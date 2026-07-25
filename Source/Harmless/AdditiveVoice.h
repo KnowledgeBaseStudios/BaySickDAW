@@ -3,6 +3,7 @@
 #include "HarmonicEngine.h"
 #include "HarmlessModRegistry.h"
 #include "SynthSound.h"   // in Source/ - on the include path via CMake
+#include "BroadcastSynthesiser.h"
 
 // ── AdditiveVoice ─────────────────────────────────────────────────────────────
 // One polyphonic voice for HarmlessSynth.
@@ -14,7 +15,9 @@
 // Zero heap allocations on the audio thread: all arrays pre-allocated for the
 // maximum unison count. SmoothedValues prevent parameter-change zipper noise.
 // ─────────────────────────────────────────────────────────────────────────────
-class AdditiveVoice : public juce::SynthesiserVoice
+class AdditiveVoice : public juce::SynthesiserVoice,
+                      public GlideStashClearable,
+                      public RampTakeoverAcceptor
 {
 public:
     static constexpr int kMaxUnison = 9;
@@ -38,6 +41,17 @@ public:
     // glideTimeSec = 0 → no glide (10ms fast snap). legato = true → don't
     // retrigger the envelope when a new note steals this voice.
     void setGlide  (float glideTimeSec);
+    // GlideStashClearable (QA-H); #36 extended to the full one-shot set (the
+    // CC85 branch tail that used to clear these now lives in the synth's wipe).
+    void clearGlideStash() override
+    {
+        mGlideFromNote    = -1;
+        mGlideTimePending = false;
+        mSlideTargetVel   = -1.0f;
+        mPanRampPend      = -999.0f;
+    }
+    // #36: first-match CC85 takeover (dispatched by BroadcastSynthesiser).
+    bool tryRampTakeover (int targetNote) override;
     void setLegato (bool  legatoOn)      noexcept { mLegatoMode = legatoOn; }
 
     // ── New parameter setters (call from processBlock preamble) ───────────────
@@ -224,6 +238,22 @@ private:
     float  mPerNoteGlideCoeff  { 0.997f };
     float  mMasterPanL      { 1.0f };   // from setPan() - constant-power
     float  mMasterPanR      { 1.0f };
+    // S-7: per-note pan from CC10 (-1..+1, 0 = center), composed with the master
+    // pan as a center-preserving balance (Issue 5B: CC10 was emitted, never read).
+    float  mNotePan         { 0.0f };
+    // S-6(C): RampSlide loudness ramp - CC86 stashes the target velocity, CC85 arms
+    // a per-sample ramp of mNoteVelocity from base to slide over the glide time.
+    float  mSlideTargetVel  { -1.0f };   // -1 = none pending
+    // #11 (G-4): CC89 pan-ramp target (-999 = none pending).  Armed at the RP
+    // takeover / RT glide noteOn; mNotePan glides current -> target (mirrors
+    // the S-6(C) velocity ramp below).
+    float  mPanRampPend     { -999.0f };
+    float  mPanRampTarget   { 0.0f };
+    float  mPanRampStep     { 0.0f };
+    int    mPanRampLeft     { 0 };
+    float  mVelRampTarget   { 0.0f };
+    float  mVelRampStep     { 0.0f };
+    int    mVelRampLeft     { 0 };
 
     // ── Phase init ────────────────────────────────────────────────────────────
     float mPhaseStart    { 0.0f };  // 0-1: fixed start position (0 = random)

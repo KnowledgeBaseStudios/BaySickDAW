@@ -68,6 +68,11 @@ public:
     // every widget's APVTS attachment via parseGuiXml on the next selectTab.
     void setEngine (Binding binding);
 
+    // QA-G3Smoke G-16 / SW-3: the internal title bar (null until a binding
+    // with engineName arrives).  Owning pages host their program controls +
+    // the Swing Mix knob on it.
+    BaySickTitleBar* getTitleBar() const noexcept { return mTitleBar.get(); }
+
 private:
     void parseGuiXml (const juce::File& xml);
     void rebuildTabBar();

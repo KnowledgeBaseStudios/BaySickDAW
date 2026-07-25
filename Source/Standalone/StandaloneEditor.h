@@ -182,6 +182,7 @@ private:
     // them without also re-adding the system (Mixer / Effects / Builder)
     // tabs that persist across project changes.
     void addDefaultDynamicTabs();
+    void addDefaultDrumTab();   // Drums-only default (factored from addDefaultDynamicTabs; kit-recovery)
     void onAddTabRequest(RibbonTabBar::TabType type);
     void onTabSelected(int tabId);
     void onTabClosed(int tabId);
@@ -754,6 +755,12 @@ private:
     // the playhead position.  -1e9 = "not yet applied" so the first tick runs.
     double mLastAutomationBeat { -1.0e9 };
     void applyAutomationAtCurrentPosition();
+
+    // Smoke round 3 (Jeff): applicator-lane (engine params + global_tempo)
+    // pre-automation baseline -- the non-APVTS twin of the processor's
+    // mAutomationBaseline.  Captured via mAutomationValueReaders at song
+    // ENTRY, restored via mAutomationApplicators at EXIT.  Message thread.
+    std::vector<std::pair<juce::String, float>> mApplicatorBaseline;
 
     // 30 Hz timer that drives automation playback application
     struct AutomationTimer : public juce::Timer {

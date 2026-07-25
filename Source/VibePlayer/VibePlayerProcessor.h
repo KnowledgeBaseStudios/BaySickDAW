@@ -81,7 +81,14 @@ public:
     // Thread-safe note audition (UI thread → audio thread via atomic)
     void auditionNote    (int midiNote) { mAuditionNote.store    (midiNote); }
     void auditionNoteOn  (int midiNote) { mAuditionHoldOn.store  (midiNote); }
-    void auditionNoteOff (int midiNote) { mAuditionHoldOff.store (midiNote); }
+    // Stuck-note fix: offs accumulate (mask) so a fast drag can't drop one --
+    // full rationale at HarmlessProcessor::auditionNoteOff.
+    void auditionNoteOff (int midiNote)
+    {
+        if (midiNote >= 0 && midiNote <= 127)
+            mAuditionHoldOff[midiNote >> 6].fetch_or (1ull << (midiNote & 63),
+                                                      std::memory_order_acq_rel);
+    }
 
     // P3 persistence (2026-04-24): wrappers around VibeSampleManager's
     // loadFolder / loadSFZ / loadSingleFile that ALSO stash the loaded path
@@ -116,8 +123,8 @@ private:
     juce::String     mPrefix;
     juce::String     mTrackId;
     std::atomic<int> mAuditionNote    { -1 };
-    std::atomic<int> mAuditionHoldOn  { -1 };
-    std::atomic<int> mAuditionHoldOff { -1 };
+    std::atomic<int>          mAuditionHoldOn { -1 };
+    std::atomic<juce::uint64> mAuditionHoldOff[2] {};
     EngineSidechainHelper mScHelper;   // C.4 Phase 2.2 SC primitive
 
     // Sub-M: scratch MIDI buffer for the keyswitch pre-scan filter.  Reused

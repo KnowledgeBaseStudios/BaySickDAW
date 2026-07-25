@@ -1426,6 +1426,23 @@ void MixerPage::rebuildStripCache() const
     for (auto& [idx,   strip] : mRustyStrips) reg(kRustyBase + idx,   strip.get());
 }
 
+void MixerPage::reRegisterStripAutomation()
+{
+    auto reReg = [](MixerTrackStrip* s) { if (s) s->reRegisterAutomation(); };
+    reReg (mMasterStrip.get());
+    reReg (mLayersBusStrip.get());
+    reReg (mBassBusStrip.get());
+    reReg (mDrumsBusStrip.get());
+    reReg (mFXBusStrip.get());
+    reReg (mAudioClipsBusStrip.get());
+    reReg (mVoxBusStrip.get());
+    reReg (mInstBusStrip.get());
+    reReg (mVoxBus2Strip.get());
+    reReg (mInstBus2Strip.get());
+    reReg (mInstBus3Strip.get());
+    reReg (mRustyDrumsBusStrip.get());
+}
+
 juce::Point<float> MixerPage::getSocketPosition(int channelId) const
 {
     auto* strip = findStripByChannelId(channelId);

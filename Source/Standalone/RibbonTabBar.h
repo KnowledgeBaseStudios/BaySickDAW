@@ -109,7 +109,9 @@ public:
 
     // ── API ──────────────────────────────────────────────────────────────────
     int  addTab(TabType type, const juce::String& name);
-    void closeTab(int tabId);
+    // force=true bypasses the last-of-type guard -- used by Load Kit teardown,
+    // which legitimately clears the sole DrumPage before rebuilding the kit.
+    void closeTab(int tabId, bool force = false);
     void selectTab(int tabId);
 
     // Project-load / File > New helper (2026-04-24): wipes every Layers /

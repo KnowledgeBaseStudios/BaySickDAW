@@ -6096,3 +6096,38 @@ QA-J' `prompt-reseeking-newt` / QA-K `brisk-prioritizing-wren` / QA-L
 plan files' Context blocks (notably: MIX-05's real cause = orphaned Layer/Bass/Drum
 strips on page close; the QA-Drum-Polish "MIDI Map placeholder" never existed; BUILD-06
 moot; slice tool exists but int-bar-only + no content-offset).
+
+### 2026-07-20 — QA-SlideSliceGlide close: slides/note-props + tiling/slice shipped; A-1 sfizz slide DEFERRED to a new QA-SlideSampler batch (sixty-first Forks entry)
+
+**Batch QA-SlideSliceGlide** (`wistful-sliding-otter`) found during the G3 boundary smoke; fixed the
+note-type slides, the Note Properties popup, and Builder tiling/slice. Shipped Tasks 1-5 (source
+verified + build-gated clean); Task 6 (A-1 sfizz slide) DEFERRED; Task 7 = docs-only close (Jeff
+directed **no commit** — commit on his approval). Routing per Rule 3:
+
+- **QA-H back-ref (slide types + Note Properties).** S-1..S-10 redid the slide DSP + popup: co-start
+  source resolution (a slide off a co-starting base now works); RT = cut-base + retrigger + block-
+  length glide (no more twin voice); Porta glides over a new per-note "Porta Length in Beats"
+  (`PianoNote.portaLengthBeats`, default 1) instead of the ~60 ms snap; RP now emits the per-note
+  expression block; **app-wide panning fixed** (CC10 was emitted but NO voice consumed it — added a
+  CC10 consumer + per-voice pan stage to BaySickSynth/Bass, Harmless, VibePlayer); Porta-length box
+  (greyed unless Porta) + double-click-to-default + Close button on the popup; RP loudness ramps
+  base->slide velocity over the glide (Jeff's option C). Annotate QA-H's §5 entry (`ghostly-riffing-moth`).
+- **QA-G back-ref (tiling + slice) + record correction.** B-1 tiling = the pattern's REAL content
+  length (`getPatternContentBeats(patternIndex)`), not `Pattern.bars`; B-2 roll slice = finite segment
+  (was an infinite line — **corrected: LATENT since the initial commit, NOT a QA-G regression**);
+  B-3 mid-note slice = clamp-and-play at read time (NO pattern copy — the researcher's "fork the
+  pattern" claim was wrong, source-verified); B-4 Builder slice = drag-line + short-block guard fix +
+  visible seam; B-5 Shift-snap on both slice paths. Annotate QA-G's §5 entry (`steady-pinning-heron`).
+- **NET-NEW: A-1 sfizz slide DEFERRED -> new QA-SlideSampler batch.** The A-1 "full per-voice MPE"
+  premise was source-falsified (sfizz has no per-note bend, mixes all voices to one buffer; the
+  karoryfer guitar patches ship ~+3 semi UP-ONLY native bend, bass ±2). A full workshop + feasibility
+  spike (2026-07-20) landed on a purpose-built crossfading **SlideSampler** (Option C hybrid: sfizz for
+  normal notes + a small custom sampler that crossfades the real sustain samples with a ≤1-semi
+  micro-bend) + a native "Bend" note type + an engine-aware Note Properties redo (strip the dead
+  in-house slide buttons on Guitars/Basses). ~2-4 weeks honest => its own batch. Plan written:
+  `Batch Plans/silky-gliding-lynx.md` (+ paired running notes); feasibility spike saved at
+  `Research Reports/daw-architecture-sample-based-continuous-pitch-slide-2026-07-20.md`; Jeff's explicit
+  add: the SlideSampler plan includes a task to review reusing it for BaySickPlayer (which also loads
+  SFZ). **Its §5 sequence slot is Jeff's call** (place when he sequences it).
+- **Held for the campaign pass (bulk-run R2):** the Implemented Work Log entry + the §5 STATUS flip
+  (drafted in the batch running notes); §B.22 authored (supersedes §B.14 H-2..H-5 + §B.13 G-8..G-11).

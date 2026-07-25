@@ -1451,6 +1451,7 @@ void PageMenuBar::clearTabSlots()
     if (mMidBtn)  { removeChildComponent(mMidBtn.get());  mMidBtn.reset(); }
     if (mSideBtn) { removeChildComponent(mSideBtn.get()); mSideBtn.reset(); }
     if (mFxRackBtn) { removeChildComponent(mFxRackBtn.get()); mFxRackBtn.reset(); }
+    if (mSwingKnob) { removeChildComponent(mSwingKnob.get()); mSwingKnob.reset(); }
     mMidSideVisible = false;
     clearExtraRightComponents();
     resized();
@@ -1503,6 +1504,79 @@ void PageMenuBar::setFxRackSlot(std::function<void()> onClick)
     }
     mFxRackBtn->setVisible(true);
     mFxRackBtn->onClick = std::move(onClick);
+    resized();
+}
+
+namespace
+{
+    // Smoke round 2: the per-player Swing Mix knob, moved off the engine
+    // title bars onto the always-visible PageMenuBar.  Right-click =
+    // Truncate Swing Notes toggle (SW-5); double-click = 1.0 (full global);
+    // hover/drag shows the value popup (mixer pan/width convention).
+    class PageSwingKnob : public juce::Slider
+    {
+    public:
+        PageSwingKnob (std::function<bool()> getTrunc, std::function<void(bool)> setTrunc)
+            : mGetTrunc (std::move (getTrunc)), mSetTrunc (std::move (setTrunc))
+        {
+            setSliderStyle (juce::Slider::RotaryVerticalDrag);
+            setTextBoxStyle (juce::Slider::NoTextBox, true, 0, 0);
+            setRange (0.0, 1.0, 0.0);
+            setDoubleClickReturnValue (true, 1.0);
+            setTooltip ("Swing Mix - how much of the global Swing this player follows. "
+                        "Right-click: Truncate Swing Notes.");
+            setPopupDisplayEnabled (true, true, nullptr);
+            textFromValueFunction = [] (double v)
+            { return "Swing Mix " + juce::String ((int) std::lround (v * 100.0)) + "%"; };
+        }
+
+        void mouseDown (const juce::MouseEvent& e) override
+        {
+            if (e.mods.isPopupMenu())
+            {
+                const bool on = mGetTrunc ? mGetTrunc() : false;
+                juce::PopupMenu m;
+                m.addItem (1, "Truncate Swing Notes", true, on);
+                // Review fix: the knob is destroyed on every page switch and
+                // JUCE does not dismiss a menu whose target died -- a raw
+                // `this` capture would dangle on a keyboard-driven switch
+                // with the menu open.
+                juce::Component::SafePointer<PageSwingKnob> safe (this);
+                m.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this),
+                                 [safe, on] (int r)
+                                 {
+                                     if (r == 1 && safe != nullptr && safe->mSetTrunc)
+                                         safe->mSetTrunc (! on);
+                                 });
+                return;
+            }
+            juce::Slider::mouseDown (e);
+        }
+
+    private:
+        std::function<bool()>     mGetTrunc;
+        std::function<void(bool)> mSetTrunc;
+    };
+}
+
+void PageMenuBar::setSwingKnobSlot (std::function<float()>     getMix,
+                                    std::function<void(float)> setMix,
+                                    std::function<bool()>      getTruncate,
+                                    std::function<void(bool)>  setTruncate)
+{
+    if (! getMix)
+    {
+        if (mSwingKnob) { removeChildComponent (mSwingKnob.get()); mSwingKnob.reset(); }
+        resized();
+        return;
+    }
+    // Rebuilt per page-show so the truncate callbacks bind THIS page's params.
+    if (mSwingKnob) removeChildComponent (mSwingKnob.get());
+    auto k = std::make_unique<PageSwingKnob> (std::move (getTruncate), std::move (setTruncate));
+    k->setValue ((double) getMix(), juce::dontSendNotification);
+    k->onValueChange = [s = k.get(), setMix] { if (setMix) setMix ((float) s->getValue()); };
+    addAndMakeVisible (*k);
+    mSwingKnob = std::move (k);
     resized();
 }
 
@@ -1602,6 +1676,14 @@ void PageMenuBar::resized()
     {
         b.removeFromLeft(6);
         mFxRackBtn->setBounds(b.removeFromLeft(58).reduced(1, 1));
+    }
+
+    // Smoke round 2: per-player Swing Mix knob, right of the FX Rack jump
+    // (or the tab cluster when the page has no FX slot -- Rusty).
+    if (mSwingKnob)
+    {
+        b.removeFromLeft(4);
+        mSwingKnob->setBounds(b.removeFromLeft(24).reduced(1, 1));
     }
 
     // Extra right components (Kit, Nav combo, etc.) flush to right

@@ -64,17 +64,24 @@ juce::String BaySickRustyDrumsPage::getEngineType() const
 BaySickRustyDrumsPage::BaySickRustyDrumsPage (VibeSynthProcessor& p)
     : mProcessor (p)
 {
+    // Smoke #13 fix: the combo + preset button MUST exist before
+    // buildPlayerTab hosts them on the panel title bar -- the old order left
+    // both null at hosting time, so the guards skipped and the Load Player
+    // dropdown was parentless (invisible everywhere).
+    buildProgramCombo();
+    buildPlayerPresetButton();
     buildDrumKitTab();
     buildPlayerTab();
     buildPianoRollTab();
-    buildProgramCombo();
-    buildPlayerPresetButton();
 
     addAndMakeVisible (*mDrumKitTab);
     addChildComponent (*mPlayerTab);
     addChildComponent (*mPianoRollTab);
 
-    switchTab (0);
+    // Smoke round 2 (Jeff): land on the PLAYER sub-tab -- the Load Player
+    // dropdown lives there now, so opening on the kit-image tab left a new
+    // Rusty tab with no visible way to load a program.
+    switchTab (1);
     startTimerHz (10);
 }
 
@@ -168,6 +175,16 @@ void BaySickRustyDrumsPage::buildPlayerTab()
     binding.accentColor = juce::Colour (0xFFCC2222);
     mAriaPanel = std::make_unique<AriaControlPanel> (binding);
     mPlayerTab->addAndMakeVisible (*mAriaPanel);
+
+    // QA-G3Smoke G-16: the Program selector + Player Preset button move off
+    // the PageMenuBar onto this title bar.  Smoke round 2 (Jeff): the SW-3
+    // Swing Mix knob moved OFF here onto the PageMenuBar (StandaloneEditor
+    // wires it per page-show) so it's visible on every sub-tab.
+    if (auto* bar = mAriaPanel->getTitleBar())
+    {
+        if (mPlayerPresetBtn) bar->addHostedTrailingWidget (mPlayerPresetBtn.get(), 110);
+        if (mProgramCombo)    bar->addHostedTrailingWidget (mProgramCombo.get(),    160);
+    }
 }
 
 void BaySickRustyDrumsPage::buildPianoRollTab()

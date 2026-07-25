@@ -151,6 +151,12 @@ public:
     // (it also flips via Ctrl+T) and pushes the visual back through the
     // setter so the two entry points can't drift.
     std::function<void()> onTypingKeyboardToggle;
+    // QA-G3Smoke SW-1: global Swing knob accessors (editor wires to the main
+    // APVTS `globalSwing`; the bar has no processor handle).
+    std::function<float()>     onGetSwing;
+    std::function<void(float)> onSetSwing;
+    // Editor calls after wiring so the knob shows the restored value.
+    void refreshSwingKnob();
     void setTypingKeyboardOn (bool on);
 
     // Called by StandaloneEditor to keep display in sync
@@ -180,6 +186,7 @@ private:
     std::unique_ptr<juce::TextButton> mSongModeBtn;    // toggle: Pattern / Song
     std::unique_ptr<juce::TextButton> mSongLoopBtn;    // toggle: play-through (→) / loop (🔁)
     std::unique_ptr<juce::Button>     mKeybMidiBtn;    // D-4: typing-keyboard MIDI toggle (custom-painted)
+    std::unique_ptr<juce::Slider>     mSwingKnob;      // QA-G3Smoke SW-1: global Swing (0-100%, dbl-click 0)
 
     // BPM
     std::unique_ptr<juce::Label>      mBpmLabel;

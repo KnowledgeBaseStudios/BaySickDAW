@@ -1,4 +1,5 @@
 #include "BaySickSynthVoice.h"
+#include "../G3PlayheadDiag.h"   // [G3 PAN] smoke-#19 arm readout (Debug-only)
 #include <cmath>
 
 // Batch E #9 (2026-05-01): musical-range constants extracted from hot path.
@@ -37,6 +38,8 @@ void BaySickSynthVoice::startNote (int midiNote, float velocity,
                                     juce::SynthesiserSound*, int pitchWheel)
 {
     mCurrentVelocity = velocity;
+    mVelRampLeft     = 0;   // S-6(C): a fresh note is not mid-slide-ramp
+    mPanRampLeft     = 0;   // #11: nor mid-pan-ramp
     mPitchWheelSemis = (pitchWheel - 8192) / 8192.0f * 2.0f;
 
     const float targetHz = midiToHz (midiNote + mTranspose);
@@ -60,6 +63,20 @@ void BaySickSynthVoice::startNote (int midiNote, float velocity,
             mCurrentFreqHz = targetHz;
             mGlideRatio    = 1.0f;
         }
+        // #11 (G-4): an RT glide noteOn carries pan as a CC89 ramp target --
+        // mNotePan (the channel snapshot this voice already tracks) glides to
+        // it over the same span as the pitch.  No CC10 was emitted for this
+        // note, so the ramp starts from the glide SOURCE note's pan.
+        if (mPanRampPend > -2.0f)
+        {
+            if (glideSamples > 1.0f)
+            {
+                mPanRampTarget = mPanRampPend;
+                mPanRampLeft   = (int) glideSamples;
+                mPanRampStep   = (mPanRampTarget - mNotePan) / (float) mPanRampLeft;
+            }
+            else mNotePan = mPanRampPend;
+        }
     }
     // Glide only when the previous note is still HELD (not already in release).
     // Otherwise, a voice being reallocated from its release tail would inherit
@@ -81,6 +98,7 @@ void BaySickSynthVoice::startNote (int midiNote, float velocity,
     }
     mGlideFromNote    = -1;      // one-shot: never leaks into the next note
     mGlideTimePending = false;
+    mPanRampPend      = -999.0f; // #11: consumed above (or irrelevant for a plain note)
 
     // Consume the per-note expression stashes; re-apply the base envelope with
     // this note's release scale (the DSP's setters only fire on user change).
@@ -229,6 +247,26 @@ void BaySickSynthVoice::controllerMoved (int cc, int value)
 {
     if (cc == 1) // CC1 = mod wheel
         mModWheelValue = (float) value / 127.0f;
+    else if (cc == 10) // S-7: per-note pan (64 = center)
+    {
+        // Smoke #19 declick: a SOUNDING voice glides to the new channel pan
+        // over ~8 ms -- the old instant set was a gain step on every ringing
+        // voice (audible click whenever any note carried a pan).  Idle voices
+        // set instantly so the next startNote reads exact channel state.
+        const float p = juce::jlimit (-1.0f, 1.0f, ((float) value - 64.0f) / 63.0f);
+       #if JUCE_DEBUG
+        if (mPanRampLeft > (int) (0.01 * getSampleRate()))   // a real (slide) ramp, not a declick
+            G3PlayheadDiag::logPan ("cc10 STOMP mid-ramp (bss): val=" + juce::String (p, 3)
+                + " rampLeft=" + juce::String (mPanRampLeft));
+       #endif
+        if (isVoiceActive())
+        {
+            mPanRampTarget = p;
+            mPanRampLeft   = juce::jmax (1, (int) (0.008 * getSampleRate()));
+            mPanRampStep   = (p - mNotePan) / (float) mPanRampLeft;
+        }
+        else mNotePan = p;
+    }
     else if (cc == 74) // CC74 = filter cutoff (Brightness) - Batch E #2
     {
         // Map 0..127 (cc) -> -2..+2 octaves, centered at 64.
@@ -241,38 +279,69 @@ void BaySickSynthVoice::controllerMoved (int cc, int value)
         mPendRelScale = std::pow (2.0f, ((float) value / 127.0f - 0.5f) * 4.0f); // 0.25x..4x
     else if (cc == 84) // glide source note (QA-H slide/porta)
         mGlideFromNote = value;
+    else if (cc == 86) // S-6(C): RampSlide target loudness (stashed for CC85)
+        mSlideTargetVel = (float) value / 127.0f;
+    else if (cc == 89) // #11 (G-4): pan RAMP target (stashed for CC85 / RT noteOn)
+        mPanRampPend = juce::jlimit (-1.0f, 1.0f, ((float) value - 64.0f) / 63.0f);
     else if (cc == 5)  { mGlideTimeMsbMs = value; mGlideTimePending = true; }
     else if (cc == 37) { mGlideTimeLsbMs = value; mGlideTimePending = true; }
-    else if (cc == 85) // QA-H Ramp Slide: bend the sounding anchor voice
+    // CC85 no longer lands here -- BroadcastSynthesiser dispatches it via
+    // tryRampTakeover (#36 first-match) and then wipes every voice's stash.
+}
+
+bool BaySickSynthVoice::tryRampTakeover (int targetNote)
+{
+    // Takeover semantics - no retrigger.  Only the voice whose (juce) playing
+    // note matches the CC84 anchor bends; #36: the synth stops at the FIRST
+    // acceptor so two voices holding the same note can't both retarget.
+    if (! (isVoiceActive() && ! mInRelease
+           && getCurrentlyPlayingNote() == mGlideFromNote))
+        return false;
+
+    const float target = midiToHz (targetNote + mTranspose);
+    const float tSec = mGlideTimePending
+        ? (float) ((mGlideTimeMsbMs << 7) | mGlideTimeLsbMs) * 0.001f
+        : 0.06f;
+    const float glideSamples = tSec * (float) getSampleRate();
+    if (mCurrentFreqHz > 0.0f && glideSamples > 1.0f
+        && target != mCurrentFreqHz)
     {
-        // Takeover semantics - no retrigger.  Only the voice whose (juce)
-        // playing note matches the CC84 anchor bends; EVERY voice clears the
-        // glide stash so a ramp never leaks into a later noteOn.
-        if (isVoiceActive() && ! mInRelease
-            && getCurrentlyPlayingNote() == mGlideFromNote)
-        {
-            const float target = midiToHz (value + mTranspose);
-            const float tSec = mGlideTimePending
-                ? (float) ((mGlideTimeMsbMs << 7) | mGlideTimeLsbMs) * 0.001f
-                : 0.06f;
-            const float glideSamples = tSec * (float) getSampleRate();
-            if (mCurrentFreqHz > 0.0f && glideSamples > 1.0f
-                && target != mCurrentFreqHz)
-            {
-                mTargetFreqHz = target;
-                mGlideRatio   = std::pow (target / mCurrentFreqHz, 1.0f / glideSamples);
-            }
-            else
-            {
-                mCurrentFreqHz = target;
-                mTargetFreqHz  = target;
-                mGlideRatio    = 1.0f;
-            }
-            mCurrentNote = value;   // kb-track etc. follow the bend target
-        }
-        mGlideFromNote    = -1;
-        mGlideTimePending = false;
+        mTargetFreqHz = target;
+        mGlideRatio   = std::pow (target / mCurrentFreqHz, 1.0f / glideSamples);
     }
+    else
+    {
+        mCurrentFreqHz = target;
+        mTargetFreqHz  = target;
+        mGlideRatio    = 1.0f;
+    }
+    mCurrentNote = targetNote;   // kb-track etc. follow the bend target
+    // S-6(C): ramp loudness from the base velocity to the slide's over the
+    // glide (parallels the pitch bend); mCurrentVelocity feeds amp + filter.
+    if (mSlideTargetVel >= 0.0f && glideSamples > 1.0f)
+    {
+        mVelRampTarget = mSlideTargetVel;
+        mVelRampLeft   = (int) glideSamples;
+        mVelRampStep   = (mVelRampTarget - mCurrentVelocity) / (float) mVelRampLeft;
+    }
+    // #11 (G-4): pan glides current -> CC89 target over the same span.
+   #if JUCE_DEBUG
+    G3PlayheadDiag::logPan ("arm(bss) pend=" + juce::String (mPanRampPend, 3)
+        + " from=" + juce::String (mNotePan, 3)
+        + " glideSamples=" + juce::String ((int) glideSamples)
+        + " timePending=" + juce::String ((int) mGlideTimePending));
+   #endif
+    if (mPanRampPend > -2.0f)
+    {
+        if (glideSamples > 1.0f)
+        {
+            mPanRampTarget = mPanRampPend;
+            mPanRampLeft   = (int) glideSamples;
+            mPanRampStep   = (mPanRampTarget - mNotePan) / (float) mPanRampLeft;
+        }
+        else mNotePan = mPanRampPend;
+    }
+    return true;
 }
 
 //==============================================================================
@@ -289,6 +358,21 @@ void BaySickSynthVoice::renderNextBlock (juce::AudioBuffer<float>& buf,
 
     for (int i = startSample; i < startSample + numSamples; ++i)
     {
+        // ── 0. Slide loudness ramp (S-6(C)) ───────────────────────────────────
+        //   mCurrentVelocity feeds both the amp (velScale) and the vel-tracked
+        //   filter, so both interpolate base -> slide over the glide.
+        if (mVelRampLeft > 0)
+        {
+            mCurrentVelocity += mVelRampStep;
+            if (--mVelRampLeft == 0) mCurrentVelocity = mVelRampTarget;
+        }
+        // #11 (G-4): pan ramp (CC89 target) -- same shape as the vel ramp.
+        if (mPanRampLeft > 0)
+        {
+            mNotePan += mPanRampStep;
+            if (--mPanRampLeft == 0) mNotePan = mPanRampTarget;
+        }
+
         // ── 1. Glide ──────────────────────────────────────────────────────────
         if (mGlideRatio != 1.0f)
         {
@@ -753,8 +837,12 @@ void BaySickSynthVoice::renderNextBlock (juce::AudioBuffer<float>& buf,
         }
 
         // ── 11. Stereo output ─────────────────────────────────────────────────
-        L[i] += Lout;
-        R[i] += Rout;
+        // S-7: per-note pan as a center-preserving balance (center = unity both
+        // sides, so a centered note is bit-identical to the pre-pan output).
+        const float npL = mNotePan <= 0.0f ? 1.0f : 1.0f - mNotePan;
+        const float npR = mNotePan >= 0.0f ? 1.0f : 1.0f + mNotePan;
+        L[i] += Lout * npL;
+        R[i] += Rout * npR;
 
         if (mCutFadeActive && mCutFadeGain <= 0.0f)
         {

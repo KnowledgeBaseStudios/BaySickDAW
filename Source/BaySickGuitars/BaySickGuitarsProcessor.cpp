@@ -2,6 +2,7 @@
 #include "sfizz.hpp"
 #include <functional>
 #include <map>
+#include <cmath>
 
 namespace
 {
@@ -34,6 +35,22 @@ BaySickGuitarsProcessor::BaySickGuitarsProcessor (int instIdx)
     // as message-thread safe when not concurrently rendering.
     for (int cc = 0; cc < kCcCount; ++cc)
         apvts.addParameterListener (mCcParamRoot + juce::String (cc), this);
+
+    // Task 12: cache the cc + cut-self param atomics once (layout is static,
+    // pointers live as long as apvts) so audio-thread reads are lock-free.
+    for (int cc = 0; cc < kCcCount; ++cc)
+        mCcRaw[(size_t) cc] = apvts.getRawParameterValue (mCcParamRoot + juce::String (cc));
+    mCutSelfRaw     = apvts.getRawParameterValue (mPrefix + "cutSelf");
+    mCutSelfModeRaw = apvts.getRawParameterValue (mPrefix + "cutSelfMode");
+
+    // The SlideSampler's block-rate CC reads ride the same atomics -- the kit
+    // panel + automation drive the slide's _oncc modulation for free.
+    mSlideSampler.setCcProvider ([this] (int cc) -> float
+    {
+        if (cc < 0 || cc >= kCcCount) return 0.0f;
+        auto* raw = mCcRaw[(size_t) cc];
+        return raw != nullptr ? raw->load() : 0.0f;
+    });
 }
 
 BaySickGuitarsProcessor::~BaySickGuitarsProcessor()
@@ -135,6 +152,12 @@ BaySickGuitarsProcessor::createLayout (const juce::String& prefix)
             "CC " + juce::String (cc),
             0, 127, 0));
 
+    // Task 12 (G-12): cut-self.  Mode false = Same Pitch, true = Cut All.
+    params.push_back (std::make_unique<juce::AudioParameterBool> (
+        prefix + "cutSelf", "Cut Self", false));
+    params.push_back (std::make_unique<juce::AudioParameterBool> (
+        prefix + "cutSelfMode", "Cut Self Mode", false));
+
     return { params.begin(), params.end() };
 }
 
@@ -149,6 +172,83 @@ void BaySickGuitarsProcessor::prepareToPlay (double sr, int maxBlockSize)
     }
     mRenderScratch.setSize (2, maxBlockSize, false, true, false);
     mRenderPtrs.assign (2, nullptr);
+    mSlideSampler.prepare (sr, maxBlockSize);
+}
+
+// QA-SlideSampler Task 3: RP Slide arm.  Suppress the sfizz anchor + set up the
+// anchor->target pitch ramp; the SlideSampler takes over as a takeover (no
+// re-pluck) crossfading in under the anchor's release.
+void BaySickGuitarsProcessor::armSlide (int anchor, int target, int timeMs, int velocity, int delaySample)
+{
+    if (anchor < 0 || target < 0 || ! mSlideSampler.hasProgram())
+        return;
+
+    const double glideSamples = juce::jmax (1.0, timeMs * 0.001 * mSampleRate);
+    const bool restruck = anchor < 128 && mNoteOnThisBlock[(size_t) anchor];
+
+    // Chain continuation (base->A->B): every segment reports the same base anchor.
+    // Retarget from the CURRENT pitch so the glide stays continuous + the band is
+    // held (SL-4); do NOT re-trigger or re-suppress.  #7: a same-block anchor
+    // noteOn means this is a COPIED slide, never a chain segment -- chains hold
+    // one anchor noteOn across all segments -- so fall through to a fresh gesture.
+    if (mSlideActive && anchor == mSlideAnchor && ! restruck)
+    {
+        mSlideTarget    = (double) target;
+        mSlidePitchStep = (mSlideTarget - mSlidePitch) / glideSamples;
+        return;
+    }
+
+    // G-13 tail policy: cut-self ON hard-cuts the previous gesture's voices;
+    // OFF lets them ring through their AHDSR release under the new gesture.
+    if (mCutSelfRaw != nullptr && mCutSelfRaw->load() >= 0.5f)
+        mSlideSampler.stopAllNow();
+    else if (mSlideActive)
+        mSlideSampler.release();
+
+    if (mSfizz) mSfizz->noteOff (delaySample, anchor, 0);   // suppress the sfizz anchor voice
+
+    mSlideActive    = true;
+    mSlideAnchor    = anchor;
+    mSlidePitch     = (double) anchor;
+    mSlideTarget    = (double) target;
+    mSlidePitchStep = (mSlideTarget - mSlidePitch) / glideSamples;
+    mSlideArmSample = delaySample;
+
+    // #3: loudness anchors to the anchor NOTE's recorded velocity; the CC86
+    // transport value only covers a gesture with no prior anchor noteOn.
+    const int anchorVel = (anchor < 128 && mLastNoteVel[(size_t) anchor] > 0)
+                            ? mLastNoteVel[(size_t) anchor] : velocity;
+
+    // A restruck (copied) slide re-plucks: its sfizz anchor noteOn was
+    // suppressed same-sample above, so the sampler supplies the attack.
+    mSlideSampler.startSlide ((float) mSlidePitch, anchorVel, /*reAttack=*/restruck);
+}
+
+// QA-SlideSampler Task 4: arm the native pitch-wheel bend.  Scales the requested
+// semitones to a wheel value using the patch's real bend range (cents), captured
+// at load; guitar down (positive bend_down) has no range so a down bend is a no-op
+// (the UI never offers it there).
+void BaySickGuitarsProcessor::armBend (int note, int semis, int shape, int timeMs)
+{
+    const int upCents = (mSlideRegions.bendUpCents == SlideRegionMap::kBendUnset)
+                          ? 200 : mSlideRegions.bendUpCents;
+    int downCents;
+    if (mSlideRegions.bendDownCents == SlideRegionMap::kBendUnset) downCents = 200;
+    else if (mSlideRegions.bendDownCents < 0) downCents = -mSlideRegions.bendDownCents;
+    else                                      downCents = 0;   // positive bend_down = up-only
+
+    int target = 0;
+    if (semis > 0 && upCents > 0)
+        target =  (int) juce::jlimit (0.0, 8191.0, (double) semis    * 100.0 / upCents   * 8192.0);
+    else if (semis < 0 && downCents > 0)
+        target = -(int) juce::jlimit (0.0, 8192.0, (double) (-semis) * 100.0 / downCents * 8192.0);
+
+    mBendActive       = true;
+    mBendNote         = note;
+    mBendTargetWheel  = target;
+    mBendShape        = shape;
+    mBendSamplesTotal = juce::jmax (1, (int) (timeMs * 0.001 * mSampleRate));
+    mBendSamplesDone  = 0;
 }
 
 bool BaySickGuitarsProcessor::isBusesLayoutSupported (const BusesLayout& layouts) const
@@ -204,36 +304,145 @@ void BaySickGuitarsProcessor::processBlock (juce::AudioBuffer<float>& buffer,
 
     if (mSfizz)
     {
+        // QA-SlideSampler Task 3: intercept the RP Slide transport (CC84 anchor,
+        // CC5+CC37 14-bit glide ms, CC86 loudness, CC85 target) and drive the
+        // blended SlideSampler instead of sfizz (which ignores those CCs).  CC85
+        // arms; the anchor's later noteOff ends the gesture (SS-Q4(a) ring-out).
+        // The transport CCs share one sample position in emit order, so the CC85
+        // arm sees the anchor/time/vel already gathered.  Notes + all other CCs
+        // (expression 10/71/72/74, pitch wheel, patch CCs) pass through to sfizz.
+        int slAnchor = -1, slHi = -1, slLo = -1, slVel = 100, slBendAmt = -999, slBendShape = 0;
+        mNoteOnThisBlock.reset();
+        const bool cutSelfOn  = mCutSelfRaw     != nullptr && mCutSelfRaw->load()     >= 0.5f;
+        const bool cutAllMode = mCutSelfModeRaw != nullptr && mCutSelfModeRaw->load() >= 0.5f;
         for (const auto meta : midi)
         {
             const auto& msg = meta.getMessage();
             const int delay = juce::jlimit (0, numFrames - 1, (int) meta.samplePosition);
-            if      (msg.isNoteOn())             mSfizz->noteOn (delay, msg.getNoteNumber(), msg.getVelocity());
-            else if (msg.isNoteOff())            mSfizz->noteOff (delay, msg.getNoteNumber(), msg.getVelocity());
-            else if (msg.isController())         mSfizz->cc (delay, msg.getControllerNumber(), msg.getControllerValue());
-            else if (msg.isPitchWheel())         mSfizz->pitchWheel (delay, msg.getPitchWheelValue());
-            else if (msg.isChannelPressure())    mSfizz->channelAftertouch (delay, msg.getChannelPressureValue());
+            if (msg.isController())
+            {
+                const int cc = msg.getControllerNumber();
+                const int cv = msg.getControllerValue();
+                switch (cc)
+                {
+                    case 84: slAnchor = cv; continue;
+                    case 5:  slHi = cv;     continue;
+                    case 37: slLo = cv;     continue;
+                    case 86: slVel = cv;         continue;
+                    case 87: slBendAmt = cv - 64; continue;   // Task 4 bend amount (signed semitones)
+                    case 88: slBendShape = cv;    continue;   // Task 4 bend shape
+                    case 85:
+                    {
+                        const int timeMs = (slHi >= 0 && slLo >= 0) ? ((slHi << 7) | slLo) : 60;
+                        armSlide (slAnchor, cv, timeMs, slVel, delay);
+                        continue;
+                    }
+                    default: mSfizz->cc (delay, cc, cv); break;
+                }
+            }
+            else if (msg.isNoteOn())
+            {
+                const int n = msg.getNoteNumber();
+                mLastNoteVel[(size_t) n] = msg.getVelocity();   // #3 anchor loudness
+                mNoteOnThisBlock[(size_t) n] = true;            // #7 copied-slide discriminator
+
+                // #2 timbre half: a keyswitch noteOn swaps the sampler's
+                // articulation tables for the NEXT gesture; the note still
+                // passes to sfizz (its own keyswitch handling).  Keyswitches
+                // are exempt from cut-self -- they're mode presses, not notes.
+                const bool isKeyswitch = mSlideSampler.trySelectArticulation (n);
+
+                // G-12 cut-self: new note cuts what's already sounding.  sfizz
+                // voices exit via noteOff (their ampeg_release); slide voices
+                // hard-stop through the declick ramp.
+                if (cutSelfOn && ! isKeyswitch)
+                {
+                    if (cutAllMode)
+                    {
+                        for (int k = 0; k < 128; ++k) mSfizz->noteOff (delay, k, 0);
+                        mSlideSampler.stopAllNow();
+                    }
+                    else
+                    {
+                        mSfizz->noteOff (delay, n, 0);
+                        if (mSlideSampler.isActive() && mSlideSampler.currentNote() == n)
+                            mSlideSampler.stopAllNow();
+                    }
+                }
+
+                if (slBendAmt != -999)   // Task 4: this noteOn is a Bend note
+                {
+                    armBend (n, slBendAmt, slBendShape,
+                             (slHi >= 0 && slLo >= 0) ? ((slHi << 7) | slLo) : 200);
+                    slBendAmt = -999;
+                }
+                mSfizz->noteOn (delay, n, msg.getVelocity());
+            }
+            else if (msg.isNoteOff())
+            {
+                const int n = msg.getNoteNumber();
+                if (mSlideActive && n == mSlideAnchor)   // slide-end: hand to the ring-out
+                {
+                    mSlideSampler.release();
+                    mSlideActive = false;
+                }
+                if (mBendActive && n == mBendNote)       // bend-end: wheel back to center
+                {
+                    mSfizz->pitchWheel (delay, 0);
+                    mBendActive = false;
+                }
+                mSfizz->noteOff (delay, n, msg.getVelocity());
+            }
+            // sfizz pitchWheel takes CENTERED -8192..+8192 (sfizz.hpp:550; normalizeBend
+            // clamps +/-8191), NOT JUCE's raw 0..16383 -- raw 8192 reads as full bend up.
+            else if (msg.isPitchWheel())      mSfizz->pitchWheel (delay, juce::jlimit (-8191, 8191, msg.getPitchWheelValue() - 8192));
+            else if (msg.isChannelPressure()) mSfizz->channelAftertouch (delay, msg.getChannelPressureValue());
             else if (msg.isAllNotesOff() || msg.isAllSoundOff())
             {
                 for (int n = 0; n < 128; ++n) mSfizz->noteOff (delay, n, 0);
+                // #5: panic is a hard stop -- gesture AND ring-out tails die
+                // through the declick ramp, not a lingering release.
+                mSlideSampler.stopAllNow();
+                mSlideActive = false;
+                if (mBendActive)  { mSfizz->pitchWheel (delay, 0); mBendActive = false; }
             }
         }
     }
     midi.clear();
 
+    // QA-SlideSampler Task 4: advance the Bend pitch-wheel ramp (per block; sfizz's
+    // bend_smooth interpolates between updates) in the note's chosen shape.
+    if (mBendActive && mSfizz)
+    {
+        mBendSamplesDone += numFrames;
+        const double phase = juce::jlimit (0.0, 1.0, (double) mBendSamplesDone / (double) mBendSamplesTotal);
+        // SS-Q5 TUNE: Ramp+Hold rise time - fixed ~120 ms, capped at the note, so a
+        // long bend still rises quickly then holds (vs rising over 1/4 of a whole note).
+        const double riseSamples = juce::jmin ((double) mBendSamplesTotal, 120.0 * 0.001 * mSampleRate);
+        double w;
+        switch (mBendShape)
+        {
+            case 1:  w = phase; break;                                            // Ramp (whole)
+            case 2:  w = phase < 0.5 ? phase / 0.5 : (1.0 - phase) / 0.5; break;  // Up + Back
+            case 3:  w = 1.0; break;                                              // Instant
+            default: w = juce::jmin (1.0, (double) mBendSamplesDone / riseSamples); break;   // Ramp + Hold
+        }
+        const int wheel = juce::jlimit (-8191, 8191, (int) std::lround (w * mBendTargetWheel));
+        mSfizz->pitchWheel (0, wheel);
+    }
+
     buffer.clear();
-    if (! mSfizz || numChannels < 1)
+    if (numChannels < 1)
         return;
 
-    // 2026-05-06 DSP gate: skip the renderBlock entirely when sfizz has no
-    // active voices (no notes playing, no release tail, no sustain-held
-    // voices).  MIDI was already dispatched above, so any fresh note-on this
-    // block bumps the active-voice count above zero - we won't skip in that
-    // case.  Saves ~all the per-block sfizz overhead on Inst tabs that aren't
-    // currently producing notes.  Mono fallback path also benefits: buffer
-    // was just cleared, leaving channel 0 silent matches the mono mix of
-    // two silent channels.
-    if (mSfizz->getNumActiveVoices() == 0)
+    // 2026-05-06 DSP gate: skip rendering entirely when neither sfizz (voices /
+    // release tails) NOR the blended slide is producing anything.  MIDI was
+    // dispatched above, so a fresh note-on bumps sfizz's active count and an
+    // armed slide sets mSlideActive, so we won't skip in either case.  Saves the
+    // per-block render overhead on idle Inst tabs.
+    const bool sfizzActive = mSfizz && mSfizz->getNumActiveVoices() > 0;
+    const bool slideActive = mSlideActive || mSlideSampler.isActive();
+    if (! sfizzActive && ! slideActive)
         return;
 
     // Lazily resize the render scratch to the current block size.
@@ -244,14 +453,41 @@ void BaySickGuitarsProcessor::processBlock (juce::AudioBuffer<float>& buffer,
                                 /*avoidReallocating=*/false);
     }
     mRenderScratch.clear (0, numFrames);
-    mRenderPtrs[0] = mRenderScratch.getWritePointer (0);
-    mRenderPtrs[1] = mRenderScratch.getWritePointer (1);
 
-    // Single stereo render path.  numOutputs=1 means one stereo pair (sfizz
-    // writes channels 0+1 of mRenderPtrs).
-    mSfizz->renderBlock (mRenderPtrs.data(),
-                         static_cast<size_t> (numFrames),
-                         /*numOutputs=*/1);
+    if (sfizzActive)
+    {
+        mRenderPtrs[0] = mRenderScratch.getWritePointer (0);
+        mRenderPtrs[1] = mRenderScratch.getWritePointer (1);
+        // Single stereo render path.  numOutputs=1 means one stereo pair (sfizz
+        // writes channels 0+1 of mRenderPtrs).
+        mSfizz->renderBlock (mRenderPtrs.data(),
+                             static_cast<size_t> (numFrames),
+                             /*numOutputs=*/1);
+    }
+
+    // QA-SlideSampler Task 3: mix the blended slide on top of sfizz.  The
+    // anchor->target pitch ramp advances per sub-block (kSlideChunk) so the glide
+    // + zone crossfades stay smooth; the arming block starts at the CC85 sample.
+    if (slideActive)
+    {
+        constexpr int kSlideChunk = 64;
+        int pos = mSlideArmSample;
+        while (pos < numFrames)
+        {
+            const int chunk = juce::jmin (kSlideChunk, numFrames - pos);
+            if (mSlideActive)
+            {
+                mSlidePitch += mSlidePitchStep * (double) chunk;
+                if ((mSlidePitchStep > 0.0 && mSlidePitch > mSlideTarget)
+                    || (mSlidePitchStep < 0.0 && mSlidePitch < mSlideTarget))
+                    mSlidePitch = mSlideTarget;
+                mSlideSampler.moveTo ((float) mSlidePitch);
+            }
+            mSlideSampler.renderNextBlock (mRenderScratch, pos, chunk);
+            pos += chunk;
+        }
+        mSlideArmSample = 0;
+    }
 
     if (mCache.outVol >= 0.0f)
         mRenderScratch.applyGain (0, numFrames, mCache.outVol);
@@ -400,6 +636,13 @@ bool BaySickGuitarsProcessor::loadKit (const juce::File& sfzPath)
                 apvts.getParameter (mCcParamRoot + juce::String (cc))))
             p->setValueNotifyingHost (p->getNormalisableRange().convertTo0to1 ((float) val));
     }
+
+    // QA-SlideSampler Task 1: build the blended-slide note->sample table for the
+    // center-voice default-keyswitch sustain articulation of the loaded program.
+    // Independent of the sfizz load above; consumed by the SlideSampler (Task 2)
+    // and a no-op for normal playback.
+    mSlideRegions = extractSlideRegions (sfzPath);
+    mSlideSampler.setProgram (mSlideRegions);   // rebuild zone tables (processing gate off here)
 
     return true;
 }

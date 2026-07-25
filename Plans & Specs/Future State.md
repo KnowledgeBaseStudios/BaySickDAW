@@ -401,6 +401,7 @@ engines (Wavetable / FM / Analog / Modal / Strings / Vocoder / etc.).
 - **[BLU-348 / AQ]** Real-time per-voice additive synthesis (T3-RealTimeAdditive) — true Harmor architecture. PRESET-SAFE.
 
 ### §P2 BaySickPlayer (VibePlayer-prefix retained)
+- **[CL-302 / AQ]** Blended multi-sample slide for BaySickPlayer SFZ sounds — extend the QA-SlideSampler `SlideSampler` (crossfades real per-note samples with a at-or-below + <=1-semi micro-bend) to back VibePlayer's `loadSFZ` / folder / single-file sounds, replacing its one-sample-stretch glide. DEFERRED at QA-SlideSampler Task 6: the win requires DENSE (chromatic, every-semitone) sampling like the karoryfer guitar/bass patches; VibePlayer sounds are frequently sparse (single-file stretched across the whole keyboard, folders one-per-octave, loosely-mapped SFZ), so the crossfade recipe has nothing coherent to blend and degrades to chipmunk/mud. VibePlayer already exposes a note->sample table (`VibeSampleManager`) so extraction is free; the blocker is density. Revisit if/when denser SFZ multisamples land — needs sample-density detection (use the SlideSampler only for chromatic-ish sounds, else keep the stretch-glide). _(Source: QA-SlideSampler Task 6 reuse review, 2026-07-21.)_
 - **[BLU-362 / AQ]** Stretch-to-note-length — note-duration-aware sample stretch. PRESET-SAFE.
 - **[BLU-363 / AQ]** VPFilterUI / VPLoFiUI / VPArticUI — expose existing READ-ONLY params. PRESET-SAFE.
 - **[BLU-364 / WP]** Knob-styling audit (T3-VPKnobStyle).

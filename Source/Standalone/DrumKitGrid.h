@@ -143,7 +143,17 @@ public:
 
     void setScrollState   (float ppb, double beatOff, int rowH);
     void setPatternManager(PatternManager* pm);
+    void setApvts         (juce::AudioProcessorValueTreeState* a);
     void setKitRowProvider(std::function<std::vector<DrumKitRowInfo>()> fn);
+
+    // QA-L-Fix (D-4): the play pitch of the drum on `pageIdx` -- new kit hits
+    // are stamped here and the retune dot keys off it.  Falls back to
+    // kKitMidiNote when the strip's param is not registered yet.
+    int  playNoteForPage (int pageIdx) const;
+    // QA-L-Fix (D-6): re-pitch that drum's hits sitting at `oldNote` to
+    // `newNote`, wrapped in the kit undo so one Ctrl+Z restores.  Hits
+    // deliberately placed at other pitches are left alone.
+    void repitchDrumHits (int pageIdx, int oldNote, int newNote);
     // Re-fetch the row info from the provider.  Call when the drum list
     // changes (drum added/removed/renamed/active-tab switched).
     void refreshRowsCache ();
@@ -331,6 +341,8 @@ private:
     void promptMidiNote      (NoteRef ref);
 
     double totalBeats() const;
+
+    juce::AudioProcessorValueTreeState* mApvts { nullptr };
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -423,12 +435,18 @@ public:
     void setReorderHandler   (std::function<void(int srcRow, int dstRow)> fn);
     void refreshKitView();
 
+    // QA-L-Fix (D-6): forwarded to the grid, which owns the drumRolls undo.
+    void repitchDrumHits (int pageIdx, int oldNote, int newNote);
+
     void setUndoContext(const UndoContext& ctx);
     std::function<void()> onShowHistoryWindow;
     void undoRoll();
     void redoRoll();
 
     std::function<void(double beat)> onSeek;
+    // #30b regression fix (QA-G3Smoke): mirrors PianoRollContainer::
+    // onContentEdited -- kit hit mutations republish the scheduler snapshot.
+    std::function<void()> onContentEdited;
 
     // 2026-04-25 (Batch 5): Kit button click - wired by StandaloneEditor to
     // open the Save Kit As / Load Kit popup.  Anchor passed for menu positioning.

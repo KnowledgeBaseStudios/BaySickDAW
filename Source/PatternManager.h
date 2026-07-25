@@ -1,8 +1,10 @@
 #pragma once
 #include <JuceHeader.h>
 #include "VibesynthConstants.h"
+#include "Engine/RetirementQueue.h"   // QA-G3Smoke #30b: roll-snapshot retirement (Batch-9c primitive)
 #include <cmath>
 #include <limits>
+#include <memory>
 
 // QA-Ee (96 PPQ): beats<->ticks converters.  kTicksPerBeat (a plain int) lives
 // in VibesynthConstants.h; these need juce::int64 so they live here, where every
@@ -62,11 +64,16 @@ struct AutomationLane
 };
 
 // ── Piano roll note type ──────────────────────────────────────────────────────
-// Values serialize as ints ("t" note attr): RetrigSlide APPENDS so previously
-// saved Slide notes (1) load as RampSlide.  RampSlide = takeover bend (no new
-// attack - the sounding note bends to this pitch across this note's length);
-// RetrigSlide = own attack, pitch glides in from the previous note's pitch.
-enum class NoteType { Standard, RampSlide, Portamento, RetrigSlide };
+// Values serialize as ints ("t" note attr); new types APPEND so existing indices
+// stay stable.  RampSlide = takeover bend (no new attack - the sounding note
+// bends to this pitch across this note's length); RetrigSlide = own attack, pitch
+// glides in from the previous note's pitch.  Bend (QA-SlideSampler) = a native
+// pitch-wheel bend by a set amount, offered on the Guitars/Basses rolls only.
+enum class NoteType { Standard, RampSlide, Portamento, RetrigSlide, Bend };
+
+// QA-SlideSampler Task 4: the pitch contour a Bend note follows over its duration
+// (user-picked per note).  Serialized as an int ("bsh"); values APPEND.
+enum class BendShape { RampHold, RampWhole, UpBack, InstantHold };
 
 // ── Piano roll note ───────────────────────────────────────────────────────────
 struct PianoNote
@@ -99,12 +106,27 @@ struct PianoNote
     // Defaults mirror startBeat 0 / durationBeats 0.25 (24t = 1/16 note).
     juce::int64 startTicks    { 0 };
     juce::int64 durationTicks { 24 };
+    // QA-SlideSliceGlide S-4: Portamento glide length in beats.  A Porta note
+    // glides over this instead of its own length or the block length; ignored by
+    // the other note types.  Kept after the tick fields so positional brace-inits
+    // (which stop at `type`, field 7) never reach it.
+    double      portaLengthBeats { 1.0 };
+    // QA-SlideSampler Task 4: native "Bend" note (Guitars/Basses).  bendSemitones
+    // = signed bend amount, gated to the patch's real range at the UI; bendShape =
+    // the pitch contour over the note.  Ignored by other note types + engines.
+    // KEEP LAST (same brace-init reasoning as portaLengthBeats above).
+    double      bendSemitones { 0.0 };
+    BendShape   bendShape     { BendShape::RampHold };
 };
 
 struct PianoRollData
 {
     std::vector<PianoNote> notes;
     int  numBars       { 2 };
+    // #20 (QA-G3Smoke): set by Riff Machine's Accept; the panel pre-checks
+    // "Work on existing score" on its next open so a re-run refines instead of
+    // replacing.  Serialized ("riffUsed"); loader defaults false.
+    bool riffMachineUsed { false };
 };
 
 // ── Basic sequence step (on-page grid) ───────────────────────────────────────
@@ -302,35 +324,31 @@ enum class ClipType { Pattern, Audio, Automation };
 // ── Arrangement block ─────────────────────────────────────────────────────────
 struct ArrangementBlock
 {
-    // QA-Ee (96 PPQ): tick-domain sentinels for the start/length fields below.
-    // kStartTicksUnset = "use startBar * 4" (legacy bar precision); a real
-    // slip-edited start may be negative but is never INT64_MIN.  kLengthTicksUnset
-    // (-1) = "use lengthBars * 4".
-    static constexpr juce::int64 kStartTicksUnset  = std::numeric_limits<juce::int64>::min();
+    // kLengthTicksUnset (-1) = "use lengthBars * 4" (bar-precision length).
     static constexpr juce::int64 kLengthTicksUnset = -1;
 
     int  trackRow     { 0 };   // which row this block sits on (free-form, user assigns)
     int  patternIndex { 0 };
-    int  startBar     { 0 };
-    int  lengthBars   { 4 };
+    // 8A (QA-G3Smoke, G-5): the block START is beats-authoritative -- ONE double
+    // in the musical map-position domain, read by scheduler, ruler, playhead and
+    // paint alike.  The old startBar(int)+startTicks(int64) pair let the bar-
+    // index and map-position domains diverge (they agreed only with no TS
+    // marker); the bar index is now DERIVED for display + serialization only.
+    // May be negative (slip-edit drag-left exposes pre-roll audio).  XML keeps
+    // writing/reading startBar+startTicks -- full precision, no migration.
+    double startBeats { 0.0 };
+    int    lengthBars { 4 };
     // QA-Ee (96 PPQ): exact length in TICKS for sub-bar precision (audio clips
     // dropped by Record naturally end mid-bar).  kLengthTicksUnset (-1) = use
     // lengthBars * 4.  setLengthBeats() bridges a beats value -> ticks; a user
     // resize wanting bar precision sets lengthTicks back to kLengthTicksUnset.
     juce::int64 lengthTicks { kLengthTicksUnset };
-    // QA-Ee (96 PPQ): sub-bar precision for the clip's START position, in TICKS.
-    // kStartTicksUnset = "use startBar * 4 (legacy bar precision)" for every
-    // pre-Task-0c project.  When set, this overrides startBar*4 for visual
-    // rendering + audio scheduling, AND is allowed to be NEGATIVE (left edge
-    // extends into negative-bar territory after slip-edit drag-left to expose
-    // pre-roll audio).  The slip-edit drag updates this + lengthTicks together
-    // to keep the right-end fixed.  A move CLEARS this (back to kStartTicksUnset)
-    // so bar-aligned moves stay bar-aligned.
-    juce::int64 startTicks { kStartTicksUnset };
 
-    // QA-Ee (96 PPQ): bridge setters so callers keep passing beats while the
-    // stored value is ticks.  setLengthBeats(<= 0) -> unset (fall back to bars).
-    void setStartBeats  (double beats) noexcept { startTicks  = beatsToTicks (beats); }
+    // Display-only derived bar index (floor; a negative slip-edit start floors
+    // to its containing bar).
+    int displayStartBar() const noexcept { return (int) std::floor (startBeats / 4.0); }
+
+    void setStartBeats  (double beats) noexcept { startBeats = beats; }
     void setLengthBeats (double beats) noexcept { lengthTicks = (beats > 0.0) ? beatsToTicks (beats) : kLengthTicksUnset; }
     bool layerTrack   { true };
 
@@ -405,21 +423,16 @@ inline double effectiveLengthBeats (const ArrangementBlock& b) noexcept
                                : (double) b.lengthBars * 4.0;
 }
 
-// QA-Ea Task 0c (2026-05-20): central helper for the "effective start in
-// beats" of an arrangement block.  Returns startBeats when set (sub-bar
-// precision, possibly negative for slip-edited clips); otherwise falls back
-// to startBar * 4 (legacy int-bar precision).  Everywhere that used to
-// compute `b.startBar * 4` directly should call this instead so slip-edited
-// clips render + play from their real sub-bar / negative start.
+// 8A (QA-G3Smoke): startBeats is authoritative; these helpers survive as
+// thin accessors so the ~30 read sites keep compiling unchanged.
 inline double effectiveStartBeats (const ArrangementBlock& b) noexcept
 {
-    return (b.startTicks != ArrangementBlock::kStartTicksUnset) ? ticksToBeats (b.startTicks)
-                                                                : (double) b.startBar * 4.0;
+    return b.startBeats;
 }
 
 inline double effectiveStartBars (const ArrangementBlock& b) noexcept
 {
-    return effectiveStartBeats (b) / 4.0;
+    return b.startBeats / 4.0;
 }
 
 // 2026-04-24: effective length in bars (fractional).  Use for visual width
@@ -489,10 +502,50 @@ struct MixerState
 // Maximum number of arrangement track rows (matches ArrangementGrid::kNumRows).
 static constexpr int kMaxArrangementRows = 500;
 
+// ── QA-G3Smoke #30b (G-6): lock-free scheduler roll snapshots ────────────────
+// The audio-thread note scheduler reads roll data through an immutable snapshot
+// table: one acquire per block, never a lock, never a discarded note.  The old
+// try-locks (drums/clips/vox/inst) silently dropped every note-on in a block
+// when the message thread held the lock; layers/bass/rusty read the live
+// vectors bare (torn reads under concurrent edits).
+//
+// Publish protocol (message thread only): notifyContentChanged() republishes
+// the CURRENT pattern's entry (every roll edit targets the current pattern --
+// the roll UI binds it live); structural mutators (pattern CRUD, load, reset,
+// restorePatternList) republish every entry.  Unchanged patterns SHARE their
+// per-pattern snapshot across publishes (shared_ptr copy-on-write); the
+// swapped-out table retires through the Batch-9c RetirementQueue so a table
+// the audio thread may still be reading is never freed under it.  shared_ptr
+// refcounts are only ever touched on the message thread (build) and the
+// retirement drainer (destroy) -- the audio thread reads through raw pointers.
+struct PatternRollsSnapshot
+{
+    std::array<std::vector<PianoNote>, kMaxLayerPages> layerNotes;
+    std::array<std::vector<PianoNote>, kMaxBassPages>  bassNotes;
+    std::array<std::vector<PianoNote>, kMaxDrumPages>  drumNotes;
+    std::array<std::vector<PianoNote>, kMaxClipPages>  clipNotes;
+    std::array<std::vector<PianoNote>, kMaxVoxPages>   voxNotes;
+    std::array<std::vector<PianoNote>, kMaxInstPages>  instNotes;
+    std::vector<PianoNote>                             rustyNotes;
+    // getPatternContentBeats computed at publish time so the audio thread never
+    // walks live note vectors for the content mask (#24 one-pass end).
+    double contentBeats { 4.0 };
+};
+
+struct SchedulerRollSnapshot
+{
+    std::vector<std::shared_ptr<const PatternRollsSnapshot>> patterns;
+    int           currentPatternIndex { 0 };
+    std::uint64_t generation          { 0 };
+};
+
 class PatternManager
 {
 public:
     PatternManager();
+    // #30b: frees the active roll-snapshot table (queue-retired tables are
+    // handled by the RetirementQueue member's own teardown).
+    ~PatternManager();
 
     // 2026-05-05 dirty-flag wiring: fired from every pattern-side mutation
     // (note edits, pattern CRUD, arrangement add/remove, time-marker
@@ -501,7 +554,29 @@ public:
     // notifyContentChanged(); pattern/arrangement/time-marker mutations call
     // notifyContentChanged() at the end of each mutator.
     std::function<void()> onAnyChange;
-    void notifyContentChanged() { if (onAnyChange) onAnyChange(); }
+    // #30b: republish the current pattern's roll snapshot BEFORE the dirty
+    // callback -- every note-edit path already funnels through here, so the
+    // audio thread sees fresh rolls the moment an edit lands.
+    void notifyContentChanged()
+    {
+        publishRollSnapshotFor (mCurrentPattern);
+        if (onAnyChange) onAnyChange();
+    }
+
+    // ── QA-G3Smoke #30b: scheduler roll-snapshot API ─────────────────────
+    // Message thread: rebuild one pattern's entry (shares the rest) / all
+    // entries, then swap the table in.  Audio thread: acquireRollSnapshot()
+    // once per block -- wait-free, stamps the in-use generation for the
+    // retirement drainer.  Never returns null after construction.
+    void publishRollSnapshotFor (int patternIndex);
+    void publishAllRollSnapshots();
+    const SchedulerRollSnapshot* acquireRollSnapshot() noexcept
+    {
+        auto* snap = mActiveRollSnapshot.load (std::memory_order_acquire);
+        if (snap != nullptr)
+            mRollRetirement.setInUseGeneration (snap->generation);
+        return snap;
+    }
 
     // ── Pattern CRUD ──────────────────────────────────────────────────────
     int           addPattern      (const juce::String& name = "");
@@ -719,6 +794,10 @@ public:
     //   2. If notes exist beyond bar 1, the loop = end of the last bar containing a note.
     //   3. Default = 1 bar = 4 beats.
     double getEffectivePatternLoopBeats() const;
+    // B-1: content length in beats for ANY pattern (not just the current one) -
+    // furthest note/step end, bar-ceiled at the pattern's bpb, min 1 bar.  Drives
+    // Builder tiling + song-mode tiling so blocks loop at their real content length.
+    double getPatternContentBeats (int patternIndex) const;
 
     // ── Check if complex sequence is active on any page ───────────────────
     // Used by the UI to grey out / enable the Sequencer tab.
@@ -746,6 +825,15 @@ public:
     // show up in the Builder's Audio tab on reload.
 
 private:
+    // ── QA-G3Smoke #30b: roll-snapshot internals (message thread builds,
+    // audio thread acquires, drainer destroys) ───────────────────────────
+    std::shared_ptr<const PatternRollsSnapshot> buildPatternRollsSnapshot (int patternIndex) const;
+    void republishRollTable();   // swap a new table in from mPatternSnapCache + retire the old
+    std::vector<std::shared_ptr<const PatternRollsSnapshot>> mPatternSnapCache;
+    std::atomic<SchedulerRollSnapshot*>    mActiveRollSnapshot { nullptr };
+    RetirementQueue<SchedulerRollSnapshot> mRollRetirement;
+    std::uint64_t                          mRollSnapGeneration { 0 };
+
     std::vector<Pattern>          mPatterns;
     std::vector<ArrangementBlock> mArrangement;
     // D-2 (2026-04-26): time-markers + time-signature-changes - project scope.

@@ -312,7 +312,21 @@ public:
     // startNote) + CC84/CC5/CC37 slide/porta glide stash.
     void controllerMoved (int controllerNumber, int newValue)          override
     {
-        if (controllerNumber == 74)
+        if (controllerNumber == 10)       // S-7: per-note pan (64 = center)
+        {
+            // Smoke #19 declick: sounding voices glide to the new channel pan
+            // (~8 ms; the block apply ramps within the block); idle voices
+            // set instantly for exact startNote state.
+            const float p = juce::jlimit (-1.0f, 1.0f, ((float) newValue - 64.0f) / 63.0f);
+            if (mIsActive.load (std::memory_order_acquire))
+            {
+                mPanRampTarget = p;
+                mPanRampLeft   = juce::jmax (1, (int) (0.008 * mSampleRate));
+                mPanRampStep   = (p - mNotePan) / (float) mPanRampLeft;
+            }
+            else mNotePan = p;
+        }
+        else if (controllerNumber == 74)
         {
             const float norm = (float) newValue / 127.0f;
             mPerNoteCutoffOctaves = (norm - 0.5f) * 4.0f;
@@ -323,32 +337,70 @@ public:
             mPendRelScale = std::pow (2.0f, ((float) newValue / 127.0f - 0.5f) * 4.0f);
         else if (controllerNumber == 84)
             mGlideFromNote = newValue;
+        else if (controllerNumber == 86)   // S-6(C): RampSlide target loudness (for CC85)
+            mSlideTargetVel = (float) newValue / 127.0f;
+        else if (controllerNumber == 89)   // #11 (G-4): pan RAMP target (for CC85 / RT noteOn)
+            mPanRampPend = juce::jlimit (-1.0f, 1.0f, ((float) newValue - 64.0f) / 63.0f);
         else if (controllerNumber == 5)  { mGlideTimeMsbMs = newValue; mGlideTimePending = true; }
         else if (controllerNumber == 37) { mGlideTimeLsbMs = newValue; mGlideTimePending = true; }
-        else if (controllerNumber == 85) // QA-H Ramp Slide: bend the sounding anchor voice
+        // CC85 no longer lands here -- the inline pre-pass dispatches it via
+        // tryRampTakeover (#36 first-match) then clearRampStash on every voice.
+    }
+
+    // #36 (QA-G3Smoke): first-match CC85 takeover.  Only the voice whose (juce)
+    // playing note matches the CC84 anchor bends, and the pre-pass stops at the
+    // FIRST acceptor so two voices holding the same note can't both retarget.
+    bool tryRampTakeover (int newValue)
+    {
+        if (! (mIsActive.load (std::memory_order_acquire) && ! mInRelease
+               && getCurrentlyPlayingNote() == mGlideFromNote
+               && mActiveResamp != nullptr))
+            return false;
+
+        const float tSec = mGlideTimePending
+            ? (float) ((mGlideTimeMsbMs << 7) | mGlideTimeLsbMs) * 0.001f
+            : 0.06f;
+        const float curOffsetFromNew =
+            (mCurTargetNote + mGlideSemisCur) - (float) newValue;
+        mGlideBaseRatio   = mBaseRatioTarget
+            * std::pow (2.0, (double) (newValue - mNoteStartedAt) / 12.0);
+        mGlideSemisCur    = curOffsetFromNew;
+        mGlideSamplesLeft = juce::jmax (1, (int) (tSec * mSampleRate));
+        mGlideSemisStep   = -mGlideSemisCur / (float) mGlideSamplesLeft;
+        mCurTargetNote    = (float) newValue;
+        // S-6(C): ramp loudness base -> slide over the glide.  Reuse the
+        // engine's velocity curve so the ramp matches a real velocity move.
+        if (mSlideTargetVel >= 0.0f)
         {
-            // Takeover semantics - no retrigger.  Only the voice whose (juce)
-            // playing note matches the CC84 anchor bends; EVERY voice clears
-            // the glide stash so a ramp never leaks into a later noteOn.
-            if (mIsActive.load (std::memory_order_acquire) && ! mInRelease
-                && getCurrentlyPlayingNote() == mGlideFromNote
-                && mActiveResamp != nullptr)
+            const float sensExp = 2.0f - mSensitivity * 1.8f;
+            auto volMix = [sensExp, this] (float v)
             {
-                const float tSec = mGlideTimePending
-                    ? (float) ((mGlideTimeMsbMs << 7) | mGlideTimeLsbMs) * 0.001f
-                    : 0.06f;
-                const float curOffsetFromNew =
-                    (mCurTargetNote + mGlideSemisCur) - (float) newValue;
-                mGlideBaseRatio   = mBaseRatioTarget
-                    * std::pow (2.0, (double) (newValue - mNoteStartedAt) / 12.0);
-                mGlideSemisCur    = curOffsetFromNew;
-                mGlideSamplesLeft = juce::jmax (1, (int) (tSec * mSampleRate));
-                mGlideSemisStep   = -mGlideSemisCur / (float) mGlideSamplesLeft;
-                mCurTargetNote    = (float) newValue;
-            }
-            mGlideFromNote    = -1;
-            mGlideTimePending = false;
+                const float adj = std::pow (juce::jlimit (0.001f, 1.f, v), sensExp);
+                return (1.0f - mVelToVolume) + mVelToVolume * adj;
+            };
+            const float baseMix = juce::jmax (1.0e-4f, volMix (mNoteVel));
+            mVelScaleTarget = mVelocityScale * (volMix (mSlideTargetVel) / baseMix);
+            mVelRampLeft    = mGlideSamplesLeft;
+            mVelScaleStep   = (mVelScaleTarget - mVelocityScale) / (float) mVelRampLeft;
         }
+        // #11 (G-4): pan glides current -> CC89 target over the same span.
+        if (mPanRampPend > -2.0f)
+        {
+            mPanRampTarget = mPanRampPend;
+            mPanRampLeft   = mGlideSamplesLeft;
+            mPanRampStep   = (mPanRampTarget - mNotePan) / (float) mPanRampLeft;
+        }
+        return true;
+    }
+
+    // #36: the one-shot stash wipe formerly at the CC85 branch tail -- the
+    // inline pre-pass runs it on EVERY voice after the takeover dispatch.
+    void clearRampStash()
+    {
+        mGlideFromNote    = -1;
+        mGlideTimePending = false;
+        mSlideTargetVel   = -1.0f;
+        mPanRampPend      = -999.0f;
     }
     void renderNextBlock (juce::AudioBuffer<float>& buf,
                           int startSample, int numSamples)             override;
@@ -455,6 +507,24 @@ private:
     float  mVelocityScale { 1.0f };   // per-note: velocity * region volumeOffset
     float  mPanL          { 1.0f };
     float  mPanR          { 1.0f };
+    // S-7: per-note pan from CC10 (-1..+1, 0 = center), composed with mPanL/mPanR
+    // as a center-preserving balance (Issue 5B: CC10 was emitted, never read).
+    float  mNotePan       { 0.0f };
+    // #11 (G-4): CC89 pan-ramp target (-999 = none pending).  Armed at the RP
+    // takeover / RT glide noteOn; mNotePan glides current -> target at block
+    // rate (mirrors the S-6(C) velocity ramp's block-advance shape).
+    float  mPanRampPend   { -999.0f };
+    float  mPanRampTarget { 0.0f };
+    float  mPanRampStep   { 0.0f };
+    int    mPanRampLeft   { 0 };
+    // S-6(C): RampSlide loudness ramp.  CC86 stashes the target velocity; CC85 arms
+    // a ramp of mVelocityScale from the base note's value to the slide's over the
+    // glide (applied to mTmpBuffer via applyGainRamp so it is smooth within a block).
+    float  mNoteVel        { 1.0f };   // base velocity, for the ramp ratio
+    float  mSlideTargetVel { -1.0f };  // -1 = none pending
+    float  mVelScaleTarget { 1.0f };
+    float  mVelScaleStep   { 0.0f };
+    int    mVelRampLeft    { 0 };
     float  mLfoAmt        { 0.0f };   // vibrato / shimmer depth 0-1
 
     // LFO for vibrato modulation

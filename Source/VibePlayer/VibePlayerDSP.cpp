@@ -832,6 +832,7 @@ void VibeVoice::startNote (int midiNote, float velocity,
     // on the player).
     mGlideSamplesLeft = 0;
     mGlideSemisCur    = 0.0f;
+    mPanRampLeft      = 0;   // #11: a fresh note is not mid-pan-ramp (RT arm below may re-set)
     mNoteStartedAt    = midiNote;
     mCurTargetNote    = (float) midiNote;
     mBaseRatioTarget  = resampRatio;
@@ -845,9 +846,20 @@ void VibeVoice::startNote (int midiNote, float velocity,
         mGlideSemisCur    = (float) (mGlideFromNote - midiNote);
         mGlideSemisStep   = -mGlideSemisCur / (float) mGlideSamplesLeft;
         mGlideBaseRatio   = resampRatio;
+        // #11 (G-4): an RT glide noteOn carries pan as a CC89 ramp target --
+        // mNotePan (the channel snapshot this voice already tracks) glides to
+        // it over the same span as the pitch (no CC10 was emitted, so the
+        // ramp starts from the glide SOURCE note's pan).
+        if (mPanRampPend > -2.0f)
+        {
+            mPanRampTarget = mPanRampPend;
+            mPanRampLeft   = mGlideSamplesLeft;
+            mPanRampStep   = (mPanRampTarget - mNotePan) / (float) mPanRampLeft;
+        }
     }
     mGlideFromNote    = -1;      // one-shot: never leaks into the next note
     mGlideTimePending = false;
+    mPanRampPend      = -999.0f; // #11: consumed above (or irrelevant for a plain note)
 
     // Consume the per-note expression stashes (QA-H).
     mActiveResOffset = mPendResOffset;
@@ -871,6 +883,8 @@ void VibeVoice::startNote (int midiNote, float velocity,
     //   mVelToVolume = 0 => 1.0 (velocity has no effect on volume)
     const float volVelMix = (1.0f - mVelToVolume) + mVelToVolume * adjustedVelocity;
     mVelocityScale = juce::Decibels::decibelsToGain (region->volumeOffset) * volVelMix;
+    mNoteVel       = velocity;   // S-6(C): base velocity for the slide loudness ramp
+    mVelRampLeft   = 0;          //          a fresh note is not mid-slide-ramp
 
     // Muffle: reduce filter cutoff. MUFFLE is a static control; VEL→MUFFLE routes
     // velocity so that louder hits bypass some of the muffle (brighter on loud hits).
@@ -1051,12 +1065,53 @@ void VibeVoice::renderNextBlock (juce::AudioBuffer<float>& outputBuffer,
     }
 
     // ── Mix into output (volume + velocity scale + pan) ──────────────────────
-    const float gain   = mVolume * mVelocityScale;
+    // S-6(C): if a slide loudness ramp is armed, bake the ramped mVelocityScale
+    // into mTmpBuffer here (smooth within the block) and drop it from the gain.
+    float velGain = mVelocityScale;
+    // #11 (G-4) + smoke #19: pan ramp (CC89 target).  The mNotePan value
+    // advances by the block, but the OUTPUT gains ramp within the block
+    // (addFromWithRamp) -- the old constant-per-block apply stair-stepped
+    // ~11 ms jumps, which read as clicks + a hard pan instead of a sweep.
+    const float panSegStart = mNotePan;
+    bool panRamping = false;
+    if (mPanRampLeft > 0)
+    {
+        const int adv = juce::jmin (mPanRampLeft, numSamples);
+        mNotePan     += mPanRampStep * (float) adv;
+        mPanRampLeft -= adv;
+        if (mPanRampLeft <= 0) mNotePan = mPanRampTarget;
+        panRamping = true;
+    }
+    if (mVelRampLeft > 0)
+    {
+        const float segStart = mVelocityScale;
+        const int   adv      = juce::jmin (mVelRampLeft, numSamples);
+        mVelocityScale += mVelScaleStep * (float) adv;
+        mVelRampLeft   -= adv;
+        if (mVelRampLeft <= 0) mVelocityScale = mVelScaleTarget;
+        mTmpBuffer.applyGainRamp (0, numSamples, segStart, mVelocityScale);
+        velGain = 1.0f;   // ramp now baked into mTmpBuffer
+    }
+    const float gain   = mVolume * velGain;
     const int   outChs = outputBuffer.getNumChannels();
     if (outChs >= 2)
     {
-        outputBuffer.addFrom (0, startSample, mTmpBuffer, 0, 0, numSamples, gain * mPanL);
-        outputBuffer.addFrom (1, startSample, mTmpBuffer, 1, 0, numSamples, gain * mPanR);
+        // S-7: per-note pan (CC10) as a center-preserving balance on top of the
+        // voice pan (center note = unity, so existing behavior is unchanged).
+        auto npLOf = [] (float p) noexcept { return p <= 0.0f ? 1.0f : 1.0f - p; };
+        auto npROf = [] (float p) noexcept { return p >= 0.0f ? 1.0f : 1.0f + p; };
+        if (panRamping)
+        {
+            outputBuffer.addFromWithRamp (0, startSample, mTmpBuffer.getReadPointer (0), numSamples,
+                                          gain * mPanL * npLOf (panSegStart), gain * mPanL * npLOf (mNotePan));
+            outputBuffer.addFromWithRamp (1, startSample, mTmpBuffer.getReadPointer (1), numSamples,
+                                          gain * mPanR * npROf (panSegStart), gain * mPanR * npROf (mNotePan));
+        }
+        else
+        {
+            outputBuffer.addFrom (0, startSample, mTmpBuffer, 0, 0, numSamples, gain * mPanL * npLOf (mNotePan));
+            outputBuffer.addFrom (1, startSample, mTmpBuffer, 1, 0, numSamples, gain * mPanR * npROf (mNotePan));
+        }
     }
     else
     {
@@ -1433,8 +1488,21 @@ void VibeSynth::renderNextBlock (juce::AudioBuffer<float>& buffer,
             if (msg.isController())
             {
                 const int num = msg.getControllerNumber();
-                if (num == 5 || num == 37 || num == 71 || num == 72
-                    || num == 74 || num == 84 || num == 85)
+                if (num == 85)   // #36: first-match ramp takeover, then the stash wipe
+                {
+                    const int val = msg.getControllerValue();
+                    bool claimed = false;
+                    forEachVoice ([&claimed, val] (VibeVoice& v)
+                                  { if (! claimed) claimed = v.tryRampTakeover (val); });
+                    forEachVoice ([] (VibeVoice& v) { v.clearRampStash(); });
+                    continue;
+                }
+                // S-7: +CC10 pan.  #37: +CC86/CC89 -- both belong to the CC85
+                // ramp handshake; the deferred path delivered them AFTER CC85
+                // had armed + cleared the ramp state, so the S-6(C) loudness
+                // ramp (and the #11 pan ramp) never fired in BaySickPlayer.
+                if (num == 5 || num == 10 || num == 37 || num == 71 || num == 72
+                    || num == 74 || num == 84 || num == 86 || num == 89)
                 {
                     const int val = msg.getControllerValue();
                     forEachVoice ([num, val] (VibeVoice& v)

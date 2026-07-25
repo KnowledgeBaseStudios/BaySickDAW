@@ -130,3 +130,26 @@ pass. SynthStyleDSP shares tracker code — findings there get logged + routed, 
 - June research doc §Recommendation (:136-195) — the engine-fix reference.
 - QA-Fe2 records: PDC solve + monitor-split precedent (gentle-scrubbing-otter scope addition;
   prancy-crunching-bear 2026-07-16/17 entries).
+
+## Carry-Over — 2026-07-18 (QA-OctavePedal close; G3 group boundary reached)
+
+- **Completed:** all 5 source tasks built clean at their gates (T1 pitch-synchronous
+  octave-down / T2 PolyPitchTracker chord grain / T3 pedal-mode layout / T4 BaySickPedals PDC
+  pull-model + octave getLatencySamples / T5 Inst Dry/With-Effect monitor). ONE commit
+  `d6abc38b` (15 files; folded the two QA-N stragglers + .gitignore for the A/B WAVs). Full
+  narrative + the HELD Work Log entry live in `Running Notes/locked-doubling-frog.md`.
+- **Spec calls (all asked, none self-decided):** #12=a (single wide auto poly range 40-1300,
+  no selector); monitor architecture = ONE engine (monitor "With Effect" IS the recorded/mixed
+  signal — corrected a wrongly-imported vocal split); octave PDC = report L, dry INSTANT
+  (blended dry ~11ms early by design); Inst monitor default = With Effect; board-bypass =
+  per-slot only (no feature added).
+- **In-flight:** nothing in code. ONE expected straggler for the next commit: §B.21's own
+  `blocks:` hash (`d6abc38b`) backfilled in v1-master-test-plan.md + the close running-notes
+  block + THIS carry-over block (B.13-B.20 pattern — a batch's §B hash rides the next commit).
+- **Resume action (G3 GROUP BOUNDARY):** R3 `/review-batch` over the combined QA-G..
+  QA-OctavePedal diff (findings fixed before proceeding, per the fix-or-reframe canon); then
+  Jeff's 15-30 min smoke — Debug exe first (jassert dialogs), then Release: launch, audio
+  plays, big project loads, save/close/reopen round-trip (§7 items 1-5). Then G4 opens.
+- **Work-Log entry needed:** none new — the QA-OctavePedal entry is drafted + HELD in the
+  running notes, applying at the §B.21 campaign pass (R2). Push: 7 commits unpushed now
+  (origin at `50c6eeb9`/QA-H); Jeff pushes when he wants the backup current.

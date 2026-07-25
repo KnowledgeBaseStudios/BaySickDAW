@@ -156,7 +156,7 @@ void RibbonTabBar::clearTabsOfType (TabType type)
     repaint();
 }
 
-void RibbonTabBar::closeTab(int tabId)
+void RibbonTabBar::closeTab(int tabId, bool force)
 {
     for (int i = 0; i < mTabs.size(); ++i)
     {
@@ -176,7 +176,7 @@ void RibbonTabBar::closeTab(int tabId)
         const bool zeroAllowed = (type == TabType::Clip
                                || type == TabType::Vox
                                || type == TabType::Inst);
-        if (! zeroAllowed && countTabsOfType(type) <= 1) return;
+        if (! force && ! zeroAllowed && countTabsOfType(type) <= 1) return;
 
         mTabs.remove(i);
 

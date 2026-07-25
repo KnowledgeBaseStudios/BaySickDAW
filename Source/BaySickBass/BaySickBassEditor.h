@@ -33,6 +33,9 @@ public:
     // mixer strip + piano-roll context label update to the patch filename.
     std::function<void(const juce::String&)> onPatchLoaded;
 
+    // Smoke round 2 (Jeff): the SW-3 Swing Mix knob moved off this title bar
+    // onto the PageMenuBar (visible on every sub-tab).
+
 private:
     void parameterChanged   (const juce::String& paramID, float newValue) override;
     void valueTreeRedirected(juce::ValueTree& tree) override;

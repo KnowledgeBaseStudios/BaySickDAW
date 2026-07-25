@@ -106,7 +106,19 @@ private:
 
         void reset();
         void setPitchRatio (float r) { pitchRatio = r; }
-        void setGrainSize  (int g)   { grainSize = juce::jlimit (256, kBufferSize / 2, g); }
+        // #35 final form (smoke #55): grain changes RE-ANCHOR the head pair to
+        // an exact half-grain offset -- a Hann pair at 50% offset sums to 1.0
+        // at every phase, and head jumps preserve (phase mod grain), so unity
+        // holds until the next grain change.  The ~12% deadband stops YIN
+        // wobble from re-anchoring (one head jump) every block.
+        void setGrainSize (int g)
+        {
+            g = juce::jlimit (256, kBufferSize / 2, g);
+            if (std::abs (g - grainSize) * 8 < grainSize) return;
+            grainSize = g;
+            readPos2  = readPos1 - (double) (grainSize / 2);
+            while (readPos2 < 0.0) readPos2 += (double) kBufferSize;
+        }
 
         // Process numSamples in-place: input[] writes into the ring; output[]
         // receives the pitch-shifted samples.  input and output may alias.
@@ -156,7 +168,7 @@ private:
     struct PeriodDoubler
     {
         static constexpr int    kRingSize  = 16384;  // lag reaches ~4 periods mid-cycle at octaveDiv 4 + correction headroom at kMaxPeriod
-        static constexpr int    kMarkQueue = 128;    // spans max lag + one max block even at kMinPeriod mark spacing
+        static constexpr int    kMarkQueue = 512;    // holds all in-ring marks: (maxBlock / kMinPeriod) + lag headroom; sized for large (>= 2048-sample) ASIO buffers so the mark tail is never dropped at high pitch
         static constexpr int    kXfadeMin  = 4;
         static constexpr int    kXfadeMax  = 64;
         static constexpr double kMinPeriod = 24.0;   // ~1.8 kHz @ 44.1 k -- above this the doubler is ineligible

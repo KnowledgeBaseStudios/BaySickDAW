@@ -98,12 +98,29 @@ void HarmlessProcessor::processBlock (juce::AudioBuffer<float>& buffer,
                        juce::jmax (1, buffer.getNumSamples() - 1));
     }
 
-    const int holdOffNote = mAuditionHoldOff.exchange (-1);
-    const int holdOnNote  = mAuditionHoldOn .exchange (-1);
-    if (holdOffNote >= 0 && holdOffNote <= 127)
-        midi.addEvent (juce::MidiMessage::noteOff (1, holdOffNote), 0);
-    if (holdOnNote  >= 0 && holdOnNote  <= 127)
+    // Stuck-note fix: drain EVERY pending hold-off (mask), then the last-wins
+    // hold-on -- see auditionNoteOff.
+    juce::uint64 offWords[2];
+    for (int w = 0; w < 2; ++w)
+    {
+        offWords[w] = mAuditionHoldOff[w].exchange (0, std::memory_order_acq_rel);
+        if (offWords[w])
+            for (int b = 0; b < 64; ++b)
+                if (offWords[w] & (1ull << b))
+                    midi.addEvent (juce::MidiMessage::noteOff (1, w * 64 + b), 0);
+    }
+    const int holdOnNote = mAuditionHoldOn.exchange (-1);
+    if (holdOnNote >= 0 && holdOnNote <= 127)
+    {
         midi.addEvent (juce::MidiMessage::noteOn  (1, holdOnNote, (juce::uint8) 100), 0);
+        // Review fix: press AND release landed inside ONE block -- the off
+        // above was a no-op (nothing sounding yet), so close the note at
+        // block-end or it rings forever.  (A same-block re-press of a held
+        // note blips one block -- the lesser wrong.)
+        if (offWords[holdOnNote >> 6] & (1ull << (holdOnNote & 63)))
+            midi.addEvent (juce::MidiMessage::noteOff (1, holdOnNote),
+                           juce::jmax (1, buffer.getNumSamples() - 1));
+    }
 
     mSynth.renderNextBlock (buffer, midi);
 

@@ -97,6 +97,11 @@ public:
     std::function<void(const juce::String& clipboardXml)> onDuplicateRequested;
         // editor receives serialized drum state, creates new tab, applies it
 
+    // QA-L-Fix (D-6): the user changed this drum's play pitch from the kit
+    // menu.  The kit grid owns the undo stack for `drumRolls`, so re-pitching
+    // the drum's existing hits is delegated up to whoever wired the kit view.
+    std::function<void(int pageIdx, int oldNote, int newNote)> onPlayNoteChanged;
+
     void                setTabName(const juce::String& name);
     const juce::String& getTabName() const { return mTabName; }
 
@@ -110,7 +115,21 @@ public:
     // D1.4-fix: picker actions.  Picker popup is a single button on the
     // Player tab; selection auto-loads the right engine + applies state.
     void showSoundPicker  (juce::Component* anchor);
-    void showContextMenu  (juce::Component* anchor);     // D1.4-fix (c)
+    // QA-L-Fix (D-2): `fromKit` gates the MIDI items.  They are kit-only --
+    // the mapping exists to play the kit off a pad controller, so the page
+    // sound-picker entry point shows neither MIDI Note nor MIDI Learn.
+    void showContextMenu  (juce::Component* anchor, bool fromKit);   // D1.4-fix (c)
+
+    // QA-L-Fix (D-4/D-6): the drum's play pitch -- the note it sounds at.
+    // Setting it re-pitches this drum's existing hits that sit at the OLD
+    // play note (via onPlayNoteChanged); hits deliberately placed at other
+    // pitches stay put.
+    int  getPlayNote () const;
+    void setPlayNote (int midiNote);
+
+    // QA-L-Fix (D-7/D-10): arm MIDI Learn for this drum's kit trigger.  The
+    // capture handshake is polled from the existing page timer.
+    void beginTriggerLearn();
     void loadSampleFile   (const juce::File& f);
     void loadSampleFolder (const juce::File& f);
     void loadSampleSFZ    (const juce::File& f);
@@ -155,6 +174,15 @@ public:
     void         importPagePresetXml (const juce::String& xml);
 
 private:
+    // QA-L-Fix: message-thread half of the trigger-learn handshake.  Polled
+    // from timerCallback; commits the capture + runs the D-10 prompt.
+    void pollTriggerLearn();
+    // Weak: the AlertWindow is modal with deleteWhenDismissed, so JUCE owns it.
+    // A unique_ptr here would double-free when the window self-deletes.
+    juce::Component::SafePointer<juce::AlertWindow> mLearnAlert;
+    // 0 = not learning.  Absolute ms deadline for the 30 s auto-cancel.
+    juce::uint32 mLearnDeadlineMs { 0 };
+
     VibeSynthProcessor& mProcessor;
     PatternManager&     mPM;
     int                 mPageIndex;   // 0..kMaxDrumPages-1

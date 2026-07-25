@@ -431,6 +431,28 @@ GlobalTransportBar::GlobalTransportBar(StandalonePlayHead& ph)
         mKeybMidiBtn.reset (k.release());
     }
 
+    // QA-G3Smoke SW-1: global Swing knob (between the typing-keyboard toggle
+    // and the pattern dropdown).  0-100%, default 0, double-click resets to 0;
+    // per-player Swing Mix knobs scale this on each title bar (SW-3).
+    {
+        auto s = std::make_unique<juce::Slider>();
+        s->setSliderStyle (juce::Slider::RotaryVerticalDrag);
+        s->setTextBoxStyle (juce::Slider::NoTextBox, true, 0, 0);
+        s->setRange (0.0, 1.0, 0.0);
+        s->setDoubleClickReturnValue (true, 0.0);
+        s->setTooltip ("Swing - pushes every second 16th step late.  Per-player Swing Mix knobs scale it.");
+        // Smoke #59/60: value popup on hover/drag (mixer pan/width convention).
+        s->setPopupDisplayEnabled (true, true, nullptr);
+        s->textFromValueFunction = [] (double v)
+        { return "Swing " + juce::String ((int) std::lround (v * 100.0)) + "%"; };
+        s->onValueChange = [this]
+        {
+            if (onSetSwing) onSetSwing ((float) mSwingKnob->getValue());
+        };
+        addAndMakeVisible (*s);
+        mSwingKnob = std::move (s);
+    }
+
     mPlayBtn->setTooltip("Play  (Space)");
     mPauseBtn->setTooltip("Pause  (Space while playing)");
     mStopBtn->setTooltip("Stop  (Shift+Space)");
@@ -904,6 +926,9 @@ void GlobalTransportBar::resized()
     if (mMetroArrowBtn) mMetroArrowBtn->setBounds(b.removeFromLeft(18).reduced(1, 1));
     b.removeFromLeft(4);
     if (mKeybMidiBtn) mKeybMidiBtn->setBounds(b.removeFromLeft(32).reduced(1, 1));
+    b.removeFromLeft(2);
+    // SW-1; smoke #59: 24 px + shifted left so it clears the pattern box.
+    if (mSwingKnob) mSwingKnob->setBounds(b.removeFromLeft(24).reduced(1, 1));
     b.removeFromLeft(12);
 
     // CPU / DSP / MEM / LAT 2x2 grid (far right). Width sized for the longest
@@ -912,6 +937,12 @@ void GlobalTransportBar::resized()
     // accommodates the second text row instead of widening).
     mPerfLabel->setBounds(b.removeFromRight(160).reduced(2, 0));
     b.removeFromRight(6);
+}
+
+void GlobalTransportBar::refreshSwingKnob()
+{
+    if (mSwingKnob && onGetSwing)
+        mSwingKnob->setValue ((double) onGetSwing(), juce::dontSendNotification);
 }
 
 void GlobalTransportBar::setSongMode(bool song)

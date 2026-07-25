@@ -98,7 +98,13 @@ void OctaveStyleDSP::GranularShifter::process (const float* input,
         const float w1 = hann (windowPhase (readPos1));
         const float w2 = hann (windowPhase (readPos2));
 
-        // Sum of windows is ~1.0 since they're 50% offset Hann pairs.
+        // #35 final form (smoke #55): plain overlap-add.  Unity now comes from
+        // the STRUCTURE -- setGrainSize re-anchors the pair to an exact
+        // half-grain offset (Hann halves sum to 1.0 at every phase) and head
+        // jumps preserve phase mod grain.  The interim live-sum divide is
+        // GONE: near coincident window nulls it amplified interpolation noise
+        // (tiny/tiny) and its epsilon floor stepped 0<->full = the smoke's
+        // clicks/tearing/dropouts across all three octave modes.
         output[i] = s1 * w1 + s2 * w2;
 
         readPos1 += (double) ratio;

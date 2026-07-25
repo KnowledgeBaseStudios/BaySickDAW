@@ -48,6 +48,35 @@ juce::Rectangle<int> BaySickTitleBar::getTrailingArea (int trailingWidth) const
     return { x, 0, trailingWidth, getHeight() };
 }
 
+// Smoke round 2 (Jeff): the SW-3 bar-owned Swing Mix knob moved to the
+// PageMenuBar (SharedUI PageSwingKnob) so it's visible on every sub-tab;
+// this bar keeps only the hosted/reserved trailing machinery (G-16/G-14).
+BaySickTitleBar::~BaySickTitleBar() = default;
+
+void BaySickTitleBar::setTrailingWidthHint (int px)
+{
+    mTrailingHint = juce::jmax (0, px);
+    resized();
+}
+
+void BaySickTitleBar::setReservedTrailingWidth (int px)
+{
+    mReservedTrailing = juce::jmax (0, px);
+    resized();
+}
+
+void BaySickTitleBar::addHostedTrailingWidget (juce::Component* c, int width)
+{
+    if (c == nullptr) return;
+    // Idempotent: source-mode swaps re-run the hosting path with the same
+    // widgets (InstPage::setEngine re-entry) -- never double-book a slot.
+    for (auto& h : mHosted)
+        if (h.comp == c) { h.width = juce::jmax (16, width); resized(); return; }
+    addAndMakeVisible (c);
+    mHosted.push_back ({ c, juce::jmax (16, width) });
+    resized();
+}
+
 void BaySickTitleBar::paint (juce::Graphics& g)
 {
     // Standardized dark background (matches existing Harmless/VibePlayer tone).
@@ -65,7 +94,17 @@ void BaySickTitleBar::paint (juce::Graphics& g)
 
 void BaySickTitleBar::resized()
 {
-    // Parent positions trailing widgets via getTrailingArea(); no internal layout.
+    // Parent-managed trailing widgets lay out via getTrailingArea(); the bar
+    // lays out ONLY what it hosts, right-to-left, LEFT of that cluster:
+    // [parent hint] <- [hosted widgets] <- [G-14 reserved slots].
+    int rightCursor = getWidth() - kPaddingPx - mTrailingHint;
+    for (auto& h : mHosted)
+    {
+        rightCursor -= (h.width + 6);
+        h.comp->setBounds (rightCursor, (getHeight() - 24) / 2, h.width, 24);
+    }
+    // mReservedTrailing (G-14) is currently layout-inert: nothing lays out
+    // left of the hosted cluster since the swing knob moved to the PageMenuBar.
 }
 
 void BaySickTitleBar::paintEngineName (juce::Graphics&       g,

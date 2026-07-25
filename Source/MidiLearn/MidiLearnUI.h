@@ -76,23 +76,14 @@ public:
         // If something else was learning, cancel it first.  No-op if not.
         cancelLearn();
 
-        mRegistry.beginLearn (paramId,
-            [this] (const MidiLearnRegistry::Mapping& captured) -> bool
-            {
-                // Audio-thread context: commit by returning true.  The
-                // registry handles atomic commit; we just request a UI
-                // refresh on the message thread (which removes the overlay).
-                juce::MessageManager::callAsync ([this]
-                {
-                    stopTimer();
-                    removeOutlineOverlay();
-                    if (onLearnStateChanged) onLearnStateChanged();
-                });
-                juce::ignoreUnused (captured);
-                return true;
-            });
+        mRegistry.beginLearn (paramId);
 
-        startTimer (30 * 1000);   // 30s auto-cancel
+        // 2026-07-19: polls at 20 Hz instead of one 30 s shot.  The registry no
+        // longer calls back from the audio thread (that path allocated in the
+        // render callback), so the commit has to be pulled from here.  The 30 s
+        // auto-cancel is now a deadline compared on each tick.
+        mLearnDeadlineMs = juce::Time::getMillisecondCounter() + 30 * 1000;
+        startTimerHz (20);
         installOutlineOverlay (paramId);
         if (onLearnStateChanged) onLearnStateChanged();
     }
@@ -101,9 +92,16 @@ public:
     // when not currently learning.
     void cancelLearn()
     {
-        if (! mRegistry.isLearning()) return;
-        mRegistry.cancelLearn();
+        // UI teardown runs unconditionally.  Gating it on isLearning() left the
+        // dashed overlay stranded when Escape landed in the window between the
+        // audio thread capturing and the next poll tick committing -- the
+        // registry has already disarmed by then, so the early return skipped
+        // the cleanup for a learn that was visibly still in progress.
+        const bool wasLearning = mRegistry.isLearning();
+        if (wasLearning) mRegistry.cancelLearn();
+
         stopTimer();
+        mLearnDeadlineMs = 0;
         removeOutlineOverlay();
         if (onLearnStateChanged) onLearnStateChanged();
     }
@@ -180,8 +178,24 @@ public:
     // ── juce::Timer ──────────────────────────────────────────────────────────
     void timerCallback() override
     {
+        // Message-thread half of the capture handshake.  Committing here is
+        // what keeps the std::map insert + onChanged() notify off the audio
+        // thread.
+        MidiLearnRegistry::Mapping captured;
+        if (mRegistry.takeCapturedMapping (captured))
+        {
+            mRegistry.setMapping (captured.paramId, captured);
+            stopTimer();
+            mLearnDeadlineMs = 0;
+            removeOutlineOverlay();
+            if (onLearnStateChanged) onLearnStateChanged();
+            return;
+        }
+
         // 30s auto-cancel.
-        cancelLearn();
+        if (mLearnDeadlineMs != 0
+            && juce::Time::getMillisecondCounter() > mLearnDeadlineMs)
+            cancelLearn();
     }
 
     // ── juce::KeyListener ────────────────────────────────────────────────────
@@ -268,6 +282,8 @@ private:
 
     MidiLearnRegistry& mRegistry;
     juce::Component*   mTopLevel { nullptr };
+    // 0 = not learning.  Absolute ms deadline for the 30 s auto-cancel.
+    juce::uint32       mLearnDeadlineMs { 0 };
 
     std::unique_ptr<MidiLearnOutlineOverlay> mOverlay;
     juce::Component*                          mOverlayTarget { nullptr };

@@ -1,4 +1,5 @@
 #include "AdditiveVoice.h"
+#include "../G3PlayheadDiag.h"   // [G3 PAN] smoke-#19 arm readout (Debug-only)
 #include <cmath>
 
 AdditiveVoice::AdditiveVoice()
@@ -116,6 +117,7 @@ void AdditiveVoice::startNote (int midiNote, float velocity,
     // carries its own time (CC5/37 = the note's length); porta uses the
     // engine glide param, falling back to 60 ms when it is 0.
     mPerNoteGlideActive = false;
+    mPanRampLeft        = 0;   // #11: a fresh note is not mid-pan-ramp (RT arm below may re-set)
     if (mGlideFromNote >= 0)
     {
         mCurrentHz = midiNoteToHz (mGlideFromNote, mPitchWheelSemis);
@@ -125,9 +127,25 @@ void AdditiveVoice::startNote (int midiNote, float velocity,
         // tau = t/3 -> ~95% of the sweep lands inside the requested time.
         mPerNoteGlideCoeff  = float (std::exp (-3.0 / (juce::jmax (0.005f, tSec) * mSampleRate)));
         mPerNoteGlideActive = (mCurrentHz != mNoteHz);
+        // #11 (G-4): an RT glide noteOn carries pan as a CC89 ramp target --
+        // mNotePan (the channel snapshot this voice already tracks) glides to
+        // it over the same span as the pitch (no CC10 was emitted, so the
+        // ramp starts from the glide SOURCE note's pan).
+        if (mPanRampPend > -2.0f)
+        {
+            const float glideSamples = juce::jmax (0.005f, tSec) * (float) mSampleRate;
+            if (glideSamples > 1.0f)
+            {
+                mPanRampTarget = mPanRampPend;
+                mPanRampLeft   = (int) glideSamples;
+                mPanRampStep   = (mPanRampTarget - mNotePan) / (float) mPanRampLeft;
+            }
+            else mNotePan = mPanRampPend;
+        }
     }
     mGlideFromNote    = -1;      // one-shot: never leaks into the next note
     mGlideTimePending = false;
+    mPanRampPend      = -999.0f; // #11: consumed above (or irrelevant for a plain note)
 
     // Consume the per-note expression stashes (QA-H).
     mActiveResOffset = mPendResOffset;
@@ -137,6 +155,7 @@ void AdditiveVoice::startNote (int midiNote, float velocity,
     // we store velocity separately and apply per-part in the render loop based
     // on mVelLink (ON: both A+B scale with velocity; OFF: only A scales).
     mNoteVelocity = velocity;
+    mVelRampLeft  = 0;   // S-6(C): a fresh note is not mid-slide-ramp
     mVolSmooth.setCurrentAndTargetValue (mVolume);
     mPartASmooth.setCurrentAndTargetValue (mPartALevel);
     mPartBSmooth.setCurrentAndTargetValue (mPartBLevel);
@@ -274,7 +293,21 @@ void AdditiveVoice::controllerMoved (int controllerNumber, int newValue)
     // Batch E #2 (2026-05-01): CC 74 (Brightness) = per-note filter cutoff
     // offset.  Map 0..127 -> -2..+2 octaves.  Applied multiplicatively to
     // both filter cutoffs in the per-block cutoff calculation.
-    if (controllerNumber == 74)
+    if (controllerNumber == 10)       // S-7: per-note pan (64 = center)
+    {
+        // Smoke #19 declick: sounding voices glide to the new channel pan
+        // over ~8 ms (instant set = gain step = click on ringing voices);
+        // idle voices set instantly for exact startNote state.
+        const float p = juce::jlimit (-1.0f, 1.0f, ((float) newValue - 64.0f) / 63.0f);
+        if (isVoiceActive())
+        {
+            mPanRampTarget = p;
+            mPanRampLeft   = juce::jmax (1, (int) (0.008f * mSampleRate));
+            mPanRampStep   = (p - mNotePan) / (float) mPanRampLeft;
+        }
+        else mNotePan = p;
+    }
+    else if (controllerNumber == 74)
     {
         const float norm = (float) newValue / 127.0f;          // 0..1
         mPerNoteCutoffOctaves = (norm - 0.5f) * 4.0f;          // -2..+2
@@ -285,29 +318,60 @@ void AdditiveVoice::controllerMoved (int controllerNumber, int newValue)
         mPendRelScale = std::pow (2.0f, ((float) newValue / 127.0f - 0.5f) * 4.0f);
     else if (controllerNumber == 84)  // glide source note (QA-H slide/porta)
         mGlideFromNote = newValue;
+    else if (controllerNumber == 86)  // S-6(C): RampSlide target loudness (for CC85)
+        mSlideTargetVel = (float) newValue / 127.0f;
+    else if (controllerNumber == 89)  // #11 (G-4): pan RAMP target (for CC85 / RT noteOn)
+        mPanRampPend = juce::jlimit (-1.0f, 1.0f, ((float) newValue - 64.0f) / 63.0f);
     else if (controllerNumber == 5)   { mGlideTimeMsbMs = newValue; mGlideTimePending = true; }
     else if (controllerNumber == 37)  { mGlideTimeLsbMs = newValue; mGlideTimePending = true; }
-    else if (controllerNumber == 85)  // QA-H Ramp Slide: bend the sounding anchor voice
+    // CC85 no longer lands here -- BroadcastSynthesiser dispatches it via
+    // tryRampTakeover (#36 first-match) and then wipes every voice's stash.
+}
+
+bool AdditiveVoice::tryRampTakeover (int targetNote)
+{
+    // Takeover semantics - no retrigger.  Only the voice whose (juce) playing
+    // note matches the CC84 anchor bends; #36: the synth stops at the FIRST
+    // acceptor so two voices holding the same note can't both retarget.
+    if (! (isVoiceActive() && ! mInRelease
+           && getCurrentlyPlayingNote() == mGlideFromNote))
+        return false;
+
+    // mCurrentHz keeps its value; moving mNoteHz re-aims the
+    // per-sample target and the per-note coefficient carries the bend.
+    mNoteHz   = midiNoteToHz (targetNote, mPitchWheelSemis);
+    mTargetHz = mNoteHz;
+    const float tSec = mGlideTimePending
+        ? (float) ((mGlideTimeMsbMs << 7) | mGlideTimeLsbMs) * 0.001f
+        : 0.06f;
+    mPerNoteGlideCoeff  = float (std::exp (-3.0 / (juce::jmax (0.005f, tSec) * mSampleRate)));
+    mPerNoteGlideActive = true;
+    // S-6(C): ramp loudness base -> slide over the glide (parallels the bend).
+    const float glideSamples = juce::jmax (0.005f, tSec) * (float) mSampleRate;
+    if (mSlideTargetVel >= 0.0f && glideSamples > 1.0f)
     {
-        // Takeover semantics - no retrigger.  Only the voice whose (juce)
-        // playing note matches the CC84 anchor bends; EVERY voice clears the
-        // glide stash so a ramp never leaks into a later noteOn.
-        if (isVoiceActive() && ! mInRelease
-            && getCurrentlyPlayingNote() == mGlideFromNote)
-        {
-            // mCurrentHz keeps its value; moving mNoteHz re-aims the
-            // per-sample target and the per-note coefficient carries the bend.
-            mNoteHz   = midiNoteToHz (newValue, mPitchWheelSemis);
-            mTargetHz = mNoteHz;
-            const float tSec = mGlideTimePending
-                ? (float) ((mGlideTimeMsbMs << 7) | mGlideTimeLsbMs) * 0.001f
-                : 0.06f;
-            mPerNoteGlideCoeff  = float (std::exp (-3.0 / (juce::jmax (0.005f, tSec) * mSampleRate)));
-            mPerNoteGlideActive = true;
-        }
-        mGlideFromNote    = -1;
-        mGlideTimePending = false;
+        mVelRampTarget = mSlideTargetVel;
+        mVelRampLeft   = (int) glideSamples;
+        mVelRampStep   = (mVelRampTarget - mNoteVelocity) / (float) mVelRampLeft;
     }
+    // #11 (G-4): pan glides current -> CC89 target over the same span.
+   #if JUCE_DEBUG
+    G3PlayheadDiag::logPan ("arm(harmless) pend=" + juce::String (mPanRampPend, 3)
+        + " from=" + juce::String (mNotePan, 3)
+        + " glideSamples=" + juce::String ((int) glideSamples)
+        + " timePending=" + juce::String ((int) mGlideTimePending));
+   #endif
+    if (mPanRampPend > -2.0f)
+    {
+        if (glideSamples > 1.0f)
+        {
+            mPanRampTarget = mPanRampPend;
+            mPanRampLeft   = (int) glideSamples;
+            mPanRampStep   = (mPanRampTarget - mNotePan) / (float) mPanRampLeft;
+        }
+        else mNotePan = mPanRampPend;
+    }
+    return true;
 }
 
 //==============================================================================
@@ -481,6 +545,19 @@ void AdditiveVoice::renderNextBlock (juce::AudioBuffer<float>& outputBuffer,
 
         const float envGain = mAmpADSR.getNextSample();
         const float vol     = mVolSmooth  .getNextValue();
+        // S-6(C): advance the RampSlide loudness ramp - mNoteVelocity drives the
+        // per-part gain below, so loudness interpolates base -> slide over the glide.
+        if (mVelRampLeft > 0)
+        {
+            mNoteVelocity += mVelRampStep;
+            if (--mVelRampLeft == 0) mNoteVelocity = mVelRampTarget;
+        }
+        // #11 (G-4): pan ramp (CC89 target) -- same shape as the vel ramp.
+        if (mPanRampLeft > 0)
+        {
+            mNotePan += mPanRampStep;
+            if (--mPanRampLeft == 0) mNotePan = mPanRampTarget;
+        }
         // S3 T2-N: vel_link gates whether Part B is velocity-scaled.
         // Always: Part A scales with velocity. vel_link ON: Part B too.
         const float velA    = mNoteVelocity;
@@ -594,9 +671,13 @@ void AdditiveVoice::renderNextBlock (juce::AudioBuffer<float>& outputBuffer,
         const float panBias = juce::jlimit (-1.f, 1.f, modPan);
         const float lScale  = juce::jlimit (0.f, 1.5f, 1.0f - panBias);
         const float rScale  = juce::jlimit (0.f, 1.5f, 1.0f + panBias);
-        outL[s] += sampleL * mMasterPanL * gain * lScale;
+        // S-7: per-note pan (CC10) as a center-preserving balance on top of the
+        // master + mod pan (center note = unity, no change to existing behavior).
+        const float npL = mNotePan <= 0.0f ? 1.0f : 1.0f - mNotePan;
+        const float npR = mNotePan >= 0.0f ? 1.0f : 1.0f + mNotePan;
+        outL[s] += sampleL * mMasterPanL * gain * lScale * npL;
         // T1h: skip stereo write entirely if mono path (caller never allocated R).
-        if (outR) outR[s] += sampleR * mMasterPanR * gain * rScale;
+        if (outR) outR[s] += sampleR * mMasterPanR * gain * rScale * npR;
     }
 
     if (!mAmpADSR.isActive())

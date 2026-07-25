@@ -920,20 +920,20 @@ File > New marker leak).
 - [ ] **G-7 — insert at capacity.** Fill/occupy the bottom row (place a block on track
       500), then Insert Track Above anywhere. Expected: "Maximum Tracks Reached" prompt,
       nothing changes. `D:__ R:__` notes:
-- [ ] **G-8 — note preview true positions.** 1-bar pattern on a 4-bar block: notes tile
+- [ ] **G-8 — note preview true positions.** *(SUPERSEDED by §B.22 SS-8 — tiling is now content-length; re-verify there.)* 1-bar pattern on a 4-bar block: notes tile
       4x at true positions (not stretched); 2-bar pattern on a 1-bar block: first bar
       only; a drums-only pattern shows its notes on the block (drum previews were BLANK
       since Phase D). `D:__ R:__` notes:
-- [ ] **G-9 — song-mode tiling (DELIBERATE CHANGE).** A 4-bar block of a 1-bar pattern
+- [ ] **G-9 — song-mode tiling (DELIBERATE CHANGE).** *(SUPERSEDED by §B.22 SS-8 — re-verify there.)* A 4-bar block of a 1-bar pattern
       now LOOPS the pattern 4x in song mode (pre-batch: one pass + 3 bars silence).
       Audio matches the preview exactly. `D:__ R:__` notes:
-- [ ] **G-10 — slice, Jeff's use case.** 1-bar pattern block, 3 one-beat notes + 2
+- [ ] **G-10 — slice, Jeff's use case.** *(SUPERSEDED by §B.22 SS-9/SS-11/SS-12 — slice re-done; re-verify there.)* 1-bar pattern block, 3 one-beat notes + 2
       half-beat notes in the last beat; snap at 1/4; Slice at the last beat. Expected:
       the cut lands at snap resolution (1-bar blocks are sliceable now); the right piece
       shows AND plays only the 2 half-beat notes at their true timing; copy/paste it
       elsewhere plays identically; the pattern itself and its other blocks unchanged;
       undo restores the un-sliced block. `D:__ R:__` notes:
-- [ ] **G-11 — slice continuation (loop/audio/automation).** Slice a looped 4-bar block
+- [ ] **G-11 — slice continuation (loop/audio/automation).** *(SUPERSEDED by §B.22 SS-12 for pattern loop/mid-note; audio + automation slice continuation still verify HERE.)* Slice a looped 4-bar block
       of a 1-bar pattern mid-loop: both pieces play/display the correct continuation.
       Slice an audio clip off-bar: the right piece continues the file (no restart), in
       Stretch AND Resample modes. Slice an automation clip: both halves keep playing
@@ -1001,25 +1001,25 @@ CC delivery, player CC ordering).
       the selection to the newly armed type (one undo step; no junk entry when already
       matching). New notes draw as the armed type (RP = filled right triangle, RT =
       outline triangle, Porta = orange arc). `D:__ R:__` notes:
-- [ ] **H-2 — Note Properties popup.** Double-left-click a note (Draw + Select tools):
+- [ ] **H-2 — Note Properties popup.** *(SUPERSEDED by §B.22 SS-6/SS-7 — re-verify the current popup there.)* Double-left-click a note (Draw + Select tools):
       popup shows Flat/RP Slide/RT Slide/Porta + Velocity, Release, Fine Pitch, Panning,
       Filter Cutoff, Resonance; edits apply LIVE; with the clicked note in a selection
       every selected note takes the edit; ONE undo restores the whole popup session; a
       popup opened and closed untouched adds NO undo entry. Fast double-click-drawing a
       new note does NOT open the popup on it. `D:__ R:__` notes:
-- [ ] **H-3 — RT Slide (retrigger).** Note A, then an RT Slide note B at another pitch:
+- [ ] **H-3 — RT Slide (retrigger).** *(SUPERSEDED by §B.22 SS-1/SS-2 — re-verify there.)* Note A, then an RT Slide note B at another pitch:
       B re-attacks and its pitch GLIDES from A's pitch to B's across B's full length
       (short B = fast glide, long B = slow). Works on BaySickSynth, BaySickBass,
       Harmless, BaySickPlayer (incl. drum tabs on those engines); also works when A ended
       earlier (glides in from A's pitch after silence). Inst/Rusty/Vox (sfizz) rolls:
       slide types are silent no-ops by scope. `D:__ R:__` notes:
-- [ ] **H-4 — RP Slide (takeover).** Note A held, RP Slide note B overlapping or
+- [ ] **H-4 — RP Slide (takeover).** *(SUPERSEDED by §B.22 SS-4 — re-verify there.)* Note A held, RP Slide note B overlapping or
       BUTT-JOINED to A's end: NO new attack — A keeps sounding and bends to B's pitch
       over B's length, and A's audible tail extends through B (release starts at B's
       end). Chain A -> RP1 -> RP2: one continuous voice bending twice. An RP note with
       NOTHING sounding at its start (gap) is silent. Works on all 4 engine families.
       `D:__ R:__` notes:
-- [ ] **H-5 — Porta.** A porta note re-attacks and glides in QUICKLY from the previous
+- [ ] **H-5 — Porta.** *(SUPERSEDED by §B.22 SS-3 — Porta now uses "Porta Length in Beats", re-verify there.)* A porta note re-attacks and glides in QUICKLY from the previous
       note's pitch: BaySickSynth/Bass follow their glide-time param when set; Harmless
       follows glide_time; BaySickPlayer (no glide param) uses the fixed ~60 ms fallback —
       audibly a snap-glide, campaign-tunable. `D:__ R:__` notes:
@@ -1250,12 +1250,43 @@ Release — mark each scenario `D:` and `R:`.
 - [ ] **L-7 — roll click accuracy (LDT-394).** At deep zoom (in and out), click just
       left/right of a beat line and just above/below a row boundary: notes land on the
       intended beat/row; near-edge resize grabs still work. `D:__ R:__` notes:
-- [ ] **L-8 — per-drum MIDI notes (#10).** Fresh project: nothing mapped (pads only
-      play the focused drum). Assign notes to 3 drums via right-click -> MIDI Note;
-      focus ANY drum tab: the 3 pads fire kick/snare/hat simultaneously from a
-      controller (or the typing keyboard); held-note release works; an unassigned
-      drum still plays only when its tab is focused; the focused drum still plays
-      chromatically. Assignments survive save/reload (APVTS param). `D:__ R:__` notes:
+- [ ] ~~**L-8 — per-drum MIDI notes (#10).**~~ **SUPERSEDED 2026-07-19 — DO NOT RUN.**
+      The shipped version was note-only and gated on drum-tab focus, so it fires
+      nothing on CC pads and the kit-trigger workflow it existed for was unreachable.
+      Redesigned as per-drum kit triggers — see L-9..L-14. `D:n/a R:n/a`
+
+**L-9 .. L-14 (per-drum MIDI kit triggers)** `blocks:` the QA-L-Fix commit (hash
+backfilled at close) — plan `Batch Plans/eager-thumping-marmot.md`, design D-1..D-14
+locked 2026-07-19. Needs a MIDI controller with pads; a CC-sending pad is required for
+L-11.
+
+- [ ] **L-9 — kit-only MIDI menu (D-2).** Right-click a drum on the DRUM KIT: the menu
+      shows "Assigned: \<note\>" and "MIDI Learn". Right-click the sound picker on that
+      same drum's PAGE: NEITHER item appears (Lock / Polyphony / Copy / Save / Delete
+      only). `D:__ R:__` notes:
+- [ ] **L-10 — assigned play note + re-pitch (D-4/5/6).** A fresh drum reads
+      "Assigned: C5". Put a few hits on the kit. Change that drum's MIDI Note to D5:
+      the label reads "Assigned: D5", the drum's hits move from C5 to D5 on its page
+      piano roll, and playback is pitched up. ONE Ctrl+Z restores. A hit you
+      deliberately placed at some other pitch on the page roll stays where it is.
+      `D:__ R:__` notes:
+- [ ] **L-11 — Learn a CC pad, fires globally (D-7/8).** Kit right-click a drum ->
+      MIDI Learn -> move a CC pad/knob: it captures (NO prompt for CC). That pad now
+      fires the drum from ANY focus — on the kit, on a drum page, and on a Layers tab.
+      `D:__ R:__` notes:
+- [ ] **L-12 — Learn a note pad, kit-focus only (D-7/8/10).** Kit right-click another
+      drum -> MIDI Learn -> hit a NOTE pad: it captures AND prompts "Also set this
+      drum's play note to \<note\>?" — take Yes on one drum, No on another. With the KIT
+      focused, the pad fires its drum. Switch to a drum PAGE: that same pad no longer
+      fires the mapped drum — the note just plays the focused drum chromatically (no
+      double-fire). `D:__ R:__` notes:
+- [ ] **L-13 — trigger plays the assigned note + velocity (D-9/11).** A triggered drum
+      sounds at its ASSIGNED MIDI Note, not the pad's note. On a velocity-sensitive pad,
+      soft vs hard hits differ. Flip the global "MIDI trigger velocity" setting to
+      Fixed: every hit lands at the standard drawn-note velocity. `D:__ R:__` notes:
+- [ ] **L-14 — persistence (D-14).** Save the project, close, reopen: assigned notes AND
+      learned triggers (both the note one and the CC one) come back and still fire.
+      `D:__ R:__` notes:
 
 ### §B.19 — QA-M (engine restoration lifecycle: kit-load vs Rusty)
 
@@ -1306,8 +1337,8 @@ per-task busy time across the audio-thread pump + every worker.
 
 ### §B.21 — QA-OctavePedal (octave engine fix + poly grain + pedal UI + PDC pull + Inst monitor)
 
-`blocks:` (backfill the QA-OctavePedal close commit hash at commit — the whole batch in one
-commit). Debug exe FIRST (screenshot any jassert), then Release — mark each scenario `D:` and `R:`.
+`blocks:` `d6abc38b` (QA-OctavePedal, the whole batch in one commit). Debug exe FIRST
+(screenshot any jassert), then Release — mark each scenario `D:` and `R:`.
 Background: the OC-Style octave pedal (Polyphonic mode) "rang like a broken bell" — the shipped
 period-doubler was free-running period-length OLA that, on a stationary tone, reconstructs the
 INPUT pitch (an identity), so its -1/-2 voices never actually shifted; the octave content was
@@ -1345,6 +1376,254 @@ pedal loaded in BaySickPedals; Polyphonic mode unless noted.
       click-free. With Effect through the active octave feels ~low-latency (~11 ms, NOT a ~50 ms
       slapback). A recorded take sounds identical whichever monitor mode was used while tracking
       (monitor-only fork; recording is the raw DI). `D:__ R:__` notes:
+
+### §B.22 — QA-SlideSliceGlide (note-type slides + note properties + Builder tiling/slice; sfizz slide DEFERRED)
+
+`blocks:` (backfill the QA-SlideSliceGlide close commit hash at commit). Debug exe FIRST
+(screenshot any jassert), then Release — mark each scenario `D:` and `R:`.
+**Supersedes** the stale §B.14 H-2 / H-3 / H-4 / H-5 (this batch redid the slide DSP + Note
+Properties popup) and the §B.13 G-8 / G-9 / G-10 / G-11 (tiling + slice re-done as content-length
+tiling + finite-segment slice + mid-note clamp-and-play) — re-verify the current behavior HERE.
+Setup for slides: a Layers or Bass tab on an in-house engine (BaySickSynth / BaySickBass / Harmless /
+BaySickPlayer) — the slide fixes are on those four. sfizz Inst engines (Guitars/Basses) are DEFERRED
+(SS-A).
+
+- [ ] **SS-1 — co-start source (S-1).** Draw a base note, then an RT Slide (also try Porta and RP)
+      note STARTING AT THE SAME beat at a different pitch. Pre-batch: same-start did nothing. Now the
+      slide finds the co-starting base as its source and glides from it. All 4 in-house families.
+      `D:__ R:__` notes:
+- [ ] **SS-2 — RT: no twin voice (S-3/S-5).** Base note A, then an RT Slide note B overlapping A.
+      Pre-batch: A kept ringing UNDER B (two voices). Now A is CUT at B's start; ONE voice — a fresh
+      attack at A's pitch gliding to B over B's full length. `D:__ R:__` notes:
+- [ ] **SS-3 — Porta Length in Beats (S-4/S-10).** A Porta note after a previous note. Set its "Porta
+      Length" box in the popup (e.g. 2): the glide spans ~2 beats REGARDLESS of the note's own length
+      (a 1/16 Porta note still glides over 2 beats). Default = 1 beat. Pre-batch Porta was a near-
+      instant ~60 ms snap. `D:__ R:__` notes:
+- [ ] **SS-4 — RP takeover + expression + loudness (S-2/S-6).** Base A held, RP Slide B overlapping/
+      butt-joined: no re-attack, A bends to B over B's length (as QA-H). NEW: set B's Panning / Filter
+      Cutoff / Resonance in the popup — the takeover now REFLECTS them (pre-batch RP emitted only
+      pitch). Set B's Velocity different from A's: the sustained note's loudness RAMPS from A's to B's
+      over the glide. `D:__ R:__` notes:
+- [ ] **SS-5 — app-wide panning (S-7).** A plain (non-slide) note with Panning hard-left in the popup
+      plays hard-left on BaySickSynth, BaySickBass, Harmless, AND BaySickPlayer. Pre-batch panning did
+      NOTHING (CC10 emitted, no voice consumed it). A centered note is unchanged (bit-identical).
+      `D:__ R:__` notes:
+- [ ] **SS-6 — double-click-to-default (S-8).** In the popup, double-click each of the 6 sliders:
+      snaps to its neutral default (Velocity 80, Release 50, Fine Pitch 0, Panning 0, Filter Cutoff 50,
+      Resonance 50). Double-click the Porta Length box: back to 1. `D:__ R:__` notes:
+- [ ] **SS-7 — Porta greying + Close (S-9/S-10).** The popup has a "Porta Length" type-in box at the
+      bottom, GREYED/disabled unless the note type is Porta (click Porta -> enables live; Flat ->
+      greys). A "Close" button dismisses the popup and commits the single-undo edit (same as
+      click-away). Popup opened + closed untouched adds NO undo entry. `D:__ R:__` notes:
+- [ ] **SS-8 — content-length tiling (B-1).** An >4-bar pattern (e.g. 8 bars of notes) dropped on the
+      Builder grid PREVIEWS and PLAYS its full 8-bar length in song mode, looping at 8 (pre-batch:
+      chopped to the 4-bar default). A 2-bar pattern loops every 2. A stretched block tiles the REAL
+      content. `D:__ R:__` notes:
+- [ ] **SS-9 — roll slice = finite segment (B-2).** Piano roll, Slice tool: drag a short line across a
+      couple of notes. ONLY notes the drawn segment crosses (between the two dots) are cut — pre-batch
+      an infinite line cut notes far above/below the stroke. `D:__ R:__` notes:
+- [ ] **SS-10 — roll Shift-snap (B-5).** Slice tool, hold Shift while dragging: the line forces
+      VERTICAL at the snap-div-snapped X under the cursor; release cuts every note that vertical line
+      crosses at that beat. `D:__ R:__` notes:
+- [ ] **SS-11 — Builder slice drag-line + short blocks + seam + Shift (B-4/B-5).** Builder Slice tool:
+      DRAG a line across one or more track rows (two-dot preview) and release — each block the line
+      crosses splits at the line's X, with a visible SEAM at the cut. Short blocks (previously
+      un-sliceable) now slice. Shift = vertical snapped cut. A plain click still slices the block under
+      the cursor. `D:__ R:__` notes:
+- [ ] **SS-12 — mid-note slice plays, NO copy (B-3).** Stretch/tile a pattern block so a note straddles
+      a slice boundary; slice mid-note. The right piece plays the note's FRAGMENT from the boundary
+      (pre-batch the straddling note vanished). No pattern copy: edit the source pattern and BOTH pieces
+      reflect the edit. `D:__ R:__` notes:
+- [ ] **SS-A — sfizz slides DEFERRED (A-1).** *(SUPERSEDED by §B.23 — the sfizz slide is now REAL as of
+      QA-SlideSampler; verify the blended slide + Bend there, not here.)* `D:__ R:__` notes:
+
+### §B.23 — QA-SlideSampler (blended multi-sample slide + native Bend + engine-aware note-props for Guitars/Basses)
+
+`blocks:` (backfill the QA-SlideSampler close commit hash at commit). Debug exe FIRST (screenshot any
+jassert), then Release — mark each scenario `D:` and `R:`. **Supersedes** §B.22 SS-A (the sfizz slide is
+now real). Setup: a **BaySickGuitars** and a **BaySickBasses** Inst tab, each on its default keyswitch
+patch (Guitars `01-green_keyswitch`, Basses `01-darkblack_keysw`).
+**SS-Q5 tuning:** dial the perceptual knobs by ear during SLS-1/2/5/6 per the SS-Q5 TUNING CHECKLIST in
+`Plans & Specs/Running Notes/silky-gliding-lynx.md` (grep `SS-Q5 TUNE` in Source/).
+
+- [ ] **SLS-1 — RP Slide sounds, mono, any direction.** Draw a base note, then an RP Slide note at a
+      different pitch — try UP and try DOWN. It plays a continuous blended slide from real samples (no
+      chipmunk, no silence). Both directions read as one moving voice. `D:__ R:__` notes:
+- [ ] **SLS-2 — landed-note thinness A/B (SS-Q4=a re-check).** Slide up into a target and let it ring;
+      then play that same pitch as a normal (non-slide) note at the same velocity. Judge whether the
+      slid-into note is noticeably thinner/weaker. If too thin -> enrich the landing (checklist row 5).
+      `D:__ R:__` notes:
+- [ ] **SLS-3 — velocity liveness.** The same slide at low / medium / high velocity: the band (timbre)
+      AND the loudness change audibly and sensibly. Velocity is NOT inert. `D:__ R:__` notes:
+- [ ] **SLS-4 — landing decay + slide-into-held-note.** The landed note rings out naturally (one-shot
+      tail), not an abrupt cut. Slide into a target immediately followed by a held normal note at that
+      pitch: the SlideSampler-tail -> sfizz-note transition doesn't double or click. `D:__ R:__` notes:
+- [ ] **SLS-5 — zone-boundary artifacts (SS-Q5 tune).** A SLOW, WIDE slide across many semitones: listen
+      for clicks / combing at the semitone (zone) crossings. Dial `mCrossfadeMs` / `mAttackOffsetMs` by
+      ear until clean. `D:__ R:__` notes:
+- [ ] **SLS-6 — native Bend plays + shape (SS-Q5 tune).** Draw a note, set type = Bend, pick a semitone
+      amount + a shape. The note bends by that amount over its duration: Ramp+Hold rises then holds;
+      Ramp(whole) rises across the note; Up+Back bends up then releases; Instant jumps + holds. A "+2"
+      bend moves ~2 semitones. Dial the Ramp+Hold rise / Up+Back split by ear. `D:__ R:__` notes:
+- [ ] **SLS-7 — Bend range gated per engine (SL-6).** On the GUITAR tab the Bend amount dropdown offers
+      UP only (+1/+2/+3, no down). On the BASS tab it offers both (-2..+2). Matches each patch's real
+      native range. `D:__ R:__` notes:
+- [ ] **SLS-8 — engine-aware note-props (strip-list).** On Guitars/Basses the note-props popup shows ONLY
+      Flat / RP Slide / Bend + Velocity + the Bend amount + shape dropdowns + the notice — Pan / Filter
+      Cutoff / Resonance / Release / Fine Pitch / Porta box + the in-house RT Slide/Porta buttons are
+      GONE. On a Layers/Bass (in-house) roll the FULL original panel is unchanged. `D:__ R:__` notes:
+- [ ] **SLS-9 — chord-wide notice.** The always-on notice is present + reads correctly (RP Slide and Bend
+      move every playing note together). Hold a chord and Bend/slide: all notes move together (expected
+      per the notice, not a bug). `D:__ R:__` notes:
+- [ ] **SLS-10 — no crash / no stuck notes or wheel.** Interleave normal notes, RP Slides, and Bends on
+      Guitars/Basses (and chains base->A->B): no crash, no stuck notes, the pitch wheel returns to center
+      after each Bend. `D:__ R:__` notes:
+- [ ] **SLS-11 — decode-at-load, no first-slide latency (option b).** Loading a guitar/bass patch takes a
+      touch longer ("Loading Instrument..."); the FIRST slide right after the tab appears plays
+      immediately (no silent/late first slide). `D:__ R:__` notes:
+- [ ] **SLS-12 — serialization.** Save + reload a project with RP Slide notes and Bend notes (varied
+      amount + shape): the note types + Bend amount/shape reload correctly and play the same.
+      `D:__ R:__` notes:
+
+### §B.24 — QA-G3Smoke (G3 boundary-smoke 37-defect sweep + voiced SlideSampler + Swing + Cut Self)
+
+`blocks:` (backfill the QA-G3Smoke close commit hash at commit). Debug exe FIRST (screenshot any
+jassert), then Release — mark each scenario `D:` and `R:`. **Supersedes §B.23** where the voiced
+rework changed behavior: SLS-1 (the slide voice now runs the full patch chain), SLS-3 (velocity =
+real velcurve bands + base-note anchor), SLS-4 (landing decay = the patch ampeg release), SLS-5
+(hops are time-aligned + fraction-mapped) — re-verify via G3-20..G3-27 below; SLS-2's
+landing-thinness A/B decision + the SS-Q5 knob dialing remain live here (G3-22).  Setup: a
+BaySickGuitars + a BaySickBasses Inst tab (default keyswitch patches), one synth Layers tab, a
+drum tab, a Rusty tab; one project saved mid-suite for the round-trip checks.
+
+Playhead + seek:
+- [ ] **G3-1 — flag marker parks exact (#30 fixes + final form).** Stop anywhere: 1-px mast ON the
+      position, flag hanging right, no clipping at bar 0.  Check roll, kit view, AND Builder (the
+      Builder ruler was the straggler — now the same flag).  `D:__ R:__` notes:
+- [ ] **G3-2 — seek snap + Alt free (spec 1A).** Ruler click lands snapped; Alt+click lands exactly
+      where clicked.  All three surfaces.  `D:__ R:__` notes:
+- [ ] **G3-3 — max-zoom alignment.** Max zoom, snap on, click a bar line: mast ON the line, flag tip
+      touching it.  KNOWN non-bug: ~5 px trail while PLAYING at high zoom (30 Hz repaint) — do not
+      chase.  `D:__ R:__` notes:
+
+Live-edit playback (the #30b guard — MUST-PASS):
+- [ ] **G3-4 — place while playing.** While playing, place roll notes on a synth tab AND an Inst
+      tab: they sound on the next pass, no stop/start.  `D:__ R:__` notes:
+- [ ] **G3-5 — kit live edits.** While playing, place + delete kit hits: both take effect live.
+      `D:__ R:__` notes:
+- [ ] **G3-6 — pattern switch mid-play.** Clean swap, no stale notes from the old pattern.
+      `D:__ R:__` notes:
+- [ ] **G3-7 — Rusty teardown/re-add.** Delete the Rusty tab, re-add, load a kit, place hits — they
+      play.  `D:__ R:__` notes:
+
+Piano roll + note types:
+- [ ] **G3-8 — S-cycle + Bend + arrows (#9/#10).** On an Inst tab the S-cycle includes Bend
+      (Flat/RP/RT/Porta/Bend); Porta + Bend notes show the unified black-fill/white-border
+      right-edge arrow.  `D:__ R:__` notes:
+- [ ] **G3-9 — RP loudness ramp incl. BaySickPlayer (#37).** RP slide ramps loudness base->slide on
+      a synth AND a BaySickPlayer tab (pre-batch the player's deferred CC path dropped the ramp
+      handshake).  `D:__ R:__` notes:
+- [ ] **G3-10 — RP pan ramp + app-wide declick (#11/G-4 + round 2).** Base panned L, slide panned R:
+      pan sweeps over the slide's length (spec: as-designed span).  Sequential plain notes at
+      opposite hard pans with overlapping releases: NO clicks (sounding voices glide ~8 ms to a new
+      channel pan).  `D:__ R:__` notes:
+- [ ] **G3-11 — click memory carries the WHOLE note (#12 + round 2).** Click a note carrying
+      pan/cutoff/res/release/fine-pitch/porta/bend; the next click-placed note copies ALL of it
+      (plus dur/type/vel).  Grouping + mute do NOT carry.  `D:__ R:__` notes:
+- [ ] **G3-12 — double-click defaults (#13/#19).** Note-props sliders double-click to neutral;
+      Porta box to 1; Humanize + Riff wheels double-click to their factory values.  `D:__ R:__` notes:
+- [ ] **G3-13 — Humanize defaults (#13-#16).** Interval combo defaults 1/64 (offers 1/32-1/128);
+      distribution 3-way; seed dropdown 1-10; ranges 10/10/20.  `D:__ R:__` notes:
+- [ ] **G3-14 — Riff Machine neutral + enables (#17/#20, defaults revoked).** Fresh project, open
+      Riff: ALL step enables ON, Levels wheels 0, Artic "None", Groove "Straight" (the interim
+      non-neutral picks are gone).  Dice randomizes + enables; Start over resets to the same
+      neutrals; accepted riff survives save/reload (riffUsed pre-checks "Work on existing score").
+      `D:__ R:__` notes:
+
+Tracks + Builder:
+- [ ] **G3-15 — track ops + undo brackets (#21/#22/#23).** Move a track, group two + color them
+      (color = ONE undo step incl. the async picker), move the GROUP: rotation stays sane over the
+      whole [lo..hi] span; Ctrl+Z single-steps everything back.  `D:__ R:__` notes:
+- [ ] **G3-16 — de-tiled block playback (#24).** A pattern longer than 4 bars on the Builder plays
+      its full length ONCE per block — content does NOT repeat/tile past its end; MIDI shading
+      matches (incl. Inst/clip/Rusty rolls, NOT Vox).  `D:__ R:__` notes:
+- [ ] **G3-17 — slice true fragments (#25/#26).** Slicing a long block yields pieces that play
+      their REAL fragment (no modulo wrap); short blocks sliceable; visible seam.  `D:__ R:__` notes:
+- [ ] **G3-18 — Builder click memory (#26/#27).** Draw a block, resize it, draw another: the new
+      block takes the last length/offset; browser-pick resets the memory; delta-snap move keeps
+      relative offsets (snap applies to the DRAGGED block's delta, not each block).  `D:__ R:__` notes:
+- [ ] **G3-19 — Alt gestures (#45 spec + KeyBindings rows).** LEFT-Alt+drag a block = fine move, no
+      snap (and Alt+drag a roll note likewise); RIGHT-Alt+click = mute toggle; Alt+RClick still
+      opens the quantize popup.  `D:__ R:__` notes:
+
+Guitar/bass slides (voiced rework — supersedes §B.23 SLS-1/3/4/5):
+- [ ] **G3-20 — voiced slide, both directions.** One continuous voice through the full patch chain
+      (velcurve gain, AHDSR, LFOs, unison, bass filter), no chipmunk.  `D:__ R:__` notes:
+- [ ] **G3-21 — long UP slide clean (#6 + smoke #24/25/28).** A long up-slide: no stutter toward the
+      end, lands and RINGS OUT (fraction-mapped hops keep >= 20% body).  Down likewise.
+      `D:__ R:__` notes:
+- [ ] **G3-22 — landing-thinness A/B (THE decision) + SS-Q5 dial.** Slide into a target, ring, vs
+      the same pitch played normally at the same velocity.  Too thin -> the enrich-the-landing
+      decision opens; else dial `mCrossfadeMs`/`mAttackOffsetMs` (grep SS-Q5 TUNE) by ear.
+      `D:__ R:__` notes:
+- [ ] **G3-23 — keyswitch timbre (#2).** Press a keyswitch (e.g. palm mute), slide: the slide plays
+      that articulation's samples; switch back, slide again.  Keyswitch presses are cut-self-exempt.
+      `D:__ R:__` notes:
+- [ ] **G3-24 — live CC voicing (12b/12c).** During a held slide: vibrato/wobble knobs modulate in
+      real time; cc118 up = next slide plays the tailpiece table; cc29 up = feedback + noise layers
+      ride the knob and hop with the slide; bass swell CC shapes the attack; bass filter
+      EG/wah CCs shape tone (wah needs BOTH its CCs up — they multiply).  `D:__ R:__` notes:
+- [ ] **G3-25 — copied slide re-plucks (#7/#36).** Copy a slide butt-joined against the original:
+      the copy re-triggers as its own gesture (no silent continuation), chains still glide
+      continuously.  `D:__ R:__` notes:
+- [ ] **G3-26 — anchor-velocity loudness (#3).** A bottom-velocity base note yields a near-silent
+      slide; a hot base yields a hot slide (CC86 only covers no-prior-noteOn).  `D:__ R:__` notes:
+- [ ] **G3-27 — panic + wheel (#1/#5).** Stop mid-slide: tails die ~7 ms.  After any Bend the wheel
+      returns to center; bend shapes scale to the patch's REAL range (wheel convention fixed).
+      `D:__ R:__` notes:
+- [ ] **G3-28 — Cut Self (G-12/13/14).** Title-bar CUT SELF + SAME PITCH/CUT ALL toggles: ON+Same
+      Pitch cuts only the retriggered pitch; CUT ALL sweeps everything; OFF lets slide tails ring
+      under the next note.  Mode button swaps text; state survives save/reload.  `D:__ R:__` notes:
+- [ ] **G3-29 — bass Mono choke (cc105).** With the bass Mono CC up, a new slide gesture chokes the
+      old over ~0.2 s.  `D:__ R:__` notes:
+- [ ] **G3-30 — idle tail (idle-suspend term).** ONE slide on an otherwise idle Inst tab, hands off:
+      the tail rings to completion, never freezes.  `D:__ R:__` notes:
+
+Drums:
+- [ ] **G3-31 — kit move-drag re-stamp (#34).** Drag hits from one drum's row to another's: they
+      play the DESTINATION drum (a deliberately re-pitched hit keeps its pitch).  `D:__ R:__` notes:
+- [ ] **G3-32 — recording demux (#32).** Record a performance with per-drum MIDI triggers: hits land
+      on each drum's own lane, kit view refreshes, playback matches the take.  `D:__ R:__` notes:
+- [ ] **G3-33 — song-mode roll playhead (#31).** In song mode the roll/kit playhead tracks the
+      pattern-LOCAL beat inside each block (not the absolute song beat).  `D:__ R:__` notes:
+
+Engine + transport:
+- [ ] **G3-34 — octave pedal all modes (#35 + smoke #55).** Po mode: -1 Oct clean on notes AND
+      chords (no loop-start click, no bell/AM); -2 produces sound (no dropout/clicks); +1 clean and
+      gain-stable (anchored half-grain pair; the live-sum divide is gone).  `D:__ R:__` notes:
+- [ ] **G3-35 — no stuck audition notes (round 2).** Rapidly drag notes across many pitches on every
+      in-house engine: nothing ever hangs ringing (off-mask drain).  `D:__ R:__` notes:
+- [ ] **G3-36 — bar-1 notes every pass (Gen-1 watch).** Loop a pattern with bar-1 notes + from-stop
+      starts: the first notes sound on EVERY pass.  (Scheduler exonerated by [G3 BAR1]; recurrence
+      -> engine side, re-open with the Debug log.)  `D:__ R:__` notes:
+- [ ] **G3-37 — automation song-only + restore (round 3).** Pattern mode: an automation clip at bar
+      0 drives NOTHING (test BOTH a main-APVTS target and an engine-panel knob).  Song mode: both
+      driven over the clip span.  Switch back to pattern: both knobs return to their pre-song
+      values (incl. mixer faders).  `D:__ R:__` notes:
+- [ ] **G3-38 — Swing SW-1..SW-6.** Transport knob ~50%: off-16ths push late on synth/bass/drum
+      rolls.  Per-player Swing Mix knobs live on the PAGE BAR right of FX Rack (visible on every
+      sub-tab; Rusty right of its tab cluster): mix 0 isolates a player; double-click = 1.0;
+      hover shows the value bubble; right-click = Truncate (colliding same-pitch swung note clips,
+      no doubling).  Vox NOT swung; audio-clip EVENTS follow the global knob; direct-dropped
+      Builder wavs do NOT swing; swing 0 + a 7/8 project = timing identical.  `D:__ R:__` notes:
+- [ ] **G3-39 — Rusty page flow (G-16 + rounds 1/2).** The page OPENS on the Player sub-tab; Load
+      Player (Full/Basic) + Player Preset sit on the panel title bar; picking a program loads it;
+      re-add after delete auto-reloads the last kit.  `D:__ R:__` notes:
+- [ ] **G3-40 — NAM A/B placement (G-16 NAM).** The A/B slot toggles sit BELOW the OS dial on the
+      NAM/IR editor (off the title bar).  `D:__ R:__` notes:
+- [ ] **G3-41 — round trip.** Save + reload the suite project: note types + bend amount/shape +
+      cut-self state + swing settings + accepted-riff flag + per-drum triggers all reload and play
+      the same.  `D:__ R:__` notes:
 
 ## §C — Deferred re-verify ledger
 

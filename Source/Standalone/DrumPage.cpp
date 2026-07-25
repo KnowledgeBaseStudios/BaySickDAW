@@ -248,7 +248,7 @@ void DrumPage::buildPlayerTab()
         if (mEngineType.isEmpty())
             showSoundPicker (mPickerBtn.get());
         else
-            showContextMenu (mPickerBtn.get());
+            showContextMenu (mPickerBtn.get(), false);
     };
     // Right-click handled via per-instance MouseListener.
     mPickerRC.owner = this;
@@ -354,6 +354,10 @@ void DrumPage::selectEngine(const juce::String& engineName)
         mEngineEditor.reset(proc->createEditor());
     }
 
+    // Smoke round 2 (Jeff): the SW-3 Swing Mix knob moved OFF the editor
+    // title bar onto the PageMenuBar (StandaloneEditor wires it per
+    // page-show) so it's visible on every sub-tab.
+
     if (mPianoRoll)
     {
         mPianoRoll->onNoteAudition = [this](int midiNote)
@@ -415,6 +419,103 @@ void DrumPage::timerCallback()
     // each drum's notes on every paint).
     if (mActiveTab == 0 && mDrumKitTab)
         mDrumKitTab->repaint();
+
+    pollTriggerLearn();
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// QA-L-Fix: kit trigger MIDI Learn.  The audio thread captures into
+// DrumTriggerMap's lock-free handshake slot; this poll (on the existing 24 Hz
+// page timer) commits on the message thread, where prompts + alerts are legal.
+// ─────────────────────────────────────────────────────────────────────────────
+void DrumPage::beginTriggerLearn()
+{
+    mProcessor.getDrumTriggerMap().beginLearn (mPageIndex);
+    mLearnDeadlineMs = juce::Time::getMillisecondCounter() + 30000;   // 30 s, mirrors MidiLearnUI
+
+    auto* aw = new juce::AlertWindow ("MIDI Learn",
+                                      "Hit a pad or key to assign it to this drum.\n"
+                                      "Waiting 30 seconds...",
+                                      juce::MessageBoxIconType::NoIcon);
+    aw->addButton ("Cancel", 0);
+    mLearnAlert = aw;
+    juce::Component::SafePointer<DrumPage> safeThis (this);
+    // The map is captured by reference, NOT reached through safeThis: if this
+    // drum tab is closed while the learn window is open, the page dies first and
+    // a safeThis-gated disarm would never run, leaving the map armed forever
+    // (the next note-on anywhere would then be swallowed as a capture).  The
+    // processor outlives every page, so this reference is safe.
+    auto& map = mProcessor.getDrumTriggerMap();
+    const int myIndex = mPageIndex;
+    aw->enterModalState (false,
+        juce::ModalCallbackFunction::create ([safeThis, &map, myIndex] (int)
+        {
+            // Reached on Cancel AND on capture/timeout (both exitModalState).
+            // Disarm only if the map is still armed FOR THIS drum -- another
+            // page may have started its own learn since, and stomping that is
+            // the same class of bug as stealing its capture.
+            if (map.getLearnTargetDrum() == myIndex)
+                map.cancelLearn();
+
+            if (! safeThis) return;   // page gone; map already disarmed above
+            auto* dp = safeThis.getComponent();
+            dp->mLearnAlert      = nullptr;
+            dp->mLearnDeadlineMs = 0;
+        }), true);
+}
+
+void DrumPage::pollTriggerLearn()
+{
+    auto& map = mProcessor.getDrumTriggerMap();
+
+    DrumTriggerMap::Binding captured;
+    if (map.takeCapturedBindingFor (mPageIndex, captured))
+    {
+        map.setBinding (mPageIndex, captured);
+        mLearnDeadlineMs = 0;
+        // The modal callback does the rest of the cleanup (SafePointer nulls
+        // itself when JUCE deletes the window).
+        if (mLearnAlert) mLearnAlert->exitModalState (0);
+
+        // D-10: only a NOTE capture offers to become the play pitch.  A CC
+        // carries no pitch, so there is nothing to offer.  Also suppressed when
+        // the learned note ALREADY equals the play note -- D-10 says "prompt on
+        // note capture" without that carve-out, but the prompt would be asking
+        // to change a value to itself.
+        if (captured.kind == DrumTriggerMap::Kind::Note
+            && captured.number != getPlayNote())
+        {
+            const juce::String noteName =
+                juce::MidiMessage::getMidiNoteName (captured.number, true, true, 5);
+            juce::Component::SafePointer<DrumPage> safeThis (this);
+            const int newNote = captured.number;
+            juce::AlertWindow::showOkCancelBox (
+                juce::MessageBoxIconType::QuestionIcon,
+                "MIDI Learn",
+                "Also set this drum's play note to " + noteName + "?",
+                "Yes", "No", nullptr,
+                juce::ModalCallbackFunction::create ([safeThis, newNote] (int result)
+                {
+                    if (result == 1 && safeThis)
+                        safeThis.getComponent()->setPlayNote (newNote);
+                }));
+        }
+        return;
+    }
+
+    // 30 s timeout.  Only the page that armed the learn owns the deadline, and
+    // it disarms only if the map is still armed for THIS drum -- a stale
+    // deadline must not cancel another page's in-flight learn.
+    if (mLearnDeadlineMs != 0
+        && juce::Time::getMillisecondCounter() > mLearnDeadlineMs)
+    {
+        mLearnDeadlineMs = 0;
+        if (map.getLearnTargetDrum() == mPageIndex)
+            map.cancelLearn();
+        // The modal callback does the rest of the cleanup (SafePointer nulls
+        // itself when JUCE deletes the window).
+        if (mLearnAlert) mLearnAlert->exitModalState (0);
+    }
 }
 
 void DrumPage::paint(Graphics& g)
@@ -1026,10 +1127,34 @@ void DrumPage::loadPlayerPreset (const juce::File& xml)
 void DrumPage::PickerRightClickListener::mouseDown (const juce::MouseEvent& e)
 {
     if (e.mods.isPopupMenu() && owner)
-        owner->showContextMenu (owner->mPickerBtn.get());
+        owner->showContextMenu (owner->mPickerBtn.get(), false);
 }
 
-void DrumPage::showContextMenu (juce::Component* anchor)
+int DrumPage::getPlayNote () const
+{
+    const juce::String pid = "mixer_drum_" + juce::String (mPageIndex) + "_playNote";
+    if (auto* p = mProcessor.apvts.getRawParameterValue (pid))
+        return juce::jlimit (0, 127, (int) std::round (p->load()));
+    return 60;
+}
+
+void DrumPage::setPlayNote (int midiNote)
+{
+    const int newNote = juce::jlimit (0, 127, midiNote);
+    const int oldNote = getPlayNote();
+    if (newNote == oldNote) return;
+
+    const juce::String pid = "mixer_drum_" + juce::String (mPageIndex) + "_playNote";
+    if (auto* p = mProcessor.apvts.getParameter (pid))
+    {
+        const auto& range = p->getNormalisableRange();
+        p->setValueNotifyingHost (range.convertTo0to1 ((float) newNote));
+    }
+
+    if (onPlayNoteChanged) onPlayNoteChanged (mPageIndex, oldNote, newNote);
+}
+
+void DrumPage::showContextMenu (juce::Component* anchor, bool fromKit)
 {
     if (anchor == nullptr) return;
 
@@ -1041,9 +1166,13 @@ void DrumPage::showContextMenu (juce::Component* anchor)
     constexpr int kIdSaveAs    = 20;
     // D3: choke-group submenu - 200 = None, 201..216 = groups 1..16.
     constexpr int kIdChokeBase = 200;   // 200 = None
-    // Per-drum MIDI note - 299 = Unassign, 300 + n = MIDI note n (0..127).
-    constexpr int kIdNoteUnassign = 299;
+    // Per-drum play pitch - 298 = disabled "Assigned:" status row,
+    // 300 + n = MIDI note n (0..127).
+    constexpr int kIdNoteHeader   = 298;
     constexpr int kIdNoteBase     = 300;
+    // Per-drum kit trigger binding (QA-L-Fix).
+    constexpr int kIdMidiLearn    = 30;
+    constexpr int kIdMidiForget   = 31;
     constexpr int kIdDelete    = 99;
 
     juce::PopupMenu menu;
@@ -1097,18 +1226,23 @@ void DrumPage::showContextMenu (juce::Component* anchor)
         menu.addSubMenu ("Choke Group", chokeSub);
     }
 
-    // Per-drum MIDI trigger note (kit fan-out): while any drum tab holds MIDI
-    // focus, an incoming note matching the assignment fires this drum too.
-    // Octave submenus; labels use the roll's FL-style octave numbering (C5 =
-    // 60, note/12).
+    // QA-L-Fix (D-2/D-4/D-5): kit-only.  This is the drum's PLAY PITCH -- the
+    // note it sounds at -- not an input filter.  Every drum starts assigned to
+    // C5 (60).  Octave submenus; labels use the roll's FL-style octave
+    // numbering (C5 = 60, note/12).
+    if (fromKit)
     {
-        const juce::String pid = "mixer_drum_" + juce::String (mPageIndex) + "_inputNote";
-        int curNote = -1;
+        const juce::String pid = "mixer_drum_" + juce::String (mPageIndex) + "_playNote";
+        int curNote = 60;
         if (auto* p = mProcessor.apvts.getRawParameterValue (pid))
-            curNote = juce::jlimit (-1, 127, (int) std::round (p->load()));
+            curNote = juce::jlimit (0, 127, (int) std::round (p->load()));
 
         juce::PopupMenu noteSub;
-        noteSub.addItem (kIdNoteUnassign, "Unassigned", true, curNote < 0);
+        noteSub.addItem (kIdNoteHeader,
+                         "Assigned: "
+                             + juce::MidiMessage::getMidiNoteName (curNote, true, true, 5),
+                         false, false);
+        noteSub.addSeparator();
         for (int oct = 0; oct * 12 < 128; ++oct)
         {
             const int lo = oct * 12;
@@ -1124,10 +1258,16 @@ void DrumPage::showContextMenu (juce::Component* anchor)
                                     + juce::MidiMessage::getMidiNoteName (hi, true, true, 5),
                                 octSub);
         }
-        menu.addSubMenu (curNote >= 0
-                             ? "MIDI Note: " + juce::MidiMessage::getMidiNoteName (curNote, true, true, 5)
-                             : juce::String ("MIDI Note"),
-                         noteSub);
+        menu.addSubMenu ("MIDI Note", noteSub);
+
+        // D-3: MIDI Learn sits directly below MIDI Note.  Label carries the
+        // current binding so the kit menu doubles as the binding readout.
+        const juce::String bind = mProcessor.getDrumTriggerMap().describeBinding (mPageIndex);
+        menu.addItem (kIdMidiLearn,
+                      bind.isEmpty() ? juce::String ("MIDI Learn")
+                                     : "MIDI Learn: " + bind);
+        if (bind.isNotEmpty())
+            menu.addItem (kIdMidiForget, "MIDI Forget: " + bind);
     }
 
     menu.addSeparator();
@@ -1143,21 +1283,23 @@ void DrumPage::showContextMenu (juce::Component* anchor)
         juce::PopupMenu::Options().withTargetComponent (anchor),
         [safeThis,
          kIdLock, kIdPolyphony, kIdRename, kIdDuplicate,
-         kIdChokeBase, kIdNoteUnassign, kIdNoteBase, kIdSaveAs, kIdDelete] (int r)
+         kIdChokeBase, kIdNoteBase, kIdMidiLearn, kIdMidiForget,
+         kIdSaveAs, kIdDelete] (int r)
         {
             if (! safeThis || r <= 0) return;
             auto* dp = safeThis.getComponent();
 
-            // Per-drum MIDI note (299 = Unassign, 300 + n = note n).
-            if (r == kIdNoteUnassign || (r >= kIdNoteBase && r < kIdNoteBase + 128))
+            // Per-drum play pitch (300 + n = note n).
+            if (r >= kIdNoteBase && r < kIdNoteBase + 128)
             {
-                const int newNote = (r == kIdNoteUnassign) ? -1 : (r - kIdNoteBase);
-                const juce::String pid = "mixer_drum_" + juce::String (dp->mPageIndex) + "_inputNote";
-                if (auto* p = dp->mProcessor.apvts.getParameter (pid))
-                {
-                    const auto& range = p->getNormalisableRange();
-                    p->setValueNotifyingHost (range.convertTo0to1 ((float) newNote));
-                }
+                dp->setPlayNote (r - kIdNoteBase);
+                return;
+            }
+
+            if (r == kIdMidiLearn)  { dp->beginTriggerLearn(); return; }
+            if (r == kIdMidiForget)
+            {
+                dp->mProcessor.getDrumTriggerMap().clearBinding (dp->mPageIndex);
                 return;
             }
 

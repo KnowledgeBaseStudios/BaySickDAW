@@ -1,7 +1,11 @@
 #pragma once
 #include <JuceHeader.h>
 #include "../Standalone/ApvtsDirtyTracker.h"
+#include "../SlideSampler/SlideRegionMap.h"
+#include "../SlideSampler/SlideSampler.h"
+#include <array>
 #include <atomic>
+#include <bitset>
 #include <map>
 #include <memory>
 
@@ -82,6 +86,11 @@ public:
 
     juce::File getCurrentKitPath() const { return mCurrentKitPath; }
 
+    // QA-SlideSampler: the extracted blended-slide sustain table for the loaded
+    // program (empty if the program has no default-keyswitch sustain).  Built in
+    // loadKit; the SlideSampler (Task 2) reads it for the RP Slide gesture.
+    const SlideRegionMap& getSlideRegions() const noexcept { return mSlideRegions; }
+
     // Thread-safe note audition (UI thread → audio thread via atomic).
     // Velocity packed into the upper byte; default 100 matches Rusty.
     void auditionNote (int midiNote, int velocity = 100)
@@ -123,6 +132,10 @@ public:
         return mAuditionNote.load (std::memory_order_acquire) != -1;
     }
 
+    // QA-G3Smoke Task 12: slide-tail peek for the idle-suspend predicate --
+    // see BaySickGuitars for rationale.
+    bool isSlideActive() const noexcept { return mSlideSampler.isActive(); }
+
     // Project-level undo - editor wires Ctrl+Z to undo()/redo() so panel
     // edits, automation captures, and CC type-in entries are all reversible.
     juce::UndoManager& getUndoManager() noexcept { return mUndoManager; }
@@ -143,8 +156,59 @@ private:
     static juce::AudioProcessorValueTreeState::ParameterLayout createLayout (const juce::String& prefix);
     void updateFromApvts();
 
+    // QA-SlideSampler Task 3: arm the blended slide from the RP Slide transport
+    // (CC84 anchor / CC5+37 glide ms / CC86 loudness / CC85 target) - suppresses
+    // the sfizz anchor voice and hands the gesture to mSlideSampler.
+    void armSlide (int anchor, int target, int timeMs, int velocity, int delaySample);
+
+    // QA-SlideSampler Task 4: native "Bend" note.  A noteOn + CC87/88/5/37 arms a
+    // pitch-wheel ramp scaled to the patch's real range; mBendNote's noteOff ends it.
+    void armBend (int note, int semis, int shape, int timeMs);
+
+    // RP Slide gesture state (audio thread).  The anchor->target pitch ramp is
+    // advanced per sub-block in processBlock; mSlideAnchor's noteOff ends it.
+    bool   mSlideActive    = false;
+    int    mSlideAnchor    = -1;
+    double mSlidePitch     = 0.0;
+    double mSlideTarget    = 0.0;
+    double mSlidePitchStep = 0.0;
+    int    mSlideArmSample = 0;
+
+    // Bend gesture state (audio thread).  Wheel ramp advanced per block.
+    bool   mBendActive       = false;
+    int    mBendNote         = -1;
+    int    mBendTargetWheel  = 0;    // -8192..+8191 (0 = center)
+    int    mBendShape        = 0;
+    int    mBendSamplesTotal = 1;
+    int    mBendSamplesDone  = 0;
+
+    // Task 12 (#3): last noteOn velocity per note (audio thread) -- armSlide
+    // anchors the slide loudness to the ANCHOR NOTE's velocity, with the CC86
+    // transport value as the no-prior-noteOn fallback.
+    std::array<int, 128> mLastNoteVel {};
+
+    // Task 12 (#7): notes struck THIS block.  A CC85 arm whose anchor was
+    // noteOn'd in the same block is a COPIED slide (fresh re-plucked gesture),
+    // never a chain continuation -- chains hold ONE anchor noteOn across all
+    // segments.  Cleared at the top of every MIDI pass.
+    std::bitset<128> mNoteOnThisBlock;
+
+    // Task 12 (G-12): cut-self param atomics, cached at construction for
+    // lock-free audio-thread reads.  cutSelfMode false = Same Pitch, true =
+    // Cut All (mirrors the QA-CutSelfReview semantics on the synth engines).
+    std::atomic<float>* mCutSelfRaw     = nullptr;
+    std::atomic<float>* mCutSelfModeRaw = nullptr;
+
+    // Task 12: per-CC APVTS atomics, cached once at construction so the
+    // SlideSampler's block-rate CC provider reads lock-free (no string-keyed
+    // map lookups on the audio thread).  The bass cc105 Mono choke reads
+    // through the same provider inside SlideSampler::startSlide.
+    std::array<std::atomic<float>*, kCcCount> mCcRaw {};
+
     std::unique_ptr<sfz::Sfizz> mSfizz;
     juce::File                  mCurrentKitPath;
+    SlideRegionMap              mSlideRegions;   // QA-SlideSampler: rebuilt each loadKit
+    SlideSampler                mSlideSampler;   // QA-SlideSampler: blended-slide DSP
     std::atomic<int>            mAuditionNote { -1 };
     // L-5 fix #5: processing-enabled gate (default true so first construction
     // works; PluginProcessor's loadBaySickBassesKit wrapper flips false→load→true).

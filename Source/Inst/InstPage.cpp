@@ -133,6 +133,19 @@ InstPage::InstPage (int pageIndex)
     mProgramButton->setTooltip ("Pick a program - current selection shown on the file-name label");
     mProgramButton->onClick = [this] { showProgramPickerMenu(); };
 
+    // Task 12 (G-14): cut-self pair, styled to match the synth editors
+    // (QA-CutSelfReview).  Hosted into the title bar by rebuildPlayerPanel.
+    mCutSelfBtn.setClickingTogglesState (true);
+    mCutSelfBtn.getProperties().set ("switchToggle", true);
+    mCutSelfBtn.setTooltip ("Cut Self: when on, a new note cuts what is already sounding\n"
+                            "(sfizz voices through their release; slide tails hard-stop).");
+    mCutModeBtn.setClickingTogglesState (true);
+    mCutModeBtn.setTooltip ("Cut Self mode: Same Pitch cuts only the retriggered note (default);\n"
+                            "Cut All cuts every ringing voice on each new note.");
+    mCutModeBtn.onStateChange = [this]
+    { mCutModeBtn.setButtonText (mCutModeBtn.getToggleState() ? "CUT ALL" : "SAME PITCH"); };
+    mCutModeBtn.onStateChange();
+
     // QA-A 4.4 (2026-05-09): I-15 polish header chrome (mPedalsHeaderTitle +
     // mPedalsPresetBtn) deleted -- the title now lives inside BaySickPedalsEditor's
     // own BaySickTitleBar (Phase 4.2), and the pedalboard preset button migrated
@@ -845,6 +858,11 @@ void InstPage::rebuildPlayerPanel()
 {
     if (! mAriaPanel) return;
 
+    // G-14: unbind the cut-self attachments FIRST -- the engine this rebuild
+    // re-binds to may not be the one they currently listen on.
+    mCutSelfAttach.reset();
+    mCutModeAttach.reset();
+
     AriaControlPanel::Binding binding{};
 
     juce::File kitRoot;
@@ -893,6 +911,59 @@ void InstPage::rebuildPlayerPanel()
     }
 
     mAriaPanel->setEngine (binding);
+
+    // QA-G3Smoke G-16 + SW-3 + G-14 (sfizz sources): the Load-program button +
+    // program label move off the PageMenuBar extras-right onto the panel's
+    // title bar (StandaloneEditor no longer mounts them there), joined by the
+    // Swing Mix knob + the Task-12 CUT SELF toggle pair.
+    if (mSource != Source::LiveInput && mFullProcessor != nullptr
+        && mAriaPanel->getTitleBar() != nullptr)
+    {
+        auto* bar = mAriaPanel->getTitleBar();
+        bar->addHostedTrailingWidget (&mClipFileLabel, 200);
+        if (mProgramButton)
+            bar->addHostedTrailingWidget (mProgramButton.get(), 130);
+
+        // G-14: bind the cut-self pair to whichever sfizz engine this page
+        // drives.  No engine (mid-teardown) -> keep the slots reserved empty.
+        juce::AudioProcessorValueTreeState* engApvts = nullptr;
+        juce::String engPrefix;
+        if (mSource == Source::BaySickGuitars)
+        {
+            if (auto* e = mFullProcessor->getBaySickGuitars (mPageIndex))
+            {
+                engApvts  = &e->apvts;
+                engPrefix = e->getApvtsPrefix();
+            }
+        }
+        else if (mSource == Source::BaySickBasses)
+        {
+            if (auto* e = mFullProcessor->getBaySickBasses (mPageIndex))
+            {
+                engApvts  = &e->apvts;
+                engPrefix = e->getApvtsPrefix();
+            }
+        }
+        if (engApvts != nullptr)
+        {
+            bar->addHostedTrailingWidget (&mCutSelfBtn, 62);
+            bar->addHostedTrailingWidget (&mCutModeBtn, 78);
+            bar->setReservedTrailingWidth (0);
+            mCutSelfAttach = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (
+                *engApvts, engPrefix + "cutSelf", mCutSelfBtn);
+            mCutModeAttach = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (
+                *engApvts, engPrefix + "cutSelfMode", mCutModeBtn);
+        }
+        else
+        {
+            bar->setReservedTrailingWidth (110);
+        }
+
+        // Smoke round 2 (Jeff): the SW-3 Swing Mix knob moved OFF this title
+        // bar onto the PageMenuBar (StandaloneEditor wires it per page-show)
+        // so it's visible on every sub-tab.
+    }
+
     if (programXml.existsAsFile())
         mAriaPanel->loadFromKit (kitRoot, programXml);
     else

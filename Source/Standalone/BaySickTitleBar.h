@@ -23,7 +23,7 @@ public:
     BaySickTitleBar (const juce::String& engineName,
                      juce::Colour accentColor,
                      bool bloom = true);
-    ~BaySickTitleBar() override = default;
+    ~BaySickTitleBar() override;
 
     static constexpr int   kStandardHeight = 32;
     static constexpr int   kPaddingPx      = 8;
@@ -43,6 +43,23 @@ public:
         `getWidth() - kPaddingPx - trailingWidth`. */
     juce::Rectangle<int> getTrailingArea (int trailingWidth) const;
 
+    // ── QA-G3Smoke G-16 / G-14 additions ────────────────────────────────────
+    // (The SW-3 Swing Mix knob moved to the PageMenuBar -- smoke round 2.)
+
+    /** Width of the PARENT-managed trailing cluster (getTrailingArea callers,
+        e.g. the 88px preset button) so bar-owned widgets sit left of it. */
+    void setTrailingWidthHint (int px);
+
+    /** G-14: reserved empty width between hosted widgets and the swing knob
+        (the Guitars/Basses CUT SELF + mode toggle slots; Task 12 fills). */
+    void setReservedTrailingWidth (int px);
+
+    /** G-16: hosts a parent-owned widget in the bar's right-anchored row
+        (right-to-left insertion order, left of the trailing hint).  The bar
+        takes the component as a CHILD for layout only -- ownership stays with
+        the caller. */
+    void addHostedTrailingWidget (juce::Component* c, int width);
+
     void paint   (juce::Graphics& g) override;
     void resized () override;
 
@@ -60,6 +77,12 @@ private:
     juce::String mEngineName;
     juce::Colour mAccentColor;
     bool         mBloom;
+
+    // QA-G3Smoke G-16 / G-14 state (see the public setters above).
+    struct HostedWidget { juce::Component* comp; int width; };
+    std::vector<HostedWidget>        mHosted;
+    int                              mTrailingHint     { 0 };
+    int                              mReservedTrailing { 0 };
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (BaySickTitleBar)
 };

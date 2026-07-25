@@ -299,3 +299,20 @@ Inst monitor default = a (With Effect). Board-bypass = per-slot only (no feature
 Deferred to the §B.21 campaign pass (bulk-run R2): OP-1..OP-6. Dev-side offline A/B (Python
 1:1 ports) confirmed the T1 engine outputs half-F0 across a held-note/glide/legato/chord/high-B
 riff where the old engine output unshifted input pitch. Artifacts `octave_ab_*.wav` at repo root.
+
+## 2026-07-18 — COMMIT LANDED — `d6abc38b` (QA-OctavePedal close)
+
+One commit, 15 files (10 Source + test plan §B.21 + running notes + falcon carry-over straggler
++ .gitignore). Folded the two QA-N stragglers (test-plan §B.20 hash `2e44ab78` + falcon
+session-end carry-over). WAVs added to .gitignore (`/octave_ab_*.wav`) per Jeff -> left on disk
+for the OP-1 campaign ear-check, harmless if not deleted. On `main` (not detached; standup agent
+was read-only). Held Work Log entry stands (applies at the §B.21 campaign pass, R2).
+
+**Straggler for the NEXT commit:** §B.21's own `blocks:` hash backfill (`d6abc38b`) in
+v1-master-test-plan.md + this running-notes block + the plan-file Carry-Over block (B.13-B.20
+pattern: the batch commit lands, its own §B hash rides the next commit).
+
+**Position:** QA-OctavePedal is the LAST G3 batch. Batch closed -> **G3 GROUP BOUNDARY** next:
+R3 `/review-batch` over the combined QA-G..QA-OctavePedal diff (findings fixed before proceeding),
+then Jeff's 15-30 min smoke (Debug first, then Release; §7 items 1-5). Then G4 opens. Awaiting
+Jeff to open the group-boundary gate.

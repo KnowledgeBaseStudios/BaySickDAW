@@ -559,13 +559,9 @@ void BaySickNAMIREditor::paint (juce::Graphics& g)
 void BaySickNAMIREditor::resized()
 {
     // ── Header ───────────────────────────────────────────────────────────────
-    // QA-A (2026-05-09): unified title bar + right-anchored A/B slot toggles.
+    // QA-A (2026-05-09): unified title bar.  QA-G3Smoke G-16: the A/B slot
+    // toggles moved off the bar to below the OS dial (see the knob row).
     mTitleBar.setBounds (0, 0, getWidth(), BaySickTitleBar::kStandardHeight);
-    const int slotClusterW = 2 * kSlotABtnW;
-    const auto trailing    = mTitleBar.getTrailingArea (slotClusterW);
-    const int  slotY       = (BaySickTitleBar::kStandardHeight - kSlotABtnH) / 2;
-    mSlotABtn.setBounds (trailing.getX(),               slotY, kSlotABtnW, kSlotABtnH);
-    mSlotBBtn.setBounds (trailing.getX() + kSlotABtnW,  slotY, kSlotABtnW, kSlotABtnH);
 
     // ── File rows ────────────────────────────────────────────────────────────
     constexpr int sectionLblW = 36;
@@ -614,6 +610,13 @@ void BaySickNAMIREditor::resized()
     const int dialY    = knobsY + 4;
     mOSSelector  .setBounds (dialX, dialY, dialSz, dialSz);
     mOSSelectorLbl.setBounds (slotX, dialY + dialSz + 4, slotW, 16);
+
+    // QA-G3Smoke G-16: A/B slot toggles under the OS dial (moved off the title
+    // bar).  Fits inside kKnobsRowH: 4+66 dial + 16 label + 2 + 20 = 108 < 130.
+    const int abY = dialY + dialSz + 4 + 16 + 2;
+    const int abX = slotX + (slotW - 2 * kSlotABtnW) / 2;
+    mSlotABtn.setBounds (abX,              abY, kSlotABtnW, kSlotABtnH);
+    mSlotBBtn.setBounds (abX + kSlotABtnW, abY, kSlotABtnW, kSlotABtnH);
 
     // ── Status row ───────────────────────────────────────────────────────────
     const int statusY = knobsY + kKnobsRowH + 8;

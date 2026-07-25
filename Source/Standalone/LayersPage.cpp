@@ -196,6 +196,10 @@ void LayersPage::selectEngine(const juce::String& engineName)
         else if (auto* pe = dynamic_cast<VibePlayerEditor*>    (mEngineEditor.get())) pe->onPatchLoaded = onPatch;
     }
 
+    // Smoke round 2 (Jeff): the SW-3 Swing Mix knob moved OFF the editor
+    // title bar onto the PageMenuBar (StandaloneEditor wires it per
+    // page-show) so it's visible on every sub-tab.
+
     // Wire note audition callback (fires on note draw, pitch drag, and key click)
     if (mPianoRoll)
     {
@@ -704,6 +708,12 @@ void LayersPage::loadPreset (const juce::File& xml)
 
     auto px = juce::XmlDocument::parse (xml);
     if (! px) return;
+
+    // QA-I: context-menu preset path -- the engine is already locked, so
+    // selectEngine's overlay never opens; wrap the (possibly multi-second) SFZ
+    // load here so the UI shows a busy indicator instead of freezing.
+    HeavyOperationOverlay::ScopedOp busy (StandaloneEditor::busyOverlayFor (this),
+                                          "Loading Preset...", true);
 
     // 2026-04-26: detect BaySickPlayer factory wrapper format.  Outer
     // <BaySickPlayerState> contains an inner <BaySickPlayerState> apvts

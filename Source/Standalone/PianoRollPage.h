@@ -78,6 +78,10 @@ struct PianoRollConnection
     // can discover the keyswitch range without inspecting the SFZ file.
     // Empty string for non-keyswitch notes or engines without keyswitching.
     std::function<juce::String(int midiNote)>  keyswitchLabelProvider;
+    // QA-SlideSampler Task 4: engine-aware note-props context (Guitars/Basses set
+    // this to expose the Flat/RP Slide/Bend panel + the patch's real bend range).
+    // Empty on other engines -> the normal in-house note-props panel.
+    std::function<PianoRollGrid::NoteEditContext()>  noteEditContextProvider;
     // J-7b: top-of-view default MIDI note when this engine is first selected.
     // -1 = no preference (use the page's existing default).
     int                                        defaultTopNote { -1 };
@@ -129,10 +133,34 @@ public:
     // Editor wires this so the playhead-pump knows when to pass -1 (Song mode).
     std::function<bool()> isSongMode;
 
+    // #30 (QA-G3Smoke): output latency + sample rate for the playhead's visual
+    // latency compensation (the page has no processor handle).  Permanent --
+    // distinct from the Debug-only g3DiagDeviceInfo below.
+    std::function<void(int& latencySamples, double& sampleRate)> deviceInfoProvider;
+
+    // #31 (QA-G3Smoke): song-mode playhead.  Editor maps a SONG beat to the
+    // VIEWED pattern's local beat (a block of that pattern whose span contains
+    // the beat; local = songBeat - blockStart + contentOffset), or -1 when the
+    // viewed pattern isn't playing there.  Pattern mode never calls this.
+    std::function<double(double songBeat)> songLocalBeatProvider;
+
+    // #30b regression fix (QA-G3Smoke): every roll/kit note mutation fires
+    // this (via each container's onContentEdited) so the editor can
+    // republish the scheduler's roll snapshot.  Stored + pushed to the kit
+    // and every registered roll (present and future).
+    void setContentEditedHook (std::function<void()> fn);
+
     // Editor wires this to read the processor's held hardware-MIDI notes each
     // timer tick (128-bit mask: lo = notes 0..63, hi = 64..127).  The active
     // roll's keyboard lights those keys so the user sees what they're playing.
     std::function<void(uint64_t&, uint64_t&)> liveHeldNotesProvider;
+
+#if JUCE_DEBUG
+    // [G3 PLAYHEAD] G-9 reading (QA-G3Smoke Task 1): the page has no processor
+    // handle, so the editor supplies output latency + sample rate for the
+    // per-tick readout.  Debug-only; stripped with the diagnostic at batch close.
+    std::function<void(int& latencySamples, double& sampleRate)> g3DiagDeviceInfo;
+#endif
 
     // Editor sets this so PianoRollPage can build its dropdown popup with the
     // ribbon's current Layer/Bass/Drum order.  Returns the engines in the
@@ -162,6 +190,7 @@ private:
     std::unique_ptr<DrumKitContainer>                                              mDrumKit;
     std::unordered_map<EngineId, std::unique_ptr<PianoRollContainer>, EngineIdHash> mRolls;
     std::unordered_map<EngineId, PianoRollConnection, EngineIdHash>                 mConns;
+    std::function<void()> mContentEditedHook;   // #30b regression fix: pushed to kit + every roll
     std::function<int()>     mSnapGetter;   // QA-Ee Stage 3: global snap read
     std::function<void(int)> mSnapSetter;   // QA-Ee Stage 3: global snap write
     std::function<int()>     mQuantizeGetter;   // QA-UICleanup Task 4: global quantize read

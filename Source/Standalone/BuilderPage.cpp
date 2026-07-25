@@ -5,7 +5,29 @@
 #include "PatternColorPicker.h"
 #include <map>                    // G1 boundary: detected-tempo display cache
 #include "../ClipDropDiag.h"        // QA-ClipDrop: diagnostic trap (2026-06-02)
+#include "../G3PlayheadDiag.h"      // [G3 PLAYHEAD] G-9 reading (QA-G3Smoke Task 1); Debug-only
+
+// Smoke #45: minimal user32 import for the right-Alt check -- deliberately
+// NOT <windows.h>: its wingdi Rectangle() collides with juce::Rectangle
+// under this file's `using namespace juce` (broke both configs).
+#if JUCE_WINDOWS
+ extern "C" __declspec(dllimport) short __stdcall GetKeyState (int nVirtKey);
+#endif
+
 using namespace juce;
+
+// Smoke #45 (spec: Jeff): JUCE's ModifierKeys can't tell the two Alt keys
+// apart, and the two carry DIFFERENT gestures here -- LEFT Alt = fine-move
+// (no-snap) drag modifier, RIGHT Alt = block mute.  Windows-only app, so the
+// Win32 key state is the discriminator (0xA5 = VK_RMENU).
+static bool isRightAltKeyDown() noexcept
+{
+   #if JUCE_WINDOWS
+    return (::GetKeyState (0xA5) & 0x8000) != 0;
+   #else
+    return false;
+   #endif
+}
 
 // QA-E Task 7 (FILE-02): shared Audio Properties box.  PendingRoute is the
 // menu-tree result; buildAudioPropsControls builds the box (definition is an
@@ -1627,14 +1649,18 @@ ArrangementGrid::~ArrangementGrid() = default;
 // ─────────────────────────────────────────────────────────────────────────────
 // Coordinate helpers  (no kLabelW offset - labels are external)
 // ─────────────────────────────────────────────────────────────────────────────
+// #30 builder half (QA-G3Smoke): pixel-center mapping, mirroring the roll's
+// LDT-394 fix -- barToX rounds (C-truncation biased lines a pixel early) and
+// xToBar samples the CENTER of pixel column x, so a click just left of a grid
+// line no longer snaps to the previous line.
 int ArrangementGrid::barToX(float bar) const
 {
-    return (int)((bar - mBarOff) * mPPBar);
+    return (int) std::lround ((bar - mBarOff) * mPPBar);
 }
 
 float ArrangementGrid::xToBar(int x) const
 {
-    return mBarOff + (float)x / mPPBar;
+    return mBarOff + ((float)x + 0.5f) / mPPBar;
 }
 
 float ArrangementGrid::xToBarF(float x) const
@@ -1835,8 +1861,8 @@ int ArrangementGrid::hitTestAutomPoint(int blockIdx, int x, int y) const
     const auto& b = mPM.getBlock(blockIdx);
     if (b.clipType != ClipType::Automation) return -1;
 
-    int bx = barToX((float)b.startBar);
-    int bw = jmax(4, barToX((float)(b.startBar + effectiveLengthBars(b))) - bx - 1);
+    int bx = barToX((float) effectiveStartBars(b));
+    int bw = jmax(4, barToX((float)(effectiveStartBars(b) + effectiveLengthBars(b))) - bx - 1);
     int by = rowToY(b.trackRow) + 2;
     int bh = rowHeightPx(b.trackRow) - 4;
 
@@ -2128,7 +2154,9 @@ void ArrangementGrid::drawRuler(Graphics& g) const
         float pulse = 0.5f + 0.5f * std::sin(mPulsePhi);
         int px = barToX((float)mPlayheadBar);
         g.setColour(VC::Highlight.withAlpha(0.55f * pulse));
-        g.fillRect(jmax(0, px - 4), yPin, 8, kRulerH);
+        // #30 (QA-G3Smoke, final form per Jeff): right-hanging handle, mast
+        // edge at px (matches the roll/kit flag markers; whole at bar 0).
+        g.fillRect(jmax(0, px), yPin, 8, kRulerH);
     }
 
     // Time selection highlight
@@ -2207,18 +2235,20 @@ void ArrangementGrid::drawRuler(Graphics& g) const
         }
     }
 
-    // Playhead triangle arrow - drawn last so it's always on top of ruler content
+    // Playhead marker - drawn last so it's always on top of ruler content.
+    // Smoke #6: flag form matching the roll/kit markers (mast edge AT px,
+    // flag hanging right) -- was still the old centered down-arrow.
     if (mPlayheadBar >= 0.0)
     {
         int px = barToX((float)mPlayheadBar);
-        if (px >= 0 && px < b.getWidth())
+        if (px >= -8 && px < b.getWidth())
         {
             g.setColour(VC::Green.withAlpha(0.9f));
-            juce::Path tri;
-            tri.addTriangle((float)px,       fPin,
-                            (float)(px - 5), fPin + (float)kRulerH,
-                            (float)(px + 5), fPin + (float)kRulerH);
-            g.fillPath(tri);
+            juce::Path flag;
+            flag.addTriangle((float)px,       fPin,
+                             (float)(px + 8), fPin,
+                             (float)px,       fPin + (float)kRulerH);
+            g.fillPath(flag);
         }
     }
 }
@@ -2317,9 +2347,10 @@ void ArrangementGrid::drawGrid(Graphics& g) const
 // Aggregates layer rolls, bass rolls, and all per-drum rolls (plus the
 // legacy pre-Phase-D drumRoll) so the preview reflects the whole pattern.
 // Owner spec (G1 smoke): notes sit at TRUE musical positions -- BEAT-TRUE
-// (x = quarter-beats, matching playback exactly for every signature); longer
-// blocks tile the pattern per its MUSICAL cycle (bars x effective TS), so a
-// pattern bar aligns with a grid bar under its marker (QA-G Task 6).
+// (x = quarter-beats, matching playback exactly for every signature).
+// #24 (QA-G3Smoke): tiling is GONE -- the preview draws ONE pass of the
+// pattern content from the content offset (mirrors the de-tiled scheduler);
+// block length past the content stays blank.
 void ArrangementGrid::drawMidiShading(Graphics& g, const ArrangementBlock& b,
                                       int bx, int by, int bw, int bh) const
 {
@@ -2327,10 +2358,10 @@ void ArrangementGrid::drawMidiShading(Graphics& g, const ArrangementBlock& b,
     const auto& pat = mPM.getPattern(b.patternIndex);
 
     const double beatsPerBar = mPM.getPatternBeatsPerBar (b.patternIndex);
-    // QA-G Task 6: BEAT-TRUE preview -- x positions are quarter-beat
-    // proportional (uniform bar = 4 quarter-beats), so display == playback
-    // for every signature; the cycle is the pattern's musical length.
-    const double cycleBars   = (double) jmax (1, pat.bars) * beatsPerBar / 4.0;
+    // B-1: the content length is the pattern's REAL note-for-note extent / 4
+    // (same value the scheduler's snapshot carries, /4 for this uniform-bar
+    // space) -- content past it simply doesn't exist to draw.
+    const double cycleBars   = mPM.getPatternContentBeats (b.patternIndex) / 4.0;
     if (beatsPerBar <= 0.0) return;
 
     const double blockStart = effectiveStartBars (b);
@@ -2346,41 +2377,38 @@ void ArrangementGrid::drawMidiShading(Graphics& g, const ArrangementBlock& b,
 
     g.setColour(blockColour(b).brighter(0.7f).withAlpha(0.6f));
 
-    // QA-G Task 5: the content offset phase-shifts the tiling (a sliced piece
-    // draws its true slice of the pattern -- same mapping playback uses).
-    const double offsetBars = juce::jlimit (0.0, cycleBars,
-                                            (double) b.contentOffsetTicks / 384.0);
-    const int numCycles = (int) std::ceil ((blockLen + offsetBars) / cycleBars);
-    // Cull tiles left of the view (mBarOff = view-left bar; the component is
-    // viewport-sized, so cycles fully before it can never draw).
-    const int firstCycle = jmax (0, (int) (((double) mBarOff - blockStart + offsetBars) / cycleBars) - 1);
+    // QA-G Task 5 / #24: the content offset phase-shifts the single pass (a
+    // sliced piece draws its true slice -- same mapping playback uses); an
+    // offset past the content leaves the block blank, like the scheduler.
+    const double offsetBars = juce::jmax (0.0, (double) b.contentOffsetTicks / 384.0);
 
     auto paintRoll = [&](const PianoRollData& roll)
     {
         for (const auto& n : roll.notes)
         {
             const double noteBar = n.startBeat / 4.0;
-            if (noteBar >= cycleBars) continue;   // outside the pattern's own cycle
+            if (noteBar >= cycleBars) continue;   // outside the pattern's content
             const double noteEnd = jmin (cycleBars, noteBar + n.durationBeats / 4.0);
             // Centre = 0.5; semitones above centre move up (smaller y), below move down.
             const float relSt = (float)(n.midiNote - kCentreNote);
             const float yFrac = jlimit(0.f, 1.f, 0.5f - 0.5f * (relSt / kHalfRangeSt));
             const int   ny    = innerY + (int)(yFrac * (float)(innerH - 2));
 
-            for (int c = firstCycle; c < numCycles; ++c)
-            {
-                const double sBars = c * cycleBars + noteBar - offsetBars;
-                if (sBars >= blockLen) break;
-                if (sBars < 0.0) continue;   // content left of the slice window
-                const double eBars = jmin (blockLen, c * cycleBars + noteEnd - offsetBars);
-                int nx = barToX((float)(blockStart + sBars));
-                if (nx >= clipR) break;
-                int nw = jmax(1, barToX((float)(blockStart + eBars)) - nx);
-                if (nx + nw <= clipL) continue;
-                nx = jmax(nx, clipL);
-                nw = jmin(nx + nw, clipR) - nx;
-                g.fillRect(nx, ny, nw, 2);
-            }
+            const double sBars = noteBar - offsetBars;
+            if (sBars >= blockLen) continue;
+            const double eBars = jmin (blockLen, noteEnd - offsetBars);
+            // B-3: a note straddling the block's LEFT edge draws its visible
+            // fragment from the boundary (matches the scheduler's clamp-and-play),
+            // rather than being dropped entirely.
+            const double drawS = (sBars < 0.0) ? 0.0 : sBars;
+            if (eBars <= drawS) continue;   // nothing visible (entirely before)
+            int nx = barToX((float)(blockStart + drawS));
+            if (nx >= clipR) continue;
+            int nw = jmax(1, barToX((float)(blockStart + eBars)) - nx);
+            if (nx + nw <= clipL) continue;
+            nx = jmax(nx, clipL);
+            nw = jmin(nx + nw, clipR) - nx;
+            g.fillRect(nx, ny, nw, 2);
         }
     };
 
@@ -2388,6 +2416,12 @@ void ArrangementGrid::drawMidiShading(Graphics& g, const ArrangementBlock& b,
     for (const auto& br : pat.bassRoll)  paintRoll(br);
     for (const auto& dr : pat.drumRolls) paintRoll(dr);
     paintRoll(pat.drumRoll);   // legacy pre-migration data (usually empty)
+    // #29 (QA-G3Smoke, G-8): the preview was blind to three scheduled roll
+    // families -- inst + clips + Rusty now shade like the rest (vox excluded:
+    // no vox MIDI).
+    for (const auto& ir : pat.instRoll)  paintRoll(ir);
+    for (const auto& cr : pat.clipRoll)  paintRoll(cr);
+    paintRoll(pat.baySickRustyDrumsRoll);
 }
 
 void ArrangementGrid::drawPatternClip(Graphics& g, const ArrangementBlock& b,
@@ -2949,6 +2983,17 @@ void ArrangementGrid::drawBlocks(Graphics& g) const
             case ClipType::Audio:      drawAudioClip     (g, b, bx, by, bw, bh, sel); break;
             case ClipType::Automation: drawAutomationClip(g, b, bx, by, bw, bh, sel); break;
         }
+
+        // B-4: visible seam at a continuation piece's LEFT edge (a sliced right
+        // piece plays offset content -- mark the cut so a split isn't invisible).
+        const bool continued =
+            (b.clipType == ClipType::Pattern && b.contentOffsetTicks   != 0)
+         || (b.clipType == ClipType::Audio   && b.contentStartSamples  != 0);
+        if (continued)
+        {
+            g.setColour(Colours::white.withAlpha(0.55f));
+            g.fillRect(bx, by, 2, bh);
+        }
     }
 }
 
@@ -2968,6 +3013,15 @@ void ArrangementGrid::drawMarquee(Graphics& g) const
         g.fillRect(mZoomRect);
         g.setColour(Colours::white.withAlpha(0.5f));
         g.drawRect(mZoomRect, 1);
+    }
+    // B-4: slice drag-line preview (line + two dots, mirrors the piano-roll slice).
+    if (mSlicing)
+    {
+        g.setColour(Colours::white.withAlpha(0.9f));
+        g.drawLine((float) mSliceStart.x, (float) mSliceStart.y,
+                   (float) mSliceEnd.x,   (float) mSliceEnd.y, 2.0f);
+        g.fillEllipse((float) mSliceStart.x - 3.f, (float) mSliceStart.y - 3.f, 6.f, 6.f);
+        g.fillEllipse((float) mSliceEnd.x   - 3.f, (float) mSliceEnd.y   - 3.f, 6.f, 6.f);
     }
 }
 
@@ -2991,8 +3045,8 @@ void ArrangementGrid::drawGhostClip(Graphics& g) const
 {
     if (!mHasGhost) return;
     const auto& b = mGhostBlock;
-    int x = barToX((float)b.startBar);
-    int w = jmax(4, barToX((float)(b.startBar + effectiveLengthBars(b))) - x - 1);
+    int x = barToX((float) effectiveStartBars(b));
+    int w = jmax(4, barToX((float)(effectiveStartBars(b) + effectiveLengthBars(b))) - x - 1);
     int y = rowToY(b.trackRow) + 2;
     int h = rowHeightPx(b.trackRow) - 4;
 
@@ -3016,9 +3070,11 @@ void ArrangementGrid::drawPlayheadOverlay(Graphics& g) const
     int px = barToX((float)mPlayheadBar);
     if (px < 0 || px >= getWidth()) return;
 
-    // Green line from ruler bottom to grid bottom only (arrow drawn in drawRuler so it's on top)
+    // Green line from ruler bottom to grid bottom only (arrow drawn in drawRuler so it's on top).
+    // #30 (QA-G3Smoke, final form per Jeff): left-anchored mast -- the line's
+    // left edge IS the position (matches the roll/kit markers; whole at bar 0).
     g.setColour(VC::Green.withAlpha(0.8f));
-    g.fillRect(px, kRulerH, 2, getHeight() - kRulerH);
+    g.fillRect(px, kRulerH, 1, getHeight() - kRulerH);   // 1-px mast: exact overlay on a grid-line column
 }
 
 void ArrangementGrid::drawPerformanceOverlays(Graphics& g) const
@@ -3028,14 +3084,15 @@ void ArrangementGrid::drawPerformanceOverlays(Graphics& g) const
     for (int i = 0; i < mPM.getNumBlocks(); ++i)
     {
         const auto& b = mPM.getBlock(i);
-        if (b.startBar > mPlayheadBar || b.startBar + effectiveLengthBars(b) <= mPlayheadBar) continue;
+        if (effectiveStartBars(b) > mPlayheadBar
+            || effectiveStartBars(b) + effectiveLengthBars(b) <= mPlayheadBar) continue;
 
-        int bx = barToX((float)b.startBar);
-        int bw = jmax(4, barToX((float)(b.startBar + effectiveLengthBars(b))) - bx - 1);
+        int bx = barToX((float) effectiveStartBars(b));
+        int bw = jmax(4, barToX((float)(effectiveStartBars(b) + effectiveLengthBars(b))) - bx - 1);
         int by = rowToY(b.trackRow) + 2;
         int bh = rowHeightPx(b.trackRow) - 4;
 
-        float progress = (float)(mPlayheadBar - b.startBar) / (float) juce::jmax(0.001, effectiveLengthBars(b));
+        float progress = (float)(mPlayheadBar - effectiveStartBars(b)) / (float) juce::jmax(0.001, effectiveLengthBars(b));
         int progW = (int)(bw * progress);
 
         // Progress tint
@@ -3082,6 +3139,17 @@ void ArrangementGrid::beginEdit(const juce::String& label)
     for (int i = 0; i < mPM.getNumBlocks(); ++i)
         mPendingBlocks.push_back(mPM.getBlock(i));
     mPendingRowNames = mPM.getRowNames();
+    // QA-G: capture the before-edit per-row state so undo of Move/Insert-track
+    // restores mute/solo/group with the blocks.
+    mPendingRowGroups.clear(); mPendingRowColors.clear();
+    mPendingRowMuted.clear();  mPendingRowSoloed.clear();
+    for (int r = 0; r < kNumRows; ++r)
+    {
+        mPendingRowGroups.push_back (mPM.getRowGroup (r));
+        mPendingRowColors.push_back (mPM.getRowGroupColor (r));
+        mPendingRowMuted .push_back (mPM.isRowMuted (r)  ? (char) 1 : (char) 0);
+        mPendingRowSoloed.push_back (mPM.isRowSoloed (r) ? (char) 1 : (char) 0);
+    }
 }
 
 void ArrangementGrid::commitEdit()
@@ -3092,15 +3160,28 @@ void ArrangementGrid::commitEdit()
     for (int i = 0; i < mPM.getNumBlocks(); ++i)
         afterBlocks.push_back(mPM.getBlock(i));
 
+    // QA-G: capture after-edit per-row state (mute/solo/group) for the redo side.
+    std::vector<int>  aGroups;  std::vector<juce::uint32> aColors;
+    std::vector<char> aMuted;   std::vector<char>         aSoloed;
+    for (int r = 0; r < kNumRows; ++r)
+    {
+        aGroups.push_back (mPM.getRowGroup (r));
+        aColors.push_back (mPM.getRowGroupColor (r));
+        aMuted .push_back (mPM.isRowMuted (r)  ? (char) 1 : (char) 0);
+        aSoloed.push_back (mPM.isRowSoloed (r) ? (char) 1 : (char) 0);
+    }
+
     auto* action = new ArrangementEditAction(
         mPendingLabel,
-        { mPendingBlocks, std::vector<juce::String>(mPendingRowNames.begin(), mPendingRowNames.end()) },
-        { afterBlocks,    std::vector<juce::String>(mPM.getRowNames().begin(), mPM.getRowNames().end()) },
+        { mPendingBlocks, std::vector<juce::String>(mPendingRowNames.begin(), mPendingRowNames.end()),
+          mPendingRowGroups, mPendingRowColors, mPendingRowMuted, mPendingRowSoloed },
+        { afterBlocks,    std::vector<juce::String>(mPM.getRowNames().begin(), mPM.getRowNames().end()),
+          aGroups, aColors, aMuted, aSoloed },
         [this](const ArrangementEditAction::Snapshot& s) {
             std::array<juce::String, kNumRows> rn;
             for (int i = 0; i < kNumRows && i < (int)s.rowNames.size(); ++i)
                 rn[i] = s.rowNames[i];
-            applySnapshot(s.blocks, rn);
+            applySnapshot(s.blocks, rn, s.rowGroups, s.rowColors, s.rowMuted, s.rowSoloed);
         });
 
     mUndoCtx.perform(action, mPendingLabel);
@@ -3112,12 +3193,25 @@ void ArrangementGrid::commitEdit()
 }
 
 void ArrangementGrid::applySnapshot(const std::vector<ArrangementBlock>& blocks,
-                                    const std::array<juce::String, kNumRows>& rowNames)
+                                    const std::array<juce::String, kNumRows>& rowNames,
+                                    const std::vector<int>& rowGroups,
+                                    const std::vector<juce::uint32>& rowColors,
+                                    const std::vector<char>& rowMuted,
+                                    const std::vector<char>& rowSoloed)
 {
     while (mPM.getNumBlocks() > 0) mPM.removeBlock(0);
     for (const auto& b : blocks) mPM.addBlock(b);
     for (int i = 0; i < kNumRows; ++i)
         mPM.setRowName(i, rowNames[i]);
+    // QA-G: restore per-row mute/solo/group so undo of Move/Insert-track is
+    // complete (blocks + names alone left mute/group desynced by a row).
+    for (int r = 0; r < kNumRows; ++r)
+    {
+        if (r < (int) rowGroups.size()) mPM.setRowGroup      (r, rowGroups[(size_t) r]);
+        if (r < (int) rowColors.size()) mPM.setRowGroupColor (r, rowColors[(size_t) r]);
+        if (r < (int) rowMuted.size())  mPM.setRowMuted      (r, rowMuted[(size_t) r]  != 0);
+        if (r < (int) rowSoloed.size()) mPM.setRowSoloed     (r, rowSoloed[(size_t) r] != 0);
+    }
     mSelection.clear();
     resized();
     repaint();
@@ -3147,7 +3241,7 @@ void ArrangementGrid::selectAll()
         for (int i = 0; i < mPM.getNumBlocks(); ++i)
         {
             const auto& b = mPM.getBlock (i);
-            const float bs = (float) b.startBar;
+            const float bs = (float) effectiveStartBars (b);
             const float be = bs + (float) effectiveLengthBars (b);
             if (bs < t1 && be > t0)
                 mSelection.push_back (i);
@@ -3175,8 +3269,8 @@ void ArrangementGrid::finaliseMarquee()
     for (int i = 0; i < mPM.getNumBlocks(); ++i)
     {
         const auto& b = mPM.getBlock(i);
-        int bx = barToX((float)b.startBar);
-        int bw = barToX((float)(b.startBar + effectiveLengthBars(b))) - bx;
+        int bx = barToX((float) effectiveStartBars(b));
+        int bw = barToX((float)(effectiveStartBars(b) + effectiveLengthBars(b))) - bx;
         int by = rowToY(b.trackRow);
         if (mMarqueeRect.intersects(Rectangle<int>(bx, by, bw, rowHeightPx(b.trackRow))))
             mSelection.push_back(i);
@@ -3225,7 +3319,7 @@ void ArrangementGrid::shiftTimeSelectionByLength (int direction)
     for (int i = 0; i < mPM.getNumBlocks(); ++i)
     {
         const auto& b = mPM.getBlock (i);
-        const float bs = (float) b.startBar;
+        const float bs = (float) effectiveStartBars (b);
         const float be = bs + (float) effectiveLengthBars (b);
         if (bs < newEnd && be > newStart)
             mSelection.push_back (i);
@@ -3257,7 +3351,7 @@ void ArrangementGrid::deleteTimeRegion()
         {
             if (idx < 0 || idx >= mPM.getNumBlocks()) continue;
             const auto& b = mPM.getBlock(idx);
-            const float bs = (float) b.startBar;
+            const float bs = (float) effectiveStartBars (b);
             const float be = bs + (float) effectiveLengthBars(b);
             t0 = std::min(t0, bs);
             t1 = std::max(t1, be);
@@ -3275,7 +3369,7 @@ void ArrangementGrid::deleteTimeRegion()
     // 1) erase blocks whose START lies in [t0, t1).
     for (int i = mPM.getNumBlocks() - 1; i >= 0; --i)
     {
-        const float bs = (float) mPM.getBlock(i).startBar;
+        const float bs = (float) effectiveStartBars (mPM.getBlock(i));
         if (bs >= t0 - kEps && bs < t1 - kEps)
             mPM.removeBlock(i);
     }
@@ -3283,8 +3377,8 @@ void ArrangementGrid::deleteTimeRegion()
     for (int i = 0; i < mPM.getNumBlocks(); ++i)
     {
         auto& b = mPM.getBlock(i);
-        if ((float) b.startBar >= t1 - kEps)
-            b.startBar = juce::jmax(0, b.startBar - removedBars);
+        if ((float) effectiveStartBars (b) >= t1 - kEps)
+            b.startBeats = juce::jmax (0.0, b.startBeats - (double) removedBars * 4.0);
     }
 
     mSelection.clear();
@@ -3300,11 +3394,11 @@ void ArrangementGrid::copySelected()
     float earliest = 1e9f;
     for (int idx : mSelection)
         if (idx < mPM.getNumBlocks())
-            earliest = jmin(earliest, (float)mPM.getBlock(idx).startBar);
+            earliest = jmin(earliest, (float) effectiveStartBars (mPM.getBlock(idx)));
     for (int idx : mSelection) {
         if (idx >= mPM.getNumBlocks()) continue;
         auto b = mPM.getBlock(idx);
-        b.startBar -= (int)earliest;
+        b.startBeats -= (double)(int) earliest * 4.0;
         mClipboard.push_back(b);
     }
 }
@@ -3316,7 +3410,7 @@ void ArrangementGrid::pasteClipboard()
     mSelection.clear();
     int pasteStart = jmax(0, (int)snapBar(mBarOff));
     for (auto b : mClipboard) {
-        b.startBar += pasteStart;
+        b.startBeats += (double) pasteStart * 4.0;
         mPM.addBlock(b);
         mSelection.push_back(mPM.getNumBlocks() - 1);
         afterPatternBlockPlaced(b);   // QA-G Task 6
@@ -3345,10 +3439,10 @@ void ArrangementGrid::duplicateSelected()
         for (int i = 0; i < n; ++i)
         {
             const auto& src = mPM.getBlock(i);
-            if ((float)src.startBar >= selStart && (float)src.startBar < selEnd)
+            if ((float) effectiveStartBars (src) >= selStart && (float) effectiveStartBars (src) < selEnd)
             {
                 ArrangementBlock nb = src;
-                nb.startBar = src.startBar + (int)selLen;
+                nb.startBeats = src.startBeats + (double)(int) selLen * 4.0;
                 newBlocks.push_back(nb);
             }
         }
@@ -3376,18 +3470,19 @@ void ArrangementGrid::duplicateSelected()
     float rightmost = 0.f;
     for (int idx : mSelection)
         if (idx < mPM.getNumBlocks())
-            rightmost = jmax(rightmost, (float)(mPM.getBlock(idx).startBar + effectiveLengthBars(mPM.getBlock(idx))));
+            rightmost = jmax(rightmost, (float)(effectiveStartBars(mPM.getBlock(idx)) + effectiveLengthBars(mPM.getBlock(idx))));
 
     float earliest = 1e9f;
     for (int i2 : mSelection)
         if (i2 < mPM.getNumBlocks())
-            earliest = jmin(earliest, (float)mPM.getBlock(i2).startBar);
+            earliest = jmin(earliest, (float) effectiveStartBars (mPM.getBlock(i2)));
 
     std::vector<ArrangementBlock> newBlocks;
     for (int idx : mSelection) {
         if (idx >= mPM.getNumBlocks()) continue;
         auto b = mPM.getBlock(idx);
-        b.startBar = (int)rightmost + (mPM.getBlock(idx).startBar - (int)earliest);
+        b.startBeats = ((double)(int) rightmost * 4.0)
+                     + (mPM.getBlock(idx).startBeats - (double)(int) earliest * 4.0);
         newBlocks.push_back(b);
     }
     mSelection.clear();
@@ -3723,7 +3818,7 @@ void ArrangementGrid::nudgeSelection(int dBars, int dRows)
     for (int idx : mSelection) {
         if (idx >= mPM.getNumBlocks()) continue;
         auto& b = mPM.getBlock(idx);
-        b.startBar = jmax(0, b.startBar + dBars);
+        b.startBeats = jmax(0.0, b.startBeats + (double) dBars * 4.0);
         b.trackRow = jlimit(0, kNumRows - 1, b.trackRow + dRows);
     }
     commitEdit();
@@ -3754,7 +3849,7 @@ void ArrangementGrid::fitBlockToViewport(int blockIdx)
         vpW = (float)jmax(1, vp->getWidth());
     const float minPP = minZoomPPBar (vpW), maxPP = maxZoomPPBar (vpW);
     mPPBar  = jlimit(minPP, maxPP, vpW / lenBars);
-    mBarOff = jmax(0.f, (float) b.startBar);
+    mBarOff = jmax(0.f, (float) effectiveStartBars (b));
     resized(); repaint();
 }
 
@@ -4076,9 +4171,9 @@ void ArrangementGrid::showQuantizePopup()
             {
                 if (idx < 0 || idx >= mPM.getNumBlocks()) continue;
                 auto& blk = mPM.getBlock(idx);
-                const float startBars = (float) blk.startBar;
+                const float startBars = (float) effectiveStartBars (blk);
                 const float snapped   = std::round(startBars / unit) * unit;
-                blk.startBar = jmax(0, (int) std::round(snapped));
+                blk.startBeats = (double) jmax(0, (int) std::round(snapped)) * 4.0;
             }
             commitEdit();
             repaint();
@@ -4629,7 +4724,7 @@ void ArrangementGrid::importAudioFile(const juce::String& path, int targetRow, f
     ArrangementBlock b;
     b.clipType       = ClipType::Audio;
     b.trackRow       = jlimit(0, kNumRows - 1, targetRow);
-    b.startBar       = (int)snapBar(targetBar);
+    b.startBeats     = (double)(int) snapBar(targetBar) * 4.0;   // 8A: bar-truncated placement preserved (Task 4 #27 un-truncates moves)
     b.lengthBars     = lengthBars;
     b.setLengthBeats (fileBeats);      // QA-E Task 5 (2026-05-15): exact end so
                                        // playback / loop match the source file
@@ -4715,7 +4810,7 @@ void ArrangementGrid::placeAudioLibraryEntry(int libIdx, int targetRow, float ta
     ArrangementBlock b;
     b.clipType      = ClipType::Audio;
     b.trackRow      = juce::jlimit (0, kNumRows - 1, targetRow);
-    b.startBar      = (int) snapBar (targetBar);
+    b.startBeats    = (double)(int) snapBar (targetBar) * 4.0;
     b.lengthBars    = lengthBars;
     b.setLengthBeats (fileBeats);
     b.audioFilePath = path;
@@ -4783,7 +4878,7 @@ void ArrangementGrid::fileDragMove(const StringArray& files, int x, int y)
     mGhostBlock.clipType      = ClipType::Audio;
     mGhostBlock.audioFilePath = files[0];
     mGhostBlock.trackRow      = jlimit(0, kNumRows - 1, yToRow(y));
-    mGhostBlock.startBar      = (int)snapBar(xToBar(x));
+    mGhostBlock.startBeats    = (double)(int) snapBar(xToBar(x)) * 4.0;
     mGhostBlock.lengthBars    = 4;
     mGhostAlpha = 0.5f;
     repaint();
@@ -4889,7 +4984,7 @@ void ArrangementGrid::itemDragMove(const SourceDetails& d)
 
     mGhostBlock = ArrangementBlock();
     mGhostBlock.trackRow   = jlimit(0, kNumRows - 1, yToRow(y));
-    mGhostBlock.startBar   = jmax(0, (int)snapBar(xToBar(x)));
+    mGhostBlock.startBeats = (double) jmax(0, (int)snapBar(xToBar(x))) * 4.0;
     mGhostBlock.lengthBars = 1;
 
     if (kind == "pattern")
@@ -4898,13 +4993,12 @@ void ArrangementGrid::itemDragMove(const SourceDetails& d)
         mGhostBlock.patternIndex = idx;
         if (idx >= 0 && idx < mPM.getNumPatterns())
         {
-            mGhostBlock.lengthBars = jmax(1, mPM.getPattern(idx).bars);
-            // QA-G Task 6: non-4/4 ghosts preview at their MUSICAL length.
-            const double patBpb = mPM.getPatternBeatsPerBar(idx);
-            if (std::abs(patBpb - 4.0) > 1e-9)
-                mGhostBlock.setLengthBeats((double) mGhostBlock.lengthBars * patBpb);
-            else
-                mGhostBlock.lengthTicks = ArrangementBlock::kLengthTicksUnset;
+            // #25 (QA-G3Smoke): ghost previews the pattern's REAL content
+            // length (already bar-ceiled at its own TS by
+            // getPatternContentBeats) -- the same size the drop places.
+            const double contentBeats = mPM.getPatternContentBeats (idx);
+            mGhostBlock.setLengthBeats (contentBeats);
+            mGhostBlock.lengthBars = jmax (1, (int) std::ceil (contentBeats / 4.0));
         }
     }
     else if (kind == "audio")
@@ -4951,15 +5045,14 @@ void ArrangementGrid::itemDropped(const SourceDetails& d)
         b.clipType     = ClipType::Pattern;
         b.trackRow     = row;
         b.patternIndex = idx;
-        b.startBar     = (int)bar;
-        b.lengthBars   = jmax(1, mPM.getPattern(idx).bars);
-        // QA-G Task 6: non-4/4 patterns place at their MUSICAL length
-        // (bars x effective beats-per-bar), so one pattern bar spans one
-        // map bar under the auto-marker.  4/4 keeps the bar-length fields.
+        b.startBeats   = (double)(int) bar * 4.0;
+        // #25 (QA-G3Smoke): a dropped pattern is sized from its REAL content
+        // length (getPatternContentBeats -- note-for-note extent, bar-ceiled
+        // at the pattern's own TS), not the stored Pattern.bars.
         {
-            const double patBpb = mPM.getPatternBeatsPerBar(idx);
-            if (std::abs(patBpb - 4.0) > 1e-9)
-                b.setLengthBeats((double) b.lengthBars * patBpb);
+            const double contentBeats = mPM.getPatternContentBeats (idx);
+            b.setLengthBeats (contentBeats);
+            b.lengthBars = jmax (1, (int) std::ceil (contentBeats / 4.0));
         }
         mPM.addBlock(b);
         mSelection.clear();
@@ -4987,7 +5080,7 @@ void ArrangementGrid::itemDropped(const SourceDetails& d)
             ArrangementBlock b;
             b.clipType       = ClipType::Automation;
             b.trackRow       = row;
-            b.startBar       = (int)bar;
+            b.startBeats     = (double)(int) bar * 4.0;
             b.lengthBars     = 4;
             b.automationLane = mPM.getAutomationTemplate(idx);
             mPM.addBlock(b);
@@ -5061,8 +5154,40 @@ void ArrangementGrid::mouseMove(const MouseEvent& e)
         updateCursor();
 }
 
+// #26 (QA-G3Smoke, G-15): clicking a block makes it the "brush" -- identity +
+// length + content offset, nothing else.  Automation blocks carry no template
+// identity, so they never prime; an audio block not (or no longer) in the
+// library leaves the brush untouched.
+void ArrangementGrid::primeClickMemoryFrom (int blockIdx)
+{
+    if (blockIdx < 0 || blockIdx >= mPM.getNumBlocks()) return;
+    const auto& b = mPM.getBlock (blockIdx);
+    if (b.clipType == ClipType::Pattern)
+    {
+        mDropKind               = BrowserDropKind::Pattern;
+        mBrowserSelection       = b.patternIndex;
+        mClickMemoryLenBeats    = effectiveLengthBeats (b);
+        mClickMemoryOffsetTicks = b.contentOffsetTicks;
+    }
+    else if (b.clipType == ClipType::Audio)
+    {
+        const int libIdx = mPM.findAudioLibraryIndexByPath (b.audioFilePath);
+        if (libIdx < 0) return;
+        mDropKind                       = BrowserDropKind::Audio;
+        mDropAudioIdx                   = libIdx;
+        mClickMemoryLenBeats            = effectiveLengthBeats (b);
+        mClickMemoryContentStartSamples = b.contentStartSamples;
+    }
+}
+
 void ArrangementGrid::mouseDown(const MouseEvent& e)
 {
+#if JUCE_DEBUG
+    G3PlayheadDiag::log ("click(builder) x=" + juce::String (e.x) + " y=" + juce::String (e.y)
+                         + " rawBar=" + juce::String (xToBar (e.x), 4)
+                         + " snapBar=" + juce::String (snapBar (xToBar (e.x)), 4)
+                         + " playheadBar=" + juce::String (mPlayheadBar, 4));
+#endif
     grabKeyboardFocus();
 
     // ── 2026-04-26 (D-7 sub-4): click-outside-time-range clears state ────
@@ -5100,8 +5225,10 @@ void ArrangementGrid::mouseDown(const MouseEvent& e)
         }
         else
         {
-            // Bare left-click on ruler: seek playhead to clicked position
-            double beat = static_cast<double>(xToBar(e.x)) * 4.0;
+            // Bare left-click on ruler: seek playhead to clicked position.
+            // 1A (QA-G3Smoke, Jeff 2026-07-23): seek obeys snap; Alt = free.
+            double beat = static_cast<double>(e.mods.isAltDown()
+                              ? xToBar(e.x) : snapBar(xToBar(e.x))) * 4.0;
             if (onSeek) onSeek(beat);
         }
         return;
@@ -5196,10 +5323,13 @@ void ArrangementGrid::mouseDown(const MouseEvent& e)
         return;
     }
 
-    // 2026-04-26 (D-1): Alt+LClick on a block = toggle mute, regardless of
-    // active tool.  Falls through when the click misses (so Zoom tool's
-    // Alt+click = zoom-out still works on empty area).
-    if (e.mods.isAltDown() && ! e.mods.isCtrlDown() && ! e.mods.isShiftDown())
+    // 2026-04-26 (D-1) + smoke #45: RIGHT-Alt+LClick on a block = toggle mute,
+    // regardless of active tool.  LEFT Alt is the fine-move (no-snap) drag
+    // modifier, so it must fall through to the normal move path instead of
+    // eating the mouseDown here.  Still falls through when the click misses
+    // (so Zoom tool's Alt+click = zoom-out works on empty area).
+    if (e.mods.isAltDown() && ! e.mods.isCtrlDown() && ! e.mods.isShiftDown()
+        && isRightAltKeyDown())
     {
         int hit = blockAtPos(e.x, e.y);
         if (hit >= 0)
@@ -5293,82 +5423,16 @@ void ArrangementGrid::mouseDown(const MouseEvent& e)
         return;
     }
 
-    // Slice tool: split clip at click position.  QA-G Task 5: snap-resolution
-    // cuts (piano-roll parity, no int-bar truncation) + content continuation
-    // per clip type -- the right piece plays exactly what it played before
-    // the cut instead of restarting.
+    // B-4: Slice tool - begin a drag-line (snap the anchor X to the active grid).
+    // The cut is applied on mouseUp so the user can drag + preview the line first;
+    // it then splits every block the line's y-span crosses (see applySliceLine).
     if (mActiveTool == AGTool::Slice)
     {
-        int hit = blockAtPos(e.x, e.y);
-        if (hit >= 0) {
-            auto& orig = mPM.getBlock(hit);
-            const double startBars = effectiveStartBars (orig);
-            const double endBars   = startBars + effectiveLengthBars (orig);
-            const double cutBars   = (double) snapBar (xToBar (e.x));
-            constexpr double kMinPieceBars = 1.0 / 384.0;   // 1 tick
-            if (cutBars > startBars + kMinPieceBars && cutBars < endBars - kMinPieceBars)
-            {
-                beginEdit("Slice");
-                const double cutBeats = (cutBars - startBars) * 4.0;
-                ArrangementBlock right = orig;
-                right.setStartBeats  (cutBars * 4.0);
-                right.setLengthBeats ((endBars - cutBars) * 4.0);
-                right.startBar   = (int) std::floor (cutBars);
-                right.lengthBars = jmax (1, (int) std::round (endBars - cutBars));
-                switch (orig.clipType)
-                {
-                    case ClipType::Pattern:
-                    {
-                        // Continuation = content offset advances by the cut
-                        // distance, wrapped into the pattern's MUSICAL cycle
-                        // (bars x effective beats-per-bar -- QA-G Task 6).
-                        const bool valid = (orig.patternIndex >= 0
-                                            && orig.patternIndex < mPM.getNumPatterns());
-                        const int patBars = valid
-                            ? jmax (1, mPM.getPattern (orig.patternIndex).bars) : 1;
-                        const double patBpb = valid
-                            ? mPM.getPatternBeatsPerBar (orig.patternIndex) : 4.0;
-                        const juce::int64 cycleTicks = jmax ((juce::int64) 1,
-                            (juce::int64) std::llround ((double) patBars * patBpb * 96.0));
-                        right.contentOffsetTicks =
-                            (orig.contentOffsetTicks + beatsToTicks (cutBeats)) % cycleTicks;
-                        break;
-                    }
-                    case ClipType::Audio:
-                    {
-                        // Continuation = content start advances by the file
-                        // samples the cut span consumes.  Mirrors the render
-                        // beat-domain mapping: file advances at
-                        // fileRate * 60 / originalBPM per project beat
-                        // (identical in Stretch and Resample modes).
-                        const juce::File f = onResolveStoredPath
-                            ? onResolveStoredPath (orig.audioFilePath)
-                            : juce::File (orig.audioFilePath);
-                        if (auto reader = std::unique_ptr<juce::AudioFormatReader> (
-                                mAFM.createReaderFor (f)))
-                        {
-                            const double fileBPM = (orig.originalBPM > 0.f)
-                                ? (double) orig.originalBPM : 120.0;
-                            right.contentStartSamples = orig.contentStartSamples
-                                + (juce::int64) std::llround (
-                                      cutBeats * reader->sampleRate * 60.0 / fileBPM);
-                        }
-                        break;
-                    }
-                    case ClipType::Automation:
-                    {
-                        splitAutomationLane (orig.automationLane, right.automationLane,
-                            (float) ((cutBars - startBars) / jmax (1.0e-9, endBars - startBars)));
-                        break;
-                    }
-                }
-                orig.setLengthBeats (cutBeats);
-                orig.lengthBars = jmax (1, (int) std::round (cutBars - startBars));
-                mPM.addBlock(right);
-                commitEdit();
-                resized(); repaint();
-            }
-        }
+        mSlicing    = true;
+        const int snappedX = barToX (snapBar (xToBar (e.x)));
+        mSliceStart = { snappedX, e.y };
+        mSliceEnd   = mSliceStart;
+        repaint();
         return;
     }
 
@@ -5393,12 +5457,13 @@ void ArrangementGrid::mouseDown(const MouseEvent& e)
         int hit = blockAtPos(e.x, e.y);
         if (hit >= 0)
         {
+            primeClickMemoryFrom (hit);   // #26: this block becomes the brush
             // ── Automation clip: point editing ───────────────────────────────
             if (mPM.getBlock(hit).clipType == ClipType::Automation)
             {
                 mAutomEditBlock = hit;
-                int bx = barToX((float)mPM.getBlock(hit).startBar);
-                int bw = jmax(4, barToX((float)(mPM.getBlock(hit).startBar
+                int bx = barToX((float) effectiveStartBars(mPM.getBlock(hit)));
+                int bw = jmax(4, barToX((float)(effectiveStartBars(mPM.getBlock(hit))
                                                 + mPM.getBlock(hit).lengthBars)) - bx - 1);
                 int by = rowToY(mPM.getBlock(hit).trackRow) + 2;
                 int bh = rowHeightPx(mPM.getBlock(hit).trackRow) - 4;
@@ -5483,7 +5548,7 @@ void ArrangementGrid::mouseDown(const MouseEvent& e)
                     mResizing        = true;
                     mResizeIdx       = hit;
                     mResizeOrigLen   = (float)mPM.getBlock(hit).lengthBars;
-                    mResizeOrigStart = (float)mPM.getBlock(hit).startBar;
+                    mResizeOrigStart = (float) effectiveStartBars (mPM.getBlock(hit));
                     mAutomEditBlock  = -1;
                     // Snapshot automation points so we can rescale absolute positions
                     if (mPM.getBlock(hit).clipType == ClipType::Automation)
@@ -5508,7 +5573,7 @@ void ArrangementGrid::mouseDown(const MouseEvent& e)
                 mResizeIdx       = hit;
                 mResizeOrigLen   = (float)mPM.getBlock(hit).lengthBars;
                 mStretchOrigBeats = effectiveLengthBeats (mPM.getBlock(hit));   // QA-Ec: exact re-fit base
-                mResizeOrigStart = (float)mPM.getBlock(hit).startBar;
+                mResizeOrigStart = (float) effectiveStartBars (mPM.getBlock(hit));
                 if (mPM.getBlock(hit).clipType == ClipType::Automation)
                     mResizeOrigPoints = mPM.getBlock(hit).automationLane.points;
                 else
@@ -5523,7 +5588,7 @@ void ArrangementGrid::mouseDown(const MouseEvent& e)
                 for (int idx : mSelection) {
                     if (idx >= mPM.getNumBlocks()) continue;
                     mMoveIndices.push_back(idx);
-                    mMoveOrigBars.push_back((float)mPM.getBlock(idx).startBar);
+                    mMoveOrigBars.push_back((float) effectiveStartBars (mPM.getBlock(idx)));   // #27: fractional origin
                     mMoveOrigRows.push_back(mPM.getBlock(idx).trackRow);
                 }
                 // QA-G Task 6: capture follower signatures for the
@@ -5575,8 +5640,18 @@ void ArrangementGrid::mouseDown(const MouseEvent& e)
         ArrangementBlock b;
         b.trackRow     = row;
         b.patternIndex = mBrowserSelection;
-        b.startBar     = (int)bar;
-        b.lengthBars   = 1;
+        b.startBeats   = (double)(int) bar * 4.0;
+        // #25 (QA-G3Smoke): paint stamps at the pattern's REAL content length
+        // (was a fixed 1 bar); the drag continuation advances by the same
+        // stamp size so stamps butt-join without overlap.
+        {
+            const double contentBeats = (mBrowserSelection >= 0
+                                         && mBrowserSelection < mPM.getNumPatterns())
+                ? mPM.getPatternContentBeats (mBrowserSelection) : 4.0;
+            b.setLengthBeats (contentBeats);
+            b.lengthBars = jmax (1, (int) std::ceil (contentBeats / 4.0));
+            mPaintLenBars = b.lengthBars;
+        }
         b.layerTrack   = true;
         mPM.addBlock(b);
         afterPatternBlockPlaced(b);   // QA-G Task 6
@@ -5591,6 +5666,7 @@ void ArrangementGrid::mouseDown(const MouseEvent& e)
         int hit = blockAtPos(e.x, e.y);
         if (hit >= 0)
         {
+            primeClickMemoryFrom (hit);   // #26: this block becomes the brush
             // QA-Ea Task 0c (2026-05-20): EditMode == Slip on Audio clip
             // edges is handled BEFORE every tool-specific branch (see
             // hoisted block above).  Legacy AGTool::SlipEdit + the
@@ -5609,7 +5685,7 @@ void ArrangementGrid::mouseDown(const MouseEvent& e)
                 for (int idx : mSelection) {
                     if (idx >= mPM.getNumBlocks()) continue;
                     mMoveIndices.push_back(idx);
-                    mMoveOrigBars.push_back((float)mPM.getBlock(idx).startBar);
+                    mMoveOrigBars.push_back((float) effectiveStartBars (mPM.getBlock(idx)));   // #27: fractional origin
                     mMoveOrigRows.push_back(mPM.getBlock(idx).trackRow);
                 }
                 // QA-G Task 6: capture follower signatures for the
@@ -5642,6 +5718,118 @@ void ArrangementGrid::mouseDown(const MouseEvent& e)
     }
 }
 
+// B-4: split ONE block at cutBars (in bars).  Caller wraps begin/commitEdit.  The
+// right piece keeps a content-offset continuation per clip type so it plays what it
+// would have played uncut (FL-style, no copy); the straddling note fires via the
+// B-3 clamp-and-play at read time.  Returns true if the block was split.
+bool ArrangementGrid::sliceOneBlock (int hit, double cutBars)
+{
+    if (hit < 0 || hit >= mPM.getNumBlocks()) return false;
+    auto& orig = mPM.getBlock (hit);
+    const double startBars = effectiveStartBars (orig);
+    const double endBars   = startBars + effectiveLengthBars (orig);
+    constexpr double kMinPieceBars = 1.0 / 384.0;   // 1 tick
+    if (! (cutBars > startBars + kMinPieceBars && cutBars < endBars - kMinPieceBars))
+        return false;
+
+    const double cutBeats = (cutBars - startBars) * 4.0;
+    ArrangementBlock right = orig;
+    right.setStartBeats  (cutBars * 4.0);
+    right.setLengthBeats ((endBars - cutBars) * 4.0);
+    right.lengthBars = jmax (1, (int) std::round (endBars - cutBars));
+    switch (orig.clipType)
+    {
+        case ClipType::Pattern:
+        {
+            // #24 (QA-G3Smoke): no tiling, no cycle wrap -- the right piece's
+            // offset is simply the cut position into the (single-pass) content;
+            // an offset past the content plays/draws blank, like everywhere else.
+            right.contentOffsetTicks = orig.contentOffsetTicks + beatsToTicks (cutBeats);
+            break;
+        }
+        case ClipType::Audio:
+        {
+            // Continuation = content start advances by the file samples the cut span
+            // consumes (fileRate * 60 / originalBPM per project beat).
+            const juce::File f = onResolveStoredPath
+                ? onResolveStoredPath (orig.audioFilePath)
+                : juce::File (orig.audioFilePath);
+            if (auto reader = std::unique_ptr<juce::AudioFormatReader> (
+                    mAFM.createReaderFor (f)))
+            {
+                const double fileBPM = (orig.originalBPM > 0.f)
+                    ? (double) orig.originalBPM : 120.0;
+                right.contentStartSamples = orig.contentStartSamples
+                    + (juce::int64) std::llround (
+                          cutBeats * reader->sampleRate * 60.0 / fileBPM);
+            }
+            break;
+        }
+        case ClipType::Automation:
+        {
+            splitAutomationLane (orig.automationLane, right.automationLane,
+                (float) ((cutBars - startBars) / jmax (1.0e-9, endBars - startBars)));
+            break;
+        }
+    }
+    orig.setLengthBeats (cutBeats);
+    orig.lengthBars = jmax (1, (int) std::round (cutBars - startBars));
+    mPM.addBlock (right);
+    return true;
+}
+
+// B-4/B-5: apply the slice drag-line - split every block whose row the line's
+// y-span crosses, at the line's interpolated X for that row (Shift already made it
+// vertical during the drag).  Collect first, then split, so the appends never
+// invalidate a pending index.
+void ArrangementGrid::applySliceLine (juce::Point<int> start, juce::Point<int> end)
+{
+    const int loY = jmin (start.y, end.y);
+    const int hiY = jmax (start.y, end.y);
+    constexpr double kMinPieceBars = 1.0 / 384.0;
+
+    struct SliceReq { int idx; double cutBars; };
+    std::vector<SliceReq> reqs;
+    for (int i = 0; i < mPM.getNumBlocks(); ++i)
+    {
+        const auto& b    = mPM.getBlock (i);
+        const int rowTop = rowToY (b.trackRow);
+        const int rowBot = rowTop + rowHeightPx (b.trackRow);
+        // Row-EXTENT overlap (not just center) so a plain click still slices the
+        // block under the cursor and a grazing drag catches tall block rows.
+        if (hiY < rowTop || loY > rowBot) continue;   // line's y-span misses this row
+        const int rowCy  = (rowTop + rowBot) / 2;
+
+        int cutX;
+        if (end.y == start.y)
+            cutX = start.x;                            // click / horizontal: cut at the anchor X
+        else
+        {
+            float t = (float)(rowCy - start.y) / (float)(end.y - start.y);
+            t = juce::jlimit (0.f, 1.f, t);            // clamp to the drawn segment's extent
+            cutX = (int)(start.x + t * (float)(end.x - start.x));
+        }
+
+        const double startBars = effectiveStartBars (b);
+        const double endBars   = startBars + effectiveLengthBars (b);
+        // B-4(ii): prefer the snapped cut; if it lands outside the block (e.g. a
+        // short block with no interior grid line) fall back to the raw cursor X so
+        // the block is still sliceable.
+        const double snapped = (double) snapBar (xToBar (cutX));
+        const double raw     = (double)          xToBar (cutX);
+        const double cut = (snapped > startBars + kMinPieceBars
+                            && snapped < endBars - kMinPieceBars) ? snapped : raw;
+        if (cut > startBars + kMinPieceBars && cut < endBars - kMinPieceBars)
+            reqs.push_back ({ i, cut });
+    }
+    if (reqs.empty()) return;
+
+    beginEdit ("Slice");
+    for (const auto& r : reqs) sliceOneBlock (r.idx, r.cutBars);
+    commitEdit();
+    resized(); repaint();
+}
+
 void ArrangementGrid::mouseDrag(const MouseEvent& e)
 {
     // 2026-04-26 (D-1): Ctrl+RClick zoom-rect drag.
@@ -5650,6 +5838,23 @@ void ArrangementGrid::mouseDrag(const MouseEvent& e)
         mZoomRect = Rectangle<int>::leftTopRightBottom(
             jmin(mZoomRectStart.x, e.x), jmin(mZoomRectStart.y, e.y),
             jmax(mZoomRectStart.x, e.x), jmax(mZoomRectStart.y, e.y));
+        repaint();
+        return;
+    }
+
+    // ── B-4/B-5: Slice drag-line ──────────────────────────────────────────────
+    if (mSlicing)
+    {
+        const int snappedX = barToX (snapBar (xToBar (e.x)));
+        if (e.mods.isShiftDown())
+        {
+            // B-5: Shift forces a VERTICAL cut at the snapped X under the cursor
+            // (both endpoints share that X); the y extent is the raw drag.
+            mSliceStart.x = snappedX;
+            mSliceEnd     = { snappedX, e.y };
+        }
+        else
+            mSliceEnd = { snappedX, e.y };
         repaint();
         return;
     }
@@ -5682,8 +5887,8 @@ void ArrangementGrid::mouseDrag(const MouseEvent& e)
             float dv = nextVal - p0.value01;
             if (nextTick <= 1.f && std::abs(dv) >= 0.02f)
             {
-                int bx = barToX((float)blk.startBar);
-                int bw = jmax(4, barToX((float)(blk.startBar + blk.lengthBars)) - bx - 1);
+                int bx = barToX((float) effectiveStartBars(blk));
+                int bw = jmax(4, barToX((float)(effectiveStartBars(blk) + blk.lengthBars)) - bx - 1);
                 int by = rowToY(blk.trackRow) + 2;
                 int bh = rowHeightPx(blk.trackRow) - 4;
                 float dragVal = jlimit(0.f, 1.f, 1.f - (float)(e.y - by) / (float)bh);
@@ -5701,8 +5906,8 @@ void ArrangementGrid::mouseDrag(const MouseEvent& e)
         && mAutomEditBlock < mPM.getNumBlocks())
     {
         auto& blk = mPM.getBlock(mAutomEditBlock);
-        int bx = barToX((float)blk.startBar);
-        int bw = jmax(4, barToX((float)(blk.startBar + blk.lengthBars)) - bx - 1);
+        int bx = barToX((float) effectiveStartBars(blk));
+        int bw = jmax(4, barToX((float)(effectiveStartBars(blk) + blk.lengthBars)) - bx - 1);
         int by = rowToY(blk.trackRow) + 2;
         int bh = rowHeightPx(blk.trackRow) - 4;
 
@@ -5760,33 +5965,32 @@ void ArrangementGrid::mouseDrag(const MouseEvent& e)
 
     if (mMoving)
     {
-        float dBars = (float)(e.x - mMoveDragOrigin.x) / mPPBar;
-        int   dRows = (int)std::round((float)(e.y - mMoveDragOrigin.y) / mEffectiveRowH);
+        // #27 (QA-G3Smoke, on 8A): fractional move via DELTA-snap (the roll's
+        // idiom): the delta comes from raw pixel math, snapping re-anchors the
+        // FIRST selected block's target to the grid, and the same delta then
+        // applies to every block -- sub-bar phase relationships between
+        // selected blocks survive the move.  snapBar is Alt-aware, so
+        // Alt+drag = free fine positioning (#28).
+        double dBars = (double)(e.x - mMoveDragOrigin.x) / (double) mPPBar;
+        int    dRows = (int)std::round((float)(e.y - mMoveDragOrigin.y) / mEffectiveRowH);
+        if (! mMoveOrigBars.empty())
+        {
+            const double snappedFirst = (double) snapBar ((float)((double) mMoveOrigBars[0] + dBars));
+            dBars = snappedFirst - (double) mMoveOrigBars[0];
+        }
         // QA-Ea Task 0c (2026-05-20 - perf): hoist maxRevealableNegativeBars
-        // out of the per-block loop.  The function does an O(num-blocks) scan
-        // and was previously called per selected block -- O(N*M) per drag
-        // fire for N selected blocks against M total blocks.  Now O(M) per
-        // drag fire regardless of selection size.
+        // out of the per-block loop (O(M) per drag fire regardless of
+        // selection size).
         const int negFloor = -(int) std::ceil (maxRevealableNegativeBars());
         for (int i = 0; i < (int)mMoveIndices.size(); ++i) {
             int idx = mMoveIndices[i];
             if (idx >= mPM.getNumBlocks()) continue;
             auto& b = mPM.getBlock(idx);
-            // QA-Ea Task 0c (2026-05-20 - Option ii): allow moves into the
-            // negative-bar zone (mirror of the user-scroll clamp lift).  Floor
-            // matches the dynamic negative-bar viewport limit so users can
-            // park clips in the same negative space the viewport reveals
-            // after a slip-edit; auto-fit operations still keep their own
-            // bar-0 floors elsewhere.
-            b.startBar = jmax(negFloor,
-                              (int) snapBar(mMoveOrigBars[i] + dBars));
-            // QA-Ea Task 0c (2026-05-20): a user-initiated MOVE overrides any
-            // prior slip-edit sub-bar startBeats.  Clearing the sentinel
-            // resets the block to bar-aligned int-precision (effectiveStartBeats
-            // falls back to startBar * 4) so the moved clip lands exactly on
-            // its grid bar with no leftover sub-bar offset from a previous
-            // slip drag.
-            b.startTicks = ArrangementBlock::kStartTicksUnset;
+            // QA-Ea Task 0c (2026-05-20 - Option ii): moves may enter the
+            // negative-bar zone; the floor matches the viewport's dynamic
+            // reveal limit.
+            b.startBeats = jmax ((double) negFloor * 4.0,
+                                 ((double) mMoveOrigBars[i] + dBars) * 4.0);
             b.trackRow = jlimit(0, kNumRows - 1, mMoveOrigRows[i] + dRows);
         }
         resized(); repaint();
@@ -5804,18 +6008,26 @@ void ArrangementGrid::mouseDrag(const MouseEvent& e)
     if (mPainting)
     {
         float bar = snapBar(xToBar(e.x));
-        // Paint continuous blocks left-to-right, avoid overlaps
-        if (bar > mPaintLastBar + 0.5f && mPaintRow >= 0)
+        // Paint continuous blocks left-to-right, avoid overlaps.  #25: the
+        // stamp size + advance are the pattern's content length (mPaintLenBars,
+        // captured at paint start), not a fixed 1 bar.
+        if (bar > mPaintLastBar + (float) mPaintLenBars - 0.5f && mPaintRow >= 0)
         {
             ArrangementBlock b;
             b.trackRow     = mPaintRow;
             b.patternIndex = mBrowserSelection;
-            b.startBar     = (int)mPaintLastBar + 1;
-            b.lengthBars   = 1;
+            b.startBeats   = (double)((int) mPaintLastBar + mPaintLenBars) * 4.0;
+            const double contentBeats = (mBrowserSelection >= 0
+                                         && mBrowserSelection < mPM.getNumPatterns())
+                ? mPM.getPatternContentBeats (mBrowserSelection) : 4.0;
+            b.setLengthBeats (contentBeats);
+            b.lengthBars   = jmax (1, (int) std::ceil (contentBeats / 4.0));
             b.layerTrack   = true;
             mPM.addBlock(b);
             afterPatternBlockPlaced(b);   // QA-G Task 6
-            mPaintLastBar = bar;
+            // #25: track the PLACED stamp's start (not the mouse bar) so the
+            // chain butt-joins deterministically at stamp-length intervals.
+            mPaintLastBar = (float)((int) mPaintLastBar + mPaintLenBars);
             repaint();
         }
         return;
@@ -5907,7 +6119,6 @@ void ArrangementGrid::mouseDrag(const MouseEvent& e)
 
             blk.contentStartSamples = newContent;
             blk.setStartBeats (newStartBeats);
-            blk.startBar            = (int) std::floor (newStartBeats / 4.0);
             blk.setLengthBeats (newLengthBeats);
             blk.lengthBars          = juce::jmax (1,
                                                   (int) std::ceil (newLengthBeats / 4.0));
@@ -6003,6 +6214,15 @@ void ArrangementGrid::mouseDrag(const MouseEvent& e)
 
 void ArrangementGrid::mouseUp(const MouseEvent& e)
 {
+    // ── B-4/B-5: Slice drag-line release - apply the cut(s) ────────────────────
+    if (mSlicing)
+    {
+        mSlicing = false;
+        applySliceLine (mSliceStart, mSliceEnd);   // repaints on success
+        repaint();
+        return;
+    }
+
     // ── Ruler time selection release ──────────────────────────────────────────
     if (mTimeSelDragging)
     {
@@ -6028,7 +6248,7 @@ void ArrangementGrid::mouseUp(const MouseEvent& e)
             for (int i = 0; i < mPM.getNumBlocks(); ++i)
             {
                 const auto& b = mPM.getBlock(i);
-                const float bs = (float) b.startBar;
+                const float bs = (float) effectiveStartBars (b);
                 const float be = bs + (float) effectiveLengthBars(b);
                 if (bs < t1 && be > t0)
                     mSelection.push_back(i);
@@ -6165,7 +6385,27 @@ void ArrangementGrid::mouseUp(const MouseEvent& e)
             if (mDropKind == BrowserDropKind::Audio)
             {
                 if (mDropAudioIdx >= 0)
+                {
+                    // #26 (G-15): audio click-copy -- the placed block takes
+                    // the clicked block's length + content start when a plain
+                    // click has memory (count-guarded: the place path may
+                    // decline/prompt without adding).
+                    const int preCount = mPM.getNumBlocks();
                     placeAudioLibraryEntry (mDropAudioIdx, row, start);
+                    if (! e.mouseWasDraggedSinceMouseDown()
+                        && mClickMemoryLenBeats > 0.0
+                        && mPM.getNumBlocks() == preCount + 1)
+                    {
+                        auto& nb = mPM.getBlock (mPM.getNumBlocks() - 1);
+                        if (nb.clipType == ClipType::Audio)
+                        {
+                            nb.setLengthBeats (mClickMemoryLenBeats);
+                            nb.lengthBars = jmax (1, (int) std::ceil (mClickMemoryLenBeats / 4.0));
+                            nb.contentStartSamples = mClickMemoryContentStartSamples;
+                            mPM.notifyContentChanged();
+                        }
+                    }
+                }
             }
             else if (mDropKind == BrowserDropKind::Automation)
             {
@@ -6176,7 +6416,7 @@ void ArrangementGrid::mouseUp(const MouseEvent& e)
                     ArrangementBlock b;
                     b.clipType       = ClipType::Automation;
                     b.trackRow       = row;
-                    b.startBar       = (int)start;
+                    b.startBeats     = (double)(int) start * 4.0;
                     b.lengthBars     = len;
                     b.automationLane = mPM.getAutomationTemplate(mDropAutomIdx);
                     mPM.addBlock(b);
@@ -6191,8 +6431,28 @@ void ArrangementGrid::mouseUp(const MouseEvent& e)
                 ArrangementBlock b;
                 b.trackRow     = row;
                 b.patternIndex = mBrowserSelection;
-                b.startBar     = (int)start;
-                b.lengthBars   = len;
+                b.startBeats   = (double)(int) start * 4.0;
+                // #26 (G-15): a plain CLICK places a copy of the last-clicked
+                // block -- length + content offset ride the click memory (the
+                // identity already rides mBrowserSelection).  #25: with no
+                // memory, a click sizes from the pattern's REAL content
+                // length.  A real DRAG keeps the user-drawn length.
+                if (! e.mouseWasDraggedSinceMouseDown() && mClickMemoryLenBeats > 0.0)
+                {
+                    b.setLengthBeats (mClickMemoryLenBeats);
+                    b.lengthBars = jmax (1, (int) std::ceil (mClickMemoryLenBeats / 4.0));
+                    b.contentOffsetTicks = mClickMemoryOffsetTicks;
+                }
+                else if (! e.mouseWasDraggedSinceMouseDown()
+                         && mBrowserSelection >= 0
+                         && mBrowserSelection < mPM.getNumPatterns())
+                {
+                    const double contentBeats = mPM.getPatternContentBeats (mBrowserSelection);
+                    b.setLengthBeats (contentBeats);
+                    b.lengthBars = jmax (1, (int) std::ceil (contentBeats / 4.0));
+                }
+                else
+                    b.lengthBars = len;
                 b.layerTrack   = true;
                 mPM.addBlock(b);
                 commitEdit();
@@ -6247,8 +6507,8 @@ void ArrangementGrid::mouseDoubleClick(const MouseEvent& e)
         if (mActiveTool == AGTool::Draw)
         {
             const auto& b  = mPM.getBlock(hit);
-            int bx = barToX(b.startBar);
-            int bw = jmax(4, barToX((float)(b.startBar + effectiveLengthBars(b))) - bx - 1);
+            int bx = barToX((float) effectiveStartBars(b));
+            int bw = jmax(4, barToX((float)(effectiveStartBars(b) + effectiveLengthBars(b))) - bx - 1);
             int by = rowToY(b.trackRow) + 2;
             int bh = rowHeightPx(b.trackRow) - 4;
             int chIdx = hitTestAutomCurveHandleInBlock(b.automationLane,
@@ -6704,6 +6964,15 @@ void TrackHeaderPanel::mouseDoubleClick(const MouseEvent& e)
         }), true);
 }
 
+void TrackHeaderPanel::groupSpan (int row, int& first, int& last) const
+{
+    const int gid = mPM.getRowGroup (row);
+    first = last = row;
+    if (gid <= 0) return;
+    while (first > 0 && mPM.getRowGroup (first - 1) == gid) --first;
+    while (last < ArrangementGrid::kNumRows - 1 && mPM.getRowGroup (last + 1) == gid) ++last;
+}
+
 void TrackHeaderPanel::showTrackContextMenu(int row)
 {
     const int gid = mPM.getRowGroup(row);
@@ -6742,32 +7011,60 @@ void TrackHeaderPanel::showTrackContextMenu(int row)
             case 2:
             case 3:
             {
-                int otherRow = (result == 2) ? row - 1 : row + 1;
-                if (otherRow < 0 || otherRow >= ArrangementGrid::kNumRows) break;
+                // #21/#22 (QA-G3Smoke): moving a grouped track moves its WHOLE
+                // contiguous group span past the NEIGHBOR'S full span (spans
+                // hop each other as units); group ids + colors travel with
+                // their rows -- the old per-row id swap is gone (it tore
+                // groups apart and left ids behind).
+                int aFirst, aLast;
+                groupSpan (row, aFirst, aLast);
+                const int nbrRow = (result == 2) ? aFirst - 1 : aLast + 1;
+                if (nbrRow < 0 || nbrRow >= ArrangementGrid::kNumRows) break;
+                int bFirst, bLast;
+                groupSpan (nbrRow, bFirst, bLast);
                 mGrid.beginEdit((result == 2) ? "Move Track Up" : "Move Track Down");
-                // Swap names.  Positional defaults ("Track N") stay positional
-                // -- only custom names travel with the track.
+                const int lo   = jmin (aFirst, bFirst);
+                const int hi   = jmax (aLast,  bLast);
+                const int lenA = aLast - aFirst + 1;
+                auto newRowOf = [&] (int r) -> int
+                {
+                    if (r >= aFirst && r <= aLast)
+                        return (result == 2) ? lo + (r - aFirst)
+                                             : (hi - lenA + 1) + (r - aFirst);
+                    return (result == 2) ? r + lenA : r - lenA;
+                };
+                // Capture the whole affected range, then rewrite through the
+                // rotation map.  Positional-default names ("Track N") stay
+                // positional -- only custom names travel with their track.
+                struct RowState { juce::String name; bool custom;
+                                  bool mute; bool solo; int gid2; juce::uint32 col; };
+                std::vector<RowState> st ((size_t)(hi - lo + 1));
                 auto names = mGrid.getRowNames();
-                const bool aDef = (names[row]      == mPM.defaultRowName(row));
-                const bool bDef = (names[otherRow] == mPM.defaultRowName(otherRow));
-                mGrid.setRowName(row,      bDef ? mPM.defaultRowName(row)      : names[otherRow]);
-                mGrid.setRowName(otherRow, aDef ? mPM.defaultRowName(otherRow) : names[row]);
-                // Row state moves with the track (mute / solo / group / colour)
-                const bool m1 = mPM.isRowMuted(row),      s1 = mPM.isRowSoloed(row);
-                const bool m2 = mPM.isRowMuted(otherRow), s2 = mPM.isRowSoloed(otherRow);
-                mPM.setRowMuted (row, m2);      mPM.setRowSoloed(row, s2);
-                mPM.setRowMuted (otherRow, m1); mPM.setRowSoloed(otherRow, s1);
-                const int          g1 = mPM.getRowGroup(row);
-                const int          g2 = mPM.getRowGroup(otherRow);
-                const juce::uint32 c1 = mPM.getRowGroupColor(row);
-                const juce::uint32 c2 = mPM.getRowGroupColor(otherRow);
-                mPM.setRowGroup(row, g2);      mPM.setRowGroupColor(row, c2);
-                mPM.setRowGroup(otherRow, g1); mPM.setRowGroupColor(otherRow, c1);
-                // Swap block rows
-                for (int i = 0; i < mPM.getNumBlocks(); ++i) {
+                for (int r = lo; r <= hi; ++r)
+                {
+                    auto& s  = st[(size_t)(r - lo)];
+                    s.name   = names[r];
+                    s.custom = (names[r] != mPM.defaultRowName (r));
+                    s.mute   = mPM.isRowMuted (r);
+                    s.solo   = mPM.isRowSoloed (r);
+                    s.gid2   = mPM.getRowGroup (r);
+                    s.col    = mPM.getRowGroupColor (r);
+                }
+                for (int r = lo; r <= hi; ++r)
+                {
+                    const auto& s = st[(size_t)(r - lo)];
+                    const int  nr = newRowOf (r);
+                    mGrid.setRowName (nr, s.custom ? s.name : mPM.defaultRowName (nr));
+                    mPM.setRowMuted (nr, s.mute);
+                    mPM.setRowSoloed (nr, s.solo);
+                    mPM.setRowGroup (nr, s.gid2);
+                    mPM.setRowGroupColor (nr, s.col);
+                }
+                for (int i = 0; i < mPM.getNumBlocks(); ++i)
+                {
                     auto& b = mPM.getBlock(i);
-                    if (b.trackRow == row)       b.trackRow = otherRow;
-                    else if (b.trackRow == otherRow) b.trackRow = row;
+                    if (b.trackRow >= lo && b.trackRow <= hi)
+                        b.trackRow = newRowOf (b.trackRow);
                 }
                 mGrid.commitEdit();
                 notifyArrangementChanged();
@@ -6788,8 +7085,11 @@ void TrackHeaderPanel::showTrackContextMenu(int row)
             }
             case 5:
             {
+                // #23 (QA-G3Smoke): group edits are undoable -- the existing
+                // begin/commit bracket already snapshots row group/color state.
                 const int above = row - 1;
                 if (above < 0) break;
+                mGrid.beginEdit("Group with Above");
                 int g = mPM.getRowGroup(above);
                 if (g <= 0)
                 {
@@ -6800,13 +7100,16 @@ void TrackHeaderPanel::showTrackContextMenu(int row)
                 }
                 mPM.setRowGroup(row, g);
                 mPM.setRowGroupColor(row, mPM.getRowGroupColor(above));
+                mGrid.commitEdit();
                 repaint();
                 break;
             }
             case 6:
             {
+                mGrid.beginEdit("Remove from Group");   // #23
                 mPM.setRowGroup(row, 0);
                 mPM.setRowGroupColor(row, 0);
+                mGrid.commitEdit();
                 repaint();
                 break;
             }
@@ -6814,12 +7117,18 @@ void TrackHeaderPanel::showTrackContextMenu(int row)
             {
                 const int g = mPM.getRowGroup(row);
                 if (g <= 0) break;
+                // #23: capture the before-state BEFORE the async picker opens;
+                // commit inside the callback.  A canceled picker never commits
+                // -- the pending snapshot is harmlessly overwritten by the
+                // next beginEdit (no undo entry pushed).
+                mGrid.beginEdit("Color Group");
                 PatternColorPicker::showAsync(this, Colour(mPM.getRowGroupColor(row)),
                     [this, g](Colour c)
                     {
                         for (int r = 0; r < ArrangementGrid::kNumRows; ++r)
                             if (mPM.getRowGroup(r) == g)
                                 mPM.setRowGroupColor(r, c.getARGB());
+                        mGrid.commitEdit();
                         repaint();
                     });
                 break;
@@ -7506,7 +7815,7 @@ void BuilderPage::doNewAutomationClip()
                     for (int i = 0; i < mPM.getNumBlocks(); ++i)
                     {
                         const auto& b = mPM.getBlock(i);
-                        bar = jmax(bar, b.startBar + b.lengthBars);
+                        bar = jmax(bar, (int) std::ceil(effectiveStartBars(b) + (double) b.lengthBars - 1e-9));
                     }
                 }
             }
@@ -7535,7 +7844,7 @@ void BuilderPage::doNewAutomationClip()
                 ArrangementBlock b;
                 b.clipType               = ClipType::Automation;
                 b.trackRow               = row;
-                b.startBar               = bar;
+                b.startBeats             = (double) bar * 4.0;
                 b.lengthBars             = len;
                 b.automationLane.paramId = paramId;
                 // Add start and end points at current param value (flat neutral line)

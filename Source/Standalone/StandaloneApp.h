@@ -196,4 +196,7 @@ public:
     // every toggle so the preference survives even an abrupt shutdown.
     static void       loadMultiCoreRenderingPref();
     static void       saveMultiCoreRenderingPref();
+    // QA-L-Fix D-11: kit-trigger velocity source (From controller / Fixed).
+    static void       loadMidiTriggerVelocityPref();
+    static void       saveMidiTriggerVelocityPref();
 };

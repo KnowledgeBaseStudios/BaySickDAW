@@ -1,5 +1,6 @@
 #pragma once
 #include <JuceHeader.h>
+#include <array>
 #include <atomic>
 #include <map>
 #include <vector>
@@ -95,24 +96,29 @@ public:
                        const juce::String& sourceDeviceName,
                        const juce::MidiMessage& msg);
 
-    // ── Learn-mode capture hook (used by I-3c right-click menu) ──────────────
-    // When the user clicks "MIDI Learn" on a knob, the UI calls
-    // beginLearn(paramId, callback).  The next incoming hardware MIDI message
-    // that matches a learnable type triggers the callback with the captured
-    // Mapping fields populated; the callback is then cleared.  The callback
-    // returning true commits the mapping; false cancels (e.g., user pressed
-    // Escape while the message was in flight).  Audio thread calls
-    // tryCaptureLearn() before normal dispatch so the capture event isn't
-    // also dispatched as a regular CC update.
-    using LearnCaptureFn = std::function<bool(const Mapping&)>;
-    void beginLearn (const juce::String& paramId, LearnCaptureFn fn);
+    // ── Learn-mode capture (used by I-3c right-click menu) ───────────────────
+    // The UI calls beginLearn(paramId), then polls takeCapturedMapping() on the
+    // message thread and commits with setMapping().
+    //
+    // 2026-07-19: the capture callback was REMOVED.  It ran on the audio thread
+    // and, between the std::function copy, the callback's own
+    // MessageManager::callAsync, the std::map insert, and the onChanged()
+    // notify, put four separate heap allocations in the render callback.  The
+    // audio thread now only fills a pre-constructed Mapping under the existing
+    // lock (refcount traffic on already-owned strings, no allocation) and sets
+    // a flag; every allocating step moved to the message thread.  Same handshake
+    // shape as DrumTriggerMap.
+    void beginLearn (const juce::String& paramId);
     void cancelLearn();
     bool isLearning() const noexcept;
     juce::String getLearnTargetParamId() const;
 
-    // Audio-thread (or MIDI thread): if a learn target is active, see if this
-    // event matches a learnable type; if so, fire the capture callback and
-    // return true (caller suppresses the event from regular dispatch).
+    // Message thread.  Returns true and fills `out` exactly once per capture.
+    bool takeCapturedMapping (Mapping& out);
+
+    // Audio-thread (or MIDI thread): if a learn target is active and this event
+    // is a learnable type, record it for the message thread and return true
+    // (caller suppresses the event from regular dispatch).
     bool tryCaptureLearn (const juce::String& sourceDeviceName,
                           const juce::MidiMessage& msg);
 
@@ -155,8 +161,11 @@ private:
     std::map<juce::String, Mapping> mMappings;
 
     // Learn-mode state (also under mLock).
-    juce::String   mLearnTargetParamId;
-    LearnCaptureFn mLearnCaptureFn;
+    juce::String mLearnTargetParamId;
+    // Pre-constructed so the audio thread only ASSIGNS into it (refcount ops on
+    // strings it does not solely own) rather than constructing/destroying one.
+    Mapping           mPendingCapture;
+    std::atomic<bool> mCaptureReady { false };
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MidiLearnRegistry)
 };
@@ -175,10 +184,12 @@ private:
 //   * Push (MIDI input thread, possibly multiple devices = MPSC): briefly
 //     locks mLock.  Push is O(1) -- a single push_back into a pre-reserved
 //     vector.
-//   * Drain (audio thread): try-locks; on success, swaps with empty buffer
-//     and releases lock, then iterates events outside the lock.  On failure
+//   * Drain (audio thread): try-locks; on success, swaps with the empty buffer
+//     and releases the lock, then iterates events outside it.  On failure
 //     (rare race with MIDI thread mid-push), skips drain this block; events
-//     persist for next block.
+//     persist for next block.  The release matters: the callbacks reach
+//     setValueNotifyingHost, and holding across them would make the MIDI input
+//     thread spin-wait in push() for the whole notification.
 //
 // Bounded capacity: events backlog if user holds wheel for many seconds
 // without audio thread running (e.g., audio device closed mid-session).
@@ -188,13 +199,25 @@ private:
 class MidiLearnEventQueue
 {
 public:
+    // Device names are INTERNED to small integer ids rather than stored per
+    // event (2026-07-19).  The queue previously held a juce::String per Event;
+    // juce::String is refcounted, the queue was the sole owner by the time the
+    // audio thread drained (MidiInput::getName() returns by value, and the
+    // MIDI-thread local died when its callback returned), so the drain's
+    // clear() dropped the last reference and ran free() INSIDE the render
+    // callback.  An int id is trivially destructible, so the drain now frees
+    // nothing.
     struct Event
     {
-        juce::String     deviceName;
+        int               deviceId { -1 };   // index into the interned name table
         juce::MidiMessage message;
     };
 
     static constexpr int kMaxBacklog = 1024;
+    // Interned device names live for the queue's lifetime.  Fixed array, never
+    // resized, entries never destroyed -- that is what makes it safe for the
+    // audio thread to hold a const& into it while the MIDI thread appends.
+    static constexpr int kMaxDevices = 32;
 
     MidiLearnEventQueue()
     {
@@ -202,38 +225,87 @@ public:
         mDraining.reserve (kMaxBacklog);
     }
 
-    // MIDI input thread (multi-producer).  Brief lock held while appending.
+    // MIDI input thread (multi-producer).  Interning takes its own lock and
+    // completes BEFORE the queue lock is taken -- juce::SpinLock is not
+    // recursive, so these must never nest.
     void push (const juce::String& deviceName, const juce::MidiMessage& msg)
     {
+        const int id = internDeviceName (deviceName);
+
         const juce::SpinLock::ScopedLockType lk (mLock);
         if ((int) mPending.size() >= kMaxBacklog)
             mPending.erase (mPending.begin());   // drop oldest
-        mPending.push_back ({ deviceName, msg });
+        mPending.push_back ({ id, msg });
     }
 
-    // Audio thread (single consumer).  Swap-and-process pattern: take the
-    // pending vector under lock, process events outside the lock to keep MIDI
-    // input threads unblocked.  Returns true if at least one event was
-    // processed.
+    // Audio thread (single consumer).  `fn` is called as
+    // fn (const juce::String& deviceName, const juce::MidiMessage&) -- the
+    // name is a reference INTO the intern table, never a copy, so no
+    // refcounted type is constructed or destroyed on this thread.
+    //
+    // RT-safety note: juce::MidiMessage heap-allocates only above 8 bytes
+    // (PackedData union).  Everything this queue admits -- CC, pitch-bend,
+    // channel pressure -- is 2-3 bytes and lives inline, so ~MidiMessage frees
+    // nothing either.  Admitting sysex here would reintroduce an audio-thread
+    // free; filter before pushing, not after draining.
     template <typename Fn>
     bool drainAndProcess (Fn&& fn)
     {
-        const juce::SpinLock::ScopedTryLockType tryLk (mLock);
-        if (! tryLk.isLocked()) return false;
-        std::swap (mPending, mDraining);
-        // Release lock here -- ScopedTryLockType exits scope after we swap.
-        // Process outside lock (we're the only consumer).
+        {
+            const juce::SpinLock::ScopedTryLockType tryLk (mLock);
+            if (! tryLk.isLocked()) return false;
+            std::swap (mPending, mDraining);
+        }
+        // Lock released before the callbacks (restored 2026-07-19; it had been
+        // held across the whole loop, which the class comment never matched).
+        // Safe because mDraining is audio-thread-private once swapped -- the
+        // MIDI thread only ever touches mPending, and only under the lock.
+        // Worth keeping that way: `fn` reaches setValueNotifyingHost, so
+        // holding here makes the MIDI input thread spin-wait in push() for the
+        // duration of parameter notification.
         for (const auto& e : mDraining)
-            fn (e.deviceName, e.message);
+            fn (deviceNameForId (e.deviceId), e.message);
         const bool any = ! mDraining.empty();
-        mDraining.clear();
+        mDraining.clear();   // ints only -- frees nothing
         return any;
     }
 
 private:
+    // MIDI thread.  Linear scan is fine: device count is tiny and this runs
+    // once per incoming event, not per sample.  Returns -1 when the table is
+    // full (event still queues; it just reports an empty device name).
+    int internDeviceName (const juce::String& name)
+    {
+        const juce::SpinLock::ScopedLockType lk (mDeviceLock);
+        const int n = mDeviceCount.load (std::memory_order_relaxed);
+        for (int i = 0; i < n; ++i)
+            if (mDeviceNames[(size_t) i] == name)
+                return i;
+        if (n >= kMaxDevices) return -1;
+        mDeviceNames[(size_t) n] = name;
+        // Release: publishes the name write before the audio thread can see
+        // an id that indexes it.
+        mDeviceCount.store (n + 1, std::memory_order_release);
+        return n;
+    }
+
+    // Audio thread.  Safe without the device lock: slots below the acquired
+    // count are fully written and never mutated again.
+    const juce::String& deviceNameForId (int id) const noexcept
+    {
+        static const juce::String kNoDevice;
+        if (id < 0 || id >= mDeviceCount.load (std::memory_order_acquire))
+            return kNoDevice;
+        return mDeviceNames[(size_t) id];
+    }
+
     juce::SpinLock     mLock;
     std::vector<Event> mPending;
     std::vector<Event> mDraining;
+
+    juce::SpinLock                            mDeviceLock;
+    std::array<juce::String, kMaxDevices>     mDeviceNames;
+    std::atomic<int>                          mDeviceCount { 0 };
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MidiLearnEventQueue)
 };

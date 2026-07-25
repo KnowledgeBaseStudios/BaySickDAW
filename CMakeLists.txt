@@ -518,8 +518,13 @@ target_sources(BaySickDAWStandalone PRIVATE
     Source/BaySickGuitars/BaySickGuitarsProcessor.cpp
     # Phase L-1 — BaySickBasses (sfizz-driven melodic bass engine; mirrors Guitars; one per Inst page)
     Source/BaySickBasses/BaySickBassesProcessor.cpp
+    # QA-SlideSampler — blended multi-sample slide for Guitars/Basses (region extraction + slide DSP + shared decode cache)
+    Source/SlideSampler/SlideRegionMap.cpp
+    Source/SlideSampler/SlideSampler.cpp
+    Source/SlideSampler/SlideSampleCache.cpp
     # Phase I-3b — App-wide MIDI Learn registry (right-click "MIDI Learn" UI lands in I-3c)
     Source/MidiLearn/MidiLearnRegistry.cpp
+    Source/MidiLearn/DrumTriggerMap.cpp
     # Phase H-1+ — BaySickVocal engine (vocal chain processor + editor)
     Source/BaySickVocal/BaySickVocalProcessor.cpp
     Source/BaySickVocal/BaySickVocalEditor.cpp
@@ -554,7 +559,7 @@ target_compile_definitions(BaySickDAWStandalone
     PUBLIC ${VIBESYNTH_DEFS} VIBESYNTH_STANDALONE=1
 )
 
-target_include_directories(BaySickDAWStandalone PRIVATE Source Source/Engine Source/Engine/Tasks Source/Standalone Source/Harmless Source/VibePlayer Source/BaySickSynth Source/BaySickBass Source/BaySickNAMIR Source/BaySickPedals Source/BaySickRustyDrums Source/BaySickGuitars Source/BaySickBasses Source/BaySickVocal Source/Clips Source/Vox Source/Inst Source/MidiLearn
+target_include_directories(BaySickDAWStandalone PRIVATE Source Source/Engine Source/Engine/Tasks Source/Standalone Source/Harmless Source/VibePlayer Source/BaySickSynth Source/BaySickBass Source/BaySickNAMIR Source/BaySickPedals Source/BaySickRustyDrums Source/BaySickGuitars Source/BaySickBasses Source/BaySickVocal Source/Clips Source/Vox Source/Inst Source/MidiLearn Source/SlideSampler
     # Rubber Band Library -- public headers (rubberband/*.h) so consumer code can
     # #include <rubberband/RubberBandLiveShifter.h>.  The compiled library links
     # via BaySickRubberBand (QA-Fe); this include is also propagated by that lib.

@@ -111,6 +111,14 @@ public:
     void     cycleNewNoteType();
     std::function<void()> onNoteTypeArmChanged;
 
+    // QA-SlideSampler Task 4: engine-aware note-props context.  On Guitars/Basses
+    // rolls the note-props panel shows Flat / RP Slide / Bend + the Bend dropdowns
+    // gated to the patch's real bend range; the provider supplies that range.  Null
+    // on other engines -> the normal (in-house) note-props panel.
+    struct NoteEditContext { bool engineAware = false; int bendUpSemis = 2; int bendDownSemis = 2; };
+    void setNoteEditContextProvider (std::function<NoteEditContext()> p) { mNoteEditContextProvider = std::move (p); }
+    std::function<NoteEditContext()> mNoteEditContextProvider;
+
     // ── Selection ─────────────────────────────────────────────────────────
     void selectAll      ();
     void clearSelection ();
@@ -304,6 +312,12 @@ private:
     // (mDrawHasDragged tells mouseUp to use the dragged length instead).
     double   mClickMemoryDur  { 0.25 };
     NoteType mClickMemoryType { NoteType::Standard };
+    float    mClickMemoryVel  { 0.8f };   // #12 (QA-G3Smoke): last-clicked note's velocity rides placements
+    // Smoke round 2 (Jeff): the WHOLE clicked note is the placement template
+    // (pan / fine pitch / cutoff / resonance / release / porta length / bend
+    // amount + shape) -- not just dur+type+vel.  groupId / muted / slotIndex
+    // are per-note intent and never carry.
+    PianoNote mClickMemoryProto {};
     bool     mDrawHasDragged  { false };
     // Double-click-created suppression: the first click of a double-click on
     // empty grid CREATES a note, so the pair would instantly open the Note
@@ -571,6 +585,8 @@ public:
     void setNoteLabelProvider(std::function<juce::String(int)> provider);
     // QA-SfzGroup Sub-Q: forward keyswitch label provider to keyboard.
     void setKeyswitchLabelProvider(std::function<juce::String(int)> provider);
+    // QA-SlideSampler Task 4: forward the engine-aware note-props context to the grid.
+    void setNoteEditContextProvider(std::function<PianoRollGrid::NoteEditContext()> provider);
     // J-7b: paint every keyboard row as a white key (BaySickRustyDrums).
     void setAllKeysWhiteMode(bool enabled);
     // J-7b: scroll the view so `topNote` is the highest visible MIDI note.
@@ -601,6 +617,12 @@ public:
 
     // Fired when the user clicks the ruler to seek the playhead
     std::function<void(double beat)> onSeek;
+    // #30b regression fix (QA-G3Smoke): fired after EVERY grid note mutation
+    // (the grid's onNotesChanged tail).  StandaloneEditor routes it to
+    // PatternManager::notifyContentChanged so the scheduler's roll snapshot
+    // republishes -- without this, freshly edited notes exist on screen but
+    // never reach the audio thread.
+    std::function<void()> onContentEdited;
 
     // Fired when a note is created or its pitch changes (for engine audition).
     // One-shot - engine receives noteOn + auto-noteOff at end of buffer.

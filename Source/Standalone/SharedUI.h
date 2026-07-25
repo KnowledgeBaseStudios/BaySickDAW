@@ -325,6 +325,16 @@ public:
     // the slot belongs to the tab cluster's lifecycle.
     void setFxRackSlot(std::function<void()> onClick);
 
+    // Smoke round 2 (Jeff): per-player Swing Mix knob, right of the FX Rack
+    // slot, so it's visible on EVERY sub-tab of a player page (the engine
+    // title-bar hosting only showed on the Player sub-tab).  Set per
+    // page-show with that page's swing binding; empty getMix hides it;
+    // clearTabSlots() clears it too.
+    void setSwingKnobSlot (std::function<float()>     getMix,
+                           std::function<void(float)> setMix,
+                           std::function<bool()>      getTruncate,
+                           std::function<void(bool)>  setTruncate);
+
     void paint(juce::Graphics&) override;
     void resized() override;
 
@@ -347,6 +357,7 @@ private:
     std::unique_ptr<juce::TextButton>              mMidBtn;
     std::unique_ptr<juce::TextButton>              mSideBtn;
     std::unique_ptr<juce::TextButton>              mFxRackBtn;
+    std::unique_ptr<juce::Slider>                  mSwingKnob;   // smoke round 2: per-player Swing Mix
     bool                                           mMidSideVisible { false };
 
     // 2026-04-19: bank indicator slot (non-owning, single pointer).

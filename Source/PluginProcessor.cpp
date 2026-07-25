@@ -1,6 +1,7 @@
 #include "PluginProcessor.h"
 #include "TempoMapRead.h"   // QA-TempoMap: stepped tempo timeline (standalone publishes; VST falls back)
 #include "TsMapRead.h"      // QA-G Task 6: stepped time-signature timeline (PatternManager publishes)
+#include "G3PlayheadDiag.h" // [G3 BAR1] smoke General-1 dropout reading (Debug-only)
 
 // QA-Ec x QA-TempoMap seam: audio-clip block boundaries are BEAT-authored, so
 // with a published timeline their sample positions must resolve through it -
@@ -41,30 +42,27 @@ static inline double clipFilePosForBeat (double beatsIntoClip, double fileSample
   #include "PluginEditor.h"
 #endif
 
-// 2026-04-30 (audit C11+C12): emit a noteOn with the per-note expression
-// values carried as standard MIDI so engines stay decoupled from the roll:
-// CC10 pan, PitchWheel fine pitch (±100 cents mapped to ±4096 = ±1 semi at
-// a ±2-semi bend range), CC74 cutoff (±2 oct around 0.5), CC71 resonance
-// offset (0.5 neutral), CC72 release-time scale (0.5 neutral).  Channel-wide
-// (not MPE), so chord-with-mixed-per-note-values behaves as "last note wins"
-// for the channel state.  Acceptable for melodic lines.
-// All five expression events emit UNCONDITIONALLY: the old skip-at-neutral
-// shortcut left the previous note's channel state in place, so a neutral
-// note silently inherited the last non-neutral pan/bend/cutoff.
-// Slide/Portamento glides ride CC84 (portamento control = source note) plus
-// an optional CC5/CC37 14-bit glide time in ms (slide = glide spans the note;
-// absent for porta = engine uses its own glide time).  Voices consume the
-// stash one-shot at the next noteOn.
-static void emitPianoNoteOn (juce::MidiBuffer& dst,
-                              const PianoNote& note, int samplePos,
-                              int glideFromNote = -1, int glideTimeMs = -1)
+// 2026-04-30 (audit C11+C12) / S-6: the shared per-note expression block, carried as
+// standard MIDI so engines stay decoupled from the roll -- CC10 pan, PitchWheel fine
+// pitch (±100 cents mapped to ±4096 = ±1 semi at a ±2-semi bend range), CC74 cutoff
+// (±2 oct around 0.5), CC71 resonance offset (0.5 neutral), CC72 release-time scale
+// (0.5 neutral).  Channel-wide (not MPE), so a chord with mixed per-note values is
+// "last note wins" for the channel state -- acceptable for melodic lines.  All five
+// emit UNCONDITIONALLY: the old skip-at-neutral shortcut left the previous note's
+// channel state in place, so a neutral note inherited the last non-neutral value.
+// Used by both a fresh note-on and a RampSlide takeover (S-6); velocity is deliberately
+// NOT here -- it rides the noteOn byte, so a takeover (no noteOn) cannot carry it.
+// QA-G3Smoke #11 (G-4): panAsRampTarget routes the pan byte to CC89 (ramp
+// TARGET -- the voice glides current->target over the slide) instead of the
+// instant CC10, for RP takeovers + RT glide note-ons only.  Plain notes keep
+// the channel-live CC10 model unchanged.
+static void emitNoteExpression (juce::MidiBuffer& dst, const PianoNote& note, int samplePos,
+                                bool panAsRampTarget = false)
 {
     constexpr int ch = 1;
-    const int vel = juce::jlimit (1, 127, (int) (note.velocity * 127.f));
-
     const int pan = juce::jlimit (0, 127,
         (int) std::round (64.f + note.panning * 63.f));
-    dst.addEvent (juce::MidiMessage::controllerEvent (ch, 10, pan), samplePos);
+    dst.addEvent (juce::MidiMessage::controllerEvent (ch, panAsRampTarget ? 89 : 10, pan), samplePos);
 
     const int wheel = juce::jlimit (0, 16383,
         (int) std::round (8192.f + note.finePitch * 4096.f));
@@ -81,6 +79,20 @@ static void emitPianoNoteOn (juce::MidiBuffer& dst,
     const int rel = juce::jlimit (0, 127,
         (int) std::round (note.releaseAmt * 127.0f));
     dst.addEvent (juce::MidiMessage::controllerEvent (ch, 72, rel), samplePos);
+}
+
+// Slide/Portamento glides ride CC84 (portamento control = source note) plus an optional
+// CC5/CC37 14-bit glide time in ms (slide = glide spans the note; absent for porta =
+// engine uses its own glide time).  Voices consume the stash one-shot at the next noteOn.
+static void emitPianoNoteOn (juce::MidiBuffer& dst,
+                              const PianoNote& note, int samplePos,
+                              int glideFromNote = -1, int glideTimeMs = -1,
+                              bool panAsRampTarget = false)
+{
+    constexpr int ch = 1;
+    const int vel = juce::jlimit (1, 127, (int) (note.velocity * 127.f));
+
+    emitNoteExpression (dst, note, samplePos, panAsRampTarget);
 
     if (glideFromNote >= 0)
     {
@@ -98,31 +110,52 @@ static void emitPianoNoteOn (juce::MidiBuffer& dst,
                   samplePos);
 }
 
-// QA-H Task 2: glide source for a RetrigSlide/Portamento note = the roll's
-// nearest preceding note start (latest startBeat strictly before this note's).
-// Returns -1 (no glide) when the note has no predecessor.
+// QA-SlideSliceGlide S-1: glide source for a RetrigSlide/Portamento note = the
+// roll's nearest note starting at-or-before this one (a co-starting base note now
+// counts, so a slide drawn on top of a held note has a source).  On a co-start
+// tie a plain (Standard) note wins over a slide so the base is preferred.
+// Returns -1 (no glide) when nothing starts at-or-before this note.
 static int findGlideSourcePitch (const std::vector<PianoNote>& notes,
                                  const PianoNote& target)
 {
-    int    best     = -1;
-    double bestBeat = -1.0e18;
+    constexpr double eps = 1.0e-9;
+    int    best      = -1;
+    double bestBeat  = -1.0e18;
+    bool   bestSlide = true;
     for (const auto& n : notes)
     {
         if (&n == &target || n.muted) continue;
-        if (n.startBeat < target.startBeat - 1.0e-9 && n.startBeat > bestBeat)
+        if (n.startBeat > target.startBeat + eps) continue;     // at-or-before only
+        // #36 (QA-G3Smoke): an already-ended note can't be a glide source --
+        // the pitch must still be sounding INTO the slide's start (this also
+        // keeps the S-5 mono-cut from cutting a long-dead voice's pitch).
+        if (n.startBeat + n.durationBeats < target.startBeat - eps) continue;
+        const bool nSlide = (n.type != NoteType::Standard);
+        if (n.startBeat > bestBeat + eps
+            || (n.startBeat > bestBeat - eps && bestSlide && ! nSlide))
         {
-            bestBeat = n.startBeat;
-            best     = n.midiNote;
+            bestBeat  = n.startBeat;
+            best      = n.midiNote;
+            bestSlide = nSlide;
         }
     }
     return best;
 }
+
+// QA-H Ramp Slide: anchor of a ramp chain = the first non-RampSlide note found
+// walking back through connected predecessors (declared ahead -- the chain-
+// duration lineage predicate below calls it).
+static const PianoNote* findRampAnchorNote (const std::vector<PianoNote>& notes,
+                                            const PianoNote& slide);
 
 // QA-H Ramp Slide: a note's audible length extends through any connected
 // chain of RampSlide notes riding it - ramp slides never retrigger, they
 // keep the source voice sounding and bend it, so the source's noteOff must
 // move to the chain's end.  Connected = each ramp starts at/inside the
 // current audible span (butt-joined counts).
+// #36 (QA-G3Smoke): lineage predicate -- only absorb a RampSlide whose OWN
+// anchor walk resolves to THIS source note, so a butt-joined chain riding a
+// different base no longer defers this note's off.
 static double rampChainDurationBeats (const std::vector<PianoNote>& notes,
                                       const PianoNote& src)
 {
@@ -136,7 +169,8 @@ static double rampChainDurationBeats (const std::vector<PianoNote>& notes,
         {
             if (n.muted || n.type != NoteType::RampSlide) continue;
             if (n.startBeat >= src.startBeat - eps && n.startBeat <= end + eps
-                && n.startBeat + n.durationBeats > end)
+                && n.startBeat + n.durationBeats > end
+                && findRampAnchorNote (notes, n) == &src)
             {
                 end  = n.startBeat + n.durationBeats;
                 grew = true;
@@ -146,12 +180,11 @@ static double rampChainDurationBeats (const std::vector<PianoNote>& notes,
     return end - src.startBeat;
 }
 
-// QA-H Ramp Slide: anchor of a ramp chain = the first non-RampSlide note
-// found walking back through connected predecessors.  Returns its pitch, or
-// -1 when the chain is broken (nothing would be sounding at the slide's
-// start, so the ramp is silent - FL-style takeover semantics).
-static int findRampAnchorPitch (const std::vector<PianoNote>& notes,
-                                const PianoNote& slide)
+// Returns the anchor NOTE, or null when the chain is broken (nothing would be
+// sounding at the slide's start, so the ramp is silent - FL-style takeover
+// semantics).
+static const PianoNote* findRampAnchorNote (const std::vector<PianoNote>& notes,
+                                            const PianoNote& slide)
 {
     constexpr double eps = 1.0e-6;
     const PianoNote* cur = &slide;
@@ -161,17 +194,30 @@ static int findRampAnchorPitch (const std::vector<PianoNote>& notes,
         for (const auto& n : notes)
         {
             if (&n == cur || n.muted) continue;
-            if (n.startBeat < cur->startBeat - eps
-                && (prev == nullptr || n.startBeat > prev->startBeat))
+            // S-1: at-or-before cur's start (a co-starting base counts).  Take the
+            // latest start; on a co-start tie prefer a non-RampSlide so a base note
+            // wins over a sibling ramp and the back-walk terminates.
+            if (n.startBeat > cur->startBeat + eps) continue;
+            if (prev == nullptr) { prev = &n; continue; }
+            if (n.startBeat > prev->startBeat + eps) { prev = &n; continue; }
+            if (n.startBeat > prev->startBeat - eps
+                && prev->type == NoteType::RampSlide && n.type != NoteType::RampSlide)
                 prev = &n;
         }
-        if (prev == nullptr) return -1;
+        if (prev == nullptr) return nullptr;
         if (prev->startBeat + prev->durationBeats < cur->startBeat - eps)
-            return -1;   // gap - the chain is not sounding here
-        if (prev->type != NoteType::RampSlide) return prev->midiNote;
+            return nullptr;   // gap - the chain is not sounding here
+        if (prev->type != NoteType::RampSlide) return prev;
         cur = prev;
     }
-    return -1;
+    return nullptr;
+}
+
+static int findRampAnchorPitch (const std::vector<PianoNote>& notes,
+                                const PianoNote& slide)
+{
+    const auto* anchor = findRampAnchorNote (notes, slide);
+    return anchor != nullptr ? anchor->midiNote : -1;
 }
 
 // QA-H Ramp Slide: bend the sounding anchor voice - deliberately NO noteOn.
@@ -179,17 +225,46 @@ static int findRampAnchorPitch (const std::vector<PianoNote>& notes,
 // (juce) playing note matches CC84 retargets its pitch over the time, and
 // every voice clears the glide stash when CC85 lands so nothing leaks into
 // a later noteOn.
-static void emitRampSlide (juce::MidiBuffer& dst, int anchorNote, int targetNote,
+static void emitRampSlide (juce::MidiBuffer& dst, const PianoNote& note, int anchorNote,
                            int timeMs, int samplePos)
 {
     constexpr int ch = 1;
+    // S-6: the takeover carries the slide note's per-note expression too, so pan /
+    // cutoff / resonance / release / fine-pitch track the slide (velocity excepted -
+    // there is no re-attack to carry it).  #11 (G-4): pan rides CC89 as a ramp
+    // TARGET so it glides over the slide instead of jumping.
+    emitNoteExpression (dst, note, samplePos, true);
     const int t = juce::jlimit (0, 16383, timeMs);
     dst.addEvent (juce::MidiMessage::controllerEvent (ch, 5,  (t >> 7) & 0x7F), samplePos);
     dst.addEvent (juce::MidiMessage::controllerEvent (ch, 37,  t       & 0x7F), samplePos);
     dst.addEvent (juce::MidiMessage::controllerEvent (ch, 84,
                       juce::jlimit (0, 127, anchorNote)), samplePos);
+    // S-6(C): target loudness for the takeover's velocity ramp (base -> slide
+    // velocity over the glide time), delivered before CC85 which arms the ramp.
+    dst.addEvent (juce::MidiMessage::controllerEvent (ch, 86,
+                      juce::jlimit (1, 127, (int) std::round (note.velocity * 127.0f))), samplePos);
     dst.addEvent (juce::MidiMessage::controllerEvent (ch, 85,
-                      juce::jlimit (0, 127, targetNote)), samplePos);
+                      juce::jlimit (0, 127, note.midiNote)), samplePos);
+}
+
+// QA-SlideSampler Task 4: native Bend note (Guitars/Basses).  Plays a normal
+// noteOn plus a bend transport - CC87 = amount (64 + signed semitones), CC88 =
+// shape (BendShape 0..3), CC5/CC37 = duration ms - that the sfizz processor turns
+// into a pitch-wheel ramp scaled to the patch's real bend range.  The in-house
+// engines don't map CC87/88 so it degrades to a plain note there.
+static void emitBend (juce::MidiBuffer& dst, const PianoNote& note, int timeMs, int samplePos)
+{
+    constexpr int ch = 1;
+    emitNoteExpression (dst, note, samplePos);
+    const int t = juce::jlimit (0, 16383, timeMs);
+    dst.addEvent (juce::MidiMessage::controllerEvent (ch, 5,  (t >> 7) & 0x7F), samplePos);
+    dst.addEvent (juce::MidiMessage::controllerEvent (ch, 37,  t       & 0x7F), samplePos);
+    dst.addEvent (juce::MidiMessage::controllerEvent (ch, 87,
+                      juce::jlimit (0, 127, 64 + (int) std::lround (note.bendSemitones))), samplePos);
+    dst.addEvent (juce::MidiMessage::controllerEvent (ch, 88,
+                      juce::jlimit (0, 3, (int) note.bendShape)), samplePos);
+    const int vel = juce::jlimit (1, 127, (int) (note.velocity * 127.f));
+    dst.addEvent (juce::MidiMessage::noteOn (ch, note.midiNote, (juce::uint8) vel), samplePos);
 }
 
 // ── Parameter layout ──────────────────────────────────────────────────────────
@@ -301,6 +376,10 @@ VibeSynthProcessor::VibeSynthProcessor()
         .withOutput("Output", juce::AudioChannelSet::stereo(), true)),
       apvts(*this, nullptr, "BaySickDAWState", createParameterLayout())
 {
+    // QA-L-Fix: -1 = no held note-trigger voice.  Value-initialisation would
+    // give 0, which is a valid MIDI note.
+    mNoteTriggerHeld.fill (-1);
+
     // Set up polyphonic synth -- 8 voices
     // QA-0a (2026-05-07): placeholder sample rate before addVoice (see
     // VibePlayerDSP::VibeSynth ctor for full reasoning).
@@ -456,6 +535,8 @@ void VibeSynthProcessor::prepareToPlay(double sampleRate, int samplesPerBlock)
 
     // 5F-4a: register master + 5 bus strip params (idempotent).
     ensureMixerBusAndMasterParams();
+    // QA-G3Smoke Swing (SW-6): global + per-player swing params + cached atomics.
+    ensureSwingParams();
     // 5F-4a Batch 6: cache APVTS pointers in bus + master nodes (needs params registered).
     mVibeGraph.rebindBusApvts();
 
@@ -2107,6 +2188,12 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
         for (auto& b : voxPageMidi)   b.addEvent(juce::MidiMessage::allNotesOff(1), 0);   // G-4
         for (auto& b : instPageMidi)  b.addEvent(juce::MidiMessage::allNotesOff(1), 0);   // G-4
         mRustyDrumsMidi.addEvent(juce::MidiMessage::allNotesOff(1), 0);                   // J-7b
+        // QA-L-Fix: drop trigger holds too -- the allNotesOff above already
+        // silenced the voices, so leaving one armed would fire a stray
+        // note-off into the next block.
+        for (auto& h : mCcTriggerHolds)  h = {};
+        for (auto& n : mNoteTriggerHeld) n = -1;
+        mAnyCcHoldActive = false;
     }
 
     // ── Piano roll note scheduling ────────────────────────────────────────
@@ -2205,6 +2292,17 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
                 windows[nWin++] = { beatStart, beatEnd, 0 };
             }
 
+           #if JUCE_DEBUG
+            // [G3 BAR1]: window readout on any block touching beat 0.
+            if (beatStart < 0.05 || (nWin > 1 && windows[1].winStart < 0.05))
+                G3PlayheadDiag::logBar1 ("windows n=" + juce::String (nWin)
+                    + " w0=[" + juce::String (windows[0].winStart, 4) + ","
+                    + juce::String (windows[0].winEnd, 4) + ")"
+                    + (nWin > 1 ? (" w1=[" + juce::String (windows[1].winStart, 4) + ","
+                                   + juce::String (windows[1].winEnd, 4) + ") wrapSmp="
+                                   + juce::String (wrapSmp)) : juce::String()));
+           #endif
+
             // QA-TempoMap: beat -> in-block sample offset within a window.
             // Map path: offset = exact sample distance from the window's
             // musical start (window 1's base re-anchors at the wrap sample).
@@ -2290,13 +2388,73 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
             auto scheduleRollWindows = [&] (const std::vector<PianoNote>& notes,
                                             juce::MidiBuffer& buf, int target,
                                             double absOffset, double contentHi, double offHi,
-                                            double contentLo = -1.0e18)
+                                            double contentLo = -1.0e18,
+                                            double swingAmt = 0.0, bool swingTrunc = false)
             {
+                // S-1/S-5: slide emits deferred to AFTER the note-on loop so each
+                // lands after its source's same-sample note-on regardless of note-
+                // vector order (a MidiBuffer keeps equal-timestamp events in insertion
+                // order).  Without this a co-starting source scheduled after the slide
+                // would out-live an RT/Porta mono-cut, or be missed entirely by an RP
+                // takeover bend.  Stack-local: no audio-thread allocation.  64 slide
+                // note-ons per roll per block is far beyond any real pattern.
+                struct MonoCut  { int note; int smp; };
+                struct RampBend { const PianoNote* note; int anchor; int timeMs; int smp; };
+                MonoCut  monoCuts [64];
+                RampBend rampBends[64];
+                int      nMonoCuts  = 0;
+                int      nRampBends = 0;
                 for (const auto& note : notes)
                 {
                     if (note.muted) continue;
-                    const double absStart = absOffset + note.startBeat;
-                    if (absStart < contentLo || absStart >= contentHi) continue;
+                    // SW-2/SW-4 (QA-G3Smoke Swing): scheduling-time transform.
+                    // An off-beat 16th (odd index in the PATTERN-LOCAL grid;
+                    // floor keeps humanized starts coherent) is pushed by
+                    // global x player-mix x half a 16th.  Local, not absolute,
+                    // so block placement never changes a pattern's feel.  The
+                    // whole note shifts (its off rides rawStart below).
+                    double localStart = note.startBeat;
+                    bool   swung      = false;
+                    if (swingAmt > 0.0
+                        && (((int) std::floor (localStart / 0.25)) & 1) != 0)
+                    {
+                        localStart += swingAmt;
+                        swung = true;
+                    }
+                    // SW-5: a pushed note may newly overlap the NEXT same-pitch
+                    // note; the per-player Truncate toggle clips its off to that
+                    // note's post-swing start (same-pitch scope only -- chords
+                    // stay intact).
+                    auto truncSwungOff = [&] (double off) -> double
+                    {
+                        if (! (swingTrunc && swung)) return off;
+                        double nextLocal = 1.0e18;
+                        for (const auto& n : notes)
+                        {
+                            if (&n == &note || n.muted || n.midiNote != note.midiNote) continue;
+                            double ns = n.startBeat;
+                            if ((((int) std::floor (n.startBeat / 0.25)) & 1) != 0) ns += swingAmt;
+                            if (ns > localStart + 1.0e-6 && ns < nextLocal) nextLocal = ns;
+                        }
+                        return juce::jmin (off, absOffset + nextLocal);
+                    };
+                    const double rawStart = absOffset + localStart;
+                    if (rawStart >= contentHi) continue;   // starts past the window end
+                    // B-3: a note straddling the window's LEFT edge (contentLo) is
+                    // clamped to the boundary and plays its remaining fragment (FL
+                    // mid-note slice, NO copy) instead of being dropped.  Because
+                    // contentLo is the block's fixed arrangement start, the clamped
+                    // note only lands in a window on the block-crossing block, so it
+                    // fires once - no per-block retrigger.  chainDur is computed once
+                    // for the straddle test + reused for the note-off below.
+                    double absStart = rawStart;
+                    double chainDur = -1.0;
+                    if (rawStart < contentLo)
+                    {
+                        chainDur = rampChainDurationBeats (notes, note);
+                        if (rawStart + chainDur <= contentLo) continue;   // entirely before
+                        absStart = contentLo;
+                    }
                     for (int w = 0; w < nWin; ++w)
                     {
                         if (absStart >= windows[w].winStart && absStart < windows[w].winEnd)
@@ -2315,41 +2473,123 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
 
                             if (note.type == NoteType::RampSlide)
                             {
-                                // Takeover bend: no noteOn, no own note-off -
-                                // the anchor's off was extended to the chain
-                                // end when the anchor was scheduled.  Chain
-                                // broken (nothing sounding) = silent.
+                                // Takeover bend: no noteOn, no own note-off - the
+                                // anchor's off was extended to the chain end when the
+                                // anchor was scheduled.  Chain broken (nothing
+                                // sounding) = silent.  S-1: a co-starting base now
+                                // qualifies as the anchor; deferring the emit lets the
+                                // takeover grab it at the shared sample.
                                 const int anchor = findRampAnchorPitch (notes, note);
-                                if (anchor >= 0)
-                                    emitRampSlide (buf, anchor, note.midiNote,
+                                if (anchor >= 0 && nRampBends < 64)
+                                    rampBends[nRampBends++] = { &note, anchor,
                                         (int) std::llround (beatsToMs (absStart, note.durationBeats)),
-                                        smp);
+                                        smp };
+                                break;
+                            }
+
+                            if (note.type == NoteType::Bend)
+                            {
+                                // Native pitch-wheel bend (Guitars/Basses): a plain
+                                // noteOn + the bend transport; the sfizz processor
+                                // ramps the wheel over the note in the chosen shape.
+                                // Off scheduled like a normal note (B-3 straddle clamp).
+                                const int timeMs = (int) std::llround (
+                                    beatsToMs (absStart, note.durationBeats));
+                                emitBend (buf, note, timeMs, smp);
+                                if (chainDur < 0.0) chainDur = rampChainDurationBeats (notes, note);
+                                double boff = truncSwungOff (rawStart + chainDur);
+                                if (boff > offHi) boff = offHi;
+                                mPRPendingOffs.push_back ({ boff, note.midiNote, target });
                                 break;
                             }
 
                             int glideFrom = -1, glideMs = -1;
                             if (note.type == NoteType::Portamento)
+                            {
                                 glideFrom = findGlideSourcePitch (notes, note);
+                                // S-4: Porta glides over its own per-note length in
+                                // beats, ignoring the block/note length.
+                                if (glideFrom >= 0)
+                                    glideMs = (int) std::llround (
+                                        beatsToMs (absStart, note.portaLengthBeats));
+                            }
                             else if (note.type == NoteType::RetrigSlide)
                             {
                                 glideFrom = findGlideSourcePitch (notes, note);
+                                // S-3: RT glides over the slide note's own length.
                                 if (glideFrom >= 0)
                                     glideMs = (int) std::llround (
                                         beatsToMs (absStart, note.durationBeats));
                             }
-                            emitPianoNoteOn (buf, note, smp, glideFrom, glideMs);
-                            double off = absStart
-                                       + rampChainDurationBeats (notes, note);
+                            // S-5: RT + Porta are single-voice - record a mono-cut of
+                            // the glide source at the slide's start.  Skipped when
+                            // source == target (a degenerate zero-interval slide) so
+                            // the fresh voice is never cut.
+                            if (glideFrom >= 0 && glideFrom != note.midiNote
+                                && nMonoCuts < 64)
+                                monoCuts[nMonoCuts++] = { glideFrom, smp };
+                            // #11 (G-4): RT glide note-ons carry pan as a CC89
+                            // ramp target (glides over the slide); Porta + plain
+                            // notes keep the instant CC10.
+                           #if JUCE_DEBUG
+                            if (absStart < 0.05)
+                                G3PlayheadDiag::logBar1 ("noteOn pitch=" + juce::String (note.midiNote)
+                                    + " absStart=" + juce::String (absStart, 4)
+                                    + " smp=" + juce::String (smp)
+                                    + " win=[" + juce::String (windows[w].winStart, 4) + ","
+                                    + juce::String (windows[w].winEnd, 4) + ")");
+                           #endif
+                            emitPianoNoteOn (buf, note, smp, glideFrom, glideMs,
+                                             note.type == NoteType::RetrigSlide && glideFrom >= 0);
+                            // B-3: the off is the note's ORIGINAL end (rawStart-based),
+                            // so a clamped straddling note stops where it really ends,
+                            // not full-duration past the boundary.
+                            if (chainDur < 0.0) chainDur = rampChainDurationBeats (notes, note);
+                            double off = truncSwungOff (rawStart + chainDur);
                             if (off > offHi) off = offHi;
                             mPRPendingOffs.push_back ({ off, note.midiNote, target });
                             break;   // a note fires in at most one window
                         }
                     }
                 }
+                // S-1/S-5: apply the deferred slide emits last, so each lands after
+                // every note-on above.  RP takeover bends first (grab the anchor
+                // voice), then RT/Porta mono-cuts (source cut, target voice untouched).
+                for (int i = 0; i < nRampBends; ++i)
+                    emitRampSlide (buf, *rampBends[i].note, rampBends[i].anchor,
+                                   rampBends[i].timeMs, rampBends[i].smp);
+                for (int i = 0; i < nMonoCuts; ++i)
+                    buf.addEvent (juce::MidiMessage::noteOff (1, monoCuts[i].note),
+                                  monoCuts[i].smp);
+            };
+
+            // #30b (G-6): ALL roll reads below go through the lock-free
+            // snapshot -- one wait-free acquire per block; the message thread
+            // republishes on every edit.  The old per-family try-locks
+            // (drums/clips/vox/inst) silently DISCARDED every note-on in a
+            // contended block, and layers/bass/rusty read live vectors bare
+            // (torn reads under concurrent edits).  Both hazards end here.
+            const SchedulerRollSnapshot* rollSnap = mPatternManager->acquireRollSnapshot();
+
+            // QA-G3Smoke Swing (SW-4): effective push = global x player mix x
+            // half a 16th (0.125 beats).  Cached raw param atomics; one global
+            // load per block, one mix load per roll dispatch.  A null mix
+            // pointer = full global (clip rolls -- Jeff 2026-07-23).
+            const float gSw = mSwingGlobal != nullptr
+                ? mSwingGlobal->load (std::memory_order_relaxed) : 0.f;
+            auto swMix = [&] (std::atomic<float>* mix) -> double
+            {
+                if (gSw <= 0.f) return 0.0;
+                const float m = mix != nullptr ? mix->load (std::memory_order_relaxed) : 1.f;
+                return (double) gSw * (double) m * 0.125;
+            };
+            auto swTrunc = [] (std::atomic<float>* t) -> bool
+            {
+                return t != nullptr && t->load (std::memory_order_relaxed) >= 0.5f;
             };
 
             // ── SONG MODE ─────────────────────────────────────────────────
-            if (mSongMode.load(std::memory_order_relaxed))
+            if (rollSnap != nullptr && mSongMode.load(std::memory_order_relaxed))
             {
 
                 // Detect song end - request transport stop (or let playhead
@@ -2375,13 +2615,12 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
                     const auto& blk = mPatternManager->getBlock(blkIdx);
                     if (blk.clipType != ClipType::Pattern || blk.muted) continue;
                     if (!mPatternManager->isRowAudible(blk.trackRow)) continue;
-                    if (blk.patternIndex < 0 || blk.patternIndex >= mPatternManager->getNumPatterns()) continue;
+                    if (blk.patternIndex < 0 || blk.patternIndex >= (int) rollSnap->patterns.size()) continue;
 
                     // QA-Ee: play the block's EXACT (sub-bar) span, not the
                     // ceil'd whole-bar count -- a sub-bar-resized pattern block
                     // now plays the length it is drawn (length of block ==
-                    // length of playback).  effective* fall back to startBar*4 /
-                    // lengthBars*4 for bar-aligned blocks, so this is a no-op there.
+                    // length of playback).
                     double blkStartBeat = effectiveStartBeats (blk);
                     double blkEndBeat   = effectiveStartBeats (blk) + effectiveLengthBeats (blk);
                     // Relevant iff the block overlaps either active window.
@@ -2392,89 +2631,75 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
                     if (!relevant) continue;
 
                     const double offHi = (loopEndBeat > 0.0) ? juce::jmin (blkEndBeat, loopEndBeat) : blkEndBeat;
-                    const auto& sPat = mPatternManager->getPattern(blk.patternIndex);
-                    // QA-G Task 5: blocks TILE their pattern (cycle = pattern
-                    // bar count on the uniform grid); the content offset
-                    // phase-shifts the tiling so slice pieces play their true
-                    // slice.  Each tile is a shifted viewport: contentLo masks
-                    // tile-0 notes starting before the block (left of a cut);
-                    // per-tile contentHi masks notes past the cycle end + the
-                    // block end (mirrors the preview's per-tile clamp).
-                    // QA-G Task 6: the cycle is the pattern's MUSICAL length
-                    // (bars x its effective beats-per-bar) -- a 3/4 pattern
-                    // tiles every 3 quarter-beats, matching its roll grid and
-                    // the preview.  4/4 keeps bars x 4 exactly.
-                    const double patBpb      = (double) juce::jmax (1, sPat.tsNum) * 4.0
-                                               / (double) juce::jmax (1, sPat.tsDen);
-                    const double cycleBeats  = juce::jmax (1.0, (double) sPat.bars * patBpb);
-                    const double offsetBeats = juce::jlimit (0.0, cycleBeats,
-                                                   ticksToBeats (blk.contentOffsetTicks));
-                    const int nTiles = (int) std::ceil ((effectiveLengthBeats (blk) + offsetBeats) / cycleBeats);
-                    auto sched = [&] (const std::vector<PianoNote>& notes, juce::MidiBuffer& buf, int target)
+                    const auto& sPat = *rollSnap->patterns[(size_t) blk.patternIndex];
+
+                    // #24 (QA-G3Smoke): tiling is GONE -- one pass from the
+                    // content offset.  The pattern's content length (computed at
+                    // snapshot publish; furthest note/step end, bar-ceiled at the
+                    // pattern's bpb, min 1 bar) masks the schedule window:
+                    // block length past available content is silent, and an
+                    // offset past the content is silent.  contentLo still masks
+                    // notes starting left of a slice cut (B-3 straddle clamp).
+                    const double contentBeats = sPat.contentBeats;
+                    const double offsetBeats  = juce::jmax (0.0, ticksToBeats (blk.contentOffsetTicks));
+                    const double origin       = blkStartBeat - offsetBeats;
+                    const double contentEnd   = juce::jmin (blkEndBeat, origin + contentBeats);
+                    if (contentEnd <= blkStartBeat) continue;
+
+                    auto sched = [&] (const std::vector<PianoNote>& notes, juce::MidiBuffer& buf, int target,
+                                      double swingAmt = 0.0, bool swingTrunc = false)
                     {
-                        for (int k = 0; k < nTiles; ++k)
-                        {
-                            const double origin = blkStartBeat - offsetBeats + k * cycleBeats;
-                            if (origin >= blkEndBeat) break;
-                            scheduleRollWindows (notes, buf, target, origin,
-                                                 juce::jmin (blkEndBeat, origin + cycleBeats),
-                                                 offHi, blkStartBeat);
-                        }
+                        scheduleRollWindows (notes, buf, target, origin, contentEnd,
+                                             offHi, blkStartBeat, swingAmt, swingTrunc);
                     };
 
                     for (int pi = 0; pi < kMaxLayerPages; ++pi)
-                        sched (sPat.layerRoll[pi].notes, layerPageMidi[pi], pi);
+                        sched (sPat.layerNotes[pi], layerPageMidi[pi], pi,
+                               swMix (mSwingMixLayer[pi]), swTrunc (mSwingTruncLayer[pi]));
                     for (int bi2 = 0; bi2 < kMaxBassPages; ++bi2)
-                        sched (sPat.bassRoll[bi2].notes, bassPageMidi[bi2], kBassPRTarget + bi2);
+                        sched (sPat.bassNotes[bi2], bassPageMidi[bi2], kBassPRTarget + bi2,
+                               swMix (mSwingMixBass[bi2]), swTrunc (mSwingTruncBass[bi2]));
 
-                    // D1.2: per-drum-page rolls.  No transpose compensation -
-                    // preset transpose IS the sound design.
+                    // #30b: per-page ENGINE existence is irrelevant to roll
+                    // scheduling -- an absent page's MIDI buffer is stable and
+                    // simply never consumed (the layers/bass loops above are the
+                    // long-standing precedent).  Family-level activity atomics
+                    // remain the fast-path gate; the per-page unique_ptr checks
+                    // (which the deleted try-locks existed to make safe) are gone.
+                    // D1.2 note: no drum transpose compensation - preset
+                    // transpose IS the sound design.
                     if (mAnyDrumPageActive.load(std::memory_order_acquire))
-                    {
-                        juce::SpinLock::ScopedTryLockType dlk(mDrumEngineLock);
-                        if (dlk.isLocked())
-                            for (int di = 0; di < kMaxDrumPages; ++di)
-                                if (mDrumEngines[di])
-                                    sched (sPat.drumRolls[di].notes, drumPageMidi[di], kDrumPRTarget + di);
-                    }
-                    // G-3: per-clip-page rolls.
+                        for (int di = 0; di < kMaxDrumPages; ++di)
+                            sched (sPat.drumNotes[di], drumPageMidi[di], kDrumPRTarget + di,
+                                   swMix (mSwingMixDrum[di]), swTrunc (mSwingTruncDrum[di]));
+                    // G-3: per-clip-page rolls.  Swing = full global (no per-page
+                    // mix param -- Jeff 2026-07-23).
                     if (mAnyClipPageActive.load(std::memory_order_acquire))
-                    {
-                        juce::SpinLock::ScopedTryLockType clk(mClipEngineLock);
-                        if (clk.isLocked())
-                            for (int ci = 0; ci < kMaxClipPages; ++ci)
-                                if (mClipEngines[ci])
-                                    sched (sPat.clipRoll[ci].notes, clipPageMidi[ci], kClipPRTarget + ci);
-                    }
-                    // G-4: per-Vox / per-Inst-page rolls.
+                        for (int ci = 0; ci < kMaxClipPages; ++ci)
+                            sched (sPat.clipNotes[ci], clipPageMidi[ci], kClipPRTarget + ci,
+                                   swMix (nullptr), false);
+                    // G-4: per-Vox-page rolls.  Swing-excluded (no vox MIDI --
+                    // Jeff 2026-07-23).
                     if (mAnyVoxPageActive.load(std::memory_order_acquire))
-                    {
-                        juce::SpinLock::ScopedTryLockType vlk(mVoxEngineLock);
-                        if (vlk.isLocked())
-                            for (int vi = 0; vi < kMaxVoxPages; ++vi)
-                                if (mVoxEngines[vi])
-                                    sched (sPat.voxRoll[vi].notes, voxPageMidi[vi], kVoxPRTarget + vi);
-                    }
+                        for (int vi = 0; vi < kMaxVoxPages; ++vi)
+                            sched (sPat.voxNotes[vi], voxPageMidi[vi], kVoxPRTarget + vi);
                     if (mAnyInstPageActive.load(std::memory_order_acquire))
-                    {
-                        juce::SpinLock::ScopedTryLockType ilk(mInstEngineLock);
-                        if (ilk.isLocked())
-                            for (int ii = 0; ii < kMaxInstPages; ++ii)
-                            {
-                                if (! mInstEngines[ii]) continue;
-                                // K-3 / L-2: only sfizz-source Inst pages (Guitars /
-                                // Basses) take MIDI; live-input chains drop it.
-                                if (! mGuitarsActive[ii].load(std::memory_order_acquire)
-                                    && ! mBassesActive[ii].load(std::memory_order_acquire)) continue;
-                                sched (sPat.instRoll[ii].notes, instPageMidi[ii], kInstPRTarget + ii);
-                            }
-                    }
+                        for (int ii = 0; ii < kMaxInstPages; ++ii)
+                        {
+                            // K-3 / L-2: only sfizz-source Inst pages (Guitars /
+                            // Basses) take MIDI; live-input chains drop it.
+                            if (! mGuitarsActive[ii].load(std::memory_order_acquire)
+                                && ! mBassesActive[ii].load(std::memory_order_acquire)) continue;
+                            sched (sPat.instNotes[ii], instPageMidi[ii], kInstPRTarget + ii,
+                                   swMix (mSwingMixInst[ii]), swTrunc (mSwingTruncInst[ii]));
+                        }
                     // J-7b: BaySickRustyDrums singleton roll.
-                    if (mRustyDrumsActive.load(std::memory_order_acquire) && mRustyDrumsEngine)
-                        sched (sPat.baySickRustyDrumsRoll.notes, mRustyDrumsMidi, kRustyPRTarget);
+                    if (mRustyDrumsActive.load(std::memory_order_acquire))
+                        sched (sPat.rustyNotes, mRustyDrumsMidi, kRustyPRTarget,
+                               swMix (mSwingMixRusty), swTrunc (mSwingTruncRusty));
                 }
             }
-            else
+            else if (rollSnap != nullptr && ! rollSnap->patterns.empty())
             {
                 // ── PATTERN MODE ──────────────────────────────────────────
                 // The current pattern loops [0, patLen) (or a time-selection
@@ -2482,58 +2707,49 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
                 // the loop-seam window split fires the wrapped first note at the
                 // exact in-block sample, and note-offs clamp to loopEnd so an
                 // overrun is cut at the boundary.  No band-aid, no double-fire.
-                auto& pat = mPatternManager->currentPattern();
+                // #30b: the viewed pattern comes from the snapshot's stamped
+                // index (published by setCurrentPattern), not the live object.
+                const int curIdx = juce::jlimit (0, (int) rollSnap->patterns.size() - 1,
+                                                 rollSnap->currentPatternIndex);
+                const auto& pat = *rollSnap->patterns[(size_t) curIdx];
                 const double offHi = (loopEndBeat > 0.0) ? loopEndBeat : 1.0e18;
                 constexpr double kInf = 1.0e18;   // pattern has no viewport mask
 
                 for (int i = 0; i < kMaxLayerPages; ++i)
-                    scheduleRollWindows (pat.layerRoll[i].notes, layerPageMidi[i], i, 0.0, kInf, offHi);
+                    scheduleRollWindows (pat.layerNotes[i], layerPageMidi[i], i, 0.0, kInf, offHi, -1.0e18,
+                                         swMix (mSwingMixLayer[i]), swTrunc (mSwingTruncLayer[i]));
                 for (int bi = 0; bi < kMaxBassPages; ++bi)
-                    scheduleRollWindows (pat.bassRoll[bi].notes, bassPageMidi[bi], kBassPRTarget + bi, 0.0, kInf, offHi);
+                    scheduleRollWindows (pat.bassNotes[bi], bassPageMidi[bi], kBassPRTarget + bi, 0.0, kInf, offHi, -1.0e18,
+                                         swMix (mSwingMixBass[bi]), swTrunc (mSwingTruncBass[bi]));
 
-                // D1.2: per-drum-page rolls.
+                // #30b: try-locks + per-page engine checks deleted (see the
+                // song-mode note); family atomics stay as the fast-path gate.
                 if (mAnyDrumPageActive.load(std::memory_order_acquire))
-                {
-                    juce::SpinLock::ScopedTryLockType dlk(mDrumEngineLock);
-                    if (dlk.isLocked())
-                        for (int di = 0; di < kMaxDrumPages; ++di)
-                            if (mDrumEngines[di])
-                                scheduleRollWindows (pat.drumRolls[di].notes, drumPageMidi[di], kDrumPRTarget + di, 0.0, kInf, offHi);
-                }
-                // G-3: per-clip-page rolls.
+                    for (int di = 0; di < kMaxDrumPages; ++di)
+                        scheduleRollWindows (pat.drumNotes[di], drumPageMidi[di], kDrumPRTarget + di, 0.0, kInf, offHi, -1.0e18,
+                                             swMix (mSwingMixDrum[di]), swTrunc (mSwingTruncDrum[di]));
+                // G-3: per-clip-page rolls -- swing = full global (Jeff 2026-07-23).
                 if (mAnyClipPageActive.load(std::memory_order_acquire))
-                {
-                    juce::SpinLock::ScopedTryLockType clk(mClipEngineLock);
-                    if (clk.isLocked())
-                        for (int ci = 0; ci < kMaxClipPages; ++ci)
-                            if (mClipEngines[ci])
-                                scheduleRollWindows (pat.clipRoll[ci].notes, clipPageMidi[ci], kClipPRTarget + ci, 0.0, kInf, offHi);
-                }
-                // G-4: per-Vox / per-Inst-page rolls.
+                    for (int ci = 0; ci < kMaxClipPages; ++ci)
+                        scheduleRollWindows (pat.clipNotes[ci], clipPageMidi[ci], kClipPRTarget + ci, 0.0, kInf, offHi, -1.0e18,
+                                             swMix (nullptr), false);
+                // G-4: per-Vox-page rolls -- swing-excluded (no vox MIDI).
                 if (mAnyVoxPageActive.load(std::memory_order_acquire))
-                {
-                    juce::SpinLock::ScopedTryLockType vlk(mVoxEngineLock);
-                    if (vlk.isLocked())
-                        for (int vi = 0; vi < kMaxVoxPages; ++vi)
-                            if (mVoxEngines[vi])
-                                scheduleRollWindows (pat.voxRoll[vi].notes, voxPageMidi[vi], kVoxPRTarget + vi, 0.0, kInf, offHi);
-                }
+                    for (int vi = 0; vi < kMaxVoxPages; ++vi)
+                        scheduleRollWindows (pat.voxNotes[vi], voxPageMidi[vi], kVoxPRTarget + vi, 0.0, kInf, offHi);
                 if (mAnyInstPageActive.load(std::memory_order_acquire))
-                {
-                    juce::SpinLock::ScopedTryLockType ilk(mInstEngineLock);
-                    if (ilk.isLocked())
-                        for (int ii = 0; ii < kMaxInstPages; ++ii)
-                        {
-                            if (! mInstEngines[ii]) continue;
-                            // K-3 / L-2: only sfizz-source Inst pages take MIDI.
-                            if (! mGuitarsActive[ii].load(std::memory_order_acquire)
-                                && ! mBassesActive[ii].load(std::memory_order_acquire)) continue;
-                            scheduleRollWindows (pat.instRoll[ii].notes, instPageMidi[ii], kInstPRTarget + ii, 0.0, kInf, offHi);
-                        }
-                }
+                    for (int ii = 0; ii < kMaxInstPages; ++ii)
+                    {
+                        // K-3 / L-2: only sfizz-source Inst pages take MIDI.
+                        if (! mGuitarsActive[ii].load(std::memory_order_acquire)
+                            && ! mBassesActive[ii].load(std::memory_order_acquire)) continue;
+                        scheduleRollWindows (pat.instNotes[ii], instPageMidi[ii], kInstPRTarget + ii, 0.0, kInf, offHi, -1.0e18,
+                                             swMix (mSwingMixInst[ii]), swTrunc (mSwingTruncInst[ii]));
+                    }
                 // J-7b: BaySickRustyDrums singleton roll.
-                if (mRustyDrumsActive.load(std::memory_order_acquire) && mRustyDrumsEngine)
-                    scheduleRollWindows (pat.baySickRustyDrumsRoll.notes, mRustyDrumsMidi, kRustyPRTarget, 0.0, kInf, offHi);
+                if (mRustyDrumsActive.load(std::memory_order_acquire))
+                    scheduleRollWindows (pat.rustyNotes, mRustyDrumsMidi, kRustyPRTarget, 0.0, kInf, offHi, -1.0e18,
+                                         swMix (mSwingMixRusty), swTrunc (mSwingTruncRusty));
             }
         }
     }
@@ -2571,7 +2787,12 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
     }
 
     // ── Automation clip playback ──────────────────────────────────────────
-    if (pos.getIsPlaying() && mPatternManager)
+    // Smoke round 3 (Jeff): SONG MODE ONLY -- automation clips live on the
+    // Builder grid, so their bar-overlap math is only meaningful against the
+    // song transport.  Pattern mode's looping beat used to be misread as a
+    // grid position, so clips parked in the first bars drove their params
+    // during pattern playback.  Gate matches the audio-clip block below.
+    if (mSongMode.load (std::memory_order_relaxed) && pos.getIsPlaying() && mPatternManager)
     {
         // C.5b (post-revert): Builder grid is uniform 4-beat-per-bar.
         const double kBeatsPerBar = 4.0;
@@ -2727,33 +2948,32 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
                 else if (msg.isNoteOff()) updateLiveHeldNote (msg.getNoteNumber(), false);
                 else if (msg.isAllNotesOff() || msg.isAllSoundOff()) clearLiveHeldNotes();
 
+                // QA-L-Fix (2026-07-19): per-drum kit triggers.  Runs HERE, in
+                // the live-MIDI loop, rather than in the block-rate learn-queue
+                // drain below -- this path preserves m.samplePosition, and drum
+                // hits are the most timing-sensitive events in the app.
+                //
+                // Learn capture first: a captured event is suppressed from both
+                // trigger dispatch AND engine routing, so the pad the user just
+                // bound doesn't also sound the focused engine on that hit.
+                if (mDrumTriggers.tryCaptureLearnRT (msg))
+                    continue;
+
+                dispatchDrumTriggers (msg, m.samplePosition, kind, drumPageMidi);
+
                 if (dest != nullptr)
                     dest->addEvent (msg, m.samplePosition);
-
-                // Kit fan-out: while ANY drum tab holds MIDI focus, a note
-                // also fires every OTHER drum whose assigned input note
-                // matches (pad controller plays the kit).  The focused tab
-                // already got the full stream above (an assigned drum still
-                // plays normally when focused); unassigned drums receive
-                // nothing extra.  Note-offs follow the same route so fanned
-                // voices release.  null pointer / -1 = unmapped.
-                if (kind == 3 && msg.isNoteOnOrOff())
-                {
-                    const int noteNum = msg.getNoteNumber();
-                    for (int di = 0; di < kMaxDrumPages; ++di)
-                    {
-                        if (di == idx) continue;   // focused tab handled above
-                        auto* p = mDrumInputNotePtr[(size_t) di].load (std::memory_order_acquire);
-                        if (p != nullptr && (int) std::lround (p->load()) == noteNum)
-                            drumPageMidi[di].addEvent (msg, m.samplePosition);
-                    }
-                }
             }
             // Non-routed targets (DrumKit grid / Clip / Vox / live-input Inst /
             // unset) leave dest null -- dropped for ENGINE routing only; allMidi
             // already captured the performance so the recorder still sees it.
         }
     }
+
+    // QA-L-Fix: expire CC-trigger holds that never received a CC-0 release.
+    // Runs every block regardless of whether live MIDI arrived, so a controller
+    // that goes silent mid-hold still releases.
+    tickCcTriggerHolds (numSamples, drumPageMidi);
 
     // I-3b (2026-05-02): MIDI Learn dispatch.  Drain device-tagged events
     // pushed by StandaloneApp::handleIncomingMidiMessage.  For each event:
@@ -3453,32 +3673,31 @@ void VibeSynthProcessor::drainMeterAtomicsForUI()
 }
 
 // 2026-05-07 (Batch 10): DSP-load measurement + overload protection.
-// Runs after dispatchBlock.  QA-N (DIAG-02): the number is TOTAL render work
-// (audio-thread pump + every worker), so it tracks "% of one core" of the
-// whole graph instead of the audio thread's critical-path wall-clock.  MT
-// path reads the pool's summed per-task busy ticks; ST path (workers parked)
-// keeps the wall-clock measure -- there the audio thread runs the whole graph
-// serially, so t1-t0 already IS the total (byte-identical to pre-batch).
+// Runs after dispatchBlock, which blocks until every render task completes, so
+// (now - t0) is the block's real render wall-clock = how close it came to the
+// buffer deadline.  That headroom fraction is what the meter DISPLAYS and what
+// the overload / color-tier / voice-steal thresholds are calibrated against
+// (Jeff, a1 2026-07-19).  Both MT and ST use the same wall-clock: under MT it
+// already spans the parallel render (the audio thread waits for the workers).
+// [Superseded QA-N (DIAG-02), which read the pool's summed per-task busy ticks
+//  -- total work across cores.  That is NOT deadline-proximity: a healthy N-core
+//  render reads >100% and false-tripped the overload/color at normal MT load.
+//  The sum-of-cores machinery is now meter-unused -> route to the Phase-6
+//  MT-diagnostic compile-gate (marathon 12e).]
 // Voice-stealing on sustained 85% overload fires regardless of worker count.
 void VibeSynthProcessor::measureDspLoadAndOverload (juce::int64 t0Ticks, int numSamples)
 {
     const double ticksPerSec = (double) juce::Time::getHighResolutionTicksPerSecond();
     const double bufDur      = numSamples / juce::jmax (1.0, mSampleRate);
-    // MT: total parallel task work (sum across the audio-thread pump + all
-    // workers, accumulated in VibeThreadPool::runOneTask, reset per block by
-    // the dispatcher).  ST: audio-thread wall-clock, unchanged.
+    // a1: wall-clock render duration across dispatchBlock (both MT + ST) -- the
+    // deadline-proximity headroom, not QA-N's sum-of-cores total work.
     const double workSeconds =
-        RenderEngine::gMultiThreadedEngineEnabled.load (std::memory_order_acquire)
-            ? (double) mRenderPool.getBusyTicks() / ticksPerSec
-            : (double) (juce::Time::getHighResolutionTicks() - t0Ticks) / ticksPerSec;
-    // 2026-05-09 (QA-Md): cap raised from 2.f (200%) to 10.f (1000%) after
-    // diagnostic capture proved both Debug-MT-on (450%) and Debug-MT-off
-    // (870%) sit well above the original 200% cap, masking the true parallel-
-    // vs-single-threaded gap.  Display side already supports up to 999% via
-    // GlobalTransportBar's juce::jlimit(0, 999, ...).  HOLD-FOR-Phase-6-
-    // review: V1 release value is a UX call (200/500/1000) deferred to the
-    // QA-Audit "Pre-release decisions to revisit" docket -- see Main Plan
-    // §5 QA-Audit + Future State CL-291.
+        (double) (juce::Time::getHighResolutionTicks() - t0Ticks) / ticksPerSec;
+    // Display/threshold ceiling.  The old 10.f (1000%) headroom existed for
+    // QA-Md's sum-of-cores readings and is moot under a1 (wall-clock rarely
+    // exceeds ~2x the deadline), but the exact V1 cap stays a HOLD-FOR-Phase-6
+    // UX call (marathon 12d = 2.0) -- see Main Plan §5 QA-Audit + Future State
+    // CL-291.  Left at 10.f (harmless: wall-clock won't reach it) pending that pass.
     const float  rawLoad  = (bufDur > 0.0)
                                 ? juce::jlimit (0.f, 10.f, (float)(workSeconds / bufDur))
                                 : 0.f;
@@ -3734,10 +3953,10 @@ void VibeSynthProcessor::rebuildAudioClipPlayers()
         if (!rawReader) continue;
 
         AudioClipPlayer p;
-        // QA-Ea Task 0c (2026-05-20 - Option A slip-edit + sub-bar):
-        // effectiveStartBeats prefers blk.startTicks when set (sub-bar
-        // precision, possibly negative) and falls back to startBar * 4 for
-        // every pre-Task-0c block.  The audio loop math at PluginProcessor.cpp
+        // QA-Ea Task 0c (2026-05-20 - Option A slip-edit + sub-bar) / 8A:
+        // effectiveStartBeats reads the beats-authoritative block start
+        // (sub-bar precision, possibly negative after a slip-edit drag-left).
+        // The audio loop math at PluginProcessor.cpp
         // :485-785 already handles negative clipStartBeat correctly
         // (outPosInClip = projectStart - clipStart works for clipStart < 0;
         // the (un)played pre-bar portion is naturally skipped by the
@@ -4614,6 +4833,11 @@ void VibeSynthProcessor::getStateInformation(juce::MemoryBlock& destData)
     state.removeChild(state.getChildWithName(MidiLearnRegistry::kRootTag), nullptr);
     state.addChild(mMidiLearn.saveToValueTree(), -1, nullptr);
 
+    // QA-L-Fix (D-14): per-drum kit trigger bindings save WITH the project --
+    // they're part of the kit setup, like each drum's play note.
+    state.removeChild(state.getChildWithName(DrumTriggerMap::kRootTag), nullptr);
+    state.addChild(mDrumTriggers.saveToValueTree(), -1, nullptr);
+
     std::unique_ptr<juce::XmlElement> xml(state.createXml());
     copyXmlToBinary(*xml, destData);
 }
@@ -4664,6 +4888,14 @@ void VibeSynthProcessor::setStateInformation(const void* data, int sizeInBytes)
         state.removeChild(midiMaps, nullptr);
         mMidiLearn.loadFromValueTree(midiMaps);
     }
+
+    // QA-L-Fix (D-14): drum kit trigger bindings.  Unlike the MIDI Learn
+    // registry there are no global defaults to fall back on, so a project
+    // without the child clears rather than inheriting the last project's kit.
+    auto drumTrigs = state.getChildWithName(DrumTriggerMap::kRootTag);
+    state.removeChild(drumTrigs, nullptr);
+    if (drumTrigs.isValid()) mDrumTriggers.loadFromValueTree(drumTrigs);
+    else                     mDrumTriggers.clearAll();
 
     // QA-Ef #4 (2026-05-22): deep-copy the saved tree BEFORE replaceState, so
     // the aux-restore scan below isn't fooled by stale empty <PARAM> nodes
@@ -5326,6 +5558,145 @@ void VibeSynthProcessor::unregisterBassEngine(int pageIdx)
 // 16-slot BaySickDrumsProcessor deleted.  Per-drum-tab registration uses
 // registerDrumEngine (singular) below.
 
+// ─────────────────────────────────────────────────────────────────────────────
+// QA-L-Fix (2026-07-19): per-drum kit trigger dispatch.  Audio thread only.
+// ─────────────────────────────────────────────────────────────────────────────
+int VibeSynthProcessor::drumPlayNoteRT (int drumIdx) const noexcept
+{
+    if (drumIdx < 0 || drumIdx >= kMaxDrumPages) return 60;
+    if (auto* p = mDrumPlayNotePtr[(size_t) drumIdx].load (std::memory_order_acquire))
+        return juce::jlimit (0, 127, (int) std::lround (p->load()));
+    return 60;
+}
+
+void VibeSynthProcessor::dispatchDrumTriggers (
+    const juce::MidiMessage& msg,
+    int samplePosition,
+    int liveTargetKind,
+    std::array<juce::MidiBuffer, kMaxDrumPages>& drumPageMidi) noexcept
+{
+    // Fast-path bypass: one atomic load skips the 16-slot scan entirely until
+    // the user binds a trigger (reference_audio_thread_fast_path_bypass).
+    if (! mDrumTriggers.anyBound()) return;
+
+    const bool isNoteOn  = msg.isNoteOn();
+    const bool isNoteOff = msg.isNoteOff();
+    const bool isCc      = msg.isController();
+    if (! isNoteOn && ! isNoteOff && ! isCc) return;
+
+    // D-8: note triggers fire ONLY while the Drum Kit is the focused engine.
+    // On any other surface the note plays that engine normally, so a pad note
+    // can never double-fire.  Kind 0 == PianoRollPage::EngineKind::DrumKit.
+    const bool kitFocused = (liveTargetKind == 0);
+
+    const int  msgChannel = msg.getChannel();
+    const int  msgNumber  = isCc ? msg.getControllerNumber() : msg.getNoteNumber();
+
+    // D-11: velocity source is app-wide.  Fixed exists for pads that aren't
+    // velocity sensitive -- they'd otherwise send one constant value and every
+    // hit would land at that level anyway, just an arbitrary one.
+    const bool useFixedVel = DrumTriggerVelocity::gUseFixed.load (std::memory_order_relaxed);
+
+    for (int di = 0; di < kMaxDrumPages; ++di)
+    {
+        const auto b = mDrumTriggers.getBindingRT (di);
+        if (! b.isSet()) continue;
+        // Message TYPE must match before the number does: a Note binding on 42
+        // and CC 42 both carry "42" but mean entirely different things, and
+        // matching on the number alone would cross-fire them.
+        const bool typeMatches = (b.kind == DrumTriggerMap::Kind::Cc)
+                                     ? isCc
+                                     : (isNoteOn || isNoteOff);
+        if (! typeMatches) continue;
+        if (b.number != msgNumber) continue;
+        if (b.channel != 0 && b.channel != msgChannel) continue;
+
+        const int playNote = drumPlayNoteRT (di);
+
+        if (b.kind == DrumTriggerMap::Kind::Cc && isCc)
+        {
+            auto& hold = mCcTriggerHolds[(size_t) di];
+            if (msg.getControllerValue() > 0)
+            {
+                // Re-trigger while already held: release the old note first so
+                // the engine sees a clean on/off pair rather than two stacked
+                // note-ons the single hold slot could never release.
+                if (hold.active)
+                    drumPageMidi[di].addEvent (
+                        juce::MidiMessage::noteOff (1, hold.note), samplePosition);
+
+                const float vel = useFixedVel
+                                      ? DrumTriggerVelocity::kFixedVelocity
+                                      : (float) msg.getControllerValue() / 127.0f;
+                drumPageMidi[di].addEvent (
+                    juce::MidiMessage::noteOn (1, playNote, vel), samplePosition);
+                hold.active      = true;
+                hold.note        = playNote;
+                hold.samplesLeft = (int64_t) (kCcTriggerMaxHoldSeconds
+                                              * juce::jmax (1.0, getSampleRate()));
+                mAnyCcHoldActive = true;
+            }
+            else if (hold.active)
+            {
+                drumPageMidi[di].addEvent (
+                    juce::MidiMessage::noteOff (1, hold.note), samplePosition);
+                hold = {};
+            }
+        }
+        else if (b.kind == DrumTriggerMap::Kind::Note && kitFocused)
+        {
+            auto& held = mNoteTriggerHeld[(size_t) di];
+            if (isNoteOn)
+            {
+                // Already held (pad re-struck without a note-off): release the
+                // old voice first so it can't outlive its owner.
+                if (held >= 0)
+                    drumPageMidi[di].addEvent (
+                        juce::MidiMessage::noteOff (1, held), samplePosition);
+
+                const float vel = useFixedVel ? DrumTriggerVelocity::kFixedVelocity
+                                              : msg.getFloatVelocity();
+                drumPageMidi[di].addEvent (
+                    juce::MidiMessage::noteOn (1, playNote, vel), samplePosition);
+                held = playNote;
+            }
+            else if (held >= 0)
+            {
+                // Release the pitch the hit STARTED at, not the current play
+                // note -- re-assigning the drum mid-hold would otherwise leave
+                // the original voice sounding forever.
+                drumPageMidi[di].addEvent (
+                    juce::MidiMessage::noteOff (1, held), samplePosition);
+                held = -1;
+            }
+        }
+    }
+}
+
+void VibeSynthProcessor::tickCcTriggerHolds (
+    int numSamples,
+    std::array<juce::MidiBuffer, kMaxDrumPages>& drumPageMidi) noexcept
+{
+    // Fast-path bypass.  Deliberately NOT gated on anyBound(): a hold can
+    // outlive the binding that started it (user unbinds mid-hold), and skipping
+    // the tick then would strand that voice.  The flag is self-correcting --
+    // set when a hold is armed, recomputed from the survivors each pass.
+    if (! mAnyCcHoldActive) return;
+
+    bool stillActive = false;
+    for (int di = 0; di < kMaxDrumPages; ++di)
+    {
+        auto& hold = mCcTriggerHolds[(size_t) di];
+        if (! hold.active) continue;
+        hold.samplesLeft -= numSamples;
+        if (hold.samplesLeft > 0) { stillActive = true; continue; }
+
+        drumPageMidi[di].addEvent (juce::MidiMessage::noteOff (1, hold.note), 0);
+        hold = {};
+    }
+    mAnyCcHoldActive = stillActive;
+}
+
 // D1.2 (2026-04-24): per-drum-page engine registration.  Each DrumPage tab
 // owns one independent engine; this wires it into the audio graph the same
 // way layers/bass do.  Mixer strip + InsertNode reuse the existing Drum
@@ -5341,10 +5712,10 @@ void VibeSynthProcessor::registerDrumEngine(int pageIdx, juce::AudioProcessor* e
     {
         const juce::String prefix = "mixer_drum_" + juce::String(pageIdx);
         ensureMixerStripParams(prefix, MixerStripKind::Insert, MixerChannelIds::kDrumsBus);
-        // Publish the input-note pointer for the live-MIDI kit fan-out (the
-        // param exists as of the ensure above; audio thread acquire-loads it).
-        mDrumInputNotePtr[(size_t) pageIdx].store(
-            apvts.getRawParameterValue(prefix + "_inputNote"),
+        // Publish the play-pitch pointer for kit-trigger dispatch (the param
+        // exists as of the ensure above; audio thread acquire-loads it).
+        mDrumPlayNotePtr[(size_t) pageIdx].store(
+            apvts.getRawParameterValue(prefix + "_playNote"),
             std::memory_order_release);
         mVibeGraph.ensureInsertNode(VibeGraph::InsertKind::Drum, pageIdx,
                                      "Drum " + juce::String(pageIdx + 1), prefix);
@@ -5373,9 +5744,9 @@ void VibeSynthProcessor::unregisterDrumEngine(int pageIdx)
         juce::SpinLock::ScopedLockType lk(mDrumEngineLock);
         mDrumEngines[pageIdx] = nullptr;
     }
-    // Closed drum stops listening for kit fan-out (param persists; re-register
+    // Closed drum stops accepting kit triggers (param persists; re-register
     // re-publishes the pointer).
-    mDrumInputNotePtr[(size_t) pageIdx].store(nullptr, std::memory_order_release);
+    mDrumPlayNotePtr[(size_t) pageIdx].store(nullptr, std::memory_order_release);
     bool any = false;
     for (auto* e : mDrumEngines) if (e) { any = true; break; }
     mAnyDrumPageActive.store(any, std::memory_order_release);
@@ -5688,12 +6059,12 @@ void VibeSynthProcessor::addParamsForMixerStrip(const juce::String& prefix,
     if (kind == MixerStripKind::Insert)
         addI(prefix + "_chokeGroup", prefix + " Choke Group", 0, 16, 0);
 
-    // Per-drum MIDI trigger note (kit fan-out): -1 = unmapped (the default --
-    // nothing fans out until the user assigns).  While ANY drum tab holds
-    // MIDI focus, an incoming note matching this value also fires this drum.
-    // Drums only -- other inserts have no kit concept.
+    // Per-drum play pitch: the MIDI note this drum SOUNDS at.  Kit hits are
+    // stamped here and kit triggers fire here; it is never an input filter.
+    // Default C5 (60) matches the historical fixed kit note, so every drum
+    // starts assigned.  Drums only -- other inserts have no kit concept.
     if (kind == MixerStripKind::Insert && prefix.startsWith("mixer_drum_"))
-        addI(prefix + "_inputNote", prefix + " Input Note", -1, 127, -1);
+        addI(prefix + "_playNote", prefix + " Play Note", 0, 127, 60);
 }
 
 bool VibeSynthProcessor::ensureMixerStripParams(const juce::String& prefix,
@@ -5739,6 +6110,128 @@ void VibeSynthProcessor::ensureMixerBusAndMasterParams()
     // J-5 (2026-05-03): BaySickRustyDrums dedicated bus.  Always register so
     // routing + audio paths work the moment the singleton spawns its 13 strips.
     ensureMixerStripParams("mixer_rustybus", MixerStripKind::Bus,    kMaster);
+}
+
+// QA-G3Smoke Swing (SW-6): eager bulk registration at startup (mirrors
+// ensureMixerBusAndMasterParams) + raw-atomic pointer caching for the
+// scheduler's per-block reads.  Family set = {layer, bass, drum, inst} x page
+// + rusty.  Vox registers nothing (no vox MIDI -- Jeff 2026-07-23); clip
+// rolls follow the GLOBAL knob at full mix by design, no per-page params
+// (Jeff 2026-07-23).  Params persist with the project via APVTS state.
+void VibeSynthProcessor::ensureSwingParams()
+{
+    auto addF = [&](const juce::String& id, const juce::String& name,
+                    float def) -> std::atomic<float>*
+    {
+        if (apvts.getParameter(id) == nullptr)
+            apvts.createAndAddParameter(std::make_unique<juce::AudioParameterFloat>(
+                VID(id), name, juce::NormalisableRange<float>(0.f, 1.f), def));
+        return apvts.getRawParameterValue(id);
+    };
+    auto addB = [&](const juce::String& id, const juce::String& name,
+                    bool def) -> std::atomic<float>*
+    {
+        if (apvts.getParameter(id) == nullptr)
+            apvts.createAndAddParameter(std::make_unique<juce::AudioParameterBool>(
+                VID(id), name, def));
+        return apvts.getRawParameterValue(id);
+    };
+
+    mSwingGlobal = addF("globalSwing", "Global Swing", 0.f);
+    for (int i = 0; i < kMaxLayerPages; ++i)
+    {
+        const juce::String p = "swing_layer_" + juce::String(i);
+        mSwingMixLayer[i]   = addF(p + "_mix",   p + " Mix", 1.f);
+        mSwingTruncLayer[i] = addB(p + "_trunc", p + " Truncate", false);
+    }
+    for (int i = 0; i < kMaxBassPages; ++i)
+    {
+        const juce::String p = "swing_bass_" + juce::String(i);
+        mSwingMixBass[i]   = addF(p + "_mix",   p + " Mix", 1.f);
+        mSwingTruncBass[i] = addB(p + "_trunc", p + " Truncate", false);
+    }
+    for (int i = 0; i < kMaxDrumPages; ++i)
+    {
+        const juce::String p = "swing_drum_" + juce::String(i);
+        mSwingMixDrum[i]   = addF(p + "_mix",   p + " Mix", 1.f);
+        mSwingTruncDrum[i] = addB(p + "_trunc", p + " Truncate", false);
+    }
+    for (int i = 0; i < kMaxInstPages; ++i)
+    {
+        const juce::String p = "swing_inst_" + juce::String(i);
+        mSwingMixInst[i]   = addF(p + "_mix",   p + " Mix", 1.f);
+        mSwingTruncInst[i] = addB(p + "_trunc", p + " Truncate", false);
+    }
+    mSwingMixRusty   = addF("swing_rusty_mix",   "swing_rusty Mix", 1.f);
+    mSwingTruncRusty = addB("swing_rusty_trunc", "swing_rusty Truncate", false);
+}
+
+VibeSynthProcessor::SwingKnobBinding
+VibeSynthProcessor::makeSwingKnobBinding (const juce::String& mixId,
+                                          const juce::String& truncId)
+{
+    SwingKnobBinding b;
+    auto* ap = &apvts;
+    b.getMix = [ap, mixId]() -> float
+    {
+        if (auto* v = ap->getRawParameterValue (mixId)) return v->load();
+        return 1.0f;
+    };
+    b.setMix = [ap, mixId] (float v)
+    {
+        if (auto* p = dynamic_cast<juce::RangedAudioParameter*> (ap->getParameter (mixId)))
+            p->setValueNotifyingHost (p->getNormalisableRange().convertTo0to1 (
+                juce::jlimit (0.0f, 1.0f, v)));
+    };
+    b.getTrunc = [ap, truncId]() -> bool
+    {
+        if (auto* v = ap->getRawParameterValue (truncId)) return v->load() >= 0.5f;
+        return false;
+    };
+    b.setTrunc = [ap, truncId] (bool on)
+    {
+        if (auto* p = dynamic_cast<juce::RangedAudioParameter*> (ap->getParameter (truncId)))
+            p->setValueNotifyingHost (on ? 1.0f : 0.0f);
+    };
+    return b;
+}
+
+void VibeSynthProcessor::setSongMode (bool b)
+{
+    const bool was = mSongMode.exchange (b, std::memory_order_relaxed);
+    if (was == b) return;
+
+    // Smoke round 3 (Jeff): automation clips only drive params in song mode
+    // (the evaluator is gated above), so the mode boundary is where the
+    // pre-automation values are captured + restored.  ENTRY: snapshot the
+    // current value of every param any automation clip targets.  EXIT:
+    // restore the snapshot so the knobs return to where the user left them.
+    // Message thread only (the transport SONG toggle / project-restore path).
+    if (b)
+    {
+        mAutomationBaseline.clear();
+        if (mPatternManager != nullptr)
+            for (int bi = 0; bi < mPatternManager->getNumBlocks(); ++bi)
+            {
+                const auto& blk = mPatternManager->getBlock (bi);
+                if (blk.clipType != ClipType::Automation)   continue;
+                if (blk.automationLane.paramId.isEmpty())   continue;
+                bool seen = false;
+                for (const auto& p : mAutomationBaseline)
+                    if (p.first == blk.automationLane.paramId) { seen = true; break; }
+                if (seen) continue;
+                if (auto* param = apvts.getParameter (blk.automationLane.paramId))
+                    mAutomationBaseline.push_back ({ blk.automationLane.paramId,
+                                                     param->getValue() });
+            }
+    }
+    else
+    {
+        for (const auto& p : mAutomationBaseline)
+            if (auto* param = apvts.getParameter (p.first))
+                param->setValueNotifyingHost (p.second);
+        mAutomationBaseline.clear();
+    }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -6189,6 +6682,9 @@ void VibeSynthProcessor::destroyBaySickRustyDrums()
     {
         for (int i = 0; i < mPatternManager->getNumPatterns(); ++i)
             mPatternManager->getPattern (i).baySickRustyDrumsRoll.notes.clear();
+        // #30b: the loop above mutated EVERY pattern outside the notify choke
+        // point -- republish so the scheduler snapshot drops the cleared notes.
+        mPatternManager->publishAllRollSnapshots();
     }
 
     // Shield raised above bails the audio thread at processBlock top, so

@@ -62,14 +62,27 @@ void BaySickSynthProcessor::processBlock (juce::AudioBuffer<float>& buffer,
                        juce::jmax (1, buffer.getNumSamples() - 1));
     }
 
-    // Press-and-hold audition: hold-off first so a transition (release prev,
-    // press next) within the same block sequences as off-then-on.
-    const int holdOffNote = mAuditionHoldOff.exchange (-1);
-    const int holdOnNote  = mAuditionHoldOn .exchange (-1);
-    if (holdOffNote >= 0 && holdOffNote <= 127)
-        midi.addEvent (juce::MidiMessage::noteOff (1, holdOffNote), 0);
-    if (holdOnNote  >= 0 && holdOnNote  <= 127)
+    // Press-and-hold audition: hold-offs first (all of them -- mask drain,
+    // stuck-note fix) so a transition within one block is off-then-on.
+    juce::uint64 offWords[2];
+    for (int w = 0; w < 2; ++w)
+    {
+        offWords[w] = mAuditionHoldOff[w].exchange (0, std::memory_order_acq_rel);
+        if (offWords[w])
+            for (int b = 0; b < 64; ++b)
+                if (offWords[w] & (1ull << b))
+                    midi.addEvent (juce::MidiMessage::noteOff (1, w * 64 + b), 0);
+    }
+    const int holdOnNote = mAuditionHoldOn.exchange (-1);
+    if (holdOnNote >= 0 && holdOnNote <= 127)
+    {
         midi.addEvent (juce::MidiMessage::noteOn  (1, holdOnNote, (juce::uint8) 100), 0);
+        // Review fix: press AND release landed inside ONE block -- close the
+        // note at block-end or it rings forever (see HarmlessProcessor).
+        if (offWords[holdOnNote >> 6] & (1ull << (holdOnNote & 63)))
+            midi.addEvent (juce::MidiMessage::noteOff (1, holdOnNote),
+                           juce::jmax (1, buffer.getNumSamples() - 1));
+    }
 
     mSynth.renderNextBlock (buffer, midi);
 

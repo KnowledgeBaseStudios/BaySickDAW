@@ -1,5 +1,6 @@
 #include "DrumKitGrid.h"
 #include "TypingKeyboardMap.h"   // D-4: bypass tool keys while typing-keyboard mode is on
+#include "../G3PlayheadDiag.h"   // [G3 PLAYHEAD] G-9 reading (QA-G3Smoke Task 1); Debug-only
 #include <numeric>
 #include <algorithm>
 #include <map>
@@ -427,10 +428,22 @@ void DrumKitGrid::refreshRowsCache()
     if (mRowProvider) mRowsCache = mRowProvider();
 }
 
-void DrumKitGrid::setPlayheadBeat(double beat) { mPlayhead = beat; repaint(); }
+void DrumKitGrid::setPlayheadBeat(double beat)
+{
+    if (beat == mPlayhead) return;
+    // Residual (b) fix: dirty-rect playhead repaint (see PianoRollGrid).
+    const int oldX = mPlayhead >= 0.0 ? beatToX(mPlayhead) : INT_MIN;
+    mPlayhead = beat;
+    const int newX = beat >= 0.0 ? beatToX(beat) : INT_MIN;
+    if (oldX != INT_MIN) repaint(oldX - 2, 0, 14, getHeight());
+    if (newX != INT_MIN) repaint(newX - 2, 0, 14, getHeight());
+}
 
-double DrumKitGrid::xToBeat(int x)      const { return mBeatOff + (double) x / jmax(1.f, mPPB); }
-int    DrumKitGrid::beatToX(double beat) const { return (int) ((beat - mBeatOff) * mPPB); }
+// #30 kit half (QA-G3Smoke): LDT-394 mirror -- xToBeat samples the CENTER of
+// pixel column x and beatToX rounds (C-truncation biased the line a pixel
+// early), matching the roll + Builder so all three surfaces map identically.
+double DrumKitGrid::xToBeat(int x)      const { return mBeatOff + ((double) x + 0.5) / jmax(1.f, mPPB); }
+int    DrumKitGrid::beatToX(double beat) const { return (int) std::llround ((beat - mBeatOff) * mPPB); }
 int    DrumKitGrid::rowToY (int row)     const { return mRowYOffset + row * mRowH; }
 int    DrumKitGrid::yToRow (int y)       const
 {
@@ -636,6 +649,113 @@ private:
     std::function<void(const DrumKitGrid::DrumKitSnapshot&)> mApply;
     bool mFirstPerform { true };
 };
+
+void DrumKitGrid::setApvts(juce::AudioProcessorValueTreeState* a)
+{
+    mApvts = a;
+}
+
+int DrumKitGrid::playNoteForPage(int pageIdx) const
+{
+    if (mApvts != nullptr && pageIdx >= 0 && pageIdx < (int) kMaxDrumPages)
+        if (auto* p = mApvts->getRawParameterValue(
+                "mixer_drum_" + juce::String(pageIdx) + "_playNote"))
+            return juce::jlimit(0, 127, (int) std::lround(p->load()));
+    return kKitMidiNote;
+}
+
+// Per-drum, ALL-patterns note snapshot.  `mixer_drum_{N}_playNote` is a single
+// project-global param, so a re-pitch has to follow it into every pattern -- but
+// the kit's ordinary DrumKitSnapshot covers only the current pattern.  A
+// dedicated action keeps normal kit edits cheap (they stay current-pattern)
+// while still giving the re-pitch a single-Ctrl+Z restore across the project.
+//
+// Snapshots rather than replaying the transform in reverse: hits the user had
+// DELIBERATELY placed at the new note before the change are indistinguishable
+// from re-pitched ones afterward, so an undo that just moved newNote -> oldNote
+// would drag those along and silently corrupt them.
+class DrumRepitchAction : public juce::UndoableAction
+{
+public:
+    using PerPatternNotes = std::vector<std::vector<PianoNote>>;
+
+    DrumRepitchAction(PatternManager* pm, int pageIdx,
+                       PerPatternNotes before, PerPatternNotes after,
+                       std::function<void()> onApplied)
+        : mPM(pm), mPage(pageIdx),
+          mBefore(std::move(before)), mAfter(std::move(after)),
+          mOnApplied(std::move(onApplied)) {}
+
+    bool perform() override
+    {
+        if (mFirstPerform) { mFirstPerform = false; return true; }
+        return apply(mAfter);
+    }
+    bool undo() override { return apply(mBefore); }
+
+private:
+    bool apply(const PerPatternNotes& snap)
+    {
+        if (mPM == nullptr) return false;
+        const int n = juce::jmin((int) snap.size(), mPM->getNumPatterns());
+        for (int p = 0; p < n; ++p)
+            mPM->getPattern(p).drumRolls[mPage].notes = snap[(size_t) p];
+        if (mOnApplied) mOnApplied();
+        return true;
+    }
+
+    PatternManager* mPM { nullptr };
+    int             mPage { -1 };
+    PerPatternNotes mBefore, mAfter;
+    std::function<void()> mOnApplied;
+    bool mFirstPerform { true };
+};
+
+void DrumKitGrid::repitchDrumHits(int pageIdx, int oldNote, int newNote)
+{
+    if (mPM == nullptr || oldNote == newNote) return;
+    if (pageIdx < 0 || pageIdx >= (int) kMaxDrumPages) return;
+
+    const int numPatterns = mPM->getNumPatterns();
+
+    DrumRepitchAction::PerPatternNotes before;
+    before.reserve((size_t) numPatterns);
+    bool anyAtOld = false;
+    for (int p = 0; p < numPatterns; ++p)
+    {
+        const auto& notes = mPM->getPattern(p).drumRolls[pageIdx].notes;
+        for (const auto& n : notes)
+            if (n.midiNote == oldNote) { anyAtOld = true; break; }
+        before.push_back(notes);
+    }
+    if (! anyAtOld) return;   // nothing to move - skip the undo entry entirely
+
+    for (int p = 0; p < numPatterns; ++p)
+        for (auto& n : mPM->getPattern(p).drumRolls[pageIdx].notes)
+            if (n.midiNote == oldNote)
+                n.midiNote = newNote;
+
+    DrumRepitchAction::PerPatternNotes after;
+    after.reserve((size_t) numPatterns);
+    for (int p = 0; p < numPatterns; ++p)
+        after.push_back(mPM->getPattern(p).drumRolls[pageIdx].notes);
+
+    if (mUndoCtx.isValid())
+    {
+        mUndoCtx.perform(
+            new DrumRepitchAction(mPM, pageIdx, std::move(before), std::move(after),
+                                  [this]
+                                  {
+                                      mSelection.clear();
+                                      if (onNotesChanged) onNotesChanged();
+                                      repaint();
+                                  }),
+            "Change Play Note");
+    }
+
+    if (onNotesChanged) onNotesChanged();
+    repaint();
+}
 
 void DrumKitGrid::beginEdit(const juce::String& label)
 {
@@ -1263,6 +1383,13 @@ void DrumKitGrid::mouseMove(const MouseEvent& e)
 // ─────────────────────────────────────────────────────────────────────────────
 void DrumKitGrid::mouseDown(const MouseEvent& e)
 {
+#if JUCE_DEBUG
+    G3PlayheadDiag::log ("click(kit) x=" + juce::String (e.x) + " y=" + juce::String (e.y)
+                         + " rawBeat=" + juce::String (xToBeat (e.x), 4)
+                         + " snapBeat=" + juce::String (snapBeat (xToBeat (e.x)), 4)
+                         + " snapDiv=" + juce::String (onGetSnapDiv ? onGetSnapDiv() : -1)
+                         + " playheadBeat=" + juce::String (mPlayhead, 4));
+#endif
     if (mPM == nullptr) return;
     refreshRowsCache();   // ensure rowToPageIndex sees current drum state
     grabKeyboardFocus();
@@ -1296,7 +1423,9 @@ void DrumKitGrid::mouseDown(const MouseEvent& e)
         }
         else if (! e.mods.isRightButtonDown())
         {
-            if (onSeek) onSeek(xToBeat(e.x));
+            // 1A (QA-G3Smoke, Jeff 2026-07-23): seek obeys snap; Alt = free.
+            if (onSeek) onSeek (e.mods.isAltDown() ? xToBeat (e.x)
+                                                   : snapBeat (xToBeat (e.x)));
         }
         return;
     }
@@ -1428,7 +1557,7 @@ void DrumKitGrid::mouseDown(const MouseEvent& e)
             if (pi >= 0)
             {
                 PianoNote n;
-                n.midiNote      = kKitMidiNote;
+                n.midiNote      = playNoteForPage(pi);
                 n.startBeat     = mDrawStart;
                 n.durationBeats = 0.25;
                 n.velocity      = 0.8f;
@@ -1590,7 +1719,7 @@ void DrumKitGrid::mouseDrag(const MouseEvent& e)
         if (! exists)
         {
             PianoNote n;
-            n.midiNote      = kKitMidiNote;
+            n.midiNote      = playNoteForPage(pi);
             n.startBeat     = curBeat;
             n.durationBeats = snapUnitBeats();
             n.velocity      = 0.8f;
@@ -1646,13 +1775,17 @@ void DrumKitGrid::mouseDrag(const MouseEvent& e)
         // values and applying delta.  Then erase originals + reinsert at new
         // locations.  We rebuild mMoveRefs at the end so subsequent drag
         // events see consistent indices.
-        struct Tmp { int newRow; PianoNote n; };
+        struct Tmp { int newRow; int srcRow; PianoNote n; };
         std::vector<Tmp> tmps;
         tmps.reserve(mMoveRefs.size());
         for (size_t i = 0; i < mMoveRefs.size(); ++i)
         {
             const int oldRow = mMoveOrigRow[i];
-            const int pi = rowToPageIndex(oldRow);
+            // #34 (QA-G3Smoke): read the note from the row it is in NOW --
+            // mMoveRefs tracks the reinserted position each drag tick, so the
+            // original-row read went stale after the first tick and pulled the
+            // wrong (or a garbage) note on cross-row drags.
+            const int pi = rowToPageIndex(mMoveRefs[i].row);
             if (pi < 0) continue;
             const auto& roll = mPM->currentPattern().drumRolls[pi];
             if (mMoveRefs[i].idx < 0 || mMoveRefs[i].idx >= (int) roll.notes.size()) continue;
@@ -1660,6 +1793,7 @@ void DrumKitGrid::mouseDrag(const MouseEvent& e)
             t.n = roll.notes[mMoveRefs[i].idx];
             t.n.startBeat = jmax(0.0, mMoveOrigBeats[i] + beatDelta);
             t.newRow = jlimit(0, jmax(0, (int) mRowsCache.size() - 1), oldRow + rowDelta);
+            t.srcRow = mMoveRefs[i].row;
             tmps.push_back(t);
         }
         // Erase originals (descending per page).
@@ -1683,6 +1817,14 @@ void DrumKitGrid::mouseDrag(const MouseEvent& e)
         {
             const int pi = rowToPageIndex(t.newRow);
             if (pi < 0) continue;
+            // #34 (QA-G3Smoke): a hit moved to another row re-stamps to the
+            // DEST row's play note -- but only when it still sat at its source
+            // row's play note (D-6: a deliberately re-pitched hit keeps its
+            // custom pitch across moves).
+            const int srcPi = rowToPageIndex(t.srcRow);
+            if (srcPi >= 0 && pi != srcPi
+                && t.n.midiNote == playNoteForPage(srcPi))
+                t.n.midiNote = playNoteForPage(pi);
             mPM->currentPattern().drumRolls[pi].notes.push_back(t.n);
             const int newIdx = (int) mPM->currentPattern().drumRolls[pi].notes.size() - 1;
             newRefs.push_back({ t.newRow, newIdx });
@@ -1824,7 +1966,7 @@ void DrumKitGrid::mouseUp(const MouseEvent&)
             if (drawnInsideRange) mSelection.clear();
 
             PianoNote n;
-            n.midiNote      = kKitMidiNote;
+            n.midiNote      = playNoteForPage(pi);
             n.startBeat     = mDrawStart;
             n.durationBeats = dur;
             n.velocity      = 0.8f;
@@ -2182,6 +2324,9 @@ void DrumKitGrid::paint(Graphics& g)
             const auto& info = mRowsCache[row];
             if (info.pageIndex < 0) continue;
             const auto& roll = mPM->currentPattern().drumRolls[info.pageIndex];
+            // Hoisted: playNoteForPage does a by-string APVTS lookup, so it
+            // stays out of the per-note loop below.
+            const int rowPlayNote = playNoteForPage(info.pageIndex);
             for (int ni = 0; ni < (int) roll.notes.size(); ++ni)
             {
                 const auto& n = roll.notes[ni];
@@ -2223,8 +2368,9 @@ void DrumKitGrid::paint(Graphics& g)
                     g.drawRoundedRectangle(nx + 0.5f, ny + 0.5f, nw - 1.f, nh - 1.f, 2.f, 1.f);
                 }
 
-                // Retune dot - top-right when not C5 (kit-grid placement note).
-                if (n.midiNote != kKitMidiNote && w >= 12 && rowH >= 10)
+                // Retune dot - top-right when the hit sits off this drum's
+                // assigned play note (deliberately re-pitched by the user).
+                if (n.midiNote != rowPlayNote && w >= 12 && rowH >= 10)
                 {
                     const float dotR = 4.f;
                     const auto dot = Rectangle<float>(nx + nw - dotR - 2.f, ny + 2.f, dotR, dotR);
@@ -2306,17 +2452,21 @@ void DrumKitGrid::paint(Graphics& g)
             g.drawVerticalLine(rx, kRulerH / 2, (float) kRulerH);
         }
     }
-    // Playhead arrow in ruler.
+    // Playhead marker (#30, QA-G3Smoke, final form per Jeff): asymmetric
+    // left-anchored mast + right-hanging cap -- see the roll's matching
+    // comment for the rationale (whole marker at beat 0, mast edge on the
+    // grid-line column).
     if (mPlayhead >= 0.0)
     {
         const int px = beatToX(mPlayhead);
         if (px >= 0 && px <= b.getWidth())
         {
             g.setColour(VC::Green.withAlpha(0.9f));
-            Path tri;
-            tri.addTriangle((float) px, 0.f, (float)(px - 5), (float) kRulerH,
-                            (float)(px + 5), (float) kRulerH);
-            g.fillPath(tri);
+            Path flag;
+            flag.addTriangle((float) px, 0.f,
+                             (float) px + 8.f, 0.f,
+                             (float) px, (float) kRulerH);
+            g.fillPath(flag);
         }
     }
     // Playhead body line.
@@ -2326,7 +2476,7 @@ void DrumKitGrid::paint(Graphics& g)
         if (px >= 0 && px <= b.getWidth())
         {
             g.setColour(VC::Green.withAlpha(0.8f));
-            g.fillRect(px, kRulerH, 2, b.getHeight() - kRulerH);
+            g.fillRect(px, kRulerH, 1, b.getHeight() - kRulerH);   // 1-px mast: exact overlay on a grid-line column
         }
     }
 }
@@ -3202,7 +3352,12 @@ DrumKitContainer::DrumKitContainer()
     mGrid->onZoom    = [this](float delta) { applyZoom((mPPB + delta) / mPPB); };
     mGrid->onZoomAnchored = [this](float f, int x) { applyZoomAnchored(f, x); };
     mGrid->onHScroll = [this](double dB)   { mBeatOff = jmax(0.0, mBeatOff + dB); syncScrollState(); };
-    mGrid->onNotesChanged = [this] { if (mLane) mLane->repaint(); };
+    mGrid->onNotesChanged = [this]
+    {
+        if (mLane) mLane->repaint();
+        // #30b regression fix: see PianoRollContainer's matching wiring.
+        if (onContentEdited) onContentEdited();
+    };
     mGrid->onToolChanged = [this](DrumKitGrid::PRTool t) {
         mActiveTool = t;
         const int idx = static_cast<int>(t);
@@ -3282,6 +3437,12 @@ void DrumKitContainer::setPatternManager(PatternManager* pm)
 void DrumKitContainer::setApvts(juce::AudioProcessorValueTreeState* a)
 {
     if (mSidebar) mSidebar->setApvts(a);
+    if (mGrid)    mGrid->setApvts(a);
+}
+
+void DrumKitContainer::repitchDrumHits(int pageIdx, int oldNote, int newNote)
+{
+    if (mGrid) mGrid->repitchDrumHits(pageIdx, oldNote, newNote);
 }
 
 void DrumKitContainer::setKitRowProvider(std::function<std::vector<DrumKitRowInfo>()> fn)

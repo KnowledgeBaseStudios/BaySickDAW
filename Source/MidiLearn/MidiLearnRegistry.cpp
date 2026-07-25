@@ -60,7 +60,7 @@ void MidiLearnRegistry::clear()
         const juce::SpinLock::ScopedLockType lk (mLock);
         mMappings.clear();
         mLearnTargetParamId = {};
-        mLearnCaptureFn = nullptr;
+        mCaptureReady.store (false, std::memory_order_relaxed);
     }
     if (onChanged) onChanged();
 }
@@ -157,30 +157,41 @@ int MidiLearnRegistry::dispatchEvent (juce::AudioProcessorValueTreeState& apvts,
 {
     // Snapshot the matching mappings under lock, then release before calling
     // setValueNotifyingHost -- the host's listener notification path may not
-    // tolerate being held off too long.  In practice typical mapping count is
-    // tiny (<10 in flight) so the snapshot copy is cheap.
-    std::vector<std::pair<juce::String, MessageType>> hits;
+    // tolerate being held off too long.
+    //
+    // 2026-07-19: this snapshot used to be a std::vector of {juce::String,
+    // MessageType}, i.e. a heap allocation plus a string copy per dispatched
+    // event -- in the render callback, continuously, for the whole duration of
+    // a knob sweep.  It is now a fixed stack array holding already-resolved
+    // parameter POINTERS.  Resolving inside the lock is what makes releasing it
+    // safe: APVTS parameters outlive the app, whereas a pointer into the map's
+    // keys would dangle if the message thread erased that mapping.
+    struct Hit { juce::RangedAudioParameter* param; MessageType type; };
+    // One event firing more than this many mappings means the user bound 17+
+    // params to a single CC; the tail is dropped rather than allocated for.
+    static constexpr int kMaxHitsPerEvent = 16;
+    Hit hits[kMaxHitsPerEvent];
+    int numHits = 0;
+
     {
         const juce::SpinLock::ScopedTryLockType tryLk (mLock);
         if (! tryLk.isLocked()) return 0;
         for (const auto& kv : mMappings)
         {
-            if (eventMatchesMapping (kv.second, sourceDeviceName, msg))
-                hits.emplace_back (kv.first, kv.second.msgType);
+            if (numHits >= kMaxHitsPerEvent) break;
+            if (! eventMatchesMapping (kv.second, sourceDeviceName, msg)) continue;
+            if (auto* p = dynamic_cast<juce::RangedAudioParameter*> (apvts.getParameter (kv.first)))
+                hits[numHits++] = { p, kv.second.msgType };
         }
     }
 
     int fired = 0;
-    for (const auto& hit : hits)
+    for (int i = 0; i < numHits; ++i)
     {
-        const float norm = extractNormalisedValue (hit.second, msg);
+        const float norm = extractNormalisedValue (hits[i].type, msg);
         if (norm < 0.0f) continue;
-
-        if (auto* p = dynamic_cast<juce::RangedAudioParameter*> (apvts.getParameter (hit.first)))
-        {
-            p->setValueNotifyingHost (norm);
-            ++fired;
-        }
+        hits[i].param->setValueNotifyingHost (norm);
+        ++fired;
     }
     return fired;
 }
@@ -188,12 +199,15 @@ int MidiLearnRegistry::dispatchEvent (juce::AudioProcessorValueTreeState& apvts,
 // ─────────────────────────────────────────────────────────────────────────────
 // Learn-mode capture
 // ─────────────────────────────────────────────────────────────────────────────
-void MidiLearnRegistry::beginLearn (const juce::String& paramId, LearnCaptureFn fn)
+void MidiLearnRegistry::beginLearn (const juce::String& paramId)
 {
     {
         const juce::SpinLock::ScopedLockType lk (mLock);
         mLearnTargetParamId = paramId;
-        mLearnCaptureFn     = std::move (fn);
+        // Drop any stale capture on THIS thread, so the audio thread only ever
+        // assigns into empty strings (see takeCapturedMapping).
+        mPendingCapture = {};
+        mCaptureReady.store (false, std::memory_order_relaxed);
     }
     if (onChanged) onChanged();
 }
@@ -205,9 +219,24 @@ void MidiLearnRegistry::cancelLearn()
         const juce::SpinLock::ScopedLockType lk (mLock);
         wasLearning = mLearnTargetParamId.isNotEmpty();
         mLearnTargetParamId = {};
-        mLearnCaptureFn = nullptr;
+        mCaptureReady.store (false, std::memory_order_relaxed);
     }
     if (wasLearning && onChanged) onChanged();
+}
+
+bool MidiLearnRegistry::takeCapturedMapping (Mapping& out)
+{
+    if (! mCaptureReady.load (std::memory_order_acquire)) return false;
+    const juce::SpinLock::ScopedLockType lk (mLock);
+    if (! mCaptureReady.exchange (false, std::memory_order_acq_rel)) return false;
+    out = mPendingCapture;
+    // Release our reference HERE, on the message thread.  If this is left for
+    // the audio thread's next assignment to overwrite, and the mapping this
+    // paramId belonged to has since been removed, that overwrite drops the last
+    // reference and frees in the render callback -- the same defect one level
+    // down.  `out` holds a reference at this point, so this cannot free either.
+    mPendingCapture = {};
+    return out.paramId.isNotEmpty();
 }
 
 bool MidiLearnRegistry::isLearning() const noexcept
@@ -256,36 +285,25 @@ bool MidiLearnRegistry::buildMappingFromEvent (Mapping& outM,
 bool MidiLearnRegistry::tryCaptureLearn (const juce::String& sourceDeviceName,
                                           const juce::MidiMessage& msg)
 {
-    juce::String       targetId;
-    LearnCaptureFn     fn;
-    {
-        const juce::SpinLock::ScopedTryLockType tryLk (mLock);
-        if (! tryLk.isLocked()) return false;
-        if (mLearnTargetParamId.isEmpty()) return false;
-        targetId = mLearnTargetParamId;
-        fn       = mLearnCaptureFn;
-    }
+    // Audio thread.  Everything below stays inside the existing try-lock and
+    // touches only pre-constructed storage: no allocation, no map insert, no
+    // std::function, no onChanged() notify.  The message thread does all of
+    // that when it drains via takeCapturedMapping().
+    const juce::SpinLock::ScopedTryLockType tryLk (mLock);
+    if (! tryLk.isLocked()) return false;
+    if (mLearnTargetParamId.isEmpty()) return false;
 
-    Mapping captured;
-    captured.paramId = targetId;
-    if (! buildMappingFromEvent (captured, sourceDeviceName, msg))
-        return false;   // not a learnable event type; ignore + fall through to dispatch
+    // Assigning into mPendingCapture only moves refcounts: paramId's source is
+    // mLearnTargetParamId (still alive at this point) and deviceName's is the
+    // event queue's interned name table, which outlives the queue's events.
+    // Neither assignment can drop a last reference, so neither can free.
+    if (! buildMappingFromEvent (mPendingCapture, sourceDeviceName, msg))
+        return false;   // not a learnable event type; fall through to dispatch
 
-    bool committed = false;
-    if (fn) committed = fn (captured);
-
-    if (committed)
-    {
-        // Commit the mapping and clear learn state.
-        {
-            const juce::SpinLock::ScopedLockType lk (mLock);
-            mMappings[targetId]   = captured;
-            mLearnTargetParamId   = {};
-            mLearnCaptureFn       = nullptr;
-        }
-        if (onChanged) onChanged();
-    }
-    return true;   // captured (whether or not committed) -- suppress regular dispatch
+    mPendingCapture.paramId = mLearnTargetParamId;
+    mLearnTargetParamId     = {};
+    mCaptureReady.store (true, std::memory_order_release);
+    return true;   // captured -- suppress regular dispatch
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

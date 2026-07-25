@@ -453,6 +453,11 @@ public:
     void mouseWheelMove(const juce::MouseEvent&, const juce::MouseWheelDetails&) override;
     bool keyPressed    (const juce::KeyPress&)                                   override;
     void modifierKeysChanged(const juce::ModifierKeys&)                          override;
+    // B-4: apply the Slice drag-line - split every block the line crosses at its
+    // per-row X (one undo edit).  sliceOneBlock does the split for a single block
+    // (caller wraps begin/commitEdit); returns true if it split.
+    void applySliceLine (juce::Point<int> start, juce::Point<int> end);
+    bool sliceOneBlock  (int blockIdx, double cutBars);
 
     // FileDragAndDropTarget - accept audio files dropped from OS
     bool isInterestedInFileDrag(const juce::StringArray& files) override;
@@ -474,10 +479,24 @@ public:
     // (setSnapMode/getSnapMode removed QA-Ee Stage 2 -- the grid reads the snap
     //  index live via onGetSnapDiv(); the combo writes it via onSnapDivChanged.)
 
-    void setPlayheadBar(double bar) { mPlayheadBar = bar; repaint(); }
+    void setPlayheadBar(double bar)
+    {
+        if (bar == mPlayheadBar) return;
+        // Residual (b) fix: dirty-rect playhead repaint (see PianoRollGrid) --
+        // covers the ruler flag + mast column; the perf-mode pulse keeps its
+        // own full repaint in the page timer.
+        const double old = mPlayheadBar;
+        mPlayheadBar = bar;
+        if (old >= 0.0) repaint(barToX((float) old) - 2, 0, 14, getHeight());
+        if (bar >= 0.0) repaint(barToX((float) bar) - 2, 0, 14, getHeight());
+    }
     void setPerformanceMode(bool on) { mPerfMode = on; repaint(); }
 
-    void setSelectedPatternIndex(int idx) { mBrowserSelection = idx; }
+    void setSelectedPatternIndex(int idx)
+    {
+        mBrowserSelection = idx;
+        mClickMemoryLenBeats = -1.0;   // #26: fresh browser pick clears the copy memory
+    }
 
     // QA-H Task 8 (#20): what an empty-grid Draw click places = the last
     // browser entry clicked (piano-roll last-type parity).  Pattern rides
@@ -486,6 +505,7 @@ public:
     void setActiveDropKind (BrowserDropKind k, int refIdx)
     {
         mDropKind = k;
+        mClickMemoryLenBeats = -1.0;   // #26: fresh browser pick clears the copy memory
         if      (k == BrowserDropKind::Audio)      mDropAudioIdx = refIdx;
         else if (k == BrowserDropKind::Automation) mDropAutomIdx = refIdx;
         else if (refIdx >= 0)                      mBrowserSelection = refIdx;
@@ -533,7 +553,11 @@ public:
     void beginEdit (const juce::String& label = "Edit");
     void commitEdit();
     void applySnapshot(const std::vector<ArrangementBlock>& blocks,
-                       const std::array<juce::String, kNumRows>& rowNames);
+                       const std::array<juce::String, kNumRows>& rowNames,
+                       const std::vector<int>& rowGroups,
+                       const std::vector<juce::uint32>& rowColors,
+                       const std::vector<char>& rowMuted,
+                       const std::vector<char>& rowSoloed);
     void undo() { if (mUndoCtx.undo) { mUndoCtx.undo(); if (onUndoRedoStateChanged) onUndoRedoStateChanged(); } }
     void redo() { if (mUndoCtx.redo) { mUndoCtx.redo(); if (onUndoRedoStateChanged) onUndoRedoStateChanged(); } }
     void showHistory() { if (mUndoCtx.showHistory) mUndoCtx.showHistory(); }   // 2026-04-26 (D-1b)
@@ -767,6 +791,15 @@ private:
     BrowserDropKind mDropKind     { BrowserDropKind::Pattern };
     int             mDropAudioIdx { -1 };
     int             mDropAutomIdx { -1 };
+    // #26 (QA-G3Smoke, G-15): click-copy memory.  Clicking a block primes the
+    // "brush" with WHAT that block is (identity via the fields above) plus its
+    // length + content offset, so an empty-space click places a faithful copy.
+    // A fresh browser pick resets to content-length defaults.  lenBeats < 0 =
+    // no memory.  Nothing else carries over (velocity is #12, roll-only).
+    double          mClickMemoryLenBeats    { -1.0 };
+    juce::int64     mClickMemoryOffsetTicks { 0 };            // Pattern copies
+    juce::int64     mClickMemoryContentStartSamples { 0 };    // Audio copies
+    void primeClickMemoryFrom (int blockIdx);
 
     // ── Ghost clip (drag preview from Source Picker) ──────────────────────────
     bool           mHasGhost   { false };
@@ -790,6 +823,15 @@ private:
     bool  mPainting   { false };
     int   mPaintRow   { -1 };
     float mPaintLastBar { 0.f };
+    // #25 (QA-G3Smoke): paint stamp size in bars (the selected pattern's
+    // content length, captured at paint start) -- drives stamp advance too.
+    int   mPaintLenBars { 1 };
+
+    // B-4: Slice tool drag-line (two-dot preview; applied on mouseUp).  Cuts every
+    // block whose row the line's y-span crosses, at the line's X for that row
+    // (Shift = vertical, snapped X).  Mirrors the piano-roll slice line.
+    bool  mSlicing    { false };
+    juce::Point<int> mSliceStart, mSliceEnd;
 
     // QA-Ea Task 0c (2026-05-20): legacy AGTool::SlipEdit stub state
     // (mSlipping/mSlipIdx/mSlipDragX + the never-functional "Slip edit:
@@ -868,6 +910,10 @@ private:
     UndoContext                        mUndoCtx;
     std::vector<ArrangementBlock>      mPendingBlocks;
     std::array<juce::String, kNumRows> mPendingRowNames;
+    std::vector<int>                   mPendingRowGroups;   // QA-G: per-row state for undo
+    std::vector<juce::uint32>          mPendingRowColors;
+    std::vector<char>                  mPendingRowMuted;
+    std::vector<char>                  mPendingRowSoloed;
     juce::String                       mPendingLabel;
 
     // ── Clipboard ─────────────────────────────────────────────────────────────
@@ -1001,6 +1047,9 @@ private:
     int              mYOffset { 0 };  // pixel offset matching viewport vertical scroll
 
     void showTrackContextMenu(int row);
+    // #21/#22 (QA-G3Smoke): contiguous run of rows sharing row's group id
+    // (a lone ungrouped row = itself) -- Move Up/Down hops whole spans.
+    void groupSpan (int row, int& first, int& last) const;
     int  yToRow(int y) const;
 
     // Mirrors BuilderPage::notifyArrangementChanged for header-panel block

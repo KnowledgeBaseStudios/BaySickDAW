@@ -1,5 +1,6 @@
 #include "PianoRoll.h"
 #include "TypingKeyboardMap.h"   // D-4: bypass tool keys while typing-keyboard mode is on
+#include "../G3PlayheadDiag.h"   // [G3 PLAYHEAD] G-9 reading (QA-G3Smoke Task 1); Debug-only
 #include <numeric>
 #include <algorithm>
 #include <set>
@@ -344,7 +345,19 @@ void PianoRollGrid::setData(PianoRollData* data)
     repaint();
 }
 
-void PianoRollGrid::setPlayheadBeat(double beat) { mPlayhead = beat; repaint(); }
+void PianoRollGrid::setPlayheadBeat(double beat)
+{
+    if (beat == mPlayhead) return;
+    // Residual (b) fix (Jeff, 2026-07-24): repaint only the old + new marker
+    // columns (1-px mast + 8-px right-hanging flag, padded to 14 px) instead
+    // of the full grid -- the 30 Hz full-canvas repaint per tick WAS the
+    // playhead's entire paint cost, and dirty-rects make 60 Hz free.
+    const int oldX = mPlayhead >= 0.0 ? beatToX(mPlayhead) : INT_MIN;
+    mPlayhead = beat;
+    const int newX = beat >= 0.0 ? beatToX(beat) : INT_MIN;
+    if (oldX != INT_MIN) repaint(oldX - 2, 0, 14, getHeight());
+    if (newX != INT_MIN) repaint(newX - 2, 0, 14, getHeight());
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Scale snap
@@ -659,8 +672,15 @@ void PianoRollGrid::cycleNewNoteType()
     {
         case NoteType::Standard:    mNewNoteType = NoteType::RampSlide;   break;
         case NoteType::RampSlide:   mNewNoteType = NoteType::RetrigSlide; break;
+        // #10 (QA-G3Smoke): the S-cycle enters Bend where Bend exists as a UI
+        // concept (engine-aware rolls = Guitars/Basses); elsewhere it wraps to
+        // Standard as before.
         case NoteType::RetrigSlide: mNewNoteType = NoteType::Portamento;  break;
-        case NoteType::Portamento:  mNewNoteType = NoteType::Standard;    break;
+        case NoteType::Portamento:
+            mNewNoteType = (mNoteEditContextProvider && mNoteEditContextProvider().engineAware)
+                               ? NoteType::Bend : NoteType::Standard;
+            break;
+        case NoteType::Bend:        mNewNoteType = NoteType::Standard;    break;
     }
     if (onNoteTypeArmChanged) onNoteTypeArmChanged();
 }
@@ -965,6 +985,12 @@ void PianoRollGrid::sliceNotesOnLine(Point<int> start, Point<int> end)
     std::vector<PianoNote> added;
     std::vector<int>       toRemove;
 
+    // B-2: the slice is the DRAWN SEGMENT, not an infinite line.  Only notes whose
+    // vertical center lies within the segment's y-span [loY, hiY] are candidates
+    // (t in [0,1]); the X is then interpolated, never extrapolated past an endpoint.
+    const int loY = juce::jmin (start.y, end.y);
+    const int hiY = juce::jmax (start.y, end.y);
+
     for (int i = 0; i < (int)mData->notes.size(); ++i)
     {
         const auto& n = mData->notes[i];
@@ -972,7 +998,9 @@ void PianoRollGrid::sliceNotesOnLine(Point<int> start, Point<int> end)
         int x2 = beatToX(n.startBeat + n.durationBeats);
         int cy = noteToY(n.midiNote) + mNoteH / 2;   // vertical centre of note row
 
-        // Interpolate line X at this note's Y
+        if (cy < loY || cy > hiY) continue;          // outside the drawn segment
+
+        // Interpolate line X at this note's Y (cy is within [loY,hiY] so t in [0,1]).
         int lineX;
         if (end.y == start.y)
             lineX = (start.x + end.x) / 2;
@@ -1367,17 +1395,32 @@ void PianoRollGrid::mouseMove(const MouseEvent& e)
 // Mouse - button down
 // ─────────────────────────────────────────────────────────────────────────────
 // ── QA-H Task 2: Note Properties popup (double-left-click a note) ────────────
+// S-10: a BPM-box-style numeric type-in field with a double-click-to-default
+// hook (a plain TextEditor's double-click does word-select, useless for a single
+// number; we repurpose it as the S-8 reset gesture, matching the sliders).
+struct NoteNumberBox : public juce::TextEditor
+{
+    std::function<void()> onDoubleClickReset;
+    void mouseDoubleClick (const juce::MouseEvent& e) override
+    {
+        if (onDoubleClickReset && isEnabled()) onDoubleClickReset();
+        else juce::TextEditor::mouseDoubleClick (e);
+    }
+};
+
 // CallOutBox content editing the per-note fields (type + velocity, release,
-// fine pitch, panning, filter cutoff, resonance).  Edits apply live to every
-// target note; the FIRST change lazily opens one grid undo edit and the panel
-// destructor (box dismissal) commits it, so a popup session is a single undo
-// step - and an untouched popup registers no undo entry at all.
+// fine pitch, panning, filter cutoff, resonance, + Porta length).  Edits apply
+// live to every target note; the FIRST change lazily opens one grid undo edit and
+// the panel destructor (box dismissal) commits it, so a popup session is a single
+// undo step - and an untouched popup registers no undo entry at all.
 class NotePropsPanel : public juce::Component
 {
 public:
+    using NoteEditContext = PianoRollGrid::NoteEditContext;
+
     NotePropsPanel (PianoRollGrid& grid, PianoRollData* data,
-                    std::vector<int> targets, int anchorIdx)
-        : mGrid (&grid), mData (data), mTargets (std::move (targets))
+                    std::vector<int> targets, int anchorIdx, NoteEditContext ctx)
+        : mGrid (&grid), mData (data), mTargets (std::move (targets)), mCtx (ctx)
     {
         const PianoNote& src = mData->notes[(size_t) anchorIdx];
 
@@ -1388,14 +1431,12 @@ public:
             b->onClick = [this, t] { applyType (t); };
             addAndMakeVisible (*b);
         };
-        addTypeBtn (mTypeNormal,  "Flat",     NoteType::Standard);
-        addTypeBtn (mTypeRpSlide, "RP Slide", NoteType::RampSlide);
-        addTypeBtn (mTypeRtSlide, "RT Slide", NoteType::RetrigSlide);
-        addTypeBtn (mTypePorta,   "Porta",    NoteType::Portamento);
-        reflectType (src.type);
 
+        // Velocity is the one per-note expression control usable on every engine;
+        // the other 5 sliders + Porta box are in-house-engine only (QA-SlideSampler
+        // Task 4: the sfizz Guitars/Basses patches don't map those CCs).
         auto addRow = [this] (int row, const char* name, double lo, double hi,
-                              double init, const char* suffix,
+                              double init, double dflt, const char* suffix,
                               std::function<void (PianoNote&, float)> apply)
         {
             auto& lbl = mLabels[row];
@@ -1404,37 +1445,133 @@ public:
             addAndMakeVisible (*lbl);
 
             auto& sl = mSliders[row];
-            sl = std::make_unique<Slider> (Slider::LinearHorizontal,
-                                           Slider::TextBoxRight);
+            sl = std::make_unique<Slider> (Slider::LinearHorizontal, Slider::TextBoxRight);
             sl->setRange (lo, hi, 1.0);
             sl->setValue (init, dontSendNotification);
+            sl->setDoubleClickReturnValue (true, dflt);
             sl->setTextValueSuffix (suffix);
             sl->setTextBoxStyle (Slider::TextBoxRight, false, 52, 18);
             sl->onValueChange = [this, apply, s = sl.get()] {
-                if (mGrid == nullptr || mData == nullptr) return;
-                beginIfNeeded();
                 const float v = (float) s->getValue();
-                for (int idx : mTargets)
-                    if (idx >= 0 && idx < (int) mData->notes.size())
-                        apply (mData->notes[(size_t) idx], v);
-                mGrid->repaint();
+                applyToTargets ([&] (PianoNote& n) { apply (n, v); });
             };
             addAndMakeVisible (*sl);
         };
-        addRow (0, "Velocity",      0, 100, src.velocity     * 100.0, " %",
-                [] (PianoNote& n, float v) { n.velocity     = v / 100.0f; });
-        addRow (1, "Release",       0, 100, src.releaseAmt   * 100.0, " %",
-                [] (PianoNote& n, float v) { n.releaseAmt   = v / 100.0f; });
-        addRow (2, "Fine Pitch", -100, 100, src.finePitch    * 100.0, " ct",
-                [] (PianoNote& n, float v) { n.finePitch    = v / 100.0f; });
-        addRow (3, "Panning",    -100, 100, src.panning      * 100.0, " %",
-                [] (PianoNote& n, float v) { n.panning      = v / 100.0f; });
-        addRow (4, "Filter Cutoff", 0, 100, src.filterCutoff * 100.0, " %",
-                [] (PianoNote& n, float v) { n.filterCutoff = v / 100.0f; });
-        addRow (5, "Resonance",     0, 100, src.resonance    * 100.0, " %",
-                [] (PianoNote& n, float v) { n.resonance    = v / 100.0f; });
+        addRow (0, "Velocity", 0, 100, src.velocity * 100.0, 80, " %",
+                [] (PianoNote& n, float v) { n.velocity = v / 100.0f; });
 
-        setSize (300, kPad * 2 + kRowH * 7);
+        if (mCtx.engineAware)
+        {
+            // ── Guitars/Basses: Flat / RP Slide / Bend + the gated Bend dropdowns.
+            addTypeBtn (mTypeNormal,  "Flat",     NoteType::Standard);
+            addTypeBtn (mTypeRpSlide, "RP Slide", NoteType::RampSlide);
+            addTypeBtn (mTypeBend,    "Bend",     NoteType::Bend);
+
+            mBendAmtLabel = std::make_unique<Label> (String(), "Bend");
+            mBendAmtLabel->setFont (Font (12.0f));
+            addAndMakeVisible (*mBendAmtLabel);
+            mBendAmtCombo = std::make_unique<ComboBox>();
+            // Item id = semitones + 100 (so a signed value survives id 1..).  Range
+            // gated to the patch: guitar +3/0 (up-only), bass +2/+2.  No 0 entry.
+            for (int s = mCtx.bendUpSemis; s >= 1; --s)
+                mBendAmtCombo->addItem ("+" + String (s) + " st",  s + 100);
+            for (int s = 1; s <= mCtx.bendDownSemis; ++s)
+                mBendAmtCombo->addItem ("-" + String (s) + " st", -s + 100);
+            mBendAmtCombo->onChange = [this] {
+                const int id = mBendAmtCombo->getSelectedId();
+                if (id == 0) return;
+                const double semis = (double) (id - 100);
+                applyToTargets ([semis] (PianoNote& n) { n.bendSemitones = semis; });
+            };
+            addAndMakeVisible (*mBendAmtCombo);
+            int amtId = (int) std::lround (src.bendSemitones) + 100;
+            if (mBendAmtCombo->indexOfItemId (amtId) < 0)                 // default to the smallest up-bend
+                amtId = (mCtx.bendUpSemis >= 1 ? 1 + 100 : -1 + 100);
+            mBendAmtCombo->setSelectedId (amtId, dontSendNotification);
+
+            mBendShapeLabel = std::make_unique<Label> (String(), "Shape");
+            mBendShapeLabel->setFont (Font (12.0f));
+            addAndMakeVisible (*mBendShapeLabel);
+            mBendShapeCombo = std::make_unique<ComboBox>();
+            mBendShapeCombo->addItem ("Ramp + Hold",  1);   // BendShape::RampHold
+            mBendShapeCombo->addItem ("Ramp (whole)", 2);   // RampWhole
+            mBendShapeCombo->addItem ("Up + Back",    3);   // UpBack
+            mBendShapeCombo->addItem ("Instant",      4);   // InstantHold
+            mBendShapeCombo->onChange = [this] {
+                const int sh = mBendShapeCombo->getSelectedId() - 1;
+                if (sh < 0) return;
+                applyToTargets ([sh] (PianoNote& n) { n.bendShape = (BendShape) sh; });
+            };
+            addAndMakeVisible (*mBendShapeCombo);
+            mBendShapeCombo->setSelectedId ((int) src.bendShape + 1, dontSendNotification);
+
+            mNotice = std::make_unique<Label> (String(),
+                "Note: RP Slide and Bend move every playing note together, not just "
+                "one - great for solos, not for chord bends.");
+            mNotice->setFont (Font (11.0f));
+            mNotice->setJustificationType (Justification::topLeft);
+            mNotice->setColour (Label::textColourId, Colour (0xFFF0C060));
+            addAndMakeVisible (*mNotice);
+        }
+        else
+        {
+            // ── In-house engines: the full existing panel.
+            addTypeBtn (mTypeNormal,  "Flat",     NoteType::Standard);
+            addTypeBtn (mTypeRpSlide, "RP Slide", NoteType::RampSlide);
+            addTypeBtn (mTypeRtSlide, "RT Slide", NoteType::RetrigSlide);
+            addTypeBtn (mTypePorta,   "Porta",    NoteType::Portamento);
+
+            addRow (1, "Release",       0, 100, src.releaseAmt   * 100.0, 50, " %",
+                    [] (PianoNote& n, float v) { n.releaseAmt   = v / 100.0f; });
+            addRow (2, "Fine Pitch", -100, 100, src.finePitch    * 100.0,  0, " ct",
+                    [] (PianoNote& n, float v) { n.finePitch    = v / 100.0f; });
+            addRow (3, "Panning",    -100, 100, src.panning      * 100.0,  0, " %",
+                    [] (PianoNote& n, float v) { n.panning      = v / 100.0f; });
+            addRow (4, "Filter Cutoff", 0, 100, src.filterCutoff * 100.0, 50, " %",
+                    [] (PianoNote& n, float v) { n.filterCutoff = v / 100.0f; });
+            addRow (5, "Resonance",     0, 100, src.resonance    * 100.0, 50, " %",
+                    [] (PianoNote& n, float v) { n.resonance    = v / 100.0f; });
+
+            mPortaLabel = std::make_unique<Label> (String(), "Porta Length");
+            mPortaLabel->setFont (Font (12.0f));
+            addAndMakeVisible (*mPortaLabel);
+            mPortaBox = std::make_unique<NoteNumberBox>();
+            mPortaBox->setInputRestrictions (6, "0123456789.");
+            mPortaBox->setJustification (Justification::centred);
+            mPortaBox->setText (formatBeats (src.portaLengthBeats), false);
+            mPortaBox->setTooltip ("Portamento glide length in beats (Porta notes only)");
+            auto applyPorta = [this] {
+                if (mGrid == nullptr || mData == nullptr) return;
+                const double v = jlimit (0.0, 64.0, mPortaBox->getText().getDoubleValue());
+                beginIfNeeded();
+                for (int idx : mTargets)
+                    if (idx >= 0 && idx < (int) mData->notes.size())
+                        mData->notes[(size_t) idx].portaLengthBeats = v;
+                mPortaBox->setText (formatBeats (v), false);
+                mGrid->repaint();
+            };
+            mPortaBox->onReturnKey        = applyPorta;
+            mPortaBox->onFocusLost        = applyPorta;
+            mPortaBox->onDoubleClickReset = [this, applyPorta] {
+                mPortaBox->setText ("1", false);
+                applyPorta();
+            };
+            addAndMakeVisible (*mPortaBox);
+        }
+
+        mCloseBtn = std::make_unique<TextButton> ("Close");
+        mCloseBtn->onClick = [this] {
+            if (auto* box = findParentComponentOfClass<juce::CallOutBox>())
+                box->dismiss();
+        };
+        addAndMakeVisible (*mCloseBtn);
+
+        reflectType (src.type);
+
+        if (mCtx.engineAware)
+            setSize (300, kPad * 2 + kRowH * 5 + 46);   // type + vel + bend amt + shape + close + notice
+        else
+            setSize (300, kPad * 2 + kRowH * 9);
     }
 
     ~NotePropsPanel() override
@@ -1450,17 +1587,47 @@ public:
     void resized() override
     {
         auto b = getLocalBounds().reduced (kPad);
+
         auto typeRow = b.removeFromTop (kRowH).reduced (0, 2);
-        const int tw = typeRow.getWidth() / 4;
+        const int nTypes = mCtx.engineAware ? 3 : 4;
+        const int tw = typeRow.getWidth() / nTypes;
         mTypeNormal ->setBounds (typeRow.removeFromLeft (tw).reduced (2, 0));
         mTypeRpSlide->setBounds (typeRow.removeFromLeft (tw).reduced (2, 0));
-        mTypeRtSlide->setBounds (typeRow.removeFromLeft (tw).reduced (2, 0));
-        mTypePorta  ->setBounds (typeRow.reduced (2, 0));
-        for (int i = 0; i < 6; ++i)
+        if (mCtx.engineAware)
+            mTypeBend ->setBounds (typeRow.reduced (2, 0));
+        else
         {
-            auto row = b.removeFromTop (kRowH);
-            mLabels[i] ->setBounds (row.removeFromLeft (86));
-            mSliders[i]->setBounds (row.reduced (0, 2));
+            mTypeRtSlide->setBounds (typeRow.removeFromLeft (tw).reduced (2, 0));
+            mTypePorta  ->setBounds (typeRow.reduced (2, 0));
+        }
+
+        auto velRow = b.removeFromTop (kRowH);
+        mLabels[0] ->setBounds (velRow.removeFromLeft (86));
+        mSliders[0]->setBounds (velRow.reduced (0, 2));
+
+        if (mCtx.engineAware)
+        {
+            { auto row = b.removeFromTop (kRowH);
+              mBendAmtLabel  ->setBounds (row.removeFromLeft (86));
+              mBendAmtCombo  ->setBounds (row.removeFromLeft (110).reduced (0, 3)); }
+            { auto row = b.removeFromTop (kRowH);
+              mBendShapeLabel->setBounds (row.removeFromLeft (86));
+              mBendShapeCombo->setBounds (row.removeFromLeft (110).reduced (0, 3)); }
+            mCloseBtn->setBounds (b.removeFromTop (kRowH).reduced (60, 3));
+            mNotice->setBounds (b.reduced (2, 2));
+        }
+        else
+        {
+            for (int i = 1; i < 6; ++i)
+            {
+                auto row = b.removeFromTop (kRowH);
+                mLabels[i] ->setBounds (row.removeFromLeft (86));
+                mSliders[i]->setBounds (row.reduced (0, 2));
+            }
+            { auto row = b.removeFromTop (kRowH);
+              mPortaLabel->setBounds (row.removeFromLeft (86));
+              mPortaBox  ->setBounds (row.removeFromLeft (72).reduced (0, 3)); }
+            mCloseBtn->setBounds (b.removeFromTop (kRowH).reduced (60, 3));
         }
     }
 
@@ -1474,32 +1641,79 @@ private:
         mDirty = true;
     }
 
-    void applyType (NoteType t)
+    void applyToTargets (std::function<void (PianoNote&)> fn)
     {
         if (mGrid == nullptr || mData == nullptr) return;
         beginIfNeeded();
         for (int idx : mTargets)
             if (idx >= 0 && idx < (int) mData->notes.size())
-                mData->notes[(size_t) idx].type = t;
-        reflectType (t);
+                fn (mData->notes[(size_t) idx]);
         mGrid->repaint();
+    }
+
+    void applyType (NoteType t)
+    {
+        applyToTargets ([t] (PianoNote& n) { n.type = t; });
+        // Switching to Bend must SEED the amount + shape from what the dropdowns
+        // show (the combo's initial setSelectedId is silent, and re-picking the
+        // shown value fires no onChange), else the note keeps bendSemitones=0 and
+        // emits a silent bend.
+        if (t == NoteType::Bend)
+        {
+            if (mBendAmtCombo != nullptr && mBendAmtCombo->getSelectedId() != 0)
+            {
+                const double semis = (double) (mBendAmtCombo->getSelectedId() - 100);
+                applyToTargets ([semis] (PianoNote& n) { n.bendSemitones = semis; });
+            }
+            if (mBendShapeCombo != nullptr && mBendShapeCombo->getSelectedId() > 0)
+            {
+                const int sh = mBendShapeCombo->getSelectedId() - 1;
+                applyToTargets ([sh] (PianoNote& n) { n.bendShape = (BendShape) sh; });
+            }
+        }
+        reflectType (t);
     }
 
     void reflectType (NoteType t)
     {
-        mTypeNormal ->setToggleState (t == NoteType::Standard,    dontSendNotification);
-        mTypeRpSlide->setToggleState (t == NoteType::RampSlide,   dontSendNotification);
-        mTypeRtSlide->setToggleState (t == NoteType::RetrigSlide, dontSendNotification);
-        mTypePorta  ->setToggleState (t == NoteType::Portamento,  dontSendNotification);
+        if (mTypeNormal)  mTypeNormal ->setToggleState (t == NoteType::Standard,    dontSendNotification);
+        if (mTypeRpSlide) mTypeRpSlide->setToggleState (t == NoteType::RampSlide,   dontSendNotification);
+        if (mTypeRtSlide) mTypeRtSlide->setToggleState (t == NoteType::RetrigSlide, dontSendNotification);
+        if (mTypePorta)   mTypePorta  ->setToggleState (t == NoteType::Portamento,  dontSendNotification);
+        if (mTypeBend)    mTypeBend   ->setToggleState (t == NoteType::Bend,        dontSendNotification);
+
+        // Bend dropdowns live only for Bend notes; Porta box only for Porta notes.
+        const bool bendOn = (t == NoteType::Bend);
+        auto setLive = [] (juce::Component* c, bool on)
+        { if (c) { c->setEnabled (on); c->setAlpha (on ? 1.0f : 0.5f); } };
+        setLive (mBendAmtCombo.get(),   bendOn);
+        setLive (mBendAmtLabel.get(),   bendOn);
+        setLive (mBendShapeCombo.get(), bendOn);
+        setLive (mBendShapeLabel.get(), bendOn);
+
+        const bool portaOn = (t == NoteType::Portamento);
+        setLive (mPortaBox.get(),   portaOn);
+        setLive (mPortaLabel.get(), portaOn);
+    }
+
+    static juce::String formatBeats (double b)
+    {
+        return juce::String (b, 3).trimCharactersAtEnd ("0").trimCharactersAtEnd (".");
     }
 
     Component::SafePointer<PianoRollGrid> mGrid;
     PianoRollData*   mData;
     std::vector<int> mTargets;
+    NoteEditContext  mCtx;
     bool             mDirty { false };
-    std::unique_ptr<TextButton> mTypeNormal, mTypeRpSlide, mTypeRtSlide, mTypePorta;
+    std::unique_ptr<TextButton> mTypeNormal, mTypeRpSlide, mTypeRtSlide, mTypePorta, mTypeBend;
     std::unique_ptr<Label>  mLabels[6];
     std::unique_ptr<Slider> mSliders[6];
+    std::unique_ptr<Label>         mPortaLabel;
+    std::unique_ptr<NoteNumberBox> mPortaBox;
+    std::unique_ptr<Label>         mBendAmtLabel, mBendShapeLabel, mNotice;   // Task 4
+    std::unique_ptr<ComboBox>      mBendAmtCombo, mBendShapeCombo;            // Task 4
+    std::unique_ptr<TextButton>    mCloseBtn;
 };
 
 void PianoRollGrid::openNoteProperties (int noteIdx, juce::Point<int> clickPos)
@@ -1519,8 +1733,10 @@ void PianoRollGrid::openNoteProperties (int noteIdx, juce::Point<int> clickPos)
     else
         targets.push_back (noteIdx);
 
+    NoteEditContext ctx;
+    if (mNoteEditContextProvider) ctx = mNoteEditContextProvider();
     auto panel = std::make_unique<NotePropsPanel> (*this, mData,
-                                                   std::move (targets), noteIdx);
+                                                   std::move (targets), noteIdx, ctx);
     const auto scr = localAreaToGlobal (
         juce::Rectangle<int> (clickPos.x - 4, clickPos.y - 4, 8, 8));
     juce::CallOutBox::launchAsynchronously (std::move (panel), scr, nullptr);
@@ -1539,6 +1755,13 @@ void PianoRollGrid::mouseDoubleClick (const MouseEvent& e)
 
 void PianoRollGrid::mouseDown(const MouseEvent& e)
 {
+#if JUCE_DEBUG
+    G3PlayheadDiag::log ("click(roll) x=" + juce::String (e.x) + " y=" + juce::String (e.y)
+                         + " rawBeat=" + juce::String (xToBeat (e.x), 4)
+                         + " snapBeat=" + juce::String (snapBeat (xToBeat (e.x)), 4)
+                         + " snapDiv=" + juce::String (onGetSnapDiv ? onGetSnapDiv() : -1)
+                         + " playheadBeat=" + juce::String (mPlayhead, 4));
+#endif
     if (!mData) return;
     grabKeyboardFocus();
     if (e.getNumberOfClicks() == 1) mLastClickCreated = false;
@@ -1587,7 +1810,9 @@ void PianoRollGrid::mouseDown(const MouseEvent& e)
         }
         else if (!e.mods.isRightButtonDown())
         {
-            if (onSeek) onSeek(xToBeat(e.x));
+            // 1A (QA-G3Smoke, Jeff 2026-07-23): seek obeys snap; Alt = free.
+            if (onSeek) onSeek (e.mods.isAltDown() ? xToBeat (e.x)
+                                                   : snapBeat (xToBeat (e.x)));
         }
         return;
     }
@@ -1653,10 +1878,12 @@ void PianoRollGrid::mouseDown(const MouseEvent& e)
             if (ni >= 0)
             {
                 // 2026-04-26 (D-7): FL-style click memory - clicking on an
-                // existing note remembers its duration + type so the next
-                // click-place uses them.  Drag-to-place still wins.
-                mClickMemoryDur  = mData->notes[ni].durationBeats;
-                mClickMemoryType = mData->notes[ni].type;
+                // existing note remembers its duration + type (+ velocity,
+                // #12 QA-G3Smoke; + the full property set, smoke round 2).
+                mClickMemoryDur   = mData->notes[ni].durationBeats;
+                mClickMemoryType  = mData->notes[ni].type;
+                mClickMemoryVel   = mData->notes[ni].velocity;
+                mClickMemoryProto = mData->notes[ni];
 
                 beginEdit("Move");
                 mMoving = true;
@@ -1777,9 +2004,12 @@ void PianoRollGrid::mouseDown(const MouseEvent& e)
             {
                 // 2026-04-26 (D-7): click memory carries from the Select tool
                 // too - clicking a note here also primes the next Draw-tool
-                // click-place with that note's length + type.
-                mClickMemoryDur  = mData->notes[idx].durationBeats;
-                mClickMemoryType = mData->notes[idx].type;
+                // click-place with that note's length + type (+ velocity, #12;
+                // + the full property set, smoke round 2).
+                mClickMemoryDur   = mData->notes[idx].durationBeats;
+                mClickMemoryType  = mData->notes[idx].type;
+                mClickMemoryVel   = mData->notes[idx].velocity;
+                mClickMemoryProto = mData->notes[idx];
 
                 if (!e.mods.isCtrlDown() && !isSelected(idx))
                     clearSelection();
@@ -1998,7 +2228,15 @@ void PianoRollGrid::mouseDrag(const MouseEvent& e)
         const auto p = e.getPosition();
         const bool noSnap = e.mods.isAltDown();
         const int snappedX = noSnap ? p.x : beatToX(snapBeat(xToBeat(p.x)));
-        mSliceEnd = { snappedX, p.y };
+        if (e.mods.isShiftDown())
+        {
+            // B-5: Shift forces a VERTICAL cut at the snap-div-snapped X under the
+            // cursor (both endpoints share that X); the y extent is the raw drag.
+            mSliceStart.x = snappedX;
+            mSliceEnd     = { snappedX, p.y };
+        }
+        else
+            mSliceEnd = { snappedX, p.y };
         repaint();
         return;
     }
@@ -2079,7 +2317,22 @@ void PianoRollGrid::mouseUp(const MouseEvent&)
              && mDrawStart <  mTimeSelBeatEnd);
         if (drawnInsideRange) mSelection.clear();
 
-        mData->notes.push_back({ mDrawNote, mDrawStart, dur, 0.8f, 0.f, 0.f, nt });
+        // #12 (QA-G3Smoke) + smoke round 2 (Jeff): placements carry the
+        // last-clicked note's WHOLE property set (pan / fine pitch / cutoff /
+        // resonance / release / porta length / bend), not just vel+type+dur.
+        // groupId / muted / slotIndex are per-note intent -- never carried.
+        {
+            PianoNote nn = mClickMemoryProto;
+            nn.midiNote      = mDrawNote;
+            nn.startBeat     = mDrawStart;
+            nn.durationBeats = dur;
+            nn.velocity      = mClickMemoryVel;
+            nn.type          = nt;
+            nn.muted         = false;
+            nn.groupId       = -1;
+            nn.slotIndex     = -1;
+            mData->notes.push_back (nn);
+        }
         tagLastCreatedNote (mDrawNote);   // Phase C §P4.2: slotIndex tagging
         mLastClickCreated = true;
         sortNotes(mData->notes);
@@ -2456,11 +2709,13 @@ void PianoRollGrid::paint(Graphics& g)
                            Justification::centredLeft, true);
             }
 
-            // ── Slide / Portamento type indicators ────────────────────────
-            // Ramp Slide = filled right-pointing triangle; Retrig Slide = the
-            // same triangle as an outline (retriggers its own attack).
-            if ((n.type == NoteType::RampSlide || n.type == NoteType::RetrigSlide)
-                && w > 8)
+            // ── Note-type indicators (G-10, QA-G3Smoke #9/#10) ────────────
+            // ONE right-edge arrow family for every non-Standard type:
+            // RampSlide = filled white (takeover), RetrigSlide = white
+            // outline (own attack), Portamento + Bend = white border + black
+            // fill.  The old orange left arc collided with the note-name
+            // text, and Bend had no marker at all.
+            if (n.type != NoteType::Standard && w > 8)
             {
                 float tx  = (float)(x + w - 2);
                 float ty  = (float)(y + 2);
@@ -2468,25 +2723,23 @@ void PianoRollGrid::paint(Graphics& g)
                 float tw2 = jmin(th * 0.7f, 7.f);
                 Path tri;
                 tri.addTriangle(tx - tw2, ty, tx - tw2, ty + th, tx, ty + th * 0.5f);
-                g.setColour(Colours::white.withAlpha(0.85f));
                 if (n.type == NoteType::RampSlide)
+                {
+                    g.setColour(Colours::white.withAlpha(0.85f));
                     g.fillPath(tri);
-                else
+                }
+                else if (n.type == NoteType::RetrigSlide)
+                {
+                    g.setColour(Colours::white.withAlpha(0.85f));
                     g.strokePath(tri, PathStrokeType(1.2f));
-            }
-            else if (n.type == NoteType::Portamento && w > 6)
-            {
-                // Small curved arc on the left end indicating pitch slide-in
-                float px2 = (float)(x + 2);
-                float py2 = (float)(y + 1);
-                float ph2 = (float)(mNoteH - 2);
-                float pw2 = jmin(ph2 * 0.55f, 6.f);
-                Path arc;
-                arc.addArc(px2, py2, pw2, ph2,
-                           juce::MathConstants<float>::pi * 0.3f,
-                           juce::MathConstants<float>::pi * 1.1f, true);
-                g.setColour(Colours::orange.withAlpha(0.9f));
-                g.strokePath(arc, PathStrokeType(1.5f));
+                }
+                else   // Portamento + Bend: white border, black fill
+                {
+                    g.setColour(Colours::black.withAlpha(0.85f));
+                    g.fillPath(tri);
+                    g.setColour(Colours::white.withAlpha(0.85f));
+                    g.strokePath(tri, PathStrokeType(1.2f));
+                }
             }
         }
     }
@@ -2582,17 +2835,24 @@ void PianoRollGrid::paint(Graphics& g)
             g.drawVerticalLine(rx, kRulerH / 2, (float)kRulerH);
         }
     }
-    // Playhead tick in ruler
+    // Playhead marker (#30, QA-G3Smoke, final form per Jeff): ASYMMETRIC,
+    // FL-style -- a left-anchored mast (line + cap share the same left edge =
+    // the position) with the cap hanging RIGHT off it.  Nothing ever draws
+    // left of the position, so parking at beat 0 clips nothing and the marker
+    // reads whole at every position; on a bar line the mast's left edge sits
+    // exactly on the 1-px grid-line column.  (The earlier centered-triangle +
+    // centered-body pair guaranteed a half-clipped look at the left edge.)
     if (mPlayhead >= 0.0)
     {
         int px = beatToX(mPlayhead);
         if (px >= 0 && px <= b.getWidth())
         {
             g.setColour(VC::Green.withAlpha(0.9f));
-            Path tri;
-            tri.addTriangle((float)px, 0.f, (float)(px - 5), (float)kRulerH,
-                            (float)(px + 5), (float)kRulerH);
-            g.fillPath(tri);
+            Path flag;
+            flag.addTriangle((float) px, 0.f,
+                             (float) px + 8.f, 0.f,
+                             (float) px, (float) kRulerH);
+            g.fillPath(flag);
         }
     }
 
@@ -2603,7 +2863,7 @@ void PianoRollGrid::paint(Graphics& g)
         if (px >= 0 && px <= b.getWidth())
         {
             g.setColour(VC::Green.withAlpha(0.8f));
-            g.fillRect(px, kRulerH, 2, b.getHeight() - kRulerH);
+            g.fillRect(px, kRulerH, 1, b.getHeight() - kRulerH);   // 1-px mast: exact overlay on a grid-line column
         }
     }
 }
@@ -2743,7 +3003,7 @@ void ControlLane::paint(Graphics& g)
              beat <= mBeatOff + b.getWidth() / mPPB + 1.0;
              beat += 0.5)
         {
-            int gx = (int)((beat - mBeatOff) * mPPB);
+            int gx = (int) std::llround((beat - mBeatOff) * mPPB);   // QA-L: match PianoRollGrid::beatToX rounding
             if (gx < 0 || gx > b.getWidth()) continue;
             const bool isBar  = (std::fmod(beat, 4.0) < 1e-9);
             const bool isBeat = (std::fmod(beat, 1.0) < 1e-9);
@@ -2792,7 +3052,7 @@ void ControlLane::paint(Graphics& g)
 
     for (const auto& n : mData->notes)
     {
-        int x     = (int)((n.startBeat - mBeatOff) * mPPB);
+        int x     = (int) std::llround((n.startBeat - mBeatOff) * mPPB);   // QA-L: match beatToX rounding so the lane stem tracks the note head
         int tailW = jmax(2, (int)(n.durationBeats * mPPB) - 1);
         if (x + tailW < 0 || x > b.getWidth()) continue;
 
@@ -2898,7 +3158,7 @@ void ControlLane::scrubApply (int x0, int x1, float v0, float v1)
     for (auto& n : mData->notes)
     {
         if (! (isNoteSelected && isNoteSelected (&n))) continue;
-        const int nx = (int) ((n.startBeat - mBeatOff) * mPPB);
+        const int nx = (int) std::llround((n.startBeat - mBeatOff) * mPPB);   // QA-L: match beatToX rounding
         if (nx < lo || nx > hi) continue;
         const float t = (x1 == x0) ? 1.0f
                       : jlimit (0.0f, 1.0f, (float) (nx - x0) / (float) (x1 - x0));
@@ -3169,7 +3429,13 @@ PianoRollContainer::PianoRollContainer()
         mTopNote = jlimit(minTop, 127, mTopNote + dN);
         syncScrollState();
     };
-    mGrid->onNotesChanged = [this] { mLane->repaint(); };
+    mGrid->onNotesChanged = [this]
+    {
+        mLane->repaint();
+        // #30b regression fix: every note mutation republishes the scheduler
+        // snapshot (via the editor-wired hook) -- see onContentEdited decl.
+        if (onContentEdited) onContentEdited();
+    };
 
     mGrid->onToolChanged = [this](PianoRollGrid::PRTool t) {
         mActiveTool = t;
@@ -3401,6 +3667,11 @@ void PianoRollContainer::setNoteLabelProvider(std::function<juce::String(int)> p
 void PianoRollContainer::setKeyswitchLabelProvider(std::function<juce::String(int)> provider)
 {
     if (mKeyboard) mKeyboard->setKeyswitchLabelProvider(std::move(provider));
+}
+
+void PianoRollContainer::setNoteEditContextProvider(std::function<PianoRollGrid::NoteEditContext()> provider)
+{
+    if (mGrid) mGrid->setNoteEditContextProvider(std::move(provider));
 }
 
 void PianoRollContainer::setAllKeysWhiteMode(bool enabled)
@@ -3758,6 +4029,7 @@ void PianoRollContainer::refreshNoteTypeButton()
     mNoteTypeBtn->setButtonText(t == NoteType::RampSlide   ? "RP Slide"
                               : t == NoteType::RetrigSlide ? "RT Slide"
                               : t == NoteType::Portamento  ? "Porta"
+                              : t == NoteType::Bend        ? "Bend"      // #10: labeled "Flat" before
                                                            : "Flat");
     mNoteTypeBtn->setToggleState(t != NoteType::Standard, dontSendNotification);
 }
@@ -3902,6 +4174,7 @@ public:
                                            Slider::TextBoxRight);
             sl->setRange (lo, hi, 1.0);
             sl->setValue (init, dontSendNotification);
+            sl->setDoubleClickReturnValue (true, init);   // #19 (QA-G3Smoke)
             sl->setTextValueSuffix (" %");
             sl->setTextBoxStyle (Slider::TextBoxRight, false, 46, 16);
             sl->onValueChange = [this] { paramsChanged(); };
@@ -3932,25 +4205,32 @@ public:
         addRowLabel (mIntervalLabel, "Start Time Max Interval");
         addRowLabel (mSeedLabel,     "Seed");
 
+        // #14 (G-3): three distributions, Quasi-Normal default.
         mDistCombo = std::make_unique<ComboBox>();
         mDistCombo->addItem ("Quasi-Normal", 1);
+        mDistCombo->addItem ("Triangular",   2);
+        mDistCombo->addItem ("Uniform",      3);
         mDistCombo->setSelectedId (1, dontSendNotification);
+        mDistCombo->onChange = [this] { paramsChanged(); };
         addAndMakeVisible (*mDistCombo);
 
+        // #13 (G-3): standalone interval list in beats (1/32, 1/64, 1/128),
+        // default 1/64 -- decoupled from the app snap table.
         mIntervalCombo = std::make_unique<ComboBox>();
-        for (int d = 2; d < kNumUnifiedSnapDivs; ++d)   // fixed divisions only
-            mIntervalCombo->addItem (kUnifiedSnapLabels[d], d);
-        mIntervalCombo->setSelectedId (6, dontSendNotification);   // Step (1/16)
+        mIntervalCombo->addItem ("1/32",  1);
+        mIntervalCombo->addItem ("1/64",  2);
+        mIntervalCombo->addItem ("1/128", 3);
+        mIntervalCombo->setSelectedId (2, dontSendNotification);
         mIntervalCombo->onChange = [this] { paramsChanged(); };
         addAndMakeVisible (*mIntervalCombo);
 
-        mSeedSlider = std::make_unique<Slider> (Slider::IncDecButtons,
-                                                Slider::TextBoxLeft);
-        mSeedSlider->setRange (0, 99999, 1);
-        mSeedSlider->setValue (12345, dontSendNotification);
-        mSeedSlider->setTextBoxStyle (Slider::TextBoxLeft, false, 60, 18);
-        mSeedSlider->onValueChange = [this] { paramsChanged(); };
-        addAndMakeVisible (*mSeedSlider);
+        // #15 (G-3): seed = a friendly 1-10 dropdown, default 1, no "None".
+        mSeedCombo = std::make_unique<ComboBox>();
+        for (int sd = 1; sd <= 10; ++sd)
+            mSeedCombo->addItem (String (sd), sd);
+        mSeedCombo->setSelectedId (1, dontSendNotification);
+        mSeedCombo->onChange = [this] { paramsChanged(); };
+        addAndMakeVisible (*mSeedCombo);
 
         mPreviewToggle = std::make_unique<ToggleButton> ("Preview");
         mPreviewToggle->setToggleState (true, dontSendNotification);
@@ -3974,12 +4254,13 @@ public:
             mDurOffset  ->setValue (0,   dontSendNotification);
             mVelRange   ->setValue (kDefVelRange, dontSendNotification);
             mVelOffset  ->setValue (0,   dontSendNotification);
-            mIntervalCombo->setSelectedId (6, dontSendNotification);
+            mIntervalCombo->setSelectedId (2, dontSendNotification);   // #13: 1/64
             paramsChanged();
         });
         addBtn (mRegenBtn, "Regenerate", [this] {
-            mSeedSlider->setValue (juce::Random::getSystemRandom().nextInt (100000),
-                                   juce::sendNotification);
+            // #15: rolls the 1-10 seed dropdown.
+            mSeedCombo->setSelectedId (1 + juce::Random::getSystemRandom().nextInt (10),
+                                       juce::sendNotification);
         });
         addBtn (mAcceptBtn, "Accept", [this] { accept(); });
 
@@ -3990,7 +4271,9 @@ public:
 
     ~HumanizePanel() override
     {
-        if (! mAccepted)
+        // QA-H: mGrid is a SafePointer; if it nulled out the PianoRollData mData
+        // points at is gone too, so guard the restore against a use-after-free.
+        if (! mAccepted && mGrid != nullptr)
         {
             restoreOriginal();
             repaintGrid();
@@ -4025,7 +4308,7 @@ public:
         mIntervalCombo->setBounds (intRow.reduced (0, 2));
         auto seedRow = b.removeFromTop (26);
         mSeedLabel->setBounds (seedRow.removeFromLeft (150));
-        mSeedSlider->setBounds (seedRow.removeFromLeft (120).reduced (0, 2));
+        mSeedCombo->setBounds (seedRow.removeFromLeft (70).reduced (0, 2));
 
         auto btns = b.removeFromBottom (26);
         mPreviewToggle->setBounds (btns.removeFromLeft (84));
@@ -4037,7 +4320,9 @@ public:
     }
 
 private:
-    static constexpr double kDefStartRange = 20, kDefDurRange = 0, kDefVelRange = 10;
+    // #16 (G-3): FL-reference defaults -- Start 10% / Duration 10% / Velocity
+    // 20%, offsets 0 (offsets already default 0 at knob creation).
+    static constexpr double kDefStartRange = 10, kDefDurRange = 10, kDefVelRange = 20;
 
     void paramsChanged()
     {
@@ -4065,9 +4350,13 @@ private:
     void applyToNotes()
     {
         if (mData == nullptr) return;
-        juce::Random rng ((juce::int64) (int) mSeedSlider->getValue());
-        const double intervalBeats =
-            snapDivToTicks (mIntervalCombo->getSelectedId()) / (double) kTicksPerBeat;
+        juce::Random rng ((juce::int64) (mSeedCombo ? mSeedCombo->getSelectedId() : 1));
+        // #13: standalone beats list (1/32 = 0.125, 1/64 = 0.0625, 1/128 =
+        // 0.03125) -- no snapDivToTicks walk.
+        const int    intId = mIntervalCombo->getSelectedId();
+        const double intervalBeats = (intId == 1) ? 0.125
+                                   : (intId == 3) ? 0.03125
+                                                  : 0.0625;
         const float startR = (float) mStartRange ->getValue() / 100.0f;
         const float startO = (float) mStartOffset->getValue() / 100.0f;
         const float durR   = (float) mDurRange   ->getValue() / 100.0f;
@@ -4075,8 +4364,13 @@ private:
         const float velR   = (float) mVelRange   ->getValue() / 100.0f;
         const float velO   = (float) mVelOffset  ->getValue() / 100.0f;
 
-        auto qn = [&rng] {
-            return (rng.nextFloat() + rng.nextFloat() + rng.nextFloat()) * (1.0f / 3.0f);
+        // #14 (G-3): one noise funnel, three shapes -- every consumer below
+        // (start / duration / velocity) already draws through qn().
+        const int dist = mDistCombo ? mDistCombo->getSelectedId() : 1;
+        auto qn = [&rng, dist] {
+            if (dist == 3) return rng.nextFloat();                                   // Uniform
+            if (dist == 2) return (rng.nextFloat() + rng.nextFloat()) * 0.5f;        // Triangular
+            return (rng.nextFloat() + rng.nextFloat() + rng.nextFloat()) * (1.0f / 3.0f);   // Quasi-Normal
         };
 
         for (size_t k = 0; k < mTargets.size(); ++k)
@@ -4125,8 +4419,8 @@ private:
     std::unique_ptr<Label>  mSectionLabels[3];
     std::unique_ptr<Label>  mDistLabel, mIntervalLabel, mSeedLabel;
     std::unique_ptr<Slider> mStartRange, mStartOffset, mDurRange, mDurOffset,
-                            mVelRange, mVelOffset, mSeedSlider;
-    std::unique_ptr<ComboBox>     mDistCombo, mIntervalCombo;
+                            mVelRange, mVelOffset;
+    std::unique_ptr<ComboBox>     mDistCombo, mIntervalCombo, mSeedCombo;   // #15: seed is a 1-10 dropdown
     std::unique_ptr<ToggleButton> mPreviewToggle;
     std::unique_ptr<TextButton>   mResetBtn, mRegenBtn, mAcceptBtn;
 };
@@ -4726,10 +5020,12 @@ public:
 
     ~RandomizePanel() override
     {
-        if (! mAccepted)
+        // QA-H: guard the mData restore on mGrid validity (SafePointer) to avoid
+        // a use-after-free if the roll was destroyed while this callout was open.
+        if (! mAccepted && mGrid != nullptr)
         {
             restoreOriginal();
-            if (mGrid != nullptr) mGrid->repaint();
+            mGrid->repaint();
         }
     }
 
@@ -5032,7 +5328,9 @@ public:
             addAndMakeVisible (*mStepTabs[i]);
 
             mStepEnable[i] = std::make_unique<ToggleButton> ("Step enabled");
-            mStepEnable[i]->setToggleState (i == 0 || i == 1 || i == 2 || i == 7, dontSendNotification);
+            // #17 (QA-G3Smoke): ALL steps enabled by default (steps 4-7 were
+            // default-off, so half the machine silently did nothing).
+            mStepEnable[i]->setToggleState (true, dontSendNotification);
             mStepEnable[i]->onClick = [this] { applyPreview(); };
             addChildComponent (*mStepEnable[i]);
         }
@@ -5066,6 +5364,7 @@ public:
                                            Slider::TextBoxRight);
             sl->setRange (lo, hi, 1.0);
             sl->setValue (init, dontSendNotification);
+            sl->setDoubleClickReturnValue (true, init);   // #19 (QA-G3Smoke)
             sl->setTextValueSuffix (suffix);
             sl->setTextBoxStyle (Slider::TextBoxRight, false, 46, 16);
             sl->onValueChange = [this] { applyPreview(); };
@@ -5078,6 +5377,7 @@ public:
             sl = std::make_unique<Slider> (Slider::IncDecButtons, Slider::TextBoxLeft);
             sl->setRange (lo, hi, 1.0);
             sl->setValue (init, dontSendNotification);
+            sl->setDoubleClickReturnValue (true, init);   // #19 (QA-G3Smoke)
             sl->setTextBoxStyle (Slider::TextBoxLeft, false, 52, 18);
             sl->onValueChange = [this] { applyPreview(); };
             regComp (page, sl.get());
@@ -5122,8 +5422,12 @@ public:
         {
             static const char* kWheelNames[6] = {
                 "Pan", "Velocity", "Release", "Cutoff", "Resonance", "Fine Pitch" };
+            // Smoke #39 (Jeff): ALL wheels default 0 -- every interim
+            // non-neutral default pick is revoked (see the Artic/Groove
+            // combos + resetStep).
             for (int i = 0; i < 6; ++i)
-                addKnob (4, mWheelLabels[i], kWheelNames[i], mWheels[i], -100, 100, 0, " %");
+                addKnob (4, mWheelLabels[i], kWheelNames[i], mWheels[i], -100, 100,
+                         0, " %");
         }
         addPageLabel (4, mBipolarLabel, "");
         mBipolar = std::make_unique<ToggleButton> ("Bipolar");
@@ -5138,6 +5442,8 @@ public:
             static const char* kArticNames[6] = { "None", "Staccato 50%", "Staccato 25%",
                                                   "Legato", "Accent downbeats", "Soft offbeats" };
             for (int i = 0; i < 6; ++i) mArticCombo->addItem (kArticNames[i], i + 1);
+            // Smoke #39 (Jeff): neutral default -- the interim non-neutral
+            // picks are revoked across Levels/Artic/Groove.
             mArticCombo->setSelectedId (1, dontSendNotification);
         }
 
@@ -5147,6 +5453,7 @@ public:
             static const char* kGrooveNames[6] = { "Straight", "Swing light", "Swing",
                                                    "Swing hard", "Push", "Laid back" };
             for (int i = 0; i < 6; ++i) mGrooveCombo->addItem (kGrooveNames[i], i + 1);
+            // Smoke #39 (Jeff): neutral default (see Artic note above).
             mGrooveCombo->setSelectedId (1, dontSendNotification);
         }
 
@@ -5174,7 +5481,12 @@ public:
         mStepResetBtn->onClick = [this] { resetStep (mCurStep); applyPreview(); };
         addAndMakeVisible (*mStepResetBtn);
         mStepRandomBtn = std::make_unique<TextButton> ("Random");
-        mStepRandomBtn->onClick = [this] { randomizeStep (mCurStep); applyPreview(); };
+        mStepRandomBtn->onClick = [this]
+        {
+            randomizeStep (mCurStep);
+            mStepEnable[mCurStep]->setToggleState (true, dontSendNotification);   // #17
+            applyPreview();
+        };
         addAndMakeVisible (*mStepRandomBtn);
 
         // ── Globals ──────────────────────────────────────────────────────
@@ -5189,7 +5501,10 @@ public:
         addAndMakeVisible (*mPreviewStep);
 
         mWorkExisting = std::make_unique<ToggleButton> ("Work on existing score");
-        mWorkExisting->setToggleState (false, dontSendNotification);
+        // #20 (QA-G3Smoke): a roll the Riff Machine already wrote pre-checks
+        // Work-on-existing, so re-opening refines instead of replacing.
+        mWorkExisting->setToggleState (mData != nullptr && mData->riffMachineUsed,
+                                       dontSendNotification);
         mWorkExisting->onClick = [this] { applyPreview(); };
         addAndMakeVisible (*mWorkExisting);
 
@@ -5214,8 +5529,7 @@ public:
             for (int i = 0; i < 8; ++i)
             {
                 resetStep (i);
-                mStepEnable[i]->setToggleState (i == 0 || i == 1 || i == 2 || i == 7,
-                                                dontSendNotification);
+                mStepEnable[i]->setToggleState (true, dontSendNotification);   // #17: all-on default
             }
             mPreviewStep->setValue (8, dontSendNotification);
             mWorkExisting->setToggleState (false, dontSendNotification);
@@ -5223,7 +5537,13 @@ public:
             applyPreview();
         });
         addBtn (mDiceBtn, "Dice", [this] {
-            for (int i = 0; i < 8; ++i) randomizeStep (i);
+            // #17: Dice randomizes AND enables every step -- a diced step
+            // that stayed disabled was inert.
+            for (int i = 0; i < 8; ++i)
+            {
+                randomizeStep (i);
+                mStepEnable[i]->setToggleState (true, dontSendNotification);
+            }
             mSeed->setValue (juce::Random::getSystemRandom().nextInt (100000),
                              dontSendNotification);
             applyPreview();
@@ -5237,10 +5557,12 @@ public:
 
     ~RiffMachinePanel() override
     {
-        if (! mAccepted)
+        // QA-H: guard the mData write on mGrid validity (SafePointer) -- if the
+        // grid nulled out, the PianoRollData is gone too (avoid use-after-free).
+        if (! mAccepted && mGrid != nullptr)
         {
             if (mData != nullptr) mData->notes = mOriginalAll;
-            if (mGrid != nullptr) mGrid->repaint();
+            mGrid->repaint();
         }
     }
 
@@ -5348,6 +5670,10 @@ private:
                     mArpSyncCombo->setSelectedId (1, dontSendNotification);
                     mGate->setValue (80, dontSendNotification); break;
             case 3: mMirrorChance->setValue (30, dontSendNotification); break;
+            // Smoke #39 (Jeff): Levels/Artic/Groove reset NEUTRAL -- the
+            // interim non-neutral picks (vel 20% / Staccato 50% / Swing
+            // light) are revoked; #17's shipped substance is the step-enable
+            // fix, not baked-in values.
             case 4: for (auto& w : mWheels) w->setValue (0, dontSendNotification);
                     mBipolar->setToggleState (true, dontSendNotification); break;
             case 5: mArticCombo->setSelectedId (1, dontSendNotification); break;
@@ -5679,6 +6005,7 @@ private:
             mData->notes = mOriginalAll;
             mGrid->beginEdit ("Riff Machine");
             computeInto();
+            mData->riffMachineUsed = true;   // #20: next open pre-checks Work-on-existing
             mGrid->commitEdit();
             mGrid->clearSelection();
             if (mGrid->onNotesChanged) mGrid->onNotesChanged();

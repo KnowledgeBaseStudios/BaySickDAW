@@ -130,6 +130,12 @@ public:
     {
         std::vector<ArrangementBlock> blocks;
         std::vector<juce::String>     rowNames;  // kNumRows entries
+        // QA-G: Move/Insert-track edits also mutate per-row state; capture it so
+        // undo restores mute/solo/group alongside the blocks (parity with SplitState).
+        std::vector<int>              rowGroups;
+        std::vector<juce::uint32>     rowColors;
+        std::vector<char>             rowMuted;
+        std::vector<char>             rowSoloed;
     };
     using ApplyFn = std::function<void(const Snapshot&)>;
 

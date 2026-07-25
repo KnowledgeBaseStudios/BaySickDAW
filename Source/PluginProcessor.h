@@ -19,6 +19,7 @@
 #include "DSP/BaySickAlignDSP.h"   // QA-Fa recovery: AlignPlaySnapshot (decode-layer live warp)
 #include "DSP/DenoiseDSP.h"        // QA-Fe2: DenoiseProfile (project-persisted per recording)
 #include "MidiLearn/MidiLearnRegistry.h"
+#include "MidiLearn/DrumTriggerMap.h"
 // Multi-threaded render engine (Phase 1 scaffolding, 2026-05-06).  These
 // members live for the lifetime of the processor; per-strip RenderTask
 // wrappers ship in Batches 3-8.
@@ -360,7 +361,13 @@ public:
     // <MidiCCMappings> child of getStateInformation; also overlay-loaded at
     // app startup from Documents/BaySickDAW/MidiMappings.xml (global defaults).
     MidiLearnRegistry&  getMidiLearnRegistry()  noexcept { return mMidiLearn; }
+    DrumTriggerMap&     getDrumTriggerMap()     noexcept { return mDrumTriggers; }
     MidiLearnEventQueue& getMidiLearnEventQueue() noexcept { return mMidiLearnQueue; }
+    // Resolve a drum's play pitch (published atomic pointer; falls back to C5
+    // when the strip's param is not registered yet).  Lock-free const read --
+    // safe from the audio thread (kit dispatch) AND the message thread (#32
+    // recording demux stamps recorded hits at the drum's play note).
+    int  drumPlayNoteRT (int drumIdx) const noexcept;
 
     // ── Latency ───────────────────────────────────────────────────────────
     // Device output latency (set by StandaloneApp when device initialises or changes).
@@ -993,12 +1000,12 @@ private:
     // mDrumSlotBufs removed (BaySickDrumsProcessor deleted).
     juce::SpinLock                                         mDrumEngineLock;
     std::array<juce::AudioProcessor*, kMaxDrumPages>       mDrumEngines {};
-    // Per-drum MIDI trigger note (kit fan-out): pre-resolved pointer to the
-    // lazily-registered mixer_drum_{N}_inputNote raw value.  Published with a
-    // release store on the message thread at registerDrumEngine (the param
-    // exists by then); audio thread acquire-loads per event.  null = strip
-    // not registered yet = unmapped.
-    std::array<std::atomic<std::atomic<float>*>, kMaxDrumPages> mDrumInputNotePtr {};
+    // Per-drum play pitch: pre-resolved pointer to the lazily-registered
+    // mixer_drum_{N}_playNote raw value -- the note a kit trigger fires this
+    // drum at.  Published with a release store on the message thread at
+    // registerDrumEngine (the param exists by then); audio thread
+    // acquire-loads per trigger.  null = strip not registered yet.
+    std::array<std::atomic<std::atomic<float>*>, kMaxDrumPages> mDrumPlayNotePtr {};
     juce::AudioBuffer<float>                               mDrumEngineBuf;     // per-drum render scratch
     juce::AudioBuffer<float>                               mDrumEngineScratch; // per-drum sum scratch
     // Fast-path bypass - true only when at least one DrumPage tab has registered
@@ -1028,6 +1035,24 @@ private:
     std::array<juce::AudioProcessor*, kMaxInstPages>       mInstEngines {};
     juce::AudioBuffer<float>                               mInstEngineScratch;
     std::atomic<bool>                                      mAnyInstPageActive { false };
+
+    // ── QA-G3Smoke Swing (SW-1..SW-6): cached raw param atomics ─────────────
+    // Registered eagerly at startup (ensureSwingParams); the scheduler reads
+    // through these pointers -- no per-block APVTS hash lookups.  Message
+    // thread writes them once at registration; audio thread loads relaxed.
+    // Vox is excluded (no vox MIDI); clip rolls ride the global at full mix
+    // (no per-page params) -- both Jeff 2026-07-23.
+    std::atomic<float>* mSwingGlobal { nullptr };
+    std::atomic<float>* mSwingMixLayer[kMaxLayerPages] {};
+    std::atomic<float>* mSwingTruncLayer[kMaxLayerPages] {};
+    std::atomic<float>* mSwingMixBass[kMaxBassPages] {};
+    std::atomic<float>* mSwingTruncBass[kMaxBassPages] {};
+    std::atomic<float>* mSwingMixDrum[kMaxDrumPages] {};
+    std::atomic<float>* mSwingTruncDrum[kMaxDrumPages] {};
+    std::atomic<float>* mSwingMixInst[kMaxInstPages] {};
+    std::atomic<float>* mSwingTruncInst[kMaxInstPages] {};
+    std::atomic<float>* mSwingMixRusty { nullptr };
+    std::atomic<float>* mSwingTruncRusty { nullptr };
 
     // J-5 (2026-05-03): BaySickRustyDrums singleton engine.  Only one
     // instance per project.  Owned here so PluginProcessor can orchestrate
@@ -1117,9 +1142,19 @@ public:
 
     // Song mode - written by UI thread, read on audio thread.
     // true = play arrangement blocks linearly; false = loop current pattern.
+    // Smoke round 3 (Jeff): the setter is now the automation-baseline hook --
+    // song ENTRY snapshots every automation-targeted param's current value,
+    // EXIT restores them, so flipping back to pattern mode returns driven
+    // knobs to their pre-automation positions.  Message thread only.
     std::atomic<bool>   mSongMode { false };
-    void setSongMode(bool b) { mSongMode.store(b, std::memory_order_relaxed); }
+    void setSongMode (bool b);
     bool isSongMode() const  { return mSongMode.load(std::memory_order_relaxed); }
+
+private:
+    // Smoke round 3: {paramId, normalized value} captured at song entry.
+    std::vector<std::pair<juce::String, float>> mAutomationBaseline;
+
+public:
 
     // 2026-05-06: project-load barrier.  Set true at the start of project
     // open / restoreBackup / closeAllDynamicTabs; the audio thread's
@@ -1319,6 +1354,21 @@ public:
     // Bulk-register the five bus strips + master once at startup.
     // Called from VibeGraph::buildFixedTopology via a callback wired in the constructor.
     void ensureMixerBusAndMasterParams();
+    // QA-G3Smoke Swing (SW-6): eager global + per-player swing param
+    // registration + raw-atomic caching (see the .cpp note for family scope).
+    void ensureSwingParams();
+    // QA-G3Smoke SW-3: bundle of UI accessors for one player's swing params
+    // (mix + truncate) -- pages hand these to the engine editors' title-bar
+    // knobs, which have no main-APVTS handle of their own.
+    struct SwingKnobBinding
+    {
+        std::function<float()>     getMix;
+        std::function<void(float)> setMix;
+        std::function<bool()>      getTrunc;
+        std::function<void(bool)>  setTrunc;
+    };
+    SwingKnobBinding makeSwingKnobBinding (const juce::String& mixId,
+                                           const juce::String& truncId);
 
 private:
 
@@ -1360,6 +1410,48 @@ private:
     // registry's dispatch.  Mutators on mMidiLearn run on the message thread.
     MidiLearnRegistry   mMidiLearn;
     MidiLearnEventQueue mMidiLearnQueue;
+
+    // QA-L-Fix (2026-07-19): per-drum kit trigger bindings.  Dispatched from the
+    // LIVE-MIDI loop (not the learn queue) because that path preserves
+    // intra-block sample position -- drum hits are the most timing-sensitive
+    // events in the app, and the learn queue applies at block rate by design.
+    DrumTriggerMap mDrumTriggers;
+
+    // Audio-thread only.  CC triggers have no note-off: a momentary pad may send
+    // value 0 on release, but plenty of gear sends nothing at all.  Each fired CC
+    // trigger arms a countdown here; the drum is released on CC-0 or when the
+    // countdown expires, whichever lands first, so a non-releasing controller can
+    // never strand a voice (owner call 2026-07-19: "safest").
+    struct CcTriggerHold
+    {
+        bool    active         { false };
+        int     note           { -1 };
+        int64_t samplesLeft    { 0 };
+    };
+    std::array<CcTriggerHold, kMaxDrumPages> mCcTriggerHolds {};
+    // Audio-thread only.  Fast-path bypass for the per-block hold tick; set
+    // when a hold is armed, recomputed from the survivors on each pass.
+    bool mAnyCcHoldActive { false };
+
+    // Audio-thread only.  Pitch a NOTE trigger fired at, per drum; -1 = not
+    // held.  Release uses this rather than the live play-note param so
+    // re-assigning a drum's play note mid-hold can't strand the old voice.
+    // No timeout needed here -- the note-off comes from the hardware.
+    std::array<int, kMaxDrumPages> mNoteTriggerHeld;
+
+    // Audio thread.  Fire/release any drum whose trigger binding matches `msg`.
+    // `liveTargetKind` is the focused-engine kind (0 = Drum Kit) -- note
+    // triggers are gated on it per D-8, CC triggers fire regardless.
+    void dispatchDrumTriggers (const juce::MidiMessage& msg,
+                               int samplePosition,
+                               int liveTargetKind,
+                               std::array<juce::MidiBuffer, kMaxDrumPages>& drumPageMidi) noexcept;
+    void tickCcTriggerHolds   (int numSamples,
+                               std::array<juce::MidiBuffer, kMaxDrumPages>& drumPageMidi) noexcept;
+    // 1 s: percussion gates are far shorter than this (a drum's tail lives in its
+    // release/sample, not the gate), so it never truncates a real hit, while a
+    // stranded voice self-clears fast enough not to drone.
+    static constexpr double kCcTriggerMaxHoldSeconds = 1.0;
 
     // ── Multi-threaded render engine (Phase 1 scaffolding, 2026-05-06) ───────
     // Lifetime = plugin lifetime. Pool spawns its workers in its constructor

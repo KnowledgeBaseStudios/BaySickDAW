@@ -67,7 +67,17 @@ public:
     // Thread-safe note audition (UI thread → audio thread via atomic)
     void auditionNote    (int midiNote) { mAuditionNote.store    (midiNote); }
     void auditionNoteOn  (int midiNote) { mAuditionHoldOn.store  (midiNote); }
-    void auditionNoteOff (int midiNote) { mAuditionHoldOff.store (midiNote); }
+    void auditionNoteOff (int midiNote)
+    {
+        // Stuck-note fix (smoke round 2): offs ACCUMULATE in a 128-bit mask.
+        // The old single slot dropped an off whenever two pitch changes
+        // landed inside one audio block (fast note-drag auditions), leaving
+        // that voice ringing until an all-notes-off.  The on stays last-wins:
+        // an overwritten on never sounded, so its off just no-ops.
+        if (midiNote >= 0 && midiNote <= 127)
+            mAuditionHoldOff[midiNote >> 6].fetch_or (1ull << (midiNote & 63),
+                                                      std::memory_order_acq_rel);
+    }
 
     // Build param ID for this instance.
     juce::String pid (const char* name) const { return mPrefix + name; }
@@ -99,8 +109,8 @@ private:
     juce::String        mPrefix;
     juce::String        mTrackId;
     std::atomic<int>    mAuditionNote    { -1 };
-    std::atomic<int>    mAuditionHoldOn  { -1 };
-    std::atomic<int>    mAuditionHoldOff { -1 };
+    std::atomic<int>          mAuditionHoldOn { -1 };
+    std::atomic<juce::uint64> mAuditionHoldOff[2] {};
     HarmlessModRegistry mModRegistry;
     EngineSidechainHelper mScHelper;   // C.4 Phase 2.2 SC primitive
     void registerModTargets();   // called once in ctor

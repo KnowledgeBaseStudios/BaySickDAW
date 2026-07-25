@@ -5,6 +5,7 @@
 #include "../SynthFilter.h"
 #include "../AdsrEnvelope.h"
 #include "../LFO.h"
+#include "../BroadcastSynthesiser.h"
 
 // ── Enumerations ──────────────────────────────────────────────────────────────
 
@@ -28,7 +29,9 @@ enum class BssFilterType { LowPass = 0, HighPass, BandPass, Notch, kCount };
 // All setters are called from BaySickSynthDSP before renderNextBlock.
 // renderNextBlock executes per-sample processing entirely in the inner loop.
 // ─────────────────────────────────────────────────────────────────────────────
-class BaySickSynthVoice : public juce::SynthesiserVoice
+class BaySickSynthVoice : public juce::SynthesiserVoice,
+                          public GlideStashClearable,
+                          public RampTakeoverAcceptor
 {
 public:
     BaySickSynthVoice();
@@ -39,6 +42,17 @@ public:
     void stopNote     (float velocity, bool allowTailOff) override;
     void pitchWheelMoved (int newValue) override;
     void controllerMoved (int cc, int value) override;   // CC1 = mod wheel
+    // GlideStashClearable (QA-H); #36 extended to the full one-shot set (the
+    // CC85 branch tail that used to clear these now lives in the synth's wipe).
+    void clearGlideStash() override
+    {
+        mGlideFromNote    = -1;
+        mGlideTimePending = false;
+        mSlideTargetVel   = -1.0f;
+        mPanRampPend      = -999.0f;
+    }
+    // #36: first-match CC85 takeover (dispatched by BroadcastSynthesiser).
+    bool tryRampTakeover (int targetNote) override;
     void renderNextBlock (juce::AudioBuffer<float>& buf,
                           int startSample, int numSamples) override;
     void setCurrentPlaybackSampleRate (double newRate) override;
@@ -187,6 +201,27 @@ private:
     // Batch E #2 (2026-05-01): per-note filter cutoff offset from CC74.
     // -2..+2 octaves applied multiplicatively to effCutoff in renderNextBlock.
     float mPerNoteCutoffOctaves { 0.0f };
+
+    // S-7: per-note pan from CC10 (-1 left .. +1 right, 0 = center).  Channel-wide
+    // live value like the cutoff above (broadcast reaches idle voices); applied as
+    // a center-preserving balance in the render output so a centered note is
+    // unchanged.  Fixes app-wide panning (Issue 5B: CC10 was emitted, never read).
+    float mNotePan { 0.0f };
+
+    // S-6(C): RampSlide loudness ramp.  CC86 stashes the target velocity; CC85
+    // arms a per-sample ramp of mCurrentVelocity from the base note's value to the
+    // slide's over the glide, so amplitude + vel-tracked filter both interpolate.
+    float mSlideTargetVel { -1.0f };   // -1 = none pending
+    float mVelRampTarget  { 0.0f };
+    float mVelRampStep    { 0.0f };
+    int   mVelRampLeft    { 0 };
+    // #11 (G-4): CC89 pan-ramp target (-999 = none pending).  Armed at the RP
+    // takeover / RT glide noteOn; mNotePan glides current -> target over the
+    // glide span (mirrors the S-6(C) velocity ramp above).
+    float mPanRampPend    { -999.0f };
+    float mPanRampTarget  { 0.0f };
+    float mPanRampStep    { 0.0f };
+    int   mPanRampLeft    { 0 };
 
     // QA-H per-note expression: pending stashes are written by controllerMoved
     // (the roll emits the CCs just before each noteOn) and consumed into the

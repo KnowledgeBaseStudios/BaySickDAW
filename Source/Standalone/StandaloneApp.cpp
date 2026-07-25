@@ -502,6 +502,44 @@ void VibesynthStandaloneApp::saveMultiCoreRenderingPref()
     root->writeTo (f);
 }
 
+// QA-L-Fix D-11 (2026-07-19): "MIDI trigger velocity" preference.  Stored as
+// <MidiTriggerVelocity fixed="0|1"/> in settings.xml, same sibling-preserving
+// pattern as MultiCoreRendering above.  Default (key missing) = From
+// controller, matching the in-memory default.
+void VibesynthStandaloneApp::loadMidiTriggerVelocityPref()
+{
+    const auto f = ProjectManager::getSettingsFile();
+    if (! f.existsAsFile()) return;
+
+    auto root = juce::XmlDocument::parse (f);
+    if (root == nullptr) return;
+
+    if (auto* node = root->getChildByName ("MidiTriggerVelocity"))
+        DrumTriggerVelocity::gUseFixed.store (node->getBoolAttribute ("fixed", false),
+                                              std::memory_order_release);
+}
+
+void VibesynthStandaloneApp::saveMidiTriggerVelocityPref()
+{
+    const auto f = ProjectManager::getSettingsFile();
+    f.getParentDirectory().createDirectory();
+
+    std::unique_ptr<juce::XmlElement> root;
+    if (f.existsAsFile())
+        root = juce::XmlDocument::parse (f);
+    if (root == nullptr)
+        root = std::make_unique<juce::XmlElement> ("BaySickDAWSettings");
+
+    if (auto* existing = root->getChildByName ("MidiTriggerVelocity"))
+        root->removeChildElement (existing, true);
+
+    auto* node = root->createNewChildElement ("MidiTriggerVelocity");
+    node->setAttribute ("fixed",
+                        DrumTriggerVelocity::gUseFixed.load (std::memory_order_acquire));
+
+    root->writeTo (f);
+}
+
 void VibesynthStandaloneApp::saveAudioSettings()
 {
     if (!mDeviceManager) return;
@@ -627,6 +665,10 @@ void VibesynthStandaloneApp::initialise(const juce::String&)
     // Defaults to true when the key is missing.  Independent of audio device
     // settings -- lives in settings.xml not audio_settings.xml.
     loadMultiCoreRenderingPref();
+
+    // QA-L-Fix D-11: kit-trigger velocity source.  Same file, same timing --
+    // the audio thread reads it from the first block onward.
+    loadMidiTriggerVelocityPref();
 
     if (settingsFile.existsAsFile())
     {
@@ -1040,7 +1082,10 @@ void VibesynthStandaloneApp::shutdown()
 }
 
 // C.3 (2026-04-30): MIDI input thread -> processor's collector.  Keep this
-// short and lock-free; MidiMessageCollector::addMessageToQueue is wait-free.
+// short.  NOTE: addMessageToQueue is NOT wait-free (this comment claimed it was
+// until 2026-07-19) -- it takes MidiMessageCollector::midiCallbackLock, briefly
+// contending with the audio thread's removeNextBlockOfMessages.  That is JUCE's
+// design and the hold is tiny; the point stands that no heavy work belongs here.
 //
 // I-3b (2026-05-02): Also fan the same event into mProcessor's MIDI Learn
 // event queue, tagged with the source device's name.  The audio thread

@@ -56,7 +56,14 @@ public:
 
     void auditionNote    (int midiNote) { mAuditionNote.store    (midiNote); }
     void auditionNoteOn  (int midiNote) { mAuditionHoldOn.store  (midiNote); }
-    void auditionNoteOff (int midiNote) { mAuditionHoldOff.store (midiNote); }
+    // Stuck-note fix: offs accumulate (mask) so a fast drag can't drop one --
+    // full rationale at HarmlessProcessor::auditionNoteOff.
+    void auditionNoteOff (int midiNote)
+    {
+        if (midiNote >= 0 && midiNote <= 127)
+            mAuditionHoldOff[midiNote >> 6].fetch_or (1ull << (midiNote & 63),
+                                                      std::memory_order_acq_rel);
+    }
 
     // Visualizer reads this to drive its LFO animation at the sync-aware rate.
     std::atomic<float>* getEffectiveLfoRatePtr() { return &mEffectiveLfoRate; }
@@ -78,8 +85,8 @@ private:
     juce::String     mPrefix;
     juce::String     mTrackId;
     std::atomic<int>   mAuditionNote       { -1 };
-    std::atomic<int>   mAuditionHoldOn     { -1 };
-    std::atomic<int>   mAuditionHoldOff    { -1 };
+    std::atomic<int>          mAuditionHoldOn { -1 };
+    std::atomic<juce::uint64> mAuditionHoldOff[2] {};
     float              mHostBPM            { 120.0f };
     float              mLastSyncedBpm      { -1.0f };   // QA-EngineApvts: tempo-change detect for the gate
     std::atomic<float> mEffectiveLfoRate   { 1.0f };

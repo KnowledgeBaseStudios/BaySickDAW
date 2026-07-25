@@ -304,7 +304,7 @@ private:
         // (the WASAPI-exclusive hot-swap crash class makes arbitrary live
         // device swaps unsafe; a same-device buffer resize is the one narrow
         // reconfigure the startup live-reconfigure precedent already does).
-        if (mMgr.getCurrentAudioDevice() != nullptr)
+        if (auto* liveDev = mMgr.getCurrentAudioDevice())
         {
             juce::AudioDeviceManager::AudioDeviceSetup cur;
             mMgr.getAudioDeviceSetup(cur);
@@ -317,7 +317,12 @@ private:
                                && mRateBox.getSelectedId() == (int) std::llround(cur.sampleRate);
             const int  newBuf   = mBufBox.getSelectedId();
 
-            if (sameType && sameDev && sameRate
+            // docket 3=b (defensive): gate the in-place live buffer reconfigure to
+            // ASIO (hasControlPanel is the ASIO proxy the panel button uses).
+            // WASAPI/DirectSound keep the pending-file + restart flow so the
+            // exclusive-mode hot-swap path this dialog avoids is never reached.
+            if (liveDev->hasControlPanel()
+                && sameType && sameDev && sameRate
                 && newBuf > 0 && newBuf != cur.bufferSize)
             {
                 applyBufferSizeLive(newBuf);
@@ -458,6 +463,11 @@ private:
         {
             mMgr.closeAudioDevice();
             mMgr.restartLastAudioDevice();
+            // NIT-10: the vendor panel may have changed the buffer size; re-read
+            // the live setup into the snapshot and refresh the combos so a later
+            // Apply doesn't revert the panel's change via the live buffer path.
+            mMgr.getAudioDeviceSetup(mSnapshot);
+            populateRatesAndBuffers();
             if (auto* top = getTopLevelComponent())
                 top->toFront(true);
         }
@@ -829,7 +839,16 @@ StandaloneEditor::StandaloneEditor(VibeSynthProcessor& p, StandalonePlayHead& ph
         }
         mRecordArmed = false;
         if (mTransport) mTransport->setRecordArmed (false);
-        if (mPlayHead.isPlaying()) { mPlayHead.stop(); mTransport->setPlayState(false, true); }
+        if (mPlayHead.isPlaying())
+        {
+            mPlayHead.stop();
+            // Playhead residual (c), Jeff 2026-07-24: quantize the paused
+            // park to the nearest 16th so the marker sits ON a grid line and
+            // snapped clicks beside it agree with it (resume shifts by at
+            // most 1/32 note).
+            mPlayHead.seekTo (std::round (mPlayHead.getCurrentBeat() * 4.0) / 4.0);
+            mTransport->setPlayState(false, true);
+        }
         // 2026-04-30: flush all-notes-off on Pause.  Was Stop-only - long-tail
         // notes (Harmless pads, big reverbs) would keep ringing after Pause
         // until the user hits Stop.  Same broadcast Stop uses, just promoted
@@ -852,6 +871,44 @@ StandaloneEditor::StandaloneEditor(VibeSynthProcessor& p, StandalonePlayHead& ph
         if (mProjectManager) mProjectManager->markDirty();
     };
     mTransport->onSongModeChanged = [this](bool songMode) {
+        // Smoke round 3 (Jeff): applicator-lane baseline (engine params +
+        // global_tempo) -- the processor's setSongMode handles the main-APVTS
+        // lanes; these live outside the main APVTS, so capture/restore here
+        // with the reader/applicator registries.
+        if (songMode != mProcessor.isSongMode())
+        {
+            if (songMode)
+            {
+                mApplicatorBaseline.clear();
+                if (mPM != nullptr)
+                    for (int bi = 0; bi < mPM->getNumBlocks(); ++bi)
+                    {
+                        const auto& blk = mPM->getBlock (bi);
+                        if (blk.clipType != ClipType::Automation)          continue;
+                        if (blk.automationLane.paramId.isEmpty())          continue;
+                        if (mProcessor.apvts.getParameter (blk.automationLane.paramId) != nullptr)
+                            continue;   // main-APVTS lane: processor baseline owns it
+                        bool seen = false;
+                        for (const auto& p : mApplicatorBaseline)
+                            if (p.first == blk.automationLane.paramId) { seen = true; break; }
+                        if (seen) continue;
+                        auto rd = mAutomationValueReaders.find (blk.automationLane.paramId);
+                        if (rd != mAutomationValueReaders.end() && rd->second)
+                            mApplicatorBaseline.push_back ({ blk.automationLane.paramId,
+                                                             rd->second() });
+                    }
+            }
+            else
+            {
+                for (const auto& p : mApplicatorBaseline)
+                {
+                    auto it = mAutomationApplicators.find (p.first);
+                    if (it != mAutomationApplicators.end() && it->second)
+                        it->second (p.second);
+                }
+                mApplicatorBaseline.clear();
+            }
+        }
         mProcessor.setSongMode(songMode);
         // QA-TempoMap: markers are song-domain - the timeline gains/loses
         // them on every mode switch (base tempo + live automation persist).
@@ -864,6 +921,14 @@ StandaloneEditor::StandaloneEditor(VibeSynthProcessor& p, StandalonePlayHead& ph
     // playhead each tick.  QA-G Task 6 (docket #14): grid TS markers are the
     // SOLE played source -- song mode reads the marker map at the playhead
     // position; pattern mode uses the pattern's effective signature.
+    // QA-G3Smoke SW-1: global Swing knob <-> main-APVTS `globalSwing`.
+    {
+        auto sb = mProcessor.makeSwingKnobBinding ("globalSwing", "globalSwing");
+        mTransport->onGetSwing = sb.getMix;
+        mTransport->onSetSwing = sb.setMix;
+        mTransport->refreshSwingKnob();
+    }
+
     mTransport->onGetTimeSig = [this](int& outNum, int& outDen) {
         outNum = 4; outDen = 4;
         if (mTransport && mTransport->isSongMode() && TsMap::isActive())
@@ -940,7 +1005,7 @@ StandaloneEditor::StandaloneEditor(VibeSynthProcessor& p, StandalonePlayHead& ph
                 for (int i = 0; i < mPM->getNumBlocks(); ++i)
                 {
                     const auto& blk = mPM->getBlock(i);
-                    const double blkEnd = blk.startBar * 4.0 + effectiveLengthBeats (blk);
+                    const double blkEnd = effectiveStartBeats (blk) + effectiveLengthBeats (blk);
                     if (blkEnd > songEnd) songEnd = blkEnd;
                 }
             }
@@ -1645,6 +1710,51 @@ void StandaloneEditor::buildDefaultTabs()
     {
         mPianoRollPage->setPlayHead    (&mPlayHead);
         mPianoRollPage->isSongMode     = [this] { return mProcessor.isSongMode(); };
+        // #30b regression fix (QA-G3Smoke): every roll/kit note mutation
+        // republishes the scheduler's roll snapshot.  The roll editors never
+        // call PatternManager::notifyContentChanged themselves (their
+        // onNotesChanged tail was repaint-only), so without this hook a
+        // freshly placed note exists on screen but never reaches the audio
+        // thread.
+        mPianoRollPage->setContentEditedHook ([this]
+        {
+            if (auto* pm = mProcessor.getPatternManager())
+                pm->notifyContentChanged();
+        });
+        // #30 (QA-G3Smoke): device info for the roll/kit playhead's visual
+        // latency compensation (permanent, unlike the Debug diag below).
+        mPianoRollPage->deviceInfoProvider = [this] (int& lat, double& sr)
+        {
+            lat = mProcessor.getTotalOutputLatency();
+            sr  = mProcessor.getSampleRate();
+        };
+        // #31 (QA-G3Smoke): song beat -> viewed pattern's local beat (block of
+        // the viewed pattern whose span contains the beat), -1 when none.
+        mPianoRollPage->songLocalBeatProvider = [this] (double songBeat) -> double
+        {
+            auto* pm = mProcessor.getPatternManager();
+            if (pm == nullptr) return -1.0;
+            const int viewed = pm->getCurrentPatternIndex();
+            for (int i = 0; i < pm->getNumBlocks(); ++i)
+            {
+                const auto& blk = pm->getBlock (i);
+                if (blk.clipType != ClipType::Pattern || blk.muted) continue;
+                if (blk.patternIndex != viewed) continue;
+                if (! pm->isRowAudible (blk.trackRow)) continue;
+                const double s = effectiveStartBeats (blk);
+                if (songBeat < s || songBeat >= s + effectiveLengthBeats (blk)) continue;
+                return songBeat - s + ticksToBeats (blk.contentOffsetTicks);
+            }
+            return -1.0;
+        };
+#if JUCE_DEBUG
+        // [G3 PLAYHEAD] G-9 reading (QA-G3Smoke Task 1); Debug-only.
+        mPianoRollPage->g3DiagDeviceInfo = [this] (int& lat, double& sr)
+        {
+            lat = mProcessor.getTotalOutputLatency();
+            sr  = mProcessor.getSampleRate();
+        };
+#endif
         // Live-note monitor: the page timer reads held hardware-MIDI notes from
         // the processor each tick to light the active roll's keyboard.
         mPianoRollPage->liveHeldNotesProvider = [this](uint64_t& lo, uint64_t& hi)
@@ -1907,59 +2017,68 @@ void StandaloneEditor::addDefaultDynamicTabs()
         addEntry (bassId, RibbonTabBar::TabType::Bass, std::move (bp));
     }
 
+    addDefaultDrumTab();
+}
+
+void StandaloneEditor::addDefaultDrumTab()
+{
     const juce::String drumsName = nextDrumTabName();
     int drumsId = mRibbon->addTab (RibbonTabBar::TabType::Drums, drumsName);
+    auto dp = createDrumPage();
+    if (auto* p = dynamic_cast<DrumPage*> (dp.get()))
     {
-        auto dp = createDrumPage();
-        if (auto* p = dynamic_cast<DrumPage*> (dp.get()))
-        {
-            p->setTabName (drumsName);   // QA-D STATE-02: sync internal mTabName to ribbon
-            const int pageIdx = p->getPageIndex();
-            p->onEngineSelected = [this, drumsId, pageIdx, p] {
-                const auto* tab = mRibbon->getTabById (drumsId);
-                if (mMixerPage)   mMixerPage->addDrumChannel (pageIdx, tab ? tab->name : "Drums");
-                if (mEffectsPage) mEffectsPage->rebuildChannelDropdown();
-                refreshAllKitViews();
-                // 2026-05-05 dirty-flag wiring on the just-installed engine.
-                wireEngineDirtyHook (p->getEngineProcessor());
-                // QA-D STATE-02 follow-on: piano-roll context label.
-                if (mPianoRollPage)
-                    mPianoRollPage->setEngineType ({ EngineKind::Drum, pageIdx }, p->getEngineType());
-            };
-            p->onSoundNameChanged = [this, drumsId, pageIdx, p] (const juce::String& nm) {
-                if (nm.isEmpty()) return;
-                if (mRibbon)    mRibbon->renameTab (drumsId, nm);
-                if (mMixerPage) mMixerPage->renameChannel (MixerPage::StripKind::Drum, pageIdx, nm);
-                p->setTabName (nm);
-                refreshAllKitViews();
-                if (mPianoRollPage) mPianoRollPage->setEngineDisplayName ({ EngineKind::Drum, pageIdx }, nm);
-            };
-            p->onDeleteRequested = [this, drumsId] {
-                if (! mRibbon) return;
-                if (mRibbon->isLastOfType (RibbonTabBar::TabType::Drums))
-                {
-                    juce::AlertWindow::showMessageBoxAsync (juce::AlertWindow::InfoIcon,
-                        "Cannot Delete",
-                        "This is the only Drum tab. Add another first.");
-                    return;
-                }
-                mRibbon->closeTab (drumsId);   // fires onTabClosed -> mPages cleanup
-            };
-            p->onDuplicateRequested = [this] (const juce::String& clipboardXml) {
-                spawnDuplicateDrumTab (clipboardXml);
-            };
-            p->onLockChanged = [this, drumsId, p] {
-                if (mRibbon) mRibbon->setTabLocked (drumsId, p->isLocked());
-                refreshAllKitViews();
-            };
-            p->onRenameRequested = [this, drumsId] {
-                if (mRibbon) mRibbon->startRename (drumsId);
-            };
-            wireDrumPageKitView (p);
-            registerDrumPianoRoll (p);
-        }
-        addEntry (drumsId, RibbonTabBar::TabType::Drums, std::move (dp));
+        p->setTabName (drumsName);   // QA-D STATE-02: sync internal mTabName to ribbon
+        const int pageIdx = p->getPageIndex();
+        p->onEngineSelected = [this, drumsId, pageIdx, p] {
+            const auto* tab = mRibbon->getTabById (drumsId);
+            if (mMixerPage)   mMixerPage->addDrumChannel (pageIdx, tab ? tab->name : "Drums");
+            if (mEffectsPage) mEffectsPage->rebuildChannelDropdown();
+            refreshAllKitViews();
+            // 2026-05-05 dirty-flag wiring on the just-installed engine.
+            wireEngineDirtyHook (p->getEngineProcessor());
+            // QA-D STATE-02 follow-on: piano-roll context label.
+            if (mPianoRollPage)
+                mPianoRollPage->setEngineType ({ EngineKind::Drum, pageIdx }, p->getEngineType());
+        };
+        p->onSoundNameChanged = [this, drumsId, pageIdx, p] (const juce::String& nm) {
+            if (nm.isEmpty()) return;
+            if (mRibbon)    mRibbon->renameTab (drumsId, nm);
+            if (mMixerPage) mMixerPage->renameChannel (MixerPage::StripKind::Drum, pageIdx, nm);
+            p->setTabName (nm);
+            refreshAllKitViews();
+            if (mPianoRollPage) mPianoRollPage->setEngineDisplayName ({ EngineKind::Drum, pageIdx }, nm);
+        };
+        p->onDeleteRequested = [this, drumsId] {
+            if (! mRibbon) return;
+            if (mRibbon->isLastOfType (RibbonTabBar::TabType::Drums))
+            {
+                juce::AlertWindow::showMessageBoxAsync (juce::AlertWindow::InfoIcon,
+                    "Cannot Delete",
+                    "This is the only Drum tab. Add another first.");
+                return;
+            }
+            mRibbon->closeTab (drumsId);   // fires onTabClosed -> mPages cleanup
+        };
+        p->onDuplicateRequested = [this] (const juce::String& clipboardXml) {
+            spawnDuplicateDrumTab (clipboardXml);
+        };
+        p->onLockChanged = [this, drumsId, p] {
+            if (mRibbon) mRibbon->setTabLocked (drumsId, p->isLocked());
+            refreshAllKitViews();
+        };
+        p->onRenameRequested = [this, drumsId] {
+            if (mRibbon) mRibbon->startRename (drumsId);
+        };
+        wireDrumPageKitView (p);
+        registerDrumPianoRoll (p);
     }
+
+    auto* entry = new PageEntry();
+    entry->ribbonTabId = drumsId;
+    entry->type        = RibbonTabBar::TabType::Drums;
+    entry->component   = std::move (dp);
+    addChildComponent (*entry->component);
+    mPages.add (entry);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -3139,6 +3258,14 @@ void StandaloneEditor::applyAutomationAtCurrentPosition()
 
     if (!mPM) return;
 
+    // Smoke round 3 (Jeff): SONG MODE ONLY -- same gate as the audio-thread
+    // pass.  This UI pass covers the stopped seek/scrub preview (APVTS lanes)
+    // AND the applicator lanes (engine params + global_tempo), which
+    // previously ran in EVERY mode on every tick: the second writer that
+    // kept automation driving pattern-mode playback after the processor
+    // pass was gated.
+    if (! mProcessor.isSongMode()) return;
+
     const double beatsPerBar   = 4.0;   // TODO: read from PatternManager time signature
     const double currentBeats  = mPlayHead.getCurrentBeat();
     const bool   playing       = mPlayHead.isPlaying();
@@ -3157,8 +3284,10 @@ void StandaloneEditor::applyAutomationAtCurrentPosition()
         if (block.clipType != ClipType::Automation) continue;
         if (block.muted) continue;
 
-        const double blockStart     = block.startBar * beatsPerBar;
-        const double clipLenBeats   = block.lengthBars * beatsPerBar;
+        // Review fix: use effectiveLengthBars (sub-bar clip spans) so the
+        // stopped/seek preview windows match the audio-thread evaluator.
+        const double blockStart     = effectiveStartBeats (block);
+        const double clipLenBeats   = effectiveLengthBars (block) * beatsPerBar;
         const double blockEnd       = blockStart + clipLenBeats;
 
         if (currentBeats < blockStart || currentBeats >= blockEnd) continue;
@@ -3222,7 +3351,7 @@ int StandaloneEditor::createAutomationBlock(const juce::String& paramId)
         for (int i = 0; i < mPM->getNumBlocks(); ++i)
         {
             const auto& b = mPM->getBlock(i);
-            maxEnd = std::max(maxEnd, b.startBar + b.lengthBars);
+            maxEnd = std::max(maxEnd, (int) std::ceil(effectiveStartBars(b) + (double) b.lengthBars - 1e-9));
         }
         if (maxEnd > 0) newLength = maxEnd;
     }
@@ -3238,7 +3367,7 @@ int StandaloneEditor::createAutomationBlock(const juce::String& paramId)
     ArrangementBlock block;
     block.clipType       = ClipType::Automation;
     block.trackRow       = usedRows;
-    block.startBar       = newStart;
+    block.startBeats     = (double) newStart * 4.0;
     block.lengthBars     = newLength;
     block.patternIndex   = mPM->getCurrentPatternIndex();
     block.layerTrack     = false;
@@ -5169,6 +5298,13 @@ void StandaloneEditor::showPageForTab(int tabId)
                 const juce::String prefix = "mixer_layer_" + juce::String (p->getPageIndex());
                 jumpToFxRackForPrefix (prefix);
             });
+            // Smoke round 2 (Jeff): per-player Swing Mix knob on this bar,
+            // right of FX Rack -- visible on every sub-tab of the page.
+            {
+                const juce::String swBase = "swing_layer_" + juce::String (lp->getPageIndex());
+                auto sb = mProcessor.makeSwingKnobBinding (swBase + "_mix", swBase + "_trunc");
+                mPageMenuBar->setSwingKnobSlot (sb.getMix, sb.setMix, sb.getTrunc, sb.setTrunc);
+            }
         }
         else if (auto* bp = dynamic_cast<BassPage*>(mVisiblePage))
         {
@@ -5222,6 +5358,12 @@ void StandaloneEditor::showPageForTab(int tabId)
                 const juce::String prefix = "mixer_bass_" + juce::String (p->getPageIndex());
                 jumpToFxRackForPrefix (prefix);
             });
+            // Smoke round 2 (Jeff): per-player Swing Mix knob (see Layers).
+            {
+                const juce::String swBase = "swing_bass_" + juce::String (bp->getPageIndex());
+                auto sb = mProcessor.makeSwingKnobBinding (swBase + "_mix", swBase + "_trunc");
+                mPageMenuBar->setSwingKnobSlot (sb.getMix, sb.setMix, sb.getTrunc, sb.setTrunc);
+            }
         }
         else if (auto* cp = dynamic_cast<ClipsPage*>(mVisiblePage))
         {
@@ -5411,17 +5553,20 @@ void StandaloneEditor::showPageForTab(int tabId)
                 const juce::String prefix = "mixer_inst_" + juce::String (p->getPageIndex());
                 jumpToFxRackForPrefix (prefix);
             });
-            // I-0b: clip-name label hosted on the right of the PageMenuBar
-            // (mirrors Vox).
-            if (auto* lbl = ip->getClipFileLabel())
-                mPageMenuBar->addExtraRightComponent (lbl, 240);
-            // K-5 (2026-05-05): sfizz sources (BaySickGuitars / BaySickBasses)
-            // surface a "Load Guitar" button in extras-right.  Click pops a
-            // menu listing every *.sfz in the kit's Programs/ folder.  The
-            // file label parked above shows the currently-loaded program.
-            if (ip->getSource() != InstPage::Source::LiveInput)
-                if (auto* btn = ip->getProgramButton())
-                    mPageMenuBar->addExtraRightComponent (btn, 130);
+            // Smoke round 2 (Jeff): per-player Swing Mix knob (see Layers).
+            {
+                const juce::String swBase = "swing_inst_" + juce::String (ip->getPageIndex());
+                auto sb = mProcessor.makeSwingKnobBinding (swBase + "_mix", swBase + "_trunc");
+                mPageMenuBar->setSwingKnobSlot (sb.getMix, sb.setMix, sb.getTrunc, sb.setTrunc);
+            }
+            // QA-G3Smoke G-16: sfizz sources (BaySickGuitars / BaySickBasses)
+            // now host the program label + Load-program button on the
+            // AriaControlPanel title bar (InstPage wires them at setEngine);
+            // only live-input pages keep the clip-name label up here (I-0b,
+            // mirrors Vox).
+            if (ip->getSource() == InstPage::Source::LiveInput)
+                if (auto* lbl = ip->getClipFileLabel())
+                    mPageMenuBar->addExtraRightComponent (lbl, 240);
         }
         else if (auto* dp = dynamic_cast<DrumPage*>(mVisiblePage))
         {
@@ -5502,6 +5647,12 @@ void StandaloneEditor::showPageForTab(int tabId)
                 const juce::String prefix = "mixer_drum_" + juce::String (p->getPageIndex());
                 jumpToFxRackForPrefix (prefix);
             });
+            // Smoke round 2 (Jeff): per-player Swing Mix knob (see Layers).
+            {
+                const juce::String swBase = "swing_drum_" + juce::String (dp->getPageIndex());
+                auto sb = mProcessor.makeSwingKnobBinding (swBase + "_mix", swBase + "_trunc");
+                mPageMenuBar->setSwingKnobSlot (sb.getMix, sb.setMix, sb.getTrunc, sb.setTrunc);
+            }
         }
         else if (auto* rp = dynamic_cast<BaySickRustyDrumsPage*>(mVisiblePage))
         {
@@ -5536,17 +5687,16 @@ void StandaloneEditor::showPageForTab(int tabId)
                     mPageMenuBar->setMidSideVisible(false);
                 }, rp->getActiveTab(), rp->getPageColor());
             mPageMenuBar->setMidSideVisible(false);
+            // Smoke round 2 (Jeff): per-player Swing Mix knob (see Layers) --
+            // Rusty has no FX Rack slot, so it sits right of the tab cluster.
+            {
+                auto sb = mProcessor.makeSwingKnobBinding ("swing_rusty_mix", "swing_rusty_trunc");
+                mPageMenuBar->setSwingKnobSlot (sb.getMix, sb.setMix, sb.getTrunc, sb.setTrunc);
+            }
 
-            // J-8 Part B (2026-05-04): "Load Player" program-selector dropdown
-            // gets parked on PageMenuBar's extra-right cluster while this page
-            // is visible.  The page owns the ComboBox; we just borrow it.
-            if (auto* combo = rp->getProgramCombo())
-                mPageMenuBar->addExtraRightComponent (combo, 160);
-
-            // J-11 (2026-05-05): Player Preset dropdown - sits to the right
-            // of the Program selector.  Captures kit CC values only.
-            if (auto* btn = rp->getPlayerPresetButton())
-                mPageMenuBar->addExtraRightComponent (btn, 130);
+            // QA-G3Smoke G-16: the Program selector + Player Preset button now
+            // live on the BaySickRustyDrums title bar inside AriaControlPanel
+            // (the page hosts them at build) -- no PageMenuBar parking.
 
             // 2026-05-05 consolidation: Save / Load Page Preset goes through
             // the unified PagePresetIO API (PageKind::RustyDrums).  Captures
@@ -5768,6 +5918,17 @@ void StandaloneEditor::showPageForTab(int tabId)
                                 true,                  // enabled
                                 false);                // not checkable
 
+                    // QA-L-Fix D-11 (2026-07-19): kit-trigger velocity source.
+                    // Fixed exists for pads that aren't velocity sensitive.
+                    {
+                        const bool fixedVel =
+                            DrumTriggerVelocity::gUseFixed.load (std::memory_order_acquire);
+                        juce::PopupMenu velSub;
+                        velSub.addItem (204, "From controller", true, ! fixedVel);
+                        velSub.addItem (205, "Fixed",           true,   fixedVel);
+                        m.addSubMenu ("MIDI trigger velocity", velSub);
+                    }
+
                     m.showMenuAsync (
                         juce::PopupMenu::Options().withTargetComponent (anchor),
                         [safeThis] (int r)
@@ -5809,6 +5970,16 @@ void StandaloneEditor::showPageForTab(int tabId)
                                 const bool wasOn = RenderEngine::gMultiThreadedEngineEnabled.load (std::memory_order_acquire);
                                 RenderEngine::gMultiThreadedEngineEnabled.store (! wasOn, std::memory_order_release);
                                 VibesynthStandaloneApp::saveMultiCoreRenderingPref();
+                                return;
+                            }
+                            if (r == 204 || r == 205)
+                            {
+                                // QA-L-Fix D-11: hot-swap; the next triggered
+                                // hit uses the new source.  Persisted like the
+                                // MT toggle above.
+                                DrumTriggerVelocity::gUseFixed.store (r == 205,
+                                                                      std::memory_order_release);
+                                VibesynthStandaloneApp::saveMidiTriggerVelocityPref();
                                 return;
                             }
                             if (r == 203)
@@ -6113,27 +6284,54 @@ void StandaloneEditor::wireDrumPageKitView (DrumPage* dp)
 
     dp->setKitListProvider ([this]() { return getKitDrumList(); });
 
+    // QA-L-Fix (D-6): the user changed this drum's play pitch from the kit
+    // menu.  Routed to the unified Piano Roll kit grid because that grid owns
+    // the drumRolls undo stack; both kit views read the same data, so one
+    // Ctrl+Z restores everywhere.
+    dp->onPlayNoteChanged = [this] (int pageIdx, int oldNote, int newNote)
+    {
+        if (mPianoRollPage)
+            if (auto* kit = mPianoRollPage->getDrumKitContainer())
+                kit->repitchDrumHits (pageIdx, oldNote, newNote);
+        refreshAllKitViews();
+    };
+
     // D2 Batch 4: per-row audition (press-and-hold) routed to the drum's
-    // engine via auditionNoteOn(60) / auditionNoteOff(60).  60 = C5 = the
-    // kit-grid placement note.
-    auto auditionDispatch = [this] (int row, bool on)
+    // engine via auditionNoteOn / auditionNoteOff.
+    // QA-L-Fix (D-4, owner call 2026-07-19): audition fires at the drum's
+    // assigned play note so the row preview matches how the drum sounds
+    // everywhere else.  `heldNote` latches the pitch used at press --
+    // auditionNoteOff targets a specific note, so releasing against a
+    // freshly-read (possibly changed) assignment would strand a voice.
+    // Shared by both handler copies below via shared_ptr.  Per-ROW rather than
+    // one shared slot: press-and-hold is mouse-driven today so rows can't
+    // overlap, but a single latch would silently mis-release the moment that
+    // stops being true (touch, or a keyboard-driven kit).
+    auto heldNotes = std::make_shared<std::array<int, kMaxDrumPages>> ();
+    heldNotes->fill (60);
+    auto auditionDispatch = [this, heldNotes] (int row, bool on)
     {
         auto list = getKitDrumList();
         if (row < 0 || row >= (int) list.size()) return;
+        if (row >= kMaxDrumPages) return;
         const int targetTabId = list[(size_t) row].ribbonTabId;
         for (auto* entry : mPages)
         {
             if (! entry || entry->ribbonTabId != targetTabId) continue;
             if (auto* targetDp = dynamic_cast<DrumPage*> (entry->component.get()))
             {
+                auto& held = (*heldNotes)[(size_t) row];
+                if (on) held = targetDp->getPlayNote();
+                const int n = held;
+
                 auto* eng = targetDp->getEngineProcessor();
                 if (auto* s = dynamic_cast<BaySickSynthProcessor*> (eng))
                 {
-                    if (on) s->auditionNoteOn (60); else s->auditionNoteOff (60);
+                    if (on) s->auditionNoteOn (n); else s->auditionNoteOff (n);
                 }
                 else if (auto* v = dynamic_cast<VibePlayerProcessor*> (eng))
                 {
-                    if (on) v->auditionNoteOn (60); else v->auditionNoteOff (60);
+                    if (on) v->auditionNoteOn (n); else v->auditionNoteOff (n);
                 }
             }
             return;
@@ -6168,7 +6366,7 @@ void StandaloneEditor::wireDrumPageKitView (DrumPage* dp)
                 if (auto* targetDp = dynamic_cast<DrumPage*> (entry->component.get()))
                 {
                     if (targetDp->isEngineLocked())
-                        targetDp->showContextMenu (anchor);
+                        targetDp->showContextMenu (anchor, true);   // kit entry point
                     else
                         targetDp->showSoundPicker (anchor);
                 }
@@ -6231,24 +6429,40 @@ void StandaloneEditor::wirePianoRollPageKitView (PianoRollPage* prp)
         return out;
     });
 
-    auto auditionDispatch = [this] (int row, bool on)
+    // QA-L-Fix (D-4, owner call 2026-07-19): audition fires at the drum's
+    // assigned play note so the row preview matches how the drum sounds
+    // everywhere else.  `heldNote` latches the pitch used at press --
+    // auditionNoteOff targets a specific note, so releasing against a
+    // freshly-read (possibly changed) assignment would strand a voice.
+    // Shared by both handler copies below via shared_ptr.  Per-ROW rather than
+    // one shared slot: press-and-hold is mouse-driven today so rows can't
+    // overlap, but a single latch would silently mis-release the moment that
+    // stops being true (touch, or a keyboard-driven kit).
+    auto heldNotes = std::make_shared<std::array<int, kMaxDrumPages>> ();
+    heldNotes->fill (60);
+    auto auditionDispatch = [this, heldNotes] (int row, bool on)
     {
         auto list = getKitDrumList();
         if (row < 0 || row >= (int) list.size()) return;
+        if (row >= kMaxDrumPages) return;
         const int targetTabId = list[(size_t) row].ribbonTabId;
         for (auto* entry : mPages)
         {
             if (! entry || entry->ribbonTabId != targetTabId) continue;
             if (auto* targetDp = dynamic_cast<DrumPage*> (entry->component.get()))
             {
+                auto& held = (*heldNotes)[(size_t) row];
+                if (on) held = targetDp->getPlayNote();
+                const int n = held;
+
                 auto* eng = targetDp->getEngineProcessor();
                 if (auto* s = dynamic_cast<BaySickSynthProcessor*> (eng))
                 {
-                    if (on) s->auditionNoteOn (60); else s->auditionNoteOff (60);
+                    if (on) s->auditionNoteOn (n); else s->auditionNoteOff (n);
                 }
                 else if (auto* v = dynamic_cast<VibePlayerProcessor*> (eng))
                 {
-                    if (on) v->auditionNoteOn (60); else v->auditionNoteOff (60);
+                    if (on) v->auditionNoteOn (n); else v->auditionNoteOff (n);
                 }
             }
             return;
@@ -6286,7 +6500,7 @@ void StandaloneEditor::wirePianoRollPageKitView (PianoRollPage* prp)
                 if (auto* targetDp = dynamic_cast<DrumPage*> (entry->component.get()))
                 {
                     if (targetDp->isEngineLocked())
-                        targetDp->showContextMenu (anchor);
+                        targetDp->showContextMenu (anchor, true);   // kit entry point
                     else
                         targetDp->showSoundPicker (anchor);
                 }
@@ -7164,8 +7378,11 @@ void StandaloneEditor::loadKitImpl (const juce::File& kitXml)
     // Bass.  The Rusty tab is ALSO Drums-typed, but a kit load replaces
     // DrumPage kits, never the singleton Rusty engine (LIFE-01) -- filter it
     // out, and close per-id instead of the type-wide ribbon clear so Rusty's
-    // ribbon tab survives.  closeTab fires onTabClosed itself (the Rusty
-    // delete flow's documented behavior), so one call = the complete close.
+    // ribbon tab survives.  Force-close bypasses closeTab's last-of-type guard:
+    // on a no-Rusty project the DrumPage torn down here is the SOLE Drums-typed
+    // tab, and the guard would otherwise no-op the close (leaving a stale page
+    // that blocks the kit's slot-0 drum).  closeTab fires onTabClosed itself, so
+    // one forced call = the complete teardown.
     {
         juce::Array<int> drumIds;
         for (auto& e : mPages)
@@ -7174,7 +7391,7 @@ void StandaloneEditor::loadKitImpl (const juce::File& kitXml)
                 drumIds.add (e->ribbonTabId);
         for (int id : drumIds)
         {
-            if (mRibbon) mRibbon->closeTab (id);
+            if (mRibbon) mRibbon->closeTab (id, /*force*/ true);
             else         onTabClosed (id);
         }
     }
@@ -7336,7 +7553,7 @@ void StandaloneEditor::loadKitImpl (const juce::File& kitXml)
     bool anyDrumTab = false;
     for (auto& e : mPages)
         if (e && e->type == RibbonTabBar::TabType::Drums) { anyDrumTab = true; break; }
-    if (! anyDrumTab) addDefaultDynamicTabs();   // rebuild the default trio
+    if (! anyDrumTab) addDefaultDrumTab();   // NIT-14: Drums-only, not the full trio
 
     // Select the first new drum tab so the user lands on a populated page.
     // Without this, the previously-visible page was destroyed by the tear-down
@@ -8805,6 +9022,19 @@ void StandaloneEditor::registerInstSourcePianoRoll (InstPage* ip)
                 return eng->getKeyswitchLabel (n);
             return {};
         };
+        // QA-SlideSampler Task 4: Guitars use the engine-aware note-props panel
+        // (Flat/RP Slide/Bend); Bend dropdown gated to the patch's native range.
+        conn.noteEditContextProvider = [proc, idx]() -> PianoRollGrid::NoteEditContext
+        {
+            PianoRollGrid::NoteEditContext ctx;
+            ctx.engineAware = true;
+            if (auto* eng = proc->getBaySickGuitars (idx))
+            {
+                ctx.bendUpSemis   = eng->getSlideRegions().bendMaxUpSemis();
+                ctx.bendDownSemis = eng->getSlideRegions().bendMaxDownSemis();
+            }
+            return ctx;
+        };
     }
     else if (kind == EngineKind::BaySickBasses)
     {
@@ -8826,6 +9056,18 @@ void StandaloneEditor::registerInstSourcePianoRoll (InstPage* ip)
             if (auto* eng = proc->getBaySickBasses (idx))
                 return eng->getKeyswitchLabel (n);
             return {};
+        };
+        // QA-SlideSampler Task 4: Basses use the engine-aware note-props panel.
+        conn.noteEditContextProvider = [proc, idx]() -> PianoRollGrid::NoteEditContext
+        {
+            PianoRollGrid::NoteEditContext ctx;
+            ctx.engineAware = true;
+            if (auto* eng = proc->getBaySickBasses (idx))
+            {
+                ctx.bendUpSemis   = eng->getSlideRegions().bendMaxUpSemis();
+                ctx.bendDownSemis = eng->getSlideRegions().bendMaxDownSemis();
+            }
+            return ctx;
         };
     }
 
@@ -10719,6 +10961,12 @@ void StandaloneEditor::resetProjectState()
     mAutomationApplicators.clear();
     mAutomationValueReaders.clear();
     registerStaticAutomationHandlers();
+    // The permanent bus/master strips are neither static APVTS params nor
+    // dynamic tabs that rebuild -- they register their fader/pan automation
+    // once at construction, so the clear() above drops their "_fader" applicator
+    // (which has no APVTS twin to re-seed it).  Re-register so master/bus fader
+    // automation survives project load / New Project.
+    if (mMixerPage) mMixerPage->reRegisterStripAutomation();
 }
 
 void StandaloneEditor::registerStaticAutomationHandlers()
@@ -11827,7 +12075,6 @@ void StandaloneEditor::placeAlignedBake (const juce::File& bakeFile, double star
     {
         auto& b = mPM->getBlock (existingBakeIdx);
         b.audioFilePath = relPath;
-        b.startBar      = (int) std::floor (startBeat / kBeatsPerBar);
         b.setStartBeats  (startBeat);
         b.lengthBars    = juce::jmax (1, (int) std::ceil (lengthBeats / kBeatsPerBar));
         b.setLengthBeats (lengthBeats);
@@ -11841,7 +12088,6 @@ void StandaloneEditor::placeAlignedBake (const juce::File& bakeFile, double star
         ArrangementBlock block;
         block.clipType      = ClipType::Audio;
         block.trackRow      = targetRow;
-        block.startBar      = (int) std::floor (startBeat / kBeatsPerBar);
         block.setStartBeats  (startBeat);
         block.lengthBars    = juce::jmax (1, (int) std::ceil (lengthBeats / kBeatsPerBar));
         block.setLengthBeats (lengthBeats);
@@ -11961,7 +12207,6 @@ void StandaloneEditor::placeVoxExportClip (const juce::File& exportFile, double 
     ArrangementBlock block;
     block.clipType      = ClipType::Audio;
     block.trackRow      = nextRow;
-    block.startBar      = (int) std::floor (startBeat / kBeatsPerBar);
     block.setStartBeats  (startBeat);
     block.lengthBars    = juce::jmax (1, (int) std::ceil (lengthBeats / kBeatsPerBar));
     block.setLengthBeats (lengthBeats);
@@ -12509,7 +12754,7 @@ void StandaloneEditor::commitRecordingResult (const VibeSynthProcessor::RecordRe
         ArrangementBlock block;
         block.clipType      = ClipType::Audio;
         block.trackRow      = nextRow;
-        block.startBar      = startBar;
+        block.startBeats    = (double) startBar * 4.0;   // 8A: bar-truncated placement preserved
         block.lengthBars    = lengthBars;                           // ceil'd bar count (for bar-aligned UI)
         block.setLengthBeats (effContentBeats);                     // QA-Ea Task 0c: visible content beats
         block.patternIndex  = mPM->getCurrentPatternIndex();
@@ -12680,6 +12925,15 @@ void StandaloneEditor::commitRecordingResult (const VibeSynthProcessor::RecordRe
     {
         PianoRollData* target = nullptr;
         auto& pat = mPM->currentPattern();
+        // #32 (QA-G3Smoke): drum recordings route PER NOTE through the trigger
+        // bindings into pat.drumRolls[] (see the loop below) -- the legacy
+        // shared pat.drumRoll is scheduler-dead (D1.2 reads drumRolls[] only)
+        // and the D1.1 rescue migration never runs for a non-empty project,
+        // so recordings were silent on playback AND permanently lost.  #33
+        // falls out: the recorder no longer writes pat.drumRoll at all, so
+        // the descending 51-midiNote migration is structurally unreachable
+        // for recorder-written notes (it remains for true pre-D1.1 projects).
+        const bool drumDemux = (mLastRollKind == LastRollKind::Drums);
         switch (mLastRollKind)
         {
             case LastRollKind::Layer:
@@ -12691,12 +12945,11 @@ void StandaloneEditor::commitRecordingResult (const VibeSynthProcessor::RecordRe
                     target = &pat.bassRoll[mLastRollIndex];
                 break;
             case LastRollKind::Drums:
-                target = &pat.drumRoll;
-                break;
+                break;   // per-note routing below
             case LastRollKind::None:
                 break;
         }
-        if (target != nullptr)
+        if (target != nullptr || drumDemux)
         {
             // QA-Ea Task 0c (FL pre-roll record): shift captured MIDI notes
             // by the pre-roll offset (negative shift -> note startBeats now
@@ -12753,8 +13006,46 @@ void StandaloneEditor::commitRecordingResult (const VibeSynthProcessor::RecordRe
                     n.startBeat = ticksToBeats (((t + quantizeTicks / 2) / quantizeTicks) * quantizeTicks);
                 }
 
+                if (drumDemux)
+                {
+                    // #32: mirror the live dispatch -- the note lands in EVERY
+                    // drum whose Note binding matches its number (the capture
+                    // does not carry a channel, so channel-scoped bindings
+                    // match any channel here), STAMPED at that drum's play
+                    // note.  Unmatched notes fall back to the focused drum,
+                    // pitch kept.
+                    auto& trig    = mProcessor.getDrumTriggerMap();
+                    bool  matched = false;
+                    for (int di = 0; di < (int) pat.drumRolls.size(); ++di)
+                    {
+                        const auto b = trig.getBinding (di);
+                        if (! b.isSet() || b.kind != DrumTriggerMap::Kind::Note) continue;
+                        if (b.number != n.midiNote) continue;
+                        auto stamped = n;
+                        const int playNote = mProcessor.drumPlayNoteRT (di);
+                        if (playNote >= 0) stamped.midiNote = playNote;
+                        pat.drumRolls[(size_t) di].notes.push_back (stamped);
+                        matched = true;
+                    }
+                    if (! matched && mLastRollIndex >= 0
+                        && mLastRollIndex < (int) pat.drumRolls.size())
+                        pat.drumRolls[(size_t) mLastRollIndex].notes.push_back (n);
+                    continue;
+                }
                 target->notes.push_back (n);
             }
+            if (drumDemux)
+            {
+                for (auto& dr : pat.drumRolls)
+                    std::sort (dr.notes.begin(), dr.notes.end(),
+                               [] (const PianoNote& a, const PianoNote& b)
+                               { return a.startBeat < b.startBeat; });
+                refreshAllKitViews();   // #32: recorded hits appear immediately
+            }
+            // #30b: recorded notes are a roll mutation OUTSIDE the grid's
+            // onNotesChanged path -- publish the scheduler snapshot explicitly
+            // (also fires onAnyChange -> markDirty).
+            mPM->notifyContentChanged();
             if (mProjectManager) mProjectManager->markDirty();
         }
     }

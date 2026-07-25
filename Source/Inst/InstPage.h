@@ -213,6 +213,16 @@ private:
     void rebuildProgramCombo();
     void onProgramComboChanged();
 
+    // QA-G3Smoke Task 12 (G-14): CUT SELF + mode toggles hosted in the panel
+    // title bar's formerly reserved trailing slots, bound to the sfizz
+    // engine's <prefix>cutSelf / <prefix>cutSelfMode params.  Attachments are
+    // reset at the top of every rebuildPlayerPanel so a source swap can never
+    // leave them listening on a torn-down engine's APVTS.
+    juce::TextButton mCutSelfBtn { "CUT SELF" };
+    juce::TextButton mCutModeBtn { "SAME PITCH" };
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> mCutSelfAttach;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> mCutModeAttach;
+
 public:
     // K-5: PageMenuBar parks this button in extras-right when the page's
     // source is sfizz-driven.  Always reads "Load Guitar" - actual loaded

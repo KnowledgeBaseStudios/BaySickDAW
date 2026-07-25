@@ -1,6 +1,7 @@
 #include "PianoRollPage.h"
 #include "SharedUI.h"
 #include "StandaloneApp.h"   // StandalonePlayHead
+#include "../G3PlayheadDiag.h"   // [G3 PLAYHEAD] G-9 reading (QA-G3Smoke Task 1); Debug-only
 
 // QA-D STATE-02 follow-on: shared composer for the piano-roll context label.
 // Format: "{displayName} - {engineType-or-(no engine)}".  Mirrors the
@@ -20,7 +21,10 @@ PianoRollPage::PianoRollPage()
     mDrumKit = std::make_unique<DrumKitContainer>();
     addAndMakeVisible (*mDrumKit);
 
-    startTimerHz (30);
+    // Residual (b) fix: 60 Hz halves the playhead's visual trail; affordable
+    // because the grids now dirty-rect their playhead repaints (the old
+    // full-canvas repaint per tick would have doubled instead).
+    startTimerHz (60);
 }
 
 PianoRollPage::~PianoRollPage()
@@ -78,8 +82,36 @@ void PianoRollPage::timerCallback()
     }
 
     if (mPlayHead == nullptr) return;
+    // #30 (QA-G3Smoke): while PLAYING, shift the visual playhead back by the
+    // output latency (mirrors the Builder) so the line sits where the user
+    // HEARS the beat.  Stopped = raw position (a seek parks exactly where
+    // clicked).  Covers the roll AND the drum kit -- both consume this pump.
+    double cur = mPlayHead->getCurrentBeat();
+    if (mPlayHead->isPlaying() && deviceInfoProvider)
+    {
+        int lat = 0; double sr = 0.0;
+        deviceInfoProvider (lat, sr);
+        const double bpm = mPlayHead->getBPM();
+        if (sr > 0.0 && bpm > 0.0)
+            cur -= (double) lat / sr * bpm / 60.0;
+    }
     const bool song = (isSongMode && isSongMode());
-    const double beat = song ? -1.0 : mPlayHead->getCurrentBeat();
+    // #31 (QA-G3Smoke): song mode shows the playhead IFF the viewed pattern is
+    // playing under it (pattern-local beat via the editor's block search; no
+    // modulo -- tiling is gone).  Pattern mode: the loop-local beat as before.
+    const double beat = ! song ? cur
+                       : (songLocalBeatProvider ? songLocalBeatProvider (cur) : -1.0);
+
+#if JUCE_DEBUG
+    if (beat >= 0.0 && mPlayHead->isPlaying())
+    {
+        int lat = -1; double sr = 0.0;
+        if (g3DiagDeviceInfo) g3DiagDeviceInfo (lat, sr);
+        G3PlayheadDiag::log ("tick beat=" + juce::String (beat, 4)
+                             + " latSamples=" + juce::String (lat)
+                             + " sr=" + juce::String (sr, 1));
+    }
+#endif
 
     // Drum Kit pump (always alive - even when not the active view, the kit
     // keeps its playhead in sync so switching back is seamless).
@@ -121,6 +153,14 @@ void PianoRollPage::setUndoContext (const UndoContext& ctx)
         if (kv.second) kv.second->setUndoContext (ctx);
 }
 
+void PianoRollPage::setContentEditedHook (std::function<void()> fn)
+{
+    mContentEditedHook = std::move (fn);
+    if (mDrumKit) mDrumKit->onContentEdited = mContentEditedHook;
+    for (auto& kv : mRolls)
+        if (kv.second) kv.second->onContentEdited = mContentEditedHook;
+}
+
 void PianoRollPage::registerEngine (EngineId id, PianoRollConnection conn)
 {
     // Replace any prior registration (defensive: caller may unregister-then-
@@ -149,6 +189,10 @@ void PianoRollPage::registerEngine (EngineId id, PianoRollConnection conn)
     if (conn.auditionOff)       roll->onNoteAuditionOff = conn.auditionOff;
     if (conn.noteLabelProvider) roll->setNoteLabelProvider (conn.noteLabelProvider);
     if (conn.keyswitchLabelProvider) roll->setKeyswitchLabelProvider (conn.keyswitchLabelProvider);
+    // QA-SlideSampler Task 4: set unconditionally so switching to a non-sfizz engine
+    // clears the guitar/bass note-props mode (null provider -> normal panel).
+    roll->setNoteEditContextProvider (conn.noteEditContextProvider);
+    roll->onContentEdited = mContentEditedHook;   // #30b regression fix
     if (conn.defaultTopNote >= 0) roll->setTopNote (conn.defaultTopNote);
     if (conn.allKeysWhite) roll->setAllKeysWhiteMode (true);
     if (mPlayHead)

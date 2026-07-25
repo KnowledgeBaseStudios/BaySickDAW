@@ -136,8 +136,70 @@ PatternManager::PatternManager()
     mDrumEnabled.fill(false);
     for (int i = 0; i < kMaxArrangementRows; ++i)
         mRowNames[i] = defaultRowName(i);
-    addPattern("Pattern 1");
+    addPattern("Pattern 1");   // publishes the first roll-snapshot table via notifyContentChanged
     publishTimeSigMap();   // TsMap live from startup (implicit 4/4)
+}
+
+PatternManager::~PatternManager()
+{
+    // #30b teardown mirrors the AudioClipSnapshot RCU: audio is stopped by the
+    // time the owner destroys us, so the ACTIVE table is ours to free here;
+    // queue-retired tables are destroyed by mRollRetirement's own teardown
+    // (drainer joined in its destructor, which runs after this body).
+    if (auto* last = mActiveRollSnapshot.exchange (nullptr, std::memory_order_acq_rel))
+        delete last;
+}
+
+// ── QA-G3Smoke #30b: roll-snapshot build + publish (message thread only) ────
+std::shared_ptr<const PatternRollsSnapshot> PatternManager::buildPatternRollsSnapshot (int patternIndex) const
+{
+    auto snap = std::make_shared<PatternRollsSnapshot>();
+    if (patternIndex < 0 || patternIndex >= (int) mPatterns.size())
+        return snap;
+    const auto& pat = mPatterns[(size_t) patternIndex];
+    for (int i = 0; i < kMaxLayerPages; ++i) snap->layerNotes[(size_t) i] = pat.layerRoll[(size_t) i].notes;
+    for (int i = 0; i < kMaxBassPages;  ++i) snap->bassNotes[(size_t) i]  = pat.bassRoll[(size_t) i].notes;
+    for (int i = 0; i < kMaxDrumPages;  ++i) snap->drumNotes[(size_t) i]  = pat.drumRolls[(size_t) i].notes;
+    for (int i = 0; i < kMaxClipPages;  ++i) snap->clipNotes[(size_t) i]  = pat.clipRoll[(size_t) i].notes;
+    for (int i = 0; i < kMaxVoxPages;   ++i) snap->voxNotes[(size_t) i]   = pat.voxRoll[(size_t) i].notes;
+    for (int i = 0; i < kMaxInstPages;  ++i) snap->instNotes[(size_t) i]  = pat.instRoll[(size_t) i].notes;
+    snap->rustyNotes   = pat.baySickRustyDrumsRoll.notes;
+    snap->contentBeats = getPatternContentBeats (patternIndex);
+    return snap;
+}
+
+void PatternManager::republishRollTable()
+{
+    auto next = std::make_unique<SchedulerRollSnapshot>();
+    next->patterns            = mPatternSnapCache;
+    next->currentPatternIndex = mCurrentPattern;
+    next->generation          = ++mRollSnapGeneration;
+    const std::uint64_t gen = next->generation;
+    if (auto* old = mActiveRollSnapshot.exchange (next.release(), std::memory_order_acq_rel))
+        mRollRetirement.retire (std::unique_ptr<SchedulerRollSnapshot> (old), gen);
+}
+
+void PatternManager::publishRollSnapshotFor (int patternIndex)
+{
+    // Structural safety net: every pattern-count-changing CRUD also funnels
+    // through notifyContentChanged -- a count mismatch rebuilds everything, so
+    // no explicit hook is needed in add/duplicate/remove.
+    if ((int) mPatternSnapCache.size() != (int) mPatterns.size())
+    {
+        publishAllRollSnapshots();
+        return;
+    }
+    if (patternIndex < 0 || patternIndex >= (int) mPatterns.size()) return;
+    mPatternSnapCache[(size_t) patternIndex] = buildPatternRollsSnapshot (patternIndex);
+    republishRollTable();
+}
+
+void PatternManager::publishAllRollSnapshots()
+{
+    mPatternSnapCache.resize (mPatterns.size());
+    for (int i = 0; i < (int) mPatterns.size(); ++i)
+        mPatternSnapCache[(size_t) i] = buildPatternRollsSnapshot (i);
+    republishRollTable();
 }
 
 int PatternManager::addPattern(const juce::String& name)
@@ -403,6 +465,9 @@ void PatternManager::restorePatternList (const std::vector<Pattern>& patterns, i
     if (patterns.empty()) return;
     mPatterns = patterns;
     mCurrentPattern = juce::jlimit(0, (int)mPatterns.size()-1, currentIndex);
+    // #30b: a same-count list swap changes EVERY pattern's content -- the
+    // notifyContentChanged size check below can't see that, so publish all.
+    publishAllRollSnapshots();
     refreshPatternTimeSigs();
     publishTimeSigMap();
     notifyContentChanged();
@@ -431,6 +496,9 @@ const Pattern& PatternManager::getPattern(int index) const
 void PatternManager::setCurrentPattern(int index)
 {
     mCurrentPattern = juce::jlimit(0, (int)mPatterns.size()-1, index);
+    // #30b: pattern-mode scheduling reads the snapshot's stamped index, so a
+    // switch republishes (refreshes the new current entry + restamps).
+    publishRollSnapshotFor (mCurrentPattern);
 }
 
 void PatternManager::addBlock(ArrangementBlock block)
@@ -460,7 +528,8 @@ ArrangementBlock& PatternManager::getBlock(int index)
 int PatternManager::getTotalArrangementBars() const
 {
     int maxBar = 0;
-    for (auto& b : mArrangement) maxBar = juce::jmax(maxBar, b.startBar + b.lengthBars);
+    for (auto& b : mArrangement)
+        maxBar = juce::jmax(maxBar, (int) std::ceil((b.startBeats + effectiveLengthBeats(b)) / 4.0 - 1e-9));
     return juce::jmax(16, maxBar);
 }
 
@@ -926,16 +995,22 @@ int PatternManager::getNumEnabledDrums() const
     return count;
 }
 
-double PatternManager::getEffectivePatternLoopBeats() const
+// B-1: per-patternIndex content length in beats (furthest note/step end across
+// that pattern's rolls, ceiled to a bar at the pattern's bpb, min 1 bar).  The
+// Builder tiling + the song-mode scheduler feed off THIS so an 8-bar pattern
+// loops every 8, a 2-bar every 2 - independent of the stored Pattern.bars field
+// (which is no longer the tile length).  getEffectivePatternLoopBeats() is the
+// current-pattern shorthand.
+double PatternManager::getPatternContentBeats (int patternIndex) const
 {
     // C.5b (post-revert): pattern owns its TS.  Bar length in PPQ = pattern's
     // own bpb (4/4 = 4, 3/4 = 3, 6/8 = 3, 7/8 = 3.5).  Builder grid is
     // uniform 4-beat-per-bar separately (song-level TS markers are decorative
     // only) - but pattern playback length is in pattern-bars, each pat-bpb wide.
-    if (mPatterns.empty() || mCurrentPattern < 0 || mCurrentPattern >= (int) mPatterns.size())
+    if (mPatterns.empty() || patternIndex < 0 || patternIndex >= (int) mPatterns.size())
         return 4.0;   // safe fallback when no patterns loaded
-    const auto&  pat          = mPatterns[(size_t) mCurrentPattern];
-    const double patBpb       = juce::jmax (1.0, getPatternBeatsPerBar (mCurrentPattern));
+    const auto&  pat          = mPatterns[(size_t) patternIndex];
+    const double patBpb       = juce::jmax (1.0, getPatternBeatsPerBar (patternIndex));
     // Minimum is 1 pattern-bar so a bar-1-only piano roll loops immediately
     // rather than waiting for the full configured bar count.
     const double kMinBeats    = patBpb;
@@ -1021,6 +1096,11 @@ double PatternManager::getEffectivePatternLoopBeats() const
     return loopBeats;
 }
 
+double PatternManager::getEffectivePatternLoopBeats() const
+{
+    return getPatternContentBeats (mCurrentPattern);
+}
+
 bool PatternManager::isComplexSequenceActive() const
 {
     for (auto& p : mPatterns)
@@ -1062,6 +1142,9 @@ namespace
         if (n.releaseAmt   != 0.5f)                  t.setProperty ("r",  n.releaseAmt,   nullptr);
         if (n.resonance    != 0.5f)                  t.setProperty ("q",  n.resonance,    nullptr);
         if (n.slotIndex    != -1)                    t.setProperty ("sl", n.slotIndex,    nullptr);
+        if (n.portaLengthBeats != 1.0)               t.setProperty ("pl", n.portaLengthBeats, nullptr);
+        if (n.bendSemitones != 0.0)                  t.setProperty ("bs", n.bendSemitones, nullptr);
+        if (n.bendShape    != BendShape::RampHold)   t.setProperty ("bsh", (int) n.bendShape, nullptr);
         return t;
     }
 
@@ -1085,6 +1168,9 @@ namespace
         n.releaseAmt    = (float)(double) t.getProperty ("r",  0.5);
         n.resonance     = (float)(double) t.getProperty ("q",  0.5);
         n.slotIndex     = (int)           t.getProperty ("sl", -1);
+        n.portaLengthBeats = (double)     t.getProperty ("pl", 1.0);
+        n.bendSemitones = (double)        t.getProperty ("bs", 0.0);
+        n.bendShape     = (BendShape)(int) t.getProperty ("bsh", (int) BendShape::RampHold);
         return n;
     }
 
@@ -1092,6 +1178,8 @@ namespace
     {
         juce::ValueTree t (tag);
         t.setProperty ("numBars",         r.numBars,         nullptr);
+        if (r.riffMachineUsed)
+            t.setProperty ("riffUsed", true, nullptr);   // #20 (QA-G3Smoke)
         for (const auto& n : r.notes) t.addChild (noteToValueTree (n), -1, nullptr);
         return t;
     }
@@ -1101,6 +1189,7 @@ namespace
         if (! t.isValid()) return;
         r.notes.clear();
         r.numBars         = (int) t.getProperty ("numBars",         2);
+        r.riffMachineUsed = (bool) t.getProperty ("riffUsed", false);   // #20
         for (int i = 0; i < t.getNumChildren(); ++i)
         {
             auto c = t.getChild (i);
@@ -1195,6 +1284,9 @@ void PatternManager::reset()
     mRowGroupId.fill(0);
     mRowGroupColor.fill(0);
     mAutomationTemplates.clear();
+    // #30b: reset never notifies (wipe path); publish the emptied rolls so the
+    // audio thread stops scheduling stale content immediately.
+    publishAllRollSnapshots();
 }
 
 juce::ValueTree PatternManager::toValueTree() const
@@ -1451,7 +1543,7 @@ juce::ValueTree PatternManager::toValueTree() const
         juce::ValueTree bNode("Block");
         bNode.setProperty("trackRow",       b.trackRow,       nullptr);
         bNode.setProperty("patternIndex",   b.patternIndex,   nullptr);
-        bNode.setProperty("startBar",       b.startBar,       nullptr);
+        bNode.setProperty("startBar",       b.displayStartBar(), nullptr);   // 8A: derived display bar (legacy readers)
         bNode.setProperty("lengthBars",     b.lengthBars,     nullptr);
         bNode.setProperty("lengthTicks",    b.lengthTicks,    nullptr);   // QA-Ee: 96 PPQ tick length (-1 = unset)
         bNode.setProperty("layerTrack",     b.layerTrack,     nullptr);
@@ -1483,12 +1575,10 @@ juce::ValueTree PatternManager::toValueTree() const
         // every pre-Task-0c project unchanged (see deserialize below).
         bNode.setProperty("contentStartSamples",
                           (juce::int64) b.contentStartSamples, nullptr);
-        // QA-Ee (96 PPQ): persist the sub-bar start in TICKS only when set
-        // (startTicks != kStartTicksUnset).  Skipping the property on bar-
-        // aligned blocks keeps the XML clean.  New format is tick-only; the
-        // old float "startBeats" prop is migrated on load (downgrade unsupported).
-        if (b.startTicks != ArrangementBlock::kStartTicksUnset)
-            bNode.setProperty("startTicks", b.startTicks, nullptr);
+        // 8A (QA-G3Smoke): startBeats is authoritative in memory; persist as
+        // full-precision ticks (96 PPQ round-trips every snapped value
+        // exactly).  Same XML property pair as before -- no migration.
+        bNode.setProperty("startTicks", beatsToTicks (b.startBeats), nullptr);
         // QA-G Task 5: slice content offset (skip when 0 -- unsliced default).
         if (b.contentOffsetTicks != 0)
             bNode.setProperty("contentOffsetTicks", b.contentOffsetTicks, nullptr);
@@ -1889,7 +1979,7 @@ void PatternManager::fromValueTree(const juce::ValueTree& root)
         ArrangementBlock b;
         b.trackRow       = (int)             bNode.getProperty("trackRow",       0);
         b.patternIndex   = (int)             bNode.getProperty("patternIndex",   0);
-        b.startBar       = (int)             bNode.getProperty("startBar",       0);
+        const int legacyStartBar = (int)     bNode.getProperty("startBar",       0);
         b.lengthBars     = (int)             bNode.getProperty("lengthBars",     4);
         // QA-Ee (96 PPQ): prefer the tick property; else migrate the legacy
         // float "lengthBeats" (beats x 96 -> ticks).  Absent/unset -> bars.
@@ -1925,16 +2015,15 @@ void PatternManager::fromValueTree(const juce::ValueTree& root)
         // shift on reopen).
         b.contentStartSamples = (juce::int64) bNode.getProperty (
             "contentStartSamples", (juce::int64) 0);
-        // QA-Ee (96 PPQ): restore the sub-bar start.  Prefer the tick property;
-        // else migrate the legacy float "startBeats" (beats x 96 -> ticks),
-        // resolving the old -1e6 sentinel to kStartTicksUnset (fall back to
-        // startBar * 4) so every pre-QA-Ee project keeps its exact position.
+        // 8A (QA-G3Smoke): startBeats is authoritative in memory.  Prefer the
+        // tick property (full precision, written by every post-QA-Ee save);
+        // else the legacy float "startBeats"; else the bar-precision startBar.
         if (bNode.hasProperty ("startTicks"))
-            b.startTicks = (juce::int64) bNode.getProperty ("startTicks", (juce::int64) ArrangementBlock::kStartTicksUnset);
+            b.startBeats = ticksToBeats ((juce::int64) bNode.getProperty ("startTicks", (juce::int64) 0));
         else
         {
             const double sb = (double) bNode.getProperty ("startBeats", (double) -1.0e6);
-            b.startTicks    = (sb > -1.0e5) ? beatsToTicks (sb) : ArrangementBlock::kStartTicksUnset;
+            b.startBeats    = (sb > -1.0e5) ? sb : (double) legacyStartBar * 4.0;
         }
         b.contentOffsetTicks = (juce::int64) bNode.getProperty ("contentOffsetTicks", (juce::int64) 0);
         if (b.clipType == ClipType::Automation)
@@ -2049,6 +2138,10 @@ void PatternManager::fromValueTree(const juce::ValueTree& root)
                 mAutomationTemplates.push_back(automationLaneFromValueTree(lane));
         }
     }
+
+    // #30b: loaded content replaced every pattern wholesale -- publish the roll
+    // snapshots directly (no notifyContentChanged: loading must not dirty).
+    publishAllRollSnapshots();
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

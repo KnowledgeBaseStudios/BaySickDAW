@@ -183,7 +183,17 @@ void InstStripTask::run()
             if (auto* b = mProcessor->getBaySickBasses (mIndex))
                 auditionPending = b->isAuditionPending();
 
-        if (midiEmpty && noVoices && ! auditionPending)
+        // QA-G3Smoke Task 12: SlideSampler voices (gesture + ring-out tails)
+        // don't count in sfizz's active-voice total -- without this term the
+        // chain suspends mid-slide and the tail freezes.
+        bool slideActive = false;
+        if (auto* g = mProcessor->getBaySickGuitars (mIndex))
+            slideActive = g->isSlideActive();
+        if (! slideActive)
+            if (auto* b = mProcessor->getBaySickBasses (mIndex))
+                slideActive = b->isSlideActive();
+
+        if (midiEmpty && noVoices && ! auditionPending && ! slideActive)
         {
             auto& counter = mProcessor->mInstIdleBlocks[(size_t) mIndex];
             if (counter >= VibeSynthProcessor::kIdleSuspendBlocks)

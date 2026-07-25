@@ -117,3 +117,9 @@ Plans & Specs/Issue Tracker.txt
 # artifacts, not shipped source.
 /PITCH_PIPELINE_BREAKDOWN.md
 /PITCH_PIPELINE_VERIFICATION.md
+
+# QA-G3Smoke crash-hunt artifacts (2026-07-24) -- do_build.bat archives each
+# outgoing Release exe+pdb pair (dump symbolization); WER LocalDumps writes
+# crash .dmp files here.  Both are per-machine runtime data, never source.
+/SymbolStore/
+/CrashDumps/

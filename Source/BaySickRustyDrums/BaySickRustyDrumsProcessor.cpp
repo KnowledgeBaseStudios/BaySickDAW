@@ -217,7 +217,9 @@ void BaySickRustyDrumsProcessor::processStrips (int numFrames, juce::MidiBuffer&
             // the piano-roll dispatch path so per-note panning (CC10), filter
             // cutoff (CC74), and finePitch (PitchWheel) actually reach sfizz.
             else if (msg.isController())         mSfizz->cc (delay, msg.getControllerNumber(), msg.getControllerValue());
-            else if (msg.isPitchWheel())         mSfizz->pitchWheel (delay, msg.getPitchWheelValue());
+            // sfizz pitchWheel takes CENTERED -8192..+8192 (sfizz.hpp:550; normalizeBend
+            // clamps +/-8191), NOT JUCE's raw 0..16383 -- raw 8192 reads as full bend up.
+            else if (msg.isPitchWheel())         mSfizz->pitchWheel (delay, juce::jlimit (-8191, 8191, msg.getPitchWheelValue() - 8192));
             else if (msg.isChannelPressure())    mSfizz->channelAftertouch (delay, msg.getChannelPressureValue());
             else if (msg.isAllNotesOff() || msg.isAllSoundOff())
             {
