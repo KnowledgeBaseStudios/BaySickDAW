@@ -106,13 +106,22 @@ JUCE 7 C++ music production app (formerly Vibesynth, then VibeDAW). **Standalone
 **Target audience:** people who have never made music before.
 **User-facing engine names:** Harmless, BaySickPlayer (sample player — internal source is still `VibePlayer*`; class / file renames deferred), BaySickSynth, BaySickBass. Drums are now per-tab engine instances (Phase D dynamic-drum architecture, 2026-04-25) — each Drums tab owns one BaySickPlayer or BaySickSynth instance; the legacy monolithic `BaySickDrums` engine was deleted.
 
-**Owner:** Jeff — professional FL Studio user. Technically capable. **Jeff runs builds himself** — never try to run do_build.bat in bash (MSVC env not available). Just tell him to run it.
+**Owner:** Jeff — professional FL Studio user. Technically capable. **Claude runs the builds** (changed 2026-07-25 — see `## Build System`). Jeff still owns every spec call, per-batch commit approval, and all in-app / ear verification.
 
 ---
 
 ## Build System
 
 - **Build command:** Run `do_build.bat` from `C:\Users\jeffm\Documents\BaySickDAW\`. Builds BOTH Release and Debug per QA-0a (2026-05-07).
+- **Who runs it: Claude (changed 2026-07-25).** Supersedes the old "Jeff runs builds himself — never try to run do_build.bat in bash (MSVC env not available)" rule, whose premise was stale: `do_build.bat` is self-contained — it resets `PATH` to a bare minimum and calls `vcvars64.bat` itself (lines 3-4), so it does NOT need the caller to have an MSVC environment. Verified working 2026-07-25 (`MSBuild version 18.7.8` in the log, both exit codes 0).
+  - **Invocation (pin this string verbatim — it is the allowlisted one; any variation re-prompts):**
+    `cmd.exe /c "C:\Users\jeffm\Documents\BaySickDAW\do_build.bat"; Write-Output "WRAPPER_EXIT=$LASTEXITCODE"`
+    via the PowerShell tool with `run_in_background: true` (a full rebuild exceeds the 10-min synchronous tool cap).
+  - **Read the result from `build_log.txt`**, not the wrapper exit code: `RELEASE_EXIT_CODE` and `DEBUG_EXIT_CODE` must BOTH be 0. Grep for `error C` / `error LNK` / `error MSB`; do not dump the whole log.
+  - **Cadence:** one build gate at the end of EVERY task (the G3 exemplar `Plans & Specs/Batch Plans/silky-gliding-lynx.md` is canonical). Bulk-run's "no per-task verify pauses" retires the per-task FUNCTIONAL test + running-notes checkpoint ONLY — it never retired the compile gate.
+  - **Exe-lock convention:** do not build while Jeff has `BaySickDAW.exe` open (Debug or Release) — the link step fails on the locked file. He says when he is in the app.
+  - **Hard stop:** if the build fails for any reason that is NOT the code under edit (env, tooling, locked exe), stop and hand it back to Jeff. Do not debug the harness — that failure mode is what created the original rule.
+  - **Unchanged:** Jeff still runs the smoke (Debug exe FIRST, screenshot any jassert, then Release), all ear checks, and approves every commit.
 - **Release exe:** `build\BaySickDAWStandalone_artefacts\Release\BaySickDAW.exe` - the shipping binary, used for music production.
 - **Debug exe:** `build\BaySickDAWStandalone_artefacts\Debug\BaySickDAW.exe` - the diagnostic binary, used for verifying fixes. Window title shows `[DEBUG]` suffix. Same embedded icon (JUCE+VS multi-config gotcha; differentiation via window title only).
 - **Build dir:** `C:\Users\jeffm\Documents\BaySickDAW\build\`

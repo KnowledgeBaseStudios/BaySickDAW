@@ -71,14 +71,14 @@ private:
     juce::Label mBoxHdr[7];
 
     // ── Box 1: Sample Engine ─────────────────────────────────────────────────
-    juce::Slider    mSampleStartKnob, mStretchKnob;
+    VibeSlider      mSampleStartKnob, mStretchKnob;
     juce::Label     mSampleStartLbl,  mStretchLbl;
     DualLabelToggle mReverseTog,      mCutSelfTog,      mCutSelfModeTog;
 
     // ── Box 2: Pitch & Voicing ───────────────────────────────────────────────
-    juce::Slider mTuneKnob,          mVoiceCapKnob;
-    juce::Slider mUnisonVoicesKnob,  mDetuneKnob;
-    juce::Slider mUnisonSpreadKnob;
+    VibeSlider mTuneKnob,          mVoiceCapKnob;
+    VibeSlider mUnisonVoicesKnob,  mDetuneKnob;
+    VibeSlider mUnisonSpreadKnob;
     juce::Label  mTuneLbl,           mVoiceCapLbl;
     juce::Label  mUnisonVoicesLbl,   mDetuneLbl;
     juce::Label  mUnisonSpreadLbl;
@@ -86,35 +86,35 @@ private:
     juce::Label  mDetuneModeLbl;
 
     // ── Box 3: Dynamics ──────────────────────────────────────────────────────
-    juce::Slider mSensKnob,     mVelVolKnob;
-    juce::Slider mVelMuffleKnob, mMuffleKnob;
-    juce::Slider mVelHardKnob,   mHardnessKnob;
+    VibeSlider mSensKnob,     mVelVolKnob;
+    VibeSlider mVelMuffleKnob, mMuffleKnob;
+    VibeSlider mVelHardKnob,   mHardnessKnob;
     juce::Label  mSensLbl,      mVelVolLbl;
     juce::Label  mVelMuffleLbl, mMuffleLbl;
     juce::Label  mVelHardLbl,   mHardnessLbl;
 
     // ── Box 4: Amp Envelope ──────────────────────────────────────────────────
-    juce::Slider mAttackKnob,  mDecayKnob;
-    juce::Slider mSustainKnob, mReleaseKnob;
+    VibeSlider mAttackKnob,  mDecayKnob;
+    VibeSlider mSustainKnob, mReleaseKnob;
     juce::Label  mAttackLbl,   mDecayLbl;
     juce::Label  mSustainLbl,  mReleaseLbl;
 
     // ── Box 5: LFO ───────────────────────────────────────────────────────────
-    juce::Slider mLfoRateKnob, mLfoAmtKnob;
+    VibeSlider mLfoRateKnob, mLfoAmtKnob;
     juce::Label  mLfoRateLbl,  mLfoAmtLbl;
 
     // ── Box 6: Filter (D.4-Q3 2026-05-01) ────────────────────────────────────
     // Surfaces 4 previously-hidden APVTS params: cutoff / res / reduct /
     // artic_group.  Sits between LFO (Box 5) and Output (now Box 7).
-    juce::Slider mFilterCutoffKnob, mFilterResKnob;
-    juce::Slider mFilterReductKnob, mFilterArticKnob;
+    VibeSlider mFilterCutoffKnob, mFilterResKnob;
+    VibeSlider mFilterReductKnob, mFilterArticKnob;
     juce::Label  mFilterCutoffLbl,  mFilterResLbl;
     juce::Label  mFilterReductLbl,  mFilterArticLbl;
 
     // ── Box 7: Output (was Box 6 before D.4-Q3) ──────────────────────────────
-    juce::Slider mPanKnob,    mStereoKnob;
-    juce::Slider mVolumeKnob, mTrebleKnob;
-    juce::Slider mDriveKnob;                // Overdrive
+    VibeSlider mPanKnob,    mStereoKnob;
+    VibeSlider mVolumeKnob, mTrebleKnob;
+    VibeSlider mDriveKnob;                // Overdrive
     juce::Label  mPanLbl,     mStereoLbl;
     juce::Label  mVolumeLbl,  mTrebleLbl;
     juce::Label  mDriveLbl;

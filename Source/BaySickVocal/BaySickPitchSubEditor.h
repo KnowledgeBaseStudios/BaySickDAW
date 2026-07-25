@@ -1,6 +1,7 @@
 #pragma once
 #include <JuceHeader.h>
 #include "../DSP/BaySickPitchDSP.h"
+#include "../Standalone/SharedUI.h"   // VibeSlider
 
 class BaySickPitchEditor;
 
@@ -69,7 +70,7 @@ private:
     std::unique_ptr<Lane>    mLane;
     std::unique_ptr<Browser> mBrowser;
     juce::TextButton mVolBtn, mPitchBtn, mPlayBtn;
-    juce::Slider mVibKnob, mFrmKnob, mVarKnob;
+    VibeSlider mVibKnob, mFrmKnob, mVarKnob;
     bool mSyncingKnobs { false };
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (BaySickPitchSubEditor)

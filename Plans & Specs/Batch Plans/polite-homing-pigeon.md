@@ -72,6 +72,7 @@ project.xml alternative forces a double-descend into every folder — worse from
 - [ ] Keep every browser feature untouched (rename/duplicate/delete/sort/guards) — only the
   entry point and title change.
 - [ ] Rule 6 pass over edited regions.
+- [ ] Build gate.
 
 ### Task 2 — Default folders + resolver + dead code
 
@@ -89,6 +90,7 @@ project.xml alternative forces a double-descend into every folder — worse from
 - [ ] Centralize the duplicated `…\Presets\Effects\Pedals\User NAM Pedals` literal: new
   `EffectPresetIO::userNamPedalsDir()`; both call sites consume it
   (`reference_single_source_of_truth_for_paths`).
+- [ ] Build gate.
 
 ## Batch close (bulk-run per-batch loop — one commit per batch)
 

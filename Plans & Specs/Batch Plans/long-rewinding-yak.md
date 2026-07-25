@@ -90,6 +90,7 @@ state — memory-safe no-op — then continues to the next live one, bounded loo
   transaction-suppressed scope (drop + re-begin pattern around the applicator pass) or, if the
   spike shows flushes don't transact, document that and guard only the explicit UI entry
   points. Undo/redo history must stay byte-identical across a played song with lanes.
+- [ ] Build gate.
 
 ### Task 2 — Engines join the one history (13=A)
 
@@ -98,6 +99,7 @@ state — memory-safe no-op — then continues to the next live one, bounded loo
 - [ ] Guitars/Basses/RustyDrums private managers + `getUndoManager()` accessors removed; the
   Rusty visible-page branch in `globalUndo/globalRedo` removed (its ARIA attachments now
   transact into the global history and Ctrl+Z reaches them anywhere).
+- [ ] Build gate.
 
 ### Task 3 — Shadow list, owner keys, hide + skip (13=ii)
 
@@ -111,6 +113,7 @@ state — memory-safe no-op — then continues to the next live one, bounded loo
 - [ ] History window filters dead-owner rows; `globalUndo/globalRedo` skip-loop over
   dead-owner transactions (undo the no-op, continue; hard cap = history depth).
 - [ ] Depth-menu semantics preserved (`setMaxNumberOfStoredUnits` values unchanged).
+- [ ] Build gate.
 
 ### Task 4 — Wrap the dirty-but-not-undo gestures (12-ii)
 
@@ -124,6 +127,7 @@ state — memory-safe no-op — then continues to the next live one, bounded loo
   path bypasses commitEdit.
 - [ ] Each wrapped op fires the same notifyContentChanged it does today (no behavior change
   beyond undoability).
+- [ ] Build gate.
 
 ### Task 5 — Event Editor unification (12-iii + 14=a)
 
@@ -133,6 +137,7 @@ state — memory-safe no-op — then continues to the next live one, bounded loo
 - [ ] Local keymap: redo = Ctrl+Alt+Z (Ctrl+Y removed); Edit-menu labels updated.
 - [ ] Key Binds window: new display-only "Event Editor" section listing its local keys
   (no Set buttons; ASCII).
+- [ ] Build gate.
 
 ### Task 6 — Manual-push gesture bracketing (12-iv)
 
@@ -140,6 +145,7 @@ state — memory-safe no-op — then continues to the next live one, bounded loo
   User-gesture sites get a named transaction bracket (begin + name at gesture start) so they
   coalesce + label properly; programmatic sites (applicators, load paths, sync code) are
   covered by Task 1's exclusion. Audit table -> running notes.
+- [ ] Build gate.
 
 ## Batch close (bulk-run per-batch loop — one commit per batch)
 

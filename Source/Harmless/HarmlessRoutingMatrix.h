@@ -24,7 +24,7 @@ private:
     static constexpr int kNumSliders = 6;
     static constexpr int kNumToggles = 6;
 
-    juce::Slider     mSliders[kNumSliders];
+    VibeSlider       mSliders[kNumSliders];
     juce::TextButton mToggles[kNumToggles];
 
     using SliderAtt = TaggedSliderAttachment;

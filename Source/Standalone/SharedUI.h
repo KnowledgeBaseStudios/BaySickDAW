@@ -793,12 +793,54 @@ public:
     }
 };
 
+// ── VibeSlider ───────────────────────────────────────────────────────────────
+// A juce::Slider that swallows right-click mouseDown / mouseDrag events so the
+// slider value never changes on right-click. Left-click interaction is
+// unchanged. Right-click still propagates up to the app-wide
+// GlobalAutoRightClick mouse listener via JUCE's normal component event chain,
+// so the "Automate..." + "Type in value..." popup still fires.
+//
+// Rationale: JUCE's default juce::Slider::mouseDown does NOT early-return on
+// right-click unless setPopupMenuEnabled(true) is set (which would install
+// JUCE's own Default/Set-value menu, competing with our custom Automate menu).
+// Without that guard, right-click on a LinearVertical slider with snap-to-mouse
+// enabled snaps the value to the Y of the click - unwanted whenever the user
+// is trying to right-click to reach the Automate menu.
+//
+// Defined ahead of VKnob because VKnob holds one by value.
+class VibeSlider : public juce::Slider
+{
+public:
+    VibeSlider() = default;
+    VibeSlider(SliderStyle style, TextEntryBoxPosition textPos = NoTextBox)
+        : juce::Slider(style, textPos) {}
+
+    void mouseDown(const juce::MouseEvent& e) override
+    {
+        if (e.mods.isRightButtonDown()) return;   // swallow right-click
+        juce::Slider::mouseDown(e);
+    }
+    void mouseDrag(const juce::MouseEvent& e) override
+    {
+        if (e.mods.isRightButtonDown()) return;
+        juce::Slider::mouseDrag(e);
+    }
+    void mouseUp(const juce::MouseEvent& e) override
+    {
+        if (e.mods.isRightButtonDown()) return;
+        juce::Slider::mouseUp(e);
+    }
+};
+
 // ── Compact knob with label ───────────────────────────────────────────────────
 class VKnob : public juce::Component,
               private juce::Slider::Listener
 {
 public:
-    juce::Slider slider;
+    // VibeSlider so right-click never jogs the knob; the Automate menu still
+    // fires because VKnob registers as a mouseListener here and
+    // Component::internalMouseDown notifies listeners after the swallowed mouseDown.
+    VibeSlider   slider;
     juce::Label  label;
 
     // Set this to enable the right-click "Automate" context menu.
@@ -1009,48 +1051,7 @@ private:
 
 // ── Fader with 0 dB snap ─────────────────────────────────────────────────────
 // LinearVertical fader that snaps to exactly 0.0 dB when dragged within ±1.5 dB.
-// ── VibeSlider ───────────────────────────────────────────────────────────────
-// A juce::Slider that swallows right-click mouseDown / mouseDrag events so the
-// slider value never changes on right-click. Left-click interaction is
-// unchanged. Right-click still propagates up to the app-wide
-// GlobalAutoRightClick mouse listener via JUCE's normal component event chain,
-// so the "Automate..." + "Type in value..." popup still fires.
-//
-// Rationale: JUCE's default juce::Slider::mouseDown does NOT early-return on
-// right-click unless setPopupMenuEnabled(true) is set (which would install
-// JUCE's own Default/Set-value menu, competing with our custom Automate menu).
-// Without that guard, right-click on a LinearVertical slider with snap-to-mouse
-// enabled snaps the value to the Y of the click - unwanted whenever the user
-// is trying to right-click to reach the Automate menu.
-//
-// 2026-04-19: targeted fix landing on EQ widget + DynamicParamsPopout +
-// MixerTrackStrip pan / width / fader. App-wide refactor (replace juce::Slider
-// everywhere) scheduled as a separate session.
-class VibeSlider : public juce::Slider
-{
-public:
-    VibeSlider() = default;
-    VibeSlider(SliderStyle style, TextEntryBoxPosition textPos = NoTextBox)
-        : juce::Slider(style, textPos) {}
-
-    void mouseDown(const juce::MouseEvent& e) override
-    {
-        if (e.mods.isRightButtonDown()) return;   // swallow right-click
-        juce::Slider::mouseDown(e);
-    }
-    void mouseDrag(const juce::MouseEvent& e) override
-    {
-        if (e.mods.isRightButtonDown()) return;
-        juce::Slider::mouseDrag(e);
-    }
-    void mouseUp(const juce::MouseEvent& e) override
-    {
-        if (e.mods.isRightButtonDown()) return;
-        juce::Slider::mouseUp(e);
-    }
-};
-
-// SnapSlider now inherits VibeSlider so the mixer fader gets the right-click
+// SnapSlider inherits VibeSlider so the mixer fader gets the right-click
 // swallow behaviour for free.
 class SnapSlider : public VibeSlider
 {

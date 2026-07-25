@@ -76,6 +76,7 @@ execution (FSW-065 asked for it; bare R = record-toggle stays).
 - [ ] `Mp3Writer`: init lame (SR/channels/bitrate), feed float blocks, flush + free; unit-shaped
   smoke = encode 2 s of sine offline at startup NOT included (no test scaffolding — verify via
   §B listening).
+- [ ] Build gate.
 
 ### Task 2 — Offline SONG render core
 
@@ -97,6 +98,7 @@ execution (FSW-065 asked for it; bare R = record-toggle stays).
   (pattern mode, current-pattern length) — one harness, two entries.
 - [ ] Move the render loop off the message thread: progress window with cancel; cancel closes
   the writer and deletes the partial file.
+- [ ] Build gate.
 
 ### Task 3 — Export dialog + menu + keybind
 
@@ -109,6 +111,7 @@ execution (FSW-065 asked for it; bare R = record-toggle stays).
 - [ ] Wire `doExport()` stub to the same dialog (or delete the stub trio if `doNew/doSave/doOpen`
   siblings are equally dead — grep callers; dead = remove per clean-own-batch rule... they are
   PRE-EXISTING dead code, so log + route instead of deleting unprompted).
+- [ ] Build gate.
 
 ### Task 4 — ProjectBundler (shared with QA-ProjectSave's Pack)
 
@@ -123,6 +126,7 @@ execution (FSW-065 asked for it; bare R = record-toggle stays).
   files listed in a completion report dialog — never silently dropped (no-silent-caps rule).
 - [ ] "Export Project Bundle…" File item: dialog = destination, zip-vs-folder, scope choice
   (docket 8: both offered per pack).
+- [ ] Build gate.
 
 ## Batch close (bulk-run per-batch loop — one commit per batch)
 

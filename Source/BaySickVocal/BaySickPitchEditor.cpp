@@ -1789,7 +1789,7 @@ private:
     juce::ToggleButton mOnToggle;
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> mOnAtt, mSnapAtt;
     std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> mRootAtt, mScaleAtt, mEngineAtt;
-    juce::Slider     mFocus, mMod, mSpeed, mThroat;
+    VibeSlider       mFocus, mMod, mSpeed, mThroat;
     std::unique_ptr<TaggedSliderAttachment> mFocusAtt, mModAtt, mSpeedAtt, mThroatAtt;
     juce::String mLengthText, mAnalysisBadge;
     bool mStale { false }, mStalePending { false }, mPlayGated { false };

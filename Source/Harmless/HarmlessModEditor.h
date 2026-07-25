@@ -1,6 +1,7 @@
 #pragma once
 #include <JuceHeader.h>
 #include <vector>
+#include "../Standalone/SharedUI.h"   // VibeSlider
 
 // ── HarmlessCurvePoint ────────────────────────────────────────────────────────
 // Self-contained modulation curve point. No PatternManager dependency.
@@ -142,11 +143,11 @@ private:
     juce::Rectangle<int> mGraphBounds;
 
     // ── Bottom strip ──────────────────────────────────────────────────────────
-    juce::Slider     mDepthKnob;          // bipolar -1..+1, center-detent
-    juce::Slider     mLengthSlider;       // 0.01..32 (beats if tempoSync else sec)
+    VibeSlider       mDepthKnob;          // bipolar -1..+1, center-detent
+    VibeSlider       mLengthSlider;       // 0.01..32 (beats if tempoSync else sec)
     juce::TextButton mTempoBtn { "TEMPO" };
-    juce::Slider     mShapeSelector;      // LFO-only, 4 waveforms
-    juce::Slider     mSpdKnob, mTnsKnob, mSkewKnob, mPwKnob;
+    VibeSlider       mShapeSelector;      // LFO-only, 4 waveforms
+    VibeSlider       mSpdKnob, mTnsKnob, mSkewKnob, mPwKnob;
 
     // ── State ─────────────────────────────────────────────────────────────────
     HarmlessModRegistry* mRegistry       { nullptr };

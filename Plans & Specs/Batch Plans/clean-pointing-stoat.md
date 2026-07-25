@@ -71,6 +71,7 @@ No sub-spec calls open.
 - [ ] `isDirty()` becomes `(current != saved) || (structural != structuralSaved)`;
   `onDirtyChanged` edge-fires from the tracker so the asterisk updates the moment the pointer
   crosses the save point in either direction.
+- [ ] Build gate.
 
 ### Task 2 — Retire the touch-model
 
@@ -85,6 +86,7 @@ No sub-spec calls open.
 - [ ] The ~18 direct `markDirty` call sites: user-gesture ones are already transactions after
   QA-UndoCoverage (their markDirty becomes redundant -> removed); the remainder map to Task 3
   structural ops or load-path guards. Full disposition table -> running notes.
+- [ ] Build gate.
 
 ### Task 3 — Structural (non-undoable) ops
 
@@ -93,11 +95,13 @@ No sub-spec calls open.
   applicable (delete) — no double-counting with transactions (they create none).
 - [ ] Autosave: verify current behavior first (does autosave clearDirty today?); replicate it
   exactly against the new counters (change nothing unprompted; note the finding).
+- [ ] Build gate.
 
 ### Task 4 — Consumer verification
 
 - [ ] Title asterisk, `confirmDiscardChanges`, quit gate, and every other `isDirty()` reader
   re-verified against the dynamic evaluator; no consumer caches the old bool.
+- [ ] Build gate.
 
 ## Batch close (bulk-run per-batch loop — one commit per batch)
 

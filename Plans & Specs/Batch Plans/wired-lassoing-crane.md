@@ -87,6 +87,7 @@ No sub-spec calls open — docket 2026-07-25 locked 4/5; mechanism + id scheme a
   lane block appears -> song-mode playback drives the knob AND the sound.
 - [ ] Confirm the G3 `mApplicatorBaseline` capture picks the new readers up automatically
   (it walks reader-backed lanes; no special-casing expected — verify by read).
+- [ ] Build gate.
 
 ### Task 2 — componentID coverage: NAMIR / Vocal / Pedals (+ per-instance ids)
 
@@ -109,6 +110,7 @@ No sub-spec calls open — docket 2026-07-25 locked 4/5; mechanism + id scheme a
   the pedals APVTS). Wire pedals-slot knobs to registry keys that reach the PEDAL DSP
   (per-instance prefixed), or record precisely why a surface stays non-automatable in running
   notes for the close entry.
+- [ ] Build gate.
 
 ### Task 3 — Retire the dead `tk_` mirror set
 
@@ -118,6 +120,7 @@ No sub-spec calls open — docket 2026-07-25 locked 4/5; mechanism + id scheme a
 - [ ] Remove the registration calls + helpers; grep zero remaining refs. Old projects carrying
   saved mirror values load fine (values for unregistered params are ignored); note this in the
   running notes + §B regression scenario.
+- [ ] Build gate.
 
 ### Task 4 — BLU-492 selector audit (rule 5=A)
 
@@ -128,6 +131,7 @@ No sub-spec calls open — docket 2026-07-25 locked 4/5; mechanism + id scheme a
   new pedals param. Known view-state: meter-mode selectors stay local.
 - [ ] Spot-verify preset round-trip on each converted selector (save preset -> change -> load ->
   selector restored).
+- [ ] Build gate.
 
 ### Task 5 — BLU-378/379 closure sweep
 
@@ -135,6 +139,7 @@ No sub-spec calls open — docket 2026-07-25 locked 4/5; mechanism + id scheme a
   offers the Automate menu (add stragglers — known: VibePlayer `cutSelfMode`).
 - [ ] BLU-379: spot-verify SliderAttachment sync (UI <-> param) per editor family; flag any
   manual-push site that double-writes against an attachment.
+- [ ] Build gate.
 
 ## Batch close (bulk-run per-batch loop — one commit per batch)
 

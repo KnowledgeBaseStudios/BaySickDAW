@@ -972,7 +972,7 @@ private:
 
     juce::ToggleButton mAlignOn, mPitchOn, mFormantOn;
     juce::ComboBox     mModeCombo, mAlgoCombo, mTypeGuide, mTypeDub;
-    juce::Slider       mFineTune, mMaxShift, mRange, mVariation, mTranspose, mFormantShift;
+    VibeSlider         mFineTune, mMaxShift, mRange, mVariation, mTranspose, mFormantShift;
 
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment>
         mAlignOnAtt, mPitchOnAtt, mFormantOnAtt;

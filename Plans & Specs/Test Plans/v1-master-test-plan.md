@@ -1625,6 +1625,62 @@ Engine + transport:
       cut-self state + swing settings + accepted-riff flag + per-drum triggers all reload and play
       the same.  `D:__ R:__` notes:
 
+### §B.25 — QA-VibeSlider (app-wide plain `juce::Slider` -> `VibeSlider` swap, BLU-493)
+
+`blocks:` `<hash>` (QA-VibeSlider — backfill at commit). Debug exe FIRST (screenshot any jassert),
+then Release — mark each scenario `D:` and `R:`.
+
+**Reconciled at code-complete — differs from the plan file's 8-item ladder in two ways.** (1) The
+swap covers ~116 declarations across 19 files, but the right-click *value-jump* it fixes is a
+LINEAR snap-to-mouse defect only: `Slider::Pimpl::mouseDown` routes a right-click into the drag
+path and calls `mouseDrag(e)` immediately, which on a rotary computes a zero delta and leaves the
+value alone. So **VS-1 / VS-6 / VS-7 / VS-8 are the real regression tests** (linear surfaces); the
+rotary scenarios confirm the Automate menu and normal dragging still work rather than hunting a
+jump that never occurred there. (2) **VS-9 is NEW** — the mid-batch VKnob scope addition (Jeff's
+spec call), which post-dates the plan file's list.
+
+Setup: one Harmless Layers tab, one BaySickSynth tab, one BaySickBass tab, one BaySickPlayer tab,
+one Vox tab with a take, one Rusty tab, one effect loaded in a rack, and one mixer send cable.
+
+- [ ] **VS-1 — Harmless routing matrix (LINEAR — the actual BLU-493 fix).** Harmless > routing
+      matrix: the six vertical sliders are `LinearVertical` with snap-to-mouse, so pre-batch a
+      right-click near the top or bottom of the track yanked the value there. Right-click one near
+      each extreme: the value does NOT move, and the Automate menu opens. Left-drag still sets the
+      value normally.  `D:__ R:__` notes:
+- [ ] **VS-2 — engine rotary knobs (guard + menu).** One knob each on BaySickSynth, BaySickBass and
+      BaySickPlayer: right-click opens the Automate menu, value unchanged; left-drag still works.
+      `D:__ R:__` notes:
+- [ ] **VS-3 — BaySickVocal sliders (guard only, no menu yet).** Retune Speed / Strength on the Vox
+      tab: right-click does NOT move the value and does NOT open a menu — the componentID/Automate
+      wiring arrives in QA-ApvtsAutomation (§B.27), so "no menu" is CORRECT here, not a failure.
+      Left-drag still works.  `D:__ R:__` notes:
+- [ ] **VS-4 — EXCLUSION: PageSwingKnob keeps its right-click feature.** The per-player Swing Mix
+      knob on the page bar: right-click still opens "Truncate Swing Notes". (This one hides behind
+      `unique_ptr<juce::Slider>` and was deliberately NOT swapped — if this menu is gone, the sweep
+      overreached.)  `D:__ R:__` notes:
+- [ ] **VS-5 — EXCLUSION: ARIA controls keep their right-click feature.** On the Rusty page, an
+      ARIA knob AND an ARIA slider: right-click still opens the ARIA param popup.  `D:__ R:__` notes:
+- [ ] **VS-6 — transport Swing + metronome volume.** Global transport Swing knob: right-click does
+      nothing, drag works, double-click returns to 0. Metronome panel volume slider (LINEAR —
+      real jump risk): right-click does not move it, drag works.  `D:__ R:__` notes:
+- [ ] **VS-7 — mixer send amount (LINEAR).** Right-click a send cable to open its popup, then
+      right-click the amount slider inside it: value does not jump, drag still sets it.
+      `D:__ R:__` notes:
+- [ ] **VS-8 — modal scale-velocity hosts (LINEAR).** Piano roll: select notes, Alt+X to open the
+      scale-velocity popup, right-click its slider — no jump; drag + the linked numeric box still
+      work; the scale still applies and is undoable. Repeat on the drum kit grid's equivalent.
+      `D:__ R:__` notes:
+- [ ] **VS-9 — NEW: VKnob (the mid-batch scope addition).** Any effect-rack panel knob, plus one
+      BaySickNAM/IR knob and one BaySickPedals knob: right-click still opens the full menu
+      ("Automate: ...", "Type in value...", MIDI Learn items) and "Type in value..." still applies.
+      Value must not move on the right-click, and left-drag/automation is unchanged. This is the
+      widest-blast-radius change in the batch — if the Automate menu regressed anywhere, it shows
+      here.  `D:__ R:__` notes:
+- [ ] **VS-10 — spot: unchanged slider behaviors.** On two or three swapped controls of different
+      styles: double-click-to-default still resets, Ctrl (fine) drag still works, the hover/drag
+      value bubble still appears, and any APVTS-attached knob still moves its parameter.
+      `D:__ R:__` notes:
+
 ## §C — Deferred re-verify ledger
 
 Parked items from closed batches. Lands INSIDE QA-J-Verify's §B section when that section is

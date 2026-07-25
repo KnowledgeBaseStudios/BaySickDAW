@@ -434,7 +434,7 @@ private:
     int                                                mCc;
     juce::Image                                        mStrip;
     juce::Rectangle<float>                             mNativeRect;
-    juce::Slider                                       mHiddenSlider;
+    VibeSlider                                         mHiddenSlider;
     std::unique_ptr<juce::SliderParameterAttachment>   mAttach;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (AriaToggle)
@@ -575,7 +575,7 @@ private:
     juce::Colour                                       mTextColor;
     bool                                               mTransparent;
     std::vector<Item>                                  mItems;
-    juce::Slider                                       mHiddenSlider;
+    VibeSlider                                         mHiddenSlider;
     std::unique_ptr<juce::SliderParameterAttachment>   mAttach;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (AriaOptionMenu)

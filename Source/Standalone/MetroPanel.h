@@ -46,7 +46,7 @@ public:
 
         // Volume row
         mVolLabel  = makeLabel("Volume:");
-        mVolSlider = std::make_unique<juce::Slider>(juce::Slider::LinearHorizontal,
+        mVolSlider = std::make_unique<VibeSlider>(juce::Slider::LinearHorizontal,
                                                     juce::Slider::TextBoxRight);
         mVolSlider->setRange(0.0, 2.0, 0.01);
         mVolSlider->setValue(0.7, juce::dontSendNotification);

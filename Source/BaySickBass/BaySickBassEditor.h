@@ -94,30 +94,30 @@ private:
     juce::TextButton mOscSyncBtn { "SYNC" };
     juce::TextButton mRingModBtn { "RING" };
 
-    juce::Slider   mTransposeKnob, mModifierKnob, mNoiseKnob;
+    VibeSlider     mTransposeKnob, mModifierKnob, mNoiseKnob;
     juce::Label    mTransposeLbl,  mModifierLbl,   mNoiseLbl;
 
-    juce::Slider   mGlideKnob;
+    VibeSlider     mGlideKnob;
     juce::Label    mGlideLbl;
-    juce::Slider   mOutVolKnob;       // 2026-04-25 master out parity (BaySickPlayer)
+    VibeSlider     mOutVolKnob;       // master out parity (BaySickPlayer)
     juce::Label    mOutVolLbl;
     juce::TextButton mCutSelfBtn { "CUT SELF" };
     juce::TextButton mCutSelfModeBtn { "SAME PITCH" };   // QA-CutSelfReview: Same Pitch / Cut All
 
-    juce::Slider   mModWheelAmtKnob;
+    VibeSlider     mModWheelAmtKnob;
     juce::Label    mModWheelAmtLbl;
 
     std::unique_ptr<BssLedRadio> mVoiceModeLed;
     std::unique_ptr<BssLedRadio> mModWheelDestLed;
 
     // ── Amp Env deck ──────────────────────────────────────────────────────────
-    juce::Slider mAmpASlider, mAmpDSlider, mAmpSSlider, mAmpRSlider;
+    VibeSlider mAmpASlider, mAmpDSlider, mAmpSSlider, mAmpRSlider;
     juce::Label  mAmpALbl,    mAmpDLbl,    mAmpSLbl,    mAmpRLbl;
-    juce::Slider mVelAmpKnob;
+    VibeSlider mVelAmpKnob;
     juce::Label  mVelAmpLbl;
-    juce::Slider mPEnvASlider, mPEnvDSlider, mPEnvSSlider, mPEnvRSlider;
+    VibeSlider mPEnvASlider, mPEnvDSlider, mPEnvSSlider, mPEnvRSlider;
     juce::Label  mPEnvALbl,    mPEnvDLbl,    mPEnvSLbl,    mPEnvRLbl;
-    juce::Slider mPEnvAmtKnob;
+    VibeSlider mPEnvAmtKnob;
     juce::Label  mPEnvAmtLbl;
     juce::GroupComponent mAmpEnvGroup, mPitchEnvGroup;
 
@@ -126,15 +126,15 @@ private:
     std::unique_ptr<BssFilterXYPad> mFilterXYPad;
     std::unique_ptr<BssLedRadio>    mFilterTypeLed;
 
-    juce::Slider  mFltKbTrackKnob, mFltVelTrackKnob;
+    VibeSlider    mFltKbTrackKnob, mFltVelTrackKnob;
     juce::Label   mFltKbTrackLbl,  mFltVelTrackLbl;
 
     // ── Filter Env deck ───────────────────────────────────────────────────────
-    juce::Slider mFltASlider, mFltDSlider, mFltSSlider, mFltRSlider;
+    VibeSlider mFltASlider, mFltDSlider, mFltSSlider, mFltRSlider;
     juce::Label  mFltALbl,    mFltDLbl,    mFltSLbl,    mFltRLbl;
 
     juce::GroupComponent mFltAmtGroup;
-    juce::Slider   mFltEnvAmtKnob;
+    VibeSlider     mFltEnvAmtKnob;
     juce::Label    mFltEnvAmtLbl;
 
     // ── LFO deck ──────────────────────────────────────────────────────────────
@@ -143,7 +143,7 @@ private:
     std::unique_ptr<BssLedRadio> mLFOShapeLed;
     std::unique_ptr<BssLedRadio> mLFODestLed;
 
-    juce::Slider     mLFORateKnob, mLFOAmtKnob;
+    VibeSlider       mLFORateKnob, mLFOAmtKnob;
     juce::Label      mLFORateLbl,  mLFOAmtLbl;
     juce::TextButton mLFOSyncBtn { "SYNC" };
     juce::ComboBox   mLFODivCbo;
@@ -175,24 +175,24 @@ private:
     std::unique_ptr<ComboAtt>  mNoiseColorAtt;
 
     juce::GroupComponent mTransientGroup;
-    juce::Slider mTransAmtKnob, mTransDurKnob, mTransColKnob;
+    VibeSlider mTransAmtKnob, mTransDurKnob, mTransColKnob;
     juce::Label  mTransAmtLbl,  mTransDurLbl,  mTransColLbl;
     std::unique_ptr<SliderAtt> mTransAmtAtt, mTransDurAtt, mTransColAtt;
 
     juce::GroupComponent mBurstGroup;
     juce::TextButton     mBurstModeBtn { "BURST" };
-    juce::Slider         mBurstCountKnob, mBurstSpacingKnob;
+    VibeSlider           mBurstCountKnob, mBurstSpacingKnob;
     juce::Label          mBurstCountLbl, mBurstSpacingLbl;
     std::unique_ptr<ButtonAtt> mBurstModeAtt;
     std::unique_ptr<SliderAtt> mBurstCountAtt, mBurstSpacingAtt;
 
     juce::GroupComponent mDriftGroup;
-    juce::Slider         mDriftKnob;
+    VibeSlider           mDriftKnob;
     juce::Label          mDriftLbl;
     std::unique_ptr<SliderAtt> mDriftAtt;
 
     juce::GroupComponent mUnisonGroup;
-    juce::Slider         mUniVoicesKnob, mUniDetuneKnob, mUniSpreadKnob;
+    VibeSlider           mUniVoicesKnob, mUniDetuneKnob, mUniSpreadKnob;
     juce::Label          mUniVoicesLbl,  mUniDetuneLbl,  mUniSpreadLbl;
     std::unique_ptr<SliderAtt> mUniVoicesAtt, mUniDetuneAtt, mUniSpreadAtt;
 

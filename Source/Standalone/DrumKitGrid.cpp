@@ -2648,7 +2648,7 @@ void DrumKitGrid::toggleResizeFromLeftMode()
 
 namespace { struct DrumScaleLevelsHost : public juce::Component
 {
-    juce::Slider slider { juce::Slider::LinearHorizontal, juce::Slider::TextBoxRight };
+    VibeSlider slider { juce::Slider::LinearHorizontal, juce::Slider::TextBoxRight };
     DrumScaleLevelsHost()
     {
         slider.setRange (0.0, 200.0, 1.0);

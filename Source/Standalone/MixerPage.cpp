@@ -1244,7 +1244,7 @@ public:
 
 private:
     juce::Label        mDestLabel;
-    juce::Slider       mAmountSlider;
+    VibeSlider         mAmountSlider;
     juce::ToggleButton mPrePostBtn;
     juce::TextButton   mDeleteBtn;
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> mAmountAtt;

@@ -86,6 +86,7 @@ as today's engine refs, noted in the §B walk).
   inst names + orders; NO arrangement, NO patterns, NO song-loop/UI-position extras).
 - [ ] `saveTemplateAs` writes `<BaySickTemplate version="2" name>` + that capture; dialog text
   updated from "kit + layers + basses" to the full-skeleton wording (ASCII).
+- [ ] Build gate.
 
 ### Task 2 — Template loader: v2 branch + scoped teardown + dirty gate
 
@@ -96,6 +97,7 @@ as today's engine refs, noted in the §B walk).
   the v1-factory branch tears down ONLY L/B/D tabs (transitional per §5).
 - [ ] Every template-load entry runs through `confirmDiscardChanges` (fixes the verified
   silent-discard bypass); blank/clean project loads directly.
+- [ ] Build gate.
 
 ### Task 3 — New-from-Template submenu + default-template consumer + removals
 
@@ -107,6 +109,7 @@ as today's engine refs, noted in the §B walk).
   folder-seed branch (ProjectManager.cpp:262-270) + update the header contract comment.
 - [ ] Remove `doFileNewFromTemplate` (+ its ProjectBrowserWindow launch) and `showTemplateMenu`
   (+ its internal dup `kIdSaveAs`); item 106 top-level Save-as-Template stays. Grep zero refs.
+- [ ] Build gate.
 
 ### Task 4 — FND-1 completion: Rusty "Save Kit & Delete"
 
@@ -115,6 +118,7 @@ as today's engine refs, noted in the §B walk).
   save chains the existing kit-save flow (StandaloneEditor kit menu save path) then fires the
   delete; clean -> current 2-button warning unchanged. Reuse Rusty's existing kit-dirty signal
   (verify which flag exists at execution; if none, derive from the engine dirty hook).
+- [ ] Build gate.
 
 ### Task 5 — Sample-retention hybrid (8a/8b)
 
@@ -128,12 +132,14 @@ as today's engine refs, noted in the §B walk).
   new imports (loader accepts bare names as before — no rewrite of old refs).
 - [ ] Missing-file handling upgraded from silent skip to a one-shot load report dialog listing
   unresolved refs (no per-block spam) — the silent-skip finding from the scout.
+- [ ] Build gate.
 
 ### Task 6 — Pack Project
 
 - [ ] File menu "Pack Project…" -> QA-Export's `ProjectBundler` (destination, zip-vs-folder,
   references-vs-self-contained per docket 8). Pack of an UNSAVED project prompts save first
   (through the standard flow).
+- [ ] Build gate.
 
 ## Batch close (bulk-run per-batch loop — one commit per batch)
 

@@ -66,6 +66,7 @@ No sub-spec calls open.
 - [ ] Grep all readers of the pedals state tags (page preset via `engineRootTag`
   "BaySickPedalsState" in [InstPage.cpp:388-400](Source/Inst/InstPage.cpp:388) — confirm that
   config keys on the tag the BLOB parse expects and update if it inspects the outer tag).
+- [ ] Build gate.
 
 ### Task 2 — Pin the FX-rack enum ordinals
 
@@ -73,6 +74,7 @@ No sub-spec calls open.
   (zero behavior change) + a Rule-6 category-6-style comment: saved pedal-slot `type` ints
   depend on these — never reorder, append only. (The pedal-native block :34-62 is already
   explicit; this closes the gap.)
+- [ ] Build gate.
 
 ### Task 3 — Strip `pedalsLog`
 
@@ -81,6 +83,7 @@ No sub-spec calls open.
   (untagged, plain lines) | Bug-B round-trip forensics, 2026-05-05 | **Removed this batch
   (Jeff 2026-07-25, docket 6 log=A)** |. The on-disk `pedals_state_log.txt` stays for Jeff to
   delete or keep — not touched by the batch.
+- [ ] Build gate.
 
 ## Batch close (bulk-run per-batch loop — one commit per batch)
 

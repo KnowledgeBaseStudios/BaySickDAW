@@ -435,7 +435,7 @@ GlobalTransportBar::GlobalTransportBar(StandalonePlayHead& ph)
     // and the pattern dropdown).  0-100%, default 0, double-click resets to 0;
     // per-player Swing Mix knobs scale this on each title bar (SW-3).
     {
-        auto s = std::make_unique<juce::Slider>();
+        auto s = std::make_unique<VibeSlider>();
         s->setSliderStyle (juce::Slider::RotaryVerticalDrag);
         s->setTextBoxStyle (juce::Slider::NoTextBox, true, 0, 0);
         s->setRange (0.0, 1.0, 0.0);
