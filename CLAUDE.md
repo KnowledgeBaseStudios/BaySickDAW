@@ -115,8 +115,9 @@ JUCE 7 C++ music production app (formerly Vibesynth, then VibeDAW). **Standalone
 - **Build command:** Run `do_build.bat` from `C:\Users\jeffm\Documents\BaySickDAW\`. Builds BOTH Release and Debug per QA-0a (2026-05-07).
 - **Who runs it: Claude (changed 2026-07-25).** Supersedes the old "Jeff runs builds himself — never try to run do_build.bat in bash (MSVC env not available)" rule, whose premise was stale: `do_build.bat` is self-contained — it resets `PATH` to a bare minimum and calls `vcvars64.bat` itself (lines 3-4), so it does NOT need the caller to have an MSVC environment. Verified working 2026-07-25 (`MSBuild version 18.7.8` in the log, both exit codes 0).
   - **Invocation (pin this string verbatim — it is the allowlisted one; any variation re-prompts):**
-    `cmd.exe /c "C:\Users\jeffm\Documents\BaySickDAW\do_build.bat"; Write-Output "WRAPPER_EXIT=$LASTEXITCODE"`
+    `cmd.exe /c "C:\Users\jeffm\Documents\BaySickDAW\do_build.bat"`
     via the PowerShell tool with `run_in_background: true` (a full rebuild exceeds the 10-min synchronous tool cap).
+    **Keep it a SINGLE statement** — no `;`, no `&&`, no `$VAR`. A compound command cannot be reduced to a reusable allow rule, so "always allow" silently fails to match the next run and Jeff gets prompted every single build. (Learned the hard way 2026-07-25: the original string appended `; Write-Output "WRAPPER_EXIT=$LASTEXITCODE"`, which was useless anyway — see the next bullet.)
   - **Read the result from `build_log.txt`**, not the wrapper exit code: `RELEASE_EXIT_CODE` and `DEBUG_EXIT_CODE` must BOTH be 0. Grep for `error C` / `error LNK` / `error MSB`; do not dump the whole log.
   - **Cadence:** one build gate at the end of EVERY task (the G3 exemplar `Plans & Specs/Batch Plans/silky-gliding-lynx.md` is canonical). Bulk-run's "no per-task verify pauses" retires the per-task FUNCTIONAL test + running-notes checkpoint ONLY — it never retired the compile gate.
   - **Exe-lock convention:** do not build while Jeff has `BaySickDAW.exe` open (Debug or Release) — the link step fails on the locked file. He says when he is in the app.

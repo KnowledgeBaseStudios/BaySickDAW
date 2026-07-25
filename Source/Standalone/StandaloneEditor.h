@@ -315,6 +315,7 @@ private:
     void doFileNewFromTemplate();
     void doFileSetDefaultTemplate();
     void doFileOpen();
+    void doFileQuickOpen();
     void doFileSave();
     void doFileSaveAs();
     void doFileRestoreBackup();

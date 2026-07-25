@@ -1627,7 +1627,7 @@ Engine + transport:
 
 ### §B.25 — QA-VibeSlider (app-wide plain `juce::Slider` -> `VibeSlider` swap, BLU-493)
 
-`blocks:` `<hash>` (QA-VibeSlider — backfill at commit). Debug exe FIRST (screenshot any jassert),
+`blocks:` `bd49d066` (QA-VibeSlider). Debug exe FIRST (screenshot any jassert),
 then Release — mark each scenario `D:` and `R:`.
 
 **Reconciled at code-complete — differs from the plan file's 8-item ladder in two ways.** (1) The
@@ -1679,6 +1679,61 @@ one Vox tab with a take, one Rusty tab, one effect loaded in a rack, and one mix
 - [ ] **VS-10 — spot: unchanged slider behaviors.** On two or three swapped controls of different
       styles: double-click-to-default still resets, Ctrl (fine) drag still works, the hover/drag
       value bubble still appears, and any APVTS-attached knob still moves its parameter.
+      `D:__ R:__` notes:
+
+### §B.26 — QA-NativeDialogs (native Open Project + Quick Open Project + per-context default folders)
+
+`blocks:` `<hash>` (QA-NativeDialogs — backfill at commit). Debug exe FIRST (screenshot any
+jassert), then Release — mark each scenario `D:` and `R:`.
+
+**Scope note.** The old "convert the choosers to native" framing was void before this batch started
+— all 18 `juce::FileChooser` sites were ALREADY native (JUCE's `useOSNativeDialogBox` ctor default
+is `true` and no site overrides it). What actually shipped: the Open Project surface moved off the
+custom `ProjectBrowserWindow` onto a native folder picker, the browser survives as a new "Quick
+Open Project" menu item, four chooser start-dirs were repointed, two path literals moved behind
+shared resolvers, and a dead 26-line block was deleted. **ND-9 is a pure regression guard** —
+DrumPage's dual browse deliberately KEEPS the JUCE browser (docket 3=c) because a Windows native
+dialog cannot offer "pick a folder OR a file" in one entry.
+
+Setup: one saved project with unsaved edits pending, plus a rack containing an Acoustic Preamp, an
+Acoustic Simulator, and a NAM Pedal.
+
+- [ ] **ND-1 — native Open Project, happy path.** File > Open Project (Ctrl+O): a native Windows
+      FOLDER dialog opens at the Projects root. Pick a real project folder — it opens as before
+      (tabs, mixer strips, arrangement all restore).  `D:__ R:__` notes:
+- [ ] **ND-2 — non-project folder is rejected WITHOUT destroying the session (MUST-PASS).** With a
+      project open, File > Open Project and pick any folder that has no `project.xml` (e.g. Documents).
+      Expect "Not a BaySickDAW project folder" and the currently-open project still fully intact —
+      tabs, strips, arrangement untouched. This is the one real hazard the batch introduced: the
+      native picker can land anywhere, and the teardown before it is not undoable, so validation
+      runs first. If the session is wiped here, that ordering broke.  `D:__ R:__` notes:
+- [ ] **ND-3 — Cancel is a no-op.** Open Project, then Cancel: nothing changes, no error.
+      `D:__ R:__` notes:
+- [ ] **ND-4 — Quick Open Project keeps every browser feature.** File > Quick Open Project: the old
+      browser appears, titled "Quick Open Project". Double-click opens a project; sort by
+      Name/Modified/Size; rename, duplicate, delete-to-Recycle-Bin, and Show in Explorer all still
+      work; both destructive ops still REFUSE the currently-open project.  `D:__ R:__` notes:
+- [ ] **ND-5 — unsaved-changes prompt fires on BOTH open paths.** With a dirty project, trigger
+      Open Project and then Quick Open Project: each prompts Save / Don't Save / Cancel first, and
+      Cancel aborts the open.  `D:__ R:__` notes:
+- [ ] **ND-6 — Set Default Template shows both subfolders on a fresh install.** Delete
+      `Documents\BaySickDAW\Templates\Factory` and `\My Templates` first, then Options > Set Default
+      Template: the dialog opens at the Templates ROOT and BOTH folders are present (recreated on
+      demand). Pick an .xml from EITHER — the Options label updates.  `D:__ R:__` notes:
+- [ ] **ND-7 — repointed start dirs.** (a) Event Editor MIDI CC import (Ctrl+M / toolbar menu):
+      opens `Documents\BaySickDAW\MIDI`, created if absent. (b) Builder Import Audio AND the Clip
+      "+"-add: BOTH open My Samples, and the Core Library shortcut inside reaches factory content.
+      `D:__ R:__` notes:
+- [ ] **ND-8 — shared resolvers (IR + NAM pedal).** (a) Acoustic Preamp with NO IR loaded: Load IR
+      opens `Presets\Effects\IR` (created on demand); load an IR, reopen — it now opens beside that
+      IR. Repeat on Acoustic Simulator; both must land in the SAME IR folder. (b) NAM Pedal "Load
+      NAM Pedal" from the pedal slot AND from the FX-rack panel: both open User NAM Pedals. All four
+      paths now come from one resolver, so a wrong folder in any one of them means the resolver is
+      wrong, not that site.  `D:__ R:__` notes:
+- [ ] **ND-9 — REGRESSION GUARD: DrumPage dual browse is deliberately unchanged.** Drum tab > Pick a
+      sound > "Browse sample folder...": the JUCE (non-native) browser appears as before; picking a
+      FOLDER loads a folder of samples, picking a FILE loads a single sample. If this turned into a
+      native dialog, the sweep overreached and the folder-or-file capability is lost.
       `D:__ R:__` notes:
 
 ## §C — Deferred re-verify ledger

@@ -9511,6 +9511,7 @@ juce::PopupMenu StandaloneEditor::getMenuForIndex(int menuIndex, const juce::Str
         m.addItem(102, "New from Template...");           // P6: pick + seed
         m.addSeparator();
         m.addItem(103, "Open Project...  (Ctrl+O)");
+        m.addItem(110, "Quick Open Project...");
         // P3: Open Recent submenu - last 10 projects, missing ones greyed out.
         {
             juce::PopupMenu recent;
@@ -9645,6 +9646,7 @@ void StandaloneEditor::menuItemSelected(int id, int)
     // File - Project persistence (P2+P3, 2026-04-23)
     case 101: doFileNew();     break;
     case 103: doFileOpen();    break;
+    case 110: doFileQuickOpen(); break;
     case 104: doFileSave();    break;
     case 105: doFileSaveAs();  break;
     case 106: saveTemplateAs(); break;                      // 2026-04-26
@@ -10376,6 +10378,11 @@ void StandaloneEditor::doFileSetDefaultTemplate()
     // by gen_factory_presets.py, plus user-saved ones under My Templates/.
     auto initialDir = templatesDir();
     initialDir.createDirectory();   // ensure exists so the chooser opens cleanly
+    // Both subfolders must exist or a fresh install shows an empty/partial
+    // root listing -- the chooser opens at the root, so Factory and My
+    // Templates have to be equally reachable from the first click.
+    factoryTemplatesDir().createDirectory();
+    userTemplatesDir   ().createDirectory();
 
     mTemplateChooser = std::make_unique<juce::FileChooser> (
         "Pick Default Template", initialDir, "*.xml", true);
@@ -10392,37 +10399,62 @@ void StandaloneEditor::doFileSetDefaultTemplate()
             "Future 'New Project' will start from '" + picked.getFileNameWithoutExtension()
             + "'.  Use Options > Clear Default Template to undo.");
     });
-    return;
-
-    // (Old ProjectBrowserWindow path retired - no longer reachable.)
-    auto* browser = new ProjectBrowserWindow();
-    browser->isCurrentProject = [this] (const juce::File& f)
-    {
-        return mProjectManager && mProjectManager->isCurrentProject (f);
-    };
-    browser->onOpenSelected = [this, browser] (const juce::File& folder)
-    {
-        if (mProjectManager) mProjectManager->setDefaultTemplate (folder);
-        if (auto* w = browser->findParentComponentOfClass<juce::DialogWindow>())
-            w->exitModalState (1);
-    };
-    browser->onNewProject = [browser]
-    {
-        if (auto* w = browser->findParentComponentOfClass<juce::DialogWindow>())
-            w->exitModalState (0);
-    };
-
-    juce::DialogWindow::LaunchOptions opts;
-    opts.dialogTitle            = "Pick Default Template";
-    opts.dialogBackgroundColour = juce::Colours::black;
-    opts.content.setOwned (browser);
-    opts.escapeKeyTriggersCloseButton = true;
-    opts.useNativeTitleBar      = true;
-    opts.resizable              = true;
-    opts.launchAsync();
 }
 
 void StandaloneEditor::doFileOpen()
+{
+    // P5: prompt Save/Don't Save/Cancel first if current project is dirty.
+    confirmDiscardChanges ([this]
+    {
+        // A project IS a folder (project.xml lives inside), so this is a
+        // directory picker, not a file picker -- picking project.xml itself
+        // would force the user to descend into every candidate folder.
+        auto root = ProjectManager::getDefaultProjectsRoot();
+        root.createDirectory();
+
+        auto chooser = std::make_shared<juce::FileChooser> (
+            "Open Project", root, juce::String(), true);
+        const int flags = juce::FileBrowserComponent::openMode
+                        | juce::FileBrowserComponent::canSelectDirectories;
+        chooser->launchAsync (flags, [this, chooser] (const juce::FileChooser& fc)
+        {
+            const juce::File folder = fc.getResult();
+            if (folder == juce::File() || ! folder.isDirectory())
+                return;   // cancelled
+
+            // Validate BEFORE the teardown below -- the native picker can land
+            // on any folder, and resetToBlankState() is not undoable.
+            if (! folder.getChildFile ("project.xml").existsAsFile())
+            {
+                juce::AlertWindow::showMessageBoxAsync (
+                    juce::MessageBoxIconType::WarningIcon,
+                    "Not a BaySickDAW project folder",
+                    "That folder has no project.xml inside it.");
+                return;
+            }
+
+            HeavyOperationOverlay::ScopedOp heavyOp (mHeavyOpOverlay,
+                                                     "Loading Project...");
+            mHeavyOpOverlay.setStepLabel ("Closing old tabs...");
+            // 2026-04-24: wipe before load (see Open Recent path for details).
+            closeAllDynamicTabs();
+            if (mMixerPage) mMixerPage->clearDynamicStrips();
+            mProcessor.resetToBlankState();
+            if (! mProjectManager->openProject (folder))
+            {
+                juce::AlertWindow::showMessageBoxAsync (
+                    juce::MessageBoxIconType::WarningIcon,
+                    "Could not open project",
+                    "That folder doesn't contain a project.xml, or the file is corrupt.");
+                return;
+            }
+            restoreAudioStripsFromArrangement();
+            refreshWindowTitle();
+        });
+    });   // close confirmDiscardChanges continuation
+}
+
+void StandaloneEditor::doFileQuickOpen()
 {
     // P5: prompt Save/Don't Save/Cancel first if current project is dirty.
     confirmDiscardChanges ([this]
@@ -10468,7 +10500,7 @@ void StandaloneEditor::doFileOpen()
     };
 
     juce::DialogWindow::LaunchOptions opts;
-    opts.dialogTitle            = "Open Project";
+    opts.dialogTitle            = "Quick Open Project";
     opts.dialogBackgroundColour = juce::Colours::black;
     opts.content.setOwned (browser);
     opts.escapeKeyTriggersCloseButton = true;

@@ -83,12 +83,12 @@ record. Per-task gating is standing practice for the rest of G4.
 ## Held Work Log entry (apply at section pass)
 
 > Drafted at code-complete via `/draft-doc batch-close`; NOT yet applied to `Implemented Work Log.md`.
-> Applies with the §5 STATUS flip when §B.25 passes the campaign walk (R2). Fill `<hash>` with the
-> batch's single source commit and stamp the full `HH:MM PT` at apply.
+> Applies with the §5 STATUS flip when §B.25 passes the campaign walk (R2). Commit hash is filled
+> (`bd49d066`); stamp the full `HH:MM PT` at apply.
 
 ### 2026-07-25 <HH:MM> PT — QA-VibeSlider — BLU-493 app-wide sweep: every plain `juce::Slider` member declaration -> `VibeSlider` across 19 files (five engine/vocal families + 7 scattered singles), so right-click can no longer jog a value on its way to the Automate menu; mid-batch scope addition swapped VKnob's inner slider (the census-missed declaration in the app's most-used knob widget), which forced the `VibeSlider` definition above `VKnob` in SharedUI.h; three right-click-feature subclasses deliberately excluded; process finding retrofitted per-task build gates into the seven remaining G4 plan files
 
-**Bucket:** UI / L&F / Theming. Batch `gentle-swapping-gecko`. `blocks:` `<hash>`.
+**Bucket:** UI / L&F / Theming. Batch `gentle-swapping-gecko`. `blocks:` `bd49d066`.
 
 #### Done
 
@@ -128,7 +128,7 @@ record. Per-task gating is standing practice for the rest of G4.
 
 #### Commit(s)
 
-`<hash>` (whole batch — Tasks 1+2 + the VKnob scope addition + Rule 6 pass + §B.25 + the 30 G4 build-gate retrofits + held entry + running notes; single batch commit per the bulk-run model). Batch opened under the G4 group-open commit `b6b47685`. Build verified clean in BOTH configs; behavioral verification deferred to the R2 campaign pass against §B.25.
+`bd49d066` (whole batch — Tasks 1+2 + the VKnob scope addition + Rule 6 pass + §B.25 + the 30 G4 build-gate retrofits + CLAUDE.md build-ownership reversal + held entry + running notes; single batch commit per the bulk-run model). Batch opened under the G4 group-open commit `b6b47685`. Build verified clean in BOTH configs; behavioral verification deferred to the R2 campaign pass against §B.25.
 
 #### Next action
 

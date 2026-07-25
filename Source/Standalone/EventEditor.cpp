@@ -1853,9 +1853,15 @@ void EventEditorContent::doImportMidi()
 {
     if (!mPM || mBlockIdx < 0 || mBlockIdx >= mPM->getNumBlocks()) return;
 
+    // .mid files get a conventional home instead of dumping the user in the
+    // Documents root.
+    auto midiDir = File::getSpecialLocation (File::userDocumentsDirectory)
+                       .getChildFile ("BaySickDAW")
+                       .getChildFile ("MIDI");
+    midiDir.createDirectory();
+
     auto chooser = std::make_shared<FileChooser>(
-        "Import MIDI CC Data", File::getSpecialLocation(File::userDocumentsDirectory),
-        "*.mid;*.midi");
+        "Import MIDI CC Data", midiDir, "*.mid;*.midi");
     chooser->launchAsync(FileBrowserComponent::openMode | FileBrowserComponent::canSelectFiles,
         [this, chooser](const FileChooser& fc) {
             auto file = fc.getResult();

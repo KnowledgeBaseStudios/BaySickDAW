@@ -111,6 +111,16 @@ juce::File presetsRoot()
               .getChildFile ("Effects");
 }
 
+juce::File userNamPedalsDir()
+{
+    return presetsRoot().getChildFile ("Pedals").getChildFile ("User NAM Pedals");
+}
+
+juce::File irDir()
+{
+    return presetsRoot().getChildFile ("IR");
+}
+
 juce::File typeRoot (EffectType type)
 {
     // I-2: pedals nest one level deeper under Effects/Pedals/{TypeName}/.
@@ -731,8 +741,7 @@ void seedFactoryPresets()
     // Also ensure the User NAM Pedals .nam-file folder exists (separate from
     // the User NAM Pedal preset folder above -- this one holds the actual
     // .nam capture files the user loads via the panel's Load button).
-    presetsRoot().getChildFile ("Pedals").getChildFile ("User NAM Pedals")
-                 .createDirectory();
+    userNamPedalsDir().createDirectory();
 
     // Build a temp DSP per preset, configure it via the lambda, capture
     // state, write XML to disk if the file is missing.  Idempotent.

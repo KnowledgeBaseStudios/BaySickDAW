@@ -440,12 +440,7 @@ private:
         auto* dsp = dynamic_cast<NAMPedalStyleDSP*> (mProc.getSlotEffect (mSlot));
         if (dsp == nullptr) return;
 
-        auto userPedals = juce::File::getSpecialLocation (juce::File::userDocumentsDirectory)
-                              .getChildFile ("BaySickDAW")
-                              .getChildFile ("Presets")
-                              .getChildFile ("Effects")
-                              .getChildFile ("Pedals")
-                              .getChildFile ("User NAM Pedals");
+        auto userPedals = EffectPresetIO::userNamPedalsDir();
         userPedals.createDirectory();
 
         mNamChooser = std::make_unique<juce::FileChooser>("Load NAM Pedal", userPedals, "*.nam");

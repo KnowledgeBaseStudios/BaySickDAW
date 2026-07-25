@@ -49,6 +49,12 @@ namespace EffectPresetIO
     juce::File   myPresetsDir (EffectType type);        // .../{Type}/My Presets
     juce::File   defaultFile  (EffectType type);        // .../{Type}/Default.xml
 
+    // Shared asset folders that are NOT per-EffectType.  Centralized here so
+    // every chooser opens the same place -- both paths were spelled out as
+    // literals at multiple call sites before QA-NativeDialogs.
+    juce::File   userNamPedalsDir();   // .../Pedals/User NAM Pedals  (.nam captures)
+    juce::File   irDir();              // .../IR                     (user impulse responses)
+
     void ensureFolderTree (EffectType type);   // mkdir-p the three folders above
 
     // Seeding ---------------------------------------------------------------

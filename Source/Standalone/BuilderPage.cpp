@@ -3,6 +3,7 @@
 #include "../DSP/BpmDetect.h"    // QA-Ec G1-boundary: content tempo estimation (import + display)
 #include "../DSP/DSPBase.h"      // QA-Fe2: isTransportPlaying stop-gate (Regenerate De-noise)
 #include "PatternColorPicker.h"
+#include "../SampleLibrary.h"     // doImportAudio start dir (My Samples)
 #include <map>                    // G1 boundary: detected-tempo display cache
 #include "../ClipDropDiag.h"        // QA-ClipDrop: diagnostic trap (2026-06-02)
 #include "../G3PlayheadDiag.h"      // [G3 PLAYHEAD] G-9 reading (QA-G3Smoke Task 1); Debug-only
@@ -7695,9 +7696,12 @@ void BuilderPage::scrollBarMoved(ScrollBar* sb, double newRangeStart)
 // ─────────────────────────────────────────────────────────────────────────────
 void BuilderPage::doImportAudio()
 {
+    // Matches the Clip "+"-add entry point -- both audio imports open My
+    // Samples, whose Core Library shortcut reaches the factory content.
+    SampleLibrary::ensureUserSamplesDir();
     auto chooser = std::make_shared<FileChooser>(
         "Import Audio File",
-        File::getSpecialLocation(File::userMusicDirectory),
+        SampleLibrary::getUserSamplesDir(),
         "*.wav;*.mp3;*.aiff;*.flac;*.ogg;*.aif");
 
     chooser->launchAsync(

@@ -62,7 +62,10 @@ My Samples/
 .claude/worktrees/
 
 # Per-machine Claude Code permission grants — local-only by Claude convention (`*.local.*`).
+# Backups included: the file is gitignored, so a prune has no other undo path, and the
+# backups hold superseded grants that must never re-enter history.
 .claude/settings.local.json
+.claude/settings.local.json.bak-*
 
 # User-created presets across every page / engine / effect — personal content, not stock.
 # Stock factory presets live alongside (e.g. "Presets/Effects/Reverb/Hall.xml"); only the

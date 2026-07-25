@@ -1,4 +1,5 @@
 #include "EffectEditorPanels.h"
+#include "EffectPresetIO.h"       // userNamPedalsDir / irDir chooser homes
 // D.4 (2026-05-01): force MSBuild to recompile this file - Compressor + Delay
 // knob additions were missing from the previous incremental build.
 #include "../DSP/CompressorDSP.h"
@@ -4959,9 +4960,11 @@ struct AcousticPreampStylePanel : public EditorPanelBase
         loadBtn->onClick = [this]
         {
             if (! mDsp) return;
+            auto irHome = EffectPresetIO::irDir();
+            irHome.createDirectory();
             auto startDir = mDsp->getUserIRPath().isNotEmpty()
                               ? juce::File (mDsp->getUserIRPath()).getParentDirectory()
-                              : juce::File::getSpecialLocation (juce::File::userDocumentsDirectory);
+                              : irHome;
             chooser = std::make_unique<juce::FileChooser> ("Pick acoustic IR", startDir, "*.wav");
             chooser->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
                 [this] (const juce::FileChooser& fc)
@@ -5070,9 +5073,11 @@ struct AcousticSimulatorStylePanel : public EditorPanelBase
         loadBtn->onClick = [this]
         {
             if (! mDsp) return;
+            auto irHome = EffectPresetIO::irDir();
+            irHome.createDirectory();
             auto startDir = mDsp->getUserIRPath().isNotEmpty()
                               ? juce::File (mDsp->getUserIRPath()).getParentDirectory()
-                              : juce::File::getSpecialLocation (juce::File::userDocumentsDirectory);
+                              : irHome;
             chooser = std::make_unique<juce::FileChooser> ("Pick acoustic simulator IR", startDir, "*.wav");
             chooser->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
                 [this] (const juce::FileChooser& fc)
@@ -5997,12 +6002,7 @@ struct NAMPedalStylePanel : public EditorPanelBase
     void showFileChooser()
     {
         if (! mDsp) return;
-        auto userPedals = juce::File::getSpecialLocation (juce::File::userDocumentsDirectory)
-                              .getChildFile ("BaySickDAW")
-                              .getChildFile ("Presets")
-                              .getChildFile ("Effects")
-                              .getChildFile ("Pedals")
-                              .getChildFile ("User NAM Pedals");
+        auto userPedals = EffectPresetIO::userNamPedalsDir();
         userPedals.createDirectory();
 
         auto startDir = mDsp->getModelPath().isNotEmpty()
