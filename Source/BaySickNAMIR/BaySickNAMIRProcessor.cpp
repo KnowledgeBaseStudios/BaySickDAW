@@ -1,5 +1,6 @@
 #include "BaySickNAMIRProcessor.h"
 #include "BaySickNAMIREditor.h"
+#include "../MissingFileReport.h"   // QA-Export Task 5
 
 // NAM core (C++20 internal; consumer translation unit is C++17 - only the
 // header pulls in Eigen / nlohmann, both of which are C++17-clean).
@@ -974,9 +975,14 @@ void BaySickNAMIRProcessor::applySnapshotToCurrent (int slot)
     }
     else if (s.micUserIrPath != currentPath)
     {
+        // QA-Export Task 5: report instead of skipping quietly (see the project
+        // -load path above for the same pattern).
         juce::String err;
         juce::File f (s.micUserIrPath);
-        if (f.existsAsFile()) mMicSim.loadUserIr (f, err, slot);
+        if (! f.existsAsFile())
+            MissingFileReport::add ("Mic A user IR", s.micUserIrPath);
+        else if (! mMicSim.loadUserIr (f, err, slot))
+            MissingFileReport::add ("Mic A user IR (failed to load)", s.micUserIrPath);
     }
 
     const juce::String currentPathB = mMicSimB.getUserIrPath (slot);
@@ -988,7 +994,10 @@ void BaySickNAMIRProcessor::applySnapshotToCurrent (int slot)
     {
         juce::String err;
         juce::File f (s.micbUserIrPath);
-        if (f.existsAsFile()) mMicSimB.loadUserIr (f, err, slot);
+        if (! f.existsAsFile())
+            MissingFileReport::add ("Mic B user IR", s.micbUserIrPath);
+        else if (! mMicSimB.loadUserIr (f, err, slot))
+            MissingFileReport::add ("Mic B user IR (failed to load)", s.micbUserIrPath);
     }
 }
 
@@ -1132,19 +1141,27 @@ void BaySickNAMIRProcessor::setStateInformation (const void* data, int sizeInByt
             // QA-Fc: Mic B's per-slot user IR gets the identical treatment.
             for (int s = 0; s < 2; ++s)
             {
+                // QA-Export Task 5: a missing or unreadable IR used to be skipped
+                // in silence here -- the project-load path -- so the mic sim came
+                // back reporting a user IR it never loaded.  `err` was captured
+                // and discarded even when an existing file failed to load.
                 const auto& path = mSnapshots[(size_t) s].micUserIrPath;
                 if (path.isNotEmpty())
                 {
                     juce::File irFile (path);
-                    if (irFile.existsAsFile())
-                        mMicSim.loadUserIr (irFile, err, s);
+                    if (! irFile.existsAsFile())
+                        MissingFileReport::add ("Mic A user IR", path);
+                    else if (! mMicSim.loadUserIr (irFile, err, s))
+                        MissingFileReport::add ("Mic A user IR (failed to load)", path);
                 }
                 const auto& pathB = mSnapshots[(size_t) s].micbUserIrPath;
                 if (pathB.isNotEmpty())
                 {
                     juce::File irFileB (pathB);
-                    if (irFileB.existsAsFile())
-                        mMicSimB.loadUserIr (irFileB, err, s);
+                    if (! irFileB.existsAsFile())
+                        MissingFileReport::add ("Mic B user IR", pathB);
+                    else if (! mMicSimB.loadUserIr (irFileB, err, s))
+                        MissingFileReport::add ("Mic B user IR (failed to load)", pathB);
                 }
             }
             // Sync the Mic Sim active-slot pointers to match ab_slot.

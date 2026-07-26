@@ -41,6 +41,7 @@ namespace BSCommands
         cmdFileOpen        = 0x10021,
         cmdFileSave        = 0x10022,
         cmdFileSaveAs      = 0x10023,
+        cmdExportAudio     = 0x10024,   // QA-Export (FSW-065)
 
         // ── General - pattern navigation (Phase B-2, 2026-04-26) ────────────
         cmdRenameActivePattern = 0x10030,

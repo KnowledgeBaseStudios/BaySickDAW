@@ -1,4 +1,5 @@
 #include "BaySickRustyDrumsProcessor.h"
+#include "../MissingFileReport.h"   // QA-Export Task 5
 #include "sfizz.hpp"
 #include <set>
 #include <map>
@@ -986,6 +987,10 @@ void BaySickRustyDrumsProcessor::setStateInformation (const void* data, int sz)
         const juce::File kit (kitNode.getProperty ("path").toString());
         if (kit.existsAsFile())
             loadKit (kit);
+        else
+            // QA-Export Task 5: see the Guitars equivalent -- silent skip meant
+            // the tab restored looking fine and produced nothing.
+            MissingFileReport::add ("Drum kit", kit.getFullPathName());
     }
 
     if (auto apvtsState = root.getChildWithName (apvts.state.getType()); apvtsState.isValid())

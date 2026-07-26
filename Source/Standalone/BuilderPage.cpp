@@ -7,6 +7,8 @@
 #include <map>                    // G1 boundary: detected-tempo display cache
 #include "../ClipDropDiag.h"        // QA-ClipDrop: diagnostic trap (2026-06-02)
 #include "../G3PlayheadDiag.h"      // [G3 PLAYHEAD] G-9 reading (QA-G3Smoke Task 1); Debug-only
+#include "../DSP/Mp3Writer.h"       // QA-Export: MP3 encoder front end
+#include "../TempoMapRead.h"        // QA-Export: offline head reads the live tempo timeline
 
 // Smoke #45: minimal user32 import for the right-Alt check -- deliberately
 // NOT <windows.h>: its wingdi Rectangle() collides with juce::Rectangle
@@ -7877,7 +7879,351 @@ void BuilderPage::doNavigatePage(int pageIndex)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Render to WAV (unchanged from original)
+// QA-Export Task 2 -- offline render harness.
+//
+// Generalised out of the old pattern-only renderPatternToWav.  The processor
+// clone + block loop are unchanged in spirit; what song mode adds is the
+// arrangement sequence, song-only automation, arrangement audio clips (which a
+// fresh processor has no editor to publish for it), and a tempo-map-aware clock.
+//
+// Runs on a background thread.  Everything it touches is either owned by the
+// render processor or read-only shared state.
+// ─────────────────────────────────────────────────────────────────────────────
+namespace
+{
+    // Beat position for an offline render.
+    //
+    // Deliberately NOT `bpm * elapsedSeconds`: with a tempo map that linear form
+    // drifts from the live playhead the moment a tempo change lands, so an
+    // exported file would disagree with what was auditioned.  Instead it reads
+    // the SAME published timeline the live playhead derives from (TempoMap, see
+    // TempoMapRead.h).
+    //
+    // Sample-rate trap: TempoMap's sample domain is the LIVE device rate, which
+    // need not be the render rate (exporting 48k from a 44.1k session).  Beats
+    // are therefore resolved through SECONDS rather than by handing the render
+    // sample index straight to beatAtSample.
+    struct OfflineHead : public juce::AudioPlayHead
+    {
+        OfflineHead (double baseBpm, double renderSr)
+            : mBaseBpm (juce::jmax (1.0, baseBpm)), mRenderSr (renderSr) {}
+
+        juce::Optional<PositionInfo> getPosition() const override
+        {
+            const double tSec = (double) mSamplePos / mRenderSr;
+
+            double beat = tSec * (mBaseBpm / 60.0);
+            double bpm  = mBaseBpm;
+
+            if (TempoMap::isActive())
+            {
+                const double mapSr    = juce::jmax (1.0, TempoMap::gSampleRate.load());
+                const auto   mapSample = (juce::int64) (tSec * mapSr);
+                beat = TempoMap::beatAtSample (mapSample);
+                bpm  = TempoMap::bpmAtSample  (mapSample);
+            }
+
+            PositionInfo pi;
+            pi.setBpm (bpm);
+            pi.setPpqPosition (beat);
+            pi.setIsPlaying (true);
+            pi.setIsRecording (false);
+            pi.setTimeInSeconds (tSec);
+            return pi;
+        }
+
+        void advance (int n) noexcept { mSamplePos += n; }
+
+        juce::int64 mSamplePos { 0 };
+        double      mBaseBpm;
+        double      mRenderSr;
+    };
+
+    // Seconds spanned by `beats`, honoring tempo changes.  Same seconds-domain
+    // reasoning as OfflineHead.
+    double beatsToSeconds (double beats, double baseBpm)
+    {
+        if (TempoMap::isActive())
+        {
+            const double mapSr = juce::jmax (1.0, TempoMap::gSampleRate.load());
+            return (double) TempoMap::sampleAtBeat (beats) / mapSr;
+        }
+        return beats * 60.0 / juce::jmax (1.0, baseBpm);
+    }
+}
+
+bool BuilderPage::renderToFile (const RenderOptions& opts,
+                                juce::String& outErr,
+                                std::function<bool()> shouldAbort,
+                                std::function<void(double)> onProgress)
+{
+    using Scope  = RenderOptions::Scope;
+    using Format = RenderOptions::Format;
+
+    if (opts.destination == juce::File())
+    {
+        outErr = "No destination file was chosen.";
+        return false;
+    }
+
+    const double sr       = opts.sampleRate > 0.0 ? opts.sampleRate : 44100.0;
+    constexpr int kBlk    = 512;
+    const double baseBpm  = juce::jmax (1.0, mPM.getGlobalTempo());
+
+    // ── Content span, in beats ───────────────────────────────────────────────
+    double startBeats = 0.0;
+    double endBeats   = 0.0;
+
+    if (opts.scope == Scope::Song)
+    {
+        // Shared with the transport's loop end so export and playback agree.
+        // NOT getTotalArrangementBars(), which floors to a 16-bar grid.
+        endBeats = mPM.getSongEndBeats();
+        if (endBeats <= 0.0)
+        {
+            outErr = "The arrangement is empty - nothing to export.";
+            return false;
+        }
+    }
+    else if (opts.scope == Scope::Section)
+    {
+        startBeats = opts.startBeats;
+        endBeats   = opts.endBeats;
+        if (endBeats <= startBeats)
+        {
+            outErr = "No section is selected on the Builder ruler.";
+            return false;
+        }
+    }
+    else
+    {
+        if (opts.patternIndex < 0 || opts.patternIndex >= mPM.getNumPatterns())
+        {
+            outErr = "That pattern no longer exists.";
+            return false;
+        }
+        endBeats = mPM.getPattern (opts.patternIndex).bars * 4.0;
+    }
+
+    const double startSec = beatsToSeconds (startBeats, baseBpm);
+    const double endSec   = beatsToSeconds (endBeats,   baseBpm);
+    const juce::int64 startSample   = (juce::int64) (startSec * sr);
+    const juce::int64 contentEndSmp = (juce::int64) (endSec   * sr);
+    const juce::int64 contentSamples = contentEndSmp - startSample;
+
+    if (contentSamples <= 0)
+    {
+        outErr = "Computed a zero-length render.";
+        return false;
+    }
+
+    // Tail::Included keeps going past the content until it decays; the loop
+    // below decides when.  Cap is a ceiling, not a length.
+    const juce::int64 maxTailSamples = (opts.tail == RenderOptions::Tail::Included)
+                                     ? (juce::int64) (kMaxTailSeconds * sr) : 0;
+
+    // ── Render processor ─────────────────────────────────────────────────────
+    VibeSynthProcessor renderProc;
+    renderProc.setPatternManager (&mPM);
+    renderProc.prepareToPlay (sr, kBlk);
+    {
+        juce::MemoryBlock state;
+        mProcessor.getStateInformation (state);
+        renderProc.setStateInformation (state.getData(), (int) state.getSize());
+    }
+
+    // Clips store paths relative to the project folder, so the render processor
+    // needs the same folder before it resolves any of them.
+    renderProc.setCurrentProjectFolder (mProcessor.getCurrentProjectFolder());
+
+    if (opts.scope == Scope::Pattern)
+    {
+        mPM.setCurrentPattern (opts.patternIndex);
+        renderProc.setSongMode (false);
+    }
+    else
+    {
+        // The live processor gets its clip snapshot published by the editor on
+        // arrangement changes.  A fresh processor has no editor, so nothing
+        // would ever build one and every arrangement clip would render silent --
+        // publish it explicitly.
+        renderProc.rebuildAudioClipPlayers();
+        renderProc.setSongMode (true);
+    }
+
+    OfflineHead head (baseBpm, sr);
+    // Section exports start mid-song, so the clock starts there too -- otherwise
+    // the render would play the song from bar 1 into a file labelled as the
+    // selection.
+    head.mSamplePos = startSample;
+    renderProc.setPlayHead (&head);
+
+    // ── Writer ───────────────────────────────────────────────────────────────
+    constexpr int kNumCh = 2;
+    Mp3Writer mp3;
+    std::unique_ptr<juce::AudioFormatWriter> writer;
+
+    opts.destination.deleteFile();
+
+    if (opts.format == Format::Mp3)
+    {
+        if (! mp3.open (opts.destination, sr, kNumCh, opts.mp3Kbps, outErr))
+            return false;
+    }
+    else
+    {
+        std::unique_ptr<juce::AudioFormat> fmt;
+        if (opts.format == Format::Ogg) fmt = std::make_unique<juce::OggVorbisAudioFormat>();
+        else                            fmt = std::make_unique<juce::WavAudioFormat>();
+
+        auto os = opts.destination.createOutputStream();
+        if (os == nullptr)
+        {
+            outErr = "Could not write to " + opts.destination.getFullPathName();
+            return false;
+        }
+
+        const int bits = (opts.format == Format::Ogg) ? opts.oggQuality : opts.bitDepth;
+        writer.reset (fmt->createWriterFor (os.release(), sr, (unsigned int) kNumCh,
+                                            bits, {}, 0));
+        if (writer == nullptr)
+        {
+            outErr = "Could not create the audio writer for these settings.";
+            return false;
+        }
+    }
+
+    // ── Block loop ───────────────────────────────────────────────────────────
+    juce::AudioBuffer<float> buf (kNumCh, kBlk);
+    juce::MidiBuffer         midi;
+    juce::int64              written  = 0;
+    juce::int64              tailDone = 0;
+    bool                     aborted  = false;
+
+    // Near-silence, and how long it must hold before the tail is called dead.
+    // -100 dBFS sits below the noise floor of any real 24-bit content, and a
+    // quarter-second window stops a decaying reverb being cut at a zero
+    // crossing between peaks.
+    constexpr float kSilenceMag      = 1.0e-5f;
+    const juce::int64 kQuietRunNeeded = (juce::int64) (0.25 * sr);
+    juce::int64 quietRun = 0;
+
+    for (;;)
+    {
+        if (shouldAbort && shouldAbort()) { aborted = true; break; }
+
+        const bool inContent = written < contentSamples;
+        if (! inContent)
+        {
+            if (maxTailSamples <= 0)          break;   // Tail::Cut
+            if (tailDone >= maxTailSamples)   break;   // safety ceiling reached
+        }
+
+        const int chunk = inContent
+                        ? (int) juce::jmin ((juce::int64) kBlk, contentSamples - written)
+                        : (int) juce::jmin ((juce::int64) kBlk, maxTailSamples - tailDone);
+
+        buf.setSize (kNumCh, chunk, false, false, true);
+        buf.clear();
+        midi.clear();
+
+        renderProc.processBlock (buf, midi);
+        head.advance (chunk);
+
+        bool ok = true;
+        if (opts.format == Format::Mp3) ok = mp3.write (buf.getArrayOfReadPointers(), chunk);
+        else                            ok = writer->writeFromAudioSampleBuffer (buf, 0, chunk);
+
+        if (! ok)
+        {
+            outErr = "Writing to " + opts.destination.getFullPathName() + " failed.";
+            aborted = true;
+            break;
+        }
+
+        if (inContent)
+        {
+            written += chunk;
+            if (onProgress)
+                onProgress (0.9 * (double) written / (double) contentSamples);
+        }
+        else
+        {
+            tailDone += chunk;
+
+            // Stop once the output has been at near-silence long enough.  Only
+            // evaluated during the tail: a song with a quiet intro or a gap
+            // between sections must not end the render early.
+            if (buf.getMagnitude (0, chunk) < kSilenceMag) quietRun += chunk;
+            else                                           quietRun  = 0;
+
+            if (quietRun >= kQuietRunNeeded) break;
+
+            if (onProgress)
+                onProgress (0.9 + 0.1 * (double) tailDone / (double) maxTailSamples);
+        }
+    }
+
+    // Release the file before any delete: on Windows an open handle blocks it.
+    writer.reset();
+    if (opts.format == Format::Mp3) mp3.close();
+
+    if (aborted)
+    {
+        opts.destination.deleteFile();
+        if (outErr.isEmpty()) outErr = "Export cancelled.";
+        return false;
+    }
+
+    return true;
+}
+
+void BuilderPage::runExportWithProgress (const RenderOptions& opts)
+{
+    // ThreadWithProgressWindow owns the window + Cancel; the render itself knows
+    // nothing about UI beyond the two callbacks.
+    //
+    // launchThread() rather than runThread(): the latter spins a modal loop and
+    // only exists under JUCE_MODAL_LOOPS_PERMITTED, which this project does not
+    // enable.  launchThread is async, so the job heap-allocates and retires
+    // itself in threadComplete.  SafePointer on the page because a long export
+    // can outlive the tab that started it.
+    struct RenderJob : public juce::ThreadWithProgressWindow
+    {
+        RenderJob (BuilderPage& owner, const RenderOptions& o)
+            : juce::ThreadWithProgressWindow ("Exporting audio...", true, true),
+              mOwner (&owner), mOpts (o) {}
+
+        void run() override
+        {
+            if (auto* page = mOwner.getComponent())
+                mOk = page->renderToFile (
+                    mOpts, mErr,
+                    [this] { return threadShouldExit(); },
+                    [this] (double p) { setProgress (p); });
+            else
+                mErr = "The Builder page closed before the export started.";
+        }
+
+        void threadComplete (bool userPressedCancel) override
+        {
+            if (! userPressedCancel && ! mOk)
+                juce::AlertWindow::showMessageBoxAsync (
+                    juce::MessageBoxIconType::WarningIcon, "Export failed", mErr, "OK");
+            delete this;
+        }
+
+        juce::Component::SafePointer<BuilderPage> mOwner;
+        RenderOptions mOpts;
+        juce::String  mErr;
+        bool          mOk { false };
+    };
+
+    (new RenderJob (*this, opts))->launchThread();
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Pattern render -- now a thin wrapper over the shared harness.
 // ─────────────────────────────────────────────────────────────────────────────
 void BuilderPage::renderPatternToWav(int patternIndex)
 {
@@ -7896,51 +8242,22 @@ void BuilderPage::renderPatternToWav(int patternIndex)
             auto dest = fc.getResult();
             if (dest == File()) return;
 
-            auto& pat2 = mPM.getPattern(patternIndex);
-            constexpr double kSR  = 44100.0;
-            constexpr int    kBlk = 512;
-            const double tailSec  = 2.0;
-            const double renderBpm = jmax (1.0, mPM.getGlobalTempo());
-            double durSec         = pat2.bars * 4.0 * (60.0 / renderBpm) + tailSec;
-            int totalSamples      = (int)(durSec * kSR);
+            // Same format defaults this path always used (44.1k / 24-bit); it
+            // now shares the song render's harness, progress window and cancel
+            // instead of blocking the message thread with its own loop.
+            // The old fixed 2 s tail becomes Tail::Included, which renders until
+            // the sound actually decays -- strictly better than guessing, and it
+            // stops truncating patterns that end on a long reverb.
+            RenderOptions opts;
+            opts.scope        = RenderOptions::Scope::Pattern;
+            opts.tail         = RenderOptions::Tail::Included;
+            opts.patternIndex = patternIndex;
+            opts.format       = RenderOptions::Format::Wav;
+            opts.sampleRate   = 44100.0;
+            opts.bitDepth     = 24;
+            opts.destination  = dest;
 
-            VibeSynthProcessor renderProc;
-            renderProc.setPatternManager(&mPM);
-            renderProc.prepareToPlay(kSR, kBlk);
-            { MemoryBlock state; mProcessor.getStateInformation(state);
-              renderProc.setStateInformation(state.getData(), (int)state.getSize()); }
-            mPM.setCurrentPattern(patternIndex);
-
-            struct OfflineHead : public AudioPlayHead {
-                double ppq{0.0}, bpm, sr;
-                OfflineHead(double b2, double s) : bpm(b2), sr(s) {}
-                Optional<PositionInfo> getPosition() const override {
-                    PositionInfo pi; pi.setBpm(bpm); pi.setPpqPosition(ppq);
-                    pi.setIsPlaying(true); pi.setIsRecording(false);
-                    pi.setTimeInSeconds(ppq * 60.0 / jmax(1.0, bpm)); return pi;
-                }
-                void advance(int n) { ppq += (n / sr) * (bpm / 60.0); }
-            } head(renderBpm, kSR);
-            renderProc.setPlayHead(&head);
-
-            WavAudioFormat fmt;
-            auto os = dest.createOutputStream();
-            if (!os) return;
-            std::unique_ptr<AudioFormatWriter> writer(
-                fmt.createWriterFor(os.release(), kSR, 2, 24, {}, 0));
-            if (!writer) return;
-
-            AudioBuffer<float> buf(2, kBlk);
-            MidiBuffer midi;
-            int remaining = totalSamples;
-            while (remaining > 0) {
-                int chunk = jmin(kBlk, remaining);
-                buf.setSize(2, chunk, false, false, true); buf.clear(); midi.clear();
-                renderProc.processBlock(buf, midi);
-                head.advance(chunk);
-                writer->writeFromAudioSampleBuffer(buf, 0, chunk);
-                remaining -= chunk;
-            }
+            runExportWithProgress (opts);
         });
 }
 

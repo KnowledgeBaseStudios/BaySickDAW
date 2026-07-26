@@ -1,4 +1,5 @@
 #include "BaySickGuitarsProcessor.h"
+#include "../MissingFileReport.h"   // QA-Export Task 5
 #include "sfizz.hpp"
 #include <functional>
 #include <map>
@@ -682,6 +683,10 @@ void BaySickGuitarsProcessor::setStateInformation (const void* data, int sz)
         const juce::File kit (kitNode.getProperty ("path").toString());
         if (kit.existsAsFile())
             loadKit (kit);
+        else
+            // QA-Export Task 5: a missing kit used to be skipped in silence, so
+            // the tab came back looking normal and made no sound.
+            MissingFileReport::add ("Guitar kit", kit.getFullPathName());
     }
 
     if (auto apvtsState = root.getChildWithName (apvts.state.getType()); apvtsState.isValid())

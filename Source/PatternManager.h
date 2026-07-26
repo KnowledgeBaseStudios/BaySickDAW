@@ -598,6 +598,18 @@ public:
     int               getNumBlocks() const { return (int)mArrangement.size(); }
     int               getTotalArrangementBars() const;
 
+    // QA-Export: exact song end in beats -- the furthest block end across EVERY
+    // block type (Pattern / Audio / Automation), using effectiveLengthBeats so a
+    // recorded clip's sub-bar length drives the end rather than a ceil'd bar
+    // count.  Muted blocks still COUNT: mute silences a block, it does not
+    // shorten the song (a lone muted 2-bar block is a 2-bar silent song).
+    //
+    // Shared deliberately: song-mode transport looping and offline export must
+    // stop at the SAME beat, and this was previously inline in StandaloneEditor's
+    // onGetLoopBeats.  Do NOT substitute getTotalArrangementBars() -- that floors
+    // to a 16-bar grid and would render trailing silence or truncate.
+    double            getSongEndBeats() const;
+
     // ── Time markers (D-2, 2026-04-26) ───────────────────────────────────
     int                 getNumTimeMarkers() const { return (int) mTimeMarkers.size(); }
     const TimeMarker&   getTimeMarker (int idx) const { return mTimeMarkers[(size_t) idx]; }

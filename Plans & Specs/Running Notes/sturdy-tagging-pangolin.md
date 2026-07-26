@@ -134,7 +134,7 @@ keep or delete. §B.28 QV-9 verifies it stops growing.
 
 ### 2026-07-25 <HH:MM> PT — QA-Verify (code half) — The founding premise was already void before Task 1 opened: the pedalboard-restore regression died with the 2026-05-05 base64 fix, and the always-on round-trip log showed ONE failing restore in its entire history against 1,150+ clean cycles. What shipped instead is state hygiene (docket 6=B + log A) — the BaySickPedals outer-wrapper / APVTS tag collision broken with a V2 root tag plus one-line legacy load tolerance and a type-derived child lookup; all 13 FX-rack `EffectType` head-block ordinals pinned explicit against silent slot repointing; the always-on Release save/load file logger stripped. Zero behavior change by design, so all nine §B.28 scenarios are regression guards. One plan self-contradiction resolved and one plan bullet turned out to be a false alarm
 
-**Bucket:** Players, Effects. Batch `sturdy-tagging-pangolin`. `blocks:` `<hash>`.
+**Bucket:** Players, Effects. Batch `sturdy-tagging-pangolin`. `blocks:` `c6f5fd61`.
 *(Main Plan §5's QA-Verify entry carries no `**Bucket:**` line at all; §8's bucket table lists
 QA-Verify under **Players** ("per-engine smoke") and **Workflow Polish** ("E-bucket walk"). Workflow
 Polish belongs to the CAMPAIGN half (§E), not this code half — nothing here is workflow polish. The
@@ -214,7 +214,7 @@ row is Jeff's call, per the QA-NativeDialogs precedent.)*
 
 #### Commit(s)
 
-`<hash>` (whole batch — Tasks 1-3 + §B.28 + the QA-ApvtsAutomation hash backfill + held entry + running notes; single batch commit per the bulk-run model). Preceded by QA-ApvtsAutomation `bbb4e639`. Build clean in BOTH configs at every task gate; behavioral verification deferred to the R2 campaign pass against §B.28.
+`c6f5fd61` (whole batch — Tasks 1-3 + §B.28 + the NAM finding's Rule 3 fold into the walrus plan + the G4-close Main Plan edit ledger + the QA-ApvtsAutomation hash backfill + held entry + running notes; 8 files, +330/-59; single batch commit per the bulk-run model). Preceded by QA-ApvtsAutomation `bbb4e639`. Build clean in BOTH configs at every task gate; behavioral verification deferred to the R2 campaign pass against §B.28.
 
 #### Next action
 

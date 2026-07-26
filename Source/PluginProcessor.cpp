@@ -2,6 +2,7 @@
 #include "TempoMapRead.h"   // QA-TempoMap: stepped tempo timeline (standalone publishes; VST falls back)
 #include "TsMapRead.h"      // QA-G Task 6: stepped time-signature timeline (PatternManager publishes)
 #include "G3PlayheadDiag.h" // [G3 BAR1] smoke General-1 dropout reading (Debug-only)
+#include "MissingFileReport.h" // QA-Export Task 5: missing external-file collector
 
 // QA-Ec x QA-TempoMap seam: audio-clip block boundaries are BEAT-authored, so
 // with a published timeline their sample positions must resolve through it -
@@ -5207,6 +5208,29 @@ void VibeSynthProcessor::deserializeProject (const juce::XmlElement& root)
 
     // QA-Ef (2026-05-22): rebuild complete -- lower the shield so audio resumes.
     setProjectLoadInProgress (false);
+
+    // QA-Export Task 5: engines that could not find an external file (NAM
+    // capture, sfizz kit) recorded it rather than skipping in silence.  Report
+    // once, here, now that every engine has finished restoring -- warning per
+    // engine would mean a dialog stack on a project with several gone missing.
+    if (! MissingFileReport::isEmpty())
+    {
+        auto entries = MissingFileReport::drain();
+        juce::String msg = "This project refers to files that are no longer where they were saved.\n"
+                           "The affected parts loaded WITHOUT them and will not make sound:\n\n";
+        const int shown = juce::jmin (12, (int) entries.size());
+        for (int i = 0; i < shown; ++i)
+            msg << "  " << entries[(size_t) i].what << ": " << entries[(size_t) i].path << "\n";
+        if ((int) entries.size() > shown)
+            msg << "  ...and " << ((int) entries.size() - shown) << " more\n";
+        msg << "\nRe-pick them on the relevant tab, or put the files back.";
+
+        juce::MessageManager::callAsync ([msg]
+        {
+            juce::AlertWindow::showMessageBoxAsync (
+                juce::MessageBoxIconType::WarningIcon, "Missing files", msg, "OK");
+        });
+    }
 }
 
 // 5F-4b B7 / QA-Ef #4 (2026-05-22): scan a saved-file state tree for

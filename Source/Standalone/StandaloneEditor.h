@@ -319,6 +319,10 @@ private:
     void doFileSave();
     void doFileSaveAs();
     void doFileRestoreBackup();
+    // QA-Export: settings dialog -> save chooser -> BuilderPage::runExportWithProgress.
+    void doExportAudio();
+    // QA-Export: zip-or-folder + scope dialog -> ProjectBundler.
+    void doExportProjectBundle();
     // Prompts the user for a project name.  Shown the first time they try to
     // save (explicit Save or - later in P4 - a Builder audio drop) when no
     // project folder exists yet.  Returns true if a project was created.

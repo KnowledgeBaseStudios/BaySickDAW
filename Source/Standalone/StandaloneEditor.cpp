@@ -4,6 +4,7 @@
 #include "../PatternManager.h"
 #include "../ProjectManager.h"
 #include "ProjectBrowserWindow.h"
+#include "ProjectBundler.h"   // QA-Export: bundle walker + writer
 #include "../SampleLibrary.h"
 #include "LayersPage.h"
 #include "BassPage.h"
@@ -996,19 +997,12 @@ StandaloneEditor::StandaloneEditor(VibeSynthProcessor& p, StandalonePlayHead& ph
             // end of the song.  Also uses `effectiveLengthBeats` so recorded
             // audio clips' sub-bar exact length drives song end instead of
             // a ceil'd bar count.
-            double songEnd = 0.0;
-            if (mPM)
-            {
-                // QA-H Task 8 (#6): muted blocks still COUNT toward song
-                // length - mute silences a block, it does not shorten the
-                // song (a lone muted 2-bar block = a 2-bar silent song).
-                for (int i = 0; i < mPM->getNumBlocks(); ++i)
-                {
-                    const auto& blk = mPM->getBlock(i);
-                    const double blkEnd = effectiveStartBeats (blk) + effectiveLengthBeats (blk);
-                    if (blkEnd > songEnd) songEnd = blkEnd;
-                }
-            }
+            // QA-Export: moved into PatternManager::getSongEndBeats() so offline
+            // export stops at the SAME beat this transport loops at -- two copies
+            // of this math would drift.  Semantics unchanged, including QA-H Task
+            // 8 (#6): muted blocks still COUNT toward song length (mute silences a
+            // block, it does not shorten the song).
+            const double songEnd = mPM ? mPM->getSongEndBeats() : 0.0;
             // No blocks → honor loop toggle. ON = 1-bar audition loop;
             // OFF = no wrap (playhead advances freely; no auto-stop since
             // there's no song end to detect).
@@ -7777,6 +7771,7 @@ bool StandaloneEditor::perform (const InvocationInfo& info)
         case BSCommands::cmdFileOpen:   doFileOpen();   return true;
         case BSCommands::cmdFileSave:   doFileSave();   return true;
         case BSCommands::cmdFileSaveAs: doFileSaveAs(); return true;
+        case BSCommands::cmdExportAudio: doExportAudio(); return true;
 
         // ── Pattern navigation (Phase B-2) ──────────────────────────────
         case BSCommands::cmdRenameActivePattern: showRenamePatternDialog(); return true;
@@ -9595,12 +9590,11 @@ juce::PopupMenu StandaloneEditor::getMenuForIndex(int menuIndex, const juce::Str
         m.addSeparator();
         m.addItem(107, "Import Audio...");
         m.addSeparator();
-        {
-            juce::PopupMenu exportSub;
-            exportSub.addItem(120, "Export as WAV...");
-            exportSub.addItem(121, "Export as MP3...");
-            m.addSubMenu("Export", exportSub);
-        }
+        // QA-Export: the old WAV/MP3 submenu (ids 120/121) had NO dispatch cases
+        // -- both were silent no-ops.  One item now, format chosen in the dialog;
+        // id 120 reused, 121 retired.
+        m.addItem(120, "Export Audio...");
+        m.addItem(122, "Export Project Bundle...");
         break;
 
     case 1: // Edit
@@ -9675,7 +9669,7 @@ juce::PopupMenu StandaloneEditor::getMenuForIndex(int menuIndex, const juce::Str
         m.addItem(603, "Key Binds...");
         m.addItem(604, "Rusty Drums Map...");
         m.addSeparator();
-        m.addItem(602, "About BaySickDAW v1.9");
+        m.addItem(602, "About BaySickDAW v1.0");
         break;
     }
 
@@ -9690,6 +9684,8 @@ void StandaloneEditor::menuItemSelected(int id, int)
     case 101: doFileNew();     break;
     case 103: doFileOpen();    break;
     case 110: doFileQuickOpen(); break;
+    case 120: doExportAudio(); break;
+    case 122: doExportProjectBundle(); break;
     case 104: doFileSave();    break;
     case 105: doFileSaveAs();  break;
     case 106: saveTemplateAs(); break;                      // 2026-04-26
@@ -9811,11 +9807,16 @@ void StandaloneEditor::menuItemSelected(int id, int)
 
     case 602:
         juce::AlertWindow::showMessageBoxAsync(
-            juce::MessageBoxIconType::InfoIcon, "BaySickDAW v1.9",
-            "BaySickDAW v1.9 - Phase 1 build\n"
+            juce::MessageBoxIconType::InfoIcon, "BaySickDAW v1.0",
+            "BaySickDAW v1.0\n"
             "Built with JUCE 7  |  (c) KnowledgeBase Studios\n\n"
+            // QA-Export (2026-07-25): LAME added here because the LGPL wants the
+            // use disclosed somewhere the user can see.  This list is INCOMPLETE
+            // -- several other vendored libs are unlisted; QA-LegalReview owns the
+            // full audit (see its Main Plan entry).
             "Powered by:\n"
-            "  - sfizz (BSD 2-Clause) - SFZ player engine",
+            "  - sfizz (BSD 2-Clause) - SFZ player engine\n"
+            "  - LAME (LGPL) - MP3 encoding",
             "OK");
         break;
 
@@ -10495,6 +10496,218 @@ void StandaloneEditor::doFileOpen()
             refreshWindowTitle();
         });
     });   // close confirmDiscardChanges continuation
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// QA-Export Task 3 -- one dialog for every format.
+//
+// Settings first, destination second: the file extension follows the chosen
+// format, so asking for the filename before the format would let the user pick
+// "song.wav" and then export an MP3 into it.
+// ─────────────────────────────────────────────────────────────────────────────
+void StandaloneEditor::doExportAudio()
+{
+    if (mBuilderPage == nullptr) return;
+
+    const bool haveSelection = mBuilderPage->hasTimeSelection();
+
+    auto* w = new juce::AlertWindow ("Export Audio", {}, juce::MessageBoxIconType::NoIcon);
+
+    w->addComboBox ("sel",    { "Full Arrangement", "Selected Section" }, "Selection");
+    w->addComboBox ("tail",   { "Included", "Cut" }, "Tail");
+    w->addComboBox ("format", { "WAV", "OGG", "MP3" }, "Format");
+    w->addComboBox ("qual",   { "-" }, "Quality");
+    w->addComboBox ("srate",  { "44100 Hz", "48000 Hz" }, "Sample rate");
+
+    // "Selected Section" is meaningless with nothing selected on the ruler, so
+    // it is disabled rather than silently falling back to the whole song.
+    if (auto* c = w->getComboBoxComponent ("sel"))
+        if (! haveSelection)
+            c->setItemEnabled (2, false);   // 1-based item id
+
+    // One quality dropdown whose contents follow the format, instead of three
+    // dropdowns where two are always irrelevant.
+    auto repopulateQuality = [w]
+    {
+        auto* fmt  = w->getComboBoxComponent ("format");
+        auto* qual = w->getComboBoxComponent ("qual");
+        if (fmt == nullptr || qual == nullptr) return;
+
+        const int f = fmt->getSelectedItemIndex();
+        qual->clear (juce::dontSendNotification);
+
+        if (f == 1)      qual->addItemList ({ "Low", "Medium", "High", "Highest" }, 1);
+        else if (f == 2) qual->addItemList ({ "128 kbps", "192 kbps", "256 kbps", "320 kbps" }, 1);
+        else             qual->addItemList ({ "16-bit", "24-bit", "32-bit float" }, 1);
+
+        qual->setSelectedItemIndex (f == 0 ? 1 : 2, juce::dontSendNotification);
+    };
+
+    if (auto* fmt = w->getComboBoxComponent ("format"))
+        fmt->onChange = repopulateQuality;
+    repopulateQuality();
+
+    w->addButton ("Export", 1, juce::KeyPress (juce::KeyPress::returnKey));
+    w->addButton ("Cancel", 0, juce::KeyPress (juce::KeyPress::escapeKey));
+
+    w->enterModalState (true, juce::ModalCallbackFunction::create (
+        [this, w] (int result)
+        {
+            if (result != 1 || mBuilderPage == nullptr) return;
+
+            BuilderPage::RenderOptions opts;
+
+            const int selIdx = w->getComboBoxComponent ("sel")->getSelectedItemIndex();
+            if (selIdx == 1 && mBuilderPage->hasTimeSelection())
+            {
+                opts.scope = BuilderPage::RenderOptions::Scope::Section;
+                // Ruler selection is in BARS; the render works in beats.
+                opts.startBeats = (double) mBuilderPage->getTimeSelStartBars() * 4.0;
+                opts.endBeats   = (double) mBuilderPage->getTimeSelEndBars()   * 4.0;
+            }
+            else
+            {
+                opts.scope = BuilderPage::RenderOptions::Scope::Song;
+            }
+
+            opts.tail = w->getComboBoxComponent ("tail")->getSelectedItemIndex() == 1
+                      ? BuilderPage::RenderOptions::Tail::Cut
+                      : BuilderPage::RenderOptions::Tail::Included;
+
+            const int fmtIdx = w->getComboBoxComponent ("format")->getSelectedItemIndex();
+            opts.format = fmtIdx == 1 ? BuilderPage::RenderOptions::Format::Ogg
+                        : fmtIdx == 2 ? BuilderPage::RenderOptions::Format::Mp3
+                                      : BuilderPage::RenderOptions::Format::Wav;
+
+            opts.sampleRate = w->getComboBoxComponent ("srate")->getSelectedItemIndex() == 1
+                            ? 48000.0 : 44100.0;
+
+            // One control, read three ways depending on format.
+            const int qIdx = juce::jlimit (0, 3,
+                w->getComboBoxComponent ("qual")->getSelectedItemIndex());
+
+            static constexpr int kDepths[] = { 16, 24, 32 };
+            static constexpr int kOggQ[]   = { 3, 5, 7, 9 };      // JUCE OGG takes a quality INDEX
+            static constexpr int kMp3Br[]  = { 128, 192, 256, 320 };
+
+            if (fmtIdx == 1)      opts.oggQuality = kOggQ[qIdx];
+            else if (fmtIdx == 2) opts.mp3Kbps    = kMp3Br[qIdx];
+            else                  opts.bitDepth   = kDepths[juce::jlimit (0, 2, qIdx)];
+
+            const juce::String ext = opts.format == BuilderPage::RenderOptions::Format::Ogg ? ".ogg"
+                                   : opts.format == BuilderPage::RenderOptions::Format::Mp3 ? ".mp3"
+                                                                                            : ".wav";
+            juce::String base = mProjectManager ? mProjectManager->getCurrentName() : juce::String();
+            if (base.isEmpty()) base = "Song";
+
+            auto chooser = std::make_shared<juce::FileChooser> (
+                "Export Audio",
+                juce::File::getSpecialLocation (juce::File::userMusicDirectory)
+                    .getChildFile (base.replaceCharacter (' ', '_') + ext),
+                "*" + ext);
+
+            chooser->launchAsync (
+                juce::FileBrowserComponent::saveMode | juce::FileBrowserComponent::canSelectFiles,
+                [this, opts, chooser] (const juce::FileChooser& fc) mutable
+                {
+                    auto dest = fc.getResult();
+                    if (dest == juce::File() || mBuilderPage == nullptr) return;
+                    opts.destination = dest;
+                    mBuilderPage->runExportWithProgress (opts);
+                });
+        }), true);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// QA-Export Task 4 -- project bundle.  Walker + writer live in ProjectBundler
+// so QA-ProjectSave's "Pack Project" reuses them rather than growing a copy.
+// ─────────────────────────────────────────────────────────────────────────────
+void StandaloneEditor::doExportProjectBundle()
+{
+    const juce::File projectFolder = mProcessor.getCurrentProjectFolder();
+    if (projectFolder == juce::File() || ! projectFolder.isDirectory())
+    {
+        juce::AlertWindow::showMessageBoxAsync (
+            juce::MessageBoxIconType::InfoIcon, "Export Project Bundle",
+            "Save the project first - there is nothing on disk to bundle yet.", "OK");
+        return;
+    }
+
+    auto* w = new juce::AlertWindow ("Export Project Bundle", {},
+                                     juce::MessageBoxIconType::NoIcon);
+
+    w->addComboBox ("mode",  { "Single .zip file", "Plain folder" }, "Bundle as");
+    w->addComboBox ("scope", { "References (smaller)", "Self-contained (includes Core Library)" },
+                    "Contents");
+
+    w->addButton ("Export", 1, juce::KeyPress (juce::KeyPress::returnKey));
+    w->addButton ("Cancel", 0, juce::KeyPress (juce::KeyPress::escapeKey));
+
+    w->enterModalState (true, juce::ModalCallbackFunction::create (
+        [this, w, projectFolder] (int result)
+        {
+            if (result != 1) return;
+
+            const bool asZip = w->getComboBoxComponent ("mode")->getSelectedItemIndex() == 0;
+            const auto scope = w->getComboBoxComponent ("scope")->getSelectedItemIndex() == 1
+                             ? ProjectBundler::Scope::SelfContained
+                             : ProjectBundler::Scope::References;
+
+            const juce::String name = projectFolder.getFileName();
+            auto suggested = juce::File::getSpecialLocation (juce::File::userDocumentsDirectory)
+                                 .getChildFile (name + (asZip ? ".zip" : " Bundle"));
+
+            auto chooser = std::make_shared<juce::FileChooser> (
+                asZip ? "Save project bundle" : "Choose a folder for the bundle",
+                suggested, asZip ? "*.zip" : "*");
+
+            const int flags = asZip
+                ? (juce::FileBrowserComponent::saveMode | juce::FileBrowserComponent::canSelectFiles)
+                : (juce::FileBrowserComponent::saveMode | juce::FileBrowserComponent::canSelectDirectories);
+
+            chooser->launchAsync (flags,
+                [this, chooser, projectFolder, asZip, scope] (const juce::FileChooser& fc)
+                {
+                    auto dest = fc.getResult();
+                    if (dest == juce::File()) return;
+
+                    if (mPM == nullptr) return;
+                    auto refs = ProjectBundler::enumerate (*mPM, mProcessor);
+                    auto res  = ProjectBundler::write (
+                        refs, projectFolder, dest,
+                        asZip ? ProjectBundler::Mode::Zip : ProjectBundler::Mode::Folder,
+                        scope);
+
+                    if (! res.ok)
+                    {
+                        juce::AlertWindow::showMessageBoxAsync (
+                            juce::MessageBoxIconType::WarningIcon,
+                            "Export Project Bundle", res.error, "OK");
+                        return;
+                    }
+
+                    // Missing files are REPORTED, never silently dropped -- a
+                    // bundle that quietly omits samples looks fine until it is
+                    // opened somewhere else.
+                    juce::String msg = "Bundle written to:\n" + dest.getFullPathName()
+                                     + "\n\nExtra files copied: " + juce::String (res.filesCopied);
+                    if (! res.missing.isEmpty())
+                    {
+                        msg << "\n\nWARNING - " << res.missing.size()
+                            << " referenced file(s) could not be found and are NOT in the bundle:\n";
+                        const int shown = juce::jmin (10, (int) res.missing.size());
+                        for (int i = 0; i < shown; ++i)
+                            msg << "  " << res.missing[i] << "\n";
+                        if (res.missing.size() > 10)
+                            msg << "  ...and " << (res.missing.size() - 10) << " more\n";
+                    }
+
+                    juce::AlertWindow::showMessageBoxAsync (
+                        res.missing.isEmpty() ? juce::MessageBoxIconType::InfoIcon
+                                              : juce::MessageBoxIconType::WarningIcon,
+                        "Export Project Bundle", msg, "OK");
+                });
+        }), true);
 }
 
 void StandaloneEditor::doFileQuickOpen()

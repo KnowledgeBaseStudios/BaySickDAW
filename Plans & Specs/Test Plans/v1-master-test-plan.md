@@ -1817,7 +1817,7 @@ with pedals loaded, one Vox tab, and a saved project from BEFORE this batch.
 
 ### §B.28 — QA-Verify code half (BaySickPedals state hygiene: tag disambiguation, enum pinning, log strip)
 
-`blocks:` `<hash>` (QA-Verify). Debug exe FIRST (screenshot any jassert), then
+`blocks:` `c6f5fd61` (QA-Verify). Debug exe FIRST (screenshot any jassert), then
 Release — mark each scenario `D:` and `R:`.
 
 **Scope note.** The batch's founding premise was already void before it started: the
@@ -1861,6 +1861,99 @@ and an existing project), not freshly-made ones.
       then do a session of pedal edits plus several preset saves/loads. The file has NOT grown.
       (The existing file is left on disk deliberately — delete it whenever you like.)
       `D:__ R:__` notes:
+
+### §B.29 — QA-Export (song-mode audio export WAV/OGG/MP3 + project bundle + missing-file visibility)
+
+`blocks:` `<hash>` (QA-Export). Debug exe FIRST (screenshot any jassert), then
+Release — mark each scenario `D:` and `R:`.
+
+**Scope note.** Export did not exist before this batch: `doExport()` was a dead stub and the File
+menu's "Export as WAV/MP3" items had no dispatch cases at all — both were silent no-ops. Almost
+everything here is NEW capability, so it needs listening to, not just clicking. Two items are
+regression guards (XP-12, XP-13). The dialog shape (Selection / Tail / Format / one quality
+dropdown) and the decay-driven tail are Jeff's spec, given mid-task.
+
+Setup: a real multi-pattern song with drums, a melodic part, at least one arrangement audio clip,
+sends and a master chain — plus something that ends on a long reverb tail. Also have one project
+whose samples you can deliberately move.
+
+- [ ] **XP-1 — MUST-PASS: WAV song export matches what you hear.** File > Export Audio (or Ctrl+R),
+      Full Arrangement, Tail Included, WAV / 24-bit / 44.1k. Play the result in an external player:
+      patterns, drums, arrangement clips, sends and master chain are ALL present and it sounds like
+      live playback. Arrangement clips are the specific risk — a fresh render processor has no
+      editor to publish its clip snapshot, so if that wiring is wrong the clips are simply SILENT
+      while everything else sounds right.  `D:__ R:__` notes:
+- [ ] **XP-2 — OGG and MP3 both play.** Same song to OGG (High) and MP3 (256 kbps). Both open in an
+      external player, full length, no truncation, no garbage at the end. MP3 is the first real use
+      of the vendored LAME encoder — nothing has encoded an MP3 before this.  `D:__ R:__` notes:
+- [ ] **XP-3 — MP3 duration and seeking are correct.** In the external player, the MP3's reported
+      length matches the WAV, and dragging the scrub bar lands where it should. This specifically
+      tests the Xing/LAME header written after the stream closes; without it the file still plays
+      but duration and seeking are wrong.  `D:__ R:__` notes:
+- [ ] **XP-4 — MUST-PASS: Tail Included captures the whole decay.** Export a song ending on a long
+      reverb with Tail = Included. The file keeps going until the reverb has actually died — not a
+      fixed couple of seconds. Then export the same song with Tail = Cut: it stops dead at the end
+      of the last block. Compare the two lengths.  `D:__ R:__` notes:
+- [ ] **XP-5 — the tail does not cut the song early.** Export a song that has a deliberate silent
+      gap in the middle (or a very quiet intro). The export does NOT stop at that gap — silence is
+      only allowed to end the render AFTER the last block.  `D:__ R:__` notes:
+- [ ] **XP-6 — MUST-PASS: Selected Section exports the right music.** Select a range on the Builder
+      ruler that does NOT start at bar 1. Export with Selection = Selected Section. The file
+      contains that range's music — not the song from the beginning. Getting this wrong is subtle:
+      the file will be the right LENGTH but the wrong CONTENT.  `D:__ R:__` notes:
+- [ ] **XP-7 — Selected Section is disabled with no selection.** Clear the ruler selection, open
+      Export Audio: "Selected Section" is greyed out and cannot be chosen.  `D:__ R:__` notes:
+- [ ] **XP-8 — the quality dropdown follows the format.** In the dialog, switch Format between WAV
+      / OGG / MP3: the single Quality dropdown swaps between bit depths, quality steps and
+      bitrates. One control, always relevant.  `D:__ R:__` notes:
+- [ ] **XP-9 — Cancel leaves nothing behind.** Start a long export, hit Cancel on the progress
+      window: no partial file remains on disk, and the app stays responsive.  `D:__ R:__` notes:
+- [ ] **XP-10 — 48 kHz export is in tune and in time.** Export at 48000 Hz and play it back. It
+      must not be pitched or time-skewed relative to the 44.1k export. This is the sample-rate
+      domain conversion in the offline clock; if it is wrong on a project WITH tempo changes the
+      timing drifts progressively.  `D:__ R:__` notes:
+- [ ] **XP-11 — tempo changes are honored.** On a song with at least one tempo change on the ruler,
+      export and compare against live playback — the tempo change lands at the same musical spot,
+      and nothing drifts after it.  `D:__ R:__` notes:
+- [ ] **XP-12 — REGRESSION: pattern render still works, and no longer freezes the UI.** Right-click
+      a pattern in the Browser > Render to WAV. It renders correctly AND shows a progress window
+      with a working Cancel (it used to block the message thread). Its tail now runs to decay
+      rather than a hard 2 seconds.  `D:__ R:__` notes:
+- [ ] **XP-13 — REGRESSION: transport loop end is unchanged.** Song-mode playback still loops at
+      the same point it always did. The song-end calculation moved into a shared helper used by
+      both the transport and the exporter — if it drifted, playback looping is where it shows.
+      `D:__ R:__` notes:
+- [ ] **XP-14 — Ctrl+R opens Export Audio and does not disturb recording.** Ctrl+R opens the export
+      dialog. Bare R still toggles record arm. Check from several pages — this codebase has prior
+      form with key handlers intercepting before the command manager sees them.
+      `D:__ R:__` notes:
+- [ ] **XP-15 — project bundle as .zip.** File > Export Project Bundle, single .zip, References.
+      The zip contains the project plus a Samples folder. Extract it somewhere else, open the
+      project, and it plays with its audio intact.  `D:__ R:__` notes:
+- [ ] **XP-16 — bundle as folder, self-contained.** Same but plain folder + Self-contained. Core
+      Library samples are copied in as well, so the bundle works on a machine without the same
+      factory content.  `D:__ R:__` notes:
+- [ ] **XP-17 — MUST-PASS: a bundle never hides missing files.** Deliberately move or rename a
+      sample the project uses, then export a bundle. The completion dialog WARNS and names the
+      missing file. A bundle that quietly omits samples looks fine until it is opened elsewhere.
+      `D:__ R:__` notes:
+- [ ] **XP-18 — MUST-PASS: missing engine files are announced on project load.** Load a NAM capture
+      into a pedal and save. Move the `.nam` file. Reopen the project: a "Missing files" dialog
+      names it, and the pedal shows the capture name with **(missing)** rather than presenting as
+      loaded. Repeat with a Guitars / Basses / Rusty Drums kit — same behaviour. Before this batch
+      all four failed in total silence.  `D:__ R:__` notes:
+- [ ] **XP-19 — one dialog, not several.** Break TWO different engine files (say a NAM capture and a
+      guitar kit) in the same project, reload: a SINGLE dialog lists both, rather than a stack.
+      `D:__ R:__` notes:
+- [ ] **XP-20 — MUST-PASS: NAM/IR mic IRs report too.** Load a user IR into NAM/IR Mic Sim (and one
+      into Mic B), save, move the IR file, reopen: the missing-files dialog names it as "Mic A user
+      IR" / "Mic B user IR". This path had FOUR silent sites — Mic A and Mic B, each in both the
+      state-apply and the project-load path — and the project-load one is what you actually hit.
+      `D:__ R:__` notes:
+- [ ] **XP-21 — an unreadable IR is reported differently from a missing one.** Point a mic IR at a
+      file that exists but is not a valid IR (rename a .txt to .wav), reload: it reports as
+      "(failed to load)" rather than as missing. Previously the error was captured and discarded, so
+      a corrupt IR failed in total silence even though the file was right there.  `D:__ R:__` notes:
 
 ## §C — Deferred re-verify ledger
 

@@ -98,6 +98,13 @@ namespace
               juce::KeyPress ('S', juce::ModifierKeys::ctrlModifier
                                    | juce::ModifierKeys::shiftModifier, 0) },
 
+            // QA-Export (FSW-065): Ctrl+R.  Verified free before binding -- no
+            // other command uses R with a modifier; bare R stays record-toggle.
+            { cmdExportAudio, Category::General,
+              "Export Audio",
+              "Render the whole arrangement out to an audio file (WAV, OGG or MP3).",
+              juce::KeyPress ('R', juce::ModifierKeys::ctrlModifier, 0) },
+
             // ── Pattern navigation ──────────────────────────────────────────
             { cmdRenameActivePattern, Category::General,
               "Rename Active Pattern",

@@ -1,4 +1,5 @@
 #include "NAMPedalStyleDSP.h"
+#include "../MissingFileReport.h"   // QA-Export Task 5
 #include <NAM/get_dsp.h>
 #include <NAM/dsp.h>
 #include <filesystem>
@@ -76,6 +77,10 @@ void NAMPedalStyleDSP::setOutputDb (float db) { mOutputDb = juce::jlimit (-24.0f
 juce::String NAMPedalStyleDSP::getModelName() const
 {
     if (mModelPath.isEmpty()) return {};
+    // QA-Export Task 5: never present a name we did not actually load -- that
+    // reads as "loaded" while the pedal does no amp modeling at all.
+    if (mModelMissing)
+        return juce::File (mModelPath).getFileNameWithoutExtension() + " (missing)";
     return juce::File (mModelPath).getFileNameWithoutExtension();
 }
 
@@ -270,14 +275,20 @@ void NAMPedalStyleDSP::setStateInformation (const void* data, int sz)
         juce::File f (path);
         if (f.existsAsFile())
         {
+            mModelMissing = false;
             juce::String err;
             loadModel (f, err);
         }
         else
         {
-            // File no longer at saved path; remember it for the editor's UI label
-            // but don't load.  User will need to re-pick.
-            mModelPath = path;
+            // QA-Export Task 5: the path is remembered so the user can see WHICH
+            // capture went missing, but the model is NOT loaded -- so the name is
+            // now flagged missing (getModelName appends a marker) and reported.
+            // Previously this displayed the remembered name with nothing behind
+            // it, so the pedal looked loaded while producing no amp modeling.
+            mModelPath    = path;
+            mModelMissing = true;
+            MissingFileReport::add ("NAM capture", path);
         }
     }
 }

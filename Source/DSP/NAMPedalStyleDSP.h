@@ -79,6 +79,9 @@ private:
     std::atomic<bool>         mSwapPending { false };
     juce::CriticalSection     mLoadLock;
     juce::String              mModelPath;
+    // QA-Export Task 5: true when mModelPath was restored but the file was gone,
+    // so getModelName() can say so instead of implying a loaded capture.
+    bool                      mModelMissing { false };
 
     // Pre-allocated mono buffers for NAM (NAM model expects double-precision mono).
     std::vector<double>       mMonoIn;

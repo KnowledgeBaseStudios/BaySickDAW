@@ -337,6 +337,53 @@ else()
     set(BAYSICK_HAS_RUBBERBAND FALSE)
 endif()
 
+# ── libmp3lame (LGPL) -- MP3 export encoder ──────────────────────────────────
+# QA-Export docket 7=A: vendored source, statically linked (JUCE ships no MP3
+# encoder and its LAME wrapper shells out to a CLI binary we would have to
+# redistribute).  LGPL surface is routed to QA-LegalReview; libs/lame/COPYING is
+# the license text, version is 3.100 release (libs/lame/libmp3lame/version.h).
+#
+# Three source dirs, all required:
+#   libmp3lame/ - the encoder itself.
+#   mpglib/     - the decoder.  lame.c references its entry points even in an
+#                 encode-only build, so omitting it is a link error, not a saving.
+#   libmp3lame/vector/ - SSE via <xmmintrin.h> INTRINSICS (not assembly).  On x64
+#                 SSE is guaranteed, so quantize.c binds init_xrpow_core_sse
+#                 unconditionally (quantize.c:101-104) and dropping this dir is an
+#                 unresolved-external at link.
+# Only libmp3lame/i386/*.nas is real assembly; that needs NASM as a new build
+# dependency and stays out -- the intrinsics path already covers x64.
+set(LAME_DIR "${CMAKE_CURRENT_SOURCE_DIR}/libs/lame")
+if(EXISTS "${LAME_DIR}/include/lame.h")
+    file(GLOB LAME_SOURCES
+        "${LAME_DIR}/libmp3lame/*.c"
+        "${LAME_DIR}/libmp3lame/vector/*.c"
+        "${LAME_DIR}/mpglib/*.c")
+    add_library(BaySickLame STATIC ${LAME_SOURCES})
+    target_include_directories(BaySickLame PUBLIC  "${LAME_DIR}/include")
+    target_include_directories(BaySickLame PRIVATE
+        "${LAME_DIR}" "${LAME_DIR}/libmp3lame" "${LAME_DIR}/mpglib")
+    # We do not run autotools, so there is no generated config.h.  Upstream ships
+    # a pre-made MSVC equivalent (configMS.h) and libs/lame/config.h -- the only
+    # file added to the vendored tree -- forwards to it.  Using upstream's own
+    # config beats hand-rolling a define list: it already supplies STDC_HEADERS,
+    # LAME_LIBRARY_BUILD, the size/limits macros and the MSVC intN_t typedefs.
+    # HAVE_MPGLIB is passed in because configMS.h keys DECODE_ON_THE_FLY off it.
+    target_compile_definitions(BaySickLame PRIVATE HAVE_CONFIG_H HAVE_MPGLIB)
+    if(MSVC)
+        # Upstream C from 1998-2017: signed/unsigned mismatches, unused locals and
+        # POSIX-name deprecations throughout.  Not our code to clean, and warnings
+        # here would drown the project's own.
+        target_compile_options(BaySickLame PRIVATE /W0)
+        target_compile_definitions(BaySickLame PRIVATE _CRT_SECURE_NO_WARNINGS)
+    endif()
+    set(BAYSICK_HAS_LAME TRUE)
+else()
+    message(STATUS "libmp3lame not found at ${LAME_DIR}/include/lame.h"
+                   " -- MP3 export will be disabled.")
+    set(BAYSICK_HAS_LAME FALSE)
+endif()
+
 # Signalsmith Stretch + Linear (MIT) -- header-only, no compiled target.  Stretch's
 # public header (signalsmith-stretch/signalsmith-stretch.h) #includes
 # "signalsmith-linear/stft.h", so BOTH packaged include/ roots go on the consumer
@@ -422,6 +469,8 @@ target_sources(BaySickDAWStandalone PRIVATE
     Source/Standalone/InstrumentPage.cpp
     # Phase 2 — DSP modules
     Source/DSP/AudioClipStreamer.cpp
+    Source/DSP/Mp3Writer.cpp                 # QA-Export (2026-07-25) - libmp3lame front end
+    Source/Standalone/ProjectBundler.cpp     # QA-Export (2026-07-25) - shared with QA-ProjectSave's Pack
     Source/DSP/PhaseVocoder.cpp
     Source/DSP/CompressorDSP.cpp
     Source/DSP/DeEsserDSP.cpp
@@ -622,6 +671,10 @@ endif()
 if(BAYSICK_HAS_RUBBERBAND)
     target_link_libraries(BaySickDAWStandalone PRIVATE BaySickRubberBand)
     target_compile_definitions(BaySickDAWStandalone PRIVATE BAYSICK_HAS_RUBBERBAND=1)
+endif()
+if(BAYSICK_HAS_LAME)
+    target_link_libraries(BaySickDAWStandalone PRIVATE BaySickLame)
+    target_compile_definitions(BaySickDAWStandalone PRIVATE BAYSICK_HAS_LAME=1)
 endif()
 if(BAYSICK_HAS_SIGNALSMITH)
     target_include_directories(BaySickDAWStandalone PRIVATE

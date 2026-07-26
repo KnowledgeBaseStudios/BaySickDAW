@@ -1141,6 +1141,52 @@ public:
     // KeyListener - intercepts key events from the top-level window
     bool keyPressed        (const juce::KeyPress&, juce::Component*) override;
 
+    // ── QA-Export: offline render ────────────────────────────────────────────
+    // One harness, two entries.  renderPatternToWav keeps its old behaviour by
+    // expressing itself over renderToFile with Scope::Pattern.
+    struct RenderOptions
+    {
+        enum class Format { Wav, Ogg, Mp3 };
+        enum class Scope  { Pattern, Song, Section };
+
+        // Tail::Included renders PAST the content end until the sound actually
+        // decays to near-silence, rather than a fixed guess -- a typed "2.0 s"
+        // truncates a long reverb and pads a dry mix.  Tail::Cut stops dead at
+        // the content end.  Applies to Song and Section alike (owner call).
+        enum class Tail { Included, Cut };
+
+        Scope      scope        { Scope::Song };
+        Tail       tail         { Tail::Included };
+        int        patternIndex { -1 };        // Scope::Pattern only
+        double     startBeats   { 0.0 };       // Scope::Section only
+        double     endBeats     { 0.0 };       // Scope::Section only
+        Format     format       { Format::Wav };
+        double     sampleRate   { 44100.0 };
+        int        bitDepth     { 24 };        // WAV only
+        int        oggQuality   { 6 };         // OGG only, 0..10
+        int        mp3Kbps      { 256 };       // MP3 only, CBR
+        juce::File destination;
+    };
+
+    // Tail::Included safety ceiling.  Some content never decays -- a frozen
+    // reverb, a self-oscillating filter, runaway feedback -- and without a cap
+    // the render would run until the disk filled.  This is a MAXIMUM, not a
+    // duration: a normal tail ends when it decays, usually seconds.
+    static constexpr double kMaxTailSeconds = 60.0;
+
+    // Renders synchronously on the CALLING thread -- never call from the message
+    // thread for a full song (that is what runExportWithProgress is for).
+    // `shouldAbort` is polled per block; returning true deletes the partial file.
+    // `onProgress` receives 0..1.  Returns false + fills outErr on failure.
+    bool renderToFile (const RenderOptions& opts,
+                       juce::String& outErr,
+                       std::function<bool()> shouldAbort = {},
+                       std::function<void(double)> onProgress = {});
+
+    // Message-thread entry: runs renderToFile on a background thread behind a
+    // progress window with a working Cancel.
+    void runExportWithProgress (const RenderOptions& opts);
+
     void renderPatternToWav(int patternIndex);
     void setPlayHead(StandalonePlayHead* ph);
     void setUndoContext(const UndoContext& ctx);

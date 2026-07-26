@@ -533,6 +533,14 @@ int PatternManager::getTotalArrangementBars() const
     return juce::jmax(16, maxBar);
 }
 
+double PatternManager::getSongEndBeats() const
+{
+    double songEnd = 0.0;
+    for (const auto& b : mArrangement)
+        songEnd = juce::jmax (songEnd, effectiveStartBeats (b) + effectiveLengthBeats (b));
+    return songEnd;
+}
+
 // ── Time markers (D-2) ──────────────────────────────────────────────────
 void PatternManager::addTimeMarker (int bar, const juce::String& label)
 {
