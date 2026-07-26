@@ -2857,12 +2857,38 @@ namespace
 
     // Predicate: is this parameter id a primary _sendTo or one of the 4
     // additional send destinations (_sendN_to)?
+    //
+    // Called once per registered parameter by every send sweep, so the four
+    // secondary suffixes are built once at first use rather than rebuilt (and
+    // freed) on each call -- with lazily-registered per-strip params the walk
+    // covers thousands of ids.
+    const juce::String& sendSuffix (int n)
+    {
+        static const juce::String suffixes[4] = { "_send0_to", "_send1_to",
+                                                  "_send2_to", "_send3_to" };
+        return suffixes[n];
+    }
+
     bool isSendDestId (const juce::String& id, bool& isPrimary)
     {
         if (id.endsWith ("_sendTo")) { isPrimary = true; return true; }
         for (int n = 0; n < 4; ++n)
-            if (id.endsWith ("_send" + juce::String (n) + "_to")) { isPrimary = false; return true; }
+            if (id.endsWith (sendSuffix (n))) { isPrimary = false; return true; }
         return false;
+    }
+
+    // QA-ProjectSave docket 18 (2026-07-26): which bus strips are permanent
+    // regardless of what routes to them.  Master is terminal and the FX bus is
+    // the default aux parent + a standing send target; the secondary Vox/Inst
+    // buses and the RustyDrums bus carry their own explicit activation flags,
+    // and a just-created "Add Vox Bus" has nothing routed to it yet -- route-
+    // counting those would make the strip the user just asked for not appear.
+    bool isAlwaysVisibleBus (int chId)
+    {
+        using namespace MixerChannelIds;
+        return chId == kMaster   || chId == kFxBus
+            || chId == kVoxBus2  || chId == kInstBus2
+            || chId == kInstBus3 || chId == kRustyDrumsBus;
     }
 
     // Walks every parameter whose id is a send-destination on a strip prefix.
@@ -2907,6 +2933,7 @@ namespace
             writeParamNatural (rp, newVal);
         }
     }
+
 }
 
 void MixerPage::deleteAuxStrip (int idx, int auxChannelId)
@@ -3672,6 +3699,25 @@ void MixerPage::layoutScrollContent()
     // Per-group helper: lay out the bus strip + its members.
     auto laidOutBus = [&](MixerTrackStrip& busStrip, int busChId, juce::Colour busAccent)
     {
+        auto it = buckets.find(busChId);
+        const bool hasMembers = (it != buckets.end() && ! it->second.empty());
+
+        // QA-ProjectSave docket 18 (2026-07-26): an empty bus is hidden and
+        // consumes no width, so its group gap closes instead of leaving a hole.
+        // `hasMembers` is the whole test: buckets are keyed by each EXISTING
+        // strip's _sendTo, so re-pointing a main-out at a bus re-buckets that
+        // strip INTO the bus's group -- for a bus, "something routes here" and
+        // "has members" are the same condition.  (Sends never enter into it;
+        // _sendN_to only ever lands on an aux strip.)
+        //
+        // The flag-gated buses opt out: they are created by explicit user
+        // action and must appear immediately, before anything is routed to them.
+        if (! hasMembers && ! isAlwaysVisibleBus (busChId))
+        {
+            busStrip.setVisible (false);
+            return;
+        }
+        busStrip.setVisible (true);
         busStrip.setBounds(x, 0, busW, stripH);
         busStrip.setAccentColor(busAccent);
         // QA-RustyMeter Task 5 (2026-05-30): wire the collapse arrow (idempotent)
@@ -3680,8 +3726,6 @@ void MixerPage::layoutScrollContent()
         // greyed/disabled when the bus has no members.
         busStrip.onCollapseToggled = [this](int chId) { onBusCollapseToggled(chId); };
         x += busW;
-        auto it = buckets.find(busChId);
-        const bool hasMembers = (it != buckets.end() && ! it->second.empty());
         const bool collapsed  = hasMembers && isBusCollapsed(busChId);
         busStrip.setCollapseEnabled(hasMembers);
         busStrip.setCollapsed(collapsed);

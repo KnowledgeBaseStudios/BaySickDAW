@@ -489,6 +489,11 @@ private:
     // Returns {-1,-1} if the strip isn't found or isn't visible.
     juce::Point<float> getSocketPosition(int channelId) const;
 
+    // QA-ProjectSave docket 18 (2026-07-26): empty bus strips are hidden by
+    // layoutScrollContent straight off its `buckets` map -- see laidOutBus.
+    // Cable sockets and strip hit-testing already reject invisible strips, so
+    // that visibility flag is the only gate needed.
+
     // ── Internal helpers ──────────────────────────────────────────────────────
     void layoutScrollContent();
     // QA-RustyMeter Task 5 (2026-05-30): bus collapse/expand.  isBusCollapsed

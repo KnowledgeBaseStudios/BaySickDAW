@@ -177,12 +177,11 @@ private:
 
     // ── Core helpers ──────────────────────────────────────────────────────────
     void buildDefaultTabs();     // called in ctor: Builder + initial Layers/Bass/Drums
-    // 2026-04-24 File > New reset: adds just the three default Layers / Bass /
-    // Drums tabs.  Split out of buildDefaultTabs so File > New can rebuild
-    // them without also re-adding the system (Mixer / Effects / Builder)
-    // tabs that persist across project changes.
-    void addDefaultDynamicTabs();
-    void addDefaultDrumTab();   // Drums-only default (factored from addDefaultDynamicTabs; kit-recovery)
+    // QA-ProjectSave docket 18 (2026-07-26): addDefaultDynamicTabs /
+    // addDefaultDrumTab removed.  Layers / Bass / Drums no longer get seeded
+    // with one instance each -- they open empty and delete down to zero like
+    // every other tab type, so a saved project or template never carries tabs
+    // the user did not ask for.
     void onAddTabRequest(RibbonTabBar::TabType type);
     void onTabSelected(int tabId);
     void onTabClosed(int tabId);
@@ -211,6 +210,29 @@ private:
     // Drums) tab + rebuild from a <UIState> element.  Safe to call repeatedly.
     void serializeUIState   (juce::XmlElement& root);
     void deserializeUIState (const juce::XmlElement& root);
+    // QA-ProjectSave Task 2 (2026-07-26): the structural half of the UI state,
+    // shared by project save and template save.  A template IS this and nothing
+    // more -- serializeUIState wraps it with the session extras (active tab,
+    // scroll, selection, metronome, VU calibration, song-loop) that a project
+    // skeleton has no business carrying.
+    // QA-ProjectSave Task 3 (2026-07-26): teardown scoped to what the caller
+    // will restore.  v2 templates + project load replace every tab type;
+    // a v1 FACTORY template only restores Layers/Bass/Drums, so it must leave
+    // Clips / Vox / Inst / Rusty alone rather than destroying work it cannot
+    // put back.
+    enum class TabTeardownScope { AllDynamic, LayersBassDrumsOnly };
+    void closeDynamicTabs (TabTeardownScope scope);
+
+    void serializeStructuralUIState  (juce::XmlElement& ui);
+    void serializeTabsInto           (juce::XmlElement& tabs);
+    // QA-ProjectSave Task 5 (2026-07-26, dockets 23/24): after a TEMPLATE's tab
+    // walk, adopt every referenced file that is not already under a stable root
+    // into My Samples and rewrite the reference to point there.  Project saves
+    // do NOT call this -- a project has its own Samples folder, so its refs are
+    // already portable with the folder; a template is one loose XML and has to
+    // carry its dependencies somewhere durable.
+    void adoptTemplateSampleRefs     (juce::XmlElement& tabs);
+    void serializeStripNamesAndOrders(juce::XmlElement& ui);
     void closeAllDynamicTabs();
     std::unique_ptr<juce::Component> createBuilderPage();
     std::unique_ptr<juce::Component> createMixerPage();
@@ -285,7 +307,10 @@ private:
     static juce::File userTemplatesDir();     // <templatesDir>/My Templates
     void showTemplateMenu (juce::Component* anchor);  // popup with Save/Load
     void saveTemplateAs ();                            // prompt + write XML
-    void loadTemplate (const juce::File& templateXml); // tear down + rebuild
+    void loadTemplate (const juce::File& templateXml); // dirty gate -> applyTemplate
+    // The actual teardown + rebuild, past the save prompt.  Never call directly:
+    // loadTemplate owns the unsaved-changes gate for every entry point.
+    void applyTemplate (const juce::File& templateXml);
     // Helper used by loadTemplate to instantiate a layer/bass tab and apply a preset.
     juce::Component* spawnLayerTabFromTemplate (const juce::String& engine,
                                                  const juce::File& presetFile,
@@ -678,6 +703,19 @@ private:
     std::unique_ptr<InstEmptyState> mInstEmptyState;
     void showVoxEmptyState  ();
     void showInstEmptyState ();
+    // QA-ProjectSave docket 18 (2026-07-26): Layers / Bass / Drums reach zero
+    // now, so they need the same placeholder the other three types have had
+    // since G-2/G-4.  One shared component class rather than three near-identical
+    // ones -- they differ only in accent colour and prompt text.
+    std::unique_ptr<EngineEmptyState> mLayersEmptyState;
+    std::unique_ptr<EngineEmptyState> mBassEmptyState;
+    std::unique_ptr<EngineEmptyState> mDrumsEmptyState;
+    void showLayersEmptyState ();
+    void showBassEmptyState   ();
+    void showDrumsEmptyState  ();
+    // Six empty states now, so each show* helper hides the other five through
+    // here rather than naming them one by one.
+    void hideAllEmptyStates ();
     // G-7 (2026-04-29): empty-state hamburger Load Page Preset support.
     // Installs a menu builder on the empty-state page menu bar so users can
     // restore a saved Page Preset which auto-spawns the appropriate tab.

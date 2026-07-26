@@ -1,6 +1,7 @@
 #include "ProjectManager.h"
 #include "PluginProcessor.h"
 #include "ClipDropDiag.h"            // QA-ClipDrop: diagnostic trap (2026-06-02)
+#include "SampleLibrary.h"           // QA-ProjectSave Task 4: source-aware import
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Path helpers
@@ -486,6 +487,19 @@ juce::String ProjectManager::importSample (const juce::File& externalFile)
 {
     if (! hasProject())                { ClipDropDiag::log ("importSample BAIL", "no project open; src=" + externalFile.getFullPathName()); return {}; }
     if (! externalFile.existsAsFile()) { ClipDropDiag::log ("importSample BAIL", "src does not exist; src=" + externalFile.getFullPathName()); return {}; }
+
+    // QA-ProjectSave Task 4 (2026-07-26, marathon 8a): source-aware retention.
+    // A file already living under Core Library or My Samples is reachable from
+    // ANY project on this install, so it is referenced, never copied -- copying
+    // duplicated factory content into every project that touched it.  Only
+    // volatile sources (Downloads, Desktop, a USB stick) still get copied into
+    // <project>/Samples/, which is the case the copy was actually for.
+    // 8b: no migration -- existing per-project copies stay exactly as they are.
+    if (auto stableRef = SampleLibrary::makeStableRef (externalFile); stableRef.isNotEmpty())
+    {
+        ClipDropDiag::log ("importSample OK", "stable root, referenced not copied; ref=" + stableRef);
+        return stableRef;
+    }
 
     auto samplesDir = getSamplesFolder();
     samplesDir.createDirectory();

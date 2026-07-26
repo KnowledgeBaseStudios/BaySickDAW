@@ -90,6 +90,18 @@ public:
     // Non-const because apvts.copyState() + VibeGraph::saveRackStates both
     // require non-const access; conceptually a read-only snapshot.
     void serializeProject  (juce::XmlElement& root);
+    // QA-ProjectSave Task 2 (2026-07-26, docket 15=B): the <Processor> child
+    // alone (APVTS + VibeRackStates), shared with template save.  Carries every
+    // mixer strip's fader/pan/width/routing + each insert's rack and post-rack
+    // EQ -- none of which is in <UIState>'s per-tab engineData.
+    void writeProcessorState (juce::XmlElement& root);
+    // The <Processor> apply half, shared with template load.  Caller owns the
+    // project-load shield and must have run clearAllAuxInserts() first; per-insert
+    // rack states are stashed for applyPendingRackStates once tabs + strips exist.
+    void applyProcessorState (const juce::XmlElement& root);
+    // One-shot warning for external files engines could not find during a
+    // restore.  Call after every engine has finished loading.
+    void reportMissingFilesIfAny();
 
     // Restores everything serializeProject wrote.  Caller is responsible for
     // syncing UI afterwards.  No-op if root is missing the expected children.

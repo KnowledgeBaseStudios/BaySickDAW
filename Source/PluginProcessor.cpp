@@ -3,6 +3,7 @@
 #include "TsMapRead.h"      // QA-G Task 6: stepped time-signature timeline (PatternManager publishes)
 #include "G3PlayheadDiag.h" // [G3 BAR1] smoke General-1 dropout reading (Debug-only)
 #include "MissingFileReport.h" // QA-Export Task 5: missing external-file collector
+#include "SampleLibrary.h"  // QA-ProjectSave Task 4: stable-root reference resolver
 
 // QA-Ec x QA-TempoMap seam: audio-clip block boundaries are BEAT-authored, so
 // with a published timeline their sample positions must resolve through it -
@@ -4943,6 +4944,49 @@ void VibeSynthProcessor::serializeProject (juce::XmlElement& root)
 {
     root.setAttribute ("version", 1);
 
+    writeProcessorState (root);
+
+    // PatternManager - patterns, arrangement, piano-roll notes, libraries,
+    // row mute/solo, drum-enabled flags, full mixer snapshot.
+    if (mPatternManager != nullptr)
+    {
+        auto pmTree = mPatternManager->toValueTree();
+        if (auto pmXml = pmTree.createXml())
+            root.addChildElement (pmXml.release());
+    }
+
+    // QA-Fe2: De-noise profiles (raw + corrector domain per recording base
+    // name) -- standalone-only project data, same placement rule as
+    // PatternManager (not in the VST blob).
+    if (! mDenoiseProfiles.empty())
+    {
+        auto* dn = root.createNewChildElement ("DenoiseProfiles");
+        for (const auto& [base, pair] : mDenoiseProfiles)
+        {
+            auto* e = dn->createNewChildElement ("Profile");
+            e->setAttribute ("base", base);
+            if (pair.first.isValid())  e->setAttribute ("raw", pair.first.toBase64());
+            if (pair.second.isValid()) e->setAttribute ("wet", pair.second.toBase64());
+        }
+    }
+
+    // P1+P2 persistence (2026-04-24): let StandaloneEditor append its tab +
+    // engine state under a <UIState> child.  Callback is null in plugin /
+    // headless contexts - that's fine; the project just omits UI state.
+    if (onSerializeUIState)
+        onSerializeUIState (root);
+}
+
+// QA-ProjectSave Task 2 (2026-07-26, docket 15=B): the <Processor> child on its
+// own, split out of serializeProject so template save emits the identical block.
+//
+// This is what carries every mixer strip's fader / pan / width / mute / solo /
+// polarity / routing + sends, plus each insert's effect rack and post-rack EQ.
+// None of it lives in the per-tab engineData under <UIState> -- that captures
+// only each engine processor's own state -- so a template without this restores
+// tabs and engines onto a defaulted mixer.
+void VibeSynthProcessor::writeProcessorState (juce::XmlElement& root)
+{
     // QA-Ef (2026-05-22, refined after the 100->-1 reset was caught on the
     // Save Diag): for every registered APVTS param that lacks a tree node in
     // apvts.state, manually append a <PARAM> child with its CURRENT live value
@@ -5000,36 +5044,6 @@ void VibeSynthProcessor::serializeProject (juce::XmlElement& root)
     auto* processor = root.createNewChildElement ("Processor");
     if (auto stateXml = state.createXml())
         processor->addChildElement (stateXml.release());
-
-    // PatternManager - patterns, arrangement, piano-roll notes, libraries,
-    // row mute/solo, drum-enabled flags, full mixer snapshot.
-    if (mPatternManager != nullptr)
-    {
-        auto pmTree = mPatternManager->toValueTree();
-        if (auto pmXml = pmTree.createXml())
-            root.addChildElement (pmXml.release());
-    }
-
-    // QA-Fe2: De-noise profiles (raw + corrector domain per recording base
-    // name) -- standalone-only project data, same placement rule as
-    // PatternManager (not in the VST blob).
-    if (! mDenoiseProfiles.empty())
-    {
-        auto* dn = root.createNewChildElement ("DenoiseProfiles");
-        for (const auto& [base, pair] : mDenoiseProfiles)
-        {
-            auto* e = dn->createNewChildElement ("Profile");
-            e->setAttribute ("base", base);
-            if (pair.first.isValid())  e->setAttribute ("raw", pair.first.toBase64());
-            if (pair.second.isValid()) e->setAttribute ("wet", pair.second.toBase64());
-        }
-    }
-
-    // P1+P2 persistence (2026-04-24): let StandaloneEditor append its tab +
-    // engine state under a <UIState> child.  Callback is null in plugin /
-    // headless contexts - that's fine; the project just omits UI state.
-    if (onSerializeUIState)
-        onSerializeUIState (root);
 }
 
 void VibeSynthProcessor::applyPendingRackStates()
@@ -5097,6 +5111,12 @@ juce::File VibeSynthProcessor::getCurrentProjectFolder() const
 juce::File VibeSynthProcessor::resolveProjectFile (const juce::String& storedPath) const
 {
     if (storedPath.isEmpty()) return {};
+    // QA-ProjectSave Task 4 (2026-07-26): stable-root references resolve FIRST,
+    // ahead of the absolute test -- "library:..." / "mysamples:..." are not
+    // absolute paths and would otherwise fall through to the project-relative
+    // branch and resolve to nonsense inside the project folder.
+    if (SampleLibrary::isStableRef (storedPath))
+        return SampleLibrary::resolveStableRef (storedPath);
     // Absolute paths pass through (pre-P4 projects stored absolute audio paths).
     if (juce::File::isAbsolutePath (storedPath)) return juce::File (storedPath);
     // Relative paths - resolve against current project folder.
@@ -5133,6 +5153,55 @@ void VibeSynthProcessor::deserializeProject (const juce::XmlElement& root)
     // restored state.
     clearAllAuxInserts();
 
+    applyProcessorState (root);
+
+    if (onLoadProgress) onLoadProgress ("Restoring patterns...");
+
+    // PatternManager - top-level child named "PatternManager".
+    if (mPatternManager != nullptr)
+    {
+        if (auto* pmXml = root.getChildByName ("PatternManager"))
+        {
+            auto pmTree = juce::ValueTree::fromXml (*pmXml);
+            if (pmTree.isValid())
+                mPatternManager->fromValueTree (pmTree);
+        }
+    }
+
+    // QA-Fe2: De-noise profiles.  Cleared unconditionally so a project
+    // without the node never inherits the previous project's rooms.
+    mDenoiseProfiles.clear();
+    if (auto* dn = root.getChildByName ("DenoiseProfiles"))
+        for (auto* e : dn->getChildWithTagNameIterator ("Profile"))
+        {
+            const juce::String base = e->getStringAttribute ("base");
+            if (base.isEmpty()) continue;
+            mDenoiseProfiles[base] = {
+                DenoiseProfile::fromBase64 (e->getStringAttribute ("raw")),
+                DenoiseProfile::fromBase64 (e->getStringAttribute ("wet")) };
+        }
+
+    // P1+P2 persistence: fire after main state is loaded so the editor's
+    // engine-processor creation can inherit any APVTS-driven defaults.
+    if (onDeserializeUIState)
+        onDeserializeUIState (root);
+
+    // QA-Ef (2026-05-22): rebuild complete -- lower the shield so audio resumes.
+    setProjectLoadInProgress (false);
+
+    reportMissingFilesIfAny();
+}
+
+// QA-ProjectSave Task 3 (2026-07-26, docket 15=B): the <Processor> apply on its
+// own, split out of deserializeProject so template load restores the identical
+// state through the identical path.  Caller owns the project-load shield and
+// must have already run clearAllAuxInserts().
+//
+// Pairs with writeProcessorState.  Per-insert rack states are STASHED here and
+// replayed by applyPendingRackStates once the caller has rebuilt tabs + strips,
+// because the InsertNodes they target do not exist yet at this point.
+void VibeSynthProcessor::applyProcessorState (const juce::XmlElement& root)
+{
     // Processor state - first child under <Processor>.
     if (auto* processor = root.getChildByName ("Processor"))
     {
@@ -5174,45 +5243,16 @@ void VibeSynthProcessor::deserializeProject (const juce::XmlElement& root)
             break;   // only one APVTS state child expected
         }
     }
+}
 
-    if (onLoadProgress) onLoadProgress ("Restoring patterns...");
-
-    // PatternManager - top-level child named "PatternManager".
-    if (mPatternManager != nullptr)
-    {
-        if (auto* pmXml = root.getChildByName ("PatternManager"))
-        {
-            auto pmTree = juce::ValueTree::fromXml (*pmXml);
-            if (pmTree.isValid())
-                mPatternManager->fromValueTree (pmTree);
-        }
-    }
-
-    // QA-Fe2: De-noise profiles.  Cleared unconditionally so a project
-    // without the node never inherits the previous project's rooms.
-    mDenoiseProfiles.clear();
-    if (auto* dn = root.getChildByName ("DenoiseProfiles"))
-        for (auto* e : dn->getChildWithTagNameIterator ("Profile"))
-        {
-            const juce::String base = e->getStringAttribute ("base");
-            if (base.isEmpty()) continue;
-            mDenoiseProfiles[base] = {
-                DenoiseProfile::fromBase64 (e->getStringAttribute ("raw")),
-                DenoiseProfile::fromBase64 (e->getStringAttribute ("wet")) };
-        }
-
-    // P1+P2 persistence: fire after main state is loaded so the editor's
-    // engine-processor creation can inherit any APVTS-driven defaults.
-    if (onDeserializeUIState)
-        onDeserializeUIState (root);
-
-    // QA-Ef (2026-05-22): rebuild complete -- lower the shield so audio resumes.
-    setProjectLoadInProgress (false);
-
-    // QA-Export Task 5: engines that could not find an external file (NAM
-    // capture, sfizz kit) recorded it rather than skipping in silence.  Report
-    // once, here, now that every engine has finished restoring -- warning per
-    // engine would mean a dialog stack on a project with several gone missing.
+// QA-Export Task 5: engines that could not find an external file (NAM capture,
+// sfizz kit) recorded it rather than skipping in silence.  Reported once, after
+// every engine has finished restoring -- a warning per engine would mean a
+// dialog stack on a project with several gone missing.
+// QA-ProjectSave Task 3 (2026-07-26): shared with template load, whose engines
+// carry the same external references.
+void VibeSynthProcessor::reportMissingFilesIfAny()
+{
     if (! MissingFileReport::isEmpty())
     {
         auto entries = MissingFileReport::drain();

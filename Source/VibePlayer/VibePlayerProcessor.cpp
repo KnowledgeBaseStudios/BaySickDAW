@@ -1,4 +1,5 @@
 #include "VibePlayerProcessor.h"
+#include "../SampleLibrary.h"   // QA-ProjectSave Task 5: stable-root sample refs
 #include "VibePlayerEditor.h"
 
 VibePlayerProcessor::VibePlayerProcessor (const juce::String& trackId)
@@ -387,7 +388,7 @@ void VibePlayerProcessor::loadSampleFolder (const juce::File& folder, int normal
     mSynth.getManager().loadFolder (folder);
     if (normalizeRoot >= 0) mSynth.getManager().normalizeRootNotes (normalizeRoot);
     apvts.state.setProperty (kLoadKindProp, "folder",                  nullptr);
-    apvts.state.setProperty (kLoadPathProp, folder.getFullPathName(),   nullptr);
+    apvts.state.setProperty (kLoadPathProp, SampleLibrary::refForPersist (folder),  nullptr);
     apvts.state.setProperty (kLoadNormProp, normalizeRoot,              nullptr);
 }
 
@@ -396,7 +397,7 @@ void VibePlayerProcessor::loadSampleSFZ (const juce::File& sfzFile, int normaliz
     mSynth.getManager().loadSFZ (sfzFile);
     if (normalizeRoot >= 0) mSynth.getManager().normalizeRootNotes (normalizeRoot);
     apvts.state.setProperty (kLoadKindProp, "sfz",                      nullptr);
-    apvts.state.setProperty (kLoadPathProp, sfzFile.getFullPathName(),  nullptr);
+    apvts.state.setProperty (kLoadPathProp, SampleLibrary::refForPersist (sfzFile), nullptr);
     apvts.state.setProperty (kLoadNormProp, normalizeRoot,              nullptr);
 }
 
@@ -405,14 +406,14 @@ void VibePlayerProcessor::loadSampleFile (const juce::File& wavFile, int normali
     mSynth.getManager().loadSingleFile (wavFile);
     if (normalizeRoot >= 0) mSynth.getManager().normalizeRootNotes (normalizeRoot);
     apvts.state.setProperty (kLoadKindProp, "file",                     nullptr);
-    apvts.state.setProperty (kLoadPathProp, wavFile.getFullPathName(),  nullptr);
+    apvts.state.setProperty (kLoadPathProp, SampleLibrary::refForPersist (wavFile), nullptr);
     apvts.state.setProperty (kLoadNormProp, normalizeRoot,              nullptr);
 }
 
 juce::File VibePlayerProcessor::getLoadedSampleFile() const
 {
     const auto path = apvts.state.getProperty (kLoadPathProp, juce::String()).toString();
-    return path.isEmpty() ? juce::File() : juce::File (path);
+    return path.isEmpty() ? juce::File() : SampleLibrary::resolvePersistedRef (path);
 }
 
 void VibePlayerProcessor::getStateInformation (juce::MemoryBlock& dest)
@@ -435,7 +436,7 @@ void VibePlayerProcessor::setStateInformation (const void* data, int sz)
         const int  norm = (int) apvts.state.getProperty (kLoadNormProp, -1);
         if (kind.isNotEmpty() && path.isNotEmpty())
         {
-            juce::File f (path);
+            juce::File f = SampleLibrary::resolvePersistedRef (path);
             if (f.exists())
             {
                 if      (kind == "folder") mSynth.getManager().loadFolder     (f);

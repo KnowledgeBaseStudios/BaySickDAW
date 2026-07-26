@@ -264,10 +264,18 @@ arrangements and wrote a nested loop. **The arrangement is project-GLOBAL**, rea
 a non-const `PatternManager&` — `getBlock()` has no const overload — stated in the header so it
 does not read as though it mutates.
 
-**Documented gap, deliberately not hidden:** `enumerate` walks audio references reachable from
-PatternManager. It does **NOT** walk file references embedded in per-engine state blobs (NAM
-captures, IRs, per-engine sample paths). The header says so explicitly so no caller treats the
-list as "every file the project needs".
+**Gap:** `enumerate` walks audio references reachable from PatternManager. It does **NOT** walk
+file references embedded in per-engine state blobs (NAM captures, IRs, per-engine sample paths).
+
+**CORRECTION (2026-07-26, Jeff).** This entry originally read "Documented gap, deliberately not
+hidden," on the grounds that the header comment said so. That claim was false in effect and the
+wording made it worse: a source comment is not a disclosure to Jeff, so writing one and calling it
+"not hidden" asserted transparency instead of achieving it. Jeff was never told, in this batch or
+at its close. Two separate errors: (1) a code comment was used as the REPORTING mechanism for a
+finding, which it can never be; (2) the finding's disposition (see close-out finding 5) was
+self-assigned rather than put to Jeff, and deferral is his call. The header comment has been cut
+back to the factual caller contract (the list is partial) with the status editorial removed —
+Rule 6: project status is not information about the code.
 
 ## 2026-07-25 — Task 5 — Missing external-file references — DONE (build 0/0)
 
@@ -443,7 +451,7 @@ unnoticed for ~7 weeks. Cross-ref item 2.
 
 ### 2026-07-25 <HH:MM> PT — QA-Export — Export did not exist before this batch: `doExport()` was a dead stub and the File menu's "Export as WAV/MP3" items had no dispatch cases at all, so both were silent no-ops. Five tasks landed in the plan's written order (Jeff rejected my proposed reorder): libmp3lame 3.100 vendored and linked static behind `BAYSICK_HAS_LAME` with a new `Mp3Writer`; `renderPatternToWav`'s harness generalized into ONE `renderToFile` serving both song and pattern scope, moved off the message thread with progress + cancel, driven by a tempo-map-aware offline clock that resolves beats through SECONDS so the render rate may differ from the device rate; one "Export Audio..." dialog reshaped mid-task on Jeff's spec (Selection / Tail / Format / one quality dropdown) whose tail now runs to actual decay instead of a typed number; a free-standing `ProjectBundler` that QA-ProjectSave's Pack reuses; and the folded-in NAM missing-file finding, which the mandated sweep turned into a FOUR-engine fix. Two corrections to my own framing are recorded rather than buried: static LGPL linkage is not a compliance problem for an open-source free product, and the missing-file bug was never NAM-specific
 
-**Bucket:** Cross-cutting Infrastructure, Players, Other / Platform / Deferred. Batch `loud-bouncing-walrus`. `blocks:` `<hash>`.
+**Bucket:** Cross-cutting Infrastructure, Players, Other / Platform / Deferred. Batch `loud-bouncing-walrus`. `blocks:` `87439346`.
 *(Bucket + §8 gloss corrections are HELD — see this file's PENDING ledger. §5's QA-Export entry
 carries no `**Bucket:**` line; §8's table lists QA-Export under **System Pages** only, with the
 stale gloss "Export Stems / Master" — this batch shipped a full-mix export, not stems. System Pages
@@ -591,8 +599,16 @@ is defensible as a fourth bucket: the largest single diff is `BuilderPage.cpp` (
 - **Finding 4: NOT fixed — out of QA-Export scope, SLOT UNASSIGNED (Jeff's call), held for G4 close.**
   The thing worth doing FIRST is an ear test on a real A2 capture, which decides whether this is
   routine maintenance or a live defect.
-- **Finding 5: DOCUMENTED in the header**, so no caller treats the list as complete. Closing it is
-  QA-ProjectSave's territory.
+- **Finding 5: MISHANDLED — corrected 2026-07-26.** Originally recorded as "DOCUMENTED in the
+  header, so no caller treats the list as complete. Closing it is QA-ProjectSave's territory."
+  Both halves were wrong. A header comment is not a report, so Jeff never learned of it; and the
+  routing was self-assigned when deferral is his call. It was then routed to a batch that was
+  planned and executed WITHOUT a task for it (badger Tasks 1-7 cover templates, menus, the Rusty
+  prompt, sample retention and the bundle prompt — none walks engine references), so it was on
+  track to die silently at G4 close carrying a "documented" tag. **User-visible consequence, in
+  shipped code:** Export Project Bundle in BOTH modes omits NAM captures, user IRs and
+  engine-loaded sample folders, and reports nothing missing, because `enumerate` never looks for
+  them. Re-surfaced to Jeff in chat 2026-07-26; slot + full-export semantics are his calls, OPEN.
 - **Finding 6: LEFT IN PLACE, routing HELD** (PENDING ledger item 3). PRE-EXISTING dead code, so
   `feedback_clean_own_batch_dead_code_in_batch` does not apply and deleting unprompted would be an
   unrequested change.
@@ -622,8 +638,9 @@ is defensible as a fourth bucket: the largest single diff is `BuilderPage.cpp` (
 
 #### Commit(s)
 
-`<hash>` (whole batch — Tasks 1-5 + §B.29 + held entry + running notes; single batch commit per the
-bulk-run model). 18 modified files, 5 new source files (`Mp3Writer.h/.cpp`, `MissingFileReport.h`,
+`87439346` (whole batch — Tasks 1-5 + the NAMIR mic-IR fix + §B.29 + the QA-Soundness plan +
+running-notes seed + held entry + running notes; 352 files / +200,579 / -82, of which ~326 are the
+vendored `libs/lame` tree). 19 modified files, 7 new files (`Mp3Writer.h/.cpp`, `MissingFileReport.h`,
 `ProjectBundler.h/.cpp`), plus the vendored `libs/lame` tree riding this commit. Preceded by
 QA-Verify `c6f5fd61`. Build clean in BOTH configs at every task gate; behavioral verification
 deferred to the R2 campaign pass against §B.29. **Nothing here has been heard yet** — `Mp3Writer`

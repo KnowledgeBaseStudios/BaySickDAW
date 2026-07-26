@@ -42,10 +42,15 @@ namespace ProjectBundler
 
     enum class Mode  { Zip, Folder };
 
-    // References     - copy what the project cannot find on another machine
-    //                  (project-relative + My Samples + absolute), leaving Core
-    //                  Library files as references since any install has them.
-    // SelfContained  - additionally copy Core Library files in.
+    // QA-ProjectSave docket 22=b (2026-07-26): NEITHER scope copies Core Library
+    // content any more.  Anyone who can open a BaySickDAW project has BaySickDAW
+    // installed and therefore has the Core Library, so copying it in bought
+    // nothing -- and once engine references are walked it would drag 555 MB-1 GB
+    // sfizz product folders into every bundle.
+    //
+    // References     - files the project itself owns (its Samples folder).
+    // SelfContained  - additionally copy My Samples + absolute references, i.e.
+    //                  everything not guaranteed to exist on the target install.
     enum class Scope { References, SelfContained };
 
     struct Result
@@ -60,16 +65,24 @@ namespace ProjectBundler
     // project's audio library plus every arrangement block's audioFilePath,
     // across every pattern.
     //
-    // KNOWN GAP: file references embedded inside ENGINE state (NAM captures, IR
-    // files, per-engine sample paths) are not walked - they live inside opaque
-    // per-engine state blobs rather than in PatternManager.  QA-Export Task 5
-    // covers the NAM case specifically; a general engine-reference walk is not
-    // in this batch.  Callers must not treat this list as "every file the
-    // project needs".
+    // Every file reference the project depends on.
+    //
+    // `tabsXml`, when supplied, is the <Tabs> element StandaloneEditor produces
+    // for project/template save.  It is how engine-held references get walked:
+    // clip paths and sfizz kit paths are plain attributes, NAM captures and user
+    // IRs live in the Inst chain XML, and BaySickPlayer sample paths sit inside
+    // base64 engine-state blobs that have to be decoded.  Passing nullptr limits
+    // the result to PatternManager references (the pre-2026-07-26 behaviour).
+    //
     // Non-const PatternManager only because getBlock() has no const overload;
     // this reads and never mutates.
     std::vector<Reference> enumerate (PatternManager& pm,
-                                      const VibeSynthProcessor& processor);
+                                      const VibeSynthProcessor& processor,
+                                      const juce::XmlElement* tabsXml = nullptr);
+
+    // Total bytes the bundle will copy under this scope, so the user is told the
+    // size BEFORE a multi-hundred-MB write rather than after.
+    juce::int64 estimateCopyBytes (const std::vector<Reference>& refs, Scope scope);
 
     // Writes the bundle.  `projectFolder` is the source project directory.
     // Missing files are REPORTED, never silently dropped.

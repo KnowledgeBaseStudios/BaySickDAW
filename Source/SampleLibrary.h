@@ -72,6 +72,52 @@ public:
     // safe to call repeatedly (and on every startup).
     static void       ensureUserSamplesDir();
 
+    // ── Stable-root references (QA-ProjectSave Task 4, 2026-07-26) ───────────
+    // A file living under Core Library or My Samples is reachable on any
+    // install of this app, so it should be PERSISTED AS A REFERENCE rather than
+    // copied into a project or written as an absolute path.  Absolute paths
+    // embed the Windows user name and cannot resolve under another account;
+    // copies duplicate factory content into every project that touches it.
+    //
+    // Wire format (matches the pre-existing DrumPage convention this
+    // consolidates, so refs written before this batch still load):
+    //     "library:<rel>"    - relative to getCoreLibraryDir()
+    //     "mysamples:<rel>"  - relative to getUserSamplesDir()
+    // <rel> always uses forward slashes regardless of platform.
+    //
+    // makeStableRef returns an EMPTY string when the file is under neither root
+    // -- that is the caller's signal to fall back to copying (importSample) or
+    // to an absolute path.  Callers must not invent their own prefix strings;
+    // this pair is the single writer/reader so the two can never drift.
+    static juce::String makeStableRef    (const juce::File& f);
+    static juce::File   resolveStableRef (const juce::String& storedPath);
+    static bool         isStableRef      (const juce::String& storedPath);
+
+    // QA-ProjectSave Task 5 (2026-07-26): the pair every persist site uses.
+    // refForPersist returns the stable reference when the file is under a
+    // stable root and the absolute path otherwise, so a call site never has to
+    // decide; resolvePersistedRef reverses it and also accepts the plain
+    // absolute paths written before this batch.  Use these rather than
+    // getFullPathName() anywhere a file path is written to disk.
+    static juce::String refForPersist       (const juce::File& f);
+    static juce::File   resolvePersistedRef (const juce::String& storedPath);
+
+    // QA-ProjectSave Task 5 (2026-07-26, dockets 23/24): adopt a volatile file
+    // into My Samples and return its "mysamples:" ref, so a TEMPLATE stops
+    // depending on wherever the user happened to drag the file in from.
+    //
+    // A template is one XML with no folder beside it, so a reference to
+    // Downloads (or worse, to some OTHER project's Samples folder) silently
+    // couples every project made from that template to a path that can vanish.
+    //
+    // No-ops into a plain ref when the file is ALREADY under a stable root --
+    // Core Library content in particular is never copied, since a 555 MB-1 GB
+    // sfizz product folder per template is not a trade worth making.  Returns
+    // an empty string if the source does not exist or the copy fails.
+    // Dedupes on size + last-modified, mirroring ProjectManager::importSample,
+    // then auto-suffixes " (2)" so a user sample is never overwritten.
+    static juce::String adoptIntoUserSamples (const juce::File& source);
+
 private:
     SampleLibrary() = default;
     JUCE_DECLARE_NON_COPYABLE (SampleLibrary)

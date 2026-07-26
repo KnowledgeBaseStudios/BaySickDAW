@@ -1931,3 +1931,28 @@ private:
     void rebuild();
     void layoutCells();
 };
+
+// ─────────────────────────────────────────────────────────────────────────────
+// EngineEmptyState - QA-ProjectSave docket 18 (2026-07-26).
+//
+// Placeholder shown when a Layers / Bass / Drums ribbon slot is clicked with
+// zero instances.  Those three types used to be seeded with one tab each and
+// refused to delete below one; they now open empty and delete to zero like
+// Clips / Vox / Inst, so they need the same placeholder those types have had
+// since G-2/G-4.
+//
+// One parameterised class instead of three near-identical ones (VoxEmptyState /
+// InstEmptyState are separate classes only because they predate a third case).
+// ─────────────────────────────────────────────────────────────────────────────
+class EngineEmptyState : public juce::Component
+{
+public:
+    EngineEmptyState (juce::Colour accent, juce::String message);
+    void paint (juce::Graphics&) override;
+
+private:
+    juce::Colour mAccent;
+    juce::String mMessage;
+
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (EngineEmptyState)
+};

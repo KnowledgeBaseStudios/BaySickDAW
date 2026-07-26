@@ -156,7 +156,7 @@ void RibbonTabBar::clearTabsOfType (TabType type)
     repaint();
 }
 
-void RibbonTabBar::closeTab(int tabId, bool force)
+void RibbonTabBar::closeTab(int tabId)
 {
     for (int i = 0; i < mTabs.size(); ++i)
     {
@@ -171,12 +171,11 @@ void RibbonTabBar::closeTab(int tabId, bool force)
          && type != TabType::Drums  && type != TabType::Clip
          && type != TabType::Vox    && type != TabType::Inst) return;
 
-        // Never delete the last instance of a type - EXCEPT for Clip / Vox /
-        // Inst, all of which can legitimately be at zero (empty-state page).
-        const bool zeroAllowed = (type == TabType::Clip
-                               || type == TabType::Vox
-                               || type == TabType::Inst);
-        if (! force && ! zeroAllowed && countTabsOfType(type) <= 1) return;
+        // QA-ProjectSave docket 18 (2026-07-26): every closeable type may reach
+        // zero.  Layers / Bass / Drums used to be pinned at >= 1 from when the
+        // app was only those three; that floor meant a saved project or template
+        // always carried tabs the user never asked for.  The `force` parameter
+        // that existed solely to bypass that floor went with it.
 
         mTabs.remove(i);
 
@@ -515,6 +514,19 @@ void RibbonTabBar::mouseDown(const juce::MouseEvent& e)
         else if (type == TabType::Inst && onInstEmptyStateRequested)
         {
             onInstEmptyStateRequested();
+        }
+        // QA-ProjectSave docket 18 (2026-07-26): these three reach zero now.
+        else if (type == TabType::Layers && onLayersEmptyStateRequested)
+        {
+            onLayersEmptyStateRequested();
+        }
+        else if (type == TabType::Bass && onBassEmptyStateRequested)
+        {
+            onBassEmptyStateRequested();
+        }
+        else if (type == TabType::Drums && onDrumsEmptyStateRequested)
+        {
+            onDrumsEmptyStateRequested();
         }
     }
 }

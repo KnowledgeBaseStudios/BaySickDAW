@@ -1,5 +1,6 @@
 #include "BaySickRustyDrumsProcessor.h"
 #include "../MissingFileReport.h"   // QA-Export Task 5
+#include "../SampleLibrary.h"       // QA-ProjectSave Task 5: stable-root kit refs
 #include "sfizz.hpp"
 #include <set>
 #include <map>
@@ -960,7 +961,11 @@ void BaySickRustyDrumsProcessor::getStateInformation (juce::MemoryBlock& dest)
     if (mCurrentKitPath != juce::File())
     {
         juce::ValueTree kitNode ("KitPath");
-        kitNode.setProperty ("path", mCurrentKitPath.getFullPathName(), nullptr);
+        // QA-ProjectSave Task 5 (2026-07-26): persist as a stable-root ref when
+        // the kit lives under Core Library (every shipped kit does), so the
+        // saved path stops embedding the Windows user name and resolves under
+        // any account.  Falls back to absolute for anything outside.
+        kitNode.setProperty ("path", SampleLibrary::refForPersist (mCurrentKitPath), nullptr);
         root.appendChild (kitNode, nullptr);
     }
 
@@ -984,7 +989,8 @@ void BaySickRustyDrumsProcessor::setStateInformation (const void* data, int sz)
     //   2) replaceState second (the project's saved CCs overlay the kit defaults)
     if (auto kitNode = root.getChildWithName ("KitPath"); kitNode.isValid())
     {
-        const juce::File kit (kitNode.getProperty ("path").toString());
+        const juce::File kit = SampleLibrary::resolvePersistedRef (
+                                   kitNode.getProperty ("path").toString());
         if (kit.existsAsFile())
             loadKit (kit);
         else

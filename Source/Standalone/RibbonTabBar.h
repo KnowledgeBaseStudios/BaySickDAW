@@ -106,21 +106,21 @@ public:
     // user to click the corresponding "Add Strip" button on the Mixer page.
     std::function<void()>                             onVoxEmptyStateRequested;
     std::function<void()>                             onInstEmptyStateRequested;
+    // QA-ProjectSave docket 18 (2026-07-26): Layers / Bass / Drums can now sit
+    // at zero instances, so they need the same body-click hook.
+    std::function<void()>                             onLayersEmptyStateRequested;
+    std::function<void()>                             onBassEmptyStateRequested;
+    std::function<void()>                             onDrumsEmptyStateRequested;
 
     // ── API ──────────────────────────────────────────────────────────────────
     int  addTab(TabType type, const juce::String& name);
-    // force=true bypasses the last-of-type guard -- used by Load Kit teardown,
-    // which legitimately clears the sole DrumPage before rebuilding the kit.
-    void closeTab(int tabId, bool force = false);
+    void closeTab(int tabId);
     void selectTab(int tabId);
 
     // Project-load / File > New helper (2026-04-24): wipes every Layers /
-    // Bass / Drums entry unconditionally, bypassing closeTab's count /
-    // type guards.  closeTab refuses to remove Drums or the last instance
-    // of a type, which is the right UX for user clicks but wrong for
-    // project load (where we need to clear defaults before restoring
-    // saved tabs).  StandaloneEditor calls this then follows up with
-    // addTab for each saved / default record.
+    // Bass / Drums entry in one pass, including types closeTab would refuse
+    // outright (system tabs).  StandaloneEditor calls this then follows up
+    // with addTab for each saved record.
     void clearAllDynamicTabs();
     // Batch 5 (2026-04-25): same as clearAllDynamicTabs but only for one
     // type - used by Load Kit to wipe Drums without disturbing Layers/Bass.
@@ -162,7 +162,8 @@ public:
 
     // D1.4-fix (c): true when there's only one tab of `type` left.  Used by
     // the editor to refuse delete-the-last-instance with a friendly notice.
-    bool isLastOfType(TabType type) const { return countTabsOfType(type) <= 1; }
+    // isLastOfType retired 2026-07-26 (QA-ProjectSave docket 18) -- its only
+    // purpose was the >= 1 floor on Layers / Bass / Drums, which is gone.
 
 private:
     static constexpr int kNumSlots = 10;  // 2026-04-28: +Vox +Inst (G-4)

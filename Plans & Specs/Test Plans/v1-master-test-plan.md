@@ -1864,7 +1864,7 @@ and an existing project), not freshly-made ones.
 
 ### §B.29 — QA-Export (song-mode audio export WAV/OGG/MP3 + project bundle + missing-file visibility)
 
-`blocks:` `<hash>` (QA-Export). Debug exe FIRST (screenshot any jassert), then
+`blocks:` `87439346` (QA-Export). Debug exe FIRST (screenshot any jassert), then
 Release — mark each scenario `D:` and `R:`.
 
 **Scope note.** Export did not exist before this batch: `doExport()` was a dead stub and the File

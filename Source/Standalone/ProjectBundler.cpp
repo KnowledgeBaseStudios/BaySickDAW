@@ -44,22 +44,75 @@ namespace
     }
 
     // Files the destination machine will not have unless we bring them.
+    // Docket 22=b: Core Library NEVER copies -- any install that can open the
+    // project already has it, and copying it would mean GB-scale bundles once
+    // engine references (sfizz kits) are part of the walk.
     bool needsCopying (RefKind k, Scope scope)
     {
         switch (k)
         {
             case RefKind::UserSamples:
-            case RefKind::Absolute:        return true;
-            case RefKind::CoreLibrary:     return scope == Scope::SelfContained;
+            case RefKind::Absolute:        return scope == Scope::SelfContained;
+            case RefKind::CoreLibrary:     return false;
             case RefKind::ProjectRelative: return false;   // inside the folder already
             case RefKind::Missing:         return false;
         }
         return false;
     }
+
+    // ── Engine-held references (QA-ProjectSave Task 6, docket 21) ────────────
+    // Attributes that name a file in engine state.  Kept explicit rather than
+    // "any attribute that looks like a path": a generic guess would report
+    // false positives as Missing and train the user to ignore the warning.
+    const char* const kPathAttrs[] = {
+        "bsp_loadPath",     // VibePlayer / BaySickPlayer sample, folder or SFZ
+        "kitPath",          // sfizz Guitars / Basses
+        "namPath", "irPath",
+        "micUserIrPath", "micbUserIrPath",
+    };
+
+    void walkXmlForPaths (const juce::XmlElement& el,
+                          const std::function<void (const juce::String&, const juce::String&)>& found)
+    {
+        for (const char* attr : kPathAttrs)
+            if (auto v = el.getStringAttribute (attr); v.isNotEmpty())
+                found (v, attr);
+
+        // <KitPath path="..."/> and <Sample path="..."/> use a generic "path",
+        // which is only safe to read on those specific tags.
+        if (el.hasTagName ("KitPath") || el.hasTagName ("Sample"))
+            if (auto v = el.getStringAttribute ("path"); v.isNotEmpty())
+                found (v, el.getTagName());
+
+        for (auto* child : el.getChildIterator())
+            walkXmlForPaths (*child, found);
+    }
+
+    // engineData / sfizzEngineData are base64 of AudioProcessor::getStateInformation,
+    // which is copyXmlToBinary -- decode back to XML and walk it.
+    void walkEngineBlob (const juce::String& base64,
+                         const std::function<void (const juce::String&, const juce::String&)>& found)
+    {
+        if (base64.isEmpty()) return;
+        juce::MemoryBlock mb;
+        if (! mb.fromBase64Encoding (base64)) return;
+        if (auto xml = juce::AudioProcessor::getXmlFromBinary (mb.getData(), (int) mb.getSize()))
+            walkXmlForPaths (*xml, found);
+    }
+}
+
+juce::int64 estimateCopyBytes (const std::vector<Reference>& refs, Scope scope)
+{
+    juce::int64 total = 0;
+    for (const auto& r : refs)
+        if (needsCopying (r.kind, scope) && r.resolved.existsAsFile())
+            total += r.resolved.getSize();
+    return total;
 }
 
 std::vector<Reference> enumerate (PatternManager& pm,
-                                  const VibeSynthProcessor& processor)
+                                  const VibeSynthProcessor& processor,
+                                  const juce::XmlElement* tabsXml)
 {
     std::vector<Reference> refs;
     const juce::File projectFolder = processor.getCurrentProjectFolder();
@@ -75,6 +128,37 @@ std::vector<Reference> enumerate (PatternManager& pm,
     {
         const auto& blk = pm.getBlock (i);
         addRef (refs, blk.audioFilePath, "Arrangement", processor, projectFolder);
+    }
+
+    // 3. Engine-held references (QA-ProjectSave Task 6, docket 21).  Before this
+    //    the walk stopped at PatternManager, so a bundle silently shipped without
+    //    NAM captures, user IRs or engine-loaded sample folders and reported
+    //    nothing missing -- it looked like a clean export.
+    if (tabsXml != nullptr)
+    {
+        for (auto* rec : tabsXml->getChildWithTagNameIterator ("Tab"))
+        {
+            const auto tabName = rec->getStringAttribute ("name",
+                                     rec->getStringAttribute ("type", "Tab"));
+
+            auto found = [&] (const juce::String& stored, const juce::String& what)
+            {
+                addRef (refs, stored, tabName + " (" + what + ")", processor, projectFolder);
+            };
+
+            // Plain attributes on the tab record itself.
+            walkXmlForPaths (*rec, found);
+
+            // The Inst chain XML is stored as a string attribute, not a child.
+            if (auto chain = rec->getStringAttribute ("instChainState"); chain.isNotEmpty())
+                if (auto parsed = juce::XmlDocument::parse (chain))
+                    walkXmlForPaths (*parsed, found);
+
+            // Base64 engine state - BaySickPlayer sample paths live here, and
+            // nowhere else reachable.
+            walkEngineBlob (rec->getStringAttribute ("engineData"),      found);
+            walkEngineBlob (rec->getStringAttribute ("sfizzEngineData"), found);
+        }
     }
 
     return refs;
