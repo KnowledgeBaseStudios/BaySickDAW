@@ -1738,7 +1738,7 @@ Acoustic Simulator, and a NAM Pedal.
 
 ### §B.27 — QA-ApvtsAutomation (engine-param application, per-instance automation keys, dead `tk_` mirror retirement, BLU-378/379/492)
 
-`blocks:` `<hash>` (QA-ApvtsAutomation). Debug exe FIRST (screenshot any
+`blocks:` `bbb4e639` (QA-ApvtsAutomation). Debug exe FIRST (screenshot any
 jassert), then Release — mark each scenario `D:` and `R:`.
 
 **Scope note.** The founding gap was real and is fixed: instrument-engine automation lanes drew
@@ -1813,6 +1813,53 @@ with pedals loaded, one Vox tab, and a saved project from BEFORE this batch.
 - [ ] **AP-17 — tab churn leaves no dead parameters.** Open a Layers tab, pick an engine, automate
       a knob, then close the tab. The Event Editor's parameter browser no longer lists that tab's
       engine parameters. Reopen a tab in the same slot and automation works again.
+      `D:__ R:__` notes:
+
+### §B.28 — QA-Verify code half (BaySickPedals state hygiene: tag disambiguation, enum pinning, log strip)
+
+`blocks:` `<hash>` (QA-Verify). Debug exe FIRST (screenshot any jassert), then
+Release — mark each scenario `D:` and `R:`.
+
+**Scope note.** The batch's founding premise was already void before it started: the
+"pedalboard preset doesn't restore" regression was fixed 2026-05-05 by the base64 decode fix,
+and the round-trip log showed one failing restore in its entire history against 1,150+ clean
+cycles. What shipped instead is hygiene hardening (docket 6=B + log A). **Everything here is a
+regression guard** — no new capability. The 10-engine preset walk is §E, not this section.
+
+The central risk is compatibility: the outer state tag changed, so the scenarios that matter
+most are the ones loading files written BEFORE this batch. Use real pre-batch files ("Jeff 1"
+and an existing project), not freshly-made ones.
+
+- [ ] **QV-1 — MUST-PASS: pre-batch pedalboard preset still loads.** Load the existing "Jeff 1"
+      pedalboard preset (written with the legacy outer tag): all 8 slots restore with the right
+      pedal types AND their knob values. If this fails, the legacy-tag tolerance is broken and
+      every saved board is orphaned.  `D:__ R:__` notes:
+- [ ] **QV-2 — new preset round-trips.** Save a new pedalboard preset, close the app fully,
+      reopen, load it: identical board. This is the new-tag write path.  `D:__ R:__` notes:
+- [ ] **QV-3 — MUST-PASS: pre-batch PROJECT with pedals restores.** Open a project saved before
+      this batch that has pedals set up: the board comes back intact. Same tolerance as QV-1 but
+      through the project path, which is where a silent failure would hurt most.
+      `D:__ R:__` notes:
+- [ ] **QV-4 — new project round-trips.** Save a project with pedals, reopen: board intact.
+      `D:__ R:__` notes:
+- [ ] **QV-5 — page preset path.** On an Inst tab with pedals loaded: save a page preset, delete
+      the tab, then load the page preset onto a new tab — board restored. This path stores the
+      pedals blob inside a page-preset envelope, so it exercises a different wrapper than QV-1/3.
+      `D:__ R:__` notes:
+- [ ] **QV-6 — bypass states survive.** Set a distinctive bypass pattern (say slots 2 and 5
+      bypassed, rest engaged), save, reload: the same LEDs are lit. Bypass lives in the pedals
+      parameter store rather than the slot blobs, and this batch changed how that child is
+      located on load — so it is the part most likely to break quietly.  `D:__ R:__` notes:
+- [ ] **QV-7 — REGRESSION: FX-rack slots still load correctly after enum pinning.** Open a
+      pre-batch project with a populated FX rack: every slot holds the SAME effect it did before
+      (a Compressor is still a Compressor, not a Reverb). The pinning was written to match the
+      previous implicit values exactly, so any mismatch here means a value was mistyped.
+      `D:__ R:__` notes:
+- [ ] **QV-8 — REGRESSION: pedal slots still hold the right effects.** Same check on a pre-batch
+      pedalboard — pedal slots persist their type through the same enum.  `D:__ R:__` notes:
+- [ ] **QV-9 — the log is gone.** Note the size of `Documents\BaySickDAW\pedals_state_log.txt`,
+      then do a session of pedal edits plus several preset saves/loads. The file has NOT grown.
+      (The existing file is left on disk deliberately — delete it whenever you like.)
       `D:__ R:__` notes:
 
 ## §C — Deferred re-verify ledger

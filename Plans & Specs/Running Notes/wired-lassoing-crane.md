@@ -368,7 +368,7 @@ trusting the census summary instead of re-reading the source. All five now stamp
 
 ### 2026-07-25 <HH:MM> PT — QA-ApvtsAutomation — The founding gap is closed: instrument-engine automation lanes now APPLY (applicator + reader registration across all four engine editors and the two sub-component surfaces the plan's per-editor framing missed); Harmless Part A and Part B became independently automatable per owner call and `part_sel` was de-stamped; NAMIR / Vocal / Pedals reach the registry for the first time under per-instance keys, with pedals given permanent per-slot uuids (owner option B) and the vocal capture lock vetoing lane writes mid-take; the dead `tk_` engine mirror set retired along with a second dead family (`tk_*_rack_slot*`) the plan never flagged; BLU-492 closed with ZERO conversions. Four plan premises turned out void or wrong and the pre-accepted PRESET-BREAK was never spent
 
-**Bucket:** Players, Cross-cutting Infrastructure. Batch `wired-lassoing-crane`. `blocks:` `<hash>`.
+**Bucket:** Players, Effects, Cross-cutting Infrastructure. Batch `wired-lassoing-crane`. `blocks:` `bbb4e639`.
 *(Main Plan §5 and the §6 footnote pre-assigned "Cross-cutting Infrastructure, UI / L&F / Theming"
 back when this batch was framed as an audit sweep. Nothing in the diff touches VibeLAF, palette,
 theme or layout. What shipped is the four instrument-engine editors plus BaySickNAMIR /
@@ -435,7 +435,7 @@ selectors; QA-NativeDialogs took Effects for a smaller pedals touch the same wee
 
 #### Commit(s)
 
-`<hash>` (whole batch — Tasks 1-5 + §B.27 + the CLAUDE.md corrections + the QA-NativeDialogs hash backfill + held entry + running notes; single batch commit per the bulk-run model). Preceded by QA-NativeDialogs `f4112b17`. Build clean in BOTH configs at every task gate; behavioral verification deferred to the R2 campaign pass against §B.27.
+`bbb4e639` (whole batch — Tasks 1-5 + the Harmless straggler sweep + §B.27 + §E correction + the Main Plan bucket correction + the CLAUDE.md corrections + the QA-NativeDialogs hash backfill + held entry + running notes; 32 files, +1173/-227; single batch commit per the bulk-run model). Preceded by QA-NativeDialogs `f4112b17`. Build clean in BOTH configs at every task gate; behavioral verification deferred to the R2 campaign pass against §B.27.
 
 #### Next action
 

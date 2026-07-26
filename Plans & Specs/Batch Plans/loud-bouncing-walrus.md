@@ -128,6 +128,30 @@ execution (FSW-065 asked for it; bare R = record-toggle stays).
   (docket 8: both offered per pack).
 - [ ] Build gate.
 
+### Task 5 — Missing external-file references stop failing silently (folded in 2026-07-25)
+
+**Rule 3 fold from QA-Verify** (`sturdy-tagging-pangolin` close; Jeff picked this batch, option d,
+over QA-ProjectSave / a new row / deferral — noted at the time that QA-Export has no thematic
+relation to external-file restore, picked regardless). Origin finding, desk-verified not relayed:
+the NAM pedal stores an ABSOLUTE `.nam` path ([NAMPedalStyleDSP.cpp:247](Source/DSP/NAMPedalStyleDSP.cpp:247))
+and on a missing file KEEPS the remembered name for the editor label, does not load the model, and
+emits nothing ([:276-281](Source/DSP/NAMPedalStyleDSP.cpp:276)). The UI shows a model name it did
+not load — actively misleading, not merely silent. Move the captures folder, rename a file, or open
+the project on another machine and the pedal presents as loaded while doing no amp modeling.
+
+- [ ] **Sweep FIRST, fix second.** Only the NAM-pedal path is verified; IR files, sample refs, and
+  NAM in the FX rack (not just the Inst pedal slot) may share it. Enumerate every external-file
+  reference restored by absolute or bare path and record which silently no-load. Task 4's
+  `ProjectBundler::enumerate` walks this same surface with a `missing` tag — reuse its reference
+  list rather than writing a second walker.
+- [ ] Fix the verified sites so a missing file is VISIBLE. The app already has the correct pattern:
+  the sfizz kit path pops a warning dialog
+  ([PagePresetIO.cpp:128-131](Source/Standalone/PagePresetIO.cpp:128)). Minimum bar: the control
+  must not display a name it failed to load.
+- [ ] Any site found but deliberately left unfixed gets recorded in running notes with the reason
+  (no-silent-caps rule) — never dropped quietly.
+- [ ] Build gate.
+
 ## Batch close (bulk-run per-batch loop — one commit per batch)
 
 - [ ] Tell Jeff to run `do_build.bat`; fix until BOTH configs build clean.

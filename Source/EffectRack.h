@@ -14,19 +14,26 @@
 // store EffectType as int.  New entries append at the end with explicit values.
 enum class EffectType
 {
-    None = 0,
-    Compressor,
-    Reverb,
-    Chorus,
-    Delay,
-    Saturation,
-    Flanger,
-    Overdrive,
-    Phaser,
-    TransientShaper,
-    Tape,
-    Limiter,
-    DeEsser,    // H-6 (2026-05-01) -- vocal chain stage (slot 2 since QA-Fe2)
+    // QA-Verify (2026-07-25): ordinals pinned explicitly.  These ints are written
+    // into saved state -- FX-rack slots and pedal slots both persist `type` as the
+    // raw enum value -- so an insertion or re-order silently repoints every saved
+    // slot at a different effect.  Values below match what was implicit before, so
+    // this pins current behavior and changes nothing.  NEVER reorder or insert;
+    // append only, with an explicit value.  (The pedal-native block below was
+    // already explicit; this closes the gap.)
+    None            = 0,
+    Compressor      = 1,
+    Reverb          = 2,
+    Chorus          = 3,
+    Delay           = 4,
+    Saturation      = 5,
+    Flanger         = 6,
+    Overdrive       = 7,
+    Phaser          = 8,
+    TransientShaper = 9,
+    Tape            = 10,
+    Limiter         = 11,
+    DeEsser         = 12,   // H-6 (2026-05-01) -- vocal chain stage (slot 2 since QA-Fe2)
 
     // I-1: BaySickPedals 18-module spec.  DSP classes land in I-5..I-13;
     // factory returns nullptr until then.  Numeric values explicit so saved

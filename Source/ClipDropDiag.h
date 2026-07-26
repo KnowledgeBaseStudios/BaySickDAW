@@ -10,7 +10,7 @@
 // failure live: every step of the drop cascade logs to a file, and a popup
 // fires only on a bail / "produced nothing" anomaly.
 //
-// Mirrors the namirLog() / pedalsLog() one-off file-logger convention
+// Mirrors the namirLog() one-off file-logger convention
 // (Documents/BaySickDAW/*.txt, works in both Debug and Release).  Rule-4
 // catalogued in Plans & Specs/Running Notes/fancy-kindling-dongarra.md; stripped
 // or kept at batch close per DS-2.

@@ -13,21 +13,17 @@ namespace
     }
 
     constexpr const char* kPedalboardRootTag = "Pedalboard";
-    constexpr const char* kStateRootTag      = "BaySickPedalsState";
-    constexpr int         kStateVersion      = 1;
 
-    // 2026-05-05 (Bug B diagnostics): file logger for save/load round-trip.
-    // Writes to Documents/BaySickDAW/pedals_state_log.txt, append-mode.
-    void pedalsLog (const juce::String& line)
-    {
-        const auto logFile = juce::File::getSpecialLocation (juce::File::userDocumentsDirectory)
-                                 .getChildFile ("BaySickDAW")
-                                 .getChildFile ("pedals_state_log.txt");
-        logFile.getParentDirectory().createDirectory();
-        const auto stamped = juce::Time::getCurrentTime().toString (false, true, true, true)
-                              + "  " + line + juce::newLine;
-        logFile.appendText (stamped);
-    }
+    // QA-Verify (2026-07-25): the outer wrapper and the APVTS child both used to be
+    // named "BaySickPedalsState" -- the same string the APVTS is constructed with
+    // (see the ctor's initialiser).  A tag lookup starting ABOVE the pedals root can
+    // therefore land on the wrapper instead of the APVTS child.  New saves write the
+    // unambiguous V2 tag; the loader still ACCEPTS the legacy tag so every existing
+    // project and pedalboard preset keeps loading.  That is load-tolerance, not a
+    // migration system (the no-backward-compat-pre-v1 rule stands).
+    constexpr const char* kStateRootTag      = "BaySickPedalsRoot";    // written by new saves
+    constexpr const char* kStateRootTagLegacy = "BaySickPedalsState";  // accepted on load
+    constexpr int         kStateVersion      = 1;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -340,8 +336,6 @@ juce::ValueTree BaySickPedalsProcessor::captureFullState() const
     // snapshot doesn't track future changes (and so this method stays const).
     state.appendChild (apvts.state.createCopy(), nullptr);
 
-    pedalsLog ("captureFullState: kNumSlots=" + juce::String (kNumSlots));
-
     // Per-slot snapshot.
     juce::ValueTree slotsTree ("Slots");
     for (int i = 0; i < kNumSlots; ++i)
@@ -363,11 +357,7 @@ juce::ValueTree BaySickPedalsProcessor::captureFullState() const
             if (dataBytes > 0)
                 slotTree.setProperty ("data", mb.toBase64Encoding(), nullptr);
         }
-        pedalsLog ("  slot " + juce::String (i)
-                   + " type=" + juce::String ((int) s.type)
-                   + " swapPending=" + juce::String (sp ? 1 : 0)
-                   + " effPtr=" + juce::String (eff ? 1 : 0)
-                   + " dataBytes=" + juce::String ((int) dataBytes));
+        juce::ignoreUnused (sp, dataBytes);
         slotsTree.appendChild (slotTree, nullptr);
     }
     state.appendChild (slotsTree, nullptr);
@@ -376,29 +366,26 @@ juce::ValueTree BaySickPedalsProcessor::captureFullState() const
 
 void BaySickPedalsProcessor::restoreFullState (const juce::ValueTree& state)
 {
-    if (! state.isValid() || ! state.hasType (kStateRootTag))
-    {
-        pedalsLog ("restoreFullState: REJECTED - state invalid or wrong root tag");
+    // Accept the legacy outer tag so pre-2026-07-25 projects + pedalboard presets
+    // keep loading; new saves write kStateRootTag.
+    if (! state.isValid()
+        || ! (state.hasType (kStateRootTag) || state.hasType (kStateRootTagLegacy)))
         return;
-    }
-
-    pedalsLog ("restoreFullState: BEGIN");
 
     // APVTS first so per-slot bypass bools restore before slots load (DSPs
     // don't depend on the bypass param themselves; this just keeps state
     // consistent before the audio swap).
-    if (auto apvtsState = state.getChildWithName ("BaySickPedalsState");
+    // Look the child up by the APVTS's OWN type rather than a hard-coded string:
+    // on legacy files that string also names the outer wrapper, and keying off
+    // apvts.state.getType() cannot drift if the APVTS type is ever renamed.
+    if (auto apvtsState = state.getChildWithName (apvts.state.getType());
         apvtsState.isValid())
     {
         apvts.replaceState (apvtsState);
     }
 
     auto slotsTree = state.getChildWithName ("Slots");
-    if (! slotsTree.isValid())
-    {
-        pedalsLog ("restoreFullState: NO Slots child - params not restored");
-        return;
-    }
+    if (! slotsTree.isValid()) return;
 
     for (int i = 0; i < slotsTree.getNumChildren(); ++i)
     {
@@ -411,10 +398,6 @@ void BaySickPedalsProcessor::restoreFullState (const juce::ValueTree& state)
         const auto type = (EffectType) (int) slotTree.getProperty ("type", 0);
         const juce::String b64 = slotTree.getProperty ("data", "").toString();
 
-        pedalsLog ("  slot " + juce::String (slotIdx)
-                   + " savedType=" + juce::String ((int) type)
-                   + " b64Len=" + juce::String (b64.length()));
-
         // Build the new DSP off-thread (createEffect, prepare, restore state)
         // BEFORE parking into pending.  Mirrors EffectRack::setStateInformation
         // pattern from I-0a -- avoids the swap-pending vs blob-write race.
@@ -422,7 +405,6 @@ void BaySickPedalsProcessor::restoreFullState (const juce::ValueTree& state)
         if (type != EffectType::None)
         {
             effect = EffectRack::createEffect (type);
-            pedalsLog ("    createEffect returned " + juce::String (effect ? 1 : 0));
             if (effect)
             {
                 if (mSampleRate > 0.0)
@@ -437,8 +419,6 @@ void BaySickPedalsProcessor::restoreFullState (const juce::ValueTree& state)
                     // is the symmetric inverse and handles the prefix.
                     juce::MemoryBlock decoded;
                     const bool decodedOk = decoded.fromBase64Encoding (b64);
-                    pedalsLog ("    decoded " + juce::String ((int) decoded.getSize())
-                               + " bytes ok=" + juce::String (decodedOk ? 1 : 0));
                     if (decodedOk && decoded.getSize() > 0)
                         effect->setStateInformation (decoded.getData(),
                                                       (int) decoded.getSize());
@@ -559,7 +539,11 @@ bool BaySickPedalsProcessor::loadPedalboardPreset (const juce::File& xml,
         outErr = "Preset file is not a Pedalboard preset.";
         return false;
     }
+    // New presets carry the V2 payload tag; pre-2026-07-25 files carry the legacy
+    // one.  Accept either so existing pedalboard presets keep loading.
     auto* inner = root->getChildByName (kStateRootTag);
+    if (inner == nullptr)
+        inner = root->getChildByName (kStateRootTagLegacy);
     if (! inner)
     {
         outErr = "Preset file is missing the state payload.";

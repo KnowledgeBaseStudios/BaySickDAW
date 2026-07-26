@@ -10,7 +10,7 @@
 // snapped beat, snap div, playhead beat) and every playhead paint tick (beat,
 // output latency samples, sample rate).
 //
-// Debug build only.  Mirrors the ClipDropDiag / namirLog / pedalsLog one-off
+// Debug build only.  Mirrors the ClipDropDiag / namirLog one-off
 // file-logger convention (Documents/BaySickDAW/*.txt) so the lines are
 // readable without a debugger.  Rule-4 catalogued in
 // Plans & Specs/Running Notes/burly-restringing-bison.md; strip at batch close.
