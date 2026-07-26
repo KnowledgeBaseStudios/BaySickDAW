@@ -3424,6 +3424,43 @@ juce::String StandaloneEditor::resolveAutomationDisplayName(const juce::String& 
 {
     if (paramId.isEmpty()) return paramId;
 
+    // QA-ApvtsAutomation: per-instance engine keys carry the owning page in the id
+    // ("inst{N}_" / "vox{N}_") so lanes stay distinct across tabs.  Strip that,
+    // resolve the remainder normally, and put the tab back on the front -- the
+    // user should see "Inst 4 - ..." rather than a raw registry key.
+    {
+        auto stripInstance = [] (const juce::String& id, const char* tag,
+                                 const char* label, juce::String& outLabel,
+                                 juce::String& outRest) -> bool
+        {
+            const juce::String prefix (tag);
+            if (! id.startsWith (prefix)) return false;
+            const int us = id.indexOfChar (prefix.length(), '_');
+            if (us < 0) return false;
+            const juce::String num = id.substring (prefix.length(), us);
+            if (num.isEmpty() || ! num.containsOnly ("0123456789")) return false;
+            outLabel = juce::String (label) + " " + juce::String (num.getIntValue() + 1);
+            outRest  = id.substring (us + 1);
+            return true;
+        };
+
+        juce::String instLabel, rest;
+        if (stripInstance (paramId, "inst", "Inst", instLabel, rest)
+         || stripInstance (paramId, "vox",  "Vox",  instLabel, rest))
+        {
+            // Pedals keys embed the slot's uuid so a lane survives reordering.
+            // That uuid is an implementation detail and must never surface.
+            if (rest.startsWith ("pedals_"))
+            {
+                juce::String tail = rest.substring (7);
+                const int us2 = tail.indexOfChar (0, '_');
+                if (us2 == 32) tail = tail.substring (us2 + 1);
+                return instLabel + " - Pedals - " + tail.replaceCharacter ('_', ' ');
+            }
+            return instLabel + " - " + resolveAutomationDisplayName (rest);
+        }
+    }
+
     using Kind = VibeGraph::InsertKind;
 
     auto& vg = const_cast<VibeSynthProcessor&>(mProcessor).mVibeGraph;
@@ -4594,6 +4631,10 @@ void StandaloneEditor::onTabClosed(int tabId)
                     // Rack-slot pids are 1-based for layers/basses
                     // (EffectsPage::getChannelPrefix maps dropdown id-199).
                     eraseAutomationEntriesWithPrefix ("layer_" + juce::String (idx + 1) + "_");
+                    // QA-ApvtsAutomation: engine-editor registrations key off the
+                    // engine's own prefix ("tk_" + trackId + "_<engine>_"), which
+                    // neither erase above covers.
+                    eraseAutomationEntriesWithPrefix ("tk_lay_" + juce::String (idx) + "_");
                 }
             }
 
@@ -4610,6 +4651,7 @@ void StandaloneEditor::onTabClosed(int tabId)
                     bassStripIdx = idx;
                     eraseAutomationEntriesWithPrefix ("mixer_bass_" + juce::String (idx) + "_");
                     eraseAutomationEntriesWithPrefix ("bass_" + juce::String (idx + 1) + "_");
+                    eraseAutomationEntriesWithPrefix ("tk_bas_" + juce::String (idx) + "_");
                 }
             }
 
@@ -4626,6 +4668,7 @@ void StandaloneEditor::onTabClosed(int tabId)
                     drumStripIdx = idx;
                     eraseAutomationEntriesWithPrefix ("mixer_drum_" + juce::String (idx) + "_");
                     eraseAutomationEntriesWithPrefix ("drum_" + juce::String (idx) + "_");
+                    eraseAutomationEntriesWithPrefix ("tk_drm_" + juce::String (idx) + "_");
                 }
             }
 

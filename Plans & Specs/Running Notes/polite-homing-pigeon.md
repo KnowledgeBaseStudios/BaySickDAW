@@ -67,12 +67,12 @@
 ## Held Work Log entry (apply at section pass)
 
 > Drafted at code-complete via `/draft-doc batch-close`; NOT yet applied to `Implemented Work Log.md`.
-> Applies with the §5 STATUS flip when §B.26 passes the campaign walk (R2). Backfill `<hash>` and
-> stamp the full `HH:MM PT` at apply.
+> Applies with the §5 STATUS flip when §B.26 passes the campaign walk (R2). Commit hash is filled
+> (`f4112b17`); stamp the full `HH:MM PT` at apply.
 
 ### 2026-07-25 <HH:MM> PT — QA-NativeDialogs — Open Project moved off the custom `ProjectBrowserWindow` onto a native Windows FOLDER picker, with `project.xml` validated BEFORE the (non-undoable) session teardown; the browser survives intact as a new "Quick Open Project" File-menu item (id 110); four chooser start-dirs repointed (Templates both-subfolders-reachable, MIDI import, Builder audio import -> My Samples, IR fallback); two path literals centralized behind new `EffectPresetIO::userNamPedalsDir()` + `irDir()` resolvers; the 26-line dead ProjectBrowserWindow block deleted; the batch's founding "convert the choosers to native" premise was already void — all 18 pre-batch `juce::FileChooser` sites were native to begin with
 
-**Bucket:** System Pages, Effects. Batch `polite-homing-pigeon`. `blocks:` `<hash>`.
+**Bucket:** System Pages, Effects. Batch `polite-homing-pigeon`. `blocks:` `f4112b17`.
 *(Main Plan §5 had pre-assigned "UI / L&F / Theming, System Pages" back when this batch was framed
 as a look-and-feel sweep; nothing in the diff touches LAF, palette, theme or layout. The §5 Bucket
 line was corrected in place on Jeff's call, 2026-07-25.)*
@@ -121,7 +121,7 @@ line was corrected in place on Jeff's call, 2026-07-25.)*
 
 #### Commit(s)
 
-`<hash>` (whole batch — Tasks 1+2 + `irDir()` + Rule 6 pass + §B.26 + the CLAUDE.md build-invocation fix + the permissions prune + the two QA-VibeSlider hash backfills + held entry + running notes; single batch commit per the bulk-run model). Preceded by QA-VibeSlider `bd49d066`. Build clean in BOTH configs at both task gates; behavioral verification deferred to the R2 campaign pass against §B.26.
+`f4112b17` (whole batch — Tasks 1+2 + `irDir()` + Rule 6 pass + §B.26 + the CLAUDE.md build-invocation fix + the permissions prune + the two QA-VibeSlider hash backfills + held entry + running notes; single batch commit per the bulk-run model). Preceded by QA-VibeSlider `bd49d066`. Build clean in BOTH configs at both task gates; behavioral verification deferred to the R2 campaign pass against §B.26.
 
 #### Next action
 

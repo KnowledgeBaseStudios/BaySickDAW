@@ -34,9 +34,20 @@ void HarmlessXYZPad::attachToApvts (juce::AudioProcessorValueTreeState& apvts,
                                      const juce::String& xId, const juce::String& yId,
                                      const juce::String& zId)
 {
-    if (xId.isNotEmpty()) mXAtt = std::make_unique<SliderAtt> (apvts, xId, mXKnob);
-    if (yId.isNotEmpty()) mYAtt = std::make_unique<SliderAtt> (apvts, yId, mYKnob);
-    if (zId.isNotEmpty()) mZAtt = std::make_unique<SliderAtt> (apvts, zId, mZKnob);
+    // QA-ApvtsAutomation Task 5 follow-up: attached but never stamped, so the
+    // three mod knobs had no Automate menu.  Engine params -- absent from the
+    // MAIN apvts -- so automation reaches them only via this registry.
+    auto wire = [&apvts] (const juce::String& id, VibeSlider& knob,
+                          std::unique_ptr<SliderAtt>& att)
+    {
+        if (id.isEmpty()) return;
+        att = std::make_unique<SliderAtt> (apvts, id, knob);
+        knob.setComponentID (id);
+        VKnobAutomation::registerSliderAutomation (id, knob);
+    };
+    wire (xId, mXKnob, mXAtt);
+    wire (yId, mYKnob, mYAtt);
+    wire (zId, mZKnob, mZAtt);
 }
 
 void HarmlessXYZPad::paint (juce::Graphics& g)

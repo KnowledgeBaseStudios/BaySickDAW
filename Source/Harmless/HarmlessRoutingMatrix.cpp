@@ -29,7 +29,14 @@ void HarmlessRoutingMatrix::attachToApvts (juce::AudioProcessorValueTreeState& a
     const juce::String ids[] = { subId, protId, clipId, fxId, volId, envId };
     for (int i = 0; i < kNumSliders; ++i)
         if (ids[i].isNotEmpty())
+        {
             mSliderAtts[i] = std::make_unique<SliderAtt> (apvts, ids[i], mSliders[i]);
+            // QA-ApvtsAutomation Task 5 follow-up: attached but never stamped, so
+            // these six had no Automate menu.  Engine params -- absent from the
+            // MAIN apvts -- so automation reaches them only via this registry.
+            mSliders[i].setComponentID (ids[i]);
+            VKnobAutomation::registerSliderAutomation (ids[i], mSliders[i]);
+        }
 }
 
 void HarmlessRoutingMatrix::paint (juce::Graphics& g)

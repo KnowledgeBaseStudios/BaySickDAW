@@ -436,6 +436,10 @@ void VoxPage::selectEngine (EngineType e)
         auto* ed = static_cast<BaySickVocalEditor*> (mVocalProc->createEditor());
         mVocalEditor.reset (ed);
         if (mVocalEditor) addChildComponent (*mVocalEditor);
+        // QA-ApvtsAutomation: bare "bsv_*" / NAM-IR ids are shared by every Vox
+        // page, so automation keys need this page's index to stay distinct.
+        if (ed != nullptr)
+            ed->setAutomationPrefix ("vox" + juce::String (mPageIndex) + "_");
         // QA-Fd 9a: re-apply the global undo context onto a (re)built editor.
         if (ed != nullptr && mUndoCtx.isValid())
             ed->setUndoContext (mUndoCtx);

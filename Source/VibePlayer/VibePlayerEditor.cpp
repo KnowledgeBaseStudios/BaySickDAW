@@ -209,9 +209,15 @@ VibePlayerEditor::VibePlayerEditor (VibePlayerProcessor& p)
     //   Each attached slider gets its APVTS paramID as its componentID so that
     //   GlobalAutoRightClick + VKnobAutomation resolve the right-click Automate
     //   and Type-in-value menus. Pattern mirrors Harmless (see HarmlessEditor:387).
+    // QA-ApvtsAutomation: the stamped id is also the automation registry key.
+    // Engine params live outside the MAIN apvts, so the automation pass only
+    // reaches them through this registry -- without the registration the lane
+    // draws and plays back against nothing.
     auto wireID = [&p] (juce::Slider& s, const char* paramName)
     {
-        s.setComponentID (p.pid (paramName));
+        const juce::String id = p.pid (paramName);
+        s.setComponentID (id);
+        VKnobAutomation::registerSliderAutomation (id, s);
     };
     wireID (mSampleStartKnob,   "sampleStart");
     wireID (mStretchKnob,       "stretch");
@@ -244,9 +250,16 @@ VibePlayerEditor::VibePlayerEditor (VibePlayerProcessor& p)
 
     // D-CC2: same componentID pattern for non-slider attached components so
     // right-click Automate works on buttons + the detune-mode selector too.
-    mReverseTog .btn().setComponentID (p.pid ("reverse"));
-    mCutSelfTog .btn().setComponentID (p.pid ("cutSelf"));
-    mDetuneModeSel    .setComponentID (p.pid ("detuneMode"));
+    mReverseTog     .btn().setComponentID (p.pid ("reverse"));
+    mCutSelfTog     .btn().setComponentID (p.pid ("cutSelf"));
+    // QA-ApvtsAutomation Task 5 (BLU-378): cutSelfMode was attached but never
+    // stamped, so it was the one control here with no Automate menu.
+    mCutSelfModeTog .btn().setComponentID (p.pid ("cutSelfMode"));
+    mDetuneModeSel        .setComponentID (p.pid ("detuneMode"));
+    VKnobAutomation::registerButtonAutomation   (p.pid ("reverse"),     mReverseTog.btn());
+    VKnobAutomation::registerButtonAutomation   (p.pid ("cutSelf"),     mCutSelfTog.btn());
+    VKnobAutomation::registerButtonAutomation   (p.pid ("cutSelfMode"), mCutSelfModeTog.btn());
+    VKnobAutomation::registerSelectorAutomation (p.pid ("detuneMode"),  mDetuneModeSel);
 
     // ── APVTS Attachments ─────────────────────────────────────────────────────
     mSampleStartAtt   = std::make_unique<SliderAtt> (avts, pid ("sampleStart"),  mSampleStartKnob);

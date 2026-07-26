@@ -50,6 +50,15 @@ public:
         mEditor.reset();
     }
 
+    // QA-ApvtsAutomation: forward the owning Vox page's automation prefix to the
+    // hosted NAM/IR editor.  Its param ids are bare literals shared with every
+    // other NAM/IR instance (Inst pages included), so they need the page key.
+    void setAutomationPrefix (const juce::String& prefix)
+    {
+        if (auto* ne = dynamic_cast<BaySickNAMIREditor*> (mEditor.get()))
+            ne->setAutomationPrefix (prefix);
+    }
+
     void paint (juce::Graphics& g) override
     {
         g.fillAll (juce::Colour (0xff14161a));
@@ -276,6 +285,21 @@ public:
         mPitchRefLbl.setJustificationType (juce::Justification::centred);
         mPitchRefLbl.setColour (juce::Label::textColourId, juce::Colours::white.withAlpha (0.75f));
         mPitchRefLbl.setFont (juce::Font (juce::Font::getDefaultMonospacedFontName(), 14.0f, juce::Font::plain));
+
+        // QA-ApvtsAutomation: stamp the BARE param id on every automatable control
+        // here; BaySickVocalEditor::setAutomationPrefix later re-stamps each one
+        // with this page's "vox{N}_" prefix so the right-click Automate menu names
+        // the same key the registry answers to.  Without a stamp these controls
+        // were reachable only through the Event Editor's parameter browser.
+        mABSlot         .setComponentID (pid ("ab_slot"));
+        mPitchBypassBtn .setComponentID (pid ("pitch_realtime_bypass"));
+        mKeyCombo       .setComponentID (pid ("pitch_key"));
+        mScaleCombo     .setComponentID (pid ("pitch_scale"));
+        mRetuneSpeed    .setComponentID (pid ("pitch_retuneSpeed"));
+        mStrength       .setComponentID (pid ("pitch_strength"));
+        mHumanize       .setComponentID (pid ("pitch_humanize"));
+        mThroatShift    .setComponentID (pid ("pitch_throatShift"));
+        mFormantBtn     .setComponentID (pid ("pitch_formantPreserve"));
 
         startTimerHz (10);
     }
@@ -568,6 +592,74 @@ BaySickVocalEditor::BaySickVocalEditor (BaySickVocalProcessor& p)
 
     setActiveTab (TabBaySickVocals);
     setSize (kMinW, kMinH);
+}
+
+void BaySickVocalEditor::setAutomationPrefix (const juce::String& prefix)
+{
+    if (prefix.isEmpty()) return;
+    mAutomationPrefix = prefix;
+
+    if (auto* np = dynamic_cast<NAMIRHostPanel*> (mPanelBaySickNAMIR.get()))
+        np->setAutomationPrefix (prefix);
+
+    // Re-stamp every control that carries a bare param id with this page's prefix,
+    // so right-click Automate names the same key the registry answers to.  Done as
+    // a tree walk rather than a per-control list: the controls live in private
+    // nested panel classes (VocalChainPanel + the Align / Pitch sub-editors), and
+    // a walk picks up any stamp added there later without touching this function.
+    // Skips the NAM/IR subtree -- it was just prefixed by its own editor above.
+    std::function<void (juce::Component&)> restamp = [&] (juce::Component& c)
+    {
+        for (auto* child : c.getChildren())
+        {
+            if (child == nullptr) continue;
+            if (child == mPanelBaySickNAMIR.get()) continue;
+            const juce::String id = child->getComponentID();
+            if (id.isNotEmpty() && ! id.startsWith (prefix))
+                child->setComponentID (prefix + id);
+            restamp (*child);
+        }
+    };
+    restamp (*this);
+
+    // Capture lock (owner call 2026-07-25, docket 4=A): while THIS strip records,
+    // an automation write to the realtime-board set is vetoed for the same reason
+    // the UI greys those controls out -- an engage-edge mid-take clicks AND prints
+    // into the WET file.  Set matches the gate list in VocalChainPanel's timer
+    // exactly; chain Bypass is deliberately absent (it left the gate set at QA-Fd).
+    static const char* const kCaptureGated[] = {
+        "bsv_ab_slot",
+        "bsv_pitch_realtime_bypass",
+        "bsv_pitch_key",
+        "bsv_pitch_scale",
+        "bsv_pitch_retuneSpeed",
+        "bsv_pitch_strength",
+        "bsv_pitch_humanize",
+        "bsv_pitch_throatShift",
+        "bsv_pitch_formantPreserve",
+    };
+
+    auto* proc = &mProc;
+    auto isRecording = [proc]() -> bool
+    {
+        return proc->onIsStripRecording && proc->onIsStripRecording();
+    };
+
+    // Registration walks the engine's own parameter list so coverage stays
+    // complete as params are added, rather than tracking a per-control table.
+    for (auto* p : mProc.getParameters())
+    {
+        auto* rap = dynamic_cast<juce::RangedAudioParameter*> (p);
+        if (rap == nullptr) continue;
+
+        bool gated = false;
+        for (auto* g : kCaptureGated)
+            if (rap->paramID == g) { gated = true; break; }
+
+        VKnobAutomation::registerParameterAutomation (
+            prefix + rap->paramID, *rap, *this,
+            gated ? std::function<bool()> (isRecording) : std::function<bool()>{});
+    }
 }
 
 juce::Component* BaySickVocalEditor::panelForTab (int idx) const noexcept

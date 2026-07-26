@@ -165,7 +165,8 @@ void BaySickPedalsProcessor::publishPending (int slot,
     mSlots[slot].swapPending.store (true, std::memory_order_release);
 }
 
-bool BaySickPedalsProcessor::loadEffect (int slot, EffectType type)
+bool BaySickPedalsProcessor::loadEffect (int slot, EffectType type,
+                                         const juce::String& uuidOverride)
 {
     if (slot < 0 || slot >= kNumSlots)         return false;
     if (! isEffectAllowedInSlot (slot, type))  return false;
@@ -196,6 +197,11 @@ bool BaySickPedalsProcessor::loadEffect (int slot, EffectType type)
     {
         const juce::ScopedLock lk (mLoadLock);
         publishPending (slot, std::move (effect), type);
+        // Fresh identity on a user-facing swap (different pedal = different knobs,
+        // so its old lanes should not follow); restoreFullState passes the saved
+        // one so lanes survive a reload.  Mirrors EffectRack::loadEffect.
+        mSlots[(size_t) slot].uuid = uuidOverride.isNotEmpty() ? uuidOverride
+                                                               : juce::Uuid().toString();
     }
     fireDirty();   // 2026-05-05 lifecycle dirty
     return true;
@@ -210,6 +216,7 @@ bool BaySickPedalsProcessor::clearSlot (int slot)
     {
         const juce::ScopedLock lk (mLoadLock);
         publishPending (slot, nullptr, EffectType::None);
+        mSlots[(size_t) slot].uuid = {};
     }
     fireDirty();
     return true;
@@ -346,6 +353,7 @@ juce::ValueTree BaySickPedalsProcessor::captureFullState() const
         juce::ValueTree slotTree ("Slot");
         slotTree.setProperty ("index", i,                 nullptr);
         slotTree.setProperty ("type",  (int) s.type,      nullptr);
+        slotTree.setProperty ("uuid",  s.uuid,            nullptr);
         size_t dataBytes = 0;
         if (eff)
         {
@@ -453,6 +461,16 @@ void BaySickPedalsProcessor::restoreFullState (const juce::ValueTree& state)
         mSlots[slotIdx].active = std::move (effect);
         mSlots[slotIdx].pending.reset();
         mSlots[slotIdx].type   = type;
+        // Restore the saved automation identity so existing lanes keep pointing at
+        // this pedal.  Pre-uuid saves carry none: mint one rather than leaving it
+        // empty, or the slot's knobs would register under a blank key.
+        {
+            const juce::String savedUuid = slotTree.getProperty ("uuid", "").toString();
+            mSlots[slotIdx].uuid = type == EffectType::None
+                                     ? juce::String()
+                                     : (savedUuid.isNotEmpty() ? savedUuid
+                                                               : juce::Uuid().toString());
+        }
     }
 
     // 2026-05-05 (Bug B fix): bulk-restore swaps DSP pointers on every slot.

@@ -1683,7 +1683,7 @@ one Vox tab with a take, one Rusty tab, one effect loaded in a rack, and one mix
 
 ### §B.26 — QA-NativeDialogs (native Open Project + Quick Open Project + per-context default folders)
 
-`blocks:` `<hash>` (QA-NativeDialogs — backfill at commit). Debug exe FIRST (screenshot any
+`blocks:` `f4112b17` (QA-NativeDialogs). Debug exe FIRST (screenshot any
 jassert), then Release — mark each scenario `D:` and `R:`.
 
 **Scope note.** The old "convert the choosers to native" framing was void before this batch started
@@ -1736,6 +1736,85 @@ Acoustic Simulator, and a NAM Pedal.
       native dialog, the sweep overreached and the folder-or-file capability is lost.
       `D:__ R:__` notes:
 
+### §B.27 — QA-ApvtsAutomation (engine-param application, per-instance automation keys, dead `tk_` mirror retirement, BLU-378/379/492)
+
+`blocks:` `<hash>` (QA-ApvtsAutomation). Debug exe FIRST (screenshot any
+jassert), then Release — mark each scenario `D:` and `R:`.
+
+**Scope note.** The founding gap was real and is fixed: instrument-engine automation lanes drew
+but never applied. Three plan premises were void and the shipped scope differs — **NAMIR knobs
+already offered an Automate menu** (they lacked registration, not componentIDs); **pedals knobs
+carried no ids at all** (not wrong rack ids), and reaching them required giving pedal slots the
+permanent identity the FX rack already had; and **BLU-492 needed zero conversions** — every
+tone selector already round-trips through its DSP's own state, so the pre-accepted PRESET-BREAK
+was NOT spent and no preset format changed. Two extra scope items landed on owner calls: Harmless
+Part A/B became independently automatable per part, and pedals got full slot-tagging (docket B).
+
+Setup: a song-mode arrangement with at least two Layers tabs on the SAME engine type, one Inst tab
+with pedals loaded, one Vox tab, and a saved project from BEFORE this batch.
+
+- [ ] **AP-1 — the founding gap, end to end.** Harmless: right-click any knob > Automate, draw a
+      ramp in the Event Editor, play in SONG mode. The knob moves AND the timbre audibly follows.
+      Stop, then drag the playhead into the middle of the lane — the knob snaps to the lane value.
+      Before this batch the lane drew but did nothing.  `D:__ R:__` notes:
+- [ ] **AP-2 — same for the other three engines.** Repeat AP-1 for one BaySickSynth, one
+      BaySickBass, and one BaySickPlayer parameter.  `D:__ R:__` notes:
+- [ ] **AP-3 — two tabs, same engine, independent lanes.** Two Layers tabs both running
+      BaySickSynth. Automate the same knob on each. Each lane drives ONLY its own tab.
+      `D:__ R:__` notes:
+- [ ] **AP-4 — MUST-PASS: Harmless Part A and Part B are separately automatable.** On a shared
+      A/B knob (Brownian / Blur / Prism / Pluck Decay / Phaser Mask Rate): with Part A showing,
+      right-click > Automate and draw a lane. Switch to Part B, right-click the SAME knob >
+      Automate — you get a SECOND, distinct lane. Play: both parts respond to their own lane at
+      the same time, and switching the A/B view does not re-point either lane. This is the owner
+      call that both parts are layers, not modes.  `D:__ R:__` notes:
+- [ ] **AP-5 — the A/B selector offers no automation.** Right-click around the Part A/B selector:
+      there is NO "Automate: Part Select" entry, and the Event Editor's parameter browser does not
+      list `part_sel`. It is view state and both parts always sound.  `D:__ R:__` notes:
+- [ ] **AP-6 — NAMIR + Vocal lanes reach the sound.** Automate a NAM/IR knob and a Vocal Retune
+      knob (via right-click where offered, else pick the parameter in the Event Editor browser).
+      Each lane drives its own tab's sound.  `D:__ R:__` notes:
+- [ ] **AP-7 — MUST-PASS: per-instance keys across Inst/Vox tabs.** Two Inst tabs. Automate the
+      same NAM/IR parameter on each: the two lanes are distinct and each drives only its own tab.
+      Before this batch every Inst tab shared one key, so the last-opened tab would have won.
+      `D:__ R:__` notes:
+- [ ] **AP-8 — pedals are automatable at all (new capability).** Inst tab > pedals: automate a
+      pedal knob and confirm the lane drives that pedal's sound.  `D:__ R:__` notes:
+- [ ] **AP-9 — MUST-PASS: a pedal lane survives reordering.** With an active lane on a pedal in
+      slot 3, move that pedal to another slot (up/down arrows). The lane still drives THAT pedal,
+      not whatever now occupies slot 3. Then save, close, reopen the project — the lane still
+      drives the same pedal. This is the whole reason slots got permanent tags; if the lane
+      retargets, the tag is not travelling with the pedal.  `D:__ R:__` notes:
+- [ ] **AP-10 — swapping a pedal drops its lanes (correct behavior).** Replace a pedal with a
+      different effect type: its old lanes no longer drive it. Different pedal, different knobs —
+      matches how the FX rack already behaves.  `D:__ R:__` notes:
+- [ ] **AP-11 — capture lock holds against automation.** Vox tab: put an active lane on the A/B
+      slot AND one on Retune. Arm the strip and record a take. During the take neither lane flips
+      the chain — the realtime board stays put, and the take has no mid-take click. After the take
+      ends, the lanes resume driving normally.  `D:__ R:__` notes:
+- [ ] **AP-12 — mode baselines cover the new lanes.** Hand-set an engine knob, enter song mode
+      with a lane on it, play, then leave song mode: the knob returns to the hand-set value.
+      `D:__ R:__` notes:
+- [ ] **AP-13 — old project loads clean after the mirror retirement.** Open a project saved BEFORE
+      this batch: it loads with no error, and the Event Editor's parameter browser no longer lists
+      the dead `tk_*` mirror ids or the `tk_*_rack_slot*` family.  `D:__ R:__` notes:
+- [ ] **AP-14 — REGRESSION: existing automation families still apply.** Mixer fader lane, FX-rack
+      knob lane, and an M/S EQ lane all still drive their targets. The registry was extended, not
+      rewired.  `D:__ R:__` notes:
+- [ ] **AP-15 — REGRESSION: effect + pedal presets round-trip.** Save and reload presets covering
+      the selectors audited in Task 4 (Compressor ratio/knee/type, Reverb mode + tail shape,
+      Saturation tube type + harmonics + oversampling, Delay feedback filter, Phaser LFO wave) and
+      the Pedals EQ-type picker. Every selector comes back as saved. Task 4 concluded these
+      already persist and changed NO code — this scenario is what proves that conclusion.
+      `D:__ R:__` notes:
+- [ ] **AP-16 — Task 5 stragglers now offer Automate.** BaySickPlayer `cutSelfMode`, and Harmless
+      LFO Rate + LFO Shape, all now show an Automate entry on right-click and their lanes drive
+      the sound.  `D:__ R:__` notes:
+- [ ] **AP-17 — tab churn leaves no dead parameters.** Open a Layers tab, pick an engine, automate
+      a knob, then close the tab. The Event Editor's parameter browser no longer lists that tab's
+      engine parameters. Reopen a tab in the same slot and automation works again.
+      `D:__ R:__` notes:
+
 ## §C — Deferred re-verify ledger
 
 Parked items from closed batches. Lands INSIDE QA-J-Verify's §B section when that section is
@@ -1756,9 +1835,11 @@ authored (locked at marathon item 1). The four:
 ## §E — Preset + patch-save walk
 
 Four families, ALL round-trip-verified (save -> reload -> identical state + audio), not just
-menu-clicked. Runs AFTER both PRESET-BREAKs land (QA-ClipPlayback bipolar-stereo; QA-ApvtsAutomation
-BLU-492). Source-ref detail lives in the run plan's §E notes (line refs re-resolve at section
-authoring).
+menu-clicked. Runs AFTER the QA-ClipPlayback bipolar-stereo PRESET-BREAK lands. **The second
+expected break did NOT happen:** QA-ApvtsAutomation's BLU-492 audit found every tone selector
+already round-trips through its DSP's own state, so zero conversions were made and the preset
+format is unchanged (see §B.27 scope note + AP-15). Source-ref detail lives in the run plan's §E
+notes (line refs re-resolve at section authoring).
 
 - [ ] E1. Engine presets — 10 engines x every factory preset (params restore + audio as expected);
       user preset save/reload identical; presets survive project save/load.

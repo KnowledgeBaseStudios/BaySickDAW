@@ -384,9 +384,9 @@ public:
     // Called when a Layers/Bass/Drums page is created or destroyed.
     // trackId format: "tk_{index}_{engine}" e.g. "tk_0_Harmless", "tk_2_BaySickBass"
     // Engine types: "Harmless", "BaySickPlayer", "BaySickSynth", "BaySickBass", "BaySickDrums"
-    void registerParamsForTrack  (const juce::String& trackId, const juce::String& engineType);
-    void unregisterParamsForTrack(const juce::String& trackId);
-    bool isTrackRegistered       (const juce::String& trackId) const;
+    // QA-ApvtsAutomation (2026-07-25): registerParamsForTrack /
+    // unregisterParamsForTrack / isTrackRegistered removed -- they registered
+    // only dead param families (see PluginProcessor.cpp).
 
     // ── Engine processor registration (audio thread rendering) ───────────────
     // Called from LayersPage / BassPage on the message thread.
@@ -1319,18 +1319,14 @@ public:
 private:
     void syncMixerFromPatternManager();
 
-    // Lazy registration helpers (called from registerParamsForTrack)
-    void addParamsForHarmless    (const juce::String& prefix);
-    void addParamsForVibePlayer  (const juce::String& prefix);
-    void addParamsForBaySickSynth(const juce::String& prefix);
-    void addParamsForBaySickBass (const juce::String& prefix);
-    // 2026-04-25: addParamsForBaySickDrums removed.
+    // Lazy registration helpers (called from ensureMixerStripParams)
+    // QA-ApvtsAutomation (2026-07-25): the four engine mirror helpers removed
+    // with registerParamsForTrack; 2026-04-25: addParamsForBaySickDrums before them.
     void addParamsForTrackEQ     (const juce::String& prefix);
     void addParamsForTrackPreEQ  (const juce::String& prefix);   // §P4.3 pre-rack EQ block
     void addLiveInputParams      (const juce::String& prefix);   // R2: Vox/Inst _inputChannelIdx
     mutable juce::CriticalSection mInputChannelNamesLock;        // R2
     void addParamsForEQBank      (const juce::String& prefix, const juce::String& subPrefix);
-    void addParamsForEffectRack  (const juce::String& prefix);
 
     // ── 5F-4a: Mixer-strip lazy APVTS registration ───────────────────────────
     // Classifies which mixer-strip param family to register.

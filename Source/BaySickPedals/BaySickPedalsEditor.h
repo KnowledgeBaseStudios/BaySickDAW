@@ -34,6 +34,13 @@ public:
     explicit BaySickPedalsEditor (BaySickPedalsProcessor& proc);
     ~BaySickPedalsEditor() override;
 
+    // QA-ApvtsAutomation: the owning page supplies a per-instance channel prefix
+    // ("inst{N}_pedals").  Every pedal panel's automation ids are built from it
+    // plus the slot's stable uuid, so lanes stay distinct across Inst tabs and
+    // survive pedal reordering.  Call once, after construction.
+    void setAutomationPrefix (const juce::String& prefix);
+    const juce::String& getAutomationPrefix() const noexcept { return mAutomationPrefix; }
+
     void paint   (juce::Graphics&) override;
     void resized ()                  override;
 
@@ -66,6 +73,7 @@ private:
     void timerCallback() override;
 
     BaySickPedalsProcessor& mProc;
+    juce::String            mAutomationPrefix;
     std::array<std::unique_ptr<PedalSlotComponent>, BaySickPedalsProcessor::kNumSlots> mTiles;
     EffectType mLastTypes[BaySickPedalsProcessor::kNumSlots] {};
     int        mDropTargetSlot { -1 };

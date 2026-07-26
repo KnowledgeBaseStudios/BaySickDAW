@@ -102,13 +102,21 @@ public:
         EffectType               type     { EffectType::None };
         // No Slot.bypassed here -- bypass lives in APVTS as `bsp_slot{N}_bypass`
         // (UI binding via attachment).  The audio path reads via apvts.
-        // No outputGainDb / uuid / scPick yet -- per-pedal master output / per-
-        // pedal preset menus / per-pedal SC routing land in later batches.
+        // No outputGainDb / scPick yet -- per-pedal master output / per-pedal SC
+        // routing land in later batches.
+
+        // QA-ApvtsAutomation: stable per-slot identity for automation paramIds,
+        // mirroring EffectRack::Slot::uuid.  Automation keys MUST NOT be the slot
+        // index: moveSlot/clearSlot shuffle contents between indices, so an
+        // index-keyed lane would silently retarget a different pedal.  The uuid
+        // travels with the effect and is persisted, so lanes survive reorder and
+        // project reload.  Empty for an empty slot.
+        juce::String             uuid;
 
         Slot() = default;
         Slot(Slot&& o) noexcept
             : active(std::move(o.active)), pending(std::move(o.pending)),
-              type(o.type)
+              type(o.type), uuid(std::move(o.uuid))
         {
             swapPending.store (o.swapPending.load());
         }
@@ -119,6 +127,7 @@ public:
                 active  = std::move(o.active);
                 pending = std::move(o.pending);
                 type    = o.type;
+                uuid    = std::move(o.uuid);
                 swapPending.store (o.swapPending.load());
             }
             return *this;
@@ -129,7 +138,16 @@ public:
     // Loads `type` into slot if allowed by the slot's locking policy
     // (isEffectAllowedInSlot).  Returns false if disallowed (e.g., trying to
     // load OverdriveStyle into slot 0).
-    bool loadEffect      (int slot, EffectType type);
+    // uuidOverride restores a saved slot identity (restoreFullState) so automation
+    // lanes survive a reload; empty means "fresh identity", which is what a
+    // user-facing effect swap wants -- different pedal, different knobs.
+    bool loadEffect      (int slot, EffectType type, const juce::String& uuidOverride = {});
+
+    // QA-ApvtsAutomation: stable automation key for this slot's current pedal.
+    juce::String getSlotUuid (int slot) const
+    {
+        return (slot >= 0 && slot < kNumSlots) ? mSlots[(size_t) slot].uuid : juce::String();
+    }
 
     // Clear slot.  Slot 0 (Tuner) and slot 7 (EQ) cannot be cleared --- they
     // always hold their default type.  Returns false for those slots.

@@ -153,6 +153,20 @@ public:
         mBypassAttach.reset();
     }
 
+    // QA-ApvtsAutomation: give this slot's panel its automation identity.  The key
+    // is the pedal's stable uuid, NOT the slot index -- reordering moves whole
+    // Slot objects, so an index-keyed lane would silently retarget another pedal.
+    // Safe to call repeatedly: setSlotContext re-stamps and re-registers, and the
+    // registry assigns by key.  No-ops until the owning page supplies the prefix.
+    void applyAutomationContext()
+    {
+        if (mPanel == nullptr) return;
+        const juce::String prefix = mParent.getAutomationPrefix();
+        if (prefix.isEmpty()) return;
+        if (auto* base = dynamic_cast<EditorPanelBase*> (mPanel.get()))
+            base->setSlotContext (prefix, mProc.getSlotUuid (mSlot));
+    }
+
     void rebuild()
     {
         const auto type = mProc.getSlotType (mSlot);
@@ -218,7 +232,10 @@ public:
             {
                 mPanel = createEffectEditor (dsp, type, EditorPanelBase::PanelMode::Pedal);
                 if (mPanel)
+                {
                     addAndMakeVisible (*mPanel);
+                    applyAutomationContext();
+                }
             }
         }
 
@@ -660,6 +677,7 @@ BaySickPedalsEditor::BaySickPedalsEditor (BaySickPedalsProcessor& proc)
         addAndMakeVisible (*mTiles[s]);
         mLastTypes[s] = proc.getSlotType (s);
     }
+
     startTimerHz (10);
 
     // 2026-05-05 (Bug B fix): subscribe to bulk-restore notifications so we
@@ -692,6 +710,18 @@ BaySickPedalsEditor::~BaySickPedalsEditor()
     stopTimer();
     mProc.onSlotsExternallyChanged = nullptr;
     for (auto& tile : mTiles) tile.reset();
+}
+
+void BaySickPedalsEditor::setAutomationPrefix (const juce::String& prefix)
+{
+    if (prefix.isEmpty() || prefix == mAutomationPrefix) return;
+    mAutomationPrefix = prefix;
+
+    // Tiles are built before the owning page supplies the prefix, so any panel
+    // that already exists needs its automation identity applied retroactively.
+    for (auto& t : mTiles)
+        if (t != nullptr)
+            t->applyAutomationContext();
 }
 
 void BaySickPedalsEditor::paint (juce::Graphics& g)

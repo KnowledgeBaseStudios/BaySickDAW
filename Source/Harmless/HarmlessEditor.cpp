@@ -473,10 +473,16 @@ HarmlessEditor::HarmlessEditor (HarmlessProcessor& p)
     // T1d/T1e 2026-04-19: setComponentID + setTooltip on every attached slider
     // so GlobalAutoRightClick exposes the "Automate: ..." + "Type in value..."
     // menus and hover reveals the param name + units. ASCII-only strings.
+    // QA-ApvtsAutomation: the stamped id is also the automation registry key.
+    // Engine params live outside the MAIN apvts, so the automation pass only
+    // reaches them through this registry -- without the registration the lane
+    // draws and plays back against nothing.
     auto wireMeta = [&p] (juce::Slider& s, const char* paramSuffix, const char* tip)
     {
-        s.setComponentID (p.pid (paramSuffix));
+        const juce::String id = p.pid (paramSuffix);
+        s.setComponentID (id);
         s.setTooltip     (tip);
+        VKnobAutomation::registerSliderAutomation (id, s);
     };
     // Top-Left
     wireMeta (mTimbreBlend,    "timbre_blend",     "Timbre Blend - crossfades Part A toward Part B (0..1)");
@@ -529,9 +535,37 @@ HarmlessEditor::HarmlessEditor (HarmlessProcessor& p)
     // S2 wires
     wireMeta (mBlurTime,       "blur_time",        "Blur Time - kernel width scale (0..2, default 1)");
     wireMeta (mBlurHarm,       "blur_harm",        "Blur Harm - harmonic-axis bias (0..1)");
-    // S4: lfo_rate / lfo_shape wireMeta removed (params ripped).
+    // QA-ApvtsAutomation Task 5 (BLU-378): the S4 note here claimed lfo_rate /
+    // lfo_shape were "ripped".  They were not -- both params are registered
+    // (HarmlessProcessor.cpp:494-495), read by the DSP (:960-961), and attached
+    // (:406-407).  Two visible, working knobs were simply missing their Automate
+    // menu on the strength of a stale comment.
+    wireMeta (mLfoRate,        "lfo_rate",         "LFO Rate (global) - cycle length for every target's LFO source");
+    wireMeta (mLfoShape,       "lfo_shape",        "LFO Shape (global) - Sine / Triangle / Saw / Square");
     // Bottom-Left
-    wireMeta (mPartSel,        "part_sel",         "Part Selector (A=0, B=1) - editor-side, no DSP effect today");
+    // QA-ApvtsAutomation (Jeff 2026-07-25): part_sel is editor view state -- it
+    // picks which part the shared knobs edit and is never read by the DSP, since
+    // both parts always render.  Deliberately NOT stamped: a componentID here
+    // would advertise an Automate menu whose lane could never do anything
+    // (matches docket 5=A, view/display selectors stay local).
+    mPartSel.setTooltip ("Part Selector (A=0, B=1) - chooses which part the knobs edit");
+
+    // QA-ApvtsAutomation Task 5 follow-up (Jeff 2026-07-25): the last stragglers.
+    // All five are attached but were never stamped, so they offered no Automate
+    // menu.  Engine params -- absent from the MAIN apvts -- so automation reaches
+    // them only via this registry.  pluck_blur is deliberately absent: it is a
+    // Part A/B dual, already stamped + registered by rebindToPart.
+    auto wireBtn = [&p] (juce::Button& b, const char* paramName)
+    {
+        const juce::String id = p.pid (paramName);
+        b.setComponentID (id);
+        VKnobAutomation::registerButtonAutomation (id, b);
+    };
+    wireBtn (mLegatoBtn,      "legato");
+    wireBtn (mUnisonAltBtn,   "unison_alt");
+    wireBtn (mVelLinkBtn,     "vel_link");
+    wireBtn (mCutSelfBtn,     "cutSelf");
+    wireBtn (mCutSelfModeBtn, "cutSelfMode");
     wireMeta (mVolume,         "volume",           "Master Volume (0..1)");
     wireMeta (mPan,            "pan",              "Master Pan (-1..+1)");
     wireMeta (mAmpA,           "amp_a",            "Amp Attack (seconds)");
@@ -589,6 +623,33 @@ HarmlessEditor::HarmlessEditor (HarmlessProcessor& p)
     pluckBlurDual.paramA = p.pid ("pluck_blur");
     pluckBlurDual.paramB = p.pid ("partB_pluck_blur");
     mDualButtons.push_back (std::move (pluckBlurDual));
+
+    // QA-ApvtsAutomation (Jeff 2026-07-25): Part A and Part B both render at all
+    // times -- Part B is a second layer, not an alternate mode -- so each part's
+    // param owns an independent automation lane and both can play at once.
+    // Registering the PARAM (not the shared knob) is what makes that possible:
+    // one knob is time-shared between the two params, so a knob-driven applicator
+    // would write whichever part happens to be bound and collapse both lanes onto
+    // the same target.  These deliberately supersede the knob-driven registrations
+    // wireMeta made above for the Part A ids.
+    auto regDualParam = [&p] (const juce::String& id, juce::Component& guard)
+    {
+        if (auto* rap = p.apvts.getParameter (id))
+            VKnobAutomation::registerParameterAutomation (id, *rap, guard);
+    };
+    for (auto& d : mDualSliders)
+        if (d.slider != nullptr)
+        {
+            regDualParam (d.paramA, *d.slider);
+            regDualParam (d.paramB, *d.slider);
+        }
+    for (auto& d : mDualButtons)
+        if (d.button != nullptr)
+        {
+            regDualParam (d.paramA, *d.button);
+            regDualParam (d.paramB, *d.button);
+        }
+
     if (auto* pp = p.apvts.getRawParameterValue (p.pid ("part_sel")))
         mActivePart = (pp->load() > 0.5f) ? 1 : 0;
     rebindToPart (mActivePart);
@@ -611,12 +672,18 @@ void HarmlessEditor::rebindToPart (int part)
         d.current.reset();
         d.current = std::make_unique<SliderAtt> (
             apvts, mActivePart == 0 ? d.paramA : d.paramB, *d.slider);
+        // QA-ApvtsAutomation: the componentID tracks the visible part so
+        // right-click Automate makes a lane for the part being edited. Both
+        // parts stay independently automatable -- applicators for BOTH ids are
+        // registered once at construction and are not touched by the rebind.
+        d.slider->setComponentID (mActivePart == 0 ? d.paramA : d.paramB);
     }
     for (auto& d : mDualButtons)
     {
         d.current.reset();
         d.current = std::make_unique<ButtonAtt> (
             apvts, mActivePart == 0 ? d.paramA : d.paramB, *d.button);
+        d.button->setComponentID (mActivePart == 0 ? d.paramA : d.paramB);
     }
 }
 

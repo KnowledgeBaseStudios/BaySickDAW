@@ -20,6 +20,15 @@ class BaySickNAMIREditor : public juce::AudioProcessorEditor,
 {
 public:
     explicit BaySickNAMIREditor (BaySickNAMIRProcessor&);
+
+    // QA-ApvtsAutomation: per-instance automation keys.  This engine's param ids
+    // are bare literals ("output", "nam_bypass", "oversampling") and are identical
+    // across all 20 Inst / 6 Vox pages, each of which owns its own processor and
+    // apvts -- so a shared registry key would let the last-built tab win every
+    // lane.  The owning page hands down "inst{N}_" / "vox{N}_"; the registry key
+    // and each control's Automate-menu id both use the prefixed form while the
+    // applicator writes THIS page's own parameter.  Call once, after construction.
+    void setAutomationPrefix (const juce::String& prefix);
     ~BaySickNAMIREditor() override;
 
     void paint   (juce::Graphics&) override;

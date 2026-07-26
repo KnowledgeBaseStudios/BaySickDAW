@@ -1,8 +1,57 @@
 #include "BaySickNAMIREditor.h"
+#include "../Standalone/SharedUI.h"   // VKnobAutomation registration
 
 // ─────────────────────────────────────────────────────────────────────────────
 // BaySickNAMIREditor - Phase G-1.4 implementation.
 // ─────────────────────────────────────────────────────────────────────────────
+
+void BaySickNAMIREditor::setAutomationPrefix (const juce::String& prefix)
+{
+    if (prefix.isEmpty()) return;
+
+    // Registration walks the engine's OWN parameter list rather than a
+    // hand-maintained control table: coverage is complete by construction and
+    // stays correct when params are added, since a table silently rots instead.
+    for (auto* p : processor.getParameters())
+        if (auto* rap = dynamic_cast<juce::RangedAudioParameter*> (p))
+            VKnobAutomation::registerParameterAutomation (prefix + rap->paramID, *rap, *this);
+
+    // The controls' Automate-menu ids must match the registry keys above, so the
+    // lane a right-click creates is the lane the registry answers to.
+    auto knob = [&prefix] (VKnob& k, const char* id)               { k.paramId = prefix + id; };
+    auto tog  = [&prefix] (DualLabelToggle& t, const char* id)     { t.btn().setComponentID (prefix + id); };
+    auto sel  = [&prefix] (ChickenHeadSelector& s, const char* id) { s.setComponentID (prefix + id); };
+    auto cbo  = [&prefix] (juce::ComboBox& c, const char* id)      { c.setComponentID (prefix + id); };
+
+    knob (mInGainKnob,                "input_gain");
+    knob (mGateThreshKnob,            "gate_threshold");
+    knob (mGateReleaseKnob,           "gate_release");
+    knob (mLowCutKnob,                "low_cut");
+    knob (mHighCutKnob,               "high_cut");
+    knob (mCabMixKnob,                "cab_mix");
+    knob (mOutputKnob,                "output");
+    knob (mMicSimMixKnob,             "nam_micsim_mix");
+    knob (mMicPlacementDistanceKnob,  "nam_placement_distance_cm");
+    knob (mMicPlacementAngleKnob,     "nam_placement_angle_deg");
+    knob (mMicPlacementMixKnob,       "nam_placement_mix");
+    knob (mMicSimMixKnobB,            "nam_micsim_b_mix");
+    knob (mMicPlacementDistanceKnobB, "nam_placement_b_distance_cm");
+    knob (mMicPlacementAngleKnobB,    "nam_placement_b_angle_deg");
+    knob (mMicPlacementMixKnobB,      "nam_placement_b_mix");
+
+    tog  (mNamBypassToggle,           "nam_bypass");
+    tog  (mCabBypassToggle,           "cab_bypass");
+    tog  (mMicBActiveToggle,          "nam_micb_active");
+
+    sel  (mOSSelector,                "oversampling");
+    sel  (mMicSimMode,                "nam_micsim_mode");
+    sel  (mMicPlacementPolar,         "nam_placement_polar");
+    sel  (mMicSimModeB,               "nam_micsim_b_mode");
+    sel  (mMicPlacementPolarB,        "nam_placement_b_polar");
+
+    cbo  (mMicSimModelCombo,          "nam_micsim_model");
+    cbo  (mMicSimModelComboB,         "nam_micsim_b_model");
+}
 
 namespace
 {

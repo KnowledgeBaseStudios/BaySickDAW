@@ -50,10 +50,6 @@ LayersPage::~LayersPage()
         mPlayerTab->removeChildComponent(mEngineEditor.get());
     mEngineEditor.reset();
     mEngineProcessor.reset();
-
-    // Unregister lazy APVTS params
-    if (mEngineLocked)
-        mProcessor.unregisterParamsForTrack(trackId());
 }
 
 // ── Tab switching ─────────────────────────────────────────────────────────────
@@ -143,9 +139,6 @@ void LayersPage::selectEngine(const juce::String& engineName)
     mEngineType   = engineName;
     mEngineLocked = true;
     refreshPianoRollContextLabel();
-
-    // Register lazy APVTS params (engine + pre-rack EQ + effect rack)
-    mProcessor.registerParamsForTrack(trackId(), engineName);
 
     // Destroy any previous editor before processor (order matters)
     if (mEngineEditor && mPlayerTab)

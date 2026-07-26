@@ -1714,6 +1714,137 @@ namespace VKnobAutomation
     std::function<void()>                                                        sOnMidiSaveAsDefault;
     std::function<bool()>                                                        sHasAnyMidiMappings;
 
+    void registerSliderAutomation (const juce::String& paramId, juce::Slider& slider)
+    {
+        if (paramId.isEmpty()) return;
+
+        juce::Component::SafePointer<juce::Slider> safeSl (&slider);
+
+        if (sOnRegisterApplicator)
+            sOnRegisterApplicator (paramId, [safeSl] (float v01)
+            {
+                auto* sl = safeSl.getComponent();
+                if (sl == nullptr) return;
+                const double lo = sl->getMinimum(), hi = sl->getMaximum();
+                sl->setValue (lo + (double) v01 * (hi - lo), juce::sendNotification);
+            });
+
+        if (sOnRegisterReader)
+            sOnRegisterReader (paramId, [safeSl]() -> float
+            {
+                auto* sl = safeSl.getComponent();
+                if (sl == nullptr) return 0.5f;
+                const double lo = sl->getMinimum(), hi = sl->getMaximum();
+                const double range = hi - lo;
+                return range > 0.0 ? (float) ((sl->getValue() - lo) / range) : 0.5f;
+            });
+    }
+
+    void registerButtonAutomation (const juce::String& paramId, juce::Button& button)
+    {
+        if (paramId.isEmpty()) return;
+
+        juce::Component::SafePointer<juce::Button> safeBtn (&button);
+
+        if (sOnRegisterApplicator)
+            sOnRegisterApplicator (paramId, [safeBtn] (float v01)
+            {
+                if (auto* b = safeBtn.getComponent())
+                    if (b->getToggleState() != (v01 >= 0.5f))
+                        b->setToggleState (v01 >= 0.5f, juce::sendNotification);
+            });
+
+        if (sOnRegisterReader)
+            sOnRegisterReader (paramId, [safeBtn]() -> float
+            {
+                auto* b = safeBtn.getComponent();
+                return (b != nullptr && b->getToggleState()) ? 1.0f : 0.0f;
+            });
+    }
+
+    void registerComboAutomation (const juce::String& paramId, juce::ComboBox& combo)
+    {
+        if (paramId.isEmpty()) return;
+
+        juce::Component::SafePointer<juce::ComboBox> safeCbo (&combo);
+
+        if (sOnRegisterApplicator)
+            sOnRegisterApplicator (paramId, [safeCbo] (float v01)
+            {
+                auto* c = safeCbo.getComponent();
+                if (c == nullptr) return;
+                const int n = c->getNumItems();
+                if (n <= 0) return;
+                const int idx = juce::jlimit (0, n - 1, (int) std::round (v01 * (float) (n - 1)));
+                if (c->getSelectedItemIndex() != idx)
+                    c->setSelectedItemIndex (idx, juce::sendNotification);
+            });
+
+        if (sOnRegisterReader)
+            sOnRegisterReader (paramId, [safeCbo]() -> float
+            {
+                auto* c = safeCbo.getComponent();
+                if (c == nullptr) return 0.0f;
+                const int n = c->getNumItems();
+                if (n <= 1) return 0.0f;
+                return juce::jlimit (0.0f, 1.0f,
+                                     (float) c->getSelectedItemIndex() / (float) (n - 1));
+            });
+    }
+
+    void registerParameterAutomation (const juce::String& paramId,
+                                      juce::RangedAudioParameter& param,
+                                      juce::Component& lifetimeGuard,
+                                      std::function<bool()> suppressWhen)
+    {
+        if (paramId.isEmpty()) return;
+
+        juce::Component::SafePointer<juce::Component> safeGuard (&lifetimeGuard);
+        auto* rap = &param;
+
+        if (sOnRegisterApplicator)
+            sOnRegisterApplicator (paramId, [safeGuard, rap, suppressWhen] (float v01)
+            {
+                if (safeGuard.getComponent() == nullptr) return;
+                if (suppressWhen && suppressWhen()) return;
+                rap->setValueNotifyingHost (juce::jlimit (0.0f, 1.0f, v01));
+            });
+
+        if (sOnRegisterReader)
+            sOnRegisterReader (paramId, [safeGuard, rap]() -> float
+            {
+                return safeGuard.getComponent() != nullptr ? rap->getValue() : 0.5f;
+            });
+    }
+
+    void registerSelectorAutomation (const juce::String& paramId, ChickenHeadSelector& selector)
+    {
+        if (paramId.isEmpty()) return;
+
+        juce::Component::SafePointer<ChickenHeadSelector> safeSel (&selector);
+
+        if (sOnRegisterApplicator)
+            sOnRegisterApplicator (paramId, [safeSel] (float v01)
+            {
+                auto* sel = safeSel.getComponent();
+                if (sel == nullptr) return;
+                const int last = sel->getNumOptions() - 1;
+                if (last < 0) return;
+                const int idx = juce::jlimit (0, last, (int) std::lround ((double) v01 * last));
+                if (sel->getSelectedIndex() != idx)
+                    sel->setSelectedIndex (idx, juce::sendNotification);
+            });
+
+        if (sOnRegisterReader)
+            sOnRegisterReader (paramId, [safeSel]() -> float
+            {
+                auto* sel = safeSel.getComponent();
+                if (sel == nullptr) return 0.0f;
+                const int last = sel->getNumOptions() - 1;
+                return last > 0 ? (float) sel->getSelectedIndex() / (float) last : 0.0f;
+            });
+    }
+
     int appendMidiLearnMenuItems (juce::PopupMenu& m, const juce::String& paramId, int firstId)
     {
         // Skip the section entirely on plugin builds where StandaloneEditor

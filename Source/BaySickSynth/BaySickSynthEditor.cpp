@@ -386,9 +386,15 @@ BaySickSynthEditor::BaySickSynthEditor (BaySickSynthProcessor& p)
     //   Each attached slider gets its full APVTS paramID as its componentID so
     //   GlobalAutoRightClick + VKnobAutomation resolve the right-click Automate
     //   and Type-in-value menus. Pattern mirrors VibePlayer (see VibePlayerEditor:203).
+    // QA-ApvtsAutomation: the stamped id is also the automation registry key.
+    // Engine params live outside the MAIN apvts, so the automation pass only
+    // reaches them through this registry -- without the registration the lane
+    // draws and plays back against nothing.
     auto wireID = [&p] (juce::Slider& s, const char* paramName)
     {
-        s.setComponentID (p.pid (paramName));
+        const juce::String id = p.pid (paramName);
+        s.setComponentID (id);
+        VKnobAutomation::registerSliderAutomation (id, s);
     };
     wireID (mTransposeKnob,   "transpose");
     wireID (mModifierKnob,    "modifier");

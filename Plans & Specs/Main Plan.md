@@ -1919,8 +1919,8 @@ kit fan-out behavior locked at docket #10 (a/a, default unmapped).
 - Dependencies: the G2 vocal builds (QA-F/QA-Fa add ~30-45 params) land first so the audit covers the final param surface.
 - Sequencing: **immediately after QA-NativeDialogs, before QA-Verify** (Jeff-approved slot via the bulk-run plan approval 2026-07-08, `Batch Plans/swift-stampeding-caribou.md`; see §6 arrow + §9 fifty-fifth Forks entry).
 - Effort: medium (~6-10 hours).
-- **Bucket:** Cross-cutting Infrastructure, UI / L&F / Theming
-- Verify (Master Test Plan §B section): sampled controls per engine/panel automate end-to-end (lane writes + playback drives the control); the audit table shows zero unbound user-changeable controls; combo-box params round-trip through preset save/load post-BLU-492.
+- **Bucket:** Players, Effects, Cross-cutting Infrastructure *(corrected in place 2026-07-25 at code-complete, per the QA-NativeDialogs precedent. The original "Cross-cutting Infrastructure, UI / L&F / Theming" was assigned when this batch was framed as an audit sweep; nothing in the shipped diff touches VibeLAF, palette, theme or layout. What shipped: the four instrument-engine editors + BaySickNAMIR / BaySickVocal / BaySickPedals (**Players**); the pedals processor's slot-uuid + persistence work and the `EffectEditorPanels::setSlotContext` reach plus the Task 4 effect-panel selector audit (**Effects**); the `VKnobAutomation` registry, `PluginProcessor` param registration and the `StandaloneEditor` tab-close lifecycle (**Cross-cutting Infrastructure**).)*
+- Verify (Master Test Plan §B section): **authored as §B.27, 17 scenarios (AP-1..AP-17)**, reconciled against what shipped. Three MUST-PASS: AP-4 (Harmless Part A and Part B separately automatable), AP-7 (per-instance keys across two Inst tabs), AP-9 (a pedal lane survives reorder + project reload). Note the original verify line's third clause is void: **BLU-492 required zero conversions** — every tone selector already round-trips through its DSP's own `getStateInformation`, so no combo became an APVTS param and the **PRESET-BREAK was never spent** (AP-15 is the scenario that proves it).
 
 #### **QA-Verify: Phase 5A/5B/5C systems verification** (added 2026-05-08 via Rule 3 — see §9)
 **Plan file:** [`Plans & Specs/Batch Plans/sturdy-tagging-pangolin.md`](Batch Plans/sturdy-tagging-pangolin.md) *(G4 group open 2026-07-25 — code half collapsed to pedals state hygiene: the pedalboard preset bug is already fixed (2026-05-05 base64 fix, runtime-log-verified); the 10-engine walk = campaign §E — see §9 sixty-fourth Forks entry)*
@@ -2918,8 +2918,13 @@ inserted 2026-07-08 at bulk-run plan approval — full APVTS + automation covera
 review across every editor/panel; superset of QA-L's BLU-378/379/492 (migration
 pending marathon confirm); BLU-492 = PRESET-BREAK, must precede the preset walk +
 QA-Templates.  Slotted **immediately after QA-NativeDialogs, before QA-Verify**
-(Jeff-approved via bulk-run plan approval).  Bucket: Cross-cutting Infrastructure,
-UI / L&F / Theming.  See §9 fifty-fifth Forks entry.
+(Jeff-approved via bulk-run plan approval).  Bucket: Players, Effects, Cross-cutting
+Infrastructure *(corrected 2026-07-25 at code-complete — was "Cross-cutting
+Infrastructure, UI / L&F / Theming"; the shipped diff touches no L&F surface.  See
+the §5 entry for the per-bucket breakdown)*.  **The BLU-492 PRESET-BREAK never
+happened** — the audit found every tone selector already round-trips through its own
+DSP state, so zero conversions were made and the preset-format sequencing constraint
+above is moot.  See §9 fifty-fifth Forks entry.
 
 \*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\* **QA-UndoCoverage**
 inserted 2026-07-08 at bulk-run plan approval — app-wide undo-history coverage

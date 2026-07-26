@@ -1,5 +1,6 @@
 #include "InstPage.h"
 #include "../BaySickNAMIR/BaySickNAMIRProcessor.h"
+#include "../BaySickNAMIR/BaySickNAMIREditor.h"   // QA-ApvtsAutomation: setAutomationPrefix
 #include "../BaySickPedals/BaySickPedalsProcessor.h"
 #include "../BaySickPedals/BaySickPedalsEditor.h"           // QA-A 4.4 (2026-05-09): wire onPedalboardPresetMenu
 #include "../BaySickGuitars/BaySickGuitarsProcessor.h"   // K-2: sfizz Guitars front-end
@@ -86,6 +87,10 @@ InstPage::InstPage (int pageIndex)
         mNamIrProc = std::move (nam);
         mNamIrEditor.reset (mNamIrProc->createEditor());
         if (mNamIrEditor) addChildComponent (*mNamIrEditor);
+        // QA-ApvtsAutomation: NAM/IR param ids are bare literals shared by every
+        // Inst page, so automation keys need this page's index to stay distinct.
+        if (auto* ne = dynamic_cast<BaySickNAMIREditor*> (mNamIrEditor.get()))
+            ne->setAutomationPrefix ("inst" + juce::String (pageIndex) + "_");
     }
 
     // I-15 (2026-05-03): real BaySickPedals processor + 4x2 rack editor.
@@ -95,6 +100,10 @@ InstPage::InstPage (int pageIndex)
         mPedalsProc = std::move (pedals);
         mPedalsEditor.reset (mPedalsProc->createEditor());
         if (mPedalsEditor) addChildComponent (*mPedalsEditor);
+        // QA-ApvtsAutomation: per-instance channel prefix; each pedal's lane key
+        // is this plus the slot's stable uuid, so lanes survive pedal reordering.
+        if (auto* pe = dynamic_cast<BaySickPedalsEditor*> (mPedalsEditor.get()))
+            pe->setAutomationPrefix ("inst" + juce::String (pageIndex) + "_pedals");
 
         // QA-A 4.4 (2026-05-09): hook the pedalboard preset button (now
         // hosted in BaySickPedalsEditor's title bar trailing area) back to

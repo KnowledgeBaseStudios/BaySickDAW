@@ -37,6 +37,12 @@ public:
     explicit BaySickVocalEditor (BaySickVocalProcessor& p);
     ~BaySickVocalEditor() override = default;
 
+    // QA-ApvtsAutomation: the owning Vox page hands down "vox{N}_".  Vocal param
+    // ids ("bsv_*") and the hosted NAM/IR's bare ids are identical across all 6
+    // Vox pages, each owning its own processor, so automation registry keys need
+    // the page index to stay distinct.  Call once, after construction.
+    void setAutomationPrefix (const juce::String& prefix);
+
     void paint   (juce::Graphics&) override;
     void resized() override;
 
@@ -60,6 +66,9 @@ private:
     class PlaceholderPanel;
     class HostPanel;
     class NAMIRHostPanel;
+
+    // QA-ApvtsAutomation: "vox{N}_" from the owning page; empty until set.
+    juce::String                        mAutomationPrefix;
 
     std::unique_ptr<BaySickVocalsPanel> mPanelBaySickVocals;
     std::unique_ptr<VocalChainPanel>    mPanelVocalChain;

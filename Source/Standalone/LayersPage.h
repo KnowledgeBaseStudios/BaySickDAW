@@ -16,9 +16,9 @@
 //   Tab 1 "Piano Roll" - PianoRollContainer bound to layerRoll[mPageIndex]
 //
 // Engine choices: Harmless | VibePlayer | BaySickSynth
-// Each page owns its engine processor + editor (created on first engine selection).
-// Per-page APVTS params lazily registered via mProcessor.registerParamsForTrack()
-// on first engine selection.
+// Each page owns its engine processor + editor (created on first engine selection),
+// and the engine owns its own APVTS.  QA-ApvtsAutomation (2026-07-25): the main
+// processor's parallel "tk_*" mirror registration is gone -- it was never read.
 // ─────────────────────────────────────────────────────────────────────────────
 class LayersPage : public juce::Component,
                    public juce::Timer,

@@ -55,6 +55,24 @@ void HarmlessFilterRow::attachToApvts (juce::AudioProcessorValueTreeState& apvts
         mKbTrack.setComponentID (kbTrackId);
         mKbTrack.setTooltip ("Filter Keyboard Tracking (0..1)");
     }
+
+    // QA-ApvtsAutomation: these ids are engine params, absent from the MAIN
+    // apvts, so the automation pass reaches them only via this registry.
+    VKnobAutomation::registerSliderAutomation (cutoffId, mFreqKnob);
+    VKnobAutomation::registerSliderAutomation (resId,    mResKnob);
+    VKnobAutomation::registerSliderAutomation (envAmtId, mEnvKnob);
+    if (!kbTrackId.isEmpty())
+        VKnobAutomation::registerSliderAutomation (kbTrackId, mKbTrack);
+
+    // Task 5 follow-up: the filter TYPE combo is tone state (it selects the
+    // filter model), attached but never stamped -- so it was the one control on
+    // this row with no Automate menu.
+    if (!typeId.isEmpty())
+    {
+        mTypeCombo.setComponentID (typeId);
+        mTypeCombo.setTooltip ("Filter Type");
+        VKnobAutomation::registerComboAutomation (typeId, mTypeCombo);
+    }
 }
 
 void HarmlessFilterRow::paint (juce::Graphics& g)

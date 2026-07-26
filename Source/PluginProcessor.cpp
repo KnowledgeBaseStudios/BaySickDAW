@@ -5260,15 +5260,13 @@ juce::AudioProcessor* JUCE_CALLTYPE createPluginFilter()
 #endif
 
 // ── Lazy APVTS registration ───────────────────────────────────────────────────
-// Parameters are registered dynamically when a page/track is opened, and
-// marked inactive when closed.  The param objects remain in the APVTS tree
-// (JUCE has no remove API), but the mRegisteredTrackParams set tracks which
-// trackIds are currently live so callers can query isTrackRegistered().
+// Mixer-strip params are registered on demand when a strip is first created
+// (ensureMixerStripParams).  Param objects remain in the APVTS tree forever --
+// JUCE has no remove API -- and mRegisteredTrackParams accumulates the ids added
+// under each mixer prefix so the EQ-bank helpers stay idempotent.
 //
-// Parameter naming convention:  tk_{trackId}_{engine}_{param}
-//   e.g. tk_0_Harmless_macro0, tk_2_BaySickSynth_oscDetune
-// EQ naming:    tk_{trackId}_eq_mid_band{b}_{freq|gain|q|type|on}
-// Rack naming:  tk_{trackId}_rack_slot{s}_{param}
+// EQ naming: mixer_{kind}_{N}_{mid|side}_eq{b}_{freq|gain|q|type|on}, with the
+// pre-rack bank under the same prefix plus "preeq_".
 
 namespace
 {
@@ -5305,91 +5303,15 @@ namespace
     }
 } // namespace
 
-void VibeSynthProcessor::addParamsForHarmless(const juce::String& prefix)
-{
-    // 8 macro knobs (full Harmless param set registered here; individual partials
-    // are NOT APVTS-registered - they live in the Harmless preset only).
-    auto& ids = mRegisteredTrackParams[prefix];
-    for (int m = 0; m < 8; ++m)
-    {
-        juce::String id   = prefix + "_macro" + juce::String(m);
-        juce::String name = prefix + " Macro " + juce::String(m + 1);
-        dynF(apvts, ids, id, name, 0.f, 1.f, 0.f);
-    }
-    // Master volume + pitch + pan
-    dynF(apvts, ids, prefix + "_vol",   prefix + " Volume", 0.f, 1.f, 0.8f);
-    dynF(apvts, ids, prefix + "_pitch", prefix + " Pitch",  -24.f, 24.f, 0.f);
-    dynF(apvts, ids, prefix + "_pan",   prefix + " Pan",    -1.f, 1.f, 0.f);
-}
-
-void VibeSynthProcessor::addParamsForVibePlayer(const juce::String& prefix)
-{
-    auto& ids = mRegisteredTrackParams[prefix];
-    dynF(apvts, ids, prefix + "_vol",     prefix + " Volume",     0.f, 1.f,   0.8f);
-    dynF(apvts, ids, prefix + "_pan",     prefix + " Pan",        -1.f, 1.f,  0.f);
-    dynF(apvts, ids, prefix + "_pitch",   prefix + " Pitch",      -24.f, 24.f, 0.f);
-    dynF(apvts, ids, prefix + "_attack",  prefix + " Attack",     0.f, 4.f,   0.01f);
-    dynF(apvts, ids, prefix + "_decay",   prefix + " Decay",      0.f, 4.f,   0.2f);
-    dynF(apvts, ids, prefix + "_sustain", prefix + " Sustain",    0.f, 1.f,   0.7f);
-    dynF(apvts, ids, prefix + "_release", prefix + " Release",    0.f, 8.f,   0.3f);
-    dynF(apvts, ids, prefix + "_start",   prefix + " Start",      0.f, 1.f,   0.f);
-    dynF(apvts, ids, prefix + "_end",     prefix + " End",        0.f, 1.f,   1.f);
-    dynF(apvts, ids, prefix + "_loop",    prefix + " Loop",       0.f, 1.f,   1.f);
-    dynB(apvts, ids, prefix + "_reverse", prefix + " Reverse",    false);
-    dynI(apvts, ids, prefix + "_quality", prefix + " Quality",    0, 3, 2);
-}
-
-void VibeSynthProcessor::addParamsForBaySickSynth(const juce::String& prefix)
-{
-    auto& ids = mRegisteredTrackParams[prefix];
-    // Oscillator
-    dynI(apvts, ids, prefix + "_oscMode",     prefix + " Osc Mode",     0, 3, 0);
-    dynI(apvts, ids, prefix + "_classicShape",prefix + " Classic Shape", 0, 3, 1);
-    dynF(apvts, ids, prefix + "_wtPos",       prefix + " WT Position",  0.f, 1.f, 0.f);
-    dynI(apvts, ids, prefix + "_unisonVoices",prefix + " Unison Voices",1, 8, 1);
-    dynF(apvts, ids, prefix + "_unisonSpread",prefix + " Unison Spread",0.f, 1.f, 0.f);
-    dynF(apvts, ids, prefix + "_detune",      prefix + " Detune",       -24.f, 24.f, 0.f);
-    dynF(apvts, ids, prefix + "_fmRatio",     prefix + " FM Ratio",     0.f, 16.f, 2.f);
-    dynF(apvts, ids, prefix + "_fmIndex",     prefix + " FM Index",     0.f, 10.f, 1.f);
-    dynF(apvts, ids, prefix + "_noiseAmt",    prefix + " Noise Amount", 0.f, 1.f, 0.f);
-    dynF(apvts, ids, prefix + "_vol",         prefix + " Volume",       0.f, 1.f, 0.7f);
-    // Sub oscillator
-    dynF(apvts, ids, prefix + "_subVol",      prefix + " Sub Volume",   0.f, 1.f, 0.f);
-    dynI(apvts, ids, prefix + "_subOct",      prefix + " Sub Octave",   1, 3, 1);
-    // Filter
-    dynI(apvts, ids, prefix + "_filterMode",  prefix + " Filter Mode",  0, 4, 0);
-    dynF(apvts, ids, prefix + "_filterCut",   prefix + " Filter Cutoff",20.f, 20000.f, 4000.f);
-    dynF(apvts, ids, prefix + "_filterRes",   prefix + " Filter Res",   0.f, 1.f, 0.f);
-    dynF(apvts, ids, prefix + "_filterEnvAmt",prefix + " Filter Env",   -96.f, 96.f, 0.f);
-    dynF(apvts, ids, prefix + "_filterKbd",   prefix + " Filter Kbd",   0.f, 1.f, 0.f);
-    // Amp ADSR
-    dynF(apvts, ids, prefix + "_ampA",   prefix + " Amp Attack",  0.f, 4.f,  0.01f);
-    dynF(apvts, ids, prefix + "_ampD",   prefix + " Amp Decay",   0.f, 4.f,  0.2f);
-    dynF(apvts, ids, prefix + "_ampS",   prefix + " Amp Sustain", 0.f, 1.f,  0.7f);
-    dynF(apvts, ids, prefix + "_ampR",   prefix + " Amp Release", 0.f, 8.f,  0.3f);
-    // Filter ADSR
-    dynF(apvts, ids, prefix + "_fltA",   prefix + " Flt Attack",  0.f, 4.f,  0.01f);
-    dynF(apvts, ids, prefix + "_fltD",   prefix + " Flt Decay",   0.f, 4.f,  0.2f);
-    dynF(apvts, ids, prefix + "_fltS",   prefix + " Flt Sustain", 0.f, 1.f,  1.f);
-    dynF(apvts, ids, prefix + "_fltR",   prefix + " Flt Release", 0.f, 8.f,  0.3f);
-    // LFO
-    dynF(apvts, ids, prefix + "_lfoRate",  prefix + " LFO Rate",  0.01f, 20.f, 1.f);
-    dynF(apvts, ids, prefix + "_lfoDepth", prefix + " LFO Depth", 0.f, 1.f, 0.f);
-    dynI(apvts, ids, prefix + "_lfoShape", prefix + " LFO Shape", 0, 4, 0);
-    dynI(apvts, ids, prefix + "_lfoRoute", prefix + " LFO Route", 0, 3, 0);
-    // Glide
-    dynF(apvts, ids, prefix + "_glide",    prefix + " Glide",     0.f, 2.f, 0.f);
-    dynB(apvts, ids, prefix + "_legato",   prefix + " Legato",    false);
-}
-
-void VibeSynthProcessor::addParamsForBaySickBass(const juce::String& prefix)
-{
-    // BaySickBass uses the same DSP as BaySickSynth, same param set
-    addParamsForBaySickSynth(prefix);
-}
-
-// 2026-04-25: addParamsForBaySickDrums removed - legacy 16-slot drum
-// processor deleted; per-drum-tab engines register their own params.
+// QA-ApvtsAutomation (2026-07-25): addParamsForHarmless / addParamsForVibePlayer
+// / addParamsForBaySickSynth / addParamsForBaySickBass / addParamsForEffectRack
+// removed with registerParamsForTrack.  They registered a "tk_{trackId}_*" mirror
+// of the engine param sets that nothing ever read: the ids were mismatched with
+// the engine-tagged ids the editors actually stamp ("tk_lay_0_bss_noise" vs this
+// set's "tk_lay_0_oscMode"), so the family was automatable-to-nowhere.  Engine
+// params now reach automation through the applicator registry instead.
+// (2026-04-25: addParamsForBaySickDrums had already gone with the legacy drum
+// processor.)
 
 void VibeSynthProcessor::addParamsForTrackEQ(const juce::String& prefix)
 {
@@ -5458,25 +5380,6 @@ void VibeSynthProcessor::addParamsForEQBank(const juce::String& prefix,
             // Option B scaffolding for Tier 3 T11 external sidechain. Default -1
             // = internal (band's own input); integer routing id when ready.
             dynI(apvts, ids, bp + "ScSource",  labelBase + " ScSource", -1, 999, -1);
-        }
-    }
-}
-
-void VibeSynthProcessor::addParamsForEffectRack(const juce::String& prefix)
-{
-    // 6 slots × ~15 params each.  Param IDs follow tk_{trackId}_rack_slot{s}_{param}.
-    auto& ids = mRegisteredTrackParams[prefix];
-    for (int s = 0; s < 6; ++s)
-    {
-        juce::String sp = prefix + "_rack_slot" + juce::String(s);
-        dynI(apvts, ids, sp + "_type",    prefix + " Rack S" + juce::String(s) + " Type",  -1, 11, -1);
-        dynB(apvts, ids, sp + "_bypass",  prefix + " Rack S" + juce::String(s) + " Bypass",false);
-        dynF(apvts, ids, sp + "_output",  prefix + " Rack S" + juce::String(s) + " Output",0.f, 1.f, 1.f);
-        // Per-effect params use generic names; actual params populated when slot type is set
-        for (int p = 0; p < 12; ++p)
-        {
-            juce::String pp = sp + "_p" + juce::String(p);
-            dynF(apvts, ids, pp, prefix + " Rack S" + juce::String(s) + " P" + juce::String(p), 0.f, 1.f, 0.f);
         }
     }
 }
@@ -5899,53 +5802,15 @@ void VibeSynthProcessor::unregisterInstEngine(int pageIdx)
 // are gone - pages now bind their EQ display to the InsertNode / BusNode
 // preEq directly via VibeGraph::getInsertPreEQ() / getXxxBusPreEQ().
 
-void VibeSynthProcessor::registerParamsForTrack(const juce::String& trackId,
-                                                 const juce::String& engineType)
-{
-    // Idempotent: if already registered, do nothing
-    if (mRegisteredTrackParams.count(trackId)) return;
-
-    // Ensure the entry exists (engine params will add to it)
-    mRegisteredTrackParams[trackId] = {};
-
-    const juce::String prefix = "tk_" + trackId;
-
-    // Register engine-specific params
-    if      (engineType == "Harmless")      addParamsForHarmless    (prefix);
-    else if (engineType == "BaySickPlayer") addParamsForVibePlayer  (prefix);
-    else if (engineType == "BaySickSynth")  addParamsForBaySickSynth(prefix);
-    else if (engineType == "BaySickBass")   addParamsForBaySickBass (prefix);
-    // 2026-04-25: "BaySickDrums" engine type removed (legacy processor deleted).
-
-    // §P4.3 B7: legacy per-track EQ params (tk_{id}_mid_eq*/side_eq*) no
-    // longer registered - pre-rack + post-rack EQs both live on the mixer
-    // strip prefix (mixer_{kind}_<N>_preeq_* / _mid_eq*), registered in
-    // ensureMixerStripParams.  Every track still gets a 6-slot effect rack.
-    addParamsForEffectRack(prefix);
-}
-
-void VibeSynthProcessor::unregisterParamsForTrack(const juce::String& trackId)
-{
-    // JUCE APVTS has no removeParameter API - params stay in the tree but
-    // we remove the trackId from our registry so isTrackRegistered() returns false.
-    // Params are reset to default so stale automation data doesn't affect the next
-    // engine loaded on the same trackId.
-    auto it = mRegisteredTrackParams.find(trackId);
-    if (it == mRegisteredTrackParams.end()) return;
-
-    for (const auto& paramId : it->second)
-    {
-        if (auto* p = dynamic_cast<juce::RangedAudioParameter*>(apvts.getParameter(paramId)))
-            p->setValueNotifyingHost(p->getNormalisableRange().convertTo0to1(p->getDefaultValue()));
-    }
-
-    mRegisteredTrackParams.erase(it);
-}
-
-bool VibeSynthProcessor::isTrackRegistered(const juce::String& trackId) const
-{
-    return mRegisteredTrackParams.count(trackId) > 0;
-}
+// QA-ApvtsAutomation (2026-07-25): registerParamsForTrack /
+// unregisterParamsForTrack / isTrackRegistered removed.  Everything they
+// registered was dead -- the engine mirror sets (id-mismatched with the ids the
+// engine editors stamp) and the 6-slot "tk_{id}_rack_slot{s}_*" family, which had
+// zero readers anywhere in the tree.  Real racks live on InsertNodes under the
+// "mixer_*" prefixes with uuid-keyed automation ids; isTrackRegistered had no
+// callers.  mRegisteredTrackParams itself STAYS -- ensureMixerStripParams and the
+// EQ-bank helpers use it as their id accumulator, keyed by mixer prefix rather
+// than by trackId, so the two never shared entries.
 
 // ═══════════════════════════════════════════════════════════════════════════════
 //  5F-4a: Mixer-strip lazy APVTS registration

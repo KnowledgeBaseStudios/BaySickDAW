@@ -659,6 +659,8 @@ private:
     static const juce::Colour kQuads[4];
 };
 
+class ChickenHeadSelector;
+
 // ── Global automation callback + right-click listener ────────────────────────
 // sOnAutomate is set once by StandaloneEditor. Any component (VKnob slider,
 // plain juce::Slider, etc.) with a non-empty componentID gets an
@@ -675,6 +677,44 @@ namespace VKnobAutomation
     // Called alongside sOnRegisterApplicator to register a value reader:
     // returns the current normalized 0..1 value of the control right now.
     extern std::function<void(const juce::String& paramId, std::function<float()>)> sOnRegisterReader;
+
+    // Drives both hooks above for a plain slider whose value reaches its engine
+    // through an existing attachment.  Maps 0..1 against the slider's range read
+    // AT APPLY TIME, not a range captured here: the instrument editors register
+    // during their componentID pass, and Harmless rebinds its Part A/B sliders
+    // afterwards, so a captured range would freeze the pre-attachment default.
+    // Ownership: the registry has no erase-on-destroy path, so these closures
+    // outlive a closed tab -- the SafePointer inside makes a dead control a
+    // no-op, and a rebuilt tab re-registers over the stale key.
+    void registerSliderAutomation (const juce::String& paramId, juce::Slider& slider);
+
+    // Button twin of the above: >= 0.5 is on.  Same SafePointer ownership rule.
+    void registerButtonAutomation (const juce::String& paramId, juce::Button& button);
+
+    // juce::ComboBox twin (ChickenHeadSelector has its own overload below).
+    // 0..1 maps across item INDEX, so a lane sweep steps through the list.
+    void registerComboAutomation (const juce::String& paramId, juce::ComboBox& combo);
+
+    // Writes the PARAMETER instead of a control.  Required wherever one physical
+    // control is time-shared between several params (Harmless Part A/B), since a
+    // control-driven applicator would write whichever param is bound right now and
+    // collapse independent lanes onto one target.  0..1 maps through the param's
+    // own NormalisableRange, so skewed params behave like main-apvts lanes.
+    // Ownership: `lifetimeGuard` must be a Component owned by the editor that owns
+    // `param`'s processor -- engine editors are destroyed BEFORE their processor
+    // (LayersPage::setEngine / dtor), so a live guard proves `param` is still valid.
+    // `suppressWhen` (optional) vetoes the write while it returns true -- used by
+    // the vocal capture lock, where a lane must not flip chain state mid-take for
+    // the same reason the UI greys those controls out.  The lane is not consumed:
+    // the next tick after the veto clears applies the current value normally.
+    void registerParameterAutomation (const juce::String& paramId,
+                                      juce::RangedAudioParameter& param,
+                                      juce::Component& lifetimeGuard,
+                                      std::function<bool()> suppressWhen = {});
+
+    // Selector twin: 0..1 spreads across the option indices.  Option count is
+    // read at apply time because panels call setOptions() after registration.
+    void registerSelectorAutomation (const juce::String& paramId, ChickenHeadSelector& selector);
 
     // Translates a raw paramId into a user-facing label for the right-click menu
     // item ("Automate: <label>"). When null or returns empty, falls back to the

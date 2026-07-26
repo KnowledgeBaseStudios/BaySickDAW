@@ -45,10 +45,6 @@ BassPage::~BassPage()
         mPlayerTab->removeChildComponent(mEngineEditor.get());
     mEngineEditor.reset();
     mEngineProcessor.reset();
-
-    // Unregister lazy APVTS params
-    if (mEngineLocked)
-        mProcessor.unregisterParamsForTrack(trackId());
 }
 
 // ── Tab switching ─────────────────────────────────────────────────────────────
@@ -137,9 +133,6 @@ void BassPage::selectEngine(const juce::String& engineName)
     mEngineType   = engineName;
     mEngineLocked = true;
     refreshPianoRollContextLabel();
-
-    // Register lazy APVTS params (engine + pre-rack EQ + effect rack)
-    mProcessor.registerParamsForTrack(trackId(), engineName);
 
     if (mEngineEditor && mPlayerTab)
         mPlayerTab->removeChildComponent(mEngineEditor.get());

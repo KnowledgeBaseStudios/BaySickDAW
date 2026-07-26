@@ -139,9 +139,6 @@ DrumPage::~DrumPage()
         mPlayerTab->removeChildComponent(mEngineEditor.get());
     mEngineEditor.reset();
     mEngineProcessor.reset();
-
-    if (hadEngine)
-        mProcessor.unregisterParamsForTrack(trackId());
 }
 
 void DrumPage::switchTab(int idx)
@@ -306,8 +303,7 @@ void DrumPage::setUndoContext(const UndoContext& ctx)
 void DrumPage::selectEngine(const juce::String& engineName)
 {
     // D1.4-fix: swap-aware.  No-op if same engine already loaded; otherwise
-    // tear down old + create new.  Triggers fresh APVTS param registration
-    // for the new engine type via registerParamsForTrack (idempotent on prefix).
+    // tear down old + create new.
     if (engineName == mEngineType && mEngineProcessor) return;
 
     HeavyOperationOverlay::ScopedOp busy (StandaloneEditor::busyOverlayFor (this),
@@ -327,8 +323,6 @@ void DrumPage::selectEngine(const juce::String& engineName)
 
     mEngineType = engineName;
     refreshPianoRollContextLabel();
-
-    mProcessor.registerParamsForTrack(trackId(), engineName);
 
     double sr        = mProcessor.getSampleRate() > 0.0 ? mProcessor.getSampleRate() : 44100.0;
     int    blockSize = 512;
