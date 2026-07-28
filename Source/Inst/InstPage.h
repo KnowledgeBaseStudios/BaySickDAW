@@ -38,7 +38,9 @@ public:
     // "+ Add BaySickGuitars" ribbon entry).
     enum class Source { LiveInput, BaySickGuitars, BaySickBasses };
 
-    explicit InstPage (int pageIndex);
+    // QA-ModelShell TS1: the processor ref is needed at construction because
+    // the Pedals + NAM/IR + chain trio is rig-owned and created in the ctor.
+    InstPage (VibeSynthProcessor& proc, int pageIndex);
     ~InstPage() override;
 
     void paint   (juce::Graphics&) override;
@@ -96,8 +98,8 @@ public:
     // (Page Preset I/O, applyEngineState in state-load) use this.
     juce::AudioProcessor* getEngineProcessor() const noexcept;
 
-    juce::AudioProcessor* getNamIrProcessor() const noexcept { return mNamIrProc.get(); }
-    juce::AudioProcessor* getPedalsProcessor() const noexcept { return mPedalsProc.get(); }
+    juce::AudioProcessor* getNamIrProcessor() const noexcept { return mNamIrProc; }
+    juce::AudioProcessor* getPedalsProcessor() const noexcept { return mPedalsProc; }
 
     // K-2 (2026-05-05): source mode access + setter.  setSource rebuilds the
     // engine chain (sfizz front-end optional, then Pedals → NAM/IR) and fires
@@ -130,7 +132,7 @@ public:
     std::function<void()> onEngineDestroying;
     std::function<void()> onEngineChanged;
 
-    void                setTabName (const juce::String& n) { mTabName = n; repaint(); }
+    void                setTabName (const juce::String& n);   // syncs the model tab's name (TS1)
     const juce::String& getTabName () const                 { return mTabName; }
 
     // ── G-6 (2026-04-29): full-state export/import for Duplicate flow ────────
@@ -231,8 +233,9 @@ public:
 
 private:
 
-    // BaySickPedals stage (I-1 will replace placeholder with the real processor).
-    std::unique_ptr<juce::AudioProcessor>        mPedalsProc;
+    // QA-ModelShell TS1: the Pedals stage is rig-owned ({Inst, pageIndex}
+    // ownedStages); non-owning view pointer here.
+    juce::AudioProcessor*                        mPedalsProc { nullptr };
     std::unique_ptr<juce::AudioProcessorEditor>  mPedalsEditor;
     std::unique_ptr<juce::Component>             mPedalsPlaceholder;
 
@@ -245,13 +248,14 @@ private:
     // routes back into it via the callback.
     void                                         showPedalboardPresetMenu();
 
-    // BaySickNAM/IR stage (existing - unchanged).
-    std::unique_ptr<juce::AudioProcessor>        mNamIrProc;
+    // QA-ModelShell TS1: the NAM/IR stage is rig-owned; non-owning view.
+    juce::AudioProcessor*                        mNamIrProc { nullptr };
     std::unique_ptr<juce::AudioProcessorEditor>  mNamIrEditor;
 
-    // I-16 G-9 (2026-05-03): chain wrapper -- registerInstEngine sees this
-    // single processor; processBlock fans the buffer through Pedals -> NAM/IR.
-    std::unique_ptr<EngineChainProcessor>        mChain;
+    // I-16 G-9 (2026-05-03): chain wrapper -- the registered engine; its
+    // processBlock fans the buffer through Pedals -> NAM/IR.  QA-ModelShell
+    // TS1: rig-owned (the tab's registered engine); non-owning view here.
+    EngineChainProcessor*                        mChain { nullptr };
 
     // J-6 EQ unification (2026-05-03): mEQDisplay removed.
     // QA-E Task 4 (2026-05-12): mLinkedClipPath removed (was scaffold for

@@ -1,6 +1,7 @@
 #pragma once
 #include <JuceHeader.h>
 #include "../PluginProcessor.h"
+#include "../EngineRig.h"
 #include "../PatternManager.h"
 #include "../DSP/EQ8MsDSP.h"
 #include "SharedUI.h"
@@ -16,9 +17,10 @@
 //   Tab 1 "Piano Roll" - PianoRollContainer bound to layerRoll[mPageIndex]
 //
 // Engine choices: Harmless | VibePlayer | BaySickSynth
-// Each page owns its engine processor + editor (created on first engine selection),
-// and the engine owns its own APVTS.  QA-ApvtsAutomation (2026-07-25): the main
-// processor's parallel "tk_*" mirror registration is gone -- it was never read.
+// QA-ModelShell TS1 (2026-07-27): the engine is MODEL-owned (EngineRig, keyed
+// {Layers, pageIndex}).  This page is a disposable view: it holds a non-owning
+// engine pointer plus the editor it creates, and requests engines from the rig
+// -- construction, registration, and teardown all happen model-side.
 // ─────────────────────────────────────────────────────────────────────────────
 class LayersPage : public juce::Component,
                    public juce::Timer,
@@ -63,7 +65,7 @@ public:
     // can round-trip the selection + the engine's internal state into the
     // project XML.  No engine selected yet => both return empty/null.
     juce::String                getEngineType()      const { return mEngineType; }
-    juce::AudioProcessor*       getEngineProcessor() const { return mEngineProcessor.get(); }
+    juce::AudioProcessor*       getEngineProcessor() const { return mEngineProcessor; }
 
     // P1+P2 persistence: StandaloneEditor calls this during project load to
     // restore the saved engine before pushing the engine's state back.  The
@@ -139,8 +141,10 @@ private:
     std::unique_ptr<juce::Component>            mPlayerTab;
     std::unique_ptr<LockableCombo>              mEngineCombo;
     std::unique_ptr<juce::Label>                mEngineLabel;   // "Engine:" label
-    // Engine processor + editor owned here; base-class pointers so we can hold any type
-    std::unique_ptr<juce::AudioProcessor>       mEngineProcessor;
+    // Non-owning view of the rig-owned engine ({Layers, pageIndex}); the
+    // editor IS view-owned and must be destroyed before the page (its
+    // attachments reference the engine's APVTS).
+    juce::AudioProcessor*                       mEngineProcessor { nullptr };
     std::unique_ptr<juce::AudioProcessorEditor> mEngineEditor;
     bool         mEngineLocked { false };
     bool         mLocked       { false };  // D1.4-fix (c): protect from kit-replace

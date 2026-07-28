@@ -1,10 +1,10 @@
 #include "BaySickBassProcessor.h"
 #include "BaySickBassEditor.h"
 
-BaySickBassProcessor::BaySickBassProcessor (const juce::String& trackId)
+BaySickBassProcessor::BaySickBassProcessor (const juce::String& trackId, juce::UndoManager* undoMgr)
     : juce::AudioProcessor (BusesProperties()
           .withOutput ("Output", juce::AudioChannelSet::stereo(), true)),
-      apvts (*this, nullptr, "BaySickBassState",
+      apvts (*this, undoMgr, "BaySickBassState",
              createLayout ("tk_" + trackId + "_bsb_")),
       mTrackId (trackId),
       mPrefix  ("tk_" + trackId + "_bsb_")

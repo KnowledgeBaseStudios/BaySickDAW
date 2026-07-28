@@ -32,11 +32,11 @@ namespace
 // ─────────────────────────────────────────────────────────────────────────────
 // Construction
 // ─────────────────────────────────────────────────────────────────────────────
-BaySickPedalsProcessor::BaySickPedalsProcessor()
+BaySickPedalsProcessor::BaySickPedalsProcessor (juce::UndoManager* undoMgr)
     : juce::AudioProcessor (BusesProperties()
                                 .withInput  ("Input",  juce::AudioChannelSet::stereo(), true)
                                 .withOutput ("Output", juce::AudioChannelSet::stereo(), true)),
-      apvts (*this, nullptr, "BaySickPedalsState", createLayout())
+      apvts (*this, undoMgr, "BaySickPedalsState", createLayout())
 {
     // Defaults: slot 0 = Tuner, slot 7 = Graphic EQ.  Construct the DSPs into
     // `active` directly (pre-audio-thread, no swap dance needed) so the editor

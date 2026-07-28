@@ -156,11 +156,28 @@ public:
                                           EffectRack*& rack, EQ8MsDSP*& eq);
     static EffectRack* rackForChannelId  (VibeGraph& vg, int id);
 
+    // QA-ModelShell TS1: dropdown-channel-id -> rack-prefix vocabulary,
+    // usable without the dropdown (the sweep below + any model trigger).
+    static juce::String channelPrefixForId (int id);
+
+    // QA-ModelShell TS1 (wire-at-load): register every populated rack slot's
+    // DSP-targeting automation across ALL channels.  Model-triggered after
+    // rack states land at project/template load so lanes apply without the
+    // Effects page ever being opened.
+    static void registerRackAutomationForAllChannels (VibeSynthProcessor& proc);
+
 private:
     // Registers DSP-targeting applicators/readers for one rack slot's mapped
     // parameters.  Called whenever a slot editor is (re)built, which is also
     // when the slot's effect type can have changed.
     void registerSlotAutomation (int slotIndex);
+
+    // The view-independent body: registrations capture (chId, uuid, type,
+    // suffix) and resolve rack -> slot -> DSP at apply time (null-owner,
+    // rack-scoped -- survives every panel/page death).
+    static void registerSlotAutomationFor (VibeGraph& vg, int chId,
+                                           const juce::String& channelPrefix,
+                                           EffectRack& rackRef, int slotIndex);
 
 public:
 

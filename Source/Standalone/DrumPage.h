@@ -1,6 +1,7 @@
 #pragma once
 #include <JuceHeader.h>
 #include "../PluginProcessor.h"
+#include "../EngineRig.h"
 #include "../PatternManager.h"
 #include "../DSP/EQ8MsDSP.h"
 #include "SharedUI.h"
@@ -108,7 +109,7 @@ public:
     PianoRollContainer* getPianoRoll() const { return mPianoRoll.get(); }
 
     juce::String                getEngineType()      const { return mEngineType; }
-    juce::AudioProcessor*       getEngineProcessor() const { return mEngineProcessor.get(); }
+    juce::AudioProcessor*       getEngineProcessor() const { return mEngineProcessor; }
     bool                        isEngineLocked()  const { return ! mEngineType.isEmpty(); }
     void selectEngine (const juce::String& engineName);
 
@@ -199,7 +200,10 @@ private:
     std::unique_ptr<juce::Component>            mPlayerTab;
     std::unique_ptr<juce::TextButton>           mPickerBtn;        // "Pick a sound ▾"
     std::unique_ptr<juce::Label>                mSoundLabel;       // current sound name
-    std::unique_ptr<juce::AudioProcessor>       mEngineProcessor;
+    // QA-ModelShell TS1: non-owning view of the rig-owned engine ({Drums,
+    // pageIndex}); the editor IS view-owned and must die before the page
+    // (its attachments reference the engine's APVTS).
+    juce::AudioProcessor*                       mEngineProcessor { nullptr };
     std::unique_ptr<juce::AudioProcessorEditor> mEngineEditor;
     std::unique_ptr<juce::FileChooser>          mFileChooser;      // outlives async picker callbacks
     juce::String mEngineType;     // "" = no engine yet

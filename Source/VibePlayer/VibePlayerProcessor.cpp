@@ -2,10 +2,10 @@
 #include "../SampleLibrary.h"   // QA-ProjectSave Task 5: stable-root sample refs
 #include "VibePlayerEditor.h"
 
-VibePlayerProcessor::VibePlayerProcessor (const juce::String& trackId)
+VibePlayerProcessor::VibePlayerProcessor (const juce::String& trackId, juce::UndoManager* undoMgr)
     : juce::AudioProcessor (BusesProperties()
           .withOutput ("Output", juce::AudioChannelSet::stereo(), true)),
-      apvts (*this, nullptr, "BaySickPlayerState",
+      apvts (*this, undoMgr, "BaySickPlayerState",
              createLayout ("tk_" + trackId + "_bsp_")),
       mTrackId (trackId),
       mPrefix  ("tk_" + trackId + "_bsp_")

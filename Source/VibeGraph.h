@@ -248,11 +248,11 @@ private:
 // Phase 1A / 1I: Audio bus topology for VibeDAW.
 //
 // Fixed bus topology:
-//   LayersBusNode ─┐
-//   BassBusNode   ─┤→ MasterBusNode → output
-//   DrumsBusNode  ─┘
-//   EffectsBusNode  (FX Bus - receive bus for aux strips + user-routed sends;
-//                    driven by VibeGraph::processEffectsBus each block)
+//   Layers Bus ─┐
+//   Bass Bus   ─┤→ Master → output          (all InstrChannelNode, CL-301)
+//   Drums Bus  ─┘
+//   FX Bus       (receive bus for aux strips + user-routed sends; driven by
+//                 processBus(kFxBus) each block)
 //
 // Each bus node owns an EffectRack (6 slots) and holds a reference to the
 // channel EQ8MsDSP managed by PluginProcessor.  Mixer gain/mute/solo comes
@@ -316,26 +316,15 @@ public:
     // 2026-05-06 (Batch 9b): unified bus DSP dispatcher used by
     // PassiveStripTask's Bus mode.  `buf` is treated as in/out - caller must
     // have it pre-filled with the bus's input signal (sum of upstream
-    // contributions) before calling.  Internally switches on busChId to the
-    // right per-bus DSP path: Layers/Bass/Drums delegate to the existing
-    // BusNodes via processChainOnly; Clips / Vox / Inst / Vox2 / Inst2 /
-    // Inst3 / Rusty run their inline DSP migrated from PluginProcessor; FxBus
-    // calls processEffectsBus; Master calls processMasterBus.  `anySolo` and
-    // `panLaw` are forwarded as needed -
-    // unused for buses that read solo/pan directly via APVTS.  Caller is
-    // responsible for routing the processed output downstream - processBus
-    // does DSP only.
+    // contributions) before calling.  CL-301: every non-master bus runs the
+    // ONE InstrChannelNode::processChainOnly (Master runs processMasterChain
+    // via processMasterBus); processBus's remaining per-bus knowledge is
+    // node/meter-atomic selection only.  `panLaw` is retained for API
+    // stability but the chain reads the cached master_pan_law pointer (same
+    // param the caller snapshots).  Caller is responsible for routing the
+    // processed output downstream - processBus does DSP only.
     void processBus(int busChId, juce::AudioBuffer<float>& buf,
                     double bpm, int panLaw);
-
-    // C.1 (2026-04-30): runs the FX Bus pipeline on its accumulator buffer
-    // (preEq -> rack -> postEq -> polarity -> M/S width -> fader x mute x
-    // solo -> pan -> peak meter).  Caller must subsequently route the kFxBus
-    // result downstream (default = Master).  busAnySolo
-    // participates in the receive-group solo gate; panLaw matches the project-
-    // level master_pan_law convention used by the Vox/Inst bus loop.
-    void processEffectsBus(juce::AudioBuffer<float>& buf, double bpm,
-                            bool busAnySolo, int panLaw);
 
     // ── Bus EffectRack access (Effects Page / Mixer UI) ───────────────────────
     EffectRack* getLayersBusRack();
@@ -502,7 +491,7 @@ public:
 
     // QA-RustyMeter part 2 (2026-05-30): UI-thread RMS drain for a BUS strip's
     // split meter.  exchange-resets the per-bus rms member atoms below (CAS-maxed
-    // audio-side by publishRms in processBus/processEffectsBus); returns
+    // audio-side by publishRms in processBus); returns
     // {-inf,-inf} for kMaster (Full layout, no RMS) or an unknown id.  Direct
     // VibeGraph read -- no PluginProcessor mirror, parallel to drainInsertNodeRms.
     std::pair<float, float> drainBusRms (int busChId) noexcept;
@@ -510,7 +499,8 @@ public:
     // QA-RustyMeter Task 3 (2026-05-30): master-bus EBU R128 LUFS readout.
     // getMasterLufs(mode): 0=Momentary, 1=Short-Term, 2=Integrated (-120 floor).
     // resetMasterLufsIntegrated(): clear the gated Integrated accumulation on
-    // transport play-from-top / loop (M/S keep running).  Owned by MasterBusNode.
+    // transport play-from-top / loop (M/S keep running).  Owned by the master
+    // node (InstrChannelNode::mLufs; only the master chain processes it).
     float getMasterLufs (int mode) const noexcept;
     void  resetMasterLufsIntegrated() noexcept;
 
@@ -589,18 +579,8 @@ public:
     // at) persist for the APVTS lifetime -- so no rebind on load is needed.
     bool anyBusSoloed() const noexcept;
 
-    // 5F-4a Batch 6: apply audio-clips-bus polarity + M/S width in-place on buf.
-    // Called by PluginProcessor on the audio thread after the clips bus rack runs.
-    void applyAudioClipsBusPolarityWidth(juce::AudioBuffer<float>& buf);
-    // R3.5: same shape, applied to Vox / Inst bus accumulators after rack/EQ.
-    void applyVoxBusPolarityWidth (juce::AudioBuffer<float>& buf);
-    void applyInstBusPolarityWidth(juce::AudioBuffer<float>& buf);
-    // G-6 (2026-04-29): polarity/width application for secondary buses.
-    void applyVoxBus2PolarityWidth (juce::AudioBuffer<float>& buf);
-    void applyInstBus2PolarityWidth(juce::AudioBuffer<float>& buf);
-    void applyInstBus3PolarityWidth(juce::AudioBuffer<float>& buf);
-    // J-4: BaySickRustyDrums bus polarity/width.
-    void applyRustyDrumsBusPolarityWidth(juce::AudioBuffer<float>& buf);
+    // CL-301: the applyXxxBusPolarityWidth wrapper family is gone -- polarity
+    // + width run inside InstrChannelNode::processChainOnly for every bus.
 
     // C.4 Phase 1 (2026-04-30): per-strip SC receive buffer set.  Each strip
     // can hold up to kMaxScRecvsPerStrip stereo SC inputs from upstream
@@ -698,7 +678,7 @@ public:
     // QA-RustyMeter part 2 (2026-05-30): per-bus windowed-RMS atoms for the
     // split meter's scrolling top half.  11 non-master buses x L/R (Master keeps
     // a full peak bar, no RMS).  CAS-maxed audio-side by publishRms in processBus
-    // / processEffectsBus (never reset there); the UI exchange-resets via
+    // (never reset there); the UI exchange-resets via
     // drainBusRms.  No mono sibling + no PluginProcessor mirror -- the UI reads
     // these directly off VibeGraph, parallel to the InsertNode rms atoms.  The
     // ~50 ms window smoothing lives UI-side in DBFSMeter::onVBlank.
@@ -745,20 +725,19 @@ public:
     juce::AudioProcessorGraph& getGraph() { return mGraph; }
 
 private:
-    // ── Forward-declared nested bus node types (defined in VibeGraph.cpp) ─────
-    // unique_ptr with incomplete type - destructor defined in VibeGraph.cpp
-    struct LayersBusNode;
-    struct BassBusNode;
-    struct DrumsBusNode;
-    struct MasterBusNode;
-    struct EffectsBusNode;
-    struct InstrChannelNode;   // generic rack+EQ container for every non-bus channel
+    // ── Forward-declared nested bus node type (defined in VibeGraph.cpp) ──────
+    // unique_ptr with incomplete type - destructor defined in VibeGraph.cpp.
+    // CL-301 (QA-ModelShell TS1, 2026-07-27): the five hand-written bus structs
+    // (Layers/Bass/Drums/Master/Effects) are folded into this ONE type -- all
+    // 11 buses share the same implementation; the master chain is a method,
+    // not a type.
+    struct InstrChannelNode;   // the one bus/channel node type (rack + EQs + chain)
 
-    std::unique_ptr<LayersBusNode>  mLayersNode;
-    std::unique_ptr<BassBusNode>    mBassNode;
-    std::unique_ptr<DrumsBusNode>   mDrumsNode;
-    std::unique_ptr<MasterBusNode>  mMasterNode;
-    std::unique_ptr<EffectsBusNode> mEffectsBusNode;
+    std::unique_ptr<InstrChannelNode> mLayersNode;
+    std::unique_ptr<InstrChannelNode> mBassNode;
+    std::unique_ptr<InstrChannelNode> mDrumsNode;
+    std::unique_ptr<InstrChannelNode> mMasterNode;
+    std::unique_ptr<InstrChannelNode> mEffectsBusNode;
     std::unique_ptr<InstrChannelNode> mAudioClipsBusNode;  // rack+EQ for all audio clips (ID 6)
 
     // QA-Ea Part A (2026-05-21): cached bus _solo atomic pointers for the

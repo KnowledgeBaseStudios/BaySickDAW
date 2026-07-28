@@ -785,6 +785,12 @@ private:
     // re-registers them; dynamic entries re-register when their UI rebuilds).
     void registerStaticAutomationHandlers();
 
+    // QA-ModelShell TS1: engine-parameter lane registration keyed to the
+    // rig's onEngineCreated model event (fires on pick / restore / template /
+    // duplicate).  Null-owner closures resolving through the rig at apply
+    // time; TS3 retires the view wrappers these coexist with.
+    void registerModelEngineAutomation (struct EngineTab& tab);
+
     // ── Applicator lifetime (QA-ProjectSave Task 7, 2026-07-26) ──────────────
     // Registration used to be insert-only, cleaned by a hand-written list of ~17
     // key prefixes wired into the tab-close paths.  That list had to be updated

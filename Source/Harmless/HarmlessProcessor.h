@@ -22,7 +22,10 @@ class HarmlessProcessor : public juce::AudioProcessor,
                           public ISidechainEngine
 {
 public:
-    explicit HarmlessProcessor (const juce::String& trackId = "lay_0");
+    // undoMgr: QA-ModelShell TS1 dormant pre-wire -- bound into apvts so
+    // QA-UndoCoverage can enable undo without a ctor sweep; unused until then.
+    explicit HarmlessProcessor (const juce::String& trackId = "lay_0",
+                                juce::UndoManager* undoMgr = nullptr);
 
     // ── AudioProcessor interface ──────────────────────────────────────────────
     void prepareToPlay   (double sampleRate, int maxBlockSize) override;

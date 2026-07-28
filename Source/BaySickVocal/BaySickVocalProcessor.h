@@ -39,7 +39,10 @@ class BaySickVocalProcessor : public juce::AudioProcessor,
                               public ISidechainEngine
 {
 public:
-    BaySickVocalProcessor();
+    // undoMgr: QA-ModelShell TS1 dormant pre-wire -- bound into apvts (and
+    // forwarded to the embedded NAM/IR) so QA-UndoCoverage can enable undo
+    // without a ctor sweep; unused until then.
+    explicit BaySickVocalProcessor (juce::UndoManager* undoMgr = nullptr);
     // 2026-05-06 (Batch 9c N1): no longer defaulted -- body sets the
     // mShuttingDown gate so subsequent processBlock entries bail before
     // dereferencing half-destroyed members.

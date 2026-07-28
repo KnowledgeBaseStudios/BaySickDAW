@@ -32,11 +32,11 @@ namespace
 // BaySickNAMIRProcessor - Phase G-1.3 implementation.
 // ─────────────────────────────────────────────────────────────────────────────
 
-BaySickNAMIRProcessor::BaySickNAMIRProcessor()
+BaySickNAMIRProcessor::BaySickNAMIRProcessor (juce::UndoManager* undoMgr)
     : juce::AudioProcessor (BusesProperties()
                                 .withInput  ("Input",  juce::AudioChannelSet::stereo(), true)
                                 .withOutput ("Output", juce::AudioChannelSet::stereo(), true)),
-      apvts (*this, nullptr, "BaySickNAMIR", createLayout())
+      apvts (*this, undoMgr, "BaySickNAMIR", createLayout())
 {
     // Explicit atomic init - see the comment on mNamSwapPending in the header.
     for (auto& a : mNamSwapPending) a.store (false);

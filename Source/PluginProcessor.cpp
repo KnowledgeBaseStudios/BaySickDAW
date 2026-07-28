@@ -4,6 +4,7 @@
 #include "G3PlayheadDiag.h" // [G3 BAR1] smoke General-1 dropout reading (Debug-only)
 #include "MissingFileReport.h" // QA-Export Task 5: missing external-file collector
 #include "SampleLibrary.h"  // QA-ProjectSave Task 4: stable-root reference resolver
+#include "EngineRig.h"      // QA-ModelShell TS1: model-side engine owner
 
 // QA-Ec x QA-TempoMap seam: audio-clip block boundaries are BEAT-authored, so
 // with a published timeline their sample positions must resolve through it -
@@ -305,7 +306,7 @@ VibeSynthProcessor::createParameterLayout()
     //   0 = Circular   (constant power, -3 dB at center, FL default)
     //   1 = Triangular (linear,         -6 dB at center)
     //   2 = Square     (0 dB at center, only attenuates the opposite side)
-    // Read every audio block by each Insert/Bus/MasterBusNode when applying
+    // Read every audio block by each Insert/InstrChannelNode when applying
     // the per-strip _pan param.  Default 0 matches FL's fresh-project default.
     addI("master_pan_law", "Pan Law", 0, 2, 0);
 
@@ -376,8 +377,10 @@ VibeSynthProcessor::VibeSynthProcessor()
         // headset still gets 2 channels - only the upper bound moved.
         .withInput ("Input",  juce::AudioChannelSet::discreteChannels(64), true)
         .withOutput("Output", juce::AudioChannelSet::stereo(), true)),
-      apvts(*this, nullptr, "BaySickDAWState", createParameterLayout())
+      apvts(*this, &mUndoManager, "BaySickDAWState", createParameterLayout())
 {
+    mEngineRig = std::make_unique<EngineRig> (*this, mUndoManager);
+
     // QA-L-Fix: -1 = no held note-trigger voice.  Value-initialisation would
     // give 0, which is a valid MIDI note.
     mNoteTriggerHeld.fill (-1);
@@ -531,7 +534,7 @@ void VibeSynthProcessor::prepareToPlay(double sampleRate, int samplesPerBlock)
     mVibeGraph.prepare(sampleRate, samplesPerBlock);
 
     // Build the fixed bus topology the first time; no-op on subsequent calls.
-    // §P4.3 B7: drumsEQ ref removed - DrumsBusNode now uses its own preEq member
+    // §P4.3 B7: drumsEQ ref removed - the drums bus node uses its own preEq member
     // (sync'd via updateAllPreRackEQsFromApvts from mixer_drumsbus_preeq_*).
     mVibeGraph.buildFixedTopology(mSynth, mBassSynth, apvts);
 
@@ -5921,7 +5924,7 @@ void VibeSynthProcessor::addParamsForMixerStrip(const juce::String& prefix,
     {
         // 2026-04-29: Master strip needs its mute param registered so the
         // strip's M button can attach (was previously visually toggling but
-        // not bound to APVTS at all → MasterBusNode read a null pointer →
+        // not bound to APVTS at all → the master node read a null pointer →
         // master mute did nothing).  Solo + polarity are intentionally
         // omitted - master has no peer to solo against and polarity at the
         // master is rarely useful (and would invert ALL output, easy to

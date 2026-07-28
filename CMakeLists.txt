@@ -91,6 +91,7 @@ endif()
 # ── Shared DSP sources (used by both VST and Standalone) ─────────────────────
 set(VIBESYNTH_DSP_SOURCES
     Source/PluginProcessor.cpp
+    Source/EngineRig.cpp
     Source/SampleLibrary.cpp
     Source/VibeGraph.cpp
     Source/SynthVoice.cpp

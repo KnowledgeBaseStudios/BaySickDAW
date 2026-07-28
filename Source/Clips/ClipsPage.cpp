@@ -3,6 +3,7 @@
 #include "../Standalone/EnginePrefixUtil.h"
 #include "../Standalone/PagePresetIO.h"
 #include "../PluginProcessor.h"
+#include "../EngineRig.h"           // QA-ModelShell TS1: model-side engine owner
 #include "../SampleLibrary.h"
 #include "../VibeGraph.h"           // QA-E Task 4: MixerChannelIds::audioInsert
 #include "../PatternManager.h"      // QA-E Task 4: addAudioToLibrary
@@ -48,6 +49,27 @@ ClipsPage::~ClipsPage()
 {
     // G-7: drop the listener before the engine processor is destroyed.
     detachDirtyListener();
+}
+
+void ClipsPage::setProcessor (VibeSynthProcessor* p)
+{
+    mFullProcessor = p;
+    // QA-ModelShell TS1: the tab becomes a model object as soon as the page
+    // can reach the rig (the ctor has no processor).  Idempotent; the engine
+    // attaches at selectEngine.
+    if (mFullProcessor != nullptr)
+        mFullProcessor->engineRig().addTab (TabKind::Clips, mPageIndex, mTabName);
+}
+
+void ClipsPage::setTabName (const juce::String& n)
+{
+    mTabName = n;
+    // QA-ModelShell TS1: every rename path funnels through here -- the one
+    // sync point for the model tab's name.  (Spawn order calls this before
+    // setProcessor; addTab then carries the already-set name.)
+    if (mFullProcessor != nullptr)
+        mFullProcessor->engineRig().renameTab (TabKind::Clips, mPageIndex, n);
+    repaint();
 }
 
 void ClipsPage::buildEnginePicker()
@@ -232,13 +254,13 @@ void ClipsPage::takeStateSnapshot()
 void ClipsPage::attachDirtyListener()
 {
     detachDirtyListener();
-    if (auto* vp = dynamic_cast<VibePlayerProcessor*> (mPlayerProc.get()))
+    if (auto* vp = dynamic_cast<VibePlayerProcessor*> (mPlayerProc))
         vp->apvts.state.addListener (&mDirtyListener);
 }
 
 void ClipsPage::detachDirtyListener()
 {
-    if (auto* vp = dynamic_cast<VibePlayerProcessor*> (mPlayerProc.get()))
+    if (auto* vp = dynamic_cast<VibePlayerProcessor*> (mPlayerProc))
         vp->apvts.state.removeListener (&mDirtyListener);
 }
 
@@ -277,7 +299,7 @@ void ClipsPage::savePagePreset (std::function<void()> onSaved)
 
             const juce::String stripPrefix = "mixer_audio_" + juce::String (safeThis->mPageIndex);
             juce::String enginePrefix;
-            if (auto* vp = dynamic_cast<VibePlayerProcessor*> (safeThis->mPlayerProc.get()))
+            if (auto* vp = dynamic_cast<VibePlayerProcessor*> (safeThis->mPlayerProc))
                 enginePrefix = vp->getParamPrefix();
 
             const juce::String xml = PagePresetIO::exportPagePreset (
@@ -285,7 +307,7 @@ void ClipsPage::savePagePreset (std::function<void()> onSaved)
                 PagePresetIO::PageKind::Clip,
                 safeThis->mPageIndex,
                 stripPrefix,
-                safeThis->mPlayerProc.get(),
+                safeThis->mPlayerProc,
                 "BaySickPlayer",
                 enginePrefix);
 
@@ -351,7 +373,7 @@ void ClipsPage::loadPagePreset (const juce::File& xml)
 
     const juce::String stripPrefix = "mixer_audio_" + juce::String (mPageIndex);
     juce::String enginePrefix;
-    if (auto* vp = dynamic_cast<VibePlayerProcessor*> (mPlayerProc.get()))
+    if (auto* vp = dynamic_cast<VibePlayerProcessor*> (mPlayerProc))
         enginePrefix = vp->getParamPrefix();
 
     auto noFallback = [] (int) { return true; };
@@ -363,7 +385,7 @@ void ClipsPage::loadPagePreset (const juce::File& xml)
                                      PagePresetIO::PageKind::Clip,
                                      mPageIndex,
                                      stripPrefix,
-                                     mPlayerProc.get(),
+                                     mPlayerProc,
                                      enginePrefix,
                                      noFallback,
                                      contents);
@@ -500,7 +522,7 @@ void ClipsPage::requestDelete()
 // ─────────────────────────────────────────────────────────────────────────────
 juce::AudioProcessor* ClipsPage::getEngineProcessor() const noexcept
 {
-    return mPlayerProc.get();
+    return mPlayerProc;
 }
 
 void ClipsPage::selectEngine (EngineType e)
@@ -510,16 +532,22 @@ void ClipsPage::selectEngine (EngineType e)
 
     if (onEngineDestroying) onEngineDestroying();
 
-    if (e == EngineType::BaySickPlayer && ! mPlayerProc)
+    if (e == EngineType::BaySickPlayer && ! mPlayerProc && mFullProcessor != nullptr)
     {
-        const juce::String prefix = "clip_" + juce::String (mPageIndex) + "_";
-        auto vp = std::make_unique<VibePlayerProcessor> (prefix);
-        vp->prepareToPlay (44100.0, 512);
-        if (mClipPath.isNotEmpty())
-            vp->loadSampleFile (juce::File (mClipPath));
-        mPlayerProc = std::move (vp);
-        mPlayerEditor.reset (mPlayerProc->createEditor());
-        if (mPlayerEditor) addChildComponent (*mPlayerEditor);
+        // QA-ModelShell TS1: the model constructs, prepares, and registers
+        // the engine (the "clip_<N>_" APVTS prefix is the rig's trackIdFor).
+        // This page keeps a non-owning view pointer and builds the editor.
+        auto& rig = mFullProcessor->engineRig();
+        rig.addTab (TabKind::Clips, mPageIndex, mTabName);
+        mPlayerProc = rig.setEngineType (TabKind::Clips, mPageIndex, "BaySickPlayer");
+        if (mPlayerProc != nullptr)
+        {
+            if (mClipPath.isNotEmpty())
+                if (auto* vp = dynamic_cast<VibePlayerProcessor*> (mPlayerProc))
+                    vp->loadSampleFile (juce::File (mClipPath));
+            mPlayerEditor.reset (mPlayerProc->createEditor());
+            if (mPlayerEditor) addChildComponent (*mPlayerEditor);
+        }
     }
 
     mEngineType = e;
@@ -574,7 +602,7 @@ void ClipsPage::setClipFilePath (const juce::String& p,
                                 : juce::String ("(no clip)"),
                             juce::dontSendNotification);
 
-    if (auto* vp = dynamic_cast<VibePlayerProcessor*> (mPlayerProc.get()))
+    if (auto* vp = dynamic_cast<VibePlayerProcessor*> (mPlayerProc))
         if (p.isNotEmpty())
             vp->loadSampleFile (juce::File (p));
 
@@ -622,7 +650,7 @@ juce::String ClipsPage::exportClipState() const
         mPlayerProc->getStateInformation (mb);
         auto* sub = el.createNewChildElement ("PlayerState");
         sub->setAttribute ("data", mb.toBase64Encoding());
-        if (auto* vp = dynamic_cast<VibePlayerProcessor*> (mPlayerProc.get()))
+        if (auto* vp = dynamic_cast<VibePlayerProcessor*> (mPlayerProc))
             sub->setAttribute ("prefix", vp->getParamPrefix());
     }
     return el.toString (juce::XmlElement::TextFormat().singleLine());
@@ -644,7 +672,7 @@ void ClipsPage::importClipState (const juce::String& xml)
             {
                 const juce::String srcPrefix = playerEl->getStringAttribute ("prefix");
                 juce::String dstPrefix;
-                if (auto* vp = dynamic_cast<VibePlayerProcessor*> (mPlayerProc.get()))
+                if (auto* vp = dynamic_cast<VibePlayerProcessor*> (mPlayerProc))
                     dstPrefix = vp->getParamPrefix();
                 substituteApvtsPrefixInBinary (mb, srcPrefix, dstPrefix);
                 // G-7: suppress dirty flag during the bulk state restore so

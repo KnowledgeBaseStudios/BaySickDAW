@@ -17,7 +17,10 @@ class BaySickBassProcessor : public juce::AudioProcessor,
                              public ISidechainEngine
 {
 public:
-    explicit BaySickBassProcessor (const juce::String& trackId = "bas_0");
+    // undoMgr: QA-ModelShell TS1 dormant pre-wire -- bound into apvts so
+    // QA-UndoCoverage can enable undo without a ctor sweep; unused until then.
+    explicit BaySickBassProcessor (const juce::String& trackId = "bas_0",
+                                   juce::UndoManager* undoMgr = nullptr);
 
     // ── AudioProcessor interface ──────────────────────────────────────────────
     void prepareToPlay    (double sampleRate, int maxBlockSize) override;

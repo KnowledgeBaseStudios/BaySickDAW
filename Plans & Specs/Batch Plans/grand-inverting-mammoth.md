@@ -109,7 +109,10 @@ no recommendations):
    choice still open.
 4. **TS4:** exact required-window minimum sizes (Jeff wants "larger" floors for Builder /
    Piano Roll / Mixer — numbers picked with him at implementation, on screen).
-5. **TS1:** batch-ID name if "QA-ModelShell" isn't to Jeff's taste.
+5. ~~**TS1:** batch-ID name if "QA-ModelShell" isn't to Jeff's taste.~~ RESOLVED
+   2026-07-27: (a) — QA-ModelShell stays. Process correction recorded: this should never
+   have been a docket item; naming plan artifacts (batch IDs included) is the assistant's
+   job, not a spec call (Jeff: "you do the plan not ask me").
 
 ## Files to modify
 
@@ -482,3 +485,40 @@ against this batch before they run — Jeff's post-approval step).
 load/apply path must keep); the QA-Ef close entries before touching doFileNew/export
 surfaces; STANDALONE_UI_CHANGES.md before TS4/TS5 (deliberate UI decisions log);
 `Files For Claude/DSP Review/_APPROVED_CHANGES.md` before TS7's Limiter work.
+
+## Carry-Over (2026-07-27 — TS1 ~70% done, mid-set handoff point)
+
+- **Completed (all builds green, both configs, per chunk):** session open + backfills
+  (§B.30 + badger held entry -> `b933b54a`); TS1 scout (full map in running notes);
+  batch-ID call resolved (a — QA-ModelShell stays; naming corrected to my job);
+  **EngineRig landed** (`Source/EngineRig.h/.cpp` — model tab registry + factory + apvtsOf
+  resolver + onEngineCreated/onEngineDestroying events); **dormant UndoManager pre-wire**
+  (processor mUndoManager before apvts; 7 engine ctors take `UndoManager* = nullptr`;
+  sfizz private UMs untouched); **ALL SIX page types flipped to views** (L/B/D + Clips +
+  Vox + Inst — non-owning pointers, rig-delegated construct/swap/teardown, Vox/Inst ctors
+  gained `VibeSynthProcessor&`); **onTabClosed** tail does rig.removeTab BEFORE the sfizz
+  destroys (dangling-chain-splice hazard caught + fixed pre-runtime); **tab identity
+  model-side** (addTab at page birth; setTabName -> renameTab funnel; clearSound ->
+  clearEngine); **automation hooks** (onEngineCreated -> registerModelEngineAutomation;
+  registerSlotAutomationFor extraction + registerRackAutomationForAllChannels after
+  applyPendingRackStates).
+- **In-flight:** TS1 SOURCE IS CODE-COMPLETE — all nine source items done including
+  CL-301 (fold executed; see the running-notes CL-301 entry for the parity audit + the
+  fourth divergence closed) and the task-7 shape confirmation. THE TASK-SET GATE IS
+  GREEN (final build after CL-301: both exit codes 0, zero error lines). The TS1 commit
+  is SURFACED to Jeff (Rule 9 one-liner + full status) — awaiting his approval; nothing
+  commits without it.
+- **Assumptions changed:** none beyond the running-notes entries (sfizz precedent, UM
+  wrinkle, K-5 chain-splice gap, Layers/Bass loadPagePreset lock-guard observation for
+  TS8, stale Forks line accrued for G4 close).
+- **Resume action:** (1) verify the task-5 build result; (2) execute CL-301 (task 6):
+  fold LayersBusNode/BassBusNode/DrumsBusNode/MasterBusNode/EffectsBusNode
+  ([VibeGraph.cpp](../../Source/VibeGraph.cpp) :239/:449/:622/:793/:947) into
+  InstrChannelNode per the Future State entry (special cases survive via flags:
+  Layers/Bass synth refs, Master LUFS + terminal no-comp-delay role, FX receive-bus
+  drive point; calling side already uniform via PassiveStripTask); (3) confirm task-7
+  shape note; (4) TS1 GATE + Rule 9 one-liner + FULL git status -> Jeff approves ->
+  COMMIT (doc backfills + running notes + this plan ride it); (5) running-notes
+  checkpoint; then TS2.
+- **Implemented-work entry needed:** compiled from the running notes at TS8's
+  batch-close draft (bulk-run R2) — nothing to add beyond what's captured.

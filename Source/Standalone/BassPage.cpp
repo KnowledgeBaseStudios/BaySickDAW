@@ -17,6 +17,10 @@ BassPage::BassPage(VibeSynthProcessor& p, PatternManager& pm, int pageIndex)
 {
     mPageColor = VC::BassCol[mPageIndex];
 
+    // QA-ModelShell TS1: the tab is a model object from birth (idempotent;
+    // name syncs via setTabName; engine attaches at selectEngine).
+    mProcessor.engineRig().addTab (TabKind::Bass, mPageIndex, mTabName);
+
     buildPlayerTab();
     // 2026-04-26 (step 2 commit 3): Piano Roll lives on PianoRollPage now.
     // mPianoRoll stays null; menu-bar pill redirects via the editor.
@@ -30,22 +34,16 @@ BassPage::BassPage(VibeSynthProcessor& p, PatternManager& pm, int pageIndex)
 BassPage::~BassPage()
 {
     stopTimer();
-
-    // D2: drop the dirty-snapshot listener before the engine processor is freed
     unsubscribeFromEngineApvtsState();
 
-    // Unregister from audio thread first, then wait for any in-flight block to finish
-    if (mEngineLocked)
-    {
-        mProcessor.unregisterBassEngine(mPageIndex);
-    }
-    juce::Thread::sleep(20);  // outlasts one audio block (~10 ms)
-
-    // Must remove editor from parent before destroying processor
+    // QA-ModelShell TS1: the engine is rig-owned and survives this view.
+    // Teardown happens in EngineRig::removeTab (tab close) or teardownAll
+    // (shutdown).  Only the view-owned editor dies here, before the page --
+    // its attachments reference the engine's APVTS.
     if (mEngineEditor && mPlayerTab)
         mPlayerTab->removeChildComponent(mEngineEditor.get());
     mEngineEditor.reset();
-    mEngineProcessor.reset();
+    mEngineProcessor = nullptr;
 }
 
 // ── Tab switching ─────────────────────────────────────────────────────────────
@@ -135,37 +133,20 @@ void BassPage::selectEngine(const juce::String& engineName)
     mEngineLocked = true;
     refreshPianoRollContextLabel();
 
+    // View teardown only -- any previous engine is rig-owned.
     if (mEngineEditor && mPlayerTab)
         mPlayerTab->removeChildComponent(mEngineEditor.get());
     mEngineEditor.reset();
-    mEngineProcessor.reset();
+    mEngineProcessor = nullptr;
 
-    double sr        = mProcessor.getSampleRate() > 0.0 ? mProcessor.getSampleRate() : 44100.0;
-    int    blockSize = 512;
-
-    // 2026-04-21: string trackId so engines on different pages don't collide.
-    const juce::String trackIdStr = "bas_" + juce::String(mPageIndex);
-    if (engineName == "Harmless")
-    {
-        auto* proc = new HarmlessProcessor(trackIdStr);
-        proc->prepareToPlay(sr, blockSize);
-        mEngineProcessor.reset(proc);
-        mEngineEditor.reset(proc->createEditor());
-    }
-    else if (engineName == "BaySickPlayer")
-    {
-        auto* proc = new VibePlayerProcessor(trackIdStr);
-        proc->prepareToPlay(sr, blockSize);
-        mEngineProcessor.reset(proc);
-        mEngineEditor.reset(proc->createEditor());
-    }
-    else if (engineName == "BaySickBass")
-    {
-        auto* proc = new BaySickBassProcessor(trackIdStr);
-        proc->prepareToPlay(sr, blockSize);
-        mEngineProcessor.reset(proc);
-        mEngineEditor.reset(proc->createEditor());
-    }
+    // QA-ModelShell TS1: the model constructs, prepares, and registers the
+    // engine (mixer-strip params + InsertNode + render task included).  This
+    // page keeps a non-owning view pointer and builds the editor.
+    auto& rig = mProcessor.engineRig();
+    rig.addTab (TabKind::Bass, mPageIndex, mTabName);
+    mEngineProcessor = rig.setEngineType (TabKind::Bass, mPageIndex, engineName);
+    if (mEngineProcessor != nullptr)
+        mEngineEditor.reset (mEngineProcessor->createEditor());
 
     // 2026-04-30: wire engine-internal patch picker -> page tab/strip rename.
     // Each engine editor fires onPatchLoaded(filename) after its internal
@@ -192,39 +173,35 @@ void BassPage::selectEngine(const juce::String& engineName)
     {
         mPianoRoll->onNoteAudition = [this](int midiNote)
         {
-            if (auto* b = dynamic_cast<BaySickBassProcessor*>(mEngineProcessor.get()))
+            if (auto* b = dynamic_cast<BaySickBassProcessor*>(mEngineProcessor))
                 b->auditionNote(midiNote);
-            else if (auto* h = dynamic_cast<HarmlessProcessor*>(mEngineProcessor.get()))
+            else if (auto* h = dynamic_cast<HarmlessProcessor*>(mEngineProcessor))
                 h->auditionNote(midiNote);
-            else if (auto* v = dynamic_cast<VibePlayerProcessor*>(mEngineProcessor.get()))
+            else if (auto* v = dynamic_cast<VibePlayerProcessor*>(mEngineProcessor))
                 v->auditionNote(midiNote);
         };
         mPianoRoll->onNoteAuditionOn = [this](int midiNote)
         {
-            if (auto* b = dynamic_cast<BaySickBassProcessor*>(mEngineProcessor.get()))
+            if (auto* b = dynamic_cast<BaySickBassProcessor*>(mEngineProcessor))
                 b->auditionNoteOn(midiNote);
-            else if (auto* h = dynamic_cast<HarmlessProcessor*>(mEngineProcessor.get()))
+            else if (auto* h = dynamic_cast<HarmlessProcessor*>(mEngineProcessor))
                 h->auditionNoteOn(midiNote);
-            else if (auto* v = dynamic_cast<VibePlayerProcessor*>(mEngineProcessor.get()))
+            else if (auto* v = dynamic_cast<VibePlayerProcessor*>(mEngineProcessor))
                 v->auditionNoteOn(midiNote);
         };
         mPianoRoll->onNoteAuditionOff = [this](int midiNote)
         {
-            if (auto* b = dynamic_cast<BaySickBassProcessor*>(mEngineProcessor.get()))
+            if (auto* b = dynamic_cast<BaySickBassProcessor*>(mEngineProcessor))
                 b->auditionNoteOff(midiNote);
-            else if (auto* h = dynamic_cast<HarmlessProcessor*>(mEngineProcessor.get()))
+            else if (auto* h = dynamic_cast<HarmlessProcessor*>(mEngineProcessor))
                 h->auditionNoteOff(midiNote);
-            else if (auto* v = dynamic_cast<VibePlayerProcessor*>(mEngineProcessor.get()))
+            else if (auto* v = dynamic_cast<VibePlayerProcessor*>(mEngineProcessor))
                 v->auditionNoteOff(midiNote);
         };
     }
 
     if (mEngineEditor && mPlayerTab)
         mPlayerTab->addAndMakeVisible(*mEngineEditor);
-
-    // Register with audio thread for rendering in processBlock.
-    // registerBassEngine also creates the Bass InsertNode (which owns preEq).
-    mProcessor.registerBassEngine(mPageIndex, mEngineProcessor.get());
 
     // Lock combo so engine can't be changed
     if (mEngineCombo)
@@ -309,6 +286,9 @@ void BassPage::resized()
 void BassPage::setTabName(const juce::String& name)
 {
     mTabName = name;
+    // QA-ModelShell TS1: every rename path funnels through here -- the one
+    // sync point for the model tab's name.
+    mProcessor.engineRig().renameTab (TabKind::Bass, mPageIndex, name);
     refreshPianoRollContextLabel();
 }
 
@@ -656,7 +636,7 @@ void BassPage::importBassState (const juce::String& xml)
             // G-6 (2026-04-29): rewrite the binary's PARAM ids so the source
             // page's prefix becomes this destination page's prefix.  Without
             // this every param is dropped by setStateInformation's id match.
-            bassSubstituteEnginePrefixInBinary (mEngineProcessor.get(), mb);
+            bassSubstituteEnginePrefixInBinary (mEngineProcessor, mb);
             mEngineProcessor->setStateInformation (mb.getData(), (int) mb.getSize());
         }
     }
@@ -717,7 +697,7 @@ void BassPage::loadPreset (const juce::File& xml)
     // Prefix substitution.  Find any PARAM child whose id contains the
     // current engine's tag (e.g. "_bsb_") and extract its prefix; rewrite
     // every PARAM id whose prefix matches.  Skip if loaded prefix == local.
-    const juce::String localPrefix = bassEngineLocalPrefix (mEngineProcessor.get());
+    const juce::String localPrefix = bassEngineLocalPrefix (mEngineProcessor);
     if (localPrefix.isEmpty()) return;
 
     // F-2 fix (2026-04-26): localPrefix format is `tk_<row>_<idx>_<engineTag>_`
@@ -761,14 +741,14 @@ void BassPage::loadPreset (const juce::File& xml)
         }
     }
 
-    bassApplyApvtsTree (mEngineProcessor.get(), loaded);
+    bassApplyApvtsTree (mEngineProcessor, loaded);
 
     // 2026-04-26: BaySickPlayer factory presets carry a sibling <Sample>
     // element pointing at an SFZ in the Core Library.  Resolve and load
     // it here.  No normalizeRootNotes - preserves SFZ's natural keymap
     // for melodic playback (only DrumPage normalizes to 60).
     if (bspSample)
-        if (auto* vp = dynamic_cast<VibePlayerProcessor*>(mEngineProcessor.get()))
+        if (auto* vp = dynamic_cast<VibePlayerProcessor*>(mEngineProcessor))
         {
             const juce::String kind = bspSample->getStringAttribute ("kind", "none");
             const juce::String pathStr = bspSample->getStringAttribute ("path");
@@ -918,14 +898,14 @@ void BassPage::savePagePreset (std::function<void()> onSaved)
                 target = dir.getChildFile (name + " (" + juce::String (n++) + ").xml");
 
             const juce::String stripPrefix = "mixer_bass_" + juce::String (safeThis->mPageIndex);
-            const juce::String enginePrefix = bassEnginePrefixOf (safeThis->mEngineProcessor.get());
+            const juce::String enginePrefix = bassEnginePrefixOf (safeThis->mEngineProcessor);
 
             const juce::String xml = PagePresetIO::exportPagePreset (
                 safeThis->mProcessor,
                 PagePresetIO::PageKind::Bass,
                 safeThis->mPageIndex,
                 stripPrefix,
-                safeThis->mEngineProcessor.get(),
+                safeThis->mEngineProcessor,
                 safeThis->mEngineType,
                 enginePrefix);
 
@@ -946,14 +926,14 @@ void BassPage::loadPagePreset (const juce::File& xml)
         selectEngine (savedEngineType);
 
     const juce::String stripPrefix = "mixer_bass_" + juce::String (mPageIndex);
-    const juce::String enginePrefix = bassEnginePrefixOf (mEngineProcessor.get());
+    const juce::String enginePrefix = bassEnginePrefixOf (mEngineProcessor);
     auto noFallback = [] (int) { return true; };
 
     PagePresetIO::importPagePreset (mProcessor,
                                      PagePresetIO::PageKind::Bass,
                                      mPageIndex,
                                      stripPrefix,
-                                     mEngineProcessor.get(),
+                                     mEngineProcessor,
                                      enginePrefix,
                                      noFallback,
                                      xml.loadFileAsString());
@@ -1040,14 +1020,14 @@ void BassPage::valueTreeRedirected (juce::ValueTree& tree)
 
 void BassPage::subscribeToEngineApvtsState()
 {
-    if (auto* h = dynamic_cast<HarmlessProcessor*>     (mEngineProcessor.get())) h->apvts.state.addListener (this);
-    else if (auto* b = dynamic_cast<BaySickBassProcessor*> (mEngineProcessor.get())) b->apvts.state.addListener (this);
-    else if (auto* v = dynamic_cast<VibePlayerProcessor*>  (mEngineProcessor.get())) v->apvts.state.addListener (this);
+    if (auto* h = dynamic_cast<HarmlessProcessor*>     (mEngineProcessor)) h->apvts.state.addListener (this);
+    else if (auto* b = dynamic_cast<BaySickBassProcessor*> (mEngineProcessor)) b->apvts.state.addListener (this);
+    else if (auto* v = dynamic_cast<VibePlayerProcessor*>  (mEngineProcessor)) v->apvts.state.addListener (this);
 }
 
 void BassPage::unsubscribeFromEngineApvtsState()
 {
-    if (auto* h = dynamic_cast<HarmlessProcessor*>     (mEngineProcessor.get())) h->apvts.state.removeListener (this);
-    else if (auto* b = dynamic_cast<BaySickBassProcessor*> (mEngineProcessor.get())) b->apvts.state.removeListener (this);
-    else if (auto* v = dynamic_cast<VibePlayerProcessor*>  (mEngineProcessor.get())) v->apvts.state.removeListener (this);
+    if (auto* h = dynamic_cast<HarmlessProcessor*>     (mEngineProcessor)) h->apvts.state.removeListener (this);
+    else if (auto* b = dynamic_cast<BaySickBassProcessor*> (mEngineProcessor)) b->apvts.state.removeListener (this);
+    else if (auto* v = dynamic_cast<VibePlayerProcessor*>  (mEngineProcessor)) v->apvts.state.removeListener (this);
 }

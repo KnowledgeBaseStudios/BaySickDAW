@@ -8,6 +8,7 @@
 #include "ProjectBrowserWindow.h"
 #include "ProjectBundler.h"   // QA-Export: bundle walker + writer
 #include "../SampleLibrary.h"
+#include "../EngineRig.h"    // QA-ModelShell TS1: model-side engine owner
 #include "LayersPage.h"
 #include "BassPage.h"
 #include "DrumPage.h"
@@ -621,6 +622,16 @@ StandaloneEditor::StandaloneEditor(VibeSynthProcessor& p, StandalonePlayHead& ph
     // save/load to the editor.  These are fired inside serialize/deserialize.
     mProcessor.onSerializeUIState   = [this](juce::XmlElement& root)       { serializeUIState (root); };
     mProcessor.onDeserializeUIState = [this](const juce::XmlElement& root) { deserializeUIState (root); };
+
+    // QA-ModelShell TS1: model-side automation registration.  The rig fires
+    // this at EVERY engine creation (user pick, project restore, template
+    // load, duplicate), so engine-parameter lanes exist without any editor
+    // view being built.  View wrappers still overwrite these ids while views
+    // live (identical param targets); TS3 retires the wrappers.
+    mProcessor.engineRig().onEngineCreated = [this] (EngineTab& tab)
+    {
+        registerModelEngineAutomation (tab);
+    };
 
     // ── VKnob right-click → automation ───────────────────────────────────────
     VKnobAutomation::sOnAutomate = [this](const juce::String& pid)
@@ -4772,11 +4783,28 @@ void StandaloneEditor::onTabClosed(int tabId)
             // SliderParameterAttachment-bearing ARIA widgets) is already gone.
             if (isRusty && mProcessor.hasBaySickRustyDrums())
                 mProcessor.destroyBaySickRustyDrums();
-            // K-4 / L-3 (2026-05-05): same ordering for BaySickGuitars +
-            // BaySickBasses - page is gone, chain dropped its raw pointer to
-            // the engine via the destructor's mChain.reset(), now drop the
-            // engine.  Frees the slot index so the user can `+ Add Bass`
-            // again after deleting one.
+            // QA-ModelShell TS1: rig-owned engines follow the same page-first
+            // ordering -- the view (and its APVTS-attached widgets) is gone,
+            // now the model tears the engine down (unregister + settle +
+            // destroy).  MUST run BEFORE the sfizz destroys below: the
+            // rig-owned Inst chain still holds the spliced Guitars/Basses
+            // stage pointer, and the chain's processBlock calls that engine
+            // directly without checking the active flags (K-5 fix #5) --
+            // removeTab unregisters the strip task and destroys the chain,
+            // so the sfizz engine frees with zero referents.  No-ops for
+            // tabs that never picked an engine.
+            {
+                auto& rig = mProcessor.engineRig();
+                if (layerStripIdx >= 0) rig.removeTab (TabKind::Layers, layerStripIdx);
+                if (bassStripIdx  >= 0) rig.removeTab (TabKind::Bass,   bassStripIdx);
+                if (drumStripIdx  >= 0) rig.removeTab (TabKind::Drums,  drumStripIdx);
+                if (clipStripIdx  >= 0) rig.removeTab (TabKind::Clips,  clipStripIdx);
+                if (voxStripIdx   >= 0) rig.removeTab (TabKind::Vox,    voxStripIdx);
+                if (instStripIdx  >= 0) rig.removeTab (TabKind::Inst,   instStripIdx);
+            }
+            // K-4 / L-3 (2026-05-05): page AND chain are gone (chain destroyed
+            // by removeTab above), now drop the sfizz engine.  Frees the slot
+            // index so the user can `+ Add Bass` again after deleting one.
             if (instGuitarsIdx >= 0)
                 mProcessor.destroyBaySickGuitars (instGuitarsIdx);
             if (instBassesIdx >= 0)
@@ -8664,29 +8692,13 @@ void StandaloneEditor::spawnClipsTabIfMissing (int audioRow, const juce::String&
     // `path` so it dedups against every other (relative) library entry.
     cpRaw->setClipFilePath (resolvedPath, path);
 
-    // G-3 (2026-04-28): dual-engine swap pattern - onEngineDestroying fires
-    // BEFORE the active engine pointer changes, so we unregister with the
-    // OLD pointer still valid (no audio-thread dangling pointer).
-    // onEngineChanged fires AFTER, so we register the new active processor.
-    // Both engine instances stay alive across swaps inside ClipsPage so
-    // settings persist.
-    cpRaw->onEngineDestroying = [this, audioRow]()
-    {
-        mProcessor.unregisterClipEngine (audioRow);
-    };
-    cpRaw->onEngineChanged = [this, audioRow, cpRaw]()
+    // QA-ModelShell TS1: engine construction/registration is model-side
+    // (EngineRig) -- the view callback only wires the dirty hook onto the
+    // just-installed engine.
+    cpRaw->onEngineChanged = [this, cpRaw]()
     {
         if (auto* eng = cpRaw->getEngineProcessor())
-        {
-            const double sr = mProcessor.getSampleRate() > 0.0
-                                ? mProcessor.getSampleRate() : 44100.0;
-            const int    bs = mProcessor.getBlockSize() > 0
-                                ? mProcessor.getBlockSize() : 512;
-            eng->prepareToPlay (sr, bs);
-            mProcessor.registerClipEngine (audioRow, eng);
-            // 2026-05-05 dirty-flag wiring on the just-installed engine.
             wireEngineDirtyHook (eng);
-        }
     };
 
     // G-6 (2026-04-29): right-click engine-picker context menu callbacks.
@@ -9157,7 +9169,7 @@ void StandaloneEditor::spawnVoxTabIfMissing (int voxIdx, bool selectAfter)
     const juce::String tabName = nextVoxTabName();   // QA-D STATE-02
     const int newId = mRibbon->addTab (RibbonTabBar::TabType::Vox, tabName);
 
-    auto cpHolder = std::make_unique<VoxPage> (voxIdx);
+    auto cpHolder = std::make_unique<VoxPage> (mProcessor, voxIdx);
     auto* cpRaw = cpHolder.get();
     cpRaw->setTabName (tabName);
     cpRaw->setProcessor (&mProcessor);   // G-7: Page Preset save/load access
@@ -9187,29 +9199,16 @@ void StandaloneEditor::spawnVoxTabIfMissing (int voxIdx, bool selectAfter)
         return true;
     });
 
-    cpRaw->onEngineDestroying = [this, voxIdx]()
+    // QA-ModelShell TS1: engine construction/registration is model-side
+    // (EngineRig, done by VoxPage's ctor engine pick).  The view callback only
+    // wires the dirty hook -- installed on the BaySickVocal processor, whose
+    // embedded NAM/IR sub-processor is wired transitively inside
+    // wireEngineDirtyHook's BaySickVocal branch.  The explicit fire covers the
+    // ctor-created engine (this callback is wired after construction).
+    cpRaw->onEngineChanged = [this, cpRaw]()
     {
-        mProcessor.unregisterVoxEngine (voxIdx);
-    };
-    cpRaw->onEngineChanged = [this, voxIdx, cpRaw]()
-    {
-        if (auto* eng = cpRaw->getEngineProcessor())
-        {
-            const double sr = mProcessor.getSampleRate() > 0.0
-                                ? mProcessor.getSampleRate() : 44100.0;
-            const int    bs = mProcessor.getBlockSize() > 0
-                                ? mProcessor.getBlockSize() : 512;
-            eng->prepareToPlay (sr, bs);
-            mProcessor.registerVoxEngine (voxIdx, eng);
-        }
-        // 2026-05-05 dirty-flag wiring: install on the BaySickVocal processor
-        // (its embedded NAM/IR sub-processor is wired transitively inside
-        // wireEngineDirtyHook's BaySickVocal branch).
         wireEngineDirtyHook (cpRaw->getVocalProcessor());
     };
-    // H-6b (2026-05-01): VoxPage now creates BaySickVocal in its constructor,
-    // before this onEngineChanged callback was wired.  Register the engine
-    // explicitly here so audio dispatch picks it up.
     if (cpRaw->onEngineChanged) cpRaw->onEngineChanged();
 
     // G-6 (2026-04-29): right-click engine-picker context menu callbacks.
@@ -9272,7 +9271,7 @@ void StandaloneEditor::spawnInstTabIfMissing (int instIdx, bool selectAfter)
     const juce::String tabName = nextInstTabName();   // QA-D STATE-02
     const int newId = mRibbon->addTab (RibbonTabBar::TabType::Inst, tabName);
 
-    auto cpHolder = std::make_unique<InstPage> (instIdx);
+    auto cpHolder = std::make_unique<InstPage> (mProcessor, instIdx);
     auto* cpRaw = cpHolder.get();
     cpRaw->setTabName (tabName);
     cpRaw->setProcessor (&mProcessor);   // G-7: Page Preset save/load access
@@ -9285,22 +9284,9 @@ void StandaloneEditor::spawnInstTabIfMissing (int instIdx, bool selectAfter)
         return true;
     });
 
-    cpRaw->onEngineDestroying = [this, instIdx]()
-    {
-        mProcessor.unregisterInstEngine (instIdx);
-    };
-    cpRaw->onEngineChanged = [this, instIdx, cpRaw]()
-    {
-        if (auto* eng = cpRaw->getEngineProcessor())
-        {
-            const double sr = mProcessor.getSampleRate() > 0.0
-                                ? mProcessor.getSampleRate() : 44100.0;
-            const int    bs = mProcessor.getBlockSize() > 0
-                                ? mProcessor.getBlockSize() : 512;
-            eng->prepareToPlay (sr, bs);
-            mProcessor.registerInstEngine (instIdx, eng);
-        }
-    };
+    // QA-ModelShell TS1: engine construction/registration is model-side
+    // (EngineRig, done by InstPage's ctor trio bind) -- the old
+    // onEngineDestroying/onEngineChanged register wiring is gone.
 
     // 2026-05-05 dirty-flag wiring: install the markDirty hook on the
     // BaySickPedals + BaySickNAM/IR processors owned by this InstPage.  Their
@@ -9348,13 +9334,6 @@ void StandaloneEditor::spawnInstTabIfMissing (int instIdx, bool selectAfter)
     entry->type          = RibbonTabBar::TabType::Inst;
     entry->component     = std::move (cpHolder);
     mPages.add (entry.release());
-
-    // I-0b (2026-05-02): Inst page pre-loads BaySickNAM/IR in its constructor
-    // (no engine picker any longer).  Trigger onEngineChanged manually so the
-    // PluginProcessor registers the just-instantiated engine -- previously this
-    // fired from selectEngine() when the user picked an engine, but selectEngine
-    // is now a no-op stub.
-    if (cpRaw->onEngineChanged) cpRaw->onEngineChanged();
 
     if (mInstEmptyState) mInstEmptyState->setVisible (false);
     if (selectAfter)
@@ -11445,6 +11424,102 @@ void StandaloneEditor::resetProjectState()
     if (mMixerPage) mMixerPage->reRegisterStripAutomation();
 }
 
+// QA-ModelShell TS1: engine-parameter lane registration keyed to MODEL events
+// (EngineRig::onEngineCreated), never to view builds.  Lane-id vocabulary
+// matches what the engine editors stamp today:
+//   Layers/Bass/Drums/Clips -- the engine APVTS param ids verbatim;
+//   Vox  -- "vox<N>_" + id, covering the vocal APVTS and its embedded NAM/IR;
+//   Inst -- "inst<N>_" + id for the NAM/IR stage.  Pedal lanes are uuid-keyed
+//   rack lanes (EffectParamMap pedal tables land in TS3); the chain wrapper
+//   has no parameters.
+// Applicators are null-owner and re-resolve tab -> engine THROUGH the rig at
+// apply time, so an engine swap can never leave a closure aimed at a freed
+// processor.
+void StandaloneEditor::registerModelEngineAutomation (EngineTab& tab)
+{
+    const TabKind kind = tab.kind;
+    const int     idx  = tab.pageIndex;
+
+    enum class Target { MainEngine, VocalNam, InstNam };
+
+    auto resolveTarget = [this, kind, idx] (Target which) -> juce::AudioProcessor*
+    {
+        auto* t = mProcessor.engineRig().findTab (kind, idx);
+        if (t == nullptr) return nullptr;
+        switch (which)
+        {
+            case Target::MainEngine: return t->engine.get();
+            case Target::VocalNam:
+                if (auto* v = dynamic_cast<BaySickVocalProcessor*> (t->engine.get()))
+                    return &v->getNamIrProcessor();
+                return nullptr;
+            case Target::InstNam:    return t->namIr;
+        }
+        return nullptr;
+    };
+
+    auto registerParamsOf = [resolveTarget] (Target which, juce::AudioProcessor* proc,
+                                             const juce::String& lanePrefix)
+    {
+        if (proc == nullptr || EngineRig::apvtsOf (proc) == nullptr) return;
+
+        for (auto* p : proc->getParameters())
+        {
+            auto* rp = dynamic_cast<juce::RangedAudioParameter*> (p);
+            if (rp == nullptr) continue;
+            const juce::String pid     = lanePrefix + rp->paramID;
+            const juce::String paramId = rp->paramID;
+
+            if (VKnobAutomation::sOnRegisterApplicator)
+                VKnobAutomation::sOnRegisterApplicator (pid,
+                    [resolveTarget, which, paramId] (float v01)
+                    {
+                        if (auto* t = resolveTarget (which))
+                            if (auto* ap = EngineRig::apvtsOf (t))
+                                if (auto* param = ap->getParameter (paramId))
+                                    param->setValueNotifyingHost (juce::jlimit (0.0f, 1.0f, v01));
+                    },
+                    nullptr);   // model-scoped, not component-scoped
+
+            if (VKnobAutomation::sOnRegisterReader)
+                VKnobAutomation::sOnRegisterReader (pid,
+                    [resolveTarget, which, paramId]() -> float
+                    {
+                        if (auto* t = resolveTarget (which))
+                            if (auto* ap = EngineRig::apvtsOf (t))
+                                if (auto* param = ap->getParameter (paramId))
+                                    return param->getValue();
+                        return 0.5f;
+                    },
+                    nullptr);
+        }
+    };
+
+    switch (kind)
+    {
+        case TabKind::Layers:
+        case TabKind::Bass:
+        case TabKind::Drums:
+        case TabKind::Clips:
+            registerParamsOf (Target::MainEngine, tab.engine.get(), {});
+            break;
+
+        case TabKind::Vox:
+        {
+            const juce::String pre = "vox" + juce::String (idx) + "_";
+            registerParamsOf (Target::MainEngine, tab.engine.get(), pre);
+            if (auto* v = dynamic_cast<BaySickVocalProcessor*> (tab.engine.get()))
+                registerParamsOf (Target::VocalNam, &v->getNamIrProcessor(), pre);
+            break;
+        }
+
+        case TabKind::Inst:
+            registerParamsOf (Target::InstNam, tab.namIr,
+                              "inst" + juce::String (idx) + "_");
+            break;
+    }
+}
+
 void StandaloneEditor::registerStaticAutomationHandlers()
 {
     // Auto-register all static APVTS params (instrument synths, EQ bands, etc.)
@@ -12475,6 +12550,12 @@ void StandaloneEditor::restoreAudioStripsFromArrangement (bool isLoadContext)
     // fixed-bus racks; this second apply reaches the InsertNodes that
     // weren't born yet at that point.
     mProcessor.applyPendingRackStates();
+
+    // QA-ModelShell TS1 (wire-at-load): racks are fully populated now (bus
+    // racks via deserializeProject's loadRackStates, per-insert racks via the
+    // apply above) -- register every slot's DSP-targeting automation without
+    // waiting for the Effects page to be visited.
+    EffectsPage::registerRackAutomationForAllChannels (mProcessor);
 
     // 2026-04-24: push the saved global tempo into the playhead now that the
     // full project has been restored.  Transport BPM field picks it up on

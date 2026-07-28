@@ -113,6 +113,10 @@ DrumPage::DrumPage(VibeSynthProcessor& p, PatternManager& pm, int pageIndex)
 {
     mPageColor = VC::DrumCol[mPageIndex];
 
+    // QA-ModelShell TS1: the tab is a model object from birth (idempotent;
+    // name syncs via setTabName; engine attaches at selectEngine).
+    mProcessor.engineRig().addTab (TabKind::Drums, mPageIndex, mTabName);
+
     // 2026-04-26 (step 2 commit 3): Drum Kit and per-drum Piano Roll both
     // live on PianoRollPage now.  Skip building those sub-views here -
     // mDrumKitTab + mPianoRoll stay null; sub-tab pills 0 (Drum Kit) and 2
@@ -130,15 +134,14 @@ DrumPage::~DrumPage()
 {
     stopTimer();
 
-    const bool hadEngine = ! mEngineType.isEmpty();
-    if (hadEngine)
-        mProcessor.unregisterDrumEngine(mPageIndex);
-    juce::Thread::sleep(20);   // outlast one audio block
-
+    // QA-ModelShell TS1: the engine is rig-owned and survives this view.
+    // Teardown happens in EngineRig::removeTab (tab close) or teardownAll
+    // (shutdown).  Only the view-owned editor dies here, before the page --
+    // its attachments reference the engine's APVTS.
     if (mEngineEditor && mPlayerTab)
         mPlayerTab->removeChildComponent(mEngineEditor.get());
     mEngineEditor.reset();
-    mEngineProcessor.reset();
+    mEngineProcessor = nullptr;
 }
 
 void DrumPage::switchTab(int idx)
@@ -309,14 +312,14 @@ void DrumPage::selectEngine(const juce::String& engineName)
     HeavyOperationOverlay::ScopedOp busy (StandaloneEditor::busyOverlayFor (this),
                                           "Loading " + engineName + "...", true);
 
-    // Tear down previous engine if engine type is changing.
+    // View teardown only -- the rig tears the old engine down inside
+    // setEngineType's swap path.
     if (mEngineProcessor)
     {
-        mProcessor.unregisterDrumEngine(mPageIndex);
         if (mEngineEditor && mPlayerTab)
             mPlayerTab->removeChildComponent(mEngineEditor.get());
         mEngineEditor.reset();
-        mEngineProcessor.reset();
+        mEngineProcessor = nullptr;
         mLoadedSampleKind = SampleKind::None;
         mLoadedSamplePath = juce::File();
     }
@@ -324,28 +327,20 @@ void DrumPage::selectEngine(const juce::String& engineName)
     mEngineType = engineName;
     refreshPianoRollContextLabel();
 
-    double sr        = mProcessor.getSampleRate() > 0.0 ? mProcessor.getSampleRate() : 44100.0;
-    int    blockSize = 512;
-
-    const juce::String trackIdStr = trackId();
-    if (engineName == "BaySickPlayer")
+    // QA-ModelShell TS1: the model constructs/swaps, prepares, and registers
+    // the engine.  This page keeps a non-owning view pointer + the editor.
+    auto& rig = mProcessor.engineRig();
+    rig.addTab (TabKind::Drums, mPageIndex, mTabName);
+    mEngineProcessor = rig.setEngineType (TabKind::Drums, mPageIndex, engineName);
+    if (mEngineProcessor != nullptr)
     {
-        auto* proc = new VibePlayerProcessor(trackIdStr);
-        proc->prepareToPlay(sr, blockSize);
-        mEngineProcessor.reset(proc);
-        mEngineEditor.reset(proc->createEditor());
+        mEngineEditor.reset (mEngineProcessor->createEditor());
         // 2026-04-26: tell the editor it's in drum context so its preset menu
         // filters to drum-only folders (Hip Hop Drums / EDM Drums) and skips
         // the in-app Core Library (DrumPage's own showSoundPicker handles that).
+        // dynamic_cast no-ops for the BaySickSynth editor.
         if (auto* vpe = dynamic_cast<VibePlayerEditor*> (mEngineEditor.get()))
             vpe->setDrumContext (true);
-    }
-    else if (engineName == "BaySickSynth")
-    {
-        auto* proc = new BaySickSynthProcessor(trackIdStr);
-        proc->prepareToPlay(sr, blockSize);
-        mEngineProcessor.reset(proc);
-        mEngineEditor.reset(proc->createEditor());
     }
 
     // Smoke round 2 (Jeff): the SW-3 Swing Mix knob moved OFF the editor
@@ -356,31 +351,29 @@ void DrumPage::selectEngine(const juce::String& engineName)
     {
         mPianoRoll->onNoteAudition = [this](int midiNote)
         {
-            if (auto* s = dynamic_cast<BaySickSynthProcessor*>(mEngineProcessor.get()))
+            if (auto* s = dynamic_cast<BaySickSynthProcessor*>(mEngineProcessor))
                 s->auditionNote(midiNote);
-            else if (auto* v = dynamic_cast<VibePlayerProcessor*>(mEngineProcessor.get()))
+            else if (auto* v = dynamic_cast<VibePlayerProcessor*>(mEngineProcessor))
                 v->auditionNote(midiNote);
         };
         mPianoRoll->onNoteAuditionOn = [this](int midiNote)
         {
-            if (auto* s = dynamic_cast<BaySickSynthProcessor*>(mEngineProcessor.get()))
+            if (auto* s = dynamic_cast<BaySickSynthProcessor*>(mEngineProcessor))
                 s->auditionNoteOn(midiNote);
-            else if (auto* v = dynamic_cast<VibePlayerProcessor*>(mEngineProcessor.get()))
+            else if (auto* v = dynamic_cast<VibePlayerProcessor*>(mEngineProcessor))
                 v->auditionNoteOn(midiNote);
         };
         mPianoRoll->onNoteAuditionOff = [this](int midiNote)
         {
-            if (auto* s = dynamic_cast<BaySickSynthProcessor*>(mEngineProcessor.get()))
+            if (auto* s = dynamic_cast<BaySickSynthProcessor*>(mEngineProcessor))
                 s->auditionNoteOff(midiNote);
-            else if (auto* v = dynamic_cast<VibePlayerProcessor*>(mEngineProcessor.get()))
+            else if (auto* v = dynamic_cast<VibePlayerProcessor*>(mEngineProcessor))
                 v->auditionNoteOff(midiNote);
         };
     }
 
     if (mEngineEditor && mPlayerTab)
         mPlayerTab->addAndMakeVisible(*mEngineEditor);
-
-    mProcessor.registerDrumEngine(mPageIndex, mEngineProcessor.get());
 
     // J-6 EQ unification (2026-05-03): page-level EQ display removed; pre-rack
     // EQ is bound exclusively by EffectsPage (mixer_drum_<N>_preeq_*).
@@ -550,6 +543,9 @@ void DrumPage::resized()
 void DrumPage::setTabName(const juce::String& name)
 {
     mTabName = name;
+    // QA-ModelShell TS1: every rename path funnels through here -- the one
+    // sync point for the model tab's name.
+    mProcessor.engineRig().renameTab (TabKind::Drums, mPageIndex, name);
     refreshPianoRollContextLabel();
 }
 
@@ -775,7 +771,7 @@ void DrumPage::loadSampleFile (const juce::File& f)
     HeavyOperationOverlay::ScopedOp busy (StandaloneEditor::busyOverlayFor (this),
                                           "Loading Sample...", true);
     selectEngine ("BaySickPlayer");
-    if (auto* vp = dynamic_cast<VibePlayerProcessor*>(mEngineProcessor.get()))
+    if (auto* vp = dynamic_cast<VibePlayerProcessor*>(mEngineProcessor))
     {
         // 2026-05-02: route through the processor wrapper so the path/kind
         // properties get stamped onto apvts.state.  Direct mgr.load* calls
@@ -796,7 +792,7 @@ void DrumPage::loadSampleFolder (const juce::File& f)
     HeavyOperationOverlay::ScopedOp busy (StandaloneEditor::busyOverlayFor (this),
                                           "Loading Samples...", true);
     selectEngine ("BaySickPlayer");
-    if (auto* vp = dynamic_cast<VibePlayerProcessor*>(mEngineProcessor.get()))
+    if (auto* vp = dynamic_cast<VibePlayerProcessor*>(mEngineProcessor))
     {
         // 2026-05-02: see loadSampleFile note above.  Drums always trigger
         // at MIDI 60 -- pass 60 as normalizeRoot.
@@ -815,7 +811,7 @@ void DrumPage::loadSampleSFZ (const juce::File& f)
     HeavyOperationOverlay::ScopedOp busy (StandaloneEditor::busyOverlayFor (this),
                                           "Loading SFZ...", true);
     selectEngine ("BaySickPlayer");
-    if (auto* vp = dynamic_cast<VibePlayerProcessor*>(mEngineProcessor.get()))
+    if (auto* vp = dynamic_cast<VibePlayerProcessor*>(mEngineProcessor))
     {
         // 2026-05-02: see loadSampleFile note above.
         vp->loadSampleSFZ (f, 60);
@@ -833,7 +829,7 @@ void DrumPage::loadSynthPreset (const juce::File& xml)
     HeavyOperationOverlay::ScopedOp busy (StandaloneEditor::busyOverlayFor (this),
                                           "Loading Preset...", true);
     selectEngine ("BaySickSynth");
-    auto* bss = dynamic_cast<BaySickSynthProcessor*>(mEngineProcessor.get());
+    auto* bss = dynamic_cast<BaySickSynthProcessor*>(mEngineProcessor);
     if (bss == nullptr) return;
 
     auto px = juce::XmlDocument::parse (xml);
@@ -898,12 +894,13 @@ void DrumPage::newBlankPatch()
 
 void DrumPage::clearSound()
 {
-    if (mEngineProcessor)
-        mProcessor.unregisterDrumEngine (mPageIndex);
+    // QA-ModelShell TS1: view dies first (editor attachments reference the
+    // engine APVTS), then the rig tears the engine down keeping the tab.
     if (mEngineEditor && mPlayerTab)
         mPlayerTab->removeChildComponent (mEngineEditor.get());
     mEngineEditor.reset();
-    mEngineProcessor.reset();
+    mEngineProcessor = nullptr;
+    mProcessor.engineRig().clearEngine (TabKind::Drums, mPageIndex);
     mEngineType.clear();
     mSoundName.clear();
     mLoadedSampleKind = SampleKind::None;
@@ -965,14 +962,14 @@ void DrumPage::savePatchAs()
             dir.createDirectory();
             auto file = dir.getChildFile (name + ".xml");
 
-            if (auto* bss = dynamic_cast<BaySickSynthProcessor*>(dp->mEngineProcessor.get()))
+            if (auto* bss = dynamic_cast<BaySickSynthProcessor*>(dp->mEngineProcessor))
             {
                 // BaySickSynth: just the apvts state.
                 auto state = bss->apvts.copyState();
                 if (auto xml = state.createXml())
                     xml->writeTo (file, {});
             }
-            else if (auto* vp = dynamic_cast<VibePlayerProcessor*>(dp->mEngineProcessor.get()))
+            else if (auto* vp = dynamic_cast<VibePlayerProcessor*>(dp->mEngineProcessor))
             {
                 // BaySickPlayer: wrap apvts state + sample reference.
                 // Sample path is stored relative to Core Library when the file
@@ -1033,7 +1030,7 @@ void DrumPage::loadPlayerPreset (const juce::File& xml)
     HeavyOperationOverlay::ScopedOp busy (StandaloneEditor::busyOverlayFor (this),
                                           "Loading Preset...", true);
     selectEngine ("BaySickPlayer");
-    auto* vp = dynamic_cast<VibePlayerProcessor*>(mEngineProcessor.get());
+    auto* vp = dynamic_cast<VibePlayerProcessor*>(mEngineProcessor);
     if (vp == nullptr) return;
 
     // 1. Apply the apvts state child (rewrite trackId prefix).
@@ -1178,7 +1175,7 @@ void DrumPage::showContextMenu (juce::Component* anchor, bool fromKit)
     {
         bool isMono = false;
         bool canToggle = false;
-        if (auto* bss = dynamic_cast<BaySickSynthProcessor*>(mEngineProcessor.get()))
+        if (auto* bss = dynamic_cast<BaySickSynthProcessor*>(mEngineProcessor))
         {
             // voiceMode raw: 0=Poly, 1=Mono, 2=Lead, 3=Legato.  We treat
             // anything > 0 as "monophonic-ish" for label purposes.
@@ -1186,7 +1183,7 @@ void DrumPage::showContextMenu (juce::Component* anchor, bool fromKit)
                 isMono = (int) std::round (p->load()) >= 1;
             canToggle = true;
         }
-        else if (auto* vp = dynamic_cast<VibePlayerProcessor*>(mEngineProcessor.get()))
+        else if (auto* vp = dynamic_cast<VibePlayerProcessor*>(mEngineProcessor))
         {
             if (auto* p = vp->apvts.getRawParameterValue (vp->getParamPrefix() + "voiceCap"))
                 isMono = p->load() <= 1.5f;
@@ -1312,7 +1309,7 @@ void DrumPage::showContextMenu (juce::Component* anchor, bool fromKit)
             if (r == kIdLock)         dp->setLocked (! dp->mLocked);
             else if (r == kIdPolyphony)
             {
-                if (auto* bss = dynamic_cast<BaySickSynthProcessor*>(dp->mEngineProcessor.get()))
+                if (auto* bss = dynamic_cast<BaySickSynthProcessor*>(dp->mEngineProcessor))
                 {
                     // voiceMode is a 4-choice param: Poly(0) / Mono(1) / Lead(2) / Legato(3).
                     // Toggle Poly <-> Mono ONLY (Lead/Legato are advanced; user wants binary).
@@ -1324,7 +1321,7 @@ void DrumPage::showContextMenu (juce::Component* anchor, bool fromKit)
                         p->setValueNotifyingHost (range.convertTo0to1 ((float) nextRaw));
                     }
                 }
-                else if (auto* vp = dynamic_cast<VibePlayerProcessor*>(dp->mEngineProcessor.get()))
+                else if (auto* vp = dynamic_cast<VibePlayerProcessor*>(dp->mEngineProcessor))
                 {
                     if (auto* p = vp->apvts.getParameter (vp->getParamPrefix() + "voiceCap"))
                     {
@@ -1464,7 +1461,7 @@ void DrumPage::importDrumState (const juce::String& xml)
             // page's prefix becomes this destination page's prefix.  Without
             // this every param is silently dropped by setStateInformation's
             // id match.
-            drumSubstituteEnginePrefixInBinary (mEngineProcessor.get(), mb);
+            drumSubstituteEnginePrefixInBinary (mEngineProcessor, mb);
             mEngineProcessor->setStateInformation (mb.getData(), (int) mb.getSize());
         }
     }
@@ -1568,14 +1565,14 @@ void DrumPage::savePagePreset (std::function<void()> onSaved)
                 target = dir.getChildFile (name + " (" + juce::String (n++) + ").xml");
 
             const juce::String stripPrefix = "mixer_drum_" + juce::String (safeThis->mPageIndex);
-            const juce::String enginePrefix = drumEnginePrefixOf (safeThis->mEngineProcessor.get());
+            const juce::String enginePrefix = drumEnginePrefixOf (safeThis->mEngineProcessor);
 
             const juce::String xml = PagePresetIO::exportPagePreset (
                 safeThis->mProcessor,
                 PagePresetIO::PageKind::Drum,
                 safeThis->mPageIndex,
                 stripPrefix,
-                safeThis->mEngineProcessor.get(),
+                safeThis->mEngineProcessor,
                 safeThis->mEngineType,
                 enginePrefix);
 
@@ -1596,14 +1593,14 @@ void DrumPage::loadPagePreset (const juce::File& xml)
         selectEngine (savedEngineType);
 
     const juce::String stripPrefix = "mixer_drum_" + juce::String (mPageIndex);
-    const juce::String enginePrefix = drumEnginePrefixOf (mEngineProcessor.get());
+    const juce::String enginePrefix = drumEnginePrefixOf (mEngineProcessor);
     auto noFallback = [] (int) { return true; };
 
     PagePresetIO::importPagePreset (mProcessor,
                                      PagePresetIO::PageKind::Drum,
                                      mPageIndex,
                                      stripPrefix,
-                                     mEngineProcessor.get(),
+                                     mEngineProcessor,
                                      enginePrefix,
                                      noFallback,
                                      xml.loadFileAsString());
@@ -1616,7 +1613,7 @@ void DrumPage::loadPagePreset (const juce::File& xml)
     // re-load).  But DrumPage's display state is NOT in apvts - without
     // syncing it here, the Player tab keeps showing the "Pick a sound"
     // empty-state UI even though the engine has a kit loaded.
-    if (auto* vp = dynamic_cast<VibePlayerProcessor*> (mEngineProcessor.get()))
+    if (auto* vp = dynamic_cast<VibePlayerProcessor*> (mEngineProcessor))
     {
         const auto kind = vp->apvts.state.getProperty ("bsp_loadKind", juce::String()).toString();
         const auto path = vp->apvts.state.getProperty ("bsp_loadPath", juce::String()).toString();
@@ -1654,14 +1651,14 @@ juce::String DrumPage::exportPagePresetXml() const
     if (mEngineProcessor == nullptr || mEngineType.isEmpty()) return {};
 
     const juce::String stripPrefix = "mixer_drum_" + juce::String (mPageIndex);
-    const juce::String enginePrefix = drumEnginePrefixOf (mEngineProcessor.get());
+    const juce::String enginePrefix = drumEnginePrefixOf (mEngineProcessor);
 
     return PagePresetIO::exportPagePreset (
         mProcessor,
         PagePresetIO::PageKind::Drum,
         mPageIndex,
         stripPrefix,
-        mEngineProcessor.get(),
+        mEngineProcessor,
         mEngineType,
         enginePrefix);
 }
@@ -1681,14 +1678,14 @@ void DrumPage::importPagePresetXml (const juce::String& xml)
         selectEngine (savedEngineType);
 
     const juce::String stripPrefix = "mixer_drum_" + juce::String (mPageIndex);
-    const juce::String enginePrefix = drumEnginePrefixOf (mEngineProcessor.get());
+    const juce::String enginePrefix = drumEnginePrefixOf (mEngineProcessor);
     auto noFallback = [] (int) { return true; };
 
     PagePresetIO::importPagePreset (mProcessor,
                                      PagePresetIO::PageKind::Drum,
                                      mPageIndex,
                                      stripPrefix,
-                                     mEngineProcessor.get(),
+                                     mEngineProcessor,
                                      enginePrefix,
                                      noFallback,
                                      xml);

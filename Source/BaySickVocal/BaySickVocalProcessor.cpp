@@ -273,16 +273,16 @@ BaySickVocalProcessor::createLayout()
 }
 
 // ─── Constructor ──────────────────────────────────────────────────────────────
-BaySickVocalProcessor::BaySickVocalProcessor()
+BaySickVocalProcessor::BaySickVocalProcessor (juce::UndoManager* undoMgr)
     : juce::AudioProcessor (BusesProperties()
           .withInput  ("Input",  juce::AudioChannelSet::stereo(), true)
           .withOutput ("Output", juce::AudioChannelSet::stereo(), true))
-    , apvts (*this, nullptr, "BaySickVocalState", createLayout())
+    , apvts (*this, undoMgr, "BaySickVocalState", createLayout())
 {
     // H-6d (2026-05-02): per-Vox-strip BaySickNAM/IR processor lives on
     // the Vox processor so its state is captured by getStateInformation
     // (page preset save/load picks it up automatically).
-    mNamIrProc = std::make_unique<BaySickNAMIRProcessor>();
+    mNamIrProc = std::make_unique<BaySickNAMIRProcessor> (undoMgr);
 
     // 2026-05-05 dirty-flag wiring: the vocal-chain rack's slot lifecycle
     // (load/clear/move/bypass) doesn't write to apvts, so chain it manually

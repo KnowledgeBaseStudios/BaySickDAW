@@ -1,6 +1,7 @@
 #pragma once
 #include <JuceHeader.h>
 #include "../PluginProcessor.h"
+#include "../EngineRig.h"
 #include "../PatternManager.h"
 #include "../DSP/EQ8MsDSP.h"
 #include "SharedUI.h"
@@ -16,9 +17,10 @@
 //   Tab 1 "Piano Roll" - PianoRollContainer bound to bassRoll[mPageIndex]
 //
 // Engine choices: Harmless | VibePlayer | BaySickBass
-// Each page owns its engine processor + editor (created on first engine selection),
-// and the engine owns its own APVTS.  QA-ApvtsAutomation (2026-07-25): the main
-// processor's parallel "tk_*" mirror registration is gone -- it was never read.
+// QA-ModelShell TS1 (2026-07-27): the engine is MODEL-owned (EngineRig, keyed
+// {Bass, pageIndex}).  This page is a disposable view: it holds a non-owning
+// engine pointer plus the editor it creates, and requests engines from the rig
+// -- construction, registration, and teardown all happen model-side.
 // ─────────────────────────────────────────────────────────────────────────────
 class BassPage : public juce::Component,
                  public juce::Timer,
@@ -57,7 +59,7 @@ public:
 
     // P1+P2 persistence (2026-04-24): same pattern as LayersPage.
     juce::String          getEngineType()      const { return mEngineType; }
-    juce::AudioProcessor* getEngineProcessor() const { return mEngineProcessor.get(); }
+    juce::AudioProcessor* getEngineProcessor() const { return mEngineProcessor; }
 
     // P1+P2 persistence: StandaloneEditor calls this during project load.
     void selectEngine (const juce::String& engineName);
@@ -120,7 +122,10 @@ private:
     };
     std::unique_ptr<LockableCombo>              mEngineCombo;
     std::unique_ptr<juce::Label>                mEngineLabel;
-    std::unique_ptr<juce::AudioProcessor>       mEngineProcessor;
+    // Non-owning view of the rig-owned engine ({Bass, pageIndex}); the editor
+    // IS view-owned and must be destroyed before the page (its attachments
+    // reference the engine's APVTS).
+    juce::AudioProcessor*                       mEngineProcessor { nullptr };
     std::unique_ptr<juce::AudioProcessorEditor> mEngineEditor;
     bool         mEngineLocked { false };
     bool         mLocked       { false };  // D1.4-fix (c): protect from kit-replace

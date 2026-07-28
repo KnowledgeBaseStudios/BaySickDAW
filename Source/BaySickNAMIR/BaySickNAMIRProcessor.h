@@ -48,7 +48,9 @@ class BaySickNAMIRProcessor : public juce::AudioProcessor,
                               private juce::AudioProcessorValueTreeState::Listener
 {
 public:
-    BaySickNAMIRProcessor();
+    // undoMgr: QA-ModelShell TS1 dormant pre-wire -- bound into apvts so
+    // QA-UndoCoverage can enable undo without a ctor sweep; unused until then.
+    explicit BaySickNAMIRProcessor (juce::UndoManager* undoMgr = nullptr);
     ~BaySickNAMIRProcessor() override;
 
     // ── AudioProcessor overrides ──────────────────────────────────────────────

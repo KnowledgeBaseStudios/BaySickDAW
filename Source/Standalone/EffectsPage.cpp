@@ -496,18 +496,22 @@ void EffectsPage::resolveChannelDsp (VibeGraph& vg, int id,
 void EffectsPage::registerSlotAutomation (int slotIndex)
 {
     if (mRack == nullptr || mTrackBox == nullptr) return;
+    registerSlotAutomationFor (mProcessor.mVibeGraph, mTrackBox->getSelectedId(),
+                               getChannelPrefix(), *mRack, slotIndex);
+}
 
-    const int          chId   = mTrackBox->getSelectedId();
-    const juce::String uuid   = mRack->getSlotUuid (slotIndex);
-    const EffectType   type   = mRack->getSlotType (slotIndex);
+void EffectsPage::registerSlotAutomationFor (VibeGraph& vg, int chId,
+                                             const juce::String& channelPrefix,
+                                             EffectRack& rackRef, int slotIndex)
+{
+    const juce::String uuid   = rackRef.getSlotUuid (slotIndex);
+    const EffectType   type   = rackRef.getSlotType (slotIndex);
     // Variant is part of the key: one EffectType can build several panels whose
     // knobs share LABELS but not meaning (Modern vs FET attack, Modern vs Opto
     // gain).  Read it from the DSP so no UI is involved.
-    const int          variant = EffectParamMap::variantOf (type, mRack->getSlotEffect (slotIndex));
-    const juce::String base   = getChannelPrefix() + "_" + uuid + "_";
+    const int          variant = EffectParamMap::variantOf (type, rackRef.getSlotEffect (slotIndex));
+    const juce::String base   = channelPrefix + "_" + uuid + "_";
     if (uuid.isEmpty()) return;
-
-    auto& vg = mProcessor.mVibeGraph;
 
     // Resolve rack -> slot index by UUID.  Shared by the slot-gain registration
     // below and the per-parameter ones after it.
@@ -599,6 +603,41 @@ EffectRack* EffectsPage::rackForChannelId (VibeGraph& vg, int id)
     EQ8MsDSP*   eq   = nullptr;
     resolveChannelDsp (vg, id, rack, eq);
     return rack;
+}
+
+// QA-ModelShell TS1 (wire-at-load): rack automation used to be registered
+// only when the Effects page built a slot editor, so lanes went silent until
+// the page was VISITED after every project boundary.  This sweep runs after
+// applyPendingRackStates repopulates the racks -- a model trigger, no view
+// involved.  View-triggered registration (rebuildSlotEditor) still runs when
+// panels build; identical rack-scoped entries overwrite by key.
+void EffectsPage::registerRackAutomationForAllChannels (VibeSynthProcessor& proc)
+{
+    auto& vg = proc.mVibeGraph;
+
+    auto sweepChannel = [&vg] (int chId)
+    {
+        auto* rack = rackForChannelId (vg, chId);
+        if (rack == nullptr) return;
+        for (int s = 0; s < EffectRack::kNumSlots; ++s)
+        {
+            if (rack->getSlotType (s) == EffectType::None) continue;
+            registerSlotAutomationFor (vg, chId, channelPrefixForId (chId), *rack, s);
+        }
+    };
+
+    // The dropdown's channel-id vocabulary (the ids lane paramIds embed):
+    // 1-12 buses, 100+ drums, 200+ layers, 300+ basses, 400+ audio inserts,
+    // 600+ aux, 700+ vox, 800+ inst, 900+ rusty.
+    for (int id = 1; id <= 12; ++id)                                     sweepChannel (id);
+    for (int i = 0; i < kMaxDrumPages; ++i)                              sweepChannel (100 + i);
+    for (int i = 0; i < kMaxLayerPages; ++i)                             sweepChannel (200 + i);
+    for (int i = 0; i < kMaxBassPages; ++i)                              sweepChannel (300 + i);
+    for (int i = 0; i < MixerState::kMaxAudioRows; ++i)                  sweepChannel (400 + i);
+    for (int i = 0; i < (int) MixerChannelIds::kMaxAuxStrips; ++i)       sweepChannel (600 + i);
+    for (int i = 0; i < (int) MixerChannelIds::kMaxVoxStrips; ++i)       sweepChannel (700 + i);
+    for (int i = 0; i < (int) MixerChannelIds::kMaxInstStrips; ++i)      sweepChannel (800 + i);
+    for (int i = 0; i < (int) MixerChannelIds::kMaxRustyStrips; ++i)     sweepChannel (900 + i);
 }
 
 void EffectsPage::onChannelChanged()
@@ -1011,13 +1050,19 @@ void EffectsPage::rebuildSlotEditor(int slotIndex)
 
 juce::String EffectsPage::getChannelPrefix() const
 {
-    // Batch E #8 (2026-05-01): added missing channel categories that
-    // previously fell through to "instr_<id>".  Audio Clips Bus, Vox/Inst
-    // buses (incl. spawnable extras), Drum / Audio / Vox / Inst inserts
-    // all now have proper prefixes for slot-context tagging.  Insert ranges
-    // sourced from MixerChannelIds + VibesynthConstants so size bumps stay
-    // in sync (kMaxInstStrips bumped 6 -> 10 -> 20 over G-4/G-6).
-    const int id = mTrackBox ? mTrackBox->getSelectedId() : 0;
+    return channelPrefixForId (mTrackBox ? mTrackBox->getSelectedId() : 0);
+}
+
+// Batch E #8 (2026-05-01): added missing channel categories that
+// previously fell through to "instr_<id>".  Audio Clips Bus, Vox/Inst
+// buses (incl. spawnable extras), Drum / Audio / Vox / Inst inserts
+// all now have proper prefixes for slot-context tagging.  Insert ranges
+// sourced from MixerChannelIds + VibesynthConstants so size bumps stay
+// in sync (kMaxInstStrips bumped 6 -> 10 -> 20 over G-4/G-6).
+// QA-ModelShell TS1: extracted static so the wire-at-load sweep can derive
+// prefixes without the dropdown.
+juce::String EffectsPage::channelPrefixForId (int id)
+{
     switch (id)
     {
         case 1:  return "layers_bus";

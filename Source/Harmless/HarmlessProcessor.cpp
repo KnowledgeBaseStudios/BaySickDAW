@@ -2,10 +2,10 @@
 #include "HarmlessEditor.h"
 #include <cmath>
 
-HarmlessProcessor::HarmlessProcessor (const juce::String& trackId)
+HarmlessProcessor::HarmlessProcessor (const juce::String& trackId, juce::UndoManager* undoMgr)
     : juce::AudioProcessor (BusesProperties()
           .withOutput ("Output", juce::AudioChannelSet::stereo(), true)),
-      apvts (*this, nullptr, "HarmlessState",
+      apvts (*this, undoMgr, "HarmlessState",
              createLayout ("tk_" + trackId + "_harm_")),
       mTrackId (trackId),
       mPrefix  ("tk_" + trackId + "_harm_")

@@ -10,6 +10,8 @@
 #include "../Standalone/PagePresetIO.h"
 #include "../SampleLibrary.h"                           // K-5: getCoreLibraryDir
 #include "../PluginProcessor.h"
+#include "../EngineRig.h"                               // QA-ModelShell TS1: model-side engine owner
+#include "../Standalone/EngineChainProcessor.h"
 
 namespace
 {
@@ -56,10 +58,14 @@ namespace
     };
 }
 
-InstPage::InstPage (int pageIndex)
+InstPage::InstPage (VibeSynthProcessor& proc, int pageIndex)
     : mPageIndex (pageIndex),
       mTabName   ("Inst " + juce::String (pageIndex + 1))
 {
+    // QA-ModelShell TS1: known before the engine-trio bind below.
+    // setProcessor stays for spawn-path parity.
+    mFullProcessor = &proc;
+
     // G-7: wire dirty-listener pointers.
     mDirtyListener.dirtyFlag = &mPageDirty;
     mDirtyListener.suppress  = &mSuppressDirty;
@@ -78,13 +84,25 @@ InstPage::InstPage (int pageIndex)
         "Audio file or recording bound to this Inst tab.  BaySickNAM/IR re-amp "
         "and BaySickPedals consume this once routing lands.");
 
-    // I-0b: instantiate both stage processors unconditionally.  Mirrors how
-    // Vox instantiates BaySickVocalProcessor in its ctor.  No engine picker
-    // -- both stages are permanent on the page.
+    // QA-ModelShell TS1: both stages + the chain wrapper are rig-owned
+    // ({Inst, pageIndex}, engineType "Chain") -- constructed, prepared, and
+    // registered by the model; the chain fans Pedals -> NAM/IR.  This page
+    // binds non-owning views and builds the editors.  No engine picker --
+    // the trio is permanent for the tab's lifetime.
     {
-        auto nam = std::make_unique<BaySickNAMIRProcessor>();
-        nam->prepareToPlay (44100.0, 512);
-        mNamIrProc = std::move (nam);
+        auto& rig = proc.engineRig();
+        rig.addTab (TabKind::Inst, pageIndex, mTabName);
+        mChain = dynamic_cast<EngineChainProcessor*> (
+            rig.setEngineType (TabKind::Inst, pageIndex, "Chain"));
+        if (auto* tab = rig.findTab (TabKind::Inst, pageIndex))
+        {
+            mPedalsProc = tab->pedals;
+            mNamIrProc  = tab->namIr;
+        }
+    }
+
+    if (mNamIrProc != nullptr)
+    {
         mNamIrEditor.reset (mNamIrProc->createEditor());
         if (mNamIrEditor) addChildComponent (*mNamIrEditor);
         // QA-ApvtsAutomation: NAM/IR param ids are bare literals shared by every
@@ -93,11 +111,8 @@ InstPage::InstPage (int pageIndex)
             ne->setAutomationPrefix ("inst" + juce::String (pageIndex) + "_");
     }
 
-    // I-15 (2026-05-03): real BaySickPedals processor + 4x2 rack editor.
+    if (mPedalsProc != nullptr)
     {
-        auto pedals = std::make_unique<BaySickPedalsProcessor>();
-        pedals->prepareToPlay (44100.0, 512);
-        mPedalsProc = std::move (pedals);
         mPedalsEditor.reset (mPedalsProc->createEditor());
         if (mPedalsEditor) addChildComponent (*mPedalsEditor);
         // QA-ApvtsAutomation: per-instance channel prefix; each pedal's lane key
@@ -114,13 +129,6 @@ InstPage::InstPage (int pageIndex)
     // Placeholder is no longer used post-I-15 but the field stays declared so
     // the layoutContent() guarded path below still compiles.
     (void) mPedalsPlaceholder;
-
-    // I-16 G-9 (2026-05-03): chain wrapper now that both stages exist.
-    // registerInstEngine receives this single pointer; its processBlock fans
-    // through Pedals -> NAM/IR.  Each stage's prepareToPlay was already
-    // called above; setChain() picks up the existing prepared state.
-    mChain = std::make_unique<EngineChainProcessor>();
-    mChain->setChain ({ mPedalsProc.get(), mNamIrProc.get() });
 
     // K-5 (2026-05-05): Player sub-tab host.  Hidden when source = LiveInput.
     // Construction binds with an empty Binding (no engine yet); rebuildPlayerPanel
@@ -168,38 +176,38 @@ InstPage::InstPage (int pageIndex)
     switchTab (0);
 }
 
+void InstPage::setTabName (const juce::String& n)
+{
+    mTabName = n;
+    // QA-ModelShell TS1: every rename path funnels through here -- the one
+    // sync point for the model tab's name.
+    if (mFullProcessor != nullptr)
+        mFullProcessor->engineRig().renameTab (TabKind::Inst, mPageIndex, n);
+    repaint();
+}
+
 InstPage::~InstPage()
 {
     detachDirtyListener();
 
-    // I-15 polish (2026-05-03): unregister this page's NAM/IR engine from
-    // VibeSynthProcessor's audio-thread routing BEFORE tearing down anything.
-    // The TunerStyleDSP -> PitchTrackerYIN worker join can take a few ms during
-    // mPedalsProc.reset() below; without this unregister the audio thread can
-    // continue calling our (partially destroyed) NAM/IR processor during that
-    // window and crash inside MicPlacementDSP.  StandaloneEditor's tab-close
-    // path also calls unregisterInstEngine, so on tab-close this is a redundant
-    // no-op (unregister is idempotent); on app-shutdown it's load-bearing.
-    if (mFullProcessor != nullptr)
-        mFullProcessor->unregisterInstEngine (mPageIndex);
-
-    // Explicitly destroy editors before their processors so editor child
-    // components don't access dangling APVTS / DSP pointers during teardown.
-    // I-16 G-9: chain holds raw pointers into Pedals + NAM/IR -- tear it down
-    // first so processBlock can't fire on stale pointers if the audio thread
-    // is mid-callback.
-    mChain       .reset();
+    // QA-ModelShell TS1: the chain + stages are rig-owned and survive this
+    // view.  Teardown happens in EngineRig::removeTab / teardownAll, which
+    // unregisters from audio dispatch BEFORE destroying and always destroys
+    // the chain before its stages.  Only view-owned widgets die here --
+    // editors first, since their child components hold attachments into the
+    // engines' APVTS.
     mPedalsEditor.reset();
     mNamIrEditor .reset();
-    // K-5: ARIA panel holds SliderParameterAttachments to the engine APVTS;
-    // tear down BEFORE the engine destruction in PluginProcessor (the
+    // K-5: ARIA panel holds SliderParameterAttachments to the sfizz engine
+    // APVTS; tear down BEFORE the engine destruction in PluginProcessor (the
     // editor/StandaloneEditor onTabClosed flow calls destroyBaySickGuitars
     // AFTER mPages.remove(i), which destroys this InstPage; ordering matches).
     mAriaPanel   .reset();
     mPlayerTab   .reset();
     mProgramButton.reset();
-    mPedalsProc  .reset();
-    mNamIrProc   .reset();
+    mChain      = nullptr;
+    mPedalsProc = nullptr;
+    mNamIrProc  = nullptr;
 }
 
 // 2026-05-05: forward declaration so showEngineContextMenu / showPageActionsMenu
@@ -364,13 +372,13 @@ void InstPage::takeStateSnapshot()
 void InstPage::attachDirtyListener()
 {
     detachDirtyListener();
-    if (auto* nm = dynamic_cast<BaySickNAMIRProcessor*> (mNamIrProc.get()))
+    if (auto* nm = dynamic_cast<BaySickNAMIRProcessor*> (mNamIrProc))
         nm->apvts.state.addListener (&mDirtyListener);
 }
 
 void InstPage::detachDirtyListener()
 {
-    if (auto* nm = dynamic_cast<BaySickNAMIRProcessor*> (mNamIrProc.get()))
+    if (auto* nm = dynamic_cast<BaySickNAMIRProcessor*> (mNamIrProc))
         nm->apvts.state.removeListener (&mDirtyListener);
 }
 
@@ -502,8 +510,8 @@ void InstPage::savePagePreset (std::function<void()> onSaved)
                 *safeThis->mFullProcessor,
                 safeThis->mPageIndex,
                 safeThis->mSource,
-                safeThis->mPedalsProc.get(),
-                safeThis->mNamIrProc.get());
+                safeThis->mPedalsProc,
+                safeThis->mNamIrProc);
 
             auto dir = PagePresetIO::myPresetsDirForPageKind (PagePresetIO::PageKind::Inst);
             dir.createDirectory();
@@ -625,7 +633,7 @@ void InstPage::loadPagePreset (const juce::File& xml)
     }
 
     const auto cfg = makeInstPresetConfig (*mFullProcessor, mPageIndex, mSource,
-                                            mPedalsProc.get(), mNamIrProc.get());
+                                            mPedalsProc, mNamIrProc);
 
     mSuppressDirty = true;
     PagePresetIO::importPagePreset (*mFullProcessor, PagePresetIO::PageKind::Inst,
@@ -755,7 +763,7 @@ juce::AudioProcessor* InstPage::getEngineProcessor() const noexcept
     // Pre-G-9 this returned only mNamIrProc (Pedals were bypassed by audio).
     // K-2 (2026-05-05): chain may also have a sfizz front-end stage when
     // source = BaySickGuitars / BaySickBasses (rebuilt via setSource).
-    return mChain.get();
+    return mChain;
 }
 
 // K-2 (2026-05-05): rebuild the EngineChainProcessor stage list based on the
@@ -783,9 +791,9 @@ void InstPage::rebuildEngineChain()
     }
 
     if (sfizzFront != nullptr)
-        mChain->setChain ({ sfizzFront, mPedalsProc.get(), mNamIrProc.get() });
+        mChain->setChain ({ sfizzFront, mPedalsProc, mNamIrProc });
     else
-        mChain->setChain ({ mPedalsProc.get(), mNamIrProc.get() });
+        mChain->setChain ({ mPedalsProc, mNamIrProc });
 }
 
 void InstPage::setSource (Source s)
@@ -1306,7 +1314,7 @@ void InstPage::paint (juce::Graphics& g)
 // ─────────────────────────────────────────────────────────────────────────────
 void InstPage::showPedalboardPresetMenu()
 {
-    auto* pedals = dynamic_cast<BaySickPedalsProcessor*> (mPedalsProc.get());
+    auto* pedals = dynamic_cast<BaySickPedalsProcessor*> (mPedalsProc);
     if (pedals == nullptr) return;
 
     auto presets = pedals->enumeratePedalboardPresets();

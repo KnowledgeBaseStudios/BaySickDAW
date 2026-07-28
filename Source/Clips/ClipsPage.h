@@ -71,7 +71,7 @@ public:
     std::function<void()> onEngineChanged;
 
     // ── Tab name (for ribbon rename) ─────────────────────────────────────────
-    void                setTabName (const juce::String& n) { mTabName = n; repaint(); }
+    void                setTabName (const juce::String& n);   // syncs the model tab's name (TS1)
     const juce::String& getTabName () const                 { return mTabName; }
 
     // ── G-6 (2026-04-29): full-state export/import for Duplicate flow ────────
@@ -115,7 +115,7 @@ public:
     // Documents/BaySickDAW/Presets/Clip Page/My Presets/.  Requires
     // setProcessor() to have been called with the global VibeSynthProcessor;
     // otherwise falls back to the engine-only savePatchAs.
-    void setProcessor (VibeSynthProcessor* p) { mFullProcessor = p; }
+    void setProcessor (VibeSynthProcessor* p);   // also creates the model tab (TS1)
     void savePagePreset (std::function<void()> onSaved = {});
     void loadPagePreset (const juce::File& xml);
     void showPageActionsMenu (juce::Component* anchor);
@@ -152,7 +152,10 @@ private:
     LockedClipsEngineCombo                       mEnginePicker;
     juce::Label                                  mClipFileLabel;
     EngineType                                   mEngineType { EngineType::None };
-    std::unique_ptr<juce::AudioProcessor>        mPlayerProc;        // VibePlayerProcessor
+    // QA-ModelShell TS1: non-owning view of the rig-owned VibePlayerProcessor
+    // ({Clips, pageIndex}); the editor IS view-owned and must die before the
+    // page (its attachments reference the engine's APVTS).
+    juce::AudioProcessor*                        mPlayerProc { nullptr };
     std::unique_ptr<juce::AudioProcessorEditor>  mPlayerEditor;
 
     // J-6 EQ unification (2026-05-03): mEQDisplay removed; pre-rack EQ on

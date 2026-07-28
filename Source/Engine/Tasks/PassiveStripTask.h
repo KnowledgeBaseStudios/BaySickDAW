@@ -27,7 +27,7 @@ class VibeSynthProcessor;
 //   processBus is the unified bus DSP entry point - same code path serial
 //   PluginProcessor and this task call.  Internally switches on channelId
 //   to the right per-bus chain (Layers/Bass/Drums via BusNode helpers,
-//   Clips/Vox/Inst/Vox2/Inst2/Inst3/Rusty inlined, FxBus → processEffectsBus,
+//   every non-master bus → InstrChannelNode::processChainOnly (CL-301),
 //   Master → processMasterBus).
 //
 // QA-Ef (2026-05-21): this is the live audio plumbing -- the dispatcher is

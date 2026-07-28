@@ -1958,7 +1958,7 @@ whose samples you can deliberately move.
 ### §B.30 — QA-ProjectSave (L/B/D empty-by-default + templates v2 + sample hybrid + bundler engine refs + automation registry/DSP-targeting + template submenu + Rusty prompt + bundle save-first)
 
 `blocks:` `dadb958a` (Tasks 1-6) + `54177488` (Task 7 badger scope + QA-ModelShell planning) +
-`<final commit - backfill at close>` (Tasks 8-12 + close docs). Debug exe FIRST (screenshot any
+`b933b54a` (Tasks 8-12 + close docs). Debug exe FIRST (screenshot any
 jassert), then Release - mark each scenario `D:` and `R:`.
 
 **Scope note.** Task 7's automation REMAINDER (mapping tables for every effect type beyond the

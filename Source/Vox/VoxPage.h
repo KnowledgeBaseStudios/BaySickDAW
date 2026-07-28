@@ -38,7 +38,9 @@ public:
     // discard it on load (BaySickPlayer is no longer a Vox option).
     enum class EngineType { None, BaySickPlayer, BaySickVocal };
 
-    explicit VoxPage (int pageIndex);
+    // QA-ModelShell TS1: the processor ref is needed at construction because
+    // the vocal engine is rig-owned and picked in the ctor (H-6b).
+    VoxPage (VibeSynthProcessor& proc, int pageIndex);
     ~VoxPage() override;
 
     void paint   (juce::Graphics&) override;
@@ -72,12 +74,12 @@ public:
     juce::AudioProcessor* getEngineProcessor() const noexcept;
     // 2026-05-05 dirty-flag wiring: editor walks the vocal processor + its
     // embedded NAM/IR sub-processor to install the markDirty hook.
-    juce::AudioProcessor* getVocalProcessor() const noexcept { return mVocalProc.get(); }
+    juce::AudioProcessor* getVocalProcessor() const noexcept { return mVocalProc; }
 
     std::function<void()> onEngineDestroying;
     std::function<void()> onEngineChanged;
 
-    void                setTabName (const juce::String& n) { mTabName = n; repaint(); }
+    void                setTabName (const juce::String& n);   // syncs the model tab's name (TS1)
     const juce::String& getTabName () const                 { return mTabName; }
 
     // ── G-6 (2026-04-29): full-state export/import for Duplicate flow ────────
@@ -156,8 +158,11 @@ private:
 
     RightClickEngineCombo                        mEnginePicker;
     EngineType                                   mEngineType { EngineType::None };
-    std::unique_ptr<juce::AudioProcessor>        mPlayerProc;        // VibePlayerProcessor
-    std::unique_ptr<juce::AudioProcessor>        mVocalProc;         // BaySickVocal (Phase H - null until then)
+    std::unique_ptr<juce::AudioProcessor>        mPlayerProc;        // VibePlayerProcessor (H-6b: dead -- never created; enum back-compat only)
+    // QA-ModelShell TS1: non-owning view of the rig-owned BaySickVocal
+    // ({Vox, pageIndex}); the editor IS view-owned and must die before the
+    // page (its attachments reference the engine's APVTS).
+    juce::AudioProcessor*                        mVocalProc { nullptr };
 
     std::unique_ptr<juce::AudioProcessorEditor>  mPlayerEditor;
     std::unique_ptr<juce::AudioProcessorEditor>  mVocalEditor;

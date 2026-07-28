@@ -4,6 +4,7 @@
 #include "../Standalone/EnginePrefixUtil.h"
 #include "../Standalone/PagePresetIO.h"
 #include "../PluginProcessor.h"
+#include "../EngineRig.h"   // QA-ModelShell TS1: model-side engine owner
 
 namespace
 {
@@ -21,10 +22,14 @@ namespace
 // Library tagging for Vox recordings happens via commitRecordingResult, and
 // re-tagging via Task 7's Properties Routing dropdown (when it lands).
 
-VoxPage::VoxPage (int pageIndex)
+VoxPage::VoxPage (VibeSynthProcessor& proc, int pageIndex)
     : mPageIndex (pageIndex),
       mTabName   ("Vox " + juce::String (pageIndex + 1))
 {
+    // QA-ModelShell TS1: known before the ctor's selectEngine so the rig is
+    // reachable at engine-pick time.  setProcessor stays for spawn-path parity.
+    mFullProcessor = &proc;
+
     // G-7: wire dirty-listener pointers (listener attaches to engine
     // apvts.state inside selectEngine after engine creation).
     mDirtyListener.dirtyFlag = &mPageDirty;
@@ -44,6 +49,16 @@ VoxPage::VoxPage (int pageIndex)
 VoxPage::~VoxPage()
 {
     detachDirtyListener();
+}
+
+void VoxPage::setTabName (const juce::String& n)
+{
+    mTabName = n;
+    // QA-ModelShell TS1: every rename path funnels through here -- the one
+    // sync point for the model tab's name.
+    if (mFullProcessor != nullptr)
+        mFullProcessor->engineRig().renameTab (TabKind::Vox, mPageIndex, n);
+    repaint();
 }
 
 void VoxPage::buildEnginePicker()
@@ -199,13 +214,13 @@ void VoxPage::attachDirtyListener()
 {
     detachDirtyListener();
     // H-6b (2026-05-01): listener attaches to BaySickVocal's apvts instead.
-    if (auto* bv = dynamic_cast<BaySickVocalProcessor*> (mVocalProc.get()))
+    if (auto* bv = dynamic_cast<BaySickVocalProcessor*> (mVocalProc))
         bv->apvts.state.addListener (&mDirtyListener);
 }
 
 void VoxPage::detachDirtyListener()
 {
-    if (auto* bv = dynamic_cast<BaySickVocalProcessor*> (mVocalProc.get()))
+    if (auto* bv = dynamic_cast<BaySickVocalProcessor*> (mVocalProc))
         bv->apvts.state.removeListener (&mDirtyListener);
 }
 
@@ -403,7 +418,7 @@ juce::AudioProcessor* VoxPage::getEngineProcessor() const noexcept
 {
     // H-6b: Vox tabs are always BaySickVocal.  BaySickPlayer kept in the enum
     // for save-state back-compat only - never returned as the active engine.
-    return mVocalProc.get();
+    return mVocalProc;
 }
 
 void VoxPage::selectEngine (EngineType e)
@@ -419,32 +434,38 @@ void VoxPage::selectEngine (EngineType e)
 
     if (onEngineDestroying) onEngineDestroying();
 
-    if (! mVocalProc)
+    if (! mVocalProc && mFullProcessor != nullptr)
     {
-        auto vp = std::make_unique<BaySickVocalProcessor>();
-        vp->prepareToPlay (44100.0, 512);
-        // QA-Fd #7: re-install the transport-beat hook on a rebuilt engine.
-        if (mTransportBeat)
-            vp->onTransportBeat = mTransportBeat;
-        if (mTransportSeek)
-            vp->onTransportSeek = mTransportSeek;
-        if (mSetSongTimeSel) vp->onSetSongTimeSel = mSetSongTimeSel;
-        if (mGetSongTimeSel) vp->onGetSongTimeSel = mGetSongTimeSel;
-        mVocalProc = std::move (vp);
-        // J-6 EQ unification (2026-05-03): cast-fixed editor pointer (originally
-        // for setPreRackEQ injection; that hookup is removed).
-        auto* ed = static_cast<BaySickVocalEditor*> (mVocalProc->createEditor());
-        mVocalEditor.reset (ed);
-        if (mVocalEditor) addChildComponent (*mVocalEditor);
-        // QA-ApvtsAutomation: bare "bsv_*" / NAM-IR ids are shared by every Vox
-        // page, so automation keys need this page's index to stay distinct.
-        if (ed != nullptr)
-            ed->setAutomationPrefix ("vox" + juce::String (mPageIndex) + "_");
-        // QA-Fd 9a: re-apply the global undo context onto a (re)built editor.
-        if (ed != nullptr && mUndoCtx.isValid())
-            ed->setUndoContext (mUndoCtx);
-        // J-6 EQ unification (2026-05-03): Pre Rack EQ injection removed -
-        // pre-rack EQ is exclusively edited via the Effects page.
+        // QA-ModelShell TS1: the model constructs, prepares, and registers
+        // the vocal engine.  This page keeps a non-owning view pointer.
+        auto& rig = mFullProcessor->engineRig();
+        rig.addTab (TabKind::Vox, mPageIndex, mTabName);
+        mVocalProc = rig.setEngineType (TabKind::Vox, mPageIndex, "BaySickVocal");
+
+        // QA-Fd #7: re-install the transport-beat hooks on a (re)built engine.
+        if (auto* vp = dynamic_cast<BaySickVocalProcessor*> (mVocalProc))
+        {
+            if (mTransportBeat)  vp->onTransportBeat  = mTransportBeat;
+            if (mTransportSeek)  vp->onTransportSeek  = mTransportSeek;
+            if (mSetSongTimeSel) vp->onSetSongTimeSel = mSetSongTimeSel;
+            if (mGetSongTimeSel) vp->onGetSongTimeSel = mGetSongTimeSel;
+        }
+
+        if (mVocalProc != nullptr)
+        {
+            // J-6 EQ unification (2026-05-03): cast-fixed editor pointer (originally
+            // for setPreRackEQ injection; that hookup is removed).
+            auto* ed = static_cast<BaySickVocalEditor*> (mVocalProc->createEditor());
+            mVocalEditor.reset (ed);
+            if (mVocalEditor) addChildComponent (*mVocalEditor);
+            // QA-ApvtsAutomation: bare "bsv_*" / NAM-IR ids are shared by every Vox
+            // page, so automation keys need this page's index to stay distinct.
+            if (ed != nullptr)
+                ed->setAutomationPrefix ("vox" + juce::String (mPageIndex) + "_");
+            // QA-Fd 9a: re-apply the global undo context onto a (re)built editor.
+            if (ed != nullptr && mUndoCtx.isValid())
+                ed->setUndoContext (mUndoCtx);
+        }
     }
 
     mEngineType = e;
@@ -484,7 +505,7 @@ void VoxPage::setUndoContext (const UndoContext& ctx)
 void VoxPage::setTransportBeatProvider (std::function<double()> fn)
 {
     mTransportBeat = std::move (fn);
-    if (auto* bv = dynamic_cast<BaySickVocalProcessor*> (mVocalProc.get()))
+    if (auto* bv = dynamic_cast<BaySickVocalProcessor*> (mVocalProc))
         bv->onTransportBeat = mTransportBeat;
 }
 
@@ -493,7 +514,7 @@ void VoxPage::setTransportBeatProvider (std::function<double()> fn)
 void VoxPage::setTransportSeekProvider (std::function<void(double)> fn)
 {
     mTransportSeek = std::move (fn);
-    if (auto* bv = dynamic_cast<BaySickVocalProcessor*> (mVocalProc.get()))
+    if (auto* bv = dynamic_cast<BaySickVocalProcessor*> (mVocalProc))
         bv->onTransportSeek = mTransportSeek;
 }
 
@@ -503,7 +524,7 @@ void VoxPage::setSongTimeSelProviders (std::function<void(float,float)> setFn,
 {
     mSetSongTimeSel = std::move (setFn);
     mGetSongTimeSel = std::move (getFn);
-    if (auto* bv = dynamic_cast<BaySickVocalProcessor*> (mVocalProc.get()))
+    if (auto* bv = dynamic_cast<BaySickVocalProcessor*> (mVocalProc))
     {
         bv->onSetSongTimeSel = mSetSongTimeSel;
         bv->onGetSongTimeSel = mGetSongTimeSel;
@@ -538,7 +559,7 @@ void VoxPage::setProcessor (VibeSynthProcessor* p)
     // clip signatures + channel list + project folder) into the vocal
     // engine.  The engine never links against VibeSynthProcessor; these
     // hooks are its only reach into the timeline.  All message-thread.
-    if (auto* bv = dynamic_cast<BaySickVocalProcessor*> (mVocalProc.get()))
+    if (auto* bv = dynamic_cast<BaySickVocalProcessor*> (mVocalProc))
     {
         bv->setOwnChannelId (MixerChannelIds::voxInsert (mPageIndex));
 
@@ -612,7 +633,7 @@ void VoxPage::setProcessor (VibeSynthProcessor* p)
 // ─────────────────────────────────────────────────────────────────────────────
 void VoxPage::timerCallback()
 {
-    auto* bv = dynamic_cast<BaySickVocalProcessor*> (mVocalProc.get());
+    auto* bv = dynamic_cast<BaySickVocalProcessor*> (mVocalProc);
     if (bv == nullptr || mFullProcessor == nullptr) return;
 
     auto pollOne = [&] (bool stale, juce::int64 curSig, juce::int64& lastSeen,

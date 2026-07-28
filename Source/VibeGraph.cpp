@@ -233,868 +233,11 @@ static void applyStereoPan (juce::AudioBuffer<float>& buf, float pan, int law) n
     buf.applyGain (1, 0, buf.getNumSamples(), gR);
 }
 
-// ── LayersBusNode ─────────────────────────────────────────────────────────────
-// Renders the polyphonic Layers synth, applies bus EQ, pushes to spectrum feed,
-// runs bus EffectRack, then applies channel fader / mute / solo.
-struct VibeGraph::LayersBusNode
-{
-    EQ8MsDSP               preEq;    // §P4.3 pre-rack
-    EffectRack             rack;
-    EQ8MsDSP               busEq;    // post-rack bus EQ - shown on Effects Page
-    CompDelayLine          compDelay;
-    std::atomic<float>     peakDb  { -60.f };
-    // 2026-04-30: stereo L/R peakDb for the new split DBFSMeter.  Mono
-    // peakDb (above) kept for back-compat; written as max(L, R) each block.
-    std::atomic<float>     peakDbL { -60.f };
-    std::atomic<float>     peakDbR { -60.f };
-    // Per-node peak ring for latency-compensated meter publish (2026-05-02).
-    // 16 entries = up to ~85 ms of compensation at 256-sample / 48 kHz.
-    std::array<float, MeterLatencyComp::kRingSize> peakRingL {}, peakRingR {};
-    int                    peakRingIdx { 0 };
-    juce::Synthesiser&       synth;
-    VibeGraph::BusMix&       busMix;
-    // 12i: spectrum feeds now live inside each EQ8MsDSP (preFeed/postFeed members).
-    // 2026-04-19 cleanup: pageEq reference removed - Layers bus pre-rack EQ had no
-    // UI and was deleted. Signal flow on Layers is now: summed-layers -> rack ->
-    // busEq -> fader (per-layer pre-rack EQ applied earlier in the per-layer scratch).
+// CL-301 (2026-07-27): LayersBusNode / BassBusNode / DrumsBusNode /
+// MasterBusNode / EffectsBusNode deleted -- folded into the unified
+// InstrChannelNode below (see its header comment for the divergence history).
 
-    // 5F-4a Batch 6: APVTS pointers for polarity + width
-    std::atomic<float>* pPolarity { nullptr };
-    std::atomic<float>* pWidth    { nullptr };
-    // 2026-04-29: strip-local FX Bypass (mixer_layers_bypass) - bypasses THIS
-    // bus's rack only.  Global kill-all (master_fx_bypass) bypasses every
-    // rack on every strip; the two are OR-ed together each block.
-    std::atomic<float>* pBypass   { nullptr };
-    // 2026-04-29: pan (mixer_layers_pan) - applied L/R after fader.
-    std::atomic<float>* pPan      { nullptr };
-    std::atomic<float>* pPanLaw   { nullptr };
-    // 2026-04-30 (audit B.3): read fader / mute / solo direct from APVTS
-    // instead of going through busMix (PatternManager) - audio-thread
-    // automation now reaches the bus at audio-block rate instead of via
-    // the UI's 30 Hz applicator timer.  Cross-bus anySolo computed by
-    // reading sibling-bus solo params (2 extra atomic loads per block).
-    std::atomic<float>* pLevel       { nullptr };
-    std::atomic<float>* pMute        { nullptr };
-    std::atomic<float>* pSolo        { nullptr };
-    std::atomic<float>* pSiblingBass { nullptr };   // mixer_bass_solo
-    std::atomic<float>* pSiblingDrum { nullptr };   // mixer_drums_solo
-    // Global "kill-all" FX bypass (master_fx_bypass) - forces rack bypass when true.
-    std::atomic<float>* pGlobalFxBypass { nullptr };
 
-    static float loadParam(const std::atomic<float>* p, float fallback) noexcept
-    {
-        return p ? p->load(std::memory_order_relaxed) : fallback;
-    }
-    void rebindApvts(juce::AudioProcessorValueTreeState& apvts, const juce::String& prefix)
-    {
-        pPolarity       = apvts.getRawParameterValue(prefix + "_polarity");
-        pWidth          = apvts.getRawParameterValue(prefix + "_width");
-        pBypass         = apvts.getRawParameterValue(prefix + "_bypass");
-        pPan            = apvts.getRawParameterValue(prefix + "_pan");
-        pPanLaw         = apvts.getRawParameterValue("master_pan_law");
-        pLevel          = apvts.getRawParameterValue(prefix + "_level");
-        pMute           = apvts.getRawParameterValue(prefix + "_mute");
-        pSolo           = apvts.getRawParameterValue(prefix + "_solo");
-        pSiblingBass    = apvts.getRawParameterValue("mixer_bass_solo");
-        pSiblingDrum    = apvts.getRawParameterValue("mixer_drums_solo");
-        pGlobalFxBypass = apvts.getRawParameterValue("master_fx_bypass");
-    }
-
-    // QA-Fe2 SC delay-match: pre-compensation key stash.  armScSourceTaps
-    // flags SC-edge sources at block rate; the copy runs right before
-    // compDelay so keys never carry the alignment delay.
-    juce::AudioBuffer<float> scTap;
-    std::atomic<bool>        scTapArmed { false };
-
-    LayersBusNode(juce::Synthesiser& s, VibeGraph::BusMix& m)
-        : synth(s), busMix(m) {}
-
-    void prepare(double sr, int blockSize)
-    {
-        preEq.prepare(sr, blockSize);   // §P4.3
-        rack .prepare(sr, blockSize);
-        busEq.prepare(sr, blockSize);
-        scTap.setSize(2, juce::jmax(1, blockSize), false, true, false);
-    }
-    void reset()
-    {
-        preEq.reset();   // §P4.3
-        rack .reset();
-        busEq.reset();
-    }
-
-    void processBlock(juce::AudioBuffer<float>& buf,
-                      juce::MidiBuffer& midi, double bpm,
-                      juce::AudioBuffer<float>* preRendered = nullptr)
-    {
-        const int n = buf.getNumSamples();
-        buf.clear();
-        if (preRendered && preRendered->getNumSamples() == n)
-        {
-            const int srcCh = juce::jmin(buf.getNumChannels(), preRendered->getNumChannels());
-            for (int c = 0; c < srcCh; ++c)
-                buf.addFrom(c, 0, *preRendered, c, 0, n);
-        }
-        else
-        {
-            synth.renderNextBlock(buf, midi, 0, n);
-        }
-        // 2026-05-06 (Batch 9b): post-render DSP factored into processChainOnly
-        // so VibeGraph::processBus can run the chain on a buffer that already
-        // contains the pre-summed input from PassiveStripTask.
-        // QA-Ea Part A (2026-05-21): synth-fallback path is dead per the
-        // comment at the legacy VibeGraph::processBlock site (deleted by
-        // QA-Ef; modern callers always supply an accumulator); pass false
-        // here since the caller chain doesn't reach anyBusSoloed().  If this
-        // path is ever revived, the caller must pass the real anyBusSoloed()
-        // value.
-        processChainOnly(buf, bpm, /*anyBusSoloed*/ false);
-    }
-
-    // 2026-05-06 (Batch 9b): runs the bus DSP chain on `buf` in-place.
-    // `buf` must already contain the bus input (PassiveStripTask predecessor
-    // sum of upstream Layer InsertNode outputs).  Steps: pre-rack EQ -> rack
-    // (with bypass logic) -> post-rack EQ -> fader x mute x in-group solo ->
-    // polarity + M/S width -> pan -> latency-compensated comp delay -> peak
-    // meter publish.
-    //
-    // QA-Ea Part A (2026-05-21): anyBusSoloed parameter replaces the legacy
-    // 3-bus (L/B/D-only) sibling solo formula.  Caller computes
-    // VibeGraph::anyBusSoloed() once per block + passes the same value to
-    // every bus's processChainOnly so the solo gate is uniform across all
-    // 11 buses.  pSiblingBass / pSiblingDrum members are now dead state
-    // (kept for minimal-churn until QA-Ef ST deletion clears the surrounding
-    // code).
-    void processChainOnly(juce::AudioBuffer<float>& buf, double bpm,
-                          bool anyBusSoloed)
-    {
-        // §P4.3: pre-rack bus EQ (was historically removed from Layers; now
-        // restored uniformly across every bus + insert).
-        if (buf.getNumChannels() >= 2) preEq.process(buf);   // §P4.3 (identity short-circuit + spectrum feed inside process)
-        rack.setHostBPM(bpm);
-        // 2026-04-29: respect strip-local FX Bypass (mixer_layers_bypass)
-        // OR-ed with global master_fx_bypass kill-all flag.
-        {
-            const bool stripBypass  = loadParam(pBypass, 0.f) > 0.5f;
-            const bool globalBypass = loadParam(pGlobalFxBypass, 0.f) > 0.5f;
-            const bool bypass       = stripBypass || globalBypass;
-            if (rack.isRackBypassed() != bypass)
-                rack.setRackBypassed(bypass);
-        }
-        rack.process(buf);
-        if (buf.getNumChannels() >= 2) busEq.process(buf);   // post-rack bus EQ (identity short-circuit + spectrum feed inside)
-
-        // 2026-04-30 (audit B.3): read fader/mute/solo from APVTS directly
-        // so audio-thread automation lands at audio-block rate.  busMix
-        // values stay in sync via the strip's onFaderChanged callbacks
-        // for legacy code paths but are no longer the audio source of
-        // truth for these three params.
-        //
-        // QA-Ea Part A (2026-05-21): anySolo now comes from the caller's
-        // VibeGraph::anyBusSoloed() (all 11 buses) instead of the legacy
-        // 3-bus L+B+D sibling sum.  Canonical formula:
-        //   silenced = thisMuted || (anyBusSoloed && !thisSolo)
-        // applied uniformly across every bus.  Per-strip _solo is a separate
-        // axis and is untouched (GUARDRAIL).
-        const bool  thisSolo  = loadParam(pSolo, 0.f) > 0.5f;
-        const bool  thisMuted = loadParam(pMute, 0.f) > 0.5f;
-        const float fadDb     = loadParam(pLevel, 0.f);
-        const float fadLin    = juce::Decibels::decibelsToGain(fadDb, -60.f);
-        const float g = (thisMuted || (anyBusSoloed && ! thisSolo)) ? 0.f : fadLin;
-        if (g != 1.f) buf.applyGain(g);
-
-        // 5F-4a Batch 6: polarity + M/S width
-        if (loadParam(pPolarity, 0.f) > 0.5f) buf.applyGain(-1.f);
-        const float width = loadParam(pWidth, 1.f);
-        if (buf.getNumChannels() >= 2 && std::abs(width - 1.f) > 1.0e-4f)
-        {
-            float* L = buf.getWritePointer(0);
-            float* R = buf.getWritePointer(1);
-            const int n = buf.getNumSamples();
-            for (int s = 0; s < n; ++s)
-            {
-                const float m    = 0.5f * (L[s] + R[s]);
-                const float side = 0.5f * (L[s] - R[s]) * width;
-                L[s] = m + side;
-                R[s] = m - side;
-            }
-        }
-
-        // 2026-04-29: pan applied AFTER fader + width using project-level law.
-        applyStereoPan (buf, loadParam(pPan, 0.f), (int) loadParam(pPanLaw, 0.f));
-
-        // QA-Fe2 SC delay-match: stash the pre-compensation output for SC
-        // consumers before the alignment delay lands on this node.
-        if (scTapArmed.load(std::memory_order_relaxed))
-            for (int c = 0, tc = juce::jmin(buf.getNumChannels(), scTap.getNumChannels()); c < tc; ++c)
-                scTap.copyFrom(c, 0, buf, c, 0, juce::jmin(buf.getNumSamples(), scTap.getNumSamples()));
-
-        compDelay.process(buf);
-        // Peak meter with hold+decay - matches InsertNode pattern so transient
-        // bus peaks aren't missed between ~30 Hz UI polls.
-        {
-            // 2026-05-02: lock-free max + latency-compensated publish.  The UI
-            // exchanges the running-max atomic with -inf on each vsync to start
-            // a fresh "max within frame" window; this CAS-loop adds the current
-            // block (or, when latency comp is on, an N-block-old block) to the
-            // running max safely across that swap.  No more audio-side decay
-            // -- ballistics live entirely on the UI thread now.
-            publishPeakReading (buf, peakRingL, peakRingR, peakRingIdx,
-                                peakDbL, peakDbR, peakDb);
-        }
-    }
-};
-
-// ── BassBusNode ───────────────────────────────────────────────────────────────
-struct VibeGraph::BassBusNode
-{
-    EQ8MsDSP               preEq;    // §P4.3 pre-rack
-    EffectRack             rack;
-    EQ8MsDSP               busEq;
-    CompDelayLine          compDelay;
-    std::atomic<float>     peakDb  { -60.f };
-    // 2026-04-30: stereo L/R peakDb for the new split DBFSMeter.  Mono
-    // peakDb (above) kept for back-compat; written as max(L, R) each block.
-    std::atomic<float>     peakDbL { -60.f };
-    std::atomic<float>     peakDbR { -60.f };
-    // Per-node peak ring for latency-compensated meter publish (2026-05-02).
-    // 16 entries = up to ~85 ms of compensation at 256-sample / 48 kHz.
-    std::array<float, MeterLatencyComp::kRingSize> peakRingL {}, peakRingR {};
-    int                    peakRingIdx { 0 };
-    BassSynth&               bass;
-    VibeGraph::BusMix&       busMix;
-    // 12i: spectrum feeds now live inside each EQ8MsDSP.
-    // 2026-04-19 cleanup: pageEq reference removed - Bass bus pre-rack EQ deleted
-    // (no UI). Signal flow on Bass: bass-synth -> rack -> busEq -> fader
-    // (per-bass pre-rack EQ applied earlier in the per-bass scratch).
-
-    // 5F-4a Batch 6: APVTS pointers for polarity + width
-    std::atomic<float>* pPolarity { nullptr };
-    std::atomic<float>* pWidth    { nullptr };
-    // 2026-04-29: strip-local FX Bypass + pan (see LayersBusNode for rationale).
-    std::atomic<float>* pBypass   { nullptr };
-    std::atomic<float>* pPan      { nullptr };
-    std::atomic<float>* pPanLaw   { nullptr };
-    // 2026-04-30 (audit B.3): direct APVTS reads - see LayersBusNode header.
-    std::atomic<float>* pLevel         { nullptr };
-    std::atomic<float>* pMute          { nullptr };
-    std::atomic<float>* pSolo          { nullptr };
-    std::atomic<float>* pSiblingLayers { nullptr };   // mixer_layers_solo
-    std::atomic<float>* pSiblingDrum   { nullptr };   // mixer_drums_solo
-    // Global "kill-all" FX bypass (master_fx_bypass) - forces rack bypass when true.
-    std::atomic<float>* pGlobalFxBypass { nullptr };
-
-    static float loadParam(const std::atomic<float>* p, float fallback) noexcept
-    {
-        return p ? p->load(std::memory_order_relaxed) : fallback;
-    }
-    void rebindApvts(juce::AudioProcessorValueTreeState& apvts, const juce::String& prefix)
-    {
-        pPolarity       = apvts.getRawParameterValue(prefix + "_polarity");
-        pWidth          = apvts.getRawParameterValue(prefix + "_width");
-        pBypass         = apvts.getRawParameterValue(prefix + "_bypass");
-        pPan            = apvts.getRawParameterValue(prefix + "_pan");
-        pPanLaw         = apvts.getRawParameterValue("master_pan_law");
-        pLevel          = apvts.getRawParameterValue(prefix + "_level");
-        pMute           = apvts.getRawParameterValue(prefix + "_mute");
-        pSolo           = apvts.getRawParameterValue(prefix + "_solo");
-        pSiblingLayers  = apvts.getRawParameterValue("mixer_layers_solo");
-        pSiblingDrum    = apvts.getRawParameterValue("mixer_drums_solo");
-        pGlobalFxBypass = apvts.getRawParameterValue("master_fx_bypass");
-    }
-
-    // QA-Fe2 SC delay-match stash (see LayersBusNode).
-    juce::AudioBuffer<float> scTap;
-    std::atomic<bool>        scTapArmed { false };
-
-    BassBusNode(BassSynth& b, VibeGraph::BusMix& m)
-        : bass(b), busMix(m) {}
-
-    void prepare(double sr, int blockSize)
-    {
-        preEq.prepare(sr, blockSize);   // §P4.3
-        rack .prepare(sr, blockSize);
-        busEq.prepare(sr, blockSize);
-        scTap.setSize(2, juce::jmax(1, blockSize), false, true, false);
-    }
-    void reset()
-    {
-        preEq.reset();   // §P4.3
-        rack .reset();
-        busEq.reset();
-    }
-
-    void processBlock(juce::AudioBuffer<float>& buf, double bpm,
-                      juce::AudioBuffer<float>* preRendered = nullptr)
-    {
-        const int n = buf.getNumSamples();
-        buf.clear();
-        if (preRendered && preRendered->getNumSamples() == n)
-        {
-            const int srcCh = juce::jmin(buf.getNumChannels(), preRendered->getNumChannels());
-            for (int c = 0; c < srcCh; ++c)
-                buf.addFrom(c, 0, *preRendered, c, 0, n);
-        }
-        else
-        {
-            bass.renderNextBlock(buf, 0, n);
-        }
-        // 2026-05-06 (Batch 9b): post-render DSP factored into processChainOnly
-        // so VibeGraph::processBus can run the chain on a buffer that already
-        // contains the pre-summed input from PassiveStripTask.
-        // QA-Ea Part A (2026-05-21): synth-fallback path is dead; pass false.
-        processChainOnly(buf, bpm, /*anyBusSoloed*/ false);
-    }
-
-    // 2026-05-06 (Batch 9b): runs the bus DSP chain on `buf` in-place. See
-    // LayersBusNode::processChainOnly for the per-step rationale; signal
-    // path is identical.  QA-Ea Part A (2026-05-21): unified anyBusSoloed
-    // parameter replaces the legacy L+B+D-sibling formula.
-    void processChainOnly(juce::AudioBuffer<float>& buf, double bpm,
-                          bool anyBusSoloed)
-    {
-        // §P4.3: pre-rack bus EQ.
-        if (buf.getNumChannels() >= 2) preEq.process(buf);   // §P4.3 (identity short-circuit + spectrum feed inside process)
-        rack.setHostBPM(bpm);
-        // 2026-04-29: strip-local FX Bypass OR global master_fx_bypass.
-        {
-            const bool stripBypass  = loadParam(pBypass, 0.f) > 0.5f;
-            const bool globalBypass = loadParam(pGlobalFxBypass, 0.f) > 0.5f;
-            const bool bypass       = stripBypass || globalBypass;
-            if (rack.isRackBypassed() != bypass)
-                rack.setRackBypassed(bypass);
-        }
-        rack.process(buf);
-        if (buf.getNumChannels() >= 2) busEq.process(buf);   // post-rack bus EQ (identity short-circuit + spectrum feed inside)
-
-        // 2026-04-30 (audit B.3): direct APVTS read - see LayersBusNode.
-        // QA-Ea Part A (2026-05-21): unified anyBusSoloed (11 buses) replaces
-        // the legacy L+layer+drum sibling sum; canonical formula identical
-        // to LayersBusNode + DrumsBusNode.
-        const bool  thisSolo  = loadParam(pSolo, 0.f) > 0.5f;
-        const bool  thisMuted = loadParam(pMute, 0.f) > 0.5f;
-        const float fadDb     = loadParam(pLevel, 0.f);
-        const float fadLin    = juce::Decibels::decibelsToGain(fadDb, -60.f);
-        const float g = (thisMuted || (anyBusSoloed && ! thisSolo)) ? 0.f : fadLin;
-        if (g != 1.f) buf.applyGain(g);
-
-        // 5F-4a Batch 6: polarity + M/S width
-        if (loadParam(pPolarity, 0.f) > 0.5f) buf.applyGain(-1.f);
-        const float width = loadParam(pWidth, 1.f);
-        if (buf.getNumChannels() >= 2 && std::abs(width - 1.f) > 1.0e-4f)
-        {
-            float* L = buf.getWritePointer(0);
-            float* R = buf.getWritePointer(1);
-            const int n = buf.getNumSamples();
-            for (int s = 0; s < n; ++s)
-            {
-                const float m    = 0.5f * (L[s] + R[s]);
-                const float side = 0.5f * (L[s] - R[s]) * width;
-                L[s] = m + side;
-                R[s] = m - side;
-            }
-        }
-
-        // 2026-04-29: pan applied AFTER fader + width using project-level law.
-        applyStereoPan (buf, loadParam(pPan, 0.f), (int) loadParam(pPanLaw, 0.f));
-
-        // QA-Fe2 SC delay-match: stash the pre-compensation output for SC
-        // consumers before the alignment delay lands on this node.
-        if (scTapArmed.load(std::memory_order_relaxed))
-            for (int c = 0, tc = juce::jmin(buf.getNumChannels(), scTap.getNumChannels()); c < tc; ++c)
-                scTap.copyFrom(c, 0, buf, c, 0, juce::jmin(buf.getNumSamples(), scTap.getNumSamples()));
-
-        compDelay.process(buf);
-        {
-            // 2026-05-02: lock-free max + latency-compensated publish.  The UI
-            // exchanges the running-max atomic with -inf on each vsync to start
-            // a fresh "max within frame" window; this CAS-loop adds the current
-            // block (or, when latency comp is on, an N-block-old block) to the
-            // running max safely across that swap.  No more audio-side decay
-            // -- ballistics live entirely on the UI thread now.
-            publishPeakReading (buf, peakRingL, peakRingR, peakRingIdx,
-                                peakDbL, peakDbR, peakDb);
-        }
-    }
-};
-
-// ── DrumsBusNode ──────────────────────────────────────────────────────────────
-struct VibeGraph::DrumsBusNode
-{
-    EQ8MsDSP               preEq;    // §P4.3 pre-rack
-    EffectRack             rack;
-    EQ8MsDSP               busEq;
-    CompDelayLine          compDelay;
-    std::atomic<float>     peakDb  { -60.f };
-    // 2026-04-30: stereo L/R peakDb for the new split DBFSMeter.  Mono
-    // peakDb (above) kept for back-compat; written as max(L, R) each block.
-    std::atomic<float>     peakDbL { -60.f };
-    std::atomic<float>     peakDbR { -60.f };
-    // Per-node peak ring for latency-compensated meter publish (2026-05-02).
-    // 16 entries = up to ~85 ms of compensation at 256-sample / 48 kHz.
-    std::array<float, MeterLatencyComp::kRingSize> peakRingL {}, peakRingR {};
-    int                    peakRingIdx { 0 };
-    // 2026-04-25: DrumSynth ref removed - drum bus now ALWAYS uses preRendered
-    // path (per-drum-tab InsertNode outputs).  Silent fallback if no preRendered.
-    VibeGraph::BusMix&       busMix;
-    // 12i: spectrum feeds now live inside each EQ8MsDSP.
-
-    // 5F-4a Batch 6: APVTS pointers for polarity + width
-    std::atomic<float>* pPolarity { nullptr };
-    std::atomic<float>* pWidth    { nullptr };
-    // 2026-04-29: strip-local FX Bypass + pan (see LayersBusNode for rationale).
-    std::atomic<float>* pBypass   { nullptr };
-    std::atomic<float>* pPan      { nullptr };
-    std::atomic<float>* pPanLaw   { nullptr };
-    // 2026-04-30 (audit B.3): direct APVTS reads - see LayersBusNode header.
-    std::atomic<float>* pLevel         { nullptr };
-    std::atomic<float>* pMute          { nullptr };
-    std::atomic<float>* pSolo          { nullptr };
-    std::atomic<float>* pSiblingLayers { nullptr };   // mixer_layers_solo
-    std::atomic<float>* pSiblingBass   { nullptr };   // mixer_bass_solo
-    // Global "kill-all" FX bypass (master_fx_bypass) - forces rack bypass when true.
-    std::atomic<float>* pGlobalFxBypass { nullptr };
-
-    static float loadParam(const std::atomic<float>* p, float fallback) noexcept
-    {
-        return p ? p->load(std::memory_order_relaxed) : fallback;
-    }
-    void rebindApvts(juce::AudioProcessorValueTreeState& apvts, const juce::String& prefix)
-    {
-        pPolarity       = apvts.getRawParameterValue(prefix + "_polarity");
-        pWidth          = apvts.getRawParameterValue(prefix + "_width");
-        pBypass         = apvts.getRawParameterValue(prefix + "_bypass");
-        pPan            = apvts.getRawParameterValue(prefix + "_pan");
-        pPanLaw         = apvts.getRawParameterValue("master_pan_law");
-        pLevel          = apvts.getRawParameterValue(prefix + "_level");
-        pMute           = apvts.getRawParameterValue(prefix + "_mute");
-        pSolo           = apvts.getRawParameterValue(prefix + "_solo");
-        pSiblingLayers  = apvts.getRawParameterValue("mixer_layers_solo");
-        pSiblingBass    = apvts.getRawParameterValue("mixer_bass_solo");
-        pGlobalFxBypass = apvts.getRawParameterValue("master_fx_bypass");
-    }
-
-    // QA-Fe2 SC delay-match stash (see LayersBusNode).
-    juce::AudioBuffer<float> scTap;
-    std::atomic<bool>        scTapArmed { false };
-
-    DrumsBusNode(VibeGraph::BusMix& m)
-        : busMix(m) {}
-
-    void prepare(double sr, int blockSize)
-    {
-        preEq.prepare(sr, blockSize);   // §P4.3
-        rack .prepare(sr, blockSize);
-        busEq.prepare(sr, blockSize);
-        scTap.setSize(2, juce::jmax(1, blockSize), false, true, false);
-    }
-    void reset()
-    {
-        preEq.reset();   // §P4.3
-        rack .reset();
-        busEq.reset();
-    }
-
-    void processBlock(juce::AudioBuffer<float>& buf, double bpm,
-                      juce::AudioBuffer<float>* preRendered = nullptr)
-    {
-        const int n = buf.getNumSamples();
-        buf.clear();
-        if (preRendered && preRendered->getNumSamples() == n)
-        {
-            const int srcCh = juce::jmin(buf.getNumChannels(), preRendered->getNumChannels());
-            for (int c = 0; c < srcCh; ++c)
-                buf.addFrom(c, 0, *preRendered, c, 0, n);
-        }
-        // 2026-04-25: legacy DrumSynth fallback removed - buf stays cleared
-        // when no preRendered (drum bus is silent until tabs route into it).
-        // 2026-05-06 (Batch 9b): post-render DSP factored into processChainOnly
-        // so VibeGraph::processBus can run the chain on a buffer that already
-        // contains the pre-summed input from PassiveStripTask.
-        // QA-Ea Part A (2026-05-21): pre-rendered-fallback path passes false.
-        processChainOnly(buf, bpm, /*anyBusSoloed*/ false);
-    }
-
-    // 2026-05-06 (Batch 9b): runs the bus DSP chain on `buf` in-place.
-    // See LayersBusNode::processChainOnly for per-step rationale; signal
-    // path is identical.  QA-Ea Part A (2026-05-21): unified anyBusSoloed
-    // parameter replaces the legacy L+B+D-sibling formula.
-    void processChainOnly(juce::AudioBuffer<float>& buf, double bpm,
-                          bool anyBusSoloed)
-    {
-        // §P4.3 pre-rack EQ (legacy pageEq retired in B7).
-        if (buf.getNumChannels() >= 2) preEq.process(buf);   // identity short-circuit + spectrum feed inside process
-        rack.setHostBPM(bpm);
-        // 2026-04-29: strip-local FX Bypass OR global master_fx_bypass.
-        {
-            const bool stripBypass  = loadParam(pBypass, 0.f) > 0.5f;
-            const bool globalBypass = loadParam(pGlobalFxBypass, 0.f) > 0.5f;
-            const bool bypass       = stripBypass || globalBypass;
-            if (rack.isRackBypassed() != bypass)
-                rack.setRackBypassed(bypass);
-        }
-        rack.process(buf);
-        if (buf.getNumChannels() >= 2) busEq.process(buf);   // post-rack bus EQ (identity short-circuit + spectrum feed inside)
-
-        // 2026-04-30 (audit B.3): direct APVTS read - see LayersBusNode.
-        // QA-Ea Part A (2026-05-21): unified anyBusSoloed (11 buses) replaces
-        // the legacy L+layer+bass sibling sum; canonical formula identical
-        // to LayersBusNode + BassBusNode.
-        const bool  thisSolo  = loadParam(pSolo, 0.f) > 0.5f;
-        const bool  thisMuted = loadParam(pMute, 0.f) > 0.5f;
-        const float fadDb     = loadParam(pLevel, 0.f);
-        const float fadLin    = juce::Decibels::decibelsToGain(fadDb, -60.f);
-        const float g = (thisMuted || (anyBusSoloed && ! thisSolo)) ? 0.f : fadLin;
-        if (g != 1.f) buf.applyGain(g);
-
-        // 5F-4a Batch 6: polarity + M/S width
-        if (loadParam(pPolarity, 0.f) > 0.5f) buf.applyGain(-1.f);
-        const float width = loadParam(pWidth, 1.f);
-        if (buf.getNumChannels() >= 2 && std::abs(width - 1.f) > 1.0e-4f)
-        {
-            float* L = buf.getWritePointer(0);
-            float* R = buf.getWritePointer(1);
-            const int n = buf.getNumSamples();
-            for (int s = 0; s < n; ++s)
-            {
-                const float m    = 0.5f * (L[s] + R[s]);
-                const float side = 0.5f * (L[s] - R[s]) * width;
-                L[s] = m + side;
-                R[s] = m - side;
-            }
-        }
-
-        // 2026-04-29: pan applied AFTER fader + width using project-level law.
-        applyStereoPan (buf, loadParam(pPan, 0.f), (int) loadParam(pPanLaw, 0.f));
-
-        // QA-Fe2 SC delay-match: stash the pre-compensation output for SC
-        // consumers before the alignment delay lands on this node.
-        if (scTapArmed.load(std::memory_order_relaxed))
-            for (int c = 0, tc = juce::jmin(buf.getNumChannels(), scTap.getNumChannels()); c < tc; ++c)
-                scTap.copyFrom(c, 0, buf, c, 0, juce::jmin(buf.getNumSamples(), scTap.getNumSamples()));
-
-        compDelay.process(buf);
-        {
-            // 2026-05-02: lock-free max + latency-compensated publish.  The UI
-            // exchanges the running-max atomic with -inf on each vsync to start
-            // a fresh "max within frame" window; this CAS-loop adds the current
-            // block (or, when latency comp is on, an N-block-old block) to the
-            // running max safely across that swap.  No more audio-side decay
-            // -- ballistics live entirely on the UI thread now.
-            publishPeakReading (buf, peakRingL, peakRingR, peakRingIdx,
-                                peakDbL, peakDbR, peakDb);
-        }
-    }
-};
-
-// ── MasterBusNode ─────────────────────────────────────────────────────────────
-// Receives pre-summed audio.  Runs master EffectRack, then applies
-// masterGain (APVTS knob) × masterFader (Mixer master strip).
-struct VibeGraph::MasterBusNode
-{
-    EQ8MsDSP               preEq;    // §P4.3 pre-rack
-    EffectRack             rack;
-    EQ8MsDSP               busEq;    // post-rack master EQ - shown on Effects Page
-    std::atomic<float>     peakDb  { -60.f };
-    // 2026-04-30: stereo L/R peakDb for the new split DBFSMeter.  Mono
-    // peakDb (above) kept for back-compat; written as max(L, R) each block.
-    std::atomic<float>     peakDbL { -60.f };
-    std::atomic<float>     peakDbR { -60.f };
-    // Per-node peak ring for latency-compensated meter publish (2026-05-02).
-    // 16 entries = up to ~85 ms of compensation at 256-sample / 48 kHz.
-    std::array<float, MeterLatencyComp::kRingSize> peakRingL {}, peakRingR {};
-    int                    peakRingIdx { 0 };
-    // QA-RustyMeter Task 3 (2026-05-30): EBU R128 loudness on the master sum
-    // (Momentary / Short-Term / Integrated).  Fed post fader/pan/width each
-    // block; read by the UI via VibeGraph::getMasterLufs.
-    LufsMeterDSP           mLufs;
-    juce::AudioProcessorValueTreeState& apvts;
-    VibeGraph::BusMix&                  busMix;
-
-    // 5F-4a Batch 6: APVTS width pointer (master has no polarity)
-    std::atomic<float>* pWidth { nullptr };
-    // Global "kill-all" FX bypass (master_fx_bypass).
-    std::atomic<float>* pGlobalFxBypass { nullptr };
-    // 2026-04-29: master mute (was previously only wired to UI; clicking it
-    // updated APVTS but no audio code read the param so master mute did
-    // nothing).
-    std::atomic<float>* pMute  { nullptr };
-    // 2026-04-29: master strip's own FX Bypass (mixer_master_bypass) - bypasses
-    // ONLY the master rack.  Distinct from master_fx_bypass which bypasses
-    // every rack on every strip globally.  The two are OR-ed together so
-    // either one being on bypasses the master rack.
-    std::atomic<float>* pBypass { nullptr };
-    // 2026-04-29: master pan + project-level pan law.
-    std::atomic<float>* pPan    { nullptr };
-    std::atomic<float>* pPanLaw { nullptr };
-    // 2026-04-30 (audit B.3): mixer_master_level direct read - was relayed
-    // through busMix.masterFader (PatternManager) on a 30 Hz UI timer.
-    // Now audio thread reads APVTS directly each block.
-    std::atomic<float>* pLevel  { nullptr };
-
-    static float loadParam(const std::atomic<float>* p, float fallback) noexcept
-    {
-        return p ? p->load(std::memory_order_relaxed) : fallback;
-    }
-    void rebindApvts(juce::AudioProcessorValueTreeState& a, const juce::String& prefix)
-    {
-        pWidth          = a.getRawParameterValue(prefix + "_width");
-        pGlobalFxBypass = a.getRawParameterValue("master_fx_bypass");
-        pMute           = a.getRawParameterValue(prefix + "_mute");
-        pBypass         = a.getRawParameterValue(prefix + "_bypass");
-        pPan            = a.getRawParameterValue(prefix + "_pan");
-        pPanLaw         = a.getRawParameterValue("master_pan_law");
-        pLevel          = a.getRawParameterValue(prefix + "_level");
-    }
-
-    MasterBusNode(juce::AudioProcessorValueTreeState& a, VibeGraph::BusMix& m)
-        : apvts(a), busMix(m) {}
-
-    void prepare(double sr, int blockSize)
-    {
-        preEq.prepare(sr, blockSize);   // §P4.3
-        rack .prepare(sr, blockSize);
-        busEq.prepare(sr, blockSize);
-        mLufs.prepareToPlay(sr);        // QA-RustyMeter Task 3: derive K-weighting + bin ring
-    }
-    void reset()
-    {
-        preEq.reset();   // §P4.3
-        rack .reset();
-        busEq.reset();
-    }
-
-    void processBlock(juce::AudioBuffer<float>& buf, double bpm)
-    {
-        // §P4.3 pre-rack master EQ.
-        if (buf.getNumChannels() >= 2) preEq.process(buf);   // §P4.3 (identity short-circuit + spectrum feed inside process)
-        rack.setHostBPM(bpm);
-        // 2026-04-29: master rack bypass = strip-local OR global kill-all.
-        // mixer_master_bypass bypasses the master rack only; master_fx_bypass
-        // also bypasses every other strip's rack downstream.
-        {
-            const bool stripBypass  = loadParam(pBypass, 0.f) > 0.5f;
-            const bool globalBypass = loadParam(pGlobalFxBypass, 0.f) > 0.5f;
-            const bool bypass       = stripBypass || globalBypass;
-            if (rack.isRackBypassed() != bypass)
-                rack.setRackBypassed(bypass);
-        }
-        rack.process(buf);
-        if (buf.getNumChannels() >= 2) busEq.process(buf);   // post-rack master EQ
-
-        float masterGain = 1.f;
-        if (auto* p = apvts.getRawParameterValue("masterGain"))
-            masterGain = p->load();
-
-        // 2026-04-29: master mute (mixer_master_mute APVTS toggle).  Multiplies
-        // gain by zero when set - master output silenced regardless of bus
-        // contributions.  Read via cached pMute pointer (rebindApvts).
-        // 2026-04-30 (audit B.3): mixer_master_level read direct from APVTS
-        // instead of busMix.masterFader (was 30 Hz UI relay).
-        const bool  masterMuted = loadParam(pMute, 0.f) > 0.5f;
-        const float masterFadDb = loadParam(pLevel, 0.f);
-        const float masterFadLn = juce::Decibels::decibelsToGain(masterFadDb, -60.f);
-        float g = masterMuted ? 0.f : (masterGain * masterFadLn);
-        if (g != 1.f) buf.applyGain(g);
-
-        // 2026-04-29: master pan applied AFTER master fader using project-level law.
-        applyStereoPan (buf, loadParam(pPan, 0.f), (int) loadParam(pPanLaw, 0.f));
-
-        // 5F-4a Batch 6: master M/S width (no polarity on master)
-        const float width = loadParam(pWidth, 1.f);
-        if (buf.getNumChannels() >= 2 && std::abs(width - 1.f) > 1.0e-4f)
-        {
-            float* L = buf.getWritePointer(0);
-            float* R = buf.getWritePointer(1);
-            const int n = buf.getNumSamples();
-            for (int s = 0; s < n; ++s)
-            {
-                const float m    = 0.5f * (L[s] + R[s]);
-                const float side = 0.5f * (L[s] - R[s]) * width;
-                L[s] = m + side;
-                R[s] = m - side;
-            }
-        }
-
-        // QA-RustyMeter Task 3 (2026-05-30): EBU R128 loudness on the final
-        // master sum (post fader/pan/width).  Cheap (2 biquads + bin math on the
-        // master bus only); broadcasts M/S/I atoms read by the UI LUFS box.
-        mLufs.process (buf);
-
-        {
-            // 2026-05-02: lock-free max + latency-compensated publish.  The UI
-            // exchanges the running-max atomic with -inf on each vsync to start
-            // a fresh "max within frame" window; this CAS-loop adds the current
-            // block (or, when latency comp is on, an N-block-old block) to the
-            // running max safely across that swap.  No more audio-side decay
-            // -- ballistics live entirely on the UI thread now.
-            publishPeakReading (buf, peakRingL, peakRingR, peakRingIdx,
-                                peakDbL, peakDbR, peakDb);
-        }
-    }
-};
-
-// ── EffectsBusNode ────────────────────────────────────────────────────────────
-// FX Bus - receive bus for aux strip output (default destination), and any
-// other strip whose user-cable points here.  Pipeline matches the Vox/Inst
-// bus loop in PluginProcessor (preEq -> rack -> postEq -> polarity -> width
-// -> fader x mute x solo -> pan -> peak).  Driven each block by
-// VibeGraph::processEffectsBus, called from PluginProcessor after the
-// Vox/Inst bus loop so every upstream send has fanned in by then.  Output
-// fans downstream via the routing graph (default _sendTo = Master).
-// Pre-C.1 (2026-04-30) this struct existed but its processBlock was never
-// invoked -- the FX Bus was completely silent.
-struct VibeGraph::EffectsBusNode
-{
-    EQ8MsDSP           preEq;    // §P4.3 pre-rack
-    EffectRack         rack;
-    EQ8MsDSP           busEq;    // post-rack Effects Bus EQ - shown on Effects Page
-    CompDelayLine      compDelay;   // QA-Fe2 PDC full-graph pass: FX bus was uncompensable (no line)
-    std::atomic<float> peakDb  { -60.f };
-    // 2026-04-30: stereo L/R peakDb for split DBFSMeter, written each block
-    // inside processBlock once the FX Bus pipeline runs.  Mirrored into
-    // PluginProcessor's mFxBusPeakDb* atomics so MixerPage can read alongside
-    // its peers.
-    std::atomic<float> peakDbL { -60.f };
-    std::atomic<float> peakDbR { -60.f };
-    // Per-node peak ring for latency-compensated meter publish (2026-05-02).
-    std::array<float, MeterLatencyComp::kRingSize> peakRingL {}, peakRingR {};
-    int                peakRingIdx { 0 };
-    // 5F-4a Batch 6: APVTS pointers for polarity + width
-    std::atomic<float>* pPolarity { nullptr };
-    std::atomic<float>* pWidth    { nullptr };
-    // Global "kill-all" FX bypass (master_fx_bypass) - forces rack bypass when true.
-    std::atomic<float>* pGlobalFxBypass { nullptr };
-    // C.1 (2026-04-30): full strip param set so FX Bus participates in the
-    // mixer's fader / mute / solo / pan / strip-bypass behaviour.  Pre-C.1
-    // these were registered + UI-bound but never read by audio.
-    std::atomic<float>* pStripBypass { nullptr };
-    std::atomic<float>* pLevel       { nullptr };
-    std::atomic<float>* pPan         { nullptr };
-    std::atomic<float>* pMute        { nullptr };
-    std::atomic<float>* pSolo        { nullptr };
-
-    static float loadParam(const std::atomic<float>* p, float fallback) noexcept
-    {
-        return p ? p->load(std::memory_order_relaxed) : fallback;
-    }
-    void rebindApvts(juce::AudioProcessorValueTreeState& apvts, const juce::String& prefix)
-    {
-        pPolarity       = apvts.getRawParameterValue(prefix + "_polarity");
-        pWidth          = apvts.getRawParameterValue(prefix + "_width");
-        pGlobalFxBypass = apvts.getRawParameterValue("master_fx_bypass");
-        pStripBypass    = apvts.getRawParameterValue(prefix + "_bypass");
-        pLevel          = apvts.getRawParameterValue(prefix + "_level");
-        pPan            = apvts.getRawParameterValue(prefix + "_pan");
-        pMute           = apvts.getRawParameterValue(prefix + "_mute");
-        pSolo           = apvts.getRawParameterValue(prefix + "_solo");
-    }
-
-    // QA-Fe2 SC delay-match stash (see LayersBusNode).
-    juce::AudioBuffer<float> scTap;
-    std::atomic<bool>        scTapArmed { false };
-
-    void prepare(double sr, int blockSize)
-    {
-        preEq.prepare(sr, blockSize);   // §P4.3
-        rack .prepare(sr, blockSize);
-        busEq.prepare(sr, blockSize);
-        scTap.setSize(2, juce::jmax(1, blockSize), false, true, false);
-    }
-    void reset()
-    {
-        preEq.reset();   // §P4.3
-        rack .reset();
-        busEq.reset();
-    }
-
-    // C.1 (2026-04-30): full FX Bus pipeline - preEq → rack (with strip OR
-    // global bypass) → postEq → polarity → M/S width → fader × mute × solo
-    // → pan → peak meter.  busAnySolo participates in the receive-group solo
-    // gate.  panLaw matches PluginProcessor's bus-loop convention (0=Circular,
-    // 1=Triangular, 2=Square).
-    void processBlock(juce::AudioBuffer<float>& buf, double bpm,
-                       bool busAnySolo, int panLaw)
-    {
-        // §P4.3 pre-rack Effects Bus EQ.
-        if (buf.getNumChannels() >= 2) preEq.process(buf);   // §P4.3 (identity short-circuit + spectrum feed inside process)
-        rack.setHostBPM(bpm);
-        // Strip-local FX Bypass OR global master_fx_bypass (kill-all flag).
-        {
-            const bool stripBypass  = loadParam(pStripBypass, 0.f) > 0.5f;
-            const bool globalBypass = loadParam(pGlobalFxBypass, 0.f) > 0.5f;
-            const bool bypass       = stripBypass || globalBypass;
-            if (rack.isRackBypassed() != bypass)
-                rack.setRackBypassed(bypass);
-        }
-        rack.process(buf);
-        if (buf.getNumChannels() >= 2) busEq.process(buf);
-
-        // 5F-4a Batch 6: polarity + M/S width
-        if (loadParam(pPolarity, 0.f) > 0.5f) buf.applyGain(-1.f);
-        const float width = loadParam(pWidth, 1.f);
-        const int   n     = buf.getNumSamples();
-        if (buf.getNumChannels() >= 2 && std::abs(width - 1.f) > 1.0e-4f)
-        {
-            float* L = buf.getWritePointer(0);
-            float* R = buf.getWritePointer(1);
-            for (int s = 0; s < n; ++s)
-            {
-                const float m    = 0.5f * (L[s] + R[s]);
-                const float side = 0.5f * (L[s] - R[s]) * width;
-                L[s] = m + side;
-                R[s] = m - side;
-            }
-        }
-
-        // Fader × mute × in-group solo.  Matches PluginProcessor BusSet pattern.
-        const float dB     = loadParam(pLevel, 0.0f);
-        const bool  muted  = loadParam(pMute, 0.f) > 0.5f;
-        const bool  soloed = loadParam(pSolo, 0.f) > 0.5f;
-        const bool  silenced = muted || (busAnySolo && ! soloed);
-        const float gain   = silenced ? 0.0f : juce::Decibels::decibelsToGain(dB, -60.0f);
-        if (gain != 1.0f) buf.applyGain(gain);
-
-        // Pan (project-level law).  Inline copy of PluginProcessor's bus-loop pan
-        // application so we don't reach into VibeGraph's private helper.
-        const float pan = loadParam(pPan, 0.f);
-        if (buf.getNumChannels() >= 2 && std::abs(pan) > 1.0e-4f)
-        {
-            float gL = 1.f, gR = 1.f;
-            const float p  = juce::jlimit(-1.f, 1.f, pan);
-            const float np = (p + 1.f) * 0.5f;
-            switch (panLaw)
-            {
-                case 1: gL = 1.f - np;          gR = np;             break;
-                case 2: gL = (p <= 0.f ? 1.f : 1.f - p);
-                        gR = (p >= 0.f ? 1.f : 1.f + p);             break;
-                default: { const float a = np * juce::MathConstants<float>::halfPi;
-                           gL = std::cos(a); gR = std::sin(a); }     break;
-            }
-            buf.applyGain(0, 0, n, gL);
-            buf.applyGain(1, 0, n, gR);
-        }
-
-        // QA-Fe2 SC delay-match: stash the pre-compensation output for SC
-        // consumers before the alignment delay lands on this node.
-        if (scTapArmed.load(std::memory_order_relaxed))
-            for (int c = 0, tc = juce::jmin(buf.getNumChannels(), scTap.getNumChannels()); c < tc; ++c)
-                scTap.copyFrom(c, 0, buf, c, 0, juce::jmin(buf.getNumSamples(), scTap.getNumSamples()));
-
-        compDelay.process(buf);
-
-        {
-            // 2026-05-02: lock-free max + latency-compensated publish.  The UI
-            // exchanges the running-max atomic with -inf on each vsync to start
-            // a fresh "max within frame" window; this CAS-loop adds the current
-            // block (or, when latency comp is on, an N-block-old block) to the
-            // running max safely across that swap.  No more audio-side decay
-            // -- ballistics live entirely on the UI thread now.
-            publishPeakReading (buf, peakRingL, peakRingR, peakRingIdx,
-                                peakDbL, peakDbR, peakDb);
-        }
-    }
-};
 
 // ── InsertNode (5F-4a Batch 2 full implementation) ───────────────────────────
 // Per-insert audio path: polarity → M/S width → rack (bypassable) → EQ →
@@ -1173,7 +316,7 @@ struct VibeGraph::InsertNode
     // every block alongside pPan so the user can pick FL-style pan curve.
     std::atomic<float>* pPanLaw { nullptr };
 
-    // QA-Fe2 SC delay-match stash (see LayersBusNode).
+    // QA-Fe2 SC delay-match stash (see InstrChannelNode).
     juce::AudioBuffer<float> scTap;
     std::atomic<bool>        scTapArmed { false };
 
@@ -1324,35 +467,61 @@ struct VibeGraph::InsertNode
 // Generic rack + post-rack EQ container for non-bus mixer channels.
 // One instance per entry in the dynamic instrument channel registry.
 // Audio routing is wired in Phase 2/3 - containers are live from Phase 1.
+// CL-301 (QA-ModelShell TS1, 2026-07-27): the ONE bus/channel node type.  The
+// five hand-written structs (LayersBusNode / BassBusNode / DrumsBusNode /
+// MasterBusNode / EffectsBusNode) are folded in here so all 11 mixer buses
+// share a single implementation -- the split caused three on-record divergence
+// incidents (scattered solo formulas, hand-ported meter pattern, PDC lines
+// missing on the generic 7) plus a fourth found at fold time (the generic 7
+// never received setHostBPM, so tempo-synced rack effects on those buses ran
+// at default BPM).  Special-case content survives as members/methods, not
+// types: the master chain (terminal -- masterGain x fader, no polarity, no
+// comp delay, LUFS meter) is processMasterChain; every other bus runs
+// processChainOnly.  The L/B/D synth-render fallback paths died with the fold
+// (dead since QA-Ea Part A; zero callers).
 struct VibeGraph::InstrChannelNode
 {
     juce::String name;
-    EQ8MsDSP     preEq;   // §P4.3 pre-rack (used by Audio Clips Bus; processed inline in PluginProcessor)
+    EQ8MsDSP     preEq;   // §P4.3 pre-rack
     EffectRack   rack;
-    EQ8MsDSP     eq;
-    // QA-Fe2 PDC full-graph pass: the 7 InstrChannelNode buses (Clips/Vox/
-    // Inst/Vox2/Inst2/Inst3/Rusty) had no delay line, so their own chain
-    // latency could never be compensated.  Runs in processBus after pan.
+    EQ8MsDSP     eq;      // post-rack bus EQ - shown on Effects Page
+    // QA-Fe2 PDC: bus-stage alignment (post-pan, pre-meter).  The master
+    // chain deliberately never processes it (terminal node -- nothing
+    // downstream to align against).
     CompDelayLine compDelay;
 
-    // 5F-4a Batch 6: polarity + width pointers (used by audio clips bus node)
-    std::atomic<float>* pPolarity { nullptr };
-    std::atomic<float>* pWidth    { nullptr };
+    // QA-RustyMeter Task 3: EBU R128 loudness (Momentary/Short-Term/
+    // Integrated).  Processed by the MASTER chain only, post fader/pan/width;
+    // sibling buses carry the member unprocessed (prepare-time cost only).
+    LufsMeterDSP mLufs;
 
-    // QA-Eg: G1-pattern peak fields (parallel to L/B/D/Master/EffectsBusNode).
-    // publishPeakReading writes peakDb/L/R + ring; processBus exchange-stores
-    // into VibeGraph member atomics; drainMeterAtomicsForUI G1 loop drains
-    // those into PluginProcessor snapshot mirrors.  S6: NO peakDecayDbPerBlock
-    // (dead carry-over on the 5 existing G1 nodes; stripped in Task 7).
+    // QA-Eg: G1-pattern peak fields.  publishPeakReading writes peakDb/L/R +
+    // ring; processBus exchange-stores into VibeGraph member atomics;
+    // drainMeterAtomicsForUI drains those into PluginProcessor mirrors.
     std::atomic<float> peakDb  { -60.f };
     std::atomic<float> peakDbL { -60.f };
     std::atomic<float> peakDbR { -60.f };
     std::array<float, MeterLatencyComp::kRingSize> peakRingL {}, peakRingR {};
     int peakRingIdx { 0 };
 
-    // QA-Fe2 SC delay-match stash (see LayersBusNode).
+    // QA-Fe2 SC delay-match: pre-compensation key stash.  armScSourceTaps
+    // flags SC-edge sources at block rate; the copy runs right before
+    // compDelay so keys never carry the alignment delay.
     juce::AudioBuffer<float> scTap;
     std::atomic<bool>        scTapArmed { false };
+
+    // Cached APVTS raw pointers (rebindBusApvts binds per-bus prefixes).
+    // CPU-safeguarding standing rule: no string-keyed lookups per block.
+    std::atomic<float>* pPolarity       { nullptr };
+    std::atomic<float>* pWidth          { nullptr };
+    std::atomic<float>* pBypass         { nullptr };
+    std::atomic<float>* pPan            { nullptr };
+    std::atomic<float>* pPanLaw         { nullptr };
+    std::atomic<float>* pLevel          { nullptr };
+    std::atomic<float>* pMute           { nullptr };
+    std::atomic<float>* pSolo           { nullptr };
+    std::atomic<float>* pGlobalFxBypass { nullptr };
+    std::atomic<float>* pMasterGain     { nullptr };   // master chain only
 
     explicit InstrChannelNode(const juce::String& displayName) : name(displayName) {}
 
@@ -1362,6 +531,7 @@ struct VibeGraph::InstrChannelNode
         rack.prepare(sr, blockSize);
         eq  .prepare(sr, blockSize);
         scTap.setSize(2, juce::jmax(1, blockSize), false, true, false);
+        mLufs.prepareToPlay(sr);        // derive K-weighting + bin ring
     }
     void reset()
     {
@@ -1376,14 +546,48 @@ struct VibeGraph::InstrChannelNode
     }
     void rebindApvts(juce::AudioProcessorValueTreeState& apvts, const juce::String& prefix)
     {
-        pPolarity = apvts.getRawParameterValue(prefix + "_polarity");
-        pWidth    = apvts.getRawParameterValue(prefix + "_width");
+        pPolarity       = apvts.getRawParameterValue(prefix + "_polarity");
+        pWidth          = apvts.getRawParameterValue(prefix + "_width");
+        pBypass         = apvts.getRawParameterValue(prefix + "_bypass");
+        pPan            = apvts.getRawParameterValue(prefix + "_pan");
+        pPanLaw         = apvts.getRawParameterValue("master_pan_law");
+        pLevel          = apvts.getRawParameterValue(prefix + "_level");
+        pMute           = apvts.getRawParameterValue(prefix + "_mute");
+        pSolo           = apvts.getRawParameterValue(prefix + "_solo");
+        pGlobalFxBypass = apvts.getRawParameterValue("master_fx_bypass");
+        pMasterGain     = apvts.getRawParameterValue("masterGain");
     }
 
-    // 5F-4a Batch 6: apply polarity flip + M/S width in-place on buf.
-    // Called by VibeGraph::applyAudioClipsBusPolarityWidth on the audio thread.
-    void applyPolarityWidth(juce::AudioBuffer<float>& buf)
+    // Runs the standard bus DSP chain on `buf` in-place.  `buf` must already
+    // contain the bus input (PassiveStripTask predecessor sum).  Steps:
+    // pre-rack EQ -> rack (strip bypass OR global kill-all) -> post-rack EQ
+    // -> fader x mute x unified bus-solo gate -> polarity + M/S width -> pan
+    // -> SC stash -> latency-compensated comp delay -> peak publish.
+    // anyBusSoloed = VibeGraph::anyBusSoloed(), computed once per block by the
+    // caller and shared by every bus (QA-Ea Part A canonical formula:
+    // silenced = muted || (anyBusSoloed && !soloed)).
+    void processChainOnly(juce::AudioBuffer<float>& buf, double bpm,
+                          bool anyBusSoloed)
     {
+        if (buf.getNumChannels() >= 2) preEq.process(buf);   // §P4.3 (identity short-circuit + spectrum feed inside)
+        rack.setHostBPM(bpm);
+        {
+            const bool stripBypass  = loadParam(pBypass, 0.f) > 0.5f;
+            const bool globalBypass = loadParam(pGlobalFxBypass, 0.f) > 0.5f;
+            const bool bypass       = stripBypass || globalBypass;
+            if (rack.isRackBypassed() != bypass)
+                rack.setRackBypassed(bypass);
+        }
+        rack.process(buf);
+        if (buf.getNumChannels() >= 2) eq.process(buf);   // post-rack bus EQ
+
+        const bool  thisSolo  = loadParam(pSolo, 0.f) > 0.5f;
+        const bool  thisMuted = loadParam(pMute, 0.f) > 0.5f;
+        const float fadDb     = loadParam(pLevel, 0.f);
+        const float fadLin    = juce::Decibels::decibelsToGain(fadDb, -60.f);
+        const float g = (thisMuted || (anyBusSoloed && ! thisSolo)) ? 0.f : fadLin;
+        if (g != 1.f) buf.applyGain(g);
+
         if (loadParam(pPolarity, 0.f) > 0.5f) buf.applyGain(-1.f);
         const float width = loadParam(pWidth, 1.f);
         if (buf.getNumChannels() >= 2 && std::abs(width - 1.f) > 1.0e-4f)
@@ -1399,6 +603,70 @@ struct VibeGraph::InstrChannelNode
                 R[s] = m - side;
             }
         }
+
+        applyStereoPan (buf, loadParam(pPan, 0.f), (int) loadParam(pPanLaw, 0.f));
+
+        if (scTapArmed.load(std::memory_order_relaxed))
+            for (int c = 0, tc = juce::jmin(buf.getNumChannels(), scTap.getNumChannels()); c < tc; ++c)
+                scTap.copyFrom(c, 0, buf, c, 0, juce::jmin(buf.getNumSamples(), scTap.getNumSamples()));
+
+        compDelay.process(buf);
+        // Lock-free max + latency-compensated publish; ballistics live
+        // entirely on the UI thread (it exchange-resets per vsync).
+        publishPeakReading (buf, peakRingL, peakRingR, peakRingIdx,
+                            peakDbL, peakDbR, peakDb);
+    }
+
+    // The terminal master chain: masterGain (APVTS knob) x master fader,
+    // mute only (no solo -- nothing to solo against), pan BEFORE width
+    // (kept verbatim from the former MasterBusNode), no polarity, no comp
+    // delay / SC stash (terminal node), LUFS metering on the final sum.
+    void processMasterChain(juce::AudioBuffer<float>& buf, double bpm)
+    {
+        if (buf.getNumChannels() >= 2) preEq.process(buf);   // §P4.3
+        rack.setHostBPM(bpm);
+        // mixer_master_bypass bypasses the master rack only; master_fx_bypass
+        // also bypasses every other strip's rack.  OR-ed together.
+        {
+            const bool stripBypass  = loadParam(pBypass, 0.f) > 0.5f;
+            const bool globalBypass = loadParam(pGlobalFxBypass, 0.f) > 0.5f;
+            const bool bypass       = stripBypass || globalBypass;
+            if (rack.isRackBypassed() != bypass)
+                rack.setRackBypassed(bypass);
+        }
+        rack.process(buf);
+        if (buf.getNumChannels() >= 2) eq.process(buf);   // post-rack master EQ
+
+        const float masterGain  = loadParam(pMasterGain, 1.f);
+        const bool  masterMuted = loadParam(pMute, 0.f) > 0.5f;
+        const float masterFadDb = loadParam(pLevel, 0.f);
+        const float masterFadLn = juce::Decibels::decibelsToGain(masterFadDb, -60.f);
+        const float g = masterMuted ? 0.f : (masterGain * masterFadLn);
+        if (g != 1.f) buf.applyGain(g);
+
+        applyStereoPan (buf, loadParam(pPan, 0.f), (int) loadParam(pPanLaw, 0.f));
+
+        const float width = loadParam(pWidth, 1.f);
+        if (buf.getNumChannels() >= 2 && std::abs(width - 1.f) > 1.0e-4f)
+        {
+            float* L = buf.getWritePointer(0);
+            float* R = buf.getWritePointer(1);
+            const int n = buf.getNumSamples();
+            for (int s = 0; s < n; ++s)
+            {
+                const float m    = 0.5f * (L[s] + R[s]);
+                const float side = 0.5f * (L[s] - R[s]) * width;
+                L[s] = m + side;
+                R[s] = m - side;
+            }
+        }
+
+        // EBU R128 on the final master sum (post fader/pan/width); M/S/I
+        // atoms read by the UI LUFS box.
+        mLufs.process (buf);
+
+        publishPeakReading (buf, peakRingL, peakRingR, peakRingIdx,
+                            peakDbL, peakDbR, peakDb);
     }
 };
 
@@ -1542,11 +810,16 @@ void VibeGraph::buildFixedTopology(juce::Synthesiser&                  synth,
     mGlobalFxBypassPtr = apvts.getRawParameterValue("master_fx_bypass");
 
     // §P4.3 B7: every bus has its own preEq member - no external EQ refs needed.
-    mLayersNode     = std::make_unique<LayersBusNode> (synth, busMix);
-    mBassNode       = std::make_unique<BassBusNode>   (bass,  busMix);
-    mDrumsNode      = std::make_unique<DrumsBusNode>  (busMix);
-    mMasterNode     = std::make_unique<MasterBusNode> (apvts, busMix);
-    mEffectsBusNode = std::make_unique<EffectsBusNode>();
+    // CL-301: one node type for all five (the synth/bass refs died with the
+    // dead render-fallback paths; masterGain reads via the cached pointer
+    // rebindBusApvts binds).  The signature keeps synth/bass for API
+    // stability with the PluginProcessor caller.
+    juce::ignoreUnused (synth, bass);
+    mLayersNode     = std::make_unique<InstrChannelNode> ("Layers Bus");
+    mBassNode       = std::make_unique<InstrChannelNode> ("Bass Bus");
+    mDrumsNode      = std::make_unique<InstrChannelNode> ("Drums Bus");
+    mMasterNode     = std::make_unique<InstrChannelNode> ("Master");
+    mEffectsBusNode = std::make_unique<InstrChannelNode> ("FX Bus");
 
 
     // Prepare all nodes with the current sample rate (may already be set)
@@ -1578,7 +851,7 @@ void VibeGraph::processMasterBus(juce::AudioBuffer<float>& sumBuf, double bpm)
     constexpr float kBusNegInf = -std::numeric_limits<float>::infinity();
     // C.4 Phase 1: push SC array to master chain before processing.
     pushScArrayToStrip(MixerChannelIds::kMaster);
-    mMasterNode->processBlock(sumBuf, bpm);
+    mMasterNode->processMasterChain(sumBuf, bpm);
     // 2026-05-02: drain via exchange-with--inf so the node atomic's
     // running-max window resets per block.
     masterPeakDb .store(mMasterNode->peakDb .exchange(kBusNegInf, std::memory_order_relaxed), std::memory_order_relaxed);
@@ -1624,16 +897,16 @@ void VibeGraph::processBus(int busChId, juce::AudioBuffer<float>& buf,
     const bool anyBus = anyBusSoloed();
     constexpr float kBusNegInf = -std::numeric_limits<float>::infinity();
 
-    // Pre-existing helpers handle Master + FxBus.  These already push SC,
-    // run their own DSP chain, and drain peaks; processBus just delegates.
-    // QA-Ea Part A (2026-05-21): pass anyBus to processEffectsBus instead of
-    // the now-dead caller anySolo so FxBus gates uniformly with the other 10.
+    // Master keeps its dedicated helper (terminal chain + SC push inside).
+    // CL-301: FxBus runs the same unified chain as every other bus (its old
+    // processEffectsBus delegate is gone; the SC push it did is kept here).
     if (busChId == kMaster)  { processMasterBus(buf, bpm);                       return; }
     if (busChId == kFxBus)
     {
-        processEffectsBus(buf, bpm, anyBus, panLaw);
         if (mEffectsBusNode != nullptr)
         {
+            pushScArrayToStrip(kFxBus);
+            mEffectsBusNode->processChainOnly(buf, bpm, anyBus);
             fxBusPeakDb .store(mEffectsBusNode->peakDb .exchange(kBusNegInf, std::memory_order_relaxed), std::memory_order_relaxed);
             fxBusPeakDbL.store(mEffectsBusNode->peakDbL.exchange(kBusNegInf, std::memory_order_relaxed), std::memory_order_relaxed);
             fxBusPeakDbR.store(mEffectsBusNode->peakDbR.exchange(kBusNegInf, std::memory_order_relaxed), std::memory_order_relaxed);
@@ -1680,80 +953,47 @@ void VibeGraph::processBus(int busChId, juce::AudioBuffer<float>& buf,
         return;
     }
 
-    // Remaining buses (Clips / Vox / Inst / Vox2 / Inst2 / Inst3 / Rusty) all
-    // share the same DSP shape, ported from PluginProcessor inline code:
-    //   preEq -> rack (with bypass) -> postEq -> polarity/width -> fader x mute
-    //   x in-group solo (where applicable) -> pan -> peak meter.
-    // Per-bus state: prefix string + EQ/rack getters + polarity/width method
-    // + in-group solo formula.
+    // Remaining buses (Clips / Vox / Inst / Vox2 / Inst2 / Inst3 / Rusty).
+    // CL-301: the inline chain that lived here (string-keyed APVTS lookups per
+    // block + the applyXxxPolarityWidth helper switch) is gone -- these buses
+    // run the SAME InstrChannelNode::processChainOnly as L/B/D/FX, with
+    // cached param pointers bound in rebindBusApvts.  processBus's remaining
+    // per-bus knowledge is node + RMS-atomic selection.
     if (mApvts == nullptr)        return;
     if (buf.getNumChannels() < 2) return;
-    // QA-InsertMaps Task 5 close (2026-05-25): pre-existing unused `const int
-    // n = buf.getNumSamples();` removed (C4189 cleanup; processBus uses buf
-    // directly via preEq/rack/postEq/applyXxxPolarityWidth/applyStereoPan/
-    // publishPeakReading and never needed n).
 
-    EQ8MsDSP*  preEq  = nullptr;
-    EffectRack* rack   = nullptr;
-    EQ8MsDSP*  postEq = nullptr;
     InstrChannelNode* node = nullptr;
-    juce::String prefix;
-    // QA-RustyMeter part 2 (2026-05-30): per-bus split-meter RMS target atoms,
-    // set alongside node in the switch below; publishRms CAS-maxes into them
-    // after publishPeakReading (parallel to the peak exchange-store).
     std::atomic<float>* rmsL = nullptr;
     std::atomic<float>* rmsR = nullptr;
-    // QA-Ea Part A (2026-05-21): inGroupSolo + useGroupSolo retired.  Every
-    // bus shares the unified canonical formula `silenced = muted || (anyBus
-    // && !soloed)`.  Previously: 6-bus subsets (different per-bus depending
-    // on Clips override / Rusty standalone) excluded L/B/D + FX inconsistently
-    // -- the root cause of "solo dead on 7 of 11 buses".  Now: anyBus is
-    // computed once at top of processBus via anyBusSoloed() (all 11 buses).
 
     switch (busChId)
     {
         case kClipsBus:
-            preEq  = getAudioClipsBusPreEQ();
-            rack   = getAudioClipsBusRack();
-            postEq = getAudioClipsBusEQ();
-            node   = mAudioClipsBusNode.get();
-            prefix = "mixer_clipsbus";
+            node = mAudioClipsBusNode.get();
             rmsL = &audioClipsRmsDbL; rmsR = &audioClipsRmsDbR;
             break;
         case kVoxBus:
-            preEq  = getVoxBusPreEQ();   rack = getVoxBusRack();   postEq = getVoxBusEQ();
-            node   = mVoxBusNode.get();
-            prefix = "mixer_voxbus";
+            node = mVoxBusNode.get();
             rmsL = &voxBusRmsDbL; rmsR = &voxBusRmsDbR;
             break;
         case kInstBus:
-            preEq  = getInstBusPreEQ();  rack = getInstBusRack();  postEq = getInstBusEQ();
-            node   = mInstBusNode.get();
-            prefix = "mixer_instbus";
+            node = mInstBusNode.get();
             rmsL = &instBusRmsDbL; rmsR = &instBusRmsDbR;
             break;
         case kVoxBus2:
-            preEq  = getVoxBus2PreEQ();  rack = getVoxBus2Rack();  postEq = getVoxBus2EQ();
-            node   = mVoxBus2Node.get();
-            prefix = "mixer_voxbus2";
+            node = mVoxBus2Node.get();
             rmsL = &voxBus2RmsDbL; rmsR = &voxBus2RmsDbR;
             break;
         case kInstBus2:
-            preEq  = getInstBus2PreEQ(); rack = getInstBus2Rack(); postEq = getInstBus2EQ();
-            node   = mInstBus2Node.get();
-            prefix = "mixer_instbus2";
+            node = mInstBus2Node.get();
             rmsL = &instBus2RmsDbL; rmsR = &instBus2RmsDbR;
             break;
         case kInstBus3:
-            preEq  = getInstBus3PreEQ(); rack = getInstBus3Rack(); postEq = getInstBus3EQ();
-            node   = mInstBus3Node.get();
-            prefix = "mixer_instbus3";
+            node = mInstBus3Node.get();
             rmsL = &instBus3RmsDbL; rmsR = &instBus3RmsDbR;
             break;
         case kRustyDrumsBus:
-            preEq  = getRustyDrumsBusPreEQ(); rack = getRustyDrumsBusRack(); postEq = getRustyDrumsBusEQ();
-            node   = mRustyDrumsBusNode.get();
-            prefix = "mixer_rustybus";
+            node = mRustyDrumsBusNode.get();
             rmsL = &rustyDrumsBusRmsDbL; rmsR = &rustyDrumsBusRmsDbR;
             break;
         default:
@@ -1761,90 +1001,10 @@ void VibeGraph::processBus(int busChId, juce::AudioBuffer<float>& buf,
             return;
     }
 
-    // Pre-rack EQ.
-    if (preEq) preEq->process(buf);
+    if (node == nullptr) return;
 
-    // Rack with bypass = strip-local OR global kill-all.
-    if (rack)
-    {
-        const auto* bypP = mApvts->getRawParameterValue (prefix + "_bypass");
-        const bool stripBypass  = bypP && bypP->load() > 0.5f;
-        const bool globalBypass = (mGlobalFxBypassPtr != nullptr)
-                                  && (mGlobalFxBypassPtr->load() > 0.5f);
-        const bool bypass = stripBypass || globalBypass;
-        if (rack->isRackBypassed() != bypass)
-            rack->setRackBypassed(bypass);
-        rack->process(buf);
-    }
-
-    // Post-rack EQ.
-    if (postEq) postEq->process(buf);
-
-    // Polarity + M/S width via the per-bus helper (so all knob bindings stay routed).
-    switch (busChId)
-    {
-        case kClipsBus:        applyAudioClipsBusPolarityWidth(buf); break;
-        case kVoxBus:          applyVoxBusPolarityWidth(buf);        break;
-        case kInstBus:         applyInstBusPolarityWidth(buf);       break;
-        case kVoxBus2:         applyVoxBus2PolarityWidth(buf);       break;
-        case kInstBus2:        applyInstBus2PolarityWidth(buf);      break;
-        case kInstBus3:        applyInstBus3PolarityWidth(buf);      break;
-        case kRustyDrumsBus:   applyRustyDrumsBusPolarityWidth(buf); break;
-        default: break;
-    }
-
-    // Fader * mute * unified bus-solo gate.
-    // QA-Ea Part A (2026-05-21): canonical formula across every bus:
-    //   silenced = muted || (anyBus && !soloed)
-    // anyBus = VibeGraph::anyBusSoloed() (all 11 bus _solo params).
-    // Identical formula to L/B/D BusNode::processChainOnly above.
-    {
-        const auto* lvlP   = mApvts->getRawParameterValue (prefix + "_level");
-        const auto* muteP  = mApvts->getRawParameterValue (prefix + "_mute");
-        const auto* soloP  = mApvts->getRawParameterValue (prefix + "_solo");
-        const float dB     = lvlP ? lvlP->load() : 0.0f;
-        const bool  muted  = muteP && muteP->load() > 0.5f;
-        const bool  soloed = soloP && soloP->load() > 0.5f;
-        const bool  silenced = muted || (anyBus && ! soloed);
-        const float gain   = silenced ? 0.0f : juce::Decibels::decibelsToGain (dB, -60.0f);
-        if (gain != 1.0f) buf.applyGain (gain);
-    }
-
-    // Pan - applyStereoPan is the file-static helper used by every BusNode.
-    if (const auto* panP = mApvts->getRawParameterValue (prefix + "_pan"))
-    {
-        const float pan = panP->load();
-        if (std::abs (pan) > 1.0e-4f)
-            applyStereoPan (buf, pan, panLaw);
-    }
-
-    // QA-Fe2 PDC full-graph pass: bus-stage alignment, same slot in the chain
-    // as the L/B/D BusNodes (post-pan, pre-meter).  The SC stash runs first
-    // so keys never carry the alignment delay.
-    if (node != nullptr)
-    {
-        if (node->scTapArmed.load (std::memory_order_relaxed))
-            for (int c = 0, tc = juce::jmin (buf.getNumChannels(), node->scTap.getNumChannels()); c < tc; ++c)
-                node->scTap.copyFrom (c, 0, buf, c, 0, juce::jmin (buf.getNumSamples(), node->scTap.getNumSamples()));
-        node->compDelay.process (buf);
-    }
-
-    // Peak meter.  Each bus's InstrChannelNode (or BusNode for L/B/D/Master/FX)
-    // owns the G1 peak fields; publishPeakReading writes them inside this
-    // block, and the exchange-store at the end of this function lifts the
-    // node-internal peak atomics into VibeGraph member atomics parallel to
-    // the L/B/D pattern above.
-    if (node != nullptr)
-    {
-        publishPeakReading (buf,
-                            node->peakRingL, node->peakRingR, node->peakRingIdx,
-                            node->peakDbL, node->peakDbR, node->peakDb);
-        // QA-RustyMeter part 2 (2026-05-30): bus split-meter RMS feed.  rmsL/rmsR
-        // were set alongside node in the switch above, so node != nullptr implies
-        // they're valid for every generic bus.
-        if (rmsL != nullptr && rmsR != nullptr)
-            publishRms (buf, *rmsL, *rmsR);
-    }
+    node->processChainOnly (buf, bpm, anyBus);
+    publishRms (buf, *rmsL, *rmsR);   // QA-RustyMeter split-meter RMS feed
 
     // Exchange-store the migrated buses' node-internal peak atomics into
     // VibeGraph member atomics (parallel to L/B/D pattern at the top of this
@@ -1934,22 +1094,6 @@ EffectRack* VibeGraph::getBassBusRack()       { return mBassNode         ? &mBas
 EffectRack* VibeGraph::getDrumsBusRack()      { return mDrumsNode        ? &mDrumsNode       ->rack : nullptr; }
 EffectRack* VibeGraph::getMasterRack()        { return mMasterNode       ? &mMasterNode      ->rack : nullptr; }
 EffectRack* VibeGraph::getEffectsBusRack()    { return mEffectsBusNode   ? &mEffectsBusNode  ->rack : nullptr; }
-
-// C.1 (2026-04-30): public wrapper - drives the FX Bus pipeline once per
-// block.  Called from PluginProcessor after the Vox/Inst bus loop, i.e.
-// after every upstream send / aux / bus has had a chance to fan into the
-// FX Bus accumulator.  Pre-C.1 this was never
-// invoked anywhere - the accumulator filled but nothing read it back.
-void VibeGraph::processEffectsBus(juce::AudioBuffer<float>& buf, double bpm,
-                                   bool busAnySolo, int panLaw)
-{
-    if (mEffectsBusNode)
-    {
-        // C.4 Phase 1: push SC array to FX Bus chain before processing.
-        pushScArrayToStrip(MixerChannelIds::kFxBus);
-        mEffectsBusNode->processBlock(buf, bpm, busAnySolo, panLaw);
-    }
-}
 
 EffectRack* VibeGraph::getAudioClipsBusRack() { return mAudioClipsBusNode ? &mAudioClipsBusNode->rack : nullptr; }
 EffectRack* VibeGraph::getVoxBusRack()        { return mVoxBusNode        ? &mVoxBusNode       ->rack : nullptr; }
@@ -2044,9 +1188,9 @@ int VibeGraph::updateBusLatencies()
         }
         return -1;
     };
-    buses[0] = { &mLayersNode->compDelay, chainLat(mLayersNode->preEq, mLayersNode->rack, mLayersNode->busEq), 0 };
-    buses[1] = { &mBassNode  ->compDelay, chainLat(mBassNode  ->preEq, mBassNode  ->rack, mBassNode  ->busEq), 0 };
-    buses[2] = { &mDrumsNode ->compDelay, chainLat(mDrumsNode ->preEq, mDrumsNode ->rack, mDrumsNode ->busEq), 0 };
+    buses[0] = { &mLayersNode->compDelay, chainLat(mLayersNode->preEq, mLayersNode->rack, mLayersNode->eq), 0 };
+    buses[1] = { &mBassNode  ->compDelay, chainLat(mBassNode  ->preEq, mBassNode  ->rack, mBassNode  ->eq), 0 };
+    buses[2] = { &mDrumsNode ->compDelay, chainLat(mDrumsNode ->preEq, mDrumsNode ->rack, mDrumsNode ->eq), 0 };
     auto instrBus = [&chainLat](InstrChannelNode* n) -> BusSlot
     {
         if (n == nullptr) return { nullptr, 0, 0 };
@@ -2061,9 +1205,9 @@ int VibeGraph::updateBusLatencies()
     buses[9] = instrBus(mRustyDrumsBusNode.get());
 
     const int fxChain = mEffectsBusNode != nullptr
-        ? chainLat(mEffectsBusNode->preEq, mEffectsBusNode->rack, mEffectsBusNode->busEq) : 0;
+        ? chainLat(mEffectsBusNode->preEq, mEffectsBusNode->rack, mEffectsBusNode->eq) : 0;
     const int masterChain =
-        chainLat(mMasterNode->preEq, mMasterNode->rack, mMasterNode->busEq);
+        chainLat(mMasterNode->preEq, mMasterNode->rack, mMasterNode->eq);
 
     // Stage-1 sweep: classify every live insert by its actual main-out target.
     // ownByCh / engineByCh feed the SC key-alignment solve below (-1 own =
@@ -2232,11 +1376,11 @@ int VibeGraph::updateBusLatencies()
 }
 
 // ── EQ getters (post-rack bus EQs, one per channel) ──────────────────────────
-EQ8MsDSP* VibeGraph::getLayersBusEQ()     { return mLayersNode       ? &mLayersNode      ->busEq : nullptr; }
-EQ8MsDSP* VibeGraph::getBassBusEQ()       { return mBassNode         ? &mBassNode        ->busEq : nullptr; }
-EQ8MsDSP* VibeGraph::getDrumsBusEQ()      { return mDrumsNode        ? &mDrumsNode       ->busEq : nullptr; }
-EQ8MsDSP* VibeGraph::getMasterEQ()        { return mMasterNode       ? &mMasterNode      ->busEq : nullptr; }
-EQ8MsDSP* VibeGraph::getEffectsBusEQ()    { return mEffectsBusNode   ? &mEffectsBusNode  ->busEq : nullptr; }
+EQ8MsDSP* VibeGraph::getLayersBusEQ()     { return mLayersNode       ? &mLayersNode      ->eq : nullptr; }
+EQ8MsDSP* VibeGraph::getBassBusEQ()       { return mBassNode         ? &mBassNode        ->eq : nullptr; }
+EQ8MsDSP* VibeGraph::getDrumsBusEQ()      { return mDrumsNode        ? &mDrumsNode       ->eq : nullptr; }
+EQ8MsDSP* VibeGraph::getMasterEQ()        { return mMasterNode       ? &mMasterNode      ->eq : nullptr; }
+EQ8MsDSP* VibeGraph::getEffectsBusEQ()    { return mEffectsBusNode   ? &mEffectsBusNode  ->eq : nullptr; }
 EQ8MsDSP* VibeGraph::getAudioClipsBusEQ() { return mAudioClipsBusNode ? &mAudioClipsBusNode->eq  : nullptr; }
 EQ8MsDSP* VibeGraph::getVoxBusEQ()        { return mVoxBusNode        ? &mVoxBusNode       ->eq  : nullptr; }
 EQ8MsDSP* VibeGraph::getInstBusEQ()       { return mInstBusNode       ? &mInstBusNode      ->eq  : nullptr; }
@@ -2301,11 +1445,11 @@ void VibeGraph::saveRackStates(juce::ValueTree& parent)
         parent.addChild(node, -1, nullptr);
     };
 
-    addNode("LayersBus",  mLayersNode    ->rack, mLayersNode    ->preEq, mLayersNode    ->busEq);
-    addNode("BassBus",    mBassNode      ->rack, mBassNode      ->preEq, mBassNode      ->busEq);
-    addNode("DrumsBus",   mDrumsNode     ->rack, mDrumsNode     ->preEq, mDrumsNode     ->busEq);
-    addNode("Master",     mMasterNode    ->rack, mMasterNode    ->preEq, mMasterNode    ->busEq);
-    addNode("EffectsBus", mEffectsBusNode->rack, mEffectsBusNode->preEq, mEffectsBusNode->busEq);
+    addNode("LayersBus",  mLayersNode    ->rack, mLayersNode    ->preEq, mLayersNode    ->eq);
+    addNode("BassBus",    mBassNode      ->rack, mBassNode      ->preEq, mBassNode      ->eq);
+    addNode("DrumsBus",   mDrumsNode     ->rack, mDrumsNode     ->preEq, mDrumsNode     ->eq);
+    addNode("Master",     mMasterNode    ->rack, mMasterNode    ->preEq, mMasterNode    ->eq);
+    addNode("EffectsBus", mEffectsBusNode->rack, mEffectsBusNode->preEq, mEffectsBusNode->eq);
 
     // 2026-04-24: the three special-bus InstrChannelNode racks (Audio Clips,
     // Vox, Inst) were silently dropped before - they're stored as separate
@@ -2458,11 +1602,11 @@ void VibeGraph::applyRackStates(const juce::ValueTree& parent)
         }
     };
 
-    restoreNode("LayersBus",  mLayersNode    ->rack, mLayersNode    ->preEq, mLayersNode    ->busEq);
-    restoreNode("BassBus",    mBassNode      ->rack, mBassNode      ->preEq, mBassNode      ->busEq);
-    restoreNode("DrumsBus",   mDrumsNode     ->rack, mDrumsNode     ->preEq, mDrumsNode     ->busEq);
-    restoreNode("Master",     mMasterNode    ->rack, mMasterNode    ->preEq, mMasterNode    ->busEq);
-    restoreNode("EffectsBus", mEffectsBusNode->rack, mEffectsBusNode->preEq, mEffectsBusNode->busEq);
+    restoreNode("LayersBus",  mLayersNode    ->rack, mLayersNode    ->preEq, mLayersNode    ->eq);
+    restoreNode("BassBus",    mBassNode      ->rack, mBassNode      ->preEq, mBassNode      ->eq);
+    restoreNode("DrumsBus",   mDrumsNode     ->rack, mDrumsNode     ->preEq, mDrumsNode     ->eq);
+    restoreNode("Master",     mMasterNode    ->rack, mMasterNode    ->preEq, mMasterNode    ->eq);
+    restoreNode("EffectsBus", mEffectsBusNode->rack, mEffectsBusNode->preEq, mEffectsBusNode->eq);
     if (mAudioClipsBusNode) restoreNode ("ClipsBus", mAudioClipsBusNode->rack, mAudioClipsBusNode->preEq, mAudioClipsBusNode->eq);
     if (mVoxBusNode)        restoreNode ("VoxBus",   mVoxBusNode       ->rack, mVoxBusNode       ->preEq, mVoxBusNode       ->eq);
     if (mInstBusNode)       restoreNode ("InstBus",  mInstBusNode      ->rack, mInstBusNode      ->preEq, mInstBusNode      ->eq);
@@ -2839,7 +1983,7 @@ std::pair<float, float> VibeGraph::drainInsertNodeRms (InsertKind kind, int inde
 
 // QA-RustyMeter part 2 (2026-05-30): UI-thread RMS drain for a bus strip's split
 // meter.  exchange-resets the per-bus rms member atoms (CAS-maxed audio-side by
-// publishRms in processBus/processEffectsBus); returns "max RMS since the last
+// publishRms in processBus); returns "max RMS since the last
 // call".  Master + unknown ids return {-inf,-inf} (Master is Full-layout, no RMS
 // top).  Direct VibeGraph read mirrored from drainInsertNodeRms -- no mirror.
 std::pair<float, float> VibeGraph::drainBusRms (int busChId) noexcept
@@ -3015,37 +2159,8 @@ bool VibeGraph::anyBusSoloed() const noexcept
     return false;
 }
 
-void VibeGraph::applyAudioClipsBusPolarityWidth(juce::AudioBuffer<float>& buf)
-{
-    if (mAudioClipsBusNode)
-        mAudioClipsBusNode->applyPolarityWidth(buf);
-}
-void VibeGraph::applyVoxBusPolarityWidth(juce::AudioBuffer<float>& buf)
-{
-    if (mVoxBusNode) mVoxBusNode->applyPolarityWidth(buf);
-}
-void VibeGraph::applyInstBusPolarityWidth(juce::AudioBuffer<float>& buf)
-{
-    if (mInstBusNode) mInstBusNode->applyPolarityWidth(buf);
-}
-// G-6 (2026-04-29): polarity/width application for secondary buses.
-void VibeGraph::applyVoxBus2PolarityWidth(juce::AudioBuffer<float>& buf)
-{
-    if (mVoxBus2Node) mVoxBus2Node->applyPolarityWidth(buf);
-}
-void VibeGraph::applyInstBus2PolarityWidth(juce::AudioBuffer<float>& buf)
-{
-    if (mInstBus2Node) mInstBus2Node->applyPolarityWidth(buf);
-}
-void VibeGraph::applyInstBus3PolarityWidth(juce::AudioBuffer<float>& buf)
-{
-    if (mInstBus3Node) mInstBus3Node->applyPolarityWidth(buf);
-}
-// J-4 (2026-05-03): polarity/width for the BaySickRustyDrums bus.
-void VibeGraph::applyRustyDrumsBusPolarityWidth(juce::AudioBuffer<float>& buf)
-{
-    if (mRustyDrumsBusNode) mRustyDrumsBusNode->applyPolarityWidth(buf);
-}
+// CL-301: the applyXxxBusPolarityWidth wrapper family is deleted -- polarity
+// + width run inside InstrChannelNode::processChainOnly for every bus.
 
 // ═══════════════════════════════════════════════════════════════════════════════
 //  5F-4b B1a: RoutingGraph
@@ -3370,7 +2485,7 @@ void VibeGraph::clearScRecvBuffers()
 // C.4 Phase 1 (2026-04-30): push the strip's SC array to all SC-capable DSP
 // modules on the strip (preEq + rack + postEq).  Caller is responsible for
 // invoking before that strip's processBlock; VibeGraph::processInsert /
-// processBlock / processEffectsBus do this internally for the strips they
+// processBlock / processBus do this internally for the strips they
 // own, and PluginProcessor's bus loop calls it for the Vox/Inst secondary
 // buses.  Address-only push so the call is cheap (4 pointer copies + maybe
 // 8 forwards into preEq/rack/postEq members).

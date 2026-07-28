@@ -49,7 +49,9 @@ public:
     static constexpr int kSlotTuner = 0;          // locked front slot
     static constexpr int kSlotEQ    = kNumSlots - 1;  // locked back slot (== 7)
 
-    BaySickPedalsProcessor();
+    // undoMgr: QA-ModelShell TS1 dormant pre-wire -- bound into apvts so
+    // QA-UndoCoverage can enable undo without a ctor sweep; unused until then.
+    explicit BaySickPedalsProcessor (juce::UndoManager* undoMgr = nullptr);
     ~BaySickPedalsProcessor() override;
 
     // ── AudioProcessor overrides ──────────────────────────────────────────────

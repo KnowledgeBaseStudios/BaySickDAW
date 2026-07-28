@@ -41,6 +41,8 @@
 // Creates a ParameterID with version 1
 #define VID(id) juce::ParameterID{(id), 1}
 
+class EngineRig;   // QA-ModelShell TS1: model-side engine owner (member at class end)
+
 class VibeSynthProcessor : public juce::AudioProcessor,
                            private juce::ValueTree::Listener   // §P4.3 perf: dirty-flag EQ sync
 {
@@ -159,7 +161,20 @@ public:
     bool isBusesLayoutSupported(const BusesLayout& layouts) const override;
 
     // ── Public accessors ──────────────────────────────────────────────────
+    // QA-ModelShell TS1 (2026-07-27): processor-owned UndoManager, DORMANT
+    // plumbing only.  Declared BEFORE apvts because apvts binds it at
+    // construction (member init order = declaration order); EngineRig's
+    // factory threads it into every engine APVTS the same way.  Nothing
+    // consumes it yet -- StandaloneEditor's UndoManager stays authoritative
+    // until QA-UndoCoverage flips undo semantics onto this one.
+    juce::UndoManager mUndoManager;
+
     juce::AudioProcessorValueTreeState apvts;
+
+    // QA-ModelShell TS1: the model-side owner of every dynamic tab's engine
+    // (Layers/Bass/Drums/Clips/Vox/Inst).  Pages are views and never
+    // construct engines.
+    EngineRig& engineRig() noexcept { return *mEngineRig; }
 
     BassSynth& getBassSynth() { return mBassSynth; }
     void       allNotesOff()  { mSynth.allNotesOff(1, false); }
@@ -471,8 +486,8 @@ public:
     std::atomic<float> mInstBusPeakDb       { -60.0f };
     std::atomic<float> mInstBusPeakDbL      { -60.0f };
     std::atomic<float> mInstBusPeakDbR      { -60.0f };
-    // C.1 (2026-04-30): FX Bus peak - written by VibeGraph::processEffectsBus
-    // each block (mirrors the EffectsBusNode internal atomics so MixerPage
+    // C.1 (2026-04-30): FX Bus peak - written by VibeGraph::processBus(kFxBus)
+    // each block (mirrors the FX node's internal atomics so MixerPage
     // can read alongside its peers without reaching into VibeGraph internals).
     std::atomic<float> mFxBusPeakDb         { -60.0f };
     std::atomic<float> mFxBusPeakDbL        { -60.0f };
@@ -1510,6 +1525,11 @@ private:
     // Batch 8 (2026-05-06): terminal MasterTask.  Always-on, registered
     // idempotently in prepareToPlay alongside the bus tasks.
     std::unique_ptr<MasterTask> mMasterRenderTask;
+
+    // QA-ModelShell TS1: declared LAST so it is destroyed FIRST -- the rig's
+    // teardown unregisters engines through the dispatcher + task arrays
+    // above, which must still be alive when that runs.
+    std::unique_ptr<EngineRig> mEngineRig;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(VibeSynthProcessor)
 };
