@@ -1,4 +1,5 @@
 #include "PatternColorPicker.h"
+#include "../AppPaths.h"
 #include "SharedUI.h"   // VC palette
 
 namespace PatternColorPicker
@@ -7,8 +8,7 @@ namespace
 {
     juce::File getSettingsFile()
     {
-        auto dir = juce::File::getSpecialLocation (juce::File::userDocumentsDirectory)
-                       .getChildFile ("BaySickDAW");
+        auto dir = AppPaths::appRoot();
         if (! dir.exists()) dir.createDirectory();
         return dir.getChildFile ("settings.xml");
     }

@@ -1,4 +1,5 @@
 #include "BassPage.h"
+#include "../AppPaths.h"
 #include "../BaySickBass/BaySickBassProcessor.h"
 #include "../BaySickBass/BaySickBassEditor.h"
 #include "../Harmless/HarmlessProcessor.h"
@@ -327,8 +328,7 @@ void BassPage::refreshPianoRollContextLabel()
 
 static juce::File bassEnginePresetsDir (const juce::String& engineName)
 {
-    return juce::File::getSpecialLocation (juce::File::userDocumentsDirectory)
-               .getChildFile ("BaySickDAW")
+    return AppPaths::appRoot()
                .getChildFile ("Presets")
                .getChildFile (engineName)
                .getChildFile ("My Presets");
@@ -339,8 +339,7 @@ static juce::File bassEnginePresetsDir (const juce::String& engineName)
 // Presets/<engineName>/ are factory bundles; "My Presets" is user-saved.
 static juce::File bassEngineRootPresetsDir (const juce::String& engineName)
 {
-    return juce::File::getSpecialLocation (juce::File::userDocumentsDirectory)
-               .getChildFile ("BaySickDAW")
+    return AppPaths::appRoot()
                .getChildFile ("Presets")
                .getChildFile (engineName);
 }

@@ -1,4 +1,5 @@
 #include "HarmlessEditor.h"
+#include "../AppPaths.h"
 #include "../Standalone/SharedUI.h"   // VKnobAutomation hooks
 
 // ── Layout constants ──────────────────────────────────────────────────────────
@@ -290,9 +291,9 @@ HarmlessEditor::HarmlessEditor (HarmlessProcessor& p)
     addAndMakeVisible (mPartBBtn);
     // S3 part_sel: A/B buttons act as a 2-way radio group writing to part_sel.
     // The previously-bound mPartSelAtt slider stays attached to APVTS and the
-    // buttons just push values to it (the slider is invisible by virtue of
-    // never being addAndMakeVisible'd in the new layout). Initial state pulls
-    // from APVTS via a syncFromApvts lambda invoked once after attachments.
+    // buttons just push values to it (the slider IS addAndMakeVisible'd but is
+    // never given bounds in the new layout, so it never draws). Initial state
+    // pulls from APVTS via a syncFromApvts lambda invoked once after attachments.
     mPartABtn.onClick = [this, &p]
     {
         if (auto* pp = dynamic_cast<juce::RangedAudioParameter*> (
@@ -1270,8 +1271,7 @@ void HarmlessEditor::resized()
 juce::File HarmlessEditor::presetsDir()
 {
     // P4b (2026-04-23): moved Roaming -> Documents per unified-folder layout.
-    return juce::File::getSpecialLocation (juce::File::userDocumentsDirectory)
-                      .getChildFile ("BaySickDAW/Presets/Harmless");
+    return AppPaths::appRoot().getChildFile ("Presets/Harmless");
 }
 
 // 2026-04-26: recursive XML-preset walker - folders become real cascading

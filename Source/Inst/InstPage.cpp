@@ -402,7 +402,9 @@ makeInstPresetConfig (VibeSynthProcessor& processor,
         if (auto* p = dynamic_cast<BaySickPedalsProcessor*> (pedalsProc))
             slot.engineApvts = &p->apvts;
         slot.engineLabel   = "Pedals";
-        slot.engineRootTag = "BaySickPedalsState";
+        // Blob root post-QA-Verify; the legacy BaySickPedalsState tag is the
+        // APVTS child, not the state root.
+        slot.engineRootTag = "BaySickPedalsRoot";
         // Pedals doesn't use a per-page-index APVTS prefix today, so no
         // prefix substitution on cross-page load.
         cfg.engineSlots.add (slot);

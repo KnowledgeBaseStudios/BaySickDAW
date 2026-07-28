@@ -825,3 +825,417 @@ load-bearing outcomes:
   entry is deferred to the G4-close ledger by Jeff's 2026-07-25 standing instruction — cite
   the deferral every time the batch is named); dependency-direction phrasing corrected
   (badger relies on nothing in mammoth; later batches consume badger's output).
+
+## 2026-07-27 — Tasks 8-12 — code-complete (batch code DONE; gates green per task)
+
+**Task 8 — central app-root resolver.** New `Source/AppPaths.h` (`AppPaths::appRoot()`), the
+single authority for `Documents\BaySickDAW`. ~40 hand-spelled root constructions across 25
+files converted (all three islands — EffectPresetIO / SampleLibrary / ProjectManager — now
+resolve through it internally; their public APIs unchanged). BONUS in the same sweep: four
+hand-spelled Core Library roots (StandaloneEditor default-kit x2 + restore fallback,
+ProjectManager shortcut target) now call the EXISTING `SampleLibrary::getCoreLibraryDir()`.
+Deliberately NOT converted: the two legacy Roaming fallbacks (migration source semantics),
+two bare-Documents sites (NAMIR permissions fallback, bundle-destination suggestion).
+
+**Task 9 — three corrections.** mPartSel comment now states the true mechanism (slider IS
+addAndMakeVisible'd, never given bounds). InstPage pedals `engineRootTag` ->
+"BaySickPedalsRoot" (post-QA-Verify blob root; tag is config-side-only for pedals — no kit
+callback — so old page presets unaffected). `kStateVersion` DECISION: kept write-only with a
+keeper comment (the stamp is the post-v1 migration hook; wiring a reader now = pre-v1
+migration logic, dropping it strips version info from exactly the files a migration would
+need; matches QA-Soundness Task 6's stance so the two plans agree).
+
+**Task 10 — template submenu + default-template consumer + removals.** File > New from
+Template submenu (New from Default Template with name suffix + missing-file grey /
+Premade Templates / My Templates; recursive walk; ids 900+ via mTemplateMenuFiles rebuilt
+per menu open; every pick -> loadTemplate's unified dirty gate). Items 102 + 109 gone;
+`doFileNewFromTemplate` (+ its ProjectBrowserWindow launch) and `showTemplateMenu` (+ dup
+kIdSaveAs) DELETED, zero refs verified. `ProjectManager::newProject` lost the dead
+folder-seed templatePath param (+ contract comment updated; the one juce::File() caller
+cleaned). Set Default Template's confirmation now names the real consumer (the old text
+claimed File > New would use it — false since QA-Ef #6). Stale "kit + 8 layers + 4 basses"
+wording fixed at both touched comments.
+
+**Task 11 — Rusty "Save Page Preset & Delete" (docket 16).** Dirty trio ported verbatim from
+ClipsPage (ApvtsDirtyListener + mPageDirty + mSuppressDirty + isPatchDirty). Attach point =
+`loadKit` (the single chokepoint every engine (re)creation runs through — loadProgram and
+project restore both funnel into it); detach at tearDownCurrentProgram top + dtor. Preset
+apply wrapped in suppress + resets clean. `savePlayerPresetAs` gained a success-only
+completion hook; the editor's delete flow gained the 3-button branch (verbatim label, honest
+description: writes a PLAYER PRESET — program + every knob — not a full page preset; save
+dialog Cancel aborts the chained delete too); clean-page 2-button warning byte-identical in
+behavior. Self-caught: one non-ASCII character corrupted into a comment mid-edit, fixed in
+the same turn.
+
+**Task 12 — bundle save-first (docket 17=b).** `doFileSaveAs` gained an optional
+success-only `onSaved` completion (threaded through the invalid-name retry; cancel/failure
+never fire). `doExportProjectBundle`'s unsaved bail replaced by the save flow continuing
+into the bundle via SafePointer re-entry.
+
+**Close artifacts.** Master Test Plan §B.30 authored — 24 scenarios (PS-1..PS-24), blocks
+`dadb958a` + `54177488` + final commit (hash backfilled at close); scope note records the
+Task 7 remainder's re-route to QA-ModelShell TS3 and that PS-21/22 cover only the badger
+scope. PS-24 covers the Jeff-reported Event Editor fixes (last-point prompt, one-undo-step
+block removal, no Delete button, Builder redraw).
+
+## Held Work Log entry (apply at section pass)
+
+> Drafted at code-complete via `/draft-doc batch-close`; NOT yet applied to `Implemented Work Log.md`.
+> Applies with the §5 STATUS flip when §B.30 passes the campaign walk (R2). Backfill the final
+> commit hash (here and in the §B.30 `blocks:` line) at commit; stamp the full `HH:MM PT` at apply.
+
+### 2026-07-27 <HH:MM> PT — QA-ProjectSave — 12 tasks across 3 commits (grew mid-batch from 7 via the second docket + the G4 findings sweep; four planned seams re-ruled to three): Layers/Bass/Drums open EMPTY and delete to zero, with empty bus strips hidden across all six type-driven buses on a MEMBERSHIP test that shrank to three lines after Jeff twice corrected my over-built route-guard; templates v2 replace the never-loadable v1-USER schema with the project shape (`<Processor>` + `<UIState>`), loading with New Project semantics behind a scoped teardown + unified dirty gate, dual-format v1-factory preserved; ONE SampleLibrary `library:`/`mysamples:` resolver ends Core Library duplication into every project and makes kit/clip/BaySickPlayer paths account-independent (VibePlayer's `bsp_loadPath` was absolute at 3 sites inside the most-used engine's blob); template save adopts volatile samples AND folders into My Samples through a decode -> rewrite -> re-encode blob round-trip; `ProjectBundler` walks engine-held refs via decoded engine blobs, stops copying Core Library in either scope, and shows a pre-write size estimate; the automation registry became self-cleaning (ComponentListener reverse index + id-owner guard; `eraseAutomationEntriesWithPrefix` and its 17 prefix literals deleted) with dead-lane diagnostics, and FX-rack automation moved OFF the widget onto the DSP through the new `EffectParamMap` keyed `(type, variant)` — Compressor x4 variants + per-slot `output_vol` against the rack, runtime-PROVEN by Jeff's differential test after three failed attempts, each root-caused (ID-stealing revocation / null-owner claim never cleared / type-only map key); Task 7's remainder re-routed to QA-ModelShell TS3 — the batch this batch's own applicator sweep CREATED when the census escalated through export-silent-instruments into the engine-ownership-inversion ruling and the full tiers pull-in; central `AppPaths` app-root resolver (~40 sites / 25 files); File > New from Template submenu with the default-template pointer finally consumed; Rusty joins the 3-button "Save Page Preset & Delete" pattern; bundle save-first prompt; plus three Jeff-reported fixes (off-screen window clamp, ribbon zero-instance labels, the Event Editor delete/prompt/redraw trio)
+
+**Bucket:** System Pages, Cross-cutting Infrastructure, Mixer / Routing, UI / L&F / Theming, Effects, Players. Batch `deep-packing-badger`. `blocks:` `dadb958a` + `54177488` + `<final commit hash>`.
+*(Bucket set is a HELD Jeff call — §5.5 lists this batch as System Pages + Cross-cutting Infrastructure
+only. PENDING ledger item 6 already flags the docket-18 additions (Mixer / Routing, UI / L&F /
+Theming); the re-plan's diffs additionally touch Players (VibePlayer writers, Rusty page + processor,
+Harmless comment) and Effects (`EffectParamMap`, EffectsPage, EffectEditorPanels, pedals tags).
+Confirm all four additions at G4 close, not unilaterally.)*
+
+#### Done
+
+- **Task 1 — L/B/D empty by default + delete to zero + empty buses hidden (docket 18, inserted at
+  batch open).** `addDefaultDynamicTabs()` + `addDefaultDrumTab()` deleted (177 lines) with all
+  three callers — editor construction, `doFileNew`, and the `loadKitImpl` kit-recovery respawn that
+  would have silently undone a delete-to-zero. `closeTab`'s `zeroAllowed` opened to L/B/D; all 15
+  `isLastOfType` guard sites removed and the helper + `closeTab`'s `force` param retired with them.
+  One parameterised `EngineEmptyState` (not three copies of the Vox/Inst shape) + `hideAllEmptyStates()`;
+  F8/F9/F10 and View > Layers/Bass/Drums — silent no-ops at zero tabs — now land on the empty states.
+- **Task 1 — the bus-visibility test SHRANK to three lines after Jeff's two-round correction.** My
+  extra "does anything route here" guard was unreachable: sends only land on aux strips, and
+  re-pointing a main-out RE-BUCKETS the strip into the target bus's group — so for a bus "something
+  routes here" and "has members" are the SAME condition. `collectLiveRouteTargets` /
+  `liveRouteTargets()` / `isBusVisible()` all deleted; the test is `if (! hasMembers &&
+  ! isAlwaysVisibleBus)` off data the layout already had. My first-cut perf defect (order 10^5
+  string allocations per layout pass) existed only inside that machinery and died with it. KEPT,
+  independently justified: `isAlwaysVisibleBus` (flag-gated buses must appear before anything routes
+  in) and the `sendSuffix()` `static const` hoist (speeds `sweepSendsTargeting`). Applied to
+  Clips/Vox/Inst too, which had the identical dead-bus condition. Four >=1-of-a-type surfaces swept
+  and already safe.
+- **Task 2 — template writer v2 (docket 15=B).** `serializeUIState` split into `serializeTabsInto`
+  + `serializeStripNamesAndOrders` under a new `serializeStructuralUIState` (project save
+  behaviour-identical); `serializeProject`'s `<Processor>` block extracted to
+  `VibeSynthProcessor::writeProcessorState` so `saveTemplateAs` emits the IDENTICAL block — every
+  mixer fader/pan/width/mute/solo/polarity/sends, each insert's rack, each post-rack EQ.
+  `<BaySickTemplate version="2">` wraps `<Processor>` + `<UIState>`; deliberately NOT a
+  `serializeUIState` call (activeTabId, `<Arrangement>`, `<Metronome>`, `<SongLoop>` etc. are
+  SESSION properties, not skeleton). `gen_factory_presets.py` checked: still writes v1-factory, so
+  the dual-format branch serves a real case with no generator edit.
+- **Task 3 (+ docket 19 amendment) — loader v2 with New Project semantics.** Dirty gate lives in
+  `loadTemplate` (not the menu entries, so Task 10's submenu inherits it) — closes the verified
+  silent-discard bypass, the ONLY File-level teardown with no save prompt. v2 restores through the
+  PROJECT path (`applyProcessorState` -> `deserializeUIState` -> `restoreAudioStripsFromArrangement`
+  — no second restore implementation to drift); `applyProcessorState` + `reportMissingFilesIfAny`
+  extracted and shared, so template load reports missing NAM captures / sfizz kits / IRs exactly as
+  project load does. `TabTeardownScope` keeps the v1-factory branch from destroying
+  Clips/Vox/Inst/Rusty tabs it cannot put back; three traps handled (Rusty carries
+  `TabType::Drums` — `dynamic_cast`-excluded; scoped path must NOT `clearDynamicStrips()`; only the
+  three L/B/D name counters rewind). Self-caught ordering defect fixed pre-close: an early
+  `applyPendingRackStates()` would have consumed the rack stash before the Audio InsertNodes
+  existed — clip racks restoring EMPTY, invisible to any build gate. Docket 19 then flipped the
+  shipped merge reading to New Project semantics (`closeAllDynamicTabs` -> `clearDynamicStrips` ->
+  `resetToBlankState`), which also dissolved the Clips path-resolution bug found in this task.
+- **Task 4 — sample-retention hybrid + resolvers.** `SampleLibrary::makeStableRef` /
+  `resolveStableRef` / `isStableRef` are the SINGLE implementation of the `library:` / `mysamples:`
+  convention (format matched to the pre-existing DrumPage writer, so pre-batch refs still load).
+  `importSample` is source-aware — THE fix for Core Library samples being duplicated into every
+  project. `resolveProjectFile` tests stable refs BEFORE the absolute-path test (load-bearing
+  ordering). A missing clip feeds `MissingFileReport` instead of restoring as a silent empty player.
+  Two plan bullets deliberately NOT implemented, with reasons recorded (ClipsPage's `clipRef` is
+  already account-independent; `onResolveStoredPath` already delegates).
+- **Task 5 — `library:` normalization + template sample adoption (dockets 23/24/25).** Normalized:
+  Guitars + Basses `kitPath`, Clips `clipPath`, Rusty `KitPath`, and **VibePlayer's `bsp_loadPath`
+  (3 writers / 2 readers)** — the significant one, correcting my earlier claim that Layer/Bass
+  patches were safe because the sample ref "rides inside the engine blob": it rode as an ABSOLUTE
+  path, embedding the Windows username in every patch using the most-used engine in the app.
+  `refForPersist` / `resolvePersistedRef` added so no call site chooses; readers still accept
+  absolutes (no migration, 8b). `adoptIntoUserSamples` copies volatile files into My Samples on
+  TEMPLATE save only, dedupes on size+modtime, auto-suffixes. The BaySickPlayer blob gap CLOSED
+  before Commit 1 on Jeff's call ("do it before this one"): `adoptTemplateSampleRefs` does a
+  decode -> rewrite -> re-encode round-trip on `engineData`, rewriting only when something was
+  adopted (untouched templates keep byte-identical blobs). FOLDERS are adopted, not just files
+  (`bsp_loadPath` can be a `loadFolder` drum pack); bare `.sfz` deliberately NOT adopted (a pointer
+  into a sample tree — docket 24's reasoning applied structurally; one-line change if overruled).
+- **Task 6 — bundler engine-reference walk + export semantics (dockets 21/22).** `enumerate` gained
+  `tabsXml` and walks four layers: plain tab attributes, the Inst chain XML (NAM captures + user
+  IRs), and the base64 `engineData` / `sfizzEngineData` blobs — the only place BaySickPlayer sample
+  paths are reachable. Path attributes kept EXPLICIT (no "looks like a path" heuristic — false
+  Missing reports would train the user to dismiss the warning). Docket 22=b: Core Library copied in
+  NEITHER scope, dropdown labels rewritten (the first mode got NARROWER as well); `estimateCopyBytes`
+  + a pre-write confirm dialog. The `ProjectBundler.h` caveat is gone — the gap is closed.
+- **Task 7 (badger scope) — step 1, self-cleaning registry.** Register hooks widened to carry the
+  owning `Component*`; `StandaloneEditor` derives `ComponentListener` with a `Component* ->
+  {paramIds}` reverse index; `componentBeingDeleted` (fires FIRST in `~Component`, verified at
+  `juce_Component.cpp:275`) drops entries. `eraseAutomationEntriesWithPrefix` + all 17 hand-written
+  prefix literals DELETED; the 29 helper call sites unchanged — the point of the reverse-index shape.
+  Teardown + project-boundary hazards handled at write time (`mTearingDownAutomation`; listeners
+  deregistered BEFORE `resetProjectState` clears the maps).
+- **Task 7 — step 2, dead-lane diagnostics.** Dispatch gained an else branch (a missed lookup and a
+  successful apply were previously the same code path); warns once per paramId per session.
+  `onIsParamStale` was widened to cover registry lanes, then REVERTED to the APVTS-only test after
+  Jeff reported the Event Editor tagging live rack lanes "deleted" — while applicators are keyed to
+  PANELS, "not registered" is an ordinary viewing state, not a dead lane. Re-widen after model-side
+  registration (mammoth TS3). Lanes are deliberately never auto-deleted (Ardour/Tracktion precedent:
+  automation data outlives the live control and re-binds).
+- **Task 7 — step 0 CONFIRMED + three same-day defects fixed (all mine).** Jeff's Debug run: two of
+  three "crash" stacks were the step-2 `jassertfalse` catching the FX-rack channel-switch hole live;
+  ear-confirmed ("while looking at a different effects rack page it doesn't play the automation").
+  Fixed same day: (a) shutdown AV — the teardown guard left `mAutomationOwners` holding dead
+  pointers that `resetProjectState` (running INSIDE the dtor) dereferenced; (b) ID STEALING — a
+  rebuilt panel registers before `setEditor` destroys the old one, whose id list still named those
+  ids, so erasure revoked a LIVE registration; new `mAutomationIdOwner` (id -> current owner) means
+  a component only erases ids it still owns; (c) the false "deleted" tag (the `onIsParamStale`
+  revert above). The dispatch `jassertfalse` was then removed — until step 3 it fires on the
+  ordinary act of switching FX channels; the `DBG` log stays.
+- **Task 7 — step 3 architecture: the mapping math got ONE home.** Jeff ruled Option A (target the
+  DSP) with a refinement better than my proposal — "We cannot have that math existing in two
+  different places" — so `Source/DSP/EffectParamMap.h/.cpp` is now the single home for what a rack
+  parameter IS (suffix, natural range, apply, read — BOTH directions, since panels also duplicated
+  the reverse map for startup knob sync). `applyNorm` converts 0..1 through the SAME range the
+  slider uses. `EffectsPage::resolveChannelDsp` extracted (I nearly duplicated the 106-line channel
+  switch — this task's own drift problem one layer up). `registerSlotAutomation` captures ONLY
+  `(channelId, slotUuid, type, suffix)` — no panel, no knob — resolving rack -> slot -> DSP at
+  apply time: survives panel destruction (the entire bug), registered with a NULL owner (tied to
+  the RACK, not a component), slot lookup by UUID never index (REAPER's positional-key failure mode
+  per the architecture research).
+- **Task 7 — three failed attempts, each root-caused, then the architecture PROVEN at runtime.**
+  (1) The ID-stealing revocation (defect (b) above). (2) Null-owner registrations never cleared the
+  id-owner claim: the ownership guard then did exactly what it was told and revoked the DSP
+  applicator moments after it installed — which also explained "quieter" (one apply, then stranded).
+  Fix: a null-owner registration explicitly erases the id's owner claim — "register the closure" and
+  "record who owns this id" had to be ONE operation. (3) `EffectParamMap` was keyed on `EffectType`
+  alone, and that is not a unique key: `EffectType::Compressor` dispatches to FOUR panels on
+  `CompressorDSP::mType`, whose variants reuse knob labels with different semantics (FET
+  attack/release are switch POSITIONS 0-7; Modern's are milliseconds; Opto gain is a 0-100 face
+  plate) — so a switch position was handed to a millisecond setter ("still a little quieter") and
+  Modern's suffixes had no table at all ("still breaks"). Fix (Jeff: "yes key it on type and
+  variant, redo all four compressor modes"): every entry point takes `(EffectType, int variant)`,
+  `variantOf` reads the variant from the DSP itself; all four tables written from their real panels
+  (Modern 10 / FET 4 / Opto 2 / CS 4); FET's `nearestPos` now excludes index 0 deliberately (0 is
+  OFF, not a time — a recorded behaviour CHOICE). **Jeff's differential test cracked it**: the
+  compressor's own Gain knob SURVIVED the channel swap (proving `registerSlotAutomation`, lazy
+  rack-by-channel-id, slot-by-UUID, variant keying, and the lifetime fixes all work) while the
+  outbound volume knob still died — and it could NEVER have worked via `EffectParamMap`, because it
+  is not a DSP parameter: it is `EffectRack::setSlotOutputGain`, rack state on `EditorPanelBase`.
+  Now registered against the RACK per-slot through the same shared `resolveSlot` — covering all 20+
+  panels at once, including pedal-style panels, and closing the last CATEGORY of automatable
+  control. Jeff's confirm: "the vol knob does work now with the change."
+- **Task 7 — Jeff-reported Event Editor trio.** Delete button REMOVED (it reset the lane to a
+  midpoint — its label described neither thing it did); deleting the last remaining point now
+  PROMPTS to remove the whole block via ONE implementation both routes call
+  (`promptDeleteWholeAutomation` + the Event Editor's `onDeleteWholeAutomationRequested`), Yes = one
+  undoable edit; Builder-grid redraw fixed at the `EEAutomationGrid::onChanged` chokepoint (new
+  `onLaneEdited` repaints the arrangement block) so future edit paths inherit it.
+- **Off-screen window on launch (Jeff-reported) — FIXED, pre-existing.** The `<WindowState>` restore
+  did a bare `setBounds` with no display check; fix intersects with
+  `Displays::getTotalBounds(true)` and requires a REAL >=200x100 overlap, else `setFullScreen(true)`.
+  Honest causation note recorded: the missing clamp is not mine, but my step-1 shutdown crash
+  plausibly preserved the stale multi-monitor coordinates that exposed it.
+- **Ribbon zero-instance labels (Jeff, screenshot) — FIXED.** `getSlotDisplayName` derived labels
+  from the ACTIVE tab; Clips/Vox/Inst had a zero-instance fallback, and docket 18 made three more
+  types zero-capable without adding theirs. All six now have it.
+- **Task 8 — central app-root resolver.** New `Source/AppPaths.h` (`AppPaths::appRoot()`) is the
+  single authority for `Documents\BaySickDAW`; ~40 hand-spelled roots across 25 files converted;
+  the three islands (EffectPresetIO / SampleLibrary / ProjectManager) resolve through it internally
+  with public APIs unchanged. Bonus: four hand-spelled Core Library roots now call the existing
+  `SampleLibrary::getCoreLibraryDir()`. Deliberately NOT converted: two legacy Roaming fallbacks
+  (migration-source semantics) + two bare-Documents sites.
+- **Task 9 — three corrections.** `mPartSel` comment states the true mechanism (the slider IS
+  made visible, it just never gets bounds); InstPage pedals `engineRootTag` -> "BaySickPedalsRoot"
+  (post-QA-Verify blob root; config-side-only, old page presets unaffected); `kStateVersion` KEPT
+  write-only with a keeper comment — the stamp is the post-v1 migration hook, wiring a reader now
+  would be pre-v1 migration logic, and dropping it strips version info from exactly the files a
+  migration would need (matches QA-Soundness Task 6's stance so the two plans agree).
+- **Task 10 — template submenu + default-template consumer + removals.** File > New from Template
+  submenu: New from Default Template (name suffix; greyed when unset or file missing) / Premade
+  Templates / My Templates, recursive walks, ids 900+ rebuilt per menu open, every pick through
+  `loadTemplate`'s unified dirty gate — the default-template pointer finally has a consumer. Items
+  102 + 109 gone; `doFileNewFromTemplate` (+ its ProjectBrowserWindow launch) and `showTemplateMenu`
+  (+ dup `kIdSaveAs`) DELETED, zero refs verified; `ProjectManager::newProject` lost the dead
+  folder-seed param; Set Default Template's confirmation names the real consumer; stale
+  "kit + 8 layers + 4 basses" wording fixed at both touched comments.
+- **Task 11 — Rusty "Save Page Preset & Delete" (docket 16).** Dirty trio ported verbatim from
+  ClipsPage; attach point = `loadKit` (the single chokepoint every engine (re)creation funnels
+  through), detach at `tearDownCurrentProgram` top + dtor; preset apply wrapped in suppress + resets
+  clean. `savePlayerPresetAs` gained a success-only completion hook; the delete flow gained the
+  3-button branch (verbatim label; honest description — it writes a PLAYER PRESET, program + every
+  knob, not a full page preset; save-dialog Cancel aborts the chained delete); clean-page 2-button
+  path byte-identical. Self-caught: one non-ASCII character corrupted into a comment mid-edit,
+  fixed same turn.
+- **Task 12 — bundle save-first prompt (docket 17=b).** `doFileSaveAs` gained an optional
+  success-only `onSaved` continuation (threaded through the invalid-name retry; cancel/failure never
+  fire); `doExportProjectBundle`'s unsaved bail replaced by the save flow continuing into the bundle
+  via SafePointer re-entry. NO new menu item — QA-Export's item 122 keeps its name.
+- **Master Test Plan §B.30 authored — 24 scenarios (PS-1..PS-24)**, blocks `dadb958a` +
+  `54177488` + the final commit; scope note records the Task 7 re-route (PS-21/22 cover only the
+  badger scope); PS-24 covers the Event Editor trio.
+- **Main Plan untouched.** All §5/§5.5/§9 items HELD in this file's PENDING ledger (6 items) per
+  Jeff's 2026-07-25 standing instruction — applied in ONE pass at G4 close.
+
+#### Spec calls locked mid-batch (full tables in the plan files)
+
+- **Batch-open docket (2026-07-26, dockets 15-18):** 15=B templates carry a full `<Processor>`
+  snapshot (the plan's engineData claim was FALSE); 16 Rusty's prompt is "Save Page Preset & Delete"
+  chaining the J-11 Player Preset (supersedes docket 11=A's label — its "kit" is a read-only factory
+  `.sfz`); 17=b no new "Pack Project" item (QA-Export already shipped it; only the save-first prompt
+  is added); 18 L/B/D empty + delete-to-zero + empty-bus hiding, inserted as Task 1 (Jeff: the trio
+  is "bloat for a user that may not want those things"; the empty buses are a defect in scope, and
+  ordering is forced — Task 2's templates would otherwise bake in three phantom tabs + strips).
+- **Second docket (2026-07-26, dockets 19-28; batch re-planned 7 -> 12 tasks):** 19 template load =
+  New Project semantics; 20 templates carry no grid/pattern content (confirmed by construction) and
+  a Clips tab's sample IS part of the rig; 21=a bundler engine-ref gap closed IN THIS BATCH; 22=b
+  Core Library never copied + size estimate (Jeff's addition); 23=b template copies land in My
+  Samples; 24=c copy scope = Clips samples + NAM captures + IRs + BaySickPlayer paths, sfizz kits
+  excluded; 25=c `library:` normalization everywhere, presets included; 26=a resolver task moved
+  ahead of the menu work; 27=a the G4 findings sweep runs NOW; 28=a hidden-bus sidechain edge left.
+  Sweep 1-5 all fix in-batch (Jeff: "this group is the end of the code and we fix what we find
+  period"); automation = option 2, all three steps (backed by the 2026-07-26 `/architecture` pass:
+  NO surveyed system keeps a UI-keyed applicator map); commits = 4 seams (deliberate deviation from
+  one-commit-per-batch, Jeff's blast-radius call).
+- **2026-07-27 rulings (produced by this batch's sweep escalation; locked in
+  `grand-inverting-mammoth.md`):** engine-ownership inversion is a V1 REQUIREMENT ("engines are the
+  drivers and the pages just hold them"); export = the model rendering ITSELF offline (FL
+  same-instance shape; no replica processor); **destroy-on-close** windows ("I want the cpu benefit
+  so definitely destroy on close") — which forces automation registration fully model-side; shell
+  calls Order=1b (inversion first) / Shell=2b (FL-style contained workspace, real native child
+  windows) / Rollout=3a (all specced windows in the one rebuild) / Title bars=4a (custom-drawn,
+  merged menu row) / Buttons=5a (close + resize only); required-tabs "+" tab bar incl. Piano Roll
+  (explicitly RETIRES Task 1's empty-state pages + 0-badge slots — option-removal paper trail in the
+  mammoth plan); scope = the ENTIRE Future State tiers list incl. full VST3 hosting + BLU-480 rack
+  window; tempo lane FOLLOWED in export + full re-prepare + FL-style progress-bar UX; CL-102 struck
+  (already shipped as PagePresetIO — verified in source after Jeff challenged my wrong claim);
+  conflict-review calls 1=b (the G4 boundary R3 review + smoke covers yak/stoat/heron; mammoth
+  verifies via per-set commits + its TS8 smoke) / 2=b (mammoth TS1 pre-wires the processor-owned
+  UndoManager DORMANT; yak Task 2 shrinks to verification) / 3=a (§B reconciliation runs inside
+  TS8) / 4=a (dated conflict notes applied to yak/stoat/heron); commit seams re-ruled — Commit 2 =
+  the Task 7 arc as it stood, ONE final commit for Tasks 8-12 + close.
+
+#### Found along the way
+
+1. **Three approved-plan premises were WRONG at batch open**, caught by reading source before code:
+   the engineData/mixer-state claim (docket 15), Rusty's "kit" save concept (docket 16), and the
+   duplicate Pack item (docket 17).
+2. **Docket 18 (Jeff-raised): the hard-coded L/B/D trio + dead empty-bus strips are an in-scope
+   defect**, not a note — with 15=B they would have been baked into every template written.
+3. **For a bus, "something routes here" == "has members"** (Jeff's two-round correction) — my extra
+   route-target guard machinery protected an unreachable case, and my first-cut perf defect lived
+   only inside it.
+4. **The FX-rack channel-switch automation hole is REAL**: desk-verified from the `/architecture`
+   pass's claims, then confirmed live by Jeff's Debug test (the new step-2 diagnostic caught it) and
+   by ear.
+5. **VibePlayer's `bsp_loadPath` was an absolute path at 3 write sites** — correcting my earlier
+   reassurance that Layer/Bass patch sample refs were safe inside the blob.
+6. **The Core Library duplication Jeff suspected is real and comes from `importSample`** (copy-always),
+   not from the `library:` writer gap (which stores paths and copies nothing).
+7. **Off-screen-window restore defect (pre-existing)**: saved multi-monitor coordinates were never
+   re-validated against attached displays.
+8. **Ribbon slots went unlabelled at zero instances** — the Task 1 sweep checked FUNCTIONAL >=1
+   assumptions and never considered PRESENTATIONAL ones; a screenshot caught what a grep never would.
+9. **The applicator sweep census escalated into the batch-defining findings**: 19 wrapper call sites
+   across 9 files + 7 direct hooks (the resume prompt's "13 across 6" undercounted); only the FX
+   rack had the die-with-UI hole (everything else safe UNDER TODAY'S immortal-pages shell); two
+   registration-timing gaps (view-gated rack wiring; lazily-materialized params missing the boundary
+   seed); offline export ignores every non-main-APVTS lane — and beneath it the render processor has
+   NO instrument engines or instrument InsertNodes at all (Jeff ear-confirmed: vox/inst exports
+   render NOTHING); export destination wrong (userMusicDirectory, not `<project>\Exports\`);
+   metronome safe today / must-gate under live-graph export.
+10. **The step-3 rollout is not "12 effect types"** — types x character modes is realistically 20+
+    distinct panel/mapping sets (Compressor alone is four).
+11. **CL-102 was already shipped as PagePresetIO** — verified in source after Jeff challenged my
+    wrong claim that it was outstanding.
+12. **Hidden-bus sidechain edge (cosmetic, pre-existing shape)**: an empty bus a compressor
+    sidechains FROM hides with its cable endpoint; audio unaffected (an empty bus is silent).
+13. **Two standing process corrections from Jeff**: never offer deferral as an option for my own
+    mistakes ("You fuck up, you fucking fix it"), and never offer "don't surface it" on a findings
+    sweep — every finding's disposition is his call. Plus three smaller ones on 2026-07-27
+    (the "undoable" wording clarification; citing QA-Soundness's deferred §5 entry whenever the
+    batch is named; dependency-direction phrasing — badger relies on nothing in mammoth).
+14. **Two build cycles lost to shell-layer text handling** (a scripted pointer->reference fix
+    missing a hand-written function; a heredoc eating a backslash).
+
+#### What was done about each finding
+
+- **1 — corrected via dockets 15=B/16/17=b before any code**; the §5 wording amendments ride the
+  PENDING ledger (items 1-4) to G4 close.
+- **2 — inserted as Task 1 and shipped** (Jeff's scope ruling verbatim in the running notes).
+- **3 — machinery deleted, test is three lines**; verification scenario rewritten to check
+  membership-not-count (§B.30 PS-4), which is exactly what a naive implementation gets wrong.
+- **4 — Task 7 step 3 built and runtime-proven** (differential test + vol-knob confirm); badger
+  scope CLOSED; the remainder (all other effect-type tables, pedals conversion, Reverb freeze row,
+  wire-at-load / wire-at-creation) re-routed to **QA-ModelShell TS3** with the plan annotated.
+- **5 — normalized in Task 5** via `refForPersist` at all three writers / both readers.
+- **6 — fixed in Task 4** (source-aware `importSample`).
+- **7 — fixed in-batch** (display-bounds clamp), pre-existing or not, per the fix-what-we-find
+  ruling; immediate settings.xml workaround given so Jeff could keep testing.
+- **8 — fixed in-batch**: all six types now have the zero-instance fallback.
+- **9 — ESCALATED into a new batch**: QA-ModelShell (`grand-inverting-mammoth.md`, 8 task sets =
+  Jeff's approved groups, per-set commits, ONE batch smoke at TS8) planned, approved 2026-07-27, and
+  slotted DIRECTLY after this batch (run order badger -> mammoth -> yak -> stoat -> heron); the
+  registration-timing gaps dissolve under model-side registration; conflict review of
+  yak/stoat/heron ran with dated notes applied to all three.
+- **10 — surfaced to Jeff before continuing**; the remaining tables ride mammoth TS3 rather than
+  being rolled out on what was then an unverified foundation.
+- **11 — struck from the tiers list**; the Future State stale-mark lands in mammoth TS8.
+- **12 — left per docket 28=a**, flagged for the campaign walk rather than pre-emptively coded around.
+- **13 — adopted as standing corrections**, recorded verbatim in the running notes.
+- **14 — standing correction for the rest of the batch: source edits via Write/Edit, never shell
+  heredocs** — held for the remainder.
+
+#### Group review (R3)
+
+- **Re-scoped 2026-07-27 (conflict-review call 1=b): the G4 boundary R3 review + smoke covers
+  yak / stoat / heron; QA-ModelShell verifies via its per-set commits + TS8 smoke.** Where that
+  leaves this batch's group-review coverage is a G4-close confirmation; its functional verification
+  is the §B.30 campaign pass (R2) either way.
+
+#### Diagnostic Instrumentation Catalog
+
+- **Added + REMOVED in-batch:** the step-2 dispatch `jassertfalse`. It earned its keep by catching
+  the FX-rack hole on its first test, then came out the same day — until step 3 removed the
+  false-positive source it fired on the ordinary act of switching FX channels.
+- **Added + RETAINED (deliberate, permanent):** the once-per-paramId-per-session `DBG` dead-lane
+  warn (`mReportedDeadLanes`) in the automation dispatch. A product Debug diagnostic, not a temp
+  trace — nothing to strip.
+- No other instrumentation added or removed.
+
+#### Carry-forward contradictions
+
+- **Task 1's empty-state presentation is ALREADY scheduled for retirement** — the mammoth tab-bar
+  ruling (2026-07-27) replaces the always-visible 0-badge slots + empty-state pages with a "+" tab
+  bar (explicit reversal, paper-trailed in the mammoth plan). The delete-to-zero model, the deleted
+  seeding paths, and membership-driven bus hiding all SURVIVE; only the presentation changes at TS4.
+  Do not "fix" the empty states back in the interim.
+- **The UI-keyed applicator map is now transitional.** The census verified every non-rack
+  registration safe ONLY under today's immortal-pages shell; destroy-on-close makes widget-scoped
+  registration a guaranteed defect. Endgame (mammoth): ALL registration model-side. Never add a new
+  widget-keyed registration; `registerSlotAutomation`'s null-owner + id-owner-claim-erase must stay
+  ONE operation (the lesson that bit twice).
+- **Notes to carry:** (1) `writeProcessorState` / `applyProcessorState` are THE shared
+  project+template serializers — never fork a second restore path; (2) `makeStableRef` /
+  `refForPersist` / `resolvePersistedRef` are the single path-ref implementation (readers still
+  accept absolutes; no pre-v1 migration); (3) `EffectParamMap` is the ONE home for rack-param
+  mapping math — panels call `applyNatural` / `read`, never inline copies, and every entry point is
+  keyed `(type, variant)`; (4) `ProjectBundler::enumerate` is the single four-layer reference
+  walker; (5) re-widen `onIsParamStale` only once registration outlives the rack (post-mammoth-TS3).
+
+#### Commit(s)
+
+`dadb958a` (Tasks 1-6 — the data layer: L/B/D empty + templates v2 + resolvers + normalization +
+adoption + bundler walk; 2026-07-26) · `54177488` (Task 7 badger scope — registry + diagnostics +
+`EffectParamMap` Compressor x4 + rack `output_vol`, off-screen clamp, ribbon labels, Event Editor
+trio, applicator census, QA-ModelShell plan/approval/slotting + conflict notes; 2026-07-27) ·
+`<final commit hash>` (Tasks 8-12 + §B.30 + this held entry + close docs). Three seams are Jeff's
+deliberate deviation from one-commit-per-batch (2026-07-26, originally four; Commits 3+4 merged by
+his 2026-07-27 re-rule) — twelve tasks spanning project save/load, the bundler, the automation
+registry and the effects audio path is too much for one rollback point. Build gates green in BOTH
+configs at every task; the only failures were exe-lock `LNK1104`s while Jeff had the app open. The
+step-3 architecture + rack `output_vol` are the ONLY parts of this batch runtime-verified (Jeff's
+differential test, 2026-07-26/27); everything else defers to the R2 campaign pass against §B.30.
+
+#### Next action
+
+- Proceed to **QA-ModelShell** ([`grand-inverting-mammoth.md`](../Batch%20Plans/grand-inverting-mammoth.md)),
+  slotted directly after this batch (G4 run order: badger -> mammoth -> yak -> stoat -> heron).
+  PENDING Main Plan ledger items (6, incl. the docket-18 §5 scope bullet + §9 Forks entry + the
+  bucket-set additions) stay deferred to G4 close.

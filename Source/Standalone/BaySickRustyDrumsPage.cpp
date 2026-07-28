@@ -1,4 +1,5 @@
 #include "BaySickRustyDrumsPage.h"
+#include "../AppPaths.h"
 #include "../BaySickRustyDrums/BaySickRustyDrumsProcessor.h"
 #include "../BaySickRustyDrums/BaySickRustyDrumsKitGraphic.h"
 #include "AriaControlPanel.h"   // K-5 (2026-05-05): moved to Source/Standalone/
@@ -64,6 +65,11 @@ juce::String BaySickRustyDrumsPage::getEngineType() const
 BaySickRustyDrumsPage::BaySickRustyDrumsPage (VibeSynthProcessor& p)
     : mProcessor (p)
 {
+    // QA-ProjectSave Task 11: wire dirty-listener pointers (the listener
+    // attaches to the engine's apvts.state in loadKit, after the engine exists).
+    mDirtyListener.dirtyFlag = &mPageDirty;
+    mDirtyListener.suppress  = &mSuppressDirty;
+
     // Smoke #13 fix: the combo + preset button MUST exist before
     // buildPlayerTab hosts them on the panel title bar -- the old order left
     // both null at hosting time, so the guards skipped and the Load Player
@@ -85,7 +91,24 @@ BaySickRustyDrumsPage::BaySickRustyDrumsPage (VibeSynthProcessor& p)
     startTimerHz (10);
 }
 
-BaySickRustyDrumsPage::~BaySickRustyDrumsPage() = default;
+BaySickRustyDrumsPage::~BaySickRustyDrumsPage()
+{
+    // QA-ProjectSave Task 11: drop the listener before the engine can go away.
+    detachDirtyListener();
+}
+
+void BaySickRustyDrumsPage::attachDirtyListener()
+{
+    detachDirtyListener();
+    if (auto* engine = mProcessor.getBaySickRustyDrums())
+        engine->apvts.state.addListener (&mDirtyListener);
+}
+
+void BaySickRustyDrumsPage::detachDirtyListener()
+{
+    if (auto* engine = mProcessor.getBaySickRustyDrums())
+        engine->apvts.state.removeListener (&mDirtyListener);
+}
 
 void BaySickRustyDrumsPage::paint (juce::Graphics& g)
 {
@@ -212,6 +235,11 @@ bool BaySickRustyDrumsPage::loadKit (const juce::File& sfzPath)
         return false;
     if (mKitGraphic) mKitGraphic->setEngine (mProcessor.getBaySickRustyDrums());
     if (mKitGraphic) mKitGraphic->setKitLoaded (true);
+    // QA-ProjectSave Task 11: fresh kit = clean page.  loadKit is the single
+    // chokepoint every engine (re)creation runs through (program switch,
+    // project restore), so the listener re-attaches here.
+    attachDirtyListener();
+    mPageDirty = false;
     if (onKitLoaded) onKitLoaded();
     if (onSoundNameChanged) onSoundNameChanged (sfzPath.getFileName());
     return true;
@@ -293,8 +321,7 @@ void BaySickRustyDrumsPage::loadAriaPanelForProgram (Program target)
 
 juce::File BaySickRustyDrumsPage::playerPresetsDir() const
 {
-    return juce::File::getSpecialLocation (juce::File::userDocumentsDirectory)
-               .getChildFile ("BaySickDAW")
+    return AppPaths::appRoot()
                .getChildFile ("Presets")
                .getChildFile ("Rusty Player")
                .getChildFile ("My Presets");
@@ -355,7 +382,7 @@ void BaySickRustyDrumsPage::showPlayerPresetMenu()
         });
 }
 
-void BaySickRustyDrumsPage::savePlayerPresetAs()
+void BaySickRustyDrumsPage::savePlayerPresetAs (std::function<void()> onSaved)
 {
     auto* engine = mProcessor.getBaySickRustyDrums();
     if (engine == nullptr) return;
@@ -370,7 +397,7 @@ void BaySickRustyDrumsPage::savePlayerPresetAs()
 
     juce::Component::SafePointer<BaySickRustyDrumsPage> safe (this);
     aw->enterModalState (true, juce::ModalCallbackFunction::create (
-        [safe, aw] (int result)
+        [safe, aw, onSaved] (int result)
         {
             std::unique_ptr<juce::AlertWindow> own (aw);
             if (result != 1 || ! safe) return;
@@ -420,6 +447,10 @@ void BaySickRustyDrumsPage::savePlayerPresetAs()
                 target = dir.getChildFile (name + " (" + juce::String (n++) + ").xml");
             target.replaceWithText (root.toString (juce::XmlElement::TextFormat()
                                                         .singleLine()));
+            // QA-ProjectSave Task 11: completion hook so the delete prompt's
+            // "Save Page Preset & Delete" can chain the delete after the write.
+            // Cancel/invalid paths return above without firing it.
+            if (onSaved) onSaved();
         }), false);
 }
 
@@ -459,6 +490,9 @@ void BaySickRustyDrumsPage::loadPlayerPresetFromFile (const juce::File& xml)
     {
         auto* engine = mProcessor.getBaySickRustyDrums();
         if (engine == nullptr) return;
+        // QA-ProjectSave Task 11: a freshly-applied preset is the new clean
+        // state, not an edit -- suppress the dirty listener for the apply.
+        mSuppressDirty = true;
         for (const auto& [id, natural] : *paramPairs)
         {
             if (auto* rp = dynamic_cast<juce::RangedAudioParameter*> (
@@ -468,6 +502,8 @@ void BaySickRustyDrumsPage::loadPlayerPresetFromFile (const juce::File& xml)
                     rp->getNormalisableRange().convertTo0to1 (natural));
             }
         }
+        mSuppressDirty = false;
+        mPageDirty     = false;
     };
 
     // Same program (or preset has no program tag): apply CCs immediately.
@@ -603,6 +639,9 @@ bool BaySickRustyDrumsPage::loadProgram (Program target)
 
 void BaySickRustyDrumsPage::tearDownCurrentProgram()
 {
+    // QA-ProjectSave Task 11: the engine dies below -- detach first.
+    detachDirtyListener();
+
     // QA-DispatcherAffinity Task 3 (2026-05-29): the piano-roll clear that
     // was previously inline here moved into
     // VibeSynthProcessor::destroyBaySickRustyDrums (called below via

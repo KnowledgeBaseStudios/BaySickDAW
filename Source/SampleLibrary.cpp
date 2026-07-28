@@ -1,4 +1,5 @@
 #include "SampleLibrary.h"
+#include "AppPaths.h"
 
 SampleLibrary& SampleLibrary::getInstance()
 {
@@ -21,9 +22,7 @@ juce::File SampleLibrary::getCoreLibraryDir()
 
 juce::File SampleLibrary::getUserSamplesDir()
 {
-    return juce::File::getSpecialLocation (juce::File::userDocumentsDirectory)
-              .getChildFile ("BaySickDAW")
-              .getChildFile ("My Samples");
+    return AppPaths::appRoot().getChildFile ("My Samples");
 }
 
 void SampleLibrary::ensureUserSamplesDir()

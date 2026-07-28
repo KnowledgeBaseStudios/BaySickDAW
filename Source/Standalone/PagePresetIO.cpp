@@ -1,4 +1,5 @@
 #include "PagePresetIO.h"
+#include "../AppPaths.h"
 #include "../PluginProcessor.h"
 #include "../VibeGraph.h"
 #include "EnginePrefixUtil.h"
@@ -22,8 +23,7 @@ namespace PagePresetIO
 
     juce::File presetsDirForPageKind (PageKind k)
     {
-        return juce::File::getSpecialLocation (juce::File::userDocumentsDirectory)
-                   .getChildFile ("BaySickDAW")
+        return AppPaths::appRoot()
                    .getChildFile ("Presets")
                    .getChildFile (pageKindLabel (k) + " Page");
     }

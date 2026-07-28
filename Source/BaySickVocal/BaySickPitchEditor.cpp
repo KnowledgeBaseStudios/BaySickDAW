@@ -1,4 +1,5 @@
 #include "BaySickPitchEditor.h"
+#include "../AppPaths.h"
 #include "BaySickPitchSubEditor.h"
 #include "BaySickVocalProcessor.h"
 #include "../DSP/PitchCorrectorDSP.h"   // shared 13-scale table
@@ -51,8 +52,7 @@ namespace
 
     juce::File pitchPresetsDir()
     {
-        return juce::File::getSpecialLocation (juce::File::userDocumentsDirectory)
-                 .getChildFile ("BaySickDAW").getChildFile ("Presets")
+        return AppPaths::appRoot().getChildFile ("Presets")
                  .getChildFile ("BaySickPitch").getChildFile ("My Presets");
     }
 
@@ -65,9 +65,7 @@ namespace
         o.applicationName     = "BaySickDAW";
         o.filenameSuffix      = "xml";
         o.folderName          = "BaySickDAW";
-        juce::File dir = juce::File::getSpecialLocation (
-                             juce::File::userDocumentsDirectory)
-                             .getChildFile ("BaySickDAW");
+        juce::File dir = AppPaths::appRoot();
         return std::make_unique<juce::PropertiesFile> (
             dir.getChildFile ("ui_prefs.xml"), o);
     }

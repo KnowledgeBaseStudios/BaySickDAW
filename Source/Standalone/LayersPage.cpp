@@ -1,4 +1,5 @@
 #include "LayersPage.h"
+#include "../AppPaths.h"
 #include "../BaySickSynth/BaySickSynthProcessor.h"
 #include "../BaySickSynth/BaySickSynthEditor.h"
 #include "../Harmless/HarmlessProcessor.h"
@@ -342,8 +343,7 @@ void LayersPage::refreshPianoRollContextLabel()
 static juce::File layerEnginePresetsDir (const juce::String& engineName)
 {
     // Documents/BaySickDAW/Presets/<EngineName>/My Presets
-    return juce::File::getSpecialLocation (juce::File::userDocumentsDirectory)
-               .getChildFile ("BaySickDAW")
+    return AppPaths::appRoot()
                .getChildFile ("Presets")
                .getChildFile (engineName)
                .getChildFile ("My Presets");
@@ -354,8 +354,7 @@ static juce::File layerEnginePresetsDir (const juce::String& engineName)
 // Presets/<engineName>/ are factory bundles; "My Presets" is user-saved.
 static juce::File layerEngineRootPresetsDir (const juce::String& engineName)
 {
-    return juce::File::getSpecialLocation (juce::File::userDocumentsDirectory)
-               .getChildFile ("BaySickDAW")
+    return AppPaths::appRoot()
                .getChildFile ("Presets")
                .getChildFile (engineName);
 }

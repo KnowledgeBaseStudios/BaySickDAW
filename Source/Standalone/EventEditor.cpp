@@ -1,4 +1,5 @@
 #include "EventEditor.h"
+#include "../AppPaths.h"
 #include <cmath>
 
 using namespace juce;
@@ -1836,9 +1837,7 @@ void EventEditorContent::doImportMidi()
 
     // .mid files get a conventional home instead of dumping the user in the
     // Documents root.
-    auto midiDir = File::getSpecialLocation (File::userDocumentsDirectory)
-                       .getChildFile ("BaySickDAW")
-                       .getChildFile ("MIDI");
+    auto midiDir = AppPaths::appRoot().getChildFile ("MIDI");
     midiDir.createDirectory();
 
     auto chooser = std::make_shared<FileChooser>(

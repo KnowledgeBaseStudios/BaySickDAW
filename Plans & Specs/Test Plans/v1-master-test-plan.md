@@ -1955,6 +1955,101 @@ whose samples you can deliberately move.
       "(failed to load)" rather than as missing. Previously the error was captured and discarded, so
       a corrupt IR failed in total silence even though the file was right there.  `D:__ R:__` notes:
 
+### §B.30 — QA-ProjectSave (L/B/D empty-by-default + templates v2 + sample hybrid + bundler engine refs + automation registry/DSP-targeting + template submenu + Rusty prompt + bundle save-first)
+
+`blocks:` `dadb958a` (Tasks 1-6) + `54177488` (Task 7 badger scope + QA-ModelShell planning) +
+`<final commit - backfill at close>` (Tasks 8-12 + close docs). Debug exe FIRST (screenshot any
+jassert), then Release - mark each scenario `D:` and `R:`.
+
+**Scope note.** Task 7's automation REMAINDER (mapping tables for every effect type beyond the
+Compressor family, the pedals conversion, the Reverb freeze row, wire-at-load) moved to
+QA-ModelShell Task set 3 mid-batch - PS-21/PS-22 below cover ONLY what this batch ships, and the
+full-coverage versions live in QA-ModelShell's TS8 batch smoke. Task 9's three corrections are
+comment/label-truth fixes with no user-visible surface (no scenario). The step-3 architecture was
+already runtime-confirmed by Jeff's differential test + outbound-vol re-test on 2026-07-27;
+PS-21 is the campaign's re-walk of that result.
+
+Setup: a dirty multi-tab project (every tab type incl. Rusty + an aux strip), a second Windows
+account for PS-17, and one project whose samples you can deliberately move.
+
+- [ ] **PS-1 — MUST-PASS: fresh launch is empty.** Fresh launch (and File > New): ribbon has NO
+      Layers, Bass or Drums tab; app lands on Builder. Each of those ribbon slots shows its
+      empty-state page on click; badge reads 0. Adding one from the slot dropdown works normally.
+- [ ] **PS-2 — Delete to zero.** Add one Layers tab, delete it: no "only tab" refusal; empty state
+      appears. Same for Bass + Drums. Deleting the last Drums tab does NOT silently re-spawn one.
+- [ ] **PS-3 — Empty buses hidden.** At zero tabs of a type, that bus strip is GONE from the Mixer
+      (Layers/Bass/Drums/Clips/Vox/Inst). Master + FX bus always remain. Adding a tab back
+      restores the bus in position with separators intact.
+- [ ] **PS-4 — Visibility follows MEMBERSHIP.** Route a Bass strip's main-out onto the Layers Bus
+      (strip physically moves into the Layers group). Delete every Layers TAB: the Layers Bus
+      REMAINS (the Bass strip is bucketed there) and its audio still flows. Re-point the Bass
+      strip home -> the Layers Bus disappears.
+- [ ] **PS-5 — MUST-PASS: template v2 round-trip.** Build a project with one of EVERY tab type +
+      an aux strip. Save as Template -> File > New -> load it from File > New from Template >
+      My Templates: every tab restores with engine state, names, aux strip - and NO phantom
+      L/B/D trio.
+- [ ] **PS-6 — Docket 15=B mixer round-trip.** Before saving that template: distinctive
+      fader/pan/width values, one send cable, an FX rack load, a per-insert EQ curve. After
+      loading it into a blank project, all of it is back.
+- [ ] **PS-7 — v1-factory branch.** A factory template still loads (kit + layers + basses);
+      tabs of OTHER types present beforehand survive the v1-factory load (scoped teardown).
+- [ ] **PS-8 — Dirty gate.** Dirty project + any template pick: Save / Don't Save / Cancel
+      appears; Cancel aborts with nothing torn down.
+- [ ] **PS-9 — Default template consumer.** File > New from Template > New from Default Template:
+      greyed with no default; after Options > General > Set Default Template it loads that
+      template and the item label shows the default's name. Delete the default's file on disk:
+      item shows "- missing" and is greyed.
+- [ ] **PS-10 — Old surfaces gone.** File menu has NO "New from Template..." clone item and NO
+      "Load Template..." item - one "New from Template" submenu (Default / Premade Templates /
+      My Templates). Save as Template stays top-level; its dialog text reads full-skeleton.
+      Set Default Template's confirmation names the submenu as the consumer.
+- [ ] **PS-11 — Rusty 3-button prompt.** Dirty the Rusty page (move any ARIA knob) -> Delete tab:
+      3-button prompt appears; "Save Page Preset & Delete" writes the Player Preset (verify it
+      reloads from the Load Player dropdown) THEN removes the tab; Cancel in the save-name dialog
+      aborts the delete too. Clean page -> the original 2-button warning.
+- [ ] **PS-12 — Sample hybrid.** Import a Core Library sample into the Builder: NO copy in
+      `<project>/Samples/`; save/reopen: plays (library: ref). Import from Downloads: copy
+      appears; plays after reopen. Clip add from My Samples: no duplicate copy.
+- [ ] **PS-13 — Missing-file report.** Delete a referenced volatile file on disk -> open project:
+      the load report names it; the rest loads normally.
+- [ ] **PS-14 — Bundle save-first (Task 12).** File > Export Project Bundle on an UNSAVED
+      project: the Save As flow runs and the bundle dialog follows automatically; Cancel in the
+      name prompt aborts the bundle cleanly (no dialog, no partial writes).
+- [ ] **PS-15 — Old projects unchanged.** A pre-batch project opens with its original L/B/D tabs
+      restored (their tabs are real content, not re-seeded defaults) and absolute/Samples refs
+      untouched.
+- [ ] **PS-16 — Docket 19: template load is New Project semantics.** Load a template into a
+      project WITH a song: patterns, notes, arrangement and audio library are CLEARED - the
+      template's rig on a blank canvas (save prompt still fires first if dirty).
+- [ ] **PS-17 — Docket 25: account-independent refs.** Save a Layer patch whose sample came from
+      Core Library -> preset XML reads `library:...`, not `C:\Users\<you>\...`. Same for a saved
+      template's sfizz kitPath. The file resolves on a second Windows account.
+- [ ] **PS-18 — Dockets 23/24: template sample adoption.** Template using a Downloads clip, a NAM
+      capture and an outside BaySickPlayer folder: on save they appear in
+      `Documents\BaySickDAW\My Samples` and the template references them there. Delete the
+      originals -> template still loads + plays. sfizz kits are NOT copied.
+- [ ] **PS-19 — Docket 21: bundler engine refs.** Export a bundle from a project using a NAM
+      capture + user IR + engine-loaded sample folder: all three are IN the bundle; it opens on
+      a clean machine with everything resolving.
+- [ ] **PS-20 — Docket 22: honest export scopes.** The bundle dialog shows a size estimate
+      before writing; self-contained no longer copies Core Library (a 555 MB-kit project makes a
+      small bundle that still loads on the target machine).
+- [ ] **PS-21 — Automation DSP-targeting (badger scope).** Automate a Compressor knob (any of
+      Modern/FET/Opto/CS) AND the slot's outbound volume on Layer 0; switch the Effects page
+      channel dropdown to Layer 1; play: BOTH keep applying. (Full effect-type coverage:
+      QA-ModelShell TS8.)
+- [ ] **PS-22 — Registry lifetime (steps 1-2).** Close a tab with automated rack knobs, reopen,
+      re-automate: no stale behavior, no crash on app close afterwards (the 2026-07-26 shutdown
+      AV regression guard). A lane whose APVTS param is genuinely gone greys in the Event Editor.
+- [ ] **PS-23 — Resolver refactor is invisible (Task 8).** Templates, Presets, My Samples, MIDI,
+      Projects, Backups, IR homes and settings.xml all read/write the exact same disk locations
+      as pre-batch; MidiMappings.xml + diagnostic logs land in `Documents\BaySickDAW` as before.
+- [ ] **PS-24 — Event Editor last-point prompt.** Right-click-delete the final remaining point of
+      an automation (from the Event Editor AND from the Builder grid): the "delete the whole
+      automation?" prompt appears; Yes removes the block as ONE undoable step (Ctrl+Z restores
+      block + points); No keeps the point. The Event Editor has NO Delete button; Builder-grid
+      blocks redraw immediately on lane edits.
+
 ## §C — Deferred re-verify ledger
 
 Parked items from closed batches. Lands INSIDE QA-J-Verify's §B section when that section is

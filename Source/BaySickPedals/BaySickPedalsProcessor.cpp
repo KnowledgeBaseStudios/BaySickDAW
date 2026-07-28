@@ -1,4 +1,5 @@
 #include "BaySickPedalsProcessor.h"
+#include "../AppPaths.h"
 #include "BaySickPedalsEditor.h"
 #include "../DSP/CompressorDSP.h"   // for I-15: Compressor in pedal slot defaults to Type::CS
 #include "../DSP/OverdriveDSP.h"    // for I-15: Overdrive in pedal slot defaults to Type::Pedal
@@ -23,6 +24,8 @@ namespace
     // migration system (the no-backward-compat-pre-v1 rule stands).
     constexpr const char* kStateRootTag      = "BaySickPedalsRoot";    // written by new saves
     constexpr const char* kStateRootTagLegacy = "BaySickPedalsState";  // accepted on load
+    // Write-only by design: stamped into engine state + pedalboard presets so a
+    // post-v1 migration can version-gate old files. No reader exists until one does.
     constexpr int         kStateVersion      = 1;
 }
 
@@ -487,8 +490,7 @@ void BaySickPedalsProcessor::setStateInformation (const void* data, int sz)
 // ─────────────────────────────────────────────────────────────────────────────
 juce::File BaySickPedalsProcessor::pedalboardPresetsRoot()
 {
-    return juce::File::getSpecialLocation (juce::File::userDocumentsDirectory)
-              .getChildFile ("BaySickDAW")
+    return AppPaths::appRoot()
               .getChildFile ("Presets")
               .getChildFile ("Pedalboards");
 }

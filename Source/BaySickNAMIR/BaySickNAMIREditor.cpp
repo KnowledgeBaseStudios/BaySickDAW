@@ -1,4 +1,5 @@
 #include "BaySickNAMIREditor.h"
+#include "../AppPaths.h"
 #include "../Standalone/SharedUI.h"   // VKnobAutomation registration
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -62,8 +63,7 @@ namespace
     // ── H-6d (2026-05-02): default Presets folders for the 3 file pickers ──
     juce::File namIrPresetsRoot()
     {
-        return juce::File::getSpecialLocation (juce::File::userDocumentsDirectory)
-                  .getChildFile ("BaySickDAW")
+        return AppPaths::appRoot()
                   .getChildFile ("Presets")
                   .getChildFile ("BaySickNAMIR");
     }
@@ -1114,8 +1114,7 @@ void BaySickNAMIREditor::filesDropped (const juce::StringArray& files, int /*x*/
 // ─────────────────────────────────────────────────────────────────────────────
 juce::File BaySickNAMIREditor::settingsFile()
 {
-    auto dir = juce::File::getSpecialLocation (juce::File::userDocumentsDirectory)
-                  .getChildFile ("BaySickDAW");
+    auto dir = AppPaths::appRoot();
     if (! dir.exists()) dir.createDirectory();
     return dir.getChildFile ("settings.xml");
 }

@@ -1,4 +1,5 @@
 #include "BaySickNAMIRProcessor.h"
+#include "../AppPaths.h"
 #include "BaySickNAMIREditor.h"
 #include "../MissingFileReport.h"   // QA-Export Task 5
 
@@ -18,8 +19,7 @@ namespace
 {
     void namirLog (const juce::String& line)
     {
-        const auto logFile = juce::File::getSpecialLocation (juce::File::userDocumentsDirectory)
-                                 .getChildFile ("BaySickDAW")
+        const auto logFile = AppPaths::appRoot()
                                  .getChildFile ("namir_state_log.txt");
         logFile.getParentDirectory().createDirectory();
         const auto stamped = juce::Time::getCurrentTime().toString (false, true, true, true)

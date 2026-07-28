@@ -1,4 +1,5 @@
 #include "BaySickAlignEditor.h"
+#include "../AppPaths.h"
 #include "BaySickVocalProcessor.h"
 #include "../Standalone/BaySickTitleBar.h"
 #include "../Standalone/SharedUI.h"
@@ -77,8 +78,7 @@ namespace
 
     juce::File alignPresetsDir()
     {
-        return juce::File::getSpecialLocation (juce::File::userDocumentsDirectory)
-                 .getChildFile ("BaySickDAW").getChildFile ("Presets")
+        return AppPaths::appRoot().getChildFile ("Presets")
                  .getChildFile ("BaySickAlign").getChildFile ("My Presets");
     }
 

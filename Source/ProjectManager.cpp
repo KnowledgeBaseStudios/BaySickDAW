@@ -1,4 +1,5 @@
 #include "ProjectManager.h"
+#include "AppPaths.h"
 #include "PluginProcessor.h"
 #include "ClipDropDiag.h"            // QA-ClipDrop: diagnostic trap (2026-06-02)
 #include "SampleLibrary.h"           // QA-ProjectSave Task 4: source-aware import
@@ -8,9 +9,7 @@
 // ──────────────────────────────────────────────────────────────────────────────
 juce::File ProjectManager::getDefaultProjectsRoot()
 {
-    return juce::File::getSpecialLocation (juce::File::userDocumentsDirectory)
-               .getChildFile ("BaySickDAW")
-               .getChildFile ("Projects");
+    return AppPaths::appRoot().getChildFile ("Projects");
 }
 
 juce::File ProjectManager::getSettingsFile()
@@ -22,9 +21,7 @@ juce::File ProjectManager::getSettingsFile()
     // round-trip through user-browsable paths + no reason to back it up with
     // user work).  audio_settings.xml still lives in Roaming APPDATA (written
     // by StandaloneApp::saveAudioSettings); that move is a separate task.
-    return juce::File::getSpecialLocation (juce::File::userDocumentsDirectory)
-               .getChildFile ("BaySickDAW")
-               .getChildFile ("settings.xml");
+    return AppPaths::appRoot().getChildFile ("settings.xml");
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -114,8 +111,7 @@ juce::Array<juce::File> ProjectManager::listBackups() const
     if (mCurrentFolder != juce::File())
         dir = mCurrentFolder.getChildFile ("Backups");
     else
-        dir = juce::File::getSpecialLocation (juce::File::userDocumentsDirectory)
-                  .getChildFile ("BaySickDAW")
+        dir = AppPaths::appRoot()
                   .getChildFile ("Backups")
                   .getChildFile ("Unsaved");
 
@@ -188,9 +184,7 @@ bool ProjectManager::writeBackup()
     }
     else
     {
-        backupsDir = juce::File::getSpecialLocation (
-                          juce::File::userDocumentsDirectory)
-                          .getChildFile ("BaySickDAW")
+        backupsDir = AppPaths::appRoot()
                           .getChildFile ("Backups")
                           .getChildFile ("Unsaved");
         stem = "Untitled";
@@ -237,8 +231,7 @@ bool ProjectManager::writeBackup()
 // ──────────────────────────────────────────────────────────────────────────────
 // Project lifecycle
 // ──────────────────────────────────────────────────────────────────────────────
-bool ProjectManager::newProject (const juce::String& name,
-                                  const juce::File& templatePath)
+bool ProjectManager::newProject (const juce::String& name)
 {
     const auto sanitized = sanitizeProjectName (name);
     if (! isValidProjectName (sanitized)) return false;
@@ -258,17 +251,6 @@ bool ProjectManager::newProject (const juce::String& name,
 
     if (! folder.createDirectory().wasOk()) return false;
     folder.getChildFile ("Samples").createDirectory();
-
-    // Optional template seed - copy template's project.xml + Samples/ as start.
-    if (templatePath.isDirectory() && templatePath != folder)
-    {
-        auto srcXml = templatePath.getChildFile ("project.xml");
-        if (srcXml.existsAsFile())
-            srcXml.copyFileTo (folder.getChildFile ("project.xml"));
-        auto srcSamples = templatePath.getChildFile ("Samples");
-        if (srcSamples.isDirectory())
-            srcSamples.copyDirectoryTo (folder.getChildFile ("Samples"));
-    }
 
     mCurrentFolder = folder;
     mProcessor.setCurrentProjectFolder (folder);
@@ -375,8 +357,7 @@ bool ProjectManager::renameProject (const juce::File& projectFolder,
 void ProjectManager::runFirstLaunchHousekeeping()
 {
     // Ensure Documents\BaySickDAW\ exists.
-    auto docsRoot = juce::File::getSpecialLocation (juce::File::userDocumentsDirectory)
-                        .getChildFile ("BaySickDAW");
+    auto docsRoot = AppPaths::appRoot();
     docsRoot.createDirectory();
 
     // P4b (2026-04-23): one-shot migration from Roaming APPDATA to Documents
@@ -416,10 +397,7 @@ void ProjectManager::runFirstLaunchHousekeeping()
     if (! mShortcutCreated)
     {
         auto link = docsRoot.getChildFile ("Sample Library.lnk");
-        auto target = juce::File::getSpecialLocation (
-                          juce::File::windowsLocalAppData)
-                          .getChildFile ("BaySickDAW")
-                          .getChildFile ("CoreLibrary");
+        auto target = SampleLibrary::getCoreLibraryDir();
         // Create target dir preemptively so the shortcut lands on a real path
         // even if the installer hasn't populated CoreLibrary/ yet.
         target.createDirectory();

@@ -1,4 +1,5 @@
 #include "EffectPresetIO.h"
+#include "../AppPaths.h"
 
 #include "../EffectRack.h"
 #include "../DSP/DSPBase.h"
@@ -105,8 +106,7 @@ static bool isPedalType (EffectType type) noexcept
 
 juce::File presetsRoot()
 {
-    return juce::File::getSpecialLocation (juce::File::userDocumentsDirectory)
-              .getChildFile ("BaySickDAW")
+    return AppPaths::appRoot()
               .getChildFile ("Presets")
               .getChildFile ("Effects");
 }

@@ -1,4 +1,5 @@
 #include "StandaloneEditor.h"
+#include "../AppPaths.h"
 #include "../MissingFileReport.h"   // QA-ProjectSave Task 4: missing clip audio
 #include "StandaloneApp.h"   // J-A2: MasterOutputRouting + saveMasterOutputRouting
 #include "../TsMapRead.h"    // QA-G Task 6: played-TS source (marker map) for song mode
@@ -6733,9 +6734,7 @@ void StandaloneEditor::applyGlobalLockToggle ()
 // ─────────────────────────────────────────────────────────────────────────────
 juce::File StandaloneEditor::templatesDir()
 {
-    return juce::File::getSpecialLocation (juce::File::userDocumentsDirectory)
-               .getChildFile ("BaySickDAW")
-               .getChildFile ("Templates");
+    return AppPaths::appRoot().getChildFile ("Templates");
 }
 juce::File StandaloneEditor::factoryTemplatesDir() { return templatesDir().getChildFile ("Factory"); }
 juce::File StandaloneEditor::userTemplatesDir   () { return templatesDir().getChildFile ("My Templates"); }
@@ -6956,9 +6955,7 @@ void StandaloneEditor::applyTemplate (const juce::File& templateXml)
     }
 
     // 3. Walk Layer + Bass entries in order so slots N=0,1,2,… line up.
-    const auto presetsRoot = juce::File::getSpecialLocation (juce::File::userDocumentsDirectory)
-                                 .getChildFile ("BaySickDAW")
-                                 .getChildFile ("Presets");
+    const auto presetsRoot = AppPaths::appRoot().getChildFile ("Presets");
 
     int firstNewLayer = -1;
     for (int i = 0; i < parsed->getNumChildElements(); ++i)
@@ -7066,75 +7063,12 @@ void StandaloneEditor::saveTemplateAs ()
         }), false);
 }
 
-void StandaloneEditor::showTemplateMenu (juce::Component* anchor)
-{
-    if (anchor == nullptr) return;
-
-    constexpr int kIdSaveAs = 1;
-    constexpr int kLoadBase = 100;
-
-    juce::PopupMenu m;
-    m.addItem (kIdSaveAs, "Save Template As...");
-    m.addSeparator();
-
-    juce::Array<juce::File> templateFiles;
-    std::function<void (juce::PopupMenu&, const juce::File&)> walk;
-    walk = [&] (juce::PopupMenu& sub, const juce::File& dir)
-    {
-        if (! dir.isDirectory()) return;
-        juce::Array<juce::File> dirs;
-        dir.findChildFiles (dirs, juce::File::findDirectories, false);
-        dirs.sort();
-        for (auto& d : dirs)
-        {
-            juce::PopupMenu inner;
-            walk (inner, d);
-            if (inner.getNumItems() > 0)
-                sub.addSubMenu (d.getFileName(), inner);
-        }
-        auto files = dir.findChildFiles (juce::File::findFiles, false, "*.xml");
-        files.sort();
-        for (auto& f : files)
-        {
-            sub.addItem (kLoadBase + templateFiles.size(), f.getFileNameWithoutExtension());
-            templateFiles.add (f);
-        }
-    };
-
-    {
-        juce::PopupMenu mySub;
-        walk (mySub, userTemplatesDir());
-        if (mySub.getNumItems() == 0)
-            mySub.addItem (-1, "(no user templates)", false, false);
-        m.addSubMenu ("My Templates", mySub);
-    }
-    {
-        juce::PopupMenu facSub;
-        walk (facSub, factoryTemplatesDir());
-        if (facSub.getNumItems() == 0)
-            facSub.addItem (-1, "(no factory templates)", false, false);
-        m.addSubMenu ("Factory Templates", facSub);
-    }
-
-    m.showMenuAsync (
-        juce::PopupMenu::Options().withTargetComponent (anchor),
-        [this, templateFiles = std::move (templateFiles), kIdSaveAs, kLoadBase] (int r) mutable
-        {
-            if (r <= 0) return;
-            if (r == kIdSaveAs) { saveTemplateAs(); return; }
-            if (r >= kLoadBase && r < kLoadBase + templateFiles.size())
-                loadTemplate (templateFiles[r - kLoadBase]);
-        });
-}
-
 // ─────────────────────────────────────────────────────────────────────────────
 // Batch 5: Kit save / load
 // ─────────────────────────────────────────────────────────────────────────────
 juce::File StandaloneEditor::kitsDir()
 {
-    return juce::File::getSpecialLocation (juce::File::userDocumentsDirectory)
-               .getChildFile ("BaySickDAW")
-               .getChildFile ("Kits");
+    return AppPaths::appRoot().getChildFile ("Kits");
 }
 
 juce::File StandaloneEditor::userKitsDir()
@@ -7481,8 +7415,7 @@ void StandaloneEditor::loadKitImpl (const juce::File& kitXml)
             // (it includes the source-folder prefix, e.g. "BaySickDrums/808 Group/808 Kick.xml").
             // engine names the runtime engine type to instantiate (BaySickSynth or BaySickPlayer),
             // which can differ from the source folder.
-            const auto presetFile = juce::File::getSpecialLocation (juce::File::userDocumentsDirectory)
-                                        .getChildFile ("BaySickDAW")
+            const auto presetFile = AppPaths::appRoot()
                                         .getChildFile ("Presets")
                                         .getChildFile (presetPath);
             if (! presetFile.existsAsFile())
@@ -8005,23 +7938,64 @@ void StandaloneEditor::addBaySickRustyDrumsTab()
     rawPage->onDeleteRequested = [safeThis, ribbonId, rawPage]
     {
         if (! safeThis) return;
-        juce::AlertWindow::showOkCancelBox (
-            juce::AlertWindow::WarningIcon,
-            "Delete BaySickRustyDrums?",
+
+        auto fireDelete = [safeThis, ribbonId, rawPage]
+        {
+            if (! safeThis) return;
+            if (rawPage) rawPage->onDeleteRequested = nullptr;   // re-entry guard
+            // closeTab fires onTabClosed → the defensive Rusty-tab-close
+            // path in StandaloneEditor::onTabClosed handles the rest:
+            // destroying the page (and its SliderParameterAttachment-
+            // bearing ARIA widgets) first, then the engine.  Order matters.
+            if (safeThis->mRibbon) safeThis->mRibbon->closeTab (ribbonId);
+        };
+
+        const juce::String warning =
             "Removing this tab will tear down the player, every Rusty mixer "
             "strip and the RustyDrums Bus, every Rusty effects rack and EQ, "
             "and clear the Rusty piano roll on every pattern.  This cannot "
-            "be undone.  Continue?",
+            "be undone.";
+
+        // QA-ProjectSave Task 11 (docket 16): FND-1 completion.  A dirty page
+        // gets the same 3-button prompt as the other six page types; the save
+        // chains the J-11 Player Preset (Rusty's only user-writable save)
+        // and fires the delete only after the write.  Clean page keeps the
+        // original 2-button warning unchanged.
+        if (rawPage != nullptr && rawPage->isPatchDirty())
+        {
+            auto* aw = new juce::AlertWindow (
+                "Delete BaySickRustyDrums?",
+                warning + "\n\n\"Save Page Preset & Delete\" writes a Player "
+                "Preset (program + every knob value) to disk first, then "
+                "deletes the tab.",
+                juce::AlertWindow::QuestionIcon);
+            aw->addButton ("Save Page Preset & Delete", 1,
+                           juce::KeyPress (juce::KeyPress::returnKey));
+            aw->addButton ("Delete",                    2);
+            aw->addButton ("Cancel",                    0,
+                           juce::KeyPress (juce::KeyPress::escapeKey));
+            aw->enterModalState (true, juce::ModalCallbackFunction::create (
+                [rawPage, aw, fireDelete] (int r)
+                {
+                    std::unique_ptr<juce::AlertWindow> own (aw);
+                    if (r == 0) return;
+                    if (r == 1 && rawPage != nullptr)
+                        rawPage->savePlayerPresetAs (fireDelete);   // chained
+                    else if (r == 2)
+                        fireDelete();                               // delete only
+                }), false);
+            return;
+        }
+
+        juce::AlertWindow::showOkCancelBox (
+            juce::AlertWindow::WarningIcon,
+            "Delete BaySickRustyDrums?",
+            warning + "  Continue?",
             "Yes, delete", "Cancel", nullptr,
-            juce::ModalCallbackFunction::create ([safeThis, ribbonId, rawPage] (int result)
+            juce::ModalCallbackFunction::create ([fireDelete] (int result)
             {
-                if (! safeThis || result != 1) return;
-                if (rawPage) rawPage->onDeleteRequested = nullptr;   // re-entry guard
-                // closeTab fires onTabClosed → the defensive Rusty-tab-close
-                // path in StandaloneEditor::onTabClosed handles the rest:
-                // destroying the page (and its SliderParameterAttachment-
-                // bearing ARIA widgets) first, then the engine.  Order matters.
-                if (safeThis->mRibbon) safeThis->mRibbon->closeTab (ribbonId);
+                if (result != 1) return;
+                fireDelete();
             }));
     };
 
@@ -8111,9 +8085,7 @@ void StandaloneEditor::addBaySickGuitarsTab()
     // creates the engine slot on first call + flips the active flag once the
     // SFZ is fully parsed.
     const juce::File defaultKit =
-        juce::File::getSpecialLocation (juce::File::windowsLocalAppData)
-              .getChildFile ("BaySickDAW")
-              .getChildFile ("CoreLibrary")
+        SampleLibrary::getCoreLibraryDir()
               .getChildFile ("Black&Green Guitars")
               .getChildFile ("Programs")
               .getChildFile ("01-green_keyswitch.sfz");
@@ -8205,9 +8177,7 @@ void StandaloneEditor::addBaySickBassesTab()
                                              "Loading Instrument...", true);
 
     const juce::File defaultKit =
-        juce::File::getSpecialLocation (juce::File::windowsLocalAppData)
-              .getChildFile ("BaySickDAW")
-              .getChildFile ("CoreLibrary")
+        SampleLibrary::getCoreLibraryDir()
               .getChildFile ("Black&Blue Basses")
               .getChildFile ("Programs")
               .getChildFile ("01-darkblack_keysw.sfz");
@@ -9554,7 +9524,66 @@ juce::PopupMenu StandaloneEditor::getMenuForIndex(int menuIndex, const juce::Str
     {
     case 0: // File - Project persistence (P2+P3+P6, 2026-04-23)
         m.addItem(101, "New Project...  (Ctrl+N)");
-        m.addItem(102, "New from Template...");           // P6: pick + seed
+        {
+            // QA-ProjectSave Task 10: one submenu replaces old items 102 (clone
+            // a project) + 109 (Load Template) -- every pick funnels through
+            // loadTemplate's unified dirty gate.  File picks resolve through
+            // mTemplateMenuFiles, rebuilt on every menu open.
+            mTemplateMenuFiles.clearQuick();
+
+            std::function<void (juce::PopupMenu&, const juce::File&)> walk;
+            walk = [&] (juce::PopupMenu& sub, const juce::File& dir)
+            {
+                if (! dir.isDirectory()) return;
+                juce::Array<juce::File> dirs;
+                dir.findChildFiles (dirs, juce::File::findDirectories, false);
+                dirs.sort();
+                for (auto& d : dirs)
+                {
+                    juce::PopupMenu inner;
+                    walk (inner, d);
+                    if (inner.getNumItems() > 0)
+                        sub.addSubMenu (d.getFileName(), inner);
+                }
+                auto files = dir.findChildFiles (juce::File::findFiles, false, "*.xml");
+                files.sort();
+                for (auto& f : files)
+                {
+                    sub.addItem (kTemplateMenuLoadBase + mTemplateMenuFiles.size(),
+                                 f.getFileNameWithoutExtension());
+                    mTemplateMenuFiles.add (f);
+                }
+            };
+
+            juce::PopupMenu tpl;
+            const auto def = mProjectManager ? mProjectManager->getDefaultTemplate()
+                                             : juce::File();
+            if (def == juce::File())
+                tpl.addItem (111, "New from Default Template", false);
+            else if (! def.existsAsFile())
+                tpl.addItem (111, "New from Default Template ("
+                                   + def.getFileNameWithoutExtension()
+                                   + " - missing)", false);
+            else
+                tpl.addItem (111, "New from Default Template ("
+                                   + def.getFileNameWithoutExtension() + ")");
+            tpl.addSeparator();
+            {
+                juce::PopupMenu premade;
+                walk (premade, factoryTemplatesDir());
+                if (premade.getNumItems() == 0)
+                    premade.addItem (-1, "(no premade templates)", false, false);
+                tpl.addSubMenu ("Premade Templates", premade);
+            }
+            {
+                juce::PopupMenu mine;
+                walk (mine, userTemplatesDir());
+                if (mine.getNumItems() == 0)
+                    mine.addItem (-1, "(no user templates)", false, false);
+                tpl.addSubMenu ("My Templates", mine);
+            }
+            m.addSubMenu ("New from Template", tpl);
+        }
         m.addSeparator();
         m.addItem(103, "Open Project...  (Ctrl+O)");
         m.addItem(110, "Quick Open Project...");
@@ -9590,9 +9619,8 @@ juce::PopupMenu StandaloneEditor::getMenuForIndex(int menuIndex, const juce::Str
         m.addItem(105, "Save As...  (Shift+Ctrl+S)");
         // 2026-04-26: Save as Preset moved out - the per-engine preset
         // pickers handle that.  Save as Template lands in this slot since
-        // it's the project-level save-as cousin (kit + 8 layers + 4 basses).
+        // it's the project-level save-as cousin (full project skeleton, v2).
         m.addItem(106, "Save as Template...");
-        m.addItem(109, "Load Template...");
         m.addSeparator();
         m.addItem(108, "Restore from Backup...");
         m.addSeparator();
@@ -9686,6 +9714,14 @@ juce::PopupMenu StandaloneEditor::getMenuForIndex(int menuIndex, const juce::Str
 
 void StandaloneEditor::menuItemSelected(int id, int)
 {
+    // File > New from Template file picks (submenu built in getMenuForIndex).
+    if (id >= kTemplateMenuLoadBase
+        && id <  kTemplateMenuLoadBase + mTemplateMenuFiles.size())
+    {
+        loadTemplate (mTemplateMenuFiles[id - kTemplateMenuLoadBase]);
+        return;
+    }
+
     switch (id)
     {
     // File - Project persistence (P2+P3, 2026-04-23)
@@ -9699,14 +9735,10 @@ void StandaloneEditor::menuItemSelected(int id, int)
     case 106: saveTemplateAs(); break;                      // 2026-04-26
     case 107: if (mBuilderPage) mBuilderPage->doImportAudio(); break;
     case 108: doFileRestoreBackup(); break;
-    case 109:                                                // 2026-04-26 Load Template
-    {
-        // Anchor on the menu bar - close enough for the popup.
-        auto anchor = mMenuBar.get();
-        if (anchor != nullptr) showTemplateMenu (anchor);
+    case 111:  // New from Default Template - the default pointer's one consumer
+        if (mProjectManager && mProjectManager->getDefaultTemplate().existsAsFile())
+            loadTemplate (mProjectManager->getDefaultTemplate());
         break;
-    }
-    case 102: doFileNewFromTemplate();    break;
     case 530: doFileSetDefaultTemplate(); break;
     case 531:
         if (mProjectManager) { mProjectManager->clearDefaultTemplate(); }
@@ -10314,7 +10346,7 @@ void StandaloneEditor::doFileNew()
                         [this] (int) { doFileNew(); }));
                 return;
             }
-            if (! mProjectManager->newProject (name, juce::File()))
+            if (! mProjectManager->newProject (name))
             {
                 juce::AlertWindow::showMessageBoxAsync (
                     juce::MessageBoxIconType::WarningIcon,
@@ -10365,67 +10397,12 @@ void StandaloneEditor::doFileNew()
     });   // close confirmDiscardChanges continuation
 }
 
-void StandaloneEditor::doFileNewFromTemplate()
-{
-    // Pick any existing project as a one-shot template (independent of the
-    // default-template setting).  Uses the Project Browser - on selection,
-    // immediately prompts for the new project's name.
-    confirmDiscardChanges ([this]
-    {
-        auto* browser = new ProjectBrowserWindow();
-        browser->isCurrentProject = [this] (const juce::File& f)
-        {
-            return mProjectManager && mProjectManager->isCurrentProject (f);
-        };
-        browser->onOpenSelected = [this, browser] (const juce::File& tpl)
-        {
-            if (auto* w = browser->findParentComponentOfClass<juce::DialogWindow>())
-                w->exitModalState (1);
-
-            promptForProjectName (
-                "New Project From Template",
-                "Naming the new project (will copy '"
-                + tpl.getFileName() + "' as a starting point):",
-                "Untitled Project",
-                [this, tpl] (juce::String name)
-                {
-                    if (! ProjectManager::isValidProjectName (name)) return;
-                    HeavyOperationOverlay::ScopedOp heavyOp (mHeavyOpOverlay,
-                                                             "Creating Project...");
-                    mHeavyOpOverlay.setStepLabel ("Copying template files...");
-                    if (! mProjectManager->newProject (name, tpl)) return;
-                    auto seedXml = mProjectManager->getCurrentFolder()
-                                        .getChildFile ("project.xml");
-                    if (seedXml.existsAsFile())
-                        if (auto parsed = juce::XmlDocument::parse (seedXml))
-                            mProcessor.deserializeProject (*parsed);
-                    restoreAudioStripsFromArrangement();
-                    mProjectManager->saveProject();
-                    refreshWindowTitle();
-                });
-        };
-        browser->onNewProject = [browser]
-        {
-            if (auto* w = browser->findParentComponentOfClass<juce::DialogWindow>())
-                w->exitModalState (0);
-        };
-
-        juce::DialogWindow::LaunchOptions opts;
-        opts.dialogTitle            = "Pick Template Project";
-        opts.dialogBackgroundColour = juce::Colours::black;
-        opts.content.setOwned (browser);
-        opts.escapeKeyTriggersCloseButton = true;
-        opts.useNativeTitleBar      = true;
-        opts.resizable              = true;
-        opts.launchAsync();
-    });
-}
-
 void StandaloneEditor::doFileSetDefaultTemplate()
 {
     // 2026-04-26: repointed from project-folder picker to the Templates
-    // folder.  Templates are XML files (kit + 8 layers + 4 basses) generated
-    // by gen_factory_presets.py, plus user-saved ones under My Templates/.
+    // folder.  Templates are XML files: v2 full-skeleton saves under
+    // My Templates/, plus the v1-factory set (gen_factory_presets.py)
+    // under Factory/.
     auto initialDir = templatesDir();
     initialDir.createDirectory();   // ensure exists so the chooser opens cleanly
     // Both subfolders must exist or a fresh install shows an empty/partial
@@ -10446,8 +10423,9 @@ void StandaloneEditor::doFileSetDefaultTemplate()
         juce::AlertWindow::showMessageBoxAsync (
             juce::MessageBoxIconType::InfoIcon,
             "Default Template Set",
-            "Future 'New Project' will start from '" + picked.getFileNameWithoutExtension()
-            + "'.  Use Options > Clear Default Template to undo.");
+            "File > New from Template > New from Default Template will start from '"
+            + picked.getFileNameWithoutExtension()
+            + "'.  Use Options > General > Clear Default Template to undo.");
     });
 }
 
@@ -10633,9 +10611,15 @@ void StandaloneEditor::doExportProjectBundle()
     const juce::File projectFolder = mProcessor.getCurrentProjectFolder();
     if (projectFolder == juce::File() || ! projectFolder.isDirectory())
     {
-        juce::AlertWindow::showMessageBoxAsync (
-            juce::MessageBoxIconType::InfoIcon, "Export Project Bundle",
-            "Save the project first - there is nothing on disk to bundle yet.", "OK");
+        // QA-ProjectSave Task 12 (docket 17=b): an unsaved project runs the
+        // standard save flow and continues into the bundle once the save
+        // completes.  Cancel anywhere aborts the bundle (the completion only
+        // fires on a successful save).
+        juce::Component::SafePointer<StandaloneEditor> safe (this);
+        doFileSaveAs ([safe]
+        {
+            if (safe) safe->doExportProjectBundle();
+        });
         return;
     }
 
@@ -10819,7 +10803,7 @@ void StandaloneEditor::doFileSave()
     refreshWindowTitle();
 }
 
-void StandaloneEditor::doFileSaveAs()
+void StandaloneEditor::doFileSaveAs (std::function<void()> onSaved)
 {
     const juce::String defaultName = mProjectManager->hasProject()
                                        ? mProjectManager->getCurrentName()
@@ -10828,7 +10812,7 @@ void StandaloneEditor::doFileSaveAs()
         "Save Project As",
         "Save a copy of this project under a new name.",
         defaultName,
-        [this] (juce::String name)
+        [this, onSaved] (juce::String name)
         {
             if (! ProjectManager::isValidProjectName (name))
             {
@@ -10839,7 +10823,7 @@ void StandaloneEditor::doFileSaveAs()
                     "OK",
                     this,
                     juce::ModalCallbackFunction::create (
-                        [this] (int) { doFileSaveAs(); }));
+                        [this, onSaved] (int) { doFileSaveAs (onSaved); }));
                 return;
             }
             if (! mProjectManager->saveProjectAs (name))
@@ -10852,6 +10836,9 @@ void StandaloneEditor::doFileSaveAs()
                 return;
             }
             refreshWindowTitle();
+            // QA-ProjectSave Task 12: success-only completion (cancel and
+            // failure paths return above without firing).
+            if (onSaved) onSaved();
         });
 }
 
@@ -11971,9 +11958,7 @@ void StandaloneEditor::deserializeUIState (const juce::XmlElement& root)
                     juce::File savedKit = SampleLibrary::resolvePersistedRef (rec->getStringAttribute ("kitPath"));
                     if (! savedKit.existsAsFile())
                     {
-                        savedKit = juce::File::getSpecialLocation (juce::File::windowsLocalAppData)
-                                          .getChildFile ("BaySickDAW")
-                                          .getChildFile ("CoreLibrary");
+                        savedKit = SampleLibrary::getCoreLibraryDir();
                         savedKit = isGuitars
                             ? savedKit.getChildFile ("Black&Green Guitars")
                                        .getChildFile ("Programs")
@@ -12960,8 +12945,7 @@ namespace
         o.folderName         = "BaySickDAW";
         o.osxLibrarySubFolder = "Application Support";
         return std::make_unique<juce::PropertiesFile> (
-            juce::File::getSpecialLocation (juce::File::userDocumentsDirectory)
-                .getChildFile ("BaySickDAW").getChildFile ("ui_prefs.xml"), o);
+            AppPaths::appRoot().getChildFile ("ui_prefs.xml"), o);
     }
 }
 

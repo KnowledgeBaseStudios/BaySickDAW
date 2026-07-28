@@ -66,11 +66,11 @@ public:
 
     // ── Project lifecycle ────────────────────────────────────────────────────
     // newProject: creates <root>/<name>/ + empty project.xml + Samples/.
-    //   If templatePath is a valid project folder, its project.xml + Samples/
-    //   get copied as the seed.  Returns true on success.  Fails if name is
-    //   invalid or folder collision couldn't be auto-resolved.
-    bool newProject (const juce::String& name,
-                     const juce::File& templatePath = {});
+    //   Returns true on success.  Fails if name is invalid or the folder
+    //   collision couldn't be auto-resolved.  (The old templatePath folder-seed
+    //   died with the clone-a-project flow, QA-ProjectSave Task 10 -- templates
+    //   load through StandaloneEditor::loadTemplate, never as folder copies.)
+    bool newProject (const juce::String& name);
 
     // openProject: loads an existing project folder.  Accepts either the
     // folder itself or the project.xml inside.

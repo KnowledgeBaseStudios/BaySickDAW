@@ -1,4 +1,5 @@
 #include "StandaloneApp.h"
+#include "../AppPaths.h"
 #include "StandaloneEditor.h"
 #include "HeavyOperationOverlay.h"
 #include "BaySickAssets.h"   // BaySickDAWLogo_png / _pngSize (logo for splash + window icon)
@@ -406,9 +407,7 @@ juce::File VibesynthStandaloneApp::getAudioSettingsFile()
     // ProjectManager are created), so we fall back to the legacy Roaming
     // path if the new Documents file doesn't exist yet.  Once migration
     // moves the file, this transparently flips to the Documents path.
-    auto neu = juce::File::getSpecialLocation(juce::File::userDocumentsDirectory)
-                   .getChildFile("BaySickDAW")
-                   .getChildFile("audio_settings.xml");
+    auto neu = AppPaths::appRoot().getChildFile("audio_settings.xml");
     if (neu.existsAsFile()) return neu;
     auto legacy = juce::File::getSpecialLocation(juce::File::userApplicationDataDirectory)
                       .getChildFile("BaySickDAW")

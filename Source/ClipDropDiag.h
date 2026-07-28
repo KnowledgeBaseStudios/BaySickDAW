@@ -17,13 +17,13 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 #include <JuceHeader.h>
+#include "AppPaths.h"
 
 namespace ClipDropDiag
 {
     inline juce::File logFile()
     {
-        return juce::File::getSpecialLocation (juce::File::userDocumentsDirectory)
-                   .getChildFile ("BaySickDAW")
+        return AppPaths::appRoot()
                    .getChildFile ("clipdrop_diag_log.txt");
     }
 

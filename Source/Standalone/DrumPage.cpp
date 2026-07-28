@@ -1,4 +1,5 @@
 #include "DrumPage.h"
+#include "../AppPaths.h"
 #include "../BaySickSynth/BaySickSynthProcessor.h"
 #include "../BaySickSynth/BaySickSynthEditor.h"
 #include "../VibePlayer/VibePlayerProcessor.h"
@@ -92,8 +93,7 @@ static void addPresetDirToMenuDP (juce::PopupMenu& menu,
 
 juce::File DrumPage::presetsDir()
 {
-    return juce::File::getSpecialLocation (juce::File::userDocumentsDirectory)
-               .getChildFile ("BaySickDAW").getChildFile ("Presets")
+    return AppPaths::appRoot().getChildFile ("Presets")
                .getChildFile ("BaySickDrums");
 }
 
@@ -636,8 +636,7 @@ void DrumPage::showSoundPicker (juce::Component* anchor)
         // the Hip Hop / EDM .wav samples with friendly names ("Hip Hop Kick 01"
         // etc.) and per-preset envelope/attack defaults.  Lives in Sample
         // submenu since they're sample-based, not synth-based.
-        const auto bspRoot = juce::File::getSpecialLocation (juce::File::userDocumentsDirectory)
-                                  .getChildFile ("BaySickDAW/Presets/BaySickPlayer");
+        const auto bspRoot = AppPaths::appRoot().getChildFile ("Presets/BaySickPlayer");
         if (bspRoot.isDirectory())
         {
             juce::Array<juce::File> bspSubs;

@@ -1,4 +1,5 @@
 #include "KeyBindings.h"
+#include "../AppPaths.h"
 
 namespace BSCommands
 {
@@ -774,8 +775,7 @@ std::vector<const MouseRefRow*> findHardcodedConflicts (const juce::KeyPress& kp
 // ── Persistence ─────────────────────────────────────────────────────────────
 juce::File getKeymapFile()
 {
-    auto dir = juce::File::getSpecialLocation (juce::File::userDocumentsDirectory)
-                  .getChildFile ("BaySickDAW");
+    auto dir = AppPaths::appRoot();
     if (! dir.exists())
         dir.createDirectory();
     return dir.getChildFile ("keymap.xml");

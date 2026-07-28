@@ -17,14 +17,14 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 #include <JuceHeader.h>
+#include "AppPaths.h"
 
 namespace G3PlayheadDiag
 {
 #if JUCE_DEBUG
     inline void log (const juce::String& line)
     {
-        auto f = juce::File::getSpecialLocation (juce::File::userDocumentsDirectory)
-                     .getChildFile ("BaySickDAW")
+        auto f = AppPaths::appRoot()
                      .getChildFile ("g3_playhead_log.txt");
         f.getParentDirectory().createDirectory();
         f.appendText (juce::Time::getCurrentTime().toString (true, true, true, true)
@@ -38,8 +38,7 @@ namespace G3PlayheadDiag
     // caller, Debug-only, fires once per gesture.  Rule-4 catalogued.
     inline void logPan (const juce::String& line)
     {
-        auto f = juce::File::getSpecialLocation (juce::File::userDocumentsDirectory)
-                     .getChildFile ("BaySickDAW")
+        auto f = AppPaths::appRoot()
                      .getChildFile ("g3_playhead_log.txt");
         f.getParentDirectory().createDirectory();
         f.appendText (juce::Time::getCurrentTime().toString (true, true, true, true)
@@ -53,8 +52,7 @@ namespace G3PlayheadDiag
     // (engine side).  Fires ~once per loop pass; Debug-only; Rule-4 catalogued.
     inline void logBar1 (const juce::String& line)
     {
-        auto f = juce::File::getSpecialLocation (juce::File::userDocumentsDirectory)
-                     .getChildFile ("BaySickDAW")
+        auto f = AppPaths::appRoot()
                      .getChildFile ("g3_playhead_log.txt");
         f.getParentDirectory().createDirectory();
         f.appendText (juce::Time::getCurrentTime().toString (true, true, true, true)

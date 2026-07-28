@@ -73,6 +73,12 @@ public:
     // Fired when the user requests removal of this page (ribbon right-click).
     std::function<void()> onDeleteRequested;
 
+    // QA-ProjectSave Task 11 (docket 16): FND-1 completion.  The delete
+    // prompt's "Save Page Preset & Delete" branch chains the J-11 Player
+    // Preset save from StandaloneEditor, so both live here in public.
+    void savePlayerPresetAs (std::function<void()> onSaved = {});
+    bool isPatchDirty() const { return mPageDirty; }
+
     // Programmatic kit load (file path -> processor).  Returns true on success.
     bool loadKit (const juce::File& sfzPath);
 
@@ -146,9 +152,35 @@ private:
 
     // J-11 Player Preset helpers.
     void showPlayerPresetMenu();
-    void savePlayerPresetAs();
     void loadPlayerPresetFromFile (const juce::File& xml);
     juce::File playerPresetsDir() const;
+
+    // QA-ProjectSave Task 11: dirty tracking, ported verbatim from the
+    // ClipsPage/VoxPage trio -- listener-based so it catches every parameter
+    // mutation regardless of how the engine serializes.  Attached to the
+    // engine apvts.state on kit load; detached before program teardown.
+    // mSuppressDirty is set during preset-apply paths so a freshly-loaded
+    // preset doesn't read as dirty.
+    struct ApvtsDirtyListener : public juce::ValueTree::Listener
+    {
+        bool* dirtyFlag { nullptr };
+        bool* suppress  { nullptr };
+        void valueTreePropertyChanged (juce::ValueTree&, const juce::Identifier&) override
+        {
+            if (suppress && *suppress) return;
+            if (dirtyFlag) *dirtyFlag = true;
+        }
+        void valueTreeChildAdded (juce::ValueTree&, juce::ValueTree&) override {}
+        void valueTreeChildRemoved (juce::ValueTree&, juce::ValueTree&, int) override {}
+        void valueTreeChildOrderChanged (juce::ValueTree&, int, int) override {}
+        void valueTreeParentChanged (juce::ValueTree&) override {}
+        void valueTreeRedirected (juce::ValueTree&) override {}
+    };
+    bool              mPageDirty { false };
+    bool              mSuppressDirty { false };
+    ApvtsDirtyListener mDirtyListener;
+    void attachDirtyListener();
+    void detachDirtyListener();
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (BaySickRustyDrumsPage)
 };

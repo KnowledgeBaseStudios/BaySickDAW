@@ -1,4 +1,5 @@
 #include "BaySickRustyDrumsKitGraphic.h"
+#include "../AppPaths.h"
 #include "BaySickRustyDrumsProcessor.h"
 #include "BaySickAssets.h"
 #include <set>
@@ -841,8 +842,7 @@ void BaySickRustyDrumsKitGraphic::setSelectedLabel (const juce::String& label)
 bool BaySickRustyDrumsKitGraphic::saveLayoutToFile (juce::File dest)
 {
     if (dest == juce::File())
-        dest = juce::File::getSpecialLocation (juce::File::userDocumentsDirectory)
-                   .getChildFile ("BaySickDAW")
+        dest = AppPaths::appRoot()
                    .getChildFile ("rusty_kit_hitboxes.txt");
 
     dest.getParentDirectory().createDirectory();

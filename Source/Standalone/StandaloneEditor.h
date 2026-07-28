@@ -308,7 +308,10 @@ private:
     static juce::File templatesDir();         // <Documents>/BaySickDAW/Templates
     static juce::File factoryTemplatesDir();  // <templatesDir>/Factory
     static juce::File userTemplatesDir();     // <templatesDir>/My Templates
-    void showTemplateMenu (juce::Component* anchor);  // popup with Save/Load
+    // File > New from Template submenu: files listed at menu-build time,
+    // resolved by id at dispatch (rebuilt on every menu open).
+    static constexpr int kTemplateMenuLoadBase = 900;
+    juce::Array<juce::File> mTemplateMenuFiles;
     void saveTemplateAs ();                            // prompt + write XML
     void loadTemplate (const juce::File& templateXml); // dirty gate -> applyTemplate
     // The actual teardown + rebuild, past the save prompt.  Never call directly:
@@ -340,12 +343,13 @@ private:
     // Shown asynchronously via AlertWindow; all take the user through
     // project-name validation and recover gracefully on cancel.
     void doFileNew();
-    void doFileNewFromTemplate();
     void doFileSetDefaultTemplate();
     void doFileOpen();
     void doFileQuickOpen();
     void doFileSave();
-    void doFileSaveAs();
+    // QA-ProjectSave Task 12: optional completion fires after a SUCCESSFUL
+    // save only -- Export Project Bundle chains the bundle through it.
+    void doFileSaveAs (std::function<void()> onSaved = {});
     void doFileRestoreBackup();
     // QA-Export: settings dialog -> save chooser -> BuilderPage::runExportWithProgress.
     void doExportAudio();

@@ -1,4 +1,5 @@
 #include "MidiLearnRegistry.h"
+#include "../AppPaths.h"
 
 namespace
 {
@@ -355,9 +356,7 @@ void MidiLearnRegistry::loadFromValueTree (const juce::ValueTree& tree)
 
 juce::File MidiLearnRegistry::globalDefaultsFile()
 {
-    return juce::File::getSpecialLocation (juce::File::userDocumentsDirectory)
-              .getChildFile ("BaySickDAW")
-              .getChildFile ("MidiMappings.xml");
+    return AppPaths::appRoot().getChildFile ("MidiMappings.xml");
 }
 
 bool MidiLearnRegistry::saveAsGlobalDefaults() const

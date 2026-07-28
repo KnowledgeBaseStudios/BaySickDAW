@@ -1,4 +1,5 @@
 #include "BaySickBassEditor.h"
+#include "../AppPaths.h"
 
 //==============================================================================
 // ── Static UI helpers ─────────────────────────────────────────────────────────
@@ -983,8 +984,7 @@ void BaySickBassEditor::updateTabButtons()
 juce::File BaySickBassEditor::presetsDir()
 {
     // P4b (2026-04-23): moved Roaming -> Documents per unified-folder layout.
-    return juce::File::getSpecialLocation (juce::File::userDocumentsDirectory)
-               .getChildFile ("BaySickDAW/Presets/BaySickBass");
+    return AppPaths::appRoot().getChildFile ("Presets/BaySickBass");
 }
 
 // Recursive XML-preset walker - folders become real cascading submenus.

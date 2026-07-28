@@ -1,4 +1,5 @@
 #include "VibePlayerEditor.h"
+#include "../AppPaths.h"
 #include "../SampleLibrary.h"
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -517,8 +518,7 @@ void VibePlayerEditor::resized()
 juce::File VibePlayerEditor::presetsDir()
 {
     // P4b (2026-04-23): moved Roaming -> Documents per unified-folder layout.
-    return juce::File::getSpecialLocation (juce::File::userDocumentsDirectory)
-               .getChildFile ("BaySickDAW/Presets/BaySickPlayer");
+    return AppPaths::appRoot().getChildFile ("Presets/BaySickPlayer");
 }
 
 void VibePlayerEditor::showPresetMenu()
