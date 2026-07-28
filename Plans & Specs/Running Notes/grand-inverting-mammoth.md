@@ -524,6 +524,26 @@
   batch plan (nothing here has been ear-tested; the compile gates + the census-derived
   design are the current evidence).
 
+## 2026-07-27 — TS2 COMMITTED `e9ecf03e` (Jeff-approved); session ends, TS3 next
+
+- **TS2 commit landed:** `e9ecf03e`, 15 files (+1700/-270), tree clean after (this
+  entry + the carry-over refresh ride TS3's commit, same convention as the session-open
+  backfills riding TS1's).  TS1 = `4ea67bd0`, TS2 = `e9ecf03e`.
+- **Process corrections adopted mid-session (carry into every future session):**
+  (1) intermediate "clean checkpoints" are NOT stopping points — the only stops are
+  task-set commit approvals and genuine spec calls; Jeff called premature wrap-ups out
+  three times before it stuck.  (2) Naming plan artifacts (batch IDs included) is the
+  assistant's job, never a docket item (memory updated at the TS1 event).
+- **Next: TS3 (automation fully model-side).**  No open sub-spec calls.  Scope per the
+  plan + this file's pins: EffectParamMap tables for ALL remaining EffectTypes x
+  variants (Saturation/Overdrive/Delay/Reverb umbrellas + pedal-native 100+ — ~20+
+  tables; Reverb includes the 0/1 `freeze` def; the (type, variant) key + one-home
+  mapping-math rules are HARD-WON, do not relearn); retire the 19 engine-editor wrapper
+  sites (vocal capture-lock veto moves with them; Harmless A/B keeps both ids); pedals
+  model-side registration; `_fader`/`_pan` lane remap + permanent-strip shim
+  retirement; EQ band lane ownership off the display; statics re-seed simplification +
+  `onIsParamStale` re-widen; BLU-344 Harmless mod-editor targets.
+
 - **Lane-resolver rules for step 3 (derived from source, do not relearn):** the live
   replay ([PluginProcessor.cpp:2794-2868](../../Source/PluginProcessor.cpp:2794)) walks
   automation blocks + interpolates value01 (stepped/linear) but applies ONLY via
@@ -541,3 +561,283 @@
   param (`_pan` is already the real param id) — TS3 retires the legacy spelling;
   (6) `global_tempo` -> the offline clock. The interpolation walk extracts to a shared
   helper so live + offline cannot drift.
+
+## 2026-07-27 — TS3 — scout complete: the wrapper census, the table matrix, and one architectural finding
+
+- **The 19 wrapper sites confirmed exactly (grep of the five `VKnobAutomation::register*Automation`
+  helpers, whole tree):** BaySickBassEditor:392 (wireID slider lambda) / BaySickSynthEditor:398
+  (same) / VibePlayerEditor:221 (same) + :260 :261 :262 (button) + :263 (selector) /
+  HarmlessEditor:486 (wireMeta slider) + :563 (wireBtn button) + :639 (regDualParam PARAM) /
+  HarmlessFilterRow:61 :62 :63 :65 (sliders) + :74 (combo) / HarmlessRoutingMatrix:38 /
+  HarmlessXYZPad:46 / BaySickNAMIREditor:18 (PARAM, whole-APVTS loop) /
+  BaySickVocalEditor:659 (PARAM, whole-APVTS loop + `kCaptureGated` veto).  Count = 19.
+  Five of the five helpers are view-scoped: even the two PARAM-targeting ones die with their
+  `lifetimeGuard` Component, so destroy-on-close kills them exactly like the widget ones.
+- **TS1's `registerModelEngineAutomation` already covers 17 of the 19 by construction** — it walks
+  the engine APVTS and registers null-owner param-targeting entries for EVERY RangedAudioParameter,
+  which subsumes every per-knob/-button/-combo/-selector wrapper AND Harmless's dual A/B pair (both
+  part ids are separate APVTS params, so both lanes register — the QA-ApvtsAutomation semantics hold
+  for free).  The two that do NOT survive retirement as-is: the vocal `kCaptureGated` veto
+  (`suppressWhen`) and the NAM/IR prefixing, which the model hook already prefixes but without the
+  veto.  So wrapper retirement = delete 19 call sites, keep every `setComponentID` stamp, and carry
+  the veto into the model hook.
+- **The EffectType x variant matrix derived from `createEffectEditor`'s dispatch (both branches).**
+  Full-mode: 31 types; DSP-readable variant umbrellas are Compressor (Modern/FET/Opto/CS — SHIPPED),
+  Saturation (Tube/Console/Tape), Delay (Echo/VocalDoubler), Overdrive (Rack/Pedal).  Everything
+  else is single-panel.  Pedal-mode adds a SECOND dispatch for 7 types
+  (Limiter/Saturation+Tape/Chorus/Flanger/Phaser/Delay/Reverb -> `*PedalPanel`).
+- **ARCHITECTURAL FINDING — PanelMode is a second variant dimension, and it is not DSP-readable.**
+  `variantOf` reads the DSP on purpose (no UI on the automation path), but which of the two panels a
+  DSP got depends on WHERE the slot lives, not on the DSP.  Three live collisions, all the same class
+  as the Modern-vs-FET `attack` bug:
+  (1) **Saturation with `satType == Tape` in a pedal slot** builds `SaturationPedalPanel`, whose
+      "Drive" is 0..10 -> `setFlowers`; the rack's Tape panel "Drive" is -24..+24 dB ->
+      `setTapeInputGain(decibelsToGain(v))`.  Keying on `variantOf(dsp)` alone would feed a
+      face-plate 0..10 into a dB->gain setter.
+  (2) **Reverb `decay`** — rack 0.1..20 s, pedal 0.1..10 s (same setter, different range).
+  (3) **Phaser `rate`** — rack upper bound is DYNAMIC (`getRateMaxHz()`, 2 Hz Slow / 10 Hz Fast),
+      pedal is a fixed 0.05..10.
+  The pedals picker really does offer Compressor / Saturation / Chorus / Flanger / Phaser / Delay /
+  Reverb / Overdrive ([BaySickPedalsEditor.cpp:495-521](../../Source/BaySickPedals/BaySickPedalsEditor.cpp:495)),
+  so all three are reachable, not theoretical.  Resolution (implementation shape inside locked scope,
+  same rule the Compressor lesson established): `PanelContext { Rack, Pedal }` becomes part of the
+  key, supplied by the REGISTRATION SITE (which always knows whether it is a rack or the board)
+  rather than read from the DSP.  `variantOf(type, dsp, ctx)` returns a distinct pedal ordinal for
+  the 7 dual-panel types and ignores ctx for everything else.
+- **Two ParamDef extensions the census forced:** (a) an optional `rangeOf(dsp, lo, hi)` hook, because
+  the old widget applicator read `slider.getMinimum()/getMaximum()` AT APPLY TIME — Phaser `rate` is
+  the one param whose range moves, and a static lo/hi would silently change its meaning; (b) an
+  `affectsLatency` flag, because the panel lambdas for lookahead-class knobs also fire
+  `onLatencyChanged` -> bus PDC refresh.  The shipped Compressor `looka` entry already lost that poke
+  at badger; closing it uniformly for Compressor `looka`, Limiter `ahead`, DeEsser `look`.
+- **Scope boundary held:** tables cover exactly the suffixes that are STAMPED today (`knobs` +
+  `getExtraKnobs()` + `outputVolKnob` + `mAutoToggles`).  Controls that never had a paramId — the
+  Graphic/Bass-Graphic EQ faders (plain `juce::Slider`), the Tuner trim knob, the chickenhead
+  selectors and mode toggles — stay unautomatable.  Making them automatable would be an unprompted
+  behavior change, not a TS3 deliverable.
+- **Panel conversion list (where the map must be the ONE home, i.e. real math would otherwise exist
+  twice):** Opto `peak_reduction`/`gain` (the 0..100 <-> dB map is ALREADY duplicated between
+  [EffectEditorPanels.cpp:620-631](../../Source/Standalone/EffectEditorPanels.cpp:620) and the shipped
+  `kCompOpto` table — badger's leftover), Flanger `damp` (log Hz map + its inverse), DeEsser `detect`
+  (Freq+Q macro), TapeSat `drive`/`hiss` (dB->gain), VocalDoubler `mix` (x0.01), Delay `tone`
+  (negation), AcousticPreamp `notch` (off-below-50 branch).  Trivial pass-throughs keep their direct
+  setter — the table lambda calls the identical setter, so there is no math to drift.
+- **FINDING (pre-existing dead code, NOT this batch's — routed, not deleted):** `TapePanel`
+  ([EffectEditorPanels.cpp:3028-3178](../../Source/Standalone/EffectEditorPanels.cpp:3028), ~150
+  lines, binds `TapeDSP*`) has ZERO construction sites tree-wide — `EffectType::Tape` has dispatched
+  to `TapeSatPanel` since the H-10 cutover (2026-05-02).  Its only remaining mentions are two
+  comments.  No table is written for it (unreachable).  Accrued to the pending ledger for Jeff's
+  Rule-3 routing call at G4 close (Phase 6 is the reserved home for dead-code cleanup).
+- **Mixer lane facts:** `<prefix>_pan` IS a real main-APVTS param id, so `registerStaticAutomationHandlers`
+  already registers it param-targeting — `MixerTrackStrip::setAutomationPrefix`
+  ([:439-485](../../Source/Standalone/MixerTrackStrip.cpp:439)) then OVERWRITES it with a widget
+  applicator, and `reRegisterStripAutomation` re-installs that widget entry after every project
+  boundary.  `<prefix>_fader` has no param twin (the param is `_level`), which is the only reason the
+  shim exists.  The remap is therefore: register `_fader` model-side as an ALIAS onto the `_level`
+  param at param-materialization time, drop both widget registrations, and the shim + its
+  `reRegisterAutomation` helper retire.  Not a save-migration (lane ids are unchanged on disk).
+
+## 2026-07-27 — TS3 — EffectParamMap completed: ~30 tables across every EffectType x variant
+
+- **Shape:** two shorthand macros (`SET_FLD` setter+public-field, `SET_GET` setter+const-getter) keep the
+  ~200 honest pass-through entries to one line each, so the genuinely non-trivial mappings stand out
+  instead of drowning. Tables: Compressor x4 (shipped at badger), Reverb, Chorus, Delay x2
+  (Echo / VocalDoubler), Saturation x3 (Tube / Console / Tape, with EffectType::Tape aliasing the Tape
+  table), Flanger, Overdrive x2 (Rack / Pedal), Phaser, TransientShaper, Limiter, DeEsser, Gate,
+  DeReverb, the 14 pedal-native types, and 7 pedal-FACE tables. **First build was green both configs
+  with zero errors** — the setter/getter names were pre-verified against the DSP headers by script
+  rather than by compile-and-fix.
+- **PanelContext landed as designed** — `variantOf(type, dsp, ctx)`, `kPedalVariant = 100`. Pedal
+  registration passes `PanelContext::Pedal` and gets the pedal table for the 7 dual-panel types, the
+  DSP-read variant for everything else, by construction. `createEffectEditor` stamps the resolved key
+  onto the panel it builds (both dispatch branches), so panel and registry can never disagree about
+  which table a slot uses.
+- **Two ParamDef fields the census forced, both used sparingly:**
+  `rangeOf` — ONE user, Phaser `rate` (the Slow/Fast switch moves its upper bound between 2 and 10 Hz;
+  the applicator this replaced read the live slider bounds every tick). `affectsLatency` — three users
+  (Compressor `looka`, Limiter `ahead`, DeEsser `look`); the rack applicator now runs
+  `setLatencySamples(updateBusLatencies())`, the same PDC refresh the panel lambdas fire through
+  `onLatencyChanged`. The shipped Compressor entry had silently lost that poke at badger.
+- **Non-trivial mappings that now have exactly one home** (panels call the map, or the map is the only
+  copy): FET input-drive inversion + attack/release switch tables (shipped), Opto's 0..100 face plate
+  (the map and the panel each had a copy — badger's leftover, now one), Flanger `damp` (log 20 kHz ->
+  200 Hz sweep AND its inverse), DeEsser `detect` (the Freq+Q macro), TapeSat `drive`/`hiss` (dB ->
+  linear gain), VocalDoubler `mix` (x0.01), Delay `tone` (sign inversion), AcousticPreamp `notch`
+  (the below-50-Hz OFF zone), TransientShaper `attack`/`release` (x100 face scaling), Flanger `feed`
+  (percentage vs coefficient).
+- **`ChorusDSP::getLFOFreq(int)` added** — a const accessor for a private field, so the three LFO-rate
+  lanes have a read-back. No behavior change.
+- **Scope boundary held:** the Graphic/Bass-Graphic EQ pedals and the Tuner get NO table. Their
+  controls are plain `juce::Slider` faders / knobs outside `knobs` + `getExtraKnobs()`, so
+  `setSlotContext` never stamped them and they have no lanes to resolve. Writing tables for them would
+  invent automation the UI has no way to create — a feature, not a TS3 deliverable.
+
+## 2026-07-27 — TS3 — panels stop registering; a display refresh replaces what that cost
+
+- **`EditorPanelBase::setSlotContext` is now STAMP-ONLY.** Its knob + toggle applicator registrations
+  are deleted; the model registers the same ids against the rack (`registerSlotAutomationFor`) or the
+  board (`registerPedalAutomation`).
+- **Consequence caught before it shipped, and closed:** rack panels are DSP-direct — no APVTS, no
+  attachment — so nothing carries a DSP change back to the knob. While automation drove the KNOB that
+  was invisible; with automation driving the DSP, an automated control would sit frozen at its last
+  user position while the sound moved underneath it. This was ALREADY live for Compressor + the
+  per-slot output knob (their DSP-targeting applicators shipped at badger), so TS3 fixes a shipped
+  regression rather than only avoiding a new one.
+  **Fix:** `EditorPanelBase` gained a display refresh — a 10 Hz timer-by-composition (several derived
+  panels already inherit `juce::Timer`, so inheritance would be ambiguous) that re-reads the stamped
+  controls through `EffectParamMap::readNatural` (new). Display only: values are pushed with
+  `dontSendNotification` so it can never write back or form a loop; skipped while the panel is hidden
+  and while the slider is under the mouse so it cannot fight a drag; `output_vol` has no table entry
+  and is left alone by construction. The dtor stops the timer FIRST — `mSyncKnobs` holds raw pointers
+  into vectors the DERIVED panel owns, and the derived destructor has already run by then.
+  This is the plan's "views keep ... UI readers where needed" clause.
+- **Pedals are model-side.** New `BaySickPedalsProcessor::onSlotAutomationChanged`, fired from
+  loadEffect / clearSlot / restoreFullState (NOT moveSlot — uuids travel with the Slot and applicators
+  resolve by uuid, so a reorder cannot repoint a lane), deliberately separate from the editor-owned
+  `onSlotsExternallyChanged` because a `std::function` has one subscriber and this must fire whether or
+  not an editor exists. `StandaloneEditor::registerPedalAutomation` walks the 8 slots, resolves board
+  -> slot BY UUID -> DSP at apply time, keyed `PanelContext::Pedal`. Wired at Inst-tab creation.
+- **The offline path got the pedal branch TS2 deferred** — `inst<N>_pedals_<uuid>_<suffix>` resolves in
+  `applyOfflineLaneValue` now. The board is not an EffectRack on a graph channel, so the rack walk
+  could never have seen it: without this branch pedal automation was simply absent from every export.
+
+## 2026-07-27 — TS3 — the 19 wrapper sites retired; the five helpers deleted with them
+
+- **All 19 gone, verified by grep returning zero matches** for
+  `VKnobAutomation::register(Slider|Button|Combo|Parameter|Selector)Automation` tree-wide. Every
+  `setComponentID` stamp stays — the right-click Automate menu reads the id off the clicked component.
+- **Why this was a pure deletion, established BEFORE cutting:** every wrapper keyed its registration to
+  `p.pid(name)`, and `pid(name) == mPrefix + name` IS the engine's APVTS param id. TS1's
+  `registerModelEngineAutomation` walks the whole engine parameter list and registers exactly those
+  keys, param-targeting. So the wrappers were a second, view-scoped claim on keys the model already
+  owned — and since the editor is built AFTER the engine, the view claim was WINNING. Retiring them is
+  what makes TS1's registration actually take effect.
+- **Harmless A/B preserved by construction, not by special-casing.** Both part ids are separate APVTS
+  params, so the model's parameter-list walk registers both, param-targeting. The `regDualParam` pair
+  that used to guarantee this was guarded by the very slider that Part A/B rebinding destroys and
+  rebuilds — strictly worse than what replaces it.
+- **The vocal capture-lock veto travelled with the wrapper**, as the plan required. The gate list moved
+  to `BaySickVocalProcessor::isCaptureGated` — model-side because two consumers need the same set and
+  neither is more authoritative (the editor greys these during a take; the applicator vetoes writes for
+  the identical reason). It had been two hand-kept copies, editor timer and registration list, one
+  edit from disagreeing. `registerModelEngineAutomation` applies the veto for Vox main-engine params.
+- **The five helpers are DELETED, not left dangling** (this batch's own dead code, cleaned in-batch).
+  Four drove a control; the fifth still took a `Component& lifetimeGuard`. Under destroy-on-close
+  every one of them is a guaranteed dead lane, so leaving them would be leaving a trap.
+
+## 2026-07-27 — TS3 — mixer + EQ lanes move to param materialization; the owner index is gone
+
+- **New model event `VibeSynthProcessor::onMixerStripParamsCreated`**, fired from
+  `ensureMixerStripParams` the first time a prefix's params are created. Strips materialize lazily,
+  long after the startup sweep, which is the whole reason the mixer strip and the EQ display each
+  carried their own view-scoped registration. One model event replaces both.
+- **`_fader` remapped, and the shim retired.** The lane has always been spelled `<prefix>_fader` while
+  the parameter is `<prefix>_level` — the id predates the param, and that mismatch is the ONLY reason
+  mixer faders needed a view-scoped applicator plus `MixerPage::reRegisterStripAutomation` to put it
+  back after every project boundary. `registerStaticAutomationHandlers` now DERIVES the alias while
+  walking params (any `mixer_*_level` gets a `_fader` twin), so it is restored by the same call that
+  re-seeds everything else. Saved lanes keep their spelling — nothing on disk changes, and this is not
+  a migration. `MixerTrackStrip::setAutomationPrefix` is stamp-only; `reRegisterAutomation` and
+  `MixerPage::reRegisterStripAutomation` are deleted. Automating a fader now moves the PARAMETER and
+  the attachment moves the cap — the knob follows again, which the widget path also did.
+- **`ParametricEQDisplay::registerAutomationForBoundEQ` deleted.** Its closures already wrote the
+  parameter, so the display contributed only a lifetime — and the wrong one twice over: band lanes died
+  with the EQ view, and did not exist at all until some view had bound the EQ (a band lane silently did
+  nothing after a project load until the user happened to visit the page). Safe to delete outright
+  because the function early-returned on any id `apvts->getParameter` did not know, so every id it ever
+  registered is a real APVTS param the static walk covers.
+- **The owner index is DELETED and `StandaloneEditor` is no longer a `juce::ComponentListener`**
+  (verified: that base class had exactly one user, this). Gone: `trackAutomationOwner`,
+  `componentBeingDeleted`, `mAutomationOwners`, `mAutomationIdOwner`, `mTearingDownAutomation`, and the
+  `juce::Component* owner` parameter on both registration hooks. Nothing registers with an owner any
+  more, so the index was a lifetime system over a permanently empty set — worse than nothing, because
+  it would half-work for anyone who later re-added a view-scoped registration. Both of badger's
+  hard-won guards (clear-the-claim on null-owner; revoke-only-what-you-still-own) existed because view
+  lifetime and lane lifetime were tangled; TS3 untangles them instead of guarding them.
+- **`onIsParamStale` RE-WIDENED** to "not a main-APVTS param AND not in the registry" — the exact test
+  reverted on 2026-07-26. The revert was right then (panel-keyed applicators made "unregistered" mean
+  "you are looking at another channel"); it is honest now that registration lasts as long as the thing
+  it targets, so "not registered" genuinely means the target is gone. Without the widening, deleted
+  tabs / cleared rack slots / removed pedals leave lanes that LOOK alive.
+
+## 2026-07-27 — TS3 — BLU-344: the mod editor's DEPTH + LENGTH become automatable
+
+- **The one target class in this batch that is neither an APVTS param nor a rack DSP.** DEPTH and
+  LENGTH are fields on `ModSourceState` inside `HarmlessModRegistry`, addressed by (target paramId,
+  source). Lane ids `<targetParamId>_mod<sourceIdx>_depth` / `_length` — no APVTS param can collide
+  with that shape, since the target id is itself a full engine param id.
+- **The 13-step LENGTH table moved to `HarmlessModLength`** in HarmlessModRegistry.h, beside the field
+  it writes, with a `nearestIndex` inverse. The editor had the forward table in one function and a
+  hand-rolled copy of the inverse in another; both now call the shared one, and the automation
+  applicator lands on exactly the same 13 values the knob offers.
+- **Registered model-side** at engine creation (`registerHarmlessModAutomation`, a no-op for non-Harmless
+  engines) for every (target x source). Applicators re-resolve rig -> tab -> engine -> registry at
+  apply time and call `publishSnapshot()` so voices observe the change on their next block — the same
+  contract the editor's own edits use. LENGTH is registered only for Envelope + LFO: the editor hides
+  the control for the other five sources, so a lane there would address something the user cannot set.
+- **The editor stamps both ids in `syncControlsFromState`** — the one place the visible (target, source)
+  pair changes — so the id under the cursor always names the pair the knob is actually editing.
+- **Offline replay covers them too.** `applyOfflineLaneValue` gained a mod-lane branch; without it,
+  DEPTH/LENGTH automation would have played live and been silently missing from every export.
+
+## 2026-07-28 — TS3 — owner ruling: sfizz automation is a DEFECT, fixed; TapePanel deleted
+
+- **Jeff's call on the two items surfaced at the TS3 commit:** (1) delete `TapePanel` outright rather
+  than routing it to the G4-close ledger; (2) the sfizz gap is "something you never setup and you need
+  to fix" — NOT a new feature, so it ships in this batch. Both done.
+- **The sfizz gap was worse than I reported, and the correction matters.** I surfaced it as "these
+  engines have no automation lanes." Reading further: `AriaControlPanel::showAriaParamPopup`
+  ([AriaControlPanel.cpp:90-113](../../Source/Standalone/AriaControlPanel.cpp:90)) has ALWAYS offered
+  "Automate: <label>" on every kit CC knob and fader, and firing it calls
+  `VKnobAutomation::sOnAutomate(paramId)` — which creates and draws a real lane. Nothing ever
+  registered an applicator for those ids, so the lane played back against nothing. So this was not an
+  absent feature: it was a UI that advertised automation, accepted the gesture, drew the clip, and
+  silently did nothing. Jeff was right to call it a defect.
+- **Why the trio was missed:** they are the only engines that are PROCESSOR-owned rather than
+  rig-owned (`mGuitarsEngine`/`mBassesEngine` per-instance arrays + the `mRustyDrumsEngine` singleton,
+  deliberately left on their own race-safe load paths at TS1). TS1's model hook keys off
+  `EngineRig::onEngineCreated`, which by definition never fires for them.
+- **The fix, matching every other family's shape:** new
+  `VibeSynthProcessor::onSfizzEngineReady (SfizzEngineKind, instIdx)` fired at the end of each
+  successful `loadBaySick{Guitars,Basses,RustyDrums}Kit` — deliberately OUTSIDE the per-slot SpinLock
+  (the audio thread try-locks it, and registration is a map insert per param), and on every successful
+  load rather than only first construction, so a destroy/recreate or source switch re-registers by
+  itself. `StandaloneEditor::registerSfizzEngineAutomation` walks the engine's whole parameter list
+  (outVol + the CC bank + the cut-self pair) and registers applicators that RE-RESOLVE the engine
+  through the processor at apply time — these engines are destroyed and rebuilt by kit loads, so a
+  captured pointer would be exactly the stale-target bug the model-side rewrite exists to prevent.
+- **Lane ids need no new vocabulary:** the param ids are already globally unique (`bgg_<idx>_*`,
+  `bbb_<idx>_*`, `brd_*`), so the lane id IS the param id — precisely what the Aria menu was already
+  passing to `sOnAutomate`. Every lane a user created before this fix starts working; none are
+  orphaned.
+- **Offline replay extended too** — new `VibeSynthProcessor::forEachSfizzApvts`, consumed by
+  `applyOfflineLaneValue`'s engine-lane stage. `EngineRig::forEachEngine` covers rig-owned engines
+  only, so without it a sfizz lane would have applied live and been missing from every export: the
+  same class of hole TS2 fixed for the rig families.
+- **Project-restore path verified, not assumed:** Rusty's `reloadForProjectRestore` forwards to
+  `mProcessor.loadBaySickRustyDrumsKit`, and Inst restores go through `loadBaySick{Guitars,Basses}Kit`,
+  so the hook fires after `resetProjectState`'s map clear on every load.
+- **`TapePanel` DELETED** (147 lines, `EffectEditorPanels.cpp`), with its now-unused
+  `#include "../DSP/TapeDSP.h"` and the two comments that referenced it by name. Confirmed for Jeff
+  before cutting: `TapePanel` bound the LEGACY standalone `TapeDSP*`; the Tape option he actually uses
+  is `TapeSatPanel`, which binds `SaturationDSP*` + its `setTape*` family and is what
+  `createEffectEditor`'s `EffectType::Tape` case builds. Covered by the new `kSatTape` table.
+- **`TapeDSP` CLASS DELETED TOO** (Jeff, same exchange: "that should be cleaned as well then,
+  correct?" — yes).  `Source/DSP/TapeDSP.h` + `.cpp` removed via `git rm`, its `CMakeLists.txt:501`
+  build entry dropped, and the two stale `#include "DSP/TapeDSP.h"` lines in `EffectRack.cpp` +
+  `EffectPresetIO.cpp` (whose files never touched the type) removed with it.  A full-tree census ran
+  BEFORE cutting: zero code dependencies.
+- **Two things deliberately KEPT during that sweep, because deleting them would break behaviour or
+  erase the reason the current code looks how it does:**
+  1. `SaturationDSP.cpp:704`'s `if (xml->getTagName() == "TapeDSP")` — a STRING compare, not a type
+     reference.  It is the legacy-preset migration path that lets pre-cutover Tape presets load, and
+     removing it would silently orphan every one of them.
+  2. The remaining `TapeDSP` mentions in `SaturationDSP.h/.cpp`, `EffectRack.cpp`,
+     `EffectEditorPanels.cpp` and `EffectPresetIO.cpp` are Rule 6 keeper comments — DSP/domain
+     references explaining that SaturationDSP's tape body is a bit-exact port of the deleted class,
+     and why `EffectType::Tape` is an alias.  `EffectRack.cpp`'s was the ONE that became false (it
+     claimed the class "stays in the source tree as an emergency-rollback safety net"), so it was
+     corrected rather than kept.
+- **Follow-on cleanup:** deleting TapePanel orphaned its only helper, the file-local
+  `setPink` TextButton colourer (MSVC C4505 flagged it on the next gate).  Removed too --
+  this batch's own dead code, cleaned in-batch rather than routed.

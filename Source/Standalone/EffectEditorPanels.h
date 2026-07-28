@@ -77,7 +77,21 @@ struct EditorPanelBase : public juce::Component
     //               (UUID travels with the Slot via std::swap).  Empty uuid =
     //               no paramIds stamped (slot is empty or pre-C13 fallback).
     // Call after the panel is created and placed in a slot.
+    //
+    // QA-ModelShell TS3 (2026-07-27): this STAMPS ONLY.  It used to also
+    // register the automation applicators, which is precisely why a lane died
+    // whenever its panel did.  Registration is now a model-side act keyed to
+    // the rack (EffectsPage::registerSlotAutomationFor) or the pedals board
+    // (StandaloneEditor::registerPedalAutomation), so the ids stamped here are
+    // answered by the registry whether this panel exists or not.
     void setSlotContext(const juce::String& channelPrefix, const juce::String& slotUuid);
+
+    // Which DSP this panel drives, and under which EffectParamMap key.  Set by
+    // createEffectEditor, which is the one place that knows all three.  Used by
+    // the display refresh below to read values back out of the DSP.
+    DSPBase*   mDsp        { nullptr };
+    EffectType mEffectType { EffectType::None };
+    int        mVariant    { 0 };
 
     // Hook for panels that keep knobs in their own vectors (r1knobs, r2knobs)
     // instead of the base-class `knobs`. Return raw pointers to extra knobs so
@@ -155,6 +169,29 @@ struct EditorPanelBase : public juce::Component
 
 private:
     UndoContext mUndoCtx;
+
+    // ── Display refresh (QA-ModelShell TS3) ──────────────────────────────────
+    // Rack panels are DSP-direct: no APVTS, no attachment, so nothing carries a
+    // DSP change back to the knob.  That was invisible while automation drove
+    // the KNOB, but automation now drives the DSP, so an automated control would
+    // sit frozen at its last user position while the sound moved underneath it.
+    // (Compressor + the per-slot output knob already had this since their
+    // DSP-targeting applicators shipped.)  This walks the stamped controls and
+    // re-reads them through EffectParamMap.
+    //
+    // Display ONLY: values are pushed with dontSendNotification, so this never
+    // writes back to the DSP and cannot form a loop.  Skipped while the panel is
+    // hidden and while the user is dragging, so it can never fight the mouse.
+    // Timer-by-composition rather than inheritance -- several derived panels
+    // already inherit juce::Timer themselves.
+    struct DisplaySync : juce::Timer
+    {
+        std::function<void()> tick;
+        void timerCallback() override { if (tick) tick(); }
+    };
+    std::unique_ptr<DisplaySync>                        mDisplaySync;
+    std::vector<std::pair<VKnob*, juce::String>>        mSyncKnobs;    // control + map suffix
+    void refreshControlsFromDsp();
 };
 
 // ── createEffectEditor ────────────────────────────────────────────────────────

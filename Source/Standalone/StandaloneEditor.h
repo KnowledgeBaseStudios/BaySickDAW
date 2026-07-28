@@ -47,10 +47,7 @@ class BaySickRustyDrumsPage;  // J-6 (2026-05-03): singleton drum-kit page
 class StandaloneEditor : public  juce::Component,
                          public  juce::MenuBarModel,
                          public  juce::ApplicationCommandTarget,
-                         public  juce::KeyListener,
-                         // QA-ProjectSave Task 7: watches automation-owning
-                         // controls so their registry entries die with them.
-                         public  juce::ComponentListener
+                         public  juce::KeyListener
 {
 public:
     StandaloneEditor(VibeSynthProcessor& p, StandalonePlayHead& ph,
@@ -780,9 +777,11 @@ private:
     // Used when creating automation blocks to seed the initial control points.
     std::map<juce::String, std::function<float()>>     mAutomationValueReaders;
 
-    // Statics = every APVTS param + "global_tempo".  Called from the ctor and
-    // re-called after resetProjectState()'s full map clear (nothing else
-    // re-registers them; dynamic entries re-register when their UI rebuilds).
+    // Statics = every APVTS param (plus the derived "<prefix>_fader" aliases)
+    // + "global_tempo".  Called from the ctor, after resetProjectState()'s full
+    // map clear, and from VibeSynthProcessor::onMixerStripParamsCreated -- a
+    // lazily-created strip's params did not exist at the earlier sweeps, and
+    // param materialization is the model event that says they do now.
     void registerStaticAutomationHandlers();
 
     // QA-ModelShell TS1: engine-parameter lane registration keyed to the
@@ -791,35 +790,51 @@ private:
     // time; TS3 retires the view wrappers these coexist with.
     void registerModelEngineAutomation (struct EngineTab& tab);
 
-    // ── Applicator lifetime (QA-ProjectSave Task 7, 2026-07-26) ──────────────
-    // Registration used to be insert-only, cleaned by a hand-written list of ~17
-    // key prefixes wired into the tab-close paths.  That list had to be updated
-    // by hand for every new tab type, and it could not see a control that died
-    // WITHOUT its tab closing -- an FX rack panel destroyed by switching the
-    // Effects page channel, a pedal panel rebuilt on slot change, Harmless
-    // rebinding its Part A/B sliders.  Those left entries whose SafePointer was
-    // null: dispatch still found them, still called them, and they did nothing,
-    // so an automation lane went dead silently.
+    // QA-ModelShell TS3: the BaySickPedals board's per-slot lanes.  Same shape
+    // as the FX rack's registerSlotAutomationFor -- resolve board -> slot BY
+    // UUID -> DSP at apply time, null owner -- but the board is not an
+    // EffectRack on a graph channel, so it needs its own resolver.  Re-run on
+    // every slot load/clear/restore via BaySickPedalsProcessor::
+    // onSlotAutomationChanged, and once at Inst-tab creation.
+    void registerPedalAutomation (int instPageIndex);
+
+    // BLU-344 (QA-ModelShell TS3): the Harmless mod editor's DEPTH and LENGTH.
+    // These are the batch's only automation targets that are neither an APVTS
+    // parameter nor a rack DSP -- they are fields on HarmlessModRegistry,
+    // addressed by (target paramId, source).  Ids are
+    // "<targetParamId>_mod<sourceIdx>_depth" / "_length"; no APVTS param can
+    // collide with that shape.  Registered for every (target x source) the
+    // editor can reach, so a lane works whichever pair the user was on when
+    // they created it.
+    void registerHarmlessModAutomation (TabKind kind, int pageIndex);
+
+    // QA-ModelShell TS3 fix (2026-07-28): the sfizz trio's lanes.  These
+    // engines are processor-owned, not rig-owned, so TS1's model hook never
+    // saw them -- and because the Aria panel already offers "Automate: ..." on
+    // every kit CC, that gap meant a right-click produced a lane that applied
+    // to nothing.  Registers the engine's whole parameter list (outVol, the
+    // CC bank, cut-self pair) with applicators that re-resolve the engine
+    // through the processor at apply time, so a kit swap or a
+    // destroy/recreate cycle cannot strand them.
+    void registerSfizzEngineAutomation (VibeSynthProcessor::SfizzEngineKind kind,
+                                        int instIdx);
+
+    // ── Applicator lifetime (QA-ModelShell TS3, 2026-07-27) ─────────────────
+    // There is none to track any more.  QA-ProjectSave Task 7 built an
+    // owning-Component index here because a lane's applicator drove a CONTROL,
+    // so the registry had to notice when that control died -- first via a
+    // hand-written list of ~17 key prefixes, then via ComponentListener when the
+    // list proved unable to see a control that died without its tab closing.
     //
-    // Now each registration records its owning Component and the registry
-    // listens for that component's destruction, which fires first in
-    // ~Component.  No prefix list, and no path can be forgotten.
+    // TS3 removes the premise instead of the symptom: every registration is now
+    // made by the model (engine creation, rack slot, pedal slot, param
+    // materialization) and re-resolves its target through the model at APPLY
+    // time.  Nothing is keyed to a view, so nothing has to be revoked when a
+    // view dies -- which is what makes destroy-on-close windows safe.  This
+    // matches the `/architecture` finding (Research Reports, 2026-07-26) that no
+    // DAW or plugin framework keeps a UI-keyed applicator map at all.
     //
-    // The `/architecture` pass (Research Reports, 2026-07-26) found no DAW or
-    // plugin framework that keeps a UI-keyed applicator map at all; this closes
-    // the lifetime hole without the larger move of promoting every target to a
-    // real parameter, which is a post-v1 job.
-    void trackAutomationOwner (const juce::String& paramId, juce::Component* owner);
-    void componentBeingDeleted (juce::Component& c) override;
-    std::map<juce::Component*, juce::StringArray> mAutomationOwners;
-    // Which component currently owns each id.  Registration overwrites by key,
-    // so a dying component must not revoke an id a newer one has claimed.
-    std::map<juce::String, juce::Component*>      mAutomationIdOwner;
-    // Guards the destruction callback while the editor itself is going away:
-    // pages die during ~StandaloneEditor, and touching the maps then is both
-    // pointless and a use-after-free risk if they have already been destroyed.
-    bool mTearingDownAutomation { false };
-    // One complaint per paramId per session (step 2).  The dispatch runs at the
+    // One complaint per paramId per session.  The dispatch runs at the
     // automation tick rate, so an unguarded warning would be a flood.
     juce::StringArray mReportedDeadLanes;
 

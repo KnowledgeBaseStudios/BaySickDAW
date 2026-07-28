@@ -12,7 +12,6 @@
 #include "../DSP/OverdriveDSP.h"
 #include "../DSP/PhaserDSP.h"
 #include "../DSP/TransientShaperDSP.h"
-#include "../DSP/TapeDSP.h"
 #include "../DSP/LimiterDSP.h"
 #include "../DSP/DeEsserDSP.h"
 

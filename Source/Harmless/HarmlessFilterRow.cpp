@@ -56,13 +56,11 @@ void HarmlessFilterRow::attachToApvts (juce::AudioProcessorValueTreeState& apvts
         mKbTrack.setTooltip ("Filter Keyboard Tracking (0..1)");
     }
 
-    // QA-ApvtsAutomation: these ids are engine params, absent from the MAIN
-    // apvts, so the automation pass reaches them only via this registry.
-    VKnobAutomation::registerSliderAutomation (cutoffId, mFreqKnob);
-    VKnobAutomation::registerSliderAutomation (resId,    mResKnob);
-    VKnobAutomation::registerSliderAutomation (envAmtId, mEnvKnob);
-    if (!kbTrackId.isEmpty())
-        VKnobAutomation::registerSliderAutomation (kbTrackId, mKbTrack);
+    // QA-ModelShell TS3 (2026-07-27): these ids are engine APVTS params, and the
+    // model registers every one of them at engine creation
+    // (StandaloneEditor::registerModelEngineAutomation), so the widget
+    // registrations that used to sit here are gone -- they only ever added a
+    // second, view-scoped claim on the same key that died with the row.
 
     // Task 5 follow-up: the filter TYPE combo is tone state (it selects the
     // filter model), attached but never stamped -- so it was the one control on
@@ -71,7 +69,6 @@ void HarmlessFilterRow::attachToApvts (juce::AudioProcessorValueTreeState& apvts
     {
         mTypeCombo.setComponentID (typeId);
         mTypeCombo.setTooltip ("Filter Type");
-        VKnobAutomation::registerComboAutomation (typeId, mTypeCombo);
     }
 }
 

@@ -475,15 +475,13 @@ HarmlessEditor::HarmlessEditor (HarmlessProcessor& p)
     // so GlobalAutoRightClick exposes the "Automate: ..." + "Type in value..."
     // menus and hover reveals the param name + units. ASCII-only strings.
     // QA-ApvtsAutomation: the stamped id is also the automation registry key.
-    // Engine params live outside the MAIN apvts, so the automation pass only
-    // reaches them through this registry -- without the registration the lane
-    // draws and plays back against nothing.
+    // QA-ModelShell TS3: the registration behind that key is made model-side at
+    // engine creation, so these controls only stamp.
     auto wireMeta = [&p] (juce::Slider& s, const char* paramSuffix, const char* tip)
     {
         const juce::String id = p.pid (paramSuffix);
         s.setComponentID (id);
         s.setTooltip     (tip);
-        VKnobAutomation::registerSliderAutomation (id, s);
     };
     // Top-Left
     wireMeta (mTimbreBlend,    "timbre_blend",     "Timbre Blend - crossfades Part A toward Part B (0..1)");
@@ -553,14 +551,13 @@ HarmlessEditor::HarmlessEditor (HarmlessProcessor& p)
 
     // QA-ApvtsAutomation Task 5 follow-up (Jeff 2026-07-25): the last stragglers.
     // All five are attached but were never stamped, so they offered no Automate
-    // menu.  Engine params -- absent from the MAIN apvts -- so automation reaches
-    // them only via this registry.  pluck_blur is deliberately absent: it is a
-    // Part A/B dual, already stamped + registered by rebindToPart.
+    // menu.  QA-ModelShell TS3: stamping only -- registration is model-side.
+    // pluck_blur is deliberately absent: it is a Part A/B dual, stamped by
+    // rebindToPart.
     auto wireBtn = [&p] (juce::Button& b, const char* paramName)
     {
         const juce::String id = p.pid (paramName);
         b.setComponentID (id);
-        VKnobAutomation::registerButtonAutomation (id, b);
     };
     wireBtn (mLegatoBtn,      "legato");
     wireBtn (mUnisonAltBtn,   "unison_alt");
@@ -627,29 +624,19 @@ HarmlessEditor::HarmlessEditor (HarmlessProcessor& p)
 
     // QA-ApvtsAutomation (Jeff 2026-07-25): Part A and Part B both render at all
     // times -- Part B is a second layer, not an alternate mode -- so each part's
-    // param owns an independent automation lane and both can play at once.
-    // Registering the PARAM (not the shared knob) is what makes that possible:
-    // one knob is time-shared between the two params, so a knob-driven applicator
-    // would write whichever part happens to be bound and collapse both lanes onto
-    // the same target.  These deliberately supersede the knob-driven registrations
-    // wireMeta made above for the Part A ids.
-    auto regDualParam = [&p] (const juce::String& id, juce::Component& guard)
-    {
-        if (auto* rap = p.apvts.getParameter (id))
-            VKnobAutomation::registerParameterAutomation (id, *rap, guard);
-    };
-    for (auto& d : mDualSliders)
-        if (d.slider != nullptr)
-        {
-            regDualParam (d.paramA, *d.slider);
-            regDualParam (d.paramB, *d.slider);
-        }
-    for (auto& d : mDualButtons)
-        if (d.button != nullptr)
-        {
-            regDualParam (d.paramA, *d.button);
-            regDualParam (d.paramB, *d.button);
-        }
+    // param owns an independent automation lane and both can play at once.  That
+    // requires targeting the PARAM rather than the shared knob: one knob is
+    // time-shared between the two params, so a knob-driven applicator would
+    // write whichever part happens to be bound and collapse both lanes onto the
+    // same target.
+    //
+    // QA-ModelShell TS3 (2026-07-27): the registration that guaranteed this
+    // moved out of the editor entirely.  The model walks the engine's whole
+    // parameter list at creation, so BOTH part ids get param-targeting
+    // applicators the same way -- and unlike the pair that used to live here,
+    // they are not guarded by a slider that Part A/B rebinding destroys and
+    // rebuilds.  The A/B semantics are preserved by construction, not by this
+    // function.
 
     if (auto* pp = p.apvts.getRawParameterValue (p.pid ("part_sel")))
         mActivePart = (pp->load() > 0.5f) ? 1 : 0;

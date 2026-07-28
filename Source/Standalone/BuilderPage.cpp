@@ -13,6 +13,8 @@
 #include "../DSP/EffectParamMap.h"  // QA-ModelShell TS2: rack-lane resolution (type, variant)
 #include "../DSP/LufsMeterDSP.h"    // QA-ModelShell TS2: CL-227 backend / CL-045 measure pass
 #include "EffectsPage.h"            // QA-ModelShell TS2: channelPrefixForId / rackForChannelId statics
+#include "../BaySickPedals/BaySickPedalsProcessor.h"   // QA-ModelShell TS3: offline pedal-board lanes
+#include "../Harmless/HarmlessProcessor.h"             // BLU-344: offline mod-editor lanes
 #include "../BaySickVocal/BaySickVocalProcessor.h"  // QA-ModelShell TS2: vox lane -> vocal + embedded NAM/IR
 
 // Smoke #45: minimal user32 import for the right-Alt check -- deliberately
@@ -8533,12 +8535,57 @@ void BuilderPage::applyOfflineLaneValue (const juce::String& pid, float v01)
             }
             return false;
         }
-        // Inst: the NAM/IR stage's bare ids.  Pedal lanes are uuid-keyed rack
-        // lanes whose EffectParamMap tables land in TS3 -- unresolved here.
+        // Inst: the NAM/IR stage's bare ids.  A pedal-board lane also starts
+        // "inst<N>_" but its bare id is "pedals_<uuid>_<suffix>", which is not a
+        // NAM param -- it falls through to the pedal branch below.
         return applyToApvts (EngineRig::apvtsOf (t->namIr), bare);
     };
     if (tryPageLane ("vox",  TabKind::Vox))  return;
     if (tryPageLane ("inst", TabKind::Inst)) return;
+
+    // Pedal-board lanes: "inst<N>_pedals_<slotUuid>_<suffix>".  The board is not
+    // an EffectRack on a graph channel, so the rack walk below cannot see it --
+    // without this branch pedal automation is simply absent from every export.
+    // Slot by UUID, never index (a board reorder carries the uuid with the Slot),
+    // and PanelContext::Pedal because the board builds the pedal FACE of the 7
+    // dual-panel types, whose knobs share labels with the rack face at different
+    // ranges and different setters.
+    {
+        const juce::String word = "inst";
+        if (pid.startsWith (word))
+        {
+            const juce::String tail = pid.substring (word.length());
+            int digits = 0;
+            while (digits < tail.length()
+                   && juce::CharacterFunctions::isDigit (tail[digits])) ++digits;
+            const juce::String marker = "_pedals_";
+            if (digits > 0 && tail.substring (digits).startsWith (marker))
+            {
+                const int idx  = tail.substring (0, digits).getIntValue();
+                const juce::String rest = tail.substring (digits + marker.length());
+                if (auto* t = rig.findTab (TabKind::Inst, idx))
+                {
+                    if (t->pedals != nullptr)
+                    {
+                        for (int s = 0; s < BaySickPedalsProcessor::kNumSlots; ++s)
+                        {
+                            const juce::String uuid = t->pedals->getSlotUuid (s);
+                            if (uuid.isEmpty() || ! rest.startsWith (uuid + "_")) continue;
+                            const juce::String suffix = rest.substring (uuid.length() + 1);
+                            auto*     dsp  = t->pedals->getSlotEffect (s);
+                            const auto type = t->pedals->getSlotType (s);
+                            EffectParamMap::applyNorm (
+                                type,
+                                EffectParamMap::variantOf (type, dsp,
+                                    EffectParamMap::PanelContext::Pedal),
+                                dsp, suffix, v01);
+                            return;
+                        }
+                    }
+                }
+            }
+        }
+    }
 
     // Engine lanes carry the engine's own globally-unique APVTS param id
     // ("tk_<trackId>_<fam>_*") -- sweep the rig for the owner.
@@ -8550,6 +8597,67 @@ void BuilderPage::applyOfflineLaneValue (const juce::String& pid, float v01)
                 applied = true;
         });
         if (applied) return;
+    }
+
+    // The sfizz trio (Guitars / Basses / RustyDrums) is processor-owned, not
+    // rig-owned, so the sweep above cannot see it.  Its ids are globally unique
+    // too ("bgg_<idx>_", "bbb_<idx>_", "brd_"), so the same bare-id match works.
+    {
+        bool applied = false;
+        mProcessor.forEachSfizzApvts ([&] (juce::AudioProcessorValueTreeState& ap)
+        {
+            if (! applied && applyToApvts (&ap, pid))
+                applied = true;
+        });
+        if (applied) return;
+    }
+
+    // BLU-344 Harmless mod-editor lanes: "<targetParamId>_mod<N>_depth|length".
+    // Not APVTS params -- fields on HarmlessModRegistry -- so nothing above can
+    // resolve them, and without this branch the DEPTH/LENGTH automation that
+    // plays live would be silently missing from every export.  The target id is
+    // itself an engine param id, so the search is a rig sweep like the one above.
+    if (pid.contains ("_mod"))
+    {
+        const juce::String tail = pid.fromLastOccurrenceOf ("_", false, false);
+        const bool isDepth  = (tail == "depth");
+        const bool isLength = (tail == "length");
+        if (isDepth || isLength)
+        {
+            const juce::String head = pid.upToLastOccurrenceOf ("_", false, false);
+            const juce::String srcTok = head.fromLastOccurrenceOf ("_mod", false, false);
+            const juce::String targetId = head.upToLastOccurrenceOf ("_mod", false, false);
+            if (srcTok.isNotEmpty() && srcTok.containsOnly ("0123456789"))
+            {
+                const int srcIdx = srcTok.getIntValue();
+                bool applied = false;
+                rig.forEachEngine ([&] (juce::AudioProcessor& p)
+                {
+                    if (applied) return;
+                    auto* h = dynamic_cast<HarmlessProcessor*> (&p);
+                    if (h == nullptr) return;
+                    auto& reg = h->getModRegistry();
+                    auto* tgt = reg.findTarget (targetId);
+                    if (tgt == nullptr) return;
+                    if (srcIdx < 0 || srcIdx >= (int) ModSource::NumSources) return;
+                    auto& src = tgt->sources[(size_t) srcIdx];
+                    if (isDepth)
+                    {
+                        src.depth = -1.0f + juce::jlimit (0.0f, 1.0f, v01) * 2.0f;
+                    }
+                    else
+                    {
+                        const int last = HarmlessModLength::kNumSteps - 1;
+                        const int i = juce::jlimit (0, last,
+                            (int) std::lround ((double) juce::jlimit (0.0f, 1.0f, v01) * last));
+                        src.length = HarmlessModLength::kBeats[i];
+                    }
+                    reg.publishSnapshot();
+                    applied = true;
+                });
+                if (applied) return;
+            }
+        }
     }
 
     // Legacy mixer fader spelling: "<mixerPrefix>_fader" -> the real _level

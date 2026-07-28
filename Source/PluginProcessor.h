@@ -360,6 +360,26 @@ public:
     bool loadBaySickBassesKit (int instIdx, const juce::File& sfzPath);
     void destroyBaySickBasses (int instIdx);
 
+    // ── sfizz automation wiring (QA-ModelShell TS3 fix, 2026-07-28) ─────────
+    // These three engines are processor-owned rather than rig-owned, so they
+    // were missed when every other engine family got model-side lane
+    // registration -- and the miss was not merely "no automation": the Aria
+    // control panel has always offered "Automate: ..." on every kit CC, so
+    // right-clicking one CREATED a lane that then applied to nothing.  Silent
+    // dead lanes, reported by the owner 2026-07-28.
+    //
+    // Fired after a kit load completes (outside the per-slot SpinLock -- the
+    // audio thread try-locks it, and registration is a map insert per param).
+    // Registration overwrites by key, so firing on every successful load is
+    // both harmless and what makes a destroy/recreate cycle re-register.
+    enum class SfizzEngineKind { Guitars, Basses, RustyDrums };
+    std::function<void (SfizzEngineKind kind, int instIdx)> onSfizzEngineReady;
+
+    // Walk every live sfizz engine's APVTS.  The offline lane replay needs this
+    // because EngineRig::forEachEngine covers only rig-owned engines, so a
+    // sfizz lane would resolve live and be missing from every export.
+    void forEachSfizzApvts (const std::function<void (juce::AudioProcessorValueTreeState&)>& fn);
+
     // R2 (2026-04-23): live-input ASIO channel persistence.  Index lives in
     // APVTS as `<prefix>_inputChannelIdx` (Int -1..127, default -1).  The
     // channel NAME (e.g. "Mic 1") is stored as a non-APVTS attribute on
@@ -1408,6 +1428,14 @@ public:
     // defaultSendTo is the main-out destination channel id (see MixerChannelIds).
     bool ensureMixerStripParams(const juce::String& prefix, MixerStripKind kind,
                                  int defaultSendTo);
+
+    // QA-ModelShell TS3 (2026-07-27): fired with the strip prefix the FIRST time
+    // its params are created.  StandaloneEditor uses it to register the strip's
+    // automation lanes at materialization, so they exist whether or not the
+    // mixer window (or the EQ display) has ever been built -- which
+    // destroy-on-close makes the normal case.  Message thread, like the
+    // registration it triggers.
+    std::function<void (const juce::String& prefix)> onMixerStripParamsCreated;
 
     // Bulk-register the five bus strips + master once at startup.
     // Called from VibeGraph::buildFixedTopology via a callback wired in the constructor.

@@ -32,10 +32,10 @@ void HarmlessRoutingMatrix::attachToApvts (juce::AudioProcessorValueTreeState& a
         {
             mSliderAtts[i] = std::make_unique<SliderAtt> (apvts, ids[i], mSliders[i]);
             // QA-ApvtsAutomation Task 5 follow-up: attached but never stamped, so
-            // these six had no Automate menu.  Engine params -- absent from the
-            // MAIN apvts -- so automation reaches them only via this registry.
+            // these six had no Automate menu.  QA-ModelShell TS3: the stamp is
+            // all that belongs here -- the applicator behind it is registered
+            // model-side against the engine's APVTS, so it outlives this matrix.
             mSliders[i].setComponentID (ids[i]);
-            VKnobAutomation::registerSliderAutomation (ids[i], mSliders[i]);
         }
 }
 

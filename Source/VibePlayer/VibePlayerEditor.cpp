@@ -211,14 +211,12 @@ VibePlayerEditor::VibePlayerEditor (VibePlayerProcessor& p)
     //   GlobalAutoRightClick + VKnobAutomation resolve the right-click Automate
     //   and Type-in-value menus. Pattern mirrors Harmless (see HarmlessEditor:387).
     // QA-ApvtsAutomation: the stamped id is also the automation registry key.
-    // Engine params live outside the MAIN apvts, so the automation pass only
-    // reaches them through this registry -- without the registration the lane
-    // draws and plays back against nothing.
+    // QA-ModelShell TS3: the applicator behind that key is registered model-side
+    // when the engine is created, so this pass stamps and nothing else.
     auto wireID = [&p] (juce::Slider& s, const char* paramName)
     {
         const juce::String id = p.pid (paramName);
         s.setComponentID (id);
-        VKnobAutomation::registerSliderAutomation (id, s);
     };
     wireID (mSampleStartKnob,   "sampleStart");
     wireID (mStretchKnob,       "stretch");
@@ -257,10 +255,6 @@ VibePlayerEditor::VibePlayerEditor (VibePlayerProcessor& p)
     // stamped, so it was the one control here with no Automate menu.
     mCutSelfModeTog .btn().setComponentID (p.pid ("cutSelfMode"));
     mDetuneModeSel        .setComponentID (p.pid ("detuneMode"));
-    VKnobAutomation::registerButtonAutomation   (p.pid ("reverse"),     mReverseTog.btn());
-    VKnobAutomation::registerButtonAutomation   (p.pid ("cutSelf"),     mCutSelfTog.btn());
-    VKnobAutomation::registerButtonAutomation   (p.pid ("cutSelfMode"), mCutSelfModeTog.btn());
-    VKnobAutomation::registerSelectorAutomation (p.pid ("detuneMode"),  mDetuneModeSel);
 
     // ── APVTS Attachments ─────────────────────────────────────────────────────
     mSampleStartAtt   = std::make_unique<SliderAtt> (avts, pid ("sampleStart"),  mSampleStartKnob);

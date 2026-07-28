@@ -6101,6 +6101,14 @@ bool VibeSynthProcessor::ensureMixerStripParams(const juce::String& prefix,
     // updateAllPreRackEQsFromApvts (B4).
     addParamsForTrackPreEQ(prefix);
     mRegisteredMixerStrips.insert(prefix);
+    // QA-ModelShell TS3 (2026-07-27): automation registration for these ids is
+    // triggered HERE, at param materialization, rather than by whatever view
+    // happened to show them.  Strips are created lazily and long after the
+    // startup sweep, so registerStaticAutomationHandlers could not have seen
+    // them -- which is why the mixer strip and the EQ display each registered
+    // their own, view-scoped, and needed a re-registration shim at every
+    // project boundary to survive.
+    if (onMixerStripParamsCreated) onMixerStripParamsCreated (prefix);
     return true;
 }
 
@@ -6472,6 +6480,7 @@ bool VibeSynthProcessor::loadBaySickGuitarsKit (int instIdx, const juce::File& s
     if (auto* eng = mGuitarsEngine[(size_t) instIdx].get())
         eng->setProcessingEnabled (true);
     mGuitarsActive[(size_t) instIdx].store (true, std::memory_order_release);
+    if (onSfizzEngineReady) onSfizzEngineReady (SfizzEngineKind::Guitars, instIdx);
     return true;
 }
 
@@ -6533,6 +6542,7 @@ bool VibeSynthProcessor::loadBaySickBassesKit (int instIdx, const juce::File& sf
     if (auto* eng = mBassesEngine[(size_t) instIdx].get())
         eng->setProcessingEnabled (true);
     mBassesActive[(size_t) instIdx].store (true, std::memory_order_release);
+    if (onSfizzEngineReady) onSfizzEngineReady (SfizzEngineKind::Basses, instIdx);
     return true;
 }
 
@@ -6639,7 +6649,23 @@ bool VibeSynthProcessor::loadBaySickRustyDrumsKit (const juce::File& sfzPath)
     // J-7b: now safe - the engine is fully loaded, output buses sized,
     // strip InsertNodes registered.  Audio thread can begin rendering.
     mRustyDrumsActive.store (true, std::memory_order_release);
+    if (onSfizzEngineReady) onSfizzEngineReady (SfizzEngineKind::RustyDrums, 0);
     return true;
+}
+
+// QA-ModelShell TS3 fix (2026-07-28): the offline lane replay's engine sweep
+// runs over EngineRig, which does not own these three -- so without this the
+// sfizz CC lanes would apply during playback and be absent from every render.
+void VibeSynthProcessor::forEachSfizzApvts (
+    const std::function<void (juce::AudioProcessorValueTreeState&)>& fn)
+{
+    if (! fn) return;
+    for (int i = 0; i < (int) kMaxInstPages; ++i)
+    {
+        if (auto* g = getBaySickGuitars (i)) fn (g->apvts);
+        if (auto* b = getBaySickBasses  (i)) fn (b->apvts);
+    }
+    if (auto* r = getBaySickRustyDrums()) fn (r->apvts);
 }
 
 void VibeSynthProcessor::destroyBaySickRustyDrums()

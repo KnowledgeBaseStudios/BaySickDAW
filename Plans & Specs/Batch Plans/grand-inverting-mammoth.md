@@ -277,7 +277,7 @@ Target state: export = the model rendering itself offline, FL-shape.
 Target state: registration NEVER originates from a view. Destroy-on-close cannot kill a
 lane. The widget-targeting era ends.
 
-- [ ] EffectParamMap tables for every remaining EffectType × variant (rack types 1-12 with
+- [x] EffectParamMap tables for every remaining EffectType × variant (rack types 1-12 with
   their character modes — Saturation/Overdrive/Delay/Reverb umbrellas — AND pedal-native
   types 100+; ~20+ tables). Variant keyed via `variantOf` (DSP-read). Reverb table includes
   the 0/1 `freeze` def (the ONE automatable toggle,
@@ -287,28 +287,28 @@ lane. The widget-targeting era ends.
   has ONE home (panels call applyNatural/read — never transcribe); registrations resolve
   rack->slot BY UUID at apply time; null-owner registrations must clear `mAutomationIdOwner`
   ([StandaloneEditor.cpp:11507-11543](../../Source/Standalone/StandaloneEditor.cpp:11507)).
-- [ ] Pedals: tile/panel registrations superseded by model-side rack registration (the
+- [x] Pedals: tile/panel registrations superseded by model-side rack registration (the
   pedals board is model-owned after TS1; slot uuids already stable).
-- [ ] Engine editors: retire all 19 widget wrapper sites; model-side per-instance param
+- [x] Engine editors: retire all 19 widget wrapper sites; model-side per-instance param
   registration (TS1 hook) is the replacement. Harmless dual A/B params keep param-targeting
   with BOTH ids registered (one lane per part — QA-ApvtsAutomation semantics preserved);
   vocal capture-lock veto (`kCaptureGated` suppressWhen,
   [BaySickVocalEditor.cpp:630-661](../../Source/BaySickVocal/BaySickVocalEditor.cpp:630))
   moves with it. Views keep ONLY componentID stamping for right-click menus + UI readers
   where needed.
-- [ ] Mixer lanes: `_fader`/`_pan` ids remapped to strip `_level`/`_pan` params (or
+- [x] Mixer lanes: `_fader`/`_pan` ids remapped to strip `_level`/`_pan` params (or
   model-registered equivalents) so mixer automation survives mixer-window close; permanent
   strips' re-registration shim ([:11458](../../Source/Standalone/StandaloneEditor.cpp:11458))
   retires.
-- [ ] EQ band lanes: ownership decoupled from ParametricEQDisplay (regOne closures already
+- [x] EQ band lanes: ownership decoupled from ParametricEQDisplay (regOne closures already
   target APVTS — registration moves to param-materialization, killing the first-boundary
   statics gap; [SharedUI.cpp:5376](../../Source/Standalone/SharedUI.cpp:5376)).
-- [ ] Statics re-seed logic + owner-index simplification once nothing view-owned remains;
+- [x] Statics re-seed logic + owner-index simplification once nothing view-owned remains;
   re-widen `onIsParamStale` to "not in APVTS AND not in registry" (reverted 2026-07-26
   because panel-keyed wiring made it lie — model-side wiring makes it true).
-- [ ] BLU-344: Harmless mod-editor DEPTH/LENGTH onto the non-parameter mechanism (mod
+- [x] BLU-344: Harmless mod-editor DEPTH/LENGTH onto the non-parameter mechanism (mod
   curves are model data; table-style defs against the mod editor's model).
-- [ ] Build gate (gates the commit below).
+- [x] Build gate (gates the commit below).
 - [ ] Batch-smoke scenarios (DEFERRED to Task set 8): (1) automate one knob of EVERY
   effect type + a pedal + freeze; close the Effects window entirely; all keep applying;
   (2) same for each engine editor window + mixer window closed; (3) restart + load:
@@ -493,21 +493,84 @@ load/apply path must keep); the QA-Ef close entries before touching doFileNew/ex
 surfaces; STANDALONE_UI_CHANGES.md before TS4/TS5 (deliberate UI decisions log);
 `Files For Claude/DSP Review/_APPROVED_CHANGES.md` before TS7's Limiter work.
 
-## Carry-Over (2026-07-27 — TS2 CODE-COMPLETE, gate GREEN, commit SURFACED to Jeff)
+## Carry-Over (2026-07-28 — TS3 CODE-COMPLETE incl. owner rulings; gate green; commit surfaced)
 
-- **Completed:** TS2 in full — every checklist item (see the running notes "TS2
-  CODE-COMPLETE" entry for the item-by-item close, incl. CL-057's
-  verified-already-satisfied disposition). Gate green both configs on the current
-  tree.  The TS2 commit one-liner + full 15-entry status is surfaced in chat —
-  NOTHING commits without Jeff's approval.
-- **In-flight:** none.  Awaiting the commit approval; on it: commit -> running-notes
-  checkpoint -> TS3 opens (automation fully model-side: retire the 19 engine-editor
-  wrapper sites, EffectParamMap tables for ALL remaining effect types x variants +
-  pedal-native 100+ types, pedals model-side registration, mixer `_fader`/`_pan` lane
-  remap, EQ band lane ownership, statics re-widen of onIsParamStale, BLU-344 Harmless
-  mod-editor targets).  TS3 has no open sub-spec calls.
-- **Resume action (if resuming pre-approval):** wait on Jeff for the TS2 commit; do
-  not start TS3 source work with the TS2 diff uncommitted (one commit per task set).
+- **Completed:** TS1 `4ea67bd0`, TS2 `e9ecf03e`, and TS3 code-complete — all eight source
+  items closed (EffectParamMap tables for every EffectType x variant; pedals model-side;
+  the 19 wrapper sites retired + their five helpers deleted; mixer `_fader` remap + shim
+  retirement; EQ band lanes off the display; owner-index removal + `onIsParamStale`
+  re-widen; BLU-344), PLUS the two items Jeff ruled on at the commit surface: the sfizz
+  automation gap FIXED as a defect, and `TapePanel` DELETED.  Item-by-item trail in the
+  running notes.
+- **In-flight:** nothing.  The TS3 commit is SURFACED to Jeff (Rule 9 one-liner + full
+  git status) — nothing commits without his approval.
+- **Assumptions changed (recorded here because the plan body still states them):**
+  1. The TS3 hard-won-facts note says "null-owner registrations must clear
+     `mAutomationIdOwner`".  That guard is GONE with the owner index itself — after TS3
+     nothing registers with an owner, so a view-lifetime index over a permanently empty
+     set was worse than nothing.  The fact was true for the widget-targeting era it was
+     written in; do not re-add it.
+  2. `variantOf` is no longer DSP-read ALONE.  Which panel a DSP gets also depends on
+     WHERE the slot lives (FX rack vs pedals board), and that is not readable from the
+     DSP — a Tape-mode SaturationDSP on the board shows "Drive" as 0..10 into setFlowers
+     where the rack shows it as dB into setTapeInputGain.  `PanelContext` supplies that
+     dimension from the registration site.  Same class of bug as Modern-vs-FET `attack`.
+  3. Retiring the wrappers was a pure deletion, not a migration: every wrapper key was
+     already the engine's APVTS param id, which TS1's model walk registers.  Because the
+     editor is built after the engine, the VIEW claim was winning — TS3 is what makes
+     TS1's registration take effect.
+- **Resume action:** session-open per the boilerplate (standup + Main Plan §0 + this plan
+  IN FULL incl. Carry-Over blocks + the mammoth running notes IN FULL), confirm the TS3
+  commit hash at HEAD, then open **TS4 (the shell)**.  TS4's FIRST act is its open
+  sub-spec call: exact minimum window sizes for Builder / Piano Roll / Mixer, picked with
+  Jeff ON SCREEN (he wants "larger" floors).  Scout after that: the native-child window
+  frame family, `StandaloneApp.cpp:948-1015` fixed-fullscreen main, RibbonTabBar "+"
+  system, and the EngineEmptyState trio to retire.
+- **Owner rulings applied 2026-07-28 (both were surfaced at the TS3 commit):**
+  1. **sfizz automation = DEFECT, fixed in-batch.**  Jeff: "that's not a new feature that's
+     something you never setup and you need to fix."  He was right, and my framing had
+     understated it: the Aria panel has always OFFERED "Automate: ..." on every kit CC and
+     `sOnAutomate` duly created the lane — with no applicator behind it, so the lane drew and
+     played back against nothing.  New `onSfizzEngineReady` model event +
+     `registerSfizzEngineAutomation` + `forEachSfizzApvts` for the offline replay.  Lane ids
+     are the engines' own globally-unique param ids, so every lane a user already created
+     starts working.
+  2. **`TapePanel` DELETED** (147 lines + its dead `TapeDSP.h` include + two stale comments),
+     after confirming for Jeff that it bound the LEGACY standalone `TapeDSP*` and is NOT the
+     Tape option he uses (that is `TapeSatPanel`, `SaturationDSP` + `setTape*`, covered by the
+     new `kSatTape` table).
+  3. **`TapeDSP` CLASS DELETED** (Jeff, same exchange).  `Source/DSP/TapeDSP.h` + `.cpp`
+     git-rm'd, `CMakeLists.txt` entry dropped, two stale includes removed.  Full-tree census
+     first: zero code dependencies.  KEPT on purpose: `SaturationDSP.cpp:704`'s
+     `getTagName() == "TapeDSP"` string compare (the legacy-preset migration path — deleting it
+     would orphan every pre-cutover Tape preset), and the Rule 6 keeper comments explaining that
+     SaturationDSP's tape body is a bit-exact port of it.  `EffectRack.cpp`'s comment was the one
+     that became FALSE ("stays in the source tree as an emergency-rollback safety net") and was
+     corrected.  Joins the earlier accrual (Main Plan :6373's stale "QA-DirtyFlag closes G4
+  code" line) and badger's six held items.
+- **Implemented-work entry needed:** compiled from running notes at TS8 (bulk-run R2).
+
+## Prior Carry-Over (2026-07-27 — TS2 COMMITTED `e9ecf03e`; superseded by the block above)
+
+- **Completed:** TS1 committed `4ea67bd0`; TS2 committed `e9ecf03e` (Jeff-approved;
+  every TS2 checklist item closed — item-by-item trail in the running notes).  Gates
+  were green both configs at both commits.
+- **In-flight:** none.  Tree dirty ONLY with this plan file + the running notes (the
+  TS2-committed entries) — EXPECTED; they ride TS3's commit, same convention as the
+  session-open backfills riding TS1's.
+- **Resume action:** session-open per the boilerplate (standup + Main Plan §0 +
+  this plan IN FULL incl. these Carry-Over blocks + the mammoth running notes IN FULL
+  — they are this batch's primary context now), confirm `e9ecf03e` at HEAD, then open
+  **TS3 (automation fully model-side)** with its scout: re-read the plan's TS3 section
+  + the running-notes pins (lane-resolver rules; EffectParamMap hard-won facts), then
+  enumerate the 19 wrapper sites (plan lists them) + the EffectType x variant table
+  matrix from `createEffectEditor`'s dispatch before writing tables.  TS3 has NO open
+  sub-spec calls; next open calls sit at TS4 (floors), TS6 (process model), TS7
+  (freeze).
+- **Standing process corrections (this session, verbatim intent):** intermediate
+  checkpoints are NOT stopping points — run continuously; the ONLY stops are task-set
+  commit approvals and genuine spec calls.  Naming is the assistant's call, never a
+  docket item.
 - **Implemented-work entry needed:** compiled from running notes at TS8 (bulk-run R2).
 
 ## Prior Carry-Over (2026-07-27 — TS1 COMMITTED `4ea67bd0`; TS2 open, stems call pending)

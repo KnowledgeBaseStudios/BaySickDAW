@@ -388,14 +388,12 @@ BaySickSynthEditor::BaySickSynthEditor (BaySickSynthProcessor& p)
     //   GlobalAutoRightClick + VKnobAutomation resolve the right-click Automate
     //   and Type-in-value menus. Pattern mirrors VibePlayer (see VibePlayerEditor:203).
     // QA-ApvtsAutomation: the stamped id is also the automation registry key.
-    // Engine params live outside the MAIN apvts, so the automation pass only
-    // reaches them through this registry -- without the registration the lane
-    // draws and plays back against nothing.
+    // QA-ModelShell TS3: the applicator behind that key is registered model-side
+    // when the engine is created, so this pass stamps and nothing else.
     auto wireID = [&p] (juce::Slider& s, const char* paramName)
     {
         const juce::String id = p.pid (paramName);
         s.setComponentID (id);
-        VKnobAutomation::registerSliderAutomation (id, s);
     };
     wireID (mTransposeKnob,   "transpose");
     wireID (mModifierKnob,    "modifier");

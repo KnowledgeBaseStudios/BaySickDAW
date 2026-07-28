@@ -203,6 +203,7 @@ bool BaySickPedalsProcessor::loadEffect (int slot, EffectType type,
                                                                : juce::Uuid().toString();
     }
     fireDirty();   // 2026-05-05 lifecycle dirty
+    if (onSlotAutomationChanged) onSlotAutomationChanged();
     return true;
 }
 
@@ -218,6 +219,7 @@ bool BaySickPedalsProcessor::clearSlot (int slot)
         mSlots[(size_t) slot].uuid = {};
     }
     fireDirty();
+    if (onSlotAutomationChanged) onSlotAutomationChanged();
     return true;
 }
 
@@ -468,6 +470,14 @@ void BaySickPedalsProcessor::restoreFullState (const juce::ValueTree& state)
     if (onSlotsExternallyChanged)
         juce::MessageManager::callAsync (
             [cb = onSlotsExternallyChanged] { if (cb) cb(); });
+
+    // Every slot's (uuid, type) pair was just rewritten, so the board's lanes
+    // need re-keying.  Marshalled for the same reason as the callback above:
+    // a project load can pump this from a non-message thread, and registration
+    // touches the editor-side registry.
+    if (onSlotAutomationChanged)
+        juce::MessageManager::callAsync (
+            [cb = onSlotAutomationChanged] { if (cb) cb(); });
 }
 
 void BaySickPedalsProcessor::getStateInformation (juce::MemoryBlock& dest)

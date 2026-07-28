@@ -175,7 +175,10 @@ private:
     // The view-independent body: registrations capture (chId, uuid, type,
     // suffix) and resolve rack -> slot -> DSP at apply time (null-owner,
     // rack-scoped -- survives every panel/page death).
-    static void registerSlotAutomationFor (VibeGraph& vg, int chId,
+    // Takes the processor rather than just the graph because a lookahead-class
+    // param has to run the same PDC refresh the panel's onLatencyChanged does,
+    // and that is setLatencySamples(updateBusLatencies()) -- both halves.
+    static void registerSlotAutomationFor (VibeSynthProcessor& proc, int chId,
                                            const juce::String& channelPrefix,
                                            EffectRack& rackRef, int slotIndex);
 

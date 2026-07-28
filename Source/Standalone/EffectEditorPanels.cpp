@@ -11,7 +11,6 @@
 #include "../DSP/OverdriveDSP.h"
 #include "../DSP/PhaserDSP.h"
 #include "../DSP/TransientShaperDSP.h"
-#include "../DSP/TapeDSP.h"
 #include "../DSP/LimiterDSP.h"
 #include "../DSP/DeEsserDSP.h"
 #include "../DSP/GateDSP.h"      // QA-Fe2 vocal-chain Gate
@@ -92,13 +91,6 @@ static void layoutKnobsH(juce::Rectangle<int> b,
         if (k) k->setBounds(b.removeFromLeft(w).withSizeKeepingCentre(sz, sz));
 }
 
-// Pink = active (engaged), dark = off - Change C colors
-static void setPink(juce::TextButton& btn)
-{
-    btn.setColour(juce::TextButton::buttonOnColourId, juce::Colour(0xffce3f8e));
-    btn.setColour(juce::TextButton::buttonColourId,   juce::Colour(0xff2e2e33));
-}
-
 // ── LabeledToggle retired ────────────────────────────────────────────────────
 // All usages migrated to DualLabelToggle (see SharedUI.h). LabeledToggle was
 // removed 2026-04-17 during the toggle/combo visual sweep.
@@ -133,6 +125,13 @@ EditorPanelBase::EditorPanelBase()
 
 EditorPanelBase::~EditorPanelBase()
 {
+    // mSyncKnobs holds raw VKnob* into vectors the DERIVED panel owns, and the
+    // derived destructor has already run by the time we get here.  Stopping the
+    // refresh timer first is what makes that window unreachable rather than
+    // merely unlikely.
+    if (mDisplaySync) mDisplaySync->stopTimer();
+    mSyncKnobs.clear();
+
     if (outputVolKnob) outputVolKnob->slider.setLookAndFeel(nullptr);
     for (auto* c : getChildren())
         if (auto* btn = dynamic_cast<juce::Button*>(c))
@@ -204,43 +203,10 @@ void EditorPanelBase::setSlotContext(const juce::String& channelPrefix, const ju
     if (outputVolKnob)
         outputVolKnob->paramId = base + "output_vol";
 
-    // Register playback applicators + value readers so automation can drive and seed these knobs.
-    // SafePointer guards against the slider being destroyed (effect swap in slot, panel rebuild,
-    // etc.) between registration and invocation -- without it, a stale applicator stored in the
-    // StandaloneEditor's map would dereference freed memory on the next automation tick and crash
-    // inside NormalisableRange::snapToLegalValue (empty-state std::function with corrupted vptr).
-    auto regKnob = [](VKnob* k)
-    {
-        if (!k || k->paramId.isEmpty()) return;
-        juce::Component::SafePointer<juce::Slider> safeSl(&k->slider);
-        double lo = k->slider.getMinimum(), hi = k->slider.getMaximum();
-        juce::String pid = k->paramId;
-
-        if (VKnobAutomation::sOnRegisterApplicator)
-            VKnobAutomation::sOnRegisterApplicator(pid, [safeSl, lo, hi](float v01)
-            {
-                if (auto* sl = safeSl.getComponent())
-                    sl->setValue(lo + v01 * (hi - lo), juce::sendNotification);
-            }, k);
-
-        if (VKnobAutomation::sOnRegisterReader)
-            VKnobAutomation::sOnRegisterReader(pid, [safeSl, lo, hi]() -> float
-            {
-                auto* sl = safeSl.getComponent();
-                if (!sl) return 0.5f;
-                double range = hi - lo;
-                return range > 0.0 ? (float)((sl->getValue() - lo) / range) : 0.5f;
-            }, k);
-    };
-    for (auto& k : knobs) regKnob(k.get());
-    for (auto* k : getExtraKnobs()) regKnob(k);
-    regKnob(outputVolKnob.get());
-
     // Task 9: automatable toggles (addAutomatableToggle).  ComponentID goes on
     // the wrapper AND every child -- GlobalAutoRightClick reads the clicked
     // component's id directly, and a click can land on the switch button or a
-    // forwarding label.  The applicator drives the BUTTON (SafePointer-guarded
-    // like regKnob) so the toggle's own onClick pushes to the DSP.
+    // forwarding label.
     for (auto& t : mAutoToggles)
     {
         if (t.tog == nullptr) continue;
@@ -248,21 +214,61 @@ void EditorPanelBase::setSlotContext(const juce::String& channelPrefix, const ju
         t.tog->setComponentID(pid);
         for (auto* child : t.tog->getChildren())
             if (child) child->setComponentID(pid);
+    }
 
-        juce::Component::SafePointer<juce::Button> safeBtn(&t.tog->btn());
-        if (VKnobAutomation::sOnRegisterApplicator)
-            VKnobAutomation::sOnRegisterApplicator(pid, [safeBtn](float v01)
-            {
-                if (auto* b = safeBtn.getComponent())
-                    if (b->getToggleState() != (v01 >= 0.5f))
-                        b->setToggleState(v01 >= 0.5f, juce::sendNotification);
-            }, t.tog);
-        if (VKnobAutomation::sOnRegisterReader)
-            VKnobAutomation::sOnRegisterReader(pid, [safeBtn]() -> float
-            {
-                auto* b = safeBtn.getComponent();
-                return (b != nullptr && b->getToggleState()) ? 1.0f : 0.0f;
-            }, t.tog);
+    // Build the display-refresh list from the controls just stamped, then start
+    // it.  Suffix is re-derived from the paramId's tail rather than re-walking
+    // the labels, so it is the SAME string the registry and EffectParamMap use.
+    mSyncKnobs.clear();
+    auto collect = [this, &base](VKnob* k)
+    {
+        if (k == nullptr || k->paramId.isEmpty()) return;
+        mSyncKnobs.push_back ({ k, k->paramId.substring (base.length()) });
+    };
+    for (auto& k : knobs) collect (k.get());
+    for (auto* k : getExtraKnobs()) collect (k);
+    collect (outputVolKnob.get());
+
+    if (mDisplaySync == nullptr)
+    {
+        mDisplaySync = std::make_unique<DisplaySync>();
+        mDisplaySync->tick = [this] { refreshControlsFromDsp(); };
+    }
+    mDisplaySync->startTimerHz (10);
+}
+
+void EditorPanelBase::refreshControlsFromDsp()
+{
+    // Cheap early-out: a panel the user cannot see has nothing to keep in sync,
+    // and only one rack panel is on screen at a time.
+    if (mDsp == nullptr || ! isShowing()) return;
+
+    for (auto& [k, suffix] : mSyncKnobs)
+    {
+        if (k == nullptr) continue;
+        auto& sl = k->slider;
+        if (sl.isMouseButtonDown()) continue;   // never fight a live drag
+
+        // output_vol is the one stamped control that is NOT a DSP parameter --
+        // it writes the RACK's per-slot gain, which EffectParamMap does not
+        // cover -- so it has no read-back here and keeps its own value.
+        const float cur = (float) sl.getValue();
+        const float now = EffectParamMap::readNatural (mEffectType, mVariant, mDsp,
+                                                       suffix, cur);
+        if (! juce::approximatelyEqual (cur, now))
+            sl.setValue ((double) now, juce::dontSendNotification);
+    }
+
+    for (auto& t : mAutoToggles)
+    {
+        if (t.tog == nullptr) continue;
+        const float v = EffectParamMap::readNatural (mEffectType, mVariant, mDsp,
+                                                     t.suffix, -1.0f);
+        if (v < 0.0f) continue;   // not a mapped toggle
+        auto& b = t.tog->btn();
+        const bool on = (v >= 0.5f);
+        if (b.getToggleState() != on)
+            b.setToggleState (on, juce::dontSendNotification);
     }
 }
 
@@ -3023,156 +3029,9 @@ struct TransientShaperPanel : public EditorPanelBase
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// TapePanel - Vibe | WowRate | WowDepth | InGain | Hiss  (OutGain removed - use output fader)
-// ─────────────────────────────────────────────────────────────────────────────
-struct TapePanel : public EditorPanelBase
-{
-    std::vector<std::unique_ptr<VKnob>>  r1knobs, r2knobs;
-    std::unique_ptr<ChickenHeadSelector> tapeSpeedSel;   // C4
-    std::unique_ptr<ChickenHeadSelector> osSel;          // C2
-
-    std::vector<VKnob*> getExtraKnobs() override
-    {
-        std::vector<VKnob*> v;
-        for (auto& k : r1knobs) if (k) v.push_back(k.get());
-        for (auto& k : r2knobs) if (k) v.push_back(k.get());
-        return v;
-    }
-
-    explicit TapePanel(TapeDSP* dsp)
-    {
-        setLookAndFeel(&HarmonicLAF::get());
-
-        // Row 1: shaper character + input + hiss
-        buildKnobs(*this, r1knobs, {
-            { "Vibe",    0.f,  1.f,   0.5f, 0.01f, "Shaper asymmetry driver - k = 0.3 * Vibe in the sigmoid" },
-            { "Hyst",    0.f,  2.f,   1.0f, 0.01f, "Hysteresis amount (C1) - 0 = no tape memory, 1 = default, 2 = strong memory" },
-            { "Bias",    0.f, 10.f,   5.0f, 0.1f,  "Tape bias (C5) - 5 = neutral (zero DC offset); extremes inject even harmonics" },
-            { "InGain",  0.f,  4.f,   1.0f, 0.01f, "Input gain (linear)" },
-            { "Hiss",    0.f,  1.f,   0.0f, 0.01f, "Hiss level (pink-filtered + 200 Hz HPF, independent L/R) - default 0; raise to taste" },
-        });
-
-        // Row 2: wow/flutter + pre/de-emphasis shelves
-        buildKnobs(*this, r2knobs, {
-            { "WowHz",   0.1f,  5.f,   0.5f, 0.05f, "Wow LFO rate (Hz)" },
-            { "WowDp",   0.f,   1.f,   0.0f, 0.01f, "Wow depth (slow motor drift) - default 0 so tape starts clean; raise to taste" },
-            { "FlutHz",  1.f,  15.f,   5.0f, 0.1f,  "Flutter LFO rate (Hz) - capstan friction shimmer" },
-            { "FlutDp",  0.f,   1.f,   0.0f, 0.01f, "Flutter depth (fast modulation) - default 0 so tape starts clean; raise to taste" },
-            { "PreShf", -12.f, 12.f,   0.0f, 0.1f,  "Pre-emphasis shelf @ 5 kHz (dB). Default 0 (flat); boost = more high-freq harmonics into shaper" },
-            { "DeShf",  -12.f, 12.f,   0.0f, 0.1f,  "De-emphasis shelf @ 4 kHz (dB). Default 0 (flat); cut = tame high harmonics after shaper" },
-        });
-
-        // OutGain removed - output volume is handled by the per-slot output fader (L2B).
-
-        // C4 Tape speed chicken-head (3 positions wrap mTapeSpeed 0..1)
-        tapeSpeedSel = std::make_unique<ChickenHeadSelector>();
-        tapeSpeedSel->setOptions({
-            { "7.5",  "7.5 ips", "7.5 ips cassette speed - slowest, squishiest, strongest hysteresis memory" },
-            { "15",   "15 ips",  "15 ips pro reel-to-reel - balanced character (default)" },
-            { "30",   "30 ips",  "30 ips mastering speed - fastest, cleanest, minimal hysteresis" },
-        });
-        tapeSpeedSel->setBodyTooltip("Tape speed - affects hysteresis memory time constant");
-        // A9: map mTapeSpeed 0..1 to nearest of (0.0, 0.5, 1.0) -> idx 0/1/2.
-        {
-            const float ts = dsp->getTapeSpeed();
-            const int idx = (ts < 0.25f) ? 0 : (ts < 0.75f) ? 1 : 2;
-            tapeSpeedSel->setSelectedIndex(idx, juce::dontSendNotification);
-        }
-        tapeSpeedSel->onChange = [dsp](int idx){
-            static constexpr float kTapeSpeedValues[3] = { 0.0f, 0.5f, 1.0f };
-            dsp->setTapeSpeed(kTapeSpeedValues[juce::jlimit(0, 2, idx)]);
-        };
-        addAndMakeVisible(*tapeSpeedSel);
-
-        // C2 Oversampling factor chicken-head
-        osSel = std::make_unique<ChickenHeadSelector>();
-        osSel->setOptions({
-            { "2x",  "2x OS",  "2x oversampling - lowest CPU, some alias from shaper at high drive" },
-            { "4x",  "4x OS",  "4x oversampling (default) - balanced quality vs CPU" },
-            { "8x",  "8x OS",  "8x oversampling - cleaner high-drive character, more CPU" },
-            { "16x", "16x OS", "16x oversampling - maximum alias suppression" },
-        });
-        osSel->setBodyTooltip("Oversampling factor around shaper + hysteresis");
-        osSel->setSelectedIndex(juce::jlimit(0, 3, dsp->getOsLog2() - 1),
-                                juce::dontSendNotification);
-        osSel->onChange = [dsp](int idx){ dsp->setOsLog2(juce::jlimit(1, 4, idx + 1)); };
-        addAndMakeVisible(*osSel);
-
-        // Row 1 knob bindings
-        r1knobs[0]->slider.onValueChange = [dsp,this]{ dsp->setVibe       ((float)r1knobs[0]->slider.getValue()); };
-        r1knobs[1]->slider.onValueChange = [dsp,this]{ dsp->setHystAmount ((float)r1knobs[1]->slider.getValue()); };
-        r1knobs[2]->slider.onValueChange = [dsp,this]{ dsp->setBias       ((float)r1knobs[2]->slider.getValue()); };
-        r1knobs[3]->slider.onValueChange = [dsp,this]{ dsp->setInputGain  ((float)r1knobs[3]->slider.getValue()); };
-        r1knobs[4]->slider.onValueChange = [dsp,this]{ dsp->setHiss       ((float)r1knobs[4]->slider.getValue()); };
-
-        // Row 2 knob bindings
-        r2knobs[0]->slider.onValueChange = [dsp,this]{ dsp->setWowRate      ((float)r2knobs[0]->slider.getValue()); };
-        r2knobs[1]->slider.onValueChange = [dsp,this]{ dsp->setWowDepth     ((float)r2knobs[1]->slider.getValue()); };
-        r2knobs[2]->slider.onValueChange = [dsp,this]{ dsp->setFlutterRate  ((float)r2knobs[2]->slider.getValue()); };
-        r2knobs[3]->slider.onValueChange = [dsp,this]{ dsp->setFlutterDepth ((float)r2knobs[3]->slider.getValue()); };
-        r2knobs[4]->slider.onValueChange = [dsp,this]{ dsp->setPreShelfDb   ((float)r2knobs[4]->slider.getValue()); };
-        r2knobs[5]->slider.onValueChange = [dsp,this]{ dsp->setDeShelfDb    ((float)r2knobs[5]->slider.getValue()); };
-
-        // A9 slider sync (real value + clamp cleanup). Uses sendNotificationSync so the
-        // existing onValueChange lambda fires -> calls the DSP setter with the slider's
-        // (possibly clamped) value. If the DSP holds a value outside the slider's range,
-        // the slider clamps it on setValue, and the setter call reconciles DSP to the
-        // clamped value. Setter CPU guards make it a no-op when DSP and slider already
-        // agree. Without this, sliders would show buildKnobs defaults while the DSP ran
-        // with stale / preset-restored / out-of-range state.
-        r1knobs[0]->slider.setValue (dsp->mVibe,         juce::sendNotificationSync);
-        r1knobs[1]->slider.setValue (dsp->mHystAmount,   juce::sendNotificationSync);
-        r1knobs[2]->slider.setValue (dsp->mBias,         juce::sendNotificationSync);
-        r1knobs[3]->slider.setValue (dsp->mInputGain,    juce::sendNotificationSync);
-        r1knobs[4]->slider.setValue (dsp->mHiss,         juce::sendNotificationSync);
-        r2knobs[0]->slider.setValue (dsp->mWowRate,      juce::sendNotificationSync);
-        r2knobs[1]->slider.setValue (dsp->mWowDepth,     juce::sendNotificationSync);
-        r2knobs[2]->slider.setValue (dsp->mFlutterRate,  juce::sendNotificationSync);
-        r2knobs[3]->slider.setValue (dsp->mFlutterDepth, juce::sendNotificationSync);
-        r2knobs[4]->slider.setValue (dsp->mPreShelfDb,   juce::sendNotificationSync);
-        r2knobs[5]->slider.setValue (dsp->mDeShelfDb,    juce::sendNotificationSync);
-    }
-
-    ~TapePanel() override
-    {
-        setLookAndFeel(nullptr);
-    }
-
-    void paint(juce::Graphics& g) override
-    {
-        HarmonicLAF::paintHammeritePanel(g, getLocalBounds());
-    }
-
-    void resized() override
-    {
-        auto b = getLocalBounds().reduced(4, 2);
-
-        // Meter strips
-        if (vuIn) vuIn->setBounds(b.removeFromLeft(120).reduced(1, 2));
-        dbfsOut      ->setBounds(b.removeFromRight(32).reduced(1, 2));
-        b.removeFromRight(2);
-        outputVolKnob->setBounds(b.removeFromRight(kKnobSz).withSizeKeepingCentre(kKnobSz, kKnobSz));
-        b.removeFromRight(4);
-
-        auto r1 = b.removeFromTop(b.getHeight() / 2);
-        auto r2 = b;
-
-        // Row 1 right: OS chicken-head | Tape Speed chicken-head
-        auto osSlot = r1.removeFromRight(60); r1.removeFromRight(2);
-        if (osSel) osSel->setBounds(osSlot.reduced(2));
-        auto tsSlot = r1.removeFromRight(62); r1.removeFromRight(2);
-        if (tapeSpeedSel) tapeSpeedSel->setBounds(tsSlot.reduced(2));
-        layoutKnobsH(r1, r1knobs);
-
-        // Row 2: knobs only
-        layoutKnobsH(r2, r2knobs);
-    }
-};
-
-// ─────────────────────────────────────────────────────────────────────────────
 // TapeSatPanel - H-10 (2026-05-02): Saturation umbrella's Tape sub-panel.
-// Mirrors TapePanel's knob layout + chicken-heads exactly but binds to
-// SaturationDSP's setTape* setters instead of the legacy TapeDSP class.
+// Binds SaturationDSP's setTape* setters; the standalone TapeDSP class it
+// replaced is no longer reachable from any panel.
 // SlotComponent's Mode dropdown picks Tube / Console / Tape; this panel
 // is constructed when Tape is the active type.
 // ─────────────────────────────────────────────────────────────────────────────
@@ -6525,6 +6384,14 @@ std::unique_ptr<juce::Component> createEffectEditor (DSPBase* effect,
             if (auto* base = dynamic_cast<EditorPanelBase*> (panel.get()))
             {
                 base->mPanelMode = mode;
+                base->mDsp        = effect;
+                base->mEffectType = type;
+                // This branch IS the pedal face, so the key is the pedal
+                // variant -- not the DSP's character mode.  A Tape-mode
+                // SaturationDSP shown here has a 0..10 "Drive" into setFlowers,
+                // where its rack panel's "Drive" is dB into setTapeInputGain.
+                base->mVariant    = EffectParamMap::variantOf (
+                                        type, effect, EffectParamMap::PanelContext::Pedal);
                 base->disableVU();
                 base->disableDbfsMeter();
                 base->disableGrMeter();
@@ -6572,8 +6439,8 @@ std::unique_ptr<juce::Component> createEffectEditor (DSPBase* effect,
         case EffectType::Saturation:
         {
             // H-7: Tube = full layout; Console = minimalist Drive/Color/Mix/Out.
-            // H-10 (2026-05-02): Tape routes to TapeSatPanel -- mirrors the
-            // legacy TapePanel layout but binds to SaturationDSP::setTape*.
+            // H-10 (2026-05-02): Tape routes to TapeSatPanel, which binds
+            // SaturationDSP::setTape*.
             auto* s = static_cast<SaturationDSP*> (effect);
             switch (s->mSatType)
             {
@@ -6718,6 +6585,13 @@ std::unique_ptr<juce::Component> createEffectEditor (DSPBase* effect,
     if (auto* base = dynamic_cast<EditorPanelBase*> (panel.get()))
     {
         base->mPanelMode = mode;
+        // Reached either as a normal FX-rack panel, or as the fall-through for a
+        // pedal-mode slot holding a type with no pedal face (the picker offers
+        // Compressor and Overdrive, which resolve through their own DSP-read
+        // character modes) -- Rack is the right key for both.
+        base->mDsp        = effect;
+        base->mEffectType = type;
+        base->mVariant    = EffectParamMap::variantOf (type, effect);
         if (mode == EditorPanelBase::PanelMode::Pedal)
         {
             base->disableVU();

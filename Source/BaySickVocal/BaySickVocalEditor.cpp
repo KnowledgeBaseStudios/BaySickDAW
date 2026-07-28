@@ -622,44 +622,15 @@ void BaySickVocalEditor::setAutomationPrefix (const juce::String& prefix)
     };
     restamp (*this);
 
-    // Capture lock (owner call 2026-07-25, docket 4=A): while THIS strip records,
-    // an automation write to the realtime-board set is vetoed for the same reason
-    // the UI greys those controls out -- an engage-edge mid-take clicks AND prints
-    // into the WET file.  Set matches the gate list in VocalChainPanel's timer
-    // exactly; chain Bypass is deliberately absent (it left the gate set at QA-Fd).
-    static const char* const kCaptureGated[] = {
-        "bsv_ab_slot",
-        "bsv_pitch_realtime_bypass",
-        "bsv_pitch_key",
-        "bsv_pitch_scale",
-        "bsv_pitch_retuneSpeed",
-        "bsv_pitch_strength",
-        "bsv_pitch_humanize",
-        "bsv_pitch_throatShift",
-        "bsv_pitch_formantPreserve",
-    };
-
-    auto* proc = &mProc;
-    auto isRecording = [proc]() -> bool
-    {
-        return proc->onIsStripRecording && proc->onIsStripRecording();
-    };
-
-    // Registration walks the engine's own parameter list so coverage stays
-    // complete as params are added, rather than tracking a per-control table.
-    for (auto* p : mProc.getParameters())
-    {
-        auto* rap = dynamic_cast<juce::RangedAudioParameter*> (p);
-        if (rap == nullptr) continue;
-
-        bool gated = false;
-        for (auto* g : kCaptureGated)
-            if (rap->paramID == g) { gated = true; break; }
-
-        VKnobAutomation::registerParameterAutomation (
-            prefix + rap->paramID, *rap, *this,
-            gated ? std::function<bool()> (isRecording) : std::function<bool()>{});
-    }
+    // QA-ModelShell TS3 (2026-07-27): registration used to happen here, walking
+    // mProc.getParameters() and binding each one through a Component lifetime
+    // guard.  That guard was this editor -- so every lane on this page died with
+    // the page, which destroy-on-close windows turn from a latent bug into the
+    // normal case.  StandaloneEditor::registerModelEngineAutomation now does the
+    // same walk off the rig's engine-created event, under the same "vox<N>_"
+    // keys, and carries the capture-lock veto with it
+    // (BaySickVocalProcessor::isCaptureGated).  Stamping ids stays here, because
+    // the right-click Automate menu reads them off the clicked component.
 }
 
 juce::Component* BaySickVocalEditor::panelForTab (int idx) const noexcept

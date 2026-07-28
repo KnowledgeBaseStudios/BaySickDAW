@@ -207,6 +207,16 @@ public:
     // stale parameter mappings (EQ frequency where boost should be, etc.).
     std::function<void()> onSlotsExternallyChanged;
 
+    // QA-ModelShell TS3 (2026-07-27): the board's automation lanes are keyed by
+    // (slot uuid, effect type), and a load/clear/restore changes both -- a swap
+    // mints a fresh uuid on purpose, so the outgoing pedal's lanes must not
+    // follow.  Fired on exactly those mutations so the model can re-register.
+    // Deliberately separate from onSlotsExternallyChanged, which the EDITOR owns
+    // (a std::function has one subscriber, and this must fire whether or not any
+    // editor exists).  moveSlot is NOT a trigger: uuids travel with the Slot and
+    // the applicators resolve by uuid, so a reorder cannot repoint a lane.
+    std::function<void()> onSlotAutomationChanged;
+
 private:
     static juce::AudioProcessorValueTreeState::ParameterLayout createLayout();
 

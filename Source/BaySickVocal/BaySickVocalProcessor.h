@@ -330,6 +330,32 @@ public:
     // on it (engage-edge toggles mid-take click AND print into the WET
     // capture -- the sound is set before the take, owner call 2026-07-10).
     std::function<bool()>                                       onIsStripRecording;
+
+    // The realtime-board params the capture lock covers.  Model-side because
+    // two consumers need the SAME set and neither is more authoritative than
+    // the other: the editor greys these while a take runs, and the automation
+    // applicator vetoes writes to them for the identical reason (an
+    // engage-edge mid-take clicks AND prints into the WET file).  They used to
+    // be two hand-kept copies -- editor timer and registration list -- which is
+    // one edit away from disagreeing.  Chain Bypass is deliberately absent (it
+    // left the gate set at QA-Fd).
+    static bool isCaptureGated (const juce::String& paramID) noexcept
+    {
+        static const char* const kGated[] = {
+            "bsv_ab_slot",
+            "bsv_pitch_realtime_bypass",
+            "bsv_pitch_key",
+            "bsv_pitch_scale",
+            "bsv_pitch_retuneSpeed",
+            "bsv_pitch_strength",
+            "bsv_pitch_humanize",
+            "bsv_pitch_throatShift",
+            "bsv_pitch_formantPreserve",
+        };
+        for (auto* g : kGated)
+            if (paramID == g) return true;
+        return false;
+    }
     // QA-Fd: the pitch DSP owning a channel's time edits (the align
     // FOLLOWER may be another Vox page's channel; its time map redefines
     // the performance align must match).  Installed by VoxPage.

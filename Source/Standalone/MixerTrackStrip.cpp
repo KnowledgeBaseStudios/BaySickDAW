@@ -438,50 +438,18 @@ void MixerTrackStrip::sliderDragEnded(juce::Slider* s)
 // ─────────────────────────────────────────────────────────────────────────────
 void MixerTrackStrip::setAutomationPrefix (const juce::String& prefix)
 {
+    // QA-ModelShell TS3 (2026-07-27): stamping only.  Both controls are
+    // attached to real APVTS params, so the applicators behind these ids are
+    // registered at param materialization (VibeSynthProcessor::
+    // onMixerStripParamsCreated -> registerStaticAutomationHandlers, which also
+    // derives the "_fader" alias onto "_level").  The registrations that used to
+    // live here drove the SLIDER and died with the strip, which is why the
+    // permanent bus/master strips needed a re-registration shim after every
+    // project boundary -- that shim is gone with them.  Automating a fader now
+    // moves the parameter, and the attachment moves the cap.
     mAutomationPrefix = prefix;
     mFader.setComponentID   (prefix + "_fader");
     mPanKnob.setComponentID (prefix + "_pan");
-
-    // SafePointer guards against the slider being destroyed between registration and an
-    // automation-tick invocation (aux strip removed, mixer rebuild, etc.). Without it, a
-    // stale applicator stored in StandaloneEditor would dereference freed memory on the
-    // next automation tick and crash inside NormalisableRange::snapToLegalValue.
-    // Fader
-    {
-        juce::Component::SafePointer<juce::Slider> safeSl(&mFader);
-        double lo = mFader.getMinimum(), hi = mFader.getMaximum();
-        juce::String id = mFader.getComponentID();
-        if (VKnobAutomation::sOnRegisterApplicator)
-            VKnobAutomation::sOnRegisterApplicator(id, [safeSl, lo, hi](float v01) {
-                if (auto* sl = safeSl.getComponent())
-                    sl->setValue(lo + v01 * (hi - lo), juce::sendNotification);
-            }, &mFader);
-        if (VKnobAutomation::sOnRegisterReader)
-            VKnobAutomation::sOnRegisterReader(id, [safeSl, lo, hi]() -> float {
-                auto* sl = safeSl.getComponent();
-                if (!sl) return 0.5f;
-                double range = hi - lo;
-                return range > 0.0 ? (float)((sl->getValue() - lo) / range) : 0.5f;
-            }, &mFader);
-    }
-    // Pan knob
-    {
-        juce::Component::SafePointer<juce::Slider> safeSl(&mPanKnob);
-        double lo = mPanKnob.getMinimum(), hi = mPanKnob.getMaximum();
-        juce::String id = mPanKnob.getComponentID();
-        if (VKnobAutomation::sOnRegisterApplicator)
-            VKnobAutomation::sOnRegisterApplicator(id, [safeSl, lo, hi](float v01) {
-                if (auto* sl = safeSl.getComponent())
-                    sl->setValue(lo + v01 * (hi - lo), juce::sendNotification);
-            }, &mPanKnob);
-        if (VKnobAutomation::sOnRegisterReader)
-            VKnobAutomation::sOnRegisterReader(id, [safeSl, lo, hi]() -> float {
-                auto* sl = safeSl.getComponent();
-                if (!sl) return 0.5f;
-                double range = hi - lo;
-                return range > 0.0 ? (float)((sl->getValue() - lo) / range) : 0.5f;
-            }, &mPanKnob);
-    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

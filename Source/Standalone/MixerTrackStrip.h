@@ -109,13 +109,11 @@ public:
     // ── Automation prefix (sets componentID on fader and pan knob) ───────────
     void setAutomationPrefix (const juce::String& prefix);
 
-    // Re-run automation applicator/reader registration using the stored prefix.
-    // StandaloneEditor::resetProjectState() clears the global applicator map at
-    // every project boundary and only re-seeds APVTS-param ids; the permanent
-    // bus/master strips register their "_fader" applicator (which has no APVTS
-    // twin) only at construction, so without this their fader automation is lost
-    // after any project load / New Project.  See MixerPage::reRegisterStripAutomation.
-    void reRegisterAutomation() { setAutomationPrefix (mAutomationPrefix); }
+    // QA-ModelShell TS3: reRegisterAutomation() is gone.  It existed because
+    // this strip registered its own view-scoped "_fader" applicator, which had
+    // no APVTS twin for resetProjectState()'s re-seed to find.  Registration is
+    // now model-side at param materialization and the "_fader" alias is derived
+    // from the "_level" param, so there is nothing left to put back.
 
     // ── Level feed (safe to call from UI timer) ───────────────────────────────
     void setLevel(float dBFS);

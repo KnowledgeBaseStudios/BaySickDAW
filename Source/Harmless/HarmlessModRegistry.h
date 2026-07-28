@@ -125,6 +125,42 @@ struct ModSourceState
     }
 };
 
+// ── LENGTH's discrete steps ──────────────────────────────────────────────────
+// The editor's LENGTH control is not continuous: it picks one of 13 musically
+// useful durations and writes the looked-up value into ModSourceState::length.
+// BLU-344 (QA-ModelShell TS3) makes that control automatable, and an automation
+// lane has to land on exactly the same 13 values the knob does -- so the table
+// and its inverse live here, next to the field they write, rather than inside
+// the editor that used to be their only caller.
+namespace HarmlessModLength
+{
+    inline constexpr int kNumSteps = 13;
+
+    inline constexpr float kBeats[kNumSteps] = {
+        0.125f, 0.25f, 0.375f, 0.5f, 0.625f, 0.75f, 0.875f,
+        1.0f, 2.0f, 4.0f, 8.0f, 16.0f, 32.0f
+    };
+
+    inline constexpr const char* kNames[kNumSteps] = {
+        "1/8", "1/4", "3/8", "1/2", "5/8", "3/4", "7/8",
+        "1", "2", "4", "8", "16", "32"
+    };
+
+    // Nearest step index for a stored length -- the read-back direction, used
+    // both to seed the knob and to answer an automation reader.
+    inline int nearestIndex (float beats) noexcept
+    {
+        int best = 0;
+        float bestDist = 1.0e9f;
+        for (int i = 0; i < kNumSteps; ++i)
+        {
+            const float d = std::abs (beats - kBeats[i]);
+            if (d < bestDist) { bestDist = d; best = i; }
+        }
+        return best;
+    }
+}
+
 struct ModTarget
 {
     juce::String paramId;

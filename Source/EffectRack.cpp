@@ -8,7 +8,6 @@
 #include "DSP/OverdriveDSP.h"
 #include "DSP/PhaserDSP.h"
 #include "DSP/TransientShaperDSP.h"
-#include "DSP/TapeDSP.h"
 #include "DSP/LimiterDSP.h"
 #include "DSP/DeEsserDSP.h"
 #include "DSP/GateDSP.h"      // QA-Fe2 vocal-chain Gate
@@ -67,9 +66,9 @@ std::unique_ptr<DSPBase> EffectRack::createEffect(EffectType type)
             // H-10 cutover (2026-05-02): EffectType::Tape is now an ALIAS that
             // constructs a SaturationDSP with mSatType pre-set to Type::Tape.
             // Old projects load via this path; the Saturation umbrella runs
-            // a bit-exact port of the legacy TapeDSP body.  TapeDSP class
-            // stays in the source tree as an emergency-rollback safety net
-            // but is no longer instantiated by the rack.
+            // a bit-exact port of the legacy TapeDSP body.  That class was
+            // deleted 2026-07-28 once nothing referenced it -- the port inside
+            // SaturationDSP is the only tape implementation now.
             auto sat = std::make_unique<SaturationDSP>();
             sat->setSatType ((int) SaturationDSP::Type::Tape);
             return sat;

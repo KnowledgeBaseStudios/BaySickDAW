@@ -156,8 +156,10 @@ public:
     // QA-ApvtsAutomation: give this slot's panel its automation identity.  The key
     // is the pedal's stable uuid, NOT the slot index -- reordering moves whole
     // Slot objects, so an index-keyed lane would silently retarget another pedal.
-    // Safe to call repeatedly: setSlotContext re-stamps and re-registers, and the
-    // registry assigns by key.  No-ops until the owning page supplies the prefix.
+    // Safe to call repeatedly.  QA-ModelShell TS3: this stamps ids for the
+    // right-click menu only -- the applicators behind them are registered
+    // model-side (StandaloneEditor::registerPedalAutomation) so the board's
+    // lanes keep working with no editor open.
     void applyAutomationContext()
     {
         if (mPanel == nullptr) return;

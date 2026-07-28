@@ -35,15 +35,15 @@ void HarmlessXYZPad::attachToApvts (juce::AudioProcessorValueTreeState& apvts,
                                      const juce::String& zId)
 {
     // QA-ApvtsAutomation Task 5 follow-up: attached but never stamped, so the
-    // three mod knobs had no Automate menu.  Engine params -- absent from the
-    // MAIN apvts -- so automation reaches them only via this registry.
+    // three mod knobs had no Automate menu.  QA-ModelShell TS3: stamping is all
+    // this does now -- the applicator is registered model-side against the
+    // engine APVTS and survives this pad.
     auto wire = [&apvts] (const juce::String& id, VibeSlider& knob,
                           std::unique_ptr<SliderAtt>& att)
     {
         if (id.isEmpty()) return;
         att = std::make_unique<SliderAtt> (apvts, id, knob);
         knob.setComponentID (id);
-        VKnobAutomation::registerSliderAutomation (id, knob);
     };
     wire (xId, mXKnob, mXAtt);
     wire (yId, mYKnob, mYAtt);

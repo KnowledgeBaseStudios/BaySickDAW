@@ -220,13 +220,6 @@ public:
     enum class StripKind { Layer, Bass, Drum, Audio };
     void renameChannel(StripKind kind, int pageIdx, const juce::String& newName);
 
-    // Re-register the permanent bus/master strips' fader/pan automation
-    // applicators after StandaloneEditor::resetProjectState() clears the global
-    // map at a project boundary.  Dynamic insert/aux strips re-register as their
-    // tabs rebuild; the permanent strips construct once and would otherwise
-    // silently lose their fader automation on every project load / New Project.
-    void reRegisterStripAutomation();
-
     // Connect to the global undo system.
     void setUndoContext(const UndoContext& ctx);
 

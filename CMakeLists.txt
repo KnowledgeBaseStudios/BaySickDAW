@@ -498,7 +498,6 @@ target_sources(BaySickDAWStandalone PRIVATE
     Source/DSP/OverdriveDSP.cpp
     Source/DSP/PhaserDSP.cpp
     Source/DSP/TransientShaperDSP.cpp
-    Source/DSP/TapeDSP.cpp
     Source/DSP/LimiterDSP.cpp
     Source/DSP/MicSimDSP.cpp
     Source/DSP/MicPlacementDSP.cpp

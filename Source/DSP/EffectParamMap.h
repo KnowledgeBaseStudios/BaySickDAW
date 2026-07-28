@@ -46,7 +46,40 @@ namespace EffectParamMap
         float       hi;                            //   slider's range
         void      (*apply) (DSPBase*, float natural);
         float     (*read)  (const DSPBase*);       // natural value from the DSP
+
+        // Optional dynamic range.  The applicator this replaced read the
+        // slider's min/max AT APPLY TIME, so a param whose range moves at
+        // runtime kept its meaning; a frozen lo/hi here would silently change
+        // it.  PhaserDSP's Rate is the one such param -- its upper bound is
+        // 2 Hz or 10 Hz depending on the Slow/Fast Range switch.  Null means
+        // "use lo/hi".
+        void      (*rangeOf) (const DSPBase*, float& lo, float& hi) = nullptr;
+
+        // The DSP's getLatencySamples() moves with this param, so applying it
+        // has to be followed by a bus PDC refresh.  The panels do that through
+        // EditorPanelBase::onLatencyChanged; an automation tick has no panel,
+        // so the rack applicator honours this flag instead.
+        bool        affectsLatency = false;
     };
+
+    // ── The second variant dimension: where the slot LIVES ───────────────────
+    // `variantOf` reads the DSP on purpose -- no UI may sit on the automation
+    // path.  But one thing about a slot is genuinely not in its DSP: whether it
+    // is an FX-rack slot or a BaySickPedals board slot.  createEffectEditor
+    // builds a DIFFERENT panel for the same DSP in each case (7 types have a
+    // *PedalPanel twin), and those twins reuse knob labels the same way the
+    // Compressor character modes do:
+    //   * SaturationDSP with satType == Tape shows "Drive" as -24..+24 dB into
+    //     setTapeInputGain in the rack, and 0..10 into setFlowers on the board;
+    //   * Reverb "Decay" is 0.1..20 s in the rack, 0.1..10 s on the board;
+    //   * Phaser "Rate" is dynamic in the rack, fixed 0.05..10 on the board.
+    // So context is part of the key, and it comes from the REGISTRATION SITE
+    // (which always knows which surface it is wiring) rather than from the DSP.
+    enum class PanelContext { Rack = 0, Pedal = 1 };
+
+    // Variant ordinal for a pedal-board slot of a dual-panel type.  Far above
+    // any DSP character-mode enum, so it can never collide with one.
+    static constexpr int kPedalVariant = 100;
 
     // ── Variant is part of the key, not an afterthought ──────────────────────
     // One EffectType can build SEVERAL panels with different knobs, ranges and
@@ -63,8 +96,11 @@ namespace EffectParamMap
     // wrong-sounding, quieter compressor.
     //
     // `variant` is read from the DSP itself so no UI is needed to resolve it;
-    // 0 for effects with a single panel.
-    int variantOf (EffectType type, const DSPBase* dsp);
+    // 0 for effects with a single panel.  `ctx` supplies the one dimension the
+    // DSP cannot answer (see PanelContext above) and is ignored for types with
+    // no pedal-board twin.
+    int variantOf (EffectType type, const DSPBase* dsp,
+                   PanelContext ctx = PanelContext::Rack);
 
     juce::Span<const ParamDef> defsFor (EffectType type, int variant);
 
@@ -84,4 +120,10 @@ namespace EffectParamMap
     // `fallback` when the suffix is unknown or the DSP is null.
     float readNorm (EffectType type, int variant, const DSPBase* dsp,
                     const juce::String& suffix, float fallback = 0.5f);
+
+    // Current value in natural units -- what a panel's display refresh wants,
+    // since its slider already works in those units.  Returns `fallback` when
+    // the suffix is unknown or the DSP is null.
+    float readNatural (EffectType type, int variant, const DSPBase* dsp,
+                       const juce::String& suffix, float fallback = 0.0f);
 }

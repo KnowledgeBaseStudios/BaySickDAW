@@ -35,6 +35,10 @@ public:
 
     // ── API ───────────────────────────────────────────────────────────────────
     void setLFOFreq    (int lfo, float hz);   // lfo=0/1/2, range 0.01..10 Hz
+    float getLFOFreq   (int lfo) const noexcept
+    {
+        return (lfo >= 0 && lfo < 3) ? lfoParams[(size_t) lfo].freq : 0.0f;
+    }
     void setLFOWave    (int lfo, int wave);   // 0=Sine 1=Triangle 2=Multi 3=Organic
     void setDelay      (float ms);            // base delay 0.5..30 ms
     void setDepth      (float ms);            // modulation depth 0..20 ms

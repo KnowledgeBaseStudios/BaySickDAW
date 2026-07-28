@@ -1700,11 +1700,9 @@ namespace VKnobAutomation
 {
     std::function<void(const juce::String& paramId)> sOnAutomate;
     std::function<void(const juce::String& paramId,
-                       std::function<void(float)>,
-                       juce::Component* owner)> sOnRegisterApplicator;
+                       std::function<void(float)>)> sOnRegisterApplicator;
     std::function<void(const juce::String& paramId,
-                       std::function<float()>,
-                       juce::Component* owner)> sOnRegisterReader;
+                       std::function<float()>)> sOnRegisterReader;
     std::function<juce::String(const juce::String& paramId)>                     sResolveMenuLabel;
     std::function<bool(const juce::String& paramId)>                             sShouldOfferModulate;
     std::function<void(const juce::String& paramId)>                             sOnModulateEnvelope;
@@ -1717,137 +1715,6 @@ namespace VKnobAutomation
     std::function<void(const juce::String& paramId)>                             sOnMidiForget;
     std::function<void()>                                                        sOnMidiSaveAsDefault;
     std::function<bool()>                                                        sHasAnyMidiMappings;
-
-    void registerSliderAutomation (const juce::String& paramId, juce::Slider& slider)
-    {
-        if (paramId.isEmpty()) return;
-
-        juce::Component::SafePointer<juce::Slider> safeSl (&slider);
-
-        if (sOnRegisterApplicator)
-            sOnRegisterApplicator (paramId, [safeSl] (float v01)
-            {
-                auto* sl = safeSl.getComponent();
-                if (sl == nullptr) return;
-                const double lo = sl->getMinimum(), hi = sl->getMaximum();
-                sl->setValue (lo + (double) v01 * (hi - lo), juce::sendNotification);
-            }, &slider);
-
-        if (sOnRegisterReader)
-            sOnRegisterReader (paramId, [safeSl]() -> float
-            {
-                auto* sl = safeSl.getComponent();
-                if (sl == nullptr) return 0.5f;
-                const double lo = sl->getMinimum(), hi = sl->getMaximum();
-                const double range = hi - lo;
-                return range > 0.0 ? (float) ((sl->getValue() - lo) / range) : 0.5f;
-            }, &slider);
-    }
-
-    void registerButtonAutomation (const juce::String& paramId, juce::Button& button)
-    {
-        if (paramId.isEmpty()) return;
-
-        juce::Component::SafePointer<juce::Button> safeBtn (&button);
-
-        if (sOnRegisterApplicator)
-            sOnRegisterApplicator (paramId, [safeBtn] (float v01)
-            {
-                if (auto* b = safeBtn.getComponent())
-                    if (b->getToggleState() != (v01 >= 0.5f))
-                        b->setToggleState (v01 >= 0.5f, juce::sendNotification);
-            }, &button);
-
-        if (sOnRegisterReader)
-            sOnRegisterReader (paramId, [safeBtn]() -> float
-            {
-                auto* b = safeBtn.getComponent();
-                return (b != nullptr && b->getToggleState()) ? 1.0f : 0.0f;
-            }, &button);
-    }
-
-    void registerComboAutomation (const juce::String& paramId, juce::ComboBox& combo)
-    {
-        if (paramId.isEmpty()) return;
-
-        juce::Component::SafePointer<juce::ComboBox> safeCbo (&combo);
-
-        if (sOnRegisterApplicator)
-            sOnRegisterApplicator (paramId, [safeCbo] (float v01)
-            {
-                auto* c = safeCbo.getComponent();
-                if (c == nullptr) return;
-                const int n = c->getNumItems();
-                if (n <= 0) return;
-                const int idx = juce::jlimit (0, n - 1, (int) std::round (v01 * (float) (n - 1)));
-                if (c->getSelectedItemIndex() != idx)
-                    c->setSelectedItemIndex (idx, juce::sendNotification);
-            }, &combo);
-
-        if (sOnRegisterReader)
-            sOnRegisterReader (paramId, [safeCbo]() -> float
-            {
-                auto* c = safeCbo.getComponent();
-                if (c == nullptr) return 0.0f;
-                const int n = c->getNumItems();
-                if (n <= 1) return 0.0f;
-                return juce::jlimit (0.0f, 1.0f,
-                                     (float) c->getSelectedItemIndex() / (float) (n - 1));
-            }, &combo);
-    }
-
-    void registerParameterAutomation (const juce::String& paramId,
-                                      juce::RangedAudioParameter& param,
-                                      juce::Component& lifetimeGuard,
-                                      std::function<bool()> suppressWhen)
-    {
-        if (paramId.isEmpty()) return;
-
-        juce::Component::SafePointer<juce::Component> safeGuard (&lifetimeGuard);
-        auto* rap = &param;
-
-        if (sOnRegisterApplicator)
-            sOnRegisterApplicator (paramId, [safeGuard, rap, suppressWhen] (float v01)
-            {
-                if (safeGuard.getComponent() == nullptr) return;
-                if (suppressWhen && suppressWhen()) return;
-                rap->setValueNotifyingHost (juce::jlimit (0.0f, 1.0f, v01));
-            }, &lifetimeGuard);
-
-        if (sOnRegisterReader)
-            sOnRegisterReader (paramId, [safeGuard, rap]() -> float
-            {
-                return safeGuard.getComponent() != nullptr ? rap->getValue() : 0.5f;
-            }, &lifetimeGuard);
-    }
-
-    void registerSelectorAutomation (const juce::String& paramId, ChickenHeadSelector& selector)
-    {
-        if (paramId.isEmpty()) return;
-
-        juce::Component::SafePointer<ChickenHeadSelector> safeSel (&selector);
-
-        if (sOnRegisterApplicator)
-            sOnRegisterApplicator (paramId, [safeSel] (float v01)
-            {
-                auto* sel = safeSel.getComponent();
-                if (sel == nullptr) return;
-                const int last = sel->getNumOptions() - 1;
-                if (last < 0) return;
-                const int idx = juce::jlimit (0, last, (int) std::lround ((double) v01 * last));
-                if (sel->getSelectedIndex() != idx)
-                    sel->setSelectedIndex (idx, juce::sendNotification);
-            }, &selector);
-
-        if (sOnRegisterReader)
-            sOnRegisterReader (paramId, [safeSel]() -> float
-            {
-                auto* sel = safeSel.getComponent();
-                if (sel == nullptr) return 0.0f;
-                const int last = sel->getNumOptions() - 1;
-                return last > 0 ? (float) sel->getSelectedIndex() / (float) last : 0.0f;
-            }, &selector);
-    }
 
     int appendMidiLearnMenuItems (juce::PopupMenu& m, const juce::String& paramId, int firstId)
     {
@@ -4906,8 +4773,6 @@ void ParametricEQDisplay::bindMsDSP(EQ8MsDSP* msDsp,
     mMsDSPMidPrefix  = midPrefix;
     mMsDSPSidePrefix = sidePrefix;
     bindMsDSP(msDsp);   // delegate to base overload (resets analyser accumulators, etc.)
-    // Session B: wire the Event Editor to every EQ band paramId under these prefixes.
-    registerAutomationForBoundEQ();
     // Bonus Q3: stamp paramIds on per-band right-panel controls (freq/gain/Q)
     // so GlobalAutoRightClick can catch right-clicks and offer the Automate menu.
     stampRightPanelComponentIds();
@@ -5366,56 +5231,6 @@ void ParametricEQDisplay::openDynamicParamsPopout(int bandIdx)
     const float hy = gainToY(mBands[bandIdx].gainDb);
     const auto anchor = localAreaToGlobal(juce::Rectangle<int>((int)hx - 6, (int)hy - 6, 12, 12));
     juce::CallOutBox::launchAsynchronously(std::move(content), anchor, nullptr);
-}
-
-// Session B: idempotent registration of automation applicators + readers for
-// every paramId under mMsDSPMidPrefix / mMsDSPSidePrefix. Called from the full
-// bindMsDSP overload whenever the widget is pointed at a new (eq, prefixPair).
-// Rebinding for the same prefix is a no-op in practice since StandaloneEditor's
-// registry map just overwrites the lambda for that paramId.
-void ParametricEQDisplay::registerAutomationForBoundEQ()
-{
-    if (!mMsDSPApvts) return;
-    if (mMsDSPMidPrefix.isEmpty() && mMsDSPSidePrefix.isEmpty()) return;
-
-    auto* apvts = mMsDSPApvts;
-
-    // QA-ProjectSave Task 7: these lanes write the PARAMETER, not a widget, but
-    // the registration is still scoped to this display -- when the EQ panel goes
-    // away its entries go with it rather than lingering as no-ops.
-    auto regOne = [apvts, owner = this](const juce::String& id)
-    {
-        if (!apvts->getParameter(id)) return;
-        if (VKnobAutomation::sOnRegisterApplicator)
-            VKnobAutomation::sOnRegisterApplicator(id, [apvts, id](float norm01)
-            {
-                if (auto* p = dynamic_cast<juce::RangedAudioParameter*>(apvts->getParameter(id)))
-                    p->setValueNotifyingHost(juce::jlimit(0.0f, 1.0f, norm01));
-            }, owner);
-        if (VKnobAutomation::sOnRegisterReader)
-            VKnobAutomation::sOnRegisterReader(id, [apvts, id]() -> float
-            {
-                if (auto* rap = dynamic_cast<juce::RangedAudioParameter*>(apvts->getParameter(id)))
-                    return rap->getValue();
-                return 0.0f;
-            }, owner);
-    };
-
-    auto regForPrefix = [&](const juce::String& prefixBase)
-    {
-        if (prefixBase.isEmpty()) return;
-        static const char* kSuffix[9] = {
-            "Freq", "Gain", "Q", "Type", "On", "Slope", "Mute", "Solo", "Channel" };
-        for (int b = 0; b < kNumBands; ++b)
-        {
-            const juce::String bp = prefixBase + juce::String(b);
-            for (int s = 0; s < 9; ++s)
-                regOne(bp + kSuffix[s]);
-        }
-    };
-
-    regForPrefix(mMsDSPMidPrefix);
-    regForPrefix(mMsDSPSidePrefix);
 }
 
 void ParametricEQDisplay::setShowMid(bool showMid)

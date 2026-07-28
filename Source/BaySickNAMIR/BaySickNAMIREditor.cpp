@@ -10,15 +10,15 @@ void BaySickNAMIREditor::setAutomationPrefix (const juce::String& prefix)
 {
     if (prefix.isEmpty()) return;
 
-    // Registration walks the engine's OWN parameter list rather than a
-    // hand-maintained control table: coverage is complete by construction and
-    // stays correct when params are added, since a table silently rots instead.
-    for (auto* p : processor.getParameters())
-        if (auto* rap = dynamic_cast<juce::RangedAudioParameter*> (p))
-            VKnobAutomation::registerParameterAutomation (prefix + rap->paramID, *rap, *this);
-
-    // The controls' Automate-menu ids must match the registry keys above, so the
-    // lane a right-click creates is the lane the registry answers to.
+    // QA-ModelShell TS3 (2026-07-27): the parameter-list walk that used to
+    // register applicators here moved to
+    // StandaloneEditor::registerModelEngineAutomation, which does it off the
+    // rig's engine-created event under these same prefixed keys.  It had to
+    // move: registration here was guarded by THIS editor's lifetime, so the
+    // lanes died whenever the page did.
+    //
+    // The controls' Automate-menu ids must match the registry keys, so the lane
+    // a right-click creates is the lane the registry answers to.
     auto knob = [&prefix] (VKnob& k, const char* id)               { k.paramId = prefix + id; };
     auto tog  = [&prefix] (DualLabelToggle& t, const char* id)     { t.btn().setComponentID (prefix + id); };
     auto sel  = [&prefix] (ChickenHeadSelector& s, const char* id) { s.setComponentID (prefix + id); };

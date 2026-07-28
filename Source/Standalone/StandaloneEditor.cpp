@@ -32,6 +32,7 @@
 #include "../BaySickGuitars/BaySickGuitarsProcessor.h"        // K-3: audition closure routes to engine->auditionNote
 #include "../BaySickBasses/BaySickBassesProcessor.h"          // L-3: parallel BaySickBasses engine for the same dispatch
 #include "../BaySickPedals/BaySickPedalsProcessor.h"          // 2026-05-05: dirty-hook wiring
+#include "../DSP/EffectParamMap.h"   // QA-ModelShell TS3: pedal-board lane registration
 #include "../BaySickNAMIR/BaySickNAMIRProcessor.h"             // 2026-05-05: dirty-hook wiring
 #include "../BaySickVocal/BaySickVocalProcessor.h"             // 2026-05-05: dirty-hook wiring
 // 2026-05-05: RustyDrumsPagePresetIO + AriaPagePresetIO consolidated into
@@ -641,20 +642,35 @@ StandaloneEditor::StandaloneEditor(VibeSynthProcessor& p, StandalonePlayHead& ph
 
     // ── Automation applicator registration hook ───────────────────────────────
     VKnobAutomation::sOnRegisterApplicator = [this](const juce::String& pid,
-                                                     std::function<void(float)> fn,
-                                                     juce::Component* owner)
+                                                     std::function<void(float)> fn)
     {
         mAutomationApplicators[pid] = std::move(fn);
-        trackAutomationOwner (pid, owner);
     };
 
     // ── Automation value reader registration hook ─────────────────────────────
     VKnobAutomation::sOnRegisterReader = [this](const juce::String& pid,
-                                                 std::function<float()> fn,
-                                                 juce::Component* owner)
+                                                 std::function<float()> fn)
     {
         mAutomationValueReaders[pid] = std::move(fn);
-        trackAutomationOwner (pid, owner);
+    };
+
+    // ── Mixer-strip param materialization -> lane registration ───────────────
+    // QA-ModelShell TS3: strips are created lazily, long after the startup
+    // sweep, so their params were invisible to it.  The mixer strip and the EQ
+    // display each covered that with their own view-scoped registration; this
+    // model event replaces both.
+    mProcessor.onMixerStripParamsCreated = [this] (const juce::String&)
+    {
+        registerStaticAutomationHandlers();
+    };
+
+    // ── sfizz engine ready -> lane registration ──────────────────────────────
+    // QA-ModelShell TS3 fix: these three are processor-owned, so they need
+    // their own model event; the rig's onEngineCreated never covers them.
+    mProcessor.onSfizzEngineReady = [this] (VibeSynthProcessor::SfizzEngineKind kind,
+                                            int instIdx)
+    {
+        registerSfizzEngineAutomation (kind, instIdx);
     };
 
     // ── Right-click menu label resolver ──────────────────────────────────────
@@ -1660,12 +1676,6 @@ StandaloneEditor::StandaloneEditor(VibeSynthProcessor& p, StandalonePlayHead& ph
 
 StandaloneEditor::~StandaloneEditor()
 {
-    // QA-ProjectSave Task 7: every page below is about to be destroyed, and each
-    // destruction fires componentBeingDeleted.  Walking the registry maps for
-    // each one is pointless work during teardown and unsafe once they are gone,
-    // so the callback is disarmed before anything starts dying.
-    mTearingDownAutomation = true;
-
     // 2026-05-06 (Batch 9c B2-followup): Tear down all dynamic tabs (Vox /
     // Inst / Clip / Layers / Bass / Drums / Rusty) THROUGH THE SAFE PATH
     // first.  Without this, the bare mPages.clear() below would destroy
@@ -3070,20 +3080,24 @@ void StandaloneEditor::openEventEditor(int blockIdx)
             pane->onIsParamStale = [this](const juce::String& pid) -> bool
             {
                 if (pid.isEmpty()) return false;
-                // QA-ProjectSave Task 7 step 2, REVERTED 2026-07-26 after Jeff
+                // QA-ModelShell TS3 (2026-07-27): RE-WIDENED to "not a main-APVTS
+                // param AND not in the registry", which is what QA-ProjectSave
+                // Task 7 step 2 tried and had to revert on 2026-07-26 when Jeff
                 // saw every effects-rack lane tagged "deleted".
                 //
-                // Widening this to "not in APVTS AND not in the registry" was
-                // wrong while applicators are still keyed to PANELS: a rack lane
-                // is unregistered whenever its channel is not the one the
-                // Effects page is showing, which is a normal viewing state, not
-                // a dead lane.  The tag was accurate about the registry and a
-                // lie about the user's automation.
+                // That revert was right at the time: applicators were keyed to
+                // PANELS, so a rack lane was unregistered whenever its channel
+                // was not the one the Effects page happened to be showing -- a
+                // normal viewing state, not a dead lane.  The tag was accurate
+                // about the registry and a lie about the user's automation.
                 //
-                // Re-widen once step 3 moves rack/pedal applicators onto the DSP
-                // -- registration will then last as long as the RACK does, so
-                // "not registered" genuinely means "target is gone".
-                return mProcessor.apvts.getParameter (pid) == nullptr;
+                // It is honest now.  Registration is model-side and lasts as
+                // long as the thing it targets, so "not registered" genuinely
+                // means the target is gone -- a deleted tab, a cleared rack
+                // slot, a removed pedal.  Without the widening, exactly those
+                // lanes look alive.
+                if (mProcessor.apvts.getParameter (pid) != nullptr) return false;
+                return mAutomationApplicators.find (pid) == mAutomationApplicators.end();
             };
         }
 
@@ -11687,27 +11701,13 @@ void StandaloneEditor::resetProjectState()
     // just cleared would still be listened to, and its later destruction would
     // try to erase ids that a NEW registration may since have claimed.
     // Deregister first: this object outlives most of these components, and JUCE
-    // does not auto-remove listeners.
-    //
-    // CRASH FIX (2026-07-26, found by Jeff on app close): NOT during teardown.
-    // ~StandaloneEditor sets mTearingDownAutomation and then runs
-    // closeAllDynamicTabs -> closeDynamicTabs -> here.  With the guard set,
-    // componentBeingDeleted early-returns and never erases entries, so by this
-    // point the map holds pointers to components that are ALREADY DESTROYED --
-    // dereferencing one to removeComponentListener was an access violation.
-    // Nothing needs deregistering then anyway: the components are going away.
-    if (! mTearingDownAutomation)
-        for (auto& [owner, ids] : mAutomationOwners)
-            if (owner != nullptr) owner->removeComponentListener (this);
-    mAutomationOwners.clear();
-    mAutomationIdOwner.clear();
+    // QA-ModelShell TS3: this one call re-seeds everything the map holds that is
+    // not model-event-driven, INCLUDING the "<prefix>_fader" aliases it derives.
+    // Two things that used to follow it are gone: the owning-component index
+    // teardown (no registration is component-scoped any more) and the
+    // MixerPage::reRegisterStripAutomation shim that put back the strip
+    // registrations this clear() used to drop.
     registerStaticAutomationHandlers();
-    // The permanent bus/master strips are neither static APVTS params nor
-    // dynamic tabs that rebuild -- they register their fader/pan automation
-    // once at construction, so the clear() above drops their "_fader" applicator
-    // (which has no APVTS twin to re-seed it).  Re-register so master/bus fader
-    // automation survives project load / New Project.
-    if (mMixerPage) mMixerPage->reRegisterStripAutomation();
 }
 
 // QA-ModelShell TS1: engine-parameter lane registration keyed to MODEL events
@@ -11756,16 +11756,30 @@ void StandaloneEditor::registerModelEngineAutomation (EngineTab& tab)
             const juce::String pid     = lanePrefix + rp->paramID;
             const juce::String paramId = rp->paramID;
 
+            // Vocal capture lock (owner call 2026-07-25, docket 4=A): while the
+            // strip is recording, a write to the realtime-board set is vetoed
+            // for the same reason the UI greys those controls out.  The lane is
+            // not consumed -- the next tick after the veto clears applies
+            // normally.  Moved here from BaySickVocalEditor's registration when
+            // TS3 retired the widget wrappers; the veto had to travel with it or
+            // an automated take would start clicking again.
+            const bool gated = (which == Target::MainEngine)
+                               && BaySickVocalProcessor::isCaptureGated (paramId);
+
             if (VKnobAutomation::sOnRegisterApplicator)
                 VKnobAutomation::sOnRegisterApplicator (pid,
-                    [resolveTarget, which, paramId] (float v01)
+                    [resolveTarget, which, paramId, gated] (float v01)
                     {
-                        if (auto* t = resolveTarget (which))
-                            if (auto* ap = EngineRig::apvtsOf (t))
-                                if (auto* param = ap->getParameter (paramId))
-                                    param->setValueNotifyingHost (juce::jlimit (0.0f, 1.0f, v01));
-                    },
-                    nullptr);   // model-scoped, not component-scoped
+                        auto* t = resolveTarget (which);
+                        if (t == nullptr) return;
+                        if (gated)
+                            if (auto* v = dynamic_cast<BaySickVocalProcessor*> (t))
+                                if (v->onIsStripRecording && v->onIsStripRecording())
+                                    return;
+                        if (auto* ap = EngineRig::apvtsOf (t))
+                            if (auto* param = ap->getParameter (paramId))
+                                param->setValueNotifyingHost (juce::jlimit (0.0f, 1.0f, v01));
+                    });   // model-scoped: re-resolves through the rig at apply time
 
             if (VKnobAutomation::sOnRegisterReader)
                 VKnobAutomation::sOnRegisterReader (pid,
@@ -11776,8 +11790,7 @@ void StandaloneEditor::registerModelEngineAutomation (EngineTab& tab)
                                 if (auto* param = ap->getParameter (paramId))
                                     return param->getValue();
                         return 0.5f;
-                    },
-                    nullptr);
+                    });
         }
     };
 
@@ -11788,6 +11801,9 @@ void StandaloneEditor::registerModelEngineAutomation (EngineTab& tab)
         case TabKind::Drums:
         case TabKind::Clips:
             registerParamsOf (Target::MainEngine, tab.engine.get(), {});
+            // BLU-344: Harmless also carries non-parameter mod-editor targets.
+            // No-op for the other engine types.
+            registerHarmlessModAutomation (kind, idx);
             break;
 
         case TabKind::Vox:
@@ -11802,7 +11818,230 @@ void StandaloneEditor::registerModelEngineAutomation (EngineTab& tab)
         case TabKind::Inst:
             registerParamsOf (Target::InstNam, tab.namIr,
                               "inst" + juce::String (idx) + "_");
+            // The board's own lanes, plus the subscription that re-keys them
+            // when the user swaps a pedal.  Wired here rather than in InstPage
+            // because the board outlives every view of it.
+            registerPedalAutomation (idx);
+            if (tab.pedals != nullptr)
+            {
+                juce::Component::SafePointer<StandaloneEditor> safeThis (this);
+                tab.pedals->onSlotAutomationChanged = [safeThis, idx]
+                {
+                    if (auto* ed = safeThis.getComponent())
+                        ed->registerPedalAutomation (idx);
+                };
+            }
             break;
+    }
+}
+
+void StandaloneEditor::registerSfizzEngineAutomation (VibeSynthProcessor::SfizzEngineKind kind,
+                                                      int instIdx)
+{
+    using Kind = VibeSynthProcessor::SfizzEngineKind;
+
+    // Re-resolve through the processor on every tick.  These engines are
+    // destroyed and recreated by source switches and kit loads, so a captured
+    // pointer would be exactly the stale-target bug the model-side rewrite
+    // exists to prevent.
+    auto resolveApvts = [this, kind, instIdx]() -> juce::AudioProcessorValueTreeState*
+    {
+        switch (kind)
+        {
+            case Kind::Guitars:
+                if (auto* e = mProcessor.getBaySickGuitars (instIdx)) return &e->apvts;
+                return nullptr;
+            case Kind::Basses:
+                if (auto* e = mProcessor.getBaySickBasses (instIdx))  return &e->apvts;
+                return nullptr;
+            case Kind::RustyDrums:
+                if (auto* e = mProcessor.getBaySickRustyDrums())      return &e->apvts;
+                return nullptr;
+        }
+        return nullptr;
+    };
+
+    auto* apvts = resolveApvts();
+    if (apvts == nullptr) return;
+
+    // Walk the engine's own parameter list so coverage stays complete as params
+    // are added -- the same reason every other engine family uses a walk rather
+    // than a hand-kept table.  Param ids are already globally unique (Guitars
+    // "bgg_<idx>_", Basses "bbb_<idx>_", Rusty's singleton "brd_"), so the lane
+    // id IS the param id -- which is exactly what the Aria panel's
+    // "Automate: ..." menu already passes to sOnAutomate.
+    for (auto* p : apvts->processor.getParameters())
+    {
+        auto* rp = dynamic_cast<juce::RangedAudioParameter*> (p);
+        if (rp == nullptr) continue;
+        const juce::String paramId = rp->paramID;
+
+        if (VKnobAutomation::sOnRegisterApplicator)
+            VKnobAutomation::sOnRegisterApplicator (paramId,
+                [resolveApvts, paramId] (float v01)
+                {
+                    if (auto* ap = resolveApvts())
+                        if (auto* param = ap->getParameter (paramId))
+                            param->setValueNotifyingHost (juce::jlimit (0.0f, 1.0f, v01));
+                });
+
+        if (VKnobAutomation::sOnRegisterReader)
+            VKnobAutomation::sOnRegisterReader (paramId,
+                [resolveApvts, paramId]() -> float
+                {
+                    if (auto* ap = resolveApvts())
+                        if (auto* param = ap->getParameter (paramId))
+                            return param->getValue();
+                    return 0.5f;
+                });
+    }
+}
+
+void StandaloneEditor::registerHarmlessModAutomation (TabKind kind, int pageIndex)
+{
+    auto* tab = mProcessor.engineRig().findTab (kind, pageIndex);
+    if (tab == nullptr) return;
+    auto* harmless = dynamic_cast<HarmlessProcessor*> (tab->engine.get());
+    if (harmless == nullptr) return;   // Harmless-only feature
+
+    // Resolve the ModSourceState fresh on every tick.  The registry's target
+    // pointers are stable for its lifetime, but the ENGINE is not -- a tab can
+    // swap Harmless out for BaySickSynth and back -- so the walk starts from the
+    // rig, exactly like the parameter applicators above.
+    auto resolveSource = [this, kind, pageIndex] (const juce::String& targetId, int srcIdx)
+                         -> std::pair<ModSourceState*, HarmlessModRegistry*>
+    {
+        auto* t = mProcessor.engineRig().findTab (kind, pageIndex);
+        if (t == nullptr) return { nullptr, nullptr };
+        auto* h = dynamic_cast<HarmlessProcessor*> (t->engine.get());
+        if (h == nullptr) return { nullptr, nullptr };
+        auto& reg = h->getModRegistry();
+        auto* tgt = reg.findTarget (targetId);
+        if (tgt == nullptr) return { nullptr, nullptr };
+        if (srcIdx < 0 || srcIdx >= (int) ModSource::NumSources) return { nullptr, nullptr };
+        return { &tgt->sources[(size_t) srcIdx], &reg };
+    };
+
+    for (const auto& tgtPtr : harmless->getModRegistry().getAllTargets())
+    {
+        if (tgtPtr == nullptr) continue;
+        const juce::String targetId = tgtPtr->paramId;
+
+        for (int s = 0; s < (int) ModSource::NumSources; ++s)
+        {
+            const juce::String base = targetId + "_mod" + juce::String (s) + "_";
+
+            // DEPTH: bipolar, every source uses it.
+            if (VKnobAutomation::sOnRegisterApplicator)
+                VKnobAutomation::sOnRegisterApplicator (base + "depth",
+                    [resolveSource, targetId, s] (float v01)
+                    {
+                        auto [src, reg] = resolveSource (targetId, s);
+                        if (src == nullptr) return;
+                        src->depth = -1.0f + juce::jlimit (0.0f, 1.0f, v01) * 2.0f;
+                        reg->publishSnapshot();   // voices observe on their next block
+                    });
+            if (VKnobAutomation::sOnRegisterReader)
+                VKnobAutomation::sOnRegisterReader (base + "depth",
+                    [resolveSource, targetId, s]() -> float
+                    {
+                        auto [src, reg] = resolveSource (targetId, s);
+                        juce::ignoreUnused (reg);
+                        if (src == nullptr) return 0.5f;
+                        return juce::jlimit (0.0f, 1.0f, (src->depth + 1.0f) * 0.5f);
+                    });
+
+            // LENGTH: only Envelope + LFO have time behavior -- the editor hides
+            // the control for the other five sources, so a lane there would
+            // address something the user cannot see or set.
+            if (s != (int) ModSource::Envelope && s != (int) ModSource::LFO) continue;
+
+            if (VKnobAutomation::sOnRegisterApplicator)
+                VKnobAutomation::sOnRegisterApplicator (base + "length",
+                    [resolveSource, targetId, s] (float v01)
+                    {
+                        auto [src, reg] = resolveSource (targetId, s);
+                        if (src == nullptr) return;
+                        // Same 13 discrete steps the knob offers, via the same
+                        // table -- a lane cannot land between them.
+                        const int last = HarmlessModLength::kNumSteps - 1;
+                        const int i = juce::jlimit (0, last,
+                            (int) std::lround ((double) juce::jlimit (0.0f, 1.0f, v01) * last));
+                        src->length = HarmlessModLength::kBeats[i];
+                        reg->publishSnapshot();
+                    });
+            if (VKnobAutomation::sOnRegisterReader)
+                VKnobAutomation::sOnRegisterReader (base + "length",
+                    [resolveSource, targetId, s]() -> float
+                    {
+                        auto [src, reg] = resolveSource (targetId, s);
+                        juce::ignoreUnused (reg);
+                        if (src == nullptr) return 0.5f;
+                        const int last = HarmlessModLength::kNumSteps - 1;
+                        return last > 0
+                             ? (float) HarmlessModLength::nearestIndex (src->length) / (float) last
+                             : 0.0f;
+                    });
+        }
+    }
+}
+
+void StandaloneEditor::registerPedalAutomation (int instPageIndex)
+{
+    auto* tab = mProcessor.engineRig().findTab (TabKind::Inst, instPageIndex);
+    if (tab == nullptr || tab->pedals == nullptr) return;
+
+    // Matches what InstPage stamps on the board's panels, so a right-click
+    // "Automate" and this registration name the same key.
+    const juce::String channelPrefix = "inst" + juce::String (instPageIndex) + "_pedals";
+
+    for (int s = 0; s < BaySickPedalsProcessor::kNumSlots; ++s)
+    {
+        const juce::String uuid = tab->pedals->getSlotUuid (s);
+        const EffectType   type = tab->pedals->getSlotType (s);
+        if (uuid.isEmpty() || type == EffectType::None) continue;
+
+        // PanelContext::Pedal is the whole point of the second key dimension:
+        // the board builds the *PedalPanel face for the 7 dual-panel types, and
+        // those faces reuse rack knob labels for different setters and ranges.
+        // For a pedal-native type it falls through to the DSP-read variant.
+        const int variant = EffectParamMap::variantOf (
+                                type, tab->pedals->getSlotEffect (s),
+                                EffectParamMap::PanelContext::Pedal);
+        const juce::String base = channelPrefix + "_" + uuid + "_";
+
+        // Resolve board -> slot by UUID at APPLY time, never by index: the
+        // board reorders slots, and an index-keyed lane would silently move to
+        // whichever pedal landed in that position.
+        auto resolveDsp = [this, instPageIndex, uuid]() -> DSPBase*
+        {
+            auto* t = mProcessor.engineRig().findTab (TabKind::Inst, instPageIndex);
+            if (t == nullptr || t->pedals == nullptr) return nullptr;
+            for (int i = 0; i < BaySickPedalsProcessor::kNumSlots; ++i)
+                if (t->pedals->getSlotUuid (i) == uuid)
+                    return t->pedals->getSlotEffect (i);
+            return nullptr;
+        };
+
+        for (const auto& def : EffectParamMap::defsFor (type, variant))
+        {
+            const juce::String pid    = base + def.suffix;
+            const juce::String suffix = def.suffix;
+
+            if (VKnobAutomation::sOnRegisterApplicator)
+                VKnobAutomation::sOnRegisterApplicator (pid,
+                    [resolveDsp, type, variant, suffix] (float v01)
+                    {
+                        EffectParamMap::applyNorm (type, variant, resolveDsp(), suffix, v01);
+                    });   // board-scoped: re-resolves through the rig at apply time
+
+            if (VKnobAutomation::sOnRegisterReader)
+                VKnobAutomation::sOnRegisterReader (pid,
+                    [resolveDsp, type, variant, suffix]() -> float
+                    {
+                        return EffectParamMap::readNorm (type, variant, resolveDsp(), suffix, 0.5f);
+                    });
+        }
     }
 }
 
@@ -11822,6 +12061,25 @@ void StandaloneEditor::registerStaticAutomationHandlers()
             {
                 return rap->getValue();  // already 0..1
             };
+
+            // QA-ModelShell TS3: the mixer fader lane is spelled
+            // "<prefix>_fader" but its parameter is "<prefix>_level" -- the lane
+            // id predates the param.  Because no APVTS param answered to the
+            // lane's own name, mixer faders were the one strip control that
+            // needed a view-scoped applicator, plus a re-registration shim to
+            // put it back after every project boundary wiped the map.  Deriving
+            // the alias from the param itself retires both, and saved lanes keep
+            // their spelling so nothing on disk changes.
+            if (pid.startsWith ("mixer_") && pid.endsWith ("_level"))
+            {
+                const juce::String faderId =
+                    pid.upToLastOccurrenceOf ("_level", false, false) + "_fader";
+                mAutomationApplicators[faderId] = [rap] (float v01)
+                {
+                    rap->setValueNotifyingHost (juce::jlimit (0.0f, 1.0f, v01));
+                };
+                mAutomationValueReaders[faderId] = [rap]() -> float { return rap->getValue(); };
+            }
         }
     }
 
@@ -11852,68 +12110,23 @@ void StandaloneEditor::registerStaticAutomationHandlers()
     };
 }
 
-void StandaloneEditor::trackAutomationOwner (const juce::String& paramId,
-                                              juce::Component* owner)
-{
-    if (paramId.isEmpty()) return;
-
-    // A null owner means the registration is NOT tied to any component -- the
-    // static APVTS / global_tempo handlers, and the rack-scoped DSP applicators
-    // from EffectsPage::registerSlotAutomation.  Those are cleared wholesale by
-    // resetProjectState instead.
-    //
-    // Clearing the id's owner claim here is load-bearing, not tidiness (found
-    // by Jeff's re-test, 2026-07-26).  A rack applicator overwrites a paramId
-    // that a KNOB registered moments earlier, and the knob is about to be
-    // destroyed by the same channel switch.  Leaving the stale claim in place
-    // meant componentBeingDeleted saw the dying knob as the owner and revoked
-    // the DSP applicator that had just replaced it -- so the fix installed
-    // correctly and was then deleted a moment later.  Worse, the automation
-    // timer could apply once through the DSP path in that window and then lose
-    // the applicator, stranding the effect at that value (the "quieter after
-    // swapping" symptom).
-    if (owner == nullptr)
-    {
-        mAutomationIdOwner.erase (paramId);
-        return;
-    }
-
-    auto& ids = mAutomationOwners[owner];
-    if (! ids.contains (paramId))
-    {
-        if (ids.isEmpty())
-            owner->addComponentListener (this);   // first id for this component
-        ids.add (paramId);
-    }
-    // The CURRENT owner of this id.  Registration overwrites by key, so the last
-    // registrant wins and earlier claimants must not be able to revoke it.
-    mAutomationIdOwner[paramId] = owner;
-}
-
-void StandaloneEditor::componentBeingDeleted (juce::Component& c)
-{
-    if (mTearingDownAutomation) return;
-
-    auto it = mAutomationOwners.find (&c);
-    if (it == mAutomationOwners.end()) return;
-
-    for (const auto& pid : it->second)
-    {
-        // ID-STEALING FIX (2026-07-26, found via Jeff's FX-page test): a rebuilt
-        // panel registers BEFORE the old one dies -- SlotComponent::setEditor
-        // does `mEditor = std::move(editor)`, and unique_ptr::operator= installs
-        // the new pointer then deletes the old.  So the dying panel's id list
-        // still names ids the NEW panel has already claimed, and erasing them
-        // blindly killed a live registration.  Only revoke what we still own.
-        auto owned = mAutomationIdOwner.find (pid);
-        if (owned == mAutomationIdOwner.end() || owned->second != &c) continue;
-
-        mAutomationApplicators .erase (pid);
-        mAutomationValueReaders.erase (pid);
-        mAutomationIdOwner.erase (owned);
-    }
-    mAutomationOwners.erase (it);
-}
+// QA-ModelShell TS3 (2026-07-27): trackAutomationOwner + componentBeingDeleted
+// are gone, and StandaloneEditor is no longer a juce::ComponentListener.
+//
+// They were the answer to a real problem in the widget-targeting era: a lane's
+// applicator drove a control, so the registry had to notice when that control
+// died or it would keep a live entry pointing at freed memory.  The machinery
+// grew two hard-won guards on top of that -- clear the id's owner claim on a
+// null-owner registration, and revoke on destruction only what the dying
+// component still owns (a rebuilt panel registers BEFORE the old one dies).
+//
+// Both guards existed because view lifetime and lane lifetime were tangled.
+// TS3 untangles them: every registration is model-side and re-resolves its
+// target through the model at apply time, so no registration can outlive its
+// target in a way that matters, and there is no component whose death should
+// revoke a lane.  A view-lifetime index over a set that is now always empty is
+// worse than nothing -- it would quietly half-work for anyone who re-added a
+// view-scoped registration.
 
 void StandaloneEditor::advanceCountersFromRestoredTabs()
 {

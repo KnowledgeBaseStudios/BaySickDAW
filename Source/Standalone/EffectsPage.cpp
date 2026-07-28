@@ -496,14 +496,15 @@ void EffectsPage::resolveChannelDsp (VibeGraph& vg, int id,
 void EffectsPage::registerSlotAutomation (int slotIndex)
 {
     if (mRack == nullptr || mTrackBox == nullptr) return;
-    registerSlotAutomationFor (mProcessor.mVibeGraph, mTrackBox->getSelectedId(),
+    registerSlotAutomationFor (mProcessor, mTrackBox->getSelectedId(),
                                getChannelPrefix(), *mRack, slotIndex);
 }
 
-void EffectsPage::registerSlotAutomationFor (VibeGraph& vg, int chId,
+void EffectsPage::registerSlotAutomationFor (VibeSynthProcessor& proc, int chId,
                                              const juce::String& channelPrefix,
                                              EffectRack& rackRef, int slotIndex)
 {
+    auto& vg = proc.mVibeGraph;
     const juce::String uuid   = rackRef.getSlotUuid (slotIndex);
     const EffectType   type   = rackRef.getSlotType (slotIndex);
     // Variant is part of the key: one EffectType can build several panels whose
@@ -545,8 +546,7 @@ void EffectsPage::registerSlotAutomationFor (VibeGraph& vg, int chId,
                     if (rack == nullptr || slot < 0) return;
                     rack->setSlotOutputGain (slot,
                         kLo + juce::jlimit (0.0f, 1.0f, v01) * (kHi - kLo));
-                },
-                nullptr);
+                });
 
         if (VKnobAutomation::sOnRegisterReader)
             VKnobAutomation::sOnRegisterReader (pid,
@@ -557,14 +557,20 @@ void EffectsPage::registerSlotAutomationFor (VibeGraph& vg, int chId,
                     if (rack == nullptr || slot < 0) return 0.5f;
                     return juce::jlimit (0.0f, 1.0f,
                         (rack->getSlotOutputGain (slot) - kLo) / (kHi - kLo));
-                },
-                nullptr);
+                });
     }
 
     for (const auto& def : EffectParamMap::defsFor (type, variant))
     {
         const juce::String pid    = base + def.suffix;
         const juce::String suffix = def.suffix;
+        // Lookahead-class knobs move the DSP's reported latency, and the panel
+        // lambda that used to own this write also poked EditorPanelBase::
+        // onLatencyChanged -> VibeGraph::updateBusLatencies.  An automation tick
+        // has no panel, so the poke rides the applicator instead; without it a
+        // lane could leave bus PDC stale.
+        const bool pokeLatency = def.affectsLatency;
+        auto* host = &proc;
 
         // Resolve rack -> slot (by uuid) -> DSP.  Any step failing means the
         // target is genuinely gone, and the applicator no-ops rather than
@@ -581,19 +587,19 @@ void EffectsPage::registerSlotAutomationFor (VibeGraph& vg, int chId,
 
         if (VKnobAutomation::sOnRegisterApplicator)
             VKnobAutomation::sOnRegisterApplicator (pid,
-                [resolveDsp, type, variant, suffix] (float v01)
+                [resolveDsp, type, variant, suffix, pokeLatency, host] (float v01)
                 {
-                    EffectParamMap::applyNorm (type, variant, resolveDsp(), suffix, v01);
-                },
-                nullptr);   // rack-scoped, not component-scoped
+                    if (EffectParamMap::applyNorm (type, variant, resolveDsp(), suffix, v01)
+                        && pokeLatency)
+                        host->setLatencySamples (host->mVibeGraph.updateBusLatencies());
+                });   // rack-scoped: resolves through the graph at apply time
 
         if (VKnobAutomation::sOnRegisterReader)
             VKnobAutomation::sOnRegisterReader (pid,
                 [resolveDsp, type, variant, suffix]() -> float
                 {
                     return EffectParamMap::readNorm (type, variant, resolveDsp(), suffix, 0.5f);
-                },
-                nullptr);
+                });
     }
 }
 
@@ -615,14 +621,14 @@ void EffectsPage::registerRackAutomationForAllChannels (VibeSynthProcessor& proc
 {
     auto& vg = proc.mVibeGraph;
 
-    auto sweepChannel = [&vg] (int chId)
+    auto sweepChannel = [&vg, &proc] (int chId)
     {
         auto* rack = rackForChannelId (vg, chId);
         if (rack == nullptr) return;
         for (int s = 0; s < EffectRack::kNumSlots; ++s)
         {
             if (rack->getSlotType (s) == EffectType::None) continue;
-            registerSlotAutomationFor (vg, chId, channelPrefixForId (chId), *rack, s);
+            registerSlotAutomationFor (proc, chId, channelPrefixForId (chId), *rack, s);
         }
     };
 

@@ -193,32 +193,23 @@ HarmlessModEditor::HarmlessModEditor()
     addAndMakeVisible (mDepthKnob);
 
     // ── Length slider: 13-step discrete selector ──────────────────────────
-    // Only these 13 musically-useful lengths are selectable:
-    //   1/8, 1/4, 3/8, 1/2, 5/8, 3/4, 7/8, 1, 2, 4, 8, 16, 32 (beats)
-    // Slider stores an INDEX 0..12; the value displayed + the value written
-    // to the registry are looked up in kBeatLengths[].
-    static const float kLen_BeatLengths[] = {
-        0.125f, 0.25f, 0.375f, 0.5f, 0.625f, 0.75f, 0.875f,
-        1.0f, 2.0f, 4.0f, 8.0f, 16.0f, 32.0f
-    };
-    static const char* kLen_BeatNames[] = {
-        "1/8", "1/4", "3/8", "1/2", "5/8", "3/4", "7/8",
-        "1", "2", "4", "8", "16", "32"
-    };
-
+    // The slider stores an INDEX; the displayed name and the value written to
+    // the registry are looked up in HarmlessModLength (which lives beside the
+    // field it writes, because BLU-344's automation lane has to land on the
+    // same 13 values this knob does).
     makeRotary (mLengthSlider);
-    mLengthSlider.setRange (0.0, 12.0, 1.0);
+    mLengthSlider.setRange (0.0, (double) (HarmlessModLength::kNumSteps - 1), 1.0);
     mLengthSlider.setValue (7.0, juce::dontSendNotification);   // index 7 = 1 beat (default)
     mLengthSlider.setTooltip ("Length: how long the envelope plays (0 -> 1). Discrete steps: 1/8, 1/4, 3/8, 1/2, 5/8, 3/4, 7/8, 1, 2, 4, 8, 16, 32 beats. TEMPO on = beats (4 = 1 bar at 4/4), TEMPO off = seconds. Notes shorter than this get the remainder released over the amp release time.");
     mLengthSlider.textFromValueFunction = [this] (double idx) -> juce::String
     {
-        const int i = juce::jlimit (0, 12, (int) std::round (idx));
-        const juce::String name (kLen_BeatNames[i]);
+        const int i = juce::jlimit (0, HarmlessModLength::kNumSteps - 1, (int) std::round (idx));
+        const juce::String name (HarmlessModLength::kNames[i]);
         auto* src = currentSource();
         const bool beats = src && src->tempoSync;
         if (beats)
         {
-            const bool isOne = (kLen_BeatLengths[i] == 1.0f);
+            const bool isOne = (HarmlessModLength::kBeats[i] == 1.0f);
             return name + (isOne ? " beat" : " beats");
         }
         return name + " sec";
@@ -228,8 +219,9 @@ HarmlessModEditor::HarmlessModEditor()
     {
         if (auto* src = currentSource())
         {
-            const int i = juce::jlimit (0, 12, (int) std::round (mLengthSlider.getValue()));
-            src->length = kLen_BeatLengths[i];
+            const int i = juce::jlimit (0, HarmlessModLength::kNumSteps - 1,
+                                        (int) std::round (mLengthSlider.getValue()));
+            src->length = HarmlessModLength::kBeats[i];
             publishEdit();
         }
     };
@@ -412,23 +404,25 @@ void HarmlessModEditor::syncControlsFromState()
     {
         mDepthKnob.setValue (src->depth, juce::dontSendNotification);
         if (hasTimeBehavior)
-        {
-            // Map stored length back to nearest discrete slider index.
-            static const float kLengths[13] = {
-                0.125f, 0.25f, 0.375f, 0.5f, 0.625f, 0.75f, 0.875f,
-                1.0f, 2.0f, 4.0f, 8.0f, 16.0f, 32.0f
-            };
-            int bestIdx = 0;
-            float bestDist = 1.0e9f;
-            for (int i = 0; i < 13; ++i)
-            {
-                const float d = std::abs (src->length - kLengths[i]);
-                if (d < bestDist) { bestDist = d; bestIdx = i; }
-            }
-            mLengthSlider.setValue ((double) bestIdx, juce::dontSendNotification);
-        }
+            mLengthSlider.setValue ((double) HarmlessModLength::nearestIndex (src->length),
+                                    juce::dontSendNotification);
         mTempoBtn     .setToggleState (src->tempoSync, juce::dontSendNotification);
         mShapeSelector.setValue ((double) juce::jlimit (0, 3, src->lfoShape), juce::dontSendNotification);
+    }
+
+    // BLU-344 (QA-ModelShell TS3): DEPTH and LENGTH are automatable, but they
+    // are NOT apvts params -- they are fields on the mod registry, addressed by
+    // (target, source).  Both are re-stamped here because this function is the
+    // one place the visible (target, source) pair changes, so the id under the
+    // cursor always names the pair the knob is actually editing.  The
+    // applicators behind these ids are registered model-side against the
+    // registry (StandaloneEditor::registerHarmlessModAutomation).
+    if (tgt)
+    {
+        const juce::String base = tgt->paramId + "_mod"
+                                + juce::String ((int) tgt->activeSource) + "_";
+        mDepthKnob   .setComponentID (base + "depth");
+        mLengthSlider.setComponentID (hasTimeBehavior ? base + "length" : juce::String());
     }
 
     if (curv)

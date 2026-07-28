@@ -670,62 +670,33 @@ namespace VKnobAutomation
     // Called when "Automate: X" is chosen from a right-click menu.
     extern std::function<void(const juce::String& paramId)> sOnAutomate;
 
-    // Called when a panel/strip assigns a paramId to a control, to register a
-    // playback applicator: given a 0..1 value, apply it to the live control.
+    // Registers a playback applicator for a paramId: given a 0..1 value, drive
+    // whatever that lane targets.
     //
-    // QA-ProjectSave Task 7 (2026-07-26): `owner` is the Component whose life
-    // the registration is tied to.  The registry listens for its destruction and
-    // drops the entry, which is what replaced the hand-maintained list of ~17 key
-    // prefixes that had to be updated by hand for every new tab type.  Pass
-    // nullptr only for registrations that live as long as the editor itself.
+    // QA-ModelShell TS3 (2026-07-27): the `owner` Component these took is gone.
+    // It existed so the registry could drop an entry when the control that
+    // registered it died -- necessary while views registered lanes, and
+    // meaningless now that none do.  Every caller is a model-side registration
+    // (engine creation, rack slot, pedal slot, param materialization) whose
+    // closures resolve their target through the model at APPLY time, so a
+    // registration is valid exactly as long as the app is.
     extern std::function<void(const juce::String& paramId,
-                              std::function<void(float)>,
-                              juce::Component* owner)> sOnRegisterApplicator;
+                              std::function<void(float)>)> sOnRegisterApplicator;
 
     // Called alongside sOnRegisterApplicator to register a value reader:
-    // returns the current normalized 0..1 value of the control right now.
+    // returns the current normalized 0..1 value of the lane's target.
     extern std::function<void(const juce::String& paramId,
-                              std::function<float()>,
-                              juce::Component* owner)> sOnRegisterReader;
+                              std::function<float()>)> sOnRegisterReader;
 
-    // Drives both hooks above for a plain slider whose value reaches its engine
-    // through an existing attachment.  Maps 0..1 against the slider's range read
-    // AT APPLY TIME, not a range captured here: the instrument editors register
-    // during their componentID pass, and Harmless rebinds its Part A/B sliders
-    // afterwards, so a captured range would freeze the pre-attachment default.
-    // Ownership (rewritten 2026-07-26, QA-ProjectSave Task 7): the registry now
-    // erases an entry when its owning control is destroyed, so a dead control
-    // cannot linger as a silent no-op.  The SafePointer inside each closure
-    // stays as a seatbelt for any path the owner index might miss.
-    void registerSliderAutomation (const juce::String& paramId, juce::Slider& slider);
-
-    // Button twin of the above: >= 0.5 is on.  Same SafePointer ownership rule.
-    void registerButtonAutomation (const juce::String& paramId, juce::Button& button);
-
-    // juce::ComboBox twin (ChickenHeadSelector has its own overload below).
-    // 0..1 maps across item INDEX, so a lane sweep steps through the list.
-    void registerComboAutomation (const juce::String& paramId, juce::ComboBox& combo);
-
-    // Writes the PARAMETER instead of a control.  Required wherever one physical
-    // control is time-shared between several params (Harmless Part A/B), since a
-    // control-driven applicator would write whichever param is bound right now and
-    // collapse independent lanes onto one target.  0..1 maps through the param's
-    // own NormalisableRange, so skewed params behave like main-apvts lanes.
-    // Ownership: `lifetimeGuard` must be a Component owned by the editor that owns
-    // `param`'s processor -- engine editors are destroyed BEFORE their processor
-    // (LayersPage::setEngine / dtor), so a live guard proves `param` is still valid.
-    // `suppressWhen` (optional) vetoes the write while it returns true -- used by
-    // the vocal capture lock, where a lane must not flip chain state mid-take for
-    // the same reason the UI greys those controls out.  The lane is not consumed:
-    // the next tick after the veto clears applies the current value normally.
-    void registerParameterAutomation (const juce::String& paramId,
-                                      juce::RangedAudioParameter& param,
-                                      juce::Component& lifetimeGuard,
-                                      std::function<bool()> suppressWhen = {});
-
-    // Selector twin: 0..1 spreads across the option indices.  Option count is
-    // read at apply time because panels call setOptions() after registration.
-    void registerSelectorAutomation (const juce::String& paramId, ChickenHeadSelector& selector);
+    // QA-ModelShell TS3 (2026-07-27): the five register*Automation helpers that
+    // lived here -- Slider / Button / Combo / Parameter / Selector -- are gone
+    // with their last callers.  Every one of them tied a lane's lifetime to a
+    // VIEW: four drove the control itself, and the Parameter variant still took
+    // a Component lifetimeGuard.  Under destroy-on-close windows that is a
+    // guaranteed dead lane, so engine-parameter registration moved to the model
+    // (StandaloneEditor::registerModelEngineAutomation, off the rig's
+    // engine-created event) and rack/pedal registration to the rack and board.
+    // Views now only stamp componentIDs for the right-click Automate menu.
 
     // Translates a raw paramId into a user-facing label for the right-click menu
     // item ("Automate: <label>"). When null or returns empty, falls back to the
@@ -1512,11 +1483,16 @@ private:
     void setAPVTSFromBand(int b);
     void pushBandToDSP   (int b);
 
-    // Session B: register VKnobAutomation applicator + reader for every EQ band
-    // paramId under the currently-bound mid/side prefixes so right-click
-    // "Automate: ..." on a band handle wires the Event Editor to APVTS. Idempotent
-    // (re-registering the same paramId just overwrites the lambda).
-    void registerAutomationForBoundEQ();
+    // QA-ModelShell TS3 (2026-07-27): registerAutomationForBoundEQ() is gone.
+    // It registered an applicator + reader for every band id under the bound
+    // prefixes, scoped to THIS display.  Those closures already wrote the
+    // PARAMETER rather than a widget, so the only thing the display contributed
+    // was a lifetime -- and it was the wrong one twice over: the lanes died when
+    // the EQ view did, and they did not exist at all until some view had bound
+    // the EQ, so a band lane silently did nothing after a project load until the
+    // user happened to visit the page.  Every one of those ids is a real APVTS
+    // param, so registration moved to param materialization
+    // (VibeSynthProcessor::onMixerStripParamsCreated).
 
     // 12j: opens a CallOutBox popout with Threshold / Ratio / Attack / Release /
     // Range sliders + Upward toggle + live GR meter for the given band index.
