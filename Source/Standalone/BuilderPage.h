@@ -415,6 +415,13 @@ class ArrangementGrid : public juce::Component,
                         public juce::TooltipClient   // 2026-04-26 (D-2): ruler hover tooltips
 {
 public:
+    // QA-ProjectSave (2026-07-26): removing an automation's LAST point leaves a
+    // block that controls nothing, so both delete routes ask here whether to
+    // drop the whole block -- this grid's own right-click, and the Event
+    // Editor's via StandaloneEditor.  Public because the Event Editor route
+    // calls in from outside.
+    void promptDeleteWholeAutomation (int blockIdx);
+
     // QA-Ea Task 0c (2026-05-20): SlipEdit removed from the AGTool enum.
     // It used to be a mutually-exclusive tool in the toolbar tool group; now
     // it lives as a separate Slip/Stretch dropdown (see EditMode below) so

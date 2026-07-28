@@ -8,6 +8,7 @@
 #include "UndoActions.h"
 
 class VibeSynthProcessor;  // forward declaration - full header in .cpp
+class VibeGraph;           // QA-ProjectSave Task 7: resolveChannelDsp parameter
 
 // ── EffectsPage ───────────────────────────────────────────────────────────────
 // Permanent system tab (Effects). Layout:
@@ -143,6 +144,27 @@ private:
 
     // Called whenever mTrackBox selection changes; wires rack + EQ to selected channel
     void onChannelChanged();
+
+public:
+    // QA-ProjectSave Task 7 step 3 (2026-07-26): channel id -> rack / EQ, lifted
+    // out of onChannelChanged so automation can resolve a rack WITHOUT this page
+    // being on that channel, or existing at all.  Static + lazily called: racks
+    // live inside InsertNodes and die with their tab, so an applicator captures
+    // the channel ID and looks the rack up per apply rather than holding a
+    // pointer that would dangle.
+    static void        resolveChannelDsp (VibeGraph& vg, int id,
+                                          EffectRack*& rack, EQ8MsDSP*& eq);
+    static EffectRack* rackForChannelId  (VibeGraph& vg, int id);
+
+private:
+    // Registers DSP-targeting applicators/readers for one rack slot's mapped
+    // parameters.  Called whenever a slot editor is (re)built, which is also
+    // when the slot's effect type can have changed.
+    void registerSlotAutomation (int slotIndex);
+
+public:
+
+private:
 
 
     void buildRackTab();

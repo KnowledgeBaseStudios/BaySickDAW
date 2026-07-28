@@ -254,6 +254,14 @@ otherwise capture three phantom tabs and three phantom bus strips into its `<Pro
 
 ### Task 7 — Automation registry: lifetime + diagnostics + DSP targeting (sweep 5, option 2)
 
+> **RE-ROUTED 2026-07-27 (Jeff):** Task 7's badger scope CLOSES with steps 0-2 + the step-3
+> architecture (EffectParamMap, Compressor x4 variants, per-slot output_vol vs the rack —
+> runtime-proven by Jeff's differential test + vol-knob confirm). The REMAINDER (all other
+> effect-type tables, pedals conversion, Reverb freeze row, wire-at-load / wire-at-creation)
+> moved to **QA-ModelShell Task set 3** (`grand-inverting-mammoth.md`), the batch the Task 7
+> sweep's findings created. Commit seams re-ruled: Commit 2 = the Task 7 arc as it stands
+> (2026-07-27); Commits 3+4 merge into ONE final commit (Tasks 8-12 + close docs).
+
 > Backed by [`Research Reports/daw-architecture-non-parameter-automation-binding-2026-07-26.md`](../Research%20Reports/daw-architecture-non-parameter-automation-binding-2026-07-26.md).
 > No surveyed system (VST3 / CLAP / Tracktion / Ardour / Vital / Surge / iPlug2 / JUCE) keeps a
 > UI-keyed automation applicator map; automation universally targets a model-owned object.

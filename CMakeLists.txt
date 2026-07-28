@@ -488,6 +488,7 @@ target_sources(BaySickDAWStandalone PRIVATE
     Source/DSP/ChorusDSP.cpp
     Source/DSP/DelayDSP.cpp
     Source/DSP/EQ8DSP.cpp
+    Source/DSP/EffectParamMap.cpp
     Source/DSP/EQ8MsDSP.cpp
     Source/DSP/EqLinearPhaseProcessor.cpp
     Source/DSP/LufsMeterDSP.cpp

@@ -1699,8 +1699,12 @@ void PageMenuBar::resized()
 namespace VKnobAutomation
 {
     std::function<void(const juce::String& paramId)> sOnAutomate;
-    std::function<void(const juce::String& paramId, std::function<void(float)>)> sOnRegisterApplicator;
-    std::function<void(const juce::String& paramId, std::function<float()>)>     sOnRegisterReader;
+    std::function<void(const juce::String& paramId,
+                       std::function<void(float)>,
+                       juce::Component* owner)> sOnRegisterApplicator;
+    std::function<void(const juce::String& paramId,
+                       std::function<float()>,
+                       juce::Component* owner)> sOnRegisterReader;
     std::function<juce::String(const juce::String& paramId)>                     sResolveMenuLabel;
     std::function<bool(const juce::String& paramId)>                             sShouldOfferModulate;
     std::function<void(const juce::String& paramId)>                             sOnModulateEnvelope;
@@ -1727,7 +1731,7 @@ namespace VKnobAutomation
                 if (sl == nullptr) return;
                 const double lo = sl->getMinimum(), hi = sl->getMaximum();
                 sl->setValue (lo + (double) v01 * (hi - lo), juce::sendNotification);
-            });
+            }, &slider);
 
         if (sOnRegisterReader)
             sOnRegisterReader (paramId, [safeSl]() -> float
@@ -1737,7 +1741,7 @@ namespace VKnobAutomation
                 const double lo = sl->getMinimum(), hi = sl->getMaximum();
                 const double range = hi - lo;
                 return range > 0.0 ? (float) ((sl->getValue() - lo) / range) : 0.5f;
-            });
+            }, &slider);
     }
 
     void registerButtonAutomation (const juce::String& paramId, juce::Button& button)
@@ -1752,14 +1756,14 @@ namespace VKnobAutomation
                 if (auto* b = safeBtn.getComponent())
                     if (b->getToggleState() != (v01 >= 0.5f))
                         b->setToggleState (v01 >= 0.5f, juce::sendNotification);
-            });
+            }, &button);
 
         if (sOnRegisterReader)
             sOnRegisterReader (paramId, [safeBtn]() -> float
             {
                 auto* b = safeBtn.getComponent();
                 return (b != nullptr && b->getToggleState()) ? 1.0f : 0.0f;
-            });
+            }, &button);
     }
 
     void registerComboAutomation (const juce::String& paramId, juce::ComboBox& combo)
@@ -1778,7 +1782,7 @@ namespace VKnobAutomation
                 const int idx = juce::jlimit (0, n - 1, (int) std::round (v01 * (float) (n - 1)));
                 if (c->getSelectedItemIndex() != idx)
                     c->setSelectedItemIndex (idx, juce::sendNotification);
-            });
+            }, &combo);
 
         if (sOnRegisterReader)
             sOnRegisterReader (paramId, [safeCbo]() -> float
@@ -1789,7 +1793,7 @@ namespace VKnobAutomation
                 if (n <= 1) return 0.0f;
                 return juce::jlimit (0.0f, 1.0f,
                                      (float) c->getSelectedItemIndex() / (float) (n - 1));
-            });
+            }, &combo);
     }
 
     void registerParameterAutomation (const juce::String& paramId,
@@ -1808,13 +1812,13 @@ namespace VKnobAutomation
                 if (safeGuard.getComponent() == nullptr) return;
                 if (suppressWhen && suppressWhen()) return;
                 rap->setValueNotifyingHost (juce::jlimit (0.0f, 1.0f, v01));
-            });
+            }, &lifetimeGuard);
 
         if (sOnRegisterReader)
             sOnRegisterReader (paramId, [safeGuard, rap]() -> float
             {
                 return safeGuard.getComponent() != nullptr ? rap->getValue() : 0.5f;
-            });
+            }, &lifetimeGuard);
     }
 
     void registerSelectorAutomation (const juce::String& paramId, ChickenHeadSelector& selector)
@@ -1833,7 +1837,7 @@ namespace VKnobAutomation
                 const int idx = juce::jlimit (0, last, (int) std::lround ((double) v01 * last));
                 if (sel->getSelectedIndex() != idx)
                     sel->setSelectedIndex (idx, juce::sendNotification);
-            });
+            }, &selector);
 
         if (sOnRegisterReader)
             sOnRegisterReader (paramId, [safeSel]() -> float
@@ -1842,7 +1846,7 @@ namespace VKnobAutomation
                 if (sel == nullptr) return 0.0f;
                 const int last = sel->getNumOptions() - 1;
                 return last > 0 ? (float) sel->getSelectedIndex() / (float) last : 0.0f;
-            });
+            }, &selector);
     }
 
     int appendMidiLearnMenuItems (juce::PopupMenu& m, const juce::String& paramId, int firstId)
@@ -5376,7 +5380,10 @@ void ParametricEQDisplay::registerAutomationForBoundEQ()
 
     auto* apvts = mMsDSPApvts;
 
-    auto regOne = [apvts](const juce::String& id)
+    // QA-ProjectSave Task 7: these lanes write the PARAMETER, not a widget, but
+    // the registration is still scoped to this display -- when the EQ panel goes
+    // away its entries go with it rather than lingering as no-ops.
+    auto regOne = [apvts, owner = this](const juce::String& id)
     {
         if (!apvts->getParameter(id)) return;
         if (VKnobAutomation::sOnRegisterApplicator)
@@ -5384,14 +5391,14 @@ void ParametricEQDisplay::registerAutomationForBoundEQ()
             {
                 if (auto* p = dynamic_cast<juce::RangedAudioParameter*>(apvts->getParameter(id)))
                     p->setValueNotifyingHost(juce::jlimit(0.0f, 1.0f, norm01));
-            });
+            }, owner);
         if (VKnobAutomation::sOnRegisterReader)
             VKnobAutomation::sOnRegisterReader(id, [apvts, id]() -> float
             {
                 if (auto* rap = dynamic_cast<juce::RangedAudioParameter*>(apvts->getParameter(id)))
                     return rap->getValue();
                 return 0.0f;
-            });
+            }, owner);
     };
 
     auto regForPrefix = [&](const juce::String& prefixBase)

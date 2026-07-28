@@ -339,7 +339,7 @@ not. And Jeff's `importSample` question resolved: the unnecessary Core-Library d
 suspected is real but comes from `importSample` (Task 4's target), NOT from the `library:` writer
 gap, which stores paths and copies nothing.
 
-## 2026-07-26 — Tasks 3-amendment / 4 / 5 / 6 — code-complete (Commit 1 span)
+## 2026-07-26 — Tasks 3-amendment / 4 / 5 / 6 — code-complete (Commit 1 = `dadb958a`)
 
 All gates green (`RELEASE_EXIT_CODE=0`, `DEBUG_EXIT_CODE=0`, zero errors).
 
@@ -426,6 +426,332 @@ ate a backslash in `replaceCharacter('\\', '/')`, producing 8 cascading errors f
 Standing correction for the rest of the batch: **source edits go through Write/Edit, never shell
 heredocs.**
 
+## 2026-07-26 — Task 7 steps 1-2 — code-complete (step 3 held at the plan's step-0 gate)
+
+Both gates green (`RELEASE_EXIT_CODE=0`, `DEBUG_EXIT_CODE=0`, zero errors).
+
+**Step 1 — self-cleaning registry.** `sOnRegisterApplicator` / `sOnRegisterReader` widened to carry
+an owning `juce::Component*`; `StandaloneEditor` now derives from `juce::ComponentListener` and
+keeps a `Component* -> {paramIds}` reverse index; `componentBeingDeleted` drops that component's
+entries. **`eraseAutomationEntriesWithPrefix` and all 17 hand-written prefix literals deleted.**
+
+The 20 hook invocations gained an owner argument (`&slider` / `&button` / `&combo` /
+`&lifetimeGuard` / `&selector` in the five wrappers; the `VKnob` and toggle in
+EffectEditorPanels; `&mFader` / `&mPanKnob` in MixerTrackStrip; `owner = this` captured into
+`ParametricEQDisplay::registerAutomationForBoundEQ`'s `regOne` lambda). **The 29 helper call sites
+did not change at all** — that was the point of the reverse-index shape over literal RAII tokens,
+and it is why this landed as a contained diff rather than a 44-site sweep.
+
+Two hazards handled at write time rather than found later:
+- **Teardown.** `~StandaloneEditor` destroys every page and each fires `componentBeingDeleted`.
+  `mTearingDownAutomation` is set at the top of the dtor so the callback is disarmed before
+  anything starts dying.
+- **Project boundary.** `resetProjectState` clears both maps, so the owner index has to be dropped
+  in step with them — and the listeners DEREGISTERED first, since JUCE does not auto-remove
+  listeners and this object outlives most of those components. Without that, a component whose ids
+  were just cleared would still be watched, and its later destruction would erase ids a NEW
+  registration may since have claimed.
+
+**Step 2 — dead-lane diagnostics.**
+- `onIsParamStale` was structurally incapable of catching this class of failure: it returned
+  `apvts.getParameter(pid) == nullptr`, so a REGISTRY lane was never stale by construction — and
+  registry lanes are exactly the ones that die with their control. Now stale means neither
+  authority resolves the id, so the Event Editor's existing grey/red row finally covers them.
+- Dispatch gained an else branch. Previously a missed lookup and a successful apply were the same
+  code path with no branch at all. Warns once per paramId per session (`mReportedDeadLanes`) with
+  `jassertfalse`; the dispatch runs at tick rate so an unguarded warning would flood.
+- **Lane deliberately NOT deleted** when its target is missing — matches Ardour and Tracktion,
+  where automation data outlives the live control and re-binds when the target returns. Deleting
+  user automation because a panel closed would be a worse bug than the one being fixed.
+
+**HELD: step 3 (FX-rack + pedal applicators targeting the DSP).** The plan's step 0 is an ear
+confirmation before this is coded, and it has been put to Jeff twice without an answer. Holding
+rather than guessing: step 3 is the largest and riskiest piece in the batch (it changes where
+automation values are delivered for effects and pedals, code that works today except in the
+channel-switch case), and it needs a `setParamByKey`/suffix table per effect type.
+
+**Steps 1-2 made the confirmation much sharper than the original "listen for the knob".** With
+step 1 erasing the entry when the panel dies and step 2 warning on an unresolved lane, a Debug run
+now REPORTS the bug directly: automate an FX rack knob on Layer 0, switch the Effects page channel
+dropdown to Layer 1, play -> `[automation] lane targets nothing: <paramId>` plus a jassert. That is
+a definitive yes/no instead of an ear judgement.
+
+## 2026-07-26 — Task 7 step 0 RESULT (Jeff's Debug test) + three defect fixes
+
+**THE FX-RACK HOLE IS CONFIRMED.** Jeff ran the Debug test. Two of the three stacks he sent were
+NOT crashes: `applyAutomationAtCurrentPosition() Line 3179` is the step-2 `jassertfalse`, i.e. the
+diagnostic firing the moment he switched the Effects page channel. He then confirmed by ear:
+"while looking at a different effects rack page it doesn't play the automation." Step 3 is
+justified and stays in scope. Build gate green after the fixes below.
+
+**Defect 1 — shutdown access violation (CRASH, mine, from step 1).**
+Stack: `~StandaloneEditor` -> `closeAllDynamicTabs` -> `closeDynamicTabs` -> `resetProjectState`
+line 11406 -> `Component::removeComponentListener` -> AV. Cause: the `mTearingDownAutomation`
+guard makes `componentBeingDeleted` early-return, so during teardown entries are never erased —
+by the time `resetProjectState` runs (from INSIDE the dtor) `mAutomationOwners` holds pointers to
+already-destroyed components, and it dereferenced one to deregister. Fix: skip the deregister loop
+entirely while tearing down; nothing needs deregistering when every component is dying anyway.
+Jeff hit this twice with identical stacks — the second was the same defect on the pre-fix binary.
+
+**Defect 2 — ID STEALING (mine, from step 1; the serious one).**
+`SlotComponent::setEditor` does `mEditor = std::move(editor)`, and `unique_ptr::operator=`
+installs the new pointer THEN deletes the old. Registration happens during panel construction /
+`setSlotContext`, i.e. BEFORE `setEditor` destroys the previous panel. So a rebuilt FX panel
+registers its ids first, and the dying old panel's id list still named those ids — erasing them
+revoked a LIVE registration. Fix: new `mAutomationIdOwner` (id -> current owner Component*);
+`componentBeingDeleted` only erases ids it still owns. This was actively breaking automation that
+had just been correctly re-registered, not merely leaving junk behind.
+
+**Defect 3 — "deleted slot" tag was mine, and it was lying (from step 2).**
+Jeff: the Event Editor tagged effects-rack automations "deleted" — after using the Delete button,
+on newly created lanes, after a New Project, and after reload; master-strip automations were fine.
+Cause: widening `onIsParamStale` to "not in APVTS AND not in the registry" is wrong while
+applicators are keyed to PANELS — a rack lane is unregistered whenever its channel is not the one
+the Effects page currently shows, which is an ordinary viewing state, not a dead lane. The tag was
+accurate about the registry and false about the user's automation. REVERTED to the APVTS-only
+test, with a note to re-widen after step 3 (once registration lasts as long as the RACK,
+"not registered" will genuinely mean "target gone").
+
+Also removed the `jassertfalse` from the dispatch. It earned its place by catching the hole on the
+first test, but until step 3 removes the false-positive source it fires on the ordinary act of
+changing FX channels, which would make every Debug session a dialog fight. `DBG` log retained.
+
+**Jeff-reported items — ALL THREE RESOLVED 2026-07-26 (build gate green after an access-level fix).**
+
+1. **Event Editor Delete button REMOVED** (Jeff's call: redundant — points already delete
+   individually via right-click, and the whole block deletes on the Builder grid). Button, its
+   `doDeleteAutomationPoints` handler, and its layout slot all deleted. Worth recording WHY it was
+   the odd one out: it did not delete anything, it reset the lane to a single midpoint, so its
+   label described neither of the two things it actually did.
+2. **Last-point delete now prompts** (Jeff's spec: "if on the event editor or on the builder grid
+   you delete the last point ... prompt if you want to delete the whole automation").
+   `ArrangementGrid::promptDeleteWholeAutomation(blockIdx)` is the single implementation; BOTH
+   routes call it — the grid's own right-click, and the Event Editor's via a new
+   `onDeleteWholeAutomationRequested` callback wired in `openEventEditor`. One implementation so
+   the two routes cannot drift into asking different questions or taking different actions.
+   Yes removes the block as one undoable edit; No leaves the final point alone. Fires on removing
+   the last REMAINING point, not on emptying a selection.
+3. **Builder-grid redraw FIXED, and it was a real missing notification, not Debug lag.**
+   `EEAutomationGrid::onChanged` is the chokepoint every Event Editor lane edit already ran
+   through, but it only repainted the Event Editor's OWN grid — the Builder's arrangement block
+   kept drawing its old shape until the page was navigated away from and back, which read as the
+   edit not having taken. New `EventEditorContent::onLaneEdited`, fired from that same chokepoint,
+   wired in `openEventEditor` to repaint `mBuilderPage->getGrid()`. Fixed at the chokepoint rather
+   than at each edit site so future edit paths inherit it.
+
+Build note: first attempt failed with one error — `promptDeleteWholeAutomation` was declared
+beside `deleteSelected()`, which sits in `ArrangementGrid`'s PRIVATE section, and the Event Editor
+route calls in from outside. Moved to public.
+
+## 2026-07-26 — Task 7 step 3 — architecture complete, Compressor converted (1 of 12)
+
+Jeff ruled Option A (target the DSP) with a refinement that removed my objection outright: do NOT
+transcribe the mapping math into a second implementation — **extract it out of the UI entirely so
+the panel and the applicator call the same function.** Verbatim: "We cannot have that math
+existing in two different places." That is a better design than what I proposed; I had treated the
+duplication as unavoidable when the fix was to give the math one home.
+
+**New: `Source/DSP/EffectParamMap.h/.cpp`.** The single home for what a rack parameter IS —
+suffix, natural range, apply-to-DSP, read-from-DSP. Both directions, because panels already
+duplicated the reverse map for their startup knob sync (the same drift risk pointing the other
+way). `applyNorm` converts 0..1 through the SAME range the slider uses, so a lane at 50% and a
+knob at 50% land on the same DSP value by construction rather than by two implementations
+agreeing.
+
+**Compressor converted first, deliberately** — it owns the two genuinely dangerous mappings, the
+ones a transcription would have silently broken:
+- **"Input" is a DRIVE control, not a threshold.** No threshold knob exists on the face plate;
+  turning Input up drives harder into a fixed threshold, so more input must mean MORE compression.
+  `[-60..0]` maps INVERTED onto threshold `[0..-42]`.
+- **Attack/Release are switch POSITIONS 0-7 into a ms table**, where position 1 is slowest and 7
+  fastest — the reverse of what the numbers imply.
+The panel now calls `applyNatural` on drag and `def->read(dsp)` for its startup sync; both inline
+copies are gone.
+
+**Resolution path (the load-bearing design).** `EffectsPage::resolveChannelDsp` extracted from
+`onChannelChanged` — ONE switch, two outputs. I nearly duplicated the 106-line switch to get the
+rack separately, which would have recreated this task's own drift problem one layer up.
+`rackForChannelId` is the thin wrapper.
+
+`registerSlotAutomation` registers per-slot applicators capturing ONLY `(channelId, slotUuid,
+type, suffix)` — no panel, no knob, no SafePointer — and resolves rack -> slot -> DSP at apply
+time. Three deliberate properties:
+1. **Survives panel destruction**, which is the entire bug.
+2. **Registered with a NULL owner**: step 1's reverse index ties entries to a component's life;
+   these are tied to the RACK instead. A dead rack resolves to nullptr and no-ops, which step 2
+   logs.
+3. **Slot lookup by UUID, never index** — rack reorder carries the UUID, so a lane cannot be
+   repointed at a different effect. That is exactly REAPER's failure mode per the architecture
+   research (positional `fxindex`/`parameterindex`).
+
+Build gate green. Two build cycles lost to trivia: `promptDeleteWholeAutomation` declared in a
+private section, and `EffectsPage.h` referencing `VibeGraph` with no forward declaration (12
+cascading errors from one missing line).
+
+**HELD before rolling out the remaining 11 effect types — awaiting Jeff's re-test.** The
+architecture compiles but has never executed: the rack-by-channel-id and slot-by-uuid lookups are
+runtime-untested. Converting 11 more types onto an unverified foundation is the exact mistake
+`verify-primary-effect-before-optimizing` warns about. The re-test is the same gesture that
+produced the original jassert, so it is a direct before/after.
+
+## 2026-07-26 — Off-screen window on launch (Jeff-reported) — FIXED
+
+**Symptom:** app launches, appears, then slides off the side of the screen and is unreachable.
+Persisted after Jeff disconnected every monitor but one.
+
+**Cause — pre-existing, in the window RESTORE path, not in this batch's changes.**
+`VibesynthStandaloneApp::initialise` restored the saved `<WindowState>` with a bare
+`mWindow->setBounds(x, y, w, h)` and no check that those coordinates still correspond to an
+attached display. A position saved while a second monitor was connected therefore placed the
+window into coordinate space with no display behind it. Disconnecting monitors cannot help — the
+stale coordinate is what is stored, and nothing re-validated it.
+
+**Fix:** intersect the restored rect with
+`juce::Desktop::getInstance().getDisplays().getTotalBounds(true)` and require a REAL overlap
+(>= 200x100, not a touching edge, so a 99%-off-screen window is rejected too). Unreachable ->
+`setFullScreen(true)`, which is always visible. Build gate green.
+
+**Honest note on causation.** The missing clamp is not mine. But Jeff had been repeatedly hitting
+the Task 7 step 1 shutdown crash, and `shutdown()` is what writes `<WindowState>` — a crash before
+that write leaves whatever coordinates were stored last, including ones from a multi-monitor
+session. So my crash is a plausible reason the stale value survived, even though the absent clamp
+is what turned a stale value into an unusable app. Recorded rather than argued either way.
+
+**Immediate workaround given to Jeff** (needed before he can test anything): delete the
+`<WindowState .../>` line from `Documents\BaySickDAW\settings.xml`, or set `maximized="1"`.
+
+**Consequence for sequencing:** Task 7 step 3's runtime verification is blocked until Jeff can see
+the app. The remaining 11 effect-type conversions stay held behind that verification.
+
+## 2026-07-26 — Step 3 re-test FAILED, root-caused, fixed (+ ribbon labels)
+
+**Jeff's re-test:** "it still breaks the automation and now when I swap it sounds quieter."
+Two symptoms, ONE root cause, entirely in my step-1 code.
+
+**Root cause — null-owner registrations never cleared the id's owner claim.**
+`trackAutomationOwner` early-returned on `owner == nullptr`, so it never touched
+`mAutomationIdOwner`. Channel-switch order is:
+1. new panel built -> `setSlotContext` registers KNOB-targeting applicators, owned by those knobs;
+2. `registerSlotAutomation` overwrites the same paramIds with DSP-targeting applicators
+   (owner = nullptr, because they are rack-scoped);
+3. the OLD panel is destroyed -> `componentBeingDeleted`.
+
+At (3) the id->owner map still named the dying knob as owner, so the ID-stealing guard added
+earlier that same day did exactly what it was told and **revoked the DSP applicator that had just
+replaced it.** The fix installed correctly and was deleted moments later — hence "still breaks."
+
+**And that also explains "quieter,"** which was the clue that made it diagnosable: between (2) and
+(3) the automation timer had a live DSP applicator, applied the lane's value to the compressor
+once, and then lost the applicator — leaving the effect stranded at that value with nothing to
+update it again.
+
+**Fix:** a null-owner registration now explicitly `mAutomationIdOwner.erase(paramId)`, so no
+component can revoke a rack-scoped entry. Build gate green on BOTH configs.
+
+**Design lesson, recorded because it bit twice from different directions:** "register the closure"
+and "record who owns this id" had to be ONE operation. Leaving two paths — one that updated
+ownership and one that skipped it — meant the ownership guard operated on stale information and
+did damage while behaving exactly as specified.
+
+**Also fixed: ribbon slot labels (Jeff, screenshot).** With Layers/Bass/Drums at zero instances
+their ribbon slots rendered as unlabelled coloured blocks. `getSlotDisplayName` derived the label
+from the ACTIVE TAB's name, which only worked while a tab was guaranteed to exist; Clips/Vox/Inst
+had gained a zero-instance fallback when THEY became zero-capable, and docket 18 made three more
+types zero-capable without adding theirs. All six now have it.
+Worth recording how it was missed: the Task 1 sweep checked FUNCTIONAL >=1 assumptions (piano-roll
+registry, dropdowns, tab selection, kit list — four found already safe) and never considered
+PRESENTATIONAL ones. Nothing broke; the UI just stopped saying anything. A screenshot caught it
+instantly where a grep-based sweep never would.
+
+**Build note:** one Release-only `LNK1104` (cannot open BaySickDAW.exe) while Jeff had the app
+open for testing — exe lock, not code; Debug linked clean in the same run. Cleared on the next
+build.
+
+## 2026-07-26 — Step 3 second failure ROOT-CAUSED: the map key was wrong by design
+
+Jeff's second re-test: "Still breaks the automation when I swap, not as quiet as before but still
+a little quieter. Please research this before just doing something to 'fix it'." Fair — the two
+prior attempts were changes made on a theory. This one was researched first.
+
+**Root cause: `EffectParamMap` was keyed on `EffectType` alone, and that is not a unique key.**
+`createEffectEditor` dispatches `EffectType::Compressor` to FOUR different panels on
+`CompressorDSP::mType` — Modern (`CompressorPanel`, the DEFAULT), FET, Opto, CS. I populated the
+table from the FET panel and keyed it by type, so every compressor got FET's mapping.
+
+The damage is precise, because different variants reuse knob LABELS and therefore derive identical
+automation suffixes:
+
+| suffix | Modern | FET | Opto | CS |
+|--------|--------|-----|------|-----|
+| `attack` | 0-400 **ms** | 0-7 **switch position** | — | 1-50 **ms** |
+| `release` | 1-4000 **ms** | 0-7 **switch position** | — | — |
+| `gain` | -30..+30 **dB** | — | 0-100 **face plate** | — |
+
+So a "3" meant as a switch position was being handed to a millisecond setter — an audibly wrong,
+quieter compressor. That is the "still a little quieter." And because Jeff's compressor is almost
+certainly Modern (the default), whose suffixes (`thresh`/`ratio`/`gain`/...) were not in the FET
+table at all, his automated knob never got a DSP applicator — hence "still breaks."
+
+Both symptoms, one cause, and NOT another lifetime bug: the `EffectParamMap` layer and the
+resolution path were never implicated. The earlier revocation bug was masking part of the level
+error, which is why it got quieter-but-less-quiet after that fix.
+
+**Fix (Jeff: "yes key it on type and variant, redo all four compressor modes"):** every entry
+point now takes `(EffectType, int variant)`. `variantOf(type, dsp)` reads the variant from the DSP
+itself, so no UI is needed to resolve it; 0 for single-panel effects. All four compressor tables
+written from their real panels: Modern (10 params), FET (4), Opto (2, 0-100 face-plate scale), CS
+(4). Build gate green on both configs.
+
+**Judgement call recorded:** FET's `nearestPos` originally seeded at index 4 and skipped index 0,
+so a stored OFF read back as a mid position. The shared version starts at index 1 and excludes 0
+deliberately — 0 is OFF, not a time, and should not win a nearest-millisecond comparison. That is
+a behaviour CHOICE in the reverse map, not a transcription of the old code.
+
+**Scope correction for the rollout.** This is not "12 effect types". It is types x character
+modes: Saturation, Overdrive, Delay and Reverb all have mode umbrellas per the `createEffectEditor`
+dispatch. Realistically 20+ distinct panel/mapping sets. Surfaced to Jeff before continuing.
+
+**Build note:** two Release-only `LNK1104` exe locks while Jeff had the app open for testing;
+Debug linked clean in both runs. Cleared once he closed it.
+
+## 2026-07-26 — Step 3 ARCHITECTURE PROVEN + the last non-DSP control closed
+
+**Jeff's differential test is what cracked it.** He isolated two controls on the same Modern
+compressor panel:
+- the compressor's own **Gain** knob -> **automation SURVIVES the channel swap**
+- the **outbound volume** knob -> still dies
+
+That split is decisive. It proves the whole DSP-targeting architecture works at runtime —
+`registerSlotAutomation`, lazy rack-by-channel-id resolution, slot-by-UUID lookup, variant keying,
+and the registry lifetime fixes — while isolating the remaining failure to one specific control.
+Everything I had been "fixing" in the previous three attempts was fine by this point; only this
+one control was left.
+
+**Why the outbound volume knob could never have worked via EffectParamMap.** It is not a DSP
+parameter. It lives on `EditorPanelBase` (every panel inherits it), is stamped `<base>_output_vol`
+by `setSlotContext`, and writes `EffectRack::setSlotOutputGain(slot, db)` — the RACK's per-slot
+gain, not anything inside the effect. `EffectParamMap` maps DSP parameters by construction, so no
+amount of adding effect types would ever have covered it. It was still on the panel-targeting
+applicator and still died with its panel.
+
+**Fix:** `registerSlotAutomation` now also registers `output_vol` against the RACK, resolved
+through the same UUID lookup (factored into a shared `resolveSlot` lambda used by both this and
+the per-parameter registrations). Range `-24..+12 dB`, mirroring `EditorPanelBase`'s slider.
+Build gate green on both configs.
+
+Two properties worth recording:
+1. It is a PER-SLOT registration, not per-effect-type, so it covers all 20+ panels immediately —
+   including pedal-style panels that call `disableOutputVolKnob()` and own their own Level knob.
+2. It closes the last CATEGORY of automatable control. The remaining rollout is now purely
+   "write mapping tables for the other effect types" — no further architecture and no further
+   classes of target to discover.
+
+**Process note for the record.** Three consecutive failed attempts (revocation bug, null-owner
+claim, type-only key) were each diagnosed from symptoms and each fixed something real, but the
+sequence only converged once Jeff pushed back with "please research this before just doing
+something to 'fix it'" and then ran a differential test isolating one working control against one
+broken one. Reading the code to find the NEXT difference beat guessing at the next fix.
+
 ## PENDING Main Plan edits — DEFERRED TO G4 CLOSE
 
 Per Jeff's 2026-07-25 standing instruction: accumulate here, apply in ONE pass at the G4
@@ -454,3 +780,48 @@ boundary. Convention: [`Running Notes/sturdy-tagging-pangolin.md`](sturdy-taggin
 6. **§5.5 Domain Coverage.** Docket 18 pulls Mixer / Routing and UI / L&F / Theming into this
    batch's bucket set (was System Pages + Cross-cutting Infrastructure). Bucket line needs the
    additions — flagged as a Jeff call at G4 close, not applied unilaterally.
+
+## 2026-07-27 — Task 7 sweep escalation -> QA-ModelShell planned; Task 7 badger scope CLOSED
+
+The mandatory applicator sweep (session-open directive) ran the full census: 19 wrapper call
+sites across 9 files (the resume prompt's "13 across 6" undercounted) + 7 direct hook sites
++ the statics. Verdicts and the census table live in chat + the QA-ModelShell plan; the
+load-bearing outcomes:
+
+- **Only the FX rack had the die-with-UI hole** (unconverted types + the one Reverb freeze
+  toggle). Every engine editor, the pedals tiles, mixer strips, and the EQ displays were
+  verified safe UNDER TODAY'S immortal-pages shell. output_vol re-verified as the only
+  rack-level non-DSP automatable control.
+- **Two registration-timing gaps found:** rack lane wiring is view-gated (registered only in
+  rebuildSlotEditor, wiped at every project boundary) and lazily-materialized APVTS params
+  miss the boundary's static seed. Both dissolve under model-side registration.
+- **Export findings (the escalation):** offline export ignores every non-main-APVTS lane
+  (dispatch is the editor UI timer; the engine replay covers main-APVTS only) — and beneath
+  it, the render processor has NO instrument engines and no instrument InsertNodes at all
+  (page-owned engines; register* family is page-called). Verified in source; Jeff confirmed
+  by ear (vox/inst exports render nothing). Export destination also wrong (userMusicDirectory,
+  not <project>\Exports\) and the metronome check came back safe today / must-gate under
+  live-graph export (click is post-master-tap, MetroDSP default-off).
+- **Jeff's rulings (the arc):** engine-ownership inversion is a V1 REQUIREMENT (FL mandate,
+  "engines are the drivers and the pages just hold them"); export = the model rendering
+  itself offline (FL same-instance shape, verified vs Image-Line wrapper evidence + JUCE
+  setNonRealtime); destroy-on-close window shell (contained native-child workspace, fixed
+  main, custom title bars, close+resize, "+" tab bar w/ Piano Roll required); BLU-480 rack
+  window; THE ENTIRE Future State tiers list including full VST3 hosting; tempo lane
+  followed in export; full re-prepare; FL-style progress-bar export UX; CL-102 struck
+  (already shipped as PagePresetIO — verified after Jeff challenged my wrong claim).
+- **QA-ModelShell batch created:** plan `grand-inverting-mammoth.md` (8 task sets = Jeff's
+  approved groups; per-set commits; ONE batch smoke at TS8), approved 2026-07-27, slotted
+  directly after this batch (run-plan G4 composition note; order badger -> mammoth -> yak ->
+  stoat -> heron). Conflict review of yak/stoat/heron ran; dated notes applied to all three;
+  boundary locked (R3 covers only yak/stoat/heron); yak Task 2 shrinks to verification via
+  mammoth TS1's dormant UndoManager pre-wire; SS-B reconciliation lands in mammoth TS8.
+- **Task 7 badger scope CLOSED + remainder re-routed** to mammoth TS3 (plan annotated).
+  Step-3 architecture runtime-proven: Jeff's differential test + outbound-vol confirm
+  ("the vol knob does work now with the change"). Commit seams re-ruled by Jeff: Commit 2 =
+  this arc, now; ONE final commit for Tasks 8-12 + close.
+- **Process corrections this arc:** the "undoable" wording confusion (clarified: one-Ctrl+Z
+  restorable; last-point prompt approved); QA-Soundness Main-Plan absence explained (its §5
+  entry is deferred to the G4-close ledger by Jeff's 2026-07-25 standing instruction — cite
+  the deferral every time the batch is named); dependency-direction phrasing corrected
+  (badger relies on nothing in mammoth; later batches consume badger's output).

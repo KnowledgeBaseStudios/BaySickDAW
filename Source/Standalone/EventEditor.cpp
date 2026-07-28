@@ -751,6 +751,17 @@ void EEAutomationGrid::mouseDown(const MouseEvent& e)
                     }
                     else if (result == 2)
                     {
+                        // QA-ProjectSave (2026-07-26, Jeff): removing the LAST
+                        // point leaves an automation that controls nothing but
+                        // still occupies a block on the Builder grid.  Ask
+                        // whether the whole automation should go instead of
+                        // silently leaving an empty shell behind.
+                        if (l->points.size() <= 1)
+                        {
+                            if (onDeleteWholeAutomationRequested)
+                                onDeleteWholeAutomationRequested();
+                            return;
+                        }
                         l->points.erase(l->points.begin() + hit);
                         commitEdit("Delete Point", before, *l);
                     }
@@ -1263,7 +1274,15 @@ EventEditorContent::EventEditorContent(VibeSynthProcessor& p, UndoManager& um)
 
     // Automation grid
     mGrid = std::make_unique<EEAutomationGrid>(mUM);
-    mGrid->onChanged = [this] { updateValueDisplay(); };
+    // QA-ProjectSave (2026-07-26, Jeff): every lane edit funnels through here, so
+    // this is where the Builder grid gets told to redraw.  Before this, an edit
+    // repainted the Event Editor's own grid only, and the arrangement block kept
+    // drawing its old shape until the user navigated away and back.
+    mGrid->onChanged = [this]
+    {
+        updateValueDisplay();
+        if (onLaneEdited) onLaneEdited();
+    };
     addAndMakeVisible(*mGrid);
 
     // Browser pane - lists all automation blocks from the Builder grid
@@ -1298,13 +1317,6 @@ EventEditorContent::EventEditorContent(VibeSynthProcessor& p, UndoManager& um)
     mTitleLabel->setJustificationType(juce::Justification::centredLeft);
     addAndMakeVisible(*mTitleLabel);
 
-    // 5F-5: Delete automation button (right of "New Automation Clip")
-    mDeleteBtn = std::make_unique<juce::TextButton>("Delete");
-    mDeleteBtn->setTooltip("Clear all automation points in the current block");
-    mDeleteBtn->setColour(juce::TextButton::buttonColourId, juce::Colour(0xff442222));
-    mDeleteBtn->setColour(juce::TextButton::textColourOffId, juce::Colour(0xffff8080));
-    mDeleteBtn->onClick = [this] { doDeleteAutomationPoints(); };
-    addAndMakeVisible(*mDeleteBtn);
 
     // 5F-5: Tool button strip (6 buttons below grid)
     {
@@ -1467,34 +1479,6 @@ void EventEditorContent::updateToolButtonStates()
 }
 
 // 5F-5: clear all control points in the current lane - single flat point at 0.5.
-void EventEditorContent::doDeleteAutomationPoints()
-{
-    if (!mPM || mBlockIdx < 0 || mBlockIdx >= mPM->getNumBlocks()) return;
-
-    auto& lane = mPM->getBlock(mBlockIdx).automationLane;
-    AutomationLane before = lane;
-
-    lane.points.clear();
-    ControlPoint p0;
-    p0.timeTicks = 0.f;
-    p0.value01   = 0.5f;
-    p0.curveType = CurveType::Linear;
-    lane.points.push_back(p0);
-
-    AutomationLane after = lane;
-
-    mUM.perform(new AutomationLaneEditAction("Clear Automation",
-        before, after,
-        [this](const AutomationLane& s)
-        {
-            if (mPM && mBlockIdx >= 0 && mBlockIdx < mPM->getNumBlocks())
-                mPM->getBlock(mBlockIdx).automationLane = s;
-            if (mGrid) mGrid->repaint();
-        }));
-
-    if (mGrid) mGrid->repaint();
-    updateValueDisplay();
-}
 
 EEAutomationGrid::EETool EventEditorContent::getTool() const
 {
@@ -1621,9 +1605,6 @@ void EventEditorContent::resized()
         mSnapCombo ->setBounds(topRow.removeFromRight(70).reduced(2, 6));
         mSnapLabel ->setBounds(topRow.removeFromRight(36).reduced(2, 6));
 
-        // 5F-5: Delete button (right of snap)
-        if (mDeleteBtn)
-            mDeleteBtn->setBounds(topRow.removeFromRight(60).reduced(2, 6));
 
         // "New Automation Clip" button (left of Delete)
         if (mNewAutoBtn)

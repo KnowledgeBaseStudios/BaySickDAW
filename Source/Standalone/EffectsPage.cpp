@@ -1,6 +1,7 @@
 #include "EffectsPage.h"
 #include "EffectEditorPanels.h"
 #include "../PluginProcessor.h"
+#include "../DSP/EffectParamMap.h"   // QA-ProjectSave Task 7 step 3
 
 // ── Channel dropdown items (order matches onChannelChanged switch) ─────────────
 // ID 1 = Layers Bus, 2 = Bass Bus, 3 = Drums Bus, 4 = Master, 5 = Effects Bus
@@ -366,24 +367,21 @@ void EffectsPage::selectChannelByApvtsPrefix(const juce::String& apvtsPrefix)
 }
 
 // ── Channel switching ─────────────────────────────────────────────────────────
-void EffectsPage::onChannelChanged()
+// QA-ProjectSave Task 7 step 3 (2026-07-26): channel id -> rack, lifted out of
+// onChannelChanged so automation can resolve a rack WITHOUT the Effects page
+// being on that channel (or existing at all).
+//
+// Deliberately resolved LAZILY at apply time rather than captured at
+// registration: racks live inside InsertNodes and die with their tab, so a
+// captured EffectRack* would dangle.  A lookup that returns nullptr just
+// no-ops, which the dead-lane logging already reports.  Same shape as
+// Ardour's automation_control(param, create) -- the lane names a key and the
+// key resolves to a live control when one is needed.
+void EffectsPage::resolveChannelDsp (VibeGraph& vg, int id,
+                                     EffectRack*& rack, EQ8MsDSP*& eq)
 {
-    // 2026-04-26: per-channel sub-tab persistence - save the previous channel's
-    // current TabKind, then restore the new channel's last-used TabKind (or
-    // default to Rack on first visit).  Done here because onChannelChanged is
-    // the single funnel for any channel selection change (dropdown click,
-    // selectChannelByName/Prefix, etc.).
-    const int newChanId = mTrackBox ? mTrackBox->getSelectedId() : 0;
-    if (mPrevChannelId != 0 && mPrevChannelId != newChanId)
-        mLastTabPerChannel[mPrevChannelId] = mCurrentTabKind;
-    mPrevChannelId = newChanId;
-
-    EffectRack* rack = nullptr;
-    EQ8MsDSP*  eq   = nullptr;
-
-    auto& vg  = mProcessor.mVibeGraph;
-    const int  id = mTrackBox->getSelectedId();
-
+    rack = nullptr;
+    eq   = nullptr;
     // IDs 1-5: fixed bus channels
     switch (id)
     {
@@ -490,6 +488,138 @@ void EffectsPage::onChannelChanged()
         }
         break;
     }
+}
+
+// QA-ProjectSave Task 7 step 3 (2026-07-26): DSP-targeting automation for one
+// rack slot.  Everything here resolves lazily from (channelId, slotUuid) so no
+// UI object is on the automation path.
+void EffectsPage::registerSlotAutomation (int slotIndex)
+{
+    if (mRack == nullptr || mTrackBox == nullptr) return;
+
+    const int          chId   = mTrackBox->getSelectedId();
+    const juce::String uuid   = mRack->getSlotUuid (slotIndex);
+    const EffectType   type   = mRack->getSlotType (slotIndex);
+    // Variant is part of the key: one EffectType can build several panels whose
+    // knobs share LABELS but not meaning (Modern vs FET attack, Modern vs Opto
+    // gain).  Read it from the DSP so no UI is involved.
+    const int          variant = EffectParamMap::variantOf (type, mRack->getSlotEffect (slotIndex));
+    const juce::String base   = getChannelPrefix() + "_" + uuid + "_";
+    if (uuid.isEmpty()) return;
+
+    auto& vg = mProcessor.mVibeGraph;
+
+    // Resolve rack -> slot index by UUID.  Shared by the slot-gain registration
+    // below and the per-parameter ones after it.
+    auto resolveSlot = [&vg, chId, uuid] (EffectRack*& outRack) -> int
+    {
+        outRack = EffectsPage::rackForChannelId (vg, chId);
+        if (outRack == nullptr) return -1;
+        for (int i = 0; i < EffectRack::kNumSlots; ++i)
+            if (outRack->getSlotUuid (i) == uuid) return i;
+        return -1;
+    };
+
+    // ── Slot output volume ───────────────────────────────────────────────────
+    // Every panel inherits this knob from EditorPanelBase, and it is the ONE
+    // automatable control that is not a DSP parameter: it writes the RACK's
+    // per-slot output gain, not anything inside the effect.  EffectParamMap
+    // therefore cannot cover it, which is exactly why Jeff found the compressor's
+    // own Gain surviving a channel swap while the outbound volume did not --
+    // that knob was still on the old panel-targeting applicator, and still died
+    // with its panel.  Range mirrors EditorPanelBase's slider (-24..+12 dB).
+    {
+        const juce::String pid = base + "output_vol";
+        constexpr float kLo = -24.0f, kHi = 12.0f;
+
+        if (VKnobAutomation::sOnRegisterApplicator)
+            VKnobAutomation::sOnRegisterApplicator (pid,
+                [resolveSlot] (float v01)
+                {
+                    EffectRack* rack = nullptr;
+                    const int slot = resolveSlot (rack);
+                    if (rack == nullptr || slot < 0) return;
+                    rack->setSlotOutputGain (slot,
+                        kLo + juce::jlimit (0.0f, 1.0f, v01) * (kHi - kLo));
+                },
+                nullptr);
+
+        if (VKnobAutomation::sOnRegisterReader)
+            VKnobAutomation::sOnRegisterReader (pid,
+                [resolveSlot]() -> float
+                {
+                    EffectRack* rack = nullptr;
+                    const int slot = resolveSlot (rack);
+                    if (rack == nullptr || slot < 0) return 0.5f;
+                    return juce::jlimit (0.0f, 1.0f,
+                        (rack->getSlotOutputGain (slot) - kLo) / (kHi - kLo));
+                },
+                nullptr);
+    }
+
+    for (const auto& def : EffectParamMap::defsFor (type, variant))
+    {
+        const juce::String pid    = base + def.suffix;
+        const juce::String suffix = def.suffix;
+
+        // Resolve rack -> slot (by uuid) -> DSP.  Any step failing means the
+        // target is genuinely gone, and the applicator no-ops rather than
+        // pretending to work.
+        auto resolveDsp = [&vg, chId, uuid]() -> DSPBase*
+        {
+            auto* rack = EffectsPage::rackForChannelId (vg, chId);
+            if (rack == nullptr) return nullptr;
+            for (int i = 0; i < EffectRack::kNumSlots; ++i)
+                if (rack->getSlotUuid (i) == uuid)
+                    return rack->getSlotEffect (i);
+            return nullptr;
+        };
+
+        if (VKnobAutomation::sOnRegisterApplicator)
+            VKnobAutomation::sOnRegisterApplicator (pid,
+                [resolveDsp, type, variant, suffix] (float v01)
+                {
+                    EffectParamMap::applyNorm (type, variant, resolveDsp(), suffix, v01);
+                },
+                nullptr);   // rack-scoped, not component-scoped
+
+        if (VKnobAutomation::sOnRegisterReader)
+            VKnobAutomation::sOnRegisterReader (pid,
+                [resolveDsp, type, variant, suffix]() -> float
+                {
+                    return EffectParamMap::readNorm (type, variant, resolveDsp(), suffix, 0.5f);
+                },
+                nullptr);
+    }
+}
+
+EffectRack* EffectsPage::rackForChannelId (VibeGraph& vg, int id)
+{
+    EffectRack* rack = nullptr;
+    EQ8MsDSP*   eq   = nullptr;
+    resolveChannelDsp (vg, id, rack, eq);
+    return rack;
+}
+
+void EffectsPage::onChannelChanged()
+{
+    // 2026-04-26: per-channel sub-tab persistence - save the previous channel's
+    // current TabKind, then restore the new channel's last-used TabKind (or
+    // default to Rack on first visit).  Done here because onChannelChanged is
+    // the single funnel for any channel selection change (dropdown click,
+    // selectChannelByName/Prefix, etc.).
+    const int newChanId = mTrackBox ? mTrackBox->getSelectedId() : 0;
+    if (mPrevChannelId != 0 && mPrevChannelId != newChanId)
+        mLastTabPerChannel[mPrevChannelId] = mCurrentTabKind;
+    mPrevChannelId = newChanId;
+
+    EffectRack* rack = nullptr;
+    EQ8MsDSP*  eq   = nullptr;
+
+    auto& vg  = mProcessor.mVibeGraph;
+    const int  id = mTrackBox->getSelectedId();
+
+    resolveChannelDsp (vg, id, rack, eq);
 
     setRack(rack);
 
@@ -840,6 +970,22 @@ void EffectsPage::rebuildSlotEditor(int slotIndex)
         if (auto* base = dynamic_cast<EditorPanelBase*>(editor.get()))
         {
             base->setSlotContext(getChannelPrefix(), mRack->getSlotUuid(slotIndex));
+
+            // QA-ProjectSave Task 7 step 3 (2026-07-26): register DSP-targeting
+            // applicators for this slot's mapped parameters.
+            //
+            // These deliberately do NOT capture the panel or its knobs.  They
+            // capture the channel id + slot UUID and resolve rack -> slot -> DSP
+            // at apply time, so an automation lane keeps working after the panel
+            // is destroyed -- which happens on every Effects-page channel switch
+            // and was the bug this task exists to fix.  Registered with a null
+            // owner because their validity is tied to the RACK, not to any
+            // component; a rack that has gone away simply resolves to nullptr.
+            //
+            // Slot lookup is by UUID, never by index, so reordering the rack
+            // does not repoint a lane at a different effect (the failure mode
+            // REAPER's positional fxindex/parameterindex addressing has).
+            registerSlotAutomation (slotIndex);
             // Basic/Advanced stamping lives in SlotComponent::setEditor (Task 9:
             // single authority, so internal remounts -- preset load, Mode switch
             // -- inherit the slot's persisted state too).

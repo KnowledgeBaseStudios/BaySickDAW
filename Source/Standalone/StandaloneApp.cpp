@@ -979,10 +979,32 @@ void VibesynthStandaloneApp::initialise(const juce::String&)
             }
             else
             {
-                mWindow->setBounds (ws->getIntAttribute ("x", 100),
-                                    ws->getIntAttribute ("y", 100),
-                                    juce::jmax (1100, ws->getIntAttribute ("w", 1280)),
-                                    juce::jmax (700,  ws->getIntAttribute ("h", 800)));
+                const juce::Rectangle<int> saved (
+                    ws->getIntAttribute ("x", 100),
+                    ws->getIntAttribute ("y", 100),
+                    juce::jmax (1100, ws->getIntAttribute ("w", 1280)),
+                    juce::jmax (700,  ws->getIntAttribute ("h", 800)));
+
+                // QA-ProjectSave (2026-07-26, found by Jeff): a saved position is
+                // only valid while the monitor it was saved on still exists.
+                // Restoring it unchecked put the window into coordinate space with
+                // no display behind it -- the app launched and vanished off the
+                // side of the screen, unreachable, and re-attaching monitors did
+                // not help because the stale coordinate is what was stored.
+                //
+                // Require a real overlap with some attached display, not merely a
+                // touching edge, so a window that is 99% off-screen is also
+                // rejected rather than left almost-unreachable.
+                const auto desktop = juce::Desktop::getInstance()
+                                        .getDisplays().getTotalBounds (true);
+                const auto overlap = desktop.getIntersection (saved);
+                const bool reachable = overlap.getWidth()  >= 200
+                                    && overlap.getHeight() >= 100;
+
+                if (reachable)
+                    mWindow->setBounds (saved);
+                else
+                    mWindow->setFullScreen (true);   // sane, always-visible fallback
             }
             windowRestored = true;
         }

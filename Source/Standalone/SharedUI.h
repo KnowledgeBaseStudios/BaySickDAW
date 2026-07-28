@@ -672,20 +672,31 @@ namespace VKnobAutomation
 
     // Called when a panel/strip assigns a paramId to a control, to register a
     // playback applicator: given a 0..1 value, apply it to the live control.
-    extern std::function<void(const juce::String& paramId, std::function<void(float)>)> sOnRegisterApplicator;
+    //
+    // QA-ProjectSave Task 7 (2026-07-26): `owner` is the Component whose life
+    // the registration is tied to.  The registry listens for its destruction and
+    // drops the entry, which is what replaced the hand-maintained list of ~17 key
+    // prefixes that had to be updated by hand for every new tab type.  Pass
+    // nullptr only for registrations that live as long as the editor itself.
+    extern std::function<void(const juce::String& paramId,
+                              std::function<void(float)>,
+                              juce::Component* owner)> sOnRegisterApplicator;
 
     // Called alongside sOnRegisterApplicator to register a value reader:
     // returns the current normalized 0..1 value of the control right now.
-    extern std::function<void(const juce::String& paramId, std::function<float()>)> sOnRegisterReader;
+    extern std::function<void(const juce::String& paramId,
+                              std::function<float()>,
+                              juce::Component* owner)> sOnRegisterReader;
 
     // Drives both hooks above for a plain slider whose value reaches its engine
     // through an existing attachment.  Maps 0..1 against the slider's range read
     // AT APPLY TIME, not a range captured here: the instrument editors register
     // during their componentID pass, and Harmless rebinds its Part A/B sliders
     // afterwards, so a captured range would freeze the pre-attachment default.
-    // Ownership: the registry has no erase-on-destroy path, so these closures
-    // outlive a closed tab -- the SafePointer inside makes a dead control a
-    // no-op, and a rebuilt tab re-registers over the stale key.
+    // Ownership (rewritten 2026-07-26, QA-ProjectSave Task 7): the registry now
+    // erases an entry when its owning control is destroyed, so a dead control
+    // cannot linger as a silent no-op.  The SafePointer inside each closure
+    // stays as a seatbelt for any path the owner index might miss.
     void registerSliderAutomation (const juce::String& paramId, juce::Slider& slider);
 
     // Button twin of the above: >= 0.5 is on.  Same SafePointer ownership rule.

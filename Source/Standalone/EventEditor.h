@@ -55,6 +55,10 @@ public:
 
     // Callbacks
     std::function<void()> onChanged;  // called after any lane edit
+    // QA-ProjectSave (2026-07-26): fired instead of deleting when the user
+    // removes a lane's LAST point -- the host prompts to delete the whole
+    // automation rather than leaving an empty block on the Builder grid.
+    std::function<void()> onDeleteWholeAutomationRequested;
     // 5F-5: fires whenever the mouse moves over the grid. Beat is in beats,
     // val01 is 0..1 range. Caller uses for hover status bar.
     std::function<void(float beat, float val01)> onHoverChanged;
@@ -235,6 +239,11 @@ public:
     // in the title bar, browser pane, etc. When null, falls back to raw paramId.
     // EventEditorContent also forwards this to its AutomationBrowserPane.
     std::function<juce::String(const AutomationLane&)>    onResolveDisplayName;
+    // QA-ProjectSave (2026-07-26): fired after ANY lane edit so the host can
+    // redraw surfaces that render the same automation -- the Builder grid's
+    // arrangement block in particular, which previously kept its old shape until
+    // the user navigated away and back.
+    std::function<void()>                                 onLaneEdited;
 
     // Accessor so StandaloneEditor can wire the display-name resolver through
     // to the browser pane after the content has been built.
@@ -280,7 +289,6 @@ private:
     // 5F-5: title label (top-left of content - shows current param id)
     std::unique_ptr<juce::Label>           mTitleLabel;
     // 5F-5: delete-automation button (next to "New Automation Clip")
-    std::unique_ptr<juce::TextButton>      mDeleteBtn;
     // 5F-5: tool button strip (22px row below the grid area)
     std::array<std::unique_ptr<juce::TextButton>, 6> mToolBtns;
     // 5F-5: footer status bar (20px at bottom - shows hovered beat + value)
@@ -299,7 +307,6 @@ private:
     void doSelectAll();
     void doNewAutomation();
     // 5F-5: clears the current lane's points (undoable via AutomationLaneEditAction)
-    void doDeleteAutomationPoints();
     // 5F-5: syncs the tool button strip's visual toggle state to the active tool
     void updateToolButtonStates();
 

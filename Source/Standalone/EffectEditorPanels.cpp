@@ -45,6 +45,7 @@
 #include "../DSP/TunerStyleDSP.h"
 // I-15c (2026-05-03): User NAM Pedal.
 #include "../DSP/NAMPedalStyleDSP.h"
+#include "../DSP/EffectParamMap.h"   // QA-ProjectSave Task 7 step 3: shared knob<->DSP math
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 struct KnobDef { const char* label; float min, max, def, step; const char* tip; };
@@ -220,7 +221,7 @@ void EditorPanelBase::setSlotContext(const juce::String& channelPrefix, const ju
             {
                 if (auto* sl = safeSl.getComponent())
                     sl->setValue(lo + v01 * (hi - lo), juce::sendNotification);
-            });
+            }, k);
 
         if (VKnobAutomation::sOnRegisterReader)
             VKnobAutomation::sOnRegisterReader(pid, [safeSl, lo, hi]() -> float
@@ -229,7 +230,7 @@ void EditorPanelBase::setSlotContext(const juce::String& channelPrefix, const ju
                 if (!sl) return 0.5f;
                 double range = hi - lo;
                 return range > 0.0 ? (float)((sl->getValue() - lo) / range) : 0.5f;
-            });
+            }, k);
     };
     for (auto& k : knobs) regKnob(k.get());
     for (auto* k : getExtraKnobs()) regKnob(k);
@@ -255,13 +256,13 @@ void EditorPanelBase::setSlotContext(const juce::String& channelPrefix, const ju
                 if (auto* b = safeBtn.getComponent())
                     if (b->getToggleState() != (v01 >= 0.5f))
                         b->setToggleState(v01 >= 0.5f, juce::sendNotification);
-            });
+            }, t.tog);
         if (VKnobAutomation::sOnRegisterReader)
             VKnobAutomation::sOnRegisterReader(pid, [safeBtn]() -> float
             {
                 auto* b = safeBtn.getComponent();
                 return (b != nullptr && b->getToggleState()) ? 1.0f : 0.0f;
-            });
+            }, t.tog);
     }
 }
 
@@ -459,44 +460,37 @@ struct FETCompressorPanel : public EditorPanelBase, public juce::Timer
         meterSel->onChange = [this] (int idx) { mMeterMode = idx; };
         addAndMakeVisible (*meterSel);
 
-        // Knob -> DSP wiring.
-        knobs[0]->slider.onValueChange = [dsp,this]
+        // Knob -> DSP wiring.  QA-ProjectSave Task 7 step 3 (2026-07-26): the
+        // mapping math moved to EffectParamMap so automation can reach the DSP
+        // without a panel in the chain, and so this and the automation
+        // applicator cannot drift -- the Input drive inversion and the
+        // Attack/Release position tables now have exactly one definition.
+        static const char* const kSuffix[] = { "input", "output", "attack", "release" };
+        for (int i = 0; i < 4; ++i)
         {
-            // QA-EffectsReview Task 6 (b): Input is a drive control -- knob UP
-            // (toward 0 dB, hotter input) must LOWER the threshold = MORE comp,
-            // like the real 1176 face plate.  Map Input [-60..0] -> threshold
-            // [0..-42].  (Was setThreshold(input) -- inverted: up gave less comp.)
-            const float input = (float) knobs[0]->slider.getValue();   // -60..0
-            if (dsp) dsp->setThreshold (-(input + 60.0f) * 0.70f);      // 0..-42 dB
-        };
-        knobs[1]->slider.onValueChange = [dsp,this]
-        {
-            if (dsp) dsp->setGain ((float) knobs[1]->slider.getValue());
-        };
-        knobs[2]->slider.onValueChange = [dsp,this]
-        {
-            const int pos = juce::jlimit (0, 7, (int) std::round (knobs[2]->slider.getValue()));
-            if (dsp) dsp->setAttack (kAttackMs[pos]);
-        };
-        knobs[3]->slider.onValueChange = [dsp,this]
-        {
-            const int pos = juce::jlimit (0, 7, (int) std::round (knobs[3]->slider.getValue()));
-            if (dsp) dsp->setRelease (kReleaseMs[pos]);
-        };
+            auto* sl = &knobs[(size_t) i]->slider;
+            const char* suffix = kSuffix[i];
+            sl->onValueChange = [dsp, sl, suffix]
+            {
+                EffectParamMap::applyNatural (EffectType::Compressor,
+                                              (int) CompressorDSP::Type::FET, dsp,
+                                              suffix, (float) sl->getValue());
+            };
+        }
 
         if (dsp)
         {
-            // (b) reverse-map the stored threshold back onto the Input knob.
-            knobs[0]->slider.setValue (juce::jlimit (-60.0, 0.0,
-                                       -(double) dsp->threshold / 0.70 - 60.0),
-                                       juce::sendNotificationSync);
-            knobs[1]->slider.setValue (dsp->makeupDb,  juce::sendNotificationSync);
-            // Best-effort sync from current ms back to the closest 1..7 position.
-            int aPos = 4, rPos = 4;
-            for (int i = 1; i < 8; ++i) if (std::abs (dsp->attackMs  - kAttackMs[i])  < std::abs (dsp->attackMs  - kAttackMs[aPos]))  aPos = i;
-            for (int i = 1; i < 8; ++i) if (std::abs (dsp->releaseMs - kReleaseMs[i]) < std::abs (dsp->releaseMs - kReleaseMs[rPos])) rPos = i;
-            knobs[2]->slider.setValue ((double) aPos, juce::sendNotificationSync);
-            knobs[3]->slider.setValue ((double) rPos, juce::sendNotificationSync);
+            // Same table, read direction: put each knob where the DSP actually
+            // is.  Previously the reverse map was written out a second time here.
+            for (int i = 0; i < 4; ++i)
+            {
+                const auto* def = EffectParamMap::find (EffectType::Compressor,
+                                                       (int) CompressorDSP::Type::FET,
+                                                       kSuffix[i]);
+                if (def == nullptr) continue;
+                knobs[(size_t) i]->slider.setValue ((double) def->read (dsp),
+                                                    juce::sendNotificationSync);
+            }
         }
 
         grMeter = std::make_unique<GRMeter>();

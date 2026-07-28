@@ -3284,6 +3284,35 @@ void ArrangementGrid::finaliseMarquee()
 // ─────────────────────────────────────────────────────────────────────────────
 // Operations
 // ─────────────────────────────────────────────────────────────────────────────
+// QA-ProjectSave (2026-07-26, Jeff): shared by the Builder grid's own
+// last-point delete and by the Event Editor's, so both routes ask the same
+// question and take the same action.  An automation with no points controls
+// nothing, so the choice is "remove the block" or "keep the point you have".
+void ArrangementGrid::promptDeleteWholeAutomation (int blockIdx)
+{
+    if (blockIdx < 0 || blockIdx >= mPM.getNumBlocks()) return;
+
+    juce::Component::SafePointer<ArrangementGrid> safeThis (this);
+    juce::NativeMessageBox::showOkCancelBox (
+        juce::MessageBoxIconType::QuestionIcon,
+        "Delete Automation",
+        "That is the last point in this automation.\n\n"
+        "Delete the whole automation and remove it from the arrangement?",
+        nullptr,
+        juce::ModalCallbackFunction::create ([safeThis, blockIdx] (int result)
+        {
+            if (result != 1 || ! safeThis) return;
+            auto* g = safeThis.getComponent();
+            if (blockIdx >= g->mPM.getNumBlocks()) return;
+            g->beginEdit ("Delete Automation");
+            g->mPM.removeBlock (blockIdx);
+            g->commitEdit();
+            g->mSelection.clear();
+            g->resized();
+            g->repaint();
+        }));
+}
+
 void ArrangementGrid::deleteSelected()
 {
     if (mSelection.empty()) return;
@@ -5310,6 +5339,15 @@ void ArrangementGrid::mouseDown(const MouseEvent& e)
                             }
                             else if (result == 2)
                             {
+                                // QA-ProjectSave (2026-07-26, Jeff): the last
+                                // point going means the automation controls
+                                // nothing, so offer to remove the whole block
+                                // rather than leave an empty one on the grid.
+                                if (lane.points.size() <= 1)
+                                {
+                                    promptDeleteWholeAutomation (hit);
+                                    return;
+                                }
                                 beginEdit("Delete Automation Point");
                                 lane.points.erase(lane.points.begin() + ptIdx);
                                 commitEdit();

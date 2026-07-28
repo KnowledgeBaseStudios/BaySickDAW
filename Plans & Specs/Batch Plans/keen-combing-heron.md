@@ -244,3 +244,23 @@ R3 reviews the G4 **diff**; this batch reviews the whole tree, including everyth
 Running R3 afterwards is still worth it — it is a different lens, focused on plan-conformance rather
 than soundness — but **R3 should run AFTER this batch's commit**, not before, so it also covers what
 this batch changed. Sequencing note for the boundary: QA-Soundness commit -> R3 -> smoke -> carry-over.
+
+## Conflict-review note — 2026-07-27 (QA-ModelShell inserted upstream)
+
+**QA-ModelShell** (`grand-inverting-mammoth.md`) now runs between QA-ProjectSave and
+QA-UndoCoverage; this batch STILL RUNS LAST (G4 order: … badger → mammoth → yak → stoat →
+heron), which strengthens its premise — it audits the post-inversion, post-shell tree.
+
+1. **Re-measure the pre-measured surface at open.** The 2026-07-25 counts (29 err-string
+   sites, 27 outErr functions, 150 existsAsFile) predate the largest churn of the QA era.
+2. **Ownership dedupe with deep-packing-badger Task 9:** the HarmlessEditor.cpp:293 comment,
+   the InstPage.h:19 hosting claim, and the `kStateVersion` decision are ALSO badger Task 9
+   items. Check badger's close state before sweeping these — no double-fix, no double-claim.
+3. **Stale context-table motivator:** "automation registry grows on tab churn, no
+   unregister" was FIXED by badger Task 7 step 1 (self-cleaning registry). Do not chase.
+4. **Task 4 scope additions from mammoth:** the offline render thread (drives the live graph
+   with the device suspended), the native-child window shell, VST3 hosting threads, and the
+   BLU-302 sandbox process are new threading surfaces this sweep must cover.
+5. **Boundary LOCKED (Jeff 2026-07-27):** the G4 R3 review + smoke covers only
+   yak/stoat/heron; mammoth is verified by its own per-task-set commits + TS8 batch smoke.
+   This batch's "R3 runs AFTER this commit" sequencing note stands.

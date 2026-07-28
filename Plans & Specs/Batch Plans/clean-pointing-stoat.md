@@ -142,3 +142,25 @@ smoke) runs immediately after this commit per the run plan.
 QA-UndoCoverage's running notes (spike findings + exclusion mechanism) are REQUIRED reading
 before Task 1 — the tracker's correctness rides on which writes transact. §3 persistence
 decisions for the load/save guard semantics.
+
+## Conflict-review note — 2026-07-27 (QA-ModelShell inserted upstream)
+
+**QA-ModelShell** (`grand-inverting-mammoth.md`) now runs between QA-ProjectSave and
+QA-UndoCoverage (G4 order: … badger → mammoth → yak → stoat → heron). Review outcome for
+this plan (intent intact, mechanics adjusted):
+
+1. **Task 3 lands cleaner, its scout is stale.** Post-inversion, tab add/delete/duplicate,
+   engine pick, and kit load are MODEL operations — the "one processor hook" this plan
+   already specifies is exactly where they now live. The scouted RibbonTabBar/page-spawn
+   `markDirty` map predates the inversion; re-scout at batch open against the post-mammoth
+   tree.
+2. **New structural-op dispositions from mammoth:** window open/close counts as NOTHING
+   (windows are disposable views; engines/model untouched). Freeze/unfreeze dirty semantics
+   arrive ANSWERED from mammoth TS7's freeze spec call — consume that ruling, do not
+   re-derive it here.
+3. **Task 2's wiring refs move:** the `installEngineDirtyHook` sites ride engine creation
+   into the model factory. Refs stale; the strip-the-dirty-half intent is unchanged.
+4. **Exclusion surface grew:** the offline render's automation application + LUFS-normalize
+   writes must never dirty the project (pairs with QA-UndoCoverage's history exclusion).
+   This batch owns the dirty evaluator, so its §B verification adds an "export a song →
+   project stays clean" scenario.

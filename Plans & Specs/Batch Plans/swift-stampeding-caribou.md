@@ -153,6 +153,7 @@ mass-scrub). Fix everything found.
 - **G3 — Builder/UX/engine polish:** QA-G′, QA-H′, QA-I, QA-J′(residuals only), QA-K (code items; DSP-08 hardware test → campaign), QA-L, QA-M, QA-Drum-Polish, QA-N, **QA-OctavePedal** (NEW 2026-07-13 — octave-pedal engine fix + pedal-mode UI rework + low-latency instrument monitoring; see Main Plan §9 fifty-eighth Forks entry). Plus the **metronome/time-signature regression** fix item (routed 2026-07-16 from QA-Fe2 close, §9 fifty-ninth; gated on Jeff's repro). Ten batches, three shrunk small.
   *(UPDATED at G3 group open 2026-07-17 — see the "G3 group open" section at the bottom of this file: NINE batches — QA-Drum-Polish folded into QA-L (docket #11=B); the metronome/TS item became the full time-signature system inside QA-G (docket #14 + A/B/B1a/B2a — repro delivered, no longer gated); pattern-block slice folded into QA-G.)*
 - **G4 — Mechanical sweeps + data layer:** QA-VibeSlider, QA-NativeDialogs′, **QA-ApvtsAutomation**, QA-Verify (only the BaySickPedals preset FIX is code; the 10-engine walk → campaign), QA-Export, QA-ProjectSave, **QA-UndoCoverage**, QA-DirtyFlag.
+  *(UPDATED 2026-07-25: + QA-Soundness as batch 9, runs LAST — see `keen-combing-heron.md`. UPDATED 2026-07-27: + **QA-ModelShell** inserted DIRECTLY AFTER QA-ProjectSave — see the "G4 composition note — 2026-07-27" section at the bottom of this file. Current order: gecko → pigeon → crane → pangolin → walrus → badger → **mammoth** → yak → stoat → heron.)*
 - **CAMPAIGN — Master Test Plan execution** (absorbs QA-B + QA-Verify walk + QA-RC's page-by-page plan): Jeff walks sections in commit order; failures → I fix (fix commits reference the batch) → re-run scenario; **section pass → apply held Work Log entry + Main Plan STATUS:CLOSED + close commit for that batch (R2)**.
 - **G5 — Phase 6:** QA-Audit (docket decisions pre-resolved at marathon) → QA-Cleanup-1 → QA-PlayerRename → QA-Cleanup-2 → QA-Cleanup-3 → QA-Cleanup-4 — build-after-every-delete discipline unchanged. Then **QA-RC-lite**: 2nd clean build (delete build/, full rebuild, warning audit) + test-to-failure soak + a regression spot-pass (full page-by-page already ran in the campaign).
 - **G6 — Phase 7:** QA-Manuals, QA-Templates, **QA-LegalReview**, QA-Installer, QA-Updater, QA-Framework. Deferred call D-1: whether Manuals/Framework drafting overlaps the campaign (they're doc work; I can draft while Jeff tests).
@@ -1224,3 +1225,26 @@ structural counter + autosave-semantics preservation.
   smoke at the G4 boundary (after stoat's commit). The campaign follows G4.
 - **Work-Log entries needed:** none new (group open is docs-only; each batch drafts + HOLDs
   its own entry at code-complete per R2).
+
+## G4 composition note — 2026-07-27 (QA-ModelShell joined the group)
+
+**QA-ModelShell** (plan: `Batch Plans/grand-inverting-mammoth.md`, approved by Jeff 2026-07-27)
+is inserted **directly after QA-ProjectSave** per Jeff's slotting ruling. Corrected G4 batch
+order: gecko → pigeon → crane → pangolin → walrus → badger → **mammoth (QA-ModelShell)** →
+yak → stoat → heron. The campaign still follows the G4 boundary.
+
+Origin: QA-ProjectSave Task 7's applicator sweep escalated into verified findings that export
+renders instrument tracks silent (page-owned engines never exist in the render processor) and
+that most automation never reaches a render. Jeff ruled the engine-ownership inversion a V1
+requirement (FL-functionality mandate), then pulled in the full window-shell rebuild, the
+entire Future State tiers list including VST3 hosting, and the export re-architecture. Full
+docket trail: `Running Notes/deep-packing-badger.md` + the locked table in
+`grand-inverting-mammoth.md`.
+
+Process deviations for this one batch (Jeff, 2026-07-27): eight LARGE task sets; a commit
+LANDS at the end of every task set (not one-commit-per-batch); compile gates per task set;
+ALL functional verification deferred into one batch smoke at Task set 8. The batch is
+multi-week and expected to span many sessions (Carry-Over blocks in the mammoth plan file
+per §0 Rule 1). Boundary shape LOCKED (Jeff
+2026-07-27, conflict-review call 1=b): the G4 R3 review + smoke covers ONLY yak/stoat/heron;
+mammoth's verification is its own per-task-set commits + the TS8 batch smoke.

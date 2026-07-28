@@ -188,3 +188,29 @@ mechanism above get surfaced to Jeff in chat BEFORE re-shaping (ask-always lock)
 §1 UndoContext/UndoActions inventory (this plan's scout section) + the vendored
 `juce_UndoManager.cpp` semantics (transactions, units) before Task 1. Constructor-order rule:
 the manager member MUST precede apvts in every processor it's handed to.
+
+## Conflict-review note — 2026-07-27 (QA-ModelShell inserted upstream)
+
+**QA-ModelShell** (`grand-inverting-mammoth.md`) now runs between QA-ProjectSave and this
+batch (G4 order: … badger → mammoth → yak → stoat → heron). Boundary locked: the G4 R3
+review + smoke covers only yak/stoat/heron; mammoth verifies via its own per-set commits +
+TS8 batch smoke. Review outcome for this plan:
+
+1. **Task 2 SHRINKS to verification (Jeff 2026-07-27, conflict call 2=b).** Mammoth TS1
+   pre-wires the plumbing: a processor-owned `juce::UndoManager` member (declared BEFORE
+   apvts — constructor-order rule) threaded as `UndoManager&` through the model engine
+   factory into every engine APVTS ctor, DORMANT — no semantics change, StandaloneEditor's
+   manager stays authoritative until this batch. Task 2 here becomes: flip the semantics on
+   + verify all 10 engines transact into the one history. The Files-to-modify Task 2 list
+   (page creation sites) is dead — creation is the model factory after the inversion.
+2. **Task 1's exclusion list grows.** Programmatic writes that must NOT create history now
+   include mammoth's model-side automation applicators and the offline render's lane
+   application + LUFS-normalize writes (an export must leave history byte-identical).
+3. **Dead-owner keys = MODEL tab deletion, not view death.** Post-mammoth, closing a window
+   destroys only the view; engines and tabs persist. Only deleting a tab from the model
+   kills its owner key. Update the Task 3 wording at open.
+4. **Task 6's ~101-site census is stale** — mammoth's registration rework moves/removes
+   push sites; re-scout at open.
+5. **The audit surface grew:** "+"-driven tab adds, rack sidebar gestures, freeze/unfreeze,
+   and VST3 slot edits are new user-changeable surfaces this coverage audit must include.
+   The ~8-12 h estimate predates them.

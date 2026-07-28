@@ -455,14 +455,14 @@ void MixerTrackStrip::setAutomationPrefix (const juce::String& prefix)
             VKnobAutomation::sOnRegisterApplicator(id, [safeSl, lo, hi](float v01) {
                 if (auto* sl = safeSl.getComponent())
                     sl->setValue(lo + v01 * (hi - lo), juce::sendNotification);
-            });
+            }, &mFader);
         if (VKnobAutomation::sOnRegisterReader)
             VKnobAutomation::sOnRegisterReader(id, [safeSl, lo, hi]() -> float {
                 auto* sl = safeSl.getComponent();
                 if (!sl) return 0.5f;
                 double range = hi - lo;
                 return range > 0.0 ? (float)((sl->getValue() - lo) / range) : 0.5f;
-            });
+            }, &mFader);
     }
     // Pan knob
     {
@@ -473,14 +473,14 @@ void MixerTrackStrip::setAutomationPrefix (const juce::String& prefix)
             VKnobAutomation::sOnRegisterApplicator(id, [safeSl, lo, hi](float v01) {
                 if (auto* sl = safeSl.getComponent())
                     sl->setValue(lo + v01 * (hi - lo), juce::sendNotification);
-            });
+            }, &mPanKnob);
         if (VKnobAutomation::sOnRegisterReader)
             VKnobAutomation::sOnRegisterReader(id, [safeSl, lo, hi]() -> float {
                 auto* sl = safeSl.getComponent();
                 if (!sl) return 0.5f;
                 double range = hi - lo;
                 return range > 0.0 ? (float)((sl->getValue() - lo) / range) : 0.5f;
-            });
+            }, &mPanKnob);
     }
 }
 

@@ -47,7 +47,10 @@ class BaySickRustyDrumsPage;  // J-6 (2026-05-03): singleton drum-kit page
 class StandaloneEditor : public  juce::Component,
                          public  juce::MenuBarModel,
                          public  juce::ApplicationCommandTarget,
-                         public  juce::KeyListener
+                         public  juce::KeyListener,
+                         // QA-ProjectSave Task 7: watches automation-owning
+                         // controls so their registry entries die with them.
+                         public  juce::ComponentListener
 {
 public:
     StandaloneEditor(VibeSynthProcessor& p, StandalonePlayHead& ph,
@@ -777,11 +780,38 @@ private:
     // re-called after resetProjectState()'s full map clear (nothing else
     // re-registers them; dynamic entries re-register when their UI rebuilds).
     void registerStaticAutomationHandlers();
-    // Tab-close hygiene: drop both maps' entries for a closed channel's
-    // paramId families.  Registration only ever inserted (std::map operator[],
-    // no erase path existed), so tab churn grew the maps unbounded and kept
-    // dead paramIds listed in the Event Editor's param browser.
-    void eraseAutomationEntriesWithPrefix (const juce::String& prefix);
+
+    // ── Applicator lifetime (QA-ProjectSave Task 7, 2026-07-26) ──────────────
+    // Registration used to be insert-only, cleaned by a hand-written list of ~17
+    // key prefixes wired into the tab-close paths.  That list had to be updated
+    // by hand for every new tab type, and it could not see a control that died
+    // WITHOUT its tab closing -- an FX rack panel destroyed by switching the
+    // Effects page channel, a pedal panel rebuilt on slot change, Harmless
+    // rebinding its Part A/B sliders.  Those left entries whose SafePointer was
+    // null: dispatch still found them, still called them, and they did nothing,
+    // so an automation lane went dead silently.
+    //
+    // Now each registration records its owning Component and the registry
+    // listens for that component's destruction, which fires first in
+    // ~Component.  No prefix list, and no path can be forgotten.
+    //
+    // The `/architecture` pass (Research Reports, 2026-07-26) found no DAW or
+    // plugin framework that keeps a UI-keyed applicator map at all; this closes
+    // the lifetime hole without the larger move of promoting every target to a
+    // real parameter, which is a post-v1 job.
+    void trackAutomationOwner (const juce::String& paramId, juce::Component* owner);
+    void componentBeingDeleted (juce::Component& c) override;
+    std::map<juce::Component*, juce::StringArray> mAutomationOwners;
+    // Which component currently owns each id.  Registration overwrites by key,
+    // so a dying component must not revoke an id a newer one has claimed.
+    std::map<juce::String, juce::Component*>      mAutomationIdOwner;
+    // Guards the destruction callback while the editor itself is going away:
+    // pages die during ~StandaloneEditor, and touching the maps then is both
+    // pointless and a use-after-free risk if they have already been destroyed.
+    bool mTearingDownAutomation { false };
+    // One complaint per paramId per session (step 2).  The dispatch runs at the
+    // automation tick rate, so an unguarded warning would be a flood.
+    juce::StringArray mReportedDeadLanes;
 
     // Nav: land on the Effects page with the given strip selected -- the same
     // three-line handoff the mixer strips' FX buttons use (mLastFXChannel is

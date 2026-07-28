@@ -295,9 +295,17 @@ juce::String RibbonTabBar::getSlotDisplayName(int slotIndex) const
         // G-2 (2026-04-28): Clip slot is valid with zero instances (drop-only
         // spawn).  Fall back to a generic label so the empty state is visible.
         // G-4 (2026-04-28): Vox + Inst follow the same pattern.
-        if (type == TabType::Clip) return "Clips";
-        if (type == TabType::Vox)  return "Vox";
-        if (type == TabType::Inst) return "Inst";
+        // QA-ProjectSave docket 18 (2026-07-26): Layers / Bass / Drums joined
+        // them.  Without these three the slots rendered as unlabelled coloured
+        // blocks the moment their last tab was deleted -- the label had always
+        // come from the active tab's name, which only worked while a tab was
+        // guaranteed to exist.
+        if (type == TabType::Clip)   return "Clips";
+        if (type == TabType::Vox)    return "Vox";
+        if (type == TabType::Inst)   return "Inst";
+        if (type == TabType::Layers) return "Layers";
+        if (type == TabType::Bass)   return "Bass";
+        if (type == TabType::Drums)  return "Drums";
         return {};
     }
     return (tab->locked ? juce::String("[L] ") : juce::String()) + tab->name;

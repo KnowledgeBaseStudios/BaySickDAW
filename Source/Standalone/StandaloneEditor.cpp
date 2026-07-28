@@ -629,16 +629,20 @@ StandaloneEditor::StandaloneEditor(VibeSynthProcessor& p, StandalonePlayHead& ph
 
     // ── Automation applicator registration hook ───────────────────────────────
     VKnobAutomation::sOnRegisterApplicator = [this](const juce::String& pid,
-                                                     std::function<void(float)> fn)
+                                                     std::function<void(float)> fn,
+                                                     juce::Component* owner)
     {
         mAutomationApplicators[pid] = std::move(fn);
+        trackAutomationOwner (pid, owner);
     };
 
     // ── Automation value reader registration hook ─────────────────────────────
     VKnobAutomation::sOnRegisterReader = [this](const juce::String& pid,
-                                                 std::function<float()> fn)
+                                                 std::function<float()> fn,
+                                                 juce::Component* owner)
     {
         mAutomationValueReaders[pid] = std::move(fn);
+        trackAutomationOwner (pid, owner);
     };
 
     // ── Right-click menu label resolver ──────────────────────────────────────
@@ -1644,6 +1648,12 @@ StandaloneEditor::StandaloneEditor(VibeSynthProcessor& p, StandalonePlayHead& ph
 
 StandaloneEditor::~StandaloneEditor()
 {
+    // QA-ProjectSave Task 7: every page below is about to be destroyed, and each
+    // destruction fires componentBeingDeleted.  Walking the registry maps for
+    // each one is pointless work during teardown and unsafe once they are gone,
+    // so the callback is disarmed before anything starts dying.
+    mTearingDownAutomation = true;
+
     // 2026-05-06 (Batch 9c B2-followup): Tear down all dynamic tabs (Vox /
     // Inst / Clip / Layers / Bass / Drums / Rusty) THROUGH THE SAFE PATH
     // first.  Without this, the bare mPages.clear() below would destroy
@@ -3033,7 +3043,43 @@ void StandaloneEditor::openEventEditor(int blockIdx)
             pane->onIsParamStale = [this](const juce::String& pid) -> bool
             {
                 if (pid.isEmpty()) return false;
-                return mProcessor.apvts.getParameter(pid) == nullptr;
+                // QA-ProjectSave Task 7 step 2, REVERTED 2026-07-26 after Jeff
+                // saw every effects-rack lane tagged "deleted".
+                //
+                // Widening this to "not in APVTS AND not in the registry" was
+                // wrong while applicators are still keyed to PANELS: a rack lane
+                // is unregistered whenever its channel is not the one the
+                // Effects page is showing, which is a normal viewing state, not
+                // a dead lane.  The tag was accurate about the registry and a
+                // lie about the user's automation.
+                //
+                // Re-widen once step 3 moves rack/pedal applicators onto the DSP
+                // -- registration will then last as long as the RACK does, so
+                // "not registered" genuinely means "target is gone".
+                return mProcessor.apvts.getParameter (pid) == nullptr;
+            };
+        }
+
+        // QA-ProjectSave (2026-07-26, Jeff): an Event Editor edit has to repaint
+        // the Builder grid too -- both draw the same lane, and before this the
+        // arrangement block kept its old shape until the user navigated away and
+        // back, which read as the edit not having taken.
+        content->onLaneEdited = [this]
+        {
+            if (mBuilderPage)
+                if (auto* g = mBuilderPage->getGrid())
+                    g->repaint();
+        };
+
+        // Last point removed in the Event Editor -> same prompt the Builder grid
+        // asks, and the same outcome, so the two routes cannot diverge.
+        if (auto* grid = content->getGrid())
+        {
+            grid->onDeleteWholeAutomationRequested = [this, blockIdx]
+            {
+                if (mBuilderPage)
+                    if (auto* g = mBuilderPage->getGrid())
+                        g->promptDeleteWholeAutomation (blockIdx);
             };
         }
 
@@ -3143,7 +3189,30 @@ void StandaloneEditor::applyAutomationAtCurrentPosition()
         // PatternManager directly via the applicator; runs on the UI thread.
         auto it = mAutomationApplicators.find(lane.paramId);
         if (it != mAutomationApplicators.end() && it->second)
+        {
             it->second(value);
+        }
+        else
+        {
+            // QA-ProjectSave Task 7 step 2: an unresolvable lane used to be
+            // indistinguishable from a working one -- find() missed (or the
+            // entry was a dead no-op) and the tick simply did nothing.  Say so
+            // once per paramId per session: loud enough to catch in Debug, quiet
+            // enough not to spam a 30 Hz automation tick.
+            // The lane is deliberately NOT deleted -- Ardour and Tracktion both
+            // keep automation data alive independent of the live control, so a
+            // target that comes back (tab reopened, panel rebuilt) re-binds.
+            // jassertfalse REMOVED 2026-07-26: it did its job (confirmed the
+            // FX-rack hole on Jeff's first test) but until step 3 lands it fires
+            // on the ordinary act of viewing a different channel's FX page, which
+            // makes every Debug session a dialog fight.  Log only for now;
+            // restore the assert once step 3 removes the false-positive source.
+            if (! mReportedDeadLanes.contains (lane.paramId))
+            {
+                mReportedDeadLanes.add (lane.paramId);
+                DBG ("[automation] lane targets nothing: " + lane.paramId);
+            }
+        }
     }
 }
 
@@ -4434,14 +4503,11 @@ void StandaloneEditor::onTabClosed(int tabId)
                 if (idx >= 0)
                 {
                     layerStripIdx = idx;
-                    eraseAutomationEntriesWithPrefix ("mixer_layer_" + juce::String (idx) + "_");
                     // Rack-slot pids are 1-based for layers/basses
                     // (EffectsPage::getChannelPrefix maps dropdown id-199).
-                    eraseAutomationEntriesWithPrefix ("layer_" + juce::String (idx + 1) + "_");
                     // QA-ApvtsAutomation: engine-editor registrations key off the
                     // engine's own prefix ("tk_" + trackId + "_<engine>_"), which
                     // neither erase above covers.
-                    eraseAutomationEntriesWithPrefix ("tk_lay_" + juce::String (idx) + "_");
                 }
             }
 
@@ -4456,9 +4522,6 @@ void StandaloneEditor::onTabClosed(int tabId)
                 if (idx >= 0)
                 {
                     bassStripIdx = idx;
-                    eraseAutomationEntriesWithPrefix ("mixer_bass_" + juce::String (idx) + "_");
-                    eraseAutomationEntriesWithPrefix ("bass_" + juce::String (idx + 1) + "_");
-                    eraseAutomationEntriesWithPrefix ("tk_bas_" + juce::String (idx) + "_");
                 }
             }
 
@@ -4473,9 +4536,6 @@ void StandaloneEditor::onTabClosed(int tabId)
                 if (idx >= 0)
                 {
                     drumStripIdx = idx;
-                    eraseAutomationEntriesWithPrefix ("mixer_drum_" + juce::String (idx) + "_");
-                    eraseAutomationEntriesWithPrefix ("drum_" + juce::String (idx) + "_");
-                    eraseAutomationEntriesWithPrefix ("tk_drm_" + juce::String (idx) + "_");
                 }
             }
 
@@ -4507,8 +4567,6 @@ void StandaloneEditor::onTabClosed(int tabId)
                     clipStripIdx = idx;
                     if (mPianoRollPage)
                         mPianoRollPage->unregisterEngine ({ EngineKind::Clip, idx });
-                    eraseAutomationEntriesWithPrefix ("mixer_audio_" + juce::String (idx) + "_");
-                    eraseAutomationEntriesWithPrefix ("audio_" + juce::String (idx) + "_");
                 }
                 if (mPM && idx >= 0)
                 {
@@ -4555,8 +4613,6 @@ void StandaloneEditor::onTabClosed(int tabId)
                 {
                     mProcessor.unregisterVoxEngine (idx);
                     voxStripIdx = idx;
-                    eraseAutomationEntriesWithPrefix ("mixer_vox_" + juce::String (idx) + "_");
-                    eraseAutomationEntriesWithPrefix ("vox_" + juce::String (idx) + "_");
                 }
                 // QA-E Task 5 (2026-05-15): library + block cascade for Vox
                 // tab close.  Walks every library entry owned by this Vox
@@ -4614,8 +4670,6 @@ void StandaloneEditor::onTabClosed(int tabId)
                 {
                     mProcessor.unregisterInstEngine (idx);
                     instStripIdx = idx;
-                    eraseAutomationEntriesWithPrefix ("mixer_inst_" + juce::String (idx) + "_");
-                    eraseAutomationEntriesWithPrefix ("inst_" + juce::String (idx) + "_");
                 }
                 if (ip->getSource() == InstPage::Source::BaySickGuitars)
                 {
@@ -4683,8 +4737,6 @@ void StandaloneEditor::onTabClosed(int tabId)
                     mPianoRollPage->unregisterEngine ({ EngineKind::BaySickRustyDrums, 0 });
                 for (int r = 0; r < (int) MixerChannelIds::kMaxRustyStrips; ++r)
                 {
-                    eraseAutomationEntriesWithPrefix ("mixer_rusty_" + juce::String (r) + "_");
-                    eraseAutomationEntriesWithPrefix ("rusty_" + juce::String (r) + "_");
                 }
             }
 
@@ -11378,6 +11430,25 @@ void StandaloneEditor::resetProjectState()
     // construction; dynamic entries re-register as their owning UI rebuilds.
     mAutomationApplicators.clear();
     mAutomationValueReaders.clear();
+    // QA-ProjectSave Task 7: the owner index tracks the same entries, so it has
+    // to be dropped in step with them -- otherwise a component whose ids were
+    // just cleared would still be listened to, and its later destruction would
+    // try to erase ids that a NEW registration may since have claimed.
+    // Deregister first: this object outlives most of these components, and JUCE
+    // does not auto-remove listeners.
+    //
+    // CRASH FIX (2026-07-26, found by Jeff on app close): NOT during teardown.
+    // ~StandaloneEditor sets mTearingDownAutomation and then runs
+    // closeAllDynamicTabs -> closeDynamicTabs -> here.  With the guard set,
+    // componentBeingDeleted early-returns and never erases entries, so by this
+    // point the map holds pointers to components that are ALREADY DESTROYED --
+    // dereferencing one to removeComponentListener was an access violation.
+    // Nothing needs deregistering then anyway: the components are going away.
+    if (! mTearingDownAutomation)
+        for (auto& [owner, ids] : mAutomationOwners)
+            if (owner != nullptr) owner->removeComponentListener (this);
+    mAutomationOwners.clear();
+    mAutomationIdOwner.clear();
     registerStaticAutomationHandlers();
     // The permanent bus/master strips are neither static APVTS params nor
     // dynamic tabs that rebuild -- they register their fader/pan automation
@@ -11433,19 +11504,67 @@ void StandaloneEditor::registerStaticAutomationHandlers()
     };
 }
 
-void StandaloneEditor::eraseAutomationEntriesWithPrefix (const juce::String& prefix)
+void StandaloneEditor::trackAutomationOwner (const juce::String& paramId,
+                                              juce::Component* owner)
 {
-    if (prefix.isEmpty()) return;
-    auto eraseFrom = [&prefix] (auto& map)
+    if (paramId.isEmpty()) return;
+
+    // A null owner means the registration is NOT tied to any component -- the
+    // static APVTS / global_tempo handlers, and the rack-scoped DSP applicators
+    // from EffectsPage::registerSlotAutomation.  Those are cleared wholesale by
+    // resetProjectState instead.
+    //
+    // Clearing the id's owner claim here is load-bearing, not tidiness (found
+    // by Jeff's re-test, 2026-07-26).  A rack applicator overwrites a paramId
+    // that a KNOB registered moments earlier, and the knob is about to be
+    // destroyed by the same channel switch.  Leaving the stale claim in place
+    // meant componentBeingDeleted saw the dying knob as the owner and revoked
+    // the DSP applicator that had just replaced it -- so the fix installed
+    // correctly and was then deleted a moment later.  Worse, the automation
+    // timer could apply once through the DSP path in that window and then lose
+    // the applicator, stranding the effect at that value (the "quieter after
+    // swapping" symptom).
+    if (owner == nullptr)
     {
-        for (auto it = map.begin(); it != map.end();)
-        {
-            if (it->first.startsWith (prefix)) it = map.erase (it);
-            else                               ++it;
-        }
-    };
-    eraseFrom (mAutomationApplicators);
-    eraseFrom (mAutomationValueReaders);
+        mAutomationIdOwner.erase (paramId);
+        return;
+    }
+
+    auto& ids = mAutomationOwners[owner];
+    if (! ids.contains (paramId))
+    {
+        if (ids.isEmpty())
+            owner->addComponentListener (this);   // first id for this component
+        ids.add (paramId);
+    }
+    // The CURRENT owner of this id.  Registration overwrites by key, so the last
+    // registrant wins and earlier claimants must not be able to revoke it.
+    mAutomationIdOwner[paramId] = owner;
+}
+
+void StandaloneEditor::componentBeingDeleted (juce::Component& c)
+{
+    if (mTearingDownAutomation) return;
+
+    auto it = mAutomationOwners.find (&c);
+    if (it == mAutomationOwners.end()) return;
+
+    for (const auto& pid : it->second)
+    {
+        // ID-STEALING FIX (2026-07-26, found via Jeff's FX-page test): a rebuilt
+        // panel registers BEFORE the old one dies -- SlotComponent::setEditor
+        // does `mEditor = std::move(editor)`, and unique_ptr::operator= installs
+        // the new pointer then deletes the old.  So the dying panel's id list
+        // still names ids the NEW panel has already claimed, and erasing them
+        // blindly killed a live registration.  Only revoke what we still own.
+        auto owned = mAutomationIdOwner.find (pid);
+        if (owned == mAutomationIdOwner.end() || owned->second != &c) continue;
+
+        mAutomationApplicators .erase (pid);
+        mAutomationValueReaders.erase (pid);
+        mAutomationIdOwner.erase (owned);
+    }
+    mAutomationOwners.erase (it);
 }
 
 void StandaloneEditor::advanceCountersFromRestoredTabs()
