@@ -176,6 +176,41 @@ public:
     // construct engines.
     EngineRig& engineRig() noexcept { return *mEngineRig; }
 
+    // ── QA-ModelShell TS2: offline render drive ──────────────────────────
+    // The model renders ITSELF offline -- no replica processor.  begin:
+    // suspend device processing (the standalone player checks isSuspended,
+    // so our render loop becomes processBlock's only caller), capture the
+    // restore set, sweep setNonRealtime(true) across self + every engine,
+    // reset the graph (wet-tail hygiene), full re-prepare at the render
+    // config (rate independent of the device).  end reverses all of it and
+    // clears the render's own tails so they never bleed into live playback.
+    // Message/render thread only.
+    bool beginOfflineRender (double renderSampleRate, int renderBlockSize);
+    void endOfflineRender();
+
+    // QA-ModelShell TS2 (stems): a strip channel's post-chain output for the
+    // block that just rendered -- the same arena slot its render task wrote.
+    // OFFLINE USE ONLY: valid on the render thread between a processBlock
+    // return and the next call, while device processing is suspended.
+    juce::AudioBuffer<float>* getStripOutputForTap (int channelId) noexcept
+    {
+        return mRenderArena.getStripBuffer (channelId);
+    }
+
+    // QA-ModelShell TS2: `<project>\Exports\` -- created on demand; every
+    // export surface defaults its save dialog here (locked destination
+    // spec).  Falls back to the user's Music folder when no project folder
+    // exists yet (the dialog-UX chunk adds the save-first interlock).
+    juce::File getProjectExportsDir()
+    {
+        const juce::File proj = getCurrentProjectFolder();
+        if (proj == juce::File() || ! proj.isDirectory())
+            return juce::File::getSpecialLocation (juce::File::userMusicDirectory);
+        const juce::File exports = proj.getChildFile ("Exports");
+        exports.createDirectory();
+        return exports;
+    }
+
     BassSynth& getBassSynth() { return mBassSynth; }
     void       allNotesOff()  { mSynth.allNotesOff(1, false); }
 
@@ -1525,6 +1560,13 @@ private:
     // Batch 8 (2026-05-06): terminal MasterTask.  Always-on, registered
     // idempotently in prepareToPlay alongside the bus tasks.
     std::unique_ptr<MasterTask> mMasterRenderTask;
+
+    // QA-ModelShell TS2: offline-render restore set (valid only between
+    // begin/endOfflineRender).
+    double               mOfflinePrevSr   { 0.0 };
+    int                  mOfflinePrevBlk  { 0 };
+    bool                 mOfflinePrevSong { true };
+    juce::AudioPlayHead* mOfflinePrevHead { nullptr };
 
     // QA-ModelShell TS1: declared LAST so it is destroyed FIRST -- the rig's
     // teardown unregisters engines through the dispatcher + task arrays

@@ -2214,6 +2214,21 @@ std::unique_ptr<juce::Component> StandaloneEditor::createBuilderPage()
     page->setUndoContext(makeUndoContext());
     mBuilderPage = page.get();
 
+    // QA-ModelShell TS2: the offline drive takes the LIVE processor, so the
+    // 30 Hz automation timer must not fight the render's own lane
+    // application.  Fires on the render thread -- marshal to the message
+    // thread (Timer start/stop is message-thread-only).
+    page->onOfflineRenderActive = [this] (bool active)
+    {
+        auto apply = [this, active]
+        {
+            if (active) mAutomationTimer.stopTimer();
+            else        mAutomationTimer.startTimerHz (30);
+        };
+        if (juce::MessageManager::getInstance()->isThisTheMessageThread()) apply();
+        else juce::MessageManager::callAsync (apply);
+    };
+
     // Wire grid callbacks
     if (auto* grid = page->getGrid())
     {
@@ -10462,123 +10477,394 @@ void StandaloneEditor::doFileOpen()
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// QA-Export Task 3 -- one dialog for every format.
-//
-// Settings first, destination second: the file extension follows the chosen
-// format, so asking for the filename before the format would let the user pick
-// "song.wav" and then export an MP3 into it.
+// QA-ModelShell TS2 -- the FL-style export dialog (locked UX call): the
+// options box PERSISTS, the save dialog opens above it, and after the pick
+// the same box flips to a progress bar + percent readout with a live Cancel.
+// The render runs on a plain background thread driving
+// BuilderPage::renderToFile (which owns the offline drive + restore set).
+// Hosts Jeff's per-strip stems pick-list: every active mixer strip, Master +
+// buses default UNCHECKED.  Settings first, destination second: the file
+// extension follows the chosen format.
 // ─────────────────────────────────────────────────────────────────────────────
+class ExportAudioDialog : public juce::Component,
+                          private juce::Thread,
+                          private juce::Timer
+{
+public:
+    ExportAudioDialog (BuilderPage& builder,
+                       VibeSynthProcessor& proc,
+                       juce::String defaultBaseName,
+                       std::vector<MixerPage::StemPickEntry> stemEntries,
+                       std::function<void (std::function<void()>)> ensureProjectSaved)
+        : juce::Thread ("Export Render"),
+          mBuilder (builder), mProc (proc),
+          mBaseName (std::move (defaultBaseName)),
+          mEnsureSaved (std::move (ensureProjectSaved))
+    {
+        auto addCombo = [this] (juce::ComboBox& c, juce::Label& l, const char* title,
+                                const juce::StringArray& items)
+        {
+            l.setText (title, juce::dontSendNotification);
+            addAndMakeVisible (l);
+            c.addItemList (items, 1);
+            c.setSelectedItemIndex (0, juce::dontSendNotification);
+            addAndMakeVisible (c);
+        };
+        addCombo (mSel,    mSelLbl,    "Selection",   { "Full Arrangement", "Selected Section" });
+        addCombo (mTail,   mTailLbl,   "Tail",        { "Included", "Cut" });
+        addCombo (mFormat, mFormatLbl, "Format",      { "WAV", "OGG", "MP3" });
+        addCombo (mQual,   mQualLbl,   "Quality",     { "-" });
+        addCombo (mSrate,  mSrateLbl,  "Sample rate", { "44100 Hz", "48000 Hz" });
+
+        // "Selected Section" is meaningless with nothing selected on the
+        // ruler, so it is disabled rather than silently falling back.
+        if (! mBuilder.hasTimeSelection())
+            mSel.setItemEnabled (2, false);   // 1-based item id
+
+        mFormat.onChange = [this] { repopulateQuality(); };
+        repopulateQuality();
+
+        // CL-043 + CL-045 riders.
+        mDitherToggle.setButtonText ("Dither (16-bit WAV)");
+        addAndMakeVisible (mDitherToggle);
+        mNormToggle.setButtonText ("Normalize to");
+        addAndMakeVisible (mNormToggle);
+        mLufsTarget.addItemList ({ "-9 LUFS", "-14 LUFS", "-16 LUFS", "-23 LUFS" }, 1);
+        mLufsTarget.setSelectedItemIndex (1, juce::dontSendNotification);   // -14: streaming standard
+        addAndMakeVisible (mLufsTarget);
+
+        mStemsToggle.setButtonText ("Export stems (one file per mixer strip)");
+        mStemsToggle.onClick = [this]
+        {
+            mStripViewport.setVisible (mStemsToggle.getToggleState());
+            refreshSize();
+        };
+        addAndMakeVisible (mStemsToggle);
+
+        int y = 0;
+        for (auto& e : stemEntries)
+        {
+            auto t = std::make_unique<juce::ToggleButton> (e.name);
+            t->setToggleState (e.defaultChecked, juce::dontSendNotification);
+            t->setBounds (0, y, kStripListW - 20, kRowH);
+            y += kRowH;
+            mStripList.addAndMakeVisible (*t);
+            mStrips.push_back ({ e.channelId, std::move (t) });
+        }
+        mStripList.setSize (kStripListW - 20, juce::jmax (kRowH, y));
+        mStripViewport.setViewedComponent (&mStripList, false);
+        mStripViewport.setScrollBarsShown (true, false);
+        addChildComponent (mStripViewport);
+
+        mExportBtn.setButtonText ("Export");
+        mCancelBtn.setButtonText ("Cancel");
+        mExportBtn.onClick = [this] { onExportClicked(); };
+        mCancelBtn.onClick = [this] { onCancelClicked(); };
+        addAndMakeVisible (mExportBtn);
+        addAndMakeVisible (mCancelBtn);
+
+        mBar = std::make_unique<juce::ProgressBar> (mProgress);
+        addChildComponent (*mBar);
+        mPercent.setJustificationType (juce::Justification::centred);
+        addChildComponent (mPercent);
+
+        refreshSize();
+    }
+
+    ~ExportAudioDialog() override
+    {
+        // renderToFile polls shouldAbort per block and restores everything on
+        // the abort path, so this join is bounded.
+        stopThread (10000);
+    }
+
+    void resized() override
+    {
+        auto area = getLocalBounds().reduced (14);
+        auto row = [&area] { return area.removeFromTop (kRowH + 6); };
+
+        auto place = [&] (juce::Label& l, juce::ComboBox& c)
+        {
+            auto r = row();
+            l.setBounds (r.removeFromLeft (96));
+            c.setBounds (r.reduced (0, 2));
+        };
+        place (mSelLbl, mSel);
+        place (mTailLbl, mTail);
+        place (mFormatLbl, mFormat);
+        place (mQualLbl, mQual);
+        place (mSrateLbl, mSrate);
+
+        mDitherToggle.setBounds (row());
+        {
+            auto r = row();
+            mNormToggle.setBounds (r.removeFromLeft (130));
+            mLufsTarget.setBounds (r.reduced (0, 2));
+        }
+
+        mStemsToggle.setBounds (row());
+        if (mStripViewport.isVisible())
+            mStripViewport.setBounds (area.removeFromTop (kStripListH));
+
+        auto btnRow = area.removeFromTop (kRowH + 10).reduced (0, 4);
+        mCancelBtn.setBounds (btnRow.removeFromRight (92));
+        btnRow.removeFromRight (8);
+        mExportBtn.setBounds (btnRow.removeFromRight (92));
+
+        auto progRow = area.removeFromTop (kRowH + 6);
+        mPercent.setBounds (progRow.removeFromRight (56));
+        if (mBar) mBar->setBounds (progRow.reduced (0, 4));
+    }
+
+private:
+    enum class State { Options, Rendering };
+    static constexpr int kRowH       = 26;
+    static constexpr int kStripListW = 392;
+    static constexpr int kStripListH = 160;
+
+    void refreshSize()
+    {
+        const int stems = mStripViewport.isVisible() ? kStripListH : 0;
+        setSize (420, 14 * 2 + (kRowH + 6) * 8 + stems + (kRowH + 10) + (kRowH + 6));
+    }
+
+    void repopulateQuality()
+    {
+        const int f = mFormat.getSelectedItemIndex();
+        mQual.clear (juce::dontSendNotification);
+        if (f == 1)      mQual.addItemList ({ "Low", "Medium", "High", "Highest" }, 1);
+        else if (f == 2) mQual.addItemList ({ "128 kbps", "192 kbps", "256 kbps", "320 kbps" }, 1);
+        else             mQual.addItemList ({ "16-bit", "24-bit", "32-bit float" }, 1);
+        mQual.setSelectedItemIndex (f == 0 ? 1 : 2, juce::dontSendNotification);
+    }
+
+    static juce::String extFor (BuilderPage::RenderOptions::Format f)
+    {
+        return f == BuilderPage::RenderOptions::Format::Ogg ? ".ogg"
+             : f == BuilderPage::RenderOptions::Format::Mp3 ? ".mp3" : ".wav";
+    }
+
+    BuilderPage::RenderOptions gatherOptions()
+    {
+        BuilderPage::RenderOptions o;
+
+        if (mSel.getSelectedItemIndex() == 1 && mBuilder.hasTimeSelection())
+        {
+            o.scope = BuilderPage::RenderOptions::Scope::Section;
+            // Ruler selection is in BARS; the render works in beats.
+            o.startBeats = (double) mBuilder.getTimeSelStartBars() * 4.0;
+            o.endBeats   = (double) mBuilder.getTimeSelEndBars()   * 4.0;
+        }
+        else
+        {
+            o.scope = BuilderPage::RenderOptions::Scope::Song;
+        }
+
+        o.tail = mTail.getSelectedItemIndex() == 1
+               ? BuilderPage::RenderOptions::Tail::Cut
+               : BuilderPage::RenderOptions::Tail::Included;
+
+        const int fmtIdx = mFormat.getSelectedItemIndex();
+        o.format = fmtIdx == 1 ? BuilderPage::RenderOptions::Format::Ogg
+                 : fmtIdx == 2 ? BuilderPage::RenderOptions::Format::Mp3
+                               : BuilderPage::RenderOptions::Format::Wav;
+
+        o.sampleRate = mSrate.getSelectedItemIndex() == 1 ? 48000.0 : 44100.0;
+
+        // One control, read three ways depending on format.
+        const int qIdx = juce::jlimit (0, 3, mQual.getSelectedItemIndex());
+        static constexpr int kDepths[] = { 16, 24, 32 };
+        static constexpr int kOggQ[]   = { 3, 5, 7, 9 };      // JUCE OGG takes a quality INDEX
+        static constexpr int kMp3Br[]  = { 128, 192, 256, 320 };
+        if (fmtIdx == 1)      o.oggQuality = kOggQ[qIdx];
+        else if (fmtIdx == 2) o.mp3Kbps    = kMp3Br[qIdx];
+        else                  o.bitDepth   = kDepths[juce::jlimit (0, 2, qIdx)];
+
+        if (mStemsToggle.getToggleState())
+            for (auto& s : mStrips)
+                if (s.toggle->getToggleState())
+                    o.stems.push_back ({ s.channelId, s.toggle->getButtonText() });
+
+        o.dither    = mDitherToggle.getToggleState();
+        o.normalize = mNormToggle.getToggleState();
+        static constexpr float kTargets[] = { -9.0f, -14.0f, -16.0f, -23.0f };
+        o.lufsTarget = kTargets[juce::jlimit (0, 3, mLufsTarget.getSelectedItemIndex())];
+
+        return o;
+    }
+
+    void onExportClicked()
+    {
+        if (mState != State::Options) return;
+        mOpts = gatherOptions();
+        mEnsureSaved ([sp = juce::Component::SafePointer<ExportAudioDialog> (this)]
+        {
+            if (sp != nullptr) sp->pickDestination();
+        });
+    }
+
+    void pickDestination()
+    {
+        const juce::String ext = extFor (mOpts.format);
+        mChooser = std::make_shared<juce::FileChooser> (
+            "Export Audio",
+            mProc.getProjectExportsDir().getChildFile (
+                mBaseName.replaceCharacter (' ', '_') + ext),
+            "*" + ext);
+        mChooser->launchAsync (
+            juce::FileBrowserComponent::saveMode | juce::FileBrowserComponent::canSelectFiles,
+            [sp = juce::Component::SafePointer<ExportAudioDialog> (this)] (const juce::FileChooser& fc)
+            {
+                if (sp == nullptr) return;
+                const juce::File dest = fc.getResult();
+                if (dest == juce::File()) return;   // picker cancelled: options persist
+                sp->mOpts.destination = dest;
+                sp->beginRender();
+            });
+    }
+
+    void beginRender()
+    {
+        mState = State::Rendering;
+        for (auto* c : { (juce::Component*) &mSel, (juce::Component*) &mTail,
+                         (juce::Component*) &mFormat, (juce::Component*) &mQual,
+                         (juce::Component*) &mSrate, (juce::Component*) &mStemsToggle,
+                         (juce::Component*) &mDitherToggle, (juce::Component*) &mNormToggle,
+                         (juce::Component*) &mLufsTarget,
+                         (juce::Component*) &mStripViewport, (juce::Component*) &mExportBtn })
+            c->setEnabled (false);
+        mBar->setVisible (true);
+        mPercent.setVisible (true);
+        startTimerHz (30);
+        startThread();
+    }
+
+    void onCancelClicked()
+    {
+        if (mState == State::Rendering)
+        {
+            // The abort path deletes partials + restores the session; the
+            // completion callback closes the dialog.
+            signalThreadShouldExit();
+            mCancelBtn.setEnabled (false);
+        }
+        else if (auto* dw = findParentComponentOfClass<juce::DialogWindow>())
+        {
+            dw->exitModalState (0);
+        }
+    }
+
+    void timerCallback() override
+    {
+        mPercent.setText (juce::String ((int) std::round (mProgress * 100.0)) + "%",
+                          juce::dontSendNotification);
+    }
+
+    void run() override
+    {
+        juce::String err;
+        bool ok = true;
+
+        // CL-045: measure-then-gain.  Pass 1 = the CL-227 backend (meters,
+        // no files, 0..50% of the bar); gain = target minus measured, BOTH
+        // directions, with any boost capped so the estimated true peak stays
+        // under the ceiling; pass 2 renders with the gain applied uniformly
+        // at every writer (main + stems).
+        if (mOpts.normalize)
+        {
+            BuilderPage::MeasureResult m;
+            ok = mBuilder.measureRender (mOpts, m, err,
+                [this]           { return threadShouldExit(); },
+                [this] (double p) { mProgress = p * 0.5; });
+            if (ok)
+            {
+                float gainDb = mOpts.lufsTarget - m.integratedLufs;
+                gainDb = juce::jmin (gainDb, mOpts.ceilingDbTp - m.truePeakDb);
+                mOpts.postGainDb = gainDb;
+            }
+        }
+
+        if (ok)
+            ok = mBuilder.renderToFile (mOpts, err,
+                [this]           { return threadShouldExit(); },
+                [this] (double p) { mProgress = mOpts.normalize ? 0.5 + p * 0.5 : p; });
+
+        juce::MessageManager::callAsync (
+            [sp = juce::Component::SafePointer<ExportAudioDialog> (this), ok, err]
+            {
+                if (sp == nullptr) return;   // window was closed mid-render
+                sp->stopTimer();
+                if (auto* dw = sp->findParentComponentOfClass<juce::DialogWindow>())
+                    dw->exitModalState (ok ? 1 : 0);
+                if (! ok && err != "Export cancelled.")
+                    juce::AlertWindow::showMessageBoxAsync (
+                        juce::MessageBoxIconType::WarningIcon, "Export failed", err);
+            });
+    }
+
+    BuilderPage&        mBuilder;
+    VibeSynthProcessor& mProc;
+    juce::String        mBaseName;
+    std::function<void (std::function<void()>)> mEnsureSaved;
+
+    juce::ComboBox mSel, mTail, mFormat, mQual, mSrate;
+    juce::Label    mSelLbl, mTailLbl, mFormatLbl, mQualLbl, mSrateLbl;
+    juce::ToggleButton mDitherToggle, mNormToggle;
+    juce::ComboBox     mLufsTarget;
+    juce::ToggleButton mStemsToggle;
+    struct StripRow { int channelId; std::unique_ptr<juce::ToggleButton> toggle; };
+    juce::Component  mStripList;
+    juce::Viewport   mStripViewport;
+    std::vector<StripRow> mStrips;
+    juce::TextButton mExportBtn, mCancelBtn;
+    std::unique_ptr<juce::ProgressBar> mBar;
+    juce::Label      mPercent;
+    double           mProgress { 0.0 };
+    State            mState { State::Options };
+    BuilderPage::RenderOptions      mOpts;
+    std::shared_ptr<juce::FileChooser> mChooser;
+
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (ExportAudioDialog)
+};
+
 void StandaloneEditor::doExportAudio()
 {
     if (mBuilderPage == nullptr) return;
 
-    const bool haveSelection = mBuilderPage->hasTimeSelection();
+    juce::String base = mProjectManager ? mProjectManager->getCurrentName() : juce::String();
+    if (base.isEmpty()) base = "Song";
 
-    auto* w = new juce::AlertWindow ("Export Audio", {}, juce::MessageBoxIconType::NoIcon);
-
-    w->addComboBox ("sel",    { "Full Arrangement", "Selected Section" }, "Selection");
-    w->addComboBox ("tail",   { "Included", "Cut" }, "Tail");
-    w->addComboBox ("format", { "WAV", "OGG", "MP3" }, "Format");
-    w->addComboBox ("qual",   { "-" }, "Quality");
-    w->addComboBox ("srate",  { "44100 Hz", "48000 Hz" }, "Sample rate");
-
-    // "Selected Section" is meaningless with nothing selected on the ruler, so
-    // it is disabled rather than silently falling back to the whole song.
-    if (auto* c = w->getComboBoxComponent ("sel"))
-        if (! haveSelection)
-            c->setItemEnabled (2, false);   // 1-based item id
-
-    // One quality dropdown whose contents follow the format, instead of three
-    // dropdowns where two are always irrelevant.
-    auto repopulateQuality = [w]
+    // Locked destination interlock: exports land in <project>\Exports\, so an
+    // unsaved session runs the standard save flow first (badger Task 12's
+    // success-only continuation) and the export continues from it.
+    auto ensureSaved = [this] (std::function<void()> then)
     {
-        auto* fmt  = w->getComboBoxComponent ("format");
-        auto* qual = w->getComboBoxComponent ("qual");
-        if (fmt == nullptr || qual == nullptr) return;
-
-        const int f = fmt->getSelectedItemIndex();
-        qual->clear (juce::dontSendNotification);
-
-        if (f == 1)      qual->addItemList ({ "Low", "Medium", "High", "Highest" }, 1);
-        else if (f == 2) qual->addItemList ({ "128 kbps", "192 kbps", "256 kbps", "320 kbps" }, 1);
-        else             qual->addItemList ({ "16-bit", "24-bit", "32-bit float" }, 1);
-
-        qual->setSelectedItemIndex (f == 0 ? 1 : 2, juce::dontSendNotification);
+        const juce::File proj = mProcessor.getCurrentProjectFolder();
+        if (proj != juce::File() && proj.isDirectory()) { then(); return; }
+        juce::AlertWindow::showOkCancelBox (
+            juce::MessageBoxIconType::QuestionIcon,
+            "Save project first",
+            "Exports are saved into the project's Exports folder.\n"
+            "Save the project now?",
+            "Save...", "Cancel", nullptr,
+            juce::ModalCallbackFunction::create ([this, then] (int r)
+            {
+                if (r == 1) doFileSaveAs (then);
+            }));
     };
 
-    if (auto* fmt = w->getComboBoxComponent ("format"))
-        fmt->onChange = repopulateQuality;
-    repopulateQuality();
-
-    w->addButton ("Export", 1, juce::KeyPress (juce::KeyPress::returnKey));
-    w->addButton ("Cancel", 0, juce::KeyPress (juce::KeyPress::escapeKey));
-
-    w->enterModalState (true, juce::ModalCallbackFunction::create (
-        [this, w] (int result)
-        {
-            if (result != 1 || mBuilderPage == nullptr) return;
-
-            BuilderPage::RenderOptions opts;
-
-            const int selIdx = w->getComboBoxComponent ("sel")->getSelectedItemIndex();
-            if (selIdx == 1 && mBuilderPage->hasTimeSelection())
-            {
-                opts.scope = BuilderPage::RenderOptions::Scope::Section;
-                // Ruler selection is in BARS; the render works in beats.
-                opts.startBeats = (double) mBuilderPage->getTimeSelStartBars() * 4.0;
-                opts.endBeats   = (double) mBuilderPage->getTimeSelEndBars()   * 4.0;
-            }
-            else
-            {
-                opts.scope = BuilderPage::RenderOptions::Scope::Song;
-            }
-
-            opts.tail = w->getComboBoxComponent ("tail")->getSelectedItemIndex() == 1
-                      ? BuilderPage::RenderOptions::Tail::Cut
-                      : BuilderPage::RenderOptions::Tail::Included;
-
-            const int fmtIdx = w->getComboBoxComponent ("format")->getSelectedItemIndex();
-            opts.format = fmtIdx == 1 ? BuilderPage::RenderOptions::Format::Ogg
-                        : fmtIdx == 2 ? BuilderPage::RenderOptions::Format::Mp3
-                                      : BuilderPage::RenderOptions::Format::Wav;
-
-            opts.sampleRate = w->getComboBoxComponent ("srate")->getSelectedItemIndex() == 1
-                            ? 48000.0 : 44100.0;
-
-            // One control, read three ways depending on format.
-            const int qIdx = juce::jlimit (0, 3,
-                w->getComboBoxComponent ("qual")->getSelectedItemIndex());
-
-            static constexpr int kDepths[] = { 16, 24, 32 };
-            static constexpr int kOggQ[]   = { 3, 5, 7, 9 };      // JUCE OGG takes a quality INDEX
-            static constexpr int kMp3Br[]  = { 128, 192, 256, 320 };
-
-            if (fmtIdx == 1)      opts.oggQuality = kOggQ[qIdx];
-            else if (fmtIdx == 2) opts.mp3Kbps    = kMp3Br[qIdx];
-            else                  opts.bitDepth   = kDepths[juce::jlimit (0, 2, qIdx)];
-
-            const juce::String ext = opts.format == BuilderPage::RenderOptions::Format::Ogg ? ".ogg"
-                                   : opts.format == BuilderPage::RenderOptions::Format::Mp3 ? ".mp3"
-                                                                                            : ".wav";
-            juce::String base = mProjectManager ? mProjectManager->getCurrentName() : juce::String();
-            if (base.isEmpty()) base = "Song";
-
-            auto chooser = std::make_shared<juce::FileChooser> (
-                "Export Audio",
-                juce::File::getSpecialLocation (juce::File::userMusicDirectory)
-                    .getChildFile (base.replaceCharacter (' ', '_') + ext),
-                "*" + ext);
-
-            chooser->launchAsync (
-                juce::FileBrowserComponent::saveMode | juce::FileBrowserComponent::canSelectFiles,
-                [this, opts, chooser] (const juce::FileChooser& fc) mutable
-                {
-                    auto dest = fc.getResult();
-                    if (dest == juce::File() || mBuilderPage == nullptr) return;
-                    opts.destination = dest;
-                    mBuilderPage->runExportWithProgress (opts);
-                });
-        }), true);
+    juce::DialogWindow::LaunchOptions lo;
+    lo.content.setOwned (new ExportAudioDialog (
+        *mBuilderPage, mProcessor, base,
+        mMixerPage ? mMixerPage->getStemPickEntries()
+                   : std::vector<MixerPage::StemPickEntry>(),
+        ensureSaved));
+    lo.dialogTitle                   = "Export Audio";
+    lo.dialogBackgroundColour        = findColour (juce::ResizableWindow::backgroundColourId);
+    lo.escapeKeyTriggersCloseButton  = true;
+    lo.useNativeTitleBar             = false;
+    lo.resizable                     = false;
+    lo.launchAsync();
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

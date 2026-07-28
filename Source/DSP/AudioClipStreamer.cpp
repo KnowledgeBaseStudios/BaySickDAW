@@ -52,6 +52,37 @@ AudioClipStreamer::~AudioClipStreamer()
 
 // ── seek - message thread ─────────────────────────────────────────────────────
 
+std::atomic<bool>        AudioClipStreamer::sOfflineRender { false };
+std::atomic<juce::int64> AudioClipStreamer::sUnderrunCount { 0 };
+
+bool AudioClipStreamer::ensureRangeBlockingForOffline (int64 needStart)
+{
+    if (! sOfflineRender.load (std::memory_order_relaxed) || mRamMode)
+        return false;
+
+    needStart = juce::jmax ((int64) 0, needStart);
+    if (needStart >= mTotalLength)
+        return false;   // past EOF: normal silence, not an underrun
+
+    // The seek() shape executed inline on the render thread: restart the
+    // ring at the needed position and synchronously prefill.  Blocking here
+    // is the point -- no live audio callback runs while the flag is set.
+    juce::CriticalSection::ScopedLockType lk (mReaderLock);
+
+    mSeekPending  .store (false,     std::memory_order_release);
+    mRingReadHead .store (needStart, std::memory_order_release);
+    mRingWriteHead.store (needStart, std::memory_order_release);
+
+    const int prefill = (int) juce::jmin (
+        (int64) (mFileSampleRate * kPrefillSeconds),
+        mTotalLength - needStart);
+    if (prefill > 0)
+        fillIntoRing (needStart, prefill);
+
+    mReady.store (true, std::memory_order_release);
+    return mRingWriteHead.load (std::memory_order_acquire) > needStart;
+}
+
 void AudioClipStreamer::seek (int64 filePos)
 {
     // G-7 polish: in RAM mode the entire file is always covered, so seek is
@@ -202,8 +233,21 @@ bool AudioClipStreamer::readRaw (juce::AudioBuffer<float>& dest,
                                   int numSamples,
                                   int64 filePos)
 {
-    if (! mReady.load (std::memory_order_acquire) || numSamples <= 0)
+    if (numSamples <= 0)
         return false;
+
+    if (! mReady.load (std::memory_order_acquire))
+    {
+        // CL-282: offline renders refill synchronously instead of returning
+        // the silence a live callback would have to.
+        if (! ensureRangeBlockingForOffline (filePos))
+        {
+            if (sOfflineRender.load (std::memory_order_relaxed)
+                && filePos >= 0 && filePos < mTotalLength)
+                sUnderrunCount.fetch_add (1, std::memory_order_relaxed);
+            return false;
+        }
+    }
 
     // G-7 polish: in RAM mode the entire file is loaded, so skip the ring
     // availability + seek-trigger logic.  Out-of-range reads return false
@@ -215,20 +259,32 @@ bool AudioClipStreamer::readRaw (juce::AudioBuffer<float>& dest,
     }
     else
     {
-        const int64 wh = mRingWriteHead.load (std::memory_order_acquire);
+        int64 wh = mRingWriteHead.load (std::memory_order_acquire);
 
         // The ring physically covers [wh - capacity, wh).
         // We use coveredStart (not rh) as the lower bound because the stateless
         // filePos computation (outPosInClip * readRatio) can land 1-2 samples
         // behind rh due to integer rounding - using rh would trigger a phantom
         // seek every block even though the data is right there in the ring.
-        const int64 coveredStart = wh - (int64) mCapacity;
+        int64 coveredStart = wh - (int64) mCapacity;
         if (filePos < coveredStart || filePos + numSamples > wh)
         {
-            mSeekTarget .store (filePos, std::memory_order_release);
-            mSeekPending.store (true,    std::memory_order_release);
-            mReady      .store (false,   std::memory_order_release);
-            return false;
+            // CL-282: one synchronous refill attempt before conceding.
+            if (ensureRangeBlockingForOffline (filePos))
+            {
+                wh           = mRingWriteHead.load (std::memory_order_acquire);
+                coveredStart = wh - (int64) mCapacity;
+            }
+            if (filePos < coveredStart || filePos + numSamples > wh)
+            {
+                if (sOfflineRender.load (std::memory_order_relaxed)
+                    && filePos >= 0 && filePos + numSamples <= mTotalLength)
+                    sUnderrunCount.fetch_add (1, std::memory_order_relaxed);
+                mSeekTarget .store (filePos, std::memory_order_release);
+                mSeekPending.store (true,    std::memory_order_release);
+                mReady      .store (false,   std::memory_order_release);
+                return false;
+            }
         }
     }
 
@@ -254,7 +310,7 @@ float AudioClipStreamer::readAndMix (juce::AudioBuffer<float>& dest,
                                      int    numDestChannels,
                                      float  gain)
 {
-    if (! mReady.load (std::memory_order_acquire) || numOutputSamples <= 0)
+    if (numOutputSamples <= 0)
         return 0.0f;
 
     // G1 smoke round 5: at a true 1:1 rate the fractional offset is a
@@ -274,6 +330,20 @@ float AudioClipStreamer::readAndMix (juce::AudioBuffer<float>& dest,
     const int64 startFloor = (int64) std::floor (fileStartPos);
     const int numFileSamples = (int) std::ceil ((double) numOutputSamples * readRatio) + 3;
 
+    if (! mReady.load (std::memory_order_acquire))
+    {
+        // CL-282: offline renders refill synchronously (Catmull-Rom reads one
+        // frame behind, hence -1) instead of returning a live callback's
+        // forced silence.
+        if (! ensureRangeBlockingForOffline (startFloor - 1))
+        {
+            if (sOfflineRender.load (std::memory_order_relaxed)
+                && startFloor >= 0 && startFloor < mTotalLength)
+                sUnderrunCount.fetch_add (1, std::memory_order_relaxed);
+            return 0.0f;
+        }
+    }
+
     // G-7 polish: in RAM mode the entire file is loaded, so skip the ring
     // availability + seek-trigger logic.  Reads past EOF still bail with
     // silence rather than triggering a phantom seek.
@@ -285,24 +355,46 @@ float AudioClipStreamer::readAndMix (juce::AudioBuffer<float>& dest,
     }
     else
     {
-        const int64 wh = mRingWriteHead.load (std::memory_order_acquire);
+        int64 wh = mRingWriteHead.load (std::memory_order_acquire);
 
         // The ring physically covers [wh - capacity, wh).
         // Use coveredStart (not rh) as the lower bound - the stateless filePos
         // (outPosInClip * readRatio) lands 1-2 samples behind rh every block due
         // to the interpolation lookahead in numFileSamples.  Using rh caused a
         // phantom seek on every single block even though the data was present.
-        const int64 coveredStart = wh - (int64) mCapacity;
+        int64 coveredStart = wh - (int64) mCapacity;
         // G1 smoke round 5: lower bound extended by 1 - the Catmull-Rom
         // kernel below reads one frame BEHIND the integer position.
         if (startFloor - 1 < coveredStart || startFloor + numFileSamples > wh)
         {
-            // Genuine position jump (backward scrub, loop, or first-block miss) -
-            // signal the background thread to seek.
-            mSeekTarget .store (startFloor, std::memory_order_release);
-            mSeekPending.store (true,       std::memory_order_release);
-            mReady      .store (false,      std::memory_order_release);
-            return 0.0f;
+            // CL-282: one synchronous refill attempt before conceding.  Live
+            // playback keeps the strict window test EXACTLY as before (the
+            // refill helper no-ops when not offline).
+            bool stillMissing = true;
+            if (ensureRangeBlockingForOffline (startFloor - 1))
+            {
+                wh           = mRingWriteHead.load (std::memory_order_acquire);
+                coveredStart = wh - (int64) mCapacity;
+                // Post-refill (offline only): covered-to-EOF counts as
+                // covered -- the refill spans [startFloor-1, EOF-or-prefill)
+                // by construction (4 s ring vs one block's need), and the
+                // per-sample EOF breaks below handle a clip tail shorter
+                // than the interpolation lookahead.
+                stillMissing = (startFloor - 1 < coveredStart)
+                            || (startFloor + numFileSamples > wh && wh < mTotalLength);
+            }
+            if (stillMissing)
+            {
+                if (sOfflineRender.load (std::memory_order_relaxed)
+                    && startFloor >= 0 && startFloor < mTotalLength)
+                    sUnderrunCount.fetch_add (1, std::memory_order_relaxed);
+                // Genuine position jump (backward scrub, loop, or first-block miss) -
+                // signal the background thread to seek.
+                mSeekTarget .store (startFloor, std::memory_order_release);
+                mSeekPending.store (true,       std::memory_order_release);
+                mReady      .store (false,      std::memory_order_release);
+                return 0.0f;
+            }
         }
     }
 

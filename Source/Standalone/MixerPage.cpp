@@ -3085,6 +3085,51 @@ std::vector<int> MixerPage::getAuxStripIndices() const
     return mAuxOrder;
 }
 
+std::vector<MixerPage::StemPickEntry> MixerPage::getStemPickEntries() const
+{
+    using namespace MixerChannelIds;
+    std::vector<StemPickEntry> out;
+
+    auto add = [&out] (const MixerTrackStrip* s, int chId, bool defChecked)
+    {
+        if (s == nullptr || ! s->isVisible()) return;
+        out.push_back ({ chId, s->getName(), defChecked });
+    };
+    auto addMap = [&add] (const std::map<int, std::unique_ptr<MixerTrackStrip>>& m,
+                          const std::vector<int>& order, int (*chIdOf) (int))
+    {
+        for (int k : order)
+        {
+            auto it = m.find (k);
+            if (it != m.end())
+                add (it->second.get(), chIdOf (k), true);
+        }
+    };
+
+    add (mMasterStrip.get(),        kMaster,    false);
+    add (mLayersBusStrip.get(),     kLayersBus, false);
+    addMap (mLayerStrips, mLayerTabOrder, &layerInsert);
+    add (mBassBusStrip.get(),       kBassBus,   false);
+    addMap (mBassStrips,  mBassTabOrder,  &bassInsert);
+    add (mDrumsBusStrip.get(),      kDrumsBus,  false);
+    addMap (mDrumStrips,  mDrumSlotOrder, &drumInsert);
+    add (mAudioClipsBusStrip.get(), kClipsBus,  false);
+    addMap (mAudioStrips, mAudioRowOrder, &audioInsert);
+    add (mVoxBusStrip.get(),        kVoxBus,    false);
+    if (mVoxBus2Active)  add (mVoxBus2Strip.get(),  kVoxBus2,  false);
+    addMap (mVoxStrips,   mVoxOrder,      &voxInsert);
+    add (mInstBusStrip.get(),       kInstBus,   false);
+    if (mInstBus2Active) add (mInstBus2Strip.get(), kInstBus2, false);
+    if (mInstBus3Active) add (mInstBus3Strip.get(), kInstBus3, false);
+    addMap (mInstStrips,  mInstOrder,     &instInsert);
+    if (mRustyDrumsBusActive) add (mRustyDrumsBusStrip.get(), kRustyDrumsBus, false);
+    addMap (mRustyStrips, mRustyOrder,    &rustyInsert);
+    add (mFXBusStrip.get(),         kFxBus,     false);
+    addMap (mAuxStrips,   mAuxOrder,      &auxStrip);
+
+    return out;
+}
+
 juce::String MixerPage::getAuxStripName(int idx) const
 {
     auto it = mAuxStrips.find(idx);

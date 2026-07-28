@@ -29,6 +29,33 @@ struct ControlPoint
     float     tension    { 0.f };   // reserved for future Bezier
 };
 
+// QA-ModelShell TS2: the ONE control-point evaluator, shared by the live
+// engine replay (PluginProcessor) and the offline render replay so the two
+// cannot drift.  relPos = 0..1 position within the clip; points assumed
+// sorted by timeTicks.
+template <typename PointVec>
+inline float evalAutomationPointsAt (const PointVec& pts, float relPos)
+{
+    if (pts.empty()) return 0.5f;
+    if ((int) pts.size() == 1)          return pts[0].value01;
+    if (relPos <= pts.front().timeTicks) return pts.front().value01;
+    if (relPos >= pts.back().timeTicks)  return pts.back().value01;
+
+    for (int pi = 0; pi < (int) pts.size() - 1; ++pi)
+    {
+        if (relPos >= pts[pi].timeTicks && relPos <= pts[pi + 1].timeTicks)
+        {
+            if (pts[pi].curveType == CurveType::Stepped)
+                return pts[pi].value01;
+
+            const float span = pts[pi + 1].timeTicks - pts[pi].timeTicks;
+            const float t    = (span > 0.f) ? (relPos - pts[pi].timeTicks) / span : 0.f;
+            return pts[pi].value01 + t * (pts[pi + 1].value01 - pts[pi].value01);
+        }
+    }
+    return pts[0].value01;
+}
+
 struct AutomationLane
 {
     juce::String              paramId;

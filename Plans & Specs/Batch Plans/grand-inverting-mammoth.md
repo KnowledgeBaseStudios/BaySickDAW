@@ -103,7 +103,14 @@ Open, to resolve at the owning task set's start (numbered prose to Jeff, lettere
 no recommendations):
 1. **TS7:** freeze tap point (pre-rack / post-rack / both) + freeze presentation
    (invisible swap / bounce-in-place / both).
-2. **TS2:** stems (CL-040) granularity — per tab, per bus, or pick-list dialog.
+2. ~~**TS2:** stems (CL-040) granularity — per tab, per bus, or pick-list dialog.~~
+   RESOLVED 2026-07-27 (Jeff): **per MIXER STRIP** (FL model) via a **pick-list of all
+   active strips** — sends/aux render as their own stems; Master + buses default
+   UNCHECKED, every other strip defaults CHECKED; stem files land in `<project>\Exports\`
+   (confirmed, same as the locked destination spec). Implementation consequence: ONE
+   full-graph offline pass with simultaneous per-strip output taps (never
+   mute-others-per-pass, which would kill sidechain keys — the point of his compressor
+   example is that stems keep SC-driven behavior).
 3. **TS6:** crash-protection process model detail (per-plugin sandbox process vs single
    shared host process) — BLU-302 entry says optional/3-6 weeks; Jeff ruled it IN, model
    choice still open.
@@ -486,7 +493,61 @@ load/apply path must keep); the QA-Ef close entries before touching doFileNew/ex
 surfaces; STANDALONE_UI_CHANGES.md before TS4/TS5 (deliberate UI decisions log);
 `Files For Claude/DSP Review/_APPROVED_CHANGES.md` before TS7's Limiter work.
 
-## Carry-Over (2026-07-27 — TS1 ~70% done, mid-set handoff point)
+## Carry-Over (2026-07-27 — TS2 CODE-COMPLETE, gate GREEN, commit SURFACED to Jeff)
+
+- **Completed:** TS2 in full — every checklist item (see the running notes "TS2
+  CODE-COMPLETE" entry for the item-by-item close, incl. CL-057's
+  verified-already-satisfied disposition). Gate green both configs on the current
+  tree.  The TS2 commit one-liner + full 15-entry status is surfaced in chat —
+  NOTHING commits without Jeff's approval.
+- **In-flight:** none.  Awaiting the commit approval; on it: commit -> running-notes
+  checkpoint -> TS3 opens (automation fully model-side: retire the 19 engine-editor
+  wrapper sites, EffectParamMap tables for ALL remaining effect types x variants +
+  pedal-native 100+ types, pedals model-side registration, mixer `_fader`/`_pan` lane
+  remap, EQ band lane ownership, statics re-widen of onIsParamStale, BLU-344 Harmless
+  mod-editor targets).  TS3 has no open sub-spec calls.
+- **Resume action (if resuming pre-approval):** wait on Jeff for the TS2 commit; do
+  not start TS3 source work with the TS2 diff uncommitted (one commit per task set).
+- **Implemented-work entry needed:** compiled from running notes at TS8 (bulk-run R2).
+
+## Prior Carry-Over (2026-07-27 — TS1 COMMITTED `4ea67bd0`; TS2 open, stems call pending)
+
+- **Completed:** TS1 in full — committed `4ea67bd0` on Jeff's approval (42 files; gate
+  green both configs; all ten punch-list items). Running notes carry the complete trail
+  (scout map, sfizz precedent, UM wrinkle, K-5 chain-splice fix, CL-301 parity audit +
+  fourth divergence, wire-at-load).
+- **In-flight:** TS2 building; skeleton steps 1-4 LANDED IN SOURCE and verified green
+  through steps 2+3 (offline drive on the live processor with replica deleted +
+  prepare-sweep gap fixes; lane-aware integrating clock + span math; UI-free offline
+  lane replay; stems one-pass multi-sink taps + metronome offline gate +
+  getProjectExportsDir destination on both choosers). The stems/metro/destination
+  chunk compile was RUNNING at checkpoint — verify build_log.txt first on resume.
+- **Resume action:** (0) the stems/metro/destination chunk went GREEN both configs —
+  re-verify build_log.txt only if source moved after this note; then the REMAINING
+  TS2 items, in order: (a) export dialog UX rework — a new persistent modal
+  ExportAudioDialog component replacing doExportAudio's AlertWindow
+  ([StandaloneEditor.cpp:10486](../../Source/Standalone/StandaloneEditor.cpp:10486);
+  carry the combo vocabulary + quality mapping over VERBATIM): options persist, the
+  async FileChooser opens ABOVE it, on pick the box flips to progress mode (bar +
+  percent readout, controls disabled, Cancel live -> shouldAbort) driving renderToFile
+  on a plain background juce::Thread; the STEMS PICK-LIST lives inside it via a NEW
+  `MixerPage::getStemPickEntries()` returning {channelId, shownName, defaultChecked}
+  for every strip the mixer currently SHOWS, in display order (MixerPage is the single
+  truth for active strips + user-visible names; Master + buses defaultChecked=false)
+  feeding RenderOptions::stems; the export save-first interlock mirrors badger Task
+  12's doFileSaveAs onSaved continuation.  The pattern right-click path keeps
+  runExportWithProgress (B.29 reconciliation happens at TS8).
+  (b) AudioClipStreamer offline synchronous-read mode under isNonRealtime + CL-282
+  underrun telemetry (atomic counter + Debug overlay); (c) riders — CL-043 dither on
+  the WAV sink, CL-045 LUFS measure-then-gain (both directions, true-peak-capped),
+  CL-056 offline block size; (d) CL-057 buffer-size hot-swap reusing
+  begin/endOfflineRender's re-prepare; (e) CL-227 backend (the loop with meters, no
+  writer); (f) TS2 GATE + Rule 9 one-liner + FULL git status -> Jeff approves ->
+  COMMIT; running-notes checkpoint.
+- **Assumptions changed:** none new since the TS1 entries.
+- **Implemented-work entry needed:** compiled from running notes at TS8 (bulk-run R2).
+
+## Prior Carry-Over (2026-07-27 — TS1 ~70% done, superseded by the block above)
 
 - **Completed (all builds green, both configs, per chunk):** session open + backfills
   (§B.30 + badger held entry -> `b933b54a`); TS1 scout (full map in running notes);

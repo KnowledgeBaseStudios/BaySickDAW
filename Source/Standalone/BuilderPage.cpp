@@ -9,6 +9,11 @@
 #include "../G3PlayheadDiag.h"      // [G3 PLAYHEAD] G-9 reading (QA-G3Smoke Task 1); Debug-only
 #include "../DSP/Mp3Writer.h"       // QA-Export: MP3 encoder front end
 #include "../TempoMapRead.h"        // QA-Export: offline head reads the live tempo timeline
+#include "../EngineRig.h"           // QA-ModelShell TS2: offline lane replay resolves engines model-side
+#include "../DSP/EffectParamMap.h"  // QA-ModelShell TS2: rack-lane resolution (type, variant)
+#include "../DSP/LufsMeterDSP.h"    // QA-ModelShell TS2: CL-227 backend / CL-045 measure pass
+#include "EffectsPage.h"            // QA-ModelShell TS2: channelPrefixForId / rackForChannelId statics
+#include "../BaySickVocal/BaySickVocalProcessor.h"  // QA-ModelShell TS2: vox lane -> vocal + embedded NAM/IR
 
 // Smoke #45: minimal user32 import for the right-Alt check -- deliberately
 // NOT <windows.h>: its wingdi Rectangle() collides with juce::Rectangle
@@ -7941,71 +7946,130 @@ namespace
     // need not be the render rate (exporting 48k from a 44.1k session).  Beats
     // are therefore resolved through SECONDS rather than by handing the render
     // sample index straight to beatAtSample.
+    // QA-ModelShell TS2: the offline transport.  Integrates beats BLOCKWISE so
+    // the render clock follows both the ruler tempo map and a "global_tempo"
+    // automation lane with the LIVE semantics: the lane is a live override
+    // while a lane clip covers the position (the 30 Hz applicator's
+    // truncate-and-append behavior -- ruler flags rule wherever no lane clip
+    // is active), and the lane layer is SONG SCOPE ONLY, matching the engine
+    // replay's song-mode gate.  Stepped per block like the live 30 Hz
+    // override -- never integrated in one closed-form jump.
     struct OfflineHead : public juce::AudioPlayHead
     {
-        OfflineHead (double baseBpm, double renderSr)
-            : mBaseBpm (juce::jmax (1.0, baseBpm)), mRenderSr (renderSr) {}
+        OfflineHead (PatternManager& pm, double baseBpm, double renderSr,
+                     bool followTempoLane)
+            : mPM (pm),
+              mCurBpm  (juce::jmax (1.0, baseBpm)),
+              mBaseBpm (juce::jmax (1.0, baseBpm)),
+              mRenderSr (renderSr),
+              mFollowLane (followTempoLane)
+        {
+            if (mFollowLane)
+                for (int bi = 0; bi < mPM.getNumBlocks(); ++bi)
+                {
+                    const auto& blk = mPM.getBlock (bi);
+                    if (blk.clipType != ClipType::Automation)         continue;
+                    if (blk.muted)                                     continue;
+                    if (! mPM.isRowAudible (blk.trackRow))             continue;
+                    if (blk.automationLane.paramId != "global_tempo")  continue;
+                    if (blk.automationLane.points.empty())             continue;
+                    mTempoLanes.push_back (&blk);
+                }
+        }
+
+        double bpmAtCurrentBeat() const
+        {
+            const double bar = mBeatPos / 4.0;
+            for (const auto* blk : mTempoLanes)
+            {
+                const double clipStart = effectiveStartBars (*blk);
+                const double len       = effectiveLengthBars (*blk);
+                if (len <= 0.0 || bar < clipStart || bar >= clipStart + len) continue;
+                const float rel = juce::jlimit (0.f, 1.f, (float) ((bar - clipStart) / len));
+                const float v01 = evalAutomationPointsAt (blk->automationLane.points, rel);
+                // The live applicator's linear 20..300 BPM map.
+                return juce::jlimit (20.0, 300.0, 20.0 + (double) v01 * 280.0);
+            }
+            if (TempoMap::isActive())
+                return TempoMap::bpmAtSample (TempoMap::sampleAtBeat (mBeatPos));
+            return mBaseBpm;
+        }
 
         juce::Optional<PositionInfo> getPosition() const override
         {
-            const double tSec = (double) mSamplePos / mRenderSr;
-
-            double beat = tSec * (mBaseBpm / 60.0);
-            double bpm  = mBaseBpm;
-
-            if (TempoMap::isActive())
-            {
-                const double mapSr    = juce::jmax (1.0, TempoMap::gSampleRate.load());
-                const auto   mapSample = (juce::int64) (tSec * mapSr);
-                beat = TempoMap::beatAtSample (mapSample);
-                bpm  = TempoMap::bpmAtSample  (mapSample);
-            }
-
             PositionInfo pi;
-            pi.setBpm (bpm);
-            pi.setPpqPosition (beat);
+            pi.setBpm (mCurBpm);
+            pi.setPpqPosition (mBeatPos);
             pi.setIsPlaying (true);
             pi.setIsRecording (false);
-            pi.setTimeInSeconds (tSec);
+            pi.setTimeInSeconds (mTimeSec);
             return pi;
         }
 
-        void advance (int n) noexcept { mSamplePos += n; }
+        void advance (int n) noexcept
+        {
+            mCurBpm    = bpmAtCurrentBeat();
+            mBeatPos  += (double) n / mRenderSr * (mCurBpm / 60.0);
+            mTimeSec  += (double) n / mRenderSr;
+            mSamplePos += n;
+        }
 
+        // Stepped fast-forward to `targetBeats`; returns the samples consumed.
+        // The final partial step is linearly corrected at that step's BPM, so
+        // span math and the render walk the same clock.
+        juce::int64 advanceToBeat (double targetBeats, int stepSamples) noexcept
+        {
+            juce::int64 samples = 0;
+            while (mBeatPos < targetBeats)
+            {
+                const double bpm          = bpmAtCurrentBeat();
+                const double beatsPerStep = (double) stepSamples / mRenderSr * (bpm / 60.0);
+                if (beatsPerStep <= 0.0) break;
+                if (mBeatPos + beatsPerStep >= targetBeats)
+                {
+                    const double frac = (targetBeats - mBeatPos) / beatsPerStep;
+                    const int    part = juce::jmax (1, (int) std::ceil (frac * (double) stepSamples));
+                    advance (part);
+                    samples += part;
+                    break;
+                }
+                advance (stepSamples);
+                samples += stepSamples;
+            }
+            return samples;
+        }
+
+        PatternManager& mPM;
+        std::vector<const ArrangementBlock*> mTempoLanes;
         juce::int64 mSamplePos { 0 };
+        double      mBeatPos   { 0.0 };
+        double      mTimeSec   { 0.0 };
+        double      mCurBpm;
         double      mBaseBpm;
         double      mRenderSr;
+        bool        mFollowLane;
     };
-
-    // Seconds spanned by `beats`, honoring tempo changes.  Same seconds-domain
-    // reasoning as OfflineHead.
-    double beatsToSeconds (double beats, double baseBpm)
-    {
-        if (TempoMap::isActive())
-        {
-            const double mapSr = juce::jmax (1.0, TempoMap::gSampleRate.load());
-            return (double) TempoMap::sampleAtBeat (beats) / mapSr;
-        }
-        return beats * 60.0 / juce::jmax (1.0, baseBpm);
-    }
 }
 
-bool BuilderPage::renderToFile (const RenderOptions& opts,
-                                juce::String& outErr,
-                                std::function<bool()> shouldAbort,
-                                std::function<void(double)> onProgress)
+// QA-ModelShell TS2: the ONE offline render loop.  Everything position- and
+// lifecycle-related lives here -- span/scope math, the offline drive
+// (begin/endOfflineRender + the full restore set), the lane-aware clock, the
+// per-block lane replay, tail-decay handling.  Consumers differ only in what
+// they do with each rendered block (write files / feed meters / tap a strip).
+bool BuilderPage::runOfflineLoop (const RenderOptions& opts,
+                                  juce::String& outErr,
+                                  std::function<bool()> shouldAbort,
+                                  std::function<void(double)> onProgress,
+                                  const std::function<bool (const juce::AudioBuffer<float>&, int)>& consumeBlock)
 {
-    using Scope  = RenderOptions::Scope;
-    using Format = RenderOptions::Format;
-
-    if (opts.destination == juce::File())
-    {
-        outErr = "No destination file was chosen.";
-        return false;
-    }
+    using Scope = RenderOptions::Scope;
 
     const double sr       = opts.sampleRate > 0.0 ? opts.sampleRate : 44100.0;
-    constexpr int kBlk    = 512;
+    // CL-056: offline block size.  2048 renders markedly faster than the live
+    // 512 while keeping the lane-replay step (~46 ms at 44.1k) in the same
+    // class as the live 30 Hz applicator tick, so automation granularity in
+    // the file matches what live playback produces.
+    constexpr int kBlk    = 2048;
     const double baseBpm  = juce::jmax (1.0, mPM.getGlobalTempo());
 
     // ── Content span, in beats ───────────────────────────────────────────────
@@ -8043,11 +8107,21 @@ bool BuilderPage::renderToFile (const RenderOptions& opts,
         endBeats = mPM.getPattern (opts.patternIndex).bars * 4.0;
     }
 
-    const double startSec = beatsToSeconds (startBeats, baseBpm);
-    const double endSec   = beatsToSeconds (endBeats,   baseBpm);
-    const juce::int64 startSample   = (juce::int64) (startSec * sr);
-    const juce::int64 contentEndSmp = (juce::int64) (endSec   * sr);
-    const juce::int64 contentSamples = contentEndSmp - startSample;
+    // Spans resolve through the SAME lane-aware clock the render walks -- a
+    // tempo lane changes real-time length, so closed-form map-only seconds
+    // math would mislabel the span.  The head fast-forwards to the section
+    // start here; the render loop continues the same clock.
+    const bool followLane = (opts.scope != Scope::Pattern);
+    OfflineHead head (mPM, baseBpm, sr, followLane);
+
+    juce::int64 contentSamples = 0;
+    {
+        OfflineHead probe (mPM, baseBpm, sr, followLane);
+        const juce::int64 endSample = probe.advanceToBeat (endBeats, kBlk);
+        const juce::int64 startSmp  = (startBeats > 0.0)
+                                    ? head.advanceToBeat (startBeats, kBlk) : 0;
+        contentSamples = endSample - startSmp;
+    }
 
     if (contentSamples <= 0)
     {
@@ -8060,78 +8134,40 @@ bool BuilderPage::renderToFile (const RenderOptions& opts,
     const juce::int64 maxTailSamples = (opts.tail == RenderOptions::Tail::Included)
                                      ? (juce::int64) (kMaxTailSeconds * sr) : 0;
 
-    // ── Render processor ─────────────────────────────────────────────────────
-    VibeSynthProcessor renderProc;
-    renderProc.setPatternManager (&mPM);
-    renderProc.prepareToPlay (sr, kBlk);
-    {
-        juce::MemoryBlock state;
-        mProcessor.getStateInformation (state);
-        renderProc.setStateInformation (state.getData(), (int) state.getSize());
-    }
+    // ── Offline drive ────────────────────────────────────────────────────────
+    // The LIVE processor renders itself: same engines, same graph, same racks
+    // as playback.  The old replica VibeSynthProcessor here had no pages and
+    // therefore no instrument engines or strips -- vox/inst/instrument
+    // exports rendered SILENT (the batch's origin finding).
+    if (onOfflineRenderActive) onOfflineRenderActive (true);
 
-    // Clips store paths relative to the project folder, so the render processor
-    // needs the same folder before it resolves any of them.
-    renderProc.setCurrentProjectFolder (mProcessor.getCurrentProjectFolder());
+    // Pattern-scope exports used to mutate the LIVE current pattern with no
+    // restore; part of the locked restore set now.
+    const int prevPatternIndex = mPM.getCurrentPatternIndex();
+
+    if (! mProcessor.beginOfflineRender (sr, kBlk))
+    {
+        if (onOfflineRenderActive) onOfflineRenderActive (false);
+        outErr = "Could not enter offline render mode.";
+        return false;
+    }
 
     if (opts.scope == Scope::Pattern)
     {
         mPM.setCurrentPattern (opts.patternIndex);
-        renderProc.setSongMode (false);
+        mProcessor.setSongMode (false);
     }
     else
     {
-        // The live processor gets its clip snapshot published by the editor on
-        // arrangement changes.  A fresh processor has no editor, so nothing
-        // would ever build one and every arrangement clip would render silent --
-        // publish it explicitly.
-        renderProc.rebuildAudioClipPlayers();
-        renderProc.setSongMode (true);
+        mProcessor.setSongMode (true);
     }
 
-    OfflineHead head (baseBpm, sr);
-    // Section exports start mid-song, so the clock starts there too -- otherwise
-    // the render would play the song from bar 1 into a file labelled as the
-    // selection.
-    head.mSamplePos = startSample;
-    renderProc.setPlayHead (&head);
-
-    // ── Writer ───────────────────────────────────────────────────────────────
-    constexpr int kNumCh = 2;
-    Mp3Writer mp3;
-    std::unique_ptr<juce::AudioFormatWriter> writer;
-
-    opts.destination.deleteFile();
-
-    if (opts.format == Format::Mp3)
-    {
-        if (! mp3.open (opts.destination, sr, kNumCh, opts.mp3Kbps, outErr))
-            return false;
-    }
-    else
-    {
-        std::unique_ptr<juce::AudioFormat> fmt;
-        if (opts.format == Format::Ogg) fmt = std::make_unique<juce::OggVorbisAudioFormat>();
-        else                            fmt = std::make_unique<juce::WavAudioFormat>();
-
-        auto os = opts.destination.createOutputStream();
-        if (os == nullptr)
-        {
-            outErr = "Could not write to " + opts.destination.getFullPathName();
-            return false;
-        }
-
-        const int bits = (opts.format == Format::Ogg) ? opts.oggQuality : opts.bitDepth;
-        writer.reset (fmt->createWriterFor (os.release(), sr, (unsigned int) kNumCh,
-                                            bits, {}, 0));
-        if (writer == nullptr)
-        {
-            outErr = "Could not create the audio writer for these settings.";
-            return false;
-        }
-    }
+    // The head was fast-forwarded to the section start by the span math above
+    // (same clock, same stepping), so section exports open at the selection.
+    mProcessor.setPlayHead (&head);
 
     // ── Block loop ───────────────────────────────────────────────────────────
+    constexpr int kNumCh = 2;
     juce::AudioBuffer<float> buf (kNumCh, kBlk);
     juce::MidiBuffer         midi;
     juce::int64              written  = 0;
@@ -8165,16 +8201,20 @@ bool BuilderPage::renderToFile (const RenderOptions& opts,
         buf.clear();
         midi.clear();
 
-        renderProc.processBlock (buf, midi);
+        // Apply every non-main-APVTS lane class at this block position
+        // (engine / rack / legacy fader).  Main-APVTS lanes replay INSIDE
+        // processBlock exactly as in live playback, and the tempo lane
+        // drives the clock itself.  Song scope only -- automation clips are
+        // song-grid data (same gate as the live replay).
+        if (followLane)
+            applyOfflineAutomationAt (head.mBeatPos);
+
+        mProcessor.processBlock (buf, midi);
         head.advance (chunk);
 
-        bool ok = true;
-        if (opts.format == Format::Mp3) ok = mp3.write (buf.getArrayOfReadPointers(), chunk);
-        else                            ok = writer->writeFromAudioSampleBuffer (buf, 0, chunk);
-
-        if (! ok)
+        if (! consumeBlock (buf, chunk))
         {
-            outErr = "Writing to " + opts.destination.getFullPathName() + " failed.";
+            if (outErr.isEmpty()) outErr = "Writing the export file(s) failed.";
             aborted = true;
             break;
         }
@@ -8202,18 +8242,374 @@ bool BuilderPage::renderToFile (const RenderOptions& opts,
         }
     }
 
-    // Release the file before any delete: on Windows an open handle blocks it.
-    writer.reset();
-    if (opts.format == Format::Mp3) mp3.close();
+    // Leave offline mode on EVERY exit path: restore-set back (device config,
+    // playhead, song mode), tails cleared, device resumed -- then the
+    // pattern-scope current-pattern restore and the editor's timer resume.
+    mProcessor.endOfflineRender();
+    if (opts.scope == Scope::Pattern)
+        mPM.setCurrentPattern (prevPatternIndex);
+    if (onOfflineRenderActive) onOfflineRenderActive (false);
 
     if (aborted)
     {
-        opts.destination.deleteFile();
         if (outErr.isEmpty()) outErr = "Export cancelled.";
         return false;
     }
-
     return true;
+}
+
+bool BuilderPage::renderToFile (const RenderOptions& opts,
+                                juce::String& outErr,
+                                std::function<bool()> shouldAbort,
+                                std::function<void(double)> onProgress)
+{
+    if (opts.destination == juce::File())
+    {
+        outErr = "No destination file was chosen.";
+        return false;
+    }
+
+    const double sr = opts.sampleRate > 0.0 ? opts.sampleRate : 44100.0;
+
+    // ── Writers (opened BEFORE the offline drive so file failures never
+    //    touch the live processor).  One sink per output file: the main mix
+    //    plus one per ticked stem strip, all fed by the SAME render pass. ──
+    struct FileSink
+    {
+        juce::File dest;
+        Mp3Writer  mp3;
+        std::unique_ptr<juce::AudioFormatWriter> writer;
+        juce::AudioBuffer<float> scratch;
+        juce::Random rng;
+        bool  isMp3   { false };
+        // CL-043 + CL-045: per-sink post-gain (uniform across main + stems so
+        // the stem sum still matches the mix) and TPDF dither at the 16-bit
+        // WAV boundary.
+        float gainLin { 1.0f };
+        bool  dither  { false };
+
+        bool open (const RenderOptions& o, double sampleRate, const juce::File& d,
+                   juce::String& err)
+        {
+            dest    = d;
+            isMp3   = (o.format == RenderOptions::Format::Mp3);
+            gainLin = juce::Decibels::decibelsToGain (o.postGainDb);
+            dither  = o.dither && o.format == RenderOptions::Format::Wav
+                                && o.bitDepth == 16;
+            dest.deleteFile();
+            if (isMp3)
+                return mp3.open (dest, sampleRate, 2, o.mp3Kbps, err);
+
+            std::unique_ptr<juce::AudioFormat> fmt;
+            if (o.format == RenderOptions::Format::Ogg) fmt = std::make_unique<juce::OggVorbisAudioFormat>();
+            else                                        fmt = std::make_unique<juce::WavAudioFormat>();
+
+            auto os = dest.createOutputStream();
+            if (os == nullptr)
+            {
+                err = "Could not write to " + dest.getFullPathName();
+                return false;
+            }
+            const int bits = (o.format == RenderOptions::Format::Ogg) ? o.oggQuality : o.bitDepth;
+            writer.reset (fmt->createWriterFor (os.release(), sampleRate, 2u, bits, {}, 0));
+            if (writer == nullptr)
+            {
+                err = "Could not create the audio writer for these settings.";
+                return false;
+            }
+            return true;
+        }
+        bool write (const juce::AudioBuffer<float>& b, int n)
+        {
+            const juce::AudioBuffer<float>* src = &b;
+            if (gainLin != 1.0f || dither)
+            {
+                scratch.setSize (2, n, false, false, true);
+                for (int c = 0; c < 2; ++c)
+                    scratch.copyFrom (c, 0, b, juce::jmin (c, b.getNumChannels() - 1), 0, n);
+                if (gainLin != 1.0f)
+                    scratch.applyGain (gainLin);
+                if (dither)
+                {
+                    // TPDF at +-1 LSB of the 16-bit grid: the difference of
+                    // two independent uniforms gives the triangular pdf.
+                    constexpr float kLsb = 1.0f / 32768.0f;
+                    for (int c = 0; c < 2; ++c)
+                    {
+                        float* p = scratch.getWritePointer (c);
+                        for (int i = 0; i < n; ++i)
+                            p[i] += (rng.nextFloat() - rng.nextFloat()) * kLsb;
+                    }
+                }
+                src = &scratch;
+            }
+            if (isMp3) return mp3.write (src->getArrayOfReadPointers(), n);
+            return writer->writeFromAudioSampleBuffer (*src, 0, n);
+        }
+        void close()
+        {
+            writer.reset();
+            if (isMp3) mp3.close();
+        }
+    };
+
+    std::vector<std::unique_ptr<FileSink>> sinks;   // [0] = the main mix
+    {
+        auto main = std::make_unique<FileSink>();
+        if (! main->open (opts, sr, opts.destination, outErr))
+            return false;
+        sinks.push_back (std::move (main));
+    }
+
+    // Stem files: "<destBase> - <stripName>.<ext>" beside the main file
+    // (inside the project's Exports folder like everything else).
+    struct StemSink { int channelId; size_t sinkIdx; };
+    std::vector<StemSink> stemSinks;
+    for (const auto& st : opts.stems)
+    {
+        if (st.channelId < 0) continue;
+        const juce::String safe = juce::File::createLegalFileName (
+            st.name.isNotEmpty() ? st.name : ("Strip " + juce::String (st.channelId)));
+        const juce::File d = opts.destination.getSiblingFile (
+            opts.destination.getFileNameWithoutExtension() + " - " + safe
+            + opts.destination.getFileExtension());
+
+        auto s = std::make_unique<FileSink>();
+        if (! s->open (opts, sr, d, outErr))
+        {
+            for (auto& x : sinks) { x->close(); x->dest.deleteFile(); }
+            return false;
+        }
+        stemSinks.push_back ({ st.channelId, sinks.size() });
+        sinks.push_back (std::move (s));
+    }
+
+    const bool ok = runOfflineLoop (opts, outErr, std::move (shouldAbort),
+                                    std::move (onProgress),
+        [this, &sinks, &stemSinks] (const juce::AudioBuffer<float>& buf, int chunk) -> bool
+        {
+            if (! sinks[0]->write (buf, chunk))
+                return false;
+
+            // Stems: copy each ticked strip's arena slot -- its render task's
+            // post-chain output for THIS block -- into that stem's file.
+            // Same single pass, so sends are separate stems and sidechain-
+            // driven content (a bass comp keyed by the kick) stays in the stem.
+            for (const auto& ss : stemSinks)
+            {
+                auto* src = mProcessor.getStripOutputForTap (ss.channelId);
+                if (src == nullptr) continue;
+                if (! sinks[ss.sinkIdx]->write (*src, chunk))
+                    return false;
+            }
+            return true;
+        });
+
+    // Release files before any delete: on Windows an open handle blocks it.
+    for (auto& s : sinks) s->close();
+
+    if (! ok)
+    {
+        for (auto& s : sinks) s->dest.deleteFile();
+        return false;
+    }
+    return true;
+}
+
+bool BuilderPage::measureRender (const RenderOptions& opts,
+                                 MeasureResult& out,
+                                 juce::String& outErr,
+                                 std::function<bool()> shouldAbort,
+                                 std::function<void(double)> onProgress)
+{
+    const double sr = opts.sampleRate > 0.0 ? opts.sampleRate : 44100.0;
+
+    LufsMeterDSP lufs;
+    lufs.prepareToPlay (sr);
+    lufs.resetIntegrated();
+
+    // Approximate true peak: 4x-oversampled scan via Lagrange interpolation.
+    // Good enough for the CL-045 boost cap; TS7's BLU-108 replaces this with
+    // the BS.1770 polyphase FIR when the maximizer suite lands.
+    juce::LagrangeInterpolator tpL, tpR;
+    juce::AudioBuffer<float>   tpScratch;
+    float truePeakLin = 0.0f;
+
+    const bool ok = runOfflineLoop (opts, outErr, std::move (shouldAbort),
+                                    std::move (onProgress),
+        [&] (const juce::AudioBuffer<float>& buf, int chunk) -> bool
+        {
+            lufs.process (buf);
+
+            tpScratch.setSize (1, chunk * 4, false, false, true);
+            for (int c = 0; c < juce::jmin (2, buf.getNumChannels()); ++c)
+            {
+                auto& interp = (c == 0 ? tpL : tpR);
+                interp.process (0.25, buf.getReadPointer (c),
+                                tpScratch.getWritePointer (0), chunk * 4);
+                truePeakLin = juce::jmax (truePeakLin,
+                                          tpScratch.getMagnitude (0, 0, chunk * 4));
+            }
+            return true;
+        });
+
+    if (! ok) return false;
+
+    out.integratedLufs = lufs.integrated();
+    out.truePeakDb     = juce::Decibels::gainToDecibels (truePeakLin, -120.0f);
+    return true;
+}
+
+// QA-ModelShell TS2: the offline automation walk.  Same block filters as the
+// live engine replay (song-grid clips, muted, row-audible), evaluated with
+// the SAME shared point evaluator -- but resolution covers the lane classes
+// the in-processBlock replay never could.
+void BuilderPage::applyOfflineAutomationAt (double songBeat)
+{
+    // C.5b: Builder grid is uniform 4-beat-per-bar (matches the live replay).
+    const double bar = songBeat / 4.0;
+
+    for (int bi = 0; bi < mPM.getNumBlocks(); ++bi)
+    {
+        const auto& blk = mPM.getBlock (bi);
+        if (blk.clipType != ClipType::Automation)   continue;
+        if (blk.muted)                               continue;
+        if (! mPM.isRowAudible (blk.trackRow))       continue;
+        const auto& pid = blk.automationLane.paramId;
+        if (pid.isEmpty())                           continue;
+        if (blk.automationLane.points.empty())       continue;
+        if (pid == "global_tempo")                   continue;   // the clock's job
+        // Main-APVTS lanes replay inside processBlock, identical to live.
+        if (mProcessor.apvts.getParameter (pid) != nullptr) continue;
+
+        const double clipStart = effectiveStartBars (blk);
+        const double len       = effectiveLengthBars (blk);
+        if (len <= 0.0 || bar < clipStart || bar >= clipStart + len) continue;
+
+        const float rel = juce::jlimit (0.f, 1.f, (float) ((bar - clipStart) / len));
+        const float v01 = juce::jlimit (0.f, 1.f,
+            evalAutomationPointsAt (blk.automationLane.points, rel));
+        applyOfflineLaneValue (pid, v01);
+    }
+}
+
+void BuilderPage::applyOfflineLaneValue (const juce::String& pid, float v01)
+{
+    auto applyToApvts = [v01] (juce::AudioProcessorValueTreeState* ap,
+                               const juce::String& paramId) -> bool
+    {
+        if (ap == nullptr) return false;
+        if (auto* param = ap->getParameter (paramId))
+        {
+            param->setValueNotifyingHost (v01);
+            return true;
+        }
+        return false;
+    };
+
+    auto& rig = mProcessor.engineRig();
+
+    // Vox/Inst per-page lanes: "vox<N>_" / "inst<N>_" + the engine's bare id
+    // (digits IMMEDIATELY after the word -- "vox_bus"/"inst_0" rack prefixes
+    // carry an underscore first and fall through by construction).
+    auto tryPageLane = [&] (const juce::String& word, TabKind kind) -> bool
+    {
+        if (! pid.startsWith (word)) return false;
+        const juce::String tail = pid.substring (word.length());
+        int digits = 0;
+        while (digits < tail.length()
+               && juce::CharacterFunctions::isDigit (tail[digits])) ++digits;
+        if (digits == 0 || digits >= tail.length() || tail[digits] != '_') return false;
+        const int idx = tail.substring (0, digits).getIntValue();
+        const juce::String bare = tail.substring (digits + 1);
+        auto* t = rig.findTab (kind, idx);
+        if (t == nullptr) return false;
+        if (kind == TabKind::Vox)
+        {
+            if (auto* v = dynamic_cast<BaySickVocalProcessor*> (t->engine.get()))
+            {
+                if (applyToApvts (EngineRig::apvtsOf (v), bare))                       return true;
+                if (applyToApvts (EngineRig::apvtsOf (&v->getNamIrProcessor()), bare)) return true;
+            }
+            return false;
+        }
+        // Inst: the NAM/IR stage's bare ids.  Pedal lanes are uuid-keyed rack
+        // lanes whose EffectParamMap tables land in TS3 -- unresolved here.
+        return applyToApvts (EngineRig::apvtsOf (t->namIr), bare);
+    };
+    if (tryPageLane ("vox",  TabKind::Vox))  return;
+    if (tryPageLane ("inst", TabKind::Inst)) return;
+
+    // Engine lanes carry the engine's own globally-unique APVTS param id
+    // ("tk_<trackId>_<fam>_*") -- sweep the rig for the owner.
+    {
+        bool applied = false;
+        rig.forEachEngine ([&] (juce::AudioProcessor& p)
+        {
+            if (! applied && applyToApvts (EngineRig::apvtsOf (&p), pid))
+                applied = true;
+        });
+        if (applied) return;
+    }
+
+    // Legacy mixer fader spelling: "<mixerPrefix>_fader" -> the real _level
+    // param.  ("_pan" lanes already carry the real param id and were consumed
+    // by the main-APVTS branch upstream.)  TS3 retires the legacy spelling.
+    if (pid.endsWith ("_fader"))
+    {
+        const juce::String levelId =
+            pid.upToLastOccurrenceOf ("_fader", false, false) + "_level";
+        if (auto* param = mProcessor.apvts.getParameter (levelId))
+        {
+            param->setValueNotifyingHost (v01);
+            return;
+        }
+    }
+
+    // Rack lanes: "<channelPrefix>_<slotUuid>_<suffix>".  Channel by prefix,
+    // slot by UUID (never index -- rack reorder carries the uuid), DSP through
+    // EffectParamMap keyed (type, variant).  "output_vol" is the ONE
+    // rack-level non-DSP control: the rack's per-slot output gain,
+    // -24..+12 dB mirroring EditorPanelBase's slider.
+    auto tryRackChannel = [&] (int chId) -> bool
+    {
+        const juce::String prefix = EffectsPage::channelPrefixForId (chId) + "_";
+        if (! pid.startsWith (prefix)) return false;
+        auto* rack = EffectsPage::rackForChannelId (mProcessor.mVibeGraph, chId);
+        if (rack == nullptr) return false;
+        const juce::String rest = pid.substring (prefix.length());
+        for (int s = 0; s < EffectRack::kNumSlots; ++s)
+        {
+            const juce::String uuid = rack->getSlotUuid (s);
+            if (uuid.isEmpty() || ! rest.startsWith (uuid + "_")) continue;
+            const juce::String suffix = rest.substring (uuid.length() + 1);
+            if (suffix == "output_vol")
+            {
+                constexpr float kLo = -24.0f, kHi = 12.0f;
+                rack->setSlotOutputGain (s,
+                    kLo + juce::jlimit (0.0f, 1.0f, v01) * (kHi - kLo));
+                return true;
+            }
+            const EffectType type    = rack->getSlotType (s);
+            const int        variant = EffectParamMap::variantOf (type, rack->getSlotEffect (s));
+            EffectParamMap::applyNorm (type, variant, rack->getSlotEffect (s), suffix, v01);
+            return true;
+        }
+        return false;
+    };
+
+    // The Effects dropdown's channel-id vocabulary (the ids lane paramIds
+    // embed): buses 1-12, drums 100+, layers 200+, basses 300+, audio 400+,
+    // aux 600+, vox 700+, inst 800+, rusty 900+.
+    for (int id = 1; id <= 12; ++id)                                 if (tryRackChannel (id))       return;
+    for (int i = 0; i < kMaxDrumPages; ++i)                          if (tryRackChannel (100 + i))  return;
+    for (int i = 0; i < kMaxLayerPages; ++i)                         if (tryRackChannel (200 + i))  return;
+    for (int i = 0; i < kMaxBassPages; ++i)                          if (tryRackChannel (300 + i))  return;
+    for (int i = 0; i < MixerState::kMaxAudioRows; ++i)              if (tryRackChannel (400 + i))  return;
+    for (int i = 0; i < (int) MixerChannelIds::kMaxAuxStrips; ++i)   if (tryRackChannel (600 + i))  return;
+    for (int i = 0; i < (int) MixerChannelIds::kMaxVoxStrips; ++i)   if (tryRackChannel (700 + i))  return;
+    for (int i = 0; i < (int) MixerChannelIds::kMaxInstStrips; ++i)  if (tryRackChannel (800 + i))  return;
+    for (int i = 0; i < (int) MixerChannelIds::kMaxRustyStrips; ++i) if (tryRackChannel (900 + i))  return;
 }
 
 void BuilderPage::runExportWithProgress (const RenderOptions& opts)
@@ -8271,7 +8667,9 @@ void BuilderPage::renderPatternToWav(int patternIndex)
 
     auto chooser = std::make_shared<FileChooser>(
         "Render \"" + pat.name + "\" to WAV",
-        File::getSpecialLocation(File::userMusicDirectory).getChildFile(defaultName),
+        // QA-ModelShell TS2: exports live in <project>\Exports\ (locked
+        // destination spec; created on demand).
+        mProcessor.getProjectExportsDir().getChildFile(defaultName),
         "*.wav");
 
     chooser->launchAsync(

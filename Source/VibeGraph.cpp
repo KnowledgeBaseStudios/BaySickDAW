@@ -789,10 +789,10 @@ void VibeGraph::reset()
     // list at this site only covered 5 kinds -- Finding B in QA-InsertMaps
     // Task 1 inventory; pre-existing oversight when R1 / J-4 extended
     // InsertKind without updating this sweep; Sub-G Option 2 resolution
-    // includes Vox / Inst / Rusty for symmetric end state.  NOTE: VibeGraph::
-    // reset() itself is currently dead code -- no caller in the source tree;
-    // future-batch routing via §9 Forks 2026-05-24 entry to wire it up to
-    // transport Stop.
+    // includes Vox / Inst / Rusty for symmetric end state.  QA-ModelShell TS2
+    // (2026-07-27): reset() gained its first callers -- the offline render
+    // drive's wet-tail hygiene (both sides of the render).  The transport-
+    // Stop wiring from the §9 Forks 2026-05-24 entry remains future work.
     for (int chId : mLiveInsertChannels)
         if (auto* n = mInsertsByChannel[(size_t) chId].get())
             n->reset();

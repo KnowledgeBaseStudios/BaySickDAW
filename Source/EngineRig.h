@@ -106,6 +106,11 @@ public:
     // destroy.  Individual removeTab keeps the per-teardown settle instead.
     void teardownAll();
 
+    // Walk every live engine + owned support stage (message/render thread).
+    // TS2's offline sweeps (setNonRealtime) consume this; the vocal's
+    // embedded NAM/IR is the caller's job (not a rig-owned stage).
+    void forEachEngine (const std::function<void (juce::AudioProcessor&)>& fn);
+
     // ── Model events ──────────────────────────────────────────────────────
     // StandaloneEditor subscribes ONCE at startup.  Automation registration
     // and dirty-hook wiring key off these -- model events, never view builds.

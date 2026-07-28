@@ -1173,7 +1173,42 @@ public:
         int        oggQuality   { 6 };         // OGG only, 0..10
         int        mp3Kbps      { 256 };       // MP3 only, CBR
         juce::File destination;
+
+        // QA-ModelShell TS2 stems (Jeff's per-mixer-strip spec, 2026-07-27):
+        // when non-empty, ONE extra file per entry -- that strip's post-chain
+        // output tapped during the SAME single render pass, so sends are
+        // separate stems and sidechain-driven behavior (a bass comp keyed by
+        // the kick) stays in the stem by construction.  channelId is the
+        // MixerChannelIds strip id (the arena slot).  Files land beside
+        // `destination` as "<destBase> - <name>.<ext>", same format options.
+        struct StemTarget { int channelId { -1 }; juce::String name; };
+        std::vector<StemTarget> stems;
+
+        // QA-ModelShell TS2 riders:
+        // CL-043: TPDF dither on 16-bit WAV writes (main file + stems alike).
+        bool  dither      { false };
+        // CL-045: LUFS-target normalization -- measure-then-gain, BOTH
+        // directions, with any boost capped so the (estimated) true peak
+        // stays under ceilingDbTp.  postGainDb is INTERNAL: the normalize
+        // flow measures first, then re-renders with this gain applied at
+        // the writers (uniformly to main + stems, so the stem sum still
+        // matches the mix).
+        bool  normalize   { false };
+        float lufsTarget  { -14.0f };
+        float ceilingDbTp { -1.0f };
+        float postGainDb  { 0.0f };
     };
+
+    // QA-ModelShell TS2 (CL-227 backend + CL-045 measure pass): the render
+    // loop with METERS instead of writers -- same offline drive, same clock,
+    // same lane replay, no files.  truePeakDb is a 4x-oversampled Lagrange
+    // ESTIMATE (TS7's BLU-108 upgrades it to the BS.1770 polyphase FIR).
+    struct MeasureResult { float integratedLufs { -120.f }; float truePeakDb { -120.f }; };
+    bool measureRender (const RenderOptions& opts,
+                        MeasureResult& out,
+                        juce::String& outErr,
+                        std::function<bool()> shouldAbort = {},
+                        std::function<void(double)> onProgress = {});
 
     // Tail::Included safety ceiling.  Some content never decays -- a frozen
     // reverb, a self-oscillating filter, runaway feedback -- and without a cap
@@ -1189,6 +1224,33 @@ public:
                        juce::String& outErr,
                        std::function<bool()> shouldAbort = {},
                        std::function<void(double)> onProgress = {});
+
+    // QA-ModelShell TS2: fired (true) as the offline drive takes the live
+    // processor and (false) after the restore set is back -- EVERY exit path.
+    // StandaloneEditor wires it to pause/resume its 30 Hz automation timer
+    // (the editor marshals to the message thread; this fires on the render
+    // thread).
+    std::function<void(bool active)> onOfflineRenderActive;
+
+    // QA-ModelShell TS2: offline lane replay (render thread; called per block
+    // by the offline loop).  Covers the lane classes the in-processBlock
+    // replay cannot: engine-APVTS lanes via the rig, rack lanes via
+    // EffectParamMap + slot uuid, the rack output gain, and the legacy
+    // "_fader" spelling.
+    void applyOfflineAutomationAt (double songBeat);
+    void applyOfflineLaneValue   (const juce::String& pid, float v01);
+
+    // QA-ModelShell TS2: the ONE offline render loop -- span/scope math, the
+    // offline drive (begin/endOfflineRender + restores), the lane-aware
+    // clock, per-block lane replay, tail-decay handling.  Consumers differ
+    // only in what they do with each rendered block: renderToFile writes
+    // sinks (+ stem arena taps), measureRender feeds meters, TS7's freeze
+    // taps one strip.  consumeBlock returns false to abort with an IO error.
+    bool runOfflineLoop (const RenderOptions& opts,
+                         juce::String& outErr,
+                         std::function<bool()> shouldAbort,
+                         std::function<void(double)> onProgress,
+                         const std::function<bool (const juce::AudioBuffer<float>&, int)>& consumeBlock);
 
     // Message-thread entry: runs renderToFile on a background thread behind a
     // progress window with a working Cancel.

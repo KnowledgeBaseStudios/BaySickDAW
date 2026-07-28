@@ -505,8 +505,16 @@ void VibeSynthProcessor::prepareToPlay(double sampleRate, int samplesPerBlock)
         for (int i = 0; i < kMaxBassPages; ++i)
             if (mBassEngines[i]) mBassEngines[i]->prepareToPlay(sampleRate, samplesPerBlock);
     }
-    // 2026-04-25: legacy mDrumsEngine removed.  Per-drum-tab engines are
-    // re-prepared by their owners (DrumPage::selectEngine).
+    // QA-ModelShell TS2 (2026-07-27): drum engines were NEVER swept here --
+    // the old comment claimed page-owners re-prepared them, which was only
+    // true at creation time, so a device rate change (and any offline render
+    // at a non-device rate) left them at the stale rate.  Model-owned now;
+    // swept like every sibling.
+    {
+        juce::SpinLock::ScopedLockType lk(mDrumEngineLock);
+        for (int i = 0; i < kMaxDrumPages; ++i)
+            if (mDrumEngines[i]) mDrumEngines[i]->prepareToPlay(sampleRate, samplesPerBlock);
+    }
     // G-3 (2026-04-28): re-prepare any registered Clip engines so host SR /
     // block-size changes (e.g. user switches audio device) propagate to
     // VibePlayer / BaySickNAM/IR instances owned by ClipsPage tabs.
@@ -531,6 +539,23 @@ void VibeSynthProcessor::prepareToPlay(double sampleRate, int samplesPerBlock)
     // thread (JUCE stops the audio callback before calling it on the
     // processor); no audio-thread race possible here.
     if (mRustyDrumsEngine) mRustyDrumsEngine->prepareToPlay(sampleRate, samplesPerBlock);
+    // QA-ModelShell TS2 (2026-07-27): the per-instance sfizz engines had the
+    // same never-swept gap as drums above (prepared only at kit load) --
+    // closed for device rate changes and offline renders alike.  Per-slot
+    // locks match the load/destroy discipline.
+    for (int i = 0; i < (int) kMaxInstPages; ++i)
+    {
+        {
+            const juce::SpinLock::ScopedLockType sl (mGuitarsEngineLock[(size_t) i]);
+            if (mGuitarsEngine[(size_t) i])
+                mGuitarsEngine[(size_t) i]->prepareToPlay(sampleRate, samplesPerBlock);
+        }
+        {
+            const juce::SpinLock::ScopedLockType sl (mBassesEngineLock[(size_t) i]);
+            if (mBassesEngine[(size_t) i])
+                mBassesEngine[(size_t) i]->prepareToPlay(sampleRate, samplesPerBlock);
+        }
+    }
     mVibeGraph.prepare(sampleRate, samplesPerBlock);
 
     // Build the fixed bus topology the first time; no-op on subsequent calls.
@@ -2823,44 +2848,10 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
             float relPos = (float)((autoBar - clipStart) / effectiveLengthBars (blk));
             relPos = juce::jlimit(0.f, 1.f, relPos);
 
-            // Interpolate control points (assume sorted by timeTicks)
-            const auto& pts = blk.automationLane.points;
-            float value01 = pts[0].value01;  // default: first point
-
-            if ((int)pts.size() == 1)
-            {
-                value01 = pts[0].value01;
-            }
-            else if (relPos <= pts.front().timeTicks)
-            {
-                value01 = pts.front().value01;
-            }
-            else if (relPos >= pts.back().timeTicks)
-            {
-                value01 = pts.back().value01;
-            }
-            else
-            {
-                for (int pi = 0; pi < (int)pts.size() - 1; ++pi)
-                {
-                    if (relPos >= pts[pi].timeTicks && relPos <= pts[pi + 1].timeTicks)
-                    {
-                        if (pts[pi].curveType == CurveType::Stepped)
-                        {
-                            value01 = pts[pi].value01;
-                        }
-                        else
-                        {
-                            float span = pts[pi + 1].timeTicks - pts[pi].timeTicks;
-                            float t    = (span > 0.f)
-                                ? (relPos - pts[pi].timeTicks) / span : 0.f;
-                            value01 = pts[pi].value01
-                                    + t * (pts[pi + 1].value01 - pts[pi].value01);
-                        }
-                        break;
-                    }
-                }
-            }
+            // QA-ModelShell TS2: shared evaluator (PatternManager.h) -- the
+            // offline render replay uses the same function, so live and
+            // exported automation cannot drift.
+            const float value01 = evalAutomationPointsAt (blk.automationLane.points, relPos);
 
             // Apply to APVTS parameter (setValue is audio-thread-safe)
             if (auto* param = apvts.getParameter(blk.automationLane.paramId))
@@ -3170,6 +3161,11 @@ void VibeSynthProcessor::applyPostMixRecordAndMetro (juce::AudioBuffer<float>& b
 
     // ── Metronome click DSP ───────────────────────────────────────────────────
     // Count-in always runs (independent of metro button); transport metro requires enabled.
+    // QA-ModelShell TS2: the click is injected post-master-tap on the LIVE
+    // graph, so under the offline drive it would print into the export --
+    // gated out entirely (locked export-semantics call; matches the
+    // record-master convention of keeping the click out of captured audio).
+    if (! isNonRealtime())
     {
         const float  metroVol  = mMetro.volume.load(std::memory_order_relaxed);
         const int    sndType   = mMetro.soundType.load(std::memory_order_relaxed);
@@ -5449,6 +5445,93 @@ void VibeSynthProcessor::addParamsForEQBank(const juce::String& prefix,
             dynI(apvts, ids, bp + "ScSource",  labelBase + " ScSource", -1, 999, -1);
         }
     }
+}
+
+// ── QA-ModelShell TS2: offline render drive ──────────────────────────────────
+bool VibeSynthProcessor::beginOfflineRender (double renderSampleRate, int renderBlockSize)
+{
+    if (renderSampleRate <= 0.0 || renderBlockSize <= 0) return false;
+
+    // Device callbacks stop reaching processBlock (the standalone player
+    // checks isSuspended and outputs silence); the render loop becomes the
+    // only caller.  One settle outlasts any in-flight device block.
+    suspendProcessing (true);
+    juce::Thread::sleep (30);
+
+    mOfflinePrevSr   = getSampleRate();
+    mOfflinePrevBlk  = getBlockSize();
+    mOfflinePrevSong = isSongMode();
+    mOfflinePrevHead = getPlayHead();
+
+    auto sweepNonRealtime = [this] (bool offline)
+    {
+        setNonRealtime (offline);
+        mEngineRig->forEachEngine ([offline] (juce::AudioProcessor& p)
+        {
+            p.setNonRealtime (offline);
+            // The vocal's embedded NAM/IR is not a rig-owned stage.
+            if (auto* v = dynamic_cast<BaySickVocalProcessor*> (&p))
+                v->getNamIrProcessor().setNonRealtime (offline);
+        });
+        for (int i = 0; i < (int) kMaxInstPages; ++i)
+        {
+            if (auto* g = mGuitarsEngine[(size_t) i].get()) g->setNonRealtime (offline);
+            if (auto* b = mBassesEngine[(size_t) i].get())  b->setNonRealtime (offline);
+        }
+        if (mRustyDrumsEngine) mRustyDrumsEngine->setNonRealtime (offline);
+    };
+    sweepNonRealtime (true);
+
+    // CL-282: clip streamers switch to synchronous blocking reads (a fast
+    // render outruns the background prefetch by design); counter reset so
+    // endOfflineRender's report proves the export had zero silent gaps.
+    AudioClipStreamer::sUnderrunCount.store (0, std::memory_order_relaxed);
+    AudioClipStreamer::sOfflineRender.store (true, std::memory_order_release);
+
+    // Wet-tail hygiene: the render must not open on live reverb/delay tails.
+    mVibeGraph.reset();
+
+    // Full re-prepare at the render config -- prepareToPlay sweeps every
+    // engine + the graph, so the render rate is independent of the device's.
+    prepareToPlay (renderSampleRate, renderBlockSize);
+    return true;
+}
+
+void VibeSynthProcessor::endOfflineRender()
+{
+    // Reverse of begin: device config back, flags off, the render's own
+    // tails cleared so they never bleed into live playback, playhead + mode
+    // restored, device resumed.
+    if (mOfflinePrevSr > 0.0 && mOfflinePrevBlk > 0)
+        prepareToPlay (mOfflinePrevSr, mOfflinePrevBlk);
+
+    setNonRealtime (false);
+    mEngineRig->forEachEngine ([] (juce::AudioProcessor& p)
+    {
+        p.setNonRealtime (false);
+        if (auto* v = dynamic_cast<BaySickVocalProcessor*> (&p))
+            v->getNamIrProcessor().setNonRealtime (false);
+    });
+    for (int i = 0; i < (int) kMaxInstPages; ++i)
+    {
+        if (auto* g = mGuitarsEngine[(size_t) i].get()) g->setNonRealtime (false);
+        if (auto* b = mBassesEngine[(size_t) i].get())  b->setNonRealtime (false);
+    }
+    if (mRustyDrumsEngine) mRustyDrumsEngine->setNonRealtime (false);
+
+    // CL-282: back to live streaming; report the render's underrun count
+    // (expected 0 -- any other number means a silent gap got printed).
+    AudioClipStreamer::sOfflineRender.store (false, std::memory_order_release);
+    DBG ("[TS2 EXPORT] clip-stream underruns this render: "
+         << AudioClipStreamer::sUnderrunCount.load (std::memory_order_relaxed));
+
+    mVibeGraph.reset();
+
+    setPlayHead (mOfflinePrevHead);
+    setSongMode (mOfflinePrevSong);
+    mOfflinePrevHead = nullptr;
+
+    suspendProcessing (false);
 }
 
 // ── Engine processor registration ────────────────────────────────────────────

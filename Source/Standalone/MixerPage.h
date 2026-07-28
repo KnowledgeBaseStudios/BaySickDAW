@@ -93,6 +93,20 @@ public:
     std::vector<int> getAuxStripIndices() const;
     juce::String     getAuxStripName(int idx) const;
 
+    // QA-ModelShell TS2 (stems pick-list): every strip the mixer currently
+    // SHOWS, in display-group order, with its MixerChannelIds id, the shown
+    // name, and the stems-dialog default -- Master + buses default UNCHECKED
+    // per Jeff's per-strip stems spec, everything else CHECKED.  The mixer is
+    // the single truth for "active strip" (covers the membership-driven
+    // empty-bus hiding and the lazy secondary buses).
+    struct StemPickEntry
+    {
+        int          channelId { -1 };
+        juce::String name;
+        bool         defaultChecked { true };
+    };
+    std::vector<StemPickEntry> getStemPickEntries() const;
+
     // Drum strip enumeration for the Effects dropdown. Returns drum-slot indices
     // that currently have a strip (i.e. a sound has been assigned to the slot)
     // and the display name for a given slot.

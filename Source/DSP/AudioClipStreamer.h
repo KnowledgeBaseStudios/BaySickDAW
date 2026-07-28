@@ -98,6 +98,19 @@ public:
     int    getNumChannels()    const { return mNumChannels; }
     bool   isRamLoaded()       const { return mRamMode; }   // G-7 polish
 
+    // QA-ModelShell TS2 (CL-282): process-wide offline-render flag, set by
+    // begin/endOfflineRender.  A fast offline render outruns the background
+    // prefetch BY DESIGN, and silence-on-underrun would print gaps into the
+    // export -- under this flag the read paths BLOCK on the reader and
+    // refill synchronously instead.  Never seen by a live audio callback:
+    // device processing is suspended for the whole render.
+    static std::atomic<bool> sOfflineRender;
+    // CL-282 telemetry: offline silence-returns that the synchronous path
+    // could NOT prevent (should stay 0; EOF-past reads are not counted).
+    // Reset by beginOfflineRender, reported by endOfflineRender -- the fix
+    // is provable, not vibes.
+    static std::atomic<juce::int64> sUnderrunCount;
+
     // juce::TimeSliceClient - called by background thread
     int useTimeSlice() override;
 
@@ -140,6 +153,11 @@ private:
     // Fill numSamples from file position fromFilePos into the ring.
     // Caller must hold mReaderLock. Advances mRingWriteHead.
     void fillIntoRing (int64 fromFilePos, int numSamples);
+
+    // CL-282: offline-only synchronous refill (the seek() shape run inline on
+    // the render thread).  Returns true when the ring now covers data from
+    // needStart; false when not offline / RAM mode / needStart is past EOF.
+    bool ensureRangeBlockingForOffline (int64 needStart);
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (AudioClipStreamer)
 };

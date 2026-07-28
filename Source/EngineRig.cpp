@@ -298,6 +298,17 @@ juce::AudioProcessor* EngineRig::engineFor (TabKind k, int pageIndex) const
     return nullptr;
 }
 
+void EngineRig::forEachEngine (const std::function<void (juce::AudioProcessor&)>& fn)
+{
+    if (! fn) return;
+    for (auto& t : mTabs)
+    {
+        if (t->engine) fn (*t->engine);
+        for (auto& s : t->ownedStages)
+            if (s) fn (*s);
+    }
+}
+
 void EngineRig::teardownAll()
 {
     // Shutdown path: the editor (and its subscriptions) is already gone, so
