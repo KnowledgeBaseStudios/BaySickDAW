@@ -6,6 +6,10 @@
 #include "SharedUI.h"
 #include "UndoActions.h"
 
+// Forward-declared rather than including the hosting header: only the bridge
+// toggle needs the type, and the definition is available in the .cpp.
+namespace Hosting { class HostedPluginInstance; }
+
 class VibeSynthProcessor;
 
 // ── The Effects shell's satellite windows — QA-ModelShell TS5 (2026-07-29) ────
@@ -74,6 +78,10 @@ private:
     const juce::String               mUuid;
     std::function<juce::String(int)> mResolveChannelName;
     UndoContext                      mUndo;
+
+    // Null unless this slot holds a hosted plugin.  Drives the bridge toggle on
+    // the title-strip menu (BLU-302).
+    Hosting::HostedPluginInstance*   hostedPluginForSlot() const;
 
     std::unique_ptr<SlotComponent>   mSlot;
     BypassLedButton                  mLed;      // injected into the title strip

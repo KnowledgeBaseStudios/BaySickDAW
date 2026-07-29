@@ -11776,15 +11776,8 @@ void StandaloneEditor::registerPedalAutomation (int instPageIndex)
 // that pointer is untouched by the shell change.
 void StandaloneEditor::hostPageInWindow (PageEntry& entry)
 {
-    // Diagnostic pair to the one in attachTo: proves whether the editor's
-    // Workspace even exists at the moment a page asks to be framed.
     if (mWorkspace == nullptr || entry.component == nullptr)
-    {
-        DBG ("[TS4 SHELL] hostPageInWindow SKIPPED tab=" << entry.ribbonTabId
-             << " workspace=" << (mWorkspace != nullptr ? "OK" : "NULL")
-             << " page=" << (entry.component != nullptr ? "OK" : "NULL"));
         return;
-    }
 
     // Already framed.  Several callers invoke this straight after adding a page
     // AND on tab selection, so the same tab can arrive twice; without this the
@@ -11855,9 +11848,6 @@ void StandaloneEditor::hostPageInWindow (PageEntry& entry)
     };
     const int tabId = entry.ribbonTabId;
     entry.window->onCloseRequested = [this, tabId] { closeWindowForTab (tabId); };
-    DBG ("[TS4 SHELL] hostPageInWindow OK tab=" << entry.ribbonTabId
-         << " key=" << persistKeyFor (entry)
-         << " wsSize=" << mWorkspace->getWidth() << "x" << mWorkspace->getHeight());
     entry.window->attachTo (*mWorkspace);
 }
 

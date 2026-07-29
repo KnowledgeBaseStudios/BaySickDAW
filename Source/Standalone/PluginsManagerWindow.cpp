@@ -212,6 +212,23 @@ PluginsManagerContent::PluginsManagerContent (Hosting::PluginManager& pm)
     mScanBtn        .onClick = [this] { doScan(); };
     mAddCheckedBtn  .onClick = [this] { doAddChecked(); };
 
+    mFilterLabel.setFont (juce::Font (12.0f));
+    mFilterLabel.setColour (juce::Label::textColourId, VC::TextDim);
+    addAndMakeVisible (mFilterLabel);
+
+    mFilter.setTextToShowWhenEmpty ("name or manufacturer", VC::TextDim);
+    mFilter.setColour (juce::TextEditor::backgroundColourId, VC::Surface);
+    mFilter.setColour (juce::TextEditor::textColourId,       VC::Text);
+    mFilter.setColour (juce::TextEditor::outlineColourId,    VC::Accent);
+    mFilter.onTextChange = [this]
+    {
+        mFilterText = mFilter.getText().trim();
+        // Both lists rebuild, which is the point of a single box.
+        refreshAdded();
+        refreshResults();
+    };
+    addAndMakeVisible (mFilter);
+
     mStatus.setFont (juce::Font (12.0f));
     mStatus.setColour (juce::Label::textColourId, VC::TextDim);
     addAndMakeVisible (mStatus);
@@ -246,6 +263,15 @@ void PluginsManagerContent::paint (juce::Graphics& g)
 void PluginsManagerContent::resized()
 {
     auto b = getLocalBounds().reduced (10);
+
+    // Filter sits at the very top: it governs BOTH lists below it, so putting it
+    // inside either section would misread as filtering only that one.
+    {
+        auto row = b.removeFromTop (kBtnH);
+        mFilterLabel.setBounds (row.removeFromLeft (44));
+        mFilter.setBounds (row.removeFromLeft (280));
+        b.removeFromTop (8);
+    }
 
     auto section = [&] (juce::Label& t, juce::Component& list, int listH,
                         std::initializer_list<juce::Component*> buttons)
@@ -299,9 +325,27 @@ void PluginsManagerContent::refreshFolders()
     mFolders.repaint();
 }
 
+bool PluginsManagerContent::matchesFilter (const juce::String& text) const
+{
+    return mFilterText.isEmpty() || text.containsIgnoreCase (mFilterText);
+}
+
+bool PluginsManagerContent::matchesFilter (const juce::PluginDescription& d) const
+{
+    if (mFilterText.isEmpty())
+        return true;
+
+    return matchesFilter (d.name) || matchesFilter (d.manufacturerName);
+}
+
 void PluginsManagerContent::refreshAdded()
 {
-    mAddedRows = mPlugins.getAddedPlugins();
+    mAddedRows.clear();
+
+    for (const auto& d : mPlugins.getAddedPlugins())
+        if (matchesFilter (d))
+            mAddedRows.add (d);
+
     mAdded.updateContent();
     mAdded.repaint();
 }
@@ -312,6 +356,9 @@ void PluginsManagerContent::refreshResults()
 
     for (const auto& d : mPlugins.getScanResults())
     {
+        if (! matchesFilter (d))
+            continue;
+
         ResultRow r;
         r.desc = d;
         r.path = juce::File (d.fileOrIdentifier).getFullPathName();
@@ -320,6 +367,11 @@ void PluginsManagerContent::refreshResults()
 
     for (const auto& s : mPlugins.getSkipped())
     {
+        // Skipped rows filter on their FILENAME -- they have no description to
+        // match against, and the filename is what the user would recognise.
+        if (! matchesFilter (juce::File (s.path).getFileName()))
+            continue;
+
         ResultRow r;
         r.skipped = true;
         r.path    = s.path;

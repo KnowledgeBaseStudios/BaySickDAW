@@ -156,22 +156,25 @@ void PluginsPage::rebuildEditor()
     mPickBtn.setButtonText (getPluginName().isNotEmpty() ? getPluginName()
                                                          : juce::String ("Select plugin..."));
 
-    mEditor.reset (eng->createEditorIfNeeded());
-
-    if (mEditor != nullptr)
+    // Built DIRECTLY, not via createEditorIfNeeded: HostedPluginEditor is a
+    // plain Component on purpose, because an AudioProcessorEditor of the hosted
+    // instance cannot safely outlive it (see HostedPluginInstance::createEditor).
+    if (auto* hostedInst = dynamic_cast<Hosting::HostedPluginInstance*> (eng))
     {
-        addAndMakeVisible (*mEditor);
+        auto ed = std::make_unique<Hosting::HostedPluginEditor> (*hostedInst);
 
         // Fit the WINDOW to the plugin's own surface rather than leaving dead
         // space around it (Jeff 2026-07-29).  The plugin may also resize itself
         // later, which is why this is a callback and not a one-shot read.
-        if (auto* hosted = dynamic_cast<Hosting::HostedPluginEditor*> (mEditor.get()))
-            hosted->onNaturalSizeChanged = [this] (int w, int h)
-            {
-                if (auto* win = findParentComponentOfClass<WorkspaceWindow>())
-                    win->sizeToContent (juce::jmax (240, w + 2 * kEdge),
-                                        h + kPickBtnH + kPickGap + 2 * kEdge);
-            };
+        ed->onNaturalSizeChanged = [this] (int w, int h)
+        {
+            if (auto* win = findParentComponentOfClass<WorkspaceWindow>())
+                win->sizeToContent (juce::jmax (240, w + 2 * kEdge),
+                                    h + kPickBtnH + kPickGap + 2 * kEdge);
+        };
+
+        mEditor = std::move (ed);
+        addAndMakeVisible (*mEditor);
     }
 
     resized();

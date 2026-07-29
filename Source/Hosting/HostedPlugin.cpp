@@ -1,5 +1,9 @@
 #include "HostedPlugin.h"
 #include "SandboxedPluginClient.h"
+// The bridged path needs the containing window's peer as the parent for the
+// plugin's remote surface, and its screen position for the parent-client
+// coordinate mapping.
+#include "../Standalone/WorkspaceWindow.h"
 
 namespace Hosting
 {
@@ -8,6 +12,12 @@ namespace
 {
     constexpr int kDeadMarkerW = 420;
     constexpr int kDeadMarkerH = 160;
+
+    // Until the helper reports the bridged plugin's declared size.  Deliberately
+    // generous: a too-small hole would clip the plugin's UI, and the window
+    // shrinks to fit as soon as the real number arrives.
+    constexpr int kBridgedDefaultW = 700;
+    constexpr int kBridgedDefaultH = 420;
 
     // Wrapper state tag + attributes.  The plugin's own blob rides as base64 so
     // the whole thing survives inside the rack's / tab's existing XML state,
@@ -33,7 +43,44 @@ HostedPluginInstance::HostedPluginInstance (PluginManager& pm, const juce::Plugi
 }
 
 // Out-of-line because SandboxedPluginClient is forward-declared in the header.
-HostedPluginInstance::~HostedPluginInstance() = default;
+HostedPluginInstance::~HostedPluginInstance()
+{
+    // JUCE requires the plugin's editor to be deleted BEFORE the plugin
+    // instance -- VST3PluginInstanceHeadless::cleanup() asserts exactly that.
+    // We do not own our editor (the panel window does), and a rack removal
+    // destroys this DSP SYNCHRONOUSLY inside EffectRack::packSlotsToTop while
+    // that window is still open -- its poll would not notice for another frame.
+    // So the editor is told to let go here, on the one path every removal
+    // route shares, rather than at each call site.
+    if (mLiveEditor != nullptr)
+        mLiveEditor->ownerDestroyed();
+
+    mSandbox.reset();
+    mInner.reset();
+}
+
+void HostedPluginInstance::openBridgedEditor (void* parentWindowHandle, int width, int height)
+{
+    if (mSandbox != nullptr)
+        mSandbox->openEditor (parentWindowHandle, width, height);
+}
+
+void HostedPluginInstance::closeBridgedEditor()
+{
+    if (mSandbox != nullptr)
+        mSandbox->closeEditor();
+}
+
+void HostedPluginInstance::attachEditor (HostedPluginEditor* e)
+{
+    mLiveEditor = e;
+}
+
+void HostedPluginInstance::detachEditor (HostedPluginEditor* e)
+{
+    if (mLiveEditor == e)
+        mLiveEditor = nullptr;
+}
 
 void HostedPluginInstance::instantiate()
 {
@@ -176,11 +223,6 @@ void HostedPluginInstance::processBlock (juce::AudioBuffer<float>& buffer, juce:
     mInner->processBlock (buffer, midi);
 }
 
-juce::AudioProcessorEditor* HostedPluginInstance::createEditor()
-{
-    return new HostedPluginEditor (*this);
-}
-
 void HostedPluginInstance::getStateInformation (juce::MemoryBlock& dest)
 {
     juce::XmlElement xml (kStateTag);
@@ -243,21 +285,89 @@ void HostedPluginInstance::setStateInformation (const void* data, int size)
 // HostedPluginEditor
 // ─────────────────────────────────────────────────────────────────────────────
 HostedPluginEditor::HostedPluginEditor (HostedPluginInstance& owner)
-    : juce::AudioProcessorEditor (owner), mOwner (owner)
+    : mOwner (owner)
 {
     setOpaque (true);
+    mOwner.attachEditor (this);
     buildInner();
 
     // Watches for the plugin dying under us.  Cheap: one bool compare.
     startTimerHz (4);
 }
 
-HostedPluginEditor::~HostedPluginEditor() = default;
+HostedPluginEditor::~HostedPluginEditor()
+{
+    stopTimer();
+
+    if (mRemoteOpened && ! mOwnerGone)
+        mOwner.closeBridgedEditor();
+
+    mRemoteHost.reset();
+
+    // Skipped when the owner went first -- it already cleared its own pointer
+    // and touching it here would be the use-after-free this design avoids.
+    if (! mOwnerGone)
+        mOwner.detachEditor (this);
+}
+
+void HostedPluginEditor::ownerDestroyed()
+{
+    stopTimer();
+
+    // Bridged: tell the helper to drop the plugin's window before we lose the
+    // ability to talk to it, then discard our end of the hole.
+    if (mRemoteOpened)
+    {
+        mOwner.closeBridgedEditor();
+        mRemoteOpened = false;
+    }
+
+    mRemoteHost.reset();
+
+    // Order is the whole point: the plugin's editor is deleted while the plugin
+    // instance is STILL ALIVE, which is what JUCE's cleanup() assert demands.
+    mInner.reset();
+
+    mOwnerGone     = true;
+    mWasAlive      = false;
+    mMarkerMessage = "This effect was removed";
+
+    setSize (kDeadMarkerW, kDeadMarkerH);
+    repaint();
+}
 
 void HostedPluginEditor::buildInner()
 {
+    if (mOwnerGone)
+        return;
+
     mInner.reset();
     mWasAlive = mOwner.isAlive();
+
+    // BRIDGED: the plugin's editor lives in the helper process, so there is no
+    // AudioProcessorEditor to create here.  We hand the helper a window and it
+    // reparents the plugin's own UI into it.
+    if (mWasAlive && mOwner.isRunningBridged())
+    {
+        mMarkerTitle   = mOwner.getDescription().name;
+        mMarkerMessage = mOwner.getStateMessage();
+
+        if (mRemoteHost == nullptr)
+        {
+            mRemoteHost = std::make_unique<juce::Component> ("BridgedPluginSurface");
+            addAndMakeVisible (*mRemoteHost);
+        }
+
+        // Provisional until the helper reports the plugin's real size.
+        setSize (kBridgedDefaultW, kBridgedDefaultH);
+        attachRemoteHost();
+        return;
+    }
+
+    // Cached now so paint() never dereferences mOwner -- by repaint time the
+    // instance may have been destroyed under us.
+    mMarkerTitle   = mOwner.getDescription().name;
+    mMarkerMessage = mOwner.getStateMessage();
 
     auto* inner = mOwner.getInner();
 
@@ -291,6 +401,9 @@ void HostedPluginEditor::buildInner()
 
 void HostedPluginEditor::timerCallback()
 {
+    if (mOwnerGone)
+        return;
+
     if (mOwner.isAlive() != mWasAlive)
         buildInner();
 }
@@ -299,6 +412,74 @@ void HostedPluginEditor::resized()
 {
     if (mInner != nullptr)
         mInner->setBounds (getLocalBounds());
+
+    updateRemoteHostBounds();
+}
+
+void HostedPluginEditor::moved()
+{
+    // A child peer does not follow its logical parent automatically -- it is
+    // positioned in the parent window's client space, so any move of ours has
+    // to be pushed onto it explicitly.
+    updateRemoteHostBounds();
+}
+
+void HostedPluginEditor::parentHierarchyChanged()
+{
+    // The peer we need as a parent does not exist while this component is being
+    // built inside a window that is not yet on the desktop, which is the same
+    // deferred-attach problem TS4 hit -- so attaching is retried here.
+    if (mRemoteHost != nullptr && ! mRemoteOpened)
+        attachRemoteHost();
+}
+
+void HostedPluginEditor::attachRemoteHost()
+{
+    if (mRemoteHost == nullptr || mOwnerGone)
+        return;
+
+    auto* win = findParentComponentOfClass<WorkspaceWindow>();
+
+    if (win == nullptr)
+        return;
+
+    auto* parentPeer = win->getPeer();
+
+    if (parentPeer == nullptr)
+        return;   // retried from parentHierarchyChanged
+
+    if (mRemoteHost->getPeer() == nullptr)
+        mRemoteHost->addToDesktop (juce::ComponentPeer::windowIgnoresKeyPresses,
+                                   parentPeer->getNativeHandle());
+
+    updateRemoteHostBounds();
+
+    auto* peer = mRemoteHost->getPeer();
+
+    if (peer == nullptr || mRemoteOpened)
+        return;
+
+    mOwner.openBridgedEditor (peer->getNativeHandle(),
+                              mRemoteHost->getWidth(), mRemoteHost->getHeight());
+    mRemoteOpened = true;
+}
+
+void HostedPluginEditor::updateRemoteHostBounds()
+{
+    if (mRemoteHost == nullptr || mRemoteHost->getPeer() == nullptr)
+        return;
+
+    auto* win = findParentComponentOfClass<WorkspaceWindow>();
+
+    if (win == nullptr)
+        return;
+
+    // Child peers are positioned in PARENT-CLIENT space -- the contract written
+    // into WorkspaceWindow.h.  A child peer has no non-client area, so its
+    // parent's client origin IS the window's top-left on screen; converting
+    // through the screen is therefore the whole of the mapping.
+    const auto screenArea = localAreaToGlobal (getLocalBounds());
+    mRemoteHost->setBounds (screenArea - win->getScreenPosition());
 }
 
 void HostedPluginEditor::childBoundsChanged (juce::Component* child)
@@ -330,14 +511,14 @@ void HostedPluginEditor::paint (juce::Graphics& g)
 
     auto area = getLocalBounds().reduced (16);
 
+    // Cached strings only -- mOwner may already be destroyed.
     g.setColour (juce::Colour (0xffe0e0e8));
     g.setFont (juce::Font (15.0f, juce::Font::bold));
-    g.drawText (mOwner.getDescription().name,
-                area.removeFromTop (24), juce::Justification::centred, true);
+    g.drawText (mMarkerTitle, area.removeFromTop (24), juce::Justification::centred, true);
 
     g.setColour (juce::Colour (0xff808090));
     g.setFont (juce::Font (13.0f));
-    g.drawFittedText (mOwner.getStateMessage(), area, juce::Justification::centred, 3);
+    g.drawFittedText (mMarkerMessage, area, juce::Justification::centred, 3);
 }
 
 } // namespace Hosting

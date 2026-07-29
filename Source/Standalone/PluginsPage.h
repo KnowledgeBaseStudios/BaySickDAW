@@ -71,7 +71,10 @@ private:
 
     // The plugin's own editor, or its dead marker.  Owned here because the page
     // is the thing on screen; the INSTANCE is owned by EngineRig.
-    std::unique_ptr<juce::AudioProcessorEditor> mEditor;
+    // A plain Component: HostedPluginEditor is deliberately not an
+    // AudioProcessorEditor of the hosted instance (that back-reference cannot
+    // safely outlive the instance -- see HostedPluginInstance::createEditor).
+    std::unique_ptr<juce::Component> mEditor;
 
     // Watches for the hosted instance being swapped or dying underneath us.
     juce::AudioProcessor* mBuiltEngine { nullptr };

@@ -94,14 +94,7 @@ void WorkspaceWindow::broughtToFront()
 
 Workspace* WorkspaceWindow::workspace() const noexcept
 {
-    auto* ws = mWorkspace.getComponent();
-    if (ws == nullptr && mAttachAttempted && ! mReportedDeadWorkspace)
-    {
-        mReportedDeadWorkspace = true;
-        DBG ("[TS4 SHELL] WorkspaceWindow '" << mPersistKey
-             << "' outlived its Workspace -- containment/magnetism off for it.");
-    }
-    return ws;
+    return mWorkspace.getComponent();
 }
 
 WorkspaceWindow::~WorkspaceWindow()
@@ -243,19 +236,6 @@ void WorkspaceWindow::mouseDown (const juce::MouseEvent& e)
     mDragStartBounds = getBounds();
     mDragStartScreen = e.getScreenPosition();
 
-    // Both the clamp and the magnet fail SILENTLY (each early-returns its input),
-    // so which guard tripped cannot be recovered from the symptom.
-    if (mDraggingTitle)
-    {
-        if (auto* ws = workspace())
-            DBG ("[TS4 SHELL] drag '" << mPersistKey << "' wsSize=" << ws->getWidth() << "x" << ws->getHeight()
-                 << " wsScreen=" << ws->getScreenBounds().toString()
-                 << " winScreen=" << getScreenBounds().toString()
-                 << " siblings=" << ws->getWindows().size());
-        else
-            DBG ("[TS4 SHELL] drag '" << mPersistKey << "' NO WORKSPACE -- clamp and magnet both off.");
-    }
-
     // Raise AFTER capturing the drag anchor.  toFront on a native child peer is
     // a real SetWindowPos/SetFocus, and doing it before the anchor is recorded
     // can move the window out from under the gesture that started it.
@@ -338,21 +318,8 @@ void WorkspaceWindow::mouseUp (const juce::MouseEvent&)
 
 void WorkspaceWindow::attachTo (Workspace& ws)
 {
-    mAttachAttempted = true;
     mWorkspace = &ws;
     ws.addWindow (this);
-
-    // Diagnostic (2026-07-28): the log proved the pending QUEUE is never used
-    // -- neither queue message ever printed -- yet windows created at page
-    // build time behave as though mWorkspace is null (no clamp, no magnet,
-    // first window never shows), while windows created on REOPEN work.  Since
-    // mWorkspace is only ever assigned here, exactly one of two assumptions is
-    // false: either attachTo is not running for those windows, or it IS
-    // running but with a parent handle that is somehow non-null this early.
-    // This line distinguishes them in a single run.
-    DBG ("[TS4 SHELL] attachTo '" << mPersistKey << "' parentHandle="
-         << (ws.getNativeParentHandle() != nullptr ? "OK" : "NULL")
-         << " wsSize=" << ws.getWidth() << "x" << ws.getHeight());
 
     auto saved = loadSavedBounds();
     if (saved.isEmpty())
@@ -672,23 +639,16 @@ void Workspace::attachPendingWindows()
 {
     if (mPendingAttach.isEmpty()) return;
 
+    // No peer yet -- the queue stays put and is retried from
+    // parentHierarchyChanged / resized.
     if (getNativeParentHandle() == nullptr)
-    {
-        // Deliberately NOT silent: a queue that never drains is the failure
-        // this whole path exists to avoid, and it is invisible from the UI.
-        DBG ("[TS4 SHELL] " << mPendingAttach.size()
-             << " window(s) still queued -- frame has no peer yet.");
         return;
-    }
 
     auto pending = mPendingAttach;
     mPendingAttach.clear();
     for (auto& sp : pending)
         if (auto* w = sp.getComponent())
-        {
-            DBG ("[TS4 SHELL] attaching queued window '" << w->getPersistKey() << "'");
             w->attachTo (*this);
-        }
 }
 
 void Workspace::addWindow (WorkspaceWindow* w)

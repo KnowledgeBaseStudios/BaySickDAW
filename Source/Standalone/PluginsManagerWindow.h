@@ -110,6 +110,17 @@ private:
     juce::TextButton mScanBtn         { "Scan" };
     juce::TextButton mAddCheckedBtn   { "Add Checked" };
 
+    // BLU-299 search/filter.  ONE box filtering BOTH the added list and the scan
+    // results (Jeff 2026-07-29: "so you can also see what you already have under
+    // that title") -- two boxes would let a user search the results, see
+    // nothing, and not realise the plugin was already added.
+    juce::Label       mFilterLabel { {}, "Filter:" };
+    juce::TextEditor  mFilter;
+    juce::String      mFilterText;
+
+    bool matchesFilter (const juce::PluginDescription&) const;
+    bool matchesFilter (const juce::String& text) const;
+
     juce::Label       mStatus;
     double            mProgress { 0.0 };
     juce::ProgressBar mProgressBar { mProgress };

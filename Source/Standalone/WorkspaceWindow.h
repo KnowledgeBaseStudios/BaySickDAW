@@ -192,16 +192,10 @@ private:
     // magnetism, window-array teardown) all bottomed out in reads through this
     // pointer with garbage addresses, and reading the code did not explain how
     // it goes bad.  A SafePointer cannot: if the Workspace dies this reads
-    // NULL, every user early-returns, and the DBG in workspace() names the
-    // moment -- turning an unexplainable crash into a signal we can act on.
+    // NULL and every user early-returns, so a dead Workspace degrades to
+    // containment and magnetism being off rather than to a crash.
     juce::Component::SafePointer<Workspace> mWorkspace;
     Workspace* workspace() const noexcept;
-    mutable bool mReportedDeadWorkspace { false };
-    // Set by attachTo.  Without it the "no workspace" warning fired during the
-    // layout that setContentNonOwned triggers -- which runs BEFORE attachTo --
-    // and the one-shot latch was spent there, so the warning never once
-    // described the state it was written to catch.
-    bool mAttachAttempted { false };
     // Manual title drag.  ComponentDragger + ComponentBoundsConstrainer are
     // NOT used for the move: they route a desktop component's bounds through
     // screen-space limit maths, and this window's bounds are PARENT-CLIENT (see

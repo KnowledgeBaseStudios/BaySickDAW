@@ -2561,6 +2561,122 @@ no plugin has been scanned, loaded, bridged or crashed on purpose yet.  That is 
 job under this batch's deferred-verification ruling, and the batch smoke scenario 5 ("kill the
 sandboxed plugin -> app survives with a dead-slot marker") is the one that exercises this code.
 
+## 2026-07-29 — TS6 FOLLOW-UP — I called TS6 complete and it was NOT; three gaps + a crash
+
+Jeff asked me to confirm everything in TS6 was done.  Walking the plan's TS6 checklist against
+the code found **three specced items missing**, all of which I had implicitly reported as shipped.
+Recorded plainly because the failure was in the CLAIM, not just the code: I asserted
+"code-complete" from my own account of the work instead of auditing the checklist against grep.
+
+His ruling: option (a) — finish them as a TS6 follow-up before TS7 opens.
+
+### Gap 1 — BLU-299's search/filter did not exist
+
+The plan line reads "search/filter over the scanned list".  There was no search box at all.
+
+**Jeff's refinement, which changed the design:** ONE box filtering **both** the added list and the
+scan results — "so you can also see what you already have under that title".  That is the right
+call and not what a literal reading of the plan gives: with the filter on the results ONLY, a user
+searching for a plugin they had already added would see an empty result list and conclude it was
+missing.  Filtering both makes "you already have this" visible in the same gesture.
+Matches on name OR manufacturer; skipped rows match on FILENAME, since they have no description
+and the filename is what a user would recognise.  Sits above both sections, because putting it
+inside either one would read as filtering only that one.
+
+### Gap 2 — the per-plugin bridge toggle had no UI
+
+`getBridgePreference` / `setBridgePreference` / `getBridgeLockReason` / `isBridgeForced` were all
+written and persisted, and grep showed **zero callers outside `HostedPlugin` itself**.  So the
+two-tier table was honoured by the model and invisible to the user.
+
+**Jeff's placement: the VST window's hamburger menu.**  Now on `EffectSlotWindow`'s title-strip
+menu, and only for a slot holding a hosted plugin.  A 32-bit plugin's row is SHOWN BUT DISABLED
+with the reason in the text ("Run bridged (32-bit - must run bridged)") rather than hidden — same
+reasoning as the scanner reporting what it skipped: a silently absent control leaves a beginner
+with no explanation for why their plugin behaves differently.  Toggling notes that it applies on
+the next load, because switching a live plugin between in-process and bridged would mean tearing
+down its instance under the audio thread.
+
+### Gap 3 — a BRIDGED plugin had no editor at all
+
+`SandboxedPluginClient::openEditor` / `closeEditor` existed and were **called by nothing**, and
+`HostedPluginEditor::buildInner` only ever looked at `mOwner.getInner()` — null when sandboxed —
+so it fell through to the dead-marker path.  Since 32-bit is FORCED bridged, every 32-bit plugin
+would have run and made sound behind a blank panel.
+
+Fixed with a `mRemoteHost` Component given its own native CHILD peer, parented to the containing
+`WorkspaceWindow`'s peer, whose handle is handed to the helper for it to reparent the plugin's
+window into.  Positioned in PARENT-CLIENT space per the contract in `WorkspaceWindow.h`; a child
+peer has no non-client area, so the parent's client origin is the window's screen top-left and the
+mapping is just `localAreaToGlobal(...) - win->getScreenPosition()`.  A child peer does not follow
+its logical parent, so `moved()` and `resized()` both push bounds onto it, and attachment retries
+from `parentHierarchyChanged()` for the same deferred-peer reason TS4 hit.
+
+### The crash Jeff reproduced in Debug — editor outliving its plugin instance
+
+`~VST3PluginInstanceHeadless::cleanup()`, reached from `EffectRack::packSlotsToTop` <-
+`EffectsPage::performSlotRemoval`.  **JUCE's own assertion names it:**
+`jassert (getActiveEditor() == nullptr); // You must delete any editors before deleting the plugin
+instance!`
+
+Removing a rack effect destroys the DSP SYNCHRONOUSLY inside `packSlotsToTop`, while the panel
+window is still open holding the plugin's editor — `EffectSlotWindow`'s poll would not notice for
+another frame and then closes asynchronously.
+
+**The fix had to change the wrapper's TYPE, not just its ordering.**  `HostedPluginEditor` was a
+`juce::AudioProcessorEditor` of the hosted instance, and `~AudioProcessorEditor` calls
+`processor.editorBeingDeleted (this)` — so an editor outliving its instance is a use-after-free no
+amount of neutering fixes.  It is now a plain `juce::Component`:
+
+* `HostedPluginInstance` keeps a non-owning pointer to its live editor and, in its destructor
+  BEFORE releasing the plugin, calls `ownerDestroyed()` — which deletes the plugin's editor while
+  the instance is still alive, satisfying JUCE's requirement.
+* After that the wrapper is inert: timer stopped, `mOwnerGone` set, and everything it paints comes
+  from strings cached at build time so `paint()` never dereferences a dead owner.
+* Its own destructor skips deregistration when the owner went first.
+* Being on the INSTANCE's destructor means every removal route is covered — remove button,
+  reorder/pack, undo/redo, preset load, project load, tab close — rather than only the one call
+  site the stack happened to come from.
+
+`HostedPluginInstance::createEditor()` now returns nullptr and `hasEditor()` false, with the
+reasoning in a keeper comment, and `PluginsPage` builds the wrapper directly instead of through
+`createEditorIfNeeded`.
+
+### Rule 4 strip pass executed — the TS4 diagnostics are OUT (Jeff approved 2026-07-29)
+
+Found while working in `WorkspaceWindow::attachTo`: all four catalogued `[TS4 SHELL]` entries were
+still in the source with disposition "Remove at TS4 close", and TS4 closed at `05b248a8`.  **An
+unfulfilled Rule 4 obligation, surfaced for approval rather than stripped unilaterally** (Rule 4:
+surface the strip list BEFORE running the pass).  Jeff: "Remove them then add to the commit."
+
+Eight DBG sites removed across the four catalog entries:
+
+| Catalog entry | Sites | Now |
+|---|---|---|
+| `WorkspaceWindow::workspace()` "outlived its Workspace" | 1 | Removed, plus the `mReportedDeadWorkspace` latch and the `mAttachAttempted` flag that existed ONLY to gate it |
+| `Workspace::attachPendingWindows` | 2 | Removed; the early-return it guarded is kept with a one-line comment |
+| `WorkspaceWindow::attachTo` | 1 | Removed with its eight-line diagnostic rationale comment |
+| `StandaloneEditor::hostPageInWindow` | 2 | Removed (SKIPPED + OK) |
+| (uncatalogued, same family) `mouseDown` drag dump | 2 | Removed — added during the same debug round and never catalogued |
+
+**Two things deliberately handled rather than left:**
+
+1. The "outlived its Workspace" line was recorded in these notes as a **FALSE POSITIVE that cost a
+   full debug round** (the one-shot latch was spent during the layout `setContentNonOwned`
+   triggers, before `attachTo` ran, so it fired for healthy windows).  Leaving it in was worse than
+   neutral — it was actively misleading.  Its two supporting members went with it.
+2. `WorkspaceWindow.h`'s SafePointer comment ended "...and the DBG in workspace() names the
+   moment", which became FALSE the instant that DBG left.  Corrected to state what the SafePointer
+   actually buys now (a dead Workspace degrades to containment/magnetism off rather than a crash)
+   — wrong comments get fixed, not stripped around.
+
+KEPT on purpose: `hostPageInWindow`'s "(the debug log showed it happening for two tabs)" comment.
+It is past-tense evidence for why the already-framed guard exists — a Rule 6 category-1 keeper, not
+a reference to a live diagnostic.
+
+The catalog's remaining entry, TS2's `[TS2 EXPORT]` underrun report, is disposition **Keep** and was
+not touched.
+
 ## 2026-07-29 — TS6 — Jeff ran it: a close CRASH fixed, and plugin windows now fit their surface
 
 He opened the app, confirmed the windows load, closed one and the app went down.  He has no

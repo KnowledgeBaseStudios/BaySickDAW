@@ -56,6 +56,13 @@ public:
 
     juce::AudioPluginInstance* getInner() const noexcept { return mInner.get(); }
 
+    // True when this instance is running out-of-process.  Its editor lives in
+    // the helper, so the host side supplies a window for the helper to reparent
+    // the plugin's UI into rather than creating an editor itself.
+    bool isRunningBridged() const noexcept { return mSandbox != nullptr; }
+    void openBridgedEditor  (void* parentWindowHandle, int width, int height);
+    void closeBridgedEditor();
+
     // ── Bridging (BLU-302) ──────────────────────────────────────────────────
     // Two tiers, and the forced one is ARCHITECTURE rather than policy: a
     // 64-bit process physically cannot load a 32-bit DLL, so that row has no
@@ -75,8 +82,21 @@ public:
     void releaseResources() override;
     void processBlock (juce::AudioBuffer<float>&, juce::MidiBuffer&) override;
 
-    juce::AudioProcessorEditor* createEditor() override;
-    bool hasEditor() const override                      { return true; }
+    // Deliberately NO editor of our own.  A juce::AudioProcessorEditor holds a
+    // REFERENCE to its processor and calls processor.editorBeingDeleted(this)
+    // from its destructor -- so an editor that outlives this instance is a
+    // use-after-free, and a rack removal destroys the DSP synchronously while
+    // its panel window is still open.  Our surfaces therefore build a
+    // HostedPluginEditor (a plain Component) directly instead, and this
+    // instance tells it to let go of the plugin's editor before dying.
+    juce::AudioProcessorEditor* createEditor() override   { return nullptr; }
+    bool hasEditor() const override                      { return false; }
+
+    // Registration so the destructor can reach a live editor.  One at a time --
+    // a second editor for the same plugin is what JUCE's VST3 wrapper warns
+    // crashes some plugins.
+    void attachEditor (class HostedPluginEditor*);
+    void detachEditor (class HostedPluginEditor*);
 
     const juce::String getName() const override          { return mDesc.name; }
     bool   acceptsMidi()  const override                 { return mDesc.isInstrument; }
@@ -115,6 +135,10 @@ private:
 
     std::unique_ptr<juce::AudioPluginInstance> mInner;
 
+    // Non-owning.  The panel window owns the editor; this is only so the
+    // destructor can tell it to release the plugin's editor first.
+    class HostedPluginEditor* mLiveEditor { nullptr };
+
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (HostedPluginInstance)
 };
 
@@ -122,12 +146,23 @@ private:
 // the reason in its place at the same size.  The window stays; only the
 // plugin's surface goes away.  That is FL's behaviour and it is the whole
 // reason HostedState distinguishes a crash from a deletion.
-class HostedPluginEditor final : public juce::AudioProcessorEditor,
+// A plain Component, NOT an AudioProcessorEditor -- see the note on
+// HostedPluginInstance::createEditor.  It hosts the plugin's own editor as a
+// child, and when the instance is destroyed under it (a rack removal does that
+// synchronously) it drops that child while the instance is still alive, then
+// goes inert.  Everything it paints after that comes from cached strings, so it
+// never touches a dead owner.
+class HostedPluginEditor final : public juce::Component,
                                  private juce::Timer
 {
 public:
     explicit HostedPluginEditor (HostedPluginInstance&);
     ~HostedPluginEditor() override;
+
+    // Called by ~HostedPluginInstance BEFORE it releases the plugin: deletes the
+    // plugin's editor (which JUCE requires to happen first) and leaves this
+    // component showing a "removed" marker with no live owner reference.
+    void ownerDestroyed();
 
     void paint (juce::Graphics&) override;
     void resized() override;
@@ -140,13 +175,29 @@ public:
     // window shrinks to the message instead of keeping the plugin's footprint.
     std::function<void(int, int)> onNaturalSizeChanged;
 
+    void parentHierarchyChanged() override;
+    void moved() override;
+
 private:
     void timerCallback() override;
     void buildInner();
+    void attachRemoteHost();
+    void updateRemoteHostBounds();
+
+    // BRIDGED path only.  A bare Component given its OWN native child peer, so
+    // the helper process has a real HWND to reparent the plugin's window into.
+    // The plugin's UI is not ours to draw in this mode -- we only supply and
+    // position the hole it lives in.
+    std::unique_ptr<juce::Component> mRemoteHost;
+    bool mRemoteOpened { false };
 
     HostedPluginInstance& mOwner;
     std::unique_ptr<juce::AudioProcessorEditor> mInner;
-    bool mWasAlive { false };
+    bool mWasAlive   { false };
+    bool mOwnerGone  { false };
+    // Cached at every rebuild so paint() never dereferences mOwner -- it may be
+    // gone by the time we repaint.
+    juce::String mMarkerTitle, mMarkerMessage;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (HostedPluginEditor)
 };

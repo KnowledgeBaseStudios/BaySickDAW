@@ -3,7 +3,7 @@
 #include "EffectEditorPanels.h"
 #include "../PluginProcessor.h"
 #include "../DSP/EffectParamMap.h"
-#include "../Hosting/HostedPlugin.h"   // QA-ModelShell TS6: fit window to plugin surface
+#include "../Hosting/HostedPluginEffect.h"   // QA-ModelShell TS6: window fit + bridge toggle
 #include "WorkspaceWindow.h"
 
 // ═════════════════════════════════════════════════════════════════ EffectSlotWindow
@@ -66,6 +66,23 @@ EffectSlotWindow::~EffectSlotWindow()
         bar->setMenuBuilder (nullptr);
     }
     if (mSlot) mSlot->setRack (nullptr);
+}
+
+// Null unless this slot currently holds a hosted plugin.  Resolved fresh each
+// call rather than cached -- the slot's DSP is replaced by preset loads, undo
+// and project restores without this window being rebuilt.
+Hosting::HostedPluginInstance* EffectSlotWindow::hostedPluginForSlot() const
+{
+    EffectRack* rack = nullptr;
+    const int slot = resolveSlot (rack);
+
+    if (rack == nullptr || slot < 0)
+        return nullptr;
+
+    if (auto* eff = dynamic_cast<Hosting::HostedPluginEffect*> (rack->getSlotEffect (slot)))
+        return eff->getHosted();
+
+    return nullptr;
 }
 
 int EffectSlotWindow::resolveSlot (EffectRack*& outRack) const
@@ -166,6 +183,43 @@ void EffectSlotWindow::configureTitleStrip (PageMenuBar& bar)
 
         if (m.getNumItems() > 0) m.addSeparator();
         m.addItem ("Presets...", [this] { mSlot->showPresetMenu(); });
+
+        // QA-ModelShell TS6 (BLU-302, Jeff 2026-07-29): the per-plugin bridge
+        // toggle lives on THIS menu, and only for a hosted plugin.
+        //
+        // A 32-bit plugin's row is SHOWN BUT DISABLED with the reason in the
+        // text -- never hidden.  Hiding it would leave a user who dragged in a
+        // 32-bit plugin with no explanation of why it behaves differently, which
+        // is the same reasoning as the scanner reporting what it skipped.
+        if (auto* hosted = hostedPluginForSlot())
+        {
+            m.addSeparator();
+
+            const auto lockReason = hosted->getBridgeLockReason();
+
+            if (lockReason.isNotEmpty())
+            {
+                m.addItem (-1, "Run bridged (" + lockReason + ")", false, true);
+            }
+            else
+            {
+                const bool bridged = hosted->getBridgePreference();
+                m.addItem ("Run bridged (separate process)", true, bridged,
+                           [this, bridged]
+                           {
+                               if (auto* h = hostedPluginForSlot())
+                                   h->setBridgePreference (! bridged);
+
+                               // Takes effect on the next load: switching a live
+                               // plugin between in-process and bridged would mean
+                               // tearing down its instance under the audio thread.
+                               juce::NativeMessageBox::showMessageBoxAsync (
+                                   juce::MessageBoxIconType::InfoIcon,
+                                   "Plugin Bridge",
+                                   "This takes effect the next time the plugin loads.");
+                           });
+            }
+        }
 
         m.showMenuAsync (juce::PopupMenu::Options()
                              .withTargetComponent (anchor != nullptr ? anchor
