@@ -412,6 +412,51 @@ module variant.
 **JEFF'S TS6 SPEC, 2026-07-29** (given at the TS5 commit surface; supersedes the one-line
 sketches below wherever they disagree).
 
+**FORMAT SCOPE — Jeff's ruling 2026-07-29, after a licensing review he ordered BEFORE any code:
+VST3 ONLY, 64-bit AND 32-bit.**  He first ruled "everything" (VST3 + VST2, both architectures),
+then asked for the VST2 licensing position to be checked before it was built rather than after —
+"we aren't burning tokens to find out later we shouldn't have done that."  The check killed the
+VST2 half; the full finding, both blockers and the open-source route, is written up as **CL-303**
+in `Future State.md` so it is never rediscovered from scratch.  Short version:
+
+  * JUCE's VST2 host path `#include`s Steinberg's own SDK headers (`aeffect.h` / `aeffectx.h`),
+    which JUCE does not ship and which are absent from our tree — it will not compile without them;
+  * Steinberg withdrew the VST2 SDK and stopped issuing licences in October 2018, with a
+    grandfather clause we do not qualify for, and being free/open-source changes nothing about
+    that;
+  * open-source hosts reach VST2 via clean-room headers whose legal footing their own maintainers
+    describe as untested — a risk decision, recorded in CL-303, not taken.
+
+VST3 carries none of this: MIT-licensed, cannot be withdrawn, covers both architectures.
+
+**Bridging defaults — two tiers (Jeff, 2026-07-29).**  The forced tier is ARCHITECTURE, not
+format: a 64-bit process physically cannot load a 32-bit DLL, so that row has no alternative.
+(The third tier in the earlier draft was 64-bit VST2, bridged-by-default; it left with VST2.)
+
+| Plugin | Bridged by default | Toggle |
+|--------|--------------------|--------|
+| 32-bit VST3 | YES — forced | **None.**  Shown but DISABLED with the reason visible ("32-bit - must run bridged"), never hidden |
+| 64-bit VST3 | No | Yes, can be turned on |
+
+**The bridge still does double duty**, just less of it than the "everything" scope implied: crash
+isolation plus 32-bit compatibility.  Consequences to size at TS6 rather than discover late:
+  * the sandbox host needs **TWO BUILDS, 64-bit and 32-bit** — a helper can only load a plugin of
+    its own architecture, which is the whole reason a 32-bit plugin needs one at all;
+  * BLU-302 therefore stops being an optional last step and becomes load-bearing for the 32-bit
+    half of the format scope.  Sequencing inside TS6 needs revisiting with that in mind.
+  * **Weigh the 32-bit half honestly at TS6 open:** legacy 32-bit freeware is overwhelmingly VST2,
+    so with VST2 out, 32-bit VST3 is a THIN population.  The 32-bit helper build may not earn its
+    cost.  Jeff kept it in scope deliberately; revisit only if the build cost turns out to be
+    disproportionate, and take that back to him rather than dropping it unilaterally.
+
+**JUCE finding that shrinks the CMake scout (verified in the vendored tree, 2026-07-29).**  The
+`juce_audio_processors_headless` module we ALREADY build carries both format types
+(`juce_VST3PluginFormatHeadless`, `juce_VSTPluginFormatHeadless`) and the VST3 SDK, gated behind
+`JUCE_PLUGINHOST_VST3` and `JUCE_PLUGINHOST_VST` — both currently defaulting to 0.  So format
+hosting looks like a COMPILE FLAG rather than the module swap the earlier plan text assumed.  What
+"headless" strips is expected to be EDITOR hosting, which we do need — confirm that specifically at
+TS6 open; it is the real question the scout has to answer.
+
 **The Plugins manager window (BLU-298 + BLU-299).**  A **Plugins** entry is added to the MAIN
 menu bar's **Options** menu.  Opening it brings up a window with three sections:
 
@@ -423,6 +468,13 @@ menu bar's **Options** menu.  Opening it brings up a window with three sections:
 3. **Scan results** — starts blank.  A **Scan** button walks the selected folders and fills this
    section with every VST found that is **not already on the added list**.  Each row carries a
    checkbox; an **Add** button at the bottom moves the checked rows into the added list.
+
+*A plugin we cannot load is REPORTED, never silently omitted.*  A scan that quietly drops a
+plugin leaves "my plugin isn't in the list" unanswerable for a beginner; the row says what it is
+and why it was skipped instead.  With VST3-only scope this matters MORE than it would have under
+"everything": a user's old VST2 freeware is exactly what will turn up in a scan and not load, and
+"Skipped: VST2, not supported" is the difference between an explanation and an apparent bug.
+Also covers broken files, failed scans and blacklisted crashers.
 
 *Effect vs instrument — answered, it is available.*  A scan yields a `juce::PluginDescription`
 per plugin, and that carries an `isInstrument` flag (the VST3 category the plugin declares).  So
@@ -468,6 +520,26 @@ strip type touches ~15 sites.
   same alphabetical ordering as the effect group.
 - [ ] BLU-302 crash protection LAST (sub-call: process model). Everything before it works
   in-process first.
+  **FL PRECEDENT — measured by Jeff in FL Studio, 2026-07-29, not recalled or assumed.**  He
+  bridged two plugins and killed one bridge process from Task Manager:
+    * **Per-plugin processes.** Bridging a second plugin produced a SECOND bridge process, so FL
+      isolates per plugin instance (option B), not through one shared host (option A).
+    * **Exposed as a per-plugin opt-in** (option C at the UI): unbridged by default, a toggle in
+      the plugin wrapper, and forced when the architecture does not match.
+    * **Recovery UX: the WINDOW SURVIVES.**  Killing the process made the plugin's surface
+      disappear while its window stayed open, showing a message saying the plugin had closed.
+      FL itself kept running.
+  **Consequence for our code, and it is a carve-out we must build deliberately:**
+  `EffectSlotWindow` polls its target and CLOSES ITSELF when the effect no longer resolves
+  ([EffectWindows.cpp](../../Source/Standalone/EffectWindows.cpp), TS5).  That is right for an
+  effect the user deleted and WRONG for a plugin that crashed — a crash must keep the window, keep
+  the slot, and show a dead marker in place of the plugin's surface, or the user's plugin silently
+  vanishes with no explanation and nothing to reload into.  The slot-gone and the
+  process-died paths therefore need to be distinguishable at the poll, not merged.
+  This also confirms the shape the batch's own smoke scenario 5 already asked for ("kill the
+  sandboxed plugin -> app survives with a dead-slot marker").
+  **RESOLVED 2026-07-29 — Jeff picked the per-plugin switch (FL's shape).**  Not always-on, not
+  never: unbridged by default, a per-plugin toggle, real per-process isolation behind it.
 - [ ] Build gate (gates the commit below).
 - [ ] Batch-smoke scenarios (DEFERRED to Task set 8): (1) scan finds Jeff's installed
   plugins; (2) a known VST3 effect loads in a rack slot, sounds, saves/reloads with

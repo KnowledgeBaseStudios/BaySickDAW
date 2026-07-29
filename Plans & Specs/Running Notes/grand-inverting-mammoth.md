@@ -1923,6 +1923,60 @@ added EFFECT plugins alphabetically; a **Plugins** ribbon tab whose "+" entry is
 of added INSTRUMENT plugins; and plugin players needing their own strip + bus, with VST strips
 routable under the Layers or Bass bus the same way those two already move between each other.
 
+- **BLU-302 precedent MEASURED, not recalled (Jeff, 2026-07-29).**  I would not claim FL's
+  behaviour from memory, and the test I first suggested was one I then told him to skip because HE
+  never bridges — his correction: our users are not him, and beginners will drag in 32-bit and VST2
+  plugins that FL bridges automatically.  He ran it: bridged two plugins, watched Task Manager,
+  killed one bridge process.  Result: **one process per bridged plugin** (per-plugin isolation),
+  offered as a **per-plugin opt-in**, and on a kill the **plugin's window stays open with a
+  "plugin closed" message in place of its surface** while FL keeps running.
+- **That last detail lands on TS5 code:** `EffectSlotWindow` closes itself when its target stops
+  resolving, which is right for a deleted effect and wrong for a crashed plugin.  The carve-out is
+  written into the plan's BLU-302 entry — the two paths must stay distinguishable at the poll.
+- **Isolation model RESOLVED (Jeff):** the per-plugin switch, FL's shape.  Not always-on, not never.
+- **A contradiction of mine, caught by Jeff, that turned into a real scope decision.**  I justified
+  the FL test by saying beginners would drag in 32-bit and VST2 plugins, then later said everything
+  we host is 64-bit VST3 — both cannot be true, and the second is what the plan actually said.
+  That "VST3 only" scope had never been DECIDED; it was inherited from the blueprint entry titles.
+  Surfaced as a call and Jeff ruled **(d) everything: VST3 + VST2, 64- and 32-bit**, with the
+  bridge doing double duty as FL's does.
+- **Bridging defaults, settled the same exchange:** 32-bit forced (architecture, not policy — a
+  64-bit process cannot load a 32-bit DLL); 64-bit VST2 bridged by default but toggleable; 64-bit
+  VST3 unbridged by default and toggleable.  I corrected Jeff's assumption on the way: FL's forced
+  bridging is about the ARCHITECTURE mismatch, so a 64-bit VST2 is not auto-bridged there — making
+  our middle row a deliberate choice of ours rather than a copy of FL.
+- **Two findings recorded with it:** the sandbox host will need BOTH a 64-bit and a 32-bit build
+  (a helper can only load a plugin of its own architecture), which makes BLU-302 load-bearing for
+  the format scope rather than an optional last step; and the CMake scout is smaller than the plan
+  claimed — the headless module we already build carries both format types behind
+  `JUCE_PLUGINHOST_VST` / `_VST3` flags defaulting to 0, so format hosting is a compile flag, and
+  the real scout question is whether "headless" strips EDITOR hosting, which we need.
+- **VST2 CHECKED BEFORE BUILDING, and it killed that half of the scope.**  I had parked the
+  licensing question as "answer before it ships, not before it is built."  Jeff overruled that
+  immediately -- "we aren't burning tokens to find out later we shouldn't have done that" -- and he
+  was right: the answer changes what gets written, so it belonged before the work, not after.
+  Final scope: **VST3 only, 64-bit AND 32-bit.**
+- **What the review found, both blockers (full write-up is CL-303 in `Future State.md`):**
+  1. **Technical.**  I had said "the code is present in our tree", which was half true and the
+     wrong half.  `JUCE_PLUGINHOST_VST` -> `JUCE_INTERNAL_HAS_VST` -> the impl `#include`s
+     `<pluginterfaces/vst2.x/aeffect.h>` + `aeffectx.h` -- STEINBERG'S OWN SDK headers, which JUCE
+     deliberately does not ship and which a whole-repo search confirms are absent here.  Flipping
+     the flag would not have compiled.
+  2. **Distribution.**  Steinberg withdrew the VST2 SDK and stopped issuing licences in October
+     2018; the grandfather clause covers only pre-cutoff signatories.  No lawful route for a new
+     product.
+- **Jeff's follow-up question was the right one and changed the answer's shape:** does being FREE
+  and OPEN SOURCE alter it?  Not the distribution blocker -- there is no non-commercial tier, and
+  Steinberg has DMCA'd redistributed SDK files.  But it does open a route commercial vendors avoid:
+  LMMS / Carla / yabridge reach VST2 through CLEAN-ROOM headers (`vestige.h`, FST, RST, Xaymar),
+  whose own maintainers call the legal footing untested and advise counsel.  Recorded in CL-303
+  rather than acted on -- it is a risk call that is his, not mine, and he chose not to take it now.
+- **Knock-on he should see at TS6:** with VST2 out, 32-bit VST3 is a thin population (legacy 32-bit
+  freeware is overwhelmingly VST2), so the 32-bit helper build may not earn its cost.  He kept it
+  in scope deliberately; the plan says to revisit only with him, never by dropping it quietly.
+- **Also strengthened by the narrower scope:** the scan MUST report what it skipped and why.  A
+  user's old VST2 freeware is now exactly what shows up and does not load, and "Skipped: VST2, not
+  supported" is the difference between an explanation and an apparent bug.
 - **His open question answered: yes, the kind is knowable without loading the plugin.**  A scan
   produces a `juce::PluginDescription` per plugin carrying `isInstrument`, derived from the
   category the VST3 declares.  That single flag serves all three of his uses -- the label on the
