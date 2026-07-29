@@ -1659,12 +1659,12 @@ MixerPage::MixerPage(VibeSynthProcessor& processor, PatternManager& pm)
 
     syncFromModel();
     syncApvtsFromMixerState();   // 5F-4a Batch 6
-    startTimerHz(30);
 
-    // 2026-05-02: vblank-locked meter feed.  Each monitor refresh, exchange
-    // every per-strip peak atomic with -inf and push the running max to the
-    // matching DBFSMeter.  Mirrors FL Studio's vsync-locked metering.
-    mVBlank = std::make_unique<juce::VBlankAttachment> (this, [this] { onVBlank(); });
+    // The 30 Hz poll and the vblank meter feed are NOT started here -- both are
+    // owned by parentHierarchyChanged, which starts them only once this page is
+    // attached to something on screen.  Starting them in the constructor would
+    // run them for a page that is built but never framed, which is now a normal
+    // state (QA-ModelShell TS4: windows open lazily).
 }
 
 MixerPage::~MixerPage()
@@ -3338,6 +3338,38 @@ void MixerPage::setUndoContext(const UndoContext& ctx)
 // ─────────────────────────────────────────────────────────────────────────────
 // Timer
 // ─────────────────────────────────────────────────────────────────────────────
+void MixerPage::parentHierarchyChanged()
+{
+    // Peer-keyed suspend -- the SAME rule VUMeter, DBFSMeter and SlotComponent
+    // already apply to their own vblank attachments.  This page did not follow
+    // it, and with the windowed shell that became a real cost: a closed page is
+    // no longer destroyed, it survives detached and peerless, so its per-strip
+    // meter drain and its 30 Hz page poll kept running for a window nobody was
+    // looking at.  That cost scales with STRIP COUNT, which is exactly the axis
+    // the instance caps are being re-evaluated along.
+    //
+    // Nothing here affects audio: the audio thread CAS-maxes and stores its peak
+    // atomics every block whether or not a reader exists, so suspending the
+    // reader removes message-thread work only.  On reopen the atomics already
+    // hold the current block's values, so meters are live within one block --
+    // what is lost is only the history for the period nobody was watching.
+    const bool onScreen = getPeer() != nullptr;
+
+    if (onScreen && mVBlank == nullptr)
+        mVBlank = std::make_unique<juce::VBlankAttachment> (this, [this] { onVBlank(); });
+    else if (! onScreen && mVBlank != nullptr)
+        mVBlank.reset();
+
+    if (onScreen)
+    {
+        if (! isTimerRunning()) startTimerHz (30);
+    }
+    else if (isTimerRunning())
+    {
+        stopTimer();
+    }
+}
+
 void MixerPage::timerCallback()
 {
     // 2026-05-02: meter polling moved to onVBlank() (vblank-locked).  This

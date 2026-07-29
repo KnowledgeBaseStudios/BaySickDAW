@@ -942,74 +942,26 @@ void VibesynthStandaloneApp::initialise(const juce::String&)
     editor->setAudioCallback(mAdvancer.get());   // allows safe unregister/re-register around device switches
     mWindow->setContentOwned(editor, true);
 
-    // QA-Eb (2026-07-08): user-resizable window with a working maximize
-    // button; launch stays maximized (unchanged behavior).  No corner
-    // resizer widget - border drag, matching the resizable child-window
-    // precedents (EventEditor / KeyBinds / UndoHistory).
-    mWindow->setResizable(true, false);
-    // Floor below which the layout stops being usable: the 40px bar's fixed
-    // occupants (controls 520 + pattern 176 + readout 100 + CPU 120 + gaps)
-    // need ~1050px before the ribbon guard (>60) kicks in, and the fixed
-    // chrome (24+40+26) plus the smallest workable page area needs ~700px
-    // of height.  Starting values - Jeff tunes at the G1 boundary smoke.
+    // QA-ModelShell TS4 (2026-07-28, locked call): the main frame is FIXED
+    // fullscreen and no longer resizable.  It is now a container -- the user
+    // sizes the contained windows inside it (WorkspaceWindow), not the frame,
+    // so a resizable frame would only add a second, redundant layout axis.
     //
-    // ORDER MATTERS (G1 smoke, the maximize-restore hunt): the limits MUST be
-    // installed BEFORE any setFullScreen/restore below.  setResizeLimits runs
-    // setBoundsConstrained, and the default constrainer's keep-on-screen
-    // clamp nudges a maximized window (which legitimately sits a few px
-    // above the screen edge) - that nudge is a real SetWindowPos, and
-    // Windows answers it by silently demoting the window from MAXIMIZED to
-    // NORMAL placement at the same size.  Every relaunch then came up
-    // windowed-almost-full and the next close saved maximized=0.  The
-    // first-launch path always had this order right, which is why it never
-    // showed the bug.
+    // ORDER STILL MATTERS (kept from the QA-Eb G1 maximize-restore hunt): the
+    // resize limits must be installed BEFORE setFullScreen.  setResizeLimits
+    // runs setBoundsConstrained, and the default constrainer's keep-on-screen
+    // clamp nudges a maximized window (which legitimately sits a few px above
+    // the screen edge); that nudge is a real SetWindowPos, and Windows answers
+    // it by silently demoting the window from MAXIMIZED to NORMAL placement at
+    // the same size.  Every relaunch then came up windowed-almost-full.
     mWindow->setResizeLimits(1100, 700, 32000, 32000);
-    // QA-Eb follow-up (Jeff, G1 smoke): remember the window size across runs
-    // - a maximized close restores maximized, a sized close restores those
-    // exact bounds.  Global pref in settings.xml (WindowState child).
-    bool windowRestored = false;
-    if (auto wsRoot = juce::XmlDocument::parse (ProjectManager::getSettingsFile()))
-    {
-        if (auto* ws = wsRoot->getChildByName ("WindowState"))
-        {
-            if (ws->getBoolAttribute ("maximized", true))
-            {
-                mWindow->setFullScreen (true);
-            }
-            else
-            {
-                const juce::Rectangle<int> saved (
-                    ws->getIntAttribute ("x", 100),
-                    ws->getIntAttribute ("y", 100),
-                    juce::jmax (1100, ws->getIntAttribute ("w", 1280)),
-                    juce::jmax (700,  ws->getIntAttribute ("h", 800)));
+    mWindow->setResizable(false, false);
 
-                // QA-ProjectSave (2026-07-26, found by Jeff): a saved position is
-                // only valid while the monitor it was saved on still exists.
-                // Restoring it unchecked put the window into coordinate space with
-                // no display behind it -- the app launched and vanished off the
-                // side of the screen, unreachable, and re-attaching monitors did
-                // not help because the stale coordinate is what was stored.
-                //
-                // Require a real overlap with some attached display, not merely a
-                // touching edge, so a window that is 99% off-screen is also
-                // rejected rather than left almost-unreachable.
-                const auto desktop = juce::Desktop::getInstance()
-                                        .getDisplays().getTotalBounds (true);
-                const auto overlap = desktop.getIntersection (saved);
-                const bool reachable = overlap.getWidth()  >= 200
-                                    && overlap.getHeight() >= 100;
-
-                if (reachable)
-                    mWindow->setBounds (saved);
-                else
-                    mWindow->setFullScreen (true);   // sane, always-visible fallback
-            }
-            windowRestored = true;
-        }
-    }
-    if (! windowRestored)
-        mWindow->setFullScreen(true);   // first launch / no saved state
+    // The main frame's saved-bounds restore retired with resizability: there is
+    // exactly one valid frame geometry now.  Its monitor-reachability lesson
+    // did NOT retire -- it moved to Workspace::clampWindowsIntoView, which
+    // keeps every CONTAINED window grabbable for the same reason.
+    mWindow->setFullScreen(true);
     mWindow->setVisible(true);
 }
 
@@ -1022,32 +974,10 @@ void VibesynthStandaloneApp::shutdown()
     auto pendingFile = getAudioSettingsFile().getSiblingFile("audio_settings_pending.xml");
     if (!pendingFile.existsAsFile())
         saveAudioSettings();
-    // QA-Eb follow-up: persist the window size/maximized state (global
-    // settings.xml, sibling-preserving write like every other pref there).
-    if (mWindow)
-    {
-        const auto f = ProjectManager::getSettingsFile();
-        f.getParentDirectory().createDirectory();
-        std::unique_ptr<juce::XmlElement> root;
-        if (f.existsAsFile())
-            root = juce::XmlDocument::parse (f);
-        if (root == nullptr)
-            root = std::make_unique<juce::XmlElement> ("BaySickDAWSettings");
-        if (auto* old = root->getChildByName ("WindowState"))
-            root->removeChildElement (old, true);
-        auto* ws = root->createNewChildElement ("WindowState");
-        // isFullScreen() for an on-desktop window reads the peer's real OS
-        // placement (GetWindowPlacement == SW_SHOWMAXIMIZED on Windows), so
-        // this save is honest for every maximize gesture.  The historical
-        // maximize-restore bug lived in initialise's restore ORDER, not here.
-        ws->setAttribute ("maximized", mWindow->isFullScreen());
-        const auto wb = mWindow->getBounds();
-        ws->setAttribute ("x", wb.getX());
-        ws->setAttribute ("y", wb.getY());
-        ws->setAttribute ("w", wb.getWidth());
-        ws->setAttribute ("h", wb.getHeight());
-        root->writeTo (f);
-    }
+    // QA-ModelShell TS4: the main frame's WindowState save retired with its
+    // restore -- the frame has one fixed geometry now, so there was nothing
+    // left to remember.  Contained windows persist their OWN bounds
+    // (WorkspaceWindow::saveBounds, same settings.xml, WorkspaceWindows tag).
     // Shutdown overlay is owned HERE, parented on the window -- the editor's
     // own overlay dies with the content.  The window stays alive (visible,
     // overlaid) through editor + engine teardown and is destroyed LAST, which

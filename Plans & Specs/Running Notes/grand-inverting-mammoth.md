@@ -841,3 +841,902 @@
 - **Follow-on cleanup:** deleting TapePanel orphaned its only helper, the file-local
   `setPink` TextButton colourer (MSVC C4505 flagged it on the next gate).  Removed too --
   this batch's own dead code, cleaned in-batch rather than routed.
+
+## 2026-07-28 — TS3 COMMITTED `1dd08437` (Jeff-approved); TS4 next
+
+- **TS3 commit landed:** `1dd08437`, 40 files (+2040/-1603), tree CLEAN after.  Gate was green
+  both configs on the exact committed tree (zero error lines; the C4505 that the TapePanel
+  deletion briefly exposed was cleaned before the final gate).  Batch so far: TS1 `4ea67bd0`,
+  TS2 `e9ecf03e`, TS3 `1dd08437`.
+- **The widget-targeting era is over.**  Zero `VKnobAutomation::register*Automation` call sites
+  remain, the five helpers are deleted, the owner index and the `ComponentListener` base are
+  gone, and every lane class in the app — main APVTS, engine params, rack DSP, pedal board, EQ
+  bands, mixer strips, sfizz kits, and the non-parameter mod-editor fields — is registered by a
+  model event and re-resolves its target through the model at apply time.  That is the
+  precondition TS4's destroy-on-close windows depend on.
+- **Everything TS3 registers, the offline renderer also resolves.**  Pedal-board lanes, the
+  BLU-344 mod lanes, and the sfizz trio all got branches in `applyOfflineLaneValue` in the same
+  pass they got live registration, so no lane class can play live and go missing from an export
+  the way vox/inst did before TS2.
+- **NOTHING here is ear-verified.**  TS3 shipped on compile gates plus a source-derived design,
+  same as TS1/TS2; all functional verification is the single TS8 batch smoke per the bulk-run
+  ruling.  Three sets of unverified structural change are now stacked — that remains the
+  batch's biggest standing risk and TS8 is where it gets paid down.
+- **Next: TS4 (the shell).**  Its FIRST act is the open sub-spec call — exact minimum window
+  sizes for Builder / Piano Roll / Mixer, picked with Jeff ON SCREEN (he wants "larger" floors).
+  Nothing else in TS4 starts before that answer.
+
+## 2026-07-28 — TS4 — scout: what the shell replaces
+
+- **Page hosting today:** `StandaloneEditor::mPages` is an `OwnedArray<PageEntry>`
+  (`{ribbonTabId, TabType, unique_ptr<Component>}`); EVERY page is a live child of the editor
+  simultaneously, and `showPageForTab` just flips `setVisible` across the whole list
+  ([StandaloneEditor.cpp](../../Source/Standalone/StandaloneEditor.cpp)).  `resized()` gives every
+  page the same content rect `b` (below menu 24 + transport 40 + PageMenuBar).  So "closing" a tab
+  today means destroying the PageEntry; there is no window concept at all, and nothing is ever
+  hidden-but-alive except by visibility.  That content rect is what becomes the WORKSPACE.
+- **No native-child precedent in the tree.**  `addToDesktop` appears exactly once
+  (StandaloneEditor.cpp:464, the modal shield).  EventEditor / KeyBinds / UndoHistory are
+  `juce::DocumentWindow`s — free-floating TOP-LEVEL desktop windows, not children of the main
+  frame.  They are the precedent for bounds persistence + the off-screen clamp, NOT for containment.
+  The native-child peer (locked call 2b) is genuinely new machinery: `addToDesktop(flags,
+  parentHWND)` per window, parented to the workspace's peer handle.
+- **Main window** ([StandaloneApp.cpp:945-1013](../../Source/Standalone/StandaloneApp.cpp:945)):
+  currently `setResizable(true,false)` + `setResizeLimits(1100,700,32000,32000)` + a
+  saved-bounds restore with a monitor-overlap reachability test (QA-ProjectSave).  TS4 pins it
+  fullscreen/non-resizable — but the ORDER COMMENT at :956 is load-bearing and must survive: limits
+  must be installed BEFORE any setFullScreen, or Windows silently demotes MAXIMIZED to NORMAL.
+  The reachability clamp is the pattern TS4 reuses PER WINDOW.
+- **RibbonTabBar is a FIXED 10-slot bar** — `kNumSlots = 10`, `slotType(slotIndex)` is a hard
+  index->type map, every slot always painted, no "+" and no close X (its own header comment says
+  so).  The TS4 tab bar is therefore a real rewrite of the slot model, not a tweak: required four
+  (Builder / Mixer / Effects / PianoRoll) always present, the six type slots appearing only at
+  >= 1 instance and returning via "+".  Six `on*EmptyStateRequested` callbacks + the three
+  `EngineEmptyState` members + `hideAllEmptyStates` (6 call sites) all retire with docket 18's
+  shape.  `mLastUsedByType` and the instance/sub-page dropdown bodies survive unchanged.
+- **PageMenuBar has no .h/.cpp of its own** — it lives inside SharedUI (the plan's file list is
+  wrong on this point).  `PageMenuBar::kHeight` is consumed directly by `resized()`.  Merging it
+  into per-window title strips means moving a shared component, not editing a dedicated pair.
+
+## 2026-07-28 — TS4 — chunk A: the window frame family lands (compiles, both configs)
+
+- **New `Source/Standalone/WorkspaceWindow.h/.cpp`** (+ CMakeLists entry), holding two classes:
+  `Workspace` (the region of the fixed frame contained windows live in — supplies the native
+  parent handle and the origin their coordinates are measured from) and `WorkspaceWindow` (one
+  contained window: custom title strip per locked call 4a, close button + resize border per 5a,
+  ComponentBoundsConstrainer floor, drag-to-move, bounds persistence).  NOT yet wired into page
+  hosting — that is the next chunk.  Gate green both configs, zero errors.
+- **FRAMEWORK CONTRACT VERIFIED IN THE VENDORED JUCE, NOT ASSUMED** — this is the single most
+  load-bearing fact in TS4 and there was no existing user of it in the tree (`addToDesktop`
+  appears once, for the modal shield).  Read from
+  `juce/modules/juce_gui_basics/native/juce_Windowing_windows.cpp`:
+  * `addToDesktop (flags, parentHwnd)` with a non-null parent ORs in `WS_CHILD` (:2239) and
+    passes the parent to `CreateWindowEx` (:2437) — a real OS child window, which is what puts
+    our frames in the same z-order space as a hosted VST3 editor's foreign HWND (TS6).
+  * **The coordinate space differs from a top-level peer in BOTH directions, and they agree with
+    each other:** `setBounds` feeds `SetWindowPos`, and Windows reads a WS_CHILD's x/y as
+    PARENT-CLIENT relative (:1614); `getBounds` returns `getWindowClientRect`, likewise
+    parent-relative (:1653 — the screen-relative branch above it is the `parentToAddTo ==
+    nullptr` case only).  So a contained window is positioned and read back in the MAIN WINDOW'S
+    client space, and the workspace's own offset inside the frame has to be added on.
+  That contract is written into the header as a Rule 6 category-4 comment so it is never
+  re-derived; `Workspace::originInParentClient()` is the one helper that applies it.
+- **Persistence stores WORKSPACE-LOCAL bounds, not the peer's parent-client bounds** — deliberate:
+  the workspace's origin moves whenever the main chrome changes height, so storing parent-client
+  coordinates would drift every window down by that delta on the next run.  Saved under a
+  `WorkspaceWindows` child of settings.xml (global preference, not project data — the user's
+  window arrangement should not change when they open a different song), keyed by a stable
+  per-logical-window string rather than per object, since destroy-on-close means the object is
+  short-lived and the key is the only thing carrying position forward.
+- **`Workspace::clampWindowsIntoView`** applies the QA-ProjectSave monitor-overlap lesson per
+  window: a window is never wider/taller than the workspace, and always keeps its title strip —
+  the only grabbable part — reachable.  A window whose saved spot no longer fits comes BACK
+  rather than becoming unreachable.
+- **One compile fix on the first gate** (both errors in the same helper): `ComponentPeer::
+  getComponent()` returns a `Component&`, not a pointer, and `juce::Point` has no scalar
+  `operator*`, so the negate is written out per-axis.
+
+## 2026-07-28 — TS4 — the shell goes live: pages hosted in contained windows, tab bar rewritten
+
+- **Pages now live in contained windows.**  `StandaloneEditor::PageEntry` gained a
+  `unique_ptr<WorkspaceWindow> window`, a new `hostPageInWindow` frames the page, and
+  `resized()` hands the old content rect to the `Workspace` instead of giving EVERY page the
+  full rect at once (which was the always-alive stacking the shell exists to replace).
+  `showPageForTab` no longer hides the other pages -- it brings the selected window forward,
+  recreating it if it had been closed.  Ownership deliberately did NOT move: the page stays in
+  `PageEntry::component` and the window hosts it via a new `setContentNonOwned`, because a large
+  amount of existing code reaches through that pointer and moving ownership would have meant
+  rewriting all of it for no gain.
+- **A REAL BUG the compiler caught, worth recording because the shape recurs.**  The page
+  creation sites are not uniform: twelve use `entry->component = ...; addChildComponent(...);
+  mPages.add(entry);`, but THREE (Clips / Vox / Inst) use a `unique_ptr<PageEntry>` with
+  `addChildComponent (*cpRaw); mPages.add (entry.release());`.  My first conversion pass
+  pattern-matched only the first shape, so those three pages would have been hosted in NO window
+  -- and since `resized()` no longer lays pages out, they would have rendered at zero size.  It
+  surfaced only because removing the empty-state members made those same functions fail to
+  compile for an unrelated reason.  All fifteen sites now route through `hostPageInWindow`.
+- **RibbonTabBar: fixed 10-slot strip -> dynamic slots + "+".**  `kNumSlots` (a compile-time
+  index->type map) is replaced by `visibleSlotTypes()`, built per paint: the four REQUIRED tabs
+  (Builder / Mixer / Effects / Piano Roll) always, the six instance types only while
+  `countTabsOfType > 0`.  `slotType` became an instance method; `slotRect` / `hitTestSlot` /
+  `paint` all run off the live count with `kMaxSlots` only bounding the width solver's stack
+  arrays.  The trailing slot is the "+" button, which owns every add route -- including the ones
+  that used to be buried inside a POPULATED type's dropdown and were therefore unreachable at
+  zero instances, exactly the hole the empty-state pages were papering over.
+- **Empty-state machinery RETIRED (the loud docket-18 reversal the plan calls for).**  Gone:
+  three `EngineEmptyState` members + `ClipsEmptyState` / `VoxEmptyState` / `InstEmptyState`
+  members, six `show*EmptyState` functions, `hideAllEmptyStates` (~140 lines), their ctor
+  construction, their `resized()` layout block, and the six `on*EmptyStateRequested` callbacks
+  on RibbonTabBar.  The justification is structural, not preference: a type tab is no longer
+  DRAWN at zero instances, so "the user is looking at a tab with nothing in it" is not a
+  reachable state.  The F8/F9/F10 shortcut fallback that navigated to those pages is now a
+  no-op for the same reason.  The `*EmptyState` CLASSES themselves stay -- they are referenced
+  from ClipsPage / VoxPage / InstPage and pruning those is a separate sweep, not this one.
+- **Main frame pinned fullscreen + non-resizable** (locked call).  The QA-Eb ordering comment is
+  PRESERVED verbatim: resize limits must be installed before `setFullScreen`, or Windows
+  silently demotes MAXIMIZED to NORMAL and every relaunch comes up windowed-almost-full.  The
+  frame's saved-bounds restore AND its `WindowState` writer both retired with resizability
+  (there is one valid frame geometry now) -- but the monitor-reachability LESSON did not: it
+  moved to `Workspace::clampWindowsIntoView`, which keeps every contained window grabbable.
+- **Settings-file bug found and fixed in my own new code before it shipped:**
+  `WorkspaceWindow::saveBounds` created a fresh root as `<Settings>` when settings.xml was
+  absent, while every other writer uses `<BaySickDAWSettings>` (ProjectManager :605).  If window
+  bounds had ever been the first thing written to a missing settings file, the result would have
+  parsed fine and been invisible to every other reader.  Now matches.
+- **Provisional floors in place** (`setMinimumSize (640, 400)` per window) so nothing is
+  unbounded while Jeff's B.31.0 measurements are pending.
+- Gate green both configs, zero errors, at every step above.
+
+## 2026-07-28 — TS4 — page menu merged into the title strip (locked call 4a); a self-inflicted detour reverted
+
+- **MY ERROR, recorded because the failure mode matters more than the fix.**  I retired the
+  empty-state pages (correct), noticed that `installEmptyStatePagePresetMenu` was orphaned by
+  that, and read it as "empty-state code."  It is not -- it calls
+  `mPageMenuBar->setMenuBuilder`, i.e. it installs on the PAGE MENU.  Instead of asking where
+  the page menu was supposed to end up, I invented a new home for the route on the "+" menu,
+  complete with a type-picker submenu the plan never asked for, and then presented Jeff three
+  options -- including "drop the capability" -- as if it were an open question.  It was not:
+  **locked call 4a says "each page's hamburger/menu row merges into the title strip,"** and the
+  TS4 checklist repeats it as "custom title strip (merged page menu per 4a)."
+  Root cause: I had SKIPPED the title-strip merge, so when a piece of the page menu came loose
+  there was no correct place to put it -- and I treated that as "this needs rescuing" rather
+  than the true reading, "you skipped a step."  All the "+"-preset work is reverted.
+- **The panic was also unfounded, which the audit showed only after the fact:** a populated
+  page's hamburger routes to `showPageActionsMenu`, which is where Save/Load Page Preset
+  actually lives.  That menu is now in the title strip, so the capability was never at risk for
+  a page that exists.  The single route genuinely lost is spawning a page from a preset when
+  ZERO of that type exist -- which the plan already answers ("+" creates the page, its
+  title-strip hamburger loads the preset).  `spawnAndLoadFromPagePreset` (174 lines) deleted as
+  the orphan it became.
+- **The merge itself, and why per-window instances rather than one shared bar.**  The deciding
+  fact is that several windows are visible AT ONCE now.  Today's single `PageMenuBar` works only
+  because exactly one page is ever visible and the bar is re-pointed on each tab switch -- with
+  five windows on screen a shared bar could only ever show one of their menus.  It is
+  structurally impossible, not merely inelegant.  And that re-pointing is precisely the
+  view-coupling TS3 spent a whole task set removing.  Per-window instances also mean a window's
+  menu dies with the window for free.  The CLASS stays shared (all menu-building logic reused
+  verbatim); only the instancing changed.
+- **How ~77 call sites survived untouched:** `mPageMenuBar` went from
+  `unique_ptr<PageMenuBar>` to a raw pointer at the ACTIVE window's bar, set in
+  `showPageForTab`.  A `mDetachedPageMenu` null object -- created, never shown -- keeps it valid
+  when no window is active.  That is not tidiness: only 2 of the 77 `mPageMenuBar->` sites
+  null-check, so a nullable pointer would have been a crash surface.
+- The main chrome no longer reserves a row for the page menu; the workspace takes that height.
+  `mMenuBar` (File / Edit / Patterns / View / Options / Help) is a DIFFERENT component and stays
+  in the chrome, which is what the plan's "transport bar + main menu stay in main chrome" means.
+- Gate green both configs, zero errors.
+
+### TS4 status against the plan's checklist (audited, not asserted)
+
+| Item | State |
+|------|-------|
+| 1. Window frame family | Native child + close + resize border + constrainer + persistence + clamp DONE; **merged page menu DONE this session**; real floors pending Jeff's B.31.0 numbers |
+| 2. Main window fixed fullscreen | DONE |
+| 3. Destroy-on-close + CL-060 | **RESOLVED AS OPTION (d)**, Jeff 2026-07-28, on measured evidence: page destruction stays OFF, and the repeating UI cost is peer-keyed off instead (MixerPage vblank + 30 Hz poll, Effects + Builder timers).  The CPU dividend the plan assumed was not there -- a maxed-out project measured ~30% with the window-close delta unmeasurable.  CL-060's LAZY half is delivered for launch (only Builder + Mixer frame); its lazy-at-PROJECT-LOAD half is blocked on the layout batch's open/closed persistence decision, and its PARALLEL half is untouched. |
+| 4. Per-window keyboard/command routing | DONE -- mapping set + typing-note gate registered per window, in that order (reverse-dispatch rule) |
+| 8. Resize containment | DONE -- added after Jeff found the resize path unclamped; drag and resize are separate paths and only drag was covered |
+| 5. Tab bar "+" | Dynamic slots + "+" + empty-state retirement DONE; populated-tab dropdowns / 0-badge / CL-101 seam unverified |
+| 6. Windows for Builder / Piano Roll / Mixer | DONE (hosted like every page) |
+| 7. CL-087 promotion | TS8's job |
+
+## 2026-07-28 — Held for the NEXT batch: page-layout review under the windowed shell
+
+Jeff's ruling 2026-07-28: the contained-window shell changes what a page's layout has to fit
+into, so every page gets a layout review — and that review is a SEPARATE batch running directly
+after QA-ModelShell, so its fixes do not muddy this batch's work.
+
+**SCOPE CORRECTION (Jeff, 2026-07-28).**  An earlier version of this entry said the batch's scope
+"cannot be written before" his B.31.0 sizing pass runs.  That is wrong, and it understates the
+batch badly.  His words: the layout batch is "gonna be all encompassing of not just how the windows
+look but how everything looks now that windows are a thing."  So it covers the app's WHOLE
+appearance under the windowed shell -- every page, every overlay, every piece of chrome, not just
+the window frames -- and B.31.0 (Test Plans §B.31.0) is ONE INPUT to it rather than the thing that
+defines it.  Do not treat the sizing numbers as a gate on writing the scope.
+
+Known going in:
+
+- **Move the preset dropdown and any engine pickers onto the window TITLE BAR** (Jeff, explicit).
+  Rationale is space: the title strip already exists per window and currently carries only the
+  page menu + close button, while the preset combo and "Engine: [Select engine...]" picker eat
+  full-width rows out of the page's own content area.  Relocating them reclaims that height for
+  the layout -- which matters more now that a page is sized to a window rather than to the whole
+  content rect.
+- **Harmless does not fit at maximum window size**, and some of its knobs render LARGER than they
+  did pre-shell (Jeff, observed 2026-07-28 with the window maximised).  Likely the same root
+  cause: these pages were written assuming they get the FULL content rect, and now receive a
+  window's content area minus chrome, so anything laying out from fixed offsets rather than
+  proportionally drifts.  NOT investigated -- deliberately left for the review.
+- Every other page needs the same pass; Harmless is just the one that surfaced first.
+- **Audit every drawn overlay for the child-peer z-order trap** (Jeff, 2026-07-28, added after it
+  bit twice in one day).  With the windowed shell, anything that is a DRAWN component parented to
+  the editor and expected to cover the workspace is now invisible behind the contained windows,
+  because a native child peer always renders above whatever is painted into its parent's client
+  area.  `setAlwaysOnTop` does NOT help -- it orders drawn siblings among themselves and does not
+  cross the drawn/native boundary.  Two instances already: the per-window tooltips, and
+  `HeavyOperationOverlay` (Jeff: "I don't see the popup for loading").  Both were fixed by giving
+  the thing its own desktop window.  By contrast `AlertWindow` / `CallOutBox` / `PopupMenu` were
+  never affected, because JUCE already puts those on the desktop as real OS windows -- which is why
+  the delete prompts always looked fine.  **The failure is SILENT** -- the component paints
+  correctly and is simply never seen -- so this needs a deliberate sweep rather than waiting for a
+  third one to surface.  Anything carrying an "always on top" assumption is suspect until checked.
+
+### Window-state persistence — Jeff's ruling 2026-07-28 (added to the held batch)
+
+Prompted by his question about what a project load restores.  Verifying it turned up that the
+behavior he assumed does not exist yet, so he specified what it should be.
+
+**THE MODEL IS THREE LIFETIMES, NOT TWO STORES.**  Read on its own, "reopening a window must
+restore its spot" and "do not save placement for the players" look contradictory; they are not,
+because they describe different durations.  Jeff confirmed the split 2026-07-28.  Getting this
+wrong in either direction is the trap here, so it is written out in full:
+
+1. **IN-SESSION -- always, every window, players included.**  Close a window and reopen it and it
+   returns to the exact spot and size it was left at.  Nothing touches disk for this; the app just
+   has to remember each window's bounds for the life of the session.  This is UNIVERSAL and is not
+   qualified by any of the store rules below.
+2. **`settings.xml` -- across launches, before any project is loaded.**  See below.
+3. **The project file -- across launches, per project.**  See below.
+
+So: "close/reopen returns to the same spot" is universal; "placement survives to DISK" is not.
+
+**IMPLEMENTATION SHAPE -- one map, three write policies.**  Jeff asked whether a temp settings file
+written while the app runs would cover the flexible state.  It would work, but it is the wrong
+tool and the answer is recorded here so it is not revisited: lifetime 1 needs no file at all.  An
+IN-MEMORY map on the editor or the Workspace -- persist key -> bounds, written on move / resize /
+close, read on open -- is the whole of it.  Then `settings.xml` is written ON EXIT from a FILTERED
+view of that map (sizes for everything, placement for the default tabs only), and the project file
+is written on save from the FULL map plus open/closed, and replaces the map on load.
+
+This also removes a live smell rather than adding to it: `saveBounds()` currently parses and
+rewrites the ENTIRE `settings.xml` on every window close, and `loadSavedBounds()` re-parses it on
+every open.  Disk I/O is standing in for in-memory state, which is a large part of why the
+lifetimes are tangled in the first place.
+
+Three reasons the temp file loses to the map: (1) it does not fix the key defect below -- a broken
+key is broken in any file; (2) a crash leaves it stale and it needs rules for when it outranks the
+real settings; (3) Jeff runs two instances (CLAUDE.md already warns Debug and Release share
+`settings.xml`), and a live-written temp file makes that collision worse.  The one thing it would
+genuinely buy is LAYOUT SURVIVING A CRASH -- if that is wanted, flush the in-memory map on a timer
+into the project autosave rather than standing up a second source of truth.  **Left open: Jeff has
+not been asked for a crash-survival ruling and no default was assumed.**
+
+**The two disk stores, different contents, deliberately:**
+
+* **`settings.xml` (global, survives across every project):** how the user has RESIZED all of the
+  windows -- SIZE for every window type, players included -- plus the PLACEMENT of the default tabs
+  only: Mixer, Builder, Effects, Piano Roll.  Explicitly NOT player PLACEMENT (Layers / Bass /
+  Drums / Clip / Vox / Inst).  A player window therefore remembers how big the user likes it and
+  NOT where it sat, which is the precise line Jeff drew: those tabs are project content, so a
+  position saved from one project means nothing in the next, whereas a preferred size is a habit
+  that carries.  The value this store holds is "the size I like my windows" plus "where I keep the
+  fixed tabs".
+* **The PROJECT FILE:** everything, exactly as the user set it up -- per-instance position, size AND
+  open/closed state for every window including the players -- so that opening a project puts them
+  straight back where they were.  Jeff: "pull up a project and be right back in it."
+  This is the ONLY store that ever holds an individual player window's position.  The global store
+  never does; its placement coverage stops at the default tabs, and only as a starting point before
+  a project is loaded.  Close/reopen (lifetime 1) is not this store's job -- it works with no
+  project at all -- but the bounds it restores are what gets written here on save.
+
+**Current state, measured, so the gap is not re-derived:**
+
+* Only position and size are persisted, into `settings.xml`, via `WorkspaceWindow::saveBounds` /
+  `loadSavedBounds` under a `key` attribute.  There is NO saved open/closed flag anywhere.
+* `settings.xml` is GLOBAL, so today window positions bleed across projects -- the exact thing the
+  split above exists to stop.
+* A project load frames EVERY page it recreates (three `hostPageInWindow` call sites in the load
+  path), because the launch-only gate has already opened by then.  So a loaded project currently
+  opens everything regardless of what the user had closed.
+
+**DEFECT found while verifying this — `StandaloneEditor::persistKeyFor`.**  Its comment states the
+correct design and the code does the opposite:
+
+> "Keyed by TYPE + the page's own index rather than the ribbon tab id: tab ids are handed out per
+> session, so keying on them would lose a window's saved position every time the project reopened."
+
+...and the body returns `type + ":" + entry.ribbonTabId`.  `PageEntry::pageIndexHint` already exists
+and is populated a few lines earlier in `hostPageInWindow` for exactly this purpose, and is never
+read.  So saved positions mismatch whenever tab ids come up different -- which is the direct cause
+of "reopen does not restore the same spot" surviving as a symptom.
+
+It is NOT a one-line fix, which is why it is held rather than done in QA-ModelShell:
+`pageIndexHint` is only filled for Layers, Bass and Drums.  Mixer / Builder / Effects / Piano Roll
+are singletons so type alone keys them safely, but **Clip, Vox and Inst are multi-instance and have
+no hint** -- they would all collide on one key and share a single saved position.  Correcting the
+key means giving those three a stable per-instance index first.  The wrong comment gets fixed at
+the same time (it currently documents behavior the code does not have).
+
+### Re-evaluate the instance caps (Jeff, 2026-07-28)
+
+Prompted by a real measurement rather than a guess.  Jeff ran **6 Vox + 20 Inst + 8 Layers +
+4 Bass + 1 Rusty** and saw roughly **30% sys and dsp, against a ~10% baseline**.  The significant
+part is what that configuration actually is: he was **AT THE HARD CAP on four of the five types**
+-- `kMaxVoxPages` 6, `kMaxInstPages` 20, `kMaxLayerPages` 8, `kMaxBassPages` 4 -- with all 16 drum
+and all 50 clip slots still unused.  So the most the app currently permits on those four costs 30%,
+and the caps look conservative relative to what the machine does with them.
+
+Current values, all in `Source/VibesynthConstants.h` unless noted:
+
+| Type | Cap | Notes |
+|------|-----|-------|
+| Layers | 8 | channel-id space already reserves 200..215 = **16** -- headroom for 2x with NO id work |
+| Bass | 4 | id space reserves 300..315 = **16** -- headroom for 4x with NO id work |
+| Drums | 16 | id space 500..515 = 16 -- **at the id limit**, a bump needs id-space work |
+| Clips / Audio | 50 | id space 400..449 = 50 -- **at the id limit**; `static_assert` ties it to `kMaxAudioRows` in two places |
+| Vox | 6 | must stay equal to `MixerChannelIds::kMaxVoxStrips` |
+| Inst | 20 | must stay equal to `kMaxInstStrips`; already bumped 6 -> 10 (G-4) -> 20 (G-6) |
+| Aux | 18 | `kMaxAuxStrips`, bumped 16 -> 18 in G-7 |
+
+**HAZARD that has to be handled by whoever raises these.**  The piano-roll target IDs are DERIVED by
+summing the caps in order -- `kBassPRTarget = kMaxLayerPages`, `kDrumPRTarget = kMaxLayerPages +
+kMaxBassPages`, then Clip, Vox, Inst and Rusty each stacking on the previous.  Changing ANY cap
+therefore shifts every downstream target ID.  Pre-v1 that needs no migration (standing rule: no
+backward-compat work before v1), but it does mean a cap bump invalidates the PR target IDs in
+existing saved projects, and that must be a deliberate call rather than a surprise.
+
+Cheapest first step if this is wanted: Layers 8 -> 16 and Bass 4 -> 16 fit entirely inside the
+channel-id space that is already reserved for them.  Drums, Clips, Vox and Inst all need id-range
+work first.
+
+**Links to the destroy-on-close decision.**  Per-strip UI cost (a vblank meter drain plus two
+listeners per strip) scales linearly with instance count.  It is negligible at 39 instruments --
+Jeff's close-all-windows test moved nothing measurable, and the 30% is dominated by DSP, not UI --
+but it would not stay negligible if the caps double or quadruple.  So raising the caps raises the
+value of stopping hidden pages' timers and vblank attachments, and lowers nothing about the case
+against a full page-destruction refactor.
+
+### Rename the Inst entry to "Live Instrument" (Jeff, 2026-07-28)
+
+Held for the layout batch.  "Inst" does not say what the page IS, and it now sits next to
+BaySickGuitars / BaySickBasses in the "+" menu, which are ALSO Inst tabs -- so the bare word reads
+as a fourth mystery option rather than as "the live-input one".  Rename it to **Live Instrument**.
+
+Scope note for whoever does it: this is a user-facing string, so it is not a single-site change.
+`TabType::Inst` is the internal enum and must NOT be renamed with it (persisted state keys off the
+enum's integer value).  The sites to sweep are the ribbon tab label, the "+" menu row, the mixer
+strip label (`MixerPage.cpp` already says "Instrument Input" -- reconcile to one term rather than
+adding a third), and any page title / piano-roll context label that spells "Inst".
+
+Nothing above is fixed in QA-ModelShell.  The review batch calls the issues out; its scope is
+authored once Jeff's sizing pass has produced the data.
+
+## 2026-07-28 — TS4 — shell debugging round: five crashes fixed, one defect still open
+
+Jeff ran the shell for the first time.  Everything below came out of that session; the crash
+stacks he captured are what made each diagnosis possible rather than guesswork.
+
+### Fixed, with cause
+
+1. **Windows never appeared at all.**  Pages are built in `StandaloneEditor`'s CONSTRUCTOR, which
+   runs before the editor is handed to the window -- so there was no HWND to parent to,
+   `getNativeParentHandle()` returned null, and `attachTo` skipped its whole `addToDesktop` block.
+   Every window was constructed and then silently never attached.  Added a pending queue.
+2. **Close button crashed every time** (`~WorkspaceWindow` -> `Workspace::removeWindow`, AV).  The
+   button destroyed its own window from INSIDE `juce::Button::sendClickMessage`; `Button::mouseUp`
+   keeps running after the callback returns, on a button that no longer exists.  Close is now
+   deferred through `MessageManager::callAsync`.
+3. **`jlimit` crash while dragging.**  The containment clamp could hand `jlimit` a lower bound
+   ABOVE its upper bound (any window wider than the workspace minus the keep-visible margin) and
+   `jlimit` has no defence against an inverted range.  Replaced with an explicitly ordered clamp
+   shared by the drag and relayout paths.
+4. **Paint crash** (`drawLinearSlider` -> `coordsToRectangle`).  The relayout clamp could shrink a
+   window BELOW its own minimum, producing a NEGATIVE content area; the first slider that painted
+   into it died.  The floor is now applied after the fit, so a negative rect cannot be produced.
+5. **`MixerPage::removeLayerChannel` reading 0x8.**  Destroying a page dangles the editor's CACHED
+   RAW POINTERS into it -- `mMixerPage`, `mBuilderPage`, `mEffectsPage`, `mPianoRollPage`, and the
+   three `mLegacy*`.  Closing the Mixer window left `mMixerPage` pointing at freed memory and the
+   next teardown call read a destroyed `std::map`.  **`mMixerPage` alone is dereferenced 103 times
+   with essentially no null guards**, so nulling the pointer is NOT a fix -- those call sites have
+   to stop assuming the page exists.  **PAGE DESTRUCTION IS THEREFORE OFF**: closing a window
+   destroys the window and its child components but keeps the page.  The CPU dividend is not yet
+   claimed.  Re-enable per type only after that type's cached pointers are made safe.
+
+Also fixed in the same round: **tooltips** (each contained window needs its OWN
+`juce::TooltipWindow` -- it only monitors components inside its own desktop window;
+`KeyBindsWindow` already had this exact workaround with a comment saying so), **delete-to-zero**
+(a stale `count > 1` gate on Layers/Bass/Drums in the ribbon dropdown survived docket 18 and
+silently reinstated the old floor -- with the new tab bar that left no way to remove a type),
+**bottom-edge drag** (containment now computed in SCREEN space; deriving the workspace origin in
+parent-client space needed both conversions to be right and one was not), and **window move**
+(the page menu filled the title strip and swallowed every click -- `setInterceptsMouseClicks
+(false, true)` lets empty strip area fall through while its buttons still work).
+
+### RULED OUT -- do not re-test these
+
+- **`ResizableBorderComponent` blocking title-strip clicks.**  Its `hitTest` returns false in the
+  centre (verified in the vendored JUCE), so it does not consume the drag area.
+- **`ComponentDragger`'s arithmetic.**  Sound.  The move was rewritten to apply a SCREEN-SPACE
+  DELTA to the captured bounds anyway, because a delta is identical in both coordinate spaces --
+  but the dragger was not the bug.
+- **Member destruction order as the explanation for the LIVE crashes.**  `mWorkspace` WAS declared
+  after `mPages` (destroyed first -- genuinely wrong, and fixed: it is now declared before), but
+  that only affects teardown.  It does not explain a crash mid-session.
+- **The deferred-attach queue as the explanation for the remaining defect.**  Jeff's full debug log
+  shows NEITHER queue message ever printed, so `mPendingAttach` is never non-empty and that path is
+  not being taken.  Driving `attachPendingWindows()` from `resized()` was added anyway (harmless,
+  correct) but it is NOT the fix.
+- **A dying `Workspace` as the explanation.**  The `outlived its Workspace` DBG fires while the app
+  is still running, so the object is alive; the WINDOW'S REFERENCE to it is what is bad.
+
+### STILL OPEN -- the one remaining defect
+
+Symptoms, all from one cause: the first window does not appear until its tab is clicked; magnetism
+never engages; windows escape the frame.  **Windows created at PAGE-CREATION time have a null
+`Workspace` reference; windows created on REOPEN have a valid one** -- Jeff confirmed by closing
+and reopening, after which containment and magnetism both worked.  That single fact explains all
+three, because `clampToWorkspace` and `applyMagnetism` both early-return on a null workspace and an
+unattached window never completes setup.
+
+`mWorkspace` is assigned ONLY in `attachTo`.  The queue is provably unused.  So exactly one of two
+assumptions is false: either `attachTo` is not running for those windows, or it IS running with a
+non-null parent handle far earlier than should be possible.
+
+**Diagnostic shipped to answer it in one run** (Rule 4 catalog below): a DBG at the top of
+`attachTo` printing the persist key, whether the parent handle was null, and the workspace size;
+and one in `hostPageInWindow` printing when it SKIPS because the editor's workspace or the page is
+null.  Between them the next run says which assumption is wrong.
+
+### Diagnostic Instrumentation Catalog (Rule 4)
+
+| Site | Tag | Purpose | Disposition |
+|------|-----|---------|-------------|
+| `WorkspaceWindow::workspace()` | `[TS4 SHELL]` | One-shot warn when a window's Workspace ref is dead -- containment/magnetism silently off | Remove at TS4 close |
+| `Workspace::attachPendingWindows` (x2) | `[TS4 SHELL]` | Whether the pending queue drains or stalls with no peer | Remove at TS4 close |
+| `WorkspaceWindow::attachTo` | `[TS4 SHELL]` | Persist key + parent-handle state + workspace size at attach | Remove at TS4 close |
+| `StandaloneEditor::hostPageInWindow` | `[TS4 SHELL]` | Why a page was not framed (null workspace vs null page) | Remove at TS4 close |
+
+### Not a code bug, recorded so it is not re-diagnosed
+
+A stray `6` was typed into the vendored `juce_ReferenceCountedObject.h` line 418 while Jeff's
+debugger sat on that line -- one character, 1062 compile errors across JUCE core.  Restored with
+`git checkout`.  If a build ever fails en masse inside `juce/`, check `git status juce/` FIRST.
+
+Related: an exe-locked link failure can leave STALE OBJECTS, and the next build then reports
+`RELEASE_EXIT_CODE=0` while a source file still has a live compile error.  Judge a build by the
+error grep AND the `vcxproj -> ....exe` link lines, not the exit code alone.
+
+- **Cursor stays stuck to a dragged window** (Jeff spec 2026-07-28).  Previously the window
+  stopped at the workspace edge while the mouse kept travelling, so the pointer slid off the title
+  bar and the window stopped tracking the grab point.  `mouseDrag` now measures the difference
+  between where the drag WANTED the window and where containment/magnetism actually put it, warps
+  the cursor by that correction, and re-baselines the drag anchor by the same amount -- so the next
+  event computes the identical position, the correction falls to zero, and the warp cannot feed
+  back on itself.
+
+### Correction: the `outlived its Workspace` line was a FALSE POSITIVE
+
+Recorded because it cost a full debug round and would cost another one to anybody reading the log
+above at face value.  `WorkspaceWindow::workspace()` warns once, latched, when its Workspace
+reference is null.  But `hostPageInWindow` calls `setContentNonOwned` BEFORE `attachTo`, and
+setting content triggers a layout -- so the very first call to `workspace()` happens while the
+reference is still legitimately unset, the latch is spent there, and the warning never once
+described the state it was written to catch.  It fired for healthy windows.
+
+That also kills the framing in the entry above: `attachTo` assigns `mWorkspace` on its FIRST line,
+before any early return, so a genuinely null reference at drag time cannot mean the Workspace died
+-- it can only mean `attachTo` never ran for that window at all.  `workspace()` now warns only
+after an attach has been attempted.
+
+Three facts are now established and should not be re-derived: there is exactly ONE `Workspace`
+(created in the editor constructor, a `unique_ptr` member that is never reset), the pending-attach
+queue is pumped from BOTH `parentHierarchyChanged` and `resized`, and containment plus magnetism
+each early-return their input when the workspace is missing or has no size -- which is why they
+fail invisibly rather than misbehaving visibly.
+
+The remaining question -- does a window that escapes the frame have a null workspace, or a valid
+one whose size is still 0x0 because the frame had not been laid out when the window attached? --
+is now answered directly by two additions: `hostPageInWindow` logs every SUCCESSFUL framing with
+the tab id, persist key and the workspace's size at that instant, and `mouseDown` dumps, per drag,
+the live workspace size, the workspace and window SCREEN rects, and the sibling count.  One run
+distinguishes the two.
+
+### Cursor-pin regression and its fix (same day)
+
+The first cut of the cursor pin shipped broken and Jeff hit it immediately -- the pointer detached
+on mouse-down and the window flickered around the screen, hard enough to block testing anything
+else.  Cause: it warped the cursor by the containment correction AND re-baselined the drag anchor
+by the same correction.  Those cancel exactly.  The synthetic move arrives at `screen + corr` while
+the anchor has also moved by `corr`, so the delta -- and therefore the desired position -- is
+unchanged, the clamp yields the same correction, and it warps again on every event without end.
+The window sat pinned at the edge while the cursor ran away one correction per event.
+
+Warping ALONE converges, in one event: the next event's delta grows by `corr`, so the desired
+position becomes the already-clamped one, the correction falls to zero and the warping stops.  The
+re-baseline was the entire bug; removing it is the fix.  A per-drag warp cap was added as a safety
+valve -- not part of the algorithm, but it means a future mistake in the clamp or the magnet
+degrades to "the cursor comes unstuck" rather than "the app is unusable".
+
+Worth stating for the layout batch: magnetism composes with this correctly.  A snap produces a
+correction like any other, so the cursor follows the window into the snapped position, and the next
+event sees desired == snapped and settles.  Escaping the snap still just means moving further than
+kSnapPx, so it remains a soft ramp rather than a lock.
+
+### Root cause found: the Workspace was being created inside a lambda
+
+The debug run settled it, and the cause was a bad edit of mine rather than anything subtle about
+JUCE.  `mWorkspace = std::make_unique<Workspace>()` plus its `addAndMakeVisible` had been inserted
+INSIDE the body of the `onMixerStripParamsCreated` callback instead of into the constructor.
+Confirmed against HEAD: that lambda's original body was the single line
+`registerStaticAutomationHandlers();`.
+
+Two consequences, and between them they account for every symptom reported since the shell first
+ran:
+
+* **The Workspace did not exist until a mixer strip materialized.**  The log shows tabs 1-5 all
+  reporting `hostPageInWindow SKIPPED ... workspace=NULL page=OK` -- those pages were never framed
+  at all, which is the "first window does not pop up until I click the tab" report.  Clicking the
+  tab re-ran the call later, by which time a strip had been created.
+* **It was RE-CREATED on every subsequent strip.**  A `unique_ptr` assignment destroys the previous
+  object, so every window already attached to the old Workspace was orphaned -- `[TS4 SHELL]
+  WorkspaceWindow '6:6' outlived its Workspace` followed by `drag '6:6' NO WORKSPACE`.  Containment
+  and magnetism both early-return without a workspace, so those windows silently escaped the frame
+  and could be dragged somewhere unretrievable.
+
+The log also caught the size question directly: `attachTo '6:6' ... wsSize=0x0` versus
+`attachTo '7:5' ... wsSize=1534x724`.  A window CAN attach before the workspace is laid out and that
+is harmless, because the clamp reads the live size at drag time, not the size at attach.  The
+0x0-at-attach reading was a symptom of the late creation, not an independent bug.
+
+Fix: the Workspace is now the FIRST statement of the constructor, so it cannot be missing when a
+page is framed and cannot be built twice.  The lambda is restored to its original single line.
+
+Also fixed while the evidence was fresh: `hostPageInWindow` now returns early (bringing the window
+to front) when the page is ALREADY framed.  The log showed it running twice for two different tabs
+-- several callers invoke it both on page-add and on tab selection -- and the second call was
+destroying a live, positioned window to build a fresh one in its place.
+
+### The magnet was a trap, not a ramp
+
+Separate defect, reported the same run: "hard snapping to the outer edge ... takes a couple seconds
+to pull it off".  Cause was the interaction between the new cursor pin and magnetism.  The pin
+warped the cursor by the FULL correction, magnetism included -- so a small move away from a snapped
+edge was pulled back by the magnet AND the pointer was dragged back to match, leaving the next
+event starting from the snapped position again.  Escaping required out-running the snap inside a
+single mouse event, which at normal polling rates cannot be done by moving slowly.  It read as a
+30px-strong lock even though kSnapPx is 10.
+
+The correction is now measured from the SNAPPED position rather than the raw desired one, so only
+containment moves the cursor.  Magnetism costs nothing: the window offsets under the pointer by up
+to kSnapPx and pulling away just works.  Sibling-to-sibling snapping was already behaving well
+("the normal magnet ... did seem to work"), and this does not change it.
+
+### Process note
+
+These edits were made with a scripted string replacement rather than the editing tool, and the
+replacement matched a location inside a lambda.  It compiled clean and passed every build gate,
+because misplacing a statement into the wrong brace level is a RUNTIME fault, not a syntax one.
+A sweep of the whole working diff for the same fingerprint -- an added line indented shallower than
+the line above it, inside an open block -- turned up three hits, all benign multi-line
+continuations.  Source edits go through the editing tool from here.
+
+### Empty title strips at launch, and the launch-open policy
+
+Two items from the next run, both in the same area.
+
+**Title-strip buttons missing on every window framed at launch.**  `showPageForTab` is the function
+that points the editor's page-menu pointer at a window's own title-strip menu and then builds its
+contents -- tab slots, MID/SIDE, menu builders, the extra right-hand components.  It runs for the
+ONE tab that gets selected.  Every other window framed during construction therefore came up with a
+bare strip, and closing and reopening it fixed the display because reopening routes through tab
+selection.  Fixed by walking the already-framed pages at the end of the constructor and running
+that configuration for each, immediately before the startup tab selection -- which runs last and so
+still leaves the active window in front and the menu pointer on it.  The walk deliberately skips
+pages with no window, so it does not defeat the policy below.
+
+**Launch now opens the Builder grid and the Mixer only** (Jeff, 2026-07-28).  Previously every
+statically-created page was framed as it was built, so the Effects and Piano Roll windows came up
+uninvited.  `hostPageInWindow` now declines to frame anything but those two until the constructor
+finishes; the rest frame the first time their tab is selected, which `showPageForTab` already
+handles for a page whose window is null.  The startup selection is Builder (tab id 3), which is in
+the open set, so it costs no extra window.
+
+Left deliberately undecided: what should happen on PROJECT LOAD, which recreates pages after
+startup and would therefore frame all of them under the current rule.  That is a spec call, not a
+default to invent.
+
+### Per-window key routing, and resize containment
+
+**Key routing.**  A contained window is its own desktop component, so a key press inside it bubbles
+up to that window and stops -- it never reaches the editor.  Every global binding (transport, undo,
+the typing keyboard) was therefore dead in every window except the frame itself.  Each window now
+gets the editor's `KeyPressMappingSet` and the editor's own KeyListener registered on it, which is
+the same fix the History window already used for the same reason.
+
+ORDER IS LOAD-BEARING and deliberately mirrors the editor's constructor: the mapping set is
+registered FIRST and the typing-note gate LAST.  `ComponentPeer::handleKeyPress` iterates a
+component's key listeners in REVERSE registration order, so last registered outranks -- and the bare
+note letters have to outrank the letter command bindings they collide with.  Registering these two
+the other way round would silently break typing-keyboard notes in every window, with no compile or
+runtime error to show for it.
+
+Lifetime is safe in the direction that matters: the window holds pointers to the listeners, and the
+window dies first.  `Component`'s destructor frees its listener array without calling anything on
+the listeners, so even the reverse order would not fault.
+
+**Resize containment** (Jeff, 2026-07-28: "it still lets you stretch the box beyond the border").
+The drag path and the resize path are DIFFERENT paths -- mouseDrag clamps, but a resize goes through
+`ResizableBorderComponent` -> the bounds constrainer, which knew nothing about the workspace.  The
+constrainer is now a small subclass overriding `applyBoundsToComponent`, routing through a new
+`clampResizeToWorkspace`.
+
+That clamp TRIMS THE EDGES that went outside rather than sliding the whole window back in the way
+the drag clamp does: during a resize the user is dragging ONE edge, and moving the opposite edge to
+compensate is not what that gesture means -- the dragged edge should simply stop.  Every bound is
+built from an explicit jmax/jmin pair rather than jlimit, because a workspace smaller than a
+window's own floor would hand jlimit an inverted range, which is the crash this file already took
+once.  Precedence is floor over trim, workspace over floor, so a window can neither be squeezed to
+a negative content area nor end up bigger than the region containing it.
+
+The constrainer was also moved to be declared BEFORE `mResizer`: the resizer holds a raw pointer to
+it and members destruct in reverse declaration order, so the pointed-at object must be declared
+first in order to outlive the thing pointing at it.
+
+### Destroy-on-close resolved as option (d): peer-keyed UI suspend
+
+Jeff's ruling 2026-07-28, taken after measurement rather than from the batch plan's assumption.  The
+plan justified full page destruction by a CPU dividend that turned out not to be there: he ran
+**6 Vox + 20 Inst + 8 Layers + 4 Bass + 1 Rusty -- the hard cap on four of those five types -- at
+about 30% sys and dsp against a ~10% baseline**, and closing every window moved nothing measurable.
+Spending a few hundred call sites of dangling-pointer risk (mMixerPage alone is dereferenced 104
+times) to reclaim something that does not register is a bad trade.  **PAGE DESTRUCTION STAYS OFF.**
+
+**Correction to the previous entry, which overstated the problem.**  Three of the four vblank owners
+-- `VUMeter`, `DBFSMeter` and `SlotComponent` -- ALREADY suspend themselves, each with a
+`parentHierarchyChanged()` keyed on `getPeer() != nullptr`.  So the per-strip meter attachments and
+the effect-slot attachments were never the leak; they stop the moment a window closes.  Only
+`MixerPage`'s own vblank (the per-strip drain loop) and three page timers were unmanaged.
+
+That also meant the right implementation was NOT a new suspend interface with a tree walk, which is
+what was first sketched.  The convention already existed three times over, so the fix follows it:
+
+* `MixerPage` -- vblank attachment AND the 30 Hz page poll, both now peer-keyed.
+* `EffectsPage` -- 30 Hz poll, peer-keyed.
+* `BuilderPage` -- 30 Hz animation poll, peer-keyed.  Deliberately kept SEPARATE from its existing
+  `visibilityChanged`, which manages a key listener: different concern, different trigger, and
+  merging them would tie key routing to peer state for no reason.
+* `PianoRollContainer` -- left alone on purpose.  It runs at 5 Hz (`startTimer(200)` is 200 ms, not
+  200 Hz -- an easy misread) and its callback already early-outs on `isShowing()`, so there is
+  nothing to reclaim and a hook would be pure churn.
+
+**The constructors no longer start these.**  Starting a timer or attachment in a page constructor
+would run it for a page that is built but never framed -- which is now a NORMAL state, since windows
+open lazily and `parentHierarchyChanged` never fires for a component that is never parented.  The
+hook owns the lifecycle start to finish.
+
+Why this is safe, verified in the code rather than assumed: the audio thread CAS-maxes into the node
+peak and stores it into the public atomic every block, whether or not a UI reader exists, so
+suspending the reader removes message-thread work only -- audio playback and player-page adjustments
+are untouched.  Every meter path is a plain atomic exchange with no ring buffer or queue behind it,
+so nothing accumulates a backlog and spikes on reopen (a failure mode this codebase has hit before,
+and the reason it was checked).  On reopen the atomics already carry the current block's values, so
+meters are live within one block; the only loss is history for the period nobody was watching --
+a flat stretch in the scrolling RMS and a peak-hold that restarts from current.
+
+**Scaling note, which is the real reason this was worth doing at all:** per-strip UI cost scales
+linearly with instance count.  It is negligible at 39 instruments.  It would not stay negligible if
+the caps double or quadruple, which is live (see the cap re-evaluation entry).  This does not make
+raising the caps easier to BUILD -- the channel-id work and the PRTarget-shift hazard are unchanged
+-- it makes a raised cap cheaper to RUN.
+
+### CL-060's PARALLEL half -- assessed, not built
+
+The lazy half is delivered (launch frames only Builder + Mixer; everything else frames on first tab
+selection).  The parallel half was assessed before touching it, and it is not the small item the
+plan's one-line entry implies.
+
+**Where project-load time actually goes.**  The restore path walks saved tabs one at a time,
+creating each page and then calling `applyEngineState`.  The heavy work inside that is
+`mSfizz->loadSfzFile(...)` -- a BLOCKING call, once per sfizz engine, in
+`BaySickGuitarsProcessor`, `BaySickBassesProcessor` and `BaySickRustyDrumsProcessor`.  Jeff's own
+test project has 20 Inst tabs, so that is 20 sequential SFZ parses plus sample loading on the
+message thread, which is why the load overlay steps tab-by-tab.
+
+**Why it cannot simply be threaded.**  JUCE components must be constructed on the message thread, so
+the PAGE half is not parallelizable at all.  The SFZ load half is pure data work and genuinely
+could move to a pool -- but `loadSfzFile` mutates the sfizz Synth object, and by the time it runs
+the engine may already be in the audio graph.  Doing it safely means restructuring the engine
+lifecycle: construct the engine, keep it OUT of the graph, load the SFZ on a pool thread, and splice
+it in on the message thread once loading completes.  That is a real change to engine construction
+ordering -- the area TS1's EngineRig now owns, and the riskiest area in the codebase to get wrong.
+
+**So the shape of the decision is:** the remaining win is load TIME only, the work touches
+audio-graph splicing, and nobody has yet said load time is a problem.  Surfaced to Jeff rather than
+either building it speculatively or quietly dropping it.
+
+### Loading readout: bar + percent + running ticker; and the missing live-Inst route
+
+**Measurement that prompted it** (Jeff, 2026-07-28): a project with 8 Layers, 4 Bass, 6 Vox,
+6 BaySickGuitars, 4 BaySickBasses, 10 Inst, a Rusty setup and a full 16-drum kit took **23 seconds
+to load**.  Starting a new project from it took 4 seconds, "the majority of which was the app
+tearing down all the windows."
+
+That second number is the useful one, because it bounds the first.  If tearing down ~30 windows
+costs a few seconds, BUILDING them costs the same order -- so of the 23 s, windows are a small
+minority and the bulk is ENGINE and SAMPLE loading.  Which means lazy windows at load would barely
+move it: an engine has to load whether or not anyone opens its page, because audio must work.  The
+only change that would actually cut 23 s is parallelising the SFZ loads, and the only change that
+fixes the EXPERIENCE is telling the user what is happening.  Jeff chose the latter.
+
+**What was already there.**  `HeavyOperationOverlay` already existed with `beginOp` /
+`setStep(i, n, label)` / `setStepLabel`, a determinate progress bar, and -- the part that makes it
+work at all -- a synchronous paint pump (`ComponentPeer::performAnyPendingRepaintsNow`) on every
+state change, because these ops hold the message thread and a plain `repaint()` would never reach
+the screen until the freeze ended.  So this was coverage and detail, not a new feature.
+
+**Added:**
+
+* **Percent**, right-aligned on the title row, and ONLY when the op is determinate -- an
+  indeterminate op has no honest number and inventing one is worse than showing none.
+* **A running ticker** -- the tail of everything loaded so far under the current step, oldest
+  faintest, so a long load reads as motion rather than as a hang.  Bounded at 64 retained / 8 drawn
+  (a many-tab project would otherwise grow it unbounded), blanks and consecutive repeats skipped
+  (several call sites re-set the same label, and a ticker that repeats itself reads as stuck), and
+  the tail deliberately EXCLUDES the newest entry because the current step is already drawn above
+  it.  Panel height now grows with the ticker so short ops still get a compact box.
+* **Reporting at the actual cost centre.**  The SFZ parse + sample load is the longest blocking step
+  in a load and runs once per sfizz tab.  All three kit loads route through `VibeSynthProcessor`,
+  which already owns `onLoadProgress`, so that hook is now fired immediately BEFORE each
+  `loadKit` -- before, not after, since the overlay pumps paint on every state change and the label
+  has to reach the screen ahead of the freeze.  Engine name + instance number + kit name.
+
+**Separate defect, same report: the "+" menu had no live-instrument route.**  It offered
+BaySickGuitars and BaySickBasses (both of which are Inst tabs) but no way to create a plain
+live-input Inst tab -- the direct counterpart of BaySickVocal -> Vox.  Added as `BaySickPedals`,
+named for its engine like every other row in that menu, and gated on the SAME `onIsInstCapReached`
+check as the other two, because all three share the Inst cap.  That required giving the engine-row
+table an `enabled` field; single-target rows previously had no way to be disabled.
+
+### The load overlay was invisible -- and it is a CLASS of bug, not a one-off
+
+Jeff, 2026-07-28: "I don't see the popup for loading."  It was being drawn the whole time, just
+underneath everything.
+
+`HeavyOperationOverlay` is a DRAWN JUCE component parented to the editor, with `setAlwaysOnTop` --
+which only orders it among its drawn siblings.  The contained windows are NATIVE CHILD PEERS, and an
+OS window always renders above anything painted into its parent's client area.  z-order between an
+OS window and a drawn component is not something the OS can express, which is exactly the reasoning
+recorded in `WorkspaceWindow.h` for making the windows child peers in the first place (so hosted
+VST3 editors could not permanently obscure our frames).  The same property that solves that problem
+buries every drawn overlay in the editor.
+
+Fixed by making the overlay actually BE a window while it shows: the outermost `beginOp` promotes it
+to its own always-on-top desktop window covering the editor's SCREEN bounds (desktop windows are
+screen-relative -- unlike the contained windows, which are child peers in parent-client space), and
+the matching `endOp` returns it to being an ordinary hidden child so the editor's teardown owns it
+exactly as before.  `windowIsTemporary` keeps it off the taskbar and stops it becoming the app's main
+window mid-load.  `parentSizeChanged` now only applies while it is a child, since on the desktop its
+bounds are set by the promotion.
+
+**THE GENERAL RULE, because this will happen again:** with the windowed shell, ANY drawn overlay that
+lives in the editor and is expected to cover the workspace is now invisible behind the contained
+windows.  `setAlwaysOnTop` does not help -- it does not cross the drawn/native boundary.  Such a
+thing must be promoted to its own desktop window.  This is the second instance already: the tooltips
+needed the same treatment for the same underlying reason (a `TooltipWindow` only monitors components
+in its own desktop window).  Anything else that assumed "child of the editor + always-on-top =
+covers everything" should be audited against this before it is trusted -- the failure is SILENT,
+since the component paints normally and is simply never seen.
+
+### The load overlay's paint pump was a no-op under Direct2D
+
+Jeff: the panel appeared but "just sits at 0% while everything loads and never says any files."  The
+z-order fix made it visible; this is why it was still frozen -- and it turns out the overlay has
+never worked, before this batch or after.
+
+`HeavyOperationOverlay`'s whole premise is that these ops hold the MESSAGE THREAD, so a plain
+`repaint()` never reaches the screen until the op finishes -- and it therefore calls
+`ComponentPeer::performAnyPendingRepaintsNow()` on every state change to force the paint through.
+Verified in the vendored JUCE 8.0.12 (`juce_Windowing_windows.cpp`), there are two render contexts
+and they do NOT agree:
+
+* `GDIRenderContext` (:4897) -- implements it properly: invalidates the deferred rects, then pumps
+  `WM_PAINT` messages.
+* `D2DRenderContext` (:5214) -- **`void performAnyPendingRepaintsNow() override {}`.  Empty.**
+
+JUCE 8 defaults to Direct2D (the "JUCE D2D swap chain thread" lines in any debug run confirm it), so
+the pump has been doing nothing.  The panel paints ONCE -- when the OS first shows the window -- and
+then sits at whatever state it had for the entire freeze.  Nothing errors and nothing logs; the
+component paints correctly and simply never reaches the screen again.
+
+Fixed by switching the OVERLAY'S OWN PEER to the Software Renderer immediately after
+`addToDesktop`.  The panel is flat 2D with no images or effects, so software rendering costs
+nothing, and it is the only surface in the app that must paint while the message thread is blocked
+-- every other surface repaints normally on the message loop and keeps D2D.  The engine is selected
+by NAME (`"Software Renderer"`, matched against `getAvailableRenderingEngines()`) rather than by
+index, because the order of `contextDescriptorList` is an implementation detail a JUCE update could
+reorder and picking the wrong one fails silently.
+
+**Standing consequence:** any future "show progress while the message thread is blocked" surface has
+the same requirement.  Under D2D the synchronous pump is unavailable, so such a surface must own its
+own peer AND select the software renderer on it.  The alternative -- moving the heavy work off the
+message thread -- is the real fix and is what CL-060's parallel half would begin.
+
+### DROPPED: CL-060's parallel-page-restoration half (Jeff, 2026-07-28)
+
+Recorded as an explicit removal, not a quiet omission.  **Jeff's words: "as for the parallel half
+lets just drop that."**  This was TS4 checklist item (6) in the batch plan and is hereby OUT of
+QA-ModelShell, and out of the immediate plan entirely -- it is not being re-routed to the layout
+batch or to any other batch.
+
+What is dropped: parallelising project-load work, specifically moving the per-tab SFZ parse and
+sample load off the message thread.  What is NOT dropped and IS shipped: CL-060's LAZY half at
+launch -- only the Builder grid and the Mixer frame at startup, everything else frames the first
+time its tab is selected.
+
+Why it was droppable.  The measured load was 23 s on a project with 8 Layers, 4 Bass, 6 Vox,
+6 Guitars, 4 Basses, 10 Inst, a Rusty setup and a 16-drum kit.  The bulk of that is the blocking
+`loadKit` call once per sfizz tab.  Parallelising it would mean restructuring engine construction --
+build the engine, keep it OUT of the audio graph, load the SFZ on a pool thread, splice it in on the
+message thread when done -- inside the area TS1 has just rebuilt, which is the riskiest code in the
+project to get wrong, for a win that is load TIME only.  The loading readout shipped this session
+addresses the actual complaint (a silent multi-second freeze with no explanation) at a fraction of
+the risk.
+
+Consequence to handle at batch close: `Future State.md` still carries CL-060 with both halves.  Its
+entry needs updating to reflect that the lazy half shipped in QA-ModelShell and the parallel half was
+dropped by owner ruling -- routed per Main Plan §0 Rule 3 rather than edited here.
+
+## 2026-07-28 — /doctor run: CLAUDE.md, memory and settings audit (NOT batch work)
+
+Run at Jeff's request mid-TS4, between the TS4 build items and the commit gate.  Logged here
+because it leaves REPO changes that the TS4 commit gate has to disposition, and because one of its
+outcomes is a governing-rule ruling.
+
+**Repo changes (uncommitted, will appear in the TS4 git status):**
+
+* `CLAUDE.md` 44,814 -> 22,525 chars (~11.1k -> ~5.6k est resident tokens).  Deleted `## Source
+  Layout` (92 lines; it was missing TEN of the sixteen `Source/` subdirectories -- every engine
+  family added since April, plus WorkspaceWindow / EngineRig / EffectParamMap / AppPaths) and
+  `## Completed Work` (95 lines, frozen at Phase D in April, duplicating `Previously
+  Implemented.md`).  `## Next Steps` rewritten: it had said "Next batch: QA-Md" for nearly three
+  months after QA-Md closed, so the replacement carries an explicit instruction NOT to record a
+  current position in that file at all.  Removed the `/draft-commit` table row (three other lines
+  said to skip it, and no such command file exists) and corrected both agent counts.
+* `.claude/skills/apvts-reference/SKILL.md` NEW -- `## APVTS Parameter IDs` moved out of CLAUDE.md
+  into a lazily-loaded skill (~1k tokens off every session; content unchanged).
+* `.claude/agents/commit-drafter.md` DELETED -- retired by Rule 9; the user-scope copy remains.
+
+**GOVERNING RULE SETTLED -- commit policy.**  Two memory files gave OPPOSITE instructions: one said
+commit at verified checkpoints without asking (and explicitly claimed to override the
+never-commit-unasked default), the other said always surface and wait.  Jeff's ruling: **never
+commit unprompted -- always surface the brief Rule 9 message plus the FULL git status with
+per-entry dispositions, and commit only on his explicit approval.**  The CADENCE is a SEPARATE
+per-batch decision he sets ("some I've said commit once at the end of the batch and some at the end
+of each task") -- read the batch's own rules for which is in force and never carry the previous
+batch's cadence forward.  CLAUDE.md's Git Commit Mechanics section already matched this, so no
+reconciliation sweep was needed there.
+
+**Memory hygiene** (84 -> 83 files, outside the repo): every file now has a `description` -- seven
+had NO frontmatter at all and so may never have surfaced on recall, including the no-mid-task-commits
+and full-git-status rules.  `feedback_approval_is_not_a_go_signal`'s description claimed "Jeff runs
+manual mode", which is FALSE and had already misled a session into treating it as a statement about
+permission settings; his original words were about PLAN approval in ExitPlanMode.  Two files renamed
+(one whose FILENAME asserted the opposite of current truth), one obsolete file deleted.
+
+**Settings** (outside the repo): auto permission mode set as the user-scope default, `github` plugin
+disabled (0 uses since install), the stale npm-global CLI duplicate removed, and 6 of 16 permission
+allow-rules pruned -- four dead one-offs plus BOTH staging rules (`git add *`, which as a prefix
+wildcard also matched `git add -A`, and `git -C ... add -u`).  No staging is pre-approved now, which
+matches the stage-by-name rule.
+
+Nothing here touches BaySickDAW source or DSP.  The three repo entries above need a disposition line
+at the TS4 commit gate like any other working-tree change.

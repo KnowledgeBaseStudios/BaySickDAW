@@ -6466,6 +6466,16 @@ bool VibeSynthProcessor::loadBaySickGuitarsKit (int instIdx, const juce::File& s
     if (auto* eng = mGuitarsEngine[(size_t) instIdx].get())
         eng->setProcessingEnabled (false);
 
+    // The SFZ parse + sample load below is the single longest blocking step in
+    // a project load, and it happens once PER sfizz tab -- a 23 s load is
+    // mostly this (Jeff, measured 2026-07-28).  Report BEFORE the call: the
+    // overlay pumps the peer's pending paint synchronously on every state
+    // change, so the label reaches the screen before the freeze rather than
+    // after it.
+    if (onLoadProgress)
+        onLoadProgress ("Loading BaySickGuitars " + juce::String (instIdx + 1)
+                        + " - " + sfzPath.getFileNameWithoutExtension() + "...");
+
     if (! mGuitarsEngine[(size_t) instIdx]->loadKit (sfzPath))
     {
         // Even on failure, re-enable processing so the slot doesn't sit
@@ -6531,6 +6541,10 @@ bool VibeSynthProcessor::loadBaySickBassesKit (int instIdx, const juce::File& sf
 
     if (auto* eng = mBassesEngine[(size_t) instIdx].get())
         eng->setProcessingEnabled (false);
+
+    if (onLoadProgress)
+        onLoadProgress ("Loading BaySickBasses " + juce::String (instIdx + 1)
+                        + " - " + sfzPath.getFileNameWithoutExtension() + "...");
 
     if (! mBassesEngine[(size_t) instIdx]->loadKit (sfzPath))
     {
@@ -6607,6 +6621,10 @@ bool VibeSynthProcessor::loadBaySickRustyDrumsKit (const juce::File& sfzPath)
         mRustyProducerTask = std::make_unique<RustyDrumsProducerTask>(*this);
         mRenderDispatcher.registerTask(mRustyProducerTask.get());
     }
+
+    if (onLoadProgress)
+        onLoadProgress ("Loading BaySickRustyDrums - "
+                        + sfzPath.getFileNameWithoutExtension() + "...");
 
     if (! mRustyDrumsEngine->loadKit (sfzPath))
     {

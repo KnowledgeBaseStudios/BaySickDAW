@@ -61,21 +61,47 @@ juce::Colour RibbonTabBar::tabColour(TabType type, bool active)
 }
 
 // ── Static helpers ───────────────────────────────────────────────────────────
-RibbonTabBar::TabType RibbonTabBar::slotType(int slotIndex)
+bool RibbonTabBar::isRequiredTab (TabType type)
 {
-    // G-8 (2026-04-29): Builder is now the leftmost slot, immediately to
-    // the LEFT of Mixer.  Tab IDs remain fixed (assignment order in ctor
-    // unchanged), so existing `selectTab(<id>)` call sites keep working;
-    // only the visual ordering changes.
+    // Locked call: these four are always present regardless of instance count
+    // -- they are app surfaces, not instance collections.
+    return type == TabType::Builder || type == TabType::Mixer
+        || type == TabType::Effects || type == TabType::PianoRoll;
+}
+
+std::vector<RibbonTabBar::TabType> RibbonTabBar::visibleSlotTypes() const
+{
+    // G-8 ordering preserved: Builder leftmost, then Mixer / Effects, the
+    // instance types in their historical order, Piano Roll last.
     static constexpr TabType order[] = {
         TabType::Builder, TabType::Mixer, TabType::Effects,
-        TabType::Clip,  // 2026-04-28 (G-2): inserted between Builder and Layers
-        TabType::Vox,   // 2026-04-28 (G-4): Vox + Inst between Clip and Layers
-        TabType::Inst,
+        TabType::Clip, TabType::Vox, TabType::Inst,
         TabType::Layers, TabType::Bass, TabType::Drums,
-        TabType::PianoRoll   // 2026-04-26: unified piano-roll page
+        TabType::PianoRoll
     };
-    return order[juce::jlimit(0, kNumSlots - 1, slotIndex)];
+
+    std::vector<TabType> out;
+    for (auto t : order)
+        if (isRequiredTab (t) || countTabsOfType (t) > 0)
+            out.push_back (t);
+    return out;
+}
+
+int RibbonTabBar::numSlots() const
+{
+    return (int) visibleSlotTypes().size() + 1;   // + the trailing "+" slot
+}
+
+bool RibbonTabBar::isAddSlot (int slotIndex) const
+{
+    return slotIndex == numSlots() - 1;
+}
+
+RibbonTabBar::TabType RibbonTabBar::slotType(int slotIndex) const
+{
+    const auto v = visibleSlotTypes();
+    if (v.empty()) return TabType::Builder;
+    return v[(size_t) juce::jlimit (0, (int) v.size() - 1, slotIndex)];
 }
 
 bool RibbonTabBar::hasDropdown(TabType type)
@@ -402,10 +428,11 @@ juce::Rectangle<int> RibbonTabBar::slotRect (int slotIndex) const
     const int totalW = getWidth();
     const int totalH = getHeight() > 0 ? getHeight() : kTabH;
 
-    int desired[kNumSlots];
-    int minW   [kNumSlots];
+    const int nSlots = numSlots();
+    int desired[kMaxSlots];
+    int minW   [kMaxSlots];
     int sumDesired = 0;
-    for (int s = 0; s < kNumSlots; ++s)
+    for (int s = 0; s < nSlots; ++s)
     {
         const auto type = slotType(s);
         int natural     = naturalSingleLineWidth(s);
@@ -419,26 +446,26 @@ juce::Rectangle<int> RibbonTabBar::slotRect (int slotIndex) const
         sumDesired += natural;
     }
 
-    int widths[kNumSlots];
+    int widths[kMaxSlots];
     if (sumDesired <= totalW)
     {
         const int slack      = totalW - sumDesired;
-        const int slackPer   = slack / kNumSlots;
-        const int slackExtra = slack - slackPer * kNumSlots;
-        for (int s = 0; s < kNumSlots; ++s)
+        const int slackPer   = slack / nSlots;
+        const int slackExtra = slack - slackPer * nSlots;
+        for (int s = 0; s < nSlots; ++s)
             widths[s] = desired[s] + slackPer + (s < slackExtra ? 1 : 0);
     }
     else
     {
         const int excess = sumDesired - totalW;
         int shrinkRoom = 0;
-        for (int s = 0; s < kNumSlots; ++s)
+        for (int s = 0; s < nSlots; ++s)
             shrinkRoom += desired[s] - minW[s];
 
         int sum = 0;
         if (shrinkRoom >= excess && shrinkRoom > 0)
         {
-            for (int s = 0; s < kNumSlots; ++s)
+            for (int s = 0; s < nSlots; ++s)
             {
                 const int room = desired[s] - minW[s];
                 const int shrink = (excess * room + shrinkRoom / 2) / shrinkRoom;
@@ -450,13 +477,13 @@ juce::Rectangle<int> RibbonTabBar::slotRect (int slotIndex) const
         {
             // All slots already at min and still overflows -- proportional
             // scale below min as last resort.  drawFittedText handles text.
-            for (int s = 0; s < kNumSlots; ++s)
+            for (int s = 0; s < nSlots; ++s)
             {
                 widths[s] = (desired[s] * totalW + sumDesired / 2) / sumDesired;
                 sum += widths[s];
             }
         }
-        widths[kNumSlots - 1] += (totalW - sum);
+        widths[nSlots - 1] += (totalW - sum);
     }
 
     int x = 0;
@@ -468,12 +495,14 @@ juce::Rectangle<int> RibbonTabBar::slotRect (int slotIndex) const
 int RibbonTabBar::hitTestSlot(juce::Point<int> pos, bool& hitArrow) const
 {
     hitArrow = false;
-    for (int s = 0; s < kNumSlots; ++s)
+    const int nSlots = numSlots();
+    for (int s = 0; s < nSlots; ++s)
     {
         auto r = slotRect(s);
         if (r.contains(pos))
         {
-            if (hasDropdown(slotType(s)))
+            // The "+" slot has no dropdown arrow -- the whole slot is one hit.
+            if (! isAddSlot (s) && hasDropdown(slotType(s)))
             {
                 auto arrowR = r.withTrimmedLeft(r.getWidth() - kArrowW);
                 hitArrow = arrowR.contains(pos);
@@ -491,6 +520,13 @@ void RibbonTabBar::mouseDown(const juce::MouseEvent& e)
     int slot = hitTestSlot(e.position.toInt(), hitArrow);
     if (slot < 0) return;
 
+    // QA-ModelShell TS4: the trailing "+" slot owns every add option.
+    if (isAddSlot (slot))
+    {
+        showAddMenu (slotRect (slot));
+        return;
+    }
+
     TabType type = slotType(slot);
 
     if (hitArrow)
@@ -499,7 +535,10 @@ void RibbonTabBar::mouseDown(const juce::MouseEvent& e)
     }
     else
     {
-        // Body click: navigate to the active tab for this type
+        // Body click: navigate to the active tab for this type.  A type slot is
+        // only VISIBLE while it has >= 1 instance now, so the six empty-state
+        // branches that used to live here are gone with the placeholders they
+        // drove -- there is no such thing as clicking an empty type tab.
         int tabId = getActiveTabForType(type);
         if (tabId >= 0)
         {
@@ -509,34 +548,91 @@ void RibbonTabBar::mouseDown(const juce::MouseEvent& e)
             repaint();
             if (onTabSelected) onTabSelected(tabId);
         }
-        else if (type == TabType::Clip && onClipsEmptyStateRequested)
+    }
+}
+
+// The "+" menu.  Every way to bring a page into existence lives here, including
+// the routes that used to be buried in a populated type's dropdown (so they
+// were unreachable at zero instances) or on another page entirely.
+void RibbonTabBar::showAddMenu (juce::Rectangle<int> slotBounds)
+{
+    // Jeff spec 2026-07-28: every entry is an ENGINE name, and the engine
+    // decides the tab.  Engines that can live in more than one tab get a side
+    // submenu; the rest go straight in.  Nothing here is a page-type name and
+    // nothing is a disabled "go do it somewhere else" label.
+    struct Target { const char* label; TabType type; };
+
+    // (engine, where it can live) -- taken from each page's own engine list:
+    // LayersPage offers Harmless / BaySickPlayer / BaySickSynth, BassPage offers
+    // Harmless / BaySickPlayer / BaySickBass, DrumPage's picker is sample
+    // (BaySickPlayer) or synth patch (BaySickSynth), Clips are BaySickPlayer.
+    struct EngineRow { const char* engine; std::vector<Target> targets; bool enabled { true }; };
+
+    // Inst is a SHARED cap: BaySickGuitars, BaySickBasses and the live
+    // instrument chain all consume Inst slots, so the same gate covers all
+    // three.  Computed here because the table below needs it.
+    const bool instCapped = onIsInstCapReached && onIsInstCapReached();
+
+    const std::vector<EngineRow> kEngines = {
+        { "Harmless",       { { "Layers", TabType::Layers }, { "Bass", TabType::Bass } } },
+        { "BaySickPlayer",  { { "Layers", TabType::Layers }, { "Bass", TabType::Bass },
+                              { "Drums",  TabType::Drums  }, { "Audio Clips", TabType::Clip } } },
+        { "BaySickSynth",   { { "Layers", TabType::Layers }, { "Drums", TabType::Drums } } },
+        { "BaySickBass",    { { "Bass",  TabType::Bass } } },
+        { "BaySickVocal",   { { "Vox",   TabType::Vox  } } },
+        // Jeff 2026-07-28: the LIVE instrument route was missing entirely.  The
+        // menu offered the two sfizz Inst engines but no way to make a plain
+        // live-input Inst tab, which is the direct counterpart of BaySickVocal
+        // -> Vox.  Named for its engine like every other row.
+        { "BaySickPedals",  { { "Inst",  TabType::Inst } }, ! instCapped },
+    };
+
+    juce::PopupMenu m;
+    mAddMenuChoices.clear();
+
+    for (const auto& row : kEngines)
+    {
+        if (row.targets.size() == 1)
         {
-            // G-2: 0 Clip instances → editor shows the empty-state drop zone.
-            onClipsEmptyStateRequested();
+            const int id = kAddEngineBaseId + (int) mAddMenuChoices.size();
+            mAddMenuChoices.push_back ({ row.targets[0].type, row.engine });
+            m.addItem (id, row.engine, row.enabled);
         }
-        else if (type == TabType::Vox && onVoxEmptyStateRequested)
+        else
         {
-            // G-4: 0 Vox instances → editor shows "Click Add Vox Strip" hint.
-            onVoxEmptyStateRequested();
-        }
-        else if (type == TabType::Inst && onInstEmptyStateRequested)
-        {
-            onInstEmptyStateRequested();
-        }
-        // QA-ProjectSave docket 18 (2026-07-26): these three reach zero now.
-        else if (type == TabType::Layers && onLayersEmptyStateRequested)
-        {
-            onLayersEmptyStateRequested();
-        }
-        else if (type == TabType::Bass && onBassEmptyStateRequested)
-        {
-            onBassEmptyStateRequested();
-        }
-        else if (type == TabType::Drums && onDrumsEmptyStateRequested)
-        {
-            onDrumsEmptyStateRequested();
+            juce::PopupMenu sub;
+            for (const auto& t : row.targets)
+            {
+                const int id = kAddEngineBaseId + (int) mAddMenuChoices.size();
+                mAddMenuChoices.push_back ({ t.type, row.engine });
+                sub.addItem (id, t.label);
+            }
+            m.addSubMenu (row.engine, sub);
         }
     }
+
+    // The sfizz engines keep their own spawn routes (kit load + strip cascade),
+    // so they fire their dedicated callbacks rather than the generic one.
+    m.addItem (1, "BaySickGuitars", ! instCapped);
+    m.addItem (2, "BaySickBasses",  ! instCapped);
+    const bool rustyLive = onIsBaySickRustyDrumsActive && onIsBaySickRustyDrumsActive();
+    m.addItem (3, "BaySickRustyDrums", ! rustyLive);
+
+    m.showMenuAsync (juce::PopupMenu::Options{}
+                        .withTargetComponent (this)
+                        .withTargetScreenArea (localAreaToGlobal (slotBounds)),
+        [this] (int r)
+        {
+            if (r <= 0) return;
+            if (r == 1) { if (onAddBaySickGuitarsRequest)    onAddBaySickGuitarsRequest();    return; }
+            if (r == 2) { if (onAddBaySickBassesRequest)     onAddBaySickBassesRequest();     return; }
+            if (r == 3) { if (onAddBaySickRustyDrumsRequest) onAddBaySickRustyDrumsRequest(); return; }
+
+            const int idx = r - kAddEngineBaseId;
+            if (idx >= 0 && idx < (int) mAddMenuChoices.size() && onAddEngineRequest)
+                onAddEngineRequest (mAddMenuChoices[(size_t) idx].type,
+                                    mAddMenuChoices[(size_t) idx].engine);
+        });
 }
 
 // ── Dropdown menus ───────────────────────────────────────────────────────────
@@ -672,16 +768,19 @@ void RibbonTabBar::showInstanceDropdown(TabType type, juce::Rectangle<int> tabBo
         m.addSeparator();
 
         // Rename / Delete apply to the currently active instance.
-        // G-7 (2026-04-29): Clip/Vox/Inst can legitimately be at zero
-        // instances (empty-state page handles the no-tabs case), so
-        // Delete is enabled even when count == 1 for those types.
-        // Layer/Bass/Drum still require count > 1 (project must always
-        // have at least one of each).
-        const bool allowZero = (type == TabType::Clip
-                              || type == TabType::Vox
-                              || type == TabType::Inst);
+        //
+        // QA-ModelShell TS4 (2026-07-28): Delete is ALWAYS enabled.  This used
+        // to hold Layer/Bass/Drum at count > 1 on the reasoning that "project
+        // must always have at least one of each" -- a floor QA-ProjectSave
+        // docket 18 already retired everywhere else, and which this task set
+        // depends on being gone: a type tab now VANISHES from the ribbon at
+        // zero instances and returns via "+", so refusing to delete the last
+        // one left no way to remove a type the user does not want.  Found by
+        // Jeff 2026-07-28 -- deleting the empty-state pages removed the
+        // placeholder this gate's comment was written around, but the gate
+        // itself survived and silently reinstated the old floor.
         m.addItem(-1, "Rename...");
-        m.addItem(-2, "Delete", allowZero ? true : (count > 1));
+        m.addItem(-2, "Delete", true);
 
         m.addSeparator();
     }
@@ -904,8 +1003,20 @@ void RibbonTabBar::paint(juce::Graphics& g)
 {
     // No background fill - the parent transport bar's brushed-aluminum shows through.
 
-    for (int s = 0; s < kNumSlots; ++s)
+    const int nSlots = numSlots();
+    for (int s = 0; s < nSlots; ++s)
     {
+        // QA-ModelShell TS4: the trailing slot is the "+" add button, not a tab.
+        if (isAddSlot (s))
+        {
+            const auto r = slotRect (s);
+            g.setColour (juce::Colours::white.withAlpha (0.10f));
+            g.fillRect (r.reduced (2));
+            g.setColour (juce::Colours::white.withAlpha (0.85f));
+            g.setFont (juce::Font (18.0f, juce::Font::bold));
+            g.drawText ("+", r, juce::Justification::centred);
+            continue;
+        }
         TabType type = slotType(s);
         bool    sel  = isSlotSelected(s);
         auto    r    = slotRect(s);
@@ -1033,7 +1144,7 @@ void RibbonTabBar::paint(juce::Graphics& g)
         }
 
         // ── Separator between slots ──────────────────────────────────────────
-        if (s + 1 < kNumSlots)
+        if (s + 1 < nSlots)
         {
             g.setColour(juce::Colours::white.withAlpha(0.15f));
             g.fillRect(r.getRight() - 1, r.getY() + 4, 1, r.getHeight() - 8);

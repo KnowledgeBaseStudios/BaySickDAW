@@ -5,6 +5,7 @@
 #include "SharedUI.h"
 #include "GlobalTransportBar.h"
 #include "RibbonTabBar.h"
+#include "WorkspaceWindow.h"   // QA-ModelShell TS4: contained-window shell
 #include "TrackSelectionManager.h"
 #include "EffectsPage.h"
 #include "UndoActions.h"
@@ -24,11 +25,8 @@ class MixerPage;
 class PianoRollContainer;
 class KeyBindsWindow;   // 2026-04-26 (Phase A - keymap editor popup)
 class ClipsPage;        // 2026-04-28 (G-2: Clips engine page)
-class ClipsEmptyState;  // 2026-04-28 (G-2: Clips empty-state placeholder)
 class VoxPage;          // 2026-04-28 (G-4: Vox engine page)
-class VoxEmptyState;    // 2026-04-28 (G-4: Vox empty-state placeholder)
 class InstPage;         // 2026-04-28 (G-4: Inst engine page)
-class InstEmptyState;   // 2026-04-28 (G-4: Inst empty-state placeholder)
 class BaySickRustyDrumsPage;  // J-6 (2026-05-03): singleton drum-kit page
 
 // ── StandaloneEditor ──────────────────────────────────────────────────────────
@@ -173,7 +171,33 @@ private:
         int             ribbonTabId { -1 };
         RibbonTabBar::TabType type;
         std::unique_ptr<juce::Component> component; // the page content component
+        // QA-ModelShell TS4: the contained window this page is framed in.
+        // The page is still owned by `component` above -- the window hosts it
+        // non-owningly -- so every existing reach through `component` keeps
+        // working while the shell changes around it.
+        std::unique_ptr<WorkspaceWindow> window;
+        // The page's own index (Layer 2, Drum 5, ...).  Needed to REBUILD the
+        // page after destroy-on-close, when the component that used to answer
+        // getPageIndex() no longer exists.  -1 for the system pages.
+        int pageIndexHint { -1 };
     };
+
+    // Frame `entry`'s page in a contained window and attach it to the
+    // workspace.  Called at every page-creation site in place of the old
+    // addChildComponent.
+    void hostPageInWindow (PageEntry& entry);
+    // Stable per-logical-window key for bounds persistence (survives the
+    // window object, which destroy-on-close makes short-lived).
+    juce::String persistKeyFor (const PageEntry& entry) const;
+    // Destroy-on-close: closing a window destroys the WINDOW AND THE PAGE, and
+    // reopening rebuilds the page from the model.  The engine is untouched --
+    // it is rig-owned since TS1 -- so audio and automation are unaffected.
+    void closeWindowForTab (int tabId);
+    // Recreate a destroyed page for `entry` and re-bind it to the rig's live
+    // engine.  Returns false for the page types whose construction is still
+    // entangled with mixer-strip spawning (see the .cpp note).
+    bool rebuildPageForTab (PageEntry& entry);
+    static bool canRebuildType (RibbonTabBar::TabType t);
 
     // ── Core helpers ──────────────────────────────────────────────────────────
     void buildDefaultTabs();     // called in ctor: Builder + initial Layers/Bass/Drums
@@ -183,6 +207,8 @@ private:
     // every other tab type, so a saved project or template never carries tabs
     // the user did not ask for.
     void onAddTabRequest(RibbonTabBar::TabType type);
+    void applyEngineToNewestTabOfType (RibbonTabBar::TabType type,
+                                       const juce::String& engine);
     void onTabSelected(int tabId);
     void onTabClosed(int tabId);
     void onSubPageSelected(RibbonTabBar::TabType type, int subPageIndex);
@@ -395,7 +421,16 @@ private:
     // between the pattern button and the ribbon (same overlay pattern).
     std::unique_ptr<TransportPositionReadout> mPosReadout;
     std::unique_ptr<RibbonTabBar>       mRibbon;
-    std::unique_ptr<PageMenuBar>        mPageMenuBar;
+    // QA-ModelShell TS4 (locked call 4a): the page menu is no longer ONE bar
+    // under the transport -- each window owns its own inside its title strip.
+    // This points at the ACTIVE window's bar, so the ~77 existing
+    // `mPageMenuBar->...` configuration sites keep working verbatim.
+    //
+    // mDetachedPageMenu is a null object, never shown: it keeps the pointer
+    // valid when no window is active.  Only 2 of those 77 sites null-check, so
+    // a nullable pointer here would be a crash surface, not a design choice.
+    PageMenuBar*                        mPageMenuBar { nullptr };
+    std::unique_ptr<PageMenuBar>        mDetachedPageMenu;
 
     // ── D-4 typing-keyboard MIDI (QA-TransportDisplay 2026-07-08) ────────────
     // Editor owns the mode: the bar button and Ctrl+T both route through
@@ -444,7 +479,24 @@ private:
     void pushTempoMarkersToPlayHead();
 
     // Page entries: parallel to ribbon tabs
+    // QA-ModelShell TS4: the region contained windows live in.  Declared BEFORE
+    // mPages ON PURPOSE.  Members destruct in REVERSE declaration order, so
+    // being declared FIRST means being destroyed LAST -- which is what we need,
+    // because every WorkspaceWindow calls mWorkspace->removeWindow(this) from
+    // its destructor.  The original order had this backwards (comment claimed
+    // one thing, C++ did the other): the Workspace died first and each window
+    // teardown then wrote into freed memory.  Jeff hit it as an access
+    // violation reading -1 inside Workspace's window array, 2026-07-28.
+    std::unique_ptr<Workspace> mWorkspace;
+
+    // False for the duration of the constructor.  While false, hostPageInWindow
+    // frames ONLY the windows that are meant to be on screen at launch; every
+    // other page waits until its tab is first selected.  Set true just before
+    // the startup tab selection, so that selection frames normally.
+    bool mStartupComplete { false };
+
     juce::OwnedArray<PageEntry> mPages;
+
 
     // Pointers to single-instance legacy pages (no duplication)
     // These are owned inside mPages[...].component
@@ -641,8 +693,6 @@ private:
     //    been imported; same component is also a FileDragAndDropTarget so
     //    audio files dropped here route through the existing Builder import
     //    flow (which fires onAudioClipAdded → spawns the Clips tab).
-    std::unique_ptr<ClipsEmptyState> mClipsEmptyState;
-    void showClipsEmptyState();
     // Idempotent - does nothing if a Clips tab already exists for `path`.
     // pageIdx = audioRow (1:1 with mixer_audio_<row>), so the engine output
     // routes through that same audio insert.  Called from the onAudioClipAdded
@@ -703,29 +753,15 @@ private:
     //    registerInstEngine for audio-thread routing.  No piano-roll
     //    registration - Vox + Inst are live-input / recorded-audio
     //    destinations, not MIDI-triggered engines.
-    std::unique_ptr<VoxEmptyState>  mVoxEmptyState;
-    std::unique_ptr<InstEmptyState> mInstEmptyState;
-    void showVoxEmptyState  ();
-    void showInstEmptyState ();
     // QA-ProjectSave docket 18 (2026-07-26): Layers / Bass / Drums reach zero
     // now, so they need the same placeholder the other three types have had
     // since G-2/G-4.  One shared component class rather than three near-identical
     // ones -- they differ only in accent colour and prompt text.
-    std::unique_ptr<EngineEmptyState> mLayersEmptyState;
-    std::unique_ptr<EngineEmptyState> mBassEmptyState;
-    std::unique_ptr<EngineEmptyState> mDrumsEmptyState;
-    void showLayersEmptyState ();
-    void showBassEmptyState   ();
-    void showDrumsEmptyState  ();
     // Six empty states now, so each show* helper hides the other five through
     // here rather than naming them one by one.
-    void hideAllEmptyStates ();
     // G-7 (2026-04-29): empty-state hamburger Load Page Preset support.
     // Installs a menu builder on the empty-state page menu bar so users can
     // restore a saved Page Preset which auto-spawns the appropriate tab.
-    void installEmptyStatePagePresetMenu (PagePresetIO::PageKind kind);
-    void spawnAndLoadFromEmptyState      (PagePresetIO::PageKind kind,
-                                           const juce::File& presetFile);
     // G-6 (2026-04-29): right-click "Duplicate" on a ClipsPage's engine
     // picker spawns a new ClipsPage at the next free audio row bound to the
     // SAME WAV file as the source, then applies the source's full state

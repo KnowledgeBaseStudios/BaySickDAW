@@ -59,6 +59,8 @@ public:
 
     void changeListenerCallback(juce::ChangeBroadcaster*) override;
     void timerCallback() override;
+    // Starts/stops the 30 Hz poll with this page's on-screen state.
+    void parentHierarchyChanged() override;
 
     // ── Active channel list callback ──────────────────────────────────────────
     // Returns {effectsPageId, displayName} for every currently-active mixer strip.

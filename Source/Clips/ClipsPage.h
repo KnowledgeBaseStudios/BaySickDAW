@@ -197,26 +197,3 @@ private:
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (ClipsPage)
 };
 
-// ─────────────────────────────────────────────────────────────────────────────
-// ClipsEmptyState - shown when the Clips ribbon slot is clicked with zero
-// instances.  Drop a supported audio file here OR onto the Builder grid to
-// spawn the first Clips tab.  G-2 (2026-04-28).
-// ─────────────────────────────────────────────────────────────────────────────
-class ClipsEmptyState : public juce::Component,
-                        public juce::FileDragAndDropTarget
-{
-public:
-    ClipsEmptyState();
-
-    void paint (juce::Graphics&) override;
-
-    bool isInterestedInFileDrag (const juce::StringArray& files) override;
-    void filesDropped           (const juce::StringArray& files, int x, int y) override;
-
-    std::function<void(const juce::String& filePath)> onClipDropped;
-
-private:
-    bool mFileHover { false };
-
-    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (ClipsEmptyState)
-};

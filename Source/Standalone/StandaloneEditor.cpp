@@ -553,6 +553,17 @@ StandaloneEditor::StandaloneEditor(VibeSynthProcessor& p, StandalonePlayHead& ph
     : mProcessor(p), mPlayHead(ph), mDeviceManager(dm),
       mUndoManager(100, 30)
 {
+    // QA-ModelShell TS4: the region contained windows live in.  This MUST be the
+    // first statement in the constructor and must never run more than once.
+    // hostPageInWindow silently declines to frame a page when it is missing, and
+    // every WorkspaceWindow holds a reference to it -- so creating it late left
+    // the early pages unframed, and re-creating it deleted the object the
+    // already-open windows pointed at, which switched their containment and
+    // magnetism off with no visible symptom other than windows escaping the
+    // frame.  Both failures came from this one line sitting in the wrong place.
+    mWorkspace = std::make_unique<Workspace>();
+    addAndMakeVisible (*mWorkspace);
+
     // Scan core sample library once at startup (non-blocking on message thread,
     // just a directory walk - typically < 10 ms)
     SampleLibrary::getInstance().scan();
@@ -1406,6 +1417,16 @@ StandaloneEditor::StandaloneEditor(VibeSynthProcessor& p, StandalonePlayHead& ph
         }
     };
     mRibbon->onAddTabRequest  = [this](RibbonTabBar::TabType t) { onAddTabRequest(t); };
+    // "+" menu picks an ENGINE; create that engine's tab, then select the
+    // engine on the page it produced.  onAddTabRequest already owns every
+    // per-type creation route (Clip opens the file picker, Vox/Inst run the
+    // mixer strip-add cascade, L/B/D make the page), so this adds only the
+    // engine selection on top of it rather than forking a second path.
+    mRibbon->onAddEngineRequest = [this](RibbonTabBar::TabType t, const juce::String& engine)
+    {
+        onAddTabRequest (t);
+        applyEngineToNewestTabOfType (t, engine);
+    };
     // J-6 (2026-05-03): "+ Add BaySickRustyDrums" entry on the Drums dropdown.
     // 1-instance lock: hide entry when a BaySickRustyDrumsPage already exists
     // in mPages (the page can exist even before a kit is loaded, so checking
@@ -1437,48 +1458,6 @@ StandaloneEditor::StandaloneEditor(VibeSynthProcessor& p, StandalonePlayHead& ph
             if (entry && entry->type == RibbonTabBar::TabType::Inst) ++n;
         return n >= (int) kMaxInstPages;
     };
-    // G-2 (2026-04-28): empty-state hook for the Clip ribbon slot.
-    mRibbon->onClipsEmptyStateRequested = [this]() { showClipsEmptyState(); };
-
-    // G-2: Clips empty-state placeholder, shown when the user clicks the
-    // Clip ribbon body and 0 Clip tabs exist.  Drop target - files dropped
-    // here route through BuilderPage's existing importAudioFile flow which
-    // fires onAudioClipAdded → spawns the first Clips tab automatically.
-    mClipsEmptyState = std::make_unique<ClipsEmptyState>();
-    addChildComponent (*mClipsEmptyState);   // hidden by default
-    mClipsEmptyState->onClipDropped = [this] (const juce::String& filePath)
-    {
-        if (mBuilderPage && mBuilderPage->getGrid())
-            mBuilderPage->getGrid()->importAudioFile (filePath, 0, 0.0f);
-    };
-
-    // G-4: Vox + Inst empty-state placeholders, shown when the user clicks
-    // the Vox / Inst ribbon body and 0 instances exist.  No drop target -
-    // the spawn trigger is the Mixer page's "Add Vox/Inst Strip" button.
-    mVoxEmptyState  = std::make_unique<VoxEmptyState>();
-    mInstEmptyState = std::make_unique<InstEmptyState>();
-    addChildComponent (*mVoxEmptyState);
-    addChildComponent (*mInstEmptyState);
-    mRibbon->onVoxEmptyStateRequested  = [this]() { showVoxEmptyState();  };
-    mRibbon->onInstEmptyStateRequested = [this]() { showInstEmptyState(); };
-
-    // QA-ProjectSave docket 18 (2026-07-26): Layers / Bass / Drums join the
-    // empty-state pattern now that they open at zero and delete to zero.
-    // Accents match each type's mixer-strip colour so the placeholder reads as
-    // that family.  Spawn trigger is the ribbon slot's own + Add New item.
-    mLayersEmptyState = std::make_unique<EngineEmptyState> (
-        VC::LayerCol[0], "Click the Layers arrow and pick + Add New Layer to start a Layer page");
-    mBassEmptyState   = std::make_unique<EngineEmptyState> (
-        VC::BassCol[0],  "Click the Bass arrow and pick + Add New Bass to start a Bass page");
-    mDrumsEmptyState  = std::make_unique<EngineEmptyState> (
-        VC::DrumsCol,    "Click the Drums arrow and pick + Add New Drum to start a Drum page");
-    addChildComponent (*mLayersEmptyState);
-    addChildComponent (*mBassEmptyState);
-    addChildComponent (*mDrumsEmptyState);
-    mRibbon->onLayersEmptyStateRequested = [this]() { showLayersEmptyState(); };
-    mRibbon->onBassEmptyStateRequested   = [this]() { showBassEmptyState();   };
-    mRibbon->onDrumsEmptyStateRequested  = [this]() { showDrumsEmptyState();  };
-
     mRibbon->onSubPageSelected = [this](RibbonTabBar::TabType t, int idx) { onSubPageSelected(t, idx); };
     // D1.4-fix: intercept rename for Drum tabs whose name == "User Patch" so
     // we can route to Save Patch As (which prompts for name + saves the
@@ -1618,9 +1597,9 @@ StandaloneEditor::StandaloneEditor(VibeSynthProcessor& p, StandalonePlayHead& ph
     addAndMakeVisible(*mRibbon);
 
     // ── Page Menu Bar (Tier 2) ────────────────────────────────────────────────
-    mPageMenuBar = std::make_unique<PageMenuBar>();
+    mDetachedPageMenu = std::make_unique<PageMenuBar>();
+    mPageMenuBar      = mDetachedPageMenu.get();
     mPageMenuBar->setPageTitle("BaySickDAW");
-    addAndMakeVisible(*mPageMenuBar);
 
     // ── Build default tabs ────────────────────────────────────────────────────
     buildDefaultTabs();
@@ -1736,8 +1715,8 @@ void StandaloneEditor::buildDefaultTabs()
         entry->ribbonTabId = ribbonId;
         entry->type        = type;
         entry->component   = std::move(comp);
-        addChildComponent(*entry->component);
         mPages.add(entry);
+        hostPageInWindow (*entry);
     };
 
     // The four system tabs already exist in the ribbon with IDs 1/2/3/4.
@@ -1937,6 +1916,19 @@ void StandaloneEditor::buildDefaultTabs()
     // opens with an empty ribbon and the user adds what they want, so nothing
     // the user never asked for ends up in a saved project or a template.
 
+    mStartupComplete = true;
+
+    // Every window framed at launch needs its title-strip menu built.
+    // showPageForTab is what fills it, and it only ever ran for the ONE tab that
+    // got selected -- so the other windows came up with a bare title strip until
+    // the user closed and reopened them, which routed through tab selection and
+    // configured it on the way (Jeff, 2026-07-28).  Only already-framed pages
+    // are touched here, so this does not defeat the launch-open policy above.
+    // The selection below runs last and leaves the active window in front.
+    for (auto* e : mPages)
+        if (e != nullptr && e->window != nullptr)
+            showPageForTab (e->ribbonTabId);
+
     // Start on Builder tab (id=3)
     mRibbon->selectTab(3);
     onTabSelected(3);
@@ -2074,8 +2066,8 @@ void StandaloneEditor::spawnDuplicateLayerTab (const juce::String& clipboardXml)
     entry->ribbonTabId = newId;
     entry->type        = RibbonTabBar::TabType::Layers;
     entry->component   = std::move (page);
-    addChildComponent (*entry->component);
     mPages.add (entry);
+    hostPageInWindow (*entry);
     lp->importLayerState (clipboardXml);
     mRibbon->selectTab (newId);
     onTabSelected (newId);
@@ -2124,8 +2116,8 @@ void StandaloneEditor::spawnDuplicateBassTab (const juce::String& clipboardXml)
     entry->ribbonTabId = newId;
     entry->type        = RibbonTabBar::TabType::Bass;
     entry->component   = std::move (page);
-    addChildComponent (*entry->component);
     mPages.add (entry);
+    hostPageInWindow (*entry);
     bp->importBassState (clipboardXml);
     mRibbon->selectTab (newId);
     onTabSelected (newId);
@@ -2184,8 +2176,8 @@ void StandaloneEditor::spawnDuplicateDrumTab (const juce::String& clipboardXml)
     entry->ribbonTabId = newId;
     entry->type        = RibbonTabBar::TabType::Drums;
     entry->component   = std::move (page);
-    addChildComponent (*entry->component);
     mPages.add (entry);
+    hostPageInWindow (*entry);
 
     dp->importDrumState (clipboardXml);
 
@@ -4366,8 +4358,8 @@ void StandaloneEditor::onAddTabRequest(RibbonTabBar::TabType type)
     entry->ribbonTabId = newId;
     entry->type        = type;
     entry->component   = std::move(page);
-    addChildComponent(*entry->component);
     mPages.add(entry);
+    hostPageInWindow (*entry);
 
     mRibbon->selectTab(newId);
     onTabSelected(newId);
@@ -4887,44 +4879,13 @@ void StandaloneEditor::onTabClosed(int tabId)
                 return n;
             };
 
-            // QA-E Task 5 (2026-05-15): only surface the empty-state when the
-            // user was actually viewing the page that just closed.  A
-            // browser last-file-out cascade closes a background Clips/Vox/
-            // Inst tab while the user is on the Builder browser -- in that
-            // case stay on Builder instead of navigating to the empty state.
-            if (closedPageWasVisible)
-            {
-                if (closedType == RibbonTabBar::TabType::Clip
-                    && remainingOfType (RibbonTabBar::TabType::Clip) == 0)
-                {
-                    showClipsEmptyState();
-                }
-                else if (closedType == RibbonTabBar::TabType::Vox
-                         && remainingOfType (RibbonTabBar::TabType::Vox) == 0)
-                {
-                    showVoxEmptyState();
-                }
-                else if (closedType == RibbonTabBar::TabType::Inst
-                         && remainingOfType (RibbonTabBar::TabType::Inst) == 0)
-                {
-                    showInstEmptyState();
-                }
-                else if (closedType == RibbonTabBar::TabType::Layers
-                         && remainingOfType (RibbonTabBar::TabType::Layers) == 0)
-                {
-                    showLayersEmptyState();
-                }
-                else if (closedType == RibbonTabBar::TabType::Bass
-                         && remainingOfType (RibbonTabBar::TabType::Bass) == 0)
-                {
-                    showBassEmptyState();
-                }
-                else if (closedType == RibbonTabBar::TabType::Drums
-                         && remainingOfType (RibbonTabBar::TabType::Drums) == 0)
-                {
-                    showDrumsEmptyState();
-                }
-            }
+            // QA-ModelShell TS4: closing the last instance of a type no
+            // longer navigates anywhere -- the TYPE TAB ITSELF disappears from
+            // the ribbon (visibleSlotTypes) and comes back through "+".  The
+            // empty-state placeholder pages that used to be shown here are
+            // retired with it; there is no state left in which the user is
+            // looking at a tab that has no instances.
+            juce::ignoreUnused (closedPageWasVisible);
             return;
         }
     }
@@ -5072,19 +5033,28 @@ void StandaloneEditor::showPageForTab(int tabId)
     // NEW tab's engine and strand the old one - release before switching.
     releaseAllTypingNotes();
 
-    // Hide all
-    for (auto* entry : mPages)
-        if (entry->component) entry->component->setVisible(false);
-    // G-2 / G-4: hide every empty-state when a real page is being shown.
-    hideAllEmptyStates();
-
+    // QA-ModelShell TS4: windows are all live at once (FL-style contained
+    // workspace), so selecting a tab no longer HIDES the others -- it brings
+    // the selected one forward, recreating its window if it was closed.
     mVisiblePage = nullptr;
 
     // Show selected + update page menu bar title
     for (auto* entry : mPages)
     {
-        if (entry->ribbonTabId == tabId && entry->component)
+        if (entry->ribbonTabId != tabId) continue;
+        // Destroy-on-close: the page may be gone.  Rebuild it from the model
+        // before showing (no-op when it is still alive).
+        if (entry->component == nullptr) rebuildPageForTab (*entry);
+        if (entry->component)
         {
+            if (entry->window == nullptr) hostPageInWindow (*entry);
+            if (entry->window != nullptr)
+            {
+                entry->window->toFront (true);
+                // Every mPageMenuBar-> call below now configures THIS window's
+                // own title-strip menu.
+                if (auto* pm = entry->window->getPageMenu()) mPageMenuBar = pm;
+            }
             entry->component->setVisible(true);
             mVisiblePage = entry->component.get();
 
@@ -6842,8 +6812,8 @@ juce::Component* StandaloneEditor::spawnLayerTabFromTemplate (const juce::String
     entry->ribbonTabId = newId;
     entry->type        = RibbonTabBar::TabType::Layers;
     entry->component   = std::move (page);
-    addChildComponent (*entry->component);
     mPages.add (entry);
+    hostPageInWindow (*entry);
 
     lp->selectEngine (engine);
     if (presetFile.existsAsFile())
@@ -6899,8 +6869,8 @@ juce::Component* StandaloneEditor::spawnBassTabFromTemplate (const juce::String&
     entry->ribbonTabId = newId;
     entry->type        = RibbonTabBar::TabType::Bass;
     entry->component   = std::move (page);
-    addChildComponent (*entry->component);
     mPages.add (entry);
+    hostPageInWindow (*entry);
 
     bp->selectEngine (engine);
     if (presetFile.existsAsFile())
@@ -7462,8 +7432,8 @@ void StandaloneEditor::loadKitImpl (const juce::File& kitXml)
         entry->ribbonTabId = newId;
         entry->type        = RibbonTabBar::TabType::Drums;
         entry->component   = std::move (page);
-        addChildComponent (*entry->component);
         mPages.add (entry);
+        hostPageInWindow (*entry);
 
         // Apply state - factory ref or embedded.
         if (isFactoryRef)
@@ -8060,8 +8030,8 @@ void StandaloneEditor::addBaySickRustyDrumsTab()
     entry->ribbonTabId = ribbonId;
     entry->type        = RibbonTabBar::TabType::Drums;
     entry->component   = std::move (page);
-    addChildComponent (*entry->component);
     mPages.add (entry);
+    hostPageInWindow (*entry);
 
     // J-7a (2026-05-03): register with the unified PianoRollPage so the
     // engine appears in its dropdown + the BaySickRustyDrumsPage's "Piano
@@ -8278,249 +8248,6 @@ void StandaloneEditor::addBaySickBassesTab()
 // install a "Load Page Preset" submenu so users can recall a saved preset
 // without first manually adding a tab.  Picking a preset spawns a new tab
 // at the next free index and applies the preset onto it.
-void StandaloneEditor::installEmptyStatePagePresetMenu (PagePresetIO::PageKind kind)
-{
-    if (! mPageMenuBar) return;
-
-    juce::Component::SafePointer<StandaloneEditor> safeThis (this);
-    mPageMenuBar->setMenuBuilder (
-        [safeThis, kind] (juce::Component* anchor)
-        {
-            if (! safeThis) return;
-
-            constexpr int kIdSavePagePreset = 100;
-            constexpr int kIdLoadBase       = 1000;
-
-            juce::PopupMenu menu;
-            // Save isn't applicable on an empty state - no engine to save.
-            menu.addItem (kIdSavePagePreset, "Save Page Preset As...", false);
-
-            juce::Array<juce::File> presetXmls;
-            {
-                juce::PopupMenu loadSub;
-                const auto root = PagePresetIO::myPresetsDirForPageKind (kind);
-                if (root.isDirectory())
-                {
-                    juce::Array<juce::File> files;
-                    root.findChildFiles (files, juce::File::findFiles, false, "*.xml");
-                    files.sort();
-                    for (auto& f : files)
-                    {
-                        const int id = kIdLoadBase + presetXmls.size();
-                        presetXmls.add (f);
-                        loadSub.addItem (id, f.getFileNameWithoutExtension());
-                    }
-                }
-                if (presetXmls.isEmpty())
-                    loadSub.addItem (-1, "(no page presets saved)", false, false);
-                menu.addSubMenu ("Load Page Preset", loadSub);
-            }
-
-            menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (anchor),
-                [safeThis, kind, presetXmls = std::move (presetXmls), kIdLoadBase] (int r)
-                {
-                    if (! safeThis || r <= 0) return;
-                    if (r >= kIdLoadBase && r < kIdLoadBase + presetXmls.size())
-                        safeThis->spawnAndLoadFromEmptyState (kind, presetXmls[r - kIdLoadBase]);
-                });
-        });
-}
-
-void StandaloneEditor::spawnAndLoadFromEmptyState (PagePresetIO::PageKind kind,
-                                                    const juce::File& presetFile)
-{
-    if (! presetFile.existsAsFile()) return;
-
-    if (kind == PagePresetIO::PageKind::Vox)
-    {
-        // Find next free vox index.
-        int idx = -1;
-        for (int i = 0; i < kMaxVoxPages; ++i)
-        {
-            bool taken = false;
-            for (auto* e : mPages)
-            {
-                if (e && e->type == RibbonTabBar::TabType::Vox)
-                    if (auto* p = dynamic_cast<VoxPage*> (e->component.get()))
-                        if (p->getPageIndex() == i) { taken = true; break; }
-            }
-            if (! taken) { idx = i; break; }
-        }
-        if (idx < 0) return;
-
-        // Spawn requires a mixer strip (Vox tabs are paired with mixer Vox
-        // strips).  Use the existing addVoxChannel path so the strip + tab
-        // are wired correctly.
-        if (mMixerPage) mMixerPage->addVoxChannelAtIndex (idx);
-        // After the strip-add cascades back to spawnVoxTabIfMissing, find
-        // the new page and load the preset onto it.
-        for (auto* e : mPages)
-        {
-            if (e && e->type == RibbonTabBar::TabType::Vox)
-                if (auto* p = dynamic_cast<VoxPage*> (e->component.get()))
-                    if (p->getPageIndex() == idx)
-                    {
-                        if (mRibbon) mRibbon->selectTab (e->ribbonTabId);
-                        onTabSelected (e->ribbonTabId);
-                        p->loadPagePreset (presetFile);
-                        return;
-                    }
-        }
-    }
-    else if (kind == PagePresetIO::PageKind::Inst)
-    {
-        // 2026-05-05 fix (Bug D): peek the saved Source mode from the preset
-        // file BEFORE picking a spawn path.  A preset saved on a sfizz tab
-        // (BaySickGuitars / BaySickBasses) needs the full sfizz spawn flow
-        // (engine create + chain rebuild + hide arm/listen + register
-        // PianoRoll + setSource + matching tab name + setTabSlots refresh).
-        // Previously empty-state load spawned a default LiveInput tab and
-        // just called loadPagePreset, leaving the PageMenuBar with 2-tab
-        // labels and the chain without the sfizz front stage.
-        const auto savedSrc = PagePresetIO::peekSourceMode (presetFile);
-
-        if (savedSrc == "BaySickGuitars")
-        {
-            addBaySickGuitarsTab();
-        }
-        else if (savedSrc == "BaySickBasses")
-        {
-            addBaySickBassesTab();
-        }
-        else
-        {
-            // LiveInput (or unknown) - use the simple spawn path.
-            int idx = -1;
-            for (int i = 0; i < kMaxInstPages; ++i)
-            {
-                bool taken = false;
-                for (auto* e : mPages)
-                {
-                    if (e && e->type == RibbonTabBar::TabType::Inst)
-                        if (auto* p = dynamic_cast<InstPage*> (e->component.get()))
-                            if (p->getPageIndex() == i) { taken = true; break; }
-                }
-                if (! taken) { idx = i; break; }
-            }
-            if (idx < 0) return;
-            if (mMixerPage) mMixerPage->addInstChannelAtIndex (idx);
-        }
-
-        // Find the just-spawned page (the highest-indexed Inst tab is the
-        // newly-added one - Guitars/Basses spawn helpers don't return its
-        // ribbon id, but mPages was just appended-to).  Apply the preset onto
-        // it; loadPagePreset itself sets source mode + spawns the engine if
-        // the saved kit doesn't match the current default.
-        InstPage* spawned = nullptr;
-        int       spawnedRibbonId = -1;
-        int       highestIdx = -1;
-        for (auto* e : mPages)
-        {
-            if (! e || e->type != RibbonTabBar::TabType::Inst) continue;
-            if (auto* p = dynamic_cast<InstPage*> (e->component.get()))
-            {
-                if (p->getPageIndex() > highestIdx)
-                {
-                    highestIdx = p->getPageIndex();
-                    spawned = p;
-                    spawnedRibbonId = e->ribbonTabId;
-                }
-            }
-        }
-        if (spawned == nullptr) return;
-
-        // Apply the preset BEFORE the final onTabSelected so setTabSlots
-        // captures the right (4-tab for sfizz / 2-tab for live-input) label
-        // list.  loadPagePreset's setSource will have run by the time
-        // onTabSelected reads getActiveTabLabels.
-        spawned->loadPagePreset (presetFile);
-
-        if (mRibbon && spawnedRibbonId >= 0)
-        {
-            mRibbon->selectTab (spawnedRibbonId);
-            onTabSelected (spawnedRibbonId);
-        }
-        return;
-    }
-    else if (kind == PagePresetIO::PageKind::Clip)
-    {
-        // Clip preset must carry a clipRef pointing to a file in My Samples
-        // - without it we can't bind the new page to an audio file.
-        auto parsed = juce::XmlDocument::parse (presetFile.loadFileAsString());
-        if (! parsed) return;
-        const juce::String clipRefRel = parsed->getStringAttribute ("clipRef");
-        if (clipRefRel.isEmpty())
-        {
-            juce::AlertWindow::showMessageBoxAsync (juce::AlertWindow::WarningIcon,
-                "Cannot Load Preset",
-                "This Clip preset has no audio file attached.\n"
-                "Save it from a clip with a loaded audio file first.");
-            return;
-        }
-        const juce::File clipFile =
-            SampleLibrary::getUserSamplesDir().getChildFile (clipRefRel);
-        if (! clipFile.existsAsFile())
-        {
-            juce::AlertWindow::showMessageBoxAsync (juce::AlertWindow::WarningIcon,
-                "Cannot Load Preset",
-                "The audio file this preset references is missing:\n"
-                + clipFile.getFullPathName());
-            return;
-        }
-        // Find next free audio row.
-        int row = -1;
-        for (int i = 0; i < kMaxClipPages; ++i)
-        {
-            bool taken = false;
-            for (auto* e : mPages)
-            {
-                if (e && e->type == RibbonTabBar::TabType::Clip)
-                    if (auto* p = dynamic_cast<ClipsPage*> (e->component.get()))
-                        if (p->getPageIndex() == i) { taken = true; break; }
-            }
-            if (! taken) { row = i; break; }
-        }
-        if (row < 0) return;
-
-        // QA-EffectsReview side-fix (2026-06-06): canonical helper so the preset-
-        // loaded Clip page gets its mixer strip too (was a strip-less page).
-        createClipStripAndPage (row, clipFile.getFullPathName(), /*allowDuplicate*/ true);
-        for (auto* e : mPages)
-        {
-            if (e && e->type == RibbonTabBar::TabType::Clip)
-                if (auto* p = dynamic_cast<ClipsPage*> (e->component.get()))
-                    if (p->getPageIndex() == row)
-                    {
-                        if (mRibbon) mRibbon->selectTab (e->ribbonTabId);
-                        onTabSelected (e->ribbonTabId);
-                        p->loadPagePreset (presetFile);
-                        return;
-                    }
-        }
-    }
-}
-
-void StandaloneEditor::showClipsEmptyState()
-{
-    // Hide every other page; show the empty-state drop zone.
-    for (auto* entry : mPages)
-        if (entry && entry->component) entry->component->setVisible (false);
-    mVisiblePage = nullptr;
-
-    if (! mClipsEmptyState) return;
-    mClipsEmptyState->setVisible (true);
-    mClipsEmptyState->toFront (false);
-    if (mPageMenuBar)
-    {
-        mPageMenuBar->setPageTitle ("Clips");
-        mPageMenuBar->clearTabSlots();
-        mPageMenuBar->clearExtraRightComponents();
-        mPageMenuBar->setBankIndicator (nullptr);
-        installEmptyStatePagePresetMenu (PagePresetIO::PageKind::Clip);
-    }
-    resized();   // make sure the empty state has its bounds
-}
-
 void StandaloneEditor::createClipStripAndPage (int row, const juce::String& path, bool allowDuplicate)
 {
     // QA-ClipDrop Task 3 (SC-G/H, 2026-06-03): shared strip + Clips-page
@@ -8786,16 +8513,15 @@ void StandaloneEditor::spawnClipsTabIfMissing (int audioRow, const juce::String&
     // branch) finds an actual roll to display.
     registerClipPianoRoll (audioRow, cpRaw);
 
-    addChildComponent (*cpRaw);
 
     auto entry           = std::make_unique<PageEntry>();
     entry->ribbonTabId   = newId;
     entry->type          = RibbonTabBar::TabType::Clip;
     entry->component     = std::move (cpHolder);
-    mPages.add (entry.release());
+    auto* addedEntry = entry.release();
+    mPages.add (addedEntry);
+    hostPageInWindow (*addedEntry);
 
-    // Hide empty state, select the new tab.
-    if (mClipsEmptyState) mClipsEmptyState->setVisible (false);
     mRibbon->selectTab (newId);
     onTabSelected (newId);
 }
@@ -9064,124 +8790,12 @@ void StandaloneEditor::unregisterInstSourcePianoRoll (InstPage* ip)
 // Mirror of the G-2/G-3 Clips helpers - same shape, different page color +
 // different default engine list.
 // ─────────────────────────────────────────────────────────────────────────────
-void StandaloneEditor::hideAllEmptyStates()
-{
-    if (mClipsEmptyState)  mClipsEmptyState ->setVisible (false);
-    if (mVoxEmptyState)    mVoxEmptyState   ->setVisible (false);
-    if (mInstEmptyState)   mInstEmptyState  ->setVisible (false);
-    if (mLayersEmptyState) mLayersEmptyState->setVisible (false);
-    if (mBassEmptyState)   mBassEmptyState  ->setVisible (false);
-    if (mDrumsEmptyState)  mDrumsEmptyState ->setVisible (false);
-}
-
-// QA-ProjectSave docket 18 (2026-07-26): Layers / Bass / Drums empty states.
-// Same shape as the Vox / Inst pair below -- hide every page + every other
-// placeholder, show this one, and point the page menu bar's preset loader at
-// this page kind so a saved Page Preset can spawn the first tab from here.
-void StandaloneEditor::showLayersEmptyState()
-{
-    for (auto* entry : mPages)
-        if (entry && entry->component) entry->component->setVisible (false);
-    mVisiblePage = nullptr;
-    hideAllEmptyStates();
-
-    if (! mLayersEmptyState) return;
-    mLayersEmptyState->setVisible (true);
-    mLayersEmptyState->toFront (false);
-    if (mPageMenuBar)
-    {
-        mPageMenuBar->setPageTitle ("Layers");
-        mPageMenuBar->clearTabSlots();
-        mPageMenuBar->clearExtraRightComponents();
-        mPageMenuBar->setBankIndicator (nullptr);
-        installEmptyStatePagePresetMenu (PagePresetIO::PageKind::Layer);
-    }
-    resized();
-}
-
-void StandaloneEditor::showBassEmptyState()
-{
-    for (auto* entry : mPages)
-        if (entry && entry->component) entry->component->setVisible (false);
-    mVisiblePage = nullptr;
-    hideAllEmptyStates();
-
-    if (! mBassEmptyState) return;
-    mBassEmptyState->setVisible (true);
-    mBassEmptyState->toFront (false);
-    if (mPageMenuBar)
-    {
-        mPageMenuBar->setPageTitle ("Bass");
-        mPageMenuBar->clearTabSlots();
-        mPageMenuBar->clearExtraRightComponents();
-        mPageMenuBar->setBankIndicator (nullptr);
-        installEmptyStatePagePresetMenu (PagePresetIO::PageKind::Bass);
-    }
-    resized();
-}
-
-void StandaloneEditor::showDrumsEmptyState()
-{
-    for (auto* entry : mPages)
-        if (entry && entry->component) entry->component->setVisible (false);
-    mVisiblePage = nullptr;
-    hideAllEmptyStates();
-
-    if (! mDrumsEmptyState) return;
-    mDrumsEmptyState->setVisible (true);
-    mDrumsEmptyState->toFront (false);
-    if (mPageMenuBar)
-    {
-        mPageMenuBar->setPageTitle ("Drums");
-        mPageMenuBar->clearTabSlots();
-        mPageMenuBar->clearExtraRightComponents();
-        mPageMenuBar->setBankIndicator (nullptr);
-        installEmptyStatePagePresetMenu (PagePresetIO::PageKind::Drum);
-    }
-    resized();
-}
-
-void StandaloneEditor::showVoxEmptyState()
-{
-    for (auto* entry : mPages)
-        if (entry && entry->component) entry->component->setVisible (false);
-    mVisiblePage = nullptr;
-    hideAllEmptyStates();
-
-    if (! mVoxEmptyState) return;
-    mVoxEmptyState->setVisible (true);
-    mVoxEmptyState->toFront (false);
-    if (mPageMenuBar)
-    {
-        mPageMenuBar->setPageTitle ("Vox");
-        mPageMenuBar->clearTabSlots();
-        mPageMenuBar->clearExtraRightComponents();
-        mPageMenuBar->setBankIndicator (nullptr);
-        installEmptyStatePagePresetMenu (PagePresetIO::PageKind::Vox);
-    }
-    resized();
-}
-
-void StandaloneEditor::showInstEmptyState()
-{
-    for (auto* entry : mPages)
-        if (entry && entry->component) entry->component->setVisible (false);
-    mVisiblePage = nullptr;
-    hideAllEmptyStates();
-
-    if (! mInstEmptyState) return;
-    mInstEmptyState->setVisible (true);
-    mInstEmptyState->toFront (false);
-    if (mPageMenuBar)
-    {
-        mPageMenuBar->setPageTitle ("Inst");
-        mPageMenuBar->clearTabSlots();
-        mPageMenuBar->clearExtraRightComponents();
-        mPageMenuBar->setBankIndicator (nullptr);
-        installEmptyStatePagePresetMenu (PagePresetIO::PageKind::Inst);
-    }
-    resized();
-}
+// QA-ModelShell TS4 (2026-07-28): hideAllEmptyStates + the six show*EmptyState
+// pages are GONE, and so is the state they existed to render.  A type tab is
+// only in the ribbon while it has >= 1 instance now (RibbonTabBar::
+// visibleSlotTypes), so "you are looking at a tab with nothing in it" is no
+// longer reachable -- the tab itself leaves and returns through "+".  This is
+// the loud reversal of docket 18's Task 1 shape that the batch plan calls for.
 
 void StandaloneEditor::spawnVoxTabIfMissing (int voxIdx, bool selectAfter)
 {
@@ -9270,15 +8884,15 @@ void StandaloneEditor::spawnVoxTabIfMissing (int voxIdx, bool selectAfter)
     // G-4 (2026-04-28): NO piano-roll registration for Vox.  Vox is a
     // live-input / recorded-audio destination, not a MIDI-triggered engine.
 
-    addChildComponent (*cpRaw);
 
     auto entry           = std::make_unique<PageEntry>();
     entry->ribbonTabId   = newId;
     entry->type          = RibbonTabBar::TabType::Vox;
     entry->component     = std::move (cpHolder);
-    mPages.add (entry.release());
+    auto* addedEntry = entry.release();
+    mPages.add (addedEntry);
+    hostPageInWindow (*addedEntry);
 
-    if (mVoxEmptyState) mVoxEmptyState->setVisible (false);
     if (selectAfter)
     {
         mRibbon->selectTab (newId);
@@ -9356,15 +8970,15 @@ void StandaloneEditor::spawnInstTabIfMissing (int instIdx, bool selectAfter)
     // G-4 (2026-04-28): NO piano-roll registration for Inst.  Same reasoning
     // as Vox - live-input / recorded-audio destination, not MIDI-triggered.
 
-    addChildComponent (*cpRaw);
 
     auto entry           = std::make_unique<PageEntry>();
     entry->ribbonTabId   = newId;
     entry->type          = RibbonTabBar::TabType::Inst;
     entry->component     = std::move (cpHolder);
-    mPages.add (entry.release());
+    auto* addedEntry = entry.release();
+    mPages.add (addedEntry);
+    hostPageInWindow (*addedEntry);
 
-    if (mInstEmptyState) mInstEmptyState->setVisible (false);
     if (selectAfter)
     {
         mRibbon->selectTab (newId);
@@ -9507,11 +9121,11 @@ void StandaloneEditor::handleCommandMessage(int commandId)
     // QA-ProjectSave docket 18 (2026-07-26): zero tabs of the type is a normal
     // state now, so F8 / F9 / F10 and the View menu land on the empty state
     // instead of doing nothing -- same destination as clicking the ribbon slot.
+    // QA-ModelShell TS4: with zero instances the type has no tab at all, so
+    // there is nothing to navigate TO -- the shortcut is a no-op rather than a
+    // trip to a placeholder page.  "+" is how the user gets one.
     switch (targetType)
     {
-        case RibbonTabBar::TabType::Layers: showLayersEmptyState(); break;
-        case RibbonTabBar::TabType::Bass:   showBassEmptyState();   break;
-        case RibbonTabBar::TabType::Drums:  showDrumsEmptyState();  break;
         default: break;
     }
 }
@@ -9917,7 +9531,6 @@ void StandaloneEditor::resized()
 
     static constexpr int kMenuH     = 24;
     static constexpr int kBarH      = 40;   // combined toolbar height
-    static constexpr int kPageMenuH = PageMenuBar::kHeight;
 
     mMenuBar->setBounds(b.removeFromTop(kMenuH));
 
@@ -9948,16 +9561,13 @@ void StandaloneEditor::resized()
         mRibbon->setBounds(bar.getX() + ribX, bar.getY(), ribW, kBarH);
 
     // ── Page menu bar + content ───────────────────────────────────────────────
-    mPageMenuBar->setBounds(b.removeFromTop(kPageMenuH));
-    for (auto* entry : mPages)
-        if (entry->component) entry->component->setBounds(b);
-    // Every empty-state placeholder shares the same content area.
-    if (mClipsEmptyState)  mClipsEmptyState ->setBounds(b);
-    if (mVoxEmptyState)    mVoxEmptyState   ->setBounds(b);
-    if (mInstEmptyState)   mInstEmptyState  ->setBounds(b);
-    if (mLayersEmptyState) mLayersEmptyState->setBounds(b);
-    if (mBassEmptyState)   mBassEmptyState  ->setBounds(b);
-    if (mDrumsEmptyState)  mDrumsEmptyState ->setBounds(b);
+    // QA-ModelShell TS4: the page menu moved into each window's title strip,
+    // so the chrome no longer reserves a row for it -- the workspace gets it.
+    // QA-ModelShell TS4: the content rect is now the WORKSPACE.  Pages are laid
+    // out by the contained window that frames them, not by this function -- the
+    // old loop gave every page the full rect simultaneously, which is exactly
+    // the always-alive stacking the shell replaces.
+    if (mWorkspace) mWorkspace->setBounds(b);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -12045,6 +11655,230 @@ void StandaloneEditor::registerPedalAutomation (int instPageIndex)
     }
 }
 
+// QA-ModelShell TS4: frame a page in a contained window.
+//
+// The page stays owned by PageEntry::component -- the window hosts it
+// non-owningly -- so the large amount of existing code that reaches through
+// that pointer is untouched by the shell change.
+void StandaloneEditor::hostPageInWindow (PageEntry& entry)
+{
+    // Diagnostic pair to the one in attachTo: proves whether the editor's
+    // Workspace even exists at the moment a page asks to be framed.
+    if (mWorkspace == nullptr || entry.component == nullptr)
+    {
+        DBG ("[TS4 SHELL] hostPageInWindow SKIPPED tab=" << entry.ribbonTabId
+             << " workspace=" << (mWorkspace != nullptr ? "OK" : "NULL")
+             << " page=" << (entry.component != nullptr ? "OK" : "NULL"));
+        return;
+    }
+
+    // Already framed.  Several callers invoke this straight after adding a page
+    // AND on tab selection, so the same tab can arrive twice; without this the
+    // second call would destroy a live, positioned window and build a fresh one
+    // in its place (the debug log showed it happening for two tabs).
+    if (entry.window != nullptr)
+    {
+        entry.window->toFront (true);
+        return;
+    }
+
+    // Launch opens the Builder grid and the Mixer and nothing else (Jeff,
+    // 2026-07-28).  Everything else frames the first time its tab is selected --
+    // showPageForTab already frames a page whose window is null, so a lazy page
+    // costs one extra call at that moment and nothing before it.
+    if (! mStartupComplete
+        && entry.type != RibbonTabBar::TabType::Builder
+        && entry.type != RibbonTabBar::TabType::Mixer)
+        return;
+
+    // Record the page index while the page still exists -- after
+    // destroy-on-close there is nothing left to ask.
+    if (entry.pageIndexHint < 0)
+    {
+        if (auto* lp = dynamic_cast<LayersPage*> (entry.component.get())) entry.pageIndexHint = lp->getPageIndex();
+        else if (auto* bp = dynamic_cast<BassPage*> (entry.component.get())) entry.pageIndexHint = bp->getPageIndex();
+        else if (auto* dp = dynamic_cast<DrumPage*> (entry.component.get())) entry.pageIndexHint = dp->getPageIndex();
+    }
+
+    const auto* tab = mRibbon != nullptr ? mRibbon->getTabById (entry.ribbonTabId) : nullptr;
+    entry.window = std::make_unique<WorkspaceWindow> (persistKeyFor (entry),
+                                                      tab != nullptr ? tab->name : juce::String());
+
+    // Provisional floor.  The real per-window numbers are collected from Jeff
+    // on screen (Test Plans B.31.0) -- they cannot be derived from source
+    // because "usable" is a judgement about knob collisions, not a measurement.
+    // Until then every window has SOME floor so none is unbounded.
+    entry.window->setMinimumSize (640, 400);
+
+    entry.window->setContentNonOwned (entry.component.get());
+
+    // Per-window key routing.  A contained window is its OWN desktop component,
+    // so a key press inside it bubbles up to the window and stops -- it never
+    // reaches the editor.  Without this, every global binding (transport, undo,
+    // the typing keyboard) is dead in every window except the frame itself.
+    // Same fix the History window already uses for the same reason.
+    //
+    // ORDER IS LOAD-BEARING and matches the editor's own constructor: the
+    // mapping set is registered FIRST and the typing-note gate LAST, because
+    // ComponentPeer::handleKeyPress iterates a component's key listeners in
+    // REVERSE registration order -- so last registered outranks, and the bare
+    // note letters must outrank the letter command bindings they collide with.
+    if (auto* set = mCmdMgr.getKeyMappings())
+        entry.window->addKeyListener (set);
+    entry.window->addKeyListener (this);
+    entry.window->setWantsKeyboardFocus (true);
+    entry.window->onBroughtToFront = [this, id = entry.ribbonTabId]
+    {
+        if (mRibbon != nullptr) mRibbon->selectTab (id);
+    };
+    const int tabId = entry.ribbonTabId;
+    entry.window->onCloseRequested = [this, tabId] { closeWindowForTab (tabId); };
+    DBG ("[TS4 SHELL] hostPageInWindow OK tab=" << entry.ribbonTabId
+         << " key=" << persistKeyFor (entry)
+         << " wsSize=" << mWorkspace->getWidth() << "x" << mWorkspace->getHeight());
+    entry.window->attachTo (*mWorkspace);
+}
+
+juce::String StandaloneEditor::persistKeyFor (const PageEntry& entry) const
+{
+    // Keyed by TYPE + the page's own index rather than the ribbon tab id: tab
+    // ids are handed out per session, so keying on them would lose a window's
+    // saved position every time the project reopened.
+    return juce::String ((int) entry.type) + ":" + juce::String (entry.ribbonTabId);
+}
+
+// Close a window WITHOUT touching the model.  The engine keeps running and the
+// tab stays in the ribbon -- reopening is a view rebuild, which is the whole
+// point of destroy-on-close.
+void StandaloneEditor::closeWindowForTab (int tabId)
+{
+    for (auto* e : mPages)
+    {
+        if (e->ribbonTabId != tabId) continue;
+
+        e->window.reset();
+
+        // PAGE DESTRUCTION IS OFF -- window-only close for now.
+        //
+        // CRASH FIX (Jeff, 2026-07-28): destroying the page dangles the
+        // editor's CACHED RAW POINTERS into it -- mMixerPage, mBuilderPage,
+        // mEffectsPage, mPianoRollPage, mLegacyLayersPage/Bass/Drum.  Closing
+        // the Mixer window then left `mMixerPage` pointing at freed memory, and
+        // the next `mMixerPage->removeLayerChannel(...)` during tab teardown
+        // read a destroyed std::map (access violation at 0x8).  mMixerPage
+        // alone is dereferenced 103 times, only a couple of them guarded, so
+        // nulling it is not a fix on its own -- those call sites have to stop
+        // assuming the page exists first.
+        //
+        // Everything else the shell needs still works: the window and its heavy
+        // child components are gone, and the ENGINE is rig-owned (TS1) so audio
+        // and every automation lane are untouched.  What is NOT yet claimed is
+        // the full CPU dividend, which needs the page gone too.  Re-enable per
+        // type as each one's cached pointers are made safe.
+        return;
+    }
+}
+
+// Which page types can be recreated from the model alone.  Clips / Vox / Inst /
+// Rusty are absent ON PURPOSE: their construction is entangled with spawning a
+// mixer strip (addVoxChannelAtIndex and friends), so a naive rebuild would
+// either duplicate the strip or come back unwired.  Untangling that is its own
+// job; until then those windows close view-and-frame but keep the page.
+bool StandaloneEditor::canRebuildType (RibbonTabBar::TabType t)
+{
+    return t == RibbonTabBar::TabType::Layers
+        || t == RibbonTabBar::TabType::Bass
+        || t == RibbonTabBar::TabType::Drums
+        || t == RibbonTabBar::TabType::Builder
+        || t == RibbonTabBar::TabType::Mixer
+        || t == RibbonTabBar::TabType::Effects
+        || t == RibbonTabBar::TabType::PianoRoll;
+}
+
+bool StandaloneEditor::rebuildPageForTab (PageEntry& entry)
+{
+    if (entry.component != nullptr) return true;      // nothing to rebuild
+    if (! canRebuildType (entry.type))  return false;
+
+    using T = RibbonTabBar::TabType;
+    std::unique_ptr<juce::Component> page;
+    int pageIdx = -1;
+
+    switch (entry.type)
+    {
+        case T::Builder:   page = createBuilderPage();   break;
+        case T::Mixer:     page = createMixerPage();     break;
+        case T::Effects:   page = createEffectsPage();   break;
+        case T::PianoRoll: page = createPianoRollPage(); break;
+
+        // The engine pages carry an index, and the create*AtIndex helpers
+        // REFUSE an index already marked used -- which it still is, because the
+        // tab never went away.  Release the claim first; the rebuild re-takes it.
+        case T::Layers:
+            pageIdx = entry.pageIndexHint;
+            if (pageIdx >= 0 && pageIdx < kMaxLayerPages) mUsedLayerIndices[pageIdx] = false;
+            page = createLayersPageAtIndex (pageIdx);
+            break;
+        case T::Bass:
+            pageIdx = entry.pageIndexHint;
+            if (pageIdx >= 0 && pageIdx < kMaxBassPages) mUsedBassIndices[pageIdx] = false;
+            page = createBassPageAtIndex (pageIdx);
+            break;
+        case T::Drums:
+            pageIdx = entry.pageIndexHint;
+            if (pageIdx >= 0 && pageIdx < kMaxDrumPages) mUsedDrumIndices[pageIdx] = false;
+            page = createDrumPageAtIndex (pageIdx);
+            break;
+        default: return false;
+    }
+
+    if (page == nullptr) return false;
+    entry.component = std::move (page);
+
+    // RE-BIND to the engine the rig still owns.  A fresh page has no engine
+    // view (that is built in selectEngine, not the constructor), so without
+    // this the window would reopen blank over a perfectly live engine.
+    // selectEngine is safe to call here: EngineRig::setEngineType no-ops and
+    // returns the EXISTING engine when the type already matches, so this
+    // rebuilds the editor view without touching audio.
+    if (pageIdx >= 0)
+    {
+        const TabKind k = entry.type == T::Layers ? TabKind::Layers
+                        : entry.type == T::Bass   ? TabKind::Bass
+                                                  : TabKind::Drums;
+        if (auto* tab = mProcessor.engineRig().findTab (k, pageIdx))
+            if (tab->engineType.isNotEmpty())
+            {
+                if (auto* lp = dynamic_cast<LayersPage*> (entry.component.get())) lp->selectEngine (tab->engineType);
+                else if (auto* bp = dynamic_cast<BassPage*>  (entry.component.get())) bp->selectEngine (tab->engineType);
+                else if (auto* dp = dynamic_cast<DrumPage*>  (entry.component.get())) dp->selectEngine (tab->engineType);
+            }
+    }
+
+    hostPageInWindow (entry);
+    return true;
+}
+
+// Select `engine` on the most recently created page of `type`.  Used by the
+// "+" menu, where the user picked an engine and the tab was created to hold it.
+// No-op for Clip (its engine is implicit) and for pages that never appeared --
+// onAddTabRequest can legitimately decline (cap reached, picker cancelled).
+void StandaloneEditor::applyEngineToNewestTabOfType (RibbonTabBar::TabType type,
+                                                     const juce::String& engine)
+{
+    if (engine.isEmpty()) return;
+
+    PageEntry* newest = nullptr;
+    for (auto* e : mPages)
+        if (e != nullptr && e->type == type)
+            newest = e;                       // mPages is append-ordered
+    if (newest == nullptr || newest->component == nullptr) return;
+
+    if      (auto* lp = dynamic_cast<LayersPage*> (newest->component.get())) lp->selectEngine (engine);
+    else if (auto* bp = dynamic_cast<BassPage*>   (newest->component.get())) bp->selectEngine (engine);
+    else if (auto* dp = dynamic_cast<DrumPage*>   (newest->component.get())) dp->selectEngine (engine);
+}
+
 void StandaloneEditor::registerStaticAutomationHandlers()
 {
     // Auto-register all static APVTS params (instrument synths, EQ bands, etc.)
@@ -12292,8 +12126,8 @@ void StandaloneEditor::deserializeUIState (const juce::XmlElement& root)
             entry->ribbonTabId = newId;
             entry->type        = RibbonTabBar::TabType::Layers;
             entry->component   = std::move (page);
-            addChildComponent (*entry->component);
             mPages.add (entry);
+            hostPageInWindow (*entry);
         }
         else if (type == "Bass")
         {
@@ -12340,8 +12174,8 @@ void StandaloneEditor::deserializeUIState (const juce::XmlElement& root)
             entry->ribbonTabId = newId;
             entry->type        = RibbonTabBar::TabType::Bass;
             entry->component   = std::move (page);
-            addChildComponent (*entry->component);
             mPages.add (entry);
+            hostPageInWindow (*entry);
         }
         else if (type == "Drums")
         {
@@ -12670,8 +12504,8 @@ void StandaloneEditor::deserializeUIState (const juce::XmlElement& root)
             entry->ribbonTabId = newId;
             entry->type        = RibbonTabBar::TabType::Drums;
             entry->component   = std::move (page);
-            addChildComponent (*entry->component);
             mPages.add (entry);
+            hostPageInWindow (*entry);
         }
         else if (type == "BaySickRustyDrums")
         {

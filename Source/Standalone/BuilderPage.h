@@ -1144,6 +1144,8 @@ public:
     void resized           ()                      override;
     void timerCallback     ()                      override;
     void visibilityChanged ()                      override;
+    // Starts/stops the 30 Hz animation poll with this page's on-screen state.
+    void parentHierarchyChanged ()                 override;
 
     // KeyListener - intercepts key events from the top-level window
     bool keyPressed        (const juce::KeyPress&, juce::Component*) override;

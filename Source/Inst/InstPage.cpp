@@ -1422,32 +1422,3 @@ void InstPage::layoutContent (juce::Rectangle<int> r)
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// InstEmptyState - text-only placeholder.  Mixer button is the spawn trigger.
-// ─────────────────────────────────────────────────────────────────────────────
-InstEmptyState::InstEmptyState()
-{
-    setInterceptsMouseClicks (false, false);
-}
-
-void InstEmptyState::paint (juce::Graphics& g)
-{
-    g.fillAll (juce::Colour (0xff181818));
-
-    auto bounds = getLocalBounds().toFloat().reduced (32.0f);
-    juce::Path p;
-    p.addRoundedRectangle (bounds, 12.0f);
-    juce::Path dashed;
-    const float dashes[] = { 8.0f, 6.0f };
-    juce::PathStrokeType (2.0f).createDashedStroke (dashed, p, dashes, 2);
-    g.setColour (juce::Colour (0xff1c3a8a).withAlpha (0.6f));
-    g.fillPath (dashed);
-
-    g.setColour (juce::Colour (0xffc0c0c0));
-    g.setFont (juce::Font (18.0f, juce::Font::plain));
-    g.drawText (
-        "Click 'Add Inst Strip' on the Mixer page to start an Inst page",
-        bounds.toNearestInt(),
-        juce::Justification::centred,
-        true);
-}

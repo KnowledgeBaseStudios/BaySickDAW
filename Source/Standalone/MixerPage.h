@@ -509,6 +509,10 @@ private:
     bool isBusCollapsed (int channelId) const;
     void onBusCollapseToggled (int channelId);
     void timerCallback() override;
+    // Starts/stops the 30 Hz poll and the vblank meter feed with this page's
+    // on-screen state.  Mirrors VUMeter / DBFSMeter / SlotComponent, which
+    // already key their own vblank attachments off getPeer().
+    void parentHierarchyChanged() override;
     // 2026-05-02: meter polling moved to a vblank-locked callback so the
     // upstream sync (audio peak atomic -> DBFSMeter) runs in lockstep with
     // the monitor refresh.  The 30 Hz Timer above is kept for the slower

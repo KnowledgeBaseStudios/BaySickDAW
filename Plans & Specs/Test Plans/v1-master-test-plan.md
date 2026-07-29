@@ -2050,6 +2050,73 @@ account for PS-17, and one project whose samples you can deliberately move.
       block + points); No keeps the point. The Event Editor has NO Delete button; Builder-grid
       blocks redraw immediately on lane edits.
 
+---
+
+### §B.31 — QA-ModelShell (engine-ownership inversion + offline export + model-side automation + contained-window shell)
+
+`blocks:` TS1 `4ea67bd0` / TS2 `e9ecf03e` / TS3 `1dd08437` / TS4-TS7 `<hashes at code-complete>`
+
+> **B.31.0 RUNS FIRST, BEFORE ANY OTHER SCENARIO IN THIS SECTION.**  It is a data-collection
+> pass, not a pass/fail test: the window resize floors cannot be picked from source, only from
+> the screen, and every later windowing scenario depends on them being set.  Jeff drags, reports
+> the numbers, Claude sets them, then the rest of §B.31 runs.
+
+#### B.31.0 — Window minimum-size collection (DO THIS FIRST)
+
+Rig: the shell build, run at Jeff's normal **125% display scale** (that is the constrained case —
+see the note under the table).  For EACH window below: open it, drag its bottom-right corner in
+until the layout is at the smallest size that is still **usable** — meaning nothing overlaps,
+nothing is clipped off, and every control you would actually reach for is still hittable — then
+record the width x height shown in the title strip readout.
+
+Record BOTH numbers per row.  "Comfortable" is the size you would actually want it to open at;
+"floor" is the hard stop below which it should refuse to shrink.
+
+| # | Window | Floor (w x h) | Comfortable (w x h) | Notes / what collided first |
+|---|--------|---------------|---------------------|------------------------------|
+| 1 | Builder | | | Jeff wants a LARGER floor than the collision point |
+| 2 | Piano Roll | | | ditto |
+| 3 | Mixer | | | ditto |
+| 4 | Effects | | | sidebar + detail pane (TS5 shape) |
+| 5 | Layers (engine page) | | | test with the widest engine — Harmless |
+| 6 | Bass (engine page) | | | |
+| 7 | Drums (engine page) | | | |
+| 8 | Clips | | | |
+| 9 | Vox | | | |
+| 10 | Inst | | | test with a sfizz source loaded (Aria panel is the wide case) |
+| 11 | BaySickRustyDrums | | | kit graphic is fixed-aspect — may be a natural-size floor |
+| 12 | Event Editor | | | already a window today; confirm it still behaves contained |
+
+**Fixed-grid pages:** if a page's layout is a fixed grid rather than a reflowing one, its floor IS
+its natural size (it should refuse to shrink at all).  Mark those rows "natural" instead of giving
+numbers.
+
+**Why 125% does not corrupt these numbers.**  JUCE lays out in LOGICAL pixels and converts to
+physical only at the window boundary, so a collision point is a property of the page's layout, not
+of the display scale.  Jeff's 125% makes his screen SMALLER in logical pixels (a 2560-wide monitor
+is 2048 logical), so it is the tighter case — floors picked here are automatically safe at 100%.
+
+#### B.31.1 — DPI round-trip drift (125%-specific, run right after B.31.0)
+
+Fractional display scales do not map logical pixels onto integers (1.25 leaves .25/.5/.75
+remainders), and JUCE's own windowing source notes non-integral client-area sizes at fractional
+scale.  A 1px rounding error on each save/restore would ACCUMULATE, walking windows off-position
+over successive runs.
+
+- [ ] Open 3 windows, place them at distinctive spots, note exact positions.
+- [ ] Quit and relaunch.  Positions identical?
+- [ ] Repeat the quit/relaunch TWICE MORE.  Any cumulative drift, in any direction, is a FAIL —
+      the failure mode is gradual, so a single restart does not prove it.
+- [ ] Same check for window SIZE, not just position.
+
+#### B.31.2+ — the deferred per-task-set scenario blocks
+
+Run the plan's TS1-TS7 "Batch-smoke scenarios" blocks in order, then the plan's end-to-end
+Verification list.  Those are authored in
+[`Batch Plans/grand-inverting-mammoth.md`](../Batch%20Plans/grand-inverting-mammoth.md) and are
+reproduced into numbered scenarios here at TS8 code-complete (per the §B reconciliation pass,
+conflict call 3=a).
+
 ## §C — Deferred re-verify ledger
 
 Parked items from closed batches. Lands INSIDE QA-J-Verify's §B section when that section is

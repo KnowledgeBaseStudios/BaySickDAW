@@ -58,6 +58,29 @@ public:
     void parentSizeChanged() override;
 
 private:
+    // Records every distinct step label for the running ticker (Jeff spec
+    // 2026-07-28: bar + percent + a running list of what is loading, so a long
+    // load reads as progress rather than as a hang).  Bounded -- a project with
+    // many tabs would otherwise grow this without limit, and only the tail is
+    // ever drawn.
+    // QA-ModelShell TS4 (Jeff, 2026-07-28: "I don't see the popup for loading").
+    // This overlay is a DRAWN component inside the editor, and the contained
+    // windows are NATIVE CHILD PEERS -- an OS window always renders above
+    // anything painted into its parent's client area, which is the very reason
+    // WorkspaceWindow uses child peers in the first place.  So once windows
+    // covered the workspace the overlay was painting underneath them and was
+    // simply invisible.  It therefore has to BE a window while it is showing:
+    // promoted to its own always-on-top desktop window on the outermost
+    // beginOp, and returned to being a child component on the matching endOp.
+    void promoteToDesktop();
+    void returnToHost();
+    juce::Component::SafePointer<juce::Component> mHost;
+
+    void pushTicker (const juce::String& label);
+    juce::StringArray mTicker;
+    static constexpr int kTickerKeep = 64;   // retained
+    static constexpr int kTickerDraw = 8;    // drawn
+
     juce::String mTitle, mStepLabel;
     float mProgress    = -1.0f;   // < 0 = indeterminate
     float mPulse       = 0.0f;

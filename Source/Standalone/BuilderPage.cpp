@@ -7552,7 +7552,23 @@ BuilderPage::BuilderPage(VibeSynthProcessor& p, PatternManager& pm)
         if (mToolbar) mToolbar->setContextText("Playlist > " + name);
     }
 
-    startTimerHz(30);  // higher rate for performance mode animations
+    // Timer start is owned by parentHierarchyChanged -- see the comment there.
+}
+
+void BuilderPage::parentHierarchyChanged()
+{
+    // Peer-keyed suspend, matching MixerPage and the meter widgets.  Deliberately
+    // SEPARATE from visibilityChanged below, which manages the key listener --
+    // different concern, different trigger, and merging them would tie the key
+    // routing to peer state for no reason.
+    if (getPeer() != nullptr)
+    {
+        if (! isTimerRunning()) startTimerHz (30);   // performance-mode animations
+    }
+    else if (isTimerRunning())
+    {
+        stopTimer();
+    }
 }
 
 BuilderPage::~BuilderPage()

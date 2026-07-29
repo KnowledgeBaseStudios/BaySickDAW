@@ -456,6 +456,7 @@ target_sources(BaySickDAWStandalone PRIVATE
     ${VIBESYNTH_DSP_SOURCES}
     # Shared standalone UI
     Source/Standalone/SharedUI.cpp
+    Source/Standalone/WorkspaceWindow.cpp
     Source/Standalone/EngineChainProcessor.cpp
     Source/Standalone/BaySickTitleBar.cpp   # QA-A (2026-05-09)
     Source/Standalone/HeavyOperationOverlay.cpp   # QA-I (2026-07-18)

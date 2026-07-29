@@ -64,7 +64,22 @@ EffectsPage::EffectsPage(TrackSelectionManager& tsm, VibeSynthProcessor& process
     switchTab(TabKind::Rack);
     rebuildChannelDropdown();  // build channel list + sets initial rack/EQ (all components ready now)
 
-    startTimerHz(30);
+    // Timer start is owned by parentHierarchyChanged -- see the comment there.
+}
+
+void EffectsPage::parentHierarchyChanged()
+{
+    // Peer-keyed suspend, matching MixerPage and the meter widgets: a page that
+    // is built but not on screen (windows open lazily, and a closed window
+    // leaves its page alive) must not keep polling.
+    if (getPeer() != nullptr)
+    {
+        if (! isTimerRunning()) startTimerHz (30);
+    }
+    else if (isTimerRunning())
+    {
+        stopTimer();
+    }
 }
 
 EffectsPage::~EffectsPage()

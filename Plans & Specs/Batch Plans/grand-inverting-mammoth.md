@@ -88,7 +88,7 @@ moment the shell is being rebuilt.
 | Min sizes | Every window gets a resize floor at its layout's knob-collision point (fixed-grid panels: floor = natural size). DPI-aware expression | Jeff spec; precedent = main window's documented floor |
 | Tab bar | Required tabs always present: Builder, Mixer, Effects, **Piano Roll**. Type tabs hidden at zero instances; "+" button holds every add option; populated tabs keep ALL current dropdown behavior; deleting a type's last page removes its tab (returns via "+"). RETIRES Task 1 (docket 18) empty-state pages + 0-badge always-visible slots — explicit reversal, Jeff confirmed the mechanics 2026-07-27 | Jeff spec; option-removal paper trail |
 | Rack surface | BLU-480 sidebar picker + detail pane as the Effects window. CL-299 Delay cosmetics ride. BLU-499 preset-loader placement designed into the shell. VST3 plugin slot type is REAL (ships in TS6), not a reserved hole | Jeff: tiers list ruling + prior "do the future state idea if possible"; feasibility confirmed |
-| Scope = everything | ALL tiers items build: riders CL-040/043/045/056/282/301; pulled-in CL-055+BLU-427 (freeze), CL-057, CL-060 (both halves), CL-044, CL-227, BLU-344; maximizer suite CL-244+CL-243(+BLU-109)+BLU-108+BLU-110+measure-before-render button; FULL VST3 family BLU-297/298/299/300/301/302+BLU-447 (LDT-219/423 subsumed) | Jeff: "I said everything… I don't want to have to do all of this later when we're building the shell for all of it now" |
+| Scope = everything | ALL tiers items build: riders CL-040/043/045/056/282/301; pulled-in CL-055+BLU-427 (freeze), CL-057, CL-060 (lazy half only — parallel half DROPPED 2026-07-28), CL-044, CL-227, BLU-344; maximizer suite CL-244+CL-243(+BLU-109)+BLU-108+BLU-110+measure-before-render button; FULL VST3 family BLU-297/298/299/300/301/302+BLU-447 (LDT-219/423 subsumed) | Jeff: "I said everything… I don't want to have to do all of this later when we're building the shell for all of it now" |
 | Automation endgame | ALL registration moves model-side: engine params registered by the model at engine creation; rack params via EffectParamMap tables; mixer `_fader`/`_pan` lanes remapped to their real strip params; EQ band ownership decoupled from the display; views only stamp right-click ids. Wire-at-load + wire-at-param-creation dissolve into this (they were view-trigger workarounds) | Destroy-on-close makes every widget-scoped registration a guaranteed defect; industry-uniform per the binding research |
 | CL-045 semantics | LUFS-target normalization on bounce is measure-then-gain, BOTH directions, headroom-capped when boosting (true-peak ceiling). NOT a maximizer — that's CL-244's job | Jeff Q&A 2026-07-27 |
 | Freeze design forks | Tap point (pre-rack "Source Only" vs post-rack "Full" vs both — Logic precedent) + presentation (invisible swap vs bounce-in-place row) are OPEN sub-spec calls, resolved at TS7 open | Jeff confirmed intent = stop engine computing, grid stays source of truth |
@@ -332,9 +332,20 @@ destroy-on-close; "+" tab bar.
   [EventEditor.h:321](../../Source/Standalone/EventEditor.h:321)).
 - [ ] Main window fixed fullscreen, resize off ([StandaloneApp.cpp:948-1015](../../Source/Standalone/StandaloneApp.cpp:948));
   transport bar + main menu stay in main chrome.
-- [ ] Destroy-on-close everywhere; reopen rebuilds the view from the model (TS1) and
-  re-binds. CL-060: lazy views (free) + parallel page restoration at load (real work —
-  views build on demand; engine restore stays load-time).
+- [x] ~~Destroy-on-close everywhere~~ — **RESOLVED AS OPTION (d), Jeff 2026-07-28.** Page
+  destruction stays OFF (the cached raw pointers into pages make it a few-hundred-site
+  refactor, and the CPU dividend that justified it did not survive measurement). Instead
+  the repeating UI cost is suspended when a page is off screen: MixerPage's vblank meter
+  drain + 30 Hz poll, and the Effects / Builder timers, all peer-keyed.
+- [x] CL-060 **lazy half — SHIPPED.** Launch frames only the Builder grid and the Mixer;
+  every other page frames the first time its tab is selected.
+- [ ] ~~CL-060 parallel page restoration at load~~ — **DROPPED by owner ruling, Jeff
+  2026-07-28: "as for the parallel half lets just drop that."** Out of QA-ModelShell and
+  not re-routed to any other batch. It would mean restructuring engine construction (build
+  engine → keep out of the graph → SFZ load on a pool thread → splice in on the message
+  thread) inside the area TS1 just rebuilt, for a load-time-only win; the loading readout
+  shipped this session addresses the actual complaint instead. `Future State.md`'s CL-060
+  entry needs reconciling at batch close per Main Plan §0 Rule 3.
 - [ ] Keyboard/command routing per window (BSCommands; KeyBindings audit — note
   Component::addKeyListener REVERSE-order gotcha from CLAUDE.md).
 - [ ] Tab bar "+" system: required tabs Builder/Mixer/Effects/Piano Roll permanent; type
@@ -493,7 +504,7 @@ load/apply path must keep); the QA-Ef close entries before touching doFileNew/ex
 surfaces; STANDALONE_UI_CHANGES.md before TS4/TS5 (deliberate UI decisions log);
 `Files For Claude/DSP Review/_APPROVED_CHANGES.md` before TS7's Limiter work.
 
-## Carry-Over (2026-07-28 — TS3 CODE-COMPLETE incl. owner rulings; gate green; commit surfaced)
+## Carry-Over (2026-07-28 — TS3 COMMITTED `1dd08437`; TS4 IN FLIGHT, chunk A landed)
 
 - **Completed:** TS1 `4ea67bd0`, TS2 `e9ecf03e`, and TS3 code-complete — all eight source
   items closed (EffectParamMap tables for every EffectType x variant; pedals model-side;
@@ -502,8 +513,9 @@ surfaces; STANDALONE_UI_CHANGES.md before TS4/TS5 (deliberate UI decisions log);
   re-widen; BLU-344), PLUS the two items Jeff ruled on at the commit surface: the sfizz
   automation gap FIXED as a defect, and `TapePanel` DELETED.  Item-by-item trail in the
   running notes.
-- **In-flight:** nothing.  The TS3 commit is SURFACED to Jeff (Rule 9 one-liner + full
-  git status) — nothing commits without his approval.
+- **In-flight:** nothing.  TS3 committed `1dd08437` on Jeff's approval (40 files,
+  +2040/-1603; tree clean after).  The post-commit running-notes entry + this Carry-Over
+  refresh ride TS4's commit, same convention as every prior set.
 - **Assumptions changed (recorded here because the plan body still states them):**
   1. The TS3 hard-won-facts note says "null-owner registrations must clear
      `mAutomationIdOwner`".  That guard is GONE with the owner index itself — after TS3
@@ -519,9 +531,48 @@ surfaces; STANDALONE_UI_CHANGES.md before TS4/TS5 (deliberate UI decisions log);
      already the engine's APVTS param id, which TS1's model walk registers.  Because the
      editor is built after the engine, the VIEW claim was winning — TS3 is what makes
      TS1's registration take effect.
+- **TS4 IS OPEN AND PARTLY BUILT — read this before touching it.**
+  * DONE: the TS4 scout (full map in the running notes — page hosting today, the
+    fixed-10-slot ribbon, the missing PageMenuBar .h/.cpp, the main-window order gotcha)
+    and **chunk A**: new `Source/Standalone/WorkspaceWindow.h/.cpp` + CMakeLists entry,
+    holding `Workspace` + `WorkspaceWindow`.  Compiles green both configs, zero errors.
+    UNCOMMITTED and UNWIRED — nothing hosts pages in it yet, so the app still behaves
+    exactly as before.
+  * The JUCE child-peer coordinate contract is VERIFIED against the vendored source and
+    written into WorkspaceWindow.h as a keeper comment.  Do NOT re-derive it: child peers
+    are WS_CHILD, and BOTH setBounds and getBounds work in PARENT-CLIENT space (top-level
+    peers use screen space) — that asymmetry is the whole reason
+    `Workspace::originInParentClient()` exists.
+  * REMAINING TS4, in order: (1) wire `Workspace` into `StandaloneEditor::resized`'s
+    content rect, replacing the stacked always-alive pages; (2) flip page hosting onto
+    WorkspaceWindows + destroy-on-close, reopen rebuilding the view from the TS1 model;
+    (3) the tab-bar "+" rewrite (RibbonTabBar is a FIXED 10-slot bar today — this is a
+    real slot-model rewrite) + retire the EngineEmptyState trio, `hideAllEmptyStates` and
+    the six `on*EmptyStateRequested` callbacks; (4) per-window keyboard/command routing
+    (mind the CLAUDE.md addKeyListener REVERSE-order gotcha); (5) main window pinned
+    fullscreen — PRESERVE the StandaloneApp.cpp:956 ordering comment, limits MUST be set
+    before setFullScreen or Windows demotes MAXIMIZED to NORMAL; (6) CL-060 lazy views
+    DONE, **CL-060 parallel page restoration DROPPED by owner ruling 2026-07-28** (see the
+    checklist entry above and the running-notes removal entry — not re-routed anywhere);
+    (7) CL-087 promoted (TS8 writes the Forks entry).
+  * **FLOORS CALL — RESOLVED AS A PROCESS, numbers still pending (Jeff 2026-07-28).**  He
+    cannot drag until he is home, and wants building to continue meanwhile.  Ruling: build
+    the shell with provisional floors, and notate every window he must size as the VERY
+    FIRST item of the smoke; he does that pass, hands over the numbers, then they get set
+    properly.  **`Test Plans/v1-master-test-plan.md` §B.31.0 is written and is that
+    checklist** — 12 windows, floor + comfortable per row, "natural" for fixed-grid pages.
+    So: DO NOT block TS4 on the numbers, and DO give every window a provisional floor via
+    `WorkspaceWindow::setMinimumSize` so nothing is unbounded in the meantime.
+  * **DPI: Jeff runs 125%.**  Not a problem for the numbers — JUCE lays out in LOGICAL
+    pixels and converts only at the peer boundary, so a collision point is a property of
+    the layout, not the display scale; and 125% makes his screen SMALLER in logical pixels,
+    so his floors are the conservative case and are automatically safe at 100%.  The real
+    125% risk is different and is now §B.31.1: fractional scale means logical<->physical
+    does not land on integers, so a 1px save/restore rounding error would ACCUMULATE across
+    launches and walk windows off-position.  Test it over THREE relaunches, not one.
 - **Resume action:** session-open per the boilerplate (standup + Main Plan §0 + this plan
-  IN FULL incl. Carry-Over blocks + the mammoth running notes IN FULL), confirm the TS3
-  commit hash at HEAD, then open **TS4 (the shell)**.  TS4's FIRST act is its open
+  IN FULL incl. Carry-Over blocks + the mammoth running notes IN FULL), confirm `1dd08437`
+  at HEAD, note the four uncommitted TS4 files, then continue **TS4** at item (1) above.  TS4's FIRST act is its open
   sub-spec call: exact minimum window sizes for Builder / Piano Roll / Mixer, picked with
   Jeff ON SCREEN (he wants "larger" floors).  Scout after that: the native-child window
   frame family, `StandaloneApp.cpp:948-1015` fixed-fullscreen main, RibbonTabBar "+"

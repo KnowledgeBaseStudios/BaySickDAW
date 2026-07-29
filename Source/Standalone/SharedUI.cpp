@@ -8099,27 +8099,3 @@ void setSliderDoubleClickDefaultsFromApvts (juce::Component& root,
     }
 }
 
-// ── EngineEmptyState (QA-ProjectSave docket 18) ──────────────────────────────
-EngineEmptyState::EngineEmptyState (juce::Colour accent, juce::String message)
-    : mAccent (accent), mMessage (std::move (message))
-{
-    setInterceptsMouseClicks (false, false);
-}
-
-void EngineEmptyState::paint (juce::Graphics& g)
-{
-    g.fillAll (juce::Colour (0xff181818));
-
-    auto bounds = getLocalBounds().toFloat().reduced (32.0f);
-    juce::Path p;
-    p.addRoundedRectangle (bounds, 12.0f);
-    juce::Path dashed;
-    const float dashes[] = { 8.0f, 6.0f };
-    juce::PathStrokeType (2.0f).createDashedStroke (dashed, p, dashes, 2);
-    g.setColour (mAccent.withAlpha (0.6f));
-    g.fillPath (dashed);
-
-    g.setColour (juce::Colour (0xffc0c0c0));
-    g.setFont (juce::Font (18.0f, juce::Font::plain));
-    g.drawText (mMessage, bounds.toNearestInt(), juce::Justification::centred, true);
-}

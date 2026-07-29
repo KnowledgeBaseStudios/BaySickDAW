@@ -294,16 +294,3 @@ private:
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (InstPage)
 };
 
-// ─────────────────────────────────────────────────────────────────────────────
-// InstEmptyState - placeholder shown when the Inst ribbon slot is clicked
-// with zero instances.  Spawn trigger is "Add Inst Strip" on Mixer.
-// ─────────────────────────────────────────────────────────────────────────────
-class InstEmptyState : public juce::Component
-{
-public:
-    InstEmptyState();
-    void paint (juce::Graphics&) override;
-
-private:
-    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (InstEmptyState)
-};

@@ -52,6 +52,11 @@ public:
     std::function<void(int tabId)>                    onTabSelected;
     std::function<void(int tabId)>                    onTabClosed;       // Layers/Bass delete
     std::function<void(TabType)>                      onAddTabRequest;   // Layers/Bass add
+    // QA-ModelShell TS4 (Jeff spec 2026-07-28): the "+" menu lists ENGINES, not
+    // page types -- the engine you pick decides which tab it lands in.  Engines
+    // that can live in more than one tab (BaySickPlayer, Harmless, BaySickSynth)
+    // get a side submenu to choose.  This fires with the resolved pair.
+    std::function<void(TabType, const juce::String& engineName)> onAddEngineRequest;
     std::function<void(TabType, int subPageIndex)>    onSubPageSelected; // Effects/Builder/Drums
     // J-6 (2026-05-03): "+ Add BaySickRustyDrums" entry in the Drums dropdown.
     // Singleton - fires only when no instance currently exists.
@@ -98,19 +103,11 @@ public:
     // dropdown only refuses if the tab is locked (with a "Cannot Delete"
     // message); otherwise it fires this so StandaloneEditor can dispatch.
     std::function<void(int tabId)>                    onTabDeleteRequested;
-    // G-2 (2026-04-28): fired when user clicks the Clip ribbon body and no
-    // Clip instances exist yet.  Editor uses this to show the empty-state
-    // placeholder ("drop a clip here..." with FileDragAndDropTarget).
-    std::function<void()>                             onClipsEmptyStateRequested;
-    // G-4 (2026-04-28): same pattern for Vox + Inst.  Empty states tell the
-    // user to click the corresponding "Add Strip" button on the Mixer page.
-    std::function<void()>                             onVoxEmptyStateRequested;
-    std::function<void()>                             onInstEmptyStateRequested;
-    // QA-ProjectSave docket 18 (2026-07-26): Layers / Bass / Drums can now sit
-    // at zero instances, so they need the same body-click hook.
-    std::function<void()>                             onLayersEmptyStateRequested;
-    std::function<void()>                             onBassEmptyStateRequested;
-    std::function<void()>                             onDrumsEmptyStateRequested;
+    // QA-ModelShell TS4 (2026-07-28): the six on*EmptyStateRequested callbacks
+    // are gone.  They existed so a click on a ZERO-INSTANCE type slot could
+    // show a placeholder page -- and a type slot is no longer even drawn at
+    // zero instances (visibleSlotTypes), so the click they answered cannot
+    // happen.  Adding an instance is the "+" slot's job now.
 
     // ── API ──────────────────────────────────────────────────────────────────
     int  addTab(TabType type, const juce::String& name);
@@ -166,7 +163,9 @@ public:
     // purpose was the >= 1 floor on Layers / Bass / Drums, which is gone.
 
 private:
-    static constexpr int kNumSlots = 10;  // 2026-04-28: +Vox +Inst (G-4)
+    // Upper bound only (10 types + the "+" slot) -- used to size stack arrays
+    // in the width solver.  The LIVE count is numSlots().
+    static constexpr int kMaxSlots = 11;
     // QA-A Phase 5 (2026-05-09): kTabH bumped 30 -> 40 so each tab fills the
     // full vertical height of the parent transport bar (kBarH = 40 in
     // StandaloneEditor::resized).  Eliminates the empty horizontal strip
@@ -194,8 +193,21 @@ private:
     static constexpr int kMinVariable   = 80;
     static constexpr int kMaxSingleLine = 220;
 
-    // Fixed slot order
-    static TabType slotType(int slotIndex);
+    // QA-ModelShell TS4: the bar is no longer a fixed 10-slot strip.  The four
+    // REQUIRED tabs (Builder / Mixer / Effects / Piano Roll) are always shown;
+    // the six instance types appear only while they have >= 1 instance and
+    // vanish at zero, returning through the trailing "+" slot.  Slot indices
+    // are therefore runtime, not a compile-time map.
+    std::vector<TabType> visibleSlotTypes() const;
+    // Visible type slots + 1 for the trailing "+".
+    int  numSlots() const;
+    // True when slotIndex addresses the "+" slot rather than a tab type.
+    bool isAddSlot (int slotIndex) const;
+    TabType slotType(int slotIndex) const;
+    static bool isRequiredTab (TabType type);
+    // The "+" menu: every add option, including the ones that used to live in
+    // per-type dropdowns and the empty-state placeholders.
+    void showAddMenu (juce::Rectangle<int> slotBounds);
 
     // Layout helpers
     juce::Rectangle<int> slotRect(int slotIndex) const;
@@ -245,6 +257,10 @@ private:
     // submenu ids index into it inside the menu result callback.
     std::vector<VoxExportEntry> mVoxExportShown;
     static constexpr int kVoxExportBaseId = 100000;
+    // "+" menu engine choices, rebuilt each time the menu opens.
+    struct AddChoice { TabType type; juce::String engine; };
+    std::vector<AddChoice> mAddMenuChoices;
+    static constexpr int kAddEngineBaseId = 300000;
 
     static juce::Colour tabColour(TabType type, bool active);
 

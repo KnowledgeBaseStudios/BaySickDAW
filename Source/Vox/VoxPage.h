@@ -207,16 +207,3 @@ private:
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (VoxPage)
 };
 
-// ─────────────────────────────────────────────────────────────────────────────
-// VoxEmptyState - text-only placeholder shown when the Vox ribbon slot is
-// clicked with zero instances.  Spawn trigger is "Add Vox Strip" on Mixer.
-// ─────────────────────────────────────────────────────────────────────────────
-class VoxEmptyState : public juce::Component
-{
-public:
-    VoxEmptyState();
-    void paint (juce::Graphics&) override;
-
-private:
-    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (VoxEmptyState)
-};
