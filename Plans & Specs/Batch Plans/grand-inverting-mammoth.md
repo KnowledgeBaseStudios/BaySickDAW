@@ -368,22 +368,39 @@ destroy-on-close; "+" tab bar.
 
 ### Task set 5 — The Effects surface (Group 5)
 
-- [ ] BLU-480 effects window: left sidebar = channel selector + 6 slot rows (picker per
-  slot) + Pre/Post EQ entries; right detail pane hosts the selected panel (min = largest
-  panel's natural size). Reuses `resolveChannelDsp`/`rackForChannelId` single-switch
-  ([EffectsPage.cpp:496-602](../../Source/Standalone/EffectsPage.cpp:496)) — do NOT fork a
-  second channel switch.
-- [ ] BLU-499 preset-loader placement in the new shell (3 approach options in its entry —
-  pick with Jeff at implementation).
-- [ ] CL-299 Delay panel deltas (4 items enumerated in its Future State entry).
-- [ ] Player-page FX buttons open this window pre-selected to that channel.
-- [ ] VST3 slot type has a real place in the sidebar picker (TS6 fills it).
-- [ ] Build gate (gates the commit below).
-- [ ] Batch-smoke scenarios (DEFERRED to Task set 8): (1) every effect type's panel
-  renders + edits in the detail pane; Basic/Advanced + presets + slot reorder intact;
-  (2) pre/post EQ edit + automate; (3) channel switching keeps automation applying (the
-  original Task 7 scenario, now in the new shell); (4) Delay panel matches the CL-299
-  reference deltas.
+**SCOPE REPLACED BY JEFF'S SPEC, 2026-07-29.**  The sidebar-plus-detail-pane shape below was
+superseded before implementation: the Effects surface is a small RACK WINDOW (strip picker,
+Pre/Post EQ buttons, six slot rows) that opens each effect panel and each EQ as its OWN window.
+His reasoning: "a user can choose what they are editing at a time instead of everything all at
+once, this will also allow for more functionality when we get to the layout batch."  Full spec +
+the five-item answer docket in the running notes, 2026-07-29.
+
+- [x] ~~BLU-480 effects window: left sidebar + right detail pane~~ — **superseded**; shipped as the
+  rack window + satellite windows.  The reuse constraint held: `resolveChannelDsp` /
+  `rackForChannelId` are the only channel switch, and the pre-rack EQ's inline switch was
+  extracted to `preEqForChannelId` rather than forked a third time.
+- [x] BLU-499 preset-loader placement — answered by the restructure rather than the 3 options:
+  per-effect presets live in the panel window's title-bar menu (with Basic/Advanced, Mode, SC),
+  and the rack window's title bar gains Save / Load FX Rack Preset (six slots + both EQs).
+- [x] CL-299 Delay panel deltas — items 1, 2 and 4 shipped (feedback warning ring, FB-distortion
+  transfer curve, reference model display order).  **Item 3 (step-denominated Time knob +
+  right-click musical-value list) DROPPED by owner ruling 2026-07-29** — the BPM toggle + 8-division
+  chickenhead stay as they are.
+- [x] Player-page FX buttons open this window pre-selected to that channel (the existing
+  `jumpToFxRackForPrefix` path already raises the window and pre-selects; verified, not rebuilt).
+- [x] VST3 slot type has a real place in the picker — a disabled "VST3 Plugin..." row under a
+  Plugins section (TS6 enables it).
+- [x] Build gate (gates the commit below) — green both configs.
+- [ ] Batch-smoke scenarios (DEFERRED to Task set 8), updated for the window shape: (1) every
+  effect type opens in its own window and edits; Basic/Advanced + Mode + SC + presets reachable
+  from that window's title menu; (2) pre + post EQ open as separate windows, both on screen at
+  once, edit + automate; (3) switching the rack window's strip leaves open windows alone and
+  keeps automation applying (the original Task 7 scenario, now across windows); (4) Delay shows
+  the feedback warning ring past 100 %, the transfer curve tracks the FBDist knobs, and the model
+  selector reads Mono / Stereo / PingPong / Off; (5) remove prompts, and removal packs the slots
+  up while an open window for a removed effect closes itself; (6) reorder moves an effect and its
+  open window follows it; (7) Save / Load FX Rack Preset round-trips six slots + both EQs onto a
+  different strip.
 - [ ] COMMIT (per-set, Jeff-approved). Running-notes checkpoint.
 
 ### Task set 6 — VST3 hosting (Group 6)
@@ -392,19 +409,63 @@ Build order within the set: scanner -> browser -> effect slot -> latency -> inst
 crash protection. CMake scout first: hosting flags on our _headless audio_processors
 module variant.
 
+**JEFF'S TS6 SPEC, 2026-07-29** (given at the TS5 commit surface; supersedes the one-line
+sketches below wherever they disagree).
+
+**The Plugins manager window (BLU-298 + BLU-299).**  A **Plugins** entry is added to the MAIN
+menu bar's **Options** menu.  Opening it brings up a window with three sections:
+
+1. **Scan folders** — shows the list of folders currently chosen, AND carries a button that
+   opens the OS folder-picker ("open" window) to add another (Jeff, 2026-07-29).  Ships seeded
+   with the standard locations VST3s install to by default.
+2. **Added list** — the full list of PLUGINS the user has added.  This is the list every other
+   surface reads from.
+3. **Scan results** — starts blank.  A **Scan** button walks the selected folders and fills this
+   section with every VST found that is **not already on the added list**.  Each row carries a
+   checkbox; an **Add** button at the bottom moves the checked rows into the added list.
+
+*Effect vs instrument — answered, it is available.*  A scan yields a `juce::PluginDescription`
+per plugin, and that carries an `isInstrument` flag (the VST3 category the plugin declares).  So
+the kind is known without loading the plugin, and Jeff's three uses of it all work:
+  - show the kind on the **added list**;
+  - the FX rack picker's **VST Plugins** group lists only EFFECTS;
+  - the **Plugins tab / "+" entry** lists only INSTRUMENTS.
+
+*Section roles are settled (Jeff, 2026-07-29):* section 1 owns the FOLDERS (list + add button),
+section 2 is the added PLUGINS list, section 3 is the scan result.  No open question here.
+
+**Plugin player engines need their own channel furniture (BLU-298/299 scope, feeds BLU-447).**
+A **Plugins** tab type, plus its own mixer **strip** and **bus**.  VST strips must be movable
+under the Layers or Bass bus, exactly as Layers and Bass strips can already be routed to each
+other's bus (the `_sendTo` machinery MixerPage + `rebuildRoutingFromApvts` already implement --
+reuse it, do not fork).  Cross-check `reference_mixer_strip_pattern_audit` before the diff: a new
+strip type touches ~15 sites.
+
 - [ ] BLU-298 scanner: background thread, known-plugins list persisted, blacklist on
-  crash-during-scan.
-- [ ] BLU-299 browser: search/filter over scanned list; lives in the "+"/picker surfaces.
+  crash-during-scan.  Drives sections 1 + 3 of the manager window above.
+- [ ] BLU-299 browser: the manager window above (Options > Plugins), search/filter over the
+  scanned list, and the added list it maintains for every consuming surface.
 - [ ] BLU-300 effect hosting: `EffectType::VST3Plugin` slot (append-only ordinal per the
   pinned-enum rule, [EffectRack.h:15-23](../../Source/EffectRack.h:15)); state save/load
   (plugin state blob in VibeRackStates); editor hosted in a native child window (the
   TS4 shell makes this composable); automation: plugin params surface as lanes (param
   index/id keyed — stable-id discipline per the binding research; REAPER's positional
   fragility is the anti-pattern).
+  **Picker shape (Jeff 2026-07-29):** the rack picker gets a **VST Plugins** group built
+  exactly like the Pedals group TS5 shipped — the bigger bold heading font with the dropdown
+  hanging off that same line — listing every EFFECT plugin on the added list, **alphabetically**.
+  The mechanism is already in the tree: `HeaderSubMenuItem` in
+  [SlotComponent.cpp](../../Source/Standalone/SlotComponent.cpp) (a real JUCE section header
+  cannot carry a submenu; that custom item is why).  TS5's disabled "VST3 Plugin..." row under
+  the flat "Plugins" header is the placeholder this replaces.
 - [ ] BLU-301 latency: plugin getLatencySamples -> bus PDC refresh (existing
   updateBusLatencies path).
 - [ ] BLU-447 instrument hosting: a hosted synth as a tab engine in TS1's generic slot
   (MIDI in from the roll dispatch; state in engineData; editor window like any page).
+  **Tab + "+" shape (Jeff 2026-07-29):** its own ribbon tab named **Plugins**, and the matching
+  **"+" menu entry is a side dropdown** listing every player-engine (instrument) plugin on the
+  added list.  Same relationship the other engine families have with the "+" menu, and the
+  same alphabetical ordering as the effect group.
 - [ ] BLU-302 crash protection LAST (sub-call: process model). Everything before it works
   in-process first.
 - [ ] Build gate (gates the commit below).
@@ -504,7 +565,33 @@ load/apply path must keep); the QA-Ef close entries before touching doFileNew/ex
 surfaces; STANDALONE_UI_CHANGES.md before TS4/TS5 (deliberate UI decisions log);
 `Files For Claude/DSP Review/_APPROVED_CHANGES.md` before TS7's Limiter work.
 
-## Carry-Over (2026-07-28 — TS3 COMMITTED `1dd08437`; TS4 IN FLIGHT, chunk A landed)
+## Carry-Over (2026-07-29 — TS5 CODE-COMPLETE, gate green, commit surfaced)
+
+- **Completed:** TS1 `4ea67bd0`, TS2 `e9ecf03e`, TS3 `1dd08437`, TS4 `05b248a8`.  TS5 is
+  code-complete against a REPLACED scope: Jeff respecced the Effects surface on 2026-07-29 before
+  any of it was built, so the sidebar-plus-detail-pane shape never shipped.  What shipped is the
+  rack window + per-effect windows + separate Pre/Post EQ windows, plus a whole-rack preset, plus
+  CL-299 items 1/2/4.  Item-by-item trail in the running notes (three entries, 2026-07-29).
+- **In-flight:** nothing.  Gate green both configs, zero errors, two exe link lines.  Awaiting
+  Jeff's approval on the TS5 commit; nothing commits without it.
+- **Assumptions changed (the plan body above is now wrong in three places, all annotated inline):**
+  1. BLU-480's sidebar/detail-pane shape is superseded.  Do not build it in a later set.
+  2. BLU-499's three approach options were never picked — the restructure answered the question
+     differently (per-effect presets on the panel window's menu; a new whole-rack preset on the
+     rack window's menu).
+  3. CL-299 is a 3-item deliverable now, not 4.  Item 3 is an explicit owner-ruled DROP.
+- **Open for TS8 bookkeeping:** `Test Plans/v1-master-test-plan.md` §B.31.0 has ONE "Effects" row,
+  written when the surface was one window.  It now needs rows for the rack window, a panel window
+  and an EQ window — three different floors.  The rack window already has a real floor (300x250,
+  derived from its fixed content); the other two are provisional (620x170, 560x320).
+- **Resume action:** session-open per the boilerplate, confirm the TS5 commit hash at HEAD, then
+  open **TS6 (VST3 hosting)** with its CMake scout: whether plugin hosting needs the full
+  `juce_audio_processors` module in place of the `_headless` variant we build today.  TS6's first
+  act is its open sub-spec call — the crash-protection process model (per-plugin sandbox process vs
+  a single shared host process).  The picker already carries a disabled "VST3 Plugin..." row under a
+  Plugins section; enabling it is TS6's entry point.
+
+## Prior Carry-Over (2026-07-28 — TS3 COMMITTED `1dd08437`; TS4 IN FLIGHT, chunk A landed)
 
 - **Completed:** TS1 `4ea67bd0`, TS2 `e9ecf03e`, and TS3 code-complete — all eight source
   items closed (EffectParamMap tables for every EffectType x variant; pedals model-side;

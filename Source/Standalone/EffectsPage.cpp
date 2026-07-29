@@ -1,10 +1,162 @@
 #include "EffectsPage.h"
 #include "EffectEditorPanels.h"
+#include "FxRackPresetIO.h"
 #include "../PluginProcessor.h"
 #include "../DSP/EffectParamMap.h"   // QA-ProjectSave Task 7 step 3
 
 // ── Channel dropdown items (order matches onChannelChanged switch) ─────────────
 // ID 1 = Layers Bus, 2 = Bass Bus, 3 = Drums Bus, 4 = Master, 5 = Effects Bus
+
+// ── RackSlotRow — one line of the rack window (QA-ModelShell TS5) ─────────────
+// [LED] [ effect name (opens its window) ] [^] [v] [pick] [x]
+//
+// Everything is painted and hit-tested rather than built from child buttons,
+// matching how the slot header has always drawn its own ▲▼× cluster.  The
+// glyphs are VECTOR PATHS, not text: a font glyph for a chevron or a cross is
+// outside ASCII and renders as a box on a machine without it, and these are the
+// only affordance a row has.
+class EffectsPage::RackSlotRow : public juce::Component,
+                                 public juce::TooltipClient
+{
+public:
+    explicit RackSlotRow (int slotIndex) : mSlotIndex (slotIndex) {}
+
+    std::function<void(int slot)>            onOpen, onPick, onRemove, onBypass;
+    std::function<void(int slot, bool up)>   onMove;
+
+    void setState (bool loaded, bool bypassed, juce::String name)
+    {
+        if (loaded == mLoaded && bypassed == mBypassed && name == mName) return;
+        mLoaded = loaded; mBypassed = bypassed; mName = std::move (name);
+        repaint();
+    }
+
+    juce::String getTooltip() override
+    {
+        const auto p = getMouseXYRelative();
+        if (mLedR   .contains (p)) return mBypassed ? "Bypassed - click to enable"
+                                                    : "Active - click to bypass";
+        if (mUpR    .contains (p)) return "Move this effect earlier in the chain";
+        if (mDownR  .contains (p)) return "Move this effect later in the chain";
+        if (mPickR  .contains (p)) return mLoaded ? "Choose a different effect"
+                                                  : "Choose an effect for this slot";
+        if (mCloseR .contains (p)) return "Remove this effect";
+        if (mNameR  .contains (p)) return mLoaded ? "Open this effect in its own window"
+                                                  : "Empty slot - click to choose an effect";
+        return {};
+    }
+
+    void paint (juce::Graphics& g) override
+    {
+        auto b = getLocalBounds().toFloat().reduced (1.0f);
+        g.setColour (VC::Panel);
+        g.fillRoundedRectangle (b, 3.0f);
+        g.setColour (VC::Accent.withAlpha (mLoaded ? 0.55f : 0.25f));
+        g.drawRoundedRectangle (b, 3.0f, 1.0f);
+
+        if (mLoaded)
+            EffectBypassLed::paint (g, mLedR, mBypassed);
+
+        // Name plate.  Reads as a button because it is one -- this is the route
+        // to the effect's own window.
+        auto nameR = mNameR.toFloat().reduced (1.0f);
+        g.setColour (mLoaded ? VC::Bg.withAlpha (0.55f) : VC::Bg.withAlpha (0.25f));
+        g.fillRoundedRectangle (nameR, 2.0f);
+        g.setColour (mLoaded ? VC::Text : VC::TextDim);
+        g.setFont (juce::Font (12.0f, mLoaded ? juce::Font::bold : juce::Font::plain));
+        g.drawText (mLoaded ? mName : juce::String ("Empty"),
+                    mNameR.reduced (6, 0), juce::Justification::centredLeft, true);
+
+        g.setColour (mLoaded ? VC::TextDim : VC::TextDim.withAlpha (0.4f));
+        drawTriangle (g, mUpR,   true);
+        drawTriangle (g, mDownR, false);
+        drawChevron  (g, mPickR);
+        if (mLoaded)
+        {
+            g.setColour (juce::Colour (0xffcc4444));
+            drawCross (g, mCloseR);
+        }
+    }
+
+    void resized() override
+    {
+        auto b = getLocalBounds().reduced (3, 2);
+        mLedR   = b.removeFromLeft (18);
+        b.removeFromLeft (3);
+        mCloseR = b.removeFromRight (18);
+        mPickR  = b.removeFromRight (20);
+        mDownR  = b.removeFromRight (16);
+        mUpR    = b.removeFromRight (16);
+        b.removeFromRight (4);
+        mNameR  = b;
+    }
+
+    void mouseDown (const juce::MouseEvent& e) override
+    {
+        const auto p = e.getPosition();
+        if (mLoaded && mLedR.contains (p))   { if (onBypass) onBypass (mSlotIndex); return; }
+        if (mLoaded && mUpR.contains (p))    { if (onMove)   onMove (mSlotIndex, true);  return; }
+        if (mLoaded && mDownR.contains (p))  { if (onMove)   onMove (mSlotIndex, false); return; }
+        if (mLoaded && mCloseR.contains (p)) { if (onRemove) onRemove (mSlotIndex); return; }
+        if (mPickR.contains (p))             { if (onPick)   onPick (mSlotIndex); return; }
+        if (mNameR.contains (p))
+        {
+            // An empty row's name plate is the picker too: a dead region where
+            // the obvious click lands is worse than a second route to the menu.
+            if (mLoaded) { if (onOpen) onOpen (mSlotIndex); }
+            else         { if (onPick) onPick (mSlotIndex); }
+        }
+    }
+
+private:
+    static void drawTriangle (juce::Graphics& g, juce::Rectangle<int> r, bool pointUp)
+    {
+        auto a = r.toFloat().reduced (4.0f, 5.0f);
+        juce::Path p;
+        if (pointUp)
+        {
+            p.startNewSubPath (a.getCentreX(), a.getY());
+            p.lineTo (a.getRight(), a.getBottom());
+            p.lineTo (a.getX(),     a.getBottom());
+        }
+        else
+        {
+            p.startNewSubPath (a.getX(),       a.getY());
+            p.lineTo (a.getRight(),            a.getY());
+            p.lineTo (a.getCentreX(),          a.getBottom());
+        }
+        p.closeSubPath();
+        g.fillPath (p);
+    }
+
+    static void drawChevron (juce::Graphics& g, juce::Rectangle<int> r)
+    {
+        auto a = r.toFloat().reduced (5.0f, 6.0f);
+        juce::Path p;
+        p.startNewSubPath (a.getX(),        a.getY());
+        p.lineTo          (a.getCentreX(),  a.getBottom());
+        p.lineTo          (a.getRight(),    a.getY());
+        g.strokePath (p, juce::PathStrokeType (1.6f));
+    }
+
+    static void drawCross (juce::Graphics& g, juce::Rectangle<int> r)
+    {
+        auto a = r.toFloat().reduced (5.0f);
+        g.drawLine (a.getX(), a.getY(), a.getRight(), a.getBottom(), 1.6f);
+        g.drawLine (a.getX(), a.getBottom(), a.getRight(), a.getY(), 1.6f);
+    }
+
+    const int    mSlotIndex;
+    bool         mLoaded   { false };
+    bool         mBypassed { false };
+    juce::String mName;
+    juce::Rectangle<int> mLedR, mNameR, mUpR, mDownR, mPickR, mCloseR;
+
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (RackSlotRow)
+};
+
+// Row pitch for the rack window's fixed-height list.
+static constexpr int kRowH = 24;
 
 // ── Ctor ──────────────────────────────────────────────────────────────────────
 EffectsPage::EffectsPage(TrackSelectionManager& tsm, VibeSynthProcessor& processor)
@@ -47,22 +199,43 @@ EffectsPage::EffectsPage(TrackSelectionManager& tsm, VibeSynthProcessor& process
     };
     addAndMakeVisible(*mFxBypassBtn);
 
-    mMetersBtn = std::make_unique<juce::TextButton>("Meters v");
-    mMetersBtn->setLookAndFeel(&VibeLAF::get());
-    mMetersBtn->setTooltip("VU meter calibration and display options");
-    mMetersBtn->onClick = [this] { showMetersMenu(); };
-    addAndMakeVisible(*mMetersBtn);
+    // ── EQ entries ────────────────────────────────────────────────────────────
+    // Buttons, not tabs: each opens its EQ in its own window, and both can be
+    // open at once (Jeff spec 2026-07-29).
+    auto makeEqBtn = [this] (std::unique_ptr<juce::TextButton>& btn,
+                             const juce::String& label, bool pre)
+    {
+        btn = std::make_unique<juce::TextButton> (label);
+        btn->setLookAndFeel (&VibeLAF::get());
+        btn->setTooltip (pre ? "Open this channel's pre-rack EQ in its own window"
+                             : "Open this channel's post-rack EQ in its own window");
+        btn->onClick = [this, pre]
+        {
+            if (onOpenEqWindow) onOpenEqWindow (getCurrentChannelId(), pre);
+        };
+        addAndMakeVisible (*btn);
+    };
+    makeEqBtn (mPreEqBtn,  "Pre EQ",  true);
+    makeEqBtn (mPostEqBtn, "Post EQ", false);
 
-    buildRackTab();
-    buildEQTab();
-    buildPreEQTab();   // §P4.3 (B6.2)
+    // ── Slot rows ─────────────────────────────────────────────────────────────
+    for (int i = 0; i < EffectRack::kNumSlots; ++i)
+    {
+        auto row = std::make_unique<RackSlotRow> (i);
+        row->onOpen   = [this] (int s) { onSlotOpenRequested (s); };
+        row->onBypass = [this] (int s) { onSlotBypassToggled (s); };
+        row->onRemove = [this] (int s) { onEffectRemoved (s); };
+        row->onMove   = [this] (int s, bool up) { onMoveRequested (s, up); };
+        row->onPick   = [this] (int s)
+        {
+            SlotComponent::showEffectPickerMenu (juce::Desktop::getMousePosition(),
+                                                 [this, s] (EffectType t) { onEffectChosen (s, t); });
+        };
+        addAndMakeVisible (*row);
+        mRows[(size_t) i] = std::move (row);
+    }
 
-    // 2026-04-26: default to Rack explicitly via TabKind - switchTab(int 0)
-    // historically resolved to PreEQ for non-player channels because of the
-    // 3-tab layout, leading to "ribbon says Rack but Pre EQ shows" mismatches
-    // on first open of the page.
-    switchTab(TabKind::Rack);
-    rebuildChannelDropdown();  // build channel list + sets initial rack/EQ (all components ready now)
+    rebuildChannelDropdown();  // build channel list + point the rows at a rack
 
     // Timer start is owned by parentHierarchyChanged -- see the comment there.
 }
@@ -74,7 +247,10 @@ void EffectsPage::parentHierarchyChanged()
     // leaves its page alive) must not keep polling.
     if (getPeer() != nullptr)
     {
-        if (! isTimerRunning()) startTimerHz (30);
+        // 10 Hz, down from the 30 the EQ displays needed: this window only has
+        // to notice rack changes made elsewhere, and the EQ polling left with
+        // the EQs.
+        if (! isTimerRunning()) startTimerHz (10);
     }
     else if (isTimerRunning())
     {
@@ -94,115 +270,14 @@ EffectsPage::~EffectsPage()
     mTSM.removeChangeListener(this);
     mTrackBox->setLookAndFeel(nullptr);
     // MixerLedButton doesn't use LAF, nothing to clean up here
-    if (mMetersBtn) mMetersBtn->setLookAndFeel(nullptr);
-    for (auto& s : mSlots)
-        if (s) s->setRack(nullptr);
+    if (mPreEqBtn)  mPreEqBtn ->setLookAndFeel(nullptr);
+    if (mPostEqBtn) mPostEqBtn->setLookAndFeel(nullptr);
 }
 
-// ── Tab builders ──────────────────────────────────────────────────────────────
-void EffectsPage::buildRackTab()
-{
-    mRackTab = std::make_unique<juce::Component>();
-
-    for (int i = 0; i < 6; ++i)
-    {
-        mSlots[i] = std::make_unique<SlotComponent>(i);
-        mSlots[i]->onEffectChosen  = [this](int idx, EffectType t) { onEffectChosen(idx, t); };
-        mSlots[i]->onEffectRemoved = [this](int idx) { onEffectRemoved(idx); };
-        mSlots[i]->onMoveRequested = [this](int idx, bool up) { onMoveRequested(idx, up); };
-        // QA-EffectsReview Task 1: persist Basic/Advanced choice with the project
-        // (setSlotBasicMode fires onSlotsChanged -> markDirty; idempotent if the
-        // SlotComponent already wrote it via toggleBasicMode).
-        mSlots[i]->onBasicModeChanged = [this](int idx, bool basic) {
-            if (mRack) mRack->setSlotBasicMode(idx, basic);
-        };
-        mRackTab->addAndMakeVisible(*mSlots[i]);
-    }
-
-    addAndMakeVisible(*mRackTab);
-}
-
-void EffectsPage::buildEQTab()
-{
-    mEQTab = std::make_unique<juce::Component>();
-
-    // Prepare the owned M/S DSP with a default sample rate
-    // (will snap to real rate if EffectsPage ever receives setSampleRate - Phase 2)
-    mEffectsEQDsp.prepare(44100.0, 512);
-
-    mEQDisplay = std::make_unique<ParametricEQDisplay>();
-    // Bind to owned DSP so MID/SIDE bands store separate state (no APVTS yet - Phase 2)
-    mEQDisplay->bindMsDSP(&mEffectsEQDsp);
-    // 12f: refresh host PDC after the user toggles anti-cramping in the popup.
-    mEQDisplay->onLatencyChanged = [this]
-    {
-        mProcessor.setLatencySamples(mProcessor.mVibeGraph.updateBusLatencies());
-    };
-    mEQTab->addAndMakeVisible(*mEQDisplay);
-    // Keep internal pill hidden - MID/SIDE are external buttons in the header row
-    mEQDisplay->showMidSideToggle(false);
-
-    addAndMakeVisible(*mEQTab);
-}
-
-// §P4.3 (B6.2) Pre EQ tab - mirror of buildEQTab.  Visible only on Aux/Audio/
-// Bus channels (player-channel pre-EQ lives on the player page).
-void EffectsPage::buildPreEQTab()
-{
-    mPreEQTab = std::make_unique<juce::Component>();
-    mPreEffectsEQDsp.prepare(44100.0, 512);
-
-    mPreEQDisplay = std::make_unique<ParametricEQDisplay>();
-    mPreEQDisplay->bindMsDSP(&mPreEffectsEQDsp);   // display-only fallback until channel selected
-    mPreEQDisplay->onLatencyChanged = [this]
-    {
-        mProcessor.setLatencySamples(mProcessor.mVibeGraph.updateBusLatencies());
-    };
-    mPreEQDisplay->showMidSideToggle(false);
-    mPreEQTab->addAndMakeVisible(*mPreEQDisplay);
-
-    addAndMakeVisible(*mPreEQTab);
-    mPreEQTab->setVisible(false);   // hidden until tab is selected
-}
-
-// §P4.3 (B6.2) - Layer / Bass / Drum-slot channels have their pre-EQ on the
-// player page; the mixer Effects page hides the Pre EQ tab for those.
-// J-6 (2026-05-03): EQ unification - every channel now exposes Pre + Rack +
-// Post on the Effects page (was: only buses + non-player inserts had a Pre
-// tab; player inserts had their pre-EQ as a sub-tab on the player page).
-// Returning false unconditionally makes the Pre tab visible for every
-// channel and the EQ sub-tab on player pages is removed entirely.  Function
-// kept for now (not deleted) so any caller that asks "is there a page
-// pre-EQ?" gets the consistent "no" answer regardless of channel type.
-bool EffectsPage::currentChannelHasPagePreEQ() const
-{
-    return false;
-}
-
-EffectsPage::TabKind EffectsPage::tabKindForVisibleIndex (int visibleIndex) const
-{
-    // 2-tab layout (player channels): [Rack | Post EQ8 M/S] = idx 0,1
-    // 3-tab layout (Aux/Audio/Bus):   [Pre  | Rack | Post]  = idx 0,1,2
-    if (currentChannelHasPagePreEQ())
-    {
-        return visibleIndex == 0 ? TabKind::Rack : TabKind::PostEQ;
-    }
-    if (visibleIndex == 0) return TabKind::PreEQ;
-    if (visibleIndex == 1) return TabKind::Rack;
-    return TabKind::PostEQ;
-}
-
-int EffectsPage::visibleIndexForTabKind (TabKind kind) const
-{
-    if (currentChannelHasPagePreEQ())
-    {
-        // 2-tab layout - PreEQ has no slot, fall back to Rack.
-        return (kind == TabKind::PostEQ) ? 1 : 0;
-    }
-    if (kind == TabKind::PreEQ)  return 0;
-    if (kind == TabKind::Rack)   return 1;
-    return 2;   // PostEQ
-}
+// The three sub-tabs (Pre EQ / Rack / Post EQ) and their visible-index
+// translation retired with the TS5 rebuild: the rack is the window, and each EQ
+// is its own window opened from the two buttons above the rows.  Nothing
+// translates an index to a tab kind any more because there are no tabs.
 
 // ── Channel list rebuild ──────────────────────────────────────────────────────
 void EffectsPage::rebuildChannelDropdown()
@@ -210,6 +285,7 @@ void EffectsPage::rebuildChannelDropdown()
     const int prevId = mTrackBox->getSelectedId();
     mTrackBox->clear(juce::dontSendNotification);
     mIdToApvtsPrefix.clear();
+    mIdToDisplayName.clear();
 
     // Attach the colored-section LAF to the dropdown popup so addSectionHeading
     // strings encoded via ColoredSectionLAF::encode() render with a color line.
@@ -252,7 +328,7 @@ void EffectsPage::rebuildChannelDropdown()
         std::vector<Item> insertItems;
         for (auto& [id, name] : channels)
         {
-            juce::String prefix = getMixerApvtsPrefixForChannel(id);
+            juce::String prefix = mixerPrefixForChannelId(id);
             Item it { id, name, prefix };
             if (id >= 1 && id <= 12) busItems.push_back(it);
             else                      insertItems.push_back(it);
@@ -273,6 +349,10 @@ void EffectsPage::rebuildChannelDropdown()
         auto addItemWithPrefix = [&](const Item& it) {
             mTrackBox->addItem(it.name, it.id);
             if (it.prefix.isNotEmpty()) mIdToApvtsPrefix[it.id] = it.prefix;
+            // QA-ModelShell TS5: satellite windows title themselves with the
+            // strip they belong to, and they outlive this page's selection --
+            // so the name has to be answerable per id, not just for "current".
+            mIdToDisplayName[it.id] = it.name;
         };
 
         // Track whether this is the first group we render - used to inject a
@@ -630,8 +710,9 @@ EffectRack* EffectsPage::rackForChannelId (VibeGraph& vg, int id)
 // only when the Effects page built a slot editor, so lanes went silent until
 // the page was VISITED after every project boundary.  This sweep runs after
 // applyPendingRackStates repopulates the racks -- a model trigger, no view
-// involved.  View-triggered registration (rebuildSlotEditor) still runs when
-// panels build; identical rack-scoped entries overwrite by key.
+// involved.  The page also re-registers a slot whenever its effect identity
+// changes (stampAndRegisterSlotEditor); identical rack-scoped entries overwrite
+// by key, so the two paths cannot disagree.
 void EffectsPage::registerRackAutomationForAllChannels (VibeSynthProcessor& proc)
 {
     auto& vg = proc.mVibeGraph;
@@ -661,18 +742,41 @@ void EffectsPage::registerRackAutomationForAllChannels (VibeSynthProcessor& proc
     for (int i = 0; i < (int) MixerChannelIds::kMaxRustyStrips; ++i)     sweepChannel (900 + i);
 }
 
+// QA-ModelShell TS5: the pre-rack EQ resolver, lifted verbatim out of
+// onChannelChanged.  It was the one piece of channel resolution that had NOT
+// been made static at TS1 -- a second copy of the channel switch living inside
+// a view method, which the EQ windows would have had to fork a third time.
+EQ8MsDSP* EffectsPage::preEqForChannelId (VibeGraph& vg, int id)
+{
+    switch (id)
+    {
+        case 1:  return vg.getLayersBusPreEQ();
+        case 2:  return vg.getBassBusPreEQ();
+        case 3:  return vg.getDrumsBusPreEQ();
+        case 4:  return vg.getMasterPreEQ();
+        case 5:  return vg.getEffectsBusPreEQ();
+        case 6:  return vg.getAudioClipsBusPreEQ();
+        case 7:  return vg.getVoxBusPreEQ();
+        case 8:  return vg.getInstBusPreEQ();
+        case 9:  return vg.getVoxBus2PreEQ();
+        case 10: return vg.getInstBus2PreEQ();
+        case 11: return vg.getInstBus3PreEQ();
+        case 12: return vg.getRustyDrumsBusPreEQ();
+        default: break;
+    }
+    if      (id >= 100 && id < 200)                                              return vg.getInsertPreEQ(VibeGraph::InsertKind::Drum,  id - 100);
+    else if (id >= 200 && id < 200 + kMaxLayerPages)                             return vg.getInsertPreEQ(VibeGraph::InsertKind::Layer, id - 200);
+    else if (id >= 300 && id < 300 + kMaxBassPages)                              return vg.getInsertPreEQ(VibeGraph::InsertKind::Bass,  id - 300);
+    else if (id >= 400 && id < 500)                                              return vg.getInsertPreEQ(VibeGraph::InsertKind::Audio, id - 400);
+    else if (id >= 600 && id < 616)                                              return vg.getInsertPreEQ(VibeGraph::InsertKind::Aux,   id - 600);
+    else if (id >= 700 && id < 700 + (int) MixerChannelIds::kMaxVoxStrips)       return vg.getInsertPreEQ(VibeGraph::InsertKind::Vox,   id - 700);
+    else if (id >= 800 && id < 800 + (int) MixerChannelIds::kMaxInstStrips)      return vg.getInsertPreEQ(VibeGraph::InsertKind::Inst,  id - 800);
+    else if (id >= 900 && id < 900 + (int) MixerChannelIds::kMaxRustyStrips)     return vg.getInsertPreEQ(VibeGraph::InsertKind::Rusty, id - 900);
+    return nullptr;
+}
+
 void EffectsPage::onChannelChanged()
 {
-    // 2026-04-26: per-channel sub-tab persistence - save the previous channel's
-    // current TabKind, then restore the new channel's last-used TabKind (or
-    // default to Rack on first visit).  Done here because onChannelChanged is
-    // the single funnel for any channel selection change (dropdown click,
-    // selectChannelByName/Prefix, etc.).
-    const int newChanId = mTrackBox ? mTrackBox->getSelectedId() : 0;
-    if (mPrevChannelId != 0 && mPrevChannelId != newChanId)
-        mLastTabPerChannel[mPrevChannelId] = mCurrentTabKind;
-    mPrevChannelId = newChanId;
-
     EffectRack* rack = nullptr;
     EQ8MsDSP*  eq   = nullptr;
 
@@ -683,96 +787,10 @@ void EffectsPage::onChannelChanged()
 
     setRack(rack);
 
-    // Session B: bind EQ display to this channel's own post-rack EQ using the
-    // full bindMsDSP overload with APVTS prefix so (a) widget drags propagate to
-    // APVTS and become audible, (b) band params are automatable via right-click
-    // "Automate: ..." menu. Fall back to stub only if the graph isn't built yet.
-    // C.4 Phase 1 (2026-04-30): also push the strip context (mixer prefix +
-    // source-name resolver) so the per-band SC dropdown in DynamicParamsPopout
-    // can enumerate routed lines and label them.
-    auto resolveSrcName = [](int srcChId) -> juce::String
-    { return MixerChannelIds::friendlyName(srcChId); };
-
-    if (mEQDisplay)
-    {
-        const juce::String chanPrefix = getMixerApvtsPrefixForChannel(id);
-        if (eq && chanPrefix.isNotEmpty())
-        {
-            mEQDisplay->bindMsDSP(eq, &mProcessor.apvts,
-                                  chanPrefix + "_mid_eq",
-                                  chanPrefix + "_side_eq");
-        }
-        else
-        {
-            mEQDisplay->bindMsDSP(eq ? eq : &mEffectsEQDsp);
-        }
-        mEQDisplay->setStripContext(chanPrefix, resolveSrcName);
-    }
-
-    // §P4.3 (B6.2): bind the Pre EQ display to this channel's pre-rack EQ
-    // using the `_preeq_*` APVTS prefix.  Pre-EQ DSP is on the same node as
-    // the post-rack EQ - fetched via getInsertPreEQ / getXxxBusPreEQ.  Note:
-    // for player channels (Layer/Bass/Drum-slot) this STILL binds correctly
-    // even though the Pre tab itself is hidden - keeps state consistent if the
-    // user later switches to a non-player channel.
-    if (mPreEQDisplay)
-    {
-        EQ8MsDSP* preEq = nullptr;
-        switch (id)
-        {
-            case 1:  preEq = vg.getLayersBusPreEQ();     break;
-            case 2:  preEq = vg.getBassBusPreEQ();       break;
-            case 3:  preEq = vg.getDrumsBusPreEQ();      break;
-            case 4:  preEq = vg.getMasterPreEQ();        break;
-            case 5:  preEq = vg.getEffectsBusPreEQ();    break;
-            case 6:  preEq = vg.getAudioClipsBusPreEQ(); break;
-            case 7:  preEq = vg.getVoxBusPreEQ();        break;
-            case 8:  preEq = vg.getInstBusPreEQ();       break;
-            case 9:  preEq = vg.getVoxBus2PreEQ();       break;
-            case 10: preEq = vg.getInstBus2PreEQ();      break;
-            case 11: preEq = vg.getInstBus3PreEQ();      break;
-            case 12: preEq = vg.getRustyDrumsBusPreEQ(); break;
-            default:
-                if      (id >= 100 && id < 200)                                    preEq = vg.getInsertPreEQ(VibeGraph::InsertKind::Drum,  id - 100);
-                else if (id >= 200 && id < 200 + kMaxLayerPages)                    preEq = vg.getInsertPreEQ(VibeGraph::InsertKind::Layer, id - 200);
-                else if (id >= 300 && id < 300 + kMaxBassPages)                     preEq = vg.getInsertPreEQ(VibeGraph::InsertKind::Bass,  id - 300);
-                else if (id >= 400 && id < 500)                                     preEq = vg.getInsertPreEQ(VibeGraph::InsertKind::Audio, id - 400);
-                else if (id >= 600 && id < 616)                                     preEq = vg.getInsertPreEQ(VibeGraph::InsertKind::Aux,   id - 600);
-                else if (id >= 700 && id < 700 + (int) MixerChannelIds::kMaxVoxStrips)   preEq = vg.getInsertPreEQ(VibeGraph::InsertKind::Vox,   id - 700);
-                else if (id >= 800 && id < 800 + (int) MixerChannelIds::kMaxInstStrips)  preEq = vg.getInsertPreEQ(VibeGraph::InsertKind::Inst,  id - 800);
-                else if (id >= 900 && id < 900 + (int) MixerChannelIds::kMaxRustyStrips) preEq = vg.getInsertPreEQ(VibeGraph::InsertKind::Rusty, id - 900);
-                break;
-        }
-        const juce::String chanPrefix = getMixerApvtsPrefixForChannel(id);
-        if (preEq && chanPrefix.isNotEmpty())
-        {
-            mPreEQDisplay->bindMsDSP(preEq, &mProcessor.apvts,
-                                      chanPrefix + "_preeq_mid_eq",
-                                      chanPrefix + "_preeq_side_eq");
-        }
-        else
-        {
-            mPreEQDisplay->bindMsDSP(preEq ? preEq : &mPreEffectsEQDsp);
-        }
-        // C.4 Phase 1: same strip context as post-rack EQ above -- the
-        // pre-rack EQ8 lives on the same strip, sees the same SC array.
-        mPreEQDisplay->setStripContext(chanPrefix, resolveSrcName);
-    }
-
-    // 2026-04-26: restore the new channel's last-used sub-tab (default Rack).
-    // Player channels never expose PreEQ - clamp PreEQ to Rack if persisted.
-    {
-        TabKind targetKind = TabKind::Rack;
-        auto it = mLastTabPerChannel.find (newChanId);
-        if (it != mLastTabPerChannel.end()) targetKind = it->second;
-        if (currentChannelHasPagePreEQ() && targetKind == TabKind::PreEQ)
-            targetKind = TabKind::Rack;
-        switchTab (targetKind);
-    }
-
-    // §P4.3 (B6.2): channel kind may have changed Pre-tab visibility - ask
-    // StandaloneEditor to re-call setTabSlots with the right 2-vs-3 labels.
-    if (onTabsNeedRefresh) onTabsNeedRefresh();
+    // The EQs are windows now, and they follow the channel they were OPENED on
+    // rather than this page's selection -- so switching channels here does not
+    // touch them.  That is the locked behavior: several strips' effects and EQs
+    // can be on screen at once.
 
     if (mFxBypassBtn)
     {
@@ -783,7 +801,7 @@ void EffectsPage::onChannelChanged()
             mProcessor.apvts.removeParameterListener(mBypassParamId, this);
         mBypassParamId.clear();
 
-        const juce::String apvtsPrefix = getMixerApvtsPrefixForChannel(
+        const juce::String apvtsPrefix = mixerPrefixForChannelId(
             mTrackBox ? mTrackBox->getSelectedId() : 0);
         const bool hasBypassParam = apvtsPrefix.isNotEmpty()
             && mProcessor.apvts.getParameter(apvtsPrefix + "_bypass") != nullptr;
@@ -854,17 +872,20 @@ void EffectsPage::selectChannelByName(const juce::String& name)
 void EffectsPage::setRack(EffectRack* rack)
 {
     mRack = rack;
-    for (auto& s : mSlots)
-        if (s) s->setRack(rack);
+
+    if (rack && mFxBypassBtn)
+        mFxBypassBtn->setToggleState(rack->isRackBypassed(), juce::dontSendNotification);
+
+    // No editors are built here any more -- a panel exists only while its own
+    // window is open.  What the page owes the new rack is its rows and, because
+    // registration is keyed to (type, variant) and this rack may never have been
+    // visited, its automation.
+    refreshAllRows();
 
     if (rack)
-    {
-        if (mFxBypassBtn)
-            mFxBypassBtn->setToggleState(rack->isRackBypassed(), juce::dontSendNotification);
-        // Build inline editors for any pre-loaded slots
         for (int i = 0; i < EffectRack::kNumSlots; ++i)
-            rebuildSlotEditor(i);
-    }
+            if (rack->getSlotType (i) != EffectType::None)
+                registerSlotAutomation (i);
 }
 
 // ── Slot interaction ──────────────────────────────────────────────────────────
@@ -944,24 +965,54 @@ void EffectsPage::onEffectChosen(int slotIndex, EffectType type)
             [this](const EffectRackAction::SlotSnapshots& t) {
                 std::array<bool, EffectRack::kNumSlots> changed;
                 applySlotSnapshots(mRack, t, changed);
-                // Only rebuild editors for slots whose DSP was actually
-                // replaced - preserves sliders (and hence any queued
-                // FloatParamActions' captured SafePointers) on untouched
-                // slots. First perform() is skipped by EffectRackAction;
-                // this runs only on undo/redo.
+                // Re-register only the slots whose DSP was actually replaced.
+                // First perform() is skipped by EffectRackAction; this runs
+                // only on undo/redo.
                 for (int i = 0; i < EffectRack::kNumSlots; ++i)
-                    if (changed[i]) rebuildSlotEditor(i);
-                refreshAllSlots();
+                    if (changed[i]) registerSlotAutomation(i);
+                refreshAllRows();
+                notifyRackContentsChanged();
                 mProcessor.setLatencySamples(mProcessor.mVibeGraph.updateBusLatencies());
             }), "Load Effect");
-    rebuildSlotEditor(slotIndex);
-    mSlots[slotIndex]->refresh();
+    registerSlotAutomation(slotIndex);
+    refreshAllRows();
+    notifyRackContentsChanged();
     mProcessor.setLatencySamples(mProcessor.mVibeGraph.updateBusLatencies());
+
+    // Choosing an effect is a request to work on it, so open its window.
+    onSlotOpenRequested (slotIndex);
 }
 
 void EffectsPage::onEffectRemoved(int slotIndex)
 {
     if (!mRack) return;
+    if (mRack->getSlotType (slotIndex) == EffectType::None) return;
+
+    // Jeff spec 2026-07-29: removal prompts.  The row's X is small and sits
+    // next to the picker, and a mis-click used to silently drop an effect (and
+    // everything below it moved up).
+    const juce::String name = SlotComponent::effectTypeName (mRack->getSlotType (slotIndex));
+    juce::NativeMessageBox::showOkCancelBox (
+        juce::MessageBoxIconType::QuestionIcon,
+        "Remove Effect",
+        "Remove " + name + " from this slot?",
+        this,
+        // SafePointer, not a raw `this`: a modal prompt can outlive its opener
+        // (app teardown while it is up), and this codebase already has a family
+        // of use-after-frees from callbacks that assumed otherwise.
+        juce::ModalCallbackFunction::create (
+            [safeThis = juce::Component::SafePointer<EffectsPage> (this), slotIndex] (int result)
+        {
+            auto* self = safeThis.getComponent();
+            if (result == 0 || self == nullptr || self->mRack == nullptr) return;
+            self->performSlotRemoval (slotIndex);
+        }));
+}
+
+void EffectsPage::performSlotRemoval (int slotIndex)
+{
+    if (mRack == nullptr) return;
+
     auto before = captureSlotSnapshots(mRack);
     mRack->clearSlot(slotIndex);
     mRack->packSlotsToTop();
@@ -972,14 +1023,18 @@ void EffectsPage::onEffectRemoved(int slotIndex)
                 std::array<bool, EffectRack::kNumSlots> changed;
                 applySlotSnapshots(mRack, t, changed);
                 for (int i = 0; i < EffectRack::kNumSlots; ++i)
-                    if (changed[i]) rebuildSlotEditor(i);
-                refreshAllSlots();
+                    if (changed[i]) registerSlotAutomation(i);
+                refreshAllRows();
+                notifyRackContentsChanged();
                 mProcessor.setLatencySamples(mProcessor.mVibeGraph.updateBusLatencies());
             }), "Remove Effect");
-    // Rebuild all 6 editors - slots shifted, so all need updating
+
+    // Every slot may have shifted (pack-to-top), so re-register all.
     for (int i = 0; i < EffectRack::kNumSlots; ++i)
-        rebuildSlotEditor(i);
-    refreshAllSlots();
+        if (mRack->getSlotType (i) != EffectType::None)
+            registerSlotAutomation(i);
+    refreshAllRows();
+    notifyRackContentsChanged();
     mProcessor.setLatencySamples(mProcessor.mVibeGraph.updateBusLatencies());
 }
 
@@ -996,77 +1051,73 @@ void EffectsPage::onMoveRequested(int slotIndex, bool up)
                 std::array<bool, EffectRack::kNumSlots> changed;
                 applySlotSnapshots(mRack, t, changed);
                 for (int i = 0; i < EffectRack::kNumSlots; ++i)
-                    if (changed[i]) rebuildSlotEditor(i);
-                refreshAllSlots();
+                    if (changed[i]) registerSlotAutomation(i);
+                refreshAllRows();
+                notifyRackContentsChanged();
                 mProcessor.setLatencySamples(mProcessor.mVibeGraph.updateBusLatencies());
             }), "Move Effect");
 
-    // Rebuild editors for both swapped slots
-    int other = up ? slotIndex - 1 : slotIndex + 1;
+    // A move is a swap: both indices now hold a different uuid, so both
+    // registrations have to follow.  (Open windows follow their own uuid and
+    // re-point themselves.)
+    const int other = up ? slotIndex - 1 : slotIndex + 1;
     if (other >= 0 && other < EffectRack::kNumSlots)
-        rebuildSlotEditor(other);
-    rebuildSlotEditor(slotIndex);
-    refreshAllSlots();
+        registerSlotAutomation(other);
+    registerSlotAutomation(slotIndex);
+    refreshAllRows();
+    notifyRackContentsChanged();
 }
 
-void EffectsPage::rebuildSlotEditor(int slotIndex)
+void EffectsPage::onSlotBypassToggled (int slotIndex)
 {
-    if (!mRack || slotIndex < 0 || slotIndex >= EffectRack::kNumSlots) return;
-    const auto& slot = mRack->getSlot(slotIndex);
+    if (mRack == nullptr) return;
+    mRack->setSlotBypassed (slotIndex, ! mRack->isSlotBypassed (slotIndex));
+    refreshAllRows();
+}
 
-    if (!mSlots[slotIndex]) return;
+void EffectsPage::onSlotOpenRequested (int slotIndex)
+{
+    if (mRack == nullptr) return;
+    if (mRack->getSlotType (slotIndex) == EffectType::None) return;
+    if (onOpenSlotPanel) onOpenSlotPanel (getCurrentChannelId(), slotIndex);
+}
 
-    DSPBase* eff = mRack->getSlotEffect(slotIndex);
-    if (slot.type == EffectType::None || ! eff)
+void EffectsPage::notifyRackContentsChanged()
+{
+    if (onRackContentsChanged) onRackContentsChanged (getCurrentChannelId());
+}
+
+// QA-ModelShell TS5: what rebuildSlotEditor used to do for an inline panel,
+// minus the mounting -- panels are mounted by their own windows now.  Both
+// halves live here because both have to happen together on EVERY mount path:
+// the stamps make the right-click Automate menu name the right lane, and the
+// registration is keyed to (type, variant), which a Mode switch changes.
+void EffectsPage::stampAndRegisterSlotEditor (VibeSynthProcessor& proc, int chId,
+                                              EffectRack& rack, int slotIndex,
+                                              SlotComponent& target)
+{
+    if (slotIndex < 0 || slotIndex >= EffectRack::kNumSlots) return;
+
+    if (auto* base = dynamic_cast<EditorPanelBase*> (target.getEditor()))
     {
-        mSlots[slotIndex]->setEditor(nullptr);
-    }
-    else
-    {
-        auto editor = createEffectEditor(eff, slot.type);
-
-        // Stamp automation paramIds on all knobs before handing off to the slot.
         // C13: keyed by slot UUID, not index, so reorder preserves automation.
-        if (auto* base = dynamic_cast<EditorPanelBase*>(editor.get()))
+        base->setSlotContext (channelPrefixForId (chId), rack.getSlotUuid (slotIndex));
+
+        // Latency-changing panel controls (lookahead) poke a bus-PDC refresh.
+        base->onLatencyChanged = [&proc]
         {
-            base->setSlotContext(getChannelPrefix(), mRack->getSlotUuid(slotIndex));
-
-            // QA-ProjectSave Task 7 step 3 (2026-07-26): register DSP-targeting
-            // applicators for this slot's mapped parameters.
-            //
-            // These deliberately do NOT capture the panel or its knobs.  They
-            // capture the channel id + slot UUID and resolve rack -> slot -> DSP
-            // at apply time, so an automation lane keeps working after the panel
-            // is destroyed -- which happens on every Effects-page channel switch
-            // and was the bug this task exists to fix.  Registered with a null
-            // owner because their validity is tied to the RACK, not to any
-            // component; a rack that has gone away simply resolves to nullptr.
-            //
-            // Slot lookup is by UUID, never by index, so reordering the rack
-            // does not repoint a lane at a different effect (the failure mode
-            // REAPER's positional fxindex/parameterindex addressing has).
-            registerSlotAutomation (slotIndex);
-            // Basic/Advanced stamping lives in SlotComponent::setEditor (Task 9:
-            // single authority, so internal remounts -- preset load, Mode switch
-            // -- inherit the slot's persisted state too).
-            // Latency-changing panel controls (lookahead) poke a bus-PDC refresh.
-            base->onLatencyChanged = [this]
-            {
-                mProcessor.setLatencySamples(mProcessor.mVibeGraph.updateBusLatencies());
-            };
-        }
-
-        // C.4 Phase 1 (2026-04-30): push the strip's mixer APVTS prefix +
-        // a source-name resolver so the slot's SC dropdown can enumerate
-        // routed lines and label them ("Layer 2", "Bass 1", "Master", ...).
-        const int chId = mTrackBox ? mTrackBox->getSelectedId() : 0;
-        const juce::String mixerPrefix = getMixerApvtsPrefixForChannel(chId);
-        mSlots[slotIndex]->setChannelContext(&mProcessor.apvts, mixerPrefix,
-                                              [](int id){ return MixerChannelIds::friendlyName(id); });
-
-        mSlots[slotIndex]->setEditor(std::move(editor));
-        mSlots[slotIndex]->setEditorUndoContext(mUndoCtx);
+            proc.setLatencySamples (proc.mVibeGraph.updateBusLatencies());
+        };
     }
+
+    // QA-ProjectSave Task 7 step 3 (2026-07-26): DSP-targeting applicators for
+    // this slot's mapped parameters.  These deliberately do NOT capture the
+    // panel or its knobs -- they capture the channel id + slot UUID and resolve
+    // rack -> slot -> DSP at apply time, so a lane keeps working after the panel
+    // is gone (which, with per-effect windows, is most of the time).  Slot
+    // lookup is by UUID, never by index, so reordering does not repoint a lane
+    // at a different effect (REAPER's positional-addressing failure mode).
+    registerSlotAutomationFor (proc, chId, channelPrefixForId (chId), rack, slotIndex);
 }
 
 juce::String EffectsPage::getChannelPrefix() const
@@ -1127,7 +1178,7 @@ juce::String EffectsPage::channelPrefixForId (int id)
 
 // 5F-4a: maps effects-page channel id → mixer-strip APVTS prefix.
 // Returns empty string if the channel has no corresponding mixer strip.
-juce::String EffectsPage::getMixerApvtsPrefixForChannel(int id) const
+juce::String EffectsPage::mixerPrefixForChannelId(int id)
 {
     if (id <= 0) return {};
 
@@ -1173,10 +1224,36 @@ juce::String EffectsPage::getMixerApvtsPrefixForChannel(int id) const
     return {};
 }
 
-void EffectsPage::refreshAllSlots()
+void EffectsPage::refreshAllRows()
 {
-    for (auto& s : mSlots)
-        if (s) s->refresh();
+    for (int i = 0; i < EffectRack::kNumSlots; ++i)
+    {
+        auto& row = mRows[(size_t) i];
+        if (! row) continue;
+
+        if (mRack == nullptr)
+        {
+            row->setState (false, false, {});
+            continue;
+        }
+
+        const auto type = mRack->getSlotType (i);
+        const bool loaded = (type != EffectType::None);
+        row->setState (loaded,
+                       loaded && mRack->isSlotBypassed (i),
+                       loaded ? SlotComponent::effectTypeName (type) : juce::String());
+    }
+}
+
+int EffectsPage::getCurrentChannelId() const
+{
+    return mTrackBox != nullptr ? mTrackBox->getSelectedId() : 0;
+}
+
+juce::String EffectsPage::getChannelDisplayName (int channelId) const
+{
+    auto it = mIdToDisplayName.find (channelId);
+    return it != mIdToDisplayName.end() ? it->second : juce::String();
 }
 
 // ── Keyboard ──────────────────────────────────────────────────────────────────
@@ -1198,116 +1275,137 @@ void EffectsPage::paint(juce::Graphics& g)
 // ── Layout ────────────────────────────────────────────────────────────────────
 void EffectsPage::resized()
 {
-    auto b = getLocalBounds();
+    auto b = getLocalBounds().reduced (4);
 
-    // Header row removed - all controls live in PageMenuBar above.
-    // Content fills full bounds.
-    if (mRackTab)   mRackTab  ->setBounds(b);
-    if (mEQTab)     mEQTab    ->setBounds(b);
-    if (mPreEQTab)  mPreEQTab ->setBounds(b);   // §P4.3 (B6.2)
-
-    // Layout within rack tab (slots)
-    if (mRackTab && mRackTab->isVisible())
+    // Channel picker + rack-wide bypass.
     {
-        auto rack = mRackTab->getLocalBounds().reduced(4);
-        int slotH = rack.getHeight() / 6;
-        for (auto& s : mSlots)
-            if (s) s->setBounds(rack.removeFromTop(slotH).reduced(0, 2));
+        auto top = b.removeFromTop (kRowH);
+        if (mTrackLabel) mTrackLabel->setBounds (top.removeFromLeft (54));
+        if (mFxBypassBtn) mFxBypassBtn->setBounds (top.removeFromRight (86).reduced (0, 1));
+        top.removeFromRight (4);
+        if (mTrackBox) mTrackBox->setBounds (top.reduced (0, 1));
     }
 
-    // Layout within Post EQ tab
-    if (mEQTab && mEQTab->isVisible() && mEQDisplay)
-        mEQDisplay->setBounds(mEQTab->getLocalBounds().reduced(4));
+    b.removeFromTop (4);
 
-    // Layout within Pre EQ tab (§P4.3 B6.2)
-    if (mPreEQTab && mPreEQTab->isVisible() && mPreEQDisplay)
-        mPreEQDisplay->setBounds(mPreEQTab->getLocalBounds().reduced(4));
+    // The two EQ entries, side by side.
+    {
+        auto eqRow = b.removeFromTop (kRowH);
+        const int half = eqRow.getWidth() / 2;
+        if (mPreEqBtn)  mPreEqBtn ->setBounds (eqRow.removeFromLeft (half).reduced (1));
+        if (mPostEqBtn) mPostEqBtn->setBounds (eqRow.reduced (1));
+    }
+
+    b.removeFromTop (6);
+
+    // Six rows, fixed height: this window is an index, so the rows do not grow
+    // to fill it -- extra height is empty space rather than six fat rows.
+    for (auto& row : mRows)
+    {
+        if (! row) continue;
+        row->setBounds (b.removeFromTop (kRowH));
+        b.removeFromTop (2);
+    }
 }
 
-// ── Tab switching ─────────────────────────────────────────────────────────────
-// §P4.3 (B6.2): legacy entry point - interprets `index` as a VISIBLE-tab index
-// (0..1 for player channels, 0..2 for Aux/Audio/Bus) and dispatches to the
-// TabKind-aware overload.
-void EffectsPage::switchTab(int index)
+// ── Title-bar menu ────────────────────────────────────────────────────────────
+void EffectsPage::buildTitleMenu (juce::PopupMenu& m)
 {
-    switchTab(tabKindForVisibleIndex(index));
-}
+    const int chId = getCurrentChannelId();
 
-void EffectsPage::switchTab(TabKind kind)
-{
-    mCurrentTabKind = kind;
-    mCurrentTab     = visibleIndexForTabKind(kind);
-    if (mPreEQTab) mPreEQTab->setVisible(kind == TabKind::PreEQ);
-    if (mRackTab)  mRackTab ->setVisible(kind == TabKind::Rack);
-    if (mEQTab)    mEQTab   ->setVisible(kind == TabKind::PostEQ);
+    m.addItem ("Save FX Rack Preset...", [this] { saveRackPreset(); });
 
-    // 2026-04-26: persist this tab kind for the current channel so re-entry
-    // restores it.  Single source of truth - every tab change funnels through
-    // here, so onChannelChanged's restore lookup will always find the most
-    // recent value.  Skipped before any channel is selected (mPrevChannelId==0
-    // during construction-time defaults).
-    if (mPrevChannelId != 0)
-        mLastTabPerChannel[mPrevChannelId] = kind;
+    juce::PopupMenu loadMenu;
+    loadRackPresetMenu (loadMenu);
+    m.addSubMenu ("Load FX Rack Preset", loadMenu, loadMenu.getNumItems() > 0);
 
-    resized();
-}
+    m.addSeparator();
+    m.addItem ("Open Presets Folder", [] {
+        auto dir = FxRackPresetIO::myPresetsDir();
+        dir.createDirectory();
+        dir.startAsProcess();
+    });
 
-void EffectsPage::setEQMid(bool showMid)
-{
-    mShowingMid = showMid;
-    if (mEQDisplay)    mEQDisplay   ->setShowMid(showMid);
-    if (mPreEQDisplay) mPreEQDisplay->setShowMid(showMid);   // §P4.3 (B6.2)
-}
-
-// ── Meters menu ───────────────────────────────────────────────────────────────
-void EffectsPage::showMetersMenu()
-{
-    // Build "VU Calibration (0 VU = ...)" sub-menu with -18 to -14 dBFS options
-    // Item IDs 1000–1004 map to -18, -17, -16, -15, -14 dBFS respectively.
-    // TODO: persist to settings.xml (Phase 5F)
-    juce::PopupMenu calibMenu;
-    const int kCalibBase = 1000;
+    // VU calibration -- app-wide, and this was the old page's "Meters" button.
+    // It moves into the menu rather than costing a button on a small window.
+    m.addSeparator();
+    juce::PopupMenu calib;
     for (int db = -18; db <= -14; ++db)
     {
-        bool isCurrent = (VUMeter::getCalibrationDb() == static_cast<float>(db));
-        calibMenu.addItem(kCalibBase + (db + 18),
-                          juce::String(db) + " dBFS",
-                          true,   // enabled
-                          isCurrent);
+        const bool isCurrent = (VUMeter::getCalibrationDb() == (float) db);
+        calib.addItem (juce::String (db) + " dBFS", true, isCurrent,
+                       [db] { VUMeter::setCalibrationDb ((float) db); });
     }
+    m.addSubMenu ("VU Calibration (0 VU = ...)", calib);
 
-    juce::PopupMenu metersMenu;
-    metersMenu.addSubMenu("VU Calibration (0 VU = ...)", calibMenu);
+    juce::ignoreUnused (chId);
+}
 
-    metersMenu.showMenuAsync(
-        juce::PopupMenu::Options().withTargetComponent(mMetersBtn.get()),
-        [this](int result)
+void EffectsPage::saveRackPreset()
+{
+    const int chId = getCurrentChannelId();
+    if (rackForChannelId (mProcessor.mVibeGraph, chId) == nullptr) return;
+
+    auto* aw = new juce::AlertWindow ("Save FX Rack Preset",
+                                      "Saves all six slots and both EQs for this channel.",
+                                      juce::MessageBoxIconType::NoIcon);
+    aw->addTextEditor ("name", getChannelDisplayName (chId) + " Rack", "Preset name:");
+    aw->addButton ("Save",   1, juce::KeyPress (juce::KeyPress::returnKey));
+    aw->addButton ("Cancel", 0, juce::KeyPress (juce::KeyPress::escapeKey));
+    aw->enterModalState (true, juce::ModalCallbackFunction::create (
+        [safeThis = juce::Component::SafePointer<EffectsPage> (this), aw, chId] (int r)
+    {
+        std::unique_ptr<juce::AlertWindow> owned (aw);
+        auto* self = safeThis.getComponent();
+        if (r != 1 || self == nullptr) return;
+
+        juce::String err;
+        if (! FxRackPresetIO::save (self->mProcessor, chId, aw->getTextEditorContents ("name"), err))
+            juce::NativeMessageBox::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon,
+                                                         "Save FX Rack Preset", err);
+    }), false);
+}
+
+void EffectsPage::loadRackPresetMenu (juce::PopupMenu& into)
+{
+    const int chId = getCurrentChannelId();
+    for (const auto& f : FxRackPresetIO::enumeratePresets())
+    {
+        into.addItem (f.getFileNameWithoutExtension(), [this, f, chId]
         {
-            if (result >= 1000 && result <= 1004)
+            juce::String err;
+            if (! FxRackPresetIO::load (mProcessor, chId, f, err))
             {
-                int db = (result - 1000) - 18;  // maps 1000→-18, 1001→-17, … 1004→-14
-                VUMeter::setCalibrationDb(static_cast<float>(db));
+                juce::NativeMessageBox::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon,
+                                                             "Load FX Rack Preset", err);
+                return;
             }
+            // The preset carries its own slot uuids, so every lane on this
+            // channel now points at effects that no longer exist -- re-register
+            // against what actually landed, and let the open windows notice
+            // their target is gone.
+            if (auto* rack = rackForChannelId (mProcessor.mVibeGraph, chId))
+                for (int i = 0; i < EffectRack::kNumSlots; ++i)
+                    if (rack->getSlotType (i) != EffectType::None)
+                        registerSlotAutomationFor (mProcessor, chId, channelPrefixForId (chId), *rack, i);
+
+            refreshAllRows();
+            notifyRackContentsChanged();
+            mProcessor.setLatencySamples (mProcessor.mVibeGraph.updateBusLatencies());
         });
+    }
 }
 
 // ── Timer ─────────────────────────────────────────────────────────────────────
 void EffectsPage::timerCallback()
 {
-    // 5F-4a: Button state is now driven by ButtonAttachment → APVTS.
-    // The old force-sync from rack.isRackBypassed() fought with the attachment
-    // and caused the click-flashes-and-reverts bug.
-
-    // 12i: drive the EQ display so pre/post spectrum feeds are polled from the
-    // bound EQ8MsDSP. Also pulls band-handle changes back into the widget when
-    // processBlock's updateXxxEQ runs against an APVTS-backed bus EQ.
-    if (mEQDisplay)    mEQDisplay   ->syncFromDSP();
-    // C.4 follow-up (2026-04-30): pre-rack EQ display ALSO needs polling --
-    // without this, the Pre EQ8 M/S tab's dynamic-band dotted curve never
-    // updates when the user moves Range/Threshold/etc. in the popout
-    // (the slider attachment writes APVTS, processBlock pushes APVTS to DSP,
-    // but mBands never syncs back from DSP -> the cached UI band state
-    // stays stale -> ghost curve doesn't follow live state).  Same fix
-    // shape as the post-rack EQ above.
-    if (mPreEQDisplay) mPreEQDisplay->syncFromDSP();
+    // 5F-4a: Button state is driven by ButtonAttachment -> APVTS.  The old
+    // force-sync from rack.isRackBypassed() fought with the attachment and
+    // caused the click-flashes-and-reverts bug.
+    //
+    // The rows, though, have to follow changes this page did not make: undo /
+    // redo, a project load, a preset drop, or a bypass flipped from an effect's
+    // own window.  setState is a no-op when nothing moved, so this costs a
+    // comparison per row.
+    refreshAllRows();
 }

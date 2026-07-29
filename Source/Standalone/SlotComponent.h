@@ -21,12 +21,48 @@
 class SlotComponent : public juce::Component
 {
 public:
+    // QA-ModelShell TS5: the same slot is now shown two ways.
+    //   Inline    - header strip + editor underneath.  The original, and what
+    //               BaySickVocal's locked Vocal Chain still uses.
+    //   PanelOnly - editor ONLY, filling the component.  The per-effect window
+    //               in the new Effects shell: its bypass LED and its
+    //               Basic / Mode / SC / Preset actions live on the WINDOW's
+    //               title strip, so the header strip would be a second copy of
+    //               chrome that is already one row higher.
+    // Everything else -- the menus, the level feed, the undo + output-gain
+    // wiring, the Basic-mode stamping -- is shared, which is the point of
+    // making this a presentation rather than a second class.
+    enum class Presentation { Inline, PanelOnly };
+    void setPresentation (Presentation p);
+
     explicit SlotComponent(int slotIndex);
     ~SlotComponent() override;
 
     void setRack(EffectRack* rack);
+    EffectRack* getRack() const noexcept { return mRack; }
     void refresh();  // sync bypass/name from rack without touching editor
+
+    // QA-ModelShell TS5: which rack slot this component drives.  Fixed for the
+    // life of an inline slot, but a panel window follows ONE EFFECT by uuid and
+    // that effect changes index whenever the rack is reordered or a removal
+    // packs the slots up -- so the window re-points its SlotComponent instead
+    // of showing the effect that moved into the old index.
+    int  getSlotIndex() const noexcept { return mSlotIndex; }
+    void setSlotIndex (int idx);
     void setEditor(std::unique_ptr<juce::Component> editor);
+    juce::Component* getEditor() const noexcept { return mEditor.get(); }
+
+    // QA-ModelShell TS5: fired whenever a NEW panel has been mounted -- the
+    // first build, a Mode switch, or a preset load that changed the Type.
+    //
+    // This exists because remountEditor() rebuilt the panel and nothing else:
+    // the fresh panel came up WITHOUT its automation paramId stamps, and the
+    // slot's registered applicators kept the variant captured at registration.
+    // So switching a Compressor from Modern to FET left every lane applying
+    // through the Modern table -- the exact collision class TS3's (type,
+    // variant) key exists to prevent.  The host re-stamps and re-registers
+    // here, which makes every mount path equivalent.
+    std::function<void()> onEditorMounted;
 
     // H-8 (2026-05-02): re-mount the inline editor for the current slot's
     // DSP.  Called from a panel when the DSP's Type-driven layout changes
@@ -80,6 +116,32 @@ public:
     // the same labels as the slot UI -- no drift between the two.
     static juce::String effectTypeName(EffectType type);
 
+    // QA-ModelShell TS5: the effect picker, callable without a SlotComponent.
+    // The rack window's slot rows are not SlotComponents but must offer the
+    // identical grouped list, and a second copy of that list would drift the
+    // first time an effect is added.
+    static void showEffectPickerMenu (juce::Point<int> screenPos,
+                                      std::function<void(EffectType)> onPick);
+
+    // ── Chrome actions, driven from the panel window's title-bar menu ─────────
+    // These were private because the only caller was this component's own
+    // header.  In PanelOnly presentation the header is gone and the window's
+    // menu drives them instead, so they are part of the surface now.
+    void showModeMenu();
+    void showPresetMenu();
+    void showScMenu();
+    void toggleBasicMode();        // QA-EffectsReview Task 1
+    void showAddMenu();
+
+    // What that menu should OFFER for the currently-loaded effect.  The header
+    // decided this by showing / hiding buttons; a menu needs to ask.
+    bool hasModeMenu()  const;     // character-mode umbrella (Compressor, ...)
+    bool hasScMenu()    const;     // effect declares usesSidechain()
+    bool hasBasicMode() const;     // panel reports hasAdvancedControls()
+    bool isBasicMode()  const;
+    juce::String modeLabel() const;
+    juce::String scLabel()   const;
+
 private:
     int          mSlotIndex;
     EffectRack*  mRack     { nullptr };
@@ -125,14 +187,14 @@ private:
     // basicMode, then re-lays-out the inline editor in place.
     std::unique_ptr<juce::TextButton>                  mBasicBtn;
 
-    void showAddMenu();
-    void showScMenu();
-    void showModeMenu();
-    void showPresetMenu();
     void refreshScBtnLabel();
     void refreshModeBtnLabel();
-    void toggleBasicMode();        // QA-EffectsReview Task 1
     void refreshBasicBtnLabel();   // QA-EffectsReview Task 1
+
+    Presentation mPresentation { Presentation::Inline };
+    // Header chrome exists only in Inline presentation; PanelOnly hides every
+    // button and skips the header strip entirely.
+    void applyPresentationToChrome();
 
     // 2026-05-02: vblank-locked level feed.  Replaces the old 30 Hz Timer so
     // every effect panel's input VU + output dBFS update in lockstep with

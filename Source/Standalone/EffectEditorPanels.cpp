@@ -1889,11 +1889,83 @@ struct ChorusPanel : public EditorPanelBase
 // Row 2: ModHz | ModTime | ModFB | Diff | DiffSprd | LoBit | FBDst | FBKnee | FBSym | Spread | Pan | Smooth
 //        +  SyncDiv  +  BPM  +  Pitch  +  FBDistType
 // ─────────────────────────────────────────────────────────────────────────────
+// ── FbCurveDisplay — CL-299 (2) ──────────────────────────────────────────────
+// Live transfer curve of the feedback distortion.  Orientation follows the
+// reference: INPUT runs vertically, OUTPUT horizontally.
+//
+// Polls the DSP rather than being pushed to, because the four values that shape
+// it (drive / knee / symmetry / type) are moved by four different controls plus
+// automation plus preset loads, and a curve that only updated on some of those
+// is worse than one that always lags by a frame.  Peer-keyed like every other
+// repeating UI cost in the shell.
+struct FbCurveDisplay : public juce::Component,
+                        public juce::SettableTooltipClient,
+                        private juce::Timer
+{
+    explicit FbCurveDisplay (DelayDSP* dsp) : mDsp (dsp) {}
+
+    void parentHierarchyChanged() override
+    {
+        if (getPeer() != nullptr)      { if (! isTimerRunning()) startTimerHz (10); }
+        else if (isTimerRunning())     { stopTimer(); }
+    }
+
+    void paint (juce::Graphics& g) override
+    {
+        auto b = getLocalBounds().toFloat().reduced (1.0f);
+        g.setColour (juce::Colour (0xff141414));
+        g.fillRoundedRectangle (b, 2.0f);
+        g.setColour (juce::Colour (0xff3A3A3A));
+        g.drawRoundedRectangle (b, 2.0f, 1.0f);
+
+        auto plot = b.reduced (3.0f);
+        // Centre cross: unity in, unity out.
+        g.setColour (juce::Colour (0xff2A2A2A));
+        g.drawLine (plot.getCentreX(), plot.getY(), plot.getCentreX(), plot.getBottom(), 1.0f);
+        g.drawLine (plot.getX(), plot.getCentreY(), plot.getRight(), plot.getCentreY(), 1.0f);
+
+        if (mDsp == nullptr) return;
+
+        juce::Path curve;
+        constexpr int kPoints = 96;
+        for (int i = 0; i < kPoints; ++i)
+        {
+            const float in  = -1.0f + 2.0f * (float) i / (float) (kPoints - 1);
+            const float out = juce::jlimit (-1.2f, 1.2f, mDsp->shapeFeedbackForDisplay (in));
+            // Input vertical (down = -1), output horizontal (right = +1).
+            const float px = plot.getCentreX() + out * plot.getWidth()  * 0.5f / 1.2f;
+            const float py = plot.getCentreY() - in  * plot.getHeight() * 0.5f;
+            if (i == 0) curve.startNewSubPath (px, py);
+            else        curve.lineTo (px, py);
+        }
+        g.setColour (juce::Colour (0xff00FFF2));
+        g.strokePath (curve, juce::PathStrokeType (1.4f));
+    }
+
+private:
+    void timerCallback() override
+    {
+        if (mDsp == nullptr) return;
+        const float lvl  = mDsp->getFBDistLevel();
+        const float knee = mDsp->getFBDistKnee();
+        const float sym  = mDsp->getFBDistSymmetry();
+        const int   type = mDsp->getFBDistType();
+        if (lvl == mLastLvl && knee == mLastKnee && sym == mLastSym && type == mLastType) return;
+        mLastLvl = lvl; mLastKnee = knee; mLastSym = sym; mLastType = type;
+        repaint();
+    }
+
+    DelayDSP* mDsp { nullptr };
+    float mLastLvl { -1.0f }, mLastKnee { -1.0f }, mLastSym { -1.0f };
+    int   mLastType { -1 };
+};
+
 struct DelayPanel : public EditorPanelBase
 {
     std::vector<std::unique_ptr<VKnob>>         r1knobs, r2knobs, duckKnobs;
     std::unique_ptr<DualLabelToggle>            tempoTog, keepPitchTog, fbDistTypeTog;
     std::unique_ptr<ChickenHeadSelector>        modelSel, fbFilterTypeSel, syncDivSel;
+    std::unique_ptr<FbCurveDisplay>             fbCurve;      // CL-299 (2)
 
     // QA-EffectsReview Task 9: Basic = the exact reference face (FL Fruity
     // Delay 3) -- which is the ENTIRE Echo panel except our additions.  Our
@@ -1908,6 +1980,18 @@ struct DelayPanel : public EditorPanelBase
         for (auto& k : r2knobs)   if (k) v.push_back(k.get());
         for (auto& k : duckKnobs) if (k) v.push_back(k.get());
         return v;
+    }
+
+    // CL-299 (4): selector position -> DelayDSP model value.  The DSP's
+    // numbering (0=Stereo 1=Mono 2=PingPong 3=Off) is what gets serialized and
+    // does not move; only the order they are OFFERED in does.
+    static constexpr int kModelOptionValues[4] = { 1, 0, 2, 3 };
+
+    static int displayIndexForModel (int dspModel)
+    {
+        for (int i = 0; i < 4; ++i)
+            if (kModelOptionValues[i] == dspModel) return i;
+        return 0;
     }
 
     // C4 -- numerator/denominator pairs for the 8 sync divisions the selector
@@ -1939,6 +2023,13 @@ struct DelayPanel : public EditorPanelBase
             { "Tone",   -1.f,    1.f,     0.f,  0.01f, "Tone on the wet output (left = low-pass, right = high-pass, center = off)" },
         });
 
+        // CL-299 (1): Feed runs to 1.2, and anything past 1.0 is additive
+        // feedback that builds instead of decaying.  The ring goes green ->
+        // orange -> red across that top zone so the runaway range is visible
+        // before you hear it.  1.0 / 1.2 is where 100 % sits on this knob.
+        if (r1knobs.size() > 1 && r1knobs[1])
+            r1knobs[1]->slider.getProperties().set (TimeLAF::kWarnRingFrom, 1.0 / 1.2);
+
         // Row 2: ModHz | ModTime | ModFB | Diff | DiffSprd | LoBit | FBDst | FBKnee | FBSym | Spread | Pan | Smooth
         // (+ Duck at idx 12, laid into row 1 in Advanced).  ModTime placed next
         // to ModHz (its LFO-rate dependency).  Smooth at the end near the Pitch
@@ -1967,18 +2058,30 @@ struct DelayPanel : public EditorPanelBase
             { "DkRel",  10.f, 1000.f, 200.f, 5.f, "Duck release (ms) - how fast the wet recovers after the trigger falls back" },
         });
 
+        // CL-299 (4): display order matches the reference (Mono / Stereo /
+        // PingPong / Off).  DISPLAY ONLY -- kModelOptionValues maps a position
+        // back to the DSP's own numbering, which is unchanged, so every saved
+        // project keeps the model it had.
         modelSel = std::make_unique<ChickenHeadSelector>();
         modelSel->setOptions({
-            { "S", "Stereo",   "Independent left/right delay lines - natural stereo" },
             { "M", "Mono",     "Summed mono delay - both channels get the same repeats" },
+            { "S", "Stereo",   "Independent left/right delay lines - natural stereo" },
             { "P", "PingPong", "Ping-pong - repeats alternate between left and right" },
             { "O", "Off",      "No echoes - the filter / lo-fi / distortion / tone chain runs instantly on the input (distortion-unit mode)" },
         });
         modelSel->setBodyTooltip("Delay topology");
         // A9: initialize from DSP so preset-loaded model shows correctly.
-        modelSel->setSelectedIndex(juce::jlimit(0, 3, dsp->getDelayModel()), juce::dontSendNotification);
-        modelSel->onChange = [dsp](int idx){ dsp->setDelayModel(idx); };
+        modelSel->setSelectedIndex(displayIndexForModel (dsp->getDelayModel()),
+                                   juce::dontSendNotification);
+        modelSel->onChange = [dsp](int idx)
+        {
+            dsp->setDelayModel (kModelOptionValues[(size_t) juce::jlimit (0, 3, idx)]);
+        };
         addAndMakeVisible(*modelSel);
+
+        fbCurve = std::make_unique<FbCurveDisplay> (dsp);
+        fbCurve->setTooltip ("Feedback distortion transfer curve - input vertical, output horizontal");
+        addAndMakeVisible (*fbCurve);
 
         fbFilterTypeSel = std::make_unique<ChickenHeadSelector>();
         fbFilterTypeSel->setOptions({
@@ -2186,6 +2289,11 @@ struct DelayPanel : public EditorPanelBase
         if (tempoTog) tempoTog->setBounds(tb.reduced(1));
         auto sd = r2.removeFromRight(66); r2.removeFromRight(2);
         if (syncDivSel) syncDivSel->setBounds(sd.reduced(2));
+        // CL-299 (2): the transfer curve sits at the left edge of row 2's
+        // right-hand cluster, beside the Limit/Sat toggle that selects which
+        // curve it is drawing.
+        auto fc = r2.removeFromRight(46); r2.removeFromRight(2);
+        if (fbCurve) fbCurve->setBounds(fc.reduced(1));
         std::vector<VKnob*> row2;
         for (int i = 0; i < (int) r2knobs.size() && i < 12; ++i)
             if (r2knobs[i]) row2.push_back(r2knobs[i].get());

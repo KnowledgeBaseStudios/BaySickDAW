@@ -1,6 +1,7 @@
 #pragma once
 #include <JuceHeader.h>
 #include <functional>
+#include <map>
 #include <memory>
 
 class Workspace;
@@ -65,6 +66,21 @@ public:
     // fixed-grid panels pass their natural size so they cannot shrink at all.
     void setMinimumSize (int minW, int minH);
 
+    // Where this window's bounds are remembered (QA-ModelShell TS5).
+    //
+    //   Disk    - settings.xml, surviving relaunch.  What the page windows use.
+    //   Session - an in-memory map only, forgotten when the app closes.
+    //
+    // The effect windows (rack / EQ / per-effect panels) are Session ON PURPOSE,
+    // per Jeff's 2026-07-28 ruling.  They are addressed per STRIP and per SLOT,
+    // which makes their placement project content by the same rule that keeps
+    // player-window positions out of the global file -- writing them to
+    // settings.xml would bleed one project's effect layout into the next.  The
+    // in-memory map is also the first of the three lifetimes the layout batch
+    // specced, so this is that lifetime rather than a placeholder for it.
+    enum class Persistence { Disk, Session };
+    void setPersistence (Persistence p) noexcept { mPersistence = p; }
+
     void setTitle (juce::String t);
 
     // This window's page menu -- the hamburger/menu row that used to be a
@@ -121,6 +137,7 @@ public:
 
     void paint (juce::Graphics&) override;
     void resized() override;
+    void broughtToFront() override;
     void mouseDown (const juce::MouseEvent&) override;
     void mouseDrag (const juce::MouseEvent&) override;
     void mouseUp   (const juce::MouseEvent&) override;
@@ -136,6 +153,11 @@ private:
     juce::Rectangle<int> loadSavedBounds() const;
 
     juce::String mPersistKey, mTitle;
+    Persistence  mPersistence { Persistence::Disk };
+    // Session-lifetime bounds, keyed exactly like the disk records.  Static
+    // because the window object itself is short-lived -- closing destroys it,
+    // and the key is the only thing carrying position to the next open.
+    static std::map<juce::String, juce::Rectangle<int>>& sessionBounds();
     // mContent owns only when setContent was used; mContentRaw is what gets
     // laid out either way (and is the non-owning case's only handle).
     std::unique_ptr<juce::Component>                 mContent;

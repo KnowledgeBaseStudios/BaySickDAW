@@ -10,23 +10,28 @@
 class VibeSynthProcessor;  // forward declaration - full header in .cpp
 class VibeGraph;           // QA-ProjectSave Task 7: resolveChannelDsp parameter
 
-// ── EffectsPage ───────────────────────────────────────────────────────────────
-// Permanent system tab (Effects). Layout:
+// ── EffectsPage — the FX rack window ──────────────────────────────────────────
+// QA-ModelShell TS5 (2026-07-29), Jeff's spec.  A small window that is a rack
+// INDEX, not a rack editor:
 //
-//   [Channel: ComboBox]                    [FX master bypass toggle]
-//   ─────────────────────────────────────────────────────────────────
-//   [Tab: Effects Rack (full width)] [Tab: EQ]
-//   ─────────────────────────────────────────
-//   Slot 1  (empty: shows "+", loaded: header + inline knobs)
-//   Slot 2  ...
-//   Slot 3
-//   Slot 4
-//   Slot 5
-//   Slot 6
-//   ─────── (EQ tab) ──────────────
-//   ParametricEQDisplay (Mid/Side toggle)
+//   [Channel: v]                            [FX Bypass]
+//   [   Pre EQ   ][   Post EQ   ]        <- each opens its own window
+//   [*][ Compressor              ][^][v][V][X]   <- one row per slot, six rows
+//   [*][ Empty                   ][^][v][V][X]
+//   ...
 //
-// Signal routing (per plan): input → slot 1 → slot 2 → ... → slot 6 → fader → buss
+// Row anatomy: bypass LED (the same one the slot header has always drawn), the
+// effect name as a button that opens THAT EFFECT'S OWN WINDOW, then move-up /
+// move-down, the picker, and remove.
+//
+// WHY NO PANELS HERE.  Pre-TS5 this page stacked all six editor panels at once
+// inside three sub-tabs.  The windowed shell makes "one thing at a time" the
+// natural unit -- Jeff: "a user can choose what they are editing at a time
+// instead of everything all at once" -- so the panels and both EQs became
+// windows of their own (EffectWindows.h) and what is left here is the index
+// that opens them.
+//
+// Signal routing is unchanged: input -> slot 1 -> ... -> slot 6 -> fader -> bus.
 // ─────────────────────────────────────────────────────────────────────────────
 class EffectsPage : public juce::Component,
                     public juce::ChangeListener,
@@ -37,10 +42,7 @@ public:
     EffectsPage(TrackSelectionManager& tsm, VibeSynthProcessor& processor);
     ~EffectsPage() override;
 
-    // 2026-04-26 (B-5): Ctrl+Z / Ctrl+Alt+Z migrated to global BSCommands;
-    // the per-page KeyListener-on-top-level dance is gone.
-
-    // Switch the channel dropdown to the named channel and update rack + EQ.
+    // Switch the channel dropdown to the named channel and update the rows.
     // Called by StandaloneEditor when a Mixer strip's FX button is clicked.
     // Accepts bus strip names ("Master", "Layers", "Bass", "Drums", "FX Bus")
     // and instrument strip names ("Layer 1", "Bass 1", etc. - mapped to their bus).
@@ -59,7 +61,7 @@ public:
 
     void changeListenerCallback(juce::ChangeBroadcaster*) override;
     void timerCallback() override;
-    // Starts/stops the 30 Hz poll with this page's on-screen state.
+    // Starts/stops the row-refresh poll with this page's on-screen state.
     void parentHierarchyChanged() override;
 
     // ── Active channel list callback ──────────────────────────────────────────
@@ -67,112 +69,59 @@ public:
     // Set by StandaloneEditor after construction; called by rebuildChannelDropdown().
     std::function<std::vector<std::pair<int,juce::String>>()> onGetActiveChannels;
 
-    // Rebuild the channel dropdown - now public so StandaloneEditor can trigger it
+    // Rebuild the channel dropdown - public so StandaloneEditor can trigger it
     // when engines are selected or drum slots change.
     void rebuildChannelDropdown();
 
-    // ── Public API for PageMenuBar integration ────────────────────────────────
-    int  getActiveTab()   const { return mCurrentTab; }
-    void switchTab(int index);
-    void setEQMid(bool showMid);
-    bool isEQMidActive()  const { return mShowingMid; }
+    // ── Satellite-window requests ────────────────────────────────────────────
+    // StandaloneEditor owns every contained window (it owns the Workspace), so
+    // the page ASKS rather than creates.  The channel id travels with the
+    // request because a window outlives this page's current selection by
+    // design: switching strips here leaves already-open windows alone.
+    std::function<void(int channelId, int slotIndex)> onOpenSlotPanel;
+    std::function<void(int channelId, bool pre)>      onOpenEqWindow;
+    // A slot's contents changed (loaded / cleared / moved / undone), so any
+    // open window on that strip must re-check what it is showing.  The windows
+    // also poll for this; the callback is the immediate path, not the only one.
+    std::function<void(int channelId)>                onRackContentsChanged;
 
-    // Non-owning component pointers for injection into PageMenuBar
-    juce::Component* getTrackLabel()  const { return mTrackLabel.get(); }
-    juce::Component* getTrackBox()    const { return mTrackBox.get();   }
-    juce::Component* getFxBypassBtn() const { return mFxBypassBtn.get();}
-    juce::Component* getMetersBtn()   const { return mMetersBtn.get();  }
-    // 2026-04-19: PageMenuBar's universal hamburger needs the EQ display so
-    // StandaloneEditor's tab-click lambda can install / uninstall its menu.
-    ParametricEQDisplay* getEQDisplay() const { return mEQDisplay.get(); }
+    // Fills this window's title-bar menu: Save / Load FX Rack Preset, plus the
+    // VU calibration submenu that used to be a "Meters" button on the old page.
+    void buildTitleMenu (juce::PopupMenu& m);
 
-private:
-    TrackSelectionManager& mTSM;
-    VibeSynthProcessor&    mProcessor;
-    EffectRack*            mRack { nullptr };
-    UndoContext            mUndoCtx;
+    int          getCurrentChannelId() const;
+    juce::String getChannelDisplayName (int channelId) const;
 
-    // ── Top bar ───────────────────────────────────────────────────────────────
-    std::unique_ptr<juce::Label>       mTrackLabel;
-    std::unique_ptr<juce::ComboBox>    mTrackBox;
-    std::unique_ptr<MixerLedButton>    mFxBypassBtn;
-    std::unique_ptr<juce::TextButton>  mMetersBtn;   // "Meters v" popup menu
-
-    // §P4.3 (B6.2): TabKind models the 3 possible EffectsPage sub-tabs.  Tab
-    // index in setTabSlots is dynamic - Aux/Audio/Bus get all 3 (Pre/Rack/Post),
-    // Layer/Bass/Drum-slot get 2 (Rack/Post) since their pre-EQ lives on the
-    // player page.  Use TabKind internally to avoid index-meaning ambiguity.
-public:
-    enum class TabKind { PreEQ, Rack, PostEQ };
-    bool currentChannelHasPagePreEQ() const;   // true for Layer/Bass/Drum channels
-    ParametricEQDisplay* getPreEQDisplay() const { return mPreEQDisplay.get(); }
-    // Switch by TabKind (preferred) or by visible-tab index (StandaloneEditor's
-    // tab-callback receives the visible index - switchTab(int) translates).
-    void switchTab (TabKind kind);
-    TabKind tabKindForVisibleIndex (int visibleIndex) const;
-    int     visibleIndexForTabKind (TabKind kind) const;
-    // Fired when the visible tab list needs to refresh (channel change altered
-    // 2-vs-3 layout).  StandaloneEditor wires this to re-call setTabSlots.
-    std::function<void()> onTabsNeedRefresh;
-private:
-
-    TabKind mCurrentTabKind { TabKind::Rack };
-    int mCurrentTab { 0 };  // legacy raw index - kept in sync with mCurrentTabKind
-
-    // 2026-04-26: per-channel sub-tab persistence.  Keyed by channel ID
-    // (1..6 buses, 100+ inserts, 200+ layers, 300+ basses, 400+ audio,
-    // 600+ aux).  When the channel selection changes, the previous channel's
-    // current TabKind is saved; the new channel restores its saved TabKind
-    // (default Rack on first visit).
-    std::map<int, TabKind> mLastTabPerChannel;
-    int mPrevChannelId { 0 };   // tracks last channel for save-on-change
-
-    // ── Rack tab content (full width) ─────────────────────────────────────────
-    std::unique_ptr<juce::Component>               mRackTab;
-    std::array<std::unique_ptr<SlotComponent>, 6>  mSlots;
-
-    // ── Post-rack EQ tab content ──────────────────────────────────────────────
-    std::unique_ptr<juce::Component>     mEQTab;
-    std::unique_ptr<ParametricEQDisplay> mEQDisplay;
-    // Owned M/S EQ DSP (display fallback before channel binding lands)
-    EQ8MsDSP                             mEffectsEQDsp;
-    bool                                 mShowingMid { true };
-
-    // ── Pre-rack EQ tab content (B6.2) ────────────────────────────────────────
-    // Visible only on Aux/Audio/Bus channels (player-pre-EQ lives on the page).
-    std::unique_ptr<juce::Component>     mPreEQTab;
-    std::unique_ptr<ParametricEQDisplay> mPreEQDisplay;
-    EQ8MsDSP                             mPreEffectsEQDsp;   // display fallback
-
-    // Called whenever mTrackBox selection changes; wires rack + EQ to selected channel
-    void onChannelChanged();
-
-public:
+    // ── Channel resolution — static and view-free ────────────────────────────
     // QA-ProjectSave Task 7 step 3 (2026-07-26): channel id -> rack / EQ, lifted
     // out of onChannelChanged so automation can resolve a rack WITHOUT this page
     // being on that channel, or existing at all.  Static + lazily called: racks
     // live inside InsertNodes and die with their tab, so an applicator captures
     // the channel ID and looks the rack up per apply rather than holding a
-    // pointer that would dangle.
+    // pointer that would dangle.  TS5's windows resolve through the same calls
+    // for the same reason.
     static void        resolveChannelDsp (VibeGraph& vg, int id,
                                           EffectRack*& rack, EQ8MsDSP*& eq);
     static EffectRack* rackForChannelId  (VibeGraph& vg, int id);
+    // The PRE-rack EQ for a channel.  QA-ModelShell TS5: extracted from
+    // onChannelChanged, where it was a second copy of the channel switch --
+    // exactly the fork the batch plan says not to make.  The EQ windows and the
+    // page now share this one.
+    static EQ8MsDSP*   preEqForChannelId (VibeGraph& vg, int id);
 
     // QA-ModelShell TS1: dropdown-channel-id -> rack-prefix vocabulary,
     // usable without the dropdown (the sweep below + any model trigger).
     static juce::String channelPrefixForId (int id);
+    // 5F-4a: channel id -> mixer-strip APVTS prefix (e.g. "mixer_layer_0"), or
+    // empty when the channel has no strip.  Static since TS5 -- the EQ windows
+    // need it and they have no page.
+    static juce::String mixerPrefixForChannelId (int id);
 
     // QA-ModelShell TS1 (wire-at-load): register every populated rack slot's
     // DSP-targeting automation across ALL channels.  Model-triggered after
     // rack states land at project/template load so lanes apply without the
     // Effects page ever being opened.
     static void registerRackAutomationForAllChannels (VibeSynthProcessor& proc);
-
-private:
-    // Registers DSP-targeting applicators/readers for one rack slot's mapped
-    // parameters.  Called whenever a slot editor is (re)built, which is also
-    // when the slot's effect type can have changed.
-    void registerSlotAutomation (int slotIndex);
 
     // The view-independent body: registrations capture (chId, uuid, type,
     // suffix) and resolve rack -> slot -> DSP at apply time (null-owner,
@@ -184,32 +133,60 @@ private:
                                            const juce::String& channelPrefix,
                                            EffectRack& rackRef, int slotIndex);
 
-public:
+    // Stamp automation paramIds onto a freshly mounted panel and (re)register
+    // that slot's applicators.  ONE home for both halves, called from every
+    // mount path -- including the ones inside SlotComponent's own menus, which
+    // used to rebuild a panel and silently leave the stamps and the
+    // variant-keyed registration behind.
+    static void stampAndRegisterSlotEditor (VibeSynthProcessor& proc, int chId,
+                                            EffectRack& rack, int slotIndex,
+                                            SlotComponent& target);
 
 private:
+    TrackSelectionManager& mTSM;
+    VibeSynthProcessor&    mProcessor;
+    EffectRack*            mRack { nullptr };
+    UndoContext            mUndoCtx;
 
+    // ── Top row ───────────────────────────────────────────────────────────────
+    std::unique_ptr<juce::Label>       mTrackLabel;
+    std::unique_ptr<juce::ComboBox>    mTrackBox;
+    std::unique_ptr<MixerLedButton>    mFxBypassBtn;
 
-    void buildRackTab();
-    void buildEQTab();
-    void buildPreEQTab();   // §P4.3 (B6.2)
-    void showMetersMenu();   // shows VU calibration popup
+    // ── EQ entries ────────────────────────────────────────────────────────────
+    std::unique_ptr<juce::TextButton>  mPreEqBtn;
+    std::unique_ptr<juce::TextButton>  mPostEqBtn;
 
-    // Slot callbacks
+    // ── Slot rows ─────────────────────────────────────────────────────────────
+    class RackSlotRow;   // defined in the .cpp
+    std::array<std::unique_ptr<RackSlotRow>, EffectRack::kNumSlots> mRows;
+
+    // Called whenever mTrackBox selection changes; re-points the rows.
+    void onChannelChanged();
+
+    void refreshAllRows();
+
+    // Slot actions, driven from the rows.
     void onEffectChosen (int slotIndex, EffectType type);
-    void onEffectRemoved(int slotIndex);
+    void onEffectRemoved(int slotIndex);   // prompts first (Jeff spec 2026-07-29)
+    void performSlotRemoval (int slotIndex);   // what the prompt's OK runs
     void onMoveRequested(int slotIndex, bool up);
+    void onSlotBypassToggled (int slotIndex);
+    void onSlotOpenRequested (int slotIndex);
 
-    // Rebuild the inline editor for one slot (call after loadEffect/clearSlot/swap)
-    void rebuildSlotEditor(int slotIndex);
-    void refreshAllSlots();
+    // Re-register a slot's automation after its effect identity changed.  The
+    // panels no longer live here, so this is where a type/variant change gets
+    // its lanes re-keyed for the rack view's own edits.
+    void registerSlotAutomation (int slotIndex);
+    void notifyRackContentsChanged();
 
     // Returns a short prefix string for the current channel, used for automation paramIds.
     // e.g. "layers_bus", "bass_bus", "master", "layer_1", "bass_2"
     juce::String getChannelPrefix() const;
 
-    // 5F-4a: returns the mixer-strip APVTS prefix (e.g. "mixer_layer_0") for the
-    // given effects-page channel id, or empty if unknown.
-    juce::String getMixerApvtsPrefixForChannel(int effectsPageId) const;
+    // Rack-wide preset (all six slots + both EQs).  Jeff spec 2026-07-29.
+    void saveRackPreset();
+    void loadRackPresetMenu (juce::PopupMenu& into);
 
     // 5F-4a: ButtonAttachment for FX Bypass - created/destroyed as channel changes.
     // When active, clicking the button writes to the APVTS _bypass param (which
@@ -222,13 +199,14 @@ private:
     juce::String mBypassParamId;
 
     // 5F-4a: listener that mirrors APVTS _bypass changes to rack.setRackBypassed().
-    // Without this, clicking the button writes APVTS but the rack stays unchanged
-    // until Batch 6 wires InsertNode's per-block read.
     void parameterChanged(const juce::String& paramId, float newValue) override;
 
     // Map: dropdown item id → APVTS prefix. Rebuilt each rebuildChannelDropdown()
     // so selectChannelByApvtsPrefix() can find the right entry unambiguously.
     std::map<int, juce::String> mIdToApvtsPrefix;
+    // Map: dropdown item id → display name, so a window can title itself with
+    // the strip it belongs to long after the page moved to another channel.
+    std::map<int, juce::String> mIdToDisplayName;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(EffectsPage)
 };

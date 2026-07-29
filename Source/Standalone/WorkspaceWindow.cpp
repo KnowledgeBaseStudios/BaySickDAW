@@ -70,6 +70,26 @@ WorkspaceWindow::WorkspaceWindow (juce::String persistKey, juce::String title)
     mResizer = std::make_unique<juce::ResizableBorderComponent> (this, &mConstrainer);
     mResizer->setBorderThickness (juce::BorderSize<int> (kBorderPx));
     addAndMakeVisible (*mResizer);
+
+    // A click ANYWHERE in this window raises it, not just on the title strip
+    // (Jeff, 2026-07-29: a window behind another only came forward when its
+    // title bar was hit).  mouseDown only ever sees clicks that reach the
+    // WINDOW -- the title strip and the resize border -- because the hosted page
+    // and every control in it consume their own.  JUCE resolves this above the
+    // component: on mouse-down it walks the clicked component's whole ancestor
+    // chain and calls toFront on any link carrying this flag, so a click on a
+    // knob six levels down still raises the window that contains it.
+    setBroughtToFrontOnMouseClick (true);
+}
+
+// Fired for every route that raises this window -- the flag above, the title
+// drag, and programmatic toFront from tab selection.  Owning the ribbon sync
+// here rather than in mouseDown is what keeps the tab bar honest now that
+// content clicks raise windows too.
+void WorkspaceWindow::broughtToFront()
+{
+    juce::Component::broughtToFront();
+    if (onBroughtToFront) onBroughtToFront();
 }
 
 Workspace* WorkspaceWindow::workspace() const noexcept
@@ -207,8 +227,9 @@ void WorkspaceWindow::mouseDown (const juce::MouseEvent& e)
     // Raise AFTER capturing the drag anchor.  toFront on a native child peer is
     // a real SetWindowPos/SetFocus, and doing it before the anchor is recorded
     // can move the window out from under the gesture that started it.
+    // (The ribbon sync moved to broughtToFront(), which this reaches -- keeping
+    // it here too would fire it twice per title click.)
     toFront (true);
-    if (onBroughtToFront) onBroughtToFront();
 }
 
 void WorkspaceWindow::mouseDrag (const juce::MouseEvent& e)
@@ -476,8 +497,21 @@ juce::Rectangle<int> WorkspaceWindow::applyMagnetism (juce::Rectangle<int> targe
     return target.translated (bestDx, bestDy);
 }
 
+std::map<juce::String, juce::Rectangle<int>>& WorkspaceWindow::sessionBounds()
+{
+    static std::map<juce::String, juce::Rectangle<int>> m;
+    return m;
+}
+
 juce::Rectangle<int> WorkspaceWindow::loadSavedBounds() const
 {
+    if (mPersistence == Persistence::Session)
+    {
+        auto& m = sessionBounds();
+        auto it = m.find (mPersistKey);
+        return it != m.end() ? it->second : juce::Rectangle<int>();
+    }
+
     auto xml = juce::XmlDocument::parse (ProjectManager::getSettingsFile());
     if (! xml) return {};
     auto* root = xml->getChildByName (kRootTag);
@@ -495,6 +529,12 @@ juce::Rectangle<int> WorkspaceWindow::loadSavedBounds() const
 void WorkspaceWindow::saveBounds() const
 {
     if (mPersistKey.isEmpty()) return;
+
+    if (mPersistence == Persistence::Session)
+    {
+        sessionBounds()[mPersistKey] = getBounds();
+        return;
+    }
 
     const auto file = ProjectManager::getSettingsFile();
     auto xml = juce::XmlDocument::parse (file);

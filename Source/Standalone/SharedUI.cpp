@@ -7370,6 +7370,17 @@ void DynamicsLAF::paintLA2APanel(juce::Graphics& g, juce::Rectangle<int> bounds)
     LRXHelper::drawMountingScrews(g, bounds, 8, juce::Colour(0xffD8D0C0));
 }
 
+// ── EffectBypassLed (QA-ModelShell TS5) ───────────────────────────────────────
+// Lifted verbatim out of SlotComponent::paint so the rack row and the panel
+// window show the identical LED rather than a look-alike.
+void EffectBypassLed::paint (juce::Graphics& g, juce::Rectangle<int> area, bool bypassed)
+{
+    g.setFont (juce::Font (16.0f));
+    g.setColour (bypassed ? juce::Colour (0xffcc2222) : juce::Colour (0xff22cc44));
+    g.drawText (juce::String::fromUTF8 ("\xe2\x97\x8f"),   // filled circle
+                area, juce::Justification::centred);
+}
+
 // ── JewelIndicator ────────────────────────────────────────────────────────────
 void JewelIndicator::paint(juce::Graphics& g)
 {
@@ -7418,9 +7429,55 @@ void JewelIndicator::paint(juce::Graphics& g)
 }
 
 // ── TimeLAF ───────────────────────────────────────────────────────────────────
-void TimeLAF::drawRotarySlider(juce::Graphics& g, int x, int y, int w, int h,
-    float sliderPos, float startAngle, float endAngle, juce::Slider& /*s*/)
+// CL-299 (1): the additive-feedback warning ring.  Opt-in per slider via the
+// `kWarnRingFrom` property, whose value is the NORMALIZED position where the
+// warning starts (Delay's Feed knob runs 0..1.2, so 100 % sits at 0.833).
+//
+// Drawn as an arc over the knob rather than as a tint, because these knobs are
+// filmstrip-rendered: there is no drawn ring to recolour, and repainting the
+// strip in another hue would look like a different control rather than the same
+// control in a warning state.
+void TimeLAF::drawWarnRing (juce::Graphics& g, juce::Rectangle<float> area,
+                            float sliderPos, float warnFrom,
+                            float startAngle, float endAngle)
 {
+    const auto centre = area.getCentre();
+    const float radius = area.getWidth() * 0.5f - 1.0f;
+    if (radius <= 1.0f) return;
+
+    const float valAngle = startAngle + sliderPos * (endAngle - startAngle);
+
+    auto arcTo = [&] (float from, float to, juce::Colour c, float thickness)
+    {
+        if (to <= from) return;
+        juce::Path p;
+        // addCentredArc with startAsNewSubPath -- addArc's habit of starting a
+        // new subpath is a documented trap for FILLED paths; this one is stroked.
+        p.addCentredArc (centre.x, centre.y, radius, radius, 0.0f, from, to, true);
+        g.setColour (c);
+        g.strokePath (p, juce::PathStrokeType (thickness, juce::PathStrokeType::curved,
+                                               juce::PathStrokeType::rounded));
+    };
+
+    // Safe portion, then the overdrive portion ramping orange -> red.
+    const float warnAngle = startAngle + juce::jlimit (0.0f, 1.0f, warnFrom) * (endAngle - startAngle);
+    arcTo (startAngle, juce::jmin (valAngle, warnAngle), juce::Colour (0xff22cc44), 2.0f);
+
+    if (sliderPos > warnFrom)
+    {
+        const float over = juce::jlimit (0.0f, 1.0f,
+                                         (sliderPos - warnFrom) / juce::jmax (0.001f, 1.0f - warnFrom));
+        arcTo (warnAngle, valAngle,
+               juce::Colour (0xffff9100).interpolatedWith (juce::Colour (0xffcc2222), over),
+               2.6f);
+    }
+}
+
+void TimeLAF::drawRotarySlider(juce::Graphics& g, int x, int y, int w, int h,
+    float sliderPos, float startAngle, float endAngle, juce::Slider& s)
+{
+    const bool hasWarnRing = s.getProperties().contains (kWarnRingFrom);
+
     // ── Filmstrip render (64x64, 101 frames) ──────────────────────────────────
     {
         const auto& strip = Filmstrips::timeBased();
@@ -7428,6 +7485,10 @@ void TimeLAF::drawRotarySlider(juce::Graphics& g, int x, int y, int w, int h,
         {
             Filmstrips::drawFrame(g, strip, 64, 64, 101, sliderPos,
                                   juce::Rectangle<float>((float)x, (float)y, (float)w, (float)h));
+            if (hasWarnRing)
+                drawWarnRing (g, juce::Rectangle<float>((float)x, (float)y, (float)w, (float)h),
+                              sliderPos, (float) s.getProperties()[kWarnRingFrom],
+                              startAngle, endAngle);
             return;
         }
     }
@@ -7475,6 +7536,11 @@ void TimeLAF::drawRotarySlider(juce::Graphics& g, int x, int y, int w, int h,
                    centre.x + outerR * std::sin(angle),
                    centre.y - outerR * std::cos(angle), 2.5f);
     }
+
+    if (hasWarnRing)
+        drawWarnRing (g, juce::Rectangle<float>((float)x, (float)y, (float)w, (float)h),
+                      sliderPos, (float) s.getProperties()[kWarnRingFrom],
+                      startAngle, endAngle);
 }
 
 void TimeLAF::drawLinearSlider(juce::Graphics& g, int x, int y, int w, int h,

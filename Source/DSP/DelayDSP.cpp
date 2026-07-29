@@ -269,6 +269,24 @@ float DelayDSP::softLimit (float x, float knee)
     return sgn * (thresh + (1.0f - thresh) * (t * t * (3.0f - 2.0f * t)));
 }
 
+// CL-299 (2): display twin of the feedback distortion in processBlock step 4.
+// EDIT BOTH TOGETHER -- see the header note for why they are not one function.
+float DelayDSP::shapeFeedbackForDisplay (float x) const
+{
+    if (mFBDistType == 0)
+        return softLimit (x, mFBDistKnee);
+
+    const float dc       = mFBDistSymmetry * 0.3f;
+    const float drive    = std::max (0.001f, mFBDistLevel);
+    const float hard     = 1.0f - mFBDistKnee;
+    const float uBias    = drive * dc;
+    const float tanhBias = std::tanh (uBias);
+    const float clipBias = juce::jlimit (-1.0f, 1.0f, uBias);
+    const float u        = drive * (x + dc);
+    return ((1.0f - hard) * (std::tanh (u) - tanhBias)
+          +  hard         * (juce::jlimit (-1.0f, 1.0f, u) - clipBias)) / drive;
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 float DelayDSP::bitcrush (float x, float bits)
 {
@@ -550,6 +568,8 @@ void DelayDSP::process (juce::AudioBuffer<float>& buffer)
         }
 
         // 4. Feedback distortion
+        //    (CL-299: shapeFeedbackForDisplay mirrors this branch for the
+        //    panel's transfer-curve graph -- edit both together.)
         if (mFBDistType == 0)
         {
             // Soft limiter

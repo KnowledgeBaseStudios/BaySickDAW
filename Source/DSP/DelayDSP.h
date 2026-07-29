@@ -121,6 +121,18 @@ public:
     int   syncNumerator   { 1 };
     int   syncDenominator { 4 };
 
+    // CL-299 (2): the feedback shaper's transfer curve, for the panel's graph.
+    // DISPLAY ONLY -- never called from processBlock.
+    //
+    // It mirrors step 4 of the feedback path rather than sharing code with it,
+    // and that is deliberate: the audio loop hoists every invariant of the Sat
+    // branch (drive, knee mix, and the two bias terms, one of which is a tanh)
+    // OUT of the per-sample work.  A shared function would either recompute
+    // those per sample on the audio thread or need the loop restructured around
+    // a prepared-shaper object -- a real change to live DSP for a picture.
+    // The two must be edited together; both carry a pointer to the other.
+    float shapeFeedbackForDisplay (float x) const;
+
     // ── Public getters for panel construct-time state-sync (A9) ─────────────
     int   getDelayModel      () const noexcept { return mDelayModel;     }
     int   getFBFilterType    () const noexcept { return mFBFilterType;   }

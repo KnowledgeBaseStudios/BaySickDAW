@@ -268,6 +268,64 @@ only when the formatted string changes. Song mode counts 4 beats/bar (matches
 playback's grid); pattern mode counts the pattern's tsNum (matches metronome
 accents) and is naturally pattern-relative (the clock loop-wraps).
 
+## 2026-07-29 — QA-ModelShell TS5: the Effects surface becomes many windows
+
+**Files:** `EffectsPage.h/.cpp`, `EffectWindows.h/.cpp` (new), `FxRackPresetIO.h/.cpp` (new),
+`SlotComponent.h/.cpp`, `SharedUI.h/.cpp`, `EffectEditorPanels.cpp`, `StandaloneEditor.h/.cpp`,
+`RibbonTabBar.cpp`
+
+### What changed
+The Effects page stopped being one page showing everything (three sub-tabs, six stacked panels) and
+became a small **rack window** that opens the rest:
+
+- **Rack window** = strip picker + FX Bypass, two EQ buttons, six slot rows. A row is
+  `[bypass LED] [effect name button] [up] [down] [picker chevron] [remove X]`; the name button opens
+  that effect in its **own window**, and remove prompts first. Title-bar menu carries Save / Load FX
+  Rack Preset (six slots + both EQs, via `FxRackPresetIO`) and the VU calibration that used to be a
+  "Meters" button.
+- **EQ windows** — one Pre, one Post, each fixed to its own EQ; the title strip's two-tab strip
+  OPENS the other window rather than swapping contents, so both can be on screen.
+- **Panel windows** — one per effect. Basic/Advanced, Mode, SC source and Presets live in that
+  window's title-bar MENU (they were buttons on the slot header); the bypass LED sits on its title
+  strip and is the same control as the row's.
+
+### Things to know before editing these
+- `SlotComponent` now has a `Presentation`: `Inline` (header + editor — BaySickVocal's Vocal Chain
+  still uses it) and `PanelOnly` (editor only, chrome on the window). Do not assume a header exists.
+- The bypass LED is drawn by `EffectBypassLed::paint` in SharedUI — one routine, three call sites.
+  Recolour it there, not per site.
+- Satellite windows are keyed by slot **UUID**, not index: removal packs slots up and reorder swaps
+  them. Their bounds are `WorkspaceWindow::Persistence::Session` (in-memory, per session) on purpose.
+- Every panel mount fires `SlotComponent::onEditorMounted`, and the host answers it with
+  `EffectsPage::stampAndRegisterSlotEditor`. A panel built without that has no automation stamps and
+  leaves the slot registered against the previous DSP variant.
+
+### FX rack picker reorganised (2026-07-29, Jeff)
+The rack picker had been a near-copy of the pedals board's picker — same sections, same order, 13 of
+its 24 entries pedal-native (Phase I alpha-merged them in). Rack effects are now the top level and
+the pedal types live in a **"Pedals" submenu**; nothing was removed, and saved projects are
+unaffected since slots load by `EffectType` and never consult this menu. **Gate** and **De-reverb**
+were added — both had DSP, panel and automation tables but appeared in no picker at all, so a rack
+slot could never hold either.
+
+### Window raise-on-click (2026-07-29, Jeff)
+A contained window is raised by a click ANYWHERE in it, via
+`WorkspaceWindow`'s `setBroughtToFrontOnMouseClick(true)` — JUCE walks the clicked component's
+ancestor chain on mouse-down, so clicks on a page's own controls raise the window containing them.
+The ribbon sync lives in the `broughtToFront()` override, not in `mouseDown`, so every raise route
+keeps the tab bar in step. Do not move it back.
+
+### CL-299 Delay deltas shipped (items 1, 2, 4 — item 3 dropped by owner ruling)
+- **Feed knob warning ring**: opt-in via `TimeLAF::kWarnRingFrom` (value = normalized start of the
+  warning zone). Drawn as an arc OVER the filmstrip; green -> orange -> red past 100 %.
+- **FB-distortion transfer curve**: `FbCurveDisplay` in `EffectEditorPanels.cpp`, input vertical /
+  output horizontal, fed by `DelayDSP::shapeFeedbackForDisplay` — which mirrors the processBlock
+  branch and must be edited with it.
+- **Delay model selector order**: displays Mono / Stereo / PingPong / Off via `kModelOptionValues`.
+  Serialized model values are unchanged.
+
+---
+
 ### Typing-keyboard MIDI (D-4)
 The ~40px slot reserved next to the metronome since D-5 polish now holds the
 KeyboardMidiButton (piano-keys icon, amber when on). StandaloneEditor owns the

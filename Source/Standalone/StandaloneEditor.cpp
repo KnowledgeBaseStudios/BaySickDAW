@@ -9,6 +9,7 @@
 #include "ProjectBundler.h"   // QA-Export: bundle walker + writer
 #include "../SampleLibrary.h"
 #include "../EngineRig.h"    // QA-ModelShell TS1: model-side engine owner
+#include "EffectWindows.h"   // QA-ModelShell TS5: per-effect + EQ satellite windows
 #include "LayersPage.h"
 #include "BassPage.h"
 #include "DrumPage.h"
@@ -3969,6 +3970,22 @@ std::unique_ptr<juce::Component> StandaloneEditor::createEffectsPage()
     page->setUndoContext(makeUndoContext());
     mEffectsPage = page.get();
 
+    // QA-ModelShell TS5: the rack window asks; the editor owns the windows
+    // (it owns the Workspace).  Requests carry the channel id because these
+    // windows deliberately outlive the rack window's current selection.
+    page->onOpenSlotPanel = [this] (int chId, int slotIndex)
+    {
+        openEffectSlotWindow (chId, slotIndex);
+    };
+    page->onOpenEqWindow = [this] (int chId, bool pre)
+    {
+        openEffectEqWindow (chId, pre);
+    };
+    page->onRackContentsChanged = [this] (int chId)
+    {
+        closeDeadEffectWindows (chId);
+    };
+
     // ── Active channel list callback ──────────────────────────────────────────
     // Returns only channels that actually have an open tab / assigned sound.
     page->onGetActiveChannels = [this]() -> std::vector<std::pair<int, juce::String>>
@@ -4900,20 +4917,16 @@ void StandaloneEditor::onSubPageSelected(RibbonTabBar::TabType type, int subPage
     switch (type)
     {
     case RibbonTabBar::TabType::Effects:
-        // Ribbon Effects ▾ dropdown: 0 = Rack, 1 = EQ.  Map by TabKind (not raw
-        // visible index) so non-player channels' 3-tab layout doesn't redirect
-        // "Rack" → PreEQ.  EQ resolves to PostEQ on every channel (the only EQ
-        // common to player + bus/aux/audio layouts).
+        // QA-ModelShell TS5: 0 = Rack, 1 = Pre EQ, 2 = Post EQ.  The rack IS
+        // the page, so "Rack" is just the tab selection that already happened
+        // in onTabSelected; the two EQ entries open their windows for whatever
+        // channel the rack window is currently showing.
         // 2026-04-26: channel pre-selection already happened in onTabSelected
         // (only when mLastFXChannel is set, e.g. via FX-button click).  Leave
-        // current channel alone here - user explicitly picked a sub-tab, not a
+        // current channel alone here - user explicitly picked a sub-page, not a
         // channel.
-        if (mEffectsPage)
-        {
-            mEffectsPage->switchTab(subPageIndex == 1
-                                    ? EffectsPage::TabKind::PostEQ
-                                    : EffectsPage::TabKind::Rack);
-        }
+        if (mEffectsPage != nullptr && subPageIndex >= 1)
+            openEffectEqWindow (mEffectsPage->getCurrentChannelId(), subPageIndex == 1);
         break;
 
     case RibbonTabBar::TabType::Builder:
@@ -5111,72 +5124,19 @@ void StandaloneEditor::showPageForTab(int tabId)
 
         if (auto* ep = dynamic_cast<EffectsPage*>(mVisiblePage))
         {
-            // §P4.3 (B6.2): tab layout is dynamic - Layer/Bass/Drum channels
-            // get [Rack | Post EQ8 M/S] (pre-EQ on player page); Aux/Audio/Bus
-            // get [Pre EQ8 M/S | Rack | Post EQ8 M/S].  Re-runs on channel
-            // change via ep->onTabsNeedRefresh.  The callback sent into
-            // setTabSlots interprets the visible-index via EffectsPage's
-            // tabKindForVisibleIndex so it works with either layout.
-            auto setupEffectsTabs = [this, ep, syncEQHamburger]()
+            // QA-ModelShell TS5: the three sub-tabs and the four right-hand
+            // extras are gone.  The channel picker and FX Bypass moved into the
+            // window body (they belong with the rows they act on), each EQ is
+            // its own window opened from the body's two buttons, and the title
+            // strip carries just the rack menu: Save / Load FX Rack Preset plus
+            // the VU calibration that used to be a "Meters" button.
+            mPageMenuBar->setMidSideVisible (false);
+            mPageMenuBar->setMenuBuilder ([this, ep] (juce::Component* anchor)
             {
-                // §P4.3 (B6.2 fix #1): bail if EffectsPage isn't the visible page.
-                // onTabsNeedRefresh fires whenever the EffectsPage's channel
-                // selection changes - even when the user has navigated away to
-                // a player page.  Without this guard, the player page's tab
-                // slots get stomped with EffectsPage's labels.
-                if (mVisiblePage != ep) return;
-
-                using TabKind = EffectsPage::TabKind;
-                const juce::StringArray labels = ep->currentChannelHasPagePreEQ()
-                    ? juce::StringArray{ "Rack", "Post EQ8 M/S" }
-                    : juce::StringArray{ "Pre EQ8 M/S", "Rack", "Post EQ8 M/S" };
-
-                auto isEqTabIndex = [ep](int idx) {
-                    auto kind = ep->tabKindForVisibleIndex(idx);
-                    return kind == TabKind::PreEQ || kind == TabKind::PostEQ;
-                };
-                auto displayForIndex = [ep](int idx) -> ParametricEQDisplay* {
-                    return ep->tabKindForVisibleIndex(idx) == TabKind::PreEQ
-                                ? ep->getPreEQDisplay()
-                                : ep->getEQDisplay();
-                };
-
-                // 2026-04-26: trust EffectsPage's current visible index - onChannelChanged
-                // restores the per-channel saved TabKind (and clamps PreEQ → Rack on
-                // player channels) before firing onTabsNeedRefresh, so getActiveTab()
-                // already points at the right slot for this layout.
-                const int activeIdx = ep->getActiveTab();
-
-                mPageMenuBar->setTabSlots(labels,
-                    [this, ep, syncEQHamburger, isEqTabIndex, displayForIndex](int i) {
-                        ep->switchTab(i);
-                        mPageMenuBar->updateTabActive(i);
-                        const bool isEq = isEqTabIndex(i);
-                        mPageMenuBar->setMidSideVisible(isEq);
-                        syncEQHamburger(displayForIndex(i), isEq);
-                    }, activeIdx);
-
-                const bool activeIsEq = isEqTabIndex(activeIdx);
-                mPageMenuBar->setMidSideVisible(activeIsEq);
-                syncEQHamburger(displayForIndex(activeIdx), activeIsEq);
-            };
-
-            // §P4.3 (B6.2 fix #2): setMidSideSlots BEFORE setupEffectsTabs so
-            // setupEffectsTabs gets the final word on visibility.  Original
-            // refactor had this reversed → setMidSideSlots' side-effects
-            // overrode the visibility we'd just set.
-            mPageMenuBar->setMidSideSlots(
-                [this, ep] { ep->setEQMid(true);  mPageMenuBar->updateMidSideActive(true);  },
-                [this, ep] { ep->setEQMid(false); mPageMenuBar->updateMidSideActive(false); },
-                ep->isEQMidActive());
-
-            setupEffectsTabs();
-            ep->onTabsNeedRefresh = setupEffectsTabs;
-            // Right side: label, channel box, bypass, meters
-            mPageMenuBar->addExtraRightComponent(ep->getMetersBtn(),   72);
-            mPageMenuBar->addExtraRightComponent(ep->getFxBypassBtn(), 82);
-            mPageMenuBar->addExtraRightComponent(ep->getTrackBox(),   176);
-            mPageMenuBar->addExtraRightComponent(ep->getTrackLabel(),  58);
+                juce::PopupMenu m;
+                ep->buildTitleMenu (m);
+                m.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (anchor));
+            });
         }
         else if (auto* lp = dynamic_cast<LayersPage*>(mVisiblePage))
         {
@@ -11291,6 +11251,12 @@ void StandaloneEditor::closeDynamicTabs (TabTeardownScope scope)
 // ── QA-D STATE-02: monotonic tab-name counter lifecycle ─────────────────────
 void StandaloneEditor::resetProjectState()
 {
+    // QA-ModelShell TS5: the per-effect and EQ windows are bound to racks that
+    // this reset is about to destroy.  They would notice on their next poll and
+    // close themselves, but closing them here means no window ever paints
+    // against a rack that is mid-teardown.
+    closeAllAuxWindows();
+
     mNextLayerNameNum   = 1;
     mNextBassNameNum    = 1;
     mNextDrumNameNum    = 1;
@@ -11708,7 +11674,15 @@ void StandaloneEditor::hostPageInWindow (PageEntry& entry)
     // on screen (Test Plans B.31.0) -- they cannot be derived from source
     // because "usable" is a judgement about knob collisions, not a measurement.
     // Until then every window has SOME floor so none is unbounded.
-    entry.window->setMinimumSize (640, 400);
+    //
+    // The Effects rack is the exception with a number behind it: TS5 made it an
+    // INDEX (picker + two EQ buttons + six fixed-height rows), so its content
+    // height is known and the general 640x400 would have forced a window three
+    // times taller than anything it can draw.
+    if (entry.type == RibbonTabBar::TabType::Effects)
+        entry.window->setMinimumSize (300, 250);
+    else
+        entry.window->setMinimumSize (640, 400);
 
     entry.window->setContentNonOwned (entry.component.get());
 
@@ -11737,6 +11711,156 @@ void StandaloneEditor::hostPageInWindow (PageEntry& entry)
          << " key=" << persistKeyFor (entry)
          << " wsSize=" << mWorkspace->getWidth() << "x" << mWorkspace->getHeight());
     entry.window->attachTo (*mWorkspace);
+}
+
+// ── Satellite windows (QA-ModelShell TS5) ────────────────────────────────────
+WorkspaceWindow* StandaloneEditor::findAuxWindow (const juce::String& key) const
+{
+    for (const auto& a : mAuxWindows)
+        if (a.key == key) return a.window.get();
+    return nullptr;
+}
+
+WorkspaceWindow* StandaloneEditor::openAuxWindow (const juce::String& key,
+                                                  const juce::String& persistKey,
+                                                  const juce::String& title,
+                                                  std::unique_ptr<juce::Component> content,
+                                                  int minW, int minH)
+{
+    if (auto* existing = findAuxWindow (key))
+    {
+        existing->toFront (true);
+        return existing;
+    }
+    if (mWorkspace == nullptr || content == nullptr) return nullptr;
+
+    auto win = std::make_unique<WorkspaceWindow> (persistKey, title);
+    // Session-lifetime placement: these are per-strip and per-slot, which makes
+    // their position project content -- writing it to the global settings.xml
+    // would carry one project's effect layout into the next (Jeff's ruling).
+    win->setPersistence (WorkspaceWindow::Persistence::Session);
+    win->setMinimumSize (minW, minH);
+    win->setContent (std::move (content));
+
+    // Same per-window key routing the page windows get: a contained window is
+    // its own desktop component, so without this every global binding is dead
+    // inside it.  Order is load-bearing -- mapping set FIRST, the editor's own
+    // listener LAST, because listeners dispatch in REVERSE registration order
+    // and the typing-note gate has to outrank the letter commands.
+    if (auto* set = mCmdMgr.getKeyMappings())
+        win->addKeyListener (set);
+    win->addKeyListener (this);
+    win->setWantsKeyboardFocus (true);
+
+    win->onCloseRequested = [this, key] { closeAuxWindow (key); };
+
+    auto* raw = win.get();
+    mAuxWindows.push_back ({ key, std::move (win) });
+    raw->attachTo (*mWorkspace);
+    return raw;
+}
+
+void StandaloneEditor::closeAuxWindow (const juce::String& key)
+{
+    for (size_t i = 0; i < mAuxWindows.size(); ++i)
+    {
+        if (mAuxWindows[i].key != key) continue;
+        // Bounds are saved by the window's own close path before this runs;
+        // reopening within the session lands in the same spot.
+        mAuxWindows.erase (mAuxWindows.begin() + (long) i);
+        return;
+    }
+}
+
+void StandaloneEditor::closeAllAuxWindows()
+{
+    mAuxWindows.clear();
+}
+
+void StandaloneEditor::openEffectSlotWindow (int channelId, int slotIndex)
+{
+    auto* rack = EffectsPage::rackForChannelId (mProcessor.mVibeGraph, channelId);
+    if (rack == nullptr) return;
+    if (rack->getSlotType (slotIndex) == EffectType::None) return;
+
+    const juce::String uuid = rack->getSlotUuid (slotIndex);
+    if (uuid.isEmpty()) return;
+
+    // Identity is the EFFECT (uuid): a reorder moves it between slots and the
+    // window must follow it rather than the index it used to occupy.
+    const juce::String key = "fx:" + juce::String (channelId) + ":" + uuid;
+    // Position is remembered per SLOT, so replacing an effect reuses the window
+    // spot the user already chose for that row.
+    const juce::String posKey = "fxpos:" + juce::String (channelId) + ":" + juce::String (slotIndex);
+
+    if (auto* existing = findAuxWindow (key)) { existing->toFront (true); return; }
+
+    auto content = std::make_unique<EffectSlotWindow> (
+        mProcessor, channelId, uuid,
+        [this] (int chId) { return mEffectsPage != nullptr ? mEffectsPage->getChannelDisplayName (chId)
+                                                           : juce::String(); },
+        makeUndoContext());
+
+    auto* contentRaw = content.get();
+    contentRaw->onRequestClose = [this, key] { closeAuxWindow (key); };
+
+    // Provisional floor.  Panels cap their knobs at a fixed size and shrink to
+    // fit below that, so this is "before the knobs start colliding" rather than
+    // a measured number -- Jeff's B.31.0 pass collects the real ones on screen.
+    auto* win = openAuxWindow (key, posKey, contentRaw->windowTitle(),
+                               std::move (content), 620, 170);
+    if (win == nullptr) return;
+
+    contentRaw->onTitleChanged = [win] (const juce::String& t) { win->setTitle (t); };
+    contentRaw->configureTitleStrip (*win->getPageMenu());
+}
+
+void StandaloneEditor::openEffectEqWindow (int channelId, bool pre)
+{
+    const juce::String key = "eq:" + juce::String (channelId) + (pre ? ":pre" : ":post");
+    if (auto* existing = findAuxWindow (key)) { existing->toFront (true); return; }
+
+    auto content = std::make_unique<EffectEqWindow> (
+        mProcessor, channelId, pre,
+        [this] (int chId) { return mEffectsPage != nullptr ? mEffectsPage->getChannelDisplayName (chId)
+                                                           : juce::String(); });
+
+    auto* contentRaw = content.get();
+    contentRaw->onRequestClose = [this, key] { closeAuxWindow (key); };
+    contentRaw->onOpenOtherEq  = [this, channelId] (bool wantPre)
+    {
+        openEffectEqWindow (channelId, wantPre);
+    };
+
+    auto* win = openAuxWindow (key, key, contentRaw->windowTitle(),
+                               std::move (content), 560, 320);
+    if (win == nullptr) return;
+
+    contentRaw->onTitleChanged = [win] (const juce::String& t) { win->setTitle (t); };
+    contentRaw->configureTitleStrip (*win->getPageMenu());
+}
+
+void StandaloneEditor::closeDeadEffectWindows (int channelId)
+{
+    auto* rack = EffectsPage::rackForChannelId (mProcessor.mVibeGraph, channelId);
+    const juce::String prefix = "fx:" + juce::String (channelId) + ":";
+
+    // Collect first, close after: closeAuxWindow mutates the vector.
+    juce::StringArray doomed;
+    for (const auto& a : mAuxWindows)
+    {
+        if (! a.key.startsWith (prefix)) continue;
+        const juce::String uuid = a.key.fromFirstOccurrenceOf (prefix, false, false);
+
+        bool stillThere = false;
+        if (rack != nullptr)
+            for (int i = 0; i < EffectRack::kNumSlots && ! stillThere; ++i)
+                stillThere = (rack->getSlotUuid (i) == uuid);
+
+        if (! stillThere) doomed.add (a.key);
+    }
+
+    for (const auto& k : doomed) closeAuxWindow (k);
 }
 
 juce::String StandaloneEditor::persistKeyFor (const PageEntry& entry) const

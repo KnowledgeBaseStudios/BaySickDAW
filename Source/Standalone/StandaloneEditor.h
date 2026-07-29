@@ -199,6 +199,43 @@ private:
     bool rebuildPageForTab (PageEntry& entry);
     static bool canRebuildType (RibbonTabBar::TabType t);
 
+    // ── Satellite windows (QA-ModelShell TS5) ────────────────────────────────
+    // Contained windows that are NOT ribbon tabs: the per-effect panels and the
+    // two EQs the rack window opens.  Kept in their own registry because every
+    // existing window path is keyed to a PageEntry, and these have no tab, no
+    // page, and a lifetime driven by the rack's contents instead of the user's
+    // navigation.  Keyed by an identity string ("fx:<chId>:<uuid>",
+    // "eq:<chId>:pre") so a second request for the same thing raises the window
+    // that already exists rather than building a duplicate.
+    struct AuxWindow
+    {
+        juce::String                     key;
+        std::unique_ptr<WorkspaceWindow> window;
+    };
+    // NOTE: the vector itself is declared next to mPages, AFTER mWorkspace --
+    // members destruct in reverse declaration order, so anything holding
+    // windows must come after the Workspace they are parented to or teardown
+    // writes into freed memory (the 2026-07-28 crash).
+
+    WorkspaceWindow* findAuxWindow (const juce::String& key) const;
+    // Opens (or raises) a satellite window.  `persistKey` is separate from
+    // `key`: identity follows the EFFECT (its uuid), while remembered position
+    // follows the SLOT, so swapping the effect in slot 3 reuses slot 3's spot
+    // instead of cascading a fresh window.
+    WorkspaceWindow* openAuxWindow (const juce::String& key,
+                                    const juce::String& persistKey,
+                                    const juce::String& title,
+                                    std::unique_ptr<juce::Component> content,
+                                    int minW, int minH);
+    void closeAuxWindow (const juce::String& key);
+    void closeAllAuxWindows();
+
+    void openEffectSlotWindow (int channelId, int slotIndex);
+    void openEffectEqWindow   (int channelId, bool pre);
+    // A rack changed under us: ask every satellite window on that channel to
+    // re-check its target, and close the ones whose effect is gone.
+    void closeDeadEffectWindows (int channelId);
+
     // ── Core helpers ──────────────────────────────────────────────────────────
     void buildDefaultTabs();     // called in ctor: Builder + initial Layers/Bass/Drums
     // QA-ProjectSave docket 18 (2026-07-26): addDefaultDynamicTabs /
@@ -496,6 +533,10 @@ private:
     bool mStartupComplete { false };
 
     juce::OwnedArray<PageEntry> mPages;
+
+    // QA-ModelShell TS5: the per-effect + EQ windows.  Declared AFTER
+    // mWorkspace deliberately -- see the note on the AuxWindow struct.
+    std::vector<AuxWindow> mAuxWindows;
 
 
     // Pointers to single-instance legacy pages (no duplication)

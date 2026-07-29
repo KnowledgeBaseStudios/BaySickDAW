@@ -393,6 +393,37 @@ public:
     void resized() override {}
 };
 
+// ── Effect bypass LED (QA-ModelShell TS5) ────────────────────────────────────
+// The green/red dot that has always sat at the left of an FX slot header.  TS5
+// shows the SAME LED in three places -- the rack window's slot row, the
+// per-effect panel window's title strip, and the classic inline slot header the
+// vocal chain still uses -- so the drawing lives in one function and every site
+// calls it.  Green = effect active, red = bypassed.
+namespace EffectBypassLed
+{
+    void paint (juce::Graphics& g, juce::Rectangle<int> area, bool bypassed);
+}
+
+// Clickable widget form of the LED above, for the sites that need it as a real
+// component rather than a painted region of a bigger strip.
+class BypassLedButton : public juce::Component,
+                        public juce::SettableTooltipClient
+{
+public:
+    std::function<void()> onClick;
+
+    void setBypassed (bool b) { if (b != mBypassed) { mBypassed = b; repaint(); } }
+    bool isBypassed() const noexcept { return mBypassed; }
+
+    void paint (juce::Graphics& g) override
+    { EffectBypassLed::paint (g, getLocalBounds(), mBypassed); }
+
+    void mouseDown (const juce::MouseEvent&) override { if (onClick) onClick(); }
+
+private:
+    bool mBypassed { false };
+};
+
 // ── MixerLedButton (5F-4a) ───────────────────────────────────────────────────
 // LED-style toggle button with a glowing colored dot and optional small label.
 // Subclasses juce::Button directly so VibeLAF's filmstrip toggle path is
@@ -572,8 +603,18 @@ public:
         return instance;
     }
 
+    // CL-299 (1): slider property that opts a knob into the additive-feedback
+    // warning ring.  Its VALUE is the normalized position where the warning
+    // starts, so the LAF never needs to know a knob's units.
+    //   slider.getProperties().set (TimeLAF::kWarnRingFrom, 1.0 / 1.2);
+    static constexpr const char* kWarnRingFrom = "warnRingFrom";
+
     void drawRotarySlider(juce::Graphics& g, int x, int y, int w, int h,
         float sliderPos, float startAngle, float endAngle, juce::Slider& s) override;
+
+    static void drawWarnRing (juce::Graphics& g, juce::Rectangle<float> area,
+                              float sliderPos, float warnFrom,
+                              float startAngle, float endAngle);
 
     void drawLinearSlider(juce::Graphics& g, int x, int y, int w, int h,
         float sliderPos, float minSliderPos, float maxSliderPos,

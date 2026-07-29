@@ -539,6 +539,8 @@ target_sources(BaySickDAWStandalone PRIVATE
     Source/Standalone/EffectsPage.cpp
     Source/Standalone/EffectEditorPanels.cpp
     Source/Standalone/EffectPresetIO.cpp
+    Source/Standalone/EffectWindows.cpp
+    Source/Standalone/FxRackPresetIO.cpp
     # Pages
     Source/Standalone/LayersPage.cpp
     Source/Standalone/BassPage.cpp

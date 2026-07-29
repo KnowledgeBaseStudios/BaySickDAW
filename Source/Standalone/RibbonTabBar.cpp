@@ -674,8 +674,11 @@ void RibbonTabBar::showSubPageDropdown(TabType type, juce::Rectangle<int> tabBou
 
     if (type == TabType::Effects)
     {
+        // QA-ModelShell TS5: the single "EQ" entry split in two because the
+        // pre- and post-rack EQs are now separate windows that can both be open.
         m.addItem(1, "Rack");
-        m.addItem(2, "EQ");
+        m.addItem(2, "Pre EQ");
+        m.addItem(3, "Post EQ");
     }
     else if (type == TabType::Builder)
     {

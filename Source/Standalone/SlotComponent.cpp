@@ -7,6 +7,60 @@
 #include "../DSP/OverdriveDSP.h"   // I-4: Mode dropdown for Overdrive (Rack vs Pedal)
 #include "EffectPresetIO.h"
 
+// Picker id for the not-yet-live VST3 row.  Deliberately outside the EffectType
+// range so it can never be cast to one, even if the disabled flag were lost.
+static constexpr int kVst3PickerItemId = 9001;
+
+// ── HeaderSubMenuItem — a GROUP heading that is itself a dropdown ─────────────
+// Jeff 2026-07-29: "Pedals" (and, at TS6, "VST Plugins") must read as a group
+// heading -- the bold, taller section font -- with the submenu hanging off that
+// same line, not as an ordinary entry tucked under another group.
+//
+// JUCE cannot do this with a real section header: ItemComponent swaps a header
+// item's component for its own HeaderItemComponent and calls setEnabled(false)
+// (juce_PopupMenu.cpp:128), and canBeTriggered/hasActiveSubMenu both refuse a
+// disabled item -- so a header can never open a submenu.  A custom item
+// component CAN, and by calling the same two LookAndFeel entry points the real
+// header uses, it renders identically to the headers above it whatever LAF is
+// in force.
+struct HeaderSubMenuItem final : public juce::PopupMenu::CustomComponent
+{
+    explicit HeaderSubMenuItem (juce::String text)
+        // false = not "triggered automatically": clicking the row must open the
+        // submenu, never dismiss the menu as a chosen item would.
+        : juce::PopupMenu::CustomComponent (false), mText (std::move (text))
+    {
+        setName (mText);
+    }
+
+    void paint (juce::Graphics& g) override
+    {
+        auto b = getLocalBounds();
+        getLookAndFeel().drawPopupMenuSectionHeader (g, b, mText);
+
+        // The submenu arrow, drawn here because a custom component replaces the
+        // LAF's own item rendering -- without it the row claims to be a heading
+        // and gives no sign that it opens.
+        auto arrow = b.removeFromRight (18).reduced (5, 0).toFloat();
+        const float cx = arrow.getX(), cy = arrow.getCentreY(), h = 4.0f;
+        juce::Path p;
+        p.startNewSubPath (cx,       cy - h);
+        p.lineTo          (cx + 6.f, cy);
+        p.lineTo          (cx,       cy + h);
+        g.setColour (findColour (juce::PopupMenu::headerTextColourId));
+        g.strokePath (p, juce::PathStrokeType (1.6f));
+    }
+
+    void getIdealSize (int& idealWidth, int& idealHeight) override
+    {
+        getLookAndFeel().getIdealPopupMenuItemSize (mText, false, -1, idealWidth, idealHeight);
+        idealHeight += idealHeight / 2;   // the LAF's own header-height rule
+        idealWidth  += 24;                // room for the arrow
+    }
+
+    juce::String mText;
+};
+
 SlotComponent::SlotComponent(int slotIndex) : mSlotIndex(slotIndex)
 {
     setInterceptsMouseClicks(true, true);
@@ -223,8 +277,14 @@ void SlotComponent::setEditor(std::unique_ptr<juce::Component> editor)
         if (show) refreshBasicBtnLabel();
     }
 
+    // Runs LAST: the blocks above decide chrome for a loaded effect, and in a
+    // panel window there is no header for that chrome to live in.
+    applyPresentationToChrome();
+
     resized();
     repaint();
+
+    if (onEditorMounted) onEditorMounted();
 }
 
 // C.4 Phase 1 (2026-04-30): channel context wiring -- EffectsPage::rebuildSlotEditor
@@ -346,6 +406,18 @@ void SlotComponent::paint(juce::Graphics& g)
 {
     auto b = getLocalBounds().toFloat().reduced(1.0f);
 
+    if (mPresentation == Presentation::PanelOnly)
+    {
+        // Just the recessed panel bed the editor sits on.  No header strip and
+        // no empty-state prompt: a panel window only exists for a loaded slot,
+        // and it closes itself when that slot is cleared.
+        g.setColour (VC::Panel);
+        g.fillRoundedRectangle (b, 3.0f);
+        g.setColour (VC::Accent.withAlpha (0.4f));
+        g.drawRoundedRectangle (b, 3.0f, 1.0f);
+        return;
+    }
+
     if (!mLoaded)
     {
         // Empty state: dark recessed panel with dashed border
@@ -389,11 +461,7 @@ void SlotComponent::paint(juce::Graphics& g)
         g.drawRoundedRectangle(editorR, 3.0f, 1.0f);
 
 
-        // Bypass dot: green when effect active, red when bypassed
-        g.setFont(juce::Font(16.0f));
-        g.setColour(mBypassed ? juce::Colour(0xffcc2222) : juce::Colour(0xff22cc44));
-        g.drawText(juce::String::fromUTF8("\xe2\x97\x8f"),  // UTF-8 for ●
-                   mBypassRect, juce::Justification::centred);
+        EffectBypassLed::paint (g, mBypassRect, mBypassed);
 
         // Effect name (between bypass and the SC dropdown / up-arrow on the right).
         // C.4 Phase 1: when SC dropdown is visible, name area shrinks to leave
@@ -433,9 +501,93 @@ void SlotComponent::paint(juce::Graphics& g)
     }
 }
 
+void SlotComponent::setSlotIndex (int idx)
+{
+    if (idx == mSlotIndex || idx < 0 || idx >= EffectRack::kNumSlots) return;
+    mSlotIndex = idx;
+    refresh();
+}
+
+void SlotComponent::setPresentation (Presentation p)
+{
+    if (mPresentation == p) return;
+    mPresentation = p;
+    applyPresentationToChrome();
+    resized();
+    repaint();
+}
+
+// PanelOnly hides every header button unconditionally.  setEditor() decides
+// which buttons a LOADED effect deserves, so this runs after it -- otherwise a
+// slot rebuild would put the chrome back in a window that has no header to
+// hold it.
+void SlotComponent::applyPresentationToChrome()
+{
+    if (mPresentation != Presentation::PanelOnly) return;
+    if (mScBtn)     mScBtn    ->setVisible (false);
+    if (mModeBtn)   mModeBtn  ->setVisible (false);
+    if (mPresetBtn) mPresetBtn->setVisible (false);
+    if (mBasicBtn)  mBasicBtn ->setVisible (false);
+}
+
+bool SlotComponent::hasModeMenu() const
+{
+    if (! mRack || ! mRack->getSlotEffect (mSlotIndex)) return false;
+    const auto t = mRack->getSlot (mSlotIndex).type;
+    return (t == EffectType::Compressor || t == EffectType::Saturation
+         || t == EffectType::Delay      || t == EffectType::Reverb
+         || t == EffectType::Overdrive);
+}
+
+bool SlotComponent::hasScMenu() const
+{
+    if (! mRack) return false;
+    auto* eff = mRack->getSlotEffect (mSlotIndex);
+    return eff != nullptr && eff->usesSidechain();
+}
+
+bool SlotComponent::hasBasicMode() const
+{
+    if (auto* base = dynamic_cast<const EditorPanelBase*> (mEditor.get()))
+        return base->hasAdvancedControls();
+    return false;
+}
+
+bool SlotComponent::isBasicMode() const
+{
+    return mRack != nullptr && mRack->getSlotBasicMode (mSlotIndex);
+}
+
+juce::String SlotComponent::scLabel() const
+{
+    if (! mRack) return "SC: Off";
+    const int pick = mRack->getSlotSidechainPick (mSlotIndex);
+    if (pick < 0 || pick >= 4 || mApvts == nullptr || mChannelMixerPrefix.isEmpty())
+        return "SC: Off";
+
+    const juce::String pid = mChannelMixerPrefix + "_sc_recv" + juce::String (pick) + "_from";
+    if (auto* p = mApvts->getRawParameterValue (pid))
+    {
+        const int srcId = (int) p->load();
+        if (srcId >= 0)
+        {
+            juce::String n = mResolveSourceName ? mResolveSourceName (srcId) : juce::String();
+            if (n.isEmpty()) n = juce::String ("Ch ") + juce::String (srcId);
+            return "SC: " + n;
+        }
+    }
+    return "SC: Off";
+}
+
 // ── Layout ────────────────────────────────────────────────────────────────────
 void SlotComponent::resized()
 {
+    if (mPresentation == Presentation::PanelOnly)
+    {
+        if (mEditor) mEditor->setBounds (getLocalBounds().reduced (2));
+        return;
+    }
+
     if (!mLoaded)
     {
         if (mEditor)
@@ -498,6 +650,11 @@ void SlotComponent::resized()
 // ── Mouse ─────────────────────────────────────────────────────────────────────
 void SlotComponent::mouseDown(const juce::MouseEvent& e)
 {
+    // PanelOnly has no header, so there are no hit regions to dispatch on --
+    // and the stale mBypassRect etc. from a previous Inline layout would
+    // otherwise fire actions on clicks in the panel's own dead space.
+    if (mPresentation == Presentation::PanelOnly) return;
+
     if (!mLoaded)
     {
         // H-6c (2026-05-01): locked + empty is a no-op (vocal chain slots
@@ -534,31 +691,37 @@ void SlotComponent::mouseDown(const juce::MouseEvent& e)
 // ── Popup menu (Change D: appears at cursor, alphabetical, no EQ) ─────────────
 void SlotComponent::showAddMenu()
 {
-    // 2026-05-02: grouped by effect family.  Section headers are
-    // non-clickable JUCE separators so the list stays flat (no submenu
-    // hover step) but reads as 4 categories.
+    const int slot = mSlotIndex;
+    juce::Component::SafePointer<SlotComponent> safeThis (this);
+    showEffectPickerMenu (mLastMousePosScreen,
+        [safeThis, slot] (EffectType t)
+        {
+            if (auto* s = safeThis.getComponent())
+                if (s->onEffectChosen) s->onEffectChosen (slot, t);
+        });
+}
+
+void SlotComponent::showEffectPickerMenu (juce::Point<int> screenPos,
+                                          std::function<void(EffectType)> onPick)
+{
+    // Grouped by effect family, alpha-sorted within each group.
+    //
+    // QA-ModelShell TS5 (2026-07-29, Jeff): the RACK effects are the top level
+    // and the pedal-native types moved into a "Pedals" submenu.  Phase I had
+    // alpha-merged the pedals into these groups (I-5 through I-11), which left
+    // this menu 13-of-24 pedals and reading as a copy of the pedals board's own
+    // picker.  Nothing is removed -- every pedal is still loadable into a rack
+    // slot, one hop away -- and no saved project is affected, since slots load
+    // by EffectType and never consult this menu.
     juce::PopupMenu m;
     m.addSectionHeader ("Dynamic");
-    // I-8 (2026-05-03): Dynamics pedals (Bass Compressor + Noise Gate)
-    // alpha-sorted alongside the existing rack dynamics.
-    m.addItem ((int)EffectType::BassCompressorStyle, "Bass Compressor");
     m.addItem ((int)EffectType::Compressor,          "Compressor");
     m.addItem ((int)EffectType::DeEsser,             "De-esser");
+    m.addItem ((int)EffectType::Gate,                "Gate");
     m.addItem ((int)EffectType::Limiter,             "Limiter");
-    m.addItem ((int)EffectType::NoiseGateStyle,      "Noise Gate");
     m.addItem ((int)EffectType::TransientShaper,     "Transient Shaper");
 
     m.addSectionHeader ("Harmonics");
-    // I-5 + I-6 + I-7 (2026-05-02): Harmonics drive + bass + octave pedals.
-    // Sorted alpha within the group per H-cross-cutting effect-picker
-    // convention.
-    m.addItem ((int)EffectType::BassDriverStyle,    "Bass Driver");
-    m.addItem ((int)EffectType::BassOverdriveStyle, "Bass Overdrive");
-    m.addItem ((int)EffectType::BluesDriveStyle,    "Blues Drive");
-    m.addItem ((int)EffectType::DistortionStyle,    "Distortion");
-    m.addItem ((int)EffectType::FuzzStyle,          "Fuzz");
-    m.addItem ((int)EffectType::HighGainStyle,      "High-Gain");
-    m.addItem ((int)EffectType::OctaveStyle,        "Octave");
     m.addItem ((int)EffectType::Overdrive,          "Overdrive");
     m.addItem ((int)EffectType::Saturation,         "Saturation");
     // H-10 cutover (2026-05-02): Tape was folded into Saturation as a 3rd
@@ -568,39 +731,74 @@ void SlotComponent::showAddMenu()
     // projects load correctly, but it's no longer in the picker.
 
     m.addSectionHeader ("Modulation");
-    // I-9 (2026-05-03): added SY Style Polyphonic Synth (Modulation LAF group
-    // per locked spec).
-    // I-10 (2026-05-03): added PW Style Wah (filter pedal -- Modulation group).
-    // I-11 (2026-05-03): added AC Style Acoustic Simulator (Modulation group
-    // per Jeff's call -- corrective EQ + transient + Schroeder reverb, no IR
-    // unless User mode).
-    m.addItem ((int)EffectType::AcousticSimulatorStyle, "Acoustic Simulator");
     m.addItem ((int)EffectType::Chorus,          "Chorus");
     m.addItem ((int)EffectType::Flanger,         "Flanger");
     m.addItem ((int)EffectType::Phaser,          "Phaser");
-    m.addItem ((int)EffectType::SynthStyle,      "Polyphonic Synth");
-    m.addItem ((int)EffectType::WahStyle,        "Wah");
 
     m.addSectionHeader ("Time");
-    // I-11 (2026-05-03): added AD Style Acoustic Preamp (Time LAF group per
-    // locked spec table).
-    // I-15 (2026-05-03): GE / GEB / EQFH / TU are intentionally NOT in the FX
-    // rack picker -- per locked spec they are BaySickPedals-only effects.
-    // DSP + panels live in the codebase, factory wires them up, and the
-    // BaySickPedalsEditor (Inst page sub-tab) is the only place users can
-    // reach them.
-    m.addItem ((int)EffectType::AcousticPreampStyle, "Acoustic Preamp");
+    m.addItem ((int)EffectType::DeReverb,        "De-reverb");
     m.addItem ((int)EffectType::Delay,           "Delay");
     m.addItem ((int)EffectType::Reverb,          "Reverb");
 
-    auto opts = juce::PopupMenu::Options()
-        .withTargetScreenArea({ mLastMousePosScreen.x, mLastMousePosScreen.y, 1, 1 });
+    // Gate + De-reverb (QA-Fe2 types 119/120) were built as locked vocal-chain
+    // stages and appeared in NO picker, so a rack slot could never hold either
+    // one despite both having full DSP, a panel and TS3 automation tables.
+    // Added to the rack picker 2026-07-29 (Jeff).  The vocal chain still pins
+    // its own copies -- those slots are locked and never open this menu.
 
-    m.showMenuAsync(opts,
-        [this](int result)
+    // ── Pedals ───────────────────────────────────────────────────────────────
+    // The BaySickPedals-native types.  I-15's exclusions still hold: Graphic EQ,
+    // Bass Graphic EQ, Pro Parametric EQ and Tuner are board-only (fixed slots
+    // there), and the User NAM Pedal loader is board-only too.
+    {
+        juce::PopupMenu pedals;
+        pedals.addSectionHeader ("Dynamics");
+        pedals.addItem ((int)EffectType::BassCompressorStyle, "Bass Compressor");
+        pedals.addItem ((int)EffectType::NoiseGateStyle,      "Noise Gate");
+
+        pedals.addSectionHeader ("Harmonics");
+        pedals.addItem ((int)EffectType::BassDriverStyle,    "Bass Driver");
+        pedals.addItem ((int)EffectType::BassOverdriveStyle, "Bass Overdrive");
+        pedals.addItem ((int)EffectType::BluesDriveStyle,    "Blues Drive");
+        pedals.addItem ((int)EffectType::DistortionStyle,    "Distortion");
+        pedals.addItem ((int)EffectType::FuzzStyle,          "Fuzz");
+        pedals.addItem ((int)EffectType::HighGainStyle,      "High-Gain");
+        pedals.addItem ((int)EffectType::OctaveStyle,        "Octave");
+
+        pedals.addSectionHeader ("Modulation");
+        pedals.addItem ((int)EffectType::AcousticSimulatorStyle, "Acoustic Simulator");
+        pedals.addItem ((int)EffectType::SynthStyle,             "Polyphonic Synth");
+        pedals.addItem ((int)EffectType::WahStyle,               "Wah");
+
+        pedals.addSectionHeader ("Time");
+        pedals.addItem ((int)EffectType::AcousticPreampStyle, "Acoustic Preamp");
+
+        // A GROUP whose heading is the dropdown, not an entry inside the group
+        // above it (Jeff 2026-07-29).  TS6's "VST Plugins" group gets the same
+        // treatment -- see the BLU-300 note in the batch plan.
+        juce::PopupMenu::Item pedalsGroup;
+        pedalsGroup.text    = "Pedals";
+        pedalsGroup.subMenu = std::make_unique<juce::PopupMenu> (pedals);
+        pedalsGroup.setCustomComponent (new HeaderSubMenuItem ("Pedals"));
+        m.addItem (std::move (pedalsGroup));
+    }
+
+    // QA-ModelShell TS5: the plugin slot type gets its real place in the picker
+    // now, disabled, so the list's final shape is settled before TS6 fills it.
+    // BLU-300 appends EffectType::VST3Plugin and enables this row; nothing else
+    // in the picker moves at that point.  A visible-but-disabled row also means
+    // "not yet" reads as a state rather than as a missing feature.
+    m.addSectionHeader ("Plugins");
+    m.addItem (kVst3PickerItemId, "VST3 Plugin...", false, false);
+
+    auto opts = juce::PopupMenu::Options()
+        .withTargetScreenArea ({ screenPos.x, screenPos.y, 1, 1 });
+
+    m.showMenuAsync (opts,
+        [pick = std::move (onPick)] (int result)
         {
-            if (result < 1) return;
-            if (onEffectChosen) onEffectChosen(mSlotIndex, (EffectType)result);
+            if (result < 1 || result == kVst3PickerItemId) return;
+            if (pick) pick ((EffectType) result);
         });
 }
 
@@ -611,9 +809,17 @@ void SlotComponent::showAddMenu()
 // ─────────────────────────────────────────────────────────────────────────────
 void SlotComponent::refreshModeBtnLabel()
 {
-    if (! mModeBtn || ! mRack) return;
+    if (! mModeBtn) return;
+    mModeBtn->setButtonText (modeLabel());
+}
+
+// QA-ModelShell TS5: the label computation moved out of the button refresh so
+// the panel window's title-bar menu can show the same current-mode text.
+juce::String SlotComponent::modeLabel() const
+{
+    if (! mRack) return "Mode";
     const auto& slot = mRack->getSlot(mSlotIndex);
-    if (! mRack->getSlotEffect(mSlotIndex)) { mModeBtn->setButtonText("Mode"); return; }
+    if (! mRack->getSlotEffect(mSlotIndex)) return "Mode";
 
     juce::String label = "Mode";
     if (slot.type == EffectType::Compressor)
@@ -682,7 +888,7 @@ void SlotComponent::refreshModeBtnLabel()
             }
         }
     }
-    mModeBtn->setButtonText(label);
+    return label;
 }
 
 void SlotComponent::showModeMenu()

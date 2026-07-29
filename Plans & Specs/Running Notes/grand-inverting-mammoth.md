@@ -520,9 +520,7 @@
   normalize / CL-056 offline block size / CL-040 stems / CL-227 backend.
 - **THE TS2 GATE IS GREEN:** the riders-chunk build is the current tree (only doc edits
   since) — RELEASE_EXIT_CODE=0 / DEBUG_EXIT_CODE=0, zero error lines.  Commit surfaced
-  to Jeff.  All functional verification stays deferred to TS8's batch smoke per the
-  batch plan (nothing here has been ear-tested; the compile gates + the census-derived
-  design are the current evidence).
+  to Jeff.
 
 ## 2026-07-27 — TS2 COMMITTED `e9ecf03e` (Jeff-approved); session ends, TS3 next
 
@@ -858,10 +856,6 @@
   BLU-344 mod lanes, and the sfizz trio all got branches in `applyOfflineLaneValue` in the same
   pass they got live registration, so no lane class can play live and go missing from an export
   the way vox/inst did before TS2.
-- **NOTHING here is ear-verified.**  TS3 shipped on compile gates plus a source-derived design,
-  same as TS1/TS2; all functional verification is the single TS8 batch smoke per the bulk-run
-  ruling.  Three sets of unverified structural change are now stacked — that remains the
-  batch's biggest standing risk and TS8 is where it gets paid down.
 - **Next: TS4 (the shell).**  Its FIRST act is the open sub-spec call — exact minimum window
   sizes for Builder / Piano Roll / Mixer, picked with Jeff ON SCREEN (he wants "larger" floors).
   Nothing else in TS4 starts before that answer.
@@ -1740,3 +1734,207 @@ matches the stage-by-name rule.
 
 Nothing here touches BaySickDAW source or DSP.  The three repo entries above need a disposition line
 at the TS4 commit gate like any other working-tree change.
+
+## 2026-07-29 — TS5 — scout, then a SPEC PIVOT: the Effects surface splits into many windows
+
+- **Scout first (the surface as it stood):** `EffectsPage` = channel combo + FX Bypass + Meters in
+  the title strip, three sub-tabs (Pre EQ8 / Rack / Post EQ8), the Rack tab stacking six
+  `SlotComponent`s each carrying a header strip (bypass dot, name, Basic/Advanced, Preset, Mode, SC,
+  up/down/close) plus an inline panel.  `resolveChannelDsp` / `rackForChannelId` /
+  `channelPrefixForId` were already static and view-free from TS1/TS3, so the plan's "do NOT fork a
+  second channel switch" was satisfiable by construction -- EXCEPT for the pre-rack EQ, whose
+  resolution was still an inline switch inside `onChannelChanged`.  That one is now
+  `EffectsPage::preEqForChannelId`, and the EQ windows use it.
+- **`SlotComponent` is shared with BaySickVocal's locked Vocal Chain** (6 slots, inline editors), so
+  it could not simply be repurposed into a row.  Everything TS5 adds to it is additive: a
+  `Presentation` enum (Inline stays the vocal chain's; PanelOnly is the new per-effect window), the
+  menus promoted from private to public so a window's title-bar menu can drive them, and a static
+  `showEffectPickerMenu` so the rack rows offer the identical grouped list without a second copy.
+- **BLU-499 was NOT answered as posed, and correctly so.**  Jeff declined the placement question
+  because the restructure below changes what the question means: with each panel in its own window,
+  the panel's preset menu lands on that window's title bar next to Mode / SC / Basic-Advanced
+  (his answer 3=a), and the RACK gets its own Save/Load FX Rack Preset menu, which is a new thing
+  BLU-499 never covered.
+- **CL-299 = option (d):** items 1, 2 and 4 ship (feedback-ring warning above 100%, FB-distortion
+  transfer-curve graph, reference model-selector display order).  Item 3 (step-denominated Time knob
+  + right-click musical-value list) is DROPPED -- the BPM toggle + 8-division chickenhead stay
+  exactly as they are.  Recorded as an explicit option removal so it is not re-proposed: the
+  reference delta stands accepted.
+
+### The locked TS5 design (Jeff's spec, 2026-07-29)
+
+The Effects surface stops being one page that shows everything and becomes a small INDEX window that
+opens the rest.  His words: "a user can choose what they are editing at a time instead of everything
+all at once, this will also allow for more functionality when we get to the layout batch."
+
+* **Rack window** (the Effects ribbon tab): strip picker at the top, then Pre EQ / Post EQ buttons,
+  then six slot rows.  Row = bypass LED, the effect NAME AS A BUTTON that opens that effect's own
+  window, then up/down, a picker chevron, and a remove X that prompts first.  Title bar carries
+  Save / Load FX Rack Preset (all six slots + both EQs).
+* **EQ windows:** one for Pre, one for Post, each fixed to its own EQ; the two-tab strip on the title
+  bar OPENS THE OTHER WINDOW rather than swapping contents, so both can sit on screen.
+* **Panel windows:** one per effect, opened from its row, closed and positioned independently.
+
+Five follow-on questions were posed as a docket and answered: (1=b) satellite windows STAY OPEN when
+the rack window's strip picker changes, each titled with its strip; (2=b) up/down arrows on the row,
+between the name and the two buttons; (3=a) Basic/Advanced + Mode + SC + Presets all in the panel
+window's title-bar MENU; (4=a) removal still packs the slots up; (5) placement memory = in-session
+only.
+
+**The LED, corrected by Jeff:** I described the panels as having no bypass control and offered to
+give them one.  Wrong framing -- the green/red dot on the slot header IS the LED he meant.  It now
+appears in both places (row and panel window) from ONE drawing routine, `EffectBypassLed::paint`,
+lifted verbatim out of `SlotComponent::paint`.
+
+**Why (5) is not can-kicking, recorded because he asked directly.**  `settings.xml` is the wrong
+store for these: they are addressed per STRIP and per SLOT, which makes their placement project
+content by the same rule that keeps player-window positions out of the global file -- writing them
+there would bleed one project's effect layout into the next.  And `saveBounds()` already parses and
+rewrites the whole settings file on every window close, which is the smell the layout batch exists
+to remove; adding eight more windows per strip to that path makes the cleanup worse.  The in-memory
+map IS lifetime 1 of the three-lifetime model he specced, so building it now is a down payment.
+`WorkspaceWindow::Persistence::Session` is that map.
+
+### Two defects found while building, both fixed rather than routed
+
+1. **`SlotComponent::remountEditor` dropped the automation stamps and the variant.**  It rebuilt the
+   panel and nothing else -- so a Mode switch (Compressor Modern -> FET) or a preset load that
+   changed Type produced a panel with NO paramId stamps, while the slot's registered applicators kept
+   the variant captured at the ORIGINAL registration.  Every lane then applied through the wrong
+   table: exactly the collision class TS3's `(type, variant)` key exists to prevent, reachable from a
+   shipped menu.  Fixed with a `SlotComponent::onEditorMounted` hook fired at the end of every
+   `setEditor`, and one shared `EffectsPage::stampAndRegisterSlotEditor` that both stamps and
+   re-registers -- so every mount path is now equivalent.
+2. **The panel window has to follow its effect by uuid, not by index.**  Removal packs the slots up
+   and reorder swaps them, both of which move an effect between indices.  `SlotComponent`'s slot
+   index was fixed for life, so a window would have started driving whatever effect moved into the
+   old index.  New `setSlotIndex` + a per-poll re-resolve by uuid; a rack pointer that changes
+   identity (project load) forces a full rebuild.
+
+## 2026-07-29 — TS5 — built: the rack window, the satellites, the preset, the Delay deltas
+
+- **What landed, by file.**  `EffectsPage` rebuilt as the rack window (picker + FX Bypass, Pre/Post
+  EQ buttons, six `RackSlotRow`s); new `EffectWindows.h/.cpp` (`EffectSlotWindow`, `EffectEqWindow`);
+  new `FxRackPresetIO.h/.cpp`; `SlotComponent` gained the `PanelOnly` presentation, public menus,
+  `showEffectPickerMenu`, `setSlotIndex` and `onEditorMounted`; `SharedUI` gained
+  `EffectBypassLed` + `BypassLedButton` + `TimeLAF::kWarnRingFrom`; `StandaloneEditor` gained the
+  satellite-window registry; `WorkspaceWindow` gained session-scoped persistence; `RibbonTabBar`'s
+  Effects dropdown split "EQ" into "Pre EQ" / "Post EQ".
+- **The three sub-tabs are gone**, and with them `switchTab` / `TabKind` / `tabKindForVisibleIndex` /
+  `visibleIndexForTabKind` / `currentChannelHasPagePreEQ` / `setEQMid` / `isEQMidActive` /
+  `getEQDisplay` / `getPreEQDisplay` / `onTabsNeedRefresh` / `getActiveTab`, plus the `setupEffectsTabs`
+  block in `showPageForTab` and the four title-strip extras it installed.  Every one of those existed
+  only to serve the sub-tab strip; the whole family had exactly one consumer.
+- **Row glyphs are VECTOR PATHS, not font characters.**  The chevron and the cross have no ASCII
+  spelling, and a font glyph for either renders as a box on a machine without it -- these are the
+  only affordance a row carries, so they are drawn.
+- **The rack window's floor is a real number, not the provisional 640x400.**  Its content is a known
+  height (picker + EQ row + six 24 px rows), so `hostPageInWindow` gives Effects 300x250 and every
+  other page type keeps the provisional floor until B.31.0.  Jeff asked for smaller than the
+  provisional minimum; this is that.
+- **Satellite floors are provisional and honest about it:** 620x170 for a panel window (panels cap
+  their knobs and shrink below that, so it is "before the knobs collide", not a measurement),
+  560x320 for an EQ.  B.31.0 needs rows for both -- it currently has ONE "Effects" row, written
+  before the surface became four window kinds.
+- **CL-299 shipped as three items.**  (1) The Feed knob's warning ring: opt-in via a slider property
+  whose value is the normalized start of the warning zone, drawn as an arc OVER the filmstrip --
+  TimeLAF's rotary is filmstrip-rendered and returns early, so there was no ring to recolour and a
+  tinted strip would read as a different control.  (2) The FB-distortion transfer curve, input
+  vertical / output horizontal per the reference, fed by a new `DelayDSP::shapeFeedbackForDisplay`.
+  (3) Model selector display order via `kModelOptionValues`; serialized values untouched.
+- **Why the curve has a display twin instead of sharing the audio code.**  The Sat branch hoists
+  four invariants out of the per-sample loop, one of them a `tanh`.  Sharing would either recompute
+  them per sample on the audio thread or force the loop to be restructured around a prepared-shaper
+  object -- live DSP surgery for a picture.  Both copies now carry a pointer to the other and the
+  rule to edit them together.
+- **Three defects found in my own review, before the gate.**  (a) `EffectSlotWindow::timerCallback`
+  destroyed its own window from inside its own timer callback when the target vanished -- the exact
+  shape of the TS4 close-button crash; deferred through `callAsync` with a SafePointer.  (b) The EQ
+  window never re-resolved its DSP, so a strip respawn would have left it drawing into an orphan;
+  it now re-binds when the resolved pointer changes.  (c) The panel menu ignored its anchor.
+- **Gate:** both configs green, zero errors, two exe link lines.
+
+## 2026-07-29 — TS5 — the FX rack picker was a near-copy of the pedals picker (Jeff caught it)
+
+- **His report:** the rack's effect list "look[s] like the pedal boards effects list and not the
+  main effects list," and he asked directly whether I had used the right list, or deleted the rack's.
+- **Verified before answering, both halves.**  (1) Nothing was deleted: the diff of that function
+  adds exactly two lines (the Plugins header + the disabled VST3 row) and removes no `addItem`.
+  (2) I did use the rack's own list -- `SlotComponent::showAddMenu`, which the rack slots and the
+  vocal chain call; the board has its own `BaySickPedalsEditor::buildSwappableMenu`.
+- **But he was right about the CONTENT, and this is the real finding.**  Put side by side, the rack
+  picker WAS the pedals picker plus three items: identical section names and order, 21 shared
+  entries, rack-only extras De-esser / Limiter / Transient Shaper, pedals-only extra "Load NAM
+  Pedal".  24 entries, of which 13 were pedal-native `*Style` types and only 11 were rack effects.
+  Phase I did that deliberately (I-5 through I-11 alpha-merged each pedal into these groups; I-15
+  recorded the four kept out), so it is not a TS5 regression -- but it has read wrong for months and
+  the rebuild is the first time anyone looked straight at it.
+- **My miss, precisely:** the scout confirmed WHICH FUNCTION the rack slots use and stopped there.
+  It never diffed that function's CONTENTS against the pedals menu, which would have shown the
+  near-duplication in one pass.  "Reuse the picker logic" made me treat the list as settled.
+- **Jeff's rulings (2026-07-29):** (1=b) keep the pedals but demote them into a **"Pedals" submenu**
+  so the rack list reads rack-first; (2) **add Gate and De-reverb** to the rack picker.
+- **Gate + De-reverb were unreachable.**  Both are QA-Fe2 types (119/120) built as locked
+  vocal-chain stages, and they appeared in NO picker -- while having a full DSP (`EffectRack`
+  factory cases), a panel (`createEffectEditor` cases) and TS3 automation tables (`kGate`,
+  `kDeReverb`).  Verified all three before adding them, so a rack slot can now hold either and
+  automate it.  The vocal chain is unaffected: its slots are locked and never open this menu.
+- **No project impact from the move.**  Slots load by `EffectType`; the picker is only the route to
+  ADD one.  A Fuzz already sitting in a rack slot keeps loading, sounding and automating.
+
+## 2026-07-29 — TS5 — "Pedals" becomes a group HEADING that is itself the dropdown
+
+- **Jeff:** the Pedals entry was landing as an ordinary item under the Time group; it should be
+  its own group -- the bigger bold heading font -- with the dropdown hanging off that same line.
+- **JUCE cannot do this with a real section header, verified in the vendored source.**
+  `ItemComponent`'s constructor swaps a header item's component for its own
+  `HeaderItemComponent` and calls `setEnabled (false)` (juce_PopupMenu.cpp:128), and both
+  `canBeTriggered` and `hasActiveSubMenu` refuse a disabled item -- so an `addSectionHeader` row
+  can never open a submenu, whatever else is set on it.
+- **The fix:** `HeaderSubMenuItem`, a `PopupMenu::CustomComponent` that paints through the SAME
+  LookAndFeel entry points a real header uses (`drawPopupMenuSectionHeader` +
+  `getIdealPopupMenuItemSize` with the LAF's own header-height rule, +50 %), so it renders
+  identically to the headings above it under any LAF, while its item carries a real `subMenu`.
+  Constructed with `CustomComponent (false)` -- not "triggered automatically" -- so clicking the
+  row opens the submenu instead of dismissing the menu as a chosen item would.  The submenu arrow
+  is drawn by hand, because a custom component replaces the LAF's own item rendering and without
+  it the row would claim to be a heading while giving no sign that it opens.
+- **TS6 reuses it verbatim** for the VST Plugins group (BLU-300), which Jeff specced the same way.
+
+## 2026-07-29 — TS6 spec captured from Jeff (recorded now, built next set)
+
+Full text landed in the batch plan's TS6 section so it travels with the plan rather than only the
+notes.  Shape: an Options > **Plugins** manager window (three sections -- scan folders seeded with
+the default VST3 install locations / the added-plugins list / blank scan results with checkboxes +
+an Add button); a **VST Plugins** group in the rack picker built like the Pedals group, listing
+added EFFECT plugins alphabetically; a **Plugins** ribbon tab whose "+" entry is a side dropdown
+of added INSTRUMENT plugins; and plugin players needing their own strip + bus, with VST strips
+routable under the Layers or Bass bus the same way those two already move between each other.
+
+- **His open question answered: yes, the kind is knowable without loading the plugin.**  A scan
+  produces a `juce::PluginDescription` per plugin carrying `isInstrument`, derived from the
+  category the VST3 declares.  That single flag serves all three of his uses -- the label on the
+  added list, the effects-only rack picker group, and the instruments-only Plugins tab.
+- **The one ambiguity I flagged was closed the same day.**  Jeff: section 1 "both lists the
+  folders chosen and has a button to pull up the 'open' window to select a folder to add" -- so
+  section 1 owns the folders (list + add button), section 2 is the added PLUGINS list, section 3
+  is the scan result.  Nothing open in the manager-window spec now.
+
+## 2026-07-29 — TS5 — a window only took focus from its title bar
+
+- **Jeff:** with windows overlapping, clicking the BODY of a background window did not raise it --
+  only its title bar did.
+- **Cause.**  `WorkspaceWindow::mouseDown` is where the raise lived, and a Component only sees
+  mouse-downs that actually reach it.  The title strip and the resize border reach it; everything
+  inside the hosted page consumes its own clicks, so the window never heard about them.
+- **Fix, and it is JUCE's own mechanism rather than a hand-rolled listener.**  On mouse-down JUCE
+  builds the clicked component's full ancestor chain and calls `toFront` on every link whose
+  `setBroughtToFrontOnMouseClick` flag is set (`Component::internalMouseDown` ->
+  `HierarchyChecker::forEach`).  Setting that one flag on `WorkspaceWindow` therefore covers a click
+  on a knob six levels down.  Verified in the vendored source rather than assumed.
+- **The ribbon sync moved with it.**  `onBroughtToFront` used to fire from `mouseDown`; it now fires
+  from a `broughtToFront()` override, which every raise route reaches (the flag, the title drag, and
+  programmatic `toFront` from tab selection).  Leaving it in `mouseDown` would have meant a
+  content-click raised the window without the tab bar following.  `RibbonTabBar::selectTab` was
+  checked first: it sets the id and repaints, fires no callback, so running it per click is cheap
+  and cannot recurse into `showPageForTab`.
