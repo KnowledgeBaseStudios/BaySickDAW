@@ -308,6 +308,13 @@ unaffected since slots load by `EffectType` and never consult this menu. **Gate*
 were added — both had DSP, panel and automation tables but appeared in no picker at all, so a rack
 slot could never hold either.
 
+**`HeaderSubMenuItem` gotcha (read before reusing it for the VST Plugins group):** a
+`PopupMenu::CustomComponent` replaces the LAF's `drawPopupMenuItem` for that row, so it owns
+*everything* that call would have drawn — background, **hover highlight**, text and submenu arrow.
+The highlight was missed on the first cut and had to be added back by hand
+(`isItemHighlighted()` → fill `bounds.reduced(1)` with `highlightedBackgroundColourId`, matching
+LookAndFeel_V4). Anything you don't draw is silently absent.
+
 ### Window raise-on-click (2026-07-29, Jeff)
 A contained window is raised by a click ANYWHERE in it, via
 `WorkspaceWindow`'s `setBroughtToFrontOnMouseClick(true)` — JUCE walks the clicked component's

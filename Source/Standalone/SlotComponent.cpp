@@ -36,6 +36,21 @@ struct HeaderSubMenuItem final : public juce::PopupMenu::CustomComponent
     void paint (juce::Graphics& g) override
     {
         auto b = getLocalBounds();
+        const bool hot = isItemHighlighted();
+
+        // The hover highlight is drawn by the LAF INSIDE drawPopupMenuItem, and
+        // a custom component replaces that call entirely -- so without this the
+        // row is the one entry in the menu that never lights up under the
+        // pointer (Jeff, 2026-07-29).  Same colour and the same 1 px inset
+        // LookAndFeel_V4 uses, so it lines up with the rows above and below.
+        if (hot)
+        {
+            g.setColour (findColour (juce::PopupMenu::highlightedBackgroundColourId));
+            g.fillRect (b.reduced (1));
+        }
+
+        // Header text stays the LAF's job -- duplicating its font/colour choice
+        // here would drift the moment a LAF overrides the header draw.
         getLookAndFeel().drawPopupMenuSectionHeader (g, b, mText);
 
         // The submenu arrow, drawn here because a custom component replaces the
@@ -47,7 +62,8 @@ struct HeaderSubMenuItem final : public juce::PopupMenu::CustomComponent
         p.startNewSubPath (cx,       cy - h);
         p.lineTo          (cx + 6.f, cy);
         p.lineTo          (cx,       cy + h);
-        g.setColour (findColour (juce::PopupMenu::headerTextColourId));
+        g.setColour (findColour (hot ? juce::PopupMenu::highlightedTextColourId
+                                     : juce::PopupMenu::headerTextColourId));
         g.strokePath (p, juce::PathStrokeType (1.6f));
     }
 

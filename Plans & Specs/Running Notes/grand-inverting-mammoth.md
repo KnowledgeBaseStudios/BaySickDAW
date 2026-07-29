@@ -1899,6 +1899,18 @@ map IS lifetime 1 of the three-lifetime model he specced, so building it now is 
   row opens the submenu instead of dismissing the menu as a chosen item would.  The submenu arrow
   is drawn by hand, because a custom component replaces the LAF's own item rendering and without
   it the row would claim to be a heading while giving no sign that it opens.
+- **Follow-up the same day: the row did not light up on hover** (Jeff, after running it).  Cause is
+  the same substitution: `LookAndFeel_V4::drawPopupMenuItem` draws the hover highlight ITSELF
+  (`area.reduced (1)` filled with `highlightedBackgroundColourId`), and a custom component replaces
+  that call entirely -- so the one row in the menu with custom rendering was the one row that never
+  highlighted.  `PopupMenu::CustomComponent::isItemHighlighted()` is the state; the fill now uses
+  the same colour and the same 1 px inset so it lines up with the rows above and below, and the
+  arrow switches to `highlightedTextColourId` with it.  The header TEXT is still drawn by the LAF
+  rather than by hand -- duplicating its font and colour choice here would drift the first time a
+  LAF overrides the header draw.
+- **Standing lesson for TS6's VST Plugins group:** a `PopupMenu::CustomComponent` owns EVERYTHING
+  the LAF would have drawn for that row -- background, highlight, text, arrow.  Anything not drawn
+  is simply absent, silently.
 - **TS6 reuses it verbatim** for the VST Plugins group (BLU-300), which Jeff specced the same way.
 
 ## 2026-07-29 — TS6 spec captured from Jeff (recorded now, built next set)
