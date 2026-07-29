@@ -550,6 +550,10 @@ private:
     // Tracks which Layers page indices (0–kMaxLayerPages-1) are currently in use.
     // Lets createLayersPage() assign the first free slot and onTabClosed() release it.
     std::array<bool, 8> mUsedLayerIndices {};
+    // QA-ModelShell TS6 (BLU-447): hosted VST3 instrument tabs.
+    std::array<bool, kMaxPluginPages> mUsedPluginIndices {};
+    std::unique_ptr<juce::Component> createPluginsPage();
+    std::unique_ptr<juce::Component> createPluginsPageAtIndex (int idx);
 
     // Tracks which Bass page indices (0–kMaxBassPages-1) are currently in use.
     std::array<bool, kMaxBassPages> mUsedBassIndices {};
@@ -580,6 +584,8 @@ private:
     // "Basses" (plural) for the BaySickBasses-source Inst tabs disambiguates
     // from "Bass" Bass-slot tabs per QA-D Sub-D.
     juce::String nextLayerTabName()   { return "Layer "  + juce::String (mNextLayerNameNum++); }
+    juce::String nextPluginTabName()  { return "Plugin " + juce::String (mNextPluginNameNum++); }
+    int mNextPluginNameNum { 1 };
     juce::String nextBassTabName()    { return "Bass "   + juce::String (mNextBassNameNum++); }
     juce::String nextDrumTabName()    { return "Drum "   + juce::String (mNextDrumNameNum++); }
     juce::String nextVoxTabName()     { return "Vox "    + juce::String (mNextVoxNameNum++); }
@@ -722,6 +728,8 @@ private:
     juce::Component::SafePointer<juce::Component> mKeyBindsWin;
     void showKeyBindsWindow();
     juce::Component::SafePointer<juce::Component> mRustyDrumsMapWin;  // J-7b
+    void showPluginsWindow();                                         // QA-ModelShell TS6
+    juce::Component::SafePointer<juce::Component> mPluginsWin;
     void showRustyDrumsMapWindow();
 
     // J-6 (2026-05-03): BaySickRustyDrums singleton tab spawn.  Triggered by
@@ -766,6 +774,8 @@ private:
     // drums.  The PianoRollConnection's dataAccessor closure points at
     // Pattern::clipRoll[idx] so pattern switches stay live.
     void registerClipPianoRoll (int idx, ClipsPage* cp);
+    // QA-ModelShell TS6 (BLU-447): hosted VST3 instrument tab.
+    void registerPluginPianoRoll (int idx, class PluginsPage* pp);
 
     // K-3 (2026-05-05): wires a sfizz-source Inst page (BaySickGuitars /
     // BaySickBasses) into the unified PianoRollPage.  dataAccessor points at

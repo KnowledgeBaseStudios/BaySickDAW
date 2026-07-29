@@ -117,6 +117,7 @@ public:
     // Called by StandaloneEditor when a page tab is opened or a sound assigned.
     // Strips persist once created; passing an empty name to addDrumChannel is a no-op.
     void addLayerChannel(int pageIndex, const juce::String& name);
+    void addPluginChannel(int pageIndex, const juce::String& name);   // TS6 (BLU-447)
     void addBassChannel (int pageIndex, const juce::String& name);
     void addDrumChannel (int slot,  const juce::String& name);
     void addAudioChannel(int row,   const juce::String& name);  // one strip per arrangement row
@@ -142,6 +143,7 @@ public:
     // overlapped after re-add and the add-side count(idx) guard blocked
     // reuse.  Same preserve-APVTS convention as the trio above.
     void removeLayerChannel(int pageIndex);
+    void removePluginChannel(int pageIndex);   // TS6 (BLU-447)
     void removeBassChannel (int pageIndex);
     void removeDrumChannel (int slot);
 
@@ -317,6 +319,9 @@ private:
     // mRustyStrips entry exists (mRustyDrumsBusActive flag).
     std::unique_ptr<MixerTrackStrip> mRustyDrumsBusStrip;
     bool                             mRustyDrumsBusActive { false };
+    // QA-ModelShell TS6 (BLU-447): hosted VST3 instrument bus + its strips.
+    std::unique_ptr<MixerTrackStrip> mPluginsBusStrip;
+    bool                             mPluginsBusActive { false };
 
     // Dynamic instrument strips - keyed by tabId (Layer/Bass) or slot (Drums)
     std::map<int, std::unique_ptr<MixerTrackStrip>> mLayerStrips;
@@ -359,7 +364,9 @@ private:
     // destroyBaySickRustyDrums.  No "Add Rusty" UI button - strip lifecycle
     // is engine-driven, not user-driven.
     std::map<int, std::unique_ptr<MixerTrackStrip>> mRustyStrips;
+    std::map<int, std::unique_ptr<MixerTrackStrip>> mPluginStrips;   // TS6
     std::vector<int>                                mRustyOrder;
+    std::vector<int>                                mPluginOrder;   // TS6
 
     // Direct Routing label - shown between Master and FX Bus when any strip
     // has _sendTo = Master. Small vertical-text panel; visibility driven by

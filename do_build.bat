@@ -23,3 +23,40 @@ echo RELEASE_EXIT_CODE=%ERRORLEVEL%                                   >> "C:\Use
 echo === Building Debug ===                                           >> "C:\Users\jeffm\Documents\BaySickDAW\build_log.txt"
 "C:\Program Files\CMake\bin\cmake.exe" --build "C:\Users\jeffm\Documents\BaySickDAW\build" --target BaySickDAWStandalone --config Debug   -j4 >> "C:\Users\jeffm\Documents\BaySickDAW\build_log.txt" 2>&1
 echo DEBUG_EXIT_CODE=%ERRORLEVEL%                                     >> "C:\Users\jeffm\Documents\BaySickDAW\build_log.txt"
+
+rem QA-ModelShell TS6 (BLU-302, 2026-07-29): the plugin-sandbox helper.  A
+rem SEPARATE target, so the two lines above would never have built it -- and a
+rem broken helper would have gone unnoticed until a bridged plugin failed to
+rem start at runtime.  Release only: the helper is a plain IPC + hosting shim
+rem with no jasserts of ours to catch, and the app locates it by filename
+rem regardless of which config launched it.
+rem
+rem GATE CRITERION, changed by this step: the log now carries THREE exit codes,
+rem and the "vcxproj -> ....exe" link-line count is 3 (two BaySickDAW.exe plus
+rem one BaySickPluginHost64.exe), not 2.
+echo === Building Plugin Host helper (x64) ===                        >> "C:\Users\jeffm\Documents\BaySickDAW\build_log.txt"
+"C:\Program Files\CMake\bin\cmake.exe" --build "C:\Users\jeffm\Documents\BaySickDAW\build" --target BaySickPluginHost --config Release -j4 >> "C:\Users\jeffm\Documents\BaySickDAW\build_log.txt" 2>&1
+echo HELPER64_EXIT_CODE=%ERRORLEVEL%                                  >> "C:\Users\jeffm\Documents\BaySickDAW\build_log.txt"
+
+rem QA-ModelShell TS6 (BLU-302 step 7b): the 32-bit helper.  A 64-bit process
+rem cannot load a 32-bit VST3 at all, so this binary IS our 32-bit support.
+rem
+rem It needs its OWN build tree because an MSVC generator is single-platform per
+rem tree -- hence the separate configure below against the standalone helper
+rem project at Source\Hosting\Helper, which depends on vendored JUCE and nothing
+rem else (configuring the ROOT project as Win32 would drag in x86 builds of
+rem sfizz / NAM / RubberBand / LAME / WORLD / lunasvg).
+rem Configure is idempotent; CMake no-ops when the cache is already good.
+echo === Configuring Plugin Host helper (x86) ===                     >> "C:\Users\jeffm\Documents\BaySickDAW\build_log.txt"
+"C:\Program Files\CMake\bin\cmake.exe" -S "C:\Users\jeffm\Documents\BaySickDAW\Source\Hosting\Helper" -B "C:\Users\jeffm\Documents\BaySickDAW\build32" -A Win32 >> "C:\Users\jeffm\Documents\BaySickDAW\build_log.txt" 2>&1
+echo HELPER32_CONFIG_EXIT_CODE=%ERRORLEVEL%                           >> "C:\Users\jeffm\Documents\BaySickDAW\build_log.txt"
+
+echo === Building Plugin Host helper (x86) ===                        >> "C:\Users\jeffm\Documents\BaySickDAW\build_log.txt"
+"C:\Program Files\CMake\bin\cmake.exe" --build "C:\Users\jeffm\Documents\BaySickDAW\build32" --target BaySickPluginHost --config Release -j4 >> "C:\Users\jeffm\Documents\BaySickDAW\build_log.txt" 2>&1
+echo HELPER32_EXIT_CODE=%ERRORLEVEL%                                  >> "C:\Users\jeffm\Documents\BaySickDAW\build_log.txt"
+
+rem Stage the x86 helper beside the app exes (its own build tree cannot see
+rem BaySickDAWStandalone's output dir, so the copy happens here rather than in
+rem a POST_BUILD command).
+copy /Y "C:\Users\jeffm\Documents\BaySickDAW\build32\BaySickPluginHost_artefacts\Release\BaySickPluginHost32.exe" "C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone_artefacts\Release\" >> "C:\Users\jeffm\Documents\BaySickDAW\build_log.txt" 2>&1
+copy /Y "C:\Users\jeffm\Documents\BaySickDAW\build32\BaySickPluginHost_artefacts\Release\BaySickPluginHost32.exe" "C:\Users\jeffm\Documents\BaySickDAW\build\BaySickDAWStandalone_artefacts\Debug\"   >> "C:\Users\jeffm\Documents\BaySickDAW\build_log.txt" 2>&1

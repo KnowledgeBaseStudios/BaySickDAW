@@ -227,11 +227,6 @@ makeInstPresetConfig (VibeSynthProcessor& processor,
 // 2026-05-05 consolidation: route every Inst preset through PagePresetIO's
 // per-kind directory ("Inst Page/My Presets") so saved files appear in the
 // load submenu (the previous `Inst/` literal didn't match where save wrote).
-static juce::File instPresetsRootDir()
-{
-    return PagePresetIO::presetsDirForPageKind (PagePresetIO::PageKind::Inst);
-}
-
 static juce::File instMyPresetsDir()
 {
     return PagePresetIO::myPresetsDirForPageKind (PagePresetIO::PageKind::Inst);

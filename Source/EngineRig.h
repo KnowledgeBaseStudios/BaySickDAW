@@ -28,7 +28,11 @@ class BaySickNAMIRProcessor;
 // unregister from audio dispatch FIRST, settle one audio block, then destroy.
 // ─────────────────────────────────────────────────────────────────────────────
 
-enum class TabKind { Layers, Bass, Drums, Clips, Vox, Inst };
+// QA-ModelShell TS6 (BLU-447): Plugins is the hosted-VST3-instrument tab.  It
+// is the "one more factory case" TS1 task 7 designed the generic slot for -- a
+// tab's engine is already a base-class unique_ptr, so nothing outside the
+// factory and apvtsOf knows what kind of processor it holds.
+enum class TabKind { Layers, Bass, Drums, Clips, Vox, Inst, Plugins };
 
 struct EngineTab
 {

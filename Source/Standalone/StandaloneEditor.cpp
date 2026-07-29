@@ -22,6 +22,8 @@
 #include "KeyBindings.h"
 #include "TypingKeyboardMap.h"   // D-4 typing-keyboard MIDI (QA-TransportDisplay)
 #include "KeyBindsWindow.h"
+#include "PluginsManagerWindow.h"   // QA-ModelShell TS6: Options > Plugins
+#include "PluginsPage.h"           // QA-ModelShell TS6: hosted-instrument tab view
 #include "RustyDrumsMapWindow.h"
 #include "PatternColorPicker.h"
 #include "../BaySickSynth/BaySickSynthProcessor.h"   // D2 Batch 4: kit audition dispatch
@@ -1964,6 +1966,32 @@ std::unique_ptr<juce::Component> StandaloneEditor::createLayersPage()
     // chooses Pattern or Song explicitly via the transport button.
     mLegacyLayersPage = page.get();
     return page;
+}
+
+// QA-ModelShell TS6 (BLU-447): hosted VST3 instrument tab.  No mLegacy* raw
+// pointer is cached for it -- those caches are the dangling-pointer surface TS4
+// measured, and a new page type has no reason to add another.
+std::unique_ptr<juce::Component> StandaloneEditor::createPluginsPage()
+{
+    int idx = -1;
+    for (int i = 0; i < (int) kMaxPluginPages; ++i)
+        if (! mUsedPluginIndices[(size_t) i]) { idx = i; break; }
+
+    if (idx < 0) return nullptr;   // all plugin slots in use
+
+    mUsedPluginIndices[(size_t) idx] = true;
+    return std::make_unique<PluginsPage> (mProcessor, idx);
+}
+
+// Project restore: the saved pageIndex is authoritative (it keys the mixer
+// strip prefix and the InsertNode), so this takes it rather than allocating.
+std::unique_ptr<juce::Component> StandaloneEditor::createPluginsPageAtIndex (int idx)
+{
+    if (idx < 0 || idx >= (int) kMaxPluginPages) return nullptr;
+    if (mUsedPluginIndices[(size_t) idx]) return nullptr;
+
+    mUsedPluginIndices[(size_t) idx] = true;
+    return std::make_unique<PluginsPage> (mProcessor, idx);
 }
 
 std::unique_ptr<juce::Component> StandaloneEditor::createLayersPageAtIndex (int idx)
@@ -4217,9 +4245,11 @@ void StandaloneEditor::onAddTabRequest(RibbonTabBar::TabType type)
     }
 
     // D1.4: Layers, Bass, and Drums all support adding new instances.
+    // TS6: Plugins joins them -- same create-page-then-wire shape.
     if (type != RibbonTabBar::TabType::Layers
         && type != RibbonTabBar::TabType::Bass
-        && type != RibbonTabBar::TabType::Drums)
+        && type != RibbonTabBar::TabType::Drums
+        && type != RibbonTabBar::TabType::Plugins)
         return;
 
     std::unique_ptr<juce::Component> page;
@@ -4241,6 +4271,11 @@ void StandaloneEditor::onAddTabRequest(RibbonTabBar::TabType type)
         page = createDrumPage();
         if (!page) return;  // all 16 Drums slots occupied
         name = nextDrumTabName();   // QA-D STATE-02
+        break;
+    case RibbonTabBar::TabType::Plugins:
+        page = createPluginsPage();
+        if (!page) return;  // all plugin slots occupied
+        name = nextPluginTabName();
         break;
     default:
         return;
@@ -4288,6 +4323,34 @@ void StandaloneEditor::onAddTabRequest(RibbonTabBar::TabType type)
                 if (mPianoRollPage) mPianoRollPage->setEngineDisplayName ({ EngineKind::Layer, pageIdx }, nm);
             };
             registerLayerPianoRoll (p);
+        }
+    }
+    // QA-ModelShell TS6 (BLU-447): hosted VST3 instrument tab.  Mirrors the
+    // Layers block above; the mixer strip is created on the FIRST plugin pick
+    // (lazy, like every other type) rather than at tab open.
+    else if (type == RibbonTabBar::TabType::Plugins)
+    {
+        if (auto* p = dynamic_cast<PluginsPage*>(page.get()))
+        {
+            p->setTabName (name);
+            const int pageIdx = p->getPageIndex();
+
+            p->onEngineSelected = [this, newId, pageIdx, p] {
+                const auto* tab = mRibbon->getTabById(newId);
+                if (mMixerPage) mMixerPage->addPluginChannel (pageIdx, tab ? tab->name : "Plugin");
+                if (mEffectsPage) mEffectsPage->rebuildChannelDropdown();
+                if (mPianoRollPage)
+                    mPianoRollPage->setEngineType ({ EngineKind::Plugin, pageIdx }, p->getPluginName());
+            };
+            // A later pick (swapping which plugin the tab hosts) renames the
+            // roll label only -- the strip already exists.
+            p->onPluginChanged = [this, pageIdx, p] {
+                if (mPianoRollPage)
+                    mPianoRollPage->setEngineType ({ EngineKind::Plugin, pageIdx }, p->getPluginName());
+                if (mProjectManager) mProjectManager->markDirty();
+            };
+
+            registerPluginPianoRoll (pageIdx, p);
         }
     }
     else if (type == RibbonTabBar::TabType::Bass)
@@ -4538,6 +4601,22 @@ void StandaloneEditor::onTabClosed(int tabId)
             // orphan-strip removal happens in the tail with the Inst/Vox/
             // Clips trio (same convention).
             int layerStripIdx = -1, bassStripIdx = -1, drumStripIdx = -1;
+            int pluginStripIdx = -1;   // QA-ModelShell TS6 (BLU-447)
+
+            // TS6: free the plugin index slot + drop its roll registration
+            // BEFORE the page dies -- the connection's closures capture the
+            // page raw pointer, same reason as the Layers block below.
+            if (auto* pp = dynamic_cast<PluginsPage*>(mPages[i]->component.get()))
+            {
+                const int idx = pp->getPageIndex();
+                if (idx >= 0 && idx < (int) kMaxPluginPages)
+                    mUsedPluginIndices[(size_t) idx] = false;
+                if (mPianoRollPage && idx >= 0)
+                    mPianoRollPage->unregisterEngine ({ EngineKind::Plugin, idx });
+                if (mMixerPage && idx >= 0)
+                    mMixerPage->removePluginChannel (idx);
+                pluginStripIdx = idx;
+            }
 
             // Free layer index slot for any LayersPage being closed
             if (auto* lp = dynamic_cast<LayersPage*>(mPages[i]->component.get()))
@@ -4839,6 +4918,7 @@ void StandaloneEditor::onTabClosed(int tabId)
                 if (clipStripIdx  >= 0) rig.removeTab (TabKind::Clips,  clipStripIdx);
                 if (voxStripIdx   >= 0) rig.removeTab (TabKind::Vox,    voxStripIdx);
                 if (instStripIdx  >= 0) rig.removeTab (TabKind::Inst,   instStripIdx);
+                if (pluginStripIdx >= 0) rig.removeTab (TabKind::Plugins, pluginStripIdx);
             }
             // K-4 / L-3 (2026-05-05): page AND chain are gone (chain destroyed
             // by removeTab above), now drop the sfizz engine.  Frees the slot
@@ -7853,6 +7933,20 @@ void StandaloneEditor::showKeyBindsWindow()
     mKeyBindsWin = w;     // SafePointer - auto-clears when the window deletes itself
 }
 
+// QA-ModelShell TS6 (BLU-299): Options > Plugins.  The manager is
+// processor-owned, so this window is a pure view over it and closing it loses
+// nothing.
+void StandaloneEditor::showPluginsWindow()
+{
+    if (mPluginsWin != nullptr)
+    {
+        mPluginsWin->toFront (true);
+        return;
+    }
+    auto* w = new PluginsManagerWindow (mProcessor.pluginManager());
+    mPluginsWin = w;      // SafePointer - auto-clears when the window deletes itself
+}
+
 // ── J-6 (2026-05-03): BaySickRustyDrums singleton spawn ──────────────────────
 // Triggered by the "+ Add BaySickRustyDrums" entry on the Drums▾ ribbon
 // dropdown.  Creates a Drums-type ribbon tab whose mPages component is a
@@ -8588,6 +8682,39 @@ void StandaloneEditor::registerClipPianoRoll (int idx, ClipsPage* cp)
     mPianoRollPage->registerEngine ({ EngineKind::Clip, idx }, conn);
 }
 
+// QA-ModelShell TS6 (BLU-447): the roll for a hosted VST3 instrument tab.
+// Same closure discipline as its siblings -- everything re-resolves per call,
+// so a plugin swap through the page's picker needs no re-registration.
+void StandaloneEditor::registerPluginPianoRoll (int idx, PluginsPage* pp)
+{
+    if (! mPianoRollPage || ! pp || ! mPM) return;
+
+    PianoRollConnection conn;
+    auto* pmRaw = mPM.get();
+
+    conn.dataAccessor = [pmRaw, idx]() -> PianoRollData*
+    {
+        if (! pmRaw) return nullptr;
+        if (idx < 0 || idx >= (int) pmRaw->currentPattern().pluginRoll.size()) return nullptr;
+        return &pmRaw->currentPattern().pluginRoll[idx];
+    };
+    conn.patternTimeSigProvider = [pmRaw](int& outNum, int& outDen) {
+        outNum = pmRaw ? pmRaw->currentPattern().tsNum : 4;
+        outDen = pmRaw ? pmRaw->currentPattern().tsDen : 4;
+    };
+    conn.noteColor   = VC::Purple;
+    conn.displayName = pp->getTabName();
+    conn.engineType  = pp->getPluginName();
+
+    // No audition closures: a hosted plugin has no auditionNote API of ours to
+    // call, and inventing one would mean synthesising note-on/off outside the
+    // scheduler -- the roll's keyboard clicks reach it through the live-MIDI
+    // path (EngineKind::Plugin == target kind 10) like any other input.
+    conn.rollMode = PianoRollContainer::RollMode::Standard;
+
+    mPianoRollPage->registerEngine ({ EngineKind::Plugin, idx }, conn);
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // 2026-05-05 dirty-flag wiring helper.  Each per-engine processor owns its
 // own APVTS that's invisible to the main PluginProcessor's project-dirty
@@ -9269,6 +9396,7 @@ juce::PopupMenu StandaloneEditor::getMenuForIndex(int menuIndex, const juce::Str
         }
         m.addItem(502, "File Settings...");
         m.addItem(503, "Audio Settings...");
+        m.addItem(504, "Plugins...");
         m.addSeparator();
         {
             juce::PopupMenu undoSub;
@@ -9426,6 +9554,11 @@ void StandaloneEditor::menuItemSelected(int id, int)
         opts.launchAsync();
         break;
     }
+
+    // QA-ModelShell TS6 (BLU-299): hosted-plugin manager.
+    case 504:
+        showPluginsWindow();
+        break;
 
     case 602:
         juce::AlertWindow::showMessageBoxAsync(
@@ -10972,7 +11105,22 @@ void StandaloneEditor::serializeTabsInto (juce::XmlElement& tabs)
     for (auto& e : mPages)
     {
         juce::XmlElement* rec = nullptr;
-        if (auto* lp = dynamic_cast<LayersPage*> (e->component.get()))
+        // QA-ModelShell TS6 (BLU-447): a hosted VST3 instrument tab.  "engine"
+        // is the plugin's stable identifier string and "engineData" is the
+        // HostedPluginInstance blob (description + bridge preference + the
+        // plugin's own state), so this needs no attributes the other kinds do
+        // not already have.  Tested first because PluginsPage is not related to
+        // the page types below it -- order is only about cast cost.
+        if (auto* pp = dynamic_cast<PluginsPage*> (e->component.get()))
+        {
+            rec = tabs.createNewChildElement ("Tab");
+            rec->setAttribute ("type",       "Plugins");
+            rec->setAttribute ("pageIndex",  pp->getPageIndex());
+            rec->setAttribute ("name",       pp->getTabName());
+            rec->setAttribute ("engine",     pp->getEngineType());
+            rec->setAttribute ("engineData", encodeEngineState (pp->getEngineProcessor()));
+        }
+        else if (auto* lp = dynamic_cast<LayersPage*> (e->component.get()))
         {
             rec = tabs.createNewChildElement ("Tab");
             rec->setAttribute ("type",       "Layers");
@@ -12001,6 +12149,10 @@ void StandaloneEditor::applyEngineToNewestTabOfType (RibbonTabBar::TabType type,
     if      (auto* lp = dynamic_cast<LayersPage*> (newest->component.get())) lp->selectEngine (engine);
     else if (auto* bp = dynamic_cast<BassPage*>   (newest->component.get())) bp->selectEngine (engine);
     else if (auto* dp = dynamic_cast<DrumPage*>   (newest->component.get())) dp->selectEngine (engine);
+    // QA-ModelShell TS6 (BLU-447): for a plugin tab `engine` is the plugin's
+    // identifier string, which is exactly what the "+" dropdown put in the
+    // AddChoice -- so no separate route was needed.
+    else if (auto* pp = dynamic_cast<PluginsPage*> (newest->component.get())) pp->selectPluginById (engine);
 }
 
 void StandaloneEditor::registerStaticAutomationHandlers()
@@ -12205,7 +12357,48 @@ void StandaloneEditor::deserializeUIState (const juce::XmlElement& root)
             "Tab " + juce::String (tabNum) + " of " + juce::String (tabTotal)
             + " - " + (name.isNotEmpty() ? name : type));
 
-        if (type == "Layers")
+        // QA-ModelShell TS6 (BLU-447): hosted VST3 instrument tab.  Restore
+        // order matches its siblings -- page, ribbon tab, hooks, roll, THEN
+        // selectPluginById (which is what constructs the plugin through the
+        // rig), then the state blob onto the engine that call created.
+        if (type == "Plugins")
+        {
+            auto page = createPluginsPageAtIndex (pageIndex);
+            if (! page) continue;
+            auto* pp = dynamic_cast<PluginsPage*> (page.get());
+            const int newId = mRibbon->addTab (RibbonTabBar::TabType::Plugins,
+                                                name.isNotEmpty() ? name : "Plugin");
+            if (pp && name.isNotEmpty()) pp->setTabName (name);
+
+            if (pp)
+            {
+                pp->onEngineSelected = [this, newId, pageIndex, pp] {
+                    const auto* tab = mRibbon->getTabById (newId);
+                    if (mMixerPage)   mMixerPage->addPluginChannel (pageIndex, tab ? tab->name : "Plugin");
+                    if (mEffectsPage) mEffectsPage->rebuildChannelDropdown();
+                    if (mPianoRollPage)
+                        mPianoRollPage->setEngineType ({ EngineKind::Plugin, pageIndex }, pp->getPluginName());
+                };
+                pp->onPluginChanged = [this, pageIndex, pp] {
+                    if (mPianoRollPage)
+                        mPianoRollPage->setEngineType ({ EngineKind::Plugin, pageIndex }, pp->getPluginName());
+                };
+                registerPluginPianoRoll (pageIndex, pp);
+
+                if (engine.isNotEmpty())
+                    pp->selectPluginById (engine);
+
+                applyEngineState (pp->getEngineProcessor(), engineData);
+            }
+
+            auto* entry = new PageEntry();
+            entry->ribbonTabId = newId;
+            entry->type        = RibbonTabBar::TabType::Plugins;
+            entry->component   = std::move (page);
+            mPages.add (entry);
+            hostPageInWindow (*entry);
+        }
+        else if (type == "Layers")
         {
             auto page = createLayersPageAtIndex (pageIndex);
             if (! page) continue;

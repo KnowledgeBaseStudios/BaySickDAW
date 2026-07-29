@@ -12,6 +12,7 @@
 #include "DSP/DeEsserDSP.h"
 #include "DSP/GateDSP.h"      // QA-Fe2 vocal-chain Gate
 #include "DSP/DeReverbDSP.h"  // QA-Fe2 vocal-chain De-reverb
+#include "Hosting/HostedPluginEffect.h"   // QA-ModelShell TS6: hosted VST3 slot
 // I-5 (2026-05-02): Harmonics drive pedals batch -- 4 new DSP classes.
 #include "DSP/BluesDriveStyleDSP.h"
 #include "DSP/DistortionStyleDSP.h"
@@ -78,6 +79,11 @@ std::unique_ptr<DSPBase> EffectRack::createEffect(EffectType type)
         case EffectType::Gate:            return std::make_unique<GateDSP>();      // QA-Fe2
         case EffectType::DeReverb:        return std::make_unique<DeReverbDSP>();  // QA-Fe2
 
+        // QA-ModelShell TS6: built EMPTY -- an EffectType carries no plugin
+        // identity, so the picker's setPlugin() or the slot's restored state
+        // blob is what names the plugin.  See HostedPluginEffect.h.
+        case EffectType::VST3Plugin:      return std::make_unique<Hosting::HostedPluginEffect>();
+
         // I-5 (2026-05-02): BaySickPedals Harmonics drive pedals batch.
         case EffectType::BluesDriveStyle: return std::make_unique<BluesDriveStyleDSP>();
         case EffectType::DistortionStyle: return std::make_unique<DistortionStyleDSP>();
@@ -141,12 +147,21 @@ static void waitForPendingDrain (std::atomic<bool>& flag) noexcept
         juce::Thread::sleep (1);
 }
 
-void EffectRack::loadEffect(int slot, EffectType type, const juce::String& uuidOverride)
+void EffectRack::loadEffect(int slot, EffectType type, const juce::String& uuidOverride,
+                            const juce::PluginDescription* pluginDesc)
 {
     if (slot < 0 || slot >= kNumSlots) return;
 
     // Build + prepare the new DSP OUTSIDE every lock (prepare can allocate).
     auto effect = createEffect(type);
+
+    // QA-ModelShell TS6: instantiating the plugin happens here, outside the
+    // locks, for the same reason prepare() does -- loading a VST3 allocates and
+    // can block for a noticeable time.
+    if (effect && type == EffectType::VST3Plugin && pluginDesc != nullptr)
+        if (auto* hosted = dynamic_cast<Hosting::HostedPluginEffect*>(effect.get()))
+            hosted->setPlugin(*pluginDesc);
+
     if (effect && mSampleRate > 0.0)
         effect->prepare(mSampleRate, mMaxBlock);
     if (effect)

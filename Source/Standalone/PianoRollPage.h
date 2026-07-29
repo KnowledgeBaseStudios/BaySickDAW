@@ -30,7 +30,12 @@ class StandalonePlayHead;
 // shared with classic live-input Inst pages); EngineId::index = Inst page
 // slot index.  Plural BaySickBasses to disambiguate from EngineKind::Bass
 // (the BaySickBass synth tab).
-enum class EngineKind { DrumKit, Layer, Bass, Drum, Clip, Vox, Inst, BaySickGuitars, BaySickBasses, BaySickRustyDrums };
+// QA-ModelShell TS6 (BLU-447): Plugin APPENDED, and the position is
+// load-bearing -- these enumerators' integer values ARE the live-MIDI target
+// encoding the processor switches on (1 Layer / 2 Bass / 3 Drum / 4 Clip /
+// 7 Guitars / 8 Basses / 9 Rusty), so Plugin must land on 10 and nothing above
+// it may be inserted.
+enum class EngineKind { DrumKit, Layer, Bass, Drum, Clip, Vox, Inst, BaySickGuitars, BaySickBasses, BaySickRustyDrums, Plugin };
 
 struct EngineId
 {

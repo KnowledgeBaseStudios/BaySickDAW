@@ -295,6 +295,8 @@ struct Pattern
     // (0..kMaxVoxPages-1 / 0..kMaxInstPages-1).
     std::array<PianoRollData, kMaxVoxPages>  voxRoll;
     std::array<PianoRollData, kMaxInstPages> instRoll;
+    // QA-ModelShell TS6 (BLU-447): per-tab roll for hosted VST3 instruments.
+    std::array<PianoRollData, kMaxPluginPages> pluginRoll;
 
     // J-7a (2026-05-03): BaySickRustyDrums singleton piano-roll data.  One
     // PianoRollData (no array) - there's only ever zero or one BaySickRustyDrums
@@ -553,6 +555,7 @@ struct PatternRollsSnapshot
     std::array<std::vector<PianoNote>, kMaxClipPages>  clipNotes;
     std::array<std::vector<PianoNote>, kMaxVoxPages>   voxNotes;
     std::array<std::vector<PianoNote>, kMaxInstPages>  instNotes;
+    std::array<std::vector<PianoNote>, kMaxPluginPages> pluginNotes;   // TS6
     std::vector<PianoNote>                             rustyNotes;
     // getPatternContentBeats computed at publish time so the audio thread never
     // walks live note vectors for the content mask (#24 one-pass end).

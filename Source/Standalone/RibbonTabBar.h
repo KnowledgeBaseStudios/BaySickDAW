@@ -31,7 +31,9 @@
 class RibbonTabBar : public juce::Component
 {
 public:
-    enum class TabType { Mixer, Effects, Builder, Clip, Vox, Inst, Layers, Bass, Drums, PianoRoll };
+    // QA-ModelShell TS6 (BLU-447): Plugins = hosted VST3 instrument tabs.
+    // Appended -- TabType's integer values are persisted in project state.
+    enum class TabType { Mixer, Effects, Builder, Clip, Vox, Inst, Layers, Bass, Drums, PianoRoll, Plugins };
 
     struct Tab
     {

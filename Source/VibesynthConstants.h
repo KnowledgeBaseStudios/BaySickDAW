@@ -16,6 +16,8 @@ static constexpr int kMaxClipPages     = 50;   // matches the audio-insert cap
 // here for piano-roll dispatch sizing without pulling that header into core.
 static constexpr int kMaxVoxPages      = 6;    // matches MixerChannelIds::kMaxVoxStrips
 static constexpr int kMaxInstPages     = 20;   // matches MixerChannelIds::kMaxInstStrips (G-4 bumped 6 → 10; G-6 bumped 10 → 20)
+// QA-ModelShell TS6 (BLU-447, 2026-07-29): hosted VST3 instrument tabs.
+static constexpr int kMaxPluginPages   = 20;   // matches MixerChannelIds::kMaxPluginStrips
 static constexpr int kBassPRTarget     = kMaxLayerPages; // PRPendingOff target ID for bass roll
 static constexpr int kDrumPRTarget     = kMaxLayerPages + kMaxBassPages; // PRPendingOff target ID base for drum rolls
 static constexpr int kClipPRTarget     = kMaxLayerPages + kMaxBassPages + kMaxDrumPages; // PRPendingOff target ID base for clip rolls (G-3)
@@ -24,6 +26,12 @@ static constexpr int kInstPRTarget     = kVoxPRTarget  + kMaxVoxPages;        //
 // J-7b (2026-05-03): BaySickRustyDrums singleton - single PRPendingOff target
 // (no array dimension since the engine is a 1-instance lock).
 static constexpr int kRustyPRTarget    = kInstPRTarget + kMaxInstPages;
+// QA-ModelShell TS6: APPENDED after Rusty deliberately.  These target IDs are
+// DERIVED by summing the caps in order, so inserting anywhere earlier -- or
+// changing any cap -- shifts every downstream target and invalidates the PR
+// targets in saved projects.  Rusty is a 1-instance singleton, so appending
+// past it moves nothing.
+static constexpr int kPluginsPRTarget  = kRustyPRTarget + 1;
 static constexpr int MAX_DRUM_SOUNDS   = 46;   // total drum sound library size
 static constexpr int MAX_DRUM_ROWS     = 16;   // max rows visible in the drums grid
 static constexpr int MAX_STEPS_TOTAL   = 64;   // max steps across any sequence

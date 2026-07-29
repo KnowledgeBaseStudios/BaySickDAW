@@ -3,6 +3,8 @@
 #include "EffectEditorPanels.h"
 #include "../PluginProcessor.h"
 #include "../DSP/EffectParamMap.h"
+#include "../Hosting/HostedPlugin.h"   // QA-ModelShell TS6: fit window to plugin surface
+#include "WorkspaceWindow.h"
 
 // ═════════════════════════════════════════════════════════════════ EffectSlotWindow
 
@@ -52,13 +54,16 @@ EffectSlotWindow::EffectSlotWindow (VibeSynthProcessor& proc,
 EffectSlotWindow::~EffectSlotWindow()
 {
     stopTimer();
-    // The bar outlives us only in the sense that it is destroyed moments later
-    // by the same window; clearing is still correct rather than relying on that
-    // ordering, since the bar holds a NON-owning pointer to our LED.
-    if (mBar != nullptr)
+    // The bar is USUALLY already gone by now -- WorkspaceWindow declares
+    // mContent before mPageMenu and members destruct in reverse order, so the
+    // menu bar dies first.  mBar is a SafePointer precisely so that reads as
+    // null instead of as freed memory; when it IS still alive (a rebuild rather
+    // than a window teardown) the LED and the menu builder must be unhooked,
+    // because the bar holds a non-owning pointer to our LED.
+    if (auto* bar = mBar.getComponent())
     {
-        mBar->removeExtraRightComponent (&mLed);
-        mBar->setMenuBuilder (nullptr);
+        bar->removeExtraRightComponent (&mLed);
+        bar->setMenuBuilder (nullptr);
     }
     if (mSlot) mSlot->setRack (nullptr);
 }
@@ -88,7 +93,25 @@ void EffectSlotWindow::buildPanel()
     mSlot->setChannelContext (&mProc.apvts,
                               EffectsPage::mixerPrefixForChannelId (mChannelId),
                               [] (int id) { return MixerChannelIds::friendlyName (id); });
+    // Destroy the OUTGOING panel before building its replacement.  For our own
+    // panels the order is immaterial, but a hosted plugin editor is the
+    // plugin's own single editor instance -- build-then-replace would have the
+    // new one asking for an editor while the old one still holds it, and JUCE's
+    // VST3 wrapper warns that a second editor instance crashes some plugins.
+    mSlot->setEditor (nullptr);
     mSlot->setEditor (createEffectEditor (eff, type));
+
+    // QA-ModelShell TS6 (Jeff 2026-07-29): a hosted plugin's editor arrives at
+    // whatever size the plugin declares, so the window fits ITSELF to that
+    // rather than leaving the panel floating in a provisionally-sized frame.
+    // Our own panels are unaffected -- they are built to the window, not the
+    // other way round.
+    if (auto* hosted = dynamic_cast<Hosting::HostedPluginEditor*> (mSlot->getEditor()))
+        hosted->onNaturalSizeChanged = [this] (int w, int h)
+        {
+            if (auto* win = findParentComponentOfClass<WorkspaceWindow>())
+                win->sizeToContent (w, h);
+        };
     // AFTER setEditor: this forwards into the panel, so calling it first would
     // be a no-op against a panel that does not exist yet.
     mSlot->setEditorUndoContext (mUndo);
@@ -115,7 +138,7 @@ juce::String EffectSlotWindow::windowTitle() const
     if (rack == nullptr || slot < 0)
         return strip;
 
-    const juce::String fx = SlotComponent::effectTypeName (rack->getSlotType (slot));
+    const juce::String fx = SlotComponent::slotDisplayName (rack, slot);
     return strip.isEmpty() ? fx : strip + " - " + fx;
 }
 
@@ -249,11 +272,15 @@ EffectEqWindow::EffectEqWindow (VibeSynthProcessor& proc,
 EffectEqWindow::~EffectEqWindow()
 {
     stopTimer();
-    if (mBar != nullptr && mDisplay != nullptr)
-    {
-        mDisplay->uninstallPageMenu (*mBar);
-        mBar->setBankIndicator (nullptr);
-    }
+    // Same destruction-order hazard as EffectSlotWindow's dtor -- the title
+    // strip's menu bar is normally already gone when the content dies, so this
+    // reads through a SafePointer rather than a raw one.
+    if (auto* bar = mBar.getComponent())
+        if (mDisplay != nullptr)
+        {
+            mDisplay->uninstallPageMenu (*bar);
+            bar->setBankIndicator (nullptr);
+        }
 }
 
 EQ8MsDSP* EffectEqWindow::resolveEq() const

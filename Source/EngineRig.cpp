@@ -8,6 +8,7 @@
 #include "BaySickPedals/BaySickPedalsProcessor.h"
 #include "BaySickNAMIR/BaySickNAMIRProcessor.h"
 #include "Standalone/EngineChainProcessor.h"
+#include "Hosting/HostedPlugin.h"   // QA-ModelShell TS6: hosted VST3 instrument
 
 EngineRig::EngineRig (VibeSynthProcessor& proc, juce::UndoManager& undoMgr)
     : mProc (proc), mUndoManager (undoMgr)
@@ -29,6 +30,7 @@ int EngineRig::capacityOf (TabKind k) noexcept
         case TabKind::Clips:  return kMaxClipPages;
         case TabKind::Vox:    return kMaxVoxPages;
         case TabKind::Inst:   return kMaxInstPages;
+        case TabKind::Plugins: return kMaxPluginPages;
     }
     return 0;
 }
@@ -43,6 +45,9 @@ juce::AudioProcessorValueTreeState* EngineRig::apvtsOf (juce::AudioProcessor* en
     if (auto* p = dynamic_cast<BaySickVocalProcessor*>  (eng)) return &p->apvts;
     if (auto* p = dynamic_cast<BaySickPedalsProcessor*> (eng)) return &p->apvts;
     if (auto* p = dynamic_cast<BaySickNAMIRProcessor*>  (eng)) return &p->apvts;
+    // A hosted plugin deliberately returns null: its parameters live in the
+    // plugin, not in an APVTS of ours, and their automation lanes are keyed on
+    // the plugin's own stable parameter ids instead.
     return nullptr;
 }
 
@@ -59,6 +64,9 @@ juce::String EngineRig::trackIdFor (TabKind k, int pageIndex)
         case TabKind::Clips:  return "clip_" + juce::String (pageIndex) + "_";
         case TabKind::Vox:    return {};
         case TabKind::Inst:   return {};
+        // A hosted plugin's parameters belong to the plugin, not to our APVTS
+        // vocabulary, so there is no per-tab prefix to hand out.
+        case TabKind::Plugins: return {};
     }
     return {};
 }
@@ -195,6 +203,26 @@ juce::AudioProcessor* EngineRig::createEngineFor (EngineTab& tab, const juce::St
             return tab.engine.get();
         }
 
+        // QA-ModelShell TS6 (BLU-447): engineType IS the plugin's stable
+        // identifier string, which is already what the tab record persists --
+        // so a hosted instrument saves and restores through the existing tab
+        // serialization with no new format.  The description is resolved from
+        // the added list; a plugin the user has since removed yields a tab with
+        // no engine rather than a failed load.
+        case TabKind::Plugins:
+        {
+            auto* pm = Hosting::PluginManager::getInstance();
+            if (pm == nullptr) return nullptr;
+
+            auto desc = pm->findAdded (engineType);
+            if (desc == nullptr) return nullptr;
+
+            auto hosted = std::make_unique<Hosting::HostedPluginInstance> (*pm, *desc);
+            hosted->prepareToPlay (srOr44100, 512);
+            tab.engine = std::move (hosted);
+            return tab.engine.get();
+        }
+
         case TabKind::Inst:
         {
             if (engineType != "Chain") return nullptr;
@@ -230,6 +258,19 @@ void EngineRig::registerWithProcessor (EngineTab& tab)
         case TabKind::Layers: mProc.registerLayerEngine (tab.pageIndex, eng); break;
         case TabKind::Bass:   mProc.registerBassEngine  (tab.pageIndex, eng); break;
         case TabKind::Drums:  mProc.registerDrumEngine  (tab.pageIndex, eng); break;
+        // QA-ModelShell TS6: prepared at the LIVE device config first -- a
+        // hosted plugin is created with a placeholder rate like the Clips/Vox/
+        // Inst group below, and a plugin that never sees a real prepare would
+        // run its DSP at the wrong rate.
+        case TabKind::Plugins:
+        {
+            const double sr = mProc.getSampleRate() > 0.0 ? mProc.getSampleRate() : 44100.0;
+            const int    bs = mProc.getBlockSize()  > 0   ? mProc.getBlockSize()  : 512;
+            eng->setRateAndBufferSizeDetails (sr, bs);
+            eng->prepareToPlay (sr, bs);
+            mProc.registerPluginEngine (tab.pageIndex, eng);
+            break;
+        }
 
         case TabKind::Clips:
         case TabKind::Vox:
@@ -260,6 +301,7 @@ void EngineRig::unregisterFromProcessor (EngineTab& tab)
         case TabKind::Clips:  mProc.unregisterClipEngine  (tab.pageIndex); break;
         case TabKind::Vox:    mProc.unregisterVoxEngine   (tab.pageIndex); break;
         case TabKind::Inst:   mProc.unregisterInstEngine  (tab.pageIndex); break;
+        case TabKind::Plugins: mProc.unregisterPluginEngine (tab.pageIndex); break;
     }
 }
 

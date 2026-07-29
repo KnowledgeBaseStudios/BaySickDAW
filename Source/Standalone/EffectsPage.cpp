@@ -3,6 +3,7 @@
 #include "FxRackPresetIO.h"
 #include "../PluginProcessor.h"
 #include "../DSP/EffectParamMap.h"   // QA-ProjectSave Task 7 step 3
+#include "../Hosting/HostedPluginEffect.h"   // QA-ModelShell TS6: hosted plugin lanes
 
 // ── Channel dropdown items (order matches onChannelChanged switch) ─────────────
 // ID 1 = Layers Bus, 2 = Bass Bus, 3 = Drums Bus, 4 = Master, 5 = Effects Bus
@@ -229,7 +230,9 @@ EffectsPage::EffectsPage(TrackSelectionManager& tsm, VibeSynthProcessor& process
         row->onPick   = [this] (int s)
         {
             SlotComponent::showEffectPickerMenu (juce::Desktop::getMousePosition(),
-                                                 [this, s] (EffectType t) { onEffectChosen (s, t); });
+                                                 [this, s] (EffectType t) { onEffectChosen (s, t); },
+                                                 [this, s] (const juce::PluginDescription& d)
+                                                 { onPluginChosen (s, d); });
         };
         addAndMakeVisible (*row);
         mRows[(size_t) i] = std::move (row);
@@ -309,7 +312,7 @@ void EffectsPage::rebuildChannelDropdown()
 
         auto channelToMixerId = [](int dropdownId) -> int {
             // Bus IDs in the dropdown match MixerChannelIds 1-12 directly.
-            if (dropdownId >= 1 && dropdownId <= 12) return dropdownId;
+            if (dropdownId >= 1 && dropdownId <= 13) return dropdownId;   // TS6: +Plugins Bus
             if (dropdownId >= 100 && dropdownId < 200) return kDrumBase + (dropdownId - 100);
             if (dropdownId >= 200 && dropdownId < 216) return kLayerBase + (dropdownId - 200);
             if (dropdownId >= 300 && dropdownId < 316) return kBassBase  + (dropdownId - 300);
@@ -318,6 +321,7 @@ void EffectsPage::rebuildChannelDropdown()
             if (dropdownId >= 700 && dropdownId < 700 + (int) kMaxVoxStrips)   return kVoxBase   + (dropdownId - 700);
             if (dropdownId >= 800 && dropdownId < 800 + (int) kMaxInstStrips)  return kInstBase  + (dropdownId - 800);
             if (dropdownId >= 900 && dropdownId < 900 + (int) kMaxRustyStrips) return kRustyBase + (dropdownId - 900);
+            if (dropdownId >= 1000 && dropdownId < 1000 + (int) kMaxPluginStrips) return kPluginBase + (dropdownId - 1000);
             return dropdownId;
         };
 
@@ -330,7 +334,7 @@ void EffectsPage::rebuildChannelDropdown()
         {
             juce::String prefix = mixerPrefixForChannelId(id);
             Item it { id, name, prefix };
-            if (id >= 1 && id <= 12) busItems.push_back(it);
+            if (id >= 1 && id <= 13) busItems.push_back(it);
             else                      insertItems.push_back(it);
         }
 
@@ -415,6 +419,9 @@ void EffectsPage::rebuildChannelDropdown()
         // J-6 (2026-05-03): EQ unification + missing bus groups.
         // ── RustyDrums Bus (J-5) ─────────────────────────────────────────
         addBusAndMembers(12, kRustyDrumsBus, "RUSTYDRUMS BUS", VC::DrumsCol);
+
+        // ── Plugins Bus (QA-ModelShell TS6, BLU-447) ─────────────────────
+        addBusAndMembers(13, kPluginsBus, "PLUGINS BUS", VC::Purple);
 
         // ── Vox Bus(es) (R3.5 + G-6) ─────────────────────────────────────
         addBusAndMembers(7, kVoxBus,   "VOX BUS",   juce::Colour(0xFF0FAFA5));
@@ -581,6 +588,14 @@ void EffectsPage::resolveChannelDsp (VibeGraph& vg, int id,
             rack = vg.getInsertRack(VibeGraph::InsertKind::Rusty, idx);
             eq   = vg.getInsertEQ  (VibeGraph::InsertKind::Rusty, idx);
         }
+        else if (id >= 1000 && id < 1000 + (int) MixerChannelIds::kMaxPluginStrips)
+        {
+            // QA-ModelShell TS6 (BLU-447): hosted VST3 instrument strips get a
+            // rack + EQ like every other engine-driven insert.
+            const int idx = id - 1000;
+            rack = vg.getInsertRack(VibeGraph::InsertKind::Plugin, idx);
+            eq   = vg.getInsertEQ  (VibeGraph::InsertKind::Plugin, idx);
+        }
         break;
     }
 }
@@ -653,6 +668,51 @@ void EffectsPage::registerSlotAutomationFor (VibeSynthProcessor& proc, int chId,
                     return juce::jlimit (0.0f, 1.0f,
                         (rack->getSlotOutputGain (slot) - kLo) / (kHi - kLo));
                 });
+    }
+
+    // ── QA-ModelShell TS6: hosted plugin parameters ──────────────────────────
+    // A plugin has no EffectParamMap table -- its parameters are DISCOVERED
+    // from the instance rather than declared by us -- so this is a parallel
+    // loop rather than another table.  Lane suffix is "vst_" + the plugin's own
+    // stable parameter id; the "vst_" tag keeps it from ever colliding with a
+    // table suffix or with "output_vol", and the offline resolver splits on the
+    // uuid so an id containing underscores is fine.
+    if (type == EffectType::VST3Plugin)
+    {
+        auto* hosted = dynamic_cast<Hosting::HostedPluginEffect*>(rackRef.getSlotEffect (slotIndex));
+
+        if (hosted != nullptr)
+        {
+            auto resolveDsp = [&vg, chId, uuid]() -> DSPBase*
+            {
+                auto* rack = EffectsPage::rackForChannelId (vg, chId);
+                if (rack == nullptr) return nullptr;
+                for (int i = 0; i < EffectRack::kNumSlots; ++i)
+                    if (rack->getSlotUuid (i) == uuid)
+                        return rack->getSlotEffect (i);
+                return nullptr;
+            };
+
+            for (const auto& p : hosted->getAutomatableParams())
+            {
+                const juce::String pid     = base + "vst_" + p.id;
+                const juce::String paramId = p.id;
+
+                if (VKnobAutomation::sOnRegisterApplicator)
+                    VKnobAutomation::sOnRegisterApplicator (pid,
+                        [resolveDsp, paramId] (float v01)
+                        {
+                            Hosting::HostedPluginEffect::applyParamNorm (resolveDsp(), paramId, v01);
+                        });
+
+                if (VKnobAutomation::sOnRegisterReader)
+                    VKnobAutomation::sOnRegisterReader (pid,
+                        [resolveDsp, paramId]() -> float
+                        {
+                            return Hosting::HostedPluginEffect::readParamNorm (resolveDsp(), paramId, 0.5f);
+                        });
+            }
+        }
     }
 
     for (const auto& def : EffectParamMap::defsFor (type, variant))
@@ -731,7 +791,7 @@ void EffectsPage::registerRackAutomationForAllChannels (VibeSynthProcessor& proc
     // The dropdown's channel-id vocabulary (the ids lane paramIds embed):
     // 1-12 buses, 100+ drums, 200+ layers, 300+ basses, 400+ audio inserts,
     // 600+ aux, 700+ vox, 800+ inst, 900+ rusty.
-    for (int id = 1; id <= 12; ++id)                                     sweepChannel (id);
+    for (int id = 1; id <= 13; ++id)                                     sweepChannel (id);
     for (int i = 0; i < kMaxDrumPages; ++i)                              sweepChannel (100 + i);
     for (int i = 0; i < kMaxLayerPages; ++i)                             sweepChannel (200 + i);
     for (int i = 0; i < kMaxBassPages; ++i)                              sweepChannel (300 + i);
@@ -740,6 +800,7 @@ void EffectsPage::registerRackAutomationForAllChannels (VibeSynthProcessor& proc
     for (int i = 0; i < (int) MixerChannelIds::kMaxVoxStrips; ++i)       sweepChannel (700 + i);
     for (int i = 0; i < (int) MixerChannelIds::kMaxInstStrips; ++i)      sweepChannel (800 + i);
     for (int i = 0; i < (int) MixerChannelIds::kMaxRustyStrips; ++i)     sweepChannel (900 + i);
+    for (int i = 0; i < (int) MixerChannelIds::kMaxPluginStrips; ++i)    sweepChannel (1000 + i);
 }
 
 // QA-ModelShell TS5: the pre-rack EQ resolver, lifted verbatim out of
@@ -772,6 +833,7 @@ EQ8MsDSP* EffectsPage::preEqForChannelId (VibeGraph& vg, int id)
     else if (id >= 700 && id < 700 + (int) MixerChannelIds::kMaxVoxStrips)       return vg.getInsertPreEQ(VibeGraph::InsertKind::Vox,   id - 700);
     else if (id >= 800 && id < 800 + (int) MixerChannelIds::kMaxInstStrips)      return vg.getInsertPreEQ(VibeGraph::InsertKind::Inst,  id - 800);
     else if (id >= 900 && id < 900 + (int) MixerChannelIds::kMaxRustyStrips)     return vg.getInsertPreEQ(VibeGraph::InsertKind::Rusty, id - 900);
+    else if (id >= 1000 && id < 1000 + (int) MixerChannelIds::kMaxPluginStrips)  return vg.getInsertPreEQ(VibeGraph::InsertKind::Plugin, id - 1000);
     return nullptr;
 }
 
@@ -954,11 +1016,17 @@ static void applySlotSnapshots(EffectRack* rack,
     }
 }
 
-void EffectsPage::onEffectChosen(int slotIndex, EffectType type)
+void EffectsPage::onPluginChosen(int slotIndex, const juce::PluginDescription& desc)
+{
+    onEffectChosen(slotIndex, EffectType::VST3Plugin, &desc);
+}
+
+void EffectsPage::onEffectChosen(int slotIndex, EffectType type,
+                                 const juce::PluginDescription* pluginDesc)
 {
     if (!mRack) return;
     auto before = captureSlotSnapshots(mRack);
-    mRack->loadEffect(slotIndex, type);
+    mRack->loadEffect(slotIndex, type, {}, pluginDesc);
     auto after = captureSlotSnapshots(mRack);
     if (mUndoCtx.isValid())
         mUndoCtx.perform(new EffectRackAction("Load Effect", before, after,
@@ -991,7 +1059,7 @@ void EffectsPage::onEffectRemoved(int slotIndex)
     // Jeff spec 2026-07-29: removal prompts.  The row's X is small and sits
     // next to the picker, and a mis-click used to silently drop an effect (and
     // everything below it moved up).
-    const juce::String name = SlotComponent::effectTypeName (mRack->getSlotType (slotIndex));
+    const juce::String name = SlotComponent::slotDisplayName (mRack, slotIndex);
     juce::NativeMessageBox::showOkCancelBox (
         juce::MessageBoxIconType::QuestionIcon,
         "Remove Effect",
@@ -1149,6 +1217,7 @@ juce::String EffectsPage::channelPrefixForId (int id)
         case 10: return "inst_bus2";
         case 11: return "inst_bus3";
         case 12: return "rusty_bus";
+        case 13: return "plugin_bus";   // QA-ModelShell TS6
         default: break;
     }
     if (id >= 100 && id < 200)
@@ -1173,6 +1242,8 @@ juce::String EffectsPage::channelPrefixForId (int id)
         return "inst_" + juce::String(id - 800);
     if (id >= 900 && id < 900 + (int) MixerChannelIds::kMaxRustyStrips)
         return "rusty_" + juce::String(id - 900);
+    if (id >= 1000 && id < 1000 + (int) MixerChannelIds::kMaxPluginStrips)
+        return "plugin_" + juce::String(id - 1000);
     return "fx";
 }
 
@@ -1196,6 +1267,7 @@ juce::String EffectsPage::mixerPrefixForChannelId(int id)
         case 10: return "mixer_instbus2";     // G-6
         case 11: return "mixer_instbus3";     // G-6
         case 12: return "mixer_rustybus";     // J-6
+        case 13: return "mixer_pluginbus";    // QA-ModelShell TS6
         default: break;
     }
 
@@ -1220,6 +1292,8 @@ juce::String EffectsPage::mixerPrefixForChannelId(int id)
         return "mixer_inst_" + juce::String(id - 800);
     if (id >= 900 && id < 900 + (int) MixerChannelIds::kMaxRustyStrips)
         return "mixer_rusty_" + juce::String(id - 900);
+    if (id >= 1000 && id < 1000 + (int) MixerChannelIds::kMaxPluginStrips)
+        return "mixer_plugin_" + juce::String(id - 1000);
 
     return {};
 }
@@ -1241,7 +1315,7 @@ void EffectsPage::refreshAllRows()
         const bool loaded = (type != EffectType::None);
         row->setState (loaded,
                        loaded && mRack->isSlotBypassed (i),
-                       loaded ? SlotComponent::effectTypeName (type) : juce::String());
+                       loaded ? SlotComponent::slotDisplayName (mRack, i) : juce::String());
     }
 }
 

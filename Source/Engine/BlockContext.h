@@ -36,6 +36,7 @@ struct BlockContext
     juce::MidiBuffer* clipPageMidi   = nullptr;
     juce::MidiBuffer* voxPageMidi    = nullptr;
     juce::MidiBuffer* instPageMidi   = nullptr;
+    juce::MidiBuffer* pluginPageMidi = nullptr;   // QA-ModelShell TS6 (BLU-447)
     juce::MidiBuffer* rustyDrumsMidi = nullptr;   // single buffer
 
     // Live audio input (for armed Vox/Inst strips). Snapshot taken at the top

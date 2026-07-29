@@ -5,6 +5,7 @@
 #include "MissingFileReport.h" // QA-Export Task 5: missing external-file collector
 #include "SampleLibrary.h"  // QA-ProjectSave Task 4: stable-root reference resolver
 #include "EngineRig.h"      // QA-ModelShell TS1: model-side engine owner
+#include "Hosting/PluginManager.h"   // QA-ModelShell TS6: hosted-plugin scan + added list
 
 // QA-Ec x QA-TempoMap seam: audio-clip block boundaries are BEAT-authored, so
 // with a published timeline their sample positions must resolve through it -
@@ -381,6 +382,10 @@ VibeSynthProcessor::VibeSynthProcessor()
 {
     mEngineRig = std::make_unique<EngineRig> (*this, mUndoManager);
 
+    // QA-ModelShell TS6: reads plugins.xml at construction (scan folders + the
+    // added list), so both are available to project load without any UI.
+    mPluginManager = std::make_unique<Hosting::PluginManager>();
+
     // QA-L-Fix: -1 = no held note-trigger voice.  Value-initialisation would
     // give 0, which is a valid MIDI note.
     mNoteTriggerHeld.fill (-1);
@@ -632,6 +637,7 @@ void VibeSynthProcessor::prepareToPlay(double sampleRate, int samplesPerBlock)
         MixerChannelIds::kInstBus2,
         MixerChannelIds::kInstBus3,
         MixerChannelIds::kRustyDrumsBus,
+        MixerChannelIds::kPluginsBus,       // QA-ModelShell TS6
     };
     for (size_t i = 0; i < kBusChannelIds.size(); ++i)
     {
@@ -2183,6 +2189,7 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
     std::array<juce::MidiBuffer, kMaxClipPages>   clipPageMidi;    // G-3 (2026-04-28): per-clip-page MIDI (sampler-style triggering)
     std::array<juce::MidiBuffer, kMaxVoxPages>    voxPageMidi;     // G-4 (2026-04-28): per-Vox-page MIDI
     std::array<juce::MidiBuffer, kMaxInstPages>   instPageMidi;    // G-4 (2026-04-28): per-Inst-page MIDI
+    std::array<juce::MidiBuffer, kMaxPluginPages> pluginPageMidi;  // QA-ModelShell TS6: per-plugin-tab MIDI
 
     // ── Flush-all request (from Stop button) ──────────────────────────────
     // Sends All-Notes-Off to every engine + clears pending offs. We do this
@@ -2723,6 +2730,13 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
                             sched (sPat.instNotes[ii], instPageMidi[ii], kInstPRTarget + ii,
                                    swMix (mSwingMixInst[ii]), swTrunc (mSwingTruncInst[ii]));
                         }
+                    // QA-ModelShell TS6: hosted VST3 instrument tabs.  Gate is
+                    // the engine pointer itself -- a plugin tab with no loaded
+                    // plugin has nothing to send MIDI to.
+                    for (int pi = 0; pi < kMaxPluginPages; ++pi)
+                        if (mPluginEngines[(size_t) pi] != nullptr)
+                            sched (sPat.pluginNotes[pi], pluginPageMidi[pi], kPluginsPRTarget + pi,
+                                   swMix (mSwingMixPlugin[pi]), swTrunc (mSwingTruncPlugin[pi]));
                     // J-7b: BaySickRustyDrums singleton roll.
                     if (mRustyDrumsActive.load(std::memory_order_acquire))
                         sched (sPat.rustyNotes, mRustyDrumsMidi, kRustyPRTarget,
@@ -2776,6 +2790,12 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
                         scheduleRollWindows (pat.instNotes[ii], instPageMidi[ii], kInstPRTarget + ii, 0.0, kInf, offHi, -1.0e18,
                                              swMix (mSwingMixInst[ii]), swTrunc (mSwingTruncInst[ii]));
                     }
+                // QA-ModelShell TS6: hosted VST3 instrument tabs.
+                for (int pi = 0; pi < kMaxPluginPages; ++pi)
+                    if (mPluginEngines[(size_t) pi] != nullptr)
+                        scheduleRollWindows (pat.pluginNotes[pi], pluginPageMidi[pi], kPluginsPRTarget + pi,
+                                             0.0, kInf, offHi, -1.0e18,
+                                             swMix (mSwingMixPlugin[pi]), swTrunc (mSwingTruncPlugin[pi]));
                 // J-7b: BaySickRustyDrums singleton roll.
                 if (mRustyDrumsActive.load(std::memory_order_acquire))
                     scheduleRollWindows (pat.rustyNotes, mRustyDrumsMidi, kRustyPRTarget, 0.0, kInf, offHi, -1.0e18,
@@ -2915,6 +2935,8 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
             else if (kind == 4 && idx >= 0 && idx < kMaxClipPages)  dest = &clipPageMidi [idx];
             else if ((kind == 7 || kind == 8) && idx >= 0 && idx < kMaxInstPages) dest = &instPageMidi[idx];
             else if (kind == 9)                                    dest = &mRustyDrumsMidi;
+            // QA-ModelShell TS6 (BLU-447): 10 = hosted VST3 instrument tab.
+            else if (kind == 10 && idx >= 0 && idx < kMaxPluginPages) dest = &pluginPageMidi[idx];
 
             // Per-engine live-keyboard octave offset.  The sfizz BaySickBasses
             // kit (kind 8) is sampled an octave below where a 61-key controller
@@ -3072,6 +3094,7 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
         mtCtx.clipPageMidi       = clipPageMidi .data();
         mtCtx.voxPageMidi        = voxPageMidi  .data();
         mtCtx.instPageMidi       = instPageMidi .data();
+        mtCtx.pluginPageMidi     = pluginPageMidi.data();
         mtCtx.rustyDrumsMidi     = &mRustyDrumsMidi;
         mtCtx.liveInputSnapshot  = &mLiveInputSnapshot;
 
@@ -3544,6 +3567,10 @@ VibeSynthProcessor::drainInsertPeakDbStereo (VibeGraph::InsertKind kind, int ind
             if (index >= 0 && index < MixerChannelIds::kMaxRustyStrips)
                 return drainPair (mRustyInsertPeakDbL[index], mRustyInsertPeakDbR[index]);
             break;
+        case VibeGraph::InsertKind::Plugin:
+            if (index >= 0 && index < MixerChannelIds::kMaxPluginStrips)
+                return drainPair (mPluginInsertPeakDbL[index], mPluginInsertPeakDbR[index]);
+            break;
     }
     return { -60.f, -60.f };
 }
@@ -3844,6 +3871,7 @@ void VibeSynthProcessor::updateAllPostRackEQsFromApvts()
         { VibeGraph::InsertKind::Vox,   "mixer_vox_",   MixerChannelIds::kMaxVoxStrips  },
         { VibeGraph::InsertKind::Inst,  "mixer_inst_",  MixerChannelIds::kMaxInstStrips },
         { VibeGraph::InsertKind::Rusty, "mixer_rusty_", MixerChannelIds::kMaxRustyStrips }, // J-6
+        { VibeGraph::InsertKind::Plugin, "mixer_plugin_", MixerChannelIds::kMaxPluginStrips }, // TS6
     };
     for (const auto& is : kInsertSets)
     {
@@ -3899,6 +3927,7 @@ void VibeSynthProcessor::updateAllPreRackEQsFromApvts()
         { VibeGraph::InsertKind::Vox,   "mixer_vox_",   MixerChannelIds::kMaxVoxStrips  },
         { VibeGraph::InsertKind::Inst,  "mixer_inst_",  MixerChannelIds::kMaxInstStrips },
         { VibeGraph::InsertKind::Rusty, "mixer_rusty_", MixerChannelIds::kMaxRustyStrips }, // J-6
+        { VibeGraph::InsertKind::Plugin, "mixer_plugin_", MixerChannelIds::kMaxPluginStrips }, // TS6
     };
     for (const auto& is : kInsertSets)
     {
@@ -5560,6 +5589,46 @@ void VibeSynthProcessor::registerLayerEngine(int idx, juce::AudioProcessor* eng)
         mLayerRenderTasks[(size_t) idx] = std::move(task);
     }
 }
+// QA-ModelShell TS6 (BLU-447): hosted VST3 instrument tab.  Byte-for-byte the
+// Layer shape -- engine pointer under a SpinLock, mixer strip params, an
+// InsertNode, and an EngineInsertTask on the dispatcher.  The only differences
+// are the parent bus and which per-tab MIDI array the task reads.
+void VibeSynthProcessor::registerPluginEngine(int idx, juce::AudioProcessor* eng)
+{
+    {
+        juce::SpinLock::ScopedLockType lk(mPluginEngineLock);
+        if (idx >= 0 && idx < kMaxPluginPages) mPluginEngines[idx] = eng;
+    }
+    if (idx >= 0 && idx < kMaxPluginPages && eng != nullptr)
+    {
+        const juce::String prefix = "mixer_plugin_" + juce::String(idx);
+        ensureMixerStripParams(prefix, MixerStripKind::Insert, MixerChannelIds::kPluginsBus);
+        mVibeGraph.ensureInsertNode(VibeGraph::InsertKind::Plugin, idx,
+                                     "Plugin " + juce::String(idx + 1), prefix);
+
+        auto task = std::make_unique<EngineInsertTask>(
+            eng, EngineInsertTask::Kind::Plugin, idx,
+            MixerChannelIds::pluginInsert(idx), mVibeGraph);
+        mRenderDispatcher.registerTask(task.get());
+        mPluginRenderTasks[(size_t) idx] = std::move(task);
+    }
+}
+
+void VibeSynthProcessor::unregisterPluginEngine(int idx)
+{
+    if (idx < 0 || idx >= kMaxPluginPages) return;
+    // Task down BEFORE the engine pointer clears, so the dispatcher never sees
+    // a task aimed at a dead engine.
+    if (mPluginRenderTasks[(size_t) idx])
+    {
+        mRenderDispatcher.unregisterTask(MixerChannelIds::pluginInsert(idx));
+        mPluginRenderTasks[(size_t) idx].reset();
+    }
+    juce::SpinLock::ScopedLockType lk(mPluginEngineLock);
+    mPluginEngines[idx] = nullptr;
+    // InsertNode retained on purpose - preserves mixer state if the tab returns.
+}
+
 void VibeSynthProcessor::unregisterLayerEngine(int idx)
 {
     if (idx < 0 || idx >= kMaxLayerPages) return;
@@ -6184,6 +6253,12 @@ void VibeSynthProcessor::ensureSwingParams()
         const juce::String p = "swing_inst_" + juce::String(i);
         mSwingMixInst[i]   = addF(p + "_mix",   p + " Mix", 1.f);
         mSwingTruncInst[i] = addB(p + "_trunc", p + " Truncate", false);
+    }
+    for (int i = 0; i < kMaxPluginPages; ++i)
+    {
+        const juce::String p = "swing_plugin_" + juce::String(i);
+        mSwingMixPlugin[i]   = addF(p + "_mix",   p + " Mix", 1.f);
+        mSwingTruncPlugin[i] = addB(p + "_trunc", p + " Truncate", false);
     }
     mSwingMixRusty   = addF("swing_rusty_mix",   "swing_rusty Mix", 1.f);
     mSwingTruncRusty = addB("swing_rusty_trunc", "swing_rusty Truncate", false);

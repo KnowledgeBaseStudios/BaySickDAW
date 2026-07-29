@@ -163,6 +163,7 @@ std::shared_ptr<const PatternRollsSnapshot> PatternManager::buildPatternRollsSna
     for (int i = 0; i < kMaxClipPages;  ++i) snap->clipNotes[(size_t) i]  = pat.clipRoll[(size_t) i].notes;
     for (int i = 0; i < kMaxVoxPages;   ++i) snap->voxNotes[(size_t) i]   = pat.voxRoll[(size_t) i].notes;
     for (int i = 0; i < kMaxInstPages;  ++i) snap->instNotes[(size_t) i]  = pat.instRoll[(size_t) i].notes;
+    for (int i = 0; i < kMaxPluginPages; ++i) snap->pluginNotes[(size_t) i] = pat.pluginRoll[(size_t) i].notes;
     snap->rustyNotes   = pat.baySickRustyDrumsRoll.notes;
     snap->contentBeats = getPatternContentBeats (patternIndex);
     return snap;
@@ -906,6 +907,7 @@ bool PatternManager::patternHasNotes (int patternIndex) const
     for (const auto& r : p.clipRoll)  if (! r.notes.empty()) return true;
     for (const auto& r : p.voxRoll)   if (! r.notes.empty()) return true;
     for (const auto& r : p.instRoll)  if (! r.notes.empty()) return true;
+    for (const auto& r : p.pluginRoll) if (! r.notes.empty()) return true;
     if (! p.baySickRustyDrumsRoll.notes.empty()) return true;
     if (! p.drumRoll.notes.empty()) return true;
     return false;
@@ -1065,6 +1067,7 @@ double PatternManager::getPatternContentBeats (int patternIndex) const
         // G-4 (2026-04-28): Vox + Inst rolls likewise.
         for (auto& roll : pat.voxRoll)   scanRoll(roll);
         for (auto& roll : pat.instRoll)  scanRoll(roll);
+        for (auto& roll : pat.pluginRoll) scanRoll(roll);
         // J-7b (2026-05-04): BaySickRustyDrums singleton roll likewise - without
         // this scan, multi-bar drum patterns wrap at the 1-bar minimum instead
         // of the longest note's end.
@@ -1532,6 +1535,15 @@ juce::ValueTree PatternManager::toValueTree() const
             rn.setProperty("page", i, nullptr);
             rollsNode.addChild(rn, -1, nullptr);
         }
+        // QA-ModelShell TS6 (BLU-447): per-plugin-tab roll.  Skip-if-empty like
+        // its siblings, so a project written before TS6 round-trips unchanged.
+        for (int i = 0; i < (int)p.pluginRoll.size(); ++i)
+        {
+            if (p.pluginRoll[i].notes.empty()) continue;
+            auto rn = rollToValueTree("PluginPageRoll", p.pluginRoll[i]);
+            rn.setProperty("page", i, nullptr);
+            rollsNode.addChild(rn, -1, nullptr);
+        }
         // J-7b (2026-05-04): BaySickRustyDrums singleton roll.  No page index
         // (one Rusty engine per project).  Idempotent skip-if-empty so old
         // projects without this tag round-trip cleanly.
@@ -1918,6 +1930,13 @@ void PatternManager::fromValueTree(const juce::ValueTree& root)
                     int page = (int) rn.getProperty("page", 0);
                     if (page >= 0 && page < (int)p.instRoll.size())
                         rollFromValueTree(rn, p.instRoll[page]);
+                }
+                else if (rn.hasType("PluginPageRoll"))
+                {
+                    // QA-ModelShell TS6: per-plugin-tab roll.
+                    int page = (int) rn.getProperty("page", 0);
+                    if (page >= 0 && page < (int)p.pluginRoll.size())
+                        rollFromValueTree(rn, p.pluginRoll[page]);
                 }
                 else if (rn.hasType("BaySickRustyDrumsRoll"))
                 {

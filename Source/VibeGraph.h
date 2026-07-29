@@ -51,6 +51,12 @@ namespace MixerChannelIds
     constexpr int kInstBus2  = 10;   // G-6: optional 2nd Inst bus
     constexpr int kInstBus3  = 11;   // G-6: optional 3rd Inst bus
     constexpr int kRustyDrumsBus = 12; // J-4 (2026-05-03): dedicated bus for BaySickRustyDrums strips
+    // QA-ModelShell TS6 (BLU-447, 2026-07-29): hosted VST3 instrument strips.
+    // Their inserts are deliberately NOT main-out locked -- Jeff's spec is that
+    // a VST strip moves under the Layers or Bass bus exactly as those two
+    // already move between each other, which is the existing unlocked
+    // `_sendTo` behaviour rather than anything new.
+    constexpr int kPluginsBus = 13;
     constexpr int kAuxBase   = 100;  // Aux 0..17 → 100..117 (G-7 polish: 16 → 18)
     constexpr int kLayerBase = 200;  // Layer insert 0..15 → 200..215
     constexpr int kBassBase  = 300;  // Bass insert 0..15 → 300..315
@@ -59,11 +65,13 @@ namespace MixerChannelIds
     constexpr int kVoxBase   = 600;  // R1: Vox insert 0..5 → 600..605
     constexpr int kInstBase  = 700;  // R1: Inst insert 0..19 → 700..719 (kMaxInstStrips bumped 6→10 in G-4 2026-04-28, 10→20 in G-6 2026-04-29)
     constexpr int kRustyBase = 800;  // J-4: BaySickRustyDrums insert 0..12 → 800..812
+    constexpr int kPluginBase = 900; // TS6: hosted VST3 instrument insert 0..19 → 900..919
 
     constexpr int kMaxVoxStrips   = 6;   // R1
     constexpr int kMaxInstStrips  = 20;  // R1; bumped 6 → 10 in G-4 (2026-04-28); 10 → 20 in G-6 (2026-04-29)
     constexpr int kMaxAuxStrips   = 18;  // 5F-4b B2; bumped 16 → 18 in G-7 polish (2026-04-29)
     constexpr int kMaxRustyStrips = 13;  // J-4: 13 sound types per BaySickRustyDrums kit (no doubles)
+    constexpr int kMaxPluginStrips = 20; // TS6: must stay equal to kMaxPluginPages
 
     inline int layerInsert (int idx) { return kLayerBase + idx; }
     inline int bassInsert  (int idx) { return kBassBase  + idx; }
@@ -73,6 +81,7 @@ namespace MixerChannelIds
     inline int voxInsert   (int idx) { return kVoxBase   + idx; }
     inline int instInsert  (int idx) { return kInstBase  + idx; }
     inline int rustyInsert (int idx) { return kRustyBase + idx; }
+    inline int pluginInsert (int idx) { return kPluginBase + idx; }
 
     // Derive the APVTS prefix from a channel id (e.g. 200 → "mixer_layer_0").
     inline juce::String prefixFromChannelId (int chId)
@@ -91,6 +100,7 @@ namespace MixerChannelIds
             case kInstBus2:  return "mixer_instbus2";
             case kInstBus3:  return "mixer_instbus3";
             case kRustyDrumsBus: return "mixer_rustybus";
+            case kPluginsBus: return "mixer_pluginbus";
         }
         if (chId >= kLayerBase && chId < kLayerBase + 16)           return "mixer_layer_" + juce::String(chId - kLayerBase);
         if (chId >= kBassBase  && chId < kBassBase  + 16)           return "mixer_bass_"  + juce::String(chId - kBassBase);
@@ -100,6 +110,7 @@ namespace MixerChannelIds
         if (chId >= kVoxBase   && chId < kVoxBase   + kMaxVoxStrips)   return "mixer_vox_"   + juce::String(chId - kVoxBase);
         if (chId >= kInstBase  && chId < kInstBase  + kMaxInstStrips)  return "mixer_inst_"  + juce::String(chId - kInstBase);
         if (chId >= kRustyBase && chId < kRustyBase + kMaxRustyStrips) return "mixer_rusty_" + juce::String(chId - kRustyBase);
+        if (chId >= kPluginBase && chId < kPluginBase + kMaxPluginStrips) return "mixer_plugin_" + juce::String(chId - kPluginBase);
         return {};
     }
 
@@ -110,7 +121,7 @@ namespace MixerChannelIds
             || chId == kFxBus     || chId == kClipsBus
             || chId == kVoxBus    || chId == kInstBus
             || chId == kVoxBus2   || chId == kInstBus2 || chId == kInstBus3
-            || chId == kRustyDrumsBus;
+            || chId == kRustyDrumsBus || chId == kPluginsBus;
     }
 
     // Is this channel's main-out locked (cannot be rerouted)?
@@ -149,6 +160,7 @@ namespace MixerChannelIds
             case kInstBus2:  return "Inst Bus 2";
             case kInstBus3:  return "Inst Bus 3";
             case kRustyDrumsBus: return "RustyDrums Bus";
+            case kPluginsBus: return "Plugins Bus";
         }
         if (chId >= kLayerBase && chId < kLayerBase + 16) return "Layer " + juce::String(chId - kLayerBase + 1);
         if (chId >= kBassBase  && chId < kBassBase  + 16) return "Bass "  + juce::String(chId - kBassBase  + 1);
@@ -158,6 +170,7 @@ namespace MixerChannelIds
         if (chId >= kVoxBase   && chId < kVoxBase   + kMaxVoxStrips)   return "Vox "   + juce::String(chId - kVoxBase   + 1);
         if (chId >= kInstBase  && chId < kInstBase  + kMaxInstStrips)  return "Inst "  + juce::String(chId - kInstBase  + 1);
         if (chId >= kRustyBase && chId < kRustyBase + kMaxRustyStrips) return "Rusty " + juce::String(chId - kRustyBase + 1);
+        if (chId >= kPluginBase && chId < kPluginBase + kMaxPluginStrips) return "Plugin " + juce::String(chId - kPluginBase + 1);
         return "Ch " + juce::String(chId);
     }
 
@@ -179,6 +192,7 @@ namespace MixerChannelIds
             case kInstBus2:
             case kInstBus3:  return kMaster;
             case kRustyDrumsBus: return kMaster;
+            case kPluginsBus: return kMaster;
         }
         if (channelId >= kLayerBase && channelId < kLayerBase + 16)             return kLayersBus;
         if (channelId >= kBassBase  && channelId < kBassBase  + 16)             return kBassBus;
@@ -188,6 +202,7 @@ namespace MixerChannelIds
         if (channelId >= kVoxBase   && channelId < kVoxBase   + kMaxVoxStrips)  return kVoxBus;
         if (channelId >= kInstBase  && channelId < kInstBase  + kMaxInstStrips) return kInstBus;
         if (channelId >= kRustyBase && channelId < kRustyBase + kMaxRustyStrips) return kRustyDrumsBus;
+        if (channelId >= kPluginBase && channelId < kPluginBase + kMaxPluginStrips) return kPluginsBus;
         return kMaster;
     }
 }
@@ -348,6 +363,11 @@ public:
     // BaySickRustyDrums instance - sums silence (cheap pre-process) until
     // a kit is loaded and 13 strips spawn at kRustyBase..kRustyBase+12.
     EffectRack* getRustyDrumsBusRack();
+    // QA-ModelShell TS6 (BLU-447): dedicated bus for hosted VST3 instrument
+    // strips.  Always allocated on the same reasoning as the Rusty bus -- audio
+    // routing works whether or not any plugin tab exists, and the bus sums
+    // silence cheaply until strips spawn at kPluginBase..kPluginBase+19.
+    EffectRack* getPluginsBusRack();
 
     // ── Per-page instrument EffectRacks ────────────────────────────────────────
     // These sit between each engine's pre-rack page EQ and the bus sum.
@@ -376,6 +396,7 @@ public:
     EQ8MsDSP* getInstBus2EQ();
     EQ8MsDSP* getInstBus3EQ();
     EQ8MsDSP* getRustyDrumsBusEQ();        // J-4
+    EQ8MsDSP* getPluginsBusEQ();           // QA-ModelShell TS6
 
     // §P4.3: Pre-rack bus EQs - fresh EQ8MsDSP per bus, runs at the very start
     // of each bus's processBlock chain (input -> preEq -> rack -> postEq -> fader).
@@ -394,6 +415,7 @@ public:
     EQ8MsDSP* getInstBus2PreEQ();
     EQ8MsDSP* getInstBus3PreEQ();
     EQ8MsDSP* getRustyDrumsBusPreEQ();     // J-4
+    EQ8MsDSP* getPluginsBusPreEQ();        // QA-ModelShell TS6
 
     // ── PDC - Plugin Delay Compensation ──────────────────────────────────────
     // Call from message thread after any effect is loaded/removed/bypassed.
@@ -465,7 +487,7 @@ public:
     // Each insert gets its own rack + post-rack EQ + polarity/width/fader path.
     // Driven by APVTS reads in the audio thread (memoized per block).
     // Batch 1 declares the API; Batch 2 defines InsertNode and the process loop.
-    enum class InsertKind { Layer, Bass, Drum, Audio, Aux, Vox, Inst, Rusty };
+    enum class InsertKind { Layer, Bass, Drum, Audio, Aux, Vox, Inst, Rusty, Plugin };
 
     struct InsertNode;
 
@@ -674,6 +696,9 @@ public:
     std::atomic<float> rustyDrumsBusPeakDb  { -60.f };
     std::atomic<float> rustyDrumsBusPeakDbL { -60.f };
     std::atomic<float> rustyDrumsBusPeakDbR { -60.f };
+    std::atomic<float> pluginsBusPeakDb     { -60.f };   // QA-ModelShell TS6
+    std::atomic<float> pluginsBusPeakDbL    { -60.f };
+    std::atomic<float> pluginsBusPeakDbR    { -60.f };
 
     // QA-RustyMeter part 2 (2026-05-30): per-bus windowed-RMS atoms for the
     // split meter's scrolling top half.  11 non-master buses x L/R (Master keeps
@@ -693,6 +718,7 @@ public:
     std::atomic<float> instBus2RmsDbL      { -60.f }, instBus2RmsDbR      { -60.f };
     std::atomic<float> instBus3RmsDbL      { -60.f }, instBus3RmsDbR      { -60.f };
     std::atomic<float> rustyDrumsBusRmsDbL { -60.f }, rustyDrumsBusRmsDbR { -60.f };
+    std::atomic<float> pluginsBusRmsDbL    { -60.f }, pluginsBusRmsDbR    { -60.f };  // TS6
 
     // QA-AudioMeters (2026-05-24): per-kind insert peak atomics, parallel to the
     // per-bus atomics above.  InsertNode::process publishes via publishPeakReading;
@@ -713,6 +739,7 @@ public:
     std::array<std::atomic<float>, MixerChannelIds::kMaxVoxStrips>    voxInsertPeakDbL    {}, voxInsertPeakDbR    {};
     std::array<std::atomic<float>, MixerChannelIds::kMaxInstStrips>   instInsertPeakDbL   {}, instInsertPeakDbR   {};
     std::array<std::atomic<float>, MixerChannelIds::kMaxRustyStrips>  rustyInsertPeakDbL  {}, rustyInsertPeakDbR  {};
+    std::array<std::atomic<float>, MixerChannelIds::kMaxPluginStrips> pluginInsertPeakDbL {}, pluginInsertPeakDbR {};
 
     // ── Phase-2 instrument node registry ─────────────────────────────────────
     // Nodes registered here will be integrated into the processing graph in a
@@ -746,7 +773,7 @@ private:
     // clipsbus / voxbus / instbus / voxbus2 / instbus2 / instbus3 / rustybus).
     // CPU-safeguarding standing rule: avoid string-keyed getRawParameterValue
     // lookups per audio block; cache the raw atomic ptrs once + reuse.
-    std::array<std::atomic<float>*, 11> mBusSoloPtr {};
+    std::array<std::atomic<float>*, 12> mBusSoloPtr {};
 
     // Instrument channel nodes: keyed by the ID returned by addInstrChannel().
     // Insertion order preserved via mInstrChannelOrder for dropdown display.
@@ -797,6 +824,9 @@ private:
     // BaySickRustyDrums instance exists - bus sums silence cheaply until a
     // kit's 13 strips are registered via ensureRustyInsertNode.
     std::unique_ptr<InstrChannelNode> mRustyDrumsBusNode;
+    // QA-ModelShell TS6 (BLU-447): hosted VST3 instrument bus, same
+    // always-allocated shape as the Rusty bus above.
+    std::unique_ptr<InstrChannelNode> mPluginsBusNode;
     // mRustyInserts std::map removed by QA-InsertMaps 2026-05-24 (flattened into
     // mInsertsByChannel above; chId range 800..812 for Rusty kit strips).
 

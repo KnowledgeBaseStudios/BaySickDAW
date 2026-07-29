@@ -8,7 +8,10 @@
 class VibeGraph;
 class ISidechainEngine;
 
-namespace VibeGraphInsertKindBridge { enum class Kind { Layer, Bass, Drum }; }
+// QA-ModelShell TS6 (BLU-447): Plugin joins the engine-driven kinds -- a hosted
+// VST3 instrument is rendered exactly like a Layer, differing only in which
+// per-tab MIDI array it reads.
+namespace VibeGraphInsertKindBridge { enum class Kind { Layer, Bass, Drum, Plugin }; }
 
 // EngineInsertTask
 // ----------------

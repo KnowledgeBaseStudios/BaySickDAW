@@ -57,6 +57,11 @@ public:
     // draws its frame; it does not free it.
     void setContentNonOwned (juce::Component* content);
     juce::Component* getContent() const noexcept { return mContentRaw; }
+
+    // Resize so the content area is exactly contentW x contentH (clamped to the
+    // workspace, floored by the constrainer).  Used by hosted-plugin surfaces,
+    // which arrive at whatever size the plugin declares.
+    void sizeToContent (int contentW, int contentH);
     // Hands the page back WITHOUT destroying it -- for a reparent that must not
     // tear the page down.  Destroy-on-close does not use this (it wants the
     // page gone); it exists so a future move-between-frames is possible.

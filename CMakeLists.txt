@@ -50,6 +50,19 @@ juce_add_binary_data(BaySickDAWAssets
         "${CMAKE_CURRENT_SOURCE_DIR}/Assets/control_tab.png"
 )
 
+# ── Plugin-sandbox helper architecture suffix (QA-ModelShell TS6, BLU-302) ────
+# An MSVC generator is single-platform per build tree, so the 32-bit helper is a
+# SEPARATE configure into its own build dir with -A Win32.  This derives the
+# name suffix from whichever platform the current tree is configured for, so one
+# source tree produces BaySickPluginHost64.exe and BaySickPluginHost32.exe
+# without either build knowing about the other.
+if(CMAKE_SIZEOF_VOID_P EQUAL 4)
+    set(BAYSICK_HELPER_ARCH_SUFFIX "32")
+else()
+    set(BAYSICK_HELPER_ARCH_SUFFIX "64")
+endif()
+message(STATUS "Plugin sandbox helper will build as BaySickPluginHost${BAYSICK_HELPER_ARCH_SUFFIX}.exe")
+
 # ── Shared compile definitions ────────────────────────────────────────────────
 set(VIBESYNTH_DEFS
     JUCE_WEB_BROWSER=0
@@ -69,6 +82,28 @@ set(VIBESYNTH_DEFS
     # Debug builds break hundreds of times during cold start as our long /
     # similar-prefix mixer-strip paramIDs trip the AAX trim check.
     JUCE_DISABLE_CAUTIOUS_PARAMETER_ID_CHECKING=1
+    # QA-ModelShell TS6 (2026-07-29): VST3 plugin hosting.  This flag is the
+    # ONLY lever -- juce_PluginFormatDefs.h derives JUCE_INTERNAL_HAS_VST3 from
+    # it and #errors if the internal name is set directly.  Turning it on
+    # compiles bodies that are already in our include list but currently expand
+    # to nothing: juce_VST3PluginFormat.cpp, juce_KnownPluginList.cpp and
+    # juce_PluginDirectoryScanner.cpp, plus the vendored VST3 SDK under
+    # juce_audio_processors_headless/format_types/VST3_SDK (MIT).
+    #
+    # No module change is needed and none was ever needed: juce_audio_utils
+    # depends on juce_audio_processors, which depends on
+    # juce_audio_processors_headless -- the headless module is the DEPENDENCY
+    # of the full one, not an alternative to it.  We have always built the full
+    # module (AudioProcessorValueTreeState lives in it), so hosted-plugin
+    # EDITORS -- VST3PluginWindow wrapping the plugin's IPlugView -- come with
+    # it.  That foreign HWND is why our workspace windows are native child
+    # peers (see WorkspaceWindow.h).
+    #
+    # JUCE_PLUGINHOST_VST stays OFF deliberately: JUCE's VST2 path #includes
+    # Steinberg SDK headers that JUCE does not ship and that are absent here,
+    # and the VST2 SDK has been unlicensable since Oct 2018.  Future State
+    # CL-303 carries the full finding -- do not flip it without reading that.
+    JUCE_PLUGINHOST_VST3=1
 )
 
 # ── ASIO (Steinberg) ─────────────────────────────────────────────────────────
@@ -92,6 +127,14 @@ endif()
 set(VIBESYNTH_DSP_SOURCES
     Source/PluginProcessor.cpp
     Source/EngineRig.cpp
+    # QA-ModelShell TS6 (2026-07-29): hosted-plugin scanning + the added list.
+    # Model-side alongside EngineRig -- project load re-instantiates saved
+    # plugin slots with no editor guaranteed to exist.
+    Source/Hosting/PluginManager.cpp
+    Source/Hosting/HostedPlugin.cpp
+    Source/Hosting/HostedPluginEffect.cpp
+    # QA-ModelShell TS6 (BLU-302): host end of the plugin sandbox bridge.
+    Source/Hosting/SandboxedPluginClient.cpp
     Source/SampleLibrary.cpp
     Source/VibeGraph.cpp
     Source/SynthVoice.cpp
@@ -541,6 +584,10 @@ target_sources(BaySickDAWStandalone PRIVATE
     Source/Standalone/EffectPresetIO.cpp
     Source/Standalone/EffectWindows.cpp
     Source/Standalone/FxRackPresetIO.cpp
+    # QA-ModelShell TS6 (2026-07-29): Options > Plugins manager (BLU-299).
+    Source/Standalone/PluginsManagerWindow.cpp
+    # QA-ModelShell TS6 (BLU-447): the hosted-VST3-instrument tab view.
+    Source/Standalone/PluginsPage.cpp
     # Pages
     Source/Standalone/LayersPage.cpp
     Source/Standalone/BassPage.cpp
@@ -719,3 +766,57 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/Resources")
                 "$<TARGET_FILE_DIR:BaySickDAWStandalone>/Resources"
         VERBATIM)
 endif()
+
+# ── BaySickPluginHost — the plugin sandbox helper (QA-ModelShell TS6, BLU-302) ─
+# Hosts ONE plugin in its own process, so a crashing plugin takes only itself
+# down.  FL's measured shape: one process per bridged plugin.
+#
+# Links ONLY the three JUCE modules it needs and NONE of our vendored libraries
+# (sfizz / NAM / RubberBand / LAME / WORLD / lunasvg).  That is deliberate and
+# load-bearing: those are all x64 builds in this tree, and the 32-bit helper
+# (BLU-302 7b, built from this same source via a separate Win32 configure)
+# would otherwise require x86 builds of every one of them.  Keeping this binary
+# tiny is what makes the 32-bit half cheap.
+# PRODUCT_NAME (not OUTPUT_NAME) is what juce_add_gui_app uses to name the
+# artefact -- OUTPUT_NAME is silently ignored here, which produced a plain
+# BaySickPluginHost.exe that SandboxedPluginClient::helperExecutable would never
+# have found.  Both builds ship side by side and the host picks between them
+# from the plugin's own PE machine type, so the suffix has to be in the filename.
+juce_add_gui_app(BaySickPluginHost
+    PRODUCT_NAME "BaySickPluginHost${BAYSICK_HELPER_ARCH_SUFFIX}"
+)
+
+juce_generate_juce_header(BaySickPluginHost)
+
+target_sources(BaySickPluginHost PRIVATE
+    Source/Hosting/Helper/PluginHostMain.cpp
+)
+
+target_compile_definitions(BaySickPluginHost
+    PUBLIC
+        JUCE_WEB_BROWSER=0
+        JUCE_USE_CURL=0
+        JUCE_DISPLAY_SPLASH_SCREEN=0
+        # The helper's entire reason to exist.
+        JUCE_PLUGINHOST_VST3=1
+)
+
+target_include_directories(BaySickPluginHost PRIVATE Source)
+
+target_link_libraries(BaySickPluginHost
+    PRIVATE
+        juce::juce_audio_processors
+        juce::juce_audio_utils
+        juce::juce_gui_basics
+    PUBLIC
+        juce::juce_recommended_config_flags
+        juce::juce_recommended_warning_flags
+)
+
+# Stage the helper beside the app so SandboxedPluginClient::helperExecutable
+# finds it next to the running binary.
+add_custom_command(TARGET BaySickPluginHost POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "$<TARGET_FILE:BaySickPluginHost>"
+            "$<TARGET_FILE_DIR:BaySickDAWStandalone>/$<TARGET_FILE_NAME:BaySickPluginHost>"
+    VERBATIM)

@@ -1,0 +1,549 @@
+#include "PluginManager.h"
+#include "../AppPaths.h"
+
+namespace Hosting
+{
+
+juce::String describeArch (PluginArch a) noexcept
+{
+    switch (a)
+    {
+        case PluginArch::X86: return "32-bit";
+        case PluginArch::X64: return "64-bit";
+        case PluginArch::Unknown:
+        default:              return "unknown";
+    }
+}
+
+// ── Persistence ──────────────────────────────────────────────────────────────
+// Global preference, not project data -- the user's installed plugins do not
+// change when they open a different song.  Sits beside settings.xml /
+// audio_settings.xml / ui_prefs.xml at the app root rather than inside
+// settings.xml, deliberately: settings.xml is re-parsed and rewritten whole on
+// every window close (the smell the layout batch exists to remove) and adding
+// a plugin database to that path would make the cleanup worse.
+
+juce::File PluginManager::dataFile()
+{
+    return AppPaths::appRoot().getChildFile ("plugins.xml");
+}
+
+juce::File PluginManager::deadMansPedalFile()
+{
+    // JUCE writes the plugin currently under scan here and clears it on
+    // success, so anything left behind is something that took the app down
+    // mid-scan.  applyBlacklistingsFromDeadMansPedal turns that into a real
+    // blacklist on the next run -- which is the whole crash-blacklist
+    // requirement, already implemented upstream.
+    return AppPaths::appRoot().getChildFile ("plugins_scan_crashes.txt");
+}
+
+// ── Construction ─────────────────────────────────────────────────────────────
+
+PluginManager::PluginManager()
+    : juce::Thread ("BaySick Plugin Scan")
+{
+    // Hard-coded rather than addDefaultFormats(): VST3 is the entire licensed
+    // format scope (CL-303), and addDefaultFormats() would silently widen it
+    // the moment another JUCE_PLUGINHOST_* flag is turned on for any reason.
+    mFormats.addFormat (new juce::VST3PluginFormat());
+
+    loadFromDisk();
+    sInstance.store (this);
+}
+
+PluginManager* PluginManager::getInstance() noexcept
+{
+    return sInstance.load();
+}
+
+PluginManager::~PluginManager()
+{
+    auto* self = this;
+    sInstance.compare_exchange_strong (self, nullptr);
+
+    // Both bases outlive this destructor body, and both need shutting down
+    // from here: juce::Thread asserts if it is still running when destroyed,
+    // and a queued AsyncUpdater callback would fire into a half-dead object.
+    signalThreadShouldExit();
+    stopThread (4000);
+    cancelPendingUpdate();
+}
+
+juce::AudioPluginFormat* PluginManager::vst3Format() const noexcept
+{
+    for (auto* f : mFormats.getFormats())
+        if (f != nullptr && f->getName() == "VST3")
+            return f;
+
+    return nullptr;
+}
+
+// ── Section 1 — scan folders ─────────────────────────────────────────────────
+
+juce::FileSearchPath PluginManager::defaultScanFolders()
+{
+    juce::VST3PluginFormat fmt;
+    return fmt.getDefaultLocationsToSearch();
+}
+
+juce::FileSearchPath PluginManager::getScanFolders() const
+{
+    const juce::ScopedLock sl (mLock);
+    return mScanFolders;
+}
+
+bool PluginManager::addScanFolder (const juce::File& f)
+{
+    if (! f.isDirectory())
+        return false;
+
+    {
+        const juce::ScopedLock sl (mLock);
+
+        for (int i = 0; i < mScanFolders.getNumPaths(); ++i)
+            if (mScanFolders[i] == f)
+                return false;
+
+        mScanFolders.add (f);
+    }
+
+    saveToDisk();
+    return true;
+}
+
+void PluginManager::removeScanFolder (int index)
+{
+    {
+        const juce::ScopedLock sl (mLock);
+
+        if (index < 0 || index >= mScanFolders.getNumPaths())
+            return;
+
+        mScanFolders.remove (index);
+    }
+
+    saveToDisk();
+}
+
+void PluginManager::resetScanFoldersToDefaults()
+{
+    {
+        const juce::ScopedLock sl (mLock);
+        mScanFolders = defaultScanFolders();
+    }
+
+    saveToDisk();
+}
+
+// ── Section 2 — the added list ───────────────────────────────────────────────
+
+static void sortByName (juce::Array<juce::PluginDescription>& list)
+{
+    std::sort (list.begin(), list.end(),
+               [] (const juce::PluginDescription& a, const juce::PluginDescription& b)
+               {
+                   const int byName = a.name.compareIgnoreCase (b.name);
+                   return byName != 0 ? byName < 0
+                                      : a.createIdentifierString() < b.createIdentifierString();
+               });
+}
+
+juce::Array<juce::PluginDescription> PluginManager::getAddedPlugins() const
+{
+    juce::Array<juce::PluginDescription> out;
+
+    {
+        const juce::ScopedLock sl (mLock);
+        out = mAdded.getTypes();
+    }
+
+    sortByName (out);
+    return out;
+}
+
+juce::Array<juce::PluginDescription> PluginManager::getAddedEffects() const
+{
+    juce::Array<juce::PluginDescription> out;
+
+    for (const auto& d : getAddedPlugins())
+        if (! d.isInstrument)
+            out.add (d);
+
+    return out;
+}
+
+juce::Array<juce::PluginDescription> PluginManager::getAddedInstruments() const
+{
+    juce::Array<juce::PluginDescription> out;
+
+    for (const auto& d : getAddedPlugins())
+        if (d.isInstrument)
+            out.add (d);
+
+    return out;
+}
+
+bool PluginManager::isOnAddedList (const juce::PluginDescription& d) const
+{
+    const auto id = d.createIdentifierString();
+    const juce::ScopedLock sl (mLock);
+
+    for (const auto& existing : mAdded.getTypes())
+        if (existing.createIdentifierString() == id)
+            return true;
+
+    return false;
+}
+
+void PluginManager::addToAddedList (const juce::Array<juce::PluginDescription>& toAdd)
+{
+    if (toAdd.isEmpty())
+        return;
+
+    {
+        const juce::ScopedLock sl (mLock);
+
+        for (const auto& d : toAdd)
+            mAdded.addType (d);
+
+        // Anything just added stops being an addable scan result, so section 3
+        // reflects the move without needing a rescan.
+        for (int i = mScanResults.size(); --i >= 0;)
+        {
+            const auto id = mScanResults.getReference (i).createIdentifierString();
+
+            for (const auto& d : toAdd)
+            {
+                if (d.createIdentifierString() == id)
+                {
+                    mScanResults.remove (i);
+                    break;
+                }
+            }
+        }
+    }
+
+    saveToDisk();
+
+    if (onAddedListChanged)
+        onAddedListChanged();
+}
+
+void PluginManager::removeFromAddedList (const juce::PluginDescription& d)
+{
+    {
+        const juce::ScopedLock sl (mLock);
+        mAdded.removeType (d);
+    }
+
+    saveToDisk();
+
+    if (onAddedListChanged)
+        onAddedListChanged();
+}
+
+std::unique_ptr<juce::PluginDescription> PluginManager::findAdded (const juce::String& identifier) const
+{
+    const juce::ScopedLock sl (mLock);
+
+    for (const auto& d : mAdded.getTypes())
+        if (d.createIdentifierString() == identifier)
+            return std::make_unique<juce::PluginDescription> (d);
+
+    return {};
+}
+
+// ── Section 3 — scanning ─────────────────────────────────────────────────────
+
+bool  PluginManager::isScanning()      const noexcept { return isThreadRunning(); }
+bool  PluginManager::hasScanned()      const noexcept { return mHasScanned.load(); }
+float PluginManager::getScanProgress() const noexcept { return mProgress.load(); }
+
+juce::String PluginManager::getScanStatusText() const
+{
+    const juce::ScopedLock sl (mLock);
+    return mStatusText;
+}
+
+juce::Array<juce::PluginDescription> PluginManager::getScanResults() const
+{
+    juce::Array<juce::PluginDescription> out;
+
+    {
+        const juce::ScopedLock sl (mLock);
+        out = mScanResults;
+    }
+
+    sortByName (out);
+    return out;
+}
+
+juce::Array<SkippedPlugin> PluginManager::getSkipped() const
+{
+    const juce::ScopedLock sl (mLock);
+    return mSkipped;
+}
+
+void PluginManager::startScan()
+{
+    if (isThreadRunning())
+        return;
+
+    {
+        const juce::ScopedLock sl (mLock);
+        mScanResults.clear();
+        mSkipped.clear();
+        mStatusText = "Starting scan...";
+    }
+
+    mProgress.store (0.0f);
+    startThread();
+}
+
+void PluginManager::cancelScan()
+{
+    signalThreadShouldExit();
+}
+
+PluginArch PluginManager::architectureOf (const juce::File& pluginPath)
+{
+    if (pluginPath.isDirectory())
+    {
+        // VST3 bundle: the real binary lives under Contents/<arch>-win/.  A
+        // bundle may ship BOTH, in which case a 64-bit host loads the 64-bit
+        // one -- so x86_64 is tested first and wins.
+        const auto contents = pluginPath.getChildFile ("Contents");
+
+        if (contents.getChildFile ("x86_64-win").isDirectory()) return PluginArch::X64;
+        if (contents.getChildFile ("x86-win")   .isDirectory()) return PluginArch::X86;
+
+        return PluginArch::Unknown;
+    }
+
+    juce::FileInputStream in (pluginPath);
+
+    if (! in.openedOk())
+        return PluginArch::Unknown;
+
+    // PE/COFF layout, all little-endian: 'MZ' at 0; the PE header's file offset
+    // is a 32-bit value at 0x3C; that header is "PE\0\0" followed immediately
+    // by IMAGE_FILE_HEADER, whose first field is the 2-byte Machine id.
+    // 0x014c = IMAGE_FILE_MACHINE_I386, 0x8664 = IMAGE_FILE_MACHINE_AMD64.
+    if (in.readShort() != (short) 0x5a4d)
+        return PluginArch::Unknown;
+
+    if (! in.setPosition (0x3c))
+        return PluginArch::Unknown;
+
+    const auto peOffset = in.readInt();
+
+    if (peOffset <= 0 || ! in.setPosition (peOffset))
+        return PluginArch::Unknown;
+
+    if (in.readInt() != 0x00004550)
+        return PluginArch::Unknown;
+
+    switch ((juce::uint16) in.readShort())
+    {
+        case 0x014c: return PluginArch::X86;
+        case 0x8664: return PluginArch::X64;
+        default:     return PluginArch::Unknown;
+    }
+}
+
+void PluginManager::run()
+{
+    juce::FileSearchPath folders;
+    juce::StringArray    alreadyAdded;
+
+    {
+        const juce::ScopedLock sl (mLock);
+        folders = mScanFolders;
+
+        for (const auto& d : mAdded.getTypes())
+            alreadyAdded.add (d.createIdentifierString());
+    }
+
+    auto* fmt = vst3Format();
+
+    if (fmt == nullptr)
+        return;
+
+    juce::Array<SkippedPlugin> skipped;
+
+    auto publish = [this] (const juce::String& status, float progress)
+    {
+        {
+            const juce::ScopedLock sl (mLock);
+            mStatusText = status;
+        }
+
+        mProgress.store (progress);
+        triggerAsyncUpdate();
+    };
+
+    // ── Pass 1: VST2 candidates ─────────────────────────────────────────────
+    // VST3PluginFormat only matches *.vst3, so a VST2 .dll is INVISIBLE to it
+    // rather than failed -- it would never reach getFailedFiles() and the user
+    // would get silence.  A .dll inside a folder the user nominated as a
+    // plugin folder is a VST2 plugin for reporting purposes, which is exactly
+    // the case Jeff called out.  RangedDirectoryIterator rather than
+    // findChildFiles so a scan over a large tree stays cancellable.
+    publish ("Looking for plugins...", 0.0f);
+
+    for (int i = 0; i < folders.getNumPaths(); ++i)
+    {
+        if (threadShouldExit())
+            return;
+
+        for (const auto& entry : juce::RangedDirectoryIterator (folders[i], true, "*.dll",
+                                                                juce::File::findFiles))
+        {
+            if (threadShouldExit())
+                return;
+
+            skipped.add ({ entry.getFile().getFullPathName(),
+                           "Skipped: VST2 is not supported" });
+        }
+    }
+
+    // ── Pass 2: split VST3 candidates by architecture BEFORE loading ────────
+    const auto candidates = fmt->searchPathsForPlugins (folders, true, false);
+
+    juce::StringArray loadable;
+
+    for (const auto& c : candidates)
+    {
+        if (threadShouldExit())
+            return;
+
+        if (architectureOf (juce::File (c)) == PluginArch::X86)
+            skipped.add ({ c, "Skipped: 32-bit - requires the plugin bridge" });
+        else
+            loadable.add (c);
+    }
+
+    // ── Pass 3: load the ones this process can actually load ────────────────
+    juce::KnownPluginList found;
+    juce::PluginDirectoryScanner::applyBlacklistingsFromDeadMansPedal (found, deadMansPedalFile());
+
+    // Empty search path on purpose: the ctor would otherwise walk the folders a
+    // SECOND time, and setFilesOrIdentifiersToScan replaces the result anyway.
+    juce::PluginDirectoryScanner scanner (found, *fmt, juce::FileSearchPath(), true,
+                                          deadMansPedalFile());
+    scanner.setFilesOrIdentifiersToScan (loadable);
+
+    juce::String nameBeingScanned;
+
+    while (! threadShouldExit())
+    {
+        const auto next = scanner.getNextPluginFileThatWillBeScanned();
+
+        if (! scanner.scanNextFile (true, nameBeingScanned))
+            break;
+
+        publish ("Scanning: " + (next.isNotEmpty() ? juce::File (next).getFileName() : nameBeingScanned),
+                 scanner.getProgress());
+    }
+
+    if (threadShouldExit())
+        return;
+
+    for (const auto& f : scanner.getFailedFiles())
+        skipped.add ({ f, "Skipped: failed to load" });
+
+    for (const auto& b : found.getBlacklistedFiles())
+        skipped.add ({ b, "Skipped: crashed during a previous scan" });
+
+    // ── Publish ─────────────────────────────────────────────────────────────
+    juce::Array<juce::PluginDescription> results;
+
+    for (const auto& d : found.getTypes())
+        if (! alreadyAdded.contains (d.createIdentifierString()))
+            results.add (d);
+
+    {
+        const juce::ScopedLock sl (mLock);
+        mScanResults = results;
+        mSkipped     = skipped;
+        mStatusText  = "Scan complete - " + juce::String (results.size()) + " found, "
+                     + juce::String (skipped.size()) + " skipped";
+    }
+
+    mProgress.store (1.0f);
+    mHasScanned.store (true);
+    mPendingFinish.store (true);
+    triggerAsyncUpdate();
+}
+
+void PluginManager::handleAsyncUpdate()
+{
+    if (onScanProgress)
+        onScanProgress();
+
+    if (mPendingFinish.exchange (false) && onScanFinished)
+        onScanFinished();
+}
+
+// ── Disk ─────────────────────────────────────────────────────────────────────
+
+void PluginManager::loadFromDisk()
+{
+    const juce::ScopedLock sl (mLock);
+
+    mScanFolders = defaultScanFolders();
+
+    const auto f = dataFile();
+
+    if (! f.existsAsFile())
+        return;
+
+    const auto xml = juce::XmlDocument::parse (f);
+
+    if (xml == nullptr)
+        return;
+
+    if (auto* folders = xml->getChildByName ("ScanFolders"))
+    {
+        juce::FileSearchPath restored;
+
+        for (auto* e : folders->getChildWithTagNameIterator ("Folder"))
+        {
+            const juce::File dir (e->getStringAttribute ("path"));
+
+            if (dir.isDirectory())
+                restored.add (dir);
+        }
+
+        // A saved-but-now-empty list stays empty: the user may have removed the
+        // defaults on purpose, and re-seeding would undo that on every launch.
+        if (folders->getNumChildElements() > 0)
+            mScanFolders = restored;
+    }
+
+    if (auto* known = xml->getChildByName ("KNOWNPLUGINS"))
+        mAdded.recreateFromXml (*known);
+}
+
+void PluginManager::saveToDisk() const
+{
+    juce::XmlElement root ("BaySickDAWPlugins");
+
+    {
+        const juce::ScopedLock sl (mLock);
+
+        auto* folders = root.createNewChildElement ("ScanFolders");
+
+        for (int i = 0; i < mScanFolders.getNumPaths(); ++i)
+            folders->createNewChildElement ("Folder")
+                   ->setAttribute ("path", mScanFolders[i].getFullPathName());
+
+        if (auto known = mAdded.createXml())
+            root.addChildElement (known.release());
+    }
+
+    root.writeTo (dataFile());
+}
+
+} // namespace Hosting

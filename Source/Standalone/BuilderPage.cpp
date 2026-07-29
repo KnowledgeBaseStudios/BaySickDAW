@@ -11,6 +11,7 @@
 #include "../TempoMapRead.h"        // QA-Export: offline head reads the live tempo timeline
 #include "../EngineRig.h"           // QA-ModelShell TS2: offline lane replay resolves engines model-side
 #include "../DSP/EffectParamMap.h"  // QA-ModelShell TS2: rack-lane resolution (type, variant)
+#include "../Hosting/HostedPluginEffect.h"  // QA-ModelShell TS6: hosted plugin lane branch
 #include "../DSP/LufsMeterDSP.h"    // QA-ModelShell TS2: CL-227 backend / CL-045 measure pass
 #include "EffectsPage.h"            // QA-ModelShell TS2: channelPrefixForId / rackForChannelId statics
 #include "../BaySickPedals/BaySickPedalsProcessor.h"   // QA-ModelShell TS3: offline pedal-board lanes
@@ -8714,6 +8715,18 @@ void BuilderPage::applyOfflineLaneValue (const juce::String& pid, float v01)
                     kLo + juce::jlimit (0.0f, 1.0f, v01) * (kHi - kLo));
                 return true;
             }
+            // QA-ModelShell TS6: hosted plugin params are a lane class with no
+            // EffectParamMap table, so they fork here.  Landing this in the
+            // SAME pass as the live registration is the batch's standing rule
+            // (fact 5) -- a lane class that plays live and is missing from the
+            // export is exactly how vox/inst broke before TS2.
+            if (suffix.startsWith ("vst_"))
+            {
+                Hosting::HostedPluginEffect::applyParamNorm (rack->getSlotEffect (s),
+                                                             suffix.substring (4), v01);
+                return true;
+            }
+
             const EffectType type    = rack->getSlotType (s);
             const int        variant = EffectParamMap::variantOf (type, rack->getSlotEffect (s));
             EffectParamMap::applyNorm (type, variant, rack->getSlotEffect (s), suffix, v01);
@@ -8734,6 +8747,8 @@ void BuilderPage::applyOfflineLaneValue (const juce::String& pid, float v01)
     for (int i = 0; i < (int) MixerChannelIds::kMaxVoxStrips; ++i)   if (tryRackChannel (700 + i))  return;
     for (int i = 0; i < (int) MixerChannelIds::kMaxInstStrips; ++i)  if (tryRackChannel (800 + i))  return;
     for (int i = 0; i < (int) MixerChannelIds::kMaxRustyStrips; ++i) if (tryRackChannel (900 + i))  return;
+    // QA-ModelShell TS6: hosted VST3 instrument strips (dropdown 1000+).
+    for (int i = 0; i < (int) MixerChannelIds::kMaxPluginStrips; ++i) if (tryRackChannel (1000 + i)) return;
 }
 
 void BuilderPage::runExportWithProgress (const RenderOptions& opts)

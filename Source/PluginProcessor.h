@@ -42,6 +42,7 @@
 #define VID(id) juce::ParameterID{(id), 1}
 
 class EngineRig;   // QA-ModelShell TS1: model-side engine owner (member at class end)
+namespace Hosting { class PluginManager; }   // QA-ModelShell TS6
 
 class VibeSynthProcessor : public juce::AudioProcessor,
                            private juce::ValueTree::Listener   // §P4.3 perf: dirty-flag EQ sync
@@ -175,6 +176,10 @@ public:
     // (Layers/Bass/Drums/Clips/Vox/Inst).  Pages are views and never
     // construct engines.
     EngineRig& engineRig() noexcept { return *mEngineRig; }
+
+    // QA-ModelShell TS6: hosted-plugin scan folders, the added list every
+    // picker reads, and the VST3 format manager instances are created through.
+    Hosting::PluginManager& pluginManager() noexcept { return *mPluginManager; }
 
     // ── QA-ModelShell TS2: offline render drive ──────────────────────────
     // The model renders ITSELF offline -- no replica processor.  begin:
@@ -475,6 +480,11 @@ public:
     // The processor must remain alive until unregister is called.
     void registerLayerEngine  (int pageIdx, juce::AudioProcessor* eng);
     void unregisterLayerEngine(int pageIdx);
+    // QA-ModelShell TS6 (BLU-447): hosted VST3 instrument tabs.  Mirrors the
+    // Layer pair exactly -- these are ENGINE-DRIVEN strips (no live input), so
+    // Layer/Bass/Drum is the right reference and Vox/Inst is not.
+    void registerPluginEngine  (int pageIdx, juce::AudioProcessor* eng);
+    void unregisterPluginEngine(int pageIdx);
     void registerBassEngine   (int pageIdx, juce::AudioProcessor* eng);
     void unregisterBassEngine (int pageIdx);
     // 2026-04-25: registerDrumsEngine / unregisterDrumsEngine removed
@@ -564,6 +574,10 @@ public:
     std::atomic<float> mRustyDrumsBusPeakDb     { -60.0f };
     std::atomic<float> mRustyDrumsBusPeakDbL    { -60.0f };
     std::atomic<float> mRustyDrumsBusPeakDbR    { -60.0f };
+    // QA-ModelShell TS6 (BLU-447): hosted VST3 instrument bus.
+    std::atomic<float> mPluginsBusPeakDb        { -60.0f };
+    std::atomic<float> mPluginsBusPeakDbL       { -60.0f };
+    std::atomic<float> mPluginsBusPeakDbR       { -60.0f };
 
     // QA-AudioMeters fix-up (2026-05-24): kPeakAtomicNegInf constant deleted.
     // It was introduced in QA-Eg but never referenced -- every drainAndMerge /
@@ -869,6 +883,8 @@ public:
     std::atomic<float> mInstInsertPeakDbR [MixerChannelIds::kMaxInstStrips];
     std::atomic<float> mRustyInsertPeakDbL[MixerChannelIds::kMaxRustyStrips];
     std::atomic<float> mRustyInsertPeakDbR[MixerChannelIds::kMaxRustyStrips];
+    std::atomic<float> mPluginInsertPeakDbL[MixerChannelIds::kMaxPluginStrips];
+    std::atomic<float> mPluginInsertPeakDbR[MixerChannelIds::kMaxPluginStrips];
 
     // QA-AudioMeters: UI-side exchange-and-reset drain for any insert kind.
     // Returns the running max-since-last-call for the (kind, index) pair from
@@ -1071,6 +1087,8 @@ private:
     // ── Per-page engine processors (message thread sets, audio thread reads) ──
     juce::SpinLock                                         mLayerEngineLock;
     std::array<juce::AudioProcessor*, kMaxLayerPages>      mLayerEngines {};
+    juce::SpinLock                                         mPluginEngineLock;
+    std::array<juce::AudioProcessor*, kMaxPluginPages>     mPluginEngines {};
     juce::SpinLock                                         mBassEngineLock;
     std::array<juce::AudioProcessor*, kMaxBassPages>       mBassEngines {};
     juce::AudioBuffer<float>                               mAudioRowScratch;    // bus accumulation (all clips summed)
@@ -1133,6 +1151,9 @@ private:
     std::atomic<float>* mSwingTruncDrum[kMaxDrumPages] {};
     std::atomic<float>* mSwingMixInst[kMaxInstPages] {};
     std::atomic<float>* mSwingTruncInst[kMaxInstPages] {};
+    // QA-ModelShell TS6 (BLU-447): per-plugin-tab swing, same shape as Inst.
+    std::atomic<float>* mSwingMixPlugin[kMaxPluginPages] {};
+    std::atomic<float>* mSwingTruncPlugin[kMaxPluginPages] {};
     std::atomic<float>* mSwingMixRusty { nullptr };
     std::atomic<float>* mSwingTruncRusty { nullptr };
 
@@ -1557,6 +1578,7 @@ private:
     // in unregisterXxxEngine. The dispatcher holds non-owning pointers; we
     // own the storage so destruction is well-defined.
     std::array<std::unique_ptr<EngineInsertTask>, kMaxLayerPages> mLayerRenderTasks;
+    std::array<std::unique_ptr<EngineInsertTask>, kMaxPluginPages> mPluginRenderTasks;   // TS6
     std::array<std::unique_ptr<EngineInsertTask>, kMaxBassPages>  mBassRenderTasks;
     std::array<std::unique_ptr<EngineInsertTask>, kMaxDrumPages>  mDrumRenderTasks;
 
@@ -1581,7 +1603,7 @@ private:
     // Batch 7 (2026-05-06): passive accumulator strip tasks.
     // Aux: created lazily via ensureAuxInsert; up to kMaxAuxStrips (18).
     // Bus: 11 always-on buses registered idempotently in prepareToPlay.
-    static constexpr int kNumBatch7Buses = 11;
+    static constexpr int kNumBatch7Buses = 12;   // QA-ModelShell TS6: +Plugins Bus
     std::array<std::unique_ptr<PassiveStripTask>, MixerChannelIds::kMaxAuxStrips> mAuxRenderTasks;
     std::array<std::unique_ptr<PassiveStripTask>, kNumBatch7Buses>                mBusRenderTasks;
 
@@ -1595,6 +1617,12 @@ private:
     int                  mOfflinePrevBlk  { 0 };
     bool                 mOfflinePrevSong { true };
     juce::AudioPlayHead* mOfflinePrevHead { nullptr };
+
+    // QA-ModelShell TS6: declared immediately BEFORE the rig so it is destroyed
+    // AFTER it -- hosted plugin instances live in the rig (instruments) and in
+    // the racks (effects), and they must not outlive the format manager that
+    // created them.
+    std::unique_ptr<Hosting::PluginManager> mPluginManager;
 
     // QA-ModelShell TS1: declared LAST so it is destroyed FIRST -- the rig's
     // teardown unregisters engines through the dispatcher + task arrays

@@ -6,9 +6,13 @@
 #include "../DSP/ReverbDSP.h"
 #include "../DSP/OverdriveDSP.h"   // I-4: Mode dropdown for Overdrive (Rack vs Pedal)
 #include "EffectPresetIO.h"
+#include "../Hosting/HostedPluginEffect.h"   // QA-ModelShell TS6: added-effects list + slot naming
 
-// Picker id for the not-yet-live VST3 row.  Deliberately outside the EffectType
-// range so it can never be cast to one, even if the disabled flag were lost.
+// Base id for hosted-plugin picker rows: kVst3PickerItemId + index into the
+// added-EFFECTS list.  Deliberately far outside the EffectType range so a
+// plugin row can never be cast to one -- the two are dispatched to different
+// callbacks and a collision would load the wrong thing silently.
+// kVst3PickerItemId - 1 is the disabled "None added" row.
 static constexpr int kVst3PickerItemId = 9001;
 
 // ── HeaderSubMenuItem — a GROUP heading that is itself a dropdown ─────────────
@@ -185,7 +189,7 @@ void SlotComponent::refresh()
         mBypassed = slot.bypassed.load (std::memory_order_relaxed);
 
         if (mLoaded)
-            mEffectName = effectTypeName(slot.type);
+            mEffectName = slotDisplayName (mRack, mSlotIndex);
         else
             mEffectName = {};
     }
@@ -718,7 +722,8 @@ void SlotComponent::showAddMenu()
 }
 
 void SlotComponent::showEffectPickerMenu (juce::Point<int> screenPos,
-                                          std::function<void(EffectType)> onPick)
+                                          std::function<void(EffectType)> onPick,
+                                          std::function<void(const juce::PluginDescription&)> onPickPlugin)
 {
     // Grouped by effect family, alpha-sorted within each group.
     //
@@ -799,21 +804,61 @@ void SlotComponent::showEffectPickerMenu (juce::Point<int> screenPos,
         m.addItem (std::move (pedalsGroup));
     }
 
-    // QA-ModelShell TS5: the plugin slot type gets its real place in the picker
-    // now, disabled, so the list's final shape is settled before TS6 fills it.
-    // BLU-300 appends EffectType::VST3Plugin and enables this row; nothing else
-    // in the picker moves at that point.  A visible-but-disabled row also means
-    // "not yet" reads as a state rather than as a missing feature.
-    m.addSectionHeader ("Plugins");
-    m.addItem (kVst3PickerItemId, "VST3 Plugin...", false, false);
+    // QA-ModelShell TS6 (BLU-300): the added EFFECT plugins, as a group whose
+    // heading is itself the dropdown -- the same HeaderSubMenuItem the Pedals
+    // group uses, per Jeff's spec.  Replaces TS5's disabled "VST3 Plugin..."
+    // placeholder.  Instruments are deliberately absent: they belong to the
+    // Plugins tab's "+" menu, and PluginDescription::isInstrument splits them
+    // without loading anything.
+    //
+    // The whole section is gated on a plugin callback being supplied: the vocal
+    // chain reaches this menu too, and its stages are locked, so offering rows
+    // there that silently do nothing would be worse than not offering them.
+    juce::Array<juce::PluginDescription> pluginEffects;
+
+    if (onPickPlugin != nullptr)
+        if (auto* pm = Hosting::PluginManager::getInstance())
+            pluginEffects = pm->getAddedEffects();   // already alphabetical
+
+    if (! pluginEffects.isEmpty())
+    {
+        juce::PopupMenu plugins;
+
+        for (int i = 0; i < pluginEffects.size(); ++i)
+            plugins.addItem (kVst3PickerItemId + i, pluginEffects.getReference (i).name);
+
+        juce::PopupMenu::Item pluginsGroup;
+        pluginsGroup.text    = "VST Plugins";
+        pluginsGroup.subMenu = std::make_unique<juce::PopupMenu> (plugins);
+        pluginsGroup.setCustomComponent (new HeaderSubMenuItem ("VST Plugins"));
+        m.addItem (std::move (pluginsGroup));
+    }
+    else if (onPickPlugin != nullptr)
+    {
+        // Shown-but-disabled rather than hidden: with no row at all, a user who
+        // has not added anything yet cannot tell plugin hosting exists.
+        m.addSectionHeader ("VST Plugins");
+        m.addItem (kVst3PickerItemId - 1, "None added - see Options > Plugins", false, false);
+    }
 
     auto opts = juce::PopupMenu::Options()
         .withTargetScreenArea ({ screenPos.x, screenPos.y, 1, 1 });
 
     m.showMenuAsync (opts,
-        [pick = std::move (onPick)] (int result)
+        [pick = std::move (onPick), pickPlugin = std::move (onPickPlugin), pluginEffects] (int result)
         {
-            if (result < 1 || result == kVst3PickerItemId) return;
+            if (result < 1) return;
+
+            if (result >= kVst3PickerItemId)
+            {
+                const int idx = result - kVst3PickerItemId;
+
+                if (pickPlugin && juce::isPositiveAndBelow (idx, pluginEffects.size()))
+                    pickPlugin (pluginEffects.getReference (idx));
+
+                return;
+            }
+
             if (pick) pick ((EffectType) result);
         });
 }
@@ -1050,7 +1095,14 @@ void SlotComponent::remountEditor()
     if (! mRack) return;
     const auto& slotNow = mRack->getSlot (mSlotIndex);
     if (auto* eff = mRack->getSlotEffect(mSlotIndex))
+    {
+        // Outgoing panel dies BEFORE its replacement is built -- see the same
+        // note in EffectSlotWindow::buildPanel.  A hosted plugin has exactly
+        // one editor instance, so overlapping the two would hand the new panel
+        // an editor the old one still owns.
+        setEditor (nullptr);
         setEditor (createEffectEditor (eff, slotNow.type));
+    }
     refreshModeBtnLabel();
 }
 
@@ -1184,10 +1236,14 @@ juce::String SlotComponent::effectTypeName(EffectType type)
         case EffectType::Tape:            return "Tape";
         case EffectType::Limiter:         return "Limiter";
         case EffectType::DeEsser:         return "De-esser";
-        // QA-Fe2: vocal-chain-only stages (locked slots; deliberately absent
-        // from the rack picker menu above).
+        // QA-Fe2 vocal-chain stages.  QA-ModelShell TS5 also added both to the
+        // rack picker after Jeff found them unreachable there.
         case EffectType::Gate:            return "Gate";
         case EffectType::DeReverb:        return "De-reverb";
+        // QA-ModelShell TS6: fallback only.  Every surface that has the rack
+        // and the slot index should call slotDisplayName instead, which names
+        // the actual plugin.
+        case EffectType::VST3Plugin:      return "VST3 Plugin";
 
         // I-5 (2026-05-02): BaySickPedals Harmonics drive pedals batch.
         case EffectType::BluesDriveStyle: return "Blues Drive";
@@ -1214,4 +1270,27 @@ juce::String SlotComponent::effectTypeName(EffectType type)
 
         default:                          return "-";
     }
+}
+
+// QA-ModelShell TS6: the display name for a LOADED slot.  Everything except a
+// hosted plugin is named by its type; a plugin slot has to ask the DSP, because
+// one EffectType ordinal covers every plugin.  One home for that rule so the
+// row, the window title and the rack preset cannot disagree.
+juce::String SlotComponent::slotDisplayName (const EffectRack* rack, int slot)
+{
+    if (rack == nullptr)
+        return "-";
+
+    const auto type = rack->getSlotType (slot);
+
+    if (type == EffectType::VST3Plugin)
+        if (auto* hosted = dynamic_cast<const Hosting::HostedPluginEffect*>(rack->getSlotEffect (slot)))
+        {
+            const auto name = hosted->getPluginName();
+
+            if (name.isNotEmpty())
+                return name;
+        }
+
+    return effectTypeName (type);
 }

@@ -1,5 +1,6 @@
 #include "RibbonTabBar.h"
 #include "SharedUI.h"
+#include "../Hosting/PluginManager.h"   // QA-ModelShell TS6: added instrument list
 
 namespace
 {
@@ -44,6 +45,9 @@ juce::Colour RibbonTabBar::tabColour(TabType type, bool active)
         // Inactive shade is roughly half-brightness, matching the convention
         // used by Layers / Bass / Drums slots.
         case TabType::Clip:      return active ? juce::Colour(0xffd4a017) : juce::Colour(0xff6a500b);
+        // TS6: Plugins match their mixer-bus colour (VC::Purple), same
+        // one-channel-identity convention Clips/Vox/Inst use.
+        case TabType::Plugins:   return active ? juce::Colour(0xff7b61ff) : juce::Colour(0xff3d3080);
         // 2026-04-28 (G-4): Vox + Inst match their mixer-bus colours so the
         // ribbon tab + page header + mixer strip read as one channel identity
         // (same convention Clips uses with VC::Warm).  Bus colours come from
@@ -77,6 +81,7 @@ std::vector<RibbonTabBar::TabType> RibbonTabBar::visibleSlotTypes() const
         TabType::Builder, TabType::Mixer, TabType::Effects,
         TabType::Clip, TabType::Vox, TabType::Inst,
         TabType::Layers, TabType::Bass, TabType::Drums,
+        TabType::Plugins,
         TabType::PianoRoll
     };
 
@@ -161,7 +166,8 @@ void RibbonTabBar::clearAllDynamicTabs()
     {
         const auto t = mTabs[i].type;
         if (t == TabType::Layers || t == TabType::Bass || t == TabType::Drums
-         || t == TabType::Clip   || t == TabType::Vox  || t == TabType::Inst)
+         || t == TabType::Clip   || t == TabType::Vox  || t == TabType::Inst
+         || t == TabType::Plugins)
             mTabs.remove (i);
     }
     // Drop selection if it pointed at a removed tab.
@@ -195,7 +201,8 @@ void RibbonTabBar::closeTab(int tabId)
         // G-4 (2026-04-28): Vox / Inst follow the same drop-spawn pattern.
         if (type != TabType::Layers && type != TabType::Bass
          && type != TabType::Drums  && type != TabType::Clip
-         && type != TabType::Vox    && type != TabType::Inst) return;
+         && type != TabType::Vox    && type != TabType::Inst
+         && type != TabType::Plugins) return;
 
         // QA-ProjectSave docket 18 (2026-07-26): every closeable type may reach
         // zero.  Layers / Bass / Drums used to be pinned at >= 1 from when the
@@ -298,6 +305,7 @@ int RibbonTabBar::getBadgeCount(TabType type) const
     case TabType::Clip:    // G-2 (2026-04-28): badge tracks instance count
     case TabType::Vox:     // G-4 (2026-04-28)
     case TabType::Inst:    // G-4 (2026-04-28)
+    case TabType::Plugins: // QA-ModelShell TS6
     case TabType::Layers:
     case TabType::Bass:
     case TabType::Drums:   return countTabsOfType(type);
@@ -327,6 +335,7 @@ juce::String RibbonTabBar::getSlotDisplayName(int slotIndex) const
         // come from the active tab's name, which only worked while a tab was
         // guaranteed to exist.
         if (type == TabType::Clip)   return "Clips";
+        if (type == TabType::Plugins) return "Plugins";
         if (type == TabType::Vox)    return "Vox";
         if (type == TabType::Inst)   return "Inst";
         if (type == TabType::Layers) return "Layers";
@@ -611,6 +620,37 @@ void RibbonTabBar::showAddMenu (juce::Rectangle<int> slotBounds)
         }
     }
 
+    // QA-ModelShell TS6 (BLU-447): hosted VST3 instruments, as a SIDE DROPDOWN
+    // off one entry (Jeff's spec) rather than N rows in the top-level list --
+    // an added-plugin list can be long and would swamp the engines above it.
+    // No new callback: AddChoice::engine is a juce::String and EngineRig keys a
+    // plugin tab on the plugin's identifier string, so these ride the existing
+    // onAddEngineRequest path exactly like a built-in engine name.
+    {
+        juce::Array<juce::PluginDescription> instruments;
+
+        if (auto* pm = Hosting::PluginManager::getInstance())
+            instruments = pm->getAddedInstruments();   // already alphabetical
+
+        juce::PopupMenu sub;
+
+        if (instruments.isEmpty())
+        {
+            sub.addItem (-99, "None added - see Options > Plugins", false, false);
+        }
+        else
+        {
+            for (const auto& d : instruments)
+            {
+                const int id = kAddEngineBaseId + (int) mAddMenuChoices.size();
+                mAddMenuChoices.push_back ({ TabType::Plugins, d.createIdentifierString() });
+                sub.addItem (id, d.name);
+            }
+        }
+
+        m.addSubMenu ("VST Plugins", sub);
+    }
+
     // The sfizz engines keep their own spawn routes (kit load + strip cascade),
     // so they fire their dedicated callbacks rather than the generic one.
     m.addItem (1, "BaySickGuitars", ! instCapped);
@@ -657,6 +697,7 @@ void RibbonTabBar::showDropdown(int slotIndex)
     case TabType::Clip:
     case TabType::Vox:
     case TabType::Inst:
+    case TabType::Plugins:
         // G-6 (2026-04-29): always show the dropdown - even at 0 instances -
         // so the +Add entry is reachable.  showInstanceDropdown handles the
         // 0-instance case by showing only the +Add (skipping Pages/Rename/
@@ -797,6 +838,7 @@ void RibbonTabBar::showInstanceDropdown(TabType type, juce::Rectangle<int> tabBo
                           : (type == TabType::Vox)    ? "+ Add New Vox"
                           : (type == TabType::Inst)   ? "+ Add New Inst"
                           : (type == TabType::Clip)   ? "+ Add New Clip..."
+                          : (type == TabType::Plugins) ? "+ Add New Plugin"
                           :                             "+ Add New Drum";
     m.addItem(-3, addLabel);
 

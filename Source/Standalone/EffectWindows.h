@@ -77,7 +77,14 @@ private:
 
     std::unique_ptr<SlotComponent>   mSlot;
     BypassLedButton                  mLed;      // injected into the title strip
-    PageMenuBar*                     mBar { nullptr };
+    // SafePointer, NOT a raw pointer.  WorkspaceWindow declares mContent BEFORE
+    // mPageMenu, and members destruct in REVERSE declaration order -- so the
+    // title strip's menu bar is already gone by the time this window (the
+    // content) is destroyed.  A raw pointer here read freed memory in
+    // ~EffectSlotWindow and took the app down when a plugin window was closed.
+    // A SafePointer simply reads null, which is the correct outcome: the bar is
+    // being destroyed anyway, so there is nothing left to unhook from it.
+    juce::Component::SafePointer<PageMenuBar> mBar;
 
     // What the mounted panel was built for.  A Mode switch changes the DSP's
     // variant without changing its EffectType, and the EffectParamMap key is
@@ -139,7 +146,8 @@ private:
     EQ8MsDSP                         mFallbackEq;
     // What the display is currently bound to, so the poll can notice a rebuild.
     EQ8MsDSP*                        mBoundEq { nullptr };
-    PageMenuBar*                     mBar { nullptr };
+    // SafePointer for the same destruction-order reason as EffectSlotWindow's.
+    juce::Component::SafePointer<PageMenuBar> mBar;
     bool                             mShowMid { true };
     juce::String                     mTitle;
 

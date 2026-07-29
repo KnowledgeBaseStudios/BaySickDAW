@@ -637,15 +637,75 @@ load/apply path must keep); the QA-Ef close entries before touching doFileNew/ex
 surfaces; STANDALONE_UI_CHANGES.md before TS4/TS5 (deliberate UI decisions log);
 `Files For Claude/DSP Review/_APPROVED_CHANGES.md` before TS7's Limiter work.
 
-## Carry-Over (2026-07-29 — TS5 CODE-COMPLETE, gate green, commit surfaced)
+## Carry-Over (2026-07-29 — TS6 CODE-COMPLETE, gate green, commit surfaced)
 
-- **Completed:** TS1 `4ea67bd0`, TS2 `e9ecf03e`, TS3 `1dd08437`, TS4 `05b248a8`.  TS5 is
-  code-complete against a REPLACED scope: Jeff respecced the Effects surface on 2026-07-29 before
-  any of it was built, so the sidebar-plus-detail-pane shape never shipped.  What shipped is the
-  rack window + per-effect windows + separate Pre/Post EQ windows, plus a whole-rack preset, plus
-  CL-299 items 1/2/4.  Item-by-item trail in the running notes (three entries, 2026-07-29).
-- **In-flight:** nothing.  Gate green both configs, zero errors, two exe link lines.  Awaiting
-  Jeff's approval on the TS5 commit; nothing commits without it.
+- **Completed:** TS1 `4ea67bd0`, TS2 `e9ecf03e`, TS3 `1dd08437`, TS4 `05b248a8`, and **TS5 across
+  three commits** — `28f4ec09` (the Effects surface rebuilt as windows), `c8854429` (the Pedals
+  group-heading hover-highlight follow-up), `71781115` (the TS6 spec + the VST3-only format-scope
+  decision + Future State CL-303).  TS5 shipped against a REPLACED scope: Jeff respecced the
+  Effects surface on 2026-07-29 before any of it was built, so the sidebar-plus-detail-pane shape
+  never shipped.  What shipped is the rack window + per-effect windows + separate Pre/Post EQ
+  windows, plus a whole-rack preset, plus CL-299 items 1/2/4.  Item-by-item trail in the running
+  notes (five entries, 2026-07-29).
+- **In-flight: TS6, steps 0-5 of 7 are IN SOURCE AND GREEN, uncommitted.**  Four build gates
+  passed, both configs each time, zero errors, two exe link lines.  What is in the tree:
+  `JUCE_PLUGINHOST_VST3=1`; new `Source/Hosting/` (PluginManager scanner + added list persisted to
+  `plugins.xml`, HostedPluginInstance proxy + its editor with the dead marker, HostedPluginEffect
+  rack adapter); new `Source/Standalone/PluginsManagerWindow.*` on Options > Plugins;
+  `EffectType::VST3Plugin = 121`; the VST Plugins picker group replacing TS5's disabled row;
+  plugin parameter lanes registered live AND resolved offline in the same pass; the
+  build-then-replace editor bug closed at both rebuild sites; `instPresetsRootDir` cleaned.
+  **Full item-by-item trail is the running-notes entry "TS6 — steps 0-5 LANDED".**
+- **Step 6 (BLU-447) is PART DONE — its foundation layer is in and green (gate 5).**  The Plugins
+  bus + channel-id space + `InsertKind::Plugin` + meters + PDC + SC + routing are complete across
+  `VibeGraph` and `VibeSynthProcessor`; the tree is behaviourally unchanged because nothing creates
+  a plugin insert yet.  Reference type was chosen per the audit memory's own rule: engine-driven,
+  so it mirrors Layer/Bass/Drum, NOT Vox/Inst.  `isMainOutLocked` deliberately untouched so a VST
+  strip reroutes under Layers/Bass like the spec requires.
+- **Step 6 audio dispatch + tab kind are DONE and green (gates 6, 7, 8).**  A hosted VST3
+  instrument now plays from the piano roll exactly like a Layer: `Pattern::pluginRoll` (serialized
+  `PluginPageRoll`, skip-if-empty so pre-TS6 projects are unchanged) -> `pluginNotes` snapshot ->
+  both scheduling paths -> `BlockContext::pluginPageMidi` -> `EngineInsertTask::Kind::Plugin` ->
+  `registerPluginEngine`'s InsertNode + dispatcher task.  `TabKind::Plugins` is ONE factory case
+  keyed on the plugin's identifier string (which `engineType` already persists, so no new save
+  format).  `EngineKind::Plugin` appended at value 10 — position is load-bearing, it IS the
+  live-MIDI encoding.
+- **Step 6 is now MOSTLY done — gates 10-13 green.**  `PluginsPage` (a view; never constructs an
+  engine), `registerPluginPianoRoll`, `TabType::Plugins` + its ribbon slot, the "+" side dropdown
+  of added instruments (rides the existing `onAddEngineRequest` path — no new callback), and BOTH
+  remaining audit sites: 5 (`EffectsPage` dropdown vocabulary at 1000+, bus range 1-13, all four
+  resolvers, plus `BuilderPage`'s matching offline sweep) and 4 (`MixerPage` bus strip, strips map,
+  colours, both hit-tests, layout, registration, peak drain).  `isRouteAllowed` gives a plugin
+  strip `Master | Plugins Bus | Layers Bus | Bass Bus`, which with `isMainOutLocked` left alone is
+  exactly the "moves under Layers or Bass like those two already do" spec.
+- **STEP 6 (BLU-447) IS COMPLETE — gate 17 green.**  End to end: the "+" dropdown creates a
+  `PluginsPage` -> picking a plugin builds it through `EngineRig` -> `registerPluginEngine` spawns
+  the InsertNode + dispatcher task -> `onEngineSelected` adds the mixer strip and flips
+  `mPluginsBusActive` -> the piano roll targets it and its notes schedule -> `onTabClosed` tears
+  the rig tab down after the strip and roll registration are dropped -> the tab round-trips through
+  project save/restore carrying the plugin identifier as `engine` and the
+  `HostedPluginInstance` blob as `engineData`.
+- **STEP 7 (BLU-302) IS BUILT — gates 18-21 green.**  Arch-neutral wire protocol with asserted
+  layout (proven by the x86 build compiling the same header), `SandboxedPluginClient` with a hard
+  4 ms audio deadline and fail-fast crash handling, the sandbox wired behind the step-3 seam
+  (32-bit forced, 64-bit by preference with in-process fallback), the `BaySickPluginHost` helper
+  linking only three JUCE modules, and 7b's standalone `-A Win32` project building
+  `BaySickPluginHost32.exe` into its own `build32/`.
+- **GATE CRITERION FOR THIS BATCH IS NOW:** five exit codes in `build_log.txt` (`RELEASE`,
+  `DEBUG`, `HELPER64`, `HELPER32_CONFIG`, `HELPER32`) all 0, and FOUR `vcxproj -> ....exe` link
+  lines (two `BaySickDAW.exe` + both helpers).  Supersedes the "two link lines" rule.
+- **Jeff ran it and two items came back, both fixed (gate re-run green):** (1) closing a plugin
+  window CRASHED — `~EffectSlotWindow` read a freed `PageMenuBar` because `WorkspaceWindow`
+  declares `mContent` before `mPageMenu` and members destruct in REVERSE order, so the menu bar
+  dies first; both that window and `EffectEqWindow` now hold it as a `SafePointer`.  (2) plugin
+  windows left dead space around the plugin's surface — new
+  `WorkspaceWindow::sizeToContent` driven by `HostedPluginEditor::onNaturalSizeChanged`, fitting
+  the window on mount and on any plugin-initiated resize.  The STRETCH half is held for the layout
+  batch with its options written out.
+- **TS6 IS CODE-COMPLETE.**  Jeff has confirmed the windows open and the close-crash is fixed; he
+  has NO instrument plugins on this machine, so the effect/player surfaces are still unverified and
+  nothing has been scanned, bridged or crashed on purpose.  That is TS8's smoke under this batch's
+  deferred-verification ruling.  Commit surfaced; nothing commits without Jeff's approval.
 - **Assumptions changed (the plan body above is now wrong in three places, all annotated inline):**
   1. BLU-480's sidebar/detail-pane shape is superseded.  Do not build it in a later set.
   2. BLU-499's three approach options were never picked — the restructure answered the question
@@ -656,12 +716,37 @@ surfaces; STANDALONE_UI_CHANGES.md before TS4/TS5 (deliberate UI decisions log);
   written when the surface was one window.  It now needs rows for the rack window, a panel window
   and an EQ window — three different floors.  The rack window already has a real floor (300x250,
   derived from its fixed content); the other two are provisional (620x170, 560x320).
-- **Resume action:** session-open per the boilerplate, confirm the TS5 commit hash at HEAD, then
-  open **TS6 (VST3 hosting)** with its CMake scout: whether plugin hosting needs the full
-  `juce_audio_processors` module in place of the `_headless` variant we build today.  TS6's first
-  act is its open sub-spec call — the crash-protection process model (per-plugin sandbox process vs
-  a single shared host process).  The picker already carries a disabled "VST3 Plugin..." row under a
-  Plugins section; enabling it is TS6's entry point.
+- **SCOUT RESULT — the CMake question is CLOSED, do not re-open it.**  There was never a module to
+  swap: `juce_audio_utils` -> `juce_audio_processors` -> `juce_audio_processors_headless`, so the
+  headless module is the DEPENDENCY of the full one, not an alternative to it, and we have always
+  built the full module (APVTS lives in it).  Editor hosting therefore came with it —
+  `VST3PluginInstance` overrides `hasEditor`/`createEditor` to return a `VST3PluginWindow` wrapping
+  the plugin's `IPlugView`, DPI + `resizeView` handled.  The entire CMake deliverable was ONE line,
+  `JUCE_PLUGINHOST_VST3=1`, and `JUCE_PLUGINHOST_VST` stays 0 per CL-303.  The VST3 SDK is already
+  vendored (MIT).  `KnownPluginList`'s blacklist API, `getDefaultLocationsToSearch()` and
+  `ChildProcessCoordinator`/`Worker` for BLU-302's IPC are all already in the tree.
+- **BUILD ORDER REVISED (proposed to Jeff 2026-07-29, steps 0-2 identical either way so nothing
+  waited on it):** 0 CMake flag -> 1 scanner -> 2 manager window -> **3 proxy seam (PROMOTED)** ->
+  4 effect slot -> 5 latency -> 6 instrument -> 7a sandbox -> 7b 32-bit.  The promotion is the
+  whole change: BLU-302 stopped being optional when 32-bit VST3 entered scope, and building every
+  consumer against a concrete `juce::AudioPluginInstance` first would have forced a rewrite of all
+  six surfaces when the sandbox arrived.  With the seam first, BLU-302 ADDS an implementation
+  behind an existing interface.
+- **32-BIT COST, taken to Jeff as the plan required:** the helper links only
+  `juce_audio_processors` + `juce_events` + `juce_gui_basics` — none of sfizz / NAM / RubberBand /
+  LAME / WORLD / lunasvg — so it is a small self-contained CMake project over vendored JUCE.  The
+  32-bit-specific delta over 64-bit-only isolation is (a) a second CMake configure into its own
+  build directory, because an MSVC generator is single-platform per tree (ours is x64), plus a
+  `do_build.bat` step, and (b) an ARCHITECTURE-NEUTRAL wire protocol — fixed-width types, explicit
+  packing, no pointer or `size_t` on the wire.  (b) is free if designed in and expensive if
+  retrofitted, so the "revisit if disproportionate" trigger does NOT fire and his ruling stands.
+  **One gate consequence to restate when 7b lands:** the "two exe link lines" build-gate criterion
+  changes once the helper builds, and in its own tree it will not appear in `build_log.txt` at all
+  unless `do_build.bat` is extended.
+- **Resume action:** continue TS6 at **step 6 (BLU-447)**.  Verified already, so do not re-derive:
+  the PR-target hazard does NOT fire — `kRustyPRTarget` is the last link in the derived chain and
+  Rusty is a singleton, so a Plugins tab APPENDS at `kRustyPRTarget + 1` and no existing target ID
+  moves.  Walk `reference_mixer_strip_pattern_audit` before the strip diff.  Then 7a/7b.
 
 ## Prior Carry-Over (2026-07-28 — TS3 COMMITTED `1dd08437`; TS4 IN FLIGHT, chunk A landed)
 

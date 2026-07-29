@@ -116,12 +116,22 @@ public:
     // the same labels as the slot UI -- no drift between the two.
     static juce::String effectTypeName(EffectType type);
 
+    // QA-ModelShell TS6: prefer this wherever the rack + slot are in hand -- a
+    // hosted plugin slot is named by its PLUGIN, which the EffectType cannot
+    // supply (one ordinal covers them all).
+    static juce::String slotDisplayName (const EffectRack* rack, int slot);
+
     // QA-ModelShell TS5: the effect picker, callable without a SlotComponent.
     // The rack window's slot rows are not SlotComponents but must offer the
     // identical grouped list, and a second copy of that list would drift the
     // first time an effect is added.
+    // QA-ModelShell TS6: plugin picks come back through a SEPARATE callback
+    // because an EffectType cannot name a plugin -- one ordinal covers them all.
+    // Defaulted so the vocal chain's caller is untouched (its locked slots never
+    // offer plugins anyway).
     static void showEffectPickerMenu (juce::Point<int> screenPos,
-                                      std::function<void(EffectType)> onPick);
+                                      std::function<void(EffectType)> onPick,
+                                      std::function<void(const juce::PluginDescription&)> onPickPlugin = {});
 
     // ── Chrome actions, driven from the panel window's title-bar menu ─────────
     // These were private because the only caller was this component's own

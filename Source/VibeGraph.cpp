@@ -34,6 +34,7 @@ namespace {
             case VibeGraph::InsertKind::Vox:   return voxInsert  (index);
             case VibeGraph::InsertKind::Inst:  return instInsert (index);
             case VibeGraph::InsertKind::Rusty: return rustyInsert(index);
+            case VibeGraph::InsertKind::Plugin: return pluginInsert(index);
         }
         return -1;  // unreachable; defensive
     }
@@ -725,6 +726,11 @@ void VibeGraph::prepare(double sampleRate, int maxBlockSize)
     if (!mRustyDrumsBusNode) mRustyDrumsBusNode = std::make_unique<InstrChannelNode>("RustyDrums Bus");
     mRustyDrumsBusNode->prepare(sampleRate, maxBlockSize);
 
+    // QA-ModelShell TS6 (BLU-447): hosted VST3 instrument bus, same
+    // always-allocated shape -- routing works before any plugin tab exists.
+    if (!mPluginsBusNode) mPluginsBusNode = std::make_unique<InstrChannelNode>("Plugins Bus");
+    mPluginsBusNode->prepare(sampleRate, maxBlockSize);
+
     if (!mTopologyBuilt) return;
 
     // Re-prepare all nodes (e.g. sample rate change)
@@ -761,6 +767,7 @@ void VibeGraph::prepare(double sampleRate, int maxBlockSize)
     initArray (voxInsertPeakDbL);    initArray (voxInsertPeakDbR);
     initArray (instInsertPeakDbL);   initArray (instInsertPeakDbR);
     initArray (rustyInsertPeakDbL);  initArray (rustyInsertPeakDbR);
+    initArray (pluginInsertPeakDbL); initArray (pluginInsertPeakDbR);
 }
 
 // ── reset ─────────────────────────────────────────────────────────────────────
@@ -776,6 +783,7 @@ void VibeGraph::reset()
     if (mInstBus2Node)      mInstBus2Node->reset();
     if (mInstBus3Node)      mInstBus3Node->reset();
     if (mRustyDrumsBusNode) mRustyDrumsBusNode->reset();
+    if (mPluginsBusNode)    mPluginsBusNode->reset();
     if (!mTopologyBuilt) return;
     mLayersNode    ->reset();
     mBassNode      ->reset();
@@ -996,6 +1004,10 @@ void VibeGraph::processBus(int busChId, juce::AudioBuffer<float>& buf,
             node = mRustyDrumsBusNode.get();
             rmsL = &rustyDrumsBusRmsDbL; rmsR = &rustyDrumsBusRmsDbR;
             break;
+        case kPluginsBus:
+            node = mPluginsBusNode.get();
+            rmsL = &pluginsBusRmsDbL; rmsR = &pluginsBusRmsDbR;
+            break;
         default:
             jassertfalse;
             return;
@@ -1052,6 +1064,12 @@ void VibeGraph::processBus(int busChId, juce::AudioBuffer<float>& buf,
         rustyDrumsBusPeakDbL.store(mRustyDrumsBusNode->peakDbL.exchange(kBusNegInf, std::memory_order_relaxed), std::memory_order_relaxed);
         rustyDrumsBusPeakDbR.store(mRustyDrumsBusNode->peakDbR.exchange(kBusNegInf, std::memory_order_relaxed), std::memory_order_relaxed);
     }
+    else if (busChId == kPluginsBus && mPluginsBusNode != nullptr)
+    {
+        pluginsBusPeakDb .store(mPluginsBusNode->peakDb .exchange(kBusNegInf, std::memory_order_relaxed), std::memory_order_relaxed);
+        pluginsBusPeakDbL.store(mPluginsBusNode->peakDbL.exchange(kBusNegInf, std::memory_order_relaxed), std::memory_order_relaxed);
+        pluginsBusPeakDbR.store(mPluginsBusNode->peakDbR.exchange(kBusNegInf, std::memory_order_relaxed), std::memory_order_relaxed);
+    }
 }
 
 // ── EffectRack getters ────────────────────────────────────────────────────────
@@ -1078,6 +1096,7 @@ void VibeGraph::rebindAllRackHooks()
     chain (getInstBus2Rack());
     chain (getInstBus3Rack());
     chain (getRustyDrumsBusRack());
+    chain (getPluginsBusRack());
 
     for (int i = 0; i < (int) mLayerPageRacks.size(); ++i)  chain (&mLayerPageRacks[(size_t) i]);
     for (int i = 0; i < (int) mBassPageRacks.size();  ++i)  chain (&mBassPageRacks[(size_t) i]);
@@ -1102,6 +1121,7 @@ EffectRack* VibeGraph::getVoxBus2Rack()       { return mVoxBus2Node       ? &mVo
 EffectRack* VibeGraph::getInstBus2Rack()      { return mInstBus2Node      ? &mInstBus2Node     ->rack : nullptr; }
 EffectRack* VibeGraph::getInstBus3Rack()      { return mInstBus3Node      ? &mInstBus3Node     ->rack : nullptr; }
 EffectRack* VibeGraph::getRustyDrumsBusRack() { return mRustyDrumsBusNode ? &mRustyDrumsBusNode->rack : nullptr; }
+EffectRack* VibeGraph::getPluginsBusRack()    { return mPluginsBusNode    ? &mPluginsBusNode   ->rack : nullptr; }
 
 EffectRack* VibeGraph::getLayerPageRack(int idx)
 {
@@ -1170,7 +1190,7 @@ int VibeGraph::updateBusLatencies()
     // busIndexFor below only; FX and Master are handled apart (FX is send-fed,
     // Master is the terminal sum).
     struct BusSlot { CompDelayLine* delay; int chain; int maxOwn; };
-    std::array<BusSlot, 10> buses {};
+    std::array<BusSlot, 11> buses {};
     auto busIndexFor = [](int chId) -> int
     {
         switch (chId)
@@ -1185,6 +1205,7 @@ int VibeGraph::updateBusLatencies()
             case kInstBus2:      return 7;
             case kInstBus3:      return 8;
             case kRustyDrumsBus: return 9;
+            case kPluginsBus:    return 10;   // QA-ModelShell TS6
         }
         return -1;
     };
@@ -1203,6 +1224,7 @@ int VibeGraph::updateBusLatencies()
     buses[7] = instrBus(mInstBus2Node.get());
     buses[8] = instrBus(mInstBus3Node.get());
     buses[9] = instrBus(mRustyDrumsBusNode.get());
+    buses[10] = instrBus(mPluginsBusNode.get());
 
     const int fxChain = mEffectsBusNode != nullptr
         ? chainLat(mEffectsBusNode->preEq, mEffectsBusNode->rack, mEffectsBusNode->eq) : 0;
@@ -1364,7 +1386,7 @@ int VibeGraph::updateBusLatencies()
     };
     for (int busCh : { kMaster, kLayersBus, kBassBus, kDrumsBus, kFxBus,
                        kClipsBus, kVoxBus, kInstBus, kVoxBus2, kInstBus2,
-                       kInstBus3, kRustyDrumsBus })
+                       kInstBus3, kRustyDrumsBus, kPluginsBus })
         solveScFor(busCh, prefixFromChannelId(busCh));
     for (int chId : mLiveInsertChannels)
         if (auto* node = mInsertsByChannel[(size_t) chId].get())
@@ -1388,6 +1410,7 @@ EQ8MsDSP* VibeGraph::getVoxBus2EQ()       { return mVoxBus2Node       ? &mVoxBus
 EQ8MsDSP* VibeGraph::getInstBus2EQ()      { return mInstBus2Node      ? &mInstBus2Node     ->eq  : nullptr; }
 EQ8MsDSP* VibeGraph::getInstBus3EQ()      { return mInstBus3Node      ? &mInstBus3Node     ->eq  : nullptr; }
 EQ8MsDSP* VibeGraph::getRustyDrumsBusEQ() { return mRustyDrumsBusNode ? &mRustyDrumsBusNode->eq  : nullptr; }
+EQ8MsDSP* VibeGraph::getPluginsBusEQ()    { return mPluginsBusNode    ? &mPluginsBusNode   ->eq  : nullptr; }
 
 // §P4.3: Pre-rack bus EQs (NEW - every bus gets one).
 EQ8MsDSP* VibeGraph::getLayersBusPreEQ()     { return mLayersNode       ? &mLayersNode       ->preEq : nullptr; }
@@ -1402,6 +1425,7 @@ EQ8MsDSP* VibeGraph::getVoxBus2PreEQ()       { return mVoxBus2Node       ? &mVox
 EQ8MsDSP* VibeGraph::getInstBus2PreEQ()      { return mInstBus2Node      ? &mInstBus2Node     ->preEq : nullptr; }
 EQ8MsDSP* VibeGraph::getInstBus3PreEQ()      { return mInstBus3Node      ? &mInstBus3Node     ->preEq : nullptr; }
 EQ8MsDSP* VibeGraph::getRustyDrumsBusPreEQ() { return mRustyDrumsBusNode ? &mRustyDrumsBusNode->preEq : nullptr; }
+EQ8MsDSP* VibeGraph::getPluginsBusPreEQ()    { return mPluginsBusNode    ? &mPluginsBusNode   ->preEq : nullptr; }
 
 // ── Rack + bus EQ state serialization ────────────────────────────────────────
 
@@ -1462,6 +1486,7 @@ void VibeGraph::saveRackStates(juce::ValueTree& parent)
     if (mInstBus2Node)      addNode ("InstBus2", mInstBus2Node     ->rack, mInstBus2Node     ->preEq, mInstBus2Node     ->eq);
     if (mInstBus3Node)      addNode ("InstBus3", mInstBus3Node     ->rack, mInstBus3Node     ->preEq, mInstBus3Node     ->eq);
     if (mRustyDrumsBusNode) addNode ("RustyBus", mRustyDrumsBusNode->rack, mRustyDrumsBusNode->preEq, mRustyDrumsBusNode->eq);
+    if (mPluginsBusNode)    addNode ("PluginsBus", mPluginsBusNode->rack, mPluginsBusNode->preEq, mPluginsBusNode->eq);
 
     for (int chId : mInstrChannelOrder)
     {
@@ -1504,6 +1529,7 @@ void VibeGraph::saveRackStates(juce::ValueTree& parent)
             case InsertKind::Vox:   return "Vox";
             case InsertKind::Inst:  return "Inst";
             case InsertKind::Rusty: return "Rusty";   // J-9 (2026-05-05)
+            case InsertKind::Plugin: return "Plugin"; // QA-ModelShell TS6
         }
         return "Unknown";   // defensive; unreachable for any valid kind
     };
@@ -1545,6 +1571,7 @@ void VibeGraph::clearAllRackStates()
     if (mInstBus2Node)      wipe (mInstBus2Node    ->rack);
     if (mInstBus3Node)      wipe (mInstBus3Node    ->rack);
     if (mRustyDrumsBusNode) wipe (mRustyDrumsBusNode->rack);
+    if (mPluginsBusNode)    wipe (mPluginsBusNode->rack);
 
     for (auto& [id, node] : mInstrChannelNodes) if (node) wipe (node->rack);
     // QA-InsertMaps (2026-05-24): single sweep over mLiveInsertChannels.
@@ -1614,6 +1641,7 @@ void VibeGraph::applyRackStates(const juce::ValueTree& parent)
     if (mInstBus2Node)      restoreNode ("InstBus2", mInstBus2Node     ->rack, mInstBus2Node     ->preEq, mInstBus2Node     ->eq);
     if (mInstBus3Node)      restoreNode ("InstBus3", mInstBus3Node     ->rack, mInstBus3Node     ->preEq, mInstBus3Node     ->eq);
     if (mRustyDrumsBusNode) restoreNode ("RustyBus", mRustyDrumsBusNode->rack, mRustyDrumsBusNode->preEq, mRustyDrumsBusNode->eq);
+    if (mPluginsBusNode)    restoreNode ("PluginsBus", mPluginsBusNode->rack, mPluginsBusNode->preEq, mPluginsBusNode->eq);
 
     for (int i = 0; i < parent.getNumChildren(); ++i)
     {
@@ -1654,6 +1682,7 @@ void VibeGraph::applyRackStates(const juce::ValueTree& parent)
         if (s == "Vox")   return InsertKind::Vox;
         if (s == "Inst")  return InsertKind::Inst;
         if (s == "Rusty") return InsertKind::Rusty;   // J-9 (2026-05-05)
+        if (s == "Plugin") return InsertKind::Plugin; // QA-ModelShell TS6
         // QA-InsertMaps Task 5 close (2026-05-25): unknown kind label -> nullopt
         // -> skipped at call site.  Restores pre-batch drop-unknown behavior
         // (pre-batch's 8 per-kind iterations dropped unrecognised labels by
@@ -1953,6 +1982,10 @@ void VibeGraph::processInsert(InsertKind kind, int index,
                 if (index >= 0 && index < MixerChannelIds::kMaxRustyStrips)
                     storeAxes (rustyInsertPeakDbL [index], rustyInsertPeakDbR [index]);
                 break;
+            case InsertKind::Plugin:
+                if (index >= 0 && index < MixerChannelIds::kMaxPluginStrips)
+                    storeAxes (pluginInsertPeakDbL [index], pluginInsertPeakDbR [index]);
+                break;
         }
     }
 }
@@ -2005,6 +2038,7 @@ std::pair<float, float> VibeGraph::drainBusRms (int busChId) noexcept
         case kInstBus2:      l = &instBus2RmsDbL;      r = &instBus2RmsDbR;      break;
         case kInstBus3:      l = &instBus3RmsDbL;      r = &instBus3RmsDbR;      break;
         case kRustyDrumsBus: l = &rustyDrumsBusRmsDbL; r = &rustyDrumsBusRmsDbR; break;
+        case kPluginsBus:    l = &pluginsBusRmsDbL;    r = &pluginsBusRmsDbR;    break;
         default:             return { kNI, kNI };   // kMaster (Full) + anything else
     }
     return { l->exchange (kNI, std::memory_order_relaxed),
@@ -2068,6 +2102,7 @@ void VibeGraph::promoteAllRackSlotSnapshots()
     promoteRack (getInstBus2Rack());
     promoteRack (getInstBus3Rack());
     promoteRack (getRustyDrumsBusRack());
+    promoteRack (getPluginsBusRack());
     // Deprecated per-page racks (5F-4a migration target was InsertNode racks
     // above; these still exist in the source tree).  Promote them too so any
     // legacy code path that still routes through them shows coherent meters.
@@ -2110,6 +2145,7 @@ void VibeGraph::rebindBusApvts()
     if (mInstBus2Node)      mInstBus2Node      ->rebindApvts(*mApvts, "mixer_instbus2");
     if (mInstBus3Node)      mInstBus3Node      ->rebindApvts(*mApvts, "mixer_instbus3");
     if (mRustyDrumsBusNode) mRustyDrumsBusNode ->rebindApvts(*mApvts, "mixer_rustybus");
+    if (mPluginsBusNode)    mPluginsBusNode    ->rebindApvts(*mApvts, "mixer_pluginbus");
     if (mMasterNode)        mMasterNode        ->rebindApvts(*mApvts, "mixer_master");
 
     // QA-Ea Part A (2026-05-21): cache bus _solo atomic pointers for the
@@ -2118,12 +2154,12 @@ void VibeGraph::rebindBusApvts()
     // ptrs once + reuse, avoid 11 string-keyed getRawParameterValue lookups
     // per audio block.  Master is excluded -- it has no _solo param + no
     // sibling to solo against.
-    static constexpr const char* kBusSoloPrefixes[11] = {
+    static constexpr const char* kBusSoloPrefixes[12] = {
         "mixer_layers", "mixer_bass", "mixer_drums", "mixer_fx", "mixer_clipsbus",
         "mixer_voxbus", "mixer_instbus", "mixer_voxbus2", "mixer_instbus2",
-        "mixer_instbus3", "mixer_rustybus"
+        "mixer_instbus3", "mixer_rustybus", "mixer_pluginbus"
     };
-    for (int i = 0; i < 11; ++i)
+    for (int i = 0; i < 12; ++i)
         mBusSoloPtr[(size_t) i] = mApvts->getRawParameterValue (
             juce::String (kBusSoloPrefixes[i]) + "_solo");
 }
@@ -2365,6 +2401,7 @@ const juce::AudioBuffer<float>* VibeGraph::getScSourceTap (int channelId) const
         case kInstBus2:      return tapOf (mInstBus2Node.get());
         case kInstBus3:      return tapOf (mInstBus3Node.get());
         case kRustyDrumsBus: return tapOf (mRustyDrumsBusNode.get());
+        case kPluginsBus:    return tapOf (mPluginsBusNode.get());
         default: break;
     }
     if (channelId >= 0 && channelId < kMaxStripChannels)
@@ -2422,6 +2459,7 @@ void VibeGraph::armScSourceTaps()
             case kInstBus2:      arm (mInstBus2Node.get());     return;
             case kInstBus3:      arm (mInstBus3Node.get());     return;
             case kRustyDrumsBus: arm (mRustyDrumsBusNode.get()); return;
+            case kPluginsBus:    arm (mPluginsBusNode.get()); return;
             default: break;
         }
         if (chId >= 0 && chId < kMaxStripChannels)
@@ -2430,7 +2468,7 @@ void VibeGraph::armScSourceTaps()
 
     for (int busCh : { kLayersBus, kBassBus, kDrumsBus, kFxBus, kClipsBus,
                        kVoxBus, kInstBus, kVoxBus2, kInstBus2, kInstBus3,
-                       kRustyDrumsBus })
+                       kRustyDrumsBus, kPluginsBus })
         armCh (busCh, false);
     for (int chId : mLiveInsertChannels)
         armCh (chId, false);
@@ -2518,6 +2556,7 @@ void VibeGraph::pushScArrayToStrip (int channelId)
         case kInstBus2:  return push3(getInstBus2PreEQ(),     getInstBus2Rack(),      getInstBus2EQ());
         case kInstBus3:  return push3(getInstBus3PreEQ(),     getInstBus3Rack(),      getInstBus3EQ());
         case kRustyDrumsBus: return push3(getRustyDrumsBusPreEQ(), getRustyDrumsBusRack(), getRustyDrumsBusEQ());
+        case kPluginsBus:    return push3(getPluginsBusPreEQ(), getPluginsBusRack(), getPluginsBusEQ());
     }
 
     // Insert channels: route to per-kind getters.
@@ -2533,6 +2572,7 @@ void VibeGraph::pushScArrayToStrip (int channelId)
     if (channelId >= kVoxBase   && channelId < kVoxBase   + kMaxVoxStrips)   return pushInsert(InsertKind::Vox,   channelId - kVoxBase);
     if (channelId >= kInstBase  && channelId < kInstBase  + kMaxInstStrips)  return pushInsert(InsertKind::Inst,  channelId - kInstBase);
     if (channelId >= kRustyBase && channelId < kRustyBase + kMaxRustyStrips) return pushInsert(InsertKind::Rusty, channelId - kRustyBase);
+    if (channelId >= kPluginBase && channelId < kPluginBase + kMaxPluginStrips) return pushInsert(InsertKind::Plugin, channelId - kPluginBase);
 }
 
 void VibeGraph::rebuildRoutingFromApvts()
@@ -2569,6 +2609,10 @@ void VibeGraph::rebuildRoutingFromApvts()
     // also so SC cycle-check operations don't drop neighboring edges due
     // to an incomplete channel set.
     mActiveChannels.emplace_back(kRustyDrumsBus, juce::String("mixer_rustybus"));
+    // QA-ModelShell TS6: Plugins Bus, included for the same reasons -- its
+    // _sendTo belongs in the graph before any plugin strip exists, and an
+    // incomplete channel set makes the SC cycle-check drop neighbouring edges.
+    mActiveChannels.emplace_back(kPluginsBus, juce::String("mixer_pluginbus"));
 
     // QA-InsertMaps (2026-05-24): single sweep over mLiveInsertChannels
     // replaces 8 per-kind emplace_back blocks (Layer / Bass / Drum / Audio /

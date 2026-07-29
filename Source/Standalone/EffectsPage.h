@@ -167,7 +167,13 @@ private:
     void refreshAllRows();
 
     // Slot actions, driven from the rows.
-    void onEffectChosen (int slotIndex, EffectType type);
+    // QA-ModelShell TS6: the plugin entry point is separate because an
+    // EffectType cannot name a plugin.  Both funnel into the same body, so undo
+    // capture, automation re-registration, PDC refresh and window-open stay in
+    // one place.
+    void onEffectChosen (int slotIndex, EffectType type,
+                         const juce::PluginDescription* pluginDesc = nullptr);
+    void onPluginChosen (int slotIndex, const juce::PluginDescription&);
     void onEffectRemoved(int slotIndex);   // prompts first (Jeff spec 2026-07-29)
     void performSlotRemoval (int slotIndex);   // what the prompt's OK runs
     void onMoveRequested(int slotIndex, bool up);

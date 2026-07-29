@@ -1,5 +1,6 @@
 #include "EffectEditorPanels.h"
 #include "EffectPresetIO.h"       // userNamPedalsDir / irDir chooser homes
+#include "../Hosting/HostedPluginEffect.h"   // QA-ModelShell TS6: hosted plugin editor
 // D.4 (2026-05-01): force MSBuild to recompile this file - Compressor + Delay
 // knob additions were missing from the previous incremental build.
 #include "../DSP/CompressorDSP.h"
@@ -6679,6 +6680,17 @@ std::unique_ptr<juce::Component> createEffectEditor (DSPBase* effect,
         // I-15c (2026-05-03): User NAM Pedal panel.
         case EffectType::NAMPedalStyle:
             panel = std::make_unique<NAMPedalStylePanel> (static_cast<NAMPedalStyleDSP*> (effect));
+            break;
+
+        // QA-ModelShell TS6: the plugin brings its own UI, so this is the ONE
+        // case that is not an EditorPanelBase.  Every caller already guards its
+        // EditorPanelBase cast, and a plugin has nothing to stamp -- its lanes
+        // are registered model-side from the instance's parameter list, not
+        // from knob componentIDs.
+        case EffectType::VST3Plugin:
+            if (auto* hosted = dynamic_cast<Hosting::HostedPluginEffect*> (effect))
+                if (auto* inst = hosted->getHosted())
+                    panel = std::make_unique<Hosting::HostedPluginEditor> (*inst);
             break;
 
         default:

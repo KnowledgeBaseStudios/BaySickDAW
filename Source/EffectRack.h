@@ -64,9 +64,15 @@ enum class EffectType
     NAMPedalStyle          = 118, // User NAM Pedal - slots 1-6 (loads .nam capture; pedal-specific entry, BaySickPedals only)
 
     // QA-Fe2 (2026-07-16): locked vocal-chain stages (Gate slot 0, De-reverb
-    // slot 1).  Not offered in the general FX-rack picker -- vocal chain only.
+    // slot 1).  QA-ModelShell TS5 also added both to the general FX-rack picker.
     Gate                   = 119,
     DeReverb               = 120,
+
+    // QA-ModelShell TS6 (2026-07-29): a hosted VST3 effect.  ONE ordinal covers
+    // every plugin -- which plugin a slot holds is carried in the slot's state
+    // blob (the full PluginDescription), not in the type, because the enum is
+    // append-only and persisted as a raw int.
+    VST3Plugin             = 121,
 };
 
 // ── EffectRack ────────────────────────────────────────────────────────────────
@@ -196,7 +202,12 @@ public:
     // Load a new effect into a slot. Calls prepare() immediately.
     // uuidOverride is used by setStateInformation to restore a saved UUID;
     // user-facing call sites leave it empty so a fresh UUID is generated.
-    void loadEffect(int slot, EffectType type, const juce::String& uuidOverride = {});
+    // QA-ModelShell TS6: pluginDesc names WHICH plugin an EffectType::VST3Plugin
+    // slot holds -- the type alone cannot, since one ordinal covers every
+    // plugin.  Applied before prepare(), so the hosted instance is prepared by
+    // the same call.  Ignored for every other type.
+    void loadEffect(int slot, EffectType type, const juce::String& uuidOverride = {},
+                    const juce::PluginDescription* pluginDesc = nullptr);
 
     // Clear a slot (set to None / nullptr)
     void clearSlot(int slot);

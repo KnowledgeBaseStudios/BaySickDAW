@@ -81,6 +81,9 @@ static juce::Colour pickStripColor(int chId, int destChannelId)
     // J-5 (2026-05-03): RustyDrums Bus strips share the Drums-red accent so
     // the top stripe matches the bus group neon divider.
     if (destChannelId == kRustyDrumsBus) return VC::DrumsCol;
+    // QA-ModelShell TS6: Plugins Bus strips carry the purple accent that the
+    // ribbon tab and the bus group divider also use -- one channel identity.
+    if (destChannelId == kPluginsBus) return VC::Purple;
     // Direct Routing / aux chain: fall back to the strip's natural color
     if (chId >= kLayerBase && chId < kLayerBase + 16) return VC::LayerCol[0];
     if (chId >= kBassBase  && chId < kBassBase  + 16) return VC::BassCol[0];
@@ -89,6 +92,7 @@ static juce::Colour pickStripColor(int chId, int destChannelId)
     if (chId >= kVoxBase   && chId < kVoxBase   + kMaxVoxStrips)  return juce::Colour(0xFF0FAFA5);
     if (chId >= kInstBase  && chId < kInstBase  + kMaxInstStrips) return juce::Colour(0xFF1C3A8A);
     if (chId >= kRustyBase && chId < kRustyBase + kMaxRustyStrips) return VC::DrumsCol;
+    if (chId >= kPluginBase && chId < kPluginBase + kMaxPluginStrips) return VC::Purple;
     return VC::Accent;
 }
 
@@ -700,6 +704,7 @@ int MixerPage::CableOverlay::findSocketNear(juce::Point<float> pt, float radius,
         // J-5 (2026-05-03): RustyDrums Bus is a valid drop socket whenever
         // the singleton has spawned its strips (mRustyDrumsBusActive flag).
         if (owner.mRustyDrumsBusActive && check(kRustyDrumsBus)) return kRustyDrumsBus;
+        if (owner.mPluginsBusActive && check(kPluginsBus)) return kPluginsBus;
     }
 
     for (auto& [tabId, strip] : owner.mLayerStrips)
@@ -764,6 +769,7 @@ int MixerPage::CableOverlay::findStripUnder(juce::Point<float> pt) const
     if (owner.isInstBus2Active() && checkBounds(kInstBus2))  return kInstBus2;
     if (owner.isInstBus3Active() && checkBounds(kInstBus3))  return kInstBus3;
     if (owner.mRustyDrumsBusActive && checkBounds(kRustyDrumsBus)) return kRustyDrumsBus;
+    if (owner.mPluginsBusActive && checkBounds(kPluginsBus)) return kPluginsBus;
 
     for (auto& [tabId, s] : owner.mLayerStrips)
         if (checkBounds(layerInsert(tabId))) return layerInsert(tabId);
@@ -806,6 +812,7 @@ bool MixerPage::CableOverlay::isRouteAllowed(int srcId, int dstId) const
     const bool srcIsVox    = (srcId >= kVoxBase   && srcId < kVoxBase   + kMaxVoxStrips);
     const bool srcIsInst   = (srcId >= kInstBase  && srcId < kInstBase  + kMaxInstStrips);
     const bool srcIsRusty  = (srcId >= kRustyBase && srcId < kRustyBase + kMaxRustyStrips);
+    const bool srcIsPlugin = (srcId >= kPluginBase && srcId < kPluginBase + kMaxPluginStrips);
 
     const bool dstIsMaster = (dstId == kMaster);
     const bool dstIsAux    = (dstId >= kAuxBase && dstId < kAuxBase + 16);
@@ -821,6 +828,14 @@ bool MixerPage::CableOverlay::isRouteAllowed(int srcId, int dstId) const
     // Drum insert: Drums Bus · Master
     if (srcIsDrum)
         return dstIsMaster || dstId == kDrumsBus;
+
+    // QA-ModelShell TS6 (BLU-447): Plugin insert: Plugins Bus, Layers Bus,
+    // Bass Bus, Master.  Jeff's spec -- a VST strip moves under Layers or Bass
+    // exactly as those two already move between each other's bus, so this rule
+    // is the Layer rule plus its own bus, not a new routing class.
+    if (srcIsPlugin)
+        return dstIsMaster || dstId == kPluginsBus
+            || dstId == kLayersBus || dstId == kBassBus;
 
     // J-5 (2026-05-03): Rusty insert main-out is LOCKED to kRustyDrumsBus
     // (enforced via isMainOutLocked).  This rule covers send cables only -
@@ -1414,6 +1429,7 @@ void MixerPage::rebuildStripCache() const
     reg(kInstBus2,      mInstBus2Strip     .get());
     reg(kInstBus3,      mInstBus3Strip     .get());
     reg(kRustyDrumsBus, mRustyDrumsBusStrip.get());
+    reg(kPluginsBus,    mPluginsBusStrip   .get());
 
     // Dynamic instrument channels (8 std::map containers, keyed by index).
     for (auto& [tabId, strip] : mLayerStrips) reg(kLayerBase + tabId, strip.get());
@@ -1424,6 +1440,7 @@ void MixerPage::rebuildStripCache() const
     for (auto& [idx,   strip] : mVoxStrips)   reg(kVoxBase   + idx,   strip.get());
     for (auto& [idx,   strip] : mInstStrips)  reg(kInstBase  + idx,   strip.get());
     for (auto& [idx,   strip] : mRustyStrips) reg(kRustyBase + idx,   strip.get());
+    for (auto& [idx,   strip] : mPluginStrips) reg(kPluginBase + idx, strip.get());
 }
 
 juce::Point<float> MixerPage::getSocketPosition(int channelId) const
@@ -1501,6 +1518,9 @@ MixerPage::MixerPage(VibeSynthProcessor& processor, PatternManager& pm)
     // matches the existing Drums Bus so the user reads them as the same family.
     mRustyDrumsBusStrip = std::make_unique<MixerTrackStrip>("RustyDrums Bus",
                               MixerTrackStrip::StripType::Bus, VC::DrumsCol);
+    // QA-ModelShell TS6 (BLU-447): hosted VST3 instrument bus.
+    mPluginsBusStrip = std::make_unique<MixerTrackStrip>("Plugins Bus",
+                              MixerTrackStrip::StripType::Bus, VC::Purple);
 
     mLayersBusStrip    ->setAutomationPrefix("mixer_layers");
     mBassBusStrip      ->setAutomationPrefix("mixer_bass");
@@ -1510,6 +1530,7 @@ MixerPage::MixerPage(VibeSynthProcessor& processor, PatternManager& pm)
     mVoxBusStrip       ->setAutomationPrefix("mixer_voxbus");
     mInstBusStrip      ->setAutomationPrefix("mixer_instbus");
     mRustyDrumsBusStrip->setAutomationPrefix("mixer_rustybus");
+    mPluginsBusStrip   ->setAutomationPrefix("mixer_pluginbus");
 
     // 5F-4a: bind each bus strip's new controls (polarity/width/bypass) to APVTS
     mLayersBusStrip    ->setApvts(mProcessor.apvts, "mixer_layers");
@@ -1607,6 +1628,7 @@ MixerPage::MixerPage(VibeSynthProcessor& processor, PatternManager& pm)
     mVoxBusStrip      ->setChannelId(MixerChannelIds::kVoxBus);
     mInstBusStrip     ->setChannelId(MixerChannelIds::kInstBus);
     mRustyDrumsBusStrip->setChannelId(MixerChannelIds::kRustyDrumsBus);
+    mPluginsBusStrip   ->setChannelId(MixerChannelIds::kPluginsBus);
 
     // 5F-4b B2: "Add Aux Strip" button (renamed from "Add Mixer Strip" during
     // R1 2026-04-23 when Vox + Inst were added alongside).  Owned here,
@@ -1703,6 +1725,41 @@ void MixerPage::addLayerChannel(int pageIndex, const juce::String& name)
     mScrollContent->addAndMakeVisible(*strip);
     mLayerStrips[pageIndex] = std::move(strip);
     mLayerTabOrder.push_back(pageIndex);
+
+    if (getWidth() > 0) resized();
+}
+
+// QA-ModelShell TS6 (BLU-447): hosted VST3 instrument strip.  Mirrors
+// addLayerChannel -- engine-driven, no arm/monitor, spawned by engine
+// registration rather than an "Add Strip" button.  Also flips
+// mPluginsBusActive, which is what makes the Plugins BUS strip appear: the bus
+// is always allocated in the graph but stays hidden until it has members.
+void MixerPage::addPluginChannel(int pageIndex, const juce::String& name)
+{
+    if (mPluginStrips.count(pageIndex) > 0) return;
+
+    auto strip = std::make_unique<MixerTrackStrip>(name,
+        MixerTrackStrip::StripType::LayerChannel, VC::Purple);
+    const juce::String prefix = "mixer_plugin_" + juce::String(pageIndex);
+    strip->setAutomationPrefix(prefix);
+    strip->setApvts(mProcessor.apvts, prefix);
+    strip->setChannelId(MixerChannelIds::pluginInsert(pageIndex));
+    strip->onAddSendRequested = [this](int chId) {
+        onAddCableRequestedFor(chId);
+    };
+
+    strip->onFXClicked = [this](const juce::String& id) {
+        if (onEffectsTabRequested) onEffectsTabRequested(id);
+    };
+    strip->onNameChanged = [this, pageIndex](const juce::String& newName) {
+        if (onChannelRenamed) onChannelRenamed(pageIndex, newName);
+    };
+
+    mScrollContent->addAndMakeVisible(*strip);
+    mPluginStrips[pageIndex] = std::move(strip);
+    mPluginOrder.push_back(pageIndex);
+    mPluginsBusActive = true;
+    mStripCacheDirty  = true;
 
     if (getWidth() > 0) resized();
 }
@@ -2781,6 +2838,19 @@ void MixerPage::removeLayerChannel(int pageIndex)
     if (onAudioStripRenamed) onAudioStripRenamed();
 }
 
+void MixerPage::removePluginChannel(int pageIndex)
+{
+    mStripCacheDirty = true;
+    mPluginStrips.erase(pageIndex);
+    mPluginOrder.erase(std::remove(mPluginOrder.begin(), mPluginOrder.end(), pageIndex),
+                       mPluginOrder.end());
+    // Last plugin strip gone -> the bus strip retires with it, matching the
+    // secondary Vox/Inst buses rather than the always-visible FX/Master pair.
+    if (mPluginStrips.empty()) mPluginsBusActive = false;
+    if (getWidth() > 0) resized();
+    if (onAudioStripRenamed) onAudioStripRenamed();
+}
+
 void MixerPage::removeBassChannel(int pageIndex)
 {
     mStripCacheDirty = true;
@@ -3106,6 +3176,8 @@ std::vector<MixerPage::StemPickEntry> MixerPage::getStemPickEntries() const
     if (mInstBus3Active) add (mInstBus3Strip.get(), kInstBus3, false);
     addMap (mInstStrips,  mInstOrder,     &instInsert);
     if (mRustyDrumsBusActive) add (mRustyDrumsBusStrip.get(), kRustyDrumsBus, false);
+    if (mPluginsBusActive) { add (mPluginsBusStrip.get(), kPluginsBus, false);
+                             addMap (mPluginStrips, mPluginOrder, &pluginInsert); }
     addMap (mRustyStrips, mRustyOrder,    &rustyInsert);
     add (mFXBusStrip.get(),         kFxBus,     false);
     addMap (mAuxStrips,   mAuxOrder,      &auxStrip);
@@ -3484,6 +3556,7 @@ void MixerPage::onVBlank()
     drainStereoBus (mVoxBusStrip       .get(), kVoxBus,        mProcessor.mVoxBusPeakDbL,        mProcessor.mVoxBusPeakDbR);
     drainStereoBus (mInstBusStrip      .get(), kInstBus,       mProcessor.mInstBusPeakDbL,       mProcessor.mInstBusPeakDbR);
     drainStereoBus (mRustyDrumsBusStrip.get(), kRustyDrumsBus, mProcessor.mRustyDrumsBusPeakDbL, mProcessor.mRustyDrumsBusPeakDbR);   // J-7b
+    drainStereoBus (mPluginsBusStrip   .get(), kPluginsBus,    mProcessor.mPluginsBusPeakDbL,    mProcessor.mPluginsBusPeakDbR);      // TS6
     // QA-Eg: cable overlay reads each strip's cached peak (MixerTrackStrip::
     // getCurrentPeakDb) for telemetry-driven alpha + warning-color animation.
     // Repaint here so cable updates land in the same vblank as the strip

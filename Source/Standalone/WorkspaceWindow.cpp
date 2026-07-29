@@ -192,6 +192,38 @@ void WorkspaceWindow::paint (juce::Graphics& g)
     g.drawRect (getLocalBounds(), 1);
 }
 
+// QA-ModelShell TS6 (Jeff 2026-07-29): a hosted plugin brings its own surface
+// at its own size, so the window is sized to THAT rather than left at a
+// provisional floor with dead space around the plugin.  The inverse of
+// contentBounds(): add the chrome back on.
+//
+// Clamped to the workspace so a plugin with a huge editor cannot open a window
+// bigger than the frame containing it -- and the floor is applied after the
+// clamp, matching clampResizeToWorkspace's precedence (floor over trim,
+// workspace over floor) so a negative content area can never be produced.
+void WorkspaceWindow::sizeToContent (int contentW, int contentH)
+{
+    if (contentW <= 0 || contentH <= 0)
+        return;
+
+    int w = contentW + 2 * kBorderPx;
+    int h = contentH + kTitleH + 2 * kBorderPx;
+
+    if (auto* ws = workspace())
+    {
+        const auto avail = ws->getLocalBounds();
+
+        if (avail.getWidth()  > 0) w = juce::jmin (w, avail.getWidth());
+        if (avail.getHeight() > 0) h = juce::jmin (h, avail.getHeight());
+    }
+
+    w = juce::jmax (w, mConstrainer.getMinimumWidth());
+    h = juce::jmax (h, mConstrainer.getMinimumHeight());
+
+    if (w != getWidth() || h != getHeight())
+        setSize (w, h);
+}
+
 void WorkspaceWindow::resized()
 {
     if (mResizer)  mResizer->setBounds (getLocalBounds());

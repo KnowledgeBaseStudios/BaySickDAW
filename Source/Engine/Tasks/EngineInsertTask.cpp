@@ -12,6 +12,7 @@ namespace
             case EngineInsertTask::Kind::Layer: return VibeGraph::InsertKind::Layer;
             case EngineInsertTask::Kind::Bass:  return VibeGraph::InsertKind::Bass;
             case EngineInsertTask::Kind::Drum:  return VibeGraph::InsertKind::Drum;
+            case EngineInsertTask::Kind::Plugin: return VibeGraph::InsertKind::Plugin;
         }
         return VibeGraph::InsertKind::Layer;
     }
@@ -41,6 +42,7 @@ juce::MidiBuffer* EngineInsertTask::resolveMidiBuffer() const noexcept
         case Kind::Layer: return mCtx->layerPageMidi != nullptr ? &mCtx->layerPageMidi[mIndex] : nullptr;
         case Kind::Bass:  return mCtx->bassPageMidi  != nullptr ? &mCtx->bassPageMidi [mIndex] : nullptr;
         case Kind::Drum:  return mCtx->drumPageMidi  != nullptr ? &mCtx->drumPageMidi [mIndex] : nullptr;
+        case Kind::Plugin: return mCtx->pluginPageMidi != nullptr ? &mCtx->pluginPageMidi[mIndex] : nullptr;
     }
     return nullptr;
 }
