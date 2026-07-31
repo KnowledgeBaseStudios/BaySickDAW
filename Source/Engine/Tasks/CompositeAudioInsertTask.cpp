@@ -1,4 +1,5 @@
 #include "CompositeAudioInsertTask.h"
+#include "../FrozenSourceRead.h"   // TS7 6.8: scope-matched frozen block read
 #include "../../PluginProcessor.h"
 #include "../../PatternManager.h"
 #include "../../VibeGraph.h"
@@ -70,23 +71,15 @@ void CompositeAudioInsertTask::run()
     // skips the BaySickPlayer engine as well as the decode.  Freezing a Clips
     // page is not "rendering a file to copy a file" -- the engine behind that
     // file runs every block, and that is the cost being reclaimed.
-    // SONG MODE ONLY -- see the note in EngineInsertTask::run.
-    if (mCtx->songMode)
-    if (auto* fz = mFrozenSource.load (std::memory_order_acquire))
+    // §6.8 scope-matched: the song render at the absolute playhead, or this
+    // pattern's own render at a loop-local one.  See FrozenSourceRead.h.
+    // Falls through to live decode + engine when neither can serve this block --
+    // §6.6's stale-plays-live rule.
+    if (FreezeRead::serveBlock (*this, *mCtx, blockView, n))
     {
-        juce::int64 filePos = 0;
-        if (mCtx->posInfo != nullptr)
-            filePos = mCtx->posInfo->getTimeInSamples().orFallback ((juce::int64) 0);
-
-        if (filePos >= 0 && filePos < fz->getTotalLength()
-            && fz->readRaw (blockView, 0, n, filePos))
-        {
-            mGraph->processInsert (VibeGraph::InsertKind::Audio, mIndex,
-                                   blockView, mCtx->bpm, mCtx->anySolo);
-            return;
-        }
-        // Falls through to live decode + engine when the streamer cannot serve
-        // this block -- §6.6's stale-plays-live rule.
+        mGraph->processInsert (VibeGraph::InsertKind::Audio, mIndex,
+                               blockView, mCtx->bpm, mCtx->anySolo);
+        return;
     }
 
     // QA-MultiBlockHazard (Task 1): both flows sum their RAW output into

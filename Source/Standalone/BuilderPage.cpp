@@ -8901,13 +8901,18 @@ bool BuilderPage::renderToFile (const RenderOptions& opts,
 // after the rack it still passes through.
 bool BuilderPage::renderFreezeFile (VibeGraph::InsertKind kind, int index,
                                     RenderTask* target,
+                                    int patternIndex,
                                     const juce::File& dest,
                                     juce::String& outErr,
                                     std::function<bool()> shouldAbort,
                                     std::function<void(double)> onProgress)
 {
     RenderOptions opts;
-    opts.scope       = RenderOptions::Scope::Song;
+    // §6.8: pattern scope renders the loop itself, so the file's length IS the
+    // pattern's and reading it at a loop-local position lines up exactly.
+    opts.scope        = patternIndex >= 0 ? RenderOptions::Scope::Pattern
+                                          : RenderOptions::Scope::Song;
+    opts.patternIndex = patternIndex;
     // Tail::Cut, deliberately.  A freeze must be sample-aligned with the
     // arrangement it stands in for; rendering PAST the song end would make the
     // frozen file longer than the timeline and shift nothing but confuse the
@@ -9072,6 +9077,7 @@ bool BuilderPage::renderFreezeFile (VibeGraph::InsertKind kind, int index,
 // when consumeBlock runs.  So one pass fills all thirteen writers.
 bool BuilderPage::renderKitFreezeFiles (const std::vector<juce::File>& dests,
                                         RenderTask* target,
+                                        int patternIndex,
                                         juce::String& outErr,
                                         std::function<bool()> shouldAbort,
                                         std::function<void(double)> onProgress)
@@ -9083,9 +9089,12 @@ bool BuilderPage::renderKitFreezeFiles (const std::vector<juce::File>& dests,
     if (n <= 0) { outErr = "The drum kit has no pieces to freeze."; return false; }
 
     RenderOptions opts;
-    opts.scope       = RenderOptions::Scope::Song;
-    opts.tail        = RenderOptions::Tail::Cut;
-    opts.sampleRate  = mProcessor.getSampleRate();
+    // §6.8: the kit is one instrument and gets per-pattern renders like the rest.
+    opts.scope        = patternIndex >= 0 ? RenderOptions::Scope::Pattern
+                                          : RenderOptions::Scope::Song;
+    opts.patternIndex = patternIndex;
+    opts.tail         = RenderOptions::Tail::Cut;
+    opts.sampleRate   = mProcessor.getSampleRate();
 
     juce::AudioFormatManager fm;
     fm.registerBasicFormats();

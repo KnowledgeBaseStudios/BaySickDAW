@@ -1,4 +1,5 @@
 #include "VoxStripTask.h"
+#include "../FrozenSourceRead.h"   // TS7 6.8: scope-matched frozen block read
 #include "../../VibeGraph.h"
 #include "../../PluginProcessor.h"
 #include "../../DSP/EngineSidechainHelper.h"
@@ -139,23 +140,18 @@ void VoxStripTask::run()
     // Frozen audio is POST-engine by construction (the freeze tap sits at the
     // top of the InsertNode), so it must never be handed to the engine's monitor
     // merge, which joins pre-rack: that would run the vocal chain over it twice.
-    // SONG MODE ONLY -- see the note in EngineInsertTask::run: a freeze file is
-    // the song arrangement, and in pattern mode the playhead wraps inside the
-    // pattern loop, so it would play the song's opening bars instead.
+    // §6.8 scope-matched: the song render at the absolute playhead, or this
+    // pattern's own render at a loop-local one.  See FrozenSourceRead.h.
+    // Gated on hasSourceFor, NOT unconditional: this stages through a scratch
+    // buffer, and sizing + clearing it every block on every Vox strip when
+    // nothing is frozen is audio-thread work bought for nothing.  (The first
+    // version of this refactor did exactly that.)
     bool frozenOk = false;
-    if (mCtx->songMode)
-    if (auto* fz = mFrozenSource.load (std::memory_order_acquire))
+    if (FreezeRead::hasSourceFor (*this, *mCtx))
     {
-        juce::int64 filePos = 0;
-        if (mCtx->posInfo != nullptr)
-            filePos = mCtx->posInfo->getTimeInSamples().orFallback ((juce::int64) 0);
-
-        if (filePos >= 0 && filePos < fz->getTotalLength())
-        {
-            mEngineScratch.setSize (blockView.getNumChannels(), n, false, false, true);
-            mEngineScratch.clear();
-            frozenOk = fz->readRaw (mEngineScratch, 0, n, filePos);
-        }
+        mEngineScratch.setSize (blockView.getNumChannels(), n, false, false, true);
+        mEngineScratch.clear();
+        frozenOk = FreezeRead::serveBlock (*this, *mCtx, mEngineScratch, n);
     }
 
     if (frozenOk && ! active)

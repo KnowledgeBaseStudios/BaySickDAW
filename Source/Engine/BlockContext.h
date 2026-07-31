@@ -29,6 +29,19 @@ struct BlockContext
     // per-block state, which is exactly what this struct is for.
     bool   songMode   = false;
 
+    // ── §6.8 pattern-mode freeze ─────────────────────────────────────────────
+    // A freeze file rendered at SONG scope covers the arrangement from bar 1.
+    // In pattern mode the transport wraps inside the pattern loop, so reading
+    // that file at the absolute playhead played the song's opening bars on loop
+    // instead of the pattern -- which is why substitution was gated to song mode
+    // and pattern mode got no freeze at all.  A per-pattern render needs to be
+    // read at a PATTERN-LOCAL position, which nothing in this context carried.
+    //
+    // patternIndex is -1 in song mode.  patternLocalSamples is this block's
+    // offset from the loop start, already wrapped.
+    int         patternIndex        = -1;
+    juce::int64 patternLocalSamples = 0;
+
     // Playhead snapshot. Pointer rather than value so default-constructed
     // BlockContext is cheap; PluginProcessor sets to a stack-local PositionInfo
     // that lives for the duration of dispatchBlock.

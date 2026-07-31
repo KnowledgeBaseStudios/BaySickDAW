@@ -241,8 +241,20 @@ private:
     // TS7 §6.8: freezes read out of a project file during deserialize, applied
     // after the whole graph exists.  Collected rather than applied inline because
     // the tabs they name do not exist yet at read time.
-    struct PendingFreeze { TabKind kind; int pageIndex; bool byUser; };
+    // Carries the §6.8 span so restore can tell a file that still matches the
+    // arrangement from one rendered against a length or tempo since changed.
+    struct PendingFreeze
+    {
+        TabKind kind; int pageIndex; bool byUser;
+        EngineTab::FreezeSpan span;
+        // Per-pattern content stamps read back from the project, so each cached
+        // pattern render is validated on its own rather than all-or-nothing.
+        std::map<int, juce::uint32> patternStamps;
+    };
     std::vector<PendingFreeze> mPendingFreezes;
+    // §6.8: last pattern whose renders were published to the tasks.  -2 rather
+    // than -1 so the first poll always publishes, including for pattern 0.
+    int mLastRepublishedPattern { -2 };
     void restorePendingFreezes();
 
     // TS7 §6.9 / CL-055: smart auto-freeze.  Polled from the existing editor

@@ -711,17 +711,28 @@ authoritative punch-list for TS7.  Ten sections, each item independently checkab
   PatternManager mutations; EffectRack lifecycle).  A counter, not the existing bool: `mDirty`
   transitions once and then clears on save, which cannot answer "did anything change since the last
   pass".
-- [ ] §3.4 **PARTIAL — reopened by the 2026-07-30 audit.**  Session-only default (a unique temp
-  FOLDER, deleted whole on close, so nothing has to guess which files in a shared temp dir were
-  ours) and the `fsCaptureRetain` switch both work.  **Two defects, one fixed one open:**
+- [x] §3.4 **DONE** — reopened by the 2026-07-30 audit, both defects now closed.  Session-only
+  default (a unique temp FOLDER, deleted whole on close, so nothing has to guess which files in a
+  shared temp dir were ours) and the `fsCaptureRetain` switch both work.  **Two defects, both
+  fixed:**
   * FIXED — the retained path was `<project>\Reports\Versions\`.  §3.4 says `<project>\Reports\` and
     Jeff's own objection is the argument: the reports ARE the versions, so a `Versions` subfolder
     would leave the Reports folder holding nothing but a subfolder.  Flattened.
-  * OPEN — **retention currently retains nothing when the audio toggle is off**, which is the
-    DEFAULT.  No Version's analysis is ever serialized: `VersionCapture` has no save/load and its
-    vector is in-memory only, so the curve, integrated, LRA and labels are gone at app close in both
-    retention modes.  §3.1 makes analysis the half that is always kept, so "keep takes in the
-    project" retaining only the optional half is backwards.
+  * FIXED (2026-07-30, entry corrected 2026-07-31) — retention used to retain nothing when the
+    audio toggle was off, which is the DEFAULT: no Version's analysis was serialized at all, so
+    the curve, integrated, LRA and labels died at app close even in "keep takes in the project"
+    mode.  §3.1 makes analysis the half that is ALWAYS kept, so retaining only the optional half
+    was backwards.  Closed by `VersionCapture::onPersistTake` (declared
+    [VersionCapture.h:115](../../Source/Standalone/VersionCapture.h:115), fired at
+    [VersionCapture.cpp:176](../../Source/Standalone/VersionCapture.cpp:176), handled at
+    [StandaloneEditor.cpp:1751](../../Source/Standalone/StandaloneEditor.cpp:1751)): a completed
+    take's analysis is written as one of the EXISTING loudness reports into `<project>\Reports\`,
+    which is what makes Jeff's own framing literally true — the reports ARE the versions.  No
+    second format, no second folder, no second reader; §11.7's embedded data block already reloads
+    them into this same analyzer.
+    **This bullet said OPEN for a day after the fix landed, and I twice reported §3.4 to Jeff as
+    unfinished off the back of it.**  A stale plan entry is not a cosmetic problem — it is the
+    same defect class as a stale comment, and it cost him two false status reports.
 - [x] §3.5 **DONE.**  Reuses `AudioFileRecorder` at the existing PRE-METRONOME master tap, so a
   captured take never carries a click track, with the same PDC trim the record path uses.  A SECOND
   instance rather than `mMasterRecorder` itself: capture and a user recording can run at once, and

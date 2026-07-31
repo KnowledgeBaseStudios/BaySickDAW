@@ -643,6 +643,13 @@ StandaloneEditor::StandaloneEditor(VibeSynthProcessor& p, StandalonePlayHead& ph
             // plays on several at once.  Over-invalidating costs a re-render
             // (deferred to Stop); under-invalidating ships the wrong audio.
             mProcessor.engineRig().markAllFreezesStale();
+
+            // §6.8 AXIS TWO: the edit landed in the CURRENT pattern, so that
+            // pattern's cached render is wrong for every tab holding one.
+            // markAllFreezesStale above is the broad song-scope signal; this is
+            // the per-pattern half, without which a pattern's cache would go on
+            // playing notes the user had already deleted.
+            if (mPM) mProcessor.engineRig().markPatternContentChanged (mPM->getCurrentPatternIndex());
         };
     // QA-G Task 6: immediate UI refresh on TS lifecycle changes (the rolls +
     // pattern-button label also self-heal on their timers; this just makes
@@ -4181,7 +4188,7 @@ std::unique_ptr<juce::Component> StandaloneEditor::createMixerPage()
     // here because this is where the editor already owns both.
     mProcessor.onRenderFreezeFile =
         [this] (VibeGraph::InsertKind kind, int index, RenderTask* target,
-                const juce::File& dest, juce::String& outErr) -> bool
+                int patternIndex, const juce::File& dest, juce::String& outErr) -> bool
         {
             if (mBuilderPage == nullptr) { outErr = "The Builder is not available."; return false; }
 
@@ -4192,7 +4199,7 @@ std::unique_ptr<juce::Component> StandaloneEditor::createMixerPage()
             // percentage and no way out, on a render that can run for a minute
             // or more.  The abort check inside the loop could never fire.
             return mBuilderPage->renderFreezeFile (
-                kind, index, target, dest, outErr,
+                kind, index, target, patternIndex, dest, outErr,
                 [this] { return mHeavyOpOverlay.wasCancelled(); },
                 [this] (double p)
                 {
@@ -4204,15 +4211,23 @@ std::unique_ptr<juce::Component> StandaloneEditor::createMixerPage()
                 });
         };
 
+    // §6.8: stepped progress for a per-instrument freeze (song + one render per
+    // pattern).  Without it a multi-render freeze showed one bar that reset to 0
+    // on each pass, which reads as a hang rather than progress.
+    mProcessor.onFreezeStep = [this] (int done, int total, const juce::String& label)
+    {
+        mHeavyOpOverlay.setStep (done, total, label);
+    };
+
     // §6.9: the kit's thirteen strips, one pass.  Same progress + cancel wiring
     // as the single-track path.
     mProcessor.onRenderKitFreezeFiles =
         [this] (const std::vector<juce::File>& dests, RenderTask* target,
-                juce::String& outErr) -> bool
+                int patternIndex, juce::String& outErr) -> bool
         {
             if (mBuilderPage == nullptr) { outErr = "The Builder is not available."; return false; }
             return mBuilderPage->renderKitFreezeFiles (
-                dests, target, outErr,
+                dests, target, patternIndex, outErr,
                 [this] { return mHeavyOpOverlay.wasCancelled(); },
                 [this] (double p) { mHeavyOpOverlay.setProgress (p); });
         };
@@ -6591,6 +6606,21 @@ void StandaloneEditor::wireFreezeSlotForVisiblePage()
 void StandaloneEditor::refreshPatternBox()
 {
     if (!mPM || mPM->getNumPatterns() == 0) return;
+
+    // §6.8: the current pattern changed, so every frozen tab's task needs to be
+    // pointed at the render for the NEW pattern.  Piggybacks this 10 Hz poll
+    // rather than adding a timer -- the poll exists precisely because the current
+    // pattern changes from places that cannot call us directly (Builder grid and
+    // browser selection, project load).  Change-guarded: republishing every tick
+    // would be pointless stores on the audio thread's read pointer.
+    {
+        const int nowPat = mPM->getCurrentPatternIndex();
+        if (nowPat != mLastRepublishedPattern)
+        {
+            mLastRepublishedPattern = nowPat;
+            mProcessor.engineRig().republishPatternSources (nowPat);
+        }
+    }
     // QA-G Task 6 (docket #2): non-4/4 EFFECTIVE signatures show as a name
     // suffix ("Synths 7/8") -- followers included.
     const auto& curPat = mPM->currentPattern();
@@ -12059,11 +12089,19 @@ void StandaloneEditor::serializeTabsInto (juce::XmlElement& tabs)
             const juce::String tt = rec->getStringAttribute ("type");
             const int          pi = rec->getIntAttribute ("pageIndex");
             TabKind kind  = TabKind::Layers;
+            // ALL EIGHT KINDS (fixed 2026-07-31).  This listed only the four
+            // engine-page types, so after freeze was extended to Clips / Vox /
+            // Inst / Rusty those four saved nothing -- freezing one, saving and
+            // reopening silently came back UNFROZEN with its file still on disk.
             bool    known = true;
             if      (tt == "Layers")  kind = TabKind::Layers;
             else if (tt == "Bass")    kind = TabKind::Bass;
             else if (tt == "Drums")   kind = TabKind::Drums;
             else if (tt == "Plugins") kind = TabKind::Plugins;
+            else if (tt == "Clips")   kind = TabKind::Clips;
+            else if (tt == "Vox")     kind = TabKind::Vox;
+            else if (tt == "Inst")    kind = TabKind::Inst;
+            else if (tt == "Rusty")   kind = TabKind::Rusty;
             else                      known = false;
 
             if (known && mProcessor.engineRig().isFrozen (kind, pi))
@@ -12072,6 +12110,30 @@ void StandaloneEditor::serializeTabsInto (juce::XmlElement& tabs)
                 const auto* t = mProcessor.engineRig().findTab (kind, pi);
                 rec->setAttribute ("frozenBy",
                                    (t != nullptr && t->frozenByUser) ? "manual" : "auto");
+                // §6.8 SPAN -- what the file on disk actually covers.  Without it
+                // a restored freeze is a file of unknown length standing in for a
+                // track, which is how a song-scope render ended up being played
+                // at the pattern-mode playhead.
+                if (t != nullptr)
+                {
+                    rec->setAttribute ("freezeScope",  t->freezeSpan.patternIndex);
+                    rec->setAttribute ("freezeBeats",  t->freezeSpan.lengthBeats);
+                    rec->setAttribute ("freezeBpm",    t->freezeSpan.bpm);
+                    // Stored as a STRING: the stamp is a uint32 and XML integer
+                    // attributes round-trip through int, so anything above
+                    // 2^31 would come back negative.
+                    rec->setAttribute ("freezeStamp",
+                                       juce::String ((juce::uint64) t->freezeSpan.contentStamp));
+
+                    // One child per cached pattern render, so each is validated
+                    // independently on reload.
+                    for (const auto& kv : t->patternStamps)
+                    {
+                        auto* ps = rec->createNewChildElement ("FreezePattern");
+                        ps->setAttribute ("index", kv.first);
+                        ps->setAttribute ("stamp", juce::String ((juce::uint64) kv.second));
+                    }
+                }
             }
         }
         juce::ignoreUnused (rec);
@@ -13289,10 +13351,34 @@ void StandaloneEditor::deserializeUIState (const juce::XmlElement& root)
         if (rec->getIntAttribute ("frozen", 0) != 0)
         {
             const bool byUser = (rec->getStringAttribute ("frozenBy", "manual") != "auto");
-            if      (type == "Layers")  mPendingFreezes.push_back ({ TabKind::Layers,  pageIndex, byUser });
-            else if (type == "Bass")    mPendingFreezes.push_back ({ TabKind::Bass,    pageIndex, byUser });
-            else if (type == "Drums")   mPendingFreezes.push_back ({ TabKind::Drums,   pageIndex, byUser });
-            else if (type == "Plugins") mPendingFreezes.push_back ({ TabKind::Plugins, pageIndex, byUser });
+
+            EngineTab::FreezeSpan span;
+            span.patternIndex = rec->getIntAttribute    ("freezeScope", EngineTab::kSongScope);
+            span.lengthBeats  = rec->getDoubleAttribute ("freezeBeats", 0.0);
+            span.bpm          = rec->getDoubleAttribute ("freezeBpm",   0.0);
+            span.contentStamp = (juce::uint32)
+                rec->getStringAttribute ("freezeStamp", "0").getLargeIntValue();
+
+            std::map<int, juce::uint32> patStamps;
+            for (auto* ps : rec->getChildWithTagNameIterator ("FreezePattern"))
+                patStamps[ps->getIntAttribute ("index", -1)] = (juce::uint32)
+                    ps->getStringAttribute ("stamp", "0").getLargeIntValue();
+
+            // All eight kinds, matching the save side.  A frozen Clips / Vox /
+            // Inst / Rusty tab used to come back unfrozen.
+            TabKind k    = TabKind::Layers;
+            bool    okay = true;
+            if      (type == "Layers")  k = TabKind::Layers;
+            else if (type == "Bass")    k = TabKind::Bass;
+            else if (type == "Drums")   k = TabKind::Drums;
+            else if (type == "Plugins") k = TabKind::Plugins;
+            else if (type == "Clips")   k = TabKind::Clips;
+            else if (type == "Vox")     k = TabKind::Vox;
+            else if (type == "Inst")    k = TabKind::Inst;
+            else if (type == "Rusty")   k = TabKind::Rusty;
+            else                        okay = false;
+
+            if (okay) mPendingFreezes.push_back ({ k, pageIndex, byUser, span, std::move (patStamps) });
         }
 
         ++tabNum;
@@ -14307,11 +14393,42 @@ void StandaloneEditor::restorePendingFreezes()
     auto pending = std::move (mPendingFreezes);
     mPendingFreezes.clear();
 
+    // §6.8: the span decides whether the file on disk still describes this
+    // project.  A freeze rendered against a 64-beat song at 120 does not stand in
+    // for a 96-beat song at 128 -- re-rendering is the only correct answer, and
+    // freezeTab re-renders unconditionally, so a mismatch just means we say so.
+    const double nowBeats = mPM != nullptr ? mPM->getSongEndBeats()  : 0.0;
+    const double nowBpm   = mPM != nullptr ? mPM->getGlobalTempo()   : 120.0;
+
     for (const auto& p : pending)
     {
         if (! p.byUser && ! autoFreezeArmed) continue;
+
+        // lengthBeats == 0 means a project saved before the span existed; treat
+        // it as "unknown, re-render" rather than assuming it still fits.
+        const bool spanKnown = p.span.lengthBeats > 0.0;
+        if (spanKnown && ! p.span.matches (nowBeats, nowBpm))
+            DBG ("[TS7 FREEZE] span changed for tab " << (int) p.kind << "/" << p.pageIndex
+                 << " (was " << p.span.lengthBeats << "@" << p.span.bpm
+                 << ", now " << nowBeats << "@" << nowBpm << ") -- re-rendering");
+
+        // Seed the tab with the stamps the project recorded BEFORE freezeTab
+        // runs -- it compares the tab's stored stamps against freshly computed
+        // ones to decide what it can reuse, so without this every file would
+        // read as unstamped and re-render, which is the cost this exists to
+        // remove.
+        if (auto* t = mProcessor.engineRig().findTab (p.kind, p.pageIndex))
+        {
+            t->freezeSpan    = p.span;
+            t->patternStamps = p.patternStamps;
+        }
+
         juce::String err;
-        if (! mProcessor.freezeTab (p.kind, p.pageIndex, err, p.byUser))
+        // reuseValid: a file whose content stamp still matches is reused as-is.
+        // A project reopened unchanged renders NOTHING; one where a pattern was
+        // edited re-renders that pattern and the song, and leaves the other
+        // patterns alone.
+        if (! mProcessor.freezeTab (p.kind, p.pageIndex, err, p.byUser, /*reuseValid*/ true))
             DBG ("[TS7 FREEZE] restore failed for tab " << (int) p.kind
                  << "/" << p.pageIndex << ": " << err);
     }

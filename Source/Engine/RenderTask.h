@@ -111,6 +111,29 @@ public:
     AudioClipStreamer* getFrozenSource() const noexcept
         { return mFrozenSource.load (std::memory_order_acquire); }
 
+    // ── §6.8 PATTERN-SCOPE SOURCE ────────────────────────────────────────────
+    // The render for the pattern currently looping, or null.  Republished by the
+    // message thread whenever the current pattern changes, so the audio thread
+    // reads ONE pointer instead of walking a map per block.
+    //
+    // `mFrozenPatternIndex` is what that pointer BELONGS to.  The audio thread
+    // compares it against the block's pattern before using the source: without
+    // that check a pattern switch would play the previous pattern's render for
+    // the block or two before the republish lands -- briefly, but audibly, the
+    // wrong pattern.  Null source or a mismatched index both mean FALL BACK TO
+    // THE LIVE ENGINE, which is freeze's existing stale-plays-live rule.
+    void setFrozenPatternSource (AudioClipStreamer* s, int patternIndex) noexcept
+    {
+        mFrozenPatternIndex.store (patternIndex, std::memory_order_relaxed);
+        mFrozenPatternSource.store (s, std::memory_order_release);
+    }
+    AudioClipStreamer* getFrozenPatternSource (int forPattern) const noexcept
+    {
+        if (mFrozenPatternIndex.load (std::memory_order_relaxed) != forPattern)
+            return nullptr;
+        return mFrozenPatternSource.load (std::memory_order_acquire);
+    }
+
     // ── TS7 §6.9: freeze-render pruning ───────────────────────────────────────
     // Set only by RenderGraphDispatcher::setFreezePrune, only for the duration
     // of an offline freeze render, and only on tasks OUTSIDE the keep-set (the
@@ -145,5 +168,7 @@ public:
 
 protected:
     std::atomic<AudioClipStreamer*> mFrozenSource { nullptr };
+    std::atomic<AudioClipStreamer*> mFrozenPatternSource { nullptr };
+    std::atomic<int>                mFrozenPatternIndex  { -1 };
     std::atomic<bool>               mRenderSkipped { false };
 };

@@ -3162,6 +3162,39 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
                 ? (int) apvts.getRawParameterValue("master_pan_law")->load()
                 : 0;
         mtCtx.posInfo            = &pos;
+
+        // §6.8: pattern-mode freeze reads a per-pattern file at a LOOP-LOCAL
+        // position.  Mirrors the scheduler's own loop-bound math (see the
+        // loopStartSamp / loopEndSamp block above) so the frozen audio lines up
+        // with the notes that produced it, including under a tempo map.
+        if (! mtCtx.songMode && mPatternManager != nullptr)
+        {
+            const double loopStartBeat = mLoopStartBeats.load (std::memory_order_relaxed);
+            const double loopEndBeat   = mCachedPatternLoopBeats.load (std::memory_order_relaxed);
+
+            if (loopEndBeat > loopStartBeat)
+            {
+                const juce::int64 samplePos = pos.getTimeInSamples().orFallback ((juce::int64) 0);
+                const double      beatNow   = pos.getPpqPosition().orFallback (0.0);
+                const double      spb       = 60.0 * mSampleRate
+                                            / juce::jmax (1e-6, pos.getBpm().orFallback (120.0));
+
+                const bool tm = TempoMap::isActive();
+                const juce::int64 startSamp = tm ? TempoMap::sampleAtBeat (loopStartBeat)
+                    : samplePos + (juce::int64) std::llround ((loopStartBeat - beatNow) * spb);
+                const juce::int64 endSamp   = tm ? TempoMap::sampleAtBeat (loopEndBeat)
+                    : samplePos + (juce::int64) std::llround ((loopEndBeat   - beatNow) * spb);
+                const juce::int64 span      = endSamp - startSamp;
+
+                if (span > 0)
+                {
+                    juce::int64 local = (samplePos - startSamp) % span;
+                    if (local < 0) local += span;   // pre-roll / negative seek
+                    mtCtx.patternIndex        = mPatternManager->getCurrentPatternIndex();
+                    mtCtx.patternLocalSamples = local;
+                }
+            }
+        }
         mtCtx.layerPageMidi      = layerPageMidi.data();
         mtCtx.bassPageMidi       = bassPageMidi .data();
         mtCtx.drumPageMidi       = drumPageMidi .data();
@@ -3752,7 +3785,7 @@ static VibeGraph::InsertKind insertKindForTab (TabKind k) noexcept
 // is append-only today by accident rather than by rule (Plugins was appended for
 // exactly this reason), and inserting a value mid-enum would silently re-point
 // every freeze file a saved project refers to.  A name cannot drift that way.
-juce::File VibeSynthProcessor::freezeFileFor (TabKind kind, int pageIndex)
+juce::File VibeSynthProcessor::freezeFileFor (TabKind kind, int pageIndex, int patternIndex)
 {
     const juce::File dir = getProjectFreezeDir();
     if (dir == juce::File()) return {};
@@ -3771,15 +3804,97 @@ juce::File VibeSynthProcessor::freezeFileFor (TabKind kind, int pageIndex)
         // drum, all written by a single freeze action.
         case TabKind::Rusty:   n = "rusty";   break;
     }
+    // §6.8: the SCOPE is in the name.  A freeze file is either the arrangement
+    // (`_song`) or one pattern's own render (`_patN`) -- the two are different
+    // audio of different lengths and cannot share a filename.  Without this a
+    // pattern render would silently overwrite the song render and vice versa.
+    // No migration for the old unsuffixed name: pre-v1, and a stale file is
+    // swept as an orphan rather than loaded.
+    const juce::String scope = patternIndex < 0
+                             ? juce::String ("song")
+                             : ("pat" + juce::String (patternIndex));
+
     return dir.getChildFile (juce::String ("tab_") + n + "_"
-                             + juce::String (pageIndex) + ".wav");
+                             + juce::String (pageIndex) + "_" + scope + ".wav");
+}
+
+// §6.8: which patterns this tab actually PLAYS IN.  A frozen instrument renders
+// the song plus one file per pattern it has content in -- not every pattern, and
+// not the other instruments in those patterns, which is what keeps the per-
+// pattern cache cheap (a few bars each rather than an arrangement).
+std::vector<int> VibeSynthProcessor::patternsWithContentFor (TabKind kind, int pageIndex) const
+{
+    std::vector<int> out;
+    if (mPatternManager == nullptr) return out;
+
+    const int nPat = mPatternManager->getNumPatterns();
+
+    for (int p = 0; p < nPat; ++p)
+    {
+        const auto& pat = mPatternManager->getPattern (p);
+        const std::vector<PianoNote>* notes = nullptr;
+
+        auto pick = [&] (const auto& arr, int idx) -> const std::vector<PianoNote>*
+        {
+            return (idx >= 0 && idx < (int) arr.size()) ? &arr[(size_t) idx].notes : nullptr;
+        };
+
+        switch (kind)
+        {
+            case TabKind::Layers:  notes = pick (pat.layerRoll,  pageIndex); break;
+            case TabKind::Bass:    notes = pick (pat.bassRoll,   pageIndex); break;
+            case TabKind::Drums:   notes = pick (pat.drumRolls,  pageIndex); break;
+            case TabKind::Clips:   notes = pick (pat.clipRoll,   pageIndex); break;
+            case TabKind::Vox:     notes = pick (pat.voxRoll,    pageIndex); break;
+            case TabKind::Inst:    notes = pick (pat.instRoll,   pageIndex); break;
+            case TabKind::Plugins: notes = pick (pat.pluginRoll, pageIndex); break;
+            // The kit is ONE instrument across 13 strips: its roll is a single
+            // shared one, so every strip's per-pattern set is the kit's.
+            case TabKind::Rusty:   notes = &pat.baySickRustyDrumsRoll.notes;  break;
+        }
+
+        if (notes != nullptr && ! notes->empty())
+            out.push_back (p);
+    }
+    return out;
 }
 
 // §6.7's two cleanup rules, both of which were missing entirely.
 void VibeSynthProcessor::deleteFreezeFileFor (TabKind kind, int pageIndex)
 {
-    const juce::File f = freezeFileFor (kind, pageIndex);
-    if (f != juce::File() && f.existsAsFile()) f.deleteFile();
+    // EVERY SCOPE, not just the song file: a per-instrument freeze can leave one
+    // file per pattern behind it, and deleting only the song render would strand
+    // all of them as orphans the moment the tab goes.
+    const juce::File dir = getProjectFreezeDir();
+    if (dir == juce::File() || ! dir.isDirectory()) return;
+
+    const juce::String prefix = freezeFilePrefixFor (kind, pageIndex);
+    if (prefix.isEmpty()) return;
+
+    juce::Array<juce::File> files;
+    dir.findChildFiles (files, juce::File::findFiles, false, prefix + "*.wav");
+    for (const auto& f : files) f.deleteFile();
+}
+
+// The name up to (and including) the scope separator -- `tab_layers_0_`.  One
+// place builds it so the delete sweep, the orphan sweep and the per-scope file
+// naming cannot drift apart.
+juce::String VibeSynthProcessor::freezeFilePrefixFor (TabKind kind, int pageIndex) const
+{
+    const char* n = nullptr;
+    switch (kind)
+    {
+        case TabKind::Layers:  n = "layers";  break;
+        case TabKind::Bass:    n = "bass";    break;
+        case TabKind::Drums:   n = "drums";   break;
+        case TabKind::Clips:   n = "clips";   break;
+        case TabKind::Vox:     n = "vox";     break;
+        case TabKind::Inst:    n = "inst";    break;
+        case TabKind::Plugins: n = "plugins"; break;
+        case TabKind::Rusty:   n = "rusty";   break;
+    }
+    if (n == nullptr) return {};
+    return juce::String ("tab_") + n + "_" + juce::String (pageIndex) + "_";
 }
 
 // Called after a project's tabs are restored.  Without this the Freeze folder
@@ -3797,19 +3912,41 @@ void VibeSynthProcessor::sweepOrphanFreezeFiles()
     // Build the live set from the rig rather than parsing names back into kinds:
     // the rig is the authority on which tabs exist, and a name we cannot parse
     // should be LEFT ALONE rather than deleted on a guess.
-    juce::StringArray live;
+    // PREFIXES, not whole filenames: a live tab now owns a whole FAMILY of files
+    // (`_song` plus one `_patN` per pattern it appears in), and matching exact
+    // names would have deleted every per-pattern render as an orphan the first
+    // time this ran.  Rusty included -- its 13 strips are indices under the
+    // `rusty` name, and omitting it swept the entire frozen kit.
+    juce::StringArray livePrefixes;
     static constexpr TabKind kAll[] = { TabKind::Layers, TabKind::Bass,
                                         TabKind::Drums,  TabKind::Clips,
                                         TabKind::Vox,    TabKind::Inst,
-                                        TabKind::Plugins };
+                                        TabKind::Plugins, TabKind::Rusty };
     for (auto k : kAll)
         for (int i = 0; i < 64; ++i)
             if (mEngineRig->findTab (k, i) != nullptr)
-                live.add (freezeFileFor (k, i).getFileName());
+            {
+                if (k == TabKind::Rusty)
+                {
+                    // One tab, thirteen strip indices.
+                    for (int s = 0; s < MixerChannelIds::kMaxRustyStrips; ++s)
+                        livePrefixes.add (freezeFilePrefixFor (k, s));
+                }
+                else
+                {
+                    livePrefixes.add (freezeFilePrefixFor (k, i));
+                }
+            }
 
     for (const auto& f : files)
-        if (! live.contains (f.getFileName(), true))
-            f.deleteFile();
+    {
+        const juce::String name = f.getFileName();
+        bool owned = false;
+        for (const auto& p : livePrefixes)
+            if (name.startsWith (p)) { owned = true; break; }
+
+        if (! owned) f.deleteFile();
+    }
 }
 
 // ── TS7 §6.9: the kit freezes as ONE unit (Jeff's option (c)) ────────────────
@@ -3822,7 +3959,28 @@ void VibeSynthProcessor::sweepOrphanFreezeFiles()
 // fader, pan, mute/solo and meter LIVE.  Only the drum sounds bake.  Capturing
 // at the kit BUS instead would have baked all thirteen strips' mixer settings --
 // see the plan's §6.9 entry for why that shape was abandoned.
-bool VibeSynthProcessor::freezeRustyKit (juce::String& outErr, bool byUser)
+bool VibeSynthProcessor::setRustyFrozenPatternSourcesImpl (
+    const std::vector<std::unique_ptr<AudioClipStreamer>>* streams, int patternIndex)
+{
+    for (size_t i = 0; i < mRustyRenderTasks.size(); ++i)
+    {
+        auto* t = mRustyRenderTasks[i].get();
+        if (t == nullptr) continue;
+
+        AudioClipStreamer* s = (streams != nullptr && i < streams->size())
+                             ? (*streams)[i].get() : nullptr;
+        t->setFrozenPatternSource (s, patternIndex);
+    }
+    return true;
+}
+
+void VibeSynthProcessor::setRustyFrozenPatternSources (
+    const std::vector<std::unique_ptr<AudioClipStreamer>>* streams, int patternIndex)
+{
+    setRustyFrozenPatternSourcesImpl (streams, patternIndex);
+}
+
+bool VibeSynthProcessor::freezeRustyKit (juce::String& outErr, bool byUser, bool reuseValid)
 {
     auto* tab = mEngineRig->findTab (TabKind::Rusty, 0);
     if (tab == nullptr)              { outErr = "The drum kit is not available."; return false; }
@@ -3851,7 +4009,14 @@ bool VibeSynthProcessor::freezeRustyKit (juce::String& outErr, bool byUser)
     // the freeze tap, so the ONE task that has to keep running is the producer
     // that calls the engine.  Everything the producer itself depends on comes
     // along through the dispatcher's upstream walk.
-    if (! onRenderKitFreezeFiles (dests, mRustyProducerTask.get(), outErr))
+    const juce::uint32 songStamp = mEngineRig->freezeContentStamp (TabKind::Rusty, 0, -1);
+    const bool songReusable = reuseValid
+                           && tab->freezeSpan.stampMatches (songStamp)
+                           && std::all_of (dests.begin(), dests.end(),
+                                           [] (const juce::File& f) { return f.existsAsFile(); });
+
+    if (! songReusable
+        && ! onRenderKitFreezeFiles (dests, mRustyProducerTask.get(), -1, outErr))
         return false;
 
     tab->freezeStreams.clear();
@@ -3873,9 +4038,70 @@ bool VibeSynthProcessor::freezeRustyKit (juce::String& outErr, bool byUser)
         tab->freezeStreams.push_back (std::move (s));
     }
 
+    // §6.8: PER-PATTERN RENDERS FOR THE KIT TOO.  Built last, because the kit
+    // renders through its own thirteen-writer path rather than freezeTab -- and
+    // that is exactly how it came to be the one tab kind of eight left with
+    // song-scope freeze only.  Each pattern is one more thirteen-file pass.
+    //
+    // A per-pattern failure is NOT fatal, same as the single-track path: the song
+    // render already succeeded, so the kit stays frozen in song mode and plays
+    // live in the pattern that failed.
+    std::map<int, std::vector<std::unique_ptr<AudioClipStreamer>>> patStreams;
+    std::map<int, juce::uint32>                                    patStamps;
+
+    for (int p : patternsWithContentFor (TabKind::Rusty, 0))
+    {
+        std::vector<juce::File> pdests;
+        pdests.reserve ((size_t) strips);
+        for (int i = 0; i < strips; ++i)
+            pdests.push_back (freezeFileFor (TabKind::Rusty, i, p));
+
+        const juce::uint32 stamp = mEngineRig->freezeContentStamp (TabKind::Rusty, 0, p);
+        auto prev = tab->patternStamps.find (p);
+        const bool reusable = reuseValid
+                           && prev != tab->patternStamps.end()
+                           && prev->second != 0 && prev->second == stamp
+                           && std::all_of (pdests.begin(), pdests.end(),
+                                           [] (const juce::File& f) { return f.existsAsFile(); });
+
+        juce::String perr;
+        if (! reusable
+            && ! onRenderKitFreezeFiles (pdests, mRustyProducerTask.get(), p, perr))
+            continue;
+
+        std::vector<std::unique_ptr<AudioClipStreamer>> v;
+        v.reserve ((size_t) strips);
+        bool ok = true;
+
+        for (const auto& f : pdests)
+        {
+            std::unique_ptr<juce::AudioFormatReader> raw (mAudioFormatManager.createReaderFor (f));
+            if (raw == nullptr) { ok = false; break; }
+            auto s = std::make_unique<AudioClipStreamer> (std::move (raw), mAudioFileThread);
+            s->seek (0);
+            v.push_back (std::move (s));
+        }
+
+        if (ok && (int) v.size() == strips)
+        {
+            patStreams[p] = std::move (v);
+            patStamps[p]  = stamp;
+        }
+    }
+
+    // Null the readers before the map they point into is replaced -- the same
+    // use-after-free the single-track path guards.
+    setRustyFrozenPatternSourcesImpl (nullptr, -1);
+    tab->freezePatternStreams = std::move (patStreams);
+    tab->patternStamps        = std::move (patStamps);
+    tab->stalePatterns.clear();
+
     tab->frozen       = true;
     tab->frozenByUser = byUser;
     tab->freezeStale  = false;
+    // The kit is the singleton (Rusty, page 0) -- freezeRustyKit has no kind /
+    // pageIndex of its own because there is only ever one.
+    tab->freezeSpan   = mEngineRig->songFreezeSpanFor (TabKind::Rusty, 0);
 
     // Publish to the strips FIRST, then let the producer stop: between those two
     // stores a strip may still read the engine, which is merely redundant.  The
@@ -3886,18 +4112,23 @@ bool VibeSynthProcessor::freezeRustyKit (juce::String& outErr, bool byUser)
             mRustyRenderTasks[(size_t) i]->setFrozenSource (tab->freezeStreams[(size_t) i].get());
     mRustyKitFrozen.store (true, std::memory_order_release);
 
+    // Point the thirteen strips at the pattern currently looping (see the same
+    // call in freezeTab for why the editor's change-gated poll is not enough).
+    if (mPatternManager != nullptr)
+        mEngineRig->republishPatternSources (mPatternManager->getCurrentPatternIndex());
+
     if (mEngineRig->onFreezeStateChanged) mEngineRig->onFreezeStateChanged (TabKind::Rusty, 0);
     return true;
 }
 
 bool VibeSynthProcessor::freezeTab (TabKind kind, int pageIndex,
-                                    juce::String& outErr, bool byUser)
+                                    juce::String& outErr, bool byUser, bool reuseValid)
 {
     // The kit is ONE action over THIRTEEN strips (Jeff's option (c)), so it has
     // its own path -- there is no single task or single file for it, which is
     // exactly why renderTaskForTab cannot express it.
     if (kind == TabKind::Rusty)
-        return freezeRustyKit (outErr, byUser);
+        return freezeRustyKit (outErr, byUser, reuseValid);
 
     auto* tab  = mEngineRig->findTab (kind, pageIndex);
     auto* task = renderTaskForTab (kind, pageIndex);
@@ -3924,34 +4155,144 @@ bool VibeSynthProcessor::freezeTab (TabKind kind, int pageIndex,
     // does not orphan its freeze.
     const juce::File dest = freezeFileFor (kind, pageIndex);
 
-    // Render with the tab still LIVE: the tap reads the engine's pre-rack output,
-    // so it must be producing audio while this runs.
-    if (! onRenderFreezeFile (insertKindForTab (kind), pageIndex, task, dest, outErr))
-        return false;
+    // §6.8: the render set is the SONG plus one file per pattern this instrument
+    // actually plays in.  Not every pattern (a tab silent in a pattern needs no
+    // file) and not the other instruments in those patterns -- freeze is
+    // per-instrument, so drums frozen and bass live means bass stays live in
+    // every pattern.
+    // The full render set: song + one file per pattern this instrument plays in.
+    // Not every pattern (a tab silent in one needs no file) and not the other
+    // instruments in those patterns -- freeze is per-instrument, so drums frozen
+    // and bass live means bass stays live in every pattern.
+    //
+    // `reuseValid` lets each file be SKIPPED when its content stamp still
+    // matches.  Project restore passes it: without the stamp, load had to
+    // re-render every frozen tab from scratch, and once a tab meant 1+N renders
+    // that multiplied load time by the pattern count.
+    const std::vector<int> pats = patternsWithContentFor (kind, pageIndex);
+    const int totalRenders = 1 + (int) pats.size();
+    int       doneRenders  = 0;
+
+    auto step = [&] (const juce::String& what)
+    {
+        if (onFreezeStep)
+            onFreezeStep (doneRenders, totalRenders, what);
+    };
+
+    // REUSE WHEN THE STAMP STILL MATCHES.  The file on disk is only valid if
+    // nothing that determines its sound has moved since -- engine state, notes,
+    // arrangement, tempo.  That is exactly what the stamp hashes, so this is a
+    // safe skip rather than the "assume it still fits" shortcut it replaces.
+    // Restore is the caller that needs it: without a stamp it had to re-render
+    // every frozen tab on every project load.
+    const juce::uint32 songStamp = mEngineRig->freezeContentStamp (kind, pageIndex, -1);
+    const bool songReusable = reuseValid
+                           && dest.existsAsFile()
+                           && tab->freezeSpan.stampMatches (songStamp);
+
+    if (! songReusable)
+    {
+        step ("Freezing - arrangement");
+
+        // Render with the tab still LIVE: the tap reads the engine's pre-rack
+        // output, so it must be producing audio while this runs.
+        if (! onRenderFreezeFile (insertKindForTab (kind), pageIndex, task, -1, dest, outErr))
+            return false;
+    }
+    ++doneRenders;
 
     // Same construction the clip players use: a reader handed to the shared
     // background prefetch thread, then a synchronous seek(0) pre-fill so the tab
     // plays from the first block rather than under-running into the live engine.
-    std::unique_ptr<juce::AudioFormatReader> rawReader (
-        mAudioFormatManager.createReaderFor (dest));
-    if (rawReader == nullptr)
+    auto openStream = [this] (const juce::File& f) -> std::unique_ptr<AudioClipStreamer>
+    {
+        std::unique_ptr<juce::AudioFormatReader> r (mAudioFormatManager.createReaderFor (f));
+        if (r == nullptr) return nullptr;
+        auto s = std::make_unique<AudioClipStreamer> (std::move (r), mAudioFileThread);
+        s->seek (0);
+        return s;
+    };
+
+    auto stream = openStream (dest);
+    if (stream == nullptr)
     {
         outErr = "The freeze file was rendered but could not be opened for playback.";
         return false;
     }
 
-    auto stream = std::make_unique<AudioClipStreamer> (std::move (rawReader),
-                                                       mAudioFileThread);
-    stream->seek (0);
+    // Per-pattern renders.  A FAILURE HERE IS NOT FATAL: the song render already
+    // succeeded, so the tab can freeze in song mode and simply play live in the
+    // pattern that failed -- which is freeze's existing fall-back-to-live rule.
+    // Dropping the whole freeze because one pattern would not render would be a
+    // worse trade than the CPU it saves.
+    std::map<int, std::vector<std::unique_ptr<AudioClipStreamer>>> patStreams;
+
+    std::map<int, juce::uint32> patStamps;
+
+    for (int p : pats)
+    {
+        const juce::File   pf    = freezeFileFor (kind, pageIndex, p);
+        const juce::uint32 stamp = mEngineRig->freezeContentStamp (kind, pageIndex, p);
+
+        // Per-pattern reuse is INDEPENDENT: editing pattern 3 leaves patterns
+        // 1, 2 and 4 valid, which is what makes per-pattern staleness exact
+        // instead of "any edit invalidates everything".
+        auto prev = tab->patternStamps.find (p);
+        const bool reusable = reuseValid
+                           && pf.existsAsFile()
+                           && prev != tab->patternStamps.end()
+                           && prev->second != 0
+                           && prev->second == stamp;
+
+        bool ok = reusable;
+
+        if (! reusable)
+        {
+            step ("Freezing - pattern " + juce::String (doneRenders) + " of "
+                  + juce::String (totalRenders - 1));
+
+            juce::String perr;
+            ok = onRenderFreezeFile (insertKindForTab (kind), pageIndex, task, p, pf, perr);
+        }
+
+        if (ok)
+            if (auto ps = openStream (pf))
+            {
+                std::vector<std::unique_ptr<AudioClipStreamer>> v;
+                v.push_back (std::move (ps));
+                patStreams[p] = std::move (v);
+                patStamps[p]  = stamp;
+            }
+
+        ++doneRenders;
+    }
 
     // Publish LAST: the task only starts reading once the streamer is fully open,
     // and the rig holds the streamer so it outlives any block that could read it.
+    // Belt-and-braces for the same hazard refreshFreeze guards above: whatever
+    // route got here, the audio thread must not be holding a pointer into the
+    // map we are about to replace.  Cheap, and it makes the invariant hold for
+    // any future caller rather than only the two that exist today.
+    task->setFrozenPatternSource (nullptr, -1);
+
     tab->freezeStreams.clear();
     tab->freezeStreams.push_back (std::move (stream));
+    tab->freezePatternStreams = std::move (patStreams);
+    tab->patternStamps        = std::move (patStamps);
+    tab->stalePatterns.clear();
     tab->frozen       = true;
     tab->frozenByUser = byUser;
     tab->freezeStale  = false;
+    tab->freezeSpan   = mEngineRig->songFreezeSpanFor (kind, pageIndex);
     task->setFrozenSource (tab->freezeStreams.front().get());
+
+    // §6.8: point the task at the render for the pattern that is CURRENTLY
+    // looping.  The editor's poll only republishes when the current pattern
+    // CHANGES, so without this a tab frozen while sitting on pattern 2 would
+    // have pattern 2's file on disk and never play it -- the user would have to
+    // switch away and back before their own freeze took effect in pattern mode.
+    if (mPatternManager != nullptr)
+        mEngineRig->republishPatternSources (mPatternManager->getCurrentPatternIndex());
 
     if (mEngineRig->onFreezeStateChanged) mEngineRig->onFreezeStateChanged (kind, pageIndex);
     return true;
@@ -3970,13 +4311,26 @@ void VibeSynthProcessor::unfreezeTab (TabKind kind, int pageIndex)
         // Clear every strip's pointer BEFORE the producer is re-enabled, so no
         // block can be reading a streamer while it is released.
         for (auto& t : mRustyRenderTasks)
-            if (t) t->setFrozenSource (nullptr);
+            if (t)
+            {
+                t->setFrozenSource (nullptr);
+                t->setFrozenPatternSource (nullptr, -1);
+            }
         mRustyKitFrozen.store (false, std::memory_order_release);
     }
     else if (auto* task = renderTaskForTab (kind, pageIndex))
+    {
         task->setFrozenSource (nullptr);
+        // §6.8: the PATTERN pointer too.  Clearing only the song source left an
+        // unfrozen tab still playing its per-pattern render in pattern mode --
+        // the freeze would look released and be audible anyway.
+        task->setFrozenPatternSource (nullptr, -1);
+    }
 
     tab->freezeStreams.clear();
+    tab->freezePatternStreams.clear();
+    tab->patternStamps.clear();
+    tab->stalePatterns.clear();
     tab->frozen      = false;
     tab->freezeStale = false;
 
@@ -3993,15 +4347,29 @@ bool VibeSynthProcessor::refreshFreeze (TabKind kind, int pageIndex, juce::Strin
     // Drop to the live engine for the duration: the render needs the engine
     // producing audio for the tap to capture, and playback falling back to live
     // meanwhile is exactly §6.6's rule -- so the re-render is never a silence.
+    // USE-AFTER-FREE if the PATTERN pointer is not cleared here (found
+    // 2026-07-31).  This path re-renders an ALREADY-FROZEN tab, so
+    // freezePatternStreams is populated and the task is pointing into it.
+    // freezeTab below move-assigns that map, destroying the streamer the audio
+    // thread is still reading.  ORDER IS LOAD-BEARING, exactly as for the song
+    // source: null the reader's pointer FIRST, release the storage after.
     if (kind == TabKind::Rusty)
     {
         for (auto& t : mRustyRenderTasks)
-            if (t) t->setFrozenSource (nullptr);
+            if (t)
+            {
+                t->setFrozenSource (nullptr);
+                t->setFrozenPatternSource (nullptr, -1);
+            }
         mRustyKitFrozen.store (false, std::memory_order_release);
     }
     else if (auto* task = renderTaskForTab (kind, pageIndex))
+    {
         task->setFrozenSource (nullptr);
+        task->setFrozenPatternSource (nullptr, -1);
+    }
     tab->freezeStreams.clear();
+    tab->freezePatternStreams.clear();
 
     if (! freezeTab (kind, pageIndex, outErr, wasByUser))
     {

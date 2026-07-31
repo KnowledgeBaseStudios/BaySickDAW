@@ -1,4 +1,5 @@
 #include "InstStripTask.h"
+#include "../FrozenSourceRead.h"   // TS7 6.8: scope-matched frozen block read
 #include "../../VibeGraph.h"
 #include "../../PluginProcessor.h"
 #include "../../DSP/EngineSidechainHelper.h"
@@ -147,24 +148,14 @@ void InstStripTask::run()
     // process it twice.  Standing aside costs nothing: the strip simply plays
     // live exactly as it does today, which is freeze's existing fall-back
     // behaviour rather than a special case invented here.
-    // SONG MODE ONLY -- see the note in EngineInsertTask::run.
-    if (! active && mCtx->songMode)
+    // §6.8 scope-matched (song render, or this pattern's own render at a
+    // loop-local position).  Still gated on `! active` for the reason above.
+    if (! active && FreezeRead::serveBlock (*this, *mCtx, blockView, n))
     {
-        if (auto* fz = mFrozenSource.load (std::memory_order_acquire))
-        {
-            juce::int64 filePos = 0;
-            if (mCtx->posInfo != nullptr)
-                filePos = mCtx->posInfo->getTimeInSamples().orFallback ((juce::int64) 0);
-
-            if (filePos >= 0 && filePos < fz->getTotalLength()
-                && fz->readRaw (blockView, 0, n, filePos))
-            {
-                pullSidechainPredecessorsToGraph (*mGraph, channelId, mPredecessors, n);
-                mGraph->processInsert (VibeGraph::InsertKind::Inst, mIndex,
-                                       blockView, mCtx->bpm, mCtx->anySolo);
-                return;
-            }
-        }
+        pullSidechainPredecessorsToGraph (*mGraph, channelId, mPredecessors, n);
+        mGraph->processInsert (VibeGraph::InsertKind::Inst, mIndex,
+                               blockView, mCtx->bpm, mCtx->anySolo);
+        return;
     }
 
     if (filePlay && ! active)

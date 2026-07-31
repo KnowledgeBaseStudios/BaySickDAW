@@ -1,4 +1,5 @@
 #include "EngineInsertTask.h"
+#include "../FrozenSourceRead.h"   // TS7 6.8: scope-matched frozen block read
 #include "../../VibeGraph.h"
 #include "../../DSP/EngineSidechainHelper.h"   // ISidechainEngine
 #include "../SidechainPullHelper.h"            // pullSidechainPredecessorsToGraph
@@ -101,27 +102,14 @@ void EngineInsertTask::run()
     // FALLS BACK TO THE LIVE ENGINE when the streamer cannot serve the block
     // (§6.6): a stale or missing freeze plays live until its re-render lands,
     // which is also what covers a project opened with no freeze cache at all.
-    // SONG MODE ONLY (2026-07-30, found by Jeff asking whether freeze helps in
-    // pattern mode).  The freeze file is the SONG arrangement rendered from bar
-    // 1, but in pattern mode the transport wraps inside the pattern loop -- so
-    // reading it at the playhead would play the opening bars of the SONG, looped,
-    // instead of the pattern.  Wrong audio WITH the CPU saving, which is worse
-    // than no saving.  Falls back to the live engine, which is freeze's existing
-    // stale-plays-live behaviour rather than a new path.
     //
-    // Pattern-mode freeze needs a pattern-SCOPED render, which is precisely the
-    // span §6.8 never saves.
-    bool playedFrozen = false;
-    if (mCtx->songMode)
-    if (auto* fz = mFrozenSource.load (std::memory_order_acquire))
-    {
-        juce::int64 filePos = 0;
-        if (mCtx->posInfo != nullptr)
-            filePos = mCtx->posInfo->getTimeInSamples().orFallback ((juce::int64) 0);
-
-        if (filePos >= 0 && filePos < fz->getTotalLength())
-            playedFrozen = fz->readRaw (blockView, 0, n, filePos);
-    }
+    // SCOPE-MATCHED (§6.8, 2026-07-31).  Song mode reads the arrangement render
+    // at the absolute playhead; pattern mode reads THAT PATTERN's own render at a
+    // loop-local position.  This was song-mode-ONLY until the span landed, which
+    // meant pattern mode got no freeze at all -- no CPU reclaimed in exactly the
+    // place layers are being stacked.  See FrozenSourceRead.h for why the
+    // selection lives in one place rather than five copies.
+    const bool playedFrozen = FreezeRead::serveBlock (*this, *mCtx, blockView, n);
 
     juce::MidiBuffer  emptyMidi;
     juce::MidiBuffer* midi = resolveMidiBuffer();

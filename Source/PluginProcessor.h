@@ -975,8 +975,12 @@ public:
     // Returns false + fills outErr if the render failed; the tab is left
     // unfrozen in that case rather than frozen against a file that does not
     // exist.
+    // reuseValid skips any file whose CONTENT STAMP still matches -- project
+    // restore passes it, so reopening a project reuses renders that are still
+    // correct instead of re-rendering every frozen tab.  Off by default: an
+    // explicit re-freeze should always produce fresh audio.
     bool freezeTab   (TabKind kind, int pageIndex, juce::String& outErr,
-                      bool byUser = true);
+                      bool byUser = true, bool reuseValid = false);
     void unfreezeTab (TabKind kind, int pageIndex);
     // Re-renders a frozen tab whose content changed (§6.6).  Playback keeps
     // falling back to the live engine until the new file is in place, so this is
@@ -987,7 +991,14 @@ public:
     // kind as a name rather than the TabKind ordinal, so inserting an enumerator
     // cannot silently re-point the freeze files a saved project refers to.
     // Not const: getProjectFreezeDir creates the folder on demand.
-    juce::File freezeFileFor      (TabKind kind, int pageIndex);
+    // §6.8: patternIndex < 0 is the SONG-scope file; anything else is that
+    // pattern's own render.  The scope is part of the name because the two are
+    // different audio of different lengths.
+    juce::File freezeFileFor      (TabKind kind, int pageIndex, int patternIndex = -1);
+    // Patterns this tab has notes in -- the set a per-instrument freeze renders.
+    std::vector<int> patternsWithContentFor (TabKind kind, int pageIndex) const;
+    // `tab_<kind>_<index>_` -- the family every scope of one tab's freeze shares.
+    juce::String     freezeFilePrefixFor (TabKind kind, int pageIndex) const;
     void       deleteFreezeFileFor (TabKind kind, int pageIndex);
     // Removes freeze files whose tab no longer exists.  Call after a project's
     // tabs are restored; without it the folder only ever grows.
@@ -996,21 +1007,39 @@ public:
     // Supplied by StandaloneEditor, calling BuilderPage::renderFreezeFile.
     // The RenderTask rides along purely so the render can prune the graph to it
     // (see setFreezePrune) -- the tap itself is still addressed by InsertKind.
-    std::function<bool (VibeGraph::InsertKind, int index, RenderTask*,
+    // §6.8: patternIndex < 0 renders SONG scope; anything else renders just that
+    // pattern, which is what makes freeze work in pattern mode at all.
+    std::function<bool (VibeGraph::InsertKind, int index, RenderTask*, int patternIndex,
                         const juce::File&, juce::String&)> onRenderFreezeFile;
+
+    // §6.8 stepped progress: a per-instrument freeze is 1 + N renders, so a
+    // single anonymous bar would sit at 0 for the whole run.  "Freezing Drums -
+    // pattern 3 of 7".
+    std::function<void (int done, int total, const juce::String& label)> onFreezeStep;
 
     // TS7 §6.9: the kit's thirteen strips in ONE render pass.  A separate hook
     // rather than N calls to the one above, because thirteen separate renders
     // would pay the offline setup cost -- and the silence -- thirteen times over
     // for audio one sfizz pass already produces together.
-    std::function<bool (const std::vector<juce::File>&, RenderTask*, juce::String&)>
-        onRenderKitFreezeFiles;
+    // patternIndex < 0 renders SONG scope; otherwise just that pattern -- the
+    // kit is ONE instrument, so it gets per-pattern renders like every other.
+    std::function<bool (const std::vector<juce::File>&, RenderTask*, int patternIndex,
+                        juce::String&)> onRenderKitFreezeFiles;
+
+    // The kit publishes THIRTEEN pattern sources, one per strip, so it cannot go
+    // through renderTaskForTab the way every other kind does.  Null clears them.
+    void setRustyFrozenPatternSources (
+        const std::vector<std::unique_ptr<AudioClipStreamer>>* streams, int patternIndex);
+private:
+    bool setRustyFrozenPatternSourcesImpl (
+        const std::vector<std::unique_ptr<AudioClipStreamer>>* streams, int patternIndex);
+public:
 
     // TS7 §6.9: forwards to the dispatcher.  Exposed here because the renderer
     // lives on BuilderPage and must not reach into the private render graph.
     void setFreezePrune (RenderTask* target) { mRenderDispatcher.setFreezePrune (target); }
 
-    bool freezeRustyKit (juce::String& outErr, bool byUser);
+    bool freezeRustyKit (juce::String& outErr, bool byUser, bool reuseValid = false);
 
     // The task carrying a tab's audio, or null.  The freeze switch and any
     // future per-tab audio routing both need it.

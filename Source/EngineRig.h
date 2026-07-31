@@ -1,6 +1,8 @@
 #pragma once
 #include <JuceHeader.h>
 #include <vector>
+#include <map>
+#include <set>
 #include "VibesynthConstants.h"
 
 // TS7 §6.3: a frozen tab streams its cached file instead of rendering its engine.
@@ -81,6 +83,58 @@ struct EngineTab
     // freeze is re-evaluated against the opening machine's threshold, because one
     // computer's performance adaptation means nothing on another.
     bool frozenByUser = false;
+
+    // ── §6.8 THE SPAN ────────────────────────────────────────────────────────
+    // What the freeze file actually COVERS.  §6.8 called for this from the start
+    // ("each freeze's span, saved and restored with the project") and it was not
+    // built; the item was closed anyway, and the omission is not bookkeeping.
+    //
+    // A freeze file is the SONG arrangement rendered from bar 1.  Nothing
+    // recorded that, so the substitution had no way to know what it was reading:
+    // in pattern mode the transport wraps inside the pattern loop, so reading the
+    // file at the playhead played the SONG's opening bars on loop instead of the
+    // pattern -- wrong audio WITH the CPU saving, which is worse than none, and
+    // nothing on screen would explain it.  Gating substitution to song mode
+    // suppressed the symptom and left pattern mode with no freeze at all.
+    //
+    // patternIndex == kSongScope means "the whole arrangement"; anything else is
+    // that pattern's own render.  lengthBeats + bpm are what the file was
+    // rendered AT, so a change to either is detectable rather than silently
+    // playing the wrong length.
+    static constexpr int kSongScope = -1;
+    struct FreezeSpan
+    {
+        int    patternIndex = kSongScope;
+        double lengthBeats  = 0.0;
+        double bpm          = 0.0;
+
+        // ── THE CONTENT STAMP ────────────────────────────────────────────────
+        // A hash of everything that determines what this file SOUNDS like: the
+        // engine's type and its whole parameter state, the notes in scope, the
+        // tempo, and (song scope) the arrangement.  0 means "unknown", which is
+        // always treated as a mismatch.
+        //
+        // Without it a freeze file is audio of unknown provenance, and every
+        // consumer had to be conservative in a way that cost something real:
+        // project restore RE-RENDERED every frozen tab because it could not tell
+        // a still-valid file from a stale one, and per-pattern staleness had to
+        // invalidate on any edit because it could not tell WHICH pattern's audio
+        // had actually changed.  Reusing files without this would have been the
+        // opposite error -- silently playing notes the user had deleted.
+        juce::uint32 contentStamp = 0;
+
+        bool isSong() const noexcept { return patternIndex == kSongScope; }
+        bool stampMatches (juce::uint32 now) const noexcept
+        { return contentStamp != 0 && contentStamp == now; }
+        // Deliberately tolerant on the doubles: these round-trip through XML as
+        // decimal text, and an exact == would call every restored freeze stale.
+        bool matches (double beats, double tempo) const noexcept
+        {
+            return std::abs (lengthBeats - beats) < 1.0e-4
+                && std::abs (bpm         - tempo) < 1.0e-4;
+        }
+    };
+    FreezeSpan freezeSpan;
     // Set when this tab's ENGINE-SCOPE content changes (§6.5): its notes, its own
     // parameters, an engine swap, its swing, tempo.  NOT the rack / EQ / fader /
     // sends -- those are downstream of the pre-rack tap and stay live on a frozen
@@ -94,6 +148,30 @@ struct EngineTab
     // TS7 §6.9: a VECTOR because the Rusty kit freezes as one action across its
     // 13 strips -- one streamer each.  Every other tab kind holds exactly one.
     std::vector<std::unique_ptr<AudioClipStreamer>> freezeStreams;
+
+    // §6.8 PER-PATTERN CACHE, keyed by pattern index.  Song mode reads
+    // freezeStreams; pattern mode reads the entry for the pattern that is
+    // looping, and falls back to the LIVE engine when there is none rather than
+    // playing the song render at a pattern-local position -- which is exactly
+    // the wrong-audio bug that made freeze song-mode-only in the first place.
+    //
+    // The inner vector mirrors freezeStreams' shape: one entry per strip, so the
+    // Rusty kit's thirteen strips work here identically to every other tab's one.
+    // Pattern renders are a few bars each, which is what makes caching many of
+    // them cheap in a way a song render never is.
+    std::map<int, std::vector<std::unique_ptr<AudioClipStreamer>>> freezePatternStreams;
+
+    // Patterns whose cached render is known stale (that pattern's CONTENT
+    // changed).  Separate from freezeStale, which is the PLAYER axis and
+    // invalidates every cached pattern at once -- §6.8's two axes are additive,
+    // and collapsing them into one flag is what made per-pattern staleness
+    // worthless the first time it was specified.
+    std::set<int> stalePatterns;
+
+    // The stamp each cached PATTERN render was made from, so a per-pattern file
+    // can be validated independently of the song render and of every other
+    // pattern.  Keyed the same as freezePatternStreams.
+    std::map<int, juce::uint32> patternStamps;
 
     // TS7 §6.5: watches THIS engine's own APVTS so a parameter move marks only
     // THIS tab's freeze stale.  Deliberately not the project-wide dirty flag,
@@ -178,6 +256,31 @@ public:
     void restoreEngineFromBlob (TabKind k, int pageIndex, const juce::String& base64);
 
     juce::AudioProcessor* engineFor (TabKind k, int pageIndex) const;
+
+    // §6.8: the span a SONG-scope freeze render covers, sampled at the moment
+    // the file lands.  Lives here rather than on the processor because
+    // EngineTab is ours -- PluginProcessor.h deliberately forward-declares
+    // TabKind instead of including this header (see the note at its top).
+    // Hash of everything that determines what a freeze file at this scope would
+    // SOUND like -- engine type + full engine state, tempo, the notes in scope,
+    // and (song scope) the arrangement.  patternIndex < 0 is song scope.
+    // Message thread: reads engine state and the pattern model.
+    juce::uint32 freezeContentStamp (TabKind k, int pageIndex, int patternIndex) const;
+
+    EngineTab::FreezeSpan currentSongFreezeSpan() const;
+    // currentSongFreezeSpan plus this tab's content stamp -- what a freeze
+    // records when its file lands.
+    EngineTab::FreezeSpan songFreezeSpanFor (TabKind k, int pageIndex) const;
+
+    // §6.8's two staleness axes.  markEngineContentChanged above is the PLAYER
+    // axis (invalidates every cached pattern for one tab); this is the PATTERN
+    // axis (invalidates one pattern across every frozen tab).  Additive, never
+    // one instead of the other.
+    void markPatternContentChanged (int patternIndex);
+
+    // Publishes the render for the pattern now looping to every frozen tab's
+    // task.  Called when the current pattern changes.
+    void republishPatternSources (int patternIndex);
 
     // Processor-shutdown path: one settle for the whole rig, then bulk
     // destroy.  Individual removeTab keeps the per-teardown settle instead.

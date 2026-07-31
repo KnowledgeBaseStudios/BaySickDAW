@@ -1,4 +1,5 @@
 #include "RustyInsertTask.h"
+#include "../FrozenSourceRead.h"   // TS7 6.8: scope-matched frozen block read
 #include "../../VibeGraph.h"
 #include "../../PluginProcessor.h"
 #include "../../BaySickRustyDrums/BaySickRustyDrumsProcessor.h"
@@ -73,16 +74,8 @@ void RustyInsertTask::run()
     //
     // Capturing at the kit BUS instead (my first design) would have baked all 13
     // strips' mixer settings and killed all of that.  See the plan's §6.9 entry.
-    bool playedFrozen = false;
-    if (mCtx->songMode)
-        if (auto* fz = mFrozenSource.load (std::memory_order_acquire))
-        {
-            juce::int64 filePos = 0;
-            if (mCtx->posInfo != nullptr)
-                filePos = mCtx->posInfo->getTimeInSamples().orFallback ((juce::int64) 0);
-            if (filePos >= 0 && filePos < fz->getTotalLength())
-                playedFrozen = fz->readRaw (blockView, 0, n, filePos);
-        }
+    // §6.8 scope-matched.  See FrozenSourceRead.h.
+    const bool playedFrozen = FreezeRead::serveBlock (*this, *mCtx, blockView, n);
 
     if (! playedFrozen)
     {

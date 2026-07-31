@@ -1423,8 +1423,12 @@ public:
     // `target` is the same strip expressed as a RenderTask, used ONLY to prune
     // the render graph down to it.  Null is legal and simply renders the whole
     // project as before.
+    // `patternIndex` < 0 renders the SONG arrangement; otherwise just that
+    // pattern, so pattern mode reads audio of the right length at a loop-local
+    // position instead of the song's opening bars.
     bool renderFreezeFile (VibeGraph::InsertKind kind, int index,
                            RenderTask* target,
+                           int patternIndex,
                            const juce::File& dest,
                            juce::String& outErr,
                            std::function<bool()> shouldAbort = {},
@@ -1434,6 +1438,7 @@ public:
     // single-arm freeze tap deliberately -- see the implementation.
     bool renderKitFreezeFiles (const std::vector<juce::File>& dests,
                                RenderTask* target,
+                               int patternIndex,
                                juce::String& outErr,
                                std::function<bool()> shouldAbort = {},
                                std::function<void(double)> onProgress = {});

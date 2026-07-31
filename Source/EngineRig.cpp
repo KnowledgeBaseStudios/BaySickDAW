@@ -162,7 +162,78 @@ void EngineRig::markEngineContentChanged (TabKind k, int pageIndex)
     auto* t = findTab (k, pageIndex);
     if (t == nullptr || ! t->frozen || t->freezeStale) return;
     t->freezeStale = true;
+
+    // §6.8 AXIS ONE -- the PLAYER changed, so EVERY cached pattern for this tab
+    // is wrong, not just the one being viewed.  This is the half I first
+    // mis-specified as "per-pattern staleness INSTEAD of per-tab": that would
+    // never have caught a preset change, a knob move or an engine swap, and the
+    // per-pattern cache would have gone on serving audio from the old sound.
+    // The two axes are additive.
+    for (const auto& kv : t->freezePatternStreams)
+        t->stalePatterns.insert (kv.first);
+
     if (onFreezeStateChanged) onFreezeStateChanged (k, pageIndex);
+}
+
+// §6.8 AXIS TWO -- this PATTERN's notes changed, so its cached render is wrong
+// for every tab that has one, while those tabs' OTHER patterns stay valid.  The
+// song render is invalidated too: the arrangement contains this pattern.
+void EngineRig::markPatternContentChanged (int patternIndex)
+{
+    if (mProc.isNonRealtime() || patternIndex < 0) return;
+
+    for (auto& t : mTabs)
+    {
+        if (! t->frozen) continue;
+
+        const bool hasPattern = t->freezePatternStreams.count (patternIndex) > 0;
+        if (hasPattern) t->stalePatterns.insert (patternIndex);
+
+        if (! t->freezeStale)
+        {
+            t->freezeStale = true;
+            if (onFreezeStateChanged) onFreezeStateChanged (t->kind, t->pageIndex);
+        }
+    }
+}
+
+// Point every frozen tab's task at the render for the pattern now looping, or at
+// nothing when there is none or it is stale -- which falls back to the live
+// engine.  Message thread; the audio thread only ever reads the published
+// pointer, so nothing here frees anything a block could be holding.
+void EngineRig::republishPatternSources (int patternIndex)
+{
+    for (auto& t : mTabs)
+    {
+        if (! t->frozen) continue;
+
+        AudioClipStreamer* s = nullptr;
+
+        if (patternIndex >= 0 && t->stalePatterns.count (patternIndex) == 0)
+        {
+            auto it = t->freezePatternStreams.find (patternIndex);
+            if (it != t->freezePatternStreams.end() && ! it->second.empty())
+                s = it->second.front().get();
+        }
+
+        // The kit is THIRTEEN tasks, not one -- renderTaskForTab cannot express
+        // it, which is the same reason its freeze has its own render path.
+        if (t->kind == TabKind::Rusty)
+        {
+            const std::vector<std::unique_ptr<AudioClipStreamer>>* v = nullptr;
+            if (patternIndex >= 0 && t->stalePatterns.count (patternIndex) == 0)
+            {
+                auto it = t->freezePatternStreams.find (patternIndex);
+                if (it != t->freezePatternStreams.end() && ! it->second.empty())
+                    v = &it->second;
+            }
+            mProc.setRustyFrozenPatternSources (v, patternIndex);
+            continue;
+        }
+
+        if (auto* task = mProc.renderTaskForTab (t->kind, t->pageIndex))
+            task->setFrozenPatternSource (s, patternIndex);
+    }
 }
 
 // Tempo and the tempo map move every engine's output in time, so they invalidate
@@ -466,6 +537,161 @@ void EngineRig::restoreEngineFromBlob (TabKind k, int pageIndex, const juce::Str
     if (! mb.fromBase64Encoding (base64)) return;
     if (mb.getSize() == 0) return;
     tab->engine->setStateInformation (mb.getData(), (int) mb.getSize());
+}
+
+namespace
+{
+    // FNV-1a.  Chosen over juce::String::hashCode because the inputs are mostly
+    // BINARY (an engine's state blob, note structs) rather than text, and this
+    // folds bytes in one pass with no allocation.  Collision risk is the usual
+    // 32-bit birthday bound -- a false MATCH would reuse a stale render, so the
+    // stamp only ever gates REUSE, never correctness of a fresh render.
+    inline juce::uint32 fnvByte (juce::uint32 h, juce::uint8 b) noexcept
+    { return (h ^ b) * 16777619u; }
+
+    inline juce::uint32 fnvBytes (juce::uint32 h, const void* p, size_t n) noexcept
+    {
+        const auto* b = static_cast<const juce::uint8*> (p);
+        for (size_t i = 0; i < n; ++i) h = fnvByte (h, b[i]);
+        return h;
+    }
+
+    inline juce::uint32 fnvDouble (juce::uint32 h, double d) noexcept
+    {
+        // Quantised before hashing: a double that round-trips through XML text
+        // can come back a few ULPs off, and an exact byte hash would then call
+        // every restored freeze stale -- the precise failure the span's own
+        // tolerant compare exists to avoid.
+        const juce::int64 q = (juce::int64) std::llround (d * 1000.0);
+        return fnvBytes (h, &q, sizeof (q));
+    }
+
+    inline juce::uint32 fnvNotes (juce::uint32 h, const std::vector<PianoNote>& notes) noexcept
+    {
+        h = fnvBytes (h, "n", 1);
+        for (const auto& n : notes)
+        {
+            h = fnvBytes  (h, &n.midiNote, sizeof (n.midiNote));
+            h = fnvDouble (h, n.startBeat);
+            h = fnvDouble (h, n.durationBeats);
+            h = fnvDouble (h, (double) n.velocity);
+            h = fnvDouble (h, (double) n.finePitch);
+            h = fnvByte   (h, (juce::uint8) (n.muted ? 1 : 0));
+            h = fnvByte   (h, (juce::uint8) n.type);
+        }
+        return h;
+    }
+}
+
+// The notes THIS tab plays in one pattern.  Mirrors the roll selection in
+// VibeSynthProcessor::patternsWithContentFor -- kept as its own switch rather
+// than shared because that one answers "is there content", this one needs the
+// content itself.
+static const std::vector<PianoNote>* rollNotesFor (const Pattern& pat,
+                                                   TabKind kind, int pageIndex)
+{
+    auto pick = [&] (const auto& arr) -> const std::vector<PianoNote>*
+    {
+        return (pageIndex >= 0 && pageIndex < (int) arr.size())
+             ? &arr[(size_t) pageIndex].notes : nullptr;
+    };
+
+    switch (kind)
+    {
+        case TabKind::Layers:  return pick (pat.layerRoll);
+        case TabKind::Bass:    return pick (pat.bassRoll);
+        case TabKind::Drums:   return pick (pat.drumRolls);
+        case TabKind::Clips:   return pick (pat.clipRoll);
+        case TabKind::Vox:     return pick (pat.voxRoll);
+        case TabKind::Inst:    return pick (pat.instRoll);
+        case TabKind::Plugins: return pick (pat.pluginRoll);
+        case TabKind::Rusty:   return &pat.baySickRustyDrumsRoll.notes;
+    }
+    return nullptr;
+}
+
+juce::uint32 EngineRig::freezeContentStamp (TabKind k, int pageIndex, int patternIndex) const
+{
+    auto* pm = mProc.getPatternManager();
+    if (pm == nullptr) return 0;
+
+    const auto* t = findTab (k, pageIndex);
+
+    juce::uint32 h = 2166136261u;   // FNV offset basis
+
+    // 1. WHICH ENGINE, and its entire parameter state.  This is the player axis:
+    //    a preset change, a knob move or an engine swap all land here, which is
+    //    what makes the stamp catch things the coarse flags only guessed at.
+    if (t != nullptr)
+    {
+        h = fnvBytes (h, t->engineType.toRawUTF8(), (size_t) t->engineType.getNumBytesAsUTF8());
+
+        if (t->engine != nullptr)
+        {
+            juce::MemoryBlock mb;
+            t->engine->getStateInformation (mb);
+            h = fnvBytes (h, mb.getData(), mb.getSize());
+        }
+    }
+
+    // 2. Tempo -- moves every rendered sample in time.
+    h = fnvDouble (h, pm->getGlobalTempo());
+
+    if (patternIndex >= 0)
+    {
+        // PATTERN SCOPE: this pattern's notes for this tab, and its length.
+        if (patternIndex < pm->getNumPatterns())
+        {
+            const auto& pat = pm->getPattern (patternIndex);
+            if (const auto* notes = rollNotesFor (pat, k, pageIndex))
+                h = fnvNotes (h, *notes);
+            h = fnvDouble (h, pm->getPatternContentBeats (patternIndex));
+        }
+        return h;
+    }
+
+    // SONG SCOPE: the arrangement decides what plays and when, plus every
+    // pattern's notes for this tab (any of them can appear in the arrangement).
+    h = fnvDouble (h, pm->getSongEndBeats());
+
+    for (int i = 0; i < pm->getNumBlocks(); ++i)
+    {
+        const auto& b = const_cast<PatternManager*> (pm)->getBlock (i);
+        h = fnvBytes  (h, &b.trackRow,     sizeof (b.trackRow));
+        h = fnvBytes  (h, &b.patternIndex, sizeof (b.patternIndex));
+        h = fnvDouble (h, effectiveStartBeats  (b));
+        h = fnvDouble (h, effectiveLengthBeats (b));
+    }
+
+    for (int p = 0; p < pm->getNumPatterns(); ++p)
+        if (const auto* notes = rollNotesFor (pm->getPattern (p), k, pageIndex))
+            h = fnvNotes (h, *notes);
+
+    return h;
+}
+
+EngineTab::FreezeSpan EngineRig::currentSongFreezeSpan() const
+{
+    // Read from the same two values renderFreezeFile renders against -- the
+    // arrangement's end and the project tempo -- so a later change to either is
+    // detectable rather than the file silently standing in for a length it never
+    // covered.
+    EngineTab::FreezeSpan s;
+    s.patternIndex = EngineTab::kSongScope;
+
+    if (auto* pm = mProc.getPatternManager())
+    {
+        s.lengthBeats = pm->getSongEndBeats();
+        s.bpm         = pm->getGlobalTempo();
+    }
+    return s;
+}
+
+EngineTab::FreezeSpan EngineRig::songFreezeSpanFor (TabKind k, int pageIndex) const
+{
+    auto s = currentSongFreezeSpan();
+    s.contentStamp = freezeContentStamp (k, pageIndex, EngineTab::kSongScope);
+    return s;
 }
 
 juce::AudioProcessor* EngineRig::engineFor (TabKind k, int pageIndex) const
