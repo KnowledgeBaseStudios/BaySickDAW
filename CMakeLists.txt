@@ -537,6 +537,7 @@ target_sources(BaySickDAWStandalone PRIVATE
     Source/DSP/EQ8MsDSP.cpp
     Source/DSP/EqLinearPhaseProcessor.cpp
     Source/DSP/LufsMeterDSP.cpp
+    Source/DSP/TruePeakMeter.cpp
     Source/DSP/SaturationDSP.cpp
     Source/DSP/FlangerDSP.cpp
     Source/DSP/OverdriveDSP.cpp
@@ -588,6 +589,14 @@ target_sources(BaySickDAWStandalone PRIVATE
     Source/Standalone/PluginsManagerWindow.cpp
     # QA-ModelShell TS6 (BLU-447): the hosted-VST3-instrument tab view.
     Source/Standalone/PluginsPage.cpp
+    # QA-ModelShell TS7 (CL-044): the floating master spectrum analyzer.
+    Source/Standalone/MasterAnalyzerWindow.cpp
+    # QA-ModelShell TS7 (CL-227): the HTML + CSV loudness conformance report.
+    Source/Standalone/LoudnessReportWriter.cpp
+    # QA-ModelShell TS7 (§3): automatic per-playback-pass version capture.
+    Source/Standalone/VersionCapture.cpp
+    # QA-ModelShell TS7 (§9.1): the one title-strip look, shell + desktop windows.
+    Source/Standalone/WindowChrome.cpp
     # Pages
     Source/Standalone/LayersPage.cpp
     Source/Standalone/BassPage.cpp

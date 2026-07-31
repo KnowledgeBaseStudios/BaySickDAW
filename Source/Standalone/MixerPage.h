@@ -62,6 +62,9 @@ public:
     // the Effects dropdown so strips rerouted to Master (Direct Routing) or
     // between buses show up under the correct group.
     std::function<void()> onSendToChanged;
+    // QA-ModelShell TS7 (CL-044): the master strip's repurposed "+" button asks
+    // the editor to open the master analyzer window.
+    std::function<void()> onAnalyzerRequested;
 
     // R2 (2026-04-23): supplied by StandaloneEditor.  Returns the names of
     // available input channels on the currently-active audio device (e.g.
@@ -209,6 +212,7 @@ public:
     bool isVoxBus2Active()  const { return mVoxBus2Active; }
     bool isInstBus2Active() const { return mInstBus2Active; }
     bool isInstBus3Active() const { return mInstBus3Active; }
+    bool isPluginsBusActive() const { return mPluginsBusActive; }   // TS6 (BLU-447)
 
     // Called by StandaloneEditor when a ribbon tab is renamed (ribbon → mixer sync).
     // C.4 follow-up (2026-04-30): kind tag added because Layer / Bass / Drum
@@ -219,7 +223,10 @@ public:
     // QA-ClipDrop Task 3 (SC-H, 2026-06-03): Audio added so a Clips ribbon-tab
     // rename syncs through to its mixer strip (strips live in mAudioStrips keyed
     // by the owning Clips-page row index) -- parity with Layer/Bass/Drum.
-    enum class StripKind { Layer, Bass, Drum, Audio };
+    // TS6 (BLU-447) -- Plugin added TS7 2026-07-30 for the same reason Audio was
+    // added above: without an enum entry a plugin tab rename had no route to its
+    // mixer strip at all.
+    enum class StripKind { Layer, Bass, Drum, Audio, Plugin };
     void renameChannel(StripKind kind, int pageIdx, const juce::String& newName);
 
     // Connect to the global undo system.
@@ -252,6 +259,10 @@ public:
     std::vector<int> getAudioStripIndices() const { return mAudioRowOrder; }
     juce::String     getVoxStripName  (int idx) const;
     juce::String     getInstStripName (int idx) const;
+    // TS6 (BLU-447) -- added TS7 2026-07-30 so the Effects page can enumerate
+    // plugin strips as members of its PLUGINS BUS group.
+    std::vector<int> getPluginStripIndices() const { return mPluginOrder; }
+    juce::String     getPluginStripName (int idx) const;
 
     // P4 persistence (2026-04-24): horizontal scroll position for save/restore.
     int  getScrollX() const;

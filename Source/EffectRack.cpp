@@ -136,17 +136,6 @@ std::unique_ptr<DSPBase> EffectRack::createEffect(EffectType type)
 // atomicity spans multiple slots; audio's process() try-locks to skip during
 // those rare rearrangements.
 
-// Internal helper: spin-wait briefly for a previously-parked pending DSP to
-// be consumed by the audio thread before overwriting `pending`.  Mirrors the
-// 1-second budget in BaySickNAMIRProcessor::loadNamModel.  In practice the
-// wait is 0 iterations because audio runs every ~10ms and the consumer flag
-// clears at the top of each process().
-static void waitForPendingDrain (std::atomic<bool>& flag) noexcept
-{
-    for (int spin = 0; spin < 1000 && flag.load (std::memory_order_acquire); ++spin)
-        juce::Thread::sleep (1);
-}
-
 void EffectRack::loadEffect(int slot, EffectType type, const juce::String& uuidOverride,
                             const juce::PluginDescription* pluginDesc)
 {
@@ -647,6 +636,30 @@ void EffectRack::reset()
             s.swapPending.store (false, std::memory_order_release);
         }
         if (s.active) s.active->reset();
+    }
+}
+
+// TS7: the per-block push.  Does BOTH setHostBPM and setHostTransport in ONE
+// slot walk -- the node call sites used to call setHostBPM here every block, and
+// adding a second call would have doubled the lock traffic on the audio thread
+// for no gain.
+void EffectRack::setHostTransport(const DSPBase::HostTransport& tp)
+{
+    mHostBPM = tp.bpm;
+    const juce::ScopedLock          lkMsg   (mLoadLock);
+    const juce::SpinLock::ScopedLockType lkAudio (mSlotsLock);
+    for (auto& s : mSlots)
+    {
+        if (s.swapPending.load (std::memory_order_acquire))
+        {
+            std::swap (s.active, s.pending);
+            s.swapPending.store (false, std::memory_order_release);
+        }
+        if (s.active)
+        {
+            s.active->setHostBPM (tp.bpm);
+            s.active->setHostTransport (tp);
+        }
     }
 }
 

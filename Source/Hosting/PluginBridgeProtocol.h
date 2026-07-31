@@ -32,7 +32,10 @@ namespace Hosting::Bridge
 // Bumped whenever the layout below changes.  The helper reports its version in
 // the handshake and the host refuses a mismatch -- a stale helper binary left
 // over from an older install would otherwise misparse every message.
-inline constexpr std::uint32_t kProtocolVersion = 1;
+// 2 (TS7, 2026-07-31): ProcessPayload gained transport, and the MIDI trailer
+// the original comment promised is now actually sent.  Host and helper are built
+// from this header by the same do_build.bat run, so they cannot disagree.
+inline constexpr std::uint32_t kProtocolVersion = 2;
 
 // Fits comfortably inside JUCE's InterprocessConnection message framing while
 // leaving room for the largest realistic plugin state blob; anything bigger is
@@ -95,8 +98,32 @@ struct PreparePayload
 struct ProcessPayload
 {
     std::uint32_t numSamples;
-    std::uint32_t numMidiBytes;    // MIDI follows the header, raw JUCE MidiBuffer bytes
+    std::uint32_t numMidiBytes;    // MIDI trailer follows; see kMaxMidiBytesPerBlock
+
+    // TS7 (2026-07-31): TRANSPORT.  Added because a hosted plugin had no
+    // playhead at all -- unbridged it never got setPlayHead forwarded to the
+    // inner instance, and bridged there was nowhere to put it.  Anything with an
+    // arpeggiator, step sequencer or tempo-synced delay/LFO therefore had no
+    // host tempo to follow, which is also why forwarding a controller's MIDI
+    // clock was papering over the real hole rather than fixing it.
+    double        bpm;
+    double        ppqPosition;
+    std::int64_t  timeInSamples;
+    std::uint32_t isPlaying;
+    std::uint32_t timeSigNumerator;
+    std::uint32_t timeSigDenominator;
+    std::uint32_t reserved;        // keeps the struct a round 48 bytes on both arches
 };
+
+// MIDI trailer cap.  A block never carries anywhere near this; the bound exists
+// so a runaway buffer cannot make the frame unbounded on the audio thread.
+inline constexpr std::uint32_t kMaxMidiBytesPerBlock = 4096;
+
+// Trailer wire format, written and read by hand rather than by copying JUCE's
+// MidiBuffer storage: the host is x64 and a bridged helper may be x86, and this
+// file's whole premise is that a layout difference between the two silently
+// shifts every field after it.  Per event: int32 samplePosition, int32 numBytes,
+// then numBytes of raw MIDI.
 
 struct SetParameterPayload
 {
@@ -126,7 +153,7 @@ struct LoadReplyPayload
 static_assert (sizeof (Header)              == 16, "Bridge::Header must be 16 bytes on every target");
 static_assert (sizeof (HandshakePayload)    == 8,  "HandshakePayload layout drifted");
 static_assert (sizeof (PreparePayload)      == 16, "PreparePayload layout drifted");
-static_assert (sizeof (ProcessPayload)      == 8,  "ProcessPayload layout drifted");
+static_assert (sizeof (ProcessPayload)      == 48, "ProcessPayload layout drifted");
 static_assert (sizeof (SetParameterPayload) == 8,  "SetParameterPayload layout drifted");
 static_assert (sizeof (EditorPayload)       == 16, "EditorPayload layout drifted");
 static_assert (sizeof (LoadReplyPayload)    == 16, "LoadReplyPayload layout drifted");

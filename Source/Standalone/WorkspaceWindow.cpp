@@ -1,5 +1,6 @@
 #include "WorkspaceWindow.h"
 #include "SharedUI.h"   // VibeLAF + PageMenuBar
+#include "WindowChrome.h"   // TS7 §9.1: the one title-strip look
 #include "../ProjectManager.h"
 
 namespace
@@ -11,11 +12,8 @@ namespace
     constexpr const char* kRootTag   = "WorkspaceWindows";
     constexpr const char* kWindowTag = "W";
 
-    juce::Colour kFrameBg     { 0xFF1B1B1F };
-    juce::Colour kTitleBg     { 0xFF2A2A31 };
-    juce::Colour kTitleBgLive { 0xFF34343D };
-    juce::Colour kTitleText   { 0xFFE8E8EE };
-    juce::Colour kFrameEdge   { 0xFF000000 };
+    // TS7 §9.1: the palette moved to WindowChrome so the desktop windows can
+    // paint the same strip.  Nothing here defines a colour any more.
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -173,16 +171,14 @@ juce::Rectangle<int> WorkspaceWindow::contentArea() const noexcept
 
 void WorkspaceWindow::paint (juce::Graphics& g)
 {
-    g.fillAll (kFrameBg);
-
     const bool live = isMouseOverOrDragging (true)
                       || (mContentRaw != nullptr && mContentRaw->hasKeyboardFocus (true));
-    auto title = titleBarArea();
-    g.setColour (live ? kTitleBgLive : kTitleBg);
-    g.fillRect (title);
 
-    g.setColour (kFrameEdge);
-    g.drawRect (getLocalBounds(), 1);
+    // No title string passed: the PageMenuBar filling this strip draws it (locked
+    // call 4a -- the page's menu row IS the title strip), so drawing it here too
+    // would double it.
+    WindowChrome::paintFrame (g, getLocalBounds());
+    WindowChrome::paintTitleBar (g, titleBarArea(), live);
 }
 
 // QA-ModelShell TS6 (Jeff 2026-07-29): a hosted plugin brings its own surface

@@ -62,6 +62,7 @@ ehthumbs.db
 /build_*.txt
 /configure_*.txt
 /startup_*.txt
+/freeze_timing.txt
 
 # Personal sample imports (mirrors the Presets/.../My Presets/ rule).
 My Samples/

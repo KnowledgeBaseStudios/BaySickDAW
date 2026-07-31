@@ -64,6 +64,31 @@ void CompositeAudioInsertTask::run()
     // the same row InsertNode.
     pullSidechainPredecessorsToGraph (*mGraph, channelId, mPredecessors, n);
 
+    // ── TS7 §6.9: frozen Clips row (Jeff, 2026-07-30) ────────────────────────
+    // Substitutes BOTH flows at once, which is the point: this task owns the
+    // arrangement-clip decode AND the clip-engine MIDI trigger, so a frozen row
+    // skips the BaySickPlayer engine as well as the decode.  Freezing a Clips
+    // page is not "rendering a file to copy a file" -- the engine behind that
+    // file runs every block, and that is the cost being reclaimed.
+    // SONG MODE ONLY -- see the note in EngineInsertTask::run.
+    if (mCtx->songMode)
+    if (auto* fz = mFrozenSource.load (std::memory_order_acquire))
+    {
+        juce::int64 filePos = 0;
+        if (mCtx->posInfo != nullptr)
+            filePos = mCtx->posInfo->getTimeInSamples().orFallback ((juce::int64) 0);
+
+        if (filePos >= 0 && filePos < fz->getTotalLength()
+            && fz->readRaw (blockView, 0, n, filePos))
+        {
+            mGraph->processInsert (VibeGraph::InsertKind::Audio, mIndex,
+                                   blockView, mCtx->bpm, mCtx->anySolo);
+            return;
+        }
+        // Falls through to live decode + engine when the streamer cannot serve
+        // this block -- §6.6's stale-plays-live rule.
+    }
+
     // QA-MultiBlockHazard (Task 1): both flows sum their RAW output into
     // blockView; the insert chain (processInsert) runs exactly ONCE per block on
     // the summed buffer below, so a stateful rack advances once per block instead

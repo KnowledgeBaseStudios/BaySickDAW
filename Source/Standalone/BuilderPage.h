@@ -3,6 +3,7 @@
 #include <JuceHeader.h>
 #include "../PluginProcessor.h"
 #include "../PatternManager.h"
+#include "../DSP/LoudnessSpec.h"
 #include "SharedUI.h"
 #include "StandaloneApp.h"
 
@@ -65,12 +66,20 @@ private:
 };
 
 // ── G-5 (2026-04-29): Audio browser unified view ─────────────────────────────
-// CategorizedAudioEntry - one record per file the browser shows in the Audio
+// CategorizedAudioEntry - one record per file the browser shows in the Files
 // tree.  StandaloneEditor's onEnumerateAudio callback walks mPages and emits
 // one entry per ClipsPage / VoxPage / InstPage with a bound file.  Orphan
-// audioLibrary entries (no bound page) are skipped - there is NO 4th
-// "Imported" / "Library" bucket per Jeff's invariant ("all importable files
-// become clips").
+// audioLibrary entries (no bound page) are skipped - there is NO "Imported" /
+// "Library" bucket per Jeff's invariant ("all importable files become clips").
+//
+// TS7 §11.4 AMENDS THE SCOPE OF THAT INVARIANT, deliberately and on the record.
+// It governs IMPORT material: anything importable becomes a clip rather than
+// sitting in a library bucket.  The Exports and Reports categories added in TS7
+// are OUTPUT - files the user just rendered, listed so they do not have to go
+// hunting for them - and they are populated from the project's Exports\ and
+// Reports\ folders rather than from audioLibrary.  Nothing is auto-added to the
+// grid; right-click routes through the same showItemContextMenu flow clips use.
+// The freeze cache is excluded: regenerable, not something the user made.
 struct CategorizedAudioEntry
 {
     int          audioLibIdx { -1 };   // index into mPM.audioLibrary for drag descriptor
@@ -105,7 +114,17 @@ public:
     int           getItemHeight        () const override         { return 26; }
     juce::String  getUniqueName        () const override         { return mEntry.category + ":" + juce::String(mEntry.audioLibIdx); }
     juce::String  getTooltip           () override               { return mEntry.fullPath; }
-    juce::var     getDragSourceDescription () override           { return juce::String("audio:") + juce::String(mEntry.audioLibIdx); }
+    // TS7 §11.5: an Exports/Reports leaf is NOT a library entry, so it has no
+    // index to drag.  It carries its PATH instead ("render:<abs path>"), which
+    // ArrangementGrid handles by importing first and then running the same
+    // route-to-a-tab prompt the context menu uses.  Without this the descriptor
+    // would read "audio:-1" and the drop would silently die on a bounds check.
+    juce::var     getDragSourceDescription () override
+    {
+        return mEntry.audioLibIdx >= 0
+                 ? juce::String ("audio:")  + juce::String (mEntry.audioLibIdx)
+                 : juce::String ("render:") + mEntry.fullPath;
+    }
     bool          canBeSelected        () const override         { return true; }
     void          paintItem            (juce::Graphics&, int, int) override;
     void          itemClicked          (const juce::MouseEvent&) override;
@@ -321,6 +340,51 @@ private:
     AudioCategoryItem*                        mClipsCat { nullptr };  // raw - owned by mAudioRoot
     AudioCategoryItem*                        mVoxCat   { nullptr };
     AudioCategoryItem*                        mInstCat  { nullptr };
+    // TS7 §11.2/§11.3: what the user has rendered.  Populated from the project's
+    // Exports\ and Reports\ folders, NOT from the audio library -- they have no
+    // bound page and are not clips.
+    AudioCategoryItem*                        mExportsCat { nullptr };
+    AudioCategoryItem*                        mReportsCat { nullptr };
+    void rebuildRenderRows();
+
+public:
+    // TS7 §11: { <project>\Exports\, <project>\Reports\ }.  Supplied by the
+    // editor -- the panel does not know where a project lives.
+    std::function<std::pair<juce::File, juce::File>()> onGetRenderFolders;
+    // §11.6: open a saved report in the analyzer window.
+    std::function<void(const juce::File&)>             onOpenReport;
+    // §11.5/§11.5a: add a rendered file to the project.  Not a callback -- the
+    // whole flow is reachable from here (mPM plus the routing callbacks the
+    // Properties dialog already uses), and routing it through the editor would
+    // just be a second copy of that logic waiting to drift from it.
+    //
+    // Registers the file IN PLACE: every other import copies into Samples\
+    // first, and a render must not, because the point of the Exports row is
+    // that the file the user just made is the file that plays.
+    //
+    // onRouted fires with the resulting library index so the grid-drop caller
+    // can place the block where it landed.  Pass nullptr for the browser
+    // gesture, which places nothing.
+    void beginAddRenderToProject (const juce::File& f,
+                                  std::function<void(int /*libIdx*/)> onRouted);
+
+    // TS7 (Jeff, 2026-07-29): how the ITEMS INSIDE each group are ordered --
+    // Clips, Vox, Inst, Exports and Reports alike, plus the leaves inside a
+    // manual or auto group.
+    //
+    // It does NOT reorder the groups or the categories themselves: those carry
+    // meaning the user assigned (category, manual group name, take-suffix
+    // family), and shuffling them would destroy that.  Only the leaves move.
+    enum class ItemSort { NewestFirst, OldestFirst, Alphabetical };
+    void setItemSort (ItemSort s);
+    ItemSort getItemSort() const noexcept { return mItemSort; }
+private:
+    ItemSort mItemSort { ItemSort::NewestFirst };
+    // Orders a leaf list in place by the current mode.  ONE implementation, so
+    // every category and every group sorts identically.
+    void sortEntries (std::vector<CategorizedAudioEntry>& v) const;
+    std::unique_ptr<juce::TextButton> mSortBtn;
+    void showSortMenu();
 
     std::unique_ptr<juce::TextButton> mAddBtn;
     std::unique_ptr<juce::TextButton> mDeleteBtn;
@@ -606,6 +670,12 @@ public:
     std::function<juce::String(const juce::String& /*src*/)>            onDuplicateFileForCopy;
     std::function<void(const juce::String& /*np*/, int /*targetChannel*/,
                        float /*pitch*/, float /*bpm*/, bool /*stretch*/)> onTagCopiedEntry;
+    // TS7 §11.5: an Exports/Reports file dragged onto the grid.  Routed to the
+    // SAME import-then-prompt handler the browser's "Add to Project..." uses, so
+    // dragging and right-clicking cannot end up meaning different things.  row /
+    // bar are where it landed, so the import can place it there.
+    std::function<void(const juce::String& /*fullPath*/, int /*row*/, float /*bar*/)>
+                                                                        onRenderFileDropped;
     // Owner call 2026-07-11: per-clip Properties "Move" mirrors the browser
     // dialog exactly by sharing its lambda -- relocate the library entry's
     // owner + props and propagate to every FOLLOWING copy (isOverride==false),
@@ -1042,6 +1112,10 @@ public:
     // Called by BuilderPage::timerCallback() to keep labels in sync with grid scroll
     void setViewportYOffset(int yPixels);
 
+    // TS7 §7.1: "Render Track to WAV..." on an AUDIO row.  BuilderPage supplies
+    // this; the panel itself owns no render machinery.
+    std::function<void(int row)> onRenderTrackRow;
+
     // LED hit-test geometry (shared with paint + mouseDown)
     static constexpr int kLedMuteX  = 4;
     static constexpr int kLedSoloX  = 20;
@@ -1186,6 +1260,26 @@ public:
         struct StemTarget { int channelId { -1 }; juce::String name; };
         std::vector<StemTarget> stems;
 
+        // QA-ModelShell TS7 (§7.1 track render, §7.2 pattern render):
+        //
+        // mixTapChannels -- when non-empty, the MAIN file is fed by SUMMING these
+        // strips' post-chain taps instead of by the master output.  One entry is a
+        // single track consolidated to one WAV (the track-head render, and each
+        // file of a Per Track pattern render); several entries is "Full Mix",
+        // which per Jeff 2026-07-29 has ALWAYS meant stems summed and never the
+        // master out -- so no master chain is on it in either case, and the two
+        // are one operation over a different track set.
+        //
+        // writeMainFile -- false renders stems only.  Per Track needs N files and
+        // no combined one, and writing a main file the user did not ask for would
+        // be worse than an extra option.
+        //
+        // Both ride the SAME single offline pass as stems, never a pass per
+        // target: muting everything but one track would kill sidechain keys and
+        // strip the ducking that made the track sound the way it does.
+        std::vector<int> mixTapChannels;
+        bool             writeMainFile { true };
+
         // QA-ModelShell TS2 riders:
         // CL-043: TPDF dither on 16-bit WAV writes (main file + stems alike).
         bool  dither      { false };
@@ -1203,20 +1297,96 @@ public:
 
     // QA-ModelShell TS2 (CL-227 backend + CL-045 measure pass): the render
     // loop with METERS instead of writers -- same offline drive, same clock,
-    // same lane replay, no files.  truePeakDb is a 4x-oversampled Lagrange
-    // ESTIMATE (TS7's BLU-108 upgrades it to the BS.1770 polyphase FIR).
-    struct MeasureResult { float integratedLufs { -120.f }; float truePeakDb { -120.f }; };
+    // same lane replay, no files.
+    //
+    // TS7 / BLU-108: truePeakDb is now a real ITU-R BS.1770-4-geometry measurement
+    // (TruePeakMeter's 4x polyphase FIR), not the 4x Lagrange ESTIMATE this
+    // shipped with at TS2.  CL-045's export boost cap consumes this value, so the
+    // cap tightened to the true number in the same change.
+    //
+    // TS7 / CL-227: the loudness-conformance fields.  `violations` is timecoded
+    // and COALESCED -- consecutive breaches of the same kind inside
+    // kViolationGapSeconds merge into one span, so a sustained overshoot reads as
+    // one row rather than several hundred.
+    struct MeasureResult
+    {
+        float  integratedLufs   { -120.f };
+        float  truePeakDb       { -120.f };
+        float  lraLu            {    0.f };   // EBU Tech 3342 loudness range
+        float  maxShortTermLufs { -120.f };
+        float  maxMomentaryLufs { -120.f };
+        double durationSeconds  {    0.0 };
+
+        // Hoisted to LoudnessSpec.h so the live capture poll and this offline
+        // scan share ONE coalescing rule (Jeff, 2026-07-30).  The alias keeps
+        // every existing MeasureResult::Violation call site working.
+        using Violation = LoudnessViolation;
+        std::vector<Violation> violations;
+        // True when the row budget was hit.  Surfaced in the report, because a
+        // silent cap reads as "only kMaxViolationRows problems exist".
+        bool violationsTruncated { false };
+
+        // TS7 §2.7: the Short-Term loudness curve, sampled at 10 Hz (EBU Tech
+        // 3342's rate).  Without this the render could be SUMMARISED but not
+        // DRAWN -- and the analyzer window is CL-227's face, so the same graphs
+        // have to render live data and render data.  It is also what the HTML
+        // report's curve is built from, so one capture serves both.
+        std::vector<float> lufsCurve;
+        static constexpr int kCurveHz = 10;
+
+        // §5.1's SPECTRUM SNAPSHOT.  Averaged over the whole render, in dB, one
+        // value per log-spaced band across 20 Hz - 20 kHz.
+        //
+        // BANDS, not raw FFT bins: a 2048-point transform gives ~1000 usable
+        // bins, which as comma-separated floats inside the HTML would add
+        // hundreds of KB to every report for a curve nobody reads bin-by-bin.
+        // 96 log bands is the resolution the eye gets from a 900px-wide plot.
+        std::vector<float> spectrumDb;
+        static constexpr int kSpectrumBands = 96;
+        static constexpr int kSpectrumOrder = 11;   // 2048-point
+        static constexpr float kSpectrumMinHz = 20.0f;
+        static constexpr float kSpectrumMaxHz = 20000.0f;
+
+        // Summary verdicts against the spec the measurement ran with.
+        LoudnessSpec::Id specId          { LoudnessSpec::Id::Streaming14 };
+        bool             integratedInSpec { true };
+        bool             truePeakInSpec   { true };
+        // §4.2: only meaningful when specId == Custom.  Carried on the RESULT so
+        // a report reloaded later reads against the number that measurement
+        // actually used.
+        float            customTargetLufs { -14.0f };
+
+        // The one way to get this measurement's spec.  Never LoudnessSpec::get
+        // (specId) at a call site -- that skips the Custom override.
+        LoudnessSpec resolvedSpec() const noexcept
+            { return LoudnessSpec::resolved (specId, customTargetLufs); }
+    };
+
+    // Aliases: the values live with the coalescing rule in LoudnessSpec.h now
+    // that live capture shares it, so there is exactly one of each.
+    static constexpr double kViolationGapSeconds = LoudnessViolation::kGapSeconds;
+    static constexpr int    kMaxViolationRows    = LoudnessViolation::kMaxRows;
+
     bool measureRender (const RenderOptions& opts,
                         MeasureResult& out,
                         juce::String& outErr,
                         std::function<bool()> shouldAbort = {},
-                        std::function<void(double)> onProgress = {});
+                        std::function<void(double)> onProgress = {},
+                        LoudnessSpec::Id spec = LoudnessSpec::Id::Streaming14,
+                        float customLufs = -14.0f);
 
     // Tail::Included safety ceiling.  Some content never decays -- a frozen
     // reverb, a self-oscillating filter, runaway feedback -- and without a cap
     // the render would run until the disk filled.  This is a MAXIMUM, not a
     // duration: a normal tail ends when it decays, usually seconds.
     static constexpr double kMaxTailSeconds = 60.0;
+
+    // CL-056: the offline render block.  Markedly faster renders than the live
+    // 512 while the per-block lane replay (~46 ms at 44.1k) stays in the same
+    // class as the live 30 Hz applicator tick, so automation granularity in the
+    // file matches what you hear.  ONE home: runOfflineLoop drives with it and
+    // renderToFile sizes its tap-sum scratch to it.
+    static constexpr int kOfflineBlock = 2048;
 
     // Renders synchronously on the CALLING thread -- never call from the message
     // thread for a full song (that is what runExportWithProgress is for).
@@ -1242,6 +1412,40 @@ public:
     void applyOfflineAutomationAt (double songBeat);
     void applyOfflineLaneValue   (const juce::String& pid, float v01);
 
+    // TS7 §6.1: freeze — runOfflineLoop's THIRD consumer (renderToFile and
+    // measureRender are the other two; the loop is never copied).  Renders one
+    // insert's PRE-RACK output to `dest` at the project rate, so the frozen tab's
+    // rack, EQ and fader stay live and editable.
+    //
+    // Renders SONG scope: a freeze has to line up with the arrangement it
+    // replaces, so it spans the same timeline rather than the tab's own content.
+    //
+    // `target` is the same strip expressed as a RenderTask, used ONLY to prune
+    // the render graph down to it.  Null is legal and simply renders the whole
+    // project as before.
+    bool renderFreezeFile (VibeGraph::InsertKind kind, int index,
+                           RenderTask* target,
+                           const juce::File& dest,
+                           juce::String& outErr,
+                           std::function<bool()> shouldAbort = {},
+                           std::function<void(double)> onProgress = {});
+
+    // TS7 §6.9: every kit strip captured in ONE offline pass.  Bypasses the
+    // single-arm freeze tap deliberately -- see the implementation.
+    bool renderKitFreezeFiles (const std::vector<juce::File>& dests,
+                               RenderTask* target,
+                               juce::String& outErr,
+                               std::function<bool()> shouldAbort = {},
+                               std::function<void(double)> onProgress = {});
+
+    // TS7 stopwatch split: offline enter/leave cost, filled by runOfflineLoop and
+    // read by renderFreezeFile.  FIXED per render regardless of length -- a full
+    // prepareToPlay of every engine (NAM oversampling rebuild + model prewarm,
+    // sfizz, graph reset, arena resize) at both ends -- so it must be separable
+    // from the per-block loop or a short render reads as catastrophically slow.
+    double mFreezeSetupMs    { 0.0 };
+    double mFreezeTeardownMs { 0.0 };
+
     // QA-ModelShell TS2: the ONE offline render loop -- span/scope math, the
     // offline drive (begin/endOfflineRender + restores), the lane-aware
     // clock, per-block lane replay, tail-decay handling.  Consumers differ
@@ -1259,6 +1463,21 @@ public:
     void runExportWithProgress (const RenderOptions& opts);
 
     void renderPatternToWav(int patternIndex);
+    // TS7 §7.1: consolidate one arrangement row to a single WAV (audio rows only).
+    void renderTrackRowToWav (int row);
+
+    // TS7 §7.2: one tab that carries notes in a pattern.  `channelId` is the
+    // strip whose post-chain tap becomes that tab's audio.
+    struct PatternTrackEntry { int channelId { -1 }; juce::String name; };
+    // Tabs with content in `patternIndex`, in display order.  Empty rolls are
+    // skipped -- rendering a silent file per idle tab is noise, not completeness.
+    std::vector<PatternTrackEntry> getPatternTracks (int patternIndex) const;
+    // The options popup (Per Track / Full Mix / Select Tracks) and its two tails.
+    void showPatternRenderOptions (int patternIndex);
+    void showPatternTrackPicker   (int patternIndex);
+    // channelIds empty == every track in the pattern; perTrack picks N files vs
+    // one summed file.  One entry point so the three menu picks cannot diverge.
+    void startPatternRender (int patternIndex, std::vector<int> channelIds, bool perTrack);
     void setPlayHead(StandalonePlayHead* ph);
     void setUndoContext(const UndoContext& ctx);
 

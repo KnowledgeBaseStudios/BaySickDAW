@@ -132,6 +132,13 @@ void HostedPluginInstance::instantiate()
         return;
     }
 
+    // NO PLAYHEAD SEED HERE, deliberately.  A first cut seeded one from
+    // getPlayHead() at this point; it could never fire, because instantiate() is
+    // only ever called from the constructor and an AudioProcessor's playhead is
+    // null until someone sets it.  Dead code that read as covering the case.
+    // The transport arrives instead when EngineRig::registerWithProcessor (or
+    // HostedPluginEffect's first transport push, for a rack slot) calls
+    // setPlayHead on this object, which forwards to mInner.
     mState = HostedState::Ok;
     mError = {};
 }
@@ -198,13 +205,48 @@ void HostedPluginInstance::releaseResources()
     if (mInner   != nullptr) mInner->releaseResources();
 }
 
+// TS7 (2026-07-31): THE PLAYHEAD WAS NEVER FORWARDED.  juce::AudioProcessor::
+// setPlayHead only stores the pointer on THIS object; `mInner` is a separate
+// AudioProcessor whose own getPlayHead() therefore returned null, so a hosted
+// plugin had no tempo, no bar/beat and no transport state whatsoever.  That --
+// not a controller's MIDI clock -- was why a hosted arpeggiator or synced delay
+// had nothing to lock to.
+void HostedPluginInstance::setPlayHead (juce::AudioPlayHead* ph)
+{
+    juce::AudioProcessor::setPlayHead (ph);
+
+    if (mInner != nullptr)
+        mInner->setPlayHead (ph);
+    // The bridged path cannot take a pointer across a process boundary; it gets
+    // the same information as plain values in every ProcessPayload instead.
+}
+
 void HostedPluginInstance::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midi)
 {
     if (mSandbox != nullptr)
     {
+        // Transport read here rather than stored, so the bridged plugin sees the
+        // same position the unbridged one would have read from the playhead.
+        SandboxedPluginClient::TransportInfo tp;
+        if (auto* ph = getPlayHead())
+        {
+            if (auto pos = ph->getPosition())
+            {
+                tp.bpm           = pos->getBpm().orFallback (120.0);
+                tp.ppqPosition   = pos->getPpqPosition().orFallback (0.0);
+                tp.timeInSamples = pos->getTimeInSamples().orFallback ((juce::int64) 0);
+                tp.isPlaying     = pos->getIsPlaying();
+                if (auto ts = pos->getTimeSignature())
+                {
+                    tp.timeSigNum = ts->numerator;
+                    tp.timeSigDen = ts->denominator;
+                }
+            }
+        }
+
         // A bridged plugin that misses its deadline (or has died) yields
         // silence for THIS slot only -- never a stall on the audio callback.
-        if (! mSandbox->processBlock (buffer, midi))
+        if (! mSandbox->processBlock (buffer, midi, tp))
             buffer.clear();
 
         return;

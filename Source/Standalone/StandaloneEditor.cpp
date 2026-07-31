@@ -23,6 +23,8 @@
 #include "TypingKeyboardMap.h"   // D-4 typing-keyboard MIDI (QA-TransportDisplay)
 #include "KeyBindsWindow.h"
 #include "PluginsManagerWindow.h"   // QA-ModelShell TS6: Options > Plugins
+#include "MasterAnalyzerWindow.h"   // QA-ModelShell TS7 CL-044: master spectrum satellite
+#include "LoudnessReportWriter.h"   // QA-ModelShell TS7 CL-227: HTML + CSV report
 #include "PluginsPage.h"           // QA-ModelShell TS6: hosted-instrument tab view
 #include "RustyDrumsMapWindow.h"
 #include "PatternColorPicker.h"
@@ -47,9 +49,14 @@
 #include "../Vox/VoxPage.h"                           // G-4: Vox page + empty state
 #include "../Inst/InstPage.h"                         // G-4: Inst page + empty state
 #include "../MidiLearn/MidiLearnUI.h"                  // I-3c: MIDI Learn UI controller
+#include "WindowChrome.h"                              // QA-ModelShell TS7 §9
 
 namespace
 {
+    // Same reason as promptForProjectName below: defined near the bottom of this
+    // TU, but the constructor reads capture settings out of it (TS7 §3).
+    std::unique_ptr<juce::PropertiesFile> openUiPrefs();
+
     // Forward-decl for the async-prompt helper defined further down in this
     // TU.  Needed so lambdas in createBuilderPage (P4 drop-without-project
     // flow) can call it before the definition appears in source order.
@@ -613,7 +620,30 @@ StandaloneEditor::StandaloneEditor(VibeSynthProcessor& p, StandalonePlayHead& ph
     // arrangement add/remove, time-marker add/remove/rename) - none of which
     // route through APVTS - chain into ProjectManager::markDirty.
     if (mPM)
-        mPM->onAnyChange = [this] { if (mProjectManager) mProjectManager->markDirty(); };
+        mPM->onAnyChange = [this]
+        {
+            if (mProjectManager) mProjectManager->markDirty();
+
+            // Re-arm the freeze re-render quiet period on EVERY content change.
+            // A drag fires this continuously, which is the point: the re-render
+            // waits until the movement stops instead of firing per mouse move
+            // and locking the app for seconds each time.
+            mLastContentEditMs = juce::Time::getMillisecondCounterHiRes();
+
+            // TS7 §6.5: the last two missing invalidators -- ARRANGEMENT CONTENT
+            // (what actually plays on a tab) and the TEMPO MAP -- are both
+            // already covered by this one signal, which fires from every
+            // pattern-side mutation including arrangement add/remove and
+            // time-marker edits.  Only base BPM had a hook before, so moving a
+            // clip or a tempo marker changed what a frozen tab should sound like
+            // while its freeze still read as current.
+            //
+            // Deliberately markALL rather than per-tab: this signal does not
+            // carry WHICH tab changed, and an arrangement edit can change what
+            // plays on several at once.  Over-invalidating costs a re-render
+            // (deferred to Stop); under-invalidating ships the wrong audio.
+            mProcessor.engineRig().markAllFreezesStale();
+        };
     // QA-G Task 6: immediate UI refresh on TS lifecycle changes (the rolls +
     // pattern-button label also self-heal on their timers; this just makes
     // the response instant).
@@ -917,6 +947,10 @@ StandaloneEditor::StandaloneEditor(VibeSynthProcessor& p, StandalonePlayHead& ph
         // PatternManager so save/reload round-trips correctly.
         if (mPM) mPM->setGlobalTempo (bpm);
         if (mProjectManager) mProjectManager->markDirty();
+        // TS7 §6.5: tempo moves EVERY engine's output in time, so it invalidates
+        // every freeze rather than any one tab's -- the one item in the
+        // invalidation list that is not per-tab.
+        mProcessor.engineRig().markAllFreezesStale();
     };
     mTransport->onSongModeChanged = [this](bool songMode) {
         // Smoke round 3 (Jeff): applicator-lane baseline (engine params +
@@ -1461,6 +1495,28 @@ StandaloneEditor::StandaloneEditor(VibeSynthProcessor& p, StandalonePlayHead& ph
             if (entry && entry->type == RibbonTabBar::TabType::Inst) ++n;
         return n >= (int) kMaxInstPages;
     };
+    // TS7 §6.4: the ribbon shows ONE slot per type, so this reports the strongest
+    // state across that type's instances -- stale wins over frozen, because a
+    // stale tab is the one currently costing full CPU on its live engine.
+    mRibbon->onIsTabFrozen = [this] (RibbonTabBar::TabType t) -> int
+    {
+        TabKind kind;
+        switch (t)
+        {
+            case RibbonTabBar::TabType::Layers:  kind = TabKind::Layers;  break;
+            case RibbonTabBar::TabType::Bass:    kind = TabKind::Bass;    break;
+            case RibbonTabBar::TabType::Drums:   kind = TabKind::Drums;   break;
+            case RibbonTabBar::TabType::Plugins: kind = TabKind::Plugins; break;
+            default: return 0;
+        }
+        int best = 0;
+        for (int i = 0; i < (int) kMaxLayerPages; ++i)
+        {
+            if (mProcessor.engineRig().isFreezeStale (kind, i)) return 2;
+            if (mProcessor.engineRig().isFrozen (kind, i))      best = 1;
+        }
+        return best;
+    };
     mRibbon->onSubPageSelected = [this](RibbonTabBar::TabType t, int idx) { onSubPageSelected(t, idx); };
     // D1.4-fix: intercept rename for Drum tabs whose name == "User Patch" so
     // we can route to Save Patch As (which prompts for name + saves the
@@ -1574,6 +1630,15 @@ StandaloneEditor::StandaloneEditor(VibeSynthProcessor& p, StandalonePlayHead& ph
                 cp->setTabName(finalName);
                 if (mPianoRollPage) mPianoRollPage->setEngineDisplayName ({ EngineKind::Clip, cp->getPageIndex() }, finalName);
             }
+            // TS6 (BLU-447) -- MISSED, fixed TS7 2026-07-30.  Same shape as Clips
+            // above: without a StripKind entry a plugin tab rename reached neither
+            // its mixer strip nor its roll label.
+            else if (auto* pp = dynamic_cast<PluginsPage*>(entry->component.get()))
+            {
+                if (mMixerPage) mMixerPage->renameChannel (MixerPage::StripKind::Plugin, pp->getPageIndex(), finalName);
+                pp->setTabName(finalName);
+                if (mPianoRollPage) mPianoRollPage->setEngineDisplayName ({ EngineKind::Plugin, pp->getPageIndex() }, finalName);
+            }
             else if (auto* vp = dynamic_cast<VoxPage*>(entry->component.get()))
             {
                 // Vox tabs have a mixer strip + no piano-roll registration
@@ -1642,6 +1707,80 @@ StandaloneEditor::StandaloneEditor(VibeSynthProcessor& p, StandalonePlayHead& ph
     {
         if (safe != nullptr) safe->grabKeyboardFocus();
     });
+
+    // ── TS7 §3: version capture ───────────────────────────────────────────────
+    // The analysis half is ALWAYS on, so the master tap is armed for the whole
+    // session rather than by a window's suspend hook.  This is the tap's second
+    // client (the analyzer window is the first); VibeGraph ORs the two wants, so
+    // closing that window no longer stops analysis.
+    mProcessor.setMasterAnalysisActive (true);
+
+    mVersionCapture.setAudioCaptureEnabled (
+        openUiPrefs()->getBoolValue ("fsCaptureAudio", false));
+    // §3.4: session-only is the default (id 1); id 2 is <project>\Reports\.
+    mVersionCapture.setRetainInProject (
+        openUiPrefs()->getIntValue ("fsCaptureRetain", 1) == 2);
+
+    mVersionCapture.onTakeBegan = [this] { mProcessor.resetMasterTruePeakMax(); };
+
+    mVersionCapture.onBeginAudio = [this] (const juce::File& target) -> bool
+    {
+        return mProcessor.startMasterCapture (target);
+    };
+    mVersionCapture.onEndAudio = [this]() -> juce::File
+    {
+        return mProcessor.stopMasterCapture();
+    };
+    mVersionCapture.onGetProjectDir = [this]() -> juce::File
+    {
+        return mProjectManager ? mProjectManager->getCurrentFolder() : juce::File();
+    };
+    // §3.4: a retained take's ANALYSIS persists as one of the existing loudness
+    // reports.  Same folder, same format, same reader -- so it shows up in the
+    // Files browser's Reports section and reopens in this analyzer with no new
+    // machinery.  Violations are absent because a capture measures Short-Term
+    // loudness on a UI timer rather than scanning blocks; the curve, the summary
+    // and the verdicts are all real.
+    mVersionCapture.onPersistTake = [this] (const VersionCapture::Version& v)
+    {
+        const auto dir = mProcessor.getProjectReportsDir();
+        if (dir == juce::File()) return;
+
+        BuilderPage::MeasureResult m;
+        m.lufsCurve      = v.lufsCurve;
+        m.integratedLufs = v.integratedLufs;
+        m.lraLu          = v.lraLu;
+        m.truePeakDb     = v.truePeakDb;
+        m.maxShortTermLufs = v.maxShortTerm;
+        m.durationSeconds  = v.durationSec;
+        m.violations          = v.violations;          // §5.3 flagged moments
+        m.violationsTruncated = v.violationsTruncated;
+        m.specId              = mVersionCapture.getSpec().id;
+        m.customTargetLufs    = mVersionCapture.getSpec().integratedLufs;
+        m.truePeakInSpec      = (m.truePeakDb <= mVersionCapture.getSpec().maxTruePeakDb);
+        m.integratedInSpec    = (! mVersionCapture.getSpec().checksIntegrated)
+                              || (std::abs (m.integratedLufs
+                                            - mVersionCapture.getSpec().integratedLufs)
+                                  <= mVersionCapture.getSpec().toleranceLu);
+
+        LoudnessReportWriter::Context ctx;
+        ctx.projectName   = mProjectManager ? mProjectManager->getCurrentFolder()
+                                                  .getFileNameWithoutExtension()
+                                            : juce::String();
+        ctx.scopeLabel    = v.scopeLabel;
+        ctx.timestampLabel = v.label;
+
+        juce::String err;
+        LoudnessReportWriter::write (dir, v.label.replaceCharacter (':', '-'),
+                                     m, ctx, /*wantCsv*/ false, err);
+    };
+
+    mVersionCapture.onVersionsChanged = [this]
+    {
+        if (auto* win = findAuxWindow ("analyzer:master"))
+            if (auto* v = dynamic_cast<MasterAnalyzerView*> (win->getContent()))
+                v->refreshVersions();
+    };
 
     // ── Automation playback timer ─────────────────────────────────────────────
     mAutomationTimer.startTimerHz(30);
@@ -1747,6 +1886,19 @@ void StandaloneEditor::buildDefaultTabs()
         {
             if (auto* pm = mProcessor.getPatternManager())
                 pm->notifyContentChanged();
+
+            // TS7 §6.5: a note edit changes what the ENGINE produces, so it makes
+            // that tab's freeze stale.  Hooked HERE because this is the single
+            // funnel every roll and kit mutation already passes through -- the
+            // per-grid onNotesChanged sites are many and would drift.
+            //
+            // Marked across every frozen tab rather than just the edited one:
+            // this hook does not carry which roll changed, and a freeze that is
+            // wrongly re-rendered costs render time while one wrongly kept plays
+            // the WRONG AUDIO.  Erring toward re-rendering is the safe direction,
+            // and markEngineContentChanged only touches tabs that are actually
+            // frozen (a no-op for the rest).
+            mProcessor.engineRig().markAllFreezesStale();
         });
         // #30 (QA-G3Smoke): device info for the roll/kit playhead's visual
         // latency compensation (permanent, unlike the Debug diag below).
@@ -1854,6 +2006,19 @@ void StandaloneEditor::buildDefaultTabs()
                     // in the dropdown.  Index always 0 (1-instance lock).
                     k = EngineKind::BaySickRustyDrums;
                     idx = 0;
+                }
+                // TS6 (BLU-447) -- MISSED, fixed TS7 2026-07-30.  Without this
+                // case a Plugins page fell through to the `else continue` below,
+                // so the roll registered by registerPluginPianoRoll had no way to
+                // be SELECTED and the whole plugin roll was unreachable.
+                // Gated on a plugin actually being picked: an empty tab has no
+                // engine to play notes into, matching the isEngineLocked test the
+                // Layer / Bass entries use.
+                else if (auto* pp = dynamic_cast<PluginsPage*> (entry->component.get()))
+                {
+                    if (pp->getEngineProcessor() == nullptr) continue;
+                    k = EngineKind::Plugin;
+                    idx = pp->getPageIndex();
                 }
                 else if (auto* ip = dynamic_cast<InstPage*> (entry->component.get()))
                 {
@@ -2981,6 +3146,46 @@ std::unique_ptr<juce::Component> StandaloneEditor::createBuilderPage()
             return renameRecordingGroup (oldBase, newBase);
         };
 
+        // TS7 §11: where the project's rendered files live.  The panel does not
+        // know about projects, so the editor supplies both folders.
+        panel->onGetRenderFolders = [this]() -> std::pair<juce::File, juce::File>
+        {
+            return { mProcessor.getProjectExportsDir(),
+                     mProcessor.getProjectReportsDir() };
+        };
+
+        // TS7 §11.6: a saved report opens IN THE APP, in the analyzer -- the
+        // same view the user watched live -- by replaying the data block the
+        // writer embedded in the HTML.  That block is why the report is not
+        // just a picture: verdicts are recomputed against the CURRENT
+        // LoudnessSpec table on open, so an old report re-read after a target
+        // changes reflects the new target rather than the one frozen into the
+        // page.  A file carrying no block is refused rather than opened empty.
+        panel->onOpenReport = [this] (const juce::File& f)
+        {
+            BuilderPage::MeasureResult    m;
+            LoudnessReportWriter::Context ctx;
+            if (! LoudnessReportWriter::readEmbedded (f, m, ctx))
+            {
+                juce::AlertWindow::showMessageBoxAsync (
+                    juce::AlertWindow::WarningIcon,
+                    "Cannot open report",
+                    "This file has no BaySickDAW measurement data in it, so "
+                    "there is nothing for the analyzer to show.\n\n"
+                    "Reports written by this app always carry it; one that has "
+                    "been edited and re-saved by another program may not.");
+                return;
+            }
+            openMasterAnalyzerWindow();
+            if (auto* win = findAuxWindow ("analyzer:master"))
+                if (auto* v = dynamic_cast<MasterAnalyzerView*> (win->getContent()))
+                    v->showRenderedCurve (m.lufsCurve, m.integratedLufs, m.lraLu,
+                                          m.truePeakDb,
+                                          ctx.scopeLabel.isNotEmpty()
+                                              ? ctx.scopeLabel
+                                              : f.getFileNameWithoutExtension());
+        };
+
         panel->onEnumerateAudio = [this]() -> std::vector<CategorizedAudioEntry>
         {
             std::vector<CategorizedAudioEntry> out;
@@ -3825,13 +4030,27 @@ juce::String StandaloneEditor::resolveAutomationDisplayName(const juce::String& 
             { "mixer_voxbus2_",   "Vox Bus 2"   },
             { "mixer_instbus2_",  "Inst Bus 2"  },
             { "mixer_instbus3_",  "Inst Bus 3"  },
+            { "mixer_rustybus_",  "RustyDrums Bus" },
+            { "mixer_pluginbus_", "Plugins Bus" },   // TS6 (missed, fixed TS7)
         };
+        // PREFIX COLLISION GUARD (Jeff's call, 2026-07-30).  The Bass BUS prefix
+        // is "mixer_bass_" and a bass INSERT is "mixer_bass_0_...", so the insert
+        // also matches the bus row -- and this loop runs first, so EVERY per-bass-
+        // strip automation entry was labelled "Mx Bass Bus - 0 Level".  Bass is the
+        // only pair that collides (drums/layers use singular insert bases), but the
+        // guard is stated generally so a future bus prefix cannot reintroduce it.
+        //
+        // A digit immediately after the prefix means "indexed insert, not this bus":
+        // no bus suffix begins with one (level, pan, sendTo, send0_to, mid_eq0_freq
+        // all start with a letter).
         for (const auto& e : kBusEntries)
         {
             const juce::String pfx = e.prefix;
-            if (paramId.startsWith(pfx))
-                return "Mx " + juce::String(e.label) + " - "
-                     + formatMixerSuffix(paramId.substring(pfx.length()));
+            if (! paramId.startsWith(pfx)) continue;
+            const juce::String tail = paramId.substring(pfx.length());
+            if (tail.isNotEmpty()
+                && juce::CharacterFunctions::isDigit((char) tail[0])) continue;
+            return "Mx " + juce::String(e.label) + " - " + formatMixerSuffix(tail);
         }
 
         // Indexed insert strips: mixer_{kind}_{N}_{suffix}.
@@ -3847,6 +4066,8 @@ juce::String StandaloneEditor::resolveAutomationDisplayName(const juce::String& 
             { "mixer_aux_",   Kind::Aux,   "Aux"       },
             { "mixer_vox_",   Kind::Vox,   "Vox"       },
             { "mixer_inst_",  Kind::Inst,  "Inst"      },
+            { "mixer_rusty_", Kind::Rusty, "Rusty"     },
+            { "mixer_plugin_", Kind::Plugin, "Plugin"  },   // TS6 (missed, fixed TS7)
         };
         for (const auto& e : kInsertEntries)
         {
@@ -3868,6 +4089,7 @@ juce::String StandaloneEditor::resolveAutomationDisplayName(const juce::String& 
                 if      (e.kind == Kind::Drum)  channelLabel = mMixerPage->getDrumStripName(insertIdx);
                 else if (e.kind == Kind::Audio) channelLabel = mMixerPage->getAudioStripName(insertIdx);
                 else if (e.kind == Kind::Aux)   channelLabel = mMixerPage->getAuxStripName(insertIdx);
+                else if (e.kind == Kind::Plugin) channelLabel = mMixerPage->getPluginStripName(insertIdx);
                 // 2026-04-30: MixerPage doesn't expose per-Vox / per-Inst
                 // strip-name lookups yet - fall through to the default
                 // "Vox N+1" / "Inst N+1" label.  Once those getters land
@@ -3949,6 +4171,83 @@ std::unique_ptr<juce::Component> StandaloneEditor::createMixerPage()
     {
         if (mEffectsPage) mEffectsPage->rebuildChannelDropdown();
     };
+    // TS7 (CL-044): the master strip's repurposed "+" opens the analyzer.  This
+    // is the ONE route -- the View menu entry was removed with it, so there is no
+    // second way in that could drift out of sync.
+    page->onAnalyzerRequested = [this]() { openMasterAnalyzerWindow(); };
+
+    // TS7 §6: the processor drives freeze but the RENDERER lives on BuilderPage,
+    // so it arrives as a hook -- the model must not reach into a view.  Wired
+    // here because this is where the editor already owns both.
+    mProcessor.onRenderFreezeFile =
+        [this] (VibeGraph::InsertKind kind, int index, RenderTask* target,
+                const juce::File& dest, juce::String& outErr) -> bool
+        {
+            if (mBuilderPage == nullptr) { outErr = "The Builder is not available."; return false; }
+
+            // PROGRESS + CANCEL were dropped here (fixed 2026-07-30).
+            // renderFreezeFile has always taken shouldAbort and onProgress, and
+            // this single wiring point passed neither -- so BOTH the manual
+            // button and auto-freeze showed an anonymous spinner with no
+            // percentage and no way out, on a render that can run for a minute
+            // or more.  The abort check inside the loop could never fire.
+            return mBuilderPage->renderFreezeFile (
+                kind, index, target, dest, outErr,
+                [this] { return mHeavyOpOverlay.wasCancelled(); },
+                [this] (double p)
+                {
+                    // setProgress pumps the peer's pending paint itself -- the
+                    // render holds the message thread, so a plain repaint would
+                    // never reach the screen and the bar would sit at 0, looking
+                    // identical to the hang it exists to explain.
+                    mHeavyOpOverlay.setProgress (p);
+                });
+        };
+
+    // §6.9: the kit's thirteen strips, one pass.  Same progress + cancel wiring
+    // as the single-track path.
+    mProcessor.onRenderKitFreezeFiles =
+        [this] (const std::vector<juce::File>& dests, RenderTask* target,
+                juce::String& outErr) -> bool
+        {
+            if (mBuilderPage == nullptr) { outErr = "The Builder is not available."; return false; }
+            return mBuilderPage->renderKitFreezeFiles (
+                dests, target, outErr,
+                [this] { return mHeavyOpOverlay.wasCancelled(); },
+                [this] (double p) { mHeavyOpOverlay.setProgress (p); });
+        };
+
+    // TS7 §6.6: a freeze going stale queues a re-render.  QUEUED rather than run
+    // here because this fires from an edit -- rendering synchronously inside a
+    // note drag would freeze the UI mid-gesture.  The 5 Hz poll drains it one at
+    // a time, and the tab plays its live engine until its file lands.
+    // §6.7: a removed frozen tab's file is deleted rather than left to accumulate.
+    mProcessor.engineRig().onFreezeFileObsolete =
+        [this] (TabKind kind, int pageIndex)
+        {
+            mProcessor.deleteFreezeFileFor (kind, pageIndex);
+        };
+
+    mProcessor.engineRig().onFreezeStateChanged =
+        [this] (TabKind kind, int pageIndex)
+        {
+            // §6.4: the ribbon's frozen mark is painted from live rig state, so a
+            // repaint is all it needs -- no cached copy to keep in sync.
+            if (mRibbon) mRibbon->repaint();
+            // The title-bar Freeze button reads live state the same way, but it
+            // is a TextButton and will not restyle itself.
+            if (mPageMenuBar) mPageMenuBar->refreshFreezeState();
+
+            if (mProcessor.engineRig().isFreezeStale (kind, pageIndex))
+            {
+                const bool queued = std::any_of (
+                    mFreezeRefreshQueue.begin(), mFreezeRefreshQueue.end(),
+                    [&] (const PendingFreeze& p)
+                    { return p.kind == kind && p.pageIndex == pageIndex; });
+                if (! queued)
+                    mFreezeRefreshQueue.push_back ({ kind, pageIndex, false });
+            }
+        };
     // R2 (2026-04-23): expose AudioDeviceManager input-channel names to the
     // Vox / Inst Arm-LED picker.  Returns the friendly names for the active
     // device's input channels (or empty when no device or zero inputs).
@@ -4038,6 +4337,10 @@ std::unique_ptr<juce::Component> StandaloneEditor::createEffectsPage()
         if (mMixerPage && mMixerPage->isInstBus3Active()) result.push_back({11, "Inst Bus 3"});
         // J-5 (2026-05-03): RustyDrums Bus surfaced only when active (singleton spawned).
         if (mProcessor.hasBaySickRustyDrums()) result.push_back({12, "RustyDrums Bus"});
+        // TS6 (BLU-447) -- MISSED, fixed TS7 2026-07-30.  EffectsPage already
+        // drew a "PLUGINS BUS" group heading; with neither the bus nor its
+        // members in this list it was a heading over nothing.
+        if (mMixerPage && mMixerPage->isPluginsBusActive()) result.push_back({13, "Plugins Bus"});
 
         // Active Layer pages (engine selected)
         for (auto* entry : mPages)
@@ -4123,6 +4426,11 @@ std::unique_ptr<juce::Component> StandaloneEditor::createEffectsPage()
                 result.push_back({700 + idx, mMixerPage->getVoxStripName(idx)});
             for (int idx : mMixerPage->getInstStripIndices())
                 result.push_back({800 + idx, mMixerPage->getInstStripName(idx)});
+            // TS6 (BLU-447) -- MISSED, fixed TS7 2026-07-30.  EffectsPage already
+            // resolves the 1000+ range to InsertKind::Plugin everywhere (rack, EQ,
+            // pre-EQ, prefix, automation sweep); nothing ever EMITTED an id in it.
+            for (int idx : mMixerPage->getPluginStripIndices())
+                result.push_back({1000 + idx, mMixerPage->getPluginStripName(idx)});
         }
 
         // J-6 (2026-05-03): Rusty inserts (when singleton is spawned).
@@ -4554,6 +4862,11 @@ void StandaloneEditor::jumpToRollPlayerPage()
         {
             match = dynamic_cast<BaySickRustyDrumsPage*> (c) != nullptr;
         }
+        else if (id.kind == EngineKind::Plugin)   // TS6 (missed, fixed TS7)
+        {
+            auto* p = dynamic_cast<PluginsPage*> (c);
+            match = p != nullptr && p->getPageIndex() == id.index;
+        }
         else if (id.kind == EngineKind::DrumKit)
         {
             // The kit view spans every drum -- land on the first Drums tab.
@@ -4581,6 +4894,8 @@ void StandaloneEditor::jumpToRollFxRack()
     else if (id.kind == EngineKind::BaySickGuitars
           || id.kind == EngineKind::BaySickBasses)
         prefix = "mixer_inst_" + juce::String (id.index);
+    else if (id.kind == EngineKind::Plugin)   // TS6 (missed, fixed TS7)
+        prefix = "mixer_plugin_" + juce::String (id.index);
     else if (id.kind == EngineKind::BaySickRustyDrums)
         prefix = "mixer_rustybus";        // singleton engine -> its bus rack
     else if (id.kind == EngineKind::DrumKit)
@@ -4890,10 +5205,6 @@ void StandaloneEditor::onTabClosed(int tabId)
 
             if (closedPageWasVisible)
                 mVisiblePage = nullptr;
-
-            // G-7 (2026-04-29): track type before removing so we can decide
-            // whether to surface the empty-state placeholder afterward.
-            const auto closedType = mPages[i]->type;
 
             mPages.remove(i);
             // J-8 stage 2: now safe to destroy the engine - the page (and its
@@ -5284,6 +5595,53 @@ void StandaloneEditor::showPageForTab(int tabId)
             // right of FX Rack -- visible on every sub-tab of the page.
             {
                 const juce::String swBase = "swing_layer_" + juce::String (lp->getPageIndex());
+                auto sb = mProcessor.makeSwingKnobBinding (swBase + "_mix", swBase + "_trunc");
+                mPageMenuBar->setSwingKnobSlot (sb.getMix, sb.setMix, sb.getTrunc, sb.setTrunc);
+            }
+        }
+        // QA-ModelShell TS6 (BLU-447) -- MISSED ENTIRELY, fixed TS7 2026-07-30.
+        // showPageForTab had NO Plugins branch, so a hosted-instrument page got no
+        // slot cluster at all: no Piano Roll button, no FX Rack jump.  The Freeze
+        // button was the only control on the bar, because that one is wired from a
+        // single unconditional call at the end of this function -- which is the
+        // only reason the omission was visible instead of silent.
+        //
+        // ONE slot, not the usual "Player / Piano Roll" pair (Jeff, 2026-07-30):
+        // a PluginsPage has no sub-pages to switch BETWEEN -- it shows the
+        // plugin's own editor and nothing else -- so an inert "Player" button
+        // would be a control that does nothing.  activeIdx = -1 leaves it
+        // unhighlighted, which is correct: you are on the player, not the roll.
+        else if (auto* pp = dynamic_cast<PluginsPage*>(mVisiblePage))
+        {
+            juce::Component::SafePointer<PluginsPage> safe (pp);
+
+            mPageMenuBar->setTabSlots ({"Piano Roll"},
+                [this, safe](int) {
+                    auto* p = safe.getComponent();
+                    if (p == nullptr) return;
+                    // Same use-after-free discipline as the Layers branch:
+                    // capture every value on the stack BEFORE onTabSelected,
+                    // which can destroy both `p` and this lambda.
+                    const int pageIdx = p->getPageIndex();
+                    auto* prp = mPianoRollPage;
+                    auto* rbn = mRibbon.get();
+                    if (rbn != nullptr) rbn->selectTab (4);
+                    onTabSelected (4);
+                    if (prp != nullptr)
+                        prp->selectEngine ({ EngineKind::Plugin, pageIdx });
+                }, -1, pp->getPageColor());
+            mPageMenuBar->setMidSideVisible(false);
+            mPageMenuBar->setFxRackSlot ([this, safe]
+            {
+                auto* p = safe.getComponent();
+                if (p == nullptr) return;
+                const juce::String prefix = "mixer_plugin_" + juce::String (p->getPageIndex());
+                jumpToFxRackForPrefix (prefix);
+            });
+            // swing_plugin_N_* already exist (ensureSwingParams) and the scheduler
+            // already applies them to plugin notes -- only the knob was missing.
+            {
+                const juce::String swBase = "swing_plugin_" + juce::String (pp->getPageIndex());
                 auto sb = mProcessor.makeSwingKnobBinding (swBase + "_mix", swBase + "_trunc");
                 mPageMenuBar->setSwingKnobSlot (sb.getMix, sb.setMix, sb.getTrunc, sb.setTrunc);
             }
@@ -6118,7 +6476,113 @@ void StandaloneEditor::showPageForTab(int tabId)
         }
     }
 
+    wireFreezeSlotForVisiblePage();
+
     resized();
+}
+
+// Resolves the currently visible page to the (TabKind, pageIndex) the freeze
+// driver is keyed on.  Returns false for anything that is not a player page --
+// Mixer, Effects, Builder, Piano Roll -- which is what hides the Freeze slot
+// there rather than showing a button with nothing behind it.
+bool StandaloneEditor::visiblePageTabIdentity (TabKind& outKind, int& outIndex) const
+{
+    if (auto* p = dynamic_cast<LayersPage*>  (mVisiblePage)) { outKind = TabKind::Layers;  outIndex = p->getPageIndex(); return true; }
+    if (auto* p = dynamic_cast<BassPage*>    (mVisiblePage)) { outKind = TabKind::Bass;    outIndex = p->getPageIndex(); return true; }
+    if (auto* p = dynamic_cast<DrumPage*>    (mVisiblePage)) { outKind = TabKind::Drums;   outIndex = p->getPageIndex(); return true; }
+    if (auto* p = dynamic_cast<ClipsPage*>   (mVisiblePage)) { outKind = TabKind::Clips;   outIndex = p->getPageIndex(); return true; }
+    if (auto* p = dynamic_cast<VoxPage*>     (mVisiblePage)) { outKind = TabKind::Vox;     outIndex = p->getPageIndex(); return true; }
+    if (auto* p = dynamic_cast<InstPage*>    (mVisiblePage)) { outKind = TabKind::Inst;    outIndex = p->getPageIndex(); return true; }
+    if (auto* p = dynamic_cast<PluginsPage*> (mVisiblePage)) { outKind = TabKind::Plugins; outIndex = p->getPageIndex(); return true; }
+    // The kit is a SINGLETON page with no page index of its own -- index 0 by
+    // definition.  It is also the one player whose engine is processor-owned
+    // rather than rig-owned, so its tab record is pure identity + freeze state.
+    if (dynamic_cast<BaySickRustyDrumsPage*> (mVisiblePage) != nullptr)
+    { outKind = TabKind::Rusty; outIndex = 0; return true; }
+    return false;
+}
+
+// ── TS7 §6: the per-player Freeze button (Jeff, 2026-07-30) ──────────────────
+// ONE wiring site at the end of showPageForTab rather than a call inside each of
+// the seven page branches above.  Those branches already each set the FX Rack
+// slot and the swing knob, and that duplication is exactly how a new player type
+// ends up silently missing a control.
+void StandaloneEditor::wireFreezeSlotForVisiblePage()
+{
+    if (! mPageMenuBar) return;
+
+    TabKind kind {};
+    int     pageIndex = -1;
+    if (! visiblePageTabIdentity (kind, pageIndex))
+    {
+        mPageMenuBar->setFreezeSlot (nullptr, nullptr);   // not a player page
+        return;
+    }
+
+    // The kit has no rig tab of its own -- its engine is processor-owned, so
+    // nothing ever created one, and without a tab record there is nowhere to
+    // hold freeze state.  Created lazily here, identity only (null engine); the
+    // teardown paths already early-return on that.
+    if (kind == TabKind::Rusty && mProcessor.engineRig().findTab (kind, 0) == nullptr)
+        mProcessor.engineRig().addTab (TabKind::Rusty, 0, "Drum Kit");
+
+    // HIDDEN BY DEFAULT (Jeff, 2026-07-30).  Freeze ships auto-first: a
+    // first-time user never sees a button and never learns the word, the machine
+    // simply protects itself at the CPU threshold.  The per-player buttons come
+    // back only when a power user ticks "Enable Instrument Level Freeze" beside
+    // the threshold slider in File Settings.
+    //
+    // HIDDEN, not removed -- auto-freeze keeps running underneath either way, so
+    // this is purely whether the manual control is on screen.
+    if (! openUiPrefs()->getBoolValue ("fsInstrumentFreeze", false))
+    {
+        mPageMenuBar->setFreezeSlot (nullptr, nullptr);
+        return;
+    }
+
+    mPageMenuBar->setFreezeSlot (
+        [this, kind, pageIndex]() -> int
+        {
+            auto& rig = mProcessor.engineRig();
+            if (! rig.isFrozen (kind, pageIndex))      return 0;
+            return rig.isFreezeStale (kind, pageIndex) ? 2 : 1;
+        },
+        [this, kind, pageIndex] (bool wantFrozen)
+        {
+            if (! wantFrozen) { mProcessor.unfreezeTab (kind, pageIndex); return; }
+
+            // A freeze is a BLOCKING offline render on the message thread, so
+            // without this the app simply stops responding until it finishes --
+            // on a long arrangement that reads as a hang rather than as work.
+            // Every other heavy operation here already uses this overlay; freeze
+            // was the one that did not (found by Jeff asking whether the
+            // multi-pattern render would show progress).
+            // Determinate (false), not indeterminate: the render reports a real
+            // fraction now that onProgress is wired, and cancel is offered
+            // because a freeze is abandonable in a way a project load is not.
+            HeavyOperationOverlay::ScopedOp heavyOp (
+                mHeavyOpOverlay,
+                "Freezing " + mPageMenuBar->getPageTitle() + "...", false);
+            mHeavyOpOverlay.setCancellable (true);
+
+            juce::String err;
+            // byUser = true: this is the ONLY path that sets it, which is why
+            // §6.8's "a manual freeze restores on any machine" rule was dead
+            // code until this button existed.
+            if (! mProcessor.freezeTab (kind, pageIndex, err, /*byUser*/ true))
+                juce::AlertWindow::showMessageBoxAsync (
+                    juce::AlertWindow::WarningIcon, "Could not freeze", err);
+        },
+        [this, kind, pageIndex]() -> juce::String
+        {
+            // Shown DISABLED carrying the reason, never hidden.
+            if (mProcessor.renderTaskForTab (kind, pageIndex) == nullptr)
+                return "This player cannot be frozen yet.";
+            if (mProcessor.getProjectFreezeDir() == juce::File())
+                return "Save the project first - the freeze file lives beside it.";
+            return {};
+        },
+        kind == TabKind::Vox);   // §6.9 vocal warning
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -7930,6 +8394,10 @@ void StandaloneEditor::showKeyBindsWindow()
         return;
     }
     auto* w = new KeyBindsWindow (mCmdMgr);
+    // TS7 §9.4: owned by the main window instead of always-on-top.  Applied from
+    // here rather than inside the window because the owner is the main frame THIS
+    // editor lives in, which the window itself has no handle on.
+    WindowChrome::ownToMainWindow (*w, *this);
     mKeyBindsWin = w;     // SafePointer - auto-clears when the window deletes itself
 }
 
@@ -8706,10 +9174,60 @@ void StandaloneEditor::registerPluginPianoRoll (int idx, PluginsPage* pp)
     conn.displayName = pp->getTabName();
     conn.engineType  = pp->getPluginName();
 
-    // No audition closures: a hosted plugin has no auditionNote API of ours to
-    // call, and inventing one would mean synthesising note-on/off outside the
-    // scheduler -- the roll's keyboard clicks reach it through the live-MIDI
-    // path (EngineKind::Plugin == target kind 10) like any other input.
+    // AUDITION (fixed 2026-07-31 -- Jeff found roll-keyboard and grid clicks
+    // silent on a plugin tab).  My TS6 note here claimed the keyboard reached the
+    // plugin "through the live-MIDI path" and so needed no closures.  That was
+    // wrong: the roll keyboard and grid clicks call THESE closures and never
+    // touch the live path, so leaving them unset meant no audition at all.
+    //
+    // Every other engine's closure calls auditionNote() on the engine; a hosted
+    // third-party plugin has no such API.  Instead we feed the live MIDI
+    // collector -- the exact path the typing keyboard already uses, which routes
+    // by setLiveMidiTarget, and which PianoRollPage::onEngineSelected has
+    // already pointed at this tab (EngineKind::Plugin == target kind 10) by the
+    // time any of these can fire.  So the roll's active engine and the live
+    // target are the same tab BY CONSTRUCTION, and no new real-time state,
+    // audition queue or per-block polling is needed.
+    juce::Component::SafePointer<StandaloneEditor> safeThis (this);
+
+    // NO FIXED DURATION (Jeff, 2026-07-31).  A first cut ended the one-shot
+    // preview on a 250 ms timer; that matches nothing else in the app.  Every
+    // other engine's one-shot is auditionNote(), documented as "noteOff-any,
+    // noteOn n" -- it releases whatever was previewing and then RINGS until the
+    // next preview or the engine's own envelope ends it.  Mirrored exactly here,
+    // so a hosted plugin behaves like every other engine and a sustaining patch
+    // sustains.  The held note is message-thread-only state; the tab-switch
+    // releaseAllTypingNotes and the transport panic all-notes-off are the
+    // existing backstops, the same ones the other engines rely on.
+    //
+    // The KEYBOARD and GRID-DRAG paths do not come through here at all: both use
+    // the On/Off pair below, which is what makes a held key sound for as long as
+    // it is held.
+    conn.auditionMomentary = [safeThis] (int n)
+    {
+        auto* self = safeThis.getComponent();
+        if (self == nullptr) return;
+        if (self->mPluginAuditionHeldNote >= 0)
+            self->sendTypingNote (self->mPluginAuditionHeldNote, false);
+        self->mPluginAuditionHeldNote = n;
+        self->sendTypingNote (n, true);
+    };
+    conn.auditionOn  = [safeThis] (int n)
+    {
+        auto* self = safeThis.getComponent();
+        if (self == nullptr) return;
+        // A press-and-hold supersedes a ringing one-shot, same as the grid's
+        // triggerAudition releases its previous note before starting the next.
+        if (self->mPluginAuditionHeldNote >= 0)
+        {
+            self->sendTypingNote (self->mPluginAuditionHeldNote, false);
+            self->mPluginAuditionHeldNote = -1;
+        }
+        self->sendTypingNote (n, true);
+    };
+    conn.auditionOff = [safeThis] (int n)
+    { if (auto* s = safeThis.getComponent()) s->sendTypingNote (n, false); };
+
     conn.rollMode = PianoRollContainer::RollMode::Standard;
 
     mPianoRollPage->registerEngine ({ EngineKind::Plugin, idx }, conn);
@@ -9550,7 +10068,7 @@ void StandaloneEditor::menuItemSelected(int id, int)
         opts.dialogBackgroundColour = VC::Bg;
         opts.content.setOwned(dlg);
         opts.resizable              = false;
-        opts.useNativeTitleBar      = true;
+        opts.useNativeTitleBar      = false;   // TS7 §9.3
         opts.launchAsync();
         break;
     }
@@ -9868,6 +10386,8 @@ void StandaloneEditor::showHistoryWindow()
             mHistoryCursor,
             [this] { globalUndo(); },
             [this] { globalRedo(); });
+
+        WindowChrome::ownToMainWindow (*mHistoryWindow, *this);   // TS7 §9.4
 
         // 2026-04-26: Ctrl+Z / Ctrl+Alt+Z still route through the command
         // manager when this window has focus.  Register the editor's
@@ -10246,9 +10766,14 @@ public:
         addAndMakeVisible (mDitherToggle);
         mNormToggle.setButtonText ("Normalize to");
         addAndMakeVisible (mNormToggle);
-        mLufsTarget.addItemList ({ "-9 LUFS", "-14 LUFS", "-16 LUFS", "-23 LUFS" }, 1);
-        mLufsTarget.setSelectedItemIndex (1, juce::dontSendNotification);   // -14: streaming standard
+        // TS7 (Jeff 2026-07-29): a typed LUFS box replaces the four-item combo.
+        // Four fixed picks could not express the number a user actually wants,
+        // and "a couple random options no one would use" was the verdict.
+        setupLufsBox (mLufsTarget, -14.0f);   // -14: streaming standard, the default
         addAndMakeVisible (mLufsTarget);
+        mLufsSuffix.setText ("LUFS", juce::dontSendNotification);
+        mLufsSuffix.setJustificationType (juce::Justification::centredLeft);
+        addAndMakeVisible (mLufsSuffix);
 
         mStemsToggle.setButtonText ("Export stems (one file per mixer strip)");
         mStemsToggle.onClick = [this]
@@ -10257,6 +10782,53 @@ public:
             refreshSize();
         };
         addAndMakeVisible (mStemsToggle);
+
+        // ── TS7: measure-before-render (CL-227 backend + BLU-108 true peak) ───
+        // Runs the SAME offline loop the export does, with meters instead of
+        // writers, so the number it reports is the number the render will produce
+        // -- not an approximation of it.  Spec list comes from LoudnessSpec so the
+        // report cannot drift from the maximizer's target line.
+        mSpecLbl.setText ("Check against", juce::dontSendNotification);
+        addAndMakeVisible (mSpecLbl);
+        {
+            juce::StringArray specs;
+            for (int i = 0; i < LoudnessSpec::numSpecs(); ++i)
+                specs.add (LoudnessSpec::nameOf (i));
+            mSpecCombo.addItemList (specs, 1);
+            mSpecCombo.setSelectedItemIndex ((int) LoudnessSpec::Id::Streaming14,
+                                             juce::dontSendNotification);
+        }
+        // Custom reveals its own reference box -- otherwise "Custom" would be a
+        // pick with nothing behind it.
+        mSpecCombo.onChange = [this] { refreshCustomSpecBox(); };
+        addAndMakeVisible (mSpecCombo);
+
+        setupLufsBox (mCustomLufs, -14.0f);
+        addChildComponent (mCustomLufs);
+        mCustomLufsLbl.setText ("Custom ref (LUFS)", juce::dontSendNotification);
+        addChildComponent (mCustomLufsLbl);
+        refreshCustomSpecBox();
+
+        // TS7 report output.  HTML is ALWAYS written and has no control -- it is
+        // the readable one, and the point of the report is that it is readable.
+        // CSV is the opt-in for anyone who wants the raw rows.
+        mCsvToggle.setButtonText ("Also write CSV report");
+        addAndMakeVisible (mCsvToggle);
+
+        mMeasureBtn.setButtonText ("Measure");
+        mMeasureBtn.setTooltip ("Measures the arrangement offline (faster than real time) "
+                                "and reports integrated loudness, loudness range and true "
+                                "peak against the selected spec. Writes no files");
+        mMeasureBtn.onClick = [this] { onMeasureClicked(); };
+        addAndMakeVisible (mMeasureBtn);
+
+        for (auto* l : { &mMeasureLine1, &mMeasureLine2 })
+        {
+            l->setJustificationType (juce::Justification::centredLeft);
+            l->setFont (juce::Font (juce::Font::getDefaultMonospacedFontName(), 11.0f,
+                                    juce::Font::plain));
+            addAndMakeVisible (*l);
+        }
 
         int y = 0;
         for (auto& e : stemEntries)
@@ -10316,8 +10888,27 @@ public:
         {
             auto r = row();
             mNormToggle.setBounds (r.removeFromLeft (130));
-            mLufsTarget.setBounds (r.reduced (0, 2));
+            mLufsTarget.setBounds (r.removeFromLeft (72).reduced (0, 3));
+            r.removeFromLeft (4);
+            mLufsSuffix.setBounds (r);
         }
+        if (mCustomLufs.isVisible())
+        {
+            auto r = row();
+            mCustomLufsLbl.setBounds (r.removeFromLeft (130));
+            mCustomLufs.setBounds (r.removeFromLeft (72).reduced (0, 3));
+        }
+        mCsvToggle.setBounds (row());
+
+        {
+            auto r = row();
+            mSpecLbl.setBounds (r.removeFromLeft (96));
+            mMeasureBtn.setBounds (r.removeFromRight (84).reduced (0, 2));
+            r.removeFromRight (8);
+            mSpecCombo.setBounds (r.reduced (0, 2));
+        }
+        mMeasureLine1.setBounds (area.removeFromTop (16));
+        mMeasureLine2.setBounds (area.removeFromTop (16));
 
         mStemsToggle.setBounds (row());
         if (mStripViewport.isVisible())
@@ -10341,8 +10932,40 @@ private:
 
     void refreshSize()
     {
-        const int stems = mStripViewport.isVisible() ? kStripListH : 0;
-        setSize (420, 14 * 2 + (kRowH + 6) * 8 + stems + (kRowH + 10) + (kRowH + 6));
+        const int stems  = mStripViewport.isVisible() ? kStripListH : 0;
+        // Rows: 5 combos + dither + normalize + measure + CSV + stems toggle = 10,
+        // plus the Custom reference row only while it is showing.
+        const int rows   = 10 + (mCustomLufs.isVisible() ? 1 : 0);
+        setSize (420, 14 * 2 + (kRowH + 6) * rows + 32 + stems
+                      + (kRowH + 10) + (kRowH + 6));
+    }
+
+    // TS7: a LUFS entry box.  Restricted to the characters a signed decimal can
+    // contain so a stray letter cannot silently read as 0 LUFS, which would be a
+    // very loud mistake on a normalize pass.
+    void setupLufsBox (juce::TextEditor& e, float defaultVal)
+    {
+        e.setMultiLine (false);
+        e.setReturnKeyStartsNewLine (false);
+        e.setInputRestrictions (7, "-0123456789.");
+        e.setJustification (juce::Justification::centredRight);
+        e.setText (juce::String (defaultVal, 1), juce::dontSendNotification);
+    }
+
+    static float readLufsBox (const juce::TextEditor& e, float fallback)
+    {
+        const auto t = e.getText().trim();
+        if (t.isEmpty() || t == "-" || t == ".") return fallback;
+        return juce::jlimit (-40.0f, 0.0f, t.getFloatValue());
+    }
+
+    void refreshCustomSpecBox()
+    {
+        const bool custom = (mSpecCombo.getSelectedItemIndex()
+                             == (int) LoudnessSpec::Id::Custom);
+        mCustomLufs.setVisible (custom);
+        mCustomLufsLbl.setVisible (custom);
+        refreshSize();
     }
 
     void repopulateQuality()
@@ -10404,8 +11027,7 @@ private:
 
         o.dither    = mDitherToggle.getToggleState();
         o.normalize = mNormToggle.getToggleState();
-        static constexpr float kTargets[] = { -9.0f, -14.0f, -16.0f, -23.0f };
-        o.lufsTarget = kTargets[juce::jlimit (0, 3, mLufsTarget.getSelectedItemIndex())];
+        o.lufsTarget = readLufsBox (mLufsTarget, -14.0f);
 
         return o;
     }
@@ -10414,10 +11036,86 @@ private:
     {
         if (mState != State::Options) return;
         mOpts = gatherOptions();
+        mJob  = Job::Render;
         mEnsureSaved ([sp = juce::Component::SafePointer<ExportAudioDialog> (this)]
         {
             if (sp != nullptr) sp->pickDestination();
         });
+    }
+
+    // TS7: measure needs no destination and no save-first interlock -- it writes
+    // nothing.  Straight to the offline loop.
+    void onMeasureClicked()
+    {
+        if (mState != State::Options) return;
+        mOpts   = gatherOptions();
+        mSpecId = (LoudnessSpec::Id) juce::jlimit (0, LoudnessSpec::numSpecs() - 1,
+                                                  mSpecCombo.getSelectedItemIndex());
+        // §4.2: the revealed Custom box is the reference value.  Without this the
+        // typed number went nowhere and Custom measured against the table's -14.
+        mCustomTarget = mCustomLufs.getText().trim().getFloatValue();
+        mJob    = Job::Measure;
+        mMeasureLine1.setText ("Measuring...", juce::dontSendNotification);
+        mMeasureLine2.setText ({}, juce::dontSendNotification);
+        beginJob();
+    }
+
+    // CL-227: writes the report beside the project.  HTML always, CSV on the
+    // checkbox.  A write failure is SHOWN on the readout line rather than
+    // swallowed -- a report the user believes exists and does not is worse than
+    // no report.
+    void writeReport (const BuilderPage::MeasureResult& m)
+    {
+        LoudnessReportWriter::Context ctx;
+        const juce::File proj = mProc.getCurrentProjectFolder();
+        ctx.projectName = (proj != juce::File() && proj.isDirectory())
+                            ? proj.getFileName() : mBaseName;
+        ctx.scopeLabel  = (mOpts.scope == BuilderPage::RenderOptions::Scope::Section)
+                            ? "Selected Section" : "Full Arrangement";
+        const auto now  = juce::Time::getCurrentTime();
+        ctx.timestampLabel = now.toString (true, true, false, true);
+
+        const juce::String stamp = now.formatted ("%Y-%m-%d %H%M%S");
+        juce::String err;
+        if (! LoudnessReportWriter::write (mProc.getProjectReportsDir(),
+                                           ctx.projectName + " " + stamp,
+                                           m, ctx, mCsvToggle.getToggleState(), err))
+            mMeasureLine2.setText (err, juce::dontSendNotification);
+    }
+
+    // Formats the measurement into the two readout lines.  Kept here rather than in
+    // run() because it touches Components and must stay on the message thread.
+    void showMeasurement (const BuilderPage::MeasureResult& m)
+    {
+        const auto spec = m.resolvedSpec();   // §4.2: honours a Custom target
+
+        mMeasureLine1.setText ("Integrated " + juce::String (m.integratedLufs, 1) + " LUFS"
+                             + "   LRA " + juce::String (m.lraLu, 1) + " LU"
+                             + "   True peak " + juce::String (m.truePeakDb, 1) + " dBTP",
+                               juce::dontSendNotification);
+
+        juce::String verdict = juce::String (spec.name) + ": ";
+        if (m.integratedInSpec && m.truePeakInSpec)
+        {
+            verdict += spec.checksIntegrated ? "in spec" : "true peak in spec";
+        }
+        else
+        {
+            juce::StringArray fails;
+            if (! m.integratedInSpec)
+                fails.add ("loudness "
+                           + juce::String (m.integratedLufs - spec.integratedLufs, 1)
+                           + " LU off target");
+            if (! m.truePeakInSpec)
+                fails.add ("true peak "
+                           + juce::String (m.truePeakDb - spec.maxTruePeakDb, 1)
+                           + " dB over");
+            verdict += fails.joinIntoString (", ");
+        }
+        if (! m.violations.empty())
+            verdict += "   (" + juce::String ((int) m.violations.size())
+                     + (m.violationsTruncated ? "+ flagged spans)" : " flagged spans)");
+        mMeasureLine2.setText (verdict, juce::dontSendNotification);
     }
 
     void pickDestination()
@@ -10440,20 +11138,51 @@ private:
             });
     }
 
-    void beginRender()
+    // One enable/disable sweep for both jobs -- a control missed here would stay
+    // live during a render, which is how a mid-render option change becomes a
+    // file that does not match the dialog.
+    void setOptionControlsEnabled (bool on)
     {
-        mState = State::Rendering;
         for (auto* c : { (juce::Component*) &mSel, (juce::Component*) &mTail,
                          (juce::Component*) &mFormat, (juce::Component*) &mQual,
                          (juce::Component*) &mSrate, (juce::Component*) &mStemsToggle,
                          (juce::Component*) &mDitherToggle, (juce::Component*) &mNormToggle,
-                         (juce::Component*) &mLufsTarget,
+                         (juce::Component*) &mLufsTarget, (juce::Component*) &mSpecCombo,
+                         (juce::Component*) &mCustomLufs, (juce::Component*) &mCsvToggle,
+                         (juce::Component*) &mMeasureBtn,
                          (juce::Component*) &mStripViewport, (juce::Component*) &mExportBtn })
-            c->setEnabled (false);
+            c->setEnabled (on);
+    }
+
+    void beginJob()
+    {
+        mState = State::Rendering;
+        mProgress = 0.0;
+        setOptionControlsEnabled (false);
+        mCancelBtn.setEnabled (true);
         mBar->setVisible (true);
         mPercent.setVisible (true);
         startTimerHz (30);
         startThread();
+    }
+
+    void beginRender() { beginJob(); }
+
+    // TS7: a finished MEASURE returns to the options box rather than closing it --
+    // the whole point is to read the number and then decide whether to export.
+    void returnToOptions()
+    {
+        stopTimer();
+        stopThread (4000);
+        mState = State::Options;
+        setOptionControlsEnabled (true);
+        // §4.5 "Cancel stays live": onCancelClicked disables this button while a
+        // job runs, and a MEASURE returns here instead of closing the dialog --
+        // so without re-enabling it, cancelling a measure left the user with a
+        // dead Cancel and only the window close box to get out.
+        mCancelBtn.setEnabled (true);
+        mBar->setVisible (false);
+        mPercent.setVisible (false);
     }
 
     void onCancelClicked()
@@ -10481,6 +11210,43 @@ private:
     {
         juce::String err;
         bool ok = true;
+
+        // TS7: the measure job shares the offline loop and the progress plumbing
+        // but writes nothing and leaves the dialog open.
+        if (mJob == Job::Measure)
+        {
+            BuilderPage::MeasureResult m;
+            ok = mBuilder.measureRender (mOpts, m, err,
+                [this]            { return threadShouldExit(); },
+                [this] (double p) { mProgress = p; },
+                mSpecId, mCustomTarget);
+
+            juce::MessageManager::callAsync (
+                [sp = juce::Component::SafePointer<ExportAudioDialog> (this), ok, err, m]
+                {
+                    if (sp == nullptr) return;
+                    sp->returnToOptions();
+                    if (ok)
+                    {
+                        sp->mLastMeasure = m;
+                        sp->mHaveMeasure = true;
+                        sp->showMeasurement (m);
+                        sp->writeReport (m);
+                        // TS7 §2.7: the analyzer window is CL-227's face, so a
+                        // completed measurement goes there too rather than living
+                        // only as two lines of text in this dialog.
+                        if (sp->mOnMeasurementReady) sp->mOnMeasurementReady (m);
+                    }
+                    else
+                    {
+                        sp->mMeasureLine1.setText (err.isEmpty() ? "Measurement cancelled."
+                                                                : err,
+                                                   juce::dontSendNotification);
+                        sp->mMeasureLine2.setText ({}, juce::dontSendNotification);
+                    }
+                });
+            return;
+        }
 
         // CL-045: measure-then-gain.  Pass 1 = the CL-227 backend (meters,
         // no files, 0..50% of the bar); gain = target minus measured, BOTH
@@ -10526,9 +11292,15 @@ private:
 
     juce::ComboBox mSel, mTail, mFormat, mQual, mSrate;
     juce::Label    mSelLbl, mTailLbl, mFormatLbl, mQualLbl, mSrateLbl;
-    juce::ToggleButton mDitherToggle, mNormToggle;
-    juce::ComboBox     mLufsTarget;
+    juce::ToggleButton mDitherToggle, mNormToggle, mCsvToggle;
+    // TS7: typed LUFS entry, not a fixed pick list.
+    juce::TextEditor   mLufsTarget, mCustomLufs;
+    juce::Label        mLufsSuffix, mCustomLufsLbl;
     juce::ToggleButton mStemsToggle;
+    // TS7 measure-before-render row.
+    juce::Label      mSpecLbl, mMeasureLine1, mMeasureLine2;
+    juce::ComboBox   mSpecCombo;
+    juce::TextButton mMeasureBtn;
     struct StripRow { int channelId; std::unique_ptr<juce::ToggleButton> toggle; };
     juce::Component  mStripList;
     juce::Viewport   mStripViewport;
@@ -10538,6 +11310,17 @@ private:
     juce::Label      mPercent;
     double           mProgress { 0.0 };
     State            mState { State::Options };
+    enum class Job { Render, Measure };
+    Job              mJob    { Job::Render };
+    LoudnessSpec::Id mSpecId { LoudnessSpec::Id::Streaming14 };
+    float            mCustomTarget { -14.0f };   // §4.2, only read when Custom
+    BuilderPage::MeasureResult mLastMeasure;
+    bool                       mHaveMeasure { false };
+public:
+    // Supplied by doExportAudio; fires on the message thread once a measurement
+    // completes so the analyzer window can show the curve.
+    std::function<void (const BuilderPage::MeasureResult&)> mOnMeasurementReady;
+private:
     BuilderPage::RenderOptions      mOpts;
     std::shared_ptr<juce::FileChooser> mChooser;
 
@@ -10571,11 +11354,24 @@ void StandaloneEditor::doExportAudio()
     };
 
     juce::DialogWindow::LaunchOptions lo;
-    lo.content.setOwned (new ExportAudioDialog (
+    auto* dlg = new ExportAudioDialog (
         *mBuilderPage, mProcessor, base,
         mMixerPage ? mMixerPage->getStemPickEntries()
                    : std::vector<MixerPage::StemPickEntry>(),
-        ensureSaved));
+        ensureSaved);
+    // TS7 §2.7: push a completed measurement into the analyzer window, opening it
+    // if it is not already up -- the number is worth more as a curve than as two
+    // lines of text in a dialog the user is about to close.
+    dlg->mOnMeasurementReady = [this] (const BuilderPage::MeasureResult& m)
+    {
+        openMasterAnalyzerWindow();
+        if (auto* win = findAuxWindow ("analyzer:master"))
+            if (auto* v = dynamic_cast<MasterAnalyzerView*> (win->getContent()))
+                v->showRenderedCurve (m.lufsCurve, m.integratedLufs, m.lraLu,
+                                      m.truePeakDb,
+                                      juce::String (LoudnessSpec::get (m.specId).name));
+    };
+    lo.content.setOwned (dlg);
     lo.dialogTitle                   = "Export Audio";
     lo.dialogBackgroundColour        = findColour (juce::ResizableWindow::backgroundColourId);
     lo.escapeKeyTriggersCloseButton  = true;
@@ -10760,7 +11556,7 @@ void StandaloneEditor::doFileQuickOpen()
     opts.dialogBackgroundColour = juce::Colours::black;
     opts.content.setOwned (browser);
     opts.escapeKeyTriggersCloseButton = true;
-    opts.useNativeTitleBar      = true;
+    opts.useNativeTitleBar      = false;   // TS7 §9.3
     opts.resizable              = true;
     opts.launchAsync();
     });   // close confirmDiscardChanges continuation
@@ -11073,13 +11869,26 @@ void StandaloneEditor::serializeUIState (juce::XmlElement& root)
     {
         auto* prSel = ui->createNewChildElement ("PianoRollSelection");
         const auto id = mPianoRollPage->getActiveEngineId();
+        // EXHAUSTIVE (2026-07-30).  This table carried four of EngineKind's
+        // eleven values, so selecting any other engine and saving wrote
+        // "DrumKit" and the project reopened on the wrong roll.  Plugin is the
+        // TS6 (BLU-447) omission; the other six predate this batch and are fixed
+        // here rather than routed because the defect IS the missing rows -- a
+        // partial fix would leave the same silent wrong-answer for six kinds.
         const char* kindStr = "DrumKit";
         switch (id.kind)
         {
-            case EngineKind::Layer:   kindStr = "Layer";   break;
-            case EngineKind::Bass:    kindStr = "Bass";    break;
-            case EngineKind::Drum:    kindStr = "Drum";    break;
-            case EngineKind::DrumKit: kindStr = "DrumKit"; break;
+            case EngineKind::Layer:             kindStr = "Layer";             break;
+            case EngineKind::Bass:              kindStr = "Bass";              break;
+            case EngineKind::Drum:              kindStr = "Drum";              break;
+            case EngineKind::Clip:              kindStr = "Clip";              break;
+            case EngineKind::Vox:               kindStr = "Vox";               break;
+            case EngineKind::Inst:              kindStr = "Inst";              break;
+            case EngineKind::BaySickGuitars:    kindStr = "BaySickGuitars";    break;
+            case EngineKind::BaySickBasses:     kindStr = "BaySickBasses";     break;
+            case EngineKind::BaySickRustyDrums: kindStr = "BaySickRustyDrums"; break;
+            case EngineKind::Plugin:            kindStr = "Plugin";            break;
+            case EngineKind::DrumKit:           kindStr = "DrumKit";           break;
         }
         prSel->setAttribute ("kind",  kindStr);
         prSel->setAttribute ("index", id.index);
@@ -11233,6 +12042,37 @@ void StandaloneEditor::serializeTabsInto (juce::XmlElement& tabs)
             rec->setAttribute ("type",       "BaySickRustyDrums");
             rec->setAttribute ("pageIndex",  0);
             rec->setAttribute ("engineData", encodeEngineState (mProcessor.getBaySickRustyDrums()));
+        }
+        // ── TS7 §6.8: freeze state is PROJECT DATA ───────────────────────────
+        // Written once here rather than in each branch above, so a tab kind can
+        // never be added without its freeze state travelling with it.
+        //
+        // The FILES are not saved -- they live in <project>\Freeze\ as
+        // regenerable cache and the bundle excludes them.  What persists is
+        // WHICH tabs are frozen and HOW they came to be:
+        //   frozenBy "manual" -> restores frozen on ANY machine, whatever that
+        //                        machine's auto-freeze threshold says.
+        //   frozenBy "auto"   -> re-evaluated on load, because one computer's
+        //                        performance adaptation means nothing on another.
+        if (rec != nullptr)
+        {
+            const juce::String tt = rec->getStringAttribute ("type");
+            const int          pi = rec->getIntAttribute ("pageIndex");
+            TabKind kind  = TabKind::Layers;
+            bool    known = true;
+            if      (tt == "Layers")  kind = TabKind::Layers;
+            else if (tt == "Bass")    kind = TabKind::Bass;
+            else if (tt == "Drums")   kind = TabKind::Drums;
+            else if (tt == "Plugins") kind = TabKind::Plugins;
+            else                      known = false;
+
+            if (known && mProcessor.engineRig().isFrozen (kind, pi))
+            {
+                rec->setAttribute ("frozen", 1);
+                const auto* t = mProcessor.engineRig().findTab (kind, pi);
+                rec->setAttribute ("frozenBy",
+                                   (t != nullptr && t->frozenByUser) ? "manual" : "auto");
+            }
         }
         juce::ignoreUnused (rec);
     }
@@ -11978,6 +12818,107 @@ void StandaloneEditor::openEffectEqWindow (int channelId, bool pre)
     contentRaw->configureTitleStrip (*win->getPageMenu());
 }
 
+// CL-044 (QA-ModelShell TS7): the floating master analyzer.  One instance -- there
+// is one master bus, so a second window would draw the identical trace at twice
+// the cost.  Its own key means it never collides with an effect window.
+void StandaloneEditor::openMasterAnalyzerWindow()
+{
+    const juce::String key = "analyzer:master";
+    if (auto* existing = findAuxWindow (key)) { existing->toFront (true); return; }
+
+    auto content   = std::make_unique<MasterAnalyzerView> (mProcessor);
+    auto* viewRaw  = content.get();
+
+    // 420x220 is the point below which the log-frequency grid labels start
+    // overlapping -- measured against the eight decade marks the grid draws, not
+    // guessed.  Placement is session-scoped like every other satellite.
+    auto* win = openAuxWindow (key, key, "Master Analyzer",
+                               std::move (content), 420, 220);
+    if (win == nullptr) return;
+
+    // TS7 §3.6: the window READS capture, it does not own it -- capture has been
+    // running since app start whether this window was ever opened.
+    viewRaw->setVersionSource (&mVersionCapture);
+    viewRaw->onExportTake = [this] (const VersionCapture::Version& v)
+    {
+        exportCapturedTake (v);
+    };
+
+    if (auto* bar = win->getPageMenu())
+    {
+        // SafePointer, not the raw pointer: the builder outlives nothing in
+        // practice (the bar dies with the window that owns the view) but the
+        // reverse-destruction trap that took the app down at TS6 was exactly this
+        // shape, so it is not worth a raw capture.
+        juce::Component::SafePointer<MasterAnalyzerView> safeView (viewRaw);
+        // safeEditor as well as safeView: the Source section reads the editor's
+        // VersionCapture, and the same reverse-destruction reasoning that made
+        // safeView a SafePointer applies to the owner it hangs off.
+        juce::Component::SafePointer<StandaloneEditor> safeEditor (this);
+        bar->setMenuBuilder ([safeView, safeEditor] (juce::Component* anchor) mutable
+        {
+            if (safeView == nullptr || safeEditor == nullptr) return;
+            using VM = MasterAnalyzerView::ViewMode;
+            juce::PopupMenu m;
+
+            m.addSectionHeader ("View");
+            m.addItem ("Loudness", true, safeView->getViewMode() == VM::Loudness,
+                       [safeView]() mutable
+                       { if (safeView) safeView->setViewMode (VM::Loudness); });
+            m.addItem ("Spectrum", true, safeView->getViewMode() == VM::Spectrum,
+                       [safeView]() mutable
+                       { if (safeView) safeView->setViewMode (VM::Spectrum); });
+
+            // §2.5: source belongs on this menu.  It lists the SAME takes as the
+            // in-view combo and routes through the SAME selectSource(), because
+            // the previous shape -- menu calls showLive(), combo owns the take id
+            // -- let the two disagree: picking Live left the combo showing a take
+            // name over a live trace, and the next refresh re-applied it.
+            m.addSectionHeader ("Source");
+            const int curId = safeView->getSelectedTakeId();
+            m.addItem ("Live", true, curId == 0,
+                       [safeView]() mutable { if (safeView) safeView->selectSource (0); });
+            if (safeEditor->mVersionCapture.versions().empty())
+            {
+                // Shown DISABLED rather than hidden so the capability is
+                // discoverable before any take exists.
+                m.addItem ("No captured takes yet", false, false, []{});
+            }
+            else
+            {
+                for (const auto& v : safeEditor->mVersionCapture.versions())
+                {
+                    const int id = v.id;
+                    m.addItem (v.label, true, curId == id,
+                               [safeView, id]() mutable
+                               { if (safeView) safeView->selectSource (id); });
+                }
+            }
+
+            m.addSectionHeader ("Target");
+            for (int i = 0; i < LoudnessSpec::numSpecs(); ++i)
+            {
+                const auto& sp = LoudnessSpec::get ((LoudnessSpec::Id) i);
+                if (! sp.checksIntegrated) continue;   // measure-only has no target
+                const float t = sp.integratedLufs;
+                m.addItem (juce::String (sp.name),
+                           true,
+                           juce::approximatelyEqual (safeView->getTargetLufs(), t),
+                           [safeView, t]() mutable
+                           { if (safeView) safeView->setTargetLufs (t); });
+            }
+
+            m.addSeparator();
+            m.addItem ("Reset history",
+                       [safeView]() mutable { if (safeView) safeView->resetHistory(); });
+
+            m.showMenuAsync (juce::PopupMenu::Options()
+                                 .withTargetComponent (anchor != nullptr ? anchor
+                                                                         : safeView.getComponent()));
+        });
+    }
+}
+
 void StandaloneEditor::closeDeadEffectWindows (int channelId)
 {
     auto* rack = EffectsPage::rackForChannelId (mProcessor.mVibeGraph, channelId);
@@ -12341,6 +13282,18 @@ void StandaloneEditor::deserializeUIState (const juce::XmlElement& root)
         const juce::String name      = rec->getStringAttribute ("name");
         const juce::String engine    = rec->getStringAttribute ("engine");
         const juce::String engineData= rec->getStringAttribute ("engineData");
+
+        // TS7 §6.8: remember this tab's freeze for restorePendingFreezes, which
+        // runs once the whole graph exists.  Applying it here would render a tab
+        // whose strip and rack have not been built yet.
+        if (rec->getIntAttribute ("frozen", 0) != 0)
+        {
+            const bool byUser = (rec->getStringAttribute ("frozenBy", "manual") != "auto");
+            if      (type == "Layers")  mPendingFreezes.push_back ({ TabKind::Layers,  pageIndex, byUser });
+            else if (type == "Bass")    mPendingFreezes.push_back ({ TabKind::Bass,    pageIndex, byUser });
+            else if (type == "Drums")   mPendingFreezes.push_back ({ TabKind::Drums,   pageIndex, byUser });
+            else if (type == "Plugins") mPendingFreezes.push_back ({ TabKind::Plugins, pageIndex, byUser });
+        }
 
         ++tabNum;
         mHeavyOpOverlay.setStep (tabNum, tabTotal,
@@ -12903,9 +13856,16 @@ void StandaloneEditor::deserializeUIState (const juce::XmlElement& root)
             const juce::String kindStr = prSel->getStringAttribute ("kind", "DrumKit");
             const int idx = prSel->getIntAttribute ("index", 0);
             EngineKind kind = EngineKind::DrumKit;
-            if      (kindStr == "Layer") kind = EngineKind::Layer;
-            else if (kindStr == "Bass")  kind = EngineKind::Bass;
-            else if (kindStr == "Drum")  kind = EngineKind::Drum;
+            if      (kindStr == "Layer")              kind = EngineKind::Layer;
+            else if (kindStr == "Bass")               kind = EngineKind::Bass;
+            else if (kindStr == "Drum")               kind = EngineKind::Drum;
+            else if (kindStr == "Clip")               kind = EngineKind::Clip;
+            else if (kindStr == "Vox")                kind = EngineKind::Vox;
+            else if (kindStr == "Inst")               kind = EngineKind::Inst;
+            else if (kindStr == "BaySickGuitars")     kind = EngineKind::BaySickGuitars;
+            else if (kindStr == "BaySickBasses")      kind = EngineKind::BaySickBasses;
+            else if (kindStr == "BaySickRustyDrums")  kind = EngineKind::BaySickRustyDrums;
+            else if (kindStr == "Plugin")             kind = EngineKind::Plugin;
             mPianoRollPage->selectEngine ({ kind, idx });
         }
     }
@@ -13092,6 +14052,271 @@ static void syncTempoFromPatternManager (StandalonePlayHead& ph,
 }
 
 // ── R5d follow-up (2026-04-24): post-load audio-strip restore ───────────────
+// (openUiPrefs is forward-declared at the top of this TU -- the constructor
+// needs it well before this point.)
+
+// ── TS7 §6.9 / CL-055: smart auto-freeze + the re-render queue ───────────────
+//
+// Both jobs drain at most ONE tab per tick, deliberately.  A freeze is a
+// blocking offline render on the message thread; doing several in one trip would
+// stall the UI precisely when the machine is already struggling, which is the
+// opposite of what the feature is for.
+//
+// The threshold is a MACHINE preference (§8.1): 0 means always freeze, 100 is the
+// top real threshold, and anything above it is Off.
+// ── TS7 §3: version capture ──────────────────────────────────────────────────
+// Everything here is a READ of state audio already publishes.  The audio thread
+// never calls into VersionCapture, and this never calls into audio beyond the
+// two capture start/stop points, which are message-thread file operations.
+juce::String StandaloneEditor::currentScopeLabel() const
+{
+    if (mProcessor.isSongMode()) return "Arrangement";
+    if (mPM != nullptr)
+    {
+        const int cur = mPM->getCurrentPatternIndex();
+        if (cur >= 0 && cur < mPM->getNumPatterns())
+            return "Pattern: " + mPM->getPattern (cur).name;
+    }
+    return "Pattern";
+}
+
+void StandaloneEditor::pollVersionCapture()
+{
+    // Final meters are attached BEFORE poll(), because poll() is what closes the
+    // take -- reading them afterwards would read the next take's fresh window.
+    if (mVersionCapture.isCapturing())
+        mVersionCapture.setFinalMeters (mProcessor.getMasterLufs (2),
+                                        mProcessor.getMasterTruePeakMaxDb());
+
+    mVersionCapture.poll (mProcessor.getPlayStartEdges(),
+                          mProcessor.getLoopWrapEdges(),
+                          DSPBase::isTransportPlaying(),
+                          mProjectManager ? mProjectManager->getChangeStamp() : 0u,
+                          mProcessor.getMasterLufs (1),
+                          // INSTANTANEOUS, not the running max: a flagged moment
+                          // has to be timecoded, and the max carries no time.
+                          mProcessor.getMasterTruePeakDb(),
+                          currentScopeLabel());
+}
+
+void StandaloneEditor::exportCapturedTake (const VersionCapture::Version& v)
+{
+    if (v.audioFile == juce::File() || ! v.audioFile.existsAsFile())
+    {
+        juce::AlertWindow::showMessageBoxAsync (
+            juce::AlertWindow::WarningIcon, "No audio for this take",
+            "This take was captured as analysis only, so there is no audio file "
+            "to export.\n\nTurn on version audio capture in File Settings to "
+            "keep the audio for future takes.");
+        return;
+    }
+
+    const auto suggested = juce::File::getSpecialLocation (
+                               juce::File::userMusicDirectory)
+                               .getChildFile (v.label.replaceCharacter (':', '-')
+                                              + ".wav");
+
+    auto chooser = std::make_shared<juce::FileChooser> (
+        "Export take", suggested, "*.wav");
+    chooser->launchAsync (juce::FileBrowserComponent::saveMode
+                              | juce::FileBrowserComponent::canSelectFiles,
+        [chooser, src = v.audioFile] (const juce::FileChooser& fc)
+        {
+            const auto dest = fc.getResult();
+            if (dest == juce::File()) return;
+            // Copy, not move: the take must stay playable in the analyzer after
+            // the user has exported it.
+            if (dest.existsAsFile()) dest.deleteFile();
+            if (! src.copyFileTo (dest))
+                juce::AlertWindow::showMessageBoxAsync (
+                    juce::AlertWindow::WarningIcon, "Export failed",
+                    "The take could not be written to:\n" + dest.getFullPathName());
+        });
+}
+
+// TS7: the render notice for the AUTOMATIC paths (Jeff, 2026-07-30).
+//
+// Deliberately names the TRACK, not just "working": an automatic freeze happens
+// uninvited, and "Freezing Layers 2..." tells the user both what the app is doing
+// and which of their tracks it concerns.  Cancellable for the same reason the
+// manual one is -- an automatic action the user cannot stop is worse than one
+// they did not ask for.
+//
+// Caller pairs this with endOp().  Not ScopedOp, because these call sites run the
+// render inline and need the overlay to close before they return rather than at
+// the end of an enclosing scope.
+void StandaloneEditor::showFreezeRenderNotice (TabKind kind, int pageIndex)
+{
+    const char* kindName = "track";
+    switch (kind)
+    {
+        case TabKind::Layers:  kindName = "Layers";  break;
+        case TabKind::Bass:    kindName = "Bass";    break;
+        case TabKind::Drums:   kindName = "Drums";   break;
+        case TabKind::Clips:   kindName = "Clips";   break;
+        case TabKind::Vox:     kindName = "Vox";     break;
+        case TabKind::Inst:    kindName = "Inst";    break;
+        case TabKind::Plugins: kindName = "Plugin";  break;
+        case TabKind::Rusty:   kindName = "Drum Kit"; break;
+    }
+    mHeavyOpOverlay.beginOp ("Freezing " + juce::String (kindName) + " "
+                             + juce::String (pageIndex + 1) + "...", false);
+    mHeavyOpOverlay.setCancellable (true);
+}
+
+void StandaloneEditor::pollAutoFreeze()
+{
+    // TS7 §6.5: drain the swing stamp the processor's APVTS listener publishes.
+    // Handled HERE rather than in that listener because it can fire on the audio
+    // thread.  Invalidates EVERY freeze rather than the one tab whose swing moved:
+    // the id-to-tab mapping would have to happen on whichever thread wrote the
+    // param, and over-invalidating costs a re-render while under-invalidating
+    // leaves a freeze that no longer matches what the tab plays.
+    {
+        const auto s = mProcessor.getSwingChangeStamp();
+        if (s != mLastSwingStamp)
+        {
+            mLastSwingStamp = s;
+            mProcessor.engineRig().markAllFreezesStale();
+        }
+    }
+
+    // Stale freezes first: a frozen tab whose content changed is currently
+    // playing its LIVE engine (§6.6's fallback), so it is costing full CPU until
+    // this catches up -- which makes it the more urgent of the two jobs.
+    //
+    // BUT NOT WHILE THE TRANSPORT RUNS.  An automation lane on a frozen tab's
+    // engine parameter writes that APVTS on every 30 Hz applicator tick, and the
+    // freeze watcher cannot tell an automation write from a knob turn -- so
+    // draining here during playback re-rendered the same tab continuously:
+    // render -> frozen -> next automation tick -> stale -> render.  A blocking
+    // offline render mid-playback is the wrong thing to do regardless.
+    // Deferring costs nothing correctness-wise because §6.6 already says a stale
+    // freeze PLAYS LIVE until its file lands; it just lands at Stop instead.
+    // AND ONLY ONCE EDITING HAS ACTUALLY STOPPED (2026-07-30).
+    //
+    // Deferring to "transport stopped" was aimed at exactly the wrong moment:
+    // stopped is when the user is EDITING.  Every grid movement marks all
+    // freezes stale (arrangement content is a real invalidator), each re-render
+    // blocks the message thread for seconds, and the queue drained on the very
+    // next tick -- so dragging a clip locked the app, twice over with two frozen
+    // tabs.  Jeff's log caught it: twenty renders in three minutes, in pairs.
+    //
+    // A quiet period is the fix rather than a smaller invalidator: the
+    // invalidation is CORRECT (the freeze really is stale), it is the response
+    // that must not be instant.  Re-arming on every edit means a drag re-renders
+    // ONCE when the hands come off, not once per mouse move.
+    const double sinceEditMs = juce::Time::getMillisecondCounterHiRes() - mLastContentEditMs;
+    if (! mFreezeRefreshQueue.empty()
+        && ! DSPBase::isTransportPlaying()
+        && sinceEditMs >= kFreezeRefreshQuietMs)
+    {
+        const auto job = mFreezeRefreshQueue.front();
+        mFreezeRefreshQueue.erase (mFreezeRefreshQueue.begin());
+
+        // RENDER NOTICE (Jeff, 2026-07-30).  This path renders SILENTLY today and
+        // blocks the message thread for seconds -- so the app simply stopped
+        // responding with nothing on screen, and with the buttons hidden by
+        // default the user has no concept of "freeze" to explain it with.  An
+        // unexplained multi-second stall is the single worst thing this feature
+        // can do, and it is the automatic path that does it uninvited.
+        showFreezeRenderNotice (job.kind, job.pageIndex);
+        juce::String err;
+        if (! mProcessor.refreshFreeze (job.kind, job.pageIndex, err))
+            DBG ("[TS7 FREEZE] re-render failed for tab " << (int) job.kind
+                 << "/" << job.pageIndex << ": " << err);
+        mHeavyOpOverlay.endOp();
+        return;
+    }
+
+    const int threshold = openUiPrefs()->getIntValue ("fsAutoFreezeCpu", 80);
+    if (threshold > 100) return;                       // Off
+
+    const float load = mProcessor.mAudioDspLoad.load (std::memory_order_relaxed) * 100.0f;
+    if (load < (float) threshold)
+    {
+        mAutoFreezeHoldTicks = 0;
+        return;
+    }
+
+    // Sustained, not instantaneous.  A single spike -- opening a window, loading
+    // a preset -- must not freeze a tab the user is working on.  This poll runs
+    // at 5 Hz, so 15 ticks is three seconds continuously over the line.
+    constexpr int kHoldTicks = 15;
+    if (++mAutoFreezeHoldTicks < kHoldTicks) return;
+    mAutoFreezeHoldTicks = 0;
+
+    // Freeze the first eligible tab that is not already frozen.  Engine-driven
+    // kinds only -- the same set freezeTab accepts.
+    // Every kind that can freeze, not just the original four (2026-07-30) --
+    // Vox / Inst / Clips / Rusty became freezable and were never added here, so
+    // auto-freeze would have kept passing over them while the machine struggled.
+    // Capacity comes from the rig rather than kMaxLayerPages, which was wrong for
+    // every kind except Layers.
+    static constexpr TabKind kFreezable[] = { TabKind::Layers, TabKind::Bass,
+                                              TabKind::Drums,  TabKind::Plugins,
+                                              TabKind::Vox,    TabKind::Inst,
+                                              TabKind::Clips,  TabKind::Rusty };
+    for (auto kind : kFreezable)
+    {
+        for (int i = 0; i < EngineRig::capacityOf (kind); ++i)
+        {
+            if (mProcessor.engineRig().findTab (kind, i) == nullptr) continue;
+            if (mProcessor.engineRig().isFrozen (kind, i))            continue;
+
+            // Same render notice as the stale-refresh path: this fires uninvited
+            // while the user is working and blocks for seconds.
+            showFreezeRenderNotice (kind, i);
+            juce::String err;
+            const bool ok = mProcessor.freezeTab (kind, i, err, /*byUser*/ false);
+            mHeavyOpOverlay.endOp();
+            if (ok) return;   // one per trip
+        }
+    }
+}
+
+// ── TS7 §6.8: re-apply the freezes a project saved ───────────────────────────
+// Collected during deserialize (the tabs do not exist yet at that point) and
+// applied here, after every engine, rack and strip is in place -- freezing
+// renders through the offline loop, so it needs the whole graph built.
+//
+// THE THRESHOLD NEVER RETRO-ACTS ON A DELIBERATE FREEZE.  A hand-frozen tab
+// restores frozen on any machine, including one with auto-freeze switched off.
+// An AUTO freeze is a performance adaptation to the machine that made it, so it
+// restores only where auto-freeze is armed at all.
+//
+// Files are NOT saved with the project (regenerable cache, excluded from
+// bundles), so this re-renders them.  Playback falls back to the live engine
+// until each lands, per §6.6 -- which is why a bundle opened on a fresh machine
+// is never silent, just briefly unfrozen.
+void StandaloneEditor::restorePendingFreezes()
+{
+    // §6.7's second cleanup rule, and it runs BEFORE the empty-list early return
+    // on purpose: a project with NO frozen tabs is the case most likely to have
+    // orphans (every freeze file in the folder belongs to a tab that is gone),
+    // and sweeping only when something needs restoring would have skipped
+    // exactly that case.  Before any re-freeze, so a file about to be rewritten
+    // is not swept first.
+    mProcessor.sweepOrphanFreezeFiles();
+
+    if (mPendingFreezes.empty()) return;
+
+    const int threshold = openUiPrefs()->getIntValue ("fsAutoFreezeCpu", 80);
+    const bool autoFreezeArmed = (threshold <= 100);
+
+    auto pending = std::move (mPendingFreezes);
+    mPendingFreezes.clear();
+
+    for (const auto& p : pending)
+    {
+        if (! p.byUser && ! autoFreezeArmed) continue;
+        juce::String err;
+        if (! mProcessor.freezeTab (p.kind, p.pageIndex, err, p.byUser))
+            DBG ("[TS7 FREEZE] restore failed for tab " << (int) p.kind
+                 << "/" << p.pageIndex << ": " << err);
+    }
+}
+
 void StandaloneEditor::restoreAudioStripsFromArrangement (bool isLoadContext)
 {
     if (mPM == nullptr) return;
@@ -13196,6 +14421,11 @@ void StandaloneEditor::restoreAudioStripsFromArrangement (bool isLoadContext)
     // apply above) -- register every slot's DSP-targeting automation without
     // waiting for the Effects page to be visited.
     EffectsPage::registerRackAutomationForAllChannels (mProcessor);
+
+    // TS7 §6.8: re-apply saved freezes.  LAST, deliberately -- freezing renders
+    // the tab through the offline loop, so every engine, rack and strip it
+    // touches has to exist first.
+    restorePendingFreezes();
 
     // 2026-04-24: push the saved global tempo into the playhead now that the
     // full project has been restored.  Transport BPM field picks it up on
@@ -13655,10 +14885,14 @@ void StandaloneEditor::sendPitchNotesToTab (int kind, int pageIndex,
 
 namespace
 {
-    // Same PropertiesFile as BaySickPitchEditor's openUiPrefs (file-local
-    // there; duplicated rather than hoisted to keep this batch's blast
-    // radius inside the editor).
-    std::unique_ptr<juce::PropertiesFile> openDenoisePrefs()
+    // `ui_prefs.xml` -- the editor's machine-scoped preferences, NOT project
+    // data.  Carries the De-noise take-type picks, and since TS7 the auto-freeze
+    // threshold and the capture-retention choice too.
+    //
+    // Same PropertiesFile as BaySickPitchEditor's openUiPrefs (file-local there;
+    // duplicated rather than hoisted to keep that batch's blast radius inside
+    // the editor).
+    std::unique_ptr<juce::PropertiesFile> openUiPrefs()
     {
         juce::PropertiesFile::Options o;
         o.applicationName    = "BaySickDAW";
@@ -13672,7 +14906,7 @@ namespace
 
 StandaloneEditor::FileTakeSettings StandaloneEditor::readFileTakeSettings() const
 {
-    auto p = openDenoisePrefs();
+    auto p = openUiPrefs();
     FileTakeSettings s;
     // Defaults preserve today's behavior (DRY + WET written) until the user
     // opts into cleaned takes; strength default = Strong (the ear-validated
@@ -13694,11 +14928,52 @@ void StandaloneEditor::showFileSettingsDialog()
         juce::ToggleButton boxes[4];
         juce::ComboBox strength;
         juce::Label note, strengthLbl;
+        // TS7 §8.1 auto-freeze threshold + §8.2 capture retention.
+        // The MAGNET the item asks for.  Over 0..101 in a ~184 px strip each step
+        // is under two pixels, so without this, landing on exactly 100 rather
+        // than 99 or Off is a pixel-hunt -- which is the "fighting the slider"
+        // §8.1 says to solve.  Same snapValue idiom as SharedUI's SnapSlider.
+        struct FreezeSlider : juce::Slider
+        {
+            FreezeSlider() : juce::Slider (juce::Slider::LinearHorizontal,
+                                           juce::Slider::NoTextBox) {}
+            double snapValue (double v, DragMode) override
+            {
+                return (std::abs (v - 100.0) < 2.0) ? 100.0 : v;
+            }
+        };
+        FreezeSlider   freezeCpu;
+        juce::Label    freezeLbl, freezeReadout;
+        juce::ComboBox   captureRetain;
+        juce::Label      captureLbl;
+        juce::ToggleButton captureAudio;      // TS7 §3.1
+        juce::ToggleButton instrumentFreeze;  // TS7 §6.9 (Jeff, 2026-07-30)
+        // Applied live rather than at next launch: capture is running right now,
+        // and a setting that needs a restart to take effect reads as broken.
+        std::function<void()> onCaptureSettingsChanged;
+
+        // The slider runs 0..101.  100 is a real threshold and 101 is OFF, which
+        // is why the range is one wider than the percentage it shows: dragging
+        // PAST the top is how the feature is switched off (Jeff's shape), and the
+        // readout says "Off" there rather than a number that would read as
+        // "freeze at 101%".  0 means always freeze, deliberately -- a weaker
+        // machine gets the CPU saving immediately.
+        //
+        // An enum rather than `static constexpr int`: this class is defined
+        // inside a function, and a local class cannot have static data members
+        // (MSVC C2246).
+        enum { kFreezeOff = 101 };
+
+        juce::String freezeText() const
+        {
+            const int v = (int) freezeCpu.getValue();
+            return v >= kFreezeOff ? juce::String ("Off") : juce::String (v) + " %";
+        }
 
         FileSettingsComp()
         {
             static const char* names[4] = { "Dry", "Dry Cleaned", "Wet", "Wet Cleaned" };
-            auto p = openDenoisePrefs();
+            auto p = openUiPrefs();
             static const char* keys[4]  = { "fsWriteDry", "fsWriteDryCleaned",
                                             "fsWriteWet", "fsWriteWetCleaned" };
             for (int i = 0; i < 4; ++i)
@@ -13722,7 +14997,69 @@ void StandaloneEditor::showFileSettingsDialog()
                           juce::dontSendNotification);
             note.setJustificationType (juce::Justification::topLeft);
             addAndMakeVisible (note);
-            setSize (400, 250);
+
+            // ── TS7 §8.1: auto-freeze threshold ──────────────────────────────
+            freezeLbl.setText ("Auto-freeze above:", juce::dontSendNotification);
+            addAndMakeVisible (freezeLbl);
+            freezeCpu.setRange (0.0, (double) kFreezeOff, 1.0);
+            // The snap itself lives in FreezeSlider::snapValue above; this
+            // comment used to claim it while the only code under it was a
+            // setSkewFactor(1.0) no-op.  Off sits one step past 100 so it cannot
+            // be landed on by accident.
+            freezeCpu.setValue ((double) p->getIntValue ("fsAutoFreezeCpu", 80),
+                                juce::dontSendNotification);
+            freezeCpu.setTooltip ("Freeze tracks automatically when CPU goes above this. "
+                                  "0 always freezes; drag past 100 to switch it off");
+            freezeCpu.onValueChange = [this]
+            {
+                freezeReadout.setText (freezeText(), juce::dontSendNotification);
+                save();
+            };
+            addAndMakeVisible (freezeCpu);
+            freezeReadout.setText (freezeText(), juce::dontSendNotification);
+            freezeReadout.setJustificationType (juce::Justification::centredRight);
+            addAndMakeVisible (freezeReadout);
+
+            // ── TS7 §8.2: where captured takes live ──────────────────────────
+            captureLbl.setText ("Keep captured takes:", juce::dontSendNotification);
+            addAndMakeVisible (captureLbl);
+            captureRetain.addItem ("This session only", 1);
+            captureRetain.addItem ("In the project Reports folder", 2);
+            captureRetain.setSelectedId (p->getIntValue ("fsCaptureRetain", 1),
+                                         juce::dontSendNotification);
+            captureRetain.onChange = [this] { save(); };
+            addAndMakeVisible (captureRetain);
+
+            // ── TS7 §3.1: the expensive half of a version ────────────────────
+            // Off by default.  Analysis costs a few KB per take and is always
+            // kept; audio is ~16 MB per minute, which is not a cost to impose on
+            // someone who never asked to record anything.
+            captureAudio.setButtonText ("Also keep the audio of each take");
+            captureAudio.setTooltip ("Lets you play back and export a take, not "
+                                     "just read its loudness.  About 16 MB per "
+                                     "minute per take.");
+            captureAudio.setToggleState (p->getBoolValue ("fsCaptureAudio", false),
+                                         juce::dontSendNotification);
+            captureAudio.onClick = [this] { save(); };
+            addAndMakeVisible (captureAudio);
+
+            // ── TS7 §6.9: the power-user escape hatch ────────────────────────
+            // Sits beside the auto-freeze threshold because it modifies the same
+            // feature: the slider decides WHEN the machine freezes for you, this
+            // decides whether you can also do it by hand.  Off by default, so a
+            // beginner never meets the concept.
+            instrumentFreeze.setButtonText ("Enable Instrument Level Freeze");
+            instrumentFreeze.setTooltip (
+                "Adds a Freeze button to each player so you can freeze one "
+                "instrument yourself.\n\nAutomatic freezing keeps working either "
+                "way - this only shows the manual control.");
+            instrumentFreeze.setToggleState (
+                p->getBoolValue ("fsInstrumentFreeze", false),
+                juce::dontSendNotification);
+            instrumentFreeze.onClick = [this] { save(); };
+            addAndMakeVisible (instrumentFreeze);
+
+            setSize (400, 416);
         }
 
         void onBoxToggled (int i)
@@ -13734,14 +15071,21 @@ void StandaloneEditor::showFileSettingsDialog()
         }
         void save()
         {
-            auto p = openDenoisePrefs();
+            auto p = openUiPrefs();
             p->setValue ("fsWriteDry",        boxes[0].getToggleState());
             p->setValue ("fsWriteDryCleaned", boxes[1].getToggleState());
             p->setValue ("fsWriteWet",        boxes[2].getToggleState());
             p->setValue ("fsWriteWetCleaned", boxes[3].getToggleState());
             p->setValue ("fsDenoiseStrength", strength.getSelectedId() == 1
                                                 ? (int) Denoise::Light : (int) Denoise::Strong);
+            // TS7: machine preferences, deliberately NOT project data -- they
+            // describe what this computer can cope with (see the plan's §6.8).
+            p->setValue ("fsAutoFreezeCpu", (int) freezeCpu.getValue());
+            p->setValue ("fsCaptureRetain", captureRetain.getSelectedId());
+            p->setValue ("fsCaptureAudio",  captureAudio.getToggleState());
+            p->setValue ("fsInstrumentFreeze", instrumentFreeze.getToggleState());
             p->saveIfNeeded();
+            if (onCaptureSettingsChanged) onCaptureSettingsChanged();
         }
         void resized() override
         {
@@ -13752,7 +15096,22 @@ void StandaloneEditor::showFileSettingsDialog()
             auto row = b.removeFromTop (26);
             strengthLbl.setBounds (row.removeFromLeft (140));
             strength.setBounds (row.removeFromLeft (120));
-            b.removeFromTop (8);
+            b.removeFromTop (10);
+            {
+                auto r = b.removeFromTop (26);
+                freezeLbl.setBounds (r.removeFromLeft (140));
+                freezeReadout.setBounds (r.removeFromRight (52));
+                freezeCpu.setBounds (r.reduced (0, 2));
+            }
+            b.removeFromTop (6);
+            {
+                auto r = b.removeFromTop (26);
+                captureLbl.setBounds (r.removeFromLeft (140));
+                captureRetain.setBounds (r.removeFromLeft (210));
+            }
+            captureAudio.setBounds (b.removeFromTop (26));
+            instrumentFreeze.setBounds (b.removeFromTop (26));
+            b.removeFromTop (10);
             note.setBounds (b);
         }
     };
@@ -13760,9 +15119,20 @@ void StandaloneEditor::showFileSettingsDialog()
     juce::DialogWindow::LaunchOptions opts;
     opts.dialogTitle            = "File Settings";
     opts.dialogBackgroundColour = VC::Bg;
-    opts.content.setOwned (new FileSettingsComp());
+    auto* comp = new FileSettingsComp();
+    comp->onCaptureSettingsChanged = [this]
+    {
+        auto p = openUiPrefs();
+        mVersionCapture.setAudioCaptureEnabled (p->getBoolValue ("fsCaptureAudio", false));
+        mVersionCapture.setRetainInProject (p->getIntValue ("fsCaptureRetain", 1) == 2);
+        // §6.9: the Freeze buttons appear/disappear on the spot.  A setting that
+        // needs a restart to take effect reads as broken, and this one is the
+        // only way to reach the feature at all.
+        wireFreezeSlotForVisiblePage();
+    };
+    opts.content.setOwned (comp);
     opts.resizable              = false;
-    opts.useNativeTitleBar      = true;
+    opts.useNativeTitleBar      = false;   // TS7 §9.3
     opts.launchAsync();
 }
 
@@ -14065,12 +15435,37 @@ void StandaloneEditor::commitRecordingResult (const VibeSynthProcessor::RecordRe
             const auto fs = readFileTakeSettings();
             int pick = (voxIdx >= 0 && voxIdx < kDenoiseMaxVox)
                          ? mVoxTakePick[(size_t) voxIdx] : -1;
-            if (pick < 0) pick = haveWet ? kTakeWet : kTakeDry;   // legacy rule
-            if (! haveWet && pick >= kTakeWet)
-                pick = (pick == kTakeWetCleaned) ? kTakeDryCleaned : kTakeDry;
 
             bool want[4] = { fs.dry, fs.dryCleaned,
                              fs.wet && haveWet, fs.wetCleaned && haveWet };
+
+            // AUTO pick = the HIGHEST-ORDER variant the user actually asked for
+            // in File Settings (Jeff, 2026-07-30).  Order is
+            // Dry < Dry Cleaned < Wet < Wet Cleaned, which is the enum order,
+            // so "highest wanted index" IS the rule.
+            //
+            // Replaces the legacy "wet if it exists, else dry", which ignored
+            // the checkboxes entirely -- so a user who ticked Wet Cleaned got
+            // the file written and then the UNCLEANED wet take on the grid, and
+            // the cleaned one sat unused in the browser.  That also mattered
+            // more than it looked: both the pitch and align editors analyse
+            // whatever is ON THE GRID, so the old rule quietly denied them the
+            // cleaned audio the user had opted into.
+            //
+            // An explicit per-strip choice from the arm-LED menu still wins --
+            // this only decides the -1 (auto) case.
+            if (pick < 0)
+            {
+                pick = kTakeDry;   // floor: dry always exists
+                for (int t = 3; t >= 0; --t)
+                    if (want[t]) { pick = t; break; }
+            }
+
+            // Wet variants cannot be picked when no wet file was recorded
+            // (realtime correction bypassed at record start -> no wet writer).
+            if (! haveWet && pick >= kTakeWet)
+                pick = (pick == kTakeWetCleaned) ? kTakeDryCleaned : kTakeDry;
+
             want[pick] = true;
 
             // Profiles: live learners first; a take recorded before the

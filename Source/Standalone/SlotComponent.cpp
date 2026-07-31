@@ -5,6 +5,7 @@
 #include "../DSP/DelayDSP.h"
 #include "../DSP/ReverbDSP.h"
 #include "../DSP/OverdriveDSP.h"   // I-4: Mode dropdown for Overdrive (Rack vs Pedal)
+#include "../DSP/LimiterDSP.h"     // TS7: Mode dropdown for Limiter vs Maximizer
 #include "EffectPresetIO.h"
 #include "../Hosting/HostedPluginEffect.h"   // QA-ModelShell TS6: added-effects list + slot naming
 
@@ -556,7 +557,8 @@ bool SlotComponent::hasModeMenu() const
     const auto t = mRack->getSlot (mSlotIndex).type;
     return (t == EffectType::Compressor || t == EffectType::Saturation
          || t == EffectType::Delay      || t == EffectType::Reverb
-         || t == EffectType::Overdrive);
+         || t == EffectType::Overdrive
+         || t == EffectType::Limiter);   // TS7: Limiter / Maximizer
 }
 
 bool SlotComponent::hasScMenu() const
@@ -949,6 +951,12 @@ juce::String SlotComponent::modeLabel() const
             }
         }
     }
+    else if (slot.type == EffectType::Limiter)
+    {
+        // TS7: Limiter is the FL reproduction; Maximizer is the loudness suite.
+        if (auto* l = dynamic_cast<LimiterDSP*>(mRack->getSlotEffect(mSlotIndex)))
+            label = LimiterDSP::modeName (l->getModeIndex());
+    }
     return label;
 }
 
@@ -1026,6 +1034,18 @@ void SlotComponent::showModeMenu()
         m.addItem(1 + (int) OverdriveDSP::Type::Pedal, "Overdrive (Pedal)", true,
                   currentPick == (int) OverdriveDSP::Type::Pedal);
     }
+    else if (slot.type == EffectType::Limiter)
+    {
+        // TS7: Limiter is the reproduction, Maximizer is the loudness suite.  The
+        // two expose different control sets, which is why mode is a real
+        // EffectParamMap variant rather than a display-only selector.
+        if (auto* l = dynamic_cast<LimiterDSP*>(mRack->getSlotEffect(mSlotIndex)))
+            currentPick = l->getModeIndex();
+        m.addItem(1 + (int) LimiterDSP::Mode::Limiter,   "Limiter (Reproduction)", true,
+                  currentPick == (int) LimiterDSP::Mode::Limiter);
+        m.addItem(1 + (int) LimiterDSP::Mode::Maximizer, "Maximizer (Loudness)",   true,
+                  currentPick == (int) LimiterDSP::Mode::Maximizer);
+    }
     else
     {
         return;
@@ -1068,6 +1088,14 @@ void SlotComponent::showModeMenu()
                     {
                         if (auto* o = dynamic_cast<OverdriveDSP*>(eff))
                             o->setType(newType);
+                    }
+                    else if (slotType == EffectType::Limiter)
+                    {
+                        // TS7: setMode also drops the live servo/trim state so a
+                        // hidden maximizer offset cannot keep driving the sound
+                        // in reproduction mode.
+                        if (auto* l = dynamic_cast<LimiterDSP*>(eff))
+                            l->setMode ((LimiterDSP::Mode) newType);
                     }
                 }
             }

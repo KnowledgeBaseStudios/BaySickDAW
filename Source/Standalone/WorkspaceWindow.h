@@ -1,5 +1,6 @@
 #pragma once
 #include <JuceHeader.h>
+#include "WindowChrome.h"   // TS7 §9.1: shared title-strip metrics + look
 #include <functional>
 #include <map>
 #include <memory>
@@ -147,8 +148,14 @@ public:
     void mouseDrag (const juce::MouseEvent&) override;
     void mouseUp   (const juce::MouseEvent&) override;
 
-    static constexpr int kTitleH   = 26;   // custom title strip (locked call 4a)
-    static constexpr int kBorderPx = 4;    // resize-drag border thickness
+    // TS7 §9.1: aliases, not values -- the numbers live in WindowChrome with the
+    // colours.  NOTE this does NOT make the two strip heights impossible to
+    // diverge (an earlier version of this comment claimed it did): a desktop
+    // DocumentWindow uses JUCE's own titleBarHeight, which happens to be 26 as
+    // well, and nothing calls setTitleBarHeight.  They match by coincidence.
+    // The existing names stay -- ~40 call sites use them.
+    static constexpr int kTitleH   = WindowChrome::kTitleH;
+    static constexpr int kBorderPx = WindowChrome::kBorderPx;
 
 private:
     juce::Rectangle<int> titleBarArea()  const noexcept;

@@ -1,5 +1,6 @@
 #include <JuceHeader.h>
 #include "../PluginBridgeProtocol.h"
+#include "../BridgeSharedMemory.h"
 
 // ── BaySickPluginHost ────────────────────────────────────────────────────────
 // QA-ModelShell TS6 (BLU-302): the sandbox helper.  Hosts exactly ONE plugin
@@ -178,6 +179,24 @@ private:
         mBlock    = (int) juce::jmax (1u, p.maxBlockSize);
         mScratch.setSize (mChannels, mBlock, false, true, true);
 
+        // TS7: the host names its audio mapping in the trailer.  Before this the
+        // helper rendered into mScratch, a buffer only IT could see, so nothing
+        // it produced ever reached the app -- a bridged plugin was inaudible by
+        // construction.  mScratch survives only as the fallback when the mapping
+        // cannot be opened, so a failure is silence rather than a crash.
+        mShared.close();
+        mChannelPtrs.resize ((size_t) mChannels);
+
+        if (bytes > sizeof (Hosting::Bridge::PreparePayload))
+        {
+            const auto* nameBytes = body + sizeof (Hosting::Bridge::PreparePayload);
+            const auto  nameLen   = (int) (bytes - sizeof (Hosting::Bridge::PreparePayload));
+            const auto  name      = juce::String::fromUTF8 ((const char*) nameBytes, nameLen);
+
+            if (name.isNotEmpty())
+                mShared.open (name, Hosting::Bridge::SharedAudioBlock::bytesFor (mBlock, mChannels));
+        }
+
         mPlugin->setPlayConfigDetails (mChannels, mChannels, p.sampleRate, mBlock);
         mPlugin->prepareToPlay (p.sampleRate, mBlock);
     }
@@ -193,8 +212,58 @@ private:
         if (mPlugin != nullptr)
         {
             const int n = (int) juce::jmin ((std::uint32_t) mBlock, p.numSamples);
-            juce::AudioBuffer<float> view (mScratch.getArrayOfWritePointers(), mChannels, n);
+
+            // Render straight into the host's mapping -- the plugin's output IS
+            // the shared block, so no copy and no second buffer.  Falls back to
+            // the private scratch only when the mapping never opened, which is
+            // silence at the host end rather than a crash here.
+            float* const* chans = mScratch.getArrayOfWritePointers();
+
+            if (mShared.isValid())
+            {
+                for (int c = 0; c < mChannels; ++c)
+                    if (auto* p2 = mShared.channel (c, mBlock))
+                        mChannelPtrs[(size_t) c] = p2;
+                chans = mChannelPtrs.data();
+            }
+
+            juce::AudioBuffer<float> view (chans, mChannels, n);
+
+            // TS7 (2026-07-31): host transport arrives as plain values because
+            // nothing with a vtable can cross a process boundary.  Rebuilt into
+            // a real AudioPlayHead here so the plugin's arpeggiators and synced
+            // effects see a host exactly as they would unbridged.
+            mPlayHead.mPos = {};
+            mPlayHead.mPos.setBpm (p.bpm);
+            mPlayHead.mPos.setPpqPosition (p.ppqPosition);
+            mPlayHead.mPos.setTimeInSamples ((juce::int64) p.timeInSamples);
+            mPlayHead.mPos.setIsPlaying (p.isPlaying != 0);
+            mPlayHead.mPos.setTimeSignature (juce::AudioPlayHead::TimeSignature {
+                (int) p.timeSigNumerator, (int) p.timeSigDenominator });
+            mPlugin->setPlayHead (&mPlayHead);
+
+            // MIDI trailer: (int32 samplePos, int32 numBytes, bytes) per event.
+            // Previously the host sent none at all, so a bridged INSTRUMENT was
+            // silent no matter what was played into it.
             mMidi.clear();
+            if (p.numMidiBytes > 0
+                && bytes >= sizeof (Hosting::Bridge::ProcessPayload) + p.numMidiBytes)
+            {
+                const std::uint8_t* m = body + sizeof (Hosting::Bridge::ProcessPayload);
+                std::uint32_t off = 0;
+                while (off + 8 <= p.numMidiBytes)
+                {
+                    juce::int32 pos = 0, nb = 0;
+                    std::memcpy (&pos, m + off,     4);
+                    std::memcpy (&nb,  m + off + 4, 4);
+                    off += 8;
+                    if (nb <= 0 || off + (std::uint32_t) nb > p.numMidiBytes)
+                        break;   // truncated or corrupt -- drop the remainder
+                    mMidi.addEvent (m + off, nb, pos);
+                    off += (std::uint32_t) nb;
+                }
+            }
+
             mPlugin->processBlock (view, mMidi);
         }
 
@@ -284,8 +353,23 @@ private:
     std::unique_ptr<juce::AudioProcessorEditor> mEditor;
     Hosting::Bridge::EditorPayload mPendingEditor {};
 
-    juce::AudioBuffer<float> mScratch;
+    juce::AudioBuffer<float> mScratch;   // fallback only -- see onPrepare
     juce::MidiBuffer         mMidi;
+
+    // The host's audio mapping, plus a stable channel-pointer array so building
+    // the AudioBuffer view per block allocates nothing.
+    Hosting::Bridge::SharedAudioBlock mShared;
+    std::vector<float*>               mChannelPtrs;
+
+    // TS7: the host's transport, republished to the plugin each block.  A member
+    // rather than a local because setPlayHead stores the POINTER -- a stack
+    // instance would dangle the moment onProcess returned.
+    struct BridgePlayHead : juce::AudioPlayHead
+    {
+        juce::AudioPlayHead::PositionInfo mPos;
+        juce::Optional<juce::AudioPlayHead::PositionInfo> getPosition() const override
+        { return mPos; }
+    } mPlayHead;
     int mChannels { 2 };
     int mBlock    { 512 };
 };

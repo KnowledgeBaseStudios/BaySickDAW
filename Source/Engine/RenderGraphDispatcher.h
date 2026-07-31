@@ -89,6 +89,18 @@ public:
     // dispatchBlock resets it to mInitialDeps at the top of every block.
     void rebuildLinks (const RoutingGraph& routing);
 
+    // TS7 §6.9: restrict an OFFLINE freeze render to the tasks the frozen
+    // track actually needs.  `target` is the task being frozen; everything
+    // upstream of it (audio predecessors, sidechain predecessors, and the
+    // synthetic producers that feed it) plus the master task stay live, and
+    // every other task is marked skipped -- it still flows through the pool
+    // and still decrements its children, it just does no work.
+    //
+    // Pass nullptr to clear the pruning.  ALWAYS paired with the freeze tap's
+    // arm / disarm; this must never be left set when real-time playback
+    // resumes or the project falls silent except for one track.
+    void setFreezePrune (RenderTask* target);
+
     // Run one block.  PluginProcessor's processBlock calls this once per
     // block; the dispatcher is the single render path (QA-Ef, 2026-05-21).
     // Caller MUST fully populate ctx

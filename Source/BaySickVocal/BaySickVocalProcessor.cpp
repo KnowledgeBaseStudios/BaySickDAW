@@ -175,6 +175,15 @@ BaySickVocalProcessor::createLayout()
     addB ("limiter_autoRelease", "Limiter Auto Release",  false);
     addB ("limiter_autoMakeup",  "Limiter Auto Makeup",   false);
     addB ("limiter_stereoLink",  "Limiter Stereo Link",   true);
+    // QA-ModelShell TS7 maximizer suite.  Every default reproduces the pre-TS7
+    // behaviour (character 0 is the old fixed ballistics, both automatic modes
+    // off), so a project saved before these existed loads unchanged.
+    addF ("limiter_mode",            "Limiter Mode",             0.f,   1.f,  0.f);
+    addF ("limiter_character",       "Limiter Character",        0.f,   7.f,  0.f);
+    addB ("limiter_loudTargetOn",    "Limiter Loudness Target",  false);
+    addF ("limiter_loudTargetLufs",  "Limiter Loudness LUFS",  -30.f,   0.f, -14.f);
+    addB ("limiter_autoCeiling",     "Limiter Auto Ceiling",     false);
+    addF ("limiter_truePeakTargetDb","Limiter True Peak dBTP",   -6.f,   0.f,  -1.f);
 
     // ── QA-F Task 3: BaySickAlign (bsa_ prefix; sections 13a/13e) ───────────
     // Offline-only params -- read at action time on the message thread,
@@ -526,6 +535,16 @@ void BaySickVocalProcessor::pushApvtsToDsp() noexcept
         lim->setAutoRelease  (rdb ("bsv_limiter_autoRelease"));
         lim->setAutoMakeup   (rdb ("bsv_limiter_autoMakeup"));
         lim->setStereoLink   (rdb ("bsv_limiter_stereoLink"));
+        // TS7 maximizer suite.  Each setter is change-guarded, so re-applying the
+        // same value every block costs a compare (standing CPU-safeguard rule).
+        lim->setMode                (((int) std::lround (rd ("bsv_limiter_mode")) == 1)
+                                       ? LimiterDSP::Mode::Maximizer
+                                       : LimiterDSP::Mode::Limiter);
+        lim->setCharacterIndex      ((int) std::lround (rd ("bsv_limiter_character")));
+        lim->setLoudnessTargetOn    (rdb ("bsv_limiter_loudTargetOn"));
+        lim->setLoudnessTargetLufs  (rd  ("bsv_limiter_loudTargetLufs"));
+        lim->setAutoCeiling         (rdb ("bsv_limiter_autoCeiling"));
+        lim->setTruePeakTargetDb    (rd  ("bsv_limiter_truePeakTargetDb"));
     }
 }
 
@@ -1099,6 +1118,7 @@ bool BaySickVocalProcessor::analyzeAlign (juce::String& errorOut)
     appendAlignVersion();
     publishAlignPlayback();
     if (auto& fn = mDirtyTracker.onAny) fn();
+    if (onPitchAlignEditsChanged) onPitchAlignEditsChanged();   // §6.5 freeze
     return true;
 }
 
@@ -1174,6 +1194,7 @@ bool BaySickVocalProcessor::revertAlignToVersion (int index)
     mAlignState.analyzedPitchMapHash = followerPitchMapHash();
     publishAlignPlayback();
     if (auto& fn = mDirtyTracker.onAny) fn();
+    if (onPitchAlignEditsChanged) onPitchAlignEditsChanged();   // §6.5 freeze
     return true;
 }
 
@@ -1183,6 +1204,7 @@ bool BaySickVocalProcessor::revertPitchToVersion (int index)
     mPitch.stateFromValueTree (mPitchVersions[(size_t) index].state);
     mPitchAnalyzedSig = mPitchVersions[(size_t) index].sigA;
     if (auto& fn = mDirtyTracker.onAny) fn();
+    if (onPitchAlignEditsChanged) onPitchAlignEditsChanged();   // §6.5 freeze
     return true;
 }
 
@@ -1513,6 +1535,7 @@ bool BaySickVocalProcessor::analyzePitch (juce::String& errorOut)
     // between analyses -- versions are the safety net, not an edit gate).
     appendPitchVersion();
     if (auto& fn = mDirtyTracker.onAny) fn();
+    if (onPitchAlignEditsChanged) onPitchAlignEditsChanged();   // §6.5 freeze
     return true;
 }
 

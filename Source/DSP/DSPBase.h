@@ -22,6 +22,32 @@ public:
     // BPM sync - only meaningful for time-based effects; default is no-op
     virtual void setHostBPM(double /*bpm*/) {}
 
+    // ── Full host transport (TS7, 2026-07-31) ────────────────────────────────
+    // setHostBPM above carries tempo and nothing else, which is all any of our
+    // own time-based effects ever needed.  A HOSTED VST3 needs more: JUCE builds
+    // the VST3 ProcessContext from a single AudioPlayHead::getPosition() call
+    // (juce_VST3PluginFormatImpl.h toProcessContext), and every field --
+    // tempo, ppq, time signature, loop -- gets its validity flag set only if
+    // that position exists.  No playhead means a zeroed context with not one
+    // valid flag, so nothing in the plugin syncs to anything.
+    //
+    // timeInSamples is NOT optional: toProcessContext jassert-fails without it
+    // ("The time in samples *must* be valid"), so a tempo-only playhead would
+    // assert every block in Debug.  That is why this carries the whole transport
+    // rather than being folded into setHostBPM.
+    //
+    // Additive and defaulted: the twelve non-hosted effect types ignore it.
+    struct HostTransport
+    {
+        double      bpm           { 120.0 };
+        double      ppqPosition   { 0.0 };
+        juce::int64 timeInSamples { 0 };
+        bool        isPlaying     { false };
+        int         timeSigNum    { 4 };
+        int         timeSigDen    { 4 };
+    };
+    virtual void setHostTransport(const HostTransport& /*tp*/) {}
+
     // Gain-reduction meter (0 = no reduction, negative dB = compressed)
     virtual float getGainReductionDb() const { return 0.0f; }
 

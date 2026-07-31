@@ -1,5 +1,6 @@
 #include "KeyBindsWindow.h"
 #include "SharedUI.h"   // VC palette + VibeLAF
+#include "WindowChrome.h"   // TS7 §9.3
 
 namespace
 {
@@ -408,8 +409,12 @@ void KeyBindsTab::promptKeyChange (int commandId)
     o.content.setOwned             (new CaptureContent (mMgr, commandId, name));
     o.componentToCentreAround      = this;
     o.escapeKeyTriggersCloseButton = true;
-    o.useNativeTitleBar            = true;
+    o.useNativeTitleBar            = false;   // TS7 §9.3
     o.resizable                    = false;
+    // TS7 §9.4: the always-on-top on this one STAYS.  It is not the same case as
+    // the Key Binds / Undo History windows -- this is the modal shortcut-capture
+    // prompt, which must sit above the very window that launched it while the
+    // user presses a key combination, and it lives only for that gesture.
     if (auto* dw = o.launchAsync())
         dw->setAlwaysOnTop (true);
 }
@@ -469,7 +474,7 @@ KeyBindsWindow::KeyBindsWindow (juce::ApplicationCommandManager& mgr)
                             VC::Bg,
                             juce::DocumentWindow::closeButton)
 {
-    setUsingNativeTitleBar (true);
+    WindowChrome::applyToDesktopWindow (*this);   // TS7 §9.3
     setResizable (true, true);
     setContentOwned (new KeyBindsContent (mgr), true);
     // 2026-04-26 (B-6): bumped from 640x500 - Builder + Piano Roll tabs are

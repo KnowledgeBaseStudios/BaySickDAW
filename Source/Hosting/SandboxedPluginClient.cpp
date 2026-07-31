@@ -94,47 +94,136 @@ bool SandboxedPluginClient::sendFramed (Bridge::MessageType type,
 
 void SandboxedPluginClient::prepare (double sampleRate, int maxBlockSize, int numChannels)
 {
-    // The shared audio block is sized here, on the message thread, so the audio
-    // path never allocates.  Interleaved-by-channel float layout, host writes
-    // input then reads output in place.
-    mSharedAudio.setSize ((size_t) maxBlockSize * (size_t) numChannels * sizeof (float), true);
+    // The shared audio block is created here, on the message thread, so the
+    // audio path never allocates.  Channel-major float layout; the host writes
+    // input, the helper processes in place, the host reads output back.
+    //
+    // A FRESH NAME PER PREPARE.  Re-creating a mapping under a name the helper
+    // still has open would hand it the OLD view while we wrote to the new one,
+    // which is a silent wrong-audio bug rather than a failure.  The name travels
+    // with the Prepare that resizes it, so both ends always agree.
+    mSharedBlockSize = maxBlockSize;
+    mSharedChannels  = numChannels;
+    mSharedAudioName = "Local\\BaySickPluginBridge_" + juce::Uuid().toDashedString();
+
+    const auto bytes = Bridge::SharedAudioBlock::bytesFor (maxBlockSize, numChannels);
+
+    if (! mSharedAudio.create (mSharedAudioName, bytes))
+    {
+        // No shared block means no audio path; processBlock's isValid() test
+        // then yields silence for this slot rather than reading a null view.
+        mLastError = "Could not create the plugin bridge audio block";
+        return;
+    }
 
     Bridge::PreparePayload p {};
     p.sampleRate   = sampleRate;
     p.maxBlockSize = (std::uint32_t) maxBlockSize;
     p.numChannels  = (std::uint32_t) numChannels;
-    sendFramed (Bridge::MessageType::Prepare, &p, sizeof (p));
+
+    // The mapping NAME rides as the trailer, the same shape LoadPlugin uses for
+    // the plugin identifier -- so PreparePayload keeps its asserted layout.
+    const auto nameUtf8  = mSharedAudioName.toRawUTF8();
+    const auto nameBytes = (std::uint32_t) std::strlen (nameUtf8);
+    sendFramed (Bridge::MessageType::Prepare, &p, sizeof (p), nameUtf8, nameBytes);
 }
 
 void SandboxedPluginClient::releaseResources()
 {
-    mSharedAudio.reset();
+    mSharedAudio.close();
+    mSharedBlockSize = 0;
+    mSharedChannels  = 0;
 }
 
 bool SandboxedPluginClient::processBlock (juce::AudioBuffer<float>& buffer,
-                                          juce::MidiBuffer& midi) noexcept
+                                          juce::MidiBuffer& midi,
+                                          const TransportInfo& tp) noexcept
 {
     if (! mAlive.load (std::memory_order_acquire))
+        return false;
+
+    // No shared block = no audio path.  Returning false yields silence for this
+    // slot, which is the same contract as a missed deadline.
+    if (! mSharedAudio.isValid())
+        return false;
+
+    const int n  = buffer.getNumSamples();
+    const int nc = juce::jmin (buffer.getNumChannels(), mSharedChannels);
+
+    if (n <= 0 || n > mSharedBlockSize || nc <= 0)
         return false;
 
     // AUDIO THREAD.  No allocation, no lock, and a bounded wait -- see the
     // threading note in the header.  A miss returns false and the caller
     // clears; it does not retry, because a retry is just a second stall.
+    //
+    // INPUT IN.  An instrument's buffer is silence here and the copy is wasted,
+    // but branching on isInstrument would mean the helper reading whatever the
+    // last block left in the mapping -- the same stale-buffer class of bug that
+    // bit the freeze render twice this batch.  A memcpy of a few KB is cheaper
+    // than that failure mode.
+    for (int c = 0; c < nc; ++c)
+        if (auto* dst = mSharedAudio.channel (c, mSharedBlockSize))
+            std::memcpy (dst, buffer.getReadPointer (c), (size_t) n * sizeof (float));
+
     mBlockOk.store (false, std::memory_order_relaxed);
     mBlockDone.reset();
 
-    Bridge::ProcessPayload p {};
-    p.numSamples   = (std::uint32_t) buffer.getNumSamples();
-    p.numMidiBytes = 0;
-    juce::ignoreUnused (midi);
+    // MIDI trailer.  Hand-serialised (int32 samplePos, int32 numBytes, bytes)
+    // rather than copying JUCE's MidiBuffer storage, because the helper may be a
+    // 32-bit process and this protocol does not trust cross-architecture layout.
+    //
+    // Previously this sent NOTHING -- numMidiBytes was hard-zero with the buffer
+    // explicitly ignored -- so a bridged INSTRUMENT received no notes and was
+    // silent by construction (TS7, 2026-07-31).
+    std::uint32_t midiBytes = 0;
+    for (const auto meta : midi)
+    {
+        const auto len = (std::uint32_t) meta.numBytes;
+        if (midiBytes + 8 + len > Bridge::kMaxMidiBytesPerBlock)
+            break;   // bounded: a runaway buffer must not make the frame unbounded
 
-    if (! sendFramed (Bridge::MessageType::Process, &p, sizeof (p)))
+        const juce::int32 pos = (juce::int32) meta.samplePosition;
+        const juce::int32 nb  = (juce::int32) len;
+        std::memcpy (mMidiScratch + midiBytes,     &pos, 4);
+        std::memcpy (mMidiScratch + midiBytes + 4, &nb,  4);
+        std::memcpy (mMidiScratch + midiBytes + 8, meta.data, len);
+        midiBytes += 8 + len;
+    }
+
+    Bridge::ProcessPayload p {};
+    p.numSamples          = (std::uint32_t) buffer.getNumSamples();
+    p.numMidiBytes        = midiBytes;
+    p.bpm                 = tp.bpm;
+    p.ppqPosition         = tp.ppqPosition;
+    p.timeInSamples       = (std::int64_t) tp.timeInSamples;
+    p.isPlaying           = tp.isPlaying ? 1u : 0u;
+    p.timeSigNumerator    = (std::uint32_t) juce::jmax (1, tp.timeSigNum);
+    p.timeSigDenominator  = (std::uint32_t) juce::jmax (1, tp.timeSigDen);
+
+    if (! sendFramed (Bridge::MessageType::Process, &p, sizeof (p),
+                      midiBytes > 0 ? mMidiScratch : nullptr, midiBytes))
         return false;
 
     if (! mBlockDone.wait (kBlockDeadlineMs))
         return false;
 
-    return mBlockOk.load (std::memory_order_acquire);
+    if (! mBlockOk.load (std::memory_order_acquire))
+        return false;
+
+    // OUTPUT BACK.  Only after the reply -- the helper writes in place, so
+    // reading before the rendezvous would race it.  Channels the helper does not
+    // cover are cleared rather than left holding this block's INPUT, which for
+    // an instrument would echo the strip back at itself.
+    for (int c = 0; c < buffer.getNumChannels(); ++c)
+    {
+        auto* src = c < nc ? mSharedAudio.channel (c, mSharedBlockSize) : nullptr;
+
+        if (src != nullptr) std::memcpy (buffer.getWritePointer (c), src, (size_t) n * sizeof (float));
+        else                buffer.clear (c, 0, n);
+    }
+
+    return true;
 }
 
 void SandboxedPluginClient::setParameter (int index, float value01) noexcept
@@ -198,7 +287,34 @@ void SandboxedPluginClient::handleMessageFromWorker (const juce::MemoryBlock& mb
     switch (static_cast<Bridge::MessageType> (h.type))
     {
         case Bridge::MessageType::HandshakeReply:
+        {
+            // HOST-SIDE VERSION CHECK (TS7, 2026-07-31).  The helper already
+            // refuses a version it does not know, but this direction was a bare
+            // `break` -- so a helper NEWER than the app, or one that skipped its
+            // own check, would have been trusted and every message misparsed
+            // silently.  A protocol whose layout is asserted rather than trusted
+            // should not take the peer's word for its version either.
+            if (bodyBytes < sizeof (Bridge::HandshakePayload))
+            {
+                mLastError = "Plugin bridge handshake was malformed";
+                mAlive.store (false, std::memory_order_release);
+                mBlockDone.signal();
+                break;
+            }
+
+            Bridge::HandshakePayload hs {};
+            std::memcpy (&hs, body, sizeof (hs));
+
+            if (hs.protocolVersion != Bridge::kProtocolVersion)
+            {
+                mLastError = "Plugin bridge version mismatch - helper reports "
+                           + juce::String ((int) hs.protocolVersion) + ", app expects "
+                           + juce::String ((int) Bridge::kProtocolVersion);
+                mAlive.store (false, std::memory_order_release);
+                mBlockDone.signal();   // never strand an audio thread mid-wait
+            }
             break;
+        }
 
         case Bridge::MessageType::LoadReply:
         {

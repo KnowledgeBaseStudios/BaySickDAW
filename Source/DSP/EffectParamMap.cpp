@@ -446,6 +446,42 @@ namespace
         SET_GET ("sustain",  0.f, 1000.f, LimiterDSP, setSustainMs,    getSustainMs),
     };
 
+    // ── Limiter, MAXIMIZER mode (TS7) ───────────────────────────────────────
+    // The reproduction's set (kLimiter above) PLUS the maximizer's own two
+    // knobs.  Jeff's ruling 2026-07-29: Limiter mode is the FL reproduction and
+    // carries none of the TS7 additions, so they live only here.
+    //
+    // THE KEY IS THE KNOB'S LABEL, LOWERCASED.  EditorPanelBase::setSlotContext
+    // derives every paramId from `label.getText().toLowerCase()`, so these two
+    // MUST read "lufs" / "dbtp" to match the VKnob labels in LimiterPanel.  A
+    // mismatch here is silent: the Automate menu still offers the lane and still
+    // draws it, and nothing ever applies it -- the same defect class as the sfizz
+    // kit-CC lanes TS3 had to fix.
+    //
+    // Mode and character are absent on purpose.  Mode is the variant itself, and
+    // the character is a chickenhead selector -- the same scope boundary TS3
+    // held, where only stamped knobs get a table entry.  The two automatic-mode
+    // toggles are DualLabelToggles that do not go through addAutomatableToggle,
+    // matching the limiter's three existing toggles.
+    const ParamDef kLimiterMaximizer[] =
+    {
+        SET_GET ("ingain", -12.f,   24.f, LimiterDSP, setInputGainDb,  getInputGainDb),
+        SET_GET ("ceil",   -24.f,   12.f, LimiterDSP, setCeilingDb,    getCeilingDb),
+        SET_GET ("satth",    0.f,    1.f, LimiterDSP, setSatThresh,    getSatThresh),
+        SET_GET ("satcv",    0.f,    1.f, LimiterDSP, setSatCurve,     getSatCurve),
+        SET_GET ("schpf",   20.f, 2000.f, LimiterDSP, setSidechainHPF, getSidechainHPF),
+        SET_GET ("atk",      0.1f,  20.f, LimiterDSP, setAttackMs,     getAttackMs),
+        SET_GET ("rel",     10.f, 1000.f, LimiterDSP, setReleaseMs,    getReleaseMs),
+        { "ahead", 0.f, 10.f,
+          [] (DSPBase* d, float v) { static_cast<LimiterDSP*> (d)->setAheadMs (v); },
+          [] (const DSPBase* d) -> float { return static_cast<const LimiterDSP*> (d)->getAheadMs(); },
+          nullptr, /*affectsLatency*/ true },
+        SET_GET ("relcv",    0.f,    1.f, LimiterDSP, setReleaseCurve, getReleaseCurve),
+        SET_GET ("sustain",  0.f, 1000.f, LimiterDSP, setSustainMs,    getSustainMs),
+        SET_GET ("lufs",   -30.f,    0.f, LimiterDSP, setLoudnessTargetLufs, getLoudnessTargetLufs),
+        SET_GET ("dbtp",    -6.f,    0.f, LimiterDSP, setTruePeakTargetDb,   getTruePeakTargetDb),
+    };
+
     // ── De-Esser ────────────────────────────────────────────────────────────
     // "Detect" is a MACRO knob: the reference exposes only an abstract 0..100
     // width, and the panel derives both the detector frequency and Q from it.
@@ -746,6 +782,13 @@ int variantOf (EffectType type, const DSPBase* dsp, PanelContext ctx)
         case EffectType::Saturation: return (int) static_cast<const SaturationDSP*> (dsp)->mSatType;
         case EffectType::Delay:      return       static_cast<const DelayDSP*>      (dsp)->getType();
         case EffectType::Overdrive:  return (int) static_cast<const OverdriveDSP*>  (dsp)->mType;
+        // TS7: Limiter / Maximizer.  Mode is a real variant because the two modes
+        // expose DIFFERENT control sets -- Limiter stays the FL reproduction and
+        // carries none of the maximizer additions.  The character voicing is NOT
+        // a variant: it leaves the parameter set identical, and 2 modes x 8
+        // characters would be 16 tables describing one set.
+        case EffectType::Limiter:
+            return (int) static_cast<const LimiterDSP*> (dsp)->getMode();
         default:                     return 0;
     }
 }
@@ -795,7 +838,12 @@ juce::Span<const ParamDef> defsFor (EffectType type, int variant)
         case EffectType::Flanger:                return span (kFlanger);
         case EffectType::Phaser:                 return span (kPhaser);
         case EffectType::TransientShaper:        return span (kTransientShaper);
-        case EffectType::Limiter:                return span (kLimiter);
+        // TS7: variant 1 is Maximizer, which adds the loudness-target and
+        // true-peak-target knobs on top of the reproduction's set.
+        case EffectType::Limiter:
+            return variant == (int) LimiterDSP::Mode::Maximizer
+                     ? span (kLimiterMaximizer)
+                     : span (kLimiter);
         case EffectType::DeEsser:                return span (kDeEsser);
         case EffectType::Gate:                   return span (kGate);
         case EffectType::DeReverb:               return span (kDeReverb);

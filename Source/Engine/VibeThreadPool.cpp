@@ -99,7 +99,15 @@ void VibeThreadPool::runOneTask (RenderTask* task) noexcept
     // thread runs tasks and its own processBlock wall-clock already IS the
     // total -- so the tick reads would be pure overhead.  Zero cost when MT is
     // off (the plan's contract).  relaxed: diagnostic, no ordering dependency.
-    if (RenderEngine::gMultiThreadedEngineEnabled.load (std::memory_order_relaxed))
+    // TS7 §6.9: an offline freeze render prunes every task the frozen track does
+    // not depend on.  The task still flows through the pool and still decrements
+    // its children below -- skipping the DEPENDENCY work would starve MasterTask
+    // and stall the block on its watchdog.  Only run() is skipped.
+    if (task->isRenderSkipped())
+    {
+        task->clearOnSkip();
+    }
+    else if (RenderEngine::gMultiThreadedEngineEnabled.load (std::memory_order_relaxed))
     {
         const auto s = juce::Time::getHighResolutionTicks();
         task->run();

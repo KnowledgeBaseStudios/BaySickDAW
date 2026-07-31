@@ -11,6 +11,9 @@ void HostedPluginEffect::setPlugin (const juce::PluginDescription& desc)
         return;
 
     mHosted = std::make_unique<HostedPluginInstance> (*pm, desc);
+    // Fresh instance -- the playhead attaches to the NEW one on the next
+    // transport push, not the destroyed one.
+    mPlayHeadAttached = false;
 
     if (mPreparedRate > 0.0)
     {
@@ -54,6 +57,39 @@ void HostedPluginEffect::reset()
 {
     if (mHosted != nullptr && mPreparedRate > 0.0)
         mHosted->prepareToPlay (mPreparedRate, mPreparedBlock);
+}
+
+// TS7 (2026-07-31).  Called once per block by EffectRack::setHostTransport,
+// BEFORE process(), so the position the plugin reads is this block's.
+//
+// The attach is one-shot and lazy rather than done at setPlugin time, because a
+// slot can be loaded before the rack has ever been driven and the instance can
+// be replaced underneath us -- checking the flag here is cheaper than finding
+// every construction path, and re-attaching after a swap costs one store.
+void HostedPluginEffect::setHostTransport (const DSPBase::HostTransport& tp)
+{
+    if (mHosted == nullptr)
+    {
+        mPlayHeadAttached = false;
+        return;
+    }
+
+    // timeInSamples is mandatory -- JUCE's toProcessContext jassert-fails
+    // without it.  Everything else is optional to the VST3 context, but a
+    // partial transport is exactly the half-fix this change exists to remove.
+    mPlayHead.mPos = {};
+    mPlayHead.mPos.setBpm (tp.bpm);
+    mPlayHead.mPos.setPpqPosition (tp.ppqPosition);
+    mPlayHead.mPos.setTimeInSamples (tp.timeInSamples);
+    mPlayHead.mPos.setIsPlaying (tp.isPlaying);
+    mPlayHead.mPos.setTimeSignature (juce::AudioPlayHead::TimeSignature {
+        juce::jmax (1, tp.timeSigNum), juce::jmax (1, tp.timeSigDen) });
+
+    if (! mPlayHeadAttached)
+    {
+        mHosted->setPlayHead (&mPlayHead);
+        mPlayHeadAttached = true;
+    }
 }
 
 int HostedPluginEffect::getLatencySamples() const

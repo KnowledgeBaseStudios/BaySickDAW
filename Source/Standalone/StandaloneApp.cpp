@@ -138,7 +138,16 @@ struct PlayHeadAdvancer : public juce::AudioIODeviceCallback
             player.audioDeviceIOCallbackWithContext (in, ni, mapped, 2, n, ctx);
         }
 
-        playHead.advanceBlock(n, sampleRate);
+        // TS7 (2026-07-30): NOT while an offline render owns the processor.
+        // The device callback keeps firing during a render (JUCE's player just
+        // writes silence when suspended), and this advance sits OUTSIDE that
+        // call -- so the transport kept running through the whole render.  A
+        // freeze that took 40 s left the playhead 40 s further into the song,
+        // sometimes past the end, and playback resumed somewhere the user never
+        // navigated to.  The clock must not move while nothing is being heard.
+        auto* proc = player.getCurrentProcessor();
+        if (proc == nullptr || ! proc->isNonRealtime())
+            playHead.advanceBlock(n, sampleRate);
     }
 };
 

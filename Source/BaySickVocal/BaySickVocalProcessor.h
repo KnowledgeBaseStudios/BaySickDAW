@@ -377,6 +377,22 @@ public:
     void setOwnChannelId (int id) noexcept { mOwnChannelId = id; }
     int  getOwnChannelId() const noexcept  { return mOwnChannelId; }
 
+    // ── TS7 §6.5/§6.9: pitch + align edits invalidate a Vox freeze ───────────
+    // MANDATORY once a Vox tab can freeze (Jeff, 2026-07-30), because both
+    // editors' results are BAKED INTO the freeze file -- the capture point sits
+    // below them.  Without this you would nudge a note on a frozen vocal, hear
+    // the old take, and have nothing on screen explaining it.
+    //
+    // A separate hook rather than the freeze watcher because that watcher only
+    // sees APVTS ValueTree writes, and pitch/align edits never touch the live
+    // tree: getStateInformation appends them into a COPY of the state at save
+    // time, so the tree the watcher listens to is never modified by editing.
+    // No amount of watching APVTS would ever have caught these.
+    //
+    // Fired from every point that commits an edit result -- align analyze,
+    // pitch analyze, and the state-restore paths that republish them.
+    std::function<void()> onPitchAlignEditsChanged;
+
     // Resolved picker state: bsa_leader_channel / bsa_follower_channel with
     // -1 meaning "none picked" (leader) / "this page's own channel" (follower).
     int resolveLeaderChannel()   const;

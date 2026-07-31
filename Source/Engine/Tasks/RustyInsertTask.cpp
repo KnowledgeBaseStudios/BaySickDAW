@@ -64,19 +64,42 @@ void RustyInsertTask::run()
     juce::AudioBuffer<float> blockView (ptrs, mOutputBuffer->getNumChannels(), n);
     blockView.clear();
 
-    // Copy this strip's output from the engine's internal buffer.
-    auto stripBuf = engine->getStripBuffer (mStripIndex, n);
-    if (stripBuf.getNumChannels() >= 2 && blockView.getNumChannels() >= 2)
+    // ── TS7 §6.9: frozen kit (Jeff, 2026-07-30) ──────────────────────────────
+    // The substitution is HERE, at the point the engine hands this strip over --
+    // the same place every other track's freeze tap sits, above the insert chain.
+    // That is what keeps the whole strip live while frozen: this task still runs
+    // its rack, EQs, fader, pan, mute/solo, still publishes its meter and still
+    // fills its arena slot, so sidechains fed from this piece keep working.
+    //
+    // Capturing at the kit BUS instead (my first design) would have baked all 13
+    // strips' mixer settings and killed all of that.  See the plan's §6.9 entry.
+    bool playedFrozen = false;
+    if (mCtx->songMode)
+        if (auto* fz = mFrozenSource.load (std::memory_order_acquire))
+        {
+            juce::int64 filePos = 0;
+            if (mCtx->posInfo != nullptr)
+                filePos = mCtx->posInfo->getTimeInSamples().orFallback ((juce::int64) 0);
+            if (filePos >= 0 && filePos < fz->getTotalLength())
+                playedFrozen = fz->readRaw (blockView, 0, n, filePos);
+        }
+
+    if (! playedFrozen)
     {
-        blockView.copyFrom (0, 0, stripBuf, 0, 0, n);
-        blockView.copyFrom (1, 0, stripBuf, 1, 0, n);
-    }
-    else if (stripBuf.getNumChannels() >= 1)
-    {
-        if (blockView.getNumChannels() > 0)
+        // Copy this strip's output from the engine's internal buffer.
+        auto stripBuf = engine->getStripBuffer (mStripIndex, n);
+        if (stripBuf.getNumChannels() >= 2 && blockView.getNumChannels() >= 2)
+        {
             blockView.copyFrom (0, 0, stripBuf, 0, 0, n);
-        if (blockView.getNumChannels() > 1)
-            blockView.copyFrom (1, 0, stripBuf, 0, 0, n);   // dual-mono
+            blockView.copyFrom (1, 0, stripBuf, 1, 0, n);
+        }
+        else if (stripBuf.getNumChannels() >= 1)
+        {
+            if (blockView.getNumChannels() > 0)
+                blockView.copyFrom (0, 0, stripBuf, 0, 0, n);
+            if (blockView.getNumChannels() > 1)
+                blockView.copyFrom (1, 0, stripBuf, 0, 0, n);   // dual-mono
+        }
     }
 
     // 2026-05-07 (Batch 9c follow-up): SC accumulator population.

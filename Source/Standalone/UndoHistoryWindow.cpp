@@ -1,5 +1,6 @@
 #include "UndoHistoryWindow.h"
 #include "SharedUI.h"
+#include "WindowChrome.h"   // TS7 §9.3
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Content
@@ -121,7 +122,7 @@ UndoHistoryWindow::UndoHistoryWindow(juce::UndoManager&               manager,
     , mGlobalUndo(std::move(globalUndo))
     , mGlobalRedo(std::move(globalRedo))
 {
-    setUsingNativeTitleBar(true);
+    WindowChrome::applyToDesktopWindow (*this);   // TS7 §9.3
     setResizable(true, false);
 
     auto* content = new Content(mLabels, mCursor, mGlobalUndo, mGlobalRedo);
@@ -130,11 +131,11 @@ UndoHistoryWindow::UndoHistoryWindow(juce::UndoManager&               manager,
     setSize(220, 400);
     centreWithSize(220, 400);
     setVisible(true);
-    // 2026-04-26: was `setAlwaysOnTop(false)` → main app window stole focus
-    // back immediately, hiding the history panel behind it.  Always-on-top
-    // keeps it visible without going modal so the user can still click into
-    // the editor while the panel is open.
-    setAlwaysOnTop(true);
+    // TS7 §9.4: the always-on-top flag that used to be here is gone.  It was
+    // there because the main window stole focus back and buried this panel, but
+    // it fixed that by floating above every other application too.  The owner
+    // relationship (WindowChrome::ownToMainWindow, applied by the editor once
+    // this window exists) is what actually solves it.
     toFront(true);
 
     mManager.addChangeListener(this);

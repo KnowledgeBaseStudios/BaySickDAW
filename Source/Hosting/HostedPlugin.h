@@ -99,6 +99,10 @@ public:
     void detachEditor (class HostedPluginEditor*);
 
     const juce::String getName() const override          { return mDesc.name; }
+    // Forwards to the inner instance -- see the definition; the base class only
+    // stores the pointer on THIS object, which left hosted plugins with no
+    // transport at all.
+    void   setPlayHead (juce::AudioPlayHead*) override;
     bool   acceptsMidi()  const override                 { return mDesc.isInstrument; }
     bool   producesMidi() const override                 { return false; }
     double getTailLengthSeconds() const override;

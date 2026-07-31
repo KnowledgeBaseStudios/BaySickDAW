@@ -78,6 +78,10 @@ public:
     // K-4: shared cap query - true when total Inst-type pages (LiveInput +
     // BaySickGuitars + BaySickBasses) hits kMaxInstPages.
     std::function<bool()>                             onIsInstCapReached;
+    // TS7 §6.4: 0 = no frozen tab of this type, 1 = frozen, 2 = frozen but stale
+    // (playing live while it re-renders).  Returns the strongest state across the
+    // type's instances, because the ribbon shows ONE slot per type.
+    std::function<int(TabType)>                       onIsTabFrozen;
     // QA-Fa recovery: "+ Add New Vox From Export" submenu (Vox dropdown
     // only).  The editor returns the Aligned/ + Pitched/ export list --
     // EMPTY when any grey rule holds (no exports / vox cap reached /

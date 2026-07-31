@@ -28,6 +28,21 @@ void RustyDrumsProducerTask::run()
     auto* engine = mProcessor->mRustyDrumsEngine.get();
     if (engine == nullptr) return;
 
+    // ── TS7 §6.9: the frozen-kit skip (Jeff, 2026-07-30) ─────────────────────
+    // THIS is where a kit freeze actually saves CPU.  One sfizz instance renders
+    // 26 channels every block; the 13 strip tasks then read from it.  Freezing
+    // the kit substitutes at each strip (RustyInsertTask), so nothing downstream
+    // needs the engine's output any more and the whole synthesis can go.
+    //
+    // SKIP THE WHOLE CALL OR NONE OF IT.  processStrips dispatches every
+    // noteOn/noteOff/CC into sfizz BEFORE rendering, and sfizz voices only
+    // advance inside renderBlock -- so dispatching MIDI while skipping the
+    // render would pile up voices that never age out, permanently poisoning both
+    // the engine's own zero-voice gate and the idle-suspend gate below.
+    if (mProcessor->mRustyKitFrozen.load (std::memory_order_acquire)
+        && mCtx->songMode)
+        return;
+
     // Idle suspend: if MIDI is empty AND no active voices for
     // kIdleSuspendBlocks consecutive blocks, skip the entire processStrips
     // call.  Wakes immediately on next block where either gate fails.

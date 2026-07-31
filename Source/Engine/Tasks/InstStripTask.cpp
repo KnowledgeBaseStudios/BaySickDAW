@@ -133,6 +133,40 @@ void InstStripTask::run()
         }
     };
 
+    // ── TS7 §6.9: frozen playback (Jeff, 2026-07-30) ─────────────────────────
+    // Tested before the route split for the same reason as Vox: the playback
+    // route only fires when a clip overlaps THIS block, so substituting inside
+    // it would leave the chain (pedals + NAM/IR, the expensive stage) running
+    // over silence on every other block and give back almost nothing.
+    //
+    // GATED ON !active -- Jeff's (a): freeze STANDS ASIDE the moment the strip
+    // is armed or monitoring.  It has to.  Unlike Vox, this task merges the
+    // recorded takes into the live buffer BEFORE the engine ("QA-Fb Option A",
+    // locked 2026-07-10, so live and prior takes get one identical chain pass),
+    // and frozen audio already carries that chain -- joining it there would
+    // process it twice.  Standing aside costs nothing: the strip simply plays
+    // live exactly as it does today, which is freeze's existing fall-back
+    // behaviour rather than a special case invented here.
+    // SONG MODE ONLY -- see the note in EngineInsertTask::run.
+    if (! active && mCtx->songMode)
+    {
+        if (auto* fz = mFrozenSource.load (std::memory_order_acquire))
+        {
+            juce::int64 filePos = 0;
+            if (mCtx->posInfo != nullptr)
+                filePos = mCtx->posInfo->getTimeInSamples().orFallback ((juce::int64) 0);
+
+            if (filePos >= 0 && filePos < fz->getTotalLength()
+                && fz->readRaw (blockView, 0, n, filePos))
+            {
+                pullSidechainPredecessorsToGraph (*mGraph, channelId, mPredecessors, n);
+                mGraph->processInsert (VibeGraph::InsertKind::Inst, mIndex,
+                                       blockView, mCtx->bpm, mCtx->anySolo);
+                return;
+            }
+        }
+    }
+
     if (filePlay && ! active)
     {
         // Pure playback (nobody listening to live input): drive the engine +

@@ -23,6 +23,23 @@ public:
     // the completed fraction (i-1)/n.  stepCount <= 0 = indeterminate.
     void setStep (int stepIndex, int stepCount, const juce::String& label);
     void setStepLabel (const juce::String& label);
+
+    // TS7 (2026-07-30): continuous progress + cancel, for the freeze render.
+    // setStep's stepped form does not fit a render that reports a 0..1 fraction
+    // per block, and the render has ALWAYS accepted an abort callback that no
+    // caller ever supplied -- so a minute-long freeze had no bar and no way out.
+    // Cancel is opt-in per op: a project load must NOT be abortable half-way.
+    void setProgress (double zeroToOne);
+    void setCancellable (bool canCancel);
+
+    // Polls the OS's CURRENT input state for a cancel (Escape, or the left
+    // button held over the button's bounds).  NOT event-driven: the operation
+    // holds the message thread, so no click is ever dispatched until it is over.
+    // Call this from the op's abort check so the poll rate matches how often the
+    // op can actually stop -- polling only on repaint can miss a quick click.
+    void pollCancelInput();
+    bool wasCancelled() noexcept { pollCancelInput(); return mCancelled; }
+
     void endOp();
 
     bool isActive() const noexcept { return mDepth > 0; }
@@ -56,6 +73,7 @@ public:
 
     void paint (juce::Graphics& g) override;
     void parentSizeChanged() override;
+    void mouseDown (const juce::MouseEvent&) override;
 
 private:
     // Records every distinct step label for the running ticker (Jeff spec
@@ -86,6 +104,9 @@ private:
     float mPulse       = 0.0f;
     int   mDepth       = 0;
     bool  mCursorShown = false;
+    bool  mCancellable = false;
+    bool  mCancelled   = false;
+    juce::Rectangle<int> mCancelBounds;   // set in paint, hit-tested in mouseDown
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (HeavyOperationOverlay)
 };

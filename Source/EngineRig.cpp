@@ -31,6 +31,11 @@ int EngineRig::capacityOf (TabKind k) noexcept
         case TabKind::Vox:    return kMaxVoxPages;
         case TabKind::Inst:   return kMaxInstPages;
         case TabKind::Plugins: return kMaxPluginPages;
+        // TS7 §6.9: the kit is a SINGLETON -- one instance per project, always
+        // pageIndex 0.  Explicit rather than left to the fallback below, which
+        // returns 0 and would have silently made a Rusty tab impossible to
+        // create.  Same silent-default trap as insertKindForTab.
+        case TabKind::Rusty:   return 1;
     }
     return 0;
 }
@@ -67,6 +72,10 @@ juce::String EngineRig::trackIdFor (TabKind k, int pageIndex)
         // A hosted plugin's parameters belong to the plugin, not to our APVTS
         // vocabulary, so there is no per-tab prefix to hand out.
         case TabKind::Plugins: return {};
+        // The kit engine is processor-owned with its own "brd_" vocabulary, so
+        // there is no per-tab prefix to hand out.  Explicit for the same reason
+        // as the capacity case above.
+        case TabKind::Rusty:   return {};
     }
     return {};
 }
@@ -91,8 +100,15 @@ void EngineRig::removeTab (TabKind k, int pageIndex)
     for (size_t i = 0; i < mTabs.size(); ++i)
     {
         if (mTabs[i]->kind != k || mTabs[i]->pageIndex != pageIndex) continue;
+
+        // §6.7: deleting a frozen track deletes its freeze file.  Done BEFORE
+        // teardown so the streamer holding the file open is destroyed first --
+        // Windows refuses to delete a file with a live handle, which is exactly
+        // how this would have failed silently if it ran after.
+        const bool wasFrozen = mTabs[i]->frozen;
         teardownEngine (*mTabs[i], /*settleAfterUnregister=*/ true);
         mTabs.erase (mTabs.begin() + (long) i);
+        if (wasFrozen && onFreezeFileObsolete) onFreezeFileObsolete (k, pageIndex);
         return;
     }
 }
@@ -115,6 +131,68 @@ const EngineTab* EngineRig::findTab (TabKind k, int pageIndex) const
     for (auto& t : mTabs)
         if (t->kind == k && t->pageIndex == pageIndex) return t.get();
     return nullptr;
+}
+
+// ── TS7 §6.5: engine-scope staleness ─────────────────────────────────────────
+// A freeze is only invalidated by things that change what the ENGINE PRODUCES.
+// Everything from preEq downstream -- rack, EQ, fader, pan, width, sends,
+// sidechain, the master chain -- stays live on a frozen tab and must NOT mark it
+// stale; that is precisely what Jeff's pre-rack Source Only ruling buys.
+//
+// Marking is idempotent and only fires the event on a TRANSITION, so a knob
+// dragged across a hundred values queues one re-render rather than a hundred.
+void EngineRig::markEngineContentChanged (TabKind k, int pageIndex)
+{
+    // NOT DURING AN OFFLINE RENDER (2026-07-30) -- this was a self-sustaining
+    // re-render loop, and Jeff's log caught it before I understood it.
+    //
+    // The render replays automation by calling setValueNotifyingHost on the
+    // ENGINE APVTS (applyOfflineLaneValue), which is the exact tree the freeze
+    // watcher listens to.  So freezing tab B wrote tab A's engine params, marked
+    // A stale, queued A for re-render -- and A's render did the same back to B.
+    // Two frozen tabs ping-ponged forever: twenty renders in three minutes in
+    // Jeff's timing log, which I first mis-attributed to grid editing.
+    //
+    // The distinction that makes this correct rather than a papering-over: those
+    // writes are a REPLAY of automation that already exists, not a user edit.
+    // They do not change what the tab produces -- they ARE what it produces, and
+    // the render is in the middle of capturing exactly that.
+    if (mProc.isNonRealtime()) return;
+
+    auto* t = findTab (k, pageIndex);
+    if (t == nullptr || ! t->frozen || t->freezeStale) return;
+    t->freezeStale = true;
+    if (onFreezeStateChanged) onFreezeStateChanged (k, pageIndex);
+}
+
+// Tempo and the tempo map move every engine's output in time, so they invalidate
+// every freeze rather than any one tab's.
+void EngineRig::markAllFreezesStale()
+{
+    // Same offline guard as markEngineContentChanged, and it matters more here:
+    // the render restores song mode, loop bounds and the current pattern on exit,
+    // all of which route through content-change signals -- so without this, every
+    // render would invalidate every freeze in the project on its way out.
+    if (mProc.isNonRealtime()) return;
+
+    for (auto& t : mTabs)
+    {
+        if (! t->frozen || t->freezeStale) continue;
+        t->freezeStale = true;
+        if (onFreezeStateChanged) onFreezeStateChanged (t->kind, t->pageIndex);
+    }
+}
+
+bool EngineRig::isFrozen (TabKind k, int pageIndex) const
+{
+    const auto* t = findTab (k, pageIndex);
+    return t != nullptr && t->frozen;
+}
+
+bool EngineRig::isFreezeStale (TabKind k, int pageIndex) const
+{
+    const auto* t = findTab (k, pageIndex);
+    return t != nullptr && t->frozen && t->freezeStale;
 }
 
 std::vector<EngineTab*> EngineRig::tabsOf (TabKind k)
@@ -162,7 +240,24 @@ juce::AudioProcessor* EngineRig::setEngineType (TabKind k, int pageIndex,
         return nullptr;
     }
 
+    // TS7 §6.5: a different engine produces different audio, so this tab's freeze
+    // is stale.  Per-tab and precise here, unlike the roll hook which has to mark
+    // broadly -- the swap knows exactly which tab it changed.
+    markEngineContentChanged (k, pageIndex);
+
     registerWithProcessor (*tab);
+
+    // TS7 §6.5: watch this engine's OWN parameters so a knob move on a frozen tab
+    // marks it stale.  Attached after creation and re-made per engine, so a swap
+    // cannot leave a listener on a destroyed APVTS.
+    if (auto* apvts = apvtsOf (tab->engine.get()))
+    {
+        tab->freezeWatcher = std::make_unique<EngineTab::FreezeParamWatcher>();
+        tab->freezeWatcher->onChanged = [this, k, pageIndex]
+        { markEngineContentChanged (k, pageIndex); };
+        apvts->state.addListener (tab->freezeWatcher.get());
+    }
+
     if (onEngineCreated) onEngineCreated (*tab);
     return tab->engine.get();
 }
@@ -253,6 +348,15 @@ void EngineRig::registerWithProcessor (EngineTab& tab)
     if (tab.engine == nullptr) return;
     auto* eng = tab.engine.get();
 
+    // 2026-07-31: hand the new engine the transport.  The processor's per-block
+    // propagation is gated on the playhead POINTER changing, and it changes once
+    // at the first audio block -- long before this engine existed -- so without
+    // this an engine added later never receives one.  For a hosted VST3 that is
+    // the whole of its transport: JUCE derives the entire VST3 ProcessContext
+    // from AudioPlayHead::getPosition(), so no playhead means a zeroed context
+    // and nothing in the plugin syncs to anything.
+    eng->setPlayHead (mProc.enginePlayHead());
+
     switch (tab.kind)
     {
         case TabKind::Layers: mProc.registerLayerEngine (tab.pageIndex, eng); break;
@@ -286,6 +390,22 @@ void EngineRig::registerWithProcessor (EngineTab& tab)
             if      (tab.kind == TabKind::Clips) mProc.registerClipEngine (tab.pageIndex, eng);
             else if (tab.kind == TabKind::Vox)   mProc.registerVoxEngine  (tab.pageIndex, eng);
             else                                 mProc.registerInstEngine (tab.pageIndex, eng);
+
+            // TS7 §6.5: pitch + align edits are BAKED INTO a Vox freeze (the
+            // capture point is below both), and they never touch the APVTS tree
+            // the freeze watcher listens to -- so without this hook, editing a
+            // note on a frozen vocal would keep playing the old take silently.
+            // Wired HERE, at registration, so it survives every engine swap and
+            // project reload rather than depending on a page existing.
+            if (tab.kind == TabKind::Vox)
+                if (auto* vp = dynamic_cast<BaySickVocalProcessor*> (eng))
+                {
+                    const int pageIdx = tab.pageIndex;
+                    vp->onPitchAlignEditsChanged = [this, pageIdx]
+                    {
+                        markEngineContentChanged (TabKind::Vox, pageIdx);
+                    };
+                }
             break;
         }
     }
@@ -310,6 +430,20 @@ void EngineRig::teardownEngine (EngineTab& tab, bool settleAfterUnregister)
     if (tab.engine == nullptr) return;
 
     if (onEngineDestroying) onEngineDestroying (tab);
+
+    // TS7 §6.5: detach the freeze param watcher BEFORE the engine (and its
+    // APVTS) is destroyed.  EngineTab's members destruct in REVERSE declaration
+    // order, so freezeWatcher would otherwise die while the tree it is attached
+    // to is still alive -- a dangling listener that the next property change
+    // would walk into.  Removed here so the order is explicit rather than a
+    // property of member layout that a later tidy-up could silently flip.
+    if (tab.freezeWatcher != nullptr)
+    {
+        if (auto* apvts = apvtsOf (tab.engine.get()))
+            apvts->state.removeListener (tab.freezeWatcher.get());
+        tab.freezeWatcher.reset();
+    }
+
     unregisterFromProcessor (tab);
     if (settleAfterUnregister)
         juce::Thread::sleep (20);   // outlast one audio block (page-dtor contract)

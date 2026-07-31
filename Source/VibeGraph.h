@@ -526,8 +526,72 @@ public:
     float getMasterLufs (int mode) const noexcept;
     void  resetMasterLufsIntegrated() noexcept;
 
+    // CL-044 (QA-ModelShell TS7): master-out spectrum feed, tapped at the same
+    // point as the LUFS meter (post fader/pan/width) so the analyzer shows what
+    // actually leaves the app.
+    //
+    // The ACTIVE FLAG lives here rather than on the master node deliberately: the
+    // node is destroyed and rebuilt by topology changes, and a flag living there
+    // would silently reset while the analyzer window was still open.  The node
+    // holds a pointer to this one, so a rebuild re-points at the same flag.
+    // setMasterSpectrumActive() is called by the analyzer window's peer-keyed
+    // suspend hook, so a closed window costs one relaxed load per block.
+    void setMasterSpectrumActive (bool on) noexcept;
+    // TS7 §3.1: version capture's own want on the same tap.  Analysis is always
+    // on, so it cannot depend on the analyzer window being open; the tap runs if
+    // EITHER client wants it.
+    void setMasterAnalysisActive (bool on) noexcept;
+    // UI thread: copies one frame.  Returns false if audio was mid-write (frame
+    // dropped, which is correct for a visualiser) or if the tap is inactive.
+    bool pollMasterSpectrum (float* dest, int& outCount) noexcept;
+    // Master-out TRUE PEAK (BLU-108), measured at the same point.  Returns -144
+    // when the tap is inactive rather than a stale value.
+    float getMasterTruePeakDb() const noexcept;
+    // TS7 §3.1: running max since the last reset, for a capture take's true peak.
+    // Sampling the per-block value from the UI timer would miss the block the
+    // overshoot lands in.
+    float getMasterTruePeakMaxDb() const noexcept;
+    void  resetMasterTruePeakMax() noexcept;
+
     // Return the post-rack EQ owned by an InsertNode (or nullptr). Parallels
     // getInsertRack - same opaque-InsertNode reason.
+    // TS7 §6.2 (freeze, pre-rack "Source Only" tap).  Captures an insert's signal
+    // at the TOP of its chain -- before preEq / polarity / width / rack / eq /
+    // fader -- which is what lets a frozen tab keep its rack live and editable.
+    // NOT the arena slot getStripOutputForTap returns: that is POST-chain (stems).
+    // One insert armed at a time; arming clears any previous arm.
+    // ── TS7 per-block host transport ─────────────────────────────────────────
+    // Published once per block by PluginProcessor before the dispatcher runs,
+    // read by every node's rack push.  Exists so a hosted VST3 in a RACK SLOT
+    // gets a real playhead: JUCE builds the whole VST3 ProcessContext from one
+    // AudioPlayHead::getPosition(), so without this a tempo-synced delay or an
+    // arpeggiator in a rack slot had no host to follow.
+    //
+    // STATIC, matching AudioClipStreamer::sOfflineRender and
+    // RenderEngine::gMultiThreadedEngineEnabled: the nodes are nested structs
+    // with no back-pointer to the graph, and threading one through would have
+    // meant changing processInsert's signature at every task call site for a
+    // value that is identical across the whole block.  One processor per app
+    // (standalone only), so a single snapshot is the whole truth.
+    //
+    // Written on the audio thread before task submission; the pool's
+    // release/acquire on submit is what publishes it to the workers.
+    static void setBlockTransport (const DSPBase::HostTransport& tp) noexcept
+    { sBlockTransport = tp; }
+    // bpm comes from the CALLER because each node is already handed the block's
+    // tempo; everything else rides the snapshot.
+    static DSPBase::HostTransport blockTransport (double bpm) noexcept
+    { auto tp = sBlockTransport; tp.bpm = bpm; return tp; }
+
+    void armFreezeTap (InsertKind kind, int index);
+    void disarmFreezeTap();
+    // OFFLINE USE ONLY -- same contract as getStripOutputForTap.
+    juce::AudioBuffer<float>* getFreezeTapBuffer() noexcept;
+    // Advances only when the tap ACTUALLY copied this block.  The tapped node's
+    // processBlock does not run every block, so without this the render cannot
+    // distinguish a fresh capture from the previous block's leftovers.
+    juce::uint32 getFreezeTapSeq() const noexcept;
+
     EQ8MsDSP*   getInsertEQ     (InsertKind kind, int index);
     EQ8MsDSP*   getInsertPreEQ  (InsertKind kind, int index);   // §P4.3
 
@@ -741,6 +805,9 @@ public:
     std::array<std::atomic<float>, MixerChannelIds::kMaxRustyStrips>  rustyInsertPeakDbL  {}, rustyInsertPeakDbR  {};
     std::array<std::atomic<float>, MixerChannelIds::kMaxPluginStrips> pluginInsertPeakDbL {}, pluginInsertPeakDbR {};
 
+    // TS7 per-block transport snapshot -- see setBlockTransport above.
+    static DSPBase::HostTransport sBlockTransport;
+
     // ── Phase-2 instrument node registry ─────────────────────────────────────
     // Nodes registered here will be integrated into the processing graph in a
     // future session when the full AudioProcessorGraph path is wired.
@@ -764,13 +831,32 @@ private:
     std::unique_ptr<InstrChannelNode> mBassNode;
     std::unique_ptr<InstrChannelNode> mDrumsNode;
     std::unique_ptr<InstrChannelNode> mMasterNode;
+    // TS7 §6.2: the currently armed freeze-tap insert, or null.  Raw because the
+    // node is owned elsewhere and this is cleared by disarmFreezeTap; the render
+    // that arms it is the only thing that reads it, and it runs with the device
+    // suspended.
+    InsertNode*                       mFreezeTapNode { nullptr };
+    // CL-044: owned HERE rather than on the node.  NOTE the original rationale
+    // ("a topology rebuild would reset it") does not hold -- buildFixedTopology
+    // early-returns on mTopologyBuilt, so mMasterNode is built exactly once.  It
+    // stays here anyway because the flag is now the OR of two clients (below) and
+    // that arbitration is graph-level state, not node state.
+    std::atomic<bool>                 mMasterSpecActive { false };
+    // TS7 §3.1: the two independent wants behind mMasterSpecActive (analyzer
+    // window / version capture).  updateMasterTapFlag folds them together --
+    // neither client may write the effective flag, or closing the window would
+    // silently stop capture's analysis.
+    std::atomic<bool>                 mMasterSpecWanted     { false };
+    std::atomic<bool>                 mMasterAnalysisWanted { false };
+    void updateMasterTapFlag() noexcept;
     std::unique_ptr<InstrChannelNode> mEffectsBusNode;
     std::unique_ptr<InstrChannelNode> mAudioClipsBusNode;  // rack+EQ for all audio clips (ID 6)
 
     // QA-Ea Part A (2026-05-21): cached bus _solo atomic pointers for the
     // anyBusSoloed() helper.  Bound in rebindBusApvts().  Order matches
-    // kBusSoloPrefixes[11] in VibeGraph.cpp (layers / bass / drums / fx /
-    // clipsbus / voxbus / instbus / voxbus2 / instbus2 / instbus3 / rustybus).
+    // kBusSoloPrefixes[12] in VibeGraph.cpp (layers / bass / drums / fx /
+    // clipsbus / voxbus / instbus / voxbus2 / instbus2 / instbus3 / rustybus /
+    // pluginbus).
     // CPU-safeguarding standing rule: avoid string-keyed getRawParameterValue
     // lookups per audio block; cache the raw atomic ptrs once + reuse.
     std::array<std::atomic<float>*, 12> mBusSoloPtr {};

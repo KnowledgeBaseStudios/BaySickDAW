@@ -1,6 +1,7 @@
 #include "VibeGraph.h"
 #include "BassSynth.h"
 #include "DSP/LufsMeterDSP.h"   // QA-RustyMeter Task 3: master-bus EBU R128 LUFS
+#include "DSP/TruePeakMeter.h"  // QA-ModelShell TS7 CL-044: master-out true peak
 // DrumSynth.h removed from graph (2026-04-25) - no longer references the class.
 #include <unordered_map>
 #include <unordered_set>
@@ -333,6 +334,8 @@ struct VibeGraph::InsertNode
         rack .prepare(sr, blockSize);
         eq   .prepare(sr, blockSize);
         scTap.setSize(2, juce::jmax(1, blockSize), false, true, false);
+        // TS7 §6.2: sized here so the audio-thread tap is a pure copy.
+        freezeTapBuf.setSize(2, juce::jmax(1, blockSize), false, true, false);
     }
     void reset()
     {
@@ -365,6 +368,25 @@ struct VibeGraph::InsertNode
     // 5F-4a Batch 6: exposed for anySolo computation on the audio thread.
     bool isSoloed() const noexcept { return load(pSolo, 0.f) > 0.5f; }
 
+    // ── TS7 §6.2: pre-rack "Source Only" freeze tap ───────────────────────────
+    // Armed by VibeGraph::armFreezeTap for ONE insert during a freeze render.
+    // The copy is taken at the very TOP of processBlock -- before preEq, and
+    // therefore before the whole chain (preEq -> polarity -> width -> rack -> eq
+    // -> fader -> pan).  That is what makes a frozen tab keep its rack live and
+    // editable, which is the entire point of Jeff's Source Only ruling.
+    //
+    // Deliberately NOT the arena slot getStripOutputForTap returns: that is the
+    // POST-chain output (what stems are), so it could not serve this.
+    std::atomic<bool>        freezeTapArmed { false };
+    juce::AudioBuffer<float> freezeTapBuf;
+    // Bumped on every actual copy.  The render reads the buffer BETWEEN blocks
+    // and cannot otherwise tell a fresh capture from last block's leftovers --
+    // and this node's processBlock does NOT run every block (a Clips row with a
+    // gap between clips skips it, an idle-suspended engine skips it).  Without
+    // this, those gaps were written as a REPEAT of the previous block instead of
+    // silence: a stutter baked into the freeze file.
+    std::atomic<juce::uint32> freezeTapSeq { 0 };
+
     // Audio thread: process buf in-place.
     // If preRenderedSrc is non-null and has matching sample count, copied into buf first.
     // anySolo: global solo-active flag (computed by caller once per block).
@@ -379,6 +401,17 @@ struct VibeGraph::InsertNode
             const int srcCh = juce::jmin(nc, preRenderedSrc->getNumChannels());
             for (int c = 0; c < srcCh; ++c)
                 buf.copyFrom(c, 0, *preRenderedSrc, c, 0, n);
+        }
+
+        // TS7 §6.2: the Source Only tap, taken BEFORE any chain stage runs.
+        // Sized at prepare, so this is a copy with no allocation.
+        if (freezeTapArmed.load (std::memory_order_relaxed)
+            && freezeTapBuf.getNumSamples() >= n)
+        {
+            const int tc = juce::jmin (nc, freezeTapBuf.getNumChannels());
+            for (int c = 0; c < tc; ++c)
+                freezeTapBuf.copyFrom (c, 0, buf, c, 0, n);
+            freezeTapSeq.fetch_add (1, std::memory_order_release);
         }
 
         // §P4.3 pre-rack EQ - first DSP stage, before polarity / width / rack.
@@ -411,7 +444,7 @@ struct VibeGraph::InsertNode
         const bool bypass       = stripBypass || globalBypass;
         if (rack.isRackBypassed() != bypass)
             rack.setRackBypassed(bypass);
-        rack.setHostBPM(bpm);
+        rack.setHostTransport (VibeGraph::blockTransport (bpm));
         rack.process(buf);
 
         // Post-rack EQ (identity short-circuit + spectrum feed live inside).
@@ -496,6 +529,30 @@ struct VibeGraph::InstrChannelNode
     // sibling buses carry the member unprocessed (prepare-time cost only).
     LufsMeterDSP mLufs;
 
+    // CL-044 (QA-ModelShell TS7): master-out spectrum tap.  Written by the MASTER
+    // chain only; sibling buses never touch either member.  `specFeedActive` is
+    // owned by VibeGraph (not the node) because the UI toggles it and the node is
+    // rebuilt by topology changes -- a flag living here would be reset behind the
+    // window's back.  Null on every non-master node, which is also the gate.
+    SpectrumFeed        specFeed;
+    std::atomic<bool>*  specFeedActive { nullptr };
+    // Pre-allocated: the mono sum cannot allocate on the audio thread.
+    std::vector<float>  specMonoScratch;
+
+    // CL-044 / BLU-108: master-out TRUE PEAK, measured at the same point as the
+    // loudness meter so the analyzer's three numbers all describe one signal.
+    // Gated by the same flag as the spectrum tap -- a closed analyzer pays for
+    // neither.  resetPeak (not reset) per block keeps filter history across the
+    // boundary, so there is no seam in the measurement.
+    TruePeakMeter       specTp;
+    std::atomic<float>  masterTpDb { -144.0f };
+    // TS7 §3.1: the running MAX across a capture take, beside the per-block
+    // value the readout shows.  A take's true peak cannot be sampled by the UI
+    // timer -- at ~43 blocks/sec against a 30 Hz poll, the one block carrying
+    // the overshoot is exactly what gets missed.  Audio keeps the max; the UI
+    // only reads and clears it.
+    std::atomic<float>  masterTpMaxDb { -144.0f };
+
     // QA-Eg: G1-pattern peak fields.  publishPeakReading writes peakDb/L/R +
     // ring; processBus exchange-stores into VibeGraph member atomics;
     // drainMeterAtomicsForUI drains those into PluginProcessor mirrors.
@@ -533,6 +590,10 @@ struct VibeGraph::InstrChannelNode
         eq  .prepare(sr, blockSize);
         scTap.setSize(2, juce::jmax(1, blockSize), false, true, false);
         mLufs.prepareToPlay(sr);        // derive K-weighting + bin ring
+        // CL-044: sized to the feed's own capacity, not the block size, so a
+        // later block-size increase cannot outrun it before the next prepare.
+        specMonoScratch.assign((size_t) SpectrumFeed::kSize, 0.0f);
+        specTp.prepare(2);
     }
     void reset()
     {
@@ -571,7 +632,7 @@ struct VibeGraph::InstrChannelNode
                           bool anyBusSoloed)
     {
         if (buf.getNumChannels() >= 2) preEq.process(buf);   // §P4.3 (identity short-circuit + spectrum feed inside)
-        rack.setHostBPM(bpm);
+        rack.setHostTransport (VibeGraph::blockTransport (bpm));
         {
             const bool stripBypass  = loadParam(pBypass, 0.f) > 0.5f;
             const bool globalBypass = loadParam(pGlobalFxBypass, 0.f) > 0.5f;
@@ -625,7 +686,7 @@ struct VibeGraph::InstrChannelNode
     void processMasterChain(juce::AudioBuffer<float>& buf, double bpm)
     {
         if (buf.getNumChannels() >= 2) preEq.process(buf);   // §P4.3
-        rack.setHostBPM(bpm);
+        rack.setHostTransport (VibeGraph::blockTransport (bpm));
         // mixer_master_bypass bypasses the master rack only; master_fx_bypass
         // also bypasses every other strip's rack.  OR-ed together.
         {
@@ -666,6 +727,44 @@ struct VibeGraph::InstrChannelNode
         // atoms read by the UI LUFS box.
         mLufs.process (buf);
 
+        // CL-044 (QA-ModelShell TS7): master-out spectrum tap, at the SAME point
+        // as the loudness meter -- post fader/pan/width -- so the analyzer shows
+        // what leaves the app rather than a pre-fader version of it.  The push is
+        // wait-free (seqlock) and gated on a UI-set flag, so a closed analyzer
+        // window costs one relaxed atomic load per block.
+        if (specFeedActive != nullptr
+            && specFeedActive->load (std::memory_order_relaxed))
+        {
+            // Mono sum: a spectrum analyzer wants the programme's magnitude
+            // response, and two independent traces would just overdraw.
+            const int n = juce::jmin (buf.getNumSamples(), SpectrumFeed::kSize);
+            if (buf.getNumChannels() >= 2)
+            {
+                const float* specL = buf.getReadPointer (0);
+                const float* specR = buf.getReadPointer (1);
+                for (int s = 0; s < n; ++s)
+                    specMonoScratch[(size_t) s] = 0.5f * (specL[s] + specR[s]);
+                specFeed.push (specMonoScratch.data(), n);
+            }
+            else
+            {
+                specFeed.push (buf.getReadPointer (0), n);
+            }
+
+            // BLU-108 at the master: the real inter-sample peak of what leaves
+            // the app, for the analyzer's True Peak readout.
+            specTp.resetPeak();
+            specTp.process (buf);
+            const float tpDb = specTp.truePeakDb();
+            masterTpDb.store (tpDb, std::memory_order_relaxed);
+
+            // Plain load/compare/store, not a CAS loop: this is the only writer
+            // (one audio thread), and the UI's clear racing a store can at worst
+            // lose one block of a take that is being restarted anyway.
+            if (tpDb > masterTpMaxDb.load (std::memory_order_relaxed))
+                masterTpMaxDb.store (tpDb, std::memory_order_relaxed);
+        }
+
         publishPeakReading (buf, peakRingL, peakRingR, peakRingIdx,
                             peakDbL, peakDbR, peakDb);
     }
@@ -674,6 +773,9 @@ struct VibeGraph::InstrChannelNode
 // ═══════════════════════════════════════════════════════════════════════════════
 //  VibeGraph implementation
 // ═══════════════════════════════════════════════════════════════════════════════
+
+// TS7 per-block transport snapshot.  See VibeGraph.h for why this is static.
+DSPBase::HostTransport VibeGraph::sBlockTransport {};
 
 VibeGraph::VibeGraph()  = default;
 
@@ -886,6 +988,65 @@ float VibeGraph::getMasterLufs (int mode) const noexcept
 void VibeGraph::resetMasterLufsIntegrated() noexcept
 {
     if (mMasterNode != nullptr) mMasterNode->mLufs.resetIntegrated();
+}
+
+// CL-044 (QA-ModelShell TS7): master-out spectrum tap control + drain.
+void VibeGraph::setMasterSpectrumActive (bool on) noexcept
+{
+    mMasterSpecWanted.store (on, std::memory_order_relaxed);
+    updateMasterTapFlag();
+}
+
+// TS7 §3.1: version capture is the SECOND client of this tap, and its analysis
+// half is always on -- so the tap can no longer be owned by whether the analyzer
+// window happens to be open.  Two independent wants, OR'd, rather than one
+// window's suspend hook writing the flag directly.
+void VibeGraph::setMasterAnalysisActive (bool on) noexcept
+{
+    mMasterAnalysisWanted.store (on, std::memory_order_relaxed);
+    updateMasterTapFlag();
+}
+
+float VibeGraph::getMasterTruePeakMaxDb() const noexcept
+{
+    if (mMasterNode == nullptr) return -144.0f;
+    return mMasterNode->masterTpMaxDb.load (std::memory_order_relaxed);
+}
+
+void VibeGraph::resetMasterTruePeakMax() noexcept
+{
+    if (mMasterNode != nullptr)
+        mMasterNode->masterTpMaxDb.store (-144.0f, std::memory_order_relaxed);
+}
+
+void VibeGraph::updateMasterTapFlag() noexcept
+{
+    mMasterSpecActive.store (
+        mMasterSpecWanted.load (std::memory_order_relaxed)
+            || mMasterAnalysisWanted.load (std::memory_order_relaxed),
+        std::memory_order_relaxed);
+    // Re-point on every call rather than only at node construction: the master
+    // node is rebuilt by topology changes, and a pointer installed once would go
+    // stale exactly when the analyzer was open across a rebuild.
+    if (mMasterNode != nullptr)
+        mMasterNode->specFeedActive = &mMasterSpecActive;
+}
+
+bool VibeGraph::pollMasterSpectrum (float* dest, int& outCount) noexcept
+{
+    outCount = 0;
+    if (dest == nullptr || mMasterNode == nullptr) return false;
+    if (! mMasterSpecActive.load (std::memory_order_relaxed)) return false;
+    return mMasterNode->specFeed.poll (dest, outCount);
+}
+
+// -144 when the tap is inactive: reporting a stale peak would be worse than
+// reporting none, since the analyzer cannot tell the difference.
+float VibeGraph::getMasterTruePeakDb() const noexcept
+{
+    if (mMasterNode == nullptr) return -144.0f;
+    if (! mMasterSpecActive.load (std::memory_order_relaxed)) return -144.0f;
+    return mMasterNode->masterTpDb.load (std::memory_order_relaxed);
 }
 
 void VibeGraph::processBus(int busChId, juce::AudioBuffer<float>& buf,
@@ -1995,6 +2156,42 @@ EffectRack* VibeGraph::getInsertRack(InsertKind kind, int index)
     if (auto* node = getInsertNode(kind, index))
         return &node->rack;
     return nullptr;
+}
+
+// ── TS7 §6.2: the pre-rack "Source Only" freeze tap ──────────────────────────
+// Exactly ONE insert is armed at a time -- a freeze render targets one tab, and
+// allowing several would mean several destinations to disambiguate for no gain.
+// Arming clears any previous arm so a cancelled render cannot leave a node
+// copying into a buffer nobody reads.
+void VibeGraph::armFreezeTap (InsertKind kind, int index)
+{
+    disarmFreezeTap();
+    if (auto* node = getInsertNode (kind, index))
+    {
+        mFreezeTapNode = node;
+        node->freezeTapArmed.store (true, std::memory_order_relaxed);
+    }
+}
+
+void VibeGraph::disarmFreezeTap()
+{
+    if (mFreezeTapNode != nullptr)
+        mFreezeTapNode->freezeTapArmed.store (false, std::memory_order_relaxed);
+    mFreezeTapNode = nullptr;
+}
+
+// OFFLINE USE ONLY, same contract as getStripOutputForTap: valid on the render
+// thread between a processBlock return and the next call, while the device is
+// suspended.
+juce::AudioBuffer<float>* VibeGraph::getFreezeTapBuffer() noexcept
+{
+    return mFreezeTapNode != nullptr ? &mFreezeTapNode->freezeTapBuf : nullptr;
+}
+
+juce::uint32 VibeGraph::getFreezeTapSeq() const noexcept
+{
+    return mFreezeTapNode != nullptr
+             ? mFreezeTapNode->freezeTapSeq.load (std::memory_order_acquire) : 0;
 }
 
 // QA-RustyMeter (2026-05-30): UI-thread drain of an insert node's RMS for the

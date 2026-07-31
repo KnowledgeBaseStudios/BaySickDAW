@@ -306,6 +306,10 @@ public:
 
     // BPM propagated to all time-based effects
     void setHostBPM(double bpm);
+    // TS7: the per-block variant -- pushes tempo AND full transport in one slot
+    // walk.  The node process paths call this; setHostBPM above stays for the
+    // load / restore paths that have no transport to hand.
+    void setHostTransport(const DSPBase::HostTransport& tp);
 
     // ── Serialization ─────────────────────────────────────────────────────────
     void getStateInformation(juce::MemoryBlock& dest);

@@ -230,13 +230,27 @@ MixerTrackStrip::MixerTrackStrip(const juce::String& trackName,
     if (mType == StripType::Master)
         addAndMakeVisible(mMasterFXBypassBtn);
 
-    // 5F-4b B5: "+" add-send button (all strip types)
-    mAddSendBtn.setButtonText("+");
+    // 5F-4b B5: "+" add-send button (all strip types).
+    //
+    // QA-ModelShell TS7 (CL-044, Jeff 2026-07-29): on MASTER this button is
+    // repurposed as the Analyzer button.  A send FROM master is structurally
+    // impossible -- master is the terminal node, so there is nothing downstream
+    // to send to -- which made it dead affordance on exactly one strip, and puts
+    // the analyzer where the user is already standing when they want it.
+    const bool isMaster = (mType == StripType::Master);
+    mAddSendBtn.setButtonText (isMaster ? "Analyzer" : "+");
     mAddSendBtn.setColour(juce::TextButton::buttonColourId, VC::Surface);
     mAddSendBtn.setColour(juce::TextButton::textColourOffId, VC::Text);
-    mAddSendBtn.setTooltip("Add send cable from this strip");
+    mAddSendBtn.setTooltip (isMaster
+        ? "Open the master analyzer - loudness, spectrum and the render report"
+        : "Add send cable from this strip");
     mAddSendBtn.onClick = [this]
     {
+        if (mType == StripType::Master)
+        {
+            if (onAnalyzerRequested) onAnalyzerRequested();
+            return;
+        }
         if (onAddSendRequested && mChannelId >= 0)
             onAddSendRequested(mChannelId);
     };

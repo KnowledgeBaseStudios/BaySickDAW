@@ -42,6 +42,11 @@
 #define VID(id) juce::ParameterID{(id), 1}
 
 class EngineRig;   // QA-ModelShell TS1: model-side engine owner (member at class end)
+// TS7 §6: opaque enum declaration rather than including EngineRig.h.  A scoped
+// enum has a fixed underlying type, so it can be forward-declared -- which keeps
+// EngineRig.h (and the AudioClipStreamer it now pulls in) out of this header,
+// preserving the deliberate forward-declaration above.
+enum class TabKind;
 namespace Hosting { class PluginManager; }   // QA-ModelShell TS6
 
 class VibeSynthProcessor : public juce::AudioProcessor,
@@ -216,6 +221,34 @@ public:
         return exports;
     }
 
+    // QA-ModelShell TS7 (CL-227): `<project>\Reports\` -- the loudness
+    // conformance reports.  Deliberately a SIBLING of Exports rather than a
+    // subfolder of it: the Builder's Files browser lists the two as separate
+    // sections, and reports are not audio the user might drag into the grid.
+    // Same Music-folder fallback as Exports for an unsaved session.
+    juce::File getProjectReportsDir()
+    {
+        const juce::File proj = getCurrentProjectFolder();
+        if (proj == juce::File() || ! proj.isDirectory())
+            return juce::File::getSpecialLocation (juce::File::userMusicDirectory);
+        const juce::File reports = proj.getChildFile ("Reports");
+        reports.createDirectory();
+        return reports;
+    }
+
+    // QA-ModelShell TS7 (§6.7): `<project>\Freeze\` -- the frozen-track audio
+    // cache.  ONE file per track, overwritten in place on re-render.  Excluded
+    // from project bundles and from the Files browser: regenerable cache, not
+    // something the user made.
+    juce::File getProjectFreezeDir()
+    {
+        const juce::File proj = getCurrentProjectFolder();
+        if (proj == juce::File() || ! proj.isDirectory()) return juce::File();
+        const juce::File fz = proj.getChildFile ("Freeze");
+        fz.createDirectory();
+        return fz;
+    }
+
     BassSynth& getBassSynth() { return mBassSynth; }
     void       allNotesOff()  { mSynth.allNotesOff(1, false); }
 
@@ -257,6 +290,27 @@ public:
     // backward ppq jump (play-from-top / loop-start).  M/S keep tracking.
     bool   mLufsWasPlaying { false };
     double mLufsLastPpq    { 0.0 };
+
+    // 2026-07-30: last playhead propagated to the child engines.  Written on the
+    // audio thread; a plain pointer compare so the N stores happen only when it
+    // changes (startup, and the offline render's swap in and back out).
+    //
+    // CHANGE-GATED PROPAGATION ALONE IS NOT ENOUGH (found 2026-07-31).  The
+    // pointer changes once, at the first audio block -- which runs BEFORE any
+    // engine exists (the audio callback is installed before the editor builds
+    // its tabs).  Every engine created afterwards -- project load, add tab, swap
+    // engine -- was therefore never handed a playhead at all, so its tempo-synced
+    // DSP had nothing to follow.  Invisible for our own engines, which mostly
+    // read bpm by other means; fatal for a hosted VST3, whose ENTIRE transport
+    // comes from this pointer.  enginePlayHead() below is the other half: every
+    // creation path sets it on the new engine.
+    juce::AudioPlayHead* mLastEnginePlayHead { nullptr };
+
+    // TS7 §3.2: version-capture transport edges, published from the SAME test
+    // above.  Counters rather than flags so a UI tick that lands between two
+    // edges still sees both happened.
+    std::atomic<juce::uint32> mPlayStartEdges { 0 };
+    std::atomic<juce::uint32> mLoopWrapEdges  { 0 };
 
     // Mixer state -- read by processBlock from PatternManager when available
     // Also settable directly for VST mode (no PatternManager)
@@ -906,6 +960,94 @@ public:
     // mode 0=Momentary / 1=Short-Term / 2=Integrated.  Passthrough to mVibeGraph.
     float getMasterLufs (int mode) const noexcept;
 
+    // CL-044 (QA-ModelShell TS7): master-out spectrum tap for the floating
+    // analyzer window.  Tapped post fader/pan/width, same point as the LUFS
+    // meter.  The active flag is what keeps a closed window free.
+    void setMasterSpectrumActive (bool on) noexcept;
+    bool pollMasterSpectrum (float* dest, int& outCount) noexcept;
+
+    // ── TS7 §6: the freeze driver ─────────────────────────────────────────────
+    // Lives here because the processor owns BOTH halves it has to join: the rig
+    // (freeze state) and the render tasks (the audio-path switch).  The RENDER
+    // itself lives on BuilderPage, so it arrives as a hook rather than a
+    // dependency -- the processor must not reach into a view.
+    //
+    // Returns false + fills outErr if the render failed; the tab is left
+    // unfrozen in that case rather than frozen against a file that does not
+    // exist.
+    bool freezeTab   (TabKind kind, int pageIndex, juce::String& outErr,
+                      bool byUser = true);
+    void unfreezeTab (TabKind kind, int pageIndex);
+    // Re-renders a frozen tab whose content changed (§6.6).  Playback keeps
+    // falling back to the live engine until the new file is in place, so this is
+    // never audible as a gap.
+    bool refreshFreeze (TabKind kind, int pageIndex, juce::String& outErr);
+
+    // §6.7 file rules.  freezeFileFor is the ONE name builder -- it spells the
+    // kind as a name rather than the TabKind ordinal, so inserting an enumerator
+    // cannot silently re-point the freeze files a saved project refers to.
+    // Not const: getProjectFreezeDir creates the folder on demand.
+    juce::File freezeFileFor      (TabKind kind, int pageIndex);
+    void       deleteFreezeFileFor (TabKind kind, int pageIndex);
+    // Removes freeze files whose tab no longer exists.  Call after a project's
+    // tabs are restored; without it the folder only ever grows.
+    void       sweepOrphanFreezeFiles();
+
+    // Supplied by StandaloneEditor, calling BuilderPage::renderFreezeFile.
+    // The RenderTask rides along purely so the render can prune the graph to it
+    // (see setFreezePrune) -- the tap itself is still addressed by InsertKind.
+    std::function<bool (VibeGraph::InsertKind, int index, RenderTask*,
+                        const juce::File&, juce::String&)> onRenderFreezeFile;
+
+    // TS7 §6.9: the kit's thirteen strips in ONE render pass.  A separate hook
+    // rather than N calls to the one above, because thirteen separate renders
+    // would pay the offline setup cost -- and the silence -- thirteen times over
+    // for audio one sfizz pass already produces together.
+    std::function<bool (const std::vector<juce::File>&, RenderTask*, juce::String&)>
+        onRenderKitFreezeFiles;
+
+    // TS7 §6.9: forwards to the dispatcher.  Exposed here because the renderer
+    // lives on BuilderPage and must not reach into the private render graph.
+    void setFreezePrune (RenderTask* target) { mRenderDispatcher.setFreezePrune (target); }
+
+    bool freezeRustyKit (juce::String& outErr, bool byUser);
+
+    // The task carrying a tab's audio, or null.  The freeze switch and any
+    // future per-tab audio routing both need it.
+    // RenderTask, not EngineInsertTask: Vox / Inst strips are plain RenderTasks
+    // and the narrower type is what shut freeze out of them (TS7 §6.9).
+    RenderTask* renderTaskForTab (TabKind kind, int pageIndex) noexcept;
+
+    // The playhead child engines are currently pointed at.  EVERY engine
+    // creation path must hand this to the new engine -- see mLastEnginePlayHead
+    // for why the per-block change-gate cannot cover engines created later.
+    // Null before the first audio block, which is harmless: that block's change
+    // test then propagates to everything at once.
+    juce::AudioPlayHead* enginePlayHead() const noexcept { return mLastEnginePlayHead; }
+    float getMasterTruePeakDb() const noexcept;
+
+    // ── TS7 §3: version capture support ──────────────────────────────────────
+    // Edge counters (§3.2) read by the editor's timer; the audio thread never
+    // calls into capture.
+    juce::uint32 getPlayStartEdges() const noexcept
+        { return mPlayStartEdges.load (std::memory_order_relaxed); }
+    juce::uint32 getLoopWrapEdges() const noexcept
+        { return mLoopWrapEdges.load (std::memory_order_relaxed); }
+    // The master tap kept alive for capture's analysis half (§3.1), independent
+    // of whether the analyzer window is open.
+    void  setMasterAnalysisActive (bool on) noexcept;
+    float getMasterTruePeakMaxDb() const noexcept;
+    void  resetMasterTruePeakMax() noexcept;
+
+    // §3.5 audio half.  Reuses AudioFileRecorder (the existing writer) at the
+    // existing pre-metronome master tap; independent of the user's record path
+    // so the two can run at once.  Returns false if the file could not be
+    // opened -- capture then runs analysis-only rather than claiming audio it
+    // does not have.
+    bool startMasterCapture (const juce::File& target);
+    juce::File stopMasterCapture();
+    bool isMasterCapturing() const { return mCaptureRecorder.isRecording(); }
+
     // ── Graph infrastructure (Phase 1A) ───────────────────────────────────────
     VibeGraph mVibeGraph;
 
@@ -1063,6 +1205,7 @@ public:
 
 private:
     AudioFileRecorder              mMasterRecorder;        // master-output fallback
+    AudioFileRecorder              mCaptureRecorder;       // TS7 §3.5 version capture
     std::vector<StripRecorder>     mStripRecorders;        // per-armed-strip WAVs
     std::atomic<RecordMode>        mRecordMode { RecordMode::Audio };
     double                         mRecordStartBeat { 0.0 };
@@ -1207,6 +1350,10 @@ private:
     static constexpr int kIdleSuspendBlocks = 9;   // ~200ms at 256/44.1k
     std::array<int, kMaxInstPages> mInstIdleBlocks {};
     int mRustyIdleBlocks { 0 };
+    // TS7 §6.9: every loaded kit strip is frozen, so the producer can skip the
+    // whole sfizz render.  Set on the message thread by freezeTab/unfreezeTab,
+    // read by the producer every block.
+    std::atomic<bool> mRustyKitFrozen { false };
     // 2026-05-06: bus-level idle gate REVERTED - the per-block magnitude
     // check added overhead during active playback (where buses are not
     // silent) without offsetting savings, net-negative on busy sessions.
@@ -1405,16 +1552,39 @@ private:
     // change.  Catches param edits from UI (message thread), automation (audio
     // thread), and host-driven setValue calls - all uniformly route through
     // ValueTree::setProperty under the hood.
-    void valueTreePropertyChanged (juce::ValueTree&, const juce::Identifier&) override
+    void valueTreePropertyChanged (juce::ValueTree& tree, const juce::Identifier&) override
     {
         mEQsDirty.store(true, std::memory_order_relaxed);
         if (onAnyStateChange) onAnyStateChange();   // P5: project dirty tracking
+
+        // TS7 §6.5: SWING was a missing freeze invalidator.  It lives in the MAIN
+        // APVTS ("swing_*"), not the per-tab engine APVTS the freeze watcher
+        // listens to, so moving it changed what an engine played while every
+        // freeze still read as current.
+        //
+        // A STAMP, not a direct markEngineContentChanged call: this listener also
+        // fires on the AUDIO thread (automation writes route through
+        // ValueTree::setProperty too, per the comment above), and the rig walks a
+        // vector and fires view callbacks.  The editor's existing 5 Hz poll reads
+        // the stamp on the message thread and acts there.
+        // BOTH spellings.  The per-player knobs are "swing_<kind>_<n>_mix" /
+        // "_trunc", but the GLOBAL swing knob on the transport bar is
+        // "globalSwing" -- it does not share the prefix, so a prefix test alone
+        // silently missed the one control that re-times every player at once
+        // (found by Jeff asking which of the two this covered).
+        const auto pid = tree.getProperty ("id").toString();
+        if (pid.startsWith ("swing_") || pid == "globalSwing")
+            mSwingChangeStamp.fetch_add (1, std::memory_order_relaxed);
     }
     // Default true: first processBlock always syncs (catches initial state load
     // + factory defaults that may differ from DSP construction defaults).
     std::atomic<bool> mEQsDirty { true };
+    std::atomic<juce::uint32> mSwingChangeStamp { 0 };   // TS7 §6.5
 
 public:
+    juce::uint32 getSwingChangeStamp() const noexcept
+        { return mSwingChangeStamp.load (std::memory_order_relaxed); }
+
     // P5: wired by StandaloneEditor to ProjectManager::markDirty.  Fires on
     // any APVTS change (piggybacks on the existing valueTreePropertyChanged
     // subscription).

@@ -1,5 +1,6 @@
 #include "SharedUI.h"
 #include "../ProjectManager.h"   // QA-RustyMeter Task 3: getSettingsFile (LUFS mode persistence)
+#include "WindowChrome.h"        // TS7 §9.1: shared title-strip look
 
 // ── Filmstrip rendering ────────────────────────────────────────────────────────
 namespace Filmstrips
@@ -839,6 +840,82 @@ void VibeLAF::drawScrollbar(juce::Graphics& g, juce::ScrollBar&,
     }
 }
 
+// ── TS7 §9.1/§9.3: desktop-window chrome ─────────────────────────────────────
+// Painted through WindowChrome, the same helpers WorkspaceWindow uses, so the
+// contained shell and the windows that cannot be contained wear one title strip.
+namespace
+{
+    // JUCE's own close glyph is an X drawn from the button's colour; ours matches
+    // the shell's "x" TextButton without dragging a TextButton into a
+    // DocumentWindow's button slot (which expects a Button that paints itself).
+    class ChromeCloseButton : public juce::Button
+    {
+    public:
+        ChromeCloseButton() : juce::Button ("close") {}
+
+        void paintButton (juce::Graphics& g, bool isOver, bool isDown) override
+        {
+            auto b = getLocalBounds().toFloat();
+            if (isOver || isDown)
+            {
+                g.setColour (juce::Colours::white.withAlpha (isDown ? 0.22f : 0.12f));
+                g.fillRect (b);
+            }
+            const auto x = b.reduced (b.getWidth() * 0.33f, b.getHeight() * 0.33f);
+            g.setColour (WindowChrome::titleText());
+            g.drawLine (x.getX(), x.getY(), x.getRight(), x.getBottom(), 1.4f);
+            g.drawLine (x.getX(), x.getBottom(), x.getRight(), x.getY(), 1.4f);
+        }
+    };
+}
+
+void VibeLAF::drawDocumentWindowTitleBar (juce::DocumentWindow& win, juce::Graphics& g,
+                                          int w, int h, int titleSpaceX, int titleSpaceW,
+                                          const juce::Image* /*icon*/,
+                                          bool /*drawTitleTextOnLeft*/)
+{
+    // "Live" for a desktop window is the peer being the active one -- the shell's
+    // mouse-over/content-focus test does not apply to a window the OS focuses.
+    const bool live = win.isActiveWindow();
+    WindowChrome::paintTitleBar (g, juce::Rectangle<int> (0, 0, w, h), live);
+
+    // Drawn against the space JUCE reserved between the buttons rather than the
+    // full width, so a long title cannot run under the close button.
+    const auto textArea = juce::Rectangle<int> (titleSpaceX, 0,
+                                                juce::jmax (1, titleSpaceW), h);
+    g.setColour (WindowChrome::titleText());
+    g.setFont (juce::Font (13.0f));
+    g.drawText (win.getName(), textArea.reduced (8, 0),
+                juce::Justification::centredLeft, true);
+}
+
+juce::Button* VibeLAF::createDocumentWindowButton (int buttonType)
+{
+    // Locked call 5a applied to desktop windows too: close only.  Minimise and
+    // maximise are returned as null so DocumentWindow simply has none -- a
+    // maximised satellite covering the app is not a state this shell has a way
+    // back out of.
+    if (buttonType == juce::DocumentWindow::closeButton)
+        return new ChromeCloseButton();
+    return nullptr;
+}
+
+void VibeLAF::positionDocumentWindowButtons (juce::DocumentWindow&,
+                                             int titleBarX, int titleBarY,
+                                             int titleBarW, int titleBarH,
+                                             juce::Button* minimise, juce::Button* maximise,
+                                             juce::Button* close,
+                                             bool /*positionTitleBarButtonsOnLeft*/)
+{
+    // Square, right-aligned, inset by the same 4px the shell's close button uses.
+    if (close != nullptr)
+        close->setBounds (juce::Rectangle<int> (titleBarX + titleBarW - titleBarH,
+                                                titleBarY, titleBarH, titleBarH)
+                              .reduced (4));
+    if (minimise != nullptr) minimise->setBounds ({});
+    if (maximise != nullptr) maximise->setBounds ({});
+}
+
 void VibeLAF::drawGroupComponentOutline(juce::Graphics& g, int w, int h,
                                          const juce::String& text,
                                          const juce::Justification& just,
@@ -1451,6 +1528,9 @@ void PageMenuBar::clearTabSlots()
     if (mMidBtn)  { removeChildComponent(mMidBtn.get());  mMidBtn.reset(); }
     if (mSideBtn) { removeChildComponent(mSideBtn.get()); mSideBtn.reset(); }
     if (mFxRackBtn) { removeChildComponent(mFxRackBtn.get()); mFxRackBtn.reset(); }
+    if (mFreezeBtn) { removeChildComponent(mFreezeBtn.get()); mFreezeBtn.reset(); }
+    mFreezeState = nullptr;
+    mFreezeDisabledReason = nullptr;
     if (mSwingKnob) { removeChildComponent(mSwingKnob.get()); mSwingKnob.reset(); }
     mMidSideVisible = false;
     clearExtraRightComponents();
@@ -1505,6 +1585,85 @@ void PageMenuBar::setFxRackSlot(std::function<void()> onClick)
     mFxRackBtn->setVisible(true);
     mFxRackBtn->onClick = std::move(onClick);
     resized();
+}
+
+void PageMenuBar::setFreezeSlot (std::function<int()> getState,
+                                 std::function<void(bool)> onToggle,
+                                 std::function<juce::String()> getDisabledReason,
+                                 bool isVocal)
+{
+    mFreezeState          = std::move (getState);
+    mFreezeDisabledReason = std::move (getDisabledReason);
+    mFreezeIsVocal        = isVocal;
+
+    if (! mFreezeState || ! onToggle)
+    {
+        if (mFreezeBtn) mFreezeBtn->setVisible (false);
+        resized();
+        return;
+    }
+
+    if (! mFreezeBtn)
+    {
+        mFreezeBtn = std::make_unique<juce::TextButton> ("Freeze");
+        addAndMakeVisible (*mFreezeBtn);
+    }
+    mFreezeBtn->setVisible (true);
+    mFreezeBtn->onClick = [this, cb = std::move (onToggle)]
+    {
+        // Toggle against the LIVE state rather than a cached copy: auto-freeze
+        // and the staleness re-render both change it behind this button's back.
+        const int s = mFreezeState ? mFreezeState() : 0;
+        cb (s == 0);
+    };
+    refreshFreezeState();
+    resized();
+}
+
+void PageMenuBar::refreshFreezeState()
+{
+    if (! mFreezeBtn || ! mFreezeState) return;
+
+    const juce::String reason = mFreezeDisabledReason ? mFreezeDisabledReason()
+                                                      : juce::String();
+    const bool enabled = reason.isEmpty();
+    mFreezeBtn->setEnabled (enabled);
+
+    const int s = mFreezeState();
+    mFreezeBtn->setButtonText (s == 0 ? "Freeze" : "Frozen");
+    // Same cyan/orange language the ribbon indicator and the analyzer use: cyan
+    // is "this is done", orange is "this needs attention".
+    mFreezeBtn->setColour (juce::TextButton::textColourOffId,
+                           s == 2 ? juce::Colour (0xffff9100)
+                          : s == 1 ? juce::Colour (0xff00fff2)
+                                   : juce::Colours::white.withAlpha (0.85f));
+    // §6.9 (Jeff, 2026-07-30): on a VOCAL the warning is not optional.  Freeze
+    // prints the WHOLE vocal chain -- gate, de-reverb, de-esser, compressor,
+    // saturation, limiter, amp -- plus pitch and alignment, because the capture
+    // point is below all of it.  A singer who freezes mid-setup and then reaches
+    // for the de-esser would find it dead with nothing explaining why, so the
+    // tooltip says what it is FOR: getting CPU back once a sound is settled, not
+    // something to leave on while dialling one in.
+    const juce::String vocalNote = mFreezeIsVocal
+        ? juce::String ("\n\nOn a vocal this prints the WHOLE chain - pitch, "
+                        "alignment, gate, de-reverb, de-esser, compressor, "
+                        "saturation, limiter and amp. None of them can be "
+                        "adjusted while frozen.\n\nUse it to get CPU back once a "
+                        "sound is settled, not while you are still setting one up.")
+        : juce::String();
+
+    mFreezeBtn->setTooltip (
+        (! enabled ? reason
+         : s == 2  ? juce::String ("Frozen, but its content changed - it plays live "
+                                   "until the new freeze finishes rendering (at Stop). "
+                                   "Click to unfreeze.")
+         : s == 1  ? juce::String ("Frozen - this player's audio is a rendered file, "
+                                   "so its engine costs no CPU. Click to unfreeze and "
+                                   "edit it again.")
+                   : juce::String ("Freeze - render this player to a file so its engine "
+                                   "stops costing CPU. Its effects, EQ and fader stay "
+                                   "live."))
+        + vocalNote);
 }
 
 namespace
@@ -1676,6 +1835,13 @@ void PageMenuBar::resized()
     {
         b.removeFromLeft(6);
         mFxRackBtn->setBounds(b.removeFromLeft(58).reduced(1, 1));
+    }
+
+    // TS7 §6: Freeze sits BETWEEN FX Rack and the swing knob on every player.
+    if (mFreezeBtn && mFreezeBtn->isVisible())
+    {
+        b.removeFromLeft (4);
+        mFreezeBtn->setBounds (b.removeFromLeft (54).reduced (1, 1));
     }
 
     // Smoke round 2: per-player Swing Mix knob, right of the FX Rack jump

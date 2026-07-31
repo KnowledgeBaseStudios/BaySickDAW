@@ -97,6 +97,10 @@ void ProjectManager::setDirtyInternal (bool flag)
 void ProjectManager::markDirty()
 {
     if (mIgnoreDirty) return;
+    // TS7 §3.3: the stamp moves on EVERY edit, where mDirty only transitions
+    // once and then clears on save.  Version capture needs "did anything change
+    // since the last pass", which a latching bool cannot answer.
+    mChangeStamp.fetch_add (1, std::memory_order_relaxed);
     setDirtyInternal (true);
 }
 

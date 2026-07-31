@@ -1,4 +1,6 @@
 #include "BuilderPage.h"
+#include "../AppPaths.h"         // TS7: freeze_timing.txt lands beside the app
+#include "../BaySickRustyDrums/BaySickRustyDrumsProcessor.h"   // TS7 §6.9 kit freeze
 #include "TypingKeyboardMap.h"   // D-4: bypass tool keys while typing-keyboard mode is on
 #include "../DSP/BpmDetect.h"    // QA-Ec G1-boundary: content tempo estimation (import + display)
 #include "../DSP/DSPBase.h"      // QA-Fe2: isTransportPlaying stop-gate (Regenerate De-noise)
@@ -13,6 +15,7 @@
 #include "../DSP/EffectParamMap.h"  // QA-ModelShell TS2: rack-lane resolution (type, variant)
 #include "../Hosting/HostedPluginEffect.h"  // QA-ModelShell TS6: hosted plugin lane branch
 #include "../DSP/LufsMeterDSP.h"    // QA-ModelShell TS2: CL-227 backend / CL-045 measure pass
+#include "../DSP/TruePeakMeter.h"   // QA-ModelShell TS7 BLU-108: real true peak, not the Lagrange estimate
 #include "EffectsPage.h"            // QA-ModelShell TS2: channelPrefixForId / rackForChannelId statics
 #include "../BaySickPedals/BaySickPedalsProcessor.h"   // QA-ModelShell TS3: offline pedal-board lanes
 #include "../Harmless/HarmlessProcessor.h"             // BLU-344: offline mod-editor lanes
@@ -307,7 +310,18 @@ BrowserPanel::BrowserPanel(PatternManager& pm,
     mCollapseBtn->onClick = [this] { setCollapsed(!mCollapsed); };
     addAndMakeVisible(*mCollapseBtn);
 
-    static const char* kTabLabels[] = { "Patterns", "Audio", "Auto" };
+    // TS7 (Jeff, 2026-07-29): sort order for the Exports / Reports sections.
+    mSortBtn = std::make_unique<TextButton>("Sort");
+    mSortBtn->setTooltip ("Sort the Exports and Reports lists");
+    mSortBtn->setColour (TextButton::buttonColourId, VC::Surface);
+    mSortBtn->setColour (TextButton::textColourOffId, VC::Text);
+    mSortBtn->onClick = [this] { showSortMenu(); };
+    addChildComponent(*mSortBtn);   // shown by switchTab on the Files tab only
+
+    // TS7 §11.1: "Audio" becomes "Files" -- the section now carries the project's
+    // exports and reports alongside its clip/vox/inst audio, so the old name
+    // undersells what is in it.
+    static const char* kTabLabels[] = { "Patterns", "Files", "Auto" };
     for (int t = 0; t < 3; ++t)
     {
         mTabBtns[t] = std::make_unique<TextButton>(kTabLabels[t]);
@@ -365,9 +379,25 @@ BrowserPanel::BrowserPanel(PatternManager& pm,
     mVoxCat  ->onContextMenu = [this] (juce::Point<int> pt) { showCategoryContextMenu (1, pt); };
     mInstCat ->onContextMenu = [this] (juce::Point<int> pt) { showCategoryContextMenu (2, pt); };
 
+    // TS7 §11.2/§11.3: two more categories -- what the user has RENDERED.
+    //
+    // §11.4, INVARIANT AMENDED RATHER THAN BROKEN QUIETLY.  BuilderPage.h records
+    // "there is NO 4th 'Imported' / 'Library' bucket per Jeff's invariant ('all
+    // importable files become clips')".  That invariant governs IMPORT material,
+    // and these are OUTPUT -- files the user made, which they should not have to
+    // go hunting for.  The header comment is updated to say so.
+    auto exportsCat = std::make_unique<AudioCategoryItem> ("Exports",
+                                                           juce::Colour (0xff00fff2));
+    auto reportsCat = std::make_unique<AudioCategoryItem> ("Reports",
+                                                           juce::Colour (0xffff9100));
+    mExportsCat = exportsCat.get();
+    mReportsCat = reportsCat.get();
+
     mAudioRoot->addSubItem (clipsCat.release());
     mAudioRoot->addSubItem (voxCat  .release());
     mAudioRoot->addSubItem (instCat .release());
+    mAudioRoot->addSubItem (exportsCat.release());
+    mAudioRoot->addSubItem (reportsCat.release());
     mAudioTree->setRootItem (mAudioRoot.get());
     mAudioTree->setRootItemVisible (false);
 
@@ -404,6 +434,8 @@ void BrowserPanel::switchTab(int t)
     if (mAudioTree) mAudioTree->setVisible (isAud && ! mCollapsed);
     mAddBtn   ->setVisible(isPat);
     mDeleteBtn->setVisible(isPat);
+    // TS7: Sort orders the Exports / Reports lists, which only exist on Files.
+    if (mSortBtn) mSortBtn->setVisible (isAud && ! mCollapsed);
 
     for (int i = 0; i < 3; ++i)
         mTabBtns[i]->setToggleState(i == t, dontSendNotification);
@@ -613,17 +645,221 @@ void BrowserPanel::rebuildAudioRows()
             {
                 showGroupContextMenu (ci, key, isAuto, pt);
             };
+            // TS7: order the leaves INSIDE this group.  The group itself keeps
+            // its position -- only its contents move.
+            std::vector<CategorizedAudioEntry> shownMembers;
+            shownMembers.reserve (bucket.members.size());
             for (const auto& mpair : bucket.members)
             {
                 auto shown = mpair.first;
                 if (mpair.second.isNotEmpty()) shown.displayName = mpair.second;
-                grp->addSubItem (makeLeaf (shown));
+                shownMembers.push_back (shown);
             }
+            sortEntries (shownMembers);
+            for (const auto& shown : shownMembers)
+                grp->addSubItem (makeLeaf (shown));
+
             catNode[ci]->addSubItem (grp);
         }
+        // TS7: and the ungrouped leaves of this category.
+        sortEntries (flat[ci]);
         for (auto& e : flat[ci])
             catNode[ci]->addSubItem (makeLeaf (e));
     }
+
+    rebuildRenderRows();
+}
+
+void BrowserPanel::setItemSort (ItemSort s)
+{
+    if (s == mItemSort) return;
+    mItemSort = s;
+    rebuildAudioRows();   // rebuilds every category, render rows included
+}
+
+void BrowserPanel::showSortMenu()
+{
+    PopupMenu m;
+    m.addItem (1, "Newest first",  true, mItemSort == ItemSort::NewestFirst);
+    m.addItem (2, "Oldest first",  true, mItemSort == ItemSort::OldestFirst);
+    m.addItem (3, "Alphabetical",  true, mItemSort == ItemSort::Alphabetical);
+    m.showMenuAsync (PopupMenu::Options().withTargetComponent (mSortBtn.get()),
+        [this] (int r)
+        {
+            if      (r == 1) setItemSort (ItemSort::NewestFirst);
+            else if (r == 2) setItemSort (ItemSort::OldestFirst);
+            else if (r == 3) setItemSort (ItemSort::Alphabetical);
+        });
+}
+
+// ONE ordering implementation for every category and every group, so the Sort
+// pick cannot mean different things in different parts of the tree.
+//
+// Time comes from the FILE's modification time rather than the display name:
+// exports and reports carry timestamps in their names, but a renamed file would
+// otherwise jump position for no reason the user can see.
+void BrowserPanel::sortEntries (std::vector<CategorizedAudioEntry>& v) const
+{
+    const auto mode = mItemSort;
+    std::stable_sort (v.begin(), v.end(),
+        [mode] (const CategorizedAudioEntry& a, const CategorizedAudioEntry& b)
+        {
+            if (mode == ItemSort::Alphabetical)
+                return a.displayName.compareIgnoreCase (b.displayName) < 0;
+
+            const auto ta = juce::File (a.fullPath).getLastModificationTime();
+            const auto tb = juce::File (b.fullPath).getLastModificationTime();
+            return mode == ItemSort::NewestFirst ? (ta > tb) : (ta < tb);
+        });
+}
+
+// ── TS7 §11.2/§11.3: Exports + Reports ───────────────────────────────────────
+// Listed straight off disk rather than out of audioLibrary: these have no bound
+// page, which is exactly the case the library's own invariant excludes.  Nothing
+// here is auto-added to the grid.
+//
+// The FREEZE folder is deliberately absent -- regenerable cache, not something
+// the user made, and surfacing it would invite dragging a frozen render back into
+// the arrangement it was frozen FROM.
+void BrowserPanel::rebuildRenderRows()
+{
+    if (! mExportsCat || ! mReportsCat) return;
+    mExportsCat->clearSubItems();
+    mReportsCat->clearSubItems();
+    if (! onGetRenderFolders) return;
+
+    const auto folders = onGetRenderFolders();   // { exports, reports }
+
+    // §11.5a (Jeff, 2026-07-29): a render that has been added and routed MOVES
+    // GROUPS -- it belongs to Clips / Vox / Inst now and must stop showing here,
+    // or one file would occupy two rows.  The move itself needs no code: the
+    // library walk in onEnumerateAudio buckets by pageOwnerChannelId and picks
+    // it up under its new category automatically.  All that is left is for this
+    // listing to stand down from any file the library has already claimed.
+    //
+    // fullPath off onEnumerateAudio is already resolved to absolute, so it
+    // compares directly against the on-disk sweep below.  StringArray's
+    // ignore-case contains is the point rather than a plain set: these paths
+    // round-trip through a project-relative stored form, and Windows will hand
+    // back a different case than the one that was written.
+    juce::StringArray claimed;
+    if (onEnumerateAudio)
+        for (const auto& e : onEnumerateAudio())
+            claimed.add (e.fullPath);
+
+    // Same ordering as every other category, through the one helper.
+    auto fill = [this, &claimed] (AudioCategoryItem* cat, const juce::File& dir,
+                                  const juce::String& wildcard, juce::Colour accent)
+    {
+        if (cat == nullptr || ! dir.isDirectory()) return;
+        juce::Array<juce::File> files;
+        dir.findChildFiles (files, juce::File::findFiles, false, wildcard);
+
+        std::vector<CategorizedAudioEntry> entries;
+        entries.reserve ((size_t) files.size());
+        for (const auto& f : files)
+        {
+            if (claimed.contains (f.getFullPathName(), true)) continue;
+
+            CategorizedAudioEntry e;
+            e.audioLibIdx = -1;            // not a library entry -- no drag index
+            e.displayName = f.getFileNameWithoutExtension();
+            e.fullPath    = f.getFullPathName();
+            e.accent      = accent;
+            entries.push_back (e);
+        }
+        sortEntries (entries);
+        for (const auto& e : entries)
+            cat->addSubItem (new AudioBrowserItem (e));
+    };
+
+    fill (mExportsCat, folders.first,  "*.wav;*.ogg;*.mp3", juce::Colour (0xff00fff2));
+    fill (mReportsCat, folders.second, "*.html;*.csv",      juce::Colour (0xffff9100));
+}
+
+// ── TS7 §11.5/§11.5a: add a render to the project ────────────────────────────
+// Reached from BOTH the Exports row's "Add to Project..." and a drag of that
+// row onto the grid, so the two gestures cannot diverge into meaning different
+// things.
+//
+// No Move/Copy question here, unlike the library Properties dialog: the file is
+// unrouted, so there is nothing to move it FROM, and per the owner a copy is a
+// thing the user does afterwards if they want one -- not a decision to make
+// while adding.  One flat list of targets, worded the same as that menu.
+void BrowserPanel::beginAddRenderToProject (const juce::File& f,
+                                            std::function<void(int)> onRouted)
+{
+    if (! f.existsAsFile()) return;
+
+    // Project-relative when the file sits in the project's own render folder,
+    // so the entry survives the project folder being moved or renamed.  The
+    // folder NAME is taken from the File the editor handed us rather than a
+    // second hardcoded "Exports" that could drift from getProjectExportsDir.
+    juce::String stored = f.getFullPathName();
+    if (onGetRenderFolders)
+    {
+        const auto dir = onGetRenderFolders().first;
+        if (dir != juce::File() && f.isAChildOf (dir))
+            stored = dir.getFileName() + "/" + f.getFileName();
+    }
+
+    std::vector<RoutablePageInfo> pages;
+    if (onEnumerateRoutablePages) pages = onEnumerateRoutablePages();
+
+    struct Tgt { int channelId; int createKind; juce::String name; };
+    auto targets = std::make_shared<std::vector<Tgt>>();
+    for (const auto& pg : pages)
+        targets->push_back ({ pg.channelId, -1, pg.displayName });
+    targets->push_back ({ -1, 0, "a new Clip Page" });
+    targets->push_back ({ -1, 1, "a new Vox Page" });
+    targets->push_back ({ -1, 2, "a new Inst Page" });
+
+    juce::PopupMenu m;
+    m.addSectionHeader ("Add \"" + f.getFileNameWithoutExtension() + "\" to:");
+    for (int t = 0; t < (int) targets->size(); ++t)
+        m.addItem (t + 1, (*targets)[(size_t) t].name);
+
+    juce::Component::SafePointer<BrowserPanel> safeThis (this);
+    m.showMenuAsync (juce::PopupMenu::Options(),
+        [safeThis, targets, stored, onRouted] (int r)
+        {
+            auto* self = safeThis.getComponent();
+            if (self == nullptr || r <= 0 || r > (int) targets->size()) return;
+            const auto& tg = (*targets)[(size_t) (r - 1)];
+
+            // Adding the same render twice re-routes the one entry instead of
+            // growing a second row for a single file.
+            int libIdx = self->mPM.findAudioLibraryIndexByPath (stored);
+            if (libIdx < 0)
+            {
+                self->mPM.addAudioToLibrary (stored, {}, 0);
+                libIdx = self->mPM.findAudioLibraryIndexByPath (stored);
+            }
+            if (libIdx < 0) return;
+
+            // Register-then-create-then-route, the same order the Properties
+            // "Move to a new page" path uses: the page factory re-adds under a
+            // real channel, which addAudioToLibrary resolves by UPGRADING this
+            // owner-0 entry rather than making a second one.
+            int target = tg.channelId;
+            if (tg.createKind >= 0 && self->onCreateRoutablePage)
+                target = self->onCreateRoutablePage (tg.createKind, stored);
+            if (target < 0) return;
+
+            if (self->onApplyLibraryProperties)
+                self->onApplyLibraryProperties (libIdx,
+                                                self->mPM.getAudioLibraryPitch (libIdx),
+                                                self->mPM.getAudioLibraryBPM (libIdx),
+                                                self->mPM.getAudioLibraryStretchMode (libIdx),
+                                                target);
+            else
+                self->mPM.setAudioLibraryPageOwner (libIdx, target);
+
+            self->maybePromptGroupAssign (libIdx, target);
+            self->rebuildAudioRows();     // appears under its routed category
+            self->rebuildRenderRows();    // and is no longer an Exports orphan
+            if (onRouted) onRouted (libIdx);
+        });
 }
 
 // ── QA-Fe2 browser groups: menus + move/copy group assignment ────────────────
@@ -776,7 +1012,45 @@ void BrowserPanel::maybePromptGroupAssign (int libIdx, int targetChannel)
 void BrowserPanel::showAudioTreeContextMenu (AudioBrowserItem& item, Point<int> globalPt)
 {
     const int libIdx = item.getAudioLibIdx();
-    if (libIdx < 0 || libIdx >= mPM.getNumAudioLibrary()) return;
+
+    // TS7 §11.5/§11.6: Exports and Reports are not library entries (libIdx -1),
+    // so they get their own short menu rather than falling through the
+    // library-index guard below and silently offering nothing.
+    if (libIdx < 0)
+    {
+        const juce::File f (item.getFullPath());
+        if (! f.existsAsFile()) return;
+        const bool isReport = f.hasFileExtension ("html;csv");
+
+        PopupMenu m;
+        if (isReport)
+        {
+            // §11.6: opens IN THE APP, in the analyzer -- the same view the user
+            // watched live.  HTML is never rendered in-app (no WebBrowser).
+            m.addItem (1, "Open in Analyzer", f.hasFileExtension ("html"));
+        }
+        else
+        {
+            // §11.5: nothing is auto-added to the grid.  Adding imports the file
+            // as audio, after which the EXISTING route-to-a-tab / create-a-new-one
+            // flow applies -- the same one clips and vox/inst recordings use.
+            m.addItem (2, "Add to Project...");
+        }
+        m.addSeparator();
+        m.addItem (3, "Reveal in Explorer");
+
+        m.showMenuAsync (PopupMenu::Options().withTargetScreenArea (
+                             Rectangle<int> (globalPt.x, globalPt.y, 1, 1)),
+            [this, f] (int r)
+            {
+                if      (r == 1) { if (onOpenReport) onOpenReport (f); }
+                else if (r == 2) { beginAddRenderToProject (f, nullptr); }
+                else if (r == 3) { f.revealToUser(); }
+            });
+        return;
+    }
+
+    if (libIdx >= mPM.getNumAudioLibrary()) return;
 
     constexpr int kIdRename     = 1;
     constexpr int kIdDuplicate  = 2;
@@ -1601,6 +1875,15 @@ void BrowserPanel::resized()
     for (int t = 0; t < 3; ++t)
         mTabBtns[t]->setBounds(tabRow.removeFromLeft(tabW).reduced(1));
     b.removeFromTop(2);
+
+    // TS7: Sort sits on its own row under the tabs, visible on Files only.  Its
+    // height is reclaimed when hidden so the tree does not lose a strip on the
+    // other two tabs.
+    if (mSortBtn && mSortBtn->isVisible())
+    {
+        mSortBtn->setBounds (b.removeFromTop (20).removeFromLeft (72).reduced (2, 1));
+        b.removeFromTop (2);
+    }
 
     auto layoutItems = [&b](std::vector<std::unique_ptr<BrowserItem>>& items)
     {
@@ -5004,6 +5287,9 @@ static bool parseBrowserDragDescription(const var& desc, String& outKind, int& o
 
 bool ArrangementGrid::isInterestedInDragSource(const SourceDetails& d)
 {
+    // TS7 §11.5: a render carries a path, not an index, so it is checked before
+    // the index parser -- which cannot represent it.
+    if (d.description.toString().startsWith ("render:")) return true;
     String kind; int idx;
     return parseBrowserDragDescription(d.description, kind, idx);
 }
@@ -5064,6 +5350,25 @@ void ArrangementGrid::itemDragExit(const SourceDetails&)
 
 void ArrangementGrid::itemDropped(const SourceDetails& d)
 {
+    // TS7 §11.5: a render dropped from the Files browser.  Handled before the
+    // index parser because it carries a PATH, and routed through the SAME
+    // import-then-prompt callback the context menu's "Add to Project..." uses --
+    // so dragging and right-clicking cannot end up meaning different things.
+    const String desc = d.description.toString();
+    if (desc.startsWith ("render:"))
+    {
+        mHasGhost = false;
+        repaint();
+        const int y = d.localPosition.getY();
+        if (y < rulerPinY() + kRulerH) return;
+        const int   row = jlimit(0, kNumRows - 1, yToRow(y));
+        const float bar = jmax(0.f, snapBar(xToBar(d.localPosition.getX())));
+        if (onRenderFileDropped)
+            onRenderFileDropped (desc.fromFirstOccurrenceOf ("render:", false, false),
+                                 row, bar);
+        return;
+    }
+
     String kind; int idx;
     if (!parseBrowserDragDescription(d.description, kind, idx))
     {
@@ -7026,6 +7331,21 @@ void TrackHeaderPanel::showTrackContextMenu(int row)
 {
     const int gid = mPM.getRowGroup(row);
 
+    // TS7 §7.1: "Render Track to WAV" is offered on AUDIO rows only, and that is
+    // a property of the arrangement rather than a UI preference.  An Audio row
+    // maps to exactly one mixer strip (MixerChannelIds::audioInsert(row)), so the
+    // render is one strip's tap; a Pattern row is not a channel at all (a pattern
+    // plays EVERY tab) and an Automation row has no audio.  Shown DISABLED rather
+    // than hidden on other row kinds, so the capability is discoverable instead of
+    // appearing to be missing -- the same rule the plugin scanner follows for the
+    // files it skips.
+    bool rowHasAudio = false;
+    for (int bi = 0; bi < mPM.getNumBlocks() && ! rowHasAudio; ++bi)
+    {
+        const auto& blk = mPM.getBlock (bi);
+        rowHasAudio = (blk.trackRow == row && blk.clipType == ClipType::Audio);
+    }
+
     PopupMenu m;
     m.addItem(1, "Rename...");
     m.addSeparator();
@@ -7036,6 +7356,8 @@ void TrackHeaderPanel::showTrackContextMenu(int row)
     m.addItem(5, "Group with Above", row > 0);
     m.addItem(6, "Remove from Group", gid > 0);
     m.addItem(7, "Color Group...", gid > 0);
+    m.addSeparator();
+    m.addItem(9, "Render Track to WAV...", rowHasAudio);
     m.addSeparator();
     m.addItem(4, "Delete Track Clips");
 
@@ -7130,6 +7452,16 @@ void TrackHeaderPanel::showTrackContextMenu(int row)
                 notifyArrangementChanged();
                 mGrid.repaint();
                 repaint();
+                break;
+            }
+            case 9:
+            {
+                // TS7 §7.1: consolidate this row to one WAV.  The intent is a
+                // chopped-and-spliced vocal becoming a single stem, so the render
+                // is that row's STRIP tapped through the one-pass mechanism TS2's
+                // stems already use -- which keeps sidechain-driven behaviour by
+                // construction rather than muting everything else.
+                if (onRenderTrackRow) onRenderTrackRow (row);
                 break;
             }
             case 5:
@@ -7427,7 +7759,8 @@ BuilderPage::BuilderPage(VibeSynthProcessor& p, PatternManager& pm)
             mToolbar->setContextText("Playlist > " + name);
         }
     };
-    mBrowser->onRenderPattern = [this](int idx) { renderPatternToWav(idx); };
+    // TS7 §7.2: the render now asks Per Track / Full Mix / Select Tracks first.
+    mBrowser->onRenderPattern = [this](int idx) { showPatternRenderOptions(idx); };
     // (Split completion may be async behind its group prompt; the browser's
     // diff-based timer refresh picks up the new pattern list either way.)
     mBrowser->onSplitPattern  = [this](int idx) {
@@ -7445,6 +7778,18 @@ BuilderPage::BuilderPage(VibeSynthProcessor& p, PatternManager& pm)
         if (mToolbar) mToolbar->setActiveTool(t);
     };
     mGrid->onUndoRedoStateChanged = [this] { syncToolbar(); };
+    // TS7 §11.5a: a render dragged onto the grid raises the SAME route prompt as
+    // the browser's "Add to Project...", then places the block where it landed.
+    mGrid->onRenderFileDropped = [this] (const String& path, int row, float bar)
+    {
+        if (! mBrowser) return;
+        mBrowser->beginAddRenderToProject (File (path),
+            [this, row, bar] (int libIdx)
+            {
+                if (mGrid && libIdx >= 0)
+                    mGrid->placeAudioLibraryEntry (libIdx, row, bar);
+            });
+    };
     mGrid->onImportAudioRequested = [this] { doImportAudio(); };
     mGrid->onRowHeightChanged     = [this]
     {
@@ -7489,6 +7834,8 @@ BuilderPage::BuilderPage(VibeSynthProcessor& p, PatternManager& pm)
 
     // Track header panel (Task 10 - fixed left label column)
     mTrackHeader = std::make_unique<TrackHeaderPanel>(*mGrid, pm);
+    // TS7 §7.1: the panel owns no render machinery; it just asks.
+    mTrackHeader->onRenderTrackRow = [this] (int row) { renderTrackRowToWav (row); };
     addAndMakeVisible(*mTrackHeader);
 
     // Toolbar
@@ -8022,6 +8369,15 @@ namespace
             pi.setIsPlaying (true);
             pi.setIsRecording (false);
             pi.setTimeInSeconds (mTimeSec);
+            // TS7 (2026-07-30): timeInSamples was NEVER published here, and an
+            // ALREADY-FROZEN track reads exactly this field to know where in its
+            // freeze file to read.  Missing, it fell back to 0 on every block, so
+            // every frozen track replayed its first blockful on a loop for the
+            // whole render -- corrupting exports and measurements, and getting
+            // worse with each track frozen.  Silent: the file was valid, just
+            // wrong.  Matters more for the planned per-pattern freeze, where one
+            // freeze action means several renders back to back.
+            pi.setTimeInSamples ((juce::int64) std::llround (mSamplePos));
             return pi;
         }
 
@@ -8088,7 +8444,7 @@ bool BuilderPage::runOfflineLoop (const RenderOptions& opts,
     // 512 while keeping the lane-replay step (~46 ms at 44.1k) in the same
     // class as the live 30 Hz applicator tick, so automation granularity in
     // the file matches what live playback produces.
-    constexpr int kBlk    = 2048;
+    constexpr int kBlk    = kOfflineBlock;   // CL-056; one home, see the header
     const double baseBpm  = juce::jmax (1.0, mPM.getGlobalTempo());
 
     // ── Content span, in beats ───────────────────────────────────────────────
@@ -8123,7 +8479,17 @@ bool BuilderPage::runOfflineLoop (const RenderOptions& opts,
             outErr = "That pattern no longer exists.";
             return false;
         }
-        endBeats = mPM.getPattern (opts.patternIndex).bars * 4.0;
+        // Pattern.bars is DEAD DATA for length and must never be used here.
+        // Nothing writes it from content -- only deserialize and clone touch it
+        // (PatternManager.cpp:1796, BuilderPage.cpp:4028) -- so it sits at
+        // DEFAULT_BARS = 4 forever, and `* 4.0` additionally assumes 4/4.  An
+        // 8-bar pattern rendered 4 bars and dropped every note past the clamp,
+        // which is the SECOND half of the bug that produced "one note then
+        // silence": fixing the loop-wrap alone just moved the truncation from
+        // bar 1 to bar 4.  getPatternContentBeats is the note-for-note extent at
+        // the pattern's own time signature, and is what the tiler, the song
+        // scheduler and live pattern playback all already use.
+        endBeats = mPM.getPatternContentBeats (opts.patternIndex);
     }
 
     // Spans resolve through the SAME lane-aware clock the render walks -- a
@@ -8164,17 +8530,39 @@ bool BuilderPage::runOfflineLoop (const RenderOptions& opts,
     // restore; part of the locked restore set now.
     const int prevPatternIndex = mPM.getCurrentPatternIndex();
 
+    // Stopwatch split (see renderFreezeFile): enter/leave offline mode is FIXED
+    // cost paid regardless of render length, so it must be timed separately from
+    // the per-block loop or a short render reads as catastrophically slow.
+    const double offlineT0 = juce::Time::getMillisecondCounterHiRes();
     if (! mProcessor.beginOfflineRender (sr, kBlk))
     {
         if (onOfflineRenderActive) onOfflineRenderActive (false);
         outErr = "Could not enter offline render mode.";
         return false;
     }
+    mFreezeSetupMs = juce::Time::getMillisecondCounterHiRes() - offlineT0;
+
+    // TS7 §7.3 FIX -- the pattern render produced one note then silence, in a file
+    // shorter than the pattern.  ONE root cause behind both symptoms.
+    //
+    // Pattern-mode scheduling bounds its window with mLoopStartBeats /
+    // mCachedPatternLoopBeats (PluginProcessor.cpp:2282-2283) and clamps every
+    // note-off to that loop end.  Those atomics are written ONLY by
+    // StandaloneEditor's transport, so an offline render inherited whatever the
+    // live session last set -- 4.0 (one bar) by default.  Notes past that stale
+    // bound never fired, because the offline head advances MONOTONICALLY and never
+    // performs the loop wrap the live playhead does.  The render then went silent,
+    // and Tail::Included's decay detection ended the file early -- which is why it
+    // was also short.  Setting the bounds to the pattern's own span fixes both.
+    const double prevLoopStart = mProcessor.mLoopStartBeats.load (std::memory_order_relaxed);
+    const double prevLoopEnd   = mProcessor.mCachedPatternLoopBeats.load (std::memory_order_relaxed);
 
     if (opts.scope == Scope::Pattern)
     {
         mPM.setCurrentPattern (opts.patternIndex);
         mProcessor.setSongMode (false);
+        mProcessor.mLoopStartBeats.store (0.0, std::memory_order_relaxed);
+        mProcessor.mCachedPatternLoopBeats.store (endBeats, std::memory_order_relaxed);
     }
     else
     {
@@ -8190,6 +8578,7 @@ bool BuilderPage::runOfflineLoop (const RenderOptions& opts,
     juce::AudioBuffer<float> buf (kNumCh, kBlk);
     juce::MidiBuffer         midi;
     juce::int64              written  = 0;
+    double lastProgressMs = 0.0;   // progress throttle, see the onProgress call
     juce::int64              tailDone = 0;
     bool                     aborted  = false;
 
@@ -8241,8 +8630,25 @@ bool BuilderPage::runOfflineLoop (const RenderOptions& opts,
         if (inContent)
         {
             written += chunk;
+            // THROTTLED to ~10 Hz (2026-07-30).  Reporting every block was not a
+            // cheap notification: the overlay's progress setter forces a
+            // synchronous full-window SOFTWARE repaint of the whole editor (JUCE
+            // 8's Direct2D context implements performAnyPendingRepaintsNow as an
+            // empty function, so the overlay deliberately promotes to the
+            // software renderer to make mid-freeze painting work at all).  At
+            // 2048-sample blocks that was a full-screen raster every ~46 ms,
+            // costing MORE than the block's realtime budget -- so the progress
+            // bar I added an hour earlier was itself most of the 1.17x "render is
+            // slow" measurement.  The instrument became the cost it was measuring.
             if (onProgress)
-                onProgress (0.9 * (double) written / (double) contentSamples);
+            {
+                const double nowMs = juce::Time::getMillisecondCounterHiRes();
+                if (nowMs - lastProgressMs >= 100.0)
+                {
+                    lastProgressMs = nowMs;
+                    onProgress (0.9 * (double) written / (double) contentSamples);
+                }
+            }
         }
         else
         {
@@ -8257,16 +8663,30 @@ bool BuilderPage::runOfflineLoop (const RenderOptions& opts,
             if (quietRun >= kQuietRunNeeded) break;
 
             if (onProgress)
-                onProgress (0.9 + 0.1 * (double) tailDone / (double) maxTailSamples);
+            {
+                const double nowMs = juce::Time::getMillisecondCounterHiRes();
+                if (nowMs - lastProgressMs >= 100.0)
+                {
+                    lastProgressMs = nowMs;
+                    onProgress (0.9 + 0.1 * (double) tailDone / (double) maxTailSamples);
+                }
+            }
         }
     }
 
     // Leave offline mode on EVERY exit path: restore-set back (device config,
     // playhead, song mode), tails cleared, device resumed -- then the
     // pattern-scope current-pattern restore and the editor's timer resume.
+    const double teardownT0 = juce::Time::getMillisecondCounterHiRes();
     mProcessor.endOfflineRender();
+    mFreezeTeardownMs = juce::Time::getMillisecondCounterHiRes() - teardownT0;
     if (opts.scope == Scope::Pattern)
         mPM.setCurrentPattern (prevPatternIndex);
+    // §7.3: the loop bounds join the restore set.  They are LIVE transport state,
+    // so leaving a render's values behind would silently re-loop the user's
+    // session over the pattern they just exported.
+    mProcessor.mLoopStartBeats       .store (prevLoopStart, std::memory_order_relaxed);
+    mProcessor.mCachedPatternLoopBeats.store (prevLoopEnd,  std::memory_order_relaxed);
     if (onOfflineRenderActive) onOfflineRenderActive (false);
 
     if (aborted)
@@ -8372,7 +8792,13 @@ bool BuilderPage::renderToFile (const RenderOptions& opts,
         }
     };
 
-    std::vector<std::unique_ptr<FileSink>> sinks;   // [0] = the main mix
+    std::vector<std::unique_ptr<FileSink>> sinks;   // [0] = the main mix, when written
+    // §7.2 Per Track writes stems ONLY, so the main sink is not opened at all --
+    // creating and then deleting an unwanted file would leave a window where it
+    // exists on disk.  stemSinks record their index at push time, so the numbering
+    // stays correct with or without [0]; the consumeBlock below only touches
+    // sinks[0] under the same writeMainFile flag.
+    if (opts.writeMainFile)
     {
         auto main = std::make_unique<FileSink>();
         if (! main->open (opts, sr, opts.destination, outErr))
@@ -8403,12 +8829,43 @@ bool BuilderPage::renderToFile (const RenderOptions& opts,
         sinks.push_back (std::move (s));
     }
 
+    // §7.1/§7.2: scratch for the summed-tap main file.  Allocated ONCE here, not
+    // per block -- the render thread has no real-time deadline but a per-block
+    // allocation in the inner loop is still waste.
+    juce::AudioBuffer<float> mixScratch;
+    if (! opts.mixTapChannels.empty())
+        mixScratch.setSize (2, kOfflineBlock, false, true, true);
+
     const bool ok = runOfflineLoop (opts, outErr, std::move (shouldAbort),
                                     std::move (onProgress),
-        [this, &sinks, &stemSinks] (const juce::AudioBuffer<float>& buf, int chunk) -> bool
+        [this, &opts, &sinks, &stemSinks, &mixScratch]
+        (const juce::AudioBuffer<float>& buf, int chunk) -> bool
         {
-            if (! sinks[0]->write (buf, chunk))
-                return false;
+            if (opts.writeMainFile)
+            {
+                if (opts.mixTapChannels.empty())
+                {
+                    // Master output -- the original behaviour.
+                    if (! sinks[0]->write (buf, chunk))
+                        return false;
+                }
+                else
+                {
+                    // Sum the requested strips' post-chain taps.  One entry is a
+                    // single consolidated track; several is Full Mix.
+                    mixScratch.clear (0, chunk);
+                    for (int chId : opts.mixTapChannels)
+                    {
+                        auto* src = mProcessor.getStripOutputForTap (chId);
+                        if (src == nullptr) continue;
+                        const int nch = juce::jmin (2, src->getNumChannels());
+                        for (int c = 0; c < nch; ++c)
+                            mixScratch.addFrom (c, 0, *src, c, 0, chunk);
+                    }
+                    if (! sinks[0]->write (mixScratch, chunk))
+                        return false;
+                }
+            }
 
             // Stems: copy each ticked strip's arena slot -- its render task's
             // post-chain output for THIS block -- into that stem's file.
@@ -8435,24 +8892,352 @@ bool BuilderPage::renderToFile (const RenderOptions& opts,
     return true;
 }
 
+// TS7 §6.1: the freeze render.  runOfflineLoop's THIRD consumer -- the loop is
+// never copied, which is the rule TS2 established when it extracted it.
+//
+// Writes 24-bit WAV at the project rate.  Float would avoid any quantisation of
+// an intermediate, but a freeze file is also the thing the user can drag out and
+// keep, and 24-bit is half the disk for a difference nothing downstream can hear
+// after the rack it still passes through.
+bool BuilderPage::renderFreezeFile (VibeGraph::InsertKind kind, int index,
+                                    RenderTask* target,
+                                    const juce::File& dest,
+                                    juce::String& outErr,
+                                    std::function<bool()> shouldAbort,
+                                    std::function<void(double)> onProgress)
+{
+    RenderOptions opts;
+    opts.scope       = RenderOptions::Scope::Song;
+    // Tail::Cut, deliberately.  A freeze must be sample-aligned with the
+    // arrangement it stands in for; rendering PAST the song end would make the
+    // frozen file longer than the timeline and shift nothing but confuse the
+    // swap.  Wet tails inside the song still render, because the engine keeps
+    // producing them up to the end.
+    opts.tail        = RenderOptions::Tail::Cut;
+    opts.format      = RenderOptions::Format::Wav;
+    opts.sampleRate  = mProcessor.getSampleRate() > 0.0 ? mProcessor.getSampleRate() : 44100.0;
+    opts.bitDepth    = 24;
+    opts.destination = dest;
+
+    auto& graph = mProcessor.mVibeGraph;
+    // ── TS7: the stopwatch (Jeff, 2026-07-30) ────────────────────────────────
+    // How long a freeze render actually takes had NEVER been measured -- every
+    // estimate in the no-dropout review was an assumption, and three of the five
+    // candidate fixes are only worth doing if the render is genuinely slow.
+    // Reported as wall-clock AND as a ratio of the audio rendered, because the
+    // ratio is the number that decides it: >1.0x means slower than just playing
+    // the song, which would rule out several routes outright.
+    const double freezeT0 = juce::Time::getMillisecondCounterHiRes();
+
+    graph.armFreezeTap (kind, index);
+
+    // TS7 §6.9 PRUNE.  A freeze render of one track was rendering the ENTIRE
+    // project every block -- every other engine, every rack, every clip stream --
+    // and then throwing all of it away.  The dispatcher now skips run() on
+    // everything the target does not depend on.  Armed and cleared on exactly
+    // the same lines as the tap, and NEVER inside runOfflineLoop: leaving it set
+    // when real-time playback resumes would silence the whole project except
+    // this one track.
+    mProcessor.setFreezePrune (target);
+
+    juce::AudioFormatManager fm;
+    fm.registerBasicFormats();
+    std::unique_ptr<juce::AudioFormatWriter> writer;
+    {
+        dest.getParentDirectory().createDirectory();
+        dest.deleteFile();                       // §6.7: overwrite in place
+        auto stream = std::make_unique<juce::FileOutputStream> (dest);
+        if (! stream->openedOk())
+        {
+            graph.disarmFreezeTap();
+            mProcessor.setFreezePrune (nullptr);
+            outErr = "Could not open the freeze file for writing.";
+            return false;
+        }
+        juce::WavAudioFormat wav;
+        writer.reset (wav.createWriterFor (stream.release(), opts.sampleRate, 2, 24, {}, 0));
+        if (writer == nullptr)
+        {
+            graph.disarmFreezeTap();
+            mProcessor.setFreezePrune (nullptr);
+            outErr = "Could not create the freeze writer.";
+            return false;
+        }
+    }
+
+    juce::int64  writtenSamples = 0;
+    juce::uint32 lastTapSeq     = graph.getFreezeTapSeq();
+    juce::int64  blocksWithTap  = 0;
+
+    const bool ok = runOfflineLoop (opts, outErr, std::move (shouldAbort),
+                                    std::move (onProgress),
+        [&graph, &writer, &writtenSamples, &lastTapSeq, &blocksWithTap]
+        (const juce::AudioBuffer<float>&, int chunk) -> bool
+        {
+            // The MASTER buffer the loop hands us is ignored on purpose: freeze
+            // wants this insert's PRE-RACK signal, which the armed tap holds.
+            auto* src = graph.getFreezeTapBuffer();
+            if (src == nullptr) return false;
+
+            // STALE-TAP GUARD.  The tapped node's processBlock does NOT run every
+            // block -- a Clips row with a gap between clips skips it, an
+            // idle-suspended engine skips it -- and the tap buffer then still
+            // holds the PREVIOUS block's audio.  Writing that repeated the last
+            // block into the gap: a stutter baked into the freeze file, valid
+            // WAV, wrong sound, and silent.  A sequence number is the only way to
+            // tell a fresh capture from leftovers, since silence is legitimate
+            // content and cannot be detected by looking at the samples.
+            const juce::uint32 seq = graph.getFreezeTapSeq();
+            if (seq != lastTapSeq) { lastTapSeq = seq; ++blocksWithTap; }
+            else                   { src->clear(); }
+
+            if (! writer->writeFromAudioSampleBuffer (*src, 0, chunk)) return false;
+            writtenSamples += chunk;
+            return true;
+        });
+
+    graph.disarmFreezeTap();
+    mProcessor.setFreezePrune (nullptr);
+    writer.reset();          // close before any delete: an open handle blocks it
+
+    if (! ok)
+    {
+        dest.deleteFile();
+        return false;
+    }
+
+    // NEVER SILENTLY SHIP A FILE THE TAP NEVER FILLED.  If the tap never fired,
+    // the render "succeeded" and produced a perfectly valid file of pure silence
+    // -- which then plays in place of the track, and the user hears a part
+    // vanish with nothing to explain it.  Failing loudly is the only safe
+    // outcome, because silence is indistinguishable from a quiet part.
+    if (blocksWithTap == 0)
+    {
+        dest.deleteFile();
+        outErr = "The freeze render captured no audio for this track.";
+        return false;
+    }
+
+    // The measurement.  Ratio is the decisive number: the audio is silent for
+    // this whole span, so anything near or above 1.0x means freezing costs about
+    // as long as listening to the part being frozen.
+    {
+        const double elapsedMs = juce::Time::getMillisecondCounterHiRes() - freezeT0;
+        const double audioSecs = (writtenSamples > 0 && opts.sampleRate > 0.0)
+                                   ? (double) writtenSamples / opts.sampleRate : 0.0;
+        const double ratio     = (audioSecs > 0.0)
+                                   ? (elapsedMs / 1000.0) / audioSecs : 0.0;
+        // FIXED vs MARGINAL is the whole question (2026-07-30).  The first
+        // measurement was 1.7 s of audio in 4.18 s -- 2.4x realtime -- but on a
+        // render that short, entering and leaving offline mode (a full
+        // prepareToPlay of every engine, incl. NAM's oversampling rebuild and
+        // model prewarm, then the same again in reverse) plausibly IS the whole
+        // figure.  If the cost is fixed, a 3-minute song costs about the same
+        // 4 s and the fix is to stop re-preparing; if it is per-sample, that song
+        // costs 7 minutes and only a background render helps.  Opposite
+        // conclusions from one ratio, so the split is what makes it decidable.
+        const double setupMs    = mFreezeSetupMs;
+        const double teardownMs = mFreezeTeardownMs;
+        const double loopMs     = juce::jmax (0.0, elapsedMs - setupMs - teardownMs);
+        const double loopRatio  = (audioSecs > 0.0) ? (loopMs / 1000.0) / audioSecs : 0.0;
+        juce::String line;
+        line << juce::Time::getCurrentTime().toString (true, true, false)
+             << "  [TS7 FREEZE] " << juce::String (audioSecs, 2) << "s audio | total "
+             << juce::String (elapsedMs, 0) << "ms = setup "
+             << juce::String (setupMs, 0) << "ms + loop "
+             << juce::String (loopMs, 0) << "ms + teardown "
+             << juce::String (teardownMs, 0) << "ms | LOOP ONLY "
+             << juce::String (loopRatio, 4) << "x realtime -> " << dest.getFileName();
+
+        DBG (line);
+        // TO A FILE, not only DBG: DBG compiles to NOTHING in Release, so the
+        // Debug figure was the only one obtainable -- and Debug can be several
+        // times slower than Release on DSP code, which is exactly the variable
+        // that decides whether the loop is genuinely too slow or just unoptimised.
+        // A measurement you cannot take in the build that ships is not a
+        // measurement.  Appended so successive runs accumulate and can be
+        // compared; lands beside the app per the existing artifact convention.
+        AppPaths::appRoot().getChildFile ("freeze_timing.txt")
+            .appendText (line + juce::newLine);
+    }
+    return true;
+}
+
+// ── TS7 §6.9: the kit's strips, all in ONE offline pass ──────────────────────
+// Does NOT use the freeze tap.  The tap is single-arm -- one insert at a time --
+// so capturing thirteen strips through it would mean thirteen full renders.  The
+// kit engine already exposes each strip's audio directly at exactly the point
+// the tap would have copied it (before that strip's insert chain), and it is
+// valid between processBlock returning and the next call, which is precisely
+// when consumeBlock runs.  So one pass fills all thirteen writers.
+bool BuilderPage::renderKitFreezeFiles (const std::vector<juce::File>& dests,
+                                        RenderTask* target,
+                                        juce::String& outErr,
+                                        std::function<bool()> shouldAbort,
+                                        std::function<void(double)> onProgress)
+{
+    auto* kit = mProcessor.getBaySickRustyDrums();
+    if (kit == nullptr) { outErr = "No drum kit is loaded."; return false; }
+
+    const int n = (int) dests.size();
+    if (n <= 0) { outErr = "The drum kit has no pieces to freeze."; return false; }
+
+    RenderOptions opts;
+    opts.scope       = RenderOptions::Scope::Song;
+    opts.tail        = RenderOptions::Tail::Cut;
+    opts.sampleRate  = mProcessor.getSampleRate();
+
+    juce::AudioFormatManager fm;
+    fm.registerBasicFormats();
+    juce::WavAudioFormat wav;
+
+    std::vector<std::unique_ptr<juce::AudioFormatWriter>> writers;
+    writers.reserve ((size_t) n);
+    for (const auto& dest : dests)
+    {
+        dest.getParentDirectory().createDirectory();
+        dest.deleteFile();
+        auto stream = std::make_unique<juce::FileOutputStream> (dest);
+        if (! stream->openedOk())
+        {
+            outErr = "Could not open a kit freeze file for writing.";
+            return false;
+        }
+        writers.emplace_back (wav.createWriterFor (stream.release(), opts.sampleRate,
+                                                   2, 24, {}, 0));
+        if (writers.back() == nullptr)
+        {
+            outErr = "Could not create a kit freeze file writer.";
+            return false;
+        }
+    }
+
+    const double t0 = juce::Time::getMillisecondCounterHiRes();
+    juce::int64  writtenSamples = 0;
+    juce::uint32 lastRenderSeq  = kit->getStripRenderSeq();
+    juce::int64  blocksRendered = 0;
+
+    // Silence to write on a block where the engine did not render.  Allocated
+    // once, outside the loop: this runs per block.
+    juce::AudioBuffer<float> silence (2, 1024);
+    silence.clear();
+
+    // Armed AFTER the writer setup above, so none of its early returns can leave
+    // the prune set.  See renderFreezeFile for why leaking it is dangerous.
+    mProcessor.setFreezePrune (target);
+
+    const bool ok = runOfflineLoop (opts, outErr, std::move (shouldAbort),
+                                    std::move (onProgress),
+        [kit, &writers, n, &writtenSamples, &lastRenderSeq, &blocksRendered, &silence]
+        (const juce::AudioBuffer<float>&, int chunk) -> bool
+        {
+            // Same stale-buffer hazard the single-track tap has: the producer
+            // task skips processStrips entirely on an idle block, and the strip
+            // views then still hold the previous block's audio.
+            const juce::uint32 seq   = kit->getStripRenderSeq();
+            const bool         fresh = (seq != lastRenderSeq);
+            if (fresh) { lastRenderSeq = seq; ++blocksRendered; }
+            else if (silence.getNumSamples() < chunk)
+                silence.setSize (2, chunk, false, true, false);
+
+            for (int i = 0; i < n; ++i)
+            {
+                const juce::AudioBuffer<float> stripBuf = kit->getStripBuffer (i, chunk);
+                auto& src = fresh ? stripBuf : silence;
+                if (! writers[(size_t) i]->writeFromAudioSampleBuffer (src, 0, chunk))
+                    return false;
+            }
+            writtenSamples += chunk;
+            return true;
+        });
+
+    mProcessor.setFreezePrune (nullptr);
+    writers.clear();   // close every handle before any delete
+
+    if (! ok || blocksRendered == 0)
+    {
+        for (const auto& d : dests) d.deleteFile();
+        if (ok) outErr = "The freeze render captured no audio for the drum kit.";
+        return false;
+    }
+
+    {
+        const double elapsedMs = juce::Time::getMillisecondCounterHiRes() - t0;
+        const double audioSecs = (writtenSamples > 0 && opts.sampleRate > 0.0)
+                                   ? (double) writtenSamples / opts.sampleRate : 0.0;
+        juce::String line;
+        line << juce::Time::getCurrentTime().toString (true, true, false)
+             << "  [TS7 FREEZE] KIT " << n << " strips | "
+             << juce::String (audioSecs, 2) << "s audio in "
+             << juce::String (elapsedMs, 0) << "ms";
+        DBG (line);
+        AppPaths::appRoot().getChildFile ("freeze_timing.txt")
+            .appendText (line + juce::newLine);
+    }
+    return true;
+}
+
+// CL-227: append a violation, or extend the trailing one when it is the same kind
+// and lands inside kViolationGapSeconds of it.  Coalescing here rather than in the
+// report face means the cap counts SPANS, so a sustained overshoot cannot exhaust
+// the row budget and hide later, unrelated breaches.
+// Thin adapter onto the shared rule in LoudnessSpec.h -- kept so the existing
+// call sites below read unchanged.
+static void addOrExtendViolation (BuilderPage::MeasureResult& out,
+                                  LoudnessViolation::Kind kind,
+                                  double startSecs, double endSecs, float value,
+                                  bool& truncated)
+{
+    LoudnessViolation::addOrExtend (out.violations, kind, startSecs, endSecs,
+                                    value, truncated);
+}
+
 bool BuilderPage::measureRender (const RenderOptions& opts,
                                  MeasureResult& out,
                                  juce::String& outErr,
                                  std::function<bool()> shouldAbort,
-                                 std::function<void(double)> onProgress)
+                                 std::function<void(double)> onProgress,
+                                 LoudnessSpec::Id specId,
+                                 float customLufs)
 {
     const double sr = opts.sampleRate > 0.0 ? opts.sampleRate : 44100.0;
+    // §4.2: resolved, not get() -- Custom's target is the user's typed number.
+    const LoudnessSpec spec = LoudnessSpec::resolved (specId, customLufs);
+    out.customTargetLufs = customLufs;
 
     LufsMeterDSP lufs;
     lufs.prepareToPlay (sr);
     lufs.resetIntegrated();
 
-    // Approximate true peak: 4x-oversampled scan via Lagrange interpolation.
-    // Good enough for the CL-045 boost cap; TS7's BLU-108 replaces this with
-    // the BS.1770 polyphase FIR when the maximizer suite lands.
-    juce::LagrangeInterpolator tpL, tpR;
-    juce::AudioBuffer<float>   tpScratch;
-    float truePeakLin = 0.0f;
+    // BLU-108: real true-peak, not an estimate.  Per block the running max is
+    // reset (filter history is NOT, so there is no seam) which gives both the
+    // programme maximum and a per-block value the violation log can timecode.
+    TruePeakMeter tp;
+    tp.prepare (2);
+
+    LoudnessRangeAccumulator lra;
+    lra.reset();
+
+    float  programmeTpLin = 0.0f;
+    double elapsedSecs    = 0.0;
+    // EBU Tech 3342 samples Short-Term at 10 Hz.  The offline block is 2048
+    // (~46 ms at 44.1k), so gate on elapsed time rather than per block, or the
+    // percentile weighting would follow the block size instead of the clock.
+    double nextStSampleAt = 0.0;
+    bool   truncated      = false;
+
+    // §5.1 spectrum snapshot.  One transform per offline block (2048-sample
+    // block, 2048-point FFT) accumulated as POWER and averaged at the end --
+    // averaging in dB would let a single silent block drag a band toward the
+    // floor far harder than it deserves.
+    constexpr int kFftSize = 1 << MeasureResult::kSpectrumOrder;
+    juce::dsp::FFT specFft (MeasureResult::kSpectrumOrder);
+    juce::dsp::WindowingFunction<float> specWin ((size_t) kFftSize,
+        juce::dsp::WindowingFunction<float>::hann);
+    std::vector<float> specScratch ((size_t) kFftSize * 2, 0.0f);
+    std::vector<double> bandPower ((size_t) MeasureResult::kSpectrumBands, 0.0);
+    std::vector<int>    bandCount ((size_t) MeasureResult::kSpectrumBands, 0);
+    int specFrames = 0;
 
     const bool ok = runOfflineLoop (opts, outErr, std::move (shouldAbort),
                                     std::move (onProgress),
@@ -8460,22 +9245,102 @@ bool BuilderPage::measureRender (const RenderOptions& opts,
         {
             lufs.process (buf);
 
-            tpScratch.setSize (1, chunk * 4, false, false, true);
-            for (int c = 0; c < juce::jmin (2, buf.getNumChannels()); ++c)
+            const double blockStart = elapsedSecs;
+            elapsedSecs += (double) chunk / sr;
+
+            tp.resetPeak();
+            tp.process (buf);
+            const float blockTpLin = tp.truePeakLinear();
+            programmeTpLin = juce::jmax (programmeTpLin, blockTpLin);
+
+            const float blockTpDb = juce::Decibels::gainToDecibels (blockTpLin, -144.0f);
+            if (blockTpDb > spec.maxTruePeakDb)
+                addOrExtendViolation (out, MeasureResult::Violation::Kind::TruePeak,
+                                      blockStart, elapsedSecs, blockTpDb, truncated);
+
+            out.maxMomentaryLufs = juce::jmax (out.maxMomentaryLufs, lufs.momentary());
+
+            // §5.1: mono-sum a full transform's worth of this block, window,
+            // transform, and fold the bins into log bands.  Blocks shorter than
+            // the transform are skipped rather than zero-padded -- padding would
+            // smear a partial tail block across every band.
+            if (chunk >= kFftSize && buf.getNumChannels() > 0)
             {
-                auto& interp = (c == 0 ? tpL : tpR);
-                interp.process (0.25, buf.getReadPointer (c),
-                                tpScratch.getWritePointer (0), chunk * 4);
-                truePeakLin = juce::jmax (truePeakLin,
-                                          tpScratch.getMagnitude (0, 0, chunk * 4));
+                const float* sL = buf.getReadPointer (0);
+                const float* sR = buf.getNumChannels() > 1 ? buf.getReadPointer (1) : sL;
+                for (int i = 0; i < kFftSize; ++i)
+                    specScratch[(size_t) i] = 0.5f * (sL[i] + sR[i]);
+                std::fill (specScratch.begin() + kFftSize, specScratch.end(), 0.0f);
+
+                specWin.multiplyWithWindowingTable (specScratch.data(), (size_t) kFftSize);
+                specFft.performFrequencyOnlyForwardTransform (specScratch.data());
+
+                const double binHz = sr / (double) kFftSize;
+                for (int b = 1; b < kFftSize / 2; ++b)
+                {
+                    const double hz = (double) b * binHz;
+                    if (hz < MeasureResult::kSpectrumMinHz
+                        || hz > MeasureResult::kSpectrumMaxHz) continue;
+
+                    const double t = std::log (hz / MeasureResult::kSpectrumMinHz)
+                                   / std::log ((double) MeasureResult::kSpectrumMaxHz
+                                               / MeasureResult::kSpectrumMinHz);
+                    const int band = juce::jlimit (0, MeasureResult::kSpectrumBands - 1,
+                        (int) (t * (MeasureResult::kSpectrumBands - 1) + 0.5));
+
+                    const double mag = (double) specScratch[(size_t) b];
+                    bandPower[(size_t) band] += mag * mag;
+                    ++bandCount[(size_t) band];
+                }
+                ++specFrames;
+            }
+
+            if (elapsedSecs >= nextStSampleAt)
+            {
+                nextStSampleAt = elapsedSecs + 0.1;
+                const float st = lufs.shortTerm();
+                lra.push (st);
+                out.lufsCurve.push_back (st);   // §2.7: the drawable curve
+                out.maxShortTermLufs = juce::jmax (out.maxShortTermLufs, st);
+
+                // Only Custom carries a short-term ceiling today -- none of the
+                // published specs in the table defines one, so this stays quiet
+                // for them rather than inventing a threshold.
+                const float stCeiling = spec.maxShortTermLufs;
+                if (spec.checksShortTerm && st > stCeiling)
+                    addOrExtendViolation (out, MeasureResult::Violation::Kind::ShortTerm,
+                                          blockStart, elapsedSecs, st, truncated);
             }
             return true;
         });
 
     if (! ok) return false;
 
-    out.integratedLufs = lufs.integrated();
-    out.truePeakDb     = juce::Decibels::gainToDecibels (truePeakLin, -120.0f);
+    out.violationsTruncated = truncated;
+    out.specId          = specId;
+    out.integratedLufs  = lufs.integrated();
+    out.truePeakDb      = juce::Decibels::gainToDecibels (programmeTpLin, -144.0f);
+    out.lraLu           = lra.lra();
+    out.durationSeconds = elapsedSecs;
+    out.truePeakInSpec  = (out.truePeakDb <= spec.maxTruePeakDb);
+    out.integratedInSpec = (! spec.checksIntegrated)
+                         || (std::abs (out.integratedLufs - spec.integratedLufs) <= spec.toleranceLu);
+
+    // §5.1: collapse the accumulated power into one dB value per band.  Left
+    // EMPTY when no full transform ever ran (a render shorter than 2048 samples),
+    // so the report can omit the plot rather than draw a flat line at the floor
+    // and imply the mix had no content.
+    if (specFrames > 0)
+    {
+        out.spectrumDb.assign ((size_t) MeasureResult::kSpectrumBands, -120.0f);
+        for (int i = 0; i < MeasureResult::kSpectrumBands; ++i)
+        {
+            if (bandCount[(size_t) i] <= 0) continue;
+            const double meanPower = bandPower[(size_t) i] / (double) bandCount[(size_t) i];
+            out.spectrumDb[(size_t) i] = (float) juce::Decibels::gainToDecibels (
+                std::sqrt (meanPower) / (double) (1 << MeasureResult::kSpectrumOrder), -120.0);
+        }
+    }
     return true;
 }
 
@@ -8798,6 +9663,160 @@ void BuilderPage::runExportWithProgress (const RenderOptions& opts)
 // ─────────────────────────────────────────────────────────────────────────────
 // Pattern render -- now a thin wrapper over the shared harness.
 // ─────────────────────────────────────────────────────────────────────────────
+// TS7 §7.2: the pattern render's options popup.
+//
+// Three picks over TWO operations and two track sets, which is the whole model:
+//   Per Track    -> one WAV per track          (set = every track in the pattern)
+//   Full Mix     -> one WAV, stems SUMMED      (set = every track in the pattern)
+//   Select Tracks-> choose the set, then choose which of the two operations.
+//
+// "Full Mix" is stems summed, NEVER the master output (Jeff 2026-07-29), so no
+// master chain rides on it in either case -- the two Full Mix paths are the same
+// operation over a different set, and Select Tracks adds no semantics of its own.
+void BuilderPage::showPatternRenderOptions (int patternIndex)
+{
+    auto tracks = getPatternTracks (patternIndex);
+    if (tracks.empty())
+    {
+        juce::AlertWindow::showMessageBoxAsync (
+            juce::MessageBoxIconType::InfoIcon, "Nothing to render",
+            "This pattern has no notes on any track.");
+        return;
+    }
+
+    juce::PopupMenu m;
+    m.addSectionHeader ("Render pattern");
+    m.addItem (1, "Per Track  (" + juce::String ((int) tracks.size()) + " files)");
+    m.addItem (2, "Full Mix  (1 file)");
+    m.addSeparator();
+    m.addItem (3, "Select Tracks...");
+
+    m.showMenuAsync (juce::PopupMenu::Options{}, [this, patternIndex] (int r)
+    {
+        if (r == 1) startPatternRender (patternIndex, {}, /*perTrack*/ true);
+        else if (r == 2) startPatternRender (patternIndex, {}, /*perTrack*/ false);
+        else if (r == 3) showPatternTrackPicker (patternIndex);
+    });
+}
+
+// The Select Tracks list: which tracks, then which way.  Both questions live in
+// one box so the user is not walked through two modal steps for one decision.
+void BuilderPage::showPatternTrackPicker (int patternIndex)
+{
+    auto tracks = getPatternTracks (patternIndex);
+    if (tracks.empty()) return;
+
+    // AlertWindow has addTextEditor / addComboBox / addCustomComponent, but NO
+    // toggle-button helper, so the checkbox list is a component we own and read
+    // back directly.  It is kept alive by the AlertWindow for the modal's
+    // lifetime (addCustomComponent does not take ownership, so the list is held
+    // in a shared_ptr the callback captures).
+    struct TrackPickList : public juce::Component
+    {
+        std::vector<std::unique_ptr<juce::ToggleButton>> boxes;
+        explicit TrackPickList (const std::vector<PatternTrackEntry>& entries)
+        {
+            for (const auto& e : entries)
+            {
+                auto tb = std::make_unique<juce::ToggleButton> (e.name);
+                tb->setToggleState (true, juce::dontSendNotification);
+                addAndMakeVisible (*tb);
+                boxes.push_back (std::move (tb));
+            }
+            setSize (300, juce::jmax (24, (int) boxes.size() * 22));
+        }
+        void resized() override
+        {
+            auto b = getLocalBounds();
+            for (auto& tb : boxes) tb->setBounds (b.removeFromTop (22));
+        }
+    };
+
+    auto list = std::make_shared<TrackPickList> (tracks);
+
+    auto* aw = new juce::AlertWindow ("Select Tracks",
+                                      "Choose the tracks to render, and how:",
+                                      juce::MessageBoxIconType::NoIcon);
+    aw->addCustomComponent (list.get());
+    aw->addComboBox ("how", { "One file per track", "One file, mixed together" }, "Output:");
+    aw->addButton ("Render", 1);
+    aw->addButton ("Cancel", 0);
+
+    aw->enterModalState (true, juce::ModalCallbackFunction::create (
+        [this, patternIndex, aw, tracks, list] (int res)
+        {
+            if (res != 1) return;
+            std::vector<int> picked;
+            for (size_t i = 0; i < tracks.size() && i < list->boxes.size(); ++i)
+                if (list->boxes[i]->getToggleState())
+                    picked.push_back (tracks[i].channelId);
+
+            if (picked.empty()) return;   // nothing ticked: silently do nothing
+            const bool perTrack = (aw->getComboBoxComponent ("how")->getSelectedItemIndex() == 0);
+            startPatternRender (patternIndex, picked, perTrack);
+        }), true);
+}
+
+// One entry point for all three picks.  `channelIds` empty means "every track in
+// the pattern"; perTrack chooses between N files and one summed file.
+void BuilderPage::startPatternRender (int patternIndex,
+                                      std::vector<int> channelIds,
+                                      bool perTrack)
+{
+    auto tracks = getPatternTracks (patternIndex);
+    if (tracks.empty()) return;
+
+    // Resolve the set once, so the two branches below cannot disagree about it.
+    std::vector<PatternTrackEntry> set;
+    if (channelIds.empty()) set = tracks;
+    else
+        for (const auto& t : tracks)
+            if (std::find (channelIds.begin(), channelIds.end(), t.channelId) != channelIds.end())
+                set.push_back (t);
+    if (set.empty()) return;
+
+    auto& pat = mPM.getPattern (patternIndex);
+    const juce::String base = pat.name.replaceCharacter (' ', '_');
+
+    auto chooser = std::make_shared<juce::FileChooser> (
+        "Render \"" + pat.name + "\" to WAV",
+        mProcessor.getProjectExportsDir().getChildFile (base + ".wav"),
+        "*.wav");
+
+    chooser->launchAsync (
+        juce::FileBrowserComponent::saveMode | juce::FileBrowserComponent::canSelectFiles,
+        [this, patternIndex, set, perTrack, chooser] (const juce::FileChooser& fc)
+        {
+            auto dest = fc.getResult();
+            if (dest == juce::File()) return;
+
+            RenderOptions opts;
+            opts.scope        = RenderOptions::Scope::Pattern;
+            opts.tail         = RenderOptions::Tail::Included;
+            opts.patternIndex = patternIndex;
+            opts.format       = RenderOptions::Format::Wav;
+            opts.sampleRate   = 44100.0;
+            opts.bitDepth     = 24;
+            opts.destination  = dest;
+
+            if (perTrack)
+            {
+                // Stems only: N files, no combined one the user did not ask for.
+                opts.writeMainFile = false;
+                for (const auto& t : set)
+                    opts.stems.push_back ({ t.channelId, t.name });
+            }
+            else
+            {
+                // Stems SUMMED into the one file -- not the master output.
+                for (const auto& t : set)
+                    opts.mixTapChannels.push_back (t.channelId);
+            }
+
+            runExportWithProgress (opts);
+        });
+}
+
 void BuilderPage::renderPatternToWav(int patternIndex)
 {
     if (patternIndex < 0 || patternIndex >= mPM.getNumPatterns()) return;
@@ -8831,6 +9850,91 @@ void BuilderPage::renderPatternToWav(int patternIndex)
             opts.sampleRate   = 44100.0;
             opts.bitDepth     = 24;
             opts.destination  = dest;
+
+            runExportWithProgress (opts);
+        });
+}
+
+// TS7 §7.2: which tabs actually carry notes in this pattern.
+//
+// Rolls with no notes are SKIPPED rather than rendered silent: "5 tabs 5 wavs"
+// means five tabs that play, and a folder of silent files per idle tab would be
+// noise dressed as completeness.  Rusty is a singleton, hence its single roll.
+std::vector<BuilderPage::PatternTrackEntry>
+BuilderPage::getPatternTracks (int patternIndex) const
+{
+    std::vector<PatternTrackEntry> out;
+    if (patternIndex < 0 || patternIndex >= mPM.getNumPatterns()) return out;
+    const auto& pat = mPM.getPattern (patternIndex);
+
+    auto addIf = [&out] (const PianoRollData& roll, int chId, const juce::String& name)
+    {
+        if (! roll.notes.empty())
+            out.push_back ({ chId, name });
+    };
+
+    for (int i = 0; i < (int) pat.layerRoll.size(); ++i)
+        addIf (pat.layerRoll[(size_t) i], MixerChannelIds::layerInsert (i),
+               "Layer " + juce::String (i + 1));
+    for (int i = 0; i < (int) pat.bassRoll.size(); ++i)
+        addIf (pat.bassRoll[(size_t) i], MixerChannelIds::bassInsert (i),
+               "Bass " + juce::String (i + 1));
+    for (int i = 0; i < (int) pat.drumRolls.size(); ++i)
+        addIf (pat.drumRolls[(size_t) i], MixerChannelIds::drumInsert (i),
+               "Drums " + juce::String (i + 1));
+    for (int i = 0; i < (int) pat.clipRoll.size(); ++i)
+        addIf (pat.clipRoll[(size_t) i], MixerChannelIds::audioInsert (i),
+               "Clip " + juce::String (i + 1));
+    for (int i = 0; i < (int) pat.voxRoll.size(); ++i)
+        addIf (pat.voxRoll[(size_t) i], MixerChannelIds::voxInsert (i),
+               "Vox " + juce::String (i + 1));
+    for (int i = 0; i < (int) pat.instRoll.size(); ++i)
+        addIf (pat.instRoll[(size_t) i], MixerChannelIds::instInsert (i),
+               "Inst " + juce::String (i + 1));
+    for (int i = 0; i < (int) pat.pluginRoll.size(); ++i)
+        addIf (pat.pluginRoll[(size_t) i], MixerChannelIds::pluginInsert (i),
+               "Plugin " + juce::String (i + 1));
+
+    return out;
+}
+
+// TS7 §7.1: consolidate one arrangement row to a single WAV.
+//
+// Scope is the whole SONG deliberately, not just the row's occupied span: the
+// point is a stem you can drop straight back in, and a song-length file aligned
+// to bar 1 does that.  A span-trimmed file would need its offset carried
+// separately and would silently misplace itself.
+void BuilderPage::renderTrackRowToWav (int row)
+{
+    const int chId = MixerChannelIds::audioInsert (row);
+
+    juce::String rowName = mPM.getRowNames()[(size_t) juce::jlimit (0, ArrangementGrid::kNumRows - 1, row)];
+    if (rowName.isEmpty()) rowName = "Track " + juce::String (row + 1);
+    const juce::String defaultName = rowName.replaceCharacter (' ', '_') + ".wav";
+
+    auto chooser = std::make_shared<juce::FileChooser> (
+        "Render \"" + rowName + "\" to WAV",
+        mProcessor.getProjectExportsDir().getChildFile (defaultName),
+        "*.wav");
+
+    chooser->launchAsync (
+        juce::FileBrowserComponent::saveMode | juce::FileBrowserComponent::canSelectFiles,
+        [this, chId, chooser] (const juce::FileChooser& fc)
+        {
+            auto dest = fc.getResult();
+            if (dest == juce::File()) return;
+
+            RenderOptions opts;
+            opts.scope       = RenderOptions::Scope::Song;
+            opts.tail        = RenderOptions::Tail::Included;
+            opts.format      = RenderOptions::Format::Wav;
+            opts.sampleRate  = 44100.0;
+            opts.bitDepth    = 24;
+            opts.destination = dest;
+            // ONE tap: the row's own strip, summed alone.  Everything else still
+            // plays during the pass, so a compressor on this row keyed off another
+            // track keeps its ducking -- the reason stems are one-pass.
+            opts.mixTapChannels = { chId };
 
             runExportWithProgress (opts);
         });
@@ -8935,7 +10039,7 @@ void BuilderMenuBar::menuItemSelected(int itemId, int /*topLevelIndex*/)
         case 43: o.doFindNextEmptyPattern();  break;
         case 44: o.doNewAutomationClip();     break;
         case 45: if (o.mGrid && o.mPM.getNumPatterns() > 0)
-                     o.renderPatternToWav(o.mPM.getCurrentPatternIndex()); break;
+                     o.showPatternRenderOptions(o.mPM.getCurrentPatternIndex()); break;
 
         // View
         case 51: o.doZoom(1.15f);            break;

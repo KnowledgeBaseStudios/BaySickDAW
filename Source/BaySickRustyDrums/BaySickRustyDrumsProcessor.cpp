@@ -252,6 +252,10 @@ void BaySickRustyDrumsProcessor::processStrips (int numFrames, juce::MidiBuffer&
         mMultiOutPtrs.resize ((size_t) neededCh);
     }
     mMultiOutScratch.clear (0, numFrames);
+    // Bumped HERE, not at the end: past this line the scratch is guaranteed
+    // fresh for this block, including the zero-voice early-out below (which
+    // returns silence, and silence that was just written is still fresh).
+    mStripRenderSeq.fetch_add (1, std::memory_order_release);
     for (int i = 0; i < neededCh; ++i)
         mMultiOutPtrs[(size_t) i] = mMultiOutScratch.getWritePointer (i);
 

@@ -8,6 +8,7 @@
 
 // Forward declarations
 class RenderGraphDispatcher;
+class AudioClipStreamer;   // TS7 §6.3 freeze source
 struct BlockContext;
 
 // Base class for one node in the render graph. Typically wraps one mixer
@@ -83,4 +84,66 @@ public:
     //   2. Write `mNumSamples` samples into mOutputBuffer.
     //   3. Return. The pool handles dependency propagation.
     virtual void run() = 0;
+
+    // ── TS7 §6.3: freeze source ───────────────────────────────────────────────
+    // Non-null means this strip plays a cached file instead of doing its own
+    // work.  Nothing is destroyed -- the engine (or the clip decode) is left in
+    // place and simply not called, so unfreeze is a store of nullptr and no
+    // state was ever lost.
+    //
+    // ON THE BASE, not on EngineInsertTask (moved 2026-07-30, Jeff: every tab
+    // must be freezable).  Vox and Inst strips are RenderTasks, NOT
+    // EngineInsertTasks, so while this lived on the derived class
+    // `renderTaskForTab` could not even express them in its return type and
+    // freeze was structurally shut out of both -- which is why the excuse
+    // recorded next to it ("live-input chains, freezing the input would freeze
+    // nothing") went unexamined for so long.  It was never about live input:
+    // recorded takes on those strips replay through the strip's own chain and
+    // are exactly what freeze should be substituting.
+    //
+    // ATOMIC because the message thread sets it (freeze / unfreeze / a
+    // re-render completing) while the audio thread reads it every block.  The
+    // streamer is owned by the freeze driver and outlives any block that could
+    // be reading it: it is cleared here FIRST, and the owner only destroys it
+    // once the dispatcher has been through a block with the pointer already null.
+    void setFrozenSource (AudioClipStreamer* s) noexcept
+        { mFrozenSource.store (s, std::memory_order_release); }
+    AudioClipStreamer* getFrozenSource() const noexcept
+        { return mFrozenSource.load (std::memory_order_acquire); }
+
+    // ── TS7 §6.9: freeze-render pruning ───────────────────────────────────────
+    // Set only by RenderGraphDispatcher::setFreezePrune, only for the duration
+    // of an offline freeze render, and only on tasks OUTSIDE the keep-set (the
+    // frozen target, everything upstream of it, and the master).  A freeze
+    // render of one track otherwise pays for the whole project every block.
+    //
+    // WHY A FLAG AND NOT "DON'T SEED THE TASK":  the dispatcher's completion
+    // signal is MasterTask::run setting mAllDone, and master only runs when its
+    // dependency counter reaches zero -- which requires EVERY predecessor to
+    // have been through the pool.  Drop a task from the seed set and master
+    // starves, mAllDone never sets, and the block burns the full 100ms watchdog
+    // instead of ~2ms: measured at 2.15x realtime, TWENTY TIMES SLOWER than the
+    // unpruned render it was meant to speed up.  So the task must still flow
+    // through the pool and still decrement its children -- it just must not do
+    // any WORK.  The dependency graph is load-bearing; only run() is optional.
+    void setRenderSkipped (bool s) noexcept
+        { mRenderSkipped.store (s, std::memory_order_release); }
+    bool isRenderSkipped() const noexcept
+        { return mRenderSkipped.load (std::memory_order_acquire); }
+
+    // Stands in for run() when skipped.  The arena buffer is recycled across
+    // blocks and is never zeroed on its own, so leaving it alone would feed
+    // last block's audio (or, on the first block, uninitialised memory) into
+    // whatever sums it downstream.
+    // Whole buffer, not just mCtx->numSamples: BlockContext is only forward
+    // declared here, and the arena slot is one max-block allocation anyway.
+    void clearOnSkip() noexcept
+    {
+        if (mOutputBuffer != nullptr)
+            mOutputBuffer->clear();
+    }
+
+protected:
+    std::atomic<AudioClipStreamer*> mFrozenSource { nullptr };
+    std::atomic<bool>               mRenderSkipped { false };
 };

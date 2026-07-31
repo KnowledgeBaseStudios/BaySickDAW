@@ -1,6 +1,9 @@
 #pragma once
 #include <JuceHeader.h>
 #include "DSPBase.h"
+#include "LufsMeterDSP.h"
+#include "TruePeakMeter.h"
+#include <array>
 #include <atomic>
 #include <memory>
 #include <vector>
@@ -33,6 +36,75 @@
 class LimiterDSP : public DSPBase
 {
 public:
+    // ── TS7: Limiter vs Maximizer ─────────────────────────────────────────────
+    // Two MODES on the panel's hamburger, the same mechanism Compressor uses for
+    // Modern/FET/Opto/CS (SlotComponent::modeLabel / showModeMenu).
+    //
+    // Limiter mode is the FL REPRODUCTION and carries none of the TS7 additions
+    // (Jeff, 2026-07-29).  Everything the maximizer suite adds -- character,
+    // loudness target, true-peak auto-ceiling, the LUFS/dBFS meter -- belongs to
+    // Maximizer mode only.  Default is Limiter, so a preset written before this
+    // existed restores unchanged.
+    //
+    // WHY MODE IS THE VARIANT AXIS AND CHARACTER IS NOT.  EffectParamMap keys on
+    // (type, variant), so an axis with N values costs N tables.  Mode changes
+    // WHICH controls exist, so it earns that.  Character changes internal
+    // ballistics only and leaves the parameter set identical -- as a variant it
+    // would have meant 2 modes x 8 characters = 16 tables describing one set.
+    // So character stays a selector, same as the Delay panel's model chickenhead.
+    enum class Mode { Limiter = 0, Maximizer };
+
+    void setMode (Mode m);
+    Mode getMode() const noexcept { return mMode; }
+    int  getModeIndex() const noexcept { return (int) mMode; }
+    static const char* modeName (int index) noexcept;
+    static constexpr int numModes() { return 2; }
+
+    // ── CL-243: character algorithms ──────────────────────────────────────────
+    // Eight release/colour voicings (BLU-109's Transparent/Punchy/Vintage
+    // voicings fold in here).  NAMES ARE OURS -- concept parity with the
+    // reference limiters' style lists, never their names (no-brand-names rule).
+    //
+    // A character biases the INTERNAL ballistics: the auto-release envelope pair,
+    // the GR depth at which the blend hands over to the slow envelope, a release
+    // curve offset, a release-time scale, and the mode's own soft-sat drive.  The
+    // user's Attack / Release / Ahead / SAT knobs stay RELATIVE controls within
+    // the chosen character -- which is how a character-mode limiter is expected
+    // to behave, and is why the knobs are not overridden.  Monotonicity is
+    // preserved in every mode (more Release is always longer).
+    //
+    // Clean == today's fixed constants exactly (20 / 300 / 6 dB / no offset / no
+    // scale / no sat), so a preset written before CL-243 -- which restores
+    // character 0 by default -- sounds bit-identical to before.
+    enum class Character
+    {
+        Clean = 0,   // most transparent; the pre-CL-243 behaviour
+        Smooth,      // longer, gentler recovery
+        Tight,       // fast and controlled
+        Punch,       // transient-forward, hands to the slow envelope early
+        Glue,        // bus-style, slow and programme-dependent
+        Loud,        // maximum density, sat engaged
+        Warm,        // saturation-forward colour
+        Instant,     // near-zero-lookahead clip guard
+        Count
+    };
+
+    struct CharacterProfile
+    {
+        const char* name;
+        float relFastMs;       // auto-release fast envelope time constant
+        float relSlowMs;       // auto-release slow envelope time constant
+        float autoKneeDb;      // GR depth at which the blend fully favours slow
+        float curveOffset;     // added to the user's ReleaseCurve (result clamped 0..1)
+        float relScale;        // multiplies the user's Release time
+        float satAutoDrive;    // the mode's own soft-sat drive, on top of the SAT knob
+        bool  needsLookahead;  // false = designed to work with Ahead at 0
+    };
+
+    static const CharacterProfile& profileFor (Character c) noexcept;
+    static const char* characterName (int index) noexcept;
+    static constexpr int numCharacters() { return (int) Character::Count; }
+
     LimiterDSP();
     ~LimiterDSP() override = default;
 
@@ -66,6 +138,66 @@ public:
     // C5: Stereo-link detector. true = single envelope from max(|L|,|R|) drives
     // both channels (default, cleanest stereo image). false = per-channel envelopes.
     void setStereoLink    (bool on);
+
+    // ── TS7 / CL-243: character selection ─────────────────────────────────────
+    void setCharacter (Character c);
+    void setCharacterIndex (int index);   // automation/serialisation-friendly
+    Character getCharacter()      const noexcept { return mCharacter; }
+    int       getCharacterIndex() const noexcept { return (int) mCharacter; }
+
+    // ── TS7 / CL-244: loudness-target mode ────────────────────────────────────
+    // A slow closed-loop servo: the limiter measures its OWN OUTPUT loudness
+    // (short-term, 3 s) and trims input gain toward the target.  Closed loop is
+    // the correct topology -- output loudness is what the target is about, and
+    // measuring it self-corrects for the limiter's own gain reduction.  The loop
+    // converges over seconds by design ("after listening to a section"), which is
+    // what the slew limit below is for; it is not a compressor.
+    void  setLoudnessTargetOn  (bool on);
+    void  setLoudnessTargetLufs (float lufs);        // -30 .. 0 LUFS
+    bool  getLoudnessTargetOn()   const noexcept { return mLoudnessTargetOn; }
+    float getLoudnessTargetLufs() const noexcept { return mLoudnessTargetLufs; }
+    // Current servo contribution, dB.  UI readout; also tells the user why the
+    // effective input gain differs from the knob.
+    float getLoudnessServoDb()    const noexcept { return mServoDb.load(); }
+
+    // ── TS7 / BLU-108: true-peak auto-ceiling ─────────────────────────────────
+    // The hard clamp guarantees the SAMPLE peak stays under the ceiling; it says
+    // nothing about inter-sample peaks, which is what clips a consumer DAC or a
+    // lossy transcode.  With auto-ceiling on, the real output true peak is
+    // measured (TruePeakMeter) and the effective ceiling is trimmed down until it
+    // sits under the true-peak target -- the Spotify/YouTube margin.
+    void  setAutoCeiling     (bool on);
+    void  setTruePeakTargetDb (float dbTp);          // -6 .. 0 dBTP
+    bool  getAutoCeiling()      const noexcept { return mAutoCeiling; }
+    float getTruePeakTargetDb() const noexcept { return mTruePeakTargetDb; }
+    float getCeilingTrimDb()    const noexcept { return mCeilingTrimDb.load(); }
+    // -144 when auto-ceiling is off (the meter is not run, so there is no value
+    // to report -- reporting a stale one would be worse than reporting none).
+    float getOutputTruePeakDb() const noexcept { return mOutTpDb.load(); }
+
+    // ── TS7 / BLU-110: LUFS beside dBFS ───────────────────────────────────────
+    // The output loudness meter costs K-weighting filters per sample -- roughly a
+    // biquad-heavy effect's worth per instance, and a project can hold dozens of
+    // limiters -- so it runs only while something needs it: target mode (which
+    // depends on it) or a panel that is watching.
+    //
+    // A WATCHDOG, not an on/off pair, and that is deliberate.  The obvious design
+    // is enable-in-ctor / disable-in-dtor, but removing a rack effect destroys the
+    // DSP SYNCHRONOUSLY inside EffectRack::packSlotsToTop while the panel window
+    // is still open (the TS6 editor-outlives-instance crash was this exact
+    // ordering), so a destructor that touched the DSP could touch freed memory.
+    // Poking a countdown from the panel's existing 30 Hz timer needs no teardown
+    // call at all: the meter simply lapses a beat after nobody is looking.
+    void  pokeLufsMeter() noexcept;
+    bool  getLufsMeterActive() const noexcept
+        { return mLoudnessTargetOn || mLufsHold.load() > 0; }
+    float getOutputLufsMomentary() const noexcept { return mOutLufsM.load(); }
+    float getOutputLufsShortTerm() const noexcept { return mOutLufsS.load(); }
+    float getOutputLufsIntegrated() const noexcept { return mOutLufsI.load(); }
+    // Clears the integrated accumulation, so a transport restart does not read
+    // as one continuous programme.  NO CALLER YET -- the panel does not offer a
+    // reset control (an earlier version of this comment claimed it did).
+    void  resetOutputLufsIntegrated() noexcept;
 
     // ── Meter accessors (UI thread reads, audio thread writes) ────────────────
     float getCurrentGainReduction() const { return mGrDb.load(); }
@@ -102,6 +234,14 @@ private:
     float mSidechainHPF      { 20.0f };   // C2: 20 Hz = effectively off
     bool  mAutoMakeup        { false };   // C4
     bool  mStereoLink        { true };    // C5
+
+    // ── TS7 params ────────────────────────────────────────────────────────────
+    Mode      mMode               { Mode::Limiter };      // FL reproduction by default
+    Character mCharacter          { Character::Clean };   // CL-243
+    bool      mLoudnessTargetOn   { false };              // CL-244
+    float     mLoudnessTargetLufs { -14.0f };
+    bool      mAutoCeiling        { false };              // BLU-108
+    float     mTruePeakTargetDb   { -1.0f };
 
     // ── Smoothed values (15 ms linear ramp) ───────────────────────────────────
     juce::SmoothedValue<float, juce::ValueSmoothingTypes::Linear> mInputGainSmooth;   // dB
@@ -164,8 +304,60 @@ private:
     float mLevelDecayDbPerBlock { 0.35f };   // for mInputDb / mOutputDb (falls toward -96)
     float mGrDecayDbPerBlock    { 0.35f };   // for mGrDb (rises toward 0 - GR is <=0)
 
+    // ── TS7 servo + meter state ───────────────────────────────────────────────
+    // Servo values are atomics because the UI reads them while the audio thread
+    // writes them; both are single-writer so a plain store/load is sufficient.
+    std::atomic<float> mServoDb      { 0.0f };   // CL-244 input-gain trim
+    std::atomic<float> mCeilingTrimDb{ 0.0f };   // BLU-108 ceiling trim (<= 0)
+    std::atomic<float> mOutTpDb      { -144.0f };
+    std::atomic<float> mOutLufsM     { -120.0f };
+    std::atomic<float> mOutLufsS     { -120.0f };
+    std::atomic<float> mOutLufsI     { -120.0f };
+
+    // BLU-110 watchdog: blocks remaining before the display meter lapses.  Poked
+    // by the panel's timer, decremented by process().  See pokeLufsMeter().
+    std::atomic<int> mLufsHold      { 0 };
+    int              mLufsHoldBlocks { 32 };   // recomputed in prepare() for ~0.5 s
+
+    // CL-244 / BLU-110: loudness of the limiter's OWN OUTPUT.  Only processed
+    // while getLufsMeterActive().
+    LufsMeterDSP  mOutLufs;
+    // BLU-108: true peak of the output.  Only processed when mAutoCeiling.
+    TruePeakMeter mOutTp;
+    bool          mLufsPrepared { false };
+
+    // Servo rate limits.  CALIBRATION (Rule 6 cat. 5): 1.5 dB/s is slow enough
+    // that a loudness servo never reads as gain-riding on musical material, and
+    // fast enough to settle inside the couple of seconds a short-term window
+    // needs to fill.  +-12 dB of authority covers a badly-gain-staged mix
+    // without letting a mistake run away.
+    static constexpr float kServoDbPerSec  = 1.5f;
+    static constexpr float kServoRangeDb   = 12.0f;
+    // Ceiling trim recovers slower than it engages: pulling down late clips,
+    // letting go early re-clips.  Asymmetric on purpose.
+    static constexpr float kTrimDownDbPerSec = 3.0f;
+    static constexpr float kTrimUpDbPerSec   = 0.5f;
+    static constexpr float kTrimMaxDb        = 6.0f;   // trim floor, as magnitude
+
+    // TS7: is the maximizer half live?  Gating on this rather than zeroing the
+    // stored values means Limiter mode is the pure FL reproduction AND flipping
+    // back to Maximizer restores the user's target, character and ceiling
+    // settings intact.  Zeroing them on the way out would silently discard work;
+    // leaving them ungated would let hidden state drive the sound, which is the
+    // defect class this codebase keeps paying for.
+    bool maximizerActive() const noexcept { return mMode == Mode::Maximizer; }
+    // The character in force.  Limiter mode always runs Clean -- the pre-TS7
+    // ballistics -- whatever the stored character says.
+    Character effectiveCharacter() const noexcept
+        { return maximizerActive() ? mCharacter : Character::Clean; }
+
     // ── Helpers ───────────────────────────────────────────────────────────────
     void recalcCoefs();       // attack/release coefs from times
     void allocateDelay();     // size delay line from mAheadMs
+    // Once per block, audio thread.  They move mServoDb / mCeilingTrimDb only --
+    // deliberately NOT the SmoothedValues, which stay single-writer (message
+    // thread).  Full reasoning at their definitions.
+    void updateLoudnessServo (int numSamples);   // CL-244
+    void updateCeilingTrim   (int numSamples);   // BLU-108
     static float softSat (float x, float drive, float curve);
 };

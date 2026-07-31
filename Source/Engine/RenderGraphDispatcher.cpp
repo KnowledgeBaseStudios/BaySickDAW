@@ -215,6 +215,67 @@ void RenderGraphDispatcher::rebuildLinks (const RoutingGraph& routing)
     }
 }
 
+void RenderGraphDispatcher::setFreezePrune (RenderTask* target)
+{
+    if (target == nullptr)
+    {
+        for (auto* t : mTasks)
+            if (t != nullptr)
+                t->setRenderSkipped (false);
+        return;
+    }
+
+    // MASTER IS NON-NEGOTIABLE.  MasterTask::run is what sets mAllDone, which
+    // is the ONLY thing that ends the block -- skip it and every block waits
+    // out the full watchdog.
+    RenderTask* master = mTasksByChannel[(size_t) MixerChannelIds::kMaster];
+    jassert (master != nullptr);
+
+    std::vector<RenderTask*> keep;
+    keep.reserve (mTasks.size());
+
+    auto contains = [&keep] (RenderTask* t)
+    { return std::find (keep.begin(), keep.end(), t) != keep.end(); };
+
+    auto add = [&keep, &contains] (RenderTask* t)
+    { if (t != nullptr && ! contains (t)) { keep.push_back (t); return true; } return false; };
+
+    add (master);
+    add (target);
+
+    // Reverse-walk the audio predecessors.  `keep` grows while we iterate it,
+    // which is deliberate: the index walk IS the breadth-first closure.  Both
+    // normal and sidechain links live in mPredecessors, so one pass covers a
+    // frozen track whose compressor is keyed off another strip -- prune that
+    // key source and the freeze bakes in the wrong gain reduction.
+    for (size_t i = 0; i < keep.size(); ++i)
+        for (const auto& link : keep[i]->mPredecessors)
+            add (link.source);
+
+    // Synthetic deps are NOT in mPredecessors (no buffer is read across them),
+    // so a producer-style task reaches the keep-set only here.  This is the
+    // only route by which RustyDrumsProducerTask -- which drives the engine
+    // that every RustyInsertTask reads out of -- survives the prune; without
+    // it, freezing a Rusty drum renders silence.  Iterate to a fixpoint: a
+    // producer can itself have predecessors, and adding it can in turn pull in
+    // another producer.
+    for (bool grew = true; grew; )
+    {
+        grew = false;
+        for (const auto& [producer, consumer] : mSyntheticDeps)
+            if (producer != nullptr && consumer != nullptr && contains (consumer))
+                grew |= add (producer);
+
+        for (size_t i = 0; i < keep.size(); ++i)
+            for (const auto& link : keep[i]->mPredecessors)
+                grew |= add (link.source);
+    }
+
+    for (auto* t : mTasks)
+        if (t != nullptr)
+            t->setRenderSkipped (! contains (t));
+}
+
 void RenderGraphDispatcher::dispatchBlock (juce::AudioBuffer<float>& outputBuffer,
                                             const BlockContext&       ctx)
 {

@@ -7,6 +7,10 @@
 
 class VibeGraph;
 class ISidechainEngine;
+// TS7 §6.3: freeze playback reuses the clip streamer -- SPSC ring, background
+// prefetch AND TS2's offline synchronous-read mode, so a frozen tab renders
+// correctly inside an export for free.  Forward-declared; only the .cpp reads it.
+class AudioClipStreamer;
 
 // QA-ModelShell TS6 (BLU-447): Plugin joins the engine-driven kinds -- a hosted
 // VST3 instrument is rendered exactly like a Layer, differing only in which
@@ -48,6 +52,11 @@ public:
                       VibeGraph&            graph);
 
     void run() override;
+
+    // TS7 §6.3 freeze: setFrozenSource / getFrozenSource / mFrozenSource moved
+    // to RenderTask (2026-07-30) so Vox and Inst strips, which are RenderTasks
+    // rather than EngineInsertTasks, can be frozen too.  See the base for the
+    // ownership and memory-ordering contract.
 
 private:
     juce::MidiBuffer* resolveMidiBuffer() const noexcept;

@@ -2,6 +2,7 @@
 #include "../../VibeGraph.h"
 #include "../../DSP/EngineSidechainHelper.h"   // ISidechainEngine
 #include "../SidechainPullHelper.h"            // pullSidechainPredecessorsToGraph
+#include "../../DSP/AudioClipStreamer.h"       // TS7 §6.3: frozen-tab playback
 
 namespace
 {
@@ -85,13 +86,50 @@ void EngineInsertTask::run()
         mScEngine->setSidechainBuffers (scBufs, VibeGraph::kMaxScRecvSlots);
     }
 
-    // ── Engine render ─────────────────────────────────────────────────────────
+    // ── Engine render, OR the frozen file in its place (TS7 §6.3) ────────────
+    //
+    // Freeze substitutes the SOURCE and nothing else: the insert chain below
+    // runs identically, which is what Jeff's pre-rack "Source Only" ruling means
+    // -- a frozen tab keeps its rack, EQ and fader live and editable.
+    //
+    // Reading here rather than at the InsertNode's dormant `preRenderedSrc` hook
+    // is deliberate.  This is where the block's playhead is available (mCtx->
+    // posInfo), the streamer's read is stateless per block on exactly that
+    // position, and the engine call it replaces sits at the same point -- so the
+    // swap is one branch instead of threading a buffer down into the graph.
+    //
+    // FALLS BACK TO THE LIVE ENGINE when the streamer cannot serve the block
+    // (§6.6): a stale or missing freeze plays live until its re-render lands,
+    // which is also what covers a project opened with no freeze cache at all.
+    // SONG MODE ONLY (2026-07-30, found by Jeff asking whether freeze helps in
+    // pattern mode).  The freeze file is the SONG arrangement rendered from bar
+    // 1, but in pattern mode the transport wraps inside the pattern loop -- so
+    // reading it at the playhead would play the opening bars of the SONG, looped,
+    // instead of the pattern.  Wrong audio WITH the CPU saving, which is worse
+    // than no saving.  Falls back to the live engine, which is freeze's existing
+    // stale-plays-live behaviour rather than a new path.
+    //
+    // Pattern-mode freeze needs a pattern-SCOPED render, which is precisely the
+    // span §6.8 never saves.
+    bool playedFrozen = false;
+    if (mCtx->songMode)
+    if (auto* fz = mFrozenSource.load (std::memory_order_acquire))
+    {
+        juce::int64 filePos = 0;
+        if (mCtx->posInfo != nullptr)
+            filePos = mCtx->posInfo->getTimeInSamples().orFallback ((juce::int64) 0);
+
+        if (filePos >= 0 && filePos < fz->getTotalLength())
+            playedFrozen = fz->readRaw (blockView, 0, n, filePos);
+    }
+
     juce::MidiBuffer  emptyMidi;
     juce::MidiBuffer* midi = resolveMidiBuffer();
     if (midi == nullptr)
         midi = &emptyMidi;
 
-    mEngine->processBlock (blockView, *midi);
+    if (! playedFrozen)
+        mEngine->processBlock (blockView, *midi);
 
     // ── Insert chain (polarity → preEq → width → rack → postEq → fader …) ────
     mGraph->processInsert (toInsertKind (mKind), mIndex,

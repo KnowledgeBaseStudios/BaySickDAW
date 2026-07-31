@@ -14,6 +14,7 @@
 #include "DrumPage.h"   // D2: KitDrumInfo struct used in helper signatures below
 #include "PagePresetIO.h"   // G-7: PageKind enum used in helper signatures below
 #include "HeavyOperationOverlay.h"
+#include "VersionCapture.h"   // QA-ModelShell TS7 §3: per-playback-pass capture
 
 class PatternManager;
 class ProjectManager;
@@ -232,9 +233,57 @@ private:
 
     void openEffectSlotWindow (int channelId, int slotIndex);
     void openEffectEqWindow   (int channelId, bool pre);
+    // CL-044 (QA-ModelShell TS7): the floating master spectrum analyzer.  A
+    // satellite window like the effect windows -- no ribbon slot, opened from
+    // View > Master Analyzer.
+    void openMasterAnalyzerWindow();
+
+    // TS7 §6.8: freezes read out of a project file during deserialize, applied
+    // after the whole graph exists.  Collected rather than applied inline because
+    // the tabs they name do not exist yet at read time.
+    struct PendingFreeze { TabKind kind; int pageIndex; bool byUser; };
+    std::vector<PendingFreeze> mPendingFreezes;
+    void restorePendingFreezes();
+
+    // TS7 §6.9 / CL-055: smart auto-freeze.  Polled from the existing editor
+    // timer rather than its own, and it freezes at most ONE tab per trip over
+    // the threshold -- freezing is a blocking offline render, so doing several
+    // in one go would stall the message thread exactly when the machine is
+    // already struggling.
+    void pollAutoFreeze();
+    // TS7: names the track in the overlay for the AUTOMATIC freeze paths, which
+    // otherwise stall the app for seconds with nothing on screen.  Pair with
+    // mHeavyOpOverlay.endOp().
+    void showFreezeRenderNotice (TabKind kind, int pageIndex);
+    int  mAutoFreezeHoldTicks { 0 };
+    juce::uint32 mLastSwingStamp { 0 };   // TS7 §6.5 swing invalidator
+    // TS7 §6.6: a freeze re-render blocks the message thread for SECONDS, so it
+    // must not fire while the user is still editing.  Re-armed by every content
+    // change; the refresh queue only drains after this much quiet.
+    double mLastContentEditMs { 0.0 };
+    static constexpr double kFreezeRefreshQuietMs = 2000.0;
+    // Re-renders queued by markEngineContentChanged, drained one per tick for
+    // the same reason.
+    std::vector<PendingFreeze> mFreezeRefreshQueue;
     // A rack changed under us: ask every satellite window on that channel to
     // re-check its target, and close the ones whose effect is gone.
     void closeDeadEffectWindows (int channelId);
+
+    // ── TS7 §3: version capture ──────────────────────────────────────────────
+    // Rides the existing 30 Hz automation timer (VersionCapture::kTimerHz), not
+    // a timer of its own: the analysis half is always on, so its wakeup cost is
+    // paid for the whole session and a second timer would double it for nothing.
+    VersionCapture mVersionCapture;
+    // TS7 §6: the per-player Freeze button, wired once from showPageForTab.
+    void wireFreezeSlotForVisiblePage();
+    bool visiblePageTabIdentity (TabKind& outKind, int& outIndex) const;
+
+    void pollVersionCapture();
+    // What is playing, for the take's label.  Read at take start only.
+    juce::String currentScopeLabel() const;
+    // §3.6: copy a take's audio somewhere the user chooses.  A COPY, not a move
+    // -- the take stays selectable in the analyzer afterwards.
+    void exportCapturedTake (const VersionCapture::Version& v);
 
     // ── Core helpers ──────────────────────────────────────────────────────────
     void buildDefaultTabs();     // called in ctor: Builder + initial Layers/Bass/Drums
@@ -478,6 +527,11 @@ private:
     std::vector<std::pair<int,int>> mTypingHeldNotes;  // keyCode -> sounding MIDI note
     void toggleTypingKeyboard();
     void sendTypingNote (int midiNote, bool noteOn);
+    // TS6 (BLU-447) plugin roll audition: the note a ONE-SHOT preview left
+    // ringing, released when the next preview or a press-and-hold starts.
+    // Message thread only.  One value, not one per tab, because only one roll is
+    // active at a time -- the same reason the live MIDI target is a single value.
+    int mPluginAuditionHeldNote { -1 };
     bool keyPressed (const juce::KeyPress&) override;
     bool keyStateChanged (bool isKeyDown) override;
     // G1 smoke item-12 fix: KeyListener overloads forwarding to the two
@@ -685,7 +739,15 @@ private:
     struct DenoisePollTimer : public juce::Timer {
         StandaloneEditor& owner;
         explicit DenoisePollTimer(StandaloneEditor& o) : owner(o) {}
-        void timerCallback() override { owner.pollDenoiseState(); }
+        void timerCallback() override
+        {
+            owner.pollDenoiseState();
+            // TS7 §6.9: rides this existing 5 Hz poll rather than starting a
+            // timer of its own -- an auto-freeze check does not need its own
+            // wakeup, and a second timer would be pure cost on the machine this
+            // feature exists to relieve.
+            owner.pollAutoFreeze();
+        }
     } mDenoisePollTimer { *this };
 
     // R5d follow-up (2026-04-24): after any project load / backup restore,
@@ -951,7 +1013,11 @@ private:
     struct AutomationTimer : public juce::Timer {
         StandaloneEditor& owner;
         explicit AutomationTimer(StandaloneEditor& o) : owner(o) {}
-        void timerCallback() override { owner.applyAutomationAtCurrentPosition(); }
+        void timerCallback() override
+        {
+            owner.applyAutomationAtCurrentPosition();
+            owner.pollVersionCapture();   // TS7 §3.2 (see pollVersionCapture)
+        }
     } mAutomationTimer { *this };
 
     // Pattern-dropdown label sync.  The current pattern changes from places

@@ -725,6 +725,11 @@ int MixerPage::CableOverlay::findSocketNear(juce::Point<float> pt, float radius,
     // J-5 (2026-05-03)
     for (auto& [idx, strip] : owner.mRustyStrips)
         if (check(rustyInsert(idx))) return rustyInsert(idx);
+    // TS6 (BLU-447) -- MISSED, fixed TS7 2026-07-30.  The bus was already a
+    // socket here; its member strips were not, so a plugin strip's own cable
+    // could not be grabbed.
+    for (auto& [idx, strip] : owner.mPluginStrips)
+        if (check(pluginInsert(idx))) return pluginInsert(idx);
 
     return -1;
 }
@@ -789,6 +794,8 @@ int MixerPage::CableOverlay::findStripUnder(juce::Point<float> pt) const
     // J-5 (2026-05-03)
     for (auto& [idx, s] : owner.mRustyStrips)
         if (checkBounds(rustyInsert(idx))) return rustyInsert(idx);
+    for (auto& [idx, s] : owner.mPluginStrips)   // TS6 (missed, fixed TS7)
+        if (checkBounds(pluginInsert(idx))) return pluginInsert(idx);
 
     return -1;
 }
@@ -1541,6 +1548,9 @@ MixerPage::MixerPage(VibeSynthProcessor& processor, PatternManager& pm)
     mVoxBusStrip       ->setApvts(mProcessor.apvts, "mixer_voxbus");
     mInstBusStrip      ->setApvts(mProcessor.apvts, "mixer_instbus");
     mRustyDrumsBusStrip->setApvts(mProcessor.apvts, "mixer_rustybus");
+    // TS6 (BLU-447) -- MISSED, fixed TS7 2026-07-30.  Without this the Plugins
+    // bus strip's polarity / width / bypass had no parameter behind them.
+    mPluginsBusStrip   ->setApvts(mProcessor.apvts, "mixer_pluginbus");
 
     wireBusCallbacks(mLayersBusStrip.get(),     mx.layersLevel,          mx.layersPan,        mx.layersMute,         mx.layersSolo);
     wireBusCallbacks(mBassBusStrip.get(),        mx.bassLevel,            mx.bassPan,          mx.bassMute,           mx.bassSolo);
@@ -1561,6 +1571,9 @@ MixerPage::MixerPage(VibeSynthProcessor& processor, PatternManager& pm)
         if (onEffectsTabRequested) onEffectsTabRequested(id);
     };
     mRustyDrumsBusStrip->onFXClicked = [this](const juce::String& id) {
+        if (onEffectsTabRequested) onEffectsTabRequested(id);
+    };
+    mPluginsBusStrip->onFXClicked = [this](const juce::String& id) {
         if (onEffectsTabRequested) onEffectsTabRequested(id);
     };
 
@@ -1590,6 +1603,12 @@ MixerPage::MixerPage(VibeSynthProcessor& processor, PatternManager& pm)
     // is what gates whether layoutScrollContent positions it on-screen.
     mScrollContent->addChildComponent(*mRustyDrumsBusStrip);
     mRustyDrumsBusStrip->setVisible(false);
+    // TS6 (BLU-447) -- MISSED, fixed TS7 2026-07-30.  This was the whole reason
+    // the Plugins bus never appeared: the strip was constructed and configured
+    // but never PARENTED, so it was an orphan Component that could not render no
+    // matter what mPluginsBusActive said.  Same lazy shape as Rusty above.
+    mScrollContent->addChildComponent(*mPluginsBusStrip);
+    mPluginsBusStrip->setVisible(false);
 
     // Direct Routing label (hidden until any strip main-outs to Master)
     mDirectRoutingLabel = std::make_unique<DirectRoutingLabel>();
@@ -1609,6 +1628,12 @@ MixerPage::MixerPage(VibeSynthProcessor& processor, PatternManager& pm)
         };
     };
     wireSendBtn(mMasterStrip.get());
+    // TS7 (CL-044): master's "+" is the Analyzer button, so it fires this instead.
+    if (mMasterStrip)
+        mMasterStrip->onAnalyzerRequested = [this]
+        {
+            if (onAnalyzerRequested) onAnalyzerRequested();
+        };
     wireSendBtn(mLayersBusStrip.get());
     wireSendBtn(mBassBusStrip.get());
     wireSendBtn(mDrumsBusStrip.get());
@@ -1617,6 +1642,7 @@ MixerPage::MixerPage(VibeSynthProcessor& processor, PatternManager& pm)
     wireSendBtn(mVoxBusStrip.get());
     wireSendBtn(mInstBusStrip.get());
     wireSendBtn(mRustyDrumsBusStrip.get());
+    wireSendBtn(mPluginsBusStrip.get());
 
     // 5F-4b B3: set channel IDs on fixed strips for cable rendering
     mMasterStrip      ->setChannelId(MixerChannelIds::kMaster);
@@ -2597,6 +2623,15 @@ void MixerPage::clearDynamicStrips()
         mRustyDrumsBusActive = false;
         mRustyDrumsBusStrip->setVisible(false);
     }
+    // TS6 (BLU-447) -- MISSED, fixed TS7 2026-07-30.  This is the project-load
+    // reset; without it a plugin strip from the OUTGOING project survived into
+    // the incoming one, bound to an APVTS prefix whose engine no longer exists.
+    mPluginStrips.clear();   mPluginOrder  .clear();
+    if (mPluginsBusActive && mPluginsBusStrip)
+    {
+        mPluginsBusActive = false;
+        mPluginsBusStrip->setVisible(false);
+    }
     mLastSendToCache.clear();
     if (getWidth() > 0) layoutScrollContent();
     if (mCableOverlay) mCableOverlay->repaint();
@@ -2683,6 +2718,13 @@ juce::String MixerPage::getInstStripName (int idx) const
     auto it = mInstStrips.find (idx);
     return (it != mInstStrips.end() && it->second) ? it->second->getName()
                                                    : juce::String ("Inst " + juce::String (idx + 1));
+}
+
+juce::String MixerPage::getPluginStripName (int idx) const
+{
+    auto it = mPluginStrips.find (idx);
+    return (it != mPluginStrips.end() && it->second) ? it->second->getName()
+                                                     : juce::String ("Plugin " + juce::String (idx + 1));
 }
 
 void MixerPage::addAuxChannelAtIndex(int idx)
@@ -2942,6 +2984,11 @@ namespace
         return chId == kMaster   || chId == kFxBus
             || chId == kVoxBus2  || chId == kInstBus2
             || chId == kInstBus3 || chId == kRustyDrumsBus;
+        // kPluginsBus deliberately NOT here (Jeff, 2026-07-31): a plugin strip's
+        // main-out is unlocked by spec and moves under Layers or Bass, and when
+        // it does the Plugins bus has no members and must disappear -- the same
+        // "shown when used, gone when nothing feeds it" rule every other
+        // member-gated bus follows.
     }
 
     // Walks every parameter whose id is a send-destination on a strip prefix.
@@ -3120,6 +3167,10 @@ void MixerPage::renameChannel(StripKind kind, int pageIdx, const juce::String& n
         // Drum do (previously left untouched -- no enum entry existed).
         case StripKind::Audio:
             if (auto it = mAudioStrips.find(pageIdx); it != mAudioStrips.end())
+                it->second->setTrackName(newName);
+            break;
+        case StripKind::Plugin:
+            if (auto it = mPluginStrips.find(pageIdx); it != mPluginStrips.end())
                 it->second->setTrackName(newName);
             break;
     }
@@ -3501,6 +3552,12 @@ void MixerPage::timerCallback()
         // cable change re-runs layout (re-buckets the strip to its new dest).
         for (int k : mRustyOrder)
             anyChange |= check(rustyInsert(k), "mixer_rusty_" + juce::String(k));
+        // TS6 (BLU-447) -- MISSED, fixed TS7 2026-07-30.  Plugin inserts are
+        // main-out UNLOCKED by spec (a VST strip moves under Layers or Bass), so
+        // omitting them from this scan is worse here than for a locked kind: the
+        // reroute the feature exists for would never re-lay-out.
+        for (int k : mPluginOrder)
+            anyChange |= check(pluginInsert(k), "mixer_plugin_" + juce::String(k));
 
         if (anyChange)
         {
@@ -3594,6 +3651,9 @@ void MixerPage::onVBlank()
     // J-5 (2026-05-03): per-Rusty-strip peak meter drain.
     for (auto& [idx, strip] : mRustyStrips)
         drainStereoInsert (VibeGraph::InsertKind::Rusty, idx, strip.get());
+    // TS6 (BLU-447) -- MISSED, fixed TS7 2026-07-30.
+    for (auto& [idx, strip] : mPluginStrips)
+        drainStereoInsert (VibeGraph::InsertKind::Plugin, idx, strip.get());
 
     if (mVoxBus2Strip)  drainStereoBus (mVoxBus2Strip .get(), kVoxBus2,  mProcessor.mVoxBus2PeakDbL,  mProcessor.mVoxBus2PeakDbR);
     if (mInstBus2Strip) drainStereoBus (mInstBus2Strip.get(), kInstBus2, mProcessor.mInstBus2PeakDbL, mProcessor.mInstBus2PeakDbR);
@@ -3641,6 +3701,8 @@ void MixerPage::onVBlank()
     for (auto& kv : mVoxStrips)   pushPeak(kv.second.get());
     for (auto& kv : mInstStrips)  pushPeak(kv.second.get());
     for (auto& kv : mRustyStrips) pushPeak(kv.second.get());
+    for (auto& kv : mPluginStrips) pushPeak(kv.second.get());   // TS6
+    if (mPluginsBusStrip) pushPeak(mPluginsBusStrip.get());     // TS6
 
     bool cableDirty = (mPeakSnapshotScratch.size() != mLastPeakSnapshot.size());
     if (! cableDirty)
@@ -3786,6 +3848,18 @@ void MixerPage::layoutScrollContent()
             bucketPush(it->second.get(), rustyInsert(k), drumW,
                        "mixer_rusty_" + juce::String(k));
     }
+    // TS6 (BLU-447) -- MISSED, fixed TS7 2026-07-30.  addPluginChannel builds the
+    // strip and parents it, but with no bucket entry here it was never given
+    // bounds: a zero-size child at 0,0.  Everything else about it was correct,
+    // which is why it read as "no strip is created".  LayerChannel width to match
+    // the strip type addPluginChannel constructs.
+    for (int k : mPluginOrder)
+    {
+        auto it = mPluginStrips.find(k);
+        if (it != mPluginStrips.end())
+            bucketPush(it->second.get(), pluginInsert(k), layerW,
+                       "mixer_plugin_" + juce::String(k));
+    }
 
     int x = kSepW;
 
@@ -3923,6 +3997,13 @@ void MixerPage::layoutScrollContent()
         laidOutBus(*mInstBus2Strip, kInstBus2, juce::Colour(0xFF1C3A8A));
     if (mInstBus3Active && mInstBus3Strip)
         laidOutBus(*mInstBus3Strip, kInstBus3, juce::Colour(0xFF1C3A8A));
+
+    // TS6 (BLU-447) -- MISSED, fixed TS7 2026-07-30.  Jeff's placement: AFTER the
+    // whole Inst family (all three buses and their strips) and BEFORE Layers, not
+    // wedged in among the secondary Inst buses.  Gated on mPluginsBusActive so the
+    // bus takes no mixer width until a plugin tab exists.
+    if (mPluginsBusActive && mPluginsBusStrip)
+        laidOutBus(*mPluginsBusStrip, kPluginsBus, VC::Purple);
 
     laidOutBus(*mLayersBusStrip,      kLayersBus, VC::LayerCol[0]);
     laidOutBus(*mBassBusStrip,        kBassBus,   VC::BassCol[0]);

@@ -44,6 +44,13 @@ public:
 
     int getLatencySamples() const override;
 
+    // TS7 (2026-07-31): a hosted VST3 in a rack slot had NO playhead, so its
+    // tempo-synced delays, LFOs and arpeggiators had nothing to follow -- JUCE
+    // builds the entire VST3 ProcessContext from one AudioPlayHead::getPosition()
+    // and skips every validity flag when there is none.  This is the one effect
+    // type that overrides it; the other twelve take DSPBase's no-op.
+    void setHostTransport (const DSPBase::HostTransport&) override;
+
     // ── Automation ──────────────────────────────────────────────────────────
     // Lanes are keyed on the plugin's OWN stable parameter id
     // (HostedParameter::getParameterID -- for VST3 the id the plugin declares),
@@ -75,6 +82,18 @@ private:
     juce::AudioProcessorParameter* findParam (const juce::String& paramId) const;
 
     std::unique_ptr<HostedPluginInstance> mHosted;
+
+    // The playhead handed to the hosted instance.  A MEMBER, not a local:
+    // setPlayHead stores the POINTER, so anything on the stack would dangle the
+    // instant the call returned.
+    struct RackPlayHead : juce::AudioPlayHead
+    {
+        juce::AudioPlayHead::PositionInfo mPos;
+        juce::Optional<juce::AudioPlayHead::PositionInfo> getPosition() const override
+        { return mPos; }
+    };
+    RackPlayHead mPlayHead;
+    bool         mPlayHeadAttached { false };
 
     // The rack's calling convention has no MIDI.  Cleared every block because a
     // plugin is free to write into the buffer it is handed.

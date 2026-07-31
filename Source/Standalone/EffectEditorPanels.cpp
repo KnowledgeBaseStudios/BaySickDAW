@@ -3375,10 +3375,129 @@ struct TapeSatPanel : public EditorPanelBase
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
+// ── LoudnessMeter (BLU-110) ──────────────────────────────────────────────────
+// LUFS beside dBFS with a target line across the loudness bar, so "how loud is
+// this" and "how close to clipping is this" are readable in one glance instead of
+// from two unrelated indicators.
+//
+// Palette follows the governing Limiter UI spec (`Files For Claude/DSP Review/
+// Limiter.txt` §2): electric cyan as the primary accent, safety orange as the
+// warning, monospaced digital readouts for the numbers.
+//
+// Deliberately NOT part of the three-zone skeuomorphic rewrite that spec also
+// describes -- `_APPROVED_CHANGES.md` §5 files that as a separate UI task, and
+// the layout batch running after this one owns the app's appearance under the
+// windowed shell.  This is the BLU-110 deliverable only.
+struct LoudnessMeter : public juce::Component,
+                       public juce::SettableTooltipClient,
+                       private juce::Timer
+{
+    LoudnessMeter() { startTimerHz (15); }
+    ~LoudnessMeter() override { stopTimer(); }
+
+    // Audio-thread values are already atomics on the DSP; the panel's timer
+    // forwards them here, so these are plain fields written on the message thread.
+    void setValues (float lufsShortTerm, float dbfsPeak, float targetLufs,
+                    bool targetActive)
+    {
+        mLufs         = lufsShortTerm;
+        mDbfs         = dbfsPeak;
+        mTargetLufs   = targetLufs;
+        mTargetActive = targetActive;
+    }
+
+    void paint (juce::Graphics& g) override
+    {
+        // Limiter.txt §2 palette: electric cyan accent, safety orange warning.
+        const juce::Colour kCyan   (0xff00fff2);
+        const juce::Colour kOrange (0xffff9100);
+
+        auto b = getLocalBounds().toFloat().reduced (1.0f);
+        g.setColour (juce::Colour (0xff141618));
+        g.fillRoundedRectangle (b, 2.0f);
+        g.setColour (juce::Colour (0xff2a2f33));
+        g.drawRoundedRectangle (b, 2.0f, 1.0f);
+
+        auto inner = b.reduced (3.0f);
+        auto labels = inner.removeFromBottom (10.0f);
+        inner.removeFromBottom (2.0f);
+
+        const float colW = (inner.getWidth() - 3.0f) * 0.5f;
+        auto lufsCol = inner.removeFromLeft (colW);
+        inner.removeFromLeft (3.0f);
+        auto dbfsCol = inner.removeFromLeft (colW);
+
+        // Shared scale.  -36..0 covers every target in the spec table (-14 through
+        // ATSC's -24) with room to read a quiet passage below EBU's -23.
+        auto yFor = [&] (const juce::Rectangle<float>& col, float db)
+        {
+            const float t = juce::jlimit (0.0f, 1.0f, (db - kMinDb) / (kMaxDb - kMinDb));
+            return col.getBottom() - t * col.getHeight();
+        };
+
+        auto drawBar = [&] (juce::Rectangle<float> col, float db, juce::Colour fill)
+        {
+            g.setColour (juce::Colour (0xff0b0d0e));
+            g.fillRect (col);
+            if (db > kMinDb)
+            {
+                const float top = yFor (col, db);
+                g.setColour (fill);
+                g.fillRect (col.withTop (top));
+            }
+        };
+
+        const bool overTarget = mTargetActive && (mLufs > mTargetLufs);
+        drawBar (lufsCol, mLufs, overTarget ? kOrange : kCyan);
+        // dBFS turns orange once it is inside the last dB, which is the margin
+        // every spec in the table asks for.
+        drawBar (dbfsCol, mDbfs, (mDbfs > -1.0f) ? kOrange : juce::Colour (0xffb8c0c6));
+
+        if (mTargetActive)
+        {
+            const float ty = yFor (lufsCol, mTargetLufs);
+            g.setColour (kCyan.withAlpha (0.85f));
+            // Dashed so it reads as a reference line rather than as signal.
+            const float dash[] = { 3.0f, 2.0f };
+            juce::Path line, dashed;
+            line.startNewSubPath (lufsCol.getX(), ty);
+            line.lineTo (lufsCol.getRight(), ty);
+            juce::PathStrokeType (1.0f).createDashedStroke (dashed, line, dash, 2);
+            g.fillPath (dashed);
+        }
+
+        g.setFont (juce::Font (juce::Font::getDefaultMonospacedFontName(), 8.0f,
+                               juce::Font::plain));
+        g.setColour (juce::Colour (0xff8f9aa1));
+        auto fmt = [] (float db) -> juce::String
+        {
+            return (db <= -119.0f) ? juce::String ("--")
+                                   : juce::String (db, 1);
+        };
+        g.drawText (fmt (mLufs), labels.removeFromLeft (colW),
+                    juce::Justification::centred, false);
+        labels.removeFromLeft (3.0f);
+        g.drawText (fmt (mDbfs), labels.removeFromLeft (colW),
+                    juce::Justification::centred, false);
+    }
+
+private:
+    void timerCallback() override { repaint(); }
+
+    float mLufs         { -120.0f };
+    float mDbfs         {  -96.0f };
+    float mTargetLufs   {  -14.0f };
+    bool  mTargetActive { false };
+
+    static constexpr float kMinDb = -36.0f;
+    static constexpr float kMaxDb =   0.0f;
+};
+
 // LimiterPanel (basic, functional - polished Limiter.txt UI is a separate task)
-// Row 1: InGain | Ceil | SatTh | SatCv
-// Row 2: Atk   | Rel  | Ahead | RelCv   + Auto toggle
-// Also: GR meter (left of knobs, right of input VU)
+// Row 1: InGain | Ceil | SatTh | SatCv | SCHPF
+// Row 2: Atk   | Rel  | Ahead | RelCv  + Sustain
+// Row 3 (TS7, Advanced): Character selector | LUFS target | TP target
+// Also: GR meter + LUFS/dBFS meter (left of knobs, right of input VU)
 // ─────────────────────────────────────────────────────────────────────────────
 struct LimiterPanel : public EditorPanelBase,
                       public juce::Timer
@@ -3389,11 +3508,27 @@ struct LimiterPanel : public EditorPanelBase,
     std::unique_ptr<DualLabelToggle>    linkTog;      // C5
     std::unique_ptr<GRMeter>            grMeter;
     std::unique_ptr<VKnob>              sustainKnob;  // Fruity SUSTAIN (Basic)
+    // ── TS7 maximizer suite ───────────────────────────────────────────────────
+    std::unique_ptr<ChickenHeadSelector> charSel;      // CL-243
+    std::unique_ptr<VKnob>               lufsTgtKnob;  // CL-244
+    std::unique_ptr<DualLabelToggle>     lufsTgtTog;   // CL-244
+    std::unique_ptr<VKnob>               tpTgtKnob;    // BLU-108
+    std::unique_ptr<DualLabelToggle>     autoCeilTog;  // BLU-108
+    std::unique_ptr<LoudnessMeter>       loudMeter;    // BLU-110
     LimiterDSP*                         mDsp { nullptr };
 
+    // Chain context only.  The vocal chain re-applies its limiter from APVTS every
+    // block, so a selector that wrote the DSP alone would be overwritten on the
+    // next callback -- it has to write the PARAMETER there.  Null in a rack slot,
+    // where the DSP is authoritative.
+    juce::AudioProcessorValueTreeState* mChainApvts { nullptr };
+    juce::String                        mChainPrefix;
+
     // Basic = the real Fruity Limiter controls (GAIN / Ceiling / SAT-thresh /
-    // Attack / Release / Sustain + GR meter).  Advanced = our additions
-    // (SatCurve / Ahead / RelCurve / SC-HPF + Auto-release / Auto-makeup / Link).
+    // Attack / Release / Sustain + GR meter) -- the exact reference replica, so
+    // every TS7 addition below is Advanced-tier by that rule, not by preference.
+    // Advanced = our additions (SatCurve / Ahead / RelCurve / SC-HPF +
+    // Auto-release / Auto-makeup / Link + the maximizer suite).
     bool hasAdvancedControls() const override { return true; }
 
     void disableGrMeter() override
@@ -3407,6 +3542,8 @@ struct LimiterPanel : public EditorPanelBase,
         for (auto& k : r1knobs) if (k) v.push_back(k.get());
         for (auto& k : r2knobs) if (k) v.push_back(k.get());
         if (sustainKnob) v.push_back(sustainKnob.get());
+        if (lufsTgtKnob) v.push_back(lufsTgtKnob.get());
+        if (tpTgtKnob)   v.push_back(tpTgtKnob.get());
         return v;
     }
 
@@ -3490,6 +3627,102 @@ struct LimiterPanel : public EditorPanelBase,
         sustainKnob->slider.onValueChange = [dsp,this]{ if (dsp) dsp->setSustainMs ((float) sustainKnob->slider.getValue()); };
         addAndMakeVisible (*sustainKnob);
 
+        // ── CL-243: character selector ────────────────────────────────────────
+        // A chickenhead, not a Mode-menu entry: a character does not change WHICH
+        // parameters exist, so making it a variant would have forced eight
+        // EffectParamMap tables for one identical parameter set.  Same reasoning
+        // (and the same control) as the Delay panel's model selector, which is
+        // likewise display-side and unautomatable.
+        charSel = std::make_unique<ChickenHeadSelector>();
+        {
+            // Two-letter bezel marks; the full name and its description ride the
+            // per-option tooltip, which is where an eight-way selector has room to
+            // explain itself.
+            static const char* kMarks[] = { "Cl", "Sm", "Ti", "Pu", "Gl", "Lo", "Wa", "In" };
+            static const char* kBlurbs[] =
+            {
+                "Most transparent. Longest, smoothest recovery - the default",
+                "Longer and gentler still; recovery leans exponential",
+                "Fast and controlled; shorter release for a firmer low end",
+                "Transient-forward; hands over to the slow envelope early",
+                "Bus-style: slow and programme-dependent",
+                "Maximum density; release is short and saturation is engaged",
+                "Saturation-forward colour with a relaxed release",
+                "Near-zero look-ahead clip guard; works with Ahead at 0",
+            };
+            std::vector<ChickenHeadSelector::Option> opts;
+            for (int i = 0; i < LimiterDSP::numCharacters(); ++i)
+                opts.push_back ({ kMarks[i], LimiterDSP::characterName (i), kBlurbs[i] });
+            charSel->setOptions (opts);
+        }
+        charSel->setBodyTooltip ("Character: release voicing and colour. Clean is the "
+                                 "most transparent; Loud and Warm add saturation; "
+                                 "Instant is designed to work with Ahead at 0");
+        charSel->setDefaultLabelColour (juce::Colours::black);   // cream Dynamics plate
+        charSel->setSelectedIndex (dsp->getCharacterIndex(), juce::dontSendNotification);
+        charSel->onChange = [this] (int idx)
+        {
+            if (mDsp) mDsp->setCharacterIndex (idx);
+            // Chain context: the parameter is the authority (see mChainApvts).
+            if (mChainApvts != nullptr)
+                if (auto* p = mChainApvts->getParameter (mChainPrefix + "limiter_character"))
+                    p->setValueNotifyingHost (
+                        p->getNormalisableRange().convertTo0to1 ((float) idx));
+        };
+        addAndMakeVisible (*charSel);
+
+        // ── CL-244: loudness target ───────────────────────────────────────────
+        lufsTgtKnob = std::make_unique<VKnob>("LUFS", -14.0f,
+            "Loudness target (LUFS). With Target on, the limiter measures its own "
+            "output loudness and trims input gain toward this over several seconds");
+        lufsTgtKnob->slider.setRange (-30.0, 0.0, 0.1);
+        lufsTgtKnob->slider.setValue (dsp->getLoudnessTargetLufs(), juce::dontSendNotification);
+        lufsTgtKnob->slider.getProperties().set (DynamicsLAF::kKnobVariant, "modernAnalog");
+        lufsTgtKnob->slider.onValueChange = [dsp,this]
+            { if (dsp) dsp->setLoudnessTargetLufs ((float) lufsTgtKnob->slider.getValue()); };
+        addAndMakeVisible (*lufsTgtKnob);
+
+        lufsTgtTog = std::make_unique<DualLabelToggle>();
+        lufsTgtTog->setupOnOff("Target", "Loudness target mode: slowly trims input gain "
+                                          "so the output settles at the LUFS target");
+        lufsTgtTog->btn().setToggleState(dsp->getLoudnessTargetOn(), juce::dontSendNotification);
+        lufsTgtTog->btn().onClick = [dsp, this]
+            { dsp->setLoudnessTargetOn (lufsTgtTog->btn().getToggleState()); };
+        addAndMakeVisible (*lufsTgtTog);
+
+        // ── BLU-108: true-peak auto-ceiling ───────────────────────────────────
+        tpTgtKnob = std::make_unique<VKnob>("dBTP", -1.0f,
+            "True-peak target (dBTP). With Auto Ceil on, the ceiling is trimmed "
+            "until the measured inter-sample peak stays under this - the margin "
+            "streaming services and lossy transcodes need");
+        tpTgtKnob->slider.setRange (-6.0, 0.0, 0.1);
+        tpTgtKnob->slider.setValue (dsp->getTruePeakTargetDb(), juce::dontSendNotification);
+        tpTgtKnob->slider.getProperties().set (DynamicsLAF::kKnobVariant, "modernAnalog");
+        tpTgtKnob->slider.onValueChange = [dsp,this]
+            { if (dsp) dsp->setTruePeakTargetDb ((float) tpTgtKnob->slider.getValue()); };
+        addAndMakeVisible (*tpTgtKnob);
+
+        autoCeilTog = std::make_unique<DualLabelToggle>();
+        autoCeilTog->setupOnOff("Auto Ceil", "True-peak auto-ceiling: measures the real "
+                                              "inter-sample peak of the output and lowers "
+                                              "the ceiling until it is under the dBTP target");
+        autoCeilTog->btn().setToggleState(dsp->getAutoCeiling(), juce::dontSendNotification);
+        autoCeilTog->btn().onClick = [dsp, this]
+            { dsp->setAutoCeiling (autoCeilTog->btn().getToggleState()); };
+        addAndMakeVisible (*autoCeilTog);
+
+        // ── BLU-110: LUFS beside dBFS ─────────────────────────────────────────
+        loudMeter = std::make_unique<LoudnessMeter>();
+        loudMeter->setTooltip ("Output loudness (LUFS short-term, left) beside output "
+                               "peak (dBFS, right). The dashed line is the LUFS target");
+        addAndMakeVisible (*loudMeter);
+
+        // The output loudness meter costs K-weighting filters per sample, so the
+        // DSP only runs it while something is watching.  Poked here so the first
+        // frame has data, then re-poked from timerCallback.  No teardown call --
+        // see pokeLufsMeter()'s comment for why a destructor must not touch the DSP.
+        dsp->pokeLufsMeter();
+
         startTimerHz (30);
     }
 
@@ -3526,6 +3759,23 @@ struct LimiterPanel : public EditorPanelBase,
         if (autoRelTog) bindButton (autoRelTog->btn(), "limiter_autoRelease");
         if (autoMuTog)  bindButton (autoMuTog ->btn(), "limiter_autoMakeup");
         if (linkTog)    bindButton (linkTog   ->btn(), "limiter_stereoLink");
+
+        // TS7 additions.  The chain drives its limiter from these parameters every
+        // block, so anything unbound here would be reset on the next callback.
+        if (lufsTgtKnob) bindSlider (lufsTgtKnob->slider, "limiter_loudTargetLufs");
+        if (tpTgtKnob)   bindSlider (tpTgtKnob  ->slider, "limiter_truePeakTargetDb");
+        if (lufsTgtTog)  bindButton (lufsTgtTog ->btn(),  "limiter_loudTargetOn");
+        if (autoCeilTog) bindButton (autoCeilTog->btn(),  "limiter_autoCeiling");
+
+        // The character selector is not a Slider or a Button, so it has no JUCE
+        // attachment.  Remembering the APVTS lets its onChange write the parameter,
+        // and the initial position is read back here.
+        mChainApvts  = &apvts;
+        mChainPrefix = prefix;
+        if (charSel != nullptr)
+            if (auto* cp = apvts.getRawParameterValue (prefix + "limiter_character"))
+                charSel->setSelectedIndex ((int) std::lround (cp->load()),
+                                           juce::dontSendNotification);
     }
 
     // Declared after the controls they attach to (reverse-order destruction).
@@ -3535,17 +3785,58 @@ struct LimiterPanel : public EditorPanelBase,
     ~LimiterPanel() override
     {
         stopTimer();
+        // Deliberately does NOT touch mDsp.  Removing a rack effect destroys the
+        // DSP synchronously while this panel is still alive, so a dereference here
+        // can read freed memory -- which is why the loudness meter is a watchdog
+        // the DSP lets lapse on its own rather than something this releases.
         setLookAndFeel (nullptr);
     }
 
     void timerCallback() override
     {
-        if (mDsp && grMeter) grMeter->setGainReduction (mDsp->getGainReductionDb());
+        if (mDsp == nullptr) return;
+        // Keep-alive for the output loudness meter (BLU-110).
+        mDsp->pokeLufsMeter();
+        if (grMeter) grMeter->setGainReduction (mDsp->getGainReductionDb());
+        if (loudMeter)
+            loudMeter->setValues (mDsp->getOutputLufsShortTerm(),
+                                  mDsp->getOutputLevelDb(),
+                                  mDsp->getLoudnessTargetLufs(),
+                                  mDsp->getLoudnessTargetOn());
+        // The two automatic modes move the ceiling and the input gain behind the
+        // knobs, so the tooltips report the live trim -- otherwise the user has no
+        // way to see why the sound differs from what the knobs read.
+        // DualLabelToggle is not a tooltip client; its ToggleButton is.
+        if (mDsp->getLoudnessTargetOn() && lufsTgtTog)
+            lufsTgtTog->btn().setTooltip ("Loudness target mode: active, currently trimming "
+                                    + juce::String (mDsp->getLoudnessServoDb(), 1)
+                                    + " dB of input gain");
+        if (mDsp->getAutoCeiling() && autoCeilTog)
+            autoCeilTog->btn().setTooltip ("True-peak auto-ceiling: measured "
+                                     + juce::String (mDsp->getOutputTruePeakDb(), 1)
+                                     + " dBTP, ceiling trimmed "
+                                     + juce::String (mDsp->getCeilingTrimDb(), 1) + " dB");
     }
 
     void paint (juce::Graphics& g) override
     {
         DynamicsLAF::paintLA2APanel (g, getLocalBounds());
+    }
+
+    // The maximizer's own row: character selector then the two target knobs.
+    // Shared by the Basic and Advanced layouts so the two cannot drift.
+    void layoutMaximizerRow (juce::Rectangle<int> r)
+    {
+        if (charSel)
+        {
+            const int cs = juce::jmin (r.getHeight(), 56);
+            charSel->setBounds (r.removeFromLeft (cs).withSizeKeepingCentre (cs, cs));
+            r.removeFromLeft (6);
+        }
+        std::vector<VKnob*> row;
+        if (lufsTgtKnob) row.push_back (lufsTgtKnob.get());
+        if (tpTgtKnob)   row.push_back (tpTgtKnob.get());
+        layoutKnobsH (r, row);
     }
 
     void resized() override
@@ -3567,21 +3858,119 @@ struct LimiterPanel : public EditorPanelBase,
         outputVolKnob->setBounds (b.removeFromRight (kKnobSz).withSizeKeepingCentre (kKnobSz, kKnobSz));
         b.removeFromRight (4);
 
-        // Advanced-only: SatCurve (r1[3]) + SC-HPF (r1[4]) + Ahead (r2[2]) +
-        // RelCurve (r2[3]) + the 3 toggles.  Basic = the real Fruity controls
-        // (GAIN / Ceiling / SAT / Attack / Release / Sustain) + the GR meter.
+        // Basic = the real Fruity controls (GAIN / Ceiling / SAT / Attack /
+        // Release / Sustain) + the GR meter, i.e. the exact reference replica.
+        // Advanced adds the pre-existing C1-C5 additions.
+        //
+        // TS7 (Jeff 2026-07-29): **Limiter mode is the FL reproduction and carries
+        // NONE of the maximizer additions.**  The whole suite -- character, LUFS
+        // target, dBTP target, loudness meter -- belongs to Maximizer mode, and
+        // there it sits in BASIC so it is the first thing the user sees rather
+        // than hidden behind Show Advanced.  The DSP gates its BEHAVIOUR on the
+        // same mode (LimiterDSP::maximizerActive), so hiding these is not what
+        // makes reproduction mode faithful -- it is faithful either way.
         const bool adv = ! mBasicMode;
-        if (r1knobs.size() > 4 && r1knobs[3]) r1knobs[3]->setVisible (adv);   // SatCv
-        if (r1knobs.size() > 4 && r1knobs[4]) r1knobs[4]->setVisible (adv);   // SCHPF
-        if (r2knobs.size() > 3 && r2knobs[2]) r2knobs[2]->setVisible (adv);   // Ahead
-        if (r2knobs.size() > 3 && r2knobs[3]) r2knobs[3]->setVisible (adv);   // RelCv
-        if (autoRelTog) autoRelTog->setVisible (adv);
-        if (autoMuTog)  autoMuTog ->setVisible (adv);
-        if (linkTog)    linkTog   ->setVisible (adv);
+        const bool maxMode = (mDsp != nullptr
+                              && mDsp->getMode() == LimiterDSP::Mode::Maximizer);
 
-        if (adv)
+        // Visibility is set EXPLICITLY for every control rather than only for the
+        // ones that change: a control left visible but unpositioned by the branch
+        // below would paint at whatever bounds it last had.
+        auto show = [] (juce::Component* c, bool v) { if (c) c->setVisible (v); };
+        const bool refBallistics = adv || ! maxMode;   // Atk/Rel/Sustain
+
+        // Maximizer Basic is EXACTLY the six controls §1.4 lists (Jeff,
+        // 2026-07-30): character selector, LUFS target knob + toggle, dBTP knob +
+        // Auto-Ceil toggle, LUFS/dBFS meter, GR meter.  InGain / Ceil / SatTh
+        // were mine on the argument that a maximizer "can't work without" them;
+        // it can -- the servo drives gain and Auto-Ceil drives the ceiling, which
+        // is the entire point of the mode.  They stay in Maximizer ADVANCED.
+        const bool refLevels = adv || ! maxMode;   // InGain / Ceil / SatTh
+
+        show (r1knobs.size() > 0 ? r1knobs[0].get() : nullptr, refLevels);   // InGain
+        show (r1knobs.size() > 1 ? r1knobs[1].get() : nullptr, refLevels);   // Ceil
+        show (r1knobs.size() > 2 ? r1knobs[2].get() : nullptr, refLevels);   // SatTh
+        show (r1knobs.size() > 3 ? r1knobs[3].get() : nullptr, adv);         // SatCv
+        show (r1knobs.size() > 4 ? r1knobs[4].get() : nullptr, adv);         // SCHPF
+        show (r2knobs.size() > 0 ? r2knobs[0].get() : nullptr, refBallistics); // Atk
+        show (r2knobs.size() > 1 ? r2knobs[1].get() : nullptr, refBallistics); // Rel
+        show (r2knobs.size() > 2 ? r2knobs[2].get() : nullptr, adv);         // Ahead
+        show (r2knobs.size() > 3 ? r2knobs[3].get() : nullptr, adv);         // RelCv
+        show (sustainKnob.get(), refBallistics);
+        show (autoRelTog.get(),  adv);
+        show (autoMuTog.get(),   adv);
+        show (linkTog.get(),     adv);
+
+        // The maximizer suite is visible in Maximizer mode ONLY, and there it is
+        // Basic-tier so it shows without touching Show Advanced.
+        show (charSel.get(),     maxMode);
+        show (lufsTgtKnob.get(), maxMode);
+        show (lufsTgtTog.get(),  maxMode);
+        show (tpTgtKnob.get(),   maxMode);
+        show (autoCeilTog.get(), maxMode);
+        show (loudMeter.get(),   maxMode);
+
+        if (maxMode)
         {
-            // Toggle layout: Auto MU column LEFT of the Auto Release + Link stack.
+            // BLU-110 meter sits beside the GR meter -- together they are the
+            // "what is happening" column.
+            if (loudMeter)
+            {
+                const int lw = juce::jmin (72, juce::jmax (40, b.getWidth() / 8));
+                loudMeter->setBounds (b.removeFromLeft (lw).reduced (1, 2));
+                b.removeFromLeft (4);
+            }
+
+            // Toggle columns.  Target + Auto Ceil are the maximizer's own pair and
+            // stay visible in Basic; the three ballistics toggles are Advanced.
+            constexpr int kToggleColW = 62;
+            const int togCols = adv ? 3 : 1;
+            auto togArea = b.removeFromRight (kToggleColW * togCols + 4);
+            b.removeFromRight (2);
+
+            auto colFor = [&] (juce::Rectangle<int>& area, DualLabelToggle* top,
+                               DualLabelToggle* bottom)
+            {
+                auto col = area.removeFromRight (kToggleColW);
+                const int halfH = col.getHeight() / 2;
+                auto topSlot = col.removeFromTop (halfH);
+                if (top)    top   ->setBounds (topSlot.reduced (1));
+                if (bottom) bottom->setBounds (col    .reduced (1));
+                area.removeFromRight (2);
+            };
+            if (adv)
+            {
+                colFor (togArea, autoRelTog.get(), linkTog.get());
+                colFor (togArea, autoMuTog.get(),  nullptr);
+            }
+            colFor (togArea, lufsTgtTog.get(), autoCeilTog.get());
+
+            // Basic: one row of the maximizer's own controls.  Advanced: the two
+            // reference rows on top, maximizer controls on the third.
+            if (adv)
+            {
+                const int rowH = b.getHeight() / 3;
+                auto r1 = b.removeFromTop (rowH);
+                auto r2 = b.removeFromTop (rowH);
+                auto r3 = b;
+                layoutKnobsH (r1, r1knobs);
+                std::vector<VKnob*> row2;
+                for (auto& k : r2knobs) if (k) row2.push_back (k.get());
+                if (sustainKnob) row2.push_back (sustainKnob.get());
+                layoutKnobsH (r2, row2);
+                layoutMaximizerRow (r3);
+            }
+            else
+            {
+                // Maximizer Basic: the maximizer's own controls and nothing else.
+                // Every reference knob is Advanced-tier here, so the row gets the
+                // full panel height rather than sharing it.
+                layoutMaximizerRow (b);
+            }
+        }
+        else if (adv)
+        {
+            // Limiter mode, Advanced: the pre-existing C1-C5 additions only.
             constexpr int kToggleColW = 62;
             auto togArea = b.removeFromRight (kToggleColW * 2 + 2);
             b.removeFromRight (2);
@@ -3591,13 +3980,13 @@ struct LimiterPanel : public EditorPanelBase,
             if (autoRelTog) autoRelTog->setBounds (autoRelSlot.reduced (1));
             if (linkTog)    linkTog   ->setBounds (rightCol .reduced (1));
             togArea.removeFromRight (2);
-            auto autoMuSlot = togArea.withSizeKeepingCentre (kToggleColW, halfH);
-            if (autoMuTog) autoMuTog->setBounds (autoMuSlot.reduced (1));
+            if (autoMuTog) autoMuTog->setBounds (
+                togArea.withSizeKeepingCentre (kToggleColW, halfH).reduced (1));
 
             auto r1 = b.removeFromTop (b.getHeight() / 2);
             auto r2 = b;
-            layoutKnobsH (r1, r1knobs);                 // InGain / Ceil / SatTh / SatCv / SCHPF
-            std::vector<VKnob*> row2;                   // Atk / Rel / Ahead / RelCv + Sustain
+            layoutKnobsH (r1, r1knobs);
+            std::vector<VKnob*> row2;
             for (auto& k : r2knobs) if (k) row2.push_back (k.get());
             if (sustainKnob) row2.push_back (sustainKnob.get());
             layoutKnobsH (r2, row2);

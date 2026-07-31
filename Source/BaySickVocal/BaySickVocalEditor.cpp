@@ -497,6 +497,11 @@ public:
                 const char* paramId = nullptr;
                 if      (slotIdx == 3) paramId = "bsv_comp_type";
                 else if (slotIdx == 4) paramId = "bsv_sat_type";
+                // TS7: the limiter gained a Mode (Limiter / Maximizer).  Without
+                // this row its mode would be written to the DSP and then not
+                // persist, because applyChainParams re-pushes from APVTS every
+                // block and the chain is APVTS-driven.
+                else if (slotIdx == 5) paramId = "bsv_limiter_mode";
                 if (paramId == nullptr) return;
                 if (auto* p = dynamic_cast<juce::RangedAudioParameter*> (
                                   mProc.apvts.getParameter (paramId)))

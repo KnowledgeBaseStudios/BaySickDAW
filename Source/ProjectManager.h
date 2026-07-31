@@ -150,6 +150,20 @@ public:
     void clearDirty();
     bool isDirty() const { return mDirty; }
 
+    // TS7 §3.3: monotonic edit counter for version capture's change detector.
+    // Deliberately keyed on markDirty rather than a new signal: that is already
+    // the FULL-SCOPE edit path (main APVTS listener, so rack knobs / bus EQ /
+    // master limiter / faders; every engine's dirty tracker; PatternManager
+    // mutations; EffectRack lifecycle), which is exactly the scope capture needs
+    // because it taps the POST-FADER master.  Freeze's per-tab engine-scope
+    // stamp is a SEPARATE detector on purpose -- it would call a fader move
+    // "unchanged" and discard a pass that sounds different.
+    //
+    // Not cleared by save: this asks "has anything changed since", not "are
+    // there unsaved edits".
+    juce::uint32 getChangeStamp() const noexcept
+        { return mChangeStamp.load (std::memory_order_relaxed); }
+
     // QA-D STATE-01: project-load suppression accessors.  openProject already
     // wraps deserializeProject with mIgnoreDirty, but follow-up load work
     // that runs after openProject returns (e.g.
@@ -242,8 +256,9 @@ private:
     bool                    mSkipKitReplacePrompt { false };
 
     // ── P5 state ─────────────────────────────────────────────────────────────
-    std::atomic<bool> mDirty       { false };
-    bool              mIgnoreDirty { false };   // true during load/save
+    std::atomic<bool>         mDirty       { false };
+    std::atomic<juce::uint32> mChangeStamp { 0 };   // TS7 §3.3
+    bool                      mIgnoreDirty { false };   // true during load/save
     int               mAutosaveSec { 900 };     // 15 min default
     void setDirtyInternal (bool flag);
     void timerCallback() override;              // autosave tick

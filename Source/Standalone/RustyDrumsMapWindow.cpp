@@ -1,6 +1,7 @@
 #include "RustyDrumsMapWindow.h"
 #include "../BaySickRustyDrums/BaySickRustyDrumsProcessor.h"
 #include "SharedUI.h"
+#include "WindowChrome.h"   // TS7 §9.3
 #include "SampleLibrary.h"
 
 namespace
@@ -113,7 +114,7 @@ RustyDrumsMapWindow::RustyDrumsMapWindow (BaySickRustyDrumsProcessor* engine)
                             VC::Bg,
                             juce::DocumentWindow::closeButton)
 {
-    setUsingNativeTitleBar (true);
+    WindowChrome::applyToDesktopWindow (*this);   // TS7 §9.3
     setResizable (true, true);
     setContentOwned (new RustyDrumsMapTable (engine), true);
     centreWithSize (640, 600);

@@ -2741,3 +2741,948 @@ nothing.  A separate later Debug failure was `LNK1168: cannot open ...Debug\BayS
 writing` -- the exe-lock case (Jeff had the Debug build open to capture the call stack), which
 CLAUDE.md explicitly says is not a code failure.  The authoritative build is the clean one after
 he closed it: **five exit codes 0, zero errors, four link lines.**
+
+## 2026-07-29 — TS6 COMMITTED across two commits; TS7 next
+
+- **TS6 landed in two Jeff-approved commits rather than one**, because the follow-up audit came
+  after the first was already surfaced:
+  1. `4ddf25fa` — VST3 hosting end to end.  `JUCE_PLUGINHOST_VST3=1` (no module swap was ever
+     needed — `juce_audio_processors` DEPENDS on the `_headless` variant, so editor hosting was
+     already built); new `Source/Hosting/` with the background scanner, the added list in
+     `plugins.xml`, the PE-header architecture split and VST2/32-bit/blacklist skip reporting; the
+     `HostedPluginInstance` proxy seam + its editor with the dead marker; `HostedPluginEffect` as
+     the rack adapter; the Options > Plugins manager window; `EffectType::VST3Plugin = 121` + the
+     VST Plugins picker group on `HeaderSubMenuItem`; plugin param lanes live AND offline in the
+     same pass; BLU-447's Plugins tab with its own bus (13 / base 900), mixer strip, piano roll
+     (`pluginRoll` + `PluginPageRoll` + `kPluginsPRTarget` appended), `EngineRig` factory case, "+"
+     side dropdown and `_sendTo` routing to Layers/Bass; BLU-302's arch-neutral protocol with
+     asserted layout, `SandboxedPluginClient` with a hard audio deadline, and `BaySickPluginHost`
+     built x64 AND x86; `WorkspaceWindow::sizeToContent`; and the close-window crash fix
+     (`EffectSlotWindow` / `EffectEqWindow` held `PageMenuBar` raw across a reverse-destruction
+     boundary — now SafePointer).
+  2. `467fd0b9` — the follow-up.  Three specced items I had wrongly reported as done: BLU-299's
+     search/filter (ONE box over BOTH the added list and the scan results, per Jeff's refinement,
+     matching name/manufacturer with skipped rows on filename); BLU-302's per-plugin bridge toggle
+     on `EffectSlotWindow`'s hamburger (32-bit shown DISABLED with the reason visible rather than
+     hidden, applying on next load); and an editor for BRIDGED plugins at all (`mRemoteHost` child
+     peer parented to the `WorkspaceWindow` peer and handed to the helper, positioned in
+     parent-client space with moved/resized push and deferred-attach retry).  Plus the
+     editor-outlives-instance crash Jeff reproduced — `HostedPluginEditor` was an
+     `AudioProcessorEditor` whose destructor calls `editorBeingDeleted` on a dead processor, so it
+     is now a plain `Component` that the instance releases from its OWN destructor, covering every
+     removal route rather than only `packSlotsToTop`.  Plus the Rule 4 strip of all eight
+     `[TS4 SHELL]` diagnostics (Jeff approved the list first, per Rule 4).
+- **Batch so far:** TS1 `4ea67bd0`, TS2 `e9ecf03e`, TS3 `1dd08437`, TS4 `05b248a8`,
+  TS5 `28f4ec09` + `c8854429` + `71781115`, TS6 `4ddf25fa` + `467fd0b9`.  Tree clean after each.
+- **The gate criterion for the rest of this batch is the five-exit-code / four-link-line one**
+  (`RELEASE`, `DEBUG`, `HELPER64`, `HELPER32_CONFIG`, `HELPER32` all 0; two `BaySickDAW.exe` plus
+  both helpers).  The background command's own exit code is NOT evidence — TS6 saw it report 0
+  while `RELEASE_EXIT_CODE=1` in the log.
+- **Carried into TS8, not TS7 work:** `Test Plans/v1-master-test-plan.md` §B.31.0's single "Effects"
+  sizing row needs splitting into rack window (300x250, real), per-effect panel window (620x170,
+  provisional) and EQ window (560x320, provisional) — and hosted-plugin windows size themselves
+  from the plugin, so their floor is a property of the plugin and cannot be a hand-picked number.
+  Nothing in TS6 has been RUN against a real plugin (Jeff has none installed), and the BRIDGED path
+  has never executed a single instruction, so TS8's smoke needs a bridged-EDITOR scenario alongside
+  scenario 5's crash half.  Future State reconciliation at close: CL-060's parallel half DROPPED,
+  CL-102 stale-marked as shipped via PagePresetIO, CL-303 added, and the VST3 family
+  (BLU-297/298/299/300/301/302 + BLU-447) graduates.
+- **Next: TS7 (freeze + loudness suite).**  Opens with its own sub-spec call — freeze tap point +
+  freeze presentation — posed as a hard stop.  The maximizer + analyzer half does not depend on
+  either answer and proceeds while it is pending.
+
+## 2026-07-29 — TS7 — spec calls posed; the maximizer + analyzer half BUILT
+
+Two dockets are open and they block DIFFERENT halves, which is why work continued rather than
+idling: freeze (items 1-3) and CL-227's report presentation (items 4-6).  Everything else in TS7
+is in source and green.
+
+### The open dockets
+
+1. **Freeze tap point** — pre-rack "Source Only" / post-rack "Full" / both (the Logic precedent).
+2. **Freeze presentation** — invisible swap / bounce-in-place row / both.
+3. **Editing frozen content** — prompt / auto-re-render / block silently.  The plan's own wording
+   is "prompts or auto-re-renders", so this was never settled; posing it rather than picking.
+4. **Where the CL-227 report lands** — window / file / both.
+5. **File format if written** — CSV / XML / both.
+6. **The short-term LUFS threshold**, which the backend surfaced: the specs give hard numbers for
+   INTEGRATED loudness and TRUE PEAK, and **none of them defines a short-term ceiling** — not EBU
+   R128, not ATSC A/85, not the streaming targets.  So the timecoded log carries true-peak rows
+   only unless a threshold exists, and the "LUFS violations" half of CL-227 has nothing to fire
+   on.  Options posed: leave it (Custom-only), derive one from the integrated target plus a margin
+   he picks, or a short-term ceiling control on the Custom spec alone.
+
+### BLU-108 — a real true-peak measurement, and CL-045's cap moved onto it
+
+- **New `Source/DSP/TruePeakMeter.h/.cpp`** — ITU-R BS.1770-4 Annex 2 GEOMETRY: a 4x polyphase FIR
+  interpolator, 48 taps as 4 phases of 12, true peak = max|y| across every phase.
+- **The coefficients are DESIGNED, not transcribed, and that was deliberate.**  BS.1770-4 publishes
+  a specific 48-value table; this builds an equivalent filter to the same geometry from a
+  Kaiser-windowed sinc (beta 8, cutoff at 0.92 of base-rate Nyquist -> flat through 20 kHz at
+  44.1/48/96 k, stopband under -80 dB).  Reason: a mis-keyed value in a hand-copied table degrades
+  the meter SILENTLY with nothing in the output to reveal it, whereas a designed filter is
+  self-consistent and checkable from the recipe.  Written into the header so it is not "corrected"
+  later by someone pasting the table in.
+- Each polyphase branch is normalised to unity DC gain INDEPENDENTLY.  Normalising globally would
+  let a constant input wobble between phases and read as inter-sample peak that is not there.
+- **`measureRender` now uses it**, replacing the 4x Lagrange ESTIMATE TS2 shipped with.  That is
+  what moves **CL-045's shipped export boost cap** onto the real number in the same pass — the cap
+  reads `m.truePeakDb`, so it tightened by itself with no call-site change, which is exactly what
+  the batch's fact 2 required and would NOT have happened if the meter had been added anywhere else.
+- **The limiter's own detector was left ALONE.**  Its `juce::dsp::Oversampling` IIR path is shipped,
+  its latency is reported into bus PDC, and replacing it is not what BLU-108 asked for.  BLU-108's
+  limiter half is the AUTO-CEILING (below), which needs an OUTPUT true-peak meter the limiter did
+  not have.
+
+### CL-243 — eight character voicings, and why `Clean` is bit-identical to before
+
+- `LimiterDSP::Character` + a `CharacterProfile` table: Clean / Smooth / Tight / Punch / Glue /
+  Loud / Warm / Instant.  **Names are ours** (no-brand-names rule) with concept parity to the
+  reference limiters' style lists; BLU-109's Transparent/Punchy/Vintage voicings fold in as
+  Clean/Punch/Warm rather than shipping as a second, overlapping control.
+- **Index 0 (`Clean`) reproduces the pre-CL-243 constants EXACTLY** — 20 ms / 300 ms envelopes, the
+  6 dB auto-release blend knee, no curve offset, no release scaling, no added saturation.  A preset
+  written before the table restores character 0, so nothing a user already saved changes.  Those
+  three numbers were hard-coded (`kRelFastMs`, `kRelSlowMs`, and a literal `/ 6.0f` in TWO places)
+  and are now table-driven.
+- A character biases INTERNAL ballistics only — envelope pair, blend knee, a release-curve offset,
+  a release-time scale, and the mode's own soft-sat drive.  The user's Attack / Release / Ahead /
+  SAT knobs stay RELATIVE controls within the mode, which is how a character-mode limiter is
+  expected to work and is why they are not overridden.  Monotonicity holds in every mode.
+- `Instant`'s `needsLookahead = false` IS the Future State entry's "near-zero-lookahead
+  permissibility": it means that mode still works with Ahead at 0, not that it overrides the knob.
+- **The character is a chickenhead, NOT a Mode-menu entry.**  A Mode entry becomes a `variantOf`
+  variant, and the EffectParamMap key is (type, variant) — so eight characters would have demanded
+  eight identical limiter tables.  Same control and same reasoning as the Delay panel's model
+  selector, and unautomatable for the same reason TS3 kept selectors out.
+
+### CL-244 — loudness target as a CLOSED loop
+
+- The limiter measures its OWN OUTPUT short-term loudness and trims input gain toward the target.
+  Closed loop is the correct topology, not a shortcut: output loudness is what the target is about,
+  and measuring it self-corrects for the limiter's own gain reduction.  It also needs ONE meter
+  instead of two.
+- Slew-limited to 1.5 dB/s with +-12 dB of authority, so it converges over seconds ("after
+  listening to a section", per the Future State wording) and can never read as gain-riding.
+- Switching the mode OFF zeroes the trim, because an invisible offset left on the input gain would
+  make the limiter louder than the panel says.
+
+### BLU-108's limiter half + BLU-110
+
+- **Auto-ceiling:** the hard clamp guarantees the SAMPLE peak; it says nothing about inter-sample
+  peaks.  With auto-ceiling on, the output's real true peak is measured and the effective ceiling is
+  trimmed until it sits under the dBTP target.  Trim is asymmetric — 3 dB/s down, 0.5 dB/s back —
+  because engaging late clips and releasing early re-clips.
+- **BLU-110:** a `LoudnessMeter` component showing LUFS beside dBFS with a dashed target line across
+  the loudness bar, in the governing `Limiter.txt` palette (electric cyan accent, safety orange
+  warning, monospaced readouts).  Deliberately NOT the three-zone skeuomorphic rewrite that spec
+  also describes: `_APPROVED_CHANGES.md` §5 files that as a separate UI task, and the layout batch
+  running directly after this one owns the app's appearance under the windowed shell.
+- Master LUFS metering already existed (QA-RustyMeter `getMasterLufs`) and was NOT duplicated —
+  BLU-110 is limiter-scoped by its own Future State entry (CL-035's note says so explicitly), so it
+  reads the limiter's own output, not the master bus.
+- New `Source/DSP/LoudnessSpec.h` — ONE table of delivery targets (streaming -14 / -16, EBU R128,
+  ATSC A/85, BS.1770-4 measure-only, Custom) plus an EBU Tech 3342 `LoudnessRangeAccumulator`.
+  Shared by the export dialog, the report and the maximizer so three copies of "-14 LUFS, -1 dBTP"
+  cannot drift apart.
+
+### Measure-before-render + the CL-227 backend
+
+- A **Measure** button and a spec combo on the export dialog, running TS2's `measureRender` on the
+  same background thread as the export and returning to the options box rather than closing it —
+  the point is to read the number and then decide whether to export.
+- `MeasureResult` grew LRA, max short-term, max momentary, duration, per-spec verdicts, and a
+  **coalesced timecoded violation list**.  Coalescing happens at capture, not in the report, so the
+  400-row budget counts SPANS — otherwise one sustained overshoot would exhaust the budget and hide
+  every later breach.  Truncation is reported rather than silent.
+
+### CL-044 — the master analyzer
+
+- New `Source/Standalone/MasterAnalyzerWindow.h/.cpp`, opened from **View > Master Analyzer** as a
+  satellite `WorkspaceWindow` (the TS5 `openAuxWindow` path, so it inherits per-window key routing
+  and its own `TooltipWindow` for free).
+- **Tap point is post fader/pan/width — the same point as the LUFS meter**, not the master EQ's
+  existing post feed, so moving the master fader moves the trace.  That is what "master analyzer"
+  implies and a pre-fader trace would be quietly wrong.
+- **Two independent cost gates**, because an analyzer is the easiest thing in a DAW to leave running
+  forever: the audio-side push is behind an atomic flag (closed window = one relaxed load per
+  block, no copy), and the flag is driven from `parentHierarchyChanged()` keyed on
+  `getPeer() != nullptr` — the peer-keyed suspend convention TS4 established.
+- **The active flag lives on `VibeGraph`, not on the master node.**  The node is destroyed and
+  rebuilt by topology changes, and a flag living there would silently reset while the analyzer was
+  still open.  `setMasterSpectrumActive` re-points the node's pointer on every call for the same
+  reason.
+
+### Four defects found in my own review before the gate
+
+1. **Write-write race on the smoothers.**  My first cut had the audio-thread servos call
+   `SmoothedValue::setTargetValue` — the same call the knob setters make from the message thread.
+   The pre-existing pattern here is READ-write (UI sets target, audio reads `getNextValue`), which
+   is benign; a second WRITER can leave one ramp with a step computed against the other's target.
+   Both servos are now audio-thread-owned dB OFFSETS added in the sample loop, and the smoothers
+   stay single-writer.  No smoothing needed on the offsets: the slew limits cap a block's movement
+   at 0.07 dB (servo) and 0.14 dB (trim) at 2048/44.1k.
+2. **The loudness meter's enable hung off `~LimiterPanel` dereferencing `mDsp`.**  TS6 established
+   that removing a rack effect destroys the DSP SYNCHRONOUSLY inside `EffectRack::packSlotsToTop`
+   while the panel window is still open — the same ordering as the editor-outlives-instance crash.
+   Replaced with a keep-alive WATCHDOG: the panel's existing 30 Hz timer pokes a countdown, the DSP
+   lets the meter lapse ~0.5 s after nobody is looking, and no destructor touches the DSP at all.
+3. **Automation suffix mismatch — the silent kind.**  `EditorPanelBase::setSlotContext` derives
+   every paramId from `label.getText().toLowerCase()`, so the two new knobs stamp `lufs` / `dbtp`
+   while I had written the EffectParamMap entries as `lufstgt` / `tptgt`.  The Automate menu would
+   have offered the lane, drawn it, and applied nothing — the exact defect class as the sfizz kit-CC
+   lanes TS3 had to fix.  Table keys corrected and the derivation rule written next to them.
+4. **Two speculative APIs on `TruePeakMeter` with no caller** (`interpolatePerSample`,
+   `latencySamples`) — added for a detector path I then decided not to touch.  Deleted rather than
+   left as dead surface; this batch's own dead code, cleaned in-batch.
+
+### FINDING, surfaced rather than fixed: auto-makeup (C4) is defeated by the ceiling clamp
+
+Found while reading the code BLU-108's trim lands in, and verified against the source rather than
+assumed.  `LimiterDSP::process` runs, per sample:
+
+```
+outL *= gainL * makeupLin;          // makeupLin = decibelsToGain(-ceilingDb)
+... optional soft-sat ...
+outL = jlimit (-ceilingLin, ceilingLin, outL);   // ceilingLin = decibelsToGain(ceilingDb)
+```
+
+With auto-makeup on and the ceiling at -6 dB: the limiter brings the peak to 0.501, makeup
+multiplies by 1.995 to reach ~1.0, and the clamp then cuts it straight back to 0.501.  **The makeup
+delivers zero level gain, and every sample that was between 0.251 and 0.501 is pushed over the
+ceiling and HARD-CLIPPED.**  So the feature is not a no-op — it is a hard clipper whose tooltip
+claims it "adds -ceilingDb of post-limit boost so lowering the ceiling doesn't quiet the signal".
+
+Why it matters to TS7: BLU-108's auto-ceiling LOWERS `ceilingDb`, which makes `makeupLin` larger,
+which makes the clipping worse.  The two features actively fight.
+
+Not fixed unilaterally.  This is shipped behaviour of a control Jeff may be using, and the fix
+(clamp to the ceiling first, THEN apply makeup, then clamp at unity) changes what the limiter
+sounds like.  Surfaced for his ruling, following the TS3 precedent where the sfizz gap and
+`TapePanel` were both surfaced before being touched.
+
+## 2026-07-29 — TS7 — all six dockets ruled; the execution spec is now the checklist
+
+Jeff answered every open item and the plan's TS7 section was replaced with a ten-section execution
+spec (§1-§10), each sub-item independently checkable, so "did you actually do it" is answerable
+against the file rather than against my account of it.  The rulings that changed what gets built:
+
+- **Freeze:** pre-rack "Source Only" tap, invisible swap, auto-re-render with LIVE PLAYBACK as the
+  fallback until the render lands.  Files live in the project, `<project>\Freeze\`, **one per track,
+  overwritten in place**; bundles exclude the folder; `frozenBy = manual | auto` provenance decides
+  whether a different machine's threshold may re-evaluate a freeze.
+- **CL-055 is IN**, default 80%, with a File Settings slider 0-100 that snaps at 100 and goes to Off
+  past it; 0 = always freeze so a weaker machine gets the saving immediately.
+- **Report:** shown AND saved to `<project>\Reports\` timestamped; **HTML always, CSV opt-in, no
+  XML**, and the HTML is the visual one (inline SVG, curve + target line + markers) because "numbers
+  on a spreadsheet" was the thing to avoid.
+- **The moment-level loudness bar is the user's own LUFS target** — no invented margin.  This is a
+  better answer than any of the three I posed: I had argued no published spec defines a short-term
+  ceiling, which was true and irrelevant, because the user's target IS the bar.
+- **Analyzer moves to the master strip's repurposed "+" button.**  I had put it on the View menu
+  without ever posing the placement as a spec call, which was the violation, not the location.
+- **Limiter mode is the FL REPRODUCTION and carries none of the TS7 additions.**
+
+### Three things I got wrong, recorded because the pattern matters more than the fixes
+
+1. **"Built" meant "compiles and links", and I let it read as "working".**  Jeff went looking for
+   the maximizer and the analyzer and found neither.  Nothing in TS7 had ever been RUN.  Deferring
+   functional verification to TS8 is a real rule in this batch; it does not license describing unrun
+   code as though the user would see it working.
+2. **Every TS7 control was Advanced-tier and panels open in Basic** (`EffectEditorPanels.h:38`,
+   `mBasicMode { true }`).  So the headline feature of the task set was invisible by construction,
+   and my own notes had justified it with "Basic is the exact reference replica" without asking
+   whether burying the deliverable behind a toggle made sense.
+3. **I built maximizer FEATURES and never gave the maximizer an IDENTITY.**  The convention is a
+   Mode entry on the panel hamburger (`SlotComponent::showModeMenu`, as Compressor uses for
+   Modern/FET/Opto/CS).  I skipped it and justified the skip with "8 characters would need 8
+   EffectParamMap tables" — true about the characters, and entirely beside the question of whether
+   Limiter/Maximizer should be a mode pair.
+4. **BLU-427:** I answered from a months-old blueprint line ("per-slot freeze-to-audio") instead of
+   what Jeff specified during planning — right-click a builder track head to render that track to
+   WAV — which he asked me to notate and which I confirmed I had.  A search of all of
+   `Plans & Specs/` finds it nowhere.  Both halves are now in the spec as directives.
+
+### §1.2-§1.4 + §1.6 + §1.7 landed: Limiter / Maximizer is a real Mode
+
+- **`LimiterDSP::Mode { Limiter, Maximizer }`**, serialized, **default Limiter** so no existing
+  preset moves.  `variantOf` returns the mode for `EffectType::Limiter`; new `kLimiterMaximizer`
+  table beside `kLimiter`; `defsFor` picks on the variant.  `hasModeMenu` includes Limiter, and the
+  hamburger offers "Limiter (Reproduction)" / "Maximizer (Loudness)".  The existing Compressor
+  machinery does the rest: picking a mode rebuilds the panel and `variantOf` re-reads the DSP, so
+  panel and registry cannot disagree.
+- **Mode is the variant axis; character is NOT.**  Written into the header so it is not "fixed"
+  later: mode changes WHICH controls exist so it earns a table, character leaves the parameter set
+  identical and as a variant would have meant 2 x 8 = 16 tables describing one set.
+- **The DSP GATES the maximizer's behaviour on the mode, not just the panel's visibility.**  Hiding
+  alone would have left a hidden servo trim, ceiling trim and character voicing driving the sound in
+  reproduction mode — the invisible-state defect class this codebase keeps paying for.
+  `effectiveCharacter()` resolves to Clean in Limiter mode; the servo, auto-ceiling and loudness
+  meter are gated on `maximizerActive()`.  Stored values SURVIVE a mode flip, so switching away and
+  back keeps the user's target and character — gating rather than zeroing is what buys that.
+- **Visibility is now explicit for every control**, not just the ones that change.  The previous
+  patchwork left the reference knobs visible-but-unpositioned in the new Maximizer Basic layout,
+  which would have painted them at stale bounds.
+- **Maximizer Basic** = GAIN / Ceiling / SAT plus character, LUFS target, dBTP target, the Target +
+  Auto-Ceil toggles and the LUFS/dBFS meter.  Ballistics are Advanced there.  **Limiter Basic and
+  Advanced are untouched.**
+- **Vocal-chain loose end closed in the same pass:** the chain re-pushes its limiter from APVTS
+  every block and `onModeChanged`'s mirror only covered slots 3 and 4 (comp, sat).  The limiter is
+  slot 5, so its mode would have been written to the DSP and then silently not persisted.  New
+  `bsv_limiter_mode` param + per-block read + the mirror row.
+
+### §1.6 — the auto-makeup fix, and why the output ceiling scales
+
+The defect: makeup ran BEFORE the ceiling clamp, which cancelled it exactly.  The limiter brought
+the peak to `ceilingLin`, makeup (`= 1/ceilingLin`) lifted it to ~1.0, and the clamp cut it straight
+back — zero level gain, plus every sample between `ceilingLin/2` and `ceilingLin` pushed over and
+hard-clipped.  Not a no-op: a clipper whose tooltip promised the opposite.  BLU-108's ceiling trim
+made it worse by lowering `ceilingDb` further, which is how it surfaced.
+
+Fix: GR -> SAT (position unchanged, so its input is the same signal) -> ceiling clamp -> makeup ->
+clamp at `ceilingLin * makeupLin`.
+
+**The scaled output ceiling is the load-bearing detail.**  A hard unity clamp would have been wrong:
+the ceiling range runs to **+12 dB** ("headroom / no limiting"), where `ceilingLin` is ~3.98, and a
+unity clamp would have newly clipped a signal the user explicitly asked not to limit.  Scaling
+instead means the makeup-OFF path reduces to the identical clamp as the line above it — bit-identical
+including the +12 case — while with makeup ON `ceilingLin * makeupLin == 1` by construction, so the
+signal reaches full scale as the control claims.
+
+`CompressorDSP` was audited and is sound: it multiplies `makeupLinBlock` into the per-sample gain
+with no ceiling clamp after it, and the CS Sustain macro rides the same path.  Unchanged.
+
+### §10.1 + §10.2 landed
+
+- **`waitForPendingDrain` deleted**, and the routing turned out better than the spec assumed.  The
+  pending-drain discipline is still LIVE, but `loadEffect` and `clearSlot` now drain INLINE on the
+  message thread (`EffectRack.cpp:181-205`, `:216-233`) rather than spin-waiting — so the function
+  was SUPERSEDED, not merely orphaned, and its 1-second-budget comment documented an approach no
+  longer taken.  The BaySickNAMIR mirror reference already lives in more detail at
+  `EffectRack.h:82-86` and `:107-113`, so nothing needed relocating.  Proof it landed: the gate's
+  C4505 count went 2 -> 0.
+- **TS7 Carry-Over block stripped** (it was written unprompted, mid-set, in the same session, right
+  after the rule about pauses not being stopping points).  Seam verified rather than assumed.
+
+### One gate discarded to an exe lock, not a code failure
+
+`RELEASE_EXIT_CODE=1` with `LNK1104: cannot open ...Release\BaySickDAW.exe` while
+`DEBUG_EXIT_CODE=0` from the identical sources.  Jeff had the app open looking for the features.
+CLAUDE.md calls this a hard hand-back rather than something to debug; he closed it and the gate
+re-ran.
+
+## 2026-07-29 — TS7 — §2 / §4 / §5 / §8 / §7.3 landed (five green gates)
+
+Working straight down the execution spec.  The plan file's checkboxes are the live record; this is
+the reasoning that does not belong in a checklist.
+
+### §2 — the analyzer became the thing it was supposed to be
+
+- **Moved to the master strip's repurposed "+" button** and the View entry DELETED, so there is one
+  route.  A send from master is structurally impossible (terminal node, nothing downstream), which
+  is what made that button free to take.
+- **Readouts:** MOM / SHORT / INT LUFS, dBFS, true peak — the last one orange inside the final dB.
+- **Loudness view** is the Youlean-style curve with the user's target as a dashed bar and the
+  over-target moments filled orange.  Gated at the display floor so it does not draw a line through
+  silence.
+- **The spectrum's dead left-hand third was structural, not cosmetic.**  `SpectrumFeed::kSize` is
+  1024, and a 1024-point FFT at 44.1k cannot produce a bin below ~43 Hz — so the bottom octave did
+  not exist rather than merely being empty.  The VIEW now stitches eight successive feed frames into
+  an **8192-point** transform (~5.4 Hz bins).  No audio-thread change: the push is still 1024.
+- **Master true-peak tap** added beside the LUFS meter at the same post-fader point, behind the same
+  atomic gate, so the three numbers all describe one signal.
+- **§2.7** `MeasureResult::lufsCurve` (10 Hz) — without it a render could be SUMMARISED but not
+  DRAWN, and this window is CL-227's face.  One capture now serves the live view, the render view
+  and the HTML report's curve.
+
+### §5 — the report, and why one file does two jobs
+
+Self-contained HTML (inline SVG + CSS, no external refs): verdict badge, summary table, the curve
+with the target dashed across it and over-target moments filled, the flagged-moments table with
+truncation stated rather than silent.  CSV alongside on the checkbox.  No XML.
+
+**Jeff's ruling on in-app viewing forced the interesting part.**  He wants a saved report to open
+IN the app, the way it looks live.  Rendering the HTML in-app is not available: `JUCE_WEB_BROWSER=0`
+and only `juce_gui_basics` is linked, so `WebBrowserComponent` would mean enabling the flag, linking
+`juce_gui_extra`, AND a Windows **WebView2 runtime dependency** that yields a blank report on any
+machine without it — unacceptable for an app aimed at beginners.  So the report reopens in the
+ANALYZER instead, which is already the view he likes.
+
+That needs the DATA back, not the HTML.  He picked embedding it in the same file, so each report is
+ONE artifact that is both human-readable in a browser and machine-reloadable by us — no sidecar, no
+third format, and the Reports folder holds exactly what the user thinks it holds.  The block is
+deliberately flat `key=value` lines: it has to survive being inside an HTML comment and be parsed
+with no library, and a stray character in a project name cannot break it the way a nested syntax
+could.  **Verdicts are RECOMPUTED on reload from the current `LoudnessSpec`**, not stored, so a
+report reopened after a spec's numbers changed reads against the live definition.
+
+### §8 — the slider range is one wider than the number it shows
+
+0..**101**: 100 is a real threshold and 101 is OFF, because dragging PAST the top is how Jeff wanted
+it switched off, and the readout says "Off" there rather than a number that would read as "freeze at
+101%".  0 = always freeze, deliberately, so a weaker machine gets the saving immediately.  Both this
+and the capture-retention pick are MACHINE preferences in the prefs file, not project data — they
+describe what this computer can cope with (§6.8's three-lifetime rule).
+
+One compile error worth recording: `FileSettingsComp` is defined inside a function, and a local
+class cannot have `static constexpr` data members (MSVC C2246).  Changed to an `enum`.  The failing
+build was allowed to DRAIN before editing rather than producing a mixed tree.
+
+### §7.3 — the pattern render bug: one cause, both symptoms
+
+Jeff reported a pattern render that "has the very first note in the pattern and then nothing else
+and the block isn't even as long as the pattern".  Those were never two bugs.
+
+Pattern-mode scheduling bounds its note window with `mLoopStartBeats` /
+`mCachedPatternLoopBeats` (`PluginProcessor.cpp:2282-2283`) and clamps every note-off to that loop
+end.  **A whole-tree grep confirms those atomics are written ONLY by `StandaloneEditor`'s
+transport** — the offline render never set them, so it inherited whatever the live session last had,
+defaulting to `4.0` (one bar).  Every note past that stale bound never fired, because the offline
+head advances MONOTONICALLY and never performs the loop wrap a live playhead does.  The render then
+went silent, and `Tail::Included`'s decay detection ended the file early — which is precisely why it
+was ALSO short.
+
+Fix: pattern scope sets `mLoopStartBeats = 0` and `mCachedPatternLoopBeats = endBeats` (the
+pattern's own span), and **both join the restore set** — they are live transport state, and leaving
+a render's values behind would silently re-loop the user's session over the pattern just exported.
+
+Attributed as this batch's own rather than routed: TS2 moved the render onto the LIVE processor,
+whose scheduler reads these live atomics.
+
+### Two corrections of mine inside this stretch
+
+1. **"Full Mix" never meant the master output.**  I assumed it did and posed a whole docket item
+   about the master chain being present for an all-tracks mix and absent for a subset.  Jeff:
+   "Full mix always meant stems and not a master out."  Both cases are the sum of the selected
+   strips' post-chain taps, so they are the SAME operation over a different track set, and Select
+   Tracks adds no semantics at all — it only picks which tracks and which way.  The docket item was
+   built on a false premise and was withdrawn, and the plan entry replaced rather than left standing.
+2. **`closedType` (`StandaloneEditor.cpp:4901`) cleaned as THIS batch's own dead code.**  Two C4189
+   warnings, not in my diff — but its comment says it tracked the type "to decide whether to surface
+   the empty-state placeholder", and TS4 retired the empty-state machinery, so TS4 orphaned it.
+
+### Diagnostic Instrumentation Catalog (Rule 4) — TS7 addition
+
+| Site | Tag | Purpose | Disposition |
+|------|-----|---------|-------------|
+| `StandaloneEditor::restorePendingFreezes` | `[TS7 FREEZE]` | Why a saved freeze failed to re-apply on project load (the render is the only step that can fail, and it fails silently otherwise) | **Keep** — product Debug diagnostic, sibling of TS2's `[TS2 EXPORT]` underrun report |
+| `StandaloneEditor::pollAutoFreeze` | `[TS7 FREEZE]` | Why a STALE freeze failed to re-render.  Same tag and same reason as the row above, different trigger: this one fires during editing, not on load, and its silent-failure mode is worse — the tab keeps playing its live engine and the user only notices as CPU that never comes back down | **Keep** — same family, same disposition |
+| `BuilderPage::renderFreezeFile` | `[TS7 FREEZE]` | The freeze-render STOPWATCH (Jeff, 2026-07-30).  Logs audio-seconds rendered, wall-clock, and the ratio between them.  The ratio is the point: three of the five candidate fixes for the audio dropout are only worth building if the render is genuinely slow, and nobody had ever measured it | **Keep until the no-dropout route is chosen**, then re-assess -- it is a decision instrument, not a permanent diagnostic |
+| `StandaloneEditor::onOpenReport` | `AlertWindow` "Cannot open report" | A report file carries no embedded data block (hand-edited, or written by something else).  Refusing with a reason beats opening an empty analyzer | **Keep** — user-facing, not a debug aid |
+| `StandaloneEditor::exportCapturedTake` | `AlertWindow` "No audio for this take" | The take was captured analysis-only.  Names the File Settings toggle that changes it, so the user can act rather than just be refused | **Keep** |
+| `StandaloneEditor::exportCapturedTake` | `AlertWindow` "Export failed" | The take's file copy failed (disk full, permissions, path).  A silent failure here would read as a successful export of nothing | **Keep** |
+
+**Catalog correction (2026-07-30).**  The three `AlertWindow` rows above shipped UNCATALOGUED and were
+found by the spec audit rather than at the moment they were written — §10.6's "nothing else added"
+claim was false.  Two method notes worth keeping, because both cost a wrong answer first time:
+a `git diff` against the batch base CANNOT see diagnostics inside NEW untracked files, so the
+enumeration has to be a tree-wide grep of the touched set; and `BuilderPage.cpp`'s "Export failed"
+alert is NOT new — it exists at the base commit and was briefly mis-filed as TS7's.
+
+### PENDING-LEDGER ACCRUAL: `EffectRack.cpp`'s `waitForPendingDrain` is dead (PRE-EXISTING)
+
+The gate is clean but carries two `C4505` warnings ("unreferenced function with internal linkage
+has been removed"), both the same site: `EffectRack.cpp:144`'s file-local
+`static void waitForPendingDrain (std::atomic<bool>&)`.  Zero callers tree-wide.
+
+**Traced before routing it, because own-batch and pre-existing go to different places.**
+`EffectRack.cpp` is not in TS7's diff at all, and the symbol has had exactly one occurrence — its
+own definition — at every commit back through `b933b54a`, which is this batch's OPEN point.  So it
+was already dead before QA-ModelShell started; the last commit to touch its lines is `7bddbed2`.
+It surfaced now only because changing `LimiterDSP.h` forced `EffectRack.cpp` to recompile.
+
+That makes it a PRE-EXISTING finding, not this batch's own dead code, so per Rule 3 it is accrued
+to the pending ledger for Jeff's routing call rather than cleaned in-batch (Phase 6 is the reserved
+home for dead-code cleanup).  Same handling TS3 first gave `TapePanel` — which he then ruled should
+just be deleted, so this may well go the same way.
+
+Kept-on-purpose check done in advance: its Rule 6 comment is a genuine domain reference (it
+documents the 1-second budget mirrored from `BaySickNAMIRProcessor::loadNamModel` and why the wait
+is 0 iterations in practice), so if the function goes, that reasoning should be preserved wherever
+the pending-drain discipline still lives rather than deleted with it.
+
+### TS7 GATE (maximizer + analyzer half): GREEN
+
+Five exit codes 0 (`RELEASE` / `DEBUG` / `HELPER64` / `HELPER32_CONFIG` / `HELPER32`), four
+`vcxproj -> ....exe` link lines (both `BaySickDAW.exe` plus both helpers), zero `error C` /
+`error LNK` / `error MSB` lines.  Two `C4505` warnings, both the pre-existing site above.
+
+Recorded because it bit twice in this batch: the background command's own exit code reported 0 on
+the run where `RELEASE_EXIT_CODE=1`, so the log's own five codes plus the error grep plus the
+link-line count are the criterion, every time.  One RED build happened in this half and is worth the
+line — `L` / `R` in my `VibeGraph` spectrum tap referenced pointers scoped to the width block above
+it; fixed with local read pointers at the tap.
+
+**No Rule 4 catalog rows added by TS7.**  Nothing in this half ships a `DBG` / `jassert` /
+`AlertWindow` diagnostic, so the catalog's only live entry is still TS2's `[TS2 EXPORT]` underrun
+report, disposition Keep.
+
+---
+
+## TS7 §11 — the Builder browser's Files section
+
+Header renamed Audio -> Files; Exports and Reports listed straight off disk through the shared
+`sortEntries` ordering, with the freeze folder deliberately absent (regenerable cache, and surfacing
+it would invite dragging a frozen render back into the arrangement it was frozen FROM).
+
+**The invariant was amended in writing, not quietly broken.**  `BuilderPage.h:69-74` said orphan
+library entries are skipped because "all importable files become clips".  Exports and reports are
+exactly that excluded case -- files with no bound page.  The resolution: the invariant governs
+IMPORT material and these are OUTPUT.  The header comment now says so rather than sitting there
+contradicting the code.
+
+### The drag gesture was broken and would have failed SILENTLY
+
+Jeff asked whether dragging a render onto the grid raises the same prompt as the right-click.  It did
+not, and the failure mode was the bad kind: browser drags carry `"audio:<libIdx>"`, which the grid
+parses as an INTEGER, and a render has no library index (-1) -- so `"audio:-1"` died on a bounds
+check with no prompt, no clip and no error.  Render leaves now emit `"render:<abs path>"`, matched in
+`isInterestedInDragSource` and `itemDropped` BEFORE the index parser (which structurally cannot carry
+a path), routed into the SAME handler the context menu uses with a completion that places the block
+at the row and bar it landed on.  One code path, so the two gestures cannot drift.
+
+### "It should change groups" turned out to decide the implementation
+
+His follow-up -- a routed render should move to the tab's category and stop showing under Exports,
+display grouping only, path unchanged -- forced two things the sentence does not say:
+
+1. **The import registers the file IN PLACE.**  Every other import copies into `Samples\` first
+   (`ProjectManager::importSample`); a render must not, because a copy changes the very path he said
+   should not change.  He confirmed the shape directly: the add prompt asks WHICH PAGE and nothing
+   else -- no copy question -- and a copy afterwards is a normal thing the user may do, at which
+   point the path changes by their action rather than silently at import.
+2. **The Exports listing skips anything the library already claims**, or one file would occupy two
+   rows.  `onEnumerateAudio` already returns resolved absolute paths, so the check is a
+   case-insensitive `StringArray::contains` against those -- case-insensitive on purpose, since these
+   paths round-trip through a project-relative stored form and Windows hands back a different case
+   than was written.
+
+The move itself needed no code: `onEnumerateAudio` buckets by `pageOwnerChannelId`, so a routed
+render appears under its new category for free.  That is also why `beginAddRenderToProject` is a
+BrowserPanel METHOD rather than an editor callback -- every piece it needs was already on the panel
+for the Properties dialog, and routing it through the editor would have created a second copy of that
+logic to drift from.  Order is register(owner 0) -> create page -> apply route, matching the
+Properties "Move to a new page" path exactly; `addAudioToLibrary`'s owner-0 upgrade branch is what
+stops the page factory's own re-add from producing a second entry.
+
+Reports open in the analyzer by replaying the embedded data block; a file without one is refused with
+a reason rather than opening an empty window.
+
+## TS7 §3 — version capture
+
+A version is one playback pass, captured whether or not the user planned to record.  Analysis always
+on, audio a File Settings toggle defaulting OFF -- the cheap half is the half worth having by default
+(under 100 KB vs ~16 MB/minute).
+
+**Three things the plan entry did not anticipate, all found by building it:**
+
+1. **The master tap had exactly one owner, and that stopped being true.**  It was armed and disarmed
+   by the analyzer window's peer-keyed suspend hook.  Analysis being always-on makes that window a
+   CLIENT, not the owner -- so `VibeGraph` now holds two independent wants and ORs them, and neither
+   client writes the effective flag.  Left as it was, closing the analyzer would have silently
+   stopped capture measuring anything.
+2. **True peak needed a running max.**  The existing `masterTpDb` is per-block (the meter calls
+   `resetPeak()` every block), and at ~43 blocks/sec against a 30 Hz UI poll the one block carrying
+   an overshoot is precisely what a sampling reader misses.  Audio now keeps `masterTpMaxDb`; the UI
+   reads and clears it per take.
+3. **The transport edges already existed.**  `processBlock`'s master-LUFS Integrated reset already
+   computes exactly "play started" and "backward ppq jump", which ARE the two triggers §3.2 asks for.
+   Publishing counters off that same test was strictly better than a second detector that could
+   disagree with it about where a take begins.
+
+**The change detector is `markDirty`, as a counter not the bool.**  `mDirty` transitions once and
+clears on save, which cannot answer "did anything change since the last pass".  `markDirty` is the
+right hook because it is already the full-scope edit path -- main APVTS listener (so rack knobs, bus
+EQ, master limiter, faders), every engine's dirty tracker, PatternManager mutations, EffectRack
+lifecycle -- and full scope is exactly what a POST-FADER tap requires.  Freeze's per-tab engine-scope
+stamp stays a separate detector on purpose: it would call a fader move "unchanged" and throw away a
+pass that sounds different.
+
+**Audio uses a SECOND `AudioFileRecorder`, not `mMasterRecorder`.**  Capture and a user recording can
+run at the same time, and sharing one writer would make whichever started second silently steal the
+file from the first.  Written at the same pre-metronome tap, so a take never carries a click.
+
+**One call surfaced for Jeff (§3.8):** unbounded audio capture is a disk-filler, but silently dropping
+a user's takes is worse -- so the cap reclaims only the OLDEST take's AUDIO and keeps the version and
+all its analysis forever, with that row reading "(analysis only)" and Export disabled rather than
+hidden.  32 is a number I picked; if it is wrong it is one constant.
+
+## TS7 §9 — window strategy (base only)
+
+`WindowChrome` is **paint helpers, not a Component**, and that was the whole design question.  The two
+hosts cannot share a component: `WorkspaceWindow` owns its strip's children directly, while
+`juce::DocumentWindow` builds and positions its own title bar and asks its LookAndFeel to draw it.  A
+shared Component would have meant reimplementing DocumentWindow.  Sharing the PIXELS and letting each
+host keep its own plumbing is the split that actually holds.
+
+**§9.3 needed no per-window plumbing at all.**  `VibeLAF` is already the app-wide default LookAndFeel,
+so putting `drawDocumentWindowTitleBar` / `createDocumentWindowButton` /
+`positionDocumentWindowButtons` there means every non-native-title-bar window picks the chrome up with
+zero call-site wiring -- and leaves no second place for the look to drift to.  Four sites flipped to
+`false` (Key Binds, Plugins, Rusty Drums Map, Undo History) plus three dialogs; Export Audio was
+already `false`, and Event Editor / Pitch Sub-Editor never set the flag so they were already
+non-native.  The MAIN app window is untouched and keeps OS chrome.  Locked call 5a carried across:
+minimise and maximise return null, so satellites get close only.
+
+**§9.4 was fixed rather than re-flipped.**  The `setAlwaysOnTop` on Undo History carried a comment
+explaining itself: the main window stole focus back and buried the panel.  That is real -- the editor
+deliberately grabs keyboard focus -- but always-on-top solved it by floating above every OTHER
+application too, which is a worse bug than the one it fixed.  `WindowChrome::ownToMainWindow` re-adds
+the window with the main frame as its native OWNER: the OS keeps an owned window above its owner,
+above nothing else, and minimises it with the owner.  Applied from the editor, because the owner is
+the main frame the window itself has no handle on.
+
+Key Binds' OTHER always-on-top (`KeyBindsWindow.cpp:414`) STAYS -- that one is the modal
+shortcut-capture prompt, which must sit above the window that launched it while the user presses a
+key combination, and lives only for that gesture.  Different case, left alone on purpose.
+
+**The one item whose correctness is not a compile-time fact:** the owner relationship is OS behaviour,
+so TS8's smoke has to confirm it on Jeff's machine.
+
+## TS7 SPEC AUDIT (2026-07-30) — I closed items that were not done
+
+Jeff asked what "§3.8" was, because there is no §3.8 in his spec. There isn't — **I invented the
+number and the cap behind it**, which made my own decision read as part of his spec. That prompted a
+full audit of all ~60 spec items against the SOURCE (not against my own plan file, which is where the
+overclaiming would be). Seven auditors plus an adversarial pass over every DONE verdict.
+
+**How the fake item got in unnoticed:** the plan file's numbering had drifted from his. I split his
+§5.1 into two, pushing §5.2-5.4 one place off; his mid-TS7 asks were inserted as §7.2/§7.2a, pushing
+his §7.2 (the pattern-render bug) to §7.3. Once the numbering is mine to extend, an invented item
+stops being visibly invented. The numbers are his spec's index, not mine.
+
+### What the audit found (the serious half)
+
+* **§7.2 — his reported bug was still broken.** I fixed one of two truncations and closed the item.
+  See the §7.3 plan entry: a symptom that survives a fix in a CHANGED form is evidence the first
+  diagnosis was incomplete, not a new bug.
+* **The cap I invented would have deleted files the user chose to keep.** `reclaimOldestAudioIfNeeded`
+  called `deleteFile()` without checking WHERE the file lived, contradicting the rule stated two
+  functions below it. Removed entirely on Jeff's ruling.
+* **§9.4 — my "owner window" was a CHILD window.** JUCE's `addToDesktop(flags, handle)` routes the
+  handle to CreateWindowEx as the PARENT and ORs in `WS_CHILD`, which clips the window inside the app
+  frame and flips `getBounds()` to parent-client space, so my own save/restore re-planted it. Win32
+  has no JUCE-level owner API; `GWLP_HWNDPARENT` on an already-created top-level window is the actual
+  mechanism. I had written confident notes about a relationship the code never established.
+* **`insertKindForTab` had a silent `default:`** mapping every unhandled kind to `InsertKind::Layer`.
+  Not a harmless fallback — it would have armed the tap on Layer[pageIndex] while rendering another
+  kind's tab, writing the WRONG TRACK's audio into the freeze file with no error anywhere. Now
+  exhaustive, so a missing case is a compiler warning.
+* **§6.7's two cleanup rules did not exist**, **§6.5 had three invalidators with no call site**, and
+  **§3.4 retained nothing** in its default configuration.
+* **Six comments I wrote were false**, each describing behaviour that was never built.
+
+### Method notes worth keeping
+
+* Auditing against my own plan file would have confirmed my own story. The audit was told to treat
+  Plans & Specs as UNTRUSTED and verify in source only.
+* A `git diff` against the batch base CANNOT see diagnostics inside NEW untracked files — that is how
+  three `AlertWindow` diagnostics shipped uncatalogued under a §10.6 entry claiming "nothing else".
+* The adversarial pass earned its keep in both directions: it overturned a PARTIAL on §1.1 that was
+  double-booking §1.2's param, and it caught that my §9.4 "owner" claim was wrong at the Win32 level
+  when the first auditor had accepted it.
+
+## THE FREEZE RE-RENDER CASCADE (2026-07-30) — and my wrong first diagnosis
+
+**The bug.**  `applyOfflineLaneValue` replays automation during a render by calling
+`setValueNotifyingHost` on the ENGINE's APVTS — the exact tree `FreezeParamWatcher` listens to.  So
+rendering a freeze for tab B wrote tab A's engine params, marked A stale, queued A for re-render —
+and A's render did the same back to B.  **Two frozen tabs ping-ponged indefinitely**, each pass a
+multi-second blocking render.
+
+**I mis-diagnosed it first.**  Jeff's timing log showed `tab_layers_0` / `tab_layers_1` alternating
+twenty times in three minutes.  I read that as grid-edit thrash — arrangement content IS a real
+invalidator — and shipped a quiet-period fix for the refresh queue.  That fix is still correct and
+still needed, but it was treating a symptom whose main driver was this cascade.  What actually
+identified it was Jeff reporting the freeze button "sometimes hangs" and my going looking for a
+mechanism rather than accepting the first plausible story.
+
+**The fix, and why it is not suppression.**  `markEngineContentChanged` and `markAllFreezesStale`
+both early-return while `isNonRealtime()`.  The distinction that makes this correct: those writes are
+a REPLAY of automation that already exists.  They do not change what the tab produces — **they ARE
+what it produces**, and the render is in the middle of capturing precisely that.  Treating a replay
+as a user edit was the error.
+
+`markAllFreezesStale` needed the guard even more than the per-tab one: the render restores song mode,
+loop bounds and current pattern on exit, all of which route through content-change signals — so
+without it, EVERY render would invalidate EVERY freeze in the project on its way out.
+
+**Method note.**  The freeze-timing file was built to answer "how slow is the render" and instead
+became the diagnostic that exposed a correctness bug it was never designed for.  Cheap instruments
+pay for themselves in unrelated directions.
+
+## TEMPO-SYNC WAS NEVER FOLLOWING PROJECT TEMPO (found + fixed 2026-07-30)
+
+**Genuinely pre-existing — and I checked before using the word this time.**  The fallback it exposes
+is annotated "S4 Batch 2b" (`HarmlessProcessor.cpp:82-84`), long before QA-ModelShell opened, and
+nothing in this batch touches it.  That is the standard: pre-existing means older than the batch's
+open commit, not older than this afternoon.
+
+**The bug.**  `AudioProcessor::setPlayHead` is called on exactly TWO sites tree-wide, both on the
+top-level processor (the offline render's swap and its restore).  It is never called on a CHILD
+engine.  So `getPlayHead()` returns null inside Harmless, BaySickSynth and BaySickBass, and each one
+silently takes its documented "no transport" path:
+
+    double bps = 2.0;   // 120 BPM default
+    if (auto* ph = getPlayHead()) ...
+
+Net effect: **tempo-synced LFO rates and envelope times ignored project tempo entirely.**  Set the
+song to 90 or 140 and they still ran at 120.  Silent, plausible-sounding, and invisible unless you
+went looking — the synth is in time with itself, just not with the song.
+
+**How it surfaced.**  Nobody was looking for it.  It fell out of the shadow-engine investigation,
+which needed to know what state a duplicated engine would have to inherit and discovered the answer
+for the playhead is "nothing, because it never had one."  Jeff: "This needs to be fixed."
+
+**The fix, and why it is not a one-shot at startup.**  Propagated from `processBlock` when the
+playhead POINTER CHANGES — a compare per block, N stores only on an actual change.  It has to react
+rather than run once: the offline render swaps this processor's playhead for its own and swaps it
+back, so a setup-time propagation would leave every engine pointing at a dead render head for the
+rest of the session.  Covers the rig engines plus the processor-owned sfizz members, which are not
+in the rig.
+
+## VOCAL SIGNAL FLOW (2026-07-30) — what I got wrong, and the two fixes that came out of it
+
+Jeff challenged the vocal chain order and I answered badly three times before getting it right.
+Recording it because the failure mode is the reusable part.
+
+**What I got wrong.**
+1. I quoted Phase H's `input -> pitch correction -> de-esser -> compressor -> saturation -> limiter`
+   as evidence that HE specified pitch-before-chain.  That line is the RACK'S INTERNAL SLOT ORDER
+   with "pitch correction" meaning the realtime corrector.  It says nothing about where BaySickPitch
+   or BaySickAlign sit relative to the chain — the actual question.  I used his own spec to justify
+   something it does not address.
+2. He said the Vox sub-tabs are in the order of the signal chain he specified.  I told him he had
+   misread a UI element.  That was both condescending and wrong.
+3. I attributed a subagent's "pull Gate and De-reverb out of the rack" proposal to him as "your full
+   idea."  He never said it.
+
+**The verified order.**  PLAYBACK: grid WAV -> BaySickAlign warp + align pitch (at file DECODE,
+before any audio reaches the engine) -> BaySickPitch note edits (first stage IN the engine) -> the
+six-slot rack -> NAM/IR -> Mix -> strip InsertNode (freeze tap, preEQ, polarity, width, insert rack,
+postEQ, fader, pan).  LIVE: mic -> DRY tap -> realtime corrector (the SAME slot BaySickPitch
+occupies) -> WET tap -> identical remainder.  One function body serves both; order is fixed by
+statement sequence, with no parameter, preset or slot move able to change it.
+
+**So his read was right:** both editors operate upstream of everything that would clean the signal
+for them, and align's follow-the-leader pitch matching is deriving its offset from untreated audio
+too.
+
+**Then he asked where DE-NOISE goes, which nothing above had mentioned — and it reframed the whole
+thing.**  De-noise is not a chain stage; it is a file cleaner attached to recording.  Learners listen
+(never modify) whenever an input is assigned; at record stop it writes cleaned COPIES.  And both
+editors analyse WHATEVER IS ON THE GRID — not the raw take, which is what I had told him.  So the
+"editors chew on raw room tone" problem is a PICKER problem, not a chain-order problem, and it had a
+settings-level answer all along.
+
+Two changes shipped off that: the auto grid pick became the highest-order ticked variant, and the
+Regenerate-De-noise staleness bug got fixed.  Both are detailed in the batch plan.
+
+**The lesson.**  Every one of the three errors was me answering an architecture question from a
+partial read and a plausible inference, at speed, to a man who knows his own spec.  The workflow
+runs that finally got it right cost minutes.  When he asks where something sits in a signal path,
+that is a source question, not a recall question.
+
+### TS7 GATE (§11 + §3 + §9): GREEN
+
+Five exit codes 0, four link lines, zero `error C` / `error LNK` / `error MSB`.  Three RED builds
+along the way, all mine and all in new code: `getCurrentPattern` (the accessor is
+`getCurrentPatternIndex`), and `openUiPrefs` forward-declared 12,000 lines BELOW the constructor that
+now reads capture settings out of it -- moved to the top of the TU beside `promptForProjectName`,
+which was already there for the same reason.
+
+### TS7 §6.9 render pruning — option 3, built
+
+Jeff ruled option 3 with a render notice.  The Release stopwatch had already come back at
+0.09x-0.13x realtime for the loop with a fixed 0.6-0.9 s setup + teardown, so the loop was never the
+disaster the first Debug reading implied — but it was still rendering the whole project to capture
+one track.
+
+The pruning investigation returned one finding that decided the whole implementation: **naive
+pruning makes it twenty times slower.**  `MasterTask::run` is the only writer of `mAllDone`, and it
+only runs when every predecessor has passed through the pool.  Not seeding a task starves master, so
+every block waits out the full 100 ms watchdog — 2.15x realtime.  So the task still flows through the
+pool and still decrements its children; only `run()` is skipped.
+
+Three pieces:
+
+* `RenderTask::mRenderSkipped` + `clearOnSkip()`, honoured in `VibeThreadPool::runOneTask` with the
+  child-dep decrement left unconditional.
+* `RenderGraphDispatcher::setFreezePrune` — keep-set is target + master + a reverse-walk of
+  `mPredecessors` (audio AND sidechain, so a compressor keyed off another strip does not bake wrong
+  gain reduction) + a fixpoint walk of `mSyntheticDeps`, which is the only way
+  `RustyDrumsProducerTask` gets in.  Without that walk, freezing a Rusty drum renders silence.
+* Armed and cleared on the same lines as the freeze tap, never inside `runOfflineLoop`.  Leaked into
+  real-time playback it would silence the whole project except one track.
+
+**Two stale-buffer bugs found on the way, both from this batch, both mine.**
+
+The freeze tap's node does not run every block — a Clips row with a gap between clips skips it, an
+idle-suspended engine skips it — and the tap buffer then still holds the previous block's audio.  The
+render wrote it again, so gaps came out as a stutter baked into the file.  Valid WAV, wrong sound,
+no error anywhere.  Silence is legitimate content so it cannot be detected from the samples; it took
+a sequence number (`freezeTapSeq`), with the render clearing the buffer whenever it did not advance.
+
+The kit renderer had the same bug on a different buffer: `getStripBuffer` is read unconditionally but
+`mMultiOutScratch` is only cleared inside `processStrips`, which the producer task skips entirely on
+an idle block.  Fixed engine-side with `getStripRenderSeq()`, bumped right after the scratch clear so
+the zero-voice early-out still counts as a fresh render.
+
+Both renderers now fail loudly instead of shipping a silent file: if the tap never fired once, the
+file is deleted and an error is raised.  A valid all-silent freeze would play in place of the track
+and the user would hear a part vanish with nothing to explain it.
+
+### TS7 GATE (§6.9 pruning): code clean, Release link blocked
+
+Debug 0, helper64 0, helper32 config 0, helper32 0.  Three link lines.  Zero `error C` in EITHER
+config — Release compiled clean and stopped at the link with `LNK1104` on `BaySickDAW.exe`, which is
+running (Release, PID 15396).  File lock, not a code failure; needs the app closed to re-run.
+
+Two RED builds before that, both mine: `BlockContext` is only forward-declared in `RenderTask.h` so
+`clearOnSkip` could not read `mCtx->numSamples` (it clears the whole arena slot instead — one
+max-block allocation, so no real cost), and `RenderOptions` has no `blockSize` field.
+
+### TS7 follow-up: BLU-447 Plugins tab was reported done and was half-built
+
+Jeff loaded a real VST3 instrument for the first time and found the player had ONLY a Freeze
+button -- no piano roll button, no entry in the roll dropdown, no mixer strip, no bus.  TS6's commit
+line claims all of it shipped.  It did not.
+
+**41 confirmed defects, 0 refuted** across five independent traces with an adversarial refutation
+pass on every finding.
+
+**What TS6 actually built:** the producer side and the creation path, both correct and both working.
+`kPluginsBus`/`kPluginBase`, the bus InsertNode + rack + EQ, `registerPluginEngine` (strip params,
+InsertNode, EngineInsertTask), `MixerPage::addPluginChannel`, the `pluginRoll` pattern model,
+`PluginPageRoll` serialization, `kPluginsPRTarget` note SCHEDULING, `EngineRig`'s factory case, and
+the whole 1000+ dropdown range in EffectsPage (rack, EQ, pre-EQ, prefix, automation sweep).
+
+**What it never did:** extend the roughly thirty hand-written per-kind enumeration sites that CONSUME
+what creation produces.  Every one is an if/else-if chain or a hand-listed table over
+{Layers, Bass, Drums, Clips, Vox, Inst, Rusty} with no default arm and no generic fallback, so a new
+tab kind is invisible by construction -- it does not fail, it falls off the end.
+
+The Freeze button is the proof: it is the ONE title-bar control wired from outside those chains (a
+single unconditional call whose resolver `visiblePageTabIdentity` does have a PluginsPage case).
+Identical infrastructure, identical page object; the one generic path reached Plugins and every
+per-kind path did not.  The comment I wrote next to that call predicted this exact failure mode.
+
+**The three that were worse than "invisible" -- all audio-side:**
+
+* `ensureMixerBusAndMasterParams` registered twelve bus prefixes and not `mixer_pluginbus`.  The bus
+  had NO parameters at all, so `mixer_pluginbus_sendTo` did not exist and the routing graph had no
+  edge from it.  Plugin audio reached Master only through `defaultSendTo`'s fallback.
+* All three note-off decode chains stopped at `kRustyPRTarget` while the SCHEDULER already emitted
+  `kPluginsPRTarget`.  Every plugin note-off was dropped; notes hung until the panic CC.
+* `onGetActiveChannels` emitted neither the bus nor any 1000+ member, so the PLUGINS BUS group that
+  EffectsPage already drew was a heading over an empty list.
+
+**The one that explains "no bus":** `mPluginsBusStrip` was constructed, prefixed, channel-id'd and
+cache-registered -- and never PARENTED.  It was an orphan Component that could not render whatever
+`mPluginsBusActive` said.  The comment claiming that flag "is what makes the Plugins BUS strip
+appear" was false; nothing in layout read it.
+
+**The one that explains "no strip":** `layoutScrollContent` buckets eight strip families and had no
+`mPluginOrder` loop, so the insert strip -- correctly built, parented and visible -- never received
+`setBounds` and sat at (0,0,0,0).
+
+**My errors inside this session, both from reading comments instead of code.**  I told Jeff "the
+audio half is real and works" before checking the param registration, and had to correct it minutes
+later.  Then I told him a plugin page could not have a swing knob because `ensureSwingParams`
+excluded Plugins -- that was the stale COMMENT above the function; the body registers
+`swing_plugin_N_*` and the scheduler already applies them.  Only the knob was missing.  Both
+comments are now fixed.
+
+**Jeff's rulings.**  (1) swing knob present -- the params already existed.  (2) his question exposed
+that my always-visible / member-gated framing was wrong: deleting the last plugin tab already clears
+`mPluginsBusActive`, so the only case the options differ in is a LIVE tab routed to Layers or Bass;
+re-put, still open.  (3) bus sits after the whole Inst family and before Layers, not among the
+secondary Inst buses.  (4) Piano Roll + FX Rack + swing, and NO inert "Player" slot -- one tab slot
+with activeIdx -1.  (5) roll dropdown lists a plugin tab only once a plugin is picked.  (6) keep the
+three pre-existing fixes in-batch.  (7) fix the `mixer_bass_` prefix collision in-batch.
+
+**(7) in detail** -- pre-existing, unrelated to plugins: the Automate-menu bus table registers
+`mixer_bass_`, but a bass INSERT is `mixer_bass_0_...` which also starts with it, and the bus loop
+runs first.  Every per-bass-strip automation entry read "Mx Bass Bus - 0 Level".  Bass is the only
+colliding pair (drums/layers use singular insert bases); the guard rejects a digit immediately after
+any bus prefix so a future bus name cannot reintroduce it.
+
+**(6) in detail** -- `PianoRollSelection` save/restore carried four of EngineKind's eleven values, so
+saving with a Clips / Vox / Inst / Guitars / Basses / Rusty roll active reopened the project on Drum
+Kit.  Both tables are now exhaustive.  Plus `mixer_rustybus_` and `mixer_rusty_` added to the two
+Automate label tables.
+
+### TS7 follow-up: hosted plugins had no transport at all
+
+Jeff's log showed MIDI clock (48/sec = 24 PPQN at 120 BPM) being forwarded from a connected
+controller straight into the plugin's buffer.  I proposed filtering it and wrote, in my own
+reasoning, that forwarding OUR tempo instead "would be a separate feature addition, bigger scope
+than what he asked for."  He quoted that back: *"That is not a bigger scope than what I asked for,
+I asked for you to fix it not half ass it."*
+
+He was right, and not merely about scope.  `HostedPlugin.h/.cpp` contained ZERO references to
+`setPlayHead`.  `juce::AudioProcessor::setPlayHead` only stores the pointer on the object it is
+called on, and `mInner` is a separate AudioProcessor -- so a hosted plugin had no tempo, no
+bar/beat and no transport state whatsoever.  Filtering the controller's clock without fixing that
+would have removed the only tempo reference it had.  The narrowing was not a judgement call about
+scope; it rested on a premise I never checked.
+
+**The mechanism, verified in our own vendored JUCE.**  `toProcessContext`
+(juce_VST3PluginFormatImpl.h:330) builds the entire VST3 ProcessContext from ONE
+`AudioPlayHead::getPosition()` call.  Every field -- tempo, ppq, time signature, loop -- sets its
+validity flag only inside `if (position.hasValue())`.  No playhead means a zeroed context with not
+one valid flag.  It also jassert-fails when a position exists without `timeInSamples` ("The time in
+samples *must* be valid"), which is what made the cheap "BPM-only playhead" option structurally
+invalid rather than merely lesser.
+
+**Jeff asked which of the two options FL Studio would use.**  Answered from the FORMAT rather than
+from claims about FL: there is one ProcessContext, built from one playhead, handed to every VST3 --
+instrument or effect alike.  The format has no tier where effects get tempo but not position, so no
+conforming host can do the cheap option.  He picked B.
+
+**Shipped.**  Unbridged: `setPlayHead` override forwarding to `mInner`.  Bridged: `ProcessPayload`
+gained bpm / ppq / timeInSamples / isPlaying / time signature (48 bytes, static_assert updated,
+`kProtocolVersion` 1 -> 2), helper rebuilds a real AudioPlayHead as a MEMBER (setPlayHead stores the
+pointer; a local would dangle).  Rack slots: new defaulted `DSPBase::setHostTransport`, a static
+per-block snapshot on VibeGraph published before `dispatchBlock`, and `EffectRack::setHostTransport`
+doing tempo + transport in ONE slot walk so the three node call sites did not double the audio-thread
+lock traffic.  `HostedPluginEffect` owns its playhead as a member with a one-shot attach that re-arms
+on `setPlugin`.
+
+**AND THE BRIDGE WAS SENDING NO MIDI AT ALL** -- `numMidiBytes` was hard-zero with the buffer
+explicitly ignored, despite the protocol comment promising a trailer.  A bridged INSTRUMENT was
+silent by construction.  Now hand-serialised (int32 pos, int32 len, bytes) rather than copying JUCE's
+MidiBuffer storage, because the helper may be x86 while we are x64 and that file's whole premise is
+that cross-architecture layout is not trustworthy.
+
+### The verification pass caught that MY FIX DID NOT WORK
+
+Six-dimension adversarial review before commit: 14 confirmed, 4 refuted.  The one that mattered:
+
+**Change-gated propagation alone could never reach a hosted plugin.**  `PluginProcessor.cpp:2178`
+propagates the playhead only when the POINTER changes.  It changes exactly once -- at the first audio
+block, which runs BEFORE any engine exists (the audio callback is installed before the editor builds
+its tabs).  Every engine created afterwards -- project load, add tab, swap engine -- never received
+one.  And the `instantiate()` seed I added to cover exactly that could never fire: `instantiate()` is
+only ever called from the constructor, where `getPlayHead()` is null by definition.  Dead code that
+read as covering the case -- the same failure mode as every other defect this batch.
+
+Fixed by setting the playhead on EVERY creation path: `EngineRig::registerWithProcessor` for rig
+engines, plus the three processor-owned ones (Guitars / Basses / Rusty), which had the identical hole
+and had simply never shown it because our own engines mostly read tempo by other means.  The dead
+seed is deleted with a comment saying why.
+
+**Pre-existing gap surfaced, NOT introduced today:** `SandboxedPluginClient::mSharedAudio` is sized
+in `prepare()` and released in `releaseResources()` and never read or written anywhere.  The bridge
+has no audio path in either direction, so a bridged plugin cannot produce sound regardless of the
+transport and MIDI now reaching it.  TS6 scope, recorded rather than quietly fixed.
+
+**Cleared by the review:** payload is genuinely 48 bytes on both arches with a matching
+static_assert; MIDI trailer write and read sides agree exactly with the scratch bound checked before
+every memcpy and no off-by-one; the clock filter bypasses only three side effects, none of which can
+act on those message types, and nothing in the tree consumes clock; `kMaxPluginStrips` and
+`kMaxPluginPages` are both 20 with no cross-indexing; the rack playhead is a member attached before
+`process()` at all three sites.
+
+**Left alone, needs Jeff's call:** `kProtocolVersion` is checked helper-side only -- the host ignores
+the handshake reply, so a stale helper exe would misparse silently rather than refuse.

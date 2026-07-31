@@ -192,6 +192,19 @@ Result write (const std::vector<Reference>& refs,
     // Everything lands under Samples/ inside the bundle, matching where the
     // project already keeps its own audio.
     const juce::String kSamplesDir = "Samples";
+    // TS7 §6.8: the freeze cache is regenerable and excluded from bundles.
+    const juce::String kFreezeDir  = "Freeze";
+
+    // True for anything the bundle deliberately leaves behind.  Matches on the
+    // path RELATIVE to the project folder, so a user's own "Freeze" folder
+    // nested somewhere else is not caught by accident.
+    auto isExcludedFromBundle = [&kFreezeDir] (const juce::File& f,
+                                               const juce::File& projectFolder)
+    {
+        const juce::String rel = f.getRelativePathFrom (projectFolder);
+        return rel.startsWith (kFreezeDir + juce::File::getSeparatorString())
+            || rel.startsWith (kFreezeDir + "/");
+    };
 
     std::vector<Reference> toCopy;
     for (const auto& r : refs)
@@ -216,6 +229,11 @@ Result write (const std::vector<Reference>& refs,
             result.error = "Could not copy the project folder.";
             return result;
         }
+        // TS7 §6.8: copyDirectoryTo takes everything, so the freeze cache is
+        // removed after the fact.  It is regenerable audio -- roughly 16 MB per
+        // minute per frozen track -- and the receiving machine re-renders it on
+        // load, so shipping it would bloat every bundle for nothing.
+        destination.getChildFile (kFreezeDir).deleteRecursively();
         tick();
 
         auto samples = destination.getChildFile (kSamplesDir);
@@ -236,11 +254,15 @@ Result write (const std::vector<Reference>& refs,
         destination.deleteFile();
         juce::ZipFile::Builder builder;
 
-        // The project folder itself, preserving relative layout.
+        // The project folder itself, preserving relative layout -- minus the
+        // freeze cache (TS7 §6.8).
         juce::Array<juce::File> projectFiles;
         projectFolder.findChildFiles (projectFiles, juce::File::findFiles, true);
         for (const auto& f : projectFiles)
+        {
+            if (isExcludedFromBundle (f, projectFolder)) continue;
             builder.addFile (f, 9, f.getRelativePathFrom (projectFolder));
+        }
         tick();
 
         for (const auto& r : toCopy)

@@ -1,5 +1,6 @@
 #include "PluginsManagerWindow.h"
 #include "SharedUI.h"   // VC palette
+#include "WindowChrome.h"   // TS7 §9.3
 
 namespace
 {
@@ -498,7 +499,7 @@ void PluginsManagerContent::doAddChecked()
 PluginsManagerWindow::PluginsManagerWindow (Hosting::PluginManager& pm)
     : juce::DocumentWindow ("Plugins", VC::Bg, juce::DocumentWindow::closeButton)
 {
-    setUsingNativeTitleBar (true);
+    WindowChrome::applyToDesktopWindow (*this);   // TS7 §9.3
     setResizable (true, true);
     setContentOwned (new PluginsManagerContent (pm), true);
     centreWithSize (920, 700);

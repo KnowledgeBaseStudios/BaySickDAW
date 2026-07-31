@@ -1177,6 +1177,36 @@ void RibbonTabBar::paint(juce::Graphics& g)
                        juce::Justification::centred);
         }
 
+        // ── TS7 §6.4: frozen indicator ───────────────────────────────────────
+        // A small mark on the tab's left edge, drawn rather than a glyph: a
+        // snowflake character renders as a box on a machine without the font,
+        // and this is the only signal that a tab is playing cached audio.
+        //
+        // Two states, because "frozen" and "frozen but out of date" mean
+        // different things to the user: solid = playing its file, hollow = stale
+        // and currently back on the live engine while it re-renders.
+        if (onIsTabFrozen)
+        {
+            const int frozenState = onIsTabFrozen (type);   // 0 none, 1 frozen, 2 stale
+            if (frozenState > 0)
+            {
+                const float d  = 7.0f;
+                const float fx = (float) r.getX() + 4.0f;
+                const float fy = (float) r.getY() + ((float) kTabH - d) * 0.5f;
+                const juce::Colour cyan (0xff00fff2);
+                if (frozenState == 1)
+                {
+                    g.setColour (cyan.withAlpha (0.95f));
+                    g.fillEllipse (fx, fy, d, d);
+                }
+                else
+                {
+                    g.setColour (cyan.withAlpha (0.75f));
+                    g.drawEllipse (fx, fy, d, d, 1.4f);
+                }
+            }
+        }
+
         // ── ▾ arrow (rightmost region) ───────────────────────────────────────
         if (hasDropdown(type))
         {

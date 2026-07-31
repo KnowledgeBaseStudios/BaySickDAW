@@ -73,6 +73,31 @@ void HeavyOperationOverlay::setStepLabel (const juce::String& label)
     pumpPaint();
 }
 
+void HeavyOperationOverlay::setProgress (double zeroToOne)
+{
+    mProgress = (float) juce::jlimit (0.0, 1.0, zeroToOne);
+    pumpPaint();
+}
+
+void HeavyOperationOverlay::setCancellable (bool canCancel)
+{
+    mCancellable = canCancel;
+    mCancelled   = false;   // a fresh op is never already cancelled
+    pumpPaint();
+}
+
+void HeavyOperationOverlay::mouseDown (const juce::MouseEvent& e)
+{
+    // Latch only; the op checks wasCancelled() at its own safe points and
+    // unwinds itself.  Nothing is torn down from here -- the message thread is
+    // inside the operation, so this handler runs from its own pumped repaint.
+    if (mCancellable && mCancelBounds.contains (e.getPosition()))
+    {
+        mCancelled = true;
+        pumpPaint();
+    }
+}
+
 void HeavyOperationOverlay::endOp()
 {
     if (mDepth == 0)
@@ -159,10 +184,45 @@ void HeavyOperationOverlay::returnToHost()
     }
 }
 
+void HeavyOperationOverlay::pollCancelInput()
+{
+    if (! mCancellable || mCancelled || ! isVisible())
+        return;
+
+    if (juce::KeyPress::isKeyCurrentlyDown (juce::KeyPress::escapeKey))
+    {
+        mCancelled = true;
+        return;
+    }
+
+    if (juce::ModifierKeys::getCurrentModifiersRealtime().isLeftButtonDown()
+        && ! mCancelBounds.isEmpty())
+    {
+        const auto screenPt = juce::Desktop::getInstance()
+                                .getMainMouseSource().getScreenPosition().roundToInt();
+        if (localAreaToGlobal (mCancelBounds).contains (screenPt))
+            mCancelled = true;
+    }
+}
+
 void HeavyOperationOverlay::pumpPaint()
 {
     if (! isVisible())
         return;
+
+    // ── Cancel has to be POLLED, not received (2026-07-30) ───────────────────
+    // The Cancel button did nothing, and mouseDown was never the problem: the op
+    // holds the MESSAGE THREAD, so no input event is dispatched until it
+    // finishes.  Forcing paints through the peer (below) does not deliver input
+    // -- the click sits in the OS queue, arriving after the thing it was meant to
+    // cancel is already done.
+    //
+    // Pumping the message queue here would deliver it, and would also let the
+    // user click anything else mid-render and re-enter the app inside a
+    // half-finished operation.  Not worth it.  Reading the OS's CURRENT input
+    // state needs no dispatch at all, so the button works while the thread is
+    // blocked and nothing else can be triggered.
+    pollCancelInput();
 
     mPulse += 0.08f;
     repaint();
@@ -202,6 +262,23 @@ void HeavyOperationOverlay::paint (juce::Graphics& g)
     g.drawRoundedRectangle (panel.toFloat().reduced (0.5f), 8.0f, 1.0f);
 
     auto inner = panel.reduced (20, 16);
+
+    // TS7: Cancel, drawn only for ops that opted in.  Taken off the BOTTOM
+    // before anything else lays out, so adding it cannot shift the title, bar or
+    // ticker positions of every existing op.
+    mCancelBounds = {};
+    if (mCancellable)
+    {
+        auto row = inner.removeFromBottom (26);
+        mCancelBounds = row.removeFromRight (96);
+        g.setColour (mCancelled ? VC::Accent.withAlpha (0.35f) : VC::Accent);
+        g.drawRoundedRectangle (mCancelBounds.toFloat().reduced (0.5f), 4.0f, 1.0f);
+        g.setColour (mCancelled ? VC::Text.withAlpha (0.5f) : VC::Text);
+        g.setFont (juce::Font (13.0f));
+        g.drawText (mCancelled ? "Cancelling..." : "Cancel", mCancelBounds,
+                    juce::Justification::centred, false);
+        inner.removeFromBottom (8);
+    }
 
     g.setColour (VC::Text);
     g.setFont (juce::Font (18.0f, juce::Font::bold));

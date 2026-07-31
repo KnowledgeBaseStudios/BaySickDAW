@@ -134,6 +134,16 @@ public:
     int                     getStripCount      () const noexcept { return (int) mChannels.size(); }
     juce::AudioBuffer<float> getStripBuffer    (int stripIdx, int numFrames);
 
+    // Bumped every time processStrips actually renders.  mMultiOutScratch is
+    // only cleared INSIDE that call, so on a block where the producer task skips
+    // it -- idle suspend, or the frozen-kit skip -- the scratch still holds the
+    // previous block's audio and getStripBuffer hands it back as if it were
+    // fresh.  Real-time playback never notices (nothing reads the strips on a
+    // block where nothing rendered them), but the offline kit freeze reads them
+    // unconditionally and would bake a repeat of the last block into every gap.
+    juce::uint32 getStripRenderSeq() const noexcept
+        { return mStripRenderSeq.load (std::memory_order_acquire); }
+
     // 2026-05-06 (Option A idle suspend): expose sfizz active-voice count so
     // PluginProcessor's Rusty dispatch can skip processStrips + per-strip
     // routing when the kit is silent.
@@ -194,6 +204,7 @@ private:
     std::vector<PianoRollKey>  mPianoRollKeymap;
     std::atomic<int>           mAuditionNote   { -1 };
     std::atomic<bool>          mHiHatPedalClosed { false };   // J-8b
+    std::atomic<juce::uint32>  mStripRenderSeq   { 0 };
     double                     mSampleRate     { 48000.0 };
     int                        mMaxBlockSize   { 1024 };
 

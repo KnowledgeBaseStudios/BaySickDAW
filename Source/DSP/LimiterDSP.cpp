@@ -6,8 +6,66 @@ namespace
 {
     constexpr float kMaxAheadMs = 10.0f;
     constexpr int   kOsFactor   = 4;      // 4× oversampling for TP detection
-    constexpr float kRelFastMs  = 20.0f;  // auto-release fast envelope time const
-    constexpr float kRelSlowMs  = 300.0f; // auto-release slow envelope time const
+
+    // CL-243 character table.  Index 0 (Clean) reproduces the pre-CL-243 fixed
+    // constants exactly -- 20 ms / 300 ms envelopes, a 6 dB auto-release blend
+    // knee, no curve offset, no release scaling, no added saturation -- so every
+    // preset written before this table restores character 0 and sounds identical.
+    //
+    // The other seven trade transparency against density and colour.  Read the
+    // columns as: how quickly the fast envelope lets go, how slowly the slow one
+    // does, how deep the GR has to be before the slow envelope takes over, which
+    // way the release curve leans, how the user's Release time is scaled, and how
+    // much of the mode's own soft saturation is dialled in.
+    constexpr LimiterDSP::CharacterProfile kCharacters[(size_t) LimiterDSP::Character::Count] =
+    {
+        // name       relFast relSlow knee  curveOff relScale sat   needsAhead
+        { "Clean",      20.f,  300.f,  6.0f,  0.00f,  1.00f,  0.00f, true  },
+        { "Smooth",     40.f,  600.f, 10.0f,  0.30f,  1.40f,  0.00f, true  },
+        { "Tight",      12.f,  180.f,  5.0f, -0.15f,  0.70f,  0.00f, true  },
+        { "Punch",       8.f,  250.f,  3.0f, -0.25f,  0.80f,  0.00f, true  },
+        { "Glue",       60.f,  800.f, 12.0f,  0.30f,  1.60f,  0.00f, true  },
+        { "Loud",        6.f,  120.f,  4.0f, -0.30f,  0.50f,  0.35f, true  },
+        { "Warm",       25.f,  350.f,  7.0f,  0.15f,  1.10f,  0.55f, true  },
+        { "Instant",     2.f,   40.f,  2.0f, -0.40f,  0.30f,  0.20f, false },
+    };
+}
+
+const LimiterDSP::CharacterProfile& LimiterDSP::profileFor (Character c) noexcept
+{
+    const auto i = (size_t) juce::jlimit (0, (int) Character::Count - 1, (int) c);
+    return kCharacters[i];
+}
+
+const char* LimiterDSP::characterName (int index) noexcept
+{
+    return kCharacters[(size_t) juce::jlimit (0, (int) Character::Count - 1, index)].name;
+}
+
+const char* LimiterDSP::modeName (int index) noexcept
+{
+    return index == 1 ? "Maximizer" : "Limiter";
+}
+
+void LimiterDSP::setMode (Mode m)
+{
+    const auto n = (m == Mode::Maximizer) ? Mode::Maximizer : Mode::Limiter;
+    if (n == mMode) return;
+    mMode = n;
+
+    // Leaving Maximizer must drop the LIVE servo state, not the stored settings:
+    // an input-gain trim or ceiling trim still applied while its controls are
+    // hidden would make the limiter quieter or louder than the panel reads.
+    if (! maximizerActive())
+    {
+        mServoDb      .store (0.0f);
+        mCeilingTrimDb.store (0.0f);
+        mOutTpDb      .store (-144.0f);
+    }
+
+    // The effective character changed with the mode (Limiter always runs Clean),
+    // so the ballistics coefficients have to be rebuilt.
+    recalcCoefs();
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -54,10 +112,16 @@ void LimiterDSP::recalcCoefs()
         return (float) std::exp (-1.0 / ((double) ms * 0.001 * sr));
     };
 
+    // CL-243: the character supplies the envelope pair and scales the user's
+    // release time.  Clean's scale is 1.0 and its pair is the old 20/300, so this
+    // is a no-op at the default -- and Limiter mode always resolves to Clean.
+    const auto& prof = profileFor (effectiveCharacter());
+    const float relMs = std::max (1.0f, mReleaseMs * prof.relScale);
+
     mAttackCoef  = expCoef (mAttackMs);
-    mReleaseCoef = expCoef (mReleaseMs);
-    mRelFastCoef = expCoef (kRelFastMs);
-    mRelSlowCoef = expCoef (kRelSlowMs);
+    mReleaseCoef = expCoef (relMs);
+    mRelFastCoef = expCoef (prof.relFastMs);
+    mRelSlowCoef = expCoef (prof.relSlowMs);
 
     // Linear-release step sizes (linear decay toward target per sample, in linear units):
     // step = 1 / (releaseMs * 0.001 * sr)  → env falls from 1→0 over releaseMs
@@ -66,9 +130,9 @@ void LimiterDSP::recalcCoefs()
         const float n = std::max (1.0f, (float)(ms * 0.001 * sr));
         return 1.0f / n;
     };
-    mRelStepPerSample = linStep (mReleaseMs);
-    mRelStepFast      = linStep (kRelFastMs);
-    mRelStepSlow      = linStep (kRelSlowMs);
+    mRelStepPerSample = linStep (relMs);
+    mRelStepFast      = linStep (prof.relFastMs);
+    mRelStepSlow      = linStep (prof.relSlowMs);
 
     // SUSTAIN RMS-window coef (0 = off -> coef 0 -> meanSq tracks the peak
     // instantly, so blendedPeak == peak and the hold is a no-op).
@@ -128,6 +192,20 @@ void LimiterDSP::prepare (double sampleRate, int maxBlockSize)
     mSatThreshSmooth.setCurrentAndTargetValue (mSatThreshTarget);
     mSatCurveSmooth .setCurrentAndTargetValue (mSatCurve);
 
+    // TS7: output loudness (CL-244 servo + BLU-110 display) and output true peak
+    // (BLU-108 auto-ceiling).  Both prepared unconditionally -- the enable flags
+    // gate the per-sample COST, not the allocation, which must not happen on the
+    // audio thread if the user flips a toggle mid-playback.
+    mOutLufs.prepareToPlay (sampleRate);
+    mOutLufs.resetIntegrated();
+    mOutTp.prepare (2);
+    mLufsPrepared = true;
+    // ~0.5 s of hold: comfortably longer than the panel's 33 ms poke interval, so
+    // a stalled message thread does not make the meter blink, and short enough
+    // that a closed panel stops costing anything almost immediately.
+    mLufsHoldBlocks = juce::jmax (2, (int) std::ceil (0.5 * sampleRate
+                                                      / (double) mMaxBlock));
+
     // C2: SC HPF biquads (per-channel, mono spec each)
     juce::dsp::ProcessSpec scSpec { sampleRate,
                                     (juce::uint32) mMaxBlock,
@@ -167,6 +245,76 @@ void LimiterDSP::reset()
     mGrDb    .store (0.0f);
     mScHpfL.reset();
     mScHpfR.reset();
+
+    // TS7: the SERVOS deliberately survive reset() -- a graph-wide reset happens
+    // for wet-tail hygiene at transport and render boundaries, and dropping a
+    // converged loudness servo or ceiling trim there would make the limiter
+    // re-learn (and briefly overshoot) every time the user pressed stop.  The
+    // meters they read from do get cleared.
+    mOutTp.reset();
+    if (mLufsPrepared) mOutLufs.resetIntegrated();
+    mOutTpDb .store (-144.0f);
+    mOutLufsM.store (-120.0f);
+    mOutLufsS.store (-120.0f);
+    mOutLufsI.store (-120.0f);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// TS7 servos.
+//
+// THREAD CONTRACT, and it is the reason these are offsets rather than smoother
+// targets.  `mInputGainSmooth` / `mCeilingSmooth` are written by the MESSAGE
+// thread (the knob setters) and read by the AUDIO thread (getNextValue) -- the
+// read/write race every DSP setter in this codebase already has, and which is
+// benign.  Having the servos ALSO write them would make it write/write: two
+// setTargetValue calls interleaving can leave one ramp with a step computed
+// against the other's target.  So each servo owns a plain dB OFFSET that the
+// audio thread adds in the sample loop, and the smoothers stay single-writer.
+//
+// No smoothing is needed on the offsets themselves: the slew limits below cap a
+// block's movement at kServoDbPerSec * blockSecs (0.07 dB at 2048/44.1k) and
+// kTrimDownDbPerSec * blockSecs (0.14 dB), both far below audibility as a step.
+
+// CL-244: slew-limited closed loop from measured OUTPUT short-term loudness back
+// onto input gain.  Runs once per block, never per sample -- a 3 s window cannot
+// say anything new inside one block, and per-sample servo work would be pure cost.
+void LimiterDSP::updateLoudnessServo (int numSamples)
+{
+    const float st = mOutLufs.shortTerm();
+    // Below the absolute gate there is no programme to measure.  Holding the last
+    // value rather than unwinding to 0 is what stops the servo from pumping the
+    // gain back up through every gap in the music.
+    if (st <= -70.0f) return;
+
+    const float blockSecs = (float) numSamples / (float) juce::jmax (1.0, mSampleRate);
+    const float maxStep   = kServoDbPerSec * blockSecs;
+    const float err       = mLoudnessTargetLufs - st;
+
+    float servo = mServoDb.load();
+    servo += juce::jlimit (-maxStep, maxStep, err);
+    mServoDb.store (juce::jlimit (-kServoRangeDb, kServoRangeDb, servo));
+}
+
+// BLU-108: pull the effective ceiling down until the measured OUTPUT true peak
+// sits under the target, and let it back up slowly.  Asymmetric on purpose --
+// engaging late clips, releasing early re-clips.
+void LimiterDSP::updateCeilingTrim (int numSamples)
+{
+    const float tpDb = mOutTpDb.load();
+    if (tpDb <= -140.0f) return;   // no output yet
+
+    const float blockSecs = (float) numSamples / (float) juce::jmax (1.0, mSampleRate);
+    const float over      = tpDb - mTruePeakTargetDb;
+
+    float trim = mCeilingTrimDb.load();
+    if (over > 0.0f)
+        trim -= juce::jmin (over, kTrimDownDbPerSec * blockSecs);
+    else if (trim < 0.0f)
+        // Only recover while there is measurable headroom, so the loop settles
+        // just under the target instead of oscillating across it.
+        trim += juce::jmin (-trim, juce::jmin (-over, kTrimUpDbPerSec * blockSecs));
+
+    mCeilingTrimDb.store (juce::jlimit (-kTrimMaxDb, 0.0f, trim));
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -206,6 +354,14 @@ void LimiterDSP::process (juce::AudioBuffer<float>& buffer)
     float inPeakLin = 0.0f;
     const bool scHpfActive = (mSidechainHPF > 21.0f);   // only cost cycles when above floor
 
+    // TS7: the two servo offsets, snapshotted ONCE per block.  Reading them
+    // per sample would let a value change mid-block for no benefit -- the servos
+    // only move once per block anyway.  Both gated on Maximizer mode: in Limiter
+    // mode the knobs are the whole truth.
+    const bool  maxOn      = maximizerActive();
+    const float servoDb    = (maxOn && mLoudnessTargetOn) ? mServoDb.load()       : 0.0f;
+    const float ceilTrimDb = (maxOn && mAutoCeiling)      ? mCeilingTrimDb.load() : 0.0f;
+
     // C.4 Phase 2 (2026-04-30): external-key detection.  When an SC source
     // is connected to this slot, the TP detector reads SC samples instead
     // of the limiter's own input.  Audio path (input gain + soft sat +
@@ -222,7 +378,9 @@ void LimiterDSP::process (juce::AudioBuffer<float>& buffer)
 
     for (int i = 0; i < numSamples; ++i)
     {
-        const float gainDb  = mInputGainSmooth.getNextValue();
+        // CL-244's servo rides ON TOP of the knob's smoothed value, never inside
+        // it -- see the thread contract above updateLoudnessServo.
+        const float gainDb  = mInputGainSmooth.getNextValue() + servoDb;
         const float gainLin = juce::Decibels::decibelsToGain (gainDb);
 
         const float rawL = L[i] * gainLin;
@@ -308,7 +466,13 @@ void LimiterDSP::process (juce::AudioBuffer<float>& buffer)
     const float relStep     = mRelStepPerSample;
     const float relStepFast = mRelStepFast;
     const float relStepSlow = mRelStepSlow;
-    const float curve       = mReleaseCurve;
+    // CL-243: the character leans the curve and sets the blend knee.  Clean's
+    // offset is 0 and its knee is 6 dB, so the default is the old behaviour, and
+    // Limiter mode resolves to Clean regardless of the stored character.
+    const auto& prof        = profileFor (effectiveCharacter());
+    const float curve       = juce::jlimit (0.0f, 1.0f, mReleaseCurve + prof.curveOffset);
+    const float autoKneeDb  = juce::jmax (0.5f, prof.autoKneeDb);
+    const float charSatDrive = prof.satAutoDrive * 5.0f;
     const bool  autoRel     = mAutoRelease;
 
     // Envelope helper: instantaneous-ish attack + user-curve release.
@@ -374,8 +538,9 @@ void LimiterDSP::process (juce::AudioBuffer<float>& buffer)
         float outL = mDelayL[(size_t) readPos];
         float outR = mDelayR[(size_t) readPos];
 
-        // Consume the ceiling smoother per sample so 15ms ramps apply here too
-        const float ceilingDb  = mCeilingSmooth.getNextValue();
+        // Consume the ceiling smoother per sample so 15ms ramps apply here too.
+        // BLU-108's trim is added on top for the same single-writer reason.
+        const float ceilingDb  = mCeilingSmooth.getNextValue() + ceilTrimDb;
         const float ceilingLin = juce::Decibels::decibelsToGain (ceilingDb);
 
         // SAT (post-limiter, FL-faithful): smoothers consumed here (not in the
@@ -383,7 +548,9 @@ void LimiterDSP::process (juce::AudioBuffer<float>& buffer)
         // touches the detector/GR.  drive = 0 when SatThresh == 1 (off).
         const float satTh    = mSatThreshSmooth.getNextValue();
         const float satCv    = mSatCurveSmooth .getNextValue();
-        const float satDrive = (1.0f - satTh) * 5.0f;
+        // CL-243: the character's own drive adds to the SAT knob's, so Loud /
+        // Warm / Instant carry colour even with the knob at its off position.
+        const float satDrive = (1.0f - satTh) * 5.0f + charSatDrive;
 
         // C4: Auto-makeup = -ceilingDb of post-limit boost so the output stays
         // hot when the user lowers the ceiling. Skipped when off.
@@ -408,7 +575,7 @@ void LimiterDSP::process (juce::AudioBuffer<float>& buffer)
                 const float env     = juce::jmax (mEnvFast, mEnvSlow);
                 const float grLin   = computeGain (env, ceilingLin);
                 const float grDbNow = juce::Decibels::gainToDecibels (grLin, -96.0f);
-                const float blendSlow = juce::jlimit (0.0f, 1.0f, -grDbNow / 6.0f);
+                const float blendSlow = juce::jlimit (0.0f, 1.0f, -grDbNow / autoKneeDb);
                 const float blended = (1.0f - blendSlow) * mEnvFast + blendSlow * mEnvSlow;
                 gainL = computeGain (blended, ceilingLin);
             }
@@ -442,7 +609,7 @@ void LimiterDSP::process (juce::AudioBuffer<float>& buffer)
                     const float e     = juce::jmax (fast, slow);
                     const float grLin = computeGain (e, ceilingLin);
                     const float db    = juce::Decibels::gainToDecibels (grLin, -96.0f);
-                    const float bs    = juce::jlimit (0.0f, 1.0f, -db / 6.0f);
+                    const float bs    = juce::jlimit (0.0f, 1.0f, -db / autoKneeDb);
                     const float b     = (1.0f - bs) * fast + bs * slow;
                     return computeGain (b, ceilingLin);
                 };
@@ -458,22 +625,48 @@ void LimiterDSP::process (juce::AudioBuffer<float>& buffer)
             }
         }
 
-        // Apply gain reduction + optional auto-makeup
-        outL *= gainL * makeupLin;
-        outR *= gainR * makeupLin;
+        // Apply gain reduction.  Makeup is deliberately NOT folded in here --
+        // see the block below for why it moved.
+        outL *= gainL;
+        outR *= gainR;
 
         // SAT: post-limiter saturation (FL final stage) -- colors the limited
-        // output.  Skipped when off (SatThresh == 1 -> drive 0).
+        // output.  Skipped when off (SatThresh == 1 -> drive 0).  Position
+        // unchanged, so its input is the same signal it always saw.
         if (satDrive > 0.0f)
         {
             outL = softSat (outL, satDrive, satCv);
             outR = softSat (outR, satDrive, satCv);
         }
 
-        // Hard ceiling safety clamp (LAST, so the ceiling guarantee holds even
-        // after saturation + makeup).
+        // Hard ceiling clamp -- the limiter's actual guarantee, taken BEFORE
+        // makeup.
         outL = juce::jlimit (-ceilingLin, ceilingLin, outL);
         outR = juce::jlimit (-ceilingLin, ceilingLin, outR);
+
+        // C4 auto-makeup, now applied AFTER the ceiling clamp (TS7 fix).
+        //
+        // IT USED TO RUN BEFORE THE CLAMP, WHICH CANCELLED IT EXACTLY.  The
+        // limiter brought the peak to ceilingLin, makeup (= 1/ceilingLin) lifted
+        // it to ~1.0, and the clamp cut it straight back to ceilingLin: zero
+        // level gain delivered, and every sample between ceilingLin/2 and
+        // ceilingLin pushed over the ceiling and hard-clipped.  So the control
+        // was not a no-op, it was a clipper whose tooltip promised the opposite.
+        // BLU-108's ceiling trim made it worse by lowering ceilingDb further.
+        //
+        // The output ceiling SCALES with makeup rather than being pinned at
+        // unity, which is what keeps the makeup-off path bit-identical: with
+        // makeupLin == 1 this reduces to the same clamp as the line above,
+        // including the +12 dB "headroom / no limiting" ceiling setting where a
+        // hard unity clamp would have newly clipped.  With makeup on,
+        // ceilingLin * makeupLin == 1 by construction, so the signal reaches
+        // full scale as the control claims.
+        if (autoMakeupOn)
+        {
+            const float outCeil = ceilingLin * makeupLin;
+            outL = juce::jlimit (-outCeil, outCeil, outL * makeupLin);
+            outR = juce::jlimit (-outCeil, outCeil, outR * makeupLin);
+        }
 
         L[i] = outL;
         if (R) R[i] = outR;
@@ -506,6 +699,48 @@ void LimiterDSP::process (juce::AudioBuffer<float>& buffer)
         const float decayed = juce::jmin (0.0f, prev + mGrDecayDbPerBlock);
         mGrDb.store (juce::jmin (blockGrDb, decayed), std::memory_order_relaxed);
     }
+
+    // ── 5. TS7: output loudness + true peak, then the two servos ──────────────
+    // Both meters read the FINAL output -- after gain reduction, saturation and
+    // the hard clamp -- because that is the signal the target is about.  Each is
+    // gated on its consumer so an idle limiter pays for neither.
+    // BLU-110 watchdog: one decrement per block, and the meter lapses when the
+    // panel stops poking it.  Target mode holds it up independently.
+    {
+        const int hold = mLufsHold.load();
+        if (hold > 0) mLufsHold.store (hold - 1);
+    }
+    // Maximizer-only: Limiter mode has no loudness readout and no servo, so it
+    // must not pay the K-weighting cost either.
+    const bool wantLufs = maxOn && (mLoudnessTargetOn || mLufsHold.load() > 0);
+    if (mLufsPrepared && wantLufs)
+    {
+        mOutLufs.process (buffer);
+        mOutLufsM.store (mOutLufs.momentary());
+        mOutLufsS.store (mOutLufs.shortTerm());
+        mOutLufsI.store (mOutLufs.integrated());
+    }
+    else if (! wantLufs)
+    {
+        // Publish the floor once the meter lapses, so a stale reading cannot sit
+        // frozen on a panel that is watching again a moment later.
+        mOutLufsM.store (-120.0f);
+        mOutLufsS.store (-120.0f);
+        mOutLufsI.store (-120.0f);
+    }
+
+    if (maxOn && mAutoCeiling)
+    {
+        // resetPeak, not reset: filter history carries across the block boundary,
+        // so there is no seam artefact in the measurement.
+        mOutTp.resetPeak();
+        mOutTp.process (buffer);
+        mOutTpDb.store (mOutTp.truePeakDb());
+        updateCeilingTrim (numSamples);
+    }
+
+    if (maxOn && mLoudnessTargetOn)
+        updateLoudnessServo (numSamples);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -529,6 +764,76 @@ void LimiterDSP::setCeilingDb (float dB)
         mCeilingTargetDb = n;
         mCeilingSmooth.setTargetValue (n);
     }
+}
+
+// ── TS7 setters ──────────────────────────────────────────────────────────────
+void LimiterDSP::setCharacter (Character c)
+{
+    const auto n = (Character) juce::jlimit (0, (int) Character::Count - 1, (int) c);
+    if (n != mCharacter) { mCharacter = n; recalcCoefs(); }
+}
+
+void LimiterDSP::setCharacterIndex (int index)
+{
+    setCharacter ((Character) index);
+}
+
+void LimiterDSP::setLoudnessTargetOn (bool on)
+{
+    if (on == mLoudnessTargetOn) return;
+    mLoudnessTargetOn = on;
+    if (! on)
+    {
+        // Turning the mode off must give the knob back: an invisible servo trim
+        // left on the input gain would make the limiter louder than the panel says.
+        mServoDb.store (0.0f);
+    }
+    else if (mLufsPrepared)
+    {
+        // Start the loop from a clean programme measurement rather than whatever
+        // the display meter happened to be showing.
+        mOutLufs.resetIntegrated();
+    }
+}
+
+void LimiterDSP::setLoudnessTargetLufs (float lufs)
+{
+    const float n = juce::jlimit (-30.0f, 0.0f, lufs);
+    if (n != mLoudnessTargetLufs) mLoudnessTargetLufs = n;
+}
+
+void LimiterDSP::setAutoCeiling (bool on)
+{
+    if (on == mAutoCeiling) return;
+    mAutoCeiling = on;
+    if (! on)
+    {
+        // Same contract as the loudness servo: the ceiling knob is authoritative
+        // again the moment the automatic half is switched off.
+        mCeilingTrimDb.store (0.0f);
+        mOutTpDb.store (-144.0f);
+    }
+    else
+    {
+        mOutTp.reset();
+    }
+}
+
+void LimiterDSP::setTruePeakTargetDb (float dbTp)
+{
+    const float n = juce::jlimit (-6.0f, 0.0f, dbTp);
+    if (n != mTruePeakTargetDb) mTruePeakTargetDb = n;
+}
+
+void LimiterDSP::pokeLufsMeter() noexcept
+{
+    mLufsHold.store (mLufsHoldBlocks);
+}
+
+void LimiterDSP::resetOutputLufsIntegrated() noexcept
+{
+    if (mLufsPrepared) mOutLufs.resetIntegrated();
+    mOutLufsI.store (-120.0f);
 }
 
 void LimiterDSP::setSatThresh (float lin)
@@ -634,6 +939,15 @@ void LimiterDSP::getStateInformation (juce::MemoryBlock& dest)
     state.setProperty ("sidechainHPF", mSidechainHPF,      nullptr);   // C2
     state.setProperty ("autoMakeup",   (int) mAutoMakeup,  nullptr);   // C4
     state.setProperty ("stereoLink",   (int) mStereoLink,  nullptr);   // C5
+    // TS7.  Absent in a pre-TS7 preset, and every default below reproduces the
+    // old behaviour: character 0 is the old fixed constants, both automatic modes
+    // are off.  So no migration is needed and none is written.
+    state.setProperty ("mode",            (int) mMode,             nullptr);   // Limiter / Maximizer
+    state.setProperty ("character",       (int) mCharacter,        nullptr);   // CL-243
+    state.setProperty ("loudTargetOn",    (int) mLoudnessTargetOn, nullptr);   // CL-244
+    state.setProperty ("loudTargetLufs",  mLoudnessTargetLufs,     nullptr);
+    state.setProperty ("autoCeiling",     (int) mAutoCeiling,      nullptr);   // BLU-108
+    state.setProperty ("truePeakTargetDb", mTruePeakTargetDb,      nullptr);
     state.setProperty ("bypassed",     (int) bypassed,     nullptr);
 
     std::unique_ptr<juce::XmlElement> xml (state.createXml());
@@ -661,6 +975,21 @@ void LimiterDSP::setStateInformation (const void* data, int sz)
     mSidechainHPF      = (float)(double) state.getProperty ("sidechainHPF", 20.0);   // C2
     mAutoMakeup        = ((int) state.getProperty ("autoMakeup", 0)) != 0;           // C4
     mStereoLink        = ((int) state.getProperty ("stereoLink", 1)) != 0;           // C5 (default link on)
+
+    // TS7: defaults reproduce the pre-TS7 behaviour exactly for old presets --
+    // mode 0 is Limiter, the FL reproduction, with the maximizer half gated off.
+    mMode               = (((int) state.getProperty ("mode", 0)) == 1)
+                            ? Mode::Maximizer : Mode::Limiter;
+    mCharacter          = (Character) juce::jlimit (0, (int) Character::Count - 1,
+                                                    (int) state.getProperty ("character", 0));
+    mLoudnessTargetOn   = ((int) state.getProperty ("loudTargetOn", 0)) != 0;
+    mLoudnessTargetLufs = (float)(double) state.getProperty ("loudTargetLufs", -14.0);
+    mAutoCeiling        = ((int) state.getProperty ("autoCeiling", 0)) != 0;
+    mTruePeakTargetDb   = (float)(double) state.getProperty ("truePeakTargetDb", -1.0);
+    // A loaded preset must not inherit the previous slot's converged servo state.
+    mServoDb      .store (0.0f);
+    mCeilingTrimDb.store (0.0f);
+
     bypassed           = ((int) state.getProperty ("bypassed",    0)) != 0;
 
     // Snap smoothed values + refresh coefs/delay
@@ -690,5 +1019,13 @@ void LimiterDSP::setStateInformation (const void* data, int sz)
         std::fill (mTpPeaksR.begin(), mTpPeaksR.end(), 0.0f);
         mScHpfL.reset();
         mScHpfR.reset();
+        // TS7: the meters restart with the preset, and the smoothers are re-snapped
+        // above with the (now zeroed) trims already folded in.
+        mOutTp.reset();
+        if (mLufsPrepared) mOutLufs.resetIntegrated();
+        mOutTpDb .store (-144.0f);
+        mOutLufsM.store (-120.0f);
+        mOutLufsS.store (-120.0f);
+        mOutLufsI.store (-120.0f);
     }
 }

@@ -1,6 +1,7 @@
 #pragma once
 #include <JuceHeader.h>
 #include "PluginBridgeProtocol.h"
+#include "BridgeSharedMemory.h"
 
 // ── Hosting::SandboxedPluginClient ──────────────────────────────────────────
 // QA-ModelShell TS6 (BLU-302): the host end of the plugin bridge.  Owns one
@@ -39,9 +40,24 @@ public:
     void prepare (double sampleRate, int maxBlockSize, int numChannels);
     void releaseResources();
 
+    // Host transport handed across per block.  Deliberately NOT a juce::
+    // AudioPlayHead: the helper is a separate PROCESS (and may be a different
+    // architecture), so nothing with a vtable or a pointer can cross.  Plain
+    // values only; the helper rebuilds a playhead from them on its side.
+    struct TransportInfo
+    {
+        double       bpm           { 120.0 };
+        double       ppqPosition   { 0.0 };
+        juce::int64  timeInSamples { 0 };
+        bool         isPlaying     { false };
+        int          timeSigNum    { 4 };
+        int          timeSigDen    { 4 };
+    };
+
     // Audio-thread entry.  Returns false when the helper did not answer within
     // the deadline -- caller clears the buffer.  Never blocks unbounded.
-    bool processBlock (juce::AudioBuffer<float>&, juce::MidiBuffer&) noexcept;
+    bool processBlock (juce::AudioBuffer<float>&, juce::MidiBuffer&,
+                       const TransportInfo&) noexcept;
 
     void  setParameter (int index, float value01) noexcept;
     int   getNumParameters() const noexcept { return mNumParameters.load(); }
@@ -81,8 +97,17 @@ private:
 
     // Audio transport.  Deliberately NOT the IPC pipe: copying every block
     // through the pipe would put an allocation and a syscall on the audio path.
-    std::unique_ptr<juce::InterprocessConnection> mUnusedKeepAlive;   // reserved
-    juce::MemoryBlock mSharedAudio;
+    //
+    // Was a juce::MemoryBlock that nothing ever read or wrote -- and a
+    // MemoryBlock is process-local, so the helper could not have seen it even if
+    // something had.  Now a real named mapping (TS7, 2026-07-31).
+    Bridge::SharedAudioBlock mSharedAudio;
+    juce::String             mSharedAudioName;
+    int                      mSharedBlockSize { 0 };
+    int                      mSharedChannels  { 0 };
+    // Pre-sized MIDI trailer scratch.  A fixed member, not a per-block
+    // allocation: processBlock runs on the audio thread.
+    std::uint8_t      mMidiScratch[Bridge::kMaxMidiBytesPerBlock] {};
 
     // Reply rendezvous for the per-block doorbell.  A WaitableEvent rather than
     // a lock so the audio thread's wait has an explicit timeout.

@@ -129,6 +129,49 @@ void VoxStripTask::run()
         }
     };
 
+    // ── TS7 §6.9: frozen grid playback (Jeff, 2026-07-30) ────────────────────
+    // Tested BEFORE the route split, not inside route A.  Route A only runs when
+    // a clip overlaps THIS block; on every other block the task falls through
+    // and runs the engine -- six rack slots including two FFT stages, plus
+    // NAM/IR -- over a silent buffer.  Substituting inside route A would have
+    // kept paying all of that, which is the entire cost freeze exists to remove.
+    //
+    // Frozen audio is POST-engine by construction (the freeze tap sits at the
+    // top of the InsertNode), so it must never be handed to the engine's monitor
+    // merge, which joins pre-rack: that would run the vocal chain over it twice.
+    // SONG MODE ONLY -- see the note in EngineInsertTask::run: a freeze file is
+    // the song arrangement, and in pattern mode the playhead wraps inside the
+    // pattern loop, so it would play the song's opening bars instead.
+    bool frozenOk = false;
+    if (mCtx->songMode)
+    if (auto* fz = mFrozenSource.load (std::memory_order_acquire))
+    {
+        juce::int64 filePos = 0;
+        if (mCtx->posInfo != nullptr)
+            filePos = mCtx->posInfo->getTimeInSamples().orFallback ((juce::int64) 0);
+
+        if (filePos >= 0 && filePos < fz->getTotalLength())
+        {
+            mEngineScratch.setSize (blockView.getNumChannels(), n, false, false, true);
+            mEngineScratch.clear();
+            frozenOk = fz->readRaw (mEngineScratch, 0, n, filePos);
+        }
+    }
+
+    if (frozenOk && ! active)
+    {
+        // Nobody armed or monitoring: the file IS the strip.  Engine skipped
+        // entirely -- this is where the CPU comes back.
+        pullSidechainPredecessorsToGraph (*mGraph, channelId, mPredecessors, n);
+        const int nc = juce::jmin (blockView.getNumChannels(),
+                                   mEngineScratch.getNumChannels());
+        for (int c = 0; c < nc; ++c)
+            blockView.copyFrom (c, 0, mEngineScratch, c, 0, n);
+        mGraph->processInsert (VibeGraph::InsertKind::Vox, mIndex,
+                               blockView, mCtx->bpm, mCtx->anySolo);
+        return;
+    }
+
     if (filePlay && ! active)
     {
         // Pure playback (nobody listening to live input): drive the engine +
@@ -184,7 +227,22 @@ void VoxStripTask::run()
     // + WET tap (capture = live only) and BEFORE its rack, so chain + NAM
     // process the vocal stack exactly like post-stop playback.  muteLive
     // covers armed && !listen (captured, not monitored).
-    if (filePlay)
+    // §6.9 armed/monitoring, Jeff's (a): the frozen takes still play while you
+    // sing over them.  Vox can do this WITHOUT reopening the QA-Fb Option A
+    // merge ruling, because it never merges clips into the live buffer
+    // pre-engine -- it hands them to the engine as a separate stream.  So the
+    // frozen audio simply does not take that handoff, and joins post-engine
+    // instead, where audio that already carries the chain belongs.
+    if (frozenOk)
+    {
+        if (mVocalEngine != nullptr)
+        {
+            // No monitor merge: live only through the engine this block.
+            mVocalEngine->setMonitorMergeForThisBlock (nullptr, clipCtx.projectStart,
+                                                        armed && ! listen);
+        }
+    }
+    else if (filePlay)
     {
         decodeRoutedClips();
         if (mVocalEngine != nullptr)
@@ -225,9 +283,22 @@ void VoxStripTask::run()
 
     mEngine->processBlock (blockView, *midi);
 
+    // §6.9: frozen takes join HERE -- after the engine, before the insert -- so
+    // the chain they already carry is not applied a second time.  Same placement
+    // the non-BaySickVocal fallback below uses, which is why that shape existing
+    // is what made covering the armed case cheap.
+    if (frozenOk)
+    {
+        if (armed && ! listen) blockView.clear();   // captured, not monitored
+        const int nc = juce::jmin (blockView.getNumChannels(),
+                                   mEngineScratch.getNumChannels());
+        for (int c = 0; c < nc; ++c)
+            blockView.addFrom (c, 0, mEngineScratch, c, 0, n);
+    }
+
     // Fallback for a Vox slot whose engine isn't BaySickVocal (cast failed --
     // shouldn't happen): mimic the merge post-engine so takes stay audible.
-    if (filePlay && mVocalEngine == nullptr)
+    if (! frozenOk && filePlay && mVocalEngine == nullptr)
     {
         if (armed && ! listen)
             blockView.clear();

@@ -218,6 +218,10 @@ public:
 
     // 5F-4b B5: "+" add-send callback (MixerPage wires to CableOverlay)
     std::function<void(int channelId)> onAddSendRequested;
+    // QA-ModelShell TS7 (CL-044): fired instead of onAddSendRequested when this
+    // is the MASTER strip, whose "+" is repurposed as the Analyzer button (a send
+    // from the terminal node has nowhere to go).
+    std::function<void()>              onAnalyzerRequested;
 
     // R2 (2026-04-23): Vox / Inst Arm-LED click - opens ASIO input picker.
     // Fires the channel id of THIS strip; MixerPage handler reads the

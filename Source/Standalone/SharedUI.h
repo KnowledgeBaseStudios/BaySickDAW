@@ -142,6 +142,25 @@ public:
     void drawScrollbar(juce::Graphics&, juce::ScrollBar&, int x, int y, int w, int h,
                        bool isVertical, int thumbStart, int thumbSize,
                        bool isOver, bool isDown) override;
+    // ── TS7 §9.1/§9.3: desktop-window chrome ─────────────────────────────────
+    // VibeLAF is the app-wide default LookAndFeel (StandaloneEditor sets it), so
+    // overriding here is what makes every juce::DocumentWindow / DialogWindow
+    // with a NON-native title bar paint the shell's strip -- no per-window
+    // look-and-feel plumbing, and no second place for the look to drift to.
+    // Windows that keep setUsingNativeTitleBar(true) are unaffected, which is
+    // how the main app window keeps its OS chrome.
+    void drawDocumentWindowTitleBar (juce::DocumentWindow&, juce::Graphics&,
+                                     int w, int h, int titleSpaceX, int titleSpaceW,
+                                     const juce::Image* icon,
+                                     bool drawTitleTextOnLeft) override;
+    juce::Button* createDocumentWindowButton (int buttonType) override;
+    void positionDocumentWindowButtons (juce::DocumentWindow&,
+                                        int titleBarX, int titleBarY,
+                                        int titleBarW, int titleBarH,
+                                        juce::Button* minimise, juce::Button* maximise,
+                                        juce::Button* close,
+                                        bool positionTitleBarButtonsOnLeft) override;
+
     static VibeLAF& get() { static VibeLAF laf; return laf; }
 
     // Helper: mark a tooltip string as automatable (appends tag)
@@ -261,6 +280,7 @@ public:
     PageMenuBar();
 
     void setPageTitle(const juce::String& t);
+    const juce::String& getPageTitle() const noexcept { return mTitle; }
     void setMenuItems(std::vector<MenuItem> items);
 
     // Universal page-actions menu (2026-04-19): components can install a custom
@@ -335,6 +355,28 @@ public:
                            std::function<bool()>      getTruncate,
                            std::function<void(bool)>  setTruncate);
 
+    // TS7 §6 freeze toggle (Jeff, 2026-07-30).  BETWEEN the FX Rack slot and the
+    // swing knob, so the placement is identical on every player AND it sits where
+    // the user is already looking at the player that is misbehaving.
+    //
+    // The tab right-click menu was the obvious alternative and is WRONG: that
+    // menu acts on a tab TYPE, so it could not target one player.
+    //
+    // getState: 0 = not frozen, 1 = frozen, 2 = frozen but stale (playing live
+    // while its file re-renders).  An empty getState hides the slot entirely.
+    // getDisabledReason returning a non-empty string shows the button DISABLED
+    // with that reason as its tooltip rather than hiding it -- a capability the
+    // user cannot see is a capability they cannot ask for.
+    // isVocal appends the §6.9 warning: a vocal freeze prints the whole chain
+    // including pitch and alignment, and is for reclaiming CPU once a sound is
+    // settled rather than something to leave on while setting one up.
+    void setFreezeSlot (std::function<int()> getState,
+                        std::function<void(bool /*wantFrozen*/)> onToggle,
+                        std::function<juce::String()> getDisabledReason = {},
+                        bool isVocal = false);
+    // Repaints the freeze button from getState without rebuilding the slot.
+    void refreshFreezeState();
+
     void paint(juce::Graphics&) override;
     void resized() override;
 
@@ -357,6 +399,10 @@ private:
     std::unique_ptr<juce::TextButton>              mMidBtn;
     std::unique_ptr<juce::TextButton>              mSideBtn;
     std::unique_ptr<juce::TextButton>              mFxRackBtn;
+    std::unique_ptr<juce::TextButton>              mFreezeBtn;   // TS7 §6
+    std::function<int()>                           mFreezeState;
+    std::function<juce::String()>                  mFreezeDisabledReason;
+    bool                                           mFreezeIsVocal { false };
     std::unique_ptr<juce::Slider>                  mSwingKnob;   // smoke round 2: per-player Swing Mix
     bool                                           mMidSideVisible { false };
 

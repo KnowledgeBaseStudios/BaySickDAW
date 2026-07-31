@@ -21,6 +21,14 @@ struct BlockContext
     // of the dispatch block; bus tasks pass it to VibeGraph::processBus.
     int    panLaw     = 0;
 
+    // TS7 §6.9: SONG MODE for this block.  Freeze substitution is gated on it in
+    // every strip task -- a freeze file is the SONG arrangement, and in pattern
+    // mode the playhead wraps inside the pattern loop, so reading the file at
+    // that position would play the song's opening bars instead of the pattern.
+    // Carried here rather than each task reaching for the processor: it is
+    // per-block state, which is exactly what this struct is for.
+    bool   songMode   = false;
+
     // Playhead snapshot. Pointer rather than value so default-constructed
     // BlockContext is cheap; PluginProcessor sets to a stack-local PositionInfo
     // that lives for the duration of dispatchBlock.
