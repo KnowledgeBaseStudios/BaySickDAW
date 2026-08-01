@@ -3995,7 +3995,8 @@ void VibeSynthProcessor::setRustyFrozenPatternSources (
     setRustyFrozenPatternSourcesImpl (streams, patternIndex);
 }
 
-bool VibeSynthProcessor::freezeRustyKit (juce::String& outErr, bool byUser, bool reuseValid)
+bool VibeSynthProcessor::freezeRustyKit (juce::String& outErr, bool byUser, bool reuseValid,
+                                         bool songScopeOnly)
 {
     auto* tab = mEngineRig->findTab (TabKind::Rusty, 0);
     if (tab == nullptr)              { outErr = "The drum kit is not available."; return false; }
@@ -4074,7 +4075,12 @@ bool VibeSynthProcessor::freezeRustyKit (juce::String& outErr, bool byUser, bool
     std::map<int, std::vector<std::unique_ptr<AudioClipStreamer>>> patStreams;
     std::map<int, juce::uint32>                                    patStamps;
 
-    for (int p : patternsWithContentFor (TabKind::Rusty, 0))
+    // Ruling 2-b: an AUTOMATIC kit freeze lands the song scope only; the
+    // staggered filler completes pattern coverage one render per quiet tick.
+    const std::vector<int> kitPats = songScopeOnly
+        ? std::vector<int>{} : patternsWithContentFor (TabKind::Rusty, 0);
+
+    for (int p : kitPats)
     {
         std::vector<juce::File> pdests;
         pdests.reserve ((size_t) strips);
@@ -4148,13 +4154,14 @@ bool VibeSynthProcessor::freezeRustyKit (juce::String& outErr, bool byUser, bool
 }
 
 bool VibeSynthProcessor::freezeTab (TabKind kind, int pageIndex,
-                                    juce::String& outErr, bool byUser, bool reuseValid)
+                                    juce::String& outErr, bool byUser, bool reuseValid,
+                                    bool songScopeOnly)
 {
     // The kit is ONE action over THIRTEEN strips (Jeff's option (c)), so it has
     // its own path -- there is no single task or single file for it, which is
     // exactly why renderTaskForTab cannot express it.
     if (kind == TabKind::Rusty)
-        return freezeRustyKit (outErr, byUser, reuseValid);
+        return freezeRustyKit (outErr, byUser, reuseValid, songScopeOnly);
 
     auto* tab  = mEngineRig->findTab (kind, pageIndex);
     auto* task = renderTaskForTab (kind, pageIndex);
@@ -4195,7 +4202,10 @@ bool VibeSynthProcessor::freezeTab (TabKind kind, int pageIndex,
     // matches.  Project restore passes it: without the stamp, load had to
     // re-render every frozen tab from scratch, and once a tab meant 1+N renders
     // that multiplied load time by the pattern count.
-    const std::vector<int> pats = patternsWithContentFor (kind, pageIndex);
+    // Ruling 2-b: automatic freezes are song-scope; the staggered filler owns
+    // pattern coverage so no uninvited render runs a whole multi-pattern set.
+    const std::vector<int> pats = songScopeOnly
+        ? std::vector<int>{} : patternsWithContentFor (kind, pageIndex);
     const int totalRenders = 1 + (int) pats.size();
     int       doneRenders  = 0;
 
@@ -4400,7 +4410,118 @@ void VibeSynthProcessor::unfreezeTab (TabKind kind, int pageIndex)
     if (mEngineRig->onFreezeStateChanged) mEngineRig->onFreezeStateChanged (kind, pageIndex);
 }
 
-bool VibeSynthProcessor::refreshFreeze (TabKind kind, int pageIndex, juce::String& outErr)
+// ── Ruling 2-b (2026-07-31): staggered pattern coverage ──────────────────────
+// Automatic freezes land song-scope only; these two fill in the per-pattern
+// renders ONE at a time from the editor's quiet-tick poll, so an uninvited
+// render never stalls the app for a whole multi-pattern set.
+bool VibeSynthProcessor::findPendingPatternFreeze (TabKind& outKind, int& outPage,
+                                                   int& outPattern) const
+{
+    if (mEngineRig == nullptr) return false;
+
+    static constexpr TabKind kAll[] = { TabKind::Layers, TabKind::Bass,
+                                        TabKind::Drums,  TabKind::Clips,
+                                        TabKind::Vox,    TabKind::Inst,
+                                        TabKind::Plugins, TabKind::Rusty };
+    for (auto k : kAll)
+        for (int i = 0; i < EngineRig::capacityOf (k); ++i)
+        {
+            const auto* t = mEngineRig->findTab (k, i);
+            // Stale tabs are the refresh queue's job -- filling their patterns
+            // here would render against content already known to be wrong.
+            if (t == nullptr || ! t->frozen || t->freezeStale) continue;
+
+            for (int p : patternsWithContentFor (k, i))
+                if (t->freezePatternStreams.count (p) == 0)
+                {
+                    outKind = k; outPage = i; outPattern = p;
+                    return true;
+                }
+        }
+    return false;
+}
+
+bool VibeSynthProcessor::renderPatternFreeze (TabKind kind, int pageIndex,
+                                              int patternIndex, juce::String& outErr)
+{
+    auto* tab = mEngineRig != nullptr ? mEngineRig->findTab (kind, pageIndex) : nullptr;
+    if (tab == nullptr || ! tab->frozen || tab->freezeStale) return false;
+    if (tab->freezePatternStreams.count (patternIndex) > 0)  return true;
+
+    auto openStream = [this] (const juce::File& f) -> std::unique_ptr<AudioClipStreamer>
+    {
+        std::unique_ptr<juce::AudioFormatReader> raw (mAudioFormatManager.createReaderFor (f));
+        if (raw == nullptr) return nullptr;
+        auto s = std::make_unique<AudioClipStreamer> (std::move (raw), mAudioFileThread);
+        s->seek (0);
+        return s;
+    };
+
+    const juce::uint32 stamp = mEngineRig->freezeContentStamp (kind, pageIndex, patternIndex);
+    const auto         prev  = tab->patternStamps.find (patternIndex);
+    const bool stampMatches  = prev != tab->patternStamps.end()
+                            && prev->second != 0 && prev->second == stamp;
+
+    std::vector<std::unique_ptr<AudioClipStreamer>> v;
+
+    if (kind == TabKind::Rusty)
+    {
+        if (mRustyDrumsEngine == nullptr || ! onRenderKitFreezeFiles) return false;
+
+        const int strips = juce::jmin ((int) mRustyDrumsEngine->getChannels().size(),
+                                       (int) MixerChannelIds::kMaxRustyStrips);
+        if (strips <= 0) return false;
+
+        std::vector<juce::File> pdests;
+        pdests.reserve ((size_t) strips);
+        for (int s = 0; s < strips; ++s)
+            pdests.push_back (freezeFileFor (TabKind::Rusty, s, patternIndex));
+
+        const bool reusable = stampMatches
+                           && std::all_of (pdests.begin(), pdests.end(),
+                                           [] (const juce::File& f) { return f.existsAsFile(); });
+        if (! reusable
+            && ! onRenderKitFreezeFiles (pdests, mRustyProducerTask.get(), patternIndex, outErr))
+            return false;
+
+        for (const auto& f : pdests)
+        {
+            auto s = openStream (f);
+            if (s == nullptr) { outErr = "Could not open a rendered kit file."; return false; }
+            v.push_back (std::move (s));
+        }
+    }
+    else
+    {
+        auto* task = renderTaskForTab (kind, pageIndex);
+        if (task == nullptr || ! onRenderFreezeFile) return false;
+
+        const juce::File pf = freezeFileFor (kind, pageIndex, patternIndex);
+        const bool reusable = stampMatches && pf.existsAsFile();
+
+        if (! reusable
+            && ! onRenderFreezeFile (insertKindForTab (kind), pageIndex, task,
+                                     patternIndex, pf, outErr))
+            return false;
+
+        auto s = openStream (pf);
+        if (s == nullptr) { outErr = "Could not open the rendered file."; return false; }
+        v.push_back (std::move (s));
+    }
+
+    // Map INSERT, never a whole-map assign: entries the audio thread is reading
+    // through published pointers must not move.  Publish follows the insert.
+    tab->freezePatternStreams[patternIndex] = std::move (v);
+    tab->patternStamps[patternIndex]        = stamp;
+    tab->stalePatterns.erase (patternIndex);
+
+    if (mPatternManager != nullptr)
+        mEngineRig->republishPatternSources (mPatternManager->getCurrentPatternIndex());
+    return true;
+}
+
+bool VibeSynthProcessor::refreshFreeze (TabKind kind, int pageIndex, juce::String& outErr,
+                                        bool songScopeOnly)
 {
     auto* tab = mEngineRig->findTab (kind, pageIndex);
     if (tab == nullptr || ! tab->frozen) return false;
@@ -4435,8 +4556,8 @@ bool VibeSynthProcessor::refreshFreeze (TabKind kind, int pageIndex, juce::Strin
     // The kit renders through its own thirteen-strip path; routing it through
     // freezeTab failed the render and silently UNFROZE a stale kit.
     const bool refreshed = (kind == TabKind::Rusty)
-        ? freezeRustyKit (outErr, wasByUser, /*reuseValid*/ false)
-        : freezeTab (kind, pageIndex, outErr, wasByUser);
+        ? freezeRustyKit (outErr, wasByUser, /*reuseValid*/ false, songScopeOnly)
+        : freezeTab (kind, pageIndex, outErr, wasByUser, /*reuseValid*/ false, songScopeOnly);
     if (! refreshed)
     {
         // Left unfrozen and playing live rather than pointing at a stale file.

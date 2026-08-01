@@ -10952,12 +10952,9 @@ public:
         addChildComponent (mCustomLufsLbl);
         refreshCustomSpecBox();
 
-        // TS7 report output.  HTML is ALWAYS written and has no control -- it is
-        // the readable one, and the point of the report is that it is readable.
-        // CSV is the opt-in for anyone who wants the raw rows.
-        mCsvToggle.setButtonText ("Also write CSV report");
-        addAndMakeVisible (mCsvToggle);
-
+        // The "Also write CSV report" checkbox that lived here is GONE (Jeff,
+        // 2026-07-31, ruling a): its only consumer was the Measure report,
+        // which ruling 5B removed -- a control gating nothing is dead UI.
         mMeasureBtn.setButtonText ("Measure");
         mMeasureBtn.setTooltip ("Measures the arrangement offline (faster than real time) "
                                 "and reports integrated loudness, loudness range and true "
@@ -11041,8 +11038,6 @@ public:
             mCustomLufsLbl.setBounds (r.removeFromLeft (130));
             mCustomLufs.setBounds (r.removeFromLeft (72).reduced (0, 3));
         }
-        mCsvToggle.setBounds (row());
-
         {
             auto r = row();
             mSpecLbl.setBounds (r.removeFromLeft (96));
@@ -11281,7 +11276,7 @@ private:
                          (juce::Component*) &mSrate, (juce::Component*) &mStemsToggle,
                          (juce::Component*) &mDitherToggle, (juce::Component*) &mNormToggle,
                          (juce::Component*) &mLufsTarget, (juce::Component*) &mSpecCombo,
-                         (juce::Component*) &mCustomLufs, (juce::Component*) &mCsvToggle,
+                         (juce::Component*) &mCustomLufs,
                          (juce::Component*) &mMeasureBtn,
                          (juce::Component*) &mStripViewport, (juce::Component*) &mExportBtn })
             c->setEnabled (on);
@@ -11428,7 +11423,7 @@ private:
 
     juce::ComboBox mSel, mTail, mFormat, mQual, mSrate;
     juce::Label    mSelLbl, mTailLbl, mFormatLbl, mQualLbl, mSrateLbl;
-    juce::ToggleButton mDitherToggle, mNormToggle, mCsvToggle;
+    juce::ToggleButton mDitherToggle, mNormToggle;
     // TS7: typed LUFS entry, not a fixed pick list.
     juce::TextEditor   mLufsTarget, mCustomLufs;
     juce::Label        mLufsSuffix, mCustomLufsLbl;
@@ -14476,11 +14471,33 @@ void StandaloneEditor::pollAutoFreeze()
         // can do, and it is the automatic path that does it uninvited.
         showFreezeRenderNotice (job.kind, job.pageIndex);
         juce::String err;
-        if (! mProcessor.refreshFreeze (job.kind, job.pageIndex, err))
+        // songScopeOnly per ruling 2-b: the automatic re-render lands the song
+        // scope; the filler below completes pattern coverage one per tick.
+        if (! mProcessor.refreshFreeze (job.kind, job.pageIndex, err, /*songScopeOnly*/ true))
             DBG ("[TS7 FREEZE] re-render failed for tab " << (int) job.kind
                  << "/" << job.pageIndex << ": " << err);
         mHeavyOpOverlay.endOp();
         return;
+    }
+
+    // Ruling 2-b (2026-07-31): STAGGERED pattern coverage.  Automatic renders
+    // (auto-freeze + the stale refresh above) are song-scope only; the
+    // per-pattern files fill in HERE, one short render per quiet tick, so no
+    // uninvited action ever stalls the app for a whole multi-pattern set.
+    // Manual freezes still render their full set under the stepped overlay.
+    if (! DSPBase::isTransportPlaying() && sinceEditMs >= kFreezeRefreshQuietMs)
+    {
+        TabKind fillKind {}; int fillPage = 0, fillPat = 0;
+        if (mProcessor.findPendingPatternFreeze (fillKind, fillPage, fillPat))
+        {
+            showFreezeRenderNotice (fillKind, fillPage);
+            juce::String fillErr;
+            if (! mProcessor.renderPatternFreeze (fillKind, fillPage, fillPat, fillErr))
+                DBG ("[TS7 FREEZE] pattern fill failed for tab " << (int) fillKind
+                     << "/" << fillPage << " pat " << fillPat << ": " << fillErr);
+            mHeavyOpOverlay.endOp();
+            return;
+        }
     }
 
     const int threshold = openUiPrefs()->getIntValue ("fsAutoFreezeCpu", 80);
@@ -14553,9 +14570,13 @@ void StandaloneEditor::pollAutoFreeze()
             // through it failed on every trip.
             showFreezeRenderNotice (kind, i);
             juce::String err;
+            // songScopeOnly per ruling 2-b: the uninvited render is ONE song
+            // render; pattern coverage staggers in on later quiet ticks.
             const bool ok = (kind == TabKind::Rusty)
-                ? mProcessor.freezeRustyKit (err, /*byUser*/ false, /*reuseValid*/ false)
-                : mProcessor.freezeTab (kind, i, err, /*byUser*/ false);
+                ? mProcessor.freezeRustyKit (err, /*byUser*/ false, /*reuseValid*/ false,
+                                             /*songScopeOnly*/ true)
+                : mProcessor.freezeTab (kind, i, err, /*byUser*/ false, /*reuseValid*/ false,
+                                        /*songScopeOnly*/ true);
             mHeavyOpOverlay.endOp();
             if (ok) return;   // one per trip
         }

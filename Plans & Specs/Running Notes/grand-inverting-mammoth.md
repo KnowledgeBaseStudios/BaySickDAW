@@ -3897,3 +3897,32 @@ into the character-table comment; #90 — the target-on integrated reset defers 
 where the meter's audio-thread contract holds; #91 — Spectrum view implies the Live source, so
 a render's readouts can no longer sit over a live trace; #92 — `~VersionCapture` ends the take
 before deleting the session folder, editor-facing callbacks dropped first.
+
+## 2026-07-31 — fix pass COMMITTED `93bb158e`; the batch smoke compiled; the two open dockets RULED
+
+- **The review fix pass is in: `93bb158e` (Jeff-approved) — 45 files, +1938/-460.**  The commit
+  line went up only after his FINISH BEFORE COMMIT ruling on the last eleven was satisfied —
+  zero findings open at commit time.
+- **The full batch smoke is compiled for Jeff:** all seven task sets' deferred verify blocks plus
+  the end-to-end list, reconciled against what actually shipped — ~48 scenarios, with the
+  fix-pass deltas marked (stopped-transport silence, stale-drops-to-live, pattern-mode freeze,
+  the kit freeze button, freeze persistence incl. Drums + the kit, auto-freeze fires at stop,
+  Measure writes nothing, window positions survive reopen, bridge protocol v3 end to end, 32-bit
+  intake).  TS6's bridge and TS7's freeze are the heavy stretches.  Nothing in this batch has
+  been heard yet.
+- **Docket 1 RULED (Jeff, 2026-07-31) — the export dialog's "Also write CSV report" checkbox:
+  option a, REMOVED.**  Ruling 5B deleted its only consumer (the Measure report), exports never
+  wrote reports, and capture's take reports are HTML-only by design — the checkbox gated
+  nothing.  `LoudnessReportWriter` keeps its CSV capability; only the dead control went.  This
+  resolves the fix-pass entry's "Note for batch close" flag on the checkbox.
+- **Docket 2 RULED (Jeff, 2026-07-31) — the auto-freeze per-pattern overlay fork: option b,
+  STAGGERED.**  Automatic freezes (auto-freeze AND the stale-refresh drain) now render SONG
+  SCOPE ONLY — new `songScopeOnly` parameter through `freezeTab` / `freezeRustyKit` /
+  `refreshFreeze` — and per-pattern coverage fills in via a new quiet-tick filler:
+  `findPendingPatternFreeze` + `renderPatternFreeze`, one short render per tick under the render
+  notice, map-insert-never-move so published streamers stay put, stamp-matched files reused
+  without re-rendering.  Manual freezes still render their full set under the stepped overlay.
+  Side effect, recorded: the filler also completes coverage when NEW pattern content appears on
+  an already-frozen tab — a case full-set-at-freeze-time never covered.
+- **Gate 6 GREEN (five exit codes 0, four link lines, zero errors); the commit follows on
+  Jeff's approval.**

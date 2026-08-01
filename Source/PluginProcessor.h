@@ -983,13 +983,28 @@ public:
     // restore passes it, so reopening a project reuses renders that are still
     // correct instead of re-rendering every frozen tab.  Off by default: an
     // explicit re-freeze should always produce fresh audio.
+    // songScopeOnly (Jeff's ruling 2-b, 2026-07-31): AUTOMATIC freezes render
+    // the song scope only and leave pattern coverage to the staggered filler
+    // below, so an uninvited render never stalls the app for a whole
+    // multi-pattern set.  Manual freezes render their full set.
     bool freezeTab   (TabKind kind, int pageIndex, juce::String& outErr,
-                      bool byUser = true, bool reuseValid = false);
+                      bool byUser = true, bool reuseValid = false,
+                      bool songScopeOnly = false);
     void unfreezeTab (TabKind kind, int pageIndex);
     // Re-renders a frozen tab whose content changed (§6.6).  Playback keeps
     // falling back to the live engine until the new file is in place, so this is
     // never audible as a gap.
-    bool refreshFreeze (TabKind kind, int pageIndex, juce::String& outErr);
+    bool refreshFreeze (TabKind kind, int pageIndex, juce::String& outErr,
+                        bool songScopeOnly = false);
+
+    // Ruling 2-b's staggered pattern coverage: the editor's 5 Hz poll asks for
+    // ONE missing per-pattern render at a time (stopped + quiet only) and
+    // shows the render notice around it.  find is a const scan; render does
+    // one pattern (reusing a stamp-matched file when one exists) and
+    // republishes.  Skips stale tabs -- the refresh queue owns those.
+    bool findPendingPatternFreeze (TabKind& outKind, int& outPage, int& outPattern) const;
+    bool renderPatternFreeze (TabKind kind, int pageIndex, int patternIndex,
+                              juce::String& outErr);
 
     // §6.6: a stale freeze plays LIVE, immediately -- the rig's staleness marks
     // call this to null every frozen-source pointer a tab has published (song +
@@ -1051,7 +1066,8 @@ public:
     // lives on BuilderPage and must not reach into the private render graph.
     void setFreezePrune (RenderTask* target) { mRenderDispatcher.setFreezePrune (target); }
 
-    bool freezeRustyKit (juce::String& outErr, bool byUser, bool reuseValid = false);
+    bool freezeRustyKit (juce::String& outErr, bool byUser, bool reuseValid = false,
+                         bool songScopeOnly = false);
 
     // The task carrying a tab's audio, or null.  The freeze switch and any
     // future per-tab audio routing both need it.
