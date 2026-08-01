@@ -216,14 +216,26 @@ void EffectRack::clearSlot(int slot)
         }
     }
 
-    // Park nullptr in pending; audio swaps active->pending so the OLD
-    // active sits in pending until the NEXT loadEffect on this slot
-    // destructs it on the message thread.
     mSlots[slot].pending.reset();
     mSlots[slot].type     = EffectType::None;
     mSlots[slot].bypassed.store (false, std::memory_order_relaxed);
     mSlots[slot].uuid     = {};
     mSlots[slot].swapPending.store (true, std::memory_order_release);
+
+    // Complete the swap HERE, the same inline drain this function already does
+    // at its top, then destroy the old active on the message thread.  Leaving
+    // it to "the next loadEffect on this slot" parked the removed DSP -- for a
+    // hosted VST3 slot, the plugin AND its live helper process -- until a
+    // touch that may never come.
+    {
+        const juce::SpinLock::ScopedLockType lkAudio (mSlotsLock);
+        if (mSlots[slot].swapPending.load (std::memory_order_acquire))
+        {
+            std::swap (mSlots[slot].active, mSlots[slot].pending);
+            mSlots[slot].swapPending.store (false, std::memory_order_release);
+        }
+    }
+    mSlots[slot].pending.reset();
 
     if (onSlotsChanged) onSlotsChanged();
 }

@@ -83,6 +83,10 @@ struct EngineTab
     // freeze is re-evaluated against the opening machine's threshold, because one
     // computer's performance adaptation means nothing on another.
     bool frozenByUser = false;
+    // Jeff's ruling (2026-07-31): an explicit unfreeze takes the tab OUT of
+    // auto-freeze's reach.  Session-scoped on purpose -- deliberately never
+    // serialized, so a project reload puts the tab back in play.
+    bool userUnfroze = false;
 
     // ── §6.8 THE SPAN ────────────────────────────────────────────────────────
     // What the freeze file actually COVERS.  §6.8 called for this from the start
@@ -184,6 +188,26 @@ struct EngineTab
         { if (onChanged) onChanged(); }
     };
     std::unique_ptr<FreezeParamWatcher> freezeWatcher;
+
+    // §6.5 for engines with NO resolvable APVTS -- hosted plugins, the Inst
+    // chain wrapper and its owned stages, the processor-owned kit.  Those
+    // players were entirely invisible to staleness: no watcher ever attached,
+    // so a knob move on a frozen one never marked it stale.  Listener
+    // callbacks carry NO thread guarantee, so they only bump an atomic;
+    // EngineRig::drainEngineChangeStamps walks tabs on the message thread.
+    struct FreezeProcListener : juce::AudioProcessorListener
+    {
+        std::atomic<juce::uint32> stamp { 0 };
+        void audioProcessorParameterChanged (juce::AudioProcessor*, int, float) override
+        { stamp.fetch_add (1, std::memory_order_release); }
+        void audioProcessorChanged (juce::AudioProcessor*, const ChangeDetails&) override
+        { stamp.fetch_add (1, std::memory_order_release); }
+    };
+    std::unique_ptr<FreezeProcListener> freezeProcListener;
+    // Everything the listener is attached to, so teardown detaches BEFORE any
+    // of it is destroyed (the dangling-listener class of bug).
+    std::vector<juce::AudioProcessor*>  freezeListenedProcs;
+    juce::uint32                        freezeProcStampSeen = 0;
 };
 
 class EngineRig
@@ -206,7 +230,12 @@ public:
 
     // ── Tab identity (message thread) ─────────────────────────────────────
     EngineTab*       addTab  (TabKind k, int pageIndex, const juce::String& name);
-    void             removeTab (TabKind k, int pageIndex);
+    // deleteFreezeFiles: §6.8 lifetime rule.  A USER deleting the tab orphans
+    // its freeze files (delete them); a project switch or app quit does NOT --
+    // the files are the regenerable cache the content stamp reuses on the next
+    // load, and deleting them on every teardown made "an unchanged project
+    // renders nothing on load" structurally impossible.
+    void             removeTab (TabKind k, int pageIndex, bool deleteFreezeFiles = true);
     // Tear down the tab's engine but KEEP the tab entry (DrumPage clearSound:
     // back to "no sound picked" without losing tab identity).  No settle --
     // matches the page-era swap/clear paths.
@@ -223,6 +252,9 @@ public:
     // Every frozen tab's freeze is invalidated (tempo / tempo-map change, which
     // moves every engine's output in time).
     void markAllFreezesStale();
+    // Message thread (the editor's 5 Hz poll): drain the per-tab
+    // FreezeProcListener stamps into staleness marks.
+    void drainEngineChangeStamps();
 
     bool isFrozen      (TabKind k, int pageIndex) const;
     bool isFreezeStale (TabKind k, int pageIndex) const;
@@ -250,10 +282,12 @@ public:
     juce::AudioProcessor* setEngineType (TabKind k, int pageIndex,
                                          const juce::String& engineType);
 
-    // Decode a base64 engine blob into the tab's live engine
-    // (setStateInformation).  No-op on empty/undecodable data -- matches the
-    // project-load walker's applyEngineState contract.
-    void restoreEngineFromBlob (TabKind k, int pageIndex, const juce::String& base64);
+    // Restore principle (HostedPlugin.h): the state blob carries the FULL
+    // PluginDescription so a project keeps loading its plugins after the user
+    // removed them from the added list.  The walker stashes it here BEFORE the
+    // select; the Plugins factory consumes it when findAdded comes up empty.
+    void stashPluginRestoreDescription (int pageIndex,
+                                        std::unique_ptr<juce::PluginDescription>);
 
     juce::AudioProcessor* engineFor (TabKind k, int pageIndex) const;
 
@@ -292,8 +326,11 @@ public:
     void forEachEngine (const std::function<void (juce::AudioProcessor&)>& fn);
 
     // ── Model events ──────────────────────────────────────────────────────
-    // StandaloneEditor subscribes ONCE at startup.  Automation registration
-    // and dirty-hook wiring key off these -- model events, never view builds.
+    // StandaloneEditor subscribes onEngineCreated ONCE at startup; automation
+    // registration keys off it -- a model event, never a view build.
+    // onEngineDestroying currently has NO subscriber, and dirty-hook wiring is
+    // still view-driven -- both are the seam a future consumer plugs into,
+    // not wiring that exists today.
     std::function<void (EngineTab&)> onEngineCreated;      // after registration
     std::function<void (EngineTab&)> onEngineDestroying;   // before unregistration
 
@@ -306,6 +343,9 @@ private:
     VibeSynthProcessor& mProc;
     juce::UndoManager&  mUndoManager;
     std::vector<std::unique_ptr<EngineTab>> mTabs;
+    // Per-page fallback descriptions for the Plugins factory -- see
+    // stashPluginRestoreDescription.  Consumed (erased) on use.
+    std::map<int, std::unique_ptr<juce::PluginDescription>> mPluginRestoreDescs;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (EngineRig)
 };

@@ -539,6 +539,14 @@ void VibeSynthProcessor::prepareToPlay(double sampleRate, int samplesPerBlock)
         for (int i = 0; i < kMaxInstPages; ++i)
             if (mInstEngines[i]) mInstEngines[i]->prepareToPlay(sampleRate, samplesPerBlock);
     }
+    // Hosted VST3 instruments (BLU-447) were the one registration array missing
+    // from this sweep -- a device-rate change or an offline render at a
+    // non-device rate left them prepared at the stale rate and block size.
+    {
+        juce::SpinLock::ScopedLockType lk(mPluginEngineLock);
+        for (int i = 0; i < kMaxPluginPages; ++i)
+            if (mPluginEngines[i]) mPluginEngines[i]->prepareToPlay(sampleRate, samplesPerBlock);
+    }
     // J-7a (2026-05-03): re-prepare the BaySickRustyDrums singleton on
     // host SR / block-size change.  prepareToPlay runs on the message
     // thread (JUCE stops the audio callback before calling it on the
@@ -620,8 +628,9 @@ void VibeSynthProcessor::prepareToPlay(double sampleRate, int samplesPerBlock)
     mRenderDispatcher.prepare (sampleRate, samplesPerBlock);
     mRenderPool.clearQueues();
 
-    // Batch 7 (2026-05-06): register the 11 always-on bus PassiveStripTasks
-    // here (after buildFixedTopology so VibeGraph bus nodes exist).
+    // Batch 7 (2026-05-06): register the always-on bus PassiveStripTasks --
+    // kNumBatch7Buses of them, 12 since TS6 added the Plugins bus -- here
+    // (after buildFixedTopology so VibeGraph bus nodes exist).
     // Idempotent - guarded by null checks so prepareToPlay can be called
     // repeatedly (sample-rate / buffer changes).  Master is excluded; it
     // gets its own MasterTask in Batch 8.
@@ -2187,14 +2196,21 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
 
     // Publish transport state for editor panels (see DSPBase::sTransportPlaying:
     // panels lock latency-changing controls while the transport runs).
-    DSPBase::sTransportPlaying.store (pos.getIsPlaying(), std::memory_order_relaxed);
-
-    // QA-RustyMeter Task 3 (2026-05-30): reset the master LUFS Integrated window
-    // on transport play-from-top / loop-start.  Edge = stopped->playing, OR a
-    // backward ppq jump while playing (loop wrap / relocate-to-start).  Done
-    // before the graph runs so this block opens a fresh Integrated window.
-    // Momentary + Short-Term keep tracking continuously (inside LufsMeterDSP).
+    // NOT during an offline render: the OfflineHead reports playing with its
+    // own positions, so an export was publishing LIVE transport signals --
+    // panels locked their latency controls, phantom play/wrap edges opened
+    // version-capture takes, and the master Integrated window reset mid-song.
+    // Same guard as the recorders and the metronome, missed on these.
+    if (! isNonRealtime())
     {
+        DSPBase::sTransportPlaying.store (pos.getIsPlaying(), std::memory_order_relaxed);
+
+        // QA-RustyMeter Task 3 (2026-05-30): reset the master LUFS Integrated
+        // window on transport play-from-top / loop-start.  Edge =
+        // stopped->playing, OR a backward ppq jump while playing (loop wrap /
+        // relocate-to-start).  Done before the graph runs so this block opens
+        // a fresh Integrated window.  Momentary + Short-Term keep tracking
+        // continuously (inside LufsMeterDSP).
         const bool   lufsPlaying = pos.getIsPlaying();
         const double lufsPpq     = pos.getPpqPosition().orFallback (0.0);
         const bool   playStarted = lufsPlaying && ! mLufsWasPlaying;
@@ -2974,7 +2990,8 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
             const int idx  = mLiveMidiTargetIndex.load (std::memory_order_relaxed);
             juce::MidiBuffer* dest = nullptr;
             // Encoding matches PianoRollPage::EngineKind ordering:
-            // 1 Layer / 2 Bass / 3 Drum / 7 Guitars / 8 Basses / 9 Rusty Drums.
+            // 1 Layer / 2 Bass / 3 Drum / 4 Clip / 7 Guitars / 8 Basses /
+            // 9 Rusty Drums / 10 hosted plugin (BLU-447).
             if      (kind == 1 && idx >= 0 && idx < kMaxLayerPages) dest = &layerPageMidi[idx];
             else if (kind == 2 && idx >= 0 && idx < kMaxBassPages)  dest = &bassPageMidi [idx];
             else if (kind == 3 && idx >= 0 && idx < kMaxDrumPages)  dest = &drumPageMidi [idx];
@@ -3055,9 +3072,10 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
                 if (dest != nullptr)
                     dest->addEvent (msg, m.samplePosition);
             }
-            // Non-routed targets (DrumKit grid / Clip / Vox / live-input Inst /
-            // unset) leave dest null -- dropped for ENGINE routing only; allMidi
+            // Non-routed targets (DrumKit grid / Vox / live-input Inst / unset)
+            // leave dest null -- dropped for ENGINE routing only; allMidi
             // already captured the performance so the recorder still sees it.
+            // Clip (4) and hosted plugins (10) ARE routed above.
         }
     }
 
@@ -3153,6 +3171,7 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
     {
         BlockContext mtCtx;
         mtCtx.numSamples         = numSamples;
+        mtCtx.sampleRate         = getSampleRate();
         mtCtx.bpm                = pos.getBpm().orFallback (120.0);
         mtCtx.anySolo            = anySolo;
         mtCtx.songMode           = mSongMode.load (std::memory_order_relaxed);
@@ -3790,20 +3809,13 @@ juce::File VibeSynthProcessor::freezeFileFor (TabKind kind, int pageIndex, int p
     const juce::File dir = getProjectFreezeDir();
     if (dir == juce::File()) return {};
 
-    const char* n = "unknown";
-    switch (kind)
-    {
-        case TabKind::Layers:  n = "layers";  break;
-        case TabKind::Bass:    n = "bass";    break;
-        case TabKind::Drums:   n = "drums";   break;
-        case TabKind::Clips:   n = "clips";   break;
-        case TabKind::Vox:     n = "vox";     break;
-        case TabKind::Inst:    n = "inst";    break;
-        case TabKind::Plugins: n = "plugins"; break;
-        // pageIndex is the STRIP index for the kit, not a page: one file per
-        // drum, all written by a single freeze action.
-        case TabKind::Rusty:   n = "rusty";   break;
-    }
+    // freezeFilePrefixFor is the ONE builder of the name-and-index prefix (it
+    // carried its own copy of the kind-name map until 2026-07-31, which is the
+    // drift its own comment warned about).  For the kit, pageIndex is the
+    // STRIP index -- one file per drum, all written by a single freeze action.
+    const juce::String prefix = freezeFilePrefixFor (kind, pageIndex);
+    if (prefix.isEmpty()) return {};
+
     // §6.8: the SCOPE is in the name.  A freeze file is either the arrangement
     // (`_song`) or one pattern's own render (`_patN`) -- the two are different
     // audio of different lengths and cannot share a filename.  Without this a
@@ -3814,8 +3826,7 @@ juce::File VibeSynthProcessor::freezeFileFor (TabKind kind, int pageIndex, int p
                              ? juce::String ("song")
                              : ("pat" + juce::String (patternIndex));
 
-    return dir.getChildFile (juce::String ("tab_") + n + "_"
-                             + juce::String (pageIndex) + "_" + scope + ".wav");
+    return dir.getChildFile (prefix + scope + ".wav");
 }
 
 // §6.8: which patterns this tab actually PLAYS IN.  A frozen instrument renders
@@ -3971,6 +3982,10 @@ bool VibeSynthProcessor::setRustyFrozenPatternSourcesImpl (
                              ? (*streams)[i].get() : nullptr;
         t->setFrozenPatternSource (s, patternIndex);
     }
+    // The producer's pattern-mode skip mirrors what was just published: only
+    // when a real stream set is up may it stop synthesizing.
+    mRustyFrozenPatternIndex.store (streams != nullptr ? patternIndex : -1,
+                                    std::memory_order_release);
     return true;
 }
 
@@ -4018,6 +4033,16 @@ bool VibeSynthProcessor::freezeRustyKit (juce::String& outErr, bool byUser, bool
     if (! songReusable
         && ! onRenderKitFreezeFiles (dests, mRustyProducerTask.get(), -1, outErr))
         return false;
+
+    // Belt-and-braces mirroring freezeTab's: on a RE-freeze the thirteen strips
+    // still point into the streams the clear below destroys.  refreshFreeze
+    // already nulls + settles before calling here; this keeps the invariant for
+    // every other route.
+    if (tab->frozen)
+    {
+        retractFrozenSources (TabKind::Rusty, 0);
+        juce::Thread::sleep (20);
+    }
 
     tab->freezeStreams.clear();
     tab->freezeStreams.reserve ((size_t) strips);
@@ -4098,6 +4123,7 @@ bool VibeSynthProcessor::freezeRustyKit (juce::String& outErr, bool byUser, bool
 
     tab->frozen       = true;
     tab->frozenByUser = byUser;
+    tab->userUnfroze  = false;
     tab->freezeStale  = false;
     // The kit is the singleton (Rusty, page 0) -- freezeRustyKit has no kind /
     // pageIndex of its own because there is only ever one.
@@ -4271,9 +4297,13 @@ bool VibeSynthProcessor::freezeTab (TabKind kind, int pageIndex,
     // and the rig holds the streamer so it outlives any block that could read it.
     // Belt-and-braces for the same hazard refreshFreeze guards above: whatever
     // route got here, the audio thread must not be holding a pointer into the
-    // map we are about to replace.  Cheap, and it makes the invariant hold for
-    // any future caller rather than only the two that exist today.
+    // storage we are about to replace -- BOTH pointers, and a block's settle
+    // when this tab was already frozen, or the invariant only holds for the
+    // callers that happen to clear first today.
     task->setFrozenPatternSource (nullptr, -1);
+    task->setFrozenSource (nullptr);
+    if (tab->frozen)
+        juce::Thread::sleep (20);
 
     tab->freezeStreams.clear();
     tab->freezeStreams.push_back (std::move (stream));
@@ -4282,6 +4312,7 @@ bool VibeSynthProcessor::freezeTab (TabKind kind, int pageIndex,
     tab->stalePatterns.clear();
     tab->frozen       = true;
     tab->frozenByUser = byUser;
+    tab->userUnfroze  = false;
     tab->freezeStale  = false;
     tab->freezeSpan   = mEngineRig->songFreezeSpanFor (kind, pageIndex);
     task->setFrozenSource (tab->freezeStreams.front().get());
@@ -4298,6 +4329,37 @@ bool VibeSynthProcessor::freezeTab (TabKind kind, int pageIndex,
     return true;
 }
 
+void VibeSynthProcessor::retractFrozenSources (TabKind kind, int pageIndex)
+{
+    if (kind == TabKind::Rusty)
+    {
+        for (auto& t : mRustyRenderTasks)
+            if (t)
+            {
+                t->setFrozenSource (nullptr);
+                t->setFrozenPatternSource (nullptr, -1);
+            }
+        // The producer resumes synthesis: a stale kit PLAYS LIVE (§6.6)
+        // rather than serving the old render, and the strips' substitution is
+        // already off because their pointers are null.  Both skip signals
+        // cleared -- song flag AND the published pattern index.
+        mRustyKitFrozen.store (false, std::memory_order_release);
+        mRustyFrozenPatternIndex.store (-1, std::memory_order_release);
+        return;
+    }
+
+    if (auto* task = renderTaskForTab (kind, pageIndex))
+    {
+        task->setFrozenSource (nullptr);
+        task->setFrozenPatternSource (nullptr, -1);
+    }
+}
+
+int VibeSynthProcessor::freezePatternIndexNow() const noexcept
+{
+    return mPatternManager != nullptr ? mPatternManager->getCurrentPatternIndex() : -1;
+}
+
 void VibeSynthProcessor::unfreezeTab (TabKind kind, int pageIndex)
 {
     auto* tab = mEngineRig->findTab (kind, pageIndex);
@@ -4308,15 +4370,7 @@ void VibeSynthProcessor::unfreezeTab (TabKind kind, int pageIndex)
     // memory.  The engine was never destroyed, so it simply resumes.
     if (kind == TabKind::Rusty)
     {
-        // Clear every strip's pointer BEFORE the producer is re-enabled, so no
-        // block can be reading a streamer while it is released.
-        for (auto& t : mRustyRenderTasks)
-            if (t)
-            {
-                t->setFrozenSource (nullptr);
-                t->setFrozenPatternSource (nullptr, -1);
-            }
-        mRustyKitFrozen.store (false, std::memory_order_release);
+        retractFrozenSources (TabKind::Rusty, 0);
     }
     else if (auto* task = renderTaskForTab (kind, pageIndex))
     {
@@ -4327,12 +4381,21 @@ void VibeSynthProcessor::unfreezeTab (TabKind kind, int pageIndex)
         task->setFrozenPatternSource (nullptr, -1);
     }
 
+    // One block's settle between the null and the free: the null stops NEW
+    // reads, but a block already past its load still holds the old pointer
+    // until it finishes (the page-dtor contract's 20 ms).
+    juce::Thread::sleep (20);
+
     tab->freezeStreams.clear();
     tab->freezePatternStreams.clear();
     tab->patternStamps.clear();
     tab->stalePatterns.clear();
     tab->frozen      = false;
     tab->freezeStale = false;
+    // Jeff's ruling: an explicit unfreeze takes this tab out of auto-freeze's
+    // reach for the session.  The freeze button is the only route here, so
+    // every call IS explicit.
+    tab->userUnfroze = true;
 
     if (mEngineRig->onFreezeStateChanged) mEngineRig->onFreezeStateChanged (kind, pageIndex);
 }
@@ -4355,23 +4418,26 @@ bool VibeSynthProcessor::refreshFreeze (TabKind kind, int pageIndex, juce::Strin
     // source: null the reader's pointer FIRST, release the storage after.
     if (kind == TabKind::Rusty)
     {
-        for (auto& t : mRustyRenderTasks)
-            if (t)
-            {
-                t->setFrozenSource (nullptr);
-                t->setFrozenPatternSource (nullptr, -1);
-            }
-        mRustyKitFrozen.store (false, std::memory_order_release);
+        retractFrozenSources (TabKind::Rusty, 0);
     }
     else if (auto* task = renderTaskForTab (kind, pageIndex))
     {
         task->setFrozenSource (nullptr);
         task->setFrozenPatternSource (nullptr, -1);
     }
+    // Same one-block settle as unfreezeTab, same reason: a block that loaded
+    // the pointer before the null is still reading the streamer these clears
+    // destroy.
+    juce::Thread::sleep (20);
     tab->freezeStreams.clear();
     tab->freezePatternStreams.clear();
 
-    if (! freezeTab (kind, pageIndex, outErr, wasByUser))
+    // The kit renders through its own thirteen-strip path; routing it through
+    // freezeTab failed the render and silently UNFROZE a stale kit.
+    const bool refreshed = (kind == TabKind::Rusty)
+        ? freezeRustyKit (outErr, wasByUser, /*reuseValid*/ false)
+        : freezeTab (kind, pageIndex, outErr, wasByUser);
+    if (! refreshed)
     {
         // Left unfrozen and playing live rather than pointing at a stale file.
         tab->frozen      = false;
@@ -6382,6 +6448,14 @@ bool VibeSynthProcessor::beginOfflineRender (double renderSampleRate, int render
 {
     if (renderSampleRate <= 0.0 || renderBlockSize <= 0) return false;
 
+    // ONE render at a time, whoever asks: export/measure call this from their
+    // background thread while freeze renders call it on the message thread.
+    // Two interleaved suspend/restore sequences corrupt both renders AND the
+    // restore set, so the loser fails cleanly instead.
+    bool expected = false;
+    if (! mOfflineRenderActive.compare_exchange_strong (expected, true))
+        return false;
+
     // Device callbacks stop reaching processBlock (the standalone player
     // checks isSuspended and outputs silence); the render loop becomes the
     // only caller.  One settle outlasts any in-flight device block.
@@ -6459,9 +6533,23 @@ void VibeSynthProcessor::endOfflineRender()
 
     setPlayHead (mOfflinePrevHead);
     setSongMode (mOfflinePrevSong);
+
+    // The engine-side pointer must not keep naming the render's DEAD STACK
+    // head: enginePlayHead() seeds every engine created between now and the
+    // next live block, and the per-block change-gate only reaches engines that
+    // already exist.
+    mLastEnginePlayHead = mOfflinePrevHead;
+    if (mEngineRig != nullptr)
+        mEngineRig->forEachEngine ([this] (juce::AudioProcessor& p)
+                                   { p.setPlayHead (mOfflinePrevHead); });
+    for (auto& g : mGuitarsEngine) if (g) g->setPlayHead (mOfflinePrevHead);
+    for (auto& b : mBassesEngine)  if (b) b->setPlayHead (mOfflinePrevHead);
+    if (mRustyDrumsEngine) mRustyDrumsEngine->setPlayHead (mOfflinePrevHead);
+
     mOfflinePrevHead = nullptr;
 
     suspendProcessing (false);
+    mOfflineRenderActive.store (false, std::memory_order_release);
 }
 
 // ── Engine processor registration ────────────────────────────────────────────
@@ -7657,6 +7745,27 @@ bool VibeSynthProcessor::loadBaySickRustyDrumsKit (const juce::File& sfzPath)
     // strip InsertNodes registered.  Audio thread can begin rendering.
     mRustyDrumsActive.store (true, std::memory_order_release);
     if (onSfizzEngineReady) onSfizzEngineReady (SfizzEngineKind::RustyDrums, 0);
+
+    // §6.8: the kit's freeze state lives on a rig tab.  Created HERE, at kit
+    // creation, not at page-show -- restorePendingFreezes and auto-freeze both
+    // need the tab before any page has ever opened.  (The page-show creation
+    // stays as an idempotent fallback.)  The engine pointer stays null: the
+    // kit engine is processor-owned, and every teardown path early-returns on
+    // that.  Player-axis watcher attached here too -- the rig's APVTS watcher
+    // never runs for a null-engine tab, so kit-sound changes were invisible
+    // to staleness.
+    {
+        auto* rustyTab = mEngineRig->findTab (TabKind::Rusty, 0);
+        if (rustyTab == nullptr)
+            rustyTab = mEngineRig->addTab (TabKind::Rusty, 0, "Drum Kit");
+        if (rustyTab != nullptr && mRustyDrumsEngine != nullptr)
+        {
+            rustyTab->freezeProcListener = std::make_unique<EngineTab::FreezeProcListener>();
+            rustyTab->freezeListenedProcs.clear();
+            mRustyDrumsEngine->addListener (rustyTab->freezeProcListener.get());
+            rustyTab->freezeListenedProcs.push_back (mRustyDrumsEngine.get());
+        }
+    }
     return true;
 }
 
@@ -7677,6 +7786,41 @@ void VibeSynthProcessor::forEachSfizzApvts (
 
 void VibeSynthProcessor::destroyBaySickRustyDrums()
 {
+    // TS7 §6.8: the kit's freeze must not outlive the kit.  mRustyKitFrozen and
+    // the rig tab's cached streams survived this function, so after a program
+    // change / tab delete / project switch the NEXT kit inherited them: the
+    // stale flag skipped its producer in song mode (silent drums), and the
+    // republish poll pushed the OLD kit's pattern renders into the new kit's
+    // strips.  Retract while the strip tasks are still alive, settle one
+    // block, then drop the storage.  The tab entry itself is the CALLER's
+    // call (tab delete removes it; a program change keeps it, stale, so the
+    // refresh queue re-renders the new sound).
+    retractFrozenSources (TabKind::Rusty, 0);
+    if (auto* frozenTab = mEngineRig->findTab (TabKind::Rusty, 0))
+    {
+        // Detach the kit's freeze listener UNCONDITIONALLY (frozen or not)
+        // before the engine it listens to is reset below.
+        if (frozenTab->freezeProcListener != nullptr)
+        {
+            for (auto* p : frozenTab->freezeListenedProcs)
+                if (p != nullptr) p->removeListener (frozenTab->freezeProcListener.get());
+            frozenTab->freezeListenedProcs.clear();
+            frozenTab->freezeProcListener.reset();
+        }
+
+        if (frozenTab->frozen)
+        {
+            juce::Thread::sleep (20);
+            frozenTab->freezeStreams.clear();
+            frozenTab->freezePatternStreams.clear();
+            frozenTab->patternStamps.clear();
+            frozenTab->stalePatterns.clear();
+            frozenTab->freezeStale = true;
+            if (mEngineRig->onFreezeStateChanged)
+                mEngineRig->onFreezeStateChanged (TabKind::Rusty, 0);
+        }
+    }
+
     // Remove all 13 InsertNodes first (audio thread will see the Rusty chId range
     // [kRustyBase..kRustyBase+kMaxRustyStrips) emptied in mInsertsByChannel
     // immediately even if the engine teardown takes another instant).

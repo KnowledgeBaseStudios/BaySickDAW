@@ -2,6 +2,17 @@
 
 VersionCapture::~VersionCapture()
 {
+    // Editor-facing callbacks are dropped first: we are inside the editor's
+    // teardown, and member destruction order decides whether the surfaces they
+    // touch still exist.  onEndAudio stays -- it stops the PROCESSOR-owned
+    // recorder, and the processor outlives the editor.
+    onVersionsChanged = nullptr;
+    onPersistTake     = nullptr;
+
+    // Close the capture BEFORE the folder delete: endTake stops the recorder,
+    // so the delete never races a writer holding a file open in the folder --
+    // Windows would refuse it and the temp folder would leak.
+    endTake();
     discardSessionAudio();
 }
 
@@ -24,7 +35,22 @@ juce::File VersionCapture::sessionDir()
 
 juce::File VersionCapture::nextAudioTarget (int takeId) const
 {
-    const juce::String name = "Take " + juce::String (takeId) + ".wav";
+    // Timestamped, never just "Take N": the take counter is SESSION-scoped, so
+    // in the retained folder a new session's "Take 1.wav" landed on last
+    // session's -- and a fresh FileOutputStream APPENDS to an existing file,
+    // so the collision did not replace the old take, it corrupted both.
+    // Windows-filename-safe stamp, same shape as the recording paths.
+    const juce::String stamp = juce::Time::getCurrentTime()
+                                   .formatted ("%Y-%m-%d %H-%M-%S");
+    const juce::String name  = "Take " + juce::String (takeId)
+                             + " - " + stamp + ".wav";
+
+    auto finish = [] (juce::File f)
+    {
+        // Same-second relaunch edge: the writer must open on a FRESH file.
+        if (f.existsAsFile()) f.deleteFile();
+        return f;
+    };
 
     if (mRetainInProject && onGetProjectDir)
     {
@@ -37,10 +63,10 @@ juce::File VersionCapture::nextAudioTarget (int takeId) const
             // folder holding nothing but a subfolder (Jeff, 2026-07-30).
             auto dir = proj.getChildFile ("Reports");
             dir.createDirectory();
-            return dir.getChildFile (name);
+            return finish (dir.getChildFile (name));
         }
     }
-    return const_cast<VersionCapture*> (this)->sessionDir().getChildFile (name);
+    return finish (const_cast<VersionCapture*> (this)->sessionDir().getChildFile (name));
 }
 
 void VersionCapture::poll (juce::uint32 playStartEdges,

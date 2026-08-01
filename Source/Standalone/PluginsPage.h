@@ -57,6 +57,9 @@ public:
     // Fired when the pick changes, so the ribbon / roll labels can follow.
     std::function<void()> onPluginChanged;
 
+public:
+    void parentHierarchyChanged() override;   // peer-keyed poll suspend (TS4)
+
 private:
     void timerCallback() override;
     void rebuildEditor();

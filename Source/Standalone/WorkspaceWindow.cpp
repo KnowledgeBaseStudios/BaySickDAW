@@ -97,6 +97,12 @@ Workspace* WorkspaceWindow::workspace() const noexcept
 
 WorkspaceWindow::~WorkspaceWindow()
 {
+    // The one save every route shares: teardown, and any resize-only session
+    // (resizes have no end-of-gesture hook, so without this a window that was
+    // only ever resized never persisted at all).  Runs while the workspace is
+    // still reachable -- saveBounds skips silently once it is not.
+    saveBounds();
+
     if (mCloseBtn) mCloseBtn->setLookAndFeel (nullptr);
     if (auto* ws = mWorkspace.getComponent()) ws->removeWindow (this);
     // Peer teardown is Component's job.  An OWNED page dies with mContent; a
@@ -187,9 +193,12 @@ void WorkspaceWindow::paint (juce::Graphics& g)
 // contentBounds(): add the chrome back on.
 //
 // Clamped to the workspace so a plugin with a huge editor cannot open a window
-// bigger than the frame containing it -- and the floor is applied after the
-// clamp, matching clampResizeToWorkspace's precedence (floor over trim,
-// workspace over floor) so a negative content area can never be produced.
+// bigger than the frame containing it -- with the constrainer's floor applied
+// LAST, so HERE the floor wins over the workspace fit.  Deliberately the
+// OPPOSITE order from clampResizeToWorkspace (there the workspace caps the
+// floor): this is a one-shot programmatic size, and a window slightly
+// overflowing a tiny workspace beats one squeezed under its own minimum into
+// a negative content area.
 void WorkspaceWindow::sizeToContent (int contentW, int contentH)
 {
     if (contentW <= 0 || contentH <= 0)
@@ -524,10 +533,23 @@ juce::Rectangle<int> WorkspaceWindow::loadSavedBounds() const
 void WorkspaceWindow::saveBounds() const
 {
     if (mPersistKey.isEmpty()) return;
+    // No workspace = no way to convert into workspace-local space; a raw save
+    // here would be the coordinate-space drift bug again.  Keep the last good
+    // save instead.
+    if (workspace() == nullptr) return;
 
     if (mPersistence == Persistence::Session)
     {
-        sessionBounds()[mPersistKey] = getBounds();
+        // Same workspace-local conversion the file branch below does; storing
+        // raw parent-client bounds re-added the workspace origin on every
+        // close/reopen, so session windows crept down-right each cycle.
+        auto b = getBounds();
+        if (auto* ws = workspace())
+        {
+            const auto o = ws->originInParentClient();
+            b.translate (-o.x, -o.y);
+        }
+        sessionBounds()[mPersistKey] = b;
         return;
     }
 

@@ -39,9 +39,20 @@ void RustyDrumsProducerTask::run()
     // advance inside renderBlock -- so dispatching MIDI while skipping the
     // render would pile up voices that never age out, permanently poisoning both
     // the engine's own zero-voice gate and the idle-suspend gate below.
-    if (mProcessor->mRustyKitFrozen.load (std::memory_order_acquire)
-        && mCtx->songMode)
-        return;
+    // BOTH scopes (2026-07-31): gating on songMode alone made pattern-mode kit
+    // freeze CPU-NEGATIVE -- full synthesis every block PLUS 13 streamer reads.
+    // Pattern mode skips only while the CURRENT pattern's renders are the
+    // published set, so a pattern switch synthesizes live until the republish
+    // lands (the strips' index-matched pointers fall back the same way).
+    {
+        const bool frozenThisBlock = mCtx->songMode
+            ? mProcessor->mRustyKitFrozen.load (std::memory_order_acquire)
+            : (mCtx->patternIndex >= 0
+               && mProcessor->mRustyFrozenPatternIndex.load (std::memory_order_acquire)
+                    == mCtx->patternIndex);
+        if (frozenThisBlock)
+            return;
+    }
 
     // Idle suspend: if MIDI is empty AND no active voices for
     // kIdleSuspendBlocks consecutive blocks, skip the entire processStrips

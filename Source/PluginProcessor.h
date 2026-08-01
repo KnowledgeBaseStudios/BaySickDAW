@@ -197,6 +197,10 @@ public:
     // Message/render thread only.
     bool beginOfflineRender (double renderSampleRate, int renderBlockSize);
     void endOfflineRender();
+    // True between begin/endOfflineRender, any thread.  The auto-freeze poll
+    // reads it to stay quiet while an export runs.
+    bool isOfflineRenderActive() const noexcept
+        { return mOfflineRenderActive.load (std::memory_order_acquire); }
 
     // QA-ModelShell TS2 (stems): a strip channel's post-chain output for the
     // block that just rendered -- the same arena slot its render task wrote.
@@ -987,6 +991,14 @@ public:
     // never audible as a gap.
     bool refreshFreeze (TabKind kind, int pageIndex, juce::String& outErr);
 
+    // §6.6: a stale freeze plays LIVE, immediately -- the rig's staleness marks
+    // call this to null every frozen-source pointer a tab has published (song +
+    // pattern; all 13 strips + the producer flag for Rusty).  ATOMIC NULLS ONLY:
+    // ownership and destruction stay with the tab, so no settle is needed here.
+    void retractFrozenSources (TabKind kind, int pageIndex);
+    // Current pattern for the rig's republish calls (-1 when no manager).
+    int  freezePatternIndexNow() const noexcept;
+
     // §6.7 file rules.  freezeFileFor is the ONE name builder -- it spells the
     // kind as a name rather than the TabKind ordinal, so inserting an enumerator
     // cannot silently re-point the freeze files a saved project refers to.
@@ -1383,6 +1395,12 @@ private:
     // whole sfizz render.  Set on the message thread by freezeTab/unfreezeTab,
     // read by the producer every block.
     std::atomic<bool> mRustyKitFrozen { false };
+    // §6.8: which pattern's kit renders are currently published to the 13
+    // strips (-1 = none).  The producer reads it so the frozen-kit skip works
+    // in PATTERN mode too -- gating the skip on songMode alone left pattern
+    // playback paying full sfizz synthesis PLUS 13 streamer reads.  Written on
+    // the message thread by setRustyFrozenPatternSourcesImpl / retraction.
+    std::atomic<int> mRustyFrozenPatternIndex { -1 };
     // 2026-05-06: bus-level idle gate REVERTED - the per-block magnitude
     // check added overhead during active playback (where buses are not
     // silent) without offsetting savings, net-negative on busy sessions.
@@ -1801,7 +1819,7 @@ private:
 
     // Batch 7 (2026-05-06): passive accumulator strip tasks.
     // Aux: created lazily via ensureAuxInsert; up to kMaxAuxStrips (18).
-    // Bus: 11 always-on buses registered idempotently in prepareToPlay.
+    // Bus: 12 always-on buses registered idempotently in prepareToPlay.
     static constexpr int kNumBatch7Buses = 12;   // QA-ModelShell TS6: +Plugins Bus
     std::array<std::unique_ptr<PassiveStripTask>, MixerChannelIds::kMaxAuxStrips> mAuxRenderTasks;
     std::array<std::unique_ptr<PassiveStripTask>, kNumBatch7Buses>                mBusRenderTasks;
@@ -1816,6 +1834,11 @@ private:
     int                  mOfflinePrevBlk  { 0 };
     bool                 mOfflinePrevSong { true };
     juce::AudioPlayHead* mOfflinePrevHead { nullptr };
+    // ONE render at a time: export/measure drive begin/end from a background
+    // thread while freeze renders drive it on the message thread -- two
+    // interleaved suspend/restore sequences corrupt both.  Owned by
+    // beginOfflineRender (compare-exchange) / endOfflineRender (clear).
+    std::atomic<bool>    mOfflineRenderActive { false };
 
     // QA-ModelShell TS6: declared immediately BEFORE the rig so it is destroyed
     // AFTER it -- hosted plugin instances live in the rig (instruments) and in

@@ -15,10 +15,14 @@
 // wrong -- and the copies had already drifted once (the freeze-tap staleness fix
 // had to be applied twice, in two shapes).  One function, five callers.
 //
-// CONTRACT: returns true only when the block was fully served from a freeze
-// file.  False means the caller runs its LIVE engine -- which covers no file,
-// the wrong pattern, a position past the end, and a short read.  That is
-// freeze's existing stale-plays-live rule, not a new path.
+// CONTRACT: returns true when the block was fully served IN PLACE OF the live
+// engine -- from the freeze file, or as silence while the transport is stopped
+// (Jeff's ruling 2026-07-31: a frozen tab is silent when stopped; the playhead
+// does not advance, so reading would loop one block as a buzz).  False means
+// the caller runs its LIVE engine -- no file, the wrong pattern, a position
+// past the end.  That is freeze's existing stale-plays-live rule, not a new
+// path.  Pattern scope wraps the loop seam internally; a rate-mismatched file
+// is served through the streamer's ratio interpolator (ruling option B).
 namespace FreezeRead
 {
 
@@ -61,10 +65,71 @@ inline bool serveBlock (const RenderTask& task,
         pos = ctx.patternLocalSamples;
     }
 
-    if (fz == nullptr || pos < 0 || pos >= fz->getTotalLength())
+    if (fz == nullptr)
         return false;
 
-    return fz->readRaw (dst, 0, numSamples, pos);
+    // Jeff's ruling (2026-07-31): a frozen tab is SILENT while the transport is
+    // stopped.  The playhead does not advance when stopped, so reading the file
+    // here replayed one block forever -- a buzz on every frozen track.  Serving
+    // silence rather than returning false keeps the engine skipped, which is
+    // the freeze.  Offline renders are unaffected: the OfflineHead publishes
+    // isPlaying = true for the whole render.
+    if (ctx.posInfo == nullptr || ! ctx.posInfo->getIsPlaying())
+    {
+        dst.clear (0, numSamples);
+        return true;
+    }
+
+    const juce::int64 total = fz->getTotalLength();
+    if (total <= 0 || pos < 0)
+        return false;
+
+    const double fileRate = fz->getFileSampleRate();
+    const double sessRate = ctx.sampleRate > 0.0 ? ctx.sampleRate : fileRate;
+
+    if (fileRate == sessRate)
+    {
+        if (pos >= total) return false;
+
+        // §6.8 seam: in pattern scope the file IS the loop, so the block that
+        // straddles the wrap reads tail-then-head.  Falling back to live here
+        // clipped the pattern's final samples every iteration AND handed the
+        // next iteration's note-ons to an engine that is skipped again one
+        // block later -- voices that never receive their note-offs.
+        const int tail = (int) juce::jmin ((juce::int64) numSamples, total - pos);
+        if (tail < numSamples && ! ctx.songMode)
+        {
+            if (! fz->readRaw (dst, 0, tail, pos)) return false;
+            return fz->readRaw (dst, tail, numSamples - tail, 0);
+        }
+        return fz->readRaw (dst, 0, numSamples, pos);
+    }
+
+    // Jeff's ruling (2026-07-31, option B): a rate-mismatched file is read
+    // through the streamer's ratio interpolator, not raw frames -- raw reads at
+    // render-domain positions silently corrupted every frozen track in an
+    // export at a non-device rate (wrong speed AND wrong material).  The same
+    // path covers a device-rate change after freezing.  readAndMix MIXES, so
+    // the destination is cleared first; underruns print silence rather than
+    // falling back (offline reads block synchronously, so an export is exact).
+    const double ratio = fileRate / sessRate;   // file samples per output sample
+    double       fpos  = (double) pos * ratio;
+    const double fend  = (double) total;
+    if (fpos >= fend) return false;
+
+    dst.clear (0, numSamples);
+
+    const int outToEnd = (int) ((fend - fpos) / ratio);
+    if (outToEnd < numSamples && ! ctx.songMode)
+    {
+        fz->readAndMix (dst, 0,        outToEnd,              fpos, ratio,
+                        dst.getNumChannels(), 1.0f);
+        fz->readAndMix (dst, outToEnd, numSamples - outToEnd, 0.0,  ratio,
+                        dst.getNumChannels(), 1.0f);
+        return true;
+    }
+    fz->readAndMix (dst, 0, numSamples, fpos, ratio, dst.getNumChannels(), 1.0f);
+    return true;
 }
 
 } // namespace FreezeRead

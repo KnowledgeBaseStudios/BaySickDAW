@@ -15,6 +15,11 @@ struct BlockContext
 {
     int    numSamples = 0;
     double bpm        = 120.0;
+    // Session rate for THIS block.  Freeze substitution needs it to notice a
+    // file rendered at a different rate (an export at a non-device rate, or a
+    // device-rate change after freezing) and read it through the streamer's
+    // ratio interpolator instead of raw-frame positions.
+    double sampleRate = 0.0;
     bool   anySolo    = false;
     // 2026-05-06 (Batch 9b): project-level master_pan_law (0=-3dB constant
     // power / 1=linear / 2=-6dB).  Read once by PluginProcessor at the top

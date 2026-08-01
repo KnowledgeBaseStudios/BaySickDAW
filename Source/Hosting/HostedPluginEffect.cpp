@@ -1,4 +1,5 @@
 #include "HostedPluginEffect.h"
+#include "SandboxedPluginClient.h"
 
 namespace Hosting
 {
@@ -126,6 +127,16 @@ juce::Array<HostedPluginEffect::AutomatableParam> HostedPluginEffect::getAutomat
     if (mHosted == nullptr)
         return out;
 
+    // BRIDGED: the in-process parameter objects do not exist here -- the list
+    // came across the wire at load (v3).  Excluding this branch is what left
+    // every bridged plugin with no automation surface at all.
+    if (auto* client = mHosted->getSandboxClient())
+    {
+        for (const auto& bp : client->getParameterList())
+            out.add ({ bp.id, bp.name });
+        return out;
+    }
+
     auto* inner = mHosted->getInner();
 
     if (inner == nullptr)
@@ -145,6 +156,23 @@ juce::Array<HostedPluginEffect::AutomatableParam> HostedPluginEffect::getAutomat
 
 bool HostedPluginEffect::applyParamNorm (const juce::String& paramId, float v01)
 {
+    // BRIDGED: resolve the id to its index in the wire list and send.  The
+    // index is the list order -- the same order the helper enumerated.
+    if (mHosted != nullptr)
+    {
+        if (auto* client = mHosted->getSandboxClient())
+        {
+            const auto params = client->getParameterList();
+            for (size_t i = 0; i < params.size(); ++i)
+            {
+                if (params[i].id != paramId) continue;
+                client->setParameter ((int) i, juce::jlimit (0.0f, 1.0f, v01));
+                return true;
+            }
+            return false;
+        }
+    }
+
     auto* p = findParam (paramId);
 
     if (p == nullptr)

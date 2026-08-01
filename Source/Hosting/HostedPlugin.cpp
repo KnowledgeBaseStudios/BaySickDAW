@@ -102,6 +102,37 @@ void HostedPluginInstance::instantiate()
             // A crash must stay distinguishable from a deleted slot -- this is
             // what lights the dead marker while the window stays open.
             client->onCrashed = [this] { mState = HostedState::Crashed; };
+
+            // The load result arrives async and used to be INVISIBLE -- a
+            // plugin that failed inside the helper looked loaded forever.
+            // Marshalled to the message thread by the client.
+            client->onLoadResult = [this] (bool ok, juce::String err, bool inst, bool midi)
+            {
+                juce::ignoreUnused (midi);
+                if (! ok)
+                {
+                    mState = HostedState::FailedToLoad;
+                    mError = err.isNotEmpty()
+                               ? err
+                               : juce::String ("The plugin failed to load in the bridge helper");
+                    return;
+                }
+                // 32-bit metadata correction: the 64-bit scanner cannot open
+                // the file, so its description was a filename-only guess.
+                if (mDesc.isInstrument != inst)
+                {
+                    mDesc.isInstrument = inst;
+                    mPlugins.refineDescription (mDesc);
+                }
+            };
+
+            // The bridged editor's real size -- fit the window to the plugin.
+            client->onEditorSize = [this] (int w, int h)
+            {
+                if (mLiveEditor != nullptr)
+                    mLiveEditor->remoteEditorSized (w, h);
+            };
+
             mSandbox = std::move (client);
             mState   = HostedState::Ok;
             mError   = {};
@@ -218,7 +249,15 @@ void HostedPluginInstance::setPlayHead (juce::AudioPlayHead* ph)
     if (mInner != nullptr)
         mInner->setPlayHead (ph);
     // The bridged path cannot take a pointer across a process boundary; it gets
-    // the same information as plain values in every ProcessPayload instead.
+    // the same information as plain values in the shared block's control header.
+}
+
+void HostedPluginInstance::setNonRealtime (bool b) noexcept
+{
+    juce::AudioProcessor::setNonRealtime (b);
+
+    if (mInner   != nullptr) mInner->setNonRealtime (b);
+    if (mSandbox != nullptr) mSandbox->setNonRealtime (b);
 }
 
 void HostedPluginInstance::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midi)
@@ -309,7 +348,21 @@ void HostedPluginInstance::setStateInformation (const void* data, int size)
     if (xml == nullptr || ! xml->hasTagName (kStateTag))
         return;
 
+    const bool wasBridged = (mSandbox != nullptr);
     setBridgePreference (xml->getBoolAttribute (kAttrBridged, false));
+
+    // "Applies on next load" (the locked ruling) -- and THIS restore is the
+    // load.  The constructor's instantiate() runs before this state arrives,
+    // so without re-instantiating here the saved preference could never take
+    // effect on ANY path: the 64-bit bridge toggle was a stored value nothing
+    // ever read at a moment it could act.
+    const bool wantBridge = isBridgeForced() || mBridgePreferred;
+    if (wantBridge != wasBridged)
+    {
+        instantiate();
+        if (getSampleRate() > 0.0 && getBlockSize() > 0)
+            prepareToPlay (getSampleRate(), getBlockSize());
+    }
 
     juce::MemoryBlock inner;
 
@@ -448,6 +501,17 @@ void HostedPluginEditor::timerCallback()
 
     if (mOwner.isAlive() != mWasAlive)
         buildInner();
+}
+
+void HostedPluginEditor::remoteEditorSized (int w, int h)
+{
+    if (mOwnerGone || mRemoteHost == nullptr || w <= 0 || h <= 0)
+        return;
+
+    setSize (w, h);
+
+    if (onNaturalSizeChanged)
+        onNaturalSizeChanged (w, h);
 }
 
 void HostedPluginEditor::resized()

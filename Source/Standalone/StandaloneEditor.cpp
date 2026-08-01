@@ -1507,6 +1507,10 @@ StandaloneEditor::StandaloneEditor(VibeSynthProcessor& p, StandalonePlayHead& ph
     // stale tab is the one currently costing full CPU on its live engine.
     mRibbon->onIsTabFrozen = [this] (RibbonTabBar::TabType t) -> int
     {
+        // ALL freezable kinds (fixed 2026-07-31) -- this mapped only the four
+        // original engine types, so frozen Clips / Vox / Inst / Rusty tabs
+        // showed no indicator at all.  Capacity comes from the rig per kind;
+        // kMaxLayerPages was wrong for every kind except Layers.
         TabKind kind;
         switch (t)
         {
@@ -1514,14 +1518,25 @@ StandaloneEditor::StandaloneEditor(VibeSynthProcessor& p, StandalonePlayHead& ph
             case RibbonTabBar::TabType::Bass:    kind = TabKind::Bass;    break;
             case RibbonTabBar::TabType::Drums:   kind = TabKind::Drums;   break;
             case RibbonTabBar::TabType::Plugins: kind = TabKind::Plugins; break;
+            case RibbonTabBar::TabType::Clip:    kind = TabKind::Clips;   break;
+            case RibbonTabBar::TabType::Vox:     kind = TabKind::Vox;     break;
+            case RibbonTabBar::TabType::Inst:    kind = TabKind::Inst;    break;
             default: return 0;
         }
         int best = 0;
-        for (int i = 0; i < (int) kMaxLayerPages; ++i)
+        auto fold = [this, &best] (TabKind k, int count)
         {
-            if (mProcessor.engineRig().isFreezeStale (kind, i)) return 2;
-            if (mProcessor.engineRig().isFrozen (kind, i))      best = 1;
-        }
+            for (int i = 0; i < count && best < 2; ++i)
+            {
+                if (mProcessor.engineRig().isFreezeStale (k, i)) best = 2;
+                else if (mProcessor.engineRig().isFrozen (k, i)) best = juce::jmax (best, 1);
+            }
+        };
+        fold (kind, EngineRig::capacityOf (kind));
+        // The kit has no ribbon type of its own -- it reports through the
+        // Drums slot, the family it belongs to.
+        if (t == RibbonTabBar::TabType::Drums)
+            fold (TabKind::Rusty, 1);
         return best;
     };
     mRibbon->onSubPageSelected = [this](RibbonTabBar::TabType t, int idx) { onSubPageSelected(t, idx); };
@@ -1728,7 +1743,19 @@ StandaloneEditor::StandaloneEditor(VibeSynthProcessor& p, StandalonePlayHead& ph
     mVersionCapture.setRetainInProject (
         openUiPrefs()->getIntValue ("fsCaptureRetain", 1) == 2);
 
-    mVersionCapture.onTakeBegan = [this] { mProcessor.resetMasterTruePeakMax(); };
+    // Ruling 6a (2026-07-31): takes are judged against the export dialog's
+    // persisted spec choice -- ONE loudness standard everywhere.  setSpec had
+    // no caller at all, so every take was graded against the -14 default no
+    // matter what the user worked to.
+    applyCaptureSpecFromPrefs();
+
+    mVersionCapture.onTakeBegan = [this]
+    {
+        mProcessor.resetMasterTruePeakMax();
+        // Re-read per take, so a spec change in the export dialog applies from
+        // the NEXT take with no wiring between the two surfaces.
+        applyCaptureSpecFromPrefs();
+    };
 
     mVersionCapture.onBeginAudio = [this] (const juce::File& target) -> bool
     {
@@ -1778,8 +1805,22 @@ StandaloneEditor::StandaloneEditor(VibeSynthProcessor& p, StandalonePlayHead& ph
         ctx.timestampLabel = v.label;
 
         juce::String err;
-        LoudnessReportWriter::write (dir, v.label.replaceCharacter (':', '-'),
-                                     m, ctx, /*wantCsv*/ false, err);
+        if (! LoudnessReportWriter::write (dir, v.label.replaceCharacter (':', '-'),
+                                           m, ctx, /*wantCsv*/ false, err))
+        {
+            // The writer's own contract: a failure is SHOWN, never swallowed.
+            // Once per session, not per take -- this fires automatically at
+            // every take end, and a broken Reports folder would otherwise
+            // popup on every loop wrap.
+            DBG ("[TS7 CAPTURE] take report write failed: " << err);
+            if (! mTakeReportErrorShown)
+            {
+                mTakeReportErrorShown = true;
+                juce::AlertWindow::showMessageBoxAsync (
+                    juce::AlertWindow::WarningIcon, "Take report not saved",
+                    err + "\n\nFurther failures this session will not be shown.");
+            }
+        }
     };
 
     mVersionCapture.onVersionsChanged = [this]
@@ -1845,6 +1886,8 @@ StandaloneEditor::~StandaloneEditor()
     mEffectsPage      = nullptr;
     mMixerPage        = nullptr;
     mVisiblePage      = nullptr;
+    // Before the windows those menus live in are destroyed with their pages.
+    mPageMenuBar      = mDetachedPageMenu.get();
     mPages.clear();
 }
 
@@ -5221,6 +5264,15 @@ void StandaloneEditor::onTabClosed(int tabId)
             if (closedPageWasVisible)
                 mVisiblePage = nullptr;
 
+            // The title-strip pointer follows the ACTIVE page window
+            // (showPageForTab re-points it at each window's own menu).  If
+            // that window dies with this page, fall back to the detached menu
+            // -- the handler-side null checks pass on a DANGLING pointer, and
+            // onFreezeStateChanged fires into it from every freeze event.
+            if (mPages[i]->window != nullptr
+                && mPageMenuBar == mPages[i]->window->getPageMenu())
+                mPageMenuBar = mDetachedPageMenu.get();
+
             mPages.remove(i);
             // J-8 stage 2: now safe to destroy the engine - the page (and its
             // SliderParameterAttachment-bearing ARIA widgets) is already gone.
@@ -5237,14 +5289,23 @@ void StandaloneEditor::onTabClosed(int tabId)
             // so the sfizz engine frees with zero referents.  No-ops for
             // tabs that never picked an engine.
             {
+                // §6.8: a USER closing the tab orphans its freeze files; the
+                // same close arriving via closeAllDynamicTabs (project switch,
+                // app quit -- the load shield is up) keeps them, because they
+                // are the cache the content stamp reuses on the next load.
+                const bool userClose = ! mProcessor.isProjectLoadInProgress();
                 auto& rig = mProcessor.engineRig();
-                if (layerStripIdx >= 0) rig.removeTab (TabKind::Layers, layerStripIdx);
-                if (bassStripIdx  >= 0) rig.removeTab (TabKind::Bass,   bassStripIdx);
-                if (drumStripIdx  >= 0) rig.removeTab (TabKind::Drums,  drumStripIdx);
-                if (clipStripIdx  >= 0) rig.removeTab (TabKind::Clips,  clipStripIdx);
-                if (voxStripIdx   >= 0) rig.removeTab (TabKind::Vox,    voxStripIdx);
-                if (instStripIdx  >= 0) rig.removeTab (TabKind::Inst,   instStripIdx);
-                if (pluginStripIdx >= 0) rig.removeTab (TabKind::Plugins, pluginStripIdx);
+                if (layerStripIdx >= 0) rig.removeTab (TabKind::Layers, layerStripIdx, userClose);
+                if (bassStripIdx  >= 0) rig.removeTab (TabKind::Bass,   bassStripIdx,  userClose);
+                if (drumStripIdx  >= 0) rig.removeTab (TabKind::Drums,  drumStripIdx,  userClose);
+                if (clipStripIdx  >= 0) rig.removeTab (TabKind::Clips,  clipStripIdx,  userClose);
+                if (voxStripIdx   >= 0) rig.removeTab (TabKind::Vox,    voxStripIdx,   userClose);
+                if (instStripIdx  >= 0) rig.removeTab (TabKind::Inst,   instStripIdx,  userClose);
+                if (pluginStripIdx >= 0) rig.removeTab (TabKind::Plugins, pluginStripIdx, userClose);
+                // The kit's rig tab had NO removal route at all -- it leaked
+                // (frozen state, open streamer handles, live orphan-sweep
+                // prefixes) across every kit delete and project switch.
+                if (isRusty) rig.removeTab (TabKind::Rusty, 0, userClose);
             }
             // K-4 / L-3 (2026-05-05): page AND chain are gone (chain destroyed
             // by removeTab above), now drop the sfizz engine.  Frees the slot
@@ -5435,6 +5496,29 @@ void StandaloneEditor::onSubPageSelected(RibbonTabBar::TabType type, int subPage
                 vp->switchTab(subPageIndex);
             else if (auto* ip = dynamic_cast<InstPage*>(entry->component.get()))
                 ip->switchTab(subPageIndex);
+            break;
+        }
+        break;
+    }
+
+    case RibbonTabBar::TabType::Plugins:
+    {
+        // 0 = Player (the navigation onTabSelected already did), 1 = Piano
+        // Roll.  This switch had no Plugins case at all, so the dropdown's
+        // Piano Roll entry navigated to the page and then did nothing.
+        const int activeId = mRibbon->getActiveTabForType(type);
+        for (auto* entry : mPages)
+        {
+            if (! entry || entry->ribbonTabId != activeId) continue;
+            if (auto* pp = dynamic_cast<PluginsPage*>(entry->component.get()))
+            {
+                if (subPageIndex == 1 && mPianoRollPage)
+                {
+                    if (mRibbon) mRibbon->selectTab (4);
+                    onTabSelected (4);
+                    mPianoRollPage->selectEngine ({ EngineKind::Plugin, pp->getPageIndex() });
+                }
+            }
             break;
         }
         break;
@@ -6583,15 +6667,24 @@ void StandaloneEditor::wireFreezeSlotForVisiblePage()
             juce::String err;
             // byUser = true: this is the ONLY path that sets it, which is why
             // §6.8's "a manual freeze restores on any machine" rule was dead
-            // code until this button existed.
-            if (! mProcessor.freezeTab (kind, pageIndex, err, /*byUser*/ true))
+            // code until this button existed.  The kit routes to its own
+            // thirteen-strip render -- freezeTab cannot express it, and probing
+            // it through renderTaskForTab is what left this button permanently
+            // disabled on the kit page.
+            const bool ok = (kind == TabKind::Rusty)
+                ? mProcessor.freezeRustyKit (err, /*byUser*/ true, /*reuseValid*/ false)
+                : mProcessor.freezeTab (kind, pageIndex, err, /*byUser*/ true);
+            if (! ok)
                 juce::AlertWindow::showMessageBoxAsync (
                     juce::AlertWindow::WarningIcon, "Could not freeze", err);
         },
         [this, kind, pageIndex]() -> juce::String
         {
             // Shown DISABLED carrying the reason, never hidden.
-            if (mProcessor.renderTaskForTab (kind, pageIndex) == nullptr)
+            const bool freezable = (kind == TabKind::Rusty)
+                ? mProcessor.hasBaySickRustyDrums()
+                : (mProcessor.renderTaskForTab (kind, pageIndex) != nullptr);
+            if (! freezable)
                 return "This player cannot be frozen yet.";
             if (mProcessor.getProjectFreezeDir() == juce::File())
                 return "Save the project first - the freeze file lives beside it.";
@@ -8413,6 +8506,7 @@ void StandaloneEditor::showRustyDrumsMapWindow()
         return;
     }
     auto* w = new RustyDrumsMapWindow (mProcessor.getBaySickRustyDrums());
+    WindowChrome::ownToMainWindow (*w, *this);   // TS7 §9.4
     mRustyDrumsMapWin = w;     // SafePointer - auto-clears when closed
 }
 
@@ -8442,6 +8536,9 @@ void StandaloneEditor::showPluginsWindow()
         return;
     }
     auto* w = new PluginsManagerWindow (mProcessor.pluginManager());
+    // TS7 §9.4: same owner relationship as every other satellite -- without it
+    // this window fell behind the main frame the moment focus returned there.
+    WindowChrome::ownToMainWindow (*w, *this);
     mPluginsWin = w;      // SafePointer - auto-clears when the window deletes itself
 }
 
@@ -10283,6 +10380,18 @@ void StandaloneEditor::releaseAllTypingNotes()
     for (auto& held : mTypingHeldNotes)
         sendTypingNote (held.second, false);
     mTypingHeldNotes.clear();
+
+    // The plugin-roll audition's held note lives OUTSIDE the typing set, so
+    // this walk never released it -- and since sendTypingNote routes to the
+    // VISIBLE tab, releasing it after a tab switch would have sent the
+    // note-off to the wrong engine and hung the plugin's voice.  Released
+    // here, while the old tab is still the target, the audition comment's
+    // "tab-switch backstop" claim is actually true.
+    if (mPluginAuditionHeldNote >= 0)
+    {
+        sendTypingNote (mPluginAuditionHeldNote, false);
+        mPluginAuditionHeldNote = -1;
+    }
 }
 
 bool StandaloneEditor::keyPressed (const juce::KeyPress& key)
@@ -10825,12 +10934,16 @@ public:
             for (int i = 0; i < LoudnessSpec::numSpecs(); ++i)
                 specs.add (LoudnessSpec::nameOf (i));
             mSpecCombo.addItemList (specs, 1);
-            mSpecCombo.setSelectedItemIndex ((int) LoudnessSpec::Id::Streaming14,
+            // Ruling 6a (2026-07-31): the spec choice is PERSISTED -- it is the
+            // one loudness standard Measure, export and version capture's take
+            // verdicts all share, so it must survive the dialog.
+            mSpecCombo.setSelectedItemIndex (
+                openUiPrefs()->getIntValue ("exSpecId", (int) LoudnessSpec::Id::Streaming14),
                                              juce::dontSendNotification);
         }
         // Custom reveals its own reference box -- otherwise "Custom" would be a
         // pick with nothing behind it.
-        mSpecCombo.onChange = [this] { refreshCustomSpecBox(); };
+        mSpecCombo.onChange = [this] { refreshCustomSpecBox(); persistSpecChoice(); };
         addAndMakeVisible (mSpecCombo);
 
         setupLufsBox (mCustomLufs, -14.0f);
@@ -11059,7 +11172,19 @@ private:
         o.normalize = mNormToggle.getToggleState();
         o.lufsTarget = readLufsBox (mLufsTarget, -14.0f);
 
+        // Ruling 6a: the moment the choice is USED it is also persisted, so
+        // version capture's next take is judged against the same standard.
+        persistSpecChoice();
+
         return o;
+    }
+
+    void persistSpecChoice()
+    {
+        auto prefs = openUiPrefs();
+        prefs->setValue ("exSpecId",     mSpecCombo.getSelectedItemIndex());
+        prefs->setValue ("exSpecCustom", (double) readLufsBox (mCustomLufs, -14.0f));
+        prefs->saveIfNeeded();
     }
 
     void onExportClicked()
@@ -11081,36 +11206,14 @@ private:
         mOpts   = gatherOptions();
         mSpecId = (LoudnessSpec::Id) juce::jlimit (0, LoudnessSpec::numSpecs() - 1,
                                                   mSpecCombo.getSelectedItemIndex());
-        // §4.2: the revealed Custom box is the reference value.  Without this the
-        // typed number went nowhere and Custom measured against the table's -14.
-        mCustomTarget = mCustomLufs.getText().trim().getFloatValue();
+        // §4.2: the revealed Custom box is the reference value.  Through
+        // readLufsBox, never a raw getFloatValue: an empty box or a lone "-"
+        // parses as 0, and measuring against 0 LUFS flags everything.
+        mCustomTarget = readLufsBox (mCustomLufs, -14.0f);
         mJob    = Job::Measure;
         mMeasureLine1.setText ("Measuring...", juce::dontSendNotification);
         mMeasureLine2.setText ({}, juce::dontSendNotification);
         beginJob();
-    }
-
-    // CL-227: writes the report beside the project.  HTML always, CSV on the
-    // checkbox.  A write failure is SHOWN on the readout line rather than
-    // swallowed -- a report the user believes exists and does not is worse than
-    // no report.
-    void writeReport (const BuilderPage::MeasureResult& m)
-    {
-        LoudnessReportWriter::Context ctx;
-        const juce::File proj = mProc.getCurrentProjectFolder();
-        ctx.projectName = (proj != juce::File() && proj.isDirectory())
-                            ? proj.getFileName() : mBaseName;
-        ctx.scopeLabel  = (mOpts.scope == BuilderPage::RenderOptions::Scope::Section)
-                            ? "Selected Section" : "Full Arrangement";
-        const auto now  = juce::Time::getCurrentTime();
-        ctx.timestampLabel = now.toString (true, true, false, true);
-
-        const juce::String stamp = now.formatted ("%Y-%m-%d %H%M%S");
-        juce::String err;
-        if (! LoudnessReportWriter::write (mProc.getProjectReportsDir(),
-                                           ctx.projectName + " " + stamp,
-                                           m, ctx, mCsvToggle.getToggleState(), err))
-            mMeasureLine2.setText (err, juce::dontSendNotification);
     }
 
     // Formats the measurement into the two readout lines.  Kept here rather than in
@@ -11261,7 +11364,10 @@ private:
                         sp->mLastMeasure = m;
                         sp->mHaveMeasure = true;
                         sp->showMeasurement (m);
-                        sp->writeReport (m);
+                        // NO report write here (Jeff's ruling 2026-07-31,
+                        // option B): Measure is the pre-export check and its
+                        // tooltip says "Writes no files" -- which was false
+                        // while this path filed an HTML report per click.
                         // TS7 §2.7: the analyzer window is CL-227's face, so a
                         // completed measurement goes there too rather than living
                         // only as two lines of text in this dialog.
@@ -12094,15 +12200,19 @@ void StandaloneEditor::serializeTabsInto (juce::XmlElement& tabs)
             // Inst / Rusty those four saved nothing -- freezing one, saving and
             // reopening silently came back UNFROZEN with its file still on disk.
             bool    known = true;
-            if      (tt == "Layers")  kind = TabKind::Layers;
-            else if (tt == "Bass")    kind = TabKind::Bass;
-            else if (tt == "Drums")   kind = TabKind::Drums;
-            else if (tt == "Plugins") kind = TabKind::Plugins;
-            else if (tt == "Clips")   kind = TabKind::Clips;
-            else if (tt == "Vox")     kind = TabKind::Vox;
-            else if (tt == "Inst")    kind = TabKind::Inst;
-            else if (tt == "Rusty")   kind = TabKind::Rusty;
-            else                      known = false;
+            // The match strings are the RECORD types the branches above write,
+            // not the TabKind names: "Drum" (singular) and "BaySickRustyDrums".
+            // Matching "Drums"/"Rusty" here meant those two freezes were never
+            // saved at all -- found by the 2026-07-31 batch review.
+            if      (tt == "Layers")            kind = TabKind::Layers;
+            else if (tt == "Bass")              kind = TabKind::Bass;
+            else if (tt == "Drum")              kind = TabKind::Drums;
+            else if (tt == "Plugins")           kind = TabKind::Plugins;
+            else if (tt == "Clips")             kind = TabKind::Clips;
+            else if (tt == "Vox")               kind = TabKind::Vox;
+            else if (tt == "Inst")              kind = TabKind::Inst;
+            else if (tt == "BaySickRustyDrums") kind = TabKind::Rusty;
+            else                                known = false;
 
             if (known && mProcessor.engineRig().isFrozen (kind, pi))
             {
@@ -12110,6 +12220,11 @@ void StandaloneEditor::serializeTabsInto (juce::XmlElement& tabs)
                 const auto* t = mProcessor.engineRig().findTab (kind, pi);
                 rec->setAttribute ("frozenBy",
                                    (t != nullptr && t->frozenByUser) ? "manual" : "auto");
+                // Save-while-stale travels too: without it, reopening reused
+                // the matching-stamp file even though the freeze was already
+                // known to be wrong when the project was written.
+                if (t != nullptr && t->freezeStale)
+                    rec->setAttribute ("freezeStale", 1);
                 // §6.8 SPAN -- what the file on disk actually covers.  Without it
                 // a restored freeze is a file of unknown length standing in for a
                 // track, which is how a song-scope render ended up being played
@@ -12207,6 +12322,16 @@ void StandaloneEditor::closeAllDynamicTabs()
 // Vox / Inst / Rusty on its way in would destroy work it cannot put back.
 void StandaloneEditor::closeDynamicTabs (TabTeardownScope scope)
 {
+    // §6.6: queued re-renders belong to the tabs being torn down.  Left alone
+    // they drain into the NEXT project against whatever tabs restore at the
+    // same (kind, index) -- a full re-render of a freshly restored, perfectly
+    // valid freeze.  Scope-gated: a partial (template) teardown keeps jobs for
+    // the tabs it keeps; the drain's own liveness check purges the rest.
+    if (scope == TabTeardownScope::AllDynamic)
+    {
+        mFreezeRefreshQueue.clear();
+        mAutoFreezePending = false;
+    }
     // 2026-05-06: project-load barrier.  Set BEFORE teardown so the audio
     // thread bails on the next callback while we're tearing down engines +
     // pages.  Sleep ~30ms to let any in-flight processBlock complete (covers
@@ -12322,11 +12447,6 @@ void StandaloneEditor::resetProjectState()
     // construction; dynamic entries re-register as their owning UI rebuilds.
     mAutomationApplicators.clear();
     mAutomationValueReaders.clear();
-    // QA-ProjectSave Task 7: the owner index tracks the same entries, so it has
-    // to be dropped in step with them -- otherwise a component whose ids were
-    // just cleared would still be listened to, and its later destruction would
-    // try to erase ids that a NEW registration may since have claimed.
-    // Deregister first: this object outlives most of these components, and JUCE
     // QA-ModelShell TS3: this one call re-seeds everything the map holds that is
     // not model-event-driven, INCLUDING the "<prefix>_fader" aliases it derives.
     // Two things that used to follow it are gone: the owning-component index
@@ -13006,10 +13126,12 @@ void StandaloneEditor::closeDeadEffectWindows (int channelId)
 
 juce::String StandaloneEditor::persistKeyFor (const PageEntry& entry) const
 {
-    // Keyed by TYPE + the page's own index rather than the ribbon tab id: tab
-    // ids are handed out per session, so keying on them would lose a window's
-    // saved position every time the project reopened.
-    return juce::String ((int) entry.type) + ":" + juce::String (entry.ribbonTabId);
+    // Keyed by TYPE + the page's OWN index: ribbon tab ids are handed out per
+    // session, so keying on them -- which this did, against its own stated
+    // rule -- lost every window's saved position on reopen.  pageIndexHint is
+    // recorded before framing for exactly this key; -1 (the system pages)
+    // still yields one stable key per type.
+    return juce::String ((int) entry.type) + ":" + juce::String (entry.pageIndexHint);
 }
 
 // Close a window WITHOUT touching the model.  The engine keeps running and the
@@ -13251,7 +13373,7 @@ void StandaloneEditor::advanceCountersFromRestoredTabs()
     };
 
     int maxLayer = 0, maxBass = 0, maxDrum = 0, maxVox = 0, maxInst = 0;
-    int maxGuitar = 0, maxBasses = 0, maxClip = 0;
+    int maxGuitar = 0, maxBasses = 0, maxClip = 0, maxPlugin = 0;
 
     if (mRibbon != nullptr)
     {
@@ -13294,6 +13416,12 @@ void StandaloneEditor::advanceCountersFromRestoredTabs()
                 case RibbonTabBar::TabType::Clip:
                     maxClip = juce::jmax (maxClip, parseTail (nm, "Clip "));
                     break;
+                case RibbonTabBar::TabType::Plugins:
+                    // Missing from the re-seed entirely: after a project load
+                    // the counter restarted at 1 and the next add duplicated
+                    // an existing "Plugin N" name.
+                    maxPlugin = juce::jmax (maxPlugin, parseTail (nm, "Plugin "));
+                    break;
                 default:
                     break;
             }
@@ -13308,6 +13436,7 @@ void StandaloneEditor::advanceCountersFromRestoredTabs()
     mNextGuitarNameNum  = juce::jmax (mNextGuitarNameNum,  maxGuitar + 1);
     mNextBassesNameNum  = juce::jmax (mNextBassesNameNum,  maxBasses + 1);
     mNextClipNameNum    = juce::jmax (mNextClipNameNum,    maxClip   + 1);
+    mNextPluginNameNum  = juce::jmax (mNextPluginNameNum,  maxPlugin + 1);
 }
 
 
@@ -13364,21 +13493,28 @@ void StandaloneEditor::deserializeUIState (const juce::XmlElement& root)
                 patStamps[ps->getIntAttribute ("index", -1)] = (juce::uint32)
                     ps->getStringAttribute ("stamp", "0").getLargeIntValue();
 
-            // All eight kinds, matching the save side.  A frozen Clips / Vox /
-            // Inst / Rusty tab used to come back unfrozen.
+            // All eight kinds, matching the save side -- which means matching
+            // the RECORD types: "Drum" (singular) and "BaySickRustyDrums", not
+            // the TabKind names.  The "Drums"/"Rusty" spellings matched nothing
+            // and silently dropped both freezes on every load.
             TabKind k    = TabKind::Layers;
             bool    okay = true;
-            if      (type == "Layers")  k = TabKind::Layers;
-            else if (type == "Bass")    k = TabKind::Bass;
-            else if (type == "Drums")   k = TabKind::Drums;
-            else if (type == "Plugins") k = TabKind::Plugins;
-            else if (type == "Clips")   k = TabKind::Clips;
-            else if (type == "Vox")     k = TabKind::Vox;
-            else if (type == "Inst")    k = TabKind::Inst;
-            else if (type == "Rusty")   k = TabKind::Rusty;
-            else                        okay = false;
+            if      (type == "Layers")            k = TabKind::Layers;
+            else if (type == "Bass")              k = TabKind::Bass;
+            else if (type == "Drum")              k = TabKind::Drums;
+            else if (type == "Plugins")           k = TabKind::Plugins;
+            else if (type == "Clips")             k = TabKind::Clips;
+            else if (type == "Vox")               k = TabKind::Vox;
+            else if (type == "Inst")              k = TabKind::Inst;
+            else if (type == "BaySickRustyDrums") k = TabKind::Rusty;
+            else                                  okay = false;
 
-            if (okay) mPendingFreezes.push_back ({ k, pageIndex, byUser, span, std::move (patStamps) });
+            if (okay)
+            {
+                PendingFreeze pf { k, pageIndex, byUser, span, std::move (patStamps) };
+                pf.stale = rec->getIntAttribute ("freezeStale", 0) != 0;
+                mPendingFreezes.push_back (std::move (pf));
+            }
         }
 
         ++tabNum;
@@ -13413,6 +13549,20 @@ void StandaloneEditor::deserializeUIState (const juce::XmlElement& root)
                         mPianoRollPage->setEngineType ({ EngineKind::Plugin, pageIndex }, pp->getPluginName());
                 };
                 registerPluginPianoRoll (pageIndex, pp);
+
+                // Restore principle (HostedPlugin.h): the blob carries the
+                // FULL description so the project keeps loading its plugin
+                // after the user removed it from the added list.  Stashed
+                // BEFORE the select so the rig factory can fall back to it.
+                if (engine.isNotEmpty() && engineData.isNotEmpty())
+                {
+                    juce::MemoryBlock mb;
+                    if (mb.fromBase64Encoding (engineData) && mb.getSize() > 0)
+                        mProcessor.engineRig().stashPluginRestoreDescription (
+                            pageIndex,
+                            Hosting::HostedPluginInstance::descriptionFromState (
+                                mb.getData(), (int) mb.getSize()));
+                }
 
                 if (engine.isNotEmpty())
                     pp->selectPluginById (engine);
@@ -14267,6 +14417,11 @@ void StandaloneEditor::pollAutoFreeze()
         }
     }
 
+    // §6.5: drain the per-tab engine-change stamps (hosted plugins, the Inst
+    // chain, the kit) -- their listeners only bump atomics, because parameter
+    // notifications carry no thread guarantee.
+    mProcessor.engineRig().drainEngineChangeStamps();
+
     // Stale freezes first: a frozen tab whose content changed is currently
     // playing its LIVE engine (§6.6's fallback), so it is costing full CPU until
     // this catches up -- which makes it the more urgent of the two jobs.
@@ -14292,6 +14447,13 @@ void StandaloneEditor::pollAutoFreeze()
     // invalidation is CORRECT (the freeze really is stale), it is the response
     // that must not be instant.  Re-arming on every edit means a drag re-renders
     // ONCE when the hands come off, not once per mouse move.
+    // Never start a render on top of another render: export / measure drive the
+    // SAME live processor from a background thread, and two begin/endOffline
+    // sequences interleaving their suspend/restore corrupts both.  The begin
+    // call itself refuses too -- this early-out just avoids surfacing that
+    // refusal as an error popup every poll tick.
+    if (mProcessor.isOfflineRenderActive()) return;
+
     const double sinceEditMs = juce::Time::getMillisecondCounterHiRes() - mLastContentEditMs;
     if (! mFreezeRefreshQueue.empty()
         && ! DSPBase::isTransportPlaying()
@@ -14299,6 +14461,12 @@ void StandaloneEditor::pollAutoFreeze()
     {
         const auto job = mFreezeRefreshQueue.front();
         mFreezeRefreshQueue.erase (mFreezeRefreshQueue.begin());
+
+        // The tab can die or be unfrozen between queueing and this drain (kit
+        // destroy, tab delete, project switch, manual unfreeze) -- a dead job
+        // must not flash the overlay for a render that will refuse anyway.
+        if (! mProcessor.engineRig().isFrozen (job.kind, job.pageIndex))
+            return;
 
         // RENDER NOTICE (Jeff, 2026-07-30).  This path renders SILENTLY today and
         // blocks the message thread for seconds -- so the app simply stopped
@@ -14318,19 +14486,43 @@ void StandaloneEditor::pollAutoFreeze()
     const int threshold = openUiPrefs()->getIntValue ("fsAutoFreezeCpu", 80);
     if (threshold > 100) return;                       // Off
 
+    // ARM on sustained load, FIRE at Stop (Jeff's ruling, 2026-07-31).  The
+    // sustained-load episode almost always happens DURING playback -- which is
+    // exactly when a blocking modal render must not fire.  So crossing the
+    // threshold only arms a pending freeze; the render itself waits for the
+    // same stopped + quiet condition the stale-refresh drain above uses.  The
+    // pending flag is what survives the load falling when playback stops --
+    // without it, stopping cleared the very condition that asked for relief.
     const float load = mProcessor.mAudioDspLoad.load (std::memory_order_relaxed) * 100.0f;
     if (load < (float) threshold)
     {
         mAutoFreezeHoldTicks = 0;
-        return;
+    }
+    else
+    {
+        // Sustained, not instantaneous.  A single spike -- opening a window,
+        // loading a preset -- must not arm a freeze.  5 Hz poll, so 15 ticks is
+        // three seconds continuously over the line.
+        constexpr int kHoldTicks = 15;
+        if (++mAutoFreezeHoldTicks >= kHoldTicks)
+        {
+            mAutoFreezeHoldTicks = 0;
+            mAutoFreezePending   = true;
+        }
     }
 
-    // Sustained, not instantaneous.  A single spike -- opening a window, loading
-    // a preset -- must not freeze a tab the user is working on.  This poll runs
-    // at 5 Hz, so 15 ticks is three seconds continuously over the line.
-    constexpr int kHoldTicks = 15;
-    if (++mAutoFreezeHoldTicks < kHoldTicks) return;
-    mAutoFreezeHoldTicks = 0;
+    if (! mAutoFreezePending) return;
+    if (DSPBase::isTransportPlaying()) return;
+    if (sinceEditMs < kFreezeRefreshQuietMs) return;
+
+    // Nothing can succeed without the project folder; retrying every arm would
+    // flash the overlay forever on an unsaved project.
+    if (mProcessor.getProjectFreezeDir() == juce::File())
+    {
+        mAutoFreezePending = false;
+        return;
+    }
+    mAutoFreezePending = false;
 
     // Freeze the first eligible tab that is not already frozen.  Engine-driven
     // kinds only -- the same set freezeTab accepts.
@@ -14347,14 +14539,23 @@ void StandaloneEditor::pollAutoFreeze()
     {
         for (int i = 0; i < EngineRig::capacityOf (kind); ++i)
         {
-            if (mProcessor.engineRig().findTab (kind, i) == nullptr) continue;
-            if (mProcessor.engineRig().isFrozen (kind, i))            continue;
+            auto* tab = mProcessor.engineRig().findTab (kind, i);
+            if (tab == nullptr || tab->frozen) continue;
+            // Jeff's ruling: an EXPLICIT unfreeze means leave that tab alone --
+            // auto goes after tabs the user has expressed no opinion about.
+            // Session-scoped: a hand re-freeze or a project reload puts the tab
+            // back in play.
+            if (tab->userUnfroze) continue;
 
             // Same render notice as the stale-refresh path: this fires uninvited
-            // while the user is working and blocks for seconds.
+            // and blocks for seconds.  The kit routes to its own thirteen-strip
+            // render -- freezeTab cannot express it, so auto-freezing the kit
+            // through it failed on every trip.
             showFreezeRenderNotice (kind, i);
             juce::String err;
-            const bool ok = mProcessor.freezeTab (kind, i, err, /*byUser*/ false);
+            const bool ok = (kind == TabKind::Rusty)
+                ? mProcessor.freezeRustyKit (err, /*byUser*/ false, /*reuseValid*/ false)
+                : mProcessor.freezeTab (kind, i, err, /*byUser*/ false);
             mHeavyOpOverlay.endOp();
             if (ok) return;   // one per trip
         }
@@ -14375,6 +14576,15 @@ void StandaloneEditor::pollAutoFreeze()
 // bundles), so this re-renders them.  Playback falls back to the live engine
 // until each lands, per §6.6 -- which is why a bundle opened on a fresh machine
 // is never silent, just briefly unfrozen.
+void StandaloneEditor::applyCaptureSpecFromPrefs()
+{
+    const auto id = (LoudnessSpec::Id) juce::jlimit (
+        0, (int) LoudnessSpec::Id::Count - 1,
+        openUiPrefs()->getIntValue ("exSpecId", (int) LoudnessSpec::Id::Streaming14));
+    const float customT = (float) openUiPrefs()->getDoubleValue ("exSpecCustom", -14.0);
+    mVersionCapture.setSpec (LoudnessSpec::resolved (id, customT));
+}
+
 void StandaloneEditor::restorePendingFreezes()
 {
     // §6.7's second cleanup rule, and it runs BEFORE the empty-list early return
@@ -14395,8 +14605,9 @@ void StandaloneEditor::restorePendingFreezes()
 
     // §6.8: the span decides whether the file on disk still describes this
     // project.  A freeze rendered against a 64-beat song at 120 does not stand in
-    // for a 96-beat song at 128 -- re-rendering is the only correct answer, and
-    // freezeTab re-renders unconditionally, so a mismatch just means we say so.
+    // for a 96-beat song at 128 -- re-rendering is the only correct answer.  The
+    // stamp comparison inside freezeTab is what catches it: a changed tempo or
+    // arrangement moves the stamp, so the mismatched file is not reused.
     const double nowBeats = mPM != nullptr ? mPM->getSongEndBeats()  : 0.0;
     const double nowBpm   = mPM != nullptr ? mPM->getGlobalTempo()   : 120.0;
 
@@ -14427,8 +14638,15 @@ void StandaloneEditor::restorePendingFreezes()
         // reuseValid: a file whose content stamp still matches is reused as-is.
         // A project reopened unchanged renders NOTHING; one where a pattern was
         // edited re-renders that pattern and the song, and leaves the other
-        // patterns alone.
-        if (! mProcessor.freezeTab (p.kind, p.pageIndex, err, p.byUser, /*reuseValid*/ true))
+        // patterns alone.  Saved-stale re-renders regardless -- the stamp
+        // cannot see every invalidator, which is how the tab went stale.
+        // The kit has its own thirteen-strip render path; freezeTab cannot
+        // express it, so restoring it through freezeTab restored nothing.
+        const bool reuse = ! p.stale;
+        const bool ok = (p.kind == TabKind::Rusty)
+            ? mProcessor.freezeRustyKit (err, p.byUser, reuse)
+            : mProcessor.freezeTab (p.kind, p.pageIndex, err, p.byUser, reuse);
+        if (! ok)
             DBG ("[TS7 FREEZE] restore failed for tab " << (int) p.kind
                  << "/" << p.pageIndex << ": " << err);
     }

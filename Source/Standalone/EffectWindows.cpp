@@ -430,11 +430,25 @@ void EffectEqWindow::parentHierarchyChanged()
 
 void EffectEqWindow::timerCallback()
 {
+    auto* eq = resolveEq();
+
+    // The channel DIED (its strip was deleted): left open, this window sat
+    // bound to the display-only fallback forever -- a zombie editing an EQ
+    // nothing plays through, against the registry's own close-on-target-loss
+    // design.  "Never resolved yet" is a different state: the fallback's
+    // stated role is drawing before the graph has built the node.
+    if (eq == nullptr && mEverResolved)
+    {
+        if (onRequestClose) { onRequestClose(); return; }
+    }
+    if (eq != nullptr)
+        mEverResolved = true;
+
     // The node under this window can be rebuilt without the window hearing
     // about it (a strip respawn, a graph rebuild).  Re-bind when the resolved
     // DSP is a DIFFERENT object, or the display would keep drawing -- and
     // writing -- into the old one.
-    if (auto* eq = resolveEq(); eq != mBoundEq)
+    if (eq != mBoundEq)
         bindToChannel();
 
     // Same poll the Effects page ran: pulls the pre/post spectrum feeds and the

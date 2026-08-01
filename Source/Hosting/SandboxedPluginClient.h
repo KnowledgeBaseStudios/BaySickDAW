@@ -15,12 +15,15 @@
 //
 // THREADING, and it is the whole risk surface of this class:
 //   * The audio thread MUST NOT block on the helper.  `processBlock` writes the
-//     input into shared memory, rings the doorbell, and waits with a hard
-//     deadline; a helper that misses the deadline yields SILENCE for that slot
-//     and the block moves on.  A stalled plugin must never become a dropout for
-//     the whole app.
-//   * Every IPC callback arrives on JUCE's message thread.  State shared with
-//     the audio thread is atomic; nothing on the audio path allocates or locks.
+//     block into the shared mapping's control header, signals a named event,
+//     and waits on the reply event with a hard deadline; a helper that misses
+//     it yields SILENCE for that slot and the block moves on.  Since v3 the
+//     audio path touches NO pipe at all -- the pipe send allocated a frame and
+//     could block for the pipe timeout, both forbidden on the audio thread.
+//   * IPC callbacks arrive on the CONNECTION'S READER THREAD, not the message
+//     thread (the earlier claim here was false).  Cross-thread state is atomic
+//     or lock-guarded, and user-facing callbacks are marshalled to the message
+//     thread before they fire.
 // ─────────────────────────────────────────────────────────────────────────────
 
 namespace Hosting
@@ -62,6 +65,37 @@ public:
     void  setParameter (int index, float value01) noexcept;
     int   getNumParameters() const noexcept { return mNumParameters.load(); }
     int   getLatencySamples() const noexcept { return mLatencySamples.load(); }
+
+    // Forwarded to the helper per block via the control header, so a bridged
+    // plugin renders offline exports in offline mode like everything else.
+    void  setNonRealtime (bool b) noexcept { mNonRealtime.store (b, std::memory_order_release); }
+
+    // The load result used to be INVISIBLE: LoadReply.ok was read and dropped,
+    // and mLastError had no reader -- a plugin that failed in the helper looked
+    // exactly like one that loaded.  Both surfaced now.
+    bool loadFailed() const noexcept { return mLoadFailed.load (std::memory_order_acquire); }
+    juce::String getLastError() const
+    {
+        const juce::ScopedLock sl (mErrorLock);
+        return mLastError;
+    }
+
+    // Fired on the MESSAGE THREAD (marshalled off the reader thread).
+    // onLoadResult: ok, error text, isInstrument, acceptsMidi -- the last two
+    // correct a 32-bit plugin's filename-only scan description on first load.
+    std::function<void (bool, juce::String, bool, bool)> onLoadResult;
+    // The bridged editor's real size, reported by the helper after it opens.
+    std::function<void (int, int)> onEditorSize;
+
+    // v3: the helper's parameter list (index implicit by order), so automation
+    // can target bridged parameters -- the in-process parameter objects the
+    // lanes used to require do not exist on this side of the boundary.
+    struct BridgedParam { juce::String id, name; };
+    std::vector<BridgedParam> getParameterList() const
+    {
+        const juce::ScopedLock sl (mParamLock);
+        return mParams;
+    }
 
     void getState (juce::MemoryBlock& dest);
     void setState (const void* data, int size);
@@ -105,19 +139,25 @@ private:
     juce::String             mSharedAudioName;
     int                      mSharedBlockSize { 0 };
     int                      mSharedChannels  { 0 };
-    // Pre-sized MIDI trailer scratch.  A fixed member, not a per-block
-    // allocation: processBlock runs on the audio thread.
-    std::uint8_t      mMidiScratch[Bridge::kMaxMidiBytesPerBlock] {};
-
-    // Reply rendezvous for the per-block doorbell.  A WaitableEvent rather than
-    // a lock so the audio thread's wait has an explicit timeout.
-    juce::WaitableEvent mBlockDone { true };
-    std::atomic<bool>   mBlockOk   { false };
+    std::atomic<bool> mNonRealtime { false };
+    std::atomic<bool> mLoadFailed  { false };
 
     juce::MemoryBlock  mPendingState;
     juce::WaitableEvent mStateReady { true };
 
+    // Written on the reader thread, read from the message thread -- a bare
+    // String here was a data race.
+    mutable juce::CriticalSection mErrorLock;
     juce::String mLastError;
+
+    mutable juce::CriticalSection mParamLock;
+    std::vector<BridgedParam>     mParams;
+
+    void setError (const juce::String& e)
+    {
+        const juce::ScopedLock sl (mErrorLock);
+        mLastError = e;
+    }
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (SandboxedPluginClient)
 };

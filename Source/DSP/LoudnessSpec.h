@@ -73,6 +73,17 @@ struct LoudnessSpec
     {
         LoudnessSpec s = get (which);
         if (which == Id::Custom) s.integratedLufs = customLufs;
+        // Jeff's ruling (2026-07-29): the moment-level bar is the USER'S OWN
+        // target -- no published spec defines a short-term ceiling and an
+        // invented margin was explicitly rejected.  So every spec that has an
+        // integrated target checks short-term against that same number.  The
+        // table's checksShortTerm was false in every row and nothing could
+        // enable it, which made ShortTerm violations structurally unreachable.
+        if (s.checksIntegrated)
+        {
+            s.checksShortTerm  = true;
+            s.maxShortTermLufs = s.integratedLufs;
+        }
         return s;
     }
 

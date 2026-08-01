@@ -29,6 +29,21 @@ PluginsPage::PluginsPage (VibeSynthProcessor& p, int pageIndex)
     startTimerHz (4);
 }
 
+// Peer-keyed suspend, the shell's convention (TS4): a page whose window is
+// closed has no peer, and its view-sync poll was the one page poll still
+// running headless.
+void PluginsPage::parentHierarchyChanged()
+{
+    if (getPeer() != nullptr)
+    {
+        if (! isTimerRunning()) startTimerHz (4);
+    }
+    else if (isTimerRunning())
+    {
+        stopTimer();
+    }
+}
+
 PluginsPage::~PluginsPage()
 {
     stopTimer();

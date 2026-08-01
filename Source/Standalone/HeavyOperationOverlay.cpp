@@ -24,6 +24,12 @@ void HeavyOperationOverlay::beginOp (const juce::String& title, bool indetermina
         mTicker.clear();
         mProgress = indeterminate ? -1.0f : 0.0f;
         mPulse    = 0.0f;
+        // Cancel is OPT-IN PER OP (setCancellable after beginOp).  Without the
+        // reset, the button leaked from a cancellable freeze into the next
+        // non-cancellable op -- a project load offering a Cancel that half-
+        // aborts nothing safely.
+        mCancellable = false;
+        mCancelled   = false;
 
         promoteToDesktop();
 

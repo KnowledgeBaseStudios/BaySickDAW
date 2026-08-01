@@ -33,9 +33,17 @@ namespace Hosting::Bridge
 // the handshake and the host refuses a mismatch -- a stale helper binary left
 // over from an older install would otherwise misparse every message.
 // 2 (TS7, 2026-07-31): ProcessPayload gained transport, and the MIDI trailer
-// the original comment promised is now actually sent.  Host and helper are built
-// from this header by the same do_build.bat run, so they cannot disagree.
-inline constexpr std::uint32_t kProtocolVersion = 2;
+// the original comment promised is now actually sent.
+// 3 (2026-07-31, batch review): the per-block path LEFT THE PIPE ENTIRELY --
+// audio, MIDI, transport and the reply all ride the shared mapping's control
+// header, with a pair of named events as the rendezvous.  The pipe send was
+// never audio-thread-safe: framing allocated a MemoryBlock per block, and a
+// stalled helper let the pipe write block the audio thread for up to the
+// 15-second pipe timeout.  LoadPlugin's trailer became path + '\n' +
+// identifier, because the identifier alone contains no path and the helper
+// could never resolve a plugin from it.  Host and helper are built from this
+// header by the same do_build.bat run, so they cannot disagree.
+inline constexpr std::uint32_t kProtocolVersion = 3;
 
 // Fits comfortably inside JUCE's InterprocessConnection message framing while
 // leaving room for the largest realistic plugin state blob; anything bigger is
@@ -48,7 +56,7 @@ enum class MessageType : std::uint32_t
     Handshake      = 1,
     LoadPlugin     = 2,
     Prepare        = 3,
-    Process        = 4,
+    Process        = 4,   // RESERVED since v3 -- per-block work rides the shared mapping
     SetParameter   = 5,
     GetState       = 6,
     SetState       = 7,
@@ -91,39 +99,17 @@ struct PreparePayload
     std::uint32_t numChannels;
 };
 
-// Audio itself does NOT ride this protocol -- it moves through the shared
-// memory block the LoadReply names, because copying every block through the
-// IPC pipe would put an unbounded allocation and a syscall on the audio path.
-// This message is the per-block doorbell only.
-struct ProcessPayload
-{
-    std::uint32_t numSamples;
-    std::uint32_t numMidiBytes;    // MIDI trailer follows; see kMaxMidiBytesPerBlock
-
-    // TS7 (2026-07-31): TRANSPORT.  Added because a hosted plugin had no
-    // playhead at all -- unbridged it never got setPlayHead forwarded to the
-    // inner instance, and bridged there was nowhere to put it.  Anything with an
-    // arpeggiator, step sequencer or tempo-synced delay/LFO therefore had no
-    // host tempo to follow, which is also why forwarding a controller's MIDI
-    // clock was papering over the real hole rather than fixing it.
-    double        bpm;
-    double        ppqPosition;
-    std::int64_t  timeInSamples;
-    std::uint32_t isPlaying;
-    std::uint32_t timeSigNumerator;
-    std::uint32_t timeSigDenominator;
-    std::uint32_t reserved;        // keeps the struct a round 48 bytes on both arches
-};
-
-// MIDI trailer cap.  A block never carries anywhere near this; the bound exists
-// so a runaway buffer cannot make the frame unbounded on the audio thread.
+// Per-block MIDI cap.  A block never carries anywhere near this; the bound
+// exists so a runaway buffer cannot overrun the control header's fixed area.
 inline constexpr std::uint32_t kMaxMidiBytesPerBlock = 4096;
 
-// Trailer wire format, written and read by hand rather than by copying JUCE's
-// MidiBuffer storage: the host is x64 and a bridged helper may be x86, and this
-// file's whole premise is that a layout difference between the two silently
-// shifts every field after it.  Per event: int32 samplePosition, int32 numBytes,
-// then numBytes of raw MIDI.
+// v3: NOTHING per-block rides this protocol.  Audio, MIDI, transport and the
+// reply all live in the shared mapping's control header (see
+// BridgeSharedMemory.h SharedBlockControl), and a pair of named auto-reset
+// events is the rendezvous -- the audio thread never touches the pipe.  MIDI
+// wire format inside the control area, written and read by hand rather than by
+// copying JUCE's MidiBuffer storage (the helper may be x86): per event,
+// int32 samplePosition, int32 numBytes, then numBytes of raw MIDI.
 
 struct SetParameterPayload
 {
@@ -144,6 +130,11 @@ struct LoadReplyPayload
     std::uint32_t numParameters;
     std::uint32_t latencySamples;
     std::uint32_t sharedMemoryBytes;
+    // v3: what the loaded plugin actually IS.  A 32-bit plugin cannot be
+    // opened by the 64-bit scanner, so its scan-time description is a
+    // filename-only guess -- the first real load corrects it from here.
+    std::uint32_t isInstrument;       // 0/1
+    std::uint32_t acceptsMidi;        // 0/1
 };
 
 #pragma pack (pop)
@@ -153,10 +144,9 @@ struct LoadReplyPayload
 static_assert (sizeof (Header)              == 16, "Bridge::Header must be 16 bytes on every target");
 static_assert (sizeof (HandshakePayload)    == 8,  "HandshakePayload layout drifted");
 static_assert (sizeof (PreparePayload)      == 16, "PreparePayload layout drifted");
-static_assert (sizeof (ProcessPayload)      == 48, "ProcessPayload layout drifted");
 static_assert (sizeof (SetParameterPayload) == 8,  "SetParameterPayload layout drifted");
 static_assert (sizeof (EditorPayload)       == 16, "EditorPayload layout drifted");
-static_assert (sizeof (LoadReplyPayload)    == 16, "LoadReplyPayload layout drifted");
+static_assert (sizeof (LoadReplyPayload)    == 24, "LoadReplyPayload layout drifted");
 
 // Helper for building a framed message: header + payload + optional trailer
 // (state blob / MIDI bytes / a UTF-8 string).

@@ -62,6 +62,10 @@ public:
     bool isRunningBridged() const noexcept { return mSandbox != nullptr; }
     void openBridgedEditor  (void* parentWindowHandle, int width, int height);
     void closeBridgedEditor();
+    // Bridged automation surface (null when in-process): the lanes resolve
+    // parameter ids and write values through the client instead of the
+    // in-process parameter objects that do not exist on this side.
+    class SandboxedPluginClient* getSandboxClient() const noexcept { return mSandbox.get(); }
 
     // ── Bridging (BLU-302) ──────────────────────────────────────────────────
     // Two tiers, and the forced one is ARCHITECTURE rather than policy: a
@@ -103,6 +107,10 @@ public:
     // stores the pointer on THIS object, which left hosted plugins with no
     // transport at all.
     void   setPlayHead (juce::AudioPlayHead*) override;
+    // Same forwarding hole as the playhead: the base only flips ITS flag, so a
+    // hosted plugin rendered offline exports in realtime mode (and a bridged
+    // one raced its wall-clock deadline).  Crosses the seam both ways now.
+    void   setNonRealtime (bool) noexcept override;
     bool   acceptsMidi()  const override                 { return mDesc.isInstrument; }
     bool   producesMidi() const override                 { return false; }
     double getTailLengthSeconds() const override;
@@ -178,6 +186,11 @@ public:
     // (Jeff 2026-07-29).  Also fires for the dead marker, so a crashed plugin's
     // window shrinks to the message instead of keeping the plugin's footprint.
     std::function<void(int, int)> onNaturalSizeChanged;
+
+    // BRIDGED path: the helper reported the plugin editor's real size (message
+    // thread).  This reply used to be dropped, so a bridged window could only
+    // ever show the provisional default hole.
+    void remoteEditorSized (int w, int h);
 
     void parentHierarchyChanged() override;
     void moved() override;

@@ -250,6 +250,10 @@ private:
         // Per-pattern content stamps read back from the project, so each cached
         // pattern render is validated on its own rather than all-or-nothing.
         std::map<int, juce::uint32> patternStamps;
+        // Saved while STALE: restore must re-render even on a matching stamp --
+        // the stamp cannot see every invalidator, which is how it went stale.
+        // Last, defaulted, so the refresh queue's aggregate inits stay valid.
+        bool stale = false;
     };
     std::vector<PendingFreeze> mPendingFreezes;
     // §6.8: last pattern whose renders were published to the tasks.  -2 rather
@@ -268,6 +272,10 @@ private:
     // mHeavyOpOverlay.endOp().
     void showFreezeRenderNotice (TabKind kind, int pageIndex);
     int  mAutoFreezeHoldTicks { 0 };
+    // ARM at sustained load, FIRE at Stop (Jeff, 2026-07-31): the flag is what
+    // survives the load falling once playback stops -- stopping otherwise
+    // cleared the very condition that asked for relief.
+    bool mAutoFreezePending { false };
     juce::uint32 mLastSwingStamp { 0 };   // TS7 §6.5 swing invalidator
     // TS7 §6.6: a freeze re-render blocks the message thread for SECONDS, so it
     // must not fire while the user is still editing.  Re-armed by every content
@@ -277,6 +285,11 @@ private:
     // Re-renders queued by markEngineContentChanged, drained one per tick for
     // the same reason.
     std::vector<PendingFreeze> mFreezeRefreshQueue;
+    // Ruling 6a: push the export dialog's persisted spec choice into version
+    // capture (init + every take start).
+    void applyCaptureSpecFromPrefs();
+    // The take-report write failure alert fires once per session, not per take.
+    bool mTakeReportErrorShown { false };
     // A rack changed under us: ask every satellite window on that channel to
     // re-check its target, and close the ones whose effect is gone.
     void closeDeadEffectWindows (int channelId);

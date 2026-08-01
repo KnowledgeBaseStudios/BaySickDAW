@@ -8295,8 +8295,10 @@ void BuilderPage::doNavigatePage(int pageIndex)
 // arrangement sequence, song-only automation, arrangement audio clips (which a
 // fresh processor has no editor to publish for it), and a tempo-map-aware clock.
 //
-// Runs on a background thread.  Everything it touches is either owned by the
-// render processor or read-only shared state.
+// May run on a BACKGROUND thread (export / measure) or the MESSAGE thread (a
+// freeze render).  There is no separate render processor since TS2 -- the loop
+// drives the LIVE processor with the device suspended, which is exactly why
+// the restore set and the one-render-at-a-time begin guard exist.
 // ─────────────────────────────────────────────────────────────────────────────
 namespace
 {
@@ -8674,19 +8676,22 @@ bool BuilderPage::runOfflineLoop (const RenderOptions& opts,
         }
     }
 
+    // Restore the render's OWN transport mutations FIRST, while the device is
+    // still suspended: endOfflineRender is what resumes callbacks, and a
+    // resumed block could otherwise play against the render's pattern and loop
+    // bounds in the gap.  §7.3: the loop bounds are LIVE transport state, so
+    // leaving a render's values behind would silently re-loop the user's
+    // session over the pattern they just exported.
+    if (opts.scope == Scope::Pattern)
+        mPM.setCurrentPattern (prevPatternIndex);
+    mProcessor.mLoopStartBeats       .store (prevLoopStart, std::memory_order_relaxed);
+    mProcessor.mCachedPatternLoopBeats.store (prevLoopEnd,  std::memory_order_relaxed);
+
     // Leave offline mode on EVERY exit path: restore-set back (device config,
-    // playhead, song mode), tails cleared, device resumed -- then the
-    // pattern-scope current-pattern restore and the editor's timer resume.
+    // playhead, song mode), tails cleared, device resumed.
     const double teardownT0 = juce::Time::getMillisecondCounterHiRes();
     mProcessor.endOfflineRender();
     mFreezeTeardownMs = juce::Time::getMillisecondCounterHiRes() - teardownT0;
-    if (opts.scope == Scope::Pattern)
-        mPM.setCurrentPattern (prevPatternIndex);
-    // §7.3: the loop bounds join the restore set.  They are LIVE transport state,
-    // so leaving a render's values behind would silently re-loop the user's
-    // session over the pattern they just exported.
-    mProcessor.mLoopStartBeats       .store (prevLoopStart, std::memory_order_relaxed);
-    mProcessor.mCachedPatternLoopBeats.store (prevLoopEnd,  std::memory_order_relaxed);
     if (onOfflineRenderActive) onOfflineRenderActive (false);
 
     if (aborted)
@@ -9903,6 +9908,13 @@ BuilderPage::getPatternTracks (int patternIndex) const
     for (int i = 0; i < (int) pat.pluginRoll.size(); ++i)
         addIf (pat.pluginRoll[(size_t) i], MixerChannelIds::pluginInsert (i),
                "Plugin " + juce::String (i + 1));
+
+    // The kit is ONE tab across 13 strips, so it gets ONE entry ("1 tab 1
+    // wav").  The tap is the kit BUS -- the only point where the kit exists as
+    // a single signal; the 13 inserts cannot be told apart from the shared
+    // roll without re-deriving the note-to-piece map.  Omitting it silently
+    // dropped the entire drum kit from pattern Per Track and Full Mix exports.
+    addIf (pat.baySickRustyDrumsRoll, MixerChannelIds::kRustyDrumsBus, "Drum Kit");
 
     return out;
 }

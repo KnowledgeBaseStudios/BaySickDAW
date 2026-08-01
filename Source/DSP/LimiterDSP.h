@@ -98,7 +98,6 @@ public:
         float curveOffset;     // added to the user's ReleaseCurve (result clamped 0..1)
         float relScale;        // multiplies the user's Release time
         float satAutoDrive;    // the mode's own soft-sat drive, on top of the SAT knob
-        bool  needsLookahead;  // false = designed to work with Ahead at 0
     };
 
     static const CharacterProfile& profileFor (Character c) noexcept;
@@ -189,15 +188,9 @@ public:
     // Poking a countdown from the panel's existing 30 Hz timer needs no teardown
     // call at all: the meter simply lapses a beat after nobody is looking.
     void  pokeLufsMeter() noexcept;
-    bool  getLufsMeterActive() const noexcept
-        { return mLoudnessTargetOn || mLufsHold.load() > 0; }
     float getOutputLufsMomentary() const noexcept { return mOutLufsM.load(); }
     float getOutputLufsShortTerm() const noexcept { return mOutLufsS.load(); }
     float getOutputLufsIntegrated() const noexcept { return mOutLufsI.load(); }
-    // Clears the integrated accumulation, so a transport restart does not read
-    // as one continuous programme.  NO CALLER YET -- the panel does not offer a
-    // reset control (an earlier version of this comment claimed it did).
-    void  resetOutputLufsIntegrated() noexcept;
 
     // ── Meter accessors (UI thread reads, audio thread writes) ────────────────
     float getCurrentGainReduction() const { return mGrDb.load(); }
@@ -317,10 +310,14 @@ private:
     // BLU-110 watchdog: blocks remaining before the display meter lapses.  Poked
     // by the panel's timer, decremented by process().  See pokeLufsMeter().
     std::atomic<int> mLufsHold      { 0 };
+    // Message-thread request for an integrated-window reset, consumed by
+    // process() -- the meter itself is audio-thread-only by contract.
+    std::atomic<bool> mLufsResetPending { false };
     int              mLufsHoldBlocks { 32 };   // recomputed in prepare() for ~0.5 s
 
     // CL-244 / BLU-110: loudness of the limiter's OWN OUTPUT.  Only processed
-    // while getLufsMeterActive().
+    // while the target servo is on or the panel watchdog is holding it up
+    // (mLoudnessTargetOn || mLufsHold > 0).
     LufsMeterDSP  mOutLufs;
     // BLU-108: true peak of the output.  Only processed when mAutoCeiling.
     TruePeakMeter mOutTp;

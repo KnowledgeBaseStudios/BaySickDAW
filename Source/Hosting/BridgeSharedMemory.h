@@ -1,6 +1,7 @@
 #pragma once
 
 #include <JuceHeader.h>
+#include "PluginBridgeProtocol.h"
 
 #ifndef WIN32_LEAN_AND_MEAN
  #define WIN32_LEAN_AND_MEAN
@@ -37,6 +38,34 @@
 namespace Hosting::Bridge
 {
 
+// v3: the per-block control header at the FRONT of the mapping.  Everything a
+// block needs crosses here -- transport, MIDI, the reply -- so the audio thread
+// never touches the IPC pipe (whose send both allocated and could block on the
+// pipe timeout).  Same layout rules as the protocol header: fixed-width fields,
+// packed, asserted, because the peer may be x86.
+#pragma pack (push, 1)
+struct SharedBlockControl
+{
+    std::uint32_t sequence;            // host writes before signaling
+    std::uint32_t numSamples;
+    std::uint32_t numMidiBytes;
+    std::uint32_t nonRealtime;         // offline render flag, forwarded per block
+    double        bpm;
+    double        ppqPosition;
+    std::int64_t  timeInSamples;
+    std::uint32_t isPlaying;
+    std::uint32_t timeSigNumerator;
+    std::uint32_t timeSigDenominator;
+    std::uint32_t replyOk;             // helper writes...
+    std::uint32_t replySequence;       // ...echoing `sequence`, THEN signals done
+    std::uint32_t reserved[3];
+    std::uint8_t  midi[kMaxMidiBytesPerBlock];   // (int32 pos, int32 len, bytes)*
+};
+#pragma pack (pop)
+
+static_assert (sizeof (SharedBlockControl) == 4 * 4 + 24 + 4 * 3 + 4 * 2 + 12 + kMaxMidiBytesPerBlock,
+               "SharedBlockControl layout drifted");
+
 class SharedAudioBlock
 {
 public:
@@ -46,7 +75,8 @@ public:
     SharedAudioBlock (const SharedAudioBlock&)            = delete;
     SharedAudioBlock& operator= (const SharedAudioBlock&) = delete;
 
-    // HOST side: makes the mapping and hands its name to the helper.
+    // HOST side: makes the mapping + the two rendezvous events and hands their
+    // shared name to the helper.
     bool create (const juce::String& name, size_t bytes)
     {
         close();
@@ -56,45 +86,76 @@ public:
                                         (DWORD) ((juce::uint64) bytes >> 32),
                                         (DWORD) ((juce::uint64) bytes & 0xffffffffull),
                                         name.toWideCharPointer());
-        return finishMapping (bytes);
+        if (! finishMapping (bytes)) return false;
+
+        // Auto-reset, so one signal wakes exactly one wait -- the rendezvous is
+        // strictly one block at a time.
+        mReq  = ::CreateEventW (nullptr, FALSE, FALSE, (name + "_req") .toWideCharPointer());
+        mDone = ::CreateEventW (nullptr, FALSE, FALSE, (name + "_done").toWideCharPointer());
+        if (mReq == nullptr || mDone == nullptr) { close(); return false; }
+        std::memset (mData, 0, sizeof (SharedBlockControl));
+        return true;
     }
 
-    // HELPER side: opens the mapping the host named in Prepare.
+    // HELPER side: opens the mapping + events the host named in Prepare.
     bool open (const juce::String& name, size_t bytes)
     {
         close();
         if (bytes == 0) return false;
 
         mHandle = ::OpenFileMappingW (FILE_MAP_ALL_ACCESS, FALSE, name.toWideCharPointer());
-        return finishMapping (bytes);
+        if (! finishMapping (bytes)) return false;
+
+        mReq  = ::OpenEventW (EVENT_ALL_ACCESS, FALSE, (name + "_req") .toWideCharPointer());
+        mDone = ::OpenEventW (EVENT_ALL_ACCESS, FALSE, (name + "_done").toWideCharPointer());
+        if (mReq == nullptr || mDone == nullptr) { close(); return false; }
+        return true;
     }
 
     void close()
     {
         if (mData   != nullptr) { ::UnmapViewOfFile (mData); mData = nullptr; }
         if (mHandle != nullptr) { ::CloseHandle (mHandle);   mHandle = nullptr; }
+        if (mReq    != nullptr) { ::CloseHandle (mReq);      mReq    = nullptr; }
+        if (mDone   != nullptr) { ::CloseHandle (mDone);     mDone   = nullptr; }
         mBytes = 0;
     }
 
-    float* data()      const noexcept { return mData; }
     size_t sizeBytes() const noexcept { return mBytes; }
     bool   isValid()   const noexcept { return mData != nullptr; }
 
-    // Channel pointer for the agreed channel-major layout.  Returns null rather
-    // than running off the end when the caller's idea of the geometry disagrees
-    // with what was mapped -- on the audio thread that is a silent block, not a
-    // crash in someone else's plugin.
+    SharedBlockControl* control() const noexcept
+    { return reinterpret_cast<SharedBlockControl*> (mData); }
+
+    // ── The v3 rendezvous ────────────────────────────────────────────────────
+    // Host: fill control + channels -> signalRequest -> waitDone(deadline).
+    // Helper audio thread: waitRequest(poll) -> process -> signalDone.
+    // Raw Win32 event calls: no allocation, kernel-bounded waits -- exactly the
+    // properties the audio thread needs and the pipe send never had.
+    void signalRequest() const noexcept { if (mReq  != nullptr) ::SetEvent (mReq); }
+    void signalDone()    const noexcept { if (mDone != nullptr) ::SetEvent (mDone); }
+    bool waitRequest (int ms) const noexcept
+    { return mReq  != nullptr && ::WaitForSingleObject (mReq,  (DWORD) ms) == WAIT_OBJECT_0; }
+    bool waitDone (int ms) const noexcept
+    { return mDone != nullptr && ::WaitForSingleObject (mDone, (DWORD) ms) == WAIT_OBJECT_0; }
+
+    // Channel pointer for the agreed channel-major layout, AFTER the control
+    // header.  Returns null rather than running off the end when the caller's
+    // idea of the geometry disagrees with what was mapped -- on the audio
+    // thread that is a silent block, not a crash in someone else's plugin.
     float* channel (int index, int maxBlockSize) const noexcept
     {
         if (mData == nullptr || index < 0 || maxBlockSize <= 0) return nullptr;
-        const size_t offsetFloats = (size_t) index * (size_t) maxBlockSize;
-        if ((offsetFloats + (size_t) maxBlockSize) * sizeof (float) > mBytes) return nullptr;
-        return mData + offsetFloats;
+        const size_t offsetBytes = sizeof (SharedBlockControl)
+                                 + (size_t) index * (size_t) maxBlockSize * sizeof (float);
+        if (offsetBytes + (size_t) maxBlockSize * sizeof (float) > mBytes) return nullptr;
+        return reinterpret_cast<float*> (mData + offsetBytes);
     }
 
     static size_t bytesFor (int maxBlockSize, int numChannels) noexcept
     {
-        return (size_t) juce::jmax (0, maxBlockSize)
+        return sizeof (SharedBlockControl)
+             + (size_t) juce::jmax (0, maxBlockSize)
              * (size_t) juce::jmax (0, numChannels) * sizeof (float);
     }
 
@@ -103,7 +164,7 @@ private:
     {
         if (mHandle == nullptr) return false;
 
-        mData = static_cast<float*> (::MapViewOfFile (mHandle, FILE_MAP_ALL_ACCESS, 0, 0, bytes));
+        mData = static_cast<std::uint8_t*> (::MapViewOfFile (mHandle, FILE_MAP_ALL_ACCESS, 0, 0, bytes));
 
         if (mData == nullptr) { close(); return false; }
 
@@ -111,9 +172,11 @@ private:
         return true;
     }
 
-    void*  mHandle { nullptr };
-    float* mData   { nullptr };
-    size_t mBytes  { 0 };
+    void*         mHandle { nullptr };
+    std::uint8_t* mData   { nullptr };
+    size_t        mBytes  { 0 };
+    void*         mReq    { nullptr };
+    void*         mDone   { nullptr };
 };
 
 } // namespace Hosting::Bridge

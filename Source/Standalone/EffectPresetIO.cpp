@@ -67,6 +67,14 @@ juce::String typeFolderName (EffectType type)
         case EffectType::BassOverdriveStyle:  return "Bass Overdrive";
         case EffectType::FurmanEQStyle:       return "Pro Parametric EQ";
 
+        // QA-Fe2's locked vocal-chain stages + TS6's hosted type were missing
+        // entirely: an empty name collapsed their presets into the shared
+        // Presets/Effects root, where a load could hand one effect another
+        // effect's state.
+        case EffectType::Gate:            return "Gate";
+        case EffectType::DeReverb:        return "De-Reverb";
+        case EffectType::VST3Plugin:      return "VST3 Plugins";
+
         case EffectType::None:            return {};
     }
     return {};

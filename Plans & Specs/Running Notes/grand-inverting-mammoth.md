@@ -3686,3 +3686,214 @@ act on those message types, and nothing in the tree consumes clock; `kMaxPluginS
 
 **Left alone, needs Jeff's call:** `kProtocolVersion` is checked helper-side only -- the host ignores
 the handshake reply, so a stale helper exe would misparse silently rather than refuse.
+
+## 2026-07-31 — the batch-close review had NEVER run: 20 agents, 94 confirmed findings, six rulings
+
+**The finding before the findings.**  The mandatory batch-close review has not run for ANY of the
+seven task sets — zero /review-batch entries exist anywhere in these notes, and the two TS7 commits
+(`a055d7ef`, `8770b607`) shipped with no review at all.  Jeff caught it, and then caught the cover
+story I reached for next: I scoped the make-up review to TS7 only and justified it with "TS1-TS6
+likely had their own reviews."  They did not.  The record right here disproved it, and the review
+scope became the whole batch.
+
+### How it ran
+
+Twenty agents: ten scoped finders covering all seven task sets over `b933b54a`..HEAD — 151 files,
+~28k insertions — plus one adversarial verifier per scope.  Plan and running notes were explicitly
+treated as UNTRUSTED, verify-in-source only (the discipline the TS7 spec audit earned).  Result:
+**94 confirmed findings — 30 BLOCKER, 56 NEEDS-FIX, 8 NIT; 1 refuted, 0 unproven.**  The full
+result JSON is kept in the session scratchpad.
+
+### The headline BLOCKER themes
+
+* **Freeze lifetime.**  Closing a Clips tab is a use-after-free onto a live audio-thread reader;
+  unfreeze and refresh destroy the streamer with no settle either; a STALE freeze keeps playing the
+  OLD render because staleness never retracts the published pointers — contradicting the
+  stale-plays-live contract and six comments; every frozen tab buzzes with the transport stopped
+  (no transport gate on substitution); and freeze files are deleted on app quit / project switch,
+  defeating the content-stamp restore entirely.
+* **The Rusty kit's freeze is broken five ways.**  Destroy leaves `mRustyKitFrozen` set — a silent
+  kit in song mode; the persistence name maps match "Rusty"/"Drums" while the records write
+  "BaySickRustyDrums"/"Drum", so the kit AND Drums freezes never persisted; the manual kit-freeze
+  button is permanently disabled via `renderTaskForTab`'s missing Rusty case; and
+  `getPatternTracks` drops the kit from pattern exports.
+* **§6.9 pruning never skips anything** — the keep-set walks MASTER's predecessors, which is every
+  task in the graph.
+* **Offline renders at a non-device rate corrupt every frozen track** — raw reads at render-domain
+  positions.
+* **No offline-render mutual exclusion** — auto-freeze and an export can run concurrently.
+* **`mPluginEngines` is missing from the `prepareToPlay` sweep.**
+* **The Plugins Bus (channel 13) is missing from `resolveChannelDsp`** — its whole rack / EQ /
+  automation is unreachable.
+* **The TS7 Limiter/Maximizer mode switch is unreachable** — the visibility list omits Limiter.
+* **The plugin bridge is dead on arrival** — the helper parses a path from an identifier that has
+  none, a `toRawUTF8`-of-a-temporary use-after-free, an every-block heap alloc with a 15 s
+  audio-thread stall, an ignored sequence field, and the 64-bit bridge pref read too late.
+* **VersionCapture's retained takes are corrupted** — Take-N name reuse + JUCE append semantics.
+
+### Six spec calls posed; ALL RULED (Jeff, 2026-07-31)
+
+1. Exports keep using frozen audio, via a rate-converting freeze read — **option B**.
+2. A frozen tab substitutes SILENCE while the transport is stopped — **option a**.  Audition on a
+   frozen tab stays dead; accepted.
+3. The bridge gets FULL completion in-batch — **option A**: load path, safety fixes, failures
+   surfaced, editor sizing, bridged parameters, `setNonRealtime` forwarding, 32-bit scan intake
+   into the forced-bridge tier, Debug helper staging.
+4. Auto-freeze gates on a STOPPED transport now (matching the stale-refresh branch); the
+   genuinely-background shadow render goes to Future State — **"a now, b in future state"**.
+5. Measure writes NOTHING — **option B**.  The tooltip's "Writes no files" becomes true again;
+   reports come only from exports and version capture.
+6. Captured takes are judged against the EXPORT DIALOG's persisted spec choice — **option a** —
+   one loudness standard shared by Measure, export and take verdicts.
+
+### The fix pass, begun immediately after the rulings
+
+Four waves, a build gate after each: (1) freeze core; (2) bridge full completion; (3) plugins tab /
+windows / capture / loudness; (4) stale comments + NITs + this batch's own dead code
+(`restoreEngineFromBlob` held pending a caller check).
+
+## 2026-07-31 — the review fix pass: all 94 findings closed, five gates
+
+Gates 1-4 GREEN on the batch criterion (five exit codes 0, four link lines).  Gate 2 had one RED
+round — the new stamp hashing in `EngineRig.cpp` needed complete types for the sfizz engines,
+includes missing — fixed same round.  Eleven findings were still open when the first commit line
+was drafted; **Jeff ruled FINISH BEFORE COMMIT**, and they closed the same day (final section).
+Gate 5, after them, is the commit gate.
+
+### Freeze core — stale now RETRACTS, stopped now means silence
+
+* **Retraction plumbing** (`retractFrozenSources`).  Staleness now RETRACTS the published
+  pointers, so stale-plays-live is true DURING playback, not a promise.
+* **`removeTab` retracts FIRST**, and gains a keep-files-on-project-switch flag
+  (`deleteFreezeFiles = false` while the load shield is up) — the content-stamp restore has
+  files to reuse again.
+* **Settles + the pattern-pointer tear.**  Settles on unfreeze / refresh / re-freeze; the
+  pattern-pointer publish/read tear fixed (park at -1 + double-check); `stalePatterns` is now
+  populated by ALL staleness paths.
+* **Stopped transport = silence per ruling 2a.**  `serveBlock` clears the buffer and returns
+  true.  `OfflineHead` publishes `isPlaying`, so exports are unaffected.
+* **Rate-mismatched files** read through `readAndMix` ratio interpolation per ruling 1B.
+* **The pattern-loop seam wraps tail-then-head** — it was clipping the last samples of the loop
+  AND leaking note-ons into the skipped engine.
+* **The §6.9 prune keep-set is fixed:** master kept but NEVER expanded.  Seeding it first walked
+  its predecessors — the whole graph — so the prune skipped nothing.
+* **One render at a time:** compare-exchange guard in `beginOfflineRender` / `endOfflineRender`
+  + an early-out in the auto-freeze poll.  And the render's transport restores now happen
+  BEFORE device resume.
+
+### The Rusty kit — all four freeze routes through `freezeRustyKit`
+
+* `destroyBaySickRustyDrums` clears the kit freeze state and detaches the kit's listener;
+  `onTabClosed` finally removes the Rusty rig tab.
+* The rig tab is created at KIT CREATION — it was page-show-lazy, so restore and auto-freeze
+  could not find it.
+* Persistence name maps fixed to what the records actually write ("Drum" / "BaySickRustyDrums",
+  not "Drums" / "Rusty") — both freezes never persisted before this.
+* `restorePendingFreezes`, `refreshFreeze`, the manual button and auto-freeze ALL route the kit
+  through `freezeRustyKit`, because `freezeTab` structurally cannot express it — the button was
+  permanently disabled, and refresh silently UNFROZE a stale kit.
+* The producer skip extends to pattern mode via `mRustyFrozenPatternIndex` (the kit freeze was
+  CPU-negative there); the `RustyInsertTask` fallback is seq-guarded against stale scratch; and
+  `getPatternTracks` gains the kit as ONE entry tapping the kit bus.
+
+### Staleness + the content stamp — the missing axes
+
+The stamp now hashes owned chain stages (Inst pedals/amp), the processor-owned sfizz + kit
+engines, per-tab swing params, the tempo map + time-signature map, and block mute.  `freezeStale`
+persists — save-while-stale re-renders on load (`reuseValid = false`) instead of reusing a file
+the project already knows is wrong.  A new generic `FreezeProcListener`
+(`AudioProcessorListener`, bump-atomic + message-thread drain in `pollAutoFreeze`) covers hosted
+plugins, the Inst chain and the kit — kinds that previously had NO player-axis invalidation at
+all.
+
+### Auto-freeze per ruling 4a — arm on load, fire at stop
+
+ARM on sustained load, FIRE at stop + quiet — `mAutoFreezePending` survives the load falling at
+stop.  Manual unfreeze exempts that tab for the session (`userUnfroze`, cleared by a hand
+re-freeze, never serialized).  No-project-dir arms are dropped, dead queue jobs are purged at
+drain, and the queue + pending flag clear on `AllDynamic` teardown.
+
+### The bridge — protocol v3, full completion per ruling 3A
+
+* **The per-block path LEFT THE PIPE.**  `SharedBlockControl` header in the mapping + a named
+  auto-reset event pair; the audio thread does raw stores + `SetEvent` + a 4 ms bounded wait.
+  Kills the per-block `MemoryBlock` allocation AND the 15 s pipe-timeout stall.  The sequence
+  field is echoed and validated — desync impossible.
+* **The helper gains a dedicated TIME_CRITICAL audio thread** — plugin processing was running
+  on the pipe reader thread.
+* **`LoadPlugin` trailer = path + '\n' + identifier.**  The identifier contains no path — the
+  bridge could never load anything.  The `toRawUTF8`-of-a-temporary UAF fixed alongside.
+* **Failures surface.**  `LoadReply.ok` is read (`mLoadFailed`, `getLastError`, `onLoadResult`
+  marshalled to the message thread); the dead marker shows the reason.
+* **`EditorOpened` handled:** `onEditorSize` -> `remoteEditorSized` fits the window.
+* **`ParameterList` wired end-to-end** so bridged plugins have an automation surface —
+  `HostedPluginEffect` enumerates + applies by wire index.
+* **`setNonRealtime` crosses the seam** (unbridged forward + control-header flag, change-gated
+  helper-side).
+* **The 64-bit bridge preference takes effect:** `setStateInformation` re-instantiates when the
+  restored pref changes the route — "applies on next load" made literal.
+* **32-bit plugins are INTAKEN at scan** as minimal filename descriptions, corrected at first
+  bridged load via `LoadReply` metadata + `PluginManager::refineDescription`.  Plugins-tab
+  restore falls back to the description embedded in the state blob
+  (`stashPluginRestoreDescription`) — the added list is not the project's dependency record.
+* x64 helper staged into the Debug artefact dir; threading comment corrected (reader thread,
+  not message thread); `mLastError` lock-guarded.
+
+### Plugins tab, windows, capture — the long tail
+
+`resolveChannelDsp` + `preEqForChannelId` gain channel 13 (the Plugins bus rack / EQ /
+automation is reachable now); the `SlotComponent` mode list gains Limiter (the Maximizer mode
+was unreachable); the ribbon frozen-indicator maps all kinds including the kit folded into
+Drums, capacity from the rig; `onSubPageSelected` gains Plugins (its Piano Roll entry was dead);
+the plugin name-counter re-seeds after load; `typeFolderName` gains Gate / DeReverb /
+VST3Plugin.  Windows: PluginsManager + RustyMap owned to the main frame; `HeavyOperationOverlay`
+resets cancel state per op; session window bounds save workspace-local (killing the down-right
+creep per reopen); `EffectEqWindow` closes itself when its channel dies (`mEverResolved`
+distinguishes not-built-yet); the Output Vol lambda reads `mSlotIndex` live; `persistKeyFor`
+keys on `pageIndexHint` per its own stated rule — saved positions survive reopen for the first
+time.  The master tap pointer installs from `buildFixedTopology`, and `endOfflineRender`
+re-points engines off the render's dead stack playhead.
+
+### Measure + capture — rulings 5B and 6a applied
+
+Measure writes NOTHING (`writeReport` deleted; the tooltip's "Writes no files" is true again).
+**Note for batch close:** the CSV checkbox's only consumer WAS the Measure report, so it
+currently gates nothing — surfaced to Jeff.  The custom LUFS box reads through `readLufsBox`
+(the raw parse measured empty input against 0 LUFS); the spec choice persists
+(`exSpecId` / `exSpecCustom`) and pushes to `VersionCapture` at init + every take start per
+ruling 6a.  ShortTerm violations are reachable — `resolved()` checks short-term against the
+user's own integrated target per the no-invented-margin ruling.  Take-report write failures
+surface once per session, and take files are timestamped — Take-N name reuse +
+`FileOutputStream` append semantics were corrupting retained takes across sessions.
+
+### Dead code + stale comments — the batch's own
+
+The `restoreEngineFromBlob` caller check came back ZERO, so it is deleted.  Stale comments
+corrected: the false `unregisterTask`-fencing claim, `removeTab`'s inverted delete-order
+comment, `restorePendingFreezes`' "re-renders unconditionally", `freezeFilePrefixFor`'s
+duplicate map (it is now the one builder), CL-301's seven-vs-eight buses, the offline-harness
+replica-era header, the truncated owner-index relic, the analyzer / master-tap comment clusters
+(node NOT rebuilt; tap always live), the model-events overstatement, the Batch-7 bus count, and
+the `kNumBatch7Buses` header line.
+
+### The last eleven — ruled FINISH BEFORE COMMIT (Jeff), closed same day
+
+Jeff rejected a commit line while open items existed.  The four comment corrections, two of
+which turned out to be CODE fixes: #48 — `saveBounds` now runs from the DESTRUCTOR (what makes
+teardown and resize-only sessions persist at all), with a no-workspace guard so a late save
+cannot re-introduce the coordinate-space drift, and the header comment states the real routes;
+#49 — `sizeToContent`'s comment states its actual precedence (floor LAST, deliberately opposite
+`clampResizeToWorkspace`'s, and why that trade is right for a one-shot programmatic size);
+#77 — `releaseAllTypingNotes` now releases the plugin-audition held note while the OLD tab is
+still the live target (the claimed tab-switch backstop never covered it, and its note-off would
+have routed to the wrong engine and hung the plugin's voice); #80 — the live-MIDI encoding
+enumeration gains Clip (4) + hosted plugin (10) and the non-routed list drops Clip.  The seven
+NITs: #86 — offline blocks no longer publish live transport edges / panel transport state / the
+master Integrated reset (same `isNonRealtime` guard as the recorders); #87 — PluginsPage's poll
+is peer-gated per the shell convention; #88 — `clearSlot` completes its own swap inline and
+destroys the removed DSP, so a cleared hosted-plugin slot no longer parks a live helper process
+forever; #89 — the three dead LimiterDSP surfaces deleted, `needsLookahead`'s intent folded
+into the character-table comment; #90 — the target-on integrated reset defers to `process()`,
+where the meter's audio-thread contract holds; #91 — Spectrum view implies the Live source, so
+a render's readouts can no longer sit over a live trace; #92 — `~VersionCapture` ends the take
+before deleting the session folder, editor-facing callbacks dropped first.

@@ -531,9 +531,11 @@ struct VibeGraph::InstrChannelNode
 
     // CL-044 (QA-ModelShell TS7): master-out spectrum tap.  Written by the MASTER
     // chain only; sibling buses never touch either member.  `specFeedActive` is
-    // owned by VibeGraph (not the node) because the UI toggles it and the node is
-    // rebuilt by topology changes -- a flag living here would be reset behind the
-    // window's back.  Null on every non-master node, which is also the gate.
+    // owned by VibeGraph (not the node) so its lifetime is independent of the
+    // node's.  Since §3.1 the tap is effectively ALWAYS live -- version
+    // capture's always-on analysis want ORs with the analyzer window's -- so
+    // the flag mostly records which clients hold it up.  Null on every
+    // non-master node, which is also the gate.
     SpectrumFeed        specFeed;
     std::atomic<bool>*  specFeedActive { nullptr };
     // Pre-allocated: the mono sum cannot allocate on the audio thread.
@@ -946,6 +948,12 @@ void VibeGraph::buildFixedTopology(juce::Synthesiser&                  synth,
 
     mTopologyBuilt = true;
 
+    // The fresh master node's tap pointer must be installed HERE, not only in
+    // the two setters: analysis is always on since §3.1, and a node built
+    // after those setters last ran would push nothing until one of them
+    // happened to be called again.
+    updateMasterTapFlag();
+
     // Apply any rack state that arrived before the topology was built (VST3 host order).
     if (mPendingRackState.isValid())
     {
@@ -1025,9 +1033,9 @@ void VibeGraph::updateMasterTapFlag() noexcept
         mMasterSpecWanted.load (std::memory_order_relaxed)
             || mMasterAnalysisWanted.load (std::memory_order_relaxed),
         std::memory_order_relaxed);
-    // Re-point on every call rather than only at node construction: the master
-    // node is rebuilt by topology changes, and a pointer installed once would go
-    // stale exactly when the analyzer was open across a rebuild.
+    // Re-point on every call AND from buildFixedTopology: the pointer must be
+    // installed whenever a master node exists, whichever came first -- the
+    // build or the last setter call.
     if (mMasterNode != nullptr)
         mMasterNode->specFeedActive = &mMasterSpecActive;
 }
@@ -1122,7 +1130,8 @@ void VibeGraph::processBus(int busChId, juce::AudioBuffer<float>& buf,
         return;
     }
 
-    // Remaining buses (Clips / Vox / Inst / Vox2 / Inst2 / Inst3 / Rusty).
+    // Remaining buses (Clips / Vox / Inst / Vox2 / Inst2 / Inst3 / Rusty /
+    // Plugins -- eight since BLU-447 added the Plugins bus).
     // CL-301: the inline chain that lived here (string-keyed APVTS lookups per
     // block + the applyXxxPolarityWidth helper switch) is gone -- these buses
     // run the SAME InstrChannelNode::processChainOnly as L/B/D/FX, with

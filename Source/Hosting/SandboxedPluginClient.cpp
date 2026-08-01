@@ -64,18 +64,26 @@ bool SandboxedPluginClient::start (const juce::PluginDescription& desc, juce::St
     }
 
     mAlive.store (true);
+    mLoadFailed.store (false);
 
     Bridge::HandshakePayload hs {};
     hs.protocolVersion = Bridge::kProtocolVersion;
     hs.hostArchBits    = (std::uint32_t) (sizeof (void*) * 8);
     sendFramed (Bridge::MessageType::Handshake, &hs, sizeof (hs));
 
-    // The plugin is named by its identifier string, not by a path -- the helper
-    // re-resolves it through its own format manager, so a shell plugin with
-    // several sub-plugins lands on the right one.
-    const auto id = desc.createIdentifierString().toRawUTF8();
-    const auto idBytes = (std::uint32_t) std::strlen (id);
-    sendFramed (Bridge::MessageType::LoadPlugin, nullptr, 0, id, idBytes);
+    // v3 trailer: PATH first, then the identifier, '\n'-separated.  The
+    // identifier alone was useless to the helper -- it contains NO path (it is
+    // format-name-uid), so the old "parse the file out of it" could never load
+    // anything.  The path is what findAllTypesForFile needs; the identifier
+    // still disambiguates a shell plugin's sub-plugins.
+    //
+    // NAMED locals: the old code took toRawUTF8() of a TEMPORARY String and
+    // used the pointer after it died.
+    const juce::String payload = desc.fileOrIdentifier + "\n"
+                               + desc.createIdentifierString();
+    const auto* utf8  = payload.toRawUTF8();
+    const auto  bytes = (std::uint32_t) std::strlen (utf8);
+    sendFramed (Bridge::MessageType::LoadPlugin, nullptr, 0, utf8, bytes);
 
     return true;
 }
@@ -112,7 +120,7 @@ void SandboxedPluginClient::prepare (double sampleRate, int maxBlockSize, int nu
     {
         // No shared block means no audio path; processBlock's isValid() test
         // then yields silence for this slot rather than reading a null view.
-        mLastError = "Could not create the plugin bridge audio block";
+        setError ("Could not create the plugin bridge audio block");
         return;
     }
 
@@ -150,12 +158,17 @@ bool SandboxedPluginClient::processBlock (juce::AudioBuffer<float>& buffer,
     const int n  = buffer.getNumSamples();
     const int nc = juce::jmin (buffer.getNumChannels(), mSharedChannels);
 
-    if (n <= 0 || n > mSharedBlockSize || nc <= 0)
+    auto* ctl = mSharedAudio.control();
+
+    if (n <= 0 || n > mSharedBlockSize || nc <= 0 || ctl == nullptr)
         return false;
 
-    // AUDIO THREAD.  No allocation, no lock, and a bounded wait -- see the
-    // threading note in the header.  A miss returns false and the caller
-    // clears; it does not retry, because a retry is just a second stall.
+    // AUDIO THREAD.  v3: NOTHING here touches the pipe.  The old path framed a
+    // MemoryBlock (allocation) and handed it to the pipe write, which blocks up
+    // to the pipe TIMEOUT when the helper stalls -- 15 seconds on the audio
+    // thread.  Now: raw stores into the mapping, one SetEvent, one bounded
+    // WaitForSingleObject.  A miss returns false and the caller clears; it does
+    // not retry, because a retry is just a second stall.
     //
     // INPUT IN.  An instrument's buffer is silence here and the copy is wasted,
     // but branching on isInstrument would mean the helper reading whatever the
@@ -166,49 +179,49 @@ bool SandboxedPluginClient::processBlock (juce::AudioBuffer<float>& buffer,
         if (auto* dst = mSharedAudio.channel (c, mSharedBlockSize))
             std::memcpy (dst, buffer.getReadPointer (c), (size_t) n * sizeof (float));
 
-    mBlockOk.store (false, std::memory_order_relaxed);
-    mBlockDone.reset();
-
-    // MIDI trailer.  Hand-serialised (int32 samplePos, int32 numBytes, bytes)
-    // rather than copying JUCE's MidiBuffer storage, because the helper may be a
-    // 32-bit process and this protocol does not trust cross-architecture layout.
-    //
-    // Previously this sent NOTHING -- numMidiBytes was hard-zero with the buffer
-    // explicitly ignored -- so a bridged INSTRUMENT received no notes and was
-    // silent by construction (TS7, 2026-07-31).
+    // MIDI straight into the control area.  Hand-serialised (int32 samplePos,
+    // int32 numBytes, bytes) rather than copying JUCE's MidiBuffer storage,
+    // because the helper may be a 32-bit process and this protocol does not
+    // trust cross-architecture layout.
     std::uint32_t midiBytes = 0;
     for (const auto meta : midi)
     {
         const auto len = (std::uint32_t) meta.numBytes;
         if (midiBytes + 8 + len > Bridge::kMaxMidiBytesPerBlock)
-            break;   // bounded: a runaway buffer must not make the frame unbounded
+            break;   // bounded: a runaway buffer must not overrun the fixed area
 
         const juce::int32 pos = (juce::int32) meta.samplePosition;
         const juce::int32 nb  = (juce::int32) len;
-        std::memcpy (mMidiScratch + midiBytes,     &pos, 4);
-        std::memcpy (mMidiScratch + midiBytes + 4, &nb,  4);
-        std::memcpy (mMidiScratch + midiBytes + 8, meta.data, len);
+        std::memcpy (ctl->midi + midiBytes,     &pos, 4);
+        std::memcpy (ctl->midi + midiBytes + 4, &nb,  4);
+        std::memcpy (ctl->midi + midiBytes + 8, meta.data, len);
         midiBytes += 8 + len;
     }
 
-    Bridge::ProcessPayload p {};
-    p.numSamples          = (std::uint32_t) buffer.getNumSamples();
-    p.numMidiBytes        = midiBytes;
-    p.bpm                 = tp.bpm;
-    p.ppqPosition         = tp.ppqPosition;
-    p.timeInSamples       = (std::int64_t) tp.timeInSamples;
-    p.isPlaying           = tp.isPlaying ? 1u : 0u;
-    p.timeSigNumerator    = (std::uint32_t) juce::jmax (1, tp.timeSigNum);
-    p.timeSigDenominator  = (std::uint32_t) juce::jmax (1, tp.timeSigDen);
+    const auto seq = mSequence.fetch_add (1) + 1;
 
-    if (! sendFramed (Bridge::MessageType::Process, &p, sizeof (p),
-                      midiBytes > 0 ? mMidiScratch : nullptr, midiBytes))
+    ctl->numSamples         = (std::uint32_t) n;
+    ctl->numMidiBytes       = midiBytes;
+    ctl->nonRealtime        = mNonRealtime.load (std::memory_order_acquire) ? 1u : 0u;
+    ctl->bpm                = tp.bpm;
+    ctl->ppqPosition        = tp.ppqPosition;
+    ctl->timeInSamples      = (std::int64_t) tp.timeInSamples;
+    ctl->isPlaying          = tp.isPlaying ? 1u : 0u;
+    ctl->timeSigNumerator   = (std::uint32_t) juce::jmax (1, tp.timeSigNum);
+    ctl->timeSigDenominator = (std::uint32_t) juce::jmax (1, tp.timeSigDen);
+    ctl->replyOk            = 0;
+    // Sequence LAST of the control stores, then the event: the helper checks it
+    // echoes back, so a reply belonging to an EARLIER block (a late helper
+    // waking on a stale request) can never be mistaken for this one -- the
+    // desync the old path's ignored sequence field allowed to persist forever.
+    ctl->sequence           = seq;
+
+    mSharedAudio.signalRequest();
+
+    if (! mSharedAudio.waitDone (kBlockDeadlineMs))
         return false;
 
-    if (! mBlockDone.wait (kBlockDeadlineMs))
-        return false;
-
-    if (! mBlockOk.load (std::memory_order_acquire))
+    if (ctl->replyOk == 0 || ctl->replySequence != seq)
         return false;
 
     // OUTPUT BACK.  Only after the reply -- the helper writes in place, so
@@ -296,9 +309,8 @@ void SandboxedPluginClient::handleMessageFromWorker (const juce::MemoryBlock& mb
             // should not take the peer's word for its version either.
             if (bodyBytes < sizeof (Bridge::HandshakePayload))
             {
-                mLastError = "Plugin bridge handshake was malformed";
+                setError ("Plugin bridge handshake was malformed");
                 mAlive.store (false, std::memory_order_release);
-                mBlockDone.signal();
                 break;
             }
 
@@ -307,11 +319,10 @@ void SandboxedPluginClient::handleMessageFromWorker (const juce::MemoryBlock& mb
 
             if (hs.protocolVersion != Bridge::kProtocolVersion)
             {
-                mLastError = "Plugin bridge version mismatch - helper reports "
-                           + juce::String ((int) hs.protocolVersion) + ", app expects "
-                           + juce::String ((int) Bridge::kProtocolVersion);
+                setError ("Plugin bridge version mismatch - helper reports "
+                          + juce::String ((int) hs.protocolVersion) + ", app expects "
+                          + juce::String ((int) Bridge::kProtocolVersion));
                 mAlive.store (false, std::memory_order_release);
-                mBlockDone.signal();   // never strand an audio thread mid-wait
             }
             break;
         }
@@ -325,13 +336,56 @@ void SandboxedPluginClient::handleMessageFromWorker (const juce::MemoryBlock& mb
             std::memcpy (&r, body, sizeof (r));
             mNumParameters .store ((int) r.numParameters);
             mLatencySamples.store ((int) r.latencySamples);
+            // The ok flag was read and DROPPED here -- a plugin that failed in
+            // the helper was indistinguishable from one that loaded.
+            mLoadFailed.store (r.ok == 0, std::memory_order_release);
+
+            if (onLoadResult)
+            {
+                // READER THREAD here; the receiver updates UI-facing state.
+                juce::MessageManager::callAsync (
+                    [cb = onLoadResult, ok = (r.ok != 0), err = getLastError(),
+                     inst = (r.isInstrument != 0), midi = (r.acceptsMidi != 0)]
+                    { cb (ok, err, inst, midi); });
+            }
             break;
         }
 
-        case Bridge::MessageType::ProcessReply:
-            mBlockOk.store (true, std::memory_order_release);
-            mBlockDone.signal();
+        case Bridge::MessageType::EditorOpened:
+        {
+            // The bridged editor's REAL size.  This reply used to fall into the
+            // default arm, so the window could never fit the plugin.
+            if (bodyBytes < sizeof (Bridge::EditorPayload))
+                break;
+
+            Bridge::EditorPayload e {};
+            std::memcpy (&e, body, sizeof (e));
+
+            if (onEditorSize)
+                juce::MessageManager::callAsync (
+                    [cb = onEditorSize, w = (int) e.width, h = (int) e.height]
+                    { cb (w, h); });
             break;
+        }
+
+        case Bridge::MessageType::ParameterList:
+        {
+            // One line per parameter, index implicit by order: id '\t' name.
+            std::vector<BridgedParam> parsed;
+            juce::StringArray lines;
+            lines.addLines (juce::String::fromUTF8 ((const char*) body, (int) bodyBytes));
+            for (const auto& line : lines)
+            {
+                if (line.isEmpty()) continue;
+                BridgedParam bp;
+                bp.id   = line.upToFirstOccurrenceOf ("\t", false, false);
+                bp.name = line.fromFirstOccurrenceOf ("\t", false, false);
+                parsed.push_back (std::move (bp));
+            }
+            const juce::ScopedLock sl (mParamLock);
+            mParams = std::move (parsed);
+            break;
+        }
 
         case Bridge::MessageType::StateBlob:
             mPendingState.replaceAll (body, bodyBytes);
@@ -339,7 +393,7 @@ void SandboxedPluginClient::handleMessageFromWorker (const juce::MemoryBlock& mb
             break;
 
         case Bridge::MessageType::Error:
-            mLastError = juce::String::fromUTF8 ((const char*) body, (int) bodyBytes);
+            setError (juce::String::fromUTF8 ((const char*) body, (int) bodyBytes));
             break;
 
         default:
@@ -349,11 +403,9 @@ void SandboxedPluginClient::handleMessageFromWorker (const juce::MemoryBlock& mb
 
 void SandboxedPluginClient::handleConnectionLost()
 {
-    // The helper died.  Release anything the audio thread may be waiting on
-    // FIRST, so a block in flight fails fast instead of burning its deadline.
+    // The helper died.  The audio thread's rendezvous needs no unsticking --
+    // its wait is the 4 ms deadline and a dead helper simply never signals.
     mAlive.store (false, std::memory_order_release);
-    mBlockOk.store (false, std::memory_order_release);
-    mBlockDone.signal();
     mStateReady.signal();
 
     if (onCrashed)

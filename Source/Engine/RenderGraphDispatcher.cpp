@@ -240,7 +240,6 @@ void RenderGraphDispatcher::setFreezePrune (RenderTask* target)
     auto add = [&keep, &contains] (RenderTask* t)
     { if (t != nullptr && ! contains (t)) { keep.push_back (t); return true; } return false; };
 
-    add (master);
     add (target);
 
     // Reverse-walk the audio predecessors.  `keep` grows while we iterate it,
@@ -270,6 +269,14 @@ void RenderGraphDispatcher::setFreezePrune (RenderTask* target)
             for (const auto& link : keep[i]->mPredecessors)
                 grew |= add (link.source);
     }
+
+    // MASTER LAST, kept but NEVER EXPANDED.  Master must run (its run() is the
+    // block's completion signal) -- but it is downstream of everything, so
+    // seeding it BEFORE the closure walked its predecessors pulled the entire
+    // graph into the keep-set and the prune skipped nothing at all.  Its own
+    // output is irrelevant here: the freeze render captures at the target's
+    // tap, not at master, and skipped tasks still decrement master's counter.
+    add (master);
 
     for (auto* t : mTasks)
         if (t != nullptr)

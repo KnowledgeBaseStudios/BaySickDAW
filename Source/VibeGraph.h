@@ -531,11 +531,11 @@ public:
     // actually leaves the app.
     //
     // The ACTIVE FLAG lives here rather than on the master node deliberately: the
-    // node is destroyed and rebuilt by topology changes, and a flag living there
-    // would silently reset while the analyzer window was still open.  The node
-    // holds a pointer to this one, so a rebuild re-points at the same flag.
-    // setMasterSpectrumActive() is called by the analyzer window's peer-keyed
-    // suspend hook, so a closed window costs one relaxed load per block.
+    // graph outlives any node, and the node holds a POINTER to this one flag
+    // (installed by buildFixedTopology and re-pointed by every setter).  Since
+    // §3.1 the tap is effectively ALWAYS live -- version capture's always-on
+    // analysis want ORs with the analyzer window's -- so closing that window
+    // changes which client holds the tap up, not whether it runs.
     void setMasterSpectrumActive (bool on) noexcept;
     // TS7 §3.1: version capture's own want on the same tap.  Analysis is always
     // on, so it cannot depend on the analyzer window being open; the tap runs if

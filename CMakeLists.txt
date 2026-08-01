@@ -823,9 +823,17 @@ target_link_libraries(BaySickPluginHost
 )
 
 # Stage the helper beside the app so SandboxedPluginClient::helperExecutable
-# finds it next to the running binary.
+# finds it next to the running binary.  The helper builds ONCE (Release) but
+# BOTH app configs need it beside their exe -- the generator expression alone
+# staged it only into the config being built, so the Debug app could never
+# find the bridge at all.
 add_custom_command(TARGET BaySickPluginHost POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
             "$<TARGET_FILE:BaySickPluginHost>"
             "$<TARGET_FILE_DIR:BaySickDAWStandalone>/$<TARGET_FILE_NAME:BaySickPluginHost>"
+    COMMAND ${CMAKE_COMMAND} -E make_directory
+            "${CMAKE_BINARY_DIR}/BaySickDAWStandalone_artefacts/Debug"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "$<TARGET_FILE:BaySickPluginHost>"
+            "${CMAKE_BINARY_DIR}/BaySickDAWStandalone_artefacts/Debug/$<TARGET_FILE_NAME:BaySickPluginHost>"
     VERBATIM)

@@ -37,4 +37,9 @@ private:
     int                  mStripIndex = 0;
     VibeGraph*           mGraph      = nullptr;
     VibeSynthProcessor*  mProcessor  = nullptr;
+    // Audio-thread only.  Last engine render seq this strip copied from; the
+    // producer does not run every block (frozen-kit skip, idle suspend), and
+    // the scratch then still holds the previous render -- copying it would
+    // repeat old drum audio.
+    juce::uint32         mLastSeenRenderSeq = 0;
 };

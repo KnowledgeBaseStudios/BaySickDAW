@@ -19,15 +19,17 @@ namespace
     // much of the mode's own soft saturation is dialled in.
     constexpr LimiterDSP::CharacterProfile kCharacters[(size_t) LimiterDSP::Character::Count] =
     {
-        // name       relFast relSlow knee  curveOff relScale sat   needsAhead
-        { "Clean",      20.f,  300.f,  6.0f,  0.00f,  1.00f,  0.00f, true  },
-        { "Smooth",     40.f,  600.f, 10.0f,  0.30f,  1.40f,  0.00f, true  },
-        { "Tight",      12.f,  180.f,  5.0f, -0.15f,  0.70f,  0.00f, true  },
-        { "Punch",       8.f,  250.f,  3.0f, -0.25f,  0.80f,  0.00f, true  },
-        { "Glue",       60.f,  800.f, 12.0f,  0.30f,  1.60f,  0.00f, true  },
-        { "Loud",        6.f,  120.f,  4.0f, -0.30f,  0.50f,  0.35f, true  },
-        { "Warm",       25.f,  350.f,  7.0f,  0.15f,  1.10f,  0.55f, true  },
-        { "Instant",     2.f,   40.f,  2.0f, -0.40f,  0.30f,  0.20f, false },
+        // name       relFast relSlow knee  curveOff relScale sat
+        // (Instant's short envelopes are what make it usable with Ahead at 0;
+        //  the old needsLookahead column encoded that and nothing read it.)
+        { "Clean",      20.f,  300.f,  6.0f,  0.00f,  1.00f,  0.00f },
+        { "Smooth",     40.f,  600.f, 10.0f,  0.30f,  1.40f,  0.00f },
+        { "Tight",      12.f,  180.f,  5.0f, -0.15f,  0.70f,  0.00f },
+        { "Punch",       8.f,  250.f,  3.0f, -0.25f,  0.80f,  0.00f },
+        { "Glue",       60.f,  800.f, 12.0f,  0.30f,  1.60f,  0.00f },
+        { "Loud",        6.f,  120.f,  4.0f, -0.30f,  0.50f,  0.35f },
+        { "Warm",       25.f,  350.f,  7.0f,  0.15f,  1.10f,  0.55f },
+        { "Instant",     2.f,   40.f,  2.0f, -0.40f,  0.30f,  0.20f },
     };
 }
 
@@ -715,6 +717,11 @@ void LimiterDSP::process (juce::AudioBuffer<float>& buffer)
     const bool wantLufs = maxOn && (mLoudnessTargetOn || mLufsHold.load() > 0);
     if (mLufsPrepared && wantLufs)
     {
+        // Message-thread reset request (target mode switched on), honoured
+        // HERE where the meter's audio-thread contract holds.
+        if (mLufsResetPending.exchange (false, std::memory_order_acq_rel))
+            mOutLufs.resetIntegrated();
+
         mOutLufs.process (buffer);
         mOutLufsM.store (mOutLufs.momentary());
         mOutLufsS.store (mOutLufs.shortTerm());
@@ -788,11 +795,13 @@ void LimiterDSP::setLoudnessTargetOn (bool on)
         // left on the input gain would make the limiter louder than the panel says.
         mServoDb.store (0.0f);
     }
-    else if (mLufsPrepared)
+    else
     {
         // Start the loop from a clean programme measurement rather than whatever
-        // the display meter happened to be showing.
-        mOutLufs.resetIntegrated();
+        // the display meter happened to be showing.  DEFERRED to process():
+        // this setter runs on the message thread and LufsMeterDSP's contract is
+        // audio-thread-only -- resetting here raced a block mid-measurement.
+        mLufsResetPending.store (true, std::memory_order_release);
     }
 }
 
@@ -828,12 +837,6 @@ void LimiterDSP::setTruePeakTargetDb (float dbTp)
 void LimiterDSP::pokeLufsMeter() noexcept
 {
     mLufsHold.store (mLufsHoldBlocks);
-}
-
-void LimiterDSP::resetOutputLufsIntegrated() noexcept
-{
-    if (mLufsPrepared) mOutLufs.resetIntegrated();
-    mOutLufsI.store (-120.0f);
 }
 
 void LimiterDSP::setSatThresh (float lin)

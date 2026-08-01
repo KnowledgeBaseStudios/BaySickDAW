@@ -499,6 +499,7 @@ void EffectsPage::resolveChannelDsp (VibeGraph& vg, int id,
     case 10: rack = vg.getInstBus2Rack();       eq = vg.getInstBus2EQ();      break;
     case 11: rack = vg.getInstBus3Rack();       eq = vg.getInstBus3EQ();      break;
     case 12: rack = vg.getRustyDrumsBusRack();  eq = vg.getRustyDrumsBusEQ(); break;
+    case 13: rack = vg.getPluginsBusRack();     eq = vg.getPluginsBusEQ();    break;
     default:
         if (id >= 200 && id < 200 + kMaxLayerPages)
         {
@@ -823,6 +824,7 @@ EQ8MsDSP* EffectsPage::preEqForChannelId (VibeGraph& vg, int id)
         case 10: return vg.getInstBus2PreEQ();
         case 11: return vg.getInstBus3PreEQ();
         case 12: return vg.getRustyDrumsBusPreEQ();
+        case 13: return vg.getPluginsBusPreEQ();
         default: break;
     }
     if      (id >= 100 && id < 200)                                              return vg.getInsertPreEQ(VibeGraph::InsertKind::Drum,  id - 100);

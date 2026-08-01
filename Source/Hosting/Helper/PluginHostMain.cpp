@@ -1,4 +1,6 @@
 #include <JuceHeader.h>
+#include <atomic>
+#include <thread>
 #include "../PluginBridgeProtocol.h"
 #include "../BridgeSharedMemory.h"
 
@@ -35,6 +37,7 @@ public:
 
     ~PluginHostWorker() override
     {
+        stopAudioThread();
         cancelPendingUpdate();
         closeEditor();
         mPlugin.reset();
@@ -58,7 +61,8 @@ public:
             case MT::Handshake:      onHandshake (body, bodyBytes);   break;
             case MT::LoadPlugin:     onLoad      (body, bodyBytes);   break;
             case MT::Prepare:        onPrepare   (body, bodyBytes);   break;
-            case MT::Process:        onProcess   (body, bodyBytes);   break;
+            // MT::Process is RESERVED since v3 -- blocks ride the shared
+            // mapping's control header and events, never the pipe.
             case MT::SetParameter:   onSetParam  (body, bodyBytes);   break;
             case MT::GetState:       onGetState();                    break;
             case MT::SetState:       onSetState  (body, bodyBytes);   break;
@@ -113,26 +117,37 @@ private:
 
     void onLoad (const std::uint8_t* body, std::uint32_t bytes)
     {
-        const auto identifier = juce::String::fromUTF8 ((const char*) body, (int) bytes);
+        // v3 trailer: PATH '\n' IDENTIFIER.  The identifier alone contains no
+        // path (it is format-name-uid), so the old "parse the file out of it"
+        // could never resolve a plugin -- the bridge was unable to load
+        // ANYTHING.  The path drives the scan; the identifier disambiguates a
+        // shell plugin's sub-plugins.
+        const auto both       = juce::String::fromUTF8 ((const char*) body, (int) bytes);
+        const auto path       = both.upToFirstOccurrenceOf ("\n", false, false);
+        const auto identifier = both.fromFirstOccurrenceOf ("\n", false, false);
 
-        // Re-scan for the identifier rather than trusting a path: a shell
-        // plugin holds several sub-plugins behind one file, and the identifier
-        // is what disambiguates them.
-        juce::KnownPluginList list;
         juce::OwnedArray<juce::PluginDescription> found;
 
         for (auto* fmt : mFormats.getFormats())
-            fmt->findAllTypesForFile (found, identifierToFile (identifier));
+            fmt->findAllTypesForFile (found, path);
 
         const juce::PluginDescription* match = nullptr;
 
         for (auto* d : found)
-            if (d->createIdentifierString() == identifier)
+            if (identifier.isNotEmpty() && d->createIdentifierString() == identifier)
                 match = d;
+
+        // A 32-bit plugin's identifier was built from a filename-only scan
+        // guess, so it will not match what a REAL scan of the file produces --
+        // fall back to the file's own (sole) description rather than refusing.
+        if (match == nullptr && found.size() == 1)
+            match = found[0];
 
         if (match == nullptr)
         {
-            replyError ("Plugin not found in helper: " + identifier);
+            replyError (found.isEmpty()
+                            ? "The helper could not read any plugin from: " + path
+                            : "Plugin not found in helper: " + identifier);
             sendLoadReply (false);
             return;
         }
@@ -147,14 +162,26 @@ private:
             return;
         }
 
+        mLoadedDesc = *match;
         sendLoadReply (true);
-    }
 
-    // The identifier's leading field is the file path, which is all
-    // findAllTypesForFile needs; the uid disambiguation happens above.
-    static juce::String identifierToFile (const juce::String& identifier)
-    {
-        return identifier.upToFirstOccurrenceOf ("-", false, false).trim();
+        // v3: the parameter list, so the host's automation can target bridged
+        // parameters (it used to require the in-process instance and therefore
+        // structurally excluded every bridged plugin).  One line per parameter,
+        // index implicit by order: id '\t' name '\n'.
+        {
+            juce::String list;
+            for (auto* p : mPlugin->getParameters())
+            {
+                juce::String id = juce::String (p->getParameterIndex());
+                if (auto* hp = dynamic_cast<juce::AudioPluginInstance::HostedParameter*> (p))
+                    id = hp->getParameterID();
+                list << id << '\t' << p->getName (64) << '\n';
+            }
+            const auto* utf8 = list.toRawUTF8();
+            reply (Hosting::Bridge::MessageType::ParameterList, nullptr, 0,
+                   utf8, (std::uint32_t) std::strlen (utf8));
+        }
     }
 
     void sendLoadReply (bool ok)
@@ -164,6 +191,10 @@ private:
         r.numParameters     = mPlugin != nullptr ? (std::uint32_t) mPlugin->getParameters().size() : 0u;
         r.latencySamples    = mPlugin != nullptr ? (std::uint32_t) mPlugin->getLatencySamples() : 0u;
         r.sharedMemoryBytes = 0;
+        // v3: what the plugin actually IS -- corrects the host's filename-only
+        // description for plugins the 64-bit scanner could not open.
+        r.isInstrument      = mLoadedDesc.isInstrument ? 1u : 0u;
+        r.acceptsMidi       = (mPlugin != nullptr && mPlugin->acceptsMidi()) ? 1u : 0u;
         reply (Hosting::Bridge::MessageType::LoadReply, &r, sizeof (r));
     }
 
@@ -171,6 +202,10 @@ private:
     {
         if (mPlugin == nullptr || bytes < sizeof (Hosting::Bridge::PreparePayload))
             return;
+
+        // The audio thread reads the mapping this replaces and calls into the
+        // plugin this re-prepares -- stop it across the swap, restart after.
+        stopAudioThread();
 
         Hosting::Bridge::PreparePayload p {};
         std::memcpy (&p, body, sizeof (p));
@@ -199,26 +234,50 @@ private:
 
         mPlugin->setPlayConfigDetails (mChannels, mChannels, p.sampleRate, mBlock);
         mPlugin->prepareToPlay (p.sampleRate, mBlock);
+
+        // v3: per-block work rides the mapping's control header + events, never
+        // the pipe (whose delivery thread also serviced control messages and
+        // whose send was the host's audio-thread stall).  One dedicated thread,
+        // highest priority the OS grants without admin.
+        if (mShared.isValid())
+            startAudioThread();
     }
 
-    void onProcess (const std::uint8_t* body, std::uint32_t bytes)
+    // ── v3 audio thread ──────────────────────────────────────────────────────
+    void startAudioThread()
     {
-        if (bytes < sizeof (Hosting::Bridge::ProcessPayload))
-            return;
+        mAudioRun.store (true, std::memory_order_release);
+        mAudioThread = std::thread ([this] { audioLoop(); });
+        if (auto h = mAudioThread.native_handle())
+            ::SetThreadPriority (h, THREAD_PRIORITY_TIME_CRITICAL);
+    }
 
-        Hosting::Bridge::ProcessPayload p {};
-        std::memcpy (&p, body, sizeof (p));
+    void stopAudioThread()
+    {
+        mAudioRun.store (false, std::memory_order_release);
+        if (mAudioThread.joinable())
+            mAudioThread.join();   // the poll wait bounds the join at ~200 ms
+    }
 
-        if (mPlugin != nullptr)
+    void audioLoop()
+    {
+        while (mAudioRun.load (std::memory_order_acquire))
         {
-            const int n = (int) juce::jmin ((std::uint32_t) mBlock, p.numSamples);
+            // Bounded poll so a stop request is honoured even if the host
+            // never signals again.
+            if (! mShared.waitRequest (200))
+                continue;
+
+            auto* ctl = mShared.control();
+            if (ctl == nullptr || mPlugin == nullptr)
+                continue;
+
+            const auto seq = ctl->sequence;
+            const int  n   = (int) juce::jmin ((std::uint32_t) mBlock, ctl->numSamples);
 
             // Render straight into the host's mapping -- the plugin's output IS
-            // the shared block, so no copy and no second buffer.  Falls back to
-            // the private scratch only when the mapping never opened, which is
-            // silence at the host end rather than a crash here.
+            // the shared block, so no copy and no second buffer.
             float* const* chans = mScratch.getArrayOfWritePointers();
-
             if (mShared.isValid())
             {
                 for (int c = 0; c < mChannels; ++c)
@@ -226,48 +285,57 @@ private:
                         mChannelPtrs[(size_t) c] = p2;
                 chans = mChannelPtrs.data();
             }
-
             juce::AudioBuffer<float> view (chans, mChannels, n);
 
-            // TS7 (2026-07-31): host transport arrives as plain values because
-            // nothing with a vtable can cross a process boundary.  Rebuilt into
-            // a real AudioPlayHead here so the plugin's arpeggiators and synced
-            // effects see a host exactly as they would unbridged.
+            // Host transport arrives as plain values because nothing with a
+            // vtable can cross a process boundary.  Rebuilt into a real
+            // AudioPlayHead so the plugin's arpeggiators and synced effects see
+            // a host exactly as they would unbridged.
             mPlayHead.mPos = {};
-            mPlayHead.mPos.setBpm (p.bpm);
-            mPlayHead.mPos.setPpqPosition (p.ppqPosition);
-            mPlayHead.mPos.setTimeInSamples ((juce::int64) p.timeInSamples);
-            mPlayHead.mPos.setIsPlaying (p.isPlaying != 0);
+            mPlayHead.mPos.setBpm (ctl->bpm);
+            mPlayHead.mPos.setPpqPosition (ctl->ppqPosition);
+            mPlayHead.mPos.setTimeInSamples ((juce::int64) ctl->timeInSamples);
+            mPlayHead.mPos.setIsPlaying (ctl->isPlaying != 0);
             mPlayHead.mPos.setTimeSignature (juce::AudioPlayHead::TimeSignature {
-                (int) p.timeSigNumerator, (int) p.timeSigDenominator });
+                (int) ctl->timeSigNumerator, (int) ctl->timeSigDenominator });
             mPlugin->setPlayHead (&mPlayHead);
 
-            // MIDI trailer: (int32 samplePos, int32 numBytes, bytes) per event.
-            // Previously the host sent none at all, so a bridged INSTRUMENT was
-            // silent no matter what was played into it.
-            mMidi.clear();
-            if (p.numMidiBytes > 0
-                && bytes >= sizeof (Hosting::Bridge::ProcessPayload) + p.numMidiBytes)
+            // Offline flag, change-gated -- setNonRealtime can be non-trivial
+            // in a plugin and this loop runs per block.
+            const bool nrt = ctl->nonRealtime != 0;
+            if (nrt != mLastNonRealtime)
             {
-                const std::uint8_t* m = body + sizeof (Hosting::Bridge::ProcessPayload);
-                std::uint32_t off = 0;
-                while (off + 8 <= p.numMidiBytes)
-                {
-                    juce::int32 pos = 0, nb = 0;
-                    std::memcpy (&pos, m + off,     4);
-                    std::memcpy (&nb,  m + off + 4, 4);
-                    off += 8;
-                    if (nb <= 0 || off + (std::uint32_t) nb > p.numMidiBytes)
-                        break;   // truncated or corrupt -- drop the remainder
-                    mMidi.addEvent (m + off, nb, pos);
-                    off += (std::uint32_t) nb;
-                }
+                mLastNonRealtime = nrt;
+                mPlugin->setNonRealtime (nrt);
+            }
+
+            // MIDI out of the control area: (int32 samplePos, int32 numBytes,
+            // bytes) per event, bounds-checked, corrupt remainder dropped.
+            mMidi.clear();
+            const auto midiBytes = juce::jmin (ctl->numMidiBytes,
+                                               Hosting::Bridge::kMaxMidiBytesPerBlock);
+            std::uint32_t off = 0;
+            while (off + 8 <= midiBytes)
+            {
+                juce::int32 pos = 0, nb = 0;
+                std::memcpy (&pos, ctl->midi + off,     4);
+                std::memcpy (&nb,  ctl->midi + off + 4, 4);
+                off += 8;
+                if (nb <= 0 || off + (std::uint32_t) nb > midiBytes)
+                    break;
+                mMidi.addEvent (ctl->midi + off, nb, pos);
+                off += (std::uint32_t) nb;
             }
 
             mPlugin->processBlock (view, mMidi);
-        }
 
-        reply (Hosting::Bridge::MessageType::ProcessReply, nullptr, 0);
+            // Echo the sequence THEN flag ok THEN signal: the host validates
+            // the echo, so a reply to a stale request can never be taken for
+            // the current block's.
+            ctl->replySequence = seq;
+            ctl->replyOk       = 1;
+            mShared.signalDone();
+        }
     }
 
     void onSetParam (const std::uint8_t* body, std::uint32_t bytes)
@@ -352,6 +420,14 @@ private:
     std::unique_ptr<juce::AudioPluginInstance>  mPlugin;
     std::unique_ptr<juce::AudioProcessorEditor> mEditor;
     Hosting::Bridge::EditorPayload mPendingEditor {};
+    juce::PluginDescription        mLoadedDesc;
+
+    // v3 audio thread.  Owns every mPlugin->processBlock call; started only
+    // after a successful Prepare mapped the shared block, stopped before any
+    // re-prepare or teardown touches what it reads.
+    std::thread       mAudioThread;
+    std::atomic<bool> mAudioRun { false };
+    bool              mLastNonRealtime { false };
 
     juce::AudioBuffer<float> mScratch;   // fallback only -- see onPrepare
     juce::MidiBuffer         mMidi;

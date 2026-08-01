@@ -9,6 +9,11 @@
 #include "BaySickNAMIR/BaySickNAMIRProcessor.h"
 #include "Standalone/EngineChainProcessor.h"
 #include "Hosting/HostedPlugin.h"   // QA-ModelShell TS6: hosted VST3 instrument
+// Complete types for the content stamp's processor-owned engine hashing --
+// PluginProcessor.h only forward-declares these three.
+#include "BaySickGuitars/BaySickGuitarsProcessor.h"
+#include "BaySickBasses/BaySickBassesProcessor.h"
+#include "BaySickRustyDrums/BaySickRustyDrumsProcessor.h"
 
 EngineRig::EngineRig (VibeSynthProcessor& proc, juce::UndoManager& undoMgr)
     : mProc (proc), mUndoManager (undoMgr)
@@ -95,20 +100,32 @@ EngineTab* EngineRig::addTab (TabKind k, int pageIndex, const juce::String& name
     return mTabs.back().get();
 }
 
-void EngineRig::removeTab (TabKind k, int pageIndex)
+void EngineRig::removeTab (TabKind k, int pageIndex, bool deleteFreezeFiles)
 {
     for (size_t i = 0; i < mTabs.size(); ++i)
     {
         if (mTabs[i]->kind != k || mTabs[i]->pageIndex != pageIndex) continue;
 
-        // §6.7: deleting a frozen track deletes its freeze file.  Done BEFORE
-        // teardown so the streamer holding the file open is destroyed first --
-        // Windows refuses to delete a file with a live handle, which is exactly
-        // how this would have failed silently if it ran after.
+        // ORDER IS LOAD-BEARING (the Clips-close use-after-free): a Clips
+        // strip's Composite task SURVIVES this teardown -- audio inserts
+        // persist for the project lifetime -- so its frozen-source pointers
+        // must be nulled BEFORE the streamers die, and the settle inside
+        // teardownEngine is what lets an in-flight block drain between the
+        // null and the erase.  Harmless for the kinds whose task dies with
+        // the unregister.
         const bool wasFrozen = mTabs[i]->frozen;
+        if (wasFrozen)
+            mProc.retractFrozenSources (k, pageIndex);
+
         teardownEngine (*mTabs[i], /*settleAfterUnregister=*/ true);
         mTabs.erase (mTabs.begin() + (long) i);
-        if (wasFrozen && onFreezeFileObsolete) onFreezeFileObsolete (k, pageIndex);
+
+        // File delete AFTER teardown: Windows refuses to delete a file the
+        // streamer still holds open.  And only on a USER delete -- a project
+        // switch or app quit keeps the files, which are the regenerable cache
+        // the content stamp reuses on the next load (§6.8).
+        if (wasFrozen && deleteFreezeFiles && onFreezeFileObsolete)
+            onFreezeFileObsolete (k, pageIndex);
         return;
     }
 }
@@ -160,19 +177,26 @@ void EngineRig::markEngineContentChanged (TabKind k, int pageIndex)
     if (mProc.isNonRealtime()) return;
 
     auto* t = findTab (k, pageIndex);
-    if (t == nullptr || ! t->frozen || t->freezeStale) return;
+    if (t == nullptr || ! t->frozen) return;
+
+    const bool transition = ! t->freezeStale;
     t->freezeStale = true;
 
     // §6.8 AXIS ONE -- the PLAYER changed, so EVERY cached pattern for this tab
-    // is wrong, not just the one being viewed.  This is the half I first
-    // mis-specified as "per-pattern staleness INSTEAD of per-tab": that would
-    // never have caught a preset change, a knob move or an engine swap, and the
-    // per-pattern cache would have gone on serving audio from the old sound.
-    // The two axes are additive.
+    // is wrong, not just the one being viewed.  Populated even when the tab was
+    // ALREADY stale: markAllFreezesStale sets the flag without walking this
+    // map, so an early-out on the flag left tempo-staled caches looking valid
+    // to the republish gate.
     for (const auto& kv : t->freezePatternStreams)
         t->stalePatterns.insert (kv.first);
 
-    if (onFreezeStateChanged) onFreezeStateChanged (k, pageIndex);
+    // §6.6: stale plays LIVE from this block, not from whenever the re-render
+    // lands.  Atomic nulls only -- the streams stay owned by the tab, so
+    // nothing here frees memory an in-flight block could be reading.
+    mProc.retractFrozenSources (k, pageIndex);
+    republishPatternSources (mProc.freezePatternIndexNow());
+
+    if (transition && onFreezeStateChanged) onFreezeStateChanged (k, pageIndex);
 }
 
 // §6.8 AXIS TWO -- this PATTERN's notes changed, so its cached render is wrong
@@ -189,12 +213,21 @@ void EngineRig::markPatternContentChanged (int patternIndex)
         const bool hasPattern = t->freezePatternStreams.count (patternIndex) > 0;
         if (hasPattern) t->stalePatterns.insert (patternIndex);
 
-        if (! t->freezeStale)
-        {
-            t->freezeStale = true;
-            if (onFreezeStateChanged) onFreezeStateChanged (t->kind, t->pageIndex);
-        }
+        const bool transition = ! t->freezeStale;
+        t->freezeStale = true;
+        // §6.6: the song render contains this pattern, so it must stop playing
+        // NOW -- retraction is what makes stale-plays-live true during
+        // playback rather than a promise the next re-render keeps.
+        mProc.retractFrozenSources (t->kind, t->pageIndex);
+        if (transition && onFreezeStateChanged)
+            onFreezeStateChanged (t->kind, t->pageIndex);
     }
+
+    // Re-point every tab whose CURRENT pattern render is still valid -- the
+    // retraction above nulled those too, and the editor's poll only
+    // republishes on a pattern CHANGE, so without this they would sit on the
+    // live engine until the user switched away and back.
+    republishPatternSources (mProc.freezePatternIndexNow());
 }
 
 // Point every frozen tab's task at the render for the pattern now looping, or at
@@ -248,9 +281,18 @@ void EngineRig::markAllFreezesStale()
 
     for (auto& t : mTabs)
     {
-        if (! t->frozen || t->freezeStale) continue;
+        if (! t->frozen) continue;
+
+        // Every cached pattern too, not just the flag: the republish gate
+        // reads stalePatterns, and leaving it empty here is exactly how a
+        // tempo change kept pattern mode serving pre-change renders.
+        for (const auto& kv : t->freezePatternStreams)
+            t->stalePatterns.insert (kv.first);
+
+        const bool transition = ! t->freezeStale;
         t->freezeStale = true;
-        if (onFreezeStateChanged) onFreezeStateChanged (t->kind, t->pageIndex);
+        mProc.retractFrozenSources (t->kind, t->pageIndex);
+        if (transition && onFreezeStateChanged) onFreezeStateChanged (t->kind, t->pageIndex);
     }
 }
 
@@ -258,6 +300,21 @@ bool EngineRig::isFrozen (TabKind k, int pageIndex) const
 {
     const auto* t = findTab (k, pageIndex);
     return t != nullptr && t->frozen;
+}
+
+// Message thread only: markEngineContentChanged walks vectors and fires view
+// callbacks, which is exactly what the listener callbacks must not do from
+// whatever thread notified them.
+void EngineRig::drainEngineChangeStamps()
+{
+    for (auto& t : mTabs)
+    {
+        if (t->freezeProcListener == nullptr) continue;
+        const auto s = t->freezeProcListener->stamp.load (std::memory_order_acquire);
+        if (s == t->freezeProcStampSeen) continue;
+        t->freezeProcStampSeen = s;
+        if (t->frozen) markEngineContentChanged (t->kind, t->pageIndex);
+    }
 }
 
 bool EngineRig::isFreezeStale (TabKind k, int pageIndex) const
@@ -299,8 +356,10 @@ juce::AudioProcessor* EngineRig::setEngineType (TabKind k, int pageIndex,
         return tab->engine.get();
 
     // Swap path keeps the page-era semantics: unregister + destroy with NO
-    // settle sleep (only full teardown settles) -- the dispatcher's
-    // unregisterTask already fences the in-flight block.
+    // settle sleep (only full teardown settles).  unregisterTask does NOT
+    // fence the in-flight block -- the earlier claim here was false; what
+    // actually covers the swap is that it runs on the message thread from a
+    // user gesture while the strip's task early-outs on the null engine.
     if (tab->engine != nullptr)
         teardownEngine (*tab, /*settleAfterUnregister=*/ false);
 
@@ -327,6 +386,24 @@ juce::AudioProcessor* EngineRig::setEngineType (TabKind k, int pageIndex,
         tab->freezeWatcher->onChanged = [this, k, pageIndex]
         { markEngineContentChanged (k, pageIndex); };
         apvts->state.addListener (tab->freezeWatcher.get());
+    }
+    else if (tab->engine != nullptr)
+    {
+        // No APVTS to watch (hosted plugin / chain wrapper): listen to the
+        // processors themselves -- the wrapper AND its owned stages, so a
+        // pedal or amp knob still invalidates an Inst freeze.  Bump-and-drain,
+        // never a direct mark (no thread guarantee on the notifications).
+        tab->freezeProcListener = std::make_unique<EngineTab::FreezeProcListener>();
+        tab->freezeListenedProcs.clear();
+        auto attach = [&tab] (juce::AudioProcessor* p)
+        {
+            if (p == nullptr) return;
+            p->addListener (tab->freezeProcListener.get());
+            tab->freezeListenedProcs.push_back (p);
+        };
+        attach (tab->engine.get());
+        for (const auto& stage : tab->ownedStages)
+            attach (stage.get());
     }
 
     if (onEngineCreated) onEngineCreated (*tab);
@@ -381,6 +458,21 @@ juce::AudioProcessor* EngineRig::createEngineFor (EngineTab& tab, const juce::St
             if (pm == nullptr) return nullptr;
 
             auto desc = pm->findAdded (engineType);
+
+            // Fall back to the description the project's own blob carried
+            // (stashed by the restore walker): the added list is the user's
+            // convenience list, not the project's dependency record, and
+            // resolving ONLY through it broke the restore principle documented
+            // in HostedPlugin.h.
+            if (desc == nullptr)
+            {
+                auto it = mPluginRestoreDescs.find (tab.pageIndex);
+                if (it != mPluginRestoreDescs.end())
+                {
+                    desc = std::move (it->second);
+                    mPluginRestoreDescs.erase (it);
+                }
+            }
             if (desc == nullptr) return nullptr;
 
             auto hosted = std::make_unique<Hosting::HostedPluginInstance> (*pm, *desc);
@@ -515,6 +607,16 @@ void EngineRig::teardownEngine (EngineTab& tab, bool settleAfterUnregister)
         tab.freezeWatcher.reset();
     }
 
+    // Same rule for the processor listener: detach from EVERYTHING before any
+    // of it is destroyed below.
+    if (tab.freezeProcListener != nullptr)
+    {
+        for (auto* p : tab.freezeListenedProcs)
+            if (p != nullptr) p->removeListener (tab.freezeProcListener.get());
+        tab.freezeListenedProcs.clear();
+        tab.freezeProcListener.reset();
+    }
+
     unregisterFromProcessor (tab);
     if (settleAfterUnregister)
         juce::Thread::sleep (20);   // outlast one audio block (page-dtor contract)
@@ -528,15 +630,11 @@ void EngineRig::teardownEngine (EngineTab& tab, bool settleAfterUnregister)
     tab.engineType.clear();
 }
 
-void EngineRig::restoreEngineFromBlob (TabKind k, int pageIndex, const juce::String& base64)
+void EngineRig::stashPluginRestoreDescription (int pageIndex,
+                                               std::unique_ptr<juce::PluginDescription> desc)
 {
-    auto* tab = findTab (k, pageIndex);
-    if (tab == nullptr || tab->engine == nullptr || base64.isEmpty()) return;
-
-    juce::MemoryBlock mb;
-    if (! mb.fromBase64Encoding (base64)) return;
-    if (mb.getSize() == 0) return;
-    tab->engine->setStateInformation (mb.getData(), (int) mb.getSize());
+    if (desc != nullptr)
+        mPluginRestoreDescs[pageIndex] = std::move (desc);
 }
 
 namespace
@@ -622,20 +720,78 @@ juce::uint32 EngineRig::freezeContentStamp (TabKind k, int pageIndex, int patter
     // 1. WHICH ENGINE, and its entire parameter state.  This is the player axis:
     //    a preset change, a knob move or an engine swap all land here, which is
     //    what makes the stamp catch things the coarse flags only guessed at.
+    auto hashProcessorState = [&h] (juce::AudioProcessor* p)
+    {
+        if (p == nullptr) return;
+        juce::MemoryBlock mb;
+        p->getStateInformation (mb);
+        h = fnvBytes (h, mb.getData(), mb.getSize());
+    };
+
     if (t != nullptr)
     {
         h = fnvBytes (h, t->engineType.toRawUTF8(), (size_t) t->engineType.getNumBytesAsUTF8());
+        hashProcessorState (t->engine.get());
 
-        if (t->engine != nullptr)
+        // Inst is a CHAIN: the wrapper's own blob says nothing about the pedal
+        // board or amp/IR baked into its freeze -- every owned stage counts.
+        for (const auto& stage : t->ownedStages)
+            hashProcessorState (stage.get());
+    }
+
+    // Processor-owned engines the rig's blob cannot see: the Inst tab's sfizz
+    // engine (whichever source mode owns one) and the kit.  Without these the
+    // player axis was INVISIBLE to the stamp for exactly those kinds -- a
+    // save/reload after any kit or amp change reused the old render.
+    if (k == TabKind::Inst)
+    {
+        hashProcessorState (mProc.getBaySickGuitars (pageIndex));
+        hashProcessorState (mProc.getBaySickBasses  (pageIndex));
+    }
+    if (k == TabKind::Rusty)
+        hashProcessorState (mProc.getBaySickRustyDrums());
+
+    // Swing shapes this tab's note timing and lives in the MAIN APVTS, which
+    // the per-engine watcher and the engine blob both miss.
+    {
+        juce::String sp;
+        switch (k)
         {
-            juce::MemoryBlock mb;
-            t->engine->getStateInformation (mb);
-            h = fnvBytes (h, mb.getData(), mb.getSize());
+            case TabKind::Layers:  sp = "swing_layer_"  + juce::String (pageIndex); break;
+            case TabKind::Bass:    sp = "swing_bass_"   + juce::String (pageIndex); break;
+            case TabKind::Drums:   sp = "swing_drum_"   + juce::String (pageIndex); break;
+            case TabKind::Inst:    sp = "swing_inst_"   + juce::String (pageIndex); break;
+            case TabKind::Plugins: sp = "swing_plugin_" + juce::String (pageIndex); break;
+            case TabKind::Rusty:   sp = "swing_rusty";                              break;
+            case TabKind::Clips:   break;   // no swing params exist for these two
+            case TabKind::Vox:     break;
+        }
+        if (sp.isNotEmpty())
+        {
+            if (auto* v = mProc.apvts.getRawParameterValue (sp + "_mix"))
+                h = fnvDouble (h, (double) v->load());
+            if (auto* v = mProc.apvts.getRawParameterValue (sp + "_trunc"))
+                h = fnvDouble (h, (double) v->load());
         }
     }
 
-    // 2. Tempo -- moves every rendered sample in time.
+    // 2. Tempo -- moves every rendered sample in time.  The tempo MAP and the
+    //    time-signature map move samples exactly the same way; the stamp saw
+    //    neither, so a marker edit reused stale renders on reload.
     h = fnvDouble (h, pm->getGlobalTempo());
+    for (int i = 0; i < pm->getNumTempoChanges(); ++i)
+    {
+        const auto& tc = pm->getTempoChange (i);
+        h = fnvBytes  (h, &tc.bar, sizeof (tc.bar));
+        h = fnvDouble (h, tc.bpm);
+    }
+    for (int i = 0; i < pm->getNumTimeSigChanges(); ++i)
+    {
+        const auto& ts = pm->getTimeSigChange (i);
+        h = fnvBytes (h, &ts.bar, sizeof (ts.bar));
+        h = fnvBytes (h, &ts.num, sizeof (ts.num));
+        h = fnvBytes (h, &ts.den, sizeof (ts.den));
+    }
 
     if (patternIndex >= 0)
     {
@@ -661,6 +817,8 @@ juce::uint32 EngineRig::freezeContentStamp (TabKind k, int pageIndex, int patter
         h = fnvBytes  (h, &b.patternIndex, sizeof (b.patternIndex));
         h = fnvDouble (h, effectiveStartBeats  (b));
         h = fnvDouble (h, effectiveLengthBeats (b));
+        // A muted block is silence in the render; toggling it must not reuse.
+        h = fnvByte   (h, (juce::uint8) (b.muted ? 1 : 0));
     }
 
     for (int p = 0; p < pm->getNumPatterns(); ++p)

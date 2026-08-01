@@ -352,6 +352,35 @@ PluginArch PluginManager::architectureOf (const juce::File& pluginPath)
     }
 }
 
+void PluginManager::refineDescription (const juce::PluginDescription& d)
+{
+    bool changed = false;
+
+    {
+        const juce::ScopedLock sl (mLock);
+
+        for (const auto& existing : mAdded.getTypes())
+        {
+            if (existing.fileOrIdentifier != d.fileOrIdentifier)
+                continue;
+
+            if (existing.isInstrument != d.isInstrument || existing.name != d.name)
+            {
+                mAdded.removeType (existing);
+                mAdded.addType (d);
+                changed = true;
+            }
+            break;
+        }
+    }
+
+    if (changed)
+    {
+        saveToDisk();
+        if (onAddedListChanged) onAddedListChanged();
+    }
+}
+
 void PluginManager::run()
 {
     juce::FileSearchPath folders;
@@ -412,6 +441,7 @@ void PluginManager::run()
     const auto candidates = fmt->searchPathsForPlugins (folders, true, false);
 
     juce::StringArray loadable;
+    juce::Array<juce::PluginDescription> bridged32;
 
     for (const auto& c : candidates)
     {
@@ -419,7 +449,25 @@ void PluginManager::run()
             return;
 
         if (architectureOf (juce::File (c)) == PluginArch::X86)
-            skipped.add ({ c, "Skipped: 32-bit - requires the plugin bridge" });
+        {
+            // INTAKE, not a skip (Jeff's ruling, 2026-07-31): skipping here
+            // meant no 32-bit plugin could ever reach the added list, which
+            // left the forced-bridge tier -- the bridge's whole reason to
+            // exist -- with no entry point at all.  This 64-bit process cannot
+            // open the file, so the description is minimal (name from the
+            // filename); the first bridged load corrects it via LoadReply ->
+            // refineDescription.
+            const juce::File f (c);
+            juce::PluginDescription d;
+            d.name             = f.getFileNameWithoutExtension();
+            d.descriptiveName  = d.name + " (32-bit, bridged)";
+            d.pluginFormatName = "VST3";
+            d.manufacturerName = "32-bit plugin";
+            d.fileOrIdentifier = c;
+            d.lastFileModTime  = f.getLastModificationTime();
+            d.isInstrument     = false;
+            bridged32.add (d);
+        }
         else
             loadable.add (c);
     }
@@ -460,6 +508,10 @@ void PluginManager::run()
     juce::Array<juce::PluginDescription> results;
 
     for (const auto& d : found.getTypes())
+        if (! alreadyAdded.contains (d.createIdentifierString()))
+            results.add (d);
+
+    for (const auto& d : bridged32)
         if (! alreadyAdded.contains (d.createIdentifierString()))
             results.add (d);
 

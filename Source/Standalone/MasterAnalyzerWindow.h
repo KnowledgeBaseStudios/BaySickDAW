@@ -27,10 +27,12 @@ class VibeSynthProcessor;
 // moves the trace.
 //
 // COST DISCIPLINE, two independent gates: the audio-side push sits behind an
-// atomic flag (closed window = one relaxed load per block, no copy), and the flag
-// is driven from parentHierarchyChanged() keyed on getPeer() != nullptr -- the
-// peer-keyed suspend convention the shell uses for MixerPage's vblank, the
-// Effects poll and the Builder animation.
+// atomic flag, driven from parentHierarchyChanged() keyed on
+// getPeer() != nullptr -- the peer-keyed suspend convention the shell uses for
+// MixerPage's vblank, the Effects poll and the Builder animation.  Since §3.1
+// the audio-side push does NOT stop with the window: version capture's
+// always-on analysis holds the master tap live, and this window is merely the
+// tap's second client -- closing it saves this window's own UI polling only.
 // ─────────────────────────────────────────────────────────────────────────────
 class MasterAnalyzerView : public juce::Component,
                            public juce::SettableTooltipClient,
@@ -62,8 +64,17 @@ public:
     // chooser is not this component's business.
     std::function<void(const VersionCapture::Version&)> onExportTake;
 
-    // Driven from the window's title-strip menu.
-    void setViewMode (ViewMode m)      { mView = m; repaint(); }
+    // Driven from the window's title-strip menu.  Spectrum view implies the
+    // LIVE source: the spectrum is live data (no spectrum is captured for a
+    // take or render), so keeping a render's readouts over a live trace
+    // presented two different signals as one.
+    void setViewMode (ViewMode m)
+    {
+        mView = m;
+        if (m == ViewMode::Spectrum && mShowingRender)
+            selectSource (0);
+        repaint();
+    }
     ViewMode getViewMode() const noexcept { return mView; }
     void setTargetLufs (float lufs)    { mTargetLufs = lufs; repaint(); }
     float getTargetLufs() const noexcept { return mTargetLufs; }

@@ -79,19 +79,29 @@ void RustyInsertTask::run()
 
     if (! playedFrozen)
     {
-        // Copy this strip's output from the engine's internal buffer.
-        auto stripBuf = engine->getStripBuffer (mStripIndex, n);
-        if (stripBuf.getNumChannels() >= 2 && blockView.getNumChannels() >= 2)
+        // Copy this strip's output from the engine's internal buffer -- but
+        // ONLY when the producer actually rendered this block.  The producer
+        // skips under the frozen-kit gate and under idle suspend, and the
+        // scratch then still holds the PREVIOUS render; the seq only advances
+        // inside processStrips, so an unchanged seq means the correct fallback
+        // is the silence blockView already holds, not a repeat of old audio.
+        const juce::uint32 seq = engine->getStripRenderSeq();
+        if (seq != mLastSeenRenderSeq)
         {
-            blockView.copyFrom (0, 0, stripBuf, 0, 0, n);
-            blockView.copyFrom (1, 0, stripBuf, 1, 0, n);
-        }
-        else if (stripBuf.getNumChannels() >= 1)
-        {
-            if (blockView.getNumChannels() > 0)
+            mLastSeenRenderSeq = seq;
+            auto stripBuf = engine->getStripBuffer (mStripIndex, n);
+            if (stripBuf.getNumChannels() >= 2 && blockView.getNumChannels() >= 2)
+            {
                 blockView.copyFrom (0, 0, stripBuf, 0, 0, n);
-            if (blockView.getNumChannels() > 1)
-                blockView.copyFrom (1, 0, stripBuf, 0, 0, n);   // dual-mono
+                blockView.copyFrom (1, 0, stripBuf, 1, 0, n);
+            }
+            else if (stripBuf.getNumChannels() >= 1)
+            {
+                if (blockView.getNumChannels() > 0)
+                    blockView.copyFrom (0, 0, stripBuf, 0, 0, n);
+                if (blockView.getNumChannels() > 1)
+                    blockView.copyFrom (1, 0, stripBuf, 0, 0, n);   // dual-mono
+            }
         }
     }
 

@@ -154,6 +154,9 @@ private:
     EQ8MsDSP                         mFallbackEq;
     // What the display is currently bound to, so the poll can notice a rebuild.
     EQ8MsDSP*                        mBoundEq { nullptr };
+    // Distinguishes "channel not built yet" (fallback draws) from "channel
+    // DIED" (close the window).
+    bool                             mEverResolved { false };
     // SafePointer for the same destruction-order reason as EffectSlotWindow's.
     juce::Component::SafePointer<PageMenuBar> mBar;
     bool                             mShowMid { true };

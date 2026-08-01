@@ -122,16 +122,27 @@ public:
     // the block or two before the republish lands -- briefly, but audibly, the
     // wrong pattern.  Null source or a mismatched index both mean FALL BACK TO
     // THE LIVE ENGINE, which is freeze's existing stale-plays-live rule.
+    // The pair is two atomics, so a swap could otherwise TEAR: a reader that
+    // validated the new index could load the old pointer (or vice versa) and
+    // serve a render belonging to a different pattern for a block.  Single
+    // writer (message thread), so the writer parks the index at -1 across the
+    // pointer swap -- no reader can validate mid-swap -- and the reader
+    // re-checks the index after loading the pointer.  A torn read degrades to
+    // nullptr = live engine for one block, freeze's existing fallback.
     void setFrozenPatternSource (AudioClipStreamer* s, int patternIndex) noexcept
     {
-        mFrozenPatternIndex.store (patternIndex, std::memory_order_relaxed);
+        mFrozenPatternIndex.store (-1, std::memory_order_release);
         mFrozenPatternSource.store (s, std::memory_order_release);
+        mFrozenPatternIndex.store (patternIndex, std::memory_order_release);
     }
     AudioClipStreamer* getFrozenPatternSource (int forPattern) const noexcept
     {
-        if (mFrozenPatternIndex.load (std::memory_order_relaxed) != forPattern)
+        if (mFrozenPatternIndex.load (std::memory_order_acquire) != forPattern)
             return nullptr;
-        return mFrozenPatternSource.load (std::memory_order_acquire);
+        auto* s = mFrozenPatternSource.load (std::memory_order_acquire);
+        if (mFrozenPatternIndex.load (std::memory_order_acquire) != forPattern)
+            return nullptr;
+        return s;
     }
 
     // ── TS7 §6.9: freeze-render pruning ───────────────────────────────────────

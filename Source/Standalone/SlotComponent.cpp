@@ -221,12 +221,15 @@ void SlotComponent::setEditor(std::unique_ptr<juce::Component> editor)
 
         addAndMakeVisible(*mEditor);
 
-        // Wire output vol knob → rack slot gain
+        // Wire output vol knob → rack slot gain.  mSlotIndex is read LIVE in
+        // the lambda: the panel window's uuid-follow re-points this component
+        // at the slot's new index when slots repack, and a mount-time copy
+        // kept writing the OLD index's gain.
         if (auto* base = dynamic_cast<EditorPanelBase*>(mEditor.get()))
         {
             const int slot = mSlotIndex;
-            base->onOutputGainChanged = [this, slot](float db) {
-                if (mRack) mRack->setSlotOutputGain(slot, db);
+            base->onOutputGainChanged = [this](float db) {
+                if (mRack) mRack->setSlotOutputGain(mSlotIndex, db);
             };
             // I-4 (2026-05-02): pedal-style panels (CSStyleCompressorPanel +
             // every I-5+ pedal) call disableOutputVolKnob() in their ctor and
@@ -258,6 +261,8 @@ void SlotComponent::setEditor(std::unique_ptr<juce::Component> editor)
     // H-8 (2026-05-02): Delay: Echo / VocalDoubler.
     // H-9 (2026-05-02): Reverb: Plate / Hall / Chamber / Room / VocalBooth.
     // I-4 (2026-05-02): Overdrive: Rack / Pedal.
+    // TS7: Limiter: Limiter (Reproduction) / Maximizer (Loudness).  Omitting it
+    // here left the whole Maximizer mode unreachable from the panel.
     if (mModeBtn)
     {
         bool show = false;
@@ -266,7 +271,7 @@ void SlotComponent::setEditor(std::unique_ptr<juce::Component> editor)
             const auto t = mRack->getSlot(mSlotIndex).type;
             show = (t == EffectType::Compressor || t == EffectType::Saturation
                  || t == EffectType::Delay      || t == EffectType::Reverb
-                 || t == EffectType::Overdrive);
+                 || t == EffectType::Overdrive  || t == EffectType::Limiter);
         }
         mModeBtn->setVisible(show);
         if (show) refreshModeBtnLabel();

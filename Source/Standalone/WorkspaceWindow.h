@@ -110,8 +110,11 @@ public:
     // (clamped into view).  Call once, after setContent.
     void attachTo (Workspace& ws);
 
-    // Persist current bounds under the persist key.  Called on close and on the
-    // owner's teardown, so a window that dies with the app still remembers.
+    // Persist current bounds under the persist key.  Called on close, after a
+    // title-drag, and from the DESTRUCTOR -- the destructor call is what makes
+    // teardown and resize-only changes persist (resizes have no end-of-gesture
+    // hook of their own).  Skips silently once the workspace is gone, because
+    // bounds can no longer be converted into workspace-local space.
     void saveBounds() const;
 
     // Order-safe containment: never returns an inverted or degenerate rect, and

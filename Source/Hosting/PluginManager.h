@@ -81,6 +81,12 @@ public:
     void removeFromAddedList (const juce::PluginDescription&);
     bool isOnAddedList       (const juce::PluginDescription&) const;
 
+    // v3: a 32-bit plugin's stored description is a filename-only guess (this
+    // 64-bit process cannot open the file), so the first successful bridged
+    // load reports what it actually is and this persists the correction.
+    // Message thread.
+    void refineDescription   (const juce::PluginDescription&);
+
     // Resolves a saved slot back to its description.  Keyed on
     // PluginDescription::createIdentifierString(), which is stable across
     // sessions and machines -- the stable-id discipline the binding research
