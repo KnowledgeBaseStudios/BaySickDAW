@@ -2054,7 +2054,15 @@ account for PS-17, and one project whose samples you can deliberately move.
 
 ### §B.31 — QA-ModelShell (engine-ownership inversion + offline export + model-side automation + contained-window shell)
 
-`blocks:` TS1 `4ea67bd0` / TS2 `e9ecf03e` / TS3 `1dd08437` / TS4-TS7 `<hashes at code-complete>`
+`blocks:` TS1 `4ea67bd0` / TS2 `e9ecf03e` / TS3 `1dd08437` / TS4 `05b248a8` / TS5 `28f4ec09` +
+`c8854429` / TS6 `71781115` + `4ddf25fa` + `467fd0b9` / TS7 `a055d7ef` + `8770b607` / review fix
+pass `93bb158e` / docket rulings `12e8a183`.
+
+> **WALKED AT THE G4 BOUNDARY SMOKE, not at batch close (Jeff, 2026-07-31).**  The layout batch
+> reshapes the same surfaces these gestures walk, so the batch closed code-complete with this
+> section held; `Files For Claude/G4 Boundary Smoke.txt` is the walk order.  The §B.1-B.30
+> reconciliation pass rides to the same boundary for the same reason.  Debug exe FIRST
+> (screenshot any jassert), then Release — mark each scenario `D:` and `R:`.
 
 > **B.31.0 RUNS FIRST, BEFORE ANY OTHER SCENARIO IN THIS SECTION.**  It is a data-collection
 > pass, not a pass/fail test: the window resize floors cannot be picked from source, only from
@@ -2109,13 +2117,132 @@ over successive runs.
       the failure mode is gradual, so a single restart does not prove it.
 - [ ] Same check for window SIZE, not just position.
 
-#### B.31.2+ — the deferred per-task-set scenario blocks
+#### B.31.2 — the reconciled batch smoke (SUPERSEDES the plan file's TS1-TS7 blocks)
 
-Run the plan's TS1-TS7 "Batch-smoke scenarios" blocks in order, then the plan's end-to-end
-Verification list.  Those are authored in
-[`Batch Plans/grand-inverting-mammoth.md`](../Batch%20Plans/grand-inverting-mammoth.md) and are
-reproduced into numbered scenarios here at TS8 code-complete (per the §B reconciliation pass,
-conflict call 3=a).
+Authored at code-complete 2026-07-31 from the plan's deferred blocks, RECONCILED against what
+actually shipped -- the review fix pass changed behavior the plan's wording predates.  [NEW] =
+exists because of the fix pass; [CHANGED] = expected behavior differs from the plan's text.
+Setup: a real multi-engine project (every engine family + vox/inst prerecorded + clips + pedals
++ a hosted VST3 effect AND instrument), saved mid-suite for round-trips; File Settings > Enable
+Instrument Level Freeze ON for the freeze stretch.
+
+TS1 -- inversion regression (pass = nothing visibly changed):
+- [ ] **MS-1 — full tab lifecycle.** Add, rename, delete every tab type; engine picks; save,
+      reopen, template load.  No user-visible change.  `D:__ R:__` notes:
+- [ ] **MS-2 — app restart.** Close/reopen the app; old projects restore.  `D:__ R:__` notes:
+
+TS2 -- export:
+- [ ] **MS-3 — everything audible.** Full-song export using every engine family + vox/inst
+      prerecorded + clips -- every track in the file.  `D:__ R:__` notes:
+- [ ] **MS-4 — four lanes, pages closed.** Automate a rack knob, synth cutoff, fader, tempo lane;
+      export WITHOUT opening those pages -- all four moves in the file.  `D:__ R:__` notes:
+- [ ] **MS-5 — pattern export + restore.** Pattern-scope export unchanged; current pattern
+      restored after.  [CHANGED] play resumes cleanly immediately after an export (transport
+      restores land before the device wakes).  `D:__ R:__` notes:
+- [ ] **MS-6 — metronome excluded.** Metronome on -> not in the file.  `D:__ R:__` notes:
+- [ ] **MS-7 — cancel clean.** Cancel mid-render -> session exactly as before, no partial files.
+      `D:__ R:__` notes:
+- [ ] **MS-8 — stems/normalize/dither.** Each produces what it claims.  `D:__ R:__` notes:
+- [ ] **MS-9 — 96k export on a 44.1k device.** [NEW] run once with a frozen track in the song --
+      frozen audio identical in the file (rate-converted read), never wrong-speed.
+      `D:__ R:__` notes:
+
+TS3 -- model-side automation:
+- [ ] **MS-10 — every effect type, window closed.** One knob per effect type + a pedal automated;
+      Effects window closed entirely; all keep applying.  `D:__ R:__` notes:
+- [ ] **MS-11 — engine editors + mixer closed.** Same with those windows closed.  `D:__ R:__` notes:
+- [ ] **MS-12 — cold-load apply.** Restart + load: everything applies from bar 1, zero windows
+      opened.  `D:__ R:__` notes:
+- [ ] **MS-13 — Event Editor greying.** A lane greys only when its target is genuinely gone.
+      `D:__ R:__` notes:
+
+TS4 -- shell:
+- [ ] **MS-14 — window gymnastics.** Open/close/resize/move every window; floors hold; no layout
+      collisions.  `D:__ R:__` notes:
+- [ ] **MS-15 — position persistence.** Settings-scoped positions survive restart; positions
+      survive project reopen.  [NEW] repeated close/reopen does NOT creep down-right; [NEW] a
+      resize-only session persists the size.  `D:__ R:__` notes:
+- [ ] **MS-16 — monitor-disconnect clamp.** Per window.  `D:__ R:__` notes:
+- [ ] **MS-17 — closed-window playback.** Close every window during playback + automation --
+      audio and lanes unaffected.  `D:__ R:__` notes:
+- [ ] **MS-18 — tab bar lifecycle.** Delete-to-zero hides the tab; "+" re-adds; per-type
+      dropdowns intact.  [NEW] the Plugins dropdown's Piano Roll entry opens the roll on that
+      plugin.  `D:__ R:__` notes:
+- [ ] **MS-19 — shortcut routing.** F-keys/shortcuts with any window focused.  `D:__ R:__` notes:
+- [ ] **MS-20 — [NEW] owner z-order.** Satellites (Key Binds / Undo History / Plugins manager /
+      Rusty map) stay above the main window when it takes focus, but alt-tab to another app
+      covers everything normally (§9.4 -- OS behavior, needs this machine).  `D:__ R:__` notes:
+
+TS5 -- effects windows:
+- [ ] **MS-21 — every type in its window.** Opens, edits; Basic/Advanced + Mode + SC + presets on
+      the title menu.  [NEW] the Limiter's Mode menu exists and switches Limiter/Maximizer.
+      `D:__ R:__` notes:
+- [ ] **MS-22 — both EQ windows.** Pre + post open at once, edit + automate.  `D:__ R:__` notes:
+- [ ] **MS-23 — strip switch.** Rack window strip change leaves open windows alone; automation
+      keeps applying.  `D:__ R:__` notes:
+- [ ] **MS-24 — Delay panel.** Feedback ring past 100%; transfer curve tracks FBDist; model reads
+      Mono/Stereo/PingPong/Off.  `D:__ R:__` notes:
+- [ ] **MS-25 — removal.** Prompt, slots pack, an open window for the removed effect closes
+      itself.  [NEW] delete a strip/tab with its EQ window open -- the window closes itself.
+      `D:__ R:__` notes:
+- [ ] **MS-26 — reorder.** Effect moves, its window follows.  `D:__ R:__` notes:
+- [ ] **MS-27 — FX rack preset.** Six slots + both EQs round-trip onto a different strip.
+      `D:__ R:__` notes:
+
+TS6 -- hosting + bridge (protocol v3 -- entirely unheard):
+- [ ] **MS-28 — scan.** Finds the installed plugins.  `D:__ R:__` notes:
+- [ ] **MS-29 — VST3 effect.** Loads in a rack slot, sounds, saves/reloads state, automates,
+      window composes.  `D:__ R:__` notes:
+- [ ] **MS-30 — VST3 instrument.** Plays from the roll, exports.  [NEW] a held roll-preview note
+      survives a tab switch without hanging.  `D:__ R:__` notes:
+- [ ] **MS-31 — latency alignment.** Latency-heavy plugin stays aligned.  `D:__ R:__` notes:
+- [ ] **MS-32 — [CHANGED] the bridge, end to end.** Bridge a 64-bit plugin (hamburger toggle,
+      save + reopen -- the toggle applies on load): SOUND through the shared-memory path, notes
+      received, tempo followed, knobs automate (bridged lanes), editor window fits the plugin's
+      real size.  `D:__ R:__` notes:
+- [ ] **MS-33 — helper kill.** Kill it in Task Manager mid-play: app survives, dead marker with
+      reason, slot silent, everything else plays.  `D:__ R:__` notes:
+- [ ] **MS-34 — [NEW] 32-bit intake.** If a 32-bit VST3 exists here: appears in scan (filename
+      name), adds, loads bridged, name/instrument status corrects after first load.
+      `D:__ R:__` notes:
+- [ ] **MS-35 — [NEW] helper reaping.** Clear a bridged slot -> its helper process disappears
+      from Task Manager.  `D:__ R:__` notes:
+
+TS7 -- freeze + loudness (most changed by the rulings):
+- [ ] **MS-36 — freeze round-trip.** Freeze a heavy synth tab (title-bar button): CPU drops,
+      sound identical, rack/EQ/fader live; unfreeze restores editing.  `D:__ R:__` notes:
+- [ ] **MS-37 — [CHANGED] stopped = silence.** Transport stopped: a frozen tab is silent -- no
+      buzz.  Audition clicks dead while frozen (accepted trade).  `D:__ R:__` notes:
+- [ ] **MS-38 — [NEW] stale drops to live.** Tweak a frozen tab's engine knob mid-playback:
+      live immediately (hollow ring), re-renders after stop + ~2s idle, solid again.
+      `D:__ R:__` notes:
+- [ ] **MS-39 — [NEW] pattern-mode freeze.** Frozen instrument, switch patterns: each plays its
+      own render; CPU saving holds in pattern mode.  `D:__ R:__` notes:
+- [ ] **MS-40 — [CHANGED] the kit.** One Freeze on the Rusty page freezes all 13; per-piece mixer
+      controls live; kick-keyed sidechain still ducks; Full<->Basic program swap does NOT
+      silence the new kit.  `D:__ R:__` notes:
+- [ ] **MS-41 — [NEW] freeze persistence.** Freeze a Layers, a Drums, and the kit; save; reopen:
+      all restore frozen, and an unchanged project renders NOTHING on load.  Project switch and
+      back: same.  `D:__ R:__` notes:
+- [ ] **MS-42 — [NEW] auto-freeze.** Threshold low to force it: sustained load during playback
+      ARMS it; the render fires only after STOP; a manually-unfrozen tab is skipped.  [NEW after
+      ruling 2-b] the automatic render is the SONG scope only; per-pattern files fill in one
+      short render per quiet tick afterwards.  `D:__ R:__` notes:
+- [ ] **MS-43 — maximizer chain.** -14 LUFS target, A/B vs Limiter mode, meters track target,
+      export lands at it; Measure matches the export's number.  [CHANGED] Measure writes NO
+      file, and the CSV checkbox is GONE.  `D:__ R:__` notes:
+- [ ] **MS-44 — analyzer + takes.** Analyzer during playback at acceptable CPU.  [NEW] every
+      play-through appears as a take; takes judged against the export dialog's spec; Spectrum
+      view snaps to Live; Export Take produces a WAV.  `D:__ R:__` notes:
+
+End-to-end:
+- [ ] **MS-45 — the one real song.** Fresh start, everything at once -- plays identically to
+      pre-batch.  `D:__ R:__` notes:
+- [ ] **MS-46 — full export of it.** Per MS-3..MS-9 in one pass.  `D:__ R:__` notes:
+- [ ] **MS-47 — compatibility.** Old projects + v2 templates + page presets load unchanged.
+      `D:__ R:__` notes:
+- [ ] **MS-48 — CPU dividend.** All-windows-closed cheaper than the old always-alive tabs;
+      several open costs more (expected, FL-style).  `D:__ R:__` notes:
 
 ## §C — Deferred re-verify ledger
 

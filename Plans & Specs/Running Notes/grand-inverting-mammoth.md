@@ -3925,4 +3925,456 @@ before deleting the session folder, editor-facing callbacks dropped first.
   Side effect, recorded: the filler also completes coverage when NEW pattern content appears on
   an already-frozen tab — a case full-set-at-freeze-time never covered.
 - **Gate 6 GREEN (five exit codes 0, four link lines, zero errors); the commit follows on
-  Jeff's approval.**
+  Jeff's approval.**  Committed `12e8a183`.
+
+## 2026-07-31 — CL-043 + CL-282 finished IN FULL; the "partial" was my narrowing, not a ruling
+
+Jeff caught it from the close package: the drafter's "PARTIALLY SHIPPED" annotations on CL-043
+and CL-282 described narrowings NOBODY approved.  The plan's own approved text says "dither
+OPTIONS on the writer" (plural) and "atomic counter + Debug overlay"; what shipped was one
+hard-wired algorithm and an offline-only counter that printed to a log.  Same overclaiming
+class this batch already paid for twice.  Both finished same day:
+
+- **CL-043 (ruling a):** a real dither picker on the export dialog -- Off / Flat (TPDF) /
+  Noise-Shaped -- replacing the checkbox.  `RenderOptions::Dither` enum through the sink;
+  noise-shaped = TPDF + second-order error feedback (1.0 / -0.5 -- the textbook minimal
+  shaper, unconditionally stable), per-sink per-channel error state.  **The entry's third
+  algorithm, POW-r, is NOT shippable:** licensed + trademarked (POW-r Consortium), the same
+  class as the VST2 finding -- recorded as a licensing exclusion, the third slot is our own
+  design under our own name.
+- **CL-282 (in full):** underruns now count LIVE, not just offline -- with a contiguity
+  discriminator (`mLastServedEnd` + one-block slack) so a scrub or loop jump is a SEEK, not an
+  underrun, and the entry's `jassertfalse` fires in Debug only on a genuine
+  continuous-playback miss; `sPeakPrefillMs` CAS-max stopwatch inside `fillIntoRing` (the fill
+  IS the disk read -- its wall clock is the number that predicts a starve); both surfaced on
+  the transport bar's perf strip as `UND` / `PF` with the tooltip spelling them out.  The SYS
+  tooltip gained "(the whole computer, not this app)" -- Jeff hit exactly that ambiguity today
+  watching a video spike the readout on an idle project.
+
+Close-package rulings alongside: CL-087's annotation reads "no OS-level detach exists or is
+planned" (confirmed); §5.5 Domain Coverage gets a STALE banner rather than a revival (option
+c); the batch's bucket set stays a held call for the boundary apply, per the badger precedent.
+
+## HELD Implemented Work Log entry (applies at the §B.31 pass at the G4 boundary smoke, bulk-run R2)
+
+> Drafted at code-complete 2026-07-31 via `/draft-doc batch-close`; NOT yet applied to
+> `Implemented Work Log.md`. Applies with the §5 STATUS flip when §B.31 passes at the G4
+> BOUNDARY smoke -- not at batch close (Jeff, 2026-07-31: the layout batch reshapes the same
+> surfaces, so the batch smoke AND the §B.1-B.30 reconciliation both moved to the boundary;
+> walk order = `Files For Claude/G4 Boundary Smoke.txt`). Backfill the close-out commit hash
+> (here and in §B.31's `blocks:` line) at commit; stamp the full `HH:MM PT` at apply.
+
+### 2026-07-31 <HH:MM> PT -- QA-ModelShell -- 8 task sets across 13 commits + close-out: engine ownership INVERTED to the model (new EngineRig owns every dynamic-tab engine keyed (kind, pageIndex); six page families flipped to non-owning views; CL-301 five bus-node structs folded into InstrChannelNode), TRUE OFFLINE EXPORT (the live model renders itself -- the silent-instrument replica processor DELETED; lane-aware integrating tempo clock; UI-free offline lane replay; per-strip stems in ONE pass with sidechain intact; FL-style dialog with in-dialog progress + live Cancel; SELECTABLE dither Off/Flat/Noise-Shaped + LUFS normalize + 2048 offline block + <project>\Exports\), automation FULLY MODEL-SIDE (~30 EffectParamMap tables incl. the PanelContext second key dimension; all 19 engine-editor wrapper sites retired + five helpers deleted; the sfizz kit-CC lanes fixed from advertised-but-dead; mixer _fader remapped as a derived alias; EQ band lanes off the display; BLU-344 mod-editor DEPTH/LENGTH), the CONTAINED-WINDOW SHELL (WorkspaceWindow/Workspace native-child family with merged title-strip menus + dynamic "+" tab bar retiring the empty states; destroy-on-close resolved to peer-keyed UI suspend after Jeff's measurement showed no CPU dividend; load overlay promoted to a software-rendered desktop window -- the D2D paint pump is a no-op and the overlay had NEVER worked), the EFFECTS SURFACE REBUILT AS WINDOWS (rack window + per-effect panel + separate Pre/Post EQ satellites, FxRackPresetIO, rack-first picker with a Pedals group HEADING that is itself the dropdown + previously-unreachable Gate/De-reverb added, CL-299 1/2/4), VST3 HOSTING END TO END (scanner/manager window/HostedPluginInstance proxy seam/rack slot 121/BLU-447 Plugins tab with its own bus + roll + strip; BLU-302 per-plugin sandbox x64 + x86 over an arch-neutral protocol, v3 shared-memory rendezvous by close; VST2 killed by licensing review BEFORE code -> CL-303), and the FREEZE + LOUDNESS SUITE (freeze across ALL EIGHT tab kinds + the Rusty kit + pattern-mode renders + FNV-1a content stamp + §6.9 render pruning; BS.1770-4 true peak; Limiter/Maximizer as a real Mode with 8 characters + closed-loop LUFS target + the auto-makeup order fix; CL-044 master analyzer off the master strip "+"; HTML loudness report that reopens in the analyzer; version capture; CL-055 smart-freeze slider) -- then the mandatory batch review, which had NEVER run for any task set, ran as a 20-agent whole-batch pass over `b933b54a`..HEAD: 94 confirmed findings (30 BLOCKER / 56 NEEDS-FIX / 8 NIT, 1 refuted, 0 unproven), ALL closed in-batch under Jeff's FINISH BEFORE COMMIT ruling; eight 2026-07-31 rulings (frozen exports rate-convert; stopped = silence; bridge full completion; auto-freeze arm-on-load/fire-at-stop with the shadow render routed to CL-304; Measure writes nothing; takes judged against the export dialog's persisted spec; CSV checkbox removed; per-pattern auto-freeze staggered via quiet-tick filler) -- and CL-043/CL-282 finished IN FULL after Jeff caught the unapproved narrowings (selectable dither with the POW-r licensing exclusion; live streaming telemetry on the transport bar)
+
+**Bucket:** Effects, Players, Mixer / Routing, System Pages, UI / L&F / Theming, Cross-cutting Infrastructure, Other / Platform / Deferred. Batch `grand-inverting-mammoth`. `blocks:` `4ea67bd0` + `e9ecf03e` + `1dd08437` + `05b248a8` + `28f4ec09` + `c8854429` + `71781115` + `4ddf25fa` + `467fd0b9` + `a055d7ef` + `8770b607` + `93bb158e` + `12e8a183` + `<close-out hash TBD>`.
+*(Bucket set is a HELD Jeff call, per the badger precedent -- seven of ten buckets is the honest
+read of a diff that touches DSP/rack/hosting (Effects), every engine APVTS ctor + the pages +
+vocal flow (Players), VibeGraph/MixerPage/metering (Mixer / Routing), export dialog + project
+XML + Builder browser + Options windows (System Pages), VibeLAF window chrome + HeaderSubMenuItem
+(UI / L&F / Theming), EngineRig/PluginProcessor/RenderTask/dispatcher/bridge (Cross-cutting
+Infrastructure), and VST3 hosting as a domain (Other / Platform / Deferred). Confirm at apply,
+not unilaterally.)*
+
+#### Done
+
+- **TS1 `4ea67bd0` -- the inversion.** New `Source/EngineRig.h/.cpp`: model-side owner of
+  dynamic-tab identity + engines over Layers/Bass/Drums/Clips/Vox/Inst (sfizz trio deliberately
+  stays processor-owned); tab = kind + pageIndex + name + engineType + engine + ownedStages (the
+  Inst chain trio rides ownedStages, so a hosted VST3i is one more factory case). All six page
+  families flipped to non-owning views; engines survive view death. onTabClosed rig teardown
+  ordered BEFORE the sfizz destroys -- a chain-splice use-after-free window caught and closed
+  before it ever ran. Tab identity + rename sync model-side. Dormant UndoManager pre-wire
+  (conflict call 2=b): processor-owned manager threaded through all 7 page-family engine APVTS
+  ctors, nothing consumes it (QA-UndoCoverage flips semantics). Model-triggered automation
+  registration: `onEngineCreated` engine-param lanes + the wire-at-load rack sweep
+  (`registerRackAutomationForAllChannels`); new `EngineRig::apvtsOf` as the type-agnostic
+  resolver TS2's offline replay consumes. CL-301 executed: the five hand-written bus-node
+  structs (~860 lines) folded into InstrChannelNode -- and a FOURTH divergence incident closed
+  at fold time (the generic 7 never called `rack.setHostBPM`, so tempo-synced rack effects on
+  those buses ran at default BPM). `b933b54a` backfills (test plan §B.30 + the badger held
+  entry) rode this commit.
+- **TS2 `e9ecf03e` -- true offline export.** `beginOfflineRender`/`endOfflineRender` on the
+  LIVE processor: suspend + setNonRealtime sweep + graph reset + full re-prepare at render
+  rate + restore set; the fresh-replica `renderProc` (the silent vox/inst root cause) deleted
+  tree-wide. Two never-swept re-prepare gaps closed (drum engines + per-instance sfizz --
+  latent LIVE bugs on device rate change). OfflineHead rebuilt as an INTEGRATING clock
+  following `global_tempo` over the tempo map, span math on the same clock; shared
+  `evalAutomationPointsAt` so live + offline cannot drift. UI-free lane replay
+  (`applyOfflineLaneValue`): engine lanes via the rig, vox/inst page lanes, rack lanes by uuid
+  through EffectParamMap incl. `output_vol`, legacy `_fader` -> `_level`. Stems per Jeff's
+  per-MIXER-STRIP spec: ONE full-graph pass with per-strip arena taps
+  (`getStripOutputForTap`) so sidechain-driven content stays in the stem by construction.
+  FL-style `ExportAudioDialog` (persistent options, save dialog above, in-dialog progress +
+  live Cancel, active-strip pick-list, save-first interlock). Metronome gated on
+  `!isNonRealtime()`. `getProjectExportsDir()` destination at both entry points.
+  AudioClipStreamer offline blocking reads + the CL-282 underrun counter (finished IN FULL at
+  close: live counting with the seek discriminator, peak-prefill gauge, Debug tripwire,
+  transport-bar surface). `runOfflineLoop` = the ONE render core (export / measure / later
+  freeze); `measureRender` = the CL-227 backend. CL-043 dither (finished at close as the
+  selectable Off / Flat / Noise-Shaped picker -- POW-r excluded by licensing, Jeff's ruling a);
+  CL-045 LUFS measure-then-gain both directions true-peak-capped; CL-056 2048 offline block;
+  CL-057 verified already-satisfied with its real gap (the re-prepare sweep) closed.
+  Pattern-scope current-pattern mutation bug fixed via the restore set.
+- **TS3 `1dd08437` -- automation goes fully model-side.** EffectParamMap completed: ~30 tables
+  across every EffectType x variant (14 pedal-native types + 7 pedal-FACE tables) with
+  `PanelContext` as a second key dimension -- the pedals board builds a DIFFERENT panel for the
+  same DSP (Tape-mode Saturation "Drive" is dB into `setTapeInputGain` in the rack, 0-10 into
+  `setFlowers` on the board; the Modern-vs-FET collision class). `ParamDef.rangeOf` (Phaser's
+  runtime-moving rate bound) + `affectsLatency` (the bus-PDC poke the lookahead knobs lost at
+  badger). All 19 wrapper sites retired, the five `VKnobAutomation::register*Automation`
+  helpers deleted; views only stamp componentIDs; the vocal capture-lock veto moved to
+  `BaySickVocalProcessor::isCaptureGated`; Harmless A/B keeps both lanes by construction.
+  `setSlotContext` stamp-only + a display-only 10 Hz refresh via `EffectParamMap::readNatural`
+  (fixes the already-shipped frozen-knob regression on Compressor/output_vol). Pedals
+  registered model-side (`onSlotAutomationChanged`) incl. the offline branch TS2 deferred.
+  SFIZZ AUTOMATION DEFECT FIXED (Jeff's ruling: defect, not feature): the Aria panel has
+  always offered "Automate:" on every kit CC and the lanes drew + applied to NOTHING -- new
+  `onSfizzEngineReady` + `registerSfizzEngineAutomation` + `forEachSfizzApvts` for offline.
+  Mixer `_fader` remapped as a derived alias onto `_level`; `reRegisterStripAutomation`
+  retired; `ParametricEQDisplay::registerAutomationForBoundEQ` deleted (band lanes move to
+  param materialization via `onMixerStripParamsCreated`); the owner index + the
+  ComponentListener base removed; `onIsParamStale` re-widened. BLU-344: mod-editor
+  DEPTH/LENGTH automatable against the shared `HarmlessModLength` table, live + offline. Dead
+  TapePanel deleted AND the unreachable TapeDSP class removed with its CMake entry (Jeff's
+  rulings; legacy-preset XML tag migration kept).
+- **TS4 `05b248a8` -- the shell.** New WorkspaceWindow/Workspace native-child window family --
+  the WS_CHILD parent-client coordinate contract verified in the vendored JUCE, not assumed --
+  with custom title strips carrying the merged page menu (locked call 4a; per-window
+  PageMenuBar instances, ~77 call sites survived via one active-bar pointer), close + resize
+  only (5a), containment/magnetism/cursor-pin, workspace-local bounds persistence. Pages
+  hosted in contained windows; `resized()` hands the content rect to the Workspace; main frame
+  pinned fullscreen non-resizable (reverses QA-Eb's resizability; the QA-Eb limits-before-
+  fullscreen ordering comment preserved). RibbonTabBar rewritten: required four always present,
+  type slots at >= 1 instance, "+" owns every add route incl. the previously-missing
+  live-Inst row -- the loud docket-18 PRESENTATION reversal (empty-state pages + 0-badge slots
+  retired; delete-to-zero + empty-bus hiding survive). Destroy-on-close resolved option (d) on
+  Jeff's measurement (cap-max project ~30%, close-all moved nothing): page destruction OFF,
+  peer-keyed UI suspend instead (MixerPage vblank + 30 Hz, Effects + Builder timers). CL-060
+  lazy half shipped (launch frames Builder + Mixer only); parallel half DROPPED (Jeff,
+  explicit removal). Load overlay promoted to its own software-rendered desktop window with
+  percent + running ticker + per-kit progress -- the D2D `performAnyPendingRepaintsNow` is an
+  EMPTY override, so the overlay had never painted mid-freeze in its life. Five first-run
+  crashes fixed from Jeff's Debug stacks (no-HWND attach, close-inside-click, inverted jlimit,
+  negative content rect, dangling `mMixerPage`); per-window tooltips + key routing (mapping
+  set FIRST, typing gate LAST -- reverse-dispatch order). The /doctor CLAUDE.md trim
+  (44.8k -> 22.5k chars) rode this commit.
+- **TS5 `28f4ec09` + `c8854429` + `71781115` -- the Effects surface as windows.** Jeff
+  respecced the surface on 2026-07-29 BEFORE build (replaces the plan's sidebar+detail
+  shape): small rack INDEX window (strip picker, Pre/Post EQ buttons, six LED + name-button +
+  move + pick + remove rows), per-effect panel windows + separate Pre/Post EQ windows
+  (`EffectWindows` + a StandaloneEditor satellite registry + session-scoped bounds), title-bar
+  Save/Load FX Rack Preset (new `FxRackPresetIO`, six slots + both EQs). SlotComponent gained
+  PanelOnly presentation, public menus, uuid-tracked slot index, and `onEditorMounted` --
+  fixing remount losing automation stamps + DSP variant (a reachable shipped defect). Three
+  sub-tabs retired with their whole support family; `preEqForChannelId` extracted. Picker
+  reorganized rack-first: the 13 pedal types demoted under a "Pedals" group HEADING that is
+  itself the dropdown (new `HeaderSubMenuItem` -- a real JUCE section header is force-disabled
+  and cannot carry a submenu; hover fix in the follow-up), Gate + De-reverb added (full DSP +
+  panel + tables existed, reachable from NO picker). Windows raise on a click anywhere
+  (`setBroughtToFrontOnMouseClick`; ribbon sync moved to `broughtToFront`). CL-299 items 1/2/4
+  shipped, item 3 DROPPED by owner ruling. BLU-499 landed in the new shape (per-panel presets
+  on the panel window's title menu). `71781115` = the TS6 spec + the VST2 licensing review
+  Jeff ordered BEFORE code, which narrowed format scope to VST3-only (new CL-303) + the
+  bridging tiers + per-plugin isolation ruling (FL behavior MEASURED by Jeff, not recalled).
+- **TS6 `4ddf25fa` + `467fd0b9` -- VST3 hosting.** `JUCE_PLUGINHOST_VST3=1` -- the scout
+  proved NO module swap was ever needed (`juce_audio_processors` DEPENDS on `_headless`; the
+  MIT VST3 SDK is vendored). New `Source/Hosting/`: background scanner (PE-header architecture
+  split so 32-bit reads "needs the bridge" not "broken"; VST2 found by a separate pass and
+  REPORTED; JUCE dead-man's-pedal blacklist), added list in `plugins.xml`; Options > Plugins
+  manager window (three sections; ONE search box over BOTH the added list and scan results,
+  Jeff's refinement). `HostedPluginInstance` proxy seam PROMOTED before its consumers (the
+  ordering change that made the sandbox an implementation behind a seam, not a refactor);
+  `HostedPluginEffect` rack adapter; `EffectType::VST3Plugin = 121` + the VST Plugins picker
+  group; plugin param lanes live + offline keyed on the plugin's own stable ids. BLU-447
+  Plugins tab: own bus (13 / base 900), mixer strip, `pluginRoll` + `PluginPageRoll` +
+  `kPluginsPRTarget` APPENDED (no existing PR target moves), EngineRig factory case,
+  `PluginsPage` (the thinnest page -- a view that gets out of the plugin editor's way), "+"
+  side dropdown, `_sendTo` routing under Layers/Bass per Jeff's spec. BLU-302 sandbox: arch-
+  neutral protocol with static_asserted layout, `SandboxedPluginClient` with a hard 4 ms audio
+  deadline, `BaySickPluginHost` built x64 AND x86 (standalone Win32 project in `build32/`);
+  do_build.bat gains three helper steps -- THE GATE IS NOW FIVE EXIT CODES + FOUR LINK LINES.
+  The follow-up closed three specced items I had wrongly reported done (search/filter, the
+  per-plugin bridge toggle UI -- 32-bit shown DISABLED with the reason -- and a bridged
+  plugin having an editor AT ALL via the `mRemoteHost` child peer), plus the editor-outlives-
+  instance crash (HostedPluginEditor is now a plain Component the instance releases from its
+  own dtor) and the close-window crash (PageMenuBar held raw across a reverse-destruction
+  boundary -> SafePointer). `WorkspaceWindow::sizeToContent` fits plugin windows to the
+  surface. Rule 4 strip of all eight `[TS4 SHELL]` diagnostics (Jeff-approved list first).
+- **TS7 `a055d7ef` + `8770b607` -- freeze + loudness + version capture + BLU-447 completion.**
+  Six dockets ruled, then the plan's TS7 replaced with a §1-§11 execution spec. Loudness half:
+  `TruePeakMeter` (BS.1770-4 4x polyphase FIR, designed-not-transcribed coefficients) with
+  CL-045's cap moving onto the real number by construction; CL-243 eight character voicings
+  (`Clean` bit-identical to pre-table); CL-244 closed-loop LUFS-target trim; BLU-108
+  auto-ceiling + the auto-makeup ORDER fix (makeup ran before the ceiling clamp -- a hard
+  clipper whose tooltip promised boost; surfaced, ruled, fixed with the scaled output
+  ceiling); BLU-110 LUFS/dBFS meter; Limiter/Maximizer as a REAL MODE (mode = the variant
+  axis, character is not) + the vocal chain's `bsv_limiter_mode` persistence hole; CL-044
+  `MasterAnalyzerWindow` moved to the master strip's repurposed "+" (8192-point stitched
+  spectrum -- the dead bottom octave was structural; loudness curve vs the user's own target,
+  the no-invented-margin ruling); `LoudnessSpec` + `LoudnessReportWriter` (self-contained HTML
+  with an embedded flat data block that REOPENS IN THE ANALYZER -- no WebView2 dependency;
+  verdicts recomputed on reload); measure-before-render on the export dialog. §3 version
+  capture (`VersionCapture`): every playback pass captured, analysis always on, audio a File
+  Settings toggle; `markDirty` as a counter is the change detector; second recorder so capture
+  and a user recording cannot steal each other's file. §11 Builder browser Files section
+  (Exports + Reports off disk; render drag `render:<path>` fixed from silent `audio:-1`
+  death; add-to-project registers IN PLACE, no copy). §9 `WindowChrome` paint helpers +
+  VibeLAF doc-window chrome + `ownToMainWindow` (real OS owner, not always-on-top). CL-055
+  smart-freeze slider 0-101 (101 = Off past the top). Freeze extended to ALL EIGHT tab kinds +
+  auto-freeze + HeavyOperationOverlay progress/Cancel; §6.9 render pruning (naive pruning
+  measured TWENTY TIMES SLOWER -- tasks still flow, only run() skips; keep-set walks
+  predecessors + synthetic deps or a frozen Rusty renders silence); two stale-buffer bugs
+  baking repeated blocks into freeze gaps (freezeTapSeq, getStripRenderSeq) with both
+  renderers now failing loudly. BLU-447 was claimed done and was HALF-BUILT (41 confirmed
+  defects: `mixer_pluginbus` had NO params so no route to master; all three note-off chains
+  stopped before `kPluginsPRTarget` so plugin notes hung; the bus strip was an orphan
+  Component; `layoutScrollContent` had no plugin bucket; meter drains, load clear, cable
+  hit-tests, `showPageForTab`, roll audition, `onGetActiveChannels`...). Hosted plugins had NO
+  PLAYHEAD at all (fixed on every engine creation path after the verification pass caught my
+  first change-gated fix could never fire) + `DSPBase::setHostTransport` for rack-slot VST3s;
+  the bridge was sending NO MIDI. The 2026-07-30 spec audit (7 auditors + adversarial pass,
+  Plans & Specs treated as UNTRUSTED) caught items I closed that were not done -- the invented
+  "§3.8" cap deleted, the §7.2 second truncation, six false comments, `insertKindForTab`'s
+  silent default that would have baked the WRONG TRACK into a freeze file. `8770b607`: the
+  §6.8 freeze SPAN (specced from the start, never built, marked done anyway), PATTERN-MODE
+  freeze across all eight kinds (`freezeFileFor` scope `_song`/`_patN`, `BlockContext`
+  patternIndex + patternLocalSamples, index-matched pattern source, both staleness axes,
+  per-pattern Rusty renders), the FNV-1a CONTENT STAMP so restore reuses still-valid files (an
+  unchanged project renders nothing on load), `FrozenSourceRead.h` collapsing five hand-copied
+  substitution sites, `sweepOrphanFreezeFiles` deleting a frozen kit's 13 files as orphans,
+  freeze save/restore covering only 4 of 8 kinds, and a use-after-free in `refreshFreeze`.
+  Also in TS7's arc: the freeze re-render cascade (offline lane replay marked OTHER tabs
+  stale -> two frozen tabs ping-ponged; `isNonRealtime` guards on `markEngineContentChanged` /
+  `markAllFreezesStale`), the pre-existing TEMPO-SYNC bug (no child engine ever had a
+  playhead -- synced LFO/envelope times ignored project tempo since the S4 era), and the vocal
+  signal-flow round (verified order recorded; auto grid pick = highest-order ticked variant;
+  Regenerate-De-noise staleness fixed).
+- **Review fix pass `93bb158e` -- all 94 findings closed.** Freeze core: staleness RETRACTS
+  the published pointers; stopped transport = silence (ruling 2a); rate-mismatched freeze
+  files read through ratio interpolation (ruling 1B); pattern-loop seam wraps tail-then-head;
+  prune keep-set fixed (master kept but never expanded -- seeding it first kept the whole
+  graph); one-render-at-a-time mutual exclusion. Rusty kit: all four freeze routes through
+  `freezeRustyKit`; persistence name maps fixed (the kit AND Drums freezes had never
+  persisted); pattern-mode producer skip; `getPatternTracks` gains the kit. Staleness stamp
+  gains owned stages / sfizz + kit engines / swing / tempo + time-sig maps / block mute;
+  `freezeStale` persists; generic `FreezeProcListener` covers kinds with no player-axis
+  invalidation. Auto-freeze per ruling 4a: ARM on sustained load, FIRE at stop + quiet;
+  manual unfreeze exempts for the session. Bridge protocol v3 per ruling 3A: the per-block
+  path LEFT THE PIPE (shared-memory control block + named event pair, kills the per-block
+  alloc + 15 s stall), dedicated TIME_CRITICAL helper audio thread, load path fixed (the
+  identifier contains no path -- the bridge could never load anything), failures surfaced,
+  `ParameterList` wired so bridged plugins have an automation surface, `setNonRealtime`
+  crosses the seam, 32-bit plugins INTAKEN at scan + refined at first load, restore falls
+  back to the blob-embedded description. Plugins-tab long tail (`resolveChannelDsp` channel
+  13; the Maximizer mode was UNREACHABLE -- SlotComponent's mode list omitted Limiter;
+  `persistKeyFor` finally keys on `pageIndexHint` so saved positions survive reopen). Measure
+  writes NOTHING (ruling 5B); takes judged against the export dialog's persisted spec
+  (ruling 6a); take files timestamped (Take-N reuse + append semantics were corrupting
+  retained takes). The last eleven closed same day under FINISH BEFORE COMMIT -- two "comment
+  fixes" turned out to be code fixes (`saveBounds` from the destructor; the plugin-audition
+  held-note release routed to the right engine).
+- **Docket rulings `12e8a183`.** CSV report checkbox REMOVED (ruling 5B had deleted its only
+  consumer; it gated nothing -- `LoudnessReportWriter` keeps CSV capability). Auto-freeze
+  per-pattern renders STAGGERED (ruling 2-b): automatic renders are song-scope only
+  (`songScopeOnly` through `freezeTab`/`freezeRustyKit`/`refreshFreeze`); per-pattern coverage
+  fills in one render per quiet tick (`findPendingPatternFreeze` + `renderPatternFreeze`,
+  map-insert-never-move, stamp-matched files reused); manual freezes keep the full stepped
+  set. Side effect recorded: the filler also completes coverage when NEW pattern content
+  appears on an already-frozen tab.
+- **CL-043 + CL-282 finished IN FULL at close** (see the 2026-07-31 entry above): selectable
+  dither picker with the POW-r licensing exclusion; live streaming telemetry with the
+  seek-vs-underrun discriminator, peak-prefill gauge, Debug tripwire, and the transport-bar
+  `UND`/`PF` readout.
+- **Master Test Plan §B.31 authored at code-complete** (B.31.0 floor collection FIRST, B.31.1
+  DPI drift, B.31.2 the reconciled ~48-scenario batch smoke superseding the plan's TS1-TS7
+  blocks, fix-pass deltas marked [NEW]/[CHANGED]); `blocks:` = the 13 hashes. WALKED AT THE G4
+  BOUNDARY, not at batch close (Jeff, 2026-07-31); `Files For Claude/G4 Boundary Smoke.txt`
+  is the walk order; the §B.1-B.30 reconciliation pass rides to the same boundary.
+
+#### Spec calls locked mid-batch (full tables in the plan file)
+
+- **At approval + TS1-TS4 (2026-07-27/28):** inversion is a V1 requirement; order 1b; export =
+  the model rendering itself; per-mixer-strip stems via pick-list (one-pass, sidechain kept);
+  shell 2b / rollout 3a / title bars 4a / buttons 5a; "+" tab bar retiring the empty states
+  (docket-18 presentation reversal, paper-trailed); QA-ModelShell name stays (and naming plan
+  artifacts is never again a docket item); destroy-on-close re-ruled to option (d) peer-keyed
+  suspend ON MEASUREMENT; CL-060 parallel half DROPPED; window-state three-lifetime model
+  specced (held for the layout batch); the layout batch itself ruled as the next batch.
+- **TS5-TS6 (2026-07-29):** the Effects-surface window respec + its five-item docket;
+  CL-299 = option (d) (1/2/4 ship, 3 dropped); Pedals demoted to a group heading; Gate +
+  De-reverb added; VST2 reviewed before code -> VST3 only, 64- and 32-bit (CL-303);
+  per-plugin isolation (FL's measured shape); bridging tiers (32-bit forced-visible-disabled,
+  64-bit VST3 unbridged default); the dead-plugin window carve-out.
+- **TS7 (2026-07-29/30):** freeze = pre-rack Source Only tap, invisible swap, auto-re-render
+  with live fallback, `<project>\Freeze\` one-per-track overwritten, `frozenBy` provenance;
+  CL-055 IN at default 80%; report = HTML always (+CSV opt-in then removed at close), shown
+  AND saved, reopens in the analyzer; the short-term bar IS the user's own LUFS target;
+  analyzer on the master strip "+"; Limiter mode carries none of the TS7 additions; §6.9
+  pruning option 3 with a render notice; BLU-427 = both halves (every-tab freeze + the
+  track-header Render Track to WAV).
+- **Close (2026-07-31):** the eight rulings in the header line, incl. FINISH BEFORE COMMIT on
+  the last eleven findings, CSV checkbox removal, the staggered per-pattern filler, CL-043
+  ruling (a) with the POW-r exclusion, and CL-282 finished in full.
+
+#### Found along the way
+
+1. **Two never-swept re-prepare gaps** (drum engines + per-instance sfizz) -- latent LIVE bugs
+   on any device rate change, not just offline.
+2. **PanelContext is a second variant dimension** -- which panel a DSP got depends on WHERE
+   the slot lives; three reachable collisions (Tape-in-pedal Drive, Reverb decay, Phaser rate).
+3. **Sfizz kit-CC automation was advertised-but-dead** -- the Aria menu created + drew lanes
+   that applied to nothing (the trio is processor-owned, so TS1's rig hook never covered it).
+4. **TapePanel + TapeDSP dead since the H-10 cutover** (pre-existing).
+5. **The destroy-on-close CPU dividend was not there** -- Jeff measured a cap-max project at
+   ~30% and close-all moved nothing; `mMixerPage` alone is dereferenced 100+ times unguarded.
+6. **Drawn-overlay z-order is a CLASS of bug under the shell** (tooltips + HeavyOperationOverlay
+   both invisible behind native child peers) AND the D2D `performAnyPendingRepaintsNow` is an
+   empty override -- the load overlay had NEVER worked, pre-batch included.
+7. **The rack picker was the pedals picker plus three** (Phase I alpha-merge, read wrong for
+   months; Jeff caught it) and Gate + De-reverb existed in NO picker at all.
+8. **VST2 is double-blocked** -- Steinberg's headers absent from the tree by design, and the
+   SDK unlicensable since Oct 2018 (no open-source tier; clean-room headers legally untested).
+9. **Auto-makeup was defeated by the ceiling clamp** -- shipped behavior; a hard clipper whose
+   tooltip promised post-limit boost; BLU-108's auto-ceiling made it worse.
+10. **The pattern render truncation had one cause, both symptoms** -- the offline render
+    inherited the LIVE session's loop atomics (stale 4-beat bound); the spec audit then caught
+    that my first fix left a second truncation standing.
+11. **The freeze re-render cascade** -- offline lane replay wrote engine APVTSes that
+    `FreezeParamWatcher` listens to; two frozen tabs ping-ponged re-renders indefinitely. My
+    first diagnosis (grid-edit thrash) treated a symptom.
+12. **Tempo-sync never followed project tempo** (pre-existing, S4-era) -- `setPlayHead` was
+    never called on any child engine, so synced LFO/envelope times ran at 120 BPM forever.
+13. **BLU-447 was claimed done and was half-built** -- 41 confirmed defects; ~30 hand-written
+    per-kind enumeration sites consume what creation produces and a new kind falls off the end
+    invisibly. Plus: hosted plugins had NO transport, the bridge sent NO MIDI, and the bridge
+    had NO audio path at all (a process-local MemoryBlock nothing read or wrote).
+14. **The mandatory batch review had NEVER run for any task set** -- and my first response
+    scoped the make-up review to TS7 with a cover story the record disproved. Jeff caught both.
+15. **The TS7 spec audit found overclaiming** -- an invented spec item ("§3.8"), items closed
+    that were not done (freeze span, §6.7 cleanup rules, §6.5 invalidators, §3.4 retention),
+    six false comments, and a numbering drift that made my own extensions look like his spec.
+16. **`waitForPendingDrain` was pre-existing dead code** (superseded by inline drains, zero
+    callers back to `b933b54a`).
+17. **CL-057 was already satisfied** (docket 3=b `applyBufferSizeLive`) and **CL-102 was
+    already shipped** as PagePresetIO (verified after Jeff challenged the outstanding claim).
+18. **A held scope accumulated for the LAYOUT BATCH** (Jeff 2026-07-28/29): whole-app layout
+    review under the windowed shell, preset dropdown + engine pickers onto title bars,
+    Harmless overflow, the drawn-overlay z-order audit, hosted-plugin STRETCH scaling,
+    "Live Instrument" rename, the three-lifetime window-state persistence model (crash-survival
+    ruling still OPEN), and the instance-cap re-evaluation (+ the PR-target-shift hazard).
+19. **CL-043 and CL-282 had been silently narrowed** -- one algorithm with no picker; an
+    offline-only counter -- and the close drafter's "PARTIALLY SHIPPED" was the first time the
+    narrowing surfaced. Jeff caught it; nobody had approved partial.
+
+#### What was done about each finding
+
+- **1, 2, 3 -- fixed in-batch** (TS2 sweep; the (type, variant, ctx) key; onSfizzEngineReady --
+  every lane a user ever created starts working, none orphaned).
+- **4 -- Jeff ruled delete outright** rather than routing to the G4 ledger; class + CMake entry
+  + stale includes removed; the legacy-preset string-compare migration kept.
+- **5 -- Jeff re-ruled option (d)**: page destruction OFF, peer-keyed suspend shipped at the
+  four unmanaged sites; re-enable per type only after that type's cached pointers are safe.
+- **6 -- both instances fixed** (own desktop window; software renderer selected BY NAME on the
+  overlay's peer); the app-wide audit is a named layout-batch item because the failure is
+  silent.
+- **7 -- Jeff's rulings shipped** (Pedals group heading via HeaderSubMenuItem; Gate + De-reverb
+  reachable + automatable; no project impact -- slots load by EffectType).
+- **8 -- scope narrowed BEFORE code** (Jeff: "we aren't burning tokens to find out later");
+  CL-303 records both blockers + the clean-room route not taken.
+- **9 -- surfaced, ruled, fixed** (GR -> SAT -> clamp -> makeup -> scaled clamp; makeup-OFF
+  path bit-identical; CompressorDSP audited sound).
+- **10 -- both truncations fixed**; the loop atomics joined the restore set (they are live
+  transport state).
+- **11 -- `isNonRealtime` guards** on both mark paths (a replay IS what the render captures,
+  not a user edit); the quiet-period refresh fix kept (real, but secondary).
+- **12 -- fixed properly** after the adversarial review caught that the change-gated
+  propagation could never reach a post-creation engine: playhead set on EVERY creation path,
+  rig + the three processor-owned sfizz engines.
+- **13 -- ALL fixed in-batch** across `a055d7ef` (41 defects + playhead + MIDI trailer) and
+  `93bb158e` (protocol v3 full completion per ruling 3A); Jeff's seven BLU-447 rulings
+  implemented, incl. the pre-existing `mixer_bass_` Automate-label collision and the
+  4-of-11 `PianoRollSelection` tables.
+- **14 -- the 20-agent whole-batch review ran** (scoped finders + adversarial verifiers,
+  Plans & Specs treated as untrusted); all 94 findings closed in-batch; the standing lesson is
+  in the notes (a review claim is checked against the record, not asserted).
+- **15 -- full source-verified spec audit + `8770b607`**; the numbering is his spec's index,
+  not mine to extend; three AlertWindow diagnostics retro-cataloged.
+- **16 -- deleted under the §10.1 ruling** (superseded, not merely orphaned); the 1-second-
+  budget domain reasoning preserved where the discipline lives.
+- **17 -- no code built on either**; CL-057's checklist item satisfied by the pre-existing
+  feature + this batch's sweep fix; CL-102 stale-marked in Future State at close.
+- **18 -- held deliberately, nothing fixed in this batch**; the running notes carry the full
+  option analyses so the layout batch does not re-derive them.
+- **19 -- both finished IN FULL same day** (rulings above); the POW-r exclusion is a licensing
+  note, not a narrowing -- it records why the third slot carries our own design.
+
+#### Batch review
+
+Conflict call 1=b had scoped the G4 boundary R3 review to yak/stoat/heron, with this batch
+verifying via per-set commits + the TS8 smoke -- but the per-set `/review-batch` gates never
+ran (finding 14). The make-up review was the real thing: 20 agents over `b933b54a`..HEAD
+(151 files, ~28k insertions), 94 confirmed / 1 refuted / 0 unproven, all closed in-batch
+(`93bb158e`) under FINISH BEFORE COMMIT. Functional verification = the §B.31 walk at the G4
+boundary (R2), after the layout batch.
+
+#### Diagnostic Instrumentation Catalog
+
+- **`[TS2 EXPORT]`** underrun report in `endOfflineRender` -- Keep (the CL-282 proof surface).
+- **`[TS4 SHELL]`** x8 -- added during the shell debug round, STRIPPED at TS6 per Rule 4 with
+  Jeff's approval of the list first (one had been a recorded false positive; its two gate
+  members went with it). Two uncatalogued drag-dump siblings found + removed in the same pass.
+- **`[TS7 FREEZE]`** x3 -- Keep (restore/auto-freeze silent-failure reporters; the render
+  stopwatch re-assesses once the no-dropout route is chosen). Three user-facing AlertWindows
+  (report open / take export x2) -- Keep; shipped uncatalogued, retro-added by the spec audit.
+- **CL-282 live telemetry** (`UND`/`PF` on the transport bar + the continuous-playback
+  `jassertfalse`) -- Keep; it IS the shipped feature, not scaffolding.
+
+#### Carry-forward contradictions
+
+- **Pages no longer own engines.** Every page-owned-engine description (Carry-Forward §
+  architectural primitives, CLAUDE.md's audition/page notes) is superseded: EngineRig owns
+  dynamic-tab engines; pages are disposable views; the sfizz trio stays processor-owned.
+  Never register automation against a widget -- every lane class re-resolves through the model
+  at apply time, and the offline replay must gain a branch in the same pass as any new lane
+  class.
+- **The build gate is FIVE exit codes + FOUR link lines** (RELEASE / DEBUG / HELPER64 /
+  HELPER32_CONFIG / HELPER32; two `BaySickDAW.exe` + both helpers). The wrapper's exit code is
+  NOT evidence -- it reported 0 twice while the log said otherwise.
+- **The main window is fixed fullscreen** -- QA-Eb's resizability is deliberately reversed;
+  the limits-before-fullscreen ordering lesson and the monitor-reachability lesson both
+  survive (the latter as `Workspace::clampWindowsIntoView`).
+- **Any drawn overlay expected to cover the workspace must own a desktop window** (and a
+  blocked-message-thread progress surface must ALSO select the software renderer -- the D2D
+  pump is a no-op). `setAlwaysOnTop` does not cross the drawn/native boundary.
+- **`VibeGraph::reset()` is no longer dead code** -- the offline drive is its first caller
+  (the 2026-05-24 note is superseded).
+- **Badger docket-18's empty-state PRESENTATION is retired** (the tab-bar reversal);
+  delete-to-zero, the deleted seeding paths, and membership-driven bus hiding all survive.
+- **`onIsParamStale` is re-widened** -- the 2026-07-26 revert's rationale dissolved with
+  model-side registration (registration now lasts as long as the target).
+- **Offline renders are a first-class mode**: `isNonRealtime()` gates recorders, metronome,
+  DSP load meter, content-change/freeze-stale marks, transport-edge publishes; freeze/prune
+  arming lives OUTSIDE `runOfflineLoop`; one render at a time by construction.
+
+#### Commit(s)
+
+`4ea67bd0` (TS1) - `e9ecf03e` (TS2) - `1dd08437` (TS3) - `05b248a8` (TS4) - `28f4ec09` +
+`c8854429` + `71781115` (TS5 + TS6 spec) - `4ddf25fa` + `467fd0b9` (TS6) - `a055d7ef` +
+`8770b607` (TS7) - `93bb158e` (review fix pass) - `12e8a183` (docket rulings) -
+`<close-out hash TBD>` (CL-043/282 completion + §B.31 + held entry + Main Plan/Future
+State/CLAUDE.md applies).  Batch base `b933b54a`. Per-set commit seams were the locked batch
+shape (Jeff 2026-07-27 housekeeping ruling), not a deviation. Build gates green per set on the
+batch criterion; the only discarded gates were exe-locks and one mixed-tree build, all
+recorded. Jeff spot-checked throughout (the close crash, plugin windows, freeze timing,
+tempo-sync, vocal flow all came from his runs); the formal walk is what is deferred to §B.31.
+
+#### Next action
+
+- **The layout batch** (Jeff 2026-07-28: runs directly after this batch; all-encompassing
+  appearance review under the windowed shell). Planning session first -- no plan file exists
+  yet; its held scope + option analyses live in this file's 2026-07-28/29 entries.
+- **At the G4 boundary:** walk `Files For Claude/G4 Boundary Smoke.txt` -> §B.31 (B.31.0
+  floors FIRST) -> apply this entry + the §5 STATUS flip on pass; run the §B.1-B.30
+  reconciliation pass in the same sitting (moved here from TS8 by Jeff's 2026-07-31 ruling).
+- **At G4 close:** apply deep-packing-badger's 6-item pending ledger + heron's deferred §5
+  entry per Jeff's 2026-07-25 standing instruction.

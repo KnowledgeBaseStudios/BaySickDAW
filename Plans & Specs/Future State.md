@@ -118,9 +118,9 @@ DSP modules + FX rack mechanics + future / restoration effects.
 
 ### §5 LimiterDSP
 - **[BLU-107 / AQ]** Spectral / multi-band limiting — separate limiter per band for mastering. PRESET-SAFE.
-- **[BLU-108 / AQ]** Auto-ceiling (true-peak aware ceiling) — Spotify/YouTube margin. PRESET-SAFE.
-- **[BLU-109 / AQ]** Release-character voicing presets — Transparent / Punchy / Vintage. PRESET-SAFE.
-- **[BLU-110 / AQ]** LUFS / dBFS side-by-side output meter. PRESET-SAFE.
+- **[BLU-108 / AQ]** Auto-ceiling (true-peak aware ceiling) — Spotify/YouTube margin. PRESET-SAFE. **SHIPPED in v1 (QA-ModelShell TS7 a055d7ef)** - real BS.1770-4 polyphase true-peak meter + asymmetric auto-ceiling trim; Maximizer mode only.
+- **[BLU-109 / AQ]** Release-character voicing presets — Transparent / Punchy / Vintage. PRESET-SAFE. **SHIPPED in v1 (folded into CL-243's character table as Clean/Punch/Warm, a055d7ef)** - no separate control shipped.
+- **[BLU-110 / AQ]** LUFS / dBFS side-by-side output meter. PRESET-SAFE. **SHIPPED in v1 (a055d7ef)** - LUFS/dBFS meter + dashed target line on the limiter panel (Maximizer mode); the three-zone skeuomorphic rewrite stays a layout-batch/_APPROVED_CHANGES section-5 item.
 - **[BLU-111 / AQ]** Oversampling factor UI — 2x / 4x / 8x; currently hardcoded 4x. PRESET-SAFE.
 
 ### §6 OverdriveDSP
@@ -219,12 +219,12 @@ DSP modules + FX rack mechanics + future / restoration effects.
 - **[BLU-296 / AQ]** Rotary Speaker (Leslie Sim) — Tremolo + AutoPan + Vibrato combination. PRESET-SAFE.
 
 ### VST3 Plugin Hosting (~2-3 weeks total)
-- **[BLU-297 / OT]** VST3 Plugin Hosting (umbrella) — 3rd-party VST3 effect plugins in FX rack.
-- **[BLU-298 / OT]** Plugin scanner — background thread, build known-plugins list. ~3-5 days.
-- **[BLU-299 / OT]** Plugin browser UI — search/filter scanned plugins. ~2-3 days.
-- **[BLU-300 / OT]** EffectRack integration — new slot type `EffectType::VST3Plugin`. ~3-4 days.
-- **[BLU-301 / OT]** Latency reporting — read plugin `getLatencySamples()`. ~1 day.
-- **[BLU-302 / OT]** Crash protection (sub-process hosting) — optional, ~3-6 weeks.
+- **[BLU-297 / OT]** VST3 Plugin Hosting (umbrella) — 3rd-party VST3 effect plugins in FX rack. **SHIPPED in v1 (QA-ModelShell TS6 4ddf25fa + 467fd0b9, protocol v3 completion 93bb158e).**
+- **[BLU-298 / OT]** Plugin scanner — background thread, build known-plugins list. ~3-5 days. **SHIPPED in v1 (4ddf25fa)** - background scanner, plugins.xml added list, PE-header 32/64 split, VST2/32-bit/blacklist skip reporting; 32-bit INTAKE (not skip) since 93bb158e.
+- **[BLU-299 / OT]** Plugin browser UI — search/filter scanned plugins. ~2-3 days. **SHIPPED in v1 (4ddf25fa + search/filter 467fd0b9)** - Options > Plugins three-section manager; ONE search box over both the added list and scan results.
+- **[BLU-300 / OT]** EffectRack integration — new slot type `EffectType::VST3Plugin`. ~3-4 days. **SHIPPED in v1 (4ddf25fa)** - EffectType::VST3Plugin = 121, VST Plugins picker group, state blob, editor window, param lanes live + offline.
+- **[BLU-301 / OT]** Latency reporting — read plugin `getLatencySamples()`. ~1 day. **SHIPPED in v1 (4ddf25fa)** - satisfied by construction through the existing rack latency sum + bus PDC.
+- **[BLU-302 / OT]** Crash protection (sub-process hosting) — optional, ~3-6 weeks. **SHIPPED in v1 (4ddf25fa + 467fd0b9; full completion per Jeff's 2026-07-31 ruling 93bb158e)** - per-plugin opt-in sandbox (FL's measured shape), BaySickPluginHost x64 + x86, arch-neutral protocol v3 (shared-memory audio rendezvous, hard 4 ms deadline, bridged params + editor + transport), 32-bit forced-bridged with the toggle shown disabled + reason.
 
 ### Batch-surfaced (QA-ModelShell 2026-07-29)
 - **[CL-303 / OT]** VST2 plugin hosting — RESEARCHED AND DELIBERATELY NOT BUILT; documented here so the position is known rather than rediscovered. Jeff ruled the QA-ModelShell TS6 format scope to "everything" (VST3 + VST2, 64- and 32-bit) on 2026-07-29, then asked for the licensing to be checked BEFORE any of it was written; the check moved the ruling to **VST3 only, 64- and 32-bit**. **The technical blocker:** JUCE's VST2 host path (`JUCE_PLUGINHOST_VST` -> `JUCE_INTERNAL_HAS_VST`) `#include`s `<pluginterfaces/vst2.x/aeffect.h>` + `aeffectx.h` — Steinberg's own SDK headers, which JUCE deliberately does NOT ship and which are absent from our tree, so the code will not compile without obtaining them. **The distribution blocker:** Steinberg withdrew the VST2 SDK from public availability and stopped issuing VST2 licences in October 2018; a grandfather clause covers only developers who had already signed before that date, which we had not, so no lawful route to the headers exists for a new product — and this is unaffected by being free or open-source, since there is no non-commercial tier to apply for and Steinberg has issued DMCA takedowns over redistributed SDK files. **The open-source route, if it is ever wanted:** Linux/open-source hosts (LMMS, Carla, yabridge) reach VST2 through CLEAN-ROOM REVERSE-ENGINEERED headers — `vestige.h` is the best known, with FST, RST and Xaymar's `vst2sdk` as alternatives — on the reasoning that Steinberg's copyright covers its SDK *files* rather than function names or struct layouts. Their own maintainers describe the legal footing as untested in court and advise legal counsel before relying on it, which is why commercial vendors avoid it. Adopting it would also mean wiring third-party headers into our build by hand (JUCE gives no help here) and being careful with the "VST" TRADEMARK, which is separate from the SDK copyright and normally comes via the licence agreement — it touches the no-brand-names rule for any picker label. **Why VST3 is clean by contrast:** the VST3 SDK is MIT-licensed, cannot be withdrawn, and covers 64-bit and 32-bit alike. **Consequence already recorded in the batch plan:** dropping VST2 thins out the 32-bit population badly (legacy 32-bit freeware is overwhelmingly VST2, not VST3), which weakens the "bridge does double duty" argument and returns the sandbox to being predominantly crash protection. _(Source: QA-ModelShell TS6 spec + licensing review 2026-07-29; Steinberg forums, LWN Linux audio plugin API survey, Xaymar/vst2sdk, CDM on the VST3/ASIO relicensing.)_
@@ -236,7 +236,7 @@ DSP modules + FX rack mechanics + future / restoration effects.
 - **[BLU-516 / AQ]** Analog Drift / Tape Pitch Wander effect — standalone subtle pitch-drift.
 
 ### Effect-panel preset loader
-- **[BLU-499 / WP]** Effect-panel preset loader UI — 3 approach options. PRESET-SAFE.
+- **[BLU-499 / WP]** Effect-panel preset loader UI — 3 approach options. PRESET-SAFE. **SHIPPED in v1 (QA-ModelShell TS5 28f4ec09)** in the windowed shape - per-panel preset menu on the panel window's title-bar menu, plus the new rack-level Save/Load FX Rack Preset (FxRackPresetIO, six slots + both EQs) the original 3-option question never covered.
 
 ### Fire-Hose net-new effect modules
 - **[CL-015 / AQ]** Convolution body resonance — short IRs of guitar bodies / drum shells; per-engine optional.
@@ -397,7 +397,7 @@ engines (Wavetable / FM / Analog / Modal / Strings / Vocoder / etc.).
 - **[BLU-341 / AQ]** EQ output-curve dropdown (T3-EQShape) — Peak/shelf/parametric beyond tilt. PRESET-SAFE.
 - **[BLU-342 / AQ]** Per-source A/B/Both routing (T3-PerPartModRouting) — re-adds GLOBAL toggle. PRESET-SAFE.
 - **[BLU-343 / AQ]** Harmor-style Advanced envelope tab (T3-HarmlessADV) — unit order, poly-rel, ramp. PRESET-SAFE.
-- **[BLU-344 / AQ]** Pattern-time automation of mod editor knobs (T3-ModMatrixAutomation) — DEPTH/LENGTH not APVTS-backed. PRESET-SAFE.
+- **[BLU-344 / AQ]** Pattern-time automation of mod editor knobs (T3-ModMatrixAutomation) — DEPTH/LENGTH not APVTS-backed. PRESET-SAFE. **SHIPPED in v1 (QA-ModelShell TS3 1dd08437)** - DEPTH/LENGTH lanes per (target x source) against the shared HarmlessModLength table, live + offline.
 - **[BLU-345 / AQ]** Note duration plumbing (T3-NoteDurationAwareEnvelopes) — custom MIDI CC pair. PRESET-SAFE.
 - **[BLU-346 / WP]** Explicit sustain markers (T3-PerPointSustain) — right-click point Mark as sustain. PRESET-SAFE.
 - **[BLU-347 / AQ]** Harmor IMG tab (T3-HarmlessImgTab) — spectral image resynthesis. PRESET-SAFE.
@@ -428,7 +428,7 @@ engines (Wavetable / FM / Analog / Modal / Strings / Vocoder / etc.).
 - **[BLU-424 / WP]** Per-slot automation lanes — PATTERN-BREAK; PatternManager refactor.
 - **[BLU-425 / AQ]** Per-slot sidechain routing — extends §P3 routing.
 - **[BLU-426 / UT]** Kit morph (A/B + morph%).
-- **[BLU-427 / WP]** Per-slot freeze-to-audio — needs offline-render scaffolding.
+- **[BLU-427 / WP]** Per-slot freeze-to-audio — needs offline-render scaffolding. **SHIPPED in v1 (QA-ModelShell TS7 a055d7ef + 8770b607)** - grew from per-slot to instrument-level freeze across ALL EIGHT tab kinds + the Rusty kit (invisible swap, pre-rack tap, pattern-mode renders, content stamp), plus the track-header Render Track to WAV half per Jeff's spec.
 - **[BLU-428 / WP]** External MIDI controller pad mapping — settings.json scope.
 - **[BLU-429 / UT]** TR-808 step sequencer view — alt editor for `drumRoll`.
 - **[BLU-430 / WP]** Custom slot count — KIT-BREAK MAJOR.
@@ -437,7 +437,7 @@ engines (Wavetable / FM / Analog / Modal / Strings / Vocoder / etc.).
 - **[BLU-607 / AQ]** BaySickVocal H-1 Skeleton — APVTS layout covering every chain stage.
 
 ### §P8 VST3 Instrument Hosting
-- **[BLU-447 / OT]** VST3 Instrument Hosting — 3rd-party VST3 instruments per tab. ~1-2 weeks.
+- **[BLU-447 / OT]** VST3 Instrument Hosting — 3rd-party VST3 instruments per tab. ~1-2 weeks. **SHIPPED in v1 (QA-ModelShell TS6 4ddf25fa creation half; TS7 a055d7ef consumption half - the tab was half-built behind ~30 per-kind enumeration sites, 41 defects closed; + 93bb158e)** - Plugins tab with own bus (13 / base 900), strip, piano roll, _sendTo routing under Layers/Bass.
 
 ### Fire-Hose new synth engines (peer to Harmless / BaySickSynth / BaySickBass)
 - **[CL-001 / AQ]** Wavetable synthesizer (`BaySickWavetable`) — full standalone engine with morph, harmonics editor, multi-frame wavetables, FFT-based distort/transform, drag-WAV-to-wavetable import.
@@ -505,12 +505,12 @@ overlay, mastering chain, metering.
 - **[CL-037 / AQ]** Phase correlation meter per bus — sticky bar meter for mono compatibility.
 - **[CL-038 / AQ]** Goniometer / vectorscope per channel — visual stereo-image diagnostic.
 - **[CL-039 / AQ]** Spectrum animation in mixer strips — mini real-time spectrum on each strip.
-- **[CL-040 / AQ]** Stem export (remix-ready) — render each tab's output as separate WAV.
+- **[CL-040 / AQ]** Stem export (remix-ready) — render each tab's output as separate WAV. **SHIPPED in v1 (QA-ModelShell TS2 e9ecf03e)** - per MIXER STRIP (Jeff's spec), pick-list of active strips, ONE full-graph pass with per-strip taps so sidechain-driven content stays in the stem.
 - **[CL-041 / AQ]** Reference-track A/B comparison tool — drag a reference WAV, A/B with project mix.
 - **[CL-042 / AQ]** Master bus chain templates — genre-specific mastering chain presets (Pop/Rock/Hip-hop/EDM/Acoustic).
-- **[CL-043 / AQ]** Mastering-grade dither — selectable dither algorithms (POW-r, TPDF, noise-shaped).
-- **[CL-044 / AQ]** Real-time spectrum analyzer master out — large floating window with peak/avg traces.
-- **[CL-045 / AQ]** Loudness normalization on bounce — target Spotify/YouTube/Apple loudness on export.
+- **[CL-043 / AQ]** Mastering-grade dither — selectable dither algorithms (POW-r, TPDF, noise-shaped). **SHIPPED IN FULL in v1 (TPDF e9ecf03e; the selectable picker at close, Jeff's ruling (a) 2026-07-31)** - export dialog dither combo Off / Flat (TPDF) / Noise-Shaped (second-order error-feedback shaper, our own design). **POW-r EXCLUDED BY LICENSING**: proprietary + trademarked (POW-r Consortium), the same class as the VST2 finding - not ours to implement or name.
+- **[CL-044 / AQ]** Real-time spectrum analyzer master out — large floating window with peak/avg traces. **SHIPPED in v1 (QA-ModelShell TS7 a055d7ef)** - MasterAnalyzerWindow off the master strip's repurposed + button (Jeff's placement ruling), 8192-point stitched spectrum, post-fader tap, loudness curve vs the user's target.
+- **[CL-045 / AQ]** Loudness normalization on bounce — target Spotify/YouTube/Apple loudness on export. **SHIPPED in v1 (e9ecf03e; cap moved onto the real BS.1770-4 true peak a055d7ef)** - measure-then-gain both directions, true-peak-capped, -9/-14/-16/-23 targets.
 - **[CL-046 / AQ]** Auto-mixing assist — AI suggests track levels + pan placement based on genre. _*Research Required*_
 - **[CL-047 / AQ]** Stem-from-audio (drag song in, get stems) — extends LDT-428 to in-app workflow.
 
@@ -519,7 +519,7 @@ overlay, mastering chain, metering.
 - **[CL-224 / AQ]** Multi-instance metering link via lightweight tap-plugin — drop a Relay-style tap on any strip; up to 8 sources route into single floating Insight-style spectrogram/spectrum/sound-field stack. Reuses SpectrumFeed seqlock per tap. _(Inspired by: iZotope Insight 2 + Relay)_ HIGH
 - **[CL-225 / AQ]** PSR + PLR meters (AES TD-1004 micro-dynamics) — 3-second sliding peak-to-short-term ratio readout with target line (PSR > 8 recommended); integrated PLR for whole song; surface on master + per-bus. _(Inspired by: Klangfreund Multimeter https://www.klangfreund.com/multimeter/ + AES Engineering Brief 19324)_ HIGH
 - **[CL-226 / AQ]** K-System scale on master meter — selectable K-12 / K-14 / K-20 ballistic with target = 0 at scale anchor; ITU BS.1770 RMS + 83 dBSPL monitor calibration callout. _(Inspired by: Bob Katz K-System + FabFilter Pro-L 2 https://www.fabfilter.com/products/pro-l-2-limiter-plug-in)_ HIGH
-- **[CL-227 / AQ]** EBU R128 conformance log + offline arrangement scan — XML/CSV log with timecode-stamped LUFS / LRA / true-peak violations against EBU R128 / ITU-R BS.1770-4 / ATSC A/85; "Scan Project" command walks arrangement faster than real time. _(Inspired by: Nugen VisLM 2 ReMEM)_ HIGH
+- **[CL-227 / AQ]** EBU R128 conformance log + offline arrangement scan — XML/CSV log with timecode-stamped LUFS / LRA / true-peak violations against EBU R128 / ITU-R BS.1770-4 / ATSC A/85; "Scan Project" command walks arrangement faster than real time. _(Inspired by: Nugen VisLM 2 ReMEM)_ HIGH **SHIPPED in v1 (backend e9ecf03e measureRender; face a055d7ef)** - reshaped by Jeff's rulings: HTML report (inline SVG curve + coalesced timecoded violation spans, embedded data block reopens in the analyzer), CSV capability retained but the export checkbox REMOVED (12e8a183), no XML; Measure writes nothing (ruling 5B) - reports come from exports + version capture.
 - **[CL-228 / AQ]** Multi-channel weighting modes on master meter — A / C / K weighting selector for measurement vs perceptual loudness comparison. _(Inspired by: Brainworx bx_meter https://www.plugin-alliance.com/en/products/bx_meter.html)_ HIGH
 - **[CL-229 / AQ]** Per-strip Sound Field / mono-compatibility indicator — small 2-LED widget per strip: green when sum-to-mono retains >=90% energy, yellow >=70%, red below; sticky red flag if dipped during last bar. Lighter-weight per-strip companion to CL-038. _(Inspired by: iZotope Insight 2 Sound Field)_ HIGH
 - **[CL-230 / AQ]** Streaming codec preview on master — re-encode master through Spotify / Apple Music / YouTube / Tidal / Amazon Music / SoundCloud / Bandcamp / Deezer codecs; feed decoded result to monitor output. Codec smear + ISP clipping audible before bounce. _(Inspired by: Nugen MasterCheck Pro https://nugenaudio.com/mastercheck/)_ HIGH
@@ -545,8 +545,8 @@ overlay, mastering chain, metering.
 
 ### Master-Bus Mastering Modules
 - **[CL-242 / AQ]** Multiband limiter on master — 5-band crossover with phase-compensated filters; PLMixer-style core allocates inter-band attenuation by psychoacoustic priority. Per-band Gain / Priority / Release plus global Master Release. _(Inspired by: Waves L3-LL Multimaximizer)_ HIGH
-- **[CL-243 / AQ]** 8 limiter character algorithms — extend LimiterDSP with selectable algorithm trading transparency vs character vs near-zero-lookahead permissibility. _(Inspired by: FabFilter Pro-L 2)_ HIGH
-- **[CL-244 / AQ]** Loudness-target limiter mode — set desired LUFS target, limiter auto-targets after listening to track section. Distinct from BLU-108 (auto-ceiling true-peak). _(Inspired by: TC Electronic BRICKWALL HD)_ HIGH
+- **[CL-243 / AQ]** 8 limiter character algorithms — extend LimiterDSP with selectable algorithm trading transparency vs character vs near-zero-lookahead permissibility. _(Inspired by: FabFilter Pro-L 2)_ HIGH **SHIPPED in v1 (a055d7ef)** - 8 characters (Clean bit-identical to pre-table constants; own names per the no-brand-names rule), chickenhead not Mode-menu (mode = the variant axis).
+- **[CL-244 / AQ]** Loudness-target limiter mode — set desired LUFS target, limiter auto-targets after listening to track section. Distinct from BLU-108 (auto-ceiling true-peak). _(Inspired by: TC Electronic BRICKWALL HD)_ HIGH **SHIPPED in v1 (a055d7ef)** - closed-loop output-LUFS servo, 1.5 dB/s slew, +-12 dB authority, zeroed on mode-off.
 - **[CL-245 / AQ]** Audition Limiting + Unity Gain monitor toggles — momentary "audition the part the limiter is removing" + "compensate output by inverse of input gain". _(Inspired by: FabFilter Pro-L 2)_ HIGH
 - **[CL-246 / AQ]** Inflator-style harmonic loudness module — psychoacoustic "loudness without dynamic-range loss"; probabilistic resampling adds asymmetric harmonics; two-band split with Effect / Curve / Mix. _(Inspired by: Sonnox Oxford Inflator https://www.sonnox.com/plugin/oxford-inflator)_ HIGH
 - **[CL-247 / AQ]** Dynamic resonance suppressor on master — auto-detects narrowband resonances, applies dynamic notch only when crossing threshold; preserves transients via "soft"/"hard" mode + sharpness + selectivity. M/S + L/R + per-band scope. _(Inspired by: oeksound soothe2 + Mastering The Mix RESO)_ HIGH
@@ -577,7 +577,7 @@ overlay, mastering chain, metering.
 - **[CL-268 / AQ]** Per-platform downmix monitor formats on master — Lo/Ro stereo / Pro Logic IIx / 5.1-direct / 7.1-direct / 2.0-from-spatial-audio toggle. Surround-aware mixing to monitor downmix in real time. _(Inspired by: Logic Pro downmix and trim controls)_ MEDIUM
 
 ### Batch-surfaced (QA-Fe2 2026-07-16)
-- **[CL-301 / OT]** Consolidate the 5 hand-written VibeGraph bus-node structs into the generic InstrChannelNode -- fold LayersBusNode / BassBusNode / DrumsBusNode / MasterBusNode / EffectsBusNode (Source/VibeGraph.cpp) into the InstrChannelNode container so all 11 mixer buses share one implementation. The 7 sibling buses (Clips / Vox / Inst / Vox2 / Inst2 / Inst3 / Rusty) already share InstrChannelNode + VibeGraph::processBus; the 5 dedicated structs are the older pattern, built when those were the only buses. Three on-record divergence incidents caused by the split: (1) QA-Ea Part A (2026-05-21) -- scattered per-struct solo formulas; the pre-fix baseline was 8 of 11 bus solos dead no-ops; (2) QA-Eg -- the G1 node-owned peak-meter pattern had to be hand-ported struct by struct; (3) the QA-Fe2 PDC full-graph audit (2026-07-16, pdc-coverage-audit-2026-07-16.md) -- the original PDC pass gave CompDelayLines only to the hand-written L/B/D nodes, leaving the 7 generic InstrChannelNode buses uncompensable (no delay line) until fixed in-batch. Feasibility: post-MT-engine the calling side is already uniform (PassiveStripTask -> processBus / processChainOnly), and LayersBusNode's synth-render fallback path is marked dead in comments (QA-Ea Part A). Special-case content survives via composition/flags rather than separate structs: Layers/Bass synth references, Master's LUFS meter + terminal role (no comp delay line), the FX bus's receive-bus drive point. Zero user-visible change; the win is removing the keep-in-sync hazard (industry norm is one generic channel-strip type instantiated per channel -- the REAPER model). _(Source: Jeff's routing call in chat 2026-07-16 during the QA-Fe2 PDC full-graph pass; routed here by Jeff.)_
+- **[CL-301 / OT]** Consolidate the 5 hand-written VibeGraph bus-node structs into the generic InstrChannelNode -- fold LayersBusNode / BassBusNode / DrumsBusNode / MasterBusNode / EffectsBusNode (Source/VibeGraph.cpp) into the InstrChannelNode container so all 11 mixer buses share one implementation. The 7 sibling buses (Clips / Vox / Inst / Vox2 / Inst2 / Inst3 / Rusty) already share InstrChannelNode + VibeGraph::processBus; the 5 dedicated structs are the older pattern, built when those were the only buses. Three on-record divergence incidents caused by the split: (1) QA-Ea Part A (2026-05-21) -- scattered per-struct solo formulas; the pre-fix baseline was 8 of 11 bus solos dead no-ops; (2) QA-Eg -- the G1 node-owned peak-meter pattern had to be hand-ported struct by struct; (3) the QA-Fe2 PDC full-graph audit (2026-07-16, pdc-coverage-audit-2026-07-16.md) -- the original PDC pass gave CompDelayLines only to the hand-written L/B/D nodes, leaving the 7 generic InstrChannelNode buses uncompensable (no delay line) until fixed in-batch. Feasibility: post-MT-engine the calling side is already uniform (PassiveStripTask -> processBus / processChainOnly), and LayersBusNode's synth-render fallback path is marked dead in comments (QA-Ea Part A). Special-case content survives via composition/flags rather than separate structs: Layers/Bass synth references, Master's LUFS meter + terminal role (no comp delay line), the FX bus's receive-bus drive point. Zero user-visible change; the win is removing the keep-in-sync hazard (industry norm is one generic channel-strip type instantiated per channel -- the REAPER model). _(Source: Jeff's routing call in chat 2026-07-16 during the QA-Fe2 PDC full-graph pass; routed here by Jeff.)_ **SHIPPED in v1 (QA-ModelShell TS1 4ea67bd0)** - five structs folded into InstrChannelNode; a FOURTH divergence incident found + closed at fold time (the generic 7 never called setHostBPM, so tempo-synced rack effects on those buses ran at default BPM).
 
 ## System Pages
 
@@ -586,11 +586,11 @@ Mouse docs.
 
 ### Source-doc backlog
 - **[BLU-478 / WP]** TB-T1 LAT readout in ms — restore millisecond conversion. PRESET-SAFE.
-- **[BLU-480 / WP]** FX-1 Rack UI refactor — sidebar picker + detail pane. PRESET-SAFE.
+- **[BLU-480 / WP]** FX-1 Rack UI refactor — sidebar picker + detail pane. PRESET-SAFE. **SHIPPED in v1 (QA-ModelShell TS5 28f4ec09, 2026-07-29)** - Jeff respecced the surface before build: rack INDEX window + per-effect panel windows + separate Pre/Post EQ windows replaces the sidebar+detail-pane shape.
 - **[BLU-487 / WP]** Sample Browser — real file-system tree, drag from disk. Post-Phase H/I.
 
 ### Batch-surfaced (QA-EffectsReview 2026-07-01)
-- **[CL-299 / WP]** Delay reference-cosmetic pass, folded into the FX-rack UI rebuild (pairs with BLU-480 FX-1 Rack UI refactor) — four visual/UX deltas vs the reference delay (FL Fruity Delay 3) accepted as cosmetic during the QA-EffectsReview Task 9 unit-1 fidelity rework, to pick up whenever the rack UI is rebuilt: (1) feedback Level knob ring color-warns green -> orange -> red above 100% (additive-feedback warning); (2) feedback-distortion section shows a live transfer-curve graph (waveshaping visualization, input vertical / output horizontal); (3) tempo-sync UX = step-denominated Time knob (dots = 1/16-bar steps) + right-click list of musical time values, vs our BPM toggle + 8-division chicken-head (functionally equivalent today); (4) delay-model selector display order matches the reference (Mono/Stereo/PingPong/Off vs our Stereo/Mono/PingPong/Off — display-only; serialized model values stay). _(Source: QA-EffectsReview Task 9 unit 1 Fruity Delay 3 research 2026-07-01; routed here by Jeff.)_
+- **[CL-299 / WP]** Delay reference-cosmetic pass, folded into the FX-rack UI rebuild (pairs with BLU-480 FX-1 Rack UI refactor) — four visual/UX deltas vs the reference delay (FL Fruity Delay 3) accepted as cosmetic during the QA-EffectsReview Task 9 unit-1 fidelity rework, to pick up whenever the rack UI is rebuilt: (1) feedback Level knob ring color-warns green -> orange -> red above 100% (additive-feedback warning); (2) feedback-distortion section shows a live transfer-curve graph (waveshaping visualization, input vertical / output horizontal); (3) tempo-sync UX = step-denominated Time knob (dots = 1/16-bar steps) + right-click list of musical time values, vs our BPM toggle + 8-division chicken-head (functionally equivalent today); (4) delay-model selector display order matches the reference (Mono/Stereo/PingPong/Off vs our Stereo/Mono/PingPong/Off — display-only; serialized model values stay). _(Source: QA-EffectsReview Task 9 unit 1 Fruity Delay 3 research 2026-07-01; routed here by Jeff.)_ **SHIPPED items (1)/(2)/(4) in v1 (QA-ModelShell TS5 28f4ec09); item (3) DROPPED by owner ruling 2026-07-29** (BPM toggle + 8-division chickenhead stay; the reference delta stands accepted).
 
 ### Batch-surfaced (QA-Fe 2026-07-13)
 - **[CL-300 / WP]** True audio-thread pitch streaming in BaySickPitch -- run Rubber Band / Signalsmith under the playhead on the audio thread so a pill drag glides the pitch continuously DURING playback (Melodyne-style scrub), instead of the QA-Fe background-re-render model (which updates the cache on drag-release). Both give the SAME edit-latency for the currently-playing region (audio already inside the engine's ~50-120 ms latency buffer can't be changed either way); true streaming only adds the continuous drag-glide, at the cost of running the heavy library engine on the audio thread + look-ahead latency alignment from the stored composite. WORLD is excluded (offline-only, always bakes). Deferred by Jeff at QA-Fe Task 2 in favor of the simpler/safer uniform background-re-render architecture. _(Source: QA-Fe Task 2 live-path spec call 2026-07-13; routed here by Jeff.)_
@@ -625,12 +625,12 @@ audio-device infrastructure, performance / efficiency optimization.
 - **[CL-052 / PE]** Background sample pre-load — predict next-likely sample, pre-load into RAM cache.
 - **[CL-053 / PE]** Smarter voice management — priority-based stealing across all engines, not just per-engine. Architecture research 2026-05-08 expanded scope: per-engine cap audit + revisit (Surge XT 64, Massive X 1-64, Pianoteq 256 vs BaySickDAW 1-16 default 16). BLU-353 same-pitch preempt + note-off strip validated correct vs Surge "Reuse Single" + Massive X "Reassign" — preserve, do not undo.
 - **[CL-054 / PE]** Per-engine CPU budgets — cap voices per engine when CPU exceeds threshold. Architecture research 2026-05-08 expanded scope: Pianoteq-style CPU-aware auto-polyphony with Optimistic 75% / Pessimistic 50% targets.
-- **[CL-055 / PE]** Smart freeze — auto-freeze tracks when CPU exceeds 80%; restore on demand.
-- **[CL-056 / PE]** Adaptive block sizing — small block for live monitoring, large for offline render.
-- **[CL-057 / PE]** ASIO buffer-size hot-swap — change buffer without engine restart.
+- **[CL-055 / PE]** Smart freeze — auto-freeze tracks when CPU exceeds 80%; restore on demand. **SHIPPED in v1 (QA-ModelShell TS7 a055d7ef/8770b607/93bb158e/12e8a183)** - File Settings slider 0-100 + Off (default 80%), arm-on-sustained-load / fire-at-stop (Jeff's 2026-07-31 ruling), song-scope automatic renders + quiet-tick per-pattern filler; the fully-background shadow render is CL-304.
+- **[CL-056 / PE]** Adaptive block sizing — small block for live monitoring, large for offline render. **SHIPPED in v1 (e9ecf03e)** - offline renders run 2048-sample blocks in runOfflineLoop; live path unchanged.
+- **[CL-057 / PE]** ASIO buffer-size hot-swap — change buffer without engine restart. **ALREADY SHIPPED pre-batch (docket 3=b applyBufferSizeLive, ASIO-scoped); QA-ModelShell TS2 e9ecf03e closed its real gap** - the re-prepare cascade never swept drum or sfizz engines, so the hot-swap left them at the old block size.
 - **[CL-058 / PE]** Per-effect CPU % display — which slot is the hog (in mixer strip + Effects page).
 - **[CL-059 / PE]** Memory profiler — per-engine RAM usage display + leak detection.
-- **[CL-060 / PE]** Faster project load — parallel page restoration; lazy-load non-active tabs.
+- **[CL-060 / PE]** Faster project load — parallel page restoration; lazy-load non-active tabs. **Lazy half SHIPPED in v1 (QA-ModelShell TS4 05b248a8: launch frames Builder + Mixer only; everything else frames on first tab selection); parallel half DROPPED by owner ruling 2026-07-28** - parallelizing the per-tab SFZ loads means restructuring engine construction inside the freshly-rebuilt EngineRig area for a load-time-only win; the load overlay readout addressed the actual complaint.
 - **[CL-061 / PE]** Async preset load — don't block UI on preset switch.
 - **[CL-062 / PE]** Lock-free everywhere — audit remaining locks in audio path; replace with atomic / RCU patterns.
 
@@ -657,7 +657,7 @@ audio-device infrastructure, performance / efficiency optimization.
 - **[CL-279 / PE]** SamplePool with refcount + preload-head (process-wide, keyed by file path) — concrete `class SamplePool` sketch in source; foundation for CL-280..CL-286. Reuse across `AudioClipStreamer` + drum pads + sampler voices; eliminates 8x RAM duplication when same WAV used 8 times. _(Source: daw-architecture-research-2026-05-08.md §5)_
 - **[CL-280 / PE]** Preload-head for streamed clips (256 KB always-in-RAM) — eliminates 3.5s synchronous prefill on first play of >100 MB streamed clip. Folds into CL-279 SamplePool. _(Source: daw-architecture-research-2026-05-08.md §5)_
 - **[CL-281 / PE]** MP3 decode-once cache (decode-to-PCM at clip-add time on message thread; cache result) — supersedes walked-state FSW-121 (RAM-load <15MB clips brute-force); more elegant solution to same problem. Use PCM cache for all subsequent playback. _(Source: daw-architecture-research-2026-05-08.md §5)_
-- **[CL-282 / WP]** Streaming telemetry (atomic underrun counter + peak-prefill-latency-ms gauge + `jassertfalse` in Debug) — EXS24-style "data not read in time" UI counter; surfaced on debug overlay. _(Source: daw-architecture-research-2026-05-08.md §5)_
+- **[CL-282 / WP]** Streaming telemetry (atomic underrun counter + peak-prefill-latency-ms gauge + `jassertfalse` in Debug) — EXS24-style "data not read in time" UI counter; surfaced on debug overlay. _(Source: daw-architecture-research-2026-05-08.md §5)_ **SHIPPED IN FULL in v1 (offline counter e9ecf03e; completed at close 2026-07-31 after Jeff caught the narrowing)** - underruns count LIVE with a seek-vs-underrun contiguity discriminator, jassertfalse fires in Debug on a genuine continuous-playback miss, peak-fill stopwatch (sPeakPrefillMs) inside fillIntoRing, both surfaced on the transport bar as UND / PF.
 - **[CL-283 / PE]** Sampler engines consume SamplePool — wire `VibeSampleManager` + Phase D drum engines + BaySickPlayer through `SamplePool::getOrLoadHead(path)`; this is what unlocks Kontakt-scale (multi-GB) libraries. _(Source: daw-architecture-research-2026-05-08.md §5)_
 - **[CL-284 / PE]** HISE-style auto-RAM-load fallback for big-pitch samples — samples mapped across many octaves with high static pitch ratio bypass streaming and stay in RAM. _(Source: daw-architecture-research-2026-05-08.md §5)_
 - **[CL-285 / PE]** DrumGizmo multi-channel collapse — dedupe simultaneous reads of same file/position from different channels; I/O-level optimization on top of CL-279 SamplePool. _(Source: daw-architecture-research-2026-05-08.md §5)_
@@ -732,7 +732,7 @@ comments, macros, performance pad, drum-pad mode, track grouping,
 section markers, action recorder.
 
 ### Fire-Hose QoL
-- **[CL-087 / WP]** Multi-window UI — detach mixer / piano roll / browser to separate windows on second monitor.
+- **[CL-087 / WP]** Multi-window UI — detach mixer / piano roll / browser to separate windows on second monitor. **SHIPPED in v1 (QA-ModelShell TS4 05b248a8, 2026-07-28)** as the FL-style CONTAINED workspace - every page hosted in a native-child window inside the fixed main frame (Jeff's shell=2b ruling supersedes this entry's detach-to-second-monitor shape; no OS-level detach exists or is planned).
 - **[CL-088 / WP]** Theme variants — light, dark, high-contrast, sepia.
 - **[CL-089 / WP]** Custom theme builder — user-defined color palettes for entire UI.
 - **[CL-090 / WP]** DPI scaling — 1x / 1.25x / 1.5x / 2x for high-DPI displays.
@@ -747,7 +747,7 @@ section markers, action recorder.
 - **[CL-099 / WP]** Drum pad mode — keyboard layout for drum trigger (S/D/F/G... = kick/snare/hat/clap...).
 - **[CL-100 / WP]** Live record loop / overdub — extend recording with cumulative overdub mode.
 - **[CL-101 / WP]** Track grouping (folder tracks) — organize Layers / Bass into collapsible folders.
-- **[CL-102 / WP]** Track template — save track config (engine + effects + routing) for quick recall.
+- **[CL-102 / WP]** Track template — save track config (engine + effects + routing) for quick recall. **STALE 2026-07-31 - already shipped in v1 as PagePresetIO** (engine(s) + strip params incl. routing/sends + insert rack + pre/post EQ8, all seven page kinds, cross-index prefix rewrite; verified in source 2026-07-27 after the outstanding claim was challenged). Struck from the QA-ModelShell tiers list; nothing remains to build.
 - **[CL-103 / WP]** Sample preview at correct pitch/key — auto-pitch a one-shot to project key on hover.
 - **[CL-104 / WP]** Drag-to-tempo-match — drop sample, auto-fit project tempo (uses PhaseVocoder).
 - **[CL-105 / WP]** Music theory overlay — show Roman numeral analysis on chord progression in real time.

@@ -8727,10 +8727,14 @@ bool BuilderPage::renderToFile (const RenderOptions& opts,
         juce::Random rng;
         bool  isMp3   { false };
         // CL-043 + CL-045: per-sink post-gain (uniform across main + stems so
-        // the stem sum still matches the mix) and TPDF dither at the 16-bit
-        // WAV boundary.
+        // the stem sum still matches the mix) and SELECTABLE dither at the
+        // 16-bit WAV boundary.
         float gainLin { 1.0f };
-        bool  dither  { false };
+        RenderOptions::Dither dither { RenderOptions::Dither::Off };
+        // Noise-shaping error feedback, per sink and per channel: the
+        // quantisation error of the previous two samples, fed back so the
+        // shaped noise sits where the ear is least sensitive.
+        float shapeErr[2][2] { { 0.0f, 0.0f }, { 0.0f, 0.0f } };
 
         bool open (const RenderOptions& o, double sampleRate, const juce::File& d,
                    juce::String& err)
@@ -8738,8 +8742,8 @@ bool BuilderPage::renderToFile (const RenderOptions& opts,
             dest    = d;
             isMp3   = (o.format == RenderOptions::Format::Mp3);
             gainLin = juce::Decibels::decibelsToGain (o.postGainDb);
-            dither  = o.dither && o.format == RenderOptions::Format::Wav
-                                && o.bitDepth == 16;
+            dither  = (o.format == RenderOptions::Format::Wav && o.bitDepth == 16)
+                        ? o.dither : RenderOptions::Dither::Off;
             dest.deleteFile();
             if (isMp3)
                 return mp3.open (dest, sampleRate, 2, o.mp3Kbps, err);
@@ -8766,23 +8770,52 @@ bool BuilderPage::renderToFile (const RenderOptions& opts,
         bool write (const juce::AudioBuffer<float>& b, int n)
         {
             const juce::AudioBuffer<float>* src = &b;
-            if (gainLin != 1.0f || dither)
+            if (gainLin != 1.0f || dither != RenderOptions::Dither::Off)
             {
                 scratch.setSize (2, n, false, false, true);
                 for (int c = 0; c < 2; ++c)
                     scratch.copyFrom (c, 0, b, juce::jmin (c, b.getNumChannels() - 1), 0, n);
                 if (gainLin != 1.0f)
                     scratch.applyGain (gainLin);
-                if (dither)
+
+                // DOMAIN REFERENCE (Rule 6 cat. 3).  Both options are TPDF at
+                // +-1 LSB of the 16-bit grid -- the difference of two
+                // independent uniforms gives the triangular pdf, which
+                // decorrelates the quantisation error from the signal.  Flat
+                // stops there.  Noise-shaped additionally feeds the previous
+                // two samples' quantisation error forward with a second-order
+                // highpass response, moving the (same total) noise power up
+                // out of the ear's most sensitive band around 3-4 kHz.
+                // Coefficients 1.0 / -0.5 are the textbook minimal shaper:
+                // audibly quieter than flat, and unconditionally stable, which
+                // aggressive psychoacoustic curves are not at every rate.
+                if (dither != RenderOptions::Dither::Off)
                 {
-                    // TPDF at +-1 LSB of the 16-bit grid: the difference of
-                    // two independent uniforms gives the triangular pdf.
-                    constexpr float kLsb = 1.0f / 32768.0f;
+                    constexpr float kLsb   = 1.0f / 32768.0f;
+                    constexpr float kQuant = 32768.0f;
+                    const bool shaped = (dither == RenderOptions::Dither::NoiseShaped);
+
                     for (int c = 0; c < 2; ++c)
                     {
                         float* p = scratch.getWritePointer (c);
                         for (int i = 0; i < n; ++i)
-                            p[i] += (rng.nextFloat() - rng.nextFloat()) * kLsb;
+                        {
+                            const float tpdf = (rng.nextFloat() - rng.nextFloat()) * kLsb;
+
+                            if (! shaped) { p[i] += tpdf; continue; }
+
+                            const float fed = p[i]
+                                            + shapeErr[c][0] * 1.0f
+                                            - shapeErr[c][1] * 0.5f;
+                            const float out = fed + tpdf;
+                            // The error THIS sample will incur once the writer
+                            // rounds to the 16-bit grid, measured here so the
+                            // next samples can correct for it.
+                            const float quantised = std::round (out * kQuant) / kQuant;
+                            shapeErr[c][1] = shapeErr[c][0];
+                            shapeErr[c][0] = quantised - fed;
+                            p[i] = out;
+                        }
                     }
                 }
                 src = &scratch;

@@ -1281,8 +1281,14 @@ public:
         bool             writeMainFile { true };
 
         // QA-ModelShell TS2 riders:
-        // CL-043: TPDF dither on 16-bit WAV writes (main file + stems alike).
-        bool  dither      { false };
+        // CL-043: SELECTABLE dither on 16-bit WAV writes (main file + stems
+        // alike).  The entry names POW-r as a third option; it is a licensed,
+        // trademarked algorithm from the POW-r Consortium and is neither ours
+        // to implement nor ours to name (same class as the VST2 finding), so
+        // the third slot is our own noise-shaped design -- Jeff's ruling (a),
+        // 2026-07-31.
+        enum class Dither { Off, Flat, NoiseShaped };
+        Dither dither     { Dither::Off };
         // CL-045: LUFS-target normalization -- measure-then-gain, BOTH
         // directions, with any boost capped so the (estimated) true peak
         // stays under ceilingDbTp.  postGainDb is INTERNAL: the normalize

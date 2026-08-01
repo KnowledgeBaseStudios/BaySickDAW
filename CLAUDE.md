@@ -100,10 +100,10 @@ the user before dispatching.
 ---
 
 ## Project Overview
-JUCE 7 C++ music production app (formerly Vibesynth, then VibeDAW). **Standalone Windows app only** — no VST/plugin version planned; a legacy `juce_add_plugin` target still exists in CMake but is not shipped. Future platform plan: tablet "DJ Party" variant, still not a VST.
+JUCE 8 C++ music production app (vendored JUCE 8.0.x; formerly Vibesynth, then VibeDAW). **Standalone Windows app only** — no VST/plugin version planned; a legacy `juce_add_plugin` target still exists in CMake but is not shipped. Future platform plan: tablet "DJ Party" variant, still not a VST.
 **App name:** BaySickDAW by KnowledgeBase Studios
 **Target audience:** people who have never made music before.
-**User-facing engine names:** Harmless, BaySickPlayer (sample player — internal source is still `VibePlayer*`; class / file renames deferred), BaySickSynth, BaySickBass. Drums are now per-tab engine instances (Phase D dynamic-drum architecture, 2026-04-25) — each Drums tab owns one BaySickPlayer or BaySickSynth instance; the legacy monolithic `BaySickDrums` engine was deleted.
+**User-facing engine names:** Harmless, BaySickPlayer (sample player — internal source is still `VibePlayer*`; class / file renames deferred), BaySickSynth, BaySickBass. Drums are now per-tab engine instances (Phase D dynamic-drum architecture, 2026-04-25) — each Drums tab owns one BaySickPlayer or BaySickSynth instance; the legacy monolithic `BaySickDrums` engine was deleted. Since QA-ModelShell (2026-07-31) the app also HOSTS third-party VST3 plugins — effects in rack slots (`EffectType::VST3Plugin`) and instruments as Plugins tabs — still standalone-only as a product.
 
 **Owner:** Jeff — professional FL Studio user. Technically capable. **Claude runs the builds** (changed 2026-07-25 — see `## Build System`). Jeff still owns every spec call, per-batch commit approval, and all in-app / ear verification.
 
@@ -117,7 +117,7 @@ JUCE 7 C++ music production app (formerly Vibesynth, then VibeDAW). **Standalone
     `cmd.exe /c "C:\Users\jeffm\Documents\BaySickDAW\do_build.bat"`
     via the PowerShell tool with `run_in_background: true` (a full rebuild exceeds the 10-min synchronous tool cap).
     **Keep it a SINGLE statement** — no `;`, no `&&`, no `$VAR`. A compound command cannot be reduced to a reusable allow rule, so "always allow" silently fails to match the next run and Jeff gets prompted every single build. (Learned the hard way 2026-07-25: the original string appended `; Write-Output "WRAPPER_EXIT=$LASTEXITCODE"`, which was useless anyway — see the next bullet.)
-  - **Read the result from `build_log.txt`**, not the wrapper exit code: `RELEASE_EXIT_CODE` and `DEBUG_EXIT_CODE` must BOTH be 0. Grep for `error C` / `error LNK` / `error MSB`; do not dump the whole log.
+  - **Read the result from `build_log.txt`**, not the wrapper exit code (it reported 0 twice while the log said failure): FIVE exit codes must ALL be 0 — `RELEASE_EXIT_CODE`, `DEBUG_EXIT_CODE`, `HELPER64_EXIT_CODE`, `HELPER32_CONFIG_EXIT_CODE`, `HELPER32_EXIT_CODE` — plus FOUR `vcxproj -> ....exe` link lines (two `BaySickDAW.exe` + `BaySickPluginHost64.exe` + `BaySickPluginHost32.exe`). Grep for `error C` / `error LNK` / `error MSB`; do not dump the whole log. (The plugin-sandbox helpers build x64 into `build\` and x86 into `build32\` — QA-ModelShell TS6.)
   - **Cadence:** one build gate at the end of EVERY task (the G3 exemplar `Plans & Specs/Batch Plans/silky-gliding-lynx.md` is canonical). Bulk-run's "no per-task verify pauses" retires the per-task FUNCTIONAL test + running-notes checkpoint ONLY — it never retired the compile gate.
   - **Exe-lock convention:** do not build while Jeff has `BaySickDAW.exe` open (Debug or Release) — the link step fails on the locked file. He says when he is in the app.
   - **Hard stop:** if the build fails for any reason that is NOT the code under edit (env, tooling, locked exe), stop and hand it back to Jeff. Do not debug the harness — that failure mode is what created the original rule.
@@ -125,7 +125,7 @@ JUCE 7 C++ music production app (formerly Vibesynth, then VibeDAW). **Standalone
 - **Release exe:** `build\BaySickDAWStandalone_artefacts\Release\BaySickDAW.exe` - the shipping binary, used for music production.
 - **Debug exe:** `build\BaySickDAWStandalone_artefacts\Debug\BaySickDAW.exe` - the diagnostic binary, used for verifying fixes. Window title shows `[DEBUG]` suffix. Same embedded icon (JUCE+VS multi-config gotcha; differentiation via window title only).
 - **Build dir:** `C:\Users\jeffm\Documents\BaySickDAW\build\`
-- **Build log:** `build_log.txt` at repo root. Two exit codes - `RELEASE_EXIT_CODE` and `DEBUG_EXIT_CODE`. Either non-zero = that config failed.
+- **Build log:** `build_log.txt` at repo root. Five exit codes (see above). Any non-zero = that piece failed. An exe-locked link failure can leave STALE OBJECTS — judge the NEXT build by the error grep AND the link-line count, not exit codes alone.
 - **Header dependencies:** handled automatically by MSBuild. No manual `.obj` deletion after header edits - just re-run `do_build.bat`.
 - **Standing rule (verifying Claude fixes):** run the Debug exe FIRST. Any `jassert` that fires shows a Windows dialog with file path + line + condition - screenshot to share. Then re-run in Release as the actual user test. Debug runs slower; audio that glitches in Debug under heavy load may be fine in Release. Always confirm in Release before declaring a real performance regression.
 - **Don't run both simultaneously.** ASIO opens audio devices exclusively (second instance gets no audio). Both exes share `Documents\BaySickDAW\settings.xml` + `audio_settings.xml` - changes in one are seen by the other on next start.
@@ -189,10 +189,25 @@ Read those at session open (Main Plan §0 Rule 1) rather than trusting any summa
 - `VibeSampleManager::detectRootNote()` parses filename numbers as MIDI notes. `Kick_01.wav` → rootNote=1 → 30× pitch. Drum engines must call `normalizeRootNotes(60)` after every `loadFolder()`/`loadSFZ()` since BaySickDrums always sends MIDI note 60.
 - `loadSingleFile()` already initializes rootNote=60.
 
+### Model-owned engines (EngineRig) — QA-ModelShell 2026-07
+- `Source/EngineRig.h/.cpp` owns every dynamic-tab engine, keyed `(TabKind, pageIndex)` over Layers/Bass/Drums/Clips/Vox/Inst/Plugins. Pages are NON-OWNING VIEWS — a page dtor touches only its editor; engines keep running when windows close. The sfizz trio (Guitars/Basses/RustyDrums) stays PROCESSOR-owned on its own race-safe load paths.
+- Teardown order is load-bearing: `rig.removeTab` runs BEFORE `destroyBaySickGuitars/Basses` (the rig-owned Inst chain holds the spliced sfizz stage pointer; one audio block in the wrong order = use-after-free).
+- ALL automation registration is model-side (engine creation events, `onMixerStripParamsCreated`, `onSfizzEngineReady`, rack/pedal model events). Applicators re-resolve their target THROUGH the model at apply time. NEVER register automation against a widget — destroy-on-close windows make every widget-scoped registration a guaranteed dead lane. Any NEW lane class needs its live registration AND an `applyOfflineLaneValue` branch in the same pass, or it plays live and vanishes from exports.
+
+### Contained-window shell (WorkspaceWindow) — QA-ModelShell 2026-07
+- Pages live in `WorkspaceWindow`s — REAL native child windows (WS_CHILD) inside the fixed fullscreen main frame. A child peer positions AND reads back in the PARENT'S CLIENT space (contract documented in `WorkspaceWindow.h`); persistence stores workspace-local bounds.
+- **Z-ORDER TRAP (silent):** a native child peer always renders above anything drawn into its parent — `setAlwaysOnTop` does NOT cross the drawn/native boundary. Any drawn overlay meant to cover the workspace must be promoted to its own desktop window (tooltips: one `TooltipWindow` PER contained window). A progress surface that paints while the message thread is blocked must ALSO select the Software Renderer on its own peer — JUCE 8's Direct2D `performAnyPendingRepaintsNow()` is an EMPTY override.
+- Peer-keyed suspend convention: repeating UI work (vblank drains, page poll timers) starts/stops in `parentHierarchyChanged()` keyed on `getPeer() != nullptr` — never in constructors (pages can exist unframed). Page destruction on window close is OFF (Jeff's measured ruling; the editor's cached raw page pointers, `mMixerPage` etc., are unguarded).
+
+### True offline export / render path — QA-ModelShell 2026-07
+- The LIVE processor renders itself: `beginOfflineRender(sr, blk)` / `endOfflineRender()` (suspend + `setNonRealtime` sweep over every engine + graph reset + full re-prepare + restore set; one render at a time by compare-exchange). `BuilderPage::runOfflineLoop` is the ONE render core — export, `measureRender`, and freeze renders all consume it; never copy the loop.
+- `isNonRealtime()` gates: metronome, recorders, DSP load meter, `markEngineContentChanged` / `markAllFreezesStale` (an automation REPLAY is not a user edit — without these guards frozen tabs re-render in a cascade), transport-edge publishes. `AudioClipStreamer::sOfflineRender` switches clip reads to blocking (offline outruns prefetch by design).
+- Freeze: files in `<project>\Freeze\`, per-tab song + per-pattern renders, FNV-1a content stamp for restore reuse, substitution via `FrozenSourceRead.h`; frozen tabs substitute SILENCE while the transport is stopped; staleness RETRACTS published pointers.
+
 ### Engine audition pattern
 - All 7 engine processors (BaySickSynth, BaySickBass, Harmless, VibePlayer, BaySickGuitars, BaySickBasses, BaySickRustyDrums) have `auditionNote(int midiNote)` + `std::atomic<int> mAuditionNote { -1 }`.
 - `processBlock` opens with `int n = mAuditionNote.exchange(-1); if (n >= 0) { ...noteOff-any, noteOn n... }`.
-- Page audition callbacks for Layers / Bass / Drums tabs cascade through the legacy 4 engine types: try BaySickSynth first, then Harmless, then VibePlayer (order doesn't matter, all silent on cast failure).  Inst tabs (BaySickGuitars / BaySickBasses) wire piano-roll keyboard clicks directly to `eng->auditionNote(n)` via `EngineConnection::auditionMomentary` (StandaloneEditor.cpp:7147-7165).  BaySickRustyDrums wires kit-graphic hitbox clicks the same way (BaySickRustyDrumsKitGraphic.cpp:665).
+- Page audition callbacks resolve engines THROUGH the rig (pages are views; do not cache engine pointers): Layers / Bass / Drums cascade the legacy engine-type casts (all silent on cast failure). Inst tabs (BaySickGuitars / BaySickBasses) wire piano-roll keyboard clicks to `eng->auditionNote(n)` via `EngineConnection::auditionMomentary`; BaySickRustyDrums wires kit-graphic hitbox clicks the same way (BaySickRustyDrumsKitGraphic.cpp). Hosted VST3 instrument tabs have NO auditionNote — the roll keyboard reaches them through the live-MIDI route (`EngineKind::Plugin` = target kind 10); do not synthesize a second MIDI path for them.
 - QA-C (2026-05-10) added a public `bool isAuditionPending() const noexcept` peek on the 3 sfizz engines (Guitars / Basses / RustyDrums) so the idle-suspend dispatcher predicates can wake the chain when an audition arrives.  Reads `mAuditionNote.load(std::memory_order_acquire) != -1`.
 - **Validated correct** by `Plans & Specs/Research Reports/daw-architecture-research-2026-05-08.md` §3 (Lock-free MIDI dispatch). Vital + Surge XT delegate UI→audio MIDI to host's `MidiBuffer` in `processBlock` and put their queue investment on parameter automation, NOT note dispatch — same baseline as us. **DO NOT** rip this out for `juce::MidiMessageCollector` — its source has a `CriticalSection midiCallbackLock` mutex (the very thing this pattern avoids). Multi-event ring upgrade lives in Future State CL-272..CL-274 and is deferred until chord-strum / paste-to-roll / arpeggio-from-UI-clock use cases land.
 
@@ -223,21 +238,6 @@ processBlock fires hundreds of times/sec — unconditional recalculation wastes 
 - kRowH=40, kRulerH=18, kLabelW=120, kNumRows=32, kResizeZone=8
 - mPPBar (public): pixels per bar (zoom state), default 80
 - Undo: full snapshot of blocks + row names per entry, max 100 entries
-
-### External MID/SIDE Button Pattern
-```cpp
-// Position after tab bar (in resized()):
-auto& bar = mTabs->getTabbedButtonBar();
-int afterEQ = mTabs->getX() + 4;
-if (auto* btn = bar.getTabButton(eqTabIndex))
-    afterEQ = mTabs->getX() + btn->getRight() + 6;
-int barY = mTabs->getY();
-mEQMidBtn ->setBounds(afterEQ,      barY + 2, 46, 24);
-mEQSideBtn->setBounds(afterEQ + 50, barY + 2, 50, 24);
-// Timer-based tab detection:
-int cur = mTabs->getCurrentTabIndex();
-if (cur != mLastTabIndex) { mLastTabIndex = cur; resized(); }
-```
 
 ### UI Changes Reference
 All deliberate standalone UI changes are documented in:

@@ -54,6 +54,34 @@ AudioClipStreamer::~AudioClipStreamer()
 
 std::atomic<bool>        AudioClipStreamer::sOfflineRender { false };
 std::atomic<juce::int64> AudioClipStreamer::sUnderrunCount { 0 };
+std::atomic<float>       AudioClipStreamer::sPeakPrefillMs { 0.0f };
+
+void AudioClipStreamer::noteMiss (int64 filePos) noexcept
+{
+    // CALIBRATION (Rule 6 cat. 5): one max-ish block of slack.  Consecutive
+    // reads continue exactly where the last ended (readRaw) or within a
+    // fraction of a sample of it (readAndMix's ratio math), so anything
+    // inside this window is continuous playback and anything outside it is a
+    // seek the user asked for.
+    constexpr int64 kContiguitySlack = 4096;
+
+    const bool contiguous = mLastServedEnd > 0
+                         && std::llabs ((long long) (filePos - mLastServedEnd))
+                              <= (long long) kContiguitySlack;
+
+    if (contiguous || sOfflineRender.load (std::memory_order_relaxed))
+    {
+        sUnderrunCount.fetch_add (1, std::memory_order_relaxed);
+        // The Debug-build tripwire the entry asks for: during CONTINUOUS
+        // playback the ring should never be short, so this firing is a real
+        // finding rather than noise.
+        jassertfalse;
+    }
+
+    // Either way the next read starts a fresh run -- a seek's first block must
+    // not be judged against a position from before the jump.
+    mLastServedEnd = 0;
+}
 
 bool AudioClipStreamer::ensureRangeBlockingForOffline (int64 needStart)
 {
@@ -136,6 +164,26 @@ void AudioClipStreamer::requestSeek (int64 filePos)
 
 void AudioClipStreamer::fillIntoRing (int64 fromFilePos, int numSamples)
 {
+    // CL-282: the fill IS the disk read, so its wall-clock is the number that
+    // predicts an underrun -- a fill slower than the ring's remaining headroom
+    // starves the next audio-thread read.  Session peak via CAS-max; runs on
+    // whichever thread is filling (message seek / background prefetch /
+    // offline blocking), never the audio thread.
+    const double fillT0 = juce::Time::getMillisecondCounterHiRes();
+    struct ScopedFillClock
+    {
+        double t0;
+        ~ScopedFillClock()
+        {
+            const float ms = (float) (juce::Time::getMillisecondCounterHiRes() - t0);
+            float cur = sPeakPrefillMs.load (std::memory_order_relaxed);
+            while (ms > cur
+                   && ! sPeakPrefillMs.compare_exchange_weak (cur, ms,
+                                                              std::memory_order_relaxed))
+            {}
+        }
+    } fillClock { fillT0 };
+
     // Guard: don't overfill the ring
     const int64 rh    = mRingReadHead .load (std::memory_order_acquire);
     const int64 wh    = mRingWriteHead.load (std::memory_order_relaxed);
@@ -242,9 +290,8 @@ bool AudioClipStreamer::readRaw (juce::AudioBuffer<float>& dest,
         // the silence a live callback would have to.
         if (! ensureRangeBlockingForOffline (filePos))
         {
-            if (sOfflineRender.load (std::memory_order_relaxed)
-                && filePos >= 0 && filePos < mTotalLength)
-                sUnderrunCount.fetch_add (1, std::memory_order_relaxed);
+            if (filePos >= 0 && filePos < mTotalLength)
+                noteMiss (filePos);
             return false;
         }
     }
@@ -277,9 +324,8 @@ bool AudioClipStreamer::readRaw (juce::AudioBuffer<float>& dest,
             }
             if (filePos < coveredStart || filePos + numSamples > wh)
             {
-                if (sOfflineRender.load (std::memory_order_relaxed)
-                    && filePos >= 0 && filePos + numSamples <= mTotalLength)
-                    sUnderrunCount.fetch_add (1, std::memory_order_relaxed);
+                if (filePos >= 0 && filePos + numSamples <= mTotalLength)
+                    noteMiss (filePos);
                 mSeekTarget .store (filePos, std::memory_order_release);
                 mSeekPending.store (true,    std::memory_order_release);
                 mReady      .store (false,   std::memory_order_release);
@@ -297,6 +343,7 @@ bool AudioClipStreamer::readRaw (juce::AudioBuffer<float>& dest,
     }
 
     mRingReadHead.store (filePos + numSamples, std::memory_order_release);
+    mLastServedEnd = filePos + numSamples;   // CL-282 contiguity anchor
     return true;
 }
 
@@ -337,9 +384,8 @@ float AudioClipStreamer::readAndMix (juce::AudioBuffer<float>& dest,
         // forced silence.
         if (! ensureRangeBlockingForOffline (startFloor - 1))
         {
-            if (sOfflineRender.load (std::memory_order_relaxed)
-                && startFloor >= 0 && startFloor < mTotalLength)
-                sUnderrunCount.fetch_add (1, std::memory_order_relaxed);
+            if (startFloor >= 0 && startFloor < mTotalLength)
+                noteMiss (startFloor);
             return 0.0f;
         }
     }
@@ -385,9 +431,8 @@ float AudioClipStreamer::readAndMix (juce::AudioBuffer<float>& dest,
             }
             if (stillMissing)
             {
-                if (sOfflineRender.load (std::memory_order_relaxed)
-                    && startFloor >= 0 && startFloor < mTotalLength)
-                    sUnderrunCount.fetch_add (1, std::memory_order_relaxed);
+                if (startFloor >= 0 && startFloor < mTotalLength)
+                    noteMiss (startFloor);
                 // Genuine position jump (backward scrub, loop, or first-block miss) -
                 // signal the background thread to seek.
                 mSeekTarget .store (startFloor, std::memory_order_release);
@@ -466,5 +511,10 @@ float AudioClipStreamer::readAndMix (juce::AudioBuffer<float>& dest,
                              + (int64) std::floor ((double) numOutputSamples * readRatio)),
                          std::memory_order_release);
 
+    // CL-282 contiguity anchor: where the NEXT block's read is expected to
+    // start (ratio-scaled), so a continuation miss is distinguishable from a
+    // user seek.  The slack in noteMiss absorbs the fractional rounding.
+    mLastServedEnd = (int64) std::llround (fileStartPos
+                                           + (double) numOutputSamples * readRatio);
     return peak;
 }

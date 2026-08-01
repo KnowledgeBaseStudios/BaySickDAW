@@ -10900,9 +10900,22 @@ public:
         mFormat.onChange = [this] { repopulateQuality(); };
         repopulateQuality();
 
-        // CL-043 + CL-045 riders.
-        mDitherToggle.setButtonText ("Dither (16-bit WAV)");
-        addAndMakeVisible (mDitherToggle);
+        // CL-043 + CL-045 riders.  CL-043 is SELECTABLE (Jeff's ruling (a),
+        // 2026-07-31 -- it shipped as a single-algorithm checkbox, which was a
+        // narrowing nobody approved).  The entry's third algorithm, POW-r, is
+        // licensed and trademarked, so the third slot is our own noise-shaped
+        // design rather than a name we cannot use.
+        mDitherLbl.setText ("Dither", juce::dontSendNotification);
+        mDitherLbl.setJustificationType (juce::Justification::centredLeft);
+        addAndMakeVisible (mDitherLbl);
+        mDither.addItem ("Off",          1);
+        mDither.addItem ("Flat (TPDF)",  2);
+        mDither.addItem ("Noise-Shaped", 3);
+        mDither.setSelectedId (1, juce::dontSendNotification);
+        mDither.setTooltip ("Applies to 16-bit WAV exports. Flat is the safe default; "
+                            "Noise-Shaped moves the same noise out of the ear's most "
+                            "sensitive range.");
+        addAndMakeVisible (mDither);
         mNormToggle.setButtonText ("Normalize to");
         addAndMakeVisible (mNormToggle);
         // TS7 (Jeff 2026-07-29): a typed LUFS box replaces the four-item combo.
@@ -11024,7 +11037,7 @@ public:
         place (mQualLbl, mQual);
         place (mSrateLbl, mSrate);
 
-        mDitherToggle.setBounds (row());
+        place (mDitherLbl, mDither);
         {
             auto r = row();
             mNormToggle.setBounds (r.removeFromLeft (130));
@@ -11163,7 +11176,8 @@ private:
                 if (s.toggle->getToggleState())
                     o.stems.push_back ({ s.channelId, s.toggle->getButtonText() });
 
-        o.dither    = mDitherToggle.getToggleState();
+        o.dither    = (BuilderPage::RenderOptions::Dither)
+                        juce::jlimit (0, 2, mDither.getSelectedId() - 1);
         o.normalize = mNormToggle.getToggleState();
         o.lufsTarget = readLufsBox (mLufsTarget, -14.0f);
 
@@ -11274,7 +11288,7 @@ private:
         for (auto* c : { (juce::Component*) &mSel, (juce::Component*) &mTail,
                          (juce::Component*) &mFormat, (juce::Component*) &mQual,
                          (juce::Component*) &mSrate, (juce::Component*) &mStemsToggle,
-                         (juce::Component*) &mDitherToggle, (juce::Component*) &mNormToggle,
+                         (juce::Component*) &mDither, (juce::Component*) &mNormToggle,
                          (juce::Component*) &mLufsTarget, (juce::Component*) &mSpecCombo,
                          (juce::Component*) &mCustomLufs,
                          (juce::Component*) &mMeasureBtn,
@@ -11421,9 +11435,9 @@ private:
     juce::String        mBaseName;
     std::function<void (std::function<void()>)> mEnsureSaved;
 
-    juce::ComboBox mSel, mTail, mFormat, mQual, mSrate;
-    juce::Label    mSelLbl, mTailLbl, mFormatLbl, mQualLbl, mSrateLbl;
-    juce::ToggleButton mDitherToggle, mNormToggle;
+    juce::ComboBox mSel, mTail, mFormat, mQual, mSrate, mDither;
+    juce::Label    mSelLbl, mTailLbl, mFormatLbl, mQualLbl, mSrateLbl, mDitherLbl;
+    juce::ToggleButton mNormToggle;
     // TS7: typed LUFS entry, not a fixed pick list.
     juce::TextEditor   mLufsTarget, mCustomLufs;
     juce::Label        mLufsSuffix, mCustomLufsLbl;

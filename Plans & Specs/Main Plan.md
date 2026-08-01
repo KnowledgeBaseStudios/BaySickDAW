@@ -1962,6 +1962,18 @@ kit fan-out behavior locked at docket #10 (a/a, default unmapped).
 - **Bucket:** System Pages, Cross-cutting Infrastructure
 - Verify (own plan file will detail): saving a template with full project state (L/B/D + vox/inst/clip/rusty/aux/samples) round-trips through Load Template intact; loading a template into a project with other-type tabs leaves those tabs untouched (non-destructive teardown); user templates with inline `<Drum>` children load correctly (drum inline-load fix); the New-from-Template submenu shows Default / Premade / My Templates in the correct folders; dirty-check flow prompts on dirty project and loads directly on clean; sample reference-vs-copy behavior matches the source-aware hybrid spec; Pack project produces a portable zip with all referenced samples resolved correctly on the receiving end; existing per-project-copy samples migrate cleanly (no orphaned files, no broken references); Save Template As dialog text accurately describes the expanded scope.
 
+*Post-close reversal: docket 18's empty-state PRESENTATION (empty-state pages + always-visible 0-badge slots) retired at QA-ModelShell TS4's "+" tab bar -- delete-to-zero, the deleted seeding paths, and membership-driven bus hiding all survive. See §9 sixty-fifth Forks entry.*
+
+#### **QA-ModelShell: Engine-Ownership Inversion + True Offline Export + Model-Side Automation + Contained-Window Shell + Effects Windows + VST3 Hosting + Freeze/Loudness Suite** *(NEW -- inserted 2026-07-27 when QA-ProjectSave's Task 7 applicator sweep escalated through export-silent-instruments into Jeff's inversion + tiers rulings; slotted directly after QA-ProjectSave (G4 order: badger -> mammoth -> layout batch -> yak -> stoat -> heron) -- see §9 sixty-fifth Forks entry)*
+**Plan file:** [`Plans & Specs/Batch Plans/grand-inverting-mammoth.md`](Batch Plans/grand-inverting-mammoth.md) *(eight task sets = Jeff's approved groups, per-set commits, ALL functional verification deferred to one batch smoke; paired running notes hold the HELD Work Log entry, the TS7 §1-§11 execution spec, and the layout-batch holds)*
+- **Bucket:** Effects, Players, Mixer / Routing, System Pages, UI / L&F / Theming, Cross-cutting Infrastructure, Other / Platform / Deferred *(proposed seven-bucket set -- HELD Jeff call at apply, per the QA-ProjectSave precedent)*.
+- Items: the engine-ownership inversion (model-owned engines as a V1 REQUIREMENT, Jeff 2026-07-27); true offline export replacing the silent-instrument replica; automation registration fully model-side; the FL-style contained-window shell (shell=2b) incl. the CL-087 promotion; the Effects surface as windows (BLU-480 respecced 2026-07-29 + CL-299 1/2/4 + BLU-499); the FULL VST3 family BLU-297/298/299/300/301/302 + BLU-447 (VST2 dropped by licensing review -> CL-303); the freeze + loudness suite (CL-055 + BLU-427 both halves, maximizer suite CL-244 + CL-243(+BLU-109) + BLU-108 + BLU-110 + measure-before-render, CL-044, CL-227); riders CL-040/043/045/056/282/301, CL-057 (verified shipped + gap closed), CL-060 (lazy half only -- parallel half DROPPED 2026-07-28), BLU-344. CL-102 struck pre-batch (already shipped as PagePresetIO). CL-043 + CL-282 finished IN FULL at close after Jeff caught unapproved narrowings (selectable dither with the POW-r licensing exclusion; live streaming telemetry).
+- Scope: eight task sets. TS1 EngineRig + view-flip + dormant UndoManager pre-wire + CL-301 bus-node fold; TS2 the live model renders itself offline (lane-aware clock, UI-free lane replay, one-pass per-strip stems, FL-style dialog, dither/LUFS-normalize/2048-block, `<project>\Exports\`); TS3 ~30 EffectParamMap tables (PanelContext key) + 19 wrapper sites retired + sfizz lane defect fixed + `_fader` alias + EQ-band/mixer lanes to param materialization + BLU-344; TS4 WorkspaceWindow native-child shell, merged title-strip menus, dynamic "+" tab bar (docket-18 presentation reversal), peer-keyed UI suspend (destroy-on-close re-ruled option (d) on measurement), software-rendered load overlay; TS5 rack window + per-effect + Pre/Post EQ satellite windows, FxRackPresetIO, rack-first picker (Pedals group heading, Gate/De-reverb made reachable); TS6 VST3 hosting end to end (scanner/manager/proxy seam/rack slot/Plugins tab with own bus + roll + strip/BLU-302 per-plugin sandbox x64 + x86, arch-neutral protocol); TS7 every-tab + pattern-mode + kit freeze with content stamp + render pruning, BS.1770-4 true peak, Limiter/Maximizer mode, master analyzer, HTML loudness report, version capture, BLU-447 half-built completion (41 defects), hosted-plugin playhead; TS8 close-out. Whole-batch 20-agent review (the mandatory per-set reviews had never run): 94 findings, ALL closed in-batch (`93bb158e`); eight 2026-07-31 rulings incl. bridge protocol v3 full completion, stop-gated auto-freeze (shadow render -> CL-304), Measure-writes-nothing, staggered per-pattern freeze (`12e8a183`).
+- **STATUS: code-complete 2026-07-31 (13 per-set commits `4ea67bd0` `e9ecf03e` `1dd08437` `05b248a8` `28f4ec09` `c8854429` `71781115` `4ddf25fa` `467fd0b9` `a055d7ef` `8770b607` `93bb158e` `12e8a183` + one close-out commit, batch base `b933b54a`; gates green per set on the five-exit-code / four-link-line criterion); Work Log entry HELD per R2 in the paired running notes -- applies, with this entry's STATUS flip to CLOSED, when §B.31 passes at the G4 BOUNDARY smoke (Jeff 2026-07-31: the layout batch reshapes the same surfaces, so the ~48-scenario batch smoke AND the §B.1-B.30 reconciliation pass BOTH moved to the boundary; supersedes conflict call 3=a's run-inside-TS8; walk order = `Files For Claude/G4 Boundary Smoke.txt`, scenario source = §B.31 incl. the B.31.0 floor-collection pass that runs FIRST). Jeff spot-checked throughout (close crash, plugin windows, freeze timing, tempo-sync, vocal flow -- all fixed from his runs); the formal walk is what is deferred. Next: the LAYOUT BATCH (Jeff 2026-07-28) -- planning session first, no plan file yet.**
+- Risk: highest since Phase D -- every page type, VibeGraph registration, project save/load, export, automation, the whole window shell, and third-party code in-process + out-of-process.
+- Dependencies: QA-ProjectSave closed at `b933b54a` (its Task 7 remainder became this batch's TS3).
+- Effort: very large -- the largest batch of the QA era; executed 2026-07-27 -> 2026-07-31 across bulk-run sessions.
+
 #### **QA-UndoCoverage: App-Wide Undo-History Coverage Review** *(NEW — inserted 2026-07-08 at bulk-run plan approval — see §9 fifty-fifth Forks entry)*
 **Plan file:** [`Plans & Specs/Batch Plans/long-rewinding-yak.md`](Batch Plans/long-rewinding-yak.md) *(G4 group open 2026-07-25 — RESHAPED: the setProperty population is serialization-only (no live-state audit exists to run); scope = one global UndoManager everywhere (docket 13=A+ii) + snapshot-gap wrapping + Event Editor unification (docket 12=A, 14=a) — see §9 sixty-fourth Forks entry)*
 - Items: everything the user can change must register in the central UndoManager (`Source/Standalone/StandaloneEditor.h:300`) — audit every mutable surface (pattern/note edits, arrangement blocks, mixer state, engine params, effect params, page state, renames) and wire the gaps via `ParameterAttachment`s or explicit transactions (Jeff request 2026-07-08 at bulk-run plan review).
@@ -2257,6 +2269,11 @@ These four batches were planned in the original `lucky-discovering-tiger` Phase 
 
 ## 5.5 Domain Coverage (batch → bucket map)
 
+> **STALE since 2026-05 (banner added 2026-07-31, Jeff's ruling c).**  This table has not been
+> maintained for any batch since May and is missing every batch from QA-Md onward, including
+> QA-ModelShell.  Do not trust it for coverage lookups; grep the per-batch `**Bucket:**` lines
+> in §5 instead.  Revive or delete at the release pass (QA-Audit).
+
 §5 batches are listed in execution order (Phase 1 → Phase 7) so the
 sequencing arrow + dependencies stay readable. This section flips the
 view: each canonical bucket from §0 lists which QA-* batches touch it.
@@ -2291,7 +2308,7 @@ records the same set so cross-doc grep stays consistent.
 ```
 QA-0a* → QA-0 → QA-Inventory*** → QA-Md** → QA-A → QA-C → QA-D → QA-E → QA-Ea********* → QA-Ef************* → QA-Eg*************** → QA-AudioMeters****************** → QA-InsertMaps******************** → QA-VoicePool********************* → QA-SfzGroup*********************** → QA-Sfizz************************ → QA-DispatcherAffinity************************* → QA-RustyMeter************************** → QA-EngineApvts********************** → QA-Sfizz-Followup*************************** → QA-Ed************ → QA-ClipDrop**************************** → QA-Ee************** → QA-Rules*********************************** → QA-EffectsReview****************************** → QA-MultiBlockHazard********************************** → QA-ClipPlayback************************************ → QA-CutSelfReview******************************* → QA-UICleanup******************************** → QA-TransportDisplay************************************* → QA-Chords********************************* → QA-TempoMap***************************** → QA-Eb********** → QA-Ec*********** → QA-F
    → QA-Fa → QA-Fb******** → QA-Fc******** → QA-Fd***************************************** → QA-Fe****************************************** → QA-Fe2******************************************** → QA-G → QA-H → QA-I → QA-J → QA-B******* → QA-K → QA-L
-   → QA-M → QA-Drum-Polish**** → QA-N → QA-OctavePedal******************************************* → QA-SlideSliceGlide********************************************* → QA-SlideSampler********************************************** → QA-L-Fix*********************************************** → QA-G3Smoke************************************************ → QA-VibeSlider**** → QA-NativeDialogs**************** → QA-ApvtsAutomation************************************** → QA-Verify**** → QA-Export**** → QA-ProjectSave***************** → QA-UndoCoverage*************************************** → QA-DirtyFlag*******************
+   → QA-M → QA-Drum-Polish**** → QA-N → QA-OctavePedal******************************************* → QA-SlideSliceGlide********************************************* → QA-SlideSampler********************************************** → QA-L-Fix*********************************************** → QA-G3Smoke************************************************ → QA-VibeSlider**** → QA-NativeDialogs**************** → QA-ApvtsAutomation************************************** → QA-Verify**** → QA-Export**** → QA-ProjectSave***************** → QA-ModelShell************************************************* → QA-UndoCoverage*************************************** → QA-DirtyFlag*******************
 ```
 
 \* QA-0a inserted 2026-05-07 ahead of QA-0 — Debug build workflow
@@ -2965,6 +2982,23 @@ channel deferral). **QA-Framework** — final installable framework
 checks (icons, version stamping, registry keys, signed binary path). See
 §9 QA-Inventory close entry + sixth Forks entry (QA-Updater) for the full
 per-batch source-trace.
+
+\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\* **QA-ModelShell**
+inserted 2026-07-27 mid-G4 when QA-ProjectSave's Task 7 applicator sweep
+escalated through the export findings (offline export ignored every
+non-main-APVTS lane; the render replica had NO instrument engines -- Jeff
+ear-confirmed silent vox/inst exports) into Jeff's rulings: model-owned
+engines are a V1 REQUIREMENT, export = the model rendering itself, the
+FL-style contained-window shell, and the ENTIRE Future State tiers list
+incl. full VST3 hosting.  Slotted **immediately after QA-ProjectSave,
+before QA-UndoCoverage** (Jeff 2026-07-27).  Code-complete 2026-07-31;
+verification held to the G4 boundary smoke (§B.31).  The LAYOUT BATCH
+(Jeff 2026-07-28 -- every page reviewed under the windowed shell; planning
+session first, no plan file yet) runs **directly after QA-ModelShell,
+before QA-UndoCoverage**; the G4 boundary R3 review + smoke (now carrying
+§B.31 + the §B.1-B.30 reconciliation pass) follows QA-Soundness per the
+run plan.  Bucket: see the §5 entry.  See §9 sixty-fifth + sixty-sixth
+Forks entries.
 
 ---
 
@@ -6372,3 +6406,100 @@ Premise corrections recorded per batch:
 `clean-pointing-stoat`.  Baked-pending-veto interpretations (listed in each plan file) were
 surfaced with the docket and drew no veto.  QA-DirtyFlag's commit closes G4 code; the group
 boundary (R3 combined-diff review + smoke) follows per the run plan.
+
+### 2026-07-27 — QA-ModelShell inserted after QA-ProjectSave: the sweep -> export -> inversion -> tiers origin trail; CL-087 + the tiers list pulled forward; docket-18 presentation reversal (sixty-fifth Forks entry)
+
+**Trigger:** QA-ProjectSave (`deep-packing-badger`) Task 7's mandatory applicator sweep ran the
+full census (19 widget-wrapper registration sites; view-gated rack wiring wiped at every project
+boundary; two registration-timing gaps) and escalated: offline export applied NO lane class
+outside the main APVTS, and beneath that the export's fresh-replica `VibeSynthProcessor` had no
+pages, therefore NO instrument engines and no instrument strips at all -- verified in source and
+confirmed by Jeff's own ear test (vox/inst exports render nothing). Root cause of both: the UI
+constructed the audio model instead of viewing it.
+
+- **Jeff's rulings (2026-07-27), in order:** model-owned engines are a V1 REQUIREMENT, not
+  future state ("engines are the drivers and the pages just hold them"; FL functionality was
+  the requirement all along); inversion FIRST, export built on the clean model (order 1b);
+  export = the model rendering ITSELF offline (FL same-instance shape -- no replica); the
+  FL-style CONTAINED-WINDOW shell (shell 2b -- real native child windows, required for z-order
+  with foreign plugin surfaces), main window fixed fullscreen (deliberately reverses QA-Eb's
+  resizability; the QA-Eb ordering + reachability lessons survive); and the ENTIRE Future
+  State tiers list builds now ("I said everything... we're building the shell for all of it
+  now"): riders CL-040/043/045/056/282/301, CL-055 + BLU-427, CL-057, CL-060 (lazy half),
+  CL-044, CL-227, BLU-344; maximizer suite CL-244 + CL-243 (+BLU-109) + BLU-108 + BLU-110 +
+  measure-before-render; FULL VST3 family BLU-297..302 + BLU-447; BLU-480 + CL-299 + BLU-499
+  as the Effects window; **CL-087 promoted** -- multi-window UI ships as the contained
+  workspace (the shell ruling supersedes the entry's detach-to-second-monitor shape).
+  CL-102 struck from the tiers list -- already shipped as PagePresetIO (verified in source
+  after Jeff challenged the outstanding claim).
+- **Docket-18 PARTIAL REVERSAL (explicit option-removal paper trail):** the locked tab-bar
+  spec (required four tabs always present; type tabs hidden at zero instances; "+" holds every
+  add route) RETIRES QA-ProjectSave docket 18's empty-state pages + always-visible 0-badge
+  slots -- presentation only. Delete-to-zero, the deleted seeding paths, and membership-driven
+  bus hiding all SURVIVE. Jeff confirmed the mechanics 2026-07-27; QA-ProjectSave's §5 entry
+  carries the one-line pointer.
+- **Batch created:** QA-ModelShell, plan [`Batch Plans/grand-inverting-mammoth.md`](Batch Plans/grand-inverting-mammoth.md)
+  (8 task sets = Jeff's approved groups; commit + compile gate per set; ALL functional
+  verification deferred to one batch smoke). Slotted directly after QA-ProjectSave; G4 run
+  order badger -> mammoth -> yak -> stoat -> heron. Conflict-review calls locked: 1=b (G4
+  boundary R3 covers yak/stoat/heron; mammoth verifies via per-set commits + its own smoke),
+  2=b (TS1 pre-wires the processor-owned UndoManager DORMANT; QA-UndoCoverage's Task 2 shrinks
+  to verification), 3=a (§B reconciliation inside TS8 -- superseded 2026-07-31, see the next
+  entry), 4=a (dated conflict notes applied to yak/stoat/heron 2026-07-27).
+
+**Plan files affected:** new §5 entry + §6 arrow (this batch); `grand-inverting-mammoth.md`;
+dated conflict notes in `long-rewinding-yak.md` / `clean-pointing-stoat.md` /
+`keen-combing-heron.md`; the run plan's G4 composition note.  **Verification:** the batch's
+per-set build gates + the §B.31 walk at the G4 boundary (see sixty-sixth entry).
+
+### 2026-07-31 — QA-ModelShell code-complete: batch smoke + §B.1-B.30 reconciliation move to the G4 BOUNDARY; layout batch is next (sixty-sixth Forks entry)
+
+**Trigger:** QA-ModelShell reached code-complete (13 per-set commits + close-out, base
+`b933b54a`) after the whole-batch 20-agent review -- the mandatory per-set reviews had never
+run; Jeff caught the gap AND the attempted TS7-only scoping -- closed all 94 confirmed findings
+in-batch (`93bb158e`, 30 BLOCKER / 56 NEEDS-FIX / 8 NIT) under his FINISH BEFORE COMMIT ruling,
+plus eight same-day rulings (frozen exports rate-convert; stopped = silence; bridge protocol v3
+full completion; auto-freeze arm-on-load/fire-at-stop with the background shadow render routed
+to Future State CL-304; Measure writes nothing; takes judged against the export dialog's
+persisted spec; CSV report checkbox removed; per-pattern auto-freeze staggered, `12e8a183`),
+then CL-043 + CL-282 finished IN FULL after Jeff caught unapproved narrowings (selectable
+dither Off/Flat/Noise-Shaped with the POW-r licensing exclusion; live streaming telemetry with
+the seek-vs-underrun discriminator + transport-bar UND/PF readout).
+
+- **Jeff's re-shape of TS8 (2026-07-31):** the ~48-scenario batch smoke AND the §B.1-B.30
+  reconciliation pass BOTH move to the **G4 BOUNDARY smoke** -- the layout batch reshapes the
+  same surfaces (and parts of the master test plan), so there is ONE walk, after layout.
+  Supersedes conflict call 3=a (reconciliation-inside-TS8) in the sixty-fifth entry. The smoke
+  is authored as §B.31 in [`Test Plans/v1-master-test-plan.md`](Test Plans/v1-master-test-plan.md)
+  (B.31.0 window-floor collection FIRST; B.31.1 DPI drift; B.31.2 the reconciled scenario set
+  superseding the plan file's TS1-TS7 blocks) and
+  `Files For Claude/G4 Boundary Smoke.txt` is the walk order drawn from it.
+- **R2 consequence:** the batch closes code-complete NOW; the held Work Log entry (in
+  `Running Notes/grand-inverting-mammoth.md`) + the §5 STATUS flip apply when §B.31 passes at
+  the boundary. Jeff has spot-checked continuously (his runs found + drove the close crash,
+  plugin-window, freeze-timing, tempo-sync and vocal-flow fixes); the formal walk is what is
+  deferred.
+- **Next batch = the LAYOUT BATCH** (Jeff 2026-07-28: all-encompassing -- "not just how the
+  windows look but how everything looks now that windows are a thing"; runs directly after
+  QA-ModelShell). Planning session first; no plan file exists yet. Its held scope + option
+  analyses live in the mammoth running notes (2026-07-28/29 entries): per-page layout review,
+  preset dropdown + engine pickers onto window title bars, the drawn-overlay z-order audit,
+  hosted-plugin stretch scaling, "Live Instrument" rename, the three-lifetime window-state
+  persistence model (crash-survival ruling OPEN), instance-cap re-evaluation.
+- **Supersession note:** the sixty-fourth entry's "QA-DirtyFlag's commit closes G4 code" line
+  predates the mammoth + layout + heron slottings -- QA-Soundness (`keen-combing-heron`)
+  closes G4 code, and the boundary R3 review + smoke (now carrying §B.31 + the §B.1-B.30
+  reconciliation) follows it.
+- **Future State reconciliation applied at this close:** CL-102 stale-marked (shipped as
+  PagePresetIO); graduated entries annotated SHIPPED with hashes (CL-087, BLU-480, CL-299,
+  BLU-499, the VST3 family BLU-297..302 + BLU-447 + CL-303 context, the freeze family CL-055 +
+  BLU-427, the maximizer items BLU-108/109/110 + CL-243/244, riders CL-040/043/044/045/056/057/
+  060/227/282/301 + BLU-344); CL-303 (2026-07-29) + CL-304 (2026-07-31) were already added
+  in-batch; Section 2 untouched.
+
+**Plan files affected:** this batch's §5 entry + §6 arrow/footnote; §B.31 +
+`G4 Boundary Smoke.txt`; `Future State.md`; CLAUDE.md architecture notes (model-owned engines,
+contained-window shell, offline export path, five-exit-code gate); §5.5 stale banner.
+**Verification:** §B.31 at the G4 boundary; the badger 6-item pending ledger + heron's deferred
+§5 entry apply at G4 close per Jeff's 2026-07-25 standing instruction (all still unapplied as
+of this entry).

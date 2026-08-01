@@ -105,11 +105,22 @@ public:
     // refill synchronously instead.  Never seen by a live audio callback:
     // device processing is suspended for the whole render.
     static std::atomic<bool> sOfflineRender;
-    // CL-282 telemetry: offline silence-returns that the synchronous path
-    // could NOT prevent (should stay 0; EOF-past reads are not counted).
-    // Reset by beginOfflineRender, reported by endOfflineRender -- the fix
-    // is provable, not vibes.
+    // ── CL-282 telemetry (completed 2026-07-31) ──────────────────────────────
+    // Counts a silence-return the reader could NOT prevent, LIVE and offline
+    // alike.  Offline it should stay 0 (the synchronous path exists to make
+    // that true) and endOfflineRender reports it; live it is the EXS24-style
+    // "data not read in time" counter, surfaced on the transport bar.
+    //
+    // A SEEK IS NOT AN UNDERRUN.  A backward scrub or loop jump legitimately
+    // lands outside the ring, and counting those would make the number
+    // meaningless and the Debug assert fire on every drag.  Only a read that
+    // CONTINUES from where the last one ended counts -- see mLastServedEnd.
     static std::atomic<juce::int64> sUnderrunCount;
+    // Worst observed ring-refill duration this session, in milliseconds: the
+    // quantity that actually predicts an underrun (a refill slower than the
+    // ring's headroom starves the next read).  Session peak, reset alongside
+    // the counter at the start of an offline render.
+    static std::atomic<float> sPeakPrefillMs;
 
     // juce::TimeSliceClient - called by background thread
     int useTimeSlice() override;
@@ -158,6 +169,13 @@ private:
     // the render thread).  Returns true when the ring now covers data from
     // needStart; false when not offline / RAM mode / needStart is past EOF.
     bool ensureRangeBlockingForOffline (int64 needStart);
+
+    // CL-282: counts a miss as an underrun when it is a CONTINUATION rather
+    // than a seek, asserts in Debug, and records the position either way.
+    void noteMiss (int64 filePos) noexcept;
+    // File position one past the last sample served.  Audio thread only (both
+    // read entry points run there); 0 until the first successful serve.
+    int64 mLastServedEnd { 0 };
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (AudioClipStreamer)
 };

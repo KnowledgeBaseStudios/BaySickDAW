@@ -1,5 +1,6 @@
 #include "GlobalTransportBar.h"
 #include "../TsMapRead.h"   // QA-G Task 6: marker-map readout in song mode
+#include "../DSP/AudioClipStreamer.h"   // CL-282: streaming telemetry readout
 #include "SharedUI.h"
 #if JUCE_WINDOWS
  #include <windows.h>
@@ -583,12 +584,12 @@ GlobalTransportBar::GlobalTransportBar(StandalonePlayHead& ph)
     // CPU / DSP / MEM / LAT 2x2 grid. Same width footprint as the old single-
     // line label; uses two text rows in a smaller font instead of one long row.
     mPerfLabel = std::make_unique<juce::Label>();
-    mPerfLabel->setText("SYS --%  DSP --%\nMEM --  LAT --", juce::dontSendNotification);
+    mPerfLabel->setText("SYS --%  DSP --%\nMEM --  LAT --  UND --  PF --", juce::dontSendNotification);
     mPerfLabel->setFont(juce::Font(juce::Font::getDefaultMonospacedFontName(), 9.f, juce::Font::plain));
     mPerfLabel->setColour(juce::Label::textColourId, VC::TextDim);
     mPerfLabel->setJustificationType(juce::Justification::centredRight);
     mPerfLabel->setMinimumHorizontalScale(1.0f);
-    mPerfLabel->setTooltip("SYS: system-wide CPU %  |  DSP: audio engine load (% of buffer window)  |  MEM: process memory in MB  |  LAT: total reported plugin latency in samples (sum of every effect that adds PDC)");
+    mPerfLabel->setTooltip("SYS: system-wide CPU % (the whole computer, not this app)  |  DSP: audio engine load (% of buffer window)  |  MEM: process memory in MB  |  LAT: total reported plugin latency in samples (sum of every effect that adds PDC)  |  UND: audio clip stream underruns during continuous playback (should stay 0)  |  PF: slowest disk read this session in ms");
     addAndMakeVisible(*mPerfLabel);
 
     startTimerHz(10);
@@ -792,8 +793,14 @@ void GlobalTransportBar::timerCallback()
         // balanced - otherwise "MEM 234MB  LAT 16sp/0.3ms" overflows the cell
         // bounds left of the right-justified anchor and clips the M of MEM.
         juce::String s;
+        // CL-282: streaming telemetry.  UND = clip-stream reads that returned
+        // silence during CONTINUOUS playback (seeks never count); PF = worst
+        // disk-fill this session in ms.  Zero / small is healthy.
+        const auto und   = AudioClipStreamer::sUnderrunCount.load (std::memory_order_relaxed);
+        const auto pfMs  = AudioClipStreamer::sPeakPrefillMs.load (std::memory_order_relaxed);
         s << "SYS " << (int)sysCpu << "%  DSP " << dspPct << "%\n"
-          << "MEM " << memMb << "  LAT " << latStr;
+          << "MEM " << memMb << "  LAT " << latStr
+          << "  UND " << (int) und << "  PF " << juce::String (pfMs, 1);
         mPerfLabel->setText(s, juce::dontSendNotification);
 
         // Color priority: 95% overload (flash red) > 85% warn (yellow) > normal (green)

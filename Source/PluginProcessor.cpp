@@ -6611,6 +6611,7 @@ bool VibeSynthProcessor::beginOfflineRender (double renderSampleRate, int render
     // render outruns the background prefetch by design); counter reset so
     // endOfflineRender's report proves the export had zero silent gaps.
     AudioClipStreamer::sUnderrunCount.store (0, std::memory_order_relaxed);
+    AudioClipStreamer::sPeakPrefillMs.store (0.0f, std::memory_order_relaxed);
     AudioClipStreamer::sOfflineRender.store (true, std::memory_order_release);
 
     // Wet-tail hygiene: the render must not open on live reverb/delay tails.
