@@ -30,7 +30,8 @@ namespace
 }
 
 class PluginHostWorker final : public juce::ChildProcessWorker,
-                               private juce::AsyncUpdater
+                               private juce::AsyncUpdater,
+                               private juce::AudioProcessorListener
 {
 public:
     PluginHostWorker() { mFormats.addFormat (std::make_unique<juce::VST3PluginFormat>()); }
@@ -40,6 +41,7 @@ public:
         stopAudioThread();
         cancelPendingUpdate();
         closeEditor();
+        if (mPlugin != nullptr) mPlugin->removeListener (this);
         mPlugin.reset();
     }
 
@@ -182,6 +184,73 @@ private:
             reply (Hosting::Bridge::MessageType::ParameterList, nullptr, 0,
                    utf8, (std::uint32_t) std::strlen (utf8));
         }
+
+        // v4: seed the host's program cache; the listener re-sends on every
+        // program change the plugin reports.
+        mPlugin->addListener (this);
+        sendProgramInfo();
+    }
+
+    void sendProgramInfo()
+    {
+        if (mPlugin == nullptr) return;
+        Hosting::Bridge::ProgramInfoPayload p {};
+        p.numPrograms    = (std::int32_t) mPlugin->getNumPrograms();
+        p.currentProgram = (std::int32_t) mPlugin->getCurrentProgram();
+        const auto name  = mPlugin->getProgramName (p.currentProgram);
+        const auto* utf8 = name.toRawUTF8();
+        reply (Hosting::Bridge::MessageType::ProgramInfo, &p, sizeof (p),
+               utf8, (std::uint32_t) std::strlen (utf8));
+    }
+
+    void audioProcessorParameterChanged (juce::AudioProcessor*, int idx, float v) override
+    {
+        // v5 "last touched": can fire on ANY thread (some plugins notify from
+        // their audio thread), so only atomics here -- the id/name resolution
+        // and the pipe write happen on the message thread.  A drag fires
+        // hundreds of these; the exchange flag coalesces each burst into one
+        // message per message-loop drain.
+        const auto nowMs = (std::int64_t) juce::Time::getMillisecondCounter();
+        if (idx == mHostSetIdx.load (std::memory_order_relaxed)
+            && nowMs - mHostSetMs.load (std::memory_order_relaxed) < 250)
+            return;   // echo of the host's own SetParameter (automation replay)
+        if (nowMs - mStateApplyMs.load (std::memory_order_relaxed) < 1000)
+            return;   // state-apply storm (restore / preset), not a user touch
+
+        mTouchIdx.store (idx, std::memory_order_relaxed);
+        mTouchVal.store (v,   std::memory_order_relaxed);
+        if (! mTouchPending.exchange (true))
+            juce::MessageManager::callAsync ([this] { sendParamTouched(); });
+    }
+
+    void sendParamTouched()
+    {
+        mTouchPending.store (false);
+        if (mPlugin == nullptr) return;
+        const int idx = mTouchIdx.load (std::memory_order_relaxed);
+        auto& params = mPlugin->getParameters();
+        if (! juce::isPositiveAndBelow (idx, params.size())) return;
+
+        auto* p = params[idx];
+        juce::String id = juce::String (idx);
+        if (auto* hp = dynamic_cast<juce::AudioPluginInstance::HostedParameter*> (p))
+            id = hp->getParameterID();
+
+        const juce::String trailer = id + "\t" + p->getName (64);
+        Hosting::Bridge::ParamTouchedPayload pl {};
+        pl.value01 = mTouchVal.load (std::memory_order_relaxed);
+        const auto* utf8 = trailer.toRawUTF8();
+        reply (Hosting::Bridge::MessageType::ParamTouched, &pl, sizeof (pl),
+               utf8, (std::uint32_t) std::strlen (utf8));
+    }
+
+    void audioProcessorChanged (juce::AudioProcessor*, const ChangeDetails& d) override
+    {
+        // Can fire on any thread; the pipe write belongs on the message
+        // thread.  The worker lives for the process's whole life, so the raw
+        // capture is safe -- pending callbacks die with the message loop.
+        if (d.programChanged)
+            juce::MessageManager::callAsync ([this] { sendProgramInfo(); });
     }
 
     void sendLoadReply (bool ok)
@@ -349,7 +418,15 @@ private:
         auto& params = mPlugin->getParameters();
 
         if (juce::isPositiveAndBelow ((int) p.paramIndex, params.size()))
+        {
+            // v5: this write will echo straight back through the parameter
+            // listener -- record it so automation playback never masquerades
+            // as a user touch inside the plugin's editor.
+            mHostSetIdx.store ((int) p.paramIndex, std::memory_order_relaxed);
+            mHostSetMs .store ((std::int64_t) juce::Time::getMillisecondCounter(),
+                               std::memory_order_relaxed);
             params[(int) p.paramIndex]->setValueNotifyingHost (juce::jlimit (0.0f, 1.0f, p.value01));
+        }
     }
 
     void onGetState()
@@ -366,7 +443,14 @@ private:
     void onSetState (const std::uint8_t* body, std::uint32_t bytes)
     {
         if (mPlugin != nullptr && bytes > 0)
+        {
+            // v5: applying a state blob makes many plugins fire a parameter
+            // change per param -- a restore/preset storm is not a user touch,
+            // so the listener suppresses relays for a window around it.
+            mStateApplyMs.store ((std::int64_t) juce::Time::getMillisecondCounter(),
+                                 std::memory_order_relaxed);
             mPlugin->setStateInformation (body, (int) bytes);
+        }
     }
 
     void onOpenEditor (const std::uint8_t* body, std::uint32_t bytes)
@@ -421,6 +505,15 @@ private:
     std::unique_ptr<juce::AudioProcessorEditor> mEditor;
     Hosting::Bridge::EditorPayload mPendingEditor {};
     juce::PluginDescription        mLoadedDesc;
+
+    // v5 last-touched relay state.  Atomics because the parameter listener
+    // can fire on the plugin's audio thread.
+    std::atomic<int>          mTouchIdx     { -1 };
+    std::atomic<float>        mTouchVal     { 0.0f };
+    std::atomic<bool>         mTouchPending { false };
+    std::atomic<int>          mHostSetIdx   { -1 };
+    std::atomic<std::int64_t> mHostSetMs    { 0 };
+    std::atomic<std::int64_t> mStateApplyMs { 0 };
 
     // v3 audio thread.  Owns every mPlugin->processBlock call; started only
     // after a successful Prepare mapped the shared block, stopped before any

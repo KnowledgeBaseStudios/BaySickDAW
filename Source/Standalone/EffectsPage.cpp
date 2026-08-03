@@ -684,6 +684,30 @@ void EffectsPage::registerSlotAutomationFor (VibeSynthProcessor& proc, int chId,
 
         if (hosted != nullptr)
         {
+            // Bridged lists arrive async after load, so this registration can
+            // run against an EMPTY list -- which left a restored project's
+            // plugin lanes silent until something re-ran it (Jeff,
+            // 2026-08-02).  Arm the arrival hook: when the list lands, re-run
+            // this whole registration, re-resolving the slot by uuid (it may
+            // have been reordered in between).  proc outlives the instance --
+            // the graph owns the rack owns the effect owns it.
+            if (auto* inst = hosted->getHosted())
+            {
+                auto* procPtr = &proc;
+                inst->onParamListArrived = [procPtr, chId, channelPrefix, uuid]
+                {
+                    auto* rack = EffectsPage::rackForChannelId (procPtr->mVibeGraph, chId);
+                    if (rack == nullptr) return;
+                    for (int i = 0; i < EffectRack::kNumSlots; ++i)
+                        if (rack->getSlotUuid (i) == uuid)
+                        {
+                            EffectsPage::registerSlotAutomationFor (*procPtr, chId,
+                                                                    channelPrefix, *rack, i);
+                            return;
+                        }
+                };
+            }
+
             auto resolveDsp = [&vg, chId, uuid]() -> DSPBase*
             {
                 auto* rack = EffectsPage::rackForChannelId (vg, chId);

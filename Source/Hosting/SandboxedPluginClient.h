@@ -84,6 +84,10 @@ public:
     // onLoadResult: ok, error text, isInstrument, acceptsMidi -- the last two
     // correct a 32-bit plugin's filename-only scan description on first load.
     std::function<void (bool, juce::String, bool, bool)> onLoadResult;
+    // The helper's parameter list just landed (arrives AFTER LoadReply).
+    // Lane registration hangs off this: registering at load-event time saw an
+    // empty list for every bridged plugin, leaving restored lanes silent.
+    std::function<void()> onParameterList;
     // The bridged editor's real size, reported by the helper after it opens.
     std::function<void (int, int)> onEditorSize;
 
@@ -96,6 +100,32 @@ public:
         const juce::ScopedLock sl (mParamLock);
         return mParams;
     }
+
+    // v4: current program info, pushed by the helper after load and on every
+    // program change the plugin reports.  Only the CURRENT program's name is
+    // relayed -- the naming linkage needs nothing else.
+    int getNumPrograms() const noexcept    { return mNumPrograms.load(); }
+    int getCurrentProgram() const noexcept { return mCurrentProgram.load(); }
+    juce::String getCurrentProgramName() const
+    {
+        const juce::ScopedLock sl (mProgramLock);
+        return mProgramName;
+    }
+
+    // v5: the parameter the user last moved inside the plugin's own editor
+    // (id + display name).  Empty until a touch arrives.
+    void getLastTouchedParam (juce::String& idOut, juce::String& nameOut) const
+    {
+        const juce::ScopedLock sl (mTouchLock);
+        idOut   = mTouchedId;
+        nameOut = mTouchedName;
+    }
+
+    // Monotonic touch counter -- the delete prompt's dirty bit compares this
+    // against a baseline snapshot instead of comparing state blobs (state
+    // blobs carry volatile bytes on many plugins, so blob-compare reads
+    // dirty on an untouched instance).
+    int getTouchCount() const noexcept { return mTouchCount.load(); }
 
     void getState (juce::MemoryBlock& dest);
     void setState (const void* data, int size);
@@ -152,6 +182,15 @@ private:
 
     mutable juce::CriticalSection mParamLock;
     std::vector<BridgedParam>     mParams;
+
+    std::atomic<int> mNumPrograms    { 1 };
+    std::atomic<int> mCurrentProgram { 0 };
+    mutable juce::CriticalSection mProgramLock;
+    juce::String mProgramName;
+
+    mutable juce::CriticalSection mTouchLock;
+    juce::String mTouchedId, mTouchedName;
+    std::atomic<int> mTouchCount { 0 };
 
     void setError (const juce::String& e)
     {

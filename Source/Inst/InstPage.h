@@ -145,6 +145,16 @@ public:
     std::function<void()>                        onDeleteRequested;
     std::function<void()>                        onLockChanged;
 
+    // Program-name linkage (2026-08-02): fired with the loaded program's
+    // display name from the INTERACTIVE paths only (picker + the add-tab
+    // default-kit autoload) -- project restore never fires it, so a saved
+    // tab name survives the reload.
+    std::function<void(const juce::String&)>     onSoundNameChanged;
+
+    // Program display name ("03-Clean_Chorus.sfz" -> "Clean Chorus").  Public
+    // so the add-tab autoload path can name the tab from the default kit.
+    static juce::String prettyProgramName (const juce::File&);
+
     bool isLocked() const noexcept { return mLocked; }
     void setLocked (bool b) { if (b == mLocked) return; mLocked = b; if (onLockChanged) onLockChanged(); repaint(); }
 

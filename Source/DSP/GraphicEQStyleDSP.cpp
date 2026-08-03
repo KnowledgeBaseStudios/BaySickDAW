@@ -39,6 +39,10 @@ void GraphicEQStyleDSP::rebuildBand (int idx)
 void GraphicEQStyleDSP::setBandDb (int idx, float db)
 {
     if (idx < 0 || idx >= kNumBands) return;
+    // jlimit passes NaN (every comparison is false), and a NaN gain bakes into
+    // the biquad coefficients and the saved project.  Debug-asserts so the
+    // WRITER is on the stack, not a later paint.
+    if (! std::isfinite (db)) { jassertfalse; return; }
     db = juce::jlimit (-15.0f, 15.0f, db);
     if (! juce::approximatelyEqual (mGainsDb[idx], db))
     {
@@ -55,6 +59,7 @@ float GraphicEQStyleDSP::getBandDb (int idx) const
 
 void GraphicEQStyleDSP::setLevelDb (float db)
 {
+    if (! std::isfinite (db)) { jassertfalse; return; }
     // QA-EffectsReview Task 3: GE-7 Level slider is +/-15 dB (no -inf kill).
     mLevelDb = juce::jlimit (-15.0f, 15.0f, db);
 }

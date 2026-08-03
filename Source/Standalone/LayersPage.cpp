@@ -1036,6 +1036,7 @@ void LayersPage::loadPagePreset (const juce::File& xml)
 void LayersPage::showPageActionsMenu (juce::Component* anchor)
 {
     constexpr int kIdSavePagePreset = 100;
+    constexpr int kIdDeleteTab      = 101;
     constexpr int kIdLoadBase       = 1000;
 
     juce::PopupMenu menu;
@@ -1063,12 +1064,20 @@ void LayersPage::showPageActionsMenu (juce::Component* anchor)
         menu.addSubMenu ("Load Page Preset", loadSub);
     }
 
+    // Delete on the hamburger too (Jeff, 2026-08-02): with pages in their own
+    // windows the title strip is the page's one always-visible control row,
+    // so every type carries its delete here as well as on the right-click
+    // engine-picker menu.  Same requestDelete() prompt flow for both.
+    menu.addSeparator();
+    menu.addItem (kIdDeleteTab, "Delete Layer", ! mLocked);
+
     juce::Component::SafePointer<LayersPage> safeThis (this);
     menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (anchor),
         [safeThis, presetXmls = std::move (presetXmls), kIdLoadBase] (int r)
         {
             if (! safeThis || r <= 0) return;
             if (r == kIdSavePagePreset) { safeThis->savePagePreset(); return; }
+            if (r == kIdDeleteTab)      { safeThis->requestDelete();  return; }
             if (r >= kIdLoadBase && r < kIdLoadBase + presetXmls.size())
             {
                 safeThis->loadPagePreset (presetXmls[r - kIdLoadBase]);

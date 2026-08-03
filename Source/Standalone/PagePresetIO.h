@@ -26,7 +26,7 @@ class VibeSynthProcessor;
 // ─────────────────────────────────────────────────────────────────────────────
 namespace PagePresetIO
 {
-    enum class PageKind { Layer, Bass, Drum, Clip, Vox, Inst, RustyDrums };
+    enum class PageKind { Layer, Bass, Drum, Clip, Vox, Inst, RustyDrums, Plugins };
 
     // Folder names use a "<Kind> Page" suffix so the directory layout is
     // self-explanatory in Windows Explorer (Documents/BaySickDAW/Presets/

@@ -972,6 +972,12 @@ private:
     // onSlotAutomationChanged, and once at Inst-tab creation.
     void registerPedalAutomation (int instPageIndex);
 
+    // 2026-08-02 (ruling 2-b): lanes for the Plugins-tab instrument itself,
+    // keyed "plugtab<pageIndex>_vst_<paramId>".  Re-run on every param-count
+    // change (bridged lists arrive async after load) via
+    // PluginsPage::onParamListChanged; idempotent.
+    void registerPluginTabAutomation (int pageIndex);
+
     // BLU-344 (QA-ModelShell TS3): the Harmless mod editor's DEPTH and LENGTH.
     // These are the batch's only automation targets that are neither an APVTS
     // parameter nor a rack DSP -- they are fields on HarmlessModRegistry,

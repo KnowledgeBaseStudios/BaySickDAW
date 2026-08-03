@@ -102,24 +102,10 @@ int HostedPluginEffect::getLatencySamples() const
 
 // ── Automation ───────────────────────────────────────────────────────────────
 
-juce::AudioProcessorParameter* HostedPluginEffect::findParam (const juce::String& paramId) const
-{
-    if (mHosted == nullptr)
-        return nullptr;
-
-    auto* inner = mHosted->getInner();
-
-    if (inner == nullptr)
-        return nullptr;
-
-    for (auto* p : inner->getParameters())
-        if (auto* hp = dynamic_cast<juce::AudioPluginInstance::HostedParameter*>(p))
-            if (hp->getParameterID() == paramId)
-                return p;
-
-    return nullptr;
-}
-
+// 2026-08-02: the whole surface moved onto HostedPluginInstance so the
+// Plugins-tab lanes and this rack adapter share ONE implementation (both
+// bridged and in-process branches live there now).  These stay as thin
+// delegates so EffectsPage's registration loop keeps its existing types.
 juce::Array<HostedPluginEffect::AutomatableParam> HostedPluginEffect::getAutomatableParams() const
 {
     juce::Array<AutomatableParam> out;
@@ -127,67 +113,20 @@ juce::Array<HostedPluginEffect::AutomatableParam> HostedPluginEffect::getAutomat
     if (mHosted == nullptr)
         return out;
 
-    // BRIDGED: the in-process parameter objects do not exist here -- the list
-    // came across the wire at load (v3).  Excluding this branch is what left
-    // every bridged plugin with no automation surface at all.
-    if (auto* client = mHosted->getSandboxClient())
-    {
-        for (const auto& bp : client->getParameterList())
-            out.add ({ bp.id, bp.name });
-        return out;
-    }
-
-    auto* inner = mHosted->getInner();
-
-    if (inner == nullptr)
-        return out;
-
-    for (auto* p : inner->getParameters())
-    {
-        if (p == nullptr || ! p->isAutomatable())
-            continue;
-
-        if (auto* hp = dynamic_cast<juce::AudioPluginInstance::HostedParameter*>(p))
-            out.add ({ hp->getParameterID(), p->getName (64) });
-    }
+    for (const auto& p : mHosted->getAutomatableParams())
+        out.add ({ p.id, p.name });
 
     return out;
 }
 
 bool HostedPluginEffect::applyParamNorm (const juce::String& paramId, float v01)
 {
-    // BRIDGED: resolve the id to its index in the wire list and send.  The
-    // index is the list order -- the same order the helper enumerated.
-    if (mHosted != nullptr)
-    {
-        if (auto* client = mHosted->getSandboxClient())
-        {
-            const auto params = client->getParameterList();
-            for (size_t i = 0; i < params.size(); ++i)
-            {
-                if (params[i].id != paramId) continue;
-                client->setParameter ((int) i, juce::jlimit (0.0f, 1.0f, v01));
-                return true;
-            }
-            return false;
-        }
-    }
-
-    auto* p = findParam (paramId);
-
-    if (p == nullptr)
-        return false;
-
-    // setValueNotifyingHost rather than setValue so the plugin's own editor
-    // follows an automated move, the same way our panels' display refresh does.
-    p->setValueNotifyingHost (juce::jlimit (0.0f, 1.0f, v01));
-    return true;
+    return mHosted != nullptr && mHosted->applyParamNorm (paramId, v01);
 }
 
 float HostedPluginEffect::readParamNorm (const juce::String& paramId, float fallback) const
 {
-    auto* p = findParam (paramId);
-    return p != nullptr ? p->getValue() : fallback;
+    return mHosted != nullptr ? mHosted->readParamNorm (paramId, fallback) : fallback;
 }
 
 bool HostedPluginEffect::applyParamNorm (DSPBase* dsp, const juce::String& paramId, float v01)

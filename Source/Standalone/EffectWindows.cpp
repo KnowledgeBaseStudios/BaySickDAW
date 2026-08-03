@@ -195,6 +195,83 @@ void EffectSlotWindow::configureTitleStrip (PageMenuBar& bar)
         {
             m.addSeparator();
 
+            // Automate (2026-08-02, ruling 2-b): the CREATION surface for the
+            // hosted plugin's lanes.  Their applicators have been registered
+            // since TS6, but a foreign editor has no right-click hook of
+            // ours, so until this menu there was no way to create one.  Same
+            // shape as the Plugins tab: last-touched fast path + chunked list.
+            {
+                // Bridged parameter lists arrive async after load, so the
+                // load-time registration can have seen zero params.  Re-run
+                // it here (idempotent) so a lane created from this menu has
+                // a live applicator behind it.
+                {
+                    EffectRack* rack = nullptr;
+                    const int slot = resolveSlot (rack);
+                    if (rack != nullptr && slot >= 0)
+                        EffectsPage::registerSlotAutomationFor (
+                            mProc, mChannelId,
+                            EffectsPage::channelPrefixForId (mChannelId),
+                            *rack, slot);
+                }
+
+                const juce::String base =
+                    EffectsPage::channelPrefixForId (mChannelId) + "_" + mUuid + "_vst_";
+
+                juce::PopupMenu autoSub;
+
+                juce::String lastId, lastName;
+                hosted->getLastTouchedParam (lastId, lastName);
+                {
+                    const juce::String pid = base + lastId;
+                    autoSub.addItem (lastId.isNotEmpty()
+                                         ? "Last Touched: " + lastName
+                                         : juce::String ("Last Touched (move a control in the plugin first)"),
+                                     lastId.isNotEmpty(), false,
+                                     [pid]
+                                     {
+                                         if (VKnobAutomation::sOnAutomate)
+                                             VKnobAutomation::sOnAutomate (pid);
+                                     });
+                }
+                autoSub.addSeparator();
+
+                const auto params = hosted->getAutomatableParams();
+                constexpr int kChunk = 30;
+                auto addParamItem = [&base] (juce::PopupMenu& dest,
+                                             const Hosting::HostedPluginInstance::AutomatableParam& p)
+                {
+                    const juce::String pid = base + p.id;
+                    dest.addItem (p.name, true, false, [pid]
+                    {
+                        if (VKnobAutomation::sOnAutomate)
+                            VKnobAutomation::sOnAutomate (pid);
+                    });
+                };
+
+                if (params.size() <= kChunk)
+                {
+                    for (const auto& p : params)
+                        addParamItem (autoSub, p);
+                }
+                else
+                {
+                    for (int start = 0; start < params.size(); start += kChunk)
+                    {
+                        const int end = juce::jmin (start + kChunk, params.size());
+                        juce::PopupMenu chunk;
+                        for (int i = start; i < end; ++i)
+                            addParamItem (chunk, params.getReference (i));
+                        autoSub.addSubMenu (juce::String (start + 1) + " - "
+                                                + juce::String (end), chunk);
+                    }
+                }
+                if (params.isEmpty())
+                    autoSub.addItem (-1, "(no parameters reported)", false, false);
+
+                m.addSubMenu ("Automate", autoSub);
+            }
+
             const auto lockReason = hosted->getBridgeLockReason();
 
             if (lockReason.isNotEmpty())

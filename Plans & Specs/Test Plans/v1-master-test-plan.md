@@ -2056,7 +2056,8 @@ account for PS-17, and one project whose samples you can deliberately move.
 
 `blocks:` TS1 `4ea67bd0` / TS2 `e9ecf03e` / TS3 `1dd08437` / TS4 `05b248a8` / TS5 `28f4ec09` +
 `c8854429` / TS6 `71781115` + `4ddf25fa` + `467fd0b9` / TS7 `a055d7ef` + `8770b607` / review fix
-pass `93bb158e` / docket rulings `12e8a183`.
+pass `93bb158e` / docket rulings `12e8a183` / close-out `493b627c` (CL-043 selectable dither +
+CL-282 full telemetry live here too -- MS-8 and the perf-strip checks cover them).
 
 > **WALKED AT THE G4 BOUNDARY SMOKE, not at batch close (Jeff, 2026-07-31).**  The layout batch
 > reshapes the same surfaces these gestures walk, so the batch closed code-complete with this

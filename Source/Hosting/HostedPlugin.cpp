@@ -56,6 +56,7 @@ HostedPluginInstance::~HostedPluginInstance()
         mLiveEditor->ownerDestroyed();
 
     mSandbox.reset();
+    if (mInner != nullptr) mInner->removeListener (this);
     mInner.reset();
 }
 
@@ -84,8 +85,10 @@ void HostedPluginInstance::detachEditor (HostedPluginEditor* e)
 
 void HostedPluginInstance::instantiate()
 {
+    if (mInner != nullptr) mInner->removeListener (this);
     mInner.reset();
     mSandbox.reset();
+    mLastTouchedIdx.store (-1);   // new instance = new touch history
 
     // Two tiers, and the forced one is ARCHITECTURE rather than policy: a
     // 64-bit process physically cannot load a 32-bit DLL, so that row has no
@@ -133,6 +136,12 @@ void HostedPluginInstance::instantiate()
                     mLiveEditor->remoteEditorSized (w, h);
             };
 
+            // Parameter-list arrival -> lane re-registration (message thread).
+            client->onParameterList = [this]
+            {
+                if (onParamListArrived) onParamListArrived();
+            };
+
             mSandbox = std::move (client);
             mState   = HostedState::Ok;
             mError   = {};
@@ -170,8 +179,142 @@ void HostedPluginInstance::instantiate()
     // The transport arrives instead when EngineRig::registerWithProcessor (or
     // HostedPluginEffect's first transport push, for a rack slot) calls
     // setPlayHead on this object, which forwards to mInner.
+    mInner->addListener (this);   // in-process "last touched" capture
     mState = HostedState::Ok;
     mError = {};
+}
+
+void HostedPluginInstance::audioProcessorParameterChanged (juce::AudioProcessor*, int idx, float)
+{
+    // May fire on the plugin's audio thread -- atomic capture only; the
+    // id/name resolution happens lazily in getLastTouchedParam.  Host-driven
+    // automation writes go through applyParamNorm's setValueNotifyingHost and
+    // echo here too; unlike the bridged path there is no cheap way to tell
+    // the echo apart, so an in-process "last touched" can briefly follow a
+    // playing lane.  Accepted: the menu is read at a right-click, when
+    // playback interaction is deliberate.
+    const auto nowMs = (std::int64_t) juce::Time::getMillisecondCounter();
+    if (nowMs - mStateApplyMs.load (std::memory_order_relaxed) < 1000)
+        return;   // state-apply storm (restore / preset load), not a touch
+
+    mLastTouchedIdx.store (idx, std::memory_order_relaxed);
+    mTouchCount.fetch_add (1, std::memory_order_relaxed);
+}
+
+int HostedPluginInstance::getTouchCount() const noexcept
+{
+    if (mSandbox != nullptr)
+        return mSandbox->getTouchCount();
+    return mTouchCount.load (std::memory_order_relaxed);
+}
+
+juce::AudioProcessorParameter* HostedPluginInstance::findInnerParam (const juce::String& paramId) const
+{
+    if (mInner == nullptr)
+        return nullptr;
+
+    for (auto* p : mInner->getParameters())
+        if (auto* hp = dynamic_cast<juce::AudioPluginInstance::HostedParameter*> (p))
+            if (hp->getParameterID() == paramId)
+                return p;
+
+    return nullptr;
+}
+
+juce::Array<HostedPluginInstance::AutomatableParam> HostedPluginInstance::getAutomatableParams() const
+{
+    juce::Array<AutomatableParam> out;
+
+    // BRIDGED: the in-process parameter objects do not exist here -- the list
+    // came across the wire at load (v3).
+    if (mSandbox != nullptr)
+    {
+        for (const auto& bp : mSandbox->getParameterList())
+            out.add ({ bp.id, bp.name });
+        return out;
+    }
+
+    if (mInner == nullptr)
+        return out;
+
+    for (auto* p : mInner->getParameters())
+    {
+        if (p == nullptr || ! p->isAutomatable())
+            continue;
+
+        if (auto* hp = dynamic_cast<juce::AudioPluginInstance::HostedParameter*> (p))
+            out.add ({ hp->getParameterID(), p->getName (64) });
+    }
+
+    return out;
+}
+
+int HostedPluginInstance::getNumKnownParams() const
+{
+    if (mSandbox != nullptr) return mSandbox->getNumParameters();
+    return mInner != nullptr ? mInner->getParameters().size() : 0;
+}
+
+bool HostedPluginInstance::applyParamNorm (const juce::String& paramId, float v01)
+{
+    // BRIDGED: resolve the id to its index in the wire list and send.  The
+    // index is the list order -- the same order the helper enumerated.
+    if (mSandbox != nullptr)
+    {
+        const auto params = mSandbox->getParameterList();
+        for (size_t i = 0; i < params.size(); ++i)
+        {
+            if (params[i].id != paramId) continue;
+            mSandbox->setParameter ((int) i, juce::jlimit (0.0f, 1.0f, v01));
+            return true;
+        }
+        return false;
+    }
+
+    auto* p = findInnerParam (paramId);
+
+    if (p == nullptr)
+        return false;
+
+    // setValueNotifyingHost rather than setValue so the plugin's own editor
+    // follows an automated move.
+    p->setValueNotifyingHost (juce::jlimit (0.0f, 1.0f, v01));
+    return true;
+}
+
+float HostedPluginInstance::readParamNorm (const juce::String& paramId, float fallback) const
+{
+    // Bridged parameter VALUES are not cached host-side -- reads fall back,
+    // same as the rack adapter has always behaved.
+    auto* p = findInnerParam (paramId);
+    return p != nullptr ? p->getValue() : fallback;
+}
+
+void HostedPluginInstance::getLastTouchedParam (juce::String& idOut, juce::String& nameOut) const
+{
+    idOut = {};
+    nameOut = {};
+
+    if (mSandbox != nullptr)
+    {
+        mSandbox->getLastTouchedParam (idOut, nameOut);
+        return;
+    }
+
+    const int idx = mLastTouchedIdx.load (std::memory_order_relaxed);
+    if (mInner == nullptr || idx < 0)
+        return;
+
+    const auto& params = mInner->getParameters();
+    if (! juce::isPositiveAndBelow (idx, params.size()))
+        return;
+
+    auto* p = params[idx];
+    if (auto* hp = dynamic_cast<juce::AudioPluginInstance::HostedParameter*> (p))
+        idOut = hp->getParameterID();
+    else
+        idOut = juce::String (idx);
+    nameOut = p->getName (64);
 }
 
 juce::String HostedPluginInstance::getStateMessage() const
@@ -205,6 +348,35 @@ juce::String HostedPluginInstance::getBridgeLockReason() const
 double HostedPluginInstance::getTailLengthSeconds() const
 {
     return mInner != nullptr ? mInner->getTailLengthSeconds() : 0.0;
+}
+
+int HostedPluginInstance::getNumPrograms()
+{
+    if (mInner   != nullptr) return mInner->getNumPrograms();
+    if (mSandbox != nullptr) return mSandbox->getNumPrograms();
+    return 1;
+}
+
+int HostedPluginInstance::getCurrentProgram()
+{
+    if (mInner   != nullptr) return mInner->getCurrentProgram();
+    if (mSandbox != nullptr) return mSandbox->getCurrentProgram();
+    return 0;
+}
+
+void HostedPluginInstance::setCurrentProgram (int i)
+{
+    // In-process only; no bridged relay -- nothing host-side SETS programs
+    // today, the linkage is read-only.
+    if (mInner != nullptr) mInner->setCurrentProgram (i);
+}
+
+const juce::String HostedPluginInstance::getProgramName (int i)
+{
+    if (mInner != nullptr) return mInner->getProgramName (i);
+    if (mSandbox != nullptr && i == mSandbox->getCurrentProgram())
+        return mSandbox->getCurrentProgramName();
+    return {};
 }
 
 void HostedPluginInstance::prepareToPlay (double sr, int blk)
@@ -347,6 +519,11 @@ void HostedPluginInstance::setStateInformation (const void* data, int size)
 
     if (xml == nullptr || ! xml->hasTagName (kStateTag))
         return;
+
+    // In-process restore/preset storms are not user touches -- see the
+    // parameter listener's suppression window.
+    mStateApplyMs.store ((std::int64_t) juce::Time::getMillisecondCounter(),
+                         std::memory_order_relaxed);
 
     const bool wasBridged = (mSandbox != nullptr);
     setBridgePreference (xml->getBoolAttribute (kAttrBridged, false));

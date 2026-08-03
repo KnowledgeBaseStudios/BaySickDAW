@@ -41,6 +41,12 @@ public:
     // Human-readable name for the ribbon / roll label; empty until picked.
     juce::String getPluginName() const;
 
+    // Preset-name linkage (2026-08-02): the plugin's CURRENT program name when
+    // it publishes one (in-process reads live; bridged reads the v4 relay),
+    // else the plugin name.  Most modern synths run private preset browsers
+    // the host cannot see -- those simply stay on the plugin name.
+    juce::String getDisplayName() const;
+
     // Delegates to EngineRig.  Rebuilds the hosted editor afterwards.
     void selectPlugin (const juce::PluginDescription&);
     // Same, from the identifier the ribbon's "+" dropdown carries.  Resolves
@@ -56,6 +62,28 @@ public:
 
     // Fired when the pick changes, so the ribbon / roll labels can follow.
     std::function<void()> onPluginChanged;
+
+    // G-7 parity with the other page kinds: confirm prompt (offering a
+    // page-preset save when a plugin is loaded), then fire onDeleteRequested.
+    void requestDelete();
+    std::function<void()> onDeleteRequested;
+
+    // Automate (2026-08-02, ruling 1-c): fired with a stable parameter id
+    // when the user picks one from the hamburger's Automate submenu or its
+    // last-touched fast path.  StandaloneEditor builds the lane pid,
+    // (re)registers the tab's applicators, and opens the event editor.
+    std::function<void(const juce::String& paramId)> onAutomateParam;
+
+    // Fired when the plugin's discovered parameter count changes -- bridged
+    // lists arrive async after load, and lane applicators can only be
+    // registered once the params exist (a restored project's plugin lanes
+    // would otherwise stay silent until the user opened the Automate menu).
+    std::function<void()> onParamListChanged;
+
+    // Title-strip hamburger: Save / Load Page Preset + Delete.
+    void showPageActionsMenu (juce::Component* anchor);
+    void savePagePreset (std::function<void()> onSaved = nullptr);
+    void loadPagePreset (const juce::File& xml);
 
 public:
     void parentHierarchyChanged() override;   // peer-keyed poll suspend (TS4)
@@ -82,6 +110,21 @@ private:
     // Watches for the hosted instance being swapped or dying underneath us.
     juce::AudioProcessor* mBuiltEngine { nullptr };
     bool                  mBuiltAlive  { false };
+
+    // Last display name the poll saw.  Empty = not yet learned; the first
+    // arrival seeds quietly so restore state can't stomp a saved tab name.
+    juce::String mLastDisplayName;
+
+    // Dirty baseline for the delete prompt: the touch counter + program name
+    // at the tab's resting point.  requestDelete offers save-and-delete only
+    // when a parameter was touched or the program changed since.  (State-BLOB
+    // compare was the first cut and read dirty on an untouched fresh load --
+    // volatile state bytes + bridged capture-before-settle.)
+    int          mBaselineTouchCount { 0 };
+    juce::String mBaselineProgram;
+    bool         mBaselineCaptured { false };
+
+    int mLastParamCount { -1 };   // param-list watch (onParamListChanged)
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (PluginsPage)
 };

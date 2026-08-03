@@ -1695,6 +1695,7 @@ void DrumPage::importPagePresetXml (const juce::String& xml)
 void DrumPage::showPageActionsMenu (juce::Component* anchor)
 {
     constexpr int kIdSavePagePreset = 100;
+    constexpr int kIdDeleteTab      = 101;
     constexpr int kIdLoadBase       = 1000;
 
     juce::PopupMenu menu;
@@ -1722,12 +1723,17 @@ void DrumPage::showPageActionsMenu (juce::Component* anchor)
         menu.addSubMenu ("Load Page Preset", loadSub);
     }
 
+    // Delete on the hamburger too (Jeff, 2026-08-02) -- see LayersPage.
+    menu.addSeparator();
+    menu.addItem (kIdDeleteTab, "Delete Drum", ! mLocked);
+
     juce::Component::SafePointer<DrumPage> safeThis (this);
     menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (anchor),
         [safeThis, presetXmls = std::move (presetXmls), kIdLoadBase] (int r)
         {
             if (! safeThis || r <= 0) return;
             if (r == kIdSavePagePreset) { safeThis->savePagePreset(); return; }
+            if (r == kIdDeleteTab)      { safeThis->requestDelete();  return; }
             if (r >= kIdLoadBase && r < kIdLoadBase + presetXmls.size())
             {
                 safeThis->loadPagePreset (presetXmls[r - kIdLoadBase]);

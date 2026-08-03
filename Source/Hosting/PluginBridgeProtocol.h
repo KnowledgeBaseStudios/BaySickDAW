@@ -43,7 +43,17 @@ namespace Hosting::Bridge
 // identifier, because the identifier alone contains no path and the helper
 // could never resolve a plugin from it.  Host and helper are built from this
 // header by the same do_build.bat run, so they cannot disagree.
-inline constexpr std::uint32_t kProtocolVersion = 3;
+// 4 (2026-08-02): ProgramInfo (helper -> host) -- current program index/count
+// + the current program's name as a UTF-8 trailer, pushed after load and on
+// every program change the plugin reports.  Feeds the tab/strip preset-name
+// linkage; plugins that never publish programs simply never send a name.
+// 5 (2026-08-02): ParamTouched (helper -> host) -- the parameter the USER just
+// moved inside the plugin's own UI, as value + "id \t name" trailer.  Feeds
+// "Automate last touched" for bridged plugins (a foreign editor has no
+// right-click hook of ours).  Bursts coalesce helper-side, and changes the
+// HOST itself just sent (automation playback) are suppressed at the source so
+// lane replay does not masquerade as user touches.
+inline constexpr std::uint32_t kProtocolVersion = 5;
 
 // Fits comfortably inside JUCE's InterprocessConnection message framing while
 // leaving room for the largest realistic plugin state blob; anything bigger is
@@ -72,6 +82,8 @@ enum class MessageType : std::uint32_t
     ParameterList  = 105,
     EditorOpened   = 106,
     Error          = 107,
+    ProgramInfo    = 108,   // v4: payload + current program's name as trailer
+    ParamTouched   = 109,   // v5: payload + "id \t name" trailer
 };
 
 #pragma pack (push, 1)
@@ -137,6 +149,24 @@ struct LoadReplyPayload
     std::uint32_t acceptsMidi;        // 0/1
 };
 
+// v4: current program state.  Only the CURRENT program's name crosses (as the
+// message trailer) -- the naming linkage needs nothing else, and a full
+// program-list sync would be dead weight for the majority of plugins that
+// report a single unnamed program.
+struct ProgramInfoPayload
+{
+    std::int32_t numPrograms;
+    std::int32_t currentProgram;
+};
+
+// v5: a user touch inside the plugin's own editor.  Trailer carries the
+// stable parameter id and display name ("id \t name") -- lanes key on the id,
+// the menu shows the name.
+struct ParamTouchedPayload
+{
+    float value01;
+};
+
 #pragma pack (pop)
 
 // A padding difference between the x64 and x86 builds would silently shift
@@ -147,6 +177,8 @@ static_assert (sizeof (PreparePayload)      == 16, "PreparePayload layout drifte
 static_assert (sizeof (SetParameterPayload) == 8,  "SetParameterPayload layout drifted");
 static_assert (sizeof (EditorPayload)       == 16, "EditorPayload layout drifted");
 static_assert (sizeof (LoadReplyPayload)    == 24, "LoadReplyPayload layout drifted");
+static_assert (sizeof (ProgramInfoPayload)  == 8,  "ProgramInfoPayload layout drifted");
+static_assert (sizeof (ParamTouchedPayload) == 4,  "ParamTouchedPayload layout drifted");
 
 // Helper for building a framed message: header + payload + optional trailer
 // (state blob / MIDI bytes / a UTF-8 string).

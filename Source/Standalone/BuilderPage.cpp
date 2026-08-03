@@ -9440,6 +9440,26 @@ void BuilderPage::applyOfflineLaneValue (const juce::String& pid, float v01)
 
     auto& rig = mProcessor.engineRig();
 
+    // Plugins-tab instrument lanes: "plugtab<N>_vst_<paramId>" (2026-08-02,
+    // registered in StandaloneEditor::registerPluginTabAutomation).  Same
+    // landing rule as the rack's vst_ fork below: the offline branch ships in
+    // the SAME pass as the live registration or exports silently drop the
+    // lane class.
+    if (pid.startsWith ("plugtab"))
+    {
+        const juce::String rest = pid.substring (7);
+        const int us = rest.indexOfChar (0, '_');
+        if (us > 0 && rest.substring (0, us).containsOnly ("0123456789")
+            && rest.substring (us + 1).startsWith ("vst_"))
+        {
+            if (auto* inst = dynamic_cast<Hosting::HostedPluginInstance*> (
+                    rig.engineFor (TabKind::Plugins,
+                                   rest.substring (0, us).getIntValue())))
+                inst->applyParamNorm (rest.substring (us + 1 + 4), v01);
+            return;
+        }
+    }
+
     // Vox/Inst per-page lanes: "vox<N>_" / "inst<N>_" + the engine's bare id
     // (digits IMMEDIATELY after the word -- "vox_bus"/"inst_0" rack prefixes
     // carry an underscore first and fall through by construction).

@@ -39,7 +39,8 @@ enum class HostedState
     Crashed        // was running, died (BLU-302 reports this over the wire)
 };
 
-class HostedPluginInstance final : public juce::AudioProcessor
+class HostedPluginInstance final : public juce::AudioProcessor,
+                                   private juce::AudioProcessorListener
 {
 public:
     HostedPluginInstance (PluginManager&, const juce::PluginDescription&);
@@ -115,14 +116,55 @@ public:
     bool   producesMidi() const override                 { return false; }
     double getTailLengthSeconds() const override;
 
-    int  getNumPrograms() override                       { return 1; }
-    int  getCurrentProgram() override                    { return 0; }
-    void setCurrentProgram (int) override                {}
-    const juce::String getProgramName (int) override     { return {}; }
+    // v4: real forwarding on both paths.  In-process reads the inner instance
+    // live; bridged reads the client's cache (helper pushes ProgramInfo after
+    // load and on every change the plugin reports).  A bridged getProgramName
+    // only knows the CURRENT program's name -- that is all the tab/strip
+    // naming linkage needs, and a full list sync would be dead weight.
+    int  getNumPrograms() override;
+    int  getCurrentProgram() override;
+    void setCurrentProgram (int) override;
+    const juce::String getProgramName (int) override;
     void changeProgramName (int, const juce::String&) override {}
 
     void getStateInformation (juce::MemoryBlock&) override;
     void setStateInformation (const void*, int) override;
+
+    // ── Automation surface (2026-08-02) ─────────────────────────────────────
+    // ONE implementation for both hosts of a plugin: the rack adapter
+    // (HostedPluginEffect) delegates here, and the Plugins-tab lanes call it
+    // directly.  Lanes key on the plugin's OWN stable parameter id, never the
+    // index -- index-keyed automation silently repoints every lane when a
+    // plugin update inserts or reorders a parameter.
+    struct AutomatableParam { juce::String id, name; };
+    juce::Array<AutomatableParam> getAutomatableParams() const;
+    // Count-only peek for pollers -- getAutomatableParams builds Strings for
+    // every parameter, which is not a per-tick cost.
+    int getNumKnownParams() const;
+    bool  applyParamNorm (const juce::String& paramId, float v01);
+    float readParamNorm  (const juce::String& paramId, float fallback) const;
+
+    // "Automate last touched": the parameter the USER moved inside the
+    // plugin's own editor (a foreign UI has no right-click hook of ours).
+    // In-process: our listener on the inner instance, index captured
+    // atomically (plugins may notify from their audio thread) and resolved
+    // lazily here.  Bridged: the v5 touch relay.  Empty until a touch.
+    void getLastTouchedParam (juce::String& idOut, juce::String& nameOut) const;
+
+    // Monotonic touch counter, the delete prompt's dirty bit: "changed
+    // anything" means touches (or a program change) since a baseline
+    // snapshot.  State-BLOB compare was tried first and reads dirty on an
+    // untouched instance -- many plugins keep volatile bytes (timestamps,
+    // editor geometry) in their state.  State-apply storms are excluded on
+    // both paths (helper-side window when bridged, mStateApplyMs here).
+    int getTouchCount() const noexcept;
+
+    // Fired on the message thread when a BRIDGED plugin's parameter list
+    // lands (in-process lists exist at load, so it never fires there).  The
+    // lane registrars arm this so a restored project's plugin lanes resolve
+    // with no window open and no user interaction -- registration at
+    // load-event time structurally saw an empty bridged list.
+    std::function<void()> onParamListArrived;
 
     // Pulls just the PluginDescription back out of a saved blob, so a restore
     // path that has no instance yet can build one.  The FULL description is
@@ -134,9 +176,23 @@ public:
 private:
     void instantiate();
 
+    // juce::AudioProcessorListener (in-process touch capture; the bridged
+    // path's equivalent lives in the helper).
+    void audioProcessorParameterChanged (juce::AudioProcessor*, int, float) override;
+    // Qualified: both bases (AudioProcessor + AudioProcessorListener) expose
+    // a ChangeDetails name, so the bare token is ambiguous here.
+    void audioProcessorChanged (juce::AudioProcessor*,
+                                const juce::AudioProcessorListener::ChangeDetails&) override {}
+
+    juce::AudioProcessorParameter* findInnerParam (const juce::String& paramId) const;
+
     // Non-null exactly when this instance is running BRIDGED.  The two are
     // mutually exclusive: mInner for in-process, mSandbox for out-of-process.
     std::unique_ptr<class SandboxedPluginClient> mSandbox;
+
+    std::atomic<int> mLastTouchedIdx { -1 };
+    std::atomic<int> mTouchCount     { 0 };
+    std::atomic<std::int64_t> mStateApplyMs { 0 };
 
     PluginManager&          mPlugins;
     juce::PluginDescription mDesc;

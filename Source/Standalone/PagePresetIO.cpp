@@ -17,6 +17,7 @@ namespace PagePresetIO
             case PageKind::Vox:        return "Vox";
             case PageKind::Inst:       return "Inst";
             case PageKind::RustyDrums: return "Rusty Drums";
+            case PageKind::Plugins:    return "Plugin";
         }
         return "Layer";
     }
@@ -47,6 +48,7 @@ namespace PagePresetIO
             case PageKind::Vox:        return "Vox";
             case PageKind::Inst:       return "Inst";
             case PageKind::RustyDrums: return "Rusty";
+            case PageKind::Plugins:    return "Plugin";
         }
         return "Layer";
     }

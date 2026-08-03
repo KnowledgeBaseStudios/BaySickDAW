@@ -5534,10 +5534,19 @@ public:
 
         // Apply the slider's skew so the cap visually matches the value.
         const double v01 = valueToProportionOfLength (getValue());
+        // NaN survives every Slider clamp (jlimit passes it) and would trip
+        // JUCE's coordinate assert inside fillRect.  Skip the cap and
+        // Debug-assert here with the slider inspectable.
+        if (! std::isfinite (v01)) { jassertfalse; return; }
         const float capY = b.getBottom() - (float) v01 * b.getHeight();
 
         // ── Rectangular cap (the fader thumb) ───────────────────────────────
+        // JUCE 8's coordsToRectangle Debug-asserts on NEGATIVE fillRect sizes
+        // (JUCE 7 silently drew nothing).  A pedals-tile fader is ~10px wide,
+        // which made the inset stripe below -2px and crashed every Debug open
+        // of a pedal board holding a graphic EQ (2026-08-01).
         const float capW = juce::jmin (b.getWidth() - 4.0f, 22.0f);
+        if (capW <= 0.0f) return;
         const float capH = 14.0f;
         juce::Rectangle<float> cap (cx - capW * 0.5f, capY - capH * 0.5f, capW, capH);
 
@@ -5553,11 +5562,25 @@ public:
         g.drawRoundedRectangle (cap, 2.0f, 1.0f);
 
         // Cap centre indicator stripe (the actual value reference line on the cap).
-        g.setColour (juce::Colour (0xff202020));
-        g.fillRect (cap.getX() + 2.0f, cap.getCentreY() - 0.75f,
-                    cap.getWidth() - 4.0f, 1.5f);
+        const float stripeW = cap.getWidth() - 4.0f;
+        if (stripeW > 0.0f)
+        {
+            g.setColour (juce::Colour (0xff202020));
+            g.fillRect (cap.getX() + 2.0f, cap.getCentreY() - 0.75f,
+                        stripeW, 1.5f);
+        }
     }
 };
+
+// Seed guard for the fader ctor reads below: the EQ DSPs' setters reject
+// non-finite input, so a non-finite READ here means the DSP object itself was
+// corrupted in RAM -- Debug-assert at the bind, seed 0 in Release.
+static double finiteOr0 (float v)
+{
+    if (std::isfinite (v)) return (double) v;
+    jassertfalse;
+    return 0.0;
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // GraphicEQStylePanel - GE Style 7-band guitar graphic EQ
@@ -5580,7 +5603,7 @@ struct GraphicEQStylePanel : public EditorPanelBase
         {
             auto f = std::make_unique<EQFader>();
             f->setRange (-15.0, 15.0, 0.1);
-            f->setValue (dsp ? dsp->getBandDb (i) : 0.0, juce::dontSendNotification);
+            f->setValue (dsp ? finiteOr0 (dsp->getBandDb (i)) : 0.0, juce::dontSendNotification);
             f->onValueChange = [this, i] { if (mDsp) mDsp->setBandDb (i, (float) faders[i]->getValue()); };
             f->setTooltip (juce::String ((int) GraphicEQStyleDSP::kFreqs[i]) + " Hz - +/-15 dB "
                            + (i == GraphicEQStyleDSP::kNumBands - 1 ? "high-shelf band" : "peaking band"));
@@ -5603,7 +5626,7 @@ struct GraphicEQStylePanel : public EditorPanelBase
             auto f = std::make_unique<EQFader>();
             f->setRange (-15.0, 15.0, 0.1);
             f->setSkewFactorFromMidPoint (0.0);
-            f->setValue (dsp ? dsp->getLevelDb() : 0.0, juce::dontSendNotification);
+            f->setValue (dsp ? finiteOr0 (dsp->getLevelDb()) : 0.0, juce::dontSendNotification);
             f->onValueChange = [this] { if (mDsp) mDsp->setLevelDb ((float) faders[GraphicEQStyleDSP::kNumBands]->getValue()); };
             f->setTooltip ("Master output level (+/-15 dB).  Center detent at 0 dB.");
             addAndMakeVisible (*f);
@@ -5683,7 +5706,7 @@ struct BassGraphicEQStylePanel : public EditorPanelBase
         {
             auto f = std::make_unique<EQFader>();
             f->setRange (-15.0, 15.0, 0.1);
-            f->setValue (dsp ? dsp->getBandDb (i) : 0.0, juce::dontSendNotification);
+            f->setValue (dsp ? finiteOr0 (dsp->getBandDb (i)) : 0.0, juce::dontSendNotification);
             f->onValueChange = [this, i] { if (mDsp) mDsp->setBandDb (i, (float) faders[i]->getValue()); };
             f->setTooltip (juce::String ((int) BassGraphicEQStyleDSP::kFreqs[i]) + " Hz - +/-15 dB peaking band");
             addAndMakeVisible (*f);
@@ -5704,7 +5727,7 @@ struct BassGraphicEQStylePanel : public EditorPanelBase
             auto f = std::make_unique<EQFader>();
             f->setRange (-15.0, 15.0, 0.1);
             f->setSkewFactorFromMidPoint (0.0);   // 0 dB sits at visual midpoint
-            f->setValue (dsp ? dsp->getLevelDb() : 0.0, juce::dontSendNotification);
+            f->setValue (dsp ? finiteOr0 (dsp->getLevelDb()) : 0.0, juce::dontSendNotification);
             f->onValueChange = [this] { if (mDsp) mDsp->setLevelDb ((float) faders[BassGraphicEQStyleDSP::kNumBands]->getValue()); };
             f->setTooltip ("Master output level (+/-15 dB).  Center detent at 0 dB.");
             addAndMakeVisible (*f);

@@ -650,6 +650,7 @@ void InstPage::loadPagePreset (const juce::File& xml)
 void InstPage::showPageActionsMenu (juce::Component* anchor)
 {
     constexpr int kIdSavePagePreset = 100;
+    constexpr int kIdDeleteTab      = 101;
     constexpr int kIdLoadBase       = 1000;
 
     juce::PopupMenu menu;
@@ -680,12 +681,17 @@ void InstPage::showPageActionsMenu (juce::Component* anchor)
         menu.addSubMenu ("Load Page Preset", loadSub);
     }
 
+    // Delete on the hamburger too (Jeff, 2026-08-02) -- see LayersPage.
+    menu.addSeparator();
+    menu.addItem (kIdDeleteTab, "Delete Inst", ! mLocked);
+
     juce::Component::SafePointer<InstPage> safeThis (this);
     menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (anchor),
         [safeThis, presetXmls = std::move (presetXmls), kIdLoadBase] (int r)
         {
             if (! safeThis || r <= 0) return;
             if (r == kIdSavePagePreset) { safeThis->savePagePreset(); return; }
+            if (r == kIdDeleteTab)      { safeThis->requestDelete();  return; }
             if (r >= kIdLoadBase && r < kIdLoadBase + presetXmls.size())
             {
                 safeThis->loadPagePreset (presetXmls[r - kIdLoadBase]);
@@ -1036,6 +1042,30 @@ void InstPage::rebuildPlayerPanel()
 // First visit to a program shows kit-author defaults.  No confirm dialog -
 // swap is non-destructive.  Source-aware: queries either the Guitars or
 // Basses engine via mFullProcessor based on mSource.
+// Program display name: strips a leading "NN-" track number, underscores to
+// spaces, Title Case.  Shared by the picker menu, the sound-name linkage,
+// and the add-tab autoload path in StandaloneEditor.
+juce::String InstPage::prettyProgramName (const juce::File& f)
+{
+    auto stem = f.getFileNameWithoutExtension();
+    if (stem.length() > 3 && stem[2] == '-'
+        && juce::CharacterFunctions::isDigit (stem[0])
+        && juce::CharacterFunctions::isDigit (stem[1]))
+        stem = stem.substring (3);
+    stem = stem.replaceCharacter ('_', ' ');
+    juce::String pretty;
+    bool atWordStart = true;
+    for (auto ch : stem)
+    {
+        if (ch == ' ') { pretty += ch; atWordStart = true; continue; }
+        pretty += atWordStart
+                    ? juce::String::charToString (juce::CharacterFunctions::toUpperCase (ch))
+                    : juce::String::charToString (ch);
+        atWordStart = false;
+    }
+    return pretty;
+}
+
 void InstPage::showProgramPickerMenu()
 {
     if (mFullProcessor == nullptr || mSource == Source::LiveInput) return;
@@ -1062,32 +1092,11 @@ void InstPage::showProgramPickerMenu()
     programsDir.findChildFiles (sfzFiles, juce::File::findFiles, false, "*.sfz");
     sfzFiles.sort();
 
-    auto prettyName = [] (const juce::File& f)
-    {
-        auto stem = f.getFileNameWithoutExtension();
-        if (stem.length() > 3 && stem[2] == '-'
-            && juce::CharacterFunctions::isDigit (stem[0])
-            && juce::CharacterFunctions::isDigit (stem[1]))
-            stem = stem.substring (3);
-        stem = stem.replaceCharacter ('_', ' ');
-        juce::String pretty;
-        bool atWordStart = true;
-        for (auto ch : stem)
-        {
-            if (ch == ' ') { pretty += ch; atWordStart = true; continue; }
-            pretty += atWordStart
-                        ? juce::String::charToString (juce::CharacterFunctions::toUpperCase (ch))
-                        : juce::String::charToString (ch);
-            atWordStart = false;
-        }
-        return pretty;
-    };
-
     juce::PopupMenu m;
     for (int i = 0; i < sfzFiles.size(); ++i)
     {
         const bool isCurrent = (sfzFiles[i] == currentKit);
-        m.addItem (i + 1, prettyName (sfzFiles[i]), /*enabled=*/true, /*ticked=*/isCurrent);
+        m.addItem (i + 1, prettyProgramName (sfzFiles[i]), /*enabled=*/true, /*ticked=*/isCurrent);
     }
 
     juce::Component::SafePointer<InstPage> safe (this);
@@ -1173,6 +1182,11 @@ void InstPage::showProgramPickerMenu()
 
             // 4) Refresh chain + ARIA panel + file label.
             p->notifySourceEngineChanged();
+
+            // 5) Program-name linkage: tab + strip + roll follow the loaded
+            //    program (interactive picks only -- restore never runs this).
+            if (p->onSoundNameChanged)
+                p->onSoundNameChanged (prettyProgramName (target));
         });
 }
 

@@ -43,6 +43,11 @@ void FurmanEQStyleDSP::rebuildBand (int idx)
 void FurmanEQStyleDSP::setFreq (int idx, float hz)
 {
     if (idx < 0 || idx >= kNumBands) return;
+    // jlimit passes NaN (every comparison is false), and a NaN here bakes into
+    // the biquad coefficients and the saved project.  Debug-asserts so the
+    // WRITER is on the stack (same guard as the two graphic EQs sharing this
+    // slot).
+    if (! std::isfinite (hz)) { jassertfalse; return; }
     hz = juce::jlimit (kFreqMin[idx], kFreqMax[idx], hz);
     if (! juce::approximatelyEqual (mFreq[idx], hz))
     {
@@ -54,6 +59,7 @@ void FurmanEQStyleDSP::setFreq (int idx, float hz)
 void FurmanEQStyleDSP::setBoostDb (int idx, float db)
 {
     if (idx < 0 || idx >= kNumBands) return;
+    if (! std::isfinite (db)) { jassertfalse; return; }
     db = juce::jlimit (-60.0f, 20.0f, db);
     if (! juce::approximatelyEqual (mBoost[idx], db))
     {
@@ -65,6 +71,7 @@ void FurmanEQStyleDSP::setBoostDb (int idx, float db)
 void FurmanEQStyleDSP::setQ (int idx, float q)
 {
     if (idx < 0 || idx >= kNumBands) return;
+    if (! std::isfinite (q)) { jassertfalse; return; }
     q = juce::jlimit (0.2f, 3.8f, q);   // QA-EffectsReview Task 3: PQ-3 Q range
     if (! juce::approximatelyEqual (mQ[idx], q))
     {
@@ -90,6 +97,7 @@ float FurmanEQStyleDSP::getQ (int idx) const
 
 void FurmanEQStyleDSP::setInputVolDb (float db)
 {
+    if (! std::isfinite (db)) { jassertfalse; return; }
     // QA-EffectsReview Task 3: preamp capped at +26 dB (was +86); the full PQ-3
     // range emerges from preamp + boost bands + Hi switch.
     mInputVolDb = juce::jlimit (0.0f, kInputMaxDb, db);

@@ -79,8 +79,6 @@ public:
     static float readParamNorm  (DSPBase*, const juce::String& paramId, float fallback);
 
 private:
-    juce::AudioProcessorParameter* findParam (const juce::String& paramId) const;
-
     std::unique_ptr<HostedPluginInstance> mHosted;
 
     // The playhead handed to the hosted instance.  A MEMBER, not a local:

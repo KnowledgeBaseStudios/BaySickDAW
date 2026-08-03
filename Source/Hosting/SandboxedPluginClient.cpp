@@ -382,8 +382,13 @@ void SandboxedPluginClient::handleMessageFromWorker (const juce::MemoryBlock& mb
                 bp.name = line.fromFirstOccurrenceOf ("\t", false, false);
                 parsed.push_back (std::move (bp));
             }
-            const juce::ScopedLock sl (mParamLock);
-            mParams = std::move (parsed);
+            {
+                const juce::ScopedLock sl (mParamLock);
+                mParams = std::move (parsed);
+            }
+            // READER THREAD here -- marshal like onLoadResult.
+            if (onParameterList)
+                juce::MessageManager::callAsync ([cb = onParameterList] { cb(); });
             break;
         }
 
@@ -391,6 +396,46 @@ void SandboxedPluginClient::handleMessageFromWorker (const juce::MemoryBlock& mb
             mPendingState.replaceAll (body, bodyBytes);
             mStateReady.signal();
             break;
+
+        case Bridge::MessageType::ParamTouched:
+        {
+            // v5: the user moved a control inside the plugin's own editor.
+            // Cached for the "Automate last touched" menu; poll-read.
+            if (bodyBytes < sizeof (Bridge::ParamTouchedPayload))
+                break;
+
+            const auto* txt = body + sizeof (Bridge::ParamTouchedPayload);
+            const auto  len = bodyBytes - (std::uint32_t) sizeof (Bridge::ParamTouchedPayload);
+            const auto  both = juce::String::fromUTF8 ((const char*) txt, (int) len);
+
+            {
+                const juce::ScopedLock sl (mTouchLock);
+                mTouchedId   = both.upToFirstOccurrenceOf ("\t", false, false);
+                mTouchedName = both.fromFirstOccurrenceOf ("\t", false, false);
+            }
+            mTouchCount.fetch_add (1);
+            break;
+        }
+
+        case Bridge::MessageType::ProgramInfo:
+        {
+            // v4: payload + the CURRENT program's name as trailer.  Cached for
+            // poll-reads (the Plugins page compares per tick); no marshalled
+            // callback needed.
+            if (bodyBytes < sizeof (Bridge::ProgramInfoPayload))
+                break;
+
+            Bridge::ProgramInfoPayload p {};
+            std::memcpy (&p, body, sizeof (p));
+            mNumPrograms   .store ((int) p.numPrograms);
+            mCurrentProgram.store ((int) p.currentProgram);
+
+            const auto* nameBytes = body + sizeof (p);
+            const auto  nameLen   = bodyBytes - (std::uint32_t) sizeof (p);
+            const juce::ScopedLock sl (mProgramLock);
+            mProgramName = juce::String::fromUTF8 ((const char*) nameBytes, (int) nameLen);
+            break;
+        }
 
         case Bridge::MessageType::Error:
             setError (juce::String::fromUTF8 ((const char*) body, (int) bodyBytes));

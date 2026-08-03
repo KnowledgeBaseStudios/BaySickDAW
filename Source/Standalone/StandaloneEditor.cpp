@@ -1452,6 +1452,7 @@ StandaloneEditor::StandaloneEditor(VibeSynthProcessor& p, StandalonePlayHead& ph
             else if (auto* cp = dynamic_cast<ClipsPage*> (entry->component.get())) cp->requestDelete();
             else if (auto* vp = dynamic_cast<VoxPage*>   (entry->component.get())) vp->requestDelete();
             else if (auto* ip = dynamic_cast<InstPage*>  (entry->component.get())) ip->requestDelete();
+            else if (auto* pp = dynamic_cast<PluginsPage*> (entry->component.get())) pp->requestDelete();
             // J-6 (2026-05-03): BaySickRustyDrums uses the page's "Remove
             // BaySickRustyDrums" button as its delete action; if the user
             // hits dropdown Delete instead, route to the same flow.
@@ -3638,6 +3639,38 @@ juce::String StandaloneEditor::resolveAutomationDisplayName(const juce::String& 
 {
     if (paramId.isEmpty()) return paramId;
 
+    // Plugins-tab instrument lanes: "plugtab<N>_vst_<paramId>" (2026-08-02).
+    // The raw plugin parameter id must never surface -- resolve it to the
+    // plugin's own display name, fronted by the tab's current name.
+    if (paramId.startsWith ("plugtab"))
+    {
+        const juce::String rest = paramId.substring (7);
+        const int us = rest.indexOfChar (0, '_');
+        if (us > 0 && rest.substring (0, us).containsOnly ("0123456789")
+            && rest.substring (us + 1).startsWith ("vst_"))
+        {
+            const int idx = rest.substring (0, us).getIntValue();
+            const juce::String pid = rest.substring (us + 1 + 4);
+            juce::String tabLabel = "Plugin " + juce::String (idx + 1);
+            juce::String prmLabel = pid;
+            for (auto* entry : mPages)
+                if (entry != nullptr && entry->type == RibbonTabBar::TabType::Plugins)
+                    if (auto* pp = dynamic_cast<PluginsPage*> (entry->component.get()))
+                        if (pp->getPageIndex() == idx)
+                        {
+                            if (const auto* tab = mRibbon ? mRibbon->getTabById (entry->ribbonTabId) : nullptr)
+                                tabLabel = tab->name;
+                            break;
+                        }
+            if (auto* inst = dynamic_cast<Hosting::HostedPluginInstance*> (
+                    const_cast<VibeSynthProcessor&> (mProcessor).engineRig()
+                        .engineFor (TabKind::Plugins, idx)))
+                for (const auto& p : inst->getAutomatableParams())
+                    if (p.id == pid) { prmLabel = p.name; break; }
+            return tabLabel + " - " + prmLabel;
+        }
+    }
+
     // QA-ApvtsAutomation: per-instance engine keys carry the owning page in the id
     // ("inst{N}_" / "vox{N}_") so lanes stay distinct across tabs.  Strip that,
     // resolve the remainder normally, and put the tab back on the front -- the
@@ -4702,18 +4735,42 @@ void StandaloneEditor::onAddTabRequest(RibbonTabBar::TabType type)
             const int pageIdx = p->getPageIndex();
 
             p->onEngineSelected = [this, newId, pageIdx, p] {
+                // Tab + strip take the plugin's display name (program name
+                // when published, else plugin name) -- the same linkage the
+                // engine pages get from onSoundNameChanged on preset load.
+                const juce::String nm = p->getDisplayName();
+                if (nm.isNotEmpty() && mRibbon) { mRibbon->renameTab (newId, nm); p->setTabName (nm); }
                 const auto* tab = mRibbon->getTabById(newId);
                 if (mMixerPage) mMixerPage->addPluginChannel (pageIdx, tab ? tab->name : "Plugin");
                 if (mEffectsPage) mEffectsPage->rebuildChannelDropdown();
                 if (mPianoRollPage)
-                    mPianoRollPage->setEngineType ({ EngineKind::Plugin, pageIdx }, p->getPluginName());
+                    mPianoRollPage->setEngineType ({ EngineKind::Plugin, pageIdx }, p->getDisplayName());
             };
-            // A later pick (swapping which plugin the tab hosts) renames the
-            // roll label only -- the strip already exists.
-            p->onPluginChanged = [this, pageIdx, p] {
+            // A later pick OR a program change inside the plugin (the page's
+            // poll fires this on display-name changes) renames tab + strip +
+            // roll label to follow.
+            p->onPluginChanged = [this, newId, pageIdx, p] {
+                const juce::String nm = p->getDisplayName();
+                if (nm.isNotEmpty())
+                {
+                    if (mRibbon) { mRibbon->renameTab (newId, nm); p->setTabName (nm); }
+                    if (mMixerPage) mMixerPage->renameChannel (MixerPage::StripKind::Plugin, pageIdx, nm);
+                }
                 if (mPianoRollPage)
-                    mPianoRollPage->setEngineType ({ EngineKind::Plugin, pageIdx }, p->getPluginName());
+                    mPianoRollPage->setEngineType ({ EngineKind::Plugin, pageIdx }, p->getDisplayName());
                 if (mProjectManager) mProjectManager->markDirty();
+            };
+            p->onDeleteRequested = [this, newId] {
+                if (! mRibbon) return;
+                mRibbon->closeTab (newId);
+            };
+            // Instrument lanes (ruling 2-b): registration re-runs on every
+            // param-count change (bridged lists arrive async).  The Automate
+            // pick re-registers too, then opens the lane.
+            p->onParamListChanged = [this, pageIdx] { registerPluginTabAutomation (pageIdx); };
+            p->onAutomateParam = [this, pageIdx] (const juce::String& paramId) {
+                registerPluginTabAutomation (pageIdx);
+                openEventEditorForParam ("plugtab" + juce::String (pageIdx) + "_vst_" + paramId);
             };
 
             registerPluginPianoRoll (pageIdx, p);
@@ -5638,12 +5695,19 @@ void StandaloneEditor::showPageForTab(int tabId)
             // so deep-link sub-tab lambdas can't deref a dangling page pointer
             // after engine swap / project reload / tab delete + re-add.
             juce::Component::SafePointer<LayersPage> safe (lp);
+            // The slot lambdas run at CLICK time, when mPageMenuBar can point
+            // at ANOTHER window's bar (every framed window has live slots
+            // since the project-load sweep) or at a DESTROYED one (bars die
+            // with their window).  Capture the bar the lambda was installed
+            // on -- never the shared cache.  Same pattern in every branch.
+            juce::Component::SafePointer<PageMenuBar> safeBar (mPageMenuBar);
 
-            auto syncPagePresetMenu = [this, safe] (int /*subTabIdx*/)
+            auto syncPagePresetMenu = [safe, safeBar] (int /*subTabIdx*/)
             {
-                if (! mPageMenuBar) return;
+                auto* bar = safeBar.getComponent();
+                if (bar == nullptr) return;
                 if (safe.getComponent() == nullptr) return;
-                mPageMenuBar->setMenuBuilder (
+                bar->setMenuBuilder (
                     [safe] (juce::Component* anchor)
                     {
                         if (auto* p = safe.getComponent())
@@ -5652,7 +5716,7 @@ void StandaloneEditor::showPageForTab(int tabId)
             };
 
             mPageMenuBar->setTabSlots({"Player", "Piano Roll"},
-                [this, safe, syncPagePresetMenu](int i) {
+                [this, safe, safeBar, syncPagePresetMenu](int i) {
                     auto* p = safe.getComponent();
                     if (p == nullptr) return;
                     if (i == 1)
@@ -5674,8 +5738,10 @@ void StandaloneEditor::showPageForTab(int tabId)
                         return;
                     }
                     p->switchTab(i);
-                    mPageMenuBar->updateTabActive(i);
-                    mPageMenuBar->setMidSideVisible(false);
+                    auto* bar = safeBar.getComponent();
+                    if (bar == nullptr) return;
+                    bar->updateTabActive(i);
+                    bar->setMidSideVisible(false);
                     syncPagePresetMenu (i);
                 }, lp->getActiveTab(), lp->getPageColor());
             syncPagePresetMenu (lp->getActiveTab());
@@ -5730,6 +5796,13 @@ void StandaloneEditor::showPageForTab(int tabId)
                         prp->selectEngine ({ EngineKind::Plugin, pageIdx });
                 }, -1, pp->getPageColor());
             mPageMenuBar->setMidSideVisible(false);
+            // Hamburger: Save / Load Page Preset + Delete (G-7 parity; this
+            // branch installed no menu at all until 2026-08-02).
+            mPageMenuBar->setMenuBuilder ([safe] (juce::Component* anchor)
+            {
+                if (auto* p = safe.getComponent())
+                    p->showPageActionsMenu (anchor);
+            });
             mPageMenuBar->setFxRackSlot ([this, safe]
             {
                 auto* p = safe.getComponent();
@@ -5751,12 +5824,14 @@ void StandaloneEditor::showPageForTab(int tabId)
             // on Effects page only.  Piano Roll sub-tab redirects to PianoRollPage.
             // QA-E Sub-Phase A (2026-05-11): SafePointer lifted to outer scope.
             juce::Component::SafePointer<BassPage> safe (bp);
+            juce::Component::SafePointer<PageMenuBar> safeBar (mPageMenuBar);   // see Layers branch
 
-            auto syncPagePresetMenu = [this, safe] (int /*subTabIdx*/)
+            auto syncPagePresetMenu = [safe, safeBar] (int /*subTabIdx*/)
             {
-                if (! mPageMenuBar) return;
+                auto* bar = safeBar.getComponent();
+                if (bar == nullptr) return;
                 if (safe.getComponent() == nullptr) return;
-                mPageMenuBar->setMenuBuilder (
+                bar->setMenuBuilder (
                     [safe] (juce::Component* anchor)
                     {
                         if (auto* p = safe.getComponent())
@@ -5765,7 +5840,7 @@ void StandaloneEditor::showPageForTab(int tabId)
             };
 
             mPageMenuBar->setTabSlots({"Player", "Piano Roll"},
-                [this, safe, syncPagePresetMenu](int i) {
+                [this, safe, safeBar, syncPagePresetMenu](int i) {
                     auto* p = safe.getComponent();
                     if (p == nullptr) return;
                     if (i == 1)
@@ -5783,8 +5858,10 @@ void StandaloneEditor::showPageForTab(int tabId)
                         return;
                     }
                     p->switchTab(i);
-                    mPageMenuBar->updateTabActive(i);
-                    mPageMenuBar->setMidSideVisible(false);
+                    auto* bar = safeBar.getComponent();
+                    if (bar == nullptr) return;
+                    bar->updateTabActive(i);
+                    bar->setMidSideVisible(false);
                     syncPagePresetMenu (i);
                 }, bp->getActiveTab(), bp->getPageColor());
             syncPagePresetMenu (bp->getActiveTab());
@@ -5815,13 +5892,15 @@ void StandaloneEditor::showPageForTab(int tabId)
             // tab keeps the same menu since the EQ stub has no own menu.
             // QA-E Sub-Phase A (2026-05-11): SafePointer lifted to outer scope.
             juce::Component::SafePointer<ClipsPage> safe (cp);
+            juce::Component::SafePointer<PageMenuBar> safeBar (mPageMenuBar);   // see Layers branch
 
-            auto syncPagePresetMenu = [this, safe] (int i)
+            auto syncPagePresetMenu = [safe, safeBar] (int i)
             {
                 juce::ignoreUnused (i);   // menu builder is the same on all sub-tabs
-                if (! mPageMenuBar) return;
+                auto* bar = safeBar.getComponent();
+                if (bar == nullptr) return;
                 if (safe.getComponent() == nullptr) return;
-                mPageMenuBar->setMenuBuilder (
+                bar->setMenuBuilder (
                     [safe] (juce::Component* anchor)
                     {
                         if (auto* p = safe.getComponent())
@@ -5832,7 +5911,7 @@ void StandaloneEditor::showPageForTab(int tabId)
             // J-6 EQ unification (2026-05-03): Pre EQ8 M/S sub-tab removed;
             // Audio insert pre-rack EQ now lives on the Effects page only.
             mPageMenuBar->setTabSlots({"Player", "Piano Roll"},
-                [this, safe, syncPagePresetMenu](int i) {
+                [this, safe, safeBar, syncPagePresetMenu](int i) {
                     auto* p = safe.getComponent();
                     if (p == nullptr) return;
                     if (i == 1)
@@ -5850,8 +5929,10 @@ void StandaloneEditor::showPageForTab(int tabId)
                         return;
                     }
                     p->switchTab (i);
-                    mPageMenuBar->updateTabActive (i);
-                    mPageMenuBar->setMidSideVisible (false);
+                    auto* bar = safeBar.getComponent();
+                    if (bar == nullptr) return;
+                    bar->updateTabActive (i);
+                    bar->setMidSideVisible (false);
                     syncPagePresetMenu (i);
                 }, cp->getActiveTab(), cp->getPageColor());
             syncPagePresetMenu (cp->getActiveTab());
@@ -5875,13 +5956,15 @@ void StandaloneEditor::showPageForTab(int tabId)
             // so users can apply a saved preset to an engineless Vox tab.
             // QA-E Sub-Phase A (2026-05-11): SafePointer lifted to outer scope.
             juce::Component::SafePointer<VoxPage> safe (vp);
+            juce::Component::SafePointer<PageMenuBar> safeBar (mPageMenuBar);   // see Layers branch
 
-            auto syncPagePresetMenu = [this, safe] (int i)
+            auto syncPagePresetMenu = [safe, safeBar] (int i)
             {
                 juce::ignoreUnused (i);
-                if (! mPageMenuBar) return;
+                auto* bar = safeBar.getComponent();
+                if (bar == nullptr) return;
                 if (safe.getComponent() == nullptr) return;
-                mPageMenuBar->setMenuBuilder (
+                bar->setMenuBuilder (
                     [safe] (juce::Component* anchor)
                     {
                         if (auto* p = safe.getComponent())
@@ -5892,12 +5975,14 @@ void StandaloneEditor::showPageForTab(int tabId)
             // H-6b (2026-05-01) / J-6 (2026-05-03): Vox page is BaySickVocal-only;
             // EQ unification dropped the "Pre Rack EQ" sub-tab so Vox now has 5 sub-tabs.
             mPageMenuBar->setTabSlots (VoxPage::getTabLabels(),
-                [this, safe, syncPagePresetMenu] (int i) {
+                [safe, safeBar, syncPagePresetMenu] (int i) {
                     auto* p = safe.getComponent();
                     if (p == nullptr) return;
                     p->switchTab (i);
-                    mPageMenuBar->updateTabActive (i);
-                    mPageMenuBar->setMidSideVisible (false);
+                    auto* bar = safeBar.getComponent();
+                    if (bar == nullptr) return;
+                    bar->updateTabActive (i);
+                    bar->setMidSideVisible (false);
                     syncPagePresetMenu (i);
                 }, vp->getActiveTab(), vp->getPageColor());
             syncPagePresetMenu (vp->getActiveTab());
@@ -5921,13 +6006,15 @@ void StandaloneEditor::showPageForTab(int tabId)
             // (same reasoning as Vox above).
             // QA-E Sub-Phase A (2026-05-11): SafePointer lifted to outer scope.
             juce::Component::SafePointer<InstPage> safe (ip);
+            juce::Component::SafePointer<PageMenuBar> safeBar (mPageMenuBar);   // see Layers branch
 
-            auto syncPagePresetMenu = [this, safe] (int i)
+            auto syncPagePresetMenu = [safe, safeBar] (int i)
             {
                 juce::ignoreUnused (i);
-                if (! mPageMenuBar) return;
+                auto* bar = safeBar.getComponent();
+                if (bar == nullptr) return;
                 if (safe.getComponent() == nullptr) return;
-                mPageMenuBar->setMenuBuilder (
+                bar->setMenuBuilder (
                     [safe] (juce::Component* anchor)
                     {
                         if (auto* p = safe.getComponent())
@@ -5946,7 +6033,7 @@ void StandaloneEditor::showPageForTab(int tabId)
             // (K-5's Player tab) doesn't break the index-based nav.
             const auto labels = ip->getActiveTabLabels();
             mPageMenuBar->setTabSlots(labels,
-                [this, safe, syncPagePresetMenu, labels](int i) {
+                [this, safe, safeBar, syncPagePresetMenu, labels](int i) {
                     auto* p = safe.getComponent();
                     if (p == nullptr) return;
                     if (i >= 0 && i < (int) labels.size() && labels[i] == "Piano Roll")
@@ -5976,8 +6063,10 @@ void StandaloneEditor::showPageForTab(int tabId)
                         return;
                     }
                     p->switchTab (i);
-                    mPageMenuBar->updateTabActive (i);
-                    mPageMenuBar->setMidSideVisible (false);
+                    auto* bar = safeBar.getComponent();
+                    if (bar == nullptr) return;
+                    bar->updateTabActive (i);
+                    bar->setMidSideVisible (false);
                     syncPagePresetMenu (i);
                 }, ip->getActiveTab(), ip->getPageColor());
             syncPagePresetMenu (ip->getActiveTab());
@@ -6022,14 +6111,16 @@ void StandaloneEditor::showPageForTab(int tabId)
             // after engine swap / project reload; this is the canonical fix
             // site for the page-type-branch use-after-free family.
             juce::Component::SafePointer<DrumPage> safe (dp);
+            juce::Component::SafePointer<PageMenuBar> safeBar (mPageMenuBar);   // see Layers branch
 
-            auto syncPagePresetMenu = [this, safe] (int subTabIdx)
+            auto syncPagePresetMenu = [safe, safeBar] (int subTabIdx)
             {
-                if (! mPageMenuBar) return;
+                auto* bar = safeBar.getComponent();
+                if (bar == nullptr) return;
                 const bool onPlayer = (subTabIdx == 1);
                 if (onPlayer && safe.getComponent() != nullptr)
                 {
-                    mPageMenuBar->setMenuBuilder (
+                    bar->setMenuBuilder (
                         [safe] (juce::Component* anchor)
                         {
                             if (auto* p = safe.getComponent())
@@ -6041,7 +6132,7 @@ void StandaloneEditor::showPageForTab(int tabId)
             // J-6 EQ unification (2026-05-03): Pre EQ8 M/S sub-tab removed.
             // Tabs: 0 Drum Kit (nav shortcut), 1 Player, 2 Piano Roll (nav shortcut).
             mPageMenuBar->setTabSlots({"Drum Kit", "Player", "Piano Roll"},
-                [this, safe, syncPagePresetMenu](int i) {
+                [this, safe, safeBar, syncPagePresetMenu](int i) {
                     auto* p = safe.getComponent();
                     if (p == nullptr) return;
                     if (i == 0)
@@ -6072,8 +6163,10 @@ void StandaloneEditor::showPageForTab(int tabId)
                         return;
                     }
                     p->switchTab(i);
-                    mPageMenuBar->updateTabActive(i);
-                    mPageMenuBar->setMidSideVisible(false);
+                    auto* bar = safeBar.getComponent();
+                    if (bar == nullptr) return;
+                    bar->updateTabActive(i);
+                    bar->setMidSideVisible(false);
                     syncPagePresetMenu (i);
                 }, dp->getActiveTab(), dp->getPageColor());
             syncPagePresetMenu (dp->getActiveTab());
@@ -6103,9 +6196,10 @@ void StandaloneEditor::showPageForTab(int tabId)
             // engine selected.
             // QA-E Sub-Phase A (2026-05-11): SafePointer lifted to outer scope.
             juce::Component::SafePointer<BaySickRustyDrumsPage> safe (rp);
+            juce::Component::SafePointer<PageMenuBar> safeBar (mPageMenuBar);   // see Layers branch
 
             mPageMenuBar->setTabSlots({"Drum Kit", "Player", "Piano Roll"},
-                [this, safe](int i) {
+                [this, safe, safeBar](int i) {
                     auto* p = safe.getComponent();
                     if (p == nullptr) return;
                     if (i == 2)
@@ -6122,8 +6216,10 @@ void StandaloneEditor::showPageForTab(int tabId)
                         return;
                     }
                     p->switchTab(i);
-                    mPageMenuBar->updateTabActive(i);
-                    mPageMenuBar->setMidSideVisible(false);
+                    auto* bar = safeBar.getComponent();
+                    if (bar == nullptr) return;
+                    bar->updateTabActive(i);
+                    bar->setMidSideVisible(false);
                 }, rp->getActiveTab(), rp->getPageColor());
             mPageMenuBar->setMidSideVisible(false);
             // Smoke round 2 (Jeff): per-player Swing Mix knob (see Layers) --
@@ -8799,14 +8895,19 @@ void StandaloneEditor::addBaySickGuitarsTab()
     if (mPianoRollPage)
         mPianoRollPage->setEngineDisplayName ({ EngineKind::BaySickGuitars, newIdx }, tabName);
 
+    // Program-name linkage (Jeff, 2026-08-02): the default kit just
+    // autoloaded, so the tab takes its program name NOW rather than waiting
+    // for the first manual pick.  "Guitar N" above stays the fallback when
+    // the kit load failed.  Interactive path only -- restore never runs this.
+    if (kitLoaded && ip->onSoundNameChanged)
+        ip->onSoundNameChanged (InstPage::prettyProgramName (defaultKit));
+
     // Step 8: select the new tab (user just asked to add it).
     if (mRibbon && ribbonId >= 0)
     {
         mRibbon->selectTab (ribbonId);
         onTabSelected (ribbonId);
     }
-
-    juce::ignoreUnused (kitLoaded);   // silent failure path covered by step 4
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -8880,13 +8981,15 @@ void StandaloneEditor::addBaySickBassesTab()
     if (mPianoRollPage)
         mPianoRollPage->setEngineDisplayName ({ EngineKind::BaySickBasses, newIdx }, tabName);
 
+    // Program-name linkage (Jeff, 2026-08-02) -- see the Guitars path above.
+    if (kitLoaded && ip->onSoundNameChanged)
+        ip->onSoundNameChanged (InstPage::prettyProgramName (defaultKit));
+
     if (mRibbon && ribbonId >= 0)
     {
         mRibbon->selectTab (ribbonId);
         onTabSelected (ribbonId);
     }
-
-    juce::ignoreUnused (kitLoaded);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -9697,6 +9800,28 @@ void StandaloneEditor::spawnInstTabIfMissing (int instIdx, bool selectAfter)
                 if (entry && entry->component.get() == cpRaw)
                     { ribbonId = entry->ribbonTabId; break; }
         if (ribbonId >= 0 && mRibbon) mRibbon->setTabLocked (ribbonId, cpRaw->isLocked());
+    };
+    // Program-name linkage (2026-08-02): a picked sfizz program renames the
+    // tab + strip + roll label, matching the preset-name flow on the engine
+    // pages.  InstPage fires this from the interactive picker only, so
+    // project restore keeps the saved tab name.
+    cpRaw->onSoundNameChanged = [this, ribbonId = -1, cpRaw] (const juce::String& nm) mutable
+    {
+        if (nm.isEmpty()) return;
+        if (ribbonId < 0)
+            for (auto* entry : mPages)
+                if (entry && entry->component.get() == cpRaw)
+                    { ribbonId = entry->ribbonTabId; break; }
+        if (ribbonId >= 0 && mRibbon) mRibbon->renameTab (ribbonId, nm);
+        cpRaw->setTabName (nm);
+        if (mMixerPage) mMixerPage->setInstStripName (cpRaw->getPageIndex(), nm);
+        if (mPianoRollPage && cpRaw->getSource() != InstPage::Source::LiveInput)
+        {
+            const auto k = cpRaw->getSource() == InstPage::Source::BaySickGuitars
+                             ? EngineKind::BaySickGuitars
+                             : EngineKind::BaySickBasses;
+            mPianoRollPage->setEngineDisplayName ({ k, cpRaw->getPageIndex() }, nm);
+        }
     };
 
     // G-4 (2026-04-28): NO piano-roll registration for Inst.  Same reasoning
@@ -12800,6 +12925,60 @@ void StandaloneEditor::registerPedalAutomation (int instPageIndex)
     }
 }
 
+// 2026-08-02 (ruling 2-b): lanes for the Plugins-tab instrument itself.  The
+// tab index IS the identity (one engine per tab; a plugin swap leaves the old
+// plugin's lanes resolving to a param id the new plugin does not have, which
+// no-ops).  Applicators re-resolve through the rig at apply time -- never a
+// cached engine pointer.
+void StandaloneEditor::registerPluginTabAutomation (int pageIndex)
+{
+    auto* eng = dynamic_cast<Hosting::HostedPluginInstance*> (
+        mProcessor.engineRig().engineFor (TabKind::Plugins, pageIndex));
+    if (eng == nullptr) return;
+
+    // Bridged lists arrive async; arm the arrival hook (self-re-arming, since
+    // this function is the callback) so a restored project's lanes resolve
+    // with no window open (Jeff, 2026-08-02).  SafePointer on the editor: the
+    // engine is model-owned and outlives editor rebuilds.
+    {
+        juce::Component::SafePointer<StandaloneEditor> safeEd (this);
+        eng->onParamListArrived = [safeEd, pageIndex]
+        {
+            if (auto* ed = safeEd.getComponent())
+                ed->registerPluginTabAutomation (pageIndex);
+        };
+    }
+
+    auto resolve = [this, pageIndex]() -> Hosting::HostedPluginInstance*
+    {
+        return dynamic_cast<Hosting::HostedPluginInstance*> (
+            mProcessor.engineRig().engineFor (TabKind::Plugins, pageIndex));
+    };
+
+    const juce::String base = "plugtab" + juce::String (pageIndex) + "_vst_";
+    for (const auto& p : eng->getAutomatableParams())
+    {
+        const juce::String pid     = base + p.id;
+        const juce::String paramId = p.id;
+
+        if (VKnobAutomation::sOnRegisterApplicator)
+            VKnobAutomation::sOnRegisterApplicator (pid,
+                [resolve, paramId] (float v01)
+                {
+                    if (auto* inst = resolve())
+                        inst->applyParamNorm (paramId, v01);
+                });
+
+        if (VKnobAutomation::sOnRegisterReader)
+            VKnobAutomation::sOnRegisterReader (pid,
+                [resolve, paramId]() -> float
+                {
+                    auto* inst = resolve();
+                    return inst != nullptr ? inst->readParamNorm (paramId, 0.5f) : 0.5f;
+                });
+    }
+}
+
 // QA-ModelShell TS4: frame a page in a contained window.
 //
 // The page stays owned by PageEntry::component -- the window hosts it
@@ -13087,16 +13266,59 @@ void StandaloneEditor::openMasterAnalyzerWindow()
             }
 
             m.addSectionHeader ("Target");
+            // This target drives the WINDOW'S bar only -- deliberately separate
+            // from the capture/export standard (exSpecId/exSpecCustom) so a view
+            // tweak never silently changes take verdicts.  Custom is excluded
+            // from the table loop because get(Id::Custom) is the -14 placeholder
+            // LoudnessSpec.h warns about -- it gets its own prompt item below.
+            bool matchesPreset = false;
             for (int i = 0; i < LoudnessSpec::numSpecs(); ++i)
             {
                 const auto& sp = LoudnessSpec::get ((LoudnessSpec::Id) i);
                 if (! sp.checksIntegrated) continue;   // measure-only has no target
+                if (sp.id == LoudnessSpec::Id::Custom) continue;
                 const float t = sp.integratedLufs;
+                const bool ticked =
+                    juce::approximatelyEqual (safeView->getTargetLufs(), t);
+                matchesPreset = matchesPreset || ticked;
                 m.addItem (juce::String (sp.name),
                            true,
-                           juce::approximatelyEqual (safeView->getTargetLufs(), t),
+                           ticked,
                            [safeView, t]() mutable
                            { if (safeView) safeView->setTargetLufs (t); });
+            }
+
+            {
+                const juce::String customLabel = matchesPreset
+                    ? juce::String ("Custom...")
+                    : "Custom (" + juce::String (safeView->getTargetLufs(), 1)
+                        + " LUFS)...";
+                m.addItem (customLabel, true, ! matchesPreset,
+                           [safeView]() mutable
+                {
+                    if (safeView == nullptr) return;
+                    auto* aw = new juce::AlertWindow (
+                        "Custom Target",
+                        "Target loudness in LUFS (-40 to 0):",
+                        juce::AlertWindow::NoIcon);
+                    aw->addTextEditor ("lufs",
+                                       juce::String (safeView->getTargetLufs(), 1));
+                    if (auto* ed = aw->getTextEditor ("lufs"))
+                        ed->setInputRestrictions (7, "-0123456789.");
+                    aw->addButton ("OK",     1,
+                                   juce::KeyPress (juce::KeyPress::returnKey));
+                    aw->addButton ("Cancel", 0,
+                                   juce::KeyPress (juce::KeyPress::escapeKey));
+                    aw->enterModalState (true, juce::ModalCallbackFunction::create (
+                        [safeView, aw] (int r)
+                        {
+                            if (r != 1 || safeView == nullptr) return;
+                            const auto t = aw->getTextEditorContents ("lufs").trim();
+                            if (t.isEmpty() || t == "-" || t == ".") return;
+                            safeView->setTargetLufs (
+                                juce::jlimit (-40.0f, 0.0f, t.getFloatValue()));
+                        }), true);
+                });
             }
 
             m.addSeparator();
@@ -13577,6 +13799,45 @@ void StandaloneEditor::deserializeUIState (const juce::XmlElement& root)
                     pp->selectPluginById (engine);
 
                 applyEngineState (pp->getEngineProcessor(), engineData);
+
+                // The hooks above stay QUIET about names so the restore-time
+                // select can't stomp the saved tab name.  Live picks and
+                // program changes from here on follow the display-name
+                // linkage, same as a fresh tab (the page's poll seeds its
+                // first-learned name quietly for the same reason).
+                pp->onEngineSelected = [this, newId, pageIndex, pp] {
+                    const juce::String nm = pp->getDisplayName();
+                    if (nm.isNotEmpty() && mRibbon) { mRibbon->renameTab (newId, nm); pp->setTabName (nm); }
+                    const auto* tab = mRibbon->getTabById (newId);
+                    if (mMixerPage)   mMixerPage->addPluginChannel (pageIndex, tab ? tab->name : "Plugin");
+                    if (mEffectsPage) mEffectsPage->rebuildChannelDropdown();
+                    if (mPianoRollPage)
+                        mPianoRollPage->setEngineType ({ EngineKind::Plugin, pageIndex }, pp->getDisplayName());
+                };
+                pp->onPluginChanged = [this, newId, pageIndex, pp] {
+                    const juce::String nm = pp->getDisplayName();
+                    if (nm.isNotEmpty())
+                    {
+                        if (mRibbon) { mRibbon->renameTab (newId, nm); pp->setTabName (nm); }
+                        if (mMixerPage) mMixerPage->renameChannel (MixerPage::StripKind::Plugin, pageIndex, nm);
+                    }
+                    if (mPianoRollPage)
+                        mPianoRollPage->setEngineType ({ EngineKind::Plugin, pageIndex }, pp->getDisplayName());
+                    if (mProjectManager) mProjectManager->markDirty();
+                };
+                pp->onDeleteRequested = [this, newId] {
+                    if (! mRibbon) return;
+                    mRibbon->closeTab (newId);
+                };
+                // Instrument lanes (ruling 2-b) -- see the spawn path.  The
+                // param-count watch is what makes a restored project's plugin
+                // lanes resolve: the bridged list lands after this block runs.
+                pp->onParamListChanged = [this, pageIndex] { registerPluginTabAutomation (pageIndex); };
+                pp->onAutomateParam = [this, pageIndex] (const juce::String& paramId) {
+                    registerPluginTabAutomation (pageIndex);
+                    openEventEditorForParam ("plugtab" + juce::String (pageIndex) + "_vst_" + paramId);
+                };
+                registerPluginTabAutomation (pageIndex);   // in-process params exist NOW
             }
 
             auto* entry = new PageEntry();
@@ -14234,6 +14495,16 @@ void StandaloneEditor::deserializeUIState (const juce::XmlElement& root)
     restoreOrder ("VoxOrder",   MixerPage::OrderKind::Vox);
     restoreOrder ("InstOrder",  MixerPage::OrderKind::Inst);
     restoreOrder ("AudioOrder", MixerPage::OrderKind::Audio);
+
+    // Every window the restore loop framed needs its title-strip menu built.
+    // Mirrors the launch-path sweep in the constructor (2026-07-28 fix):
+    // showPageForTab is what fills the strip, and only the preferred tab
+    // selected below would otherwise get it -- every other restored window
+    // came up bare until its ribbon tab was clicked once.  The selection
+    // below runs last and leaves the active window in front.
+    for (auto* e : mPages)
+        if (e != nullptr && e->window != nullptr)
+            showPageForTab (e->ribbonTabId);
 
     // Prefer the saved active tab, then the first dynamic tab, then Builder.
     int preferred = ui->getIntAttribute ("activeTabId", -1);
