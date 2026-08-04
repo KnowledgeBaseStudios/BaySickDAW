@@ -382,6 +382,9 @@ public:
     void resized() override;
 
     static constexpr int kHeight = 26;
+    // QA-Layout L31: width of the "Menu" text button (was a 22px "=" glyph);
+    // shared by resized() and the paint() title x-offset.
+    static constexpr int kMenuBtnW = 46;
 
 private:
     juce::String mTitle;

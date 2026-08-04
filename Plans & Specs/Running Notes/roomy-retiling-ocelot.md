@@ -54,6 +54,47 @@ Convention: Main Plan §0 "Batch Plans + Running Notes layout" (locked 2026-05-1
 - **CLAUDE.md stale fact noted for T14:** ArrangementGrid constants say kNumRows=32; source says
   500 (`BuilderPage.h:601`).
 
+## 2026-08-03 — Task 1 committed `80b2f1f2` — transport readout + ribbon visuals + app title
+
+- **Build gate green:** five exit codes 0, four `vcxproj -> ...exe` link lines, zero
+  `error C` / `error LNK` / `error MSB` greps.
+- **Perf readout rebuilt as `TransportPerfReadout`** (custom component in
+  GlobalTransportBar.h/.cpp, replaces the juce::Label): three 9pt monospaced rows —
+  SYS/DSP, MEM/LAT, UND/PF — inside the same 40px bar (L24).  Per-token coloring per
+  L20: the SYS token colors off whole-machine CPU alone (same 50/80% thresholds);
+  DSP load/overload colors the DSP token plus rows 2–3; the 95% overload flash is
+  unchanged.  A Label cannot draw split colors — that is why the custom component
+  exists.
+- **Gutter fix:** `kCPUReserve` in StandaloneEditor::resized() now derives from
+  `TransportPerfReadout::kWidth` (120) + 12 (4px bar inset + 8px gap).  The old
+  literal 120 disagreed with the label's 160px rect — the 120-vs-160 mismatch
+  diagnosed in planning is what let the readout overlap the ribbon "+" slot.
+- **L25 two-row ribbon tabs** (RibbonTabBar.h/.cpp): name on the top row
+  (`kNameRowH` 22); badge + arrow on the bottom row; arrow hit zone = bottom-row
+  right in `hitTestSlot` (name-row clicks navigate).  `naturalSingleLineWidth`
+  dropped its arrow/badge width terms.  camelCase wrap machinery retired —
+  `splitCamelCase` + `slotWraps` deleted, paint's wrap branch removed; long labels
+  shrink via `drawFittedText` 0.75 minScale.  Frozen-tab dot moved to the bottom
+  row's left edge so it cannot touch the name.  Arrow glyph 26pt → 16pt to fit the
+  18px bottom row.  Stale "index 6" ctor comment rewritten in-region (Rule 6).
+- **FINDING — fixed in-region (Rule 3 fold-in, T1's own surface):** `kMaxSlots` was
+  11 ("10 types + '+' slot"), but QA-ModelShell TS6's Plugins type made it 11 types
+  + the "+" slot = 12 possible slots — `slotRect()`'s stack arrays
+  (`desired` / `minW` / `widths[kMaxSlots]`) overflowed by one whenever every type
+  was visible at once.  Latent until a project holds all six instance types + a
+  Plugins tab simultaneously.  Bumped to 12.
+- **L27:** `order[]` reordered to Builder / Mixer / Effects / PianoRoll then the
+  instance types — order array ONLY; the persisted `addFixed` ids untouched.
+- **L26:** `VibeLAF::drawDocumentWindowTitleBar` (SharedUI.cpp) now stock-JUCE
+  placement — icon + title centered as one unit, clamped into the title space;
+  reverts TS7's left-align + icon drop.  Applies to every non-native DocumentWindow;
+  the main frame is the only icon-setter.  Second wrong-comment fix in the same
+  pass: SharedUI.h claimed the main app window keeps OS chrome via a native title
+  bar — false; VibeSynthWindow never opts in and paints through this override
+  (which is why TS7's left-align was visible on the app title at all).
+- **`STANDALONE_UI_CHANGES.md`** gained a QA-Layout T1 entry per that file's
+  standing convention for deliberate UI changes.
+
 ## Diagnostic Instrumentation Catalog (Rule 4)
 
 | Site | Tag | Purpose | Disposition |

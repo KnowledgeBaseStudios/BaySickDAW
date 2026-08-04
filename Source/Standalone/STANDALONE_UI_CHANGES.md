@@ -371,3 +371,40 @@ shortcut. Held notes release on mode-off, octave shift, and tab switch.
 - **App title** (L26): `VibeLAF::drawDocumentWindowTitleBar` uses stock-JUCE placement — icon +
   title centred as one unit, clamped into the title space.  Applies to every non-native
   `DocumentWindow`; the main frame is the only caller that sets an icon.
+
+---
+
+## 2026-08-03 — QA-Layout T2: "+" menu reorder, engine-picker retirement, engine-named dropdown adds, LiveInst rename, "Menu" button
+
+**Files:** `RibbonTabBar.h/.cpp`, `LayersPage.h/.cpp`, `BassPage.h/.cpp`, `ClipsPage.h/.cpp`
+(`Source/Clips/`), `DrumPage.h/.cpp`, `SharedUI.h/.cpp`, `StandaloneEditor.h`,
+`InstPage.cpp` (`Source/Inst/`), `MixerPage.cpp`
+
+- **"+" menu** rebuilt to Jeff's locked order (L2/L3/L28): BaySickVocal · BaySickLiveInst ·
+  BaySickGuitars · BaySickBasses · VSTPlugin ▸ · Harmless ▸ (Layers/Bass) · BaySickSynth (flat →
+  Layers) · BaySickPlayer ▸ (Layers/Bass/Audio Clips) · BaySickBass · **BaySickDrums ▸
+  (BaySickPlayer/BaySickSynth — absorbs the old drum routes)** · BaySickRustyDrums.  The VSTPlugin
+  list stays alphabetical (`getAddedInstruments()`).
+- **Ribbon dropdown add rows** (Jeff map 2026-08-03): the generic "+ Add New X" rows (which made
+  ENGINELESS pages) are replaced by engine-named rows per type — Layers: Harmless/BaySickPlayer/
+  BaySickSynth; Bass: Harmless/BaySickPlayer/BaySickBass; Drums: BaySickPlayer/BaySickSynth (+
+  existing Rusty row); Vox: BaySickVocal (+ export submenu); Inst: BaySickLiveInst (+ Guitars/
+  Basses rows); Clips: "+ Add BaySickPlayer…" (file-picker route unchanged); Plugins: "+ Add
+  VSTPlugin ▸" side menu, alphabetical.  All ride `onAddEngineRequest` — the engine loads at
+  creation.
+- **Engine pickers deleted (L4):** Layers/Bass `LockableCombo` + "Engine:" label rows, Clips'
+  decorative locked BaySickPlayer combo, Drums' "Pick a sound v" button + sound label.  Each
+  page's engine context menu merged into its Menu-dropdown `showPageActionsMenu` (Lock /
+  Polyphony / Rename / Duplicate / Choke / Save Patch / Load Preset + page-preset entries + ONE
+  Delete).  DrumPage's Menu forwards to `showContextMenu(anchor, false)` — kit pads keep
+  `fromKit=true` (MIDI Note/Learn rows, no page presets); empty-drum sound picking lives on the
+  kit grid's per-pad pickers.  Clips' "Load Page Preset" keeps the wider factory+user recursive
+  root from its old context menu.  Engine editors now fill their Player tabs full-height.
+- **LiveInst rename (L2):** new live-input tabs are "LiveInst N" (`nextInstTabName`), InstPage
+  title default, mixer strip default name + `getInstStripName` fallback, input-picker header
+  "LiveInst Input" (was "Instrument Input").  Family-generic "Inst" labels that also cover
+  Guitars/Basses (automation "Inst N" prefix labels, "Inst Bus", browser category, channel-list
+  fallbacks) deliberately stay "Inst".
+- **Hamburger → "Menu" (L31):** PageMenuBar's "=" TextButton is now a 46px "Menu" button
+  (`kMenuBtnW`); title x-offset follows.  It is the app's only hamburger-style button — every
+  window title strip shares PageMenuBar.

@@ -528,60 +528,37 @@ void RibbonTabBar::showAddMenu (juce::Rectangle<int> slotBounds)
     // decides the tab.  Engines that can live in more than one tab get a side
     // submenu; the rest go straight in.  Nothing here is a page-type name and
     // nothing is a disabled "go do it somewhere else" label.
-    struct Target { const char* label; TabType type; };
-
-    // (engine, where it can live) -- taken from each page's own engine list:
-    // LayersPage offers Harmless / BaySickPlayer / BaySickSynth, BassPage offers
-    // Harmless / BaySickPlayer / BaySickBass, DrumPage's picker is sample
-    // (BaySickPlayer) or synth patch (BaySickSynth), Clips are BaySickPlayer.
-    struct EngineRow { const char* engine; std::vector<Target> targets; bool enabled { true }; };
+    // QA-Layout L2/L3/L28 (2026-08-03): order + strings are Jeff's locked
+    // list; the BaySickDrums entry absorbs the drum routes that used to hide
+    // inside the BaySickPlayer / BaySickSynth submenus.
 
     // Inst is a SHARED cap: BaySickGuitars, BaySickBasses and the live
     // instrument chain all consume Inst slots, so the same gate covers all
-    // three.  Computed here because the table below needs it.
+    // three.
     const bool instCapped = onIsInstCapReached && onIsInstCapReached();
-
-    const std::vector<EngineRow> kEngines = {
-        { "Harmless",       { { "Layers", TabType::Layers }, { "Bass", TabType::Bass } } },
-        { "BaySickPlayer",  { { "Layers", TabType::Layers }, { "Bass", TabType::Bass },
-                              { "Drums",  TabType::Drums  }, { "Audio Clips", TabType::Clip } } },
-        { "BaySickSynth",   { { "Layers", TabType::Layers }, { "Drums", TabType::Drums } } },
-        { "BaySickBass",    { { "Bass",  TabType::Bass } } },
-        { "BaySickVocal",   { { "Vox",   TabType::Vox  } } },
-        // Jeff 2026-07-28: the LIVE instrument route was missing entirely.  The
-        // menu offered the two sfizz Inst engines but no way to make a plain
-        // live-input Inst tab, which is the direct counterpart of BaySickVocal
-        // -> Vox.  Named for its engine like every other row.
-        { "BaySickPedals",  { { "Inst",  TabType::Inst } }, ! instCapped },
-    };
 
     juce::PopupMenu m;
     mAddMenuChoices.clear();
 
-    for (const auto& row : kEngines)
+    auto pushChoice = [this] (TabType type, const juce::String& engine)
     {
-        if (row.targets.size() == 1)
-        {
-            const int id = kAddEngineBaseId + (int) mAddMenuChoices.size();
-            mAddMenuChoices.push_back ({ row.targets[0].type, row.engine });
-            m.addItem (id, row.engine, row.enabled);
-        }
-        else
-        {
-            juce::PopupMenu sub;
-            for (const auto& t : row.targets)
-            {
-                const int id = kAddEngineBaseId + (int) mAddMenuChoices.size();
-                mAddMenuChoices.push_back ({ t.type, row.engine });
-                sub.addItem (id, t.label);
-            }
-            m.addSubMenu (row.engine, sub);
-        }
-    }
+        const int id = kAddEngineBaseId + (int) mAddMenuChoices.size();
+        mAddMenuChoices.push_back ({ type, engine });
+        return id;
+    };
+
+    m.addItem (pushChoice (TabType::Vox,  "BaySickVocal"),    "BaySickVocal");
+    m.addItem (pushChoice (TabType::Inst, "BaySickLiveInst"), "BaySickLiveInst", ! instCapped);
+
+    // The sfizz engines keep their own spawn routes (kit load + strip cascade),
+    // so they fire their dedicated callbacks rather than the generic one.
+    m.addItem (1, "BaySickGuitars", ! instCapped);
+    m.addItem (2, "BaySickBasses",  ! instCapped);
 
     // QA-ModelShell TS6 (BLU-447): hosted VST3 instruments, as a SIDE DROPDOWN
     // off one entry (Jeff's spec) rather than N rows in the top-level list --
-    // an added-plugin list can be long and would swamp the engines above it.
+    // an added-plugin list can be long and would swamp the engines around it.
+    // Stays alphabetical (Jeff, 2026-08-03) -- getAddedInstruments() sorts.
     // No new callback: AddChoice::engine is a juce::String and EngineRig keys a
     // plugin tab on the plugin's identifier string, so these ride the existing
     // onAddEngineRequest path exactly like a built-in engine name.
@@ -589,31 +566,49 @@ void RibbonTabBar::showAddMenu (juce::Rectangle<int> slotBounds)
         juce::Array<juce::PluginDescription> instruments;
 
         if (auto* pm = Hosting::PluginManager::getInstance())
-            instruments = pm->getAddedInstruments();   // already alphabetical
+            instruments = pm->getAddedInstruments();
 
         juce::PopupMenu sub;
 
         if (instruments.isEmpty())
-        {
             sub.addItem (-99, "None added - see Options > Plugins", false, false);
-        }
         else
-        {
             for (const auto& d : instruments)
-            {
-                const int id = kAddEngineBaseId + (int) mAddMenuChoices.size();
-                mAddMenuChoices.push_back ({ TabType::Plugins, d.createIdentifierString() });
-                sub.addItem (id, d.name);
-            }
-        }
+                sub.addItem (pushChoice (TabType::Plugins, d.createIdentifierString()), d.name);
 
-        m.addSubMenu ("VST Plugins", sub);
+        m.addSubMenu ("VSTPlugin", sub);
     }
 
-    // The sfizz engines keep their own spawn routes (kit load + strip cascade),
-    // so they fire their dedicated callbacks rather than the generic one.
-    m.addItem (1, "BaySickGuitars", ! instCapped);
-    m.addItem (2, "BaySickBasses",  ! instCapped);
+    {
+        juce::PopupMenu sub;
+        sub.addItem (pushChoice (TabType::Layers, "Harmless"), "Layers");
+        sub.addItem (pushChoice (TabType::Bass,   "Harmless"), "Bass");
+        m.addSubMenu ("Harmless", sub);
+    }
+
+    // Flat row: with the drum route under BaySickDrums, Layers is the only
+    // tab BaySickSynth can land in, so no submenu.
+    m.addItem (pushChoice (TabType::Layers, "BaySickSynth"), "BaySickSynth");
+
+    {
+        juce::PopupMenu sub;
+        sub.addItem (pushChoice (TabType::Layers, "BaySickPlayer"), "Layers");
+        sub.addItem (pushChoice (TabType::Bass,   "BaySickPlayer"), "Bass");
+        sub.addItem (pushChoice (TabType::Clip,   "BaySickPlayer"), "Audio Clips");
+        m.addSubMenu ("BaySickPlayer", sub);
+    }
+
+    m.addItem (pushChoice (TabType::Bass, "BaySickBass"), "BaySickBass");
+
+    // L28: the drum grab is its own top-level entry; the submenu picks the
+    // player that backs the new Drums tab.
+    {
+        juce::PopupMenu sub;
+        sub.addItem (pushChoice (TabType::Drums, "BaySickPlayer"), "BaySickPlayer");
+        sub.addItem (pushChoice (TabType::Drums, "BaySickSynth"),  "BaySickSynth");
+        m.addSubMenu ("BaySickDrums", sub);
+    }
+
     const bool rustyLive = onIsBaySickRustyDrumsActive && onIsBaySickRustyDrumsActive();
     m.addItem (3, "BaySickRustyDrums", ! rustyLive);
 
@@ -788,18 +783,73 @@ void RibbonTabBar::showInstanceDropdown(TabType type, juce::Rectangle<int> tabBo
         m.addSeparator();
     }
 
-    // G-6 (2026-04-29): all multi-instance types now have a +Add entry,
-    // including Clip.  Clip's +Add opens an OS file picker (handled by the
-    // editor's onAddTabRequest closure) so the user can add a clip without
-    // dragging from elsewhere.
-    juce::String addLabel = (type == TabType::Layers) ? "+ Add New Layers"
-                          : (type == TabType::Bass)   ? "+ Add New Bass"
-                          : (type == TabType::Vox)    ? "+ Add New Vox"
-                          : (type == TabType::Inst)   ? "+ Add New Inst"
-                          : (type == TabType::Clip)   ? "+ Add New Clip..."
-                          : (type == TabType::Plugins) ? "+ Add New Plugin"
-                          :                             "+ Add New Drum";
-    m.addItem(-3, addLabel);
+    // QA-Layout T2 (Jeff map, 2026-08-03): the bottom section names the
+    // PLAYERS this type can load -- picking one creates the tab with that
+    // player already loaded, mirroring the "+" slot's routes scoped to the
+    // type.  The old generic "+ Add New X" rows made an ENGINELESS page,
+    // whose picker no longer exists (L4).  Clip keeps the file-picker route
+    // (-3): a clip is born from an audio file, and BaySickPlayer is implied.
+    mAddMenuChoices.clear();
+    auto addEngineRow = [this, &m] (const juce::String& engine,
+                                    TabType targetType,
+                                    const juce::String& label,
+                                    bool enabled = true)
+    {
+        const int id = kAddEngineBaseId + (int) mAddMenuChoices.size();
+        mAddMenuChoices.push_back ({ targetType, engine });
+        m.addItem (id, label, enabled);
+    };
+
+    if (type == TabType::Layers)
+    {
+        addEngineRow ("Harmless",      type, "+ Add Harmless");
+        addEngineRow ("BaySickPlayer", type, "+ Add BaySickPlayer");
+        addEngineRow ("BaySickSynth",  type, "+ Add BaySickSynth");
+    }
+    else if (type == TabType::Bass)
+    {
+        addEngineRow ("Harmless",      type, "+ Add Harmless");
+        addEngineRow ("BaySickPlayer", type, "+ Add BaySickPlayer");
+        addEngineRow ("BaySickBass",   type, "+ Add BaySickBass");
+    }
+    else if (type == TabType::Drums)
+    {
+        addEngineRow ("BaySickPlayer", type, "+ Add BaySickPlayer");
+        addEngineRow ("BaySickSynth",  type, "+ Add BaySickSynth");
+    }
+    else if (type == TabType::Vox)
+    {
+        addEngineRow ("BaySickVocal", type, "+ Add BaySickVocal");
+    }
+    else if (type == TabType::Inst)
+    {
+        const bool capReached = onIsInstCapReached && onIsInstCapReached();
+        addEngineRow ("BaySickLiveInst", type, "+ Add BaySickLiveInst", ! capReached);
+    }
+    else if (type == TabType::Clip)
+    {
+        m.addItem (-3, "+ Add BaySickPlayer...");
+    }
+    else if (type == TabType::Plugins)
+    {
+        // Side menu, alphabetical (Jeff, 2026-08-03) -- same sorted
+        // getAddedInstruments() source as the "+" slot's VSTPlugin submenu.
+        juce::Array<juce::PluginDescription> instruments;
+        if (auto* pm = Hosting::PluginManager::getInstance())
+            instruments = pm->getAddedInstruments();
+
+        juce::PopupMenu sub;
+        if (instruments.isEmpty())
+            sub.addItem (-99, "None added - see Options > Plugins", false, false);
+        else
+            for (const auto& d : instruments)
+            {
+                const int id = kAddEngineBaseId + (int) mAddMenuChoices.size();
+                mAddMenuChoices.push_back ({ TabType::Plugins, d.createIdentifierString() });
+                sub.addItem (id, d.name);
+            }
+        m.addSubMenu ("+ Add VSTPlugin", sub);
+    }
 
     // QA-Fa recovery: "+ Add New Vox From Export" submenu (Vox only; the one
     // sanctioned exception to the old instance-switcher-only convention,
@@ -901,8 +951,17 @@ void RibbonTabBar::showInstanceDropdown(TabType type, juce::Rectangle<int> tabBo
             }
             else if (result == -3)
             {
-                // Add new instance
+                // Clip only: opens the OS audio-file picker (editor closure).
                 if (onAddTabRequest) onAddTabRequest(type);
+            }
+            else if (result >= kAddEngineBaseId)
+            {
+                // Engine-named add row (QA-Layout T2) -- same dispatch as the
+                // "+" slot's menu.
+                const int idx = result - kAddEngineBaseId;
+                if (idx >= 0 && idx < (int) mAddMenuChoices.size() && onAddEngineRequest)
+                    onAddEngineRequest (mAddMenuChoices[(size_t) idx].type,
+                                        mAddMenuChoices[(size_t) idx].engine);
             }
             else if (result == -4)
             {

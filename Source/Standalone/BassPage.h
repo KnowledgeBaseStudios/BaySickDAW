@@ -64,8 +64,6 @@ public:
     // P1+P2 persistence: StandaloneEditor calls this during project load.
     void selectEngine (const juce::String& engineName);
 
-    // D1.4-fix (c) - per-bass right-click context menu + save / delete.
-    void showContextMenu  (juce::Component* anchor);
     void savePatchAs      ();
     // 2026-04-25: Load preset (factory + user) for the current engine.
     // Handles both wrapped (savePatchAs) and raw apvts XML formats.
@@ -104,24 +102,9 @@ private:
     int  mActiveTab   { 0 };
 
     // ── Tab 0: Player ─────────────────────────────────────────────────────────
+    // QA-Layout T2 (L4): the engine-picker row is gone -- same rationale as
+    // LayersPage.h.
     std::unique_ptr<juce::Component>            mPlayerTab;
-    // LockableCombo: same pattern as LayersPage - see LayersPage.h.
-    struct LockableCombo : public juce::ComboBox
-    {
-        bool locked { false };
-        std::function<void()> onLockedClick;
-        void mouseDown (const juce::MouseEvent& e) override
-        {
-            if (locked)
-            {
-                if (onLockedClick) onLockedClick();
-                return;
-            }
-            juce::ComboBox::mouseDown (e);
-        }
-    };
-    std::unique_ptr<LockableCombo>              mEngineCombo;
-    std::unique_ptr<juce::Label>                mEngineLabel;
     // Non-owning view of the rig-owned engine ({Bass, pageIndex}); the editor
     // IS view-owned and must be destroyed before the page (its attachments
     // reference the engine's APVTS).

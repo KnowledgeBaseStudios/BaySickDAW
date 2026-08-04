@@ -61,30 +61,11 @@ void BassPage::switchTab(int idx)
 // ── Tab builders ──────────────────────────────────────────────────────────────
 void BassPage::buildPlayerTab()
 {
+    // QA-Layout T2 (L4): the engine picker row is gone -- the engine is
+    // chosen at the "+" menu before the page exists, and the old context
+    // menu lives on the title strip's Menu dropdown (showPageActionsMenu).
     mPlayerTab = std::make_unique<Component>();
     addAndMakeVisible(*mPlayerTab);
-
-    mEngineLabel = std::make_unique<Label>("", "Engine:");
-    mEngineLabel->setColour(Label::textColourId, VC::TextDim);
-    mEngineLabel->setFont(Font(13.f));
-    mPlayerTab->addAndMakeVisible(*mEngineLabel);
-
-    // D1.4-fix (c): LockableCombo intercepts clicks once engine is locked.
-    mEngineCombo = std::make_unique<LockableCombo>();
-    mEngineCombo->addItem("Harmless",      1);
-    mEngineCombo->addItem("BaySickPlayer", 2);
-    mEngineCombo->addItem("BaySickBass",   3);
-    mEngineCombo->setTextWhenNothingSelected("Select engine...");
-    mEngineCombo->onChange = [this]
-    {
-        if (mEngineLocked) return;   // post-lock click handled by LockableCombo
-        int sel = mEngineCombo->getSelectedId();
-        if      (sel == 1) selectEngine("Harmless");
-        else if (sel == 2) selectEngine("BaySickPlayer");
-        else if (sel == 3) selectEngine("BaySickBass");
-    };
-    mEngineCombo->onLockedClick = [this] { showContextMenu (mEngineCombo.get()); };
-    mPlayerTab->addAndMakeVisible(*mEngineCombo);
 }
 
 void BassPage::buildPianoRollTab()
@@ -203,10 +184,6 @@ void BassPage::selectEngine(const juce::String& engineName)
     if (mEngineEditor && mPlayerTab)
         mPlayerTab->addAndMakeVisible(*mEngineEditor);
 
-    // Lock combo so engine can't be changed
-    if (mEngineCombo)
-        mEngineCombo->locked = true;   // D1.4-fix (c): hijack future clicks → menu
-
     // J-6 EQ unification (2026-05-03): page-level EQ display removed; pre-rack
     // EQ is now bound exclusively by EffectsPage (mixer_bass_<N>_preeq_*).
     juce::MessageManager::callAsync([this] { if (isShowing()) resized(); });
@@ -246,13 +223,13 @@ void BassPage::paint(Graphics& g)
 {
     g.fillAll(VC::Bg);
 
-    // Show placeholder text in Player tab before engine is selected
+    // Engineless pages can only come from a pre-QA-Layout project save --
+    // every add route now names the engine up front (L4).
     if (mActiveTab == 0 && !mEngineLocked)
     {
         g.setColour(VC::TextDim);
         g.setFont(Font(15.f));
-        auto area = getLocalBounds().withTrimmedTop(40);
-        g.drawText("Select engine to begin", area, Justification::centred);
+        g.drawText("No engine loaded", getLocalBounds(), Justification::centred);
     }
 }
 
@@ -264,17 +241,8 @@ void BassPage::resized()
     if (mPlayerTab)
     {
         mPlayerTab->setBounds(b);
-
-        constexpr int kRowH   = 28;
-        constexpr int kPad    = 6;
-        constexpr int kLabelW = 52;
-        auto pb = mPlayerTab->getLocalBounds();
-        auto row = pb.removeFromTop(kRowH + kPad * 2).reduced(kPad);
-        if (mEngineLabel) mEngineLabel->setBounds(row.removeFromLeft(kLabelW));
-        if (mEngineCombo) mEngineCombo->setBounds(row.removeFromLeft(160));
-
-        if (mEngineEditor && pb.getHeight() > 0)
-            mEngineEditor->setBounds(pb);
+        if (mEngineEditor && mPlayerTab->getHeight() > 0)
+            mEngineEditor->setBounds(mPlayerTab->getLocalBounds());
     }
 
     if (mPianoRoll) mPianoRoll->setBounds(b);
@@ -442,10 +410,12 @@ static void addBassPresetDirToMenu (juce::PopupMenu& menu,
     }
 }
 
-void BassPage::showContextMenu (juce::Component* anchor)
+// QA-Layout T2 (L4/L31): the engine picker died, so its context menu (Lock /
+// Polyphony / Rename / Duplicate / Choke / Save Patch / Load Preset / Delete)
+// lives here on the title strip's Menu dropdown, merged with the page-preset
+// entries.  One Delete only.
+void BassPage::showPageActionsMenu (juce::Component* anchor)
 {
-    if (anchor == nullptr) return;
-
     constexpr int kIdLock      = 1;
     constexpr int kIdPolyphony = 2;
     constexpr int kIdRename    = 5;
@@ -454,8 +424,11 @@ void BassPage::showContextMenu (juce::Component* anchor)
     constexpr int kIdSaveAs    = 20;
     // D3: choke-group submenu - 200 = None, 201..216 = groups 1..16.
     constexpr int kIdChokeBase = 200;
-    // 2026-04-25: Load Preset submenu - 500 + i indexes into mPresetXmls[].
+    // 2026-04-25: Load Preset submenu - 500 + i indexes into presetXmls[].
     constexpr int kIdLoadPresetBase = 500;
+    constexpr int kIdSavePagePreset = 100;
+    // Page-preset load submenu - 1000 + i indexes into pagePresetXmls[].
+    constexpr int kIdLoadBase  = 1000;
     constexpr int kIdDelete    = 99;
 
     juce::PopupMenu menu;
@@ -530,17 +503,50 @@ void BassPage::showContextMenu (juce::Component* anchor)
     }
 
     menu.addSeparator();
+    menu.addItem (kIdSavePagePreset, "Save Page Preset As...",
+                  mEngineProcessor != nullptr);
+    juce::Array<juce::File> pagePresetXmls;
+    {
+        juce::PopupMenu loadSub;
+        const auto root = PagePresetIO::myPresetsDirForPageKind (PagePresetIO::PageKind::Bass);
+        if (root.isDirectory())
+        {
+            juce::Array<juce::File> files;
+            root.findChildFiles (files, juce::File::findFiles, false, "*.xml");
+            files.sort();
+            for (auto& f : files)
+            {
+                const int id = kIdLoadBase + pagePresetXmls.size();
+                pagePresetXmls.add (f);
+                loadSub.addItem (id, f.getFileNameWithoutExtension());
+            }
+        }
+        if (pagePresetXmls.isEmpty())
+            loadSub.addItem (-1, "(no page presets saved)", false, false);
+        menu.addSubMenu ("Load Page Preset", loadSub);
+    }
+
+    menu.addSeparator();
     menu.addItem (kIdDelete, "Delete Bass", ! mLocked);   // locked bass tabs can't be deleted
 
     juce::Component::SafePointer<BassPage> safeThis (this);
     menu.showMenuAsync (
         juce::PopupMenu::Options().withTargetComponent (anchor),
         [safeThis, presetXmls = std::move (presetXmls),
-         kIdLock, kIdPolyphony, kIdRename, kIdDuplicate,
-         kIdChokeBase, kIdSaveAs, kIdLoadPresetBase, kIdDelete] (int r) mutable
+         pagePresetXmls = std::move (pagePresetXmls),
+         kIdLock, kIdPolyphony, kIdRename, kIdDuplicate, kIdChokeBase,
+         kIdSaveAs, kIdLoadPresetBase, kIdSavePagePreset, kIdLoadBase,
+         kIdDelete] (int r) mutable
         {
             if (! safeThis || r <= 0) return;
             auto* bp = safeThis.getComponent();
+
+            // Page-preset load submenu (1000 + i -> pagePresetXmls[i]).
+            if (r >= kIdLoadBase && r < kIdLoadBase + pagePresetXmls.size())
+            {
+                bp->loadPagePreset (pagePresetXmls[r - kIdLoadBase]);
+                return;
+            }
 
             // Load Preset submenu (500 + i → presetXmls[i]).
             if (r >= kIdLoadPresetBase && r < kIdLoadPresetBase + presetXmls.size())
@@ -599,8 +605,9 @@ void BassPage::showContextMenu (juce::Component* anchor)
                 if (state.isNotEmpty() && bp->onDuplicateRequested)
                     bp->onDuplicateRequested (state);
             }
-            else if (r == kIdSaveAs)    bp->savePatchAs();
-            else if (r == kIdDelete)    bp->requestDelete();
+            else if (r == kIdSaveAs)         bp->savePatchAs();
+            else if (r == kIdSavePagePreset) bp->savePagePreset();
+            else if (r == kIdDelete)         bp->requestDelete();
         });
 }
 
@@ -942,56 +949,6 @@ void BassPage::loadPagePreset (const juce::File& xml)
     setTabName (newName);
     if (onSoundNameChanged) onSoundNameChanged (newName);
     takeStateSnapshot();
-}
-
-void BassPage::showPageActionsMenu (juce::Component* anchor)
-{
-    constexpr int kIdSavePagePreset = 100;
-    constexpr int kIdDeleteTab      = 101;
-    constexpr int kIdLoadBase       = 1000;
-
-    juce::PopupMenu menu;
-    menu.addItem (kIdSavePagePreset, "Save Page Preset As...",
-                  mEngineProcessor != nullptr);
-
-    juce::Array<juce::File> presetXmls;
-    {
-        juce::PopupMenu loadSub;
-        const auto root = PagePresetIO::myPresetsDirForPageKind (PagePresetIO::PageKind::Bass);
-        if (root.isDirectory())
-        {
-            juce::Array<juce::File> files;
-            root.findChildFiles (files, juce::File::findFiles, false, "*.xml");
-            files.sort();
-            for (auto& f : files)
-            {
-                const int id = kIdLoadBase + presetXmls.size();
-                presetXmls.add (f);
-                loadSub.addItem (id, f.getFileNameWithoutExtension());
-            }
-        }
-        if (presetXmls.isEmpty())
-            loadSub.addItem (-1, "(no page presets saved)", false, false);
-        menu.addSubMenu ("Load Page Preset", loadSub);
-    }
-
-    // Delete on the hamburger too (Jeff, 2026-08-02) -- see LayersPage.
-    menu.addSeparator();
-    menu.addItem (kIdDeleteTab, "Delete Bass", ! mLocked);
-
-    juce::Component::SafePointer<BassPage> safeThis (this);
-    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (anchor),
-        [safeThis, presetXmls = std::move (presetXmls), kIdLoadBase] (int r)
-        {
-            if (! safeThis || r <= 0) return;
-            if (r == kIdSavePagePreset) { safeThis->savePagePreset(); return; }
-            if (r == kIdDeleteTab)      { safeThis->requestDelete();  return; }
-            if (r >= kIdLoadBase && r < kIdLoadBase + presetXmls.size())
-            {
-                safeThis->loadPagePreset (presetXmls[r - kIdLoadBase]);
-                return;
-            }
-        });
 }
 
 // ── D2 lock + dirty-snapshot helpers ─────────────────────────────────────────

@@ -60,7 +60,7 @@ namespace
 
 InstPage::InstPage (VibeSynthProcessor& proc, int pageIndex)
     : mPageIndex (pageIndex),
-      mTabName   ("Inst " + juce::String (pageIndex + 1))
+      mTabName   ("LiveInst " + juce::String (pageIndex + 1))
 {
     // QA-ModelShell TS1: known before the engine-trio bind below.
     // setProcessor stays for spawn-path parity.

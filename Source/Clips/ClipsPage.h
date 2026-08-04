@@ -83,9 +83,9 @@ public:
     juce::String exportClipState() const;
     void         importClipState (const juce::String& xml);
 
-    // ── G-6 (2026-04-29): right-click context menu on the engine picker ──────
-    // Wired by StandaloneEditor.  Mirrors the Layers/Bass/Drums right-click
-    // context menus on their LockableCombo sound-pickers.
+    // ── Menu-dropdown action callbacks (wired by StandaloneEditor) ───────────
+    // QA-Layout T2: these served the picker's right-click context menu; the
+    // picker is gone and the same entries live on showPageActionsMenu.
     std::function<void()>                        onDuplicateRequested;
     std::function<void()>                        onRenameRequested;
     std::function<void()>                        onDeleteRequested;
@@ -125,23 +125,7 @@ public:
     void requestDelete ();
 
 private:
-    void buildEnginePicker();
     void layoutEditor (juce::Rectangle<int> r);
-    void showEngineContextMenu();
-
-    // G-6 ComboBox subclass that fires onRightClick instead of opening the
-    // dropdown when right-clicked.  Locked to BaySickPlayer (the only option)
-    // so left-click is informational only.
-    class LockedClipsEngineCombo : public juce::ComboBox
-    {
-    public:
-        std::function<void()> onRightClick;
-        void mouseDown (const juce::MouseEvent& e) override
-        {
-            if (e.mods.isPopupMenu()) { if (onRightClick) onRightClick(); return; }
-            juce::ComboBox::mouseDown (e);
-        }
-    };
 
     int                                          mPageIndex { 0 };
     int                                          mActiveTab { 0 };
@@ -149,7 +133,6 @@ private:
     juce::String                                 mClipPath;
     bool                                         mLocked { false };
 
-    LockedClipsEngineCombo                       mEnginePicker;
     juce::Label                                  mClipFileLabel;
     EngineType                                   mEngineType { EngineType::None };
     // QA-ModelShell TS1: non-owning view of the rig-owned VibePlayerProcessor

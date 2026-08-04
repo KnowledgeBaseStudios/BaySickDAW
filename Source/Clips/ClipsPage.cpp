@@ -10,9 +10,8 @@
 
 namespace
 {
-    constexpr int kHeaderRowH = 36;     // engine picker + filename strip at top of page
+    constexpr int kHeaderRowH = 36;     // filename strip at top of page
     constexpr int kPad        = 12;
-    constexpr int kPickerW    = 220;
     constexpr int kFilenameW  = 320;
 }
 
@@ -29,8 +28,10 @@ ClipsPage::ClipsPage (int pageIndex)
     mDirtyListener.dirtyFlag = &mPageDirty;
     mDirtyListener.suppress  = &mSuppressDirty;
 
-    buildEnginePicker();
     // J-6 EQ unification (2026-05-03): EQ sub-tab removed; pre+post EQ on Effects page.
+    // QA-Layout T2 (L4): the decorative BaySickPlayer picker is gone -- it
+    // existed to look like Vox/Inst and to anchor the context menu, which
+    // now lives on the title strip's Menu dropdown (showPageActionsMenu).
 
     addAndMakeVisible (mClipFileLabel);
     mClipFileLabel.setJustificationType (juce::Justification::centredLeft);
@@ -70,22 +71,6 @@ void ClipsPage::setTabName (const juce::String& n)
     if (mFullProcessor != nullptr)
         mFullProcessor->engineRig().renameTab (TabKind::Clips, mPageIndex, n);
     repaint();
-}
-
-void ClipsPage::buildEnginePicker()
-{
-    // G-6 (2026-04-29): single-engine page (BaySickPlayer only).  The picker
-    // is shown for visual consistency with Vox/Inst (and to host the
-    // right-click context menu) but locked - left-click opens the dropdown
-    // showing the one option, right-click opens the page context menu.
-    addAndMakeVisible (mEnginePicker);
-    mEnginePicker.addItem ("BaySickPlayer", 1);
-    mEnginePicker.setSelectedId (1, juce::dontSendNotification);
-    mEnginePicker.setTooltip (
-        "Clips uses BaySickPlayer (sample playback) - the only engine for clips.  "
-        "Right-click for tab options (Rename / Duplicate / Delete).");
-    // Single option - no need for an onChange handler.
-    mEnginePicker.onRightClick = [this] { showEngineContextMenu(); };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -130,14 +115,21 @@ static void addClipsPresetDirToMenu (juce::PopupMenu& menu,
     }
 }
 
-void ClipsPage::showEngineContextMenu()
+// QA-Layout T2 (L4/L31): the decorative picker died, so its context menu
+// (Lock / Rename / Duplicate / Choke / preset save+load / Delete) lives here
+// on the title strip's Menu dropdown.  Clips' context "Save Current Patch
+// As..." and "Load Preset" were already the page-preset routines, so the
+// merge dedupes to the page-preset entries -- Load Page Preset keeps the
+// context menu's WIDER root (factory + user, recursive) rather than the old
+// page menu's My-Presets-only walk.
+void ClipsPage::showPageActionsMenu (juce::Component* anchor)
 {
     constexpr int kIdLock           = 1;
     constexpr int kIdRename         = 5;
     constexpr int kIdDuplicate      = 12;
-    constexpr int kIdSaveAs         = 20;
     constexpr int kIdChokeBase      = 200;     // 200 = None, 201..216 = Group 1..16
-    constexpr int kIdLoadPresetBase = 500;
+    constexpr int kIdSavePagePreset = 100;
+    constexpr int kIdLoadPresetBase = 1000;
     constexpr int kIdDelete         = 99;
 
     juce::PopupMenu menu;
@@ -160,9 +152,8 @@ void ClipsPage::showEngineContextMenu()
     }
 
     menu.addSeparator();
-    menu.addItem (kIdSaveAs, "Save Current Patch As...", mPlayerProc != nullptr);
+    menu.addItem (kIdSavePagePreset, "Save Page Preset As...", mPlayerProc != nullptr);
 
-    // Load Preset submenu - walks Documents/BaySickDAW/Presets/Clips/.
     juce::Array<juce::File> presetXmls;
     {
         juce::PopupMenu loadSub;
@@ -170,22 +161,23 @@ void ClipsPage::showEngineContextMenu()
         if (root.isDirectory())
             addClipsPresetDirToMenu (loadSub, root, kIdLoadPresetBase, presetXmls);
         if (presetXmls.isEmpty())
-            loadSub.addItem (-1, "(no presets installed)", false, false);
-        menu.addSubMenu ("Load Preset", loadSub);
+            loadSub.addItem (-1, "(no page presets saved)", false, false);
+        menu.addSubMenu ("Load Page Preset", loadSub);
     }
 
     menu.addSeparator();
     menu.addItem (kIdDelete, "Delete Clip", ! mLocked);
 
     juce::Component::SafePointer<ClipsPage> self (this);
-    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&mEnginePicker),
-        [self, presetXmls = std::move (presetXmls), kIdLoadPresetBase, kIdChokeBase] (int r)
+    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (anchor),
+        [self, presetXmls = std::move (presetXmls),
+         kIdLoadPresetBase, kIdChokeBase] (int r)
         {
             if (! self || r <= 0) return;
             if (r == kIdLock)        { self->setLocked (! self->mLocked); return; }
             if (r == kIdRename    && self->onRenameRequested)    { self->onRenameRequested();    return; }
             if (r == kIdDuplicate && self->onDuplicateRequested) { self->onDuplicateRequested(); return; }
-            if (r == kIdSaveAs)      { self->savePagePreset(); return; }   // G-7: full chain
+            if (r == kIdSavePagePreset) { self->savePagePreset(); return; }
             if (r == kIdDelete)      { self->requestDelete();  return; }   // G-7: prompt before delete
             if (r >= kIdChokeBase && r <= kIdChokeBase + 16)
             {
@@ -408,56 +400,6 @@ void ClipsPage::loadPagePreset (const juce::File& xml)
     }
 
     takeStateSnapshot();
-}
-
-void ClipsPage::showPageActionsMenu (juce::Component* anchor)
-{
-    constexpr int kIdSavePagePreset = 100;
-    constexpr int kIdDeleteTab      = 101;
-    constexpr int kIdLoadBase       = 1000;
-
-    juce::PopupMenu menu;
-    menu.addItem (kIdSavePagePreset, "Save Page Preset As...",
-                  mPlayerProc != nullptr);
-
-    juce::Array<juce::File> presetXmls;
-    {
-        juce::PopupMenu loadSub;
-        const auto root = PagePresetIO::myPresetsDirForPageKind (PagePresetIO::PageKind::Clip);
-        if (root.isDirectory())
-        {
-            juce::Array<juce::File> files;
-            root.findChildFiles (files, juce::File::findFiles, false, "*.xml");
-            files.sort();
-            for (auto& f : files)
-            {
-                const int id = kIdLoadBase + presetXmls.size();
-                presetXmls.add (f);
-                loadSub.addItem (id, f.getFileNameWithoutExtension());
-            }
-        }
-        if (presetXmls.isEmpty())
-            loadSub.addItem (-1, "(no page presets saved)", false, false);
-        menu.addSubMenu ("Load Page Preset", loadSub);
-    }
-
-    // Delete on the hamburger too (Jeff, 2026-08-02) -- see LayersPage.
-    menu.addSeparator();
-    menu.addItem (kIdDeleteTab, "Delete Clip", ! mLocked);
-
-    juce::Component::SafePointer<ClipsPage> safeThis (this);
-    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (anchor),
-        [safeThis, presetXmls = std::move (presetXmls), kIdLoadBase] (int r)
-        {
-            if (! safeThis || r <= 0) return;
-            if (r == kIdSavePagePreset) { safeThis->savePagePreset(); return; }
-            if (r == kIdDeleteTab)      { safeThis->requestDelete();  return; }
-            if (r >= kIdLoadBase && r < kIdLoadBase + presetXmls.size())
-            {
-                safeThis->loadPagePreset (presetXmls[r - kIdLoadBase]);
-                return;
-            }
-        });
 }
 
 void ClipsPage::requestDelete()
@@ -719,8 +661,6 @@ void ClipsPage::resized()
 {
     auto r = getLocalBounds();
     auto header = r.removeFromTop (kHeaderRowH).reduced (kPad, 6);
-    mEnginePicker.setBounds (header.removeFromLeft (kPickerW));
-    header.removeFromLeft (kPad);
     mClipFileLabel.setBounds (header.removeFromLeft (juce::jmin (kFilenameW, header.getWidth())));
     layoutEditor (r);
 }

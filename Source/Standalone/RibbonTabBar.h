@@ -3,30 +3,17 @@
 #include <vector>
 
 // ── RibbonTabBar ──────────────────────────────────────────────────────────────
-// Fixed 10-slot tab bar. Each slot represents a page type:
+// One slot per page type.  The four required app surfaces (Builder / Mixer /
+// Effects / Piano Roll) are always shown; instance types (Clip / Vox / Inst /
+// Layers / Bass / Drums / Plugins) appear only while they have >= 1 tab and
+// return through the trailing "+" slot (QA-ModelShell TS4).
 //
-//   Mixer       - no dropdown, no badge
-//   Effects     - dropdown (Rack / EQ), badge ②
-//   Builder     - dropdown (Patterns / Audio Clips / Automation), badge ③
-//   Clip        - dropdown (instance list + sub-pages + rename/delete; NO add).
-//                 Instances are ONLY spawned via drag/drop or upload of audio
-//                 onto Builder - the ribbon dropdown can't create new ones.
-//                 Phase G-2 (2026-04-28).
-//   Vox         - dropdown (instance list + sub-pages + rename/delete; NO add).
-//                 Instances are ONLY spawned via the "Add Vox Strip" button on
-//                 the Mixer page.  Phase G-4 (2026-04-28).
-//   Inst        - dropdown (instance list + sub-pages + rename/delete; NO add).
-//                 Instances are ONLY spawned via the "Add Inst Strip" button
-//                 on the Mixer page.  Phase G-4 (2026-04-28).
-//   Layers      - dropdown (instance list + rename/delete/add), dynamic badge
-//   Bass        - dropdown (instance list + rename/delete/add), dynamic badge
-//   Drums       - dropdown (Sounds / EQ), badge ②
-//   PianoRoll   - unified piano-roll page (Drum Kit + every engine's roll),
-//                 black/white piano-key palette; dropdown picks the active
-//                 engine (Drum Kit always at top of list)
+// A type slot's dropdown carries: instance list, sub-page nav, rename/delete,
+// and engine-named add rows at the bottom -- each names a player this type
+// can load and spawns the tab with that player already loaded (QA-Layout T2;
+// the engine pickers that used to live on the pages are gone per L4).
 //
-// No overflow, no close X.  Tab management through the per-type dropdowns;
-// adding goes through the trailing "+" slot (QA-ModelShell TS4).
+// No overflow, no close X.
 // ─────────────────────────────────────────────────────────────────────────────
 
 class RibbonTabBar : public juce::Component

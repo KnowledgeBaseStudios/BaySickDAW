@@ -668,7 +668,7 @@ private:
     juce::String nextBassTabName()    { return "Bass "   + juce::String (mNextBassNameNum++); }
     juce::String nextDrumTabName()    { return "Drum "   + juce::String (mNextDrumNameNum++); }
     juce::String nextVoxTabName()     { return "Vox "    + juce::String (mNextVoxNameNum++); }
-    juce::String nextInstTabName()    { return "Inst "   + juce::String (mNextInstNameNum++); }
+    juce::String nextInstTabName()    { return "LiveInst " + juce::String (mNextInstNameNum++); }
     juce::String nextGuitarTabName()  { return "Guitar " + juce::String (mNextGuitarNameNum++); }
     juce::String nextBassesTabName()  { return "Basses " + juce::String (mNextBassesNameNum++); }
     juce::String nextClipTabName()    { return "Clip "   + juce::String (mNextClipNameNum++); }

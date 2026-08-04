@@ -236,31 +236,13 @@ void DrumPage::buildDrumKitTab()
 
 void DrumPage::buildPlayerTab()
 {
+    // QA-Layout T2 (L4): the "Pick a sound  v" button + sound label row is
+    // gone -- the engine is chosen at the "+" menu, the sound name lives on
+    // the tab/title, and the old context menu lives on the title strip's
+    // Menu dropdown (showPageActionsMenu).  Sound picking for empty drums
+    // stays on the kit grid's per-pad pickers (showSoundPicker).
     mPlayerTab = std::make_unique<Component>();
     addAndMakeVisible(*mPlayerTab);
-
-    // Single picker button.  Two states:
-    //   Pre-pick  → label "Pick a sound  v", click opens picker popup
-    //   Post-pick → label = current sound name, click opens context menu
-    // Right-click always opens context menu (no-op when nothing loaded).
-    mPickerBtn = std::make_unique<TextButton>("Pick a sound  v");
-    mPickerBtn->onClick = [this] {
-        if (mEngineType.isEmpty())
-            showSoundPicker (mPickerBtn.get());
-        else
-            showContextMenu (mPickerBtn.get(), false);
-    };
-    // Right-click handled via per-instance MouseListener.
-    mPickerRC.owner = this;
-    mPickerBtn->addMouseListener (&mPickerRC, false);
-    mPlayerTab->addAndMakeVisible(*mPickerBtn);
-
-    // Sound name label (right of picker button).
-    mSoundLabel = std::make_unique<Label>("", "");
-    mSoundLabel->setColour(Label::textColourId, VC::Text);
-    mSoundLabel->setFont(Font(13.f, Font::bold));
-    mSoundLabel->setJustificationType(Justification::centredLeft);
-    mPlayerTab->addAndMakeVisible(*mSoundLabel);
 }
 
 void DrumPage::buildPianoRollTab()
@@ -508,15 +490,14 @@ void DrumPage::pollTriggerLearn()
 void DrumPage::paint(Graphics& g)
 {
     g.fillAll(VC::Bg);
-    // D2: "Select engine to begin" hint shows on Player sub-tab (idx 1) when
-    // no engine is loaded.  (Tab 0 is now the Drum Kit and renders its own
-    // placeholder grid even on empty drums.)
+    // Empty-drum hint on the Player sub-tab (idx 1).  The kit grid's per-pad
+    // picker is the one remaining sound-pick route for an empty drum (L4).
     if (mActiveTab == 1 && mEngineType.isEmpty())
     {
         g.setColour(VC::TextDim);
         g.setFont(Font(15.f));
-        auto area = getLocalBounds().withTrimmedTop(40);
-        g.drawText("Select engine to begin", area, Justification::centred);
+        g.drawText("No sound loaded - pick one from the Drum Kit",
+                   getLocalBounds(), Justification::centred);
     }
 }
 
@@ -527,15 +508,8 @@ void DrumPage::resized()
     if (mPlayerTab)
     {
         mPlayerTab->setBounds(b);
-        constexpr int kRowH = 28;
-        constexpr int kPad  = 6;
-        auto pb = mPlayerTab->getLocalBounds();
-        auto row = pb.removeFromTop(kRowH + kPad * 2).reduced(kPad);
-        if (mPickerBtn)  mPickerBtn ->setBounds(row.removeFromLeft(160));
-        row.removeFromLeft(8);
-        if (mSoundLabel) mSoundLabel->setBounds(row);
-        if (mEngineEditor && pb.getHeight() > 0)
-            mEngineEditor->setBounds(pb);
+        if (mEngineEditor && mPlayerTab->getHeight() > 0)
+            mEngineEditor->setBounds(mPlayerTab->getLocalBounds());
     }
     if (mPianoRoll) mPianoRoll->setBounds(b);
 }
@@ -555,17 +529,6 @@ void DrumPage::refreshPianoRollContextLabel()
     const juce::String engine = mEngineType.isEmpty() ? juce::String("(no engine)")
                                                       : mEngineType;
     mPianoRoll->setContextLabel(mTabName + " - " + engine);
-    if (mSoundLabel) mSoundLabel->setText (mSoundName, juce::dontSendNotification);
-    // D1.4-fix (c): picker button label tracks sound state.  Empty drum =
-    // open picker prompt; loaded drum = sound name + lock indicator.
-    if (mPickerBtn)
-    {
-        if (mEngineType.isEmpty())
-            mPickerBtn->setButtonText ("Pick a sound  v");
-        else
-            mPickerBtn->setButtonText ((mLocked ? juce::String ("[L] ") : juce::String())
-                                       + (mSoundName.isEmpty() ? juce::String ("(loaded)") : mSoundName));
-    }
 }
 
 
@@ -1109,17 +1072,6 @@ void DrumPage::loadPlayerPreset (const juce::File& xml)
     takeStateSnapshot();
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// D1.4-fix (c): right-click context menu (Lock / Polyphony / Copy / Paste /
-// Duplicate / Save Patch As / Delete).  Choke Group lands in D3.  Per-note
-// MIDI editing happens via double-click on a kit-grid note (D1.5).
-// ─────────────────────────────────────────────────────────────────────────────
-void DrumPage::PickerRightClickListener::mouseDown (const juce::MouseEvent& e)
-{
-    if (e.mods.isPopupMenu() && owner)
-        owner->showContextMenu (owner->mPickerBtn.get(), false);
-}
-
 int DrumPage::getPlayNote () const
 {
     const juce::String pid = "mixer_drum_" + juce::String (mPageIndex) + "_playNote";
@@ -1265,19 +1217,56 @@ void DrumPage::showContextMenu (juce::Component* anchor, bool fromKit)
                           && (mEngineType == "BaySickSynth" || mEngineType == "BaySickPlayer");
     menu.addItem (kIdSaveAs, "Save Current Patch As...", canSave);
 
+    // QA-Layout T2: the page-scope route (the Menu dropdown) also carries the
+    // page-preset entries the old separate showPageActionsMenu held; the kit
+    // route keeps its per-drum shape without them.
+    constexpr int kIdSavePagePreset = 40;
+    constexpr int kIdPageLoadBase   = 1000;
+    juce::Array<juce::File> pagePresetXmls;
+    if (! fromKit)
+    {
+        menu.addSeparator();
+        menu.addItem (kIdSavePagePreset, "Save Page Preset As...",
+                      mEngineProcessor != nullptr);
+        juce::PopupMenu loadSub;
+        const auto root = PagePresetIO::myPresetsDirForPageKind (PagePresetIO::PageKind::Drum);
+        if (root.isDirectory())
+        {
+            juce::Array<juce::File> files;
+            root.findChildFiles (files, juce::File::findFiles, false, "*.xml");
+            files.sort();
+            for (auto& f : files)
+            {
+                const int id = kIdPageLoadBase + pagePresetXmls.size();
+                pagePresetXmls.add (f);
+                loadSub.addItem (id, f.getFileNameWithoutExtension());
+            }
+        }
+        if (pagePresetXmls.isEmpty())
+            loadSub.addItem (-1, "(no page presets saved)", false, false);
+        menu.addSubMenu ("Load Page Preset", loadSub);
+    }
+
     menu.addSeparator();
     menu.addItem (kIdDelete, "Delete Drum", ! mLocked);   // locked drums can't be deleted
 
     juce::Component::SafePointer<DrumPage> safeThis (this);
     menu.showMenuAsync (
         juce::PopupMenu::Options().withTargetComponent (anchor),
-        [safeThis,
+        [safeThis, pagePresetXmls = std::move (pagePresetXmls),
          kIdLock, kIdPolyphony, kIdRename, kIdDuplicate,
          kIdChokeBase, kIdNoteBase, kIdMidiLearn, kIdMidiForget,
-         kIdSaveAs, kIdDelete] (int r)
+         kIdSaveAs, kIdSavePagePreset, kIdPageLoadBase, kIdDelete] (int r) mutable
         {
             if (! safeThis || r <= 0) return;
             auto* dp = safeThis.getComponent();
+
+            // Page-preset load submenu (1000 + i -> pagePresetXmls[i]).
+            if (r >= kIdPageLoadBase && r < kIdPageLoadBase + pagePresetXmls.size())
+            {
+                dp->loadPagePreset (pagePresetXmls[r - kIdPageLoadBase]);
+                return;
+            }
 
             // Per-drum play pitch (300 + n = note n).
             if (r >= kIdNoteBase && r < kIdNoteBase + 128)
@@ -1344,8 +1333,9 @@ void DrumPage::showContextMenu (juce::Component* anchor, bool fromKit)
                 if (state.isNotEmpty() && dp->onDuplicateRequested)
                     dp->onDuplicateRequested (state);
             }
-            else if (r == kIdSaveAs)    dp->savePatchAs();
-            else if (r == kIdDelete)    dp->requestDelete();
+            else if (r == kIdSaveAs)         dp->savePatchAs();
+            else if (r == kIdSavePagePreset) dp->savePagePreset();
+            else if (r == kIdDelete)         dp->requestDelete();
         });
 }
 
@@ -1605,14 +1595,14 @@ void DrumPage::loadPagePreset (const juce::File& xml)
                                      noFallback,
                                      xml.loadFileAsString());
 
-    // 2026-05-05 fix: sync the DrumPage's sound-picker tracking state from
-    // the engine that just had its state restored.  selectEngine creates a
+    // 2026-05-05 fix: sync the DrumPage's sample tracking state from the
+    // engine that just had its state restored.  selectEngine creates a
     // fresh engine with mLoadedSampleKind=None / mLoadedSamplePath=empty,
     // and importPagePreset restores the engine's INTERNAL apvts (which
     // includes bsp_loadKind / bsp_loadPath for VibePlayer + the sample
-    // re-load).  But DrumPage's display state is NOT in apvts - without
-    // syncing it here, the Player tab keeps showing the "Pick a sound"
-    // empty-state UI even though the engine has a kit loaded.
+    // re-load).  But DrumPage's tracking is NOT in apvts - without syncing
+    // it here, mSoundName stays empty and savePatchAs cannot reconstruct
+    // the load call even though the engine has a kit loaded.
     if (auto* vp = dynamic_cast<VibePlayerProcessor*> (mEngineProcessor))
     {
         const auto kind = vp->apvts.state.getProperty ("bsp_loadKind", juce::String()).toString();
@@ -1694,50 +1684,8 @@ void DrumPage::importPagePresetXml (const juce::String& xml)
 
 void DrumPage::showPageActionsMenu (juce::Component* anchor)
 {
-    constexpr int kIdSavePagePreset = 100;
-    constexpr int kIdDeleteTab      = 101;
-    constexpr int kIdLoadBase       = 1000;
-
-    juce::PopupMenu menu;
-    menu.addItem (kIdSavePagePreset, "Save Page Preset As...",
-                  mEngineProcessor != nullptr);
-
-    juce::Array<juce::File> presetXmls;
-    {
-        juce::PopupMenu loadSub;
-        const auto root = PagePresetIO::myPresetsDirForPageKind (PagePresetIO::PageKind::Drum);
-        if (root.isDirectory())
-        {
-            juce::Array<juce::File> files;
-            root.findChildFiles (files, juce::File::findFiles, false, "*.xml");
-            files.sort();
-            for (auto& f : files)
-            {
-                const int id = kIdLoadBase + presetXmls.size();
-                presetXmls.add (f);
-                loadSub.addItem (id, f.getFileNameWithoutExtension());
-            }
-        }
-        if (presetXmls.isEmpty())
-            loadSub.addItem (-1, "(no page presets saved)", false, false);
-        menu.addSubMenu ("Load Page Preset", loadSub);
-    }
-
-    // Delete on the hamburger too (Jeff, 2026-08-02) -- see LayersPage.
-    menu.addSeparator();
-    menu.addItem (kIdDeleteTab, "Delete Drum", ! mLocked);
-
-    juce::Component::SafePointer<DrumPage> safeThis (this);
-    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (anchor),
-        [safeThis, presetXmls = std::move (presetXmls), kIdLoadBase] (int r)
-        {
-            if (! safeThis || r <= 0) return;
-            if (r == kIdSavePagePreset) { safeThis->savePagePreset(); return; }
-            if (r == kIdDeleteTab)      { safeThis->requestDelete();  return; }
-            if (r >= kIdLoadBase && r < kIdLoadBase + presetXmls.size())
-            {
-                safeThis->loadPagePreset (presetXmls[r - kIdLoadBase]);
-                return;
-            }
-        });
+    // QA-Layout T2: the Menu dropdown IS the page-scope context menu; the
+    // kit pads keep their per-drum shape via fromKit=true (MIDI Note / MIDI
+    // Learn rows, no page-preset entries).
+    showContextMenu (anchor, /*fromKit*/ false);
 }

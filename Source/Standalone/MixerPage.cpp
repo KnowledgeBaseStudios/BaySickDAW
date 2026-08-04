@@ -2333,7 +2333,10 @@ void MixerPage::showInputChannelPicker(int channelId)
     if (prefix.isEmpty()) return;
 
     juce::PopupMenu menu;
-    menu.addSectionHeader (prefix.startsWith("mixer_vox_") ? "Vocal Input" : "Instrument Input");
+    // QA-Layout L2: one term for the live-input Inst flavor -- "LiveInst"
+    // (was "Instrument Input", a third spelling next to "Inst" and the tab
+    // names).  Guitars/Basses strips never open this picker (no arm LED).
+    menu.addSectionHeader (prefix.startsWith("mixer_vox_") ? "Vocal Input" : "LiveInst Input");
 
     juce::StringArray names;
     if (getInputChannelNames) names = getInputChannelNames();
@@ -2480,7 +2483,7 @@ void MixerPage::addInstChannelAtIndex(int idx)
     if (mInstStrips.count(idx) > 0) return;
 
     const juce::String prefix = "mixer_inst_" + juce::String(idx);
-    const juce::String name   = "Inst " + juce::String(idx + 1);
+    const juce::String name   = "LiveInst " + juce::String(idx + 1);
     mProcessor.ensureInstInsert(idx, name);
 
     auto strip = std::make_unique<MixerTrackStrip>(name,
@@ -2717,7 +2720,7 @@ juce::String MixerPage::getInstStripName (int idx) const
 {
     auto it = mInstStrips.find (idx);
     return (it != mInstStrips.end() && it->second) ? it->second->getName()
-                                                   : juce::String ("Inst " + juce::String (idx + 1));
+                                                   : juce::String ("LiveInst " + juce::String (idx + 1));
 }
 
 juce::String MixerPage::getPluginStripName (int idx) const

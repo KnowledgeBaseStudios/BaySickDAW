@@ -113,12 +113,14 @@ public:
     bool                        isEngineLocked()  const { return ! mEngineType.isEmpty(); }
     void selectEngine (const juce::String& engineName);
 
-    // D1.4-fix: picker actions.  Picker popup is a single button on the
-    // Player tab; selection auto-loads the right engine + applies state.
+    // D1.4-fix: sound picker popup.  QA-Layout T2: anchored from the kit
+    // grid's per-pad pickers (the page's own picker button is gone);
+    // selection auto-loads the right engine + applies state.
     void showSoundPicker  (juce::Component* anchor);
-    // QA-L-Fix (D-2): `fromKit` gates the MIDI items.  They are kit-only --
-    // the mapping exists to play the kit off a pad controller, so the page
-    // sound-picker entry point shows neither MIDI Note nor MIDI Learn.
+    // QA-L-Fix (D-2): `fromKit` gates the MIDI items (kit-only -- the mapping
+    // exists to play the kit off a pad controller).  QA-Layout T2: !fromKit
+    // adds the page-preset entries instead -- it is the Menu dropdown's shape
+    // (showPageActionsMenu forwards here).
     void showContextMenu  (juce::Component* anchor, bool fromKit);   // D1.4-fix (c)
 
     // QA-L-Fix (D-4/D-6): the drum's play pitch -- the note it sounds at.
@@ -196,10 +198,9 @@ private:
     // Same content regardless of which drum tab is active in the ribbon.
     std::unique_ptr<DrumKitContainer>           mDrumKitTab;
 
-    // Tab 1: Player
+    // Tab 1: Player.  QA-Layout T2 (L4): the picker button + sound-name
+    // label row is gone -- the engine editor fills the tab.
     std::unique_ptr<juce::Component>            mPlayerTab;
-    std::unique_ptr<juce::TextButton>           mPickerBtn;        // "Pick a sound ▾"
-    std::unique_ptr<juce::Label>                mSoundLabel;       // current sound name
     // QA-ModelShell TS1: non-owning view of the rig-owned engine ({Drums,
     // pageIndex}); the editor IS view-owned and must die before the page
     // (its attachments reference the engine's APVTS).
@@ -238,16 +239,6 @@ private:
     void buildPlayerTab();
     void buildPianoRollTab();
     void refreshPianoRollContextLabel();
-
-    // D1.4-fix (c): per-instance MouseListener that catches right-clicks on
-    // the picker button (TextButton consumes left-clicks via onClick, so we
-    // need a listener for the popup-menu modifier).
-    struct PickerRightClickListener : public juce::MouseListener
-    {
-        DrumPage* owner { nullptr };
-        void mouseDown (const juce::MouseEvent& e) override;
-    };
-    PickerRightClickListener mPickerRC;
 
     juce::String trackId() const { return "drm_" + juce::String(mPageIndex); }
 

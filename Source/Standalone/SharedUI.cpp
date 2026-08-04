@@ -1342,7 +1342,9 @@ void LRXHelper::applyGrunge(juce::Graphics& g, juce::Rectangle<int> bounds, floa
 // ── PageMenuBar ───────────────────────────────────────────────────────────────
 PageMenuBar::PageMenuBar()
 {
-    mHamburgerBtn = std::make_unique<juce::TextButton>("=");
+    // QA-Layout L31: a labeled "Menu" button, not a hamburger glyph -- same
+    // dropdowns, discoverable name.
+    mHamburgerBtn = std::make_unique<juce::TextButton>("Menu");
     mHamburgerBtn->setTooltip("Page menu");
     mHamburgerBtn->onClick = [this] { showHamburgerMenu(); };
     addAndMakeVisible(*mHamburgerBtn);
@@ -1821,7 +1823,8 @@ void PageMenuBar::paint(juce::Graphics& g)
     {
         g.setColour(VC::TextDim.withAlpha(0.7f));
         g.setFont(juce::Font(10.f, juce::Font::bold));
-        g.drawText(mTitle, 34, 0, 160, getHeight(), juce::Justification::centredLeft, false);
+        g.drawText(mTitle, kMenuBtnW + 12, 0, 160, getHeight(),
+                   juce::Justification::centredLeft, false);
     }
 }
 
@@ -1829,8 +1832,8 @@ void PageMenuBar::resized()
 {
     auto b = getLocalBounds().reduced(2, 2);
 
-    // Hamburger button on left
-    mHamburgerBtn->setBounds(b.removeFromLeft(22).reduced(0, 1));
+    // "Menu" button on left (L31)
+    mHamburgerBtn->setBounds(b.removeFromLeft(kMenuBtnW).reduced(0, 1));
     b.removeFromLeft(2);
 
     // Tab slot buttons right after hamburger

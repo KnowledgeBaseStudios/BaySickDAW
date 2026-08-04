@@ -13,7 +13,8 @@
 // One Layers instrument page. Up to 8 instances (kMaxLayerPages).
 //
 // Two sub-tabs (J-6 EQ unification 2026-05-03 - EQ moved to Effects page):
-//   Tab 0 "Player"     - engine selector ComboBox (locks on first pick) + engine editor
+//   Tab 0 "Player"     - the engine's editor, full page (engine is chosen at
+//                        the ribbon "+" menu before the page exists -- L4)
 //   Tab 1 "Piano Roll" - PianoRollContainer bound to layerRoll[mPageIndex]
 //
 // Engine choices: Harmless | VibePlayer | BaySickSynth
@@ -72,10 +73,6 @@ public:
     // internal combo callback still uses the same method.
     void selectEngine (const juce::String& engineName);
 
-    // D1.4-fix (c) - per-layer right-click context menu + save/delete.
-    // Mirrors the drum tab pattern.  Lock toggle, Polyphony, Copy / Paste /
-    // Duplicate, Choke Group placeholder, Save Patch As, Delete.
-    void showContextMenu  (juce::Component* anchor);
     void savePatchAs      ();
     // 2026-04-25: Load preset (factory + user) for the current engine.
     // Handles both wrapped (savePatchAs) and raw apvts XML formats.
@@ -118,29 +115,11 @@ private:
     // ── Tab system ────────────────────────────────────────────────────────────
     int  mActiveTab   { 0 };
 
-    // D1.4-fix (c): combo subclass that intercepts clicks when locked so we
-    // can route to the per-layer context menu (instead of the engine
-    // dropdown popping up).  Pre-lock = normal ComboBox; post-lock = both
-    // left-click and right-click invoke onLockedClick.
-    struct LockableCombo : public juce::ComboBox
-    {
-        bool locked { false };
-        std::function<void()> onLockedClick;
-        void mouseDown (const juce::MouseEvent& e) override
-        {
-            if (locked)
-            {
-                if (onLockedClick) onLockedClick();
-                return;
-            }
-            juce::ComboBox::mouseDown (e);
-        }
-    };
-
     // ── Tab 0: Player ─────────────────────────────────────────────────────────
+    // QA-Layout T2 (L4): the engine-picker row (LockableCombo + "Engine:"
+    // label) is gone -- the engine is chosen at the "+" menu, and the old
+    // context menu lives on the Menu dropdown (showPageActionsMenu).
     std::unique_ptr<juce::Component>            mPlayerTab;
-    std::unique_ptr<LockableCombo>              mEngineCombo;
-    std::unique_ptr<juce::Label>                mEngineLabel;   // "Engine:" label
     // Non-owning view of the rig-owned engine ({Layers, pageIndex}); the
     // editor IS view-owned and must be destroyed before the page (its
     // attachments reference the engine's APVTS).
