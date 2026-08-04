@@ -2873,6 +2873,18 @@ void PianoRollGrid::paint(Graphics& g)
 // ─────────────────────────────────────────────────────────────────────────────
 ControlLane::ControlLane() {}
 
+// QA-Layout T9 (L29): app-wide shared lane prefs -- one height for every lane
+// (DrumKitControlLane included; containers lockstep-sync off these on their
+// existing timers) and the last settled visibility as the new-container default.
+// Message-thread only, like all lane state.
+static int  gLaneUserHeight     = ControlLane::kHeight;
+static bool gLaneDefaultVisible = true;
+
+int  ControlLane::getUserHeight()             { return gLaneUserHeight; }
+void ControlLane::setUserHeight (int h)       { gLaneUserHeight = juce::jlimit (kHeaderH, kHeight, h); }
+bool ControlLane::getDefaultVisible()         { return gLaneDefaultVisible; }
+void ControlLane::setDefaultVisible (bool v)  { gLaneDefaultVisible = v; }
+
 void ControlLane::setScrollState(float ppb, double beatOff) { mPPB = ppb; mBeatOff = beatOff; repaint(); }
 void ControlLane::setData(PianoRollData* data) { mData = data; repaint(); }
 void ControlLane::setMode(Mode m)              { mMode = m;    repaint(); }
@@ -3094,24 +3106,14 @@ void ControlLane::paint(Graphics& g)
 
 void ControlLane::mouseDown(const MouseEvent& e)
 {
-    // ── Header: open mode dropdown ────────────────────────────────────────
+    // ── Header: press starts either a resize drag or a mode-menu click; the
+    // drag threshold decides which, so the menu waits for mouseUp (T9/L29).
     if (e.y < kHeaderH)
     {
-        PopupMenu m;
-        m.addItem(1, "Velocity");
-        m.addItem(2, "Panning");
-        m.addItem(3, "Pitch Bend");
-        // Batch E #2 (2026-05-01): Filter Cutoff exposed.  Engines read
-        // PianoNote::filterCutoff (0..1) on note-on and apply as a per-note
-        // cutoff offset (octaves around master cutoff knob).
-        m.addItem(4, "Filter Cutoff");
-        m.showMenuAsync(PopupMenu::Options().withTargetComponent(this),
-            [this](int r) {
-                if (r < 1 || r > 4) return;
-                mMode = static_cast<Mode>(r - 1);
-                if (onModeChange) onModeChange(mMode);
-                repaint();
-            });
+        mHeaderPressed    = true;
+        mHeaderDragged    = false;
+        mHeaderDragStartY = e.getScreenY();
+        mHeaderDragStartH = getHeight();
         return;
     }
 
@@ -3174,6 +3176,17 @@ void ControlLane::scrubApply (int x0, int x1, float v0, float v1)
 
 void ControlLane::mouseDrag(const MouseEvent& e)
 {
+    if (mHeaderPressed)
+    {
+        if (! mHeaderDragged
+            && std::abs (e.getScreenY() - mHeaderDragStartY) < 3) return;
+        mHeaderDragged = true;
+        // Header is the lane's TOP edge: dragging up grows the lane.
+        if (onHeightDragged)
+            onHeightDragged (mHeaderDragStartH + (mHeaderDragStartY - e.getScreenY()));
+        return;
+    }
+
     if (!mData || e.y < kHeaderH) return;
     int contentH = jmax(1, getHeight() - kHeaderH);
     int relY     = e.y - kHeaderH;
@@ -3193,9 +3206,41 @@ void ControlLane::mouseDrag(const MouseEvent& e)
 
 void ControlLane::mouseUp(const MouseEvent&)
 {
+    if (mHeaderPressed)
+    {
+        const bool wasClick = ! mHeaderDragged;
+        mHeaderPressed = false;
+        mHeaderDragged = false;
+        if (wasClick)
+        {
+            PopupMenu m;
+            m.addItem(1, "Velocity");
+            m.addItem(2, "Panning");
+            m.addItem(3, "Pitch Bend");
+            // Batch E #2 (2026-05-01): Filter Cutoff exposed.  Engines read
+            // PianoNote::filterCutoff (0..1) on note-on and apply as a per-note
+            // cutoff offset (octaves around master cutoff knob).
+            m.addItem(4, "Filter Cutoff");
+            m.showMenuAsync(PopupMenu::Options().withTargetComponent(this),
+                [this](int r) {
+                    if (r < 1 || r > 4) return;
+                    mMode = static_cast<Mode>(r - 1);
+                    if (onModeChange) onModeChange(mMode);
+                    repaint();
+                });
+        }
+        return;
+    }
+
     mDragNote  = nullptr;
     mScrubbing = false;
     if (onCommitEdit) onCommitEdit();
+}
+
+void ControlLane::mouseMove(const MouseEvent& e)
+{
+    setMouseCursor (e.y < kHeaderH ? MouseCursor::UpDownResizeCursor
+                                   : MouseCursor::NormalCursor);
 }
 
 // 2026-04-26 (D-7 sub-4): Alt+Wheel over the lane adjusts the currently-
@@ -3244,6 +3289,15 @@ PianoRollContainer::PianoRollContainer()
     mKeyboard = std::make_unique<PianoKeyboard>(); addAndMakeVisible(*mKeyboard);
     mGrid     = std::make_unique<PianoRollGrid>();  addAndMakeVisible(*mGrid);
     mLane     = std::make_unique<ControlLane>();   addAndMakeVisible(*mLane);
+
+    // T9 (L29): open with the app-wide lane defaults; header drags write the
+    // shared height so every other lane locksteps off its container's timer.
+    mLaneVisible = ControlLane::getDefaultVisible();
+    mLane->onHeightDragged = [this] (int h)
+    {
+        ControlLane::setUserHeight (h);
+        resized();
+    };
 
     // 2026-04-26 (D-7): bare-M from the grid toggles keyboard column.
     mGrid->onToggleKeyboard = [this] {
@@ -3924,6 +3978,9 @@ void PianoRollContainer::setLaneVisible(bool v)
 {
     if (mLaneVisible == v) return;
     mLaneVisible = v;
+    // T9: the last settled toggle anywhere becomes the app-wide default new
+    // containers open with (and what the project serializer stores).
+    ControlLane::setDefaultVisible (v);
     resized();
     repaint();
 }
@@ -3967,6 +4024,12 @@ void PianoRollContainer::timerCallback()
     // roll needs it; setToggleState repaints only on an actual state change.
     if (isShowing() && mMagnetBtn && mOnGetSnapDiv)
         mMagnetBtn->setToggleState (mOnGetSnapDiv() != 0, juce::dontSendNotification);
+
+    // T9 (L29): lockstep the shared lane height -- another container's header
+    // drag (or a project load) changed it; only the visible roll re-lays.
+    if (isShowing() && mLaneVisible && mLane
+        && mLane->getHeight() != ControlLane::getUserHeight())
+        resized();
 }
 
 void PianoRollContainer::setScaleActive(bool active)
@@ -4070,7 +4133,7 @@ void PianoRollContainer::resized()
     // Compute explicit bounds so keyboard/grid/lane can never overlap.
     static constexpr int kMinGridH = 120;
     int totalH      = b.getHeight();
-    int actualLaneH = mLaneVisible ? kLaneH : 0;
+    int actualLaneH = mLaneVisible ? ControlLane::getUserHeight() : 0;
     int gridH       = jmax(kMinGridH, totalH - actualLaneH - kScrollBarSz);
 
     int bx = b.getX();

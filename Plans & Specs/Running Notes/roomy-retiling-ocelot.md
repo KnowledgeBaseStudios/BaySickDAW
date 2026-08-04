@@ -375,6 +375,60 @@ Convention: Main Plan §0 "Batch Plans + Running Notes layout" (locked 2026-05-1
   checklist of every window to size so coverage can be verified at hand-back — being
   compiled as part of the T6 handoff.
 
+## 2026-08-03 — Task 6 committed `7ac6844e` — sizing diag + floors drop + §B.31.0 rewrite + the HANDOFF
+
+- **Build gate green FIRST TRY:** five exit codes 0, four `vcxproj -> ...exe` link
+  lines, zero `error C` / `error LNK` / `error MSB` greps.  7 files, 154 insertions /
+  39 deletions.
+- **THIS IS THE HANDOFF POINT (L7):** Jeff's sizing pass is now in flight.  T1–T5
+  landed the decoupled windows first, per the plan's sequencing, so everything he
+  sizes is final-shape chrome; everything below is the collection apparatus.
+- **`[QA-Layout DIAG]` instrumentation landed** (full sites in the catalog row
+  below — that row was updated from placeholder to the full site list in this same
+  commit): live WxH strip readout (yellow monospace,
+  `WorkspaceWindow::paintOverChildren` — drawn OVER the PageMenuBar, clear of the
+  close/fill buttons); per-size-change append of
+  `persist-key | title | WxH [| Basic/Advanced]` to
+  `Documents/BaySickDAW/window-sizing-diag.txt` (deduped per size via
+  `mLastDiagSize`; effect windows report their mode through a new
+  `onDiagExtraInfo` hook -> `EffectSlotWindow::diagPanelMode`); ALL floors dropped
+  to 120x80 (ctor default + `setMinimumSize` ignores every caller's provisional
+  floor — the real body is preserved in a comment for T7 to restore).  Compiled
+  into BOTH configs DELIBERATELY (Jeff asked in chat): layout collision points
+  don't differ by config, so the pass can run in the Release exe.
+- **L1 delivered — Test Plans §B.31.0 rewritten IN PLACE:** the drag-and-report
+  12-row table replaced by the diag-driven flow — two takes per window (floor +
+  comfortable; the last settled line per key wins), effects sized in both modes
+  where the Basic/Advanced toggle exists, per-engine takes for Layers/Bass/Drums,
+  "natural" notes for fixed grids, hand-back artifact = the diag file, coverage
+  verified against the T6 checklist below before T7 starts.
+- **THE COVERAGE CHECKLIST — delivered to Jeff in chat at his request; the diag
+  file is verified against it at hand-back, before T7.  Recorded in full:**
+  A. page windows — Builder, Mixer, Effects rack, Piano Roll, Layers x {Harmless,
+  BaySickPlayer, BaySickSynth}, Bass x {Harmless, BaySickPlayer, BaySickBass},
+  Drums x {BaySickPlayer, BaySickSynth}, Clips, Vox, Inst x {BaySickGuitars,
+  BaySickBasses}, Rusty (Drum Kit + Player views).  B. sub-page windows — Vocal
+  Chain, BaySickPitch, BaySickAlign, NAM/IR (Vox + LiveInst keys, same layout),
+  Pedals board.  C. Pre EQ (covers Post) + Master Analyzer.  D. effect panels —
+  Compressor {FET, Opto, CS}, Reverb, Chorus, Delay {Echo, VocalDoubler},
+  Saturation {Tube, Console, Tape}, Flanger, Overdrive {Rack, Pedal}, Phaser,
+  Transient Shaper, Tape, Limiter {Limiter, Maximizer — FLAGGED for a T13
+  re-check since BLU-110 rebuilds the panel}, De-esser, Gate, De-reverb, plus the
+  18 pedal-native rack-loadable types (BluesDrive, Distortion, Fuzz, Noise Gate,
+  HighGain, Tuner, Acoustic Preamp, GraphicEQ, Synth, Octave, Wah, Bass
+  GraphicEQ, Bass Compressor, Bass Driver, Bass Overdrive, FurmanEQ, Acoustic
+  Simulator, NAM Pedal) — each x Basic/Advanced where the toggle exists.
+- **Checklist EXCLUSIONS:** hosted VST3 windows (plugin-derived floors — T12
+  stretch) + the desktop popups (Event Editor, Key Binds, Undo History, Plugins
+  manager, Rusty Map, Pitch Sub-Editor).  The old §B.31.0 row 12 (Event Editor)
+  is SUPERSEDED.
+- **Sequencing now (per L7 + the session brief):** Jeff sizes — Debug smoke first,
+  the pass itself runs in Release.  T9 (piano-roll control-lane resize) starts
+  immediately, then T10 (mixer menus + Add menu + group buses), then T11 opening
+  with the D3 drum-kit workshop (no cap code before that ruling).  T7 (real
+  floors + layout reworks) and T8 (Window-6 collapse, D1/D2 re-docket) WAIT on
+  the diag doc.
+
 ## Diagnostic Instrumentation Catalog (Rule 4)
 
 | Site | Tag | Purpose | Disposition |

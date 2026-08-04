@@ -358,6 +358,7 @@ public:
     void mouseDown(const juce::MouseEvent&)                               override;
     void mouseDrag(const juce::MouseEvent&)                               override;
     void mouseUp  (const juce::MouseEvent&)                               override;
+    void mouseMove(const juce::MouseEvent&)                               override;
     void mouseWheelMove (const juce::MouseEvent&,
                          const juce::MouseWheelDetails&)                  override;
 
@@ -373,8 +374,12 @@ public:
     std::function<bool()>                     hasAnySelection;
     std::function<void(const juce::String&)>  onBeginEdit;
     std::function<void()>                     onCommitEdit;
-    static constexpr int kHeight  = 240;
     static constexpr int kHeaderH = 16;
+
+    // QA-Layout T9 (L29): header-drag resize, mirroring ControlLane -- the
+    // height itself is the app-wide ControlLane::getUserHeight() so both lane
+    // families move in lockstep (ControlLane::kHeight is the shared max).
+    std::function<void(int)> onHeightDragged;
 
 private:
     float  mPPB     { 80.f };
@@ -389,6 +394,11 @@ private:
     void       setVal     (PianoNote& n, float v);
 
     DrumKitGrid::NoteRef mDragRef { -1, -1 };
+
+    bool mHeaderPressed    { false };
+    bool mHeaderDragged    { false };
+    int  mHeaderDragStartY { 0 };
+    int  mHeaderDragStartH { 0 };
 };
 
 // ── Helper: TextButton with right-click callback ─────────────────────────
@@ -483,7 +493,6 @@ public:
 
     static constexpr int kMenuBarH    = 20;
     static constexpr int kToolbarH    = 28;
-    static constexpr int kLaneH       = DrumKitControlLane::kHeight;
     static constexpr int kScrollBarSz = 12;
 
 private:

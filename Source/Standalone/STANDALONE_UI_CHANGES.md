@@ -510,3 +510,25 @@ shortcut. Held notes release on mode-off, octave shift, and tab switch.
 - **persistKeyFor defect fixed:** the index fill covered only Layers/Bass/Drums, so every
   Clip/Vox/Inst/Plugins window shared one "type:-1" key (one saved position for all).  One
   resolver (`pageIndexOfEntry`) now serves the key, the hint fill, and the load-time matcher.
+
+---
+
+## 2026-08-03 - QA-Layout T9: piano-roll control lane resize (L29)
+
+**Files:** `PianoRoll.h/.cpp`, `DrumKitGrid.h/.cpp`, `StandaloneEditor.cpp`
+
+- **Header-drag resize:** the 16px lane header doubles as a resize handle - drag
+  vertically to set the lane height (min = collapsed to just the header, max = the
+  old fixed 240); a clean click still opens the mode dropdown (menu moved from
+  mouseDown to mouseUp behind a 3px drag threshold).  Up-down resize cursor over
+  the header.
+- **ONE shared height:** `ControlLane::get/setUserHeight` statics - every lane in
+  the app (embedded rolls, the Piano Roll page, both DrumKit lanes) shows the same
+  height; other containers lockstep off their existing 200ms timers.  The grid
+  keeps its 120px floor; `kLaneH` fixed-height aliases deleted from both
+  containers.
+- **Persistence:** `<ControlLane h= visible=>` in the project `<UIState>` (rides
+  autosave/crash-flush like the T5 `<Windows>` block).  `visible` is the last
+  settled Velocity Lane toggle from ANY container - the default new containers
+  open with; in-session toggles stay per-container.  Restored before the tab
+  rebuild on load.

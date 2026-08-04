@@ -1,4 +1,5 @@
 #include "DrumKitGrid.h"
+#include "PianoRoll.h"           // T9 (L29): shared lane height/visibility statics on ControlLane
 #include "TypingKeyboardMap.h"   // D-4: bypass tool keys while typing-keyboard mode is on
 #include "../G3PlayheadDiag.h"   // [G3 PLAYHEAD] G-9 reading (QA-G3Smoke Task 1); Debug-only
 #include <numeric>
@@ -3118,18 +3119,14 @@ void DrumKitControlLane::paint(Graphics& g)
 
 void DrumKitControlLane::mouseDown(const MouseEvent& e)
 {
+    // T9 (L29): press starts either a resize drag or a mode-menu click; the
+    // drag threshold decides which, so the menu waits for mouseUp.
     if (e.y < kHeaderH)
     {
-        PopupMenu m;
-        m.addItem(1, "Velocity");
-        m.addItem(2, "Panning");
-        m.showMenuAsync(PopupMenu::Options().withTargetComponent(this),
-            [this](int r) {
-                if (r < 1 || r > 2) return;
-                mMode = static_cast<Mode>(r - 1);
-                if (onModeChange) onModeChange(mMode);
-                repaint();
-            });
+        mHeaderPressed    = true;
+        mHeaderDragged    = false;
+        mHeaderDragStartY = e.getScreenY();
+        mHeaderDragStartH = getHeight();
         return;
     }
     if (mPM == nullptr) return;
@@ -3162,6 +3159,17 @@ void DrumKitControlLane::mouseDown(const MouseEvent& e)
 
 void DrumKitControlLane::mouseDrag(const MouseEvent& e)
 {
+    if (mHeaderPressed)
+    {
+        if (! mHeaderDragged
+            && std::abs (e.getScreenY() - mHeaderDragStartY) < 3) return;
+        mHeaderDragged = true;
+        // Header is the lane's TOP edge: dragging up grows the lane.
+        if (onHeightDragged)
+            onHeightDragged (mHeaderDragStartH + (mHeaderDragStartY - e.getScreenY()));
+        return;
+    }
+
     if (mPM == nullptr || ! mDragRef.isValid() || e.y < kHeaderH || ! mRowProvider) return;
     const int contentH = jmax(1, getHeight() - kHeaderH);
     const int relY     = e.y - kHeaderH;
@@ -3185,8 +3193,35 @@ void DrumKitControlLane::mouseDrag(const MouseEvent& e)
 
 void DrumKitControlLane::mouseUp(const MouseEvent&)
 {
+    if (mHeaderPressed)
+    {
+        const bool wasClick = ! mHeaderDragged;
+        mHeaderPressed = false;
+        mHeaderDragged = false;
+        if (wasClick)
+        {
+            PopupMenu m;
+            m.addItem(1, "Velocity");
+            m.addItem(2, "Panning");
+            m.showMenuAsync(PopupMenu::Options().withTargetComponent(this),
+                [this](int r) {
+                    if (r < 1 || r > 2) return;
+                    mMode = static_cast<Mode>(r - 1);
+                    if (onModeChange) onModeChange(mMode);
+                    repaint();
+                });
+        }
+        return;
+    }
+
     mDragRef = { -1, -1 };
     if (onCommitEdit) onCommitEdit();
+}
+
+void DrumKitControlLane::mouseMove(const MouseEvent& e)
+{
+    setMouseCursor (e.y < kHeaderH ? MouseCursor::UpDownResizeCursor
+                                   : MouseCursor::NormalCursor);
 }
 
 // 2026-04-26 (D-7 sub-4): Alt+Wheel over the drum-kit lane mirrors the
@@ -3240,6 +3275,15 @@ DrumKitContainer::DrumKitContainer()
     mSidebar = std::make_unique<DrumKitSidebar>(); addAndMakeVisible(*mSidebar);
     mGrid    = std::make_unique<DrumKitGrid>();    addAndMakeVisible(*mGrid);
     mLane    = std::make_unique<DrumKitControlLane>(); addAndMakeVisible(*mLane);
+
+    // T9 (L29): open with the app-wide lane defaults; header drags write the
+    // shared height so every other lane locksteps off its container's timer.
+    mLaneVisible = ControlLane::getDefaultVisible();
+    mLane->onHeightDragged = [this] (int h)
+    {
+        ControlLane::setUserHeight (h);
+        resized();
+    };
 
     // Forward sidebar wheel events to the grid.
     mSidebar->onWheel = [this](const juce::MouseEvent& e, const juce::MouseWheelDetails& wheel) {
@@ -3647,6 +3691,9 @@ void DrumKitContainer::setLaneVisible(bool v)
 {
     if (mLaneVisible == v) return;
     mLaneVisible = v;
+    // T9: the last settled toggle anywhere becomes the app-wide default new
+    // containers open with (and what the project serializer stores).
+    ControlLane::setDefaultVisible (v);
     resized();
     repaint();
 }
@@ -3682,6 +3729,12 @@ void DrumKitContainer::timerCallback()
     // (only the visible grid needs it; setToggleState repaints only on a change).
     if (isShowing() && mMagnetBtn && mOnGetSnapDiv)
         mMagnetBtn->setToggleState (mOnGetSnapDiv() != 0, juce::dontSendNotification);
+
+    // T9 (L29): lockstep the shared lane height -- another container's header
+    // drag (or a project load) changed it; only the visible grid re-lays.
+    if (isShowing() && mLaneVisible && mLane
+        && mLane->getHeight() != ControlLane::getUserHeight())
+        resized();
 }
 
 void DrumKitContainer::paint(Graphics& g)
@@ -3737,7 +3790,7 @@ void DrumKitContainer::resized()
 
     static constexpr int kMinGridH = 120;
     const int totalH      = b.getHeight();
-    const int actualLaneH = mLaneVisible ? kLaneH : 0;
+    const int actualLaneH = mLaneVisible ? ControlLane::getUserHeight() : 0;
     const int gridH       = jmax(kMinGridH, totalH - actualLaneH - kScrollBarSz);
 
     const int bx = b.getX();

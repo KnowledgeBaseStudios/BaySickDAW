@@ -12174,6 +12174,14 @@ void StandaloneEditor::serializeUIState (juce::XmlElement& root)
                 wins->createNewChildElement ("Open")->setAttribute ("key", aw.key);
     }
 
+    // QA-Layout T9 (L29): shared control-lane prefs -- ONE height for every
+    // lane (DrumKit included) + the last settled visibility as the default.
+    {
+        auto* lane = ui->createNewChildElement ("ControlLane");
+        lane->setAttribute ("h",       ControlLane::getUserHeight());
+        lane->setAttribute ("visible", ControlLane::getDefaultVisible() ? 1 : 0);
+    }
+
     // P4 persistence: active ribbon tab, mixer scroll, arrangement view/sel.
     if (mRibbon)
         ui->setAttribute ("activeTabId", mRibbon->getSelectedTabId());
@@ -14089,6 +14097,15 @@ void StandaloneEditor::deserializeUIState (const juce::XmlElement& root)
         WorkspaceWindow::replaceSessionBounds (std::move (m));
         for (auto* o : wins->getChildWithTagNameIterator ("Open"))
             openWindowKeys.add (o->getStringAttribute ("key"));
+    }
+
+    // QA-Layout T9 (L29): shared lane prefs restored BEFORE the tab rebuild so
+    // every container created below opens with them; containers already alive
+    // pick the height up on their lockstep timers.
+    if (auto* lane = ui->getChildByName ("ControlLane"))
+    {
+        ControlLane::setUserHeight     (lane->getIntAttribute  ("h", ControlLane::kHeight));
+        ControlLane::setDefaultVisible (lane->getBoolAttribute ("visible", true));
     }
 
     auto applyEngineState = [](juce::AudioProcessor* eng, const juce::String& base64)

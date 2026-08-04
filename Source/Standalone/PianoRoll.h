@@ -474,6 +474,7 @@ public:
     void mouseDown    (const juce::MouseEvent&)                            override;
     void mouseDrag    (const juce::MouseEvent&)                            override;
     void mouseUp      (const juce::MouseEvent&)                            override;
+    void mouseMove    (const juce::MouseEvent&)                            override;
     void mouseWheelMove (const juce::MouseEvent&,
                          const juce::MouseWheelDetails&)                   override;
 
@@ -494,6 +495,20 @@ public:
     static constexpr int kHeight  = 240;
     static constexpr int kHeaderH = 16; // dropdown header at top of lane
 
+    // QA-Layout T9 (L29): the header doubles as a resize handle -- a vertical
+    // drag sets the lane height (kHeaderH = collapsed min, kHeight = max), a
+    // clean click still opens the mode dropdown.  ONE height is shared by
+    // every lane in the app (DrumKitControlLane mirrors in lockstep), so it
+    // lives behind these statics rather than per-instance.
+    static int  getUserHeight();
+    static void setUserHeight (int h);
+    // Last settled lane visibility -- the default new containers open with and
+    // what the project serializer stores.  In-session toggles stay per-container.
+    static bool getDefaultVisible();
+    static void setDefaultVisible (bool v);
+    // Desired height during a header drag; the owning container clamps + applies.
+    std::function<void(int)> onHeightDragged;
+
 private:
     float  mPPB     { 80.f };
     double mBeatOff { 0.0 };
@@ -512,6 +527,13 @@ private:
     bool  mScrubbing    { false };
     int   mLastScrubX   { 0 };
     float mLastScrubVal { 0.0f };
+
+    // Header press bookkeeping: mode menu on a clean click (fires on mouseUp),
+    // resize once the drag threshold is crossed.
+    bool mHeaderPressed    { false };
+    bool mHeaderDragged    { false };
+    int  mHeaderDragStartY { 0 };
+    int  mHeaderDragStartH { 0 };
 };
 
 // ── Helper: TextButton with right-click callback ───────────────────────────
@@ -683,7 +705,6 @@ public:
     static constexpr int kMenuBarH  = 20;  // menu bar above toolbar
     // Toolbar is always a single 28 px row (row 2 has been folded in).
     static constexpr int kToolbarH  = 28;
-    static constexpr int kLaneH     = ControlLane::kHeight;       // fixed lane height
     static constexpr int kScrollH   = 12;
     static constexpr int kScrollBarSz = 12; // width of V scrollbar / height of H scrollbar
 
