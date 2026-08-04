@@ -113,6 +113,15 @@ public:
     bool                        isEngineLocked()  const { return ! mEngineType.isEmpty(); }
     void selectEngine (const juce::String& engineName);
 
+    // QA-Layout T3 (Window-3/4): title-strip chrome for the hosted engine --
+    // see LayersPage.h for the contract.  Drums matter most here: a kit-pad
+    // pick can SWAP the engine while the page is visible, and the rebuild
+    // callback is what re-mounts the strip.
+    juce::String     stripEngineTitle()  const;
+    juce::Colour     stripEngineAccent() const;
+    juce::Component* stripPresetButton() const;
+    std::function<void()> onEngineEditorRebuilt;
+
     // D1.4-fix: sound picker popup.  QA-Layout T2: anchored from the kit
     // grid's per-pad pickers (the page's own picker button is gone);
     // selection auto-loads the right engine + applies state.

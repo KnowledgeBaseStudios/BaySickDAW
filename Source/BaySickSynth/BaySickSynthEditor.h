@@ -43,8 +43,12 @@ public:
     // the patch filename.
     std::function<void(const juce::String&)> onPatchLoaded;
 
-    // Smoke round 2 (Jeff): the SW-3 Swing Mix knob moved off this title bar
-    // onto the PageMenuBar (visible on every sub-tab).
+    // QA-Layout T3 (Window-3/4): the internal BaySickTitleBar is dissolved --
+    // the hosting window's title strip shows the engine name and mounts the
+    // preset button.  The editor still OWNS the button.
+    juce::Component* getTitleStripPresetButton() noexcept { return &mPresetBtn; }
+    static juce::String getEngineTitle()  { return "BaySickSynth"; }
+    static juce::Colour getEngineAccent() { return juce::Colour (BaySickSynthLAF::kGreen); }
 
 private:
     void parameterChanged   (const juce::String& paramID, float newValue) override;
@@ -84,11 +88,9 @@ private:
     BaySickSynthLAF mSynthLAF;
 
     // ── Header ────────────────────────────────────────────────────────────────
-    // QA-A (2026-05-09): unified title bar.  Accent = BaySickSynthLAF::kGreen
-    // (#A0DB2B FL green).  STYLE-06 spec: preset moves to RIGHT, title is the
-    // engine's green accent.
-    BaySickTitleBar     mTitleBar  { "BaySickSynth",
-                                     juce::Colour (BaySickSynthLAF::kGreen) };
+    // Accent = BaySickSynthLAF::kGreen (#A0DB2B FL green).  The preset button
+    // mounts on the hosting window's title strip (QA-Layout T3); the internal
+    // title bar is dissolved.
     BaySickPresetButton mPresetBtn { "Preset" };
 
     // ── Visualizer ────────────────────────────────────────────────────────────

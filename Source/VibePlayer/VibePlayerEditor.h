@@ -23,9 +23,6 @@ public:
     void paint   (juce::Graphics&) override;
     void resized () override;
 
-    // Called by BaySickDrumsEditor after loading a sample into a slot
-    void setInfoText (const juce::String& text);
-
     // 2026-04-23: page-context flag.  When true (set by BaySickDrumsEditor on
     // construction), the in-app Core Library submenu is hidden because the
     // outer drum-slot picker handles library selection (filtered to drum
@@ -39,8 +36,13 @@ public:
     // patch filename.
     std::function<void(const juce::String&)> onPatchLoaded;
 
-    // Smoke round 2 (Jeff): the SW-3 Swing Mix knob moved off this title bar
-    // onto the PageMenuBar (visible on every sub-tab).
+    // QA-Layout T3 (Window-3/4): the internal BaySickTitleBar is dissolved --
+    // the hosting window's title strip shows the engine name (centered,
+    // accent-colored) and mounts the preset button.  The editor still OWNS
+    // the button; the strip only lays it out.
+    juce::Component* getTitleStripPresetButton() noexcept { return &mPresetBtn; }
+    static juce::String getEngineTitle()  { return "BaySickPlayer"; }
+    static juce::Colour getEngineAccent() { return juce::Colour (0xFFD4A017); }
 
 private:
     void valueTreeRedirected (juce::ValueTree& tree) override;
@@ -59,10 +61,9 @@ private:
     VibePlayerLAF mLAF;
 
     // ── Header ────────────────────────────────────────────────────────────────
-    // QA-A (2026-05-09): unified title bar.  Accent = VC::Warm (#D4A017),
-    // matching the Clips + Builder ribbon-tab active colour so the player
-    // page reads as one identity with its tab.
-    BaySickTitleBar     mTitleBar  { "BaySickPlayer", juce::Colour (0xFFD4A017) };
+    // Accent = VC::Warm (#D4A017), matching the Clips + Builder ribbon-tab
+    // active colour so the player reads as one identity with its tab.  The
+    // preset button mounts on the hosting window's title strip (T3).
     BaySickPresetButton mPresetBtn { "Preset" };
 
     // ── 7-box grid layout (D.4-Q3 2026-05-01 - 7th box "Filter" added):

@@ -64,6 +64,13 @@ public:
     // P1+P2 persistence: StandaloneEditor calls this during project load.
     void selectEngine (const juce::String& engineName);
 
+    // QA-Layout T3 (Window-3/4): title-strip chrome for the hosted engine --
+    // see LayersPage.h for the contract.
+    juce::String     stripEngineTitle()  const;
+    juce::Colour     stripEngineAccent() const;
+    juce::Component* stripPresetButton() const;
+    std::function<void()> onEngineEditorRebuilt;
+
     void savePatchAs      ();
     // 2026-04-25: Load preset (factory + user) for the current engine.
     // Handles both wrapped (savePatchAs) and raw apvts XML formats.

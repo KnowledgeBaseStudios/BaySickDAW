@@ -53,6 +53,16 @@ public:
     // StandaloneEditor uses this to add the mixer channel strip.
     std::function<void()> onEngineSelected;
 
+    // QA-Layout T3 (Window-3/4): title-strip chrome for the hosted engine --
+    // centered colored name + the editor-owned preset button (empty/null when
+    // no engine).  onEngineEditorRebuilt fires after selectEngine builds a new
+    // editor, so the window's strip can re-mount without waiting for the next
+    // page-show (the common add path shows the page BEFORE the engine lands).
+    juce::String     stripEngineTitle()  const;
+    juce::Colour     stripEngineAccent() const;
+    juce::Component* stripPresetButton() const;
+    std::function<void()> onEngineEditorRebuilt;
+
     // Tab name sync - called by StandaloneEditor when the ribbon tab is
     // renamed. Refreshes the piano-roll context label ("{tab} - {engine}").
     void                setTabName(const juce::String& name);

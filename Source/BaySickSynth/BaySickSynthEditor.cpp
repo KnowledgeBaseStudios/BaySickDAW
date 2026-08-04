@@ -57,8 +57,8 @@ BaySickSynthEditor::BaySickSynthEditor (BaySickSynthProcessor& p)
 
     // ── Header ────────────────────────────────────────────────────────────────
     // QA-A (2026-05-09): unified title bar.
-    addAndMakeVisible (mTitleBar);
-    addAndMakeVisible (mPresetBtn);
+    // QA-Layout T3: no internal header -- the hosting window's title strip
+    // shows the name and mounts mPresetBtn (still owned + wired here).
     mPresetBtn.onClick = [this] { showPresetMenu(); };
 
     // ── Visualizer ────────────────────────────────────────────────────────────
@@ -551,18 +551,12 @@ void BaySickSynthEditor::resized()
 {
     const int w = getWidth();
 
-    // ── Header (32px) ─────────────────────────────────────────────────────────
-    // QA-A (2026-05-09): unified title bar + STYLE-06 (preset moves to RIGHT).
-    mTitleBar.setBounds (0, 0, w, BaySickTitleBar::kStandardHeight);
-    const auto trailing = mTitleBar.getTrailingArea (88);
-    const int btnY = (BaySickTitleBar::kStandardHeight - 22) / 2;
-    mPresetBtn.setBounds (trailing.getX(), btnY, 88, 22);
-
     // ── Visualizer (120px) ────────────────────────────────────────────────────
-    mVisualizer.setBounds (0, 32, w, 120);
+    // QA-Layout T3: the internal 32px title bar is gone -- content starts at 0.
+    mVisualizer.setBounds (0, 0, w, 120);
 
     // ── Tab row (30px) ────────────────────────────────────────────────────────
-    const int kTabTop = 32 + 120;
+    const int kTabTop = 120;
     const int kTabW   = w / 6;
     for (int i = 0; i < 6; ++i)
         mTabBtns[i].setBounds (i * kTabW, kTabTop, kTabW, 30);

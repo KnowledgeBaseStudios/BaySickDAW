@@ -83,8 +83,9 @@ public:
     // QA-E Task 4 (2026-05-12): getClipFilePath / setClipFilePath / mClipPath
     // + mLinkedClipPath deleted.  Inst file-association now lives in
     // PatternManager's AudioLibrary via pageOwnerChannelId tagging (per §9
-    // 17th Forks entry).  mClipFileLabel is RETAINED -- still used for sfizz
-    // kit name display by setSource() / updateSfizzKitLabel() paths.
+    // 17th Forks entry).  mClipFileLabel is RETAINED for the sfizz program
+    // display on the Aria bar (its live-input strip mount died in QA-Layout
+    // T3 / L23).
 
     // Back-compat stub.  No-op in I-0b -- there's no engine picker; both engines
     // live as permanent sub-tabs.  Old StandaloneEditor save-load code calls this
@@ -192,14 +193,11 @@ private:
     juce::String                                 mTabName;
     bool                                         mLocked { false };
 
-    // I-0b: page header label (informational).  Was previously parented to
-    // mEnginePicker's row; the picker is gone but we keep the label for the
-    // file path display.  Re-parented into PageMenuBar's right slot when the
-    // page is visible (mirrors Vox).
+    // sfizz program display -- setSource()/updateSfizz paths drive it, and it
+    // sits on the AriaControlPanel title bar.  QA-Layout T3 (L23): the
+    // live-input PageMenuBar mount is gone (nothing ever updated it there,
+    // so it read "(no audio loaded)" forever).
     juce::Label                                  mClipFileLabel;
-
-public:
-    juce::Label* getClipFileLabel() noexcept { return &mClipFileLabel; }
 
 private:
     // K-5 (2026-05-05): ARIA control panel + Player tab host.  Created in the

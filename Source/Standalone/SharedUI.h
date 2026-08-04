@@ -281,6 +281,13 @@ public:
     PageMenuBar();
 
     void setPageTitle(const juce::String& t);
+
+    // QA-Layout T3 (Window-4/L2): the engine's colored name, centered on the
+    // strip in BaySickTitleBar's bloom style -- the dissolved engine title
+    // bars' identity moved up here.  Independent of setPageTitle (the small
+    // grey tab title, suppressed when tab slots exist); D7 reviews
+    // narrow-width collisions.  Empty name = nothing drawn.
+    void setCenterTitle(const juce::String& name, juce::Colour accent);
     const juce::String& getPageTitle() const noexcept { return mTitle; }
     void setMenuItems(std::vector<MenuItem> items);
 
@@ -299,6 +306,9 @@ public:
 
     // ── Non-owning extra components on the right (e.g. Kit ▾, Nav combo) ────────
     // Components are reparented into PageMenuBar. Call clear before the page hides.
+    // QA-Layout T3: entries are SafePointers -- a mounted component owned by an
+    // engine editor can die on an engine swap before the next page-show clears
+    // the strip, and a raw pointer here was a guaranteed dangle.
     void addExtraRightComponent(juce::Component* c, int width);
     // 2026-04-19: targeted removal so per-tab extras (e.g. EQ bank indicator)
     // can be added/removed without disturbing page-level extras that should
@@ -382,8 +392,9 @@ public:
     void resized() override;
 
     static constexpr int kHeight = 26;
-    // QA-Layout L31: width of the "Menu" text button (was a 22px "=" glyph);
-    // shared by resized() and the paint() title x-offset.
+    // QA-Layout L31: width of the "Menu" entry -- a flat native-menu-bar-style
+    // text heading, not a chrome button (was a 22px "=" glyph).  Shared by
+    // resized() and the paint() title x-offset.
     static constexpr int kMenuBtnW = 46;
 
 private:
@@ -394,9 +405,13 @@ private:
     std::unique_ptr<juce::TextButton> mHamburgerBtn;
     std::vector<std::unique_ptr<juce::TextButton>> mActionBtns;
 
-    // Non-owning extra right components (e.g. Kit button, Nav combo)
-    struct ExtraComp { juce::Component* comp; int width; };
+    // Non-owning extra right components (e.g. Kit button, Nav combo).
+    // SafePointer: see addExtraRightComponent.
+    struct ExtraComp { juce::Component::SafePointer<juce::Component> comp; int width; };
     std::vector<ExtraComp> mExtraRight;
+
+    juce::String mCenterName;
+    juce::Colour mCenterAccent;
 
     // Tab slot buttons (owned)
     std::vector<std::unique_ptr<juce::TextButton>> mTabSlotBtns;

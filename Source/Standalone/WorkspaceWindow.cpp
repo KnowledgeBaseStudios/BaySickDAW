@@ -14,6 +14,43 @@ namespace
 
     // TS7 §9.1: the palette moved to WindowChrome so the desktop windows can
     // paint the same strip.  Nothing here defines a colour any more.
+
+    // QA-Layout T3 (L5): maximize/restore glyph drawn as paths, like the
+    // close button's "x" -- no dependency on a font having the glyph.
+    class FillToggleButton : public juce::Button
+    {
+    public:
+        FillToggleButton() : juce::Button ("fullscreen") {}
+        std::function<bool()> isFilled;
+
+        void paintButton (juce::Graphics& g, bool isOver, bool isDown) override
+        {
+            auto b = getLocalBounds().toFloat();
+            if (isOver || isDown)
+            {
+                g.setColour (juce::Colours::white.withAlpha (isDown ? 0.22f : 0.12f));
+                g.fillRect (b);
+            }
+
+            const bool filled = isFilled && isFilled();
+            auto r = b.reduced (b.getWidth() * 0.30f, b.getHeight() * 0.30f);
+            g.setColour (WindowChrome::titleText());
+            if (! filled)
+            {
+                g.drawRect (r, 1.4f);
+            }
+            else
+            {
+                // Restore glyph: a second square peeking out behind the first.
+                auto back = r.translated (r.getWidth() * 0.25f, -r.getHeight() * 0.25f);
+                g.drawRect (back, 1.2f);
+                g.setColour (WindowChrome::titleBg (true));
+                g.fillRect (r);
+                g.setColour (WindowChrome::titleText());
+                g.drawRect (r, 1.4f);
+            }
+        }
+    };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -43,9 +80,19 @@ WorkspaceWindow::WorkspaceWindow (juce::String persistKey, juce::String title)
     };
     addAndMakeVisible (*mCloseBtn);
 
-    // Locked call 5a: close + resize only.  No minimise -- there is nowhere for
-    // a minimised window to go inside a contained frame, and no maximise --
-    // the tab bar is how you get a window back.
+    // QA-Layout T3 (L5, reverses locked call 5a's no-maximise half): a
+    // workspace-fill toggle sits left of the close button.  Still no
+    // minimise -- there is nowhere for a minimised window to go inside a
+    // contained frame.
+    {
+        auto* fill = new FillToggleButton();
+        fill->isFilled = [this] { return mFilled; };
+        mFullBtn.reset (fill);
+        mFullBtn->setTooltip ("Fill the workspace / restore the previous size");
+        mFullBtn->onClick = [this] { toggleWorkspaceFill(); };
+        addAndMakeVisible (*mFullBtn);
+    }
+
     // Locked call 4a: the page's hamburger/menu row IS the title strip.  It is
     // created empty; StandaloneEditor fills it for whichever page this window
     // frames, using the same calls it used to make against the shared bar.
@@ -226,9 +273,14 @@ void WorkspaceWindow::resized()
 {
     if (mResizer)  mResizer->setBounds (getLocalBounds());
 
+    // L5 button order, right-to-left: close, fill toggle; the preset button
+    // (when a page mounts one) rides the PageMenuBar's right-extras cluster,
+    // which ends left of these.
     auto title = titleBarArea();
     if (mCloseBtn)
         mCloseBtn->setBounds (title.removeFromRight (kTitleH).reduced (4));
+    if (mFullBtn)
+        mFullBtn->setBounds (title.removeFromRight (kTitleH).reduced (4));
     if (mPageMenu)
         mPageMenu->setBounds (title);
 
@@ -252,6 +304,14 @@ void WorkspaceWindow::mouseDown (const juce::MouseEvent& e)
 void WorkspaceWindow::mouseDrag (const juce::MouseEvent& e)
 {
     if (! mDraggingTitle) return;
+
+    // L5: a manual move leaves the filled state -- the toggle should fill
+    // again from here, not restore a rect the user has since abandoned.
+    if (mFilled)
+    {
+        mFilled = false;
+        if (mFullBtn) mFullBtn->repaint();
+    }
 
     const auto delta = e.getScreenPosition() - mDragStartScreen;
     const auto desired = mDragStartBounds.translated (delta.x, delta.y);
@@ -318,6 +378,30 @@ void WorkspaceWindow::mouseUp (const juce::MouseEvent&)
     if (! mDraggingTitle) return;
     mDraggingTitle = false;
     mWarpsThisDrag = 0;
+    saveBounds();
+}
+
+void WorkspaceWindow::toggleWorkspaceFill()
+{
+    auto* ws = workspace();
+    if (ws == nullptr || ws->getWidth() <= 0 || ws->getHeight() <= 0) return;
+
+    if (! mFilled)
+    {
+        mRestoreBounds = getBounds();
+        mFilled = true;
+        // Fill rect in parent-client space: workspace origin + its size (same
+        // translation attachTo applies to a restored position).
+        const auto o = ws->originInParentClient();
+        setBounds (clampToWorkspace ({ o.x, o.y, ws->getWidth(), ws->getHeight() }));
+    }
+    else
+    {
+        mFilled = false;
+        if (! mRestoreBounds.isEmpty())
+            setBounds (clampToWorkspace (mRestoreBounds));
+    }
+    if (mFullBtn) mFullBtn->repaint();
     saveBounds();
 }
 
@@ -406,6 +490,14 @@ juce::Rectangle<int> WorkspaceWindow::clampToWorkspace (juce::Rectangle<int> tar
 void WorkspaceWindow::Constrainer::applyBoundsToComponent (juce::Component& c,
                                                            juce::Rectangle<int> bounds)
 {
+    // L5: a manual resize leaves the filled state (same rule as the drag).
+    // Only user gestures route through here (ResizableBorderComponent);
+    // programmatic setBounds does not.
+    if (owner.mFilled)
+    {
+        owner.mFilled = false;
+        if (owner.mFullBtn) owner.mFullBtn->repaint();
+    }
     juce::ComponentBoundsConstrainer::applyBoundsToComponent (c, owner.clampResizeToWorkspace (bounds));
 }
 

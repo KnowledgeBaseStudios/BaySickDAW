@@ -203,6 +203,32 @@ void LayersPage::selectEngine(const juce::String& engineName)
     // the clean baseline.
     subscribeToEngineApvtsState();
     takeStateSnapshot();
+
+    if (onEngineEditorRebuilt) onEngineEditorRebuilt();
+}
+
+juce::String LayersPage::stripEngineTitle() const
+{
+    if (dynamic_cast<HarmlessEditor*>     (mEngineEditor.get())) return HarmlessEditor::getEngineTitle();
+    if (dynamic_cast<BaySickSynthEditor*> (mEngineEditor.get())) return BaySickSynthEditor::getEngineTitle();
+    if (dynamic_cast<VibePlayerEditor*>   (mEngineEditor.get())) return VibePlayerEditor::getEngineTitle();
+    return {};
+}
+
+juce::Colour LayersPage::stripEngineAccent() const
+{
+    if (dynamic_cast<HarmlessEditor*>     (mEngineEditor.get())) return HarmlessEditor::getEngineAccent();
+    if (dynamic_cast<BaySickSynthEditor*> (mEngineEditor.get())) return BaySickSynthEditor::getEngineAccent();
+    if (dynamic_cast<VibePlayerEditor*>   (mEngineEditor.get())) return VibePlayerEditor::getEngineAccent();
+    return {};
+}
+
+juce::Component* LayersPage::stripPresetButton() const
+{
+    if (auto* e = dynamic_cast<HarmlessEditor*>     (mEngineEditor.get())) return e->getTitleStripPresetButton();
+    if (auto* e = dynamic_cast<BaySickSynthEditor*> (mEngineEditor.get())) return e->getTitleStripPresetButton();
+    if (auto* e = dynamic_cast<VibePlayerEditor*>   (mEngineEditor.get())) return e->getTitleStripPresetButton();
+    return nullptr;
 }
 
 // ── Timer ─────────────────────────────────────────────────────────────────────

@@ -195,6 +195,32 @@ void BassPage::selectEngine(const juce::String& engineName)
     // editor refreshes the dirty-snapshot.  Initial snapshot now.
     subscribeToEngineApvtsState();
     takeStateSnapshot();
+
+    if (onEngineEditorRebuilt) onEngineEditorRebuilt();
+}
+
+juce::String BassPage::stripEngineTitle() const
+{
+    if (dynamic_cast<HarmlessEditor*>    (mEngineEditor.get())) return HarmlessEditor::getEngineTitle();
+    if (dynamic_cast<BaySickBassEditor*> (mEngineEditor.get())) return BaySickBassEditor::getEngineTitle();
+    if (dynamic_cast<VibePlayerEditor*>  (mEngineEditor.get())) return VibePlayerEditor::getEngineTitle();
+    return {};
+}
+
+juce::Colour BassPage::stripEngineAccent() const
+{
+    if (dynamic_cast<HarmlessEditor*>    (mEngineEditor.get())) return HarmlessEditor::getEngineAccent();
+    if (dynamic_cast<BaySickBassEditor*> (mEngineEditor.get())) return BaySickBassEditor::getEngineAccent();
+    if (dynamic_cast<VibePlayerEditor*>  (mEngineEditor.get())) return VibePlayerEditor::getEngineAccent();
+    return {};
+}
+
+juce::Component* BassPage::stripPresetButton() const
+{
+    if (auto* e = dynamic_cast<HarmlessEditor*>    (mEngineEditor.get())) return e->getTitleStripPresetButton();
+    if (auto* e = dynamic_cast<BaySickBassEditor*> (mEngineEditor.get())) return e->getTitleStripPresetButton();
+    if (auto* e = dynamic_cast<VibePlayerEditor*>  (mEngineEditor.get())) return e->getTitleStripPresetButton();
+    return nullptr;
 }
 
 // ── Timer ─────────────────────────────────────────────────────────────────────

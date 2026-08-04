@@ -5668,6 +5668,7 @@ void StandaloneEditor::showPageForTab(int tabId)
         mPageMenuBar->setBankIndicator (nullptr);
         mPageMenuBar->clearTabSlots();
         mPageMenuBar->clearExtraRightComponents();
+        mPageMenuBar->setCenterTitle ({}, juce::Colour());   // QA-Layout T3
 
         if (auto* ep = dynamic_cast<EffectsPage*>(mVisiblePage))
         {
@@ -5762,6 +5763,24 @@ void StandaloneEditor::showPageForTab(int tabId)
                 const juce::String swBase = "swing_layer_" + juce::String (lp->getPageIndex());
                 auto sb = mProcessor.makeSwingKnobBinding (swBase + "_mix", swBase + "_trunc");
                 mPageMenuBar->setSwingKnobSlot (sb.getMix, sb.setMix, sb.getTrunc, sb.setTrunc);
+            }
+            // QA-Layout T3 (Window-3/4): centered engine name + editor-owned
+            // preset button on the strip.  Runs now AND on engine rebuild --
+            // the add path shows the page BEFORE the engine lands, so the
+            // show-time run alone would leave the strip bare.
+            {
+                auto syncStripChrome = [safe, safeBar]
+                {
+                    auto* bar = safeBar.getComponent();
+                    auto* p   = safe.getComponent();
+                    if (bar == nullptr || p == nullptr) return;
+                    bar->setCenterTitle (p->stripEngineTitle(), p->stripEngineAccent());
+                    if (auto* pb = p->stripPresetButton())
+                        if (pb->getParentComponent() != bar)
+                            bar->addExtraRightComponent (pb, 88);
+                };
+                syncStripChrome();
+                lp->onEngineEditorRebuilt = syncStripChrome;
             }
         }
         // QA-ModelShell TS6 (BLU-447) -- MISSED ENTIRELY, fixed TS7 2026-07-30.
@@ -5880,6 +5899,21 @@ void StandaloneEditor::showPageForTab(int tabId)
                 auto sb = mProcessor.makeSwingKnobBinding (swBase + "_mix", swBase + "_trunc");
                 mPageMenuBar->setSwingKnobSlot (sb.getMix, sb.setMix, sb.getTrunc, sb.setTrunc);
             }
+            // QA-Layout T3: strip chrome (see the Layers branch).
+            {
+                auto syncStripChrome = [safe, safeBar]
+                {
+                    auto* bar = safeBar.getComponent();
+                    auto* p   = safe.getComponent();
+                    if (bar == nullptr || p == nullptr) return;
+                    bar->setCenterTitle (p->stripEngineTitle(), p->stripEngineAccent());
+                    if (auto* pb = p->stripPresetButton())
+                        if (pb->getParentComponent() != bar)
+                            bar->addExtraRightComponent (pb, 88);
+                };
+                syncStripChrome();
+                bp->onEngineEditorRebuilt = syncStripChrome;
+            }
         }
         else if (auto* cp = dynamic_cast<ClipsPage*>(mVisiblePage))
         {
@@ -5945,6 +5979,21 @@ void StandaloneEditor::showPageForTab(int tabId)
                 const juce::String prefix = "mixer_audio_" + juce::String (p->getPageIndex());
                 jumpToFxRackForPrefix (prefix);
             });
+            // QA-Layout T3: strip chrome (see the Layers branch).
+            {
+                auto syncStripChrome = [safe, safeBar]
+                {
+                    auto* bar = safeBar.getComponent();
+                    auto* p   = safe.getComponent();
+                    if (bar == nullptr || p == nullptr) return;
+                    bar->setCenterTitle (p->stripEngineTitle(), p->stripEngineAccent());
+                    if (auto* pb = p->stripPresetButton())
+                        if (pb->getParentComponent() != bar)
+                            bar->addExtraRightComponent (pb, 88);
+                };
+                syncStripChrome();
+                cp->onEngineEditorRebuilt = syncStripChrome;
+            }
         }
         else if (auto* vp = dynamic_cast<VoxPage*>(mVisiblePage))
         {
@@ -6087,14 +6136,11 @@ void StandaloneEditor::showPageForTab(int tabId)
                 auto sb = mProcessor.makeSwingKnobBinding (swBase + "_mix", swBase + "_trunc");
                 mPageMenuBar->setSwingKnobSlot (sb.getMix, sb.setMix, sb.getTrunc, sb.setTrunc);
             }
-            // QA-G3Smoke G-16: sfizz sources (BaySickGuitars / BaySickBasses)
-            // now host the program label + Load-program button on the
-            // AriaControlPanel title bar (InstPage wires them at setEngine);
-            // only live-input pages keep the clip-name label up here (I-0b,
-            // mirrors Vox).
-            if (ip->getSource() == InstPage::Source::LiveInput)
-                if (auto* lbl = ip->getClipFileLabel())
-                    mPageMenuBar->addExtraRightComponent (lbl, 240);
+            // QA-Layout T3 (L23): the live-input clip-name label mount is
+            // gone -- nothing ever updated it on a live-input page, so it sat
+            // reading "(no audio loaded)" forever.  The label itself stays:
+            // sfizz sources still drive it on the AriaControlPanel title bar
+            // (program display, InstPage wires it at setEngine).
         }
         else if (auto* dp = dynamic_cast<DrumPage*>(mVisiblePage))
         {
@@ -6185,6 +6231,23 @@ void StandaloneEditor::showPageForTab(int tabId)
                 auto sb = mProcessor.makeSwingKnobBinding (swBase + "_mix", swBase + "_trunc");
                 mPageMenuBar->setSwingKnobSlot (sb.getMix, sb.setMix, sb.getTrunc, sb.setTrunc);
             }
+            // QA-Layout T3: strip chrome (see the Layers branch).  Drums is
+            // the one type whose engine can SWAP while visible (kit-pad
+            // pick), so the rebuild callback carries real weight here.
+            {
+                auto syncStripChrome = [safe, safeBar]
+                {
+                    auto* bar = safeBar.getComponent();
+                    auto* p   = safe.getComponent();
+                    if (bar == nullptr || p == nullptr) return;
+                    bar->setCenterTitle (p->stripEngineTitle(), p->stripEngineAccent());
+                    if (auto* pb = p->stripPresetButton())
+                        if (pb->getParentComponent() != bar)
+                            bar->addExtraRightComponent (pb, 88);
+                };
+                syncStripChrome();
+                dp->onEngineEditorRebuilt = syncStripChrome;
+            }
         }
         else if (auto* rp = dynamic_cast<BaySickRustyDrumsPage*>(mVisiblePage))
         {
@@ -6229,9 +6292,13 @@ void StandaloneEditor::showPageForTab(int tabId)
                 mPageMenuBar->setSwingKnobSlot (sb.getMix, sb.setMix, sb.getTrunc, sb.setTrunc);
             }
 
-            // QA-G3Smoke G-16: the Program selector + Player Preset button now
-            // live on the BaySickRustyDrums title bar inside AriaControlPanel
-            // (the page hosts them at build) -- no PageMenuBar parking.
+            // QA-Layout T3 (Window-3): the Program selector + Player Preset
+            // button live on the title strip (reverses G-16's Aria-bar move --
+            // the strip is the page's one always-visible control row).
+            if (auto* ppb = rp->getPlayerPresetButton())
+                mPageMenuBar->addExtraRightComponent (ppb, 110);
+            if (auto* pcb = rp->getProgramCombo())
+                mPageMenuBar->addExtraRightComponent (pcb, 160);
 
             // 2026-05-05 consolidation: Save / Load Page Preset goes through
             // the unified PagePresetIO API (PageKind::RustyDrums).  Captures

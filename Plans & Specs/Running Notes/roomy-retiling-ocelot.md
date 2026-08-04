@@ -95,6 +95,67 @@ Convention: Main Plan §0 "Batch Plans + Running Notes layout" (locked 2026-05-1
 - **`STANDALONE_UI_CHANGES.md`** gained a QA-Layout T1 entry per that file's
   standing convention for deliberate UI changes.
 
+## 2026-08-03 — Task 2 committed `148e192a` — add menus + engine pickers deleted + page-menu merges + LiveInst rename
+
+- **Build gate green:** five exit codes 0, four `vcxproj -> ...exe` link lines, zero
+  `error C` / `error LNK` / `error MSB` greps.  17 files, 445 insertions / 580 deletions.
+- **SPEC CALL (Rule 5, resolved in chat before landing):** the ribbon dropdowns' generic
+  "+ Add New Layers/Bass/Drum" rows would have become dead ends once L4 deleted the engine
+  pickers — they create ENGINELESS pages whose picker no longer exists.  Jeff's ruling: each
+  tab type's dropdown bottom section lists the PLAYERS that type can load, engine-named.  His
+  map, confirmed row by row: Layers = Harmless / BaySickPlayer / BaySickSynth; Bass =
+  Harmless / BaySickPlayer / BaySickBass; Drums = BaySickPlayer / BaySickSynth (+ existing
+  BaySickRustyDrums row); Vox = BaySickVocal (+ existing From-Export submenu); Inst =
+  BaySickLiveInst (+ existing Guitars/Basses rows, all gated on the shared cap); Clips =
+  "+ Add BaySickPlayer..." keeping the -3 file-picker route (BaySickPlayer implied — Jeff:
+  fine, matches the + button, the manual will cover it); Plugins = "+ Add VSTPlugin >" side
+  menu.  Added constraint: the Plugins side menu AND the + menu's VSTPlugin submenu both stay
+  ALPHABETICAL (both ride the sorted `getAddedInstruments()`).  Rows fire
+  `onAddEngineRequest` so the engine loads at creation — no route can create an engineless
+  page anymore.
+- **showAddMenu rebuilt to the locked L2/L3/L28 order:** BaySickVocal, BaySickLiveInst,
+  BaySickGuitars, BaySickBasses, VSTPlugin submenu, Harmless > Layers/Bass, BaySickSynth
+  (flat -> Layers), BaySickPlayer > Layers/Bass/Audio Clips, BaySickBass, BaySickDrums >
+  BaySickPlayer/BaySickSynth (new, absorbs the drum routes), BaySickRustyDrums.  The old
+  "BaySickPedals" + menu string had NO code consumers (`applyEngineToNewestTabOfType`
+  ignores the engine string for Inst tabs) — the rename was display-only.  The
+  EngineRow/Target table scaffolding was replaced by direct sequential construction.
+- **L4 deletions:** LayersPage + BassPage LockableCombo + "Engine:" label rows (struct
+  deleted from both headers); ClipsPage's decorative LockedClipsEngineCombo; DrumPage's
+  "Pick a sound v" button + sound-name label + PickerRightClickListener.  Engine editors now
+  fill their Player tabs full-height — the close-the-layout-gap step; full re-layout waits
+  on T7 floors.  Placeholder paint texts updated: Layers/Bass "No engine loaded" (engineless
+  pages only reachable from pre-QA-Layout saves), Drums "No sound loaded - pick one from the
+  Drum Kit" (kit pads remain the empty-drum sound-pick route via `showSoundPicker`).
+- **Menu merges — one Delete per page:** each affected page's engine context menu merged
+  into its Menu-dropdown `showPageActionsMenu`.  LayersPage/BassPage: full merge (Lock /
+  Polyphony / Rename / Duplicate / Choke / Save Patch / Load Preset + Save/Load Page Preset
+  + Delete); old separate `showPageActionsMenu` deleted, `showContextMenu` deleted.
+  DrumPage: `showPageActionsMenu` now FORWARDS to `showContextMenu(anchor, fromKit=false)`,
+  which gained the page-preset entries in the `!fromKit` branch; kit pads keep
+  `fromKit=true` (MIDI Note / MIDI Learn rows, no page presets).  ClipsPage:
+  `showEngineContextMenu` merged into `showPageActionsMenu` — its "Save Current Patch
+  As..." / "Load Preset" were already aliases of the page-preset routines, deduped; Load
+  Page Preset keeps the context menu's WIDER root (factory + user recursive
+  `clipsPresetsRootDir`) instead of the old page menu's My-Presets-only walk.
+- **L2 LiveInst rename:** `nextInstTabName` -> "LiveInst N" (StandaloneEditor.h); InstPage
+  ctor default; MixerPage strip default name + `getInstStripName` fallback; input-picker
+  section header "LiveInst Input" (was "Instrument Input" — the third spelling, reconciled
+  per the mammoth held note).  FLAVOR-vs-FAMILY line drawn and recorded: family-generic
+  "Inst" labels that also cover Guitars/Basses strips stay "Inst" (automation "Inst N"
+  prefix labels in PluginProcessor / StandaloneEditor, "Inst Bus" strips, browser category
+  tag, channel-list fallbacks) — renaming those would mislabel Guitars/Basses.  No tab-name
+  prefix parsing exists (grep-verified), so the rename breaks nothing.
+- **L31:** PageMenuBar's "=" hamburger is now a 46px "Menu" TextButton (`kMenuBtnW` in
+  SharedUI.h, shared by resized() and the paint() title x-offset).  Grep-verified it is the
+  app's ONLY hamburger-style button — every window title strip shares PageMenuBar.
+- **Stale comment fix (Rule 6, in-region):** RibbonTabBar.h's file-header comment block
+  rewritten — it claimed "NO add" dropdowns and drag-drop-only Clip spawning, both long
+  false.
+- **`STANDALONE_UI_CHANGES.md`** gained the T2 entry.  VoxPage's decorative picker
+  deliberately NOT touched — not in L4's locked list; its page is rebuilt wholesale in T4
+  (Window-7).
+
 ## Diagnostic Instrumentation Catalog (Rule 4)
 
 | Site | Tag | Purpose | Disposition |

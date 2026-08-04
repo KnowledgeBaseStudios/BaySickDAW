@@ -3,7 +3,6 @@
 #include "../SampleLibrary.h"
 
 // ── Constants ─────────────────────────────────────────────────────────────────
-static constexpr int   kHdrH         = BaySickTitleBar::kStandardHeight;   // 32, was 36 (QA-A 2026-05-09)
 static constexpr int   kLblH         = 13;   // knob label height
 static constexpr int   kPad          = 6;
 static constexpr int   kKnobSz       = 55;   // knob diameter
@@ -44,12 +43,9 @@ VibePlayerEditor::VibePlayerEditor (VibePlayerProcessor& p)
     auto& avts = p.apvts;
     auto  pid  = [&] (const char* s) { return p.pid (s); };
 
-    // ── Header ────────────────────────────────────────────────────────────────
-    // QA-A (2026-05-09): mTitleBar replaces mTitleLbl + custom header paint.
-    addAndMakeVisible (mTitleBar);
-
+    // QA-Layout T3: no internal header -- the hosting window's title strip
+    // shows the name and mounts mPresetBtn (still owned + wired here).
     mPresetBtn.onClick = [this] { showPresetMenu(); };
-    addAndMakeVisible (mPresetBtn);
 
     // ── Box titles ────────────────────────────────────────────────────────────
     const char* kBoxTitles[7] = {
@@ -341,9 +337,9 @@ static juce::Rectangle<int> boxRectFor (int idx, int editorW, int editorH)
     const int  row    = topRow ? 0 : 1;
     const int  totalW = editorW - 2 * kOuterMargin - (cols - 1) * kBoxGap;
     const int  boxW   = totalW / cols;
-    const int  boxH   = (editorH - kHdrH - 2 * kOuterMargin - kBoxGap) / 2;
+    const int  boxH   = (editorH - 2 * kOuterMargin - kBoxGap) / 2;
     return { kOuterMargin + col * (boxW + kBoxGap),
-             kHdrH + kOuterMargin + row * (boxH + kBoxGap),
+             kOuterMargin + row * (boxH + kBoxGap),
              boxW, boxH };
 }
 
@@ -352,8 +348,6 @@ void VibePlayerEditor::paint (juce::Graphics& g)
 {
     // Background
     g.fillAll (juce::Colour (0xFF1A1C1F));
-
-    // QA-A (2026-05-09): header bar paint moved to BaySickTitleBar::paint().
 
     // 6 box section titles only - no box borders, no underlines, no fill.
     //   Kept flat matte to avoid the AA ghost-rings the rounded-rect outlines
@@ -396,18 +390,6 @@ void VibePlayerEditor::paint (juce::Graphics& g)
 // ── Resized ───────────────────────────────────────────────────────────────────
 void VibePlayerEditor::resized()
 {
-    const int w = getWidth();
-
-    // ── Header ────────────────────────────────────────────────────────────────
-    // QA-A (2026-05-09): unified title bar (32 px) + right-anchored preset
-    // button.  Phase 6 (2026-05-10): help button removed (was a leftover Jeff
-    // never asked for) and preset width unified at 88 px to match every
-    // other engine title bar.
-    mTitleBar.setBounds (0, 0, w, BaySickTitleBar::kStandardHeight);
-    const auto trailing = mTitleBar.getTrailingArea (88);
-    const int btnY = (BaySickTitleBar::kStandardHeight - 22) / 2;
-    mPresetBtn.setBounds (trailing.getX(), btnY, 88, 22);
-
     // ── Box layout helpers ───────────────────────────────────────────────────
     auto box = [&] (int i) { return boxRectFor (i, getWidth(), getHeight()); };
 
@@ -827,11 +809,3 @@ void VibePlayerEditor::loadPreset (const juce::File& f)
         onPatchLoaded (f.getFileNameWithoutExtension());
 }
 
-void VibePlayerEditor::setInfoText (const juce::String& text)
-{
-    // QA-A (2026-05-09): retargeted from mTitleLbl to mTitleBar.  Original
-    // caller (BaySickDrumsEditor) was deleted in the Phase D dynamic-drum
-    // refactor (2026-04-25); kept on the API for any future page-context
-    // callers that want to override the displayed engine name.
-    mTitleBar.setEngineName (text.isEmpty() ? "BaySickPlayer" : text);
-}

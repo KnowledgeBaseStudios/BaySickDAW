@@ -5,7 +5,6 @@
 // ── Layout constants ──────────────────────────────────────────────────────────
 static constexpr int kW       = 960;
 static constexpr int kH       = 620;
-static constexpr int kHdrH    = BaySickTitleBar::kStandardHeight;   // 32, was 36 (QA-A 2026-05-09)
 static constexpr int kGap     = 6;
 static constexpr int kKnob    = 44;
 static constexpr int kKnobSm  = 32;
@@ -330,12 +329,9 @@ HarmlessEditor::HarmlessEditor (HarmlessProcessor& p)
     setupRotary (mStrumTime);      addAndMakeVisible (mStrumTime);
     setupRotary (mStrumTns);       addAndMakeVisible (mStrumTns);
 
-    // ── Header ────────────────────────────────────────────────────────────────
-    // QA-A (2026-05-09): mTitleBar replaces the bespoke g.drawText "HARMLESS"
-    // bloom + custom header paint.
-    addAndMakeVisible (mTitleBar);
+    // QA-Layout T3: no internal header -- the hosting window's title strip
+    // shows the name and mounts mPresetBtn (still owned + wired here).
     mPresetBtn.onClick = [this] { showPresetMenu(); };
-    addAndMakeVisible (mPresetBtn);
 
     // ── APVTS attachments ─────────────────────────────────────────────────────
     // Top-left
@@ -824,17 +820,8 @@ void HarmlessEditor::paint (juce::Graphics& g)
 //==============================================================================
 void HarmlessEditor::resized()
 {
+    // QA-Layout T3: the internal 32px title bar is gone -- content starts at 0.
     auto bounds = getLocalBounds();
-    bounds.removeFromTop (kHdrH);
-
-    // QA-A (2026-05-09): unified title bar (32 px) + right-anchored preset btn.
-    // QA-A Phase 6 (2026-05-10): width 86 -> 88 to match every other engine
-    // title bar (BaySickPlayer / BaySickSynth / BaySickBass / BaySickPedals).
-    mTitleBar.setBounds (0, 0, getWidth(), BaySickTitleBar::kStandardHeight);
-    const auto trailing = mTitleBar.getTrailingArea (88);
-    const int btnY = (BaySickTitleBar::kStandardHeight - 22) / 2;
-    mPresetBtn.setBounds (trailing.getX(), btnY, 88, 22);
-
     bounds.reduce (kGap, 0);
     bounds.removeFromTop (kGap / 2);
 

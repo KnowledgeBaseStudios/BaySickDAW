@@ -659,13 +659,9 @@ BaySickPedalsEditor::BaySickPedalsEditor (BaySickPedalsProcessor& proc)
 {
     setSize (880, 480);
 
-    // QA-A (2026-05-09): unified title bar + migrated pedalboard preset btn.
-    // The button used to live in InstPage's kHeaderRowH chrome strip; Phase
-    // 4.4 deletes that chrome.  Until InstPage wires
-    // mPedalsEditor->onPedalboardPresetMenu = [this] { showPedalboardPresetMenu(); }
-    // (Phase 4.4 task), the button is visible but its click is a no-op.
-    addAndMakeVisible (mTitleBar);
-    addAndMakeVisible (mPresetBtn);
+    // QA-Layout T3: no internal header -- the hosting window's title strip
+    // shows the name and mounts mPresetBtn (still owned + wired here; the
+    // strip mount lands with the T4 pedals window).
     mPresetBtn.setTooltip ("Save / load the entire 8-slot pedalboard rack as a "
                            "preset (separate from per-pedal '...' presets).");
     mPresetBtn.onClick = [this]
@@ -733,16 +729,9 @@ void BaySickPedalsEditor::paint (juce::Graphics& g)
 
 void BaySickPedalsEditor::resized()
 {
-    // QA-A (2026-05-09): title bar at top, then 4x2 grid below it.  Preset
-    // button right-anchored inside the title bar's trailing area.
-    mTitleBar.setBounds (0, 0, getWidth(), BaySickTitleBar::kStandardHeight);
-    const auto trailing = mTitleBar.getTrailingArea (88);
-    const int  btnY     = (BaySickTitleBar::kStandardHeight - 22) / 2;
-    mPresetBtn.setBounds (trailing.getX(), btnY, 88, 22);
-
-    auto b = getLocalBounds()
-                 .withTrimmedTop (BaySickTitleBar::kStandardHeight)
-                 .reduced (kPagePad);
+    // QA-Layout T3: the internal title bar is gone -- the 4x2 grid gets the
+    // full height.
+    auto b = getLocalBounds().reduced (kPagePad);
     if (b.isEmpty()) return;
 
     const int tileW = (b.getWidth()  - kGridGap * (kCols - 1)) / kCols;

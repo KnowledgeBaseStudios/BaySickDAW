@@ -1,5 +1,6 @@
 #include "ClipsPage.h"
 #include "../VibePlayer/VibePlayerProcessor.h"
+#include "../VibePlayer/VibePlayerEditor.h"   // QA-Layout T3: strip chrome cast
 #include "../Standalone/EnginePrefixUtil.h"
 #include "../Standalone/PagePresetIO.h"
 #include "../PluginProcessor.h"
@@ -523,6 +524,25 @@ void ClipsPage::selectEngine (EngineType e)
     takeStateSnapshot();
 
     if (onEngineChanged) onEngineChanged();
+    if (onEngineEditorRebuilt) onEngineEditorRebuilt();
+}
+
+juce::String ClipsPage::stripEngineTitle() const
+{
+    if (dynamic_cast<VibePlayerEditor*> (mPlayerEditor.get())) return VibePlayerEditor::getEngineTitle();
+    return {};
+}
+
+juce::Colour ClipsPage::stripEngineAccent() const
+{
+    if (dynamic_cast<VibePlayerEditor*> (mPlayerEditor.get())) return VibePlayerEditor::getEngineAccent();
+    return {};
+}
+
+juce::Component* ClipsPage::stripPresetButton() const
+{
+    if (auto* e = dynamic_cast<VibePlayerEditor*> (mPlayerEditor.get())) return e->getTitleStripPresetButton();
+    return nullptr;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

@@ -65,6 +65,13 @@ public:
     EngineType    getEngineType() const noexcept { return mEngineType; }
     juce::AudioProcessor* getEngineProcessor() const noexcept;
 
+    // QA-Layout T3 (Window-3/4): title-strip chrome for the hosted engine --
+    // see LayersPage.h for the contract.
+    juce::String     stripEngineTitle()  const;
+    juce::Colour     stripEngineAccent() const;
+    juce::Component* stripPresetButton() const;
+    std::function<void()> onEngineEditorRebuilt;
+
     // G-3 (2026-04-28): fired BEFORE the active engine swaps so the editor
     // can unregisterClipEngine while the OLD pointer is still valid.
     std::function<void()> onEngineDestroying;

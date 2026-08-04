@@ -1,6 +1,7 @@
 #include "SharedUI.h"
 #include "../ProjectManager.h"   // QA-RustyMeter Task 3: getSettingsFile (LUFS mode persistence)
 #include "WindowChrome.h"        // TS7 §9.1: shared title-strip look
+#include "BaySickTitleBar.h"     // QA-Layout T3: centered engine-name painter
 
 // ── Filmstrip rendering ────────────────────────────────────────────────────────
 namespace Filmstrips
@@ -1340,11 +1341,36 @@ void LRXHelper::applyGrunge(juce::Graphics& g, juce::Rectangle<int> bounds, floa
 }
 
 // ── PageMenuBar ───────────────────────────────────────────────────────────────
+namespace
+{
+    // QA-Layout L31 (Jeff correction 2026-08-03): the strip's menu entry reads
+    // like a NATIVE MENU-BAR HEADING -- flat text the way a main window shows
+    // "File", with only a hover/press highlight -- not a chrome button widget.
+    // The first cut shipped a TextButton with the standard chassis bezel;
+    // wrong read of "text button".
+    class TitleStripMenuItem : public juce::TextButton
+    {
+    public:
+        using juce::TextButton::TextButton;
+
+        void paintButton (juce::Graphics& g, bool isOver, bool isDown) override
+        {
+            if (isOver || isDown)
+            {
+                g.setColour (juce::Colours::white.withAlpha (isDown ? 0.18f : 0.10f));
+                g.fillRect (getLocalBounds());
+            }
+            g.setColour (WindowChrome::titleText());
+            g.setFont (juce::Font (13.0f));
+            g.drawText (getButtonText(), getLocalBounds(),
+                        juce::Justification::centred, true);
+        }
+    };
+}
+
 PageMenuBar::PageMenuBar()
 {
-    // QA-Layout L31: a labeled "Menu" button, not a hamburger glyph -- same
-    // dropdowns, discoverable name.
-    mHamburgerBtn = std::make_unique<juce::TextButton>("Menu");
+    mHamburgerBtn = std::make_unique<TitleStripMenuItem>("Menu");
     mHamburgerBtn->setTooltip("Page menu");
     mHamburgerBtn->onClick = [this] { showHamburgerMenu(); };
     addAndMakeVisible(*mHamburgerBtn);
@@ -1353,6 +1379,14 @@ PageMenuBar::PageMenuBar()
 void PageMenuBar::setPageTitle(const juce::String& t)
 {
     mTitle = t;
+    repaint();
+}
+
+void PageMenuBar::setCenterTitle(const juce::String& name, juce::Colour accent)
+{
+    if (name == mCenterName && accent == mCenterAccent) return;
+    mCenterName   = name;
+    mCenterAccent = accent;
     repaint();
 }
 
@@ -1826,6 +1860,18 @@ void PageMenuBar::paint(juce::Graphics& g)
         g.drawText(mTitle, kMenuBtnW + 12, 0, 160, getHeight(),
                    juce::Justification::centredLeft, false);
     }
+
+    // QA-Layout T3 (Window-4/L2): centered colored engine name, bloom style.
+    // paintEngineName anchors LEFT within its rect, so center by sizing the
+    // rect to the text.
+    if (mCenterName.isNotEmpty())
+    {
+        const juce::Font f (15.0f, juce::Font::bold);
+        const int tw = f.getStringWidth (mCenterName) + 8;
+        BaySickTitleBar::paintEngineName (g, mCenterName, mCenterAccent,
+                                          getLocalBounds().withSizeKeepingCentre (tw, getHeight()),
+                                          true, 15.0f);
+    }
 }
 
 void PageMenuBar::resized()
@@ -1879,9 +1925,12 @@ void PageMenuBar::resized()
         mSwingKnob->setBounds(b.removeFromLeft(24).reduced(1, 1));
     }
 
-    // Extra right components (Kit, Nav combo, etc.) flush to right
+    // Extra right components (Kit, Nav combo, etc.) flush to right.  A dead
+    // SafePointer (editor-owned component destroyed on engine swap) is
+    // skipped without consuming width.
     for (auto it = mExtraRight.rbegin(); it != mExtraRight.rend(); ++it)
-        it->comp->setBounds(b.removeFromRight(it->width).reduced(2, 1));
+        if (it->comp != nullptr)
+            it->comp->setBounds(b.removeFromRight(it->width).reduced(2, 1));
 
     // Action buttons flush to right
     for (auto it = mActionBtns.rbegin(); it != mActionBtns.rend(); ++it)

@@ -408,3 +408,41 @@ shortcut. Held notes release on mode-off, octave shift, and tab switch.
 - **Hamburger → "Menu" (L31):** PageMenuBar's "=" TextButton is now a 46px "Menu" button
   (`kMenuBtnW`); title x-offset follows.  It is the app's only hamburger-style button — every
   window title strip shares PageMenuBar.
+
+---
+
+## 2026-08-03 — QA-Layout T3: window title strips — fill toggle, dissolved engine title bars, preset buttons on the strip
+
+**Files:** `WorkspaceWindow.h/.cpp`, `SharedUI.h/.cpp`, `VibePlayerEditor.h/.cpp`,
+`BaySickSynthEditor.h/.cpp`, `BaySickBassEditor.h/.cpp`, `HarmlessEditor.h/.cpp`,
+`BaySickPedalsEditor.h/.cpp`, `LayersPage.h/.cpp`, `BassPage.h/.cpp`, `DrumPage.h/.cpp`,
+`ClipsPage.h/.cpp`, `BaySickRustyDrumsPage.cpp`, `InstPage.h`, `StandaloneEditor.cpp`
+
+- **Full-screen toggle (L5 — reverses locked call 5a's no-maximize):** every `WorkspaceWindow`
+  gets a `FillToggleButton` left of close (path-drawn maximize/restore glyph).
+  `toggleWorkspaceFill()` fills the workspace and toggles back to the pre-fill bounds; a manual
+  drag or resize while filled clears the state.  Button order right-to-left: close, fill toggle,
+  then the PageMenuBar's right-extras (preset button etc.).
+- **Engine title bars dissolved (Window-4/L2):** VibePlayer / BaySickSynth / BaySickBass /
+  Harmless / BaySickPedals editors lost their internal `BaySickTitleBar` (32px reclaimed —
+  content starts at 0).  The colored player name now renders CENTERED on the window title strip
+  via `PageMenuBar::setCenterTitle` (BaySickTitleBar's bloom painter, 15pt).  Each editor keeps
+  its accent/name as `getEngineTitle()`/`getEngineAccent()` statics.  `VibePlayerEditor::
+  setInfoText` deleted (caller-less; its target bar is gone).
+- **Preset buttons on the strip (Window-3):** editors still OWN their `BaySickPresetButton`s;
+  the pages expose `stripEngineTitle/Accent/PresetButton()` and fire `onEngineEditorRebuilt`
+  after `selectEngine`, and StandaloneEditor's page-show branches mount the button via
+  `addExtraRightComponent` (88px) + set the center title.  The rebuild callback matters because
+  the add path SHOWS the page before the engine lands, and a Drums kit-pad pick can swap the
+  engine while visible.  `PageMenuBar::ExtraComp` now holds SafePointers (an editor-owned
+  mounted component can die on engine swap; dead entries are skipped).  RustyDrums' Player
+  Preset (110px) + Program combo (160px) moved from the Aria bar back onto the strip (reverses
+  G-16); the Aria bar itself stays (Guitars/Basses/Rusty identity).  BaySickPedals' strip mount
+  lands with its T4 window.
+- **L23:** the live-input Inst page's "(no audio loaded)" clip-name label mount is gone —
+  nothing ever updated it on a live-input page.  The label member stays (sfizz program display
+  on the Aria bar); its caller-less `getClipFileLabel()` accessor deleted.
+- **L31 correction (Jeff, 2026-08-03):** the T2 cut shipped the "Menu" entry as a chrome
+  `TextButton` — wrong read of "text button".  It is now `TitleStripMenuItem`: a flat
+  native-menu-bar-style text heading (like "File" on a main window) with only a hover/press
+  highlight, same dropdown behavior.  One shared class → every window strip corrected at once.

@@ -199,15 +199,10 @@ void BaySickRustyDrumsPage::buildPlayerTab()
     mAriaPanel = std::make_unique<AriaControlPanel> (binding);
     mPlayerTab->addAndMakeVisible (*mAriaPanel);
 
-    // QA-G3Smoke G-16: the Program selector + Player Preset button move off
-    // the PageMenuBar onto this title bar.  Smoke round 2 (Jeff): the SW-3
-    // Swing Mix knob moved OFF here onto the PageMenuBar (StandaloneEditor
-    // wires it per page-show) so it's visible on every sub-tab.
-    if (auto* bar = mAriaPanel->getTitleBar())
-    {
-        if (mPlayerPresetBtn) bar->addHostedTrailingWidget (mPlayerPresetBtn.get(), 110);
-        if (mProgramCombo)    bar->addHostedTrailingWidget (mProgramCombo.get(),    160);
-    }
+    // QA-Layout T3 (Window-3): the Program selector + Player Preset button
+    // move off the Aria title bar onto the hosting window's title strip
+    // (StandaloneEditor mounts them per page-show, reversing G-16's move --
+    // the strip is the one always-visible control row now).
 }
 
 void BaySickRustyDrumsPage::buildPianoRollTab()

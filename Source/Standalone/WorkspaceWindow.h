@@ -124,6 +124,15 @@ public:
     // on relayout -- one containment definition, two callers.
     juce::Rectangle<int> clampToWorkspace (juce::Rectangle<int> target) const;
 
+    // QA-Layout T3 (L5, REVERSES locked call 5a): full-screen toggle -- fills
+    // the workspace, and toggles back to the bounds the user last set.  The
+    // restore path is what answers 5a's original objection (a maximised
+    // window now has a way back out).  A manual drag or resize while filled
+    // clears the flag, so the next click fills again rather than restoring a
+    // stale rect.
+    void toggleWorkspaceFill();
+    bool isWorkspaceFilled() const noexcept { return mFilled; }
+
     // Soft edge magnetism (Jeff spec 2026-07-28).  While dragging, a window
     // whose edge comes within kSnapPx of another window's opposing edge (or of
     // a workspace edge) is nudged flush so they line up.  Deliberately NOT a
@@ -178,6 +187,9 @@ private:
     std::unique_ptr<juce::Component>                 mContent;
     juce::Component*                                 mContentRaw { nullptr };
     std::unique_ptr<juce::TextButton>                mCloseBtn;
+    std::unique_ptr<juce::Button>                    mFullBtn;      // L5 fill toggle
+    juce::Rectangle<int>                             mRestoreBounds;   // pre-fill (parent-client)
+    bool                                             mFilled { false };
     std::unique_ptr<PageMenuBar>                    mPageMenu;
     // Each contained window needs its OWN tooltip window: juce::TooltipWindow
     // only monitors components inside its own desktop window, and these are

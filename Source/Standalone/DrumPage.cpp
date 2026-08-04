@@ -362,6 +362,28 @@ void DrumPage::selectEngine(const juce::String& engineName)
     juce::MessageManager::callAsync([this] { if (isShowing()) resized(); });
 
     if (onEngineSelected) onEngineSelected();
+    if (onEngineEditorRebuilt) onEngineEditorRebuilt();
+}
+
+juce::String DrumPage::stripEngineTitle() const
+{
+    if (dynamic_cast<BaySickSynthEditor*> (mEngineEditor.get())) return BaySickSynthEditor::getEngineTitle();
+    if (dynamic_cast<VibePlayerEditor*>   (mEngineEditor.get())) return VibePlayerEditor::getEngineTitle();
+    return {};
+}
+
+juce::Colour DrumPage::stripEngineAccent() const
+{
+    if (dynamic_cast<BaySickSynthEditor*> (mEngineEditor.get())) return BaySickSynthEditor::getEngineAccent();
+    if (dynamic_cast<VibePlayerEditor*>   (mEngineEditor.get())) return VibePlayerEditor::getEngineAccent();
+    return {};
+}
+
+juce::Component* DrumPage::stripPresetButton() const
+{
+    if (auto* e = dynamic_cast<BaySickSynthEditor*> (mEngineEditor.get())) return e->getTitleStripPresetButton();
+    if (auto* e = dynamic_cast<VibePlayerEditor*>   (mEngineEditor.get())) return e->getTitleStripPresetButton();
+    return nullptr;
 }
 
 void DrumPage::timerCallback()

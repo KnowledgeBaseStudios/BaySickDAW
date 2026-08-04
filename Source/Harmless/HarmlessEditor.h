@@ -37,6 +37,13 @@ public:
     // silently and the page wrappers had no way to know.
     std::function<void(const juce::String&)> onPatchLoaded;
 
+    // QA-Layout T3 (Window-3/4): the internal BaySickTitleBar is dissolved --
+    // the hosting window's title strip shows the engine name and mounts the
+    // preset button.  The editor still OWNS the button.
+    juce::Component* getTitleStripPresetButton() noexcept { return &mPresetBtn; }
+    static juce::String getEngineTitle()  { return "Harmless"; }
+    static juce::Colour getEngineAccent() { return juce::Colour (HarmlessLAF::kAccent); }
+
     // Smoke round 2 (Jeff): the SW-3 Swing Mix knob moved off this title bar
     // onto the PageMenuBar (visible on every sub-tab).
 
@@ -53,11 +60,9 @@ private:
     HarmlessLAF mLAF;
 
     // ── Header ────────────────────────────────────────────────────────────────
-    // QA-A (2026-05-09): unified title bar.  Accent = HarmlessLAF::kAccent
-    // (#FF6600 orange).  Bloom is the default, so no need to pass it
-    // explicitly here; the long-standing orange-glow signature is preserved.
-    BaySickTitleBar     mTitleBar  { "Harmless",
-                                     juce::Colour (HarmlessLAF::kAccent) };
+    // Accent = HarmlessLAF::kAccent (#FF6600 orange).  The preset button
+    // mounts on the hosting window's title strip (QA-Layout T3); the internal
+    // title bar is dissolved.
     BaySickPresetButton mPresetBtn { "Preset" };
 
     // ── Waveform buttons (visual selectors, synced to hidden sliders) ─────────

@@ -69,6 +69,12 @@ public:
     // top-left -- i.e. the app's top-left, not a button-relative location).
     juce::Component* getPedalboardPresetButton() noexcept { return &mPresetBtn; }
 
+    // QA-Layout T3 (Window-3/4): the internal BaySickTitleBar is dissolved;
+    // the hosting window's title strip shows this identity (T4 wires the
+    // pedals window's strip to these + the preset button above).
+    static juce::String getEngineTitle()  { return "BaySickPedals"; }
+    static juce::Colour getEngineAccent() { return juce::Colour (0xFF1C3A8A); }
+
 private:
     void timerCallback() override;
 
@@ -78,11 +84,10 @@ private:
     EffectType mLastTypes[BaySickPedalsProcessor::kNumSlots] {};
     int        mDropTargetSlot { -1 };
 
-    // QA-A (2026-05-09): unified title bar at the top of the pedal grid.
     // Accent = navy / royal blue (#1C3A8A), shared with BaySickGuitars +
-    // BaySickBasses (Inst tab active color per RibbonTabBar.cpp:21) since
-    // all three engines live inside Inst pages.
-    BaySickTitleBar     mTitleBar  { "BaySickPedals", juce::Colour (0xFF1C3A8A) };
+    // BaySickBasses (Inst tab active color) since all three engines live
+    // inside Inst pages.  The preset button mounts on the hosting window's
+    // title strip (QA-Layout T3/T4); the internal title bar is dissolved.
     BaySickPresetButton mPresetBtn { "Preset" };
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (BaySickPedalsEditor)
