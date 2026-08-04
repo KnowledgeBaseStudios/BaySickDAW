@@ -264,6 +264,68 @@ Convention: Main Plan §0 "Batch Plans + Running Notes layout" (locked 2026-05-1
   displays) with the D4=c EQ rows appended for every type; persistence keys designed per
   T5's scheme.
 
+## 2026-08-03 — Task 4 committed `85128436` — Window-7 Vox satellites + L10 pedals-as-player + L11 window rows
+
+- **Build gate — one intermediate FAILURE, then green on the final tree:** 8x C2440 —
+  the new BaySickVocalEditor panel accessors upcast forward-declared panel types
+  inline in the header; fixed by moving the four accessor bodies to the .cpp.  Final
+  build: five exit codes 0, four `vcxproj -> ...exe` link lines, zero
+  `error C` / `error LNK` / `error MSB` greps.  18 files, 797 insertions /
+  637 deletions.
+- **This entry COMPLEMENTS the Task 4 in-flight entry above** — D4=c, D6, the
+  findParentComponentOfClass escapes, the L22 saturation fix, and the VoxPage
+  dead-menu merge are recorded there and ride this commit; not restated here.
+- **Window-7 Vox delivered:** BaySickVocalEditor's tab machinery (TabIdx enum,
+  `setActiveTab`, `panelForTab`, `mActiveTab`) DELETED — content is the BaySickVocals
+  main panel only, and the panel's internal BaySickTitleBar dissolved (the Window-4
+  treatment extended: the panel IS the window content now; the Vox strip shows
+  centered "BaySickVocals" teal).  Four panel accessors added (bodies in the .cpp —
+  the C2440 failure above).  The four satellites open via
+  `StandaloneEditor::openVoxSatelliteWindow` through a new file-local
+  `PanelSatelliteView` — hosts the editor-OWNED panel NON-OWNED via a per-tick 4Hz
+  peer-keyed resolver; resolve-fails-after-success => `onRequestClose` (the
+  EffectSlotWindow contract).  Keys `voxsat:<idx>:{chain|pitch|align|namir}`,
+  Session persistence until T5, provisional floors: chain 560x420,
+  pitch/align 900x560, namir 640x420.  Vox strip = four launcher slots
+  (activeIdx -1, the PluginsPage precedent) + page Menu + FX Rack slot; the
+  satellites' strips carry the page Menu too.
+- **L10 LiveInst delivered — the pedals window IS the player:** `showPageForTab`
+  short-circuits a LiveInput InstPage (no `hostPageInWindow` —
+  `openInstPedalsWindow` + front instead), AND `hostPageInWindow` itself refuses
+  LiveInput InstPages (covers the project-load sweep until T5 reworks it).  The
+  pedals window (`instsat:<idx>:pedals`, 880x480) wears the TAB NAME as title,
+  centered "BaySickPedals", page Menu, the pedalboard preset button (T3's deferred
+  mount, via `getPedalboardPresetButton`), and a "NAM/IR" launcher slot.
+  `openInstNamIrWindow` (`instsat:<idx>:namir`, 640x420).  sfizz Inst tabs keep
+  their page window (Aria player, `mPlayerTab` visible per `setSource`) with
+  {Pedals, NAM/IR, Piano Roll} launcher slots.  InstPage sub-tab machinery
+  (`switchTab`, `mActiveTab`, `getTabLabels`, `getActiveTabLabels`,
+  `mPedalsPlaceholder`) deleted; the Pedals / NAM-IR editors stay page-owned, no
+  longer page children.
+- **L11 + D4=c delivered — ribbon "Pages:" is now a per-instance window-row model:**
+  RibbonTabBar's hardcoded rows replaced by `onListPageWindowRows` /
+  `onPageWindowRowPicked`; `StandaloneEditor::buildPageWindowRows` is ONE body
+  serving labels AND pick dispatch (rebuilt at pick time — no stale indices).  Rows
+  per type: Layers/Bass/Clips/Plugins = Player + Piano Roll (nav); Drums =
+  Drum Kit (nav) + Player + Piano Roll (nav); Rusty = Drum Kit + Player + Piano
+  Roll (its EQ rows tap `kRustyDrumsBus` — the kit's one whole-signal point); Vox =
+  Player + the four satellites; Inst LiveInput = Pedals + NAM/IR; Inst sfizz =
+  Player + Pedals + NAM/IR + Piano Roll.  EVERY list ends with the D4=c Pre EQ /
+  Post EQ rows -> `openEffectEqWindow`.  `onSubPageSelected` slimmed to
+  Effects/Builder (instance branches deleted).
+- **Tab-close hygiene:** the Vox/Inst close branches call `closeVoxSatellites` /
+  `closeInstSatellites` — a deliberate close beats the resolvers' timed one.
+- **FOUND EN ROUTE — cleaned in-region (Rule 6):** BaySickVocalEditor's HostPanel +
+  PlaceholderPanel classes were pre-existing DEAD code — every sub-tab they
+  scaffolded shipped real content long ago and nothing instantiated either —
+  deleted with their forward decls.
+- **ENUMERATED, no edit needed:** the SlotComponent Saturation Mode menu already
+  offers Tube/Console/Tape and pushes `setSatType` + mirrors `bsv_sat_type` via
+  `onModeChanged` — L22's whole bug was the param range clamp, fixed in the
+  in-flight entry's landed item.
+- **`STANDALONE_UI_CHANGES.md`** gained the T4 entry.
+- **Next:** T5 (window-state persistence, three lifetimes).
+
 ## Diagnostic Instrumentation Catalog (Rule 4)
 
 | Site | Tag | Purpose | Disposition |

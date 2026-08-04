@@ -12149,6 +12149,31 @@ void StandaloneEditor::serializeUIState (juce::XmlElement& root)
     ui->setAttribute ("version", 1);
     serializeStructuralUIState (*ui);
 
+    // QA-Layout T5 (lifetime 3): the FULL bounds map + per-window open state,
+    // players included -- "pull up a project and be right back in it".  L16
+    // crash survival rides for free: the autosave calls this serializer, and
+    // the flush below is the "timer flush" (resizes have no end-of-gesture
+    // hook, so the map is refreshed from the live windows before writing).
+    {
+        flushAllWindowBounds();
+        auto* wins = ui->createNewChildElement ("Windows");
+        for (const auto& [key, b] : WorkspaceWindow::sessionBoundsMap())
+        {
+            auto* w = wins->createNewChildElement ("W");
+            w->setAttribute ("key", key);
+            w->setAttribute ("x", b.getX());
+            w->setAttribute ("y", b.getY());
+            w->setAttribute ("w", b.getWidth());
+            w->setAttribute ("h", b.getHeight());
+        }
+        for (auto* e : mPages)
+            if (e != nullptr && e->window != nullptr)
+                wins->createNewChildElement ("Open")->setAttribute ("key", persistKeyFor (*e));
+        for (const auto& aw : mAuxWindows)
+            if (aw.window != nullptr)
+                wins->createNewChildElement ("Open")->setAttribute ("key", aw.key);
+    }
+
     // P4 persistence: active ribbon tab, mixer scroll, arrangement view/sel.
     if (mRibbon)
         ui->setAttribute ("activeTabId", mRibbon->getSelectedTabId());
@@ -13056,10 +13081,14 @@ void StandaloneEditor::hostPageInWindow (PageEntry& entry)
     if (mWorkspace == nullptr || entry.component == nullptr)
         return;
 
+    // QA-Layout T5: nothing frames mid-load -- the end-of-load pass frames
+    // exactly the windows the project saved as open (the old behavior framed
+    // every restored page unconditionally).
+    if (mLoadingWindows)
+        return;
+
     // QA-Layout T4 (L10): a live-input Inst tab has NO page window -- the
-    // pedals window is its player.  Refusing here covers every caller,
-    // including the project-load sweep (T5 reworks that sweep; until then
-    // this guard is what enforces L10 on load).
+    // pedals window is its player.  Refusing here covers every caller.
     if (auto* lip = dynamic_cast<InstPage*> (entry.component.get()))
         if (lip->getSource() == InstPage::Source::LiveInput)
             return;
@@ -13084,17 +13113,24 @@ void StandaloneEditor::hostPageInWindow (PageEntry& entry)
         return;
 
     // Record the page index while the page still exists -- after
-    // destroy-on-close there is nothing left to ask.
+    // destroy-on-close there is nothing left to ask.  QA-Layout T5: the fill
+    // covered only Layers/Bass/Drums, so every Clip/Vox/Inst/Plugins window
+    // collided on one "type:-1" key and shared a single saved position.
     if (entry.pageIndexHint < 0)
-    {
-        if (auto* lp = dynamic_cast<LayersPage*> (entry.component.get())) entry.pageIndexHint = lp->getPageIndex();
-        else if (auto* bp = dynamic_cast<BassPage*> (entry.component.get())) entry.pageIndexHint = bp->getPageIndex();
-        else if (auto* dp = dynamic_cast<DrumPage*> (entry.component.get())) entry.pageIndexHint = dp->getPageIndex();
-    }
+        entry.pageIndexHint = pageIndexOfEntry (entry);
 
     const auto* tab = mRibbon != nullptr ? mRibbon->getTabById (entry.ribbonTabId) : nullptr;
     entry.window = std::make_unique<WorkspaceWindow> (persistKeyFor (entry),
                                                       tab != nullptr ? tab->name : juce::String());
+
+    // QA-Layout T5: only the four default tabs persist PLACEMENT to
+    // settings.xml (sizes persist for every page window) -- player positions
+    // are project content.
+    if (entry.type == RibbonTabBar::TabType::Mixer
+     || entry.type == RibbonTabBar::TabType::Builder
+     || entry.type == RibbonTabBar::TabType::Effects
+     || entry.type == RibbonTabBar::TabType::PianoRoll)
+        WorkspaceWindow::registerPlacementPersistentKey (persistKeyFor (entry));
 
     // Provisional floor.  The real per-window numbers are collected from Jeff
     // on screen (Test Plans B.31.0) -- they cannot be derived from source
@@ -13682,11 +13718,37 @@ void StandaloneEditor::closeDeadEffectWindows (int channelId)
 juce::String StandaloneEditor::persistKeyFor (const PageEntry& entry) const
 {
     // Keyed by TYPE + the page's OWN index: ribbon tab ids are handed out per
-    // session, so keying on them -- which this did, against its own stated
-    // rule -- lost every window's saved position on reopen.  pageIndexHint is
-    // recorded before framing for exactly this key; -1 (the system pages)
-    // still yields one stable key per type.
-    return juce::String ((int) entry.type) + ":" + juce::String (entry.pageIndexHint);
+    // session, so keying on them would lose a window's saved position every
+    // time the project reopened.  QA-Layout T5: falls back to the live
+    // component when the hint is unfilled, so multi-instance types can never
+    // collapse onto one "type:-1" key.
+    int idx = entry.pageIndexHint;
+    if (idx < 0) idx = pageIndexOfEntry (entry);
+    return juce::String ((int) entry.type) + ":" + juce::String (idx);
+}
+
+int StandaloneEditor::pageIndexOfEntry (const PageEntry& entry) const
+{
+    auto* c = entry.component.get();
+    if (c == nullptr) return entry.pageIndexHint;
+    if (auto* lp = dynamic_cast<LayersPage*>  (c)) return lp->getPageIndex();
+    if (auto* bp = dynamic_cast<BassPage*>    (c)) return bp->getPageIndex();
+    if (auto* dp = dynamic_cast<DrumPage*>    (c)) return dp->getPageIndex();
+    if (auto* cp = dynamic_cast<ClipsPage*>   (c)) return cp->getPageIndex();
+    if (auto* vp = dynamic_cast<VoxPage*>     (c)) return vp->getPageIndex();
+    if (auto* ip = dynamic_cast<InstPage*>    (c)) return ip->getPageIndex();
+    if (auto* pp = dynamic_cast<PluginsPage*> (c)) return pp->getPageIndex();
+    return -1;   // system pages + the Rusty singleton: one stable key per type
+}
+
+void StandaloneEditor::flushAllWindowBounds()
+{
+    for (auto* e : mPages)
+        if (e != nullptr && e->window != nullptr)
+            e->window->saveBounds();
+    for (const auto& aw : mAuxWindows)
+        if (aw.window != nullptr)
+            aw.window->saveBounds();
 }
 
 // Close a window WITHOUT touching the model.  The engine keeps running and the
@@ -14004,6 +14066,25 @@ void StandaloneEditor::deserializeUIState (const juce::XmlElement& root)
 
     mHeavyOpOverlay.setStepLabel ("Closing old tabs...");
     closeAllDynamicTabs();
+
+    // QA-Layout T5 (lifetime 3): the project's window map REPLACES the live
+    // map, and nothing frames until the end-of-load pass at the bottom of
+    // this function -- the load path no longer force-opens every page.  A
+    // project without a <Windows> element (pre-T5 save) frames nothing; its
+    // tabs are one ribbon click away (accepted, pre-v1 no-migration rule).
+    mLoadingWindows = true;
+    juce::StringArray openWindowKeys;
+    if (auto* wins = ui->getChildByName ("Windows"))
+    {
+        std::map<juce::String, juce::Rectangle<int>> m;
+        for (auto* w : wins->getChildWithTagNameIterator ("W"))
+            m[w->getStringAttribute ("key")] =
+                { w->getIntAttribute ("x"), w->getIntAttribute ("y"),
+                  w->getIntAttribute ("w"), w->getIntAttribute ("h") };
+        WorkspaceWindow::replaceSessionBounds (std::move (m));
+        for (auto* o : wins->getChildWithTagNameIterator ("Open"))
+            openWindowKeys.add (o->getStringAttribute ("key"));
+    }
 
     auto applyEngineState = [](juce::AudioProcessor* eng, const juce::String& base64)
     {
@@ -14820,7 +14901,66 @@ void StandaloneEditor::deserializeUIState (const juce::XmlElement& root)
     restoreOrder ("InstOrder",  MixerPage::OrderKind::Inst);
     restoreOrder ("AudioOrder", MixerPage::OrderKind::Audio);
 
-    // Every window the restore loop framed needs its title-strip menu built.
+    // QA-Layout T5: frame exactly the windows the project saved as open --
+    // page keys route to hostPageInWindow; aux keys re-dispatch to their
+    // open functions (which rebuild content from live model state, never
+    // from the file).
+    mLoadingWindows = false;
+    for (const auto& key : openWindowKeys)
+    {
+        if (key.startsWith ("fx:"))
+        {
+            const juce::String rest = key.fromFirstOccurrenceOf (":", false, false);
+            const int ch = rest.upToFirstOccurrenceOf (":", false, false).getIntValue();
+            const juce::String uuid = rest.fromFirstOccurrenceOf (":", false, false);
+            if (auto* rack = EffectsPage::rackForChannelId (mProcessor.mVibeGraph, ch))
+                for (int s = 0; s < EffectRack::kNumSlots; ++s)
+                    if (rack->getSlotUuid (s) == uuid)
+                        { openEffectSlotWindow (ch, s); break; }
+            continue;
+        }
+        if (key.startsWith ("eq:"))
+        {
+            const juce::String rest = key.fromFirstOccurrenceOf (":", false, false);
+            const int ch = rest.upToFirstOccurrenceOf (":", false, false).getIntValue();
+            openEffectEqWindow (ch, rest.fromFirstOccurrenceOf (":", false, false) == "pre");
+            continue;
+        }
+        if (key.startsWith ("voxsat:"))
+        {
+            const juce::String rest = key.fromFirstOccurrenceOf (":", false, false);
+            const int idx = rest.upToFirstOccurrenceOf (":", false, false).getIntValue();
+            const juce::String kind = rest.fromFirstOccurrenceOf (":", false, false);
+            if      (kind == "chain") openVoxSatelliteWindow (idx, VoxSat::Chain);
+            else if (kind == "pitch") openVoxSatelliteWindow (idx, VoxSat::Pitch);
+            else if (kind == "align") openVoxSatelliteWindow (idx, VoxSat::Align);
+            else if (kind == "namir") openVoxSatelliteWindow (idx, VoxSat::NamIr);
+            continue;
+        }
+        if (key.startsWith ("instsat:"))
+        {
+            const juce::String rest = key.fromFirstOccurrenceOf (":", false, false);
+            const int idx = rest.upToFirstOccurrenceOf (":", false, false).getIntValue();
+            const juce::String kind = rest.fromFirstOccurrenceOf (":", false, false);
+            if      (kind == "pedals") openInstPedalsWindow (idx);
+            else if (kind == "namir")  openInstNamIrWindow  (idx);
+            continue;
+        }
+        if (key == "analyzer:master") { openMasterAnalyzerWindow(); continue; }
+
+        // Page key "<type>:<index>".
+        const int type = key.upToFirstOccurrenceOf (":", false, false).getIntValue();
+        const int idx  = key.fromFirstOccurrenceOf (":", false, false).getIntValue();
+        for (auto* e : mPages)
+        {
+            if (e == nullptr || (int) e->type != type) continue;
+            if (pageIndexOfEntry (*e) != idx) continue;
+            hostPageInWindow (*e);
+            break;
+        }
+    }
+
+    // Every window the pass above framed needs its title-strip menu built.
     // Mirrors the launch-path sweep in the constructor (2026-07-28 fix):
     // showPageForTab is what fills the strip, and only the preferred tab
     // selected below would otherwise get it -- every other restored window

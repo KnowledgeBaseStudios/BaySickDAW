@@ -483,3 +483,30 @@ shortcut. Held notes release on mode-off, octave shift, and tab switch.
 - **VoxPage cleanup:** caller-less `showEngineContextMenu` merged into the Menu dropdown
   (restores Lock/Rename/Duplicate + the factory preset root); dead picker scaffolding removed.
 - Vox/Inst tab close now closes that instance's satellites.
+
+---
+
+## 2026-08-03 — QA-Layout T5: window-state persistence — the three-lifetime model
+
+**Files:** `WorkspaceWindow.h/.cpp`, `StandaloneApp.cpp`, `StandaloneEditor.h/.cpp`
+
+- **Lifetime 1 (universal, in-memory):** the session map is now the ONE live store — every
+  window (Disk or Session) writes it on move/resize/close and reads it on open.  Close/reopen
+  returns to the same spot for every window type, players included.
+- **Lifetime 2 (settings.xml):** written ONCE at app exit (`writeSessionToSettings`, after
+  editor teardown so destructors flush final bounds) from a filtered view — SIZES for every
+  page window, PLACEMENT only for the four default tabs (Mixer/Builder/Effects/Piano Roll).
+  Player x/y attributes are stripped from old records.  The parse-and-rewrite-whole-file-per-
+  close smell is gone; the file is read only as a seed on a map miss (size-only records take
+  the default cascade position).
+- **Lifetime 3 (project file):** `serializeUIState` stores the full map + an `Open` record per
+  live window (pages by persist key, satellites/effect windows by aux key); load REPLACES the
+  map and frames exactly the saved-open set — the load path no longer force-opens every page
+  (`mLoadingWindows` guard in `hostPageInWindow`; aux keys re-dispatch through their open
+  functions).  Pre-T5 projects (no `<Windows>`) frame nothing; tabs are one ribbon click away.
+- **L16 crash survival:** rides the existing 15-min autosave — the serializer flushes all live
+  window bounds into the map before writing, so a crash loses at most one autosave interval of
+  layout.
+- **persistKeyFor defect fixed:** the index fill covered only Layers/Bass/Drums, so every
+  Clip/Vox/Inst/Plugins window shared one "type:-1" key (one saved position for all).  One
+  resolver (`pageIndexOfEntry`) now serves the key, the hint fill, and the load-time matcher.

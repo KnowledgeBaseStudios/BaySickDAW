@@ -410,17 +410,19 @@ void WorkspaceWindow::attachTo (Workspace& ws)
     mWorkspace = &ws;
     ws.addWindow (this);
 
-    auto saved = loadSavedBounds();
+    bool hasPos = true;
+    auto saved = loadSavedBounds (hasPos);
+    // First open: a readable default inset from the workspace origin, offset
+    // per already-open window so a fresh window never lands exactly on top
+    // of the one before it.  A SIZE-ONLY seed (T5: player sizes carry across
+    // projects, placement does not) keeps its size and takes the default spot.
+    const int step = 28 * juce::jmin (6, ws.getWindows().size() - 1);
     if (saved.isEmpty())
-    {
-        // First open: a readable default inset from the workspace origin, offset
-        // per already-open window so a fresh window never lands exactly on top
-        // of the one before it.
-        const int step = 28 * juce::jmin (6, ws.getWindows().size() - 1);
         saved = juce::Rectangle<int> (24 + step, 24 + step,
                                       juce::jmax (480, ws.getWidth()  * 2 / 3),
                                       juce::jmax (320, ws.getHeight() * 2 / 3));
-    }
+    else if (! hasPos)
+        saved.setPosition (24 + step, 24 + step);
     setBounds (saved);
 
     // Parent-client space: the peer's coordinates are measured from the MAIN
@@ -599,15 +601,49 @@ std::map<juce::String, juce::Rectangle<int>>& WorkspaceWindow::sessionBounds()
     return m;
 }
 
-juce::Rectangle<int> WorkspaceWindow::loadSavedBounds() const
+std::set<juce::String>& WorkspaceWindow::diskEligibleKeys()
 {
-    if (mPersistence == Persistence::Session)
+    static std::set<juce::String> s;
+    return s;
+}
+
+std::set<juce::String>& WorkspaceWindow::placementKeys()
+{
+    static std::set<juce::String> s;
+    return s;
+}
+
+const std::map<juce::String, juce::Rectangle<int>>& WorkspaceWindow::sessionBoundsMap()
+{
+    return sessionBounds();
+}
+
+void WorkspaceWindow::replaceSessionBounds (std::map<juce::String, juce::Rectangle<int>> m)
+{
+    sessionBounds() = std::move (m);
+}
+
+void WorkspaceWindow::registerPlacementPersistentKey (const juce::String& key)
+{
+    if (key.isNotEmpty()) placementKeys().insert (key);
+}
+
+juce::Rectangle<int> WorkspaceWindow::loadSavedBounds (bool& outHasPosition) const
+{
+    outHasPosition = true;
+
+    // Lifetime 1 first: close/reopen returns to the same spot for EVERY
+    // window, players included -- no store rule qualifies this.
     {
         auto& m = sessionBounds();
         auto it = m.find (mPersistKey);
-        return it != m.end() ? it->second : juce::Rectangle<int>();
+        if (it != m.end()) return it->second;
     }
+    if (mPersistence == Persistence::Session) return {};
 
+    // Map miss on a Disk window: seed from settings.xml (the layout the last
+    // exit flushed).  A record without x/y is a SIZE-ONLY seed -- player
+    // placement is filtered out of the global file by design.
     auto xml = juce::XmlDocument::parse (ProjectManager::getSettingsFile());
     if (! xml) return {};
     auto* root = xml->getChildByName (kRootTag);
@@ -616,6 +652,7 @@ juce::Rectangle<int> WorkspaceWindow::loadSavedBounds() const
     for (auto* w : root->getChildWithTagNameIterator (kWindowTag))
     {
         if (w->getStringAttribute ("key") != mPersistKey) continue;
+        outHasPosition = w->hasAttribute ("x") && w->hasAttribute ("y");
         return { w->getIntAttribute ("x"), w->getIntAttribute ("y"),
                  w->getIntAttribute ("w"), w->getIntAttribute ("h") };
     }
@@ -630,20 +667,28 @@ void WorkspaceWindow::saveBounds() const
     // save instead.
     if (workspace() == nullptr) return;
 
-    if (mPersistence == Persistence::Session)
+    // Lifetime 1: the map is the one live store.  Workspace-local, not
+    // parent-client -- storing raw peer bounds re-added the workspace origin
+    // on every close/reopen, so windows crept down-right each cycle; and the
+    // workspace moves when the main chrome changes height.
+    auto b = getBounds();
+    if (auto* ws = workspace())
     {
-        // Same workspace-local conversion the file branch below does; storing
-        // raw parent-client bounds re-added the workspace origin on every
-        // close/reopen, so session windows crept down-right each cycle.
-        auto b = getBounds();
-        if (auto* ws = workspace())
-        {
-            const auto o = ws->originInParentClient();
-            b.translate (-o.x, -o.y);
-        }
-        sessionBounds()[mPersistKey] = b;
-        return;
+        const auto o = ws->originInParentClient();
+        b.translate (-o.x, -o.y);
     }
+    sessionBounds()[mPersistKey] = b;
+
+    // Disk windows flush to settings.xml ONCE, at app exit
+    // (writeSessionToSettings) -- the per-close parse-and-rewrite of the
+    // whole file is gone (T5).
+    if (mPersistence == Persistence::Disk)
+        diskEligibleKeys().insert (mPersistKey);
+}
+
+void WorkspaceWindow::writeSessionToSettings()
+{
+    if (diskEligibleKeys().empty()) return;
 
     const auto file = ProjectManager::getSettingsFile();
     auto xml = juce::XmlDocument::parse (file);
@@ -655,29 +700,37 @@ void WorkspaceWindow::saveBounds() const
     auto* root = xml->getChildByName (kRootTag);
     if (root == nullptr) root = xml->createNewChildElement (kRootTag);
 
-    juce::XmlElement* rec = nullptr;
-    for (auto* w : root->getChildWithTagNameIterator (kWindowTag))
-        if (w->getStringAttribute ("key") == mPersistKey) { rec = w; break; }
-    if (rec == nullptr)
+    auto& m = sessionBounds();
+    for (const auto& key : diskEligibleKeys())
     {
-        rec = root->createNewChildElement (kWindowTag);
-        rec->setAttribute ("key", mPersistKey);
-    }
+        auto it = m.find (key);
+        if (it == m.end()) continue;
 
-    // Store WORKSPACE-LOCAL bounds, not the peer's parent-client bounds: the
-    // workspace moves when the main chrome changes height, and a stored
-    // parent-client position would drift by that delta on the next run.
-    auto b = getBounds();
-    if (auto* ws2 = workspace())
-    {
-        const auto o = ws2->originInParentClient();
-        b.translate (-o.x, -o.y);
-    }
-    rec->setAttribute ("x", b.getX());
-    rec->setAttribute ("y", b.getY());
-    rec->setAttribute ("w", b.getWidth());
-    rec->setAttribute ("h", b.getHeight());
+        juce::XmlElement* rec = nullptr;
+        for (auto* w : root->getChildWithTagNameIterator (kWindowTag))
+            if (w->getStringAttribute ("key") == key) { rec = w; break; }
+        if (rec == nullptr)
+        {
+            rec = root->createNewChildElement (kWindowTag);
+            rec->setAttribute ("key", key);
+        }
 
+        // Sizes for every window type; PLACEMENT only for the default tabs.
+        // A player's position is project content (lifetime 3) -- persisting
+        // it globally would carry one project's layout into the next.
+        rec->setAttribute ("w", it->second.getWidth());
+        rec->setAttribute ("h", it->second.getHeight());
+        if (placementKeys().count (key) > 0)
+        {
+            rec->setAttribute ("x", it->second.getX());
+            rec->setAttribute ("y", it->second.getY());
+        }
+        else
+        {
+            rec->removeAttribute ("x");
+            rec->removeAttribute ("y");
+        }
+    }
     xml->writeTo (file);
 }
 

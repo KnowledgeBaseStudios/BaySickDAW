@@ -1011,6 +1011,13 @@ void VibesynthStandaloneApp::shutdown()
         mWindow->clearContentComponent();
     }
 
+    // QA-Layout T5: settings.xml is written ONCE, here, from the in-memory
+    // map (sizes for every page window, placement for the default tabs
+    // only).  AFTER editor teardown on purpose: the window destructors are
+    // the last writers into the static map, so this flush sees every open
+    // window's final bounds.
+    WorkspaceWindow::writeSessionToSettings();
+
     if (shutdownOverlay)
         shutdownOverlay->setStepLabel ("Releasing audio device...");
     if (mDeviceManager)

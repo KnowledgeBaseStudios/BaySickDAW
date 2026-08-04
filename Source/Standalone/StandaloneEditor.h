@@ -190,6 +190,19 @@ private:
     // Stable per-logical-window key for bounds persistence (survives the
     // window object, which destroy-on-close makes short-lived).
     juce::String persistKeyFor (const PageEntry& entry) const;
+    // QA-Layout T5: the page's own index resolved from its live component
+    // (-1 for the system pages + the Rusty singleton).  One resolver serves
+    // persistKeyFor, hostPageInWindow's hint fill, and the load-time reopen
+    // matcher -- the old fill cascade covered only Layers/Bass/Drums, so
+    // every Clip/Vox/Inst/Plugins window shared a "type:-1" key.
+    int  pageIndexOfEntry (const PageEntry& entry) const;
+    // Sweep every live window's bounds into the lifetime-1 map.  Resizes
+    // have no end-of-gesture hook, so serialization flushes first (this is
+    // L16's "timer flush" -- the autosave calls the serializer).
+    void flushAllWindowBounds();
+    // True while deserializeUIState runs: nothing frames mid-load; the
+    // end-of-load pass frames exactly the windows the project saved as open.
+    bool mLoadingWindows { false };
     // Destroy-on-close: closing a window destroys the WINDOW AND THE PAGE, and
     // reopening rebuilds the page from the model.  The engine is untouched --
     // it is rig-owned since TS1 -- so audio and automation are unaffected.
