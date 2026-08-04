@@ -57,6 +57,13 @@ namespace MixerChannelIds
     // already move between each other, which is the existing unlocked
     // `_sendTo` behaviour rather than anything new.
     constexpr int kPluginsBus = 13;
+    // QA-Layout T10 (L13): optional secondary group buses on the kVoxBus2
+    // pattern -- always-allocated audio, lazy UI strip, spawned from the
+    // Mixer's "Add" menu.
+    constexpr int kLayersBus2 = 14;
+    constexpr int kBassBus2   = 15;
+    constexpr int kClipsBus2  = 16;
+    constexpr int kPluginsBus2 = 17;
     constexpr int kAuxBase   = 100;  // Aux 0..17 → 100..117 (G-7 polish: 16 → 18)
     constexpr int kLayerBase = 200;  // Layer insert 0..15 → 200..215
     constexpr int kBassBase  = 300;  // Bass insert 0..15 → 300..315
@@ -101,6 +108,10 @@ namespace MixerChannelIds
             case kInstBus3:  return "mixer_instbus3";
             case kRustyDrumsBus: return "mixer_rustybus";
             case kPluginsBus: return "mixer_pluginbus";
+            case kLayersBus2: return "mixer_layersbus2";
+            case kBassBus2:   return "mixer_bassbus2";
+            case kClipsBus2:  return "mixer_clipsbus2";
+            case kPluginsBus2: return "mixer_pluginbus2";
         }
         if (chId >= kLayerBase && chId < kLayerBase + 16)           return "mixer_layer_" + juce::String(chId - kLayerBase);
         if (chId >= kBassBase  && chId < kBassBase  + 16)           return "mixer_bass_"  + juce::String(chId - kBassBase);
@@ -121,7 +132,9 @@ namespace MixerChannelIds
             || chId == kFxBus     || chId == kClipsBus
             || chId == kVoxBus    || chId == kInstBus
             || chId == kVoxBus2   || chId == kInstBus2 || chId == kInstBus3
-            || chId == kRustyDrumsBus || chId == kPluginsBus;
+            || chId == kRustyDrumsBus || chId == kPluginsBus
+            || chId == kLayersBus2 || chId == kBassBus2
+            || chId == kClipsBus2  || chId == kPluginsBus2;
     }
 
     // Is this channel's main-out locked (cannot be rerouted)?
@@ -161,6 +174,10 @@ namespace MixerChannelIds
             case kInstBus3:  return "Inst Bus 3";
             case kRustyDrumsBus: return "RustyDrums Bus";
             case kPluginsBus: return "Plugins Bus";
+            case kLayersBus2: return "Layers Bus 2";
+            case kBassBus2:   return "Bass Bus 2";
+            case kClipsBus2:  return "Clips Bus 2";
+            case kPluginsBus2: return "Plugins Bus 2";
         }
         if (chId >= kLayerBase && chId < kLayerBase + 16) return "Layer " + juce::String(chId - kLayerBase + 1);
         if (chId >= kBassBase  && chId < kBassBase  + 16) return "Bass "  + juce::String(chId - kBassBase  + 1);
@@ -193,6 +210,10 @@ namespace MixerChannelIds
             case kInstBus3:  return kMaster;
             case kRustyDrumsBus: return kMaster;
             case kPluginsBus: return kMaster;
+            case kLayersBus2: return kMaster;
+            case kBassBus2:   return kMaster;
+            case kClipsBus2:  return kMaster;
+            case kPluginsBus2: return kMaster;
         }
         if (channelId >= kLayerBase && channelId < kLayerBase + 16)             return kLayersBus;
         if (channelId >= kBassBase  && channelId < kBassBase  + 16)             return kBassBus;
@@ -368,6 +389,13 @@ public:
     // routing works whether or not any plugin tab exists, and the bus sums
     // silence cheaply until strips spawn at kPluginBase..kPluginBase+19.
     EffectRack* getPluginsBusRack();
+    // QA-Layout T10 (L13): secondary group buses -- always allocated on the
+    // same reasoning as kVoxBus2 (silent pre-process is cheap; the activation
+    // flag only controls UI presence + route-picker filtering).
+    EffectRack* getLayersBus2Rack();
+    EffectRack* getBassBus2Rack();
+    EffectRack* getClipsBus2Rack();
+    EffectRack* getPluginsBus2Rack();
 
     // ── Per-page instrument EffectRacks ────────────────────────────────────────
     // These sit between each engine's pre-rack page EQ and the bus sum.
@@ -397,6 +425,11 @@ public:
     EQ8MsDSP* getInstBus3EQ();
     EQ8MsDSP* getRustyDrumsBusEQ();        // J-4
     EQ8MsDSP* getPluginsBusEQ();           // QA-ModelShell TS6
+    // QA-Layout T10: secondary group buses.
+    EQ8MsDSP* getLayersBus2EQ();
+    EQ8MsDSP* getBassBus2EQ();
+    EQ8MsDSP* getClipsBus2EQ();
+    EQ8MsDSP* getPluginsBus2EQ();
 
     // §P4.3: Pre-rack bus EQs - fresh EQ8MsDSP per bus, runs at the very start
     // of each bus's processBlock chain (input -> preEq -> rack -> postEq -> fader).
@@ -416,6 +449,11 @@ public:
     EQ8MsDSP* getInstBus3PreEQ();
     EQ8MsDSP* getRustyDrumsBusPreEQ();     // J-4
     EQ8MsDSP* getPluginsBusPreEQ();        // QA-ModelShell TS6
+    // QA-Layout T10: secondary group buses.
+    EQ8MsDSP* getLayersBus2PreEQ();
+    EQ8MsDSP* getBassBus2PreEQ();
+    EQ8MsDSP* getClipsBus2PreEQ();
+    EQ8MsDSP* getPluginsBus2PreEQ();
 
     // ── PDC - Plugin Delay Compensation ──────────────────────────────────────
     // Call from message thread after any effect is loaded/removed/bypassed.
@@ -763,6 +801,19 @@ public:
     std::atomic<float> pluginsBusPeakDb     { -60.f };   // QA-ModelShell TS6
     std::atomic<float> pluginsBusPeakDbL    { -60.f };
     std::atomic<float> pluginsBusPeakDbR    { -60.f };
+    // QA-Layout T10: secondary group buses.
+    std::atomic<float> layersBus2PeakDb     { -60.f };
+    std::atomic<float> layersBus2PeakDbL    { -60.f };
+    std::atomic<float> layersBus2PeakDbR    { -60.f };
+    std::atomic<float> bassBus2PeakDb       { -60.f };
+    std::atomic<float> bassBus2PeakDbL      { -60.f };
+    std::atomic<float> bassBus2PeakDbR      { -60.f };
+    std::atomic<float> clipsBus2PeakDb      { -60.f };
+    std::atomic<float> clipsBus2PeakDbL     { -60.f };
+    std::atomic<float> clipsBus2PeakDbR     { -60.f };
+    std::atomic<float> pluginsBus2PeakDb    { -60.f };
+    std::atomic<float> pluginsBus2PeakDbL   { -60.f };
+    std::atomic<float> pluginsBus2PeakDbR   { -60.f };
 
     // QA-RustyMeter part 2 (2026-05-30): per-bus windowed-RMS atoms for the
     // split meter's scrolling top half.  11 non-master buses x L/R (Master keeps
@@ -783,6 +834,11 @@ public:
     std::atomic<float> instBus3RmsDbL      { -60.f }, instBus3RmsDbR      { -60.f };
     std::atomic<float> rustyDrumsBusRmsDbL { -60.f }, rustyDrumsBusRmsDbR { -60.f };
     std::atomic<float> pluginsBusRmsDbL    { -60.f }, pluginsBusRmsDbR    { -60.f };  // TS6
+    // QA-Layout T10: secondary group buses.
+    std::atomic<float> layersBus2RmsDbL    { -60.f }, layersBus2RmsDbR    { -60.f };
+    std::atomic<float> bassBus2RmsDbL      { -60.f }, bassBus2RmsDbR      { -60.f };
+    std::atomic<float> clipsBus2RmsDbL     { -60.f }, clipsBus2RmsDbR     { -60.f };
+    std::atomic<float> pluginsBus2RmsDbL   { -60.f }, pluginsBus2RmsDbR   { -60.f };
 
     // QA-AudioMeters (2026-05-24): per-kind insert peak atomics, parallel to the
     // per-bus atomics above.  InsertNode::process publishes via publishPeakReading;
@@ -859,7 +915,7 @@ private:
     // pluginbus).
     // CPU-safeguarding standing rule: avoid string-keyed getRawParameterValue
     // lookups per audio block; cache the raw atomic ptrs once + reuse.
-    std::array<std::atomic<float>*, 12> mBusSoloPtr {};
+    std::array<std::atomic<float>*, 16> mBusSoloPtr {};
 
     // Instrument channel nodes: keyed by the ID returned by addInstrChannel().
     // Insertion order preserved via mInstrChannelOrder for dropdown display.
@@ -913,6 +969,11 @@ private:
     // QA-ModelShell TS6 (BLU-447): hosted VST3 instrument bus, same
     // always-allocated shape as the Rusty bus above.
     std::unique_ptr<InstrChannelNode> mPluginsBusNode;
+    // QA-Layout T10 (L13): secondary group buses, kVoxBus2 shape.
+    std::unique_ptr<InstrChannelNode> mLayersBus2Node;
+    std::unique_ptr<InstrChannelNode> mBassBus2Node;
+    std::unique_ptr<InstrChannelNode> mClipsBus2Node;
+    std::unique_ptr<InstrChannelNode> mPluginsBus2Node;
     // mRustyInserts std::map removed by QA-InsertMaps 2026-05-24 (flattened into
     // mInsertsByChannel above; chId range 800..812 for Rusty kit strips).
 

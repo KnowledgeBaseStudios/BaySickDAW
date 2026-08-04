@@ -647,6 +647,10 @@ void VibeSynthProcessor::prepareToPlay(double sampleRate, int samplesPerBlock)
         MixerChannelIds::kInstBus3,
         MixerChannelIds::kRustyDrumsBus,
         MixerChannelIds::kPluginsBus,       // QA-ModelShell TS6
+        MixerChannelIds::kLayersBus2,       // QA-Layout T10
+        MixerChannelIds::kBassBus2,
+        MixerChannelIds::kClipsBus2,
+        MixerChannelIds::kPluginsBus2,
     };
     for (size_t i = 0; i < kBusChannelIds.size(); ++i)
     {
@@ -4703,6 +4707,19 @@ void VibeSynthProcessor::drainMeterAtomicsForUI()
     drainAndMerge (mPluginsBusPeakDb,  mVibeGraph.pluginsBusPeakDb);
     drainAndMerge (mPluginsBusPeakDbL, mVibeGraph.pluginsBusPeakDbL);
     drainAndMerge (mPluginsBusPeakDbR, mVibeGraph.pluginsBusPeakDbR);
+    // QA-Layout T10: secondary group buses.
+    drainAndMerge (mLayersBus2PeakDb,   mVibeGraph.layersBus2PeakDb);
+    drainAndMerge (mLayersBus2PeakDbL,  mVibeGraph.layersBus2PeakDbL);
+    drainAndMerge (mLayersBus2PeakDbR,  mVibeGraph.layersBus2PeakDbR);
+    drainAndMerge (mBassBus2PeakDb,     mVibeGraph.bassBus2PeakDb);
+    drainAndMerge (mBassBus2PeakDbL,    mVibeGraph.bassBus2PeakDbL);
+    drainAndMerge (mBassBus2PeakDbR,    mVibeGraph.bassBus2PeakDbR);
+    drainAndMerge (mClipsBus2PeakDb,    mVibeGraph.clipsBus2PeakDb);
+    drainAndMerge (mClipsBus2PeakDbL,   mVibeGraph.clipsBus2PeakDbL);
+    drainAndMerge (mClipsBus2PeakDbR,   mVibeGraph.clipsBus2PeakDbR);
+    drainAndMerge (mPluginsBus2PeakDb,  mVibeGraph.pluginsBus2PeakDb);
+    drainAndMerge (mPluginsBus2PeakDbL, mVibeGraph.pluginsBus2PeakDbL);
+    drainAndMerge (mPluginsBus2PeakDbR, mVibeGraph.pluginsBus2PeakDbR);
 
     // QA-AudioMeters (2026-05-24): per-kind insert mirror drain.  Same
     // drainAndMerge primitive as the bus loop above; 8 InsertKinds.  Audio
@@ -4913,6 +4930,10 @@ void VibeSynthProcessor::updateAllPostRackEQsFromApvts()
         { "mixer_instbus3", [](VibeGraph& g) { return g.getInstBus3EQ();     } },
         { "mixer_rustybus", [](VibeGraph& g) { return g.getRustyDrumsBusEQ(); } },  // J-6
         { "mixer_pluginbus", [](VibeGraph& g) { return g.getPluginsBusEQ();  } },  // TS6 (missed, fixed TS7)
+        { "mixer_layersbus2",  [](VibeGraph& g) { return g.getLayersBus2EQ();  } },  // T10
+        { "mixer_bassbus2",    [](VibeGraph& g) { return g.getBassBus2EQ();    } },
+        { "mixer_clipsbus2",   [](VibeGraph& g) { return g.getClipsBus2EQ();   } },
+        { "mixer_pluginbus2",  [](VibeGraph& g) { return g.getPluginsBus2EQ(); } },
     };
     for (const auto& bp : kBusEQs)
     {
@@ -4970,6 +4991,10 @@ void VibeSynthProcessor::updateAllPreRackEQsFromApvts()
         { "mixer_instbus3", [](VibeGraph& g) { return g.getInstBus3PreEQ();     } },
         { "mixer_rustybus", [](VibeGraph& g) { return g.getRustyDrumsBusPreEQ(); } },  // J-6
         { "mixer_pluginbus", [](VibeGraph& g) { return g.getPluginsBusPreEQ(); } },   // TS6 (missed, fixed TS7)
+        { "mixer_layersbus2",  [](VibeGraph& g) { return g.getLayersBus2PreEQ();  } },  // T10
+        { "mixer_bassbus2",    [](VibeGraph& g) { return g.getBassBus2PreEQ();    } },
+        { "mixer_clipsbus2",   [](VibeGraph& g) { return g.getClipsBus2PreEQ();   } },
+        { "mixer_pluginbus2",  [](VibeGraph& g) { return g.getPluginsBus2PreEQ(); } },
     };
     for (const auto& bp : kBusPreEQs)
     {
@@ -7320,6 +7345,12 @@ void VibeSynthProcessor::ensureMixerBusAndMasterParams()
     // no edge to Master.  Hosted plugin audio had no path out.  Every other bus
     // on this list is here for exactly that reason.
     ensureMixerStripParams("mixer_pluginbus", MixerStripKind::Bus,   kMaster);
+    // QA-Layout T10 (L13): secondary group buses -- always registered for the
+    // same reason as every bus above.
+    ensureMixerStripParams("mixer_layersbus2",  MixerStripKind::Bus, kMaster);
+    ensureMixerStripParams("mixer_bassbus2",    MixerStripKind::Bus, kMaster);
+    ensureMixerStripParams("mixer_clipsbus2",   MixerStripKind::Bus, kMaster);
+    ensureMixerStripParams("mixer_pluginbus2",  MixerStripKind::Bus, kMaster);
 }
 
 // QA-G3Smoke Swing (SW-6): eager bulk registration at startup (mirrors

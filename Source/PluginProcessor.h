@@ -636,6 +636,19 @@ public:
     std::atomic<float> mPluginsBusPeakDb        { -60.0f };
     std::atomic<float> mPluginsBusPeakDbL       { -60.0f };
     std::atomic<float> mPluginsBusPeakDbR       { -60.0f };
+    // QA-Layout T10: secondary group buses.
+    std::atomic<float> mLayersBus2PeakDb        { -60.0f };
+    std::atomic<float> mLayersBus2PeakDbL       { -60.0f };
+    std::atomic<float> mLayersBus2PeakDbR       { -60.0f };
+    std::atomic<float> mBassBus2PeakDb          { -60.0f };
+    std::atomic<float> mBassBus2PeakDbL         { -60.0f };
+    std::atomic<float> mBassBus2PeakDbR         { -60.0f };
+    std::atomic<float> mClipsBus2PeakDb         { -60.0f };
+    std::atomic<float> mClipsBus2PeakDbL        { -60.0f };
+    std::atomic<float> mClipsBus2PeakDbR        { -60.0f };
+    std::atomic<float> mPluginsBus2PeakDb       { -60.0f };
+    std::atomic<float> mPluginsBus2PeakDbL      { -60.0f };
+    std::atomic<float> mPluginsBus2PeakDbR      { -60.0f };
 
     // QA-AudioMeters fix-up (2026-05-24): kPeakAtomicNegInf constant deleted.
     // It was introduced in QA-Eg but never referenced -- every drainAndMerge /
@@ -1835,8 +1848,8 @@ private:
 
     // Batch 7 (2026-05-06): passive accumulator strip tasks.
     // Aux: created lazily via ensureAuxInsert; up to kMaxAuxStrips (18).
-    // Bus: 12 always-on buses registered idempotently in prepareToPlay.
-    static constexpr int kNumBatch7Buses = 12;   // QA-ModelShell TS6: +Plugins Bus
+    // Bus: always-on buses registered idempotently in prepareToPlay.
+    static constexpr int kNumBatch7Buses = 16;   // QA-Layout T10: +4 secondary group buses
     std::array<std::unique_ptr<PassiveStripTask>, MixerChannelIds::kMaxAuxStrips> mAuxRenderTasks;
     std::array<std::unique_ptr<PassiveStripTask>, kNumBatch7Buses>                mBusRenderTasks;
 

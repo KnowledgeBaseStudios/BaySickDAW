@@ -62,11 +62,12 @@ static juce::Colour pickStripColor(int chId, int destChannelId)
     using namespace MixerChannelIds;
     // Aux: always Effects-tab pink
     if (chId >= kAuxBase && chId < kAuxBase + 16) return juce::Colour(kEffectsTabPink);
-    // Colored bus groups - track the main-out destination
-    if (destChannelId == kLayersBus) return VC::LayerCol[0];
-    if (destChannelId == kBassBus)   return VC::BassCol[0];
+    // Colored bus groups - track the main-out destination.  T10: secondary
+    // group buses share their family accent.
+    if (destChannelId == kLayersBus || destChannelId == kLayersBus2) return VC::LayerCol[0];
+    if (destChannelId == kBassBus   || destChannelId == kBassBus2)   return VC::BassCol[0];
     if (destChannelId == kDrumsBus)  return VC::DrumsCol;
-    if (destChannelId == kClipsBus)  return VC::Warm;
+    if (destChannelId == kClipsBus  || destChannelId == kClipsBus2)  return VC::Warm;
     if (destChannelId == kFxBus)     return juce::Colour(kEffectsTabPink);
     // 2026-04-30: Vox + Inst destination buses got teal + navy mirrors of
     // the matching ribbon tabs.  Was missing - Vox/Inst insert strips
@@ -83,7 +84,7 @@ static juce::Colour pickStripColor(int chId, int destChannelId)
     if (destChannelId == kRustyDrumsBus) return VC::DrumsCol;
     // QA-ModelShell TS6: Plugins Bus strips carry the purple accent that the
     // ribbon tab and the bus group divider also use -- one channel identity.
-    if (destChannelId == kPluginsBus) return VC::Purple;
+    if (destChannelId == kPluginsBus || destChannelId == kPluginsBus2) return VC::Purple;
     // Direct Routing / aux chain: fall back to the strip's natural color
     if (chId >= kLayerBase && chId < kLayerBase + 16) return VC::LayerCol[0];
     if (chId >= kBassBase  && chId < kBassBase  + 16) return VC::BassCol[0];
@@ -138,22 +139,17 @@ MixerPage::CableOverlay::CableOverlay(MixerPage& o) : owner(o)
     // every cable strobed in lockstep (all cables share the same cached
     // bitmap; per-frame invalidation thrashed the cache).  Paint directly
     // each frame instead.
-    // hitTest() gates click-through: only intercepts near sockets or while dragging.
+    // hitTest() gates click-through: only intercepts near a cable (T10/L12).
     setInterceptsMouseClicks(true, false);
 }
 
 bool MixerPage::CableOverlay::hitTest(int x, int y)
 {
-    if (mDragging) return true;
-    if (mPendingSendSrcId >= 0) return true;   // B5: intercept everything in send-placement mode
-    if (mPendingScSrcId   >= 0) return true;   // C.4 Phase 1: same for SC-placement mode
-
+    // QA-Layout T10 (L12): the click-to-place + drag routing modes are
+    // retired (targets are picked from the "+" menu now) -- the overlay only
+    // intercepts near a cable, for the right-click property popup.
     auto pt = juce::Point<float>((float) x, (float) y);
-
-    // B6: right-click near a cable should be intercepted
-    if (hitTestCable(pt).srcId >= 0) return true;
-
-    return findSocketNear(pt, 14.f, true) >= 0;
+    return hitTestCable(pt).srcId >= 0;
 }
 
 // QA-Eg: deep dual-stub cable path - 200 px base drop plus 0.4 * horizontal
@@ -251,7 +247,6 @@ void MixerPage::CableOverlay::paint(juce::Graphics& g)
         for (const auto& e : edges)
         {
             if (! e.isMainOut) continue;
-            if (mDragging && e.srcId == mDragSrcId) continue;
 
             auto src = owner.getSocketPosition(e.srcId);
             auto dst = owner.getSocketPosition(e.dstId);
@@ -342,7 +337,6 @@ void MixerPage::CableOverlay::paint(juce::Graphics& g)
         {
             if (! e.isMainOut) continue;
             if (e.dstId != kMasterCh) continue;
-            if (mDragging && e.srcId == mDragSrcId) continue;
 
             auto src = owner.getSocketPosition(e.srcId);
             auto dst = owner.getSocketPosition(e.dstId);
@@ -388,64 +382,10 @@ void MixerPage::CableOverlay::paint(juce::Graphics& g)
     }
 
 
-    // Ghost cable while dragging the main-out (no telemetry: no committed source)
-    if (mDragging)
-    {
-        g.setColour(juce::Colour(kCableMain).withAlpha(0.45f));
-        g.strokePath(getMixerCablePath(mDragSrcSocket.x, mDragSrcSocket.y,
-                                       mDragMousePos.x,  mDragMousePos.y),
-                     mainStroke);
-    }
-
-    // B5: ghost cable in send-placement mode (follows cursor) - pink.
-    if (mPendingSendSrcId >= 0)
-    {
-        auto srcSock = owner.getSocketPosition(mPendingSendSrcId);
-        if (srcSock.x >= 0)
-        {
-            g.setColour(juce::Colour(kCableSend).withAlpha(0.40f));
-            g.strokePath(getMixerCablePath(srcSock.x, srcSock.y,
-                                           mDragMousePos.x, mDragMousePos.y),
-                         juce::PathStrokeType(2.0f));
-        }
-    }
-
-    // C.4 Phase 1: ghost cable in SC-placement mode - white.
-    if (mPendingScSrcId >= 0)
-    {
-        auto srcSock = owner.getSocketPosition(mPendingScSrcId);
-        if (srcSock.x >= 0)
-        {
-            g.setColour(juce::Colour(kCableSc).withAlpha(0.45f));
-            g.strokePath(getMixerCablePath(srcSock.x, srcSock.y,
-                                           mDragMousePos.x, mDragMousePos.y),
-                         juce::PathStrokeType(2.0f));
-        }
-    }
-
-    // Red flash on rejected strip
-    if (mFlashStripId >= 0 && mFlashCountdown > 0)
-    {
-        if (auto* strip = owner.findStripByChannelId(mFlashStripId))
-        {
-            auto sb = strip->getBoundsInParent();
-            juce::Rectangle<float> flashRect;
-
-            if (strip->getParentComponent() == &owner)
-            {
-                flashRect = sb.toFloat();
-            }
-            else
-            {
-                float px = owner.mViewport->getX() + sb.getX() - owner.mViewport->getViewPositionX();
-                float py = owner.mViewport->getY() + sb.getY() - owner.mViewport->getViewPositionY();
-                flashRect = { px, py, (float)sb.getWidth(), (float)sb.getHeight() };
-            }
-
-            g.setColour(juce::Colour(0xffff2020).withAlpha(0.35f));
-            g.fillRoundedRectangle(flashRect, 3.f);
-        }
-    }
+    // QA-Layout T10 (L12): the drag/placement ghost cables + the red
+    // rejected-drop flash are gone with the modes that drew them -- routing
+    // targets are picked from the "+" menu, where illegal targets are simply
+    // disabled rows.
 }
 
 void MixerPage::CableOverlay::mouseDown(const juce::MouseEvent& e)
@@ -498,307 +438,14 @@ void MixerPage::CableOverlay::mouseDown(const juce::MouseEvent& e)
         return;
     }
 
-    // B5: send-placement mode - click commits the send
-    if (mPendingSendSrcId >= 0)
-    {
-        int dstId = findStripUnder(e.position);
-
-        if (dstId < 0 || dstId == mPendingSendSrcId)
-        {
-            cancelSendPlacement();
-            return;
-        }
-
-        // Routing rule check for sends
-        using namespace MixerChannelIds;
-        // ALL sends must land on an Aux strip. Sidechain routing is a separate
-        // feature (deferred post-5F-9). FX Bus is reachable only via aux-send.
-        if (!isValidBusSendTarget(dstId))
-        {
-            mFlashStripId = dstId; mFlashCountdown = 6; startTimerHz(30);
-            cancelSendPlacement();
-            return;
-        }
-
-        // Cycle check
-        if (owner.mProcessor.mVibeGraph.getRoutingGraph().wouldCreateCycle(mPendingSendSrcId, dstId))
-        {
-            mFlashStripId = dstId; mFlashCountdown = 6; startTimerHz(30);
-            cancelSendPlacement();
-            return;
-        }
-
-        // Find available send slot (0..3)
-        const juce::String prefix = prefixFromChannelId(mPendingSendSrcId);
-        int slot = findAvailableSendSlot(prefix);
-        if (slot < 0)
-        {
-            // All 4 send slots full - flash the source strip
-            mFlashStripId = mPendingSendSrcId; mFlashCountdown = 6; startTimerHz(30);
-            cancelSendPlacement();
-            return;
-        }
-
-        // Commit: write _sendN_to APVTS param
-        const juce::String sp = prefix + "_send" + juce::String(slot);
-        if (auto* p = dynamic_cast<juce::RangedAudioParameter*>(
-                owner.mProcessor.apvts.getParameter(sp + "_to")))
-            p->setValueNotifyingHost(p->getNormalisableRange().convertTo0to1((float)dstId));
-
-        cancelSendPlacement();
-        return;
-    }
-
-    // C.4 Phase 1 (2026-04-30): sidechain-placement mode - click commits SC
-    // on the TARGET strip's _sc_recv{N}_from (target-side encoding so per-
-    // module pickers see stable line indices regardless of cable order).
-    if (mPendingScSrcId >= 0)
-    {
-        int dstId = findStripUnder(e.position);
-
-        if (dstId < 0 || dstId == mPendingScSrcId)
-        {
-            cancelSidechainPlacement();
-            return;
-        }
-
-        // Cycle check (covers SC + send + main edges combined).
-        if (owner.mProcessor.mVibeGraph.getRoutingGraph().wouldCreateCycle(mPendingScSrcId, dstId))
-        {
-            mFlashStripId = dstId; mFlashCountdown = 6; startTimerHz(30);
-            cancelSidechainPlacement();
-            return;
-        }
-
-        // Find available SC receive slot on the TARGET (0..3).
-        const juce::String targetPrefix =
-            MixerChannelIds::prefixFromChannelId(dstId);
-        int slot = findAvailableScRecvSlot(targetPrefix);
-        if (slot < 0)
-        {
-            // Target's 4 SC receive lines are full - flash the target.
-            mFlashStripId = dstId; mFlashCountdown = 6; startTimerHz(30);
-            cancelSidechainPlacement();
-            return;
-        }
-
-        // Commit: write target's _sc_recv{N}_from with source's channel id.
-        const juce::String sp = targetPrefix + "_sc_recv" + juce::String(slot);
-        if (auto* p = dynamic_cast<juce::RangedAudioParameter*>(
-                owner.mProcessor.apvts.getParameter(sp + "_from")))
-            p->setValueNotifyingHost(p->getNormalisableRange().convertTo0to1((float) mPendingScSrcId));
-
-        cancelSidechainPlacement();
-        return;
-    }
-
-    // B4: main-out drag - click near a non-locked socket
-    int chId = findSocketNear(e.position, 14.f, true);
-    if (chId < 0) return;
-
-    mDragging      = true;
-    mDragSrcId     = chId;
-    mDragSrcSocket = owner.getSocketPosition(chId);
-    mDragMousePos  = e.position;
-    repaint();
+    // QA-Layout T10 (L12): non-right clicks do nothing -- the click-to-place
+    // send/SC modes and the main-out socket drag are retired; every routing
+    // action lives on the strip's "+" target menu.
+    juce::ignoreUnused (e);
 }
 
-void MixerPage::CableOverlay::mouseDrag(const juce::MouseEvent& e)
-{
-    if (!mDragging) return;
-    mDragMousePos = e.position;
-    repaint();
-}
-
-void MixerPage::CableOverlay::mouseUp(const juce::MouseEvent& e)
-{
-    if (!mDragging) { return; }
-    mDragging = false;
-
-    int dstId = findStripUnder(e.position);
-
-    if (dstId < 0 || dstId == mDragSrcId)
-    {
-        // Dropped on empty space or self - cancel, cable snaps back
-        repaint();
-        return;
-    }
-
-    // Routing rule check
-    if (!isRouteAllowed(mDragSrcId, dstId))
-    {
-        mFlashStripId   = dstId;
-        mFlashCountdown = 6;   // ~200ms at 30fps
-        startTimerHz(30);
-        repaint();
-        return;
-    }
-
-    // Cycle check
-    if (owner.mProcessor.mVibeGraph.getRoutingGraph().wouldCreateCycle(mDragSrcId, dstId))
-    {
-        mFlashStripId   = dstId;
-        mFlashCountdown = 6;
-        startTimerHz(30);
-        repaint();
-        return;
-    }
-
-    // Commit: write _sendTo APVTS param for the source strip
-    const juce::String prefix = MixerChannelIds::prefixFromChannelId(mDragSrcId);
-    if (prefix.isNotEmpty())
-    {
-        if (auto* p = dynamic_cast<juce::RangedAudioParameter*>(
-                owner.mProcessor.apvts.getParameter(prefix + "_sendTo")))
-            p->setValueNotifyingHost(p->getNormalisableRange().convertTo0to1((float)dstId));
-    }
-
-    repaint();
-}
-
-void MixerPage::CableOverlay::timerCallback()
-{
-    if (mFlashCountdown > 0)
-    {
-        --mFlashCountdown;
-        repaint();
-    }
-    else
-    {
-        mFlashStripId = -1;
-        stopTimer();
-        repaint();
-    }
-}
-
-int MixerPage::CableOverlay::findSocketNear(juce::Point<float> pt, float radius,
-                                              bool skipLocked) const
-{
-    // Check Master + 5 buses + all insert maps + aux
-    auto check = [&](int chId) -> bool
-    {
-        if (skipLocked && MixerChannelIds::isMainOutLocked(chId))
-            return false;
-        auto sock = owner.getSocketPosition(chId);
-        return sock.x >= 0 && sock.getDistanceFrom(pt) < radius;
-    };
-
-    using namespace MixerChannelIds;
-    // Don't offer master/bus sockets for dragging (locked main-out)
-    if (!skipLocked)
-    {
-        if (check(kMaster))    return kMaster;
-        if (check(kLayersBus)) return kLayersBus;
-        if (check(kBassBus))   return kBassBus;
-        if (check(kDrumsBus))  return kDrumsBus;
-        if (check(kFxBus))     return kFxBus;
-        if (check(kClipsBus))  return kClipsBus;
-        // G-6 (2026-04-29): Vox + Inst buses (primary + secondary) were
-        // missing here pre-G-6.  Without them, dragging a cable into a Vox/
-        // Inst bus did nothing.  Now fully supported as drop sockets.
-        if (check(kVoxBus))    return kVoxBus;
-        if (check(kInstBus))   return kInstBus;
-        if (owner.isVoxBus2Active()  && check(kVoxBus2))   return kVoxBus2;
-        if (owner.isInstBus2Active() && check(kInstBus2))  return kInstBus2;
-        if (owner.isInstBus3Active() && check(kInstBus3))  return kInstBus3;
-        // J-5 (2026-05-03): RustyDrums Bus is a valid drop socket whenever
-        // the singleton has spawned its strips (mRustyDrumsBusActive flag).
-        if (owner.mRustyDrumsBusActive && check(kRustyDrumsBus)) return kRustyDrumsBus;
-        if (owner.mPluginsBusActive && check(kPluginsBus)) return kPluginsBus;
-    }
-
-    for (auto& [tabId, strip] : owner.mLayerStrips)
-        if (check(layerInsert(tabId))) return layerInsert(tabId);
-    for (auto& [tabId, strip] : owner.mBassStrips)
-        if (check(bassInsert(tabId))) return bassInsert(tabId);
-    for (auto& [slot, strip] : owner.mDrumStrips)
-        if (check(drumInsert(slot))) return drumInsert(slot);
-    for (auto& [row, strip] : owner.mAudioStrips)
-        if (check(audioInsert(row))) return audioInsert(row);
-    for (auto& [idx, strip] : owner.mAuxStrips)
-        if (check(auxStrip(idx))) return auxStrip(idx);
-    // R1 (2026-04-23)
-    for (auto& [idx, strip] : owner.mVoxStrips)
-        if (check(voxInsert(idx))) return voxInsert(idx);
-    for (auto& [idx, strip] : owner.mInstStrips)
-        if (check(instInsert(idx))) return instInsert(idx);
-    // J-5 (2026-05-03)
-    for (auto& [idx, strip] : owner.mRustyStrips)
-        if (check(rustyInsert(idx))) return rustyInsert(idx);
-    // TS6 (BLU-447) -- MISSED, fixed TS7 2026-07-30.  The bus was already a
-    // socket here; its member strips were not, so a plugin strip's own cable
-    // could not be grabbed.
-    for (auto& [idx, strip] : owner.mPluginStrips)
-        if (check(pluginInsert(idx))) return pluginInsert(idx);
-
-    return -1;
-}
-
-int MixerPage::CableOverlay::findStripUnder(juce::Point<float> pt) const
-{
-    // Check all strips - is pt within their page-coords bounds?
-    auto checkBounds = [&](int chId) -> bool
-    {
-        auto* strip = owner.findStripByChannelId(chId);
-        if (!strip || !strip->isVisible()) return false;
-
-        auto sb = strip->getBoundsInParent();
-        juce::Rectangle<float> rect;
-
-        if (strip->getParentComponent() == &owner)
-        {
-            rect = sb.toFloat();
-        }
-        else
-        {
-            float px = owner.mViewport->getX() + sb.getX() - owner.mViewport->getViewPositionX();
-            float py = owner.mViewport->getY() + sb.getY() - owner.mViewport->getViewPositionY();
-            rect = { px, py, (float)sb.getWidth(), (float)sb.getHeight() };
-        }
-
-        return rect.contains(pt);
-    };
-
-    using namespace MixerChannelIds;
-    if (checkBounds(kMaster))    return kMaster;
-    if (checkBounds(kLayersBus)) return kLayersBus;
-    if (checkBounds(kBassBus))   return kBassBus;
-    if (checkBounds(kDrumsBus))  return kDrumsBus;
-    if (checkBounds(kFxBus))     return kFxBus;
-    if (checkBounds(kClipsBus))  return kClipsBus;
-    // G-6 (2026-04-29): Vox + Inst buses (primary + secondary).  Pre-G-6
-    // these weren't in this list which is why cable-drag-to-bus didn't work.
-    if (checkBounds(kVoxBus))    return kVoxBus;
-    if (checkBounds(kInstBus))   return kInstBus;
-    if (owner.isVoxBus2Active()  && checkBounds(kVoxBus2))   return kVoxBus2;
-    if (owner.isInstBus2Active() && checkBounds(kInstBus2))  return kInstBus2;
-    if (owner.isInstBus3Active() && checkBounds(kInstBus3))  return kInstBus3;
-    if (owner.mRustyDrumsBusActive && checkBounds(kRustyDrumsBus)) return kRustyDrumsBus;
-    if (owner.mPluginsBusActive && checkBounds(kPluginsBus)) return kPluginsBus;
-
-    for (auto& [tabId, s] : owner.mLayerStrips)
-        if (checkBounds(layerInsert(tabId))) return layerInsert(tabId);
-    for (auto& [tabId, s] : owner.mBassStrips)
-        if (checkBounds(bassInsert(tabId))) return bassInsert(tabId);
-    for (auto& [slot, s] : owner.mDrumStrips)
-        if (checkBounds(drumInsert(slot))) return drumInsert(slot);
-    for (auto& [row, s] : owner.mAudioStrips)
-        if (checkBounds(audioInsert(row))) return audioInsert(row);
-    for (auto& [idx, s] : owner.mAuxStrips)
-        if (checkBounds(auxStrip(idx))) return auxStrip(idx);
-    // R1 (2026-04-23)
-    for (auto& [idx, s] : owner.mVoxStrips)
-        if (checkBounds(voxInsert(idx))) return voxInsert(idx);
-    for (auto& [idx, s] : owner.mInstStrips)
-        if (checkBounds(instInsert(idx))) return instInsert(idx);
-    // J-5 (2026-05-03)
-    for (auto& [idx, s] : owner.mRustyStrips)
-        if (checkBounds(rustyInsert(idx))) return rustyInsert(idx);
-    for (auto& [idx, s] : owner.mPluginStrips)   // TS6 (missed, fixed TS7)
-        if (checkBounds(pluginInsert(idx))) return pluginInsert(idx);
-
-    return -1;
-}
+// QA-Layout T10 (L12): timerCallback (rejected-drop flash), findSocketNear
+// and findStripUnder deleted with the drag/placement modes they served.
 
 bool MixerPage::CableOverlay::isRouteAllowed(int srcId, int dstId) const
 {
@@ -824,13 +471,19 @@ bool MixerPage::CableOverlay::isRouteAllowed(int srcId, int dstId) const
     const bool dstIsMaster = (dstId == kMaster);
     const bool dstIsAux    = (dstId >= kAuxBase && dstId < kAuxBase + 16);
 
-    // Layer insert: Layers Bus · Bass Bus · Master
+    // Layer insert: Layers Bus · Bass Bus · Master.  T10: + active secondary
+    // family buses (activation checked so cables to inactive buses don't open
+    // invisible routing).
     if (srcIsLayer)
-        return dstIsMaster || dstId == kLayersBus || dstId == kBassBus;
+        return dstIsMaster || dstId == kLayersBus || dstId == kBassBus
+            || (dstId == kLayersBus2 && owner.isLayersBus2Active())
+            || (dstId == kBassBus2   && owner.isBassBus2Active());
 
-    // Bass insert: Bass Bus · Layers Bus · Master
+    // Bass insert: Bass Bus · Layers Bus · Master (+ T10 secondaries).
     if (srcIsBass)
-        return dstIsMaster || dstId == kBassBus || dstId == kLayersBus;
+        return dstIsMaster || dstId == kBassBus || dstId == kLayersBus
+            || (dstId == kBassBus2   && owner.isBassBus2Active())
+            || (dstId == kLayersBus2 && owner.isLayersBus2Active());
 
     // Drum insert: Drums Bus · Master
     if (srcIsDrum)
@@ -842,7 +495,10 @@ bool MixerPage::CableOverlay::isRouteAllowed(int srcId, int dstId) const
     // is the Layer rule plus its own bus, not a new routing class.
     if (srcIsPlugin)
         return dstIsMaster || dstId == kPluginsBus
-            || dstId == kLayersBus || dstId == kBassBus;
+            || dstId == kLayersBus || dstId == kBassBus
+            || (dstId == kPluginsBus2 && owner.isPluginsBus2Active())
+            || (dstId == kLayersBus2  && owner.isLayersBus2Active())
+            || (dstId == kBassBus2    && owner.isBassBus2Active());
 
     // J-5 (2026-05-03): Rusty insert main-out is LOCKED to kRustyDrumsBus
     // (enforced via isMainOutLocked).  This rule covers send cables only -
@@ -857,7 +513,10 @@ bool MixerPage::CableOverlay::isRouteAllowed(int srcId, int dstId) const
         return dstIsMaster || dstId == kLayersBus || dstId == kBassBus
             || dstId == kDrumsBus || dstId == kClipsBus
             || dstId == kVoxBus  || dstId == kInstBus
-            || dstId == kVoxBus2 || dstId == kInstBus2 || dstId == kInstBus3;
+            || dstId == kVoxBus2 || dstId == kInstBus2 || dstId == kInstBus3
+            || (dstId == kClipsBus2  && owner.isClipsBus2Active())
+            || (dstId == kLayersBus2 && owner.isLayersBus2Active())
+            || (dstId == kBassBus2   && owner.isBassBus2Active());
 
     // Aux strip: Master · FX Bus · other Aux
     if (srcIsAux)
@@ -883,57 +542,10 @@ bool MixerPage::CableOverlay::isRouteAllowed(int srcId, int dstId) const
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 5F-4b B5: send-placement mode
+// QA-Layout T10 (L12): the send/SC placement modes (mouseMove ghost tracking,
+// Escape cancel, start/cancel pairs) are deleted -- the slot finders below
+// survive because the "+" target menu commits through them.
 // ─────────────────────────────────────────────────────────────────────────────
-void MixerPage::CableOverlay::mouseMove(const juce::MouseEvent& e)
-{
-    if (mPendingSendSrcId >= 0 || mPendingScSrcId >= 0)
-    {
-        mDragMousePos = e.position;
-        repaint();
-    }
-}
-
-bool MixerPage::CableOverlay::keyPressed(const juce::KeyPress& k)
-{
-    if (k == juce::KeyPress::escapeKey && mPendingScSrcId >= 0)
-    {
-        cancelSidechainPlacement();
-        return true;
-    }
-    if (k == juce::KeyPress::escapeKey && mPendingSendSrcId >= 0)
-    {
-        cancelSendPlacement();
-        return true;
-    }
-    return false;
-}
-
-void MixerPage::CableOverlay::startSendPlacement(int srcChannelId)
-{
-    // If no aux strip exists yet, auto-create one so the user has a valid
-    // landing target. Sends can only land on aux strips.
-    if (owner.mAuxStrips.empty())
-    {
-        owner.addAuxChannel();
-        owner.layoutScrollContent();
-    }
-
-    mPendingSendSrcId = srcChannelId;
-    mPendingScSrcId   = -1;   // C.4 Phase 1: mutually exclusive with SC mode
-    mDragMousePos     = owner.getSocketPosition(srcChannelId);
-    setMouseCursor(juce::MouseCursor::CrosshairCursor);
-    grabKeyboardFocus();   // so Escape works
-    repaint();
-}
-
-void MixerPage::CableOverlay::cancelSendPlacement()
-{
-    mPendingSendSrcId = -1;
-    setMouseCursor(juce::MouseCursor::NormalCursor);
-    repaint();
-}
-
 int MixerPage::CableOverlay::findAvailableSendSlot(const juce::String& prefix) const
 {
     for (int s = 0; s < 4; ++s)
@@ -946,24 +558,9 @@ int MixerPage::CableOverlay::findAvailableSendSlot(const juce::String& prefix) c
     return -1;   // all 4 slots occupied
 }
 
-// C.4 Phase 1 (2026-04-30): start/end SC-placement mode + target-side slot
-// finder.  Mirrors send placement but writes to TARGET's _sc_recv{N}_from
-// instead of SOURCE's _send{N}_to.
-void MixerPage::CableOverlay::startSidechainPlacement(int srcChannelId)
-{
-    mPendingScSrcId   = srcChannelId;
-    mPendingSendSrcId = -1;            // mutually exclusive
-    mDragMousePos     = owner.getSocketPosition(srcChannelId);
-    setMouseCursor(juce::MouseCursor::CrosshairCursor);
-    grabKeyboardFocus();
-    repaint();
-}
-void MixerPage::CableOverlay::cancelSidechainPlacement()
-{
-    mPendingScSrcId = -1;
-    setMouseCursor(juce::MouseCursor::NormalCursor);
-    repaint();
-}
+// C.4 Phase 1 (2026-04-30): target-side SC slot finder -- SC lines are
+// encoded on the TARGET's _sc_recv{N}_from so per-module pickers see stable
+// line indices regardless of cable order.
 int MixerPage::CableOverlay::findAvailableScRecvSlot(const juce::String& targetPrefix) const
 {
     if (targetPrefix.isEmpty()) return -1;
@@ -977,26 +574,121 @@ int MixerPage::CableOverlay::findAvailableScRecvSlot(const juce::String& targetP
     return -1;
 }
 
-// C.4 Phase 1 (2026-04-30): per-strip "+" Add-Cable button popup.  Pops a
-// 2-item menu (Send / Sidechain) and routes the user's pick into the
-// CableOverlay's corresponding placement mode.  Wired from every strip's
-// onAddSendRequested lambda so the user gets a consistent "+ -> pick type
-// -> click target" flow.
+// QA-Layout T10 (L12): the per-strip "+" menu enumerates CONCRETE targets --
+// Send... / Sidechain... / Move Output... submenus built from the live strip
+// set, filtered by the same rules the retired click-to-place + drag paths
+// enforced (isValidBusSendTarget / isRouteAllowed / wouldCreateCycle);
+// picking writes the same params those paths wrote.  Illegal targets render
+// as disabled rows.  Items are action-lambdas (itemID -1, self-dispatching).
 void MixerPage::onAddCableRequestedFor(int srcChannelId)
 {
+    using namespace MixerChannelIds;
     if (mCableOverlay == nullptr) return;
 
-    juce::PopupMenu m;
-    m.addItem(1, "Send...");
-    m.addItem(2, "Sidechain...");
+    auto& graph = mProcessor.mVibeGraph.getRoutingGraph();
+    juce::Component::SafePointer<MixerPage> safeThis (this);
 
-    m.showMenuAsync(juce::PopupMenu::Options{},
-        [this, srcChannelId](int r)
+    auto writeNatural = [safeThis] (const juce::String& paramId, float natural)
+    {
+        if (! safeThis) return;
+        if (auto* p = dynamic_cast<juce::RangedAudioParameter*>(
+                safeThis->mProcessor.apvts.getParameter (paramId)))
+            p->setValueNotifyingHost (p->getNormalisableRange().convertTo0to1 (natural));
+    };
+
+    const juce::String srcPrefix = prefixFromChannelId (srcChannelId);
+    const auto entries = getStemPickEntries();
+
+    juce::PopupMenu m;
+
+    // Send... -> aux strips only (isValidBusSendTarget), cycle-filtered.
+    {
+        juce::PopupMenu sendSub;
+        const bool haveFreeSlot = mCableOverlay->findAvailableSendSlot (srcPrefix) >= 0;
+        for (const auto& en : entries)
         {
-            if (mCableOverlay == nullptr) return;
-            if (r == 1) mCableOverlay->startSendPlacement      (srcChannelId);
-            else if (r == 2) mCableOverlay->startSidechainPlacement(srcChannelId);
-        });
+            if (! isValidBusSendTarget (en.channelId) || en.channelId == srcChannelId) continue;
+            const int dstId = en.channelId;
+            const bool ok = haveFreeSlot && ! graph.wouldCreateCycle (srcChannelId, dstId);
+            sendSub.addItem (en.name, ok, false,
+                [safeThis, writeNatural, srcPrefix, dstId]
+                {
+                    if (! safeThis || safeThis->mCableOverlay == nullptr) return;
+                    const int slot = safeThis->mCableOverlay->findAvailableSendSlot (srcPrefix);
+                    if (slot < 0) return;
+                    writeNatural (srcPrefix + "_send" + juce::String (slot) + "_to", (float) dstId);
+                });
+        }
+        // The retired click-to-place auto-created an aux when none existed;
+        // the menu keeps that capability as an explicit row.
+        sendSub.addItem ("New Aux Strip", haveFreeSlot, false,
+            [safeThis, writeNatural, srcPrefix]
+            {
+                if (! safeThis || safeThis->mCableOverlay == nullptr) return;
+                const int auxIdx = safeThis->mNextAuxIdx;
+                safeThis->addAuxChannelAtIndex (auxIdx);
+                const int slot = safeThis->mCableOverlay->findAvailableSendSlot (srcPrefix);
+                if (slot < 0) return;
+                writeNatural (srcPrefix + "_send" + juce::String (slot) + "_to",
+                              (float) auxStrip (auxIdx));
+            });
+        m.addSubMenu ("Send...", sendSub);
+    }
+
+    // Sidechain... -> any other strip with a free SC receive line (target-side
+    // encoding), cycle-filtered.
+    {
+        juce::PopupMenu scSub;
+        for (const auto& en : entries)
+        {
+            if (en.channelId == srcChannelId) continue;
+            const int dstId = en.channelId;
+            const juce::String targetPrefix = prefixFromChannelId (dstId);
+            const bool ok = targetPrefix.isNotEmpty()
+                         && mCableOverlay->findAvailableScRecvSlot (targetPrefix) >= 0
+                         && ! graph.wouldCreateCycle (srcChannelId, dstId);
+            scSub.addItem (en.name, ok, false,
+                [safeThis, writeNatural, srcChannelId, dstId]
+                {
+                    if (! safeThis || safeThis->mCableOverlay == nullptr) return;
+                    const juce::String tp = MixerChannelIds::prefixFromChannelId (dstId);
+                    const int slot = safeThis->mCableOverlay->findAvailableScRecvSlot (tp);
+                    if (slot < 0) return;
+                    writeNatural (tp + "_sc_recv" + juce::String (slot) + "_from",
+                                  (float) srcChannelId);
+                });
+        }
+        m.addSubMenu ("Sidechain...", scSub);
+    }
+
+    // Move Output... -> legal main-out reroutes (absent on locked strips);
+    // current destination shows a tick.
+    if (! isMainOutLocked (srcChannelId))
+    {
+        juce::PopupMenu moveSub;
+        int currentDest = defaultSendTo (srcChannelId);
+        if (auto* p = mProcessor.apvts.getRawParameterValue (srcPrefix + "_sendTo"))
+        {
+            const int v = (int) p->load();
+            if (v >= 0) currentDest = v;
+        }
+        for (const auto& en : entries)
+        {
+            if (en.channelId == srcChannelId) continue;
+            if (! mCableOverlay->isRouteAllowed (srcChannelId, en.channelId)) continue;
+            const int dstId = en.channelId;
+            const bool ticked = dstId == currentDest;
+            const bool ok = ticked || ! graph.wouldCreateCycle (srcChannelId, dstId);
+            moveSub.addItem (en.name, ok, ticked,
+                [writeNatural, srcPrefix, dstId]
+                {
+                    writeNatural (srcPrefix + "_sendTo", (float) dstId);
+                });
+        }
+        m.addSubMenu ("Move Output...", moveSub);
+    }
+
+    m.showMenuAsync (juce::PopupMenu::Options{});
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -1423,7 +1115,7 @@ void MixerPage::rebuildStripCache() const
         if (s) mStripByChannelId[id] = s;
     };
 
-    // Bus strips (12 fixed-id slots; secondary Vox/Inst + RustyDrums may be null).
+    // Bus strips (fixed-id slots; the lazy secondary buses may be null).
     reg(kMaster,        mMasterStrip       .get());
     reg(kLayersBus,     mLayersBusStrip    .get());
     reg(kBassBus,       mBassBusStrip      .get());
@@ -1437,6 +1129,10 @@ void MixerPage::rebuildStripCache() const
     reg(kInstBus3,      mInstBus3Strip     .get());
     reg(kRustyDrumsBus, mRustyDrumsBusStrip.get());
     reg(kPluginsBus,    mPluginsBusStrip   .get());
+    reg(kLayersBus2,    mLayersBus2Strip   .get());   // T10
+    reg(kBassBus2,      mBassBus2Strip     .get());
+    reg(kClipsBus2,     mClipsBus2Strip    .get());
+    reg(kPluginsBus2,   mPluginsBus2Strip  .get());
 
     // Dynamic instrument channels (8 std::map containers, keyed by index).
     for (auto& [tabId, strip] : mLayerStrips) reg(kLayerBase + tabId, strip.get());
@@ -1656,48 +1352,9 @@ MixerPage::MixerPage(VibeSynthProcessor& processor, PatternManager& pm)
     mRustyDrumsBusStrip->setChannelId(MixerChannelIds::kRustyDrumsBus);
     mPluginsBusStrip   ->setChannelId(MixerChannelIds::kPluginsBus);
 
-    // 5F-4b B2: "Add Aux Strip" button (renamed from "Add Mixer Strip" during
-    // R1 2026-04-23 when Vox + Inst were added alongside).  Owned here,
-    // reparented into the PageMenuBar when the Mixer page becomes visible.
-    mAddAuxBtn = std::make_unique<juce::TextButton>("Add Aux Strip");
-    mAddAuxBtn->setTooltip("Add a new Aux / Group strip to the mixer");
-    mAddAuxBtn->setColour(juce::TextButton::buttonColourId, VC::Surface);
-    mAddAuxBtn->setColour(juce::TextButton::textColourOffId, VC::Text);
-    mAddAuxBtn->onClick = [this] { addAuxChannel(); };
-
-    // R1 (2026-04-23): Add Vox Strip + Add Inst Strip buttons.  Same reparent
-    // pattern as Add Aux - StandaloneEditor moves them into the PageMenuBar
-    // while the Mixer page is visible.
-    mAddVoxBtn = std::make_unique<juce::TextButton>("Add Vox Strip");
-    mAddVoxBtn->setTooltip("Add a live-input vocal strip (up to 6)");
-    mAddVoxBtn->setColour(juce::TextButton::buttonColourId, VC::Surface);
-    mAddVoxBtn->setColour(juce::TextButton::textColourOffId, VC::Text);
-    mAddVoxBtn->onClick = [this] { addVoxChannel(); };
-
-    mAddInstBtn = std::make_unique<juce::TextButton>("Add Inst Strip");
-    mAddInstBtn->setTooltip("Add a live-input instrument strip (up to 20)");
-    mAddInstBtn->setColour(juce::TextButton::buttonColourId, VC::Surface);
-    mAddInstBtn->setColour(juce::TextButton::textColourOffId, VC::Text);
-    mAddInstBtn->onClick = [this] { addInstChannel(); };
-
-    // G-6 (2026-04-29): Add Vox Bus + Add Inst Bus buttons.  Each opens a
-    // secondary bus on demand (Vox: 1 extra max → kVoxBus2; Inst: 2 extra
-    // max → kInstBus2 / kInstBus3).  Greyed out at cap.
-    mAddVoxBusBtn = std::make_unique<juce::TextButton>("Add Vox Bus");
-    mAddVoxBusBtn->setTooltip("Add a second Vox bus (e.g. lead vs backup vocals).  Max 1 extra.");
-    mAddVoxBusBtn->setColour(juce::TextButton::buttonColourId, VC::Surface);
-    mAddVoxBusBtn->setColour(juce::TextButton::textColourOffId, VC::Text);
-    mAddVoxBusBtn->onClick = [this] { activateVoxBus2(); };
-
-    mAddInstBusBtn = std::make_unique<juce::TextButton>("Add Inst Bus");
-    mAddInstBusBtn->setTooltip("Add a secondary Inst bus (e.g. guitars vs bass).  Max 2 extra.");
-    mAddInstBusBtn->setColour(juce::TextButton::buttonColourId, VC::Surface);
-    mAddInstBusBtn->setColour(juce::TextButton::textColourOffId, VC::Text);
-    mAddInstBusBtn->onClick = [this]
-    {
-        if      (! mInstBus2Active) activateInstBus2();
-        else if (! mInstBus3Active) activateInstBus3();
-    };
+    // QA-Layout T10 (L13): the five title-strip add buttons are gone -- the
+    // strip's "Add" titled menu (StandaloneEditor's Mixer branch) carries
+    // Aux Strip + the bus adds; Vox/Inst STRIP adds live on the ribbon's "+".
 
     // 5F-4b B7: restore any aux strips that were in the saved project.
     // VibeGraph already has their InsertNodes (registered by restoreAuxStripsFromState
@@ -1907,8 +1564,9 @@ void MixerPage::addAuxChannel()
 // addAuxChannelAtIndex.  Capped at kMaxVoxStrips / kMaxInstStrips per the
 // spec lock.  ensureVoxInsert / ensureInstInsert on the processor side
 // registers APVTS params + InsertNode; this side just creates the UI strip.
-void MixerPage::addVoxChannel()  { addVoxChannelAtIndex  (mNextVoxIdx);  }
-void MixerPage::addInstChannel() { addInstChannelAtIndex (mNextInstIdx); }
+// T10: addVoxChannel / addInstChannel wrappers deleted -- Vox/Inst strip
+// creation flows exclusively through the ribbon's "+" (addVoxChannelAtIndex /
+// addInstChannelAtIndex remain the entry points).
 
 // ─────────────────────────────────────────────────────────────────────────────
 // G-6 (2026-04-29): secondary Vox/Inst bus activation.  Lazy-creates the
@@ -1977,7 +1635,6 @@ bool MixerPage::activateVoxBus2()
     mVoxBus2Active = true;
     if (getWidth() > 0) resized();
     if (onAudioStripRenamed) onAudioStripRenamed();   // refresh Effects dropdown
-    if (mAddVoxBusBtn) mAddVoxBusBtn->setEnabled(false);   // capped at 1 extra
     return true;
 }
 
@@ -2102,8 +1759,132 @@ bool MixerPage::activateInstBus3()
     mInstBus3Active = true;
     if (getWidth() > 0) resized();
     if (onAudioStripRenamed) onAudioStripRenamed();
-    if (mAddInstBusBtn) mAddInstBusBtn->setEnabled(false);   // capped at 2 extra
     return true;
+}
+
+// QA-Layout T10 (L13): one shared body for the four secondary group buses --
+// same shape as activateVoxBus2 above, parameterized instead of cloned.
+bool MixerPage::activateGroupBus (std::unique_ptr<MixerTrackStrip>& strip, bool& activeFlag,
+                                  const juce::String& name, juce::Colour color,
+                                  const char* prefix, int chId,
+                                  const juce::String& deleteTitle,
+                                  const juce::String& parentName)
+{
+    if (activeFlag) return false;
+    if (! strip)
+    {
+        strip = std::make_unique<MixerTrackStrip>(name,
+            MixerTrackStrip::StripType::Bus, color);
+        strip->setAutomationPrefix(prefix);
+        strip->setApvts(mProcessor.apvts, prefix);
+        strip->setChannelId(chId);
+        strip->onAddSendRequested = [this](int ch) {
+            onAddCableRequestedFor(ch);
+        };
+        strip->onFXClicked = [this](const juce::String& id) {
+            if (onEffectsTabRequested) onEffectsTabRequested(id);
+        };
+        strip->onNameChanged = [this](const juce::String&) {
+            if (getWidth() > 0) layoutScrollContent();
+            if (onAudioStripRenamed) onAudioStripRenamed();
+        };
+        strip->setRenameable (true);
+        {
+            juce::Component::SafePointer<MixerPage> safeThis (this);
+            strip->onContextMenuRequested =
+                [safeThis, chId, deleteTitle, parentName] (juce::Point<int> screenPos)
+            {
+                if (! safeThis) return;
+                juce::PopupMenu m;
+                m.addItem (1, deleteTitle);
+                m.showMenuAsync (juce::PopupMenu::Options().withTargetScreenArea (
+                                    juce::Rectangle<int> (screenPos.x, screenPos.y, 1, 1)),
+                    [safeThis, chId, deleteTitle, parentName] (int r)
+                    {
+                        if (! safeThis || r != 1) return;
+                        auto* aw = new juce::AlertWindow (
+                            deleteTitle,
+                            "Deleting this bus removes its Effects Rack.\n"
+                            "All attached strips will be moved to the " + parentName + ".",
+                            juce::AlertWindow::WarningIcon);
+                        aw->addButton ("Delete", 1);
+                        aw->addButton ("Cancel", 0, juce::KeyPress (juce::KeyPress::escapeKey));
+                        aw->enterModalState (true, juce::ModalCallbackFunction::create (
+                            [safeThis, aw, chId] (int result)
+                            {
+                                std::unique_ptr<juce::AlertWindow> own (aw);
+                                if (result != 1 || ! safeThis) return;
+                                safeThis->deleteSecondaryBus (chId);
+                            }), false);
+                    });
+            };
+        }
+        mScrollContent->addAndMakeVisible(*strip);
+    }
+    else
+    {
+        strip->setVisible(true);
+    }
+    activeFlag = true;
+    if (getWidth() > 0) resized();
+    if (onAudioStripRenamed) onAudioStripRenamed();
+    return true;
+}
+
+bool MixerPage::isSecondaryBus (int chId)
+{
+    using namespace MixerChannelIds;
+    return chId == kVoxBus2   || chId == kInstBus2  || chId == kInstBus3
+        || chId == kLayersBus2 || chId == kBassBus2
+        || chId == kClipsBus2  || chId == kPluginsBus2;
+}
+
+void MixerPage::deactivateBusFlagOnly (int chId)
+{
+    using namespace MixerChannelIds;
+    switch (chId)
+    {
+        case kVoxBus2:     mVoxBus2Active     = false; break;
+        case kInstBus2:    mInstBus2Active    = false; break;
+        case kInstBus3:    mInstBus3Active    = false; break;
+        case kLayersBus2:  mLayersBus2Active  = false; break;
+        case kBassBus2:    mBassBus2Active    = false; break;
+        case kClipsBus2:   mClipsBus2Active   = false; break;
+        case kPluginsBus2: mPluginsBus2Active = false; break;
+        default: break;
+    }
+}
+
+bool MixerPage::activateLayersBus2()
+{
+    return activateGroupBus (mLayersBus2Strip, mLayersBus2Active,
+                             "Layers Bus 2", VC::LayerCol[0],
+                             "mixer_layersbus2", MixerChannelIds::kLayersBus2,
+                             "Delete Layers Bus", "main Layers Bus");
+}
+
+bool MixerPage::activateBassBus2()
+{
+    return activateGroupBus (mBassBus2Strip, mBassBus2Active,
+                             "Bass Bus 2", VC::BassCol[0],
+                             "mixer_bassbus2", MixerChannelIds::kBassBus2,
+                             "Delete Bass Bus", "main Bass Bus");
+}
+
+bool MixerPage::activateClipsBus2()
+{
+    return activateGroupBus (mClipsBus2Strip, mClipsBus2Active,
+                             "Clips Bus 2", VC::Warm,
+                             "mixer_clipsbus2", MixerChannelIds::kClipsBus2,
+                             "Delete Clips Bus", "main Clips Bus");
+}
+
+bool MixerPage::activatePluginsBus2()
+{
+    return activateGroupBus (mPluginsBus2Strip, mPluginsBus2Active,
+                             "Plugins Bus 2", VC::Purple,
+                             "mixer_pluginbus2", MixerChannelIds::kPluginsBus2,
+                             "Delete Plugins Bus", "main Plugins Bus");
 }
 
 void MixerPage::addVoxChannelAtIndex(int idx)
@@ -2635,6 +2416,23 @@ void MixerPage::clearDynamicStrips()
         mPluginsBusActive = false;
         mPluginsBusStrip->setVisible(false);
     }
+    // QA-Layout T10: project-load reset for every user-added secondary bus --
+    // the incoming project's <Buses> element re-activates its own set.
+    // (Vox2/Inst2/3 previously leaked across projects; with activation now
+    // project-persisted the reset is the correct half of that contract.)
+    auto dropBus = [] (bool& flag, std::unique_ptr<MixerTrackStrip>& strip)
+    {
+        flag = false;
+        if (strip) strip->setVisible (false);
+    };
+    dropBus (mVoxBus2Active,     mVoxBus2Strip);
+    dropBus (mInstBus2Active,    mInstBus2Strip);
+    dropBus (mInstBus3Active,    mInstBus3Strip);
+    dropBus (mLayersBus2Active,  mLayersBus2Strip);
+    dropBus (mBassBus2Active,    mBassBus2Strip);
+    dropBus (mClipsBus2Active,   mClipsBus2Strip);
+    dropBus (mPluginsBus2Active, mPluginsBus2Strip);
+    mBusEverRouted.clear();
     mLastSendToCache.clear();
     if (getWidth() > 0) layoutScrollContent();
     if (mCableOverlay) mCableOverlay->repaint();
@@ -2936,6 +2734,10 @@ namespace
         if (prefix == "mixer_voxbus2")   return kVoxBus2;
         if (prefix == "mixer_instbus2")  return kInstBus2;
         if (prefix == "mixer_instbus3")  return kInstBus3;
+        if (prefix == "mixer_layersbus2")  return kLayersBus2;   // T10
+        if (prefix == "mixer_bassbus2")    return kBassBus2;
+        if (prefix == "mixer_clipsbus2")   return kClipsBus2;
+        if (prefix == "mixer_pluginbus2")  return kPluginsBus2;
         if (prefix.startsWith ("mixer_layer_")) return kLayerBase + prefix.substring (12).getIntValue();
         if (prefix.startsWith ("mixer_bass_"))  return kBassBase  + prefix.substring (11).getIntValue();
         if (prefix.startsWith ("mixer_drum_"))  return kDrumBase  + prefix.substring (11).getIntValue();
@@ -2984,9 +2786,14 @@ namespace
     bool isAlwaysVisibleBus (int chId)
     {
         using namespace MixerChannelIds;
+        // T10: the secondary group buses join the flag-gated set -- their
+        // hide path is the L14 lifecycle in laidOutBus, not the generic
+        // membership check.
         return chId == kMaster   || chId == kFxBus
             || chId == kVoxBus2  || chId == kInstBus2
-            || chId == kInstBus3 || chId == kRustyDrumsBus;
+            || chId == kInstBus3 || chId == kRustyDrumsBus
+            || chId == kLayersBus2 || chId == kBassBus2
+            || chId == kClipsBus2  || chId == kPluginsBus2;
         // kPluginsBus deliberately NOT here (Jeff, 2026-07-31): a plugin strip's
         // main-out is unlocked by spec and moves under Layers or Bass, and when
         // it does the Plugins bus has no members and must disappear -- the same
@@ -3067,10 +2874,17 @@ void MixerPage::deleteAuxStrip (int idx, int auxChannelId)
 void MixerPage::deleteSecondaryBus (int channelId)
 {
     using namespace MixerChannelIds;
-    if (channelId != kVoxBus2 && channelId != kInstBus2 && channelId != kInstBus3)
+    if (channelId != kVoxBus2 && channelId != kInstBus2 && channelId != kInstBus3
+        && channelId != kLayersBus2 && channelId != kBassBus2
+        && channelId != kClipsBus2  && channelId != kPluginsBus2)
         return;   // primary buses + master never deletable
 
-    const int parentBus = (channelId == kVoxBus2) ? kVoxBus : kInstBus;
+    const int parentBus = (channelId == kVoxBus2)    ? kVoxBus
+                        : (channelId == kLayersBus2) ? kLayersBus
+                        : (channelId == kBassBus2)   ? kBassBus
+                        : (channelId == kClipsBus2)  ? kClipsBus
+                        : (channelId == kPluginsBus2) ? kPluginsBus
+                                                      : kInstBus;
 
     // Reroute any strip whose primary _sendTo targets this bus → parent bus.
     // Reroute any _sendN_to targeting this bus → -1 (inactive) so we don't
@@ -3100,6 +2914,29 @@ void MixerPage::deleteSecondaryBus (int channelId)
         if (mInstBus3Strip) mInstBus3Strip->setVisible (false);
         mInstBus3Active = false;
     }
+    else if (channelId == kLayersBus2)
+    {
+        if (mLayersBus2Strip) mLayersBus2Strip->setVisible (false);
+        mLayersBus2Active = false;
+    }
+    else if (channelId == kBassBus2)
+    {
+        if (mBassBus2Strip) mBassBus2Strip->setVisible (false);
+        mBassBus2Active = false;
+    }
+    else if (channelId == kClipsBus2)
+    {
+        if (mClipsBus2Strip) mClipsBus2Strip->setVisible (false);
+        mClipsBus2Active = false;
+    }
+    else if (channelId == kPluginsBus2)
+    {
+        if (mPluginsBus2Strip) mPluginsBus2Strip->setVisible (false);
+        mPluginsBus2Active = false;
+    }
+
+    // L14: a deleted bus starts a fresh lifecycle if re-added.
+    mBusEverRouted[channelId] = false;
 
     if (getWidth() > 0) layoutScrollContent();
     if (onAudioStripRenamed) onAudioStripRenamed();
@@ -3215,12 +3052,15 @@ std::vector<MixerPage::StemPickEntry> MixerPage::getStemPickEntries() const
 
     add (mMasterStrip.get(),        kMaster,    false);
     add (mLayersBusStrip.get(),     kLayersBus, false);
+    if (mLayersBus2Active) add (mLayersBus2Strip.get(), kLayersBus2, false);   // T10
     addMap (mLayerStrips, mLayerTabOrder, &layerInsert);
     add (mBassBusStrip.get(),       kBassBus,   false);
+    if (mBassBus2Active)   add (mBassBus2Strip.get(),   kBassBus2,   false);   // T10
     addMap (mBassStrips,  mBassTabOrder,  &bassInsert);
     add (mDrumsBusStrip.get(),      kDrumsBus,  false);
     addMap (mDrumStrips,  mDrumSlotOrder, &drumInsert);
     add (mAudioClipsBusStrip.get(), kClipsBus,  false);
+    if (mClipsBus2Active)  add (mClipsBus2Strip.get(),  kClipsBus2,  false);   // T10
     addMap (mAudioStrips, mAudioRowOrder, &audioInsert);
     add (mVoxBusStrip.get(),        kVoxBus,    false);
     if (mVoxBus2Active)  add (mVoxBus2Strip.get(),  kVoxBus2,  false);
@@ -3232,6 +3072,7 @@ std::vector<MixerPage::StemPickEntry> MixerPage::getStemPickEntries() const
     if (mRustyDrumsBusActive) add (mRustyDrumsBusStrip.get(), kRustyDrumsBus, false);
     if (mPluginsBusActive) { add (mPluginsBusStrip.get(), kPluginsBus, false);
                              addMap (mPluginStrips, mPluginOrder, &pluginInsert); }
+    if (mPluginsBus2Active) add (mPluginsBus2Strip.get(), kPluginsBus2, false);   // T10
     addMap (mRustyStrips, mRustyOrder,    &rustyInsert);
     add (mFXBusStrip.get(),         kFxBus,     false);
     addMap (mAuxStrips,   mAuxOrder,      &auxStrip);
@@ -3661,6 +3502,11 @@ void MixerPage::onVBlank()
     if (mVoxBus2Strip)  drainStereoBus (mVoxBus2Strip .get(), kVoxBus2,  mProcessor.mVoxBus2PeakDbL,  mProcessor.mVoxBus2PeakDbR);
     if (mInstBus2Strip) drainStereoBus (mInstBus2Strip.get(), kInstBus2, mProcessor.mInstBus2PeakDbL, mProcessor.mInstBus2PeakDbR);
     if (mInstBus3Strip) drainStereoBus (mInstBus3Strip.get(), kInstBus3, mProcessor.mInstBus3PeakDbL, mProcessor.mInstBus3PeakDbR);
+    // T10: secondary group buses.
+    if (mLayersBus2Strip)  drainStereoBus (mLayersBus2Strip .get(), kLayersBus2,  mProcessor.mLayersBus2PeakDbL,  mProcessor.mLayersBus2PeakDbR);
+    if (mBassBus2Strip)    drainStereoBus (mBassBus2Strip   .get(), kBassBus2,    mProcessor.mBassBus2PeakDbL,    mProcessor.mBassBus2PeakDbR);
+    if (mClipsBus2Strip)   drainStereoBus (mClipsBus2Strip  .get(), kClipsBus2,   mProcessor.mClipsBus2PeakDbL,   mProcessor.mClipsBus2PeakDbR);
+    if (mPluginsBus2Strip) drainStereoBus (mPluginsBus2Strip.get(), kPluginsBus2, mProcessor.mPluginsBus2PeakDbL, mProcessor.mPluginsBus2PeakDbR);
 
     // QA-Eg (2026-05-24): cable overlay repaint is delta-gated against a
     // snapshot of every strip's displayed peak dB from the previous vblank.
@@ -3695,6 +3541,10 @@ void MixerPage::onVBlank()
     pushPeak(mVoxBus2Strip      .get());
     pushPeak(mInstBus2Strip     .get());
     pushPeak(mInstBus3Strip     .get());
+    pushPeak(mLayersBus2Strip   .get());   // T10
+    pushPeak(mBassBus2Strip     .get());
+    pushPeak(mClipsBus2Strip    .get());
+    pushPeak(mPluginsBus2Strip  .get());
 
     for (auto& kv : mLayerStrips) pushPeak(kv.second.get());
     for (auto& kv : mBassStrips)  pushPeak(kv.second.get());
@@ -3864,6 +3714,36 @@ void MixerPage::layoutScrollContent()
                        "mixer_plugin_" + juce::String(k));
     }
 
+    // QA-Layout T10: a routed-to secondary bus SELF-ACTIVATES -- preset and
+    // project loads write _sendTo values before any activation flag arrives,
+    // and members bucketed under an unrendered bus would otherwise never get
+    // bounds.  Activation is deferred via callAsync because activate*()
+    // re-enters this layout.
+    {
+        struct SelfAct { int chId; bool active; bool (MixerPage::*fn)(); };
+        const SelfAct kSelfAct[] = {
+            { kVoxBus2,     mVoxBus2Active,     &MixerPage::activateVoxBus2     },
+            { kInstBus2,    mInstBus2Active,    &MixerPage::activateInstBus2    },
+            { kInstBus3,    mInstBus3Active,    &MixerPage::activateInstBus3    },
+            { kLayersBus2,  mLayersBus2Active,  &MixerPage::activateLayersBus2  },
+            { kBassBus2,    mBassBus2Active,    &MixerPage::activateBassBus2    },
+            { kClipsBus2,   mClipsBus2Active,   &MixerPage::activateClipsBus2   },
+            { kPluginsBus2, mPluginsBus2Active, &MixerPage::activatePluginsBus2 },
+        };
+        juce::Component::SafePointer<MixerPage> safeThis (this);
+        for (const auto& sa : kSelfAct)
+        {
+            if (sa.active) continue;
+            auto it = buckets.find (sa.chId);
+            if (it == buckets.end() || it->second.empty()) continue;
+            auto fn = sa.fn;
+            juce::MessageManager::callAsync ([safeThis, fn]
+            {
+                if (safeThis) ((*safeThis).*fn)();
+            });
+        }
+    }
+
     int x = kSepW;
 
     // Neon lines recorded during layout, drawn later by ScrollContent::paintOverChildren
@@ -3922,6 +3802,21 @@ void MixerPage::layoutScrollContent()
         //
         // The flag-gated buses opt out: they are created by explicit user
         // action and must appear immediately, before anything is routed to them.
+        //
+        // L14 (QA-Layout T10): the user-added secondary buses live by the
+        // has-ever-had-route lifecycle instead -- a fresh bus stays visible
+        // while never-routed, and once it HAS had members and empties again
+        // it auto-deactivates (flag only; no param sweep -- it is already
+        // empty, and deleteSecondaryBus would recurse into this layout).
+        if (hasMembers) mBusEverRouted[busChId] = true;
+        if (! hasMembers && isSecondaryBus (busChId) && getBusEverRouted (busChId))
+        {
+            // No onAudioStripRenamed here -- it can re-enter this layout;
+            // pickers read the active flag live on their next open anyway.
+            busStrip.setVisible (false);
+            deactivateBusFlagOnly (busChId);
+            return;
+        }
         if (! hasMembers && ! isAlwaysVisibleBus (busChId))
         {
             busStrip.setVisible (false);
@@ -3986,6 +3881,9 @@ void MixerPage::layoutScrollContent()
 
     // Clips Bus sits between FX and the instrument buses - matches Builder tab color.
     laidOutBus(*mAudioClipsBusStrip,  kClipsBus,  VC::Warm);
+    // QA-Layout T10 (L13): Clips Bus 2 (when active) sits next to Clips Bus.
+    if (mClipsBus2Active && mClipsBus2Strip)
+        laidOutBus(*mClipsBus2Strip, kClipsBus2, VC::Warm);
 
     // R3.5 (2026-04-23): Vox + Inst BUS strips alongside Clips Bus.  Same
     // shape as other buses (full rack/EQ/fader DSP applied in PluginProcessor
@@ -4007,9 +3905,18 @@ void MixerPage::layoutScrollContent()
     // bus takes no mixer width until a plugin tab exists.
     if (mPluginsBusActive && mPluginsBusStrip)
         laidOutBus(*mPluginsBusStrip, kPluginsBus, VC::Purple);
+    // QA-Layout T10 (L13): Plugins Bus 2 (when active) sits next to Plugins Bus.
+    if (mPluginsBus2Active && mPluginsBus2Strip)
+        laidOutBus(*mPluginsBus2Strip, kPluginsBus2, VC::Purple);
 
     laidOutBus(*mLayersBusStrip,      kLayersBus, VC::LayerCol[0]);
+    // QA-Layout T10 (L13): Layers Bus 2 (when active) sits next to Layers Bus.
+    if (mLayersBus2Active && mLayersBus2Strip)
+        laidOutBus(*mLayersBus2Strip, kLayersBus2, VC::LayerCol[0]);
     laidOutBus(*mBassBusStrip,        kBassBus,   VC::BassCol[0]);
+    // QA-Layout T10 (L13): Bass Bus 2 (when active) sits next to Bass Bus.
+    if (mBassBus2Active && mBassBus2Strip)
+        laidOutBus(*mBassBus2Strip, kBassBus2, VC::BassCol[0]);
     // J-5 (2026-05-03): RustyDrums Bus + 13 inserts sit between Bass and
     // Drums so they read as a sibling of Drums.  Visible only when
     // mRustyDrumsBusActive (= a BaySickRustyDrums singleton has been spawned).

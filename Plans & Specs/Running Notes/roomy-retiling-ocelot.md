@@ -503,6 +503,55 @@ Convention: Main Plan §0 "Batch Plans + Running Notes layout" (locked 2026-05-1
   before T7 DELIBERATELY: it changes strip contents, which affects the min widths
   T7 will encode.
 
+## 2026-08-04 — Task 15 committed `7a0758b0` — strip nav buttons into Menu dropdowns + sfizz titles
+
+- **Build gate green FIRST TRY:** five exit codes 0, four `vcxproj -> ...exe` link
+  lines, zero `error C` / `error LNK` / `error MSB` greps.  20 files, 422 insertions /
+  237 deletions.
+- **Batch plan updated at Jeff's explicit request ("Update the plan"):** new Task 15
+  section after Task 14, and the ordering paragraph now records T15 executing between
+  T9 and T10 plus the post-hand-back order T15 -> T10 -> T11 -> T7 -> T8 -> T12+.
+- **Buttons -> Menu entries:** every player page's title-strip buttons (between Menu
+  and the swing knob) are GONE; the same entries now sit at the TOP of that window's
+  Menu dropdown with a tick on the active local view.  Mechanism: a new
+  `onBuildWindowNavMenu` std::function hook on all seven page classes, invoked at the
+  top of `showPageActionsMenu` (DrumPage: inside `showContextMenu`, !fromKit only, so
+  kit pads keep their per-drum shape); Rusty gets the entries directly inside its
+  editor-side menu builder.  The entries are JUCE action-lambda PopupMenu items —
+  verified in the vendored JUCE source that they carry itemID -1 and self-dispatch,
+  so they coexist with every id-dispatched page menu (Rusty's `r <= 0` guard skips
+  them by design).
+- **Per page:** Rusty + Drums {Drum Kit, Player, Piano Roll}; Layers/Bass/Clips
+  {Player, Piano Roll}; Vox {Vocal Chain, BaySickPitch, BaySickAlign, NAM/IR}; Inst
+  {Pedals, NAM/IR, Piano Roll}; Plugins {Piano Roll}.  The QA-E Sub-Phase A
+  capture-locals-before-onTabSelected discipline is preserved verbatim in every
+  Piano Roll nav action.  EXCLUDED per Jeff: the PianoRollPage jump cluster, the
+  pedals window's NAM/IR launcher, and the EQ windows' Pre/Post pair — those keep
+  setTabSlots (the API's remaining users; the SharedUI.h usage comment was updated
+  to say so).
+- **Drums' Menu builder now installs unconditionally** (was Player-sub-tab-only) so
+  the nav entries are always reachable — post-J-6 Player is the only local sub-tab,
+  the gate was vestigial.
+- **The small grey tab title returns to player strips** (instance name, e.g.
+  "Layer 1") — it was suppressed only while tab slots existed.
+- **sfizz titles (the missed T3 treatment):** BaySickRustyDrums + BaySickGuitars +
+  BaySickBasses internal AriaControlPanel title bands dissolved by leaving
+  `binding.engineName` empty (the panel only builds its BaySickTitleBar when the
+  name is non-empty); the names now center on the window strip via setCenterTitle
+  (Rusty red #CC2222, Inst navy #1C3A8A).  The four widgets the Inst band hosted
+  (program label 200px + Load button 130px + CUT SELF 62px + mode toggle 78px)
+  re-home to the strip's right extras per page-show; the CUT SELF/mode APVTS
+  ButtonAttachments are now wired independently of any title bar — previously the
+  whole attachment block was gated on `getTitleBar() != nullptr`, so clearing the
+  name WITHOUT this decoupling would have silently killed the G-14 cut-self
+  feature.
+- **Dead/stale cleanup in touched regions:** the Rusty branch's unused safeBar
+  SafePointer deleted; wrong comments fixed (ClipsPage.h header, SharedUI.h
+  setTabSlots note, the Vox/Inst/Drums/Plugins branch comments).
+- **`STANDALONE_UI_CHANGES.md`** gained the T15 entry.
+- **Next:** T10 — mixer menu moves, per-strip "+" target dropdowns, the Add titled
+  menu + four group buses, the L14 lifecycle.
+
 ## Diagnostic Instrumentation Catalog (Rule 4)
 
 | Site | Tag | Purpose | Disposition |

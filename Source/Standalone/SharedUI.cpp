@@ -1374,6 +1374,21 @@ PageMenuBar::PageMenuBar()
     mHamburgerBtn->setTooltip("Page menu");
     mHamburgerBtn->onClick = [this] { showHamburgerMenu(); };
     addAndMakeVisible(*mHamburgerBtn);
+
+    // QA-Layout T10 (L13): second flat native-style heading -- the strip
+    // reads "Menu  Add".  Hidden until a page installs an Add builder.
+    mAddBtn = std::make_unique<TitleStripMenuItem>("Add");
+    mAddBtn->setTooltip("Add strips and buses");
+    mAddBtn->onClick = [this] { if (mAddMenuBuilder) mAddMenuBuilder (mAddBtn.get()); };
+    addChildComponent(*mAddBtn);
+}
+
+void PageMenuBar::setAddMenuBuilder(MenuBuilder builder)
+{
+    mAddMenuBuilder = std::move(builder);
+    if (mAddBtn) mAddBtn->setVisible(mAddMenuBuilder != nullptr);
+    resized();
+    repaint();
 }
 
 void PageMenuBar::setPageTitle(const juce::String& t)
@@ -1855,9 +1870,11 @@ void PageMenuBar::paint(juce::Graphics& g)
     // Page title - suppress when tab slots are present (page is obvious from tabs)
     if (mTitle.isNotEmpty() && mTabSlotBtns.empty())
     {
+        const int titleX = kMenuBtnW + 12
+                         + (mAddBtn != nullptr && mAddBtn->isVisible() ? kAddBtnW + 2 : 0);
         g.setColour(VC::TextDim.withAlpha(0.7f));
         g.setFont(juce::Font(10.f, juce::Font::bold));
-        g.drawText(mTitle, kMenuBtnW + 12, 0, 160, getHeight(),
+        g.drawText(mTitle, titleX, 0, 160, getHeight(),
                    juce::Justification::centredLeft, false);
     }
 
@@ -1881,6 +1898,14 @@ void PageMenuBar::resized()
     // "Menu" button on left (L31)
     mHamburgerBtn->setBounds(b.removeFromLeft(kMenuBtnW).reduced(0, 1));
     b.removeFromLeft(2);
+
+    // "Add" heading right of Menu (T10/L13) -- only takes width when a page
+    // installed an Add builder.
+    if (mAddBtn != nullptr && mAddBtn->isVisible())
+    {
+        mAddBtn->setBounds(b.removeFromLeft(kAddBtnW).reduced(0, 1));
+        b.removeFromLeft(2);
+    }
 
     // Tab slot buttons right after hamburger
     for (auto& btn : mTabSlotBtns)

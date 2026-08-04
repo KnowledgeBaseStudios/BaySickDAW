@@ -301,6 +301,10 @@ public:
     // can't express). Pass nullptr to clear and revert to mMenuItems behaviour.
     using MenuBuilder = std::function<void(juce::Component* anchor)>;
     void setMenuBuilder(MenuBuilder builder);
+    // QA-Layout T10 (L13): second flat titled heading right of "Menu" -- the
+    // strip reads "Menu  Add".  Hidden when no builder is installed; pass
+    // nullptr to clear (the branch-top clear in showPageForTab does).
+    void setAddMenuBuilder(MenuBuilder builder);
     void addActionButton(const juce::String& label, std::function<void()> action);
     void clearActionButtons();
 
@@ -398,13 +402,17 @@ public:
     // text heading, not a chrome button (was a 22px "=" glyph).  Shared by
     // resized() and the paint() title x-offset.
     static constexpr int kMenuBtnW = 46;
+    // T10 (L13): width of the "Add" heading, same flat style as "Menu".
+    static constexpr int kAddBtnW  = 40;
 
 private:
     juce::String mTitle;
     std::vector<MenuItem> mMenuItems;
     MenuBuilder           mMenuBuilder;
+    MenuBuilder           mAddMenuBuilder;   // T10 (L13)
 
     std::unique_ptr<juce::TextButton> mHamburgerBtn;
+    std::unique_ptr<juce::TextButton> mAddBtn;   // T10 (L13)
     std::vector<std::unique_ptr<juce::TextButton>> mActionBtns;
 
     // Non-owning extra right components (e.g. Kit button, Nav combo).

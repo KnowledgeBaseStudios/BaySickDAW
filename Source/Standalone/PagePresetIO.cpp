@@ -287,6 +287,15 @@ namespace PagePresetIO
                         newChId = kInstBus;
                     else if (chId == kInstBus3 && isChannelActive && ! isChannelActive (chId))
                         newChId = kInstBus;
+                    // QA-Layout T10: secondary group buses fall back the same way.
+                    else if (chId == kLayersBus2 && isChannelActive && ! isChannelActive (chId))
+                        newChId = kLayersBus;
+                    else if (chId == kBassBus2 && isChannelActive && ! isChannelActive (chId))
+                        newChId = kBassBus;
+                    else if (chId == kClipsBus2 && isChannelActive && ! isChannelActive (chId))
+                        newChId = kClipsBus;
+                    else if (chId == kPluginsBus2 && isChannelActive && ! isChannelActive (chId))
+                        newChId = kPluginsBus;
 
                     if (newChId != chId)
                         natural = (float) newChId;

@@ -166,9 +166,7 @@ public:
 
     // R1 (2026-04-23): Vox / Inst strip creation.  Up to kMaxVoxStrips (6)
     // and kMaxInstStrips (6) respectively.  Same pattern as aux.
-    void addVoxChannel();
     void addVoxChannelAtIndex(int idx);
-    void addInstChannel();
     void addInstChannelAtIndex(int idx);
 
     // K-2 (2026-05-05): toggle the noLiveInput flag on an existing Inst strip.
@@ -192,16 +190,6 @@ public:
     enum class OrderKind { Aux, Vox, Inst, Audio };
     void setStripOrder (OrderKind kind, const std::vector<int>& indices);
 
-    // 5F-4b B2: accessor for PageMenuBar injection (StandaloneEditor reparents
-    // this button into the menu bar when the Mixer page becomes visible).
-    juce::Component* getAddAuxBtn()    const { return mAddAuxBtn.get();    }
-    juce::Component* getAddVoxBtn()    const { return mAddVoxBtn.get();    }
-    juce::Component* getAddInstBtn()   const { return mAddInstBtn.get();   }
-    // G-6 (2026-04-29): Add Vox/Inst BUS buttons (separate from Strip buttons).
-    juce::Component* getAddVoxBusBtn() const { return mAddVoxBusBtn.get(); }
-    juce::Component* getAddInstBusBtn() const { return mAddInstBusBtn.get(); }
-
-
     // G-6 (2026-04-29): activate a secondary Vox/Inst bus - creates the
     // strip on Mixer + flags the bus active for route-picker / cable
     // filtering.  Idempotent (no-op if already active).  Returns true on
@@ -209,10 +197,26 @@ public:
     bool activateVoxBus2();
     bool activateInstBus2();
     bool activateInstBus3();
+    // QA-Layout T10 (L13): secondary group buses, same activate contract.
+    bool activateLayersBus2();
+    bool activateBassBus2();
+    bool activateClipsBus2();
+    bool activatePluginsBus2();
     bool isVoxBus2Active()  const { return mVoxBus2Active; }
     bool isInstBus2Active() const { return mInstBus2Active; }
     bool isInstBus3Active() const { return mInstBus3Active; }
     bool isPluginsBusActive() const { return mPluginsBusActive; }   // TS6 (BLU-447)
+    bool isLayersBus2Active()  const { return mLayersBus2Active;  }
+    bool isBassBus2Active()    const { return mBassBus2Active;    }
+    bool isClipsBus2Active()   const { return mClipsBus2Active;   }
+    bool isPluginsBus2Active() const { return mPluginsBus2Active; }
+    // L14 lifecycle state, persisted by the editor's <Buses> element.
+    bool getBusEverRouted (int chId) const
+    {
+        auto it = mBusEverRouted.find (chId);
+        return it != mBusEverRouted.end() && it->second;
+    }
+    void setBusEverRouted (int chId, bool v) { mBusEverRouted[chId] = v; }
 
     // Called by StandaloneEditor when a ribbon tab is renamed (ribbon → mixer sync).
     // C.4 follow-up (2026-04-30): kind tag added because Layer / Bass / Drum
@@ -333,6 +337,32 @@ private:
     // QA-ModelShell TS6 (BLU-447): hosted VST3 instrument bus + its strips.
     std::unique_ptr<MixerTrackStrip> mPluginsBusStrip;
     bool                             mPluginsBusActive { false };
+    // QA-Layout T10 (L13): secondary group buses -- lazy strips + activation
+    // flags on the kVoxBus2 pattern, spawned from the Mixer's "Add" menu.
+    std::unique_ptr<MixerTrackStrip> mLayersBus2Strip;
+    std::unique_ptr<MixerTrackStrip> mBassBus2Strip;
+    std::unique_ptr<MixerTrackStrip> mClipsBus2Strip;
+    std::unique_ptr<MixerTrackStrip> mPluginsBus2Strip;
+    bool                             mLayersBus2Active  { false };
+    bool                             mBassBus2Active    { false };
+    bool                             mClipsBus2Active   { false };
+    bool                             mPluginsBus2Active { false };
+    // L14: per-secondary-bus has-ever-had-route flags (project-persisted via
+    // the editor's <Buses> element).  A freshly added bus with no members
+    // stays visible; once it HAS had members and empties again, the layout
+    // pass auto-deactivates it.
+    std::map<int, bool>              mBusEverRouted;
+    // Shared body for the T10 secondary-bus activations (kVoxBus2 pattern).
+    bool activateGroupBus (std::unique_ptr<MixerTrackStrip>& strip, bool& activeFlag,
+                           const juce::String& name, juce::Colour color,
+                           const char* prefix, int chId,
+                           const juce::String& deleteTitle,
+                           const juce::String& parentName);
+    // L14: the seven user-added secondary buses (Vox2/Inst2/Inst3 + the four
+    // T10 group buses) -- the has-ever-had-route lifecycle applies to these.
+    static bool isSecondaryBus (int chId);
+    // Flag+visibility drop WITHOUT the param sweep (bus already empty).
+    void deactivateBusFlagOnly (int chId);
 
     // Dynamic instrument strips - keyed by tabId (Layer/Bass) or slot (Drums)
     std::map<int, std::unique_ptr<MixerTrackStrip>> mLayerStrips;
@@ -347,26 +377,19 @@ private:
     std::map<int, std::unique_ptr<MixerTrackStrip>> mAudioStrips;   // keyed by arrangement row
     std::vector<int>                                mAudioRowOrder;
 
-    // 5F-4b B2: aux strip storage + "+" button
+    // 5F-4b B2: aux strip storage.  QA-Layout T10 (L13): the five add BUTTONS
+    // are gone -- every add action lives on the strip's "Add" titled menu.
     std::map<int, std::unique_ptr<MixerTrackStrip>> mAuxStrips;
     std::vector<int>                                mAuxOrder;
-    std::unique_ptr<juce::TextButton>               mAddAuxBtn;
-    // G-6 (2026-04-29): Add Vox Bus / Add Inst Bus buttons - sit alongside
-    // the existing strip-add buttons.  Greyed out at cap (Vox: 1 extra max,
-    // Inst: 2 extra max).
-    std::unique_ptr<juce::TextButton>               mAddVoxBusBtn;
-    std::unique_ptr<juce::TextButton>               mAddInstBusBtn;
     int                                             mNextAuxIdx { 0 };
 
-    // R1 (2026-04-23): Vox + Inst strip storage + "+" buttons.
+    // R1 (2026-04-23): Vox + Inst strip storage.
     std::map<int, std::unique_ptr<MixerTrackStrip>> mVoxStrips;
     std::vector<int>                                mVoxOrder;
-    std::unique_ptr<juce::TextButton>               mAddVoxBtn;
     int                                             mNextVoxIdx { 0 };
 
     std::map<int, std::unique_ptr<MixerTrackStrip>> mInstStrips;
     std::vector<int>                                mInstOrder;
-    std::unique_ptr<juce::TextButton>               mAddInstBtn;
     int                                             mNextInstIdx { 0 };
 
 
@@ -414,49 +437,20 @@ private:
     mutable std::unordered_map<int, MixerTrackStrip*> mStripByChannelId;
     mutable bool                                      mStripCacheDirty { true };
 
-    // 5F-4b B3+B4: cable overlay - paints green beziers + handles cable drag.
-    struct CableOverlay : public juce::Component, private juce::Timer
+    // 5F-4b B3+B4: cable overlay - paints the patch-bay beziers.  QA-Layout
+    // T10 (L12): the click-to-place send/SC modes and the main-out socket
+    // drag are RETIRED (targets are picked from the per-strip "+" menu);
+    // what remains is cable painting + the right-click property popup.
+    struct CableOverlay : public juce::Component
     {
         MixerPage& owner;
 
-        // Drag state
-        bool  mDragging     { false };
-        int   mDragSrcId    { -1 };
-        juce::Point<float> mDragSrcSocket;
-        juce::Point<float> mDragMousePos;
-
-        // Red-flash rejection state
-        int   mFlashStripId   { -1 };
-        int   mFlashCountdown { 0 };
-
-        // 5F-4b B5: send-placement mode (click "+" → click destination)
-        int   mPendingSendSrcId { -1 };
-        // C.4 Phase 1 (2026-04-30): sidechain-placement mode (click "+" →
-        // pick "Sidechain" from popup → click destination strip).  At most
-        // ONE of mPendingSendSrcId / mPendingScSrcId is >= 0 at a time.
-        int   mPendingScSrcId   { -1 };
-
         explicit CableOverlay(MixerPage& o);
-        ~CableOverlay() override { stopTimer(); }
 
         bool hitTest(int x, int y) override;
         void paint(juce::Graphics&) override;
         void mouseDown(const juce::MouseEvent&) override;
-        void mouseDrag(const juce::MouseEvent&) override;
-        void mouseUp(const juce::MouseEvent&) override;
-        void mouseMove(const juce::MouseEvent&) override;   // B5: track cursor in pending mode
-        bool keyPressed(const juce::KeyPress&) override;     // B5: Escape cancels
-        void timerCallback() override;
 
-        // B5: enter/exit send-placement mode
-        void startSendPlacement(int srcChannelId);
-        void cancelSendPlacement();
-        // C.4 Phase 1: enter/exit sidechain-placement mode (white cable).
-        void startSidechainPlacement(int srcChannelId);
-        void cancelSidechainPlacement();
-
-        int findSocketNear(juce::Point<float> pt, float radius, bool skipLocked) const;
-        int findStripUnder(juce::Point<float> pt) const;
         bool isRouteAllowed(int srcId, int dstId) const;
 
         // B5: find the first inactive send slot (0..3) for a strip, or -1 if full.
@@ -497,10 +491,9 @@ private:
     };
     std::unique_ptr<CableOverlay> mCableOverlay;
 
-    // C.4 Phase 1 (2026-04-30): popup-then-dispatch helper for the per-strip
-    // "+" Add-Send button.  Shows a Send / Sidechain submenu and routes the
-    // user's pick to the corresponding CableOverlay placement mode.  Wired
-    // from every onAddSendRequested lambda.
+    // QA-Layout T10 (L12): the per-strip "+" menu -- Send... / Sidechain... /
+    // Move Output... submenus enumerating concrete legal targets.  Wired from
+    // every onAddSendRequested lambda.
     void onAddCableRequestedFor(int srcChannelId);
 
     // Find the strip component for a given MixerChannelIds value (or nullptr).

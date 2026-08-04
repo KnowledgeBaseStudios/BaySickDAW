@@ -406,12 +406,15 @@ void EffectsPage::rebuildChannelDropdown()
 
         // ── Clips Bus ─────────────────────────────────────────────────────
         addBusAndMembers(6, kClipsBus, "CLIPS BUS", juce::Colour(0xffd4a017));
+        addBusAndMembers(16, kClipsBus2, "CLIPS BUS 2", juce::Colour(0xffd4a017));   // T10
 
         // ── Layers Bus ────────────────────────────────────────────────────
         addBusAndMembers(1, kLayersBus, "LAYERS BUS", VC::LayerCol[0]);
+        addBusAndMembers(14, kLayersBus2, "LAYERS BUS 2", VC::LayerCol[0]);   // T10
 
         // ── Bass Bus ──────────────────────────────────────────────────────
         addBusAndMembers(2, kBassBus, "BASS BUS", VC::BassCol[0]);
+        addBusAndMembers(15, kBassBus2, "BASS BUS 2", VC::BassCol[0]);   // T10
 
         // ── Drums Bus ─────────────────────────────────────────────────────
         addBusAndMembers(3, kDrumsBus, "DRUMS BUS", VC::DrumsCol);
@@ -422,6 +425,7 @@ void EffectsPage::rebuildChannelDropdown()
 
         // ── Plugins Bus (QA-ModelShell TS6, BLU-447) ─────────────────────
         addBusAndMembers(13, kPluginsBus, "PLUGINS BUS", VC::Purple);
+        addBusAndMembers(17, kPluginsBus2, "PLUGINS BUS 2", VC::Purple);   // T10
 
         // ── Vox Bus(es) (R3.5 + G-6) ─────────────────────────────────────
         addBusAndMembers(7, kVoxBus,   "VOX BUS",   juce::Colour(0xFF0FAFA5));
@@ -500,6 +504,10 @@ void EffectsPage::resolveChannelDsp (VibeGraph& vg, int id,
     case 11: rack = vg.getInstBus3Rack();       eq = vg.getInstBus3EQ();      break;
     case 12: rack = vg.getRustyDrumsBusRack();  eq = vg.getRustyDrumsBusEQ(); break;
     case 13: rack = vg.getPluginsBusRack();     eq = vg.getPluginsBusEQ();    break;
+    case 14: rack = vg.getLayersBus2Rack();     eq = vg.getLayersBus2EQ();    break;   // T10
+    case 15: rack = vg.getBassBus2Rack();       eq = vg.getBassBus2EQ();      break;
+    case 16: rack = vg.getClipsBus2Rack();      eq = vg.getClipsBus2EQ();     break;
+    case 17: rack = vg.getPluginsBus2Rack();    eq = vg.getPluginsBus2EQ();   break;
     default:
         if (id >= 200 && id < 200 + kMaxLayerPages)
         {
@@ -849,6 +857,10 @@ EQ8MsDSP* EffectsPage::preEqForChannelId (VibeGraph& vg, int id)
         case 11: return vg.getInstBus3PreEQ();
         case 12: return vg.getRustyDrumsBusPreEQ();
         case 13: return vg.getPluginsBusPreEQ();
+        case 14: return vg.getLayersBus2PreEQ();    // T10
+        case 15: return vg.getBassBus2PreEQ();
+        case 16: return vg.getClipsBus2PreEQ();
+        case 17: return vg.getPluginsBus2PreEQ();
         default: break;
     }
     if      (id >= 100 && id < 200)                                              return vg.getInsertPreEQ(VibeGraph::InsertKind::Drum,  id - 100);
@@ -1244,6 +1256,10 @@ juce::String EffectsPage::channelPrefixForId (int id)
         case 11: return "inst_bus3";
         case 12: return "rusty_bus";
         case 13: return "plugin_bus";   // QA-ModelShell TS6
+        case 14: return "layers_bus2";  // QA-Layout T10
+        case 15: return "bass_bus2";
+        case 16: return "clips_bus2";
+        case 17: return "plugin_bus2";
         default: break;
     }
     if (id >= 100 && id < 200)
@@ -1294,6 +1310,10 @@ juce::String EffectsPage::mixerPrefixForChannelId(int id)
         case 11: return "mixer_instbus3";     // G-6
         case 12: return "mixer_rustybus";     // J-6
         case 13: return "mixer_pluginbus";    // QA-ModelShell TS6
+        case 14: return "mixer_layersbus2";   // QA-Layout T10
+        case 15: return "mixer_bassbus2";
+        case 16: return "mixer_clipsbus2";
+        case 17: return "mixer_pluginbus2";
         default: break;
     }
 

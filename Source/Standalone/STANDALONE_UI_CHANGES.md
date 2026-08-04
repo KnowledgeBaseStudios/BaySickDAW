@@ -563,3 +563,39 @@ shortcut. Held notes release on mode-off, octave shift, and tab switch.
   #1C3A8A).  The four widgets the Inst band hosted (program label + Load button,
   CUT SELF + mode toggles) mount on the strip as right extras; the CUT SELF
   APVTS attachments are wired independently of any title bar now.
+
+---
+
+## 2026-08-04 - QA-Layout T10: mixer menus, Add heading, group buses, routing menus
+
+**Files:** `VibeGraph.h/.cpp`, `PluginProcessor.h/.cpp`, `MixerPage.h/.cpp`,
+`EffectsPage.cpp`, `StandaloneEditor.cpp`, `SharedUI.h/.cpp`, `PagePresetIO.cpp`
+
+- **L13 - "Add" titled menu:** second flat native-style heading right of "Menu"
+  (strip reads "Menu  Add"; PageMenuBar::setAddMenuBuilder, hidden on pages
+  without a builder).  Mixer's Add menu = the ruled seven rows: Aux Strip, Vox
+  Bus, Inst Bus, Layers Bus, Bass Bus, Clips Bus, Plugins Bus (bus rows grey at
+  cap).  The five title-strip add buttons are DELETED (Vox/Inst STRIP adds live
+  on the ribbon "+" flow, which already creates the strip).
+- **Four secondary group buses** (kLayersBus2 14, kBassBus2 15, kClipsBus2 16,
+  kPluginsBus2 17) on the full kVoxBus2 pattern: registry rows, always-allocated
+  graph nodes, params, render tasks, EQ tables, meters, Effects dropdown ids
+  14-17, automation labels, active-gated route rules, preset fallbacks.
+- **L14 lifecycle:** per-secondary-bus has-ever-had-route flag; a fresh bus stays
+  visible while never-routed, auto-deactivates once used-then-emptied.  New
+  <Buses> element in the structural UIState serializer persists activation +
+  everRouted for all seven secondary buses; clearDynamicStrips resets them on
+  project load (Vox2/Inst2/3 previously leaked across projects).  A routed-to
+  inactive secondary bus SELF-ACTIVATES at layout time (preset/project loads
+  write _sendTo before any flag arrives).
+- **L12 - "+" target menus:** the per-strip "+" now shows Send... / Sidechain...
+  / Move Output... submenus enumerating concrete legal targets (filtered by
+  isValidBusSendTarget / isRouteAllowed / wouldCreateCycle; illegal = disabled
+  row; current main-out ticked; "New Aux Strip" row preserves the old
+  auto-create).  The click-to-place send/SC modes, the main-out socket drag,
+  the ghost cables, and the red rejected-drop flash are RETIRED; cable painting
+  + right-click cable menus (delete, amount, pre/post) stay; Master's "+"
+  stays the Analyzer launcher.
+- **L30:** "MIDI trigger velocity" moved from the Mixer Menu to the Audio
+  Settings dialog as a "Trigger Velocity:" combo below the MIDI inputs (applied
+  live, settings.xml persistence unchanged; dialog height +1 row).

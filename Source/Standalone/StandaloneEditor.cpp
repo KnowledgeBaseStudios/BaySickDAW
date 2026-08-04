@@ -124,6 +124,26 @@ public:
         addAndMakeVisible(mMidiLbl);
         rebuildMidiToggles();
 
+        // QA-Layout T10 (L30): "MIDI trigger velocity" lives here now (was on
+        // the Mixer Menu) -- beside the MIDI inputs it configures.  Applied
+        // LIVE on change (QA-L-Fix D-11 hot-swap); persistence unchanged
+        // (settings.xml pref).
+        styleLabel(mVelLbl, "Trigger Velocity:");
+        styleCombo(mVelBox);
+        mVelBox.addItem("From controller", 1);
+        mVelBox.addItem("Fixed", 2);
+        mVelBox.setSelectedId(
+            DrumTriggerVelocity::gUseFixed.load(std::memory_order_acquire) ? 2 : 1,
+            juce::dontSendNotification);
+        mVelBox.onChange = [this]
+        {
+            DrumTriggerVelocity::gUseFixed.store(mVelBox.getSelectedId() == 2,
+                                                 std::memory_order_release);
+            VibesynthStandaloneApp::saveMidiTriggerVelocityPref();
+        };
+        addAndMakeVisible(mVelLbl);
+        addAndMakeVisible(mVelBox);
+
         mApplyBtn.setButtonText("Apply");
         mApplyBtn.setColour(juce::TextButton::buttonColourId,  VC::Accent.withAlpha(0.25f));
         mApplyBtn.setColour(juce::TextButton::textColourOffId, VC::Text);
@@ -158,7 +178,8 @@ public:
         // measure (kRowH * (4 audio rows + N midi toggles + footer)).
         const int midiToggleCount = juce::jmax(1, (int) mMidiToggles.size());
         const int kRowH = 36, kPad = 16, kFooter = 60;
-        setSize(480, kPad + 4 * kRowH + 8 + midiToggleCount * 26 + kFooter);
+        // T10 (L30): 5 rows -- the trigger-velocity row joined the 4 audio rows.
+        setSize(480, kPad + 5 * kRowH + 8 + midiToggleCount * 26 + kFooter);
     }
 
     void resized() override
@@ -192,6 +213,11 @@ public:
                 mMidiToggles[i]->setBounds(togX, midiBlockTop + (int) i * togH, togW, togH);
         }
         y = midiBlockTop + (int) juce::jmax((size_t) 1, mMidiToggles.size()) * togH + 12;
+
+        // T10 (L30): trigger-velocity row below the MIDI inputs block.
+        mVelLbl.setBounds(kPad, y + 4, kLblW, kComboH);
+        mVelBox.setBounds(togX, y, togW, kComboH);
+        y += kRowH;
 
         const int btnW = 90, btnH = 28;
         mPanelBtn.setBounds(kPad, y, 176, btnH);
@@ -535,7 +561,9 @@ private:
 
     juce::Label      mTypeLbl, mDevLbl, mRateLbl, mBufLbl;
     juce::Label      mMidiLbl, mMidiNoneLbl;
+    juce::Label      mVelLbl;    // T10 (L30)
     juce::ComboBox   mTypeBox, mDevBox, mRateBox, mBufBox;
+    juce::ComboBox   mVelBox;   // T10 (L30)
     juce::TextButton mApplyBtn, mCloseBtn, mPanelBtn;
     std::vector<std::unique_ptr<juce::ToggleButton>> mMidiToggles;
 
@@ -4122,6 +4150,10 @@ juce::String StandaloneEditor::resolveAutomationDisplayName(const juce::String& 
             { "mixer_instbus3_",  "Inst Bus 3"  },
             { "mixer_rustybus_",  "RustyDrums Bus" },
             { "mixer_pluginbus_", "Plugins Bus" },   // TS6 (missed, fixed TS7)
+            { "mixer_layersbus2_",  "Layers Bus 2"  },   // QA-Layout T10
+            { "mixer_bassbus2_",    "Bass Bus 2"    },
+            { "mixer_clipsbus2_",   "Clips Bus 2"   },
+            { "mixer_pluginbus2_",  "Plugins Bus 2" },
         };
         // PREFIX COLLISION GUARD (Jeff's call, 2026-07-30).  The Bass BUS prefix
         // is "mixer_bass_" and a bass INSERT is "mixer_bass_0_...", so the insert
@@ -4439,6 +4471,11 @@ std::unique_ptr<juce::Component> StandaloneEditor::createEffectsPage()
         // drew a "PLUGINS BUS" group heading; with neither the bus nor its
         // members in this list it was a heading over nothing.
         if (mMixerPage && mMixerPage->isPluginsBusActive()) result.push_back({13, "Plugins Bus"});
+        // QA-Layout T10: secondary group buses, active-gated like Vox Bus 2.
+        if (mMixerPage && mMixerPage->isLayersBus2Active())  result.push_back({14, "Layers Bus 2"});
+        if (mMixerPage && mMixerPage->isBassBus2Active())    result.push_back({15, "Bass Bus 2"});
+        if (mMixerPage && mMixerPage->isClipsBus2Active())   result.push_back({16, "Clips Bus 2"});
+        if (mMixerPage && mMixerPage->isPluginsBus2Active()) result.push_back({17, "Plugins Bus 2"});
 
         // Active Layer pages (engine selected)
         for (auto* entry : mPages)
@@ -5692,6 +5729,7 @@ void StandaloneEditor::showPageForTab(int tabId)
         // AddAux, EQ bank indicator etc.) don't leak across page switches.
         // Pre-existing leak that became visible with the new bank indicator.
         mPageMenuBar->setMenuBuilder (nullptr);
+        mPageMenuBar->setAddMenuBuilder (nullptr);   // QA-Layout T10 (L13)
         mPageMenuBar->setBankIndicator (nullptr);
         mPageMenuBar->clearTabSlots();
         mPageMenuBar->clearExtraRightComponents();
@@ -6456,17 +6494,41 @@ void StandaloneEditor::showPageForTab(int tabId)
         }
         else if (auto* mxp = dynamic_cast<MixerPage*>(mVisiblePage))
         {
-            // G-6 (2026-04-29): five add buttons in the Mixer page menu bar.
-            // User-spec'd order (left → right):
-            //   [Add Vox Bus] [Add Vox Strip] [Add Inst Bus] [Add Inst Strip] [Add Aux Strip]
-            // Verified empirically: addExtraRightComponent appends rightward,
-            // so the FIRST add lands leftmost.  (The pre-existing comment in
-            // the R1 code claimed the opposite - it was wrong.)
-            mPageMenuBar->addExtraRightComponent(mxp->getAddVoxBusBtn(),  120);
-            mPageMenuBar->addExtraRightComponent(mxp->getAddVoxBtn(),     120);
-            mPageMenuBar->addExtraRightComponent(mxp->getAddInstBusBtn(), 120);
-            mPageMenuBar->addExtraRightComponent(mxp->getAddInstBtn(),    120);
-            mPageMenuBar->addExtraRightComponent(mxp->getAddAuxBtn(),     120);
+            // QA-Layout T10 (L13): the five add buttons are gone; the strip's
+            // "Add" titled menu (flat heading right of "Menu") carries every
+            // add action.  Bus rows grey out at their caps; action items
+            // self-dispatch (itemID -1, the T15 pattern).
+            {
+                juce::Component::SafePointer<MixerPage> safeMx (mxp);
+                mPageMenuBar->setAddMenuBuilder ([safeMx] (juce::Component* anchor)
+                {
+                    auto* mx = safeMx.getComponent();
+                    if (mx == nullptr) return;
+                    // L13's ruled seven rows exactly -- Vox/Inst STRIP adds
+                    // live on the ribbon's "+" flow, not here.
+                    juce::PopupMenu m;
+                    m.addItem ("Aux Strip", [safeMx] { if (auto* p = safeMx.getComponent()) p->addAuxChannel(); });
+                    m.addSeparator();
+                    m.addItem ("Vox Bus", ! mx->isVoxBus2Active(), false,
+                               [safeMx] { if (auto* p = safeMx.getComponent()) p->activateVoxBus2(); });
+                    m.addItem ("Inst Bus", ! (mx->isInstBus2Active() && mx->isInstBus3Active()), false,
+                               [safeMx]
+                               {
+                                   auto* p = safeMx.getComponent();
+                                   if (p == nullptr) return;
+                                   if (! p->activateInstBus2()) p->activateInstBus3();
+                               });
+                    m.addItem ("Layers Bus", ! mx->isLayersBus2Active(), false,
+                               [safeMx] { if (auto* p = safeMx.getComponent()) p->activateLayersBus2(); });
+                    m.addItem ("Bass Bus", ! mx->isBassBus2Active(), false,
+                               [safeMx] { if (auto* p = safeMx.getComponent()) p->activateBassBus2(); });
+                    m.addItem ("Clips Bus", ! mx->isClipsBus2Active(), false,
+                               [safeMx] { if (auto* p = safeMx.getComponent()) p->activateClipsBus2(); });
+                    m.addItem ("Plugins Bus", ! mx->isPluginsBus2Active(), false,
+                               [safeMx] { if (auto* p = safeMx.getComponent()) p->activatePluginsBus2(); });
+                    m.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (anchor));
+                });
+            }
 
             // 2026-04-29: Mixer hamburger menu - project-level Pan Law selector.
             // 2026-05-02: + meter latency-compensation toggle (off by default).
@@ -6553,16 +6615,9 @@ void StandaloneEditor::showPageForTab(int tabId)
                                 true,                  // enabled
                                 false);                // not checkable
 
-                    // QA-L-Fix D-11 (2026-07-19): kit-trigger velocity source.
-                    // Fixed exists for pads that aren't velocity sensitive.
-                    {
-                        const bool fixedVel =
-                            DrumTriggerVelocity::gUseFixed.load (std::memory_order_acquire);
-                        juce::PopupMenu velSub;
-                        velSub.addItem (204, "From controller", true, ! fixedVel);
-                        velSub.addItem (205, "Fixed",           true,   fixedVel);
-                        m.addSubMenu ("MIDI trigger velocity", velSub);
-                    }
+                    // QA-Layout T10 (L30): "MIDI trigger velocity" moved to
+                    // the Audio Settings dialog, beside the MIDI inputs it
+                    // configures.
 
                     m.showMenuAsync (
                         juce::PopupMenu::Options().withTargetComponent (anchor),
@@ -6605,16 +6660,6 @@ void StandaloneEditor::showPageForTab(int tabId)
                                 const bool wasOn = RenderEngine::gMultiThreadedEngineEnabled.load (std::memory_order_acquire);
                                 RenderEngine::gMultiThreadedEngineEnabled.store (! wasOn, std::memory_order_release);
                                 VibesynthStandaloneApp::saveMultiCoreRenderingPref();
-                                return;
-                            }
-                            if (r == 204 || r == 205)
-                            {
-                                // QA-L-Fix D-11: hot-swap; the next triggered
-                                // hit uses the new source.  Persisted like the
-                                // MT toggle above.
-                                DrumTriggerVelocity::gUseFixed.store (r == 205,
-                                                                      std::memory_order_release);
-                                VibesynthStandaloneApp::saveMidiTriggerVelocityPref();
                                 return;
                             }
                             if (r == 203)
@@ -12598,6 +12643,30 @@ void StandaloneEditor::serializeStripNamesAndOrders (juce::XmlElement& ui)
         writeOrder ("VoxOrder",   mMixerPage->getVoxStripIndices());
         writeOrder ("InstOrder",  mMixerPage->getInstStripIndices());
         writeOrder ("AudioOrder", mMixerPage->getAudioStripIndices());
+
+        // QA-Layout T10 (L14): secondary-bus activation + has-ever-had-route
+        // lifecycle state.  Routed-to buses also self-activate at layout time,
+        // so this element's real weight is active-but-EMPTY buses (freshly
+        // added, or used-then-emptied ones held visible until layout hides
+        // them) plus the everRouted flags.
+        {
+            using namespace MixerChannelIds;
+            auto* buses = ui.createNewChildElement ("Buses");
+            auto writeBus = [&] (int chId, bool active)
+            {
+                auto* rec = buses->createNewChildElement ("B");
+                rec->setAttribute ("ch",         chId);
+                rec->setAttribute ("active",     active ? 1 : 0);
+                rec->setAttribute ("everRouted", mMixerPage->getBusEverRouted (chId) ? 1 : 0);
+            };
+            writeBus (kVoxBus2,     mMixerPage->isVoxBus2Active());
+            writeBus (kInstBus2,    mMixerPage->isInstBus2Active());
+            writeBus (kInstBus3,    mMixerPage->isInstBus3Active());
+            writeBus (kLayersBus2,  mMixerPage->isLayersBus2Active());
+            writeBus (kBassBus2,    mMixerPage->isBassBus2Active());
+            writeBus (kClipsBus2,   mMixerPage->isClipsBus2Active());
+            writeBus (kPluginsBus2, mMixerPage->isPluginsBus2Active());
+        }
     }
 }
 
@@ -14983,6 +15052,35 @@ void StandaloneEditor::deserializeUIState (const juce::XmlElement& root)
     restoreOrder ("VoxOrder",   MixerPage::OrderKind::Vox);
     restoreOrder ("InstOrder",  MixerPage::OrderKind::Inst);
     restoreOrder ("AudioOrder", MixerPage::OrderKind::Audio);
+
+    // QA-Layout T10 (L14): secondary-bus activation + everRouted restore.
+    // clearDynamicStrips reset every flag at the top of this load; routed-to
+    // buses would self-activate at layout time anyway -- this pass restores
+    // the ones that carry no routes yet (freshly added) plus the lifecycle
+    // flags.
+    if (auto* buses = ui->getChildByName ("Buses"); buses != nullptr && mMixerPage != nullptr)
+    {
+        using namespace MixerChannelIds;
+        for (auto* rec : buses->getChildWithTagNameIterator ("B"))
+        {
+            const int  chId       = rec->getIntAttribute ("ch", -1);
+            const bool active     = rec->getBoolAttribute ("active", false);
+            const bool everRouted = rec->getBoolAttribute ("everRouted", false);
+            mMixerPage->setBusEverRouted (chId, everRouted);
+            if (! active) continue;
+            switch (chId)
+            {
+                case kVoxBus2:     mMixerPage->activateVoxBus2();     break;
+                case kInstBus2:    mMixerPage->activateInstBus2();    break;
+                case kInstBus3:    mMixerPage->activateInstBus3();    break;
+                case kLayersBus2:  mMixerPage->activateLayersBus2();  break;
+                case kBassBus2:    mMixerPage->activateBassBus2();    break;
+                case kClipsBus2:   mMixerPage->activateClipsBus2();   break;
+                case kPluginsBus2: mMixerPage->activatePluginsBus2(); break;
+                default: break;
+            }
+        }
+    }
 
     // QA-Layout T5: frame exactly the windows the project saved as open --
     // page keys route to hostPageInWindow; aux keys re-dispatch to their
