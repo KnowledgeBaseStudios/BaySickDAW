@@ -52,6 +52,10 @@ public:
     // poll so a strip rename reaches the window title.
     juce::String windowTitle() const;
 
+    // [QA-Layout DIAG] "Basic" / "Advanced" for the sizing diag line, empty
+    // when the panel has no disclosure toggle (Rule 4, Remove at batch close).
+    juce::String diagPanelMode() const;
+
     // The slot this window is showing is gone (cleared, rack destroyed, project
     // closed).  The owner destroys the window in response, so nothing may touch
     // this object after it fires.

@@ -165,7 +165,15 @@ public:
     // that gesture means -- the edge being dragged should simply stop.
     juce::Rectangle<int> clampResizeToWorkspace (juce::Rectangle<int> target) const;
 
+    // [QA-Layout DIAG] window-sizing collection (Rule 4, Remove at batch
+    // close): the strip shows a live WxH readout, every size change appends
+    // a line to Documents/BaySickDAW/window-sizing-diag.txt, and floors are
+    // dropped to the absolute minimum so the real ones can be found on
+    // screen.  Effect windows report their Basic/Advanced mode through this.
+    std::function<juce::String()> onDiagExtraInfo;
+
     void paint (juce::Graphics&) override;
+    void paintOverChildren (juce::Graphics&) override;   // [QA-Layout DIAG] WxH readout
     void resized() override;
     void broughtToFront() override;
     void mouseDown (const juce::MouseEvent&) override;
@@ -247,6 +255,7 @@ private:
     bool                 mDraggingTitle { false };
     juce::Rectangle<int> mDragStartBounds;
     juce::Point<int>     mDragStartScreen;
+    juce::Point<int>     mLastDiagSize;   // [QA-Layout DIAG] dedupe per-size lines
     // Runaway guard for the cursor-pinning warp in mouseDrag.  See the long
     // comment there: the warp is proven to converge, and this exists purely so
     // a future change that breaks that proof degrades to "the cursor comes

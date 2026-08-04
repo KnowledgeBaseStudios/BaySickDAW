@@ -2067,38 +2067,41 @@ CL-282 full telemetry live here too -- MS-8 and the perf-strip checks cover them
 
 > **B.31.0 RUNS FIRST, BEFORE ANY OTHER SCENARIO IN THIS SECTION.**  It is a data-collection
 > pass, not a pass/fail test: the window resize floors cannot be picked from source, only from
-> the screen, and every later windowing scenario depends on them being set.  Jeff drags, reports
-> the numbers, Claude sets them, then the rest of §B.31 runs.
+> the screen, and every later windowing scenario depends on them being set.  QA-Layout T6
+> (2026-08-03) replaced the old drag-and-report table with a DIAG-DRIVEN collection: the app
+> records the numbers itself, Jeff just drives the windows, then hands back the diag file.
 
-#### B.31.0 — Window minimum-size collection (DO THIS FIRST)
+#### B.31.0 — Window minimum-size collection (DO THIS FIRST — diag-driven, QA-Layout T6)
 
-Rig: the shell build, run at Jeff's normal **125% display scale** (that is the constrained case —
-see the note under the table).  For EACH window below: open it, drag its bottom-right corner in
-until the layout is at the smallest size that is still **usable** — meaning nothing overlaps,
-nothing is clipped off, and every control you would actually reach for is still hittable — then
-record the width x height shown in the title strip readout.
+Rig: the QA-Layout T6 build at Jeff's normal **125% display scale** (the constrained case — see
+the note at the bottom).  The build carries the `[QA-Layout DIAG]` instrumentation:
 
-Record BOTH numbers per row.  "Comfortable" is the size you would actually want it to open at;
-"floor" is the hard stop below which it should refuse to shrink.
+- Every contained window shows a live **WxH readout** (yellow, monospace) on its title strip.
+- Every actual size change **appends a line** to `Documents\BaySickDAW\window-sizing-diag.txt`
+  as `persist-key | title | WxH` — effect windows append a 4th field, `Basic` or `Advanced`,
+  for the panel mode on screen at that size.
+- All resize **floors are dropped to 120x80** so the real collision points are reachable.
 
-| # | Window | Floor (w x h) | Comfortable (w x h) | Notes / what collided first |
-|---|--------|---------------|---------------------|------------------------------|
-| 1 | Builder | | | Jeff wants a LARGER floor than the collision point |
-| 2 | Piano Roll | | | ditto |
-| 3 | Mixer | | | ditto |
-| 4 | Effects | | | sidebar + detail pane (TS5 shape) |
-| 5 | Layers (engine page) | | | test with the widest engine — Harmless |
-| 6 | Bass (engine page) | | | |
-| 7 | Drums (engine page) | | | |
-| 8 | Clips | | | |
-| 9 | Vox | | | |
-| 10 | Inst | | | test with a sfizz source loaded (Aria panel is the wide case) |
-| 11 | BaySickRustyDrums | | | kit graphic is fixed-aspect — may be a natural-size floor |
-| 12 | Event Editor | | | already a window today; confirm it still behaves contained |
+**The pass, per window on the coverage checklist** (the checklist is the chat hand-off list from
+QA-Layout T6; every persist key on it must appear in the diag file):
 
-**Fixed-grid pages:** if a page's layout is a fixed grid rather than a reflowing one, its floor IS
-its natural size (it should refuse to shrink at all).  Mark those rows "natural" instead of giving
-numbers.
+1. Open the window, drag its bottom-right corner in until the layout is at the smallest size
+   that is still **usable** — nothing overlaps, nothing is clipped off, every control you would
+   actually reach for is still hittable.  Let go.  That final line in the diag file is the
+   window's FLOOR take.
+2. Then resize out to the size you would actually want it to **open at**, and let go — that
+   line is the COMFORTABLE take.  (The last two settled sizes per key are read in order;
+   in-between drag noise is ignored.)
+3. **Effect windows: repeat both takes in the OTHER disclosure mode** (flip Basic/Advanced from
+   the window's title-strip menu) — both modes share one panel, so each needs its own floor.
+4. Engine pages whose content differs by engine (Layers / Bass / Drums) get one pair of takes
+   PER ENGINE — the checklist enumerates the variants.
+5. Fixed-grid layouts that should refuse to shrink at all: shrink to the point it stops being
+   usable anyway, then note "natural" for that key when handing the file back (a text note next
+   to the file is fine).
+
+Hand-back = `window-sizing-diag.txt` (plus any "natural"/commentary notes).  QA-Layout T7 sets
+the real floors from it; coverage is verified against the T6 checklist before T7 starts.
 
 **Why 125% does not corrupt these numbers.**  JUCE lays out in LOGICAL pixels and converts to
 physical only at the window boundary, so a collision point is a property of the page's layout, not

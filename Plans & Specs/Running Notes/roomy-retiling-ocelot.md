@@ -326,8 +326,57 @@ Convention: Main Plan §0 "Batch Plans + Running Notes layout" (locked 2026-05-1
 - **`STANDALONE_UI_CHANGES.md`** gained the T4 entry.
 - **Next:** T5 (window-state persistence, three lifetimes).
 
+## 2026-08-03 — Task 5 committed `fba55012` — three-lifetime window persistence + persist-key collision closed
+
+- **Build gate green FIRST TRY:** five exit codes 0, four `vcxproj -> ...exe` link
+  lines, zero `error C` / `error LNK` / `error MSB` greps.  7 files, 393 insertions /
+  72 deletions.
+- **LIFETIME 1 (universal in-memory):** WorkspaceWindow's session map is now the ONE
+  live store — `saveBounds` always writes it (workspace-local), `loadSavedBounds`
+  always reads it FIRST, for Disk and Session windows alike.  Close/reopen returns to
+  the same spot for every window type, players included, no disk involved.
+- **LIFETIME 2 (settings.xml):** the per-close parse-and-rewrite of the whole file is
+  GONE.  Disk-marked windows register in a `diskEligibleKeys` set;
+  `WorkspaceWindow::writeSessionToSettings` runs ONCE in
+  `VibesynthStandaloneApp::shutdown`, deliberately AFTER editor teardown (window
+  destructors are the last map writers, so the flush sees final bounds).  Filtered per
+  the mammoth ruling: w/h for every eligible window; x/y only for keys in
+  `placementKeys` (`hostPageInWindow` registers the four default tabs —
+  Mixer/Builder/Effects/PianoRoll); player x/y attributes are STRIPPED from old
+  records.  `loadSavedBounds` treats a record without x/y as a SIZE-ONLY seed
+  (`attachTo` keeps the size, takes the default cascade position) — "the size I like
+  my windows" carries across projects, placement does not.
+- **LIFETIME 3 (project file):** `serializeUIState` writes a `<Windows>` element — one
+  `<W key x y w h>` per map entry (`flushAllWindowBounds` sweeps live windows first)
+  plus one `<Open key>` per live window (pages by persist key; effect
+  windows/satellites by aux key).  `deserializeUIState` REPLACES the map, sets an
+  `mLoadingWindows` guard (`hostPageInWindow` refuses mid-load — kills the three
+  force-framing sites without touching them), and at end-of-load frames EXACTLY the
+  saved-open set: page keys match via `pageIndexOfEntry`; aux keys re-dispatch
+  (`fx:<ch>:<uuid>` resolves the slot by uuid over `EffectRack::kNumSlots`; `eq:` /
+  `voxsat:` / `instsat:` / `analyzer:master` route to their open functions) so content
+  always rebuilds from live model state.  A pre-T5 project (no `<Windows>`) frames
+  nothing — tabs are one ribbon click away (accepted, pre-v1 no-migration).
+- **L16 crash survival rides the EXISTING 15-min autosave:**
+  `ProjectManager::writeBackup` serializes the project, which now includes
+  `<Windows>`, and `flushAllWindowBounds` inside the serializer is the "timer flush"
+  (resizes have no end-of-gesture hook).  A crash loses at most one autosave interval
+  of layout.
+- **persistKeyFor defect CLOSED — plan's diagnosis half-corrected:** the fill cascade
+  covered only Layers/Bass/Drums, so every Clip/Vox/Inst/Plugins window collided on
+  `"type:-1"` (one shared saved position).  New `pageIndexOfEntry` resolver (full
+  7-type cast cascade, -1 for system pages + the Rusty singleton) serves
+  `persistKeyFor`'s fallback, `hostPageInWindow`'s hint fill, and the load-time reopen
+  matcher.  The plan's "fix the wrong comment" half was already fixed upstream (the
+  key body matched its comment); the LIVE defect was the fill gap.
+- **`STANDALONE_UI_CHANGES.md`** gained the T5 entry.
+- **Next:** T6 — the sizing diag + WxH readout + floors drop + the Test Plans §B.31.0
+  rewrite, then the HANDOFF to Jeff's sizing pass.  Jeff asked in chat for a complete
+  checklist of every window to size so coverage can be verified at hand-back — being
+  compiled as part of the T6 handoff.
+
 ## Diagnostic Instrumentation Catalog (Rule 4)
 
 | Site | Tag | Purpose | Disposition |
 |------|-----|---------|-------------|
-| (T6 diag, when built) | `[QA-Layout DIAG]` | Window-sizing collection: per-resize append of persist-key + title + WxH + effects panel mode to `Documents/BaySickDAW/window-sizing-diag.txt` | Remove at batch close |
+| `WorkspaceWindow.h` (onDiagExtraInfo + paintOverChildren decl + mLastDiagSize), `WorkspaceWindow.cpp` (ctor 120x80 floor, setMinimumSize override w/ commented-out real body, resized() diag append, paintOverChildren WxH readout, AppPaths include), `EffectWindows.h/.cpp` (diagPanelMode), `StandaloneEditor.cpp` (openEffectSlotWindow onDiagExtraInfo wire) | `[QA-Layout DIAG]` | Window-sizing collection (T6): per-size-change append of persist-key + title + WxH + effects panel mode to `Documents/BaySickDAW/window-sizing-diag.txt`; live strip readout; floors dropped to 120x80 | Remove at batch close (T7 restores real floors in setMinimumSize; readout + append + hook + diagPanelMode all strip) |

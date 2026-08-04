@@ -13272,6 +13272,11 @@ void StandaloneEditor::openEffectSlotWindow (int channelId, int slotIndex)
 
     contentRaw->onTitleChanged = [win] (const juce::String& t) { win->setTitle (t); };
     contentRaw->configureTitleStrip (*win->getPageMenu());
+
+    // [QA-Layout DIAG] the sizing diag line carries the panel's
+    // Basic/Advanced mode -- both modes share one panel, so the pass takes
+    // one take per mode (L6).
+    win->onDiagExtraInfo = [contentRaw] { return contentRaw->diagPanelMode(); };
 }
 
 void StandaloneEditor::openEffectEqWindow (int channelId, bool pre)

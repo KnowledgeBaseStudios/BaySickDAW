@@ -159,6 +159,13 @@ juce::String EffectSlotWindow::windowTitle() const
     return strip.isEmpty() ? fx : strip + " - " + fx;
 }
 
+// [QA-Layout DIAG]
+juce::String EffectSlotWindow::diagPanelMode() const
+{
+    if (mSlot == nullptr || ! mSlot->hasBasicMode()) return {};
+    return mSlot->isBasicMode() ? "Basic" : "Advanced";
+}
+
 void EffectSlotWindow::configureTitleStrip (PageMenuBar& bar)
 {
     mBar = &bar;

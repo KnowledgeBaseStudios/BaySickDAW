@@ -2,6 +2,7 @@
 #include "SharedUI.h"   // VibeLAF + PageMenuBar
 #include "WindowChrome.h"   // TS7 §9.1: the one title-strip look
 #include "../ProjectManager.h"
+#include "../AppPaths.h"    // [QA-Layout DIAG] window-sizing-diag.txt location
 
 namespace
 {
@@ -111,7 +112,9 @@ WorkspaceWindow::WorkspaceWindow (juce::String persistKey, juce::String title)
     // editor's, so hover help works the same inside every contained window.
     mTooltips = std::make_unique<VibeTooltip> (this, 600);
 
-    mConstrainer.setMinimumSize (320, 200);
+    // [QA-Layout DIAG] 320x200 -> 120x80 while the sizing collection is
+    // active (T7 restores real floors from the diag data).
+    mConstrainer.setMinimumSize (120, 80);
     mResizer = std::make_unique<juce::ResizableBorderComponent> (this, &mConstrainer);
     mResizer->setBorderThickness (juce::BorderSize<int> (kBorderPx));
     addAndMakeVisible (*mResizer);
@@ -195,11 +198,14 @@ std::unique_ptr<juce::Component> WorkspaceWindow::releaseContent()
 
 void WorkspaceWindow::setMinimumSize (int minW, int minH)
 {
-    // The floor covers the whole frame, so the PAGE's minimum has to grow by
-    // the chrome around it or the page would still be squeezed below its own
-    // collision point.
-    mConstrainer.setMinimumSize (juce::jmax (120, minW + 2 * kBorderPx),
-                                 juce::jmax (80,  minH + kTitleH + 2 * kBorderPx));
+    // [QA-Layout DIAG] every caller's floor is a provisional number the
+    // sizing collection exists to replace -- ignore them all and hold the
+    // absolute minimum so Jeff can find the real collision points on screen.
+    // T7 restores this body:
+    //   mConstrainer.setMinimumSize (juce::jmax (120, minW + 2 * kBorderPx),
+    //                                juce::jmax (80,  minH + kTitleH + 2 * kBorderPx));
+    juce::ignoreUnused (minW, minH);
+    mConstrainer.setMinimumSize (120, 80);
 }
 
 void WorkspaceWindow::setTitle (juce::String t)
@@ -271,6 +277,25 @@ void WorkspaceWindow::sizeToContent (int contentW, int contentH)
 
 void WorkspaceWindow::resized()
 {
+    // [QA-Layout DIAG] one line per actual size change; the last row per key
+    // in a take is the number Jeff settled on.
+    if (getWidth() > 0 && getHeight() > 0 && workspace() != nullptr
+        && (getWidth() != mLastDiagSize.x || getHeight() != mLastDiagSize.y))
+    {
+        mLastDiagSize = { getWidth(), getHeight() };
+        juce::String line;
+        line << mPersistKey << " | " << mTitle << " | "
+             << getWidth() << "x" << getHeight();
+        if (onDiagExtraInfo)
+        {
+            const auto extra = onDiagExtraInfo();
+            if (extra.isNotEmpty()) line << " | " << extra;
+        }
+        line << "\n";
+        AppPaths::appRoot().getChildFile ("window-sizing-diag.txt").appendText (line);
+        repaint (titleBarArea());
+    }
+
     if (mResizer)  mResizer->setBounds (getLocalBounds());
 
     // L5 button order, right-to-left: close, fill toggle; the preset button
@@ -285,6 +310,19 @@ void WorkspaceWindow::resized()
         mPageMenu->setBounds (title);
 
     if (mContentRaw) mContentRaw->setBounds (contentArea());
+}
+
+void WorkspaceWindow::paintOverChildren (juce::Graphics& g)
+{
+    // [QA-Layout DIAG] live WxH readout on the strip (B.31.0's assumed
+    // readout).  Drawn OVER the PageMenuBar, right-aligned against the fill
+    // toggle; yellow monospace so it reads on every strip.
+    auto r = titleBarArea();
+    r.removeFromRight (kTitleH * 2 + 4);   // clear of close + fill buttons
+    g.setColour (juce::Colours::yellow.withAlpha (0.9f));
+    g.setFont (juce::Font (juce::Font::getDefaultMonospacedFontName(), 12.0f, juce::Font::bold));
+    g.drawText (juce::String (getWidth()) + "x" + juce::String (getHeight()),
+                r.removeFromRight (86), juce::Justification::centredRight, false);
 }
 
 void WorkspaceWindow::mouseDown (const juce::MouseEvent& e)
