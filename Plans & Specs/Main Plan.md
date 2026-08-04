@@ -1969,10 +1969,20 @@ kit fan-out behavior locked at docket #10 (a/a, default unmapped).
 - **Bucket:** Effects, Players, Mixer / Routing, System Pages, UI / L&F / Theming, Cross-cutting Infrastructure, Other / Platform / Deferred *(proposed seven-bucket set -- HELD Jeff call at apply, per the QA-ProjectSave precedent)*.
 - Items: the engine-ownership inversion (model-owned engines as a V1 REQUIREMENT, Jeff 2026-07-27); true offline export replacing the silent-instrument replica; automation registration fully model-side; the FL-style contained-window shell (shell=2b) incl. the CL-087 promotion; the Effects surface as windows (BLU-480 respecced 2026-07-29 + CL-299 1/2/4 + BLU-499); the FULL VST3 family BLU-297/298/299/300/301/302 + BLU-447 (VST2 dropped by licensing review -> CL-303); the freeze + loudness suite (CL-055 + BLU-427 both halves, maximizer suite CL-244 + CL-243(+BLU-109) + BLU-108 + BLU-110 + measure-before-render, CL-044, CL-227); riders CL-040/043/045/056/282/301, CL-057 (verified shipped + gap closed), CL-060 (lazy half only -- parallel half DROPPED 2026-07-28), BLU-344. CL-102 struck pre-batch (already shipped as PagePresetIO). CL-043 + CL-282 finished IN FULL at close after Jeff caught unapproved narrowings (selectable dither with the POW-r licensing exclusion; live streaming telemetry).
 - Scope: eight task sets. TS1 EngineRig + view-flip + dormant UndoManager pre-wire + CL-301 bus-node fold; TS2 the live model renders itself offline (lane-aware clock, UI-free lane replay, one-pass per-strip stems, FL-style dialog, dither/LUFS-normalize/2048-block, `<project>\Exports\`); TS3 ~30 EffectParamMap tables (PanelContext key) + 19 wrapper sites retired + sfizz lane defect fixed + `_fader` alias + EQ-band/mixer lanes to param materialization + BLU-344; TS4 WorkspaceWindow native-child shell, merged title-strip menus, dynamic "+" tab bar (docket-18 presentation reversal), peer-keyed UI suspend (destroy-on-close re-ruled option (d) on measurement), software-rendered load overlay; TS5 rack window + per-effect + Pre/Post EQ satellite windows, FxRackPresetIO, rack-first picker (Pedals group heading, Gate/De-reverb made reachable); TS6 VST3 hosting end to end (scanner/manager/proxy seam/rack slot/Plugins tab with own bus + roll + strip/BLU-302 per-plugin sandbox x64 + x86, arch-neutral protocol); TS7 every-tab + pattern-mode + kit freeze with content stamp + render pruning, BS.1770-4 true peak, Limiter/Maximizer mode, master analyzer, HTML loudness report, version capture, BLU-447 half-built completion (41 defects), hosted-plugin playhead; TS8 close-out. Whole-batch 20-agent review (the mandatory per-set reviews had never run): 94 findings, ALL closed in-batch (`93bb158e`); eight 2026-07-31 rulings incl. bridge protocol v3 full completion, stop-gated auto-freeze (shadow render -> CL-304), Measure-writes-nothing, staggered per-pattern freeze (`12e8a183`).
-- **STATUS: code-complete 2026-07-31 (13 per-set commits `4ea67bd0` `e9ecf03e` `1dd08437` `05b248a8` `28f4ec09` `c8854429` `71781115` `4ddf25fa` `467fd0b9` `a055d7ef` `8770b607` `93bb158e` `12e8a183` + close-out 493b627c, batch base `b933b54a`; gates green per set on the five-exit-code / four-link-line criterion); Work Log entry HELD per R2 in the paired running notes -- applies, with this entry's STATUS flip to CLOSED, when §B.31 passes at the G4 BOUNDARY smoke (Jeff 2026-07-31: the layout batch reshapes the same surfaces, so the ~48-scenario batch smoke AND the §B.1-B.30 reconciliation pass BOTH moved to the boundary; supersedes conflict call 3=a's run-inside-TS8; walk order = `Files For Claude/G4 Boundary Smoke.txt`, scenario source = §B.31 incl. the B.31.0 floor-collection pass that runs FIRST). Jeff spot-checked throughout (close crash, plugin windows, freeze timing, tempo-sync, vocal flow -- all fixed from his runs); the formal walk is what is deferred. Next: the LAYOUT BATCH (Jeff 2026-07-28) -- planning session first, no plan file yet.**
+- **STATUS: code-complete 2026-07-31 (13 per-set commits `4ea67bd0` `e9ecf03e` `1dd08437` `05b248a8` `28f4ec09` `c8854429` `71781115` `4ddf25fa` `467fd0b9` `a055d7ef` `8770b607` `93bb158e` `12e8a183` + close-out 493b627c, batch base `b933b54a`; gates green per set on the five-exit-code / four-link-line criterion); Work Log entry HELD per R2 in the paired running notes -- applies, with this entry's STATUS flip to CLOSED, when §B.31 passes at the G4 BOUNDARY smoke (Jeff 2026-07-31: the layout batch reshapes the same surfaces, so the ~48-scenario batch smoke AND the §B.1-B.30 reconciliation pass BOTH moved to the boundary; supersedes conflict call 3=a's run-inside-TS8; walk order = `Files For Claude/G4 Boundary Smoke.txt`, scenario source = §B.31 incl. the B.31.0 floor-collection pass that runs FIRST). Jeff spot-checked throughout (close crash, plugin windows, freeze timing, tempo-sync, vocal flow -- all fixed from his runs); the formal walk is what is deferred. Next: the LAYOUT BATCH (Jeff 2026-07-28) -- planned + landed 2026-08-03 as QA-Layout ([`Batch Plans/roomy-retiling-ocelot.md`](Batch Plans/roomy-retiling-ocelot.md)); see §9 sixty-seventh Forks entry.**
 - Risk: highest since Phase D -- every page type, VibeGraph registration, project save/load, export, automation, the whole window shell, and third-party code in-process + out-of-process.
 - Dependencies: QA-ProjectSave closed at `b933b54a` (its Task 7 remainder became this batch's TS3).
 - Effort: very large -- the largest batch of the QA era; executed 2026-07-27 -> 2026-07-31 across bulk-run sessions.
+
+#### **QA-Layout: Whole-App Layout Under the Windowed Shell** *(NEW -- inserted 2026-08-03 at the layout planning session; slotted after QA-ModelShell per the G4 order (badger -> mammoth -> layout -> yak -> stoat -> heron) -- see §9 sixty-seventh Forks entry)*
+**Plan file:** [`Plans & Specs/Batch Plans/roomy-retiling-ocelot.md`](Batch Plans/roomy-retiling-ocelot.md) *(14 tasks, one commit each; mid-batch handoff for Jeff's window-sizing pass; paired running notes)*
+- **Bucket:** UI / L&F / Theming, Mixer / Routing, Players, System Pages, Cross-cutting Infrastructure, Effects, Other / Platform / Deferred.
+- Items: Jeff's authored spec `Files For Claude/Final V1 Layout.md` (primary input) + the mammoth held scope, reconciled 2026-08-03 (his doc wins; supersessions in the plan's locked table L1-L32). Transport readout third row + gutter fix + per-token SYS coloring; two-row ribbon tab labels; app title recentered + logo; Piano Roll tab next to Effects; "+" menu reorder + BaySickDrums entry + BaySickLiveInst; engine-picker deletion (Layers/Bass/Clips combos + Drums picker button); hamburger -> "Menu"; full-screen toggle (locked call 5a REVERSED); preset buttons + player titles onto window title strips (BaySickTitleBar dissolved); Window-7 five sub-page windows (pedals = LiveInst player; per-instance dropdown window list); three-lifetime window persistence + autosave crash flush + persist-key fix; sizing diag + Jeff's pass -> real floors -> Harmless rework + VibePlayer 18px knobs + pedal-tile Pedal-mode branches; Window-6 collapse + pedalboard one-pedal view (gated on data); piano-roll control lane resize; mixer MIDI-trigger move + target-list dropdowns (drag placement retired) + Add menu + four group buses (Layers/Bass/Clips/Plugins) with used-once-then-hide lifecycle; instance caps 20/10/32/100/10/30 + second drum-kit PR entry (workshop D3); hosted-plugin stretch (free zoom); BLU-110 three-zone limiter panel; drawn-overlay z-order audit; vocal-chain saturation range/default fix; dead Inst clip label removed.
+- Scope: 14 tasks (plan file is authoritative). T1-T5 pre-handoff, T6 diag handoff, T7/T8 post-data, T9/T10/T11 parallel-eligible during Jeff's sizing pass, T12-T14 close.
+- Risk: widest UI surface of the QA era; T4 (five re-hostings + LiveInst restructure) and T10 (four new buses) are the heavy chunks; caps + buses touch VibeGraph registration (Carry-Forward §1/§3 discipline).
+- Dependencies: QA-ModelShell code-complete (`1cd1f5d6` post-close fixes included). Part of G4: NO batch smoke -- verification rides the G4 boundary smoke; bridged-specific `1cd1f5d6` relays are UNTESTED (no 32-bit VST3 on hand) and the smoke must not assume them.
+- Effort: very large -- largest since QA-ModelShell.
+- **STATUS: plan approved 2026-08-03; execution not started.**
 
 #### **QA-UndoCoverage: App-Wide Undo-History Coverage Review** *(NEW — inserted 2026-07-08 at bulk-run plan approval — see §9 fifty-fifth Forks entry)*
 **Plan file:** [`Plans & Specs/Batch Plans/long-rewinding-yak.md`](Batch Plans/long-rewinding-yak.md) *(G4 group open 2026-07-25 — RESHAPED: the setProperty population is serialization-only (no live-state audit exists to run); scope = one global UndoManager everywhere (docket 13=A+ii) + snapshot-gap wrapping + Event Editor unification (docket 12=A, 14=a) — see §9 sixty-fourth Forks entry)*
@@ -2308,7 +2318,7 @@ records the same set so cross-doc grep stays consistent.
 ```
 QA-0a* → QA-0 → QA-Inventory*** → QA-Md** → QA-A → QA-C → QA-D → QA-E → QA-Ea********* → QA-Ef************* → QA-Eg*************** → QA-AudioMeters****************** → QA-InsertMaps******************** → QA-VoicePool********************* → QA-SfzGroup*********************** → QA-Sfizz************************ → QA-DispatcherAffinity************************* → QA-RustyMeter************************** → QA-EngineApvts********************** → QA-Sfizz-Followup*************************** → QA-Ed************ → QA-ClipDrop**************************** → QA-Ee************** → QA-Rules*********************************** → QA-EffectsReview****************************** → QA-MultiBlockHazard********************************** → QA-ClipPlayback************************************ → QA-CutSelfReview******************************* → QA-UICleanup******************************** → QA-TransportDisplay************************************* → QA-Chords********************************* → QA-TempoMap***************************** → QA-Eb********** → QA-Ec*********** → QA-F
    → QA-Fa → QA-Fb******** → QA-Fc******** → QA-Fd***************************************** → QA-Fe****************************************** → QA-Fe2******************************************** → QA-G → QA-H → QA-I → QA-J → QA-B******* → QA-K → QA-L
-   → QA-M → QA-Drum-Polish**** → QA-N → QA-OctavePedal******************************************* → QA-SlideSliceGlide********************************************* → QA-SlideSampler********************************************** → QA-L-Fix*********************************************** → QA-G3Smoke************************************************ → QA-VibeSlider**** → QA-NativeDialogs**************** → QA-ApvtsAutomation************************************** → QA-Verify**** → QA-Export**** → QA-ProjectSave***************** → QA-ModelShell************************************************* → QA-UndoCoverage*************************************** → QA-DirtyFlag*******************
+   → QA-M → QA-Drum-Polish**** → QA-N → QA-OctavePedal******************************************* → QA-SlideSliceGlide********************************************* → QA-SlideSampler********************************************** → QA-L-Fix*********************************************** → QA-G3Smoke************************************************ → QA-VibeSlider**** → QA-NativeDialogs**************** → QA-ApvtsAutomation************************************** → QA-Verify**** → QA-Export**** → QA-ProjectSave***************** → QA-ModelShell************************************************* → QA-Layout (ins. 2026-08-03 -- see §9 sixty-seventh Forks entry) → QA-UndoCoverage*************************************** → QA-DirtyFlag*******************
 ```
 
 \* QA-0a inserted 2026-05-07 ahead of QA-0 — Debug build workflow
@@ -6503,3 +6513,50 @@ contained-window shell, offline export path, five-exit-code gate); §5.5 stale b
 **Verification:** §B.31 at the G4 boundary; the badger 6-item pending ledger + heron's deferred
 §5 entry apply at G4 close per Jeff's 2026-07-25 standing instruction (all still unapplied as
 of this entry).
+
+### 2026-08-03 — QA-Layout planning session: scope locked, plan landed (sixty-seventh Forks entry)
+
+**Trigger:** the layout batch's planning session (2026-08-03). Jeff's authored spec
+`Files For Claude/Final V1 Layout.md` was read first and reconciled against the mammoth held
+scope (his doc wins); 16 dockets + follow-up rulings resolved same-session; batch plan approved
+and landed as **QA-Layout** ([`Batch Plans/roomy-retiling-ocelot.md`](Batch Plans/roomy-retiling-ocelot.md)
++ paired running notes). 14 tasks, one commit each; part of G4 — NO batch smoke, verification
+rides the G4 boundary smoke; per-task build gates stand.
+
+- **Supersessions on record:** locked call 5a REVERSED (full-screen toggle on every window;
+  button order preset | full-screen | close); the held "engine pickers onto title bars" note
+  superseded — pickers are DELETED (Layers/Bass combos, Clips decorative combo, Drums "Pick a
+  sound" button); Test Plans §B.31.0's drag-and-report floor collection superseded by the
+  diag-driven flow (rewritten in place at Task 6); the held "Live Instrument" rename lands as
+  BaySickLiveInst (+ menu) / LiveInst (tab/strip/titles); + menu keeps "BaySickVocal" singular;
+  the VST entry reads "VSTPlugin".
+- **Structural rulings:** Window-7 five sub-page windows (Pitch/Align/Vocal Chain/Pedals/NAM-IR)
+  with the pedalboard as the LiveInst player + a per-instance dropdown window list ("Pedals"
+  label); three-lifetime window persistence in-batch with crash survival = autosave timer flush
+  (closes the OPEN ruling from 2026-07-28); hosted-plugin stretch = native resize + free
+  transform zoom for fixed-size surfaces; instance caps Layers 20 / Bass 10 / Drums 32 /
+  Clips 100 / Vox 10 / Inst 30 with the PR-target shift accepted (existing projects' PR routing
+  breaks once, pre-v1) and a second drum-kit PR entry for drums 17-32 (mechanics = deferred
+  call D3, workshopped before code); mixer Add menu rework + four new group buses
+  (Layers/Bass/Clips/Plugins, kVoxBus2 pattern) with the used-once-then-hide lifecycle; SYS
+  coloring per-token; BLU-110 three-zone limiter panel IN-batch (Jeff: "Build it"); VibePlayer
+  knobs to literal ~18px; sequencing = title-bar work + Window-7 BEFORE Jeff's sizing pass;
+  Window-6 collapse + the pedalboard one-pedal view GATED on the sizing data (D1/D2).
+- **Deferred sub-spec calls D1-D7** live in the plan file (Window-6 scope, pedalboard collapse
+  shape, drum-kit second-16 mechanics, ribbon dropdown EQ-entry disposition, floor numbers,
+  Guitars/Basses pedal carriage, narrow-width title layout).
+- **Planning-session corrections recorded** (running notes carry the detail): the perf-readout
+  overlap is a 120-vs-160 gutter mismatch; `kMaxAudioRows` caps audio CHANNELS, not Builder
+  rows (500-row grid, many-to-one `routeChannel`); every channel-id type owns a 100-wide block
+  so no cap raise needs re-basing; cap raises are constants + literal sweep, NOT the
+  new-strip-type checklist (Inst went 6→10→20 that way in G-4/G-6); the vocal-chain saturation
+  defect is the `sat_type` 0..1 range clamping Tape=2.
+- **§6 arrow** annotated inline (QA-ModelShell → QA-Layout → QA-UndoCoverage) rather than with a
+  new asterisk footnote — the asterisk chain is past legibility at 40+ stars; the annotation
+  carries the date + this entry's back-ref.
+
+**Plan files affected:** this entry; §5 QA-Layout entry (new, after QA-ModelShell); the mammoth
+§5 STATUS "no plan file yet" line updated with a back-ref here; §6 arrow;
+`Batch Plans/roomy-retiling-ocelot.md` + `Running Notes/roomy-retiling-ocelot.md` (new).
+**Verification:** G4 boundary smoke (unchanged); bridged-specific `1cd1f5d6` items recorded as
+untested — the smoke must not assume them.
