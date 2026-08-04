@@ -350,13 +350,14 @@ void PatternManager::renameManualAudioGroup(int category, const juce::String& ol
     // Member rewrite is category-filtered too: same-named groups can exist
     // in different categories (the create default is "New Group"), and a
     // rename in one must not re-group the other's members.  Category from
-    // the owner-channel ranges (literals per the BuilderPage convention:
-    // Clips 400..449 = 0, Vox 600..605 = 1, Inst 700..705 = 2).
+    // the owner-channel ranges.  Literals mirror MixerChannelIds caps BY HAND
+    // (this core file doesn't see VibeGraph.h): Clips 400..499 = 0,
+    // Vox 600..609 = 1, Inst 700..729 = 2 (QA-Layout T11 caps).
     auto ownerCategory = [] (int ch) noexcept
     {
-        if (ch >= 600 && ch < 606) return 1;
-        if (ch >= 700 && ch < 706) return 2;
-        if (ch >= 400 && ch < 450) return 0;
+        if (ch >= 600 && ch < 610) return 1;
+        if (ch >= 700 && ch < 730) return 2;
+        if (ch >= 400 && ch < 500) return 0;
         return -1;
     };
     for (auto& e : mAudioLibrary)
@@ -1484,7 +1485,7 @@ juce::ValueTree PatternManager::toValueTree() const
         savePageSeq("BassSeq",  p.bassSeq);
         savePageSeq("DrumSeq",  p.drumSeq);
 
-        // Piano-roll notes - layerRoll[0..7], bassRoll[0..kMaxBassPages-1], drumRoll
+        // Piano-roll notes - layerRoll[0..kMaxLayerPages-1], bassRoll[0..kMaxBassPages-1], drumRoll
         juce::ValueTree rollsNode("Rolls");
         for (int i = 0; i < (int)p.layerRoll.size(); ++i)
         {

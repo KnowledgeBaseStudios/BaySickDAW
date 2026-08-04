@@ -552,6 +552,69 @@ Convention: Main Plan §0 "Batch Plans + Running Notes layout" (locked 2026-05-1
 - **Next:** T10 — mixer menu moves, per-strip "+" target dropdowns, the Add titled
   menu + four group buses, the L14 lifecycle.
 
+## 2026-08-04 — Task 10 committed `3639cb98` — mixer rework: group buses, Add menu, target submenus, L30, L14
+
+- **Build gate green FIRST TRY:** five exit codes 0, four `vcxproj -> ...exe` link
+  lines, zero `error C` / `error LNK` / `error MSB` greps.  13 files, 995 insertions /
+  625 deletions.
+- **PLAN-PREMISE CHECK at task open:** an Explore survey claimed the plan's "four new
+  group buses" already exist (kLayersBus=1 etc.) — verified the agent misread the
+  PLAN, not the code: the four are SECONDARY buses on the kVoxBus2 pattern (the
+  "Layers Bus" Add row = add a second Layers bus), ids 14-17 =
+  kLayersBus2/kBassBus2/kClipsBus2/kPluginsBus2, consistent with "next bus ids after
+  13".  Also verified L13's dropped "Add Vox/Inst Strip" buttons lose nothing: the
+  ribbon "+" add flow already creates the mixer strip (StandaloneEditor
+  onAddTabRequest calls addVoxChannelAtIndex/addInstChannelAtIndex).
+- **FOUR SECONDARY GROUP BUSES — full kVoxBus2-pattern registration, cross-checked
+  against `reference_mixer_strip_pattern_audit.md`:** VibeGraph registry rows
+  (prefix/isBus/friendlyName/defaultSendTo), always-allocated InstrChannelNodes,
+  processBus + peak/RMS atomics + drains, latency-solver slots (array 11->15), SC bus
+  lists, addNode/wipe/restoreNode, rebindApvts, kBusSoloPrefixes 12->16 (+ mBusSoloPtr
+  array), getScSourceTap, armBusMeters, pushScArrayToStrip, rebuildRoutingFromApvts
+  mActiveChannels (the critical site), PluginProcessor params
+  (ensureMixerBusAndMasterParams) + kNumBatch7Buses 12->16 + render tasks + pre/post
+  EQ tables + peak mirrors, MixerPage strips (ONE shared activateGroupBus body + four
+  thin wrappers, family accent colors), strip cache, stems list, meter drains, route
+  rules (active-gated), EffectsPage dropdown ids 14-17 + prefix maps + rack/preEQ
+  resolvers, StandaloneEditor automation labels (kBusEntries) + active-channel rows,
+  PagePresetIO inactive-bus fallbacks.  Automation lanes: live via the generic
+  mixer-strip param registration; offline via the APVTS-id-generic
+  applyOfflineLaneValue — no per-bus offline branch exists to add (verified; satisfies
+  the EngineRig rule).
+- **L13 — the Add menu:** PageMenuBar gained setAddMenuBuilder — a second flat
+  TitleStripMenuItem heading ("Menu  Add"), hidden on pages without a builder, cleared
+  in the branch-top clear.  Mixer's Add menu = the ruled SEVEN rows exactly (Aux
+  Strip; Vox/Inst/Layers/Bass/Clips/Plugins Bus), bus rows greyed at cap.  The five
+  title-strip buttons DELETED (members, accessors, creation); dead
+  addVoxChannel/addInstChannel wrappers deleted too.
+- **L12 — per-strip "+" target submenus:** the "+" now opens Send... / Sidechain... /
+  Move Output... submenus enumerating concrete targets from getStemPickEntries(),
+  filtered by isValidBusSendTarget / isRouteAllowed / wouldCreateCycle (illegal =
+  disabled rows, current main-out ticked, "New Aux Strip" row preserves the old
+  auto-create).  RETIRED: click-to-place send/SC modes, main-out socket drag, ghost
+  cables, red rejected-drop flash, CableOverlay's Timer base,
+  findSocketNear/findStripUnder.  KEPT: cable painting, right-click cable menus,
+  Master's "+" = Analyzer, the slot finders (the menu commits through them).
+- **L14 — used-once-then-hide lifecycle:** per-secondary-bus has-ever-had-route flags
+  (all seven: Vox2/Inst2/Inst3 + the four new).  A fresh bus stays visible while
+  never-routed; used-then-emptied auto-deactivates in laidOutBus (flag-only drop, no
+  param sweep, no re-entrant relayout).  New Buses element in
+  serializeStripNamesAndOrders (structural — rides templates) persists active +
+  everRouted; restore pass after the strip-order restore; clearDynamicStrips now
+  resets ALL seven secondary buses on project load (Vox2/Inst2/3 previously leaked
+  across projects — with activation persisted, the reset is the correct half of the
+  contract).  Plus: a routed-to inactive secondary bus SELF-ACTIVATES via a deferred
+  callAsync in layoutScrollContent (preset/project loads write _sendTo before any flag
+  arrives; also makes per-page setBusActiveQuery wiring unnecessary for the new
+  buses).
+- **L30 — trigger velocity relocated:** the "MIDI trigger velocity" submenu (ids
+  204/205) removed from the Mixer Menu; AudioSettingsDialog gained a "Trigger
+  Velocity:" combo (From controller / Fixed) below the MIDI inputs, applied live
+  (QA-L-Fix D-11 hot-swap), settings.xml persistence unchanged, dialog height math
+  +1 row.
+- **Next:** T11 opens with the D3 drum-kit workshop in chat — no cap code before
+  Jeff's ruling.
+
 ## Diagnostic Instrumentation Catalog (Rule 4)
 
 | Site | Tag | Purpose | Disposition |

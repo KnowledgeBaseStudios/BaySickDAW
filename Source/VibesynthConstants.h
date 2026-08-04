@@ -2,20 +2,24 @@
 
 // ── Core counts ───────────────────────────────────────────────────────────────
 // Phase 2+ page limits (each page = one engine instance, not a 4-layer stack)
-static constexpr int kMaxLayerPages    = 8;    // max simultaneous Layers pages
-static constexpr int kMaxBassPages     = 4;    // max simultaneous Bass pages
-static constexpr int kMaxDrumPages     = 16;   // max simultaneous Drums pages (D1: dynamic-drum model)
-// Phase G-2/G-3 (2026-04-28): Clips pages - 1:1 with audio inserts (mixer_audio_0..49).
+// QA-Layout T11 (L18): instance caps raised to their shipping values --
+// Layers 20 / Bass 10 / Drums 32 / Clips 100 / Vox 10 / Inst 30.  Each cap
+// has a kMax*Strips mirror in VibeGraph.h's MixerChannelIds (kept in
+// lockstep BY HAND); range checks read the constants, never a bare literal.
+// NOTE the PR-target bases below are DERIVED by summing these caps, so this
+// bump shifts every downstream target: pre-existing projects' piano-roll
+// routing is invalidated once (accepted, Jeff -- QA-Layout L18).
+static constexpr int kMaxLayerPages    = 20;   // max simultaneous Layers pages
+static constexpr int kMaxBassPages     = 10;   // max simultaneous Bass pages
+static constexpr int kMaxDrumPages     = 32;   // max simultaneous Drums pages (D1: dynamic-drum model)
+// Phase G-2/G-3 (2026-04-28): Clips pages - 1:1 with audio inserts (mixer_audio_0..99).
 // Each Clips tab is spawned by drag/drop of an audio file onto Builder; pageIndex is
 // the audio-row index, so the engine output can mix into the matching audio_<row>
 // InsertNode without a separate audio-row lookup table.
-static constexpr int kMaxClipPages     = 50;   // matches the audio-insert cap
+static constexpr int kMaxClipPages     = 100;  // matches the audio-insert cap
 // Phase G-4 (2026-04-28): Vox + Inst pages - 1:1 with their mixer inserts.
-// Spawn trigger is the Mixer page's "Add Vox/Inst Strip" button (NOT drop).
-// kMaxVoxStrips / kMaxInstStrips live in VibeGraph.h's MixerChannelIds; mirror
-// here for piano-roll dispatch sizing without pulling that header into core.
-static constexpr int kMaxVoxPages      = 6;    // matches MixerChannelIds::kMaxVoxStrips
-static constexpr int kMaxInstPages     = 20;   // matches MixerChannelIds::kMaxInstStrips (G-4 bumped 6 → 10; G-6 bumped 10 → 20)
+static constexpr int kMaxVoxPages      = 10;   // matches MixerChannelIds::kMaxVoxStrips
+static constexpr int kMaxInstPages     = 30;   // matches MixerChannelIds::kMaxInstStrips
 // QA-ModelShell TS6 (BLU-447, 2026-07-29): hosted VST3 instrument tabs.
 static constexpr int kMaxPluginPages   = 20;   // matches MixerChannelIds::kMaxPluginStrips
 static constexpr int kBassPRTarget     = kMaxLayerPages; // PRPendingOff target ID for bass roll

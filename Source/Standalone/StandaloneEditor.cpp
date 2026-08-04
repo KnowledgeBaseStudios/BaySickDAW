@@ -3311,7 +3311,7 @@ std::unique_ptr<juce::Component> StandaloneEditor::createBuilderPage()
                     e.accent   = juce::Colour (0xff1c3a8a);
                 }
                 else if (owner >= MixerChannelIds::kAudioBase
-                         && owner <  MixerChannelIds::kAudioBase + 50)
+                         && owner <  MixerChannelIds::kAudioBase + MixerChannelIds::kMaxAudioStrips)
                 {
                     e.category = "Clips";
                     e.accent   = juce::Colour (0xffd4a017);

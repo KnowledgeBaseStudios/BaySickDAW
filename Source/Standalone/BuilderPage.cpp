@@ -957,9 +957,11 @@ void BrowserPanel::showGroupContextMenu (int category, const String& name,
 
 void BrowserPanel::maybePromptGroupAssign (int libIdx, int targetChannel)
 {
-    // Ranges mirror MixerChannelIds; literals per the BuilderPage convention.
-    const int category = (targetChannel >= 600 && targetChannel < 606) ? 1
-                       : (targetChannel >= 700 && targetChannel < 706) ? 2 : -1;
+    // QA-Layout T11: literals replaced with the MixerChannelIds caps (the old
+    // 606/706 bounds were stale below the real strip counts).
+    using namespace MixerChannelIds;
+    const int category = (targetChannel >= kVoxBase  && targetChannel < kVoxBase  + kMaxVoxStrips)  ? 1
+                       : (targetChannel >= kInstBase && targetChannel < kInstBase + kMaxInstStrips) ? 2 : -1;
     if (category < 0 || libIdx < 0 || libIdx >= mPM.getNumAudioLibrary()) return;
 
     // Candidate groups "connected to that page": the target page's own
@@ -2819,10 +2821,11 @@ void ArrangementGrid::drawAudioClip(Graphics& g, const ArrangementBlock& b,
     else
     {
         const int rc = b.routeChannel;
-        if      (rc >= 600 && rc < 606)  base = Colour (0xff0fafa5);   // Vox
-        else if (rc >= 700 && rc < 706)  base = Colour (0xff1c3a8a);   // Inst
-        else if (rc >= 400 && rc < 450)  base = Colour (0xffd4a017);   // Clips
-        else                             base = kAudioGeneric;          // unrouted
+        using namespace MixerChannelIds;
+        if      (rc >= kVoxBase   && rc < kVoxBase   + kMaxVoxStrips)   base = Colour (0xff0fafa5);   // Vox
+        else if (rc >= kInstBase  && rc < kInstBase  + kMaxInstStrips)  base = Colour (0xff1c3a8a);   // Inst
+        else if (rc >= kAudioBase && rc < kAudioBase + kMaxAudioStrips) base = Colour (0xffd4a017);   // Clips
+        else                                                            base = kAudioGeneric;         // unrouted
     }
 
     // Background

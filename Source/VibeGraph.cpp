@@ -2887,10 +2887,10 @@ void VibeGraph::pushScArrayToStrip (int channelId)
     {
         push3(getInsertPreEQ(kind, idx), getInsertRack(kind, idx), getInsertEQ(kind, idx));
     };
-    if (channelId >= kLayerBase && channelId < kLayerBase + 16)              return pushInsert(InsertKind::Layer, channelId - kLayerBase);
-    if (channelId >= kBassBase  && channelId < kBassBase  + 16)              return pushInsert(InsertKind::Bass,  channelId - kBassBase);
-    if (channelId >= kDrumBase  && channelId < kDrumBase  + 16)              return pushInsert(InsertKind::Drum,  channelId - kDrumBase);
-    if (channelId >= kAudioBase && channelId < kAudioBase + 50)              return pushInsert(InsertKind::Audio, channelId - kAudioBase);
+    if (channelId >= kLayerBase && channelId < kLayerBase + kMaxLayerStrips) return pushInsert(InsertKind::Layer, channelId - kLayerBase);
+    if (channelId >= kBassBase  && channelId < kBassBase  + kMaxBassStrips)  return pushInsert(InsertKind::Bass,  channelId - kBassBase);
+    if (channelId >= kDrumBase  && channelId < kDrumBase  + kMaxDrumStrips)  return pushInsert(InsertKind::Drum,  channelId - kDrumBase);
+    if (channelId >= kAudioBase && channelId < kAudioBase + kMaxAudioStrips) return pushInsert(InsertKind::Audio, channelId - kAudioBase);
     if (channelId >= kAuxBase   && channelId < kAuxBase   + kMaxAuxStrips)   return pushInsert(InsertKind::Aux,   channelId - kAuxBase);
     if (channelId >= kVoxBase   && channelId < kVoxBase   + kMaxVoxStrips)   return pushInsert(InsertKind::Vox,   channelId - kVoxBase);
     if (channelId >= kInstBase  && channelId < kInstBase  + kMaxInstStrips)  return pushInsert(InsertKind::Inst,  channelId - kInstBase);

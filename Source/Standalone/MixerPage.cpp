@@ -61,7 +61,7 @@ static juce::Colour pickStripColor(int chId, int destChannelId)
 {
     using namespace MixerChannelIds;
     // Aux: always Effects-tab pink
-    if (chId >= kAuxBase && chId < kAuxBase + 16) return juce::Colour(kEffectsTabPink);
+    if (chId >= kAuxBase && chId < kAuxBase + kMaxAuxStrips) return juce::Colour(kEffectsTabPink);
     // Colored bus groups - track the main-out destination.  T10: secondary
     // group buses share their family accent.
     if (destChannelId == kLayersBus || destChannelId == kLayersBus2) return VC::LayerCol[0];
@@ -86,10 +86,10 @@ static juce::Colour pickStripColor(int chId, int destChannelId)
     // ribbon tab and the bus group divider also use -- one channel identity.
     if (destChannelId == kPluginsBus || destChannelId == kPluginsBus2) return VC::Purple;
     // Direct Routing / aux chain: fall back to the strip's natural color
-    if (chId >= kLayerBase && chId < kLayerBase + 16) return VC::LayerCol[0];
-    if (chId >= kBassBase  && chId < kBassBase  + 16) return VC::BassCol[0];
-    if (chId >= kDrumBase  && chId < kDrumBase  + 16) return VC::DrumsCol;
-    if (chId >= kAudioBase && chId < kAudioBase + 50) return VC::Warm;
+    if (chId >= kLayerBase && chId < kLayerBase + kMaxLayerStrips) return VC::LayerCol[0];
+    if (chId >= kBassBase  && chId < kBassBase  + kMaxBassStrips)  return VC::BassCol[0];
+    if (chId >= kDrumBase  && chId < kDrumBase  + kMaxDrumStrips)  return VC::DrumsCol;
+    if (chId >= kAudioBase && chId < kAudioBase + kMaxAudioStrips) return VC::Warm;
     if (chId >= kVoxBase   && chId < kVoxBase   + kMaxVoxStrips)  return juce::Colour(0xFF0FAFA5);
     if (chId >= kInstBase  && chId < kInstBase  + kMaxInstStrips) return juce::Colour(0xFF1C3A8A);
     if (chId >= kRustyBase && chId < kRustyBase + kMaxRustyStrips) return VC::DrumsCol;
@@ -458,18 +458,18 @@ bool MixerPage::CableOverlay::isRouteAllowed(int srcId, int dstId) const
     // Bus/Master main-out is locked (drag never starts); defensive check
     if (isMainOutLocked(srcId)) return false;
 
-    const bool srcIsLayer  = (srcId >= kLayerBase && srcId < kLayerBase + 16);
-    const bool srcIsBass   = (srcId >= kBassBase  && srcId < kBassBase  + 16);
-    const bool srcIsDrum   = (srcId >= kDrumBase  && srcId < kDrumBase  + 16);
-    const bool srcIsAudio  = (srcId >= kAudioBase && srcId < kAudioBase + 50);
-    const bool srcIsAux    = (srcId >= kAuxBase   && srcId < kAuxBase   + 16);
+    const bool srcIsLayer  = (srcId >= kLayerBase && srcId < kLayerBase + kMaxLayerStrips);
+    const bool srcIsBass   = (srcId >= kBassBase  && srcId < kBassBase  + kMaxBassStrips);
+    const bool srcIsDrum   = (srcId >= kDrumBase  && srcId < kDrumBase  + kMaxDrumStrips);
+    const bool srcIsAudio  = (srcId >= kAudioBase && srcId < kAudioBase + kMaxAudioStrips);
+    const bool srcIsAux    = (srcId >= kAuxBase   && srcId < kAuxBase   + kMaxAuxStrips);
     const bool srcIsVox    = (srcId >= kVoxBase   && srcId < kVoxBase   + kMaxVoxStrips);
     const bool srcIsInst   = (srcId >= kInstBase  && srcId < kInstBase  + kMaxInstStrips);
     const bool srcIsRusty  = (srcId >= kRustyBase && srcId < kRustyBase + kMaxRustyStrips);
     const bool srcIsPlugin = (srcId >= kPluginBase && srcId < kPluginBase + kMaxPluginStrips);
 
     const bool dstIsMaster = (dstId == kMaster);
-    const bool dstIsAux    = (dstId >= kAuxBase && dstId < kAuxBase + 16);
+    const bool dstIsAux    = (dstId >= kAuxBase && dstId < kAuxBase + kMaxAuxStrips);
 
     // Layer insert: Layers Bus · Bass Bus · Master.  T10: + active secondary
     // family buses (activation checked so cables to inactive buses don't open
@@ -3874,7 +3874,7 @@ void MixerPage::layoutScrollContent()
     // Aux-to-aux main-out chains still live visually in the FX family
     for (auto& [dst, members] : buckets)
     {
-        if (dst >= kAuxBase && dst < kAuxBase + 16)
+        if (dst >= kAuxBase && dst < kAuxBase + kMaxAuxStrips)
             layoutGroup(members, x, juce::Colour(kEffectsTabPink), dst);
     }
     x += kGroupSep;

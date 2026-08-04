@@ -267,9 +267,11 @@ struct Pattern
     int totalSteps() const { return juce::jlimit(1, MAX_STEPS_TOTAL, bars * stepsPerBar); }
     double stepLengthBeats() const { return 4.0 / juce::jmax(1, stepsPerBar); }
 
-    // Per-page piano roll note data - one slot per Layers page (max 8), one per Bass page (max 4)
-    std::array<PianoRollData, 8>            layerRoll;
-    std::array<PianoRollData, kMaxBassPages> bassRoll;
+    // Per-page piano roll note data - one slot per Layers page, one per Bass
+    // page (QA-Layout T11: layerRoll's literal 8 replaced with the constant;
+    // it would have overflowed at the new 20-page cap).
+    std::array<PianoRollData, kMaxLayerPages> layerRoll;
+    std::array<PianoRollData, kMaxBassPages>  bassRoll;
 
     // Legacy single drum roll (pre-D1, kit-shared with slotIndex tagging).
     // Kept for backward compat / migration.  Will be removed in D1.4 cutover.
@@ -508,8 +510,9 @@ struct MixerState
     std::array<float, MAX_DRUM_ROWS> drumSlotLevel;
     std::array<float, MAX_DRUM_ROWS> drumSlotPan;
 
-    // Per-audio-row fader levels and mute (arrangement rows 0..49)
-    static constexpr int kMaxAudioRows = 50;
+    // Per-audio-row fader levels and mute (arrangement rows 0..99;
+    // QA-Layout T11: 50 -> 100 with the Clips cap)
+    static constexpr int kMaxAudioRows = 100;
     std::array<float, kMaxAudioRows> audioRowLevel;
     std::array<bool,  kMaxAudioRows> audioRowMute;
 

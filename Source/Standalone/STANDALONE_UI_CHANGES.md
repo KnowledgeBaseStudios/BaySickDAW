@@ -599,3 +599,37 @@ shortcut. Held notes release on mode-off, octave shift, and tab switch.
 - **L30:** "MIDI trigger velocity" moved from the Mixer Menu to the Audio
   Settings dialog as a "Trigger Velocity:" combo below the MIDI inputs (applied
   live, settings.xml persistence unchanged; dialog height +1 row).
+
+---
+
+## 2026-08-04 - QA-Layout T11: instance caps (L18) + two-sixteens drum kit (D3)
+
+**Files:** `VibesynthConstants.h`, `VibeGraph.h/.cpp`, `PatternManager.h/.cpp`,
+`PluginProcessor.h/.cpp`, `MixerPage.cpp`, `EffectsPage.cpp`, `BuilderPage.cpp`,
+`StandaloneEditor.h/.cpp`, `DrumKitGrid.h/.cpp`
+
+- **L18 caps:** Layers 20, Bass 10, Drums 32, Clips 100, Vox 10, Inst 30 - each
+  page cap mirrored by a kMax*Strips constant in MixerChannelIds (new
+  kMaxLayerStrips/kMaxBassStrips/kMaxDrumStrips/kMaxAudioStrips; Vox 6->10,
+  Inst 20->30).  kMaxAudioRows/kMaxAudioInserts 50->100 (static_assert keeps
+  the trio locked).
+- **PR-target shift (accepted):** the PRPendingOff target bases are derived by
+  summing the caps, so pre-existing projects' piano-roll routing is invalidated
+  once.
+- **Literal sweep:** every stale range-check literal replaced with the
+  constants - VibeGraph prefix/friendly/defaultSendTo tables + pushScArrayToStrip
+  (+16/+50), MixerPage color/route/aux checks, EffectsPage aux dropdown (16->18)
+  + audio dropdown (450->500), PatternManager ownerCategory (Vox 606 / Inst 706
+  were stale BUGS below the real strip counts), BuilderPage group-assign +
+  clip-block colors (same stale bug), PluginProcessor EQ-sync tables (8/4/16/50),
+  StandaloneEditor mUsedLayerIndices (literal 8 would have overflowed at cap 20),
+  PatternManager layerRoll (literal 8, same overflow).
+- **D3 (ruled 1c + 2a): two-sixteens drum kit.**  ONE "Drum Kit" PR target; the
+  kit view gains a "1-16 / 17-32" switch beside the Kit button.  Mapping is
+  FIXED by page index - drum pages 1-16 belong to view 1, 17-32 to view 2; a
+  drum never moves between views (deleting one leaves a gap in its own view).
+  DrumKitContainer holds the raw row provider + handlers; children see a
+  view-filtered sixteen and row indices are translated back before handlers
+  fire (row-click, audition, reorder; the sidebar add row maps past the raw
+  end so the add branch still fires - a new drum always fills the lowest free
+  page slot, so an add from view 2 can land in view 1).

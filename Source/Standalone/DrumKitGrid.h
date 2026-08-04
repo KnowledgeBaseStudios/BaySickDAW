@@ -436,6 +436,13 @@ public:
     void setPatternManager (PatternManager* pm);
     void setApvts          (juce::AudioProcessorValueTreeState* a);
     void setKitRowProvider (std::function<std::vector<DrumKitRowInfo>()> fn);
+    // QA-Layout T11 (D3 ruling 1c+2a): the kit view covers 32 drum pages as
+    // TWO fixed sixteens -- pages 0..15 in view 0, 16..31 in view 1.  A drum
+    // NEVER moves between views (deleting one leaves a gap in its own view);
+    // the PR target list keeps ONE "Drum Kit" entry and this switch flips the
+    // visible sixteen.
+    void setKitViewPage (int page);
+    int  getKitViewPage() const { return mKitViewPage; }
     void setPlayheadBeat   (double beat);
     void setContextLabel   (const juce::String& text);
 
@@ -512,6 +519,19 @@ private:
     std::unique_ptr<juce::TextButton>                mZoomInBtn, mZoomOutBtn;
     // Batch 5: Kit button - opens the Save Kit As / Load Kit popup.
     std::unique_ptr<juce::TextButton>                mKitBtn;
+    // QA-Layout T11 (D3): the two-sixteens view switch.  The container holds
+    // the RAW row provider + raw handlers; children get a view-filtered
+    // provider, and every child row index is translated back to a raw index
+    // before the stored handlers fire (handlers index the raw kit list).
+    std::unique_ptr<juce::TextButton>                mKitView1Btn, mKitView2Btn;
+    int                                              mKitViewPage { 0 };
+    std::function<std::vector<DrumKitRowInfo>()>     mRawRowProvider;
+    std::function<void(int, juce::Component*)>       mRawRowClick;
+    std::function<void(int)>                         mRawAuditionOn, mRawAuditionOff;
+    std::function<void(int, int)>                    mRawReorder;
+    std::vector<DrumKitRowInfo> filteredKitRows() const;
+    int  viewRowToRaw (int viewRow) const;
+    void installFilteredProvider();
 
     PatternManager* mPM { nullptr };
     UndoContext     mUndoCtx;

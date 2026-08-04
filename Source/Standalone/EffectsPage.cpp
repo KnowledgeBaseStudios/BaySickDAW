@@ -316,7 +316,7 @@ void EffectsPage::rebuildChannelDropdown()
             if (dropdownId >= 100 && dropdownId < 200) return kDrumBase + (dropdownId - 100);
             if (dropdownId >= 200 && dropdownId < 216) return kLayerBase + (dropdownId - 200);
             if (dropdownId >= 300 && dropdownId < 316) return kBassBase  + (dropdownId - 300);
-            if (dropdownId >= 400 && dropdownId < 450) return kAudioBase + (dropdownId - 400);
+            if (dropdownId >= 400 && dropdownId < 500) return kAudioBase + (dropdownId - 400);
             if (dropdownId >= 600 && dropdownId < 600 + (int) kMaxAuxStrips)   return kAuxBase   + (dropdownId - 600);
             if (dropdownId >= 700 && dropdownId < 700 + (int) kMaxVoxStrips)   return kVoxBase   + (dropdownId - 700);
             if (dropdownId >= 800 && dropdownId < 800 + (int) kMaxInstStrips)  return kInstBase  + (dropdownId - 800);
@@ -401,7 +401,7 @@ void EffectsPage::rebuildChannelDropdown()
         addBusAndMembers(5, kFxBus, "FX BUS", juce::Colour(0xffce3f8e));
         // Aux-to-aux chains live visually with FX group
         for (auto& [dst, members] : buckets)
-            if (dst >= kAuxBase && dst < kAuxBase + 16)
+            if (dst >= kAuxBase && dst < kAuxBase + kMaxAuxStrips)
                 for (auto& m : members) addItemWithPrefix(m);
 
         // ── Clips Bus ─────────────────────────────────────────────────────
@@ -531,7 +531,7 @@ void EffectsPage::resolveChannelDsp (VibeGraph& vg, int id,
             if (rack == nullptr)
                 rack = vg.getBassPageRack(idx);    // legacy fallback
         }
-        else if (id >= 600 && id < 600 + 16)
+        else if (id >= 600 && id < 600 + (int) MixerChannelIds::kMaxAuxStrips)
         {
             // Aux strips (600..615 - dropdown-internal range to avoid collision
             // with drum 100-series and audio 400-series). Route through the

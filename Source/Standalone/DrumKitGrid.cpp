@@ -3387,6 +3387,25 @@ DrumKitContainer::DrumKitContainer()
     };
     addAndMakeVisible(*mKitBtn);
 
+    // QA-Layout T11 (D3): the two-sixteens view switch.
+    auto makeViewBtn = [this](std::unique_ptr<TextButton>& btn, const char* label,
+                              const char* tip, int page)
+    {
+        btn = std::make_unique<TextButton>(label);
+        btn->setTooltip(tip);
+        btn->setColour(TextButton::buttonColourId,   VC::Surface);
+        btn->setColour(TextButton::buttonOnColourId, VC::Accent.withAlpha(0.35f));
+        btn->setColour(TextButton::textColourOffId,  VC::Text);
+        btn->onClick = [this, page] {
+            setKitViewPage(page);
+            if (mGrid) mGrid->grabKeyboardFocus();
+        };
+        addAndMakeVisible(*btn);
+    };
+    makeViewBtn(mKitView1Btn, "1-16",  "Show drums 1-16",  0);
+    makeViewBtn(mKitView2Btn, "17-32", "Show drums 17-32", 1);
+    mKitView1Btn->setToggleState(true, dontSendNotification);
+
     // Menu bar.
     mMenuBarModel = std::make_unique<DrumKitMenuBar>(*this);
     mMenuBar      = std::make_unique<juce::MenuBarComponent>(mMenuBarModel.get());
@@ -3489,31 +3508,90 @@ void DrumKitContainer::repitchDrumHits(int pageIdx, int oldNote, int newNote)
     if (mGrid) mGrid->repitchDrumHits(pageIdx, oldNote, newNote);
 }
 
+// QA-Layout T11 (D3): the container holds the RAW provider/handlers; children
+// see only the active sixteen and their row indices are translated back to
+// raw indices before the stored handlers fire (handlers index the raw list).
+std::vector<DrumKitRowInfo> DrumKitContainer::filteredKitRows() const
+{
+    std::vector<DrumKitRowInfo> out;
+    if (! mRawRowProvider) return out;
+    const int lo = mKitViewPage * 16, hi = lo + 16;
+    for (auto& r : mRawRowProvider())
+        if (r.pageIndex >= lo && r.pageIndex < hi)
+            out.push_back (r);
+    return out;
+}
+
+int DrumKitContainer::viewRowToRaw (int viewRow) const
+{
+    if (! mRawRowProvider) return viewRow;
+    const auto raw  = mRawRowProvider();
+    const auto view = filteredKitRows();
+    if (viewRow < 0) return -1;
+    // Past-the-end = the sidebar's add row; keep it past the RAW end so the
+    // handler's add branch still fires.
+    if (viewRow >= (int) view.size()) return (int) raw.size();
+    const int pageIdx = view[(size_t) viewRow].pageIndex;
+    for (int i = 0; i < (int) raw.size(); ++i)
+        if (raw[(size_t) i].pageIndex == pageIdx) return i;
+    return -1;
+}
+
+void DrumKitContainer::installFilteredProvider()
+{
+    auto filtered = [this] { return filteredKitRows(); };
+    if (mSidebar) mSidebar->setKitRowProvider(filtered);
+    if (mGrid)    mGrid->setKitRowProvider(filtered);
+    if (mLane)    mLane->setKitRowProvider(filtered);
+}
+
 void DrumKitContainer::setKitRowProvider(std::function<std::vector<DrumKitRowInfo>()> fn)
 {
-    if (mSidebar) mSidebar->setKitRowProvider(fn);
-    if (mGrid)    mGrid->setKitRowProvider(fn);
-    if (mLane)    mLane->setKitRowProvider(fn);
+    mRawRowProvider = std::move(fn);
+    installFilteredProvider();
+}
+
+void DrumKitContainer::setKitViewPage (int page)
+{
+    page = juce::jlimit (0, 1, page);
+    if (mKitViewPage == page) return;
+    mKitViewPage = page;
+    if (mKitView1Btn) mKitView1Btn->setToggleState (page == 0, juce::dontSendNotification);
+    if (mKitView2Btn) mKitView2Btn->setToggleState (page == 1, juce::dontSendNotification);
+    refreshKitView();
+    repaint();
 }
 
 void DrumKitContainer::setRowClickHandler(std::function<void(int, juce::Component*)> fn)
 {
-    if (mSidebar) mSidebar->setRowClickHandler(std::move(fn));
+    mRawRowClick = std::move(fn);
+    if (mSidebar) mSidebar->setRowClickHandler([this](int viewRow, juce::Component* anchor)
+    {
+        if (mRawRowClick) mRawRowClick(viewRowToRaw(viewRow), anchor);
+    });
 }
 
 void DrumKitContainer::setAuditionHandlers(std::function<void(int)> onOn,
                                            std::function<void(int)> onOff)
 {
-    if (mSidebar) mSidebar->setAuditionHandlers(onOn, onOff);
+    mRawAuditionOn  = std::move(onOn);
+    mRawAuditionOff = std::move(onOff);
+    auto trOn  = [this](int viewRow) { if (mRawAuditionOn)  mRawAuditionOn (viewRowToRaw(viewRow)); };
+    auto trOff = [this](int viewRow) { if (mRawAuditionOff) mRawAuditionOff(viewRowToRaw(viewRow)); };
+    if (mSidebar) mSidebar->setAuditionHandlers(trOn, trOff);
     if (mGrid) {
-        mGrid->onRowAuditionOn  = onOn;
-        mGrid->onRowAuditionOff = onOff;
+        mGrid->onRowAuditionOn  = trOn;
+        mGrid->onRowAuditionOff = trOff;
     }
 }
 
 void DrumKitContainer::setReorderHandler(std::function<void(int, int)> fn)
 {
-    if (mSidebar) mSidebar->setReorderHandler(std::move(fn));
+    mRawReorder = std::move(fn);
+    if (mSidebar) mSidebar->setReorderHandler([this](int srcRow, int dstRow)
+    {
+        if (mRawReorder) mRawReorder(viewRowToRaw(srcRow), viewRowToRaw(dstRow));
+    });
 }
 
 void DrumKitContainer::refreshKitView()
@@ -3782,6 +3860,9 @@ void DrumKitContainer::resized()
     // QA-UICleanup Task 3 (SC9): Kit button pinned to the far-right end (like the
     // other players' preset buttons); context label fills the space to its left.
     if (mKitBtn) mKitBtn->setBounds(row1.removeFromRight(46).reduced(2, 3));
+    // QA-Layout T11 (D3): two-sixteens switch beside the Kit button.
+    if (mKitView2Btn) mKitView2Btn->setBounds(row1.removeFromRight(48).reduced(2, 3));
+    if (mKitView1Btn) mKitView1Btn->setBounds(row1.removeFromRight(44).reduced(2, 3));
     if (mContextLabel)
     {
         row1.removeFromLeft(8);

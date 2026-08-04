@@ -65,17 +65,25 @@ namespace MixerChannelIds
     constexpr int kClipsBus2  = 16;
     constexpr int kPluginsBus2 = 17;
     constexpr int kAuxBase   = 100;  // Aux 0..17 → 100..117 (G-7 polish: 16 → 18)
-    constexpr int kLayerBase = 200;  // Layer insert 0..15 → 200..215
-    constexpr int kBassBase  = 300;  // Bass insert 0..15 → 300..315
-    constexpr int kAudioBase = 400;  // Audio insert 0..49 → 400..449
-    constexpr int kDrumBase  = 500;  // Drum insert 0..15 → 500..515
-    constexpr int kVoxBase   = 600;  // R1: Vox insert 0..5 → 600..605
-    constexpr int kInstBase  = 700;  // R1: Inst insert 0..19 → 700..719 (kMaxInstStrips bumped 6→10 in G-4 2026-04-28, 10→20 in G-6 2026-04-29)
+    constexpr int kLayerBase = 200;  // Layer insert 0..19 → 200..219
+    constexpr int kBassBase  = 300;  // Bass insert 0..9 → 300..309
+    constexpr int kAudioBase = 400;  // Audio insert 0..99 → 400..499 (ends flush at kDrumBase)
+    constexpr int kDrumBase  = 500;  // Drum insert 0..31 → 500..531
+    constexpr int kVoxBase   = 600;  // R1: Vox insert 0..9 → 600..609
+    constexpr int kInstBase  = 700;  // R1: Inst insert 0..29 → 700..729
     constexpr int kRustyBase = 800;  // J-4: BaySickRustyDrums insert 0..12 → 800..812
     constexpr int kPluginBase = 900; // TS6: hosted VST3 instrument insert 0..19 → 900..919
 
-    constexpr int kMaxVoxStrips   = 6;   // R1
-    constexpr int kMaxInstStrips  = 20;  // R1; bumped 6 → 10 in G-4 (2026-04-28); 10 → 20 in G-6 (2026-04-29)
+    // QA-Layout T11 (L18): per-kind strip caps at their shipping values --
+    // mirrors of the kMax*Pages constants in VibesynthConstants.h (kept in
+    // lockstep BY HAND).  Range checks read THESE, never a bare literal (the
+    // old +16/+50 literals silently capped range checks below the page caps).
+    constexpr int kMaxLayerStrips = 20;
+    constexpr int kMaxBassStrips  = 10;
+    constexpr int kMaxDrumStrips  = 32;
+    constexpr int kMaxAudioStrips = 100;
+    constexpr int kMaxVoxStrips   = 10;  // T11: 6 → 10
+    constexpr int kMaxInstStrips  = 30;  // T11: 20 → 30
     constexpr int kMaxAuxStrips   = 18;  // 5F-4b B2; bumped 16 → 18 in G-7 polish (2026-04-29)
     constexpr int kMaxRustyStrips = 13;  // J-4: 13 sound types per BaySickRustyDrums kit (no doubles)
     constexpr int kMaxPluginStrips = 20; // TS6: must stay equal to kMaxPluginPages
@@ -113,10 +121,10 @@ namespace MixerChannelIds
             case kClipsBus2:  return "mixer_clipsbus2";
             case kPluginsBus2: return "mixer_pluginbus2";
         }
-        if (chId >= kLayerBase && chId < kLayerBase + 16)           return "mixer_layer_" + juce::String(chId - kLayerBase);
-        if (chId >= kBassBase  && chId < kBassBase  + 16)           return "mixer_bass_"  + juce::String(chId - kBassBase);
-        if (chId >= kDrumBase  && chId < kDrumBase  + 16)           return "mixer_drum_"  + juce::String(chId - kDrumBase);
-        if (chId >= kAudioBase && chId < kAudioBase + 50)           return "mixer_audio_" + juce::String(chId - kAudioBase);
+        if (chId >= kLayerBase && chId < kLayerBase + kMaxLayerStrips) return "mixer_layer_" + juce::String(chId - kLayerBase);
+        if (chId >= kBassBase  && chId < kBassBase  + kMaxBassStrips)  return "mixer_bass_"  + juce::String(chId - kBassBase);
+        if (chId >= kDrumBase  && chId < kDrumBase  + kMaxDrumStrips)  return "mixer_drum_"  + juce::String(chId - kDrumBase);
+        if (chId >= kAudioBase && chId < kAudioBase + kMaxAudioStrips) return "mixer_audio_" + juce::String(chId - kAudioBase);
         if (chId >= kAuxBase   && chId < kAuxBase   + kMaxAuxStrips)   return "mixer_aux_"   + juce::String(chId - kAuxBase);
         if (chId >= kVoxBase   && chId < kVoxBase   + kMaxVoxStrips)   return "mixer_vox_"   + juce::String(chId - kVoxBase);
         if (chId >= kInstBase  && chId < kInstBase  + kMaxInstStrips)  return "mixer_inst_"  + juce::String(chId - kInstBase);
@@ -179,10 +187,10 @@ namespace MixerChannelIds
             case kClipsBus2:  return "Clips Bus 2";
             case kPluginsBus2: return "Plugins Bus 2";
         }
-        if (chId >= kLayerBase && chId < kLayerBase + 16) return "Layer " + juce::String(chId - kLayerBase + 1);
-        if (chId >= kBassBase  && chId < kBassBase  + 16) return "Bass "  + juce::String(chId - kBassBase  + 1);
-        if (chId >= kDrumBase  && chId < kDrumBase  + 16) return "Drum "  + juce::String(chId - kDrumBase  + 1);
-        if (chId >= kAudioBase && chId < kAudioBase + 50) return "Audio " + juce::String(chId - kAudioBase + 1);
+        if (chId >= kLayerBase && chId < kLayerBase + kMaxLayerStrips) return "Layer " + juce::String(chId - kLayerBase + 1);
+        if (chId >= kBassBase  && chId < kBassBase  + kMaxBassStrips)  return "Bass "  + juce::String(chId - kBassBase  + 1);
+        if (chId >= kDrumBase  && chId < kDrumBase  + kMaxDrumStrips)  return "Drum "  + juce::String(chId - kDrumBase  + 1);
+        if (chId >= kAudioBase && chId < kAudioBase + kMaxAudioStrips) return "Audio " + juce::String(chId - kAudioBase + 1);
         if (chId >= kAuxBase   && chId < kAuxBase   + kMaxAuxStrips)   return "Aux "   + juce::String(chId - kAuxBase   + 1);
         if (chId >= kVoxBase   && chId < kVoxBase   + kMaxVoxStrips)   return "Vox "   + juce::String(chId - kVoxBase   + 1);
         if (chId >= kInstBase  && chId < kInstBase  + kMaxInstStrips)  return "Inst "  + juce::String(chId - kInstBase  + 1);
@@ -215,10 +223,10 @@ namespace MixerChannelIds
             case kClipsBus2:  return kMaster;
             case kPluginsBus2: return kMaster;
         }
-        if (channelId >= kLayerBase && channelId < kLayerBase + 16)             return kLayersBus;
-        if (channelId >= kBassBase  && channelId < kBassBase  + 16)             return kBassBus;
-        if (channelId >= kDrumBase  && channelId < kDrumBase  + 16)             return kDrumsBus;
-        if (channelId >= kAudioBase && channelId < kAudioBase + 50)             return kClipsBus;
+        if (channelId >= kLayerBase && channelId < kLayerBase + kMaxLayerStrips) return kLayersBus;
+        if (channelId >= kBassBase  && channelId < kBassBase  + kMaxBassStrips)  return kBassBus;
+        if (channelId >= kDrumBase  && channelId < kDrumBase  + kMaxDrumStrips)  return kDrumsBus;
+        if (channelId >= kAudioBase && channelId < kAudioBase + kMaxAudioStrips) return kClipsBus;
         if (channelId >= kAuxBase   && channelId < kAuxBase   + kMaxAuxStrips)  return kFxBus;
         if (channelId >= kVoxBase   && channelId < kVoxBase   + kMaxVoxStrips)  return kVoxBus;
         if (channelId >= kInstBase  && channelId < kInstBase  + kMaxInstStrips) return kInstBus;
@@ -846,7 +854,7 @@ public:
     // drainMeterAtomicsForUI drains them into PluginProcessor mirrors that the UI
     // polls.  All 8 InsertKinds adopt this unified G1 pattern (ends the bus-vs-
     // insert architectural split QA-Eg's bus migration left exposed).
-    static constexpr int kMaxAudioInserts = 50;  // matches VibeSynthProcessor::kMaxAudioRows + MixerState::kMaxAudioRows (static_assert in .cpp)
+    static constexpr int kMaxAudioInserts = 100; // matches VibeSynthProcessor::kMaxAudioRows + MixerState::kMaxAudioRows (static_assert in .cpp); T11: 50 -> 100
 
     // QA-AudioMeters fix-up (2026-05-24): mono <kind>InsertPeakDb members
     // deleted as dead writes (no UI consumer ever read them; the UI reads L/R

@@ -936,7 +936,7 @@ public:
     // (one per kind) deleted as dead writes -- no UI consumer ever read them;
     // drainInsertPeakDbStereo only returns L/R.  Bus mono mirrors above are
     // also dead (pre-existing pre-batch); left for a separate cleanup batch.
-    static constexpr int kMaxAudioRows = 50;
+    static constexpr int kMaxAudioRows = 100;   // QA-Layout T11: 50 -> 100 with the Clips cap
     std::atomic<float> mAudioRowPeakDbL[kMaxAudioRows];
     std::atomic<float> mAudioRowPeakDbR[kMaxAudioRows];
 

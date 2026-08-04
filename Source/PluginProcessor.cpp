@@ -428,7 +428,7 @@ VibeSynthProcessor::VibeSynthProcessor()
     initMirrorArr (mRustyInsertPeakDbR, MixerChannelIds::kMaxRustyStrips);
 
     // QA-AudioMeters: VibeGraph::kMaxAudioInserts must match this processor's
-    // kMaxAudioRows (both 50 = MixerState::kMaxAudioRows).  Static-asserted here
+    // kMaxAudioRows (both = MixerState::kMaxAudioRows).  Static-asserted here
     // since VibeGraph.cpp doesn't include PluginProcessor.h (circular include).
     static_assert (VibeGraph::kMaxAudioInserts == kMaxAudioRows,
                    "VibeGraph::kMaxAudioInserts must equal VibeSynthProcessor::kMaxAudioRows");
@@ -4946,10 +4946,10 @@ void VibeSynthProcessor::updateAllPostRackEQsFromApvts()
     // Insert post-rack EQs (Layer / Bass / Drum / Audio / Aux / Vox / Inst).
     struct InsertSet { VibeGraph::InsertKind kind; const char* prefixBase; int count; };
     static const InsertSet kInsertSets[] = {
-        { VibeGraph::InsertKind::Layer, "mixer_layer_", 8  },
-        { VibeGraph::InsertKind::Bass,  "mixer_bass_",  4  },
-        { VibeGraph::InsertKind::Drum,  "mixer_drum_",  16 },
-        { VibeGraph::InsertKind::Audio, "mixer_audio_", 50 },
+        { VibeGraph::InsertKind::Layer, "mixer_layer_", kMaxLayerPages },
+        { VibeGraph::InsertKind::Bass,  "mixer_bass_",  kMaxBassPages  },
+        { VibeGraph::InsertKind::Drum,  "mixer_drum_",  kMaxDrumPages  },
+        { VibeGraph::InsertKind::Audio, "mixer_audio_", kMaxAudioRows  },
         { VibeGraph::InsertKind::Aux,   "mixer_aux_",   MixerChannelIds::kMaxAuxStrips },
         { VibeGraph::InsertKind::Vox,   "mixer_vox_",   MixerChannelIds::kMaxVoxStrips  },
         { VibeGraph::InsertKind::Inst,  "mixer_inst_",  MixerChannelIds::kMaxInstStrips },
@@ -5007,10 +5007,10 @@ void VibeSynthProcessor::updateAllPreRackEQsFromApvts()
     // Insert pre-rack EQs (Layer / Bass / Drum / Audio / Aux / Vox / Inst).
     struct InsertSet { VibeGraph::InsertKind kind; const char* prefixBase; int count; };
     static const InsertSet kInsertSets[] = {
-        { VibeGraph::InsertKind::Layer, "mixer_layer_", 8  },
-        { VibeGraph::InsertKind::Bass,  "mixer_bass_",  4  },
-        { VibeGraph::InsertKind::Drum,  "mixer_drum_",  16 },
-        { VibeGraph::InsertKind::Audio, "mixer_audio_", 50 },
+        { VibeGraph::InsertKind::Layer, "mixer_layer_", kMaxLayerPages },
+        { VibeGraph::InsertKind::Bass,  "mixer_bass_",  kMaxBassPages  },
+        { VibeGraph::InsertKind::Drum,  "mixer_drum_",  kMaxDrumPages  },
+        { VibeGraph::InsertKind::Audio, "mixer_audio_", kMaxAudioRows  },
         { VibeGraph::InsertKind::Aux,   "mixer_aux_",   MixerChannelIds::kMaxAuxStrips },
         { VibeGraph::InsertKind::Vox,   "mixer_vox_",   MixerChannelIds::kMaxVoxStrips  },
         { VibeGraph::InsertKind::Inst,  "mixer_inst_",  MixerChannelIds::kMaxInstStrips },

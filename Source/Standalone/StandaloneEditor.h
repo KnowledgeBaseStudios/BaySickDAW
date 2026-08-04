@@ -663,7 +663,7 @@ private:
 
     // Tracks which Layers page indices (0–kMaxLayerPages-1) are currently in use.
     // Lets createLayersPage() assign the first free slot and onTabClosed() release it.
-    std::array<bool, 8> mUsedLayerIndices {};
+    std::array<bool, kMaxLayerPages> mUsedLayerIndices {};
     // QA-ModelShell TS6 (BLU-447): hosted VST3 instrument tabs.
     std::array<bool, kMaxPluginPages> mUsedPluginIndices {};
     std::unique_ptr<juce::Component> createPluginsPage();
