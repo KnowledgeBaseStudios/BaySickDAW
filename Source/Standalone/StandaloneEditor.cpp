@@ -2159,6 +2159,19 @@ void StandaloneEditor::buildDefaultTabs()
         }
     }
 
+    // The four default tabs' placement is a GLOBAL preference (T5), so their
+    // keys must be known before anything can load a project -- otherwise the
+    // project/global filter runs against an empty set and the project's stale
+    // copy wins.  Keys match persistKeyFor's "<type>:<index>" with index -1.
+    {
+        using TT = RibbonTabBar::TabType;
+        WorkspaceWindow::seedGlobalPlacementKeys (
+            { juce::String ((int) TT::Mixer)     + ":-1",
+              juce::String ((int) TT::Builder)   + ":-1",
+              juce::String ((int) TT::Effects)   + ":-1",
+              juce::String ((int) TT::PianoRoll) + ":-1" });
+    }
+
     // Heavy-op overlay: added last + always-on-top so it covers every page.
     addChildComponent (mHeavyOpOverlay);
     mProcessor.onLoadProgress = [this] (const juce::String& label)
@@ -5678,6 +5691,10 @@ void StandaloneEditor::showPageForTab(int tabId)
                 // Every mPageMenuBar-> call below now configures THIS window's
                 // own title-strip menu.
                 if (auto* pm = entry->window->getPageMenu()) mPageMenuBar = pm;
+                // T7: engine-driven floors track the visible engine (Drums
+                // swaps live); cheap to re-apply per show.
+                const auto f = floorSizeFor (*entry);
+                entry->window->setMinimumWindowSize (f.x, f.y);
             }
             entry->component->setVisible(true);
             mVisiblePage = entry->component.get();
@@ -8301,7 +8318,12 @@ void StandaloneEditor::loadKitImpl (const juce::File& kitXml)
         entry->type        = RibbonTabBar::TabType::Drums;
         entry->component   = std::move (page);
         mPages.add (entry);
-        hostPageInWindow (*entry);
+        // QA-Layout (Jeff, 2026-08-04): a kit load does NOT frame its drums.
+        // Framing each one put a full kit's worth of player windows on screen
+        // at once -- windows the user generally never touches individually.
+        // The tab, mixer strip and piano roll are all still created; the
+        // window appears the first time that drum's tab is selected, which
+        // showPageForTab already handles for an unframed page.
 
         // Apply state - factory ref or embedded.
         if (isFactoryRef)
@@ -8342,20 +8364,20 @@ void StandaloneEditor::loadKitImpl (const juce::File& kitXml)
     // respawn would have silently undone a delete-to-zero (and re-seeded a tab
     // into the next save) every time a kit loaded empty.
 
-    // Select the first new drum tab so the user lands on a populated page.
-    // Without this, the previously-visible page was destroyed by the tear-down
-    // loop and nothing replaced it on screen → click felt like a no-op.
-    // 2026-04-26 (step 2 polish): if the user was already on the unified
-    // PianoRollPage with Drum Kit selected, stay there instead of jumping
-    // to the freshly-spawned Drums page.  The kit view will repaint with
-    // the new contents in place.
+    // Land on the DRUM KIT view rather than an individual drum's player.  The
+    // tear-down loop destroyed whatever drum page was visible, so the load
+    // still has to put something on screen or it reads as a no-op -- but that
+    // something is the one surface showing the whole kit, not one of its 16
+    // players (Jeff, 2026-08-04).  Already on the kit view = stay put.
     const bool stayOnPianoRollKit = (mPianoRollPage != nullptr
         && mVisiblePage == mPianoRollPage
         && mPianoRollPage->getActiveEngineId().kind == EngineKind::DrumKit);
     if (! stayOnPianoRollKit && firstNewTabId >= 0 && mRibbon)
     {
-        mRibbon->selectTab (firstNewTabId);
-        onTabSelected (firstNewTabId);
+        auto* prp = mPianoRollPage;
+        mRibbon->selectTab (4);            // 4 = the PianoRoll ribbon slot
+        onTabSelected (4);
+        if (prp != nullptr) prp->selectEngine ({ EngineKind::DrumKit, 0 });
     }
 
     refreshAllKitViews();
@@ -12265,6 +12287,10 @@ void StandaloneEditor::serializeUIState (juce::XmlElement& root)
         auto* wins = ui->createNewChildElement ("Windows");
         for (const auto& [key, b] : WorkspaceWindow::sessionBoundsMap())
         {
+            // The four default tabs are a GLOBAL preference (settings.xml) per
+            // the T5 ruling -- writing them here too made every project open
+            // overwrite the position the user had just set.
+            if (WorkspaceWindow::isGlobalPlacementKey (key)) continue;
             auto* w = wins->createNewChildElement ("W");
             w->setAttribute ("key", key);
             w->setAttribute ("x", b.getX());
@@ -13211,6 +13237,51 @@ void StandaloneEditor::registerPluginTabAutomation (int pageIndex)
 
 // QA-ModelShell TS4: frame a page in a contained window.
 //
+// QA-Layout T7: window minimums, MEASURED by Jeff's sizing pass (2026-08-04).
+// Each number is the smallest size at which that surface is still readable --
+// the whole point of the pass -- so these are HARD minimums (Jeff's ruling:
+// option B, grow-only) in FULL WINDOW dims, chrome included.
+//
+// KEYED BY PLAYER TYPE, NOT TAB TYPE (Jeff, 2026-08-04): a Harmless on Layers
+// and a Harmless on Bass are the same window, so the engine decides -- never
+// the tab it happens to sit in.  Drums swaps its engine live, which is why the
+// floor is re-applied on every page-show rather than only at window creation.
+juce::Point<int> StandaloneEditor::floorSizeFor (const PageEntry& entry) const
+{
+    using TT = RibbonTabBar::TabType;
+
+    // Measured per player type.
+    auto engineFloor = [] (const juce::String& title) -> juce::Point<int>
+    {
+        if (title.contains ("Harmless"))      return { 1047, 455 };
+        // Jeff, 2026-08-04: BaySickSynth and BaySickBass share one minimum.
+        if (title.contains ("BaySickSynth")
+            || title.contains ("BaySickBass"))return { 558,  455 };
+        if (title.contains ("BaySickPlayer")) return { 490,  455 };
+        return { 490, 455 };   // no engine bound yet
+    };
+
+    switch (entry.type)
+    {
+        case TT::Mixer:     return { 486, 455 };
+        case TT::Builder:   return { 486, 268 };
+        case TT::Effects:   return { 357, 268 };
+        case TT::PianoRoll: return { 691, 268 };
+        default: break;
+    }
+
+    auto* c = entry.component.get();
+    if (auto* lp = dynamic_cast<LayersPage*> (c)) return engineFloor (lp->stripEngineTitle());
+    if (auto* bp = dynamic_cast<BassPage*>   (c)) return engineFloor (bp->stripEngineTitle());
+    if (auto* dp = dynamic_cast<DrumPage*>   (c)) return engineFloor (dp->stripEngineTitle());
+    if (auto* cp = dynamic_cast<ClipsPage*>  (c)) return engineFloor (cp->stripEngineTitle());
+    if (dynamic_cast<VoxPage*>    (c)) return { 1534, 455 };   // BaySickVocals
+    if (dynamic_cast<InstPage*>   (c)) return { 1047, 455 };   // BaySickGuitars / BaySickBasses
+    if (dynamic_cast<BaySickRustyDrumsPage*> (c)) return { 1047, 455 };
+    // Hosted plugins keep their plugin-derived floors (T12 stretch).
+    return { 640, 400 };
+}
+
 // The page stays owned by PageEntry::component -- the window hosts it
 // non-owningly -- so the large amount of existing code that reaches through
 // that pointer is untouched by the shell change.
@@ -13241,13 +13312,17 @@ void StandaloneEditor::hostPageInWindow (PageEntry& entry)
         return;
     }
 
-    // Launch opens the Builder grid and the Mixer and nothing else (Jeff,
-    // 2026-07-28).  Everything else frames the first time its tab is selected --
-    // showPageForTab already frames a page whose window is null, so a lazy page
-    // costs one extra call at that moment and nothing before it.
+    // Launch opens the four DEFAULT TABS -- Builder, Mixer, Effects, Piano Roll
+    // (Jeff, 2026-08-04: the 2026-07-28 "Builder + Mixer only" rule left the
+    // other two shut, and these are exactly the windows whose placement is a
+    // global preference, so they are the persistent workspace).  Player windows
+    // still frame lazily on first tab selection -- showPageForTab frames a page
+    // whose window is null, so a lazy page costs one call at that moment.
     if (! mStartupComplete
         && entry.type != RibbonTabBar::TabType::Builder
-        && entry.type != RibbonTabBar::TabType::Mixer)
+        && entry.type != RibbonTabBar::TabType::Mixer
+        && entry.type != RibbonTabBar::TabType::Effects
+        && entry.type != RibbonTabBar::TabType::PianoRoll)
         return;
 
     // Record the page index while the page still exists -- after
@@ -13279,10 +13354,11 @@ void StandaloneEditor::hostPageInWindow (PageEntry& entry)
     // INDEX (picker + two EQ buttons + six fixed-height rows), so its content
     // height is known and the general 640x400 would have forced a window three
     // times taller than anything it can draw.
-    if (entry.type == RibbonTabBar::TabType::Effects)
-        entry.window->setMinimumSize (300, 250);
-    else
-        entry.window->setMinimumSize (640, 400);
+    // QA-Layout T7: real floors from the approved sizing map (window dims).
+    {
+        const auto f = floorSizeFor (entry);
+        entry.window->setMinimumWindowSize (f.x, f.y);
+    }
 
     entry.window->setContentNonOwned (entry.component.get());
 
@@ -13336,7 +13412,8 @@ WorkspaceWindow* StandaloneEditor::openAuxWindow (const juce::String& key,
     // their position project content -- writing it to the global settings.xml
     // would carry one project's effect layout into the next (Jeff's ruling).
     win->setPersistence (WorkspaceWindow::Persistence::Session);
-    win->setMinimumSize (minW, minH);
+    // T7: every aux caller now passes floors in WINDOW dims (Jeff's map).
+    win->setMinimumWindowSize (minW, minH);
     win->setContent (std::move (content));
 
     // Same per-window key routing the page windows get: a contained window is
@@ -13401,20 +13478,23 @@ void StandaloneEditor::openEffectSlotWindow (int channelId, int slotIndex)
     auto* contentRaw = content.get();
     contentRaw->onRequestClose = [this, key] { closeAuxWindow (key); };
 
-    // Provisional floor.  Panels cap their knobs at a fixed size and shrink to
-    // fit below that, so this is "before the knobs start colliding" rather than
-    // a measured number -- Jeff's B.31.0 pass collects the real ones on screen.
+    // QA-Layout T7: open at the class minimum (pedal tile); the mode-aware
+    // floor (Basic 691x268 / Advanced 1047x268 / pedal 358x268) arrives via
+    // onFloorChanged on the content's first poll and on every class/mode swap.
     auto* win = openAuxWindow (key, posKey, contentRaw->windowTitle(),
-                               std::move (content), 620, 170);
+                               std::move (content), 358, 268);
     if (win == nullptr) return;
+
+    {
+        juce::Component::SafePointer<WorkspaceWindow> safeWin (win);
+        contentRaw->onFloorChanged = [safeWin] (int w, int h)
+        {
+            if (auto* wnd = safeWin.getComponent()) wnd->setMinimumWindowSize (w, h);
+        };
+    }
 
     contentRaw->onTitleChanged = [win] (const juce::String& t) { win->setTitle (t); };
     contentRaw->configureTitleStrip (*win->getPageMenu());
-
-    // [QA-Layout DIAG] the sizing diag line carries the panel's
-    // Basic/Advanced mode -- both modes share one panel, so the pass takes
-    // one take per mode (L6).
-    win->onDiagExtraInfo = [contentRaw] { return contentRaw->diagPanelMode(); };
 }
 
 void StandaloneEditor::openEffectEqWindow (int channelId, bool pre)
@@ -13435,7 +13515,7 @@ void StandaloneEditor::openEffectEqWindow (int channelId, bool pre)
     };
 
     auto* win = openAuxWindow (key, key, contentRaw->windowTitle(),
-                               std::move (content), 560, 320);
+                               std::move (content), 1047, 455);   // T7: approved map
     if (win == nullptr) return;
 
     contentRaw->onTitleChanged = [win] (const juce::String& t) { win->setTitle (t); };
@@ -13513,9 +13593,11 @@ void StandaloneEditor::openVoxSatelliteWindow (int voxIdx, VoxSat kind)
 {
     static const char* kKeyTag[]  = { "chain", "pitch", "align", "namir" };
     static const char* kTitles[]  = { "Vocal Chain", "BaySickPitch", "BaySickAlign", "BaySickNAM/IR" };
-    // Provisional floors -- Jeff's B.31.0 pass collects the real ones (T7).
-    static const int   kMinWs[]   = { 560, 900, 900, 640 };
-    static const int   kMinHs[]   = { 420, 560, 560, 420 };
+    // QA-Layout T7: real floors from the approved sizing map (window dims) --
+    // Vocal Chain 1047x723, BaySickPitch 1534x724, BaySickAlign 1047x723,
+    // NAM/IR 843x563.
+    static const int   kMinWs[]   = { 1047, 1534, 1047, 843 };
+    static const int   kMinHs[]   = { 723,  724,  723,  563 };
 
     const juce::String key = "voxsat:" + juce::String (voxIdx) + ":" + kKeyTag[(int) kind];
     if (auto* existing = findAuxWindow (key)) { existing->toFront (true); return; }
@@ -13607,7 +13689,7 @@ void StandaloneEditor::openInstPedalsWindow (int instIdx)
     const juce::String title = liveInput ? ip->getTabName()
                                          : ip->getTabName() + " - Pedals";
 
-    auto* win = openAuxWindow (key, key, title, std::move (content), 880, 480);
+    auto* win = openAuxWindow (key, key, title, std::move (content), 1534, 455);   // T7: approved map
     if (win == nullptr) return;
 
     if (auto* bar = win->getPageMenu())
@@ -13663,7 +13745,7 @@ void StandaloneEditor::openInstNamIrWindow (int instIdx)
     contentRaw->onRequestClose = [this, key] { closeAuxWindow (key); };
 
     auto* win = openAuxWindow (key, key, ip->getTabName() + " - NAM/IR",
-                               std::move (content), 640, 420);
+                               std::move (content), 843, 563);   // T7: approved map
     if (win == nullptr) return;
 
     if (auto* bar = win->getPageMenu())
@@ -13702,11 +13784,10 @@ void StandaloneEditor::openMasterAnalyzerWindow()
     auto content   = std::make_unique<MasterAnalyzerView> (mProcessor);
     auto* viewRaw  = content.get();
 
-    // 420x220 is the point below which the log-frequency grid labels start
-    // overlapping -- measured against the eight decade marks the grid draws, not
-    // guessed.  Placement is session-scoped like every other satellite.
+    // T7: floor from the approved sizing map.  Placement is session-scoped
+    // like every other satellite.
     auto* win = openAuxWindow (key, key, "Master Analyzer",
-                               std::move (content), 420, 220);
+                               std::move (content), 1047, 455);
     if (win == nullptr) return;
 
     // TS7 §3.6: the window READS capture, it does not own it -- capture has been
@@ -14221,9 +14302,19 @@ void StandaloneEditor::deserializeUIState (const juce::XmlElement& root)
     {
         std::map<juce::String, juce::Rectangle<int>> m;
         for (auto* w : wins->getChildWithTagNameIterator ("W"))
-            m[w->getStringAttribute ("key")] =
-                { w->getIntAttribute ("x"), w->getIntAttribute ("y"),
-                  w->getIntAttribute ("w"), w->getIntAttribute ("h") };
+        {
+            const auto key = w->getStringAttribute ("key");
+            // Default-tab bounds are global; older projects still carry a copy,
+            // so drop it rather than let it beat settings.xml.
+            if (WorkspaceWindow::isGlobalPlacementKey (key)) continue;
+            m[key] = { w->getIntAttribute ("x"), w->getIntAttribute ("y"),
+                       w->getIntAttribute ("w"), w->getIntAttribute ("h") };
+        }
+        // Carry the live global-placement entries across the replace -- the
+        // project's map is authoritative only for the windows it owns.
+        for (const auto& [key, b] : WorkspaceWindow::sessionBoundsMap())
+            if (WorkspaceWindow::isGlobalPlacementKey (key))
+                m[key] = b;
         WorkspaceWindow::replaceSessionBounds (std::move (m));
         for (auto* o : wins->getChildWithTagNameIterator ("Open"))
             openWindowKeys.add (o->getStringAttribute ("key"));

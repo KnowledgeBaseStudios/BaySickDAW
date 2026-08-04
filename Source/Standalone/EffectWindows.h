@@ -52,14 +52,13 @@ public:
     // poll so a strip rename reaches the window title.
     juce::String windowTitle() const;
 
-    // [QA-Layout DIAG] "Basic" / "Advanced" for the sizing diag line, empty
-    // when the panel has no disclosure toggle (Rule 4, Remove at batch close).
-    juce::String diagPanelMode() const;
-
     // The slot this window is showing is gone (cleared, rack destroyed, project
     // closed).  The owner destroys the window in response, so nothing may touch
     // this object after it fires.
     std::function<void()> onRequestClose;
+    // QA-Layout T7: fired (change-guarded) when the panel class or mode makes
+    // a different floor apply; the owner routes it to setMinimumWindowSize.
+    std::function<void(int, int)> onFloorChanged;
     // Title text changed (strip renamed, effect swapped by a preset load).
     std::function<void(const juce::String&)> onTitleChanged;
 
@@ -105,6 +104,8 @@ private:
     EffectRack*                      mBuiltRack    { nullptr };
     EffectType                       mBuiltType    { EffectType::None };
     int                              mBuiltVariant { -1 };
+    int                              mLastFloorW   { 0 };   // T7 floor change guard
+    int                              mLastFloorH   { 0 };
     juce::String                     mTitle;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (EffectSlotWindow)

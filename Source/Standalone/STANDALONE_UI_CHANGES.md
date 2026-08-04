@@ -633,3 +633,88 @@ shortcut. Held notes release on mode-off, octave shift, and tab switch.
   fire (row-click, audition, reorder; the sidebar add row maps past the raw
   end so the add branch still fires - a new drum always fills the lowest free
   page slot, so an add from view 2 can land in view 1).
+
+---
+
+## 2026-08-04 - QA-Layout T7: real floors + Harmless four-column rework + VibePlayer knobs + pedal tile grids
+
+**Files:** `WorkspaceWindow.h/.cpp`, `StandaloneEditor.h/.cpp`, `EffectWindows.h/.cpp`,
+`EffectRack.h`, `EffectPresetIO.cpp`, `EffectEditorPanels.cpp`,
+`Harmless/HarmlessEditor.h/.cpp`, `VibePlayer/VibePlayerEditor.cpp`
+
+- **Real floors (Jeff's approved sizing map, full-window dims):** the diag-era
+  120x80 free-for-all is over - WorkspaceWindow's setMinimumSize body restored,
+  new setMinimumWindowSize for map-dim callers.  Page windows floor via
+  StandaloneEditor::floorSizeFor (engine-aware for Layers/Bass/Drums: Harmless
+  1047x455, BaySickPlayer 490x455, Synth/BaySickBass 558x455; re-applied per
+  show so Drums' live swap tracks).  Satellites: Vocal Chain 1047x723, Pitch
+  1534x724, Align 1047x723, NAM/IR 843x563, Pedals board 1534x455, EQ +
+  Analyzer 1047x455.  Effect windows: open at 358x268 and re-floor live via a
+  new onFloorChanged hook (Basic 691x268 / Advanced 1047x268 / pedal-native
+  358x268; pushed on the poll so Mode swaps + Basic toggles re-floor).  Hosted
+  plugin windows keep plugin-derived floors (T12).
+- **Harmless (Specific-2): the layout is REDONE, not re-hung** (Jeff's
+  correction 2026-08-04 - re-flowing the old sections into columns was not the
+  ask).  Design size is now the approved window (1035x425 content, was a tall
+  960x620 box).  Two root causes fixed:
+  - **Overflow:** `layoutRow` laid every item in ONE row and let wide sets run
+    past the cell edge (Output, Timbre, FX).  It now WRAPS into as many rows as
+    the cell width needs and centres the block, so a section fits at any width.
+  - **Dead space:** a blank grid row, a blank bottom-left half and a blank
+    row-C half were reserved as "future space" while real sections were
+    squeezed.  Every cell now carries content.
+  New map - TOP band: left column Output / (Tremolo | Routing) /
+  Vibrato-Legato; middle column Unison alone at full height (its three faders
+  are the only inherently vertical control set, and they get real throw back);
+  right column (Filter 1 | its ADSR) / (Filter 2 | its ADSR) / Timbre at FULL
+  width.  BOTTOM band, six columns: Pitch over LFO Mod | Strum over XYZ |
+  Blur-Prism over Amp Env | FX | Spectrogram | Mod Editor.  The cramped 2x2
+  filter-offset/part-mask stack inside Timbre is dissolved - those four knobs
+  sit inline at full size in the full-width row instead of shrinking to ~12px.
+  Part A/B dual-bind + rebindToPart untouched.
+- **VibePlayer (L15/Specific-1): kKnobSz 55 -> 18** with the knob+label stack
+  now vertically centered per cell; routing-arrow centers follow the same math.
+- **Pedal tiles (Specific-4):** every pedal-capable panel now has a
+  PanelMode::Pedal branch - a shared pedalTileGrid (generalizing the
+  Octave/FurmanEQ hand-built grids) grids knobs + selectors/buttons per tile;
+  fader-bank EQs + the Tuner keep their layouts and reclaim the dBFS strip.
+  isPedalNativeType moved to EffectRack.h (shared with preset routing).
+- **Subtractive-math sweep disposition:** the restored floors make every
+  below-design-size state unreachable; no live sub-floor paint path remains to
+  sweep.  (Flagged at commit for Jeff's veto.)
+- **Window placement fixes (Jeff, 2026-08-04 - the Mixer would not hold its
+  spot).**  FOUR causes, found in order, all fixed.  The last one was the
+  headline bug and was only isolated by tracing save/write/restore to a file:
+  1. A project stored the four default tabs' bounds AND replaced the whole
+     in-memory map on load, so its stale copy beat the position just saved to
+     settings.xml.  Projects no longer write or restore those keys, and live
+     global entries survive a project load.  The key set is seeded at editor
+     construction - registering it at first framing was too late when a
+     project loaded first.
+  2. The teardown save persisted whatever a half-dismantled window reported,
+     and it ran LAST so it won.  The destructor no longer saves; every real
+     route saves explicitly (drag-release, resize/move, close button, fill
+     toggle) plus one flush at shutdown BEFORE editor teardown, while windows
+     are still alive and placed.
+  3. **Restore ran against a workspace that was not laid out yet.**
+     `originInParentClient()` returned (0,0) instead of the real (1,91), so
+     every restored window landed short by the origin - 91px up, every
+     launch.  It also collapsed the first-open default size (a fraction of the
+     workspace) to its 480x320 floor, which is what littered settings.xml.
+     Attach now waits for a workspace with real bounds, not merely a native
+     handle, and a fresh window opens at its own measured minimum instead of a
+     workspace fraction.
+  4. **The clamp captured windows during startup layout.**  The frame passes
+     through a partial size (~1098x608) before reaching 1534x724, and
+     `clampWindowsIntoView` squeezed every window into that partial size with
+     nothing to put them back once it grew.  A GROWING workspace now re-applies
+     each window's stored bounds before clamping again; programmatic clamps
+     stay out of the store via a scoped suppression, so a clamp can never be
+     mistaken for a placement.
+- **Kit load no longer frames its drums (Jeff, 2026-08-04).**  Loading a
+  16-drum kit put 16 player windows on screen.  Tabs, mixer strips and piano
+  rolls are still created; the window for a drum appears when that drum's tab
+  is selected.  The post-load landing spot moved from "the first new drum's
+  player" to the DRUM KIT view, so the load still shows something without
+  opening a player.  The one-shared-window-with-a-dropdown alternative is
+  Future State CL-305.

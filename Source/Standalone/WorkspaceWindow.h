@@ -72,6 +72,10 @@ public:
     // Resize floor.  Every window gets one at its layout's collision point;
     // fixed-grid panels pass their natural size so they cannot shrink at all.
     void setMinimumSize (int minW, int minH);
+    // QA-Layout T7: floor expressed in WINDOW dimensions -- the diag readout
+    // (and Jeff's approved sizing map) measured the full window, chrome
+    // included, so the T7 floor table calls this instead of converting.
+    void setMinimumWindowSize (int w, int h);
 
     // QA-Layout T5: the THREE-LIFETIME model (Jeff's 2026-07-28 ruling).
     //
@@ -97,6 +101,34 @@ public:
     static const std::map<juce::String, juce::Rectangle<int>>& sessionBoundsMap();
     static void replaceSessionBounds (std::map<juce::String, juce::Rectangle<int>> m);
     static void registerPlacementPersistentKey (const juce::String& key);
+    // QA-Layout T7 fix: true for the four default tabs, whose placement is a
+    // GLOBAL preference (settings.xml) by the T5 three-lifetime ruling.  A
+    // project must not carry -- or restore -- their bounds, or its stale copy
+    // beats the position the user just set (Jeff, 2026-08-04: the Mixer moved
+    // and "didn't save", because every project open overwrote it).
+    static bool isGlobalPlacementKey (const juce::String& key);
+    // Register the global-placement keys BEFORE any window is framed.  The
+    // per-window registration above happens at first framing, which is too
+    // late if a project loads first -- the filter would see an empty set and
+    // let the project's stale copy through (Jeff, 2026-08-04: the Mixer came
+    // back at the project's y instead of its own).
+    static void seedGlobalPlacementKeys (const juce::StringArray& keys);
+
+    // Programmatic repositioning (the workspace's clamp-into-view sweep) must
+    // NOT reach the bounds store: it runs on every frame resize, and at startup
+    // it fires while the workspace is still mid-layout.  Persisting those would
+    // overwrite the user's placement with a transient clamp -- which is exactly
+    // how a hand-placed window drifted to somewhere it was never put.  User
+    // gestures (drag, border resize) are unaffected.
+    struct ScopedSaveSuppress
+    {
+        ScopedSaveSuppress()  { ++sSaveSuppressed; }
+        ~ScopedSaveSuppress() { --sSaveSuppressed; }
+    };
+    static bool savesSuppressed() noexcept { return sSaveSuppressed > 0; }
+    // Re-apply this window's stored bounds (workspace-local -> parent-client).
+    // Used by the workspace's grow-restore pass.
+    void applySavedBounds();
     static void writeSessionToSettings();
 
     void setTitle (juce::String t);
@@ -165,16 +197,9 @@ public:
     // that gesture means -- the edge being dragged should simply stop.
     juce::Rectangle<int> clampResizeToWorkspace (juce::Rectangle<int> target) const;
 
-    // [QA-Layout DIAG] window-sizing collection (Rule 4, Remove at batch
-    // close): the strip shows a live WxH readout, every size change appends
-    // a line to Documents/BaySickDAW/window-sizing-diag.txt, and floors are
-    // dropped to the absolute minimum so the real ones can be found on
-    // screen.  Effect windows report their Basic/Advanced mode through this.
-    std::function<juce::String()> onDiagExtraInfo;
-
     void paint (juce::Graphics&) override;
-    void paintOverChildren (juce::Graphics&) override;   // [QA-Layout DIAG] WxH readout
     void resized() override;
+    void moved() override;
     void broughtToFront() override;
     void mouseDown (const juce::MouseEvent&) override;
     void mouseDrag (const juce::MouseEvent&) override;
@@ -209,6 +234,7 @@ private:
     // saved this session) and the subset whose PLACEMENT persists there.
     static std::set<juce::String>& diskEligibleKeys();
     static std::set<juce::String>& placementKeys();
+    static int sSaveSuppressed;   // ScopedSaveSuppress depth
     // mContent owns only when setContent was used; mContentRaw is what gets
     // laid out either way (and is the non-owning case's only handle).
     std::unique_ptr<juce::Component>                 mContent;
@@ -255,7 +281,6 @@ private:
     bool                 mDraggingTitle { false };
     juce::Rectangle<int> mDragStartBounds;
     juce::Point<int>     mDragStartScreen;
-    juce::Point<int>     mLastDiagSize;   // [QA-Layout DIAG] dedupe per-size lines
     // Runaway guard for the cursor-pinning warp in mouseDrag.  See the long
     // comment there: the warp is proven to converge, and this exists purely so
     // a future change that breaks that proof degrades to "the cursor comes
@@ -310,6 +335,15 @@ private:
     // window whose saved spot is no longer reachable must not become
     // unreachable, it must come back.
     void clampWindowsIntoView();
+    // A GROWING workspace must put windows BACK where they were saved.  The
+    // clamp above squeezes them into whatever the workspace measured at the
+    // time, and at launch that is the frame mid-layout -- so a window saved
+    // below the not-yet-full-height workspace got pulled up and nothing ever
+    // moved it back (Jeff, 2026-08-04: the Mixer kept reappearing higher than
+    // he left it).  Suppressed from the bounds store: this is a restore, not
+    // a placement.
+    void restoreWindowsToSavedBounds();
+    juce::Point<int> mLastSize;
 
     // SafePointer, not a raw pointer: a window that dies without its
     // destructor reaching removeWindow (any teardown-ordering mistake, now or

@@ -3,19 +3,35 @@
 #include "../Standalone/SharedUI.h"   // VKnobAutomation hooks
 
 // ── Layout constants ──────────────────────────────────────────────────────────
-static constexpr int kW       = 960;
-static constexpr int kH       = 620;
+// QA-Layout T7 (Specific-2): design size = the CONTENT area of Jeff's
+// measured Harmless window minimum (1047x455 window, less the 26px title bar
+// and 4px borders = 1039x421).  The old 960x620 was a TALL box -- the layout
+// it drove is what collapsed in the real window.
+static constexpr int kW       = 1039;
+static constexpr int kH       = 421;
 static constexpr int kGap     = 6;
 static constexpr int kKnob    = 44;
 static constexpr int kKnobSm  = 32;
 
-// Proportional splits (from reference: top 55%, bottom 45%; 40/10/50, 40/60)
-static constexpr float kTopFrac  = 0.55f;
-static constexpr float kTLFrac   = 0.40f;
-static constexpr float kTMFrac   = 0.10f;
-// kTRFrac = 0.50 (remainder)
-static constexpr float kBLFrac   = 0.40f;
-// kBRFrac = 0.60 (remainder)
+// QA-Layout T7 (Specific-2, Jeff's correction 2026-08-04): ground-up
+// re-layout for the approved 1047x455 window.  What was wrong with the old
+// map, both fixed here:
+//   * DEAD SPACE -- a whole blank grid row, a blank bottom-left half and a
+//     blank row-C half were reserved as "future space" while real sections
+//     were squeezed.  Every cell now carries content.
+//   * OVERFLOW -- wide item sets (Output, Timbre, FX) ran past their cell
+//     edges.  layoutRow wraps now, and each section is sized to its content.
+// Two bands: the top holds the per-voice engine (Output/Routing/mod/Unison/
+// filters/Timbre), the bottom the performance + visual surfaces.
+static constexpr float kTopBandFrac = 0.52f;   // top band; bottom takes the rest
+static constexpr float kTLFrac      = 0.34f;   // top: left column
+static constexpr float kTMFrac      = 0.13f;   // top: Unison column; filters take the rest
+// Bottom-band column fractions; the Mod Editor takes the remainder.
+static constexpr float kBPitchFrac  = 0.17f;   // Pitch over LFO Mod
+static constexpr float kBStrumFrac  = 0.13f;   // Strum over XYZ pad
+static constexpr float kBToneFrac   = 0.18f;   // Blur/Prism over Amp Env
+static constexpr float kBFXFrac     = 0.17f;   // FX
+static constexpr float kBSpecFrac   = 0.13f;   // Spectrogram
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 static void setupRotary (juce::Slider& s)
@@ -139,8 +155,8 @@ HarmlessEditor::HarmlessEditor (HarmlessProcessor& p)
     addAndMakeVisible (mModEditor);
     mModEditor.setRegistry (&p.getModRegistry());
 
-    // S5 T2-M: central spectrogram visualiser. Bounds set in resized()
-    // to the full right column of the bot-left panel (mSpectroTopSec).
+    // S5 T2-M: central spectrogram visualiser.  Bounds set in resized()
+    // (bottom band, its own column -- mSpectroSec).
     addAndMakeVisible (mSpectrogram);
     mSpectrogram.setSynth (&p.getSynth());
 
@@ -706,38 +722,34 @@ void HarmlessEditor::paint (juce::Graphics& g)
     drawPanel (mTopLeftBounds);
     drawPanel (mTopMidBounds);
     drawPanel (mTopRightBounds);
-    drawPanel (mBotLeftBounds);
+    drawPanel (mBotBandBounds);
 
-    // ── Section labels (2026-04-20 S5 layout redesign) ────────────────────────
-    // Top-left: Row A (Output | Routing), Row B (Trem | Vib/Leg),
-    // Row C (blank | Strum + XYZ).
+    // ── Section labels (QA-Layout T7 map) ─────────────────────────────────────
+    // Top-left column.
     drawSection (g, mGlobalSec,    "OUTPUT");
-    drawSection (g, mRoutingSec,   "ROUTING");
     drawSection (g, mTremSec,      "TREMOLO");
+    drawSection (g, mRoutingSec,   "ROUTING");
     drawSection (g, mVibLegatoSec, "VIBRATO / LEGATO");
-    drawSection (g, mStrumSec,     "STRUM");
 
-    // Top-middle: Unison / Pitch / LFO Mod stack.
+    // Top-middle column.
     drawSection (g, mUnisonSec,    "UNISON");
-    drawSection (g, mPitchSec,     "PITCH");
-    drawSection (g, mLFOSec,       "LFO MOD");
 
-
-    // Top-right 5x2 grid (D.4-Q1+Q2): Flt1 | Flt1 ADSR, Flt2 | Flt2 ADSR,
-    // Timbre | Blur/Prism, AmpEnv | FX.
+    // Top-right column.
     drawSection (g, mFlt1Sec,      "FILTER 1");
     drawSection (g, mFlt1AdsrSec,  "FILTER 1 ADSR");
     drawSection (g, mFlt2Sec,      "FILTER 2");
     drawSection (g, mFlt2AdsrSec,  "FILTER 2 ADSR");
     drawSection (g, mTimbreSec,    "TIMBRE");
+
+    // Bottom band.  The XYZ pad and Mod Editor paint their own frames, so
+    // they take no section header here.
+    drawSection (g, mPitchSec,     "PITCH");
+    drawSection (g, mLFOSec,       "LFO MOD");
+    drawSection (g, mStrumSec,     "STRUM");
     drawSection (g, mBlurPrismSec, "BLUR / PRISM");
     drawSection (g, mAmpEnvSec,    "AMP ENV / PHASE");
     drawSection (g, mFXSec,        "FX - PLUCK / PHASER / EQ");
-
-    // Bot-left right column: spectrogram placeholder (populated in L2).
-    drawSection (g, mSpectroTopSec, "SPECTROGRAM");
-    // mFutureR4L/R, mFutureR5L/R, mFutureBL_TopSec/BotSec, mSpectroBotSec
-    // deliberately un-labelled - they're blank-for-future / continuation tiles.
+    drawSection (g, mSpectroSec,   "SPECTROGRAM");
 
     // ── Knob labels - Top-Left ────────────────────────────────────────────────
     knobLabel (g, mTimbreWavA,   "PART A");
@@ -746,7 +758,7 @@ void HarmlessEditor::paint (juce::Graphics& g)
     knobLabel (g, mPartALevel,   "VOICE A");
     knobLabel (g, mPartBLevel,   "VOICE B");
     knobLabel (g, mBrownian,     "BROWN");
-    // D.4-Q1+Q2 (2026-05-01): timbre 2x2 stack + filter ADSR labels.
+    // D.4-Q1+Q2 (2026-05-01): filter-offset / part-mask + filter ADSR labels.
     knobLabel (g, mFlt1CutoffOfs, "F1 OFS");
     knobLabel (g, mFlt2CutoffOfs, "F2 OFS");
     knobLabel (g, mPartAMask,     "A MASK");
@@ -825,97 +837,119 @@ void HarmlessEditor::resized()
     bounds.reduce (kGap, 0);
     bounds.removeFromTop (kGap / 2);
 
-    const int contentH = bounds.getHeight();
     const int contentW = bounds.getWidth();
 
-    // ── Proportional splits ───────────────────────────────────────────────────
-    const int topH = int (contentH * kTopFrac);
-    const int botH = contentH - topH - kGap;
-
-    const int tlW  = int (contentW * kTLFrac);
-    const int tmW  = int (contentW * kTMFrac);
-    const int trW  = contentW - tlW - tmW - kGap * 2;
-
-    const int blW  = int (contentW * kBLFrac);
-    const int brW  = contentW - blW - kGap;
-
-    // ── Top Row ───────────────────────────────────────────────────────────────
-    auto topRow = bounds.removeFromTop (topH);
-
-    mTopLeftBounds  = topRow.removeFromLeft (tlW);
-    topRow.removeFromLeft (kGap);
-    mTopMidBounds   = topRow.removeFromLeft (tmW);
-    topRow.removeFromLeft (kGap);
-    mTopRightBounds = topRow;
-
+    // ── QA-Layout T7 (Specific-2) region map ─────────────────────────────────
+    //   TOP band (52%)
+    //     LEFT (34%)        MID (13%)   RIGHT (rest)
+    //     Output            Unison      Filter 1   | Filter 1 ADSR
+    //     Tremolo | Routing (full ht)   Filter 2   | Filter 2 ADSR
+    //     Vibrato / Legato              Timbre (full width)
+    //   BOTTOM band (rest), six columns
+    //     Pitch      | Strum | Blur-Prism | FX | Spectrogram | Mod Editor
+    //     LFO Mod    | XYZ   | Amp Env    |    |             |
+    auto topBand = bounds.removeFromTop (int (bounds.getHeight() * kTopBandFrac));
     bounds.removeFromTop (kGap);
+    mBotBandBounds = bounds;
 
-    // ── Bottom Row ────────────────────────────────────────────────────────────
-    auto botRow = bounds;
-    mBotLeftBounds  = botRow.removeFromLeft (blW);
-    botRow.removeFromLeft (kGap);
-    mBotRightBounds = botRow;
+    mTopLeftBounds  = topBand.removeFromLeft (int (contentW * kTLFrac));
+    topBand.removeFromLeft (kGap);
+    mTopMidBounds   = topBand.removeFromLeft (int (contentW * kTMFrac));
+    topBand.removeFromLeft (kGap);
+    mTopRightBounds = topBand;
 
     // Distribute a list of (component, width, height) across a rect, with
-    // equal gaps at start/between/end. Every row below uses this so knobs
-    // span the full cell width like the effect panels do, instead of
-    // clustering left.
+    // equal gaps at start/between/end.
+    //
+    // QA-Layout T7 (Specific-2): the single-row version ran wide item sets
+    // straight past the cell edge (Output, Timbre and FX all overflowed at
+    // the approved 1047x455 window -- the visible "doesn't fit" symptom).
+    // Items now WRAP into as many rows as the cell width needs and the block
+    // centres vertically, so a section fits its cell at any width.
     auto layoutRow = [] (juce::Rectangle<int> r,
                           std::initializer_list<std::tuple<juce::Component*, int, int>> items)
     {
         const int n = (int) items.size();
-        if (n <= 0) return;
-        int totalW = 0;
-        for (auto& it : items) totalW += std::get<1> (it);
-        const int gapSpace = juce::jmax (0, r.getWidth() - totalW);
-        const int gap = gapSpace / (n + 1);
-        int x = r.getX() + gap;
-        for (auto& it : items)
+        if (n <= 0 || r.getWidth() <= 0) return;
+        const auto* it = items.begin();
+        constexpr int kMinGap = 4;
+
+        // Greedy wrap: start a new row when the next item would not fit.
+        std::vector<std::pair<int, int>> rows;   // (firstIdx, count)
         {
-            auto* c = std::get<0> (it);
-            const int w = std::get<1> (it);
-            const int h = std::get<2> (it);
-            const int y = r.getCentreY() - h / 2;
-            c->setBounds (x, y, w, h);
-            x += w + gap;
+            int first = 0, used = 0;
+            for (int i = 0; i < n; ++i)
+            {
+                const int iw   = std::get<1> (it[i]);
+                const int need = (i > first ? kMinGap : 0) + iw;
+                if (i > first && used + need > r.getWidth())
+                {
+                    rows.emplace_back (first, i - first);
+                    first = i;
+                    used  = iw;
+                }
+                else used += need;
+            }
+            rows.emplace_back (first, n - first);
+        }
+
+        std::vector<int> rowH;
+        rowH.reserve (rows.size());
+        int blockH = 0;
+        for (auto& rw : rows)
+        {
+            int h = 0;
+            for (int i = rw.first; i < rw.first + rw.second; ++i)
+                h = juce::jmax (h, std::get<2> (it[i]));
+            rowH.push_back (h);
+            blockH += h;
+        }
+        blockH += kMinGap * ((int) rows.size() - 1);
+
+        int y = r.getY() + juce::jmax (0, (r.getHeight() - blockH) / 2);
+        for (size_t ri = 0; ri < rows.size(); ++ri)
+        {
+            const auto& rw = rows[ri];
+            int itemsW = 0;
+            for (int i = rw.first; i < rw.first + rw.second; ++i)
+                itemsW += std::get<1> (it[i]);
+            const int gap = juce::jmax (0, r.getWidth() - itemsW) / (rw.second + 1);
+            int x = r.getX() + gap;
+            for (int i = rw.first; i < rw.first + rw.second; ++i)
+            {
+                auto* c = std::get<0> (it[i]);
+                const int w = std::get<1> (it[i]);
+                const int h = std::get<2> (it[i]);
+                c->setBounds (x, y + (rowH[ri] - h) / 2, w, h);
+                x += w + gap;
+            }
+            y += rowH[ri] + kMinGap;
         }
     };
 
     // ═════════════════════════════════════════════════════════════════════════
-    // S5 Layout redesign (2026-04-20).
-    // See blueprint §P1 Harmless layout review for the full map. Quick version:
+    // S5 section internals (2026-04-20), rehung on the T7 four-column frame:
     //
-    //   TOP-LEFT      TOP-MIDDLE      TOP-RIGHT (5x2 grid)
-    //   Output|Route  Unison          Filter1 | Filter2
-    //   Trem  |VibLeg Pitch           Timbre  | BlurPrism
-    //   (merged)      LFO Mod         AmpEnv  | FX
-    //   blank|Strum                   blank   | blank
-    //        |XYZ                     blank   | blank
-    //
-    //   BOT-LEFT                      BOT-RIGHT
-    //   blank | Spectrogram (top)     Mod Editor (unchanged)
-    //   blank | Spectrogram (bottom)
+    //   COL 1           COL 2      COL 3 (grid)       COL 4
+    //   Output|Route    Unison     Filter1 | Filter2  Mod Editor
+    //   Trem  |VibLeg   Pitch      Timbre  | BlurPrsm ----------
+    //   blank |Strum    LFO Mod    AmpEnv  | FX       Spectrogram
+    //         |XYZ
     // ═════════════════════════════════════════════════════════════════════════
 
     // ─────────────────────────────────────────────────────────────────────────
-    // TOP-LEFT panel - Row A (Output | Routing), Row B (Tremolo | Vib/Legato),
-    // Row C merged (left blank | right: Strum top-1/4, XYZ pad bot-3/4).
+    // TOP-LEFT column - Output (full width) / Tremolo | Routing / Vib-Legato
+    // (full width).  T7: the old half-width Output cell overflowed its six
+    // fixed-width items; full-width rows fit them with room at the approved
+    // size.  Strum + XYZ moved to the bottom band.
     // ─────────────────────────────────────────────────────────────────────────
     {
         auto r = mTopLeftBounds.reduced (6, 4);
         const int secGap = 3;
-        const int halfW  = (r.getWidth() - secGap) / 2;
-        const int avail  = r.getHeight();
-        // Row A uses current Timbre-box proportion (0.20); Row B uses current
-        // Routing-box proportion (0.18); Row C eats the rest (~0.62).
-        const int rowAH = int (avail * 0.20f);
-        const int rowBH = int (avail * 0.18f);
-        // rowCH = remainder
+        const int rowH   = (r.getHeight() - 2 * secGap) / 3;
 
-        // Row A: Output (Volume / Pan / VelLink, no A+B) | Routing Matrix
-        auto rowA = r.removeFromTop (rowAH);
-        mGlobalSec   = rowA.withWidth (halfW);                                 // Output
-        mRoutingSec  = rowA.withX (rowA.getX() + halfW + secGap).withWidth (halfW);
+        // Row A: Output, full width.
+        mGlobalSec = r.removeFromTop (rowH);
         layoutRow (mGlobalSec.reduced (4, 16), {
             { &mVolume,      kKnobSm, kKnobSm },
             { &mPan,         kKnobSm, kKnobSm },
@@ -924,19 +958,25 @@ void HarmlessEditor::resized()
             { &mCutSelfModeBtn, 74,   18      },   // QA-CutSelfReview: Same Pitch / Cut All
             { &mAutoGainBtn, 52,      18      },   // D.4-Q1+Q2: moved here from Timbre cell
         });
-        mRoutingMatrix.setBounds (mRoutingSec.reduced (4, 16));
         r.removeFromTop (secGap);
 
-        // Row B: Tremolo | Vibrato/Legato
-        auto rowB = r.removeFromTop (rowBH);
-        mTremSec      = rowB.withWidth (halfW);
-        mVibLegatoSec = rowB.withX (rowB.getX() + halfW + secGap).withWidth (halfW);
+        // Row B: Tremolo | Routing Matrix.
+        auto rowB = r.removeFromTop (rowH);
+        const int halfW = (rowB.getWidth() - secGap) / 2;
+        mTremSec    = rowB.withWidth (halfW);
+        mRoutingSec = rowB.withX (rowB.getX() + halfW + secGap)
+                          .withWidth (rowB.getWidth() - halfW - secGap);
         layoutRow (mTremSec.reduced (4, 16), {
             { &mTremWavBtn, 32,      32      },
             { &mTremDepth,  kKnobSm, kKnobSm },
             { &mTremSpeed,  kKnobSm, kKnobSm },
             { &mTremGap,    kKnobSm, kKnobSm },
         });
+        mRoutingMatrix.setBounds (mRoutingSec.reduced (4, 16));
+        r.removeFromTop (secGap);
+
+        // Row C: Vibrato / Legato, full width.
+        mVibLegatoSec = r;
         layoutRow (mVibLegatoSec.reduced (4, 16), {
             { &mVibWavBtn,   32,      32      },
             { &mVibDepth,    kKnobSm, kKnobSm },
@@ -946,150 +986,52 @@ void HarmlessEditor::resized()
             { &mLegatoLimit, kKnobSm, kKnobSm },
             { &mLegatoBtn,   42,      20      },
         });
-        r.removeFromTop (secGap);
-
-        // Row C merged: left blank, right split (Strum top 1/4, XYZ bot 3/4).
-        // `mBlurPrismSec` + `mPitchSec` now repurposed for future-space and are
-        // not rendered (drawSection for them removed in paint()). `mStrumSec`
-        // gets the top quarter of the right half; XYZ pad fills bottom 3/4.
-        auto rowC = r;
-        mBlurPrismSec = rowC.withWidth (halfW);   // blank future-space (left)
-        mPitchSec     = juce::Rectangle<int> {};  // unused - Pitch moved to top-middle
-        auto rowCright = rowC.withX (rowC.getX() + halfW + secGap).withWidth (halfW);
-        const int strumH = rowCright.getHeight() / 4;
-        mStrumSec = rowCright.removeFromTop (strumH);
-        layoutRow (mStrumSec.reduced (4, 14), {
-            { &mStrumDirSlider, kKnobSm, kKnobSm },
-            { &mStrumTime,      kKnobSm, kKnobSm },
-            { &mStrumTns,       kKnobSm, kKnobSm },
-        });
-        mXYZPad.setBounds (rowCright.reduced (2));
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // TOP-MIDDLE panel - Unison (shortened faders) / Pitch / LFO Mod stack.
+    // TOP-MIDDLE column - Unison, alone at full band height.  T7: Unison is
+    // the one section whose controls are inherently VERTICAL (three faders
+    // under the voices knob), so it gets the height rather than sharing a
+    // stack with Pitch + LFO Mod (which are horizontal rows and moved to the
+    // bottom band).  The faders keep real throw instead of the ~75%-of-a-
+    // third they had, and the derived "savings" arithmetic that produced the
+    // old heights is gone with it.
     // ─────────────────────────────────────────────────────────────────────────
     {
-        auto r = mTopMidBounds.reduced (6, 4);
-        const int avail  = r.getHeight();
-        // 2026-04-30 - Unison shrinks to free space for the LFO Mod's new
-        // 2-row layout, per Jeff's spec:
-        //   • Voices knob: kKnob (44) → kKnobSm (32) → saves 12 px
-        //   • Faders: cut to 75 % of their previous length → saves ~25 %
-        //     of the leftover-fader height inside the Unison box.
-        // The recovered space is added to lfoH so the LFO section fits
-        // [RATE | SHAPE | TEMPO] above [VEL | VOL | PITCH].
-        const int rowBHeq = int (avail * 0.18f);
-        const int pitchH  = rowBHeq;
-        // Compute what the original (pre-shrink) Unison fader height was,
-        // then shave 25 % off - that's our "fader saving" pixel count.
-        const int origUnisonH      = avail - rowBHeq - rowBHeq - 4;
-        const int origUnisonInnerH = origUnisonH - 28;   // reduce(6,14)
-        // Original layout consumed: kKnob(voices) + 8 + kKnobSm(type) + 2
-        //                         + 18(alt button) + 2 (advance gap) → 76.
-        const int origFaderH = juce::jmax (10, origUnisonInnerH - 76);
-        const int voicesSaving = kKnob - kKnobSm;        // 12 px
-        const int faderSaving  = origFaderH / 4;         // 25 % of length
-        const int lfoH    = rowBHeq + voicesSaving + faderSaving;
-        const int unisonH = avail - pitchH - lfoH - 4;   // - 2 gaps of 2
-
-        // Unison (top).  2026-04-30: voices knob shrinks from kKnob (44)
-        // to kKnobSm (32) - same size as every other knob in the editor.
-        // Faders auto-shrink because the section's overall height was
-        // reduced by voicesSaving + faderSaving above.
-        auto unisonRect = r.removeFromTop (unisonH);
-        mUnisonSec = unisonRect;
-        {
-            auto ur = unisonRect.reduced (6, 14);
-            int x = ur.getX() + (ur.getWidth() - kKnobSm) / 2;
-            mUnisonVoices.setBounds (x, ur.getY(), kKnobSm, kKnobSm);
-            ur.removeFromTop (kKnobSm + 8);
-            mUnisonType  .setBounds (ur.getX(), ur.getY(), ur.getWidth(), kKnobSm);
-            ur.removeFromTop (kKnobSm + 2);
-            mUnisonAltBtn.setBounds (ur.getX(), ur.getY(), ur.getWidth(), 18);
-            ur.removeFromTop (20);
-            // Remaining height -> 3 vertical faders.  Length is now ~75 %
-            // of the previous version since the section was shrunk by
-            // faderSaving above.  Plenty of throw for the user.
-            const int sliderW = (ur.getWidth() - 8) / 3;
-            const int sliderH = juce::jmax (10, ur.getHeight() - 2);
-            mUnisonPan  .setBounds (ur.getX(),                   ur.getY(), sliderW, sliderH);
-            mUnisonPitch.setBounds (ur.getX() + sliderW + 4,     ur.getY(), sliderW, sliderH);
-            mUnisonPhase.setBounds (ur.getX() + (sliderW + 4)*2, ur.getY(), sliderW, sliderH);
-        }
-        r.removeFromTop (2);
-
-        // Pitch (middle): FREQ / DETUNE / fraction chicken-head / OCT + Hz toggles
-        mPitchSec = r.removeFromTop (pitchH);
-        layoutRow (mPitchSec.reduced (4, 14), {
-            { &mPitchFreq,     kKnobSm, kKnobSm },
-            { &mPitchDetune,   kKnobSm, kKnobSm },
-            { &mPitchFreqFrac, kKnobSm, kKnobSm },
-            { &mPitchOctBtn,   24,      18      },
-            { &mPitchHzBtn,    20,      18      },
-        });
-        r.removeFromTop (2);
-
-        // LFO Mod (bottom): two-row layout.
-        //   Row 1: RATE / SHAPE / TEMPO - global macro carriers.
-        //   Row 2: VEL / VOL / PITCH - depth shortcuts that route to the
-        //          Volume + Pitch mod-registry targets and the noteOn
-        //          velocity-scaling path.
-        // 2026-04-30: T2-B Vel/Vol/Pitch depth sliders restored after the
-        // S4 strip.  Section height bumped to 0.32 × avail (steals from
-        // Unison's overlong faders) so two rows fit cleanly inside the
-        // existing section title border.
-        mLFOSec = r;
-        {
-            // Inset for section title (matches the single-row version).
-            auto inner = mLFOSec.reduced (4, 14);
-            // 2026-04-30: two-row LFO Mod layout.  Row-1 RATE/SHAPE/TEMPO
-            // already gets its labels via knobLabel under each control.
-            // Row-2 sliders get the same - labels are drawn 1 px below the
-            // slider's bottom (knobLabel convention), so we reserve 11 px
-            // at the bottom of row 2 (10 px label height + 1 px gap) and
-            // size the slider height to fill what's left.
-            const int rowGap     = 4;
-            const int row1H      = kKnobSm;
-            constexpr int kLblH  = 11;   // label band beneath each slider
-
-            auto row1 = inner.removeFromTop (row1H);
-            layoutRow (row1, {
-                { &mLfoRate,     kKnobSm, kKnobSm },
-                { &mLfoShape,    kKnobSm, kKnobSm },
-                { &mLfoTempoBtn, 52,      24      },
-            });
-            inner.removeFromTop (rowGap);
-
-            // Row 2 - three vertical depth sliders.  Trim 11 px off the
-            // bottom of the layout rect so layoutRow's vertical centering
-            // never reaches into the label band, and size sliderH to fill
-            // the trimmed rect.  Net: slider's bottom edge = inner.bottom
-            // - 11 px, label rendered by knobLabel sits cleanly below.
-            auto sliderArea = inner.withTrimmedBottom (kLblH);
-            const int sliderH = juce::jmax (12, sliderArea.getHeight());
-            layoutRow (sliderArea, {
-                { &mLfoVel,   22, sliderH },
-                { &mLfoVol,   22, sliderH },
-                { &mLfoPitch, 22, sliderH },
-            });
-        }
+        mUnisonSec = mTopMidBounds.reduced (6, 4);
+        auto ur = mUnisonSec.reduced (6, 14);
+        int x = ur.getX() + (ur.getWidth() - kKnobSm) / 2;
+        mUnisonVoices.setBounds (x, ur.getY(), kKnobSm, kKnobSm);
+        ur.removeFromTop (kKnobSm + 8);
+        mUnisonType  .setBounds (ur.getX(), ur.getY(), ur.getWidth(), kKnobSm);
+        ur.removeFromTop (kKnobSm + 2);
+        mUnisonAltBtn.setBounds (ur.getX(), ur.getY(), ur.getWidth(), 18);
+        ur.removeFromTop (20);
+        // Remaining height -> 3 vertical faders (PAN / PITCH / PHASE).  Leave
+        // the knobLabel band clear at the bottom.
+        constexpr int kLblBand = 11;
+        const int sliderW = (ur.getWidth() - 8) / 3;
+        const int sliderH = juce::jmax (10, ur.getHeight() - kLblBand);
+        mUnisonPan  .setBounds (ur.getX(),                   ur.getY(), sliderW, sliderH);
+        mUnisonPitch.setBounds (ur.getX() + sliderW + 4,     ur.getY(), sliderW, sliderH);
+        mUnisonPhase.setBounds (ur.getX() + (sliderW + 4)*2, ur.getY(), sliderW, sliderH);
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // TOP-RIGHT panel - 5×2 grid.
-    //   D.4-Q1+Q2 (2026-05-01): Filter 2 moved BELOW Filter 1; new ADSR boxes
-    //   placed to the right of each filter row (4 knobs each, 2x2 layout).
+    // TOP-RIGHT column - 3 rows, no blanks (T7).
+    //   D.4-Q1+Q2 (2026-05-01): Filter 2 sits BELOW Filter 1, each with its
+    //   ADSR box to the right.
     //   R1: Filter 1 | Filter 1 ADSR
     //   R2: Filter 2 | Filter 2 ADSR
-    //   R3: Timbre (with A+B + 2x2 stack) | Blur/Prism
-    //   R4: Amp Env + Phase | FX (Pluck / Phaser / EQ)
-    //   R5: blank (future upgrade space)
+    //   R3: Timbre (A/B strip + the 2x2 offsets/masks stack), FULL width --
+    //       the widest control set in the editor, and the old half-width cell
+    //       is exactly what overflowed.  Blur/Prism, Amp Env and FX moved to
+    //       the bottom band; the two blank "future" rows are gone.
     // ─────────────────────────────────────────────────────────────────────────
     {
         auto r = mTopRightBounds.reduced (4, 4);
         const int cellGap = 3;
-        const int rowH  = (r.getHeight() - cellGap * 4) / 5;
+        const int rowH  = (r.getHeight() - cellGap * 2) / 3;
         const int halfW = (r.getWidth()  - cellGap) / 2;
 
         auto cellAt = [&] (int row, int col) -> juce::Rectangle<int>
@@ -1124,75 +1066,120 @@ void HarmlessEditor::resized()
         mFilter2Row.setBounds (mFlt2Sec.reduced (3, 12));
         layoutAdsr (mFlt2AdsrSec, mFlt2A, mFlt2D, mFlt2S, mFlt2R);
 
-        // R3: Timbre (with A/B) | Blur/Prism
-        mTimbreSec    = cellAt (2, 0);
-        mBlurPrismSec = cellAt (2, 1);
-        // D.4-Q1+Q2 (2026-05-01): Timbre cell now also hosts a 2x2 stack on the
-        // right (offsets row + masks row).  Left strip = 8 horizontal controls
-        // (AutoGain moved out to Output cell to free this width); right block
-        // = 4 knobs in 2x2 grid.
+        // R3: Timbre, FULL width -- the widest set in the editor, and the old
+        // half cell is what overflowed.  T7 also DISSOLVES the cramped 2x2
+        // stack that held the D.4-Q1+Q2 filter-offset + part-mask knobs: with
+        // the full row available they sit inline at full knob size instead of
+        // shrinking to ~12px in a half-height sub-cell.
+        mTimbreSec = cellAt (2, 0).withWidth (r.getWidth());
+        layoutRow (mTimbreSec.reduced (3, 12), {
+            { &mPartABtn,       22,      18      },
+            { &mPartBBtn,       22,      18      },
+            { &mTimbreWavA,     28,      28      },
+            { &mTimbreWavB,     28,      28      },
+            { &mTimbreBlend,    kKnobSm, kKnobSm },
+            { &mPartALevel,     kKnobSm, kKnobSm },
+            { &mPartBLevel,     kKnobSm, kKnobSm },
+            { &mBrownian,       kKnobSm, kKnobSm },
+            { &mFlt1CutoffOfs,  kKnobSm, kKnobSm },
+            { &mFlt2CutoffOfs,  kKnobSm, kKnobSm },
+            { &mPartAMask,      kKnobSm, kKnobSm },
+            { &mPartBMask,      kKnobSm, kKnobSm },
+        });
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // BOTTOM band - six columns, every one carrying content (T7).
+    //   Pitch      | Strum | Blur/Prism | FX | Spectrogram | Mod Editor
+    //   LFO Mod    | XYZ   | Amp Env    |    |             |
+    // The horizontal-row sections (Pitch, LFO Mod, Blur/Prism, Amp Env, FX)
+    // moved here off the top band; XYZ + Spectrogram + Mod Editor are the
+    // surfaces that actually want area, so they get full column height.
+    // ─────────────────────────────────────────────────────────────────────────
+    {
+        auto band = mBotBandBounds;
+        auto takeCol = [&] (float frac) -> juce::Rectangle<int>
         {
-            auto timbreInner = mTimbreSec.reduced (3, 12);
-            // Reserve the rightmost 2 columns of kKnobSm width for the 2x2 stack.
-            const int stackW = kKnobSm * 2 + 4;
-            auto stackArea   = timbreInner.removeFromRight (stackW);
-            timbreInner.removeFromRight (4);   // gap between strip and stack
+            auto c = band.removeFromLeft (int (contentW * frac));
+            band.removeFromLeft (kGap);
+            return c;
+        };
+        constexpr int kLblBand = 11;   // knobLabel band under a control
+        constexpr int kColGap  = 3;
 
-            layoutRow (timbreInner, {
-                { &mPartABtn,    22,      18      },
-                { &mPartBBtn,    22,      18      },
-                { &mTimbreWavA,  28,      28      },
-                { &mTimbreWavB,  28,      28      },
-                { &mTimbreBlend, kKnobSm, kKnobSm },
-                { &mPartALevel,  kKnobSm, kKnobSm },
-                { &mPartBLevel,  kKnobSm, kKnobSm },
-                { &mBrownian,    kKnobSm, kKnobSm },
+        // Col 1: Pitch over LFO Mod.
+        {
+            auto col = takeCol (kBPitchFrac);
+            mPitchSec = col.removeFromTop (col.getHeight() * 2 / 5);
+            layoutRow (mPitchSec.reduced (4, 14), {
+                { &mPitchFreq,     kKnobSm, kKnobSm },
+                { &mPitchDetune,   kKnobSm, kKnobSm },
+                { &mPitchFreqFrac, kKnobSm, kKnobSm },
+                { &mPitchOctBtn,   24,      18      },
+                { &mPitchHzBtn,    20,      18      },
             });
+            col.removeFromTop (kColGap);
+            mLFOSec = col;
 
-            // 2x2 stack: top row = flt1Ofs | flt2Ofs (filter offsets pair)
-            //            bot row = partAMask | partBMask (timbre mask pair)
-            // Reserve 11px under each knob for its label so adjacent rows /
-            // knobs don't overlap.  Knob size shrinks to fit the remaining
-            // vertical space (label-aware).
-            constexpr int kLabelGap = 11;
-            const int half  = stackArea.getHeight() / 2;
-            const int knobW = (stackArea.getWidth() - 4) / 2;
-            const int sz    = juce::jmin (kKnobSm, knobW, juce::jmax (12, half - kLabelGap));
-            auto top = stackArea.removeFromTop (half);
-            auto bot = stackArea;
-            mFlt1CutoffOfs.setBounds (top.removeFromLeft (knobW)
-                                          .withSizeKeepingCentre (sz, sz)
-                                          .translated (0, -(kLabelGap / 2)));
-            top.removeFromLeft (4);
-            mFlt2CutoffOfs.setBounds (top.withSizeKeepingCentre (sz, sz)
-                                          .translated (0, -(kLabelGap / 2)));
-            mPartAMask    .setBounds (bot.removeFromLeft (knobW)
-                                          .withSizeKeepingCentre (sz, sz)
-                                          .translated (0, -(kLabelGap / 2)));
-            bot.removeFromLeft (4);
-            mPartBMask    .setBounds (bot.withSizeKeepingCentre (sz, sz)
-                                          .translated (0, -(kLabelGap / 2)));
+            // Row 1 RATE / SHAPE / TEMPO over row 2's VEL / VOL / PITCH depth
+            // faders.  Each row reserves its label band so the labels can
+            // never land on the row below.
+            auto inner = mLFOSec.reduced (4, 14);
+            auto row1  = inner.removeFromTop (kKnobSm + kLblBand);
+            layoutRow (row1.withTrimmedBottom (kLblBand), {
+                { &mLfoRate,     kKnobSm, kKnobSm },
+                { &mLfoShape,    kKnobSm, kKnobSm },
+                { &mLfoTempoBtn, 52,      24      },
+            });
+            inner.removeFromTop (4);
+            auto faders = inner.withTrimmedBottom (kLblBand);
+            const int faderH = juce::jmax (12, faders.getHeight());
+            layoutRow (faders, {
+                { &mLfoVel,   22, faderH },
+                { &mLfoVol,   22, faderH },
+                { &mLfoPitch, 22, faderH },
+            });
         }
-        layoutRow (mBlurPrismSec.reduced (3, 12), {
-            { &mBlurSize,  kKnobSm, kKnobSm },
-            { &mBlurTime,  kKnobSm, kKnobSm },
-            { &mBlurHarm,  kKnobSm, kKnobSm },
-            { &mPrismAmt,  kKnobSm, kKnobSm },
-            { &mPrismMode, kKnobSm, kKnobSm },
-        });
 
-        // R4: Amp Env + Phase | FX (Pluck / Phaser / EQ).  D.4-Q1+Q2: was R3
-        // before Filter 2 got its own row.
-        mAmpEnvSec = cellAt (3, 0);
-        mFXSec     = cellAt (3, 1);
-        layoutRow (mAmpEnvSec.reduced (3, 12), {
-            { &mAmpA,       kKnobSm, kKnobSm },
-            { &mAmpD,       kKnobSm, kKnobSm },
-            { &mAmpS,       kKnobSm, kKnobSm },
-            { &mAmpR,       kKnobSm, kKnobSm },
-            { &mPhaseStart, kKnobSm, kKnobSm },
-            { &mPhaseRand,  kKnobSm, kKnobSm },
-        });
+        // Col 2: Strum over the XYZ pad.
+        {
+            auto col = takeCol (kBStrumFrac);
+            mStrumSec = col.removeFromTop (col.getHeight() * 2 / 5);
+            layoutRow (mStrumSec.reduced (4, 14), {
+                { &mStrumDirSlider, kKnobSm, kKnobSm },
+                { &mStrumTime,      kKnobSm, kKnobSm },
+                { &mStrumTns,       kKnobSm, kKnobSm },
+            });
+            col.removeFromTop (kColGap);
+            mXYZSec = col;                       // pad draws its own frame
+            mXYZPad.setBounds (mXYZSec.reduced (2));
+        }
+
+        // Col 3: Blur/Prism over Amp Env + Phase.
+        {
+            auto col = takeCol (kBToneFrac);
+            mBlurPrismSec = col.removeFromTop ((col.getHeight() - kColGap) / 2);
+            layoutRow (mBlurPrismSec.reduced (3, 12), {
+                { &mBlurSize,  kKnobSm, kKnobSm },
+                { &mBlurTime,  kKnobSm, kKnobSm },
+                { &mBlurHarm,  kKnobSm, kKnobSm },
+                { &mPrismAmt,  kKnobSm, kKnobSm },
+                { &mPrismMode, kKnobSm, kKnobSm },
+            });
+            col.removeFromTop (kColGap);
+            mAmpEnvSec = col;
+            layoutRow (mAmpEnvSec.reduced (3, 12), {
+                { &mAmpA,       kKnobSm, kKnobSm },
+                { &mAmpD,       kKnobSm, kKnobSm },
+                { &mAmpS,       kKnobSm, kKnobSm },
+                { &mAmpR,       kKnobSm, kKnobSm },
+                { &mPhaseStart, kKnobSm, kKnobSm },
+                { &mPhaseRand,  kKnobSm, kKnobSm },
+            });
+        }
+
+        // Col 4: FX (Pluck / Phaser / EQ) -- 9 controls, wrapped by layoutRow.
+        mFXSec = takeCol (kBFXFrac);
         layoutRow (mFXSec.reduced (3, 12), {
             { &mPluckDecay,    kKnobSm, kKnobSm },
             { &mPluckBlurBtn,  24,      18      },
@@ -1205,40 +1192,14 @@ void HarmlessEditor::resized()
             { &mEQMix,         kKnobSm, kKnobSm },
         });
 
-        // R4 + R5: blank (future upgrade space).
-        mFutureR4LSec = cellAt (3, 0);
-        mFutureR4RSec = cellAt (3, 1);
-        mFutureR5LSec = cellAt (4, 0);
-        mFutureR5RSec = cellAt (4, 1);
+        // Col 5: Spectrogram (12 px reserved for the section header).
+        mSpectroSec = takeCol (kBSpecFrac);
+        mSpectrogram.setBounds (mSpectroSec.reduced (4, 4).withTrimmedTop (12));
+
+        // Col 6: Mod Editor takes the remainder.
+        mModSec = band;
+        mModEditor.setBounds (mModSec.reduced (2));
     }
-
-    // ─────────────────────────────────────────────────────────────────────────
-    // BOTTOM-LEFT panel - left column blank (future space), right column
-    // reserved for the spectrogram visualizer (two stacked tiles, populated
-    // in S5 batch L2).
-    // ─────────────────────────────────────────────────────────────────────────
-    {
-        auto r = mBotLeftBounds.reduced (6, 4);
-        const int halfH = (r.getHeight() - kGap) / 2;
-        const int halfW = (r.getWidth()  - kGap) / 2;
-
-        mFutureBL_TopSec = juce::Rectangle<int> (r.getX(), r.getY(), halfW, halfH);
-        mFutureBL_BotSec = juce::Rectangle<int> (r.getX(), r.getY() + halfH + kGap, halfW, halfH);
-        // Spectrogram spans the ENTIRE right column as one visualizer, not two
-        // stacked boxes. mSpectroBotSec kept as a zero rect so drawSection
-        // for it is a no-op (it's drawn as part of mSpectroTopSec now).
-        mSpectroTopSec = juce::Rectangle<int> (r.getX() + halfW + kGap, r.getY(),
-                                                halfW, halfH * 2 + kGap);
-        mSpectroBotSec = juce::Rectangle<int> {};
-        // Size the visualiser component to fit inside the section, leaving
-        // 14 px at the top for the "SPECTROGRAM" header text drawSection draws.
-        mSpectrogram.setBounds (mSpectroTopSec.reduced (4, 4).withTrimmedTop (12));
-    }
-
-    // ─────────────────────────────────────────────────────────────────────────
-    // BOTTOM-RIGHT panel (Mod Editor) - 60% width
-    // ─────────────────────────────────────────────────────────────────────────
-    mModEditor.setBounds (mBotRightBounds.reduced (2));
 }
 
 //==============================================================================

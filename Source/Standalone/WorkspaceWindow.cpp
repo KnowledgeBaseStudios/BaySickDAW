@@ -2,7 +2,6 @@
 #include "SharedUI.h"   // VibeLAF + PageMenuBar
 #include "WindowChrome.h"   // TS7 §9.1: the one title-strip look
 #include "../ProjectManager.h"
-#include "../AppPaths.h"    // [QA-Layout DIAG] window-sizing-diag.txt location
 
 namespace
 {
@@ -112,9 +111,10 @@ WorkspaceWindow::WorkspaceWindow (juce::String persistKey, juce::String title)
     // editor's, so hover help works the same inside every contained window.
     mTooltips = std::make_unique<VibeTooltip> (this, 600);
 
-    // [QA-Layout DIAG] 320x200 -> 120x80 while the sizing collection is
-    // active (T7 restores real floors from the diag data).
-    mConstrainer.setMinimumSize (120, 80);
+    // QA-Layout T7: ctor default restored post-sizing-collection; every real
+    // floor comes from the caller via setMinimumSize (the diag-era 120x80
+    // free-for-all is over).
+    mConstrainer.setMinimumSize (320, 200);
     mResizer = std::make_unique<juce::ResizableBorderComponent> (this, &mConstrainer);
     mResizer->setBorderThickness (juce::BorderSize<int> (kBorderPx));
     addAndMakeVisible (*mResizer);
@@ -147,12 +147,14 @@ Workspace* WorkspaceWindow::workspace() const noexcept
 
 WorkspaceWindow::~WorkspaceWindow()
 {
-    // The one save every route shares: teardown, and any resize-only session
-    // (resizes have no end-of-gesture hook, so without this a window that was
-    // only ever resized never persisted at all).  Runs while the workspace is
-    // still reachable -- saveBounds skips silently once it is not.
-    saveBounds();
-
+    // NO saveBounds() here (removed 2026-08-04).  A destructor runs while the
+    // window is being dismantled, so what it reported was not the geometry the
+    // user left -- and because it ran LAST, it overwrote the good value on the
+    // way out.  That is why a hand-placed Mixer kept coming back somewhere
+    // else after an app restart.  Every real route saves explicitly now:
+    // drag-release, border resize + move (resized/moved), the close button,
+    // the fill toggle, and the exit flush that runs before teardown
+    // (StandaloneEditor::flushWindowBoundsNow).
     if (mCloseBtn) mCloseBtn->setLookAndFeel (nullptr);
     if (auto* ws = mWorkspace.getComponent()) ws->removeWindow (this);
     // Peer teardown is Component's job.  An OWNED page dies with mContent; a
@@ -198,14 +200,16 @@ std::unique_ptr<juce::Component> WorkspaceWindow::releaseContent()
 
 void WorkspaceWindow::setMinimumSize (int minW, int minH)
 {
-    // [QA-Layout DIAG] every caller's floor is a provisional number the
-    // sizing collection exists to replace -- ignore them all and hold the
-    // absolute minimum so Jeff can find the real collision points on screen.
-    // T7 restores this body:
-    //   mConstrainer.setMinimumSize (juce::jmax (120, minW + 2 * kBorderPx),
-    //                                juce::jmax (80,  minH + kTitleH + 2 * kBorderPx));
-    juce::ignoreUnused (minW, minH);
-    mConstrainer.setMinimumSize (120, 80);
+    // QA-Layout T7: real body restored (the diag-era override ignored every
+    // caller).  minW/minH are CONTENT floors; the constrainer works on the
+    // full window, so the chrome joins the math.
+    mConstrainer.setMinimumSize (juce::jmax (120, minW + 2 * kBorderPx),
+                                 juce::jmax (80,  minH + kTitleH + 2 * kBorderPx));
+}
+
+void WorkspaceWindow::setMinimumWindowSize (int w, int h)
+{
+    mConstrainer.setMinimumSize (juce::jmax (120, w), juce::jmax (80, h));
 }
 
 void WorkspaceWindow::setTitle (juce::String t)
@@ -277,24 +281,13 @@ void WorkspaceWindow::sizeToContent (int contentW, int contentH)
 
 void WorkspaceWindow::resized()
 {
-    // [QA-Layout DIAG] one line per actual size change; the last row per key
-    // in a take is the number Jeff settled on.
-    if (getWidth() > 0 && getHeight() > 0 && workspace() != nullptr
-        && (getWidth() != mLastDiagSize.x || getHeight() != mLastDiagSize.y))
-    {
-        mLastDiagSize = { getWidth(), getHeight() };
-        juce::String line;
-        line << mPersistKey << " | " << mTitle << " | "
-             << getWidth() << "x" << getHeight();
-        if (onDiagExtraInfo)
-        {
-            const auto extra = onDiagExtraInfo();
-            if (extra.isNotEmpty()) line << " | " << extra;
-        }
-        line << "\n";
-        AppPaths::appRoot().getChildFile ("window-sizing-diag.txt").appendText (line);
-        repaint (titleBarArea());
-    }
+    // QA-Layout T7 fix: persist on EVERY settled geometry change, not just the
+    // title-drag release + teardown.  A border resize has no end-of-gesture
+    // hook, so before this the only thing that captured it was the destructor
+    // -- and anything that ended the session another way lost it.  The
+    // isOnDesktop guard keeps attachTo's pre-reparent setBounds (which is in
+    // workspace-local space, before the origin is applied) out of the store.
+    if (isOnDesktop()) saveBounds();
 
     if (mResizer)  mResizer->setBounds (getLocalBounds());
 
@@ -310,19 +303,6 @@ void WorkspaceWindow::resized()
         mPageMenu->setBounds (title);
 
     if (mContentRaw) mContentRaw->setBounds (contentArea());
-}
-
-void WorkspaceWindow::paintOverChildren (juce::Graphics& g)
-{
-    // [QA-Layout DIAG] live WxH readout on the strip (B.31.0's assumed
-    // readout).  Drawn OVER the PageMenuBar, right-aligned against the fill
-    // toggle; yellow monospace so it reads on every strip.
-    auto r = titleBarArea();
-    r.removeFromRight (kTitleH * 2 + 4);   // clear of close + fill buttons
-    g.setColour (juce::Colours::yellow.withAlpha (0.9f));
-    g.setFont (juce::Font (juce::Font::getDefaultMonospacedFontName(), 12.0f, juce::Font::bold));
-    g.drawText (juce::String (getWidth()) + "x" + juce::String (getHeight()),
-                r.removeFromRight (86), juce::Justification::centredRight, false);
 }
 
 void WorkspaceWindow::mouseDown (const juce::MouseEvent& e)
@@ -411,6 +391,14 @@ void WorkspaceWindow::mouseDrag (const juce::MouseEvent& e)
     setBounds (finalBounds);
 }
 
+void WorkspaceWindow::moved()
+{
+    // Same reasoning as resized(): every settled position lands in the store,
+    // including programmatic moves (snap, workspace clamp) that never pass
+    // through the title-drag release below.
+    if (isOnDesktop()) saveBounds();
+}
+
 void WorkspaceWindow::mouseUp (const juce::MouseEvent&)
 {
     if (! mDraggingTitle) return;
@@ -448,39 +436,62 @@ void WorkspaceWindow::attachTo (Workspace& ws)
     mWorkspace = &ws;
     ws.addWindow (this);
 
-    bool hasPos = true;
-    auto saved = loadSavedBounds (hasPos);
-    // First open: a readable default inset from the workspace origin, offset
-    // per already-open window so a fresh window never lands exactly on top
-    // of the one before it.  A SIZE-ONLY seed (T5: player sizes carry across
-    // projects, placement does not) keeps its size and takes the default spot.
-    const int step = 28 * juce::jmin (6, ws.getWindows().size() - 1);
-    if (saved.isEmpty())
-        saved = juce::Rectangle<int> (24 + step, 24 + step,
-                                      juce::jmax (480, ws.getWidth()  * 2 / 3),
-                                      juce::jmax (320, ws.getHeight() * 2 / 3));
-    else if (! hasPos)
-        saved.setPosition (24 + step, 24 + step);
-    setBounds (saved);
-
     // Parent-client space: the peer's coordinates are measured from the MAIN
     // window's client origin, so the workspace's own offset inside the frame
     // has to be added on.  (See the contract note in the header -- this is the
     // one line that differs from how a top-level JUCE window is positioned.)
+    //
+    // WAIT FOR A LAID-OUT WORKSPACE, not just a peer (fix 2026-08-04).  A
+    // zero-size Workspace reports originInParentClient() as (0,0), so every
+    // window restored at that moment landed short by the real origin -- saved
+    // at origin (1,91), restored against (0,0), i.e. 91px too high, every
+    // launch.  It also collapsed the first-open default size, which is a
+    // fraction of the workspace, to its 480x320 floor.  Both symptoms, one
+    // cause.  Queue instead; Workspace::resized drains the queue once the
+    // frame is laid out and the handle + bounds are both real.
     auto* parent = ws.getNativeParentHandle();
-    if (parent == nullptr)
+    if (parent == nullptr || ws.getWidth() <= 0 || ws.getHeight() <= 0)
     {
-        // No peer yet -- the editor builds its pages in its constructor, before
-        // it is handed to the window.  Queue and attach once the frame exists.
         ws.queueForAttach (this);
         return;
     }
+
+    bool hasPos = true;
+    auto saved = loadSavedBounds (hasPos);
+    // First open: the window's OWN minimum is its natural size -- those are
+    // the measured "smallest still readable" numbers, which Jeff set as both
+    // the floor and the default (2026-08-04).  Offset per already-open window
+    // so a fresh window never lands exactly on top of the one before it.  A
+    // SIZE-ONLY seed (T5: player sizes carry across projects, placement does
+    // not) keeps its size and takes the default spot.
+    const int step = 28 * juce::jmin (6, ws.getWindows().size() - 1);
+    if (saved.isEmpty())
+        saved = juce::Rectangle<int> (24 + step, 24 + step,
+                                      juce::jmax (120, mConstrainer.getMinimumWidth()),
+                                      juce::jmax (80,  mConstrainer.getMinimumHeight()));
+    else if (! hasPos)
+        saved.setPosition (24 + step, 24 + step);
+    setBounds (saved);
 
     addToDesktop (0, parent);
     const auto o = ws.originInParentClient();
     setTopLeftPosition (saved.getX() + o.x, saved.getY() + o.y);
     setVisible (true);
     toFront (true);
+}
+
+void WorkspaceWindow::applySavedBounds()
+{
+    auto* ws = workspace();
+    if (ws == nullptr || ws->getWidth() <= 0 || ws->getHeight() <= 0) return;
+
+    bool hasPos = true;
+    const auto saved = loadSavedBounds (hasPos);
+    if (saved.isEmpty() || ! hasPos) return;
+
+    const auto o = ws->originInParentClient();
+    setBounds (saved.getX() + o.x, saved.getY() + o.y,
+               saved.getWidth(), saved.getHeight());
 }
 
 juce::Rectangle<int> WorkspaceWindow::clampToWorkspace (juce::Rectangle<int> target) const
@@ -666,6 +677,19 @@ void WorkspaceWindow::registerPlacementPersistentKey (const juce::String& key)
     if (key.isNotEmpty()) placementKeys().insert (key);
 }
 
+bool WorkspaceWindow::isGlobalPlacementKey (const juce::String& key)
+{
+    return placementKeys().count (key) > 0;
+}
+
+int WorkspaceWindow::sSaveSuppressed = 0;
+
+void WorkspaceWindow::seedGlobalPlacementKeys (const juce::StringArray& keys)
+{
+    for (const auto& k : keys)
+        if (k.isNotEmpty()) placementKeys().insert (k);
+}
+
 juce::Rectangle<int> WorkspaceWindow::loadSavedBounds (bool& outHasPosition) const
 {
     outHasPosition = true;
@@ -699,6 +723,9 @@ juce::Rectangle<int> WorkspaceWindow::loadSavedBounds (bool& outHasPosition) con
 
 void WorkspaceWindow::saveBounds() const
 {
+    // A programmatic clamp is not a placement the user chose -- see
+    // ScopedSaveSuppress.
+    if (savesSuppressed()) return;
     if (mPersistKey.isEmpty()) return;
     // No workspace = no way to convert into workspace-local space; a raw save
     // here would be the coordinate-space drift bug again.  Keep the last good
@@ -783,6 +810,15 @@ void Workspace::paint (juce::Graphics& g)
     g.fillAll (juce::Colour (0xFF141417));
 }
 
+void Workspace::restoreWindowsToSavedBounds()
+{
+    const WorkspaceWindow::ScopedSaveSuppress noSave;
+    for (auto& sp : mWindows)
+        if (auto* w = sp.getComponent())
+            if (w->isOnDesktop())
+                w->applySavedBounds();
+}
+
 void Workspace::resized()
 {
     // ALSO drive the pending queue here, not just from parentHierarchyChanged.
@@ -795,6 +831,19 @@ void Workspace::resized()
     // exactly the "first window does not pop up, later ones do" report -- later
     // windows attach immediately because the peer already exists by then.
     attachPendingWindows();
+
+    // The workspace GREW -- the frame finishing its layout at launch, or the
+    // user enlarging it.  Windows were clamped into whatever size the
+    // workspace measured before, so put them back where they were saved
+    // BEFORE clamping again; otherwise a launch-time partial size (the frame
+    // passes through ~1098x608 on its way to full size) permanently pulls
+    // every window up and in.  Restoring is not a placement, so it does not
+    // touch the store.
+    const juce::Point<int> now { getWidth(), getHeight() };
+    if (now.x > mLastSize.x || now.y > mLastSize.y)
+        restoreWindowsToSavedBounds();
+    mLastSize = now;
+
     clampWindowsIntoView();
 }
 
@@ -876,6 +925,10 @@ void Workspace::removeWindow (WorkspaceWindow* w)
 void Workspace::clampWindowsIntoView()
 {
     if (getWidth() <= 0 || getHeight() <= 0) return;
+
+    // The clamp is OURS, not the user's: keep it out of the bounds store so a
+    // mid-layout workspace size can't overwrite hand-placed windows.
+    const WorkspaceWindow::ScopedSaveSuppress noSave;
 
     for (auto& sp : mWindows)
     {

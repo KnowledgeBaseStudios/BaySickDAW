@@ -995,6 +995,14 @@ void VibesynthStandaloneApp::shutdown()
     // ~StandaloneEditor ground through closeAllDynamicTabs + engine
     // destruction).  The message loop is already stopped at this point;
     // the overlay's own peer paint-pump is what keeps it rendering.
+    // Capture window bounds while every window is still ALIVE and positioned.
+    // The exit write used to rely on the window destructors to feed the map,
+    // which meant it recorded whatever a half-torn-down window reported --
+    // not the layout the user actually left (Jeff, 2026-08-04).
+    if (mWindow)
+        if (auto* ed = dynamic_cast<StandaloneEditor*> (mWindow->getContentComponent()))
+            ed->flushWindowBoundsNow();
+
     std::unique_ptr<HeavyOperationOverlay> shutdownOverlay;
     if (mWindow)
     {

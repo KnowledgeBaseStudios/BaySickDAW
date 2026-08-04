@@ -159,13 +159,6 @@ juce::String EffectSlotWindow::windowTitle() const
     return strip.isEmpty() ? fx : strip + " - " + fx;
 }
 
-// [QA-Layout DIAG]
-juce::String EffectSlotWindow::diagPanelMode() const
-{
-    if (mSlot == nullptr || ! mSlot->hasBasicMode()) return {};
-    return mSlot->isBasicMode() ? "Basic" : "Advanced";
-}
-
 void EffectSlotWindow::configureTitleStrip (PageMenuBar& bar)
 {
     mBar = &bar;
@@ -378,6 +371,23 @@ void EffectSlotWindow::timerCallback()
     {
         mTitle = t;
         if (onTitleChanged) onTitleChanged (t);
+    }
+
+    // QA-Layout T7: the window floor tracks the panel class + mode (Jeff's
+    // approved generic sizes, WINDOW dims): pedal-native tiles 358x268,
+    // Advanced 1047x268, Basic + toggle-less full panels 691x268.  Pushed on
+    // the poll so a Mode swap or Basic toggle re-floors without new plumbing;
+    // the change guard keeps it quiet.
+    if (onFloorChanged && mSlot != nullptr)
+    {
+        int fw = 691, fh = 268;
+        if (isPedalNativeType (mBuiltType))                        { fw = 358;  fh = 268; }
+        else if (mSlot->hasBasicMode() && ! mSlot->isBasicMode())  { fw = 1047; fh = 268; }
+        if (fw != mLastFloorW || fh != mLastFloorH)
+        {
+            mLastFloorW = fw; mLastFloorH = fh;
+            onFloorChanged (fw, fh);
+        }
     }
 }
 

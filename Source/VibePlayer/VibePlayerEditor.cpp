@@ -5,7 +5,7 @@
 // ── Constants ─────────────────────────────────────────────────────────────────
 static constexpr int   kLblH         = 13;   // knob label height
 static constexpr int   kPad          = 6;
-static constexpr int   kKnobSz       = 55;   // knob diameter
+static constexpr int   kKnobSz       = 18;   // knob diameter (QA-Layout T7/L15: 55 -> 18, Jeff's one-third spec)
 static constexpr float kArrowSz      = 10.f; // routing arrow size (Box 3)
 // 2026-04-21: 6-box grid layout constants
 static constexpr int   kOuterMargin  = 10;
@@ -382,9 +382,10 @@ void VibePlayerEditor::paint (juce::Graphics& g)
     const int cellW    = contentW / 2;
     const int cellH    = contentH / 3;
     const int arrowX   = contentX + cellW;                       // on the col boundary
-    // Row 1 knob centre y = row top + knob height/2
-    drawArrow (arrowX, contentY + cellH     + kKnobSz / 2);
-    drawArrow (arrowX, contentY + cellH * 2 + kKnobSz / 2);
+    // Knob centre y mirrors placeKnob's vertically-centered stack (T7/L15).
+    const int knobMid  = juce::jmax (0, (cellH - (kKnobSz + kLblH)) / 2) + kKnobSz / 2;
+    drawArrow (arrowX, contentY + cellH     + knobMid);
+    drawArrow (arrowX, contentY + cellH * 2 + knobMid);
 }
 
 // ── Resized ───────────────────────────────────────────────────────────────────
@@ -409,9 +410,13 @@ void VibePlayerEditor::resized()
                            juce::Slider& s, juce::Label& l)
     {
         auto c = cell (boxIdx, col, row);
+        // T7/L15: with 18px knobs the stack no longer fills the cell --
+        // center it vertically so rows don't hug the cell tops.
+        const int stackH = kKnobSz + kLblH;
+        const int ky = c.getY() + juce::jmax (0, (c.getHeight() - stackH) / 2);
         const int kx = c.getX() + (c.getWidth() - kKnobSz) / 2;
-        s.setBounds (kx, c.getY(), kKnobSz, kKnobSz);
-        l.setBounds (c.getX(), c.getY() + kKnobSz, c.getWidth(), kLblH);
+        s.setBounds (kx, ky, kKnobSz, kKnobSz);
+        l.setBounds (c.getX(), ky + kKnobSz, c.getWidth(), kLblH);
     };
 
     // Box-title labels centred across full box width

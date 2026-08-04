@@ -80,35 +80,13 @@ juce::String typeFolderName (EffectType type)
     return {};
 }
 
-// I-2 (2026-05-02): pedal-type predicate.  Used by typeRoot() to route the 17
-// new pedal-style entries into a dedicated "Pedals" subfolder under
-// Presets/Effects/.  Existing 12 effect types stay flat under Presets/Effects/.
+// I-2 (2026-05-02): pedal-type predicate.  Used by typeRoot() to route the
+// pedal-style entries into a dedicated "Pedals" subfolder under
+// Presets/Effects/.  QA-Layout T7: the switch moved to EffectRack.h's shared
+// isPedalNativeType (the floor table needs the same classification).
 static bool isPedalType (EffectType type) noexcept
 {
-    switch (type)
-    {
-        case EffectType::BluesDriveStyle:
-        case EffectType::DistortionStyle:
-        case EffectType::FuzzStyle:
-        case EffectType::NoiseGateStyle:
-        case EffectType::HighGainStyle:
-        case EffectType::TunerStyle:
-        case EffectType::AcousticPreampStyle:
-        case EffectType::AcousticSimulatorStyle:
-        case EffectType::NAMPedalStyle:
-        case EffectType::GraphicEQStyle:
-        case EffectType::SynthStyle:
-        case EffectType::OctaveStyle:
-        case EffectType::WahStyle:
-        case EffectType::BassGraphicEQStyle:
-        case EffectType::BassCompressorStyle:
-        case EffectType::BassDriverStyle:
-        case EffectType::BassOverdriveStyle:
-        case EffectType::FurmanEQStyle:
-            return true;
-        default:
-            return false;
-    }
+    return isPedalNativeType (type);
 }
 
 juce::File presetsRoot()

@@ -187,6 +187,10 @@ private:
     // workspace.  Called at every page-creation site in place of the old
     // addChildComponent.
     void hostPageInWindow (PageEntry& entry);
+    // QA-Layout T7: per-window floor from Jeff's approved sizing map
+    // (full-window dims).  Engine-driven families key off the visible engine;
+    // re-applied per show so Drums' live engine swap tracks.
+    juce::Point<int> floorSizeFor (const PageEntry& entry) const;
     // Stable per-logical-window key for bounds persistence (survives the
     // window object, which destroy-on-close makes short-lived).
     juce::String persistKeyFor (const PageEntry& entry) const;
@@ -541,6 +545,12 @@ public:
     // synchronously; returns false when a dialog is shown and the app should
     // wait for the user's choice (continuation calls quit() on accept).
     bool requestAppQuit();
+    // Capture every live window's bounds into the lifetime-1 map.  Public so
+    // shutdown can run it BEFORE editor teardown: the window destructors were
+    // the only thing feeding the exit write, and by then a window is mid-
+    // dismantle -- what landed in settings.xml was not where the user left it
+    // (Jeff, 2026-08-04: the Mixer kept reopening in the wrong place).
+    void flushWindowBoundsNow() { flushAllWindowBounds(); }
 private:
 
     // Undo manager - owned here, passed by pointer to sub-systems

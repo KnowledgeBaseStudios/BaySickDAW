@@ -75,6 +75,37 @@ enum class EffectType
     VST3Plugin             = 121,
 };
 
+// QA-Layout T7: the pedal-native tile set, shared by preset-folder routing
+// (EffectPresetIO) and the effect-window floor table.  Lives beside the enum
+// so an appended pedal type has one classification to update.
+inline bool isPedalNativeType (EffectType type) noexcept
+{
+    switch (type)
+    {
+        case EffectType::BluesDriveStyle:
+        case EffectType::DistortionStyle:
+        case EffectType::FuzzStyle:
+        case EffectType::NoiseGateStyle:
+        case EffectType::HighGainStyle:
+        case EffectType::TunerStyle:
+        case EffectType::AcousticPreampStyle:
+        case EffectType::AcousticSimulatorStyle:
+        case EffectType::NAMPedalStyle:
+        case EffectType::GraphicEQStyle:
+        case EffectType::SynthStyle:
+        case EffectType::OctaveStyle:
+        case EffectType::WahStyle:
+        case EffectType::BassGraphicEQStyle:
+        case EffectType::BassCompressorStyle:
+        case EffectType::BassDriverStyle:
+        case EffectType::BassOverdriveStyle:
+        case EffectType::FurmanEQStyle:
+            return true;
+        default:
+            return false;
+    }
+}
+
 // ── EffectRack ────────────────────────────────────────────────────────────────
 // Holds 6 hot-swappable DSP slots.
 //

@@ -615,6 +615,58 @@ Convention: Main Plan §0 "Batch Plans + Running Notes layout" (locked 2026-05-1
 - **Next:** T11 opens with the D3 drum-kit workshop in chat — no cap code before
   Jeff's ruling.
 
+## 2026-08-04 — D3 RULED (drum-kit second-16 mechanics)
+
+- **Posed at T11 open per the docket; Jeff ruled 1(c) + 2(a).**  ONE "Drum Kit" entry
+  stays in the piano-roll target list; a switch INSIDE the kit view flips between the
+  two sixteens.
+- **Mapping is FIXED by page index:** drum pages 1-16 belong to view 1, pages 17-32
+  to view 2; a drum NEVER moves between views — deleting one leaves a gap in its own
+  view.
+- **Restated as ruled-and-accepted:** the PR-target shift lands with T11, and
+  pre-existing projects' piano-roll routing is invalidated once.
+
+## 2026-08-04 — Task 11 committed `4722c27c` — L18 caps + literal sweep + two-sixteens kit
+
+- **Build gate green FIRST TRY:** five exit codes 0, four `vcxproj -> ...exe` link
+  lines, zero `error C` / `error LNK` / `error MSB` greps.  16 files, 305 insertions /
+  88 deletions.
+- **L18 caps:** kMaxLayerPages 8->20, kMaxBassPages 4->10, kMaxDrumPages 16->32,
+  kMaxClipPages 50->100, kMaxVoxPages 6->10, kMaxInstPages 20->30 (Plugins stays 20 —
+  not in L18).  New MixerChannelIds mirrors kMaxLayerStrips / kMaxBassStrips /
+  kMaxDrumStrips / kMaxAudioStrips + kMaxVoxStrips 6->10, kMaxInstStrips 20->30.
+  kMaxAudioRows / kMaxAudioInserts 50->100 across PatternManager / PluginProcessor /
+  VibeGraph (the existing static_assert keeps the trio locked).  ID space verified:
+  audio 400..499 ends flush at kDrumBase 500; every range fits its century.
+- **PR-target shift:** the PRPendingOff bases are derived cap sums
+  (VibesynthConstants), so the bump shifts every downstream target — the accepted
+  one-time invalidation (D3 entry above), noted in the constants comment.
+- **LITERAL SWEEP FINDINGS — all fixed in-batch.**  TWO LATENT OVERFLOWS:
+  StandaloneEditor::mUsedLayerIndices was `std::array<bool, 8>` while its fill loops
+  run to kMaxLayerPages (writes past the end at cap 20), and Pattern::layerRoll was
+  `std::array<PianoRollData, 8>` (same overflow class).  TWO STALE RANGE BUGS live
+  at the OLD caps: PatternManager ownerCategory checked Vox 600..605 / Inst 700..705
+  (6-wide since before the caps grew to 6/20 — audio-group category detection was
+  already broken for Inst strips 7-20), and BuilderPage's group-assign prompt +
+  clip-block colors had the same stale 606/706 bounds.  Plus stale-but-loose
+  literals normalized to constants: VibeGraph
+  prefix/friendly/defaultSendTo/pushScArrayToStrip (+16/+50), MixerPage
+  pickStripColor + isRouteAllowed + aux checks (aux 16 vs kMaxAuxStrips 18),
+  EffectsPage aux dropdown 16 -> kMaxAuxStrips + audio dropdown 450 -> 500,
+  PluginProcessor pre/post EQ-sync tables (8/4/16/50 -> constants).
+- **Two-sixteens kit (D3 1c+2a):** DrumKitContainer gained a "1-16 / 17-32" toggle
+  pair beside the Kit button — the PianoRollPage kit AND DrumPage's kit both inherit
+  it (one container implementation).  The container now stores the RAW row provider
+  + raw row-click/audition/reorder handlers; children get a view-filtered provider,
+  and every child row index is translated back to a raw index before the stored
+  handlers fire — they index the raw kit list (verified in wirePianoRollPageKitView
+  BEFORE coding; unwrapped filtering would have mis-dispatched view 2's clicks).
+  The sidebar's add row maps past the RAW end so the add branch still fires; noted
+  consequence: a new drum always fills the lowest free page slot, so an add clicked
+  from view 2 can land in view 1.
+- **`STANDALONE_UI_CHANGES.md`** gained the T11 entry.
+- **Next:** T7 — real window floors from the approved sizing map + the layout reworks.
+
 ## Diagnostic Instrumentation Catalog (Rule 4)
 
 | Site | Tag | Purpose | Disposition |

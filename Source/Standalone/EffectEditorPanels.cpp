@@ -4448,6 +4448,40 @@ namespace
         }
         return bounds;   // remaining empty-left rect
     }
+
+    // QA-Layout T7 (Specific-4): shared pedal-tile grid.  The BaySickPedals
+    // tile (~190x137 inner) cannot fit the full-mode right-cluster + dBFS
+    // column -- knobs collapsed onto each other (Jeff's overlap finding).
+    // Grid every knob (plus an optional trailing widget, e.g. a mode
+    // selector) into the smallest grid that holds them; the dBFS column is
+    // dropped (hidden on the board anyway).  OctaveStylePanel / FurmanEQ's
+    // hand-built 3x2/3x3 grids were the originals; this generalizes them.
+    void pedalTileGrid (juce::Rectangle<int> b,
+                        std::vector<std::unique_ptr<VKnob>>& ks,
+                        std::initializer_list<juce::Component*> extras = {})
+    {
+        int nExtras = 0;
+        for (auto* e : extras) if (e != nullptr) ++nExtras;
+        const int n = (int) ks.size() + nExtras;
+        if (n <= 0) return;
+        const int cols  = n <= 3 ? juce::jmax (1, n) : (n == 4 ? 2 : 3);
+        const int rows  = (n + cols - 1) / cols;
+        const int cellW = b.getWidth()  / cols;
+        const int cellH = b.getHeight() / rows;
+        auto cell = [&] (int idx)
+        {
+            return juce::Rectangle<int> (b.getX() + (idx % cols) * cellW,
+                                         b.getY() + (idx / cols) * cellH,
+                                         cellW, cellH);
+        };
+        const int kSz = juce::jlimit (28, 56, juce::jmin (cellW - 6, cellH - 16));
+        int idx = 0;
+        for (auto& k : ks)
+            k->setBounds (cell (idx++).withSizeKeepingCentre (kSz, kSz + 14));
+        for (auto* e : extras)
+            if (e != nullptr)
+                e->setBounds (cell (idx++).reduced (3));
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -4492,6 +4526,9 @@ struct BluesDriveStylePanel : public EditorPanelBase
     void resized() override
     {
         auto b = getLocalBounds().reduced (4, 4);
+        // T7 (Specific-4): pedal tiles grid instead of right-clustering.
+        if (mPanelMode == EditorPanelBase::PanelMode::Pedal)
+            return pedalTileGrid (b, knobs);
         dbfsOut->setBounds (b.removeFromRight (32).reduced (1, 2));
         b.removeFromRight (4);
         rightClusterKnobs (b, knobs);
@@ -4542,6 +4579,9 @@ struct OverdrivePedalPanel : public EditorPanelBase
     void resized() override
     {
         auto b = getLocalBounds().reduced (4, 4);
+        // T7 (Specific-4): pedal tiles grid instead of right-clustering.
+        if (mPanelMode == EditorPanelBase::PanelMode::Pedal)
+            return pedalTileGrid (b, knobs);
         dbfsOut->setBounds (b.removeFromRight (32).reduced (1, 2));
         b.removeFromRight (4);
         rightClusterKnobs (b, knobs);
@@ -4590,6 +4630,9 @@ struct DistortionStylePanel : public EditorPanelBase
     void resized() override
     {
         auto b = getLocalBounds().reduced (4, 4);
+        // T7 (Specific-4): pedal tiles grid instead of right-clustering.
+        if (mPanelMode == EditorPanelBase::PanelMode::Pedal)
+            return pedalTileGrid (b, knobs);
         dbfsOut->setBounds (b.removeFromRight (32).reduced (1, 2));
         b.removeFromRight (4);
         rightClusterKnobs (b, knobs);
@@ -4651,6 +4694,9 @@ struct FuzzStylePanel : public EditorPanelBase
     void resized() override
     {
         auto b = getLocalBounds().reduced (4, 4);
+        // T7 (Specific-4): pedal tiles grid instead of right-clustering.
+        if (mPanelMode == EditorPanelBase::PanelMode::Pedal)
+            return pedalTileGrid (b, knobs, { modeSel ? &*modeSel : nullptr });
         dbfsOut->setBounds (b.removeFromRight (32).reduced (1, 2));
         b.removeFromRight (4);
         // Mode chickenhead sits left of the knobs.  Right-cluster the knobs
@@ -4716,6 +4762,9 @@ struct HighGainStylePanel : public EditorPanelBase
     void resized() override
     {
         auto b = getLocalBounds().reduced (4, 4);
+        // T7 (Specific-4): pedal tiles grid instead of right-clustering.
+        if (mPanelMode == EditorPanelBase::PanelMode::Pedal)
+            return pedalTileGrid (b, knobs);
         dbfsOut->setBounds (b.removeFromRight (32).reduced (1, 2));
         b.removeFromRight (4);
         // 6 knobs is wider than the other pedals; tighter slot to keep the
@@ -4770,6 +4819,9 @@ struct BassDriverStylePanel : public EditorPanelBase
     void resized() override
     {
         auto b = getLocalBounds().reduced (4, 4);
+        // T7 (Specific-4): pedal tiles grid instead of right-clustering.
+        if (mPanelMode == EditorPanelBase::PanelMode::Pedal)
+            return pedalTileGrid (b, knobs);
         dbfsOut->setBounds (b.removeFromRight (32).reduced (1, 2));
         b.removeFromRight (4);
         rightClusterKnobs (b, knobs);
@@ -4823,6 +4875,9 @@ struct BassOverdriveStylePanel : public EditorPanelBase
     void resized() override
     {
         auto b = getLocalBounds().reduced (4, 4);
+        // T7 (Specific-4): pedal tiles grid instead of right-clustering.
+        if (mPanelMode == EditorPanelBase::PanelMode::Pedal)
+            return pedalTileGrid (b, knobs);
         dbfsOut->setBounds (b.removeFromRight (32).reduced (1, 2));
         b.removeFromRight (4);
         rightClusterKnobs (b, knobs);
@@ -4990,6 +5045,10 @@ struct NoiseGateStylePanel : public EditorPanelBase
     void resized() override
     {
         auto b = getLocalBounds().reduced (4, 4);
+        // T7 (Specific-4): pedal tiles grid instead of right-clustering.
+        if (mPanelMode == EditorPanelBase::PanelMode::Pedal)
+            return pedalTileGrid (b, knobs, { modeSel ? &*modeSel : nullptr,
+                                              sourceSel ? &*sourceSel : nullptr });
         dbfsOut->setBounds (b.removeFromRight (32).reduced (1, 2));
         b.removeFromRight (4);
         auto remainingLeft = rightClusterKnobs (b, knobs);
@@ -5067,6 +5126,9 @@ struct BassCompressorStylePanel : public EditorPanelBase, public juce::Timer
     void resized() override
     {
         auto b = getLocalBounds().reduced (4, 4);
+        // T7 (Specific-4): pedal tiles grid; the GR meter takes a cell.
+        if (mPanelMode == EditorPanelBase::PanelMode::Pedal)
+            return pedalTileGrid (b, knobs, { grMeter ? &*grMeter : nullptr });
         dbfsOut->setBounds (b.removeFromRight (32).reduced (1, 2));
         b.removeFromRight (4);
         auto remainingLeft = rightClusterKnobs (b, knobs);
@@ -5175,6 +5237,11 @@ struct SynthStylePanel : public EditorPanelBase
     void resized() override
     {
         auto b = getLocalBounds().reduced (4, 4);
+        // T7 (Specific-4): pedal tiles grid -- selector + toggles take cells.
+        if (mPanelMode == EditorPanelBase::PanelMode::Pedal)
+            return pedalTileGrid (b, knobs, { typeSel ? &*typeSel : nullptr,
+                                              polyTog ? &*polyTog : nullptr,
+                                              instTog ? &*instTog : nullptr });
         dbfsOut->setBounds (b.removeFromRight (32).reduced (1, 2));
         b.removeFromRight (4);
 
@@ -5239,6 +5306,9 @@ struct WahStylePanel : public EditorPanelBase
     void resized() override
     {
         auto b = getLocalBounds().reduced (4, 4);
+        // T7 (Specific-4): pedal tiles grid instead of right-clustering.
+        if (mPanelMode == EditorPanelBase::PanelMode::Pedal)
+            return pedalTileGrid (b, knobs, { modeSel ? &*modeSel : nullptr });
         dbfsOut->setBounds (b.removeFromRight (32).reduced (1, 2));
         b.removeFromRight (4);
         auto remainingLeft = rightClusterKnobs (b, knobs, kKnobSz + 4, kKnobSz);
@@ -5360,6 +5430,10 @@ struct AcousticPreampStylePanel : public EditorPanelBase
     void resized() override
     {
         auto b = getLocalBounds().reduced (4, 4);
+        // T7 (Specific-4): pedal tiles grid instead of right-clustering.
+        if (mPanelMode == EditorPanelBase::PanelMode::Pedal)
+            return pedalTileGrid (b, knobs, { bodySel ? &*bodySel : nullptr,
+                                              loadBtn ? &*loadBtn : nullptr });
         dbfsOut->setBounds (b.removeFromRight (32).reduced (1, 2));
         b.removeFromRight (4);
         auto remainingLeft = rightClusterKnobs (b, knobs);
@@ -5468,6 +5542,10 @@ struct AcousticSimulatorStylePanel : public EditorPanelBase
     void resized() override
     {
         auto b = getLocalBounds().reduced (4, 4);
+        // T7 (Specific-4): pedal tiles grid instead of right-clustering.
+        if (mPanelMode == EditorPanelBase::PanelMode::Pedal)
+            return pedalTileGrid (b, knobs, { modeSel ? &*modeSel : nullptr,
+                                              loadBtn ? &*loadBtn : nullptr });
         dbfsOut->setBounds (b.removeFromRight (32).reduced (1, 2));
         b.removeFromRight (4);
         auto remainingLeft = rightClusterKnobs (b, knobs);
@@ -5668,8 +5746,13 @@ struct GraphicEQStylePanel : public EditorPanelBase
     void resized() override
     {
         auto b = getLocalBounds().reduced (4, 4);
-        dbfsOut->setBounds (b.removeFromRight (32).reduced (1, 2));
-        b.removeFromRight (4);
+        // T7 (Specific-4): in a pedal tile the fader bank keeps its column
+        // layout but reclaims the dBFS strip (hidden on the board anyway).
+        if (mPanelMode != EditorPanelBase::PanelMode::Pedal)
+        {
+            dbfsOut->setBounds (b.removeFromRight (32).reduced (1, 2));
+            b.removeFromRight (4);
+        }
 
         const int labelH = 14;
         auto labelRow = b.removeFromBottom (labelH);
@@ -5768,8 +5851,13 @@ struct BassGraphicEQStylePanel : public EditorPanelBase
     void resized() override
     {
         auto b = getLocalBounds().reduced (4, 4);
-        dbfsOut->setBounds (b.removeFromRight (32).reduced (1, 2));
-        b.removeFromRight (4);
+        // T7 (Specific-4): in a pedal tile the fader bank keeps its column
+        // layout but reclaims the dBFS strip (hidden on the board anyway).
+        if (mPanelMode != EditorPanelBase::PanelMode::Pedal)
+        {
+            dbfsOut->setBounds (b.removeFromRight (32).reduced (1, 2));
+            b.removeFromRight (4);
+        }
 
         const int labelH = 14;
         auto labelRow = b.removeFromBottom (labelH);
@@ -6276,8 +6364,13 @@ struct TunerStylePanel : public EditorPanelBase, private juce::Timer
     void resized() override
     {
         auto b = getLocalBounds().reduced (4, 4);
-        dbfsOut->setBounds (b.removeFromRight (32).reduced (1, 2));
-        b.removeFromRight (4);
+        // T7 (Specific-4): the tuner layout is width-proportional already; in
+        // a pedal tile it just reclaims the dBFS strip.
+        if (mPanelMode != EditorPanelBase::PanelMode::Pedal)
+        {
+            dbfsOut->setBounds (b.removeFromRight (32).reduced (1, 2));
+            b.removeFromRight (4);
+        }
 
         // All controls always visible -- the tuner is a pedal, no Basic/Advanced
         // toggle to reveal them.  Trim + Mode | Display | Flat + Mute / 432.
@@ -6448,6 +6541,9 @@ struct LimiterPedalPanel : public EditorPanelBase
     void resized() override
     {
         auto b = getLocalBounds().reduced (4, 4);
+        // T7 (Specific-4): pedal tiles grid instead of right-clustering.
+        if (mPanelMode == EditorPanelBase::PanelMode::Pedal)
+            return pedalTileGrid (b, knobs);
         dbfsOut->setBounds (b.removeFromRight (32).reduced (1, 2));
         b.removeFromRight (4);
         rightClusterKnobs (b, knobs);
@@ -6489,6 +6585,9 @@ struct SaturationPedalPanel : public EditorPanelBase
     void resized() override
     {
         auto b = getLocalBounds().reduced (4, 4);
+        // T7 (Specific-4): pedal tiles grid instead of right-clustering.
+        if (mPanelMode == EditorPanelBase::PanelMode::Pedal)
+            return pedalTileGrid (b, knobs, { typeSel ? &*typeSel : nullptr });
         dbfsOut->setBounds (b.removeFromRight (32).reduced (1, 2));
         b.removeFromRight (4);
         auto remaining = rightClusterKnobs (b, knobs);
@@ -6523,6 +6622,9 @@ struct ChorusPedalPanel : public EditorPanelBase
     void resized() override
     {
         auto b = getLocalBounds().reduced (4, 4);
+        // T7 (Specific-4): pedal tiles grid instead of right-clustering.
+        if (mPanelMode == EditorPanelBase::PanelMode::Pedal)
+            return pedalTileGrid (b, knobs);
         dbfsOut->setBounds (b.removeFromRight (32).reduced (1, 2));
         b.removeFromRight (4);
         rightClusterKnobs (b, knobs);
@@ -6554,6 +6656,9 @@ struct FlangerPedalPanel : public EditorPanelBase
     void resized() override
     {
         auto b = getLocalBounds().reduced (4, 4);
+        // T7 (Specific-4): pedal tiles grid instead of right-clustering.
+        if (mPanelMode == EditorPanelBase::PanelMode::Pedal)
+            return pedalTileGrid (b, knobs);
         dbfsOut->setBounds (b.removeFromRight (32).reduced (1, 2));
         b.removeFromRight (4);
         rightClusterKnobs (b, knobs);
@@ -6585,6 +6690,9 @@ struct PhaserPedalPanel : public EditorPanelBase
     void resized() override
     {
         auto b = getLocalBounds().reduced (4, 4);
+        // T7 (Specific-4): pedal tiles grid instead of right-clustering.
+        if (mPanelMode == EditorPanelBase::PanelMode::Pedal)
+            return pedalTileGrid (b, knobs);
         dbfsOut->setBounds (b.removeFromRight (32).reduced (1, 2));
         b.removeFromRight (4);
         rightClusterKnobs (b, knobs);
@@ -6624,6 +6732,9 @@ struct DelayPedalPanel : public EditorPanelBase
     void resized() override
     {
         auto b = getLocalBounds().reduced (4, 4);
+        // T7 (Specific-4): pedal tiles grid instead of right-clustering.
+        if (mPanelMode == EditorPanelBase::PanelMode::Pedal)
+            return pedalTileGrid (b, knobs, { syncBtn ? &*syncBtn : nullptr });
         dbfsOut->setBounds (b.removeFromRight (32).reduced (1, 2));
         b.removeFromRight (4);
         auto remaining = rightClusterKnobs (b, knobs);

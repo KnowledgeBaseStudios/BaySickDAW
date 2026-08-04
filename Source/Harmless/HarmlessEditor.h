@@ -12,13 +12,15 @@
 #include "../Standalone/BaySickTitleBar.h"   // QA-A (2026-05-09)
 
 // ── HarmlessEditor ────────────────────────────────────────────────────────────
-// Full single-view dense layout: 960 × 620
-// No Basic/Advanced toggle - all controls visible.
+// Full single-view dense layout.  No Basic/Advanced toggle - all controls
+// visible.
 //
-// Layout:
-//   Header bar (36 px) - preset button, title
-//   Top row  (304 px) - [Timbre/Mod|Unison|Filter+FX]
-//   Bottom row (268 px) - [Global/AmpEnv/XYZ/Strum | ModEditor]
+// QA-Layout T7 (Specific-2): four full-height columns, sized for Jeff's
+// approved wide-short window (1047x455):
+//   col 1: Output/Routing/Trem/VibLegato/Strum/XYZ stack
+//   col 2: Unison/Pitch/LFO Mod stack
+//   col 3: Filters/Timbre/Blur/AmpEnv/FX grid
+//   col 4: Mod Editor over the Spectrogram
 // ─────────────────────────────────────────────────────────────────────────────
 class HarmlessEditor : public juce::AudioProcessorEditor,
                        private juce::ValueTree::Listener
@@ -167,23 +169,20 @@ private:
     VibeSlider      mStrumTime, mStrumTns;
 
     // ── Section layout bounds (for paint) ─────────────────────────────────────
+    // QA-Layout T7 (Specific-2): band + column frames, then one rect per
+    // section.  The blank "future space" rects are gone with the dead cells
+    // that held them.
     juce::Rectangle<int> mTopLeftBounds, mTopMidBounds, mTopRightBounds;
-    juce::Rectangle<int> mBotLeftBounds, mBotRightBounds;
-    // Repurposed by S5 layout redesign: see resized() for the new placement.
-    // Top-left: Row A (mGlobalSec|mRoutingSec), Row B (mTremSec|mVibLegatoSec),
-    // Row C (mBlurPrismSec blank | mStrumSec + XYZ).
-    juce::Rectangle<int> mTimbreSec, mRoutingSec, mBlurPrismSec, mPitchSec, mTremSec, mVibLegatoSec;
-    // Top-middle: Unison / Pitch / LFO Mod stack.
+    juce::Rectangle<int> mBotBandBounds;
+    // Top-left column: Output / (Tremolo | Routing) / Vibrato-Legato.
+    juce::Rectangle<int> mGlobalSec, mTremSec, mRoutingSec, mVibLegatoSec;
+    // Top-middle column: Unison (full height).
     juce::Rectangle<int> mUnisonSec;
-    // Top-right: 5x2 grid. R1 = Flt1 | Flt2, R2 = Timbre | BlurPrism, R3 = AmpEnv | FX,
-    // R4 + R5 = blank (future upgrade space).
-    juce::Rectangle<int> mFlt1Sec, mFlt2Sec, mFXSec;
-    juce::Rectangle<int> mFlt1AdsrSec, mFlt2AdsrSec;   // D.4-Q1 (2026-05-01)
-    juce::Rectangle<int> mFutureR4LSec, mFutureR4RSec, mFutureR5LSec, mFutureR5RSec;
-    // Bottom-left: left column blank; right column reserved for spectrogram (S5 L2).
-    juce::Rectangle<int> mGlobalSec, mAmpEnvSec, mLFOSec, mStrumSec;
-    juce::Rectangle<int> mFutureBL_TopSec, mFutureBL_BotSec;
-    juce::Rectangle<int> mSpectroTopSec, mSpectroBotSec;
+    // Top-right column: (Filter 1 | its ADSR) / (Filter 2 | its ADSR) / Timbre.
+    juce::Rectangle<int> mFlt1Sec, mFlt2Sec, mFlt1AdsrSec, mFlt2AdsrSec, mTimbreSec;
+    // Bottom band: Pitch/LFO | Strum/XYZ | Blur-Prism/AmpEnv | FX | Spectrogram | Mod Editor.
+    juce::Rectangle<int> mPitchSec, mLFOSec, mStrumSec, mXYZSec;
+    juce::Rectangle<int> mBlurPrismSec, mAmpEnvSec, mFXSec, mSpectroSec, mModSec;
 
     // ── APVTS Attachments ─────────────────────────────────────────────────────
     using SliderAtt = TaggedSliderAttachment;
