@@ -2,37 +2,6 @@
 #include "SharedUI.h"
 #include "../Hosting/PluginManager.h"   // QA-ModelShell TS6: added instrument list
 
-namespace
-{
-// QA-A Phase 5 / STYLE-01 (2026-05-09): mid-string camelCase splitter for
-// the wrap renderer.  JUCE's `drawFittedText` with `maxLines > 1` only
-// breaks at spaces / hyphens; brand names like "BaySickRustyDrums" or
-// "BaySickPlayer" have neither, so the engine treats them as a single
-// unbreakable word and just shrinks instead of wrapping.  This helper
-// finds the capital letter (after the first character) closest to the
-// midpoint of the string and inserts a newline there, giving the engine
-// a hard break point.  When no capital exists past position 0 (e.g. the
-// user typed "supercalifragilistic"), it returns the original string and
-// drawFittedText falls back to its single-line shrink behaviour.
-juce::String splitCamelCase (const juce::String& s)
-{
-    if (s.length() < 4) return s;
-    const int mid = s.length() / 2;
-    int bestCap     = -1;
-    int bestDelta   = std::numeric_limits<int>::max();
-    for (int i = 1; i < s.length(); ++i)
-    {
-        if (juce::CharacterFunctions::isUpperCase (s[i]))
-        {
-            const int d = std::abs (i - mid);
-            if (d < bestDelta) { bestDelta = d; bestCap = i; }
-        }
-    }
-    if (bestCap < 0) return s;
-    return s.substring (0, bestCap) + "\n" + s.substring (bestCap);
-}
-} // namespace
-
 // ── Colour helpers ───────────────────────────────────────────────────────────
 juce::Colour RibbonTabBar::tabColour(TabType type, bool active)
 {
@@ -75,14 +44,14 @@ bool RibbonTabBar::isRequiredTab (TabType type)
 
 std::vector<RibbonTabBar::TabType> RibbonTabBar::visibleSlotTypes() const
 {
-    // G-8 ordering preserved: Builder leftmost, then Mixer / Effects, the
-    // instance types in their historical order, Piano Roll last.
+    // L27 (QA-Layout): the four required app-surface tabs sit together at the
+    // left -- Piano Roll moved from last to beside Effects -- then the
+    // instance types in their historical order.
     static constexpr TabType order[] = {
-        TabType::Builder, TabType::Mixer, TabType::Effects,
+        TabType::Builder, TabType::Mixer, TabType::Effects, TabType::PianoRoll,
         TabType::Clip, TabType::Vox, TabType::Inst,
         TabType::Layers, TabType::Bass, TabType::Drums,
-        TabType::Plugins,
-        TabType::PianoRoll
+        TabType::Plugins
     };
 
     std::vector<TabType> out;
@@ -134,12 +103,9 @@ RibbonTabBar::RibbonTabBar()
     addFixed(TabType::Mixer,     "Mixer");
     addFixed(TabType::Effects,   "Effects");
     addFixed(TabType::Builder,   "Builder");
-    // 2026-04-26: PianoRoll fixed slot.  Layers/Bass/Drums dynamic instances
-    // are inserted between Builder and PianoRoll by StandaloneEditor's
-    // create...Page() calls - addTab() pushes them at the end of mTabs but the
-    // ribbon's slot ordering uses slotType() and a per-type index lookup,
-    // not raw mTabs order.  Adding PianoRoll here keeps the slot fixed at
-    // index 6 regardless of how many dynamic tabs exist.
+    // The addFixed ids are handed out in this creation order and persisted in
+    // project state -- never reorder these calls.  On-screen slot order is
+    // visibleSlotTypes()'s order[], not mTabs order.
     addFixed(TabType::PianoRoll, "Piano Roll");
 
     mSelectedId = mTabs[0].id;
@@ -396,32 +362,22 @@ bool RibbonTabBar::isFixedNameSlot (TabType type)
         || type == TabType::PianoRoll;
 }
 
-// Pure measurement: bold-font text width + arrow + badge + 16 px padding.
-// No clamping to min/max here -- callers (slotRect / slotWraps) apply the
-// per-slot floor and the wrap cap themselves.  Bold (the active-state
-// font) is the worst case so a slot never changes width when clicked
-// between active and inactive.
+// Pure measurement: bold-font text width + 16 px padding.  Arrow + badge sit
+// on the bottom row (L25) and add no width.  No clamping to min/max here --
+// the caller (slotRect) applies the per-slot floor and the cap itself.  Bold
+// (the active-state font) is the worst case so a slot never changes width
+// when clicked between active and inactive.
 int RibbonTabBar::naturalSingleLineWidth (int slotIndex) const
 {
-    const auto       type = slotType(slotIndex);
-    const auto       name = getSlotDisplayName(slotIndex);
     const juce::Font font (12.0f, juce::Font::bold);
-    int w = font.getStringWidth(name) + 16;
-    if (hasDropdown(type))         w += kArrowW;
-    if (getBadgeCount(type) > 0)   w += kBadgeR * 2 + 4;
-    return w;
-}
-
-bool RibbonTabBar::slotWraps (int slotIndex) const
-{
-    return naturalSingleLineWidth(slotIndex) > kMaxSingleLine;
+    return font.getStringWidth(getSlotDisplayName(slotIndex)) + 16;
 }
 
 // QA-A Phase 5 / STYLE-01 (2026-05-09): constraint-based variable-width
 // layout with min floors and a max single-line cap that triggers wrap.
 //   1. desired_i = clamp(natural_i, minW_i, kMaxSingleLine).
-//      -- natural above kMaxSingleLine -> slot caps at the max and the
-//         label will paint as wrapped two-line text in paint().
+//      -- natural above kMaxSingleLine -> slot caps at the max and
+//         drawFittedText shrinks the label in paint().
 //      -- natural below the slot's per-type minimum -> floored to that
 //         minimum so short labels keep visual presence.
 //   2. If sum(desired) <= totalW: each slot gets desired plus an equal
@@ -511,9 +467,12 @@ int RibbonTabBar::hitTestSlot(juce::Point<int> pos, bool& hitArrow) const
         if (r.contains(pos))
         {
             // The "+" slot has no dropdown arrow -- the whole slot is one hit.
+            // L25: the arrow lives on the bottom row; a name-row click
+            // anywhere in the slot navigates.
             if (! isAddSlot (s) && hasDropdown(slotType(s)))
             {
-                auto arrowR = r.withTrimmedLeft(r.getWidth() - kArrowW);
+                auto arrowR = r.withTrimmedLeft(r.getWidth() - kArrowW)
+                               .withTrimmedTop(kNameRowH);
                 hitArrow = arrowR.contains(pos);
             }
             return s;
@@ -1126,45 +1085,25 @@ void RibbonTabBar::paint(juce::Graphics& g)
             g.fillRect(r.getX() + 1, r.getY(), r.getWidth() - 2, 2);
         }
 
-        // ── Compute badge count first (affects text area) ─────────────────
         int badge = getBadgeCount(type);
 
-        // ── Tab text ─────────────────────────────────────────────────────────
-        // Layout from right edge: [arrow 24px] [badge 20px if present] [text fills rest]
-        juce::Rectangle<int> textR = r;
-        if (hasDropdown(type))
-            textR = textR.withTrimmedRight(kArrowW);
-        if (badge > 0)
-            textR = textR.withTrimmedRight(kBadgeR * 2 + 4);
+        // ── L25 (QA-Layout): two-row slot ────────────────────────────────────
+        // Name across the top row at full slot width; badge + arrow on the
+        // bottom row.  drawFittedText's 0.75f minScale shrinks a long label
+        // before anything clips.
+        const juce::Rectangle<int> nameR   = r.withHeight (kNameRowH);
+        const juce::Rectangle<int> bottomR = r.withTrimmedTop (kNameRowH);
 
-        juce::String name = getSlotDisplayName(s);
         g.setColour(juce::Colours::white.withAlpha(sel ? 1.0f : 0.75f));
         g.setFont(juce::Font(12.0f, sel ? juce::Font::bold : 0));
-        // QA-A Phase 5 / STYLE-01 (2026-05-09): single-line by default; if the
-        // slot's natural width exceeds kMaxSingleLine the layout caps the
-        // slot's allocated width and we render the label wrapped to two
-        // lines.  JUCE's `drawFittedText` word-wrap breaks at spaces /
-        // hyphens, so user-typed names with spaces wrap on their own.  For
-        // brand names without spaces ("BaySickRustyDrums" / "BaySickPlayer"),
-        // splitCamelCase() in the anonymous namespace at the top of this
-        // file injects a hard newline at the capital letter closest to the
-        // string midpoint so the text still wraps cleanly.  drawFittedText's
-        // 0.75f minScaleFactor handles the residual narrow-window case
-        // where even the wrapped two lines need a slight shrink.
-        const bool wraps = slotWraps(s);
-        const juce::String renderName =
-            (wraps && ! name.containsAnyOf (" -")) ? splitCamelCase (name) : name;
-        const int maxLines = wraps ? 2 : 1;
-        g.drawFittedText (renderName,
-                          textR.reduced (8, 0),
-                          juce::Justification::centredLeft,
-                          maxLines, 0.75f);
+        g.drawFittedText (getSlotDisplayName(s), nameR.reduced (8, 0),
+                          juce::Justification::centredLeft, 1, 0.75f);
 
-        // ── Badge circle (between text and arrow) ────────────────────────────
+        // ── Badge circle (bottom row, left of the arrow) ─────────────────────
         if (badge > 0)
         {
-            int bx = r.getRight() - kArrowW - kBadgeR * 2 - 2;
-            int by = r.getY() + (kTabH - kBadgeR * 2) / 2;
+            int bx = r.getRight() - (hasDropdown(type) ? kArrowW : 0) - kBadgeR * 2 - 2;
+            int by = bottomR.getY() + (bottomR.getHeight() - kBadgeR * 2) / 2;
 
             g.setColour(juce::Colours::white.withAlpha(0.85f));
             g.fillEllipse((float)bx, (float)by,
@@ -1178,9 +1117,10 @@ void RibbonTabBar::paint(juce::Graphics& g)
         }
 
         // ── TS7 §6.4: frozen indicator ───────────────────────────────────────
-        // A small mark on the tab's left edge, drawn rather than a glyph: a
-        // snowflake character renders as a box on a machine without the font,
-        // and this is the only signal that a tab is playing cached audio.
+        // A small mark on the tab's left edge (bottom row, clear of the name),
+        // drawn rather than a glyph: a snowflake character renders as a box on
+        // a machine without the font, and this is the only signal that a tab
+        // is playing cached audio.
         //
         // Two states, because "frozen" and "frozen but out of date" mean
         // different things to the user: solid = playing its file, hollow = stale
@@ -1192,7 +1132,8 @@ void RibbonTabBar::paint(juce::Graphics& g)
             {
                 const float d  = 7.0f;
                 const float fx = (float) r.getX() + 4.0f;
-                const float fy = (float) r.getY() + ((float) kTabH - d) * 0.5f;
+                const float fy = (float) bottomR.getY()
+                               + ((float) bottomR.getHeight() - d) * 0.5f;
                 const juce::Colour cyan (0xff00fff2);
                 if (frozenState == 1)
                 {
@@ -1207,13 +1148,12 @@ void RibbonTabBar::paint(juce::Graphics& g)
             }
         }
 
-        // ── ▾ arrow (rightmost region) ───────────────────────────────────────
+        // ── ▾ arrow (bottom row, rightmost region) ───────────────────────────
         if (hasDropdown(type))
         {
-            auto arrowR = r.withTrimmedLeft(r.getWidth() - kArrowW)
-                           .withSizeKeepingCentre(kArrowW, kTabH);
+            auto arrowR = bottomR.withTrimmedLeft(bottomR.getWidth() - kArrowW);
             g.setColour(juce::Colours::white.withAlpha(sel ? 0.9f : 0.55f));
-            g.setFont(juce::Font(26.0f));
+            g.setFont(juce::Font(16.0f));
             g.drawText(juce::CharPointer_UTF8("\xe2\x96\xbe"), arrowR,
                        juce::Justification::centred);   // ▾
         }

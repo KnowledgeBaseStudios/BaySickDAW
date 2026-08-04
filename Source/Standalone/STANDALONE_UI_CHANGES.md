@@ -345,3 +345,29 @@ mode is on, `TypingKeyboardMap::shouldBypassLocalKeys` makes the three grid
 key handlers (PianoRollGrid / DrumKitGrid / ArrangementGrid) decline bare
 mapped keys so they bubble to the editor's converter; any modifier = normal
 shortcut. Held notes release on mode-off, octave shift, and tab switch.
+
+---
+
+## 2026-08-03 — QA-Layout T1: transport readout, two-row ribbon tabs, centred app title
+
+**Files:** `GlobalTransportBar.h/.cpp`, `StandaloneEditor.cpp`, `RibbonTabBar.h/.cpp`, `SharedUI.h/.cpp`
+
+- **Perf readout** is now `TransportPerfReadout` (custom component, not a `juce::Label`): three
+  9pt monospaced rows `SYS/DSP`, `MEM/LAT`, `UND/PF`, right-aligned in a 120px box
+  (`TransportPerfReadout::kWidth`).  Per-token colouring (L20): the SYS token colours off
+  whole-machine CPU alone; DSP load/overload colours the DSP token and rows 2-3.
+  `kCPUReserve` in `StandaloneEditor::resized()` derives from `kWidth + 12` so the ribbon can
+  never underlap the readout (fixes the old 120-reserve vs 160-label gutter mismatch).
+- **Ribbon tabs** are two-row (L25): name on the top row (`kNameRowH` 22), badge + dropdown
+  arrow on the bottom row; the arrow hit zone is the bottom-row right (a name-row click
+  anywhere navigates).  The camelCase wrap machinery (`splitCamelCase` / `slotWraps`) is
+  retired — long labels shrink via `drawFittedText` instead of wrapping — and
+  `naturalSingleLineWidth` no longer adds arrow/badge width.  The frozen-tab dot moved to the
+  bottom row's left edge, clear of the name.
+- **Tab order** (L27): `order[]` is now Builder / Mixer / Effects / Piano Roll, then the
+  instance types.  Order array only — the persisted `addFixed` tab ids are untouched.
+- **`kMaxSlots` corrected 11 → 12**: TS6's Plugins type made it 11 types + the "+" slot; with
+  every type visible the width solver's stack arrays overflowed by one.
+- **App title** (L26): `VibeLAF::drawDocumentWindowTitleBar` uses stock-JUCE placement — icon +
+  title centred as one unit, clamped into the title space.  Applies to every non-native
+  `DocumentWindow`; the main frame is the only caller that sets an icon.

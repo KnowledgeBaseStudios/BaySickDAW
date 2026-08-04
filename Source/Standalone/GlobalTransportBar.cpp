@@ -581,16 +581,11 @@ GlobalTransportBar::GlobalTransportBar(StandalonePlayHead& ph)
     mTapBtn->setTooltip("Tap to set tempo - tap repeatedly then it locks in");
     mTapBtn->onClick = [this] { doTap(); };
 
-    // CPU / DSP / MEM / LAT 2x2 grid. Same width footprint as the old single-
-    // line label; uses two text rows in a smaller font instead of one long row.
-    mPerfLabel = std::make_unique<juce::Label>();
-    mPerfLabel->setText("SYS --%  DSP --%\nMEM --  LAT --  UND --  PF --", juce::dontSendNotification);
-    mPerfLabel->setFont(juce::Font(juce::Font::getDefaultMonospacedFontName(), 9.f, juce::Font::plain));
-    mPerfLabel->setColour(juce::Label::textColourId, VC::TextDim);
-    mPerfLabel->setJustificationType(juce::Justification::centredRight);
-    mPerfLabel->setMinimumHorizontalScale(1.0f);
-    mPerfLabel->setTooltip("SYS: system-wide CPU % (the whole computer, not this app)  |  DSP: audio engine load (% of buffer window)  |  MEM: process memory in MB  |  LAT: total reported plugin latency in samples (sum of every effect that adds PDC)  |  UND: audio clip stream underruns during continuous playback (should stay 0)  |  PF: slowest disk read this session in ms");
-    addAndMakeVisible(*mPerfLabel);
+    mPerfReadout = std::make_unique<TransportPerfReadout>();
+    mPerfReadout->update ("SYS --%", "DSP --%", "MEM --  LAT --", "UND --  PF --",
+                          VC::TextDim, VC::TextDim);
+    mPerfReadout->setTooltip("SYS: system-wide CPU % (the whole computer, not this app)  |  DSP: audio engine load (% of buffer window)  |  MEM: process memory in MB  |  LAT: total reported plugin latency in samples (sum of every effect that adds PDC)  |  UND: audio clip stream underruns during continuous playback (should stay 0)  |  PF: slowest disk read this session in ms");
+    addAndMakeVisible(*mPerfReadout);
 
     startTimerHz(10);
 }
@@ -788,38 +783,45 @@ void GlobalTransportBar::timerCallback()
         if (onGetLatencySamples)
             latStr = juce::String(onGetLatencySamples());
 
-        // 2x2 grid: SYS%/DSP% on top row, MEM/LAT on bottom row. Bottom-row
-        // unit suffixes dropped (covered by tooltip) to keep the column widths
-        // balanced - otherwise "MEM 234MB  LAT 16sp/0.3ms" overflows the cell
+        // Unit suffixes dropped (covered by tooltip) to keep the column widths
+        // balanced - otherwise "MEM 234MB  LAT 16sp/0.3ms" overflows the row
         // bounds left of the right-justified anchor and clips the M of MEM.
-        juce::String s;
+        //
         // CL-282: streaming telemetry.  UND = clip-stream reads that returned
         // silence during CONTINUOUS playback (seeks never count); PF = worst
         // disk-fill this session in ms.  Zero / small is healthy.
         const auto und   = AudioClipStreamer::sUnderrunCount.load (std::memory_order_relaxed);
         const auto pfMs  = AudioClipStreamer::sPeakPrefillMs.load (std::memory_order_relaxed);
-        s << "SYS " << (int)sysCpu << "%  DSP " << dspPct << "%\n"
-          << "MEM " << memMb << "  LAT " << latStr
-          << "  UND " << (int) und << "  PF " << juce::String (pfMs, 1);
-        mPerfLabel->setText(s, juce::dontSendNotification);
+        juce::String row2, row3;
+        row2 << "MEM " << memMb << "  LAT " << latStr;
+        row3 << "UND " << (int) und << "  PF " << juce::String (pfMs, 1);
 
-        // Color priority: 95% overload (flash red) > 85% warn (yellow) > normal (green)
-        juce::Colour col;
+        // L20 (QA-Layout): SYS colours only itself, off whole-machine CPU;
+        // DSP load/overload colours the DSP token and the remaining rows, so
+        // background apps can't tint an idle project's engine readout.
+        juce::Colour sysCol;
+        if      (sysCpu > 80.f) sysCol = VC::Yellow;
+        else if (sysCpu > 50.f) sysCol = VC::Yellow.withAlpha(0.7f);
+        else                    sysCol = VC::Green;
+
+        juce::Colour dspCol;
         if (over95)
         {
             // Flash between bright red and dark red each tick (10 Hz = visible flicker)
             static bool sFlash = false;
             sFlash = !sFlash;
-            col = sFlash ? juce::Colour(0xffff2222) : juce::Colour(0xff991111);
+            dspCol = sFlash ? juce::Colour(0xffff2222) : juce::Colour(0xff991111);
         }
-        else if (dspLoad > 0.85f || sysCpu > 80.f)
-            col = VC::Yellow;
-        else if (dspLoad > 0.5f  || sysCpu > 50.f)
-            col = VC::Yellow.withAlpha(0.7f);
+        else if (dspLoad > 0.85f)
+            dspCol = VC::Yellow;
+        else if (dspLoad > 0.5f)
+            dspCol = VC::Yellow.withAlpha(0.7f);
         else
-            col = VC::Green;
+            dspCol = VC::Green;
 
-        mPerfLabel->setColour(juce::Label::textColourId, col);
+        mPerfReadout->update ("SYS " + juce::String ((int) sysCpu) + "%",
+                              "DSP " + juce::String (dspPct) + "%",
+                              row2, row3, sysCol, dspCol);
     }
 
     // Keep BPM field synced to playhead tempo if it's not focused
@@ -938,12 +940,9 @@ void GlobalTransportBar::resized()
     if (mSwingKnob) mSwingKnob->setBounds(b.removeFromLeft(24).reduced(1, 1));
     b.removeFromLeft(12);
 
-    // CPU / DSP / MEM / LAT 2x2 grid (far right). Width sized for the longest
-    // bottom-row variant ("MEM 999MB  LAT 99999sp/22.2ms") at 9pt monospaced.
-    // No wider than the old 1-line layout in the common case (bar height
-    // accommodates the second text row instead of widening).
-    mPerfLabel->setBounds(b.removeFromRight(160).reduced(2, 0));
-    b.removeFromRight(6);
+    // Three-row perf readout (far right).  kWidth is shared with the ribbon
+    // reserve in StandaloneEditor::resized() -- see TransportPerfReadout.
+    mPerfReadout->setBounds(b.removeFromRight(TransportPerfReadout::kWidth).reduced(2, 0));
 }
 
 void GlobalTransportBar::refreshSwingKnob()
@@ -1063,4 +1062,46 @@ void TransportPositionReadout::paint (juce::Graphics& g)
     g.setColour (juce::Colour (0xffFFB030));
     g.setFont (juce::Font (juce::Font::getDefaultMonospacedFontName(), 14.0f, juce::Font::bold));
     g.drawText (mText, getLocalBounds().reduced (4, 0), juce::Justification::centred, false);
+}
+
+// ── TransportPerfReadout ─────────────────────────────────────────────────────
+void TransportPerfReadout::update (const juce::String& sysText, const juce::String& dspText,
+                                   const juce::String& row2, const juce::String& row3,
+                                   juce::Colour sysCol, juce::Colour dspCol)
+{
+    if (sysText == mSysText && dspText == mDspText && row2 == mRow2 && row3 == mRow3
+        && sysCol == mSysCol && dspCol == mDspCol)
+        return;
+
+    mSysText = sysText;  mDspText = dspText;
+    mRow2    = row2;     mRow3    = row3;
+    mSysCol  = sysCol;   mDspCol  = dspCol;
+    repaint();
+}
+
+void TransportPerfReadout::paint (juce::Graphics& g)
+{
+    const juce::Font f (juce::Font::getDefaultMonospacedFontName(), 9.0f, juce::Font::plain);
+    g.setFont (f);
+
+    const auto area = getLocalBounds().withTrimmedRight (2);
+    const int  rowH = area.getHeight() / 3;
+
+    // Row 1 draws as two right-anchored segments so SYS and DSP can carry
+    // their own colours (L20 per-token rule).
+    const int dspW = f.getStringWidth (mDspText);
+    const int gapW = f.getStringWidth ("  ");
+    const int sysW = f.getStringWidth (mSysText);
+
+    g.setColour (mSysCol);
+    g.drawText (mSysText, area.getRight() - dspW - gapW - sysW, area.getY(), sysW, rowH,
+                juce::Justification::centredLeft);
+    g.setColour (mDspCol);
+    g.drawText (mDspText, area.getRight() - dspW, area.getY(), dspW, rowH,
+                juce::Justification::centredLeft);
+
+    g.drawText (mRow2, area.getX(), area.getY() + rowH, area.getWidth(), rowH,
+                juce::Justification::centredRight);
+    g.drawText (mRow3, area.getX(), area.getY() + rowH * 2, area.getWidth(),
+                area.getHeight() - rowH * 2, juce::Justification::centredRight);
 }

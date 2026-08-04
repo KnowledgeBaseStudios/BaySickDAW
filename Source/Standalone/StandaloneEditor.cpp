@@ -10405,7 +10405,10 @@ void StandaloneEditor::resized()
     mTransport->setBounds(bar);
 
     // Pattern dropdown button - single control replacing old ComboBox + Add button
-    static constexpr int kCPUReserve = 120; // space kept clear on right for CPU label
+    // QA-Layout T1 gutter fix: derived from the readout's own width (+4px bar
+    // inset +8px gap) so the ribbon's "+" slot can never underlap the readout.
+    // The old literal 120 disagreed with the label's 160px rect.
+    static constexpr int kCPUReserve = TransportPerfReadout::kWidth + 12;
     static constexpr int kPatBtnW    = 176; // 140 + 32 + 4 gap, same total footprint
     static constexpr int kPatStart   = GlobalTransportBar::kControlsWidth + 8;
     int py = bar.getY() + (kBarH - 28) / 2;

@@ -871,7 +871,7 @@ namespace
 
 void VibeLAF::drawDocumentWindowTitleBar (juce::DocumentWindow& win, juce::Graphics& g,
                                           int w, int h, int titleSpaceX, int titleSpaceW,
-                                          const juce::Image* /*icon*/,
+                                          const juce::Image* icon,
                                           bool /*drawTitleTextOnLeft*/)
 {
     // "Live" for a desktop window is the peer being the active one -- the shell's
@@ -879,13 +879,37 @@ void VibeLAF::drawDocumentWindowTitleBar (juce::DocumentWindow& win, juce::Graph
     const bool live = win.isActiveWindow();
     WindowChrome::paintTitleBar (g, juce::Rectangle<int> (0, 0, w, h), live);
 
-    // Drawn against the space JUCE reserved between the buttons rather than the
-    // full width, so a long title cannot run under the close button.
-    const auto textArea = juce::Rectangle<int> (titleSpaceX, 0,
-                                                juce::jmax (1, titleSpaceW), h);
+    // L26 (QA-Layout): stock-JUCE placement -- icon + title centred as one
+    // unit, clamped into the space JUCE reserved between the buttons so a
+    // long title cannot run under the close button.  Reverts TS7's
+    // left-align + icon drop; the main frame is the only caller that sets
+    // an icon.
+    const juce::Font font (13.0f);
+    g.setFont (font);
+
+    int textW = font.getStringWidth (win.getName());
+    int iconW = 0, iconH = 0;
+    if (icon != nullptr && icon->isValid())
+    {
+        iconH = (int) font.getHeight();
+        iconW = icon->getWidth() * iconH / juce::jmax (1, icon->getHeight()) + 4;
+    }
+    textW = juce::jmin (titleSpaceW, textW + iconW);
+    int textX = juce::jmax (titleSpaceX, (w - textW) / 2);
+    if (textX + textW > titleSpaceX + titleSpaceW)
+        textX = titleSpaceX + titleSpaceW - textW;
+
+    if (iconW > 0)
+    {
+        g.setOpacity (live ? 1.0f : 0.6f);
+        g.drawImageWithin (*icon, textX, (h - iconH) / 2, iconW, iconH,
+                           juce::RectanglePlacement::centred, false);
+        textX += iconW;
+        textW -= iconW;
+    }
+
     g.setColour (WindowChrome::titleText());
-    g.setFont (juce::Font (13.0f));
-    g.drawText (win.getName(), textArea.reduced (8, 0),
+    g.drawText (win.getName(), textX, 0, textW, h,
                 juce::Justification::centredLeft, true);
 }
 

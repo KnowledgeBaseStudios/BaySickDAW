@@ -25,7 +25,8 @@
 //                 black/white piano-key palette; dropdown picks the active
 //                 engine (Drum Kit always at top of list)
 //
-// No + button, no overflow, no close X. All tab management through dropdowns.
+// No overflow, no close X.  Tab management through the per-type dropdowns;
+// adding goes through the trailing "+" slot (QA-ModelShell TS4).
 // ─────────────────────────────────────────────────────────────────────────────
 
 class RibbonTabBar : public juce::Component
@@ -169,14 +170,20 @@ public:
     // purpose was the >= 1 floor on Layers / Bass / Drums, which is gone.
 
 private:
-    // Upper bound only (10 types + the "+" slot) -- used to size stack arrays
-    // in the width solver.  The LIVE count is numSlots().
-    static constexpr int kMaxSlots = 11;
+    // Upper bound only (11 types + the "+" slot) -- used to size stack arrays
+    // in the width solver.  The LIVE count is numSlots().  QA-Layout T1: was
+    // 11, which TS6's Plugins type silently outgrew -- with every type visible
+    // the solver's stack arrays overflowed by one.
+    static constexpr int kMaxSlots = 12;
     // QA-A Phase 5 (2026-05-09): kTabH bumped 30 -> 40 so each tab fills the
     // full vertical height of the parent transport bar (kBarH = 40 in
     // StandaloneEditor::resized).  Eliminates the empty horizontal strip
     // that previously sat below all tabs.
     static constexpr int kTabH     = 40;
+    // QA-Layout T1 (L25): two-row slots.  Name on the top row (kNameRowH);
+    // badge + dropdown arrow on the remaining bottom row.  Shared by paint()
+    // and hitTestSlot() so the drawn arrow and its hit zone stay one rect.
+    static constexpr int kNameRowH = 22;
     static constexpr int kArrowW   = 22;   // hit-test width for ▾ region
     static constexpr int kBadgeR   = 8;    // badge circle radius
 
@@ -186,15 +193,12 @@ private:
     //                     down to this (they never go below 60 px so the tab
     //                     remains readable in narrow windows).
     //   kMinVariable  -- width floor for variable-label slots (Clip / Vox /
-    //                     Inst / Layers / Bass / Drums).  Higher than the
-    //                     fixed floor since these slots need room for arrow
-    //                     + badge + a few characters of the active label.
-    //   kMaxSingleLine -- width cap above which a slot's label wraps to two
-    //                     lines instead of growing the slot further.  Tuned
-    //                     so every brand-default name (longest is
-    //                     "BaySickRustyDrums" at ~208 px natural) stays
-    //                     single-line; only user-renamed long custom labels
-    //                     trip the wrap.
+    //                     Inst / Layers / Bass / Drums / Plugins).  Higher
+    //                     than the fixed floor so a few characters of the
+    //                     active label always survive.
+    //   kMaxSingleLine -- hard width cap; a slot never grows past this.
+    //                     Longer labels shrink via drawFittedText's minScale
+    //                     (QA-Layout T1 retired the two-line wrap).
     static constexpr int kMinFixed      = 60;
     static constexpr int kMinVariable   = 80;
     static constexpr int kMaxSingleLine = 220;
@@ -219,22 +223,17 @@ private:
     juce::Rectangle<int> slotRect(int slotIndex) const;
     int hitTestSlot(juce::Point<int> pos, bool& hitArrow) const;
 
-    // QA-A Phase 5 / STYLE-01 (2026-05-09): variable-width + wrap support.
+    // QA-A Phase 5 / STYLE-01 (2026-05-09): variable-width support.
     // - isFixedNameSlot:        true for Mixer / Effects / Builder /
     //                            PianoRoll (slot label is a constant,
     //                            never reflects user-renamed text).
     // - naturalSingleLineWidth: pixel width the slot would need to display
-    //                            its current label single-line at 12pt bold,
-    //                            including arrow / badge / padding.  Pure
+    //                            its current label single-line at 12pt bold
+    //                            plus padding.  Arrow + badge sit on the
+    //                            bottom row (L25) and add no width.  Pure
     //                            measurement; no clamping to min/max.
-    // - slotWraps:              true when naturalSingleLineWidth exceeds
-    //                            kMaxSingleLine -- paint() then renders the
-    //                            label wrapped to two lines via JUCE's word
-    //                            wrap or (for camelCase brand names with no
-    //                            spaces) a manual mid-string split.
     static bool isFixedNameSlot(TabType type);
     int  naturalSingleLineWidth(int slotIndex) const;
-    bool slotWraps(int slotIndex) const;
 
     // Display helpers
     juce::String getSlotDisplayName(int slotIndex) const;

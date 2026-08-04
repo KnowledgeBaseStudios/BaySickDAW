@@ -147,8 +147,9 @@ public:
     // overriding here is what makes every juce::DocumentWindow / DialogWindow
     // with a NON-native title bar paint the shell's strip -- no per-window
     // look-and-feel plumbing, and no second place for the look to drift to.
-    // Windows that keep setUsingNativeTitleBar(true) are unaffected, which is
-    // how the main app window keeps its OS chrome.
+    // Windows that keep setUsingNativeTitleBar(true) are unaffected.  The main
+    // app frame does NOT opt into native chrome -- it paints through this
+    // override too, which is where the centred app title + icon land (L26).
     void drawDocumentWindowTitleBar (juce::DocumentWindow&, juce::Graphics&,
                                      int w, int h, int titleSpaceX, int titleSpaceW,
                                      const juce::Image* icon,

@@ -44,6 +44,32 @@ private:
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(TransportPositionReadout)
 };
 
+// ── TransportPerfReadout ──────────────────────────────────────────────────────
+// QA-Layout T1 (L24/L20): three-row performance readout, far right of the bar.
+// Custom-painted rather than a juce::Label because the SYS token is coloured
+// independently of the rest -- SYS reflects whole-machine CPU alone, while DSP
+// load/overload colours the DSP token and the MEM/LAT/UND/PF rows.
+class TransportPerfReadout : public juce::Component,
+                             public juce::SettableTooltipClient
+{
+public:
+    // Agreed with StandaloneEditor::resized()'s kCPUReserve so the ribbon can
+    // never underlap the readout.  Fits the longest row
+    // ("MEM 9999  LAT 99999") at 9pt monospaced with margin.
+    static constexpr int kWidth = 120;
+
+    void update (const juce::String& sysText, const juce::String& dspText,
+                 const juce::String& row2,    const juce::String& row3,
+                 juce::Colour sysCol, juce::Colour dspCol);
+
+    void paint (juce::Graphics&) override;
+
+private:
+    juce::String mSysText { "SYS --%" },        mDspText { "DSP --%" };
+    juce::String mRow2    { "MEM --  LAT --" }, mRow3    { "UND --  PF --" };
+    juce::Colour mSysCol  { 0xff888888 },       mDspCol  { 0xff888888 };
+};
+
 // ── GlobalTransportBar ────────────────────────────────────────────────────────
 // Sits between the title bar and the ribbon tabs.
 // Play (Space), Pause (Space toggle), Stop (Shift+Space),
@@ -212,7 +238,7 @@ private:
     void doTap();   // records tap, recomputes BPM after ≥2 taps
 
     // CPU / memory readout (far right)
-    std::unique_ptr<juce::Label> mPerfLabel;
+    std::unique_ptr<TransportPerfReadout> mPerfReadout;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(GlobalTransportBar)
 };
