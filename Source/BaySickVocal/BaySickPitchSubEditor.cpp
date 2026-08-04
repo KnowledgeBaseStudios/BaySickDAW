@@ -434,8 +434,10 @@ void BaySickPitchSubEditor::refreshFromRegion()
         mVibKnob.setValue (r->vibDepthMult, juce::dontSendNotification);
         mFrmKnob.setValue (r->formantSemis, juce::dontSendNotification);
         mVarKnob.setValue (r->variation,    juce::dontSendNotification);
-        if (auto* dw = findParentComponentOfClass<juce::DocumentWindow>())
-            dw->setName ("Pitch Sub-Editor - "
+        // QA-Layout T4: injected callback replaces the
+        // findParentComponentOfClass<DocumentWindow> escape (hosting-agnostic).
+        if (onTitleChanged)
+            onTitleChanged ("Pitch Sub-Editor - "
                 + midiNoteName ((int) std::round (r->midi + r->shiftSemis))
                 + "  (" + juce::String (r->endSec - r->startSec, 2) + "s)");
     }
@@ -537,6 +539,7 @@ BaySickPitchSubEditorWindow::BaySickPitchSubEditorWindow (BaySickPitchEditor& ow
 {
     auto content = std::make_unique<BaySickPitchSubEditor> (owner);
     content->setSize (760, 430);
+    content->onTitleChanged = [this] (const juce::String& t) { setName (t); };
     setContentOwned (content.release(), true);
     setResizable (true, true);
     setResizeLimits (560, 320, 1600, 900);

@@ -40,6 +40,9 @@
 #include "../DSP/EffectParamMap.h"   // QA-ModelShell TS3: pedal-board lane registration
 #include "../BaySickNAMIR/BaySickNAMIRProcessor.h"             // 2026-05-05: dirty-hook wiring
 #include "../BaySickVocal/BaySickVocalProcessor.h"             // 2026-05-05: dirty-hook wiring
+#include "../BaySickVocal/BaySickVocalEditor.h"                // QA-Layout T4: satellite panel accessors
+#include "../BaySickVocal/BaySickPitchEditor.h"                // QA-Layout T4: note-provider wiring
+#include "../BaySickPedals/BaySickPedalsEditor.h"              // QA-Layout T4: pedals window strip chrome
 // 2026-05-05: RustyDrumsPagePresetIO + AriaPagePresetIO consolidated into
 // PagePresetIO.h.  Rusty's Save/Load Page Preset now uses PageKind::RustyDrums.
 #include "PagePresetIO.h"
@@ -1541,6 +1544,10 @@ StandaloneEditor::StandaloneEditor(VibeSynthProcessor& p, StandalonePlayHead& ph
         return best;
     };
     mRibbon->onSubPageSelected = [this](RibbonTabBar::TabType t, int idx) { onSubPageSelected(t, idx); };
+    // QA-Layout T4 (L11/D4=c): the instance dropdowns' "Pages:" window-row
+    // model -- one body serves the label list AND the pick dispatch.
+    mRibbon->onListPageWindowRows  = [this] (int tabId) { return buildPageWindowRows (tabId, -1); };
+    mRibbon->onPageWindowRowPicked = [this] (int tabId, int rowIdx) { buildPageWindowRows (tabId, rowIdx); };
     // D1.4-fix: intercept rename for Drum tabs whose name == "User Patch" so
     // we can route to Save Patch As (which prompts for name + saves the
     // preset XML, then auto-renames the tab via onSoundNameChanged).
@@ -5172,6 +5179,10 @@ void StandaloneEditor::onTabClosed(int tabId)
                 {
                     mProcessor.unregisterVoxEngine (idx);
                     voxStripIdx = idx;
+                    // QA-Layout T4: a dead tab must not leave its sub-page
+                    // windows open (their resolvers would close them a tick
+                    // later, but a deliberate close beats a timed one).
+                    closeVoxSatellites (idx);
                 }
                 // QA-E Task 5 (2026-05-15): library + block cascade for Vox
                 // tab close.  Walks every library entry owned by this Vox
@@ -5229,6 +5240,8 @@ void StandaloneEditor::onTabClosed(int tabId)
                 {
                     mProcessor.unregisterInstEngine (idx);
                     instStripIdx = idx;
+                    // QA-Layout T4: see the Vox close above.
+                    closeInstSatellites (idx);
                 }
                 if (ip->getSource() == InstPage::Source::BaySickGuitars)
                 {
@@ -5458,132 +5471,132 @@ void StandaloneEditor::onSubPageSelected(RibbonTabBar::TabType type, int subPage
         if (mBuilderPage) mBuilderPage->setBrowserTab(subPageIndex);
         break;
 
-    case RibbonTabBar::TabType::Drums:
-    case RibbonTabBar::TabType::Layers:
-    case RibbonTabBar::TabType::Bass:
-    {
-        // 0 = Player, 1 = Piano Roll, 2 = EQ.  Dispatch to the ACTIVE page
-        // for this type (not the last-created legacy ptr, which gets stale
-        // once multiple tabs of the same type exist).
-        // Layers/Bass sub-tab 1 (Piano Roll) redirects to the unified
-        // PianoRollPage with this engine selected - same logic the
-        // page-menu-bar pill click uses.  Drums has Piano Roll at sub-tab 2
-        // and an additional Drum Kit at sub-tab 0; both redirect.
-        const int activeId = mRibbon->getActiveTabForType(type);
-        for (auto* entry : mPages)
-        {
-            if (! entry || entry->ribbonTabId != activeId) continue;
-            if (auto* lp = dynamic_cast<LayersPage*>(entry->component.get()))
-            {
-                if (subPageIndex == 1 && mPianoRollPage)
-                {
-                    if (mRibbon) mRibbon->selectTab (4);
-                    onTabSelected (4);
-                    mPianoRollPage->selectEngine ({ EngineKind::Layer, lp->getPageIndex() });
-                }
-                else lp->switchTab(subPageIndex);
-            }
-            else if (auto* bp = dynamic_cast<BassPage*>(entry->component.get()))
-            {
-                if (subPageIndex == 1 && mPianoRollPage)
-                {
-                    if (mRibbon) mRibbon->selectTab (4);
-                    onTabSelected (4);
-                    mPianoRollPage->selectEngine ({ EngineKind::Bass, bp->getPageIndex() });
-                }
-                else bp->switchTab(subPageIndex);
-            }
-            else if (auto* dp = dynamic_cast<DrumPage*>(entry->component.get()))
-            {
-                // Drums: 0=DrumKit (redirect), 1=Player, 2=PianoRoll (redirect), 3=EQ.
-                if (subPageIndex == 0 && mPianoRollPage)
-                {
-                    if (mRibbon) mRibbon->selectTab (4);
-                    onTabSelected (4);
-                    mPianoRollPage->selectEngine ({ EngineKind::DrumKit, 0 });
-                }
-                else if (subPageIndex == 2 && mPianoRollPage)
-                {
-                    if (mRibbon) mRibbon->selectTab (4);
-                    onTabSelected (4);
-                    mPianoRollPage->selectEngine ({ EngineKind::Drum, dp->getPageIndex() });
-                }
-                else dp->switchTab(subPageIndex);
-            }
-            break;
-        }
-        break;
-    }
-
-    case RibbonTabBar::TabType::Clip:
-    {
-        // G-2 (2026-04-28): Clip dropdown sub-pages - 0=Player, 1=Piano Roll
-        // (redirect), 2=Pre EQ8 M/S.  Sub-tab 1 jumps to the unified
-        // PianoRollPage with this Clip's engine selected.
-        const int activeId = mRibbon->getActiveTabForType(type);
-        for (auto* entry : mPages)
-        {
-            if (! entry || entry->ribbonTabId != activeId) continue;
-            if (auto* cp = dynamic_cast<ClipsPage*>(entry->component.get()))
-            {
-                if (subPageIndex == 1 && mPianoRollPage)
-                {
-                    if (mRibbon) mRibbon->selectTab (4);
-                    onTabSelected (4);
-                    mPianoRollPage->selectEngine ({ EngineKind::Clip, cp->getPageIndex() });
-                }
-                else cp->switchTab(subPageIndex);
-            }
-            break;
-        }
-        break;
-    }
-
-    case RibbonTabBar::TabType::Vox:
-    case RibbonTabBar::TabType::Inst:
-    {
-        // G-4 (2026-04-28): Vox + Inst dropdown sub-pages - 0=Player, 1=EQ.
-        // No Piano Roll redirect - these are live-input / recorded-audio
-        // destinations, not MIDI-triggered engines.
-        const int activeId = mRibbon->getActiveTabForType(type);
-        for (auto* entry : mPages)
-        {
-            if (! entry || entry->ribbonTabId != activeId) continue;
-            if (auto* vp = dynamic_cast<VoxPage*>(entry->component.get()))
-                vp->switchTab(subPageIndex);
-            else if (auto* ip = dynamic_cast<InstPage*>(entry->component.get()))
-                ip->switchTab(subPageIndex);
-            break;
-        }
-        break;
-    }
-
-    case RibbonTabBar::TabType::Plugins:
-    {
-        // 0 = Player (the navigation onTabSelected already did), 1 = Piano
-        // Roll.  This switch had no Plugins case at all, so the dropdown's
-        // Piano Roll entry navigated to the page and then did nothing.
-        const int activeId = mRibbon->getActiveTabForType(type);
-        for (auto* entry : mPages)
-        {
-            if (! entry || entry->ribbonTabId != activeId) continue;
-            if (auto* pp = dynamic_cast<PluginsPage*>(entry->component.get()))
-            {
-                if (subPageIndex == 1 && mPianoRollPage)
-                {
-                    if (mRibbon) mRibbon->selectTab (4);
-                    onTabSelected (4);
-                    mPianoRollPage->selectEngine ({ EngineKind::Plugin, pp->getPageIndex() });
-                }
-            }
-            break;
-        }
-        break;
-    }
-
+    // QA-Layout T4 (L11): the instance types' sub-page rows moved to the
+    // window-row model (buildPageWindowRows) -- their dropdowns no longer
+    // fire onSubPageSelected.  Only Effects + Builder still route here
+    // (their dropdowns are showSubPageDropdown, a separate path).
     default:
         break;
     }
+}
+
+// QA-Layout T4 (L11/D4=c): ONE body builds the instance dropdown's "Pages:"
+// window-row model AND executes a pick (pickRow < 0 collects labels; >= 0
+// runs that row's action).  The ribbon re-calls this at pick time, so a page
+// that changed while the menu was open can never be acted on by a stale
+// index.  Every list ends with the strip's Pre/Post EQ rows (Jeff, D4=c).
+juce::StringArray StandaloneEditor::buildPageWindowRows (int tabId, int pickRow)
+{
+    juce::StringArray labels;
+    int rowN = 0;
+    auto row = [&] (const juce::String& label, std::function<void()> action)
+    {
+        if (pickRow < 0)          labels.add (label);
+        else if (rowN == pickRow) { if (action) action(); }
+        ++rowN;
+    };
+    // A null action = the row IS the page window; the dropdown's navigation
+    // (which runs before the pick routes here) already fronted it.
+    auto navToRoll = [this] (EngineKind kind, int idx)
+    {
+        auto* prp = mPianoRollPage;
+        auto* rbn = mRibbon.get();
+        if (rbn != nullptr) rbn->selectTab (4);
+        onTabSelected (4);
+        if (prp != nullptr) prp->selectEngine ({ kind, idx });
+    };
+
+    PageEntry* entry = nullptr;
+    for (auto* e : mPages)
+        if (e != nullptr && e->ribbonTabId == tabId) { entry = e; break; }
+    if (entry == nullptr || entry->component == nullptr) return labels;
+
+    using namespace MixerChannelIds;
+    int eqChannelId = -1;
+
+    if (auto* lp = dynamic_cast<LayersPage*> (entry->component.get()))
+    {
+        const int idx = lp->getPageIndex();
+        eqChannelId = layerInsert (idx);
+        row ("Player",     {});
+        row ("Piano Roll", [navToRoll, idx] { navToRoll (EngineKind::Layer, idx); });
+    }
+    else if (auto* bp = dynamic_cast<BassPage*> (entry->component.get()))
+    {
+        const int idx = bp->getPageIndex();
+        eqChannelId = bassInsert (idx);
+        row ("Player",     {});
+        row ("Piano Roll", [navToRoll, idx] { navToRoll (EngineKind::Bass, idx); });
+    }
+    else if (auto* dp = dynamic_cast<DrumPage*> (entry->component.get()))
+    {
+        const int idx = dp->getPageIndex();
+        eqChannelId = drumInsert (idx);
+        row ("Drum Kit",   [navToRoll]      { navToRoll (EngineKind::DrumKit, 0); });
+        row ("Player",     {});
+        row ("Piano Roll", [navToRoll, idx] { navToRoll (EngineKind::Drum, idx); });
+    }
+    else if (auto* rp = dynamic_cast<BaySickRustyDrumsPage*> (entry->component.get()))
+    {
+        juce::ignoreUnused (rp);
+        eqChannelId = kRustyDrumsBus;   // the kit's one whole-signal point
+        row ("Drum Kit",   [navToRoll] { navToRoll (EngineKind::DrumKit, 0); });
+        row ("Player",     {});
+        row ("Piano Roll", [navToRoll] { navToRoll (EngineKind::BaySickRustyDrums, 0); });
+    }
+    else if (auto* cp = dynamic_cast<ClipsPage*> (entry->component.get()))
+    {
+        const int idx = cp->getPageIndex();
+        eqChannelId = audioInsert (idx);
+        row ("Player",     {});
+        row ("Piano Roll", [navToRoll, idx] { navToRoll (EngineKind::Clip, idx); });
+    }
+    else if (auto* pp = dynamic_cast<PluginsPage*> (entry->component.get()))
+    {
+        const int idx = pp->getPageIndex();
+        eqChannelId = pluginInsert (idx);
+        row ("Player",     {});
+        row ("Piano Roll", [navToRoll, idx] { navToRoll (EngineKind::Plugin, idx); });
+    }
+    else if (auto* vp = dynamic_cast<VoxPage*> (entry->component.get()))
+    {
+        const int idx = vp->getPageIndex();
+        eqChannelId = voxInsert (idx);
+        row ("Player",       {});
+        row ("Vocal Chain",  [this, idx] { openVoxSatelliteWindow (idx, VoxSat::Chain); });
+        row ("BaySickPitch", [this, idx] { openVoxSatelliteWindow (idx, VoxSat::Pitch); });
+        row ("BaySickAlign", [this, idx] { openVoxSatelliteWindow (idx, VoxSat::Align); });
+        row ("NAM/IR",       [this, idx] { openVoxSatelliteWindow (idx, VoxSat::NamIr); });
+    }
+    else if (auto* ip = dynamic_cast<InstPage*> (entry->component.get()))
+    {
+        const int idx = ip->getPageIndex();
+        eqChannelId = instInsert (idx);
+        if (ip->getSource() == InstPage::Source::LiveInput)
+        {
+            // L11: LiveInst rows read "Pedals" / "NAM/IR" -- the pedals
+            // window IS the player (L10), so there is no separate Player row.
+            row ("Pedals", [this, idx] { openInstPedalsWindow (idx); });
+            row ("NAM/IR", [this, idx] { openInstNamIrWindow  (idx); });
+        }
+        else
+        {
+            const EngineKind k = (ip->getSource() == InstPage::Source::BaySickGuitars)
+                                  ? EngineKind::BaySickGuitars
+                                  : EngineKind::BaySickBasses;
+            row ("Player",     {});
+            row ("Pedals",     [this, idx] { openInstPedalsWindow (idx); });
+            row ("NAM/IR",     [this, idx] { openInstNamIrWindow  (idx); });
+            row ("Piano Roll", [navToRoll, k, idx] { navToRoll (k, idx); });
+        }
+    }
+
+    if (eqChannelId >= 0)
+    {
+        row ("Pre EQ",  [this, eqChannelId] { openEffectEqWindow (eqChannelId, true);  });
+        row ("Post EQ", [this, eqChannelId] { openEffectEqWindow (eqChannelId, false); });
+    }
+    return labels;
 }
 
 void StandaloneEditor::showPageForTab(int tabId)
@@ -5607,6 +5620,20 @@ void StandaloneEditor::showPageForTab(int tabId)
         if (entry->component == nullptr) rebuildPageForTab (*entry);
         if (entry->component)
         {
+            // QA-Layout T4 (L10): a LIVE-INPUT Inst tab has NO page window --
+            // the pedals window IS its player.  Tab click opens/fronts it;
+            // its strip was configured by openInstPedalsWindow, so the branch
+            // config below must not run against it.
+            if (auto* lip = dynamic_cast<InstPage*> (entry->component.get()))
+            {
+                if (lip->getSource() == InstPage::Source::LiveInput)
+                {
+                    mVisiblePage = entry->component.get();
+                    openInstPedalsWindow (lip->getPageIndex());
+                    return;
+                }
+            }
+
             if (entry->window == nullptr) hostPageInWindow (*entry);
             if (entry->window != nullptr)
             {
@@ -5997,45 +6024,30 @@ void StandaloneEditor::showPageForTab(int tabId)
         }
         else if (auto* vp = dynamic_cast<VoxPage*>(mVisiblePage))
         {
-            // 2026-04-28 (G-4): Vox page - Player + EQ only, no Piano Roll
-            // (live-input / recorded-audio destination, not MIDI-triggered).
-            // G-7: Page Preset hamburger menu installed regardless of sub-tab
-            // since the EQ stub doesn't have its own menu.  Save Page Preset
-            // greys out when there's no engine; Load Page Preset stays active
-            // so users can apply a saved preset to an engineless Vox tab.
-            // QA-E Sub-Phase A (2026-05-11): SafePointer lifted to outer scope.
+            // QA-Layout T4 (Window-7): the Vox window shows the BaySickVocals
+            // main panel; the four former sub-tabs are contained windows
+            // opened from these LAUNCHER slots (activeIdx -1 -- they open
+            // windows, they are not in-page tabs; PluginsPage precedent).
             juce::Component::SafePointer<VoxPage> safe (vp);
-            juce::Component::SafePointer<PageMenuBar> safeBar (mPageMenuBar);   // see Layers branch
 
-            auto syncPagePresetMenu = [safe, safeBar] (int i)
-            {
-                juce::ignoreUnused (i);
-                auto* bar = safeBar.getComponent();
-                if (bar == nullptr) return;
-                if (safe.getComponent() == nullptr) return;
-                bar->setMenuBuilder (
-                    [safe] (juce::Component* anchor)
-                    {
-                        if (auto* p = safe.getComponent())
-                            p->showPageActionsMenu (anchor);
-                    });
-            };
+            mPageMenuBar->setMenuBuilder (
+                [safe] (juce::Component* anchor)
+                {
+                    if (auto* p = safe.getComponent())
+                        p->showPageActionsMenu (anchor);
+                });
 
-            // H-6b (2026-05-01) / J-6 (2026-05-03): Vox page is BaySickVocal-only;
-            // EQ unification dropped the "Pre Rack EQ" sub-tab so Vox now has 5 sub-tabs.
-            mPageMenuBar->setTabSlots (VoxPage::getTabLabels(),
-                [safe, safeBar, syncPagePresetMenu] (int i) {
+            mPageMenuBar->setTabSlots ({ "Vocal Chain", "BaySickPitch",
+                                         "BaySickAlign", "NAM/IR" },
+                [this, safe] (int i) {
                     auto* p = safe.getComponent();
                     if (p == nullptr) return;
-                    p->switchTab (i);
-                    auto* bar = safeBar.getComponent();
-                    if (bar == nullptr) return;
-                    bar->updateTabActive (i);
-                    bar->setMidSideVisible (false);
-                    syncPagePresetMenu (i);
-                }, vp->getActiveTab(), vp->getPageColor());
-            syncPagePresetMenu (vp->getActiveTab());
+                    openVoxSatelliteWindow (p->getPageIndex(), (VoxSat) i);
+                }, -1, vp->getPageColor());
             mPageMenuBar->setMidSideVisible (false);
+            // Window-4 treatment: the main panel's internal title bar is
+            // dissolved; the strip shows the centered player name.
+            mPageMenuBar->setCenterTitle ("BaySickVocals", juce::Colour (0xFF0FAFA5));
             mPageMenuBar->setFxRackSlot ([this, safe]
             {
                 auto* p = safe.getComponent();
@@ -6044,81 +6056,46 @@ void StandaloneEditor::showPageForTab(int tabId)
                 const juce::String prefix = "mixer_vox_" + juce::String (p->getPageIndex());
                 jumpToFxRackForPrefix (prefix);
             });
-            // QA-E Task 4 (2026-05-12): mClipFileLabel removed from VoxPage;
-            // file-association lives in PatternManager AudioLibrary now.
         }
         else if (auto* ip = dynamic_cast<InstPage*>(mVisiblePage))
         {
-            // 2026-04-28 (G-4): Inst page - Player + EQ only, no Piano Roll
-            // (same reasoning as Vox).
-            // G-7: Page Preset hamburger menu installed regardless of sub-tab
-            // (same reasoning as Vox above).
+            // QA-Layout T4 (Window-7/D6): only sfizz Inst tabs frame this page
+            // (the Aria player); a LIVE-INPUT tab's player is the pedals
+            // window (L10) and never reaches this branch.  Pedals + NAM/IR
+            // open from launcher slots; Piano Roll keeps its nav redirect.
             // QA-E Sub-Phase A (2026-05-11): SafePointer lifted to outer scope.
             juce::Component::SafePointer<InstPage> safe (ip);
-            juce::Component::SafePointer<PageMenuBar> safeBar (mPageMenuBar);   // see Layers branch
 
-            auto syncPagePresetMenu = [safe, safeBar] (int i)
-            {
-                juce::ignoreUnused (i);
-                auto* bar = safeBar.getComponent();
-                if (bar == nullptr) return;
-                if (safe.getComponent() == nullptr) return;
-                bar->setMenuBuilder (
-                    [safe] (juce::Component* anchor)
-                    {
-                        if (auto* p = safe.getComponent())
-                            p->showPageActionsMenu (anchor);
-                    });
-            };
+            mPageMenuBar->setMenuBuilder (
+                [safe] (juce::Component* anchor)
+                {
+                    if (auto* p = safe.getComponent())
+                        p->showPageActionsMenu (anchor);
+                });
 
-            // I-0b (2026-05-02) / J-6 (2026-05-03): Inst page sub-tabs restructured.
-            //   0 = BaySickPedals (placeholder until I-15)
-            //   1 = BaySickNAM/IR
-            //  (Pre EQ8 M/S removed in J-6 EQ unification - Effects page only)
-            // K-3 (2026-05-05): sfizz sources (BaySickGuitars / BaySickBasses)
-            // add a "Piano Roll" tab at the end that nav-redirects to the
-            // unified PianoRollPage with this engine selected.  Tab dispatch
-            // identifies the redirect target by label so adding new tabs
-            // (K-5's Player tab) doesn't break the index-based nav.
-            const auto labels = ip->getActiveTabLabels();
-            mPageMenuBar->setTabSlots(labels,
-                [this, safe, safeBar, syncPagePresetMenu, labels](int i) {
+            mPageMenuBar->setTabSlots ({ "Pedals", "NAM/IR", "Piano Roll" },
+                [this, safe] (int i) {
                     auto* p = safe.getComponent();
                     if (p == nullptr) return;
-                    if (i >= 0 && i < (int) labels.size() && labels[i] == "Piano Roll")
-                    {
-                        // QA-E Sub-Phase A (2026-05-11): capture ALL state via
-                        // local stack variables BEFORE onTabSelected(4).  Two
-                        // destruction surfaces: (a) onTabSelected destroys this
-                        // page, so `p` becomes dangling; (b) onTabSelected calls
-                        // showPageForTab, which calls mPageMenuBar->setTabSlots,
-                        // which replaces THIS lambda's callback slot, freeing the
-                        // lambda's capture struct mid-invocation -- so `this->X`
-                        // access becomes a use-after-free too.  User-repro
-                        // 2026-05-11 BaySickBasses Piano Roll click crashed
-                        // initially at p->getPageIndex(); after that was
-                        // pre-captured it then crashed at this->mPianoRollPage.
-                        const auto src    = p->getSource();
-                        const int pageIdx = p->getPageIndex();
-                        const EngineKind k = (src == InstPage::Source::BaySickGuitars)
-                                              ? EngineKind::BaySickGuitars
-                                              : EngineKind::BaySickBasses;
-                        auto* prp = mPianoRollPage;
-                        auto* rbn = mRibbon.get();
-                        if (rbn != nullptr) rbn->selectTab (4);
-                        onTabSelected (4);
-                        if (prp != nullptr)
-                            prp->selectEngine ({ k, pageIdx });
-                        return;
-                    }
-                    p->switchTab (i);
-                    auto* bar = safeBar.getComponent();
-                    if (bar == nullptr) return;
-                    bar->updateTabActive (i);
-                    bar->setMidSideVisible (false);
-                    syncPagePresetMenu (i);
-                }, ip->getActiveTab(), ip->getPageColor());
-            syncPagePresetMenu (ip->getActiveTab());
+                    if (i == 0) { openInstPedalsWindow (p->getPageIndex()); return; }
+                    if (i == 1) { openInstNamIrWindow  (p->getPageIndex()); return; }
+
+                    // Piano Roll nav redirect.  QA-E Sub-Phase A (2026-05-11):
+                    // capture ALL state via locals BEFORE onTabSelected(4) --
+                    // the switch can destroy the page AND this lambda (see the
+                    // Layers branch comment for the full rationale).
+                    const auto src    = p->getSource();
+                    const int pageIdx = p->getPageIndex();
+                    const EngineKind k = (src == InstPage::Source::BaySickGuitars)
+                                          ? EngineKind::BaySickGuitars
+                                          : EngineKind::BaySickBasses;
+                    auto* prp = mPianoRollPage;
+                    auto* rbn = mRibbon.get();
+                    if (rbn != nullptr) rbn->selectTab (4);
+                    onTabSelected (4);
+                    if (prp != nullptr)
+                        prp->selectEngine ({ k, pageIdx });
+                }, -1, ip->getPageColor());
             mPageMenuBar->setMidSideVisible (false);
             mPageMenuBar->setFxRackSlot ([this, safe]
             {
@@ -6136,11 +6113,6 @@ void StandaloneEditor::showPageForTab(int tabId)
                 auto sb = mProcessor.makeSwingKnobBinding (swBase + "_mix", swBase + "_trunc");
                 mPageMenuBar->setSwingKnobSlot (sb.getMix, sb.setMix, sb.getTrunc, sb.setTrunc);
             }
-            // QA-Layout T3 (L23): the live-input clip-name label mount is
-            // gone -- nothing ever updated it on a live-input page, so it sat
-            // reading "(no audio loaded)" forever.  The label itself stays:
-            // sfizz sources still drive it on the AriaControlPanel title bar
-            // (program display, InstPage wires it at setEngine).
         }
         else if (auto* dp = dynamic_cast<DrumPage*>(mVisiblePage))
         {
@@ -9744,6 +9716,31 @@ void StandaloneEditor::spawnVoxTabIfMissing (int voxIdx, bool selectAfter)
         return true;
     });
 
+    // QA-Layout T4: "Send Notes to..." providers, replacing the pitch
+    // editor's findParentComponentOfClass escape (inside a contained window
+    // the parent chain never reaches this editor).  Types convert at this
+    // boundary so the pitch editor's header stays free of StandaloneEditor.h.
+    if (auto* ve = dynamic_cast<BaySickVocalEditor*> (cpRaw->getVocalEditor()))
+        if (auto* pe = dynamic_cast<BaySickPitchEditor*> (ve->getPitchPanel()))
+        {
+            pe->onListNoteTargets = [this]() -> std::vector<BaySickPitchEditor::NoteTarget>
+            {
+                std::vector<BaySickPitchEditor::NoteTarget> out;
+                for (const auto& t : listPitchNoteTargets())
+                    out.push_back ({ t.kind, t.pageIndex, t.label });
+                return out;
+            };
+            pe->onSendNotes = [this] (int kind, int pageIndex,
+                                      const std::vector<BaySickPitchEditor::SentNote>& notes)
+            {
+                std::vector<ContourNote> conv;
+                conv.reserve (notes.size());
+                for (const auto& n : notes)
+                    conv.push_back ({ n.startSec, n.endSec, n.midiNote });
+                sendPitchNotesToTab (kind, pageIndex, conv);
+            };
+        }
+
     // QA-ModelShell TS1: engine construction/registration is model-side
     // (EngineRig, done by VoxPage's ctor engine pick).  The view callback only
     // wires the dirty hook -- installed on the BaySickVocal processor, whose
@@ -13059,6 +13056,14 @@ void StandaloneEditor::hostPageInWindow (PageEntry& entry)
     if (mWorkspace == nullptr || entry.component == nullptr)
         return;
 
+    // QA-Layout T4 (L10): a live-input Inst tab has NO page window -- the
+    // pedals window is its player.  Refusing here covers every caller,
+    // including the project-load sweep (T5 reworks that sweep; until then
+    // this guard is what enforces L10 on load).
+    if (auto* lip = dynamic_cast<InstPage*> (entry.component.get()))
+        if (lip->getSource() == InstPage::Source::LiveInput)
+            return;
+
     // Already framed.  Several callers invoke this straight after adding a page
     // AND on tab selection, so the same tab can arrive twice; without this the
     // second call would destroy a live, positioned window and build a fresh one
@@ -13256,6 +13261,255 @@ void StandaloneEditor::openEffectEqWindow (int channelId, bool pre)
 
     contentRaw->onTitleChanged = [win] (const juce::String& t) { win->setTitle (t); };
     contentRaw->configureTitleStrip (*win->getPageMenu());
+}
+
+// ── QA-Layout T4 (Window-7): Vox sub-page + Inst Pedals/NAM-IR windows ───────
+namespace
+{
+// Thin window content hosting a PAGE-OWNED panel non-owned, re-resolving it
+// per tick (the EffectWindows satellite discipline: hold no raw pointers --
+// the panel's owner can be rebuilt or die under the window).  A resolve that
+// fails after having succeeded means the target died -> ask the owner to
+// close this window (same contract as EffectSlotWindow::onRequestClose:
+// nothing may touch this object after it fires).
+class PanelSatelliteView : public juce::Component,
+                           private juce::Timer
+{
+public:
+    explicit PanelSatelliteView (std::function<juce::Component*()> resolve)
+        : mResolve (std::move (resolve))
+    {
+        rehost();
+    }
+
+    ~PanelSatelliteView() override
+    {
+        // Detach only -- the panel belongs to its page and lives on.
+        if (mHosted != nullptr && mHosted->getParentComponent() == this)
+            removeChildComponent (mHosted);
+    }
+
+    std::function<void()> onRequestClose;
+
+    void resized() override
+    {
+        if (mHosted != nullptr && mHosted->getParentComponent() == this)
+            mHosted->setBounds (getLocalBounds());
+    }
+
+    // Peer-keyed poll, matching every other repeating UI cost in the shell.
+    void parentHierarchyChanged() override
+    {
+        if (getPeer() != nullptr) startTimerHz (4);
+        else                      stopTimer();
+    }
+
+private:
+    void timerCallback() override { rehost(); }
+
+    void rehost()
+    {
+        auto* p = mResolve ? mResolve() : nullptr;
+        if (p == nullptr)
+        {
+            if (mEverResolved && onRequestClose) onRequestClose();   // target died
+            return;
+        }
+        mEverResolved = true;
+        if (mHosted == p && p->getParentComponent() == this) return;
+        if (mHosted != nullptr && mHosted->getParentComponent() == this)
+            removeChildComponent (mHosted);
+        mHosted = p;
+        addAndMakeVisible (*p);
+        resized();
+    }
+
+    std::function<juce::Component*()>             mResolve;
+    juce::Component::SafePointer<juce::Component> mHosted;
+    bool                                          mEverResolved { false };
+};
+} // namespace
+
+void StandaloneEditor::openVoxSatelliteWindow (int voxIdx, VoxSat kind)
+{
+    static const char* kKeyTag[]  = { "chain", "pitch", "align", "namir" };
+    static const char* kTitles[]  = { "Vocal Chain", "BaySickPitch", "BaySickAlign", "BaySickNAM/IR" };
+    // Provisional floors -- Jeff's B.31.0 pass collects the real ones (T7).
+    static const int   kMinWs[]   = { 560, 900, 900, 640 };
+    static const int   kMinHs[]   = { 420, 560, 560, 420 };
+
+    const juce::String key = "voxsat:" + juce::String (voxIdx) + ":" + kKeyTag[(int) kind];
+    if (auto* existing = findAuxWindow (key)) { existing->toFront (true); return; }
+
+    juce::String tabName;
+    juce::Component::SafePointer<StandaloneEditor> safeThis (this);
+    auto findVoxPage = [safeThis, voxIdx]() -> VoxPage*
+    {
+        if (safeThis == nullptr) return nullptr;
+        for (auto* e : safeThis->mPages)
+        {
+            if (e == nullptr || e->component == nullptr) continue;
+            if (auto* vp = dynamic_cast<VoxPage*> (e->component.get()))
+                if (vp->getPageIndex() == voxIdx) return vp;
+        }
+        return nullptr;
+    };
+    if (auto* vp = findVoxPage()) tabName = vp->getTabName();
+    else return;   // no such tab -- nothing to open
+
+    auto resolve = [findVoxPage, kind]() -> juce::Component*
+    {
+        auto* vp = findVoxPage();
+        if (vp == nullptr) return nullptr;
+        auto* ve = dynamic_cast<BaySickVocalEditor*> (vp->getVocalEditor());
+        if (ve == nullptr) return nullptr;
+        switch (kind)
+        {
+            case VoxSat::Chain: return ve->getVocalChainPanel();
+            case VoxSat::Pitch: return ve->getPitchPanel();
+            case VoxSat::Align: return ve->getAlignPanel();
+            case VoxSat::NamIr: return ve->getNamIrPanel();
+        }
+        return nullptr;
+    };
+
+    auto content = std::make_unique<PanelSatelliteView> (resolve);
+    auto* contentRaw = content.get();
+    contentRaw->onRequestClose = [this, key] { closeAuxWindow (key); };
+
+    auto* win = openAuxWindow (key, key, tabName + " - " + kTitles[(int) kind],
+                               std::move (content),
+                               kMinWs[(int) kind], kMinHs[(int) kind]);
+    if (win == nullptr) return;
+
+    if (auto* bar = win->getPageMenu())
+    {
+        // The page Menu travels with every window of the instance.
+        bar->setMenuBuilder ([findVoxPage] (juce::Component* anchor)
+        {
+            if (auto* vp = findVoxPage()) vp->showPageActionsMenu (anchor);
+        });
+    }
+}
+
+void StandaloneEditor::openInstPedalsWindow (int instIdx)
+{
+    const juce::String key = "instsat:" + juce::String (instIdx) + ":pedals";
+    if (auto* existing = findAuxWindow (key)) { existing->toFront (true); return; }
+
+    juce::Component::SafePointer<StandaloneEditor> safeThis (this);
+    auto findInstPage = [safeThis, instIdx]() -> InstPage*
+    {
+        if (safeThis == nullptr) return nullptr;
+        for (auto* e : safeThis->mPages)
+        {
+            if (e == nullptr || e->component == nullptr) continue;
+            if (auto* ip = dynamic_cast<InstPage*> (e->component.get()))
+                if (ip->getPageIndex() == instIdx) return ip;
+        }
+        return nullptr;
+    };
+    auto* ip = findInstPage();
+    if (ip == nullptr) return;
+
+    auto resolve = [findInstPage]() -> juce::Component*
+    {
+        auto* p = findInstPage();
+        return p != nullptr ? p->getPedalsEditorComponent() : nullptr;
+    };
+
+    auto content = std::make_unique<PanelSatelliteView> (resolve);
+    auto* contentRaw = content.get();
+    contentRaw->onRequestClose = [this, key] { closeAuxWindow (key); };
+
+    // L10: for a LIVE-INPUT tab this window IS the player, so it wears the
+    // tab's name; sfizz tabs get the satellite-style suffix.
+    const bool liveInput = (ip->getSource() == InstPage::Source::LiveInput);
+    const juce::String title = liveInput ? ip->getTabName()
+                                         : ip->getTabName() + " - Pedals";
+
+    auto* win = openAuxWindow (key, key, title, std::move (content), 880, 480);
+    if (win == nullptr) return;
+
+    if (auto* bar = win->getPageMenu())
+    {
+        bar->setMenuBuilder ([findInstPage] (juce::Component* anchor)
+        {
+            if (auto* p = findInstPage()) p->showPageActionsMenu (anchor);
+        });
+        bar->setCenterTitle (BaySickPedalsEditor::getEngineTitle(),
+                             BaySickPedalsEditor::getEngineAccent());
+        // NAM/IR launcher on the pedals strip (L10).
+        juce::Component::SafePointer<StandaloneEditor> safe2 (this);
+        bar->setTabSlots ({ "NAM/IR" },
+            [safe2, instIdx] (int)
+            {
+                if (safe2 != nullptr) safe2->openInstNamIrWindow (instIdx);
+            }, -1, ip->getPageColor());
+        // Pedalboard preset button (T3 relocation, mounted here now that the
+        // pedals window exists).
+        if (auto* pe = dynamic_cast<BaySickPedalsEditor*> (ip->getPedalsEditorComponent()))
+            bar->addExtraRightComponent (pe->getPedalboardPresetButton(), 88);
+    }
+}
+
+void StandaloneEditor::openInstNamIrWindow (int instIdx)
+{
+    const juce::String key = "instsat:" + juce::String (instIdx) + ":namir";
+    if (auto* existing = findAuxWindow (key)) { existing->toFront (true); return; }
+
+    juce::Component::SafePointer<StandaloneEditor> safeThis (this);
+    auto findInstPage = [safeThis, instIdx]() -> InstPage*
+    {
+        if (safeThis == nullptr) return nullptr;
+        for (auto* e : safeThis->mPages)
+        {
+            if (e == nullptr || e->component == nullptr) continue;
+            if (auto* ip = dynamic_cast<InstPage*> (e->component.get()))
+                if (ip->getPageIndex() == instIdx) return ip;
+        }
+        return nullptr;
+    };
+    auto* ip = findInstPage();
+    if (ip == nullptr) return;
+
+    auto resolve = [findInstPage]() -> juce::Component*
+    {
+        auto* p = findInstPage();
+        return p != nullptr ? p->getNamIrEditorComponent() : nullptr;
+    };
+
+    auto content = std::make_unique<PanelSatelliteView> (resolve);
+    auto* contentRaw = content.get();
+    contentRaw->onRequestClose = [this, key] { closeAuxWindow (key); };
+
+    auto* win = openAuxWindow (key, key, ip->getTabName() + " - NAM/IR",
+                               std::move (content), 640, 420);
+    if (win == nullptr) return;
+
+    if (auto* bar = win->getPageMenu())
+        bar->setMenuBuilder ([findInstPage] (juce::Component* anchor)
+        {
+            if (auto* p = findInstPage()) p->showPageActionsMenu (anchor);
+        });
+}
+
+void StandaloneEditor::closeVoxSatellites (int voxIdx)
+{
+    const juce::String prefix = "voxsat:" + juce::String (voxIdx) + ":";
+    juce::StringArray keys;
+    for (const auto& aw : mAuxWindows)
+        if (aw.key.startsWith (prefix)) keys.add (aw.key);
+    for (const auto& k : keys) closeAuxWindow (k);
+}
+
+void StandaloneEditor::closeInstSatellites (int instIdx)
+{
+    const juce::String prefix = "instsat:" + juce::String (instIdx) + ":";
+    juce::StringArray keys;
+    for (const auto& aw : mAuxWindows)
+        if (aw.key.startsWith (prefix)) keys.add (aw.key);
+    for (const auto& k : keys) closeAuxWindow (k);
 }
 
 // CL-044 (QA-ModelShell TS7): the floating master analyzer.  One instance -- there

@@ -5,7 +5,6 @@
 #include "../BaySickNAMIR/BaySickNAMIREditor.h"
 #include "../Standalone/SlotComponent.h"
 #include "../Standalone/EffectEditorPanels.h"
-#include "../Standalone/BaySickTitleBar.h"   // QA-A (2026-05-09)
 
 // H-6c (2026-05-01): createEffectEditor lives in EffectEditorPanels.cpp; the
 // VocalChainPanel uses it to materialise per-slot inline editors.  Declaration
@@ -74,74 +73,9 @@ private:
     std::unique_ptr<juce::AudioProcessorEditor> mEditor;
 };
 
-// ─────────────────────────────────────────────────────────────────────────────
-// HostPanel - wraps an externally-owned child component so the editor can
-// inject things like the strip's Pre Rack EQ display into a sub-tab without
-// taking ownership.
-// ─────────────────────────────────────────────────────────────────────────────
-class BaySickVocalEditor::HostPanel : public juce::Component
-{
-public:
-    void setHosted (juce::Component* c)
-    {
-        if (mHosted == c) return;
-        if (mHosted) removeChildComponent (mHosted);
-        mHosted = c;
-        if (mHosted) addAndMakeVisible (*mHosted);
-        resized();
-    }
-
-    void paint (juce::Graphics& g) override
-    {
-        g.fillAll (juce::Colour (0xff14161a));
-        if (mHosted == nullptr)
-        {
-            g.setColour (juce::Colours::white.withAlpha (0.55f));
-            g.setFont (juce::Font (14.0f));
-            g.drawText ("(Pre Rack EQ - available when this Vox tab has a strip on the mixer)",
-                        getLocalBounds(), juce::Justification::centred);
-        }
-    }
-
-    void resized() override
-    {
-        if (mHosted) mHosted->setBounds (getLocalBounds().reduced (4));
-    }
-
-private:
-    juce::Component* mHosted { nullptr };
-};
-
-// ─────────────────────────────────────────────────────────────────────────────
-// PlaceholderPanel - used by the 4 sub-tabs whose content lands in follow-ups
-// ─────────────────────────────────────────────────────────────────────────────
-class BaySickVocalEditor::PlaceholderPanel : public juce::Component
-{
-public:
-    PlaceholderPanel (juce::String headline, juce::String body)
-        : mHeadline (std::move (headline)), mBody (std::move (body))
-    {
-    }
-
-    void paint (juce::Graphics& g) override
-    {
-        g.fillAll (juce::Colour (0xff14161a));
-
-        const auto b = getLocalBounds().reduced (40);
-        g.setColour (juce::Colours::white.withAlpha (0.85f));
-        g.setFont (juce::Font (24.0f, juce::Font::bold));
-        g.drawText (mHeadline, b.withHeight (40), juce::Justification::centred);
-
-        g.setColour (juce::Colours::white.withAlpha (0.55f));
-        g.setFont (juce::Font (14.0f));
-        auto bodyArea = b.withTrimmedTop (60);
-        g.drawFittedText (mBody, bodyArea, juce::Justification::centredTop, 8, 0.9f);
-    }
-
-private:
-    juce::String mHeadline;
-    juce::String mBody;
-};
+// QA-Layout T4: the dormant HostPanel + PlaceholderPanel classes are deleted
+// -- every sub-tab they were scaffolding for shipped real content long ago,
+// and nothing instantiated either.
 
 // ─────────────────────────────────────────────────────────────────────────────
 // BaySickVocalsPanel - realtime pitch correction + page-wide controls
@@ -152,10 +86,9 @@ class BaySickVocalEditor::BaySickVocalsPanel : public juce::Component,
 public:
     BaySickVocalsPanel (BaySickVocalProcessor& p) : mProc (p)
     {
-        // QA-A (2026-05-09): unified title bar at top of the panel, replacing
-        // the old "PAGE CONTROLS" g.drawText caption per STYLE-03.  Accent =
-        // bright teal (#0FAFA5), matching the Vox tab's active ribbon colour.
-        addAndMakeVisible (mTopTitleBar);
+        // QA-Layout T4: no internal title bar -- the hosting window's title
+        // strip shows the centered "BaySickVocals" name (Window-4 treatment,
+        // extended here now that this panel IS the Vox window's content).
 
         // ── Page-wide controls (top half) ───────────────────────────────────
         addAndMakeVisible (mMixSlider);
@@ -313,10 +246,6 @@ public:
         g.setColour (juce::Colours::white.withAlpha (0.08f));
         g.drawHorizontalLine (half, 0.0f, (float) getWidth());
 
-        // QA-A (2026-05-09): "PAGE CONTROLS" g.drawText caption removed --
-        // mTopTitleBar at y=0..32 now owns that role with engine name
-        // "BaySickVocals" instead of "PAGE CONTROLS" per STYLE-03.
-
         // Bottom-half caption preserved -- this is descriptive of the
         // section's contents (realtime correction widgets), not an engine
         // title, so it stays as a g.drawText caption for now.
@@ -328,18 +257,9 @@ public:
 
     void resized() override
     {
-        // QA-A (2026-05-09): title bar at the top of the panel.  Top-half
-        // content rect skips it via withTrimmedTop, then keeps the original
-        // 16-px horizontal margin and 8-px vertical breathing room (was 24
-        // before; reduced because the title bar now sits where "PAGE CONTROLS"
-        // used to be, providing its own visual chrome).
-        mTopTitleBar.setBounds (0, 0, getWidth(), BaySickTitleBar::kStandardHeight);
-
+        // QA-Layout T4: the internal title bar is gone -- content starts at 0.
         const int half = getHeight() / 2;
-        auto top = getLocalBounds()
-                       .withTrimmedTop (BaySickTitleBar::kStandardHeight)
-                       .removeFromTop (half - BaySickTitleBar::kStandardHeight)
-                       .reduced (16, 8);
+        auto top = getLocalBounds().removeFromTop (half).reduced (16, 8);
         auto bot = getLocalBounds().withTrimmedTop (half).reduced (16, 24);
 
         // Top half: Mix knob | A/B combo (QA-Fd: Bypass slot removed)
@@ -430,11 +350,6 @@ private:
     }
 
     BaySickVocalProcessor& mProc;
-
-    // QA-A (2026-05-09): unified title bar replaces the old "PAGE CONTROLS"
-    // g.drawText caption.  Accent = bright teal (#0FAFA5) -- same as the Vox
-    // tab's active ribbon colour at RibbonTabBar.cpp:20.
-    BaySickTitleBar mTopTitleBar { "BaySickVocals", juce::Colour (0xFF0FAFA5) };
 
     using SAtt = juce::AudioProcessorValueTreeState::SliderAttachment;
     using BAtt = juce::AudioProcessorValueTreeState::ButtonAttachment;
@@ -579,9 +494,11 @@ private:
 BaySickVocalEditor::BaySickVocalEditor (BaySickVocalProcessor& p)
     : juce::AudioProcessorEditor (&p), mProc (p)
 {
-    // H-6b (2026-05-01): tabs are PageMenuBar buttons (set by StandaloneEditor
-    // via mPageMenuBar->setTabSlots) -- this editor just owns 6 content panes
-    // and switches which one is visible based on setActiveTab.
+    // QA-Layout T4 (Window-7): all five panels are OWNED here (they were
+    // always-built even as tabs, and the offline analyses must survive a
+    // satellite window closing), but only the BaySickVocals main panel is
+    // this editor's CONTENT -- the other four are hosted non-owned by their
+    // contained windows through the accessors.
     mPanelBaySickVocals = std::make_unique<BaySickVocalsPanel> (p);
     mPanelVocalChain    = std::make_unique<VocalChainPanel>    (p);
     mPanelBaySickPitch  = std::make_unique<BaySickPitchEditor> (p);   // H-6b
@@ -589,13 +506,8 @@ BaySickVocalEditor::BaySickVocalEditor (BaySickVocalProcessor& p)
     mPanelBaySickNAMIR  = std::make_unique<NAMIRHostPanel> (p.getNamIrProcessor()); // H-6d
     // J-6 EQ unification (2026-05-03): Pre Rack EQ panel removed.
 
-    addChildComponent (*mPanelBaySickVocals);
-    addChildComponent (*mPanelVocalChain);
-    addChildComponent (*mPanelBaySickPitch);
-    addChildComponent (*mPanelBaySickAlign);
-    addChildComponent (*mPanelBaySickNAMIR);
+    addAndMakeVisible (*mPanelBaySickVocals);
 
-    setActiveTab (TabBaySickVocals);
     setSize (kMinW, kMinH);
 }
 
@@ -638,28 +550,10 @@ void BaySickVocalEditor::setAutomationPrefix (const juce::String& prefix)
     // the right-click Automate menu reads them off the clicked component.
 }
 
-juce::Component* BaySickVocalEditor::panelForTab (int idx) const noexcept
-{
-    switch (idx)
-    {
-        case TabBaySickVocals: return mPanelBaySickVocals.get();
-        case TabVocalChain:    return mPanelVocalChain   .get();
-        case TabBaySickPitch:  return mPanelBaySickPitch .get();
-        case TabBaySickAlign:  return mPanelBaySickAlign .get();
-        case TabBaySickNAMIR:  return mPanelBaySickNAMIR .get();
-        // J-6 EQ unification (2026-05-03): TabPreRackEQ removed.
-        default:               return nullptr;
-    }
-}
-
-void BaySickVocalEditor::setActiveTab (int idx)
-{
-    mActiveTab = juce::jlimit (0, (int) kNumTabs - 1, idx);
-    for (int i = 0; i < (int) kNumTabs; ++i)
-        if (auto* c = panelForTab (i))
-            c->setVisible (i == mActiveTab);
-    resized();
-}
+juce::Component* BaySickVocalEditor::getVocalChainPanel() const noexcept { return mPanelVocalChain   .get(); }
+juce::Component* BaySickVocalEditor::getPitchPanel()      const noexcept { return mPanelBaySickPitch .get(); }
+juce::Component* BaySickVocalEditor::getAlignPanel()      const noexcept { return mPanelBaySickAlign .get(); }
+juce::Component* BaySickVocalEditor::getNamIrPanel()      const noexcept { return mPanelBaySickNAMIR .get(); }
 
 void BaySickVocalEditor::setUndoContext (const UndoContext& ctx)
 {
@@ -676,6 +570,6 @@ void BaySickVocalEditor::paint (juce::Graphics& g)
 
 void BaySickVocalEditor::resized()
 {
-    if (auto* c = panelForTab (mActiveTab))
-        c->setBounds (getLocalBounds());
+    if (mPanelBaySickVocals)
+        mPanelBaySickVocals->setBounds (getLocalBounds());
 }

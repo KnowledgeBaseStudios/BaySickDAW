@@ -2432,10 +2432,12 @@ void BaySickPitchEditor::showVersionsMenu()
 
 void BaySickPitchEditor::showSendNotesMenu()
 {
-    auto* se = findParentComponentOfClass<StandaloneEditor>();
-    if (se == nullptr) return;
+    // QA-Layout T4: injected providers replace the findParentComponentOfClass
+    // escape -- inside a contained window the parent chain never reaches the
+    // app editor.
+    if (! onListNoteTargets || ! onSendNotes) return;
 
-    const auto targets = se->listPitchNoteTargets();
+    const auto targets = onListNoteTargets();
     juce::PopupMenu m;
     if (targets.empty())
         m.addItem (-1, "(no Layers / Bass / Drums / Clips tabs open)", false, false);
@@ -2447,20 +2449,19 @@ void BaySickPitchEditor::showSendNotesMenu()
         [self, targets] (int r)
         {
             if (! self || r <= 0 || r > (int) targets.size()) return;
-            auto* se2 = self->findParentComponentOfClass<StandaloneEditor>();
-            if (se2 == nullptr) return;
+            if (! self->onSendNotes) return;
 
             // MIDI only: the detected contour quantized to notes, normalized
             // so the first note starts the riff.  Slice pills are skipped
             // (no pitch identity).
-            std::vector<StandaloneEditor::ContourNote> notes;
+            std::vector<SentNote> notes;
             const auto& regions = self->mProc.mPitch.regions();
             double t0 = -1.0;
             for (const auto& reg : regions)
             {
                 if (reg.isSlice) continue;
                 if (t0 < 0.0) t0 = reg.dstStart();
-                StandaloneEditor::ContourNote n;
+                SentNote n;
                 n.startSec = reg.dstStart() - t0;
                 n.endSec   = reg.dstEnd()   - t0;
                 n.midiNote = juce::jlimit (0, 127,
@@ -2469,7 +2470,7 @@ void BaySickPitchEditor::showSendNotesMenu()
             }
             if (notes.empty()) return;
             const auto& tgt = targets[(size_t) (r - 1)];
-            se2->sendPitchNotesToTab (tgt.kind, tgt.pageIndex, notes);
+            self->onSendNotes (tgt.kind, tgt.pageIndex, notes);
         });
 }
 

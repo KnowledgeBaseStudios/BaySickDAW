@@ -156,6 +156,114 @@ Convention: Main Plan §0 "Batch Plans + Running Notes layout" (locked 2026-05-1
   deliberately NOT touched — not in L4's locked list; its page is rebuilt wholesale in T4
   (Window-7).
 
+## 2026-08-03 — Task 3 committed `5065a616` — full-screen toggle + engine title bars dissolved + preset relocation + Menu correction
+
+- **Build gate green — TWICE:** the initial T3 build, then a re-run after the mid-approval
+  L31 correction (below); five exit codes 0, four `vcxproj -> ...exe` link lines, zero
+  `error C` / `error LNK` / `error MSB` greps both times.  28 files, 566 insertions /
+  159 deletions.
+- **L5 full-screen toggle (REVERSES locked call 5a's no-maximize half, as the plan
+  records):** every WorkspaceWindow gets a `FillToggleButton` left of close — path-drawn
+  maximize/restore glyph, no font dependency.  `toggleWorkspaceFill()` saves current
+  bounds to `mRestoreBounds`, fills the workspace (parent-client space: workspace origin +
+  size, then `clampToWorkspace`), toggles back.  A manual title-drag or border-resize
+  while filled CLEARS the filled flag (`mouseDrag` + `Constrainer::applyBoundsToComponent`
+  — only user gestures route through the constrainer), so the next click fills again
+  rather than restoring a stale rect.  Button order right-to-left: close, fill toggle,
+  then PageMenuBar right-extras (preset).
+- **Window-4/L2 engine title bars dissolved:** VibePlayer / BaySickSynth / BaySickBass /
+  Harmless / BaySickPedals editors lost their internal BaySickTitleBar members + the 32px
+  layout row — content starts at 0 (VibePlayer's `boxRectFor` dropped its kHdrH terms,
+  Synth/Bass visualizers to y=0, Harmless dropped its removeFromTop, Pedals grid
+  full-height).  Each editor keeps identity as `getEngineTitle()` / `getEngineAccent()`
+  statics + `getTitleStripPresetButton()`.  `VibePlayerEditor::setInfoText` DELETED —
+  caller-less API whose only target was the dead bar.  The colored player name now renders
+  CENTERED on the window title strip via new `PageMenuBar::setCenterTitle`
+  (BaySickTitleBar::paintEngineName bloom painter, 15pt, rect sized to text since the
+  painter is left-anchored).  The small grey tab-title suppression behavior unchanged —
+  D7 reviews narrow-width collisions.
+- **Window-3 preset relocation:** pages (Layers/Bass/Drum/Clips) expose
+  `stripEngineTitle()` / `stripEngineAccent()` / `stripPresetButton()` (dynamic_cast
+  cascade over their editor types) + fire a new `onEngineEditorRebuilt` callback at the
+  end of `selectEngine`.  StandaloneEditor's page-show branches run a `syncStripChrome`
+  lambda at show AND wire it to the rebuild callback — needed because the add path SHOWS
+  the page BEFORE `applyEngineToNewestTabOfType` lands the engine, and a Drums kit-pad
+  pick can SWAP the engine while visible.  `PageMenuBar::ExtraComp` hardened raw
+  `Component*` -> SafePointer (an editor-owned mounted button dies on engine swap; dead
+  entries skipped in resized without consuming width); double-mount guarded by parent
+  check.
+- **RustyDrums back on the strip — reverses QA-G3Smoke G-16:** Player Preset (110px) +
+  Program combo (160px) moved from the AriaControlPanel title bar back onto the strip;
+  the existing page accessors from the pre-G-16 era made this trivial.  The Aria bar
+  itself STAYS (Guitars/Basses/Rusty identity — not in the dissolution list).
+  BaySickPedals' strip mount deliberately WAITS for its T4 window — its preset button is
+  unmounted in the interim; nobody runs the app before T4 lands (recorded, not silent).
+- **L23 + FINDING — fold-in, resolved in-region:** the live-input Inst page's clip-name
+  label mount removed (StandaloneEditor Inst branch).  The label is DUAL-USE — the member
+  stays because sfizz sources drive it as the program display on the Aria bar; only the
+  LiveInput strip mount (which nothing ever updated — permanent "(no audio loaded)")
+  died.  Caller-less `getClipFileLabel()` accessor deleted; InstPage.h comments
+  corrected.
+- **MID-APPROVAL CORRECTION (Jeff, in chat, before the commit landed):** T2's cut of L31
+  shipped "Menu" as a chrome TextButton — WRONG read of "text button".  Jeff wants a
+  NATIVE MENU-BAR-STYLE text heading, like "File" on a main window: flat text,
+  hover/press highlight only, no button chrome.  Fixed as `TitleStripMenuItem`
+  (TextButton subclass painting flat: WindowChrome::titleText 13pt centered + subtle
+  white hover fill) — one shared class, every window strip corrected at once.  The
+  correction rides this commit; the build gate re-ran green after the fix.
+- **PLAN CLARIFICATION (at Jeff's request, batch plan T10 body edited in this commit):**
+  T10's L13 "Add" entry is pinned to render exactly like the corrected "Menu" — a flat
+  TitleStripMenuItem-style text heading, NOT a chrome button; the mixer strip reads
+  "Menu  Add" like a native window's menu bar.  Also answered in chat: L30 (MIDI trigger
+  velocity -> Audio Settings beside the MIDI inputs) is confirmed T10 scope, and the
+  mixer add-buttons-to-dropdown work is T10 per the plan's sequencing (runs during the
+  sizing pass), not missing.
+- **`STANDALONE_UI_CHANGES.md`** gained the T3 entry incl. the L31 correction bullet.
+
+## 2026-08-03 — Task 4 in flight — D4 resolved (=c) + escapes + L22 landed (uncommitted)
+
+- **D4 RESOLVED (Jeff in chat, option c) — enumeration first, per the plan:** the Vox/Inst
+  ribbon dropdowns' "EQ" row has been MISLABELED DEAD WEIGHT since J-6 — it fires sub-page
+  index 1, which on a Vox tab opens the VOCAL CHAIN (tabs shifted when the Pre Rack EQ tab
+  was removed) and on an Inst tab hits whatever sits at slot 1 (NAM/IR on live-input,
+  Pedals on Guitars/Basses).  Jeff's ruling: under the L11 rework, EVERY instance type's
+  dropdown (Layers/Bass/Drums/Clips/Vox/Inst/Plugins) gets "Pre EQ" / "Post EQ" rows that
+  open that strip's Pre/Post EQ windows directly (the Effects satellites via
+  `openEffectEqWindow`), in addition to the per-instance window list.
+- **D6 RESOLVED FROM SOURCE (no pose needed — the plan's "pose only if ambiguous"):**
+  Guitars/Basses Inst tabs DO carry Pedals + NAM/IR today —
+  `InstPage::getActiveTabLabels` returns { engineLabel, "BaySickPedals",
+  "BaySickNAM/IR", "Piano Roll" } for sfizz sources — so they keep that carriage as
+  satellite windows opened from their title strips.
+- **FINDING (VoxPage, fix rides T4):** `VoxPage::showEngineContextMenu` is CALLER-LESS
+  dead code — its Lock / Rename / Duplicate entries + the wider factory+user preset root
+  are currently UNREACHABLE on Vox pages (the Menu dropdown's `showPageActionsMenu` only
+  has Save/Load Page Preset + Delete).  T4 merges the orphaned content into
+  `showPageActionsMenu` (the same treatment the other pages got in T2), restoring the
+  lost access.  Also dead: VoxPage's `mEnginePicker` member + `buildEnginePicker` stub
+  (H-6b left scaffolding, never shown) — cleaned in-region with the T4 VoxPage work.
+- **LANDED (uncommitted, ride the T4 commit) — findParentComponentOfClass escapes,
+  converted BEFORE re-hosting per the plan:** `BaySickPitchEditor::showSendNotesMenu` now
+  uses injected `onListNoteTargets` / `onSendNotes` callbacks (local mirror types
+  NoteTarget/SentNote keep StandaloneEditor.h out of the header);
+  `BaySickPitchSubEditor::refreshFromRegion` now fires an injected `onTitleChanged`
+  (wired by BaySickPitchSubEditorWindow to `setName`) instead of
+  `findParentComponentOfClass<DocumentWindow>`.
+- **LANDED (uncommitted, same commit) — L22 saturation fix:** BaySickVocalProcessor
+  `sat_type` range widened 0..1 -> 0..2 with default Console (the 0..1 range clamped
+  Tape=2 back to Console on every per-block APVTS push), plus SaturationDSP.h `mSatType`
+  default Tube -> Console covering the pre-first-push window — both exactly per the
+  plan's locked code block.
+- **T4 remaining (design settled, in progress):** BaySickVocalEditor loses its in-page
+  tab switcher (layout = BaySickVocals main panel only) + gains panel accessors; four Vox
+  satellites (Vocal Chain / Pitch / Align / NAM-IR) + the Inst Pedals/NAM-IR satellites
+  host the page-owned panels NON-OWNED through per-tick resolvers (the EffectWindows
+  satellite pattern); L10 LiveInst = the pedals window IS the player (no Inst page
+  window; NAM/IR button on the pedals strip); the ribbon "Pages:" section becomes a
+  per-instance window-row model (StandaloneEditor builds label+action rows; the ribbon
+  displays) with the D4=c EQ rows appended for every type; persistence keys designed per
+  T5's scheme.
+
 ## Diagnostic Instrumentation Catalog (Rule 4)
 
 | Site | Tag | Purpose | Disposition |

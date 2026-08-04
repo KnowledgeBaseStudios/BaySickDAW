@@ -22,18 +22,6 @@
 class BaySickVocalEditor : public juce::AudioProcessorEditor
 {
 public:
-    // Tab indices map 1:1 to the page-menu-bar slot order.
-    enum TabIdx
-    {
-        TabBaySickVocals = 0,
-        TabVocalChain    = 1,
-        TabBaySickPitch  = 2,
-        TabBaySickAlign  = 3,
-        TabBaySickNAMIR  = 4,
-        // J-6 EQ unification (2026-05-03): TabPreRackEQ removed.
-        kNumTabs
-    };
-
     explicit BaySickVocalEditor (BaySickVocalProcessor& p);
     ~BaySickVocalEditor() override = default;
 
@@ -49,10 +37,19 @@ public:
     // J-6 EQ unification (2026-05-03): setPreRackEQ removed; Pre Rack EQ is
     // now exclusively edited on the Effects page.
 
-    // Driven by the PageMenuBar tab-slot buttons (StandaloneEditor wires the
-    // setTabSlots callback to call this).  Default = TabBaySickVocals.
-    void setActiveTab (int idx);
-    int  getActiveTab() const noexcept { return mActiveTab; }
+    // QA-Layout T4 (Window-7): the in-page tab views are retired -- this
+    // editor's own layout is the BaySickVocals main panel ONLY.  The four
+    // former sub-tabs live in their own contained windows; the owner reaches
+    // the panels through these to host them (non-owned) and wire callbacks.
+    // This editor still OWNS all five panels (L9: no sys cost -- they were
+    // always-built even as tabs, and the offline analyses they carry must
+    // survive a satellite window closing).
+    // Defined in the .cpp: the panel types are only complete there, and an
+    // inline upcast from a forward-declared type does not compile.
+    juce::Component* getVocalChainPanel() const noexcept;
+    juce::Component* getPitchPanel()      const noexcept;
+    juce::Component* getAlignPanel()      const noexcept;
+    juce::Component* getNamIrPanel()      const noexcept;
 
     // QA-Fd 9a: global undo context, forwarded to the BaySickPitch panel.
     void setUndoContext (const UndoContext& ctx);
@@ -60,11 +57,10 @@ public:
 private:
     BaySickVocalProcessor& mProc;
 
-    // ── Sub-tab content components (owned directly; one visible at a time) ─
+    // ── Panel classes (all owned; main panel is the editor's content, the
+    //    other four are hosted by their contained windows -- T4) ────────────
     class BaySickVocalsPanel;
     class VocalChainPanel;
-    class PlaceholderPanel;
-    class HostPanel;
     class NAMIRHostPanel;
 
     // QA-ApvtsAutomation: "vox{N}_" from the owning page; empty until set.
@@ -76,10 +72,6 @@ private:
     std::unique_ptr<juce::Component>    mPanelBaySickAlign;   // H-6c: BaySickAlignEditor
     std::unique_ptr<juce::Component>    mPanelBaySickNAMIR;   // H-6d: NAMIRHostPanel
     // J-6 EQ unification (2026-05-03): mPanelPreRackEQ removed.
-
-    int mActiveTab { TabBaySickVocals };
-
-    juce::Component* panelForTab (int idx) const noexcept;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (BaySickVocalEditor)
 };

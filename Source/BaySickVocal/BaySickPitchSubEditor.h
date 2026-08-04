@@ -47,6 +47,11 @@ public:
     void beginLaneEdit();
     void commitLaneEdit (const juce::String& label);
 
+    // QA-Layout T4: hosting window wires this to its own title setter --
+    // replaces the findParentComponentOfClass<DocumentWindow> escape so the
+    // sub-editor never assumes what frames it.
+    std::function<void (const juce::String&)> onTitleChanged;
+
 private:
     class Lane;
     class Browser;

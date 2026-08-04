@@ -46,33 +46,12 @@ public:
     void paint   (juce::Graphics&) override;
     void resized () override;
 
-    void switchTab    (int idx);
-    int  getActiveTab () const noexcept { return mActiveTab; }
-
-    // I-0b: tab labels surfaced through the PageMenuBar's setTabSlots.  Mirrors
-    // VoxPage::getTabLabels() pattern.
-    // K-3 (2026-05-05): tab list now depends on source mode.  LiveInput shows
-    // the classic 2-tab layout (Pedals + NAM/IR).  sfizz sources add a "Piano
-    // Roll" tab that nav-redirects to the unified PianoRollPage with this
-    // page's engine selected.  K-5 will add a "Player" tab at the front for
-    // the ARIA control panel.  Caller in StandaloneEditor uses the label
-    // strings (not raw indices) to identify nav-redirect targets, so adding
-    // tabs here doesn't require updating index-based dispatch.
-    static juce::StringArray getTabLabels()
-    {
-        return { "BaySickPedals", "BaySickNAM/IR" };
-    }
-    juce::StringArray getActiveTabLabels() const
-    {
-        if (mSource == Source::LiveInput)
-            return { "BaySickPedals", "BaySickNAM/IR" };
-        // K-5 (2026-05-05): sfizz source.  Player sub-tab labeled with the
-        // engine name sits leftmost (hosts the ARIA control panel); BaySickPedals
-        // and BaySickNAM/IR follow; Piano Roll nav-redirect is the rightmost tab.
-        const juce::String engineLabel =
-            (mSource == Source::BaySickGuitars) ? "BaySickGuitars" : "BaySickBasses";
-        return { engineLabel, "BaySickPedals", "BaySickNAM/IR", "Piano Roll" };
-    }
+    // QA-Layout T4 (Window-7/L10): sub-tab switching is retired.  A sfizz
+    // tab's window shows the Aria player; Pedals + NAM/IR live in contained
+    // windows hosted NON-OWNED through these accessors.  A LiveInput tab has
+    // NO page window at all -- the pedals window IS its player.
+    juce::Component* getPedalsEditorComponent() const noexcept { return mPedalsEditor.get(); }
+    juce::Component* getNamIrEditorComponent()  const noexcept { return mNamIrEditor.get(); }
 
     int          getPageIndex() const noexcept { return mPageIndex; }
     // 2026-04-28 (G-4): page accent matches the mixer Inst-bus colour
@@ -188,7 +167,6 @@ private:
     void rebuildEngineChain();
 
     int                                          mPageIndex { 0 };
-    int                                          mActiveTab { 0 };
     Source                                       mSource    { Source::LiveInput };
     juce::String                                 mTabName;
     bool                                         mLocked { false };
@@ -202,8 +180,8 @@ private:
 private:
     // K-5 (2026-05-05): ARIA control panel + Player tab host.  Created in the
     // ctor with a null binding; setSource(BaySickGuitars/Basses) re-binds via
-    // rebuildPlayerPanel() and loads the kit's GUI XML.  Visible only when
-    // source != LiveInput AND active sub-tab == 0.
+    // rebuildPlayerPanel() and loads the kit's GUI XML.  QA-Layout T4: the
+    // page's only content -- visible whenever source != LiveInput.
     std::unique_ptr<juce::Component>             mPlayerTab;
     std::unique_ptr<AriaControlPanel>            mAriaPanel;
     // K-5 UI fix (2026-05-05): replaced ComboBox with a TextButton labeled
@@ -245,7 +223,6 @@ private:
     // ownedStages); non-owning view pointer here.
     juce::AudioProcessor*                        mPedalsProc { nullptr };
     std::unique_ptr<juce::AudioProcessorEditor>  mPedalsEditor;
-    std::unique_ptr<juce::Component>             mPedalsPlaceholder;
 
     // QA-A Phase 4.4 (2026-05-09): the I-15 polish kHeaderRowH = 36 chrome
     // strip is gone.  mPedalsHeaderTitle + mPedalsPresetBtn deleted along

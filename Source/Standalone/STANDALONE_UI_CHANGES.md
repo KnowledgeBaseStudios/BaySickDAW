@@ -446,3 +446,40 @@ shortcut. Held notes release on mode-off, octave shift, and tab switch.
   `TextButton` — wrong read of "text button".  It is now `TitleStripMenuItem`: a flat
   native-menu-bar-style text heading (like "File" on a main window) with only a hover/press
   highlight, same dropdown behavior.  One shared class → every window strip corrected at once.
+
+---
+
+## 2026-08-03 — QA-Layout T4: Window-7 — Vox sub-page windows, LiveInst restructure, per-instance dropdown window lists
+
+**Files:** `BaySickVocalEditor.h/.cpp`, `BaySickPitchEditor.h/.cpp`, `BaySickPitchSubEditor.h/.cpp`,
+`BaySickVocalProcessor.cpp`, `SaturationDSP.h`, `VoxPage.h/.cpp`, `InstPage.h/.cpp`,
+`RibbonTabBar.h/.cpp`, `StandaloneEditor.h/.cpp`
+
+- **Vox (Window-7/L9):** `BaySickVocalEditor` is no longer a tab switcher — its content is the
+  BaySickVocals main panel only (whose internal title bar dissolved; the Vox window strip shows
+  the centered "BaySickVocals").  The four former sub-tabs (Vocal Chain / BaySickPitch /
+  BaySickAlign / NAM-IR) are contained windows: `openVoxSatelliteWindow` hosts the editor-OWNED
+  panels non-owned through `PanelSatelliteView` (per-tick resolver; a dead target closes the
+  window).  The Vox strip carries four launcher slots (activeIdx −1) that open them.  Keys:
+  `voxsat:<idx>:<kind>`, Session persistence until T5.
+- **LiveInst (L10):** a live-input Inst tab has NO page window — the pedals window IS its player
+  (tab click opens/fronts it; `hostPageInWindow` refuses LiveInput InstPages so the load sweep
+  can't frame one).  The pedals window strip carries the page Menu, centered "BaySickPedals",
+  the pedalboard preset button (T3's deferred mount), and a NAM/IR launcher.  sfizz Inst tabs
+  frame the page (Aria player) with Pedals / NAM/IR / Piano Roll strip slots (D6: they carried
+  both before, they keep them).  `InstPage` sub-tab machinery retired; Pedals/NAM-IR editors
+  stay page-owned, satellite-hosted (`instsat:<idx>:<kind>`).
+- **Ribbon dropdown "Pages:" (L11/D4=c):** now a per-instance WINDOW list built by
+  `StandaloneEditor::buildPageWindowRows` — one body serves the labels AND the pick (rebuilt at
+  pick time, so indices can't go stale).  LiveInst rows read "Pedals" / "NAM/IR".  EVERY type's
+  list ends with "Pre EQ" / "Post EQ" rows opening that strip's EQ windows (Rusty uses the kit
+  bus).  The old mislabeled "EQ" row (it opened the Vocal Chain on Vox since J-6) is gone;
+  `onSubPageSelected` slimmed to Effects/Builder.
+- **Escapes (pre-re-hosting, per plan):** `BaySickPitchEditor::showSendNotesMenu` uses injected
+  `onListNoteTargets`/`onSendNotes` (wired at Vox spawn); `BaySickPitchSubEditor` title updates
+  via injected `onTitleChanged`.
+- **L22:** vocal-chain `sat_type` widened 0..2 (default Console) + `SaturationDSP` default
+  Console — Tape now sticks.
+- **VoxPage cleanup:** caller-less `showEngineContextMenu` merged into the Menu dropdown
+  (restores Lock/Rename/Duplicate + the factory preset root); dead picker scaffolding removed.
+- Vox/Inst tab close now closes that instance's satellites.

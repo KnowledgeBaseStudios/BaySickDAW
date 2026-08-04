@@ -735,33 +735,16 @@ void RibbonTabBar::showInstanceDropdown(TabType type, juce::Rectangle<int> tabBo
 
         m.addSeparator();
 
-        // Sub-page navigation - opens the active instance and switches to that sub-tab
-        // Negative IDs reserved for menu actions: -1/-2/-3 (rename/delete/add) and
-        // -10..-13 (sub-page items) so we can disambiguate from instance IDs.
-        // Drums has 4 sub-tabs (Drum Kit added in D2); Layers/Bass have 3.
-        // Note: PopupMenu has no addSectionHeading; use a disabled "Pages:" item.
+        // QA-Layout T4 (L11/D4=c): the "Pages:" section is the instance's
+        // real WINDOW list, built by the editor (incl. Pre/Post EQ rows).
+        // Negative IDs reserved for menu actions: -1/-2 (rename/delete),
+        // -3..-6 (adds), -99 (headers); rows take -10 - i.
+        // Note: PopupMenu has no addSectionHeading; use a disabled item.
         m.addItem(-99, "Pages:", false /* enabled */, false);
-        // J-6 EQ unification (2026-05-03): EQ sub-page item removed from
-        // Drums/Layers/Bass/Clip dropdowns - pre + post EQ for every strip
-        // now live exclusively on the Effects page.  Vox/Inst keep "EQ"
-        // because BaySickVocalEditor still hosts the Pre Rack EQ as one of
-        // its internal tabs (deferred clean-up).
-        if (type == TabType::Drums)
-        {
-            m.addItem(-10, "  Drum Kit");
-            m.addItem(-11, "  Player");
-            m.addItem(-12, "  Piano Roll");
-        }
-        else if (type == TabType::Vox || type == TabType::Inst)
-        {
-            m.addItem(-10, "  Player");
-            m.addItem(-11, "  EQ");
-        }
-        else
-        {
-            m.addItem(-10, "  Player");
-            m.addItem(-11, "  Piano Roll");
-        }
+        juce::StringArray pageRows;
+        if (onListPageWindowRows) pageRows = onListPageWindowRows (activeId);
+        for (int i = 0; i < pageRows.size(); ++i)
+            m.addItem (-10 - i, "  " + pageRows[i]);
 
         m.addSeparator();
 
@@ -986,15 +969,12 @@ void RibbonTabBar::showInstanceDropdown(TabType type, juce::Rectangle<int> tabBo
                     onAddVoxFromExport (
                         mVoxExportShown[(size_t)(result - kVoxExportBaseId)].fullPath);
             }
-            else if (result <= -10 && result >= (type == TabType::Drums ? -12
-                                                : (type == TabType::Vox || type == TabType::Inst) ? -11
-                                                : -11))
+            else if (result <= -10 && result > -99)
             {
-                // Sub-page item: open the active instance, then notify the
-                // editor to switch its sub-tab.
-                // Drums (D2): -10=DrumKit(0), -11=Player(1), -12=PianoRoll(2), -13=EQ(3).
-                // Vox/Inst (G-4): -10=Player(0), -11=EQ(1) - no Piano Roll.
-                // Layers/Bass/Clip: -10=Player(0), -11=PianoRoll(1), -12=EQ(2).
+                // QA-Layout T4: window-list row.  Navigate to the instance
+                // first (the row's window belongs to it), then let the editor
+                // act on the row -- it rebuilds the row model at pick time so
+                // the index cannot go stale.
                 int tabId = getActiveTabForType(type);
                 if (tabId >= 0)
                 {
@@ -1004,7 +984,7 @@ void RibbonTabBar::showInstanceDropdown(TabType type, juce::Rectangle<int> tabBo
                     repaint();
                     if (onTabSelected) onTabSelected(tabId);
                 }
-                if (onSubPageSelected) onSubPageSelected(type, -10 - result);
+                if (onPageWindowRowPicked) onPageWindowRowPicked (activeId, -10 - result);
             }
             else
             {

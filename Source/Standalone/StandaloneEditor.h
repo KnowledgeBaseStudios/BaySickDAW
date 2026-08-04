@@ -233,6 +233,23 @@ private:
 
     void openEffectSlotWindow (int channelId, int slotIndex);
     void openEffectEqWindow   (int channelId, bool pre);
+
+    // QA-Layout T4 (Window-7): the Vox sub-page windows + the Inst
+    // Pedals/NAM-IR windows.  Content hosts the PAGE-OWNED panel non-owned
+    // through a per-tick resolver (the EffectWindows satellite discipline).
+    // Persist keys are T5's type+instance scheme ("voxsat:<idx>:<kind>" /
+    // "instsat:<idx>:<kind>"); stores stay Session until T5 wires the
+    // three-lifetime model.
+    enum class VoxSat { Chain = 0, Pitch = 1, Align = 2, NamIr = 3 };
+    void openVoxSatelliteWindow  (int voxIdx, VoxSat kind);
+    // The pedals window doubles as the LIVE-INPUT player window (L10): its
+    // strip carries the page Menu, the pedalboard preset button, and a
+    // NAM/IR launcher.
+    void openInstPedalsWindow (int instIdx);
+    void openInstNamIrWindow  (int instIdx);
+    // Tab-close hygiene: a dead tab must not leave its satellites open.
+    void closeVoxSatellites  (int voxIdx);
+    void closeInstSatellites (int instIdx);
     // CL-044 (QA-ModelShell TS7): the floating master spectrum analyzer.  A
     // satellite window like the effect windows -- no ribbon slot, opened from
     // View > Master Analyzer.
@@ -324,6 +341,11 @@ private:
     void onTabClosed(int tabId);
     void onSubPageSelected(RibbonTabBar::TabType type, int subPageIndex);
     void showPageForTab(int tabId);
+    // QA-Layout T4 (L11/D4=c): one function builds the instance dropdown's
+    // window-row model AND executes a pick -- pickRow < 0 collects labels,
+    // pickRow >= 0 runs that row's action.  Single body keeps the list and
+    // the dispatch in lockstep (an index can never mean two things).
+    juce::StringArray buildPageWindowRows (int tabId, int pickRow);
     void refreshPatternBox();
 
     // Create page components for each type

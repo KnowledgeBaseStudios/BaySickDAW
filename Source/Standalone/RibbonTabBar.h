@@ -47,7 +47,15 @@ public:
     // that can live in more than one tab (BaySickPlayer, Harmless, BaySickSynth)
     // get a side submenu to choose.  This fires with the resolved pair.
     std::function<void(TabType, const juce::String& engineName)> onAddEngineRequest;
-    std::function<void(TabType, int subPageIndex)>    onSubPageSelected; // Effects/Builder/Drums
+    std::function<void(TabType, int subPageIndex)>    onSubPageSelected; // Effects/Builder
+    // QA-Layout T4 (L11/D4=c): the instance dropdowns' "Pages:" section is a
+    // per-instance WINDOW list built by the editor (incl. the Pre/Post EQ
+    // rows).  Labels come from onListPageWindowRows; a pick navigates to the
+    // tab first, then routes back by row index.  The editor rebuilds the row
+    // model at pick time, so the indices cannot go stale against a page that
+    // changed while the menu was open.
+    std::function<juce::StringArray(int tabId)>       onListPageWindowRows;
+    std::function<void(int tabId, int rowIdx)>        onPageWindowRowPicked;
     // J-6 (2026-05-03): "+ Add BaySickRustyDrums" entry in the Drums dropdown.
     // Singleton - fires only when no instance currently exists.
     std::function<void()>                             onAddBaySickRustyDrumsRequest;

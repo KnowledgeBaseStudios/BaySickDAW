@@ -6,13 +6,6 @@
 #include "../PluginProcessor.h"
 #include "../EngineRig.h"   // QA-ModelShell TS1: model-side engine owner
 
-namespace
-{
-    constexpr int kHeaderRowH = 36;
-    constexpr int kPad        = 12;
-    constexpr int kPickerW    = 220;
-    constexpr int kFilenameW  = 320;
-}
 
 // QA-E Task 4 (2026-05-12): the 2026-04-29 debug `isInterestedInFileDrag`
 // + `filesDropped` handlers (originally added to test whether dropping a WAV
@@ -42,8 +35,10 @@ VoxPage::VoxPage (VibeSynthProcessor& proc, int pageIndex)
     // tagging (see §9 17th Forks entry); per-page label is redundant.
 
     // H-6b (2026-05-01): Vox tabs are always BaySickVocal.  Pick on construction.
+    // QA-Layout T4 (Window-7): no sub-tab switching -- the page shows the
+    // BaySickVocals main panel; the four former sub-tabs are contained
+    // windows opened from the title strip.
     selectEngine (EngineType::BaySickVocal);
-    switchTab (0);
 }
 
 VoxPage::~VoxPage()
@@ -59,14 +54,6 @@ void VoxPage::setTabName (const juce::String& n)
     if (mFullProcessor != nullptr)
         mFullProcessor->engineRig().renameTab (TabKind::Vox, mPageIndex, n);
     repaint();
-}
-
-void VoxPage::buildEnginePicker()
-{
-    // H-6b (2026-05-01): No engine picker on Vox tabs anymore.  BaySickVocal
-    // is the only engine; instantiated unconditionally in the ctor.  The
-    // page header bar stays minimal - clip file label only.  The right-click
-    // page actions menu lives on the ribbon tab itself, not here.
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -110,59 +97,6 @@ static void addVoxPresetDirToMenu (juce::PopupMenu& menu,
     }
 }
 
-void VoxPage::showEngineContextMenu()
-{
-    constexpr int kIdLock           = 1;
-    constexpr int kIdRename         = 5;
-    constexpr int kIdDuplicate      = 12;
-    constexpr int kIdSavePagePreset = 20;
-    constexpr int kIdLoadPresetBase = 500;
-    constexpr int kIdDelete         = 99;
-
-    juce::PopupMenu menu;
-    menu.addItem (kIdLock, "Lock", true, mLocked);
-
-    menu.addSeparator();
-    menu.addItem (kIdRename,    "Rename...");
-    menu.addItem (kIdDuplicate, "Duplicate Vox (new tab)");
-
-    menu.addSeparator();
-    menu.addItem (kIdSavePagePreset, "Save Page Preset As...",
-                  mVocalProc != nullptr);
-
-    juce::Array<juce::File> presetXmls;
-    {
-        juce::PopupMenu loadSub;
-        const auto root = voxPresetsRootDir();
-        if (root.isDirectory())
-            addVoxPresetDirToMenu (loadSub, root, kIdLoadPresetBase, presetXmls);
-        if (presetXmls.isEmpty())
-            loadSub.addItem (-1, "(no presets installed)", false, false);
-        menu.addSubMenu ("Load Page Preset", loadSub);
-    }
-
-    menu.addSeparator();
-    menu.addItem (kIdDelete, "Delete Vox", ! mLocked);
-
-    juce::Component::SafePointer<VoxPage> self (this);
-    // H-6b: anchor on the page itself since the engine picker is gone.
-    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this),
-        [self, presetXmls = std::move (presetXmls), kIdLoadPresetBase] (int r)
-        {
-            if (! self || r <= 0) return;
-            if (r == kIdLock)        { self->setLocked (! self->mLocked); return; }
-            if (r == kIdRename    && self->onRenameRequested)    { self->onRenameRequested();    return; }
-            if (r == kIdDuplicate && self->onDuplicateRequested) { self->onDuplicateRequested(); return; }
-            if (r == kIdSavePagePreset) { self->savePagePreset();   return; }   // G-7: full chain
-            if (r == kIdDelete)         { self->requestDelete();    return; }   // G-7: prompt before delete
-            if (r >= kIdLoadPresetBase
-                && r <  kIdLoadPresetBase + presetXmls.size())
-            {
-                self->loadPagePreset (presetXmls[r - kIdLoadPresetBase]);   // G-7: full chain
-                return;
-            }
-        });
-}
 
 void VoxPage::saveVoxPagePreset()
 {
@@ -313,48 +247,54 @@ void VoxPage::loadPagePreset (const juce::File& xml)
     takeStateSnapshot();
 }
 
+// QA-Layout T4: the old showEngineContextMenu was CALLER-LESS after H-6b --
+// its Lock / Rename / Duplicate entries and the wider factory+user preset
+// root were unreachable.  Merged here (the T2 treatment), restoring access;
+// one Delete only.
 void VoxPage::showPageActionsMenu (juce::Component* anchor)
 {
+    constexpr int kIdLock           = 1;
+    constexpr int kIdRename         = 5;
+    constexpr int kIdDuplicate      = 12;
     constexpr int kIdSavePagePreset = 100;
-    constexpr int kIdDeleteTab      = 101;
     constexpr int kIdLoadBase       = 1000;
+    constexpr int kIdDelete         = 99;
 
     juce::PopupMenu menu;
+    menu.addItem (kIdLock, "Lock", true, mLocked);
+
+    menu.addSeparator();
+    menu.addItem (kIdRename,    "Rename...");
+    menu.addItem (kIdDuplicate, "Duplicate Vox (new tab)");
+
+    menu.addSeparator();
     menu.addItem (kIdSavePagePreset, "Save Page Preset As...",
                   getEngineProcessor() != nullptr);
 
     juce::Array<juce::File> presetXmls;
     {
         juce::PopupMenu loadSub;
-        const auto root = PagePresetIO::myPresetsDirForPageKind (PagePresetIO::PageKind::Vox);
+        const auto root = voxPresetsRootDir();
         if (root.isDirectory())
-        {
-            juce::Array<juce::File> files;
-            root.findChildFiles (files, juce::File::findFiles, false, "*.xml");
-            files.sort();
-            for (auto& f : files)
-            {
-                const int id = kIdLoadBase + presetXmls.size();
-                presetXmls.add (f);
-                loadSub.addItem (id, f.getFileNameWithoutExtension());
-            }
-        }
+            addVoxPresetDirToMenu (loadSub, root, kIdLoadBase, presetXmls);
         if (presetXmls.isEmpty())
             loadSub.addItem (-1, "(no page presets saved)", false, false);
         menu.addSubMenu ("Load Page Preset", loadSub);
     }
 
-    // Delete on the hamburger too (Jeff, 2026-08-02) -- see LayersPage.
     menu.addSeparator();
-    menu.addItem (kIdDeleteTab, "Delete Vox", ! mLocked);
+    menu.addItem (kIdDelete, "Delete Vox", ! mLocked);
 
     juce::Component::SafePointer<VoxPage> safeThis (this);
     menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (anchor),
         [safeThis, presetXmls = std::move (presetXmls), kIdLoadBase] (int r)
         {
             if (! safeThis || r <= 0) return;
+            if (r == kIdLock)           { safeThis->setLocked (! safeThis->mLocked); return; }
+            if (r == kIdRename    && safeThis->onRenameRequested)    { safeThis->onRenameRequested();    return; }
+            if (r == kIdDuplicate && safeThis->onDuplicateRequested) { safeThis->onDuplicateRequested(); return; }
             if (r == kIdSavePagePreset) { safeThis->savePagePreset(); return; }
-            if (r == kIdDeleteTab)      { safeThis->requestDelete();  return; }
+            if (r == kIdDelete)         { safeThis->requestDelete();  return; }
             if (r >= kIdLoadBase && r < kIdLoadBase + presetXmls.size())
             {
                 safeThis->loadPagePreset (presetXmls[r - kIdLoadBase]);
@@ -535,20 +475,6 @@ void VoxPage::setSongTimeSelProviders (std::function<void(float,float)> setFn,
         bv->onSetSongTimeSel = mSetSongTimeSel;
         bv->onGetSongTimeSel = mGetSongTimeSel;
     }
-}
-
-void VoxPage::switchTab (int idx)
-{
-    // H-6b (2026-05-01) / J-6 (2026-05-03): forward outer tab-slot click to
-    // BaySickVocalEditor's setActiveTab.  Tab labels:
-    //   0 BaySickVocals, 1 Vocal Chain, 2 BaySickPitch, 3 BaySickAlign,
-    //   4 BaySickNAM/IR  (Pre Rack EQ tab removed in J-6 EQ unification)
-    mActiveTab = juce::jlimit (0, 4, idx);
-    if (auto* ed = dynamic_cast<BaySickVocalEditor*> (mVocalEditor.get()))
-        ed->setActiveTab (mActiveTab);
-    if (mVocalEditor) mVocalEditor->setVisible (true);
-    resized();
-    repaint();
 }
 
 // H-6b (2026-05-01): setProcessor was inline-set previously; promoted to a

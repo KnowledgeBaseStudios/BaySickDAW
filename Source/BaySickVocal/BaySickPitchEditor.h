@@ -56,6 +56,17 @@ public:
     // QA-Fd 9a: global undo plumb (VoxPage -> BaySickVocalEditor -> here).
     void setUndoContext (const UndoContext& ctx) { mUndoCtx = ctx; }
 
+    // QA-Layout T4 (Window-7): "Send Notes to..." providers, injected by
+    // StandaloneEditor at page wiring.  This editor is re-hosted into its own
+    // contained window -- a desktop component -- where
+    // findParentComponentOfClass can no longer reach the app editor.  Local
+    // mirror types keep StandaloneEditor.h out of this header.
+    struct NoteTarget { int kind; int pageIndex; juce::String label; };
+    struct SentNote   { double startSec; double endSec; int midiNote; };
+    std::function<std::vector<NoteTarget>()> onListNoteTargets;
+    std::function<void (int kind, int pageIndex,
+                        const std::vector<SentNote>&)> onSendNotes;
+
     // Shared view state (seconds domain, composite-relative).
     double pixelsPerSecond() const noexcept { return mPps; }
     double scrollSeconds()   const noexcept { return mScroll; }

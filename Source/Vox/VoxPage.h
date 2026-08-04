@@ -46,16 +46,11 @@ public:
     void paint   (juce::Graphics&) override;
     void resized () override;
 
-    void switchTab    (int idx);
-    int  getActiveTab () const noexcept { return mActiveTab; }
-
-    // H-6b (2026-05-01) / J-6 (2026-05-03): tab labels surfaced through the
-    // PageMenuBar's setTabSlots.  Pre Rack EQ removed in J-6 EQ unification.
-    static juce::StringArray getTabLabels()
-    {
-        return { "BaySickVocals", "Vocal Chain", "BaySickPitch",
-                 "BaySickAlign",  "BaySickNAM/IR" };
-    }
+    // QA-Layout T4 (Window-7): sub-tab switching is retired -- the page shows
+    // the BaySickVocals main panel; Vocal Chain / BaySickPitch / BaySickAlign
+    // / NAM-IR live in contained windows opened from the title strip, hosted
+    // NON-OWNED through the vocal editor's panel accessors.
+    juce::AudioProcessorEditor* getVocalEditor() const noexcept { return mVocalEditor.get(); }
 
     int          getPageIndex() const noexcept { return mPageIndex; }
     // 2026-04-28 (G-4): page accent matches the mixer Vox-bus colour
@@ -124,10 +119,8 @@ public:
     void requestDelete ();
 
 private:
-    void buildEnginePicker();
     void layoutEditor (juce::Rectangle<int> r);
     juce::AudioProcessorEditor* activeEditor() const;
-    void showEngineContextMenu();
 
     // QA-Fa recovery: stop-gated auto re-analyze poller (see the .cpp).
     void timerCallback() override;
@@ -138,25 +131,10 @@ private:
     juce::int64 mPitchAutoAttempted { 0 };
     int         mPitchAutoStable    { 0 };
 
-    // G-6: ComboBox subclass that fires onRightClick on right-button click
-    // (left-click still opens the dropdown for engine selection).
-    class RightClickEngineCombo : public juce::ComboBox
-    {
-    public:
-        std::function<void()> onRightClick;
-        void mouseDown (const juce::MouseEvent& e) override
-        {
-            if (e.mods.isPopupMenu()) { if (onRightClick) onRightClick(); return; }
-            juce::ComboBox::mouseDown (e);
-        }
-    };
-
     int                                          mPageIndex { 0 };
-    int                                          mActiveTab { 0 };
     juce::String                                 mTabName;
     bool                                         mLocked { false };
 
-    RightClickEngineCombo                        mEnginePicker;
     EngineType                                   mEngineType { EngineType::None };
     std::unique_ptr<juce::AudioProcessor>        mPlayerProc;        // VibePlayerProcessor (H-6b: dead -- never created; enum back-compat only)
     // QA-ModelShell TS1: non-owning view of the rig-owned BaySickVocal

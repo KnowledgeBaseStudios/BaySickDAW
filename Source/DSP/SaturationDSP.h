@@ -170,7 +170,9 @@ public:
     float mOut         { 0.0f };
     bool  mAutoGain    { false };   // 9b
     int   mOsLog2      { 2 };       // C2: default 2 = 4x  (shared by Tube/Console + Tape)
-    Type  mSatType     { Type::Tube }; // H-7: default Tube preserves prior audio
+    Type  mSatType     { Type::Console }; // QA-Layout T4 (L22): Console matches the
+                                          // vocal-chain param default, covering the
+                                          // window before the first APVTS push
     bool  mVocalBody   { false };      // H-7: vocal-body EQ post-saturation
     HarmonicsMode mHarmonicsMode { HarmonicsMode::Normal };  // H-7
     ConsoleMode   mConsoleMode  { ConsoleMode::Clean };  // Console Clean/Dirty voicing

@@ -70,10 +70,9 @@ InstPage::InstPage (VibeSynthProcessor& proc, int pageIndex)
     mDirtyListener.dirtyFlag = &mPageDirty;
     mDirtyListener.suppress  = &mSuppressDirty;
 
-    // I-0b: file label retained for header chrome (re-parented into the
-    // PageMenuBar's right slot when the page becomes visible -- mirrors Vox).
-    // Not addAndMakeVisible'd directly on the page because the menu bar will
-    // host it.
+    // sfizz program display -- hosted on the AriaControlPanel title bar by
+    // rebuildPlayerPanel (QA-Layout T3/L23 removed its live-input strip
+    // mount; nothing ever updated it there).
     mClipFileLabel.setJustificationType (juce::Justification::centredLeft);
     mClipFileLabel.setColour (juce::Label::textColourId,        juce::Colour (0xff66bbff));
     mClipFileLabel.setColour (juce::Label::backgroundColourId,  juce::Colour (0xff1a1a1a));
@@ -101,10 +100,14 @@ InstPage::InstPage (VibeSynthProcessor& proc, int pageIndex)
         }
     }
 
+    // QA-Layout T4 (Window-7/L10): the Pedals + NAM/IR editors are OWNED here
+    // but no longer page children -- their contained windows host them
+    // non-owned through the accessors.  For a LiveInput tab the PEDALS window
+    // IS the player (this page is never framed); sfizz tabs frame this page
+    // showing the Aria player.
     if (mNamIrProc != nullptr)
     {
         mNamIrEditor.reset (mNamIrProc->createEditor());
-        if (mNamIrEditor) addChildComponent (*mNamIrEditor);
         // QA-ApvtsAutomation: NAM/IR param ids are bare literals shared by every
         // Inst page, so automation keys need this page's index to stay distinct.
         if (auto* ne = dynamic_cast<BaySickNAMIREditor*> (mNamIrEditor.get()))
@@ -114,26 +117,20 @@ InstPage::InstPage (VibeSynthProcessor& proc, int pageIndex)
     if (mPedalsProc != nullptr)
     {
         mPedalsEditor.reset (mPedalsProc->createEditor());
-        if (mPedalsEditor) addChildComponent (*mPedalsEditor);
         // QA-ApvtsAutomation: per-instance channel prefix; each pedal's lane key
         // is this plus the slot's stable uuid, so lanes survive pedal reordering.
         if (auto* pe = dynamic_cast<BaySickPedalsEditor*> (mPedalsEditor.get()))
             pe->setAutomationPrefix ("inst" + juce::String (pageIndex) + "_pedals");
 
-        // QA-A 4.4 (2026-05-09): hook the pedalboard preset button (now
-        // hosted in BaySickPedalsEditor's title bar trailing area) back to
-        // this page's existing showPedalboardPresetMenu() routing.
+        // QA-A 4.4 (2026-05-09): hook the pedalboard preset button back to
+        // this page's existing showPedalboardPresetMenu() routing (the button
+        // itself mounts on the pedals window's title strip -- T3/T4).
         if (auto* pe = dynamic_cast<BaySickPedalsEditor*> (mPedalsEditor.get()))
             pe->onPedalboardPresetMenu = [this] { showPedalboardPresetMenu(); };
     }
-    // Placeholder is no longer used post-I-15 but the field stays declared so
-    // the layoutContent() guarded path below still compiles.
-    (void) mPedalsPlaceholder;
 
-    // K-5 (2026-05-05): Player sub-tab host.  Hidden when source = LiveInput.
-    // Construction binds with an empty Binding (no engine yet); rebuildPlayerPanel
-    // re-binds when setSource flips to a sfizz source AND the engine exists in
-    // PluginProcessor.
+    // K-5 (2026-05-05): sfizz player host.  The page's ONLY content now --
+    // stays hidden for LiveInput tabs (which are never framed).
     mPlayerTab = std::make_unique<juce::Component>();
     mPlayerTab->setName ("Inst Player Tab");
     addChildComponent (*mPlayerTab);
@@ -172,8 +169,6 @@ InstPage::InstPage (VibeSynthProcessor& proc, int pageIndex)
 
     // Hook dirty tracker for the live engine.
     attachDirtyListener();
-
-    switchTab (0);
 }
 
 void InstPage::setTabName (const juce::String& n)
@@ -819,14 +814,14 @@ void InstPage::setSource (Source s)
         mProgramButton->setButtonText (label);
         mProgramButton->setTooltip (tip);
     }
-    // K-5 fix #1 (2026-05-05): refresh visibility under the new label list.
-    // Switching from LiveInput → BaySickGuitars/Basses changes which component
-    // is mapped to mActiveTab (e.g. index 0 was "BaySickPedals", now "Player").
-    // Re-running switchTab(mActiveTab) re-evaluates the label-based dispatch
-    // and flips the right component visible.  Caps to the new label range.
-    const auto labels = getActiveTabLabels();
-    if (mActiveTab >= (int) labels.size()) mActiveTab = 0;
-    switchTab (mActiveTab);
+    // QA-Layout T4: the sfizz player is the page's only content -- visible
+    // for sfizz sources, hidden for LiveInput (whose tab is never framed;
+    // the pedals window is its player per L10).
+    if (mPlayerTab)
+    {
+        mPlayerTab->setVisible (mSource != Source::LiveInput);
+        resized();
+    }
     if (onSourceChanged) onSourceChanged (mSource);
 }
 
@@ -1197,36 +1192,6 @@ void InstPage::setProcessor (VibeSynthProcessor* p)
     // EQ is bound exclusively by EffectsPage (mixer_inst_<N>_preeq_*).
 }
 
-void InstPage::switchTab (int idx)
-{
-    // K-5 (2026-05-05): label-based dispatch - sub-tab indices vary by source
-    // mode (LiveInput has 2 tabs, sfizz sources have 4).  Resolve the active
-    // label first, then flip visibility on the components it represents.
-    const auto labels = getActiveTabLabels();
-    if (idx < 0 || idx >= (int) labels.size()) return;
-    mActiveTab = idx;
-
-    const juce::String active = labels[idx];
-    const bool isPlayer  = (active == "BaySickGuitars" || active == "BaySickBasses");
-    const bool isPedals  = (active == "BaySickPedals");
-    const bool isNamIr   = (active == "BaySickNAM/IR");
-    // "Piano Roll" is nav-redirect only (StandaloneEditor handles it before
-    // calling switchTab) - never the active in-page tab.
-
-    if (mPlayerTab)         mPlayerTab        ->setVisible (isPlayer);
-    if (mPedalsPlaceholder) mPedalsPlaceholder->setVisible (isPedals);
-    if (mPedalsEditor)      mPedalsEditor    ->setVisible (isPedals);
-    if (mNamIrEditor)       mNamIrEditor     ->setVisible (isNamIr);
-
-    // I-15 polish: BaySickPedals header chrome only on the Pedals sub-tab.
-    // QA-A 4.4 (2026-05-09): mPedalsHeaderTitle + mPedalsPresetBtn deleted
-    // along with the page header chrome.  The pedalboard preset button
-    // (now inside BaySickPedalsEditor's title bar trailing area) inherits
-    // visibility from the editor itself, so no explicit setVisible call here.
-
-    resized();
-    repaint();
-}
 
 // QA-E Task 4 (2026-05-12): setClipFilePath deleted.  Inst file-association
 // lives in PatternManager AudioLibrary via pageOwnerChannelId tagging.
@@ -1417,13 +1382,8 @@ void InstPage::resized()
 
 void InstPage::layoutContent (juce::Rectangle<int> r)
 {
-    if (mPedalsPlaceholder && mPedalsPlaceholder->isVisible())
-        mPedalsPlaceholder->setBounds (r);
-    if (mPedalsEditor && mPedalsEditor->isVisible())
-        mPedalsEditor->setBounds (r);
-    if (mNamIrEditor && mNamIrEditor->isVisible())
-        mNamIrEditor->setBounds (r);
-    // K-5 (2026-05-05): Player tab fills the same content area when active.
+    // QA-Layout T4: Pedals + NAM/IR live in their own contained windows --
+    // the sfizz player is the page's only content.
     if (mPlayerTab && mPlayerTab->isVisible())
     {
         mPlayerTab->setBounds (r);

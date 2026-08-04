@@ -127,9 +127,11 @@ BaySickVocalProcessor::createLayout()
     addB ("comp_autoMakeup", "Compressor Auto Makeup",  false);
 
     // H-7 (2026-05-01) -- Saturation stage params (Type umbrella + Vocal Body
-    // + harmonic-routing mode).  Existing presets default to Tube + body off
-    // + Normal harmonics -> audio identical to pre-H-7.
-    addI ("sat_type",          "Saturation Type",          0, 1, 0);   // 0=Tube, 1=Console
+    // + harmonic-routing mode).
+    // QA-Layout T4 (L22): range 0..1 clamped Tape=2 back to Console on every
+    // per-block APVTS push, so Tape could never stick on the vocal chain.
+    // Widened to 0..2; default Console (Jeff's ruling).
+    addI ("sat_type",          "Saturation Type",          0, 2, 1);   // 0=Tube, 1=Console, 2=Tape
     addB ("sat_vocalBody",     "Saturation Vocal Body",    false);
     addI ("sat_harmonicsMode", "Saturation Harmonics Mode", 0, 2, 1);  // 0=Lo, 1=Normal, 2=Hi
 
