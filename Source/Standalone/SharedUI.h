@@ -317,8 +317,10 @@ public:
     void clearExtraRightComponents();
 
     // ── Tab slot buttons (owned, laid out after ≡) ────────────────────────────
-    // Call setTabSlots when a Layers/Bass/Drums page becomes visible.
-    // Call clearTabSlots when switching to a page with no sub-tabs.
+    // QA-Layout T15: player pages no longer mount slot clusters (their nav
+    // entries live in the Menu dropdown).  Remaining users: the EQ windows'
+    // Pre/Post pair, PianoRollPage's jump cluster, the pedals window's NAM/IR
+    // launcher.  Call clearTabSlots when reconfiguring a bar without slots.
     void setTabSlots(const juce::StringArray& labels,
                      std::function<void(int)> onTabClick,
                      int activeIdx = 0,

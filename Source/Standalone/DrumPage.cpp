@@ -1140,6 +1140,9 @@ void DrumPage::showContextMenu (juce::Component* anchor, bool fromKit)
     constexpr int kIdDelete    = 99;
 
     juce::PopupMenu menu;
+    // T15: nav entries only on the Menu-dropdown shape -- a kit pad's
+    // per-drum context menu is not a window menu.
+    if (! fromKit && onBuildWindowNavMenu) { onBuildWindowNavMenu (menu); menu.addSeparator(); }
     menu.addItem (kIdLock, "Lock Drum", true, mLocked);
 
     // Polyphony toggle - engine-specific param dispatch.

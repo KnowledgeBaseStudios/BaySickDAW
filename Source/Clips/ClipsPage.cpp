@@ -134,6 +134,7 @@ void ClipsPage::showPageActionsMenu (juce::Component* anchor)
     constexpr int kIdDelete         = 99;
 
     juce::PopupMenu menu;
+    if (onBuildWindowNavMenu) { onBuildWindowNavMenu (menu); menu.addSeparator(); }
     menu.addItem (kIdLock, "Lock", true, mLocked);
 
     menu.addSeparator();

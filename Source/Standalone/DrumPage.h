@@ -178,6 +178,10 @@ public:
     void savePagePreset   (std::function<void()> onSaved = {});
     void loadPagePreset   (const juce::File& xml);
     void showPageActionsMenu (juce::Component* anchor);
+    // QA-Layout T15: the title strip's nav buttons dissolved into the Menu
+    // dropdown -- the editor injects the window/view entries at the top of
+    // the page-actions popup (showContextMenu, !fromKit only) through this hook.
+    std::function<void(juce::PopupMenu&)> onBuildWindowNavMenu;
 
     // XML-string variants used by kit save/load so the full chain
     // (engine + strip params + insert rack + post-EQ) round-trips per drum

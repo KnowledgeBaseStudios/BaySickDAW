@@ -429,6 +429,80 @@ Convention: Main Plan §0 "Batch Plans + Running Notes layout" (locked 2026-05-1
   floors + layout reworks) and T8 (Window-6 collapse, D1/D2 re-docket) WAIT on
   the diag doc.
 
+## 2026-08-03 — Task 9 committed `43313911` — piano-roll control-lane header-drag resize
+
+- **Build gate — two locked-exe blocks, then green:** the first run hit the EXPECTED
+  LNK1104 on the Release link (Jeff mid-sizing-pass in the Release exe; per the
+  exe-lock convention, no rebuild until he was out) — the code compiled clean in both
+  configs, and Debug + both helpers were green on that run.  A second relink attempt
+  also hit the lock (Jeff was adding a late Vocal Chain take).  Final relink after he
+  closed the app: five exit codes 0, four `vcxproj -> ...exe` link lines, zero
+  `error C` / `error LNK` / `error MSB` greps.  7 files, 270 insertions /
+  31 deletions (PianoRoll.h/.cpp, DrumKitGrid.h/.cpp, StandaloneEditor.cpp,
+  STANDALONE_UI_CHANGES.md, this file).
+- **Header-drag resize:** the 16px lane header doubles as the resize handle — a 3px
+  drag threshold decides drag-vs-click, and the mode dropdown moved from mouseDown
+  to mouseUp so a clean click still opens it; up-down resize cursor over the header.
+- **ONE shared height for every lane app-wide:** new `ControlLane::get/setUserHeight`
+  statics (clamped kHeaderH 16 = collapsed min .. kHeight 240 = max).
+  DrumKitControlLane mirrors with the identical gesture and reads the same statics
+  (DrumKitGrid.cpp now includes PianoRoll.h); the other containers lockstep off
+  their existing 200ms timers (resized() when lane height != the shared value).
+  The grid keeps its 120px floor.  Dead constants deleted: both containers' kLaneH
+  aliases + DrumKitControlLane::kHeight.
+- **Persistence — new `<ControlLane h= visible=>` element in the project
+  `<UIState>`** (the T5 lifetime-3 store — rides autosave/crash flush), restored at
+  the top of `deserializeUIState` BEFORE the tab rebuild.  `visible` = the last
+  settled Velocity Lane toggle from ANY container, stored via a
+  `ControlLane::get/setDefaultVisible` static — the default new containers open
+  with; in-session toggles stay per-container.
+- **Placement call (flagged to Jeff on the commit surface):** the element lives in
+  the PROJECT store, NOT settings.xml — the settings writer is strictly
+  WorkspaceWindow's window-record store — so lane height follows the project, not
+  the machine.
+- **`STANDALONE_UI_CHANGES.md`** gained the T9 entry.
+
+## 2026-08-03 — Sizing pass complete: diag doc reviewed + map approved; new Task 15 ruled in (strip buttons dissolve into Menu)
+
+- **The hand-back:** Jeff finished the sizing pass and handed back
+  `window-sizing-diag.txt` — 13,287 raw lines -> 37 settled groups after the
+  last-line-per-key/title/mode parse, plus a late Vocal Chain take he flagged in
+  chat.
+- **MID-SIZING FINDING + RULING — lands NOW as Task 15, before T10:** every player
+  page window's title-strip buttons sitting between the Menu dropdown and the swing
+  knob stop being strip buttons and become entries inside that window's own Menu
+  dropdown.  Per page: Rusty + Drums {Drum Kit, Player, Piano Roll};
+  Layers/Bass/Clips {Player, Piano Roll}; Vox {Vocal Chain, BaySickPitch,
+  BaySickAlign, NAM/IR}; Inst {Pedals, NAM/IR, Piano Roll}; Plugins {Piano Roll}.
+  Explicitly EXCLUDED (Jeff: fine as-is): the Piano Roll page's cluster (target
+  pill / Player Page / FX Rack) and the Pedals satellite window's NAM/IR button.
+  Purpose: declutter + make the centered strip titles visible.  ALSO in Task 15:
+  BaySickRustyDrums, BaySickGuitars, BaySickBasses never got the T3 title
+  treatment — their internal title bands dissolve and their names go centered on
+  the title strip like every other engine.  (Jeff caught this from his sizing
+  screenshots; my first two readings of the ask were wrong — the corrected scope
+  is the above.)
+- **SIZING MAP APPROVED (Jeff, single approval over the 8-line list):**
+  engine-attributed page sizes — Harmless 1047x455, BaySickPlayer 490x455 (Clips
+  too), BaySickSynth + BaySickBass 558x455; Mixer 486x455, Builder 486x268,
+  Effects rack 357x268, Piano Roll page 691x268, Vox 1534x455, Inst
+  Guitars/Basses 1047x455 each, Rusty 1047x455; sub-pages — Vocal Chain 1047x723,
+  BaySickPitch 1534x724, BaySickAlign 1047x723, NAM/IR 843x563 (Vox + LiveInst
+  same layout), Pedals board 1534x455; Pre/Post EQ + Master Analyzer 1047x455
+  each.
+- **Effect generics:** Basic 691x268, Advanced 1047x268 (the 13 toggled panels);
+  the no-toggle full panels (Flanger, Gate, De-reverb, FET/Opto/CS compressor
+  variants) 691x268 per the Gate exemplar; ALL pedal-native panels 358x268
+  (normalized from Bass Compressor 358x267 + Polyphonic Synth 355x268).  Three
+  stray 1022x482 lines discarded as default-open-size noise (LiveInst 10 pedals +
+  no-mode Compressor + no-mode Limiter).  The Limiter/Maximizer re-check after
+  T13 (BLU-110) stays flagged; anything not fitting its generic gets fixed when
+  found (Jeff's rule).
+- **Sequencing:** T7/T8 now UNBLOCKED (the approved map = T7's real floors input).
+  Order: Task 15 now -> T10 -> T11 (D3 workshop first) -> T7 -> T8.  T15 lands
+  before T7 DELIBERATELY: it changes strip contents, which affects the min widths
+  T7 will encode.
+
 ## Diagnostic Instrumentation Catalog (Rule 4)
 
 | Site | Tag | Purpose | Disposition |

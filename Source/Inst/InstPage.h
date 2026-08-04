@@ -154,6 +154,10 @@ public:
     void savePagePreset (std::function<void()> onSaved = {});
     void loadPagePreset (const juce::File& xml);
     void showPageActionsMenu (juce::Component* anchor);
+    // QA-Layout T15: the title strip's nav buttons dissolved into the Menu
+    // dropdown -- the editor injects the window/view entries at the top of
+    // the page-actions popup through this hook.
+    std::function<void(juce::PopupMenu&)> onBuildWindowNavMenu;
     void requestDelete ();
 
 private:
@@ -216,6 +220,13 @@ public:
     // source is sfizz-driven.  Always reads "Load Guitar" - actual loaded
     // program surfaces on the clip-file label next to it.
     juce::TextButton* getProgramButton() const { return mProgramButton.get(); }
+
+    // QA-Layout T15: the sfizz AriaControlPanel title bar is dissolved; the
+    // widgets it hosted mount on the hosting window's title strip instead
+    // (StandaloneEditor wires them per page-show).
+    juce::Label*      getClipFileLabel() { return &mClipFileLabel; }
+    juce::TextButton* getCutSelfButton() { return &mCutSelfBtn; }
+    juce::TextButton* getCutModeButton() { return &mCutModeBtn; }
 
 private:
 

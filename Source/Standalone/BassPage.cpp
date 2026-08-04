@@ -458,6 +458,7 @@ void BassPage::showPageActionsMenu (juce::Component* anchor)
     constexpr int kIdDelete    = 99;
 
     juce::PopupMenu menu;
+    if (onBuildWindowNavMenu) { onBuildWindowNavMenu (menu); menu.addSeparator(); }
     menu.addItem (kIdLock, "Lock Bass", true, mLocked);
 
     // Polyphony - engine-specific param.

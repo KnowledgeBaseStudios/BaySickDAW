@@ -5743,35 +5743,39 @@ void StandaloneEditor::showPageForTab(int tabId)
                     });
             };
 
-            mPageMenuBar->setTabSlots({"Player", "Piano Roll"},
-                [this, safe, safeBar, syncPagePresetMenu](int i) {
+            // QA-Layout T15: the strip's nav buttons dissolved into the Menu
+            // dropdown (entries injected at the top of the page-actions
+            // popup).  Action items carry itemID -1 and self-dispatch, so
+            // they coexist with every id-dispatched page menu.
+            lp->onBuildWindowNavMenu = [this, safe, syncPagePresetMenu] (juce::PopupMenu& m)
+            {
+                auto* page = safe.getComponent();
+                const bool onPlayer = page != nullptr && page->getActiveTab() == 0;
+                m.addItem ("Player", true, onPlayer, [safe, syncPagePresetMenu]
+                {
                     auto* p = safe.getComponent();
                     if (p == nullptr) return;
-                    if (i == 1)
-                    {
-                        // QA-E Sub-Phase A (2026-05-11): capture ALL state via
-                        // local stack variables BEFORE onTabSelected(4).  The page
-                        // switch can destroy both the source page (so `p` becomes
-                        // dangling) AND this lambda itself (mPageMenuBar replaces
-                        // its callbacks during showPageForTab, freeing the lambda's
-                        // capture struct mid-invocation), so any access to `this->X`
-                        // or `p->X` after the switch reads freed memory.
-                        const int pageIdx = p->getPageIndex();
-                        auto* prp = mPianoRollPage;
-                        auto* rbn = mRibbon.get();
-                        if (rbn != nullptr) rbn->selectTab (4);
-                        onTabSelected (4);
-                        if (prp != nullptr)
-                            prp->selectEngine ({ EngineKind::Layer, pageIdx });
-                        return;
-                    }
-                    p->switchTab(i);
-                    auto* bar = safeBar.getComponent();
-                    if (bar == nullptr) return;
-                    bar->updateTabActive(i);
-                    bar->setMidSideVisible(false);
-                    syncPagePresetMenu (i);
-                }, lp->getActiveTab(), lp->getPageColor());
+                    p->switchTab (0);
+                    syncPagePresetMenu (0);
+                });
+                m.addItem ("Piano Roll", [this, safe]
+                {
+                    auto* p = safe.getComponent();
+                    if (p == nullptr) return;
+                    // QA-E Sub-Phase A (2026-05-11): capture ALL state via
+                    // local stack variables BEFORE onTabSelected(4).  The page
+                    // switch can destroy the source page (so `p` becomes
+                    // dangling), so any `p->X` after the switch reads freed
+                    // memory.
+                    const int pageIdx = p->getPageIndex();
+                    auto* prp = mPianoRollPage;
+                    auto* rbn = mRibbon.get();
+                    if (rbn != nullptr) rbn->selectTab (4);
+                    onTabSelected (4);
+                    if (prp != nullptr)
+                        prp->selectEngine ({ EngineKind::Layer, pageIdx });
+                });
+            };
             syncPagePresetMenu (lp->getActiveTab());
             mPageMenuBar->setMidSideVisible(false);
             mPageMenuBar->setFxRackSlot ([this, safe]
@@ -5811,28 +5815,29 @@ void StandaloneEditor::showPageForTab(int tabId)
             }
         }
         // QA-ModelShell TS6 (BLU-447) -- MISSED ENTIRELY, fixed TS7 2026-07-30.
-        // showPageForTab had NO Plugins branch, so a hosted-instrument page got no
-        // slot cluster at all: no Piano Roll button, no FX Rack jump.  The Freeze
-        // button was the only control on the bar, because that one is wired from a
-        // single unconditional call at the end of this function -- which is the
-        // only reason the omission was visible instead of silent.
+        // showPageForTab had NO Plugins branch, so a hosted-instrument page got
+        // no nav controls at all: no Piano Roll jump, no FX Rack jump.  The
+        // Freeze button was the only control on the bar, because that one is
+        // wired from a single unconditional call at the end of this function --
+        // which is the only reason the omission was visible instead of silent.
         //
-        // ONE slot, not the usual "Player / Piano Roll" pair (Jeff, 2026-07-30):
-        // a PluginsPage has no sub-pages to switch BETWEEN -- it shows the
-        // plugin's own editor and nothing else -- so an inert "Player" button
-        // would be a control that does nothing.  activeIdx = -1 leaves it
-        // unhighlighted, which is correct: you are on the player, not the roll.
+        // ONE nav entry, not the usual "Player / Piano Roll" pair (Jeff,
+        // 2026-07-30): a PluginsPage has no sub-pages to switch BETWEEN -- it
+        // shows the plugin's own editor and nothing else -- so an inert
+        // "Player" entry would be a control that does nothing.
         else if (auto* pp = dynamic_cast<PluginsPage*>(mVisiblePage))
         {
             juce::Component::SafePointer<PluginsPage> safe (pp);
 
-            mPageMenuBar->setTabSlots ({"Piano Roll"},
-                [this, safe](int) {
+            // QA-Layout T15: strip nav button dissolved into the Menu dropdown.
+            pp->onBuildWindowNavMenu = [this, safe] (juce::PopupMenu& m)
+            {
+                m.addItem ("Piano Roll", [this, safe]
+                {
                     auto* p = safe.getComponent();
                     if (p == nullptr) return;
                     // Same use-after-free discipline as the Layers branch:
-                    // capture every value on the stack BEFORE onTabSelected,
-                    // which can destroy both `p` and this lambda.
+                    // capture every value on the stack BEFORE onTabSelected.
                     const int pageIdx = p->getPageIndex();
                     auto* prp = mPianoRollPage;
                     auto* rbn = mRibbon.get();
@@ -5840,7 +5845,8 @@ void StandaloneEditor::showPageForTab(int tabId)
                     onTabSelected (4);
                     if (prp != nullptr)
                         prp->selectEngine ({ EngineKind::Plugin, pageIdx });
-                }, -1, pp->getPageColor());
+                });
+            };
             mPageMenuBar->setMidSideVisible(false);
             // Hamburger: Save / Load Page Preset + Delete (G-7 parity; this
             // branch installed no menu at all until 2026-08-02).
@@ -5885,31 +5891,35 @@ void StandaloneEditor::showPageForTab(int tabId)
                     });
             };
 
-            mPageMenuBar->setTabSlots({"Player", "Piano Roll"},
-                [this, safe, safeBar, syncPagePresetMenu](int i) {
+            // QA-Layout T15: strip nav buttons dissolved into the Menu
+            // dropdown (see the Layers branch).
+            bp->onBuildWindowNavMenu = [this, safe, syncPagePresetMenu] (juce::PopupMenu& m)
+            {
+                auto* page = safe.getComponent();
+                const bool onPlayer = page != nullptr && page->getActiveTab() == 0;
+                m.addItem ("Player", true, onPlayer, [safe, syncPagePresetMenu]
+                {
                     auto* p = safe.getComponent();
                     if (p == nullptr) return;
-                    if (i == 1)
-                    {
-                        // QA-E Sub-Phase A (2026-05-11): capture ALL state via
-                        // locals before onTabSelected(4) -- see LayersPage branch
-                        // comment for full rationale.
-                        const int pageIdx = p->getPageIndex();
-                        auto* prp = mPianoRollPage;
-                        auto* rbn = mRibbon.get();
-                        if (rbn != nullptr) rbn->selectTab (4);
-                        onTabSelected (4);
-                        if (prp != nullptr)
-                            prp->selectEngine ({ EngineKind::Bass, pageIdx });
-                        return;
-                    }
-                    p->switchTab(i);
-                    auto* bar = safeBar.getComponent();
-                    if (bar == nullptr) return;
-                    bar->updateTabActive(i);
-                    bar->setMidSideVisible(false);
-                    syncPagePresetMenu (i);
-                }, bp->getActiveTab(), bp->getPageColor());
+                    p->switchTab (0);
+                    syncPagePresetMenu (0);
+                });
+                m.addItem ("Piano Roll", [this, safe]
+                {
+                    auto* p = safe.getComponent();
+                    if (p == nullptr) return;
+                    // QA-E Sub-Phase A (2026-05-11): capture ALL state via
+                    // locals before onTabSelected(4) -- see LayersPage branch
+                    // comment for full rationale.
+                    const int pageIdx = p->getPageIndex();
+                    auto* prp = mPianoRollPage;
+                    auto* rbn = mRibbon.get();
+                    if (rbn != nullptr) rbn->selectTab (4);
+                    onTabSelected (4);
+                    if (prp != nullptr)
+                        prp->selectEngine ({ EngineKind::Bass, pageIdx });
+                });
+            };
             syncPagePresetMenu (bp->getActiveTab());
             mPageMenuBar->setMidSideVisible(false);
             mPageMenuBar->setFxRackSlot ([this, safe]
@@ -5971,31 +5981,35 @@ void StandaloneEditor::showPageForTab(int tabId)
 
             // J-6 EQ unification (2026-05-03): Pre EQ8 M/S sub-tab removed;
             // Audio insert pre-rack EQ now lives on the Effects page only.
-            mPageMenuBar->setTabSlots({"Player", "Piano Roll"},
-                [this, safe, safeBar, syncPagePresetMenu](int i) {
+            // QA-Layout T15: strip nav buttons dissolved into the Menu
+            // dropdown (see the Layers branch).
+            cp->onBuildWindowNavMenu = [this, safe, syncPagePresetMenu] (juce::PopupMenu& m)
+            {
+                auto* page = safe.getComponent();
+                const bool onPlayer = page != nullptr && page->getActiveTab() == 0;
+                m.addItem ("Player", true, onPlayer, [safe, syncPagePresetMenu]
+                {
                     auto* p = safe.getComponent();
                     if (p == nullptr) return;
-                    if (i == 1)
-                    {
-                        // QA-E Sub-Phase A (2026-05-11): capture ALL state via
-                        // locals before onTabSelected(4) -- see LayersPage branch
-                        // comment for full rationale.
-                        const int pageIdx = p->getPageIndex();
-                        auto* prp = mPianoRollPage;
-                        auto* rbn = mRibbon.get();
-                        if (rbn != nullptr) rbn->selectTab (4);
-                        onTabSelected (4);
-                        if (prp != nullptr)
-                            prp->selectEngine ({ EngineKind::Clip, pageIdx });
-                        return;
-                    }
-                    p->switchTab (i);
-                    auto* bar = safeBar.getComponent();
-                    if (bar == nullptr) return;
-                    bar->updateTabActive (i);
-                    bar->setMidSideVisible (false);
-                    syncPagePresetMenu (i);
-                }, cp->getActiveTab(), cp->getPageColor());
+                    p->switchTab (0);
+                    syncPagePresetMenu (0);
+                });
+                m.addItem ("Piano Roll", [this, safe]
+                {
+                    auto* p = safe.getComponent();
+                    if (p == nullptr) return;
+                    // QA-E Sub-Phase A (2026-05-11): capture ALL state via
+                    // locals before onTabSelected(4) -- see LayersPage branch
+                    // comment for full rationale.
+                    const int pageIdx = p->getPageIndex();
+                    auto* prp = mPianoRollPage;
+                    auto* rbn = mRibbon.get();
+                    if (rbn != nullptr) rbn->selectTab (4);
+                    onTabSelected (4);
+                    if (prp != nullptr)
+                        prp->selectEngine ({ EngineKind::Clip, pageIdx });
+                });
+            };
             syncPagePresetMenu (cp->getActiveTab());
             mPageMenuBar->setMidSideVisible (false);
             mPageMenuBar->setFxRackSlot ([this, safe]
@@ -6025,9 +6039,8 @@ void StandaloneEditor::showPageForTab(int tabId)
         else if (auto* vp = dynamic_cast<VoxPage*>(mVisiblePage))
         {
             // QA-Layout T4 (Window-7): the Vox window shows the BaySickVocals
-            // main panel; the four former sub-tabs are contained windows
-            // opened from these LAUNCHER slots (activeIdx -1 -- they open
-            // windows, they are not in-page tabs; PluginsPage precedent).
+            // main panel; the four former sub-tabs are contained windows.
+            // QA-Layout T15: their launchers live in the Menu dropdown.
             juce::Component::SafePointer<VoxPage> safe (vp);
 
             mPageMenuBar->setMenuBuilder (
@@ -6037,13 +6050,23 @@ void StandaloneEditor::showPageForTab(int tabId)
                         p->showPageActionsMenu (anchor);
                 });
 
-            mPageMenuBar->setTabSlots ({ "Vocal Chain", "BaySickPitch",
-                                         "BaySickAlign", "NAM/IR" },
-                [this, safe] (int i) {
-                    auto* p = safe.getComponent();
-                    if (p == nullptr) return;
-                    openVoxSatelliteWindow (p->getPageIndex(), (VoxSat) i);
-                }, -1, vp->getPageColor());
+            // QA-Layout T15: the four satellite launcher buttons dissolved
+            // into the Menu dropdown.
+            vp->onBuildWindowNavMenu = [this, safe] (juce::PopupMenu& m)
+            {
+                auto add = [this, safe, &m] (const juce::String& label, VoxSat s)
+                {
+                    m.addItem (label, [this, safe, s]
+                    {
+                        if (auto* p = safe.getComponent())
+                            openVoxSatelliteWindow (p->getPageIndex(), s);
+                    });
+                };
+                add ("Vocal Chain",  VoxSat::Chain);
+                add ("BaySickPitch", VoxSat::Pitch);
+                add ("BaySickAlign", VoxSat::Align);
+                add ("NAM/IR",       VoxSat::NamIr);
+            };
             mPageMenuBar->setMidSideVisible (false);
             // Window-4 treatment: the main panel's internal title bar is
             // dissolved; the strip shows the centered player name.
@@ -6061,8 +6084,9 @@ void StandaloneEditor::showPageForTab(int tabId)
         {
             // QA-Layout T4 (Window-7/D6): only sfizz Inst tabs frame this page
             // (the Aria player); a LIVE-INPUT tab's player is the pedals
-            // window (L10) and never reaches this branch.  Pedals + NAM/IR
-            // open from launcher slots; Piano Roll keeps its nav redirect.
+            // window (L10) and never reaches this branch.  QA-Layout T15:
+            // Pedals + NAM/IR + the Piano Roll redirect live in the Menu
+            // dropdown.
             // QA-E Sub-Phase A (2026-05-11): SafePointer lifted to outer scope.
             juce::Component::SafePointer<InstPage> safe (ip);
 
@@ -6073,17 +6097,28 @@ void StandaloneEditor::showPageForTab(int tabId)
                         p->showPageActionsMenu (anchor);
                 });
 
-            mPageMenuBar->setTabSlots ({ "Pedals", "NAM/IR", "Piano Roll" },
-                [this, safe] (int i) {
+            // QA-Layout T15: strip nav buttons dissolved into the Menu
+            // dropdown.
+            ip->onBuildWindowNavMenu = [this, safe] (juce::PopupMenu& m)
+            {
+                m.addItem ("Pedals", [this, safe]
+                {
+                    if (auto* p = safe.getComponent())
+                        openInstPedalsWindow (p->getPageIndex());
+                });
+                m.addItem ("NAM/IR", [this, safe]
+                {
+                    if (auto* p = safe.getComponent())
+                        openInstNamIrWindow (p->getPageIndex());
+                });
+                m.addItem ("Piano Roll", [this, safe]
+                {
                     auto* p = safe.getComponent();
                     if (p == nullptr) return;
-                    if (i == 0) { openInstPedalsWindow (p->getPageIndex()); return; }
-                    if (i == 1) { openInstNamIrWindow  (p->getPageIndex()); return; }
-
                     // Piano Roll nav redirect.  QA-E Sub-Phase A (2026-05-11):
                     // capture ALL state via locals BEFORE onTabSelected(4) --
-                    // the switch can destroy the page AND this lambda (see the
-                    // Layers branch comment for the full rationale).
+                    // the switch can destroy the page (see the Layers branch
+                    // comment for the full rationale).
                     const auto src    = p->getSource();
                     const int pageIdx = p->getPageIndex();
                     const EngineKind k = (src == InstPage::Source::BaySickGuitars)
@@ -6095,8 +6130,22 @@ void StandaloneEditor::showPageForTab(int tabId)
                     onTabSelected (4);
                     if (prp != nullptr)
                         prp->selectEngine ({ k, pageIdx });
-                }, -1, ip->getPageColor());
+                });
+            };
             mPageMenuBar->setMidSideVisible (false);
+            // QA-Layout T15: the internal Aria title bar is dissolved -- the
+            // sfizz engine name renders centered on the strip (navy = the
+            // Inst-tab accent, D7), and the widgets that bar hosted (program
+            // label + button, CUT SELF pair) mount as right extras.  Only
+            // sfizz tabs reach this branch (L10: LiveInput returns early).
+            mPageMenuBar->setCenterTitle (
+                ip->getSource() == InstPage::Source::BaySickGuitars ? "BaySickGuitars"
+                                                                    : "BaySickBasses",
+                juce::Colour (0xFF1C3A8A));
+            if (auto* cl = ip->getClipFileLabel())  mPageMenuBar->addExtraRightComponent (cl, 200);
+            if (auto* pb = ip->getProgramButton())  mPageMenuBar->addExtraRightComponent (pb, 130);
+            if (auto* cs = ip->getCutSelfButton())  mPageMenuBar->addExtraRightComponent (cs, 62);
+            if (auto* cm = ip->getCutModeButton())  mPageMenuBar->addExtraRightComponent (cm, 78);
             mPageMenuBar->setFxRackSlot ([this, safe]
             {
                 auto* p = safe.getComponent();
@@ -6121,9 +6170,8 @@ void StandaloneEditor::showPageForTab(int tabId)
             // (index 2) are nav shortcuts - clicking them switches to
             // PianoRollPage with that view selected.  Player (1) and EQ (3)
             // remain local sub-pages.
-            // G-7: Page Preset hamburger menu - installed when sub-tab is
-            // Player (1) only.  EQ (3) hands the menu off to ParametricEQDisplay
-            // via syncEQHamburger; Drum Kit (0) + Piano Roll (2) are nav-only.
+            // G-7: Page Preset menu (QA-Layout T15: installed unconditionally
+            // -- the Menu also carries the nav entries now).
             // QA-E Sub-Phase A (2026-05-11): SafePointer lifted to outer scope.
             // User-reproduced crash on this branch's Drum Kit sub-tab click
             // after engine swap / project reload; this is the canonical fix
@@ -6131,62 +6179,66 @@ void StandaloneEditor::showPageForTab(int tabId)
             juce::Component::SafePointer<DrumPage> safe (dp);
             juce::Component::SafePointer<PageMenuBar> safeBar (mPageMenuBar);   // see Layers branch
 
-            auto syncPagePresetMenu = [safe, safeBar] (int subTabIdx)
+            // QA-Layout T15: the Menu builder installs unconditionally now
+            // (was Player-sub-tab-only) -- the nav entries live in that menu,
+            // so it must be reachable from every sub-tab.  Post-J-6 the only
+            // LOCAL sub-tab is Player anyway; the old gate was vestigial.
+            auto syncPagePresetMenu = [safe, safeBar] (int /*subTabIdx*/)
             {
                 auto* bar = safeBar.getComponent();
                 if (bar == nullptr) return;
-                const bool onPlayer = (subTabIdx == 1);
-                if (onPlayer && safe.getComponent() != nullptr)
-                {
-                    bar->setMenuBuilder (
-                        [safe] (juce::Component* anchor)
-                        {
-                            if (auto* p = safe.getComponent())
-                                p->showPageActionsMenu (anchor);
-                        });
-                }
+                if (safe.getComponent() == nullptr) return;
+                bar->setMenuBuilder (
+                    [safe] (juce::Component* anchor)
+                    {
+                        if (auto* p = safe.getComponent())
+                            p->showPageActionsMenu (anchor);
+                    });
             };
 
             // J-6 EQ unification (2026-05-03): Pre EQ8 M/S sub-tab removed.
-            // Tabs: 0 Drum Kit (nav shortcut), 1 Player, 2 Piano Roll (nav shortcut).
-            mPageMenuBar->setTabSlots({"Drum Kit", "Player", "Piano Roll"},
-                [this, safe, safeBar, syncPagePresetMenu](int i) {
+            // Views: Drum Kit (nav shortcut), Player (local), Piano Roll (nav
+            // shortcut).  QA-Layout T15: strip nav buttons dissolved into the
+            // Menu dropdown (see the Layers branch).
+            dp->onBuildWindowNavMenu = [this, safe, syncPagePresetMenu] (juce::PopupMenu& m)
+            {
+                auto* page = safe.getComponent();
+                const bool onPlayer = page != nullptr && page->getActiveTab() == 1;
+                m.addItem ("Drum Kit", [this]
+                {
+                    // QA-E Sub-Phase A (2026-05-11): capture ALL state via
+                    // locals before onTabSelected(4) -- see LayersPage branch
+                    // comment for full rationale.
+                    auto* prp = mPianoRollPage;
+                    auto* rbn = mRibbon.get();
+                    if (rbn != nullptr) rbn->selectTab (4);
+                    onTabSelected (4);
+                    if (prp != nullptr)
+                        prp->selectEngine ({ EngineKind::DrumKit, 0 });
+                });
+                m.addItem ("Player", true, onPlayer, [safe, syncPagePresetMenu]
+                {
                     auto* p = safe.getComponent();
                     if (p == nullptr) return;
-                    if (i == 0)
-                    {
-                        // QA-E Sub-Phase A (2026-05-11): capture ALL state via
-                        // locals before onTabSelected(4) -- see LayersPage branch
-                        // comment for full rationale.
-                        auto* prp = mPianoRollPage;
-                        auto* rbn = mRibbon.get();
-                        if (rbn != nullptr) rbn->selectTab (4);
-                        onTabSelected (4);
-                        if (prp != nullptr)
-                            prp->selectEngine ({ EngineKind::DrumKit, 0 });
-                        return;
-                    }
-                    if (i == 2)
-                    {
-                        // QA-E Sub-Phase A (2026-05-11): capture ALL state via
-                        // locals before onTabSelected(4) -- see LayersPage branch
-                        // comment for full rationale.
-                        const int pageIdx = p->getPageIndex();
-                        auto* prp = mPianoRollPage;
-                        auto* rbn = mRibbon.get();
-                        if (rbn != nullptr) rbn->selectTab (4);
-                        onTabSelected (4);
-                        if (prp != nullptr)
-                            prp->selectEngine ({ EngineKind::Drum, pageIdx });
-                        return;
-                    }
-                    p->switchTab(i);
-                    auto* bar = safeBar.getComponent();
-                    if (bar == nullptr) return;
-                    bar->updateTabActive(i);
-                    bar->setMidSideVisible(false);
-                    syncPagePresetMenu (i);
-                }, dp->getActiveTab(), dp->getPageColor());
+                    p->switchTab (1);
+                    syncPagePresetMenu (1);
+                });
+                m.addItem ("Piano Roll", [this, safe]
+                {
+                    auto* p = safe.getComponent();
+                    if (p == nullptr) return;
+                    // QA-E Sub-Phase A (2026-05-11): capture ALL state via
+                    // locals before onTabSelected(4) -- see LayersPage branch
+                    // comment for full rationale.
+                    const int pageIdx = p->getPageIndex();
+                    auto* prp = mPianoRollPage;
+                    auto* rbn = mRibbon.get();
+                    if (rbn != nullptr) rbn->selectTab (4);
+                    onTabSelected (4);
+                    if (prp != nullptr)
+                        prp->selectEngine ({ EngineKind::Drum, pageIdx });
+                });
+            };
             syncPagePresetMenu (dp->getActiveTab());
             mPageMenuBar->setMidSideVisible(false);
             mPageMenuBar->setFxRackSlot ([this, safe]
@@ -6231,31 +6283,12 @@ void StandaloneEditor::showPageForTab(int tabId)
             // engine selected.
             // QA-E Sub-Phase A (2026-05-11): SafePointer lifted to outer scope.
             juce::Component::SafePointer<BaySickRustyDrumsPage> safe (rp);
-            juce::Component::SafePointer<PageMenuBar> safeBar (mPageMenuBar);   // see Layers branch
 
-            mPageMenuBar->setTabSlots({"Drum Kit", "Player", "Piano Roll"},
-                [this, safe, safeBar](int i) {
-                    auto* p = safe.getComponent();
-                    if (p == nullptr) return;
-                    if (i == 2)
-                    {
-                        // QA-E Sub-Phase A (2026-05-11): capture ALL state via
-                        // locals before onTabSelected(4) -- see LayersPage branch
-                        // comment for full rationale.
-                        auto* prp = mPianoRollPage;
-                        auto* rbn = mRibbon.get();
-                        if (rbn != nullptr) rbn->selectTab (4);   // 4 = PianoRoll ribbon slot
-                        onTabSelected (4);
-                        if (prp != nullptr)
-                            prp->selectEngine ({ EngineKind::BaySickRustyDrums, 0 });
-                        return;
-                    }
-                    p->switchTab(i);
-                    auto* bar = safeBar.getComponent();
-                    if (bar == nullptr) return;
-                    bar->updateTabActive(i);
-                    bar->setMidSideVisible(false);
-                }, rp->getActiveTab(), rp->getPageColor());
+            // QA-Layout T15: strip nav buttons dissolved into the Menu
+            // dropdown (built into this branch's menu builder below), and the
+            // internal Aria title bar is dissolved -- the engine name renders
+            // centered on the strip (Drums-tab red, D7).
+            mPageMenuBar->setCenterTitle ("BaySickRustyDrums", juce::Colour (0xFFCC2222));
             mPageMenuBar->setMidSideVisible(false);
             // Smoke round 2 (Jeff): per-player Swing Mix knob (see Layers) --
             // Rusty has no FX Rack slot, so it sits right of the tab cluster.
@@ -6306,13 +6339,41 @@ void StandaloneEditor::showPageForTab(int tabId)
             };
 
             mPageMenuBar->setMenuBuilder (
-                [safeThisRusty, buildRustyPresetCfg] (juce::Component* anchor)
+                [safeThisRusty, buildRustyPresetCfg, safe] (juce::Component* anchor)
                 {
                     if (! safeThisRusty) return;
                     constexpr int kIdSave     = 100;
                     constexpr int kIdLoadBase = 1000;
 
                     juce::PopupMenu m;
+                    // QA-Layout T15: the strip's nav buttons live here now.
+                    // Action items carry itemID -1 and self-dispatch -- the
+                    // r <= 0 guard below skips them by design.
+                    {
+                        auto* pg = safe.getComponent();
+                        const int active = pg != nullptr ? pg->getActiveTab() : -1;
+                        m.addItem ("Drum Kit", true, active == 0, [safe]
+                        {
+                            if (auto* p2 = safe.getComponent()) p2->switchTab (0);
+                        });
+                        m.addItem ("Player", true, active == 1, [safe]
+                        {
+                            if (auto* p2 = safe.getComponent()) p2->switchTab (1);
+                        });
+                        m.addItem ("Piano Roll", [safeThisRusty]
+                        {
+                            if (! safeThisRusty) return;
+                            // QA-E Sub-Phase A: capture locals BEFORE
+                            // onTabSelected(4) (see the Layers branch).
+                            auto* prp = safeThisRusty->mPianoRollPage;
+                            auto* rbn = safeThisRusty->mRibbon.get();
+                            if (rbn != nullptr) rbn->selectTab (4);
+                            safeThisRusty->onTabSelected (4);
+                            if (prp != nullptr)
+                                prp->selectEngine ({ EngineKind::BaySickRustyDrums, 0 });
+                        });
+                        m.addSeparator();
+                    }
                     const bool kitLoaded = safeThisRusty->mProcessor.hasBaySickRustyDrums();
                     m.addItem (kIdSave, "Save Page Preset As...", kitLoaded);
 

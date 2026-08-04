@@ -17,10 +17,9 @@ class VibeSynthProcessor;
 // the Builder grid or the Clips empty-state placeholder; the ribbon's Clip
 // dropdown is an instance switcher only (no `+ Add` entry).
 //
-// Sub-tabs mirror Layer/Bass shape - Player / Piano Roll / Pre EQ8 M/S - but
-// only Player is locally rendered.  Piano Roll redirects to PianoRollPage
-// via the StandaloneEditor's PageMenuBar setTabSlots wiring; Pre EQ8 M/S is
-// a placeholder until later polish.
+// Views mirror Layer/Bass shape - Player / Piano Roll - but only Player is
+// locally rendered.  Piano Roll redirects to PianoRollPage via the Menu
+// dropdown's nav entries (QA-Layout T15; the strip buttons are gone).
 // ─────────────────────────────────────────────────────────────────────────────
 
 class ClipsPage : public juce::Component
@@ -126,6 +125,10 @@ public:
     void savePagePreset (std::function<void()> onSaved = {});
     void loadPagePreset (const juce::File& xml);
     void showPageActionsMenu (juce::Component* anchor);
+    // QA-Layout T15: the title strip's nav buttons dissolved into the Menu
+    // dropdown -- the editor injects the window/view entries at the top of
+    // the page-actions popup through this hook.
+    std::function<void(juce::PopupMenu&)> onBuildWindowNavMenu;
     // G-7: tab-close prompt (replaces the inline AlertWindow that the
     // editor was firing).  Calls onDeleteRequested after confirmation;
     // 3-button "Save Page Preset & Delete" when player state is dirty.

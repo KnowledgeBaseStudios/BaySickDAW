@@ -101,6 +101,10 @@ public:
     void savePagePreset   (std::function<void()> onSaved = {});
     void loadPagePreset   (const juce::File& xml);
     void showPageActionsMenu (juce::Component* anchor);
+    // QA-Layout T15: the title strip's nav buttons dissolved into the Menu
+    // dropdown -- the editor injects the window/view entries at the top of
+    // the page-actions popup through this hook.
+    std::function<void(juce::PopupMenu&)> onBuildWindowNavMenu;
     bool isLocked() const { return mLocked; }
     void setLocked(bool l);   // D2: fires onLockChanged so ribbon + UI reflect the new state
     std::function<void()>           onDeleteRequested;

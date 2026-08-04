@@ -453,6 +453,7 @@ void PluginsPage::showPageActionsMenu (juce::Component* anchor)
     constexpr int kIdAutoBase       = 20000;
 
     juce::PopupMenu menu;
+    if (onBuildWindowNavMenu) { onBuildWindowNavMenu (menu); menu.addSeparator(); }
     menu.addItem (kIdSavePagePreset, "Save Page Preset As...", getHosted() != nullptr);
 
     juce::Array<juce::File> presetXmls;

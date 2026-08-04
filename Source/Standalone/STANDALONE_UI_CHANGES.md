@@ -532,3 +532,34 @@ shortcut. Held notes release on mode-off, octave shift, and tab switch.
   settled Velocity Lane toggle from ANY container - the default new containers
   open with; in-session toggles stay per-container.  Restored before the tab
   rebuild on load.
+
+---
+
+## 2026-08-03 - QA-Layout T15: strip nav buttons into the Menu dropdown + sfizz titles
+
+**Files:** `StandaloneEditor.cpp`, `SharedUI.h`, `LayersPage.h/.cpp`, `BassPage.h/.cpp`,
+`ClipsPage.h/.cpp`, `DrumPage.h/.cpp`, `VoxPage.h/.cpp`, `InstPage.h/.cpp`,
+`PluginsPage.h/.cpp`, `BaySickRustyDrumsPage.cpp`
+
+- **Every player page's title-strip buttons (between Menu and the swing knob) are
+  gone; the same entries live at the top of that window's Menu dropdown** (Jeff's
+  mid-sizing ruling, 2026-08-03).  Per page: Rusty + Drums {Drum Kit, Player,
+  Piano Roll}; Layers/Bass/Clips {Player, Piano Roll}; Vox {Vocal Chain,
+  BaySickPitch, BaySickAlign, NAM/IR}; Inst {Pedals, NAM/IR, Piano Roll};
+  Plugins {Piano Roll}.  Local-view entries show a tick on the active view.
+  Mechanism: a `onBuildWindowNavMenu` hook on each page, invoked at the top of
+  `showPageActionsMenu` (DrumPage: `showContextMenu`, !fromKit only); Rusty's
+  editor-side menu builder gets the entries directly.  Entries are JUCE
+  action-lambda items (itemID -1, self-dispatching) so they coexist with the
+  pages' id-dispatched menus.  EXCLUDED per Jeff: the Piano Roll page's jump
+  cluster, the pedals window's NAM/IR launcher, the EQ windows' Pre/Post pair.
+- **Drums' Menu installs unconditionally** (was Player-sub-tab-only) so the nav
+  entries are always reachable; post-J-6 Player is the only local sub-tab anyway.
+- **The small grey tab title returns to player strips** (it was suppressed while
+  tab slots existed) - each window shows its instance name at the left again.
+- **sfizz titles (the missed T3 treatment):** BaySickRustyDrums, BaySickGuitars,
+  BaySickBasses no longer draw the internal AriaControlPanel title band; their
+  names render centered on the title strip (Rusty red #CC2222, Inst navy
+  #1C3A8A).  The four widgets the Inst band hosted (program label + Load button,
+  CUT SELF + mode toggles) mount on the strip as right extras; the CUT SELF
+  APVTS attachments are wired independently of any title bar now.

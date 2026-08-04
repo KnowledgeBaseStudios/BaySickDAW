@@ -649,6 +649,7 @@ void InstPage::showPageActionsMenu (juce::Component* anchor)
     constexpr int kIdLoadBase       = 1000;
 
     juce::PopupMenu menu;
+    if (onBuildWindowNavMenu) { onBuildWindowNavMenu (menu); menu.addSeparator(); }
     menu.addItem (kIdSavePagePreset, "Save Page Preset As...",
                   getEngineProcessor() != nullptr);
 
@@ -906,41 +907,22 @@ void InstPage::rebuildPlayerPanel()
         };
 
         if (mSource == Source::BaySickGuitars)
-        {
             bindToSfizzEngine (mFullProcessor->getBaySickGuitars (mPageIndex));
-            // QA-A 4.4 (2026-05-09): per-source-mode title bar inside
-            // AriaControlPanel.  Navy accent (#1C3A8A) is the Inst-tab active
-            // colour shared with BaySickBasses + BaySickPedals (decision D7
-            // confirmed via AskUserQuestion 2026-05-09).
-            binding.engineName  = "BaySickGuitars";
-            binding.accentColor = juce::Colour (0xFF1C3A8A);
-        }
         else if (mSource == Source::BaySickBasses)
-        {
             bindToSfizzEngine (mFullProcessor->getBaySickBasses  (mPageIndex));
-            // QA-A 4.4 (2026-05-09): per-source-mode title bar inside
-            // AriaControlPanel.  Same navy accent as BaySickGuitars per D7.
-            binding.engineName  = "BaySickBasses";
-            binding.accentColor = juce::Colour (0xFF1C3A8A);
-        }
+        // QA-Layout T15: binding.engineName stays empty -- the internal
+        // AriaControlPanel title bar is dissolved; the engine name renders
+        // centered on the hosting window's title strip and the widgets the
+        // bar hosted (program label/button + CUT SELF pair) mount there too,
+        // wired by StandaloneEditor per page-show.
     }
 
     mAriaPanel->setEngine (binding);
 
-    // QA-G3Smoke G-16 + SW-3 + G-14 (sfizz sources): the Load-program button +
-    // program label move off the PageMenuBar extras-right onto the panel's
-    // title bar (StandaloneEditor no longer mounts them there), joined by the
-    // Swing Mix knob + the Task-12 CUT SELF toggle pair.
-    if (mSource != Source::LiveInput && mFullProcessor != nullptr
-        && mAriaPanel->getTitleBar() != nullptr)
+    // G-14: bind the cut-self pair to whichever sfizz engine this page
+    // drives.  No engine (mid-teardown) -> attachments stay cleared.
+    if (mSource != Source::LiveInput && mFullProcessor != nullptr)
     {
-        auto* bar = mAriaPanel->getTitleBar();
-        bar->addHostedTrailingWidget (&mClipFileLabel, 200);
-        if (mProgramButton)
-            bar->addHostedTrailingWidget (mProgramButton.get(), 130);
-
-        // G-14: bind the cut-self pair to whichever sfizz engine this page
-        // drives.  No engine (mid-teardown) -> keep the slots reserved empty.
         juce::AudioProcessorValueTreeState* engApvts = nullptr;
         juce::String engPrefix;
         if (mSource == Source::BaySickGuitars)
@@ -961,22 +943,11 @@ void InstPage::rebuildPlayerPanel()
         }
         if (engApvts != nullptr)
         {
-            bar->addHostedTrailingWidget (&mCutSelfBtn, 62);
-            bar->addHostedTrailingWidget (&mCutModeBtn, 78);
-            bar->setReservedTrailingWidth (0);
             mCutSelfAttach = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (
                 *engApvts, engPrefix + "cutSelf", mCutSelfBtn);
             mCutModeAttach = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (
                 *engApvts, engPrefix + "cutSelfMode", mCutModeBtn);
         }
-        else
-        {
-            bar->setReservedTrailingWidth (110);
-        }
-
-        // Smoke round 2 (Jeff): the SW-3 Swing Mix knob moved OFF this title
-        // bar onto the PageMenuBar (StandaloneEditor wires it per page-show)
-        // so it's visible on every sub-tab.
     }
 
     if (programXml.existsAsFile())

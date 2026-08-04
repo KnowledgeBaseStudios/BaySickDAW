@@ -80,7 +80,7 @@ Canonical path: `Plans & Specs/Batch Plans/roomy-retiling-ocelot.md`. Paired run
 
 ## Tasks
 
-Ordering honors L7: T1–T5 land before the T6 handoff; T9/T10/T11 may run while Jeff's sizing pass is in flight; T7/T8 need his numbers. One commit per task; message + full `git status` surfaced for approval each time; build gate = five exit codes 0, four link lines, zero error greps. `/draft-doc running-notes` after every commit/finding/ruling.
+Ordering honors L7: T1–T5 land before the T6 handoff; T9/T10/T11 may run while Jeff's sizing pass is in flight; T7/T8 need his numbers. T15 (ruled mid-sizing 2026-08-03) executes between T9 and T10, deliberately before T7 encodes floors; remaining order after the sizing hand-back: T15 → T10 → T11 → T7 → T8 → T12+. One commit per task; message + full `git status` surfaced for approval each time; build gate = five exit codes 0, four link lines, zero error greps. `/draft-doc running-notes` after every commit/finding/ruling.
 
 ### Task 1 — Transport readout + ribbon visuals + app title
 
@@ -202,6 +202,13 @@ addI ("sat_type", "Saturation Type", 0, 2, 1);   // 0=Tube 1=Console 2=Tape; def
 - [ ] Rule 4: surface the diag strip list (the `[QA-Layout DIAG]` sites) for approval, then strip.
 - [ ] Author this batch's §B section of the Master Test Plan at code-complete (bulk-run R2), reconciled against what actually shipped, including the new-surface scenarios (windows, buses, caps, stretch) — walked at the G4 boundary, not at close.
 - [ ] Batch close sequence: `/draft-doc batch-close` → `/review-batch QA-Layout` (BLOCKERs before proceeding) → apply draft via Edit → close commit. L32: Work Log entry held to the G4 boundary — confirm with Jeff at close.
+
+### Task 15 — Strip nav buttons into Menu dropdowns + sfizz titles (ruled mid-sizing 2026-08-03; executes between T9 and T10)
+
+- [ ] Every player page's title-strip buttons sitting between the Menu dropdown and the swing knob stop being strip buttons and become entries at the top of that window's own Menu dropdown (tick on the active local view). Per page: Rusty + Drums {Drum Kit, Player, Piano Roll}; Layers/Bass/Clips {Player, Piano Roll}; Vox {Vocal Chain, BaySickPitch, BaySickAlign, NAM/IR}; Inst {Pedals, NAM/IR, Piano Roll}; Plugins {Piano Roll}. EXCLUDED (Jeff): the Piano Roll page's jump cluster, the pedals window's NAM/IR launcher, the EQ windows' Pre/Post pair.
+- [ ] The missed T3 title treatment: BaySickRustyDrums, BaySickGuitars, BaySickBasses internal title bands dissolved; names centered on the title strip (Rusty red `#CC2222`, Inst navy `#1C3A8A`). The widgets the Inst band hosted (program label + Load button, CUT SELF pair) re-home to the strip's right extras; CUT SELF attachments wired independently of any title bar.
+- [ ] Purpose: declutter + make the centered strip titles visible. Sequenced BEFORE T7 deliberately — it changes strip contents, which affects the min widths T7 encodes.
+- [ ] Build gate → commit on approval → running notes.
 
 ## Verification (end-to-end)
 
