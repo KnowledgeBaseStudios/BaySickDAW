@@ -172,6 +172,21 @@ private:
 
     void saveAudioSettings();
 
+    // Receives JUCE's ASIO trace (JUCE_ASIO_DEBUGGING).  Must outlive every
+    // audio-device call and be cleared from Logger before it dies -- Logger
+    // holds a RAW pointer, so destroying this while it is still the current
+    // logger leaves a dangling one for anything that logs during teardown.
+    std::unique_ptr<juce::FileLogger> mLogger;
+
+    // TRUE when the chosen device would not open and we fell back to the
+    // Windows default just so the app is usable (Jeff, 2026-08-05).  The
+    // fallback device's name is NON-empty, so without this flag
+    // saveAudioSettings would happily write it over the user's real choice --
+    // which is the very erasure the empty-name guard exists to prevent, arriving
+    // by a different door.  While this is set, the saved device names are left
+    // exactly as they were so the next launch retries what the user picked.
+    bool mUsingFallbackDevice { false };
+
 public:
     // 2026-04-25: made public so AudioSettingsDialog (in StandaloneEditor.cpp)
     // can write the pending file as a SIBLING of the live settings file.

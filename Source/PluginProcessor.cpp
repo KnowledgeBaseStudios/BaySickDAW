@@ -487,6 +487,8 @@ void VibeSynthProcessor::prepareToPlay(double sampleRate, int samplesPerBlock)
     // C.3 (2026-04-30): reset MIDI input collector for the current SR.  Without
     // this, removeNextBlockOfMessages can't compute correct sample offsets.
     mLiveMidiCollector.reset (sampleRate);
+    // Only NOW may the MIDI input thread push into it -- see isLiveMidiReady.
+    mLiveMidiReady.store (true, std::memory_order_release);
 
     // Pre-allocate engine scratch buffers to avoid audio-thread allocation
     mAudioRowScratch   .setSize(2, samplesPerBlock, false, true, false);

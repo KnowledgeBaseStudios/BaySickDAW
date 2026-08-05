@@ -727,12 +727,73 @@ void BaySickPedalsEditor::paint (juce::Graphics& g)
     g.fillAll (juce::Colour (0xff121212));
 }
 
+void BaySickPedalsEditor::rebuildSlotPicker()
+{
+    const int keep = mSlotPicker.getSelectedId();
+    mSlotPicker.clear (juce::dontSendNotification);
+    for (int s = 0; s < BaySickPedalsProcessor::kNumSlots; ++s)
+    {
+        const auto type = mProc.getSlotType (s);
+        auto label = juce::String (s + 1) + "  "
+                   + (type == EffectType::None ? juce::String ("(empty)")
+                                               : SlotComponent::effectTypeName (type));
+        mSlotPicker.addItem (label, s + 1);
+    }
+    mSlotPicker.setSelectedId (keep > 0 ? keep : mCompactSlot + 1,
+                               juce::dontSendNotification);
+}
+
+void BaySickPedalsEditor::setViewMode (ViewMode m, bool notifyHost)
+{
+    if (mViewMode == m) return;
+    mViewMode = m;
+    if (mViewMode == ViewMode::Compact) rebuildSlotPicker();
+    resized();
+    repaint();
+    if (notifyHost && onViewModeChanged) onViewModeChanged (mViewMode);
+}
+
 void BaySickPedalsEditor::resized()
 {
-    // QA-Layout T3: the internal title bar is gone -- the 4x2 grid gets the
-    // full height.
     auto b = getLocalBounds().reduced (kPagePad);
     if (b.isEmpty()) return;
+
+    // COMPACT (Jeff, 2026-08-05): the eight slots become a dropdown and ONE
+    // display box.  A pedal chain is a row of discrete units, so paginating it
+    // loses nothing -- unlike a synth panel, where every control is meant to be
+    // visible at once.
+    if (mViewMode == ViewMode::Compact)
+    {
+        if (mSlotPicker.getParentComponent() != this)
+        {
+            addAndMakeVisible (mSlotPicker);
+            mSlotPicker.onChange = [this]
+            {
+                const int id = mSlotPicker.getSelectedId();
+                if (id < 1) return;
+                mCompactSlot = id - 1;
+                resized();
+                repaint();
+            };
+            rebuildSlotPicker();
+        }
+        mSlotPicker.setVisible (true);
+        mSlotPicker.setBounds (b.removeFromTop (22));
+        b.removeFromTop (kGridGap);
+
+        for (int s = 0; s < BaySickPedalsProcessor::kNumSlots; ++s)
+        {
+            if (! mTiles[s]) continue;
+            const bool shown = (s == mCompactSlot);
+            mTiles[s]->setVisible (shown);
+            if (shown) mTiles[s]->setBounds (b);
+        }
+        return;
+    }
+
+    // STANDARD -- QA-Layout T3: the internal title bar is gone, so the 4x2 grid
+    // gets the full height.
+    mSlotPicker.setVisible (false);
 
     const int tileW = (b.getWidth()  - kGridGap * (kCols - 1)) / kCols;
     const int tileH = (b.getHeight() - kGridGap * (kRows - 1)) / kRows;
@@ -745,7 +806,7 @@ void BaySickPedalsEditor::resized()
             b.getX() + col * (tileW + kGridGap),
             b.getY() + row * (tileH + kGridGap),
             tileW, tileH);
-        if (mTiles[s]) mTiles[s]->setBounds (rect);
+        if (mTiles[s]) { mTiles[s]->setVisible (true); mTiles[s]->setBounds (rect); }
     }
 }
 
@@ -754,6 +815,9 @@ void BaySickPedalsEditor::onSlotTypeChanged (int slot)
     if (slot < 0 || slot >= BaySickPedalsProcessor::kNumSlots) return;
     if (mTiles[slot]) mTiles[slot]->rebuild();
     mLastTypes[slot] = mProc.getSlotType (slot);
+    // The compact picker names each slot by its effect, so a type change has to
+    // re-label it -- otherwise the dropdown keeps advertising the old pedal.
+    if (mViewMode == ViewMode::Compact) rebuildSlotPicker();
 }
 
 int BaySickPedalsEditor::findSlotIndexAt (juce::Point<int> editorPos) const noexcept

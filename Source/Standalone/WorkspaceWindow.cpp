@@ -215,14 +215,30 @@ void WorkspaceWindow::setDefaultWindowSize (int w, int h)
     mDefaultSize  = { juce::jmax (kMinDegenerateW, w), juce::jmax (kMinDegenerateH, h) };
     mDefaultKnown = true;
 
+    // Jeff, 2026-08-05: the measured size is the MINIMUM again as well as the
+    // opening size.  These numbers are the "smallest still readable" ones, so a
+    // window that refuses to go below its own is correct behaviour -- the
+    // suspension was only ever pending T8, and compact layouts moved to Future
+    // State (CL-306).  A view that genuinely needs to be smaller declares its
+    // own smaller default via setDefaultWindowSize (the pedals Compact view).
+    mConstrainer.setMinimumSize (mDefaultSize.x, mDefaultSize.y);
+
     // ONLY a window that opened without a remembered size takes the default.
     // A size that came from the session map, a project or the user's own drag
     // is never overwritten -- that is the three-lifetime contract, and the
     // default exists to answer "what size when nothing has an opinion".
-    if (! mOpenedAtPlaceholder) return;
+    if (mOpenedAtPlaceholder)
+    {
+        mOpenedAtPlaceholder = false;
+        setSize (mDefaultSize.x, mDefaultSize.y);
+        return;
+    }
 
-    mOpenedAtPlaceholder = false;
-    setSize (mDefaultSize.x, mDefaultSize.y);
+    // A remembered size from before this window's default was known -- or from
+    // a run where the minimum was suspended -- must come up to the new floor.
+    if (getWidth() < mDefaultSize.x || getHeight() < mDefaultSize.y)
+        setSize (juce::jmax (getWidth(),  mDefaultSize.x),
+                 juce::jmax (getHeight(), mDefaultSize.y));
 }
 
 void WorkspaceWindow::setTitle (juce::String t)
@@ -491,10 +507,11 @@ void WorkspaceWindow::attachTo (Workspace& ws)
     }
     else if (! hasPos)
         saved.setPosition (24 + step, 24 + step);
-    // Anti-degenerate only.  A remembered size is honoured exactly, however
-    // small -- there is no content lock until the compact-layout task lands.
-    saved.setSize (juce::jmax (saved.getWidth(),  kMinDegenerateW),
-                   juce::jmax (saved.getHeight(), kMinDegenerateH));
+    // Never reopen below the window's own minimum.  When the default is not yet
+    // known the constrainer still holds the anti-degenerate clamp, and
+    // setDefaultWindowSize raises the window when the real number lands.
+    saved.setSize (juce::jmax (saved.getWidth(),  mConstrainer.getMinimumWidth()),
+                   juce::jmax (saved.getHeight(), mConstrainer.getMinimumHeight()));
     setBounds (saved);
 
     addToDesktop (0, parent);
@@ -514,10 +531,9 @@ void WorkspaceWindow::applySavedBounds()
     if (saved.isEmpty() || ! hasPos) return;
 
     const auto o = ws->originInParentClient();
-    // Anti-degenerate only -- a remembered size is restored exactly.
     setBounds (saved.getX() + o.x, saved.getY() + o.y,
-               juce::jmax (saved.getWidth(),  kMinDegenerateW),
-               juce::jmax (saved.getHeight(), kMinDegenerateH));
+               juce::jmax (saved.getWidth(),  mConstrainer.getMinimumWidth()),
+               juce::jmax (saved.getHeight(), mConstrainer.getMinimumHeight()));
 }
 
 juce::Rectangle<int> WorkspaceWindow::clampToWorkspace (juce::Rectangle<int> target) const

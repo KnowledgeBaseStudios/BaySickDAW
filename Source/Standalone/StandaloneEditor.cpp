@@ -166,14 +166,13 @@ public:
         mPanelBtn.setButtonText("Open ASIO Control Panel");
         mPanelBtn.setColour(juce::TextButton::buttonColourId,  VC::Panel);
         mPanelBtn.setColour(juce::TextButton::textColourOffId, VC::Text);
-        {
-            auto* liveDev = mMgr.getCurrentAudioDevice();
-            mPanelBtn.setEnabled(liveDev != nullptr && liveDev->hasControlPanel());
-        }
         mPanelBtn.onClick = [this] { showAsioControlPanel(); };
         addAndMakeVisible(mPanelBtn);
 
         populateFromManager();
+        // AFTER populateFromManager: the type combo has to hold its selection
+        // before the enablement can read it.
+        refreshPanelButtonEnablement();
 
         // Set the dialog size after the toggles are built so resized() can
         // measure (kRowH * (4 audio rows + N midi toggles + footer)).
@@ -251,7 +250,7 @@ private:
             mTypeBox.setSelectedItemIndex(0, juce::dontSendNotification);
 
         // When type changes, repopulate devices - still no manager changes
-        mTypeBox.onChange = [this] { refreshDeviceList(); };
+        mTypeBox.onChange = [this] { refreshDeviceList(); refreshPanelButtonEnablement(); };
         refreshDeviceList();
     }
 
@@ -303,15 +302,46 @@ private:
         for (int b : kBufs)
             mBufBox.addItem(juce::String(b) + " samples", b);
 
-        // Pre-select from snapshot; add the value if not in our standard list
+        // The snapshot describes the device that is CURRENTLY OPEN.  Injecting
+        // its values into these lists whenever they were non-standard meant a
+        // Windows-audio fallback's 480-sample buffer got offered as a choice
+        // for an ASIO driver reporting granularity -1 (powers of two only) --
+        // the dialog presented a size that device can never accept, and the
+        // user picked it because it was the pre-selected entry (Jeff,
+        // 2026-08-05).  Only trust the snapshot when the SELECTION IS the live
+        // device; otherwise snap to the nearest standard value.
+        auto* curTypeObj = mMgr.getCurrentDeviceTypeObject();
+        const bool selectionIsLive = curTypeObj != nullptr
+                                  && mTypeBox.getText() == curTypeObj->getTypeName()
+                                  && mDevBox.getText()  == mSnapshot.outputDeviceName;
+
+        const auto nearestIn = [] (const int* list, int n, int want)
+        {
+            int best = list[0];
+            for (int i = 1; i < n; ++i)
+                if (std::abs (list[i] - want) < std::abs (best - want))
+                    best = list[i];
+            return best;
+        };
+
         int curRate = (mSnapshot.sampleRate > 0.0) ? (int)mSnapshot.sampleRate : 44100;
-        if (!mRateBox.getItemText(mRateBox.indexOfItemId(curRate)).isNotEmpty())
-            mRateBox.addItem(juce::String(curRate) + " Hz", curRate);
+        if (mRateBox.indexOfItemId(curRate) < 0)
+        {
+            if (selectionIsLive)
+                mRateBox.addItem(juce::String(curRate) + " Hz", curRate);
+            else
+                curRate = nearestIn (kRates, juce::numElementsInArray (kRates), curRate);
+        }
         mRateBox.setSelectedId(curRate, juce::dontSendNotification);
 
         int curBuf = (mSnapshot.bufferSize > 0) ? mSnapshot.bufferSize : 512;
-        if (!mBufBox.getItemText(mBufBox.indexOfItemId(curBuf)).isNotEmpty())
-            mBufBox.addItem(juce::String(curBuf) + " samples", curBuf);
+        if (mBufBox.indexOfItemId(curBuf) < 0)
+        {
+            if (selectionIsLive)
+                mBufBox.addItem(juce::String(curBuf) + " samples", curBuf);
+            else
+                curBuf = nearestIn (kBufs, juce::numElementsInArray (kBufs), curBuf);
+        }
         mBufBox.setSelectedId(curBuf, juce::dontSendNotification);
     }
 
@@ -386,14 +416,40 @@ private:
             xml->setAttribute("deviceType", types[typeIdx]->getTypeName());
 
         xml->setAttribute("audioOutputDeviceName", mDevBox.getText());
-        // 2026-04-30: do NOT clobber audioInputDeviceName here.  The dialog
-        // has no input-device picker, so the old line `setAttribute(..., "")`
-        // silently disabled ASIO inputs every Apply - Vox/Inst Listen mode
-        // would stop receiving audio after any sample-rate / buffer-size
-        // change.  Whatever input device was previously open survives via
-        // the createStateXml() snapshot at the top of applySettings().
-        // (Adding a real input-device picker is a follow-up; until then,
-        // leaving the existing entry alone preserves the user's setup.)
+
+        // 2026-04-30: do NOT clobber audioInputDeviceName with "" here.  That
+        // silently disabled ASIO inputs on every Apply - Vox/Inst Listen mode
+        // stopped receiving audio after any rate / buffer change.  Whatever
+        // input was open survives via the createStateXml() snapshot above.
+        //
+        // 2026-08-05: but "leave it alone" was too blunt, because the snapshot
+        // belongs to the device that is CURRENTLY open, not the one being
+        // chosen.  Switching to an ASIO driver after a Windows-audio fallback
+        // wrote audioOutputDeviceName="UMC ASIO Driver" alongside
+        // audioInputDeviceName="Microphone (HyperX ...)" -- a WASAPI endpoint
+        // named inside an ASIO config, which no driver can resolve.  Startup's
+        // input=output patch happened to mask it, and that patch is exactly the
+        // kind of downstream band-aid a coherent file makes unnecessary.
+        const juce::String selType = (typeIdx >= 0 && typeIdx < types.size())
+                                        ? types[typeIdx]->getTypeName()
+                                        : juce::String();
+
+        if (selType.equalsIgnoreCase ("ASIO"))
+        {
+            // One driver drives both directions; the names MUST match.
+            xml->setAttribute("audioInputDeviceName", mDevBox.getText());
+        }
+        else if (typeIdx >= 0 && typeIdx < types.size())
+        {
+            // Keep the existing input only if it belongs to the selected type.
+            const auto inName = xml->getStringAttribute("audioInputDeviceName");
+            if (inName.isNotEmpty())
+            {
+                types[typeIdx]->scanForDevices();
+                if (! types[typeIdx]->getDeviceNames(true).contains (inName))
+                    xml->removeAttribute("audioInputDeviceName");
+            }
+        }
 
         if (mRateBox.getSelectedId() > 0)
             xml->setAttribute("audioDeviceRate",       (double)mRateBox.getSelectedId());
@@ -493,11 +549,72 @@ private:
     // reopen).  The restart is safe here despite this dialog's no-live-touch
     // design: hasControlPanel gates this to ASIO only, so the WASAPI-exclusive
     // hot-swap crash class the design avoids can't reach this path.
+    // Refreshes the panel button.  Jeff, 2026-08-05: it used to key ONLY on a
+    // live device having a panel, which meant the one control that reaches a
+    // driver's own settings switched itself off in the exact situation you need
+    // it -- a driver that will not open.  That is how an ASIO4ALL panel edit
+    // became unrecoverable from inside this app: no device, so no button, so no
+    // way back to the panel that caused it.  An ASIO driver can show its panel
+    // from a CREATED device; it does not need an opened one.
+    void refreshPanelButtonEnablement()
+    {
+        auto* liveDev = mMgr.getCurrentAudioDevice();
+        const bool liveHasPanel = liveDev != nullptr && liveDev->hasControlPanel();
+        const bool asioSelected = mTypeBox.getText().containsIgnoreCase ("ASIO");
+        mPanelBtn.setEnabled (liveHasPanel || asioSelected);
+    }
+
     void showAsioControlPanel()
     {
         auto* dev = mMgr.getCurrentAudioDevice();
+
+        const auto typeName = mTypeBox.getText();
+        const auto devName  = mDevBox.getText();
+
+        // Use the LIVE device only when it IS the one the combos point at and it
+        // actually has a panel.  Keying on "is there a live device" (Jeff,
+        // 2026-08-05) broke this in exactly the state the startup fallback
+        // creates: the fallback leaves a Windows device open, so dev was
+        // non-null, the ad-hoc path below was skipped, and the hasControlPanel
+        // check then returned SILENTLY -- an enabled button that did nothing,
+        // and no way left to reach the ASIO panel from inside the app.
+        const bool liveIsSelected = dev != nullptr
+                                    && dev->hasControlPanel()
+                                    && dev->getName() == devName
+                                    && mMgr.getCurrentAudioDeviceType() == typeName;
+
+        // Build the SELECTED device just far enough to ask it for its panel,
+        // then drop it again.  Instantiating the driver is all ASIO needs to
+        // show its panel (and, for ASIO4ALL, to put its tray icon up) -- it does
+        // NOT need the device to have opened, which is the whole point here:
+        // the panel has to be reachable precisely when the open is failing.
+        std::unique_ptr<juce::AudioIODevice> temp;
+        if (! liveIsSelected)
+        {
+            dev = nullptr;
+            for (auto* t : mMgr.getAvailableDeviceTypes())
+            {
+                if (t == nullptr || t->getTypeName() != typeName) continue;
+                t->scanForDevices();
+                temp.reset (t->createDevice (devName, devName));
+                break;
+            }
+            dev = temp.get();
+        }
+
         if (dev == nullptr || ! dev->hasControlPanel())
+        {
+            juce::AlertWindow::showMessageBoxAsync (
+                juce::MessageBoxIconType::WarningIcon,
+                "No control panel",
+                "BaySickDAW could not load a control panel for:\n\n"
+                "    " + typeName + "  /  " + devName + "\n\n"
+                "Only ASIO drivers have their own control panel. If this is an "
+                "ASIO device, the driver would not load -- check that it is "
+                "installed and that no other application is holding it.",
+                "OK");
             return;
+        }
 
         juce::Component modalShield;
         modalShield.setOpaque(true);
@@ -506,8 +623,14 @@ private:
 
         if (dev->showControlPanel())
         {
+            // Drop the ad-hoc device BEFORE restarting -- ASIO is exclusive, so
+            // holding it here would block the real open we are about to attempt.
+            dev = nullptr;
+            temp.reset();
+
             mMgr.closeAudioDevice();
             mMgr.restartLastAudioDevice();
+            refreshPanelButtonEnablement();
             // NIT-10: the vendor panel may have changed the buffer size; re-read
             // the live setup into the snapshot and refresh the combos so a later
             // Apply doesn't revert the panel's change via the live buffer path.
@@ -2156,12 +2279,15 @@ void StandaloneEditor::buildDefaultTabs()
             // enumeration above only surfaces the MIDI-driven kinds here.
             mProcessor.setLiveMidiTarget ((int) id.kind, id.index);
 
-            // Refresh the menu-bar pill label on the next showPageForTab pass
-            // (onEngineSelected fires AFTER selectEngine completes).  If the
-            // PianoRollPage is currently visible, force the setTabSlots
-            // rebuild now so the label updates immediately.
-            if (mVisiblePage == mPianoRollPage)
-                showPageForTab (4);
+            // Rebuild the pill directly (onEngineSelected fires AFTER
+            // selectEngine completes).  Deliberately NOT gated on
+            // mVisiblePage == mPianoRollPage any more: contained windows are
+            // all live at once, so the roll's own dropdown is reachable while
+            // some other page is the visible one, and that gate silently
+            // skipped every such rebuild -- the pill sat on "Drum Kit" while
+            // the page underneath changed.  Also no longer routed through
+            // showPageForTab, which would front the window as a side effect.
+            refreshPianoRollTabSlots();
         };
         // C.3: push the initial focus once so the processor knows the target
         // before the user picks anything.  Default = whatever PianoRollPage
@@ -5662,6 +5788,75 @@ juce::StringArray StandaloneEditor::buildPageWindowRows (int tabId, int pickRow)
     return labels;
 }
 
+void StandaloneEditor::refreshPianoRollTabSlots()
+{
+    if (mPianoRollPage == nullptr) return;
+
+    // Resolve the bar through the Piano Roll's OWN window.  This used to live
+    // inline in showPageForTab and write to mPageMenuBar, which meant the pill
+    // could only ever be rebuilt while the Piano Roll was the "visible" page.
+    // Contained windows (QA-ModelShell TS4) are all live simultaneously, so a
+    // user driving this dropdown while another window has focus got no rebuild
+    // and the pill kept whatever text it was last given -- "Drum Kit" forever.
+    PageMenuBar* bar = nullptr;
+    for (auto* entry : mPages)
+        if (entry != nullptr
+            && entry->component.get() == mPianoRollPage
+            && entry->window != nullptr)
+            bar = entry->window->getPageMenu();
+
+    if (bar == nullptr) return;
+
+    // 2026-04-26 (step 2): engine-picker pill right after the hamburger.  Click
+    // pops the menu (Drum Kit at top, every enumerated engine after); the
+    // active selection drives the label.
+    const auto active = mPianoRollPage->getActiveEngineId();
+    juce::String pillLabel = "Drum Kit";
+    if (active.kind != EngineKind::DrumKit)
+    {
+        if (mPianoRollPage->dropdownEnumerator)
+        {
+            for (auto& e : mPianoRollPage->dropdownEnumerator())
+                if (e.id == active) { pillLabel = e.label; break; }
+        }
+    }
+    pillLabel += "  ";
+    pillLabel += juce::String (juce::CharPointer_UTF8 ("\xe2\x96\xbe"));
+
+    // Nav pair immediately right of the roll dropdown: "Player Page" lands on
+    // the selected roll's engine tab; "FX Rack" lands on its strip on the
+    // Effects page.  Same slot row as the pill.
+    bar->setTabSlots (
+        { pillLabel, "Player Page", "FX Rack" },
+        [this] (int slot)
+        {
+            if (! mPianoRollPage) return;
+            if (slot == 1) { jumpToRollPlayerPage(); return; }
+            if (slot == 2) { jumpToRollFxRack();     return; }
+            juce::PopupMenu m = mPianoRollPage->buildEngineDropdown();
+            m.showMenuAsync (juce::PopupMenu::Options(),
+                [this] (int r)
+                {
+                    if (r <= 0 || ! mPianoRollPage) return;
+                    if (r == 1)
+                    {
+                        mPianoRollPage->selectEngine ({ EngineKind::DrumKit, 0 });
+                        return;
+                    }
+                    // Items >= 100 map to dropdownEnumerator entries
+                    const int idx = r - 100;
+                    if (mPianoRollPage->dropdownEnumerator)
+                    {
+                        const auto entries = mPianoRollPage->dropdownEnumerator();
+                        if (idx >= 0 && idx < (int) entries.size())
+                            mPianoRollPage->selectEngine (entries[idx].id);
+                    }
+                });
+        },
+        0,
+        juce::Colours::white);
+}
+
 void StandaloneEditor::showPageForTab(int tabId)
 {
     // D-4: the live-MIDI target follows the visible tab, so a tab switch
@@ -6846,64 +7041,7 @@ void StandaloneEditor::showPageForTab(int tabId)
         }
         else if (mPianoRollPage != nullptr && mVisiblePage == mPianoRollPage)
         {
-            // 2026-04-26 (step 2): Piano Roll page's engine-picker dropdown -
-            // single pill right after the hamburger.  Click pops up the menu
-            // (Drum Kit at top, every Layer/Bass/Drum engine after).  Active
-            // engine selection drives the pill label.
-            const auto active = mPianoRollPage->getActiveEngineId();
-            juce::String pillLabel = "Drum Kit";
-            if (active.kind != EngineKind::DrumKit)
-            {
-                if (auto* tab = mRibbon ? mRibbon->getTabById (mRibbon->getActiveTabForType (
-                        active.kind == EngineKind::Layer ? RibbonTabBar::TabType::Layers
-                      : active.kind == EngineKind::Bass  ? RibbonTabBar::TabType::Bass
-                      :                                    RibbonTabBar::TabType::Drums)) : nullptr)
-                {
-                    juce::ignoreUnused (tab);
-                }
-                // Resolve label by index via the dropdown enumerator.
-                if (mPianoRollPage->dropdownEnumerator)
-                {
-                    for (auto& e : mPianoRollPage->dropdownEnumerator())
-                        if (e.id == active) { pillLabel = e.label; break; }
-                }
-            }
-            pillLabel += "  ";
-            pillLabel += juce::String (juce::CharPointer_UTF8 ("\xe2\x96\xbe"));
-
-            // Nav pair immediately right of the roll dropdown: "Player Page"
-            // lands on the selected roll's engine tab; "FX Rack" lands on its
-            // strip on the Effects page.  Same slot row as the pill, so they
-            // sit exactly where the dropdown is.
-            mPageMenuBar->setTabSlots (
-                { pillLabel, "Player Page", "FX Rack" },
-                [this] (int slot)
-                {
-                    if (! mPianoRollPage) return;
-                    if (slot == 1) { jumpToRollPlayerPage(); return; }
-                    if (slot == 2) { jumpToRollFxRack();     return; }
-                    juce::PopupMenu m = mPianoRollPage->buildEngineDropdown();
-                    m.showMenuAsync (juce::PopupMenu::Options(),
-                        [this] (int r)
-                        {
-                            if (r <= 0 || ! mPianoRollPage) return;
-                            if (r == 1)
-                            {
-                                mPianoRollPage->selectEngine ({ EngineKind::DrumKit, 0 });
-                                return;
-                            }
-                            // Items >= 100 map to dropdownEnumerator entries
-                            const int idx = r - 100;
-                            if (mPianoRollPage->dropdownEnumerator)
-                            {
-                                const auto entries = mPianoRollPage->dropdownEnumerator();
-                                if (idx >= 0 && idx < (int) entries.size())
-                                    mPianoRollPage->selectEngine (entries[idx].id);
-                            }
-                        });
-                },
-                0,
-                juce::Colours::white);
+            refreshPianoRollTabSlots();
         }
     }
 
@@ -12377,7 +12515,24 @@ void StandaloneEditor::serializeUIState (juce::XmlElement& root)
                 wins->createNewChildElement ("Open")->setAttribute ("key", persistKeyFor (*e));
         for (const auto& aw : mAuxWindows)
             if (aw.window != nullptr)
-                wins->createNewChildElement ("Open")->setAttribute ("key", aw.key);
+            {
+                auto* rec = wins->createNewChildElement ("Open");
+                rec->setAttribute ("key", aw.key);
+                // Jeff, 2026-08-05: the pedals window's view mode rides its
+                // open-state record -- it IS window state, and this is the one
+                // element already written per aux window.
+                if (aw.key.endsWith (":pedals"))
+                {
+                    const int idx = aw.key.fromFirstOccurrenceOf (":", false, false)
+                                          .upToFirstOccurrenceOf (":", false, false)
+                                          .getIntValue();
+                    for (auto* e : mPages)
+                        if (e != nullptr)
+                            if (auto* ip = dynamic_cast<InstPage*> (e->component.get()))
+                                if (ip->getPageIndex() == idx && ip->isPedalsCompact())
+                                    rec->setAttribute ("view", 1);
+                }
+            }
     }
 
     // QA-Layout T9 (L29): shared control-lane prefs -- ONE height for every
@@ -13809,8 +13964,18 @@ void StandaloneEditor::openInstPedalsWindow (int instIdx)
     const juce::String title = liveInput ? ip->getTabName()
                                          : ip->getTabName() + " - Pedals";
 
-    auto* win = openAuxWindow (key, key, title, std::move (content), 1534, 455);   // T7: approved map
+    // Open at the size THIS page's current view wants -- the mode may have been
+    // restored from the project before any window existed.
+    const auto vm = ip->isPedalsCompact() ? BaySickPedalsEditor::ViewMode::Compact
+                                          : BaySickPedalsEditor::ViewMode::Standard;
+    const auto vmSize = BaySickPedalsEditor::windowSizeFor (vm);
+    auto* win = openAuxWindow (key, key, title, std::move (content), vmSize.x, vmSize.y);
     if (win == nullptr) return;
+
+    // Apply the mode to the editor WITHOUT notifying the host: a restore must
+    // not resize the window over the bounds attachTo just restored.
+    if (auto* pe = dynamic_cast<BaySickPedalsEditor*> (ip->getPedalsEditorComponent()))
+        pe->setViewMode (vm, /*notifyHost*/ false);
 
     if (auto* bar = win->getPageMenu())
     {
@@ -13820,17 +13985,77 @@ void StandaloneEditor::openInstPedalsWindow (int instIdx)
         });
         bar->setCenterTitle (BaySickPedalsEditor::getEngineTitle(),
                              BaySickPedalsEditor::getEngineAccent());
-        // NAM/IR launcher on the pedals strip (L10).
-        juce::Component::SafePointer<StandaloneEditor> safe2 (this);
-        bar->setTabSlots ({ "NAM/IR" },
-            [safe2, instIdx] (int)
+
+        // Jeff, 2026-08-05: View menu between Menu and the NAM/IR button.
+        // Standard = the 4x2 pedalboard; Compact = one pedal at a time in an
+        // Effects-sized window.  The editor owns its layout, this owns the
+        // window resize -- the split that makes the mechanism reusable.
+        {
+            juce::Component::SafePointer<WorkspaceWindow> safeWin (win);
+            auto pedals = [findInstPage]() -> BaySickPedalsEditor*
             {
-                if (safe2 != nullptr) safe2->openInstNamIrWindow (instIdx);
-            }, -1, ip->getPageColor());
-        // Pedalboard preset button (T3 relocation, mounted here now that the
-        // pedals window exists).
-        if (auto* pe = dynamic_cast<BaySickPedalsEditor*> (ip->getPedalsEditorComponent()))
-            bar->addExtraRightComponent (pe->getPedalboardPresetButton(), 88);
+                auto* p = findInstPage();
+                return p != nullptr
+                     ? dynamic_cast<BaySickPedalsEditor*> (p->getPedalsEditorComponent())
+                     : nullptr;
+            };
+            if (auto* pe = pedals())
+                pe->onViewModeChanged = [safeWin] (BaySickPedalsEditor::ViewMode m)
+                {
+                    if (auto* w = safeWin.getComponent())
+                    {
+                        const auto sz = BaySickPedalsEditor::windowSizeFor (m);
+                        w->setDefaultWindowSize (sz.x, sz.y);
+                        w->setSize (sz.x, sz.y);   // an explicit mode switch RESIZES
+                    }
+                };
+            // Jeff, 2026-08-05: the strip itself narrows in Compact.  At 357px
+            // the full-width NAM/IR slot plus the 88px Preset button left the
+            // centered logo nowhere to go -- the button sat on top of it.  The
+            // slot shrinks to an abbreviation carrying the full name in its
+            // tooltip, Preset narrows, and PageMenuBar centres the logo in the
+            // free span between the clusters rather than on the whole strip.
+            juce::Component::SafePointer<PageMenuBar> safeBar (bar);
+            juce::Component::SafePointer<StandaloneEditor> safe2 (this);
+            const auto accent = ip->getPageColor();
+            auto configureStrip = [safeBar, safe2, pedals, instIdx, accent] (bool compact)
+            {
+                auto* b = safeBar.getComponent();
+                if (b == nullptr) return;
+                b->setTabSlots ({ compact ? "N/I" : "NAM/IR" },
+                    [safe2, instIdx] (int)
+                    {
+                        if (safe2 != nullptr) safe2->openInstNamIrWindow (instIdx);
+                    }, -1, accent);
+                b->setTabSlotWidth (compact ? 30 : 74);
+                b->setTabSlotTooltip (0, "NAM/IR - open the amp + cabinet window");
+
+                b->clearExtraRightComponents();
+                if (auto* pe = pedals())
+                    b->addExtraRightComponent (pe->getPedalboardPresetButton(),
+                                               compact ? 60 : 88);
+            };
+
+            bar->setViewMenu ({ "Standard", "Compact" },
+                [findInstPage] { auto* p = findInstPage();
+                                 return p != nullptr && p->isPedalsCompact() ? 1 : 0; },
+                [findInstPage, pedals, configureStrip] (int idx)
+                {
+                    const bool compact = (idx == 1);
+                    // The PAGE is the source of truth -- it outlives the editor
+                    // and it is what the project save reads.
+                    if (auto* p = findInstPage()) p->setPedalsCompact (compact);
+                    if (auto* pe = pedals())
+                        pe->setViewMode (compact ? BaySickPedalsEditor::ViewMode::Compact
+                                                 : BaySickPedalsEditor::ViewMode::Standard);
+                    configureStrip (compact);
+                });
+
+            // NAM/IR launcher + preset button, sized for the mode this window
+            // is opening in (L10 / T3 relocation).
+            configureStrip (vm == BaySickPedalsEditor::ViewMode::Compact);
+        }
+
     }
 }
 
@@ -14424,6 +14649,7 @@ void StandaloneEditor::deserializeUIState (const juce::XmlElement& root)
     // tabs are one ribbon click away (accepted, pre-v1 no-migration rule).
     mLoadingWindows = true;
     juce::StringArray openWindowKeys;
+    juce::StringArray compactWindowKeys;   // pedals windows saved in Compact view
     if (auto* wins = ui->getChildByName ("Windows"))
     {
         std::map<juce::String, juce::Rectangle<int>> m;
@@ -14443,7 +14669,11 @@ void StandaloneEditor::deserializeUIState (const juce::XmlElement& root)
                 m[key] = b;
         WorkspaceWindow::replaceSessionBounds (std::move (m));
         for (auto* o : wins->getChildWithTagNameIterator ("Open"))
-            openWindowKeys.add (o->getStringAttribute ("key"));
+        {
+            const auto k = o->getStringAttribute ("key");
+            openWindowKeys.add (k);
+            if (o->getIntAttribute ("view", 0) == 1) compactWindowKeys.add (k);
+        }
     }
 
     // QA-Layout T9 (L29): shared lane prefs restored BEFORE the tab rebuild so
@@ -15340,7 +15570,18 @@ void StandaloneEditor::deserializeUIState (const juce::XmlElement& root)
             const juce::String rest = key.fromFirstOccurrenceOf (":", false, false);
             const int idx = rest.upToFirstOccurrenceOf (":", false, false).getIntValue();
             const juce::String kind = rest.fromFirstOccurrenceOf (":", false, false);
-            if      (kind == "pedals") openInstPedalsWindow (idx);
+            if (kind == "pedals")
+            {
+                // Set the mode on the PAGE before the window exists, so the
+                // window opens at the right size and its restored bounds are
+                // measured against the right minimum.
+                if (compactWindowKeys.contains (key))
+                    for (auto* e : mPages)
+                        if (e != nullptr)
+                            if (auto* ip = dynamic_cast<InstPage*> (e->component.get()))
+                                if (ip->getPageIndex() == idx) ip->setPedalsCompact (true);
+                openInstPedalsWindow (idx);
+            }
             else if (kind == "namir")  openInstNamIrWindow  (idx);
             continue;
         }

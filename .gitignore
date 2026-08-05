@@ -24,6 +24,9 @@ plugins_scan_crashes.txt
 
 # Runtime diagnostic logs — regenerated each launch, not source.
 *_log.txt
+# JUCE's ASIO driver trace (JUCE_ASIO_DEBUGGING) — truncated and rewritten on
+# every launch.  Not matched by *_log.txt above.
+/asio_trace.txt
 
 # QA-DispatcherAffinity trace dumps — one-shot diagnostic CSV captures from
 # the (now-stripped) Mixer "QA-DispatcherAffinity Trace" menu item.  The

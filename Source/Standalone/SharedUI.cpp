@@ -1407,6 +1407,22 @@ void PageMenuBar::setExtraHeadings (const juce::StringArray& labels,
     repaint();
 }
 
+void PageMenuBar::setViewMenu (const juce::StringArray& modeNames,
+                               std::function<int()>     getMode,
+                               std::function<void(int)> setMode)
+{
+    setExtraHeadings ({ "View" },
+        [modeNames, getMode, setMode] (int, juce::Component* anchor)
+        {
+            juce::PopupMenu m;
+            const int cur = getMode ? getMode() : 0;
+            for (int i = 0; i < modeNames.size(); ++i)
+                m.addItem (modeNames[i], true, i == cur,
+                           [setMode, i] { if (setMode) setMode (i); });
+            m.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (anchor));
+        });
+}
+
 void PageMenuBar::clearExtraHeadings()
 {
     for (auto& b : mExtraHeadings) removeChildComponent (b.get());
@@ -1619,10 +1635,25 @@ void PageMenuBar::updateTabActive(int idx)
             mTabSlotBtns[i]->setToggleState(i == idx, juce::dontSendNotification);
 }
 
+void PageMenuBar::setTabSlotWidth (int px)
+{
+    const int w = juce::jmax (18, px);
+    if (w == mTabSlotW) return;
+    mTabSlotW = w;
+    resized();
+}
+
+void PageMenuBar::setTabSlotTooltip (int idx, const juce::String& tip)
+{
+    if (idx >= 0 && idx < (int) mTabSlotBtns.size() && mTabSlotBtns[(size_t) idx])
+        mTabSlotBtns[(size_t) idx]->setTooltip (tip);
+}
+
 void PageMenuBar::clearTabSlots()
 {
     for (auto& b : mTabSlotBtns) removeChildComponent(b.get());
     mTabSlotBtns.clear();
+    mTabSlotW = 74;   // a narrow override must not leak to the next page
     if (mMidBtn)  { removeChildComponent(mMidBtn.get());  mMidBtn.reset(); }
     if (mSideBtn) { removeChildComponent(mSideBtn.get()); mSideBtn.reset(); }
     mFxRackAction         = nullptr;
@@ -1951,10 +1982,20 @@ void PageMenuBar::paint(juce::Graphics& g)
     // rect to the text.
     if (mCenterName.isNotEmpty())
     {
+        // Jeff, 2026-08-05: centre the name in the FREE SPAN between the left
+        // cluster and the right extras, not on the whole strip.  Centring on
+        // the strip put it underneath whatever sat on the left the moment a
+        // window got narrow -- visible first on the pedals Compact view, where
+        // the NAM/IR button covered it, but latent on every narrow strip.
         const juce::Font f (15.0f, juce::Font::bold);
-        const int tw = f.getStringWidth (mCenterName) + 8;
+        const int tw   = f.getStringWidth (mCenterName) + 8;
+        const int freeL = juce::jmin (mCenterFreeL, mCenterFreeR);
+        const int freeW = juce::jmax (0, mCenterFreeR - freeL);
+        auto span = freeW > 0 ? juce::Rectangle<int> (freeL, 0, freeW, getHeight())
+                              : getLocalBounds();
         BaySickTitleBar::paintEngineName (g, mCenterName, mCenterAccent,
-                                          getLocalBounds().withSizeKeepingCentre (tw, getHeight()),
+                                          span.withSizeKeepingCentre (juce::jmin (tw, span.getWidth()),
+                                                                      getHeight()),
                                           true, 15.0f);
     }
 
@@ -1998,7 +2039,7 @@ void PageMenuBar::resized()
 
     // Tab slot buttons right after hamburger
     for (auto& btn : mTabSlotBtns)
-        btn->setBounds(b.removeFromLeft(74).reduced(2, 1));
+        btn->setBounds(b.removeFromLeft(mTabSlotW).reduced(2, 1));
 
     // MID/SIDE after tab slots (always positioned; visibility managed separately)
     if (mMidBtn || mSideBtn)
@@ -2020,6 +2061,11 @@ void PageMenuBar::resized()
     // FX Rack and Freeze are MENU ITEMS now (Jeff, 2026-08-04), not buttons --
     // see appendStandardItems.  No strip geometry for either.
 
+    // Everything above is the LEFT cluster; whatever is still in `b` when the
+    // right-hand extras have been taken is the free span the centered engine
+    // name may use.  Captured for paint() -- see mCenterFreeL/R.
+    mCenterFreeL = b.getX();
+
     // Extra right components (Kit, Nav combo, etc.) flush to right.  A dead
     // SafePointer (editor-owned component destroyed on engine swap) is
     // skipped without consuming width.
@@ -2030,6 +2076,8 @@ void PageMenuBar::resized()
     // Action buttons flush to right
     for (auto it = mActionBtns.rbegin(); it != mActionBtns.rend(); ++it)
         (*it)->setBounds(b.removeFromRight(60).reduced(2, 1));
+
+    mCenterFreeR = b.getRight();
 }
 
 // ============================================================ VKnobAutomation

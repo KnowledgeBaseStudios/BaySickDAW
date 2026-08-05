@@ -554,6 +554,44 @@ void VibesynthStandaloneApp::saveAudioSettings()
     auto xml = mDeviceManager->createStateXml();
     if (!xml) return;
     auto f = getAudioSettingsFile();
+
+    // NEVER let a failed device open erase the user's choice (Jeff, 2026-08-05).
+    //
+    // createStateXml reports what is CURRENTLY OPEN.  When nothing opened -- a
+    // wireless headset asleep, an interface unplugged, a driver misbehaving --
+    // it returns empty device names, and writing that over the settings file
+    // discards the device the user picked.  Every subsequent launch then has
+    // nothing to reconnect to, so the app can never recover on its own once the
+    // hardware comes back: the failure is self-entrenching, and the user is left
+    // re-picking the device by hand with no clue why it forgot.
+    //
+    // So: an empty name never overwrites a non-empty saved one.  A real change
+    // of device still writes through, because that name is non-empty.
+    if (f.existsAsFile())
+    {
+        // A fallback session must preserve the choice WHOLESALE -- see
+        // mUsingFallbackDevice.  Otherwise only empty names are protected.
+        const bool outEmpty = mUsingFallbackDevice
+                           || xml->getStringAttribute ("audioOutputDeviceName").isEmpty();
+        const bool inEmpty  = mUsingFallbackDevice
+                           || xml->getStringAttribute ("audioInputDeviceName") .isEmpty();
+
+        if (outEmpty || inEmpty)
+        {
+            if (auto prev = juce::XmlDocument::parse (f))
+            {
+                const auto prevOut = prev->getStringAttribute ("audioOutputDeviceName");
+                const auto prevIn  = prev->getStringAttribute ("audioInputDeviceName");
+                if (outEmpty && prevOut.isNotEmpty()) xml->setAttribute ("audioOutputDeviceName", prevOut);
+                if (inEmpty  && prevIn .isNotEmpty()) xml->setAttribute ("audioInputDeviceName",  prevIn);
+                // The device type goes with the names -- a preserved name under a
+                // reset type would name a device that type cannot open.
+                if ((outEmpty || inEmpty) && prev->hasAttribute ("deviceType"))
+                    xml->setAttribute ("deviceType", prev->getStringAttribute ("deviceType"));
+            }
+        }
+    }
+
     f.getParentDirectory().createDirectory();
     f.replaceWithText(xml->toString());
 }
@@ -584,6 +622,30 @@ void VibesynthStandaloneApp::changeListenerCallback(juce::ChangeBroadcaster*)
 }
 
 // ── VibesynthStandaloneApp ────────────────────────────────────────────────────
+// Stamps every logged line with seconds since the logger was installed, which
+// is effectively seconds since launch.  Startup blocks the message thread in
+// several places (driver opens above all), and without elapsed time in the file
+// the only measure of "how long did it sit there" is somebody watching a splash
+// screen and estimating -- which is not a measurement.
+class TimestampedFileLogger : public juce::FileLogger
+{
+public:
+    TimestampedFileLogger (const juce::File& f, const juce::String& welcome)
+        : juce::FileLogger (f, welcome),
+          mStartMs (juce::Time::getMillisecondCounterHiRes())
+    {
+    }
+
+    void logMessage (const juce::String& m) override
+    {
+        const double elapsed = (juce::Time::getMillisecondCounterHiRes() - mStartMs) * 0.001;
+        juce::FileLogger::logMessage (juce::String (elapsed, 3) + "s  " + m);
+    }
+
+private:
+    const double mStartMs;
+};
+
 void VibesynthStandaloneApp::initialise(const juce::String&)
 {
    #if JUCE_WINDOWS
@@ -594,6 +656,20 @@ void VibesynthStandaloneApp::initialise(const juce::String&)
     // workers is MMCSS "Pro Audio" in VibeThreadPool::workerLoop.
     SetPriorityClass (GetCurrentProcess(), ABOVE_NORMAL_PRIORITY_CLASS);
    #endif
+
+    // Installed FIRST so the ASIO trace (JUCE_ASIO_DEBUGGING, set in
+    // CMakeLists) is captured from the very first driver call -- the device
+    // open happens further down this same function, so a logger installed any
+    // later would miss the part that matters.  Truncated per launch: the
+    // interesting run is always the current one.
+    {
+        auto traceFile = getAudioSettingsFile().getSiblingFile ("asio_trace.txt");
+        traceFile.deleteFile();
+        mLogger = std::make_unique<TimestampedFileLogger> (traceFile,
+                                                           "BaySickDAW audio driver trace");
+        juce::Logger::setCurrentLogger (mLogger.get());
+        juce::Logger::writeToLog ("startup: begin");
+    }
 
     // ── Splash screen (2026-04-21) ───────────────────────────────────────────
     // Shows the BaySickDAW logo on launch while the DAW initialises. The
@@ -613,6 +689,36 @@ void VibesynthStandaloneApp::initialise(const juce::String&)
                                                 /*useDropShadow=*/true);
         splash->deleteAfterDelay (juce::RelativeTime::seconds (4.0),
                                    /*removeOnMouseClick=*/true);
+
+        // Get it ONTO THE SCREEN before the rest of this function blocks.
+        // Everything below -- preset seeding, the audio device open, MIDI
+        // enumeration, window + editor construction -- runs on the message
+        // thread, so the splash's paint is never dispatched until init is
+        // finished and it is about to be deleted.  On a fast start that is
+        // invisible; when a device refuses to open (JUCE waits 3 s for an ASIO
+        // callback, then the fallback opens another device) the user gets a
+        // blank rectangle for several seconds and a click that cannot be
+        // answered.  Same fix, and same Direct2D trap, as
+        // HeavyOperationOverlay: performAnyPendingRepaintsNow() is an EMPTY
+        // override in JUCE 8's Direct2D context, so the Software Renderer has
+        // to be selected first or the pump silently does nothing.  Matched by
+        // NAME -- the order of the engine list is an implementation detail.
+        if (auto* peer = splash->getPeer())
+        {
+            const auto engines = peer->getAvailableRenderingEngines();
+            const int  idx     = engines.indexOf ("Software Renderer");
+            if (idx >= 0)
+                peer->setCurrentRenderingEngine (idx);
+
+            // repaint() FIRST.  performAnyPendingRepaintsNow() flushes a
+            // PENDING paint; with nothing invalidated there is nothing to
+            // flush and it returns having drawn nothing, which is exactly
+            // what happened when this was added without the repaint call.
+            splash->repaint();
+            peer->performAnyPendingRepaintsNow();
+        }
+
+        juce::Logger::writeToLog ("startup: splash shown");
     }
 
     // H-9 prep (2026-05-02): seed effect-rack factory presets on every launch.
@@ -624,6 +730,7 @@ void VibesynthStandaloneApp::initialise(const juce::String&)
     // ("Tape Vintage" etc) seed cleanly.
     EffectPresetIO::migrateTapeFolderToSaturation();
     EffectPresetIO::seedFactoryPresets();
+    juce::Logger::writeToLog ("startup: factory presets seeded");
 
     mProcessor    = std::make_unique<VibeSynthProcessor>();
     mPlayHead     = std::make_unique<StandalonePlayHead>();
@@ -678,11 +785,24 @@ void VibesynthStandaloneApp::initialise(const juce::String&)
     // the audio thread reads it from the first block onward.
     loadMidiTriggerVelocityPref();
 
+    // Captured for the "no audio device" message below -- the parsed xml is
+    // scoped to this block, and by the time we know the open failed it is gone.
+    juce::String xmlDeviceType, xmlOutputName;
+
+    // The driver's OWN reason the open failed.  initialise() returns it and we
+    // used to discard the return value, so a device that refused to open left
+    // no trace anywhere -- every diagnosis after that was guesswork against a
+    // symptom.  Captured here, written to audio_setup_log.txt, and shown in the
+    // failure dialog.
+    juce::String initErr;
+
     if (settingsFile.existsAsFile())
     {
         auto xml = juce::XmlDocument::parse(settingsFile);
         if (xml != nullptr)
         {
+            xmlDeviceType = xml->getStringAttribute ("deviceType");
+            xmlOutputName = xml->getStringAttribute ("audioOutputDeviceName");
             xml->removeAttribute ("audioDeviceInChans");
             xml->removeAttribute ("audioDeviceOutChans");
             // G1 boundary fix (2026-07-08, found at the smoke): switching
@@ -703,12 +823,30 @@ void VibesynthStandaloneApp::initialise(const juce::String&)
                     xml->setAttribute ("audioInputDeviceName", outName);
             }
         }
-        mDeviceManager->initialise(64, 64, xml.get(), true);
+        // selectDefaultDeviceOnFailure = FALSE (2026-08-05).
+        //
+        // With it TRUE, juce_AudioDeviceManager.cpp:524 opens the device type's
+        // DEFAULT device when the user's choice will not open, and then CLEARS
+        // the error.  The result is a non-null device and an empty error string,
+        // so every check here reads as success while the app is running a device
+        // the user never picked -- Jeff selected the UMC ASIO Driver and silently
+        // got ASIO4ALL.  Worse, nothing marked it a fallback, so shutdown's
+        // saveAudioSettings wrote ASIO4ALL over his actual choice and the pick
+        // was gone from disk after one restart.
+        //
+        // FALSE means a refused device returns null WITH the driver's error text,
+        // which hands control to our own fallback path below: it logs every step,
+        // names the device in a dialog, and preserves the user's choice for the
+        // next launch.  It also removes JUCE's extra open attempt, which on a
+        // failing ASIO driver costs another 3 s of blocked message thread.
+        initErr = mDeviceManager->initialise(64, 64, xml.get(), false);
     }
     else
     {
-        mDeviceManager->initialiseWithDefaultDevices(64, 64);
+        initErr = mDeviceManager->initialiseWithDefaultDevices(64, 64);
     }
+
+    juce::Logger::writeToLog ("startup: audio device init done");
 
     // J-A2 / C3 (2026-05-04): diagnostic log to disk - captures what JUCE
     // actually does with the audio device setup at startup, so we can see
@@ -812,6 +950,117 @@ void VibesynthStandaloneApp::initialise(const juce::String&)
     else
     {
         diagLog << "getCurrentAudioDevice() returned null after initialise.\n";
+        diagLog << "initialise() said: '"
+                << (initErr.isEmpty() ? juce::String ("(no error text)") : initErr) << "'\n";
+
+        // TELL THE USER (Jeff, 2026-08-05).  This condition -- no device at all
+        // -- used to be recorded in this log and nowhere else: the app came up
+        // silent, slowly (the failed open blocks), with no splash and no
+        // message, and every symptom downstream looked like a broken app rather
+        // than a device that would not open.  The buses are the worst of it:
+        // buildFixedTopology runs from prepareToPlay, so with no device there
+        // are no bus or master nodes, and the effects rack silently refuses
+        // every click on them with no explanation.
+        const auto wantedType = xmlDeviceType.isNotEmpty() ? xmlDeviceType : juce::String ("(default)");
+        const auto wantedOut  = xmlOutputName.isNotEmpty() ? xmlOutputName : juce::String ("(default)");
+
+        // FALL BACK so the app is usable this session -- with a device open,
+        // prepareToPlay runs, buildFixedTopology creates the buses and master,
+        // meters move and sound comes out.  The user's real choice is NOT
+        // overwritten (mUsingFallbackDevice), so the next launch goes back to
+        // trying the device they actually picked.
+        //
+        juce::String fellBackTo;
+
+        // NO retry of the chosen device here.  Two were tried on 2026-08-05 and
+        // both are gone: a rate x buffer x inputs ladder (twelve attempts, half
+        // a minute of frozen message thread) and then a single output-only
+        // attempt.  The output-only one was measured against both of Jeff's
+        // failing drivers and helped NEITHER -- ASIO4ALL still delivered no
+        // callbacks with inputs off, and the UMC still returned Hardware
+        // Malfunction -- while costing 9.1 s on the UMC, because each failed
+        // createBuffers burns its own 3 s driver timeout and JUCE calls it three
+        // times.  A retry here is 3-9 s of frozen UI added to the exact path
+        // where the user is already waiting.  Anything of this kind belongs off
+        // the message thread with a timeout, not inline before the window exists.
+        // Straight to the Windows default (Jeff, 2026-08-05).
+        //
+        // An ASIO4ALL-first step used to sit here on the reasoning that a
+        // generic ASIO wrapper keeps a failed session on the ASIO path.  It was
+        // removed after being measured: ASIO4ALL either delivered no callbacks
+        // at all, or -- worse -- opened SUCCESSFULLY onto whatever virtual
+        // device it happened to be bound to (a Voice.ai cable, on Jeff's rig)
+        // and reported victory while the audio went nowhere.  A fallback that
+        // silently succeeds into a virtual cable is worse than one that fails,
+        // because nothing downstream can tell it went wrong.  The Windows
+        // default is a device the USER picked, in a place they control.
+        //
+        // The TYPE has to be switched off ASIO first (Jeff, 2026-08-05).
+        // initialiseWithDefaultDevices opens the default device OF THE CURRENT
+        // TYPE, and after a failed ASIO open the current type is still ASIO --
+        // so it retried the ASIO default, i.e. the driver that had just failed,
+        // and reported "the Windows default would not open either" on a machine
+        // with five working outputs.  It never tried a Windows device at all.
+        if (fellBackTo.isEmpty())
+        {
+            for (auto* t : mDeviceManager->getAvailableDeviceTypes())
+            {
+                if (t == nullptr || t->getTypeName() == "ASIO") continue;
+
+                mDeviceManager->setCurrentAudioDeviceType (t->getTypeName(), true);
+                mDeviceManager->initialiseWithDefaultDevices (64, 64);
+
+                if (auto* fb = mDeviceManager->getCurrentAudioDevice())
+                {
+                    fellBackTo = fb->getName() + "  (" + t->getTypeName() + ")";
+                    diagLog << "Fallback type '" << t->getTypeName()
+                            << "' opened '" << fb->getName() << "'\n";
+                    break;
+                }
+
+                diagLog << "Fallback type '" << t->getTypeName() << "' opened nothing.\n";
+            }
+        }
+
+        if (fellBackTo.isNotEmpty())
+        {
+            mUsingFallbackDevice = true;
+            diagLog << "Fell back to: '" << fellBackTo << "'\n";
+        }
+        else
+        {
+            diagLog << "Every fallback failed - no audio.\n";
+        }
+
+        juce::MessageManager::callAsync ([wantedType, wantedOut, fellBackTo, initErr]
+        {
+            const juce::String reason = initErr.isNotEmpty()
+                ? juce::String ("\n\nThe driver said: ") + initErr
+                : juce::String();
+
+            const juce::String body = fellBackTo.isNotEmpty()
+                ? "BaySickDAW could not open the audio device you chose, so it is "
+                  "using your Windows default for now.\n\n"
+                  "Wanted:      " + wantedType + "  /  " + wantedOut + "\n"
+                  "Now using:   " + fellBackTo + "\n\n"
+                  "Your choice has been kept -- the next launch will try it again. "
+                  "Common causes: the device is switched off or asleep (wireless "
+                  "headsets), unplugged, or held by another application." + reason
+                : "BaySickDAW could not open an audio device, so there is no sound.\n\n"
+                  "Tried:  " + wantedType + "  /  " + wantedOut + "\n\n"
+                  "The Windows default device would not open either. Common causes: "
+                  "the device is switched off or asleep (wireless headsets), "
+                  "unplugged, or held by another application.\n\n"
+                  "Pick a device in Options > Audio Settings. Note that mixer buses "
+                  "and the master are not created until an audio device opens, so "
+                  "the effects rack cannot add effects to them until then." + reason;
+
+            juce::AlertWindow::showMessageBoxAsync (
+                juce::MessageBoxIconType::WarningIcon,
+                fellBackTo.isNotEmpty() ? "Using a different audio device"
+                                        : "No audio device",
+                body, "OK");
+        });
     }
 
     // G1 boundary diagnostics (2026-07-08, Keep): the log could not answer
@@ -833,6 +1082,8 @@ void VibesynthStandaloneApp::initialise(const juce::String&)
         logFile.getParentDirectory().createDirectory();
         logFile.replaceWithText (diagLog);
     }
+
+    juce::Logger::writeToLog ("startup: MIDI + device diagnostics written");
 
     // J-A2 (2026-05-04): restore the user's master-output channel pick from
     // master_output.xml (sibling of audio_settings.xml).  Done AFTER
@@ -938,6 +1189,8 @@ void VibesynthStandaloneApp::initialise(const juce::String&)
     mAdvancer = std::make_unique<PlayHeadAdvancer>(*mPlayHead, *mPlayer);
     mDeviceManager->addAudioCallback(mAdvancer.get());
 
+    juce::Logger::writeToLog ("startup: creating main window + editor");
+
     mWindow = std::make_unique<VibeSynthWindow>();
     // Window title-bar icon (reuses the embedded splash logo).
     {
@@ -972,6 +1225,11 @@ void VibesynthStandaloneApp::initialise(const juce::String&)
     // keeps every CONTAINED window grabbable for the same reason.
     mWindow->setFullScreen(true);
     mWindow->setVisible(true);
+
+    // Last line of initialise: everything before this ran on the message thread
+    // with no repaints dispatched, so this figure IS the frozen-UI duration the
+    // user sees as a stuck splash.
+    juce::Logger::writeToLog ("startup: COMPLETE - main window visible");
 }
 
 void VibesynthStandaloneApp::shutdown()
@@ -1054,6 +1312,11 @@ void VibesynthStandaloneApp::shutdown()
         shutdownOverlay = nullptr;   // detach from the window before it dies
     }
     mWindow = nullptr;
+
+    // LAST: everything above can still log (driver close, device teardown), and
+    // Logger keeps only a raw pointer.
+    juce::Logger::setCurrentLogger (nullptr);
+    mLogger = nullptr;
 }
 
 // C.3 (2026-04-30): MIDI input thread -> processor's collector.  Keep this
@@ -1073,7 +1336,14 @@ void VibesynthStandaloneApp::handleIncomingMidiMessage (juce::MidiInput* source,
 {
     if (mProcessor == nullptr) return;
 
-    mProcessor->getLiveMidiCollector().addMessageToQueue (message);
+    // MIDI input opens before the audio device prepares, and the collector
+    // asserts unless reset() has run for the current sample rate -- so a
+    // controller that talks during startup took the Debug build down before the
+    // window ever appeared.  Drop those few messages: they predate any engine
+    // being ready to sound them.  The learn queue below has no such
+    // precondition and still gets them.
+    if (mProcessor->isLiveMidiReady())
+        mProcessor->getLiveMidiCollector().addMessageToQueue (message);
 
     // Only learnable channel-voice messages (CC / pitch-bend / channel
     // pressure) need to enter the learn queue.  Filter here to keep the

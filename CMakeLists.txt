@@ -116,6 +116,15 @@ set(VIBESYNTH_ASIO_INCLUDES "")
 if(EXISTS "${ASIO_SDK_DIR}/common/iasiodrv.h")
     message(STATUS "ASIO SDK found at ${ASIO_SDK_DIR}/common -> ASIO support ENABLED")
     list(APPEND VIBESYNTH_DEFS JUCE_ASIO=1)
+    # Turns on JUCE's own ASIO trace (juce_ASIO_windows.cpp): driver init result,
+    # supported rates, buffer-size range, channel counts, clock source, and the
+    # named ASIO error code at every step.  Without it a refused open reports one
+    # sentence ("Device didn't start correctly") with nothing behind it, which is
+    # not enough to tell a driver problem from ours.  Every log site is on an
+    # open/close/setup path or the control-message callback -- none on the audio
+    # callback -- so routing it to a file adds no audio-thread I/O.  Logged via
+    # Logger::writeToLog, which is live in Release too (DBG is not).
+    list(APPEND VIBESYNTH_DEFS JUCE_ASIO_DEBUGGING=1)
     set(VIBESYNTH_ASIO_INCLUDES "${ASIO_SDK_DIR}/common")
 else()
     message(STATUS "ASIO SDK not found at ${ASIO_SDK_DIR}/common -> ASIO support DISABLED")

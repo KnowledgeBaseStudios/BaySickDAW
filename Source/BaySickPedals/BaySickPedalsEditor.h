@@ -75,6 +75,34 @@ public:
     static juce::String getEngineTitle()  { return "BaySickPedals"; }
     static juce::Colour getEngineAccent() { return juce::Colour (0xFF1C3A8A); }
 
+    // ── View modes (Jeff, 2026-08-05) ─────────────────────────────────────────
+    // STANDARD is the 4x2 pedalboard.  COMPACT shows ONE pedal at a time, picked
+    // from a dropdown of the eight slots, in a window the size of the Effects
+    // window -- a chain of discrete units paginates naturally, which is why this
+    // is not a "compact layout" in the T8 sense (those are Future State CL-306).
+    //
+    // The MECHANISM is meant to be reused: PageMenuBar::setViewMenu installs the
+    // View heading, the host owns the window resize, and the editor only has to
+    // answer what its modes are and lay itself out.  See CL-307.
+    enum class ViewMode { Standard, Compact };
+    // notifyHost=false is the RESTORE path: it lays the editor out without
+    // firing onViewModeChanged, so restoring the mode cannot resize the window
+    // and clobber the bounds the project just restored.  Only a user-initiated
+    // switch resizes.
+    void     setViewMode (ViewMode m, bool notifyHost = true);
+    ViewMode getViewMode() const noexcept { return mViewMode; }
+    // Fired when the mode changes so the HOST can resize its window -- the
+    // editor does not know or care what window it is in.
+    std::function<void(ViewMode)> onViewModeChanged;
+    // Window sizes each mode wants, in WINDOW dims.  Compact is the Effects
+    // window's WIDTH but taller (Jeff, 2026-08-05: 357x355) -- the Effects
+    // window's 268 height does not leave a usable pedal below the picker.
+    static juce::Point<int> windowSizeFor (ViewMode m)
+    {
+        return m == ViewMode::Compact ? juce::Point<int> { 357, 355 }
+                                      : juce::Point<int> { 1534, 455 };
+    }
+
 private:
     void timerCallback() override;
 
@@ -89,6 +117,13 @@ private:
     // inside Inst pages.  The preset button mounts on the hosting window's
     // title strip (QA-Layout T3/T4); the internal title bar is dissolved.
     BaySickPresetButton mPresetBtn { "Preset" };
+
+    // Compact-view state: which slot the single visible tile is showing, and
+    // the picker that chooses it.  Both inert in Standard.
+    ViewMode        mViewMode { ViewMode::Standard };
+    int             mCompactSlot { 0 };
+    juce::ComboBox  mSlotPicker;
+    void rebuildSlotPicker();
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (BaySickPedalsEditor)
 };

@@ -375,6 +375,12 @@ private:
     void onTabClosed(int tabId);
     void onSubPageSelected(RibbonTabBar::TabType type, int subPageIndex);
     void showPageForTab(int tabId);
+    // Rebuilds the Piano Roll window's title-strip slots (engine pill + the
+    // Player Page / FX Rack jumps).  Resolves the bar through the page's OWN
+    // window rather than mPageMenuBar, so it is correct no matter which page
+    // is "visible" -- contained windows are all live at once, and the engine
+    // pill has to follow the dropdown even when another window has focus.
+    void refreshPianoRollTabSlots();
     // QA-Layout T4 (L11/D4=c): one function builds the instance dropdown's
     // window-row model AND executes a pick -- pickRow < 0 collects labels,
     // pickRow >= 0 runs that row's action.  Single body keeps the list and

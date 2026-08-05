@@ -481,6 +481,15 @@ public:
     //   anything else (0 DrumKit grid / 4 Clip / 5 Vox / 6 live-input Inst /
     //   -1 unset) = drop (no MIDI-driven engine on those pages).
     juce::MidiMessageCollector& getLiveMidiCollector() noexcept { return mLiveMidiCollector; }
+    // FALSE until prepareToPlay has reset the collector for the current sample
+    // rate.  juce::MidiMessageCollector::addMessageToQueue asserts on
+    // hasCalledReset, and MIDI input opens BEFORE the audio device prepares --
+    // so a controller that sends anything during startup (a hardware handshake,
+    // a knob nudged, an active-sensing burst) hit that assert and stopped the
+    // Debug build from opening at all.  The race is timing-dependent, which is
+    // why it can lie dormant for months.  Callers must check this first.
+    bool isLiveMidiReady() const noexcept
+    { return mLiveMidiReady.load (std::memory_order_acquire); }
     void setLiveMidiTarget (int engineKind, int index) noexcept
     {
         mLiveMidiTargetKind .store (engineKind, std::memory_order_relaxed);
@@ -1734,6 +1743,7 @@ private:
     // C.3 (2026-04-30): hardware MIDI input bridge.  See public getter +
     // setLiveMidiTarget for the contract.
     juce::MidiMessageCollector mLiveMidiCollector;
+    std::atomic<bool>          mLiveMidiReady { false };   // see isLiveMidiReady
     std::atomic<int>           mLiveMidiTargetKind  { -1 };   // -1 = unset
     std::atomic<int>           mLiveMidiTargetIndex { 0  };
 

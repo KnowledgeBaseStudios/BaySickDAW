@@ -188,6 +188,33 @@ public:
     {
         setLookAndFeel(nullptr);
     }
+
+    // NEVER while something is modal -- a popup menu, in practice.
+    //
+    // juce_TooltipWindow.cpp:219 gates on
+    //   newComp == nullptr || getParentComponent() == nullptr
+    //                      || newComp->getPeer() == getPeer()
+    // While this window was PARENTED that middle term was false, so a menu item
+    // (which lives in the menu's own desktop peer, never the editor's) failed
+    // the gate and no tooltip was ever evaluated over an open menu.  Making the
+    // window parentless -- required so tooltips draw above the contained
+    // windows -- makes that term TRUE, so tooltips began evaluating over popup
+    // menus for the first time and displayTipInternal put an always-on-top
+    // temporary desktop window up while the menu was modal.
+    //
+    // A tooltip over a modal menu is wrong on its own terms, so this guard is
+    // right regardless of what it fixes.
+    //
+    // Hooked on getTipFor rather than timerCallback: TooltipWindow inherits
+    // Timer PRIVATELY, so timerCallback cannot be overridden from outside.
+    // Returning an empty tip is equivalent and lands earlier -- the base timer
+    // treats "no tip" as hide-and-do-nothing (juce_TooltipWindow.cpp:246).
+    juce::String getTipFor (juce::Component& c) override
+    {
+        if (juce::Component::getCurrentlyModalComponent() != nullptr)
+            return {};
+        return juce::TooltipWindow::getTipFor (c);
+    }
 };
 
 // ── LRX - Texture cache ───────────────────────────────────────────────────────
@@ -314,6 +341,20 @@ public:
     void setExtraHeadings (const juce::StringArray& labels,
                            std::function<void(int, juce::Component*)> onOpen);
     void clearExtraHeadings();
+
+    // ── View-mode menu (Jeff, 2026-08-05) ─────────────────────────────────────
+    // Installs a "View" heading listing the given mode names with a tick on the
+    // active one.  It lands right of "Menu" and LEFT of the tab slots, so on the
+    // pedals window the strip reads "Menu  View  NAM/IR".
+    //
+    // This is the REUSABLE half of view swapping, and is meant to stay that way:
+    // any window that grows a second view calls this and supplies two closures.
+    // The heading knows nothing about what the modes mean; the editor owns its
+    // layout and the host owns the window resize.  Rolling a bespoke switcher
+    // per player later is the thing this exists to prevent (see CL-307).
+    void setViewMenu (const juce::StringArray& modeNames,
+                      std::function<int()>     getMode,
+                      std::function<void(int)> setMode);
     void addActionButton(const juce::String& label, std::function<void()> action);
     void clearActionButtons();
 
@@ -340,6 +381,10 @@ public:
                      juce::Colour accent = juce::Colour());
     void updateTabActive(int idx);
     void clearTabSlots();
+    // Per-slot width, default 74.  A narrow strip (the pedals Compact view)
+    // sets this small and leans on the slot's tooltip for the full name.
+    void setTabSlotWidth (int px);
+    void setTabSlotTooltip (int idx, const juce::String& tip);
 
     // Phase C §P4.2 (2026-04-24): convert an existing tab-slot button into a
     // split-button.  Body-click still fires the slot's onTabClick; clicks
@@ -439,6 +484,11 @@ private:
 
     juce::String mCenterName;
     juce::Colour mCenterAccent;
+    int          mTabSlotW { 74 };
+    // Free span left over between the left cluster and the right extras, filled
+    // by resized() and used by paint() to place mCenterName.  See paint().
+    int          mCenterFreeL { 0 };
+    int          mCenterFreeR { 0 };
 
     // Tab slot buttons (owned)
     std::vector<std::unique_ptr<juce::TextButton>> mTabSlotBtns;

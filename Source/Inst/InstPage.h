@@ -115,6 +115,13 @@ public:
     void                setTabName (const juce::String& n);   // syncs the model tab's name (TS1)
     const juce::String& getTabName () const                 { return mTabName; }
 
+    // Jeff, 2026-08-05: the pedals window's Standard/Compact view lives on the
+    // PAGE, not the editor -- the editor is destroyed and rebuilt (source swap,
+    // window close) and the mode has to outlive it, and the project save needs
+    // somewhere to read it from when no window is open at all.
+    bool isPedalsCompact() const noexcept   { return mPedalsCompact; }
+    void setPedalsCompact (bool c) noexcept { mPedalsCompact = c; }
+
     // ── G-6 (2026-04-29): full-state export/import for Duplicate flow ────────
     juce::String exportInstState() const;
     void         importInstState (const juce::String& xml);
@@ -210,6 +217,7 @@ private:
     // engine's <prefix>cutSelf / <prefix>cutSelfMode params.  Attachments are
     // reset at the top of every rebuildPlayerPanel so a source swap can never
     // leave them listening on a torn-down engine's APVTS.
+    bool mPedalsCompact { false };   // see isPedalsCompact
     juce::TextButton mCutSelfBtn { "CUT SELF" };
     juce::TextButton mCutModeBtn { "SAME PITCH" };
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> mCutSelfAttach;

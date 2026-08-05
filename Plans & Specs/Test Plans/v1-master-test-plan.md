@@ -1191,9 +1191,13 @@ launch performs the one-time factory-effect-preset re-seed (versioned seeding).
 - [ ] **K-3 — ASIO Control Panel button.** Audio Settings on the ASIO device: "Open
       ASIO Control Panel" enabled; click opens the vendor panel; change the buffer
       size IN the vendor panel and close it — device restarts, audio resumes, LAT
-      readout reflects the new size. Switch the Audio Mode combo to Windows Audio
-      WITHOUT applying: button stays keyed to the LIVE device (still enabled). On a
-      machine/session where the live device is non-ASIO: button greyed.
+      readout reflects the new size.
+      SUPERSEDED BY QA-Layout (2026-08-05) — the old expectations ("button stays
+      keyed to the LIVE device", "greyed when the live device is non-ASIO") no
+      longer hold and must NOT be re-tested: the button now follows the SELECTED
+      device and instantiates it on demand, because keying it to the live device
+      made the panel unreachable in exactly the state the startup fallback
+      creates. Current behavior is LAY-A6 in §B.32.
       `D:__ R:__` notes:
 - [ ] **K-4 — DSP-11 live buffer-size change (Debug FIRST — this is the 10b
       feasibility verdict).** Audio Settings: change ONLY Buffer Size, Apply: NO
@@ -2247,6 +2251,73 @@ End-to-end:
       `D:__ R:__` notes:
 - [ ] **MS-48 — CPU dividend.** All-windows-closed cheaper than the old always-alive tabs;
       several open costs more (expected, FL-style).  `D:__ R:__` notes:
+
+### §B.32 — QA-Layout (audio-device open / fallback / Audio Settings coherence)
+
+Audio-device slice only. The rest of QA-Layout's scenarios get authored at batch close.
+
+Rig note: these need at least one ASIO interface and one deliberately BROKEN ASIO path.
+Jeff's rig has both — Model Mixer ASIO (works; needs a few seconds after power-on before
+launch or its driver returns "ASIO Driver open Failure!") and ASIO4ALL + UMC ASIO (both
+fail on that machine, for different reasons). Any driver that refuses to open serves.
+Where a step says "check the trace", read `asio_trace.txt` next to `audio_settings.xml`.
+
+- [ ] **LAY-A1 — chosen device is never silently swapped.** Pick a WORKING ASIO
+      interface, Apply, restart: the app opens THAT device. Now pick a device that
+      cannot open, Apply, restart: a dialog names both what was wanted and what is
+      being used instead — the app must NOT come up on a different device claiming
+      success. Trace shows the failing driver attempted by name. `D:__ R:__` notes:
+- [ ] **LAY-A2 — the choice survives a failure.** After LAY-A1's failing case, quit
+      and inspect `audio_settings.xml`: `audioOutputDeviceName` STILL names the
+      device you picked, not the fallback. Relaunch: it retries your device again.
+      (Regression guard: three separate bugs erased the pick here.) `D:__ R:__` notes:
+- [ ] **LAY-A3 — fallback lands on the Windows default.** With the chosen device
+      failing, the app opens the device set as default in `mmsys.cpl` — NOT ASIO4ALL,
+      which was removed from the chain for silently succeeding onto a virtual cable.
+      Change the Windows default, relaunch, confirm it follows. `D:__ R:__` notes:
+- [ ] **LAY-A4 — the failure names its reason.** The dialog ends with "The driver
+      said: ..." carrying the driver's own text (e.g. "Device didn't start
+      correctly", "Can't create i/o buffers", "ASIO Driver open Failure!"), and the
+      trace records the same. A silent failure is a FAIL. `D:__ R:__` notes:
+- [ ] **LAY-A5 — buses exist whenever a device opened.** After any fallback, the
+      Mixer shows its buses and master, and the Effects rack can add an effect to a
+      BUS and to the MASTER. (No device -> no `prepareToPlay` -> no bus nodes -> the
+      rack silently ignored every click; that is the bug this guards.)
+      `D:__ R:__` notes:
+- [ ] **LAY-A6 — ASIO control panel from the fallback state (supersedes K-3).** Let
+      the app fall back to a Windows device. Audio Settings: set Audio Mode to ASIO
+      and Device to an ASIO driver, do NOT Apply, click "Open ASIO Control Panel" —
+      the vendor panel opens even though the live device is not ASIO. Pick a device
+      with no panel: a message names it instead of the button doing nothing.
+      `D:__ R:__` notes:
+- [ ] **LAY-A7 — Apply writes a coherent config.** From a Windows-audio session,
+      switch to an ASIO device and Apply. Inspect `audio_settings.xml`:
+      `audioInputDeviceName` equals `audioOutputDeviceName` (ASIO is one device both
+      directions) — a Windows endpoint name must never appear in an ASIO config.
+      Then switch to a Windows device and Apply: any input name left over from
+      another driver type is dropped. `D:__ R:__` notes:
+- [ ] **LAY-A8 — rate/buffer lists belong to the SELECTED device.** While running on
+      one device, select a DIFFERENT one in Audio Settings: the Sample Rate and
+      Buffer Size lists offer only standard values, with no non-standard entry
+      carried over from the running device (e.g. a 480-sample WASAPI buffer must not
+      be offered for an ASIO driver that only accepts powers of two).
+      `D:__ R:__` notes:
+- [ ] **LAY-A9 — splash paints during a slow start.** With a failing ASIO device
+      selected (startup blocks for seconds), launch: the splash shows the LOGO for
+      the whole wait — never a blank rectangle. `D:__ R:__` notes:
+- [ ] **LAY-A10 — startup timing is recorded.** `asio_trace.txt` opens with
+      `0.000s startup: begin` and every line carries elapsed seconds through
+      `startup: COMPLETE - main window visible`. That last figure is the frozen-UI
+      duration; note it for a good device AND a failing one. `D:__ R:__` notes:
+- [ ] **LAY-A11 — no retry ladder.** A failing ASIO device costs ONE open attempt,
+      not several. The trace must show a single `opening device: <chosen>` before the
+      fallback — no repeated opens of the same device at different buffer sizes or
+      with inputs disabled. (Two retry designs were shipped and reverted; this guards
+      against a third.) `D:__ R:__` notes:
+- [ ] **LAY-A12 — a working interface is untouched.** With a healthy ASIO interface,
+      startup reaches `startup: COMPLETE` in about a second, all its channels appear
+      in the Mixer master-output list and on track arming, and the trace shows the
+      real channel counts. `D:__ R:__` notes:
 
 ## §C — Deferred re-verify ledger
 

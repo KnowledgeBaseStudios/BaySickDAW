@@ -69,16 +69,18 @@ public:
     // page gone); it exists so a future move-between-frames is possible.
     std::unique_ptr<juce::Component> releaseContent();
 
-    // DEFAULT OPENING SIZE, in WINDOW dimensions (chrome included -- the
-    // measured numbers were taken off the whole window).
+    // DEFAULT OPENING SIZE **and MINIMUM**, in WINDOW dimensions (chrome
+    // included -- the measured numbers were taken off the whole window).
     //
-    // Jeff, 2026-08-04: this is NOT a lock.  Content minimums are suspended
-    // until the compact-layout task decides what they should be, so a window
-    // may be dragged smaller or larger than its default freely.  The only
-    // surviving constraint is the anti-degenerate clamp in the ctor.  Applying
-    // this to a window that has never been sized by the session, a project or
-    // the user sets its size outright; a window that HAS been sized keeps what
-    // it was given.
+    // Jeff, 2026-08-05: these are the "smallest still readable" measurements,
+    // so they serve as both.  A window that has never been sized opens at this
+    // size; one that HAS been sized keeps what it was given but is raised if it
+    // sits below.  Either way it cannot be dragged smaller.
+    //
+    // A view that legitimately needs to be smaller declares a smaller default
+    // by calling this again -- that is how the pedals Compact view drops to the
+    // Effects window's footprint.  Compact layouts for the OTHER players are
+    // Future State (CL-306), not a suspension of this rule.
     void setDefaultWindowSize (int w, int h);
     // False until a real default has been supplied.  Drives the editor's
     // healing sweep -- an engine-derived size is unknown while the engine is
