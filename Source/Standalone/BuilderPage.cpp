@@ -306,10 +306,6 @@ BrowserPanel::BrowserPanel(PatternManager& pm,
                            AudioThumbnailCache& thumbCache)
     : mPM(pm), mAFM(afm), mThumbCache(thumbCache)
 {
-    mCollapseBtn = std::make_unique<TextButton>("<<");
-    mCollapseBtn->onClick = [this] { setCollapsed(!mCollapsed); };
-    addAndMakeVisible(*mCollapseBtn);
-
     // TS7 (Jeff, 2026-07-29): sort order for the Exports / Reports sections.
     mSortBtn = std::make_unique<TextButton>("Sort");
     mSortBtn->setTooltip ("Sort the Exports and Reports lists");
@@ -408,7 +404,8 @@ BrowserPanel::BrowserPanel(PatternManager& pm,
 void BrowserPanel::setCollapsed(bool c)
 {
     mCollapsed = c;
-    mCollapseBtn->setButtonText(c ? ">>" : "<<");
+    setMouseCursor (c ? juce::MouseCursor::PointingHandCursor
+                      : juce::MouseCursor::NormalCursor);
     for (auto& t : mTabBtns) t->setVisible(!c);
     for (auto& r : mPatItems)   r->setVisible(!c);
     for (auto& r : mAudioItems) r->setVisible(!c);
@@ -418,6 +415,12 @@ void BrowserPanel::setCollapsed(bool c)
     // G-5: tree visibility tracks the collapsed state on the Audio tab.
     if (mAudioTree) mAudioTree->setVisible (! c && mActiveTab == 1);
     if (auto* p = getParentComponent()) p->resized();
+    repaint();
+}
+
+void BrowserPanel::mouseDown (const juce::MouseEvent&)
+{
+    if (mCollapsed && onExpandRequest) onExpandRequest();
 }
 
 void BrowserPanel::switchTab(int t)
@@ -1849,7 +1852,25 @@ void BrowserPanel::paint(Graphics& g)
     g.setColour(VC::Accent.withAlpha(0.6f));
     g.fillRect(getWidth() - 1, 0, 1, getHeight());
 
-    if (mCollapsed) return;
+    if (mCollapsed)
+    {
+        // Jeff, 2026-08-04: collapsed, this strip IS the handle -- give it a
+        // grip texture and an arrow so it reads as "pull me back out" rather
+        // than as an empty margin.
+        const int cx = getWidth() / 2;
+        const int cy = getHeight() / 2;
+        g.setColour(VC::TextDim.withAlpha(0.55f));
+        for (int i = -3; i <= 3; ++i)
+            g.fillRect(cx - 5, cy + i * 4 + 26, 11, 1);
+
+        juce::Path arrow;
+        arrow.addTriangle((float)(cx - 4), (float)(cy - 8),
+                          (float)(cx - 4), (float)(cy + 8),
+                          (float)(cx + 5), (float)cy);
+        g.setColour(VC::Text.withAlpha(0.75f));
+        g.fillPath(arrow);
+        return;
+    }
 
     g.setColour(VC::TextDim);
     g.setFont(Font(9.f, Font::bold));
@@ -1869,8 +1890,11 @@ void BrowserPanel::paint(Graphics& g)
 void BrowserPanel::resized()
 {
     auto b = getLocalBounds();
-    mCollapseBtn->setBounds(b.removeFromTop(22).removeFromRight(28).reduced(1));
     if (mCollapsed) return;
+
+    // T16: the 22px row the "<<" button occupied is reclaimed -- the header
+    // caption still paints over it, so the tabs start below that band.
+    b.removeFromTop(22);
 
     auto tabRow = b.removeFromTop(22).reduced(2, 1);
     int  tabW   = tabRow.getWidth() / 3;
@@ -6918,12 +6942,11 @@ void ArrangementGrid::mouseWheelMove(const MouseEvent& e, const MouseWheelDetail
     else if (e.mods.isAltDown())
     {
         // Alt+scroll = vertical zoom anchored to the cursor: the row under the
-        // mouse stays under the mouse.  full out = kMaxRowsInView rows fill
-        // the viewport, full in = 8 rows.  Clamp subtracts the ruler band so
-        // zoom-out tiles ruler + rows exactly (no residual dead strip).
+        // mouse stays under the mouse.  Range is fixed in pixels (see
+        // kMinRowH / kMaxRowH) so it does not move with the window.
         float factor = (wheel.deltaY > 0.f) ? 1.15f : (1.f / 1.15f);
-        float minRH  = (vpH - (float) kRulerH) / (float)kMaxRowsInView;
-        float maxRH  = jmax(minRH, (vpH - (float) kRulerH) / 8.f);
+        const float minRH = (float) kMinRowH;
+        const float maxRH = (float) kMaxRowH;
         const float oldRH = mEffectiveRowH;
         mEffectiveRowH = jlimit(minRH, maxRH, mEffectiveRowH * factor);
         resized();
@@ -7177,10 +7200,14 @@ void TrackHeaderPanel::paint(Graphics& g)
     g.fillRect(0, 0, b.getWidth(), ArrangementGrid::kRulerH);
     g.setColour(VC::Accent.withAlpha(0.6f));
     g.drawHorizontalLine(ArrangementGrid::kRulerH - 1, 0.f, (float)b.getWidth());
-    // "BUILDER" label in corner
-    g.setColour(VC::TextDim);
-    g.setFont(Font(8.f, Font::bold));
-    g.drawText("BUILDER", 4, 1, b.getWidth() - 8, ArrangementGrid::kRulerH - 2, Justification::centredLeft);
+    // Jeff, 2026-08-04: the corner square beside the ruler is BLANK.  It used
+    // to carry a "BUILDER" caption AND -- worse -- the row loop below drew into
+    // it, because a scrolled row 0 lands at kRulerH - mYOffset, which is
+    // negative.  Track names scrolled up over the ruler line.  Clip the rows to
+    // the band under the ruler so nothing can ever cross it.
+    g.saveState();
+    g.reduceClipRegion (0, ArrangementGrid::kRulerH,
+                        b.getWidth(), jmax (0, b.getHeight() - ArrangementGrid::kRulerH));
 
     // Track rows -- geometry comes from the grid's rowToY/rowHeightPx so the
     // labels stay pixel-locked to the grid rows at every zoom level.
@@ -7252,6 +7279,15 @@ void TrackHeaderPanel::paint(Graphics& g)
         g.setColour(kGridLine);
         g.drawHorizontalLine(y + rh - 1, 0.f, (float)b.getWidth());
     }
+
+    g.restoreState();
+
+    // Opaque corner square: repainted AFTER the rows so a partially-scrolled
+    // row can never bleed through, and deliberately empty.
+    g.setColour(kHeaderBg);
+    g.fillRect(0, 0, b.getWidth(), ArrangementGrid::kRulerH);
+    g.setColour(kGridLine);
+    g.drawHorizontalLine(ArrangementGrid::kRulerH - 1, 0.f, (float)b.getWidth());
 
     // Right border
     g.setColour(VC::Accent.withAlpha(0.8f));
@@ -7737,14 +7773,37 @@ BuilderPage::BuilderPage(VibeSynthProcessor& p, PatternManager& pm)
     mBrowser = std::make_unique<BrowserPanel>(pm, mAFM, mThumbCache);
 
     // QA-Fe2: draggable browser right edge (min = default 180, max = 3x).
+    // Jeff, 2026-08-04: the floor is now a MAGNETIC RAMP.  Dragging into the
+    // last kRampPx before the floor snaps to the floor; pushing kCollapsePx
+    // past it collapses the browser to its pull-back strip.  Replaces the "<<"
+    // button and the View > Toggle Browser entry, which were two click-paths to
+    // one action with no drag path at all.
     mBrowserGrip = std::make_unique<BrowserEdgeGrip>();
     mBrowserGrip->getWidth = [this] { return mBrowserWidth; };
     mBrowserGrip->setWidth = [this](int w)
     {
-        const int clamped = juce::jlimit (kBrowserDefaultW, kBrowserDefaultW * 3, w);
+        constexpr int kRampPx     = 14;
+        constexpr int kCollapsePx = 44;
+
+        if (w < kBrowserDefaultW - kCollapsePx)
+        {
+            if (mBrowser && ! mBrowser->isCollapsed()) mBrowser->setCollapsed (true);
+            return;
+        }
+        const int snapped = (w < kBrowserDefaultW + kRampPx) ? kBrowserDefaultW : w;
+        const int clamped = juce::jlimit (kBrowserDefaultW, kBrowserDefaultW * 3, snapped);
         if (clamped != mBrowserWidth) { mBrowserWidth = clamped; resized(); }
     };
     addAndMakeVisible (*mBrowserGrip);
+    // The collapsed panel IS the pull-back handle -- click it to come back.
+    mBrowser->onExpandRequest = [this]
+    {
+        if (mBrowser && mBrowser->isCollapsed())
+        {
+            mBrowserWidth = juce::jmax (mBrowserWidth, kBrowserDefaultW);
+            mBrowser->setCollapsed (false);
+        }
+    };
     // QA-H Task 8 (#20): browser click -> the grid's active drop type.
     mBrowser->onDropTypeChanged = [this] (int tab, int refIdx) {
         if (! mGrid) return;
@@ -7890,10 +7949,8 @@ BuilderPage::BuilderPage(VibeSynthProcessor& p, PatternManager& pm)
     mToolbar->setEditModeLabel (mGrid->getEditMode());   // initial label
     addAndMakeVisible(*mToolbar);
 
-    // Menu bar (replaces ≡ popup)
-    mMenuBarModel = std::make_unique<BuilderMenuBar>(*this);
-    mMenuBar = std::make_unique<juce::MenuBarComponent>(mMenuBarModel.get());
-    addAndMakeVisible(*mMenuBar);
+    // T16: no in-page menu bar -- Edit / View are title-strip headings and
+    // Clips folds into the window Menu (StandaloneEditor installs all three).
 
     // Initial context label
     {
@@ -7924,15 +7981,6 @@ void BuilderPage::parentHierarchyChanged()
 
 BuilderPage::~BuilderPage()
 {
-    // QA-D Task 4 (QA-0a finding #8): defensive teardown of the MenuBarComponent
-    // before its model is destroyed.  See PianoRollContainer::~PianoRollContainer
-    // for the rationale.
-    if (mMenuBar)
-    {
-        mMenuBar->setModel (nullptr);
-        mMenuBar.reset();
-    }
-
     stopTimer();
     if (auto* top = getTopLevelComponent())
         top->removeKeyListener(this);
@@ -7985,10 +8033,10 @@ void BuilderPage::resized()
             mBrowserGrip->setBounds (b.removeFromLeft (5));
     }
 
-    // Menu bar (above toolbar)
-    if (mMenuBar) mMenuBar->setBounds(b.removeFromTop(kMenuBarH));
+    // T16: the 20px menu row is gone; the toolbar starts at the top and the
+    // grid gains that height.
 
-    // Toolbar (right of browser, below menu bar)
+    // Toolbar (right of browser)
     mToolbar->setBounds(b.removeFromTop(ArrangementToolbar::kHeight));
 
     // Bottom band: external horizontal scrollbar (spans the grid area only;
@@ -10018,112 +10066,53 @@ void BuilderPage::renderTrackRowToWav (int row)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// BuilderMenuBar
+// Builder menus - hosted by the WINDOW title strip since T16 (Jeff, 2026-08-04).
+// Tools is gone: Draw / Paint / Select / Delete / Mute / Slice / Zoom / Play
+// Selected all have a toolbar button one row below, so the menu was a duplicate
+// of controls already on screen.
 // ─────────────────────────────────────────────────────────────────────────────
-juce::StringArray BuilderMenuBar::getMenuBarNames()
+void BuilderPage::buildEditMenu (PopupMenu& m)
 {
-    return { "Edit", "Tools", "Clips", "View" };
+    const bool canUndo = mGrid && mGrid->canUndo();
+    const bool canRedo = mGrid && mGrid->canRedo();
+    auto key = [this] (KeyPress k) { if (mGrid) mGrid->keyPressed (k); };
+
+    m.addItem ("Undo", canUndo, false, [this] { if (mGrid) mGrid->undo(); });
+    m.addItem ("Redo", canRedo, false, [this] { if (mGrid) mGrid->redo(); });
+    m.addSeparator();
+    m.addItem ("Select All\tCtrl+A", [key] { key (KeyPress ('a', ModifierKeys::ctrlModifier, 0)); });
+    m.addItem ("Deselect\tEsc",      [key] { key (KeyPress (KeyPress::escapeKey)); });
+    m.addSeparator();
+    m.addItem ("Copy\tCtrl+C",       [key] { key (KeyPress ('c', ModifierKeys::ctrlModifier, 0)); });
+    m.addItem ("Paste\tCtrl+V",      [key] { key (KeyPress ('v', ModifierKeys::ctrlModifier, 0)); });
+    m.addItem ("Delete\tDel",        [key] { key (KeyPress (KeyPress::deleteKey)); });
+    m.addItem ("Duplicate\tCtrl+B",  [key] { key (KeyPress ('b', ModifierKeys::ctrlModifier, 0)); });
 }
 
-juce::PopupMenu BuilderMenuBar::getMenuForIndex(int index, const juce::String&)
+void BuilderPage::buildClipsMenu (PopupMenu& m)
 {
-    using AGTool = ArrangementGrid::AGTool;
-    PopupMenu m;
-
-    if (index == 0)  // Edit
+    m.addItem ("Import Audio...",        [this] { doImportAudio(); });
+    m.addSeparator();
+    m.addItem ("Rename Pattern\tF2",     [this] { doRenamePattern(); });
+    m.addItem ("Find Next Empty\tF4",    [this] { doFindNextEmptyPattern(); });
+    m.addItem ("New Automation Clip...", [this] { doNewAutomationClip(); });
+    m.addSeparator();
+    m.addItem ("Render Pattern to WAV...", [this]
     {
-        bool canUndo = mOwner.mGrid && mOwner.mGrid->canUndo();
-        bool canRedo = mOwner.mGrid && mOwner.mGrid->canRedo();
-        m.addItem(1, "Undo",  canUndo);
-        m.addItem(2, "Redo",  canRedo);
-        m.addSeparator();
-        m.addItem(3, "Select All\tCtrl+A");
-        m.addItem(4, "Deselect\tEsc");
-        m.addSeparator();
-        m.addItem(5, "Copy\tCtrl+C");
-        m.addItem(6, "Paste\tCtrl+V");
-        m.addItem(7, "Delete\tDel");
-        m.addItem(8, "Duplicate\tCtrl+B");
-    }
-    else if (index == 1)  // Tools
-    {
-        auto cur = mOwner.mGrid ? mOwner.mGrid->getTool() : AGTool::Draw;
-        m.addItem(21, "Draw\tP",          true, cur == AGTool::Draw);
-        m.addItem(22, "Paint\tB",         true, cur == AGTool::Paint);
-        m.addItem(23, "Select\tE",        true, cur == AGTool::Select);
-        m.addItem(24, "Delete\tD",        true, cur == AGTool::Delete);
-        m.addItem(25, "Mute\tT",          true, cur == AGTool::Mute);
-        // QA-Ea Task 0c (2026-05-20): "Slip Edit\tS" tool menu item removed.
-        // Slip is now an edge-drag mode (the toolbar Slip/Stretch dropdown),
-        // not a tool selection.  Item id 26 is intentionally retired.
-        m.addItem(27, "Slice\tC",         true, cur == AGTool::Slice);
-        m.addItem(28, "Zoom\tZ",          true, cur == AGTool::Zoom);
-        m.addItem(29, "Play Selected\tY", true, cur == AGTool::PlaySelected);
-    }
-    else if (index == 2)  // Clips
-    {
-        m.addItem(41, "Import Audio...");
-        m.addSeparator();
-        m.addItem(42, "Rename Pattern\tF2");
-        m.addItem(43, "Find Next Empty\tF4");
-        m.addItem(44, "New Automation Clip...");
-        m.addSeparator();
-        m.addItem(45, "Render Pattern to WAV...");
-    }
-    else if (index == 3)  // View
-    {
-        m.addItem(51, "Zoom In\t+");
-        m.addItem(52, "Zoom Out\t-");
-        m.addSeparator();
-        m.addItem(53, "Toggle Browser");
-        m.addItem(54, "Performance Mode\tCtrl+P", true, mOwner.mPerfMode);
-    }
-
-    return m;
+        if (mGrid && mPM.getNumPatterns() > 0)
+            showPatternRenderOptions (mPM.getCurrentPatternIndex());
+    });
 }
 
-void BuilderMenuBar::menuItemSelected(int itemId, int /*topLevelIndex*/)
+void BuilderPage::buildViewMenu (PopupMenu& m)
 {
-    using AGTool = ArrangementGrid::AGTool;
-    auto& o = mOwner;
-
-    switch (itemId)
-    {
-        // Edit
-        case 1: if (o.mGrid) o.mGrid->undo();                           break;
-        case 2: if (o.mGrid) o.mGrid->redo();                           break;
-        case 3: if (o.mGrid) o.mGrid->keyPressed(KeyPress('a', ModifierKeys::ctrlModifier, 0)); break;
-        case 4: if (o.mGrid) o.mGrid->keyPressed(KeyPress(KeyPress::escapeKey)); break;
-        case 5: if (o.mGrid) o.mGrid->keyPressed(KeyPress('c', ModifierKeys::ctrlModifier, 0)); break;
-        case 6: if (o.mGrid) o.mGrid->keyPressed(KeyPress('v', ModifierKeys::ctrlModifier, 0)); break;
-        case 7: if (o.mGrid) o.mGrid->keyPressed(KeyPress(KeyPress::deleteKey)); break;
-        case 8: if (o.mGrid) o.mGrid->keyPressed(KeyPress('b', ModifierKeys::ctrlModifier, 0)); break;
-
-        // Tools
-        case 21: if (o.mGrid) o.mGrid->setTool(AGTool::Draw);         break;
-        case 22: if (o.mGrid) o.mGrid->setTool(AGTool::Paint);        break;
-        case 23: if (o.mGrid) o.mGrid->setTool(AGTool::Select);       break;
-        case 24: if (o.mGrid) o.mGrid->setTool(AGTool::Delete);       break;
-        case 25: if (o.mGrid) o.mGrid->setTool(AGTool::Mute);         break;
-        // QA-Ea Task 0c (2026-05-20): case 26 (Slip Edit tool) removed.
-        case 27: if (o.mGrid) o.mGrid->setTool(AGTool::Slice);        break;
-        case 28: if (o.mGrid) o.mGrid->setTool(AGTool::Zoom);         break;
-        case 29: if (o.mGrid) o.mGrid->setTool(AGTool::PlaySelected); break;
-
-        // Clips
-        case 41: o.doImportAudio();           break;
-        case 42: o.doRenamePattern();         break;
-        case 43: o.doFindNextEmptyPattern();  break;
-        case 44: o.doNewAutomationClip();     break;
-        case 45: if (o.mGrid && o.mPM.getNumPatterns() > 0)
-                     o.showPatternRenderOptions(o.mPM.getCurrentPatternIndex()); break;
-
-        // View
-        case 51: o.doZoom(1.15f);            break;
-        case 52: o.doZoom(1.f / 1.15f);      break;
-        case 53: o.doToggleBrowser();        break;
-        case 54: o.doPerformanceModeToggle(); break;
-
-        default: break;
-    }
+    // Jeff, 2026-08-04: "Toggle Browser" removed.  It was a second click-path to
+    // the same setCollapsed() the "<<" button called, and the browser now
+    // collapses by dragging its edge past the magnetic floor -- one gesture, not
+    // a button and a menu entry doing the same thing.
+    m.addItem ("Zoom In\t+",  [this] { doZoom (1.15f); });
+    m.addItem ("Zoom Out\t-", [this] { doZoom (1.f / 1.15f); });
+    m.addSeparator();
+    m.addItem ("Performance Mode\tCtrl+P", true, mPerfMode,
+               [this] { doPerformanceModeToggle(); });
 }

@@ -10,8 +10,11 @@
 static constexpr int kW       = 1039;
 static constexpr int kH       = 421;
 static constexpr int kGap     = 6;
-static constexpr int kKnob    = 44;
-static constexpr int kKnobSm  = 32;
+// Jeff, 2026-08-04: every knob halved (44/32 -> 22/16).  The old sizes
+// are what forced long control rows into tall boxes and produced both the
+// overlap and the wasted space at 1047x455.
+static constexpr int kKnob    = 22;
+static constexpr int kKnobSm  = 16;
 
 // QA-Layout T7 (Specific-2, Jeff's correction 2026-08-04): ground-up
 // re-layout for the approved 1047x455 window.  What was wrong with the old
@@ -23,15 +26,19 @@ static constexpr int kKnobSm  = 32;
 //     edges.  layoutRow wraps now, and each section is sized to its content.
 // Two bands: the top holds the per-voice engine (Output/Routing/mod/Unison/
 // filters/Timbre), the bottom the performance + visual surfaces.
-static constexpr float kTopBandFrac = 0.52f;   // top band; bottom takes the rest
+// Jeff, 2026-08-04 re-proportion.  Halved knobs and knob-ified faders mean every
+// control section needs far less room, so the top band gives height back and the
+// bottom columns give width back -- all of it to the Mod Editor, which was asked
+// to be at least twice its old size and previously got only the ~22% left over.
+static constexpr float kTopBandFrac = 0.46f;   // top band; bottom takes the rest
 static constexpr float kTLFrac      = 0.34f;   // top: left column
-static constexpr float kTMFrac      = 0.13f;   // top: Unison column; filters take the rest
-// Bottom-band column fractions; the Mod Editor takes the remainder.
-static constexpr float kBPitchFrac  = 0.17f;   // Pitch over LFO Mod
-static constexpr float kBStrumFrac  = 0.13f;   // Strum over XYZ pad
-static constexpr float kBToneFrac   = 0.18f;   // Blur/Prism over Amp Env
-static constexpr float kBFXFrac     = 0.17f;   // FX
-static constexpr float kBSpecFrac   = 0.13f;   // Spectrogram
+static constexpr float kTMFrac      = 0.11f;   // top: Unison column; filters take the rest
+// Bottom-band column fractions; the Mod Editor takes the remainder (~0.45).
+static constexpr float kBPitchFrac  = 0.12f;   // Pitch over LFO Mod
+static constexpr float kBStrumFrac  = 0.09f;   // Strum over XYZ pad
+static constexpr float kBToneFrac   = 0.12f;   // Blur/Prism over Amp Env
+static constexpr float kBFXFrac     = 0.12f;   // FX
+static constexpr float kBSpecFrac   = 0.10f;   // Spectrogram
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 static void setupRotary (juce::Slider& s)
@@ -76,10 +83,17 @@ static void drawSection (juce::Graphics& g, juce::Rectangle<int> r, const char* 
 // Draw knob label below a component
 static void knobLabel (juce::Graphics& g, const juce::Component& c, const char* t)
 {
+    // Jeff, 2026-08-04: the label box used to be the KNOB's width + 8, which at
+    // 44px knobs was plenty and at 16px truncated every word past four letters
+    // ("VOICES" -> "VOIC...").  Size the box to the TEXT and centre it on the
+    // knob instead -- labels overhang their knob into the packing gap, which is
+    // free space, rather than the word being cut.
+    const juce::Font f (8.0f);
     g.setColour (juce::Colour (HarmlessLAF::kTextDim));
-    g.setFont   (juce::Font  (8.0f));
-    g.drawText  (t, c.getX() - 4, c.getBottom() + 1,
-                 c.getWidth() + 8, 10, juce::Justification::centred);
+    g.setFont   (f);
+    const int w  = f.getStringWidth (t) + 4;
+    const int cx = c.getX() + c.getWidth() / 2;
+    g.drawText  (t, cx - w / 2, c.getBottom() + 1, w, 10, juce::Justification::centred);
 }
 
 // ── Constructor ───────────────────────────────────────────────────────────────
@@ -228,9 +242,11 @@ HarmlessEditor::HarmlessEditor (HarmlessProcessor& p)
     mUnisonAltBtn.getProperties().set ("switchToggle", true);
     addAndMakeVisible (mUnisonAltBtn);
 
-    setupVertical (mUnisonPan);   addAndMakeVisible (mUnisonPan);
-    setupVertical (mUnisonPitch); addAndMakeVisible (mUnisonPitch);
-    setupVertical (mUnisonPhase); addAndMakeVisible (mUnisonPhase);
+    // Jeff, 2026-08-04: Unison PAN/PITCH/PHASE are knobs, not faders -- the
+    // whole reason Unison held a full-height column was fader throw.
+    setupRotary (mUnisonPan);   addAndMakeVisible (mUnisonPan);
+    setupRotary (mUnisonPitch); addAndMakeVisible (mUnisonPitch);
+    setupRotary (mUnisonPhase); addAndMakeVisible (mUnisonPhase);
 
     // ── Top-Right FX knobs ────────────────────────────────────────────────────
     for (auto* s : { &mPluckDecay, &mPhaserMix, &mPhaserDepth, &mPhaserRate,
@@ -338,8 +354,10 @@ HarmlessEditor::HarmlessEditor (HarmlessProcessor& p)
     for (auto* s : { &mAmpA, &mAmpD, &mAmpS, &mAmpR, &mPhaseStart, &mPhaseRand })
         { setupRotary (*s); addAndMakeVisible (*s); }
 
+    // Jeff, 2026-08-04: the LFO depth faders are KNOBS now -- a fader needs
+    // vertical throw, and that height is what the layout could not afford.
     for (auto* s : { &mLfoVel, &mLfoVol, &mLfoPitch })
-        { setupVertical (*s); addAndMakeVisible (*s); }
+        { setupRotary (*s); addAndMakeVisible (*s); }
 
     setupRotary (mStrumDirSlider); addAndMakeVisible (mStrumDirSlider);
     setupRotary (mStrumTime);      addAndMakeVisible (mStrumTime);
@@ -735,9 +753,11 @@ void HarmlessEditor::paint (juce::Graphics& g)
     drawSection (g, mUnisonSec,    "UNISON");
 
     // Top-right column.
-    drawSection (g, mFlt1Sec,      "FILTER 1");
+    // T16: one box per filter, its ADSR included -- mFlt*AdsrSec is emptied by
+    // resized() so these two draw nothing.
+    drawSection (g, mFlt1Sec,      "FILTER 1 + ADSR");
     drawSection (g, mFlt1AdsrSec,  "FILTER 1 ADSR");
-    drawSection (g, mFlt2Sec,      "FILTER 2");
+    drawSection (g, mFlt2Sec,      "FILTER 2 + ADSR");
     drawSection (g, mFlt2AdsrSec,  "FILTER 2 ADSR");
     drawSection (g, mTimbreSec,    "TIMBRE");
 
@@ -895,16 +915,29 @@ void HarmlessEditor::resized()
 
         std::vector<int> rowH;
         rowH.reserve (rows.size());
-        int blockH = 0;
+        int itemsH = 0;
         for (auto& rw : rows)
         {
             int h = 0;
             for (int i = rw.first; i < rw.first + rw.second; ++i)
                 h = juce::jmax (h, std::get<2> (it[i]));
             rowH.push_back (h);
-            blockH += h;
+            itemsH += h;
         }
-        blockH += kMinGap * ((int) rows.size() - 1);
+        const int gapsH = kMinGap * ((int) rows.size() - 1);
+
+        // Jeff, 2026-08-04: wrapping alone was not enough.  A block taller than
+        // its cell used to CENTRE and spill past both edges, which is what put
+        // FILTER 1 on top of FILTER 2 and pushed the Amp Env RAND row into its
+        // neighbour.  Scale the whole block down to fit instead.  Width scales
+        // with height so the knobs stay round -- and since the factor is <= 1,
+        // items only get narrower, so the wrap decided above stays valid.
+        const double avail = juce::jmax (1, r.getHeight() - gapsH);
+        const double scale = itemsH > 0 ? juce::jmin (1.0, avail / (double) itemsH) : 1.0;
+        auto sc = [scale] (int v) { return juce::jmax (1, (int) std::lround (v * scale)); };
+
+        int blockH = gapsH;
+        for (auto& h : rowH) { h = sc (h); blockH += h; }
 
         int y = r.getY() + juce::jmax (0, (r.getHeight() - blockH) / 2);
         for (size_t ri = 0; ri < rows.size(); ++ri)
@@ -912,14 +945,26 @@ void HarmlessEditor::resized()
             const auto& rw = rows[ri];
             int itemsW = 0;
             for (int i = rw.first; i < rw.first + rw.second; ++i)
-                itemsW += std::get<1> (it[i]);
+                itemsW += sc (std::get<1> (it[i]));
+
+            // Jeff, 2026-08-04: DISTRIBUTE across the cell -- equal gap before,
+            // between and after -- so knobs breathe inside their box.
+            //
+            // This is deliberately NOT the packing an earlier pass used.  The
+            // reason packing was reached for (halving the knobs just widened
+            // every gap and bought no space) no longer applies: a section's
+            // WIDTH is now decided by its content via the natural() sizing in
+            // the bottom band, so spreading inside that width costs nothing and
+            // the box does not grow.  Boxes with their own layout -- Routing,
+            // the XYZ/MOD pad, the Mod Editor's knob row -- do not come through
+            // here and keep their packed spacing.
             const int gap = juce::jmax (0, r.getWidth() - itemsW) / (rw.second + 1);
             int x = r.getX() + gap;
             for (int i = rw.first; i < rw.first + rw.second; ++i)
             {
                 auto* c = std::get<0> (it[i]);
-                const int w = std::get<1> (it[i]);
-                const int h = std::get<2> (it[i]);
+                const int w = sc (std::get<1> (it[i]));
+                const int h = sc (std::get<2> (it[i]));
                 c->setBounds (x, y + (rowH[ri] - h) / 2, w, h);
                 x += w + gap;
             }
@@ -999,22 +1044,20 @@ void HarmlessEditor::resized()
     // ─────────────────────────────────────────────────────────────────────────
     {
         mUnisonSec = mTopMidBounds.reduced (6, 4);
-        auto ur = mUnisonSec.reduced (6, 14);
-        int x = ur.getX() + (ur.getWidth() - kKnobSm) / 2;
-        mUnisonVoices.setBounds (x, ur.getY(), kKnobSm, kKnobSm);
-        ur.removeFromTop (kKnobSm + 8);
-        mUnisonType  .setBounds (ur.getX(), ur.getY(), ur.getWidth(), kKnobSm);
-        ur.removeFromTop (kKnobSm + 2);
+        auto ur = mUnisonSec.reduced (6, 10);
+        constexpr int kLblBand = 11;
+        // VOICES + the type combo + ALT, then PAN/PITCH/PHASE as a knob row.
+        auto r1 = ur.removeFromTop (kKnobSm + kLblBand);
+        layoutRow (r1.withTrimmedBottom (kLblBand), { { &mUnisonVoices, kKnobSm, kKnobSm } });
+        mUnisonType  .setBounds (ur.getX(), ur.getY(), ur.getWidth(), 18);
+        ur.removeFromTop (20);
         mUnisonAltBtn.setBounds (ur.getX(), ur.getY(), ur.getWidth(), 18);
         ur.removeFromTop (20);
-        // Remaining height -> 3 vertical faders (PAN / PITCH / PHASE).  Leave
-        // the knobLabel band clear at the bottom.
-        constexpr int kLblBand = 11;
-        const int sliderW = (ur.getWidth() - 8) / 3;
-        const int sliderH = juce::jmax (10, ur.getHeight() - kLblBand);
-        mUnisonPan  .setBounds (ur.getX(),                   ur.getY(), sliderW, sliderH);
-        mUnisonPitch.setBounds (ur.getX() + sliderW + 4,     ur.getY(), sliderW, sliderH);
-        mUnisonPhase.setBounds (ur.getX() + (sliderW + 4)*2, ur.getY(), sliderW, sliderH);
+        layoutRow (ur.withTrimmedBottom (kLblBand), {
+            { &mUnisonPan,   kKnobSm, kKnobSm },
+            { &mUnisonPitch, kKnobSm, kKnobSm },
+            { &mUnisonPhase, kKnobSm, kKnobSm },
+        });
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -1054,17 +1097,34 @@ void HarmlessEditor::resized()
             });
         };
 
-        // R1: Filter 1 | Filter 1 ADSR
-        mFlt1Sec      = cellAt (0, 0);
-        mFlt1AdsrSec  = cellAt (0, 1);
-        mFilter1Row.setBounds (mFlt1Sec.reduced (3, 12));
-        layoutAdsr (mFlt1AdsrSec, mFlt1A, mFlt1D, mFlt1S, mFlt1R);
+        // Jeff, 2026-08-04: ONE box per filter.  Splitting each filter from its
+        // own ADSR into two boxes doubled the chrome and the padding for eight
+        // knobs that belong together, and left both halves half-empty.  The
+        // filter row (combo + 4 knobs) takes the left, its ADSR the right, in a
+        // single section spanning the full width.  mFlt*AdsrSec is emptied so
+        // paint() draws no second frame.
+        auto filterCell = [&] (int row, juce::Rectangle<int>& sec,
+                               HarmlessFilterRow& fltRow,
+                               juce::Slider& a, juce::Slider& d,
+                               juce::Slider& s, juce::Slider& rk)
+        {
+            sec = cellAt (row, 0).withWidth (r.getWidth());
+            auto inner = sec.reduced (3, 12);
+            // The filter row needs the combo plus four knobs; the ADSR four
+            // more.  Split by content, not down the middle.
+            fltRow.setBounds (inner.removeFromLeft (inner.getWidth() * 9 / 16));
+            layoutRow (inner, {
+                { &a,  kKnobSm, kKnobSm },
+                { &d,  kKnobSm, kKnobSm },
+                { &s,  kKnobSm, kKnobSm },
+                { &rk, kKnobSm, kKnobSm },
+            });
+        };
 
-        // R2: Filter 2 | Filter 2 ADSR
-        mFlt2Sec      = cellAt (1, 0);
-        mFlt2AdsrSec  = cellAt (1, 1);
-        mFilter2Row.setBounds (mFlt2Sec.reduced (3, 12));
-        layoutAdsr (mFlt2AdsrSec, mFlt2A, mFlt2D, mFlt2S, mFlt2R);
+        filterCell (0, mFlt1Sec, mFilter1Row, mFlt1A, mFlt1D, mFlt1S, mFlt1R);
+        filterCell (1, mFlt2Sec, mFilter2Row, mFlt2A, mFlt2D, mFlt2S, mFlt2R);
+        mFlt1AdsrSec = {};
+        mFlt2AdsrSec = {};
 
         // R3: Timbre, FULL width -- the widest set in the editor, and the old
         // half cell is what overflowed.  T7 also DISSOLVES the cramped 2x2
@@ -1098,107 +1158,149 @@ void HarmlessEditor::resized()
     // ─────────────────────────────────────────────────────────────────────────
     {
         auto band = mBotBandBounds;
-        auto takeCol = [&] (float frac) -> juce::Rectangle<int>
-        {
-            auto c = band.removeFromLeft (int (contentW * frac));
-            band.removeFromLeft (kGap);
-            return c;
-        };
-        constexpr int kLblBand = 11;   // knobLabel band under a control
         constexpr int kColGap  = 3;
 
-        // Col 1: Pitch over LFO Mod.
-        {
-            auto col = takeCol (kBPitchFrac);
-            mPitchSec = col.removeFromTop (col.getHeight() * 2 / 5);
-            layoutRow (mPitchSec.reduced (4, 14), {
-                { &mPitchFreq,     kKnobSm, kKnobSm },
-                { &mPitchDetune,   kKnobSm, kKnobSm },
-                { &mPitchFreqFrac, kKnobSm, kKnobSm },
-                { &mPitchOctBtn,   24,      18      },
-                { &mPitchHzBtn,    20,      18      },
-            });
-            col.removeFromTop (kColGap);
-            mLFOSec = col;
+        // Jeff, 2026-08-04: HORIZONTAL STRIPS, not narrow vertical columns.
+        // Every one of these sections is a single row of knobs, and squeezing
+        // them into ~13%-wide columns forced layoutRow to wrap them into two or
+        // three cramped lines -- the overlap.  Each is now a full-width strip in
+        // a left stack, so a row stays a row.  The two surfaces that genuinely
+        // want AREA (the XYZ pad and the Spectrogram) share a column beside the
+        // stack, and the Mod Editor keeps the right-hand half.
+        auto right    = band.removeFromRight (int (band.getWidth() * 0.38f));
+        band.removeFromRight (kGap);
+        // Jeff, 2026-08-04: the Spectrogram is a VISUAL surface and the last
+        // pass starved it.  This column is wider now, and the split favours the
+        // Spectrogram over the XYZ pad rather than halving them.
+        auto surfaces = band.removeFromRight (int (band.getWidth() * 0.30f));
+        band.removeFromRight (kGap);
 
-            // Row 1 RATE / SHAPE / TEMPO over row 2's VEL / VOL / PITCH depth
-            // faders.  Each row reserves its label band so the labels can
-            // never land on the row below.
-            auto inner = mLFOSec.reduced (4, 14);
-            auto row1  = inner.removeFromTop (kKnobSm + kLblBand);
-            layoutRow (row1.withTrimmedBottom (kLblBand), {
-                { &mLfoRate,     kKnobSm, kKnobSm },
-                { &mLfoShape,    kKnobSm, kKnobSm },
-                { &mLfoTempoBtn, 52,      24      },
-            });
-            inner.removeFromTop (4);
-            auto faders = inner.withTrimmedBottom (kLblBand);
-            const int faderH = juce::jmax (12, faders.getHeight());
-            layoutRow (faders, {
-                { &mLfoVel,   22, faderH },
-                { &mLfoVol,   22, faderH },
-                { &mLfoPitch, 22, faderH },
-            });
-        }
+        // Right: Mod Editor, full height of the band.
+        mModSec = right;
+        mModEditor.setBounds (mModSec.reduced (2));
 
-        // Col 2: Strum over the XYZ pad.
-        {
-            auto col = takeCol (kBStrumFrac);
-            mStrumSec = col.removeFromTop (col.getHeight() * 2 / 5);
-            layoutRow (mStrumSec.reduced (4, 14), {
-                { &mStrumDirSlider, kKnobSm, kKnobSm },
-                { &mStrumTime,      kKnobSm, kKnobSm },
-                { &mStrumTns,       kKnobSm, kKnobSm },
-            });
-            col.removeFromTop (kColGap);
-            mXYZSec = col;                       // pad draws its own frame
-            mXYZPad.setBounds (mXYZSec.reduced (2));
-        }
-
-        // Col 3: Blur/Prism over Amp Env + Phase.
-        {
-            auto col = takeCol (kBToneFrac);
-            mBlurPrismSec = col.removeFromTop ((col.getHeight() - kColGap) / 2);
-            layoutRow (mBlurPrismSec.reduced (3, 12), {
-                { &mBlurSize,  kKnobSm, kKnobSm },
-                { &mBlurTime,  kKnobSm, kKnobSm },
-                { &mBlurHarm,  kKnobSm, kKnobSm },
-                { &mPrismAmt,  kKnobSm, kKnobSm },
-                { &mPrismMode, kKnobSm, kKnobSm },
-            });
-            col.removeFromTop (kColGap);
-            mAmpEnvSec = col;
-            layoutRow (mAmpEnvSec.reduced (3, 12), {
-                { &mAmpA,       kKnobSm, kKnobSm },
-                { &mAmpD,       kKnobSm, kKnobSm },
-                { &mAmpS,       kKnobSm, kKnobSm },
-                { &mAmpR,       kKnobSm, kKnobSm },
-                { &mPhaseStart, kKnobSm, kKnobSm },
-                { &mPhaseRand,  kKnobSm, kKnobSm },
-            });
-        }
-
-        // Col 4: FX (Pluck / Phaser / EQ) -- 9 controls, wrapped by layoutRow.
-        mFXSec = takeCol (kBFXFrac);
-        layoutRow (mFXSec.reduced (3, 12), {
-            { &mPluckDecay,    kKnobSm, kKnobSm },
-            { &mPluckBlurBtn,  24,      18      },
-            { &mPhaserMix,     kKnobSm, kKnobSm },
-            { &mPhaserDepth,   kKnobSm, kKnobSm },
-            { &mPhaserRate,    kKnobSm, kKnobSm },
-            { &mPhaserWidth,   kKnobSm, kKnobSm },
-            { &mPhaserOfs,     kKnobSm, kKnobSm },
-            { &mPhaserMaskRate,kKnobSm, kKnobSm },
-            { &mEQMix,         kKnobSm, kKnobSm },
-        });
-
-        // Col 5: Spectrogram (12 px reserved for the section header).
-        mSpectroSec = takeCol (kBSpecFrac);
+        // Middle: Spectrogram ALONE, full column height (Jeff, 2026-08-04).  The
+        // XYZ/MOD pad moved into the left stack, so nothing shares this column
+        // and the scope gets the whole of it.
+        mSpectroSec = surfaces;
         mSpectrogram.setBounds (mSpectroSec.reduced (4, 4).withTrimmedTop (12));
 
-        // Col 6: Mod Editor takes the remainder.
-        mModSec = band;
-        mModEditor.setBounds (mModSec.reduced (2));
+        // Left: strips SIZED TO CONTENT, so two short sections share one row
+        // rather than each burning a whole row (Jeff, 2026-08-04).  A section's
+        // natural width is its packed row plus the frame padding; a row splits
+        // between its sections in proportion to those widths.
+        {
+            constexpr int kPackGap = 10;
+            constexpr int kSecPad  = 16;
+            auto natural = [&] (std::initializer_list<int> widths)
+            {
+                int w = 0, n = 0;
+                for (int v : widths) { w += v; ++n; }
+                return w + kPackGap * juce::jmax (0, n - 1) + kSecPad;
+            };
+
+            const int nRows  = 4;
+            const int stripH = (band.getHeight() - kColGap * (nRows - 1)) / nRows;
+            auto takeStrip = [&] () -> juce::Rectangle<int>
+            {
+                auto s = band.removeFromTop (stripH);
+                band.removeFromTop (kColGap);
+                return s;
+            };
+            auto splitByContent = [&] (juce::Rectangle<int> strip, int wA, int wB,
+                                       juce::Rectangle<int>& a, juce::Rectangle<int>& b)
+            {
+                const int avail = strip.getWidth() - kColGap;
+                a = strip.removeFromLeft (juce::jmax (40, avail * wA / juce::jmax (1, wA + wB)));
+                strip.removeFromLeft (kColGap);
+                b = strip;
+            };
+
+            // Row 1: PITCH + LFO MOD.
+            {
+                auto strip = takeStrip();
+                const int wP = natural ({ kKnobSm, kKnobSm, kKnobSm, 24, 20 });
+                const int wL = natural ({ kKnobSm, kKnobSm, 52, kKnobSm, kKnobSm, kKnobSm });
+                splitByContent (strip, wP, wL, mPitchSec, mLFOSec);
+
+                layoutRow (mPitchSec.reduced (4, 12), {
+                    { &mPitchFreq,     kKnobSm, kKnobSm },
+                    { &mPitchDetune,   kKnobSm, kKnobSm },
+                    { &mPitchFreqFrac, kKnobSm, kKnobSm },
+                    { &mPitchOctBtn,   24,      18      },
+                    { &mPitchHzBtn,    20,      18      },
+                });
+                layoutRow (mLFOSec.reduced (4, 12), {
+                    { &mLfoRate,     kKnobSm, kKnobSm },
+                    { &mLfoShape,    kKnobSm, kKnobSm },
+                    { &mLfoTempoBtn, 52,      20      },
+                    { &mLfoVel,      kKnobSm, kKnobSm },
+                    { &mLfoVol,      kKnobSm, kKnobSm },
+                    { &mLfoPitch,    kKnobSm, kKnobSm },
+                });
+            }
+
+            // Row 2: STRUM + FX (Jeff, 2026-08-04 -- FX and Blur/Prism swapped
+            // places, so the nine-control set shares this row and Blur/Prism
+            // drops into the half-width stack below).
+            {
+                auto strip = takeStrip();
+                const int wS = natural ({ kKnobSm, kKnobSm, kKnobSm });
+                const int wF = natural ({ kKnobSm, 24, kKnobSm, kKnobSm, kKnobSm,
+                                          kKnobSm, kKnobSm, kKnobSm, kKnobSm });
+                splitByContent (strip, wS, wF, mStrumSec, mFXSec);
+
+                layoutRow (mStrumSec.reduced (4, 12), {
+                    { &mStrumDirSlider, kKnobSm, kKnobSm },
+                    { &mStrumTime,      kKnobSm, kKnobSm },
+                    { &mStrumTns,       kKnobSm, kKnobSm },
+                });
+                layoutRow (mFXSec.reduced (4, 12), {
+                    { &mPluckDecay,    kKnobSm, kKnobSm },
+                    { &mPluckBlurBtn,  24,      18      },
+                    { &mPhaserMix,     kKnobSm, kKnobSm },
+                    { &mPhaserDepth,   kKnobSm, kKnobSm },
+                    { &mPhaserRate,    kKnobSm, kKnobSm },
+                    { &mPhaserWidth,   kKnobSm, kKnobSm },
+                    { &mPhaserOfs,     kKnobSm, kKnobSm },
+                    { &mPhaserMaskRate,kKnobSm, kKnobSm },
+                    { &mEQMix,         kKnobSm, kKnobSm },
+                });
+            }
+
+            // Rows 3+4 (Jeff, 2026-08-04): AMP ENV / PHASE and BLUR / PRISM take
+            // only HALF the width they had and stack in the left half; the half
+            // that frees up carries the XYZ/MOD pad across both rows, which is
+            // what let the Spectrogram claim its whole column.
+            {
+                auto block = band;                      // whatever height remains
+                auto leftHalf = block.removeFromLeft ((block.getWidth() - kColGap) / 2);
+                block.removeFromLeft (kColGap);
+
+                mXYZSec = block;                        // pad draws its own frame
+                mXYZPad.setBounds (mXYZSec.reduced (2));
+
+                mAmpEnvSec = leftHalf.removeFromTop ((leftHalf.getHeight() - kColGap) / 2);
+                leftHalf.removeFromTop (kColGap);
+                mBlurPrismSec = leftHalf;
+
+                layoutRow (mAmpEnvSec.reduced (4, 12), {
+                    { &mAmpA,       kKnobSm, kKnobSm },
+                    { &mAmpD,       kKnobSm, kKnobSm },
+                    { &mAmpS,       kKnobSm, kKnobSm },
+                    { &mAmpR,       kKnobSm, kKnobSm },
+                    { &mPhaseStart, kKnobSm, kKnobSm },
+                    { &mPhaseRand,  kKnobSm, kKnobSm },
+                });
+                layoutRow (mBlurPrismSec.reduced (4, 12), {
+                    { &mBlurSize,  kKnobSm, kKnobSm },
+                    { &mBlurTime,  kKnobSm, kKnobSm },
+                    { &mBlurHarm,  kKnobSm, kKnobSm },
+                    { &mPrismAmt,  kKnobSm, kKnobSm },
+                    { &mPrismMode, kKnobSm, kKnobSm },
+                });
+            }
+        }
     }
 }
 

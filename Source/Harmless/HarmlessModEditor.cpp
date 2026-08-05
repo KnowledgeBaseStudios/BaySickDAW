@@ -72,7 +72,9 @@ HarmlessModEditor::HarmlessModEditor()
     mCurveModeBtn.setToggleState (true, juce::dontSendNotification);   // CURVE default
     mCurveModeBtn.setTooltip ("CURVE mode: newly added points use smooth interpolation between them.");
     mStepModeBtn .setTooltip ("STEP mode: newly added points hold their value until the next point (stair-step).");
-    mSnapBtn     .setTooltip ("SNAP: when on, new points and drags snap to a 1/16 grid on both axes. Hold Shift while dragging to axis-lock (horizontal or vertical only).");
+    mSnapBtn     .setTooltip ("SNAP: when on, new points and drags snap to the grid on both axes, at the "
+                              "division chosen in the dropdown to the right. Hold Shift while dragging to "
+                              "axis-lock (horizontal or vertical only).");
     mCurveModeBtn.onClick = [this]
     {
         mNewPointCurveType = 1;   // smooth
@@ -120,21 +122,22 @@ HarmlessModEditor::HarmlessModEditor()
     for (auto* b : { &mFreezeBtn, &mZoomInBtn, &mZoomOutBtn })
         addAndMakeVisible (*b);
 
-    // Division dropdown - sets snap target. Grid always shows 32 divisions
-    // so users see every possible snap line regardless of selection.
-    mDivisionDD.addItem ("1",    1);
-    mDivisionDD.addItem ("1/2",  2);
-    mDivisionDD.addItem ("1/4",  3);
-    mDivisionDD.addItem ("1/8",  4);
-    mDivisionDD.addItem ("1/16", 5);
-    mDivisionDD.addItem ("1/32", 6);
-    mDivisionDD.setSelectedId (5, juce::dontSendNotification);   // 1/16 default
-    mDivisionDD.setTooltip ("Snap resolution. 1 = snap to start/end only; 1/32 = snap to every one of the 32 visible grid lines. SNAP button (to the left) must be on for this to apply.");
+    // Division dropdown - the app's unified snap set (Bar .. 1/6 Step),
+    // triplets included.  Item id = unified index + 1, because a ComboBox id of
+    // 0 means "nothing selected".  "Off" and "Line" are omitted: the SNAP
+    // button already IS the on/off, and "Line" is a zoom-relative song-grid
+    // idea that has no meaning on a fixed 0-1 phase axis.
+    for (int i = 2; i < kNumUnifiedSnapDivs; ++i)
+        mDivisionDD.addItem (kUnifiedSnapLabels[i], i + 1);
+    mDivisionDD.setSelectedId (mSnapDivIdx + 1, juce::dontSendNotification);
+    mDivisionDD.setTooltip ("Snap resolution, using the same divisions as the Piano Roll and Builder -- "
+                            "1/3 Beat, 1/3 Step and 1/6 Step are the triplet targets. The grid draws the "
+                            "matching ladder, so every snap position is a line you can see. "
+                            "SNAP (to the left) must be on for this to apply.");
     mDivisionDD.onChange = [this]
     {
         const int id = mDivisionDD.getSelectedId();
-        static const int kDivs[] = { 1, 1, 2, 4, 8, 16, 32 };   // 1-indexed
-        if (id >= 1 && id <= 6) mSnapDivision = kDivs[id];
+        if (id >= 3 && id <= kNumUnifiedSnapDivs) { mSnapDivIdx = id - 1; repaint(); }
     };
     addAndMakeVisible (mDivisionDD);
 
@@ -581,23 +584,43 @@ void HarmlessModEditor::paint (juce::Graphics& g)
     g.fillRect  (gf);
     g.setColour (juce::Colour (HarmlessLAF::kBorder));
     g.drawRect  (gf, 1.f);
-    // Always-on 32-segment grid. Thicker lines at 1/4 boundaries for visual
-    // anchor; finer lines at the remaining 1/32 positions. Dropdown picks
-    // the snap target - independent of visual grid density.
-    g.setColour (juce::Colour (0xFF171718));   // finest 1/32 lines
-    for (int i = 1; i < kGridSegments; ++i)
+    // Jeff, 2026-08-04: the grid FOLLOWS the selected division now.  It used to
+    // be a fixed 32 segments whatever was chosen, so picking Beat drew 32 lines
+    // and snapped to 4 -- and a triplet division had no lines of its own at all.
+    // Same rule the Piano Roll and Builder use: the snap TYPE picks the ladder
+    // (straight or triplet), and every rung that clears a pixel threshold is
+    // drawn, so a finer selection reveals more lines and each snap target always
+    // lands on a visible one.
     {
-        if (i % (kGridSegments / 4) == 0) continue;   // skip quarters (drawn below)
-        const float x = gf.getX() + gf.getWidth() * float (i) / float (kGridSegments);
-        g.drawVerticalLine (juce::roundToInt (x), gf.getY(), gf.getBottom());
-    }
-    g.setColour (juce::Colour (0xFF1E1E20));   // bolder quarter lines + horiz thirds
-    for (int i = 1; i <= 3; ++i)
-    {
-        const float y = gf.getY() + gf.getHeight() * float (i) / 4.f;
-        const float x = gf.getX() + gf.getWidth()  * float (i) / 4.f;
-        g.drawHorizontalLine (juce::roundToInt (y), gf.getX(), gf.getRight());
-        g.drawVerticalLine   (juce::roundToInt (x), gf.getY(), gf.getBottom());
+        int nRungs = 0;
+        const int* ladder = gridLadderForSnap (mSnapDivIdx, nRungs);
+        const float cycleW = gf.getWidth() * mZoomFactor;   // one phase cycle on screen
+
+        // Coarse -> fine, so finer lines never overdraw the anchors.
+        for (int r = 0; r < nRungs; ++r)
+        {
+            const int   ticks = ladder[r];
+            const int   segs  = juce::jmax (1, 384 / juce::jmax (1, ticks));
+            if (cycleW / float (segs) < float (kMinGridPx)) continue;   // too dense to read
+
+            g.setColour (juce::Colour (r <= 1 ? 0xFF1E1E20 : 0xFF171718));
+            for (int i = 1; i < segs; ++i)
+            {
+                const float phase = float (i) / float (segs);
+                if (phase < mZoomOffset || phase > mZoomOffset + 1.0f / mZoomFactor) continue;
+                const float x = gf.getX()
+                              + (phase - mZoomOffset) * mZoomFactor * gf.getWidth();
+                g.drawVerticalLine (juce::roundToInt (x), gf.getY(), gf.getBottom());
+            }
+        }
+
+        // Horizontal quarters stay fixed -- the vertical axis is depth, not time.
+        g.setColour (juce::Colour (0xFF1E1E20));
+        for (int i = 1; i <= 3; ++i)
+        {
+            const float y = gf.getY() + gf.getHeight() * float (i) / 4.f;
+            g.drawHorizontalLine (juce::roundToInt (y), gf.getX(), gf.getRight());
+        }
     }
     g.setColour (juce::Colour (HarmlessLAF::kBorder));
     const float cy = gf.getY() + gf.getHeight() * 0.5f;
@@ -616,24 +639,30 @@ void HarmlessModEditor::paint (juce::Graphics& g)
     // Curve
     drawCurve (g);
 
-    // Knob labels
+    // Knob labels.  Jeff, 2026-08-04: size the box to the TEXT and centre it on
+    // the knob.  These used to be the knob's width + 4, which was ample at 34px
+    // knobs and truncates at 16 -- "DEPTH" and "LENGTH" both came out as "...".
+    // Labels overhang into the gap between knobs, which is empty anyway.
+    const juce::Font labelFont (8.f);
     g.setColour (juce::Colour (HarmlessLAF::kTextDim));
-    g.setFont (juce::Font (8.f));
+    g.setFont (labelFont);
+
+    auto knobLabel = [&] (const juce::Component& c, const char* t)
+    {
+        const int w  = labelFont.getStringWidth (t) + 4;
+        const int cx = c.getX() + c.getWidth() / 2;
+        g.drawText (t, cx - w / 2, c.getBottom() + 2, w, 10, juce::Justification::centred);
+    };
+
     const char* kLbls[] = { "SPD", "TNS", "SKEW", "PW" };
     const juce::Slider* kKnobs[] = { &mSpdKnob, &mTnsKnob, &mSkewKnob, &mPwKnob };
     for (int i = 0; i < 4; ++i)
-        g.drawText (kLbls[i], kKnobs[i]->getX() - 2, kKnobs[i]->getBottom() + 2,
-                    kKnobs[i]->getWidth() + 4, 10, juce::Justification::centred);
+        knobLabel (*kKnobs[i], kLbls[i]);
 
     // Depth + length labels (sustain is auto-derived, no label needed)
-    g.drawText ("DEPTH", mDepthKnob.getX() - 2, mDepthKnob.getBottom() + 2,
-                mDepthKnob.getWidth() + 4, 10, juce::Justification::centred);
-    if (mLengthSlider.isVisible())
-        g.drawText ("LENGTH", mLengthSlider.getX() - 2, mLengthSlider.getBottom() + 2,
-                    mLengthSlider.getWidth() + 4, 10, juce::Justification::centred);
-    if (mShapeSelector.isVisible())
-        g.drawText ("SHAPE", mShapeSelector.getX() - 2, mShapeSelector.getBottom() + 2,
-                    mShapeSelector.getWidth() + 4, 10, juce::Justification::centred);
+    knobLabel (mDepthKnob, "DEPTH");
+    if (mLengthSlider.isVisible())  knobLabel (mLengthSlider,  "LENGTH");
+    if (mShapeSelector.isVisible()) knobLabel (mShapeSelector, "SHAPE");
 }
 
 // ── Layout ────────────────────────────────────────────────────────────────────
@@ -642,7 +671,10 @@ void HarmlessModEditor::resized()
     const int kTopH     = 22;
     const int kTabH     = 22;
     const int kBotH     = 50;
-    const int kKnobSz   = 34;
+    // Jeff, 2026-08-04: matches kKnobSm in HarmlessEditor -- these were the
+    // last knobs in Harmless still at their old size, so the mod editor's row
+    // read as oversized next to every other section.
+    const int kKnobSz   = 16;
     const int kGap      = 4;
     auto bounds = getLocalBounds();
 
@@ -653,41 +685,67 @@ void HarmlessModEditor::resized()
     top.removeFromLeft (4);
     mModulationsDD  .setBounds (top.removeFromLeft (halfW));
 
-    // Tab row + tool buttons + viewport buttons sharing one row.
+    // Tab row + tool buttons + viewport buttons -- ONE row, always.
+    //
+    // Jeff, 2026-08-04: at its natural widths this row wants 398px and the mod
+    // editor is ~387px, so the tail overflowed and the division dropdown got
+    // clipped -- which is what rendered its value as "...".  The buttons SHRINK
+    // to fit.  Wrapping to a second row was the previous attempt and it is
+    // wrong: it steals height from the envelope graph, which is the one thing
+    // this box exists to make bigger.
+    //
+    // The dropdown is excluded from the shrink and floored at a width that
+    // holds the longest label ("1/2 Beat") plus its arrow -- it is the control
+    // that was unreadable, so it is the one that must not give ground.
     auto tabRow = bounds.removeFromTop (kTabH);
-    const int tabW = 48;
-    for (int i = 0; i < kNumTabs; ++i)
-        mTabBtns[i].setBounds (tabRow.removeFromLeft (tabW));
-    tabRow.removeFromLeft (8);
-    // Edit tools (left group): CURVE / STEP / SNAP.
-    mCurveModeBtn.setBounds (tabRow.removeFromLeft (52));
-    tabRow.removeFromLeft (2);
-    mStepModeBtn .setBounds (tabRow.removeFromLeft (48));
-    tabRow.removeFromLeft (2);
-    mSnapBtn     .setBounds (tabRow.removeFromLeft (48));
-    tabRow.removeFromLeft (8);
-    // Viewport tools (right group): FREEZE / + / - / Division dropdown.
-    mFreezeBtn.setBounds (tabRow.removeFromLeft (56));
-    tabRow.removeFromLeft (2);
-    mZoomInBtn.setBounds (tabRow.removeFromLeft (28));
-    tabRow.removeFromLeft (2);
-    mZoomOutBtn.setBounds (tabRow.removeFromLeft (28));
-    tabRow.removeFromLeft (4);
-    mDivisionDD.setBounds (tabRow.removeFromLeft (62));
+    {
+        constexpr int kDivW = 72;
+        const int gaps    = 8 + 2 + 2 + 8 + 2 + 2 + 4;
+        const int btnNat  = kNumTabs * 48 + 52 + 48 + 48 + 56 + 28 + 28;
+        const int btnRoom = juce::jmax (1, tabRow.getWidth() - gaps - kDivW);
+        const double k    = juce::jmin (1.0, (double) btnRoom / (double) btnNat);
+        auto sc = [k] (int v) { return juce::jmax (14, (int) std::floor (v * k)); };
+
+        for (int i = 0; i < kNumTabs; ++i)
+            mTabBtns[i].setBounds (tabRow.removeFromLeft (sc (48)));
+        tabRow.removeFromLeft (8);
+        // Edit tools: CURVE / STEP / SNAP.
+        mCurveModeBtn.setBounds (tabRow.removeFromLeft (sc (52)));
+        tabRow.removeFromLeft (2);
+        mStepModeBtn .setBounds (tabRow.removeFromLeft (sc (48)));
+        tabRow.removeFromLeft (2);
+        mSnapBtn     .setBounds (tabRow.removeFromLeft (sc (48)));
+        tabRow.removeFromLeft (8);
+        // Viewport tools: FREEZE / + / - / Division dropdown.
+        mFreezeBtn .setBounds (tabRow.removeFromLeft (sc (56)));
+        tabRow.removeFromLeft (2);
+        mZoomInBtn .setBounds (tabRow.removeFromLeft (sc (28)));
+        tabRow.removeFromLeft (2);
+        mZoomOutBtn.setBounds (tabRow.removeFromLeft (sc (28)));
+        tabRow.removeFromLeft (4);
+        // Whatever is left, but never less than the dropdown's floor.
+        mDivisionDD.setBounds (tabRow.removeFromLeft (juce::jmax (kDivW, tabRow.getWidth())));
+    }
 
     // Bottom strip.
     auto bot = bounds.removeFromBottom (kBotH);
     const int ky = bot.getY() + 4;
     int bx = bot.getX() + 4;
 
-    mDepthKnob    .setBounds (bx, ky, kKnobSz, kKnobSz); bx += kKnobSz + kGap + 8;
-    mLengthSlider .setBounds (bx, ky, kKnobSz, kKnobSz); bx += kKnobSz + kGap;
+    // Jeff, 2026-08-04: TEMPO clipped the LENGTH label.  Labels are sized to
+    // their TEXT now and centre on a 16px knob, so "LENGTH" overhangs its knob
+    // by ~6px each side -- more than the 4px gap that followed it.  kLblClear
+    // is the room a label needs beyond its knob; anything sitting next to a
+    // labelled knob leaves that much.
+    constexpr int kLblClear = 14;
+    mDepthKnob    .setBounds (bx, ky, kKnobSz, kKnobSz); bx += kKnobSz + kLblClear;
+    mLengthSlider .setBounds (bx, ky, kKnobSz, kKnobSz); bx += kKnobSz + kLblClear;
     mTempoBtn     .setBounds (bx, ky + 8, 52, 22);       bx += 52 + kGap;
     // Shape lives in the same column whether visible or not (LFO-only).
-    mShapeSelector.setBounds (bx, ky, kKnobSz, kKnobSz); bx += kKnobSz + kGap + 8;
-    mSpdKnob      .setBounds (bx, ky, kKnobSz, kKnobSz); bx += kKnobSz + kGap;
-    mTnsKnob     .setBounds (bx, ky, kKnobSz, kKnobSz); bx += kKnobSz + kGap;
-    mSkewKnob    .setBounds (bx, ky, kKnobSz, kKnobSz); bx += kKnobSz + kGap;
+    mShapeSelector.setBounds (bx, ky, kKnobSz, kKnobSz); bx += kKnobSz + kLblClear;
+    mSpdKnob      .setBounds (bx, ky, kKnobSz, kKnobSz); bx += kKnobSz + kLblClear;
+    mTnsKnob     .setBounds (bx, ky, kKnobSz, kKnobSz); bx += kKnobSz + kLblClear;
+    mSkewKnob    .setBounds (bx, ky, kKnobSz, kKnobSz); bx += kKnobSz + kLblClear;
     mPwKnob      .setBounds (bx, ky, kKnobSz, kKnobSz);
 
     // Horizontal scroll bar sits just above the bottom strip for panning
@@ -911,8 +969,8 @@ void HarmlessModEditor::mouseDown (const juce::MouseEvent& e)
         {
             const juce::SpinLock::ScopedLockType lock (mRegistry->getEditLock());
             auto newPt = pixelToPoint (float (e.x), float (e.y));
-            newPt.time      = snapToGridN (newPt.time,  mSnapEnabled, mSnapDivision);
-            newPt.value     = snapToGridN (newPt.value, mSnapEnabled, mSnapDivision);
+            newPt.time      = snapToGridN (newPt.time,  mSnapEnabled, snapSegments());
+            newPt.value     = snapToGridN (newPt.value, mSnapEnabled, snapSegments());
             newPt.curveType = mNewPointCurveType;
 
             // Prevent duplicate-time points. The sampler's bracketing logic
@@ -1003,8 +1061,8 @@ void HarmlessModEditor::mouseDrag (const juce::MouseEvent& e)
         else         pt.time  = mDragStartPos.time;    // vertical-lock
     }
 
-    pt.time      = snapToGridN (pt.time,  mSnapEnabled, mSnapDivision);
-    pt.value     = snapToGridN (pt.value, mSnapEnabled, mSnapDivision);
+    pt.time      = snapToGridN (pt.time,  mSnapEnabled, snapSegments());
+    pt.value     = snapToGridN (pt.value, mSnapEnabled, snapSegments());
     pt.curveType = curv->points[(size_t) mDragIndex].curveType;   // preserve
     curv->points[(size_t) mDragIndex] = pt;
     publishEdit();

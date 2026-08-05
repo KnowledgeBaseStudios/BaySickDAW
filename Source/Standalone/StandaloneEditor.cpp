@@ -39,6 +39,7 @@
 #include "../BaySickPedals/BaySickPedalsProcessor.h"          // 2026-05-05: dirty-hook wiring
 #include "../DSP/EffectParamMap.h"   // QA-ModelShell TS3: pedal-board lane registration
 #include "../BaySickNAMIR/BaySickNAMIRProcessor.h"             // 2026-05-05: dirty-hook wiring
+#include "../BaySickNAMIR/BaySickNAMIREditor.h"                // T16: engine title/accent for the window strips
 #include "../BaySickVocal/BaySickVocalProcessor.h"             // 2026-05-05: dirty-hook wiring
 #include "../BaySickVocal/BaySickVocalEditor.h"                // QA-Layout T4: satellite panel accessors
 #include "../BaySickVocal/BaySickPitchEditor.h"                // QA-Layout T4: note-provider wiring
@@ -830,7 +831,19 @@ StandaloneEditor::StandaloneEditor(VibeSynthProcessor& p, StandalonePlayHead& ph
 
     // ── Global LAF + Tooltip ──────────────────────────────────────────────────
     juce::LookAndFeel::setDefaultLookAndFeel(&VibeLAF::get());
-    mTooltipWindow = std::make_unique<VibeTooltip>(this, 600);
+    // Jeff, 2026-08-04: NO parent component -- this makes the tooltip its own
+    // desktop window instead of something painted into the frame's client area.
+    // A parented TooltipWindow positions itself inside the parent and is drawn
+    // there, and a native child peer (every WorkspaceWindow) always renders
+    // above anything drawn into its parent, so every tooltip raised from the
+    // transport bar dropped straight behind the page windows -- the status
+    // readout, BPM and the position display all showed nothing.  Parentless,
+    // JUCE routes through addToDesktop and it floats above them.  This is the
+    // same route the knob value bubble already takes, which is exactly why that
+    // one was visible while tooltips were not.  ONE tooltip for the whole app:
+    // the per-WorkspaceWindow ones are gone, because a parentless tooltip's
+    // peer gate always passes and keeping both showed two tips at once.
+    mTooltipWindow = std::make_unique<VibeTooltip>(nullptr, 600);
 
     // Global right-click listener - catches any slider with a componentID set
     addMouseListener(&mAutoRightClick, true);
@@ -5693,8 +5706,8 @@ void StandaloneEditor::showPageForTab(int tabId)
                 if (auto* pm = entry->window->getPageMenu()) mPageMenuBar = pm;
                 // T7: engine-driven floors track the visible engine (Drums
                 // swaps live); cheap to re-apply per show.
-                const auto f = floorSizeFor (*entry);
-                entry->window->setMinimumWindowSize (f.x, f.y);
+                if (const auto f = defaultSizeFor (*entry))
+                    entry->window->setDefaultWindowSize (f.value().x, f.value().y);
             }
             entry->component->setVisible(true);
             mVisiblePage = entry->component.get();
@@ -5747,12 +5760,40 @@ void StandaloneEditor::showPageForTab(int tabId)
         // Pre-existing leak that became visible with the new bank indicator.
         mPageMenuBar->setMenuBuilder (nullptr);
         mPageMenuBar->setAddMenuBuilder (nullptr);   // QA-Layout T10 (L13)
+        mPageMenuBar->clearExtraHeadings();          // QA-Layout T16
         mPageMenuBar->setBankIndicator (nullptr);
         mPageMenuBar->clearTabSlots();
         mPageMenuBar->clearExtraRightComponents();
         mPageMenuBar->setCenterTitle ({}, juce::Colour());   // QA-Layout T3
 
-        if (auto* ep = dynamic_cast<EffectsPage*>(mVisiblePage))
+        if (auto* bldp = dynamic_cast<BuilderPage*>(mVisiblePage))
+        {
+            // QA-Layout T16 (Jeff, 2026-08-04): Builder's own Edit/Tools/Clips/
+            // View row is deleted.  Clips lands in this window's Menu; Edit and
+            // View become title-strip headings; Tools is gone (every entry
+            // duplicated a toolbar button).
+            juce::Component::SafePointer<BuilderPage> safe (bldp);
+            mPageMenuBar->setMidSideVisible (false);
+            mPageMenuBar->setMenuBuilder ([safe] (juce::Component* anchor)
+            {
+                auto* p = safe.getComponent();
+                if (p == nullptr) return;
+                juce::PopupMenu m;
+                p->buildClipsMenu (m);
+                m.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (anchor));
+            });
+            mPageMenuBar->setExtraHeadings ({ "Edit", "View" },
+                [safe] (int idx, juce::Component* anchor)
+                {
+                    auto* p = safe.getComponent();
+                    if (p == nullptr) return;
+                    juce::PopupMenu m;
+                    if (idx == 0) p->buildEditMenu (m);
+                    else          p->buildViewMenu (m);
+                    m.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (anchor));
+                });
+        }
+        else if (auto* ep = dynamic_cast<EffectsPage*>(mVisiblePage))
         {
             // QA-ModelShell TS5: the three sub-tabs and the four right-hand
             // extras are gone.  The channel picker and FX Bypass moved into the
@@ -5802,7 +5843,7 @@ void StandaloneEditor::showPageForTab(int tabId)
             // dropdown (entries injected at the top of the page-actions
             // popup).  Action items carry itemID -1 and self-dispatch, so
             // they coexist with every id-dispatched page menu.
-            lp->onBuildWindowNavMenu = [this, safe, syncPagePresetMenu] (juce::PopupMenu& m)
+            lp->onBuildWindowNavMenu = [this, safe, safeBar, syncPagePresetMenu] (juce::PopupMenu& m)
             {
                 auto* page = safe.getComponent();
                 const bool onPlayer = page != nullptr && page->getActiveTab() == 0;
@@ -5830,6 +5871,9 @@ void StandaloneEditor::showPageForTab(int tabId)
                     if (prp != nullptr)
                         prp->selectEngine ({ EngineKind::Layer, pageIdx });
                 });
+                // QA-Layout T16: FX Rack + Freeze are menu entries now, not
+                // strip buttons -- every player window appends the same pair.
+                if (auto* bar = safeBar.getComponent()) bar->appendStandardItems (m);
             };
             syncPagePresetMenu (lp->getActiveTab());
             mPageMenuBar->setMidSideVisible(false);
@@ -5855,7 +5899,8 @@ void StandaloneEditor::showPageForTab(int tabId)
             // the add path shows the page BEFORE the engine lands, so the
             // show-time run alone would leave the strip bare.
             {
-                auto syncStripChrome = [safe, safeBar]
+                juce::Component::SafePointer<StandaloneEditor> safeEd (this);
+                auto syncStripChrome = [safe, safeBar, safeEd]
                 {
                     auto* bar = safeBar.getComponent();
                     auto* p   = safe.getComponent();
@@ -5864,6 +5909,10 @@ void StandaloneEditor::showPageForTab(int tabId)
                     if (auto* pb = p->stripPresetButton())
                         if (pb->getParentComponent() != bar)
                             bar->addExtraRightComponent (pb, 88);
+                    // The floor is engine-derived, so THIS is the first moment
+                    // it can be known for a window framed before its engine --
+                    // and the moment it changes on a live engine swap.
+                    if (safeEd != nullptr) safeEd->refreshWindowDefaultFor (p);
                 };
                 syncStripChrome();
                 lp->onEngineEditorRebuilt = syncStripChrome;
@@ -5883,9 +5932,10 @@ void StandaloneEditor::showPageForTab(int tabId)
         else if (auto* pp = dynamic_cast<PluginsPage*>(mVisiblePage))
         {
             juce::Component::SafePointer<PluginsPage> safe (pp);
+            juce::Component::SafePointer<PageMenuBar> safeBar (mPageMenuBar);   // see Layers branch
 
             // QA-Layout T15: strip nav button dissolved into the Menu dropdown.
-            pp->onBuildWindowNavMenu = [this, safe] (juce::PopupMenu& m)
+            pp->onBuildWindowNavMenu = [this, safe, safeBar] (juce::PopupMenu& m)
             {
                 m.addItem ("Piano Roll", [this, safe]
                 {
@@ -5901,6 +5951,7 @@ void StandaloneEditor::showPageForTab(int tabId)
                     if (prp != nullptr)
                         prp->selectEngine ({ EngineKind::Plugin, pageIdx });
                 });
+                if (auto* bar = safeBar.getComponent()) bar->appendStandardItems (m);   // T16
             };
             mPageMenuBar->setMidSideVisible(false);
             // Hamburger: Save / Load Page Preset + Delete (G-7 parity; this
@@ -5948,7 +5999,7 @@ void StandaloneEditor::showPageForTab(int tabId)
 
             // QA-Layout T15: strip nav buttons dissolved into the Menu
             // dropdown (see the Layers branch).
-            bp->onBuildWindowNavMenu = [this, safe, syncPagePresetMenu] (juce::PopupMenu& m)
+            bp->onBuildWindowNavMenu = [this, safe, safeBar, syncPagePresetMenu] (juce::PopupMenu& m)
             {
                 auto* page = safe.getComponent();
                 const bool onPlayer = page != nullptr && page->getActiveTab() == 0;
@@ -5974,6 +6025,7 @@ void StandaloneEditor::showPageForTab(int tabId)
                     if (prp != nullptr)
                         prp->selectEngine ({ EngineKind::Bass, pageIdx });
                 });
+                if (auto* bar = safeBar.getComponent()) bar->appendStandardItems (m);   // T16
             };
             syncPagePresetMenu (bp->getActiveTab());
             mPageMenuBar->setMidSideVisible(false);
@@ -5993,7 +6045,8 @@ void StandaloneEditor::showPageForTab(int tabId)
             }
             // QA-Layout T3: strip chrome (see the Layers branch).
             {
-                auto syncStripChrome = [safe, safeBar]
+                juce::Component::SafePointer<StandaloneEditor> safeEd (this);
+                auto syncStripChrome = [safe, safeBar, safeEd]
                 {
                     auto* bar = safeBar.getComponent();
                     auto* p   = safe.getComponent();
@@ -6002,6 +6055,10 @@ void StandaloneEditor::showPageForTab(int tabId)
                     if (auto* pb = p->stripPresetButton())
                         if (pb->getParentComponent() != bar)
                             bar->addExtraRightComponent (pb, 88);
+                    // The floor is engine-derived, so THIS is the first moment
+                    // it can be known for a window framed before its engine --
+                    // and the moment it changes on a live engine swap.
+                    if (safeEd != nullptr) safeEd->refreshWindowDefaultFor (p);
                 };
                 syncStripChrome();
                 bp->onEngineEditorRebuilt = syncStripChrome;
@@ -6038,7 +6095,7 @@ void StandaloneEditor::showPageForTab(int tabId)
             // Audio insert pre-rack EQ now lives on the Effects page only.
             // QA-Layout T15: strip nav buttons dissolved into the Menu
             // dropdown (see the Layers branch).
-            cp->onBuildWindowNavMenu = [this, safe, syncPagePresetMenu] (juce::PopupMenu& m)
+            cp->onBuildWindowNavMenu = [this, safe, safeBar, syncPagePresetMenu] (juce::PopupMenu& m)
             {
                 auto* page = safe.getComponent();
                 const bool onPlayer = page != nullptr && page->getActiveTab() == 0;
@@ -6064,6 +6121,7 @@ void StandaloneEditor::showPageForTab(int tabId)
                     if (prp != nullptr)
                         prp->selectEngine ({ EngineKind::Clip, pageIdx });
                 });
+                if (auto* bar = safeBar.getComponent()) bar->appendStandardItems (m);   // T16
             };
             syncPagePresetMenu (cp->getActiveTab());
             mPageMenuBar->setMidSideVisible (false);
@@ -6077,7 +6135,8 @@ void StandaloneEditor::showPageForTab(int tabId)
             });
             // QA-Layout T3: strip chrome (see the Layers branch).
             {
-                auto syncStripChrome = [safe, safeBar]
+                juce::Component::SafePointer<StandaloneEditor> safeEd (this);
+                auto syncStripChrome = [safe, safeBar, safeEd]
                 {
                     auto* bar = safeBar.getComponent();
                     auto* p   = safe.getComponent();
@@ -6086,6 +6145,10 @@ void StandaloneEditor::showPageForTab(int tabId)
                     if (auto* pb = p->stripPresetButton())
                         if (pb->getParentComponent() != bar)
                             bar->addExtraRightComponent (pb, 88);
+                    // The floor is engine-derived, so THIS is the first moment
+                    // it can be known for a window framed before its engine --
+                    // and the moment it changes on a live engine swap.
+                    if (safeEd != nullptr) safeEd->refreshWindowDefaultFor (p);
                 };
                 syncStripChrome();
                 cp->onEngineEditorRebuilt = syncStripChrome;
@@ -6097,6 +6160,7 @@ void StandaloneEditor::showPageForTab(int tabId)
             // main panel; the four former sub-tabs are contained windows.
             // QA-Layout T15: their launchers live in the Menu dropdown.
             juce::Component::SafePointer<VoxPage> safe (vp);
+            juce::Component::SafePointer<PageMenuBar> safeBar (mPageMenuBar);   // see Layers branch
 
             mPageMenuBar->setMenuBuilder (
                 [safe] (juce::Component* anchor)
@@ -6107,7 +6171,7 @@ void StandaloneEditor::showPageForTab(int tabId)
 
             // QA-Layout T15: the four satellite launcher buttons dissolved
             // into the Menu dropdown.
-            vp->onBuildWindowNavMenu = [this, safe] (juce::PopupMenu& m)
+            vp->onBuildWindowNavMenu = [this, safe, safeBar] (juce::PopupMenu& m)
             {
                 auto add = [this, safe, &m] (const juce::String& label, VoxSat s)
                 {
@@ -6121,6 +6185,7 @@ void StandaloneEditor::showPageForTab(int tabId)
                 add ("BaySickPitch", VoxSat::Pitch);
                 add ("BaySickAlign", VoxSat::Align);
                 add ("NAM/IR",       VoxSat::NamIr);
+                if (auto* bar = safeBar.getComponent()) bar->appendStandardItems (m);   // T16
             };
             mPageMenuBar->setMidSideVisible (false);
             // Window-4 treatment: the main panel's internal title bar is
@@ -6144,6 +6209,7 @@ void StandaloneEditor::showPageForTab(int tabId)
             // dropdown.
             // QA-E Sub-Phase A (2026-05-11): SafePointer lifted to outer scope.
             juce::Component::SafePointer<InstPage> safe (ip);
+            juce::Component::SafePointer<PageMenuBar> safeBar (mPageMenuBar);   // see Layers branch
 
             mPageMenuBar->setMenuBuilder (
                 [safe] (juce::Component* anchor)
@@ -6154,7 +6220,7 @@ void StandaloneEditor::showPageForTab(int tabId)
 
             // QA-Layout T15: strip nav buttons dissolved into the Menu
             // dropdown.
-            ip->onBuildWindowNavMenu = [this, safe] (juce::PopupMenu& m)
+            ip->onBuildWindowNavMenu = [this, safe, safeBar] (juce::PopupMenu& m)
             {
                 m.addItem ("Pedals", [this, safe]
                 {
@@ -6186,6 +6252,7 @@ void StandaloneEditor::showPageForTab(int tabId)
                     if (prp != nullptr)
                         prp->selectEngine ({ k, pageIdx });
                 });
+                if (auto* bar = safeBar.getComponent()) bar->appendStandardItems (m);   // T16
             };
             mPageMenuBar->setMidSideVisible (false);
             // QA-Layout T15: the internal Aria title bar is dissolved -- the
@@ -6197,10 +6264,11 @@ void StandaloneEditor::showPageForTab(int tabId)
                 ip->getSource() == InstPage::Source::BaySickGuitars ? "BaySickGuitars"
                                                                     : "BaySickBasses",
                 juce::Colour (0xFF1C3A8A));
-            if (auto* cl = ip->getClipFileLabel())  mPageMenuBar->addExtraRightComponent (cl, 200);
-            if (auto* pb = ip->getProgramButton())  mPageMenuBar->addExtraRightComponent (pb, 130);
-            if (auto* cs = ip->getCutSelfButton())  mPageMenuBar->addExtraRightComponent (cs, 62);
-            if (auto* cm = ip->getCutModeButton())  mPageMenuBar->addExtraRightComponent (cm, 78);
+            // Jeff, 2026-08-04: both narrowed to 2/3 so they eat less of the
+            // strip; CUT SELF + cut mode moved off the bar entirely onto the
+            // player's own top-left corner (InstPage::resized).
+            if (auto* cl = ip->getClipFileLabel())  mPageMenuBar->addExtraRightComponent (cl, 133);
+            if (auto* pb = ip->getProgramButton())  mPageMenuBar->addExtraRightComponent (pb, 87);
             mPageMenuBar->setFxRackSlot ([this, safe]
             {
                 auto* p = safe.getComponent();
@@ -6255,7 +6323,7 @@ void StandaloneEditor::showPageForTab(int tabId)
             // Views: Drum Kit (nav shortcut), Player (local), Piano Roll (nav
             // shortcut).  QA-Layout T15: strip nav buttons dissolved into the
             // Menu dropdown (see the Layers branch).
-            dp->onBuildWindowNavMenu = [this, safe, syncPagePresetMenu] (juce::PopupMenu& m)
+            dp->onBuildWindowNavMenu = [this, safe, safeBar, syncPagePresetMenu] (juce::PopupMenu& m)
             {
                 auto* page = safe.getComponent();
                 const bool onPlayer = page != nullptr && page->getActiveTab() == 1;
@@ -6293,6 +6361,7 @@ void StandaloneEditor::showPageForTab(int tabId)
                     if (prp != nullptr)
                         prp->selectEngine ({ EngineKind::Drum, pageIdx });
                 });
+                if (auto* bar = safeBar.getComponent()) bar->appendStandardItems (m);   // T16
             };
             syncPagePresetMenu (dp->getActiveTab());
             mPageMenuBar->setMidSideVisible(false);
@@ -6314,7 +6383,8 @@ void StandaloneEditor::showPageForTab(int tabId)
             // the one type whose engine can SWAP while visible (kit-pad
             // pick), so the rebuild callback carries real weight here.
             {
-                auto syncStripChrome = [safe, safeBar]
+                juce::Component::SafePointer<StandaloneEditor> safeEd (this);
+                auto syncStripChrome = [safe, safeBar, safeEd]
                 {
                     auto* bar = safeBar.getComponent();
                     auto* p   = safe.getComponent();
@@ -6323,6 +6393,10 @@ void StandaloneEditor::showPageForTab(int tabId)
                     if (auto* pb = p->stripPresetButton())
                         if (pb->getParentComponent() != bar)
                             bar->addExtraRightComponent (pb, 88);
+                    // The floor is engine-derived, so THIS is the first moment
+                    // it can be known for a window framed before its engine --
+                    // and the moment it changes on a live engine swap.
+                    if (safeEd != nullptr) safeEd->refreshWindowDefaultFor (p);
                 };
                 syncStripChrome();
                 dp->onEngineEditorRebuilt = syncStripChrome;
@@ -6339,11 +6413,10 @@ void StandaloneEditor::showPageForTab(int tabId)
             // QA-E Sub-Phase A (2026-05-11): SafePointer lifted to outer scope.
             juce::Component::SafePointer<BaySickRustyDrumsPage> safe (rp);
 
-            // QA-Layout T15: strip nav buttons dissolved into the Menu
-            // dropdown (built into this branch's menu builder below), and the
-            // internal Aria title bar is dissolved -- the engine name renders
-            // centered on the strip (Drums-tab red, D7).
-            mPageMenuBar->setCenterTitle ("BaySickRustyDrums", juce::Colour (0xFFCC2222));
+            // QA-Layout T15: strip nav buttons dissolved into the Menu dropdown
+            // (built into this branch's menu builder below).  Jeff, 2026-08-04:
+            // NO center title -- Rusty's kit artwork carries its own logo, so a
+            // rendered engine name was a duplicate of it.
             mPageMenuBar->setMidSideVisible(false);
             // Smoke round 2 (Jeff): per-player Swing Mix knob (see Layers) --
             // Rusty has no FX Rack slot, so it sits right of the tab cluster.
@@ -6352,13 +6425,10 @@ void StandaloneEditor::showPageForTab(int tabId)
                 mPageMenuBar->setSwingKnobSlot (sb.getMix, sb.setMix, sb.getTrunc, sb.setTrunc);
             }
 
-            // QA-Layout T3 (Window-3): the Program selector + Player Preset
-            // button live on the title strip (reverses G-16's Aria-bar move --
-            // the strip is the page's one always-visible control row).
-            if (auto* ppb = rp->getPlayerPresetButton())
-                mPageMenuBar->addExtraRightComponent (ppb, 110);
-            if (auto* pcb = rp->getProgramCombo())
-                mPageMenuBar->addExtraRightComponent (pcb, 160);
+            // Jeff, 2026-08-04: the Program selector + Player Preset button are
+            // back on the page's own Aria title band (BaySickRustyDrumsPage
+            // hosts them), reverting T3's move to the window strip -- the strip
+            // could not fit them and half ended up behind the window chrome.
 
             // 2026-05-05 consolidation: Save / Load Page Preset goes through
             // the unified PagePresetIO API (PageKind::RustyDrums).  Captures
@@ -6393,8 +6463,9 @@ void StandaloneEditor::showPageForTab(int tabId)
                 return cfg;
             };
 
+            juce::Component::SafePointer<PageMenuBar> safeBarRusty (mPageMenuBar);
             mPageMenuBar->setMenuBuilder (
-                [safeThisRusty, buildRustyPresetCfg, safe] (juce::Component* anchor)
+                [safeThisRusty, buildRustyPresetCfg, safe, safeBarRusty] (juce::Component* anchor)
                 {
                     if (! safeThisRusty) return;
                     constexpr int kIdSave     = 100;
@@ -6427,6 +6498,9 @@ void StandaloneEditor::showPageForTab(int tabId)
                             if (prp != nullptr)
                                 prp->selectEngine ({ EngineKind::BaySickRustyDrums, 0 });
                         });
+                        // QA-Layout T16: Freeze (Rusty has no FX Rack).
+                        if (auto* bar = safeBarRusty.getComponent())
+                            bar->appendStandardItems (m);
                         m.addSeparator();
                     }
                     const bool kitLoaded = safeThisRusty->mProcessor.hasBaySickRustyDrums();
@@ -6883,19 +6957,15 @@ void StandaloneEditor::wireFreezeSlotForVisiblePage()
     if (kind == TabKind::Rusty && mProcessor.engineRig().findTab (kind, 0) == nullptr)
         mProcessor.engineRig().addTab (TabKind::Rusty, 0, "Drum Kit");
 
-    // HIDDEN BY DEFAULT (Jeff, 2026-07-30).  Freeze ships auto-first: a
-    // first-time user never sees a button and never learns the word, the machine
-    // simply protects itself at the CPU threshold.  The per-player buttons come
-    // back only when a power user ticks "Enable Instrument Level Freeze" beside
-    // the threshold slider in File Settings.
+    // LOCKED BY DEFAULT (Jeff, 2026-08-04, revising the 2026-07-30 hide).
+    // Freeze still ships auto-first -- the machine protects itself at the CPU
+    // threshold without the user ever learning the word -- but the entry is now
+    // visible-and-greyed rather than absent, with the unlock path in its
+    // tooltip.  Hiding it entirely meant a user who HAD heard of freeze had no
+    // way to discover it existed, let alone where the switch was.
     //
-    // HIDDEN, not removed -- auto-freeze keeps running underneath either way, so
-    // this is purely whether the manual control is on screen.
-    if (! openUiPrefs()->getBoolValue ("fsInstrumentFreeze", false))
-    {
-        mPageMenuBar->setFreezeSlot (nullptr, nullptr);
-        return;
-    }
+    // Auto-freeze runs underneath either way; this is purely the manual control.
+    const bool freezeUnlocked = openUiPrefs()->getBoolValue ("fsInstrumentFreeze", false);
 
     mPageMenuBar->setFreezeSlot (
         [this, kind, pageIndex]() -> int
@@ -6936,9 +7006,13 @@ void StandaloneEditor::wireFreezeSlotForVisiblePage()
                 juce::AlertWindow::showMessageBoxAsync (
                     juce::AlertWindow::WarningIcon, "Could not freeze", err);
         },
-        [this, kind, pageIndex]() -> juce::String
+        [this, kind, pageIndex, freezeUnlocked]() -> juce::String
         {
             // Shown DISABLED carrying the reason, never hidden.
+            if (! freezeUnlocked)
+                return "Freeze is locked. Turn on \"Enable Instrument Level Freeze\" "
+                       "in File Settings, beside the auto-freeze CPU threshold, to "
+                       "freeze players by hand.";
             const bool freezable = (kind == TabKind::Rusty)
                 ? mProcessor.hasBaySickRustyDrums()
                 : (mProcessor.renderTaskForTab (kind, pageIndex) != nullptr);
@@ -13246,27 +13320,39 @@ void StandaloneEditor::registerPluginTabAutomation (int pageIndex)
 // and a Harmless on Bass are the same window, so the engine decides -- never
 // the tab it happens to sit in.  Drums swaps its engine live, which is why the
 // floor is re-applied on every page-show rather than only at window creation.
-juce::Point<int> StandaloneEditor::floorSizeFor (const PageEntry& entry) const
+std::optional<juce::Point<int>> StandaloneEditor::defaultSizeFor (const PageEntry& entry) const
 {
     using TT = RibbonTabBar::TabType;
+    using P  = juce::Point<int>;
 
     // Measured per player type.
-    auto engineFloor = [] (const juce::String& title) -> juce::Point<int>
+    //
+    // Jeff, 2026-08-04: there is NO fallback number here, deliberately.  This
+    // used to answer 490x455 for "engine not bound yet" -- which is
+    // BaySickPlayer's REAL floor, so an unresolved window was indistinguishable
+    // from a legitimately small one and nothing downstream knew there was
+    // anything left to correct.  It was also the SMALLEST of the three, so the
+    // failure always erred toward too-small: a Harmless window framed before
+    // its engine bound kept a 490-wide floor and would not lock at 1047.
+    // Saying "I don't know" is the whole fix; refreshWindowDefaultFor answers it
+    // later, when the engine actually exists.
+    auto engineFloor = [] (const juce::String& title) -> std::optional<P>
     {
-        if (title.contains ("Harmless"))      return { 1047, 455 };
+        if (title.isEmpty())                  return std::nullopt;   // not bound yet
+        if (title.contains ("Harmless"))      return P { 1047, 455 };
         // Jeff, 2026-08-04: BaySickSynth and BaySickBass share one minimum.
         if (title.contains ("BaySickSynth")
-            || title.contains ("BaySickBass"))return { 558,  455 };
-        if (title.contains ("BaySickPlayer")) return { 490,  455 };
-        return { 490, 455 };   // no engine bound yet
+            || title.contains ("BaySickBass"))return P { 558,  455 };
+        if (title.contains ("BaySickPlayer")) return P { 490,  455 };
+        return std::nullopt;   // unknown engine -- say so rather than invent one
     };
 
     switch (entry.type)
     {
-        case TT::Mixer:     return { 486, 455 };
-        case TT::Builder:   return { 486, 268 };
-        case TT::Effects:   return { 357, 268 };
-        case TT::PianoRoll: return { 691, 268 };
+        case TT::Mixer:     return P { 486, 455 };
+        case TT::Builder:   return P { 486, 268 };
+        case TT::Effects:   return P { 357, 268 };
+        case TT::PianoRoll: return P { 691, 268 };
         default: break;
     }
 
@@ -13275,11 +13361,35 @@ juce::Point<int> StandaloneEditor::floorSizeFor (const PageEntry& entry) const
     if (auto* bp = dynamic_cast<BassPage*>   (c)) return engineFloor (bp->stripEngineTitle());
     if (auto* dp = dynamic_cast<DrumPage*>   (c)) return engineFloor (dp->stripEngineTitle());
     if (auto* cp = dynamic_cast<ClipsPage*>  (c)) return engineFloor (cp->stripEngineTitle());
-    if (dynamic_cast<VoxPage*>    (c)) return { 1534, 455 };   // BaySickVocals
-    if (dynamic_cast<InstPage*>   (c)) return { 1047, 455 };   // BaySickGuitars / BaySickBasses
-    if (dynamic_cast<BaySickRustyDrumsPage*> (c)) return { 1047, 455 };
+    if (dynamic_cast<VoxPage*>    (c)) return P { 1534, 455 };   // BaySickVocals
+    if (dynamic_cast<InstPage*>   (c)) return P { 1047, 455 };   // BaySickGuitars / BaySickBasses
+    if (dynamic_cast<BaySickRustyDrumsPage*> (c)) return P { 1047, 455 };
     // Hosted plugins keep their plugin-derived floors (T12 stretch).
-    return { 640, 400 };
+    return P { 640, 400 };
+}
+
+void StandaloneEditor::pollPendingWindowDefaults()
+{
+    for (auto* e : mPages)
+    {
+        if (e == nullptr || e->window == nullptr || e->component == nullptr) continue;
+        if (e->window->hasDefaultSize()) continue;          // already resolved
+        if (const auto f = defaultSizeFor (*e))
+            e->window->setDefaultWindowSize (f->x, f->y);
+    }
+}
+
+void StandaloneEditor::refreshWindowDefaultFor (const juce::Component* page)
+{
+    if (page == nullptr) return;
+    for (auto* e : mPages)
+    {
+        if (e == nullptr || e->component.get() != page || e->window == nullptr)
+            continue;
+        if (const auto f = defaultSizeFor (*e))
+            e->window->setDefaultWindowSize (f->x, f->y);
+        return;
+    }
 }
 
 // The page stays owned by PageEntry::component -- the window hosts it
@@ -13336,29 +13446,27 @@ void StandaloneEditor::hostPageInWindow (PageEntry& entry)
     entry.window = std::make_unique<WorkspaceWindow> (persistKeyFor (entry),
                                                       tab != nullptr ? tab->name : juce::String());
 
-    // QA-Layout T5: only the four default tabs persist PLACEMENT to
-    // settings.xml (sizes persist for every page window) -- player positions
-    // are project content.
+    // Jeff, 2026-08-04: ONLY the four default tabs touch settings.xml, and they
+    // carry size AND position.  Every other window is Session -- its size and
+    // placement are session state plus project content, so a cold start with no
+    // project opens it at its default size.  Persistence defaults to Session on
+    // the window, so this is the one promotion site.
     if (entry.type == RibbonTabBar::TabType::Mixer
      || entry.type == RibbonTabBar::TabType::Builder
      || entry.type == RibbonTabBar::TabType::Effects
      || entry.type == RibbonTabBar::TabType::PianoRoll)
-        WorkspaceWindow::registerPlacementPersistentKey (persistKeyFor (entry));
-
-    // Provisional floor.  The real per-window numbers are collected from Jeff
-    // on screen (Test Plans B.31.0) -- they cannot be derived from source
-    // because "usable" is a judgement about knob collisions, not a measurement.
-    // Until then every window has SOME floor so none is unbounded.
-    //
-    // The Effects rack is the exception with a number behind it: TS5 made it an
-    // INDEX (picker + two EQ buttons + six fixed-height rows), so its content
-    // height is known and the general 640x400 would have forced a window three
-    // times taller than anything it can draw.
-    // QA-Layout T7: real floors from the approved sizing map (window dims).
     {
-        const auto f = floorSizeFor (entry);
-        entry.window->setMinimumWindowSize (f.x, f.y);
+        WorkspaceWindow::registerPlacementPersistentKey (persistKeyFor (entry));
+        entry.window->setPersistence (WorkspaceWindow::Persistence::Disk);
     }
+
+    // Default OPENING size (not a lock -- content minimums are suspended until
+    // the compact-layout task).  Nothing at all when the engine has not bound
+    // yet: refreshWindowDefaultFor and the healing sweep answer it later.  A
+    // placeholder here is what made an unresolved window indistinguishable from
+    // a deliberately small one.
+    if (const auto f = defaultSizeFor (entry))
+        entry.window->setDefaultWindowSize (f->x, f->y);
 
     entry.window->setContentNonOwned (entry.component.get());
 
@@ -13413,7 +13521,7 @@ WorkspaceWindow* StandaloneEditor::openAuxWindow (const juce::String& key,
     // would carry one project's effect layout into the next (Jeff's ruling).
     win->setPersistence (WorkspaceWindow::Persistence::Session);
     // T7: every aux caller now passes floors in WINDOW dims (Jeff's map).
-    win->setMinimumWindowSize (minW, minH);
+    win->setDefaultWindowSize (minW, minH);
     win->setContent (std::move (content));
 
     // Same per-window key routing the page windows get: a contained window is
@@ -13489,7 +13597,7 @@ void StandaloneEditor::openEffectSlotWindow (int channelId, int slotIndex)
         juce::Component::SafePointer<WorkspaceWindow> safeWin (win);
         contentRaw->onFloorChanged = [safeWin] (int w, int h)
         {
-            if (auto* wnd = safeWin.getComponent()) wnd->setMinimumWindowSize (w, h);
+            if (auto* wnd = safeWin.getComponent()) wnd->setDefaultWindowSize (w, h);
         };
     }
 
@@ -13650,6 +13758,18 @@ void StandaloneEditor::openVoxSatelliteWindow (int voxIdx, VoxSat kind)
         {
             if (auto* vp = findVoxPage()) vp->showPageActionsMenu (anchor);
         });
+        // Jeff, 2026-08-04: each panel's own logo moves up here; the panel's
+        // internal band keeps everything else.  Vocal Chain has no logo of its
+        // own, so it falls through to the centered plain title.
+        const juce::Colour vocalTeal (0xFF0FAFA5);
+        switch (kind)
+        {
+            case VoxSat::Chain: break;
+            case VoxSat::Pitch: bar->setCenterTitle ("BaySickPitch", vocalTeal); break;
+            case VoxSat::Align: bar->setCenterTitle ("BaySickAlign", vocalTeal); break;
+            case VoxSat::NamIr: bar->setCenterTitle (BaySickNAMIREditor::getEngineTitle(),
+                                                     BaySickNAMIREditor::getEngineAccent()); break;
+        }
     }
 }
 
@@ -13749,10 +13869,16 @@ void StandaloneEditor::openInstNamIrWindow (int instIdx)
     if (win == nullptr) return;
 
     if (auto* bar = win->getPageMenu())
+    {
         bar->setMenuBuilder ([findInstPage] (juce::Component* anchor)
         {
             if (auto* p = findInstPage()) p->showPageActionsMenu (anchor);
         });
+        // Jeff, 2026-08-04: the logo lives HERE, not as strip text with the
+        // editor's own logo repeated directly below it.
+        bar->setCenterTitle (BaySickNAMIREditor::getEngineTitle(),
+                             BaySickNAMIREditor::getEngineAccent());
+    }
 }
 
 void StandaloneEditor::closeVoxSatellites (int voxIdx)

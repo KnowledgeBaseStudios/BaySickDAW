@@ -305,6 +305,15 @@ public:
     // strip reads "Menu  Add".  Hidden when no builder is installed; pass
     // nullptr to clear (the branch-top clear in showPageForTab does).
     void setAddMenuBuilder(MenuBuilder builder);
+
+    // QA-Layout T16 (Jeff, 2026-08-04): further flat headings right of "Menu"
+    // (and "Add"), same native-menu-bar styling.  Builder uses them for Edit
+    // and View so its own 20px menu row could be deleted and the grid moved up.
+    // onOpen receives the heading index and the button to anchor the popup on.
+    // The branch-top clear in showPageForTab drops them per page-show.
+    void setExtraHeadings (const juce::StringArray& labels,
+                           std::function<void(int, juce::Component*)> onOpen);
+    void clearExtraHeadings();
     void addActionButton(const juce::String& label, std::function<void()> action);
     void clearActionButtons();
 
@@ -356,25 +365,32 @@ public:
     // EQ-tab click appended a new entry.
     void setBankIndicator(juce::Component* indicator);
 
-    // FX Rack jump slot at the right end of the page-tab button cluster
-    // (after tabs / MID-SIDE / bank pill).  Set per page-show with that
-    // page's jump; empty fn hides it.  clearTabSlots() clears it too --
-    // the slot belongs to the tab cluster's lifecycle.
+    // FX Rack jump.  Jeff, 2026-08-04: this is a MENU ITEM, not a bar button --
+    // registration is unchanged (set per page-show, empty fn removes it,
+    // clearTabSlots() clears it), but it surfaces through appendStandardItems.
     void setFxRackSlot(std::function<void()> onClick);
 
-    // Smoke round 2 (Jeff): per-player Swing Mix knob, right of the FX Rack
-    // slot, so it's visible on EVERY sub-tab of a player page (the engine
-    // title-bar hosting only showed on the Player sub-tab).  Set per
-    // page-show with that page's swing binding; empty getMix hides it;
-    // clearTabSlots() clears it too.
+    // Appends the entries every player window shares -- FX Rack, then Freeze --
+    // to a menu a page is building.  Called from each page's nav-menu hook so
+    // the items land in that window's own Menu dropdown.  No-op when neither
+    // slot is registered (Effects / Mixer / Builder / Piano Roll).
+    void appendStandardItems (juce::PopupMenu& m);
+
+    // Smoke round 2 (Jeff): per-player Swing Mix knob.  Jeff, 2026-08-04: it
+    // now sits at the far LEFT, immediately right of the Menu heading, so its
+    // position never shifts with whatever else a page mounts.  Visible on
+    // EVERY sub-tab of a player page (the engine title-bar hosting only showed
+    // on the Player sub-tab).  Set per page-show with that page's swing
+    // binding; empty getMix hides it; clearTabSlots() clears it too.
     void setSwingKnobSlot (std::function<float()>     getMix,
                            std::function<void(float)> setMix,
                            std::function<bool()>      getTruncate,
                            std::function<void(bool)>  setTruncate);
 
-    // TS7 §6 freeze toggle (Jeff, 2026-07-30).  BETWEEN the FX Rack slot and the
-    // swing knob, so the placement is identical on every player AND it sits where
-    // the user is already looking at the player that is misbehaving.
+    // TS7 §6 freeze toggle (Jeff, 2026-07-30).  Jeff, 2026-08-04: a MENU ITEM
+    // under this window's Menu, directly after FX Rack, so the placement is
+    // identical on every player AND it sits where the user is already looking
+    // at the player that is misbehaving.
     //
     // The tab right-click menu was the obvious alternative and is WRONG: that
     // menu acts on a tab TYPE, so it could not target one player.
@@ -413,6 +429,7 @@ private:
 
     std::unique_ptr<juce::TextButton> mHamburgerBtn;
     std::unique_ptr<juce::TextButton> mAddBtn;   // T10 (L13)
+    std::vector<std::unique_ptr<juce::TextButton>> mExtraHeadings;   // T16
     std::vector<std::unique_ptr<juce::TextButton>> mActionBtns;
 
     // Non-owning extra right components (e.g. Kit button, Nav combo).
@@ -427,8 +444,8 @@ private:
     std::vector<std::unique_ptr<juce::TextButton>> mTabSlotBtns;
     std::unique_ptr<juce::TextButton>              mMidBtn;
     std::unique_ptr<juce::TextButton>              mSideBtn;
-    std::unique_ptr<juce::TextButton>              mFxRackBtn;
-    std::unique_ptr<juce::TextButton>              mFreezeBtn;   // TS7 §6
+    std::function<void()>                          mFxRackAction;
+    std::function<void(bool)>                      mFreezeToggle;   // TS7 §6
     std::function<int()>                           mFreezeState;
     std::function<juce::String()>                  mFreezeDisabledReason;
     bool                                           mFreezeIsVocal { false };

@@ -1519,7 +1519,10 @@ public:
     Toolbar (BaySickPitchEditor& o, juce::AudioProcessorValueTreeState& apvts)
         : mOwner (o), mApvts (apvts)
     {
-        addAndMakeVisible (mTitleLbl);
+        // Jeff, 2026-08-04: the logo moved to the hosting window's title strip.
+        // Added-but-hidden (not deleted) so the toolbar's setBounds still
+        // reserves its slot -- every other widget stays exactly where it was.
+        addChildComponent (mTitleLbl);
 
         auto plain = [this] (juce::TextButton& b, const juce::String& t,
                              const juce::String& tt)

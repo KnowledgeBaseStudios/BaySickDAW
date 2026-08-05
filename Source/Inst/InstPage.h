@@ -221,12 +221,11 @@ public:
     // program surfaces on the clip-file label next to it.
     juce::TextButton* getProgramButton() const { return mProgramButton.get(); }
 
-    // QA-Layout T15: the sfizz AriaControlPanel title bar is dissolved; the
-    // widgets it hosted mount on the hosting window's title strip instead
-    // (StandaloneEditor wires them per page-show).
+    // QA-Layout T15: the sfizz AriaControlPanel title bar is dissolved.  The
+    // program button + clip-file label it hosted mount on the hosting window's
+    // title strip (StandaloneEditor wires them per page-show); the cut-self
+    // pair mounts on the player itself (Jeff, 2026-08-04).
     juce::Label*      getClipFileLabel() { return &mClipFileLabel; }
-    juce::TextButton* getCutSelfButton() { return &mCutSelfBtn; }
-    juce::TextButton* getCutModeButton() { return &mCutModeBtn; }
 
 private:
 

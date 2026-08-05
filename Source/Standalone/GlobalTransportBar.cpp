@@ -584,7 +584,8 @@ GlobalTransportBar::GlobalTransportBar(StandalonePlayHead& ph)
     mPerfReadout = std::make_unique<TransportPerfReadout>();
     mPerfReadout->update ("SYS --%", "DSP --%", "MEM --  LAT --", "UND --  PF --",
                           VC::TextDim, VC::TextDim);
-    mPerfReadout->setTooltip("SYS: system-wide CPU % (the whole computer, not this app)  |  DSP: audio engine load (% of buffer window)  |  MEM: process memory in MB  |  LAT: total reported plugin latency in samples (sum of every effect that adds PDC)  |  UND: audio clip stream underruns during continuous playback (should stay 0)  |  PF: slowest disk read this session in ms");
+    // Tooltip is owned by the readout now (live values + the legend), rebuilt
+    // whenever a value changes -- see TransportPerfReadout::refreshTooltip.
     addAndMakeVisible(*mPerfReadout);
 
     startTimerHz(10);
@@ -1065,6 +1066,26 @@ void TransportPositionReadout::paint (juce::Graphics& g)
 }
 
 // ── TransportPerfReadout ─────────────────────────────────────────────────────
+TransportPerfReadout::TransportPerfReadout()
+{
+    refreshTooltip();
+}
+
+void TransportPerfReadout::refreshTooltip()
+{
+    setTooltip (mSysText + "   " + mDspText + "\n"
+                + mRow2 + "\n"
+                + mRow3 + "\n\n"
+                + "SYS: system-wide CPU % (the whole computer, not this app)  |  "
+                  "DSP: audio engine load (% of buffer window)  |  "
+                  "MEM: process memory in MB  |  "
+                  "LAT: total reported plugin latency in samples (sum of every effect "
+                  "that adds PDC)  |  "
+                  "UND: audio clip stream underruns during continuous playback "
+                  "(should stay 0)  |  "
+                  "PF: slowest disk read this session in ms");
+}
+
 void TransportPerfReadout::update (const juce::String& sysText, const juce::String& dspText,
                                    const juce::String& row2, const juce::String& row3,
                                    juce::Colour sysCol, juce::Colour dspCol)
@@ -1076,6 +1097,7 @@ void TransportPerfReadout::update (const juce::String& sysText, const juce::Stri
     mSysText = sysText;  mDspText = dspText;
     mRow2    = row2;     mRow3    = row3;
     mSysCol  = sysCol;   mDspCol  = dspCol;
+    refreshTooltip();
     repaint();
 }
 

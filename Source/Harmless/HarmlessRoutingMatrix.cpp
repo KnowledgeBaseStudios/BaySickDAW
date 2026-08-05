@@ -8,7 +8,9 @@ HarmlessRoutingMatrix::HarmlessRoutingMatrix()
 {
     for (int i = 0; i < kNumSliders; ++i) {
         auto& s = mSliders[i];
-        s.setSliderStyle (juce::Slider::LinearVertical);
+        // Jeff, 2026-08-04: knobs, not faders -- the six faders needed vertical
+        // throw, and that height is exactly what this section could not afford.
+        s.setSliderStyle (juce::Slider::RotaryVerticalDrag);
         s.setTextBoxStyle (juce::Slider::NoTextBox, false, 0, 0);
         s.setRange (0.0, 1.0);
         s.setScrollWheelEnabled (true);
@@ -57,14 +59,16 @@ void HarmlessRoutingMatrix::paint (juce::Graphics& g)
 
 void HarmlessRoutingMatrix::resized()
 {
-    // 2026-04-19 (S1): toggles dropped (Jeff's "no LED needed"). Faders take
-    // the full panel height minus a 14 px label band at the bottom.
-    const int sliderH = getHeight() - 14;
-    const int sliderW = 18;
-    const int gap = (getWidth() - kNumSliders * sliderW) / (kNumSliders + 1);
-    int x = gap;
+    // 2026-04-19 (S1): toggles dropped (Jeff's "no LED needed").
+    // Jeff, 2026-08-04: one packed row of 16px knobs, matching kKnobSm in the
+    // editor, with a label band beneath.  Packed at a fixed gap rather than
+    // sharing out all spare width, so the row is as wide as its contents.
+    constexpr int kKnobSz = 16, kGapPx = 10, kLblBand = 12;
+    const int rowW = kNumSliders * kKnobSz + kGapPx * (kNumSliders - 1);
+    const int y    = juce::jmax (0, (getHeight() - kLblBand - kKnobSz) / 2);
+    int x = juce::jmax (0, (getWidth() - rowW) / 2);
     for (int i = 0; i < kNumSliders; ++i) {
-        mSliders[i].setBounds (x, 4, sliderW, sliderH);
-        x += sliderW + gap;
+        mSliders[i].setBounds (x, y, kKnobSz, kKnobSz);
+        x += kKnobSz + kGapPx;
     }
 }

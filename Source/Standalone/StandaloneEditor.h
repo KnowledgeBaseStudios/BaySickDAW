@@ -1,5 +1,6 @@
 #pragma once
 #include <JuceHeader.h>
+#include <optional>   // defaultSizeFor returns nothing when an engine is unbound
 #include "../PluginProcessor.h"
 #include "StandaloneApp.h"
 #include "SharedUI.h"
@@ -188,9 +189,25 @@ private:
     // addChildComponent.
     void hostPageInWindow (PageEntry& entry);
     // QA-Layout T7: per-window floor from Jeff's approved sizing map
-    // (full-window dims).  Engine-driven families key off the visible engine;
-    // re-applied per show so Drums' live engine swap tracks.
-    juce::Point<int> floorSizeFor (const PageEntry& entry) const;
+    // (full-window dims).  Engine-driven families key off the visible engine.
+    //
+    // Jeff, 2026-08-04: returns NOTHING when the engine has not bound yet.
+    // There is deliberately no fallback number -- see the definition.  A caller
+    // that gets nullopt installs NO floor rather than a placeholder one.
+    std::optional<juce::Point<int>> defaultSizeFor (const PageEntry& entry) const;
+    // Re-applies the floor for the window framing `page`, now that its engine
+    // is known.  Wired to each engine-driven page's onEngineEditorRebuilt --
+    // the only moment the answer exists for a window framed before its engine.
+    void refreshWindowDefaultFor (const juce::Component* page);
+    // Self-healing sweep for windows still carrying the ctor placeholder floor.
+    // onEngineEditorRebuilt is a SINGLE callback slot, so an engine that bound
+    // before showPageForTab installed the slot fired into nothing and that
+    // window kept 320x200 forever -- intermittent by nature, and likelier on a
+    // second player because the engine loads faster once warm (Jeff,
+    // 2026-08-04).  A floor that is not yet known is a KNOWN-incomplete state,
+    // so poll it instead of depending on catching one event.  Costs nothing
+    // once resolved: a window with a real floor is skipped outright.
+    void pollPendingWindowDefaults();
     // Stable per-logical-window key for bounds persistence (survives the
     // window object, which destroy-on-close makes short-lived).
     juce::String persistKeyFor (const PageEntry& entry) const;
@@ -817,6 +834,7 @@ private:
             // wakeup, and a second timer would be pure cost on the machine this
             // feature exists to relieve.
             owner.pollAutoFreeze();
+            owner.pollPendingWindowDefaults();
         }
     } mDenoisePollTimer { *this };
 

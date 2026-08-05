@@ -667,8 +667,114 @@ Convention: Main Plan §0 "Batch Plans + Running Notes layout" (locked 2026-05-1
 - **`STANDALONE_UI_CHANGES.md`** gained the T11 entry.
 - **Next:** T7 — real window floors from the approved sizing map + the layout reworks.
 
+## 2026-08-04 — Task 7 committed `9797f19d` — measured floors, window-placement bug (4 causes), Harmless redo, pedal tiles
+
+- **Build gate green:** five exit codes 0, four `vcxproj -> ...exe` link lines, zero
+  `error C` / `error LNK` / `error MSB` greps.  16 files, 949 insertions /
+  517 deletions.  Several earlier runs were blocked by LNK1104 on a locked Release
+  exe — twice the cause was a STALE `BaySickDAW` process still running after Jeff
+  had closed the window; found via `Get-Process` and the PID surfaced to him rather
+  than killed (his exe, his call).
+- **REAL FLOORS FROM THE SIZING MAP:** `WorkspaceWindow`'s real `setMinimumSize` body
+  is restored (the T6 diag-era override ignored every caller and forced 120x80), and
+  a new `setMinimumWindowSize` serves callers that pass WINDOW dimensions rather than
+  content dimensions.
+- **Floors resolve per PLAYER TYPE, not per tab type** — `StandaloneEditor::floorSizeFor`
+  keys off the engine a page currently holds, re-applied on every page-show so a Drums
+  tab's live engine swap tracks its floor.  Jeff's correction 2026-08-04, which drove
+  the rewrite: "there is no split between a layers harmless and a bass harmless, its
+  all the same size".
+- **The values as landed:** Harmless 1047x455; BaySickSynth AND BaySickBass 558x455
+  (Jeff corrected a first pass that split those two and used a non-existent 586x549);
+  BaySickPlayer 490x455; BaySickGuitars / BaySickBasses 1047x455; Rusty 1047x455;
+  Vox 1534x455; Mixer 486x455; Builder 486x268; Effects rack 357x268; Piano Roll
+  691x268; Vocal Chain 1047x723; BaySickPitch 1534x724; BaySickAlign 1047x723;
+  NAM/IR 843x563 (Vox AND Inst identical — Jeff asked that the identity be verified,
+  and it was); Pedals 1534x455; Pre/Post EQ + Master Analyzer 1047x455.
+- **Effect panel floors are LIVE, not one-shot:** Basic 691x268 / Advanced 1047x268 /
+  pedal-native 358x268, pushed through a new `EffectSlotWindow::onFloorChanged` hook so
+  a Mode swap or a Basic/Advanced toggle re-floors the open window instead of leaving a
+  stale minimum behind.
+- **Minimums are HARD (Jeff ruled option B, grow-only):** "why would you offer something
+  that makes the windows so small you can't see the shit on it which is the whole point
+  of sizing them".
+- **PROCESS FINDING, recorded so it is not repeated:** my first floor map was built from
+  a MID-PASS snapshot of `window-sizing-diag.txt` taken while Jeff was still sizing, and
+  I treated it as final — the file kept growing afterwards and several numbers were
+  wrong.  Lesson: read the hand-back artifact once the hand-back is actually MADE, not
+  while the producing pass is in flight.
+- **WINDOW PLACEMENT — the headline bug of this task** ("the Mixer doesn't save where I
+  move it").  FOUR independent causes, found in this order; the fourth was only isolated
+  after three failed fixes by adding temporary save/write/restore tracing to a file (with
+  Jeff's agreement, removed before the commit):
+  1. **A project overwrote the global store.**  A project file stored the four default
+     tabs' bounds AND replaced the whole in-memory map on load, so its stale copy beat
+     `settings.xml`.  Projects no longer write or restore those keys; live global entries
+     now survive a project load; the key set is SEEDED at editor construction, because
+     registering at first framing was too late whenever a project loaded first.
+  2. **The teardown save clobbered good values.**  The destructor-time save persisted
+     whatever a half-dismantled window happened to report, and it ran LAST, so it won.
+     Destructors no longer save; explicit saves fire on drag-release, resize/move, the
+     close button, and the fill toggle, plus one flush at shutdown BEFORE editor teardown.
+  3. **THE BIG ONE — restore ran against a workspace that was not laid out yet.**
+     `originInParentClient()` returned (0,0) instead of the real (1,91), so every restored
+     window landed 91px high on every launch; the same unlaid-out read also collapsed the
+     first-open default size (a workspace fraction) down to the 480x320 floor, which is
+     what littered `settings.xml` with junk records.  Attach now waits for real workspace
+     BOUNDS, not merely a native handle, and a fresh window opens at its own measured
+     minimum instead of a workspace fraction.
+  4. **The startup clamp captured windows.**  The frame passes through a partial size
+     (~1098x608) before reaching the real 1534x724, and `clampWindowsIntoView` squeezed
+     everything into that partial size with nothing left to restore them.  A GROWING
+     workspace now re-applies each window's stored bounds before clamping again, and
+     programmatic clamps are excluded from the store via a scoped suppression so a clamp
+     can never be mistaken for a user placement.  Jeff verified: "It works now".
+- **CORRECTION recorded (twice wrong before the above):** I first asserted the behavior was
+  "working as intended" per the T5 spec — wrong, the Mixer is a DEFAULT tab and does persist
+  placement — and then asserted the workspace genuinely was 1098x608 — also wrong, that is a
+  mid-layout reading, and Jeff pointed out BaySickPitch was sized to the full 1534x724
+  workspace, which proved it.
+- **Harmless (Specific-2) REDONE, not re-hung** — Jeff rejected a first attempt that only
+  re-flowed the existing sections into columns.  Two root causes fixed: `layoutRow` laid
+  every item in ONE row and let wide sets overflow their cell (Output / Timbre / FX), so it
+  now WRAPS and centers the block; and a blank grid row plus a blank bottom-left half plus a
+  blank row-C half were being held as "future space" while real sections were squeezed, so
+  every cell now carries content.  New map — TOP band: Output / (Tremolo | Routing) /
+  Vibrato-Legato, then Unison alone at full height, then (Filter 1 | ADSR) / (Filter 2 |
+  ADSR) / Timbre at FULL width.  BOTTOM band, six columns: Pitch-LFO Mod | Strum/XYZ |
+  Blur-Prism/AmpEnv | FX | Spectrogram | Mod Editor.  The cramped 2x2 filter-offset /
+  part-mask stack inside Timbre is DISSOLVED (those knobs were shrinking to ~12px).  Design
+  size is now 1039x421 — the content area of the measured 1047x455 window.
+- **VibePlayer L15:** `kKnobSz` 55 -> 18, stacks vertically centered, routing-arrow math
+  follows the new size.
+- **Specific-4 pedal tiles:** all 26 pedal-capable panels now have a `PanelMode::Pedal`
+  branch, via a shared `pedalTileGrid` that generalizes the hand-built Octave / FurmanEQ
+  grids.  The fader-bank EQs and the Tuner keep their own layouts and reclaim the dBFS
+  strip.  `isPedalNativeType` moved to `EffectRack.h`, now shared with preset routing.
+- **ALSO IN THIS COMMIT (both Jeff-reported during T7):** Effects and Piano Roll now open at
+  launch alongside Builder and Mixer.  Correction to an earlier draft of this entry, which
+  blamed a "2026-07-28 Builder + Mixer only rule" — no such rule was ever made.  Jeff's rule
+  has always been that those FOUR are the default launch windows; the launch policy simply
+  framed two of them, which was an implementation error on my side, not a spec change.  Two
+  of the four global-placement windows were shut, so half the placement store was never
+  exercised.
+  And a kit load no longer frames its drums: loading a 16-drum kit put SIXTEEN player windows
+  on screen.  Tabs, mixer strips and piano rolls are still created; a drum's window now
+  appears when its tab is selected, and the post-load landing spot moved to the DRUM KIT view.
+- **Option B recorded as Future State `CL-305`** (one shared drum-player window with a
+  dropdown) — Jeff's ruling was "do A for now and notate B as a possible future state"; the
+  entry ships in this same commit with its three open questions unanswered.
+- **DISPOSITION flagged to Jeff at the commit surface:** the plan's subtractive-size-math
+  sweep has NOTHING to sweep — restored floors make below-design-size states unreachable, so
+  no live sub-floor paint path remains.
+- **ALL Rule 4 diagnostics REMOVED in this commit:** the `[QA-Layout DIAG]` WxH title-bar
+  readout, the per-resize file append, the `onDiagExtraInfo` / `diagPanelMode` hooks, AND the
+  temporary `[WINPOS DIAG]` placement tracing added for cause 4.
+- **Next:** T8 — the D1/D2 collapse re-docket, now that real floor numbers exist.
+
 ## Diagnostic Instrumentation Catalog (Rule 4)
 
 | Site | Tag | Purpose | Disposition |
 |------|-----|---------|-------------|
-| `WorkspaceWindow.h` (onDiagExtraInfo + paintOverChildren decl + mLastDiagSize), `WorkspaceWindow.cpp` (ctor 120x80 floor, setMinimumSize override w/ commented-out real body, resized() diag append, paintOverChildren WxH readout, AppPaths include), `EffectWindows.h/.cpp` (diagPanelMode), `StandaloneEditor.cpp` (openEffectSlotWindow onDiagExtraInfo wire) | `[QA-Layout DIAG]` | Window-sizing collection (T6): per-size-change append of persist-key + title + WxH + effects panel mode to `Documents/BaySickDAW/window-sizing-diag.txt`; live strip readout; floors dropped to 120x80 | Remove at batch close (T7 restores real floors in setMinimumSize; readout + append + hook + diagPanelMode all strip) |
+| `WorkspaceWindow.h` (onDiagExtraInfo + paintOverChildren decl + mLastDiagSize), `WorkspaceWindow.cpp` (ctor 120x80 floor, setMinimumSize override w/ commented-out real body, resized() diag append, paintOverChildren WxH readout, AppPaths include), `EffectWindows.h/.cpp` (diagPanelMode), `StandaloneEditor.cpp` (openEffectSlotWindow onDiagExtraInfo wire) | `[QA-Layout DIAG]` | Window-sizing collection (T6): per-size-change append of persist-key + title + WxH + effects panel mode to `Documents/BaySickDAW/window-sizing-diag.txt`; live strip readout; floors dropped to 120x80 | **REMOVED in `9797f19d` (T7)** — real floors restored in setMinimumSize; readout, per-resize append, onDiagExtraInfo and diagPanelMode all stripped |
+| `WorkspaceWindow.h/.cpp` (winPosDiag + SAVE/REST call sites), `WorkspaceWindow.cpp` writeSessionToSettings (WRITE call site) | `[WINPOS DIAG]` | Window-placement bug (T7): one line per store / write / restore with raw bounds, screen bounds, workspace origin and workspace screen bounds, so the failing step was identified from data after three wrong diagnoses.  Wrote `Documents/BaySickDAW/window-pos-diag.txt` | **REMOVED in `9797f19d` (T7)** — added and removed inside the same task; it is what isolated causes 3 and 4 |

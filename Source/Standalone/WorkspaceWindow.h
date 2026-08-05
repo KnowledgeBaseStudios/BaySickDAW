@@ -8,7 +8,7 @@
 
 class Workspace;
 class PageMenuBar;
-class VibeTooltip;
+class GlobalAutoRightClick;
 
 // ── WorkspaceWindow — QA-ModelShell TS4 (2026-07-28) ─────────────────────────
 // One contained window inside the fixed main frame (locked call 2b: FL-style
@@ -69,13 +69,22 @@ public:
     // page gone); it exists so a future move-between-frames is possible.
     std::unique_ptr<juce::Component> releaseContent();
 
-    // Resize floor.  Every window gets one at its layout's collision point;
-    // fixed-grid panels pass their natural size so they cannot shrink at all.
-    void setMinimumSize (int minW, int minH);
-    // QA-Layout T7: floor expressed in WINDOW dimensions -- the diag readout
-    // (and Jeff's approved sizing map) measured the full window, chrome
-    // included, so the T7 floor table calls this instead of converting.
-    void setMinimumWindowSize (int w, int h);
+    // DEFAULT OPENING SIZE, in WINDOW dimensions (chrome included -- the
+    // measured numbers were taken off the whole window).
+    //
+    // Jeff, 2026-08-04: this is NOT a lock.  Content minimums are suspended
+    // until the compact-layout task decides what they should be, so a window
+    // may be dragged smaller or larger than its default freely.  The only
+    // surviving constraint is the anti-degenerate clamp in the ctor.  Applying
+    // this to a window that has never been sized by the session, a project or
+    // the user sets its size outright; a window that HAS been sized keeps what
+    // it was given.
+    void setDefaultWindowSize (int w, int h);
+    // False until a real default has been supplied.  Drives the editor's
+    // healing sweep -- an engine-derived size is unknown while the engine is
+    // still binding, and the event announcing it can be missed.
+    bool hasDefaultSize() const noexcept { return mDefaultKnown; }
+
 
     // QA-Layout T5: the THREE-LIFETIME model (Jeff's 2026-07-28 ruling).
     //
@@ -90,10 +99,18 @@ public:
     //   Lifetime 3 -- the project file -- StandaloneEditor serializes the
     //   full map + per-window open state and REPLACES the map on load.
     //
-    //   Disk    - eligible for the settings.xml exit write (page windows).
-    //   Session - map only (effect windows / satellites: per-strip and
-    //             per-slot addressing makes their placement project content,
-    //             so they ride lifetime 3, never the global file).
+    //   Disk    - eligible for the settings.xml exit write.  Jeff, 2026-08-04:
+    //             this is ONLY the four default tabs (Builder / Mixer /
+    //             Effects / Piano Roll), size AND position.  Nothing else goes
+    //             in that file.  It previously defaulted to Disk for every page
+    //             window and wrote every window's SIZE globally, gating only
+    //             POSITION to the four -- the exact inverse of the ruling, and
+    //             what left 143 records in settings.xml feeding stale sizes to
+    //             players on every cold start.
+    //   Session - map only.  EVERY other window: players, effect windows,
+    //             satellites.  Their size and placement are session state
+    //             (lifetime 1) and project content (lifetime 3); a cold start
+    //             with no project opens them at their DEFAULT size.
     enum class Persistence { Disk, Session };
     void setPersistence (Persistence p) noexcept { mPersistence = p; }
 
@@ -183,6 +200,11 @@ public:
     // lock: the snap only adjusts the position it is given, so continuing to
     // drag pushes straight past it, and windows may still overlap freely.
     juce::Rectangle<int> applyMagnetism (juce::Rectangle<int> target) const;
+    // Resize-path magnetism.  applyMagnetism translates the whole window, which
+    // a resize must not do -- this snaps each edge independently and only the
+    // ones that moved.  Jeff, 2026-08-04: the magnet worked on move and not at
+    // all on resize, because only mouseDrag ever called for it.
+    juce::Rectangle<int> applyResizeMagnetism (juce::Rectangle<int> target) const;
     static constexpr int kSnapPx = 10;
 
     // Containment for the RESIZE path, which is a DIFFERENT path from the drag.
@@ -224,7 +246,9 @@ private:
     juce::Rectangle<int> loadSavedBounds (bool& outHasPosition) const;
 
     juce::String mPersistKey, mTitle;
-    Persistence  mPersistence { Persistence::Disk };
+    // Session by default: only the four default tabs are promoted to Disk, and
+    // hostPageInWindow does that explicitly by key.
+    Persistence  mPersistence { Persistence::Session };
     // Lifetime-1 bounds (workspace-local), keyed exactly like the disk
     // records.  Static because the window object itself is short-lived --
     // closing destroys it, and the key is the only thing carrying position
@@ -244,13 +268,26 @@ private:
     juce::Rectangle<int>                             mRestoreBounds;   // pre-fill (parent-client)
     bool                                             mFilled { false };
     std::unique_ptr<PageMenuBar>                    mPageMenu;
-    // Each contained window needs its OWN tooltip window: juce::TooltipWindow
-    // only monitors components inside its own desktop window, and these are
-    // separate native windows from the main frame.  Without this the editor's
-    // tooltip window stopped covering every page (Jeff, 2026-07-28 -- the
-    // knob info tooltips vanished).  Same workaround KeyBindsWindow already
-    // uses for the same reason.
-    std::unique_ptr<VibeTooltip>                    mTooltips;
+    // NO per-window tooltip since 2026-08-04.  One per window was the fix for
+    // "knob info tooltips vanished" (Jeff, 2026-07-28) back when the editor's
+    // tooltip was parented to the frame and therefore could not reach in here.
+    // The editor's is parentless now -- a real desktop window that floats above
+    // every contained window and serves all of them -- so a local one would
+    // only produce a second tip on top of the first.
+    //
+    // Each contained window DOES still need its OWN right-click Automate
+    // listener, for the same peer-boundary reason the tooltip used to need one.
+    // StandaloneEditor installs one GlobalAutoRightClick over its own
+    // component tree, but a contained window is a separate native peer with a
+    // separate tree, so that listener never sees a click in here.  VKnob-based
+    // controls kept working (a VKnob listens to its own slider and tags it so
+    // the global handler skips it); every VibeSlider did not, because
+    // VibeSlider swallows the right-click on purpose and depends entirely on
+    // this listener to raise the menu.  That is what silently cost the players
+    // and the mixer strips their Automate menu when pages moved into contained
+    // windows (Jeff, 2026-08-04).  The two listener scopes are disjoint, so
+    // this cannot double up the menu.
+    std::unique_ptr<GlobalAutoRightClick>           mAutoRightClick;
     // Routes the resize path through clampResizeToWorkspace.  Declared BEFORE
     // mResizer on purpose: the resizer holds a raw pointer to it, and members
     // destruct in reverse declaration order, so being declared first means
@@ -262,6 +299,24 @@ private:
         WorkspaceWindow& owner;
     };
     Constrainer                                      mConstrainer { *this };
+    // Jeff, 2026-08-04.  The ctor installs a 320x200 PLACEHOLDER minimum, and
+    // attachTo uses the minimum as the first-open size.  That was harmless
+    // while every floor was known at creation, but an engine-driven floor is
+    // now deliberately unknown until the engine binds -- so such a window first
+    // opened at 320x200 and only reached its real size later, if at all.
+    // mFloorKnown says whether a REAL floor has been installed;
+    // mOpenedAtPlaceholder marks a window that opened before one arrived and
+    // has never been sized by the user, so the floor can snap it exactly rather
+    // than merely grow it.
+    bool                                             mDefaultKnown { false };
+    bool                                             mOpenedAtPlaceholder { false };
+    juce::Point<int>                                 mDefaultSize { 0, 0 };
+public:
+    // Anti-degenerate clamp only -- small enough to be no content rule, big
+    // enough that a window can always be grabbed and dragged back.
+    static constexpr int kMinDegenerateW = 120;
+    static constexpr int kMinDegenerateH = 80;
+private:
     std::unique_ptr<juce::ResizableBorderComponent>  mResizer;
     // SafePointer, not a raw Workspace*.  Three crashes in a row (drag,
     // magnetism, window-array teardown) all bottomed out in reads through this

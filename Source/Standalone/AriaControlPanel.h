@@ -48,6 +48,11 @@ public:
         std::function<juce::String(int cc)>  ccLabel;
         juce::String                         engineName  {};
         juce::Colour                         accentColor { juce::Colours::transparentBlack };
+        // Jeff, 2026-08-04: keep the band even with NO engine name.  Rusty's
+        // kit artwork carries its own logo, so the name would be a duplicate --
+        // but the band itself is where Rusty's Program + Player Preset controls
+        // live, and dissolving it left them homeless on the window strip.
+        bool                                 hostTitleBar { false };
     };
 
     explicit AriaControlPanel (Binding binding);
@@ -68,9 +73,9 @@ public:
     // every widget's APVTS attachment via parseGuiXml on the next selectTab.
     void setEngine (Binding binding);
 
-    // QA-G3Smoke G-16 / SW-3: the internal title bar (null until a binding
-    // with engineName arrives).  Owning pages host their program controls +
-    // the Swing Mix knob on it.
+    // QA-G3Smoke G-16 / SW-3: the internal title bar.  Null unless the binding
+    // carries an engineName OR sets hostTitleBar.  Owning pages host their
+    // program controls on it (addHostedTrailingWidget).
     BaySickTitleBar* getTitleBar() const noexcept { return mTitleBar.get(); }
 
 private:

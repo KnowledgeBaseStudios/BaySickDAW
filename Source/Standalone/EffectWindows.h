@@ -57,7 +57,7 @@ public:
     // this object after it fires.
     std::function<void()> onRequestClose;
     // QA-Layout T7: fired (change-guarded) when the panel class or mode makes
-    // a different floor apply; the owner routes it to setMinimumWindowSize.
+    // a different floor apply; the owner routes it to setDefaultWindowSize.
     std::function<void(int, int)> onFloorChanged;
     // Title text changed (strip renamed, effect swapped by a preset load).
     std::function<void(const juce::String&)> onTitleChanged;

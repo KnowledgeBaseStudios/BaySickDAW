@@ -191,16 +191,19 @@ void BaySickRustyDrumsPage::buildPlayerTab()
         binding.kitDefaultCc = [engine](int cc) { return engine->getKitDefaultCc (cc); };
         binding.ccLabel      = [engine](int cc) { return engine->getCcLabel (cc); };
     }
-    // QA-Layout T15: binding.engineName stays empty -- the internal
-    // AriaControlPanel title bar is dissolved; "BaySickRustyDrums" renders
-    // centered on the hosting window's title strip (StandaloneEditor).
+    // Jeff, 2026-08-04: engineName stays EMPTY (the kit artwork carries Rusty's
+    // own logo, so a rendered name would be a second one) but the BAND stays --
+    // it is where this page's Program + Player Preset controls live.  T15
+    // dissolved the band along with the name and left both controls homeless.
+    binding.hostTitleBar = true;
     mAriaPanel = std::make_unique<AriaControlPanel> (binding);
     mPlayerTab->addAndMakeVisible (*mAriaPanel);
 
-    // QA-Layout T3 (Window-3): the Program selector + Player Preset button
-    // move off the Aria title bar onto the hosting window's title strip
-    // (StandaloneEditor mounts them per page-show, reversing G-16's move --
-    // the strip is the one always-visible control row now).
+    if (auto* bar = mAriaPanel->getTitleBar())
+    {
+        if (mPlayerPresetBtn) bar->addHostedTrailingWidget (mPlayerPresetBtn.get(), 110);
+        if (mProgramCombo)    bar->addHostedTrailingWidget (mProgramCombo.get(),    160);
+    }
 }
 
 void BaySickRustyDrumsPage::buildPianoRollTab()
@@ -293,8 +296,9 @@ void BaySickRustyDrumsPage::loadAriaPanelForProgram (Program target)
         binding.kitDefaultCc = [engine](int cc) { return engine->getKitDefaultCc (cc); };
         binding.ccLabel      = [engine](int cc) { return engine->getCcLabel (cc); };
     }
-    // QA-Layout T15: engineName stays empty across program reloads too --
-    // no internal title bar; the window strip carries the name.
+    // engineName stays empty across program reloads too, but the band persists
+    // (hostTitleBar) so the hosted Program + Player Preset widgets survive.
+    binding.hostTitleBar = true;
     mAriaPanel->setEngine (binding);
 
     const auto kitRoot = SampleLibrary::getCoreLibraryDir().getChildFile ("Big Rusty Drums");

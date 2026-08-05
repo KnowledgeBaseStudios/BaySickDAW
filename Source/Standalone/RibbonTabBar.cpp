@@ -388,12 +388,25 @@ int RibbonTabBar::naturalSingleLineWidth (int slotIndex) const
 //      at-min still overflows totalW (very narrow window), fall back to
 //      pure proportional scaling -- drawFittedText in paint() picks up
 //      the slack on per-slot text fitting.
+int RibbonTabBar::addSlotWidth() const
+{
+    // Same font paint() draws the glyph with, so the slot tracks the symbol.
+    const juce::Font f (18.0f, juce::Font::bold);
+    return juce::jmax (12, f.getStringWidth ("+") * 2);
+}
+
 juce::Rectangle<int> RibbonTabBar::slotRect (int slotIndex) const
 {
-    const int totalW = getWidth();
     const int totalH = getHeight() > 0 ? getHeight() : kTabH;
+    const int addW   = addSlotWidth();
+    // The "+" is carved off the right edge first; everything below divides the
+    // remainder among the TYPE slots only.
+    const int totalW = juce::jmax (0, getWidth() - addW);
 
-    const int nSlots = numSlots();
+    if (isAddSlot (slotIndex))
+        return { totalW, 0, addW, totalH };
+
+    const int nSlots = juce::jmax (1, numSlots() - 1);
     int desired[kMaxSlots];
     int minW   [kMaxSlots];
     int sumDesired = 0;

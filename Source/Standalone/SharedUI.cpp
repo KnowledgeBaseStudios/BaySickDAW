@@ -1391,6 +1391,29 @@ void PageMenuBar::setAddMenuBuilder(MenuBuilder builder)
     repaint();
 }
 
+void PageMenuBar::setExtraHeadings (const juce::StringArray& labels,
+                                    std::function<void(int, juce::Component*)> onOpen)
+{
+    clearExtraHeadings();
+    for (int i = 0; i < labels.size(); ++i)
+    {
+        auto btn = std::make_unique<TitleStripMenuItem> (labels[i]);
+        auto* raw = btn.get();
+        btn->onClick = [onOpen, i, raw] { if (onOpen) onOpen (i, raw); };
+        addAndMakeVisible (*btn);
+        mExtraHeadings.push_back (std::move (btn));
+    }
+    resized();
+    repaint();
+}
+
+void PageMenuBar::clearExtraHeadings()
+{
+    for (auto& b : mExtraHeadings) removeChildComponent (b.get());
+    mExtraHeadings.clear();
+    resized();
+}
+
 void PageMenuBar::setPageTitle(const juce::String& t)
 {
     mTitle = t;
@@ -1602,9 +1625,9 @@ void PageMenuBar::clearTabSlots()
     mTabSlotBtns.clear();
     if (mMidBtn)  { removeChildComponent(mMidBtn.get());  mMidBtn.reset(); }
     if (mSideBtn) { removeChildComponent(mSideBtn.get()); mSideBtn.reset(); }
-    if (mFxRackBtn) { removeChildComponent(mFxRackBtn.get()); mFxRackBtn.reset(); }
-    if (mFreezeBtn) { removeChildComponent(mFreezeBtn.get()); mFreezeBtn.reset(); }
-    mFreezeState = nullptr;
+    mFxRackAction         = nullptr;
+    mFreezeToggle         = nullptr;
+    mFreezeState          = nullptr;
     mFreezeDisabledReason = nullptr;
     if (mSwingKnob) { removeChildComponent(mSwingKnob.get()); mSwingKnob.reset(); }
     mMidSideVisible = false;
@@ -1645,21 +1668,7 @@ void PageMenuBar::setMidSideSlots(std::function<void()> onMid,
 
 void PageMenuBar::setFxRackSlot(std::function<void()> onClick)
 {
-    if (! onClick)
-    {
-        if (mFxRackBtn) mFxRackBtn->setVisible(false);
-        resized();
-        return;
-    }
-    if (! mFxRackBtn)
-    {
-        mFxRackBtn = std::make_unique<juce::TextButton>("FX Rack");
-        mFxRackBtn->setTooltip("Open this page's effect rack on the Effects page");
-        addAndMakeVisible(*mFxRackBtn);
-    }
-    mFxRackBtn->setVisible(true);
-    mFxRackBtn->onClick = std::move(onClick);
-    resized();
+    mFxRackAction = std::move (onClick);
 }
 
 void PageMenuBar::setFreezeSlot (std::function<int()> getState,
@@ -1669,56 +1678,98 @@ void PageMenuBar::setFreezeSlot (std::function<int()> getState,
 {
     mFreezeState          = std::move (getState);
     mFreezeDisabledReason = std::move (getDisabledReason);
+    mFreezeToggle         = std::move (onToggle);
     mFreezeIsVocal        = isVocal;
-
-    if (! mFreezeState || ! onToggle)
-    {
-        if (mFreezeBtn) mFreezeBtn->setVisible (false);
-        resized();
-        return;
-    }
-
-    if (! mFreezeBtn)
-    {
-        mFreezeBtn = std::make_unique<juce::TextButton> ("Freeze");
-        addAndMakeVisible (*mFreezeBtn);
-    }
-    mFreezeBtn->setVisible (true);
-    mFreezeBtn->onClick = [this, cb = std::move (onToggle)]
-    {
-        // Toggle against the LIVE state rather than a cached copy: auto-freeze
-        // and the staleness re-render both change it behind this button's back.
-        const int s = mFreezeState ? mFreezeState() : 0;
-        cb (s == 0);
-    };
-    refreshFreezeState();
-    resized();
 }
 
-void PageMenuBar::refreshFreezeState()
-{
-    if (! mFreezeBtn || ! mFreezeState) return;
+// The button carried its own state; a menu item is rebuilt from scratch on
+// every open, so there is nothing left to refresh.  Kept as a no-op because the
+// freeze driver calls it from its state-change broadcast.
+void PageMenuBar::refreshFreezeState() {}
 
+namespace
+{
+    // JUCE PopupMenu items carry no tooltip.  Freeze needs one when it is
+    // LOCKED -- a greyed item with no explanation is a dead end (Jeff,
+    // 2026-08-04: "if it is locked make it so if the user hovers over that
+    // freeze option it says something about where to unlock that").  A custom
+    // item component is the only hook JUCE gives us; TooltipClient on it is
+    // what the tooltip window queries.
+    class TooltipMenuItem : public juce::PopupMenu::CustomComponent,
+                            public juce::TooltipClient
+    {
+    public:
+        TooltipMenuItem (juce::String text, juce::String tip, bool enabled,
+                         juce::Colour textColour)
+            // TRUE: let the menu detect the click and invoke the item.  With
+            // false the component has to trigger itself, and the item's action
+            // would simply never fire.
+            : juce::PopupMenu::CustomComponent (true),
+              mText (std::move (text)), mTip (std::move (tip)),
+              mEnabled (enabled), mColour (textColour)
+        {
+        }
+
+        juce::String getTooltip() override { return mTip; }
+
+        void getIdealSize (int& w, int& h) override
+        {
+            w = juce::Font (14.0f, juce::Font::plain).getStringWidth (mText) + 46;
+            h = 22;
+        }
+
+        void paint (juce::Graphics& g) override
+        {
+            if (mEnabled && isItemHighlighted())
+            {
+                g.setColour (VC::Accent.withAlpha (0.30f));
+                g.fillRect (getLocalBounds());
+            }
+            g.setColour (mEnabled ? mColour : mColour.withAlpha (0.38f));
+            g.setFont (juce::Font (14.0f, juce::Font::plain));
+            g.drawText (mText, getLocalBounds().withTrimmedLeft (12),
+                        juce::Justification::centredLeft, true);
+        }
+
+    private:
+        juce::String mText, mTip;
+        bool         mEnabled;
+        juce::Colour mColour;
+    };
+}
+
+void PageMenuBar::appendStandardItems (juce::PopupMenu& m)
+{
+    const bool haveFx     = (bool) mFxRackAction;
+    const bool haveFreeze = mFreezeState != nullptr && mFreezeToggle != nullptr;
+    if (! haveFx && ! haveFreeze) return;
+
+    m.addSeparator();
+
+    if (haveFx)
+        m.addItem ("FX Rack", [cb = mFxRackAction] { if (cb) cb(); });
+
+    if (! haveFreeze) return;
+
+    // Freeze SHOWS even when locked, greyed, with the unlock path in its
+    // tooltip (Jeff, 2026-08-04).  A capability the user cannot see is a
+    // capability they cannot ask for -- same reasoning as the old disabled
+    // button, but the lock now has somewhere to explain itself.
     const juce::String reason = mFreezeDisabledReason ? mFreezeDisabledReason()
                                                       : juce::String();
-    const bool enabled = reason.isEmpty();
-    mFreezeBtn->setEnabled (enabled);
+    const bool  enabled = reason.isEmpty();
+    const int   s       = mFreezeState();
+    const auto  colour  = s == 2 ? juce::Colour (0xffff9100)
+                        : s == 1 ? juce::Colour (0xff00fff2)
+                                 : juce::Colours::white.withAlpha (0.85f);
 
-    const int s = mFreezeState();
-    mFreezeBtn->setButtonText (s == 0 ? "Freeze" : "Frozen");
-    // Same cyan/orange language the ribbon indicator and the analyzer use: cyan
-    // is "this is done", orange is "this needs attention".
-    mFreezeBtn->setColour (juce::TextButton::textColourOffId,
-                           s == 2 ? juce::Colour (0xffff9100)
-                          : s == 1 ? juce::Colour (0xff00fff2)
-                                   : juce::Colours::white.withAlpha (0.85f));
     // §6.9 (Jeff, 2026-07-30): on a VOCAL the warning is not optional.  Freeze
     // prints the WHOLE vocal chain -- gate, de-reverb, de-esser, compressor,
     // saturation, limiter, amp -- plus pitch and alignment, because the capture
     // point is below all of it.  A singer who freezes mid-setup and then reaches
     // for the de-esser would find it dead with nothing explaining why, so the
     // tooltip says what it is FOR: getting CPU back once a sound is settled, not
-    // something to leave on while dialling one in.
+    // something to leave on while dialing one in.
     const juce::String vocalNote = mFreezeIsVocal
         ? juce::String ("\n\nOn a vocal this prints the WHOLE chain - pitch, "
                         "alignment, gate, de-reverb, de-esser, compressor, "
@@ -1727,7 +1778,7 @@ void PageMenuBar::refreshFreezeState()
                         "sound is settled, not while you are still setting one up.")
         : juce::String();
 
-    mFreezeBtn->setTooltip (
+    const juce::String tip =
         (! enabled ? reason
          : s == 2  ? juce::String ("Frozen, but its content changed - it plays live "
                                    "until the new freeze finishes rendering (at Stop). "
@@ -1738,7 +1789,25 @@ void PageMenuBar::refreshFreezeState()
                    : juce::String ("Freeze - render this player to a file so its engine "
                                    "stops costing CPU. Its effects, EQ and fader stay "
                                    "live."))
-        + vocalNote);
+        + vocalNote;
+
+    const juce::String label = s == 0 ? "Freeze" : "Frozen";
+    auto item = std::make_unique<TooltipMenuItem> (label, tip, enabled, colour);
+    // Constructed FROM the label, not default-constructed: Item's default ctor
+    // leaves itemID at 0, which is PopupMenu's "user picked nothing" sentinel
+    // and trips the jassert in addItem.  The String ctor sets -1, the same id
+    // every action-lambda item carries (and which the r <= 0 guards skip).
+    juce::PopupMenu::Item pmi (label);
+    pmi.customComponent = item.release();
+    pmi.isEnabled       = enabled;
+    if (enabled)
+        pmi.action = [getState = mFreezeState, cb = mFreezeToggle]
+        {
+            // Toggle against the LIVE state rather than a cached copy: auto-freeze
+            // and the staleness re-render both change it behind this item's back.
+            if (cb) cb (getState ? getState() == 0 : true);
+        };
+    m.addItem (std::move (pmi));
 }
 
 namespace
@@ -1867,15 +1936,14 @@ void PageMenuBar::paint(juce::Graphics& g)
     g.setColour(VC::Accent.withAlpha(0.55f));
     g.drawHorizontalLine(getHeight() - 1, 0.f, (float)getWidth());
 
-    // Page title - suppress when tab slots are present (page is obvious from tabs)
-    if (mTitle.isNotEmpty() && mTabSlotBtns.empty())
+    // Page title.  Jeff's rule (2026-08-04): a window carrying its own logo /
+    // engine wordmark shows NO plain title text -- the logo IS the identity.
+    // A window without one centres the title instead of pinning it left.
+    if (mTitle.isNotEmpty() && mTabSlotBtns.empty() && mCenterName.isEmpty())
     {
-        const int titleX = kMenuBtnW + 12
-                         + (mAddBtn != nullptr && mAddBtn->isVisible() ? kAddBtnW + 2 : 0);
         g.setColour(VC::TextDim.withAlpha(0.7f));
         g.setFont(juce::Font(10.f, juce::Font::bold));
-        g.drawText(mTitle, titleX, 0, 160, getHeight(),
-                   juce::Justification::centredLeft, false);
+        g.drawText(mTitle, getLocalBounds(), juce::Justification::centred, false);
     }
 
     // QA-Layout T3 (Window-4/L2): centered colored engine name, bloom style.
@@ -1889,6 +1957,7 @@ void PageMenuBar::paint(juce::Graphics& g)
                                           getLocalBounds().withSizeKeepingCentre (tw, getHeight()),
                                           true, 15.0f);
     }
+
 }
 
 void PageMenuBar::resized()
@@ -1905,6 +1974,26 @@ void PageMenuBar::resized()
     {
         mAddBtn->setBounds(b.removeFromLeft(kAddBtnW).reduced(0, 1));
         b.removeFromLeft(2);
+    }
+
+    // T16: page-supplied headings (Builder's Edit / View), sized to their text
+    // so a long label is not clipped by a fixed slot width.
+    for (auto& h : mExtraHeadings)
+    {
+        const int w = juce::jmax (kAddBtnW,
+                                  juce::Font (13.0f).getStringWidth (h->getButtonText()) + 18);
+        h->setBounds(b.removeFromLeft(w).reduced(0, 1));
+        b.removeFromLeft(2);
+    }
+
+    // Swing Mix knob sits immediately right of the Menu heading (Jeff,
+    // 2026-08-04) -- it is the one always-live CONTROL on the strip, so it
+    // gets the fixed leftmost spot rather than drifting with whatever nav
+    // buttons a page happens to mount.
+    if (mSwingKnob)
+    {
+        mSwingKnob->setBounds(b.removeFromLeft(24).reduced(1, 1));
+        b.removeFromLeft(4);
     }
 
     // Tab slot buttons right after hamburger
@@ -1928,27 +2017,8 @@ void PageMenuBar::resized()
         mBankIndicator->setBounds(b.removeFromLeft(56).reduced(1, 1));
     }
 
-    // FX Rack jump at the right end of the page-tab button cluster.
-    if (mFxRackBtn && mFxRackBtn->isVisible())
-    {
-        b.removeFromLeft(6);
-        mFxRackBtn->setBounds(b.removeFromLeft(58).reduced(1, 1));
-    }
-
-    // TS7 §6: Freeze sits BETWEEN FX Rack and the swing knob on every player.
-    if (mFreezeBtn && mFreezeBtn->isVisible())
-    {
-        b.removeFromLeft (4);
-        mFreezeBtn->setBounds (b.removeFromLeft (54).reduced (1, 1));
-    }
-
-    // Smoke round 2: per-player Swing Mix knob, right of the FX Rack jump
-    // (or the tab cluster when the page has no FX slot -- Rusty).
-    if (mSwingKnob)
-    {
-        b.removeFromLeft(4);
-        mSwingKnob->setBounds(b.removeFromLeft(24).reduced(1, 1));
-    }
+    // FX Rack and Freeze are MENU ITEMS now (Jeff, 2026-08-04), not buttons --
+    // see appendStandardItems.  No strip geometry for either.
 
     // Extra right components (Kit, Nav combo, etc.) flush to right.  A dead
     // SafePointer (editor-owned component destroyed on engine swap) is

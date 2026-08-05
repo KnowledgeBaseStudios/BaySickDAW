@@ -2,6 +2,7 @@
 #include <JuceHeader.h>
 #include <vector>
 #include "../Standalone/SharedUI.h"   // VibeSlider
+#include "../VibesynthConstants.h"    // unified snap labels / divisions / grid ladders
 
 // ── HarmlessCurvePoint ────────────────────────────────────────────────────────
 // Self-contained modulation curve point. No PatternManager dependency.
@@ -118,8 +119,31 @@ private:
     bool             mFrozen      { false };
     float            mZoomFactor  { 1.0f };    // 1..8
     float            mZoomOffset  { 0.0f };    // 0..(1 - 1/zoom) phase window start
-    int              mSnapDivision { 16 };     // 1 / 2 / 4 / 8 / 16 / 32 - snap target
-    static constexpr int kGridSegments = 32;   // always 32 visible divisions
+    // Jeff, 2026-08-04: the snap vocabulary is the APP'S unified one now
+    // (kUnifiedSnapLabels / snapDivToTicks / gridLadderForSnap in
+    // VibesynthConstants.h), triplets included -- this editor used to offer
+    // straight 1 / 1/2 / 1/4 / 1/8 / 1/16 / 1/32 only, which was the one place
+    // in the app where a triplet could not be snapped to.
+    //
+    // The TICK SYSTEM itself still does not reach in here, and deliberately:
+    // this axis is per-note 0-1 PHASE, not song position (see CLAUDE.md on
+    // HarmlessCurvePoint vs PatternManager::ControlPoint).  What is shared is
+    // the DIVISION vocabulary -- a division's segment count across one phase
+    // cycle is 384 / snapDivToTicks(idx), so the numbers come from the same
+    // source of truth without importing the domain.
+    int              mSnapDivIdx { 6 };        // unified index; 6 = Step (1/16)
+    // Equal segments across ONE phase cycle for the current division.  384 is a
+    // bar in ticks, so this is "how many of this division fit in a cycle" --
+    // derived from snapDivToTicks so the numbers can never drift from the rest
+    // of the app.  Bar -> 1, Beat -> 4, 1/3 Beat -> 12, Step -> 16, 1/6 Step -> 96.
+    int snapSegments() const noexcept
+    {
+        const int t = snapDivToTicks (mSnapDivIdx);
+        return t > 0 ? juce::jmax (1, 384 / t) : 16;
+    }
+    // Grid density follows the SELECTED division's ladder rung, no longer a
+    // fixed 32 lines regardless of what is being snapped to.
+    static constexpr int kMinGridPx = 6;       // finest rung must clear this
 
     // ── Undo / Redo (Batch 5b) - per-target curve history ─────────────────────
     // Simple stack of full point-vector snapshots. pushUndo() is called before

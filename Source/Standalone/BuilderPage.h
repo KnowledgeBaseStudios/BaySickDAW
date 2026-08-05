@@ -230,6 +230,12 @@ public:
     bool isCollapsed() const { return mCollapsed; }
     void setCollapsed(bool c);
 
+    // Jeff, 2026-08-04: the "<<" button is gone.  Collapsing happens by dragging
+    // the edge grip past its magnetic floor; the collapsed panel is the thin bar
+    // you click (or drag) to pull the browser back out.
+    std::function<void()> onExpandRequest;
+    void mouseDown (const juce::MouseEvent&) override;
+
     int  getSelectedPatternIndex() const { return mSelectedPat; }
 
     // Public alias for switchTab - used by BuilderPage::setBrowserTab + ribbon dropdown.
@@ -318,7 +324,6 @@ private:
     bool mCollapsed { false };
     int  mActiveTab { 0 };
 
-    std::unique_ptr<juce::TextButton> mCollapseBtn;
     std::array<std::unique_ptr<juce::TextButton>, 3> mTabBtns;
 
     std::vector<std::unique_ptr<BrowserItem>> mPatItems;
@@ -599,9 +604,16 @@ public:
     // Owner call 2026-07-17: FL-parity 500 tracks (supersedes marathon-5's
     // "keep 50 stock rows" -- 50 was an arbitrary early constant, not a spec).
     static constexpr int kNumRows    = 500;
-    // Alt-zoom-out floor: at most this many rows in view (preserves the
-    // pre-500 zoom range; all kNumRows in view would be ~1.5 px rows).
-    static constexpr int kMaxRowsInView = 50;
+    // Alt-zoom limits.  Jeff, 2026-08-04: these are ABSOLUTE PIXELS now.  They
+    // used to be derived from the viewport height ((vpH - kRulerH) / 50 and
+    // / 8), which tied the zoom range to the window: the same Alt+scroll
+    // bottomed out at a readable ~12 px row in a full-screen Builder and at a
+    // ~4 px row in a small one, so a contained window crushed every row into
+    // its neighbour.  Fixed bounds make one gesture mean one thing at any
+    // window size, and the floor is above the tallest fixed-height thing drawn
+    // in a row, so rows can no longer overlap at all.
+    static constexpr int kMinRowH = 16;
+    static constexpr int kMaxRowH = 96;
     static constexpr int kResizeZone = 8;
     // QA-Ea Task 0c (2026-05-20 update): dynamic negative-bar viewport limit.
     // Replaces the earlier hardcoded -8 floor.  Scans all Audio blocks for
@@ -1202,7 +1214,6 @@ private:
     std::unique_ptr<juce::Label>    mContextLabel;
 };
 
-class BuilderMenuBar;   // defined after BuilderPage
 
 // ── BuilderPage ───────────────────────────────────────────────────────────────
 class BuilderPage : public juce::Component,
@@ -1537,6 +1548,15 @@ public:
     // 2=Automation). Wired to the ribbon Builder dropdown.
     void setBrowserTab(int idx);
 
+    // QA-Layout T16 (Jeff, 2026-08-04): the page's own 20px Edit/Tools/Clips/View
+    // row is gone -- Clips folds into the window's Menu dropdown, Edit and View
+    // become title-strip headings, and Tools was deleted outright because every
+    // one of its eight entries duplicated a toolbar button already on screen.
+    // Items carry action lambdas so they compose into any host menu.
+    void buildClipsMenu (juce::PopupMenu& m);
+    void buildEditMenu  (juce::PopupMenu& m);
+    void buildViewMenu  (juce::PopupMenu& m);
+
 private:
     VibeSynthProcessor& mProcessor;
     PatternManager&     mPM;
@@ -1583,28 +1603,5 @@ private:
     void scrollBarMoved(juce::ScrollBar*, double newRangeStart) override;
     void syncGridHScroll();
 
-    // Menu bar (sits above toolbar, replaces hamburger popup).
-    // QA-D Task 4 / QA-0a finding #8: model declared FIRST so it outlives
-    // the MenuBarComponent during reverse-order destruction.
-    std::unique_ptr<BuilderMenuBar>         mMenuBarModel;
-    std::unique_ptr<juce::MenuBarComponent> mMenuBar;
-    static constexpr int kMenuBarH = 20;
-
-    friend class BuilderMenuBar;
     void syncToolbar();
-};
-
-// ── Builder menu bar model ────────────────────────────────────────────────────
-class BuilderMenuBar : public juce::MenuBarModel
-{
-public:
-    explicit BuilderMenuBar(BuilderPage& owner) : mOwner(owner) {}
-    ~BuilderMenuBar() override { setApplicationCommandManagerToWatch(nullptr); }
-
-    juce::StringArray getMenuBarNames() override;
-    juce::PopupMenu   getMenuForIndex (int index, const juce::String& name) override;
-    void              menuItemSelected(int itemId, int topLevelIndex) override;
-
-private:
-    BuilderPage& mOwner;
 };

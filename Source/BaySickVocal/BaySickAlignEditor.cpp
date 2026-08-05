@@ -991,7 +991,10 @@ class BaySickAlignEditor::Toolbar : public juce::Component
 public:
     explicit Toolbar (BaySickAlignEditor& o) : mOwner (o)
     {
-        addAndMakeVisible (mTitleLbl);
+        // Jeff, 2026-08-04: the logo moved to the hosting window's title strip.
+        // Added-but-hidden (not deleted) so the toolbar's setBounds still
+        // reserves its slot -- every other widget stays exactly where it was.
+        addChildComponent (mTitleLbl);
 
         addAndMakeVisible (mPresetCombo);
         for (int i = 0; i < 6; ++i)

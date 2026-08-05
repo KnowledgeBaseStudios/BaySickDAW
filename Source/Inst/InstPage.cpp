@@ -148,7 +148,7 @@ InstPage::InstPage (VibeSynthProcessor& proc, int pageIndex)
     mProgramButton->onClick = [this] { showProgramPickerMenu(); };
 
     // Task 12 (G-14): cut-self pair, styled to match the synth editors
-    // (QA-CutSelfReview).  Hosted into the title bar by rebuildPlayerPanel.
+    // (QA-CutSelfReview).
     mCutSelfBtn.setClickingTogglesState (true);
     mCutSelfBtn.getProperties().set ("switchToggle", true);
     mCutSelfBtn.setTooltip ("Cut Self: when on, a new note cuts what is already sounding\n"
@@ -159,6 +159,12 @@ InstPage::InstPage (VibeSynthProcessor& proc, int pageIndex)
     mCutModeBtn.onStateChange = [this]
     { mCutModeBtn.setButtonText (mCutModeBtn.getToggleState() ? "CUT ALL" : "SAME PITCH"); };
     mCutModeBtn.onStateChange();
+
+    // Jeff, 2026-08-04: the pair lives on the PLAYER's own top-left corner, not
+    // on the window title strip -- they act on this engine's voices, so they
+    // belong with the engine.  Added after mAriaPanel so they paint over it.
+    mPlayerTab->addAndMakeVisible (mCutSelfBtn);
+    mPlayerTab->addAndMakeVisible (mCutModeBtn);
 
     // QA-A 4.4 (2026-05-09): I-15 polish header chrome (mPedalsHeaderTitle +
     // mPedalsPresetBtn) deleted -- the title now lives inside BaySickPedalsEditor's
@@ -1359,6 +1365,11 @@ void InstPage::layoutContent (juce::Rectangle<int> r)
     {
         mPlayerTab->setBounds (r);
         if (mAriaPanel) mAriaPanel->setBounds (mPlayerTab->getLocalBounds());
+        // Overlaid on the player's top-left corner (Jeff, 2026-08-04).
+        auto cut = mPlayerTab->getLocalBounds().removeFromTop (22).reduced (6, 2);
+        mCutSelfBtn.setBounds (cut.removeFromLeft (62));
+        cut.removeFromLeft (4);
+        mCutModeBtn.setBounds (cut.removeFromLeft (78));
     }
 }
 

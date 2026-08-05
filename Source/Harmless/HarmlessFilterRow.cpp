@@ -96,17 +96,26 @@ void HarmlessFilterRow::resized()
     // 2026-04-20 (S5 layout redesign): distribute 5 controls evenly across
     // the full width with equal gap at start / between / end, instead of
     // left-clustering with fixed gaps. Matches the effect-panel style.
-    const int kSmall = 32, kLarge = 44, kComboH = 18;
-    const int totalW = 80 + kSmall + kLarge + kLarge + kSmall;   // = 232
-    const int avail  = getWidth();
-    const int gapSpace = juce::jmax (0, avail - totalW);
-    const int gap = gapSpace / 6;   // 5 items => 6 gaps (before+between+after)
+    // Jeff, 2026-08-04: all FOUR knobs are one size -- FREQ and RES used to be
+    // 44 against ENV/KB's 32, which read as an accident rather than emphasis --
+    // and the whole set is halved along with every other knob in Harmless.
+    // Jeff, 2026-08-04: the type combo was 80px for labels like "LP" / "Notch"
+    // -- three times what it needs -- which is most of why this row looked
+    // stretched.  Knobs pack at a fixed gap now rather than sharing out every
+    // spare pixel between them.
+    const int kSmall = 16, kLarge = kSmall, kComboH = 18, kComboW = 56;
+    const int kGapPx = 10;
+    // Distributed, not packed: equal gap before / between / after, so the row
+    // breathes across whatever width the filter box gives it (Jeff, 2026-08-04).
+    juce::ignoreUnused (kGapPx);
+    const int itemsW = kComboW + kSmall + kLarge + kLarge + kSmall;
+    const int gap    = juce::jmax (2, (getWidth() - itemsW) / 6);   // 5 items, 6 gaps
     int x = gap;
-    const int y = 4;
+    const int y  = juce::jmax (0, (getHeight() - kSmall) / 2 - 4);
     const int cy = getHeight() / 2;
-    mTypeCombo.setBounds (x, cy - kComboH / 2, 80, kComboH);       x += 80 + gap;
-    mEnvKnob  .setBounds (x, y, kSmall, kSmall);                    x += kSmall + gap;
-    mFreqKnob .setBounds (x, y, kLarge, kLarge);                    x += kLarge + gap;
-    mResKnob  .setBounds (x, y, kLarge, kLarge);                    x += kLarge + gap;
+    mTypeCombo.setBounds (x, cy - kComboH / 2, kComboW, kComboH); x += kComboW + gap;
+    mEnvKnob  .setBounds (x, y, kSmall, kSmall);                  x += kSmall  + gap;
+    mFreqKnob .setBounds (x, y, kLarge, kLarge);                  x += kLarge  + gap;
+    mResKnob  .setBounds (x, y, kLarge, kLarge);                  x += kLarge  + gap;
     mKbTrack  .setBounds (x, y, kSmall, kSmall);
 }

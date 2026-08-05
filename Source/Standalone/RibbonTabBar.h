@@ -215,6 +215,12 @@ private:
     void showAddMenu (juce::Rectangle<int> slotBounds);
 
     // Layout helpers
+    // Jeff, 2026-08-04: the "+" is sized to TWICE its own glyph and nothing
+    // more.  It used to be laid out as a normal slot -- floored to kMinFixed /
+    // kMinVariable and handed an equal share of every leftover pixel -- so on a
+    // wide bar it ballooned into a huge empty block while the real tabs stayed
+    // narrow.  Reserved first now; the type slots divide what is left.
+    int addSlotWidth() const;
     juce::Rectangle<int> slotRect(int slotIndex) const;
     int hitTestSlot(juce::Point<int> pos, bool& hitArrow) const;
 

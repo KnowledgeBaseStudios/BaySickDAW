@@ -590,7 +590,7 @@ AriaControlPanel::AriaControlPanel (Binding binding)
     // supplies an engine name.  Used by InstPage (Guitars / Basses) and
     // BaySickRustyDrumsPage to give each engine its own title bar through
     // this shared kit-artwork panel.
-    if (mBinding.engineName.isNotEmpty())
+    if (mBinding.engineName.isNotEmpty() || mBinding.hostTitleBar)
     {
         mTitleBar = std::make_unique<BaySickTitleBar> (mBinding.engineName,
                                                         mBinding.accentColor);
@@ -606,7 +606,7 @@ void AriaControlPanel::setEngine (Binding binding)
 
     // QA-A (2026-05-09): create / update / drop the internal title bar to
     // match the new binding.
-    if (mBinding.engineName.isNotEmpty())
+    if (mBinding.engineName.isNotEmpty() || mBinding.hostTitleBar)
     {
         if (! mTitleBar)
         {

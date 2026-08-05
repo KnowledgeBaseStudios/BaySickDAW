@@ -21,6 +21,13 @@ class BaySickNAMIREditor : public juce::AudioProcessorEditor,
 public:
     explicit BaySickNAMIREditor (BaySickNAMIRProcessor&);
 
+    // Jeff, 2026-08-04: this editor is ALWAYS hosted in a window that owns a
+    // title strip (the Inst NAM/IR window and the Vox NAM/IR satellite), so the
+    // logo renders there and the internal bar carries none -- one name, not a
+    // text copy on the strip with the logo directly beneath it.
+    static juce::String getEngineTitle()  { return "BaySickNAM/IR"; }
+    static juce::Colour getEngineAccent() { return juce::Colour (0xFFE0303F); }
+
     // QA-ApvtsAutomation: per-instance automation keys.  This engine's param ids
     // are bare literals ("output", "nam_bypass", "oversampling") and are identical
     // across all 20 Inst / 6 Vox pages, each of which owns its own processor and
@@ -67,7 +74,9 @@ private:
     // ── Header ───────────────────────────────────────────────────────────────
     // QA-A (2026-05-09): unified title bar replaces the old juce::Label +
     // custom header paint.  Accent = Mesa red (#E0303F) per Jeff's pick.
-    BaySickTitleBar  mTitleBar { "BaySickNAM/IR", juce::Colour (0xFFE0303F) };
+    // Nameless since 2026-08-04 -- the bar stays (it hosts the A/B pair and its
+    // own chrome), the LOGO moved to the hosting window's strip.
+    BaySickTitleBar  mTitleBar { {}, getEngineAccent() };
     juce::TextButton mSlotABtn { "A" };
     juce::TextButton mSlotBBtn { "B" };
 

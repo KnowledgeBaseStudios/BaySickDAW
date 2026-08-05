@@ -69,10 +69,10 @@ public:
 
 private:
     juce::TabbedComponent mTabs { juce::TabbedButtonBar::TabsAtTop };
-    // Local tooltip window - the editor's main TooltipWindow only monitors
-    // its own component tree, so the popup needs its own to show per-row hover
-    // tips on the keymap rows.
-    juce::TooltipWindow   mTooltips { this, 600 };
+    // No local tooltip window since 2026-08-04.  One lived here because the
+    // editor's was parented to the frame and monitored only its own component
+    // tree; the editor's is a parentless desktop window now, which monitors
+    // everything, so a local one would just raise a second tip on top of it.
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (KeyBindsContent)
 };

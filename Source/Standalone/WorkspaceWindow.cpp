@@ -107,14 +107,23 @@ WorkspaceWindow::WorkspaceWindow (juce::String persistKey, juce::String title)
     mPageMenu->setInterceptsMouseClicks (false, true);
     addAndMakeVisible (*mPageMenu);
 
-    // Tooltips: see the member comment -- one per window, 600 ms like the
-    // editor's, so hover help works the same inside every contained window.
-    mTooltips = std::make_unique<VibeTooltip> (this, 600);
+    // No tooltip window here -- see the member comment.  The editor's is a
+    // desktop window now and covers this one too.
 
-    // QA-Layout T7: ctor default restored post-sizing-collection; every real
-    // floor comes from the caller via setMinimumSize (the diag-era 120x80
-    // free-for-all is over).
-    mConstrainer.setMinimumSize (320, 200);
+    // Right-click Automate: see the member comment.  Installed over this
+    // window's whole subtree, which is the only tree the editor's own listener
+    // cannot reach.
+    mAutoRightClick = std::make_unique<GlobalAutoRightClick>();
+    addMouseListener (mAutoRightClick.get(), true);
+
+    // Jeff, 2026-08-04: the ONLY constraint is anti-degenerate.  Content-based
+    // minimums are suspended until the compact-layout task decides what they
+    // should be -- until then a window may be dragged to any size, and the
+    // measured numbers act purely as the DEFAULT opening size
+    // (setDefaultWindowSize).  The old 320x200 was a resize floor AND doubled
+    // as the first-open size, which is how an unresolved window came up at
+    // 320x200 and looked deliberate.
+    mConstrainer.setMinimumSize (kMinDegenerateW, kMinDegenerateH);
     mResizer = std::make_unique<juce::ResizableBorderComponent> (this, &mConstrainer);
     mResizer->setBorderThickness (juce::BorderSize<int> (kBorderPx));
     addAndMakeVisible (*mResizer);
@@ -156,6 +165,9 @@ WorkspaceWindow::~WorkspaceWindow()
     // the fill toggle, and the exit flush that runs before teardown
     // (StandaloneEditor::flushWindowBoundsNow).
     if (mCloseBtn) mCloseBtn->setLookAndFeel (nullptr);
+    // Unhook before the listener object dies -- a page detached here (see
+    // below) outlives this window and would otherwise keep a dangling entry.
+    if (mAutoRightClick) removeMouseListener (mAutoRightClick.get());
     if (auto* ws = mWorkspace.getComponent()) ws->removeWindow (this);
     // Peer teardown is Component's job.  An OWNED page dies with mContent; a
     // non-owned one is detached here and outlives us by design.
@@ -198,18 +210,19 @@ std::unique_ptr<juce::Component> WorkspaceWindow::releaseContent()
     return std::move (mContent);
 }
 
-void WorkspaceWindow::setMinimumSize (int minW, int minH)
+void WorkspaceWindow::setDefaultWindowSize (int w, int h)
 {
-    // QA-Layout T7: real body restored (the diag-era override ignored every
-    // caller).  minW/minH are CONTENT floors; the constrainer works on the
-    // full window, so the chrome joins the math.
-    mConstrainer.setMinimumSize (juce::jmax (120, minW + 2 * kBorderPx),
-                                 juce::jmax (80,  minH + kTitleH + 2 * kBorderPx));
-}
+    mDefaultSize  = { juce::jmax (kMinDegenerateW, w), juce::jmax (kMinDegenerateH, h) };
+    mDefaultKnown = true;
 
-void WorkspaceWindow::setMinimumWindowSize (int w, int h)
-{
-    mConstrainer.setMinimumSize (juce::jmax (120, w), juce::jmax (80, h));
+    // ONLY a window that opened without a remembered size takes the default.
+    // A size that came from the session map, a project or the user's own drag
+    // is never overwritten -- that is the three-lifetime contract, and the
+    // default exists to answer "what size when nothing has an opinion".
+    if (! mOpenedAtPlaceholder) return;
+
+    mOpenedAtPlaceholder = false;
+    setSize (mDefaultSize.x, mDefaultSize.y);
 }
 
 void WorkspaceWindow::setTitle (juce::String t)
@@ -299,8 +312,7 @@ void WorkspaceWindow::resized()
         mCloseBtn->setBounds (title.removeFromRight (kTitleH).reduced (4));
     if (mFullBtn)
         mFullBtn->setBounds (title.removeFromRight (kTitleH).reduced (4));
-    if (mPageMenu)
-        mPageMenu->setBounds (title);
+    if (mPageMenu) mPageMenu->setBounds (title);
 
     if (mContentRaw) mContentRaw->setBounds (contentArea());
 }
@@ -466,11 +478,23 @@ void WorkspaceWindow::attachTo (Workspace& ws)
     // not) keeps its size and takes the default spot.
     const int step = 28 * juce::jmin (6, ws.getWindows().size() - 1);
     if (saved.isEmpty())
-        saved = juce::Rectangle<int> (24 + step, 24 + step,
-                                      juce::jmax (120, mConstrainer.getMinimumWidth()),
-                                      juce::jmax (80,  mConstrainer.getMinimumHeight()));
+    {
+        // Nothing remembered.  Use the default if it is already known; if it is
+        // not (engine-derived size, engine still binding) open at a neutral
+        // placeholder and flag it, so setDefaultWindowSize snaps the window the
+        // moment the default arrives.  It still OPENS now rather than waiting:
+        // a page whose engine never binds must not end up with no window.
+        mOpenedAtPlaceholder = ! mDefaultKnown;
+        const auto sz = mDefaultKnown ? mDefaultSize
+                                      : juce::Point<int> { 480, 320 };
+        saved = juce::Rectangle<int> (24 + step, 24 + step, sz.x, sz.y);
+    }
     else if (! hasPos)
         saved.setPosition (24 + step, 24 + step);
+    // Anti-degenerate only.  A remembered size is honoured exactly, however
+    // small -- there is no content lock until the compact-layout task lands.
+    saved.setSize (juce::jmax (saved.getWidth(),  kMinDegenerateW),
+                   juce::jmax (saved.getHeight(), kMinDegenerateH));
     setBounds (saved);
 
     addToDesktop (0, parent);
@@ -490,8 +514,10 @@ void WorkspaceWindow::applySavedBounds()
     if (saved.isEmpty() || ! hasPos) return;
 
     const auto o = ws->originInParentClient();
+    // Anti-degenerate only -- a remembered size is restored exactly.
     setBounds (saved.getX() + o.x, saved.getY() + o.y,
-               saved.getWidth(), saved.getHeight());
+               juce::jmax (saved.getWidth(),  kMinDegenerateW),
+               juce::jmax (saved.getHeight(), kMinDegenerateH));
 }
 
 juce::Rectangle<int> WorkspaceWindow::clampToWorkspace (juce::Rectangle<int> target) const
@@ -549,7 +575,71 @@ void WorkspaceWindow::Constrainer::applyBoundsToComponent (juce::Component& c,
         owner.mFilled = false;
         if (owner.mFullBtn) owner.mFullBtn->repaint();
     }
-    juce::ComponentBoundsConstrainer::applyBoundsToComponent (c, owner.clampResizeToWorkspace (bounds));
+    // Jeff, 2026-08-04: the magnet works when MOVING a window but did nothing
+    // when resizing one, because applyMagnetism was only ever called from
+    // mouseDrag.  Snap first, then contain -- same order as the drag path.
+    const auto snapped = owner.applyResizeMagnetism (bounds);
+    juce::ComponentBoundsConstrainer::applyBoundsToComponent (c, owner.clampResizeToWorkspace (snapped));
+}
+
+// Edge-independent magnetism, which is what a RESIZE needs.  The move path's
+// applyMagnetism finds one dx/dy and TRANSLATES the whole window -- correct for
+// a drag, wrong here: dragging the right edge must not haul the left edge along.
+// This snaps each edge on its own and only considers edges that actually MOVED
+// (compared against the current bounds), so the edges the user is not dragging
+// are left exactly where they are.
+juce::Rectangle<int> WorkspaceWindow::applyResizeMagnetism (juce::Rectangle<int> target) const
+{
+    auto* ws = workspace();
+    if (ws == nullptr) return target;
+
+    const auto cur = getBounds();
+
+    std::vector<int> xs, ys;
+    auto addRect = [&] (juce::Rectangle<int> r)
+    {
+        xs.push_back (r.getX()); xs.push_back (r.getRight());
+        ys.push_back (r.getY()); ys.push_back (r.getBottom());
+    };
+
+    // Same candidate set the drag path magnetises against: every sibling plus
+    // the workspace itself, all in this window's own coordinate space.
+    for (auto& sp : ws->getWindows())
+        if (auto* w = sp.getComponent())
+            if (w != this && w->isVisible())
+                addRect (w->getBounds());
+    {
+        const auto wsLocal = ws->getBounds();
+        const auto o       = ws->originInParentClient();
+        addRect (juce::Rectangle<int> (o.x, o.y, wsLocal.getWidth(), wsLocal.getHeight()));
+    }
+
+    auto nearest = [] (const std::vector<int>& cands, int edge, int& out) -> bool
+    {
+        int bestDist = kSnapPx + 1;
+        for (int c : cands)
+        {
+            const int d = std::abs (c - edge);
+            if (d <= kSnapPx && d < bestDist) { bestDist = d; out = c; }
+        }
+        return bestDist <= kSnapPx;
+    };
+
+    int l = target.getX(), r = target.getRight();
+    int t = target.getY(), b = target.getBottom();
+    int v = 0;
+
+    if (l != cur.getX()      && nearest (xs, l, v)) l = v;
+    if (r != cur.getRight()  && nearest (xs, r, v)) r = v;
+    if (t != cur.getY()      && nearest (ys, t, v)) t = v;
+    if (b != cur.getBottom() && nearest (ys, b, v)) b = v;
+
+    // A snap must never invert the rectangle or breach the anti-degenerate
+    // clamp; the dragged edge gives way rather than the window folding.
+    if (r - l < kMinDegenerateW) r = l + kMinDegenerateW;
+    if (b - t < kMinDegenerateH) b = t + kMinDegenerateH;
+
+    return { l, t, r - l, b - t };
 }
 
 juce::Rectangle<int> WorkspaceWindow::clampResizeToWorkspace (juce::Rectangle<int> target) const
@@ -780,9 +870,12 @@ void WorkspaceWindow::writeSessionToSettings()
             rec->setAttribute ("key", key);
         }
 
-        // Sizes for every window type; PLACEMENT only for the default tabs.
-        // A player's position is project content (lifetime 3) -- persisting
-        // it globally would carry one project's layout into the next.
+        // Jeff, 2026-08-04: size AND position, for the four default tabs only.
+        // Only they are ever Disk-marked now, so reaching this loop already
+        // means "one of the four".  The old code wrote SIZE for every window
+        // and gated only POSITION -- the inverse of the ruling, and the reason
+        // a player's size survived a cold start when it should have reverted
+        // to its default.
         rec->setAttribute ("w", it->second.getWidth());
         rec->setAttribute ("h", it->second.getHeight());
         if (placementKeys().count (key) > 0)

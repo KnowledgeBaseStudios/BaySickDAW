@@ -53,10 +53,15 @@ class TransportPerfReadout : public juce::Component,
                              public juce::SettableTooltipClient
 {
 public:
+    TransportPerfReadout();
+
     // Agreed with StandaloneEditor::resized()'s kCPUReserve so the ribbon can
-    // never underlap the readout.  Fits the longest row
-    // ("MEM 9999  LAT 99999") at 9pt monospaced with margin.
-    static constexpr int kWidth = 120;
+    // never underlap the readout.  Jeff, 2026-08-04: trimmed 120 -> 95, and the
+    // 25 px goes to the ribbon's tab slots.  120 was sized for a worst case
+    // ("MEM 9999  LAT 99999") that only shows on a machine with 10 GB of
+    // process memory or five figures of plugin latency; the real rows are far
+    // shorter, so the box was reserving dead air next to the tabs.
+    static constexpr int kWidth = 95;
 
     void update (const juce::String& sysText, const juce::String& dspText,
                  const juce::String& row2,    const juce::String& row3,
@@ -65,6 +70,15 @@ public:
     void paint (juce::Graphics&) override;
 
 private:
+    // Jeff, 2026-08-04: the tooltip carries the LIVE values as well as the
+    // legend.  The box is narrow enough (kWidth) that a worst-case row can
+    // truncate, and truncation here is SILENT: rows 2/3 ellipsize, but row 1
+    // draws SYS/DSP as two exact-width right-anchored segments, so an
+    // over-wide pair pushes SYS off the left edge with no visible marker.
+    // Hover now always yields the full numbers.  Rebuilt only when a value
+    // actually changes (update() early-returns otherwise), not per 10 Hz tick.
+    void refreshTooltip();
+
     juce::String mSysText { "SYS --%" },        mDspText { "DSP --%" };
     juce::String mRow2    { "MEM --  LAT --" }, mRow3    { "UND --  PF --" };
     juce::Colour mSysCol  { 0xff888888 },       mDspCol  { 0xff888888 };

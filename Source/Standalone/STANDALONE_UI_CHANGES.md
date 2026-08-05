@@ -718,3 +718,217 @@ shortcut. Held notes release on mode-off, octave shift, and tab switch.
   player" to the DRUM KIT view, so the load still shows something without
   opening a player.  The one-shared-window-with-a-dropdown alternative is
   Future State CL-305.
+
+---
+
+## 2026-08-04 - QA-Layout T16: title-strip consolidation + Builder menu/grid/browser rework
+
+**Files:** `SharedUI.h/.cpp`, `StandaloneEditor.cpp`, `BuilderPage.h/.cpp`,
+`AriaControlPanel.h/.cpp`, `BaySickRustyDrumsPage.cpp`, `Inst/InstPage.h/.cpp`,
+`BaySickNAMIR/BaySickNAMIREditor.h`, `BaySickVocal/BaySickPitchEditor.cpp`,
+`BaySickVocal/BaySickAlignEditor.cpp`, `Harmless/HarmlessEditor.cpp`
+
+- **FX Rack and Freeze are menu items, not strip buttons.**  `setFxRackSlot` /
+  `setFreezeSlot` keep their registration signatures but now only store
+  callbacks; `PageMenuBar::appendStandardItems` emits both into whatever menu a
+  page is building, called from each page's `onBuildWindowNavMenu`.  Rusty has
+  no FX Rack, so it gets Freeze alone.  Piano Roll is deliberately untouched -
+  its `Player Page` / `FX Rack` slots are hotkeys back to the thing being
+  edited, which is a different job from the per-window action list.
+- **Freeze shows LOCKED rather than hidden (Jeff, 2026-08-04).**  It used to
+  vanish entirely unless "Enable Instrument Level Freeze" was ticked in File
+  Settings, so a user who had heard of freeze had no way to learn it existed.
+  It now renders greyed with the unlock path in its tooltip.  JUCE popup items
+  carry no tooltip, so the entry is a `PopupMenu::CustomComponent` that also
+  implements `TooltipClient`.
+- **Swing Mix knob moved to the far left**, immediately right of the `Menu`
+  heading, so its position is fixed rather than drifting with whatever nav
+  widgets a page mounts.
+- **Inst (Guitars / Basses):** `CUT SELF` + cut-mode moved OFF the strip onto
+  the player's own top-left corner - they act on that engine's voices, so they
+  belong with the engine.  Clip-file label 200 -> 133 px and Program button
+  130 -> 87 px (both 2/3) to give the strip its width back.
+- **Logos moved to the hosting window strip, one name per window.**
+  BaySickPitch and BaySickAlign hide their internal `BaySickEngineLabel`
+  (added-but-hidden so their toolbars keep reserving the slot and nothing else
+  shifts); BaySickNAM/IR's internal `BaySickTitleBar` is nameless and exposes
+  `getEngineTitle` / `getEngineAccent` for the strip.  Vocal Chain has no logo
+  of its own and falls through to the centered plain title.
+- **Rusty's Aria title band is back.**  T15 dissolved it along with the engine
+  name, which left the Program selector and Player Preset button on a strip too
+  narrow to hold them - half sat on the player, half behind the window chrome.
+  `AriaControlPanel::Binding::hostTitleBar` keeps the band with NO name, the
+  two controls are hosted on it again, and the strip's centered
+  "BaySickRustyDrums" is gone because the kit artwork already carries the logo.
+- **Title text rule (Jeff, 2026-08-04):** a window with a logo shows no plain
+  title text; a window without one CENTERS it instead of pinning it left.
+- **Harmless `layoutRow` scales an over-tall block down.**  Wrapping alone was
+  not enough: a block taller than its cell centered and spilled past both
+  edges, which is what put FILTER 1 on FILTER 2 and pushed the Amp Env RAND row
+  into its neighbour.  Width scales with height so knobs stay round, and since
+  the factor is <= 1 the wrap decided at full width stays valid.
+- **Builder's own `Edit / Tools / Clips / View` row is deleted** and the grid
+  moved up into its 20 px.  Clips folds into the window `Menu`; Edit and View
+  became title-strip headings via the new
+  `PageMenuBar::setExtraHeadings`; Tools was removed outright because all eight
+  entries (Draw / Paint / Select / Delete / Mute / Slice / Zoom / Play
+  Selected) duplicate toolbar buttons one row below.  `BuilderMenuBar` and its
+  `MenuBarComponent` are gone.
+- **Browser collapse is a magnetic ramp.**  The `<<` button and the
+  `View > Toggle Browser` entry were two click-paths to the same
+  `setCollapsed()` with no drag path at all; both are removed.  The edge grip
+  now snaps to the floor within 14 px and collapses when pushed 44 px past it.
+  The collapsed 28 px panel is the pull-back handle - grip texture, arrow, and
+  a click to reopen.
+- **Track-header corner is blank and clipped.**  It carried a "BUILDER" caption
+  AND the row loop drew into it, because a scrolled row 0 lands at
+  `kRulerH - mYOffset` which is negative - track names scrolled up over the
+  ruler.  Rows are clipped to the band below the ruler and the corner repaints
+  opaque afterwards.
+- **Vertical zoom decoupled from window size.**  The Alt+scroll clamps were
+  `(vpH - kRulerH) / 50` and `/ 8`, so the same gesture bottomed out at a
+  readable ~12 px row full-screen and a ~4 px row in a small contained window -
+  every row crushed into its neighbour.  Replaced with absolute
+  `kMinRowH = 16` / `kMaxRowH = 96`, so one gesture means one thing at any
+  window size and rows can no longer overlap.
+- **Right-click Automate restored inside contained windows (Jeff-reported,
+  2026-08-04) - a QA-ModelShell regression, not a T16 one.**  StandaloneEditor
+  installs one `GlobalAutoRightClick` via
+  `addMouseListener(&mAutoRightClick, true)`, and "nested children" means
+  components in ITS OWN tree.  Once pages moved into `WorkspaceWindow`s - real
+  native child peers with separate trees - that listener stopped seeing a
+  single click inside them.  `VKnob`-based controls never noticed (a VKnob
+  listens to its own slider and tags it `vknob_slider` so the global handler
+  skips it), which is why the effect panels and pedals kept working; every
+  `VibeSlider` went dark, because VibeSlider swallows the right-click on
+  purpose and depends entirely on that listener to raise the menu.  That cost
+  the players and the mixer strips their Automate menu, silently, since the
+  shell landed.  Each `WorkspaceWindow` now owns a `GlobalAutoRightClick` and
+  installs it over its own subtree - the same per-contained-window pattern
+  already used for `TooltipWindow`, and it covers page windows, satellites,
+  effect-slot and EQ windows in one place.  Verified no path can double the
+  menu: VKnob is skipped by tag, `AriaControlPanel`'s sliders set no
+  componentID so the handler bails, and the EQ `DynamicParamsPopout` is a
+  CallOutBox peer outside both scopes with its own local mirror.  Keyboard was
+  never affected - key listeners were already installed per contained window.
+- **Ribbon "+" slot sized to its glyph (Jeff, 2026-08-04).**  It was laid out as
+  an ordinary slot: floored to `kMinFixed` / `kMinVariable` AND handed an equal
+  share of every leftover pixel in the bar, so on a wide transport bar it
+  ballooned into a large empty block while the real tabs stayed narrow.
+  `addSlotWidth()` is now twice the width of the "+" glyph at the same 18pt
+  font paint() draws it with, carved off the right edge first; the type slots
+  divide what remains.
+- **25 px moved from the perf readout to the tabs.**
+  `TransportPerfReadout::kWidth` 120 -> 95.  120 was sized for a worst case
+  ("MEM 9999  LAT 99999") needing ~10 GB of process memory or five figures of
+  plugin latency.  Because that box CAN now truncate, and truncation there is
+  silent -- rows 2/3 ellipsize but row 1 draws SYS/DSP as two exact-width
+  right-anchored segments, so an over-wide pair pushes SYS off the left edge
+  with no marker -- the tooltip carries the LIVE values above the legend and is
+  rebuilt whenever a value changes.  Hover always yields the full numbers.
+- **Tooltips promoted to a single desktop window (Jeff-reported, 2026-08-04) -
+  another QA-ModelShell z-order regression.**  `VibeTooltip` was constructed
+  with the editor as its parent, and JUCE's `displayTipInternal` forks on that:
+  with a parent it positions inside the parent and DRAWS THERE; parentless it
+  goes through `addToDesktop`.  A native child peer always renders above
+  anything drawn into its parent, so every tip raised from the transport bar
+  dropped behind the page windows - the perf readout, BPM and the position
+  display all appeared to have no tooltip at all when in fact the box was
+  painting underneath the workspace.  The editor's tooltip is parentless now.
+  Consequently the per-`WorkspaceWindow` tooltips (added 2026-07-28 for exactly
+  the reach problem this removes) and `KeyBindsContent`'s local one are GONE: a
+  parentless tooltip's peer gate always passes, so leaving them in raised two
+  tips at once.  One tooltip window now serves the whole app and can extend
+  past a contained window's edge instead of being clipped by it.  Knob VALUE
+  bubbles were never affected - `Slider::PopupDisplayComponent` is a
+  `BubbleComponent` on the same `addToDesktop` route already, which is why
+  those stayed visible throughout and is the precedent this follows.
+
+---
+
+## 2026-08-04 - QA-Layout T17: window sizing rework + Harmless re-layout
+
+**Files:** `WorkspaceWindow.h/.cpp`, `StandaloneEditor.h/.cpp`, `SharedUI.h/.cpp`,
+`RibbonTabBar.h/.cpp`, `GlobalTransportBar.h/.cpp`, `KeyBindsWindow.h`,
+`Harmless/HarmlessEditor.cpp`, `Harmless/HarmlessModEditor.h/.cpp`,
+`Harmless/HarmlessFilterRow.cpp`, `Harmless/HarmlessRoutingMatrix.cpp`
+
+### Window sizing / persistence
+
+- **No fake floor.**  `floorSizeFor` answered 490x455 for "engine not bound
+  yet" -- which is BaySickPlayer's REAL floor, so an unresolved window was
+  indistinguishable from a legitimately small one and nothing downstream knew
+  there was anything left to correct.  It was also the smallest of the three, so
+  the failure always erred toward too-small.  Renamed `defaultSizeFor`, returns
+  `std::optional`, and answers NOTHING when the engine is unbound.
+- **Sizes install when the engine binds**, via each page's
+  `onEngineEditorRebuilt` -- the same callback that sets the strip's engine
+  name.  That also tracks a live Drums engine swap.
+- **Plus a healing sweep** (`pollPendingWindowDefaults`, riding the existing
+  5 Hz `DenoisePollTimer`).  `onEngineEditorRebuilt` is a SINGLE callback slot,
+  so an engine that bound before `showPageForTab` installed the slot fired into
+  nothing and that window kept the ctor placeholder forever -- intermittent by
+  nature and likelier on a second player, whose engine loads faster once warm.
+  A window without a default is a known-incomplete state, so it is polled rather
+  than depending on catching one event.
+- **Content minimums SUSPENDED (Jeff's call).**  Only the 120x80
+  anti-degenerate clamp survives until the compact-layout task decides real
+  minimums.  The measured numbers are now purely the DEFAULT OPENING SIZE.  The
+  ctor's 320x200 was both a resize floor AND the first-open size, which is how
+  an unresolved window opened at 320x200 and looked deliberate.
+- **settings.xml carries ONLY the four default tabs** (Builder / Mixer /
+  Effects / Piano Roll), size AND position.  It previously defaulted every page
+  window to `Persistence::Disk` and wrote every window's SIZE globally while
+  gating only POSITION to the four -- the exact inverse of the three-lifetime
+  ruling, and what left 143 records feeding stale sizes to players on every cold
+  start.  Everything else is Session: session state plus project content, and a
+  cold start with no project opens it at its default.  The stale records were
+  stripped (backup: `settings.xml.bak-preclean`).
+- **Resize magnetism.**  `applyMagnetism` was only ever called from
+  `mouseDrag`, so the magnet worked when MOVING a window and did nothing when
+  resizing one.  `applyResizeMagnetism` snaps each edge independently and only
+  edges that actually moved -- translating the whole window is right for a drag
+  and wrong for a resize.
+
+### Harmless
+
+- Every knob halved (44/32 -> 22/16); all four filter knobs one size (FREQ and
+  RES were 44 against ENV/KB's 32); the type combo 80 -> 56.
+- Faders converted to knobs: Unison PAN/PITCH/PHASE, the LFO depths, and the
+  six Routing sliders (Routing lives in its own component and was missed on the
+  first pass).
+- **One box per filter**, ADSR included -- two boxes for eight related knobs
+  doubled the chrome and left both halves half-empty.
+- **`layoutRow` distributes**, and the box WIDTH comes from content
+  (`natural()`).  A pass that packed instead was wrong for spacing; a pass that
+  distributed without content-sizing was wrong for width.  Both are needed: the
+  box is sized to what it holds, the knobs breathe inside it.
+- **Horizontal strips, not narrow columns.**  Each of these sections is one row
+  of knobs, and ~13%-wide columns forced `layoutRow` to wrap them into cramped
+  lines -- the overlap.  Pitch+LFO Mod and Strum+FX share rows; Amp Env and
+  Blur/Prism are half-width and stacked; the MOD pad spans both; the
+  Spectrogram has its column to itself.
+- **Labels size to their TEXT**, not the knob width + 8.  At 16px knobs that
+  clipped everything past four characters (`VOIC...`, `DEPTH`, `LENGTH`).  Both
+  the editor's `knobLabel` and the Mod Editor's own label drawing.
+- **Mod Editor**: knobs 34 -> 16; its tool row shrinks its buttons to fit ONE
+  row (wrapping to two steals height from the envelope graph, which is the one
+  thing that box exists to enlarge).
+- **Snap + grid** now use the app's unified divisions from
+  `VibesynthConstants.h`, triplets included -- this was the one place in the app
+  a triplet could not be snapped to.  Segment counts derive from
+  `snapDivToTicks` so they cannot drift.  The grid follows the SELECTED division
+  via `gridLadderForSnap` instead of a fixed 32 lines, so every snap target
+  lands on a visible line.  The tick system itself deliberately does NOT reach
+  in: this axis is per-note 0-1 phase, not song position.
+
+### Transport bar
+
+- Ribbon `+` sized to twice its glyph and carved off the right edge first; it
+  was laid out as an ordinary slot, floored to 60-80px AND handed an equal share
+  of every leftover pixel.
+- `TransportPerfReadout::kWidth` 120 -> 95, the 25px to the tabs.  Because that
+  box can now truncate and truncation there is silent (row 1 draws SYS/DSP as
+  exact-width right-anchored segments, so an over-wide pair pushes SYS off the
+  left edge with no marker), the tooltip carries the LIVE values above the
+  legend and rebuilds whenever a value changes.
