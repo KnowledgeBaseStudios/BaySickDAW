@@ -241,6 +241,14 @@ void WorkspaceWindow::setDefaultWindowSize (int w, int h)
                  juce::jmax (getHeight(), mDefaultSize.y));
 }
 
+void WorkspaceWindow::setResizeFloor (int minW, int minH)
+{
+    // Never below the degenerate floor -- a window still has to be grabbable
+    // whatever its content claims it can shrink to.
+    mConstrainer.setMinimumSize (juce::jmax (kMinDegenerateW, minW),
+                                 juce::jmax (kMinDegenerateH, minH));
+}
+
 void WorkspaceWindow::setTitle (juce::String t)
 {
     if (mTitle == t) return;

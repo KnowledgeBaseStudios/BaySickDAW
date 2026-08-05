@@ -50,11 +50,15 @@ public:
     // Fired when any audio row strip is renamed - StandaloneEditor rebuilds Effects dropdown.
     std::function<void()> onAudioStripRenamed;
 
-    // G-4 (2026-04-28): fired AFTER a Vox / Inst strip is created via the
-    // Mixer page's "Add Vox Strip" / "Add Inst Strip" button (or restored at
-    // project load).  StandaloneEditor wires these to spawnVoxTabIfMissing /
+    // Fired AFTER a Vox / Inst strip is created, whatever created it -- the
+    // Mixer's Add menu, the ribbon "+", or a project-load restore.
+    // StandaloneEditor wires these to spawnVoxTabIfMissing /
     // spawnInstTabIfMissing so the matching ribbon page appears alongside the
-    // strip.  idx is the strip's slot index (0..kMaxVoxStrips-1 / 0..kMaxInstStrips-1).
+    // strip; the page is DOWNSTREAM of the strip for these two types, which is
+    // why they cannot be rebuilt from the model alone (canRebuildType).
+    // idx is the strip's slot index (0..kMaxVoxStrips-1 / 0..kMaxInstStrips-1).
+    // (Named the "Add Vox Strip" / "Add Inst Strip" buttons until 2026-08-05;
+    // T10 replaced those five buttons with the Add titled menu.)
     std::function<void(int idx)> onVoxStripAdded;
     std::function<void(int idx)> onInstStripAdded;
 

@@ -195,11 +195,25 @@ void PluginsPage::rebuildEditor()
         // Fit the WINDOW to the plugin's own surface rather than leaving dead
         // space around it (Jeff 2026-07-29).  The plugin may also resize itself
         // later, which is why this is a callback and not a one-shot read.
-        ed->onNaturalSizeChanged = [this] (int w, int h)
+        auto* edRaw = ed.get();
+        ed->onNaturalSizeChanged = [this, edRaw] (int w, int h)
         {
-            if (auto* win = findParentComponentOfClass<WorkspaceWindow>())
-                win->sizeToContent (juce::jmax (240, w + 2 * kEdge),
-                                    h + kPickBtnH + kPickGap + 2 * kEdge);
+            auto* win = findParentComponentOfClass<WorkspaceWindow>();
+            if (win == nullptr) return;
+
+            const int chromeW = 2 * kEdge;
+            const int chromeH = kPickBtnH + kPickGap + 2 * kEdge;
+
+            win->sizeToContent (juce::jmax (240, w + chromeW), h + chromeH);
+
+            // QA-Layout T12: floor from the minimum usable scale, and the
+            // CHROME does not scale -- only the plugin surface does, so the
+            // picker row and edges keep their full height in the floor.
+            const float floorScale = edRaw->canScaleSurface()
+                                       ? Hosting::HostedPluginEditor::kMinUsableScale
+                                       : 1.0f;
+            win->setResizeFloor (juce::jmax (240, (int) ((float) w * floorScale) + chromeW),
+                                 (int) ((float) h * floorScale) + chromeH);
         };
 
         mEditor = std::move (ed);

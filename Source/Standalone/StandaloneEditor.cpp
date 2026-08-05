@@ -4559,15 +4559,22 @@ std::unique_ptr<juce::Component> StandaloneEditor::createMixerPage()
         if (voxIdx >= 0 && voxIdx < kDenoiseMaxVox)
             mVoxTakePick[(size_t) voxIdx] = juce::jlimit (0, 3, pick);
     };
-    // G-4 (2026-04-28): "Add Vox Strip" / "Add Inst Strip" buttons in the
-    // Mixer page are the spawn trigger for the matching ribbon page (no other
-    // path).  spawnVoxTabIfMissing / spawnInstTabIfMissing are idempotent on
-    // pageIdx so restoring a project (which calls addVoxChannelAtIndex during
-    // load) is safe - duplicate spawns are a no-op.
-    // G-6 (2026-04-29): Mixer "Add Vox/Inst Strip" should NOT auto-jump to
-    // the new page - keep user on Mixer so they can add multiple strips in
-    // a row without bouncing back each time.  Empty-state spawn flow (and
-    // any other path that wants navigation) leaves selectAfter at default.
+    // A Vox / Inst PAGE is spawned by its STRIP, not the other way round:
+    // addVoxChannelAtIndex / addInstChannelAtIndex create the strip and fire
+    // these, which spawn the matching ribbon page.  Every gesture that adds one
+    // -- the Mixer's Add menu, the ribbon "+", a project load -- goes through
+    // that same call, so this is the single spawn point regardless of entry.
+    // (Corrected 2026-08-05: the comment here named the Mixer's "Add Vox Strip"
+    // / "Add Inst Strip" BUTTONS as the trigger and claimed no other path.  T10
+    // replaced those five buttons with the Add titled menu, and the ribbon "+"
+    // reaches the same call -- the claim outlived both.)
+    //
+    // Idempotent on pageIdx, so a project load calling addVoxChannelAtIndex per
+    // restored strip cannot double-spawn.
+    //
+    // selectAfter=false: adding a strip must not yank the user off the Mixer,
+    // so several can be added in a row.  Paths that DO want navigation (the
+    // ribbon empty-state click) leave selectAfter at its default.
     page->onVoxStripAdded  = [this](int idx) { spawnVoxTabIfMissing  (idx, /*selectAfter*/ false); };
     page->onInstStripAdded = [this](int idx) { spawnInstTabIfMissing (idx, /*selectAfter*/ false); };
     return page;

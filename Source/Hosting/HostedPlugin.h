@@ -251,6 +251,38 @@ public:
     void parentHierarchyChanged() override;
     void moved() override;
 
+    // ── Stretch (QA-Layout T12 / L17) ────────────────────────────────────────
+    // Three cases, and they are genuinely different rather than one behaviour
+    // with edge cases:
+    //
+    //   RESIZABLE, in-process  - the frame size is pushed through the plugin's
+    //                            OWN resize path.  Its constrainer decides what
+    //                            it accepts and we follow whatever it settles on.
+    //   FIXED-SIZE, in-process - the plugin snaps any bounds change back, so the
+    //                            surface is SCALED by an AffineTransform instead.
+    //                            Aspect preserved and centred, so the result is
+    //                            letterbox bars rather than a stretched or
+    //                            silently clipped UI.
+    //   BRIDGED                - CANNOT scale.  The surface is a native child
+    //                            peer holding another process's window; an
+    //                            AffineTransform on a JUCE component does not
+    //                            reach a peer, which is positioned in raw
+    //                            parent-client pixels.  It is centred at its
+    //                            natural size and clipped to the frame.
+    //
+    // The floor exists so "scaled down" never becomes "unusable": below this the
+    // window refuses to shrink further instead of rendering an unreadable UI.
+    static constexpr float kMinUsableScale = 0.5f;
+
+    // False for the bridged case -- hosts use it to explain the narrowing rather
+    // than leaving a window that just refuses to scale with no reason given.
+    bool canScaleSurface() const noexcept   { return mRemoteHost == nullptr; }
+
+    // The plugin's OWN declared size, tracked across self-resizes.  Window
+    // minimums derive from this * kMinUsableScale.
+    int getNaturalWidth()  const noexcept   { return mNaturalW; }
+    int getNaturalHeight() const noexcept   { return mNaturalH; }
+
 private:
     void timerCallback() override;
     void buildInner();
@@ -271,6 +303,15 @@ private:
     // Cached at every rebuild so paint() never dereferences mOwner -- it may be
     // gone by the time we repaint.
     juce::String mMarkerTitle, mMarkerMessage;
+
+    // The plugin's own declared size.  Kept SEPARATE from our bounds because
+    // scaling makes the two deliberately differ -- "child size != frame size"
+    // used to be the test for a plugin self-resize, and that test is wrong the
+    // moment a transform is in play.
+    int  mNaturalW { 0 }, mNaturalH { 0 };
+    // Guards the resized() -> setBounds -> childBoundsChanged -> host resize
+    // -> resized() feedback loop that a resizable plugin would otherwise spin.
+    bool mInLayout { false };
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (HostedPluginEditor)
 };

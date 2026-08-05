@@ -87,6 +87,18 @@ public:
     // still binding, and the event announcing it can be missed.
     bool hasDefaultSize() const noexcept { return mDefaultKnown; }
 
+    // Lowers ONLY the resize floor, leaving the default (opening) size alone.
+    //
+    // The T8 rule is minimum == default: a window may not shrink below the size
+    // its content was measured at, because our own panels do not scale and
+    // anything smaller is unreadable.  A hosted plugin's fixed-size surface DOES
+    // scale (HostedPluginEditor applies a transform), so it is the one case
+    // where a smaller window still shows a usable UI -- and without a lower
+    // floor the scaling could only ever grow, which is half a feature.
+    //
+    // Call AFTER setDefaultWindowSize: that resets the minimum to the default.
+    void setResizeFloor (int minW, int minH);
+
 
     // QA-Layout T5: the THREE-LIFETIME model (Jeff's 2026-07-28 ruling).
     //

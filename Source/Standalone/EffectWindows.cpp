@@ -124,10 +124,22 @@ void EffectSlotWindow::buildPanel()
     // Our own panels are unaffected -- they are built to the window, not the
     // other way round.
     if (auto* hosted = dynamic_cast<Hosting::HostedPluginEditor*> (mSlot->getEditor()))
-        hosted->onNaturalSizeChanged = [this] (int w, int h)
+        hosted->onNaturalSizeChanged = [this, hosted] (int w, int h)
         {
-            if (auto* win = findParentComponentOfClass<WorkspaceWindow>())
-                win->sizeToContent (w, h);
+            auto* win = findParentComponentOfClass<WorkspaceWindow>();
+            if (win == nullptr) return;
+
+            win->sizeToContent (w, h);
+
+            // QA-Layout T12: the surface scales, so the window may go below the
+            // plugin's natural size -- but only as far as the UI stays usable.
+            // A bridged surface cannot scale at all, so its floor IS its natural
+            // size; shrinking further would only clip it.
+            const float floorScale = hosted->canScaleSurface()
+                                       ? Hosting::HostedPluginEditor::kMinUsableScale
+                                       : 1.0f;
+            win->setResizeFloor ((int) ((float) w * floorScale),
+                                 (int) ((float) h * floorScale));
         };
     // AFTER setEditor: this forwards into the panel, so calling it first would
     // be a no-op against a panel that does not exist yet.

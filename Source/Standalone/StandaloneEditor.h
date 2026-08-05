@@ -977,11 +977,12 @@ private:
     void spawnDuplicateClipsTab (class ClipsPage* sourceCp);
     void spawnDuplicateVoxTab   (class VoxPage*   sourceVp);
     void spawnDuplicateInstTab  (class InstPage*  sourceIp);
-    // G-6 (2026-04-29): selectAfter controls whether the new tab takes focus.
-    // false = stay on current page (used by Mixer "Add Vox/Inst Strip" so the
-    // user can add multiple without being yanked away on each add).  true =
-    // navigate to the new tab (used by ribbon empty-state click + ribbon "+Add"
-    // entry where the user explicitly asked for the page).
+    // selectAfter controls whether the new tab takes focus.  false = stay put
+    // (strip-driven adds, so several can be added without being yanked away on
+    // each one).  true = navigate to the new tab, for gestures where the user
+    // explicitly asked for the PAGE (ribbon empty-state click).
+    // (Said "Mixer 'Add Vox/Inst Strip'" until 2026-08-05 -- T10 replaced those
+    // buttons with the Add titled menu.)
     void spawnVoxTabIfMissing  (int voxIdx,  bool selectAfter = true);
     void spawnInstTabIfMissing (int instIdx, bool selectAfter = true);
 

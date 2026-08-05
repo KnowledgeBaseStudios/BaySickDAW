@@ -18,7 +18,9 @@ class AriaControlPanel;
 //       editor here.  For I-0b ships a placeholder component.
 //     - BaySickNAM/IR (sub-tab 1): hosts the existing BaySickNAMIRProcessor +
 //       BaySickNAMIREditor unchanged (same setup as the Vox page's NAM/IR sub-tab).
-//   * Spawn trigger remains the Mixer page's "Add Inst Strip" button.
+//   * Spawned BY its mixer strip: addInstChannelAtIndex fires onInstStripAdded,
+//     which spawns this page.  Every entry point -- the Mixer's Add menu, the
+//     ribbon "+", a project load -- goes through that one call.
 // ─────────────────────────────────────────────────────────────────────────────
 
 class InstPage : public juce::Component

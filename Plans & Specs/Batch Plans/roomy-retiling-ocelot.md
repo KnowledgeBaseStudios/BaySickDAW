@@ -75,8 +75,11 @@ Canonical path: `Plans & Specs/Batch Plans/roomy-retiling-ocelot.md`. Paired run
 - **T10:** `StandaloneEditor.cpp` (:6357-6519 mixer menu, AudioSettingsDialog :86-539), `Source/Standalone/MixerPage.cpp/.h` (add buttons :1662-1696, CableOverlay :502-657, :890-910), `Source/Standalone/MixerTrackStrip.cpp` (:241-256), `Source/VibeGraph.h/.cpp` (bus ids, prefix/friendly tables :87-176, registration), `Source/PluginProcessor.cpp` (task registration), `SharedUI.*` (PageMenuBar second titled menu)
 - **T11:** `Source/VibeGraph.h` (:60-74 + literal rows :105-113, :170-176), `Source/VibesynthConstants.h` (:17-18 + page caps), repo-wide literal sweep, piano-roll target derivation + kit grid per D3
 - **T12:** `Source/Hosting/HostedPlugin.*`, `HostedPluginEditor`, `WorkspaceWindow.cpp` (resize→content push), bridged `mRemoteHost` path
-- **T13:** `Source/Standalone/EffectEditorPanels.*` (LimiterPanel), `Files For Claude/DSP Review/Limiter.txt` (read-only spec)
+- **T13:** `Source/Standalone/EffectEditorPanels.*` (LimiterPanel), `Files For Claude/DSP Review/Limiter.txt` (read-only spec); consumes T17's component
 - **T14:** overlay sweep sites (grep-driven), `CLAUDE.md`, Rule 4 catalog strips
+- **T17:** new shared visual component under `Source/Standalone/`, `EffectEditorPanels.*` (PanelContext + view plumbing), `EffectWindows.cpp/.h` (View menu + per-view sizing, `onFloorChanged`), `SharedUI.*` (`setViewMenu` reuse from T8), the effect DSP classes that publish capture data + their gating atomic
+- **T18:** `Source/Standalone/EffectEditorPanels.*` (nine panels), the matching DSP modules for whatever each visual reads
+- **T19:** `Source/Standalone/WorkspaceWindow.cpp/.h` (`clampToWorkspace` split, drag path, open/restore placement), `EffectWindows.cpp` (`onFloorChanged` → set size, not just floor)
 
 ## Tasks
 
@@ -194,9 +197,10 @@ V1**; the pedalboard half **is**, in a different shape than the plan assumed.
 - [ ] Bridged editors: establish what scaling means for the remote child peer; if the bridged case can't scale, it letterboxes and the narrowing is surfaced to Jeff, not shipped silently.
 - [ ] Build gate → commit on approval → running notes.
 
-### Task 13 — BLU-110 three-zone limiter panel (L21)
+### Task 13 — BLU-110 three-zone limiter panel (L21) — executes AFTER T17
 
 - [ ] `EffectEditorPanels::LimiterPanel` rebuilt per `Limiter.txt` §1–2: Zone A scrolling waveform (input trace, GR curve from top, red ceiling line, right→left), Zone B Gain/Ceiling/Sat big knobs, Zone C Attack/Release/Ahead/Curve; skeuomorphic knob LAF; glass overlay; `#00FFF2` cyan GR / `#FF9100` orange sat; monospace readouts. Existing LUFS meter + target-line features carry over.
+- [ ] **Zone A is built AS T17's reusable component, not standalone** (Jeff, 2026-08-05). This is the whole reason T17 comes first: the other nine panels in T18 consume the same component, so a bespoke Zone A here would be built twice and diverge.
 - [ ] Panel behaves at rack size and in the pedal context (PanelContext) with no subtractive-math hazards; floors from T7 data.
 - [ ] Build gate → commit on approval → running notes.
 
@@ -227,6 +231,91 @@ V1**; the pedalboard half **is**, in a different shape than the plan assumed.
 - [ ] **Harmless re-layout**: knobs halved (44/32 → 22/16), all four filter knobs one size, faders → knobs (Unison, LFO depths, and Routing — Routing is its own component and was missed first pass), one box per filter with its ADSR, sections sized to content with knobs distributed inside, horizontal strips replacing narrow columns, labels sized to their TEXT (knob-width boxes clipped everything past four characters at 16px), mod editor knobs matched at 16 and its tool row shrink-to-fit on ONE row. Snap + grid moved onto the app's unified divisions from `VibesynthConstants.h` **including triplets** — this was the one place in the app a triplet could not be snapped to — with segment counts derived from `snapDivToTicks` and the grid following the selected division via `gridLadderForSnap`. The tick system deliberately does NOT reach in: this axis is per-note 0-1 phase, not song position.
 - [ ] Build gate → commit on approval → running notes.
 
+### Task 17 — Effect-panel visual foundation (Jeff-directed mid-batch 2026-08-05)
+
+Workshopped with Jeff 2026-08-05.  Rulings recorded here because they decide the
+other three tasks: the space comes from HEIGHT (all three panel classes are 268
+tall; width already varies); the visual is a **third view, not an Advanced-gated
+feature** — a beginner cannot hear what a compressor does, so gating the picture
+behind Advanced hands the explanation to the people who least need it; and Basic
+is allowed to carry it (the replica rule was about not burying a learner under
+ten unfamiliar knobs, not about literal fidelity).
+
+- [ ] **Reusable visual-strip component.** One component the other panels
+      configure, NOT a per-panel bespoke drawing job — the limiter's Zone A is
+      its first consumer, not a one-off. Everything after T13 is then layout.
+- [ ] **Visibility-gated audio feed.** Any audio-thread capture (samples,
+      spectrum, GR history) sits behind ONE atomic that is true only while a
+      visual is on screen — the `mAnyXActive` fast-path-bypass pattern. Without
+      this, ten effects feed data into the void forever and no view or window
+      state saves anything; this is the actual CPU lever, bigger than either
+      geometry option considered.
+- [ ] **One shared timer** driving every visible visual rather than N
+      independent ones; peer-keyed start/stop like every other repeating cost
+      in the shell.
+- [ ] **Menu entry on EVERY effect panel** (Jeff, 2026-08-05): a title-bar Menu
+      item that opens the Visual view, present on all of them and **greyed +
+      unusable when that effect has no visual**, with the reason in its tooltip
+      — the same show-it-disabled treatment T16 gave locked Freeze, and for the
+      same reason: a user who closes or switches away has to be able to find it
+      again, and an entry that vanishes teaches nothing.
+- [ ] **"Visual" third view** through the T8 view-swap machinery (`setViewMenu`,
+      editor-owned `ViewMode`, `windowSizeFor`, host-owned resize — CL-307
+      exists precisely so this is layout-only). The view declares its OWN window
+      height, which is what dissolves the fixed-panel-size problem. Switching
+      away tears the visual down; the effect window stays open and the DSP never
+      notices. Effect windows are their own windows with their own peer-keyed
+      poll, so close here is a genuine teardown (unlike page windows, where the
+      page object survives — see `canRebuildType`).
+- [ ] Build gate → commit on approval → running notes.
+
+### Task 18 — The remaining nine effect visuals (Jeff-directed mid-batch 2026-08-05)
+
+Jeff's call: ALL ten, this batch. Built on T17's component, so each is layout +
+its own drawing, not new plumbing. Ranked by whether it TEACHES (the audience has
+never made music) rather than by how it looks.
+
+- [ ] **Compressor** — GR history trace + transfer curve with the knee drawn and
+      a live dot at the current operating point.
+- [ ] **Chorus / Flanger / Phaser** — animated LFO scope (waveform + current
+      phase) plus the comb-notch curve.
+- [ ] **Transient Shaper** — before/after envelope ghosting on a waveform strip.
+- [ ] **Saturation / Tape** — live harmonic bars + the shaper's transfer curve.
+- [ ] **Delay** — repeats laid out against the beat grid, ping-pong shown L/R.
+- [ ] **Reverb** — decay envelope with pre-delay / early reflections / tail as
+      distinct regions.
+- [ ] **Manual-facing explanations written AT the component that draws them**
+      (Jeff, 2026-08-05: the manuals get researched from the whole corpus later,
+      so there is no separate notes doc — the corpus has to carry it). Every
+      visual whose meaning is not self-evident says what it is telling the user:
+      harmonic bars above all (nobody who has never made music knows what a third
+      harmonic is), plus what the GR trace means, why reverb pre-delay is its own
+      region, and what the comb notches represent.
+- [ ] Build gate → commit on approval → running notes.
+
+### Task 19 — Window placement + Basic/Advanced swap sizing (Jeff-found 2026-08-05)
+
+- [ ] **Windows must LAND on screen.** Open/restore clamps POSITION into the
+      workspace. Verified cause of the second half: `clampToWorkspace` does two
+      jobs — it fits the SIZE to the workspace and then nudges the position — and
+      the drag path calls it every mouse move, so the first drag of an oversized
+      window shrinks it to workspace width ("moving it instantly locks it into
+      the width of the screen"). Not yet traced: why they open outside in the
+      first place; `clampWindowsIntoView` runs only from the workspace's
+      `resized()`, so a window framed or re-defaulted after that is never
+      clamped — confirm before fixing.
+- [ ] **Drag bound becomes the CURSOR, not the window** (Jeff's ruling, FL
+      behaviour): a window may hang off any edge, the mouse may not leave the
+      workspace. This retires the size clamp from the drag path, which is the
+      destructive half. Supersedes the locked call 2b containment rule.
+- [ ] **Basic/Advanced swap resizes to the new variant's default.** The swap
+      fires `onFloorChanged` (1047x268 Advanced / 691x268 Basic) and the owner
+      routes it to `setDefaultWindowSize`, which only ever GROWS to a floor — so
+      Advanced→Basic stays stuck at 1047 wide and Basic→Advanced grows rightward
+      with no re-clamp, landing half off screen. Set the size outright on a
+      variant change, then re-clamp position into view.
+- [ ] Build gate → commit on approval → running notes.
+
 ## Verification (end-to-end)
 
 None at batch level — **this batch is part of G4**. All functional verification rides the G4 boundary smoke (`Files For Claude/G4 Boundary Smoke.txt` + Test Plans §B.31 with B.31.0 rewritten by T6 + this batch's §B section from T14). The smoke must not assume the untested bridged-specific `1cd1f5d6` items (no 32-bit VST3 on hand). Per-task build gates are the only in-batch gates.
@@ -236,6 +325,32 @@ None at batch level — **this batch is part of G4**. All functional verificatio
 ## Routing notes (Rule 3 during execution)
 
 Findings that touch a not-yet-started task here → fold in (running-notes entry). Completed-batch surfaces → §9 Forks back-ref, fix rides this batch. Genuinely new areas → new §5 row, Jeff slots it. QA batches fix bugs found — deferral needs Jeff's explicit call. Spec calls discovered mid-execution surface in chat before landing in this file (Rule 5).
+
+**Finding (2026-08-05) — `canRebuildType`'s stated reason does not hold for Rusty.**
+Traced at Jeff's instruction while explaining why four page types close
+frame-only. The comment gives one reason for all four ("construction is
+entangled with spawning a mixer strip"); it is correct for three and unverified
+for the fourth:
+
+- **Vox / Inst** — confirmed. `addVoxChannelAtIndex` / `addInstChannelAtIndex`
+  create the STRIP and fire `onVoxStripAdded` / `onInstStripAdded`, which spawn
+  the page. The page is downstream of the strip, so there is no way to rebuild
+  the page without re-entering at strip creation.
+- **Clips** — confirmed, different mechanism. `createClipStripAndPage` builds the
+  strip and the page as one unit, and the page's identity is a Builder row plus a
+  sample file rather than anything the rig holds.
+- **BaySickRustyDrums** — NOT confirmed. Its strips are created by
+  `onKitLoaded` firing `addRustyChannelAtIndex` per engine channel — a kit-LOAD
+  event, which is the same lazy pattern that makes Layers/Bass/Drums rebuildable.
+  Its engine is processor-owned rather than rig-owned (the sfizz trio's
+  race-safe load paths), which may be the actual reason it was excluded, but that
+  is a guess and is recorded as one. If it turns out Rusty CAN be rebuilt, that
+  is a memory dividend on one of the heaviest pages — worth a look, not worth
+  assuming.
+
+Contrast that makes the rule legible: Layers / Bass / Drums create the page
+first and the strip arrives later from `onEngineSelected`, so a page rebuild
+never re-runs strip creation.
 
 ## Carry-Forward Reference touch points
 

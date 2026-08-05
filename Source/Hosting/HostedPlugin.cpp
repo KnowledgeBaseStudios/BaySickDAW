@@ -656,15 +656,21 @@ void HostedPluginEditor::buildInner()
         if (mInner != nullptr)
         {
             addAndMakeVisible (*mInner);
-            setSize (mInner->getWidth(), mInner->getHeight());
+            mNaturalW = mInner->getWidth();
+            mNaturalH = mInner->getHeight();
+            setSize (mNaturalW, mNaturalH);
 
             if (onNaturalSizeChanged)
-                onNaturalSizeChanged (mInner->getWidth(), mInner->getHeight());
+                onNaturalSizeChanged (mNaturalW, mNaturalH);
 
             return;
         }
     }
 
+    // The dead marker is its own natural size -- without this the frame would
+    // keep scaling against the size of a plugin that is no longer there.
+    mNaturalW = kDeadMarkerW;
+    mNaturalH = kDeadMarkerH;
     setSize (kDeadMarkerW, kDeadMarkerH);
 
     if (onNaturalSizeChanged)
@@ -685,6 +691,8 @@ void HostedPluginEditor::remoteEditorSized (int w, int h)
     if (mOwnerGone || mRemoteHost == nullptr || w <= 0 || h <= 0)
         return;
 
+    mNaturalW = w;
+    mNaturalH = h;
     setSize (w, h);
 
     if (onNaturalSizeChanged)
@@ -693,10 +701,49 @@ void HostedPluginEditor::remoteEditorSized (int w, int h)
 
 void HostedPluginEditor::resized()
 {
-    if (mInner != nullptr)
-        mInner->setBounds (getLocalBounds());
+    // Everything below can move the child, and moving the child re-enters here
+    // through childBoundsChanged; the flag keeps a self-resize (real, from the
+    // plugin) distinguishable from our own layout (not a size change at all).
+    const juce::ScopedValueSetter<bool> inLayout (mInLayout, true);
 
-    updateRemoteHostBounds();
+    if (mRemoteHost != nullptr)
+    {
+        // Bridged: no scaling is possible -- see the header note.  Centre at
+        // natural size; updateRemoteHostBounds clips to the frame.
+        updateRemoteHostBounds();
+        return;
+    }
+
+    if (mInner == nullptr)
+        return;
+
+    if (mInner->isResizable())
+    {
+        // Push the frame size through the plugin's OWN path.  Its constrainer
+        // rejects or clamps as it likes and childBoundsChanged follows the
+        // result, so a plugin with a minimum simply stops shrinking.
+        mInner->setTransform ({});
+        mInner->setBounds (getLocalBounds());
+        return;
+    }
+
+    // Fixed-size: bounds changes get snapped back by the plugin, so scale.
+    const int nw = juce::jmax (1, mNaturalW);
+    const int nh = juce::jmax (1, mNaturalH);
+
+    mInner->setTransform ({});
+    mInner->setBounds (0, 0, nw, nh);
+
+    const float fit = juce::jmin ((float) getWidth()  / (float) nw,
+                                  (float) getHeight() / (float) nh);
+    const float scale = juce::jmax (kMinUsableScale, fit);
+
+    // Centre the scaled surface -- the leftover is symmetrical letterboxing,
+    // which reads as deliberate framing instead of an off-centre crop.
+    const float dx = ((float) getWidth()  - (float) nw * scale) * 0.5f;
+    const float dy = ((float) getHeight() - (float) nh * scale) * 0.5f;
+
+    mInner->setTransform (juce::AffineTransform::scale (scale).translated (dx, dy));
 }
 
 void HostedPluginEditor::moved()
@@ -757,29 +804,58 @@ void HostedPluginEditor::updateRemoteHostBounds()
     if (win == nullptr)
         return;
 
+    // LETTERBOX, not stretch (QA-Layout T12).  The hole cannot scale its
+    // contents -- it is another process's window reparented into a native child
+    // peer, and a JUCE AffineTransform does not reach a peer.  Giving it the
+    // whole frame would just enlarge the hole and leave the plugin drawn at
+    // natural size in its top-left, with the growth showing as dead space on
+    // two sides.  Centring it puts the same leftover on all four sides, which
+    // reads as framing instead of misalignment.
+    auto area = getLocalBounds();
+
+    if (mNaturalW > 0 && mNaturalH > 0)
+        area = juce::Rectangle<int> (mNaturalW, mNaturalH)
+                   .withCentre (area.getCentre())
+                   // A frame smaller than the plugin clips rather than
+                   // overhanging into the window's chrome.
+                   .getIntersection (getLocalBounds());
+
     // Child peers are positioned in PARENT-CLIENT space -- the contract written
     // into WorkspaceWindow.h.  A child peer has no non-client area, so its
     // parent's client origin IS the window's top-left on screen; converting
     // through the screen is therefore the whole of the mapping.
-    const auto screenArea = localAreaToGlobal (getLocalBounds());
+    const auto screenArea = localAreaToGlobal (area);
     mRemoteHost->setBounds (screenArea - win->getScreenPosition());
 }
 
 void HostedPluginEditor::childBoundsChanged (juce::Component* child)
 {
-    // A plugin can resize its own editor at any time (VST3's resizeView).  When
-    // it does, the frame follows it rather than clipping -- our resized() would
-    // otherwise immediately squash it back to the old size.
-    if (child != mInner.get() || mInner == nullptr)
+    // A plugin can resize its own editor at any time (VST3's resizeView), and
+    // the frame follows it rather than clipping.
+    //
+    // The test is against the plugin's LAST DECLARED size, not against our own
+    // bounds.  Scaling makes child-size and frame-size differ on purpose, so
+    // the old "differs from the frame" test fired on every scaled layout and
+    // would have dragged the window back to the plugin's natural size the
+    // instant anyone resized it.  mInLayout additionally excludes the bounds
+    // WE just set on a resizable plugin, which is our change, not the
+    // plugin's.
+    if (mInLayout || child != mInner.get() || mInner == nullptr)
         return;
 
-    if (mInner->getWidth() != getWidth() || mInner->getHeight() != getHeight())
-    {
-        setSize (mInner->getWidth(), mInner->getHeight());
+    const int w = mInner->getWidth();
+    const int h = mInner->getHeight();
 
-        if (onNaturalSizeChanged)
-            onNaturalSizeChanged (mInner->getWidth(), mInner->getHeight());
-    }
+    if (w <= 0 || h <= 0 || (w == mNaturalW && h == mNaturalH))
+        return;
+
+    mNaturalW = w;
+    mNaturalH = h;
+
+    setSize (w, h);
+
+    if (onNaturalSizeChanged)
+        onNaturalSizeChanged (w, h);
 }
 
 void HostedPluginEditor::paint (juce::Graphics& g)
