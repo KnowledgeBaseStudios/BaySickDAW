@@ -379,8 +379,29 @@ void WorkspaceWindow::mouseDrag (const juce::MouseEvent& e)
     // no defence against an inverted range.  clampToWorkspace orders the bounds
     // explicitly and is shared with the resize/relayout path so the two cannot
     // drift.
-    const auto snapped     = applyMagnetism (desired);
-    const auto finalBounds = clampToWorkspace (snapped);
+    const auto snapped = applyMagnetism (desired);
+
+    // THE BOUND IS THE CURSOR, NOT THE WINDOW (Jeff, 2026-08-05, superseding
+    // locked call 2b).  A window may hang off any edge; the POINTER may not
+    // leave the workspace, which preserves the only guarantee that matters --
+    // a window can never be dragged somewhere it cannot be grabbed back from.
+    //
+    // This also drops the size fit from the drag path.  clampToWorkspace both
+    // moves AND resizes, and sharing it here meant the first drag of a window
+    // wider than the workspace snapped it to workspace width, destroying a size
+    // the user had chosen.  A drag does not change size.
+    juce::Rectangle<int> finalBounds = snapped;
+
+    if (auto* ws = workspace())
+    {
+        const auto wsScreen = ws->getScreenBounds();
+        const auto cursor   = e.getScreenPosition();
+        const juce::Point<int> bounded {
+            juce::jlimit (wsScreen.getX(), wsScreen.getRight()  - 1, cursor.x),
+            juce::jlimit (wsScreen.getY(), wsScreen.getBottom() - 1, cursor.y)
+        };
+        finalBounds = snapped.translated (bounded.x - cursor.x, bounded.y - cursor.y);
+    }
 
     // Keep the cursor STUCK to the window (Jeff spec 2026-07-28).  Without this
     // the window stops at the workspace edge while the mouse keeps travelling,
@@ -525,6 +546,33 @@ void WorkspaceWindow::attachTo (Workspace& ws)
     addToDesktop (0, parent);
     const auto o = ws.originInParentClient();
     setTopLeftPosition (saved.getX() + o.x, saved.getY() + o.y);
+
+    // LAND ON SCREEN (Jeff, 2026-08-05).  attachTo was the one path that never
+    // checked a window's opening position -- clampWindowsIntoView runs only from
+    // Workspace::resized(), so a window opened after the last workspace layout
+    // was placed verbatim and never looked at.
+    //
+    // TWO GUARDS, both learned the hard way when the first attempt shipped
+    // without either and had to be reverted:
+    //
+    //  1. SAVES SUPPRESSED.  This runs AFTER addToDesktop, so setTopLeftPosition
+    //     reaches moved() -> saveBounds().  Without the suppression the clamped
+    //     position is written into the store as though the user had chosen it,
+    //     and the real placement is destroyed on the spot.
+    //  2. POSITION ONLY.  Never resize to fit; a window is allowed to exceed the
+    //     workspace, it just may not START outside it.
+    //
+    // The partial-workspace case is covered by the machinery that already
+    // exists rather than by testing for it here: the frame passes through a
+    // smaller size on its way to full, this clamp pulls windows in against it,
+    // and then Workspace::resized() sees a GROWING workspace and calls
+    // restoreWindowsToSavedBounds() -- which is only able to put them back
+    // because guard 1 kept the store clean.
+    {
+        const ScopedSaveSuppress noSave;
+        setBounds (clampPositionToWorkspace (getBounds()));
+    }
+
     setVisible (true);
     toFront (true);
 }
@@ -584,6 +632,33 @@ juce::Rectangle<int> WorkspaceWindow::clampToWorkspace (juce::Rectangle<int> tar
     else if (winScreen.getRight() > wsScreen.getRight()) dx = wsScreen.getRight() - winScreen.getRight();
     if (winScreen.getY() < wsScreen.getY())            dy = wsScreen.getY() - winScreen.getY();
     else if (winScreen.getBottom() > wsScreen.getBottom()) dy = wsScreen.getBottom() - winScreen.getBottom();
+
+    return target.translated (dx, dy);
+}
+
+juce::Rectangle<int> WorkspaceWindow::clampPositionToWorkspace (juce::Rectangle<int> target) const
+{
+    // clampToWorkspace WITHOUT the size fit.  The size fit is what made the
+    // first drag of an oversized window snap it to the workspace width; landing
+    // a window on screen needs only the move half.
+    auto* ws = workspace();
+    if (ws == nullptr || ws->getWidth() <= 0 || ws->getHeight() <= 0)
+        return target;
+
+    const auto moveDelta = target.getPosition() - getBounds().getPosition();
+    const auto wsScreen  = ws->getScreenBounds();
+    const auto winScreen = getScreenBounds().translated (moveDelta.x, moveDelta.y)
+                                            .withSize (target.getWidth(), target.getHeight());
+
+    // Left/top win when the window is BIGGER than the workspace: that corner
+    // holds the title bar, so it is the one that has to stay grabbable.
+    int dx = 0, dy = 0;
+    if (winScreen.getX() < wsScreen.getX())               dx = wsScreen.getX() - winScreen.getX();
+    else if (winScreen.getRight() > wsScreen.getRight())  dx = juce::jmax (wsScreen.getX() - winScreen.getX(),
+                                                                           wsScreen.getRight() - winScreen.getRight());
+    if (winScreen.getY() < wsScreen.getY())               dy = wsScreen.getY() - winScreen.getY();
+    else if (winScreen.getBottom() > wsScreen.getBottom()) dy = juce::jmax (wsScreen.getY() - winScreen.getY(),
+                                                                            wsScreen.getBottom() - winScreen.getBottom());
 
     return target.translated (dx, dy);
 }

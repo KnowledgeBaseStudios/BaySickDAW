@@ -109,6 +109,23 @@ private:
     EffectRack*                      mBuiltRack    { nullptr };
     EffectType                       mBuiltType    { EffectType::None };
     int                              mBuiltVariant { -1 };
+    // The DSP INSTANCE the live panel was built against.  Compared by ADDRESS
+    // only -- never dereferenced, because by the time it differs the object it
+    // used to point at is already gone.
+    //
+    // Rack, type and variant are not enough to notice a rebuild: a project load
+    // can replace a slot's DSP in place, leaving the same rack, the same type
+    // and the same variant, so every existing check passed while the panel's
+    // cached mDsp pointed at freed memory.  Its timer then made a VIRTUAL call
+    // into it (getGainReductionDb), read the vtable out of a destroyed object,
+    // and took the app down on project LOAD (Jeff, 2026-08-05).
+    DSPBase*                         mBuiltDsp     { nullptr };
+    // Has this window ever resolved its slot?  Until it has, a failed resolve
+    // means the restore is still in flight, NOT that the effect is gone -- so
+    // the self-close is held back.  EffectEqWindow and EffectVisualWindow both
+    // carry the same flag; this window never did, which is why windows restored
+    // from a project closed themselves on their first poll.
+    bool                             mEverResolved { false };
     int                              mLastFloorW   { 0 };   // T7 floor change guard
     int                              mLastFloorH   { 0 };
     juce::String                     mTitle;

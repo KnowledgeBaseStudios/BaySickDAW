@@ -702,6 +702,40 @@ void LimiterDSP::process (juce::AudioBuffer<float>& buffer)
         mGrDb.store (juce::jmin (blockGrDb, decayed), std::memory_order_relaxed);
     }
 
+    // QA-Layout T13: one column per block into the visual feed.  Free when no
+    // Visual window is open -- push() returns on a single relaxed load.
+    //
+    // Everything is normalised HERE rather than in the painter, because the
+    // painter has no business knowing the limiter's dB range and a second
+    // effect using the same drawing helper would otherwise have to agree with
+    // it by coincidence.  Mapping over a 60 dB window: -60 dBFS at the centre
+    // line, 0 dBFS at full deflection.
+    {
+        constexpr float kRangeDb = 60.0f;
+
+        const auto norm = [] (float db, float range)
+        {
+            return juce::jlimit (0.0f, 1.0f, (db + range) / range);
+        };
+
+        // Envelope is symmetric about the centre: this is a level display, not
+        // a waveform, so both halves carry the same magnitude.
+        const float lvl = norm (juce::jmax (-kRangeDb, outDbNow), kRangeDb);
+
+        // a = gain reduction as a 0..1 depth FROM THE TOP of the strip, which
+        // is how every limiter draws it -- the curve hangs down from the
+        // ceiling by however much is being taken off.
+        const float gr  = juce::jlimit (0.0f, 1.0f,
+                                        -mGrDb.load (std::memory_order_relaxed) / 20.0f);
+
+        // b = the ceiling line, in the same 0..1 top-down space, so the GR
+        // curve and the line it is measured against share one coordinate system.
+        const float ceilNorm = 1.0f - norm (mCeilingTargetDb + mCeilingTrimDb.load (std::memory_order_relaxed),
+                                            kRangeDb);
+
+        mVisualFeed.push (-lvl, lvl, gr, ceilNorm);
+    }
+
     // ── 5. TS7: output loudness + true peak, then the two servos ──────────────
     // Both meters read the FINAL output -- after gain reduction, saturation and
     // the hard clamp -- because that is the signal the target is about.  Each is

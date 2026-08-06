@@ -141,6 +141,18 @@ void EffectSlotWindow::buildPanel()
             win->setResizeFloor ((int) ((float) w * floorScale),
                                  (int) ((float) h * floorScale));
         };
+    // The panel's own timer must be able to ask whether the DSP it was built
+    // against is STILL the one in this slot.  Its timer and this window's
+    // rebuild poll are independent, so a project load can destroy the DSP and
+    // the panel can tick before we notice -- see EditorPanelBase::liveDsp.
+    if (auto* panel = dynamic_cast<EditorPanelBase*> (mSlot->getEditor()))
+        panel->mResolveDsp = [this]() -> DSPBase*
+        {
+            EffectRack* r = nullptr;
+            const int s = resolveSlot (r);
+            return (r != nullptr && s >= 0) ? r->getSlotEffect (s) : nullptr;
+        };
+
     // AFTER setEditor: this forwards into the panel, so calling it first would
     // be a no-op against a panel that does not exist yet.
     mSlot->setEditorUndoContext (mUndo);
@@ -148,6 +160,7 @@ void EffectSlotWindow::buildPanel()
     mBuiltRack    = rack;
     mBuiltType    = type;
     mBuiltVariant = EffectParamMap::variantOf (type, eff);
+    mBuiltDsp     = eff;   // address only; see the member's note
 }
 
 void EffectSlotWindow::refreshChrome()
@@ -335,6 +348,13 @@ void EffectSlotWindow::configureTitleStrip (PageMenuBar& bar)
             }
         }
 
+        // QA-Layout T17: emits the "Visual" entry.  This window sets no FX Rack
+        // or Freeze slot -- those are player-page actions -- so on an effect
+        // window this contributes Visual alone.  Without the call the entry was
+        // registered and never rendered, which is how it shipped invisible.
+        if (auto* b = mBar.getComponent())
+            b->appendStandardItems (m);
+
         m.showMenuAsync (juce::PopupMenu::Options()
                              .withTargetComponent (anchor != nullptr ? anchor
                                                                      : (juce::Component*) mBar));
@@ -366,9 +386,20 @@ void EffectSlotWindow::timerCallback()
     EffectRack* rack = nullptr;
     const int slot = resolveSlot (rack);
 
+    if (rack != nullptr && slot >= 0)
+        mEverResolved = true;
+
     // Target gone: the slot was cleared, the rack's tab was deleted, or a
     // project load rebuilt the graph.  Close rather than sit on a dead panel.
-    if (rack == nullptr || slot < 0)
+    //
+    // ONLY ONCE WE HAVE RESOLVED AT LEAST ONCE (Jeff, 2026-08-05).  The project
+    // restore walker opens this window from its <Open key> record, and the
+    // first poll can land BEFORE the rack has been populated with that uuid --
+    // so a window restored with the project closed itself immediately and the
+    // effect + visual windows never came back, while page windows (a different
+    // restore path) did.  Same guard EffectEqWindow and EffectVisualWindow
+    // already carry; this was the one that never got it.
+    if (mEverResolved && (rack == nullptr || slot < 0))
     {
         stopTimer();
         // DEFERRED, and this is not optional: onRequestClose destroys the
@@ -385,6 +416,11 @@ void EffectSlotWindow::timerCallback()
         return;
     }
 
+    // Not resolved YET (restore in flight).  Wait for the rack rather than fall
+    // through -- everything below dereferences `rack` and indexes by `slot`.
+    if (rack == nullptr || slot < 0)
+        return;
+
     // The effect moved index (a reorder, or a removal above it packed the slots
     // up).  The uuid is what identifies it, so follow that rather than keep
     // driving whatever landed in the old index.
@@ -396,7 +432,12 @@ void EffectSlotWindow::timerCallback()
     // us (project load), and the SlotComponent's cached pointer is stale.
     auto* eff = rack->getSlotEffect (slot);
     const auto type = rack->getSlotType (slot);
+    // `eff != mBuiltDsp` is the load-bearing one: a project load replaces a
+    // slot's DSP in place, so rack, type and variant all still match while the
+    // panel holds a pointer to the destroyed instance.  Address comparison
+    // only -- mBuiltDsp is never dereferenced.
     if (rack != mBuiltRack
+        || eff != mBuiltDsp
         || (eff != nullptr
             && (type != mBuiltType || EffectParamMap::variantOf (type, eff) != mBuiltVariant)))
         buildPanel();
@@ -606,16 +647,35 @@ EffectVisualWindow::EffectVisualWindow (VibeSynthProcessor& proc,
       mResolveName (std::move (resolveChannelName))
 {
     mStrip = std::make_unique<EffectVisualStrip>();
+
+    // The strip asks the MODEL for its feed every time it needs one, so a DSP
+    // destroyed under an open window can never be read or written through a
+    // stale pointer.  Captures only this window (which owns the strip), never
+    // a DSP.
+    mStrip->setFeedResolver ([this]() -> EffectVisualFeed*
+    {
+        auto* rack = EffectsPage::rackForChannelId (mProcessor.mVibeGraph, mChannelId);
+        if (rack == nullptr) return nullptr;
+
+        for (int s = 0; s < EffectRack::kNumSlots; ++s)
+            if (rack->getSlotUuid (s) == mUuid)
+                if (auto* d = rack->getSlotEffect (s))
+                    return &d->visualFeed();
+
+        return nullptr;
+    });
+
     addAndMakeVisible (*mStrip);
     rebind();
 }
 
 EffectVisualWindow::~EffectVisualWindow()
 {
-    // Drop the feed BEFORE the strip dies so the watcher is released against a
-    // DSP that still exists.  The strip's own destructor would do it too; this
-    // is explicit because the ordering is the whole safety argument.
-    if (mStrip) mStrip->setFeed (nullptr);
+    // Clear the resolver FIRST: it captures `this`, and the strip may still
+    // release its watcher while being destroyed.  Cleared, the release sees no
+    // live feed and drops the count instead of calling into a half-destroyed
+    // window.  (The strip is destroyed below with the rest of our members.)
+    if (mStrip) mStrip->setFeedResolver (nullptr);
 }
 
 juce::String EffectVisualWindow::windowTitle() const { return mTitle; }
@@ -667,10 +727,33 @@ void EffectVisualWindow::rebind()
 
     if (dsp != mBoundDsp)
     {
-        mBoundDsp  = dsp;
+        mBoundDsp  = dsp;   // address only, for change detection
         mBoundType = type;
-        mStrip->setFeed (dsp != nullptr ? &dsp->visualFeed() : nullptr);
         mStrip->setCaption (fxName);
+
+        // Per-effect drawing lives HERE rather than inside the strip: the strip
+        // owns timing, gating and chrome; what a column MEANS is the effect's
+        // business.  T18 adds the remaining nine branches.
+        //
+        // Limiter (T13 / BLU-110): output level as the envelope, gain reduction
+        // hanging from the top in cyan, ceiling as the orange line it is
+        // measured against.  Colours are the approved #00FFF2 / #FF9100 pair.
+        if (mBoundType == EffectType::Limiter)
+        {
+            mStrip->setPaintFn ([] (juce::Graphics& g, juce::Rectangle<float> area,
+                                    EffectVisualFeed* feed)
+            {
+                EffectVisualDraw::scrollingHistory (g, area, feed,
+                                                    VC::TextDim,                    // level envelope
+                                                    juce::Colour (0xff00fff2),      // GR
+                                                    true,
+                                                    juce::Colour (0xffff9100));     // ceiling
+            });
+        }
+        else
+        {
+            mStrip->setPaintFn (nullptr);
+        }
     }
 
     const juce::String strip = mResolveName ? mResolveName (mChannelId) : juce::String();

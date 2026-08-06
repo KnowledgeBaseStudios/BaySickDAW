@@ -98,13 +98,23 @@ public:
         detach();
     }
 
-    // The DSP whose feed this strip displays.  Safe to pass null (effect
-    // swapped out, slot cleared) -- the strip simply stops watching.
-    void setFeed (EffectVisualFeed* feed)
+    // How the strip finds its feed.  A RESOLVER, not a pointer, and that is the
+    // whole safety argument (Jeff, 2026-08-05 crash).
+    //
+    // The feed lives INSIDE a DSPBase, and a project load destroys that DSP
+    // underneath an open Visual window.  A cached raw pointer then gets read by
+    // the 30 Hz paint and -- far worse -- WRITTEN by removeWatcher()'s
+    // compare-exchange when the strip finally noticed and tried to release.
+    // A write into freed memory is heap corruption, which showed up as blacked
+    // out regions of the frame and an access violation in an unrelated timer
+    // whose own pointers were perfectly valid.
+    //
+    // Resolving on demand means the strip can never read or write through a
+    // pointer the model no longer vouches for.
+    void setFeedResolver (std::function<EffectVisualFeed*()> fn)
     {
-        if (feed == mFeed) return;
         releaseWatcher();
-        mFeed = feed;
+        mResolve = std::move (fn);
         acquireWatcherIfVisible();
     }
 
@@ -134,8 +144,9 @@ public:
             g.drawText (mCaption, capArea, juce::Justification::centredLeft);
         }
 
+        // Resolved fresh every paint -- never a stored pointer.
         if (mPaint && ! content.isEmpty())
-            mPaint (g, content, mFeed);
+            mPaint (g, content, mResolve ? mResolve() : nullptr);
     }
 
     // Visibility is the gate, and it has to be observed from BOTH of these:
@@ -156,16 +167,31 @@ private:
 
     void acquireWatcherIfVisible()
     {
-        if (! shouldWatch() || mFeed == nullptr || mWatching) return;
-        mFeed->addWatcher();
+        if (! shouldWatch() || mWatching) return;
+        auto* feed = mResolve ? mResolve() : nullptr;
+        if (feed == nullptr) return;
+
+        feed->addWatcher();
+        mWatched  = feed;
         mWatching = true;
         EffectVisualClock::get().add (this);
     }
 
     void releaseWatcher()
     {
-        if (mWatching && mFeed != nullptr)
-            mFeed->removeWatcher();
+        // THE LIVENESS TEST.  Only decrement through a pointer the resolver
+        // STILL hands back: if it returns something else (or nothing), the DSP
+        // we incremented on is gone and its count went with it -- there is
+        // nothing to release and touching it would be a write into freed
+        // memory.  Leaking a count on a dead object costs exactly nothing,
+        // because the object holding it no longer exists.
+        if (mWatching && mWatched != nullptr)
+        {
+            auto* live = mResolve ? mResolve() : nullptr;
+            if (live == mWatched)
+                mWatched->removeWatcher();
+        }
+        mWatched  = nullptr;
         mWatching = false;
     }
 
@@ -177,7 +203,10 @@ private:
 
     void detach() { detachClockAndWatcher(); }
 
-    EffectVisualFeed* mFeed { nullptr };
+    std::function<EffectVisualFeed*()> mResolve;
+    // The feed we incremented on.  Held ONLY to compare against what the
+    // resolver returns later -- never dereferenced without that check passing.
+    EffectVisualFeed* mWatched  { nullptr };
     bool              mWatching { false };
     PaintFn           mPaint;
     juce::String      mCaption;

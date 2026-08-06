@@ -296,6 +296,44 @@ never made music) rather than by how it looks.
       region, and what the comb notches represent.
 - [ ] Build gate → commit on approval → running notes.
 
+### Task 20 — Delay panel rebuild + reference-grouping review (Jeff-directed 2026-08-05)
+
+Split out of T18: the nine visuals are one job, this is another that happens to
+start with Delay.  Reference is FL Studio's Fruity Delay 3 (Jeff's link), with
+his own caveat that even that unit is already fairly advanced.
+
+**Found:** Basic filtering exists but only covers ROW 1 — the Delay hides exactly
+four knobs in Basic (Duck, DkThr, DkAtt, DkRel), which is why its top row is 9
+vs Advanced's 13.  Row 2's twelve (ModHz, ModTime, ModFB, Diff, DiffSprd, LoBit,
+FBDst, FBKnee, FBSym, Spread, Pan, Smooth) are NEVER filtered, so Basic renders
+the same twelve at 691 px instead of 1047 and the labels truncate to "M...",
+"Df...", "Lo...".  Basic was not a simpler panel, it was the same panel squeezed.
+Thirteen other panels do this properly (compressor hides KneeW/Mix/LookA/Det/
+SCHPF; reverb hides HFRatio/WetTone/Freeze).
+
+- [ ] **Basic contents, locked by Jeff 2026-08-05:** Time, Feed, Wet, Dry, Tone;
+      the three FB knobs; Smooth; both topology chicken-heads; all three switches
+      (BPM / Pitch / Limit-Sat); and the BPM sync-division chicken-head **moved up
+      beside the other two chicken-heads, above the BPM switch** (today it floats
+      next to the curve).  Everything else is Advanced.
+      *Reading to confirm at execution:* "the 3 fb knobs" = FBDst / FBKnee /
+      FBSym (row 2's three FB-prefixed knobs), NOT FBCut / FBReso — those are the
+      feedback FILTER and stay Advanced.  Flagged because it is the one genuine
+      ambiguity in the list.
+- [ ] **Feedback curve leaves the panel** for the Delay's T18 visual window, so
+      all of the Delay's visualisation is in one place and the 46 px box stops
+      eating panel width.
+- [ ] **Re-layout both modes** around the freed space: Basic becomes one readable
+      cluster; Advanced fits better once the curve box and the misplaced
+      chicken-head stop taking room.  Dead space in Advanced addressed.
+- [ ] **Grouping review across the reference-based panels** now that windows
+      exist — functional grouping only.  Jeff's line (2026-08-05): grouping
+      controls the way they are used is ordinary practice; what is off-limits is
+      distinctive VISUAL appearance -- faceplate, colour scheme, typography,
+      badging, or a layout so specific it reads as that product.  Sits alongside
+      the existing no-brand-names-in-user-facing-strings rule.
+- [ ] Build gate → commit on approval → running notes.
+
 ### Task 19 — Window placement + Basic/Advanced swap sizing (Jeff-found 2026-08-05)
 
 - [ ] **Windows must LAND on screen.** Open/restore clamps POSITION into the

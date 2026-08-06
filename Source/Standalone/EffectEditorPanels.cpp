@@ -509,6 +509,12 @@ struct FETCompressorPanel : public EditorPanelBase, public juce::Timer
 
     void timerCallback() override
     {
+        // QA-Layout T13 crash fix: liveDsp() returns mDsp ONLY while the rack
+        // still hands back that same pointer for this slot, so this one guard
+        // makes every mDsp-> below safe.  A panel timer and its window's rebuild
+        // poll are independent; without this the timer can tick on a DSP a
+        // project load already destroyed.  See EditorPanelBase::liveDsp.
+        if (liveDsp() == nullptr) return;
         if (grMeter && mDsp)
         {
             // Mode 0 = GR display.  Modes 1/2 (+8 / +4 output) and mode 3 (OFF)
@@ -658,6 +664,12 @@ struct OptoCompressorPanel : public EditorPanelBase, public juce::Timer
 
     void timerCallback() override
     {
+        // QA-Layout T13 crash fix: liveDsp() returns mDsp ONLY while the rack
+        // still hands back that same pointer for this slot, so this one guard
+        // makes every mDsp-> below safe.  A panel timer and its window's rebuild
+        // poll are independent; without this the timer can tick on a DSP a
+        // project load already destroyed.  See EditorPanelBase::liveDsp.
+        if (liveDsp() == nullptr) return;
         if (grMeter && mDsp)
         {
             // GR mode: real GR.  +10 / +4 modes wired but display "--" until
@@ -793,6 +805,12 @@ struct CSStyleCompressorPanel : public EditorPanelBase, public juce::Timer
 
     void timerCallback() override
     {
+        // QA-Layout T13 crash fix: liveDsp() returns mDsp ONLY while the rack
+        // still hands back that same pointer for this slot, so this one guard
+        // makes every mDsp-> below safe.  A panel timer and its window's rebuild
+        // poll are independent; without this the timer can tick on a DSP a
+        // project load already destroyed.  See EditorPanelBase::liveDsp.
+        if (liveDsp() == nullptr) return;
         if (grMeter && mDsp) grMeter->setGainReduction (mDsp->getGainReductionDb());
     }
 
@@ -1019,6 +1037,12 @@ struct CompressorPanel : public EditorPanelBase,
 
     void timerCallback() override
     {
+        // QA-Layout T13 crash fix: liveDsp() returns mDsp ONLY while the rack
+        // still hands back that same pointer for this slot, so this one guard
+        // makes every mDsp-> below safe.  A panel timer and its window's rebuild
+        // poll are independent; without this the timer can tick on a DSP a
+        // project load already destroyed.  See EditorPanelBase::liveDsp.
+        if (liveDsp() == nullptr) return;
         if (mDsp && grMeter) grMeter->setGainReduction(mDsp->getGainReductionDb());
     }
 
@@ -1905,6 +1929,19 @@ struct FbCurveDisplay : public juce::Component,
 {
     explicit FbCurveDisplay (DelayDSP* dsp) : mDsp (dsp) {}
 
+    // Set by the owning panel so this child can ask whether its DSP is STILL
+    // live before reading it.  A child component inherits the panel's hazard
+    // without inheriting EditorPanelBase::liveDsp, which is exactly how this
+    // site was missed in the first sweep (QA-Layout T13, 2026-08-05).
+    std::function<DSPBase*()> mResolveDsp;
+
+    DelayDSP* liveDsp() const
+    {
+        if (mDsp == nullptr) return nullptr;
+        if (! mResolveDsp)   return mDsp;
+        return mResolveDsp() == static_cast<DSPBase*> (mDsp) ? mDsp : nullptr;
+    }
+
     void parentHierarchyChanged() override
     {
         if (getPeer() != nullptr)      { if (! isTimerRunning()) startTimerHz (10); }
@@ -1946,7 +1983,10 @@ struct FbCurveDisplay : public juce::Component,
 private:
     void timerCallback() override
     {
-        if (mDsp == nullptr) return;
+        // Own liveDsp(): this is a child Component with its own DelayDSP*, not
+        // an EditorPanelBase, so it carries the panel's hazard and needed its
+        // own resolver.  Non-null here means the rack still vouches for mDsp.
+        if (liveDsp() == nullptr) return;
         const float lvl  = mDsp->getFBDistLevel();
         const float knee = mDsp->getFBDistKnee();
         const float sym  = mDsp->getFBDistSymmetry();
@@ -2081,6 +2121,10 @@ struct DelayPanel : public EditorPanelBase
         addAndMakeVisible(*modelSel);
 
         fbCurve = std::make_unique<FbCurveDisplay> (dsp);
+        // Hand the child the SAME liveness question this panel answers, so it
+        // stops reading its DSP the moment the model stops vouching for ours.
+        fbCurve->mResolveDsp = [this]() -> DSPBase*
+                               { return mResolveDsp ? mResolveDsp() : mDsp; };
         fbCurve->setTooltip ("Feedback distortion transfer curve - input vertical, output horizontal");
         addAndMakeVisible (*fbCurve);
 
@@ -3794,28 +3838,32 @@ struct LimiterPanel : public EditorPanelBase,
 
     void timerCallback() override
     {
-        if (mDsp == nullptr) return;
+        // liveDsp(), NOT mDsp -- see the note on EditorPanelBase::liveDsp.  A
+        // null mDsp was never the danger; a DESTROYED one is, and only the
+        // model can say which we are holding.
+        auto* dsp = static_cast<LimiterDSP*> (liveDsp());
+        if (dsp == nullptr) return;
         // Keep-alive for the output loudness meter (BLU-110).
-        mDsp->pokeLufsMeter();
-        if (grMeter) grMeter->setGainReduction (mDsp->getGainReductionDb());
+        dsp->pokeLufsMeter();
+        if (grMeter) grMeter->setGainReduction (dsp->getGainReductionDb());
         if (loudMeter)
-            loudMeter->setValues (mDsp->getOutputLufsShortTerm(),
-                                  mDsp->getOutputLevelDb(),
-                                  mDsp->getLoudnessTargetLufs(),
-                                  mDsp->getLoudnessTargetOn());
+            loudMeter->setValues (dsp->getOutputLufsShortTerm(),
+                                  dsp->getOutputLevelDb(),
+                                  dsp->getLoudnessTargetLufs(),
+                                  dsp->getLoudnessTargetOn());
         // The two automatic modes move the ceiling and the input gain behind the
         // knobs, so the tooltips report the live trim -- otherwise the user has no
         // way to see why the sound differs from what the knobs read.
         // DualLabelToggle is not a tooltip client; its ToggleButton is.
-        if (mDsp->getLoudnessTargetOn() && lufsTgtTog)
+        if (dsp->getLoudnessTargetOn() && lufsTgtTog)
             lufsTgtTog->btn().setTooltip ("Loudness target mode: active, currently trimming "
-                                    + juce::String (mDsp->getLoudnessServoDb(), 1)
+                                    + juce::String (dsp->getLoudnessServoDb(), 1)
                                     + " dB of input gain");
-        if (mDsp->getAutoCeiling() && autoCeilTog)
+        if (dsp->getAutoCeiling() && autoCeilTog)
             autoCeilTog->btn().setTooltip ("True-peak auto-ceiling: measured "
-                                     + juce::String (mDsp->getOutputTruePeakDb(), 1)
+                                     + juce::String (dsp->getOutputTruePeakDb(), 1)
                                      + " dBTP, ceiling trimmed "
-                                     + juce::String (mDsp->getCeilingTrimDb(), 1) + " dB");
+                                     + juce::String (dsp->getCeilingTrimDb(), 1) + " dB");
     }
 
     void paint (juce::Graphics& g) override
@@ -5115,6 +5163,12 @@ struct BassCompressorStylePanel : public EditorPanelBase, public juce::Timer
 
     void timerCallback() override
     {
+        // QA-Layout T13 crash fix: liveDsp() returns mDsp ONLY while the rack
+        // still hands back that same pointer for this slot, so this one guard
+        // makes every mDsp-> below safe.  A panel timer and its window's rebuild
+        // poll are independent; without this the timer can tick on a DSP a
+        // project load already destroyed.  See EditorPanelBase::liveDsp.
+        if (liveDsp() == nullptr) return;
         if (grMeter && mDsp) grMeter->setGainReduction (mDsp->getGainReductionDb());
     }
 
@@ -5989,6 +6043,12 @@ struct FurmanEQStylePanel : public EditorPanelBase,
 
     void timerCallback() override
     {
+        // QA-Layout T13 crash fix: liveDsp() returns mDsp ONLY while the rack
+        // still hands back that same pointer for this slot, so this one guard
+        // makes every mDsp-> below safe.  A panel timer and its window's rebuild
+        // poll are independent; without this the timer can tick on a DSP a
+        // project load already destroyed.  See EditorPanelBase::liveDsp.
+        if (liveDsp() == nullptr) return;
         const bool ov = (mDsp && mDsp->getClipLevel() > 1.0f);
         if (ov != mOverload) { mOverload = ov; repaint (mLedBounds); }
     }
@@ -6225,6 +6285,12 @@ struct TunerStylePanel : public EditorPanelBase, private juce::Timer
 
     void timerCallback() override
     {
+        // QA-Layout T13 crash fix: liveDsp() returns mDsp ONLY while the rack
+        // still hands back that same pointer for this slot, so this one guard
+        // makes every mDsp-> below safe.  A panel timer and its window's rebuild
+        // poll are independent; without this the timer can tick on a DSP a
+        // project load already destroyed.  See EditorPanelBase::liveDsp.
+        if (liveDsp() == nullptr) return;
         if (! mDsp) return;
         TunerStyleDSP::Reading r {};
         const bool ok = mDsp->getReading (r);
@@ -6847,6 +6913,12 @@ struct GatePanel : public EditorPanelBase, private juce::Timer
 
     void timerCallback() override
     {
+        // QA-Layout T13 crash fix: liveDsp() returns mDsp ONLY while the rack
+        // still hands back that same pointer for this slot, so this one guard
+        // makes every mDsp-> below safe.  A panel timer and its window's rebuild
+        // poll are independent; without this the timer can tick on a DSP a
+        // project load already destroyed.  See EditorPanelBase::liveDsp.
+        if (liveDsp() == nullptr) return;
         if (grMeter && mDsp)
             grMeter->setGainReduction (mDsp->getGainReductionDb());
     }
@@ -6932,6 +7004,12 @@ struct DeReverbPanel : public EditorPanelBase, private juce::Timer
 
     void timerCallback() override
     {
+        // QA-Layout T13 crash fix: liveDsp() returns mDsp ONLY while the rack
+        // still hands back that same pointer for this slot, so this one guard
+        // makes every mDsp-> below safe.  A panel timer and its window's rebuild
+        // poll are independent; without this the timer can tick on a DSP a
+        // project load already destroyed.  See EditorPanelBase::liveDsp.
+        if (liveDsp() == nullptr) return;
         if (grMeter && mDsp)
             grMeter->setGainReduction (mDsp->getGainReductionDb());
     }

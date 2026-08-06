@@ -199,6 +199,18 @@ public:
     // on relayout -- one containment definition, two callers.
     juce::Rectangle<int> clampToWorkspace (juce::Rectangle<int> target) const;
 
+    // QA-Layout T19: the MOVE half alone -- slides a window inside without ever
+    // resizing it.  Separate from clampToWorkspace because the size fit is what
+    // made the first drag of an oversized window snap to the workspace width,
+    // and landing a window on screen must not cost the size the user chose.
+    //
+    // CALLERS MUST SUPPRESS SAVES (ScopedSaveSuppress).  A clamp is not a
+    // placement the user made, and during startup the workspace passes through
+    // a PARTIAL size on its way to full -- so a clamp that reaches the bounds
+    // store writes a squeezed position over a good one and the real placement is
+    // gone.  That is exactly what shipped on 2026-08-05 and had to be reverted.
+    juce::Rectangle<int> clampPositionToWorkspace (juce::Rectangle<int> target) const;
+
     // QA-Layout T3 (L5, REVERSES locked call 5a): full-screen toggle -- fills
     // the workspace, and toggles back to the bounds the user last set.  The
     // restore path is what answers 5a's original objection (a maximised

@@ -5505,6 +5505,13 @@ namespace
     private:
         void timerCallback() override
         {
+            // LIVENESS, not null-ness (QA-Layout T13, 2026-08-05).  This popout
+            // holds a raw EQ8DSP* and polls it; a project load rebuilds the
+            // graph and destroys that DSP while the callout is still on screen.
+            // Same defect class that crashed LimiterPanel -- a null check never
+            // catches a DESTROYED object.  The owner's resolver answers whether
+            // ours is still the live one.
+            if (mResolveDsp && mResolveDsp() != mDsp) return;
             if (!mDsp) return;
             const float gr = mDsp->getBandGrDb(mBandIdx);
             if (std::abs(gr - mLiveGrDb) > 0.05f)
@@ -5514,6 +5521,13 @@ namespace
             }
         }
 
+    public:
+        // Set by the owner after construction: returns the EQ8DSP the model
+        // currently vouches for, so the poll above can tell "still live" from
+        // "destroyed under us".
+        std::function<EQ8DSP*()> mResolveDsp;
+
+    private:
         juce::AudioProcessorValueTreeState& mApvts;
         EQ8DSP* mDsp;
         int     mBandIdx;
@@ -5643,6 +5657,14 @@ void ParametricEQDisplay::openDynamicParamsPopout(int bandIdx)
                                                           std::move(onRatioChanged),
                                                           std::move(onAttackChanged),
                                                           std::move(onReleaseChanged));
+    // The popout outlives nothing, but a project load CAN rebuild the graph
+    // while it is open -- so it asks the display for the live DSP rather than
+    // trusting the pointer it was handed at construction.
+    content->mResolveDsp = [safeSelf]() -> EQ8DSP*
+    {
+        auto* self = safeSelf.getComponent();
+        return self != nullptr ? self->mBoundDSP : nullptr;
+    };
     // Anchor the CallOutBox to the band handle's screen rect so the arrow points
     // at the band it's editing.
     const float hx = freqToX(mBands[bandIdx].freq);
@@ -7860,7 +7882,16 @@ void TimeLAF::drawWarnRing (juce::Graphics& g, juce::Rectangle<float> area,
                             float startAngle, float endAngle)
 {
     const auto centre = area.getCentre();
-    const float radius = area.getWidth() * 0.5f - 1.0f;
+
+    // The stroke is CENTRED on the radius, so the arc's outer edge sits half a
+    // thickness beyond it.  Deriving the radius from width alone and ignoring
+    // that put the outer edge past the component on both counts: clipped at the
+    // sides on any cell, and clipped at the top on a cell taller than it is
+    // wide.  Use the SMALLER dimension and leave room for the fattest stroke
+    // this function draws (Jeff, 2026-08-05).
+    constexpr float kMaxStroke = 2.6f;
+    const float radius = juce::jmin (area.getWidth(), area.getHeight()) * 0.5f
+                           - (kMaxStroke * 0.5f) - 1.0f;
     if (radius <= 1.0f) return;
 
     const float valAngle = startAngle + sliderPos * (endAngle - startAngle);

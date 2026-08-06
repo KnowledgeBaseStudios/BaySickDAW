@@ -13769,7 +13769,22 @@ void StandaloneEditor::openEffectSlotWindow (int channelId, int slotIndex)
         juce::Component::SafePointer<WorkspaceWindow> safeWin (win);
         contentRaw->onFloorChanged = [safeWin] (int w, int h)
         {
-            if (auto* wnd = safeWin.getComponent()) wnd->setDefaultWindowSize (w, h);
+            auto* wnd = safeWin.getComponent();
+            if (wnd == nullptr) return;
+
+            // Order matters: lower the floor FIRST, or the resize below is
+            // clamped by the outgoing variant's minimum.
+            wnd->setDefaultWindowSize (w, h);
+
+            // Then take the size outright (Jeff, 2026-08-05).
+            // setDefaultWindowSize only ever GROWS a window to its floor, which
+            // is right when a floor arrives late for a window already sized by
+            // the user -- but a Basic/Advanced swap is a variant change, and the
+            // new variant's size is the answer in BOTH directions.  Without
+            // this, Basic->Advanced widened correctly and Advanced->Basic left
+            // the window stuck at 1047 wide with dead space where the advanced
+            // controls had been.
+            wnd->setSize (w, h);
         };
     }
 

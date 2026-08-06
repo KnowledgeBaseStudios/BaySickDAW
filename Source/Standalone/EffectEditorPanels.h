@@ -93,6 +93,31 @@ struct EditorPanelBase : public juce::Component
     EffectType mEffectType { EffectType::None };
     int        mVariant    { 0 };
 
+    // How the OWNER re-checks that mDsp is still the live DSP for this slot.
+    // Set by EffectSlotWindow after the panel is built; null elsewhere, which
+    // makes liveDsp() fall through to mDsp unchanged.
+    std::function<DSPBase*()> mResolveDsp;
+
+    // USE THIS IN EVERY TIMER, never mDsp directly (Jeff, 2026-08-05 crash).
+    //
+    // A panel's timer and its window's rebuild poll are two INDEPENDENT timers.
+    // A project load destroys and replaces a slot's DSP; the window rebuilds the
+    // panel when it notices, but if the panel's own tick lands first it
+    // dereferences the destroyed object.  getGainReductionDb() is virtual, so
+    // that read goes through the vtable of freed memory and takes the app down
+    // -- which is exactly what a project saved with a window outside the frame
+    // reproduced on LOAD.
+    //
+    // The test is identity, not liveness-by-inspection: if the model no longer
+    // hands back the same pointer we were built against, ours is gone.  Return
+    // null and let the window's rebuild land on its own schedule.
+    DSPBase* liveDsp() const
+    {
+        if (mDsp == nullptr)   return nullptr;
+        if (! mResolveDsp)     return mDsp;
+        return mResolveDsp() == mDsp ? mDsp : nullptr;
+    }
+
     // Hook for panels that keep knobs in their own vectors (r1knobs, r2knobs)
     // instead of the base-class `knobs`. Return raw pointers to extra knobs so
     // setSlotContext() can stamp paramIds on them and register automation

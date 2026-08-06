@@ -114,6 +114,11 @@ public:
     void getStateInformation (juce::MemoryBlock& dest) override;
     void setStateInformation (const void* data, int sz) override;
     float getGainReductionDb() const override { return mGrDb.load(); }
+
+    // QA-Layout T13: this DSP publishes columns, so Menu > Visual is offered
+    // rather than greyed.  The column layout it writes is documented at the
+    // push site in process().
+    bool hasVisualFeed() const override { return true; }
     int   getLatencySamples() const override  { return mLatencySamples; }
 
     // ── Setters ───────────────────────────────────────────────────────────────
