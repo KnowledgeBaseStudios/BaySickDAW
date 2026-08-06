@@ -12549,7 +12549,22 @@ void StandaloneEditor::serializeUIState (juce::XmlElement& root)
                                 if (ip->getPageIndex() == idx && ip->isPedalsCompact())
                                     rec->setAttribute ("view", 1);
                 }
+                // T21: the visual window's tether lock rides its open record the
+                // same way.  Written only when UNLOCKED -- locked is the default
+                // a tethered pair opens in, so the absent attribute means locked
+                // and an older project restores tethered.
+                if (aw.key.startsWith ("vis:") && aw.window->tetherPartner() != nullptr
+                    && ! aw.window->isTetherLocked())
+                    rec->setAttribute ("lock", 0);
             }
+
+        // T21: visuals the user CLOSED by hand.  This cannot ride the <Open>
+        // records -- a closed window has none -- and without it auto-open and the
+        // persisted open/closed state cancel each other out: every effect window
+        // reopening would drag the visual back and the close would never stick
+        // (Jeff flagged exactly this in the workshop).
+        for (const auto& k : mVisualUserClosed)
+            wins->createNewChildElement ("VisClosed")->setAttribute ("key", k);
     }
 
     // QA-Layout T9 (L29): shared control-lane prefs -- ONE height for every
@@ -13789,12 +13804,50 @@ void StandaloneEditor::openEffectSlotWindow (int channelId, int slotIndex)
     }
 
     contentRaw->onTitleChanged = [win] (const juce::String& t) { win->setTitle (t); };
+    // Menu > Visual is a USER request: it clears the closed-by-hand flag, which
+    // is the only way back to auto-opening once they have dismissed it.
     contentRaw->onOpenVisual   = [this] (int chId, const juce::String& u)
-                                 { openEffectVisualWindow (chId, u); };
+                                 { openEffectVisualWindow (chId, u, true); };
     contentRaw->configureTitleStrip (*win->getPageMenu());
+
+    // T21 (Jeff, 2026-08-06): a LOCKED pair closes together.  Closing only the
+    // half you clicked "defeats the whole purpose" -- one piece means one close.
+    // Unlocked, each window closes alone, which is what the unlock is for.
+    {
+        juce::Component::SafePointer<WorkspaceWindow> safeFx (win);
+        const juce::String visKey = "vis:" + juce::String (channelId) + ":" + uuid;
+        win->onCloseRequested = [this, key, visKey, safeFx]
+        {
+            auto* w = safeFx.getComponent();
+            const bool locked = w != nullptr && w->isTetherLocked();
+
+            // closeAuxWindow DESTROYS the window that owns this lambda, so every
+            // captured value is dead the moment it returns.  Copy first, then
+            // close, then use only the copies.
+            auto* const     self = this;
+            const juce::String fx = key, vis = visKey;
+
+            self->closeAuxWindow (fx);
+            if (locked) self->closeAuxWindow (vis);
+        };
+    }
+
+    // T21 auto-open (Jeff, 2026-08-05).  Runs LAST: the visual tethers itself to
+    // this window by looking it up in the registry, so the effect window has to
+    // be fully built and registered first.  Suppressed only by the user having
+    // closed this slot's visual by hand.
+    if (auto* rackNow = EffectsPage::rackForChannelId (mProcessor.mVibeGraph, channelId))
+        if (auto* dsp = rackNow->getSlotEffect (slotIndex))
+            if (dsp->hasVisual())
+            {
+                const juce::String visKey = "vis:" + juce::String (channelId) + ":" + uuid;
+                if (mVisualUserClosed.find (visKey) == mVisualUserClosed.end())
+                    openEffectVisualWindow (channelId, uuid, false);
+            }
 }
 
-void StandaloneEditor::openEffectVisualWindow (int channelId, const juce::String& slotUuid)
+void StandaloneEditor::openEffectVisualWindow (int channelId, const juce::String& slotUuid,
+                                               bool userRequested)
 {
     if (slotUuid.isEmpty()) return;
 
@@ -13806,7 +13859,26 @@ void StandaloneEditor::openEffectVisualWindow (int channelId, const juce::String
     const juce::String key    = "vis:"    + juce::String (channelId) + ":" + slotUuid;
     const juce::String posKey = "vispos:" + juce::String (channelId) + ":" + slotUuid;
 
-    if (auto* existing = findAuxWindow (key)) { existing->toFront (true); return; }
+    // Asking for it again is the user un-dismissing it.
+    if (userRequested) mVisualUserClosed.erase (key);
+
+    // The effect window's key is this one's with a different prefix -- same
+    // channel, same uuid -- so the parent is found without threading a pointer
+    // through the call.
+    const juce::String fxKey = "fx:" + juce::String (channelId) + ":" + slotUuid;
+    const bool wantLocked = mVisualUnlockedKeys.count (key) == 0;
+
+    // RE-TETHER an already-open visual.  Closing the effect window kills the
+    // link (its half of the pair is destroyed and the SafePointer nulls), so
+    // reopening it while the visual survived would otherwise leave two windows
+    // that look tethered, report unlocked, and move independently.
+    if (auto* existing = findAuxWindow (key))
+    {
+        if (auto* parent = findAuxWindow (fxKey))
+            parent->setTetherFollower (existing, wantLocked);
+        existing->toFront (true);
+        return;
+    }
 
     auto content = std::make_unique<EffectVisualWindow> (
         mProcessor, channelId, slotUuid,
@@ -13814,6 +13886,8 @@ void StandaloneEditor::openEffectVisualWindow (int channelId, const juce::String
                                                            : juce::String(); });
 
     auto* contentRaw = content.get();
+    // Slot died under us -- NOT a dismissal, so the closed-by-hand flag stays
+    // clear and the visual comes back with the effect next time.
     contentRaw->onRequestClose = [this, key] { closeAuxWindow (key); };
 
     auto* win = openAuxWindow (key, posKey, contentRaw->windowTitle(),
@@ -13821,6 +13895,54 @@ void StandaloneEditor::openEffectVisualWindow (int channelId, const juce::String
     if (win == nullptr) return;
 
     contentRaw->onTitleChanged = [win] (const juce::String& t) { win->setTitle (t); };
+
+    // The X on a LOCKED visual closes the pair (Jeff, 2026-08-06) and is NOT a
+    // dismissal -- the effect window is going with it, so the visual must come
+    // back when that reopens.  Setting the flag there would mean the pair closed
+    // together and reopened as one window, which is the bug in the other
+    // direction.  Unlocked, the X means what it used to: dismiss this visual, do
+    // not auto-open it again.
+    {
+        juce::Component::SafePointer<WorkspaceWindow> safeVis (win);
+        win->onCloseRequested = [this, key, fxKey, safeVis]
+        {
+            auto* w = safeVis.getComponent();
+            const bool locked = w != nullptr && w->isTetherLocked();
+
+            // closeAuxWindow DESTROYS the window that owns this lambda -- copy
+            // everything needed before the first one, then touch only the copies.
+            auto* const     self = this;
+            const juce::String vis = key, fx = fxKey;
+
+            if (! locked) self->mVisualUserClosed.insert (vis);
+            self->closeAuxWindow (vis);
+            if (locked) self->closeAuxWindow (fx);
+        };
+    }
+
+    // ── T21 tether ───────────────────────────────────────────────────────────
+    // A visual opened while its effect window is CLOSED gets no tether; the
+    // effect window re-tethers it on open via the re-tether path above.
+    if (auto* parent = findAuxWindow (fxKey))
+        parent->setTetherFollower (win, wantLocked);
+
+    juce::Component::SafePointer<WorkspaceWindow> safeWin (win);
+    contentRaw->isTetherLocked = [safeWin]
+    {
+        auto* w = safeWin.getComponent();
+        return w != nullptr && w->isTetherLocked();
+    };
+    contentRaw->onToggleTetherLock = [this, key, safeWin]
+    {
+        auto* w = safeWin.getComponent();
+        if (w == nullptr || w->tetherPartner() == nullptr) return;
+
+        const bool nowLocked = ! w->isTetherLocked();
+        w->setTetherLocked (nowLocked);
+        if (nowLocked) mVisualUnlockedKeys.erase  (key);
+        else           mVisualUnlockedKeys.insert (key);
+    };
+    contentRaw->configureTitleStrip (*win->getPageMenu());
 }
 
 void StandaloneEditor::openEffectEqWindow (int channelId, bool pre)
@@ -14731,12 +14853,23 @@ void StandaloneEditor::deserializeUIState (const juce::XmlElement& root)
             if (WorkspaceWindow::isGlobalPlacementKey (key))
                 m[key] = b;
         WorkspaceWindow::replaceSessionBounds (std::move (m));
+        // T21: both tether stores REPLACE rather than merge -- they are project
+        // content, and carrying the previous project's forward would unlock or
+        // suppress visuals belonging to effects this project never had.
+        mVisualUnlockedKeys.clear();
         for (auto* o : wins->getChildWithTagNameIterator ("Open"))
         {
             const auto k = o->getStringAttribute ("key");
             openWindowKeys.add (k);
             if (o->getIntAttribute ("view", 0) == 1) compactWindowKeys.add (k);
+            // Absent means LOCKED (see the writer) -- only an explicit 0
+            // restores an unlocked pair, so an older project restores tethered.
+            if (k.startsWith ("vis:") && o->getIntAttribute ("lock", 1) == 0)
+                mVisualUnlockedKeys.insert (k);
         }
+        mVisualUserClosed.clear();
+        for (auto* c : wins->getChildWithTagNameIterator ("VisClosed"))
+            mVisualUserClosed.insert (c->getStringAttribute ("key"));
     }
 
     // QA-Layout T9 (L29): shared lane prefs restored BEFORE the tab rebuild so

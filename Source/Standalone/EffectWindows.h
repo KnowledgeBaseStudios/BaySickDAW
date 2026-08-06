@@ -224,6 +224,19 @@ public:
     std::function<void()> onRequestClose;
     std::function<void(const juce::String&)> onTitleChanged;
 
+    // QA-Layout T21: this window had NO title strip at all -- the only one of the
+    // three effect window classes without one -- so the lock/unlock item Jeff
+    // ruled in had nowhere to live.  Built here rather than on the effect side
+    // because the lock is the VISUAL's property: it is the window that gets moved
+    // around by the tether, so it is the one that has to be able to break it.
+    void configureTitleStrip (PageMenuBar& bar);
+
+    // Read + toggle the tether lock.  BOTH are closures resolved live rather
+    // than a cached bool, for the reason the Freeze entry taught us: the menu is
+    // rebuilt on every open and must reflect the state at that moment.
+    std::function<bool()> isTetherLocked;
+    std::function<void()> onToggleTetherLock;
+
     void resized() override;
     // Peer-keyed poll, matching every other repeating UI cost in the shell.
     void parentHierarchyChanged() override;
@@ -237,6 +250,7 @@ private:
     juce::String        mUuid;
     std::function<juce::String(int)> mResolveName;
 
+    juce::Component::SafePointer<PageMenuBar> mBar;
     std::unique_ptr<EffectVisualStrip> mStrip;
     DSPBase*     mBoundDsp  { nullptr };
     EffectType   mBoundType { EffectType::None };

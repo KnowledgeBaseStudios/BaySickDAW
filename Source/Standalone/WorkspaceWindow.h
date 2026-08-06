@@ -220,6 +220,45 @@ public:
     void toggleWorkspaceFill();
     bool isWorkspaceFilled() const noexcept { return mFilled; }
 
+    // ── Tether (QA-Layout T21; workshopped + ruled by Jeff 2026-08-05) ────────
+    // Two windows that drag as one piece.  Built for an effect window and its
+    // visual, and the relationship is deliberately ASYMMETRIC IN ONE AXIS ONLY:
+    //
+    //   * DRAGGING is symmetric -- grabbing EITHER half moves both (Jeff's
+    //     ruling; the alternatives were refusing the child's drag, which reads
+    //     as broken, and auto-unlocking, which is surprising).
+    //   * PLACEMENT has a leader -- the follower sits under it, centred, at the
+    //     leader's width.  Something has to own the geometry, and "the visual
+    //     follows the effect" is the whole point.
+    //
+    // Both links are SafePointers: these windows are destroy-on-close and either
+    // half can go first, so a dead partner just ends the tether rather than
+    // leaving a dangling raw pointer in a drag path.
+    //
+    // T19 made the hard half free.  The workshop expected to need a combined-rect
+    // containment clamp, because clamping each half independently tears a pair
+    // apart at the workspace edge -- but T19 dropped the size fit from the drag
+    // path and made the bound the CURSOR, which is one point no matter which half
+    // was grabbed.  There is nothing left to separate them.
+    void setTetherFollower (WorkspaceWindow* follower, bool locked);
+    void setTetherLocked   (bool locked);
+    bool isTetherLocked() const noexcept { return mTetherLocked && tetherPartner() != nullptr; }
+    WorkspaceWindow* tetherPartner()  const noexcept;
+    WorkspaceWindow* tetherFollower() const noexcept { return mTetherFollower.getComponent(); }
+    WorkspaceWindow* tetherLeader()   const noexcept { return mTetherLeader.getComponent(); }
+
+    // Put the follower under this window, centred, matching width.  Called at
+    // lock, at open, and whenever the leader's size changes -- which is what
+    // carries a Basic/Advanced swap across to the visual (Jeff: "matches width",
+    // and it follows in both directions because the visual's 420x220 floor is
+    // under both the 691 and 1047 variants).
+    void layoutTetherFollower();
+
+    // Fired on BOTH halves when the lock toggles, so the owner can persist it and
+    // either window's menu can re-read it live rather than caching a bool -- the
+    // staleness that made the locked-Freeze entry ignore its own unlock flag.
+    std::function<void(bool)> onTetherLockChanged;
+
     // Soft edge magnetism (Jeff spec 2026-07-28).  While dragging, a window
     // whose edge comes within kSnapPx of another window's opposing edge (or of
     // a workspace edge) is nudged flush so they line up.  Deliberately NOT a
@@ -285,6 +324,22 @@ private:
     static std::set<juce::String>& diskEligibleKeys();
     static std::set<juce::String>& placementKeys();
     static int sSaveSuppressed;   // ScopedSaveSuppress depth
+    // ── Tether state (T21) ───────────────────────────────────────────────────
+    juce::Component::SafePointer<WorkspaceWindow> mTetherFollower;
+    juce::Component::SafePointer<WorkspaceWindow> mTetherLeader;
+    bool mTetherLocked { false };
+    // Re-entrancy guard for the fronting half only.  toFront on the partner
+    // re-enters broughtToFront, which would front us back, forever.  The MOVE
+    // half needs no guard: only the window under the mouse runs mouseDrag, and
+    // translating the partner never re-enters it.
+    static bool sTetherFronting;
+    // Set while layoutTetherFollower is writing the follower's bounds.  The
+    // follower re-asks its leader to re-seat it on its own resize/move (a
+    // width change or a workspace clamp has to re-centre it), and without this
+    // that request re-enters the very call that caused it.
+    static bool sTetherSyncing;
+    // Ask our leader to re-seat us.  No-op unless we ARE a locked follower.
+    void requestTetherReseat();
     // mContent owns only when setContent was used; mContentRaw is what gets
     // laid out either way (and is the non-owning case's only handle).
     std::unique_ptr<juce::Component>                 mContent;

@@ -681,6 +681,27 @@ EffectVisualWindow::~EffectVisualWindow()
 
 juce::String EffectVisualWindow::windowTitle() const { return mTitle; }
 
+void EffectVisualWindow::configureTitleStrip (PageMenuBar& bar)
+{
+    mBar = &bar;
+
+    bar.setMenuBuilder ([this] (juce::Component* anchor)
+    {
+        juce::PopupMenu m;
+
+        // Wording states what the item DOES rather than what the state is: this
+        // menu has one entry, so a ticked "Locked to Effect Window" would read as
+        // a label with nothing to be consistent against.
+        const bool locked = isTetherLocked && isTetherLocked();
+        m.addItem (locked ? "Unlock from Effect Window" : "Lock to Effect Window",
+                   [this] { if (onToggleTetherLock) onToggleTetherLock(); });
+
+        m.showMenuAsync (juce::PopupMenu::Options()
+                             .withTargetComponent (anchor != nullptr ? anchor
+                                                                     : (juce::Component*) mBar));
+    });
+}
+
 void EffectVisualWindow::resized()
 {
     if (mStrip) mStrip->setBounds (getLocalBounds().reduced (6));

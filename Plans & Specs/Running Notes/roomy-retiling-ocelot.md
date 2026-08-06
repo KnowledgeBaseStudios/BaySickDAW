@@ -964,6 +964,100 @@ way it is meant to, and the lock/unlock item needs a title strip built on
 `EffectVisualWindow` from scratch — a class T18 would otherwise be touching nine more
 times first.
 
+## 2026-08-06 — Task 21 built — effect-window <-> visual-window tether
+
+- **Build gate green on a RE-RUN.**  The first run reported five exit codes 0, but two
+  edits to `StandaloneEditor.cpp` landed after it was launched, so that result did not
+  cover the tree and was discarded rather than counted.  Re-run: five exit codes 0, four
+  `vcxproj -> ...exe` link lines, zero `error C` / `error LNK` / `error MSB`,
+  `StandaloneEditor.cpp` confirmed recompiled in the log, no new warnings in any touched
+  file.
+- **The tether primitive lives on `WorkspaceWindow`, asymmetric in ONE axis only.**
+  DRAGGING is symmetric — `mouseDrag` translates the partner by the delta actually taken,
+  in either direction, so grabbing either half moves both (Jeff's ruling).  PLACEMENT has
+  a leader: `layoutTetherFollower` puts the follower under it, centred, at its width.
+  Both links are `SafePointer`s because these windows are destroy-on-close and either half
+  can go first.
+- **The delta is measured from the position ACTUALLY TAKEN, not from `desired`** — so
+  magnetism and the cursor bound are already inside it and the pair cannot drift apart by
+  whatever either of those corrected.
+- **T19 made the hard half free, confirmed.**  The workshop expected to need a
+  combined-rect containment clamp, because clamping each half independently tears a pair
+  apart at the workspace edge.  T19 dropped the size fit from the drag path and made the
+  bound the CURSOR — one point regardless of which half was grabbed — so there is nothing
+  left to separate them and no combined clamp was written.
+- **Basic/Advanced carries across with no new plumbing.**  `resized()` calls
+  `layoutTetherFollower`, and the variant swap already resizes the effect window (T19), so
+  the follower picks the width up from there.  `moved()` calls it too, so a programmatic
+  move (workspace clamp, restore) carries the follower like a drag does.
+- **Fronting**: `broughtToFront` fronts the partner then re-fronts itself, so the half the
+  user clicked ends on top.  One static re-entrancy guard covers both re-entries and also
+  suppresses `onBroughtToFront` during the swap, or the partner's pass would sync the
+  ribbon to the wrong window on its way through.  The MOVE half needs no guard — only the
+  window under the mouse runs `mouseDrag`.
+- **FOUND EN ROUTE: the visual window has been showing a DEAD "Menu" heading since T17.**
+  `PageMenuBar` builds `mHamburgerBtn` unconditionally in its constructor, so every window
+  has the heading; `showHamburgerMenu` with no builder and no items hits
+  `if (mMenuItems.empty()) return;` and silently does nothing.  `EffectVisualWindow` was
+  the only one of the three effect window classes with no `configureTitleStrip`, so its
+  Menu had never done anything.  T21 gives it one, which fixes that incidentally.
+- **Auto-open + the closed-by-hand flag.**  `openEffectSlotWindow` opens the slot's visual
+  last (the visual tethers itself by looking the effect window up in the registry, so that
+  window must be registered first), gated on `hasVisual()` and on the user not having
+  dismissed it.  The two close paths are deliberately distinguished: `onCloseRequested`
+  (the X) sets the flag, `onRequestClose` (slot died) does not — so a visual that vanished
+  because its effect was cleared comes back with it, and one the user shut stays shut.
+- **RE-TETHER path, caught in self-review before the gate.**  Closing the effect window
+  destroys its half and nulls the SafePointer.  Reopening it while the visual survived hit
+  `openEffectVisualWindow`'s existing-window early return and never re-tethered — two
+  windows that look paired, report unlocked and move independently.  The early return now
+  re-tethers.
+- **Persistence.**  Lock rides the visual's `<Open>` record like the pedals window's view
+  mode, written ONLY when unlocked — absent means locked, so an older project restores
+  tethered.  The closed-by-hand set needs its own `<VisClosed>` elements because a closed
+  window has no `<Open>` record to ride.  Both stores REPLACE on load rather than merge:
+  they are project content, and carrying the previous project's forward would unlock or
+  suppress visuals belonging to effects this project never had.
+- **No Rule 4 diagnostics added.**
+
+**TWO BUGS, both Jeff-found on the first run, both fixed before the commit:**
+
+- **1. A locked pair drifted out of alignment.**  The leader->follower move was applied
+  TWICE.  `setBounds` in `mouseDrag` fires `moved()`, which already calls
+  `layoutTetherFollower` and re-seats the follower; the delta block then shoved it one
+  more frame's delta past that.  Every frame re-seated correctly and then knocked it off
+  by one delta, so the drag ended slightly out and stayed out.  Propagation is now
+  follower->leader ONLY — the direction that has no other mechanism, since nothing else
+  moves a leader.  The leader's `moved()` re-seats the follower afterwards, so the pair
+  self-corrects every frame instead of accumulating.
+  Second source of the same symptom: a follower resized by its own border kept the new
+  width and sat off-centre until the leader happened to move.  `requestTetherReseat` on
+  the follower's `resized()`/`moved()` fixes that, guarded by `mDraggingTitle` — re-seating
+  during the follower's OWN drag would snap it back to the leader's old position, the
+  measured delta would come out zero, and the follower would be undraggable.
+- **2. A locked pair closed and opened separately** (Jeff: "defeats the whole purpose").
+  Closing either half now closes both while locked; unlocked, each closes alone, which is
+  what the unlock is for.  **One deliberate asymmetry:** closing a LOCKED visual does NOT
+  set the closed-by-hand flag, because the effect window is going with it and has to bring
+  it back on reopen.  Setting it there produces the same bug mirrored — the pair closes
+  together and reopens as one window.
+  **Lifetime hazard in both close paths:** `closeAuxWindow` destroys the window that owns
+  the lambda currently running, so every captured value is dead the moment the first close
+  returns.  Both handlers copy what they need to locals before the first call and touch
+  only the copies afterwards.  The pre-existing single-close handlers got away with it by
+  never using a capture after the call.
+- **A shadowing warning of mine was fixed rather than shipped**: the tether's `delta` hid
+  `mouseDrag`'s raw pointer-travel `delta` (C4456).  Renamed `applied`, since it is
+  specifically the movement taken AFTER magnetism and the cursor bound — carrying the raw
+  one would drift the pair by whatever either corrected.
+- **NOT VERIFIED IN THE APP** beyond Jeff's two reports — this batch is inside G4 and takes
+  no batch smoke, so the rest rides the G4 boundary walk.  The G4 smoke needs steps for it:
+  drag either half, resize either half, lock/unlock from the visual's Menu, Basic/Advanced
+  with a locked pair, close either half locked and unlocked, close-and-reopen the effect
+  window with the visual still up, and save/reload with a pair both locked and unlocked.
+- **Next:** T18 — the remaining nine effect visuals, now landing into a window that
+  behaves the way it is meant to.
+
 ## Diagnostic Instrumentation Catalog (Rule 4)
 
 | Site | Tag | Purpose | Disposition |

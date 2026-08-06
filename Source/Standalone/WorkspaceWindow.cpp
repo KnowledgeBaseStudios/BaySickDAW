@@ -146,7 +146,26 @@ WorkspaceWindow::WorkspaceWindow (juce::String persistKey, juce::String title)
 void WorkspaceWindow::broughtToFront()
 {
     juce::Component::broughtToFront();
-    if (onBroughtToFront) onBroughtToFront();
+
+    // T21: a locked pair fronts together.  These are native child peers, so
+    // without this the effect window can end up behind a third window while its
+    // visual sits in front of it -- which reads as more broken than anything
+    // else the tether could get wrong.
+    //
+    // Partner first, then US, so the half the user actually clicked ends on top.
+    // The guard covers both re-entries: the partner's toFront calls its own
+    // broughtToFront, and so does ours.
+    if (! sTetherFronting && isTetherLocked())
+        if (auto* partner = tetherPartner())
+        {
+            const juce::ScopedValueSetter<bool> guard (sTetherFronting, true);
+            partner->toFront (false);
+            toFront (false);
+        }
+
+    // Suppressed during the swap above: the partner's fronting would otherwise
+    // sync the ribbon to the wrong window on its way past.
+    if (! sTetherFronting && onBroughtToFront) onBroughtToFront();
 }
 
 Workspace* WorkspaceWindow::workspace() const noexcept
@@ -339,6 +358,16 @@ void WorkspaceWindow::resized()
     if (mPageMenu) mPageMenu->setBounds (title);
 
     if (mContentRaw) mContentRaw->setBounds (contentArea());
+
+    // T21: the leader changing size re-seats the follower, which is what carries
+    // a Basic/Advanced swap across to the visual -- the swap resizes the effect
+    // window (T19) and the follower picks the new width up from here rather than
+    // needing its own hook into the variant change.
+    layoutTetherFollower();
+    // ...and OUR size changing re-centres us under our leader.  Without this a
+    // follower resized by its own border kept the new width and drifted off
+    // centre until the leader happened to move.
+    requestTetherReseat();
 }
 
 void WorkspaceWindow::mouseDown (const juce::MouseEvent& e)
@@ -445,7 +474,31 @@ void WorkspaceWindow::mouseDrag (const juce::MouseEvent& e)
         mWarpsThisDrag = 0;
     }
 
+    const auto beforePos = getBounds().getPosition();
     setBounds (finalBounds);
+
+    // T21: propagate ONLY follower -> leader.
+    //
+    // The leader -> follower direction is already done by the setBounds above:
+    // it fires moved(), which calls layoutTetherFollower().  Doing it here as
+    // well applied the delta TWICE to the follower -- re-seated correctly by
+    // moved(), then shoved one frame's delta past it -- which is the drift Jeff
+    // saw as "they become unaligned but still locked".
+    //
+    // Dragging the FOLLOWER still needs this, because a follower has nothing
+    // that moves its leader.  The leader's own moved() then re-seats the
+    // follower, so the pair self-corrects every frame instead of accumulating.
+    if (isTetherLocked())
+        if (auto* lead = mTetherLeader.getComponent())
+        {
+            // NOT the `delta` above -- that one is the raw pointer travel, this
+            // is what the window actually took after magnetism and the cursor
+            // bound. Carrying the raw one would drift the pair by whatever
+            // either of those corrected.
+            const auto applied = getBounds().getPosition() - beforePos;
+            if (! applied.isOrigin())
+                lead->setTopLeftPosition (lead->getBounds().getPosition() + applied);
+        }
 }
 
 void WorkspaceWindow::moved()
@@ -454,6 +507,14 @@ void WorkspaceWindow::moved()
     // including programmatic moves (snap, workspace clamp) that never pass
     // through the title-drag release below.
     if (isOnDesktop()) saveBounds();
+
+    // T21: a PROGRAMMATIC move of the leader carries the follower too -- a
+    // workspace clamp or a restore is still the pair moving.  This is ALSO the
+    // leader->follower half of a drag; mouseDrag deliberately does not repeat it.
+    layoutTetherFollower();
+    // A programmatic move of the FOLLOWER (workspace clamp, restore) puts it back
+    // under its leader.  Skipped during its own drag -- see requestTetherReseat.
+    requestTetherReseat();
 }
 
 void WorkspaceWindow::mouseUp (const juce::MouseEvent&)
@@ -486,6 +547,90 @@ void WorkspaceWindow::toggleWorkspaceFill()
     }
     if (mFullBtn) mFullBtn->repaint();
     saveBounds();
+}
+
+// ── Tether (T21) ─────────────────────────────────────────────────────────────
+bool WorkspaceWindow::sTetherFronting = false;
+bool WorkspaceWindow::sTetherSyncing  = false;
+
+void WorkspaceWindow::requestTetherReseat()
+{
+    // NOT during our own title drag: the drag moves us first and moves the
+    // leader second, so re-seating in between would snap us back to the leader's
+    // OLD position, the measured delta would come out zero, and the follower
+    // would be undraggable.
+    if (mDraggingTitle || sTetherSyncing || ! mTetherLocked) return;
+    if (auto* lead = mTetherLeader.getComponent())
+        lead->layoutTetherFollower();
+}
+
+WorkspaceWindow* WorkspaceWindow::tetherPartner() const noexcept
+{
+    if (auto* f = mTetherFollower.getComponent()) return f;
+    return mTetherLeader.getComponent();
+}
+
+void WorkspaceWindow::setTetherFollower (WorkspaceWindow* follower, bool locked)
+{
+    // Clear the old follower's back-link first, or a re-tether leaves an orphan
+    // still pointing at us and it keeps getting dragged around.
+    if (auto* old = mTetherFollower.getComponent())
+        if (old != follower)
+            old->mTetherLeader = nullptr;
+
+    mTetherFollower = follower;
+    if (follower != nullptr)
+    {
+        follower->mTetherLeader = this;
+        setTetherLocked (locked);
+    }
+    else
+    {
+        mTetherLocked = false;
+    }
+}
+
+void WorkspaceWindow::setTetherLocked (bool locked)
+{
+    auto* partner = tetherPartner();
+    if (mTetherLocked == locked && partner == nullptr) return;
+
+    mTetherLocked = locked;
+    if (partner != nullptr) partner->mTetherLocked = locked;
+
+    // Re-seat the follower the moment it is locked: locking a pair the user has
+    // dragged apart has to DO something visible, or the menu item reads as dead.
+    if (locked)
+    {
+        if (mTetherFollower.getComponent() != nullptr)               layoutTetherFollower();
+        else if (auto* lead = mTetherLeader.getComponent())          lead->layoutTetherFollower();
+    }
+
+    if (onTetherLockChanged)                    onTetherLockChanged (locked);
+    if (partner && partner->onTetherLockChanged) partner->onTetherLockChanged (locked);
+}
+
+void WorkspaceWindow::layoutTetherFollower()
+{
+    auto* f = mTetherFollower.getComponent();
+    if (f == nullptr || ! mTetherLocked || sTetherSyncing) return;
+    const juce::ScopedValueSetter<bool> guard (sTetherSyncing, true);
+
+    // Width matches; height is the follower's own.  The follower's constrainer
+    // still owns the floor, so a leader narrower than the follower's minimum
+    // (no such pair today -- 691/1047 against a 420 floor) widens rather than
+    // producing a sub-minimum window.
+    const auto lead = getBounds();
+    const int  w    = juce::jmax (getWidth(), f->mConstrainer.getMinimumWidth());
+    const int  h    = juce::jmax (f->getHeight(), f->mConstrainer.getMinimumHeight());
+
+    // Centred under the leader.  NOT clamped into the workspace: a locked pair is
+    // one tall object and a pair dragged low is allowed to hang off the bottom,
+    // exactly as a single oversized window is since T19.  Only the OPENING
+    // placement gets pulled in, and attachTo already does that for the follower.
+    const juce::Rectangle<int> want { lead.getCentreX() - w / 2, lead.getBottom(), w, h };
+    if (want != f->getBounds())
+        f->setBounds (want);
 }
 
 void WorkspaceWindow::attachTo (Workspace& ws)

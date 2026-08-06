@@ -1,6 +1,7 @@
 #pragma once
 #include <JuceHeader.h>
 #include <optional>   // defaultSizeFor returns nothing when an engine is unbound
+#include <set>        // T21 tether stores (closed-by-hand / unlocked visual keys)
 #include "../PluginProcessor.h"
 #include "StandaloneApp.h"
 #include "SharedUI.h"
@@ -270,7 +271,22 @@ private:
     // QA-Layout T17: one visual window PER SLOT (Jeff's call) so a compressor
     // and a limiter can be watched side by side.  Keyed by uuid like the effect
     // window, so it follows the effect through a reorder.
-    void openEffectVisualWindow (int channelId, const juce::String& slotUuid);
+    //
+    // T21 `userRequested`: true only for Menu > Visual.  Auto-open passes false,
+    // and the difference is load-bearing -- asking for it by hand un-dismisses
+    // it, arriving with the effect window must not.
+    void openEffectVisualWindow (int channelId, const juce::String& slotUuid,
+                                 bool userRequested = false);
+
+    // ── T21 tether stores (project content; replaced on load, not merged) ─────
+    // Visual keys the user closed BY HAND.  Auto-open respects this, or the two
+    // features cancel: every effect-window open would drag the visual back and
+    // the close would never stick.
+    std::set<juce::String> mVisualUserClosed;
+    // Visual keys whose tether the user UNLOCKED.  Stored as the exception
+    // because locked is the default a pair opens in, so an absent entry -- and
+    // therefore any older project -- restores tethered.
+    std::set<juce::String> mVisualUnlockedKeys;
 
     // QA-Layout T4 (Window-7): the Vox sub-page windows + the Inst
     // Pedals/NAM-IR windows.  Content hosts the PAGE-OWNED panel non-owned
