@@ -500,23 +500,26 @@ void ReverbDSP::process (juce::AudioBuffer<float>& buffer)
     // H-9 (2026-05-02): all 5 algorithms live -- Plate (B) + Hall (existing
     // FDN, default) + Chamber (D) + Room (E) + VocalBooth (F).  Each runs
     // its own dedicated DSP code path with its own buffers + topology.
-    switch (mAlgorithm)
     {
-        case Algorithm::Plate:
-            if (processPlate      (buffer)) return;
-            break;
-        case Algorithm::Chamber:
-            if (processChamber    (buffer)) return;
-            break;
-        case Algorithm::Room:
-            if (processRoom       (buffer)) return;
-            break;
-        case Algorithm::VocalBooth:
-            if (processVocalBooth (buffer)) return;
-            break;
-        case Algorithm::Hall:
-        default:
-            break;
+        // T18: every algorithm path exits through the visual push, so the
+        // in-vs-out strip works regardless of which reverb body ran.
+        const float visIn = visualCaptureIn (buffer);
+        bool done = false;
+        switch (mAlgorithm)
+        {
+            case Algorithm::Plate:      done = processPlate      (buffer); break;
+            case Algorithm::Chamber:    done = processChamber    (buffer); break;
+            case Algorithm::Room:       done = processRoom       (buffer); break;
+            case Algorithm::VocalBooth: done = processVocalBooth (buffer); break;
+            case Algorithm::Hall:
+            default:                    break;
+        }
+        if (done)
+        {
+            visualPushInOut (buffer, visIn);
+            return;
+        }
+        mVisHallIn = visIn;   // Hall runs inline below; pushed at its end
     }
 
     const int N  = buffer.getNumSamples();
@@ -794,6 +797,8 @@ void ReverbDSP::process (juce::AudioBuffer<float>& buffer)
         L[s] = origL * mDry + wetL * mWet * duckScalar;
         R[s] = origR * mDry + wetR * mWet * duckScalar;
     }
+
+    visualPushInOut (buffer, mVisHallIn);   // T18: the Hall path's exit
 }
 
 //──────────────────────────────────────────────────────────────────────────────

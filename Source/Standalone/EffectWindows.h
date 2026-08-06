@@ -245,6 +245,15 @@ private:
     void timerCallback() override;
     void rebind();
 
+    // QA-Layout T18: the DSP for this slot, resolved LIVE through the rack on
+    // every call and never cached -- the same discipline the feed resolver uses,
+    // and for the same reason: a project load destroys the DSP under an open
+    // window.  Parametric visuals (LFO scopes, transfer curves, comb notches,
+    // delay grids, reverb envelopes) read knob state at PAINT time rather than
+    // consuming the audio feed, which is what makes a knob edit show up in the
+    // display immediately -- there is nothing to publish and nothing to wait for.
+    DSPBase* resolveDsp() const;
+
     VibeSynthProcessor& mProcessor;
     int                 mChannelId;
     juce::String        mUuid;

@@ -135,4 +135,25 @@ protected:
 
     // Protected, not private: derived effects push into it from process().
     EffectVisualFeed mVisualFeed;
+
+    // ── T18 audio-first visual helpers (Jeff, 2026-08-06) ────────────────────
+    // The standard column for an in-vs-out visual: hi/lo = output envelope,
+    // a = input envelope, both linear so the strip reads as a waveform.  Shared
+    // here so six effects cannot drift six ways.  Both are no-ops (one relaxed
+    // load) while nothing is watching.
+    //
+    // Call visualCaptureIn at the TOP of process(), before the buffer is
+    // modified; call visualPushInOut at the end of every path that produced
+    // output.  A path that early-returns simply pushes nothing that block.
+    float visualCaptureIn (const juce::AudioBuffer<float>& b) const noexcept
+    {
+        return mVisualFeed.isActive() && b.getNumSamples() > 0
+                 ? b.getMagnitude (0, b.getNumSamples()) : 0.0f;
+    }
+    void visualPushInOut (const juce::AudioBuffer<float>& b, float inPk) noexcept
+    {
+        if (! mVisualFeed.isActive() || b.getNumSamples() <= 0) return;
+        const float o = juce::jlimit (0.0f, 1.0f, b.getMagnitude (0, b.getNumSamples()));
+        mVisualFeed.push (-o, o, juce::jlimit (0.0f, 1.0f, inPk), 0.0f);
+    }
 };

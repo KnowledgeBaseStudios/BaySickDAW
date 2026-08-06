@@ -115,6 +115,11 @@ public:
     void setErLevel (float v);   // old 0-1 → setER dB
 
     // ── Public getters for panel construct-time state-sync (A9 extended to sliders) ─────
+    // QA-Layout T18 (audio-first rework, Jeff 2026-08-06): publishes in-vs-out
+    // per block so the visual shows the tail actually hanging on after the
+    // sound stops; the decay diagram (drawn from the getters below) rides
+    // beside it.
+    bool  hasVisualFeed()     const override { return true;            }
     float getRoomSize()       const noexcept { return mRoomSize;       }
     float getDecay()          const noexcept { return mDecay;          }
     float getHFRatio()        const noexcept { return mHFRatio;        }
@@ -234,6 +239,9 @@ private:
     float     mDuckAttackMs    { 10.0f };
     float     mDuckReleaseMs   { 200.0f };
     float     mDuckEnv         { 0.0f };       // envelope follower output
+    // T18: input peak captured at the top of process(), consumed by the Hall
+    // path's exit push (the other algorithms push before returning).
+    float     mVisHallIn       { 0.0f };
 
     // Tempo-sync pre-delay state -- mTempoSync engages the snap; mSyncDivIdx
     // picks which entry of kSyncDivisions[] (declared public above) gets used.

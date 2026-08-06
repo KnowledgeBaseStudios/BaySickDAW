@@ -135,6 +135,30 @@ public:
     // The two must be edited together; both carry a pointer to the other.
     float shapeFeedbackForDisplay (float x) const;
 
+    // QA-Layout T18 (audio-first rework, Jeff 2026-08-06): publishes wet + dry
+    // envelopes per block so the visual shows the actual echoes against the
+    // beat grid; the drive curve rides beside it.
+    bool  hasVisualFeed      () const override { return true;            }
+    // The BPM this delay is ACTUALLY syncing to.  Read from the DSP rather than
+    // the transport so a beat grid can never disagree with the repeats drawn on
+    // it -- they come from the same number.
+    float hostBpmForDisplay  () const noexcept { return (float) mHostBPM;  }
+
+    // CL-299 (1) second half (Jeff, 2026-08-05; recovered 2026-08-06): the Feed
+    // knob's warning ring shows the feedback OCCURRING, not just where the knob
+    // is set.  This is the peak of the loop-injection signal (step 5, post
+    // mFeedbackLevel scale) with a ~250 ms decay: near 1.0 means step 4's
+    // limiter/saturator is clamping every cycle -- the "extreme clipping" state
+    // the ring is supposed to go red on.  Relaxed atomic; the UI reads a level
+    // meter, not a synchronization point.
+    float getFeedbackEnvForDisplay() const noexcept
+    { return mFbEnvDisplay.load (std::memory_order_relaxed); }
+
+    // One feed column = one processed block, so the visual needs the block
+    // duration to place beat lines on the scrolling audio.
+    float lastBlockMsForDisplay() const noexcept
+    { return mBlockMsDisplay.load (std::memory_order_relaxed); }
+
     // ── Public getters for panel construct-time state-sync (A9) ─────────────
     int   getDelayModel      () const noexcept { return mDelayModel;     }
     int   getFBFilterType    () const noexcept { return mFBFilterType;   }
@@ -327,6 +351,11 @@ private:
     // 5 Hz DC-blocker state (feedback-path, post-distortion / pre-level)
     float mDcBlockXL  { 0.0f }, mDcBlockYL { 0.0f };
     float mDcBlockXR  { 0.0f }, mDcBlockYR { 0.0f };
+
+    // Audio-thread writes, UI reads (getFeedbackEnvForDisplay).  Peak of the
+    // loop-injection signal, decayed at block rate -- see the accessor comment.
+    std::atomic<float> mFbEnvDisplay  { 0.0f };
+    std::atomic<float> mBlockMsDisplay { 0.0f };   // lastBlockMsForDisplay
 
     // Scaffolding for future Spectral Delay subsystem. Reserved in state
     // serialization so v1 presets survive the eventual addition without

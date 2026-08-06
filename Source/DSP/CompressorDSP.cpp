@@ -360,6 +360,12 @@ void CompressorDSP::process (juce::AudioBuffer<float>& buffer)
     if (numSamples == 0 || numChannels == 0)
         return;
 
+    // T18: the visual wants the INPUT the compressor is reacting to, captured
+    // before this function changes the buffer.  Gated: costs one buffer scan
+    // per block, and only while a visual window is watching.
+    const bool  visActive = mVisualFeed.isActive();
+    const float visInPk   = visActive ? buffer.getMagnitude (0, numSamples) : 0.0f;
+
     // C.4 Phase 1 (2026-04-30): pull SC source from the strip's SC array via
     // mScPick (set each block by EffectRack from slot.scPick).  Overrides
     // any legacy setSidechainBuffer / setUseSidechain wiring -- the strip's
@@ -658,6 +664,19 @@ void CompressorDSP::process (juce::AudioBuffer<float>& buffer)
     // GR is <=0; "deeper" means more negative; "decay toward rest" = toward 0.
     const float decayedGr = juce::jmin(0.0f, prevGr + mGrDecayDbPerBlock);
     mGainReductionDb.store(juce::jmin(blockGr, decayedGr), std::memory_order_relaxed);
+
+    // T18 column: input envelope (linear, so the strip reads as a waveform),
+    // GR as a 0..1 depth from the top of a 20 dB window, threshold as a linear
+    // level the display draws as a line ON that waveform -- which is where
+    // attack and release become VISIBLE: how fast the cyan digs in after the
+    // input crosses the line, and how long it hangs on after it falls back.
+    if (visActive)
+    {
+        const float inLin  = juce::jlimit (0.0f, 1.0f, visInPk);
+        const float gr01   = juce::jlimit (0.0f, 1.0f, -blockGr / 20.0f);
+        const float thrLin = juce::Decibels::decibelsToGain (threshold);
+        mVisualFeed.push (-inLin, inLin, gr01, thrLin);
+    }
 }
 
 // -----------------------------------------------------------------------------

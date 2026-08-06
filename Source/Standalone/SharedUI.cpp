@@ -7858,30 +7858,39 @@ void JewelIndicator::paint(juce::Graphics& g)
 }
 
 // ── TimeLAF ───────────────────────────────────────────────────────────────────
-// CL-299 (1): the additive-feedback warning ring.  Opt-in per slider via the
-// `kWarnRingFrom` property, whose value is the NORMALIZED position where the
-// warning starts (Delay's Feed knob runs 0..1.2, so 100 % sits at 0.833).
+// CL-299 (1): the additive-feedback warning ring, BOTH halves.  Opt-in per
+// slider via `kWarnRingFrom` (normalized position where the warning zone
+// starts; Delay's Feed knob runs 0..1.2, so 100 % sits at 0.833).
 //
-// Drawn as an arc over the knob rather than as a tint, because these knobs are
-// filmstrip-rendered: there is no drawn ring to recolour, and repainting the
-// strip in another hue would look like a different control rather than the same
-// control in a warning state.
+// The ring is a live METER, not a knob decoration (Jeff, 2026-08-05: "actually
+// show you hitting red when it was causing the extreme clipping" -- the first
+// build colored purely off the knob position and showed nothing about the
+// audio).  Two layers:
+//   * SETTING track (thin): where the knob is -- green through the safe range,
+//     a dim outline through the over-unity zone, so the runaway RANGE stays
+//     visible before anything sounds.
+//   * LIVE arc (thick): the feedback level actually circulating, fed by the
+//     owning panel's timer via `kWarnRingLive`.  Its lit head IS the current
+//     level; the color runs green -> orange as the loop approaches unity and
+//     red only when the shaper is genuinely clamping (the clipping Jeff
+//     described).  Silence draws nothing.
 void TimeLAF::drawWarnRing (juce::Graphics& g, juce::Rectangle<float> area,
-                            float sliderPos, float warnFrom,
+                            float sliderPos, float warnFrom, float liveNorm,
                             float startAngle, float endAngle)
 {
     const auto centre = area.getCentre();
 
     // The stroke is CENTRED on the radius, so the arc's outer edge sits half a
-    // thickness beyond it.  Deriving the radius from width alone and ignoring
-    // that put the outer edge past the component on both counts: clipped at the
-    // sides on any cell, and clipped at the top on a cell taller than it is
-    // wide.  Use the SMALLER dimension and leave room for the fattest stroke
-    // this function draws (Jeff, 2026-08-05).
-    constexpr float kMaxStroke = 2.6f;
-    const float radius = juce::jmin (area.getWidth(), area.getHeight()) * 0.5f
-                           - (kMaxStroke * 0.5f) - 1.0f;
-    if (radius <= 1.0f) return;
+    // thickness beyond it.  Use the SMALLER dimension and leave room for the
+    // fattest stroke this function draws (Jeff, 2026-08-05).  The kWarnRing*
+    // calibration fits the ellipse to the knob face -- see their declaration.
+    constexpr float kMaxStroke = 2.8f;
+    const float baseR = juce::jmin (area.getWidth(), area.getHeight()) * 0.5f
+                          - (kMaxStroke * 0.5f) - 1.0f;
+    const float rx = baseR * kWarnRingScaleX;
+    const float ry = baseR * kWarnRingScaleY;
+    if (rx <= 1.0f || ry <= 1.0f) return;
+    const float rot = kWarnRingRotDeg * juce::MathConstants<float>::pi / 180.0f;
 
     const float valAngle = startAngle + sliderPos * (endAngle - startAngle);
 
@@ -7891,23 +7900,39 @@ void TimeLAF::drawWarnRing (juce::Graphics& g, juce::Rectangle<float> area,
         juce::Path p;
         // addCentredArc with startAsNewSubPath -- addArc's habit of starting a
         // new subpath is a documented trap for FILLED paths; this one is stroked.
-        p.addCentredArc (centre.x, centre.y, radius, radius, 0.0f, from, to, true);
+        p.addCentredArc (centre.x, centre.y, rx, ry, rot, from, to, true);
         g.setColour (c);
         g.strokePath (p, juce::PathStrokeType (thickness, juce::PathStrokeType::curved,
                                                juce::PathStrokeType::rounded));
     };
 
-    // Safe portion, then the overdrive portion ramping orange -> red.
+    // ── Setting track (thin) ─────────────────────────────────────────────────
     const float warnAngle = startAngle + juce::jlimit (0.0f, 1.0f, warnFrom) * (endAngle - startAngle);
-    arcTo (startAngle, juce::jmin (valAngle, warnAngle), juce::Colour (0xff22cc44), 2.0f);
-
+    arcTo (startAngle, juce::jmin (valAngle, warnAngle),
+           juce::Colour (0xff22cc44).withAlpha (0.55f), 1.4f);
     if (sliderPos > warnFrom)
+        arcTo (warnAngle, valAngle, juce::Colour (0xffff9100).withAlpha (0.35f), 1.4f);
+
+    // ── Live meter (thick) ───────────────────────────────────────────────────
+    const float live = juce::jlimit (0.0f, 1.0f, liveNorm);
+    if (live > 0.005f)
     {
-        const float over = juce::jlimit (0.0f, 1.0f,
-                                         (sliderPos - warnFrom) / juce::jmax (0.001f, 1.0f - warnFrom));
-        arcTo (warnAngle, valAngle,
-               juce::Colour (0xffff9100).interpolatedWith (juce::Colour (0xffcc2222), over),
-               2.6f);
+        const float liveAngle = startAngle + live * (endAngle - startAngle);
+        juce::Colour c;
+        if (live < warnFrom)
+        {
+            // Approach: green heating toward orange as the loop nears unity.
+            const float t = live / juce::jmax (0.001f, warnFrom);
+            c = juce::Colour (0xff22cc44).interpolatedWith (juce::Colour (0xffff9100),
+                                                            t * t);
+        }
+        else
+        {
+            // Past unity: the step-4 shaper is clamping -- this is the red.
+            const float t = (live - warnFrom) / juce::jmax (0.001f, 1.0f - warnFrom);
+            c = juce::Colour (0xffff9100).interpolatedWith (juce::Colour (0xffee2222), t);
+        }
+        arcTo (startAngle, liveAngle, c, 2.8f);
     }
 }
 
@@ -7915,23 +7940,27 @@ void TimeLAF::drawRotarySlider(juce::Graphics& g, int x, int y, int w, int h,
     float sliderPos, float startAngle, float endAngle, juce::Slider& s)
 {
     const bool hasWarnRing = s.getProperties().contains (kWarnRingFrom);
+    const auto  fullArea   = juce::Rectangle<float>((float)x, (float)y, (float)w, (float)h);
+    // Jeff, 2026-08-06: knob at FULL size; the ring fits the knob face via the
+    // kWarnRing* ellipse calibration instead of shrinking the knob.
+    const auto  knobArea   = fullArea;
 
     // ── Filmstrip render (64x64, 101 frames) ──────────────────────────────────
     {
         const auto& strip = Filmstrips::timeBased();
         if (strip.isValid())
         {
-            Filmstrips::drawFrame(g, strip, 64, 64, 101, sliderPos,
-                                  juce::Rectangle<float>((float)x, (float)y, (float)w, (float)h));
+            Filmstrips::drawFrame(g, strip, 64, 64, 101, sliderPos, knobArea);
             if (hasWarnRing)
-                drawWarnRing (g, juce::Rectangle<float>((float)x, (float)y, (float)w, (float)h),
+                drawWarnRing (g, fullArea,
                               sliderPos, (float) s.getProperties()[kWarnRingFrom],
+                              (float) s.getProperties().getWithDefault (kWarnRingLive, 0.0f),
                               startAngle, endAngle);
             return;
         }
     }
 
-    auto bounds = juce::Rectangle<float>(x, y, w, h).reduced(3.f);
+    auto bounds = knobArea.reduced(3.f);
     auto centre = bounds.getCentre();
     float radius = bounds.getWidth() * 0.5f;
     float angle  = startAngle + sliderPos * (endAngle - startAngle);
@@ -7976,8 +8005,9 @@ void TimeLAF::drawRotarySlider(juce::Graphics& g, int x, int y, int w, int h,
     }
 
     if (hasWarnRing)
-        drawWarnRing (g, juce::Rectangle<float>((float)x, (float)y, (float)w, (float)h),
+        drawWarnRing (g, fullArea,
                       sliderPos, (float) s.getProperties()[kWarnRingFrom],
+                      (float) s.getProperties().getWithDefault (kWarnRingLive, 0.0f),
                       startAngle, endAngle);
 }
 

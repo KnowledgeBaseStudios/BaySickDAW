@@ -62,6 +62,18 @@ public:
     struct LFOParams { float freq { 0.5f }; int wave { 0 }; };
     std::array<LFOParams, 3> lfoParams;
 
+    // ── Display-only (QA-Layout T18) ─────────────────────────────────────────
+    // Same contract as DelayDSP::shapeFeedbackForDisplay: read by the Visual
+    // window's paint, NEVER called from processBlock, and carrying no lock --
+    // a float read racing the audio thread's write costs at worst one stale
+    // frame in a 30 Hz picture.
+    bool  hasVisualFeed() const override { return true; }
+    float lfoPhase (int i) const noexcept
+    { return (i >= 0 && i < 3) ? mLFOPhase[(size_t) i] : 0.0f; }
+    // The LFO's actual shape, so the scope draws the wave the user PICKED
+    // rather than an idealised sine.
+    static float lfoShapeForDisplay (int wave, float phase) { return evalLFO (wave, phase); }
+
 private:
     // Max delay = base (30ms) + depth (20ms) + largest per-voice prime offset (7ms) + safety
     static constexpr float kMaxDelayMs = 64.0f;

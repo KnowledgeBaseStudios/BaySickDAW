@@ -5,6 +5,16 @@
 #include "../DSP/EffectParamMap.h"
 #include "../Hosting/HostedPluginEffect.h"   // QA-ModelShell TS6: window fit + bridge toggle
 #include "WorkspaceWindow.h"
+// QA-Layout T18: the parametric visuals read their effect's live knob state at
+// paint time, so this file needs the concrete DSP types to cast to.
+#include "../DSP/ChorusDSP.h"
+#include "../DSP/FlangerDSP.h"
+#include "../DSP/PhaserDSP.h"
+#include "../DSP/DelayDSP.h"
+#include "../DSP/ReverbDSP.h"
+#include "../DSP/CompressorDSP.h"
+#include "../DSP/TransientShaperDSP.h"
+#include "../DSP/SaturationDSP.h"
 
 // ═════════════════════════════════════════════════════════════════ EffectSlotWindow
 
@@ -636,6 +646,435 @@ void EffectEqWindow::timerCallback()
     }
 }
 
+// ═══════════════════════════════════════════════════ T18 parametric visual draws
+//
+// These read the effect's knob state at PAINT time rather than consuming the
+// audio feed, which is what makes turning a knob move the picture immediately:
+// there is nothing to publish and no ring buffer to wait for.  The 30 Hz shared
+// clock (EffectVisualClock) is what animates the moving parts.
+//
+// The captions are not decoration.  This app's audience has never made music,
+// and an unlabelled graph teaches nothing -- so every visual whose meaning is
+// not self-evident says what it is showing.
+namespace T18Draw
+{
+    // Shared chrome: faint grid + a centre line, so a flat curve still reads as
+    // a measurement rather than an empty box.
+    static void grid (juce::Graphics& g, juce::Rectangle<float> r, int cols = 8)
+    {
+        g.setColour (VC::Panel.brighter (0.06f));
+        for (int i = 1; i < cols; ++i)
+        {
+            const float x = r.getX() + r.getWidth() * (float) i / (float) cols;
+            g.drawLine (x, r.getY(), x, r.getBottom(), 0.5f);
+        }
+        g.setColour (VC::Panel.brighter (0.14f));
+        g.drawLine (r.getX(), r.getCentreY(), r.getRight(), r.getCentreY(), 0.5f);
+    }
+
+    static void label (juce::Graphics& g, juce::Rectangle<float> r, const juce::String& t)
+    {
+        g.setColour (VC::TextDim);
+        g.setFont (9.0f);
+        g.drawText (t, r, juce::Justification::topLeft, false);
+    }
+
+    // ── The audio itself: scrolling in-vs-out (Jeff, 2026-08-06 rework) ──────
+    // Every visual leads with THIS -- the actual signal passing through, newest
+    // at the right -- because a picture of the settings with no sound in it
+    // shows a beginner nothing about what the effect is DOING.  Ghost outline =
+    // what went in; filled shape = what came out.  The difference between the
+    // two IS the effect.
+    static void audioInOut (juce::Graphics& g, juce::Rectangle<float> area,
+                            EffectVisualFeed* feed, juce::Colour outColour,
+                            bool drawGhostIn = true)
+    {
+        auto r = area.reduced (2.0f);
+        grid (g, r, 8);
+        if (feed == nullptr || r.getWidth() < 2.0f) return;
+
+        const int      cols  = juce::jmin ((int) r.getWidth(), EffectVisualFeed::kSize);
+        const uint32_t write = feed->writeIndex();
+        const float    midY  = r.getCentreY();
+        const float    halfH = r.getHeight() * 0.5f;
+
+        // Output: filled vertical strokes, a solid waveform body.
+        g.setColour (outColour.withAlpha (0.85f));
+        for (int i = 0; i < cols; ++i)
+        {
+            const auto& c = feed->at (write - (uint32_t) (cols - i));
+            const float x = r.getX() + (float) i;
+            const float e = juce::jlimit (0.0f, 1.0f, c.hi);
+            if (e > 0.002f)
+                g.drawLine (x, midY - e * halfH * 0.94f, x, midY + e * halfH * 0.94f, 1.0f);
+        }
+
+        // Input: a ghost OUTLINE over it (top edge only, mirrored), thin, so in
+        // and out are readable at a glance without the two filling over each
+        // other.
+        if (drawGhostIn)
+        {
+            juce::Path top, bot;
+            bool started = false;
+            for (int i = 0; i < cols; ++i)
+            {
+                const auto& c = feed->at (write - (uint32_t) (cols - i));
+                const float x = r.getX() + (float) i;
+                const float e = juce::jlimit (0.0f, 1.0f, c.a);
+                const float yT = midY - e * halfH * 0.94f;
+                const float yB = midY + e * halfH * 0.94f;
+                if (! started) { top.startNewSubPath (x, yT); bot.startNewSubPath (x, yB); started = true; }
+                else           { top.lineTo (x, yT);          bot.lineTo (x, yB); }
+            }
+            g.setColour (VC::TextDim.withAlpha (0.65f));
+            g.strokePath (top, juce::PathStrokeType (1.0f));
+            g.strokePath (bot, juce::PathStrokeType (1.0f));
+        }
+    }
+
+    // Recent input level out of the feed (max of the last ~30 columns' `a`), so
+    // a display can react to how hard the signal is ACTUALLY hitting right now
+    // without any extra publishing machinery.
+    static float recentInputLevel (EffectVisualFeed* feed)
+    {
+        if (feed == nullptr) return 0.0f;
+        const uint32_t write = feed->writeIndex();
+        float pk = 0.0f;
+        for (uint32_t i = 1; i <= 30; ++i)
+            pk = juce::jmax (pk, feed->at (write - i).a);
+        return juce::jlimit (0.0f, 1.0f, pk);
+    }
+
+    // ── LFO scope + comb response (Chorus / Flanger / Phaser) ────────────────
+    // Left: one cycle of the LFO's ACTUAL wave with a dot riding the real phase,
+    // so "rate" and "shape" stop being abstract numbers.
+    // Right: what that modulation does to the frequency response -- the notches
+    // a flanger/chorus comb produces, or the phaser's allpass notches.  Drawn as
+    // a curve rather than a spectrum because it is the SHAPE that explains the
+    // effect, and a spectrum needs signal present to show anything at all.
+    static void lfoScope (juce::Graphics& g, juce::Rectangle<float> area,
+                          float phase01, int wave, float depth01,
+                          std::function<float(int, float)> shapeFn)
+    {
+        auto r = area.reduced (2.0f);
+        grid (g, r);
+
+        juce::Path p;
+        constexpr int kPts = 96;
+        for (int i = 0; i < kPts; ++i)
+        {
+            const float t = (float) i / (float) (kPts - 1);
+            const float v = shapeFn ? juce::jlimit (-1.0f, 1.0f, shapeFn (wave, t))
+                                    : std::sin (t * juce::MathConstants<float>::twoPi);
+            const float x = r.getX() + t * r.getWidth();
+            const float y = r.getCentreY() - v * r.getHeight() * 0.42f * depth01;
+            if (i == 0) p.startNewSubPath (x, y);
+            else        p.lineTo (x, y);
+        }
+        g.setColour (juce::Colour (0xff00fff2));
+        g.strokePath (p, juce::PathStrokeType (1.4f));
+
+        // The dot is the whole reason this is animated: it shows WHERE in the
+        // sweep the effect currently is, which is the part a static curve of the
+        // waveform cannot convey.
+        const float t  = juce::jlimit (0.0f, 1.0f, phase01);
+        const float v  = shapeFn ? juce::jlimit (-1.0f, 1.0f, shapeFn (wave, t))
+                                 : std::sin (t * juce::MathConstants<float>::twoPi);
+        const float dx = r.getX() + t * r.getWidth();
+        const float dy = r.getCentreY() - v * r.getHeight() * 0.42f * depth01;
+        g.setColour (juce::Colour (0xffff9100));
+        g.fillEllipse (dx - 2.5f, dy - 2.5f, 5.0f, 5.0f);
+    }
+
+    // Comb / notch response.  `notches` is how many nulls to draw across the
+    // strip and `depthN` how deep they cut -- both derived by the caller from
+    // the effect's own controls, so the picture moves with the knobs.
+    static void combResponse (juce::Graphics& g, juce::Rectangle<float> area,
+                              float notches, float depthN, float sweep01)
+    {
+        auto r = area.reduced (2.0f);
+        grid (g, r, 6);
+
+        juce::Path p;
+        constexpr int kPts = 160;
+        const float n = juce::jmax (0.5f, notches);
+        for (int i = 0; i < kPts; ++i)
+        {
+            const float t = (float) i / (float) (kPts - 1);
+            // cos-comb: |cos| dips to zero at each null.  sweep01 slides the
+            // whole pattern, which is exactly what the LFO does to it.
+            const float c = std::cos ((t * n + sweep01) * juce::MathConstants<float>::pi);
+            const float mag = 1.0f - depthN * (1.0f - std::abs (c));
+            const float x = r.getX() + t * r.getWidth();
+            const float y = r.getBottom() - juce::jlimit (0.0f, 1.0f, mag) * r.getHeight() * 0.9f;
+            if (i == 0) p.startNewSubPath (x, y);
+            else        p.lineTo (x, y);
+        }
+        g.setColour (VC::TextDim);
+        g.strokePath (p, juce::PathStrokeType (1.2f));
+    }
+
+    // ── Reverb: decay envelope, three named regions ──────────────────────────
+    // Pre-delay / early reflections / tail get their own regions because they
+    // are three different things people conflate: silence before anything comes
+    // back, the discrete first bounces, then the diffuse wash.
+    static void reverbEnvelope (juce::Graphics& g, juce::Rectangle<float> area,
+                                float preDelayMs, float decaySec, float erDb,
+                                float diffusion)
+    {
+        auto r = area.reduced (2.0f);
+        grid (g, r, 6);
+
+        const float spanMs = juce::jmax (500.0f, decaySec * 1000.0f * 1.05f);
+        const float preX   = r.getX() + (preDelayMs / spanMs) * r.getWidth();
+        // Early reflections run from pre-delay for roughly the first 80 ms --
+        // the conventional boundary where discrete bounces stop being separable.
+        const float erX    = r.getX() + ((preDelayMs + 80.0f) / spanMs) * r.getWidth();
+
+        // Region shading, faint enough to read as background.
+        g.setColour (VC::Panel.brighter (0.05f));
+        g.fillRect (juce::Rectangle<float> (r.getX(), r.getY(), preX - r.getX(), r.getHeight()));
+        g.setColour (juce::Colour (0xffff9100).withAlpha (0.10f));
+        g.fillRect (juce::Rectangle<float> (preX, r.getY(), erX - preX, r.getHeight()));
+
+        // Early reflections: discrete spikes, denser as diffusion rises.
+        const int nEr = juce::jlimit (3, 14, (int) (4.0f + diffusion * 10.0f));
+        const float erAmp = juce::jlimit (0.0f, 1.0f, std::pow (10.0f, erDb / 20.0f));
+        g.setColour (juce::Colour (0xffff9100).withAlpha (0.9f));
+        for (int i = 0; i < nEr; ++i)
+        {
+            const float f = (float) (i + 1) / (float) nEr;
+            const float x = preX + (erX - preX) * f;
+            const float h = erAmp * (1.0f - f * 0.6f) * r.getHeight() * 0.8f;
+            g.drawLine (x, r.getBottom(), x, r.getBottom() - h, 1.2f);
+        }
+
+        // Tail: exponential decay to -60 dB over the decay time (RT60 is
+        // literally defined as that), so the curve IS the number on the knob.
+        juce::Path tail;
+        constexpr int kPts = 120;
+        for (int i = 0; i < kPts; ++i)
+        {
+            const float t   = (float) i / (float) (kPts - 1);
+            const float ms  = preDelayMs + 80.0f + t * juce::jmax (1.0f, spanMs - preDelayMs - 80.0f);
+            const float sec = ms * 0.001f;
+            const float a   = std::pow (10.0f, -3.0f * sec / juce::jmax (0.05f, decaySec));
+            const float x   = r.getX() + (ms / spanMs) * r.getWidth();
+            const float y   = r.getBottom() - juce::jlimit (0.0f, 1.0f, a) * r.getHeight() * 0.8f;
+            if (i == 0) tail.startNewSubPath (x, y);
+            else        tail.lineTo (x, y);
+        }
+        g.setColour (juce::Colour (0xff00fff2));
+        g.strokePath (tail, juce::PathStrokeType (1.4f));
+
+        g.setColour (VC::TextDim);
+        g.setFont (8.5f);
+        g.drawText ("pre",  juce::Rectangle<float> (r.getX(), r.getBottom() - 11.0f, preX - r.getX(), 10.0f),
+                    juce::Justification::centred, false);
+        g.drawText ("early", juce::Rectangle<float> (preX, r.getBottom() - 11.0f, erX - preX, 10.0f),
+                    juce::Justification::centred, false);
+        g.drawText ("tail",  juce::Rectangle<float> (erX, r.getBottom() - 11.0f, r.getRight() - erX, 10.0f),
+                    juce::Justification::centred, false);
+    }
+
+    // ── Compressor: transfer curve, knee drawn, live operating point ─────────
+    // in dB on both axes over a -60..0 window.  A compressor is the effect a
+    // beginner is least able to HEAR, so the picture has to carry the idea:
+    // below threshold the line is 45 degrees (nothing happens), above it the
+    // line tilts (louder in, less louder out), and the knee is how gradually
+    // the bend arrives.
+    static void compCurve (juce::Graphics& g, juce::Rectangle<float> area,
+                           float thrDb, float ratio, float kneeDb, float grDb)
+    {
+        auto r = area.reduced (2.0f);
+        constexpr float kMin = -60.0f;
+        auto xFor = [&] (float db) { return r.getX() + (db - kMin) / -kMin * r.getWidth(); };
+        auto yFor = [&] (float db) { return r.getBottom() - (db - kMin) / -kMin * r.getHeight(); };
+
+        grid (g, r, 6);
+
+        // Unity reference, so the compressed curve reads as a DEPARTURE from it.
+        g.setColour (VC::Panel.brighter (0.16f));
+        g.drawLine (xFor (kMin), yFor (kMin), xFor (0.0f), yFor (0.0f), 1.0f);
+
+        const float R  = juce::jmax (1.0f, ratio);
+        const float K  = juce::jmax (0.0f, kneeDb);
+        auto outFor = [&] (float in) -> float
+        {
+            // Standard soft-knee: quadratic interpolation across the knee width,
+            // straight ratio above it.  Same shape the DSP implements, so the
+            // drawing is not a separate idea of what the compressor does.
+            if (K > 0.0f && in > thrDb - K * 0.5f && in < thrDb + K * 0.5f)
+            {
+                const float d = in - thrDb + K * 0.5f;
+                return in + (1.0f / R - 1.0f) * d * d / (2.0f * K);
+            }
+            return in <= thrDb ? in : thrDb + (in - thrDb) / R;
+        };
+
+        juce::Path p;
+        constexpr int kPts = 120;
+        for (int i = 0; i < kPts; ++i)
+        {
+            const float in = kMin + (float) i / (float) (kPts - 1) * -kMin;
+            const float x = xFor (in), y = yFor (juce::jlimit (kMin, 0.0f, outFor (in)));
+            if (i == 0) p.startNewSubPath (x, y);
+            else        p.lineTo (x, y);
+        }
+        g.setColour (juce::Colour (0xff00fff2));
+        g.strokePath (p, juce::PathStrokeType (1.6f));
+
+        // Threshold marker.
+        g.setColour (juce::Colour (0xffff9100).withAlpha (0.55f));
+        g.drawLine (xFor (thrDb), r.getY(), xFor (thrDb), r.getBottom(), 0.8f);
+
+        // Live dot: solve the curve backwards from the gain reduction actually
+        // happening right now.  GR = in - out, and above the knee that is
+        // (in - T)(1 - 1/R), so the input level follows from the one number the
+        // DSP already publishes.
+        if (grDb > 0.05f && R > 1.0f)
+        {
+            const float in = thrDb + grDb / juce::jmax (0.01f, 1.0f - 1.0f / R);
+            if (in <= 0.0f)
+            {
+                g.setColour (juce::Colour (0xffff9100));
+                g.fillEllipse (xFor (in) - 3.0f, yFor (outFor (in)) - 3.0f, 6.0f, 6.0f);
+            }
+        }
+    }
+
+    // ── Transient Shaper: before/after envelope ──────────────────────────────
+    // One drum hit, ghosted twice: what went in, and what the Attack/Release
+    // settings turn it into.  This is the only honest way to show an effect
+    // whose whole job is a difference between two envelopes.
+    static void transientEnvelope (juce::Graphics& g, juce::Rectangle<float> area,
+                                   float attack, float release,
+                                   int attShape, int relShape)
+    {
+        auto r = area.reduced (2.0f);
+        grid (g, r, 8);
+
+        // Shape index bends how fast each stage moves: Sharp snaps, Soft eases.
+        auto shapeExp = [] (int s) { return s == 0 ? 0.55f : (s == 2 ? 1.8f : 1.0f); };
+        const float aE = shapeExp (attShape), rE = shapeExp (relShape);
+
+        auto envAt = [&] (float t, bool shaped) -> float
+        {
+            // Attack portion is the first 12 % of the strip; the rest decays.
+            constexpr float kAtt = 0.12f;
+            if (t < kAtt)
+            {
+                float a = std::pow (t / kAtt, aE);
+                if (shaped) a *= (1.0f + attack);     // attack -1..1 cuts or boosts the spike
+                return juce::jlimit (0.0f, 1.4f, a);
+            }
+            const float d = (t - kAtt) / (1.0f - kAtt);
+            float v = std::pow (1.0f - d, 2.2f * rE);
+            if (shaped) v = std::pow (juce::jlimit (0.0f, 1.0f, v),
+                                      juce::jmax (0.2f, 1.0f - release));  // release +1 = longer
+            const float peak = shaped ? (1.0f + attack) : 1.0f;
+            return juce::jlimit (0.0f, 1.4f, v * peak);
+        };
+
+        auto drawEnv = [&] (bool shaped, juce::Colour c, float thickness)
+        {
+            juce::Path p;
+            constexpr int kPts = 140;
+            for (int i = 0; i < kPts; ++i)
+            {
+                const float t = (float) i / (float) (kPts - 1);
+                const float v = envAt (t, shaped) / 1.4f;
+                const float x = r.getX() + t * r.getWidth();
+                const float y = r.getBottom() - v * r.getHeight() * 0.92f;
+                if (i == 0) p.startNewSubPath (x, y);
+                else        p.lineTo (x, y);
+            }
+            g.setColour (c);
+            g.strokePath (p, juce::PathStrokeType (thickness));
+        };
+
+        drawEnv (false, VC::TextDim.withAlpha (0.55f), 1.0f);   // ghost = input
+        drawEnv (true,  juce::Colour (0xff00fff2),     1.6f);   // solid = result
+    }
+
+    // ── Saturation / Tape: harmonic bars, measured AT the live signal level ──
+    // One sine cycle goes through the effect's real shaper at the amplitude the
+    // audio is ACTUALLY hitting it with, and harmonics 1-8 are correlated out
+    // of what comes back.  That is the whole point (Jeff, 2026-08-06): a soft
+    // clipper adds nothing at low level and plenty when driven, so the bars
+    // rise and fall with the signal passing through -- where the harmonics are
+    // hitting, as they hit.  Ghost bars behind them = the potential at full
+    // drive, so a quiet passage still shows what the effect WOULD add.
+    static void harmonicBars (juce::Graphics& g, juce::Rectangle<float> area,
+                              const std::function<float(float)>& shaper,
+                              float liveLevel01)
+    {
+        auto r = area.reduced (2.0f);
+        grid (g, r, 8);
+        if (! shaper) return;
+
+        constexpr int kN = 128, kH = 8;
+        auto measure = [&shaper] (float amp, float (&mag)[kH + 1])
+        {
+            float wave[kN];
+            for (int i = 0; i < kN; ++i)
+            {
+                const float ph = (float) i / (float) kN * juce::MathConstants<float>::twoPi;
+                wave[i] = shaper (amp * std::sin (ph));
+            }
+            for (int h = 1; h <= kH; ++h)
+            {
+                float re = 0.0f, im = 0.0f;
+                for (int i = 0; i < kN; ++i)
+                {
+                    const float ph = (float) (h * i) / (float) kN * juce::MathConstants<float>::twoPi;
+                    re += wave[i] * std::cos (ph);
+                    im += wave[i] * std::sin (ph);
+                }
+                mag[h] = 2.0f * std::sqrt (re * re + im * im) / (float) kN;
+            }
+        };
+
+        float ghostMag[kH + 1] = {}, liveMag[kH + 1] = {};
+        measure (0.8f, ghostMag);
+        const bool haveLive = liveLevel01 > 0.02f;
+        if (haveLive) measure (juce::jmax (0.05f, liveLevel01 * 0.8f), liveMag);
+
+        const float barW = r.getWidth() / (float) kH;
+        g.setFont (8.5f);
+        auto heightFor = [&r] (const float (&mag)[kH + 1], int h) -> float
+        {
+            // dB below the fundamental over a 60 dB window -- linear magnitude
+            // flattens everything past the 2nd into invisibility.
+            const float ref = juce::jmax (1.0e-6f, mag[1]);
+            const float db  = 20.0f * std::log10 (juce::jmax (1.0e-6f, mag[h] / ref));
+            return juce::jlimit (0.0f, 1.0f, (db + 60.0f) / 60.0f) * (r.getHeight() - 12.0f);
+        };
+
+        for (int h = 1; h <= kH; ++h)
+        {
+            const float x = r.getX() + barW * (float) (h - 1);
+
+            const float gh = heightFor (ghostMag, h);
+            g.setColour (VC::TextDim.withAlpha (0.22f));
+            g.fillRect (juce::Rectangle<float> (x + barW * 0.2f, r.getBottom() - 12.0f - gh,
+                                                barW * 0.6f, gh));
+            if (haveLive)
+            {
+                const float lh = heightFor (liveMag, h);
+                g.setColour (h == 1 ? VC::TextDim.withAlpha (0.6f)
+                                    : juce::Colour (0xffff9100).withAlpha (0.9f));
+                g.fillRect (juce::Rectangle<float> (x + barW * 0.28f, r.getBottom() - 12.0f - lh,
+                                                    barW * 0.44f, lh));
+            }
+            g.setColour (VC::TextDim);
+            g.drawText (juce::String (h),
+                        juce::Rectangle<float> (x, r.getBottom() - 11.0f, barW, 10.0f),
+                        juce::Justification::centred, false);
+        }
+    }
+}
+
 // ═══════════════════════════════════════════════════════════ EffectVisualWindow
 
 EffectVisualWindow::EffectVisualWindow (VibeSynthProcessor& proc,
@@ -680,6 +1119,18 @@ EffectVisualWindow::~EffectVisualWindow()
 }
 
 juce::String EffectVisualWindow::windowTitle() const { return mTitle; }
+
+DSPBase* EffectVisualWindow::resolveDsp() const
+{
+    auto* rack = EffectsPage::rackForChannelId (mProcessor.mVibeGraph, mChannelId);
+    if (rack == nullptr) return nullptr;
+
+    for (int s = 0; s < EffectRack::kNumSlots; ++s)
+        if (rack->getSlotUuid (s) == mUuid)
+            return rack->getSlotEffect (s);
+
+    return nullptr;
+}
 
 void EffectVisualWindow::configureTitleStrip (PageMenuBar& bar)
 {
@@ -760,8 +1211,11 @@ void EffectVisualWindow::rebind()
         // Limiter (T13 / BLU-110): output level as the envelope, gain reduction
         // hanging from the top in cyan, ceiling as the orange line it is
         // measured against.  Colours are the approved #00FFF2 / #FF9100 pair.
+        // T18 caption upgrade: the plan's manual rule says the GR trace's
+        // meaning is stated AT the component; a bare effect name did not.
         if (mBoundType == EffectType::Limiter)
         {
+            mStrip->setCaption (fxName + " - cyan dips = volume being pulled down; orange = ceiling");
             mStrip->setPaintFn ([] (juce::Graphics& g, juce::Rectangle<float> area,
                                     EffectVisualFeed* feed)
             {
@@ -770,6 +1224,303 @@ void EffectVisualWindow::rebind()
                                                     juce::Colour (0xff00fff2),      // GR
                                                     true,
                                                     juce::Colour (0xffff9100));     // ceiling
+            });
+        }
+        // ── T18: Chorus / Flanger / Phaser ───────────────────────────────────
+        // One shape for all three: they are the same idea (an LFO sweeping a
+        // filter or a delay) wearing different clothes, so teaching them with
+        // three different pictures would be teaching a difference that is not
+        // there.  Left is the LFO, right is what it does to the sound.
+        //
+        // Captures `this` and resolves the DSP per paint -- never a cached
+        // pointer, same rule as the feed resolver above.
+        else if (mBoundType == EffectType::Chorus
+              || mBoundType == EffectType::Flanger
+              || mBoundType == EffectType::Phaser)
+        {
+            // Audio-first (Jeff, 2026-08-06): main = the sound itself, ghost in
+            // vs solid out -- the swoosh is visible in the output envelope.
+            // Side = the LFO doing the sweeping and the comb it drags through.
+            mStrip->setCaption (fxName + " - grey outline = in, solid = out | LFO + response");
+            mStrip->setPaintFn ([this] (juce::Graphics& g, juce::Rectangle<float> area,
+                                        EffectVisualFeed* feed)
+            {
+                auto* dsp = resolveDsp();
+                if (dsp == nullptr) return;
+
+                auto right = area.removeFromRight (area.getWidth() * 0.38f);
+                auto left  = right.removeFromTop  (right.getHeight() * 0.5f);
+
+                T18Draw::audioInOut (g, area, feed, juce::Colour (0xff00fff2));
+                T18Draw::label (g, area.reduced (3.0f), "Audio");
+
+                float phase = 0.0f, depth = 1.0f, notches = 4.0f, depthN = 0.9f;
+                int   wave  = 0;
+                std::function<float(int, float)> shapeFn;
+
+                if (auto* c = dynamic_cast<ChorusDSP*> (dsp))
+                {
+                    phase   = c->lfoPhase (0);
+                    wave    = c->lfoParams[0].wave;
+                    shapeFn = [] (int w, float t) { return ChorusDSP::lfoShapeForDisplay (w, t); };
+                    depth   = juce::jlimit (0.05f, 1.0f, c->depth / 20.0f);
+                    // Comb spacing is set by the base delay: a short delay puts
+                    // the nulls far apart, a long one packs them in.
+                    notches = juce::jlimit (1.0f, 24.0f, c->delayMs * 0.8f);
+                    depthN  = juce::jlimit (0.0f, 1.0f, c->wet);
+                }
+                else if (auto* f = dynamic_cast<FlangerDSP*> (dsp))
+                {
+                    phase   = f->lfoPhase();
+                    // Shape morphs sine -> triangle; the scope shows which.
+                    wave    = f->mShape > 0.5f ? 1 : 0;
+                    depth   = juce::jlimit (0.05f, 1.0f, f->mDepth / 10.0f);
+                    notches = juce::jlimit (1.0f, 24.0f, juce::jmax (0.5f, f->mDelay + f->mDepth) * 1.6f);
+                    // Feedback is what turns a gentle comb into the metallic
+                    // sweep, so it drives how deep the nulls cut.
+                    depthN  = juce::jlimit (0.0f, 1.0f, std::abs (f->mFeedback) * 0.5f + f->mWet * 0.5f);
+                }
+                else if (auto* p = dynamic_cast<PhaserDSP*> (dsp))
+                {
+                    phase   = p->lfoPhase();
+                    wave    = p->mLFOWaveIdx;
+                    depth   = juce::jlimit (0.05f, 1.0f, p->mDepth);
+                    // A phaser's notch count is its stage count, not a delay --
+                    // two allpass stages make one notch.
+                    notches = juce::jlimit (1.0f, 12.0f, (float) p->mNumStages * 0.5f);
+                    depthN  = juce::jlimit (0.0f, 1.0f, std::abs (p->mFeedback) * 0.4f + p->mWet * 0.6f);
+                }
+
+                T18Draw::lfoScope      (g, left,  phase, wave, depth, shapeFn);
+                T18Draw::combResponse  (g, right, notches, depthN, phase);
+                T18Draw::label (g, left .reduced (3.0f), "LFO");
+                T18Draw::label (g, right.reduced (3.0f), "Notches");
+            });
+        }
+        // ── T18: Delay ───────────────────────────────────────────────────────
+        // The feedback transfer curve arrived here from the panel at T20, so all
+        // of the Delay's drawing is in one place: repeats on the left, the curve
+        // that shapes them on the right.
+        else if (mBoundType == EffectType::Delay)
+        {
+            // Audio-first (Jeff, 2026-08-06): main = the ACTUAL echoes -- the
+            // DSP publishes the wet path separately from the mix, so every
+            // repeat is a visible bump even while the dry plays.  Beat-grid
+            // verticals ride over the audio so a synced delay reads as bumps
+            // landing on the lines.
+            mStrip->setCaption (fxName + " - solid = the echoes, grey = what you played | drive curve");
+            mStrip->setPaintFn ([this] (juce::Graphics& g, juce::Rectangle<float> area,
+                                        EffectVisualFeed* feed)
+            {
+                auto* d = dynamic_cast<DelayDSP*> (resolveDsp());
+                if (d == nullptr) return;
+
+                auto left  = area.removeFromLeft (area.getWidth() * 0.68f);
+                auto right = area;
+
+                T18Draw::audioInOut (g, left, feed, juce::Colour (0xff00fff2));
+
+                // Beat grid over the audio.  The strip scrolls one column per
+                // block, so a beat's width in columns = beat time / block time
+                // -- derived from the DSP's own BPM so grid and echoes cannot
+                // disagree.
+                {
+                    const float bpm     = juce::jmax (20.0f, d->hostBpmForDisplay());
+                    const float beatMs  = 60000.0f / bpm;
+                    const float blockMs = d->lastBlockMsForDisplay();
+                    if (blockMs > 0.01f)
+                    {
+                        auto rr = left.reduced (2.0f);
+                        const float colsPerBeat = beatMs / blockMs;
+                        if (colsPerBeat > 4.0f)
+                        {
+                            g.setColour (VC::Panel.brighter (0.16f));
+                            for (float x = rr.getRight(); x > rr.getX(); x -= colsPerBeat)
+                                g.drawLine (x, rr.getY(), x, rr.getBottom(), 0.6f);
+                        }
+                    }
+                }
+                T18Draw::label (g, left.reduced (3.0f), "Echoes vs beat");
+                if (d->getFeedbackLevel() > 1.0f)
+                {
+                    g.setColour (juce::Colour (0xffff9100));
+                    g.setFont (9.0f);
+                    g.drawText ("BUILDING", left.reduced (4.0f),
+                                juce::Justification::topRight, false);
+                }
+
+                // The curve that left the panel at T20 (CL-299): input vertical,
+                // output horizontal, matching the reference orientation.
+                auto rr = right.reduced (2.0f);
+                T18Draw::grid (g, rr, 4);
+                juce::Path curve;
+                constexpr int kPts = 96;
+                for (int i = 0; i < kPts; ++i)
+                {
+                    const float in  = -1.0f + 2.0f * (float) i / (float) (kPts - 1);
+                    const float out = juce::jlimit (-1.2f, 1.2f, d->shapeFeedbackForDisplay (in));
+                    const float px  = rr.getCentreX() + out * rr.getWidth()  * 0.5f / 1.2f;
+                    const float py  = rr.getCentreY() - in  * rr.getHeight() * 0.5f;
+                    if (i == 0) curve.startNewSubPath (px, py);
+                    else        curve.lineTo (px, py);
+                }
+                g.setColour (juce::Colour (0xff00fff2));
+                g.strokePath (curve, juce::PathStrokeType (1.4f));
+                T18Draw::label (g, rr.reduced (1.0f), "Drive");
+            });
+        }
+        // ── T18: Reverb (audio-first, Jeff 2026-08-06) ───────────────────────
+        // Main = the sound: the grey outline stops when you stop playing and
+        // the solid shape keeps going -- THAT hang-over is the reverb.  Side =
+        // the decay map explaining what the tail is made of.
+        else if (mBoundType == EffectType::Reverb)
+        {
+            mStrip->setCaption (fxName + " - solid keeps going after the grey stops: that is the tail");
+            mStrip->setPaintFn ([this] (juce::Graphics& g, juce::Rectangle<float> area,
+                                        EffectVisualFeed* feed)
+            {
+                auto* r = dynamic_cast<ReverbDSP*> (resolveDsp());
+                if (r == nullptr) return;
+
+                auto side = area.removeFromRight (area.getWidth() * 0.38f);
+                T18Draw::audioInOut (g, area, feed, juce::Colour (0xff00fff2));
+                T18Draw::label (g, area.reduced (3.0f), "Audio");
+
+                T18Draw::reverbEnvelope (g, side, r->getPreDelayMs(), r->getDecay(),
+                                         r->getER(), r->getDiffusion());
+            });
+        }
+        // ── T18: Compressor (audio-first, Jeff 2026-08-06) ───────────────────
+        // Main = the input the compressor is reacting to, with the threshold
+        // drawn ON it and the gain reduction hanging from the top -- which is
+        // where Attack and Release finally SHOW: attack is how fast the cyan
+        // digs in after the audio crosses the orange lines, release is how long
+        // it hangs on after the audio falls back.  (They never bend the knee --
+        // that curve is the level map; they are the speed of moving along it.)
+        // Side = the knee curve with the live operating dot.
+        else if (mBoundType == EffectType::Compressor)
+        {
+            mStrip->setCaption (fxName + " - cyan from top = volume pulled down; orange = threshold");
+            mStrip->setPaintFn ([this] (juce::Graphics& g, juce::Rectangle<float> area,
+                                        EffectVisualFeed* feed)
+            {
+                auto* c = dynamic_cast<CompressorDSP*> (resolveDsp());
+                if (c == nullptr) return;
+
+                auto side = area.removeFromRight (area.getWidth() * 0.34f);
+
+                // Input waveform (hi/lo IS the input for this effect's columns).
+                auto rr = area.reduced (2.0f);
+                T18Draw::grid (g, rr, 8);
+                if (feed != nullptr && rr.getWidth() >= 2.0f)
+                {
+                    const int      cols  = juce::jmin ((int) rr.getWidth(), EffectVisualFeed::kSize);
+                    const uint32_t write = feed->writeIndex();
+                    const float    midY  = rr.getCentreY();
+                    const float    halfH = rr.getHeight() * 0.5f;
+
+                    for (int i = 0; i < cols; ++i)
+                    {
+                        const auto& col = feed->at (write - (uint32_t) (cols - i));
+                        const float x = rr.getX() + (float) i;
+                        const float e = juce::jlimit (0.0f, 1.0f, col.hi);
+                        if (e > 0.002f)
+                        {
+                            g.setColour (VC::TextDim.withAlpha (0.8f));
+                            g.drawLine (x, midY - e * halfH * 0.94f,
+                                        x, midY + e * halfH * 0.94f, 1.0f);
+                        }
+                        // GR hanging from the top, exactly like the limiter.
+                        const float gr = juce::jlimit (0.0f, 1.0f, col.a);
+                        if (gr > 0.005f)
+                        {
+                            g.setColour (juce::Colour (0xff00fff2));
+                            g.drawLine (x, rr.getY(), x, rr.getY() + gr * rr.getHeight() * 0.5f, 1.0f);
+                        }
+                    }
+
+                    // Threshold: +/- lines on the same linear scale as the
+                    // waveform, from the newest column so a knob turn moves it.
+                    const float thr = juce::jlimit (0.0f, 1.0f, feed->at (write - 1).b);
+                    if (thr > 0.001f)
+                    {
+                        g.setColour (juce::Colour (0xffff9100).withAlpha (0.7f));
+                        g.drawLine (rr.getX(), midY - thr * halfH * 0.94f,
+                                    rr.getRight(), midY - thr * halfH * 0.94f, 0.8f);
+                        g.drawLine (rr.getX(), midY + thr * halfH * 0.94f,
+                                    rr.getRight(), midY + thr * halfH * 0.94f, 0.8f);
+                    }
+                }
+                T18Draw::label (g, rr.reduced (1.0f), "Input + reduction");
+
+                T18Draw::compCurve (g, side, c->threshold, c->ratio, c->kneeDb,
+                                    -c->getGainReductionDb());
+                T18Draw::label (g, side.reduced (3.0f), "Knee");
+            });
+        }
+        // ── T18: Transient Shaper (audio-first, Jeff 2026-08-06) ─────────────
+        // Main = the real audio, ghost in vs solid out -- the actual hits
+        // getting sharpened or softened as they pass.  Side = the idealized
+        // one-hit preview, which still earns its place because it shows what
+        // the settings WILL do while nothing is playing.
+        else if (mBoundType == EffectType::TransientShaper)
+        {
+            mStrip->setCaption (fxName + " - grey outline = in, solid = shaped out | one-hit preview");
+            mStrip->setPaintFn ([this] (juce::Graphics& g, juce::Rectangle<float> area,
+                                        EffectVisualFeed* feed)
+            {
+                auto* t = dynamic_cast<TransientShaperDSP*> (resolveDsp());
+                if (t == nullptr) return;
+
+                auto side = area.removeFromRight (area.getWidth() * 0.34f);
+                T18Draw::audioInOut (g, area, feed, juce::Colour (0xff00fff2));
+                T18Draw::label (g, area.reduced (3.0f), "Audio");
+
+                T18Draw::transientEnvelope (g, side, t->mAttack, t->mRelease,
+                                            t->mAttackShape, t->mReleaseShape);
+                T18Draw::label (g, side.reduced (3.0f), "Preview");
+            });
+        }
+        // ── T18: Saturation / Tape (one DSP -- Tape is an alias type) ────────
+        else if (mBoundType == EffectType::Saturation || mBoundType == EffectType::Tape)
+        {
+            // Audio-first (Jeff, 2026-08-06): main = the signal thickening as it
+            // passes; the bars are measured AT the level the audio is actually
+            // hitting the shaper, so they rise and fall with the sound.
+            mStrip->setCaption (fxName + " - grey = in, solid = out | bright bars = harmonics being added NOW");
+            mStrip->setPaintFn ([this] (juce::Graphics& g, juce::Rectangle<float> area,
+                                        EffectVisualFeed* feed)
+            {
+                auto* s = dynamic_cast<SaturationDSP*> (resolveDsp());
+                if (s == nullptr) return;
+
+                auto audio = area.removeFromLeft (area.getWidth() * 0.45f);
+                auto left  = area.removeFromLeft (area.getWidth() * 0.55f);
+                auto right = area;
+
+                T18Draw::audioInOut (g, audio, feed, juce::Colour (0xff00fff2));
+                T18Draw::label (g, audio.reduced (3.0f), "Audio");
+
+                T18Draw::harmonicBars (g, left, [s] (float x) { return s->shapeForDisplay (x); },
+                                       T18Draw::recentInputLevel (feed));
+                T18Draw::label (g, left.reduced (3.0f), "Harmonics");
+
+                auto rr = right.reduced (2.0f);
+                T18Draw::grid (g, rr, 4);
+                juce::Path curve;
+                constexpr int kPts = 96;
+                for (int i = 0; i < kPts; ++i)
+                {
+                    const float in  = -1.0f + 2.0f * (float) i / (float) (kPts - 1);
+                    const float out = juce::jlimit (-1.2f, 1.2f, s->shapeForDisplay (in));
+                    const float px  = rr.getX() + (in + 1.0f) * 0.5f * rr.getWidth();
+                    const float py  = rr.getCentreY() - out * rr.getHeight() * 0.5f / 1.2f;
+                    if (i == 0) curve.startNewSubPath (px, py);
+                    else        curve.lineTo (px, py);
+                }
+                g.setColour (juce::Colour (0xff00fff2));
+                g.strokePath (curve, juce::PathStrokeType (1.4f));
+                T18Draw::label (g, rr.reduced (1.0f), "Curve");
             });
         }
         else

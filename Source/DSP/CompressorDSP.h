@@ -52,6 +52,12 @@ public:
     // Returns the most-recent gain reduction in dB (negative = reduced)
     float getGainReductionDb() const override;
 
+    // QA-Layout T18 (audio-first rework, Jeff 2026-08-06): publishes the input
+    // envelope + GR + threshold per block so the visual shows the compressor
+    // WORKING on real audio; the knee curve (drawn from the fields below) rides
+    // beside it.  hasVisual() defaults through this.
+    bool  hasVisualFeed() const override { return true; }
+
     // Latency reported to EffectRack for PDC (= look-ahead in samples).
     int getLatencySamples() const override { return mLASamples; }
 

@@ -126,6 +126,8 @@ void ChorusDSP::process (juce::AudioBuffer<float>& buffer)
     const int numChannels = buffer.getNumChannels();
     if (numSamples == 0 || numChannels < 1 || mBufSize == 0) return;
 
+    const float visIn = visualCaptureIn (buffer);   // T18
+
     float* L = buffer.getWritePointer(0);
     float* R = (numChannels > 1) ? buffer.getWritePointer(1) : nullptr;
 
@@ -238,6 +240,8 @@ void ChorusDSP::process (juce::AudioBuffer<float>& buffer)
 
         mWritePos = (mWritePos + 1) % mBufSize;
     }
+
+    visualPushInOut (buffer, visIn);   // T18
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

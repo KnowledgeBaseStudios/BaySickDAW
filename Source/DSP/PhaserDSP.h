@@ -71,6 +71,14 @@ public:
     static constexpr int kNumSyncDivisions = 8;
     static const SyncDiv kSyncDivisions[kNumSyncDivisions];
 
+    // ── Display-only (QA-Layout T18) ─────────────────────────────────────────
+    // Same contract as DelayDSP::shapeFeedbackForDisplay: read by the Visual
+    // window's paint, NEVER called from processBlock, and unlocked by design --
+    // a float read racing the audio thread's write costs at worst one stale
+    // frame in a 30 Hz picture.
+    bool  hasVisualFeed() const override { return true; }
+    float lfoPhase()  const noexcept { return (float) mPhase; }
+
     float mRate       { 0.5f };
     float mManualRate { 0.5f };   // (c) shadow of last manual rate; restored on un-sync
     float mDepth      { 0.8f };

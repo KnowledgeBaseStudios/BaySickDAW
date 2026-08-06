@@ -86,6 +86,10 @@ public:
     int  getOsLog2()        const noexcept { return mOsLog2; }
     bool getStereoDetect()  const noexcept { return mStereoDetect; }
 
+    // QA-Layout T18: the before/after envelope is drawn from mAttack / mRelease
+    // and the two shape selectors below, so it tracks the knobs directly.
+    bool hasVisualFeed()    const override { return true; }
+
     // ---- Public state ----------------------------------------------------
     float mAttack       { 0.0f };      // stored -1..1 (0 = neutral, no attack boost/cut)
     float mRelease      { 0.0f };      // stored -1..1

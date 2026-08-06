@@ -387,9 +387,13 @@ void SaturationDSP::process (juce::AudioBuffer<float>& buffer)
     // bit-exact port of the legacy TapeDSP algorithm.  Tube + Console
     // share the FDN/console body that follows.  Each path has independent
     // state so switching modes never leaks one engine's tail into another.
+    // T18: captured before either body touches the buffer; each exit pushes.
+    const float visIn = visualCaptureIn (buffer);
+
     if (mSatType == Type::Tape)
     {
         processTape (buffer);
+        visualPushInOut (buffer, visIn);
         return;
     }
 
@@ -638,6 +642,8 @@ void SaturationDSP::process (juce::AudioBuffer<float>& buffer)
                 dst[n] += src[n];
         }
     }
+
+    visualPushInOut (buffer, visIn);   // T18: the Tube/Console exit
 }
 
 // -- Serialisation ------------------------------------------------------------

@@ -236,6 +236,8 @@ void TransientShaperDSP::process (juce::AudioBuffer<float>& buffer)
     if (mOversampler == nullptr) return;
     if (mBandBuf.getNumSamples() < numSamples) return;
 
+    const float visIn = visualCaptureIn (buffer);   // T18
+
     const int numCh = std::min (buffer.getNumChannels(), 2);
 
     // C.4: external sidechain override for detector path. Audio path (band-split,
@@ -425,6 +427,8 @@ void TransientShaperDSP::process (juce::AudioBuffer<float>& buffer)
             out[n] = (dry * (1.0f - wet) + shaped[n] * wet) * outLin;
         }
     }
+
+    visualPushInOut (buffer, visIn);   // T18
 }
 
 // -- Serialisation ------------------------------------------------------------

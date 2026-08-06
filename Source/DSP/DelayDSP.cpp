@@ -67,6 +67,7 @@ void DelayDSP::reset()
     std::fill(mLineL.begin(), mLineL.end(), 0.0f);
     std::fill(mLineR.begin(), mLineR.end(), 0.0f);
     mWritePos = 0;
+    mFbEnvDisplay.store (0.0f, std::memory_order_relaxed);
 
     for (int s = 0; s < kDiffStages; ++s)
         mDiffusion[s].reset();
@@ -451,6 +452,15 @@ void DelayDSP::process (juce::AudioBuffer<float>& buffer)
         ? std::exp(-1.0f / std::max(1.0f, mSmoothing * 0.5f * static_cast<float>(mSampleRate)))
         : 0.0f;
 
+    float fbBlockPeak = 0.0f;   // warn-ring source, accumulated at step 5
+
+    // T18: wet accumulated SEPARATELY from the mix -- a post-scan of the output
+    // buffer would bury the echoes under the dry signal while it plays, and the
+    // echoes are the entire point of the picture.  Hoisted gate: one load per
+    // block, three fabs per sample only while a visual is watching.
+    const bool visActive = mVisualFeed.isActive();
+    float visWetPk = 0.0f, visDryPk = 0.0f;
+
     for (int i = 0; i < numSamples; ++i)
     {
         const float inL = L[i];
@@ -618,6 +628,10 @@ void DelayDSP::process (juce::AudioBuffer<float>& buffer)
         {
             feedL *= mFeedbackLevel;
             feedR *= mFeedbackLevel;
+            // Warn-ring source: peak of what is actually re-entering the loop.
+            // Off model skips this on purpose -- no loop, no feedback occurring,
+            // ring stays dark.  Cost is two fabs+max on register values.
+            fbBlockPeak = juce::jmax (fbBlockPeak, std::abs (feedL), std::abs (feedR));
         }
 
         // ── Write to delay lines (depends on model) ──────────────────────────
@@ -678,7 +692,36 @@ void DelayDSP::process (juce::AudioBuffer<float>& buffer)
         if (R)
             R[i] = inR * mDryOut + outR * mWetOut;
 
+        if (visActive)
+        {
+            visWetPk = juce::jmax (visWetPk, std::abs (outL * mWetOut),
+                                             std::abs (outR * mWetOut));
+            visDryPk = juce::jmax (visDryPk, std::abs (inL), std::abs (inR));
+        }
+
         mWritePos = (mWritePos + 1) % lineSize;
+    }
+
+    // Warn-ring publish: instant rise to the block peak, ~250 ms decay -- fast
+    // enough that a building runaway reads live, slow enough that the ring does
+    // not flicker at the repeat rate.
+    {
+        const float prev  = mFbEnvDisplay.load (std::memory_order_relaxed);
+        const float decay = std::exp (-(float) numSamples
+                                      / (0.25f * (float) mSampleRate));
+        mFbEnvDisplay.store (juce::jmax (fbBlockPeak, prev * decay),
+                             std::memory_order_relaxed);
+    }
+
+    // T18 column: hi/lo = the WET signal (each echo is a visible bump even
+    // while the dry plays), a = the dry input.
+    if (visActive)
+    {
+        mBlockMsDisplay.store ((float) (numSamples * 1000.0 / mSampleRate),
+                               std::memory_order_relaxed);
+        mVisualFeed.push (-juce::jlimit (0.0f, 1.0f, visWetPk),
+                           juce::jlimit (0.0f, 1.0f, visWetPk),
+                           juce::jlimit (0.0f, 1.0f, visDryPk), 0.0f);
     }
 }
 

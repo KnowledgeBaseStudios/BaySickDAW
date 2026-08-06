@@ -764,12 +764,28 @@ public:
     // starts, so the LAF never needs to know a knob's units.
     //   slider.getProperties().set (TimeLAF::kWarnRingFrom, 1.0 / 1.2);
     static constexpr const char* kWarnRingFrom = "warnRingFrom";
+    // CL-299 (1) second half (Jeff, 2026-08-05): the LIVE feedback level,
+    // normalized onto the same arc scale, refreshed by the owning panel's
+    // timer.  The ring is a METER of the feedback occurring -- where its lit
+    // head sits IS the current level, and it only reads red when the loop is
+    // genuinely in the clipping zone.  Absent/0 = silent, ring shows only the
+    // setting track.
+    static constexpr const char* kWarnRingLive = "warnRingLive";
+
+    // Ring ellipse calibration -- the Time-Based knob art is drawn in
+    // perspective, so a flat circle cannot sit on its face; the ring is a
+    // squashed, tilted ellipse instead.  Values are Jeff's, fitted by eye with
+    // the T20 placement box (2026-08-06) and hardcoded from his settled
+    // numbers; his offsets came out 0/0, so only stretch + tilt survive.
+    static constexpr float kWarnRingScaleX = 1.417f;
+    static constexpr float kWarnRingScaleY = 0.889f;
+    static constexpr float kWarnRingRotDeg = -1.5f;
 
     void drawRotarySlider(juce::Graphics& g, int x, int y, int w, int h,
         float sliderPos, float startAngle, float endAngle, juce::Slider& s) override;
 
     static void drawWarnRing (juce::Graphics& g, juce::Rectangle<float> area,
-                              float sliderPos, float warnFrom,
+                              float sliderPos, float warnFrom, float liveNorm,
                               float startAngle, float endAngle);
 
     void drawLinearSlider(juce::Graphics& g, int x, int y, int w, int h,

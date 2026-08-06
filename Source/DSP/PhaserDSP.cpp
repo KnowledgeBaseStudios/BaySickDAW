@@ -283,6 +283,8 @@ void PhaserDSP::process (juce::AudioBuffer<float>& buffer)
     float* L = numCh > 0 ? buffer.getWritePointer (0) : nullptr;
     float* R = numCh > 1 ? buffer.getWritePointer (1) : nullptr;
 
+    const float visIn = visualCaptureIn (buffer);   // T18
+
     const float sr           = (float) mSampleRate;
     const float nyqLimit     = sr * 0.499f;
     const float fbSign       = mInvertFeedback ? -1.0f : 1.0f;
@@ -390,6 +392,8 @@ void PhaserDSP::process (juce::AudioBuffer<float>& buffer)
         mPhase += (double) rate * (double) invSr;
         while (mPhase >= 1.0) mPhase -= 1.0;
     }
+
+    visualPushInOut (buffer, visIn);   // T18
 }
 
 // ----- Serialisation ---------------------------------------------------------

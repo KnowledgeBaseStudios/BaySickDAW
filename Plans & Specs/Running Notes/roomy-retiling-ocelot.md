@@ -1058,9 +1058,169 @@ times first.
 - **Next:** T18 — the remaining nine effect visuals, now landing into a window that
   behaves the way it is meant to.
 
+## 2026-08-06 — Task 18 complete — all 10 effect visuals live
+
+- **SCOPE CORRECTED BY JEFF at the top of this task.**  I had read `Limiter.txt` §1-2 as
+  live scope and posed a spec call about skeuomorphic Zone B knobs, brushed-aluminium
+  rendering and a three-zone panel rewrite.  Jeff: *"None of these I didn't write this up
+  you did and are now trying to push on me something I never asked for.  I don't care if
+  the knobs stay the same I just care that we have all the knobs for the setup and that the
+  different visuals that are attached to them display on the visual window and show edits
+  on the knobs in the display like they are supposed to."*  The Limiter panel rewrite is
+  **OUT**; knobs stay as they are.  The requirement is: full knob set on the panel, a
+  visual per effect in the Visual window, and the visual MOVES when a knob moves.
+- **Limiter CONFIRMED already complete** against that requirement, verified in source
+  rather than assumed: `LimiterDSP.cpp:736` pushes `(-lvl, lvl, gr, ceilNorm)` where the
+  ceiling line comes from `mCeilingTargetDb + mCeilingTrimDb`, so the orange line tracks
+  the Ceiling knob and GR/level track the rest.
+- **The plumbing gap that made the rest possible:** the paint callback was handed the
+  audio FEED and nothing else, but most of these visuals are PARAMETRIC -- they read knob
+  state at paint time.  `EffectVisualWindow::resolveDsp()` added, resolving through the
+  rack by uuid on every call and never cached, same discipline as the feed resolver and
+  for the same reason (a project load destroys the DSP under an open window).  Parametric
+  is also *why* a knob edit shows up immediately: nothing is published and nothing waits.
+- **Display-only accessors added** following the `DelayDSP::shapeFeedbackForDisplay`
+  precedent -- paint-thread read, never called from processBlock, unlocked by design
+  (a float read racing the audio thread costs at worst one stale frame at 30 Hz):
+  `ChorusDSP::lfoPhase/lfoShapeForDisplay`, `FlangerDSP::lfoPhase`, `PhaserDSP::lfoPhase`,
+  `DelayDSP::hostBpmForDisplay`.  Everything else was already public state.
+- **SHIPPED (all 10):**
+  - **Limiter** — scrolling level + GR + ceiling (pre-existing, re-verified).
+  - **Chorus / Flanger / Phaser** — ONE shape for all three, deliberately: they are the
+    same idea (an LFO sweeping a delay or a filter) and three different pictures would
+    teach a difference that is not there.  Left is the LFO's actual wave with a dot on the
+    real phase; right is the comb/notch response.  Per-effect derivations differ (chorus
+    notch spacing from base delay, flanger depth from feedback, phaser notches from stage
+    count -- two allpass stages make one notch).
+  - **Delay** — repeats as bars against the beat grid, ping-pong split above/below the
+    centre line, BUILDING warning above unity feedback, plus the feedback drive curve that
+    arrived from the panel at T20.  Beat grid reads `hostBpmForDisplay` off the DSP rather
+    than the transport so grid and repeats can never disagree.
+  - **Reverb** — decay envelope with pre-delay / early-reflections / tail as shaded named
+    regions; the tail is a true -60 dB exponential over the Decay knob's time, so the curve
+    IS the number on the knob.
+  - **Compressor** — in/out transfer curve with the soft knee drawn and a live dot.  The
+    dot solves the curve BACKWARDS from `getGainReductionDb()`: GR = (in-T)(1-1/R), so the
+    operating point comes from the one number the DSP already publishes.
+  - **Transient Shaper** — one hit ghosted twice, input vs shaped, driven by Attack /
+    Release and the two Shape selectors.
+  - **Saturation / Tape** — one branch (`EffectType::Tape` is an ALIAS onto
+    `SaturationDSP`, H-10 cutover).  Harmonic bars + the drive transfer curve.  The bars
+    are MEASURED, not modelled: one sine cycle runs through `shapeForDisplay` at paint
+    time and harmonics 1-8 are correlated out of what comes back, drawn in dB below the
+    fundamental (linear magnitude flattens everything past the 2nd) with the fundamental
+    dim at the left as the note-you-play reference.  A Tube-type swap or Color toggle
+    moves the bars because it changed the math, not a hand-tuned picture.
+- **`SaturationDSP::shapeForDisplay` dispatches on the ACTIVE Type and calls the REAL
+  static shapers** (`processTube` / `processConsole` / `tapeAsymShaper`) with live member
+  values -- the shapers are stateless statics, so the picture cannot drift from the audio
+  path because it IS the audio path.  A generic tanh approximation was rejected for
+  exactly that reason.  Console maps Drive->mFlowers / Color->mDabs (the process()
+  argument mapping); Tape mirrors the phase-2 call-site input math (bias offset, then
+  k = 0.3 * vibe) with an edit-together note on both sides.  Deliberately omits
+  everything AROUND the shaper (band split, oversampling, hysteresis, wow/flutter):
+  static transfer curve, not a simulation.
+- **Limiter caption upgraded** while closing the manual-rule sweep: the plan requires the
+  GR trace's meaning stated AT the component, and T13 had left a bare effect name.  Now
+  "cyan dips = volume being pulled down; orange = ceiling".
+
+**RECOVERED RULING #2 from the same ledger gap (Jeff, 2026-08-06): the Feed warn ring was
+supposed to be LIVE.**  Jeff's words in the T13/T19 session (recovered by transcript
+search): the ring "was supposed to actually show you hitting red when it was causing the
+extreme clipping and what not that comes with high feedback."  That session fixed only the
+glow clipping (`9bcb510c`) and dropped this half -- the ring colored purely off the KNOB
+position and showed nothing about the audio.  Same anti-recurrence note as the tether: a
+ledger gap gets checked for unbuilt rulings, and this one had TWO in it.
+
+- **DSP**: `DelayDSP` accumulates the peak of the loop-injection signal (step 5, post
+  `mFeedbackLevel` scale -- the signal actually re-entering the line) and publishes it
+  through `getFeedbackEnvForDisplay()` (relaxed atomic, instant rise, ~250 ms decay so a
+  building runaway reads live without flickering at the repeat rate).  The Off model
+  skips the accumulate on purpose: no loop, no feedback occurring, ring dark.  Near 1.0
+  means step 4's limiter/saturator is clamping every cycle -- the exact "extreme
+  clipping" state Jeff described.  Zeroed in `reset()`.
+- **Ring redesign** (`TimeLAF::drawWarnRing`, new `kWarnRingLive` slider property): two
+  layers.  SETTING track, thin -- green through the safe range, dim orange outline
+  through the over-unity zone, so the runaway RANGE stays visible before anything sounds
+  (the original CL-299 purpose survives).  LIVE arc, thick -- a meter of the level
+  actually circulating; its lit head IS the current level, green heating to orange as
+  the loop approaches unity, red only past it.  Both share the knob's 0..1.2 scale so a
+  circulating level of 1.0 lights exactly to the knob's "100%" mark.
+- **Position rework** (Jeff: "sitting on top of our knob... looks weird as hell"): a
+  ring-carrying knob now draws its face INSET 6 px so the ring orbits in clear space
+  around it -- the chicken-head letter-ring relationship -- instead of being painted
+  over the filmstrip face.
+- **Panel**: `DelayPanel` gains a 15 Hz peer-keyed timer (starts/stops on
+  `parentHierarchyChanged`, `liveDsp()` guard first per the T13 crash class) that maps
+  the level onto the arc scale and pokes `kWarnRingLive` + a repaint, change-guarded at
+  0.004 so a silent panel repaints nothing.
+- Build gate green after each batch; final gate five exit codes 0, four link lines, zero
+  `error C` / `error LNK` / `error MSB`.
+- **No Rule 4 diagnostics added.**
+- **NOT VERIFIED IN THE APP** — no batch smoke (G4).  The G4 walk needs, per effect: open
+  Menu > Visual, confirm the picture draws, then turn its knobs and confirm the picture
+  moves.  That last half is the actual requirement and cannot be inferred from a build.
+
+## 2026-08-06 — T18 REWORKED audio-first after Jeff rejected the parametric-only pass
+
+Jeff's verdict on the first T18 pass, direct: the visuals were "just weird lines that do
+slightly move with the knobs but there is nothing displaying the sound at all ... I need
+way more audio displayed in these as this is kind of piss poor work."  He was right, and
+the tell was already in the record: the limiter -- the ONE visual showing real audio --
+was the one he had no complaint about.  The parametric pass showed the SETTINGS; the
+requirement is the SOUND, with the settings shown against it.
+
+- **Every effect now publishes real audio to its visual feed** (self-gated -- one relaxed
+  load per block unwatched, unchanged from T17's design).  Shared helpers on `DSPBase`
+  (`visualCaptureIn` / `visualPushInOut`: hi/lo = output envelope, a = input envelope,
+  linear so the strip reads as a waveform) so six effects cannot drift six ways.
+  Per-effect exceptions: Compressor pushes input + GR + threshold; Delay accumulates the
+  WET path separately in-loop, because a post-scan of the mix would bury the echoes under
+  the dry signal while it plays and the echoes are the entire point.  Reverb's
+  five-algorithm dispatch was restructured (done-flag instead of per-case returns) so
+  every path exits through the push.  The `hasVisual()` overrides became
+  `hasVisualFeed()` -- every effect genuinely publishes now.
+- **Every window is audio-first**: main area = scrolling in-vs-out (ghost outline = what
+  went in, solid = what came out; the difference IS the effect), parametric drawing
+  demoted to a side strip.  Per effect: Compressor = input waveform + cyan GR from the
+  top + orange threshold lines ON the waveform (which is where Attack/Release finally
+  SHOW -- how fast the cyan digs in, how long it hangs on; they never bend the static
+  knee, which is a level map, and Jeff's question about that is answered by putting the
+  audio on screen rather than by the curve).  Delay = the actual echoes (wet-only trace)
+  with beat-grid verticals derived from block duration + the DSP's own BPM, so grid and
+  echoes cannot disagree.  Reverb = the solid keeps going after the ghost stops -- that
+  hang-over IS the tail.  TransientShaper = real before/after; the canned one-hit stays
+  as a small side preview because it shows the settings while nothing plays.
+  Saturation/Tape = in-vs-out plus harmonic bars measured AT THE LIVE INPUT LEVEL (from
+  the feed's recent input columns): a soft clipper adds nothing quiet and plenty driven,
+  so the bars rise and fall with the sound -- Jeff's "where those harmonics are hitting
+  as it passes through" -- with dim ghost bars behind them showing the potential at full
+  drive.  Chorus/Flanger/Phaser = the audio with the LFO scope + comb stacked at the side.
+- **`delayRepeats` deleted** (the parametric repeats grid the audio view replaces) --
+  own-batch dead code, cleaned in-batch.
+- **Warn-ring position: knob restored to full size** (the 6 px inset was mine, not asked
+  for, reverted on Jeff's correction) and the ring's placement made adjustable:
+  `TimeLAF::sWarnRingOffX/OffY/Scale` statics applied in `drawWarnRing`, driven by a
+  draggable placement box (below).  Once Jeff settles a placement the numbers get
+  hardcoded and the box deleted.
+- Build gate green: five exit codes 0, four link lines, zero errors.
+- **NOT VERIFIED IN THE APP** — Jeff re-tests against the audio-first list; the knob
+  half was already verified once, the audio half cannot be inferred from a build.
+
+**Ring placement SETTLED (Jeff, 2026-08-06).**  The move-only box was rejected same day —
+the knob art is in perspective, so fitting the ring needed stretch and rotation, not just
+position.  The box gained corner handles (stretch X/Y independently), a top-stem rotation
+knob, and wheel uniform scale; Jeff fitted it by eye and delivered
+`scaleX=1.417 scaleY=0.889 rotDeg=-1.5` (offsets 0/0).  Hardcoded as
+`TimeLAF::kWarnRingScaleX/ScaleY/RotDeg` constexpr calibration (Rule 6 category 5 — value
+derivation recorded at the declaration); `drawWarnRing` draws the tilted ellipse via
+`addCentredArc(rx, ry, rotation)`.  Box, statics, file write and the on-disk placement
+file all deleted per the catalog disposition.
+
 ## Diagnostic Instrumentation Catalog (Rule 4)
 
 | Site | Tag | Purpose | Disposition |
 |------|-----|---------|-------------|
+| `EffectEditorPanels.cpp` `RingPlacementBox` (+ mount/layout in DelayPanel), `SharedUI.h` `TimeLAF::sWarnRingOffX/OffY/ScaleX/ScaleY/RotDeg`, `SharedUI.cpp` `drawWarnRing` offset/stretch/rotation application | `[QA-Layout DIAG]` | Warn-ring placement (Jeff, 2026-08-06): dashed frame around the Feed knob.  Move-only was rejected same day ("can't rotate or stretch it at all which is required to make it actually fit on the knob" -- the knob art is in perspective, so the fit needs a squashed, tilted ellipse).  Final form: edge drag = move, corner handles = stretch X/Y independently, top-stem knob = rotate, wheel = uniform scale; interior passed through so the knob stayed usable.  Ring geometry via `addCentredArc(rx, ry, rotation)` | **REMOVED same day** -- Jeff's settled numbers (`scaleX=1.417 scaleY=0.889 rotDeg=-1.5`, offsets 0/0) hardcoded as `TimeLAF::kWarnRingScaleX/ScaleY/RotDeg` constexpr calibration; box, statics, file write and the on-disk `warn-ring-placement.txt` all deleted |
 | `WorkspaceWindow.h` (onDiagExtraInfo + paintOverChildren decl + mLastDiagSize), `WorkspaceWindow.cpp` (ctor 120x80 floor, setMinimumSize override w/ commented-out real body, resized() diag append, paintOverChildren WxH readout, AppPaths include), `EffectWindows.h/.cpp` (diagPanelMode), `StandaloneEditor.cpp` (openEffectSlotWindow onDiagExtraInfo wire) | `[QA-Layout DIAG]` | Window-sizing collection (T6): per-size-change append of persist-key + title + WxH + effects panel mode to `Documents/BaySickDAW/window-sizing-diag.txt`; live strip readout; floors dropped to 120x80 | **REMOVED in `9797f19d` (T7)** — real floors restored in setMinimumSize; readout, per-resize append, onDiagExtraInfo and diagPanelMode all stripped |
 | `WorkspaceWindow.h/.cpp` (winPosDiag + SAVE/REST call sites), `WorkspaceWindow.cpp` writeSessionToSettings (WRITE call site) | `[WINPOS DIAG]` | Window-placement bug (T7): one line per store / write / restore with raw bounds, screen bounds, workspace origin and workspace screen bounds, so the failing step was identified from data after three wrong diagnoses.  Wrote `Documents/BaySickDAW/window-pos-diag.txt` | **REMOVED in `9797f19d` (T7)** — added and removed inside the same task; it is what isolated causes 3 and 4 |

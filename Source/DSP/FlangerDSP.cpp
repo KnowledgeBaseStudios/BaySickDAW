@@ -251,6 +251,8 @@ void FlangerDSP::process (juce::AudioBuffer<float>& buffer)
 
     if (mBufL.empty()) return;
 
+    const float visIn = visualCaptureIn (buffer);   // T18
+
     const int    bufSize         = (int) mBufL.size();
     // Stereo phase offset for R channel: convert degrees to 0..1 phase fraction
     const double stereoPhaseFrac = (double) mStereoPhase / 360.0;
@@ -344,6 +346,8 @@ void FlangerDSP::process (juce::AudioBuffer<float>& buffer)
         while (mPhase >= 1.0) mPhase -= 1.0;
         while (mPhase <  0.0) mPhase += 1.0;
     }
+
+    visualPushInOut (buffer, visIn);   // T18
 }
 
 // ── Serialisation ─────────────────────────────────────────────────────────────

@@ -1922,11 +1922,14 @@ struct ChorusPanel : public EditorPanelBase
 // DelayDSP::shapeFeedbackForDisplay; T18 re-raises it there alongside the
 // beat-grid repeats.
 // ─────────────────────────────────────────────────────────────────────────────
-struct DelayPanel : public EditorPanelBase
+struct DelayPanel : public EditorPanelBase,
+                    private juce::Timer
 {
     std::vector<std::unique_ptr<VKnob>>         r1knobs, r2knobs, duckKnobs;
     std::unique_ptr<DualLabelToggle>            tempoTog, keepPitchTog, fbDistTypeTog;
     std::unique_ptr<ChickenHeadSelector>        modelSel, fbFilterTypeSel, syncDivSel;
+    DelayDSP*                                   mDelayDsp { nullptr };
+    float                                       mLastRingLive { -1.0f };
 
     // QA-Layout T20 (Jeff, 2026-08-05): Basic is a locked short list, no longer
     // "the reference face minus our additions".  The reference unit is itself
@@ -1966,6 +1969,7 @@ struct DelayPanel : public EditorPanelBase
     // ^ 1/1, 1/2, 1/4, 1/8, 1/8D (=3/16), 1/4T (=1/6), 1/16, 1/8T (=1/12)
 
     explicit DelayPanel(DelayDSP* dsp)
+        : mDelayDsp (dsp)
     {
         disableVU();   // Delay has no input VU - full knob width
         setLookAndFeel(&TimeLAF::get());
@@ -1991,6 +1995,7 @@ struct DelayPanel : public EditorPanelBase
         // before you hear it.  1.0 / 1.2 is where 100 % sits on this knob.
         if (r1knobs.size() > 1 && r1knobs[1])
             r1knobs[1]->slider.getProperties().set (TimeLAF::kWarnRingFrom, 1.0 / 1.2);
+
 
         // Row 2: ModHz | ModTime | ModFB | Diff | DiffSprd | LoBit | FBDst | FBKnee | FBSym | Spread | Pan | Smooth
         // (+ Duck at idx 12, laid into row 1 in Advanced).  ModTime placed next
@@ -2196,7 +2201,38 @@ struct DelayPanel : public EditorPanelBase
             syncDivSel->setLocked(! syncOn);
     }
 
-    ~DelayPanel() override { setLookAndFeel(nullptr); }
+    ~DelayPanel() override
+    {
+        stopTimer();
+        setLookAndFeel(nullptr);
+    }
+
+    // Peer-keyed like every repeating UI cost in the shell: a panel can exist
+    // unframed, and a hidden panel polling a meter is pure waste.
+    void parentHierarchyChanged() override
+    {
+        if (getPeer() != nullptr) { if (! isTimerRunning()) startTimerHz (15); }
+        else if (isTimerRunning()) stopTimer();
+    }
+
+    // CL-299 (1) second half: feed the Feed knob's ring the feedback level
+    // actually occurring.  liveDsp() first, ALWAYS (Jeff, 2026-08-05 crash
+    // class) -- a load can replace the DSP under this timer.
+    void timerCallback() override
+    {
+        if (liveDsp() == nullptr || mDelayDsp == nullptr) return;
+        if (r1knobs.size() < 2 || ! r1knobs[1]) return;
+
+        // Level -> arc position: the ring shares the knob's 0..1.2 scale, so a
+        // circulating level of 1.0 lights exactly up to the knob's "100%" mark
+        // and the red zone is the same zone on both.
+        const float norm = juce::jlimit (0.0f, 1.0f,
+                                         mDelayDsp->getFeedbackEnvForDisplay() / 1.2f);
+        if (std::abs (norm - mLastRingLive) < 0.004f) return;
+        mLastRingLive = norm;
+        r1knobs[1]->slider.getProperties().set (TimeLAF::kWarnRingLive, norm);
+        r1knobs[1]->slider.repaint();
+    }
 
     void paint(juce::Graphics& g) override
     {
@@ -2306,6 +2342,7 @@ struct DelayPanel : public EditorPanelBase
 
         layoutKnobsH (r1, row1);
         layoutKnobsH (r2, row2);
+
     }
 };
 

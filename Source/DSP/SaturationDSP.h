@@ -199,6 +199,37 @@ public:
     bool  mTapeIrOn         { false };     // cassette IR engaged (Basic on/off; default off)
     int   mTapeCassetteIdx  { 0 };         // 0..9 -> paired cassette IR + hiss bed
 
+    // ── Display-only (QA-Layout T18) ─────────────────────────────────────────
+    // Transfer curve for the Visual window, dispatching on the ACTIVE Type and
+    // calling the very shapers process() uses with the live member values --
+    // the picture cannot drift from the audio path because it IS the audio
+    // path.  Same contract as DelayDSP::shapeFeedbackForDisplay: paint-thread
+    // read, never called from processBlock.  Deliberately omits everything
+    // AROUND the shaper (band split, oversampling, hysteresis, wow/flutter):
+    // this is the static transfer curve, not a simulation.
+    bool  hasVisualFeed() const override { return true; }
+    float shapeForDisplay (float x) const noexcept
+    {
+        switch (mSatType)
+        {
+            case Type::Console:
+                // Same argument mapping as the process() call sites: Drive
+                // knob rides mFlowers, Color rides mDabs.  isLow=false = the
+                // high band's curve; Dirty mode drives the low band 2.75x
+                // harder, which the caption states rather than a second curve.
+                return processConsole (x, mFlowers, mDabs, mConsoleColor,
+                                       mConsoleMode == ConsoleMode::Dirty, false);
+            case Type::Tape:
+                // Mirrors the phase-2 shaper input math at its call site
+                // (bias-offset then k = 0.3 * vibe); edit the two together.
+                return tapeAsymShaper (x + (mTapeBias - 5.0f) * 0.02f,
+                                       0.3f * mTapeVibe);
+            case Type::Tube:
+            default:
+                return processTube (x, mFlowers, mDabs, mTubeType, mTransformer);
+        }
+    }
+
 private:
     // Tube engine (stateless per sample; takes per-sample smoothed params).
     static float processTube (float x, float flowers, float dabs,
