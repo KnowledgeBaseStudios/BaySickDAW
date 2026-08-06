@@ -1908,110 +1908,31 @@ struct ChorusPanel : public EditorPanelBase
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// DelayPanel  (2 rows)
+// DelayPanel  (2 rows + a 3x2 selector grid at the right edge)
 // Row 1: Time | Feed | LoFiSR | WetIn | Wet | Dry | FBCut | FBReso | Tone
-//        (+ Duck | DkThr | DkAtt | DkRel in Advanced)  +  Model  +  FBFilter
+//        (+ Duck | DkThr | DkAtt | DkRel in Advanced)   [Model][SyncDiv][FBFilter]
 // Row 2: ModHz | ModTime | ModFB | Diff | DiffSprd | LoBit | FBDst | FBKnee | FBSym | Spread | Pan | Smooth
-//        +  SyncDiv  +  BPM  +  Pitch  +  FBDistType
-// ─────────────────────────────────────────────────────────────────────────────
-// ── FbCurveDisplay — CL-299 (2) ──────────────────────────────────────────────
-// Live transfer curve of the feedback distortion.  Orientation follows the
-// reference: INPUT runs vertically, OUTPUT horizontally.
+//                                                     [Pitch][ BPM ][Limit/Sat]
+// Basic keeps Time/Feed/Wet/Dry/Tone on row 1, FBDst/FBKnee/FBSym/Smooth on
+// row 2, and every selector; no control ever changes row between modes.
 //
-// Polls the DSP rather than being pushed to, because the four values that shape
-// it (drive / knee / symmetry / type) are moved by four different controls plus
-// automation plus preset loads, and a curve that only updated on some of those
-// is worse than one that always lags by a frame.  Peer-keyed like every other
-// repeating UI cost in the shell.
-struct FbCurveDisplay : public juce::Component,
-                        public juce::SettableTooltipClient,
-                        private juce::Timer
-{
-    explicit FbCurveDisplay (DelayDSP* dsp) : mDsp (dsp) {}
-
-    // Set by the owning panel so this child can ask whether its DSP is STILL
-    // live before reading it.  A child component inherits the panel's hazard
-    // without inheriting EditorPanelBase::liveDsp, which is exactly how this
-    // site was missed in the first sweep (QA-Layout T13, 2026-08-05).
-    std::function<DSPBase*()> mResolveDsp;
-
-    DelayDSP* liveDsp() const
-    {
-        if (mDsp == nullptr) return nullptr;
-        if (! mResolveDsp)   return mDsp;
-        return mResolveDsp() == static_cast<DSPBase*> (mDsp) ? mDsp : nullptr;
-    }
-
-    void parentHierarchyChanged() override
-    {
-        if (getPeer() != nullptr)      { if (! isTimerRunning()) startTimerHz (10); }
-        else if (isTimerRunning())     { stopTimer(); }
-    }
-
-    void paint (juce::Graphics& g) override
-    {
-        auto b = getLocalBounds().toFloat().reduced (1.0f);
-        g.setColour (juce::Colour (0xff141414));
-        g.fillRoundedRectangle (b, 2.0f);
-        g.setColour (juce::Colour (0xff3A3A3A));
-        g.drawRoundedRectangle (b, 2.0f, 1.0f);
-
-        auto plot = b.reduced (3.0f);
-        // Centre cross: unity in, unity out.
-        g.setColour (juce::Colour (0xff2A2A2A));
-        g.drawLine (plot.getCentreX(), plot.getY(), plot.getCentreX(), plot.getBottom(), 1.0f);
-        g.drawLine (plot.getX(), plot.getCentreY(), plot.getRight(), plot.getCentreY(), 1.0f);
-
-        if (mDsp == nullptr) return;
-
-        juce::Path curve;
-        constexpr int kPoints = 96;
-        for (int i = 0; i < kPoints; ++i)
-        {
-            const float in  = -1.0f + 2.0f * (float) i / (float) (kPoints - 1);
-            const float out = juce::jlimit (-1.2f, 1.2f, mDsp->shapeFeedbackForDisplay (in));
-            // Input vertical (down = -1), output horizontal (right = +1).
-            const float px = plot.getCentreX() + out * plot.getWidth()  * 0.5f / 1.2f;
-            const float py = plot.getCentreY() - in  * plot.getHeight() * 0.5f;
-            if (i == 0) curve.startNewSubPath (px, py);
-            else        curve.lineTo (px, py);
-        }
-        g.setColour (juce::Colour (0xff00FFF2));
-        g.strokePath (curve, juce::PathStrokeType (1.4f));
-    }
-
-private:
-    void timerCallback() override
-    {
-        // Own liveDsp(): this is a child Component with its own DelayDSP*, not
-        // an EditorPanelBase, so it carries the panel's hazard and needed its
-        // own resolver.  Non-null here means the rack still vouches for mDsp.
-        if (liveDsp() == nullptr) return;
-        const float lvl  = mDsp->getFBDistLevel();
-        const float knee = mDsp->getFBDistKnee();
-        const float sym  = mDsp->getFBDistSymmetry();
-        const int   type = mDsp->getFBDistType();
-        if (lvl == mLastLvl && knee == mLastKnee && sym == mLastSym && type == mLastType) return;
-        mLastLvl = lvl; mLastKnee = knee; mLastSym = sym; mLastType = type;
-        repaint();
-    }
-
-    DelayDSP* mDsp { nullptr };
-    float mLastLvl { -1.0f }, mLastKnee { -1.0f }, mLastSym { -1.0f };
-    int   mLastType { -1 };
-};
-
+// The feedback transfer curve left this panel at QA-Layout T20 (2026-08-05) for
+// the Delay's Visual window, so all of the Delay's drawing lives in one place
+// and its 46 px box stops eating row 2.  The draw is a 96-point sweep of
+// DelayDSP::shapeFeedbackForDisplay; T18 re-raises it there alongside the
+// beat-grid repeats.
+// ─────────────────────────────────────────────────────────────────────────────
 struct DelayPanel : public EditorPanelBase
 {
     std::vector<std::unique_ptr<VKnob>>         r1knobs, r2knobs, duckKnobs;
     std::unique_ptr<DualLabelToggle>            tempoTog, keepPitchTog, fbDistTypeTog;
     std::unique_ptr<ChickenHeadSelector>        modelSel, fbFilterTypeSel, syncDivSel;
-    std::unique_ptr<FbCurveDisplay>             fbCurve;      // CL-299 (2)
 
-    // QA-EffectsReview Task 9: Basic = the exact reference face (FL Fruity
-    // Delay 3) -- which is the ENTIRE Echo panel except our additions.  Our
-    // additions = the Duck cluster (amount + threshold/attack/release); those
-    // hide in Basic.  resized() does show/hide + reflow.
+    // QA-Layout T20 (Jeff, 2026-08-05): Basic is a locked short list, no longer
+    // "the reference face minus our additions".  The reference unit is itself
+    // fairly advanced, and hiding only the Duck cluster left Basic rendering
+    // twelve row-2 knobs inside a 691 px window -- the same panel squeezed,
+    // not a simpler one.  resized() does show/hide + reflow for BOTH rows.
     bool hasAdvancedControls() const override { return true; }
 
     std::vector<VKnob*> getExtraKnobs() override
@@ -2119,14 +2040,6 @@ struct DelayPanel : public EditorPanelBase
             dsp->setDelayModel (kModelOptionValues[(size_t) juce::jlimit (0, 3, idx)]);
         };
         addAndMakeVisible(*modelSel);
-
-        fbCurve = std::make_unique<FbCurveDisplay> (dsp);
-        // Hand the child the SAME liveness question this panel answers, so it
-        // stops reading its DSP the moment the model stops vouching for ours.
-        fbCurve->mResolveDsp = [this]() -> DSPBase*
-                               { return mResolveDsp ? mResolveDsp() : mDsp; };
-        fbCurve->setTooltip ("Feedback distortion transfer curve - input vertical, output horizontal");
-        addAndMakeVisible (*fbCurve);
 
         fbFilterTypeSel = std::make_unique<ChickenHeadSelector>();
         fbFilterTypeSel->setOptions({
@@ -2290,6 +2203,20 @@ struct DelayPanel : public EditorPanelBase
         TimeLAF::paintPultecPanel(g, getLocalBounds());
     }
 
+    // Which knobs survive into Basic, by index into their row's vector.
+    // Locked by Jeff 2026-08-05: Time / Feed / Wet / Dry / Tone up top; the
+    // three feedback-DRIVE knobs (not FBCut/FBReso, which are the feedback
+    // FILTER) plus Smooth below.  Kept as members so the two lists sit beside
+    // each other rather than being buried mid-resized().
+    static constexpr int kR1Basic[] = { 0, 1, 4, 5, 8 };   // Time Feed Wet Dry Tone
+    static constexpr int kR2Basic[] = { 6, 7, 8, 11 };     // FBDst FBKnee FBSym Smooth
+
+    static bool inBasic (const int* list, int n, int idx)
+    {
+        for (int i = 0; i < n; ++i) if (list[i] == idx) return true;
+        return false;
+    }
+
     void resized() override
     {
         auto b = getLocalBounds().reduced(4, 2);
@@ -2301,48 +2228,84 @@ struct DelayPanel : public EditorPanelBase
         outputVolKnob->setBounds(b.removeFromRight(kKnobSz).withSizeKeepingCentre(kKnobSz, kKnobSz));
         b.removeFromRight(4);
 
-        // Task 9 Basic/Advanced: Basic = the reference face; Advanced adds the
-        // Duck cluster (laid into row 1).
         const bool adv = ! mBasicMode;
-        if (r2knobs.size() > 12 && r2knobs[12]) r2knobs[12]->setVisible(adv);
-        for (auto& k : duckKnobs) if (k) k->setVisible(adv);
+
+        // T20: BOTH rows filter now.  Row 2 never did, so Basic laid out the
+        // same twelve knobs the Advanced view has inside a 691 px window --
+        // ~23 px a slot, which is below the point where a VKnob's label has any
+        // room and is why they read "M..." / "Df...".
+        auto visibleFrom = [adv] (std::vector<std::unique_ptr<VKnob>>& src,
+                                  const int* basicList, int basicCount, int upTo)
+        {
+            std::vector<VKnob*> out;
+            for (int i = 0; i < upTo && i < (int) src.size(); ++i)
+            {
+                if (! src[i]) continue;
+                const bool show = adv || inBasic (basicList, basicCount, i);
+                src[i]->setVisible (show);
+                if (show) out.push_back (src[i].get());
+            }
+            return out;
+        };
+
+        auto row1 = visibleFrom (r1knobs, kR1Basic, (int) (sizeof (kR1Basic) / sizeof (kR1Basic[0])),
+                                 (int) r1knobs.size());
+        auto row2 = visibleFrom (r2knobs, kR2Basic, (int) (sizeof (kR2Basic) / sizeof (kR2Basic[0])), 12);
+
+        // Duck amount is stored in r2knobs but lays out with its envelope trio
+        // at the end of row 1; the whole cluster is Advanced-only.
+        if (r2knobs.size() > 12 && r2knobs[12])
+        {
+            r2knobs[12]->setVisible (adv);
+            if (adv) row1.push_back (r2knobs[12].get());
+        }
+        for (auto& k : duckKnobs)
+        {
+            if (! k) continue;
+            k->setVisible (adv);
+            if (adv) row1.push_back (k.get());
+        }
 
         auto r1 = b.removeFromTop(b.getHeight() / 2);
         auto r2 = b;
 
-        // Row 1: Model + FBFilter chicken-head selectors on right
-        auto mc = r1.removeFromRight(66); r1.removeFromRight(2);
-        if (modelSel) modelSel->setBounds(mc.reduced(2));
-        auto fbc = r1.removeFromRight(66); r1.removeFromRight(2);
-        if (fbFilterTypeSel) fbFilterTypeSel->setBounds(fbc.reduced(2));
-        std::vector<VKnob*> row1;
-        for (auto& k : r1knobs) if (k) row1.push_back(k.get());
-        if (adv)
-        {
-            if (r2knobs.size() > 12 && r2knobs[12]) row1.push_back(r2knobs[12].get());
-            for (auto& k : duckKnobs) if (k) row1.push_back(k.get());
-        }
-        layoutKnobsH(r1, row1);
+        // T20 selector grid, replacing two chicken-heads up top and four
+        // controls plus the curve box below:
+        //
+        //   [ Model ] [ SyncDiv ] [ FB Filter ]
+        //   [ Pitch ] [   BPM   ] [ Limit/Sat ]
+        //
+        // One column width across both rows so the pairs line up, and sync
+        // division sits directly above the BPM switch that gates it (Jeff,
+        // 2026-08-05 -- it used to float mid-row beside the curve).
+        //
+        // Cells are sized to their CONTENT, not to the row: a DualLabelToggle
+        // draws from the top of its bounds, so a full-row-height cell left ~60 px
+        // of blank under every switch, and ChickenHeadSelector's knob is
+        // min(w,h) minus a 26 px letter ring, so a 66-wide cell shrank the head
+        // to 32 px next to 44 px knobs.  74 is the width that puts the head back
+        // at kKnobSz; 54 is the OnOff toggle's natural stack (12+10+22+10).
+        constexpr int kSelW = 74;
+        constexpr int kSelH = 74;
+        constexpr int kTogH = 54;
 
-        // Row 2 right: SyncDiv chicken-head | BPM on/off | Pitch on/off | FBDistType named
-        // (taken right-to-left; order left-to-right on screen = SyncDiv / BPM / Pitch / FBDist)
-        auto fdt = r2.removeFromRight(62); r2.removeFromRight(2);
-        if (fbDistTypeTog) fbDistTypeTog->setBounds(fdt.reduced(1));
-        auto kp = r2.removeFromRight(62); r2.removeFromRight(2);
-        if (keepPitchTog) keepPitchTog->setBounds(kp.reduced(1));
-        auto tb = r2.removeFromRight(62); r2.removeFromRight(2);
-        if (tempoTog) tempoTog->setBounds(tb.reduced(1));
-        auto sd = r2.removeFromRight(66); r2.removeFromRight(2);
-        if (syncDivSel) syncDivSel->setBounds(sd.reduced(2));
-        // CL-299 (2): the transfer curve sits at the left edge of row 2's
-        // right-hand cluster, beside the Limit/Sat toggle that selects which
-        // curve it is drawing.
-        auto fc = r2.removeFromRight(46); r2.removeFromRight(2);
-        if (fbCurve) fbCurve->setBounds(fc.reduced(1));
-        std::vector<VKnob*> row2;
-        for (int i = 0; i < (int) r2knobs.size() && i < 12; ++i)
-            if (r2knobs[i]) row2.push_back(r2knobs[i].get());
-        layoutKnobsH(r2, row2);
+        auto cell = [] (juce::Rectangle<int>& row, int w, int h)
+        {
+            auto slot = row.removeFromRight (w);
+            row.removeFromRight (2);
+            return slot.withSizeKeepingCentre (w, juce::jmin (h, slot.getHeight()));
+        };
+
+        if (fbFilterTypeSel) fbFilterTypeSel->setBounds (cell (r1, kSelW, kSelH));
+        if (syncDivSel)      syncDivSel     ->setBounds (cell (r1, kSelW, kSelH));
+        if (modelSel)        modelSel       ->setBounds (cell (r1, kSelW, kSelH));
+
+        if (fbDistTypeTog)   fbDistTypeTog  ->setBounds (cell (r2, kSelW, kTogH));
+        if (tempoTog)        tempoTog       ->setBounds (cell (r2, kSelW, kTogH));
+        if (keepPitchTog)    keepPitchTog   ->setBounds (cell (r2, kSelW, kTogH));
+
+        layoutKnobsH (r1, row1);
+        layoutKnobsH (r2, row2);
     }
 };
 

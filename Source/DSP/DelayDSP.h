@@ -121,8 +121,10 @@ public:
     int   syncNumerator   { 1 };
     int   syncDenominator { 4 };
 
-    // CL-299 (2): the feedback shaper's transfer curve, for the panel's graph.
-    // DISPLAY ONLY -- never called from processBlock.
+    // CL-299 (2): the feedback shaper's transfer curve, for the Delay's Visual
+    // window (it drew on the panel until QA-Layout T20 moved every Delay
+    // drawing into that one window).  DISPLAY ONLY -- never called from
+    // processBlock.
     //
     // It mirrors step 4 of the feedback path rather than sharing code with it,
     // and that is deliberate: the audio loop hoists every invariant of the Sat
