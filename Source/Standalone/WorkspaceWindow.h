@@ -227,7 +227,7 @@ public:
     //   * DRAGGING is symmetric -- grabbing EITHER half moves both (Jeff's
     //     ruling; the alternatives were refusing the child's drag, which reads
     //     as broken, and auto-unlocking, which is surprising).
-    //   * PLACEMENT has a leader -- the follower sits under it, centred, at the
+    //   * PLACEMENT has a leader -- the follower sits under it, centered, at the
     //     leader's width.  Something has to own the geometry, and "the visual
     //     follows the effect" is the whole point.
     //
@@ -247,17 +247,13 @@ public:
     WorkspaceWindow* tetherFollower() const noexcept { return mTetherFollower.getComponent(); }
     WorkspaceWindow* tetherLeader()   const noexcept { return mTetherLeader.getComponent(); }
 
-    // Put the follower under this window, centred, matching width.  Called at
+    // Put the follower under this window, centered, matching width.  Called at
     // lock, at open, and whenever the leader's size changes -- which is what
     // carries a Basic/Advanced swap across to the visual (Jeff: "matches width",
     // and it follows in both directions because the visual's 420x220 floor is
     // under both the 691 and 1047 variants).
     void layoutTetherFollower();
 
-    // Fired on BOTH halves when the lock toggles, so the owner can persist it and
-    // either window's menu can re-read it live rather than caching a bool -- the
-    // staleness that made the locked-Freeze entry ignore its own unlock flag.
-    std::function<void(bool)> onTetherLockChanged;
 
     // Soft edge magnetism (Jeff spec 2026-07-28).  While dragging, a window
     // whose edge comes within kSnapPx of another window's opposing edge (or of
@@ -335,7 +331,7 @@ private:
     static bool sTetherFronting;
     // Set while layoutTetherFollower is writing the follower's bounds.  The
     // follower re-asks its leader to re-seat it on its own resize/move (a
-    // width change or a workspace clamp has to re-centre it), and without this
+    // width change or a workspace clamp has to re-center it), and without this
     // that request re-enters the very call that caused it.
     static bool sTetherSyncing;
     // Ask our leader to re-seat us.  No-op unless we ARE a locked follower.

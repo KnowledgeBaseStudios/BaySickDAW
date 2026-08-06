@@ -235,7 +235,7 @@ processBlock fires hundreds of times/sec — unconditional recalculation wastes 
 - Seqlock is wait-free on audio thread, correct under C++ memory model
 
 ### ArrangementGrid Layout Constants
-- kRowH=40, kRulerH=18, kLabelW=120, kNumRows=32, kResizeZone=8
+- kRowH=40, kRulerH=18, kLabelW=120, kNumRows=500, kResizeZone=8
 - mPPBar (public): pixels per bar (zoom state), default 80
 - Undo: full snapshot of blocks + row names per entry, max 100 entries
 
@@ -250,6 +250,6 @@ All approved DSP upgrades for the 12 effect modules are spec'd in:
 Covers 12 modules (Chorus, Compressor, Delay, Flanger, Limiter (net-new), Overdrive, Phaser, Reverb, Saturation, Tape, Transient Shaper, EQ8). Includes per-module change list with implementation notes, CPU budget, ordering, and deferred UI tasks. The source prompts Jeff provided are at `Files For Claude/DSP Review/*.txt` (one per module). Read `_APPROVED_CHANGES.md` before touching any DSP file listed there.
 
 Notes:
-- **Limiter UI** — `Limiter.txt` has the full 3-zone layout spec (scrolling waveform, skeuomorphic knobs, #00FFF2 cyan GR / #FF9100 orange sat, monospace digital font). Reference this when building `EffectEditorPanels::LimiterPanel`.
+- **Limiter UI** — `Limiter.txt`'s 3-zone layout spec is SUPERSEDED for the panel (Jeff, 2026-08-06, QA-Layout T13/T18): the panel keeps its standard knob layout; Zone A (scrolling waveform, #00FFF2 cyan GR / #FF9100 orange ceiling) lives in the effect's VISUAL window (`EffectVisualWindow`), which every effect has. Do NOT build the skeuomorphic panel rewrite from that doc.
 - **EQ band count** — stays at 8 (`kNumBands = 8`). Review suggested 7; we keep our existing 8.
 - **Dynamic EQ** is full feature (DSP + UI), not DSP-only.

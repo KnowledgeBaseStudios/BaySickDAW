@@ -12553,8 +12553,14 @@ void StandaloneEditor::serializeUIState (juce::XmlElement& root)
                 // same way.  Written only when UNLOCKED -- locked is the default
                 // a tethered pair opens in, so the absent attribute means locked
                 // and an older project restores tethered.
-                if (aw.key.startsWith ("vis:") && aw.window->tetherPartner() != nullptr
-                    && ! aw.window->isTetherLocked())
+                //
+                // Read the STORE, not the window (close review, 2026-08-06): an
+                // unlocked visual whose effect window is closed at save time has
+                // no partner, so window state reports "not locked" via a null
+                // partner and the attribute was skipped -- reload then re-LOCKED
+                // the pair against the user's choice.  mVisualUnlockedKeys is
+                // the in-session truth both tether paths already read.
+                if (aw.key.startsWith ("vis:") && mVisualUnlockedKeys.count (aw.key) != 0)
                     rec->setAttribute ("lock", 0);
             }
 

@@ -1,8 +1,20 @@
 # QA-DirtyFlag — Transaction-pointer dirty tracking (undo-aware clean state) — Plan (clean-pointing-stoat)
 
+> **MERGED INTO QA-UndoCoverage (Jeff's ruling, 2026-08-06, at QA-Layout close).**  This batch
+> no longer runs standalone — its scope executes inside `long-rewinding-yak.md`, whose 2026-08-06
+> ruling banner carries the merged premises.  TWO of this plan's premises are superseded there:
+> the "deliberately NOT undoable" structural-ops class is REVOKED (every action is undoable, via
+> engine-state snapshot temp files on the PagePresetIO serializer), and with it the dual
+> structural counter loses its reason to exist — dirty = transaction-pointer mismatch alone
+> should suffice (verify at the merged plan-open).  The transaction-pointer spec itself
+> (Jeff's 2026-05-23 verbatim block: currentUndoStep/savedUndoStep, branch-kill, save sync,
+> asterisk clears when Ctrl+Z lands on the save point) STANDS and executes in the merged batch.
+> This file stays as the spec record; do not execute from it.
+
 > **Canonical path:** `Plans & Specs/Batch Plans/clean-pointing-stoat.md` (mirrored at G4 group
-> approval; home-dir copy deleted). **For execution:** bulk-run G4 batch 8 of 8 — the last
-> code batch before the campaign. §B authored at code-complete; one source commit.
+> approval; home-dir copy deleted). **For execution:** ~~bulk-run G4 batch 8 of 8 — the last
+> code batch before the campaign~~ MERGED into batch 7 — see the banner above. §B authored at
+> code-complete; one source commit.
 
 ## Context
 

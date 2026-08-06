@@ -199,10 +199,10 @@ V1**; the pedalboard half **is**, in a different shape than the plan assumed.
 
 ### Task 13 — BLU-110 three-zone limiter panel (L21) — executes AFTER T17
 
-- [ ] `EffectEditorPanels::LimiterPanel` rebuilt per `Limiter.txt` §1–2: Zone A scrolling waveform (input trace, GR curve from top, red ceiling line, right→left), Zone B Gain/Ceiling/Sat big knobs, Zone C Attack/Release/Ahead/Curve; skeuomorphic knob LAF; glass overlay; `#00FFF2` cyan GR / `#FF9100` orange sat; monospace readouts. Existing LUFS meter + target-line features carry over.
-- [ ] **Zone A is built AS T17's reusable component, not standalone** (Jeff, 2026-08-05). This is the whole reason T17 comes first: the other nine panels in T18 consume the same component, so a bespoke Zone A here would be built twice and diverge.
-- [ ] Panel behaves at rack size and in the pedal context (PanelContext) with no subtractive-math hazards; floors from T7 data.
-- [ ] Build gate → commit on approval → running notes.
+- [x] ~~`EffectEditorPanels::LimiterPanel` rebuilt per `Limiter.txt` §1–2: Zone A scrolling waveform (input trace, GR curve from top, red ceiling line, right→left), Zone B Gain/Ceiling/Sat big knobs, Zone C Attack/Release/Ahead/Curve; skeuomorphic knob LAF; glass overlay; `#00FFF2` cyan GR / `#FF9100` orange sat; monospace readouts.~~ **SCOPED DOWN by Jeff 2026-08-06** — the panel-side rewrite (Zones B/C, skeuomorphic LAF, glass overlay, panel readouts) is OUT: "I don't care if the knobs stay the same I just care that we have all the knobs for the setup and that the different visuals that are attached to them display on the visual window and show edits on the knobs in the display."  Against that requirement T13 is COMPLETE: Zone A shipped in the Visual window (`9bcb510c`, colors per spec), the panel carries the full knob set, and the visual tracks the knobs (ceiling line rides `mCeilingTargetDb + mCeilingTrimDb`).  Existing LUFS meter + target-line features untouched.
+- [x] **Zone A is built AS T17's reusable component, not standalone** (Jeff, 2026-08-05) — shipped `9bcb510c`.
+- [x] ~~Panel behaves at rack size and in the pedal context (PanelContext) with no subtractive-math hazards; floors from T7 data.~~ Moot with the rewrite scoped out — the panel is unchanged from its T7-era layout, which already passed that bar.
+- [x] Closed inside the T18 commits; no separate T13 commit.
 
 ### Task 14 — Z-order audit + close bookkeeping
 

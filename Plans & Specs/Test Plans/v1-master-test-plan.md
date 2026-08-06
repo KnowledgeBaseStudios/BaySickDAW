@@ -2252,9 +2252,12 @@ End-to-end:
 - [ ] **MS-48 — CPU dividend.** All-windows-closed cheaper than the old always-alive tabs;
       several open costs more (expected, FL-style).  `D:__ R:__` notes:
 
-### §B.32 — QA-Layout (audio-device open / fallback / Audio Settings coherence)
+### §B.32 — QA-Layout (audio-device slice + whole-app layout under the windowed shell)
 
-Audio-device slice only. The rest of QA-Layout's scenarios get authored at batch close.
+Audio-device slice first (LAY-A*); the layout-batch scenarios (LAY-B*) follow it,
+authored at batch close 2026-08-06 and reconciled against what actually shipped —
+including the mid-batch additions (T15-T21) and the T13/T18 audio-first supersession.
+Walked at the G4 boundary, not at batch close (L32).
 
 Rig note: these need at least one ASIO interface and one deliberately BROKEN ASIO path.
 Jeff's rig has both — Model Mixer ASIO (works; needs a few seconds after power-on before
@@ -2318,6 +2321,132 @@ Where a step says "check the trace", read `asio_trace.txt` next to `audio_settin
       startup reaches `startup: COMPLETE` in about a second, all its channels appear
       in the Mixer master-output list and on track arming, and the trace shows the
       real channel counts. `D:__ R:__` notes:
+
+**Windows + shell (T3 / T5 / T16 / T19):**
+
+- [ ] **LAY-B1 — full-screen toggle round-trips.** On any page window: click the
+      fill button — window fills the workspace.  Click again — it returns to the
+      EXACT bounds it had.  Drag a filled window: the fill state clears, and the
+      next fill click fills again rather than restoring a stale rect. `D:__ R:__` notes:
+- [ ] **LAY-B2 — three window lifetimes.** (1) Close and reopen a player window in
+      one session: same spot.  (2) Restart the app with no project: the four default
+      tabs (Builder / Mixer / Effects / Piano Roll) come back at their last size AND
+      position; a player window opens at its DEFAULT, not a remembered size.
+      (3) Save a project with several windows placed, some closed; reload: placement
+      and open/closed state match the save. `D:__ R:__` notes:
+- [ ] **LAY-B3 — windows land on screen.** Open every window type (players, Vox
+      satellites, effect windows, visuals, EQs): none opens off the workspace.  Drag
+      one against every edge: the CURSOR stops at the workspace edge, the window may
+      hang off, and an oversized window keeps its width through the whole drag.
+      `D:__ R:__` notes:
+- [ ] **LAY-B4 — resize magnetism.** Drag a window edge to within ~10px of another
+      window's opposing edge: the edge snaps flush; only the dragged edge moves.
+      Continuing the drag pushes straight through the snap. `D:__ R:__` notes:
+- [ ] **LAY-B5 — Basic/Advanced resizes BOTH directions.** On a Basic-capable
+      effect window: Show Advanced grows it to the Advanced size; Show Basic returns
+      it to the Basic size (not stuck wide), re-clamped into view. `D:__ R:__` notes:
+
+**Title strips + menus (T2 / T3 / T15 / T16):**
+
+- [ ] **LAY-B6 — "Menu" everywhere, hamburgers gone.** Every window's strip reads
+      "Menu" (text), and the per-page nav that used to be strip buttons (Player /
+      Piano Roll / Drum Kit / Vocal Chain / Pedals / NAM-IR etc.) lives at the TOP of
+      that window's Menu with a tick on the active view. `D:__ R:__` notes:
+- [ ] **LAY-B7 — engine pickers are gone; + menu is the locked list.** Layers/Bass
+      combos, the Clips decorative combo and Drums "Pick a sound" no longer exist;
+      the ribbon "+" offers exactly: BaySickVocal, BaySickLiveInst, BaySickGuitars,
+      BaySickBasses, VSTPlugin, Harmless (Layers/Bass), BaySickSynth, BaySickPlayer,
+      BaySickBass, BaySickDrums (Player/Synth), BaySickRustyDrums. `D:__ R:__` notes:
+- [ ] **LAY-B8 — FX Rack / Freeze / Visual ride the window Menu.** On a player
+      window: Menu carries FX Rack + Freeze (Freeze greyed with the unlock path in
+      its tooltip when locked).  On an effect window: Menu carries Visual ONLY when
+      that effect has one — load an EQ8 or hosted VST3 in a slot and the row is
+      ABSENT, not greyed. `D:__ R:__` notes:
+
+**Mixer (T10):**
+
+- [ ] **LAY-B9 — target dropdowns replace drag-to-place.** A strip's "+" offers
+      Send... / Sidechain... / Move Output... submenus listing every LEGAL target
+      (illegal ones absent); picking one creates the same route the old drag made;
+      cables still draw; right-click delete + pre/post still work. `D:__ R:__` notes:
+- [ ] **LAY-B10 — group buses + L14 lifecycle.** Title-strip "Add" creates Aux /
+      Vox / Inst / Layers / Bass / Clips / Plugins buses.  A new bus PERSISTS with
+      no routes (project save/load included); give it one route, remove the route:
+      the bus hides.  Automation on a group-bus level lane plays live AND lands in
+      an offline export. `D:__ R:__` notes:
+
+**Caps + drums (T11):**
+
+- [ ] **LAY-B11 — instance caps.** Add pages to the caps: Layers 20, Bass 10,
+      Drums 32, Clips 100, Vox 10, Inst 30 — the "+" refuses past each cap without
+      crashing, and every page above the old limits gets a working mixer strip and
+      piano-roll target. `D:__ R:__` notes:
+- [ ] **LAY-B12 — drums 17-32 second kit.** With >16 drum tabs, the piano roll
+      offers a second drum-kit entry; kit view maps pads to the right pages for
+      both sixteens; note routing from both entries reaches the right drums.
+      `D:__ R:__` notes:
+
+**Hosted plugins (T12):**
+
+- [ ] **LAY-B13 — plugin stretch.** A RESIZABLE plugin resizes natively with its
+      window.  A FIXED-SIZE plugin scales (free-transform, aspect kept) instead of
+      clipping; nothing is silently cut off at any window size. `D:__ R:__` notes:
+
+**Piano roll + transport (T1 / T9):**
+
+- [ ] **LAY-B14 — control-lane resize.** Drag the lane header: lane height follows
+      between collapsed and 240px; DrumKit lane mirrors; height survives a project
+      save/reload; a clean CLICK on the header still opens the mode dropdown.
+      `D:__ R:__` notes:
+- [ ] **LAY-B15 — transport readout.** Three rows (SYS/DSP, MEM/LAT, UND/PF), no
+      overlap with the ribbon "+" at any width; a busy OTHER app yellows SYS ONLY
+      (DSP token and the rest stay put); hover shows live values above the legend.
+      `D:__ R:__` notes:
+
+**Pedalboard (T8):**
+
+- [ ] **LAY-B16 — Compact view.** Pedals window View > Compact: one-pedal dropdown
+      view at the Effects-window footprint, slots labeled by their current effect,
+      relabeling on a type change; Standard restores the 4x2 board; the mode
+      survives a project save/reload. `D:__ R:__` notes:
+
+**Effect visuals (T13 / T17 / T18 — audio-first) + tether (T21):**
+
+- [ ] **LAY-B17 — visuals exist, auto-open, and show AUDIO.** Load each of the ten
+      (Compressor, Reverb, Chorus, Delay, Saturation, Flanger, Phaser, Transient
+      Shaper, Tape, Limiter): the Visual window auto-opens under the effect window,
+      centered, matching width.  With audio running, every visual's main area shows
+      the signal moving (ghost = in, solid = out); with audio stopped, the scroll
+      goes quiet.  An unwatched visual costs nothing: close all visuals and confirm
+      DSP% does not change. `D:__ R:__` notes:
+- [ ] **LAY-B18 — visuals track their knobs.** Spot-check per family: Compressor —
+      threshold lines move with Thresh, cyan GR digs in faster with faster Attack,
+      hangs longer with longer Release, knee curve + dot on the side.  Delay —
+      echoes land on beat lines when synced; BUILDING shows past 100% Feed.  Reverb
+      — solid tail keeps going after the ghost stops, longer with Decay.  Saturation
+      — bright harmonic bars rise as the input drives harder and move when Tube
+      Type / Color change.  Chorus/Flanger/Phaser — LFO dot speed follows Rate;
+      notch count follows stages (Phaser) / delay (Chorus). `D:__ R:__` notes:
+- [ ] **LAY-B19 — tether.** Locked pair: drag EITHER half and both move together,
+      stay aligned after many drags; fronting either fronts both; closing either
+      closes both; Basic/Advanced swap re-widths the visual both directions.
+      Unlock from the visual's Menu: halves move and close independently; the X on
+      an unlocked visual sticks (no auto-reopen), Menu > Visual un-dismisses it.
+      Lock state + closed-by-hand survive save/reload.  Reopen the effect window
+      while the visual is still up: they re-tether. `D:__ R:__` notes:
+- [ ] **LAY-B20 — Feed warn ring is LIVE.** Delay playing with Feed ~80%: the ring
+      arc rises and falls with the echoes, green.  Feed past 100% with input: the
+      arc climbs to red as the loop builds toward clipping; pull Feed down and it
+      decays.  Silence = no arc.  Model Off = ring stays dark.  The ellipse sits ON
+      the knob face (Jeff's calibrated fit), knob at full size. `D:__ R:__` notes:
+
+**Delay panel (T20):**
+
+- [ ] **LAY-B21 — Basic filters BOTH rows.** Delay Basic shows exactly Time / Feed
+      / Wet / Dry / Tone up top, FBDst / FBKnee / FBSym / Smooth below, all six
+      selectors in the 3x2 grid with SyncDiv directly above the BPM switch; no
+      truncated labels at the Basic window size; Advanced restores the full set
+      with no control changing row. `D:__ R:__` notes:
 
 ## §C — Deferred re-verify ledger
 

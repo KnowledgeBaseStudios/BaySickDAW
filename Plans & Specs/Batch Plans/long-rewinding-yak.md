@@ -1,8 +1,30 @@
 # QA-UndoCoverage — One global undo: authority move, engine params, gap wrapping, Event Editor unification — Plan (long-rewinding-yak)
 
+> **RULED 2026-08-06 (Jeff, at QA-Layout close) — TWO CHANGES SUPERSEDING THIS PLAN'S PREMISES.**
+> **(1) QA-DirtyFlag MERGES INTO THIS BATCH.** One batch, one plan, one close; `clean-pointing-stoat.md`
+> is absorbed (banner there points here). The G4 order becomes ... layout -> yak (merged) -> heron.
+> **(2) EVERY ACTION IS UNDOABLE — the "dead-owner model" exclusion is REVOKED.** Jeff's original
+> spec said every action; the narrowing to "every edit, structural ops excluded" was baked
+> pending-veto on 2026-07-25 and was never posed to him — the Rule 5 violation pattern — and the
+> exclusion does not stand. Structural ops (tab add/delete/duplicate, engine pick, kit load)
+> become undoable via ENGINE-STATE SNAPSHOT temp files captured at the destructive edge — Jeff's
+> design direction: "temp files that screenshot the players like our page saves do".  VERIFIED
+> against `PagePresetIO.h` (2026-08-06, after Jeff corrected an understated first reading): the
+> page preset already captures the END-TO-END CHAIN — every engine state, every mixer-strip
+> APVTS param (sends included), the insert rack, both pre + post EQ8 M/S, and owned bus racks —
+> so it is the SPINE of the undo snapshot, not a piece of it.  The undo wrapper adds only what
+> presets deliberately exclude: the instance's piano-roll/pattern content, automation lanes
+> targeting it, INBOUND references from other strips (their sends/sidechain picks at this
+> channel), and an IDENTITY-PRESERVING restore mode (the preset loader deliberately rewrites id
+> prefixes for load-into-another-page; undo needs the same index/ids/uuids back so lanes and
+> windows re-resolve). CONSEQUENCE for the absorbed DirtyFlag half: with every action
+> undoable, the dual structural counter loses its reason to exist — dirty = transaction-pointer
+> mismatch alone should suffice; verify at plan-open rather than carrying the counter forward.
+> RE-PLAN AT BATCH OPEN from these premises; the task bodies below predate both rulings.
+
 > **Canonical path:** `Plans & Specs/Batch Plans/long-rewinding-yak.md` (mirrored at G4 group
-> approval; home-dir copy deleted). **For execution:** bulk-run G4 batch 7 of 8. §B authored at
-> code-complete; one source commit. QA-DirtyFlag (next batch) builds directly on this.
+> approval; home-dir copy deleted). **For execution:** bulk-run G4 batch 7 of 8 — MERGED with
+> QA-DirtyFlag per the 2026-08-06 ruling above. §B authored at code-complete; one source commit.
 
 ## Context
 

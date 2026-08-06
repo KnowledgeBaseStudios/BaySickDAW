@@ -1978,13 +1978,13 @@ kit fan-out behavior locked at docket #10 (a/a, default unmapped).
 **Plan file:** [`Plans & Specs/Batch Plans/roomy-retiling-ocelot.md`](Batch Plans/roomy-retiling-ocelot.md) *(14 tasks, one commit each; mid-batch handoff for Jeff's window-sizing pass; paired running notes)*
 - **Bucket:** UI / L&F / Theming, Mixer / Routing, Players, System Pages, Cross-cutting Infrastructure, Effects, Other / Platform / Deferred.
 - Items: Jeff's authored spec `Files For Claude/Final V1 Layout.md` (primary input) + the mammoth held scope, reconciled 2026-08-03 (his doc wins; supersessions in the plan's locked table L1-L32). Transport readout third row + gutter fix + per-token SYS coloring; two-row ribbon tab labels; app title recentered + logo; Piano Roll tab next to Effects; "+" menu reorder + BaySickDrums entry + BaySickLiveInst; engine-picker deletion (Layers/Bass/Clips combos + Drums picker button); hamburger -> "Menu"; full-screen toggle (locked call 5a REVERSED); preset buttons + player titles onto window title strips (BaySickTitleBar dissolved); Window-7 five sub-page windows (pedals = LiveInst player; per-instance dropdown window list); three-lifetime window persistence + autosave crash flush + persist-key fix; sizing diag + Jeff's pass -> real floors -> Harmless rework + VibePlayer 18px knobs + pedal-tile Pedal-mode branches; Window-6 collapse + pedalboard one-pedal view (gated on data); piano-roll control lane resize; mixer MIDI-trigger move + target-list dropdowns (drag placement retired) + Add menu + four group buses (Layers/Bass/Clips/Plugins) with used-once-then-hide lifecycle; instance caps 20/10/32/100/10/30 + second drum-kit PR entry (workshop D3); hosted-plugin stretch (free zoom); BLU-110 three-zone limiter panel; drawn-overlay z-order audit; vocal-chain saturation range/default fix; dead Inst clip label removed.
-- Scope: 14 tasks (plan file is authoritative). T1-T5 pre-handoff, T6 diag handoff, T7/T8 post-data, T9/T10/T11 parallel-eligible during Jeff's sizing pass, T12-T14 close.
+- Scope: 14 tasks at plan approval; GREW TO 21 via Jeff-directed mid-batch additions T15-T21 (plan file is authoritative; see §9 sixty-eighth Forks entry). T1-T5 pre-handoff, T6 diag handoff, T7/T8 post-data, T9/T10/T11 parallel-eligible during Jeff's sizing pass, T12-T21 + close.
 - Risk: widest UI surface of the QA era; T4 (five re-hostings + LiveInst restructure) and T10 (four new buses) are the heavy chunks; caps + buses touch VibeGraph registration (Carry-Forward §1/§3 discipline).
 - Dependencies: QA-ModelShell code-complete (`1cd1f5d6` post-close fixes included). Part of G4: NO batch smoke -- verification rides the G4 boundary smoke; bridged-specific `1cd1f5d6` relays are UNTESTED (no 32-bit VST3 on hand) and the smoke must not assume them.
 - Effort: very large -- largest since QA-ModelShell.
-- **STATUS: plan approved 2026-08-03; execution not started.**
+- **STATUS: code-complete 2026-08-06 (21 tasks across 21 commits `80b2f1f2`..the close commit; per-task build gates all green on the five-exit-code / four-link-line criterion; `/review-batch` 0 BLOCKER / 1 NEEDS-FIX fixed at close / 5 NIT).  Work Log entry HELD per L32 in the paired running notes -- applies, with this line's flip to CLOSED, when the G4 boundary walk passes §B.31 + §B.32.  Mid-batch growth T15-T21, the T8 drop to CL-306, the T13 scope-down, the T18 audio-first rework, and the ledger-gap recovery are chronicled in §9 sixty-eighth.  Next: QA-UndoCoverage.**
 
-#### **QA-UndoCoverage: App-Wide Undo-History Coverage Review** *(NEW — inserted 2026-07-08 at bulk-run plan approval — see §9 fifty-fifth Forks entry)*
+#### **QA-UndoCoverage: App-Wide Undo-History Coverage Review** *(NEW — inserted 2026-07-08 at bulk-run plan approval — see §9 fifty-fifth Forks entry.  MERGED 2026-08-06: absorbs QA-DirtyFlag, and Jeff's every-ACTION-undoable spec is restored — the structural-ops exclusion was a never-posed narrowing and is revoked; see §9 sixty-ninth Forks entry)*
 **Plan file:** [`Plans & Specs/Batch Plans/long-rewinding-yak.md`](Batch Plans/long-rewinding-yak.md) *(G4 group open 2026-07-25 — RESHAPED: the setProperty population is serialization-only (no live-state audit exists to run); scope = one global UndoManager everywhere (docket 13=A+ii) + snapshot-gap wrapping + Event Editor unification (docket 12=A, 14=a) — see §9 sixty-fourth Forks entry)*
 - Items: everything the user can change must register in the central UndoManager (`Source/Standalone/StandaloneEditor.h:300`) — audit every mutable surface (pattern/note edits, arrangement blocks, mixer state, engine params, effect params, page state, renames) and wire the gaps via `ParameterAttachment`s or explicit transactions (Jeff request 2026-07-08 at bulk-run plan review).
 - Scope: this is the "Strict UndoManager Plumbing" half of QA-DirtyFlag's locked spec, promoted to its own batch; **QA-DirtyFlag re-scopes to the transaction-pointer system on top of it** (its correctness depends on this coverage being complete).  Sizing intel (source-verified 2026-07-08): 477 `setProperty(..., nullptr)` sites across 50 files, of which ~300 are detached-tree preset serialization (correctly nullptr — OUT of scope); real targets = PatternManager (105 sites) + live UI writes; the main APVTS is currently constructed with a nullptr UndoManager (`PluginProcessor.cpp:159`).  UndoCoverage/DirtyFlag boundary + which UndoManager becomes the single global authority = marathon docket item 19.
@@ -1995,9 +1995,9 @@ kit fan-out behavior locked at docket #10 (a/a, default unmapped).
 - **Bucket:** Cross-cutting Infrastructure, System Pages, UI / L&F / Theming
 - Verify (Master Test Plan §B section): every page's state mutations undo/redo correctly (sampled walk per surface); a representative multi-surface edit session unwinds fully via Ctrl+Z; no mutable control bypasses the history.
 
-#### **QA-DirtyFlag: UndoManager-Aware Project Dirty Tracking** *(NEW — inserted 2026-05-24)*
+#### **QA-DirtyFlag: UndoManager-Aware Project Dirty Tracking** *(NEW — inserted 2026-05-24.  MERGED INTO QA-UndoCoverage 2026-08-06, Jeff's ruling — no longer runs standalone; see §9 sixty-ninth Forks entry)*
 
-**Plan file:** [`Plans & Specs/Batch Plans/clean-pointing-stoat.md`](Batch Plans/clean-pointing-stoat.md) *(G4 group open 2026-07-25 — + dual structural counter so non-undoable ops (tab add/delete) still dirty honestly — see §9 sixty-fourth Forks entry)*
+**Plan file:** [`Plans & Specs/Batch Plans/clean-pointing-stoat.md`](Batch Plans/clean-pointing-stoat.md) *(G4 group open 2026-07-25 — + dual structural counter so non-undoable ops (tab add/delete) still dirty honestly — see §9 sixty-fourth Forks entry.  SUPERSEDED 2026-08-06: the merge banner in this file points at `long-rewinding-yak.md`; the structural counter's premise (non-undoable ops) is revoked with the every-action ruling and the counter is expected to fall away — verify at the merged plan-open)*
 - **Re-scope (2026-07-08 — see §9 fifty-fifth Forks entry):** the "Strict UndoManager Plumbing" audit half of the locked spec below moved to the new **QA-UndoCoverage** batch (runs immediately before this one); QA-DirtyFlag keeps the TransactionTracker / transaction-pointer system + dynamic dirty evaluation, built on that completed plumbing.  Original spec text below preserved as written.
 - Items: refactor BaySickDAW's project dirty state tracking from the current "anything touched since load" model to a transaction-pointer system mimicking major DAWs.  Origin: surfaced 2026-05-23 mid-QA-Eg-Task-3 testing — clicking a solo button and unclicking it marks the project dirty even though net state matches the saved file.  Verified by code-read: `ApvtsDirtyTracker` (`Source/Standalone/ApvtsDirtyTracker.h:39-42`) is a `ValueTree::Listener` that fires `onAny` on every property write regardless of old-vs-new equality; `ProjectManager::markDirty` (`Source/ProjectManager.cpp:98-102`) sets `mDirty=true` unconditionally.  The flag tracks "anything touched since load" — NOT "state differs from file."  See §9 thirty-second Forks entry.
 - Scope (Jeff's verbatim spec, locked 2026-05-23):
@@ -6560,3 +6560,83 @@ rides the G4 boundary smoke; per-task build gates stand.
 `Batch Plans/roomy-retiling-ocelot.md` + `Running Notes/roomy-retiling-ocelot.md` (new).
 **Verification:** G4 boundary smoke (unchanged); bridged-specific `1cd1f5d6` items recorded as
 untested — the smoke must not assume them.
+
+### 2026-08-06 — QA-Layout code-complete: 14 tasks grew to 21, two rulings recovered from a ledger gap, T18 reworked audio-first, T13 scoped down; Work Log entry HELD to the G4 boundary (sixty-eighth Forks entry)
+
+**Trigger:** QA-Layout reached code-complete (21 commits, `80b2f1f2`..the close commit) and
+closed per the T14 sequence (drafter + `/review-batch` in parallel; 0 BLOCKER / 1 NEEDS-FIX
+fixed at close / 5 NIT — 2 fixed, 3 recorded).  The held Work Log entry lives in
+`Running Notes/roomy-retiling-ocelot.md` and applies, with the §5 STATUS flip to CLOSED, when
+the G4 boundary walk passes §B.31 + §B.32.
+
+- **Mid-batch growth (Jeff-directed): T15-T21.** T15 strip-nav-into-Menu + sfizz titles
+  (ruled mid-sizing); T16 sizing-model rework (defaults not floors) + two Jeff-found
+  QA-ModelShell regressions (per-window right-click Automate; desktop tooltip) + Harmless
+  re-layout; T17 effect-visual foundation (gated feed + shared clock + per-slot visual
+  windows); T18 ALL TEN effect visuals; T20 Delay panel rebuild (Basic's row 2 was never
+  filtered); T21 the effect/visual window tether.  T19 (window landing + cursor-bound drag +
+  both-direction Basic/Advanced resize) was Jeff-found the same week.
+- **The ledger gap + two recovered rulings.** Five commits (T16/T8/T12/T17/T13+T19) shipped
+  with no running-notes entries; Jeff ruled NO BACKFILL — the commit messages stand.  The gap
+  contained two workshopped-and-RULED specs that existed in no doc and no code: the tether
+  (became T21) and the live Feed warn ring (landed inside T18, ellipse-fitted to the knob by
+  Jeff via a same-day placement box, his numbers hardcoded as constexpr calibration).
+  Anti-recurrence note on record: a ledger gap gets checked for UNBUILT RULINGS before it is
+  written off.
+- **T18 reworked AUDIO-FIRST on Jeff's rejection** of the parametric-only first pass: every
+  effect now publishes real audio to its self-gated visual feed and every visual leads with
+  the sound (ghost in vs solid out), parametric draws demoted to side strips.
+- **Supersessions this batch, all recorded at the point of reversal:** locked call 5a (T3
+  full-screen toggle); locked call 2b's containment (T19 cursor-bound drag); T17's
+  greyed-Visual treatment (T20 follow-up presence gate on `hasVisual()`); G-16 (T3); K-3
+  (T8); §B.31.0's table (T6 rewrite).  **T13's three-zone panel rewrite SCOPED OUT by Jeff
+  2026-08-06** — the delivered requirement is the full knob set + Zone A in the Visual window
+  + knob-tracking visuals, all shipped; `Limiter.txt` §1-2 marked superseded in CLAUDE.md.
+- **Routings:** T8's general page-collapse -> Future State CL-306; view-swap machinery
+  notated CL-307; shared drum-player window CL-305.  All shipped in their tasks' commits.
+- **Reconciliation at close:** the G4 run plan's composition note
+  (`swift-stampeding-caribou.md`) had never learned of QA-Layout — the 2026-08-03 insertion
+  updated §5/§6/§9 but missed it; fixed with Jeff's approval.  CLAUDE.md: ArrangementGrid
+  kNumRows 32 -> 500; the Limiter-UI note supersession.  §B.32 grew LAY-B1..B21 (the layout
+  scenarios) next to T8's LAY-A audio-device slice.
+
+**Plan files affected:** this entry; §5 QA-Layout entry (scope line + STATUS); §B.32;
+`swift-stampeding-caribou.md` composition note; CLAUDE.md; `Future State.md` (CL-305/306/307
+shipped in-batch); the paired batch plan + running notes (incl. the held Work Log entry).
+**Verification:** the G4 boundary walk — §B.31 + §B.32 (LAY-B17..B21 carry the visuals,
+tether, and warn-ring steps that cannot be inferred from a build); the bridged-specific
+`1cd1f5d6` items remain untested and the smoke must not assume them.
+
+### 2026-08-06 — QA-UndoCoverage + QA-DirtyFlag MERGE; every-ACTION-undoable spec RESTORED (sixty-ninth Forks entry)
+
+**Trigger:** Jeff, at the QA-Layout close surface, on being shown the yak/stoat boundary and
+the structural-ops exclusion.  Two rulings, plus a process correction that goes on the record.
+
+- **THE PROCESS CORRECTION.**  Jeff's original spec was EVERY ACTION undoable.  The narrowing
+  to "every edit, structural ops excluded" (the "dead-owner model": tab add/delete/duplicate,
+  engine pick, kit load) was recorded as "baked-pending-veto 2026-07-25" — i.e. baked into a
+  docket table and never POSED as a question.  That is the exact violation pattern Rule 5
+  documents ("pre-picking + baking-into-plan-body + table-listing is indistinguishable from
+  picking outright"), applied to a narrowing of Jeff's own spec.  The exclusion does not
+  stand.  Additionally, the close surface presented the two-batch split as "Jeff's own locked
+  call" on the strength of a marathon docket row — a claim of deliberate authorship the
+  record does not support (the 2026-05-23 dirty spec and the 2026-07-08 boundary row are
+  independent artifacts a month and a half apart).  Both misrepresentations owned.
+- **RULING 1 — every action is undoable.**  Structural ops become undoable via ENGINE-STATE
+  SNAPSHOT temp files captured at the destructive edge (Jeff's design direction: "temp files
+  that screenshot the players like our page saves do" — the `PagePresetIO` serializer captures
+  the player before the op; undo re-creates the tab and restores from the snapshot).
+- **RULING 2 — the batches merge.**  One batch, one plan, one close: QA-DirtyFlag is absorbed
+  into QA-UndoCoverage (`long-rewinding-yak.md` carries the merged premises in its 2026-08-06
+  ruling banner; `clean-pointing-stoat.md` gets a merge banner and stays as the spec record —
+  the transaction-pointer spec itself, Jeff's 2026-05-23 verbatim block, STANDS).  Consequence
+  noted for the merged plan-open: with every action undoable, the dual structural counter
+  loses its premise — dirty = transaction-pointer mismatch alone should suffice.  G4 order
+  becomes: ... layout -> yak (merged) -> heron.  RE-PLAN at the merged batch open; both plan
+  files' task bodies predate the rulings.
+
+**Plan files affected:** this entry; §5 QA-UndoCoverage + QA-DirtyFlag rows;
+`long-rewinding-yak.md` (ruling banner); `clean-pointing-stoat.md` (merge banner);
+`swift-stampeding-caribou.md` composition note (order updated).
+**Verification:** the merged batch's own gates + the campaign; nothing walks at the G4
+boundary for this entry.

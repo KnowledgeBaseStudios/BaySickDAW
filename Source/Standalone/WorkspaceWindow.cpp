@@ -364,9 +364,9 @@ void WorkspaceWindow::resized()
     // window (T19) and the follower picks the new width up from here rather than
     // needing its own hook into the variant change.
     layoutTetherFollower();
-    // ...and OUR size changing re-centres us under our leader.  Without this a
+    // ...and OUR size changing re-centers us under our leader.  Without this a
     // follower resized by its own border kept the new width and drifted off
-    // centre until the leader happened to move.
+    // center until the leader happened to move.
     requestTetherReseat();
 }
 
@@ -605,9 +605,6 @@ void WorkspaceWindow::setTetherLocked (bool locked)
         if (mTetherFollower.getComponent() != nullptr)               layoutTetherFollower();
         else if (auto* lead = mTetherLeader.getComponent())          lead->layoutTetherFollower();
     }
-
-    if (onTetherLockChanged)                    onTetherLockChanged (locked);
-    if (partner && partner->onTetherLockChanged) partner->onTetherLockChanged (locked);
 }
 
 void WorkspaceWindow::layoutTetherFollower()
