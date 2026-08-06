@@ -267,6 +267,10 @@ private:
 
     void openEffectSlotWindow (int channelId, int slotIndex);
     void openEffectEqWindow   (int channelId, bool pre);
+    // QA-Layout T17: one visual window PER SLOT (Jeff's call) so a compressor
+    // and a limiter can be watched side by side.  Keyed by uuid like the effect
+    // window, so it follows the effect through a reorder.
+    void openEffectVisualWindow (int channelId, const juce::String& slotUuid);
 
     // QA-Layout T4 (Window-7): the Vox sub-page windows + the Inst
     // Pedals/NAM-IR windows.  Content hosts the PAGE-OWNED panel non-owned

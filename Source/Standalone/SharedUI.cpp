@@ -1769,16 +1769,49 @@ namespace
     };
 }
 
+void PageMenuBar::setVisualSlot (std::function<void()>         openVisual,
+                                 std::function<juce::String()> disabledReason)
+{
+    mVisualAction         = std::move (openVisual);
+    mVisualDisabledReason = std::move (disabledReason);
+}
+
 void PageMenuBar::appendStandardItems (juce::PopupMenu& m)
 {
     const bool haveFx     = (bool) mFxRackAction;
     const bool haveFreeze = mFreezeState != nullptr && mFreezeToggle != nullptr;
-    if (! haveFx && ! haveFreeze) return;
+    const bool haveVisual = (bool) mVisualAction;
+    if (! haveFx && ! haveFreeze && ! haveVisual) return;
 
     m.addSeparator();
 
     if (haveFx)
         m.addItem ("FX Rack", [cb = mFxRackAction] { if (cb) cb(); });
+
+    // QA-Layout T17: opens this effect's Visual window -- a sub-page window like
+    // Pedals or NAM/IR, so closing it is a real teardown (the display's strip
+    // dies, its watcher releases, and the DSP stops publishing).  This entry is
+    // the way BACK once it has been closed, which is why it is here at all.
+    //
+    // SHOWN GREYED for an effect with no visual rather than hidden, with the
+    // reason on hover -- same ruling as locked Freeze below: an entry that
+    // disappears tells the user nothing about whether the feature exists.
+    if (haveVisual)
+    {
+        const juce::String vReason = mVisualDisabledReason ? mVisualDisabledReason()
+                                                           : juce::String();
+        if (vReason.isEmpty())
+        {
+            m.addItem ("Visual", [cb = mVisualAction] { if (cb) cb(); });
+        }
+        else
+        {
+            m.addCustomItem (-1,
+                             std::make_unique<TooltipMenuItem> ("Visual", vReason, false,
+                                                                juce::Colours::white.withAlpha (0.85f)),
+                             nullptr);
+        }
+    }
 
     if (! haveFreeze) return;
 

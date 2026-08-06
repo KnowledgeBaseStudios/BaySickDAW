@@ -355,6 +355,14 @@ public:
     void setViewMenu (const juce::StringArray& modeNames,
                       std::function<int()>     getMode,
                       std::function<void(int)> setMode);
+
+    // QA-Layout T17: the Menu dropdown's "Visual" entry -- opens this effect's
+    // Visual sub-page window, and is the way back once the user has closed it.
+    // `disabledReason` returning non-empty greys the entry and supplies its
+    // hover text; an effect with no visual therefore still SHOWS the entry and
+    // says why it cannot be used, which is the locked-Freeze treatment.
+    void setVisualSlot (std::function<void()>         openVisual,
+                        std::function<juce::String()> disabledReason);
     void addActionButton(const juce::String& label, std::function<void()> action);
     void clearActionButtons();
 
@@ -499,6 +507,8 @@ private:
     std::function<int()>                           mFreezeState;
     std::function<juce::String()>                  mFreezeDisabledReason;
     bool                                           mFreezeIsVocal { false };
+    std::function<void()>                          mVisualAction;            // T17
+    std::function<juce::String()>                  mVisualDisabledReason;    // T17
     std::unique_ptr<juce::Slider>                  mSwingKnob;   // smoke round 2: per-player Swing Mix
     bool                                           mMidSideVisible { false };
 

@@ -175,6 +175,31 @@ void EffectSlotWindow::configureTitleStrip (PageMenuBar& bar)
 {
     mBar = &bar;
 
+    // QA-Layout T17: "Visual" in the Menu, and the way back once its window has
+    // been closed.  BOTH closures resolve the DSP LIVE through the rack rather
+    // than capturing a DSPBase* or a bool -- the effect in this slot changes
+    // under an open window (swap, preset load, undo), which is precisely the
+    // shape that made the locked-Freeze entry go stale (Jeff, 2026-08-05: it
+    // captured its unlock flag by value and the checkbox appeared to do nothing).
+    bar.setVisualSlot (
+        [this]
+        {
+            if (onOpenVisual) onOpenVisual (mChannelId, mUuid);
+        },
+        [this]() -> juce::String
+        {
+            EffectRack* rack = nullptr;
+            const int slot = resolveSlot (rack);
+            if (rack == nullptr || slot < 0)
+                return "This slot is empty.";
+
+            auto* dsp = rack->getSlotEffect (slot);
+            if (dsp == nullptr || ! dsp->hasVisualFeed())
+                return "This effect has no visual display.";
+
+            return {};
+        });
+
     // Locked call 3a: Basic/Advanced, Mode, SC and Presets all live in the
     // window's menu rather than as buttons, so the strip stays readable at the
     // small sizes these windows are meant to run at.
@@ -568,3 +593,94 @@ void EffectEqWindow::timerCallback()
         if (onTitleChanged) onTitleChanged (t);
     }
 }
+
+// ═══════════════════════════════════════════════════════════ EffectVisualWindow
+
+EffectVisualWindow::EffectVisualWindow (VibeSynthProcessor& proc,
+                                        int channelId,
+                                        juce::String slotUuid,
+                                        std::function<juce::String(int)> resolveChannelName)
+    : mProcessor (proc),
+      mChannelId (channelId),
+      mUuid (std::move (slotUuid)),
+      mResolveName (std::move (resolveChannelName))
+{
+    mStrip = std::make_unique<EffectVisualStrip>();
+    addAndMakeVisible (*mStrip);
+    rebind();
+}
+
+EffectVisualWindow::~EffectVisualWindow()
+{
+    // Drop the feed BEFORE the strip dies so the watcher is released against a
+    // DSP that still exists.  The strip's own destructor would do it too; this
+    // is explicit because the ordering is the whole safety argument.
+    if (mStrip) mStrip->setFeed (nullptr);
+}
+
+juce::String EffectVisualWindow::windowTitle() const { return mTitle; }
+
+void EffectVisualWindow::resized()
+{
+    if (mStrip) mStrip->setBounds (getLocalBounds().reduced (6));
+}
+
+void EffectVisualWindow::parentHierarchyChanged()
+{
+    if (getPeer() != nullptr) { if (! isTimerRunning()) startTimerHz (4); }
+    else                        stopTimer();
+}
+
+void EffectVisualWindow::rebind()
+{
+    auto* rack = EffectsPage::rackForChannelId (mProcessor.mVibeGraph, mChannelId);
+
+    DSPBase*   dsp  = nullptr;
+    EffectType type = EffectType::None;
+    int        slot = -1;
+
+    if (rack != nullptr)
+    {
+        for (int s = 0; s < EffectRack::kNumSlots; ++s)
+        {
+            if (rack->getSlotUuid (s) != mUuid) continue;
+            slot = s;
+            type = rack->getSlotType (s);
+            dsp  = rack->getSlotEffect (s);
+            break;
+        }
+    }
+
+    // Resolved once and then lost = the slot was cleared or the rack died.  Ask
+    // the owner to close rather than sitting on a window watching nothing.
+    if (mEverResolved && dsp == nullptr)
+    {
+        if (onRequestClose) onRequestClose();
+        return;
+    }
+
+    if (dsp != nullptr) mEverResolved = true;
+
+    const juce::String fxName = (rack != nullptr && slot >= 0)
+                                  ? SlotComponent::slotDisplayName (rack, slot)
+                                  : juce::String();
+
+    if (dsp != mBoundDsp)
+    {
+        mBoundDsp  = dsp;
+        mBoundType = type;
+        mStrip->setFeed (dsp != nullptr ? &dsp->visualFeed() : nullptr);
+        mStrip->setCaption (fxName);
+    }
+
+    const juce::String strip = mResolveName ? mResolveName (mChannelId) : juce::String();
+    const juce::String what  = fxName.isNotEmpty() ? fxName : juce::String ("Effect");
+    const juce::String t = (strip.isEmpty() ? what : strip + " - " + what) + " Visual";
+    if (t != mTitle)
+    {
+        mTitle = t;
+        if (onTitleChanged) onTitleChanged (mTitle);
+    }
+}
+
+void EffectVisualWindow::timerCallback() { rebind(); }

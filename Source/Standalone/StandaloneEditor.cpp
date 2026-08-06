@@ -7110,7 +7110,8 @@ void StandaloneEditor::wireFreezeSlotForVisiblePage()
     // way to discover it existed, let alone where the switch was.
     //
     // Auto-freeze runs underneath either way; this is purely the manual control.
-    const bool freezeUnlocked = openUiPrefs()->getBoolValue ("fsInstrumentFreeze", false);
+    // The flag itself is read inside the disabled-reason lambda below so it
+    // tracks the checkbox live -- see the note there.
 
     mPageMenuBar->setFreezeSlot (
         [this, kind, pageIndex]() -> int
@@ -7151,10 +7152,19 @@ void StandaloneEditor::wireFreezeSlotForVisiblePage()
                 juce::AlertWindow::showMessageBoxAsync (
                     juce::AlertWindow::WarningIcon, "Could not freeze", err);
         },
-        [this, kind, pageIndex, freezeUnlocked]() -> juce::String
+        [this, kind, pageIndex]() -> juce::String
         {
             // Shown DISABLED carrying the reason, never hidden.
-            if (! freezeUnlocked)
+            //
+            // The unlock flag is read LIVE here (Jeff, 2026-08-05).  It used to
+            // be captured by value from a read at wiring time, and this wiring
+            // runs only from showPageForTab -- so ticking "Enable Instrument
+            // Level Freeze" in File Settings left every already-open player's
+            // menu entry greyed until that page happened to be re-shown, or the
+            // app restarted.  The setting appeared to do nothing.  Every OTHER
+            // condition in this lambda was already live; the flag was the one
+            // snapshot, which is exactly why it was the one that went stale.
+            if (! openUiPrefs()->getBoolValue ("fsInstrumentFreeze", false))
                 return "Freeze is locked. Turn on \"Enable Instrument Level Freeze\" "
                        "in File Settings, beside the auto-freeze CPU threshold, to "
                        "freeze players by hand.";
@@ -13764,7 +13774,38 @@ void StandaloneEditor::openEffectSlotWindow (int channelId, int slotIndex)
     }
 
     contentRaw->onTitleChanged = [win] (const juce::String& t) { win->setTitle (t); };
+    contentRaw->onOpenVisual   = [this] (int chId, const juce::String& u)
+                                 { openEffectVisualWindow (chId, u); };
     contentRaw->configureTitleStrip (*win->getPageMenu());
+}
+
+void StandaloneEditor::openEffectVisualWindow (int channelId, const juce::String& slotUuid)
+{
+    if (slotUuid.isEmpty()) return;
+
+    // Keyed by UUID for the same reason the effect window is: a reorder moves
+    // the effect between slots and its visual must follow the EFFECT.  The
+    // aux-window registry gives this project persistence for nothing -- the
+    // save walker writes an <Open key> per live aux window, and the restore
+    // walker dispatches "vis:" back through here.
+    const juce::String key    = "vis:"    + juce::String (channelId) + ":" + slotUuid;
+    const juce::String posKey = "vispos:" + juce::String (channelId) + ":" + slotUuid;
+
+    if (auto* existing = findAuxWindow (key)) { existing->toFront (true); return; }
+
+    auto content = std::make_unique<EffectVisualWindow> (
+        mProcessor, channelId, slotUuid,
+        [this] (int chId) { return mEffectsPage != nullptr ? mEffectsPage->getChannelDisplayName (chId)
+                                                           : juce::String(); });
+
+    auto* contentRaw = content.get();
+    contentRaw->onRequestClose = [this, key] { closeAuxWindow (key); };
+
+    auto* win = openAuxWindow (key, posKey, contentRaw->windowTitle(),
+                               std::move (content), 420, 220);
+    if (win == nullptr) return;
+
+    contentRaw->onTitleChanged = [win] (const juce::String& t) { win->setTitle (t); };
 }
 
 void StandaloneEditor::openEffectEqWindow (int channelId, bool pre)
@@ -15559,6 +15600,15 @@ void StandaloneEditor::deserializeUIState (const juce::XmlElement& root)
             const juce::String rest = key.fromFirstOccurrenceOf (":", false, false);
             const int ch = rest.upToFirstOccurrenceOf (":", false, false).getIntValue();
             openEffectEqWindow (ch, rest.fromFirstOccurrenceOf (":", false, false) == "pre");
+            continue;
+        }
+        // QA-Layout T17: a visual window reopens with the project.  No slot
+        // lookup needed -- it is keyed by uuid and resolves the effect itself.
+        if (key.startsWith ("vis:"))
+        {
+            const juce::String rest = key.fromFirstOccurrenceOf (":", false, false);
+            const int ch = rest.upToFirstOccurrenceOf (":", false, false).getIntValue();
+            openEffectVisualWindow (ch, rest.fromFirstOccurrenceOf (":", false, false));
             continue;
         }
         if (key.startsWith ("voxsat:"))

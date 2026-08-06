@@ -1,5 +1,6 @@
 #pragma once
 #include <JuceHeader.h>
+#include "EffectVisualFeed.h"
 
 // ── DSPBase ───────────────────────────────────────────────────────────────────
 // Abstract base for all Phase 2+ standalone DSP effect modules.
@@ -10,6 +11,19 @@ class DSPBase
 {
 public:
     virtual ~DSPBase() = default;
+
+    // QA-Layout T17: every effect gets a visual feed for free, and publishing
+    // into it is free too while nothing is watching (see EffectVisualFeed).
+    // Lives on the base rather than per-effect so a new panel visual needs no
+    // new plumbing -- the DSP calls push() in process() and the gate decides.
+    EffectVisualFeed&       visualFeed()       noexcept { return mVisualFeed; }
+    const EffectVisualFeed& visualFeed() const noexcept { return mVisualFeed; }
+
+    // Does this effect actually publish anything?  Drives the greyed-out state
+    // of the panel's View > Visual entry: an effect with no visual still SHOWS
+    // the entry (so it is discoverable and recoverable) but cannot be switched
+    // to it.  Default false; a DSP that pushes columns overrides to true.
+    virtual bool hasVisualFeed() const { return false; }
 
     virtual void prepare(double sampleRate, int maxBlockSize) = 0;
     virtual void process(juce::AudioBuffer<float>& buffer)   = 0;
@@ -107,4 +121,7 @@ protected:
     juce::AudioBuffer<float>* const* mScBufs  { nullptr };
     int                              mScCount { 0 };
     int                              mScPick  { -1 };
+
+    // Protected, not private: derived effects push into it from process().
+    EffectVisualFeed mVisualFeed;
 };

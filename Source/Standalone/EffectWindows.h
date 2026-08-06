@@ -5,6 +5,7 @@
 #include "SlotComponent.h"
 #include "SharedUI.h"
 #include "UndoActions.h"
+#include "EffectVisual.h"
 
 // Forward-declared rather than including the hosting header: only the bridge
 // toggle needs the type, and the definition is available in the .cpp.
@@ -56,6 +57,10 @@ public:
     // closed).  The owner destroys the window in response, so nothing may touch
     // this object after it fires.
     std::function<void()> onRequestClose;
+    // QA-Layout T17: Menu > Visual asks the owner to open this slot's visual
+    // window.  The owner keys it per slot, so two effects can be watched at
+    // once, and the aux-window registry gives it project persistence for free.
+    std::function<void(int /*channelId*/, const juce::String& /*uuid*/)> onOpenVisual;
     // QA-Layout T7: fired (change-guarded) when the panel class or mode makes
     // a different floor apply; the owner routes it to setDefaultWindowSize.
     std::function<void(int, int)> onFloorChanged;
@@ -168,4 +173,58 @@ private:
     juce::String                     mTitle;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (EffectEqWindow)
+};
+
+// ── EffectVisualWindow — QA-Layout T17 (2026-08-05) ──────────────────────────
+// One per effect SLOT (Jeff's call): a compressor and a limiter can be watched
+// side by side rather than one shared window retargeting between them.  Opened
+// from the effect window's Menu > Visual, which is also the way BACK once this
+// has been closed.
+//
+// Closing it is a genuine teardown, and that is the point: the strip dies, its
+// watcher releases, and the DSP stops publishing (EffectVisualFeed).  An
+// unwatched effect costs one relaxed atomic load per block.
+//
+// SATELLITE DISCIPLINE, same as the two windows above: the DSP is resolved
+// through the rack by UUID on every poll and never cached.  A slot whose effect
+// is swapped or cleared under an open window must be noticed, not dereferenced.
+class EffectVisualWindow : public juce::Component,
+                           private juce::Timer
+{
+public:
+    EffectVisualWindow (VibeSynthProcessor& proc,
+                        int channelId,
+                        juce::String slotUuid,
+                        std::function<juce::String(int)> resolveChannelName);
+    ~EffectVisualWindow() override;
+
+    // "<Strip> - <Effect> Visual".  Recomputed on the poll so a strip rename or
+    // an effect swap reaches the title.
+    juce::String windowTitle() const;
+
+    // The slot this window was watching is gone (cleared, rack destroyed,
+    // project closed).  The owner destroys the window in response.
+    std::function<void()> onRequestClose;
+    std::function<void(const juce::String&)> onTitleChanged;
+
+    void resized() override;
+    // Peer-keyed poll, matching every other repeating UI cost in the shell.
+    void parentHierarchyChanged() override;
+
+private:
+    void timerCallback() override;
+    void rebind();
+
+    VibeSynthProcessor& mProcessor;
+    int                 mChannelId;
+    juce::String        mUuid;
+    std::function<juce::String(int)> mResolveName;
+
+    std::unique_ptr<EffectVisualStrip> mStrip;
+    DSPBase*     mBoundDsp  { nullptr };
+    EffectType   mBoundType { EffectType::None };
+    bool         mEverResolved { false };
+    juce::String mTitle;
+
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (EffectVisualWindow)
 };

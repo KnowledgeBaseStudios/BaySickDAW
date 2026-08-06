@@ -253,20 +253,23 @@ ten unfamiliar knobs, not about literal fidelity).
 - [ ] **One shared timer** driving every visible visual rather than N
       independent ones; peer-keyed start/stop like every other repeating cost
       in the shell.
-- [ ] **Menu entry on EVERY effect panel** (Jeff, 2026-08-05): a title-bar Menu
-      item that opens the Visual view, present on all of them and **greyed +
-      unusable when that effect has no visual**, with the reason in its tooltip
-      — the same show-it-disabled treatment T16 gave locked Freeze, and for the
-      same reason: a user who closes or switches away has to be able to find it
-      again, and an entry that vanishes teaches nothing.
-- [ ] **"Visual" third view** through the T8 view-swap machinery (`setViewMenu`,
-      editor-owned `ViewMode`, `windowSizeFor`, host-owned resize — CL-307
-      exists precisely so this is layout-only). The view declares its OWN window
-      height, which is what dissolves the fixed-panel-size problem. Switching
-      away tears the visual down; the effect window stays open and the DSP never
-      notices. Effect windows are their own windows with their own peer-keyed
-      poll, so close here is a genuine teardown (unlike page windows, where the
-      page object survives — see `canRebuildType`).
+- [ ] **The visual is its OWN sub-page window**, like Pedals / NAM-IR / the EQ
+      windows — NOT a view swapped inside the effect panel's window.
+      (Corrected 2026-08-05: written first as a third view against the T8
+      view-swap machinery, which was a misreading of Jeff — he had said
+      "closing the visual window" from the start. A separate window is also the
+      better answer to the CPU question that drove the decision: closing it is a
+      real teardown, so the strip dies, its watcher releases and the DSP stops
+      publishing, with no view state to reason about.) It carries its own size,
+      which is what dissolves the fixed-panel-height problem.
+- [ ] **Menu entry on EVERY effect panel** (Jeff, 2026-08-05): a "Visual" item
+      in the per-window Menu dropdown beside FX Rack and Freeze, which is the
+      way BACK once the window has been closed. **Greyed + unusable when that
+      effect has no visual**, with the reason on hover — the same
+      show-it-disabled treatment T16 gave locked Freeze, and for the same
+      reason: an entry that vanishes tells the user nothing about whether the
+      feature exists. `PageMenuBar::setVisualSlot`, emitted from
+      `appendStandardItems`, greying driven by `DSPBase::hasVisualFeed()`.
 - [ ] Build gate → commit on approval → running notes.
 
 ### Task 18 — The remaining nine effect visuals (Jeff-directed mid-batch 2026-08-05)
