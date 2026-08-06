@@ -1769,18 +1769,23 @@ namespace
     };
 }
 
-void PageMenuBar::setVisualSlot (std::function<void()>         openVisual,
-                                 std::function<juce::String()> disabledReason)
+void PageMenuBar::setVisualSlot (std::function<void()> openVisual,
+                                 std::function<bool()> available)
 {
-    mVisualAction         = std::move (openVisual);
-    mVisualDisabledReason = std::move (disabledReason);
+    mVisualAction    = std::move (openVisual);
+    mVisualAvailable = std::move (available);
 }
 
 void PageMenuBar::appendStandardItems (juce::PopupMenu& m)
 {
     const bool haveFx     = (bool) mFxRackAction;
     const bool haveFreeze = mFreezeState != nullptr && mFreezeToggle != nullptr;
-    const bool haveVisual = (bool) mVisualAction;
+    // Evaluated LIVE on every menu build, not cached: the effect in this slot
+    // changes under an open window (swap, preset load, undo), so a bool captured
+    // at configure time is the same staleness that made the locked-Freeze entry
+    // ignore its own unlock flag.
+    const bool haveVisual = (bool) mVisualAction
+                            && (! mVisualAvailable || mVisualAvailable());
     if (! haveFx && ! haveFreeze && ! haveVisual) return;
 
     m.addSeparator();
@@ -1793,25 +1798,9 @@ void PageMenuBar::appendStandardItems (juce::PopupMenu& m)
     // dies, its watcher releases, and the DSP stops publishing).  This entry is
     // the way BACK once it has been closed, which is why it is here at all.
     //
-    // SHOWN GREYED for an effect with no visual rather than hidden, with the
-    // reason on hover -- same ruling as locked Freeze below: an entry that
-    // disappears tells the user nothing about whether the feature exists.
+    // T20 (Jeff, 2026-08-05): PRESENT or ABSENT, never greyed.  See setVisualSlot.
     if (haveVisual)
-    {
-        const juce::String vReason = mVisualDisabledReason ? mVisualDisabledReason()
-                                                           : juce::String();
-        if (vReason.isEmpty())
-        {
-            m.addItem ("Visual", [cb = mVisualAction] { if (cb) cb(); });
-        }
-        else
-        {
-            m.addCustomItem (-1,
-                             std::make_unique<TooltipMenuItem> ("Visual", vReason, false,
-                                                                juce::Colours::white.withAlpha (0.85f)),
-                             nullptr);
-        }
-    }
+        m.addItem ("Visual", [cb = mVisualAction] { if (cb) cb(); });
 
     if (! haveFreeze) return;
 

@@ -772,6 +772,198 @@ Convention: Main Plan §0 "Batch Plans + Running Notes layout" (locked 2026-05-1
   temporary `[WINPOS DIAG]` placement tracing added for cause 4.
 - **Next:** T8 — the D1/D2 collapse re-docket, now that real floor numbers exist.
 
+## 2026-08-05 — LEDGER GAP at T20 open — five commits carry no running-notes entry — RULED: no backfill
+
+The last entry above is T7 (`9797f19d`); the batch has since shipped `8c610c6c` (T8),
+`3cfdf4c2` (T16), `94da6a6f` (T12), `d07d710f` (T17) and `9bcb510c` (T13 + T19) with no
+entry for any of them.  Those sessions did the work and wrote the commit messages but
+skipped the per-commit ledger step the Tasks preamble mandates.
+
+**Jeff ruled 2026-08-05: no backfill — "it is what it is."**  The five commit messages
+stand as the record for those tasks; they are unusually detailed, which is what makes that
+workable.  Anyone reconstructing T8 / T16 / T12 / T17 / T13 / T19 reads
+`git log 9797f19d..9bcb510c`, not this file.  Recorded so the gap reads as a decision
+rather than as an oversight nobody noticed.
+
+## 2026-08-05 — Task 20 committed `a6d6ed60` — Delay panel rebuild + reference-grouping review
+
+- **Build gate green first run:** five exit codes 0 (`RELEASE` / `DEBUG` / `HELPER64` /
+  `HELPER32_CONFIG` / `HELPER32`), four `vcxproj -> ...exe` link lines, zero
+  `error C` / `error LNK` / `error MSB`.  No new warnings in either touched file — the
+  `C4996 juce::Font::Font` hits in `EffectEditorPanels.cpp` are pre-existing and at
+  untouched lines.  2 files, 106 insertions / 141 deletions (EffectEditorPanels.cpp,
+  DelayDSP.h).
+- **Root finding CONFIRMED by arithmetic, not by eye.**  Basic filtering covered ROW 1
+  only.  At the 691px Basic window the panel has 589px of knob room per row after the
+  dBFS + Vol cluster; twelve knobs in it is ~23px a slot, and `layoutKnobsH` sizes the
+  WHOLE VKnob to `min(slotW, rowH, kKnobSz)` — so a 23px slot produces a 23px-wide
+  label, which is what rendered "M..." / "Df...".  Above 44px the slot width stops
+  mattering (the label is capped at the knob size), which is why every other row in
+  every mode was fine and only this one was not.  Basic was the same panel squeezed.
+- **Locked Basic list falls out as PURE INDEX FILTERING** — `r1knobs {0,1,4,5,8}` =
+  Time / Feed / Wet / Dry / Tone, `r2knobs {6,7,8,11}` = FBDst / FBKnee / FBSym /
+  Smooth, both in exactly the order Jeff enumerated, with no knob reordering and no
+  knob changing row between modes.  New widths: Basic 77px (row 1) and 96px (row 2);
+  Advanced 55px and 59px.  All clear 44.
+- **The flagged ambiguity RESOLVED from source, as the plan asked.**  "The 3 fb knobs"
+  = FBDst / FBKnee / FBSym: they bind `setFBDistLevel` / `setFBDistKnee` /
+  `setFBDistSymmetry` and are selected by the Limit/Sat toggle.  FBCut / FBReso bind
+  `setFeedbackCutoff` / `setFeedbackResonance` and are selected by the FB Filter
+  chicken-head — the feedback FILTER, Advanced.
+- **Sync division moved up** into a single 3x2 selector grid, directly above the BPM
+  switch that gates it: `[Model][SyncDiv][FBFilter]` over `[Pitch][BPM][Limit/Sat]`,
+  one column width across both rows so the pairs align.  Pitch sits at the left of its
+  row so Smooth (its documented dependency, and the last knob in row 2) stays beside it.
+- **Dead space traced — it was NOT horizontal.**  Two causes, both in the right-hand
+  cluster.  `DualLabelToggle` draws from the TOP of its bounds (54px of content in
+  OnOff mode), so a full-row-height cell left ~60px of blank under every switch; and
+  `ChickenHeadSelector::getKnobBounds` sizes the head to `min(w,h)` minus a 26px letter
+  ring, so the old 66px cell drew a 32px head next to 44px knobs.  Cells are
+  content-sized now: 74 wide is the width that puts the head back at `kKnobSz`, 54 tall
+  is the toggle's natural stack.
+- **`FbCurveDisplay` DELETED (93 lines), not parked.**  It was a Component wrapper with
+  its own timer and its own `liveDsp()` resolver, and T18's Delay visual is an
+  `EffectVisualStrip` paint callback inside `EffectVisualWindow` — so the wrapper does
+  not survive the move and keeping it alive for one commit to delete it next would be
+  dead code either way.  The reusable half is `DelayDSP::shapeFeedbackForDisplay`,
+  untouched.  **T18 INPUT:** the Delay visual owes a 96-point sweep of that function
+  (input vertical, output horizontal, `#00FFF2`) alongside the beat-grid repeats; the
+  note is parked in the DelayPanel header comment where T18 will be reading.
+- **T18 PLUMBING CONSEQUENCE, recorded now:** `Menu > Visual` greys off
+  `DSPBase::hasVisualFeed()`, which means "publishes to the visual feed".  Most of
+  T18's ten are PARAMETRIC draws with no feed at all (LFO scopes, transfer curves,
+  harmonic bars, the delay grid, the reverb envelope — `EffectVisual.h` says so in its
+  own design note), so every one of them would show greyed-and-unusable under the
+  current predicate.  T18 needs a `hasVisual()` distinct from `hasVisualFeed()`, or the
+  predicate widened, in the same pass as the first parametric visual.
+- **Wrong comment fixed outside the edited region** (`DelayDSP.h`): the
+  `shapeFeedbackForDisplay` block said "for the panel's graph", which stopped being
+  true with this commit.
+- **Grouping review (the task's second bullet) — walked all 14 Basic-capable panels.**
+  The Delay was the ONLY one with the defect; the plan's "thirteen other panels do this
+  properly" holds.  Checked the two shapes where it could hide: panels calling the
+  full-vector `layoutKnobsH` overload (which cannot skip individuals) are Reverb row 2,
+  Saturation both rows, TransientShaper and Limiter — and in the last two those calls
+  sit inside `adv`-only branches while Basic runs a hand-built list.  Reverb's
+  unfiltered row 2 is 8 knobs at 58px in Basic and Saturation's are 4 at 84-101px, so
+  neither is at risk.
+- **ONE grouping candidate surfaced to Jeff, deliberately NOT acted on:**
+  TransientShaper Advanced row 2 is three knobs (Wet / FastRel / SlowAtt) spread across
+  ~683px — 227px a slot — while FastRel and SlowAtt are functionally Attack/Release
+  refinements sitting a row away from Attack and Release.  Which knobs group with which
+  is a spec call (Jeff locked the Delay's list himself), so it waits on his ruling.
+- **No Rule 4 diagnostics added.**
+- **Next:** T18 — the remaining nine effect visuals, starting from the `hasVisualFeed()`
+  predicate problem above.
+
+## 2026-08-05 — T20 follow-up — Visual entry becomes a presence gate (T17 ruling REVERSED) + TransientShaper regroup
+
+Jeff ruled all three items surfaced at the T20 commit.
+
+- **T17's "greyed + unusable" Visual entry is SUPERSEDED — it is a PRESENCE GATE now**
+  (Jeff verbatim: "so it's there or it's not there instead of grey out and make
+  unusable").  The batch plan's T17 bullet is struck through in place with the reversal
+  recorded beside it.  Jeff's original T17 reasoning was the locked-Freeze parallel — an
+  entry that vanishes tells the user nothing about whether the feature exists — and the
+  parallel does not survive contact: Freeze is a capability the user can UNLOCK, so it
+  has to announce itself and its tooltip carries the unlock path.  An effect with no
+  visual has nothing to offer and no route to acquiring one, so the row is permanent
+  noise in every other effect's menu.  `mVisualDisabledReason`
+  (`std::function<juce::String()>`) became `mVisualAvailable`
+  (`std::function<bool()>`); `appendStandardItems` folds it into `haveVisual`, so it
+  also drives the early-return and the separator rather than leaving a bare separator
+  above nothing.
+- **`DSPBase::hasVisual()` added, DELIBERATELY distinct from `hasVisualFeed()`.**  This
+  is the T18 blocker flagged at the T20 commit, and the gate made it sharper rather than
+  softer: `hasVisualFeed()` answers "does the AUDIO thread publish columns", which is
+  true for only four of the ten visuals — the rest (LFO scopes, transfer curves,
+  harmonic bars, the delay grid, the reverb envelope) are parametric draws that read DSP
+  state at paint time and push nothing.  Under the old greying that predicate showed six
+  visuals greyed-with-a-reason while their windows drew fine; under a presence gate it
+  would have DELETED the row silently, which is strictly harder to notice.
+  `hasVisual()` defaults to `hasVisualFeed()`, so LimiterDSP's single existing override
+  still answers both and nothing regressed; each T18 parametric visual overrides
+  `hasVisual()` alone.  `hasVisualFeed()`'s own comment was rewritten — it described the
+  greyed-entry behaviour that no longer exists.
+- **TransientShaper Advanced regrouped 7/3 -> 5/5** (Jeff: "do what makes sense").  The
+  old split was by which VECTOR a knob lived in, not by function, which put FastRel and
+  SlowAtt — the release constant of the peak follower and the attack constant of the RMS
+  follower, i.e. the two envelopes Attack and Release act on — on the far row from the
+  controls they tune.  Row 1 is detection + shaping (Attack / Release / FastRel /
+  SlowAtt / Sens, plus both Shape chicken-heads and Mono/Stereo Det, which is a
+  detection control); row 2 is band split + output (Split / Balance / Drive / Gain /
+  Wet, plus OS).  Built as explicit `VKnob*` lists — the vectors are NOT re-sorted,
+  because the Basic branch indexes into them and re-sorting would break those indices
+  for no gain.
+- **The residual sprawl is a WINDOW-SIZE issue, not a grouping one — recorded, not
+  fixed.**  Worst slot goes 227px -> 152px, but TransientShaper Advanced has ten knobs
+  total and the generic Advanced window is 1047 wide, so 44px knobs in ~150px slots is
+  what that arithmetic gives.  Closing it properly means a per-panel Advanced width,
+  which is a T7/T8 sizing decision and outside T20.
+- **Ledger gap RULED: no backfill** (Jeff: "it is what it is") — see the entry above.
+
+## 2026-08-05 — RECOVERED: the effect-window <-> visual-window TETHER was workshopped, RULED, and never built
+
+Found by transcript search on 2026-08-06 when Jeff asked whether it had shipped.  It had
+not, and it was in no doc — the rulings existed only in the T17 session's chat, and that
+is the session whose running-notes entry was never written.  The ledger gap ruled "no
+backfill" an hour earlier was assessed as five missing COMMIT entries; it also contained
+an unbuilt spec, which nobody checked for.  **Anti-recurrence:** a ledger gap gets checked
+for unbuilt rulings before it is written off, not just for missing narrative.
+
+**Jeff's request, verbatim (2026-08-05):** "I also want the visual window to open
+automatically along with the effect window.  Also is there any way to link the two windows
+together with the visual window spawning under the effects window centered and they move
+together as one piece and then give the visual window a menu that has a lock unlock option
+to lock the window to the parent effect or not.  Could we do that?  Workshop before doing
+please."
+
+**Workshopped, then RULED by Jeff in the same session:**
+
+| Piece | Ruling |
+|-------|--------|
+| Visual opens automatically with the effect window | YES — needs a per-slot "user closed this one" flag, or auto-open and the persisted open/closed state cancel each other out |
+| Spawn position | Under the effect window, centered |
+| Dragging a locked pair | **Moves the pair** — grabbing EITHER half moves both (rejected: refuse-the-drag, auto-unlock) |
+| Locked width | **Visual matches the effect window's width** |
+| Lock / unlock | Menu item on the VISUAL window, persisted on the aux record the way the pedals window stores its Compact mode |
+| Sequencing | **T19 first**, then the tether, then T13's panel |
+
+**T19 has since shipped (`9bcb510c`), so the stated prerequisite is met — and it made the
+tether CHEAPER than the workshop predicted.**  Workshop concern 3 was that containment
+would clamp each half independently and tear a locked pair apart at the workspace edge.
+That concern is void: T19 dropped the size fit from the drag path entirely and made the
+bound the CURSOR, which is one point regardless of which half was grabbed.  No
+combined-rect clamp is needed.
+
+**Jeff's open sub-question — "does that follow basic and advanced?" — ANSWERED: yes,
+in both directions.**  The visual window's floor is 420x220 (`openAuxWindow(..., 420,
+220)`); Basic 691 and Advanced 1047 both clear it, so a width-matching visual is never
+clamped.  The hook already exists — `onFloorChanged` fires on every Basic/Advanced swap
+and already calls `setDefaultWindowSize` + `setSize` on the effect window (T19), so the
+tether rides that same callback rather than needing new plumbing.
+
+**What is missing, verified in source 2026-08-06:**
+
+- `StandaloneEditor::openEffectSlotWindow` never calls `openEffectVisualWindow` — no
+  auto-open.  The visual is reachable ONLY through Menu > Visual.
+- `openEffectVisualWindow` opens on its own independent `vispos:` position key and never
+  reads the parent window's bounds — no spawn-under-centered.
+- `WorkspaceWindow` has no follower list and no shared fronting — nothing pairs two
+  windows.  (`broughtToFront` / `onBroughtToFront` is the existing hook the z-order half
+  would ride.)
+- `EffectVisualWindow` has NO `configureTitleStrip` (`EffectWindows.h:208`), unlike
+  `EffectSlotWindow` and `EffectEqWindow` — it has no Menu at all, so the lock/unlock item
+  has nowhere to live until one is built.
+- `onFloorChanged` drives its own window only.
+
+**SLOTTED by Jeff 2026-08-06: its own task, executed NEXT — ahead of T18.**  Landed in the
+batch plan as Task 21 with the full ruled spec.  Sequencing rationale: T19 is done so the
+prerequisite is met, the nine T18 visuals then land into a window that already behaves the
+way it is meant to, and the lock/unlock item needs a title strip built on
+`EffectVisualWindow` from scratch — a class T18 would otherwise be touching nine more
+times first.
+
 ## Diagnostic Instrumentation Catalog (Rule 4)
 
 | Site | Tag | Purpose | Disposition |

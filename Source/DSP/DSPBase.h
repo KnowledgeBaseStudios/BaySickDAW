@@ -19,11 +19,22 @@ public:
     EffectVisualFeed&       visualFeed()       noexcept { return mVisualFeed; }
     const EffectVisualFeed& visualFeed() const noexcept { return mVisualFeed; }
 
-    // Does this effect actually publish anything?  Drives the greyed-out state
-    // of the panel's View > Visual entry: an effect with no visual still SHOWS
-    // the entry (so it is discoverable and recoverable) but cannot be switched
-    // to it.  Default false; a DSP that pushes columns overrides to true.
+    // Does the AUDIO thread push columns into the feed?  This is a question
+    // about publishing, nothing else.  Default false; a DSP that pushes
+    // overrides to true.
     virtual bool hasVisualFeed() const { return false; }
+
+    // Does this effect have a Visual window at all?  DELIBERATELY separate from
+    // hasVisualFeed() (QA-Layout T20, 2026-08-05): only four of the ten visuals
+    // are a scrolling history fed from the audio thread -- the rest (LFO scopes,
+    // transfer curves, harmonic bars, the delay grid, the reverb envelope) are
+    // parametric draws that read DSP state at paint time and push nothing.
+    // Answering the menu's question with hasVisualFeed() would hide the entry on
+    // every one of those while its window drew perfectly well.
+    //
+    // Defaults to hasVisualFeed() so a feed-driven effect needs one override,
+    // not two; a parametric visual overrides THIS one alone.
+    virtual bool hasVisual() const { return hasVisualFeed(); }
 
     virtual void prepare(double sampleRate, int maxBlockSize) = 0;
     virtual void process(juce::AudioBuffer<float>& buffer)   = 0;

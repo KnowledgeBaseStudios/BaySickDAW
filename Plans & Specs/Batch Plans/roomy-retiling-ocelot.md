@@ -264,12 +264,21 @@ ten unfamiliar knobs, not about literal fidelity).
       which is what dissolves the fixed-panel-height problem.
 - [ ] **Menu entry on EVERY effect panel** (Jeff, 2026-08-05): a "Visual" item
       in the per-window Menu dropdown beside FX Rack and Freeze, which is the
-      way BACK once the window has been closed. **Greyed + unusable when that
+      way BACK once the window has been closed. ~~**Greyed + unusable when that
       effect has no visual**, with the reason on hover — the same
       show-it-disabled treatment T16 gave locked Freeze, and for the same
       reason: an entry that vanishes tells the user nothing about whether the
-      feature exists. `PageMenuBar::setVisualSlot`, emitted from
-      `appendStandardItems`, greying driven by `DSPBase::hasVisualFeed()`.
+      feature exists.~~ **SUPERSEDED 2026-08-05 at T20 — the entry is a PRESENCE
+      GATE: it is there or it is not** (Jeff: "so it's there or it's not there
+      instead of grey out and make unusable"). The locked-Freeze parallel does
+      not hold — Freeze is a capability the user can unlock, so it needs to
+      announce itself; an effect with no visual has nothing to offer and no path
+      to acquiring one, so the row is permanent noise in every other effect's
+      menu. `PageMenuBar::setVisualSlot`, emitted from `appendStandardItems`;
+      the gate is `DSPBase::hasVisual()`, **not** `hasVisualFeed()` — that one
+      asks whether the AUDIO thread publishes, which is false for every
+      parametric visual in T18 and would have hidden the entry on effects whose
+      window draws perfectly well.
 - [ ] Build gate → commit on approval → running notes.
 
 ### Task 18 — The remaining nine effect visuals (Jeff-directed mid-batch 2026-08-05)
@@ -355,6 +364,45 @@ SCHPF; reverb hides HFRatio/WetTone/Freeze).
       Advanced→Basic stays stuck at 1047 wide and Basic→Advanced grows rightward
       with no re-clamp, landing half off screen. Set the size outright on a
       variant change, then re-clamp position into view.
+- [ ] Build gate → commit on approval → running notes.
+
+### Task 21 — Effect-window <-> visual-window tether (workshopped + RULED 2026-08-05; RECOVERED 2026-08-06)
+
+Workshopped and ruled in full on 2026-08-05, then lost — the rulings lived only in the
+T17 session's chat, and that is the session whose running-notes entry was never written.
+Recovered by transcript search 2026-08-06 when Jeff asked whether it had shipped. Nothing
+of it exists in code. Slotted by Jeff 2026-08-06: **its own task, executed NEXT** (ahead
+of T18).
+
+Jeff's request, verbatim: "I also want the visual window to open automatically along with
+the effect window. Also is there any way to link the two windows together with the visual
+window spawning under the effects window centered and they move together as one piece and
+then give the visual window a menu that has a lock unlock option to lock the window to the
+parent effect or not."
+
+- [ ] **Auto-open**: `openEffectSlotWindow` opens the slot's visual whenever the effect
+      has one. **Needs a per-slot user-closed flag** — the aux registry already persists
+      open/closed state with the project, so without the flag a close never sticks and
+      the two features cancel each other out.
+- [ ] **Spawn under the parent, centered**, from the parent's bounds at open. Landing is
+      already handled: T19 put the position clamp in `attachTo`, which every window goes
+      through.
+- [ ] **Move as one piece.** Follower list on `WorkspaceWindow`; on move, translate
+      followers by the same delta. **Grabbing EITHER half moves both** (Jeff's ruling —
+      rejected: refuse-the-drag, auto-unlock). Fronting either half fronts both, via the
+      existing `broughtToFront` / `onBroughtToFront` hook; without that a locked pair can
+      sit with the effect window behind something and the visual in front.
+      **T19 made the containment half free** — the workshop's combined-rect clamp concern
+      is void because T19 dropped the size fit from the drag path and made the bound the
+      CURSOR, which is one point regardless of which half was grabbed.
+- [ ] **Locked width follows the parent** (Jeff's ruling), including across a
+      Basic/Advanced swap in BOTH directions: the visual's floor is 420x220 and the
+      variants are 691 and 1047, so it is never clamped. Rides the effect window's
+      existing `onFloorChanged` rather than new plumbing.
+- [ ] **Lock / unlock menu item on the VISUAL window** — which first needs a title strip:
+      `EffectVisualWindow` has no `configureTitleStrip` at all, unlike `EffectSlotWindow`
+      and `EffectEqWindow`. Lock state persists on the aux record the way the pedals
+      window stores its Compact mode.
 - [ ] Build gate → commit on approval → running notes.
 
 ## Verification (end-to-end)

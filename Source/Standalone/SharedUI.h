@@ -358,11 +358,15 @@ public:
 
     // QA-Layout T17: the Menu dropdown's "Visual" entry -- opens this effect's
     // Visual sub-page window, and is the way back once the user has closed it.
-    // `disabledReason` returning non-empty greys the entry and supplies its
-    // hover text; an effect with no visual therefore still SHOWS the entry and
-    // says why it cannot be used, which is the locked-Freeze treatment.
-    void setVisualSlot (std::function<void()>         openVisual,
-                        std::function<juce::String()> disabledReason);
+    //
+    // T20 (Jeff, 2026-08-05): `available` is a PRESENCE gate -- false and the
+    // entry is not built at all.  Reverses T17's show-it-greyed treatment for
+    // this one item; unlike locked Freeze, which is a capability the user can
+    // unlock and therefore needs to be told about, an effect with no visual has
+    // nothing to offer and no path to acquiring one, so a permanently dead row
+    // in every other effect's menu is noise rather than discoverability.
+    void setVisualSlot (std::function<void()> openVisual,
+                        std::function<bool()> available);
     void addActionButton(const juce::String& label, std::function<void()> action);
     void clearActionButtons();
 
@@ -508,7 +512,7 @@ private:
     std::function<juce::String()>                  mFreezeDisabledReason;
     bool                                           mFreezeIsVocal { false };
     std::function<void()>                          mVisualAction;            // T17
-    std::function<juce::String()>                  mVisualDisabledReason;    // T17
+    std::function<bool()>                          mVisualAvailable;         // T20 presence gate
     std::unique_ptr<juce::Slider>                  mSwingKnob;   // smoke round 2: per-player Swing Mix
     bool                                           mMidSideVisible { false };
 

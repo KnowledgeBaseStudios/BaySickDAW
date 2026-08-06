@@ -3102,20 +3102,47 @@ struct TransientShaperPanel : public EditorPanelBase
             auto r1 = b.removeFromTop(b.getHeight() / 2);
             auto r2 = b;
 
-            // Row 1 right: AttackShape + ReleaseShape chicken-heads.
+            // T20 grouping review (Jeff, 2026-08-05: "do what makes sense").
+            // Advanced was split 7/3 by which vector a knob happened to live in,
+            // which put FastRel and SlowAtt -- the release and attack time
+            // constants of the two envelope followers Attack and Release drive --
+            // on the far row from the controls they tune, and left row 2 with
+            // three knobs sprawled across ~683px.  Split 5/5 by FUNCTION instead:
+            // row 1 is detection + shaping, row 2 is the band split + output.
+            // Stereo/Mono Det follows the detector knobs for the same reason.
+            //
+            // The knob VECTORS are untouched -- Basic below indexes into them,
+            // and re-sorting them to match the rows would break those indices for
+            // no gain.
+            std::vector<VKnob*> row1 {
+                r1knobs[0].get(),   // Attack
+                r1knobs[1].get(),   // Release
+                r2knobs[1].get(),   // FastRel  (peak follower release)
+                r2knobs[2].get(),   // SlowAtt  (RMS follower attack)
+                r1knobs[2].get(),   // Sens
+            };
+            std::vector<VKnob*> row2 {
+                r1knobs[3].get(),   // Split
+                r1knobs[4].get(),   // Balance
+                r1knobs[5].get(),   // Drive
+                r1knobs[6].get(),   // Gain
+                r2knobs[0].get(),   // Wet
+            };
+
+            // Row 1 right: AttackShape + ReleaseShape chicken-heads + Stereo Det.
             int r1sz = juce::jmin(r1.getHeight(), kKnobSz);
+            auto sdSlot = r1.removeFromRight(74); r1.removeFromRight(4);
+            if (stereoDetectTog) stereoDetectTog->setBounds(sdSlot.reduced(1));
             auto rSlot = r1.removeFromRight(r1sz); r1.removeFromRight(4);
             if (releaseShapeSel) releaseShapeSel->setBounds(rSlot.reduced(2));
             auto aSlot = r1.removeFromRight(r1sz); r1.removeFromRight(4);
             if (attackShapeSel)  attackShapeSel->setBounds(aSlot.reduced(2));
-            layoutKnobsH(r1, r1knobs);   // all 7 (Attack/Release/Sens/Split/Balance/Drive/Gain)
+            layoutKnobsH(r1, row1);
 
-            // Row 2 right: OS + StereoDetect.
+            // Row 2 right: OS.
             auto osSlot = r2.removeFromRight(60); r2.removeFromRight(4);
             if (osSel) osSel->setBounds(osSlot.reduced(2));
-            auto sdSlot = r2.removeFromRight(74); r2.removeFromRight(4);
-            if (stereoDetectTog) stereoDetectTog->setBounds(sdSlot.reduced(1));
-            layoutKnobsH(r2, r2knobs);   // Wet/FastRel/SlowAtt
+            layoutKnobsH(r2, row2);
         }
         else
         {

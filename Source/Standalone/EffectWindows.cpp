@@ -194,23 +194,24 @@ void EffectSlotWindow::configureTitleStrip (PageMenuBar& bar)
     // under an open window (swap, preset load, undo), which is precisely the
     // shape that made the locked-Freeze entry go stale (Jeff, 2026-08-05: it
     // captured its unlock flag by value and the checkbox appeared to do nothing).
+    //
+    // T20: the second closure is a PRESENCE gate now -- false and the row is not
+    // built.  hasVisual(), not hasVisualFeed(): most of the visuals draw from DSP
+    // state at paint time and publish nothing, so the feed question would hide
+    // the entry on effects whose window works fine.
     bar.setVisualSlot (
         [this]
         {
             if (onOpenVisual) onOpenVisual (mChannelId, mUuid);
         },
-        [this]() -> juce::String
+        [this]() -> bool
         {
             EffectRack* rack = nullptr;
             const int slot = resolveSlot (rack);
-            if (rack == nullptr || slot < 0)
-                return "This slot is empty.";
+            if (rack == nullptr || slot < 0) return false;
 
             auto* dsp = rack->getSlotEffect (slot);
-            if (dsp == nullptr || ! dsp->hasVisualFeed())
-                return "This effect has no visual display.";
-
-            return {};
+            return dsp != nullptr && dsp->hasVisual();
         });
 
     // Locked call 3a: Basic/Advanced, Mode, SC and Presets all live in the
