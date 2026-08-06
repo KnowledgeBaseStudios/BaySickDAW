@@ -1,30 +1,37 @@
-# QA-UndoCoverage — One global undo: authority move, engine params, gap wrapping, Event Editor unification — Plan (long-rewinding-yak)
+# QA-UndoCoverage — MERGED batch: one global undo (every ACTION undoable, structural ops via snapshot resurrection) + transaction-pointer dirty tracking — Plan (long-rewinding-yak)
 
-> **RULED 2026-08-06 (Jeff, at QA-Layout close) — TWO CHANGES SUPERSEDING THIS PLAN'S PREMISES.**
-> **(1) QA-DirtyFlag MERGES INTO THIS BATCH.** One batch, one plan, one close; `clean-pointing-stoat.md`
-> is absorbed (banner there points here). The G4 order becomes ... layout -> yak (merged) -> heron.
-> **(2) EVERY ACTION IS UNDOABLE — the "dead-owner model" exclusion is REVOKED.** Jeff's original
-> spec said every action; the narrowing to "every edit, structural ops excluded" was baked
-> pending-veto on 2026-07-25 and was never posed to him — the Rule 5 violation pattern — and the
-> exclusion does not stand. Structural ops (tab add/delete/duplicate, engine pick, kit load)
-> become undoable via ENGINE-STATE SNAPSHOT temp files captured at the destructive edge — Jeff's
-> design direction: "temp files that screenshot the players like our page saves do".  VERIFIED
-> against `PagePresetIO.h` (2026-08-06, after Jeff corrected an understated first reading): the
-> page preset already captures the END-TO-END CHAIN — every engine state, every mixer-strip
-> APVTS param (sends included), the insert rack, both pre + post EQ8 M/S, and owned bus racks —
-> so it is the SPINE of the undo snapshot, not a piece of it.  The undo wrapper adds only what
-> presets deliberately exclude: the instance's piano-roll/pattern content, automation lanes
-> targeting it, INBOUND references from other strips (their sends/sidechain picks at this
-> channel), and an IDENTITY-PRESERVING restore mode (the preset loader deliberately rewrites id
-> prefixes for load-into-another-page; undo needs the same index/ids/uuids back so lanes and
-> windows re-resolve). CONSEQUENCE for the absorbed DirtyFlag half: with every action
-> undoable, the dual structural counter loses its reason to exist — dirty = transaction-pointer
-> mismatch alone should suffice; verify at plan-open rather than carrying the counter forward.
-> RE-PLAN AT BATCH OPEN from these premises; the task bodies below predate both rulings.
+> **REVISED 2026-08-06 at QA-Layout close — the two Jeff rulings of that date ARE APPLIED in
+> this revision; the task bodies below are current.**
+> **(1) QA-DirtyFlag IS MERGED IN.** One batch, one plan, one close; `clean-pointing-stoat.md`
+> is absorbed (its banner points here; its 2026-05-23 verbatim transaction-pointer spec STANDS
+> and executes as Tasks 8-9 below). The G4 order: ... layout -> yak (merged) -> heron.
+> **(2) EVERY ACTION IS UNDOABLE — the "dead-owner model" exclusion is REVOKED.** Jeff's
+> original spec said every action; the narrowing to "every edit, structural ops excluded" was
+> baked pending-veto on 2026-07-25 and never posed to him (the Rule 5 violation pattern).
+> Structural ops (tab add/delete/duplicate, engine pick, kit load) are undoable via
+> ENGINE-STATE SNAPSHOT temp files captured at the destructive edge — Jeff's design direction:
+> "temp files that screenshot the players like our page saves do".  VERIFIED against
+> `PagePresetIO.h` (2026-08-06, after Jeff corrected an understated first reading): the page
+> preset already captures the END-TO-END CHAIN — every engine state, every mixer-strip APVTS
+> param (sends included), the insert rack, both pre + post EQ8 M/S, and owned bus racks — so it
+> is the SPINE of the undo snapshot.  The undo wrapper adds only what presets deliberately
+> exclude: the instance's piano-roll/pattern content, automation lanes targeting it, INBOUND
+> references from other strips (their sends/sidechain picks at this channel), and an
+> IDENTITY-PRESERVING restore mode (the preset loader deliberately rewrites id prefixes for
+> load-into-another-page; undo needs the same index/ids/uuids back so lanes and windows
+> re-resolve).
+> **STRUCTURAL CONSEQUENCES APPLIED BELOW:** (a) docket 13's "dead-owner hidden + auto-skipped"
+> half is SUPERSEDED — under linear undo a deleted tab's edits are unreachable without first
+> undoing the delete, which resurrects the tab, so dead transactions cannot exist and the
+> hide/skip machinery is not built (owner keys survive as history LABELS only); (b) stoat's
+> dual structural counter is DROPPED — structural ops transact now, so dirty = transaction-
+> pointer mismatch alone; (c) `PagePresetIO::kitLoadCallback` already provides the race-safe
+> sfizz re-entry the resurrection path needs (it exists because sfizz crashes on mid-render
+> reload).
 
 > **Canonical path:** `Plans & Specs/Batch Plans/long-rewinding-yak.md` (mirrored at G4 group
-> approval; home-dir copy deleted). **For execution:** bulk-run G4 batch 7 of 8 — MERGED with
-> QA-DirtyFlag per the 2026-08-06 ruling above. §B authored at code-complete; one source commit.
+> approval; home-dir copy deleted). **For execution:** bulk-run G4 batch 7 (merged; heron
+> follows, then the G4 boundary). §B authored at code-complete; one source commit.
 
 ## Context
 
@@ -45,34 +52,52 @@ ZERO reachable consumers; RustyDrums' manager reachable only via the visible-pag
 DIRTY but never UNDO (pattern add/duplicate/remove/rename, time-marker + time-sig +
 tempo-change ops, Builder audio-library ops, automation-template ops).
 
-- **Risk:** medium-high. The parallel `mHistoryLabels` list assumes every transaction flows
-  through `doUndoAction`; wiring the APVTS UndoManager makes attachments create transactions
-  OUTSIDE it — the label list, cursor, and history window all need a new sync layer, and
-  automation/programmatic writes must be excluded from history. Task 1 opens with a bounded
-  source-reading spike on the vendored APVTS to pin exactly which writes transact.
-- **Effort:** ~8-12 h.
-- **Dependencies:** runs after QA-ProjectSave (its new flows get covered); QA-DirtyFlag
-  consumes this batch's transaction-event infrastructure.
+The absorbed DirtyFlag context (verified, from `clean-pointing-stoat.md`): `ApvtsDirtyTracker`
+fires `markDirty` on every property write; `ProjectManager::markDirty` (+~18 direct sites)
+sets an unconditional bool; the three undo-path `markDirty` calls mean undo can only ever
+DIRTY the project today — the exact inversion Tasks 8-9 fix.  Readers: title asterisk,
+`confirmDiscardChanges`, quit gate.
+
+- **Risk:** HIGH (was medium-high pre-merge). The parallel `mHistoryLabels` list assumes every
+  transaction flows through `doUndoAction`; wiring the APVTS UndoManager makes attachments
+  create transactions OUTSIDE it — the label list, cursor, and history window need a
+  listener-driven sync layer, and automation/programmatic writes must be excluded from
+  history. Task 1 opens with a bounded source-reading spike on the vendored APVTS. The new
+  structural-undo subsystem (Task 7) touches engine lifecycle — the sfizz teardown-order and
+  async-load rules apply in full.
+- **Effort:** ~20-30 h honest for the merged whole (old yak 8-12 + stoat 4-7 + structural
+  undo, the largest single addition; the QA-ModelShell conflict note's growth stands).
+- **Dependencies:** QA-ModelShell (model factory, model-side registration) + QA-Layout
+  (T21 windows resolve by uuid/persist-key — resurrection must restore the same identities).
+- **ORDERING RULE (load-bearing):** widget-captured undo actions move to MODEL-ADDRESSED
+  actions BEFORE structural resurrection lands (Tasks 1-6 before Task 7), or redo across a
+  resurrection replays edits into dead widgets — the same class of bug model-side automation
+  registration was built to kill.
 
 ## Spec calls already locked
 
 | ID | Decision | Reasoning |
 |----|----------|-----------|
+| Jeff 2026-08-06 | EVERY ACTION undoable; structural ops via identity-preserving snapshot resurrection on the PagePresetIO spine; the 2026-07-25 structural exclusion REVOKED (never posed) | Ruled at QA-Layout close; Main Plan §9 sixty-ninth |
+| Jeff 2026-08-06 | QA-DirtyFlag merges in; one batch, one close; dual structural counter dropped (structural ops transact) | Same ruling |
+| §5 verbatim spec (stoat) | TransactionTracker: current/saved pointer, branch-kill (saved=-1 past an undone save point), save sync, asterisk clears the instant Ctrl+Z lands on the save point, dirty = pointer mismatch | Jeff, locked 2026-05-23 — STANDS |
 | Marathon 9b | PROCESSOR-owned UndoManager handed to the main APVTS at construction; StandaloneEditor's manager retires in favor of it; param changes undoable + count toward the dirty pointer | Locked 2026-07-08 |
-| Marathon 19 | Boundary: this batch = plumbing + wiring; DirtyFlag = TransactionTracker on top | Locked 2026-07-08 |
-| Docket 12=A | Full reshaped list: (i) APVTS wiring, (ii) gap wrapping of the dirty-but-not-undo gestures, (iii) Event Editor unification, (iv) manual-push gesture bracketing | Jeff 2026-07-25 |
-| Docket 13=A+ii | ONE manager everywhere — all 10 engine APVTSes take the global manager; the 3 private managers + the Rusty-only branch retire. Dead-tab transactions: HIDDEN from the history list + auto-skipped on undo/redo | Jeff 2026-07-25 |
+| Docket 12=A | (i) APVTS wiring, (ii) gap wrapping of the dirty-but-not-undo gestures, (iii) Event Editor unification, (iv) manual-push gesture bracketing | Jeff 2026-07-25 |
+| Docket 13=A+ii | ONE manager everywhere — all 10 engine APVTSes take the global manager; the 3 private managers + the Rusty-only branch retire. ~~Dead-tab transactions: HIDDEN + auto-skipped~~ **SUPERSEDED 2026-08-06** — no dead transactions can exist under every-action undo (see banner); owner keys survive as history labels only | Jeff 2026-07-25 / 2026-08-06 |
 | Docket 14=a | Event Editor adopts Ctrl+Alt+Z redo; its keys get a DISPLAY-ONLY section in the Key Binds window | Jeff 2026-07-25 |
+| Marathon 9a | Live-state mutations only; detached-tree serialization untouched | Locked 2026-07-08 |
 
 ## Sub-spec calls surfaced for ExitPlanMode
 
-No sub-spec calls open. Implementation shape stated for R5 (plain English): transactions get
-tagged with an owner key (which tab/surface made them) via the transaction NAME — our own
-gesture entry points name their transactions, and a listener-driven shadow list keeps the
-history window truthful for transactions we didn't start (attachment gestures). "Hidden +
-auto-skipped" = the history window filters dead-owner rows out, and Ctrl+Z walks straight
-through them (undoing a dead transaction mutates only the dead engine's detached, ref-counted
-state — memory-safe no-op — then continues to the next live one, bounded loop).
+No sub-spec calls open.  Convention-derived picks stated plainly (not new spec): snapshot temp
+files live under `Documents/BaySickDAW/UndoSnapshots/` (existing folder convention), are
+session-scoped (undo history dies with the session; files swept at startup + exit and dropped
+as entries fall off the depth cap); a kit load is ONE undo entry (one user gesture — the
+existing per-gesture coalescing convention); undo of a sample-engine resurrection is a LOAD,
+not an instant snap-back (async loads; Jeff accepted this property knowingly 2026-08-06).
+Execution-time confirmations that go to Jeff IN CHAT if they arise: spike findings that
+contradict the exclusion mechanism; autosave dirty semantics (verify current behavior first,
+change nothing unprompted).
 
 ## Files to modify
 
@@ -93,6 +118,15 @@ state — memory-safe no-op — then continues to the next live one, bounded loo
 - Task 5: `Source/Standalone/EventEditor.cpp/.h` (route via ctx; Ctrl+Alt+Z),
   `Source/Standalone/KeyBindsWindow` site (display-only EE section)
 - Task 6: audit-driven manual-push sites (MixerPage/StandaloneEditor/NAMIR editor top of list)
+- Task 7: `Source/Standalone/UndoActions.h` (StructuralOpAction), `Source/Standalone/PagePresetIO.h/.cpp`
+  (identity-preserving restore mode), `Source/EngineRig.h/.cpp` + model tab add/delete/dup +
+  engine-pick + kit-load entry points (snapshot capture at the destructive edge), PatternManager
+  (per-instance note/lane slice capture), snapshot temp-file store under Documents/BaySickDAW/UndoSnapshots/
+- Task 8: `Source/PluginProcessor.h/.cpp` (TransactionTracker beside the UndoManager),
+  `Source/Standalone/StandaloneEditor.cpp` (the three undo-path markDirty calls removed; wrappers feed the tracker)
+- Task 9: `Source/ProjectManager.cpp/.h` (markDirty -> dynamic evaluator; save sync; load reset),
+  `Source/Standalone/ApvtsDirtyTracker.h` + engine wiring sites (dirty half stripped; audio-gate half kept if consumed),
+  dirty consumers (title asterisk, confirmDiscardChanges, quit gate) read-through verification
 
 ## Tasks
 
@@ -123,17 +157,17 @@ state — memory-safe no-op — then continues to the next live one, bounded loo
   transact into the global history and Ctrl+Z reaches them anywhere).
 - [ ] Build gate.
 
-### Task 3 — Shadow list, owner keys, hide + skip (13=ii)
+### Task 3 — Shadow list + owner-key labels (13=ii as superseded 2026-08-06)
 
 - [ ] Replace the write-side `mHistoryLabels` appends with a listener-driven shadow list:
   UndoManager ChangeListener detects new transactions (top undo-description changed while redo
   emptied) and appends {label, ownerKey}; `doUndoAction` keeps naming its own transactions
   (`<owner>|<label>` convention); attachment gestures get named at drag-start via a small hook
   at the attachment creation sites (editor knows its owner key).
-- [ ] Owner keys: tab-scoped (`lay0`, `drm3`, `vox1`, `rusty`, …) for engine/page surfaces;
-  `app` for global surfaces. On tab close, its key joins a dead set.
-- [ ] History window filters dead-owner rows; `globalUndo/globalRedo` skip-loop over
-  dead-owner transactions (undo the no-op, continue; hard cap = history depth).
+- [ ] Owner keys: tab-scoped (`lay0`, `drm3`, `vox1`, `rusty`, ...) for engine/page surfaces;
+  `app` for global surfaces.  LABELS ONLY — the dead-set / hide / skip machinery is NOT built
+  (superseded: under every-action undo a deleted tab's edits sit below its delete entry and
+  cannot be reached without resurrecting the tab first; no dead transaction can exist).
 - [ ] Depth-menu semantics preserved (`setMaxNumberOfStoredUnits` values unchanged).
 - [ ] Build gate.
 
@@ -166,7 +200,64 @@ state — memory-safe no-op — then continues to the next live one, bounded loo
 - [ ] Audit the ~101 `setValueNotifyingHost` sites; classify user-gesture vs programmatic.
   User-gesture sites get a named transaction bracket (begin + name at gesture start) so they
   coalesce + label properly; programmatic sites (applicators, load paths, sync code) are
-  covered by Task 1's exclusion. Audit table -> running notes.
+  covered by Task 1's exclusion. Audit table -> running notes. (Census is stale post-mammoth
+  and post-layout — re-scout, do not trust the number.)
+- [ ] Build gate.
+
+### Task 7 — Structural undo: snapshot resurrection (Jeff's 2026-08-06 ruling)
+
+- [ ] `StructuralOpAction` in UndoActions.h: capture at the destructive edge = the per-tab
+  slice via `PagePresetIO` (the chain spine: engines, strip params incl. sends, insert rack,
+  pre+post EQ8 M/S, owned bus racks) PLUS the four preset-excluded surfaces: the instance's
+  piano-roll/pattern content, automation lanes targeting it, inbound references from other
+  strips (their sends/sidechain picks at this channel), and the identity record (pageIndex,
+  strip/channel id, slot uuids, persist keys).
+- [ ] `PagePresetIO` gains an IDENTITY-PRESERVING restore mode (no prefix rewrite; restore
+  into the SAME index/ids/uuids so automation lanes and the T21 windows re-resolve).
+- [ ] Wrapped ops, one transaction per user gesture: tab add (undo = delete), tab delete
+  (undo = resurrect from snapshot), tab duplicate, engine pick/swap (undo = restore the prior
+  engine's snapshot), kit load (ONE entry for the whole kit; undo = remove the created tabs;
+  redo = reload).  Resurrection enters through the MODEL creation paths (the restore-walker
+  pattern; Vox/Inst/Clips enter strip-first per their creation order; sfizz engines re-enter
+  via `kitLoadCallback` — the race-safe path that exists because sfizz crashes on mid-render
+  reload).  Teardown-order rules (Carry-Forward §2 + the sfizz notes) apply in full.
+- [ ] Snapshot temp files under `Documents/BaySickDAW/UndoSnapshots/`: written at capture,
+  dropped as entries fall off the depth cap, swept at startup + exit.  Session-scoped —
+  project load clears history and the store.
+- [ ] UX property (accepted by Jeff 2026-08-06): undoing a sample-engine deletion is a LOAD
+  (async), not an instant snap-back; the existing load/progress surfaces cover it.
+- [ ] Build gate.
+
+### Task 8 — TransactionTracker (absorbed stoat T1, dual counter dropped)
+
+- [ ] `TransactionTracker` on the processor beside the manager: `current`/`saved` only —
+  structural ops transact now, so the `structural`/`structuralSaved` pair from the stoat plan
+  is NOT built.  Fed by this batch's transaction events: new transaction -> ++current; undo ->
+  --current; redo -> ++current; new transaction while current<saved -> saved=-1 (branch-kill).
+- [ ] Remove the three undo-path `markDirty` calls; `doUndoAction`/`globalUndo/Redo` notify
+  the tracker instead.
+- [ ] `isDirty()` = `(current != saved)`; `onDirtyChanged` edge-fires so the asterisk updates
+  the moment the pointer crosses the save point in either direction.
+- [ ] Build gate.
+
+### Task 9 — Retire the touch-model + consumer verification (absorbed stoat T2-T4)
+
+- [ ] `ProjectManager::markDirty`'s unconditional-bool model retired; save ->
+  `saved = current`.  `mIgnoreDirty` load-guard semantics preserved: project load clears
+  history + the snapshot store, resets the counters, fires clean.
+- [ ] `ApvtsDirtyTracker`'s `onAny -> markDirty` wiring removed at the engine sites (refs
+  moved into the model factory post-mammoth — re-scout).  The class's lock-free
+  `hasChangedSinceLastBlock` audio gate is a SEPARATE consumer — verify who reads it; keep
+  that half, strip only the dirty half; remove the class whole if nothing else consumes it
+  (grep-driven).
+- [ ] The ~18 direct `markDirty` sites: user gestures are transactions now (redundant ->
+  removed); the remainder map to Task 7 ops or load-path guards.  Disposition table ->
+  running notes.
+- [ ] Autosave: verify current behavior FIRST (does autosave clearDirty today?); replicate
+  exactly against the tracker (change nothing unprompted; note the finding).  Freeze/unfreeze
+  dirty semantics consume mammoth TS7's ruling — do not re-derive.
+- [ ] Consumers re-verified against the dynamic evaluator (title asterisk,
+  `confirmDiscardChanges`, quit gate — no consumer caches the old bool).
 - [ ] Build gate.
 
 ## Batch close (bulk-run per-batch loop — one commit per batch)
@@ -187,9 +278,14 @@ state — memory-safe no-op — then continues to the next live one, bounded loo
    double-click reset = one row.
 3. Play a song with engine + mixer automation lanes for 30 s: the history window gains ZERO
    rows during playback (programmatic exclusion).
-4. Two Layers tabs: edit knobs on both, delete tab 2 -> its rows vanish from the history
-   window; Ctrl+Z walks tab 1's edits without ever landing on tab 2's (skip verified by the
-   labels shown as you step).
+4. STRUCTURAL UNDO (the 2026-08-06 ruling, end to end): two Layers tabs, edit knobs on both,
+   delete tab 2 -> Ctrl+Z resurrects it — same tab position, same engine settings, same rack +
+   pre/post EQ, same strip params and sends, its piano-roll notes back, its automation lanes
+   playing, its window reopening where it was; a further Ctrl+Z then reaches the knob edits
+   made BEFORE the delete.  Redo re-deletes.  Same round-trip for: tab add (undo removes it),
+   tab duplicate, engine pick/swap (undo restores the prior engine's full state), and a kit
+   load (ONE history entry; undo removes all its tabs; redo reloads — expect a load wait, not
+   an instant snap-back).
 5. Rusty ARIA knob edit undoes from ANY page via Ctrl+Z (the visible-page restriction is gone).
 6. Event Editor: draw + move + delete lane points -> each appears in the history window;
    Ctrl+Z inside the editor undoes them; redo is Ctrl+Alt+Z (Ctrl+Y does nothing); the Key
@@ -197,13 +293,29 @@ state — memory-safe no-op — then continues to the next live one, bounded loo
 7. Pattern remove undo restores the pattern WITH its notes at the same index; marker-set undo
    restores marker + the played tempo (readout check).
 8. Undo History window depth setting (100/250/500/1000) still applies; labels match actions.
-9. Load a project: history is EMPTY (loads don't transact); first post-load edit is row 1.
+9. Load a project: history is EMPTY (loads don't transact), the snapshot store is swept;
+   first post-load edit is row 1.
+10. DIRTY POINTER (absorbed stoat spec): the origin repro — Solo on, Solo off (via Ctrl+Z x2
+    OR direct re-toggle) -> NO asterisk once state matches the save.  Edit -> Save -> edit x3
+    -> Ctrl+Z x3 -> asterisk clears exactly at the save point; one more Ctrl+Z past it ->
+    asterisk returns.
+11. Branch-kill: edit -> Save -> Ctrl+Z -> make a DIFFERENT edit -> Ctrl+Alt+Z is dead and
+    the project stays dirty through any further undo/redo until the next Save.
+12. Add a tab, nothing else: dirty (it transacted).  Save: clean.  Delete the tab: dirty.
+    Ctrl+Z (resurrect): asterisk CLEARS — the pointer is back at the save point, which is the
+    whole reason the dual counter could be dropped.
+13. Play a song with lanes 30 s (no hand edits): history gains ZERO rows AND the project
+    stays clean.  Export a song offline: history byte-identical, project stays clean.
+14. Quit gates: load -> quit immediately, no prompt; one edit -> prompt; autosave behavior
+    identical to the Task 9 verification note.
 
 ## Routing notes (Rule 3)
 
-Dirty-pointer semantics (undo re-cleaning the asterisk, the three undo-path markDirty calls)
-belong to QA-DirtyFlag — do not fix here; log and hand over. Spike findings that contradict the
-mechanism above get surfaced to Jeff in chat BEFORE re-shaping (ask-always lock).
+The DirtyFlag handover is DISSOLVED by the merge — dirty-pointer semantics execute here as
+Tasks 8-9.  Spike findings that contradict the exclusion mechanism, and any autosave-semantics
+surprise, get surfaced to Jeff in chat BEFORE re-shaping (ask-always lock).  Any gesture found
+not transacting is a coverage bug: fix in-batch.  This batch does NOT close G4 code — heron
+(QA-Soundness) follows, then the boundary R3 + smoke.
 
 ## Carry-Forward Reference touch points
 
@@ -231,6 +343,9 @@ TS8 batch smoke. Review outcome for this plan:
 3. **Dead-owner keys = MODEL tab deletion, not view death.** Post-mammoth, closing a window
    destroys only the view; engines and tabs persist. Only deleting a tab from the model
    kills its owner key. Update the Task 3 wording at open.
+   *(2026-08-06: doubly superseded — the dead-key machinery is not built at all under the
+   every-action ruling; the model-vs-view distinction this point drew still governs Task 7's
+   capture points.)*
 4. **Task 6's ~101-site census is stale** — mammoth's registration rework moves/removes
    push sites; re-scout at open.
 5. **The audit surface grew:** "+"-driven tab adds, rack sidebar gestures, freeze/unfreeze,
