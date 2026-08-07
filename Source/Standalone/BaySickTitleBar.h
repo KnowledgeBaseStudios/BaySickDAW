@@ -54,11 +54,8 @@ public:
         (the Guitars/Basses CUT SELF + mode toggle slots; Task 12 fills). */
     void setReservedTrailingWidth (int px);
 
-    /** G-16: hosts a parent-owned widget in the bar's right-anchored row
-        (right-to-left insertion order, left of the trailing hint).  The bar
-        takes the component as a CHILD for layout only -- ownership stays with
-        the caller. */
-    void addHostedTrailingWidget (juce::Component* c, int width);
+    // (G-16's addHostedTrailingWidget removed 2026-08-06 -- its last caller
+    // was the Rusty band, whose controls moved to the window title strip.)
 
     void paint   (juce::Graphics& g) override;
     void resized () override;
@@ -78,9 +75,7 @@ private:
     juce::Colour mAccentColor;
     bool         mBloom;
 
-    // QA-G3Smoke G-16 / G-14 state (see the public setters above).
-    struct HostedWidget { juce::Component* comp; int width; };
-    std::vector<HostedWidget>        mHosted;
+    // QA-G3Smoke G-14 state (see the public setters above).
     int                              mTrailingHint     { 0 };
     int                              mReservedTrailing { 0 };
 

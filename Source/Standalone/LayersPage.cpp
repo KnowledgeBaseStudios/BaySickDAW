@@ -1,4 +1,6 @@
 #include "LayersPage.h"
+#include "UndoBracket.h"
+#include "UndoSnapshotStore.h"   // QA-UndoCoverage: chain-swap snapshots
 #include "../AppPaths.h"
 #include "../BaySickSynth/BaySickSynthProcessor.h"
 #include "../BaySickSynth/BaySickSynthEditor.h"
@@ -99,6 +101,7 @@ void LayersPage::setPlayHead(StandalonePlayHead* ph)
 
 void LayersPage::setUndoContext(const UndoContext& ctx)
 {
+    mUndoCtx = ctx;   // QA-UndoCoverage: chain-swap gestures (ruling 3a)
     if (mPianoRoll)
     {
         mPianoRoll->setUndoContext(ctx);
@@ -342,9 +345,9 @@ static juce::String layerEngineLocalPrefix (juce::AudioProcessor* proc)
 // Apply a ValueTree (raw apvts state) to whichever engine is loaded.
 static void layerApplyApvtsTree (juce::AudioProcessor* proc, const juce::ValueTree& vt)
 {
-    if (auto* bss = dynamic_cast<BaySickSynthProcessor*>(proc))  { bss->apvts.replaceState(vt); return; }
-    if (auto* bsp = dynamic_cast<VibePlayerProcessor*>(proc))    { bsp->apvts.replaceState(vt); return; }
-    if (auto* h   = dynamic_cast<HarmlessProcessor*>(proc))      { h  ->apvts.replaceState(vt); return; }
+    if (auto* bss = dynamic_cast<BaySickSynthProcessor*>(proc))  { bss->apvts.replaceStateKeepingUndoHistory(vt); return; }
+    if (auto* bsp = dynamic_cast<VibePlayerProcessor*>(proc))    { bsp->apvts.replaceStateKeepingUndoHistory(vt); return; }
+    if (auto* h   = dynamic_cast<HarmlessProcessor*>(proc))      { h  ->apvts.replaceStateKeepingUndoHistory(vt); return; }
 }
 
 // G-6 (2026-04-29): rewrite the binary state's PARAM ids so the source
@@ -594,7 +597,8 @@ void LayersPage::showPageActionsMenu (juce::Component* anchor)
             // Page-preset load submenu (1000 + i -> pagePresetXmls[i]).
             if (r >= kIdLoadBase && r < kIdLoadBase + pagePresetXmls.size())
             {
-                lp->loadPagePreset (pagePresetXmls[r - kIdLoadBase]);
+                lp->performChainSwapGesture ("Load Page Preset",
+                    [lp, f = pagePresetXmls[r - kIdLoadBase]] { lp->loadPagePreset (f); });
                 return;
             }
 
@@ -610,6 +614,7 @@ void LayersPage::showPageActionsMenu (juce::Component* anchor)
             {
                 const int newGroup = r - kIdChokeBase;
                 const juce::String prefix = "mixer_layer_" + juce::String (lp->mPageIndex) + "_chokeGroup";
+                beginParamUndoGesture (lp->mProcessor.apvts, prefix); // Task 6 (12-iv)
                 if (auto* p = lp->mProcessor.apvts.getParameter (prefix))
                 {
                     const auto& range = p->getNormalisableRange();
@@ -630,6 +635,7 @@ void LayersPage::showPageActionsMenu (juce::Component* anchor)
                         const auto& range = p->getNormalisableRange();
                         const int curRaw  = (int) std::round (range.convertFrom0to1 (p->getValue()));
                         const int nextRaw = (curRaw == 0) ? 1 : 0;
+                        beginParamUndoGesture (lp->mProcessor.apvts, trackPrefix + "bss_voiceMode"); // Task 6 (12-iv)
                         p->setValueNotifyingHost (range.convertTo0to1 ((float) nextRaw));
                     }
                 }
@@ -640,6 +646,7 @@ void LayersPage::showPageActionsMenu (juce::Component* anchor)
                         const auto& range = p->getNormalisableRange();
                         const float curRaw  = range.convertFrom0to1 (p->getValue());
                         const float nextRaw = (curRaw <= 1.5f) ? 8.f : 1.f;
+                        beginParamUndoGesture (lp->mProcessor.apvts, trackPrefix + "bsp_voiceCap"); // Task 6 (12-iv)
                         p->setValueNotifyingHost (range.convertTo0to1 (nextRaw));
                     }
                 }
@@ -1036,8 +1043,64 @@ void LayersPage::loadPagePreset (const juce::File& xml)
 {
     if (! xml.existsAsFile()) return;
 
+    applyPagePresetXml (xml.loadFileAsString());
+
+    const juce::String newName = xml.getFileNameWithoutExtension();
+    setTabName (newName);
+    if (onSoundNameChanged) onSoundNameChanged (newName);
+}
+
+void LayersPage::performChainSwapGesture (const juce::String& label,
+                                          const std::function<void()>& op)
+{
+    const juce::String before = capturePagePresetXml();
+    if (! mUndoCtx.isValid() || before.isEmpty()) { op(); return; }
+
+    op();
+    const juce::String after = capturePagePresetXml();
+    if (before == after) return;
+
+    const juce::File beforeF = UndoSnapshotStore::writeNew (before);
+    const juce::File afterF  = UndoSnapshotStore::writeNew (after);
+    // Jeff ruling 2026-08-06: resolve the LIVE page at apply time (a
+    // delete+resurrect cycle replaces this object; SafePointer = fallback).
+    auto resolveSelf = mUndoCtx.resolveOwnerPage;
+    auto sp = juce::Component::SafePointer<LayersPage> (this);
+    auto apply = [resolveSelf, sp] (const juce::File& f)
+    {
+        auto* lp = resolveSelf ? dynamic_cast<LayersPage*> (resolveSelf())
+                               : sp.getComponent();
+        if (lp != nullptr && f.existsAsFile())
+            lp->applyPagePresetXml (f.loadFileAsString());
+    };
+    mUndoCtx.perform (new StructuralOpAction ([apply, beforeF] { apply (beforeF); },
+                                              [apply, afterF]  { apply (afterF); },
+                                              { beforeF, afterF }),
+                      label);
+}
+
+// QA-UndoCoverage Task 7: the Save/Load Page Preset payload over in-memory
+// XML -- the structural-undo snapshot capture/apply rides these.
+juce::String LayersPage::capturePagePresetXml()
+{
+    if (mEngineProcessor == nullptr) return {};
+    const juce::String stripPrefix  = "mixer_layer_" + juce::String (mPageIndex);
+    const juce::String enginePrefix = layerEnginePrefixOf (mEngineProcessor);
+    return PagePresetIO::exportPagePreset (mProcessor,
+                                           PagePresetIO::PageKind::Layer,
+                                           mPageIndex,
+                                           stripPrefix,
+                                           mEngineProcessor,
+                                           mEngineType,
+                                           enginePrefix);
+}
+
+void LayersPage::applyPagePresetXml (const juce::String& xmlText)
+{
+    if (xmlText.isEmpty()) return;
+
     // First peek the engineType so we can swap engines if needed.
-    const juce::String savedEngineType = PagePresetIO::peekEngineType (xml);
+    const juce::String savedEngineType = PagePresetIO::peekEngineTypeFromXml (xmlText);
     if (savedEngineType.isNotEmpty() && savedEngineType != mEngineType)
         selectEngine (savedEngineType);
 
@@ -1055,11 +1118,7 @@ void LayersPage::loadPagePreset (const juce::File& xml)
                                      mEngineProcessor,
                                      enginePrefix,
                                      noFallback,
-                                     xml.loadFileAsString());
-
-    const juce::String newName = xml.getFileNameWithoutExtension();
-    setTabName (newName);
-    if (onSoundNameChanged) onSoundNameChanged (newName);
+                                     xmlText);
     takeStateSnapshot();
 }
 

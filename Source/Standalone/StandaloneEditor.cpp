@@ -1,4 +1,7 @@
 #include "StandaloneEditor.h"
+#include "UndoBracket.h"
+#include "UndoSnapshotStore.h"   // QA-UndoCoverage Task 7: structural-undo snapshots
+#include "PagePresetIO.h"        // Task 7: peekEngineTypeFromXml
 #include "../AppPaths.h"
 #include "../MissingFileReport.h"   // QA-ProjectSave Task 4: missing clip audio
 #include "StandaloneApp.h"   // J-A2: MasterOutputRouting + saveMasterOutputRouting
@@ -716,7 +719,7 @@ struct PlaceholderPage : public juce::Component
 StandaloneEditor::StandaloneEditor(VibeSynthProcessor& p, StandalonePlayHead& ph,
                                    juce::AudioDeviceManager& dm)
     : mProcessor(p), mPlayHead(ph), mDeviceManager(dm),
-      mUndoManager(100, 30)
+      mUndoManager(p.mUndoManager)
 {
     // QA-ModelShell TS4: the region contained windows live in.  This MUST be the
     // first statement in the constructor and must never run more than once.
@@ -728,6 +731,25 @@ StandaloneEditor::StandaloneEditor(VibeSynthProcessor& p, StandalonePlayHead& ph
     // frame.  Both failures came from this one line sitting in the wrong place.
     mWorkspace = std::make_unique<Workspace>();
     addAndMakeVisible (*mWorkspace);
+
+    // History depth (Jeff ruling 2026-08-06, "this one is required"): the menu
+    // numbers are TRANSACTION counts now.  JUCE's cap is unit-based and every
+    // action of ours exceeds the old (n, 30) unit budgets, so all four menu
+    // settings silently retained ~30 transactions.  maxUnits = 1 forces the
+    // unit test permanently over, making minimumTransactionsToKeep the exact
+    // retained count.
+    mUndoManager.setMaxNumberOfStoredUnits (1, 100);
+
+    // QA-UndoCoverage Task 3: the history-label list mirrors the manager's
+    // real stack via change messages (attachment gestures transact OUTSIDE
+    // doUndoAction, so write-side appends could never stay truthful).
+    // Registered before the history window ever exists, so this rebuild runs
+    // before the window's own change-driven repaint.
+    mUndoManager.addChangeListener (this);
+
+    // Task 7: undo history is session-scoped; snapshots from a crashed prior
+    // session are unreachable garbage.
+    UndoSnapshotStore::sweepAll();
 
     // Scan core sample library once at startup (non-blocking on message thread,
     // just a directory walk - typically < 10 ms)
@@ -1156,6 +1178,10 @@ StandaloneEditor::StandaloneEditor(VibeSynthProcessor& p, StandalonePlayHead& ph
             }
             else
             {
+                // QA-UndoCoverage: baseline restore is programmatic -- the
+                // applicators write engine APVTS params; keep them out of the
+                // history.
+                juce::AudioProcessorValueTreeState::ScopedProgrammaticParamWrites spw;
                 for (const auto& p : mApplicatorBaseline)
                 {
                     auto it = mAutomationApplicators.find (p.first);
@@ -1369,6 +1395,7 @@ StandaloneEditor::StandaloneEditor(VibeSynthProcessor& p, StandalonePlayHead& ph
         return 0;
     };
     mTransport->onRecordQuantizeDivChanged = [this](int div) {
+        beginParamUndoGesture (mProcessor.apvts, "Unified_RecordQuantizeDiv"); // Task 6 (12-iv)
         if (auto* p = dynamic_cast<juce::RangedAudioParameter*> (
                 mProcessor.apvts.getParameter ("Unified_RecordQuantizeDiv")))
             p->setValueNotifyingHost (
@@ -1477,8 +1504,13 @@ StandaloneEditor::StandaloneEditor(VibeSynthProcessor& p, StandalonePlayHead& ph
                 else if (result == -1)
                 {
                     // New pattern
-                    mPM->addPattern();
-                    mPM->setCurrentPattern(mPM->getNumPatterns() - 1);
+                    auto* grid = mBuilderPage ? mBuilderPage->getGrid() : nullptr;
+                    auto op = [this] {
+                        mPM->addPattern();
+                        mPM->setCurrentPattern(mPM->getNumPatterns() - 1);
+                    };
+                    if (grid) grid->performPatternSliceOp ("Add Pattern", op);
+                    else      op();
                     refreshPatternBox();
                 }
                 else if (result == -2)
@@ -1500,8 +1532,18 @@ StandaloneEditor::StandaloneEditor(VibeSynthProcessor& p, StandalonePlayHead& ph
                                     auto newName = aw->getTextEditorContents("name").trim();
                                     if (newName.isNotEmpty())
                                     {
+                                        const juce::String oldName = mPM->getPattern(idx).name;
                                         mPM->renamePattern(idx, newName);
                                         refreshPatternBox();
+                                        if (oldName != newName)
+                                            doUndoAction(new PatternRenameAction(idx, oldName, newName,
+                                                [this](int i, const juce::String& n)
+                                                {
+                                                    if (!mPM || i < 0 || i >= mPM->getNumPatterns()) return;
+                                                    mPM->renamePattern(i, n);
+                                                    refreshPatternBox();
+                                                }),
+                                              "Rename Pattern");
                                     }
                                 }
                             }),
@@ -1515,12 +1557,22 @@ StandaloneEditor::StandaloneEditor(VibeSynthProcessor& p, StandalonePlayHead& ph
                     if (idx < 0 || idx >= mPM->getNumPatterns()) return;
                     const juce::Colour curCol = mPM->getPattern(idx).color;
                     PatternColorPicker::showAsync (mPatternBtn.get(), curCol,
-                        [this, idx] (juce::Colour newCol)
+                        [this, idx, curCol] (juce::Colour newCol)
                         {
                             if (! mPM || idx < 0 || idx >= mPM->getNumPatterns()) return;
                             mPM->getPattern(idx).color = newCol;
                             refreshPatternBox();
                             if (mBuilderPage) mBuilderPage->repaint();
+                            if (newCol != curCol)
+                                doUndoAction(new PatternColorAction(idx, curCol, newCol,
+                                    [this](int i, juce::Colour c)
+                                    {
+                                        if (!mPM || i < 0 || i >= mPM->getNumPatterns()) return;
+                                        mPM->getPattern(i).color = c;
+                                        refreshPatternBox();
+                                        if (mBuilderPage) mBuilderPage->repaint();
+                                    }),
+                                  "Pattern Color");
                         });
                 }
                 else if (result == -200)
@@ -1545,16 +1597,23 @@ StandaloneEditor::StandaloneEditor(VibeSynthProcessor& p, StandalonePlayHead& ph
                     aw->enterModalState (true,
                         juce::ModalCallbackFunction::create ([this, idx, aw](int r)
                         {
+                            auto* grid = mBuilderPage ? mBuilderPage->getGrid() : nullptr;
                             if (r == 1)
                             {
                                 const int n2 = aw->getTextEditorContents("num").getIntValue();
                                 const int d2 = aw->getTextEditorContents("den").getIntValue();
                                 if (n2 > 0 && d2 > 0)
-                                    mPM->setPatternTimeSig (idx, n2, d2);
+                                {
+                                    auto op = [this, idx, n2, d2] { mPM->setPatternTimeSig (idx, n2, d2); };
+                                    if (grid) grid->performPatternTsOp ("Pattern Time Signature", op);
+                                    else      op();
+                                }
                             }
                             else if (r == 2)
                             {
-                                mPM->resetPatternTimeSig (idx);
+                                auto op = [this, idx] { mPM->resetPatternTimeSig (idx); };
+                                if (grid) grid->performPatternTsOp ("Reset Time Signature", op);
+                                else      op();
                             }
                             refreshPatternBox();
                             if (mPianoRollPage) mPianoRollPage->repaint();
@@ -1566,15 +1625,23 @@ StandaloneEditor::StandaloneEditor(VibeSynthProcessor& p, StandalonePlayHead& ph
                     // Docket #4: manual current-TS re-pick.
                     const int tsIdx = (-result) - 300;
                     if (tsIdx >= 0 && tsIdx < mPM->getNumTimeSigChanges())
-                        mPM->setCurrentTsMarkerUid (mPM->getTimeSigChange (tsIdx).uid);
+                    {
+                        const int uid = mPM->getTimeSigChange (tsIdx).uid;
+                        auto* grid = mBuilderPage ? mBuilderPage->getGrid() : nullptr;
+                        auto op = [this, uid] { mPM->setCurrentTsMarkerUid (uid); };
+                        if (grid) grid->performMarkerSetOp ("Current Time Signature", op);
+                        else      op();
+                    }
                 }
                 else if (result == -3)
                 {
                     // Delete current pattern
                     int idx = mPM->getCurrentPatternIndex();
+                    // QA-UndoCoverage Task 4: "This cannot be undone." retired
+                    // with the wrap below -- it can, now.
                     auto* aw = new juce::AlertWindow(
                         "Delete Pattern",
-                        "Delete \"" + mPM->currentPattern().name + "\"? This cannot be undone.",
+                        "Delete \"" + mPM->currentPattern().name + "\"?",
                         juce::MessageBoxIconType::WarningIcon);
                     aw->addButton("Delete", 1);
                     aw->addButton("Cancel", 0);
@@ -1584,10 +1651,15 @@ StandaloneEditor::StandaloneEditor(VibeSynthProcessor& p, StandalonePlayHead& ph
                             {
                                 if (r == 1)
                                 {
-                                    mPM->removePattern(idx);
-                                    // clamp selection
-                                    int newIdx = juce::jlimit(0, mPM->getNumPatterns() - 1, idx);
-                                    mPM->setCurrentPattern(newIdx);
+                                    auto* grid = mBuilderPage ? mBuilderPage->getGrid() : nullptr;
+                                    auto op = [this, idx] {
+                                        mPM->removePattern(idx);
+                                        // clamp selection
+                                        int newIdx = juce::jlimit(0, mPM->getNumPatterns() - 1, idx);
+                                        mPM->setCurrentPattern(newIdx);
+                                    };
+                                    if (grid) grid->performPatternSliceOp ("Delete Pattern", op);
+                                    else      op();
                                     refreshPatternBox();
                                 }
                             }),
@@ -1636,15 +1708,100 @@ StandaloneEditor::StandaloneEditor(VibeSynthProcessor& p, StandalonePlayHead& ph
     // engine selection on top of it rather than forking a second path.
     mRibbon->onAddEngineRequest = [this](RibbonTabBar::TabType t, const juce::String& engine)
     {
+        // Review fix (2026-08-06): suppress the strip-cascade wrap -- this
+        // path wraps AFTER the engine/plugin pick so the record carries it
+        // (the cascade fires mid-flow and would capture the pre-pick page).
+        // pageCountBefore guards the "newest of type" scan below: at the
+        // page cap nothing spawns and the scan would land on a PRE-EXISTING
+        // tab, minting a bogus Add transaction whose undo closes it.
+        const int pageCountBefore = mPages.size();
+        ++mSuppressAddUndoWrap;
         onAddTabRequest (t);
         applyEngineToNewestTabOfType (t, engine);
+        --mSuppressAddUndoWrap;
+        if (mPages.size() <= pageCountBefore) return;
+
+        // QA-UndoCoverage Task 7 + review fix: "+" add-and-pick is ONE
+        // structural transaction (undo removes the tab; redo re-creates it
+        // at the same index from its post-pick snapshot).  L/B/D ride the
+        // PagePresetIO spine; Vox/Inst/Plugins the captureTabRecord spine.
+        if (t == RibbonTabBar::TabType::Vox || t == RibbonTabBar::TabType::Inst
+            || t == RibbonTabBar::TabType::Plugins)
+        {
+            PageEntry* newest = nullptr;
+            for (auto* e : mPages)
+                if (e != nullptr && e->type == t) newest = e;
+            if (newest == nullptr || ! mRibbon) return;
+            const auto* tab = mRibbon->getTabById (newest->ribbonTabId);
+            wrapTabAddUndo (newest->ribbonTabId,
+                            "Add " + (tab != nullptr && tab->name.isNotEmpty() ? tab->name
+                                                                               : engine));
+            return;
+        }
+
+        if (t == RibbonTabBar::TabType::Layers || t == RibbonTabBar::TabType::Bass
+            || t == RibbonTabBar::TabType::Drums)
+        {
+            PageEntry* newest = nullptr;
+            for (auto* e : mPages)
+                if (e != nullptr && e->type == t) newest = e;
+            if (newest == nullptr || ! mRibbon) return;
+
+            juce::String presetXml, tabName;
+            int pageIdx = -1;
+            if (const auto* tab = mRibbon->getTabById (newest->ribbonTabId))
+                tabName = tab->name;
+            if (auto* lp = dynamic_cast<LayersPage*> (newest->component.get()))
+            { pageIdx = lp->getPageIndex(); presetXml = lp->capturePagePresetXml(); }
+            else if (auto* bp = dynamic_cast<BassPage*> (newest->component.get()))
+            { pageIdx = bp->getPageIndex(); presetXml = bp->capturePagePresetXml(); }
+            else if (auto* dp = dynamic_cast<DrumPage*> (newest->component.get()))
+            { pageIdx = dp->getPageIndex(); presetXml = dp->exportPagePresetXml(); }
+            if (pageIdx < 0 || presetXml.isEmpty()) return;
+
+            const juce::File snap = UndoSnapshotStore::writeNew (presetXml);
+            auto liveId = std::make_shared<int> (newest->ribbonTabId);
+            auto undoFn = [this, liveId] { if (mRibbon) mRibbon->closeTab (*liveId); };
+            auto redoFn = [this, snap, t, pageIdx, tabName, liveId]
+            {
+                const juce::String xml = snap.loadFileAsString();
+                int newId = -1;
+                switch (t)
+                {
+                    case RibbonTabBar::TabType::Layers:
+                        newId = spawnDuplicateLayerTab (xml, pageIdx, tabName, true); break;
+                    case RibbonTabBar::TabType::Bass:
+                        newId = spawnDuplicateBassTab  (xml, pageIdx, tabName, true); break;
+                    case RibbonTabBar::TabType::Drums:
+                        newId = spawnDuplicateDrumTab  (xml, pageIdx, tabName, true); break;
+                    default: break;
+                }
+                if (newId >= 0) *liveId = newId;
+            };
+            doUndoAction (new StructuralOpAction (std::move (undoFn), std::move (redoFn), { snap }),
+                          "Add " + (tabName.isNotEmpty() ? tabName : engine));
+        }
     };
     // J-6 (2026-05-03): "+ Add BaySickRustyDrums" entry on the Drums dropdown.
     // 1-instance lock: hide entry when a BaySickRustyDrumsPage already exists
     // in mPages (the page can exist even before a kit is loaded, so checking
     // hasBaySickRustyDrums() on the processor isn't sufficient - that flag
     // only flips true after loadBaySickRustyDrumsKit succeeds).
-    mRibbon->onAddBaySickRustyDrumsRequest = [this] { addBaySickRustyDrumsTab(); };
+    // Review fix (2026-08-06): the add function is shared with load restore
+    // and resurrection (which re-enters THROUGH it), so the add wrap lives
+    // out here on the user gesture, gated on a page actually appearing.
+    mRibbon->onAddBaySickRustyDrumsRequest = [this]
+    {
+        const int pageCountBefore = mPages.size();
+        addBaySickRustyDrumsTab();
+        if (mPages.size() <= pageCountBefore) return;
+        for (auto* e : mPages)
+            if (e != nullptr && dynamic_cast<BaySickRustyDrumsPage*> (e->component.get()))
+            {
+                wrapTabAddUndo (e->ribbonTabId, "Add BaySickRustyDrums");
+                return;
+            }
+    };
     // 2026-05-05 dirty-flag wiring: tab lock toggle.
     mRibbon->onTabLockChanged = [this] (int, bool) {
         if (mProjectManager) mProjectManager->markDirty();
@@ -1873,6 +2030,14 @@ StandaloneEditor::StandaloneEditor(VibeSynthProcessor& p, StandalonePlayHead& ph
     // togglePlayPause / stopAndDisarm / toggleRecord methods are invoked from
     // perform() so the same actions can be re-bound through Help > Key Binds.
     mCmdMgr.registerAllCommandsForTarget (this);
+    // Regression fix (2026-08-06): without an explicit first target the
+    // command manager resolves targets by walking UP from the FOCUSED
+    // component -- and every page lives in a parentless desktop
+    // WorkspaceWindow, so with focus inside any page window the walk found
+    // nothing and EVERY global key bind (Ctrl+Z, Ctrl+Alt+Z, Space, ...)
+    // silently died.  Pinning the editor makes the per-window
+    // addKeyListener(set) registrations actually fire regardless of focus.
+    mCmdMgr.setFirstCommandTarget (this);
 
     if (auto* set = mCmdMgr.getKeyMappings())
     {
@@ -2017,6 +2182,15 @@ StandaloneEditor::StandaloneEditor(VibeSynthProcessor& p, StandalonePlayHead& ph
 
 StandaloneEditor::~StandaloneEditor()
 {
+    // QA-UndoCoverage Task 3: the manager is processor-owned and outlives this
+    // editor -- deregister before anything else tears down.  Task 7: every
+    // action references editor-lifetime objects, so the history dies WITH the
+    // editor (also deletes the structural-undo snapshot files via the action
+    // dtors); sweep catches strays from a prior crash.
+    mUndoManager.removeChangeListener (this);
+    mUndoManager.clearUndoHistory();
+    UndoSnapshotStore::sweepAll();
+
     // 2026-05-06 (Batch 9c B2-followup): Tear down all dynamic tabs (Vox /
     // Inst / Clip / Layers / Bass / Drums / Rusty) THROUGH THE SAFE PATH
     // first.  Without this, the bare mPages.clear() below would destroy
@@ -2047,6 +2221,7 @@ StandaloneEditor::~StandaloneEditor()
     mProcessor.onLoadProgress = nullptr;
     // Detach the keymap-set listener installed in the ctor.  GlobalTransportBar
     // is no longer a KeyListener (Phase A 2026-04-26 - keymap migration).
+    mCmdMgr.setFirstCommandTarget (nullptr);   // pinned in the ctor
     if (auto* set = mCmdMgr.getKeyMappings())
         removeKeyListener(set);
     removeKeyListener (this);   // G1 smoke item-12: the typing-note gate
@@ -2169,6 +2344,7 @@ void StandaloneEditor::buildDefaultTabs()
                 return 1;
             },
             [this](int div) {
+                beginParamUndoGesture (mProcessor.apvts, "Unified_PianoRollSnapDiv"); // Task 6 (12-iv)
                 if (auto* p = dynamic_cast<juce::RangedAudioParameter*> (
                         mProcessor.apvts.getParameter ("Unified_PianoRollSnapDiv")))
                     p->setValueNotifyingHost (p->getNormalisableRange().convertTo0to1 ((float) div));
@@ -2182,6 +2358,7 @@ void StandaloneEditor::buildDefaultTabs()
                 return 0;
             },
             [this](int div) {
+                beginParamUndoGesture (mProcessor.apvts, "Unified_QuantizeDiv"); // Task 6 (12-iv)
                 if (auto* p = dynamic_cast<juce::RangedAudioParameter*> (
                         mProcessor.apvts.getParameter ("Unified_QuantizeDiv")))
                     p->setValueNotifyingHost (p->getNormalisableRange().convertTo0to1 ((float) div));
@@ -2364,7 +2541,7 @@ std::unique_ptr<juce::Component> StandaloneEditor::createLayersPage()
     mUsedLayerIndices[idx] = true;
     auto page = std::make_unique<LayersPage>(mProcessor, *mPM, idx);
     page->setPlayHead(&mPlayHead);
-    page->setUndoContext(makeUndoContext());
+    page->setUndoContext(makeUndoContext("lay" + juce::String(idx)));
     // 2026-04-22: Removed auto-mode-swap (sub-tab → Pattern/Song).  User now
     // chooses Pattern or Song explicitly via the transport button.
     mLegacyLayersPage = page.get();
@@ -2383,7 +2560,9 @@ std::unique_ptr<juce::Component> StandaloneEditor::createPluginsPage()
     if (idx < 0) return nullptr;   // all plugin slots in use
 
     mUsedPluginIndices[(size_t) idx] = true;
-    return std::make_unique<PluginsPage> (mProcessor, idx);
+    auto page = std::make_unique<PluginsPage> (mProcessor, idx);
+    page->setUndoContext (makeUndoContext ("plug" + juce::String (idx)));   // ruling 3a
+    return page;
 }
 
 // Project restore: the saved pageIndex is authoritative (it keys the mixer
@@ -2394,7 +2573,9 @@ std::unique_ptr<juce::Component> StandaloneEditor::createPluginsPageAtIndex (int
     if (mUsedPluginIndices[(size_t) idx]) return nullptr;
 
     mUsedPluginIndices[(size_t) idx] = true;
-    return std::make_unique<PluginsPage> (mProcessor, idx);
+    auto page = std::make_unique<PluginsPage> (mProcessor, idx);
+    page->setUndoContext (makeUndoContext ("plug" + juce::String (idx)));   // ruling 3a
+    return page;
 }
 
 std::unique_ptr<juce::Component> StandaloneEditor::createLayersPageAtIndex (int idx)
@@ -2404,7 +2585,7 @@ std::unique_ptr<juce::Component> StandaloneEditor::createLayersPageAtIndex (int 
     mUsedLayerIndices[idx] = true;
     auto page = std::make_unique<LayersPage> (mProcessor, *mPM, idx);
     page->setPlayHead (&mPlayHead);
-    page->setUndoContext (makeUndoContext());
+    page->setUndoContext (makeUndoContext ("lay" + juce::String (idx)));
     mLegacyLayersPage = page.get();
     return page;
 }
@@ -2416,7 +2597,7 @@ std::unique_ptr<juce::Component> StandaloneEditor::createBassPageAtIndex (int id
     mUsedBassIndices[idx] = true;
     auto page = std::make_unique<BassPage> (mProcessor, *mPM, idx);
     page->setPlayHead (&mPlayHead);
-    page->setUndoContext (makeUndoContext());
+    page->setUndoContext (makeUndoContext ("bass" + juce::String (idx)));
     mLegacyBassPage = page.get();
     return page;
 }
@@ -2434,7 +2615,7 @@ std::unique_ptr<juce::Component> StandaloneEditor::createBassPage()
     mUsedBassIndices[idx] = true;
     auto page = std::make_unique<BassPage>(mProcessor, *mPM, idx);
     page->setPlayHead(&mPlayHead);
-    page->setUndoContext(makeUndoContext());
+    page->setUndoContext(makeUndoContext("bass" + juce::String(idx)));
     // 2026-04-22: Removed auto-mode-swap.  See createLayersPage comment.
     mLegacyBassPage = page.get();
     return page;
@@ -2450,19 +2631,24 @@ std::unique_ptr<juce::Component> StandaloneEditor::createDrumPage()
     mUsedDrumIndices[idx] = true;
     auto page = std::make_unique<DrumPage>(mProcessor, *mPM, idx);
     page->setPlayHead(&mPlayHead);
-    page->setUndoContext(makeUndoContext());
+    page->setUndoContext(makeUndoContext("drm" + juce::String(idx)));
     mLegacyDrumPage = page.get();
     return page;
 }
 
-void StandaloneEditor::spawnDuplicateLayerTab (const juce::String& clipboardXml)
+int StandaloneEditor::spawnDuplicateLayerTab (const juce::String& clipboardXml,
+                                              int forcedPageIndex,
+                                              const juce::String& forcedName,
+                                              bool fullPreset)
 {
-    auto page = createLayersPage();
-    if (! page) return;
+    auto page = forcedPageIndex >= 0 ? createLayersPageAtIndex (forcedPageIndex)
+                                     : createLayersPage();
+    if (! page) return -1;
     auto* lp = dynamic_cast<LayersPage*> (page.get());
-    if (lp == nullptr) return;
+    if (lp == nullptr) return -1;
     const int pageIdx = lp->getPageIndex();
-    const juce::String layerName = nextLayerTabName();   // QA-D STATE-02
+    const juce::String layerName = forcedName.isNotEmpty() ? forcedName
+                                                           : nextLayerTabName();   // QA-D STATE-02
     lp->setTabName (layerName);                          // sync internal mTabName
     const int newId = mRibbon->addTab (RibbonTabBar::TabType::Layers, layerName);
     lp->onEngineSelected = [this, newId, pageIdx, lp] {
@@ -2476,10 +2662,10 @@ void StandaloneEditor::spawnDuplicateLayerTab (const juce::String& clipboardXml)
     };
     lp->onDeleteRequested = [this, newId] {
         if (! mRibbon) return;
-        mRibbon->closeTab (newId);
+        deleteTabWithUndo (newId);
     };
     lp->onDuplicateRequested = [this] (const juce::String& xml) {
-        spawnDuplicateLayerTab (xml);
+        duplicateTabWithUndo (RibbonTabBar::TabType::Layers, xml);
     };
     lp->onLockChanged = [this, newId, lp] {
         if (mRibbon) mRibbon->setTabLocked (newId, lp->isLocked());
@@ -2500,19 +2686,26 @@ void StandaloneEditor::spawnDuplicateLayerTab (const juce::String& clipboardXml)
     entry->component   = std::move (page);
     mPages.add (entry);
     hostPageInWindow (*entry);
-    lp->importLayerState (clipboardXml);
+    if (fullPreset) lp->applyPagePresetXml (clipboardXml);
+    else            lp->importLayerState (clipboardXml);
     mRibbon->selectTab (newId);
     onTabSelected (newId);
+    return newId;
 }
 
-void StandaloneEditor::spawnDuplicateBassTab (const juce::String& clipboardXml)
+int StandaloneEditor::spawnDuplicateBassTab (const juce::String& clipboardXml,
+                                             int forcedPageIndex,
+                                             const juce::String& forcedName,
+                                             bool fullPreset)
 {
-    auto page = createBassPage();
-    if (! page) return;
+    auto page = forcedPageIndex >= 0 ? createBassPageAtIndex (forcedPageIndex)
+                                     : createBassPage();
+    if (! page) return -1;
     auto* bp = dynamic_cast<BassPage*> (page.get());
-    if (bp == nullptr) return;
+    if (bp == nullptr) return -1;
     const int pageIdx = bp->getPageIndex();
-    const juce::String bassName = nextBassTabName();   // QA-D STATE-02
+    const juce::String bassName = forcedName.isNotEmpty() ? forcedName
+                                                          : nextBassTabName();   // QA-D STATE-02
     bp->setTabName (bassName);                         // sync internal mTabName
     const int newId = mRibbon->addTab (RibbonTabBar::TabType::Bass, bassName);
     bp->onEngineSelected = [this, newId, pageIdx, bp] {
@@ -2526,10 +2719,10 @@ void StandaloneEditor::spawnDuplicateBassTab (const juce::String& clipboardXml)
     };
     bp->onDeleteRequested = [this, newId] {
         if (! mRibbon) return;
-        mRibbon->closeTab (newId);
+        deleteTabWithUndo (newId);
     };
     bp->onDuplicateRequested = [this] (const juce::String& xml) {
-        spawnDuplicateBassTab (xml);
+        duplicateTabWithUndo (RibbonTabBar::TabType::Bass, xml);
     };
     bp->onLockChanged = [this, newId, bp] {
         if (mRibbon) mRibbon->setTabLocked (newId, bp->isLocked());
@@ -2550,23 +2743,30 @@ void StandaloneEditor::spawnDuplicateBassTab (const juce::String& clipboardXml)
     entry->component   = std::move (page);
     mPages.add (entry);
     hostPageInWindow (*entry);
-    bp->importBassState (clipboardXml);
+    if (fullPreset) bp->applyPagePresetXml (clipboardXml);
+    else            bp->importBassState (clipboardXml);
     mRibbon->selectTab (newId);
     onTabSelected (newId);
+    return newId;
 }
 
-void StandaloneEditor::spawnDuplicateDrumTab (const juce::String& clipboardXml)
+int StandaloneEditor::spawnDuplicateDrumTab (const juce::String& clipboardXml,
+                                             int forcedPageIndex,
+                                             const juce::String& forcedName,
+                                             bool fullPreset)
 {
     // D1.4-fix (c): Duplicate Drum action - find the next free drum index,
     // create a new DrumPage at that slot, wire its callbacks, then apply the
     // serialized state.  Mirrors the onAddTabRequest(Drums) flow + paste.
-    auto page = createDrumPage();
-    if (! page) return;   // 16-drum cap reached
+    auto page = forcedPageIndex >= 0 ? createDrumPageAtIndex (forcedPageIndex)
+                                     : createDrumPage();
+    if (! page) return -1;   // 16-drum cap reached
     auto* dp = dynamic_cast<DrumPage*> (page.get());
-    if (dp == nullptr) return;
+    if (dp == nullptr) return -1;
 
     const int pageIdx = dp->getPageIndex();
-    const juce::String drumName = nextDrumTabName();   // QA-D STATE-02
+    const juce::String drumName = forcedName.isNotEmpty() ? forcedName
+                                                          : nextDrumTabName();   // QA-D STATE-02
     dp->setTabName (drumName);                         // sync internal mTabName
     const int newId = mRibbon->addTab (RibbonTabBar::TabType::Drums, drumName);
     dp->onEngineSelected = [this, newId, pageIdx, dp] {
@@ -2589,10 +2789,10 @@ void StandaloneEditor::spawnDuplicateDrumTab (const juce::String& clipboardXml)
     };
     dp->onDeleteRequested = [this, newId] {
         if (! mRibbon) return;
-        mRibbon->closeTab (newId);
+        deleteTabWithUndo (newId);
     };
     dp->onDuplicateRequested = [this] (const juce::String& xml) {
-        spawnDuplicateDrumTab (xml);
+        duplicateTabWithUndo (RibbonTabBar::TabType::Drums, xml);
     };
     dp->onLockChanged = [this, newId, dp] {
         if (mRibbon) mRibbon->setTabLocked (newId, dp->isLocked());
@@ -2611,11 +2811,13 @@ void StandaloneEditor::spawnDuplicateDrumTab (const juce::String& clipboardXml)
     mPages.add (entry);
     hostPageInWindow (*entry);
 
-    dp->importDrumState (clipboardXml);
+    if (fullPreset) dp->importPagePresetXml (clipboardXml);
+    else            dp->importDrumState (clipboardXml);
 
     mRibbon->selectTab (newId);
     onTabSelected (newId);
     refreshAllKitViews();
+    return newId;
 }
 
 std::unique_ptr<juce::Component> StandaloneEditor::createDrumPageAtIndex (int idx)
@@ -2625,7 +2827,7 @@ std::unique_ptr<juce::Component> StandaloneEditor::createDrumPageAtIndex (int id
     mUsedDrumIndices[idx] = true;
     auto page = std::make_unique<DrumPage>(mProcessor, *mPM, idx);
     page->setPlayHead(&mPlayHead);
-    page->setUndoContext(makeUndoContext());
+    page->setUndoContext(makeUndoContext("drm" + juce::String(idx)));
     mLegacyDrumPage = page.get();
     return page;
 }
@@ -2938,6 +3140,7 @@ std::unique_ptr<juce::Component> StandaloneEditor::createBuilderPage()
                                         float pitch, float bpm, bool stretch)
         {
             if (! mPM || np.isEmpty()) return;
+            AudioLibrarySnapshot libBefore = captureAudioLibrarySnapshot (false);
             // addAudioToLibrary dedups on (path, owner): if the Clips-page
             // spawn already registered (np, targetChannel) this is a no-op.
             mPM->addAudioToLibrary (np, {}, targetChannel);
@@ -2945,6 +3148,10 @@ std::unique_ptr<juce::Component> StandaloneEditor::createBuilderPage()
             if (idx >= 0)
                 mPM->setAudioLibraryClipDefaults (idx, pitch, bpm, stretch);
             if (mBuilderPage) mBuilderPage->notifyArrangementChanged();
+            doUndoAction (new AudioLibraryAction (std::move (libBefore),
+                                                  captureAudioLibrarySnapshot (false),
+                                                  makeAudioLibraryApply()),
+                          "Copy Audio Entry");
         };
         // P4: copy-on-drop.  When the user drops a WAV onto the arrangement,
         // ProjectManager::importSample copies it into <project>/Samples/ and
@@ -2993,6 +3200,7 @@ std::unique_ptr<juce::Component> StandaloneEditor::createBuilderPage()
             return 1;
         };
         grid->onSnapDivChanged = [this](int div) {
+            beginParamUndoGesture (mProcessor.apvts, "Unified_BuilderSnapDiv"); // Task 6 (12-iv)
             if (auto* p = dynamic_cast<juce::RangedAudioParameter*> (
                     mProcessor.apvts.getParameter ("Unified_BuilderSnapDiv")))
                 p->setValueNotifyingHost (
@@ -3209,6 +3417,11 @@ std::unique_ptr<juce::Component> StandaloneEditor::createBuilderPage()
         {
             if (! mPM) return;
             if (libIdx < 0 || libIdx >= mPM->getNumAudioLibrary()) return;
+
+            // QA-UndoCoverage Task 4: one Properties apply = one transaction
+            // (entries + the follower-block writes below).
+            AudioLibrarySnapshot before = captureAudioLibrarySnapshot (true);
+
             mPM->setAudioLibraryPageOwner    (libIdx, newRoute);
             mPM->setAudioLibraryClipDefaults (libIdx, newPitch, newBPM, newStretch);
 
@@ -3229,6 +3442,11 @@ std::unique_ptr<juce::Component> StandaloneEditor::createBuilderPage()
                 }
             }
             if (mBuilderPage) mBuilderPage->notifyArrangementChanged();
+
+            doUndoAction (new AudioLibraryAction (std::move (before),
+                                                  captureAudioLibrarySnapshot (true),
+                                                  makeAudioLibraryApply()),
+                          "Audio Properties");
         };
 
         // Owner call 2026-07-11: the grid's per-clip Move shares this exact
@@ -3269,8 +3487,38 @@ std::unique_ptr<juce::Component> StandaloneEditor::createBuilderPage()
                 }
             }
 
-            if (ribbonTabId >= 0 && mRibbon)
-                mRibbon->closeTab (ribbonTabId);
+            if (ribbonTabId < 0 || ! mRibbon) return;
+
+            // QA-UndoCoverage close fix: this auto-close fires INSIDE the
+            // browser's "Delete Audio" gesture (last file on the page), whose
+            // AudioLibraryAction transaction is current -- so the tab capture
+            // RIDES it via manager->perform (no beginNewTransaction): one
+            // Ctrl+Z restores the library, the blocks, AND the tab.  ActionSet
+            // undo runs in reverse, so the tab resurrects first and the
+            // wholesale library restore then overwrites any interim re-adds.
+            PageEntry* entry = nullptr;
+            for (auto* e : mPages)
+                if (e != nullptr && e->ribbonTabId == ribbonTabId) { entry = e; break; }
+            std::unique_ptr<juce::XmlElement> rec =
+                entry != nullptr ? captureTabRecord (*entry) : nullptr;
+
+            mRibbon->closeTab (ribbonTabId);
+
+            if (rec == nullptr) return;
+            const juce::File snap = UndoSnapshotStore::writeNew (
+                rec->toString (juce::XmlElement::TextFormat().singleLine()));
+            auto liveId = std::make_shared<int> (ribbonTabId);
+            auto undoFn = [this, snap, liveId]
+            {
+                if (auto parsed = juce::XmlDocument::parse (snap.loadFileAsString()))
+                {
+                    const int newId = resurrectTabFromRecord (*parsed);
+                    if (newId >= 0) *liveId = newId;
+                }
+            };
+            auto redoFn = [this, liveId] { if (mRibbon) mRibbon->closeTab (*liveId); };
+            mUndoManager.perform (new StructuralOpAction (std::move (undoFn),
+                                                          std::move (redoFn), { snap }));
         };
 
         // G-5 (2026-04-29): page-walk based enumeration of audio files for
@@ -3508,6 +3756,7 @@ void StandaloneEditor::openEventEditor(int blockIdx)
     }
 
     auto* ed = new EventEditor(mProcessor, mUndoManager, mPM.get(), blockIdx, title);
+    ed->setUndoContext (makeUndoContext());   // Task 5 (12-iii): choke-point routing
     ed->onClosed = [this](EventEditor* w)
     {
         // Remove from owned list (this deletes the object)
@@ -3644,6 +3893,10 @@ void StandaloneEditor::applyAutomationAtCurrentPosition()
     // kept automation driving pattern-mode playback after the processor
     // pass was gated.
     if (! mProcessor.isSongMode()) return;
+
+    // QA-UndoCoverage: the stopped-seek APVTS writes and the applicator-lane
+    // invocations below are programmatic -- none of it enters the history.
+    juce::AudioProcessorValueTreeState::ScopedProgrammaticParamWrites spw;
 
     const double beatsPerBar   = 4.0;   // TODO: read from PatternManager time signature
     const double currentBeats  = mPlayHead.getCurrentBeat();
@@ -3783,12 +4036,39 @@ int StandaloneEditor::createAutomationBlock(const juce::String& paramId)
     cpEnd  .timeTicks = 1.f;  cpEnd  .value01 = seedVal;
     block.automationLane.points = { cpStart, cpEnd };
 
+    // QA-UndoCoverage Task 4: block add + template registration = one
+    // transaction (this path had NO undo bracket -- Automate-menu adds were
+    // dirty-only).
+    AutomationTemplateSnapshot before;
+    before.templates      = mPM->getAutomationTemplatesRaw();
+    before.includesBlocks = true;
+    for (int i = 0; i < mPM->getNumBlocks(); ++i) before.blocks.push_back (mPM->getBlock (i));
+
     mPM->addBlock(block);
     // Also register the lane in the persistent template library so the new
     // automation shows up in the Browser panel alongside builder-created
     // blocks. addAutomationTemplate dedupes by paramId, so revisiting the
     // same control won't spam duplicates.
     mPM->addAutomationTemplate(block.automationLane);
+
+    AutomationTemplateSnapshot after;
+    after.templates      = mPM->getAutomationTemplatesRaw();
+    after.includesBlocks = true;
+    for (int i = 0; i < mPM->getNumBlocks(); ++i) after.blocks.push_back (mPM->getBlock (i));
+    doUndoAction (new AutomationTemplateAction (std::move (before), std::move (after),
+        [this] (const AutomationTemplateSnapshot& s)
+        {
+            if (mPM == nullptr) return;
+            mPM->restoreAutomationTemplates (s.templates);
+            if (s.includesBlocks)
+            {
+                while (mPM->getNumBlocks() > 0) mPM->removeBlock (0);
+                for (const auto& b : s.blocks) mPM->addBlock (b);
+            }
+            if (mBuilderPage) mBuilderPage->notifyArrangementChanged();
+        }),
+        "Add Automation");
+
     return mPM->getNumBlocks() - 1;
 }
 
@@ -4575,8 +4855,30 @@ std::unique_ptr<juce::Component> StandaloneEditor::createMixerPage()
     // selectAfter=false: adding a strip must not yank the user off the Mixer,
     // so several can be added in a row.  Paths that DO want navigation (the
     // ribbon empty-state click) leave selectAfter at its default.
-    page->onVoxStripAdded  = [this](int idx) { spawnVoxTabIfMissing  (idx, /*selectAfter*/ false); };
-    page->onInstStripAdded = [this](int idx) { spawnInstTabIfMissing (idx, /*selectAfter*/ false); };
+    // Review fix (2026-08-06): the strip-add cascade is the one choke every
+    // user-initiated Vox/Inst spawn passes through (Mixer Add menu, ribbon
+    // engine rows).  Wrap gated on "actually spawned" -- resurrection/restore
+    // re-enter with the tab already present, so IfMissing returns -1 and no
+    // perform fires during an undo.  Composite flows (Guitars/Basses adds,
+    // Vox/Inst duplicates) suppress this and wrap themselves at the end.
+    page->onVoxStripAdded  = [this](int idx)
+    {
+        const int tabId = spawnVoxTabIfMissing (idx, /*selectAfter*/ false);
+        if (tabId >= 0 && mSuppressAddUndoWrap == 0)
+        {
+            const auto* tab = mRibbon ? mRibbon->getTabById (tabId) : nullptr;
+            wrapTabAddUndo (tabId, "Add " + (tab ? tab->name : juce::String ("Vox Tab")));
+        }
+    };
+    page->onInstStripAdded = [this](int idx)
+    {
+        const int tabId = spawnInstTabIfMissing (idx, /*selectAfter*/ false);
+        if (tabId >= 0 && mSuppressAddUndoWrap == 0)
+        {
+            const auto* tab = mRibbon ? mRibbon->getTabById (tabId) : nullptr;
+            wrapTabAddUndo (tabId, "Add " + (tab ? tab->name : juce::String ("Inst Tab")));
+        }
+    };
     return page;
 }
 
@@ -4903,10 +5205,10 @@ void StandaloneEditor::onAddTabRequest(RibbonTabBar::TabType type)
             };
             p->onDeleteRequested = [this, newId] {
                 if (! mRibbon) return;
-                mRibbon->closeTab (newId);
+                deleteTabWithUndo (newId);
             };
             p->onDuplicateRequested = [this] (const juce::String& clipboardXml) {
-                spawnDuplicateLayerTab (clipboardXml);
+                duplicateTabWithUndo (RibbonTabBar::TabType::Layers, clipboardXml);
             };
             p->onLockChanged = [this, newId, p] {
                 if (mRibbon) mRibbon->setTabLocked (newId, p->isLocked());
@@ -4965,7 +5267,7 @@ void StandaloneEditor::onAddTabRequest(RibbonTabBar::TabType type)
             };
             p->onDeleteRequested = [this, newId] {
                 if (! mRibbon) return;
-                mRibbon->closeTab (newId);
+                deleteTabWithUndo (newId);
             };
             // Instrument lanes (ruling 2-b): registration re-runs on every
             // param-count change (bridged lists arrive async).  The Automate
@@ -4996,10 +5298,10 @@ void StandaloneEditor::onAddTabRequest(RibbonTabBar::TabType type)
             };
             p->onDeleteRequested = [this, newId] {
                 if (! mRibbon) return;
-                mRibbon->closeTab (newId);
+                deleteTabWithUndo (newId);
             };
             p->onDuplicateRequested = [this] (const juce::String& clipboardXml) {
-                spawnDuplicateBassTab (clipboardXml);
+                duplicateTabWithUndo (RibbonTabBar::TabType::Bass, clipboardXml);
             };
             p->onLockChanged = [this, newId, p] {
                 if (mRibbon) mRibbon->setTabLocked (newId, p->isLocked());
@@ -5043,10 +5345,10 @@ void StandaloneEditor::onAddTabRequest(RibbonTabBar::TabType type)
             };
             p->onDeleteRequested = [this, newId] {
                 if (! mRibbon) return;
-                mRibbon->closeTab (newId);
+                deleteTabWithUndo (newId);
             };
             p->onDuplicateRequested = [this] (const juce::String& clipboardXml) {
-                spawnDuplicateDrumTab (clipboardXml);
+                duplicateTabWithUndo (RibbonTabBar::TabType::Drums, clipboardXml);
             };
             p->onLockChanged = [this, newId, p] {
                 if (mRibbon) mRibbon->setTabLocked (newId, p->isLocked());
@@ -6627,10 +6929,15 @@ void StandaloneEditor::showPageForTab(int tabId)
                 mPageMenuBar->setSwingKnobSlot (sb.getMix, sb.setMix, sb.getTrunc, sb.setTrunc);
             }
 
-            // Jeff, 2026-08-04: the Program selector + Player Preset button are
-            // back on the page's own Aria title band (BaySickRustyDrumsPage
-            // hosts them), reverting T3's move to the window strip -- the strip
-            // could not fit them and half ended up behind the window chrome.
+            // Jeff, 2026-08-06: Program selector + Player Preset button on the
+            // WINDOW title strip (reverses 2026-08-04 -- the Aria band now
+            // hosts the section tab row instead).  addExtraRightComponent lays
+            // out INSIDE the menu bar, whose right edge already excludes the
+            // close/fill chrome -- the T3 attempt failed by laying out against
+            // the whole window and sliding behind the chrome; this mount
+            // cannot reach it.
+            if (auto* pb = rp->getPlayerPresetButton()) mPageMenuBar->addExtraRightComponent (pb, 110);
+            if (auto* pc = rp->getProgramCombo())       mPageMenuBar->addExtraRightComponent (pc, 160);
 
             // 2026-05-05 consolidation: Save / Load Page Preset goes through
             // the unified PagePresetIO API (PageKind::RustyDrums).  Captures
@@ -6919,6 +7226,7 @@ void StandaloneEditor::showPageForTab(int tabId)
                             if (! safeThis) return;
                             if (r >= 101 && r <= 103)
                             {
+                                beginParamUndoGesture (safeThis->mProcessor.apvts, "master_pan_law"); // Task 6 (12-iv)
                                 if (auto* param = safeThis->mProcessor.apvts.getParameter ("master_pan_law"))
                                     param->setValueNotifyingHost (
                                         param->convertTo0to1 ((float) (r - 101)));
@@ -7905,9 +8213,9 @@ juce::Component* StandaloneEditor::spawnLayerTabFromTemplate (const juce::String
     };
     lp->onDeleteRequested = [this, newId] {
         if (! mRibbon) return;
-        mRibbon->closeTab (newId);
+        deleteTabWithUndo (newId);
     };
-    lp->onDuplicateRequested = [this] (const juce::String& xml) { spawnDuplicateLayerTab (xml); };
+    lp->onDuplicateRequested = [this] (const juce::String& xml) { duplicateTabWithUndo (RibbonTabBar::TabType::Layers, xml); };
     lp->onLockChanged = [this, newId, lp] {
         if (mRibbon) mRibbon->setTabLocked (newId, lp->isLocked());
     };
@@ -7962,9 +8270,9 @@ juce::Component* StandaloneEditor::spawnBassTabFromTemplate (const juce::String&
     };
     bp->onDeleteRequested = [this, newId] {
         if (! mRibbon) return;
-        mRibbon->closeTab (newId);
+        deleteTabWithUndo (newId);
     };
-    bp->onDuplicateRequested = [this] (const juce::String& xml) { spawnDuplicateBassTab (xml); };
+    bp->onDuplicateRequested = [this] (const juce::String& xml) { duplicateTabWithUndo (RibbonTabBar::TabType::Bass, xml); };
     bp->onLockChanged = [this, newId, bp] {
         if (mRibbon) mRibbon->setTabLocked (newId, bp->isLocked());
     };
@@ -8380,12 +8688,97 @@ void StandaloneEditor::loadKit (const juce::File& kitXml)
                 auto* se = safeThis.getComponent();
                 if (dontAsk && dontAsk->getToggleState() && se->mProjectManager)
                     se->mProjectManager->setSkipKitReplacePrompt (true);
-                se->loadKitImpl (capturedKit);   // proceed (skip prompt this time)
+                se->loadKitWithUndo (capturedKit);   // proceed (skip prompt this time)
             }), false);
         return;
     }
     // No existing drums (or prompt opted out) - load directly.
+    loadKitWithUndo (kitXml);
+}
+
+// QA-UndoCoverage Task 7: one kit load = ONE transaction.  Captures every
+// existing DrumPage (Rusty excluded, matching the loader's own filter) before
+// the teardown sweep and the created set after; undo closes the created tabs
+// and resurrects the captured ones, redo the inverse.  Redo re-spawns from
+// the post-load snapshots rather than re-running the loader (no prompt, no
+// teardown asymmetry, exact state).  Expect a load wait, not an instant
+// snap-back -- accepted async-load property.
+void StandaloneEditor::loadKitWithUndo (const juce::File& kitXml)
+{
+    struct TabRec { int pageIdx; juce::String name; juce::File snap; };
+
+    auto captureDrumTabs = [this] (std::vector<TabRec>& out, std::vector<int>* idsOut)
+    {
+        for (auto* e : mPages)
+        {
+            if (e == nullptr || e->type != RibbonTabBar::TabType::Drums) continue;
+            auto* dp = dynamic_cast<DrumPage*> (e->component.get());
+            if (dp == nullptr) continue;   // Rusty is Drums-typed but not a DrumPage
+            if (idsOut != nullptr) idsOut->push_back (e->ribbonTabId);
+            const juce::String xml = dp->exportPagePresetXml();
+            juce::String name;
+            if (mRibbon)
+                if (const auto* tab = mRibbon->getTabById (e->ribbonTabId))
+                    name = tab->name;
+            // Jeff ruling 2026-08-06: an engine-less tab records with NO
+            // snapshot so undo/redo re-create it EMPTY (it used to be
+            // skipped, so a pre-existing empty Drums tab vanished on undo of
+            // a kit load).  spawnDuplicateDrumTab tolerates the empty xml.
+            out.push_back ({ dp->getPageIndex(), name,
+                             xml.isEmpty() ? juce::File()
+                                           : UndoSnapshotStore::writeNew (xml) });
+        }
+    };
+
+    auto before = std::make_shared<std::vector<TabRec>>();
+    std::vector<int> preIds;
+    captureDrumTabs (*before, &preIds);
+
     loadKitImpl (kitXml);
+
+    auto after       = std::make_shared<std::vector<TabRec>>();
+    auto liveAfterIds = std::make_shared<std::vector<int>>();
+    captureDrumTabs (*after, liveAfterIds.get());
+
+    // Failed/early-out load: the tab set is unchanged -- no transaction.
+    if (*liveAfterIds == preIds)
+    {
+        for (auto& r : *before) r.snap.deleteFile();
+        for (auto& r : *after)  r.snap.deleteFile();
+        return;
+    }
+
+    juce::Array<juce::File> owned;
+    for (auto& r : *before) if (r.snap != juce::File()) owned.add (r.snap);
+    for (auto& r : *after)  if (r.snap != juce::File()) owned.add (r.snap);
+
+    auto liveBeforeIds = std::make_shared<std::vector<int>>();
+    auto undoFn = [this, before, liveAfterIds, liveBeforeIds]
+    {
+        for (int id : *liveAfterIds) if (mRibbon) mRibbon->closeTab (id);
+        liveAfterIds->clear();
+        liveBeforeIds->clear();
+        for (auto& r : *before)
+        {
+            const int id = spawnDuplicateDrumTab (r.snap.loadFileAsString(),
+                                                  r.pageIdx, r.name, /*fullPreset*/ true);
+            if (id >= 0) liveBeforeIds->push_back (id);
+        }
+    };
+    auto redoFn = [this, after, liveAfterIds, liveBeforeIds]
+    {
+        for (int id : *liveBeforeIds) if (mRibbon) mRibbon->closeTab (id);
+        liveBeforeIds->clear();
+        liveAfterIds->clear();
+        for (auto& r : *after)
+        {
+            const int id = spawnDuplicateDrumTab (r.snap.loadFileAsString(),
+                                                  r.pageIdx, r.name, /*fullPreset*/ true);
+            if (id >= 0) liveAfterIds->push_back (id);
+        }
+    };
+    doUndoAction (new StructuralOpAction (std::move (undoFn), std::move (redoFn), owned),
+                  "Load Kit " + kitXml.getFileNameWithoutExtension());
 }
 
 void StandaloneEditor::loadKitImpl (const juce::File& kitXml)
@@ -8527,10 +8920,10 @@ void StandaloneEditor::loadKitImpl (const juce::File& kitXml)
         };
         dp->onDeleteRequested = [this, newId] {
             if (! mRibbon) return;
-            mRibbon->closeTab (newId);
+            deleteTabWithUndo (newId);
         };
         dp->onDuplicateRequested = [this] (const juce::String& xml) {
-            spawnDuplicateDrumTab (xml);
+            duplicateTabWithUndo (RibbonTabBar::TabType::Drums, xml);
         };
         dp->onLockChanged = [this, newId, dp] {
             if (mRibbon) mRibbon->setTabLocked (newId, dp->isLocked());
@@ -8944,8 +9337,18 @@ void StandaloneEditor::showRenamePatternDialog()
                 if (r != 1) return;
                 const auto newName = aw->getTextEditorContents ("name").trim();
                 if (newName.isEmpty()) return;
+                const juce::String oldName = mPM->getPattern (idx).name;
                 mPM->renamePattern (idx, newName);
                 refreshPatternBox();
+                if (oldName != newName)
+                    doUndoAction (new PatternRenameAction (idx, oldName, newName,
+                        [this] (int i, const juce::String& n)
+                        {
+                            if (!mPM || i < 0 || i >= mPM->getNumPatterns()) return;
+                            mPM->renamePattern (i, n);
+                            refreshPatternBox();
+                        }),
+                      "Rename Pattern");
             }),
         true);
 }
@@ -8974,8 +9377,13 @@ void StandaloneEditor::jumpToNextEmptyPattern()
 void StandaloneEditor::createNewPattern()
 {
     if (mPM == nullptr) return;
-    mPM->addPattern();
-    mPM->setCurrentPattern (mPM->getNumPatterns() - 1);
+    auto* grid = mBuilderPage ? mBuilderPage->getGrid() : nullptr;
+    auto op = [this] {
+        mPM->addPattern();
+        mPM->setCurrentPattern (mPM->getNumPatterns() - 1);
+    };
+    if (grid) grid->performPatternSliceOp ("Add Pattern", op);
+    else      op();
     refreshPatternBox();
 }
 
@@ -9089,6 +9497,72 @@ void StandaloneEditor::addBaySickRustyDrumsTab()
                                            rawPage->getEngineType());
     };
 
+    // QA-UndoCoverage rulings 1a/3a: one Rusty structural gesture (program
+    // switch / player-preset load) = one transaction.  Composite capture:
+    // the engine blob (kit path + CC state, the captureTabRecord Rusty
+    // record) + the pattern slice the program teardown clears.  Restore
+    // re-enters through resurrectTabFromRecord, whose addBaySickRustyDrumsTab
+    // no-ops while the tab is alive -- so it is a pure state restore here.
+    rawPage->onWrapStructuralOp =
+        [this] (const juce::String& label, std::function<void()> op)
+    {
+        PageEntry* e = nullptr;
+        for (auto* pe : mPages)
+            if (pe != nullptr && dynamic_cast<BaySickRustyDrumsPage*> (pe->component.get()))
+            { e = pe; break; }
+        auto* grid = mBuilderPage ? mBuilderPage->getGrid() : nullptr;
+        if (e == nullptr || grid == nullptr) { op(); return; }
+
+        auto beforeRec = captureTabRecord (*e);
+        PatternListSnapshot beforeSlice = grid->capturePatternSlice();
+        op();
+        auto afterRec = captureTabRecord (*e);
+        PatternListSnapshot afterSlice = grid->capturePatternSlice();
+        if (beforeRec == nullptr || afterRec == nullptr) return;
+
+        const auto fmt = juce::XmlElement::TextFormat().singleLine();
+        const juce::String beforeStr = beforeRec->toString (fmt);
+        const juce::String afterStr  = afterRec->toString (fmt);
+        // Review fix (2026-08-06): re-loading the current preset is a no-op --
+        // don't mint a phantom history row + two snapshot files (the kit-load
+        // and chain-swap wraps carry the same guard).  Record-string equality
+        // only; a roll-touching op with an unchanged engine record would slip
+        // through, but both wrapped gestures rewrite the record when they
+        // touch anything.
+        if (beforeStr == afterStr) return;
+        const juce::File beforeF = UndoSnapshotStore::writeNew (beforeStr);
+        const juce::File afterF  = UndoSnapshotStore::writeNew (afterStr);
+        auto gridSp = juce::Component::SafePointer<ArrangementGrid> (grid);
+        auto apply = [this, gridSp] (const juce::File& f, const PatternListSnapshot& slice)
+        {
+            if (auto parsed = juce::XmlDocument::parse (f.loadFileAsString()))
+            {
+                // Ruling 1A (2026-08-06): a record captured BEFORE the
+                // session's first program pick has no engine blob.  Restoring
+                // it means returning the LIVE page to the empty player --
+                // resurrectTabFromRecord cannot express that (it no-ops on
+                // empty engineData while the tab is alive), so unload
+                // directly.
+                if (parsed->getStringAttribute ("engineData").isEmpty())
+                {
+                    for (auto* pe : mPages)
+                        if (auto* livePage = pe != nullptr
+                                ? dynamic_cast<BaySickRustyDrumsPage*> (pe->component.get())
+                                : nullptr)
+                        { livePage->unloadToNone(); break; }
+                }
+                else
+                    resurrectTabFromRecord (*parsed);
+            }
+            if (gridSp != nullptr) gridSp->applyPatternSlice (slice);
+        };
+        doUndoAction (new StructuralOpAction (
+                          [apply, beforeF, beforeSlice] { apply (beforeF, beforeSlice); },
+                          [apply, afterF, afterSlice]   { apply (afterF, afterSlice); },
+                          { beforeF, afterF }),
+                      label);
+    };
+
     // J-7a (2026-05-03): NO ribbon-rename hookup for this engine.
     // BaySickRustyDrums is a singleton - its ribbon tab name represents the
     // engine's identity, not the active kit/program.  Layer/Bass/Drum/Clip
@@ -9115,14 +9589,15 @@ void StandaloneEditor::addBaySickRustyDrumsTab()
             // path in StandaloneEditor::onTabClosed handles the rest:
             // destroying the page (and its SliderParameterAttachment-
             // bearing ARIA widgets) first, then the engine.  Order matters.
-            if (safeThis->mRibbon) safeThis->mRibbon->closeTab (ribbonId);
+            if (safeThis->mRibbon) safeThis->deleteTabWithUndo (ribbonId);
         };
 
+        // "This cannot be undone." retired 2026-08-06 (Jeff ruling 2a): the
+        // delete is one undoable transaction now.
         const juce::String warning =
             "Removing this tab will tear down the player, every Rusty mixer "
             "strip and the RustyDrums Bus, every Rusty effects rack and EQ, "
-            "and clear the Rusty piano roll on every pattern.  This cannot "
-            "be undone.";
+            "and clear the Rusty piano roll on every pattern.";
 
         // QA-ProjectSave Task 11 (docket 16): FND-1 completion.  A dirty page
         // gets the same 3-button prompt as the other six page types; the save
@@ -9227,7 +9702,11 @@ void StandaloneEditor::addBaySickGuitarsTab()
 
     // Step 1: spawn the mixer strip.  Synchronously fires onInstStripAdded →
     // spawnInstTabIfMissing, which creates a default LiveInput InstPage.
+    // Review fix (2026-08-06): cascade wrap suppressed -- it would capture
+    // the pre-Guitars LiveInput page; this flow wraps itself at the end.
+    ++mSuppressAddUndoWrap;
     mMixerPage->addInstChannelAtIndex (newIdx);
+    --mSuppressAddUndoWrap;
 
     // Step 2: locate the just-spawned InstPage so we can flip its source mode.
     InstPage* ip = nullptr;
@@ -9304,6 +9783,10 @@ void StandaloneEditor::addBaySickGuitarsTab()
         mRibbon->selectTab (ribbonId);
         onTabSelected (ribbonId);
     }
+
+    // Review fix (2026-08-06): whole 8-step add as one transaction, captured
+    // AFTER the source flip so the record carries BaySickGuitars.
+    wrapTabAddUndo (ribbonId, "Add " + tabName);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -9329,7 +9812,11 @@ void StandaloneEditor::addBaySickBassesTab()
         if (! idxTaken[(size_t) i]) { newIdx = i; break; }
     if (newIdx < 0) return;
 
+    // Review fix (2026-08-06): cascade wrap suppressed -- it would capture
+    // the pre-Basses LiveInput page; this flow wraps itself at the end.
+    ++mSuppressAddUndoWrap;
     mMixerPage->addInstChannelAtIndex (newIdx);
+    --mSuppressAddUndoWrap;
 
     InstPage* ip = nullptr;
     int       ribbonId = -1;
@@ -9386,6 +9873,10 @@ void StandaloneEditor::addBaySickBassesTab()
         mRibbon->selectTab (ribbonId);
         onTabSelected (ribbonId);
     }
+
+    // Review fix (2026-08-06): whole 8-step add as one transaction, captured
+    // AFTER the source flip so the record carries BaySickBasses.
+    wrapTabAddUndo (ribbonId, "Add " + tabName);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -9508,6 +9999,7 @@ void StandaloneEditor::addClipPageFromFile (const juce::File& src)
     // SC-G: register the library entry owned by the new Clips page, then create
     // the page + strip -- NO grid block.  The Builder browser repopulates via
     // its diff-based timer once the audio library changes.
+    AudioLibrarySnapshot libBefore = captureAudioLibrarySnapshot (false);
     const int ownerCh = MixerChannelIds::audioInsert (newRow);
     mPM->addAudioToLibrary (storedPath, {}, ownerCh);
     if (mBuilderPage) mBuilderPage->notifyArrangementChanged();
@@ -9515,15 +10007,28 @@ void StandaloneEditor::addClipPageFromFile (const juce::File& src)
     createClipStripAndPage (newRow, storedPath);
 
     // User explicitly clicked "+ Add New Clip" -> navigate to the new tab.
+    int newTabId = -1;
     for (auto* entry : mPages)
         if (entry && entry->type == RibbonTabBar::TabType::Clip)
             if (auto* cp = dynamic_cast<ClipsPage*> (entry->component.get()))
                 if (cp->getPageIndex() == newRow && mRibbon)
                 {
+                    newTabId = entry->ribbonTabId;
                     mRibbon->selectTab (entry->ribbonTabId);
                     onTabSelected (entry->ribbonTabId);
                     break;
                 }
+
+    // Review fix (2026-08-06): the add gesture is ONE transaction -- library
+    // entry + tab spawn.  Library action first: undo runs the set in reverse
+    // (tab closes, then the entry vanishes) and redo restores the entry
+    // BEFORE the resurrect that path-matches against it -- the same ordering
+    // deleteTabWithUndo uses.
+    doUndoAction (new AudioLibraryAction (std::move (libBefore),
+                                          captureAudioLibrarySnapshot (false),
+                                          makeAudioLibraryApply()),
+                  "Add " + src.getFileNameWithoutExtension());
+    wrapTabAddUndo (newTabId, {}, /*asRider*/ true);
 
     ClipDropDiag::log ("AddNewClip OK",
                        "row=" + juce::String (newRow) + " storedPath=" + storedPath + " (page + strip, no grid block)");
@@ -9623,7 +10128,7 @@ void StandaloneEditor::spawnClipsTabIfMissing (int audioRow, const juce::String&
             for (auto* entry : mPages)
                 if (entry && entry->component.get() == cpRaw)
                     { ribbonId = entry->ribbonTabId; break; }
-        if (ribbonId >= 0 && mRibbon) mRibbon->closeTab (ribbonId);
+        if (ribbonId >= 0 && mRibbon) deleteTabWithUndo (ribbonId);
     };
     cpRaw->onLockChanged = [this, ribbonId = -1, cpRaw]() mutable
     {
@@ -9643,6 +10148,7 @@ void StandaloneEditor::spawnClipsTabIfMissing (int audioRow, const juce::String&
     cpRaw->onSetChokeGroup = [this, audioRow] (int g)
     {
         const juce::String pid = "mixer_audio_" + juce::String (audioRow) + "_chokeGroup";
+        beginParamUndoGesture (mProcessor.apvts, pid); // Task 6 (12-iv)
         if (auto* p = mProcessor.apvts.getParameter (pid))
             p->setValueNotifyingHost (
                 p->getNormalisableRange().convertTo0to1 ((float) juce::jlimit (0, 16, g)));
@@ -10028,16 +10534,16 @@ void StandaloneEditor::unregisterInstSourcePianoRoll (InstPage* ip)
 // longer reachable -- the tab itself leaves and returns through "+".  This is
 // the loud reversal of docket 18's Task 1 shape that the batch plan calls for.
 
-void StandaloneEditor::spawnVoxTabIfMissing (int voxIdx, bool selectAfter)
+int StandaloneEditor::spawnVoxTabIfMissing (int voxIdx, bool selectAfter)
 {
-    if (voxIdx < 0 || voxIdx >= kMaxVoxPages) return;
+    if (voxIdx < 0 || voxIdx >= kMaxVoxPages) return -1;
 
     // Idempotent on pageIndex.
     for (auto* entry : mPages)
     {
         if (! entry || entry->type != RibbonTabBar::TabType::Vox) continue;
         if (auto* vp = dynamic_cast<VoxPage*> (entry->component.get()))
-            if (vp->getPageIndex() == voxIdx) return;
+            if (vp->getPageIndex() == voxIdx) return -1;
     }
 
     const juce::String tabName = nextVoxTabName();   // QA-D STATE-02
@@ -10047,7 +10553,7 @@ void StandaloneEditor::spawnVoxTabIfMissing (int voxIdx, bool selectAfter)
     auto* cpRaw = cpHolder.get();
     cpRaw->setTabName (tabName);
     cpRaw->setProcessor (&mProcessor);   // G-7: Page Preset save/load access
-    cpRaw->setUndoContext (makeUndoContext());   // QA-Fd 9a: pitch editor global undo
+    cpRaw->setUndoContext (makeUndoContext ("vox" + juce::String (voxIdx)));   // QA-Fd 9a: pitch editor global undo
     // QA-Fd #7: pitch editor playhead follows the main transport (incl. the
     // stop-reset seek) -- getCurrentBeat is the UI-safe playhead accessor.
     cpRaw->setTransportBeatProvider ([this] { return mPlayHead.getCurrentBeat(); });
@@ -10126,7 +10632,7 @@ void StandaloneEditor::spawnVoxTabIfMissing (int voxIdx, bool selectAfter)
             for (auto* entry : mPages)
                 if (entry && entry->component.get() == cpRaw)
                     { ribbonId = entry->ribbonTabId; break; }
-        if (ribbonId >= 0 && mRibbon) mRibbon->closeTab (ribbonId);
+        if (ribbonId >= 0 && mRibbon) deleteTabWithUndo (ribbonId);
     };
     cpRaw->onLockChanged = [this, ribbonId = -1, cpRaw]() mutable
     {
@@ -10154,17 +10660,18 @@ void StandaloneEditor::spawnVoxTabIfMissing (int voxIdx, bool selectAfter)
         mRibbon->selectTab (newId);
         onTabSelected (newId);
     }
+    return newId;
 }
 
-void StandaloneEditor::spawnInstTabIfMissing (int instIdx, bool selectAfter)
+int StandaloneEditor::spawnInstTabIfMissing (int instIdx, bool selectAfter)
 {
-    if (instIdx < 0 || instIdx >= kMaxInstPages) return;
+    if (instIdx < 0 || instIdx >= kMaxInstPages) return -1;
 
     for (auto* entry : mPages)
     {
         if (! entry || entry->type != RibbonTabBar::TabType::Inst) continue;
         if (auto* ip = dynamic_cast<InstPage*> (entry->component.get()))
-            if (ip->getPageIndex() == instIdx) return;
+            if (ip->getPageIndex() == instIdx) return -1;
     }
 
     const juce::String tabName = nextInstTabName();   // QA-D STATE-02
@@ -10173,6 +10680,7 @@ void StandaloneEditor::spawnInstTabIfMissing (int instIdx, bool selectAfter)
     auto cpHolder = std::make_unique<InstPage> (mProcessor, instIdx);
     auto* cpRaw = cpHolder.get();
     cpRaw->setTabName (tabName);
+    cpRaw->setUndoContext (makeUndoContext ("inst" + juce::String (instIdx)));   // Task 7
     cpRaw->setProcessor (&mProcessor);   // G-7: Page Preset save/load access
     cpRaw->setBusActiveQuery ([this] (int chId)
     {
@@ -10212,7 +10720,7 @@ void StandaloneEditor::spawnInstTabIfMissing (int instIdx, bool selectAfter)
             for (auto* entry : mPages)
                 if (entry && entry->component.get() == cpRaw)
                     { ribbonId = entry->ribbonTabId; break; }
-        if (ribbonId >= 0 && mRibbon) mRibbon->closeTab (ribbonId);
+        if (ribbonId >= 0 && mRibbon) deleteTabWithUndo (ribbonId);
     };
     cpRaw->onLockChanged = [this, ribbonId = -1, cpRaw]() mutable
     {
@@ -10262,6 +10770,7 @@ void StandaloneEditor::spawnInstTabIfMissing (int instIdx, bool selectAfter)
         mRibbon->selectTab (newId);
         onTabSelected (newId);
     }
+    return newId;
 }
 
 // G-4 (2026-04-28): registerVoxPianoRoll / registerInstPianoRoll DELETED.
@@ -10300,7 +10809,11 @@ void StandaloneEditor::spawnDuplicateVoxTab (VoxPage* sourceVp)
     if (newIdx < 0) return;
 
     // Create the mixer strip - cascade fires onVoxStripAdded → spawnVoxTabIfMissing(newIdx, false).
+    // Review fix (2026-08-06): cascade wrap suppressed -- it would capture the
+    // page BEFORE the cloned state lands; wrap at the end instead.
+    ++mSuppressAddUndoWrap;
     mMixerPage->addVoxChannelAtIndex (newIdx);
+    --mSuppressAddUndoWrap;
 
     // Apply state to the freshly-spawned page + select the new tab.
     int newRibbonId = -1;
@@ -10321,6 +10834,10 @@ void StandaloneEditor::spawnDuplicateVoxTab (VoxPage* sourceVp)
     {
         mRibbon->selectTab (newRibbonId);
         onTabSelected (newRibbonId);
+
+        const auto* tab = mRibbon->getTabById (newRibbonId);
+        wrapTabAddUndo (newRibbonId,
+                        "Duplicate " + (tab ? tab->name : juce::String ("Vox Tab")));
     }
 }
 
@@ -10345,7 +10862,10 @@ void StandaloneEditor::spawnDuplicateInstTab (InstPage* sourceIp)
         if (! idxTaken[(size_t) i]) { newIdx = i; break; }
     if (newIdx < 0) return;
 
+    // Review fix (2026-08-06): same suppress-then-wrap as the Vox duplicate.
+    ++mSuppressAddUndoWrap;
     mMixerPage->addInstChannelAtIndex (newIdx);
+    --mSuppressAddUndoWrap;
 
     int newRibbonId = -1;
     for (auto* entry : mPages)
@@ -10365,6 +10885,10 @@ void StandaloneEditor::spawnDuplicateInstTab (InstPage* sourceIp)
     {
         mRibbon->selectTab (newRibbonId);
         onTabSelected (newRibbonId);
+
+        const auto* tab = mRibbon->getTabById (newRibbonId);
+        wrapTabAddUndo (newRibbonId,
+                        "Duplicate " + (tab ? tab->name : juce::String ("Inst Tab")));
     }
 }
 
@@ -10712,19 +11236,18 @@ void StandaloneEditor::menuItemSelected(int id, int)
         break;
     case 407: showLastUsedPianoRoll(); break;   // Phase B-1: Piano Roll (F11)
 
-    // Undo history size - also cap the label list
-    case 510: mUndoHistorySize = 100;  mUndoManager.setMaxNumberOfStoredUnits(100,  30);
-              while ((int)mHistoryLabels.size() > 100)  mHistoryLabels.pop_front();
-              mHistoryCursor = juce::jmin(mHistoryCursor, 100);  break;
-    case 511: mUndoHistorySize = 250;  mUndoManager.setMaxNumberOfStoredUnits(250,  30);
-              while ((int)mHistoryLabels.size() > 250)  mHistoryLabels.pop_front();
-              mHistoryCursor = juce::jmin(mHistoryCursor, 250);  break;
-    case 512: mUndoHistorySize = 500;  mUndoManager.setMaxNumberOfStoredUnits(500,  30);
-              while ((int)mHistoryLabels.size() > 500)  mHistoryLabels.pop_front();
-              mHistoryCursor = juce::jmin(mHistoryCursor, 500);  break;
-    case 513: mUndoHistorySize = 1000; mUndoManager.setMaxNumberOfStoredUnits(1000, 30);
-              while ((int)mHistoryLabels.size() > 1000) mHistoryLabels.pop_front();
-              mHistoryCursor = juce::jmin(mHistoryCursor, 1000); break;
+    // Undo history size -- HONEST transaction counts (Jeff ruling 2026-08-06):
+    // maxUnits = 1 keeps the unit test permanently over, so
+    // minimumTransactionsToKeep IS the retained count (the old (n, 30) shape
+    // collapsed every setting to ~30).  Labels rebuild from the manager.
+    case 510: mUndoHistorySize = 100;  mUndoManager.setMaxNumberOfStoredUnits(1, 100);
+              rebuildHistoryLabels();  break;
+    case 511: mUndoHistorySize = 250;  mUndoManager.setMaxNumberOfStoredUnits(1, 250);
+              rebuildHistoryLabels();  break;
+    case 512: mUndoHistorySize = 500;  mUndoManager.setMaxNumberOfStoredUnits(1, 500);
+              rebuildHistoryLabels();  break;
+    case 513: mUndoHistorySize = 1000; mUndoManager.setMaxNumberOfStoredUnits(1, 1000);
+              rebuildHistoryLabels();  break;
 
     // QA-Fe2: File Settings (take-type checkboxes + De-noise strength)
     case 502:
@@ -10997,71 +11520,184 @@ bool StandaloneEditor::keyStateChanged (bool /*isKeyDown*/)
 // Undo dispatch
 // ─────────────────────────────────────────────────────────────────────────────
 bool StandaloneEditor::doUndoAction(juce::UndoableAction* action,
-                                    const juce::String&    label)
+                                    const juce::String&    label,
+                                    const juce::String&    ownerKey)
 {
-    // Trim any future (redo) labels from the cursor onward
-    if (mHistoryCursor < (int)mHistoryLabels.size())
-        mHistoryLabels.erase(mHistoryLabels.begin() + mHistoryCursor,
-                             mHistoryLabels.end());
+    const juce::String name = (ownerKey.isEmpty() || ownerKey == "app")
+                                  ? label : ownerKey + "|" + label;
+    // Gesture-merge fix (2026-08-06): file pending param flushes into THEIR
+    // transaction before this boundary moves (see UndoBracket.h).
+    juce::AudioProcessorValueTreeState::flushAllLiveInstancesToValueTrees();
+    mUndoManager.beginNewTransaction(name);
+    bool ok = mUndoManager.perform(action, name);
 
-    mHistoryLabels.push_back(label);
-    if ((int)mHistoryLabels.size() > mUndoHistorySize)
-        mHistoryLabels.pop_front();
-    mHistoryCursor = (int)mHistoryLabels.size();
+    // QA-UndoCoverage Task 8: the P5 markDirty is GONE -- dirty is now the
+    // transaction-pointer mismatch, fed by the ChangeListener derivation.
 
-    mUndoManager.beginNewTransaction(label);
-    bool ok = mUndoManager.perform(action, label);
-
-    // P5: undoable edits mark the project dirty.
-    if (ok && mProjectManager) mProjectManager->markDirty();
-
+    // perform() already broadcast a change message; rebuild synchronously so
+    // the immediate refresh below paints the new row (the async listener pass
+    // would land one message-loop tick later).
+    rebuildHistoryLabels();
     if (mHistoryWindow) mHistoryWindow->refresh();
     return ok;
 }
 
 void StandaloneEditor::globalUndo()
 {
-    // J-8 stage 2 (2026-05-04): if the BaySickRustyDrums page is visible AND
-    // its engine UndoManager has a pending action, prefer that - player CC
-    // edits stack into the engine's APVTS undo manager (separate from the
-    // editor's main mUndoManager).  This makes Ctrl+Z reverse the most recent
-    // ARIA panel knob edit when you're on the player tab.
-    if (auto* rp = dynamic_cast<BaySickRustyDrumsPage*> (mVisiblePage))
-    {
-        juce::ignoreUnused (rp);
-        if (auto* eng = mProcessor.getBaySickRustyDrums())
-        {
-            auto& engUm = eng->getUndoManager();
-            if (engUm.canUndo()) { engUm.undo(); return; }
-        }
-    }
-
-    // 2026-04-26: decrement unconditionally (matches the original behaviour
-    // before my conditional-on-undo-return tweak which left the cursor stuck
-    // at the end on the user's machine).  Cursor + UndoManager can drift on
-    // no-op undos, but the user-visible cursor movement matters more.
-    if (mHistoryCursor > 0) --mHistoryCursor;
+    // Cursor maintenance retired (QA-UndoCoverage Task 3): the label rebuild
+    // derives the cursor from the manager's real undo depth, so no-op undos
+    // can no longer drift it.  Task 8: markDirty removed -- undo can now
+    // CLEAN the project (the tracker walks the pointer back to the save
+    // point), which is the entire point of the absorbed DirtyFlag spec.
+    // Gesture-merge fix (2026-08-06): a still-pending knob flush must land in
+    // its own transaction BEFORE the undo -- so "undo right after a tweak"
+    // undoes THAT tweak, and nothing leaks into the post-undo auto-begin.
+    juce::AudioProcessorValueTreeState::flushAllLiveInstancesToValueTrees();
     mUndoManager.undo();
-    if (mProjectManager) mProjectManager->markDirty();
+    rebuildHistoryLabels();
     if (mHistoryWindow) mHistoryWindow->refresh();
 }
 
 void StandaloneEditor::globalRedo()
 {
-    if (auto* rp = dynamic_cast<BaySickRustyDrumsPage*> (mVisiblePage))
-    {
-        juce::ignoreUnused (rp);
-        if (auto* eng = mProcessor.getBaySickRustyDrums())
-        {
-            auto& engUm = eng->getUndoManager();
-            if (engUm.canRedo()) { engUm.redo(); return; }
-        }
-    }
-
-    if (mHistoryCursor < (int)mHistoryLabels.size()) ++mHistoryCursor;
+    juce::AudioProcessorValueTreeState::flushAllLiveInstancesToValueTrees();
     mUndoManager.redo();
-    if (mProjectManager) mProjectManager->markDirty();
+    rebuildHistoryLabels();
     if (mHistoryWindow) mHistoryWindow->refresh();
+}
+
+void StandaloneEditor::changeListenerCallback (juce::ChangeBroadcaster* source)
+{
+    if (source != &mUndoManager) return;
+
+    // QA-UndoCoverage Task 8: derive transaction events for the dirty tracker
+    // from the manager's depth deltas.  This is the ONE feed point -- choke
+    // transactions and attachment gestures both broadcast, so counting here
+    // covers every source exactly once.  ChangeBroadcaster coalesces rapid
+    // messages; deltas are applied by COUNT so a coalesced window of N new
+    // transactions still advances the pointer by N.  (A window mixing undo
+    // with a new transaction nets ambiguously -- physically requires two
+    // user gestures inside one message-loop dispatch, which mouse-driven
+    // gestures cannot produce.)
+    const int u = mUndoManager.getUndoDescriptions().size();
+    const int r = mUndoManager.getRedoDescriptions().size();
+    const juce::String top = mUndoManager.getUndoDescription();
+    auto& trk = mProcessor.mTxTracker;
+    const bool historyCleared = (u == 0 && r == 0
+                                  && (mPrevUndoDepth > 0 || mPrevRedoDepth > 0));
+
+    if (historyCleared)
+    {
+        // clearUndoHistory (load boundary / editor teardown).  The load path
+        // resets the tracker itself (Task 9); nothing to derive here.
+    }
+    else if (u < mPrevUndoDepth && r > mPrevRedoDepth)
+        trk.onUndo (mPrevUndoDepth - u);
+    else if (u > mPrevUndoDepth && r < mPrevRedoDepth)
+        trk.onRedo (u - mPrevUndoDepth);
+    else if (u > mPrevUndoDepth)
+        trk.onNewTransactions (u - mPrevUndoDepth);
+    else if (mPrevRedoDepth > 0 && r == 0)
+        trk.onNewTransactions (1);            // future stashed by a new perform
+    else if (u == mPrevUndoDepth && r == 0 && mPrevRedoDepth == 0
+             && top != mPrevTopUndoName && top.isNotEmpty())
+        trk.onNewTransactions (1);            // depth-cap drop + new transaction
+    // else: append/coalesce inside the current transaction -- no event.
+
+    mPrevUndoDepth   = u;
+    mPrevRedoDepth   = r;
+    mPrevTopUndoName = top;
+
+    // TS7 stamp feed: pre-Task-8, doUndoAction's markDirty advanced the
+    // version-capture change stamp for every choke transaction; removing it
+    // left the stamp static across notes-only sessions, so VersionCapture
+    // skipped takes it used to keep.  markDirty() is stamp-only post-Task 9,
+    // so feeding it from every non-clear manager broadcast restores that
+    // coverage (and adds attachment gestures) without touching dirty state.
+    if (! historyCleared && mProjectManager)
+        mProjectManager->markDirty();
+
+    rebuildHistoryLabels();
+}
+
+void StandaloneEditor::rebuildHistoryLabels()
+{
+    const auto undoNames = mUndoManager.getUndoDescriptions();   // newest first
+    const auto redoNames = mUndoManager.getRedoDescriptions();   // next first
+
+    mHistoryLabels.clear();
+    for (int i = undoNames.size(); --i >= 0;)                    // oldest first
+        mHistoryLabels.push_back (historyDisplayFor (undoNames[i]));
+    mHistoryCursor = (int) mHistoryLabels.size();
+    for (const auto& n : redoNames)
+        mHistoryLabels.push_back (historyDisplayFor (n));
+}
+
+juce::String StandaloneEditor::historyDisplayFor (const juce::String& transactionName) const
+{
+    // "param:<id>" = an attachment gesture named by the vendored
+    // ParameterAttachment::beginGesture -- resolve to owner + pretty label.
+    if (transactionName.startsWith ("param:"))
+    {
+        const juce::String pid = transactionName.substring (6);
+        AutomationLane tmp;
+        tmp.paramId = pid;
+        juce::String pretty = displayNameFor (tmp);
+        if (pretty.isEmpty()) pretty = pid;
+        const juce::String owner = ownerKeyForParamId (pid);
+        return owner == "app" ? pretty : owner + "|" + pretty;
+    }
+    if (transactionName.isEmpty())
+        return "(edit)";
+    return transactionName;
+}
+
+juce::String StandaloneEditor::ownerKeyForParamId (const juce::String& paramId) const
+{
+    // Processor-owned sfizz engines carry their identity in the id prefix.
+    if (paramId.startsWith ("brd_")) return "rusty";
+    if (paramId.startsWith ("bgg_"))
+        return "inst" + paramId.fromFirstOccurrenceOf ("bgg_", false, false)
+                               .upToFirstOccurrenceOf ("_", false, false);
+    if (paramId.startsWith ("bbb_"))
+        return "inst" + paramId.fromFirstOccurrenceOf ("bbb_", false, false)
+                               .upToFirstOccurrenceOf ("_", false, false);
+
+    // Rig-owned engines: ask each tab's APVTS whether it owns the parameter.
+    // Engines with UNPREFIXED param ids (Vocal / NAM-IR / Pedals) are
+    // ambiguous across same-kind tabs -- first match wins, which can tag the
+    // wrong INDEX on a multi-tab history label.  Labels only; the undo action
+    // itself is bound to the correct tree regardless.
+    static const std::pair<TabKind, const char*> kKinds[] = {
+        { TabKind::Layers, "lay" }, { TabKind::Bass, "bass" },
+        { TabKind::Drums,  "drm" }, { TabKind::Clips, "clip" },
+        { TabKind::Vox,    "vox" }, { TabKind::Inst, "inst" },
+        { TabKind::Plugins, "plug" },
+    };
+    auto& rig = mProcessor.engineRig();
+    for (const auto& [kind, key] : kKinds)
+        for (int i = 0; i < EngineRig::capacityOf (kind); ++i)
+        {
+            const auto* t = rig.findTab (kind, i);
+            if (t == nullptr) continue;
+            if (auto* ap = EngineRig::apvtsOf (t->engine.get()))
+                if (ap->getParameter (paramId) != nullptr)
+                    return juce::String (key) + juce::String (i);
+            if (t->namIr != nullptr)
+                if (auto* ap = EngineRig::apvtsOf (t->namIr))
+                    if (ap->getParameter (paramId) != nullptr)
+                        return juce::String (key) + juce::String (i);
+            if (t->pedals != nullptr)
+                if (auto* ap = EngineRig::apvtsOf (t->pedals))
+                    if (ap->getParameter (paramId) != nullptr)
+                        return juce::String (key) + juce::String (i);
+            if (kind == TabKind::Vox)
+                if (auto* v = dynamic_cast<BaySickVocalProcessor*> (t->engine.get()))
+                    if (auto* ap = EngineRig::apvtsOf (&v->getNamIrProcessor()))
+                        if (ap->getParameter (paramId) != nullptr)
+                            return juce::String (key) + juce::String (i);
+        }
+    return "app";
 }
 
 void StandaloneEditor::showHistoryWindow()
@@ -11088,17 +11724,646 @@ void StandaloneEditor::showHistoryWindow()
     mHistoryWindow->toFront(true);
 }
 
-UndoContext StandaloneEditor::makeUndoContext()
+void StandaloneEditor::duplicateTabWithUndo (RibbonTabBar::TabType type,
+                                             const juce::String& clipboardXml)
+{
+    int newId = -1;
+    switch (type)
+    {
+        case RibbonTabBar::TabType::Layers: newId = spawnDuplicateLayerTab (clipboardXml); break;
+        case RibbonTabBar::TabType::Bass:   newId = spawnDuplicateBassTab  (clipboardXml); break;
+        case RibbonTabBar::TabType::Drums:  newId = spawnDuplicateDrumTab  (clipboardXml); break;
+        default: return;
+    }
+    if (newId < 0 || ! mRibbon) return;
+
+    // Capture the duplicate's post-spawn identity + full chain so redo
+    // reproduces it exactly (same index, same name, same state).
+    PageEntry* entry = nullptr;
+    for (auto* e : mPages)
+        if (e != nullptr && e->ribbonTabId == newId) { entry = e; break; }
+    if (entry == nullptr) return;
+
+    juce::String presetXml, tabName;
+    int pageIdx = -1;
+    if (const auto* tab = mRibbon->getTabById (newId)) tabName = tab->name;
+    if (auto* lp = dynamic_cast<LayersPage*> (entry->component.get()))
+    { pageIdx = lp->getPageIndex(); presetXml = lp->capturePagePresetXml(); }
+    else if (auto* bp = dynamic_cast<BassPage*> (entry->component.get()))
+    { pageIdx = bp->getPageIndex(); presetXml = bp->capturePagePresetXml(); }
+    else if (auto* dp = dynamic_cast<DrumPage*> (entry->component.get()))
+    { pageIdx = dp->getPageIndex(); presetXml = dp->exportPagePresetXml(); }
+    if (pageIdx < 0 || presetXml.isEmpty()) return;
+
+    const juce::File snap = UndoSnapshotStore::writeNew (presetXml);
+    auto liveId = std::make_shared<int> (newId);
+    auto undoFn = [this, liveId] { if (mRibbon) mRibbon->closeTab (*liveId); };
+    auto redoFn = [this, snap, type, pageIdx, tabName, liveId]
+    {
+        const juce::String xml = snap.loadFileAsString();
+        int id = -1;
+        switch (type)
+        {
+            case RibbonTabBar::TabType::Layers:
+                id = spawnDuplicateLayerTab (xml, pageIdx, tabName, true); break;
+            case RibbonTabBar::TabType::Bass:
+                id = spawnDuplicateBassTab  (xml, pageIdx, tabName, true); break;
+            case RibbonTabBar::TabType::Drums:
+                id = spawnDuplicateDrumTab  (xml, pageIdx, tabName, true); break;
+            default: break;
+        }
+        if (id >= 0) *liveId = id;
+    };
+    doUndoAction (new StructuralOpAction (std::move (undoFn), std::move (redoFn), { snap }),
+                  "Duplicate " + (tabName.isNotEmpty() ? tabName : juce::String ("Tab")));
+}
+
+std::unique_ptr<juce::XmlElement> StandaloneEditor::captureTabRecord (PageEntry& e)
+{
+    auto encodeEngineState = [] (juce::AudioProcessor* eng) -> juce::String
+    {
+        if (eng == nullptr) return {};
+        juce::MemoryBlock mb;
+        eng->getStateInformation (mb);
+        return mb.toBase64Encoding();
+    };
+
+    auto rec = std::make_unique<juce::XmlElement> ("Tab");
+
+    if (auto* pp = dynamic_cast<PluginsPage*> (e.component.get()))
+    {
+        rec->setAttribute ("type",       "Plugins");
+        rec->setAttribute ("pageIndex",  pp->getPageIndex());
+        rec->setAttribute ("name",       pp->getTabName());
+        rec->setAttribute ("engine",     pp->getEngineType());
+        rec->setAttribute ("engineData", encodeEngineState (pp->getEngineProcessor()));
+        return rec;
+    }
+    if (auto* cp = dynamic_cast<ClipsPage*> (e.component.get()))
+    {
+        rec->setAttribute ("type",       "Clips");
+        rec->setAttribute ("pageIndex",  cp->getPageIndex());
+        rec->setAttribute ("name",       cp->getTabName());
+        rec->setAttribute ("engine",     (int) cp->getEngineType());
+        rec->setAttribute ("engineData", encodeEngineState (cp->getEngineProcessor()));
+        rec->setAttribute ("clipPath",   SampleLibrary::refForPersist (juce::File (cp->getClipFilePath())));
+        return rec;
+    }
+    if (auto* vp = dynamic_cast<VoxPage*> (e.component.get()))
+    {
+        rec->setAttribute ("type",       "Vox");
+        rec->setAttribute ("pageIndex",  vp->getPageIndex());
+        rec->setAttribute ("name",       vp->getTabName());
+        rec->setAttribute ("engine",     (int) vp->getEngineType());
+        rec->setAttribute ("engineData", encodeEngineState (vp->getEngineProcessor()));
+        return rec;
+    }
+    if (auto* ip = dynamic_cast<InstPage*> (e.component.get()))
+    {
+        rec->setAttribute ("type",       "Inst");
+        rec->setAttribute ("pageIndex",  ip->getPageIndex());
+        rec->setAttribute ("name",       ip->getTabName());
+        rec->setAttribute ("engine",     (int) ip->getEngineType());
+        rec->setAttribute ("engineData", encodeEngineState (ip->getEngineProcessor()));
+        rec->setAttribute ("instChainState", ip->exportInstState());
+        const auto src = ip->getSource();
+        if (src == InstPage::Source::BaySickGuitars || src == InstPage::Source::BaySickBasses)
+        {
+            const bool isGuitars = src == InstPage::Source::BaySickGuitars;
+            rec->setAttribute ("source", isGuitars ? "BaySickGuitars" : "BaySickBasses");
+            if (isGuitars)
+            {
+                if (auto* eng = mProcessor.getBaySickGuitars (ip->getPageIndex()))
+                {
+                    rec->setAttribute ("kitPath", SampleLibrary::refForPersist (eng->getCurrentKitPath()));
+                    rec->setAttribute ("sfizzEngineData", encodeEngineState (eng));
+                }
+            }
+            else if (auto* eng = mProcessor.getBaySickBasses (ip->getPageIndex()))
+            {
+                rec->setAttribute ("kitPath", SampleLibrary::refForPersist (eng->getCurrentKitPath()));
+                rec->setAttribute ("sfizzEngineData", encodeEngineState (eng));
+            }
+            if (auto* cacheXml = ip->serializeProgramCacheXml())
+                rec->addChildElement (cacheXml);
+        }
+        return rec;
+    }
+    if (dynamic_cast<BaySickRustyDrumsPage*> (e.component.get()) != nullptr)
+    {
+        rec->setAttribute ("type",       "BaySickRustyDrums");
+        rec->setAttribute ("pageIndex",  0);
+        rec->setAttribute ("engineData", encodeEngineState (mProcessor.getBaySickRustyDrums()));
+        return rec;
+    }
+    return nullptr;   // L/B/D ride the PagePresetIO pass-1 path, not this one
+}
+
+int StandaloneEditor::resurrectTabFromRecord (const juce::XmlElement& rec)
+{
+    auto applyEngineState = [] (juce::AudioProcessor* eng, const juce::String& base64)
+    {
+        if (eng == nullptr || base64.isEmpty()) return;
+        juce::MemoryBlock mb;
+        if (mb.fromBase64Encoding (base64))
+            eng->setStateInformation (mb.getData(), (int) mb.getSize());
+    };
+
+    const juce::String type       = rec.getStringAttribute ("type");
+    const int          pageIndex  = rec.getIntAttribute ("pageIndex");
+    const juce::String name       = rec.getStringAttribute ("name");
+    const juce::String engine     = rec.getStringAttribute ("engine");
+    const juce::String engineData = rec.getStringAttribute ("engineData");
+
+    if (type == "Plugins")
+    {
+        auto page = createPluginsPageAtIndex (pageIndex);
+        if (! page) return -1;
+        auto* pp = dynamic_cast<PluginsPage*> (page.get());
+        const int newId = mRibbon->addTab (RibbonTabBar::TabType::Plugins,
+                                            name.isNotEmpty() ? name : "Plugin");
+        if (pp && name.isNotEmpty()) pp->setTabName (name);
+        if (pp)
+        {
+            pp->onEngineSelected = [this, newId, pageIndex, pp] {
+                const auto* tab = mRibbon->getTabById (newId);
+                if (mMixerPage)   mMixerPage->addPluginChannel (pageIndex, tab ? tab->name : "Plugin");
+                if (mEffectsPage) mEffectsPage->rebuildChannelDropdown();
+                if (mPianoRollPage)
+                    mPianoRollPage->setEngineType ({ EngineKind::Plugin, pageIndex }, pp->getPluginName());
+            };
+            registerPluginPianoRoll (pageIndex, pp);
+            if (engine.isNotEmpty() && engineData.isNotEmpty())
+            {
+                juce::MemoryBlock mb;
+                if (mb.fromBase64Encoding (engineData) && mb.getSize() > 0)
+                    mProcessor.engineRig().stashPluginRestoreDescription (
+                        pageIndex,
+                        Hosting::HostedPluginInstance::descriptionFromState (
+                            mb.getData(), (int) mb.getSize()));
+            }
+            if (engine.isNotEmpty())
+                pp->selectPluginById (engine);
+            applyEngineState (pp->getEngineProcessor(), engineData);
+            pp->onEngineSelected = [this, newId, pageIndex, pp] {
+                const juce::String nm = pp->getDisplayName();
+                if (nm.isNotEmpty() && mRibbon) { mRibbon->renameTab (newId, nm); pp->setTabName (nm); }
+                const auto* tab = mRibbon->getTabById (newId);
+                if (mMixerPage)   mMixerPage->addPluginChannel (pageIndex, tab ? tab->name : "Plugin");
+                if (mEffectsPage) mEffectsPage->rebuildChannelDropdown();
+                if (mPianoRollPage)
+                    mPianoRollPage->setEngineType ({ EngineKind::Plugin, pageIndex }, pp->getDisplayName());
+            };
+            pp->onPluginChanged = [this, newId, pageIndex, pp] {
+                const juce::String nm = pp->getDisplayName();
+                if (nm.isNotEmpty())
+                {
+                    if (mRibbon) { mRibbon->renameTab (newId, nm); pp->setTabName (nm); }
+                    if (mMixerPage) mMixerPage->renameChannel (MixerPage::StripKind::Plugin, pageIndex, nm);
+                }
+                if (mPianoRollPage)
+                    mPianoRollPage->setEngineType ({ EngineKind::Plugin, pageIndex }, pp->getDisplayName());
+                if (mProjectManager) mProjectManager->markDirty();
+            };
+            pp->onDeleteRequested = [this, newId] {
+                if (! mRibbon) return;
+                deleteTabWithUndo (newId);
+            };
+            pp->onParamListChanged = [this, pageIndex] { registerPluginTabAutomation (pageIndex); };
+            pp->onAutomateParam = [this, pageIndex] (const juce::String& paramId) {
+                registerPluginTabAutomation (pageIndex);
+                openEventEditorForParam ("plugtab" + juce::String (pageIndex) + "_vst_" + paramId);
+            };
+            registerPluginTabAutomation (pageIndex);
+        }
+        auto* entry = new PageEntry();
+        entry->ribbonTabId = newId;
+        entry->type        = RibbonTabBar::TabType::Plugins;
+        entry->component   = std::move (page);
+        mPages.add (entry);
+        hostPageInWindow (*entry);
+        return newId;
+    }
+
+    if (type == "Clips")
+    {
+        const juce::String clipPath = rec.getStringAttribute ("clipPath");
+        createClipStripAndPage (pageIndex, clipPath);
+        for (auto* entry : mPages)
+        {
+            if (! entry || entry->type != RibbonTabBar::TabType::Clip) continue;
+            auto* cp = dynamic_cast<ClipsPage*> (entry->component.get());
+            if (cp == nullptr || cp->getPageIndex() != pageIndex) continue;
+            if (name.isNotEmpty())
+            {
+                cp->setTabName (name);
+                if (mRibbon)    mRibbon->renameTab (entry->ribbonTabId, name);
+                if (mMixerPage) mMixerPage->renameChannel (MixerPage::StripKind::Audio, pageIndex, name);
+            }
+            if (engine.isNotEmpty())
+                cp->selectEngine ((ClipsPage::EngineType) engine.getIntValue());
+            applyEngineState (cp->getEngineProcessor(), engineData);
+            return entry->ribbonTabId;
+        }
+        return -1;
+    }
+
+    if (type == "Vox")
+    {
+        spawnVoxTabIfMissing (pageIndex, /*selectAfter*/ false);
+        if (mMixerPage) mMixerPage->addVoxChannelAtIndex (pageIndex);
+        for (auto* entry : mPages)
+        {
+            if (! entry || entry->type != RibbonTabBar::TabType::Vox) continue;
+            auto* vp = dynamic_cast<VoxPage*> (entry->component.get());
+            if (vp == nullptr || vp->getPageIndex() != pageIndex) continue;
+            if (name.isNotEmpty())
+            {
+                vp->setTabName (name);
+                if (mRibbon) mRibbon->renameTab (entry->ribbonTabId, name);
+            }
+            if (engine.isNotEmpty())
+                vp->selectEngine ((VoxPage::EngineType) engine.getIntValue());
+            applyEngineState (vp->getEngineProcessor(), engineData);
+            return entry->ribbonTabId;
+        }
+        return -1;
+    }
+
+    if (type == "Inst")
+    {
+        const juce::String source = rec.getStringAttribute ("source");
+        const bool sfizzSource = (source == "BaySickGuitars" || source == "BaySickBasses");
+        spawnInstTabIfMissing (pageIndex, /*selectAfter*/ false);
+        if (mMixerPage) mMixerPage->addInstChannelAtIndex (pageIndex);
+        for (auto* entry : mPages)
+        {
+            if (! entry || entry->type != RibbonTabBar::TabType::Inst) continue;
+            auto* ip = dynamic_cast<InstPage*> (entry->component.get());
+            if (ip == nullptr || ip->getPageIndex() != pageIndex) continue;
+            if (name.isNotEmpty())
+            {
+                ip->setTabName (name);
+                if (mRibbon) mRibbon->renameTab (entry->ribbonTabId, name);
+            }
+            {
+                const juce::String chainXml = rec.getStringAttribute ("instChainState");
+                if (chainXml.isNotEmpty())
+                    ip->importInstState (chainXml);
+            }
+            if (sfizzSource)
+            {
+                const bool isGuitars = source == "BaySickGuitars";
+                const auto sourceMode = isGuitars ? InstPage::Source::BaySickGuitars
+                                                  : InstPage::Source::BaySickBasses;
+                const juce::String engineRootTag = isGuitars ? "BaySickGuitarsState"
+                                                             : "BaySickBassesState";
+                ip->setSource (sourceMode);
+                if (mMixerPage) mMixerPage->setInstStripNoLiveInput (pageIndex, true);
+                juce::File savedKit = SampleLibrary::resolvePersistedRef (rec.getStringAttribute ("kitPath"));
+                if (! savedKit.existsAsFile())
+                {
+                    savedKit = SampleLibrary::getCoreLibraryDir();
+                    savedKit = isGuitars
+                        ? savedKit.getChildFile ("Black&Green Guitars")
+                                   .getChildFile ("Programs").getChildFile ("01-green_keyswitch.sfz")
+                        : savedKit.getChildFile ("Black&Blue Basses")
+                                   .getChildFile ("Programs").getChildFile ("01-darkblack_keysw.sfz");
+                }
+                if (isGuitars) mProcessor.loadBaySickGuitarsKit (pageIndex, savedKit);
+                else           mProcessor.loadBaySickBassesKit  (pageIndex, savedKit);
+                wireEngineDirtyHook (isGuitars
+                                     ? (juce::AudioProcessor*) mProcessor.getBaySickGuitars (pageIndex)
+                                     : (juce::AudioProcessor*) mProcessor.getBaySickBasses  (pageIndex));
+                const juce::String sfizzData = rec.getStringAttribute ("sfizzEngineData");
+                if (sfizzData.isNotEmpty())
+                {
+                    juce::AudioProcessor* eng = isGuitars
+                        ? (juce::AudioProcessor*) mProcessor.getBaySickGuitars (pageIndex)
+                        : (juce::AudioProcessor*) mProcessor.getBaySickBasses  (pageIndex);
+                    juce::AudioProcessorValueTreeState* apv = nullptr;
+                    if (isGuitars) { if (auto* g = mProcessor.getBaySickGuitars (pageIndex)) apv = &g->apvts; }
+                    else           { if (auto* b = mProcessor.getBaySickBasses  (pageIndex)) apv = &b->apvts; }
+                    if (eng != nullptr && apv != nullptr)
+                    {
+                        juce::MemoryBlock mb;
+                        if (mb.fromBase64Encoding (sfizzData))
+                        {
+                            if (auto xml = juce::AudioProcessor::getXmlFromBinary (mb.getData(), (int) mb.getSize()))
+                            {
+                                if (xml->hasTagName (engineRootTag))
+                                {
+                                    auto root2 = juce::ValueTree::fromXml (*xml);
+                                    if (auto apvtsState = root2.getChildWithName (
+                                            apv->state.getType()); apvtsState.isValid())
+                                    {
+                                        // Resurrection state apply is programmatic.
+                                        juce::AudioProcessorValueTreeState::ScopedProgrammaticParamWrites spw;
+                                        apv->replaceStateKeepingUndoHistory (apvtsState);
+                                        for (auto* p : eng->getParameters())
+                                            if (auto* ranged = dynamic_cast<juce::RangedAudioParameter*> (p))
+                                                ranged->setValueNotifyingHost (ranged->getValue());
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                if (auto* cacheXml = rec.getChildByName ("ProgramStateCache"))
+                    ip->restoreProgramCacheFromXml (*cacheXml);
+                registerInstSourcePianoRoll (ip);
+                ip->notifySourceEngineChanged();
+            }
+            else
+            {
+                if (engine.isNotEmpty())
+                    ip->selectEngine ((InstPage::EngineType) engine.getIntValue());
+                applyEngineState (ip->getEngineProcessor(), engineData);
+            }
+            return entry->ribbonTabId;
+        }
+        return -1;
+    }
+
+    if (type == "BaySickRustyDrums")
+    {
+        addBaySickRustyDrumsTab();
+        if (engineData.isNotEmpty())
+        {
+            juce::MemoryBlock mb;
+            if (mb.fromBase64Encoding (engineData))
+            {
+                if (auto kitXml = juce::AudioProcessor::getXmlFromBinary (mb.getData(), (int) mb.getSize()))
+                {
+                    if (kitXml->hasTagName ("BaySickRustyDrumsState"))
+                    {
+                        // Regression fix (2026-08-06): the blob stores the kit
+                        // as a stable-root ref ("library:<rel>" for every
+                        // shipped kit) -- reading it as a raw path made
+                        // existsAsFile() false and silently skipped the whole
+                        // restore, so every wrapped Rusty undo no-oped.
+                        // Mirror the engine's own setStateInformation decode.
+                        juce::File kitFile;
+                        if (auto* kp = kitXml->getChildByName ("KitPath"))
+                            kitFile = SampleLibrary::resolvePersistedRef (
+                                          kp->getStringAttribute ("path"));
+                        BaySickRustyDrumsPage* rustyPage = nullptr;
+                        for (auto* entry : mPages)
+                            if (auto* rp = dynamic_cast<BaySickRustyDrumsPage*> (entry->component.get()))
+                            { rustyPage = rp; break; }
+                        if (rustyPage != nullptr && kitFile.existsAsFile()
+                            && rustyPage->reloadForProjectRestore (kitFile))
+                        {
+                            if (auto* eng = mProcessor.getBaySickRustyDrums())
+                            {
+                                for (auto* child : kitXml->getChildIterator())
+                                {
+                                    auto state = juce::ValueTree::fromXml (*child);
+                                    if (state.isValid()
+                                        && state.getType() == eng->apvts.state.getType())
+                                    {
+                                        eng->apvts.replaceStateKeepingUndoHistory (state);
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        for (auto* entry : mPages)
+            if (entry && dynamic_cast<BaySickRustyDrumsPage*> (entry->component.get()))
+                return entry->ribbonTabId;
+        return -1;
+    }
+
+    return -1;
+}
+
+void StandaloneEditor::deleteTabWithUndo (int ribbonTabId)
+{
+    if (! mRibbon) return;
+
+    PageEntry* entry = nullptr;
+    for (auto* e : mPages)
+        if (e != nullptr && e->ribbonTabId == ribbonTabId) { entry = e; break; }
+
+    juce::String presetXml, tabName, engineType;
+    int pageIdx = -1;
+    auto type = RibbonTabBar::TabType::Mixer;
+
+    if (entry != nullptr)
+    {
+        type = entry->type;
+        if (const auto* tab = mRibbon->getTabById (ribbonTabId))
+            tabName = tab->name;
+
+        if (auto* lp = dynamic_cast<LayersPage*> (entry->component.get()))
+        { pageIdx = lp->getPageIndex(); engineType = lp->getEngineType(); presetXml = lp->capturePagePresetXml(); }
+        else if (auto* bp = dynamic_cast<BassPage*> (entry->component.get()))
+        { pageIdx = bp->getPageIndex(); engineType = bp->getEngineType(); presetXml = bp->capturePagePresetXml(); }
+        else if (auto* dp = dynamic_cast<DrumPage*> (entry->component.get()))
+        { pageIdx = dp->getPageIndex(); engineType = dp->getEngineType(); presetXml = dp->exportPagePresetXml(); }
+    }
+
+    // Pass 2 (Jeff ruling 2a, 2026-08-06): Clips / Vox / Inst / Plugins /
+    // Rusty capture via the serializeTabsInto-shaped record + kind extras.
+    if (entry == nullptr || pageIdx < 0 || presetXml.isEmpty())
+    {
+        std::unique_ptr<juce::XmlElement> rec =
+            entry != nullptr ? captureTabRecord (*entry) : nullptr;
+        if (rec == nullptr)
+        {
+            mRibbon->closeTab (ribbonTabId);   // unknown kind: plain close
+            return;
+        }
+
+        const juce::String recType = rec->getStringAttribute ("type");
+        juce::String recName = rec->getStringAttribute ("name");
+        if (recName.isEmpty())
+            if (const auto* tab = mRibbon->getTabById (ribbonTabId))
+                recName = tab->name;
+
+        // Clips/Vox/Inst deletes cascade into the audio library + arrangement
+        // blocks; Rusty clears its roll across every pattern.  Capture the
+        // slices the cascade destroys (in-RAM, Task 4 machinery).
+        const bool isCVI   = (recType == "Clips" || recType == "Vox" || recType == "Inst");
+        const bool isRusty = (recType == "BaySickRustyDrums");
+        AudioLibrarySnapshot libSnap;
+        if (isCVI) libSnap = captureAudioLibrarySnapshot (/*withBlocks*/ true);
+        PatternListSnapshot patSnap;
+        auto* grid = mBuilderPage ? mBuilderPage->getGrid() : nullptr;
+        if (isRusty && grid != nullptr) patSnap = grid->capturePatternSlice();
+
+        const juce::File snap = UndoSnapshotStore::writeNew (
+            rec->toString (juce::XmlElement::TextFormat().singleLine()));
+
+        mRibbon->closeTab (ribbonTabId);
+
+        auto liveId = std::make_shared<int> (ribbonTabId);
+        auto libApply = makeAudioLibraryApply();
+        auto gridSp   = juce::Component::SafePointer<ArrangementGrid> (grid);
+        auto undoFn = [this, snap, liveId, isCVI, isRusty, libSnap, patSnap,
+                       libApply, gridSp]
+        {
+            // Library slice FIRST: the Clips resurrect matches its clip path
+            // against library entries, and the block swap must precede the
+            // strip/page rebuild notifications.
+            if (isCVI && libApply) libApply (libSnap);
+            const juce::String xmlText = snap.loadFileAsString();
+            if (auto parsed = juce::XmlDocument::parse (xmlText))
+            {
+                const int newId = resurrectTabFromRecord (*parsed);
+                if (newId >= 0) *liveId = newId;
+            }
+            // Rusty roll slice AFTER: reloadForProjectRestore cleared nothing
+            // itself, but the DELETE cascade wiped the rolls -- restore them
+            // once the tab + engine exist again.
+            if (isRusty && gridSp != nullptr) gridSp->applyPatternSlice (patSnap);
+        };
+        auto redoFn = [this, liveId]
+        {
+            if (mRibbon) mRibbon->closeTab (*liveId);
+        };
+
+        doUndoAction (new StructuralOpAction (std::move (undoFn), std::move (redoFn), { snap }),
+                      "Delete " + (recName.isNotEmpty() ? recName : juce::String ("Tab")));
+        return;
+    }
+
+    const juce::File snap = UndoSnapshotStore::writeNew (presetXml);
+
+    mRibbon->closeTab (ribbonTabId);
+
+    // The current ribbon id changes on every resurrection -- track it so redo
+    // closes the LIVE tab, not the original id.
+    auto liveId = std::make_shared<int> (ribbonTabId);
+    auto undoFn = [this, snap, type, pageIdx, tabName, liveId]
+    {
+        const juce::String xml = snap.loadFileAsString();
+        int newId = -1;
+        switch (type)
+        {
+            case RibbonTabBar::TabType::Layers:
+                newId = spawnDuplicateLayerTab (xml, pageIdx, tabName, /*fullPreset*/ true); break;
+            case RibbonTabBar::TabType::Bass:
+                newId = spawnDuplicateBassTab  (xml, pageIdx, tabName, /*fullPreset*/ true); break;
+            case RibbonTabBar::TabType::Drums:
+                newId = spawnDuplicateDrumTab  (xml, pageIdx, tabName, /*fullPreset*/ true); break;
+            default: break;
+        }
+        if (newId >= 0) *liveId = newId;
+    };
+    auto redoFn = [this, liveId]
+    {
+        if (mRibbon) mRibbon->closeTab (*liveId);
+    };
+
+    doUndoAction (new StructuralOpAction (std::move (undoFn), std::move (redoFn), { snap }),
+                  "Delete " + (tabName.isNotEmpty() ? tabName : juce::String ("Tab")));
+}
+
+AudioLibrarySnapshot StandaloneEditor::captureAudioLibrarySnapshot (bool withBlocks) const
+{
+    AudioLibrarySnapshot s;
+    if (mPM == nullptr) return s;
+    s.entries        = mPM->getAudioLibraryEntries();
+    s.manualGroups   = mPM->getManualAudioGroupsRaw();
+    s.includesBlocks = withBlocks;
+    if (withBlocks)
+        for (int i = 0; i < mPM->getNumBlocks(); ++i) s.blocks.push_back (mPM->getBlock (i));
+    return s;
+}
+
+AudioLibraryAction::ApplyFn StandaloneEditor::makeAudioLibraryApply()
+{
+    return [this] (const AudioLibrarySnapshot& s)
+    {
+        if (mPM == nullptr) return;
+        mPM->restoreAudioLibrary (s.entries, s.manualGroups);
+        if (s.includesBlocks)
+        {
+            while (mPM->getNumBlocks() > 0) mPM->removeBlock (0);
+            for (const auto& b : s.blocks) mPM->addBlock (b);
+        }
+        if (mBuilderPage) mBuilderPage->notifyArrangementChanged();
+    };
+}
+
+void StandaloneEditor::wrapTabAddUndo (int ribbonTabId, const juce::String& label,
+                                       bool asRider)
+{
+    if (! mRibbon || ribbonTabId < 0) return;
+
+    PageEntry* entry = nullptr;
+    for (auto* e : mPages)
+        if (e != nullptr && e->ribbonTabId == ribbonTabId) { entry = e; break; }
+    if (entry == nullptr) return;
+
+    auto rec = captureTabRecord (*entry);
+    if (rec == nullptr) return;
+
+    const juce::File snap = UndoSnapshotStore::writeNew (
+        rec->toString (juce::XmlElement::TextFormat().singleLine()));
+    auto liveId = std::make_shared<int> (ribbonTabId);
+    auto undoFn = [this, liveId] { if (mRibbon) mRibbon->closeTab (*liveId); };
+    auto redoFn = [this, snap, liveId]
+    {
+        if (auto parsed = juce::XmlDocument::parse (snap.loadFileAsString()))
+        {
+            const int newId = resurrectTabFromRecord (*parsed);
+            if (newId >= 0) *liveId = newId;
+        }
+    };
+
+    auto* action = new StructuralOpAction (std::move (undoFn), std::move (redoFn), { snap });
+    if (asRider)
+        mUndoManager.perform (action);
+    else
+        doUndoAction (action, label);
+}
+
+UndoContext StandaloneEditor::makeUndoContext(const juce::String& ownerKey)
 {
     UndoContext ctx;
     ctx.manager = &mUndoManager;
-    ctx.perform  = [this](juce::UndoableAction* a, const juce::String& l)
+    ctx.perform  = [this, ownerKey](juce::UndoableAction* a, const juce::String& l)
     {
-        return doUndoAction(a, l);
+        return doUndoAction(a, l, ownerKey);
     };
     ctx.undo        = [this] { globalUndo(); };
     ctx.redo        = [this] { globalRedo(); };
     ctx.showHistory = [this] { showHistoryWindow(); };
+    // Jeff ruling 2026-08-06: live-page resolution for page-lifetime undo
+    // entries (see the UndoContext decl).  The ctx owner key carries the
+    // page identity ("drm3", "lay0", ...) -- the same pageIndex-keyed
+    // identity the resurrection spine preserves, so a re-created page
+    // answers to its old key.  No prefix here prefixes another, so the
+    // first match is the match.
+    ctx.resolveOwnerPage = [this, ownerKey]() -> juce::Component*
+    {
+        static const struct { const char* prefix; RibbonTabBar::TabType type; } kOwnerMap[] = {
+            { "lay",  RibbonTabBar::TabType::Layers  },
+            { "bass", RibbonTabBar::TabType::Bass    },
+            { "drm",  RibbonTabBar::TabType::Drums   },
+            { "vox",  RibbonTabBar::TabType::Vox     },
+            { "inst", RibbonTabBar::TabType::Inst    },
+            { "plug", RibbonTabBar::TabType::Plugins },
+        };
+        for (const auto& m : kOwnerMap)
+        {
+            if (! ownerKey.startsWith (m.prefix)) continue;
+            const juce::String rest = ownerKey.substring ((int) strlen (m.prefix));
+            if (rest.isEmpty() || ! rest.containsOnly ("0123456789")) continue;
+            const int idx = rest.getIntValue();
+            for (auto* e : mPages)
+                if (e != nullptr && e->type == m.type && pageIndexOfEntry (*e) == idx)
+                    return e->component.get();
+            return nullptr;
+        }
+        return nullptr;
+    };
     return ctx;
 }
 
@@ -15033,7 +16298,7 @@ void StandaloneEditor::deserializeUIState (const juce::XmlElement& root)
                 };
                 pp->onDeleteRequested = [this, newId] {
                     if (! mRibbon) return;
-                    mRibbon->closeTab (newId);
+                    deleteTabWithUndo (newId);
                 };
                 // Instrument lanes (ruling 2-b) -- see the spawn path.  The
                 // param-count watch is what makes a restored project's plugin
@@ -15072,10 +16337,10 @@ void StandaloneEditor::deserializeUIState (const juce::XmlElement& root)
             };
             lp->onDeleteRequested = [this, newId] {
                 if (! mRibbon) return;
-                mRibbon->closeTab (newId);
+                deleteTabWithUndo (newId);
             };
             lp->onDuplicateRequested = [this] (const juce::String& clipboardXml) {
-                spawnDuplicateLayerTab (clipboardXml);
+                duplicateTabWithUndo (RibbonTabBar::TabType::Layers, clipboardXml);
             };
             lp->onLockChanged = [this, newId, lp] {
                 if (mRibbon) mRibbon->setTabLocked (newId, lp->isLocked());
@@ -15120,10 +16385,10 @@ void StandaloneEditor::deserializeUIState (const juce::XmlElement& root)
             };
             bp->onDeleteRequested = [this, newId] {
                 if (! mRibbon) return;
-                mRibbon->closeTab (newId);
+                deleteTabWithUndo (newId);
             };
             bp->onDuplicateRequested = [this] (const juce::String& clipboardXml) {
-                spawnDuplicateBassTab (clipboardXml);
+                duplicateTabWithUndo (RibbonTabBar::TabType::Bass, clipboardXml);
             };
             bp->onLockChanged = [this, newId, bp] {
                 if (mRibbon) mRibbon->setTabLocked (newId, bp->isLocked());
@@ -15389,7 +16654,9 @@ void StandaloneEditor::deserializeUIState (const juce::XmlElement& root)
                                         if (auto apvtsState = root2.getChildWithName (
                                                 apv->state.getType()); apvtsState.isValid())
                                         {
-                                            apv->replaceState (apvtsState);
+                                            // Task 6: load-path force-fires are programmatic.
+                                            juce::AudioProcessorValueTreeState::ScopedProgrammaticParamWrites spw;
+                                            apv->replaceStateKeepingUndoHistory (apvtsState);
                                             for (auto* p : eng->getParameters())
                                                 if (auto* ranged = dynamic_cast<juce::RangedAudioParameter*> (p))
                                                     ranged->setValueNotifyingHost (ranged->getValue());
@@ -15453,10 +16720,10 @@ void StandaloneEditor::deserializeUIState (const juce::XmlElement& root)
                 };
                 dp2->onDeleteRequested = [this, newId] {
                     if (! mRibbon) return;
-                    mRibbon->closeTab (newId);
+                    deleteTabWithUndo (newId);
                 };
                 dp2->onDuplicateRequested = [this] (const juce::String& clipboardXml) {
-                    spawnDuplicateDrumTab (clipboardXml);
+                    duplicateTabWithUndo (RibbonTabBar::TabType::Drums, clipboardXml);
                 };
                 dp2->onLockChanged = [this, newId, dp2] {
                     if (mRibbon) mRibbon->setTabLocked (newId, dp2->isLocked());
@@ -15540,7 +16807,7 @@ void StandaloneEditor::deserializeUIState (const juce::XmlElement& root)
                                         if (state.isValid()
                                             && state.getType() == eng->apvts.state.getType())
                                         {
-                                            eng->apvts.replaceState (state);
+                                            eng->apvts.replaceStateKeepingUndoHistory (state);
                                             break;
                                         }
                                     }
@@ -16755,6 +18022,7 @@ void StandaloneEditor::addVoxFromExport (const juce::String& fullPath)
                     if (self == nullptr || mute != 1) return;
                     const juce::String id = "mixer_vox_"
                         + juce::String (sourceIdx) + "_mute";
+                    beginParamUndoGesture (self->mProcessor.apvts, id); // Task 6 (12-iv)
                     if (auto* p = dynamic_cast<juce::RangedAudioParameter*> (
                             self->mProcessor.apvts.getParameter (id)))
                         p->setValueNotifyingHost (
@@ -17243,6 +18511,17 @@ void StandaloneEditor::commitRecordingResult (const VibeSynthProcessor::RecordRe
 {
     if (! mPM) return;
 
+    // Jeff (2026-08-06): a take is ONE undoable gesture.  Undo removes the
+    // recording from the PROJECT -- library entries, grid blocks, and the
+    // captured MIDI notes -- while the WAV files stay on disk.  Captured as
+    // a library slice + pattern slice (the pattern slice carries blocks AND
+    // roll note content); performed as one transaction at the tail.
+    auto* takeGrid = mBuilderPage ? mBuilderPage->getGrid() : nullptr;
+    AudioLibrarySnapshot takeLibBefore = captureAudioLibrarySnapshot (false);
+    PatternListSnapshot  takePatBefore;
+    if (takeGrid != nullptr) takePatBefore = takeGrid->capturePatternSlice();
+    const int takeBlocksBefore = mPM->getNumBlocks();
+
     // I-16 G-9 (2026-05-03): per-block routing decision.  Vox/Inst channelIds
     // produce a block linked to the originating page (block.routeChannel set;
     // playback fans through the page's chain).  Master / Audio-row files
@@ -17356,9 +18635,33 @@ void StandaloneEditor::commitRecordingResult (const VibeSynthProcessor::RecordRe
         }
     };
 
-    // Master capture (no strips armed) -> Audio row, route channel 0.
+    // Master capture (no strips armed) -- Jeff 2026-08-06: lands in the
+    // project's Exports folder (browser panel), NOT auto-dropped on the grid.
+    // Adding it to the project is the user's drag/"Add to Project..." gesture,
+    // which raises the standard route prompt (channel creation included) --
+    // the same flow as every other export, and the step that owns the undo.
+    // This also retires the old auto-drop's orphaned Audio strip on undo.
+    // Move-failure fallback keeps the old behavior over losing the take.
     if (res.masterFile.existsAsFile())
-        dropWavAsClip (res.masterFile, /*routeChannel=*/0);
+    {
+        const auto exportsDir = mProcessor.getProjectExportsDir();
+        exportsDir.createDirectory();
+        auto dest = exportsDir.getChildFile (res.masterFile.getFileName());
+        int dupe = 2;
+        while (dest.existsAsFile())
+            dest = exportsDir.getChildFile (
+                res.masterFile.getFileNameWithoutExtension()
+                + " (" + juce::String (dupe++) + ")" + res.masterFile.getFileExtension());
+
+        if (res.masterFile.moveFileTo (dest))
+        {
+            if (mBuilderPage)
+                if (auto* bp = mBuilderPage->getBrowserPanel())
+                    bp->refreshRenderRows();
+        }
+        else
+            dropWavAsClip (res.masterFile, /*routeChannel=*/0);
+    }
 
     // I-16 G-9: per-strip files.  For Vox channelIds we have BOTH a dry and
     // a wet file; the WET one goes on the grid, both go in the Audio Browser.
@@ -17630,6 +18933,36 @@ void StandaloneEditor::commitRecordingResult (const VibeSynthProcessor::RecordRe
             mPM->notifyContentChanged();
             if (mProjectManager) mProjectManager->markDirty();
         }
+    }
+
+    // Jeff (2026-08-06): the whole take = ONE transaction (see the capture at
+    // the top).  Pattern slice first (blocks + roll notes), library rider
+    // second.  Skipped when nothing landed (stop during count-in leaves the
+    // WAV on disk but adds nothing to the project).
+    AudioLibrarySnapshot takeLibAfter = captureAudioLibrarySnapshot (false);
+    const bool takeLanded =
+           takeLibAfter.entries.size() != takeLibBefore.entries.size()
+        || mPM->getNumBlocks() != takeBlocksBefore
+        || ! res.midiNotes.empty();
+    if (takeLanded)
+    {
+        if (takeGrid != nullptr)
+        {
+            doUndoAction (new PatternListAction (
+                              std::move (takePatBefore), takeGrid->capturePatternSlice(),
+                              [sp = juce::Component::SafePointer<ArrangementGrid> (takeGrid)]
+                              (const PatternListSnapshot& s)
+                              { if (sp != nullptr) sp->applyPatternSlice (s); }),
+                          "Record Take");
+            mUndoManager.perform (new AudioLibraryAction (std::move (takeLibBefore),
+                                                          std::move (takeLibAfter),
+                                                          makeAudioLibraryApply()));
+        }
+        else
+            doUndoAction (new AudioLibraryAction (std::move (takeLibBefore),
+                                                  std::move (takeLibAfter),
+                                                  makeAudioLibraryApply()),
+                          "Record Take");
     }
 }
 

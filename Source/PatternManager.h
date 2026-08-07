@@ -651,6 +651,8 @@ public:
     void                removeTimeMarker (int idx);
     void                renameTimeMarker (int idx, const juce::String& label);
     int                 findTimeMarkerNearBar (float bar, float tolerance = 0.5f) const;
+    // QA-UndoCoverage Task 4: bulk restore seam for MarkerSetAction.
+    void                restoreTimeMarkers (const std::vector<TimeMarker>& markers);
 
     // ── Time-signature changes (D-2; QA-G Task 6: the SOLE played source) ──
     int                  getNumTimeSigChanges() const { return (int) mTimeSigChanges.size(); }
@@ -665,6 +667,12 @@ public:
     // exists; user-picked via prompt / transport dropdown at 2+.
     int                  getCurrentTsMarkerUid() const { return mCurrentTsMarkerUid; }
     void                 setCurrentTsMarkerUid (int uid);
+    // QA-UndoCoverage Task 4: bulk restore seam for MarkerSetAction (list +
+    // current-uid together -- removeTimeSigChange re-picks the uid, so the
+    // pair restores atomically).  Restored uids stay valid: mNextTsUid only
+    // climbs, so re-adds never collide with restored markers.
+    void                 restoreTimeSigState (const std::vector<TimeSigChange>& changes,
+                                              int currentUid);
     // Fired after any change that can alter effective pattern signatures
     // (marker mutations, current-selection change, lifecycle refresh).
     // StandaloneEditor refreshes rolls / dropdown / Builder from it.
@@ -697,6 +705,8 @@ public:
     void               addTempoChange (int bar, double bpm);       // replaces an existing same-bar change
     void               removeTempoChange (int idx);
     int                findTempoChangeNearBar (float bar, float tolerance = 0.5f) const;
+    // QA-UndoCoverage Task 4: bulk restore seam for MarkerSetAction.
+    void               restoreTempoChanges (const std::vector<TempoChange>& changes);
 
     // C.5 (2026-04-30): time-signature-aware beat/bar conversion.
     // The DAW beat is one quarter note (PPQ).  For a time signature N/D, one
@@ -729,6 +739,24 @@ public:
     // Inst / Clips page so the browser groups by ownerChannelId range instead
     // of round-tripping through per-page mClipPath fields.  Default 0 = generic
     // Audio category (master capture, untagged drops).  See §9 17th Forks entry.
+    // D3 (2026-04-25): chokeGroup is 0 = none, 1..16 = group id.  QA-E Task 4:
+    // pageOwnerChannelId tags the entry to its owning page.  QA-E Task 7
+    // (FILE-02): the entry is the SOURCE OF TRUTH for a file's clip
+    // properties (pitch/BPM/stretch); followers inherit.  QA-Fe2: groupName
+    // is manual browser-group membership ("" = ungrouped).
+    // Public since QA-UndoCoverage Task 4 -- AudioLibraryAction snapshots the
+    // whole list by value.
+    struct AudioLibraryEntry {
+        juce::String path;
+        juce::String alias;
+        int chokeGroup         { 0 };
+        int pageOwnerChannelId { 0 };
+        float pitchSemitones   { 0.f };
+        float originalBPM      { 120.f };
+        bool  stretchMode      { true };
+        juce::String groupName;
+    };
+
     void                 addAudioToLibrary     (const juce::String& path,
                                                 const juce::String& alias = {},
                                                 int                 pageOwnerChannelId = 0);
@@ -786,6 +814,14 @@ public:
     int                  replaceAudioPath (const juce::String& oldPath,
                                            const juce::String& newPath);
 
+    // QA-UndoCoverage Task 4: bulk snapshot/restore seams for AudioLibraryAction
+    // (mirrors the restorePatternList precedent).  Restore swaps both lists and
+    // notifies; callers refresh their own views.
+    const std::vector<AudioLibraryEntry>&           getAudioLibraryEntries() const { return mAudioLibrary; }
+    const std::vector<std::pair<int, juce::String>>& getManualAudioGroupsRaw() const { return mManualAudioGroups; }
+    void restoreAudioLibrary (const std::vector<AudioLibraryEntry>& entries,
+                              const std::vector<std::pair<int, juce::String>>& manualGroups);
+
     // ── Automation template library (persists independently of blocks) ───
     void                    addAutomationTemplate   (const AutomationLane& lane);
     void                    removeAutomationTemplate(int idx);
@@ -796,6 +832,11 @@ public:
     // Set the template's user-facing display name (empty = revert to auto).
     // Does NOT touch paramId (keeps backend applicator bindings stable).
     void                    setAutomationTemplateUserName(int idx, const juce::String& userName);
+
+    // QA-UndoCoverage Task 4: bulk snapshot/restore seam for
+    // AutomationTemplateAction (restorePatternList precedent).
+    const std::vector<AutomationLane>& getAutomationTemplatesRaw() const { return mAutomationTemplates; }
+    void restoreAutomationTemplates (const std::vector<AutomationLane>& templates);
 
     // ── Drum sounds ───────────────────────────────────────────────────────
     static const char* kDrumNames[MAX_DRUM_SOUNDS];
@@ -908,26 +949,7 @@ private:
     std::array<juce::uint32, kMaxArrangementRows> mRowGroupColor {};
 
     // ── Browser library storage (persists across block delete) ──────────
-    // D3 (2026-04-25): chokeGroup is 0 = none, 1..16 = group id.  When this
-    // clip starts playback, it chokes any other insert (synth or audio) on the
-    // same group.  Set via the browser's right-click "Choke Group" submenu.
-    struct AudioLibraryEntry {
-        juce::String path;
-        juce::String alias;
-        int chokeGroup         { 0 };
-        int pageOwnerChannelId { 0 };   // QA-E Task 4 (2026-05-12): 0 = generic Audio; else channel id (kVoxBase / kInstBase / kAudioBase range)
-        // QA-E Task 7 (FILE-02): the library entry is the SOURCE OF TRUTH for
-        // a file's clip properties.  Every grid copy with ArrangementBlock::
-        // isOverride == false inherits these (the browser "Properties..."
-        // dialog edits them here and propagates to followers).  pitch/BPM/
-        // stretchMode parallel pageOwnerChannelId (the source-of-truth route).
-        float pitchSemitones   { 0.f };
-        float originalBPM      { 120.f };
-        bool  stretchMode      { true };
-        // QA-Fe2: manual browser-group membership ("" = ungrouped; recording
-        // takes auto-group by base name in the tree, this overrides).
-        juce::String groupName;
-    };
+    // Entry type is public (QA-UndoCoverage Task 4); storage stays here.
     std::vector<AudioLibraryEntry> mAudioLibrary;
     std::vector<AutomationLane>    mAutomationTemplates;
 

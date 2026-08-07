@@ -331,9 +331,11 @@ BrowserPanel::BrowserPanel(PatternManager& pm,
 
     mAddBtn = std::make_unique<TextButton>("+ Add");
     mAddBtn->onClick = [this] {
-        mPM.addPattern();
-        mSelectedPat = mPM.getNumPatterns() - 1;
-        mPM.setCurrentPattern(mSelectedPat);
+        performPatternSliceOp ("Add Pattern", [this] {
+            mPM.addPattern();
+            mSelectedPat = mPM.getNumPatterns() - 1;
+            mPM.setCurrentPattern(mSelectedPat);
+        });
         rebuildPatternRows();
         if (onPatternSelected) onPatternSelected(mSelectedPat);
     };
@@ -342,9 +344,11 @@ BrowserPanel::BrowserPanel(PatternManager& pm,
     mDeleteBtn = std::make_unique<TextButton>("Delete");
     mDeleteBtn->onClick = [this] {
         if (mPM.getNumPatterns() > 1) {
-            mPM.removePattern(mSelectedPat);
-            mSelectedPat = jlimit(0, mPM.getNumPatterns() - 1, mSelectedPat);
-            mPM.setCurrentPattern(mSelectedPat);
+            performPatternSliceOp ("Delete Pattern", [this] {
+                mPM.removePattern(mSelectedPat);
+                mSelectedPat = jlimit(0, mPM.getNumPatterns() - 1, mSelectedPat);
+                mPM.setCurrentPattern(mSelectedPat);
+            });
             rebuildPatternRows();
             if (onPatternSelected) onPatternSelected(mSelectedPat);
         }
@@ -404,8 +408,6 @@ BrowserPanel::BrowserPanel(PatternManager& pm,
 void BrowserPanel::setCollapsed(bool c)
 {
     mCollapsed = c;
-    setMouseCursor (c ? juce::MouseCursor::PointingHandCursor
-                      : juce::MouseCursor::NormalCursor);
     for (auto& t : mTabBtns) t->setVisible(!c);
     for (auto& r : mPatItems)   r->setVisible(!c);
     for (auto& r : mAudioItems) r->setVisible(!c);
@@ -416,11 +418,6 @@ void BrowserPanel::setCollapsed(bool c)
     if (mAudioTree) mAudioTree->setVisible (! c && mActiveTab == 1);
     if (auto* p = getParentComponent()) p->resized();
     repaint();
-}
-
-void BrowserPanel::mouseDown (const juce::MouseEvent&)
-{
-    if (mCollapsed && onExpandRequest) onExpandRequest();
 }
 
 void BrowserPanel::switchTab(int t)
@@ -888,7 +885,8 @@ void BrowserPanel::showCategoryContextMenu (int category, Point<int> globalPt)
                 const String t = raw->getText().trim();
                 if (t.isNotEmpty())
                 {
-                    mPM.addManualAudioGroup (category, t);
+                    performLibraryOp ("Create Group", /*withBlocks*/ false,
+                                      [this, category, &t] { mPM.addManualAudioGroup (category, t); });
                     rebuildAudioRows();
                 }
                 if (auto* cb = raw->findParentComponentOfClass<CallOutBox>())
@@ -940,7 +938,9 @@ void BrowserPanel::showGroupContextMenu (int category, const String& name,
                     }
                     else
                     {
-                        mPM.renameManualAudioGroup (category, name, t);
+                        performLibraryOp ("Rename Group", /*withBlocks*/ false,
+                                          [this, category, &name, &t]
+                                          { mPM.renameManualAudioGroup (category, name, t); });
                     }
                     rebuildAudioRows();
                 }
@@ -1006,8 +1006,10 @@ void BrowserPanel::maybePromptGroupAssign (int libIdx, int targetChannel)
                 sel = juce::jmax (0, cb->getSelectedItemIndex());
             if (sel > 0)
             {
-                self->mPM.setAudioLibraryGroup (libIdx,
-                    aw->getComboBoxComponent ("grp")->getText());
+                const juce::String g = aw->getComboBoxComponent ("grp")->getText();
+                self->performLibraryOp ("Assign Group", /*withBlocks*/ false,
+                                        [self, libIdx, &g]
+                                        { self->mPM.setAudioLibraryGroup (libIdx, g); });
                 self->rebuildAudioRows();
             }
         }),
@@ -1160,7 +1162,9 @@ void BrowserPanel::showAudioTreeContextMenu (AudioBrowserItem& item, Point<int> 
             }
             if (result >= kIdChokeBase && result <= kIdChokeBase + 16)
             {
-                mPM.setAudioLibraryChokeGroup (libIdx, result - kIdChokeBase);
+                performLibraryOp ("Choke Group", /*withBlocks*/ false,
+                                  [this, libIdx, result]
+                                  { mPM.setAudioLibraryChokeGroup (libIdx, result - kIdChokeBase); });
                 return;
             }
             if (result == kIdDelete)
@@ -1225,18 +1229,20 @@ void BrowserPanel::confirmAndDeleteLibraryEntry (int libIdx)
             if (! self) return;
             auto& pm = self->mPM;
 
-            // Cascade-remove blocks matching (path, owner).  Blocks routed
-            // to a DIFFERENT page (different routeChannel) stay.
-            for (int i = pm.getNumBlocks() - 1; i >= 0; --i)
-                if (pm.getBlock (i).clipType == ClipType::Audio
-                    && pm.getBlock (i).audioFilePath == path
-                    && pm.getBlock (i).routeChannel  == owner)
-                    pm.removeBlock (i);
+            self->performLibraryOp ("Delete Audio", /*withBlocks*/ true, [&] {
+                // Cascade-remove blocks matching (path, owner).  Blocks routed
+                // to a DIFFERENT page (different routeChannel) stay.
+                for (int i = pm.getNumBlocks() - 1; i >= 0; --i)
+                    if (pm.getBlock (i).clipType == ClipType::Audio
+                        && pm.getBlock (i).audioFilePath == path
+                        && pm.getBlock (i).routeChannel  == owner)
+                        pm.removeBlock (i);
 
-            // Remove the specific library entry by index (precise -- post-
-            // Task-5 schema may have multiple entries with same path under
-            // different page owners).
-            pm.removeAudioFromLibraryAt (libIdx);
+                // Remove the specific library entry by index (precise -- post-
+                // Task-5 schema may have multiple entries with same path under
+                // different page owners).
+                pm.removeAudioFromLibraryAt (libIdx);
+            });
 
             self->rebuildAudioRows();
             if (self->onArrangementChanged) self->onArrangementChanged();
@@ -1542,6 +1548,113 @@ void BrowserPanel::refresh()
     else                      rebuildAutomationRows();
 }
 
+void BrowserPanel::refreshAutomationTab()
+{
+    rebuildAutomationRows();
+}
+
+void BrowserPanel::refreshPatternTab()
+{
+    rebuildPatternRows();
+}
+
+void BrowserPanel::refreshRenderRows()
+{
+    rebuildRenderRows();
+}
+
+// ── QA-UndoCoverage Task 4: browser gesture wrappers ─────────────────────────
+void BrowserPanel::performPatternSliceOp (const juce::String& label,
+                                          const std::function<void()>& op)
+{
+    if (! (mUndoCtx.isValid() && onCapturePatternSlice && onApplyPatternSlice))
+    { op(); return; }
+
+    PatternListSnapshot before = onCapturePatternSlice();
+    op();
+    PatternListSnapshot after  = onCapturePatternSlice();
+    mUndoCtx.perform (new PatternListAction (std::move (before), std::move (after),
+                          [fn = onApplyPatternSlice] (const PatternListSnapshot& s) { fn (s); }),
+                      label);
+}
+
+void BrowserPanel::performLibraryOp (const juce::String& label, bool withBlocks,
+                                     const std::function<void()>& op)
+{
+    if (! mUndoCtx.isValid()) { op(); return; }
+
+    auto capture = [this, withBlocks]() -> AudioLibrarySnapshot
+    {
+        AudioLibrarySnapshot s;
+        s.entries        = mPM.getAudioLibraryEntries();
+        s.manualGroups   = mPM.getManualAudioGroupsRaw();
+        s.includesBlocks = withBlocks;
+        if (withBlocks)
+            for (int i = 0; i < mPM.getNumBlocks(); ++i) s.blocks.push_back (mPM.getBlock (i));
+        return s;
+    };
+
+    AudioLibrarySnapshot before = capture();
+    op();
+    AudioLibrarySnapshot after = capture();
+
+    auto apply = [sp = juce::Component::SafePointer<BrowserPanel> (this)]
+                 (const AudioLibrarySnapshot& s)
+    {
+        if (sp == nullptr) return;
+        auto& pm = sp->mPM;
+        pm.restoreAudioLibrary (s.entries, s.manualGroups);
+        if (s.includesBlocks)
+        {
+            while (pm.getNumBlocks() > 0) pm.removeBlock (0);
+            for (const auto& b : s.blocks) pm.addBlock (b);
+        }
+        sp->rebuildAudioRows();
+        if (s.includesBlocks && sp->onArrangementChanged) sp->onArrangementChanged();
+    };
+    mUndoCtx.perform (new AudioLibraryAction (std::move (before), std::move (after),
+                                              std::move (apply)),
+                      label);
+}
+
+void BrowserPanel::performTemplateOp (const juce::String& label, bool withBlocks,
+                                      const std::function<void()>& op)
+{
+    if (! mUndoCtx.isValid()) { op(); return; }
+
+    auto capture = [this, withBlocks]() -> AutomationTemplateSnapshot
+    {
+        AutomationTemplateSnapshot s;
+        s.templates      = mPM.getAutomationTemplatesRaw();
+        s.includesBlocks = withBlocks;
+        if (withBlocks)
+            for (int i = 0; i < mPM.getNumBlocks(); ++i) s.blocks.push_back (mPM.getBlock (i));
+        return s;
+    };
+
+    AutomationTemplateSnapshot before = capture();
+    op();
+    AutomationTemplateSnapshot after = capture();
+
+    auto apply = [sp = juce::Component::SafePointer<BrowserPanel> (this)]
+                 (const AutomationTemplateSnapshot& s)
+    {
+        if (sp == nullptr) return;
+        auto& pm = sp->mPM;
+        pm.restoreAutomationTemplates (s.templates);
+        if (s.includesBlocks)
+        {
+            while (pm.getNumBlocks() > 0) pm.removeBlock (0);
+            for (const auto& b : s.blocks) pm.addBlock (b);
+        }
+        sp->rebuildAutomationRows();
+        if (s.includesBlocks && sp->onArrangementChanged) sp->onArrangementChanged();
+    };
+    mUndoCtx.perform (new AutomationTemplateAction (std::move (before), std::move (after),
+                                                    std::move (apply)),
+                      label);
+}
+
 // ── Rename popup (CallOutBox with TextEditor) ───────────────────────────────
 void BrowserPanel::openRenamePopup(BrowserItem& item)
 {
@@ -1638,7 +1751,9 @@ void BrowserPanel::showItemContextMenu(BrowserItem& item, Point<int> /*globalPt*
             if (kind == BrowserItem::Kind::Audio
                 && result >= kIdChokeBase && result <= kIdChokeBase + 16)
             {
-                mPM.setAudioLibraryChokeGroup(idx, result - kIdChokeBase);
+                performLibraryOp ("Choke Group", /*withBlocks*/ false,
+                                  [this, idx, result]
+                                  { mPM.setAudioLibraryChokeGroup(idx, result - kIdChokeBase); });
                 return;
             }
             if (result == 5 && kind == BrowserItem::Kind::Automation)
@@ -1663,22 +1778,40 @@ void BrowserPanel::showItemContextMenu(BrowserItem& item, Point<int> /*globalPt*
                 if (idx < 0 || idx >= mPM.getNumPatterns()) return;
                 const juce::Colour curCol = mPM.getPattern(idx).color;
                 PatternColorPicker::showAsync (raw, curCol,
-                    [this, idx] (juce::Colour newCol)
+                    [this, idx, curCol] (juce::Colour newCol)
                     {
                         if (idx < 0 || idx >= mPM.getNumPatterns()) return;
                         mPM.getPattern(idx).color = newCol;
                         rebuildPatternRows();
                         repaint();
+                        if (mUndoCtx.isValid() && newCol != curCol)
+                            mUndoCtx.perform (new PatternColorAction (idx, curCol, newCol,
+                                [sp = juce::Component::SafePointer<BrowserPanel> (this)]
+                                (int i, juce::Colour c)
+                                {
+                                    if (sp == nullptr) return;
+                                    if (i < 0 || i >= sp->mPM.getNumPatterns()) return;
+                                    sp->mPM.getPattern(i).color = c;
+                                    sp->rebuildPatternRows();
+                                    sp->repaint();
+                                }),
+                              "Pattern Color");
                     });
                 return;
             }
             if (result == 4 && kind == BrowserItem::Kind::Pattern)
             {
-                int newIdx = mPM.duplicatePattern(idx);
+                int newIdx = -1;
+                performPatternSliceOp ("Duplicate Pattern", [this, idx, &newIdx] {
+                    newIdx = mPM.duplicatePattern(idx);
+                    if (newIdx >= 0)
+                    {
+                        mSelectedPat = newIdx;
+                        mPM.setCurrentPattern(newIdx);
+                    }
+                });
                 if (newIdx >= 0)
                 {
-                    mSelectedPat = newIdx;
-                    mPM.setCurrentPattern(newIdx);
                     rebuildPatternRows();
                     if (onPatternSelected) onPatternSelected(newIdx);
                 }
@@ -1691,9 +1824,11 @@ void BrowserPanel::showItemContextMenu(BrowserItem& item, Point<int> /*globalPt*
                 case BrowserItem::Kind::Pattern:
                     if (mPM.getNumPatterns() > 1)
                     {
-                        mPM.removePattern(idx);
-                        mSelectedPat = jlimit(0, mPM.getNumPatterns() - 1, mSelectedPat);
-                        mPM.setCurrentPattern(mSelectedPat);
+                        performPatternSliceOp ("Delete Pattern", [this, idx] {
+                            mPM.removePattern(idx);
+                            mSelectedPat = jlimit(0, mPM.getNumPatterns() - 1, mSelectedPat);
+                            mPM.setCurrentPattern(mSelectedPat);
+                        });
                         rebuildPatternRows();
                         if (onPatternSelected) onPatternSelected(mSelectedPat);
                     }
@@ -1720,14 +1855,17 @@ void BrowserPanel::showItemContextMenu(BrowserItem& item, Point<int> /*globalPt*
                         const int tplIdx = mAutomBlockIndices[idx];
                         if (tplIdx >= 0 && tplIdx < mPM.getNumAutomationTemplates())
                         {
-                            // Cascade-remove any blocks created from this
-                            // template (matched by paramId).
-                            const String pid = mPM.getAutomationTemplate(tplIdx).paramId;
-                            for (int i = mPM.getNumBlocks() - 1; i >= 0; --i)
-                                if (mPM.getBlock(i).clipType == ClipType::Automation
-                                    && mPM.getBlock(i).automationLane.paramId == pid)
-                                    mPM.removeBlock(i);
-                            mPM.removeAutomationTemplate(tplIdx);
+                            performTemplateOp ("Delete Automation", /*withBlocks*/ true,
+                                               [this, tplIdx] {
+                                // Cascade-remove any blocks created from this
+                                // template (matched by paramId).
+                                const String pid = mPM.getAutomationTemplate(tplIdx).paramId;
+                                for (int i = mPM.getNumBlocks() - 1; i >= 0; --i)
+                                    if (mPM.getBlock(i).clipType == ClipType::Automation
+                                        && mPM.getBlock(i).automationLane.paramId == pid)
+                                        mPM.removeBlock(i);
+                                mPM.removeAutomationTemplate(tplIdx);
+                            });
                         }
                         rebuildAutomationRows();
                         if (onArrangementChanged) onArrangementChanged();
@@ -1769,8 +1907,19 @@ void BrowserPanel::renamePatternAt(int idx, const String& newName)
     const juce::String finalName = ensureUniqueBrowserName (
         newName, idx, mPM.getNumPatterns(),
         [this] (int i) { return mPM.getPattern(i).name; });
+    const juce::String oldName = mPM.getPattern(idx).name;
     mPM.renamePattern(idx, finalName);
     rebuildPatternRows();
+    if (mUndoCtx.isValid() && oldName != finalName)
+        mUndoCtx.perform (new PatternRenameAction (idx, oldName, finalName,
+                              [sp = juce::Component::SafePointer<BrowserPanel> (this)]
+                              (int i, const juce::String& n)
+                              {
+                                  if (sp == nullptr) return;
+                                  sp->mPM.renamePattern (i, n);
+                                  sp->rebuildPatternRows();
+                              }),
+                          "Rename Pattern");
 }
 
 void BrowserPanel::renameAudioAt(int idx, const String& newName)
@@ -1786,18 +1935,20 @@ void BrowserPanel::renameAudioAt(int idx, const String& newName)
     const juce::String finalName = ensureUniqueBrowserName (
         newName, libIdx, mPM.getNumAudioLibrary(),
         [this] (int i) { return mPM.getAudioLibraryAlias(i); });
-    // Persist the alias in the library so it survives block deletion.
-    if (libIdx >= 0) mPM.setAudioLibraryAlias(libIdx, finalName);
-    // Also stamp every currently-placed block so the clip title matches.
-    // (path, owner) match, not path-only -- same-path entries on OTHER pages
-    // keep their own alias (the delete cascade's keying, FILE-03).
-    for (int i = 0; i < mPM.getNumBlocks(); ++i)
-    {
-        auto& bb = mPM.getBlock(i);
-        if (bb.clipType == ClipType::Audio && bb.audioFilePath == path
-            && bb.routeChannel == owner)
-            bb.displayAlias = finalName;
-    }
+    performLibraryOp ("Rename Audio", /*withBlocks*/ true, [&] {
+        // Persist the alias in the library so it survives block deletion.
+        if (libIdx >= 0) mPM.setAudioLibraryAlias(libIdx, finalName);
+        // Also stamp every currently-placed block so the clip title matches.
+        // (path, owner) match, not path-only -- same-path entries on OTHER pages
+        // keep their own alias (the delete cascade's keying, FILE-03).
+        for (int i = 0; i < mPM.getNumBlocks(); ++i)
+        {
+            auto& bb = mPM.getBlock(i);
+            if (bb.clipType == ClipType::Audio && bb.audioFilePath == path
+                && bb.routeChannel == owner)
+                bb.displayAlias = finalName;
+        }
+    });
     rebuildAudioRows();
     if (onArrangementChanged) onArrangementChanged();
 }
@@ -1833,16 +1984,18 @@ void BrowserPanel::renameAutomationAt(int idx, const String& newName)
                 return other.paramId;
             });
     }
-    mPM.setAutomationTemplateUserName(tplIdx, trimmed);
-    // Propagate the user-rename onto any already-placed blocks that share
-    // this paramId so the grid label + Event Editor title update immediately.
-    const String pid = mPM.getAutomationTemplate(tplIdx).paramId;
-    for (int i = 0; i < mPM.getNumBlocks(); ++i)
-    {
-        auto& bb = mPM.getBlock(i);
-        if (bb.clipType == ClipType::Automation && bb.automationLane.paramId == pid)
-            bb.automationLane.userDisplayName = trimmed;
-    }
+    performTemplateOp ("Rename Automation", /*withBlocks*/ true, [&] {
+        mPM.setAutomationTemplateUserName(tplIdx, trimmed);
+        // Propagate the user-rename onto any already-placed blocks that share
+        // this paramId so the grid label + Event Editor title update immediately.
+        const String pid = mPM.getAutomationTemplate(tplIdx).paramId;
+        for (int i = 0; i < mPM.getNumBlocks(); ++i)
+        {
+            auto& bb = mPM.getBlock(i);
+            if (bb.clipType == ClipType::Automation && bb.automationLane.paramId == pid)
+                bb.automationLane.userDisplayName = trimmed;
+        }
+    });
     rebuildAutomationRows();
 }
 
@@ -1852,25 +2005,10 @@ void BrowserPanel::paint(Graphics& g)
     g.setColour(VC::Accent.withAlpha(0.6f));
     g.fillRect(getWidth() - 1, 0, 1, getHeight());
 
+    // Jeff 2026-08-06: collapsed = width zero (the divider is the handle) --
+    // nothing to paint.
     if (mCollapsed)
-    {
-        // Jeff, 2026-08-04: collapsed, this strip IS the handle -- give it a
-        // grip texture and an arrow so it reads as "pull me back out" rather
-        // than as an empty margin.
-        const int cx = getWidth() / 2;
-        const int cy = getHeight() / 2;
-        g.setColour(VC::TextDim.withAlpha(0.55f));
-        for (int i = -3; i <= 3; ++i)
-            g.fillRect(cx - 5, cy + i * 4 + 26, 11, 1);
-
-        juce::Path arrow;
-        arrow.addTriangle((float)(cx - 4), (float)(cy - 8),
-                          (float)(cx - 4), (float)(cy + 8),
-                          (float)(cx + 5), (float)cy);
-        g.setColour(VC::Text.withAlpha(0.75f));
-        g.fillPath(arrow);
         return;
-    }
 
     g.setColour(VC::TextDim);
     g.setFont(Font(9.f, Font::bold));
@@ -3848,36 +3986,149 @@ void ArrangementGrid::duplicateSelected()
 // ─────────────────────────────────────────────────────────────────────────────
 // Split by Player Engine (QA-G, owner docket 5/5a/5b, 2026-07-17)
 // ─────────────────────────────────────────────────────────────────────────────
-namespace
+// QA-UndoCoverage Task 4: the Split-by-Engine local SplitState /
+// SplitPatternUndoAction pair was promoted to PatternListSnapshot /
+// PatternListAction (UndoActions.h) so browser pattern ops and the transport
+// dropdown share the slice.  Linked TS markers stay outside the undo domain
+// (established seam).
+PatternListSnapshot ArrangementGrid::capturePatternSlice() const
 {
-    // Full project-slice snapshot for the split's SINGLE undo step (owner
-    // lock): patterns + blocks + every per-row state the operation can touch.
-    // Linked TS markers stay outside the undo domain (established seam).
-    struct SplitState
+    PatternListSnapshot s;
+    for (int i = 0; i < mPM.getNumPatterns(); ++i) s.patterns.push_back (mPM.getPattern (i));
+    s.currentPattern = mPM.getCurrentPatternIndex();
+    for (int i = 0; i < mPM.getNumBlocks(); ++i)   s.blocks.push_back (mPM.getBlock (i));
+    for (int r = 0; r < kNumRows; ++r)
     {
-        std::vector<Pattern>          patterns;
-        int                           currentPattern { 0 };
-        std::vector<ArrangementBlock> blocks;
-        std::vector<juce::String>     rowNames;
-        std::vector<int>              rowGroups;
-        std::vector<juce::uint32>     rowColors;
-        std::vector<char>             rowMuted, rowSoloed;
+        s.rowNames.push_back (mPM.getRowNames()[(size_t) r]);
+        s.rowGroups.push_back (mPM.getRowGroup (r));
+        s.rowColors.push_back (mPM.getRowGroupColor (r));
+        s.rowMuted.push_back (mPM.isRowMuted (r) ? 1 : 0);
+        s.rowSoloed.push_back (mPM.isRowSoloed (r) ? 1 : 0);
+    }
+    return s;
+}
+
+void ArrangementGrid::applyPatternSlice (const PatternListSnapshot& s)
+{
+    // A degenerate (empty) snapshot must not wipe the project -- capture can
+    // only be empty when it ran before the grid existed, which no user
+    // gesture can reach.
+    if (s.patterns.empty() || (int) s.rowNames.size() < kNumRows) return;
+
+    mPM.restorePatternList (s.patterns, s.currentPattern);
+    while (mPM.getNumBlocks() > 0) mPM.removeBlock (0);
+    for (const auto& b : s.blocks) mPM.addBlock (b);
+    for (int r = 0; r < kNumRows; ++r)
+    {
+        mPM.setRowName (r, s.rowNames[(size_t) r]);
+        mPM.setRowMuted (r, s.rowMuted[(size_t) r] != 0);
+        mPM.setRowSoloed(r, s.rowSoloed[(size_t) r] != 0);
+        mPM.setRowGroup (r, s.rowGroups[(size_t) r]);
+        mPM.setRowGroupColor (r, s.rowColors[(size_t) r]);
+    }
+    mSelection.clear();
+    mPM.cleanupLinkedMarkers();
+    resized(); repaint();
+    if (onUndoRedoStateChanged) onUndoRedoStateChanged();
+    if (onArrangementChanged)   onArrangementChanged();
+}
+
+void ArrangementGrid::performPatternSliceOp (const juce::String& label,
+                                             const std::function<void()>& op)
+{
+    if (! mUndoCtx.isValid()) { op(); return; }
+
+    PatternListSnapshot before = capturePatternSlice();
+    op();
+    PatternListSnapshot after = capturePatternSlice();
+    mUndoCtx.perform (new PatternListAction (std::move (before), std::move (after),
+                          [sp = juce::Component::SafePointer<ArrangementGrid> (this)]
+                          (const PatternListSnapshot& s)
+                          { if (sp != nullptr) sp->applyPatternSlice (s); }),
+                      label);
+}
+
+void ArrangementGrid::performMarkerSetOp (const juce::String& label,
+                                          const std::function<void()>& op)
+{
+    if (! mUndoCtx.isValid()) { op(); return; }
+
+    auto capture = [this]() -> MarkerSetSnapshot
+    {
+        MarkerSetSnapshot s;
+        for (int i = 0; i < mPM.getNumTimeMarkers(); ++i)    s.timeMarkers.push_back (mPM.getTimeMarker (i));
+        for (int i = 0; i < mPM.getNumTimeSigChanges(); ++i) s.timeSigChanges.push_back (mPM.getTimeSigChange (i));
+        for (int i = 0; i < mPM.getNumTempoChanges(); ++i)   s.tempoChanges.push_back (mPM.getTempoChange (i));
+        s.currentTsUid = mPM.getCurrentTsMarkerUid();
+        return s;
     };
 
-    class SplitPatternUndoAction : public juce::UndoableAction
+    MarkerSetSnapshot before = capture();
+    op();
+    MarkerSetSnapshot after = capture();
+
+    auto apply = [sp = juce::Component::SafePointer<ArrangementGrid> (this)]
+                 (const MarkerSetSnapshot& s)
     {
-    public:
-        using ApplyFn = std::function<void(const SplitState&)>;
-        SplitPatternUndoAction (SplitState before, SplitState after, ApplyFn apply)
-            : mBefore (std::move (before)), mAfter (std::move (after)),
-              mApply (std::move (apply)) {}
-        bool perform() override { mApply (mAfter);  return true; }
-        bool undo()    override { mApply (mBefore); return true; }
-    private:
-        SplitState mBefore, mAfter;
-        ApplyFn    mApply;
-        JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (SplitPatternUndoAction)
+        if (sp == nullptr) return;
+        auto& pm = sp->mPM;
+        pm.restoreTimeMarkers (s.timeMarkers);
+        pm.restoreTimeSigState (s.timeSigChanges, s.currentTsUid);
+        pm.restoreTempoChanges (s.tempoChanges);
+        sp->repaint();
+        if (sp->onTempoMapChanged) sp->onTempoMapChanged();
     };
+    mUndoCtx.perform (new MarkerSetAction (std::move (before), std::move (after),
+                                           std::move (apply)),
+                      label);
+}
+
+void ArrangementGrid::performPatternTsOp (const juce::String& label,
+                                          const std::function<void()>& op)
+{
+    if (! mUndoCtx.isValid()) { op(); return; }
+
+    auto captureMarkers = [this]() -> MarkerSetSnapshot
+    {
+        MarkerSetSnapshot s;
+        for (int i = 0; i < mPM.getNumTimeMarkers(); ++i)    s.timeMarkers.push_back (mPM.getTimeMarker (i));
+        for (int i = 0; i < mPM.getNumTimeSigChanges(); ++i) s.timeSigChanges.push_back (mPM.getTimeSigChange (i));
+        for (int i = 0; i < mPM.getNumTempoChanges(); ++i)   s.tempoChanges.push_back (mPM.getTempoChange (i));
+        s.currentTsUid = mPM.getCurrentTsMarkerUid();
+        return s;
+    };
+
+    PatternListSnapshot sliceBefore   = capturePatternSlice();
+    MarkerSetSnapshot   markersBefore = captureMarkers();
+    op();
+    PatternListSnapshot sliceAfter   = capturePatternSlice();
+    MarkerSetSnapshot   markersAfter = captureMarkers();
+
+    auto sliceApply = [sp = juce::Component::SafePointer<ArrangementGrid> (this)]
+                      (const PatternListSnapshot& s)
+    { if (sp != nullptr) sp->applyPatternSlice (s); };
+
+    auto markerApply = [sp = juce::Component::SafePointer<ArrangementGrid> (this)]
+                       (const MarkerSetSnapshot& s)
+    {
+        if (sp == nullptr) return;
+        auto& pm = sp->mPM;
+        pm.restoreTimeMarkers (s.timeMarkers);
+        pm.restoreTimeSigState (s.timeSigChanges, s.currentTsUid);
+        pm.restoreTempoChanges (s.tempoChanges);
+        sp->repaint();
+        if (sp->onTempoMapChanged) sp->onTempoMapChanged();
+    };
+
+    // The slice opens the named transaction; the marker action appends into
+    // the SAME ActionSet (no beginNewTransaction between performs), so one
+    // Ctrl+Z reverses both.
+    mUndoCtx.perform (new PatternListAction (std::move (sliceBefore), std::move (sliceAfter),
+                                             std::move (sliceApply)),
+                      label);
+    mUndoCtx.manager->perform (new MarkerSetAction (std::move (markersBefore),
+                                                    std::move (markersAfter),
+                                                    std::move (markerApply)));
 }
 
 bool ArrangementGrid::rowIsBlank (int r) const
@@ -4006,43 +4257,7 @@ void ArrangementGrid::performSplitByEngine (int patternIndex,
     if (patternIndex < 0 || patternIndex >= mPM.getNumPatterns() || parts.empty())
         return;
 
-    auto captureState = [this]() -> SplitState
-    {
-        SplitState s;
-        for (int i = 0; i < mPM.getNumPatterns(); ++i) s.patterns.push_back (mPM.getPattern (i));
-        s.currentPattern = mPM.getCurrentPatternIndex();
-        for (int i = 0; i < mPM.getNumBlocks(); ++i)   s.blocks.push_back (mPM.getBlock (i));
-        for (int r = 0; r < kNumRows; ++r)
-        {
-            s.rowNames.push_back (mPM.getRowNames()[(size_t) r]);
-            s.rowGroups.push_back (mPM.getRowGroup (r));
-            s.rowColors.push_back (mPM.getRowGroupColor (r));
-            s.rowMuted.push_back (mPM.isRowMuted (r) ? 1 : 0);
-            s.rowSoloed.push_back (mPM.isRowSoloed (r) ? 1 : 0);
-        }
-        return s;
-    };
-    auto applyState = [this] (const SplitState& s)
-    {
-        mPM.restorePatternList (s.patterns, s.currentPattern);
-        while (mPM.getNumBlocks() > 0) mPM.removeBlock (0);
-        for (const auto& b : s.blocks) mPM.addBlock (b);
-        for (int r = 0; r < kNumRows; ++r)
-        {
-            mPM.setRowName (r, s.rowNames[(size_t) r]);
-            mPM.setRowMuted (r, s.rowMuted[(size_t) r] != 0);
-            mPM.setRowSoloed(r, s.rowSoloed[(size_t) r] != 0);
-            mPM.setRowGroup (r, s.rowGroups[(size_t) r]);
-            mPM.setRowGroupColor (r, s.rowColors[(size_t) r]);
-        }
-        mSelection.clear();
-        mPM.cleanupLinkedMarkers();
-        resized(); repaint();
-        if (onUndoRedoStateChanged) onUndoRedoStateChanged();
-        if (onArrangementChanged)   onArrangementChanged();
-    };
-
-    const SplitState before = captureState();
+    const PatternListSnapshot before = capturePatternSlice();
 
     // 1) Create the split patterns (appended; the original's TS state, bar
     //    count, and color carry over; only the part's roll is copied).
@@ -4136,7 +4351,7 @@ void ArrangementGrid::performSplitByEngine (int patternIndex,
     if (capacityBlocked)
     {
         // Owner spec: prompt + abort untouched.
-        applyState (before);
+        applyPatternSlice (before);
         juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon,
             "Maximum Tracks Reached",
             "Splitting needs more tracks than remain - all 500 rows are in use.");
@@ -4149,9 +4364,12 @@ void ArrangementGrid::performSplitByEngine (int patternIndex,
         mPM.setCurrentPattern (newIdx[0]);
     mPM.removePattern (patternIndex);
 
-    const SplitState after = captureState();
+    const PatternListSnapshot after = capturePatternSlice();
     if (mUndoCtx.isValid())
-        mUndoCtx.perform (new SplitPatternUndoAction (before, after, applyState),
+        mUndoCtx.perform (new PatternListAction (before, after,
+                              [sp = juce::Component::SafePointer<ArrangementGrid> (this)]
+                              (const PatternListSnapshot& s)
+                              { if (sp != nullptr) sp->applyPatternSlice (s); }),
                           "Split by Player Engine");
 
     mSelection.clear();
@@ -4299,11 +4517,17 @@ void ArrangementGrid::showRulerContextMenu(int xPx)
         {
             if (result <= 0) return;
             if (result == 1 && existingMarker >= 0) promptRenameTimeMarker(existingMarker);
-            else if (result == 2 && existingMarker >= 0) { mPM.removeTimeMarker(existingMarker); repaint(); }
+            else if (result == 2 && existingMarker >= 0)
+            {
+                performMarkerSetOp ("Delete Marker",
+                                    [this, existingMarker] { mPM.removeTimeMarker(existingMarker); });
+                repaint();
+            }
             else if (result == 3 && existingTS >= 0)     promptEditTimeSigChange(existingTS);
             else if (result == 4 && existingTS >= 0)
             {
-                mPM.removeTimeSigChange(existingTS);
+                performMarkerSetOp ("Delete Time Signature",
+                                    [this, existingTS] { mPM.removeTimeSigChange(existingTS); });
                 repaint();
                 // Docket 4B: the current marker died with 2+ left -> re-ask.
                 if (mPM.getCurrentTsMarkerUid() < 0)
@@ -4312,7 +4536,8 @@ void ArrangementGrid::showRulerContextMenu(int xPx)
             else if (result == 5 && existingTempo >= 0)  promptEditTempoChange(existingTempo);
             else if (result == 6 && existingTempo >= 0)
             {
-                mPM.removeTempoChange(existingTempo);
+                performMarkerSetOp ("Delete Tempo Change",
+                                    [this, existingTempo] { mPM.removeTempoChange(existingTempo); });
                 if (onTempoMapChanged) onTempoMapChanged();
                 repaint();
             }
@@ -4337,7 +4562,8 @@ void ArrangementGrid::promptAddTempoChange(int bar)
             if (r != 1) return;
             const double bpm = aw->getTextEditorContents("bpm").getDoubleValue();
             if (bpm <= 0.0) return;
-            mPM.addTempoChange (bar, bpm);
+            performMarkerSetOp ("Add Tempo Change",
+                                [this, bar, bpm] { mPM.addTempoChange (bar, bpm); });
             if (onTempoMapChanged) onTempoMapChanged();
             repaint();
         }), true);
@@ -4360,7 +4586,8 @@ void ArrangementGrid::promptEditTempoChange(int idx)
             const double bpm = aw->getTextEditorContents("bpm").getDoubleValue();
             if (bpm <= 0.0) return;
             // addTempoChange replaces the existing change at the same bar.
-            mPM.addTempoChange (cur.bar, bpm);
+            performMarkerSetOp ("Edit Tempo Change",
+                                [this, &cur, bpm] { mPM.addTempoChange (cur.bar, bpm); });
             if (onTempoMapChanged) onTempoMapChanged();
             repaint();
         }), true);
@@ -4378,7 +4605,9 @@ void ArrangementGrid::promptAddTimeMarker(int bar)
         juce::ModalCallbackFunction::create ([this, bar, aw](int r)
         {
             if (r != 1) return;
-            mPM.addTimeMarker (bar, aw->getTextEditorContents("label").trim());
+            const juce::String label = aw->getTextEditorContents("label").trim();
+            performMarkerSetOp ("Add Time Marker",
+                                [this, bar, &label] { mPM.addTimeMarker (bar, label); });
             repaint();
         }), true);
 }
@@ -4397,7 +4626,9 @@ void ArrangementGrid::promptRenameTimeMarker(int idx)
         juce::ModalCallbackFunction::create ([this, idx, aw](int r)
         {
             if (r != 1) return;
-            mPM.renameTimeMarker (idx, aw->getTextEditorContents("label").trim());
+            const juce::String label = aw->getTextEditorContents("label").trim();
+            performMarkerSetOp ("Edit Marker",
+                                [this, idx, &label] { mPM.renameTimeMarker (idx, label); });
             repaint();
         }), true);
 }
@@ -4439,7 +4670,9 @@ void ArrangementGrid::showCurrentTsPicker()
         [this] (int result)
         {
             if (result <= 0 || result > mPM.getNumTimeSigChanges()) return;
-            mPM.setCurrentTsMarkerUid (mPM.getTimeSigChange (result - 1).uid);
+            const int uid = mPM.getTimeSigChange (result - 1).uid;
+            performMarkerSetOp ("Current Time Signature",
+                                [this, uid] { mPM.setCurrentTsMarkerUid (uid); });
             repaint();
         });
 }
@@ -4460,7 +4693,8 @@ void ArrangementGrid::promptAddTimeSigChange(int bar)
             if (r != 1) return;
             const int n = aw->getTextEditorContents("num").getIntValue();
             const int d = aw->getTextEditorContents("den").getIntValue();
-            mPM.addTimeSigChange (bar, n, d);
+            performMarkerSetOp ("Add Time Signature",
+                                [this, bar, n, d] { mPM.addTimeSigChange (bar, n, d); });
             repaint();
             // Docket #4: every add beyond the first re-asks which marker is
             // current (the picker defaults its tick to the standing choice).
@@ -4486,7 +4720,8 @@ void ArrangementGrid::promptEditTimeSigChange(int idx)
             const int n = aw->getTextEditorContents("num").getIntValue();
             const int d = aw->getTextEditorContents("den").getIntValue();
             // addTimeSigChange replaces existing change at same bar.
-            mPM.addTimeSigChange (cur.bar, n, d);
+            performMarkerSetOp ("Edit Time Signature",
+                                [this, &cur, n, d] { mPM.addTimeSigChange (cur.bar, n, d); });
             repaint();
         }), true);
 }
@@ -4661,7 +4896,10 @@ void ArrangementGrid::showClipContextMenu(int blockIdx)
                     const int optIdx = result - 100;
                     if (patIdx >= 0 && optIdx >= 0 && optIdx < 8)
                     {
-                        mPM.setPatternTimeSig (patIdx, kTsOpts[optIdx].n, kTsOpts[optIdx].d);
+                        performPatternTsOp ("Pattern Time Signature",
+                                            [this, patIdx, optIdx] {
+                            mPM.setPatternTimeSig (patIdx, kTsOpts[optIdx].n, kTsOpts[optIdx].d);
+                        });
                         repaint();
                     }
                 }
@@ -5054,6 +5292,12 @@ void ArrangementGrid::importAudioFile(const juce::String& path, int targetRow, f
     }
 
     beginEdit("Import Audio");
+    // QA-UndoCoverage Task 4: the library entry rides the Import Audio
+    // transaction (an AudioLibraryAction appended after commitEdit below) so
+    // undoing the import no longer strands the entry in the browser.
+    AudioLibrarySnapshot libBefore;
+    libBefore.entries      = mPM.getAudioLibraryEntries();
+    libBefore.manualGroups = mPM.getManualAudioGroupsRaw();
     // Register the stored path in the persistent audio library so the Browser
     // keeps showing it even if every block referencing it gets deleted.
     // QA-E Task 4 (2026-05-12): tag ownerChannelId so re-drag from browser
@@ -5086,6 +5330,24 @@ void ArrangementGrid::importAudioFile(const juce::String& path, int targetRow, f
     mSelection.clear();
     mSelection.push_back(mPM.getNumBlocks() - 1);
     commitEdit();
+
+    if (mUndoCtx.isValid())
+    {
+        AudioLibrarySnapshot libAfter;
+        libAfter.entries      = mPM.getAudioLibraryEntries();
+        libAfter.manualGroups = mPM.getManualAudioGroupsRaw();
+        // Appends into commitEdit's transaction (no beginNewTransaction in
+        // between): one Ctrl+Z removes the block AND the library entry.
+        mUndoCtx.manager->perform (new AudioLibraryAction (
+            std::move (libBefore), std::move (libAfter),
+            [sp = juce::Component::SafePointer<ArrangementGrid> (this)]
+            (const AudioLibrarySnapshot& s)
+            {
+                if (sp == nullptr) return;
+                sp->mPM.restoreAudioLibrary (s.entries, s.manualGroups);
+                if (sp->onArrangementChanged) sp->onArrangementChanged();
+            }));
+    }
 
     // Ensure thumbnail is loaded - cache key is the STORED path so later
     // paint calls (which pass b.audioFilePath) hit the same entry.
@@ -6723,7 +6985,10 @@ void ArrangementGrid::mouseUp(const MouseEvent& e)
             aw->enterModalState (true,
                 ModalCallbackFunction::create ([this, pi, pre] (int r)
                 {
-                    if (r == 2) mPM.setPatternTimeSig (pi, pre[1], pre[2]);
+                    if (r == 2)
+                        performPatternTsOp ("Lock Previous TS",
+                                            [this, pi, &pre]
+                                            { mPM.setPatternTimeSig (pi, pre[1], pre[2]); });
                 }), true);
         }
         mMovePreTs.clear();
@@ -7352,7 +7617,13 @@ void TrackHeaderPanel::mouseDoubleClick(const MouseEvent& e)
         ModalCallbackFunction::create([this, row, aw](int r) {
             if (r == 1) {
                 auto n = aw->getTextEditorContents("name").trim();
-                if (n.isNotEmpty()) mGrid.setRowName(row, n);
+                if (n.isNotEmpty()) {
+                    // QA-UndoCoverage Task 4: renames bypassed the bracket the
+                    // sibling Move/Delete handlers already use.
+                    mGrid.beginEdit("Rename Track");
+                    mGrid.setRowName(row, n);
+                    mGrid.commitEdit();
+                }
             }
         }), true);
 }
@@ -7413,7 +7684,11 @@ void TrackHeaderPanel::showTrackContextMenu(int row)
                     ModalCallbackFunction::create([this, row, aw](int r) {
                         if (r == 1) {
                             auto n = aw->getTextEditorContents("n").trim();
-                            if (n.isNotEmpty()) mGrid.setRowName(row, n);
+                            if (n.isNotEmpty()) {
+                                mGrid.beginEdit("Rename Track");
+                                mGrid.setRowName(row, n);
+                                mGrid.commitEdit();
+                            }
                         }
                     }), true);
                 break;
@@ -7779,15 +8054,25 @@ BuilderPage::BuilderPage(VibeSynthProcessor& p, PatternManager& pm)
     // button and the View > Toggle Browser entry, which were two click-paths to
     // one action with no drag path at all.
     mBrowserGrip = std::make_unique<BrowserEdgeGrip>();
-    mBrowserGrip->getWidth = [this] { return mBrowserWidth; };
+    mBrowserGrip->getWidth    = [this] { return mBrowserWidth; };
+    mBrowserGrip->isCollapsed = [this] { return mBrowser && mBrowser->isCollapsed(); };
     mBrowserGrip->setWidth = [this](int w)
     {
         constexpr int kRampPx     = 14;
         constexpr int kCollapsePx = 44;
 
-        if (w < kBrowserDefaultW - kCollapsePx)
+        // Jeff 2026-08-06 (replaces the 28px click-strip): collapsed, the
+        // divider itself is the handle -- drag it back out.  Ruling 2B: the
+        // panel opens once the drag passes the collapse threshold and lands
+        // on the magnetic default (no width tracking below it).
+        if (mBrowser && mBrowser->isCollapsed())
         {
-            if (mBrowser && ! mBrowser->isCollapsed()) mBrowser->setCollapsed (true);
+            if (w < kBrowserDefaultW - kCollapsePx) return;   // not out far enough yet
+            mBrowser->setCollapsed (false);
+        }
+        else if (w < kBrowserDefaultW - kCollapsePx)
+        {
+            if (mBrowser) mBrowser->setCollapsed (true);
             return;
         }
         const int snapped = (w < kBrowserDefaultW + kRampPx) ? kBrowserDefaultW : w;
@@ -7795,15 +8080,6 @@ BuilderPage::BuilderPage(VibeSynthProcessor& p, PatternManager& pm)
         if (clamped != mBrowserWidth) { mBrowserWidth = clamped; resized(); }
     };
     addAndMakeVisible (*mBrowserGrip);
-    // The collapsed panel IS the pull-back handle -- click it to come back.
-    mBrowser->onExpandRequest = [this]
-    {
-        if (mBrowser && mBrowser->isCollapsed())
-        {
-            mBrowserWidth = juce::jmax (mBrowserWidth, kBrowserDefaultW);
-            mBrowser->setCollapsed (false);
-        }
-    };
     // QA-H Task 8 (#20): browser click -> the grid's active drop type.
     mBrowser->onDropTypeChanged = [this] (int tab, int refIdx) {
         if (! mGrid) return;
@@ -7832,6 +8108,15 @@ BuilderPage::BuilderPage(VibeSynthProcessor& p, PatternManager& pm)
         if (mGrid) mGrid->importAudioFile(path, 0, 0.f);
     };
     mBrowser->onArrangementChanged = [this] { notifyArrangementChanged(); };
+    // QA-UndoCoverage Task 4: pattern-list ops cascade into blocks, so the
+    // browser borrows the grid's slice capture/apply.
+    mBrowser->onCapturePatternSlice = [this]
+    { return mGrid ? mGrid->capturePatternSlice() : PatternListSnapshot{}; };
+    mBrowser->onApplyPatternSlice   = [this] (const PatternListSnapshot& s)
+    {
+        if (mGrid) mGrid->applyPatternSlice (s);
+        if (mBrowser) mBrowser->refreshPatternTab();
+    };
     addAndMakeVisible(*mBrowser);
 
     // Grid + viewport
@@ -7988,7 +8273,8 @@ BuilderPage::~BuilderPage()
 
 void BuilderPage::setUndoContext(const UndoContext& ctx)
 {
-    if (mGrid) { mGrid->setUndoContext(ctx); syncToolbar(); }
+    if (mGrid)    { mGrid->setUndoContext(ctx); syncToolbar(); }
+    if (mBrowser) mBrowser->setUndoContext(ctx);
 }
 
 void BuilderPage::syncToolbar()
@@ -8023,15 +8309,13 @@ void BuilderPage::resized()
 {
     auto b = getLocalBounds();
 
-    // Browser panel (left)
-    int browserW = mBrowser->isCollapsed() ? 28 : mBrowserWidth;   // QA-Fe2 resizable
+    // Browser panel (left).  Jeff 2026-08-06: collapsed = width ZERO -- only
+    // the 5px divider remains (with its chevron), draggable back out.  The
+    // 28px click-strip is gone.
+    int browserW = mBrowser->isCollapsed() ? 0 : mBrowserWidth;   // QA-Fe2 resizable
     mBrowser->setBounds(b.removeFromLeft(browserW));
     if (mBrowserGrip)
-    {
-        mBrowserGrip->setVisible (! mBrowser->isCollapsed());
-        if (! mBrowser->isCollapsed())
-            mBrowserGrip->setBounds (b.removeFromLeft (5));
-    }
+        mBrowserGrip->setBounds (b.removeFromLeft (5));
 
     // T16: the 20px menu row is gone; the toolbar starts at the top and the
     // grid gains that height.
@@ -8227,11 +8511,6 @@ void BuilderPage::doZoom(float factor)
     resized();
 }
 
-void BuilderPage::doToggleBrowser()
-{
-    if (mBrowser) { mBrowser->setCollapsed(!mBrowser->isCollapsed()); resized(); }
-}
-
 void BuilderPage::doNewAutomationClip()
 {
     // Collect all registered APVTS parameter IDs
@@ -8307,6 +8586,11 @@ void BuilderPage::doNewAutomationClip()
             if (mGrid)
             {
                 mGrid->beginEdit("New Automation Clip");
+                // QA-UndoCoverage Task 4: the template registration rides the
+                // block's transaction (rider appended after commitEdit) so
+                // undoing the clip no longer orphans a template row.
+                AutomationTemplateSnapshot tplBefore;
+                tplBefore.templates = mPM.getAutomationTemplatesRaw();
                 ArrangementBlock b;
                 b.clipType               = ClipType::Automation;
                 b.trackRow               = row;
@@ -8321,6 +8605,20 @@ void BuilderPage::doNewAutomationClip()
                 mPM.addAutomationTemplate(b.automationLane);
                 mPM.addBlock(b);
                 mGrid->commitEdit();
+                if (auto* mgr = mGrid->riderManager())
+                {
+                    AutomationTemplateSnapshot tplAfter;
+                    tplAfter.templates = mPM.getAutomationTemplatesRaw();
+                    mgr->perform (new AutomationTemplateAction (
+                        std::move (tplBefore), std::move (tplAfter),
+                        [pb = juce::Component::SafePointer<BuilderPage> (this)]
+                        (const AutomationTemplateSnapshot& s)
+                        {
+                            if (pb == nullptr) return;
+                            pb->mPM.restoreAutomationTemplates (s.templates);
+                            if (auto* bp = pb->getBrowserPanel()) bp->refreshAutomationTab();
+                        }));
+                }
                 mGrid->clearTimeSelection();
                 mGrid->resized();
                 mGrid->repaint();
@@ -8491,6 +8789,13 @@ bool BuilderPage::runOfflineLoop (const RenderOptions& opts,
                                   const std::function<bool (const juce::AudioBuffer<float>&, int)>& consumeBlock)
 {
     using Scope = RenderOptions::Scope;
+
+    // QA-UndoCoverage: the whole offline loop is one programmatic-write phase.
+    // The message thread blocks for the duration, so every lane replay
+    // (applyOfflineAutomationAt + processBlock's internal pass), restore-set
+    // write, and normalize write is marked before any flush can run -- an
+    // export leaves the undo history byte-identical.
+    juce::AudioProcessorValueTreeState::ScopedProgrammaticParamWrites spw;
 
     const double sr       = opts.sampleRate > 0.0 ? opts.sampleRate : 44100.0;
     // CL-056: offline block size.  2048 renders markedly faster than the live

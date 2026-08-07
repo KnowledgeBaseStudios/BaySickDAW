@@ -155,4 +155,6 @@ namespace PagePresetIO
                                     const juce::String& xml);
 
     juce::String peekEngineType (const juce::File& xml);
+    // QA-UndoCoverage Task 7: same peek over in-memory XML text.
+    juce::String peekEngineTypeFromXml (const juce::String& xmlText);
 }

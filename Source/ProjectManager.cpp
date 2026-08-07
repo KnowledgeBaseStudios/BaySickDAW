@@ -1,6 +1,7 @@
 #include "ProjectManager.h"
 #include "AppPaths.h"
 #include "PluginProcessor.h"
+#include "Standalone/UndoSnapshotStore.h"   // QA-UndoCoverage Task 9: load-boundary sweep
 #include "ClipDropDiag.h"            // QA-ClipDrop: diagnostic trap (2026-06-02)
 #include "SampleLibrary.h"           // QA-ProjectSave Task 4: source-aware import
 
@@ -69,6 +70,14 @@ bool ProjectManager::isValidProjectName (const juce::String& name)
 ProjectManager::ProjectManager (VibeSynthProcessor& processor)
     : mProcessor (processor)
 {
+    // QA-UndoCoverage Task 9: the dirty edge now originates on the
+    // TransactionTracker; forward it through the existing onDirtyChanged hook
+    // so every consumer (title asterisk etc.) keeps its wiring.
+    mProcessor.mTxTracker.onDirtyChanged = [this] (bool)
+    {
+        if (onDirtyChanged) onDirtyChanged();
+    };
+
     loadSettings();
     // Kick off autosave timer (15 min default).  Timer runs on message thread;
     // file I/O on project.xml is small + only fires when dirty so no real risk.
@@ -88,25 +97,36 @@ void ProjectManager::setAutosaveIntervalSeconds (int seconds)
     if (mAutosaveSec > 0) startTimer (mAutosaveSec * 1000);
 }
 
-void ProjectManager::setDirtyInternal (bool flag)
+bool ProjectManager::isDirty() const
 {
-    const bool prev = mDirty.exchange (flag, std::memory_order_relaxed);
-    if (prev != flag && onDirtyChanged) onDirtyChanged();
+    return mProcessor.mTxTracker.isDirty();
+}
+
+void ProjectManager::markSaved()
+{
+    mProcessor.mTxTracker.onSave();
 }
 
 void ProjectManager::markDirty()
 {
     if (mIgnoreDirty) return;
-    // TS7 §3.3: the stamp moves on EVERY edit, where mDirty only transitions
-    // once and then clears on save.  Version capture needs "did anything change
-    // since the last pass", which a latching bool cannot answer.
+    // TS7 §3.3: the stamp moves on EVERY edit -- version capture needs "did
+    // anything change since the last pass".  QA-UndoCoverage Task 9: the bool
+    // half is GONE; dirty is the transaction-pointer mismatch, fed by the
+    // editor's UndoManager ChangeListener.  The ~18 direct markDirty call
+    // sites stay AS the stamp feed (removing them would shrink version
+    // capture's change-detection scope).
     mChangeStamp.fetch_add (1, std::memory_order_relaxed);
-    setDirtyInternal (true);
 }
 
 void ProjectManager::clearDirty()
 {
-    setDirtyInternal (false);
+    // QA-UndoCoverage Task 9 -- load boundary: loads don't transact.  History
+    // + snapshot store + pointers reset together so the first post-load edit
+    // is row 1 and the project opens clean.
+    mProcessor.mUndoManager.clearUndoHistory();
+    UndoSnapshotStore::sweepAll();
+    mProcessor.mTxTracker.onLoadReset();
 }
 
 juce::Array<juce::File> ProjectManager::listBackups() const
@@ -301,7 +321,7 @@ bool ProjectManager::saveProject()
 
     auto xml = mCurrentFolder.getChildFile ("project.xml");
     const bool ok = xml.replaceWithText (root.toString());
-    if (ok) clearDirty();
+    if (ok) markSaved();   // Task 9: save pins the pointer, never clears history
     return ok;
 }
 
@@ -337,7 +357,7 @@ bool ProjectManager::saveProjectAs (const juce::String& newName)
     mProcessor.setCurrentProjectFolder (target);
     // Write current in-memory state as the new folder's project.xml (may
     // differ from the copied file if the user made unsaved edits).
-    saveProject();   // clears dirty
+    saveProject();   // pins the save point (Task 9)
     pushRecentProject (target);
     return true;
 }

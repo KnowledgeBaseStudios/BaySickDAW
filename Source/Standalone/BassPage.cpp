@@ -1,4 +1,6 @@
 #include "BassPage.h"
+#include "UndoBracket.h"
+#include "UndoSnapshotStore.h"   // QA-UndoCoverage: chain-swap snapshots
 #include "../AppPaths.h"
 #include "../BaySickBass/BaySickBassProcessor.h"
 #include "../BaySickBass/BaySickBassEditor.h"
@@ -95,6 +97,7 @@ void BassPage::setPlayHead(StandalonePlayHead* ph)
 
 void BassPage::setUndoContext(const UndoContext& ctx)
 {
+    mUndoCtx = ctx;   // QA-UndoCoverage: chain-swap gestures (ruling 3a)
     if (mPianoRoll)
     {
         mPianoRoll->setUndoContext(ctx);
@@ -333,9 +336,9 @@ static juce::String bassEngineLocalPrefix (juce::AudioProcessor* proc)
 // is responsible for any prefix substitution before calling.
 static void bassApplyApvtsTree (juce::AudioProcessor* proc, const juce::ValueTree& vt)
 {
-    if (auto* bsb = dynamic_cast<BaySickBassProcessor*>(proc))   { bsb->apvts.replaceState(vt); return; }
-    if (auto* bsp = dynamic_cast<VibePlayerProcessor*>(proc))    { bsp->apvts.replaceState(vt); return; }
-    if (auto* h   = dynamic_cast<HarmlessProcessor*>(proc))      { h  ->apvts.replaceState(vt); return; }
+    if (auto* bsb = dynamic_cast<BaySickBassProcessor*>(proc))   { bsb->apvts.replaceStateKeepingUndoHistory(vt); return; }
+    if (auto* bsp = dynamic_cast<VibePlayerProcessor*>(proc))    { bsp->apvts.replaceStateKeepingUndoHistory(vt); return; }
+    if (auto* h   = dynamic_cast<HarmlessProcessor*>(proc))      { h  ->apvts.replaceStateKeepingUndoHistory(vt); return; }
 }
 
 // G-6 (2026-04-29): rewrite the binary state's PARAM ids so the source page's
@@ -571,7 +574,8 @@ void BassPage::showPageActionsMenu (juce::Component* anchor)
             // Page-preset load submenu (1000 + i -> pagePresetXmls[i]).
             if (r >= kIdLoadBase && r < kIdLoadBase + pagePresetXmls.size())
             {
-                bp->loadPagePreset (pagePresetXmls[r - kIdLoadBase]);
+                bp->performChainSwapGesture ("Load Page Preset",
+                    [bp, f = pagePresetXmls[r - kIdLoadBase]] { bp->loadPagePreset (f); });
                 return;
             }
 
@@ -587,6 +591,7 @@ void BassPage::showPageActionsMenu (juce::Component* anchor)
             {
                 const int newGroup = r - kIdChokeBase;
                 const juce::String prefix = "mixer_bass_" + juce::String (bp->mPageIndex) + "_chokeGroup";
+                beginParamUndoGesture (bp->mProcessor.apvts, prefix); // Task 6 (12-iv)
                 if (auto* p = bp->mProcessor.apvts.getParameter (prefix))
                 {
                     const auto& range = p->getNormalisableRange();
@@ -607,6 +612,7 @@ void BassPage::showPageActionsMenu (juce::Component* anchor)
                         const auto& range = p->getNormalisableRange();
                         const int curRaw  = (int) std::round (range.convertFrom0to1 (p->getValue()));
                         const int nextRaw = (curRaw == 0) ? 1 : 0;
+                        beginParamUndoGesture (bp->mProcessor.apvts, trackPrefix + "bsb_voiceMode"); // Task 6 (12-iv)
                         p->setValueNotifyingHost (range.convertTo0to1 ((float) nextRaw));
                     }
                 }
@@ -617,6 +623,7 @@ void BassPage::showPageActionsMenu (juce::Component* anchor)
                         const auto& range = p->getNormalisableRange();
                         const float curRaw  = range.convertFrom0to1 (p->getValue());
                         const float nextRaw = (curRaw <= 1.5f) ? 8.f : 1.f;
+                        beginParamUndoGesture (bp->mProcessor.apvts, trackPrefix + "bsp_voiceCap"); // Task 6 (12-iv)
                         p->setValueNotifyingHost (range.convertTo0to1 (nextRaw));
                     }
                 }
@@ -955,7 +962,63 @@ void BassPage::loadPagePreset (const juce::File& xml)
 {
     if (! xml.existsAsFile()) return;
 
-    const juce::String savedEngineType = PagePresetIO::peekEngineType (xml);
+    applyPagePresetXml (xml.loadFileAsString());
+
+    const juce::String newName = xml.getFileNameWithoutExtension();
+    setTabName (newName);
+    if (onSoundNameChanged) onSoundNameChanged (newName);
+}
+
+void BassPage::performChainSwapGesture (const juce::String& label,
+                                        const std::function<void()>& op)
+{
+    const juce::String before = capturePagePresetXml();
+    if (! mUndoCtx.isValid() || before.isEmpty()) { op(); return; }
+
+    op();
+    const juce::String after = capturePagePresetXml();
+    if (before == after) return;
+
+    const juce::File beforeF = UndoSnapshotStore::writeNew (before);
+    const juce::File afterF  = UndoSnapshotStore::writeNew (after);
+    // Jeff ruling 2026-08-06: resolve the LIVE page at apply time (a
+    // delete+resurrect cycle replaces this object; SafePointer = fallback).
+    auto resolveSelf = mUndoCtx.resolveOwnerPage;
+    auto sp = juce::Component::SafePointer<BassPage> (this);
+    auto apply = [resolveSelf, sp] (const juce::File& f)
+    {
+        auto* bp = resolveSelf ? dynamic_cast<BassPage*> (resolveSelf())
+                               : sp.getComponent();
+        if (bp != nullptr && f.existsAsFile())
+            bp->applyPagePresetXml (f.loadFileAsString());
+    };
+    mUndoCtx.perform (new StructuralOpAction ([apply, beforeF] { apply (beforeF); },
+                                              [apply, afterF]  { apply (afterF); },
+                                              { beforeF, afterF }),
+                      label);
+}
+
+// QA-UndoCoverage Task 7: the Save/Load Page Preset payload over in-memory
+// XML -- the structural-undo snapshot capture/apply rides these.
+juce::String BassPage::capturePagePresetXml()
+{
+    if (mEngineProcessor == nullptr) return {};
+    const juce::String stripPrefix  = "mixer_bass_" + juce::String (mPageIndex);
+    const juce::String enginePrefix = bassEnginePrefixOf (mEngineProcessor);
+    return PagePresetIO::exportPagePreset (mProcessor,
+                                           PagePresetIO::PageKind::Bass,
+                                           mPageIndex,
+                                           stripPrefix,
+                                           mEngineProcessor,
+                                           mEngineType,
+                                           enginePrefix);
+}
+
+void BassPage::applyPagePresetXml (const juce::String& xmlText)
+{
+    if (xmlText.isEmpty()) return;
+
+    const juce::String savedEngineType = PagePresetIO::peekEngineTypeFromXml (xmlText);
     if (savedEngineType.isNotEmpty() && savedEngineType != mEngineType)
         selectEngine (savedEngineType);
 
@@ -970,11 +1033,7 @@ void BassPage::loadPagePreset (const juce::File& xml)
                                      mEngineProcessor,
                                      enginePrefix,
                                      noFallback,
-                                     xml.loadFileAsString());
-
-    const juce::String newName = xml.getFileNameWithoutExtension();
-    setTabName (newName);
-    if (onSoundNameChanged) onSoundNameChanged (newName);
+                                     xmlText);
     takeStateSnapshot();
 }
 

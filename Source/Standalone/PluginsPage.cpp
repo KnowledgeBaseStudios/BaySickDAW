@@ -1,4 +1,5 @@
 #include "PluginsPage.h"
+#include "UndoSnapshotStore.h"   // QA-UndoCoverage ruling 3a: swap snapshots
 #include "../PluginProcessor.h"
 #include "../EngineRig.h"
 #include "SharedUI.h"   // VC palette
@@ -415,6 +416,48 @@ void PluginsPage::savePagePreset (std::function<void()> onSaved)
         }), false);
 }
 
+// QA-UndoCoverage ruling 3a: plugin-state swap gesture as one transaction.
+void PluginsPage::performChainSwapGesture (const juce::String& label,
+                                           const std::function<void()>& op)
+{
+    auto encode = [] (juce::AudioProcessor* eng) -> juce::String
+    {
+        if (eng == nullptr) return {};
+        juce::MemoryBlock mb;
+        eng->getStateInformation (mb);
+        return mb.toBase64Encoding();
+    };
+
+    const juce::String before = encode (getEngineProcessor());
+    if (! mUndoCtx.isValid() || before.isEmpty()) { op(); return; }
+
+    op();
+    const juce::String after = encode (getEngineProcessor());
+    if (before == after) return;
+
+    const juce::File beforeF = UndoSnapshotStore::writeNew (before);
+    const juce::File afterF  = UndoSnapshotStore::writeNew (after);
+    // Jeff ruling 2026-08-06: resolve the LIVE page at apply time (a
+    // delete+resurrect cycle replaces this object; SafePointer = fallback).
+    auto resolveSelf = mUndoCtx.resolveOwnerPage;
+    auto sp = juce::Component::SafePointer<PluginsPage> (this);
+    auto apply = [resolveSelf, sp] (const juce::File& f)
+    {
+        auto* pp = resolveSelf ? dynamic_cast<PluginsPage*> (resolveSelf())
+                               : sp.getComponent();
+        if (pp == nullptr || ! f.existsAsFile()) return;
+        auto* eng = pp->getEngineProcessor();
+        if (eng == nullptr) return;
+        juce::MemoryBlock mb;
+        if (mb.fromBase64Encoding (f.loadFileAsString()))
+            eng->setStateInformation (mb.getData(), (int) mb.getSize());
+    };
+    mUndoCtx.perform (new StructuralOpAction ([apply, beforeF] { apply (beforeF); },
+                                              [apply, afterF]  { apply (afterF); },
+                                              { beforeF, afterF }),
+                      label);
+}
+
 void PluginsPage::loadPagePreset (const juce::File& xml)
 {
     if (! xml.existsAsFile()) return;
@@ -569,6 +612,10 @@ void PluginsPage::showPageActionsMenu (juce::Component* anchor)
                 return;
             }
             if (r >= kIdLoadBase && r < kIdLoadBase + presetXmls.size())
-                safeThis->loadPagePreset (presetXmls[r - kIdLoadBase]);
+            {
+                auto* pp = safeThis.getComponent();
+                pp->performChainSwapGesture ("Load Page Preset",
+                    [pp, f = presetXmls[r - kIdLoadBase]] { pp->loadPagePreset (f); });
+            }
         });
 }

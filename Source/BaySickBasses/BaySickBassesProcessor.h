@@ -37,7 +37,7 @@ private:
     const juce::String mCcParamRoot; // "<prefix>cc"
 
 public:
-    explicit BaySickBassesProcessor (int instIdx);
+    BaySickBassesProcessor (int instIdx, juce::UndoManager& undoMgr);
     ~BaySickBassesProcessor() override;
 
     // ── AudioProcessor interface ──────────────────────────────────────────────
@@ -66,9 +66,10 @@ public:
     bool isBusesLayoutSupported (const BusesLayout&) const override;
 
     // ── Public interface ──────────────────────────────────────────────────────
-    // UndoManager declared BEFORE apvts so its address is valid by the time the
-    // apvts constructor stores `&mUndoManager` (matches BaySickRustyDrums).
-    juce::UndoManager                  mUndoManager;
+    // QA-UndoCoverage: the GLOBAL manager (VibeSynthProcessor-owned) -- ARIA
+    // panel edits transact into the one app history.  Reference declared BEFORE
+    // apvts so it is bound by the time the apvts constructor stores its address.
+    juce::UndoManager&                 mUndoManager;
     juce::AudioProcessorValueTreeState apvts;
 
     // L-1 instance bookkeeping.  `mInstIdx` baked into APVTS prefix at
@@ -107,7 +108,6 @@ public:
     // get APVTS-bound (no kit Basses currently uses any, but matches Rusty).
     static constexpr int kCcCount = 512;
 
-    void sendCc (int cc, int value);
     int  getCcValue (int cc) const;
     int  getKitDefaultCc (int cc) const;   // read-only snapshot of kit's set_cc<N> values
     juce::String getCcLabel (int cc) const; // kit's `label_cc<N>=<text>` (empty if none)
@@ -135,10 +135,6 @@ public:
     // QA-G3Smoke Task 12: slide-tail peek for the idle-suspend predicate --
     // see BaySickGuitars for rationale.
     bool isSlideActive() const noexcept { return mSlideSampler.isActive(); }
-
-    // Project-level undo - editor wires Ctrl+Z to undo()/redo() so panel
-    // edits, automation captures, and CC type-in entries are all reversible.
-    juce::UndoManager& getUndoManager() noexcept { return mUndoManager; }
 
     // 2026-05-05 dirty-flag wiring: every edit to this engine's apvts.state
     // (knob drag, automation, kit-load CC defaults push, replaceState) fires

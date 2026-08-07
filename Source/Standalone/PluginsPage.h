@@ -1,6 +1,7 @@
 #pragma once
 #include <JuceHeader.h>
 #include "../Hosting/HostedPlugin.h"
+#include "UndoActions.h"   // QA-UndoCoverage ruling 3a: UndoContext + StructuralOpAction
 
 class VibeSynthProcessor;
 
@@ -56,6 +57,13 @@ public:
     juce::AudioProcessor* getEngineProcessor() const;
     Hosting::HostedPluginInstance* getHosted() const;
 
+    // QA-UndoCoverage ruling 3a: one plugin-state swap gesture (page-preset
+    // load) = one structural transaction.  Skips the wrap when no plugin is
+    // hosted.  Wired by the page creators.
+    void setUndoContext (const UndoContext& ctx) { mUndoCtx = ctx; }
+    void performChainSwapGesture (const juce::String& label,
+                                  const std::function<void()>& op);
+
     // Fired when a plugin is first chosen -- StandaloneEditor spawns the mixer
     // strip off this, same as the other page types.
     std::function<void()> onEngineSelected;
@@ -93,6 +101,7 @@ public:
     void parentHierarchyChanged() override;   // peer-keyed poll suspend (TS4)
 
 private:
+    UndoContext mUndoCtx;   // QA-UndoCoverage ruling 3a
     void timerCallback() override;
     void rebuildEditor();
     void showPicker();

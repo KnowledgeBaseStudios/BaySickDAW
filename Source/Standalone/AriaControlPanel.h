@@ -48,10 +48,10 @@ public:
         std::function<juce::String(int cc)>  ccLabel;
         juce::String                         engineName  {};
         juce::Colour                         accentColor { juce::Colours::transparentBlack };
-        // Jeff, 2026-08-04: keep the band even with NO engine name.  Rusty's
-        // kit artwork carries its own logo, so the name would be a duplicate --
-        // but the band itself is where Rusty's Program + Player Preset controls
-        // live, and dissolving it left them homeless on the window strip.
+        // Jeff, 2026-08-06: keep the band even with NO engine name (Rusty's
+        // kit artwork carries its own logo).  The band hosts the section TAB
+        // ROW (Main / Kick / Snare / ...) -- see resized() -- while the
+        // Program + Player Preset controls live on the WINDOW title strip.
         bool                                 hostTitleBar { false };
     };
 
@@ -74,8 +74,8 @@ public:
     void setEngine (Binding binding);
 
     // QA-G3Smoke G-16 / SW-3: the internal title bar.  Null unless the binding
-    // carries an engineName OR sets hostTitleBar.  Owning pages host their
-    // program controls on it (addHostedTrailingWidget).
+    // carries an engineName OR sets hostTitleBar.  Since 2026-08-06 the band's
+    // content is the section tab row (laid by resized()), not hosted widgets.
     BaySickTitleBar* getTitleBar() const noexcept { return mTitleBar.get(); }
 
 private:

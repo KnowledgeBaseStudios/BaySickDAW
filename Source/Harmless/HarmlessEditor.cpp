@@ -1,6 +1,7 @@
 #include "HarmlessEditor.h"
 #include "../AppPaths.h"
 #include "../Standalone/SharedUI.h"   // VKnobAutomation hooks
+#include "../Standalone/UndoBracket.h"
 
 // ── Layout constants ──────────────────────────────────────────────────────────
 // QA-Layout T7 (Specific-2): design size = the CONTENT area of Jeff's
@@ -273,6 +274,7 @@ HarmlessEditor::HarmlessEditor (HarmlessProcessor& p)
         {
             const bool on = mAutoGainBtn.getToggleState();
             mAutoGainBtn.setButtonText (on ? "AG: ABS" : "AG: REL");
+            beginParamUndoGesture (mProc.apvts, agParamId); // Task 6 (12-iv)
             if (auto* p = dynamic_cast<juce::RangedAudioParameter*> (mProc.apvts.getParameter (agParamId)))
                 p->setValueNotifyingHost (on ? 1.0f : 0.0f);
         };
@@ -327,6 +329,7 @@ HarmlessEditor::HarmlessEditor (HarmlessProcessor& p)
     // pulls from APVTS via a syncFromApvts lambda invoked once after attachments.
     mPartABtn.onClick = [this, &p]
     {
+        beginParamUndoGesture (p.apvts, p.pid ("part_sel")); // Task 6 (12-iv)
         if (auto* pp = dynamic_cast<juce::RangedAudioParameter*> (
                           p.apvts.getParameter (p.pid ("part_sel"))))
             pp->setValueNotifyingHost (pp->getNormalisableRange().convertTo0to1 (0.0f));
@@ -336,6 +339,7 @@ HarmlessEditor::HarmlessEditor (HarmlessProcessor& p)
     };
     mPartBBtn.onClick = [this, &p]
     {
+        beginParamUndoGesture (p.apvts, p.pid ("part_sel")); // Task 6 (12-iv)
         if (auto* pp = dynamic_cast<juce::RangedAudioParameter*> (
                           p.apvts.getParameter (p.pid ("part_sel"))))
             pp->setValueNotifyingHost (pp->getNormalisableRange().convertTo0to1 (1.0f));
@@ -1384,7 +1388,7 @@ void HarmlessEditor::showPresetMenu()
             else if (result == 1001)
             {
                 auto freshTree = juce::ValueTree (mProc.apvts.state.getType());
-                mProc.apvts.replaceState (freshTree);
+                mProc.apvts.replaceStateKeepingUndoHistory (freshTree, "Init Patch");   // ruling 3a
             }
         });
 }
@@ -1405,7 +1409,8 @@ void HarmlessEditor::loadPreset (const juce::File& f)
     if (auto xml = juce::XmlDocument::parse (f))
         if (xml->hasTagName (mProc.apvts.state.getType()))
         {
-            mProc.apvts.replaceState (juce::ValueTree::fromXml (*xml));
+            mProc.apvts.replaceStateKeepingUndoHistory (juce::ValueTree::fromXml (*xml),
+                                                        "Load Preset");   // ruling 3a
             ok = true;
         }
     // 2026-04-30: notify page wrapper so Layer/Bass tab + mixer strip get

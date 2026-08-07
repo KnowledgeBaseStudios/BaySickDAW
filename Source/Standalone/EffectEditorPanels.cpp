@@ -1,4 +1,5 @@
 #include "EffectEditorPanels.h"
+#include "UndoBracket.h"
 #include "EffectPresetIO.h"       // userNamPedalsDir / irDir chooser homes
 #include "../Hosting/HostedPluginEffect.h"   // QA-ModelShell TS6: hosted plugin editor
 // D.4 (2026-05-01): force MSBuild to recompile this file - Compressor + Delay
@@ -1006,9 +1007,10 @@ struct CompressorPanel : public EditorPanelBase,
         if (auto* p = apvts.getParameter (prefix + "comp_kneeType"))
         {
             auto prev = kneeSel->onChange;
-            kneeSel->onChange = [prev, p] (int idx)
+            kneeSel->onChange = [prev, p, um = apvts.undoManager] (int idx)
             {
                 if (prev) prev (idx);
+                beginParamUndoGesture (um, p->paramID); // Task 6 (12-iv)
                 p->setValueNotifyingHost (
                     p->getNormalisableRange().convertTo0to1 ((float) idx));
             };
@@ -1630,9 +1632,10 @@ struct SaturationPanel : public EditorPanelBase,
         if (auto* p = apvts.getParameter (prefix + "sat_harmonicsMode"))
         {
             auto prev = harmModeSel->onChange;
-            harmModeSel->onChange = [prev, p] (int idx)
+            harmModeSel->onChange = [prev, p, um = apvts.undoManager] (int idx)
             {
                 if (prev) prev (idx);
+                beginParamUndoGesture (um, p->paramID); // Task 6 (12-iv)
                 p->setValueNotifyingHost (
                     p->getNormalisableRange().convertTo0to1 ((float) idx));
             };
@@ -3736,9 +3739,12 @@ struct LimiterPanel : public EditorPanelBase,
             if (mDsp) mDsp->setCharacterIndex (idx);
             // Chain context: the parameter is the authority (see mChainApvts).
             if (mChainApvts != nullptr)
+            {
+                beginParamUndoGesture (*mChainApvts, mChainPrefix + "limiter_character"); // Task 6 (12-iv)
                 if (auto* p = mChainApvts->getParameter (mChainPrefix + "limiter_character"))
                     p->setValueNotifyingHost (
                         p->getNormalisableRange().convertTo0to1 ((float) idx));
+            }
         };
         addAndMakeVisible (*charSel);
 
@@ -4391,9 +4397,10 @@ struct DeEsserPanel : public EditorPanelBase, private juce::Timer
         if (auto* p = apvts.getParameter (prefix + "deesser_msMode"))
         {
             auto prev = msSel->onChange;
-            msSel->onChange = [prev, p] (int idx)
+            msSel->onChange = [prev, p, um = apvts.undoManager] (int idx)
             {
                 if (prev) prev (idx);
+                beginParamUndoGesture (um, p->paramID); // Task 6 (12-iv)
                 p->setValueNotifyingHost (
                     p->getNormalisableRange().convertTo0to1 ((float) idx));
             };

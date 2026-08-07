@@ -13,6 +13,7 @@ juce::String categoryName (Category c)
         case Category::DrumKit:        return "Drum Kit Key Binds";
         case Category::MouseReference: return "Mouse Reference";
         case Category::VocalEditors:   return "Vocal Editor Key Binds";
+        case Category::EventEditor:    return "Event Editor Key Binds";
     }
     return {};
 }
@@ -716,6 +717,42 @@ namespace
             { Category::VocalEditors, "Drag (protected strip)",
               "Paint Protected Area",
               "Drags out a region the aligner must leave alone.  Right-click it to toggle Protect Timing / Protect Pitch or delete the area." },
+
+            // ── Event Editor (QA-UndoCoverage Task 5, docket 14=a) ──────────
+            // Window-local hardcoded keys; display-only, none rebindable.
+            { Category::EventEditor, "P",
+              "Pencil Tool",
+              "Arms the Draw tool: click empty space to add a point, drag a point to move it." },
+            { Category::EventEditor, "B",
+              "Paint Tool",
+              "Arms the Paint brush: drag to lay a run of points along the curve." },
+            { Category::EventEditor, "D",
+              "Erase Tool",
+              "Arms the Erase tool: click or drag across points to remove them." },
+            { Category::EventEditor, "I",
+              "Interpolate Tool",
+              "Arms the Interpolate tool: smooths the curve between the points you drag across." },
+            { Category::EventEditor, "E",
+              "Select Tool",
+              "Arms the Select tool: marquee-drag to select points for group edits." },
+            { Category::EventEditor, "Z",
+              "Zoom Tool",
+              "Arms the Zoom tool: drag a rectangle to zoom the lane view onto it." },
+            { Category::EventEditor, "Delete / Backspace",
+              "Delete Selected Points",
+              "Removes every selected point.  Deleting the last point prompts to remove the whole automation clip instead of leaving an empty block." },
+            { Category::EventEditor, "Ctrl + Z",
+              "Undo",
+              "Undoes the most recent edit in the app's ONE history - lane edits land in the same Ctrl+Z stream as everything else." },
+            { Category::EventEditor, "Ctrl + Alt + Z",
+              "Redo",
+              "Redo, matching the app-wide binding.  (The editor's old local Ctrl+Y redo was retired when its history joined the app's.)" },
+            { Category::EventEditor, "Ctrl + A",
+              "Select All Points",
+              "Selects every point in the lane." },
+            { Category::EventEditor, "Ctrl + M",
+              "Import MIDI CC",
+              "Imports a .mid file's CC lane as automation points into this lane." },
         };
     }
 }

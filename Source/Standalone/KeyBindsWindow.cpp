@@ -452,6 +452,10 @@ KeyBindsContent::KeyBindsContent (juce::ApplicationCommandManager& mgr)
     // not rebindable (same deal as the Piano Roll's local keys).
     mTabs.addTab (BSCommands::categoryName (BSCommands::Category::VocalEditors),
                   VC::Bg, new KeyBindsTab (BSCommands::Category::VocalEditors, mgr), true);
+    // 2026-08-06 (QA-UndoCoverage Task 5, docket 14=a): Event Editor local
+    // keys - display-only reference rows, none rebindable.
+    mTabs.addTab (BSCommands::categoryName (BSCommands::Category::EventEditor),
+                  VC::Bg, new KeyBindsTab (BSCommands::Category::EventEditor, mgr), true);
 
     addAndMakeVisible (mTabs);
 }

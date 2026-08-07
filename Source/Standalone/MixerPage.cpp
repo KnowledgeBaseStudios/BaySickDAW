@@ -1,4 +1,5 @@
 #include "MixerPage.h"
+#include "UndoBracket.h"
 #include <set>   // D.3: setStripOrder uses std::set for dedup
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -616,6 +617,7 @@ void MixerPage::onAddCableRequestedFor(int srcChannelId)
                     if (! safeThis || safeThis->mCableOverlay == nullptr) return;
                     const int slot = safeThis->mCableOverlay->findAvailableSendSlot (srcPrefix);
                     if (slot < 0) return;
+                    beginParamUndoGesture (safeThis->mProcessor.apvts, srcPrefix + "_send" + juce::String (slot) + "_to"); // Task 6 (12-iv)
                     writeNatural (srcPrefix + "_send" + juce::String (slot) + "_to", (float) dstId);
                 });
         }
@@ -629,6 +631,7 @@ void MixerPage::onAddCableRequestedFor(int srcChannelId)
                 safeThis->addAuxChannelAtIndex (auxIdx);
                 const int slot = safeThis->mCableOverlay->findAvailableSendSlot (srcPrefix);
                 if (slot < 0) return;
+                beginParamUndoGesture (safeThis->mProcessor.apvts, srcPrefix + "_send" + juce::String (slot) + "_to"); // Task 6 (12-iv)
                 writeNatural (srcPrefix + "_send" + juce::String (slot) + "_to",
                               (float) auxStrip (auxIdx));
             });
@@ -654,6 +657,7 @@ void MixerPage::onAddCableRequestedFor(int srcChannelId)
                     const juce::String tp = MixerChannelIds::prefixFromChannelId (dstId);
                     const int slot = safeThis->mCableOverlay->findAvailableScRecvSlot (tp);
                     if (slot < 0) return;
+                    beginParamUndoGesture (safeThis->mProcessor.apvts, tp + "_sc_recv" + juce::String (slot) + "_from"); // Task 6 (12-iv)
                     writeNatural (tp + "_sc_recv" + juce::String (slot) + "_from",
                                   (float) srcChannelId);
                 });
@@ -680,8 +684,9 @@ void MixerPage::onAddCableRequestedFor(int srcChannelId)
             const bool ticked = dstId == currentDest;
             const bool ok = ticked || ! graph.wouldCreateCycle (srcChannelId, dstId);
             moveSub.addItem (en.name, ok, ticked,
-                [writeNatural, srcPrefix, dstId]
+                [safeThis, writeNatural, srcPrefix, dstId]
                 {
+                    if (safeThis) beginParamUndoGesture (safeThis->mProcessor.apvts, srcPrefix + "_sendTo"); // Task 6 (12-iv)
                     writeNatural (srcPrefix + "_sendTo", (float) dstId);
                 });
         }
@@ -995,6 +1000,7 @@ void MixerPage::CableOverlay::showCablePopup(juce::Point<float> screenPt,
         {
             if (targetPrefix.isEmpty()) return;
             const juce::String sp = targetPrefix + "_sc_recv" + juce::String(slot);
+            beginParamUndoGesture(owner.mProcessor.apvts, sp + "_from"); // Task 6 (12-iv)
             if (auto* p = dynamic_cast<juce::RangedAudioParameter*>(
                     owner.mProcessor.apvts.getParameter(sp + "_from")))
                 p->setValueNotifyingHost(p->getNormalisableRange().convertTo0to1(-1.f));
@@ -1065,6 +1071,7 @@ void MixerPage::CableOverlay::showCablePopup(juce::Point<float> screenPt,
         auto deleteAction = [this, prefix, slot = hit.sendSlot]
         {
             const juce::String sp = prefix + "_send" + juce::String(slot);
+            beginParamUndoGesture(owner.mProcessor.apvts, sp + "_to"); // Task 6 (12-iv)
             if (auto* p = dynamic_cast<juce::RangedAudioParameter*>(
                     owner.mProcessor.apvts.getParameter(sp + "_to")))
                 p->setValueNotifyingHost(p->getNormalisableRange().convertTo0to1(-1.f));
@@ -2207,6 +2214,7 @@ void MixerPage::showInputChannelPicker(int channelId)
                               : (isStereoPick ? (chosen - 200)
                                               : (chosen - 100));
 
+            beginParamUndoGesture (self->mProcessor.apvts, prefix + "_inputChannelIdx"); // Task 6 (12-iv)
             if (auto* p = self->mProcessor.apvts.getParameter (prefix + "_inputChannelIdx"))
                 p->setValueNotifyingHost (
                     p->getNormalisableRange().convertTo0to1 ((float) newIdx));
@@ -2848,6 +2856,7 @@ namespace
 
 void MixerPage::deleteAuxStrip (int idx, int auxChannelId)
 {
+    beginParamUndoGesture (mProcessor.apvts, MixerChannelIds::prefixFromChannelId (auxChannelId) + "_level"); // Task 6 (12-iv)
     // Reset every send that targeted this aux.
     //  - Primary _sendTo  → natural parent for that strip's channel id
     //  - Secondary _sendN_to → -1 (inactive)
@@ -2886,6 +2895,7 @@ void MixerPage::deleteSecondaryBus (int channelId)
                         : (channelId == kPluginsBus2) ? kPluginsBus
                                                       : kInstBus;
 
+    beginParamUndoGesture (mProcessor.apvts, prefixFromChannelId (channelId) + "_level"); // Task 6 (12-iv)
     // Reroute any strip whose primary _sendTo targets this bus → parent bus.
     // Reroute any _sendN_to targeting this bus → -1 (inactive) so we don't
     // double-up the parent bus on multiple sends.
@@ -3238,6 +3248,8 @@ void MixerPage::syncFromModel()
 // so attachments update and the audio thread sees the new values immediately.
 void MixerPage::syncApvtsFromMixerState()
 {
+    // QA-UndoCoverage Task 6: ctor-time model->APVTS mirror is programmatic.
+    juce::AudioProcessorValueTreeState::ScopedProgrammaticParamWrites spw;
     const auto& mx = mPM.getMixer();
     auto writeFloat = [&](const juce::String& id, float v)
     {
@@ -3596,6 +3608,7 @@ void MixerPage::onBusCollapseToggled (int channelId)
 {
     const juce::String prefix = MixerChannelIds::prefixFromChannelId (channelId);
     if (prefix.isEmpty()) return;
+    beginParamUndoGesture (mProcessor.apvts, prefix + "_collapsed"); // Task 6 (12-iv)
     if (auto* p = mProcessor.apvts.getParameter (prefix + "_collapsed"))
         p->setValueNotifyingHost (p->getValue() > 0.5f ? 0.0f : 1.0f);   // flip
     layoutScrollContent();   // re-reads the param: hide/show members + close the gap

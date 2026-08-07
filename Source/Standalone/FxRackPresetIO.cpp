@@ -124,6 +124,8 @@ bool load (VibeSynthProcessor& proc, int channelId,
     {
         if (destPrefix.isNotEmpty())
         {
+            // QA-UndoCoverage Task 6: rack-preset EQ restore is programmatic.
+            juce::AudioProcessorValueTreeState::ScopedProgrammaticParamWrites spw;
             for (auto* pe = eqEl->getFirstChildElement(); pe != nullptr; pe = pe->getNextElement())
             {
                 if (! pe->hasTagName ("Param")) continue;

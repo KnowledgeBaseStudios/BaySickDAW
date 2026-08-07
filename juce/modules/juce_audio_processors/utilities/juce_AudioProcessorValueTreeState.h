@@ -403,6 +403,28 @@ public:
     */
     void replaceState (const ValueTree& newState);
 
+    /** BaySickDAW QA-UndoCoverage (2026-08-06): replaceState minus the
+        clearUndoHistory() call.  With every engine APVTS sharing the ONE global
+        UndoManager, a mid-session engine preset / kit load calling replaceState
+        would wipe the entire app undo history.  Engine-state swaps use this
+        variant; only the main-APVTS project/template load keeps the clearing
+        replaceState (a load is supposed to start with an empty history).
+        Caveat carried knowingly: undo entries recorded BEFORE the swap hold
+        actions bound to the replaced (detached) trees, so those particular
+        param rows become inert no-ops for this engine -- strictly better than
+        wiping everything, and the structural-undo snapshot ops cover the
+        full-state cases.
+
+        Jeff ruling 3a (2026-08-06): pass a non-empty undoTransactionName and
+        the swap itself becomes ONE undoable transaction (old tree <-> new
+        tree, wholesale) -- this is how engine-internal preset loads join the
+        history without per-editor plumbing.  Opt-in ONLY at direct user
+        preset gestures; load paths and calls already inside a wrapped
+        structural gesture must keep the silent default (a nested swap action
+        would contaminate the enclosing transaction).  */
+    void replaceStateKeepingUndoHistory (const ValueTree& newState,
+                                         const String& undoTransactionName = {});
+
     //==============================================================================
     /** A reference to the processor with which this state is associated. */
     AudioProcessor& processor;
@@ -418,6 +440,52 @@ public:
 
     /** Provides access to the undo manager that this object is using. */
     UndoManager* const undoManager;
+
+    //==============================================================================
+    // BaySickDAW QA-UndoCoverage (2026-08-06): thread-local programmatic-write
+    // phase.  Parameter writes notify the internal ParameterAdapter SYNCHRONOUSLY
+    // on the writer's thread, but the value reaches the ValueTree (and therefore
+    // the UndoManager) later, on the message-thread timer flush -- so a caller-
+    // scoped "suppress undo now" cannot work.  Instead a programmatic writer
+    // (automation replay, applicator pass, baseline restore, offline render)
+    // opens this phase around its writes; the adapter records the mark at write
+    // time, and the flush consumes it -- marked values write to the tree WITHOUT
+    // the UndoManager, so programmatic writes never create or contaminate undo
+    // transactions.  UI gesture writes are unaffected.  thread_local keeps an
+    // audio-thread replay phase from marking concurrent message-thread UI writes.
+    static thread_local bool programmaticWritePhase;
+
+    struct ScopedProgrammaticParamWrites
+    {
+        ScopedProgrammaticParamWrites() : previous (programmaticWritePhase)  { programmaticWritePhase = true; }
+        ~ScopedProgrammaticParamWrites()                                     { programmaticWritePhase = previous; }
+
+    private:
+        const bool previous;
+        JUCE_DECLARE_NON_COPYABLE (ScopedProgrammaticParamWrites)
+    };
+
+    // BaySickDAW QA-UndoCoverage (2026-08-06, redo-across-resurrection fix):
+    // stable identity for undo targeting.  Engines are destroyed and re-created
+    // by tab resurrection / program switches / kit loads, so an undo entry
+    // holding an object reference dies with the instance.  The app stamps a
+    // tag at every APVTS creation ("main", "rusty", rig kind:page, ...); param
+    // undo entries and StateSwapAction store the TAG and re-resolve the LIVE
+    // instance through the registry at apply time -- the same model-addressed
+    // convention the automation applicators follow.  Re-created engines reuse
+    // their identity (pageIndex-keyed), so redo lands on the new instance.
+    String undoOwnerTag;
+    static AudioProcessorValueTreeState* findByUndoOwnerTag (const String& tag);
+
+    // BaySickDAW QA-UndoCoverage (2026-08-06, gesture-merge fix): the flush
+    // timer (10-50 Hz, decaying to 500 ms idle) is what files param edits
+    // into the manager -- so two quick gestures could land in ONE
+    // transaction (the second begin only sets a flag; the first gesture's
+    // late flush then landed inside the new set).  Every transaction-
+    // boundary site (gesture begins, choke-point transactions, undo/redo)
+    // calls this FIRST so pending edits are filed into THEIR transaction
+    // before the boundary moves.  Message thread only.
+    static void flushAllLiveInstancesToValueTrees();
 
 private:
     //==============================================================================

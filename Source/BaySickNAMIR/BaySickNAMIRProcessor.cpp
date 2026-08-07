@@ -925,6 +925,11 @@ void BaySickNAMIRProcessor::captureSnapshotFromCurrent (int slot)
 void BaySickNAMIRProcessor::applySnapshotToCurrent (int slot)
 {
     if (slot < 0 || slot > 1) return;
+    // QA-UndoCoverage Task 6: snapshot restores are programmatic.  Undo of an
+    // A/B flip stays correct WITHOUT these values in history -- undoing the
+    // ab_slot param re-fires parameterChanged, which re-applies the other
+    // slot's snapshot (the handler is self-healing).
+    juce::AudioProcessorValueTreeState::ScopedProgrammaticParamWrites spw;
     const auto& s = mSnapshots[(size_t) slot];
 
     auto setF = [&] (const char* id, float value)
@@ -1081,7 +1086,7 @@ void BaySickNAMIRProcessor::setStateInformation (const void* data, int sizeInByt
 
         if (xml->hasTagName (apvts.state.getType()))
         {
-            apvts.replaceState (juce::ValueTree::fromXml (*xml));
+            apvts.replaceStateKeepingUndoHistory (juce::ValueTree::fromXml (*xml));
             mNamPaths[0] = apvts.state.getProperty ("nam_filepath",   {}).toString();
             mIrPaths [0] = apvts.state.getProperty ("ir_filepath",    {}).toString();
             mNamPaths[1] = apvts.state.getProperty ("nam_filepath_b", {}).toString();

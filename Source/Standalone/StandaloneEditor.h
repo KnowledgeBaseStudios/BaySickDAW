@@ -48,7 +48,8 @@ class BaySickRustyDrumsPage;  // J-6 (2026-05-03): singleton drum-kit page
 class StandaloneEditor : public  juce::Component,
                          public  juce::MenuBarModel,
                          public  juce::ApplicationCommandTarget,
-                         public  juce::KeyListener
+                         public  juce::KeyListener,
+                         public  juce::ChangeListener
 {
 public:
     StandaloneEditor(VibeSynthProcessor& p, StandalonePlayHead& ph,
@@ -73,11 +74,19 @@ public:
     juce::UndoManager& getUndoManager() { return mUndoManager; }
 
     // ── Undo dispatch (call instead of UndoManager directly) ─────────────────
-    // Takes ownership of action, updates history list, then forwards to manager.
-    bool doUndoAction(juce::UndoableAction* action, const juce::String& label);
+    // Takes ownership of action and forwards to the manager under a named
+    // transaction ("<owner>|<label>" when the owner key is tab-scoped).  The
+    // history-label list is rebuilt from the manager itself via ChangeListener
+    // (QA-UndoCoverage Task 3) -- write-side label maintenance is gone.
+    bool doUndoAction(juce::UndoableAction* action, const juce::String& label,
+                      const juce::String& ownerKey = "app");
     void globalUndo();
     void globalRedo();
     void showHistoryWindow();
+
+    // QA-UndoCoverage Task 3: fires on every UndoManager change (perform /
+    // undo / redo / clear) -- rebuilds the history labels from the real stack.
+    void changeListenerCallback (juce::ChangeBroadcaster*) override;
 
     // QA-F (2026-07-09): place a BaySickAlign render-to-bake on the Builder
     // grid (row below the originals + row-mute A/B, alignBake-marked).
@@ -112,7 +121,10 @@ public:
                               const std::vector<ContourNote>& notes);
 
     // Build a UndoContext token pointing at this editor's undo infrastructure.
-    UndoContext makeUndoContext();
+    // ownerKey tags the page's transactions in the history window (labels
+    // only); pass a tab-scoped key ("lay0", "vox1", ...) where the creation
+    // site knows it, "app" for global surfaces.
+    UndoContext makeUndoContext(const juce::String& ownerKey = "app");
 
     // Audio transport
     void startPlayback(double bpm);
@@ -421,9 +433,45 @@ private:
     std::unique_ptr<juce::Component> createLayersPageAtIndex (int idx);
     std::unique_ptr<juce::Component> createBassPageAtIndex   (int idx);
     std::unique_ptr<juce::Component> createDrumPageAtIndex   (int idx);   // D1.4
-    void spawnDuplicateDrumTab  (const juce::String& clipboardXml);        // D1.4-fix (c)
-    void spawnDuplicateLayerTab (const juce::String& clipboardXml);        // D1.4-fix (c)
-    void spawnDuplicateBassTab  (const juce::String& clipboardXml);        // D1.4-fix (c)
+    // D1.4-fix (c); QA-UndoCoverage Task 7 generalization: with a forced
+    // pageIndex + name these ARE the structural-undo resurrect path (a
+    // duplicate is just a resurrect at a fresh identity).  fullPreset = the
+    // xml is a full-chain Page Preset (engines + strips + racks) instead of
+    // the duplicate clipboard's engine-only blob.  Returns the new ribbon tab
+    // id, -1 on failure.
+    int spawnDuplicateDrumTab  (const juce::String& clipboardXml, int forcedPageIndex = -1,
+                                const juce::String& forcedName = {}, bool fullPreset = false);
+    int spawnDuplicateLayerTab (const juce::String& clipboardXml, int forcedPageIndex = -1,
+                                const juce::String& forcedName = {}, bool fullPreset = false);
+    int spawnDuplicateBassTab  (const juce::String& clipboardXml, int forcedPageIndex = -1,
+                                const juce::String& forcedName = {}, bool fullPreset = false);
+
+    // QA-UndoCoverage Task 7: user-facing tab delete with snapshot capture --
+    // performs a StructuralOpAction whose undo resurrects the tab (same
+    // pageIndex, same chain state) and whose redo re-deletes it.  Kinds
+    // without a capture path yet fall back to a plain closeTab.
+    void deleteTabWithUndo (int ribbonTabId);
+    // The duplicate gesture as one transaction (undo removes the duplicate;
+    // redo re-creates it at the same identity from its post-spawn snapshot).
+    void duplicateTabWithUndo (RibbonTabBar::TabType type, const juce::String& clipboardXml);
+
+    // QA-UndoCoverage Task 7 pass 2 (Jeff ruling 2a): capture + resurrect for
+    // the Clips/Vox/Inst/Plugins/Rusty kinds.  The record mirrors
+    // serializeTabsInto's per-kind Tab element; resurrect mirrors the
+    // project-restore branches (same creation order, same race-safe loads).
+    std::unique_ptr<juce::XmlElement> captureTabRecord (PageEntry& e);
+    int resurrectTabFromRecord (const juce::XmlElement& rec);
+
+    // Review fix (2026-08-06): user-initiated tab ADD as one transaction for
+    // the captureTabRecord kinds (undo closes the tab; redo resurrects it from
+    // its add-time record).  asRider appends into the CURRENT transaction
+    // instead of beginning one (Clips add composes with its library action).
+    // Suppression counter: composite adds (Guitars/Basses, Vox/Inst
+    // duplicates) spawn a plain page mid-flow through the strip cascade and
+    // wrap themselves at the end with the full record instead.
+    void wrapTabAddUndo (int ribbonTabId, const juce::String& label,
+                         bool asRider = false);
+    int  mSuppressAddUndoWrap = 0;
 
     // Project-load orchestration: tear down every dynamic (Layers / Bass /
     // Drums) tab + rebuild from a <UIState> element.  Safe to call repeatedly.
@@ -517,6 +565,8 @@ private:
     void saveKitAs ();                              // prompt + write XML
     void loadKit   (const juce::File& kitXml);      // entry: confirm + dispatch
     void loadKitImpl (const juce::File& kitXml);    // actual tear-down + rebuild
+    // QA-UndoCoverage Task 7: loadKitImpl wrapped as ONE undo transaction.
+    void loadKitWithUndo (const juce::File& kitXml);
     // 2026-04-26: Global Lock/Unlock prompt + cross-slot toggle.
     void showGlobalLockPrompt ();
     void applyGlobalLockToggle ();
@@ -596,14 +646,32 @@ public:
     void flushWindowBoundsNow() { flushAllWindowBounds(); }
 private:
 
-    // Undo manager - owned here, passed by pointer to sub-systems
-    juce::UndoManager mUndoManager;           // initialised in ctor with default 100 steps
+    // QA-UndoCoverage: the ONE global undo history lives on the processor
+    // (declared there BEFORE apvts -- apvts binds it at construction).  A
+    // reference keeps every existing consumer (UndoContext, EventEditor,
+    // history window, depth menu) pointed at the processor's manager.
+    juce::UndoManager& mUndoManager;
     int               mUndoHistorySize { 100 };  // mirrors current max; JUCE has no getter
 
-    // Parallel history label list (juce::UndoManager doesn't expose its list)
+    // History label list + cursor: REBUILT from the manager's real stack on
+    // every change message (QA-UndoCoverage Task 3) -- the deque/cursor pair
+    // survives because UndoHistoryWindow references both.  Never appended to
+    // directly.
     std::deque<juce::String>           mHistoryLabels;
     int                                mHistoryCursor { 0 };
     std::unique_ptr<UndoHistoryWindow> mHistoryWindow;
+    void rebuildHistoryLabels();
+    juce::String historyDisplayFor (const juce::String& transactionName) const;
+    juce::String ownerKeyForParamId (const juce::String& paramId) const;
+    // QA-UndoCoverage Task 8: previous manager depths for the dirty-tracker
+    // event derivation in changeListenerCallback.
+    int          mPrevUndoDepth { 0 };
+    int          mPrevRedoDepth { 0 };
+    juce::String mPrevTopUndoName;
+    // QA-UndoCoverage Task 4: editor-side capture/apply for AudioLibraryAction
+    // (the browser-panel ops carry their own; these serve the editor lambdas).
+    AudioLibrarySnapshot captureAudioLibrarySnapshot (bool withBlocks) const;
+    AudioLibraryAction::ApplyFn makeAudioLibraryApply();
 
     // ── UI layers (top to bottom) ─────────────────────────────────────────────
     // Menu bar (JUCE component, sits at very top)
@@ -1003,8 +1071,11 @@ private:
     // explicitly asked for the PAGE (ribbon empty-state click).
     // (Said "Mixer 'Add Vox/Inst Strip'" until 2026-08-05 -- T10 replaced those
     // buttons with the Add titled menu.)
-    void spawnVoxTabIfMissing  (int voxIdx,  bool selectAfter = true);
-    void spawnInstTabIfMissing (int instIdx, bool selectAfter = true);
+    // Return the new tab's ribbon id, or -1 when the tab already existed (or
+    // creation failed) -- the strip-cascade add wrap keys on "actually
+    // spawned" so resurrection/restore re-entries never re-perform.
+    int spawnVoxTabIfMissing  (int voxIdx,  bool selectAfter = true);
+    int spawnInstTabIfMissing (int instIdx, bool selectAfter = true);
 
     // Phase B-1 helpers (page-switch commands).
     // Find the first tab of the given ribbon type and select it.  No-op when

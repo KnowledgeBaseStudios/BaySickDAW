@@ -186,6 +186,12 @@ int MidiLearnRegistry::dispatchEvent (juce::AudioProcessorValueTreeState& apvts,
         }
     }
 
+    // QA-UndoCoverage Task 6: hardware CC streams have no gesture boundaries,
+    // so mapped writes are EXCLUDED from the undo history (an un-bracketed
+    // continuous stream would contaminate whatever transaction is open).
+    // Making hardware tweaks undoable would need idle-timeout gesture
+    // bracketing -- surfaced to Jeff as an open question, not built.
+    juce::AudioProcessorValueTreeState::ScopedProgrammaticParamWrites spw;
     int fired = 0;
     for (int i = 0; i < numHits; ++i)
     {

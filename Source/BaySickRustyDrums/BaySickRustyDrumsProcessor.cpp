@@ -1,4 +1,5 @@
 #include "BaySickRustyDrumsProcessor.h"
+#include "../Standalone/UndoBracket.h"
 #include "../MissingFileReport.h"   // QA-Export Task 5
 #include "../SampleLibrary.h"       // QA-ProjectSave Task 5: stable-root kit refs
 #include "sfizz.hpp"
@@ -12,11 +13,16 @@ constexpr const char* kPrefix = "brd_";
 inline juce::String pid (const char* name) { return juce::String (kPrefix) + name; }
 }
 
-BaySickRustyDrumsProcessor::BaySickRustyDrumsProcessor()
+BaySickRustyDrumsProcessor::BaySickRustyDrumsProcessor (juce::UndoManager& undoMgr)
     : juce::AudioProcessor (BusesProperties()
                                 .withOutput ("Out", juce::AudioChannelSet::stereo(), true)),
+      mUndoManager (undoMgr),
       apvts (*this, &mUndoManager, "BaySickRustyDrumsState", createLayout())
 {
+    // QA-UndoCoverage: stable undo identity -- the Rusty singleton is rebuilt
+    // on every program switch/kit load; the tag lets its undo entries land on
+    // the NEW instance (redo-across-resurrection fix).
+    apvts.undoOwnerTag = "rusty";
     mSfizz = std::make_unique<sfz::Sfizz>();
     mSfizz->setSampleRate     (static_cast<float>(mSampleRate));
     mSfizz->setSamplesPerBlock (mMaxBlockSize);
@@ -69,6 +75,7 @@ void BaySickRustyDrumsProcessor::setHiHatPedalClosed (bool closed)
 void BaySickRustyDrumsProcessor::sendCc (int cc, int value)
 {
     if (cc < 0 || cc >= kCcCount) return;
+    beginParamUndoGesture (&mUndoManager, "brd_cc" + juce::String (cc)); // Task 6 (12-iv)
     if (auto* p = dynamic_cast<juce::RangedAudioParameter*> (
             apvts.getParameter ("brd_cc" + juce::String (cc))))
     {
@@ -637,6 +644,9 @@ bool BaySickRustyDrumsProcessor::loadKit (const juce::File& sfzPath)
     // programs (e.g. Full -> Basic) would otherwise leak the previous program's
     // user-tweaked CC values into the new program.  The reset reaches sfizz via
     // setValueNotifyingHost -> parameterChanged.
+    // QA-UndoCoverage Task 6: kit-default pushes are programmatic (the kit
+    // load itself becomes ONE structural transaction in Task 7).
+    juce::AudioProcessorValueTreeState::ScopedProgrammaticParamWrites spw;
     for (int cc = 0; cc < kCcCount; ++cc)
     {
         if (auto* p = dynamic_cast<juce::RangedAudioParameter*> (
@@ -1004,5 +1014,5 @@ void BaySickRustyDrumsProcessor::setStateInformation (const void* data, int sz)
     }
 
     if (auto apvtsState = root.getChildWithName (apvts.state.getType()); apvtsState.isValid())
-        apvts.replaceState (apvtsState);
+        apvts.replaceStateKeepingUndoHistory (apvtsState);
 }

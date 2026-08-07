@@ -1,6 +1,7 @@
 #include "BaySickAlignEditor.h"
 #include "../AppPaths.h"
 #include "BaySickVocalProcessor.h"
+#include "../Standalone/UndoBracket.h"
 #include "../Standalone/BaySickTitleBar.h"
 #include "../Standalone/SharedUI.h"
 #include <algorithm>
@@ -1435,6 +1436,7 @@ void BaySickAlignEditor::applyFactoryPreset (int presetIdx)
 {
     presetIdx = juce::jlimit (0, 5, presetIdx);
     const auto& fp = kFactoryPresets[presetIdx];
+    beginParamUndoGesture (mProc.apvts, "bsa_preset"); // Task 6 (12-iv)
     setParamValue ("bsa_preset",         (float) presetIdx);
     setParamValue ("bsa_align_mode",     (float) fp.mode);
     setParamValue ("bsa_pitch_on",       fp.pitchOn ? 1.0f : 0.0f);
@@ -1491,6 +1493,7 @@ void BaySickAlignEditor::saveUserPreset()
                 target = dir.getChildFile (name + " (" + juce::String (n++) + ").xml");
             target.replaceWithText (el.toString());
 
+            beginParamUndoGesture (self->mProc.apvts, "bsa_preset"); // Task 6 (12-iv)
             self->setParamValue ("bsa_preset", 6.0f);   // "(User)"
             self->snapshotPresetValues();
         }), true);
@@ -1517,6 +1520,7 @@ void BaySickAlignEditor::loadUserPreset()
             if (! self || r <= 0 || r > files.size()) return;
             auto xml = juce::parseXML (files[r - 1]);
             if (xml == nullptr || ! xml->hasTagName ("BaySickAlignPreset")) return;
+            beginParamUndoGesture (self->mProc.apvts, "bsa_preset"); // Task 6 (12-iv)
             for (auto* id : kPresetParamIds)
                 if (xml->hasAttribute (id))
                     self->setParamValue (id, (float) xml->getDoubleAttribute (id));

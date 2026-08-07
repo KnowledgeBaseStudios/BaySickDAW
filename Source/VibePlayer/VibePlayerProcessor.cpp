@@ -427,7 +427,7 @@ void VibePlayerProcessor::setStateInformation (const void* data, int sz)
     if (auto xml = getXmlFromBinary (data, sz))
     {
         auto tree = juce::ValueTree::fromXml (*xml);
-        apvts.replaceState (tree);
+        apvts.replaceStateKeepingUndoHistory (tree);
 
         // P3: replay the saved sample load.  Kind tells us which API to use.
         // Missing / empty path = nothing to restore (fresh engine).

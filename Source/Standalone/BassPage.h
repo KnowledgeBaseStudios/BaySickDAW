@@ -87,6 +87,14 @@ public:
     // button to chain delete after save completes.
     void savePagePreset   (std::function<void()> onSaved = {});
     void loadPagePreset   (const juce::File& xml);
+    // QA-UndoCoverage Task 7: the same full-chain payload over in-memory XML
+    // (the structural-undo snapshot capture/apply rides these).
+    juce::String capturePagePresetXml();
+    void         applyPagePresetXml (const juce::String& xmlText);
+    // Ruling 3a: one chain-swap gesture (page-preset load) = one structural
+    // transaction.  Skips the wrap on an engine-less page.
+    void performChainSwapGesture (const juce::String& label,
+                                  const std::function<void()>& op);
     void showPageActionsMenu (juce::Component* anchor);
     // QA-Layout T15: the title strip's nav buttons dissolved into the Menu
     // dropdown -- the editor injects the window/view entries at the top of
@@ -122,6 +130,7 @@ private:
     juce::AudioProcessor*                       mEngineProcessor { nullptr };
     std::unique_ptr<juce::AudioProcessorEditor> mEngineEditor;
     bool         mEngineLocked { false };
+    UndoContext  mUndoCtx;   // QA-UndoCoverage: chain-swap gestures (ruling 3a)
     bool         mLocked       { false };  // D1.4-fix (c): protect from kit-replace
     juce::String mEngineType;
     juce::String mTabName;   // defaults to "Bass {pageIndex}"; overridden by ribbon rename

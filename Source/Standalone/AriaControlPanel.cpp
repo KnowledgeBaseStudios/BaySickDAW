@@ -157,7 +157,11 @@ public:
             const auto pid = ccParamId (mBinding, mCc);
             if (pid.isNotEmpty())
                 if (auto* p = mBinding.apvts->getParameter (pid))
-                    mAttach = std::make_unique<juce::SliderParameterAttachment> (*p, *this);
+                    // Regression fix (2026-08-06): the manager arg was omitted
+                    // (defaults nullptr) -- no gesture transaction ever began,
+                    // so knob turns bled into the previous history entry.
+                    mAttach = std::make_unique<juce::SliderParameterAttachment> (
+                                  *p, *this, mBinding.apvts->undoManager);
         }
     }
 
@@ -253,7 +257,11 @@ public:
             const auto pid = ccParamId (mBinding, mCc);
             if (pid.isNotEmpty())
                 if (auto* p = mBinding.apvts->getParameter (pid))
-                    mAttach = std::make_unique<juce::SliderParameterAttachment> (*p, *this);
+                    // Regression fix (2026-08-06): the manager arg was omitted
+                    // (defaults nullptr) -- no gesture transaction ever began,
+                    // so knob turns bled into the previous history entry.
+                    mAttach = std::make_unique<juce::SliderParameterAttachment> (
+                                  *p, *this, mBinding.apvts->undoManager);
         }
     }
 
@@ -363,7 +371,10 @@ public:
             const auto pid = ccParamId (mBinding, mCc);
             if (pid.isNotEmpty())
                 if (auto* p = mBinding.apvts->getParameter (pid))
-                    mAttach = std::make_unique<juce::SliderParameterAttachment> (*p, mHiddenSlider);
+                    // Regression fix (2026-08-06): same omitted-manager fix as
+                    // the AriaKnob attachment above.
+                    mAttach = std::make_unique<juce::SliderParameterAttachment> (
+                                  *p, mHiddenSlider, mBinding.apvts->undoManager);
         }
     }
 
@@ -466,7 +477,10 @@ public:
             const auto pid = ccParamId (mBinding, mCc);
             if (pid.isNotEmpty())
                 if (auto* p = mBinding.apvts->getParameter (pid))
-                    mAttach = std::make_unique<juce::SliderParameterAttachment> (*p, mHiddenSlider);
+                    // Regression fix (2026-08-06): same omitted-manager fix as
+                    // the AriaKnob attachment above.
+                    mAttach = std::make_unique<juce::SliderParameterAttachment> (
+                                  *p, mHiddenSlider, mBinding.apvts->undoManager);
         }
     }
 
@@ -922,38 +936,64 @@ void AriaControlPanel::resized()
     const float sx = drawArea.getWidth()  / (float) mNativeW;
     const float sy = drawArea.getHeight() / (float) mNativeH;
 
-    // Position the tab strip relative to the artwork:
-    //   X: artwork center + mTabStripNativeOffset.x (in native coords scaled
-    //      to pixels) -- centred on the artwork when offset is 0.
-    //   Y: artwork top + mTabStripNativeOffset.y (in native coords scaled
-    //      to pixels) -- flush at the top when offset is 0.
     if (! mTabButtons.empty())
     {
         const int n = (int) mTabButtons.size();
-        const int maxBtnW = 110;
-        const int btnW = juce::jmin (maxBtnW,
-                                      juce::jmax (40,
-                                                   (int) drawArea.getWidth()
-                                                       / juce::jmax (1, n)));
-        const int stripW  = btnW * n;
-        const int stripCx = (int) drawArea.getCentreX()
-                          + (int) std::lround ((float) mTabStripNativeOffset.x * sx);
-        const int stripX  = stripCx - stripW / 2;
-        const int stripY  = (int) drawArea.getY()
-                          + (int) std::lround ((float) mTabStripNativeOffset.y * sy);
-        for (int i = 0; i < n; ++i)
-            if (mTabButtons[(size_t) i])
-            {
-                mTabButtons[(size_t) i]->setBounds (stripX + i * btnW, stripY,
-                                                     btnW - 2, kTabBarHeight);
-                // QA-A 4.5: tab strip overlays kit artwork + widgets, so the
-                // buttons must paint on top of them.  Widgets are added to
-                // the child list AFTER tab buttons (rebuildTabBar() runs
-                // before parseGuiXml() in selectTab()), so by default they'd
-                // sit visually on top.  Move each tab button to the front
-                // here.  Buttons don't overlap each other.
-                mTabButtons[(size_t) i]->toFront (false);
-            }
+        if (mTitleBar != nullptr)
+        {
+            // Jeff 2026-08-06: with a title band present, the section tab row
+            // (Main / Kick / Snare / ...) lives IN the band -- the Program +
+            // Player Preset controls that used to sit there moved up to the
+            // WINDOW title strip, freeing the band's full width.  Centered,
+            // vertically middled in the 32px row.
+            const int maxBtnW = 110;
+            const int btnW = juce::jmin (maxBtnW,
+                                          juce::jmax (40, getWidth() / juce::jmax (1, n)));
+            const int stripW = btnW * n;
+            const int stripX = (getWidth() - stripW) / 2;
+            const int stripY = (titleBarH - kTabBarHeight) / 2;
+            for (int i = 0; i < n; ++i)
+                if (mTabButtons[(size_t) i])
+                {
+                    mTabButtons[(size_t) i]->setBounds (stripX + i * btnW, stripY,
+                                                         btnW - 2, kTabBarHeight);
+                    // The band is a sibling child -- keep the buttons above it.
+                    mTabButtons[(size_t) i]->toFront (false);
+                }
+        }
+        else
+        {
+            // Band-less hosts (Guitars/Basses InstPage panels): keep the
+            // artwork-overlay placement.
+            //   X: artwork center + mTabStripNativeOffset.x (native coords
+            //      scaled to pixels) -- centred on the artwork when offset is 0.
+            //   Y: artwork top + mTabStripNativeOffset.y (native coords scaled
+            //      to pixels) -- flush at the top when offset is 0.
+            const int maxBtnW = 110;
+            const int btnW = juce::jmin (maxBtnW,
+                                          juce::jmax (40,
+                                                       (int) drawArea.getWidth()
+                                                           / juce::jmax (1, n)));
+            const int stripW  = btnW * n;
+            const int stripCx = (int) drawArea.getCentreX()
+                              + (int) std::lround ((float) mTabStripNativeOffset.x * sx);
+            const int stripX  = stripCx - stripW / 2;
+            const int stripY  = (int) drawArea.getY()
+                              + (int) std::lround ((float) mTabStripNativeOffset.y * sy);
+            for (int i = 0; i < n; ++i)
+                if (mTabButtons[(size_t) i])
+                {
+                    mTabButtons[(size_t) i]->setBounds (stripX + i * btnW, stripY,
+                                                         btnW - 2, kTabBarHeight);
+                    // QA-A 4.5: tab strip overlays kit artwork + widgets, so the
+                    // buttons must paint on top of them.  Widgets are added to
+                    // the child list AFTER tab buttons (rebuildTabBar() runs
+                    // before parseGuiXml() in selectTab()), so by default they'd
+                    // sit visually on top.  Move each tab button to the front
+                    // here.  Buttons don't overlap each other.
+                    mTabButtons[(size_t) i]->toFront (false);
+                }
+        }
     }
 
     auto toComp = [&] (juce::Rectangle<float> nr) -> juce::Rectangle<int>

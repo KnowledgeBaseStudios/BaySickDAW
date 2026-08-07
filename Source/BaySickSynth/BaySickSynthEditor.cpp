@@ -1117,7 +1117,7 @@ void BaySickSynthEditor::loadPreset (const juce::File& f)
         }
     }
 
-    mProc.apvts.replaceState (loaded);
+    mProc.apvts.replaceStateKeepingUndoHistory (loaded, "Load Preset");   // ruling 3a
 
     // 2026-04-30: notify page wrapper so Layer/Bass tab + mixer strip get
     // renamed to the patch filename (matches DrumPage's auto-rename).

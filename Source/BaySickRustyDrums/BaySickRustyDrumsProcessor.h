@@ -49,7 +49,7 @@ class BaySickRustyDrumsProcessor : public juce::AudioProcessor,
                                     public juce::AudioProcessorValueTreeState::Listener
 {
 public:
-    BaySickRustyDrumsProcessor();
+    explicit BaySickRustyDrumsProcessor (juce::UndoManager& undoMgr);
     ~BaySickRustyDrumsProcessor() override;
 
     // ── AudioProcessor interface ──────────────────────────────────────────────
@@ -78,11 +78,11 @@ public:
     bool isBusesLayoutSupported (const BusesLayout&) const override;
 
     // ── Public interface ──────────────────────────────────────────────────────
-    // J-8 stage 2 (2026-05-04): UndoManager declared BEFORE apvts so its
-    // address is valid by the time the apvts constructor stores `&mUndoManager`.
-    // Without this ordering, `apvts (..., &mUndoManager, ...)` takes the
-    // address of an uninitialized member (technically valid, but fragile).
-    juce::UndoManager                  mUndoManager;
+    // QA-UndoCoverage: the GLOBAL manager (VibeSynthProcessor-owned) -- ARIA
+    // panel edits transact into the one app history, so Ctrl+Z reaches them
+    // from any page.  Reference declared BEFORE apvts so it is bound by the
+    // time the apvts constructor stores its address.
+    juce::UndoManager&                 mUndoManager;
     juce::AudioProcessorValueTreeState apvts;
 
     // J-3: loads `sfzPath` (an SFZ file like `01-full.sfz`) into the sfizz
@@ -180,10 +180,6 @@ public:
 
     // APVTS listener - forwards every brd_cc<N> change to sfizz.
     void parameterChanged (const juce::String& paramId, float newValue) override;
-
-    // Project-level undo - the editor wires Ctrl+Z to undo()/redo() so panel
-    // edits, automation captures, and CC type-in entries are all reversible.
-    juce::UndoManager& getUndoManager() noexcept { return mUndoManager; }
 
     // 2026-05-05 dirty-flag wiring (see ApvtsDirtyTracker.h).
     void setOnAnyStateChange (std::function<void()> fn) { mDirtyTracker.onAny = std::move (fn); }

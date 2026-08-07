@@ -1,6 +1,7 @@
 #include "BaySickNAMIREditor.h"
 #include "../AppPaths.h"
 #include "../Standalone/SharedUI.h"   // VKnobAutomation registration
+#include "../Standalone/UndoBracket.h"
 
 // ─────────────────────────────────────────────────────────────────────────────
 // BaySickNAMIREditor - Phase G-1.4 implementation.
@@ -321,6 +322,7 @@ BaySickNAMIREditor::BaySickNAMIREditor (BaySickNAMIRProcessor& p)
         mMicSimMode.setSelectedIndex ((int) p->load(), juce::dontSendNotification);
     mMicSimMode.onChange = [this] (int idx)
     {
+        beginParamUndoGesture (processor.apvts, "nam_micsim_mode"); // Task 6 (12-iv)
         if (auto* p = dynamic_cast<juce::RangedAudioParameter*> (
                           processor.apvts.getParameter ("nam_micsim_mode")))
             p->setValueNotifyingHost (
@@ -341,6 +343,7 @@ BaySickNAMIREditor::BaySickNAMIREditor (BaySickNAMIRProcessor& p)
     mMicSimModelCombo.onChange = [this]()
     {
         const int idx = juce::jmax (0, mMicSimModelCombo.getSelectedId() - 1);
+        beginParamUndoGesture (processor.apvts, "nam_micsim_model"); // Task 6 (12-iv)
         if (auto* p = dynamic_cast<juce::RangedAudioParameter*> (
                           processor.apvts.getParameter ("nam_micsim_model")))
             p->setValueNotifyingHost (
@@ -398,6 +401,7 @@ BaySickNAMIREditor::BaySickNAMIREditor (BaySickNAMIRProcessor& p)
         mMicPlacementPolar.setSelectedIndex ((int) p->load(), juce::dontSendNotification);
     mMicPlacementPolar.onChange = [this] (int idx)
     {
+        beginParamUndoGesture (processor.apvts, "nam_placement_polar"); // Task 6 (12-iv)
         if (auto* p = dynamic_cast<juce::RangedAudioParameter*> (
                           processor.apvts.getParameter ("nam_placement_polar")))
             p->setValueNotifyingHost (
@@ -447,6 +451,7 @@ BaySickNAMIREditor::BaySickNAMIREditor (BaySickNAMIRProcessor& p)
         mMicSimModeB.setSelectedIndex ((int) p->load(), juce::dontSendNotification);
     mMicSimModeB.onChange = [this] (int idx)
     {
+        beginParamUndoGesture (processor.apvts, "nam_micsim_b_mode"); // Task 6 (12-iv)
         if (auto* p = dynamic_cast<juce::RangedAudioParameter*> (
                           processor.apvts.getParameter ("nam_micsim_b_mode")))
             p->setValueNotifyingHost (
@@ -466,6 +471,7 @@ BaySickNAMIREditor::BaySickNAMIREditor (BaySickNAMIRProcessor& p)
     mMicSimModelComboB.onChange = [this]()
     {
         const int idx = juce::jmax (0, mMicSimModelComboB.getSelectedId() - 1);
+        beginParamUndoGesture (processor.apvts, "nam_micsim_b_model"); // Task 6 (12-iv)
         if (auto* p = dynamic_cast<juce::RangedAudioParameter*> (
                           processor.apvts.getParameter ("nam_micsim_b_model")))
             p->setValueNotifyingHost (
@@ -520,6 +526,7 @@ BaySickNAMIREditor::BaySickNAMIREditor (BaySickNAMIRProcessor& p)
         mMicPlacementPolarB.setSelectedIndex ((int) p->load(), juce::dontSendNotification);
     mMicPlacementPolarB.onChange = [this] (int idx)
     {
+        beginParamUndoGesture (processor.apvts, "nam_placement_b_polar"); // Task 6 (12-iv)
         if (auto* p = dynamic_cast<juce::RangedAudioParameter*> (
                           processor.apvts.getParameter ("nam_placement_b_polar")))
             p->setValueNotifyingHost (
@@ -751,6 +758,7 @@ void BaySickNAMIREditor::browseForMicUserIr()
         {
             mMicSimUserIrLabel.setText (file.getFileName(), juce::dontSendNotification);
             // Auto-switch the Mic Sim mode to User IR after a successful load
+            beginParamUndoGesture (processor.apvts, "nam_micsim_mode"); // Task 6 (12-iv)
             if (auto* p = dynamic_cast<juce::RangedAudioParameter*> (
                               processor.apvts.getParameter ("nam_micsim_mode")))
                 p->setValueNotifyingHost (p->getNormalisableRange().convertTo0to1 (2.0f));
@@ -810,6 +818,7 @@ void BaySickNAMIREditor::browseForMicUserIrB()
         if (processor.loadUserMicIrB (file, err))
         {
             mMicSimUserIrLabelB.setText (file.getFileName(), juce::dontSendNotification);
+            beginParamUndoGesture (processor.apvts, "nam_micsim_b_mode"); // Task 6 (12-iv)
             if (auto* p = dynamic_cast<juce::RangedAudioParameter*> (
                               processor.apvts.getParameter ("nam_micsim_b_mode")))
                 p->setValueNotifyingHost (p->getNormalisableRange().convertTo0to1 (2.0f));

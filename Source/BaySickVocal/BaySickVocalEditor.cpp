@@ -1,6 +1,7 @@
 #include "BaySickVocalEditor.h"
 #include "BaySickPitchEditor.h"
 #include "BaySickAlignEditor.h"
+#include "../Standalone/UndoBracket.h"
 #include "../BaySickNAMIR/BaySickNAMIRProcessor.h"
 #include "../BaySickNAMIR/BaySickNAMIREditor.h"
 #include "../Standalone/SlotComponent.h"
@@ -418,6 +419,7 @@ public:
                 // block and the chain is APVTS-driven.
                 else if (slotIdx == 5) paramId = "bsv_limiter_mode";
                 if (paramId == nullptr) return;
+                beginParamUndoGesture (mProc.apvts, paramId); // Task 6 (12-iv)
                 if (auto* p = dynamic_cast<juce::RangedAudioParameter*> (
                                   mProc.apvts.getParameter (paramId)))
                     p->setValueNotifyingHost (

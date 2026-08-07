@@ -64,6 +64,12 @@ public:
     // just created.
     std::function<void()> onKitLoaded;
 
+    // QA-UndoCoverage rulings 1a/3a (2026-08-06): the editor wraps one
+    // structural gesture (program switch, player-preset load) as one undo
+    // transaction -- composite capture of the engine blob + the pattern slice
+    // the teardown clears.  Falls back to a plain run when unwired.
+    std::function<void (const juce::String& label, std::function<void()> op)> onWrapStructuralOp;
+
     // QA-E Task 8 NIT-1 (engine-type half): fired AFTER mCurrentProgram is
     // updated (loadProgram / reloadForProjectRestore) so listeners read the
     // NEW program.  onKitLoaded fires mid-loadKit, BEFORE mCurrentProgram is
@@ -108,6 +114,10 @@ public:
 
     enum class Program { None = 0, Full = 1, Basic = 2 };
     Program getCurrentProgram() const noexcept { return mCurrentProgram; }
+    // Ruling 1A (2026-08-06): the session's FIRST program pick is undoable --
+    // undo returns the page to the empty player.  This is that restore: the
+    // switch teardown without a follow-up load, plus UI reset to None.
+    void unloadToNone();
     // QA-E Task 8 NIT-1 (engine-type half): mirrors LayersPage::getEngineType()
     // so the piano-roll context label can show "{tab} - Full" / "{tab} -
     // Basic" (empty -> "(no engine)" pre-load, consistent with other engines).

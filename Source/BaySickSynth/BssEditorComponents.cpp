@@ -1,5 +1,6 @@
 #include "BssEditorComponents.h"
 #include "BaySickSynthLAF.h"
+#include "../Standalone/UndoBracket.h"
 #include <cmath>
 
 //==============================================================================
@@ -152,6 +153,7 @@ void BssLedRadio::mouseDown (const juce::MouseEvent& e)
     }
 
     mSelected = clicked;
+    beginParamUndoGesture (mAvts, mParamID); // Task 6 (12-iv)
     if (auto* raw = dynamic_cast<juce::RangedAudioParameter*> (mAvts.getParameter (mParamID)))
         raw->setValueNotifyingHost (raw->getNormalisableRange().convertTo0to1 ((float) clicked));
 
@@ -275,6 +277,8 @@ void BssFilterXYPad::mouseDown (const juce::MouseEvent& e)
 
     mDotX = juce::jlimit (0.0f, 1.0f, ((float) e.x - iX) / iW);
     mDotY = juce::jlimit (0.0f, 1.0f, ((float) e.y - iY) / iH);
+    if (! e.mouseWasDraggedSinceMouseDown())
+        beginParamUndoGesture (mAvts, mCutoffID); // Task 6 (12-iv)
     writeParamsFromDot();
     repaint();
 }

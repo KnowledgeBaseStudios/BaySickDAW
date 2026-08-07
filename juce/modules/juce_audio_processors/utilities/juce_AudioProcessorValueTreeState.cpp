@@ -36,6 +36,105 @@ namespace juce
 {
 
 //==============================================================================
+// BaySickDAW QA-UndoCoverage (2026-08-06): see the declaration comment in the
+// header -- write-time programmatic marking, consumed at flush time.
+thread_local bool AudioProcessorValueTreeState::programmaticWritePhase = false;
+
+// BaySickDAW QA-UndoCoverage: message-thread liveness registry.  Backs both
+// the StateSwapAction dead-owner guard and the tag resolution that lets undo
+// entries survive engine destruction/re-creation (see the header comment on
+// undoOwnerTag).
+static Array<AudioProcessorValueTreeState*>& liveApvtsInstances()
+{
+    static Array<AudioProcessorValueTreeState*> list;
+    return list;
+}
+
+AudioProcessorValueTreeState* AudioProcessorValueTreeState::findByUndoOwnerTag (const String& tag)
+{
+    if (tag.isEmpty()) return nullptr;
+    for (auto* s : liveApvtsInstances())
+        if (s->undoOwnerTag == tag)
+            return s;
+    return nullptr;
+}
+
+void AudioProcessorValueTreeState::flushAllLiveInstancesToValueTrees()
+{
+    // See the header comment.  Human-gesture rate; the walk is trivial.
+    for (auto* s : liveApvtsInstances())
+        s->flushParameterValuesToValueTree();
+}
+
+// BaySickDAW QA-UndoCoverage (2026-08-06, redo-across-resurrection fix): the
+// undo entry for a parameter edit.  Replaces the tree-bound SetPropertyAction
+// the flush used to perform -- that action held the SPECIFIC child-tree
+// object, so once an engine was destroyed and re-created (tab resurrection,
+// program switch, kit load) its stored writes fired into a detached tree and
+// redo silently did nothing.  This action stores denormalised VALUES plus the
+// owner's tag and re-resolves the live APVTS at apply time; a re-created
+// engine answers to the same tag, so the redo lands.  Falls back to the
+// construction-time pointer (liveness-checked) for untagged instances.
+// Apply writes the PARAMETER under the programmatic phase: the engine hears
+// it immediately, and the next timer flush copies it to the tree WITHOUT the
+// UndoManager -- nothing performs during an undo (UndoManager forbids that).
+struct ApvtsParamValueUndoAction final : public UndoableAction
+{
+    ApvtsParamValueUndoAction (AudioProcessorValueTreeState& owner,
+                               String parameterId, float oldDenormIn, float newDenormIn)
+        : ownerTag (owner.undoOwnerTag), ownerPtr (&owner),
+          paramId (std::move (parameterId)),
+          oldDenorm (oldDenormIn), newDenorm (newDenormIn) {}
+
+    bool perform() override
+    {
+        if (firstPerform) { firstPerform = false; return true; }   // value already live at insert
+        return apply (newDenorm);
+    }
+    bool undo() override    { return apply (oldDenorm); }
+
+    bool apply (float denorm) const
+    {
+        auto* owner = AudioProcessorValueTreeState::findByUndoOwnerTag (ownerTag);
+        if (owner == nullptr && liveApvtsInstances().contains (ownerPtr))
+            owner = ownerPtr;
+        if (owner == nullptr)
+            return true;   // owner absent right now: inert no-op, keep the history
+        auto* p = owner->getParameter (paramId);
+        if (p == nullptr)
+            return true;
+
+        AudioProcessorValueTreeState::ScopedProgrammaticParamWrites spw;
+        p->setValueNotifyingHost (p->convertTo0to1 (denorm));
+        return true;
+    }
+
+    UndoableAction* createCoalescedAction (UndoableAction* nextAction) override
+    {
+        // Same shape as SetPropertyAction's coalescing: a drag's per-flush
+        // actions merge into one, keeping the FIRST old value.
+        if (auto* next = dynamic_cast<ApvtsParamValueUndoAction*> (nextAction))
+            if (next->ownerTag == ownerTag && next->ownerPtr == ownerPtr
+                && next->paramId == paramId)
+            {
+                auto* merged = new ApvtsParamValueUndoAction (*ownerPtr, paramId,
+                                                              oldDenorm, next->newDenorm);
+                merged->ownerTag = ownerTag;   // keep the capture-time tag even if the owner re-tagged
+                return merged;
+            }
+        return nullptr;
+    }
+
+    int getSizeInUnits() override { return 10; }
+
+    String ownerTag;
+    AudioProcessorValueTreeState* const ownerPtr;
+    const String paramId;
+    const float oldDenorm, newDenorm;
+    bool firstPerform = true;
+};
+
+//==============================================================================
 
 AudioProcessorValueTreeState::Parameter::Parameter (const ParameterID& parameterID,
                                                     const String& parameterName,
@@ -117,19 +216,35 @@ public:
     float getDenormalisedValue() const                { return unnormalisedValue; }
     std::atomic<float>& getRawDenormalisedValue()     { return unnormalisedValue; }
 
-    bool flushToTree (const Identifier& key, UndoManager* um)
+    bool flushToTree (const Identifier& key, UndoManager* um,
+                      AudioProcessorValueTreeState& owner)
     {
         auto needsUpdateTestValue = true;
 
         if (! needsUpdate.compare_exchange_strong (needsUpdateTestValue, false))
             return false;
 
+        // BaySickDAW QA-UndoCoverage: consume the mark recorded at write time.
+        // A pending value whose LAST writer was programmatic must not enter the
+        // undo history; a later user write to the same parameter un-marks it.
+        if (pendingIsProgrammatic.exchange (false, std::memory_order_relaxed))
+            um = nullptr;
+
         if (auto* valueProperty = tree.getPropertyPointer (key))
         {
-            if (! approximatelyEqual ((float) *valueProperty, unnormalisedValue.load()))
+            const float oldValue = (float) *valueProperty;
+            const float newValue = unnormalisedValue.load();
+            if (! approximatelyEqual (oldValue, newValue))
             {
                 ScopedValueSetter<bool> svs (ignoreParameterChangedCallbacks, true);
-                tree.setProperty (key, unnormalisedValue.load(), um);
+                // Redo-across-resurrection fix: the undo entry is the
+                // tag-resolving value action (see ApvtsParamValueUndoAction),
+                // NOT a tree-bound SetPropertyAction -- the tree itself is
+                // always written untransacted.
+                if (um != nullptr)
+                    um->perform (new ApvtsParamValueUndoAction (owner, parameter.paramID,
+                                                                oldValue, newValue));
+                tree.setProperty (key, newValue, nullptr);
             }
         }
         else
@@ -155,6 +270,12 @@ private:
         unnormalisedValue = newValue;
         listeners.call ([this] (Listener& l) { l.parameterChanged (parameter.paramID, unnormalisedValue); });
         listenersNeedCalling = false;
+
+        // BaySickDAW QA-UndoCoverage: this callback runs synchronously on the
+        // writer's thread, so the phase flag identifies WHO wrote the pending
+        // value.  Last writer wins -- matches whose value the flush will see.
+        pendingIsProgrammatic.store (AudioProcessorValueTreeState::programmaticWritePhase,
+                                     std::memory_order_relaxed);
         needsUpdate = true;
     }
 
@@ -207,6 +328,9 @@ private:
     LockedListeners listeners;
     std::atomic<float> unnormalisedValue { 0.0f };
     std::atomic<bool> needsUpdate { true }, listenersNeedCalling { true };
+    // BaySickDAW QA-UndoCoverage: set at write time (writer's thread), consumed
+    // by flushToTree (message thread) -- atomic for that cross-thread hand-off.
+    std::atomic<bool> pendingIsProgrammatic { false };
     bool ignoreParameterChangedCallbacks { false };
 };
 
@@ -271,12 +395,14 @@ AudioProcessorValueTreeState::AudioProcessorValueTreeState (AudioProcessor& proc
 AudioProcessorValueTreeState::AudioProcessorValueTreeState (AudioProcessor& p, UndoManager* um)
     : processor (p), undoManager (um)
 {
+    liveApvtsInstances().add (this);
     startTimerHz (10);
     state.addListener (this);
 }
 
 AudioProcessorValueTreeState::~AudioProcessorValueTreeState()
 {
+    liveApvtsInstances().removeFirstMatchingValue (this);
     stopTimer();
 }
 
@@ -340,6 +466,25 @@ RangedAudioParameter* AudioProcessorValueTreeState::createAndAddParameter (std::
 void AudioProcessorValueTreeState::addParameterAdapter (RangedAudioParameter& param)
 {
     adapterTable.emplace (param.paramID, std::make_unique<ParameterAdapter> (param));
+
+    // BaySickDAW QA-UndoCoverage regression fix (2026-08-06): BaySickDAW
+    // registers params LAZILY (QA-0a) -- after `state` was last assigned --
+    // and updateParameterConnectionsToChildTrees only runs on a wholesale
+    // state (re)assignment, so a late adapter kept an INVALID tree forever:
+    // its flush could never transact, the begun "param:<id>" gesture stayed
+    // empty, and the edit never reached the undo history.  Bind the child
+    // here, with the value property PRE-SET to the param's live value -- an
+    // id-only node would make setNewState read the missing value as the
+    // DEFAULT and reset the live param (the QA-Ef save-path failure mode).
+    // nullptr um everywhere: materialization is not an edit.
+    if (state.isValid())
+    {
+        const ScopedLock lock (valueTreeChanging);
+        ValueTree child (valueType);
+        child.setProperty (idPropertyID, param.paramID, nullptr);
+        child.setProperty (valuePropertyID, param.convertFrom0to1 (param.getValue()), nullptr);
+        state.appendChild (child, nullptr);   // valueTreeChildAdded -> setNewState binds
+    }
 }
 
 AudioProcessorValueTreeState::ParameterAdapter* AudioProcessorValueTreeState::getParameterAdapter (StringRef paramID) const
@@ -410,6 +555,78 @@ void AudioProcessorValueTreeState::replaceState (const ValueTree& newState)
         undoManager->clearUndoHistory();
 }
 
+// BaySickDAW QA-UndoCoverage: see the header comment.
+void AudioProcessorValueTreeState::replaceStateKeepingUndoHistory (const ValueTree& newState,
+                                                                   const String& undoTransactionName)
+{
+    // Jeff ruling 3a: wholesale old<->new tree swap as ONE undoable action.
+    // The undo/redo re-assignment re-fires valueTreeRedirected -> adapter
+    // rebind -> flush; the programmatic-write phase keeps that flush from
+    // performing nested actions mid-undo (UndoManager forbids recursion).
+    struct StateSwapAction final : public UndoableAction
+    {
+        StateSwapAction (AudioProcessorValueTreeState& o, ValueTree oldS, ValueTree newS)
+            : ownerTag (o.undoOwnerTag), ownerPtr (&o),
+              oldState (std::move (oldS)), newState (std::move (newS)) {}
+
+        bool apply (const ValueTree& target)
+        {
+            // Redo-across-resurrection fix: resolve the LIVE owner by tag
+            // first (a re-created engine answers to the same tag), falling
+            // back to the construction-time pointer for untagged instances.
+            // Dead-owner no-op MUST report success -- a false return makes
+            // UndoManager wipe the entire history.  The type guard covers
+            // pointer reuse AND cross-kind tag mistakes: refuse a tree of a
+            // different root type rather than redirect a foreign state.
+            auto* owner = findByUndoOwnerTag (ownerTag);
+            if (owner == nullptr && liveApvtsInstances().contains (ownerPtr))
+                owner = ownerPtr;
+            if (owner == nullptr)
+                return true;
+            if (owner->state.isValid() && target.isValid()
+                 && owner->state.getType() != target.getType())
+                return true;
+
+            ScopedProgrammaticParamWrites spw;
+            const ScopedLock sl (owner->valueTreeChanging);
+            owner->state = target;
+            return true;
+        }
+        bool perform() override
+        {
+            if (firstPerform) { firstPerform = false; return true; }   // already applied
+            return apply (newState);
+        }
+        bool undo() override    { return apply (oldState); }
+        int getSizeInUnits() override { return (int) sizeof (*this); }
+
+        String ownerTag;
+        AudioProcessorValueTreeState* ownerPtr;
+        ValueTree oldState, newState;
+        bool firstPerform = true;
+    };
+
+    if (undoManager != nullptr && undoTransactionName.isNotEmpty())
+    {
+        auto oldState = state.createCopy();
+
+        {
+            ScopedProgrammaticParamWrites spw;   // rebind pushes are programmatic
+            ScopedLock lock (valueTreeChanging);
+            state = newState;
+        }
+
+        undoManager->beginNewTransaction (undoTransactionName);
+        undoManager->perform (new StateSwapAction (*this, std::move (oldState), newState));
+        return;
+    }
+
+    // Unnamed keep-history swap (restore paths): programmatic by definition.
+    ScopedProgrammaticParamWrites spw;
+    ScopedLock lock (valueTreeChanging);
+    state = newState;
+}
+
 void AudioProcessorValueTreeState::setNewState (ValueTree vt)
 {
     jassert (vt.getParent() == state);
@@ -423,6 +640,10 @@ void AudioProcessorValueTreeState::setNewState (ValueTree vt)
 
 void AudioProcessorValueTreeState::updateParameterConnectionsToChildTrees()
 {
+    // BaySickDAW QA-UndoCoverage: a rebind is programmatic by definition --
+    // setNewState's value pushes must never mark as user writes, or a state
+    // assignment could mint undo entries into whatever transaction is open.
+    ScopedProgrammaticParamWrites spw;
     ScopedLock lock (valueTreeChanging);
 
     for (auto& p : adapterTable)
@@ -471,7 +692,7 @@ bool AudioProcessorValueTreeState::flushParameterValuesToValueTree()
     bool anyUpdated = false;
 
     for (auto& p : adapterTable)
-        anyUpdated |= p.second->flushToTree (valuePropertyID, undoManager);
+        anyUpdated |= p.second->flushToTree (valuePropertyID, undoManager, *this);
 
     return anyUpdated;
 }

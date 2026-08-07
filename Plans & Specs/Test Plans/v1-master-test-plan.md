@@ -2448,6 +2448,112 @@ Where a step says "check the trace", read `asio_trace.txt` next to `audio_settin
       truncated labels at the Basic window size; Advanced restores the full set
       with no control changing row. `D:__ R:__` notes:
 
+### §B.33 — QA-UndoCoverage (one global history + every-action undo + transaction-pointer dirty)
+
+> Authored at code-complete 2026-08-06 (merged batch: absorbs QA-DirtyFlag).  `blocks:` = the
+> one batch commit, backfilled at close.  Jeff's five rulings of 2026-08-06 are IN scope here
+> (all deletes undoable, Rusty program switch undoable, preset loads undoable, MIDI-learn
+> excluded, honest depth counts).  Expected everywhere: hardware MIDI-learn knob turns create
+> NO history rows (ruling 4b) while still moving the params.
+> UND-B19..B22 added same day after the runtime regression pass (double-undo, record-take
+> undo, master-captures-to-Exports, tag-resolved cross-resurrection round-trips) -- 22 rows
+> total.
+
+- [ ] **UND-B1 — multi-surface unwind.** Place notes -> move a mixer fader -> load a
+      rack effect -> add a pattern -> add a tempo marker -> rename a pattern -> drag
+      a Harmless macro.  Seven Ctrl+Z restore the exact start state in reverse
+      order; seven Ctrl+Alt+Z replay them. `D:__ R:__` notes:
+- [ ] **UND-B2 — one gesture = one labeled row.** A knob drag on any engine editor
+      is ONE history row labeled with the tab + control name; double-click reset =
+      one row; a wheel tweak right after an undo lands as its own "(edit)"/named
+      row, never merged into the prior gesture. `D:__ R:__` notes:
+- [ ] **UND-B3 — playback adds zero rows.** Play a song with engine + mixer
+      automation lanes 30 s: the history window gains NO rows; hand-drag a
+      NON-automated knob mid-playback: exactly one row appears for it.
+      `D:__ R:__` notes:
+- [ ] **UND-B4 — structural round-trip (Layers/Bass/Drums).** Two Layers tabs, knob
+      edits on both, delete tab 2 -> Ctrl+Z resurrects it: same slot, same engine
+      settings, same rack + pre/post EQ, same strip params and sends, notes back,
+      lanes playing, window where it was; a further Ctrl+Z reaches the pre-delete
+      knob edits; redo re-deletes.  Same round-trip for a "+" add (undo removes it)
+      and a duplicate. `D:__ R:__` notes:
+- [ ] **UND-B5 — drum sound + kit load.** Drum sound pick / clear / New Patch each
+      = one row; undo of a sample pick reloads the prior sound (a LOAD, not a
+      snap-back).  A drum-KIT load = ONE row; undo removes the kit's tabs and
+      resurrects the replaced ones; redo reloads. `D:__ R:__` notes:
+- [ ] **UND-B6 — every other tab delete resurrects (ruling 2a).** Delete a Clips
+      tab (its library entry + grid clips return on undo), a Vox tab, an Inst tab
+      (sfizz source: kit + program + CC state return -- expect a load wait), a
+      Plugins tab (plugin + its state return), and the Rusty tab (kit + 13 strips +
+      the Rusty roll on every pattern return).  Redo re-deletes each.
+      `D:__ R:__` notes:
+- [ ] **UND-B7 — Rusty program switch + player preset (rulings 1a/3a).** Full ->
+      Basic: prompt no longer says "cannot be undone"; the switch is ONE row; undo
+      returns to Full WITH the prior CC tweaks and the Rusty roll intact.  A player
+      preset load = one row, undo restores prior CCs. `D:__ R:__` notes:
+- [ ] **UND-B8 — preset loads undo (ruling 3a).** Engine-internal preset menus
+      (Harmless incl. Init Patch, BaySickSynth, BaySickBass, BaySickPlayer) and the
+      L/B/D/Plugins Load Page Preset entries: each load = one row; undo restores
+      the FULL prior state (engine + strips + racks on page presets).
+      `D:__ R:__` notes:
+- [ ] **UND-B9 — Rusty ARIA undo from anywhere.** ARIA knob edit on the Rusty tab,
+      switch to Builder, Ctrl+Z undoes it (the old visible-page restriction is
+      gone). `D:__ R:__` notes:
+- [ ] **UND-B10 — Event Editor unified.** Draw + move + delete lane points: each in
+      the history window; Ctrl+Z inside the editor undoes; redo is Ctrl+Alt+Z and
+      Ctrl+Y does NOTHING; Key Binds shows the display-only Event Editor tab.
+      `D:__ R:__` notes:
+- [ ] **UND-B11 — pattern + marker restores.** Pattern remove undo restores the
+      pattern WITH its notes at the same index (delete dialog no longer claims it
+      cannot be undone); marker-set undo restores marker + the played tempo
+      (readout check); pattern TS set/reset undoes both the pattern fields and the
+      linked marker list. `D:__ R:__` notes:
+- [ ] **UND-B12 — HONEST depth counts (ruling 5).** Set History Size 100: make ~110
+      distinct edits; exactly the newest 100 are undoable and the window shows 100
+      rows.  Spot-check 250 similarly (sampled).  The old ~30 ceiling is gone.
+      `D:__ R:__` notes:
+- [ ] **UND-B13 — loads open clean.** Load a project: history EMPTY, the
+      UndoSnapshots folder swept, first post-load edit is row 1.  File > New:
+      same. `D:__ R:__` notes:
+- [ ] **UND-B14 — dirty pointer (the origin repro).** Solo on, Solo off (Ctrl+Z x2
+      OR re-toggle) -> NO asterisk once state matches the save.  Edit -> Save ->
+      edit x3 -> Ctrl+Z x3 -> asterisk clears exactly at the save point; one more
+      Ctrl+Z past it -> asterisk returns. `D:__ R:__` notes:
+- [ ] **UND-B15 — branch-kill.** Edit -> Save -> Ctrl+Z -> make a DIFFERENT edit:
+      Ctrl+Alt+Z is dead and the project stays dirty through any further
+      undo/redo until the next Save. `D:__ R:__` notes:
+- [ ] **UND-B16 — structural ops drive dirty.** Add a tab, nothing else: dirty.
+      Save: clean.  Delete the tab: dirty.  Ctrl+Z (resurrect): asterisk CLEARS
+      (the pointer is back at the save point). `D:__ R:__` notes:
+- [ ] **UND-B17 — playback + export stay clean.** Play a song with lanes 30 s (no
+      hand edits): zero rows AND the project stays clean.  Offline-export a song:
+      history byte-identical, project stays clean. `D:__ R:__` notes:
+- [ ] **UND-B18 — quit gates + autosave.** Load -> quit immediately: no prompt.
+      One edit -> prompt.  Autosave writes its backup WITHOUT clearing the dirty
+      asterisk (verified-unchanged semantics). `D:__ R:__` notes:
+- [ ] **UND-B19 — one press, one entry, from every window** (2026-08-06 runtime
+      pass).  Focus inside a page window: Ctrl+Z steps the history marker by
+      EXACTLY one per press; Ctrl+Alt+Z likewise; Space toggles transport.
+      Repeat with focus on the main frame and in the History window.  Two quick
+      knob tweaks file as TWO rows (no gesture merging). `D:__ R:__` notes:
+- [ ] **UND-B20 — record-take undo** (Jeff's ruling: everything undoable).
+      Arm a Vox/Inst strip, record a short take, stop, Ctrl+Z once: the take's
+      grid block, browser entries, and any captured MIDI leave the project; the
+      WAV stays in Samples.  Redo brings all of it back. `D:__ R:__` notes:
+- [ ] **UND-B21 — master capture routes through Exports** (Jeff's design,
+      2026-08-06).  Record with NO strips armed, stop: nothing lands on the
+      grid; the WAV appears under the browser's Exports immediately.  Drag it
+      onto the grid: the standard route prompt (existing pages + new-page
+      options) creates the channel; undoing THAT step removes it cleanly (no
+      orphan strip).  Note: a count-in head stays in the exported WAV
+      (slip-edit after placement). `D:__ R:__` notes:
+- [ ] **UND-B22 — undo/redo across engine death round-trips values**
+      (tag-resolved targets).  Tweak Rusty knobs, undo past the program load
+      (player returns to EMPTY per ruling 1A), redo all the way forward: the
+      player returns WITH the knob positions.  Same shape on a deleted+undone
+      Layers tab: pre-delete knob rows still undo/redo onto the resurrected
+      engine. `D:__ R:__` notes:
+
 ## §C — Deferred re-verify ledger
 
 Parked items from closed batches. Lands INSIDE QA-J-Verify's §B section when that section is

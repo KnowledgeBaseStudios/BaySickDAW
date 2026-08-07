@@ -1,4 +1,6 @@
 #include "DrumPage.h"
+#include "UndoBracket.h"
+#include "UndoSnapshotStore.h"   // QA-UndoCoverage Task 7: sound-swap snapshots
 #include "../AppPaths.h"
 #include "../BaySickSynth/BaySickSynthProcessor.h"
 #include "../BaySickSynth/BaySickSynthEditor.h"
@@ -273,6 +275,8 @@ void DrumPage::setPlayHead(StandalonePlayHead* ph)
 
 void DrumPage::setUndoContext(const UndoContext& ctx)
 {
+    // QA-UndoCoverage Task 7: kept for the sound-swap structural gesture.
+    mUndoCtx = ctx;
     if (mPianoRoll)
     {
         mPianoRoll->setUndoContext(ctx);
@@ -677,7 +681,11 @@ void DrumPage::showSoundPicker (juce::Component* anchor)
             auto* dp = safeThis.getComponent();
 
             if (result == kIdNone)            { dp->clearSound();    return; }
-            if (result == kIdNewPatch)        { dp->newBlankPatch(); return; }
+            if (result == kIdNewPatch)
+            {
+                dp->performSoundSwapGesture ("New Drum Patch", [dp] { dp->newBlankPatch(); });
+                return;
+            }
             if (result == kIdSaveAs)          { dp->savePatchAs();   return; }
 
             if (result == kIdBrowseSmp)
@@ -695,8 +703,12 @@ void DrumPage::showSoundPicker (juce::Component* anchor)
                     if (auto* d = safeThis.getComponent())
                     {
                         const auto chosen = fc.getResult();
-                        if (chosen.isDirectory())          d->loadSampleFolder (chosen);
-                        else if (chosen.existsAsFile())    d->loadSampleFile   (chosen);
+                        if (chosen.isDirectory())
+                            d->performSoundSwapGesture ("Load Drum Samples",
+                                                        [d, chosen] { d->loadSampleFolder (chosen); });
+                        else if (chosen.existsAsFile())
+                            d->performSoundSwapGesture ("Load Drum Sample",
+                                                        [d, chosen] { d->loadSampleFile (chosen); });
                     }
                 });
                 return;
@@ -716,7 +728,9 @@ void DrumPage::showSoundPicker (juce::Component* anchor)
                     if (auto* d = safeThis.getComponent())
                     {
                         const auto chosen = fc.getResult();
-                        if (chosen.existsAsFile()) d->loadSampleSFZ (chosen);
+                        if (chosen.existsAsFile())
+                            d->performSoundSwapGesture ("Load Drum SFZ",
+                                                        [d, chosen] { d->loadSampleSFZ (chosen); });
                     }
                 });
                 return;
@@ -724,10 +738,13 @@ void DrumPage::showSoundPicker (juce::Component* anchor)
 
             if (result >= kLibBase && result < kLibBase + (int) libInstruments.size())
             {
-                const auto& inst = libInstruments[result - kLibBase];
-                if      (inst.isSFZ)             dp->loadSampleSFZ    (inst.path);
-                else if (inst.path.isDirectory()) dp->loadSampleFolder (inst.path);
-                else                              dp->loadSampleFile   (inst.path);
+                const auto inst = libInstruments[result - kLibBase];
+                dp->performSoundSwapGesture ("Load Drum Sound", [dp, inst]
+                {
+                    if      (inst.isSFZ)              dp->loadSampleSFZ    (inst.path);
+                    else if (inst.path.isDirectory()) dp->loadSampleFolder (inst.path);
+                    else                              dp->loadSampleFile   (inst.path);
+                });
                 return;
             }
 
@@ -735,13 +752,15 @@ void DrumPage::showSoundPicker (juce::Component* anchor)
             {
                 // Detect engine from preset's root tag - BaySickPlayerState
                 // routes to the player loader, BaySickSynthState to the synth.
-                const auto& xml = presetXmls[result - kPresetBase];
+                const auto xml = presetXmls[result - kPresetBase];
                 if (auto px = juce::XmlDocument::parse (xml))
                 {
-                    if (px->hasTagName ("BaySickPlayerState"))
-                        dp->loadPlayerPreset (xml);
-                    else
-                        dp->loadSynthPreset (xml);
+                    const bool isPlayer = px->hasTagName ("BaySickPlayerState");
+                    dp->performSoundSwapGesture ("Load Drum Patch", [dp, xml, isPlayer]
+                    {
+                        if (isPlayer) dp->loadPlayerPreset (xml);
+                        else          dp->loadSynthPreset (xml);
+                    });
                 }
                 return;
             }
@@ -853,7 +872,7 @@ void DrumPage::loadSynthPreset (const juce::File& xml)
             }
         }
     }
-    bss->apvts.replaceState (loaded);
+    bss->apvts.replaceStateKeepingUndoHistory (loaded);
 
     // Synth preset → no sample reference.
     mLoadedSampleKind = SampleKind::None;
@@ -878,6 +897,56 @@ void DrumPage::newBlankPatch()
 }
 
 void DrumPage::clearSound()
+{
+    performSoundSwapGesture ("Clear Drum Sound", [this] { clearSoundInternal(); });
+}
+
+// QA-UndoCoverage Task 7: one drum-sound swap gesture (pick / preset / clear)
+// = one StructuralOpAction.  Before/after are full-chain Page Preset XML
+// snapshots; an empty side means "no engine" and applies as a clear.  The
+// undo of a sample load is itself a LOAD (async engines) -- accepted
+// property, Jeff 2026-08-06.
+void DrumPage::performSoundSwapGesture (const juce::String& label,
+                                        const std::function<void()>& op)
+{
+    if (! mUndoCtx.isValid()) { op(); return; }
+
+    const juce::String before = exportPagePresetXml();
+    op();
+    const juce::String after = exportPagePresetXml();
+    if (before == after) return;
+
+    const juce::File beforeF = before.isNotEmpty() ? UndoSnapshotStore::writeNew (before) : juce::File();
+    const juce::File afterF  = after.isNotEmpty()  ? UndoSnapshotStore::writeNew (after)  : juce::File();
+    juce::Array<juce::File> owned;
+    if (beforeF != juce::File()) owned.add (beforeF);
+    if (afterF  != juce::File()) owned.add (afterF);
+
+    // Jeff ruling 2026-08-06: resolve the LIVE page at apply time (a
+    // delete+resurrect cycle replaces this object; the SafePointer stays
+    // only as the fallback for a ctx without a resolver).
+    auto resolveSelf = mUndoCtx.resolveOwnerPage;
+    auto sp = juce::Component::SafePointer<DrumPage> (this);
+    auto livePage = [resolveSelf, sp]() -> DrumPage*
+    {
+        if (resolveSelf) return dynamic_cast<DrumPage*> (resolveSelf());
+        return sp.getComponent();
+    };
+    auto applyXmlOrClear = [livePage] (const juce::File& f)
+    {
+        auto* dp = livePage();
+        if (dp == nullptr) return;
+        if (f == juce::File() || ! f.existsAsFile()) { dp->clearSoundInternal(); return; }
+        dp->importPagePresetXml (f.loadFileAsString());
+    };
+    mUndoCtx.perform (new StructuralOpAction (
+                          [applyXmlOrClear, beforeF] { applyXmlOrClear (beforeF); },
+                          [applyXmlOrClear, afterF]  { applyXmlOrClear (afterF); },
+                          owned),
+                      label);
+}
+
+void DrumPage::clearSoundInternal()
 {
     // QA-ModelShell TS1: view dies first (editor attachments reference the
     // engine APVTS), then the rig tears the engine down keeping the tab.
@@ -1050,7 +1119,7 @@ void DrumPage::loadPlayerPreset (const juce::File& xml)
                 }
             }
         }
-        vp->apvts.replaceState (loaded);
+        vp->apvts.replaceStateKeepingUndoHistory (loaded);
     }
 
     // 2. Reload sample reference.
@@ -1109,6 +1178,7 @@ void DrumPage::setPlayNote (int midiNote)
     if (newNote == oldNote) return;
 
     const juce::String pid = "mixer_drum_" + juce::String (mPageIndex) + "_playNote";
+    beginParamUndoGesture (mProcessor.apvts, pid); // Task 6 (12-iv)
     if (auto* p = mProcessor.apvts.getParameter (pid))
     {
         const auto& range = p->getNormalisableRange();
@@ -1289,7 +1359,8 @@ void DrumPage::showContextMenu (juce::Component* anchor, bool fromKit)
             // Page-preset load submenu (1000 + i -> pagePresetXmls[i]).
             if (r >= kIdPageLoadBase && r < kIdPageLoadBase + pagePresetXmls.size())
             {
-                dp->loadPagePreset (pagePresetXmls[r - kIdPageLoadBase]);
+                dp->performSoundSwapGesture ("Load Page Preset",
+                    [dp, f = pagePresetXmls[r - kIdPageLoadBase]] { dp->loadPagePreset (f); });
                 return;
             }
 
@@ -1312,6 +1383,7 @@ void DrumPage::showContextMenu (juce::Component* anchor, bool fromKit)
             {
                 const int newGroup = r - kIdChokeBase;
                 const juce::String prefix = "mixer_drum_" + juce::String (dp->mPageIndex) + "_chokeGroup";
+                beginParamUndoGesture (dp->mProcessor.apvts, prefix); // Task 6 (12-iv)
                 if (auto* p = dp->mProcessor.apvts.getParameter (prefix))
                 {
                     const auto& range = p->getNormalisableRange();
@@ -1332,6 +1404,7 @@ void DrumPage::showContextMenu (juce::Component* anchor, bool fromKit)
                         const auto& range = p->getNormalisableRange();
                         const int curRaw = (int) std::round (range.convertFrom0to1 (p->getValue()));
                         const int nextRaw = (curRaw == 0) ? 1 : 0;   // Poly=0, Mono=1
+                        beginParamUndoGesture (bss->apvts, bss->getParamPrefix() + "voiceMode"); // Task 6 (12-iv)
                         p->setValueNotifyingHost (range.convertTo0to1 ((float) nextRaw));
                     }
                 }
@@ -1343,6 +1416,7 @@ void DrumPage::showContextMenu (juce::Component* anchor, bool fromKit)
                         const auto& range = p->getNormalisableRange();
                         const float curRaw = range.convertFrom0to1 (p->getValue());
                         const float nextRaw = (curRaw <= 1.5f) ? 8.f : 1.f;
+                        beginParamUndoGesture (vp->apvts, vp->getParamPrefix() + "voiceCap"); // Task 6 (12-iv)
                         p->setValueNotifyingHost (range.convertTo0to1 (nextRaw));
                     }
                 }

@@ -1242,19 +1242,12 @@ bool DrumKitGrid::keyPressed(const KeyPress& key)
             }
     }
 
-    // Ctrl shortcuts.
-    if (ctrl && alt && (key.getKeyCode() == 'Z' || key.getKeyCode() == 'z'))
-    {
-        if (mUndoCtx.redo) mUndoCtx.redo();
-        return true;
-    }
+    // Ctrl shortcuts.  Regression fix (2026-08-06): the local Ctrl+Z /
+    // Ctrl+Alt+Z handlers removed -- they swallowed the key even with a dead
+    // context, and the global BSCommands dispatch handles both from every
+    // window now (the PianoRoll B-5 migration, finally applied here too).
     if (ctrl && ! alt)
     {
-        if (! shift && (key.getKeyCode() == 'Z' || key.getKeyCode() == 'z'))
-        {
-            if (mUndoCtx.undo) mUndoCtx.undo();
-            return true;
-        }
         if (! shift && (key.getKeyCode() == 'A' || key.getKeyCode() == 'a'))
             { selectAll(); return true; }
         if (! shift && (key.getKeyCode() == 'C' || key.getKeyCode() == 'c'))

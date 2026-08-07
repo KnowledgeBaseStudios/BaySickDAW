@@ -230,11 +230,10 @@ public:
     bool isCollapsed() const { return mCollapsed; }
     void setCollapsed(bool c);
 
-    // Jeff, 2026-08-04: the "<<" button is gone.  Collapsing happens by dragging
-    // the edge grip past its magnetic floor; the collapsed panel is the thin bar
-    // you click (or drag) to pull the browser back out.
-    std::function<void()> onExpandRequest;
-    void mouseDown (const juce::MouseEvent&) override;
+    // Jeff, 2026-08-06: collapsed = width zero.  The 5px edge grip is the only
+    // affordance in both states -- drag past the magnetic floor to collapse,
+    // drag the (chevron-marked) grip back out to reopen.  The 28px click-strip
+    // and its onExpandRequest are gone.
 
     int  getSelectedPatternIndex() const { return mSelectedPat; }
 
@@ -317,7 +316,34 @@ public:
     std::function<void(const juce::String& /*np*/, int /*targetChannel*/,
                        float /*pitch*/, float /*bpm*/, bool /*stretch*/)> onTagCopiedEntry;
 
+    // QA-UndoCoverage Task 4: browser pattern/library/template gestures wrap
+    // in undo actions.  Wired by BuilderPage::setUndoContext.
+    void setUndoContext (const UndoContext& ctx) { mUndoCtx = ctx; }
+    // Public rebuild hooks for undo-apply paths that live outside this class
+    // (the New Automation Clip rider + the slice-apply wiring in BuilderPage).
+    void refreshAutomationTab();
+    void refreshPatternTab();
+    // Jeff 2026-08-06: master-capture takes land in the Exports folder at
+    // record-commit; the editor pokes this so the new file shows immediately.
+    void refreshRenderRows();
+
+    // Pattern-list ops cascade into blocks (removePattern re-indexes), so the
+    // slice capture/apply lives on the ArrangementGrid; BuilderPage wires
+    // these across.
+    std::function<PatternListSnapshot()>            onCapturePatternSlice;
+    std::function<void(const PatternListSnapshot&)> onApplyPatternSlice;
+
 private:
+    // Wrap one browser gesture as one undo transaction (capture before, run
+    // the op, capture after, perform).  Falls back to bare op() when the
+    // context or slice hooks are unwired.
+    void performPatternSliceOp (const juce::String& label, const std::function<void()>& op);
+    void performLibraryOp      (const juce::String& label, bool withBlocks,
+                                const std::function<void()>& op);
+    void performTemplateOp     (const juce::String& label, bool withBlocks,
+                                const std::function<void()>& op);
+
+    UndoContext                mUndoCtx;
     PatternManager&            mPM;
     juce::AudioFormatManager&  mAFM;
     juce::AudioThumbnailCache& mThumbCache;
@@ -641,6 +667,25 @@ public:
                        const std::vector<juce::uint32>& rowColors,
                        const std::vector<char>& rowMuted,
                        const std::vector<char>& rowSoloed);
+    // QA-UndoCoverage Task 4: the pattern-list slice (patterns + blocks +
+    // per-row state), promoted from the Split-by-Engine local lambdas so
+    // browser pattern ops and the transport dropdown share one capture/apply.
+    PatternListSnapshot capturePatternSlice() const;
+    void                applyPatternSlice (const PatternListSnapshot& s);
+    // Wrap one pattern-list gesture (add / duplicate / remove) as one
+    // PatternListAction transaction.  Public: the transport dropdown and
+    // keybind paths in StandaloneEditor delegate here.
+    void performPatternSliceOp (const juce::String& label, const std::function<void()>& op);
+    // Wrap one marker/TS/tempo gesture as one MarkerSetAction transaction.
+    void performMarkerSetOp (const juce::String& label, const std::function<void()>& op);
+    // Wrap a pattern-TS gesture (setPatternTimeSig / resetPatternTimeSig):
+    // writes pattern fields AND marker lists, so a MarkerSetAction rides the
+    // slice action inside ONE transaction.
+    void performPatternTsOp (const juce::String& label, const std::function<void()>& op);
+    // For rider actions appended into the transaction commitEdit just opened
+    // (perform WITHOUT beginNewTransaction = same ActionSet, one Ctrl+Z).
+    juce::UndoManager* riderManager() const { return mUndoCtx.manager; }
+
     void undo() { if (mUndoCtx.undo) { mUndoCtx.undo(); if (onUndoRedoStateChanged) onUndoRedoStateChanged(); } }
     void redo() { if (mUndoCtx.redo) { mUndoCtx.redo(); if (onUndoRedoStateChanged) onUndoRedoStateChanged(); } }
     void showHistory() { if (mUndoCtx.showHistory) mUndoCtx.showHistory(); }   // 2026-04-26 (D-1b)
@@ -1523,7 +1568,6 @@ public:
     void doRenamePattern();
     void doPerformanceModeToggle();
     void doZoom(float factor);
-    void doToggleBrowser();
     void doNavigatePage(int pageIndex);  // 0=Layers, 1=Bass, 2=Drums, 3=Builder
     void doNewAutomationClip();
 
@@ -1578,14 +1622,34 @@ private:
     {
         std::function<int()>     getWidth;
         std::function<void(int)> setWidth;
+        std::function<bool()>    isCollapsed;   // Jeff 2026-08-06: divider stays live when collapsed
         int mStartW { 0 };
         BrowserEdgeGrip() { setMouseCursor (juce::MouseCursor::LeftRightResizeCursor); }
         void mouseDown (const juce::MouseEvent&) override
-            { mStartW = getWidth ? getWidth() : 0; }
+        {
+            // Collapsed: seed from zero so the drag-out travel is measured
+            // from the closed edge, not the stale pre-collapse width.
+            mStartW = (isCollapsed && isCollapsed()) ? 0
+                                                     : (getWidth ? getWidth() : 0);
+        }
         void mouseDrag (const juce::MouseEvent& e) override
             { if (setWidth) setWidth (mStartW + e.getDistanceFromDragStartX()); }
         void paint (juce::Graphics& g) override
-            { g.fillAll (juce::Colour (0xff303640)); }
+        {
+            g.fillAll (juce::Colour (0xff303640));
+            if (isCollapsed && isCollapsed())
+            {
+                // Small right-pointing chevron: "drag me back out".
+                const float cx = (float) getWidth() * 0.5f;
+                const float cy = (float) getHeight() * 0.5f;
+                juce::Path p;
+                p.startNewSubPath (cx - 1.5f, cy - 5.0f);
+                p.lineTo          (cx + 1.5f, cy);
+                p.lineTo          (cx - 1.5f, cy + 5.0f);
+                g.setColour (VC::Text.withAlpha (0.75f));
+                g.strokePath (p, juce::PathStrokeType (1.5f));
+            }
+        }
     };
     std::unique_ptr<BrowserEdgeGrip>      mBrowserGrip;
 

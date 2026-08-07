@@ -90,6 +90,9 @@ namespace BSCommands
         // All entries are page-local hardcoded keys + mouse gestures --
         // reference rows only, none rebindable (Piano Roll local-key deal).
         VocalEditors   = 5,
+        // 2026-08-06 (QA-UndoCoverage Task 5, docket 14=a): Event Editor
+        // local keys.  Display-only reference rows, none rebindable.
+        EventEditor    = 6,
     };
 
     juce::String categoryName (Category c);

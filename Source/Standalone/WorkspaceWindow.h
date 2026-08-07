@@ -306,6 +306,12 @@ private:
     // record whose placement was filtered out -- player windows).
     juce::Rectangle<int> loadSavedBounds (bool& outHasPosition) const;
 
+    // Jeff, 2026-08-06: seed mFilled + mRestoreBounds from the stores when a
+    // window opens (session map first, settings.xml rx/ry/rw/rh second) --
+    // a window saved while filled reopens filled AND keeps a restore size
+    // for the fill toggle.  Called at the end of attachTo.
+    void loadSavedFillState();
+
     juce::String mPersistKey, mTitle;
     // Session by default: only the four default tabs are promoted to Disk, and
     // hostPageInWindow does that explicitly by key.

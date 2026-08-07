@@ -386,7 +386,7 @@ void BaySickPedalsProcessor::restoreFullState (const juce::ValueTree& state)
     if (auto apvtsState = state.getChildWithName (apvts.state.getType());
         apvtsState.isValid())
     {
-        apvts.replaceState (apvtsState);
+        apvts.replaceStateKeepingUndoHistory (apvtsState);
     }
 
     auto slotsTree = state.getChildWithName ("Slots");

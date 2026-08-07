@@ -2,6 +2,7 @@
 #include "../AppPaths.h"
 #include "BaySickPitchSubEditor.h"
 #include "BaySickVocalProcessor.h"
+#include "../Standalone/UndoBracket.h"
 #include "../DSP/PitchCorrectorDSP.h"   // shared 13-scale table
 #include "../Standalone/BaySickTitleBar.h"
 #include "../Standalone/SharedUI.h"
@@ -2953,6 +2954,7 @@ void BaySickPitchEditor::loadUserPreset()
             if (! self || r <= 0 || r > files.size()) return;
             auto xml = juce::parseXML (files[r - 1]);
             if (xml == nullptr || ! xml->hasTagName ("BaySickPitchPreset")) return;
+            beginParamUndoGesture (self->mProc.apvts, "bsp_focus"); // Task 6 (12-iv)
             for (auto* id : { "bsp_focus", "bsp_mod", "bsp_speed" })
                 if (xml->hasAttribute (id))
                     self->setParamValue (id, (float) xml->getDoubleAttribute (id));

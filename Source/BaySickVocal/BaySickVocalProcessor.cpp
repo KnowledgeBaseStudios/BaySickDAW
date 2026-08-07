@@ -1887,11 +1887,15 @@ void BaySickVocalProcessor::setStateInformation (const void* data, int size)
         const bool preQaFePitch = ! newState.getChildWithProperty (
             "id", juce::String ("bsp_engine")).isValid();
 
-        apvts.replaceState (newState);
+        apvts.replaceStateKeepingUndoHistory (newState);
 
         if (preQaFePitch)
+        {
+            // QA-UndoCoverage Task 6: load-path migration write, not history.
+            juce::AudioProcessorValueTreeState::ScopedProgrammaticParamWrites spw;
             if (auto* p = apvts.getParameter ("bsa_pitch_algo"))
                 p->setValueNotifyingHost (p->convertTo0to1 (0.0f));
+        }
 
         mPitchRenders.clear();
         mPitchVersions.clear();

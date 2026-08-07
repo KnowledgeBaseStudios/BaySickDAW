@@ -191,19 +191,17 @@ void BaySickRustyDrumsPage::buildPlayerTab()
         binding.kitDefaultCc = [engine](int cc) { return engine->getKitDefaultCc (cc); };
         binding.ccLabel      = [engine](int cc) { return engine->getCcLabel (cc); };
     }
-    // Jeff, 2026-08-04: engineName stays EMPTY (the kit artwork carries Rusty's
-    // own logo, so a rendered name would be a second one) but the BAND stays --
-    // it is where this page's Program + Player Preset controls live.  T15
-    // dissolved the band along with the name and left both controls homeless.
+    // Jeff, 2026-08-06: engineName stays EMPTY (the kit artwork carries Rusty's
+    // own logo) and the BAND stays -- but it now hosts the section TAB ROW
+    // (Main / Kick / Snare / ...), placed there by AriaControlPanel::resized.
+    // The Program + Player Preset controls moved UP to the WINDOW title strip
+    // (StandaloneEditor's Rusty page-show branch mounts them via
+    // addExtraRightComponent, which lays out INSIDE the menu bar -- the mount
+    // whose right edge already excludes the window chrome, unlike the T3
+    // attempt that ended up behind it).
     binding.hostTitleBar = true;
     mAriaPanel = std::make_unique<AriaControlPanel> (binding);
     mPlayerTab->addAndMakeVisible (*mAriaPanel);
-
-    if (auto* bar = mAriaPanel->getTitleBar())
-    {
-        if (mPlayerPresetBtn) bar->addHostedTrailingWidget (mPlayerPresetBtn.get(), 110);
-        if (mProgramCombo)    bar->addHostedTrailingWidget (mProgramCombo.get(),    160);
-    }
 }
 
 void BaySickRustyDrumsPage::buildPianoRollTab()
@@ -296,8 +294,10 @@ void BaySickRustyDrumsPage::loadAriaPanelForProgram (Program target)
         binding.kitDefaultCc = [engine](int cc) { return engine->getKitDefaultCc (cc); };
         binding.ccLabel      = [engine](int cc) { return engine->getCcLabel (cc); };
     }
-    // engineName stays empty across program reloads too, but the band persists
-    // (hostTitleBar) so the hosted Program + Player Preset widgets survive.
+    // engineName stays empty across program reloads too, and the band
+    // persists (hostTitleBar) -- it hosts the section tab row (Jeff
+    // 2026-08-06; the Program + Player Preset controls live on the WINDOW
+    // title strip now).
     binding.hostTitleBar = true;
     mAriaPanel->setEngine (binding);
 
@@ -373,6 +373,10 @@ void BaySickRustyDrumsPage::showPlayerPresetMenu()
         {
             if (! safe || r <= 0) return;
             if (r == kIdSave) { safe->savePlayerPresetAs(); return; }
+            // Ruling 3a + regression fix (2026-08-06): the load wraps at its
+            // TERMINALS inside loadPlayerPresetFromFile (the cross-program
+            // branch finishes in an async confirm callback the old outer
+            // wrap could not see).
             if (r >= kIdLoadBase && r < kIdLoadBase + presetXmls.size())
                 safe->loadPlayerPresetFromFile (presetXmls[r - kIdLoadBase]);
         });
@@ -488,6 +492,8 @@ void BaySickRustyDrumsPage::loadPlayerPresetFromFile (const juce::File& xml)
         if (engine == nullptr) return;
         // QA-ProjectSave Task 11: a freshly-applied preset is the new clean
         // state, not an edit -- suppress the dirty listener for the apply.
+        // QA-UndoCoverage Task 6: and keep it out of the undo history too.
+        juce::AudioProcessorValueTreeState::ScopedProgrammaticParamWrites spw;
         mSuppressDirty = true;
         for (const auto& [id, natural] : *paramPairs)
         {
@@ -502,19 +508,34 @@ void BaySickRustyDrumsPage::loadPlayerPresetFromFile (const juce::File& xml)
         mPageDirty     = false;
     };
 
+    // Regression fix (2026-08-06): the wrap moved from the MENU callback to
+    // each terminal here.  The old shape wrapped this whole function, but the
+    // cross-program branch does its real work in an ASYNC confirm callback --
+    // the wrap closed before anything changed, the before==after guard ate
+    // the empty transaction, and the actual switch ran unwrapped.
+    auto wrapOp = [this] (std::function<void()> op)
+    {
+        if (onWrapStructuralOp) onWrapStructuralOp ("Load Player Preset", std::move (op));
+        else                    op();
+    };
+
     // Same program (or preset has no program tag): apply CCs immediately.
     if (presetProgram == Program::None || presetProgram == mCurrentProgram)
     {
-        applyParams();
+        wrapOp (applyParams);
         return;
     }
 
     // Preset specifies a different program.  If nothing is loaded yet, switch
-    // silently (no destructive state to warn about).
+    // silently (no destructive state to warn about).  Ruling 1A: undoable,
+    // undo returns to the empty player.
     if (mCurrentProgram == Program::None)
     {
-        if (loadProgram (presetProgram))
-            applyParams();
+        wrapOp ([this, presetProgram, applyParams]
+        {
+            if (loadProgram (presetProgram))
+                applyParams();
+        });
         return;
     }
 
@@ -527,14 +548,21 @@ void BaySickRustyDrumsPage::loadPlayerPresetFromFile (const juce::File& xml)
         juce::String ("This preset was saved on '") + programLabel (presetProgram)
             + "' and will switch the player from '" + programLabel (mCurrentProgram)
             + "'.  Switching will reset all mixer settings and clear the piano "
-              "roll across every pattern.  This cannot be undone.  Continue?",
+              "roll across every pattern.  Continue?",
         "Yes, switch + load", "Cancel", nullptr,
         juce::ModalCallbackFunction::create (
             [safe, presetProgram, applyParams] (int r)
             {
                 if (! safe || r != 1) return;
-                if (safe->loadProgram (presetProgram))
-                    applyParams();
+                auto op = [safe, presetProgram, applyParams]
+                {
+                    if (safe != nullptr && safe->loadProgram (presetProgram))
+                        applyParams();
+                };
+                if (safe->onWrapStructuralOp)
+                    safe->onWrapStructuralOp ("Load Player Preset", op);
+                else
+                    op();
             }));
 }
 
@@ -563,8 +591,12 @@ void BaySickRustyDrumsPage::onProgramComboChanged()
 
     if (mCurrentProgram == Program::None)
     {
-        // First load - no confirm prompt, nothing to lose.
-        loadProgram (target);
+        // First load - no confirm prompt.  Ruling 1A (2026-08-06): still ONE
+        // undoable transaction; undo returns to the empty player (the wrap's
+        // restore recognizes the engine-less before-record and unloads).
+        auto doIt = [this, target] { loadProgram (target); };
+        if (onWrapStructuralOp) onWrapStructuralOp ("Load Rusty Program", doIt);
+        else                    doIt();
         return;
     }
 
@@ -578,13 +610,19 @@ void BaySickRustyDrumsPage::promptAndSwitchProgram (Program target)
         juce::AlertWindow::WarningIcon,
         "Switch Rusty Drums program?",
         "Switching will reset all mixer settings, clear the piano roll across "
-        "every pattern, and reload the kit.  This cannot be undone.  Continue?",
+        "every pattern, and reload the kit.  Continue?",
         "Yes, switch", "Cancel", nullptr,
         juce::ModalCallbackFunction::create ([this, target] (int result)
         {
             if (result == 1)
             {
-                loadProgram (target);
+                // Jeff ruling 1a (2026-08-06): the switch is ONE undoable
+                // transaction (composite capture: engine blob + the pattern
+                // slice the teardown clears).  "This cannot be undone."
+                // retired from the warning above with it.
+                auto doIt = [this, target] { loadProgram (target); };
+                if (onWrapStructuralOp) onWrapStructuralOp ("Switch Rusty Program", doIt);
+                else                    doIt();
             }
             else
             {
@@ -631,6 +669,16 @@ bool BaySickRustyDrumsPage::loadProgram (Program target)
     loadAriaPanelForProgram (target);   // J-8 stage 2: render the ARIA control surface
     if (onSoundNameChanged) onSoundNameChanged (juce::String ("BaySickRustyDrums - ") + programLabel (target));
     return true;
+}
+
+void BaySickRustyDrumsPage::unloadToNone()
+{
+    if (mCurrentProgram == Program::None) return;
+    tearDownCurrentProgram();
+    mCurrentProgram = Program::None;
+    if (mProgramCombo) mProgramCombo->setSelectedId (0, juce::dontSendNotification);
+    if (onProgramChanged) onProgramChanged();
+    if (onSoundNameChanged) onSoundNameChanged ("BaySickRustyDrums");
 }
 
 void BaySickRustyDrumsPage::tearDownCurrentProgram()

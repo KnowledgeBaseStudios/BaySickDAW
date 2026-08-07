@@ -1092,7 +1092,7 @@ void HarmlessProcessor::setStateInformation (const void* data, int sz)
             if (modTree.isValid())
                 mModRegistry.fromValueTree (modTree);
 
-            apvts.replaceState (tree);
+            apvts.replaceStateKeepingUndoHistory (tree);
         }
     }
 }

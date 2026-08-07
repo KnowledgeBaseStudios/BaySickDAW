@@ -2,6 +2,7 @@
 #include <JuceHeader.h>
 #include "../Standalone/SharedUI.h"   // ParametricEQDisplay
 #include "../Standalone/EngineChainProcessor.h"   // I-16 G-9: Pedals -> NAM/IR chain
+#include "../Standalone/UndoActions.h"            // QA-UndoCoverage Task 7: UndoContext + StructuralOpAction
 
 class VibeSynthProcessor;
 class AriaControlPanel;
@@ -111,6 +112,11 @@ public:
     // when nothing changed is harmless (just rebuilds the same stage list).
     void notifySourceEngineChanged();
 
+    // QA-UndoCoverage Task 7: program pick = one structural transaction
+    // (undo re-enters the prior program through the session CC-state cache).
+    void setUndoContext (const UndoContext& ctx) { mUndoCtx = ctx; }
+    void switchSfizzProgramWithUndo (const juce::File& target);
+
     std::function<void()> onEngineDestroying;
     std::function<void()> onEngineChanged;
 
@@ -210,9 +216,9 @@ private:
     // Saved on outgoing program; restored on incoming program if present.
     // Project save (K-6) will persist this map alongside the kit path.
     std::map<juce::String, juce::ValueTree>      mProgramStateCache;
+    UndoContext                                  mUndoCtx;
+    bool switchSfizzProgram (const juce::File& target);
     void rebuildPlayerPanel();
-    void rebuildProgramCombo();
-    void onProgramComboChanged();
 
     // QA-G3Smoke Task 12 (G-14): CUT SELF + mode toggles hosted in the panel
     // title bar's formerly reserved trailing slots, bound to the sfizz

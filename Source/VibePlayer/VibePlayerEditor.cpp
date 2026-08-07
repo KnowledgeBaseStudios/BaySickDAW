@@ -294,11 +294,15 @@ VibePlayerEditor::VibePlayerEditor (VibePlayerProcessor& p)
     // ChickenHeadSelector <-> APVTS int param (manual two-way binding)
     if (auto* p = avts.getParameter (pid ("detuneMode")))
     {
+        // Regression fix (2026-08-06): this attachment WRITES (the
+        // setValueAsCompleteGesture below) -- a nullptr manager meant the
+        // gesture never began a transaction and the pick bled into the
+        // previous history entry.
         mDetuneModeAtt = std::make_unique<juce::ParameterAttachment> (
             *p,
             [this] (float v) { mDetuneModeSel.setSelectedIndex (juce::jlimit (0, 2, (int) v),
                                                                 juce::dontSendNotification); },
-            nullptr);
+            avts.undoManager);
         mDetuneModeAtt->sendInitialUpdate();
         mDetuneModeSel.onChange = [this] (int idx)
         {
@@ -783,7 +787,7 @@ void VibePlayerEditor::loadPreset (const juce::File& f)
                 }
             }
         }
-        mProc.apvts.replaceState (loaded);
+        mProc.apvts.replaceStateKeepingUndoHistory (loaded, "Load Preset");   // ruling 3a
     }
 
     // 2. Reload the referenced sample (handles "library:rel/path" + absolute).

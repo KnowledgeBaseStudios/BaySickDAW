@@ -169,6 +169,9 @@ namespace PagePresetIO
                                 // value calls were silently no-op'd by the
                                 // listener-short-circuit on some JUCE builds,
                                 // leaving sfizz holding kit defaults.
+                                // QA-UndoCoverage Task 6: preset-import param
+                                // walks are programmatic -- never history.
+                                juce::AudioProcessorValueTreeState::ScopedProgrammaticParamWrites spw;
                                 for (int i = 0; i < state.getNumChildren(); ++i)
                                 {
                                     auto paramNode = state.getChild (i);
@@ -191,7 +194,7 @@ namespace PagePresetIO
                                 // properties) round-trip too.  Param values
                                 // are already at the saved targets, so this
                                 // is a no-op for the listener path.
-                                slot.engineApvts->replaceState (state);
+                                slot.engineApvts->replaceStateKeepingUndoHistory (state);
                                 break;
                             }
                         }
@@ -305,6 +308,8 @@ namespace PagePresetIO
                 {
                     if (auto* rp = dynamic_cast<juce::RangedAudioParameter*> (p))
                     {
+                        // Task 6: preset strip-param restore is programmatic.
+                        juce::AudioProcessorValueTreeState::ScopedProgrammaticParamWrites spw;
                         const float normalized = rp->getNormalisableRange()
                                                      .convertTo0to1 (natural);
                         rp->setValueNotifyingHost (normalized);
@@ -767,7 +772,14 @@ namespace PagePresetIO
     juce::String peekEngineType (const juce::File& xml)
     {
         if (! xml.existsAsFile()) return {};
-        auto parsed = juce::XmlDocument::parse (xml);
+        return peekEngineTypeFromXml (xml.loadFileAsString());
+    }
+
+    // QA-UndoCoverage Task 7: string-input peek for the structural-undo
+    // snapshots (they live as in-memory XML / temp files, not preset files).
+    juce::String peekEngineTypeFromXml (const juce::String& xmlText)
+    {
+        auto parsed = juce::XmlDocument::parse (xmlText);
         if (parsed == nullptr) return {};
         const auto rootTag = parsed->getTagName();
         if (rootTag != "BaySickPagePreset"

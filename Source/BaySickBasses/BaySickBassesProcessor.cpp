@@ -13,14 +13,17 @@ inline juce::String makePrefix (int instIdx)
 }
 }
 
-BaySickBassesProcessor::BaySickBassesProcessor (int instIdx)
+BaySickBassesProcessor::BaySickBassesProcessor (int instIdx, juce::UndoManager& undoMgr)
     : juce::AudioProcessor (BusesProperties()
                                 .withOutput ("Out", juce::AudioChannelSet::stereo(), true)),
       mInstIdx     (instIdx),
       mPrefix      (makePrefix (instIdx)),
       mCcParamRoot (mPrefix + "cc"),
+      mUndoManager (undoMgr),
       apvts (*this, &mUndoManager, "BaySickBassesState", createLayout (mPrefix))
 {
+    // QA-UndoCoverage: stable undo identity (see BaySickGuitars).
+    apvts.undoOwnerTag = "sfizz:" + mPrefix;
     mSfizz = std::make_unique<sfz::Sfizz>();
     mSfizz->setSampleRate     (static_cast<float>(mSampleRate));
     mSfizz->setSamplesPerBlock (mMaxBlockSize);
@@ -67,16 +70,6 @@ void BaySickBassesProcessor::parameterChanged (const juce::String& paramId, floa
     if (cc < 0 || cc >= kCcCount) return;
     const int v  = juce::jlimit (0, 127, (int) std::round (newValue));
     if (mSfizz) mSfizz->cc (0, cc, v);
-}
-
-void BaySickBassesProcessor::sendCc (int cc, int value)
-{
-    if (cc < 0 || cc >= kCcCount) return;
-    if (auto* p = dynamic_cast<juce::RangedAudioParameter*> (
-            apvts.getParameter (mCcParamRoot + juce::String (cc))))
-    {
-        p->setValueNotifyingHost (p->getNormalisableRange().convertTo0to1 ((float) value));
-    }
 }
 
 int BaySickBassesProcessor::getNumActiveVoices() const noexcept
@@ -615,6 +608,9 @@ bool BaySickBassesProcessor::loadKit (const juce::File& sfzPath)
     // kit - a CC the user moved on one program would persist into the next
     // program that never set_cc's it.  The reset reaches sfizz via
     // setValueNotifyingHost -> parameterChanged.
+    // QA-UndoCoverage Task 6: kit-default pushes are programmatic (the kit
+    // load itself becomes ONE structural transaction in Task 7).
+    juce::AudioProcessorValueTreeState::ScopedProgrammaticParamWrites spw;
     for (int cc = 0; cc < kCcCount; ++cc)
     {
         if (auto* p = dynamic_cast<juce::RangedAudioParameter*> (
@@ -684,5 +680,5 @@ void BaySickBassesProcessor::setStateInformation (const void* data, int sz)
     }
 
     if (auto apvtsState = root.getChildWithName (apvts.state.getType()); apvtsState.isValid())
-        apvts.replaceState (apvtsState);
+        apvts.replaceStateKeepingUndoHistory (apvtsState);
 }

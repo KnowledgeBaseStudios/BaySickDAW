@@ -6,6 +6,7 @@
 #include "SampleLibrary.h"  // QA-ProjectSave Task 4: stable-root reference resolver
 #include "EngineRig.h"      // QA-ModelShell TS1: model-side engine owner
 #include "Hosting/PluginManager.h"   // QA-ModelShell TS6: hosted-plugin scan + added list
+#include "Standalone/UndoBracket.h"
 
 // QA-Ec x QA-TempoMap seam: audio-clip block boundaries are BEAT-authored, so
 // with a published timeline their sample positions must resolve through it -
@@ -380,6 +381,11 @@ VibeSynthProcessor::VibeSynthProcessor()
         .withOutput("Output", juce::AudioChannelSet::stereo(), true)),
       apvts(*this, &mUndoManager, "BaySickDAWState", createParameterLayout())
 {
+    // QA-UndoCoverage: stable undo identity for the main APVTS (never
+    // re-created, but tagged so its undo entries use the same tag-resolving
+    // path as every engine's).
+    apvts.undoOwnerTag = "main";
+
     mEngineRig = std::make_unique<EngineRig> (*this, mUndoManager);
 
     // QA-ModelShell TS6: reads plugins.xml at construction (scan folders + the
@@ -2912,6 +2918,11 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
     // during pattern playback.  Gate matches the audio-clip block below.
     if (mSongMode.load (std::memory_order_relaxed) && pos.getIsPlaying() && mPatternManager)
     {
+        // QA-UndoCoverage: automation replay is a programmatic writer -- its
+        // values must never enter the undo history (write-time marking; the
+        // scope is a thread_local bool flip, allocation-free on this thread).
+        juce::AudioProcessorValueTreeState::ScopedProgrammaticParamWrites spw;
+
         // C.5b (post-revert): Builder grid is uniform 4-beat-per-bar.
         const double kBeatsPerBar = 4.0;
         double autoBeat = pos.getPpqPosition().orFallback(0.0);
@@ -6214,17 +6225,22 @@ void VibeSynthProcessor::resetToBlankState()
     // Reset every registered APVTS param to its default value.  Iterate via
     // getParameters() so lazy-registered engine / mixer-strip / rack params
     // all get swept regardless of when they were added.
-    for (auto* param : getParameters())
     {
-        if (auto* ranged = dynamic_cast<juce::RangedAudioParameter*> (param))
+        // QA-UndoCoverage Task 6: File > New / Open default sweep is a load
+        // boundary -- never history.
+        juce::AudioProcessorValueTreeState::ScopedProgrammaticParamWrites spw;
+        for (auto* param : getParameters())
         {
-            // 2026-04-24 bugfix: getDefaultValue() already returns normalised
-            // 0..1 (JUCE contract).  Wrapping it in convertTo0to1 caused
-            // double-normalisation - Int params with large ranges (e.g.
-            // _sendTo 0..999) collapsed to 0, silently breaking every strip's
-            // routing after File > New.  Pass the normalised default straight
-            // through.
-            ranged->setValueNotifyingHost (ranged->getDefaultValue());
+            if (auto* ranged = dynamic_cast<juce::RangedAudioParameter*> (param))
+            {
+                // 2026-04-24 bugfix: getDefaultValue() already returns normalised
+                // 0..1 (JUCE contract).  Wrapping it in convertTo0to1 caused
+                // double-normalisation - Int params with large ranges (e.g.
+                // _sendTo 0..999) collapsed to 0, silently breaking every strip's
+                // routing after File > New.  Pass the normalised default straight
+                // through.
+                ranged->setValueNotifyingHost (ranged->getDefaultValue());
+            }
         }
     }
 
@@ -7428,6 +7444,7 @@ VibeSynthProcessor::makeSwingKnobBinding (const juce::String& mixId,
     };
     b.setMix = [ap, mixId] (float v)
     {
+        beginParamUndoGesture (*ap, mixId); // Task 6 (12-iv)
         if (auto* p = dynamic_cast<juce::RangedAudioParameter*> (ap->getParameter (mixId)))
             p->setValueNotifyingHost (p->getNormalisableRange().convertTo0to1 (
                 juce::jlimit (0.0f, 1.0f, v)));
@@ -7439,6 +7456,7 @@ VibeSynthProcessor::makeSwingKnobBinding (const juce::String& mixId,
     };
     b.setTrunc = [ap, truncId] (bool on)
     {
+        beginParamUndoGesture (*ap, truncId); // Task 6 (12-iv)
         if (auto* p = dynamic_cast<juce::RangedAudioParameter*> (ap->getParameter (truncId)))
             p->setValueNotifyingHost (on ? 1.0f : 0.0f);
     };
@@ -7476,6 +7494,8 @@ void VibeSynthProcessor::setSongMode (bool b)
     }
     else
     {
+        // QA-UndoCoverage: baseline restore is programmatic -- not history.
+        juce::AudioProcessorValueTreeState::ScopedProgrammaticParamWrites spw;
         for (const auto& p : mAutomationBaseline)
             if (auto* param = apvts.getParameter (p.first))
                 param->setValueNotifyingHost (p.second);
@@ -7627,6 +7647,8 @@ void VibeSynthProcessor::removeRustyInsert(int idx)
     // Reset to defaults so a future re-create starts clean.  Common cleanup
     // covers: level (0 dB), pan (centre), mute/solo/polarity/bypass/arm (off).
     const juce::String prefix = "mixer_rusty_" + juce::String(idx);
+    // QA-UndoCoverage Task 6: teardown default pushes are programmatic.
+    juce::AudioProcessorValueTreeState::ScopedProgrammaticParamWrites spw;
     auto resetParam = [&](const juce::String& suffix, float defaultVal)
     {
         if (auto* p = dynamic_cast<juce::RangedAudioParameter*>(apvts.getParameter(prefix + suffix)))
@@ -7682,7 +7704,7 @@ bool VibeSynthProcessor::loadBaySickGuitarsKit (int instIdx, const juce::File& s
         const juce::SpinLock::ScopedLockType sl (mGuitarsEngineLock[(size_t) instIdx]);
         if (! mGuitarsEngine[(size_t) instIdx])
         {
-            mGuitarsEngine[(size_t) instIdx] = std::make_unique<BaySickGuitarsProcessor> (instIdx);
+            mGuitarsEngine[(size_t) instIdx] = std::make_unique<BaySickGuitarsProcessor> (instIdx, mUndoManager);
             // 2026-07-31: see mLastEnginePlayHead -- the per-block propagation is
             // change-gated and the change already happened, so a later-created
             // engine only gets a playhead if its creation path hands it one.
@@ -7762,7 +7784,7 @@ bool VibeSynthProcessor::loadBaySickBassesKit (int instIdx, const juce::File& sf
         const juce::SpinLock::ScopedLockType sl (mBassesEngineLock[(size_t) instIdx]);
         if (! mBassesEngine[(size_t) instIdx])
         {
-            mBassesEngine[(size_t) instIdx] = std::make_unique<BaySickBassesProcessor> (instIdx);
+            mBassesEngine[(size_t) instIdx] = std::make_unique<BaySickBassesProcessor> (instIdx, mUndoManager);
             mBassesEngine[(size_t) instIdx]->setPlayHead (enginePlayHead());   // see above
             mBassesEngine[(size_t) instIdx]->prepareToPlay (
                 getSampleRate() > 0.0 ? getSampleRate() : 48000.0,
@@ -7839,7 +7861,7 @@ bool VibeSynthProcessor::loadBaySickRustyDrumsKit (const juce::File& sfzPath)
     // audio thread at processBlock top, so no concurrent reader exists.
     if (! mRustyDrumsEngine)
     {
-        mRustyDrumsEngine = std::make_unique<BaySickRustyDrumsProcessor>();
+        mRustyDrumsEngine = std::make_unique<BaySickRustyDrumsProcessor> (mUndoManager);
         mRustyDrumsEngine->setPlayHead (enginePlayHead());   // see mLastEnginePlayHead
         mRustyDrumsEngine->prepareToPlay (getSampleRate() > 0.0 ? getSampleRate() : 48000.0,
                                           getBlockSize()  > 0   ? getBlockSize()  : 512);
@@ -8042,6 +8064,8 @@ void VibeSynthProcessor::destroyBaySickRustyDrums()
 
     // Reset bus-level mixer params to defaults so a future re-create starts
     // clean (mixer_rustybus_* params persist as APVTS zombies, harmless).
+    // QA-UndoCoverage Task 6: teardown default pushes are programmatic.
+    juce::AudioProcessorValueTreeState::ScopedProgrammaticParamWrites spwBus;
     auto resetBusParam = [&](const juce::String& suffix, float defaultVal)
     {
         if (auto* p = dynamic_cast<juce::RangedAudioParameter*>(apvts.getParameter("mixer_rustybus" + suffix)))
@@ -8061,6 +8085,8 @@ void VibeSynthProcessor::resetBaySickRustyDrumsMixerState()
     // resets the standard strip/bus params to the registered defaults.
     // Called when the user switches programs (Full <-> Basic) so the
     // freshly-spawned strips for the new program start clean.
+    // QA-UndoCoverage Task 6: program-swap default pushes are programmatic.
+    juce::AudioProcessorValueTreeState::ScopedProgrammaticParamWrites spw;
     auto resetParam = [&] (const juce::String& id, float defaultVal)
     {
         if (auto* p = dynamic_cast<juce::RangedAudioParameter*> (apvts.getParameter (id)))

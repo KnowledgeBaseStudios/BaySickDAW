@@ -933,7 +933,7 @@ void RibbonTabBar::showInstanceDropdown(TabType type, juce::Rectangle<int> tabBo
                 {
                     auto* aw = new juce::AlertWindow(
                         "Delete",
-                        "This action cannot be undone. Are you sure?",
+                        "Are you sure?",
                         juce::MessageBoxIconType::WarningIcon);
                     aw->addButton("Delete", 1);
                     aw->addButton("Cancel", 0);

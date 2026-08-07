@@ -564,5 +564,5 @@ void BaySickBassProcessor::setStateInformation (const void* data, int sz)
 {
     if (auto xml = getXmlFromBinary (data, sz))
         if (xml->hasTagName (apvts.state.getType()))
-            apvts.replaceState (juce::ValueTree::fromXml (*xml));
+            apvts.replaceStateKeepingUndoHistory (juce::ValueTree::fromXml (*xml));
 }

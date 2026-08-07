@@ -31,6 +31,17 @@ struct UndoContext
     // Open the global undo history window (optional - wire where available).
     std::function<void()> showHistory;
 
+    // Jeff ruling 2026-08-06 (fix now): page-lifetime undo entries must
+    // survive delete + resurrect cycles.  Resurrection creates a NEW page
+    // object, so a SafePointer captured at gesture time goes null and the
+    // entry silently skips.  Apply lambdas resolve the LIVE page through
+    // this instead: it returns the CURRENT page owning this context's
+    // identity (the editor derives kind + pageIndex from the ctx owner key),
+    // or nullptr while the tab is genuinely absent -- the history ORDER
+    // re-creates it before its rows replay.  Wired by
+    // StandaloneEditor::makeUndoContext; null on non-page contexts.
+    std::function<juce::Component*()> resolveOwnerPage;
+
     bool isValid() const { return manager != nullptr && (bool)perform; }
 };
 
@@ -302,4 +313,266 @@ private:
     ApplyFn        mApply;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(AutomationLaneEditAction)
+};
+
+// ── StructuralOpAction (QA-UndoCoverage Task 7) ───────────────────────────────
+// One structural user gesture (tab add / delete / duplicate, engine pick or
+// swap, kit load) as one undoable transaction.  The op has ALREADY happened
+// when this action is performed (skip-first convention); undoFn reverses it
+// and redoFn re-applies it.  Snapshot temp files referenced by the lambdas
+// are owned here -- deleted when the action dies (depth-cap drop, history
+// clear, manager teardown), which is what keeps the UndoSnapshots store
+// bounded by the history depth.
+// ─────────────────────────────────────────────────────────────────────────────
+class StructuralOpAction : public juce::UndoableAction
+{
+public:
+    StructuralOpAction (std::function<void()> undoFn,
+                        std::function<void()> redoFn,
+                        juce::Array<juce::File> ownedSnapshots = {})
+        : mUndo (std::move (undoFn))
+        , mRedo (std::move (redoFn))
+        , mSnapshots (std::move (ownedSnapshots))
+    {}
+
+    ~StructuralOpAction() override
+    {
+        for (const auto& f : mSnapshots)
+            f.deleteFile();
+    }
+
+    bool perform() override
+    {
+        if (mFirstPerform) { mFirstPerform = false; return true; }
+        if (mRedo) mRedo();
+        return true;
+    }
+    bool undo() override
+    {
+        if (mUndo) mUndo();
+        return true;
+    }
+    int getSizeInUnits() override { return (int) sizeof (*this); }
+
+private:
+    std::function<void()>  mUndo, mRedo;
+    juce::Array<juce::File> mSnapshots;
+    bool                   mFirstPerform { true };
+
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(StructuralOpAction)
+};
+
+// ── PatternListAction (QA-UndoCoverage Task 4) ────────────────────────────────
+// Project-slice snapshot for pattern-list ops (add / duplicate / remove).
+// The slice is {patterns, currentPattern, blocks, row state} because
+// PatternManager::removePattern cascades: blocks of the dead pattern are
+// erased and every higher patternIndex is re-indexed -- a single-Pattern
+// payload cannot restore that.  Linked TS markers stay OUTSIDE the undo
+// domain (the Split-by-Engine seam).  Shape shared with the Split flow.
+// ─────────────────────────────────────────────────────────────────────────────
+struct PatternListSnapshot
+{
+    std::vector<Pattern>          patterns;
+    int                           currentPattern { 0 };
+    std::vector<ArrangementBlock> blocks;
+    std::vector<juce::String>     rowNames;
+    std::vector<int>              rowGroups;
+    std::vector<juce::uint32>     rowColors;
+    std::vector<char>             rowMuted, rowSoloed;
+};
+
+class PatternListAction : public juce::UndoableAction
+{
+public:
+    using ApplyFn = std::function<void(const PatternListSnapshot&)>;
+
+    PatternListAction(PatternListSnapshot before, PatternListSnapshot after,
+                      ApplyFn applyFn)
+        : mBefore(std::move(before))
+        , mAfter(std::move(after))
+        , mApply(std::move(applyFn))
+    {}
+
+    bool perform() override { mApply(mAfter);  return true; }
+    bool undo()    override { mApply(mBefore); return true; }
+    int  getSizeInUnits() override
+    {
+        return (int)((mBefore.patterns.size() + mAfter.patterns.size()) * 1024
+                     + (mBefore.blocks.size() + mAfter.blocks.size()) * sizeof(ArrangementBlock));
+    }
+
+private:
+    PatternListSnapshot mBefore, mAfter;
+    ApplyFn             mApply;
+
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(PatternListAction)
+};
+
+// ── PatternRenameAction / PatternColorAction ──────────────────────────────────
+// Light single-field pattern edits -- the full slice above would copy every
+// pattern's note content for a name/color write.
+// ─────────────────────────────────────────────────────────────────────────────
+class PatternRenameAction : public juce::UndoableAction
+{
+public:
+    using ApplyFn = std::function<void(int index, const juce::String& name)>;
+
+    PatternRenameAction(int index, juce::String before, juce::String after,
+                        ApplyFn applyFn)
+        : mIndex(index), mBefore(std::move(before)), mAfter(std::move(after))
+        , mApply(std::move(applyFn))
+    {}
+
+    bool perform() override { mApply(mIndex, mAfter);  return true; }
+    bool undo()    override { mApply(mIndex, mBefore); return true; }
+    int  getSizeInUnits() override { return (int)sizeof(*this); }
+
+private:
+    int          mIndex;
+    juce::String mBefore, mAfter;
+    ApplyFn      mApply;
+
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(PatternRenameAction)
+};
+
+class PatternColorAction : public juce::UndoableAction
+{
+public:
+    using ApplyFn = std::function<void(int index, juce::Colour colour)>;
+
+    PatternColorAction(int index, juce::Colour before, juce::Colour after,
+                       ApplyFn applyFn)
+        : mIndex(index), mBefore(before), mAfter(after)
+        , mApply(std::move(applyFn))
+    {}
+
+    bool perform() override { mApply(mIndex, mAfter);  return true; }
+    bool undo()    override { mApply(mIndex, mBefore); return true; }
+    int  getSizeInUnits() override { return (int)sizeof(*this); }
+
+private:
+    int          mIndex;
+    juce::Colour mBefore, mAfter;
+    ApplyFn      mApply;
+
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(PatternColorAction)
+};
+
+// ── MarkerSetAction (QA-UndoCoverage Task 4) ──────────────────────────────────
+// Before/after snapshot of the three ruler lists (time markers, time-sig
+// changes, tempo changes) + the current-TS uid.  Cheap: the lists are small
+// POD-ish vectors.  Ops that ALSO write a pattern's TS fields
+// (setPatternTimeSig / resetPatternTimeSig) ride a PatternListAction in the
+// same transaction.
+// ─────────────────────────────────────────────────────────────────────────────
+struct MarkerSetSnapshot
+{
+    std::vector<TimeMarker>    timeMarkers;
+    std::vector<TimeSigChange> timeSigChanges;
+    std::vector<TempoChange>   tempoChanges;
+    int                        currentTsUid { -1 };
+};
+
+class MarkerSetAction : public juce::UndoableAction
+{
+public:
+    using ApplyFn = std::function<void(const MarkerSetSnapshot&)>;
+
+    MarkerSetAction(MarkerSetSnapshot before, MarkerSetSnapshot after,
+                    ApplyFn applyFn)
+        : mBefore(std::move(before))
+        , mAfter(std::move(after))
+        , mApply(std::move(applyFn))
+    {}
+
+    bool perform() override { mApply(mAfter);  return true; }
+    bool undo()    override { mApply(mBefore); return true; }
+    int  getSizeInUnits() override { return (int)sizeof(*this); }
+
+private:
+    MarkerSetSnapshot mBefore, mAfter;
+    ApplyFn           mApply;
+
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(MarkerSetAction)
+};
+
+// ── AudioLibraryAction (QA-UndoCoverage Task 4) ───────────────────────────────
+// Before/after snapshot of the Builder audio library (entries + manual
+// groups) plus the arrangement blocks, because library ops cascade into
+// blocks (entry delete removes its clips; alias rename rewrites block
+// displayAlias).  Blocks stay empty-empty for pure-library ops.
+// ─────────────────────────────────────────────────────────────────────────────
+struct AudioLibrarySnapshot
+{
+    std::vector<PatternManager::AudioLibraryEntry>  entries;
+    std::vector<std::pair<int, juce::String>>       manualGroups;
+    std::vector<ArrangementBlock>                   blocks;
+    bool                                            includesBlocks { false };
+};
+
+class AudioLibraryAction : public juce::UndoableAction
+{
+public:
+    using ApplyFn = std::function<void(const AudioLibrarySnapshot&)>;
+
+    AudioLibraryAction(AudioLibrarySnapshot before, AudioLibrarySnapshot after,
+                       ApplyFn applyFn)
+        : mBefore(std::move(before))
+        , mAfter(std::move(after))
+        , mApply(std::move(applyFn))
+    {}
+
+    bool perform() override { mApply(mAfter);  return true; }
+    bool undo()    override { mApply(mBefore); return true; }
+    int  getSizeInUnits() override
+    {
+        return (int)((mBefore.entries.size() + mAfter.entries.size()) * 128
+                     + (mBefore.blocks.size() + mAfter.blocks.size()) * sizeof(ArrangementBlock));
+    }
+
+private:
+    AudioLibrarySnapshot mBefore, mAfter;
+    ApplyFn              mApply;
+
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(AudioLibraryAction)
+};
+
+// ── AutomationTemplateAction (QA-UndoCoverage Task 4) ─────────────────────────
+// Before/after snapshot of the automation-template list, optionally with the
+// arrangement blocks (template delete cascades into its clips; template
+// rename rewrites block lane display names).
+// ─────────────────────────────────────────────────────────────────────────────
+struct AutomationTemplateSnapshot
+{
+    std::vector<AutomationLane>   templates;
+    std::vector<ArrangementBlock> blocks;
+    bool                          includesBlocks { false };
+};
+
+class AutomationTemplateAction : public juce::UndoableAction
+{
+public:
+    using ApplyFn = std::function<void(const AutomationTemplateSnapshot&)>;
+
+    AutomationTemplateAction(AutomationTemplateSnapshot before,
+                             AutomationTemplateSnapshot after,
+                             ApplyFn applyFn)
+        : mBefore(std::move(before))
+        , mAfter(std::move(after))
+        , mApply(std::move(applyFn))
+    {}
+
+    bool perform() override { mApply(mAfter);  return true; }
+    bool undo()    override { mApply(mBefore); return true; }
+    int  getSizeInUnits() override
+    {
+        return (int)((mBefore.templates.size() + mAfter.templates.size()) * 256
+                     + (mBefore.blocks.size() + mAfter.blocks.size()) * sizeof(ArrangementBlock));
+    }
+
+private:
+    AutomationTemplateSnapshot mBefore, mAfter;
+    ApplyFn                    mApply;
+
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(AutomationTemplateAction)
 };

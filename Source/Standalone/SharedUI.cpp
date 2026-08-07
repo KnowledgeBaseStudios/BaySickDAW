@@ -1,4 +1,5 @@
 #include "SharedUI.h"
+#include "UndoBracket.h"
 #include "../ProjectManager.h"   // QA-RustyMeter Task 3: getSettingsFile (LUFS mode persistence)
 #include "WindowChrome.h"        // TS7 §9.1: shared title-strip look
 #include "BaySickTitleBar.h"     // QA-Layout T3: centered engine-name painter
@@ -3311,6 +3312,11 @@ ParametricEQDisplay::ParametricEQDisplay()
             // which is why the fader stays locked after a swap back to Peaking.
             syncControlsFromBands();
             pushBandToDSP(i);
+            beginParamUndoGesture(mBindMode == BindMode::MsDSP && mMsDSPApvts ? mMsDSPApvts->undoManager
+                                      : mBindMode == BindMode::APVTS && mAPVTS ? mAPVTS->undoManager : nullptr,
+                                  (mBindMode == BindMode::MsDSP ? (mShowMid ? mMsDSPMidPrefix : mMsDSPSidePrefix)
+                                                                : "L" + juce::String(mLayerIdx) + "_eq")
+                                      + juce::String(i) + "Freq"); // Task 6 (12-iv)
             setAPVTSFromBand(i);
             repaint();
             if (onBandChanged) onBandChanged(i, mBands[i].freq, mBands[i].gainDb);
@@ -4193,6 +4199,11 @@ void ParametricEQDisplay::mouseDown(const juce::MouseEvent& e)
                 {
                     mBands[i].enabled = !mBands[i].enabled;
                     syncControlsFromBands();
+                    beginParamUndoGesture(mBindMode == BindMode::MsDSP && mMsDSPApvts ? mMsDSPApvts->undoManager
+                                              : mBindMode == BindMode::APVTS && mAPVTS ? mAPVTS->undoManager : nullptr,
+                                          (mBindMode == BindMode::MsDSP ? (mShowMid ? mMsDSPMidPrefix : mMsDSPSidePrefix)
+                                                                        : "L" + juce::String(mLayerIdx) + "_eq")
+                                              + juce::String(i) + "Freq"); // Task 6 (12-iv)
                     setAPVTSFromBand(i);
                     pushBandToDSP(i);
                     repaint();
@@ -4224,6 +4235,11 @@ void ParametricEQDisplay::mouseDown(const juce::MouseEvent& e)
             if (pos.x >= hx - 10.f && pos.x <= hx - 1.f) {
                 // M chip: toggle mute
                 mBands[i].muted = !mBands[i].muted;
+                beginParamUndoGesture(mBindMode == BindMode::MsDSP && mMsDSPApvts ? mMsDSPApvts->undoManager
+                                          : mBindMode == BindMode::APVTS && mAPVTS ? mAPVTS->undoManager : nullptr,
+                                      (mBindMode == BindMode::MsDSP ? (mShowMid ? mMsDSPMidPrefix : mMsDSPSidePrefix)
+                                                                    : "L" + juce::String(mLayerIdx) + "_eq")
+                                          + juce::String(i) + "Freq"); // Task 6 (12-iv)
                 setAPVTSFromBand(i);
                 pushBandToDSP(i);
                 repaint();
@@ -4232,6 +4248,11 @@ void ParametricEQDisplay::mouseDown(const juce::MouseEvent& e)
             if (pos.x >= hx + 1.f && pos.x <= hx + 10.f) {
                 // S chip: toggle solo
                 mBands[i].soloed = !mBands[i].soloed;
+                beginParamUndoGesture(mBindMode == BindMode::MsDSP && mMsDSPApvts ? mMsDSPApvts->undoManager
+                                          : mBindMode == BindMode::APVTS && mAPVTS ? mAPVTS->undoManager : nullptr,
+                                      (mBindMode == BindMode::MsDSP ? (mShowMid ? mMsDSPMidPrefix : mMsDSPSidePrefix)
+                                                                    : "L" + juce::String(mLayerIdx) + "_eq")
+                                          + juce::String(i) + "Freq"); // Task 6 (12-iv)
                 setAPVTSFromBand(i);
                 pushBandToDSP(i);
                 repaint();
@@ -4251,6 +4272,11 @@ void ParametricEQDisplay::mouseDown(const juce::MouseEvent& e)
         mBands[hitBand].muted  = false;
         mBands[hitBand].soloed = false;
         syncControlsFromBands();
+        beginParamUndoGesture(mBindMode == BindMode::MsDSP && mMsDSPApvts ? mMsDSPApvts->undoManager
+                                  : mBindMode == BindMode::APVTS && mAPVTS ? mAPVTS->undoManager : nullptr,
+                              (mBindMode == BindMode::MsDSP ? (mShowMid ? mMsDSPMidPrefix : mMsDSPSidePrefix)
+                                                            : "L" + juce::String(mLayerIdx) + "_eq")
+                                  + juce::String(hitBand) + "Freq"); // Task 6 (12-iv)
         setAPVTSFromBand(hitBand);
         pushBandToDSP(hitBand);
         repaint();
@@ -4343,11 +4369,21 @@ void ParametricEQDisplay::mouseDown(const juce::MouseEvent& e)
                 if (nonGainBearing && mBands[band].gainDb != 0.f)
                     mBands[band].gainDb = 0.f;
                 syncControlsFromBands();
+                beginParamUndoGesture(mBindMode == BindMode::MsDSP && mMsDSPApvts ? mMsDSPApvts->undoManager
+                                          : mBindMode == BindMode::APVTS && mAPVTS ? mAPVTS->undoManager : nullptr,
+                                      (mBindMode == BindMode::MsDSP ? (mShowMid ? mMsDSPMidPrefix : mMsDSPSidePrefix)
+                                                                    : "L" + juce::String(mLayerIdx) + "_eq")
+                                          + juce::String(band) + "Freq"); // Task 6 (12-iv)
                 setAPVTSFromBand(band);
                 pushBandToDSP(band);
                 repaint();
             } else if (result >= 200 && result < 207) {
                 mBands[band].slope = result - 200;
+                beginParamUndoGesture(mBindMode == BindMode::MsDSP && mMsDSPApvts ? mMsDSPApvts->undoManager
+                                          : mBindMode == BindMode::APVTS && mAPVTS ? mAPVTS->undoManager : nullptr,
+                                      (mBindMode == BindMode::MsDSP ? (mShowMid ? mMsDSPMidPrefix : mMsDSPSidePrefix)
+                                                                    : "L" + juce::String(mLayerIdx) + "_eq")
+                                          + juce::String(band) + "Freq"); // Task 6 (12-iv)
                 setAPVTSFromBand(band);
                 pushBandToDSP(band);
                 repaint();
@@ -4360,12 +4396,22 @@ void ParametricEQDisplay::mouseDown(const juce::MouseEvent& e)
                 mBands[band].q      = 0.707f;
                 mBands[band].slope  = 0;
                 syncControlsFromBands();
+                beginParamUndoGesture(mBindMode == BindMode::MsDSP && mMsDSPApvts ? mMsDSPApvts->undoManager
+                                          : mBindMode == BindMode::APVTS && mAPVTS ? mAPVTS->undoManager : nullptr,
+                                      (mBindMode == BindMode::MsDSP ? (mShowMid ? mMsDSPMidPrefix : mMsDSPSidePrefix)
+                                                                    : "L" + juce::String(mLayerIdx) + "_eq")
+                                          + juce::String(band) + "Freq"); // Task 6 (12-iv)
                 setAPVTSFromBand(band);
                 pushBandToDSP(band);
                 repaint();
             } else if (result >= 400 && result < 405) {
                 // Session B: Channel routing change (Stereo/Mid/Side/L/R).
                 mBands[band].channel = result - 400;
+                beginParamUndoGesture(mBindMode == BindMode::MsDSP && mMsDSPApvts ? mMsDSPApvts->undoManager
+                                          : mBindMode == BindMode::APVTS && mAPVTS ? mAPVTS->undoManager : nullptr,
+                                      (mBindMode == BindMode::MsDSP ? (mShowMid ? mMsDSPMidPrefix : mMsDSPSidePrefix)
+                                                                    : "L" + juce::String(mLayerIdx) + "_eq")
+                                          + juce::String(band) + "Freq"); // Task 6 (12-iv)
                 setAPVTSFromBand(band);
                 pushBandToDSP(band);
                 repaint();
@@ -4411,6 +4457,11 @@ void ParametricEQDisplay::mouseDown(const juce::MouseEvent& e)
                     if (mBands[band].dynamic) // wasOff is implied when dynamic is now true
                         setF(bp + "Range", mBands[band].rangeDb);   // 0
                 };
+                beginParamUndoGesture(mBindMode == BindMode::MsDSP && mMsDSPApvts ? mMsDSPApvts->undoManager
+                                          : mBindMode == BindMode::APVTS && mAPVTS ? mAPVTS->undoManager : nullptr,
+                                      (mBindMode == BindMode::MsDSP ? mMsDSPMidPrefix
+                                                                    : "L" + juce::String(mLayerIdx) + "_eq")
+                                          + juce::String(band) + "Dynamic"); // Task 6 (12-iv)
                 if (mBindMode == BindMode::MsDSP && mMsDSPApvts)
                 {
                     writeFlag(mMsDSPApvts, mMsDSPMidPrefix);
@@ -4786,6 +4837,11 @@ void ParametricEQDisplay::commitReadoutEdit()
         default: return;
     }
     syncControlsFromBands();
+    beginParamUndoGesture(mBindMode == BindMode::MsDSP && mMsDSPApvts ? mMsDSPApvts->undoManager
+                              : mBindMode == BindMode::APVTS && mAPVTS ? mAPVTS->undoManager : nullptr,
+                          (mBindMode == BindMode::MsDSP ? (mShowMid ? mMsDSPMidPrefix : mMsDSPSidePrefix)
+                                                        : "L" + juce::String(mLayerIdx) + "_eq")
+                              + juce::String(band) + "Freq"); // Task 6 (12-iv)
     setAPVTSFromBand(band);
     pushBandToDSP(band);
     repaint();
@@ -5812,6 +5868,7 @@ void ParametricEQDisplay::triggerCompare()
         if (mMsDSPApvts && ! mMsDSPMidPrefix.isEmpty()
                        && ! mMsDSPSidePrefix.isEmpty())
         {
+            beginParamUndoGesture (*mMsDSPApvts, mMsDSPMidPrefix + "0Freq"); // Task 6 (12-iv)
             pushInnerDSPBandsToAPVTS (mBoundMsDsp->mid (), mMsDSPMidPrefix);
             pushInnerDSPBandsToAPVTS (mBoundMsDsp->side(), mMsDSPSidePrefix);
         }
@@ -5834,6 +5891,7 @@ void ParametricEQDisplay::triggerCompare()
         // overwrite the swap.
         if (mMsDSPApvts && ! mMsDSPMidPrefix.isEmpty())
         {
+            beginParamUndoGesture (*mMsDSPApvts, mMsDSPMidPrefix + "0Freq"); // Task 6 (12-iv)
             for (int i = 0; i < kNumBands; ++i)
                 setAPVTSFromBand(i);
         }
@@ -6134,6 +6192,11 @@ void ParametricEQDisplay::showEQOptionsMenu(juce::Component* anchor)
                 }
                 case 5:
                     // Reset all bands to default values
+                    beginParamUndoGesture(mBindMode == BindMode::MsDSP && mMsDSPApvts ? mMsDSPApvts->undoManager
+                                              : mBindMode == BindMode::APVTS && mAPVTS ? mAPVTS->undoManager : nullptr,
+                                          (mBindMode == BindMode::MsDSP ? (mShowMid ? mMsDSPMidPrefix : mMsDSPSidePrefix)
+                                                                        : "L" + juce::String(mLayerIdx) + "_eq")
+                                              + juce::String(0) + "Freq"); // Task 6 (12-iv)
                     for (int b = 0; b < kNumBands; ++b)
                     {
                         mBands[b].freq    = kEQDefaultFreqs[b];

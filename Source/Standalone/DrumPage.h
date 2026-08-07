@@ -150,6 +150,11 @@ public:
     void newBlankPatch    ();
     void savePatchAs      ();
     void clearSound       ();
+    // QA-UndoCoverage Task 7: one drum-sound swap gesture = one structural
+    // undo transaction (before/after full-chain snapshots).  Public so the
+    // sound-picker menu callback wraps its terminal loads.
+    void performSoundSwapGesture (const juce::String& label,
+                                  const std::function<void()>& op);
     void requestDelete    ();   // confirms + (if BaySickSynth tweaked) prompts save first
     static juce::File presetsDir();        // Documents/BaySickDAW/Presets/BaySickDrums
     static juce::File userPresetsDir();    // <presetsDir>/My Presets
@@ -241,6 +246,11 @@ private:
     juce::MemoryBlock mLoadedStateSnapshot;
     void takeStateSnapshot();
     bool isPatchDirty() const;
+
+    // QA-UndoCoverage Task 7: undo context (structural sound-swap gesture) +
+    // the unwrapped clear body the undo-apply path uses.
+    UndoContext mUndoCtx;
+    void clearSoundInternal();
 
     // Tab 2: Piano Roll
     std::unique_ptr<PianoRollContainer>         mPianoRoll;

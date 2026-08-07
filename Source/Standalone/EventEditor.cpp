@@ -171,13 +171,22 @@ void EEAutomationGrid::commitEdit(const String& label,
     PatternManager* pm       = mPM;
     int             blockIdx = mBlockIdx;
 
-    mUM.beginNewTransaction(label);
-    mUM.perform(new AutomationLaneEditAction(
+    auto* action = new AutomationLaneEditAction(
         label, before, after,
         [pm, blockIdx](const AutomationLane& lane) {
             if (blockIdx < pm->getNumBlocks())
                 pm->getBlock(blockIdx).automationLane = lane;
-        }));
+        });
+
+    // QA-UndoCoverage Task 5 (12-iii): the choke point names the transaction
+    // and marks dirty; direct-manager fallback only while unwired.
+    if (mCtx.isValid())
+        mCtx.perform(action, label);
+    else
+    {
+        mUM.beginNewTransaction(label);
+        mUM.perform(action);
+    }
 }
 
 // ── resized ────────────────────────────────────────────────────────────────
@@ -1669,8 +1678,8 @@ PopupMenu EventEditorContent::getMenuForIndex(int menuIndex, const String&)
             m.addItem(102, "Save Automation Data");
             break;
         case 1: // Edit
-            m.addItem(200, "Undo (Ctrl+Z)",     mUM.canUndo());
-            m.addItem(201, "Redo (Ctrl+Y)",     mUM.canRedo());
+            m.addItem(200, "Undo (Ctrl+Z)",      mUM.canUndo());
+            m.addItem(201, "Redo (Ctrl+Alt+Z)",  mUM.canRedo());
             m.addSeparator();
             m.addItem(202, "Select All (Ctrl+A)");
             m.addItem(203, "Copy (Ctrl+C)");
@@ -1727,8 +1736,8 @@ void EventEditorContent::menuItemSelected(int id, int /*topIdx*/)
             if (auto* ew = findParentComponentOfClass<EventEditor>())
                 ew->closeButtonPressed();
             break;
-        case 200: mUM.undo(); break;
-        case 201: mUM.redo(); break;
+        case 200: doUndo(); break;
+        case 201: doRedo(); break;
         case 202: doSelectAll();    break;
         case 205: // Erase to range start
             if (mGrid && mPM && mBlockIdx >= 0 && mBlockIdx < mPM->getNumBlocks())
@@ -1740,8 +1749,7 @@ void EventEditorContent::menuItemSelected(int id, int /*topIdx*/)
                 for (auto& pt : lane.points) pt.value01 = rv;
                 AutomationLane after = lane;
                 PatternManager* pm = mPM; int bi = mBlockIdx;
-                mUM.beginNewTransaction("Erase to Range Start");
-                mUM.perform(new AutomationLaneEditAction(
+                performViaCtx("Erase to Range Start", new AutomationLaneEditAction(
                     "Erase to Range Start", before, after,
                     [pm, bi](const AutomationLane& l) {
                         if (bi < pm->getNumBlocks())
@@ -1822,13 +1830,49 @@ bool EventEditorContent::keyPressed(const KeyPress& key, Component*)
 
     if (key.getModifiers().isCtrlDown())
     {
-        if (kc == 'Z') { mUM.undo(); return true; }
-        if (kc == 'Y') { mUM.redo(); return true; }
+        // QA-UndoCoverage Task 5 (docket 14=a): redo unified onto the app's
+        // Ctrl+Alt+Z; the editor-local Ctrl+Y retired (now does nothing).
+        if (kc == 'Z')
+        {
+            if (key.getModifiers().isAltDown()) doRedo();
+            else                                doUndo();
+            return true;
+        }
         if (kc == 'A') { doSelectAll(); return true; }
         if (kc == 'M') { doImportMidi(); return true; }
     }
 
     return false;
+}
+
+void EventEditorContent::setUndoContext (const UndoContext& ctx)
+{
+    mCtx = ctx;
+    if (mGrid) mGrid->setUndoContext (ctx);
+}
+
+void EventEditorContent::performViaCtx (const juce::String& label,
+                                        juce::UndoableAction* action)
+{
+    if (mCtx.isValid())
+        mCtx.perform (action, label);
+    else
+    {
+        mUM.beginNewTransaction (label);
+        mUM.perform (action);
+    }
+}
+
+void EventEditorContent::doUndo()
+{
+    if (mCtx.undo) mCtx.undo();
+    else           mUM.undo();
+}
+
+void EventEditorContent::doRedo()
+{
+    if (mCtx.redo) mCtx.redo();
+    else           mUM.redo();
 }
 
 void EventEditorContent::doImportMidi()
@@ -1925,8 +1969,7 @@ void EventEditorContent::doImportMidi()
 
                 AutomationLane after = lane;
                 PatternManager* pm = mPM; int bi = mBlockIdx;
-                mUM.beginNewTransaction("Import MIDI CC");
-                mUM.perform(new AutomationLaneEditAction(
+                performViaCtx("Import MIDI CC", new AutomationLaneEditAction(
                     "Import MIDI CC", before, after,
                     [pm, bi](const AutomationLane& l) {
                         if (bi < pm->getNumBlocks())
@@ -2026,8 +2069,7 @@ void EventEditorContent::doConvertToClip()
             AutomationLane after = lane;
 
             PatternManager* pm = mPM; int bi = mBlockIdx;
-            mUM.beginNewTransaction("Simplify Curve");
-            mUM.perform(new AutomationLaneEditAction(
+            performViaCtx("Simplify Curve", new AutomationLaneEditAction(
                 "Simplify Curve", before, after,
                 [pm, bi](const AutomationLane& l) {
                     if (bi < pm->getNumBlocks())
@@ -2072,6 +2114,11 @@ EventEditor::EventEditor(VibeSynthProcessor& p, UndoManager& um,
 }
 
 EventEditor::~EventEditor() = default;
+
+void EventEditor::setUndoContext (const UndoContext& ctx)
+{
+    if (auto* c = getContent()) c->setUndoContext (ctx);
+}
 
 void EventEditor::closeButtonPressed()
 {

@@ -68,8 +68,20 @@ void ParameterAttachment::setValueAsCompleteGesture (float newDenormalisedValue)
 
 void ParameterAttachment::beginGesture()
 {
+    // BaySickDAW QA-UndoCoverage (2026-08-06): stock JUCE begins the gesture
+    // transaction UNNAMED, which leaves the app's history window blind to what
+    // a row is.  Name it with the parameter id under a recognizable marker;
+    // the app's history rebuild resolves "param:<id>" to an owner key + a
+    // human-readable label.
+    // Gesture-merge fix: file any PENDING edits into their own transaction
+    // BEFORE this boundary -- the flush timer is slower than quick gestures,
+    // and without this a previous knob's late flush landed inside THIS
+    // gesture's set (one Ctrl+Z then reverted both knobs).
     if (undoManager != nullptr)
-        undoManager->beginNewTransaction();
+    {
+        AudioProcessorValueTreeState::flushAllLiveInstancesToValueTrees();
+        undoManager->beginNewTransaction ("param:" + parameter.paramID);
+    }
 
     parameter.beginChangeGesture();
 }

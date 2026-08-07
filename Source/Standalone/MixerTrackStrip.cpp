@@ -1,4 +1,5 @@
 #include "MixerTrackStrip.h"
+#include "UndoBracket.h"
 
 namespace
 {
@@ -365,9 +366,10 @@ void MixerTrackStrip::setApvts(juce::AudioProcessorValueTreeState& apvts,
                 m.addItem (1, "True Dry",               true, cur == 0);
                 m.addItem (2, "Bypass Pitch Corrector", true, cur == 1);
                 m.addItem (3, "With Effect",            true, cur == 2);
-                m.showMenuAsync (juce::PopupMenu::Options(), [p] (int r)
+                m.showMenuAsync (juce::PopupMenu::Options(), [apvtsPtr, p] (int r)
                 {
                     if (r <= 0) return;
+                    beginParamUndoGesture (apvtsPtr->undoManager, p->paramID); // Task 6 (12-iv)
                     p->beginChangeGesture();
                     p->setValueNotifyingHost (
                         p->getNormalisableRange().convertTo0to1 ((float) (r - 1)));
@@ -391,9 +393,10 @@ void MixerTrackStrip::setApvts(juce::AudioProcessorValueTreeState& apvts,
                 juce::PopupMenu m;
                 m.addItem (1, "Dry",         true, cur == 0);
                 m.addItem (2, "With Effect", true, cur == 1);
-                m.showMenuAsync (juce::PopupMenu::Options(), [p] (int r)
+                m.showMenuAsync (juce::PopupMenu::Options(), [apvtsPtr, p] (int r)
                 {
                     if (r <= 0) return;
+                    beginParamUndoGesture (apvtsPtr->undoManager, p->paramID); // Task 6 (12-iv)
                     p->beginChangeGesture();
                     p->setValueNotifyingHost (
                         p->getNormalisableRange().convertTo0to1 ((float) (r - 1)));

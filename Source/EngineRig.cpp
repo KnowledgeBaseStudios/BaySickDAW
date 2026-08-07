@@ -415,6 +415,13 @@ juce::AudioProcessor* EngineRig::createEngineFor (EngineTab& tab, const juce::St
     const double srOr44100 = mProc.getSampleRate() > 0.0 ? mProc.getSampleRate() : 44100.0;
     const juce::String trackId = trackIdFor (tab.kind, tab.pageIndex);
 
+    // QA-UndoCoverage redo-across-resurrection fix (2026-08-06): every rig
+    // engine's APVTS gets a STABLE identity tag -- (kind, pageIndex), the same
+    // key the whole resurrection spine uses -- so undo entries re-resolve the
+    // live instance at apply time and survive engine re-creation.
+    const juce::String rigTag = "rig:" + juce::String ((int) tab.kind)
+                              + ":" + juce::String (tab.pageIndex);
+
     switch (tab.kind)
     {
         case TabKind::Layers:
@@ -426,10 +433,10 @@ juce::AudioProcessor* EngineRig::createEngineFor (EngineTab& tab, const juce::St
             // these are creation defaults; the device path re-prepares live
             // engines on rate/block changes.
             std::unique_ptr<juce::AudioProcessor> eng;
-            if      (engineType == "Harmless")      eng = std::make_unique<HarmlessProcessor>     (trackId, &mUndoManager);
-            else if (engineType == "BaySickPlayer") eng = std::make_unique<VibePlayerProcessor>   (trackId, &mUndoManager);
-            else if (engineType == "BaySickSynth")  eng = std::make_unique<BaySickSynthProcessor> (trackId, &mUndoManager);
-            else if (engineType == "BaySickBass")   eng = std::make_unique<BaySickBassProcessor>  (trackId, &mUndoManager);
+            if      (engineType == "Harmless")      { auto e = std::make_unique<HarmlessProcessor>     (trackId, &mUndoManager); e->apvts.undoOwnerTag = rigTag; eng = std::move (e); }
+            else if (engineType == "BaySickPlayer") { auto e = std::make_unique<VibePlayerProcessor>   (trackId, &mUndoManager); e->apvts.undoOwnerTag = rigTag; eng = std::move (e); }
+            else if (engineType == "BaySickSynth")  { auto e = std::make_unique<BaySickSynthProcessor> (trackId, &mUndoManager); e->apvts.undoOwnerTag = rigTag; eng = std::move (e); }
+            else if (engineType == "BaySickBass")   { auto e = std::make_unique<BaySickBassProcessor>  (trackId, &mUndoManager); e->apvts.undoOwnerTag = rigTag; eng = std::move (e); }
             if (eng == nullptr) return nullptr;
 
             eng->prepareToPlay (srOr44100, 512);
@@ -441,6 +448,8 @@ juce::AudioProcessor* EngineRig::createEngineFor (EngineTab& tab, const juce::St
         {
             if (engineType != "BaySickVocal") return nullptr;
             auto vp = std::make_unique<BaySickVocalProcessor> (&mUndoManager);
+            vp->apvts.undoOwnerTag = rigTag;
+            vp->getNamIrProcessor().apvts.undoOwnerTag = rigTag + ".namir";
             vp->prepareToPlay (44100.0, 512);   // VoxPage-era creation prep
             tab.engine = std::move (vp);
             return tab.engine.get();
@@ -487,8 +496,10 @@ juce::AudioProcessor* EngineRig::createEngineFor (EngineTab& tab, const juce::St
             // InstPage-era shape: both stages permanent, chain wrapper is the
             // registered engine and fans Pedals -> NAM/IR.
             auto pedals = std::make_unique<BaySickPedalsProcessor> (&mUndoManager);
+            pedals->apvts.undoOwnerTag = rigTag + ".pedals";
             pedals->prepareToPlay (44100.0, 512);
             auto nam = std::make_unique<BaySickNAMIRProcessor> (&mUndoManager);
+            nam->apvts.undoOwnerTag = rigTag + ".namir";
             nam->prepareToPlay (44100.0, 512);
 
             auto chain = std::make_unique<EngineChainProcessor>();

@@ -175,6 +175,41 @@ public:
     // until QA-UndoCoverage flips undo semantics onto this one.
     juce::UndoManager mUndoManager;
 
+    // QA-UndoCoverage Task 8 (the absorbed QA-DirtyFlag spec, Jeff 2026-05-23):
+    // transaction-pointer dirty tracking.  current walks with the undo cursor;
+    // saved pins the last save point; dirty = (current != saved).  Branch-kill:
+    // a new transaction while current < saved destroys the saved future ->
+    // saved = -1 (unreachable) until the next save.  Fed by the editor's
+    // UndoManager ChangeListener (every transaction source -- choke point AND
+    // attachment gestures -- broadcasts); message thread only.
+    struct TransactionTracker
+    {
+        int current { 0 };
+        int saved   { 0 };
+        std::function<void (bool nowDirty)> onDirtyChanged;   // edge-fired
+
+        bool isDirty() const noexcept { return current != saved; }
+
+        void onNewTransactions (int count)
+        {
+            const bool was = isDirty();
+            if (current < saved) saved = -1;
+            current += count;
+            edge (was);
+        }
+        void onUndo (int count) { const bool was = isDirty(); current -= count; edge (was); }
+        void onRedo (int count) { const bool was = isDirty(); current += count; edge (was); }
+        void onSave()           { const bool was = isDirty(); saved = current;  edge (was); }
+        void onLoadReset()      { const bool was = isDirty(); current = 0; saved = 0; edge (was); }
+
+    private:
+        void edge (bool was)
+        {
+            if (onDirtyChanged && was != isDirty()) onDirtyChanged (isDirty());
+        }
+    };
+    TransactionTracker mTxTracker;
+
     juce::AudioProcessorValueTreeState apvts;
 
     // QA-ModelShell TS1: the model-side owner of every dynamic tab's engine

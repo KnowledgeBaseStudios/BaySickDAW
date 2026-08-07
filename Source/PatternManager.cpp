@@ -462,6 +462,40 @@ void PatternManager::removePattern(int index)
     if (onTimeSigStateChanged) onTimeSigStateChanged();
 }
 
+void PatternManager::restoreTimeMarkers (const std::vector<TimeMarker>& markers)
+{
+    mTimeMarkers = markers;
+    notifyContentChanged();
+}
+
+void PatternManager::restoreTimeSigState (const std::vector<TimeSigChange>& changes,
+                                          int currentUid)
+{
+    mTimeSigChanges     = changes;
+    mCurrentTsMarkerUid = currentUid;
+    tsStateChanged();
+}
+
+void PatternManager::restoreTempoChanges (const std::vector<TempoChange>& changes)
+{
+    mTempoChanges = changes;
+    notifyContentChanged();
+}
+
+void PatternManager::restoreAudioLibrary (const std::vector<AudioLibraryEntry>& entries,
+                                          const std::vector<std::pair<int, juce::String>>& manualGroups)
+{
+    mAudioLibrary      = entries;
+    mManualAudioGroups = manualGroups;
+    notifyContentChanged();
+}
+
+void PatternManager::restoreAutomationTemplates (const std::vector<AutomationLane>& templates)
+{
+    mAutomationTemplates = templates;
+    notifyContentChanged();
+}
+
 void PatternManager::restorePatternList (const std::vector<Pattern>& patterns, int currentIndex)
 {
     if (patterns.empty()) return;

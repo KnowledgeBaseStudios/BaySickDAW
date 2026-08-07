@@ -12,6 +12,17 @@ namespace
     constexpr const char* kRootTag   = "WorkspaceWindows";
     constexpr const char* kWindowTag = "W";
 
+    // Jeff, 2026-08-06: a window saved while FILLED must remember BOTH sizes
+    // -- the filled bounds (the normal store) AND the pre-fill restore rect,
+    // or a cold start reopens at full size with nothing for the fill toggle
+    // to restore to.  Workspace-local space, same as the bounds store; keyed
+    // presence = "was filled at save time".
+    std::map<juce::String, juce::Rectangle<int>>& sessionRestoreRects()
+    {
+        static std::map<juce::String, juce::Rectangle<int>> m;
+        return m;
+    }
+
     // TS7 §9.1: the palette moved to WindowChrome so the desktop windows can
     // paint the same strip.  Nothing here defines a colour any more.
 
@@ -715,8 +726,51 @@ void WorkspaceWindow::attachTo (Workspace& ws)
         setBounds (clampPositionToWorkspace (getBounds()));
     }
 
+    loadSavedFillState();   // Jeff 2026-08-06: both sizes survive a restart
+
     setVisible (true);
     toFront (true);
+}
+
+void WorkspaceWindow::loadSavedFillState()
+{
+    if (mPersistKey.isEmpty()) return;
+
+    juce::Rectangle<int> r;
+    bool have = false;
+
+    auto it = sessionRestoreRects().find (mPersistKey);
+    if (it != sessionRestoreRects().end())
+    {
+        r = it->second;
+        have = true;
+    }
+    else if (mPersistence == Persistence::Disk)
+    {
+        if (auto xml = juce::XmlDocument::parse (ProjectManager::getSettingsFile()))
+            if (auto* root = xml->getChildByName (kRootTag))
+                for (auto* w : root->getChildWithTagNameIterator (kWindowTag))
+                {
+                    if (w->getStringAttribute ("key") != mPersistKey) continue;
+                    if (w->hasAttribute ("rw") && w->hasAttribute ("rh"))
+                    {
+                        r = { w->getIntAttribute ("rx"), w->getIntAttribute ("ry"),
+                              w->getIntAttribute ("rw"), w->getIntAttribute ("rh") };
+                        have = true;
+                    }
+                    break;
+                }
+    }
+    if (! have || r.isEmpty()) return;
+
+    if (auto* ws = workspace())
+    {
+        const auto o = ws->originInParentClient();
+        r.translate (o.x, o.y);
+    }
+    mRestoreBounds = clampToWorkspace (r);
+    mFilled = true;
+    if (mFullBtn) mFullBtn->repaint();
 }
 
 void WorkspaceWindow::applySavedBounds()
@@ -1075,6 +1129,22 @@ void WorkspaceWindow::saveBounds() const
     }
     sessionBounds()[mPersistKey] = b;
 
+    // Jeff, 2026-08-06: keep the pre-fill restore rect alongside the bounds
+    // while filled; clear it the moment the window is saved un-filled (a
+    // manual drag/resize already drops mFilled, so this self-heals).
+    if (mFilled && ! mRestoreBounds.isEmpty())
+    {
+        auto r = mRestoreBounds;
+        if (auto* ws = workspace())
+        {
+            const auto o = ws->originInParentClient();
+            r.translate (-o.x, -o.y);
+        }
+        sessionRestoreRects()[mPersistKey] = r;
+    }
+    else
+        sessionRestoreRects().erase (mPersistKey);
+
     // Disk windows flush to settings.xml ONCE, at app exit
     // (writeSessionToSettings) -- the per-close parse-and-rewrite of the
     // whole file is gone (T5).
@@ -1128,6 +1198,27 @@ void WorkspaceWindow::writeSessionToSettings()
         {
             rec->removeAttribute ("x");
             rec->removeAttribute ("y");
+        }
+
+        // Jeff, 2026-08-06: a window flushed while FILLED also writes its
+        // pre-fill restore rect (rx/ry/rw/rh) so the fill toggle has a size
+        // to come back to after a cold start.  Only the four Disk windows
+        // ever reach this loop, and all four carry placement, so position
+        // is written unconditionally.
+        auto fit = sessionRestoreRects().find (key);
+        if (fit != sessionRestoreRects().end())
+        {
+            rec->setAttribute ("rx", fit->second.getX());
+            rec->setAttribute ("ry", fit->second.getY());
+            rec->setAttribute ("rw", fit->second.getWidth());
+            rec->setAttribute ("rh", fit->second.getHeight());
+        }
+        else
+        {
+            rec->removeAttribute ("rx");
+            rec->removeAttribute ("ry");
+            rec->removeAttribute ("rw");
+            rec->removeAttribute ("rh");
         }
     }
     xml->writeTo (file);

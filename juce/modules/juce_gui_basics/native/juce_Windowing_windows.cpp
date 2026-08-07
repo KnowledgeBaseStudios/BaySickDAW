@@ -3368,8 +3368,20 @@ private:
 
     void forwardMessageToParent (UINT message, WPARAM wParam, LPARAM lParam) const
     {
+        // BaySickDAW QA-UndoCoverage (2026-08-06, double-undo fix): this
+        // forward exists for the plugin-in-a-HOST case, where the parent HWND
+        // belongs to a foreign app that never saw the key.  When the parent is
+        // a JUCE peer IN THIS PROCESS (the contained WorkspaceWindows), the
+        // key was already offered to the app's dispatch on this peer's own
+        // chain -- forwarding makes the SAME press dispatch twice: the child's
+        // WM_CHAR path fired the command, then the forwarded WM_KEYDOWN
+        // synthesized a second keypress on the parent peer (undo_diag tracer:
+        // two src=cmd invocations ~12 ms apart per press).  Ctrl+Alt combos
+        // arrive as WM_SYSKEYDOWN/WM_SYSCHAR, which this switch never
+        // forwards -- which is why redo fired once while undo fired twice.
         if (HWND parentH = GetParent (hwnd))
-            PostMessage (parentH, message, wParam, lParam);
+            if (getOwnerOfWindow (parentH) == nullptr)
+                PostMessage (parentH, message, wParam, lParam);
     }
 
     bool doAppCommand (const LPARAM lParam)

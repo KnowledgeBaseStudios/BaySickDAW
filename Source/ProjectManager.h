@@ -146,9 +146,19 @@ public:
     // (APVTS listener, undoable actions via StandaloneEditor::doUndoAction).
     // While mIgnoreDirty is true, markDirty is a no-op - used during
     // load/save so we don't self-mark dirty when replacing state.
+    // QA-UndoCoverage Task 9: the unconditional-bool model is RETIRED.
+    // markDirty now only advances the TS7 change stamp (version capture's
+    // detector needs every edit path it always had); DIRTY itself is the
+    // transaction-pointer mismatch on the processor's TransactionTracker.
     void markDirty();
+    // Save sync: pins saved = current so the asterisk clears at the save
+    // point (and returns the moment Ctrl+Z walks past it).
+    void markSaved();
+    // Load-boundary reset: loads don't transact -- clears the undo history,
+    // sweeps the structural-undo snapshot store, resets the pointers, fires
+    // clean.  (Former semantics: set the bool false.)
     void clearDirty();
-    bool isDirty() const { return mDirty; }
+    bool isDirty() const;
 
     // TS7 §3.3: monotonic edit counter for version capture's change detector.
     // Deliberately keyed on markDirty rather than a new signal: that is already
@@ -256,11 +266,11 @@ private:
     bool                    mSkipKitReplacePrompt { false };
 
     // ── P5 state ─────────────────────────────────────────────────────────────
-    std::atomic<bool>         mDirty       { false };
+    // QA-UndoCoverage Task 9: mDirty + setDirtyInternal retired -- see the
+    // TransactionTracker on VibeSynthProcessor.
     std::atomic<juce::uint32> mChangeStamp { 0 };   // TS7 §3.3
     bool                      mIgnoreDirty { false };   // true during load/save
     int               mAutosaveSec { 900 };     // 15 min default
-    void setDirtyInternal (bool flag);
     void timerCallback() override;              // autosave tick
     bool writeBackup();                         // writes project.xml.bak
 

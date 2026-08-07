@@ -1080,86 +1080,132 @@ void InstPage::showProgramPickerMenu()
             if (! safe || result <= 0 || result > picksCopy.size()) return;
             auto* p = safe.getComponent();
             if (p == nullptr || p->mFullProcessor == nullptr) return;
-
-            // Resolve current sfizz engine for this page's source mode.
-            auto sfizzEngine = [&] () -> juce::AudioProcessor*
-            {
-                if (p->mSource == Source::BaySickGuitars)
-                    return p->mFullProcessor->getBaySickGuitars (p->mPageIndex);
-                if (p->mSource == Source::BaySickBasses)
-                    return p->mFullProcessor->getBaySickBasses  (p->mPageIndex);
-                return nullptr;
-            };
-            auto sfizzApvts = [&] () -> juce::AudioProcessorValueTreeState*
-            {
-                if (p->mSource == Source::BaySickGuitars)
-                    if (auto* eng = p->mFullProcessor->getBaySickGuitars (p->mPageIndex))
-                        return &eng->apvts;
-                if (p->mSource == Source::BaySickBasses)
-                    if (auto* eng = p->mFullProcessor->getBaySickBasses (p->mPageIndex))
-                        return &eng->apvts;
-                return nullptr;
-            };
-            auto sfizzKitPath = [&] () -> juce::File
-            {
-                if (p->mSource == Source::BaySickGuitars)
-                    if (auto* eng = p->mFullProcessor->getBaySickGuitars (p->mPageIndex))
-                        return eng->getCurrentKitPath();
-                if (p->mSource == Source::BaySickBasses)
-                    if (auto* eng = p->mFullProcessor->getBaySickBasses (p->mPageIndex))
-                        return eng->getCurrentKitPath();
-                return {};
-            };
-
-            auto* eng = sfizzEngine();
-            auto* apv = sfizzApvts();
-            if (eng == nullptr || apv == nullptr) return;
-            const auto current = sfizzKitPath();
-            const auto target  = picksCopy[result - 1];
-            if (target == current) return;
-
-            // 1) Save outgoing program's APVTS state.
-            const auto outgoingKey = current.getFileName();
-            if (outgoingKey.isNotEmpty())
-                p->mProgramStateCache[outgoingKey] = apv->copyState();
-
-            // 2) Race-safe kit load (source-aware wrapper).
-            const bool ok = (p->mSource == Source::BaySickGuitars)
-                              ? p->mFullProcessor->loadBaySickGuitarsKit (p->mPageIndex, target)
-                              : p->mFullProcessor->loadBaySickBassesKit  (p->mPageIndex, target);
-            if (! ok) return;
-
-            // 3) Restore incoming program's saved state if cached.  Walk the
-            //    cached PARAM tree directly and call setValueNotifyingHost on
-            //    each one - replaceState alone doesn't reliably fire the
-            //    parameterChanged listener for every changed param across all
-            //    JUCE versions, which would leave sfizz out of sync with the
-            //    restored APVTS state for any CC the kit just reset to 0.
-            const auto incomingKey = target.getFileName();
-            if (auto it = p->mProgramStateCache.find (incomingKey);
-                it != p->mProgramStateCache.end())
-            {
-                auto* apv2 = sfizzApvts();
-                auto* eng2 = sfizzEngine();
-                if (apv2 != nullptr && eng2 != nullptr)
-                {
-                    apv2->replaceState (it->second);
-                    for (auto* param : eng2->getParameters())
-                    {
-                        if (auto* ranged = dynamic_cast<juce::RangedAudioParameter*> (param))
-                            ranged->setValueNotifyingHost (ranged->getValue());
-                    }
-                }
-            }
-
-            // 4) Refresh chain + ARIA panel + file label.
-            p->notifySourceEngineChanged();
-
-            // 5) Program-name linkage: tab + strip + roll follow the loaded
-            //    program (interactive picks only -- restore never runs this).
-            if (p->onSoundNameChanged)
-                p->onSoundNameChanged (prettyProgramName (target));
+            p->switchSfizzProgramWithUndo (picksCopy[result - 1]);
         });
+}
+
+// QA-UndoCoverage Task 7: the program switch, callable from the menu pick AND
+// from undo/redo.  The session program-state cache carries each program's CC
+// tweaks, so no snapshot files are needed -- switching back restores the
+// prior program's state through the same cache the pick always used.
+bool InstPage::switchSfizzProgram (const juce::File& target)
+{
+    if (mFullProcessor == nullptr) return false;
+
+    auto sfizzEngine = [&] () -> juce::AudioProcessor*
+    {
+        if (mSource == Source::BaySickGuitars)
+            return mFullProcessor->getBaySickGuitars (mPageIndex);
+        if (mSource == Source::BaySickBasses)
+            return mFullProcessor->getBaySickBasses  (mPageIndex);
+        return nullptr;
+    };
+    auto sfizzApvts = [&] () -> juce::AudioProcessorValueTreeState*
+    {
+        if (mSource == Source::BaySickGuitars)
+            if (auto* eng = mFullProcessor->getBaySickGuitars (mPageIndex))
+                return &eng->apvts;
+        if (mSource == Source::BaySickBasses)
+            if (auto* eng = mFullProcessor->getBaySickBasses (mPageIndex))
+                return &eng->apvts;
+        return nullptr;
+    };
+    auto sfizzKitPath = [&] () -> juce::File
+    {
+        if (mSource == Source::BaySickGuitars)
+            if (auto* eng = mFullProcessor->getBaySickGuitars (mPageIndex))
+                return eng->getCurrentKitPath();
+        if (mSource == Source::BaySickBasses)
+            if (auto* eng = mFullProcessor->getBaySickBasses (mPageIndex))
+                return eng->getCurrentKitPath();
+        return {};
+    };
+
+    auto* eng = sfizzEngine();
+    auto* apv = sfizzApvts();
+    if (eng == nullptr || apv == nullptr) return false;
+    const auto current = sfizzKitPath();
+    if (target == current) return false;
+
+    // 1) Save outgoing program's APVTS state.
+    const auto outgoingKey = current.getFileName();
+    if (outgoingKey.isNotEmpty())
+        mProgramStateCache[outgoingKey] = apv->copyState();
+
+    // 2) Race-safe kit load (source-aware wrapper).
+    const bool ok = (mSource == Source::BaySickGuitars)
+                      ? mFullProcessor->loadBaySickGuitarsKit (mPageIndex, target)
+                      : mFullProcessor->loadBaySickBassesKit  (mPageIndex, target);
+    if (! ok) return false;
+
+    // 3) Restore incoming program's saved state if cached.  Walk the
+    //    cached PARAM tree directly and call setValueNotifyingHost on
+    //    each one - replaceState alone doesn't reliably fire the
+    //    parameterChanged listener for every changed param across all
+    //    JUCE versions, which would leave sfizz out of sync with the
+    //    restored APVTS state for any CC the kit just reset to 0.
+    const auto incomingKey = target.getFileName();
+    if (auto it = mProgramStateCache.find (incomingKey);
+        it != mProgramStateCache.end())
+    {
+        auto* apv2 = sfizzApvts();
+        auto* eng2 = sfizzEngine();
+        if (apv2 != nullptr && eng2 != nullptr)
+        {
+            // QA-UndoCoverage Task 6: restore force-fires are programmatic.
+            juce::AudioProcessorValueTreeState::ScopedProgrammaticParamWrites spw;
+            apv2->replaceStateKeepingUndoHistory (it->second);
+            for (auto* param : eng2->getParameters())
+            {
+                if (auto* ranged = dynamic_cast<juce::RangedAudioParameter*> (param))
+                    ranged->setValueNotifyingHost (ranged->getValue());
+            }
+        }
+    }
+
+    // 4) Refresh chain + ARIA panel + file label.
+    notifySourceEngineChanged();
+
+    // 5) Program-name linkage: tab + strip + roll follow the loaded
+    //    program (interactive picks only -- restore never runs this).
+    if (onSoundNameChanged)
+        onSoundNameChanged (prettyProgramName (target));
+    return true;
+}
+
+void InstPage::switchSfizzProgramWithUndo (const juce::File& target)
+{
+    // Capture the prior program BEFORE the switch (the switch caches its CC
+    // state under this key, which is exactly what undo re-enters through).
+    juce::File prior;
+    if (mSource == Source::BaySickGuitars)
+    {
+        if (auto* eng = mFullProcessor ? mFullProcessor->getBaySickGuitars (mPageIndex) : nullptr)
+            prior = eng->getCurrentKitPath();
+    }
+    else if (mSource == Source::BaySickBasses)
+    {
+        if (auto* eng = mFullProcessor ? mFullProcessor->getBaySickBasses (mPageIndex) : nullptr)
+            prior = eng->getCurrentKitPath();
+    }
+
+    if (! switchSfizzProgram (target)) return;
+
+    if (! mUndoCtx.isValid() || prior == juce::File()) return;
+
+    // Jeff ruling 2026-08-06: resolve the LIVE page at apply time (a
+    // delete+resurrect cycle replaces this object; SafePointer = fallback).
+    auto resolveSelf = mUndoCtx.resolveOwnerPage;
+    auto sp = juce::Component::SafePointer<InstPage> (this);
+    auto livePage = [resolveSelf, sp]() -> InstPage*
+    {
+        if (resolveSelf) return dynamic_cast<InstPage*> (resolveSelf());
+        return sp.getComponent();
+    };
+    mUndoCtx.perform (new StructuralOpAction (
+                          [livePage, prior]  { if (auto* ip = livePage()) ip->switchSfizzProgram (prior); },
+                          [livePage, target] { if (auto* ip = livePage()) ip->switchSfizzProgram (target); }),
+                      "Program " + prettyProgramName (target));
 }
 
 void InstPage::setProcessor (VibeSynthProcessor* p)

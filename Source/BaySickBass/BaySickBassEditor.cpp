@@ -1080,7 +1080,7 @@ void BaySickBassEditor::loadPreset (const juce::File& f)
         }
     }
 
-    mProc.apvts.replaceState (loaded);
+    mProc.apvts.replaceStateKeepingUndoHistory (loaded, "Load Preset");   // ruling 3a
 
     if (onPatchLoaded)
         onPatchLoaded (f.getFileNameWithoutExtension());

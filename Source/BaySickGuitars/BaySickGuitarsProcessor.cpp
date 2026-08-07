@@ -13,14 +13,18 @@ inline juce::String makePrefix (int instIdx)
 }
 }
 
-BaySickGuitarsProcessor::BaySickGuitarsProcessor (int instIdx)
+BaySickGuitarsProcessor::BaySickGuitarsProcessor (int instIdx, juce::UndoManager& undoMgr)
     : juce::AudioProcessor (BusesProperties()
                                 .withOutput ("Out", juce::AudioChannelSet::stereo(), true)),
       mInstIdx     (instIdx),
       mPrefix      (makePrefix (instIdx)),
       mCcParamRoot (mPrefix + "cc"),
+      mUndoManager (undoMgr),
       apvts (*this, &mUndoManager, "BaySickGuitarsState", createLayout (mPrefix))
 {
+    // QA-UndoCoverage: stable undo identity (redo survives engine re-creation
+    // at the same instIdx -- program switches rebuild this processor).
+    apvts.undoOwnerTag = "sfizz:" + mPrefix;
     mSfizz = std::make_unique<sfz::Sfizz>();
     mSfizz->setSampleRate     (static_cast<float>(mSampleRate));
     mSfizz->setSamplesPerBlock (mMaxBlockSize);
@@ -69,16 +73,6 @@ void BaySickGuitarsProcessor::parameterChanged (const juce::String& paramId, flo
     if (cc < 0 || cc >= kCcCount) return;
     const int v  = juce::jlimit (0, 127, (int) std::round (newValue));
     if (mSfizz) mSfizz->cc (0, cc, v);
-}
-
-void BaySickGuitarsProcessor::sendCc (int cc, int value)
-{
-    if (cc < 0 || cc >= kCcCount) return;
-    if (auto* p = dynamic_cast<juce::RangedAudioParameter*> (
-            apvts.getParameter (mCcParamRoot + juce::String (cc))))
-    {
-        p->setValueNotifyingHost (p->getNormalisableRange().convertTo0to1 ((float) value));
-    }
 }
 
 int BaySickGuitarsProcessor::getNumActiveVoices() const noexcept
@@ -621,6 +615,9 @@ bool BaySickGuitarsProcessor::loadKit (const juce::File& sfzPath)
     // kit - e.g. user adjusts CC100 on Green to 90, switches to Black (which
     // never set_cc100); without the reset CC100 would stay at 90.  The reset
     // reaches sfizz via setValueNotifyingHost -> parameterChanged.
+    // QA-UndoCoverage Task 6: kit-default pushes are programmatic (the kit
+    // load itself becomes ONE structural transaction in Task 7).
+    juce::AudioProcessorValueTreeState::ScopedProgrammaticParamWrites spw;
     for (int cc = 0; cc < kCcCount; ++cc)
     {
         if (auto* p = dynamic_cast<juce::RangedAudioParameter*> (
@@ -690,5 +687,5 @@ void BaySickGuitarsProcessor::setStateInformation (const void* data, int sz)
     }
 
     if (auto apvtsState = root.getChildWithName (apvts.state.getType()); apvtsState.isValid())
-        apvts.replaceState (apvtsState);
+        apvts.replaceStateKeepingUndoHistory (apvtsState);
 }

@@ -19,6 +19,11 @@ public:
 
     explicit EEAutomationGrid(juce::UndoManager& um);
 
+    // QA-UndoCoverage Task 5 (12-iii): edits route through the app's undo
+    // choke point (labels/dirty/owner semantics) instead of hitting the
+    // manager directly.  Falls back to the direct path when unwired.
+    void setUndoContext (const UndoContext& ctx) { mCtx = ctx; }
+
     // Data binding ─────────────────────────────────────────────────────────────
     // Call setBlock() to bind to a live AutomationLane inside PatternManager.
     // All edits snapshot the lane before/after and register AutomationLaneEditActions.
@@ -83,6 +88,7 @@ public:
 
 private:
     juce::UndoManager& mUM;
+    UndoContext        mCtx;
     PatternManager*    mPM        { nullptr };
     int                mBlockIdx  { -1 };
     float              mTotalBeats{ 4.f };
@@ -214,6 +220,10 @@ public:
     EventEditorContent(VibeSynthProcessor& p, juce::UndoManager& um);
     ~EventEditorContent() override;
 
+    // QA-UndoCoverage Task 5 (12-iii): route lane edits + undo/redo through
+    // the app choke point; forwards to the grid.
+    void setUndoContext (const UndoContext& ctx);
+
     // Bind to a specific ArrangementBlock (must be ClipType::Automation)
     void setBlock(PatternManager* pm, int blockIdx);
 
@@ -256,6 +266,10 @@ public:
 private:
     VibeSynthProcessor& mProcessor;
     juce::UndoManager&  mUM;
+    UndoContext         mCtx;
+    void performViaCtx (const juce::String& label, juce::UndoableAction* action);
+    void doUndo();
+    void doRedo();
 
     PatternManager* mPM       { nullptr };
     int             mBlockIdx { -1 };
@@ -325,6 +339,9 @@ public:
                 PatternManager* pm, int blockIdx,
                 const juce::String& title = "Event Editor");
     ~EventEditor() override;
+
+    // QA-UndoCoverage Task 5: forwarded to the content + grid.
+    void setUndoContext (const UndoContext& ctx);
 
     void closeButtonPressed() override;
 
