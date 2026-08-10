@@ -1,7 +1,7 @@
 #include "EngineRig.h"
 #include "PluginProcessor.h"
 #include "Harmless/HarmlessProcessor.h"
-#include "VibePlayer/VibePlayerProcessor.h"
+#include "BaySickPlayer/BaySickPlayerProcessor.h"
 #include "BaySickSynth/BaySickSynthProcessor.h"
 #include "BaySickBass/BaySickBassProcessor.h"
 #include "BaySickVocal/BaySickVocalProcessor.h"
@@ -15,7 +15,7 @@
 #include "BaySickBasses/BaySickBassesProcessor.h"
 #include "BaySickRustyDrums/BaySickRustyDrumsProcessor.h"
 
-EngineRig::EngineRig (VibeSynthProcessor& proc, juce::UndoManager& undoMgr)
+EngineRig::EngineRig (BaySickDAWProcessor& proc, juce::UndoManager& undoMgr)
     : mProc (proc), mUndoManager (undoMgr)
 {
 }
@@ -49,7 +49,7 @@ juce::AudioProcessorValueTreeState* EngineRig::apvtsOf (juce::AudioProcessor* en
 {
     if (eng == nullptr) return nullptr;
     if (auto* p = dynamic_cast<HarmlessProcessor*>      (eng)) return &p->apvts;
-    if (auto* p = dynamic_cast<VibePlayerProcessor*>    (eng)) return &p->apvts;
+    if (auto* p = dynamic_cast<BaySickPlayerProcessor*>    (eng)) return &p->apvts;
     if (auto* p = dynamic_cast<BaySickSynthProcessor*>  (eng)) return &p->apvts;
     if (auto* p = dynamic_cast<BaySickBassProcessor*>   (eng)) return &p->apvts;
     if (auto* p = dynamic_cast<BaySickVocalProcessor*>  (eng)) return &p->apvts;
@@ -560,7 +560,7 @@ juce::AudioProcessor* EngineRig::createEngineFor (EngineTab& tab, const juce::St
             // what hid the missing re-prepare in registerWithProcessor.)
             std::unique_ptr<juce::AudioProcessor> eng;
             if      (engineType == "Harmless")      { auto e = std::make_unique<HarmlessProcessor>     (trackId, &mUndoManager); e->apvts.undoOwnerTag = rigTag; eng = std::move (e); }
-            else if (engineType == "BaySickPlayer") { auto e = std::make_unique<VibePlayerProcessor>   (trackId, &mUndoManager); e->apvts.undoOwnerTag = rigTag; eng = std::move (e); }
+            else if (engineType == "BaySickPlayer") { auto e = std::make_unique<BaySickPlayerProcessor>   (trackId, &mUndoManager); e->apvts.undoOwnerTag = rigTag; eng = std::move (e); }
             else if (engineType == "BaySickSynth")  { auto e = std::make_unique<BaySickSynthProcessor> (trackId, &mUndoManager); e->apvts.undoOwnerTag = rigTag; eng = std::move (e); }
             else if (engineType == "BaySickBass")   { auto e = std::make_unique<BaySickBassProcessor>  (trackId, &mUndoManager); e->apvts.undoOwnerTag = rigTag; eng = std::move (e); }
             if (eng == nullptr) return nullptr;
@@ -662,7 +662,7 @@ void EngineRig::liveDeviceConfig (double& sampleRate, int& blockSize) const noex
 
     // Only reachable before the audio device has ever prepared the processor
     // (project restore can run first).  The values are arbitrary because nothing
-    // is rendering yet -- VibeSynthProcessor::prepareToPlay sweeps every
+    // is rendering yet -- BaySickDAWProcessor::prepareToPlay sweeps every
     // registered engine the moment a real device arrives, so these are never the
     // config an engine actually renders at.
     if (sampleRate <= 0.0) sampleRate = 44100.0;
@@ -888,7 +888,7 @@ namespace
 }
 
 // The notes THIS tab plays in one pattern.  Mirrors the roll selection in
-// VibeSynthProcessor::patternsWithContentFor -- kept as its own switch rather
+// BaySickDAWProcessor::patternsWithContentFor -- kept as its own switch rather
 // than shared because that one answers "is there content", this one needs the
 // content itself.
 static const std::vector<PianoNote>* rollNotesFor (const Pattern& pat,

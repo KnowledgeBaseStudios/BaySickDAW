@@ -4,8 +4,8 @@
 #include "../AppPaths.h"
 #include "../BaySickSynth/BaySickSynthProcessor.h"
 #include "../BaySickSynth/BaySickSynthEditor.h"
-#include "../VibePlayer/VibePlayerProcessor.h"
-#include "../VibePlayer/VibePlayerEditor.h"
+#include "../BaySickPlayer/BaySickPlayerProcessor.h"
+#include "../BaySickPlayer/BaySickPlayerEditor.h"
 #include "../SampleLibrary.h"
 #include "../MissingFileReport.h"
 #include "../UserFileSave.h"
@@ -112,7 +112,7 @@ juce::File DrumPage::userPresetsDir()
 // G-6 (2026-04-29): sDrumClipboard removed (Copy/Paste menu items dropped).
 
 
-DrumPage::DrumPage(VibeSynthProcessor& p, PatternManager& pm, int pageIndex)
+DrumPage::DrumPage(BaySickDAWProcessor& p, PatternManager& pm, int pageIndex)
     : mProcessor(p), mPM(pm), mPageIndex(juce::jlimit(0, kMaxDrumPages - 1, pageIndex))
 {
     mPageColor = VC::DrumCol[mPageIndex % juce::numElementsInArray (VC::DrumCol)];
@@ -327,7 +327,7 @@ void DrumPage::selectEngine(const juce::String& engineName)
         // filters to drum-only folders (Hip Hop Drums / EDM Drums) and skips
         // the in-app Core Library (DrumPage's own showSoundPicker handles that).
         // dynamic_cast no-ops for the BaySickSynth editor.
-        if (auto* vpe = dynamic_cast<VibePlayerEditor*> (mEngineEditor.get()))
+        if (auto* vpe = dynamic_cast<BaySickPlayerEditor*> (mEngineEditor.get()))
             vpe->setDrumContext (true);
     }
 
@@ -341,21 +341,21 @@ void DrumPage::selectEngine(const juce::String& engineName)
         {
             if (auto* s = dynamic_cast<BaySickSynthProcessor*>(mEngineProcessor))
                 s->auditionNote(midiNote);
-            else if (auto* v = dynamic_cast<VibePlayerProcessor*>(mEngineProcessor))
+            else if (auto* v = dynamic_cast<BaySickPlayerProcessor*>(mEngineProcessor))
                 v->auditionNote(midiNote);
         };
         mPianoRoll->onNoteAuditionOn = [this](int midiNote)
         {
             if (auto* s = dynamic_cast<BaySickSynthProcessor*>(mEngineProcessor))
                 s->auditionNoteOn(midiNote);
-            else if (auto* v = dynamic_cast<VibePlayerProcessor*>(mEngineProcessor))
+            else if (auto* v = dynamic_cast<BaySickPlayerProcessor*>(mEngineProcessor))
                 v->auditionNoteOn(midiNote);
         };
         mPianoRoll->onNoteAuditionOff = [this](int midiNote)
         {
             if (auto* s = dynamic_cast<BaySickSynthProcessor*>(mEngineProcessor))
                 s->auditionNoteOff(midiNote);
-            else if (auto* v = dynamic_cast<VibePlayerProcessor*>(mEngineProcessor))
+            else if (auto* v = dynamic_cast<BaySickPlayerProcessor*>(mEngineProcessor))
                 v->auditionNoteOff(midiNote);
         };
     }
@@ -374,21 +374,21 @@ void DrumPage::selectEngine(const juce::String& engineName)
 juce::String DrumPage::stripEngineTitle() const
 {
     if (dynamic_cast<BaySickSynthEditor*> (mEngineEditor.get())) return BaySickSynthEditor::getEngineTitle();
-    if (dynamic_cast<VibePlayerEditor*>   (mEngineEditor.get())) return VibePlayerEditor::getEngineTitle();
+    if (dynamic_cast<BaySickPlayerEditor*>   (mEngineEditor.get())) return BaySickPlayerEditor::getEngineTitle();
     return {};
 }
 
 juce::Colour DrumPage::stripEngineAccent() const
 {
     if (dynamic_cast<BaySickSynthEditor*> (mEngineEditor.get())) return BaySickSynthEditor::getEngineAccent();
-    if (dynamic_cast<VibePlayerEditor*>   (mEngineEditor.get())) return VibePlayerEditor::getEngineAccent();
+    if (dynamic_cast<BaySickPlayerEditor*>   (mEngineEditor.get())) return BaySickPlayerEditor::getEngineAccent();
     return {};
 }
 
 juce::Component* DrumPage::stripPresetButton() const
 {
     if (auto* e = dynamic_cast<BaySickSynthEditor*> (mEngineEditor.get())) return e->getTitleStripPresetButton();
-    if (auto* e = dynamic_cast<VibePlayerEditor*>   (mEngineEditor.get())) return e->getTitleStripPresetButton();
+    if (auto* e = dynamic_cast<BaySickPlayerEditor*>   (mEngineEditor.get())) return e->getTitleStripPresetButton();
     return nullptr;
 }
 
@@ -780,7 +780,7 @@ void DrumPage::loadSampleFile (const juce::File& f)
     HeavyOperationOverlay::ScopedOp busy (StandaloneEditor::busyOverlayFor (this),
                                           "Loading Sample...", true);
     selectEngine ("BaySickPlayer");
-    if (auto* vp = dynamic_cast<VibePlayerProcessor*>(mEngineProcessor))
+    if (auto* vp = dynamic_cast<BaySickPlayerProcessor*>(mEngineProcessor))
     {
         // 2026-05-02: route through the processor wrapper so the path/kind
         // properties get stamped onto apvts.state.  Direct mgr.load* calls
@@ -809,7 +809,7 @@ void DrumPage::loadSampleFolder (const juce::File& f)
     HeavyOperationOverlay::ScopedOp busy (StandaloneEditor::busyOverlayFor (this),
                                           "Loading Samples...", true);
     selectEngine ("BaySickPlayer");
-    if (auto* vp = dynamic_cast<VibePlayerProcessor*>(mEngineProcessor))
+    if (auto* vp = dynamic_cast<BaySickPlayerProcessor*>(mEngineProcessor))
     {
         // 2026-05-02: see loadSampleFile note above.  Drums always trigger
         // at MIDI 60 -- pass 60 as normalizeRoot.
@@ -833,7 +833,7 @@ void DrumPage::loadSampleSFZ (const juce::File& f)
     HeavyOperationOverlay::ScopedOp busy (StandaloneEditor::busyOverlayFor (this),
                                           "Loading SFZ...", true);
     selectEngine ("BaySickPlayer");
-    if (auto* vp = dynamic_cast<VibePlayerProcessor*>(mEngineProcessor))
+    if (auto* vp = dynamic_cast<BaySickPlayerProcessor*>(mEngineProcessor))
     {
         // 2026-05-02: see loadSampleFile note above.
         vp->loadSampleSFZ (f, 60);
@@ -1084,7 +1084,7 @@ void DrumPage::savePatchAs()
                 if (auto xml = state.createXml())
                     contents = xml->toString();
             }
-            else if (auto* vp = dynamic_cast<VibePlayerProcessor*>(dp->mEngineProcessor))
+            else if (auto* vp = dynamic_cast<BaySickPlayerProcessor*>(dp->mEngineProcessor))
             {
                 // BaySickPlayer: wrap apvts state + sample reference.
                 // Sample path is stored relative to Core Library when the file
@@ -1165,7 +1165,7 @@ juce::String DrumPage::loadPlayerPreset (const juce::File& xml)
     HeavyOperationOverlay::ScopedOp busy (StandaloneEditor::busyOverlayFor (this),
                                           "Loading Preset...", true);
     selectEngine ("BaySickPlayer");
-    auto* vp = dynamic_cast<VibePlayerProcessor*>(mEngineProcessor);
+    auto* vp = dynamic_cast<BaySickPlayerProcessor*>(mEngineProcessor);
     if (vp == nullptr)
         return "BaySickPlayer engine unavailable";
 
@@ -1318,7 +1318,7 @@ void DrumPage::showContextMenu (juce::Component* anchor, bool fromKit)
                 isMono = (int) std::round (p->load()) >= 1;
             canToggle = true;
         }
-        else if (auto* vp = dynamic_cast<VibePlayerProcessor*>(mEngineProcessor))
+        else if (auto* vp = dynamic_cast<BaySickPlayerProcessor*>(mEngineProcessor))
         {
             if (auto* p = vp->apvts.getRawParameterValue (vp->getParamPrefix() + "voiceCap"))
                 isMono = p->load() <= 1.5f;
@@ -1496,7 +1496,7 @@ void DrumPage::showContextMenu (juce::Component* anchor, bool fromKit)
                         p->setValueNotifyingHost (range.convertTo0to1 ((float) nextRaw));
                     }
                 }
-                else if (auto* vp = dynamic_cast<VibePlayerProcessor*>(dp->mEngineProcessor))
+                else if (auto* vp = dynamic_cast<BaySickPlayerProcessor*>(dp->mEngineProcessor))
                 {
                     if (auto* p = vp->apvts.getParameter (vp->getParamPrefix() + "voiceCap"))
                     {
@@ -1538,7 +1538,7 @@ void DrumPage::showContextMenu (juce::Component* anchor, bool fromKit)
 static juce::String drumEngineLocalPrefix (juce::AudioProcessor* proc)
 {
     if (auto* bss = dynamic_cast<BaySickSynthProcessor*>(proc))  return bss->getParamPrefix();
-    if (auto* bsp = dynamic_cast<VibePlayerProcessor*>(proc))    return bsp->getParamPrefix();
+    if (auto* bsp = dynamic_cast<BaySickPlayerProcessor*>(proc))    return bsp->getParamPrefix();
     return {};
 }
 
@@ -1716,7 +1716,7 @@ void DrumPage::requestDelete()
 static juce::String drumEnginePrefixOf (juce::AudioProcessor* p)
 {
     if (auto* s = dynamic_cast<BaySickSynthProcessor*>(p)) return s->getParamPrefix();
-    if (auto* v = dynamic_cast<VibePlayerProcessor*>  (p)) return v->getParamPrefix();
+    if (auto* v = dynamic_cast<BaySickPlayerProcessor*>  (p)) return v->getParamPrefix();
     return {};
 }
 
@@ -1798,11 +1798,11 @@ void DrumPage::loadPagePreset (const juce::File& xml)
     // engine that just had its state restored.  selectEngine creates a
     // fresh engine with mLoadedSampleKind=None / mLoadedSamplePath=empty,
     // and importPagePreset restores the engine's INTERNAL apvts (which
-    // includes bsp_loadKind / bsp_loadPath for VibePlayer + the sample
+    // includes bsp_loadKind / bsp_loadPath for BaySickPlayer + the sample
     // re-load).  But DrumPage's tracking is NOT in apvts - without syncing
     // it here, mSoundName stays empty and savePatchAs cannot reconstruct
     // the load call even though the engine has a kit loaded.
-    if (auto* vp = dynamic_cast<VibePlayerProcessor*> (mEngineProcessor))
+    if (auto* vp = dynamic_cast<BaySickPlayerProcessor*> (mEngineProcessor))
     {
         const auto kind = vp->apvts.state.getProperty ("bsp_loadKind", juce::String()).toString();
         const auto path = vp->apvts.state.getProperty ("bsp_loadPath", juce::String()).toString();

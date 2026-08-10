@@ -4,14 +4,14 @@
 #include <vector>
 
 #include "RenderTask.h"     // RenderTask, UpstreamLink (transitively via UpstreamLink.h)
-#include "../VibeGraph.h"   // VibeGraph::getScRecvBuffer + VibeGraph::kMaxScRecvSlots
+#include "../BaySickGraph.h"   // BaySickGraph::getScRecvBuffer + BaySickGraph::kMaxScRecvSlots
 
 // ─────────────────────────────────────────────────────────────────────────────
 // pullSidechainPredecessorsToGraph (Batch 9c follow-up, 2026-05-07)
 // ─────────────────────────────────────────────────────────────────────────────
 //
 // A strip's rack / preEq / postEq can contain SC-capable DSP (compressors,
-// dynamic-EQ bands, etc.) that read from VibeGraph's per-strip scRecv buffers
+// dynamic-EQ bands, etc.) that read from BaySickGraph's per-strip scRecv buffers
 // (via pushScArrayToStrip -> setSidechainBuffers).  The engine-level
 // ISidechainEngine push only covers ENGINE SC, not the strip's internal
 // rack/EQ DSP -- so something must fill those scRecv buffers.
@@ -28,7 +28,7 @@
 // from mCtx->numSamples on the calling task.
 // ─────────────────────────────────────────────────────────────────────────────
 inline void pullSidechainPredecessorsToGraph(
-    VibeGraph&                        graph,
+    BaySickGraph&                        graph,
     int                                channelId,
     const std::vector<UpstreamLink>&   predecessors,
     int                                numSamples) noexcept
@@ -37,7 +37,7 @@ inline void pullSidechainPredecessorsToGraph(
     for (const auto& link : predecessors)
     {
         if (! link.isSc) continue;
-        if (link.scSlot < 0 || link.scSlot >= VibeGraph::kMaxScRecvSlots) continue;
+        if (link.scSlot < 0 || link.scSlot >= BaySickGraph::kMaxScRecvSlots) continue;
         if (link.source == nullptr || link.source->mOutputBuffer == nullptr) continue;
 
         auto* recv = graph.getScRecvBuffer (channelId, link.scSlot);

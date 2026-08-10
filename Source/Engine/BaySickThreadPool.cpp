@@ -1,4 +1,4 @@
-#include "VibeThreadPool.h"
+#include "BaySickThreadPool.h"
 #include "RenderTask.h"
 #include "RenderEngineFlags.h"
 
@@ -17,7 +17,7 @@
  #pragma comment (lib, "avrt.lib")
 #endif
 
-struct VibeThreadPool::Impl
+struct BaySickThreadPool::Impl
 {
     // Worker-eligible task queue (MPMC).  Workers tryPop this in workerLoop.
     // Audio thread also drains it via runUntilOrTimeout (main-as-worker).
@@ -28,7 +28,7 @@ struct VibeThreadPool::Impl
     std::atomic<int>                                   activeWaiters { 0 };
 };
 
-VibeThreadPool::VibeThreadPool (int requestedWorkers)
+BaySickThreadPool::BaySickThreadPool (int requestedWorkers)
     : mImpl (std::make_unique<Impl>())
 {
     mNumWorkers = juce::jlimit (1, RenderEngine::kMaxWorkers, requestedWorkers);
@@ -43,7 +43,7 @@ VibeThreadPool::VibeThreadPool (int requestedWorkers)
         mImpl->workers.emplace_back ([this, i] { workerLoop (i); });
 }
 
-VibeThreadPool::~VibeThreadPool()
+BaySickThreadPool::~BaySickThreadPool()
 {
     mShutdown.store (true, std::memory_order_release);
 
@@ -56,7 +56,7 @@ VibeThreadPool::~VibeThreadPool()
             t.join();
 }
 
-void VibeThreadPool::submit (RenderTask* task) noexcept
+void BaySickThreadPool::submit (RenderTask* task) noexcept
 {
     if (task == nullptr)
         return;
@@ -87,7 +87,7 @@ void VibeThreadPool::submit (RenderTask* task) noexcept
             waker->signal();
 }
 
-RenderTask* VibeThreadPool::tryPop() noexcept
+RenderTask* BaySickThreadPool::tryPop() noexcept
 {
     RenderTask* task = nullptr;
     if (mImpl->queue.try_dequeue (task))
@@ -95,7 +95,7 @@ RenderTask* VibeThreadPool::tryPop() noexcept
     return nullptr;
 }
 
-void VibeThreadPool::runOneTask (RenderTask* task) noexcept
+void BaySickThreadPool::runOneTask (RenderTask* task) noexcept
 {
     if (task == nullptr)
         return;
@@ -154,7 +154,7 @@ void VibeThreadPool::runOneTask (RenderTask* task) noexcept
 // -- the deadline is only checked on idle iterations where there's nothing to
 // do.  This biases toward "if work is available, finish the block normally;
 // only declare timeout when the system is actually stuck waiting."
-bool VibeThreadPool::runUntilOrTimeout (std::atomic<bool>& done,
+bool BaySickThreadPool::runUntilOrTimeout (std::atomic<bool>& done,
                                           double              deadlineMillisHiRes) noexcept
 {
     const bool capture = RenderEngine::MtDiagnostic::gCaptureOn.load (std::memory_order_relaxed);
@@ -180,7 +180,7 @@ bool VibeThreadPool::runUntilOrTimeout (std::atomic<bool>& done,
     return true;
 }
 
-void VibeThreadPool::clearQueues() noexcept
+void BaySickThreadPool::clearQueues() noexcept
 {
     RenderTask* drained = nullptr;
     while (mImpl->queue.try_dequeue (drained))
@@ -193,7 +193,7 @@ void VibeThreadPool::clearQueues() noexcept
     mOutstandingTasks.store (0, std::memory_order_relaxed);
 }
 
-void VibeThreadPool::workerLoop (int workerIndex) noexcept
+void BaySickThreadPool::workerLoop (int workerIndex) noexcept
 {
    #if JUCE_WINDOWS
     // MMCSS "Pro Audio" registration for the worker's whole lifetime: a raw

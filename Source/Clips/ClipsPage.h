@@ -2,7 +2,7 @@
 #include <JuceHeader.h>
 #include "../Standalone/SharedUI.h"   // ParametricEQDisplay
 
-class VibeSynthProcessor;
+class BaySickDAWProcessor;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // ClipsPage - host component for one Clips tab (Phase G-2).
@@ -96,7 +96,7 @@ public:
     // ── G-6 (2026-04-29): full-state export/import for Duplicate flow ────────
     // Captures BaySickPlayer's APVTS state (single-engine page now).  Saves
     // the actual engine prefix in the XML so import does proper substitution
-    // even though VibePlayerProcessor's prefix format is composite
+    // even though BaySickPlayerProcessor's prefix format is composite
     // ("tk_<trackId>_bsp_" with double-underscore artifact when trackId
     // already ends in "_").
     juce::String exportClipState() const;
@@ -110,7 +110,7 @@ public:
     std::function<void()>                        onDeleteRequested;
     std::function<void()>                        onLockChanged;        // editor wires to ribbon setTabLocked
     // Choke Group: editor reads/writes the mixer_audio_<pageIdx>_chokeGroup
-    // APVTS param on the main VibeSynthProcessor.  ClipsPage doesn't carry
+    // APVTS param on the main BaySickDAWProcessor.  ClipsPage doesn't carry
     // a reference to that processor so the menu queries via these callbacks.
     std::function<int()>                         onGetChokeGroup;
     std::function<void(int)>                     onSetChokeGroup;
@@ -136,9 +136,9 @@ public:
     // ── G-7 (2026-04-29): Page Preset save/load (full chain) ─────────────────
     // savePagePreset writes engine + strip params + insert rack + post-EQ to
     // Documents/BaySickDAW/Presets/Clip Page/My Presets/.  Requires
-    // setProcessor() to have been called with the global VibeSynthProcessor;
+    // setProcessor() to have been called with the global BaySickDAWProcessor;
     // otherwise falls back to the engine-only savePatchAs.
-    void setProcessor (VibeSynthProcessor* p);   // also creates the model tab (TS1)
+    void setProcessor (BaySickDAWProcessor* p);   // also creates the model tab (TS1)
     void savePagePreset (std::function<void()> onSaved = {});
     void loadPagePreset (const juce::File& xml);
     void showPageActionsMenu (juce::Component* anchor);
@@ -162,7 +162,7 @@ private:
 
     juce::Label                                  mClipFileLabel;
     EngineType                                   mEngineType { EngineType::None };
-    // QA-ModelShell TS1: non-owning view of the rig-owned VibePlayerProcessor
+    // QA-ModelShell TS1: non-owning view of the rig-owned BaySickPlayerProcessor
     // ({Clips, pageIndex}); the editor IS view-owned and must die before the
     // page (its attachments reference the engine's APVTS).
     juce::AudioProcessor*                        mPlayerProc { nullptr };
@@ -172,8 +172,8 @@ private:
     // Effects page only.
 
     // G-7 (2026-04-29): set by StandaloneEditor after construction so we
-    // can call PagePresetIO with the global apvts + VibeGraph.
-    VibeSynthProcessor*                          mFullProcessor { nullptr };
+    // can call PagePresetIO with the global apvts + BaySickGraph.
+    BaySickDAWProcessor*                          mFullProcessor { nullptr };
 
     // G-7 dirty tracking - listener-based instead of byte comparison so it
     // catches every parameter mutation reliably regardless of how the

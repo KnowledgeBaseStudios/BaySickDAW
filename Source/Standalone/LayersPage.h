@@ -17,7 +17,7 @@
 //                        the ribbon "+" menu before the page exists -- L4)
 //   Tab 1 "Piano Roll" - PianoRollContainer bound to layerRoll[mPageIndex]
 //
-// Engine choices: Harmless | VibePlayer | BaySickSynth
+// Engine choices: Harmless | BaySickPlayer | BaySickSynth
 // QA-ModelShell TS1 (2026-07-27): the engine is MODEL-owned (EngineRig, keyed
 // {Layers, pageIndex}).  This page is a disposable view: it holds a non-owning
 // engine pointer plus the editor it creates, and requests engines from the rig
@@ -28,7 +28,7 @@ class LayersPage : public juce::Component,
                    private juce::ValueTree::Listener
 {
 public:
-    LayersPage(VibeSynthProcessor& p, PatternManager& pm, int pageIndex);
+    LayersPage(BaySickDAWProcessor& p, PatternManager& pm, int pageIndex);
     ~LayersPage() override;
 
     void paint  (juce::Graphics&) override;
@@ -129,7 +129,7 @@ public:
     std::function<void(const juce::String& newName)> onSoundNameChanged;
 
 private:
-    VibeSynthProcessor& mProcessor;
+    BaySickDAWProcessor& mProcessor;
     PatternManager&     mPM;
     int                 mPageIndex;   // 0-7
     juce::Colour        mPageColor;   // from VC::LayerCol[mPageIndex]

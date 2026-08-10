@@ -459,7 +459,7 @@ void MixerTrackStrip::setAutomationPrefix (const juce::String& prefix)
 {
     // QA-ModelShell TS3 (2026-07-27): stamping only.  Both controls are
     // attached to real APVTS params, so the applicators behind these ids are
-    // registered at param materialization (VibeSynthProcessor::
+    // registered at param materialization (BaySickDAWProcessor::
     // onMixerStripParamsCreated -> registerStaticAutomationHandlers, which also
     // derives the "_fader" alias onto "_level").  The registrations that used to
     // live here drove the SLIDER and died with the strip, which is why the

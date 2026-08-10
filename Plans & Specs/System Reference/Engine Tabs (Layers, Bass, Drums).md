@@ -8,7 +8,7 @@
 
 **The engine lives in the model, not in the window.** `Source/EngineRig.h/.cpp` owns every dynamic tab's engine, keyed by `(TabKind, pageIndex)`. `TabKind::Layers`, `TabKind::Bass` and `TabKind::Drums` are three of the eight kinds. The page component (`Source/Standalone/LayersPage.cpp`, `BassPage.cpp`, `DrumPage.cpp`) is a **view**: it holds a non-owning `juce::AudioProcessor*` into the rig plus the engine editor it built, and asks the rig for engines through `EngineRig::setEngineType`. Closing a window does not stop the sound.
 
-Per-kind capacity comes from `Source/VibesynthConstants.h` and is the single statement of each cap:
+Per-kind capacity comes from `Source/BaySickConstants.h` and is the single statement of each cap:
 
 | Family | Constant | Value |
 |---|---|---|
@@ -23,7 +23,7 @@ Per-kind capacity comes from `Source/VibesynthConstants.h` and is the single sta
 | Name string | Class |
 |---|---|
 | `"Harmless"` | `HarmlessProcessor` |
-| `"BaySickPlayer"` | `VibePlayerProcessor` |
+| `"BaySickPlayer"` | `BaySickPlayerProcessor` |
 | `"BaySickSynth"` | `BaySickSynthProcessor` |
 | `"BaySickBass"` | `BaySickBassProcessor` |
 
@@ -33,7 +33,7 @@ Every one gets its own `AudioProcessorValueTreeState` whose parameter ids are pr
 
 **Threading.** All rig mutation, page building, menus and preset IO run on the message thread. The audio thread reads the processor's spinlock-guarded pointer arrays that the rig keeps in sync. Teardown order is fixed in `EngineRig::removeTab`: retract frozen sources, unregister from audio dispatch, settle one audio block, then destroy.
 
-**The two drum kits.** `MixerChannelIds::kDrumPagesPerBank = 16` (in `Source/VibeGraph.h`) splits the 32 drum pages into two kits. `drumBankForPage(pageIdx)` answers 0 for pages 0-15 and 1 for pages 16-31; `drumBusForPage(pageIdx)` maps those to `kDrumsBus` (id 3) and `kDrumsBus2` (id 18). **The slot number is the only record of which kit a drum belongs to** - nothing stores a bank field, and a drum never moves between kits. Which kit is on screen is editor state (`StandaloneEditor::mActiveDrumBank`), because add / save kit / load kit all read it and it has to survive a page rebuild.
+**The two drum kits.** `MixerChannelIds::kDrumPagesPerBank = 16` (in `Source/BaySickGraph.h`) splits the 32 drum pages into two kits. `drumBankForPage(pageIdx)` answers 0 for pages 0-15 and 1 for pages 16-31; `drumBusForPage(pageIdx)` maps those to `kDrumsBus` (id 3) and `kDrumsBus2` (id 18). **The slot number is the only record of which kit a drum belongs to** - nothing stores a bank field, and a drum never moves between kits. Which kit is on screen is editor state (`StandaloneEditor::mActiveDrumBank`), because add / save kit / load kit all read it and it has to survive a page rebuild.
 
 ---
 

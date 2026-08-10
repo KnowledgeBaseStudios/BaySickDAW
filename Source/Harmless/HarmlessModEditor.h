@@ -1,8 +1,8 @@
 #pragma once
 #include <JuceHeader.h>
 #include <vector>
-#include "../Standalone/SharedUI.h"   // VibeSlider
-#include "../VibesynthConstants.h"    // unified snap labels / divisions / grid ladders
+#include "../Standalone/SharedUI.h"   // BaySickSlider
+#include "../BaySickConstants.h"    // unified snap labels / divisions / grid ladders
 
 // ── HarmlessCurvePoint ────────────────────────────────────────────────────────
 // Self-contained modulation curve point. No PatternManager dependency.
@@ -121,7 +121,7 @@ private:
     float            mZoomOffset  { 0.0f };    // 0..(1 - 1/zoom) phase window start
     // Jeff, 2026-08-04: the snap vocabulary is the APP'S unified one now
     // (kUnifiedSnapLabels / snapDivToTicks / gridLadderForSnap in
-    // VibesynthConstants.h), triplets included -- this editor used to offer
+    // BaySickConstants.h), triplets included -- this editor used to offer
     // straight 1 / 1/2 / 1/4 / 1/8 / 1/16 / 1/32 only, which was the one place
     // in the app where a triplet could not be snapped to.
     //
@@ -167,11 +167,11 @@ private:
     juce::Rectangle<int> mGraphBounds;
 
     // ── Bottom strip ──────────────────────────────────────────────────────────
-    VibeSlider       mDepthKnob;          // bipolar -1..+1, center-detent
-    VibeSlider       mLengthSlider;       // 0.01..32 (beats if tempoSync else sec)
+    BaySickSlider       mDepthKnob;          // bipolar -1..+1, center-detent
+    BaySickSlider       mLengthSlider;       // 0.01..32 (beats if tempoSync else sec)
     juce::TextButton mTempoBtn { "TEMPO" };
-    VibeSlider       mShapeSelector;      // LFO-only, 4 waveforms
-    VibeSlider       mSpdKnob, mTnsKnob, mSkewKnob, mPwKnob;
+    BaySickSlider       mShapeSelector;      // LFO-only, 4 waveforms
+    BaySickSlider       mSpdKnob, mTnsKnob, mSkewKnob, mPwKnob;
 
     // ── State ─────────────────────────────────────────────────────────────────
     HarmlessModRegistry* mRegistry       { nullptr };

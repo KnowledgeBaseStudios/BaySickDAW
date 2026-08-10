@@ -13,7 +13,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // Composite-driven note-level pitch editor engine (the BaySickAlign sibling,
 // section 14 of phantom-recording-mongoose).  Channel-level: the editor feeds
-// it the channel composite (VibeSynthProcessor::renderChannelComposite);
+// it the channel composite (BaySickDAWProcessor::renderChannelComposite);
 // analysis runs YIN once over it and segments note regions with ABSOLUTE
 // timeline positions.  User edits (pitch shift / formant / vibrato / volume
 // shape) attach to regions and flow to playback through the REALTIME

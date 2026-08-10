@@ -161,7 +161,7 @@ private:
 static constexpr int kRowH = 24;
 
 // ── Ctor ──────────────────────────────────────────────────────────────────────
-EffectsPage::EffectsPage(TrackSelectionManager& tsm, VibeSynthProcessor& processor)
+EffectsPage::EffectsPage(TrackSelectionManager& tsm, BaySickDAWProcessor& processor)
     : mTSM(tsm), mProcessor(processor)
 {
     mTSM.addChangeListener(this);
@@ -181,7 +181,7 @@ EffectsPage::EffectsPage(TrackSelectionManager& tsm, VibeSynthProcessor& process
     addAndMakeVisible(*mTrackLabel);
 
     mTrackBox = std::make_unique<juce::ComboBox>();
-    mTrackBox->setLookAndFeel(&VibeLAF::get());
+    mTrackBox->setLookAndFeel(&BaySickLAF::get());
     mTrackBox->setTooltip("Select channel to edit effects / EQ");
     mTrackBox->onChange = [this] { onChannelChanged(); };
     addAndMakeVisible(*mTrackBox);
@@ -215,7 +215,7 @@ EffectsPage::EffectsPage(TrackSelectionManager& tsm, VibeSynthProcessor& process
                              const juce::String& label, bool pre)
     {
         btn = std::make_unique<juce::TextButton> (label);
-        btn->setLookAndFeel (&VibeLAF::get());
+        btn->setLookAndFeel (&BaySickLAF::get());
         btn->setTooltip (pre ? "Open this channel's pre-rack EQ in its own window"
                              : "Open this channel's post-rack EQ in its own window");
         btn->onClick = [this, pre]
@@ -495,7 +495,7 @@ void EffectsPage::selectChannelByApvtsPrefix(const juce::String& apvtsPrefix)
 // no-ops, which the dead-lane logging already reports.  Same shape as
 // Ardour's automation_control(param, create) -- the lane names a key and the
 // key resolves to a live control when one is needed.
-void EffectsPage::resolveChannelDsp (VibeGraph& vg, int id,
+void EffectsPage::resolveChannelDsp (BaySickGraph& vg, int id,
                                      EffectRack*& rack, EQ8MsDSP*& eq)
 {
     rack = nullptr;
@@ -530,8 +530,8 @@ void EffectsPage::resolveChannelDsp (VibeGraph& vg, int id,
             // and getInsertEQ share the InsertNode so the post-rack EQ audibly
             // processes the same signal the rack does.
             const int idx = id - 200;
-            rack = vg.getInsertRack(VibeGraph::InsertKind::Layer, idx);
-            eq   = vg.getInsertEQ  (VibeGraph::InsertKind::Layer, idx);
+            rack = vg.getInsertRack(BaySickGraph::InsertKind::Layer, idx);
+            eq   = vg.getInsertEQ  (BaySickGraph::InsertKind::Layer, idx);
             if (rack == nullptr)
                 rack = vg.getLayerPageRack(idx);   // legacy fallback
         }
@@ -539,8 +539,8 @@ void EffectsPage::resolveChannelDsp (VibeGraph& vg, int id,
         {
             // Per-page Bass channels (IDs 300-303), same pattern as Layer above.
             const int idx = id - 300;
-            rack = vg.getInsertRack(VibeGraph::InsertKind::Bass, idx);
-            eq   = vg.getInsertEQ  (VibeGraph::InsertKind::Bass, idx);
+            rack = vg.getInsertRack(BaySickGraph::InsertKind::Bass, idx);
+            eq   = vg.getInsertEQ  (BaySickGraph::InsertKind::Bass, idx);
             if (rack == nullptr)
                 rack = vg.getBassPageRack(idx);    // legacy fallback
         }
@@ -552,8 +552,8 @@ void EffectsPage::resolveChannelDsp (VibeGraph& vg, int id,
             // audio path actually processes (same asymmetry as drums/layers/bass
             // had before this sweep).
             const int idx = id - 600;
-            rack = vg.getInsertRack(VibeGraph::InsertKind::Aux, idx);
-            eq   = vg.getInsertEQ  (VibeGraph::InsertKind::Aux, idx);
+            rack = vg.getInsertRack(BaySickGraph::InsertKind::Aux, idx);
+            eq   = vg.getInsertEQ  (BaySickGraph::InsertKind::Aux, idx);
             if (rack == nullptr)
                 rack = vg.getAuxRack(idx);         // legacy fallback
         }
@@ -561,8 +561,8 @@ void EffectsPage::resolveChannelDsp (VibeGraph& vg, int id,
         {
             // Per-clip audio row channels (IDs 400+row). InsertNode-first.
             const int row = id - 400;
-            rack = vg.getInsertRack(VibeGraph::InsertKind::Audio, row);
-            eq   = vg.getInsertEQ  (VibeGraph::InsertKind::Audio, row);
+            rack = vg.getInsertRack(BaySickGraph::InsertKind::Audio, row);
+            eq   = vg.getInsertEQ  (BaySickGraph::InsertKind::Audio, row);
             if (rack == nullptr)
             {
                 // Legacy InstrChannelNode fallback for stray state-restore paths
@@ -576,12 +576,12 @@ void EffectsPage::resolveChannelDsp (VibeGraph& vg, int id,
             // Drums were migrated from legacy InstrChannelNode to InsertKind::Drum
             // during 5F-3; the dropdown enumeration (StandaloneEditor::onGetActiveChannels)
             // already populates drums via MixerPage::getDrumStripIndices with ID=100+slot,
-            // so we resolve the rack via VibeGraph's InsertNode registry here.
+            // so we resolve the rack via BaySickGraph's InsertNode registry here.
             // Fallback to legacy InstrChannelRack for any stray state-restore paths
             // (belt-and-suspenders - mirrors the same pattern in onGetActiveChannels).
             const int slot = id - 100;
-            rack = vg.getInsertRack(VibeGraph::InsertKind::Drum, slot);
-            eq   = vg.getInsertEQ  (VibeGraph::InsertKind::Drum, slot);
+            rack = vg.getInsertRack(BaySickGraph::InsertKind::Drum, slot);
+            eq   = vg.getInsertEQ  (BaySickGraph::InsertKind::Drum, slot);
             if (rack == nullptr)
             {
                 // Legacy fallback for pre-5F-3 state
@@ -592,14 +592,14 @@ void EffectsPage::resolveChannelDsp (VibeGraph& vg, int id,
         else if (id >= 700 && id < 700 + (int) MixerChannelIds::kMaxVoxStrips)
         {
             const int idx = id - 700;
-            rack = vg.getInsertRack(VibeGraph::InsertKind::Vox, idx);
-            eq   = vg.getInsertEQ  (VibeGraph::InsertKind::Vox, idx);
+            rack = vg.getInsertRack(BaySickGraph::InsertKind::Vox, idx);
+            eq   = vg.getInsertEQ  (BaySickGraph::InsertKind::Vox, idx);
         }
         else if (id >= 800 && id < 800 + (int) MixerChannelIds::kMaxInstStrips)
         {
             const int idx = id - 800;
-            rack = vg.getInsertRack(VibeGraph::InsertKind::Inst, idx);
-            eq   = vg.getInsertEQ  (VibeGraph::InsertKind::Inst, idx);
+            rack = vg.getInsertRack(BaySickGraph::InsertKind::Inst, idx);
+            eq   = vg.getInsertEQ  (BaySickGraph::InsertKind::Inst, idx);
         }
         else if (id >= 900 && id < 900 + (int) MixerChannelIds::kMaxRustyStrips)
         {
@@ -607,16 +607,16 @@ void EffectsPage::resolveChannelDsp (VibeGraph& vg, int id,
             // InsertNode registry pattern as Layer/Bass/Drum - racks bind to
             // the audio-graph node so widget edits hit the audible signal.
             const int idx = id - 900;
-            rack = vg.getInsertRack(VibeGraph::InsertKind::Rusty, idx);
-            eq   = vg.getInsertEQ  (VibeGraph::InsertKind::Rusty, idx);
+            rack = vg.getInsertRack(BaySickGraph::InsertKind::Rusty, idx);
+            eq   = vg.getInsertEQ  (BaySickGraph::InsertKind::Rusty, idx);
         }
         else if (id >= 1000 && id < 1000 + (int) MixerChannelIds::kMaxPluginStrips)
         {
             // QA-ModelShell TS6 (BLU-447): hosted VST3 instrument strips get a
             // rack + EQ like every other engine-driven insert.
             const int idx = id - 1000;
-            rack = vg.getInsertRack(VibeGraph::InsertKind::Plugin, idx);
-            eq   = vg.getInsertEQ  (VibeGraph::InsertKind::Plugin, idx);
+            rack = vg.getInsertRack(BaySickGraph::InsertKind::Plugin, idx);
+            eq   = vg.getInsertEQ  (BaySickGraph::InsertKind::Plugin, idx);
         }
         break;
     }
@@ -632,7 +632,7 @@ void EffectsPage::registerSlotAutomation (int slotIndex)
                                getChannelPrefix(), *mRack, slotIndex);
 }
 
-void EffectsPage::registerSlotAutomationFor (VibeSynthProcessor& proc, int chId,
+void EffectsPage::registerSlotAutomationFor (BaySickDAWProcessor& proc, int chId,
                                              const juce::String& channelPrefix,
                                              EffectRack& rackRef, int slotIndex)
 {
@@ -767,7 +767,7 @@ void EffectsPage::registerSlotAutomationFor (VibeSynthProcessor& proc, int chId,
         const juce::String suffix = def.suffix;
         // Lookahead-class knobs move the DSP's reported latency, and the panel
         // lambda that used to own this write also poked EditorPanelBase::
-        // onLatencyChanged -> VibeGraph::updateBusLatencies.  An automation tick
+        // onLatencyChanged -> BaySickGraph::updateBusLatencies.  An automation tick
         // has no panel, so the poke rides the applicator instead; without it a
         // lane could leave bus PDC stale.
         const bool pokeLatency = def.affectsLatency;
@@ -804,7 +804,7 @@ void EffectsPage::registerSlotAutomationFor (VibeSynthProcessor& proc, int chId,
     }
 }
 
-EffectRack* EffectsPage::rackForChannelId (VibeGraph& vg, int id)
+EffectRack* EffectsPage::rackForChannelId (BaySickGraph& vg, int id)
 {
     EffectRack* rack = nullptr;
     EQ8MsDSP*   eq   = nullptr;
@@ -817,7 +817,7 @@ EffectRack* EffectsPage::rackForChannelId (VibeGraph& vg, int id)
 // 700+ vox, 800+ inst, 900+ rusty, 1000+ plugin.  ONE copy of it -- two sweeps
 // spelling the ranges out separately would silently miss a channel class the
 // day one of them gained a strip type.
-static void forEachChannelWithRack (VibeGraph& vg,
+static void forEachChannelWithRack (BaySickGraph& vg,
                                     const std::function<void(int, EffectRack&)>& fn)
 {
     auto visit = [&vg, &fn] (int chId)
@@ -845,7 +845,7 @@ static void forEachChannelWithRack (VibeGraph& vg,
 // involved.  The page also re-registers a slot whenever its effect identity
 // changes (stampAndRegisterSlotEditor); identical rack-scoped entries overwrite
 // by key, so the two paths cannot disagree.
-void EffectsPage::registerRackAutomationForAllChannels (VibeSynthProcessor& proc)
+void EffectsPage::registerRackAutomationForAllChannels (BaySickDAWProcessor& proc)
 {
     forEachChannelWithRack (proc.mVibeGraph, [&proc] (int chId, EffectRack& rack)
     {
@@ -857,7 +857,7 @@ void EffectsPage::registerRackAutomationForAllChannels (VibeSynthProcessor& proc
     });
 }
 
-bool EffectsPage::retryDeadPluginSlot (VibeSynthProcessor& proc, int chId,
+bool EffectsPage::retryDeadPluginSlot (BaySickDAWProcessor& proc, int chId,
                                        EffectRack& rack, int slotIndex)
 {
     if (slotIndex < 0 || slotIndex >= EffectRack::kNumSlots)          return false;
@@ -962,7 +962,7 @@ bool EffectsPage::retryDeadPluginSlot (VibeSynthProcessor& proc, int chId,
     return inst != nullptr && inst->isAlive();
 }
 
-void EffectsPage::retryDeadPluginSlots (VibeSynthProcessor& proc)
+void EffectsPage::retryDeadPluginSlots (BaySickDAWProcessor& proc)
 {
     forEachChannelWithRack (proc.mVibeGraph, [&proc] (int chId, EffectRack& rack)
     {
@@ -975,7 +975,7 @@ void EffectsPage::retryDeadPluginSlots (VibeSynthProcessor& proc)
 // onChannelChanged.  It was the one piece of channel resolution that had NOT
 // been made static at TS1 -- a second copy of the channel switch living inside
 // a view method, which the EQ windows would have had to fork a third time.
-EQ8MsDSP* EffectsPage::preEqForChannelId (VibeGraph& vg, int id)
+EQ8MsDSP* EffectsPage::preEqForChannelId (BaySickGraph& vg, int id)
 {
     switch (id)
     {
@@ -999,15 +999,15 @@ EQ8MsDSP* EffectsPage::preEqForChannelId (VibeGraph& vg, int id)
         case 18: return vg.getDrumsBus2PreEQ();     // QA-SOUNDNESS
         default: break;
     }
-    if      (id >= 100 && id < 200)                                              return vg.getInsertPreEQ(VibeGraph::InsertKind::Drum,  id - 100);
-    else if (id >= 200 && id < 200 + kMaxLayerPages)                             return vg.getInsertPreEQ(VibeGraph::InsertKind::Layer, id - 200);
-    else if (id >= 300 && id < 300 + kMaxBassPages)                              return vg.getInsertPreEQ(VibeGraph::InsertKind::Bass,  id - 300);
-    else if (id >= 400 && id < 500)                                              return vg.getInsertPreEQ(VibeGraph::InsertKind::Audio, id - 400);
-    else if (id >= 600 && id < 600 + (int) MixerChannelIds::kMaxAuxStrips)       return vg.getInsertPreEQ(VibeGraph::InsertKind::Aux,   id - 600);
-    else if (id >= 700 && id < 700 + (int) MixerChannelIds::kMaxVoxStrips)       return vg.getInsertPreEQ(VibeGraph::InsertKind::Vox,   id - 700);
-    else if (id >= 800 && id < 800 + (int) MixerChannelIds::kMaxInstStrips)      return vg.getInsertPreEQ(VibeGraph::InsertKind::Inst,  id - 800);
-    else if (id >= 900 && id < 900 + (int) MixerChannelIds::kMaxRustyStrips)     return vg.getInsertPreEQ(VibeGraph::InsertKind::Rusty, id - 900);
-    else if (id >= 1000 && id < 1000 + (int) MixerChannelIds::kMaxPluginStrips)  return vg.getInsertPreEQ(VibeGraph::InsertKind::Plugin, id - 1000);
+    if      (id >= 100 && id < 200)                                              return vg.getInsertPreEQ(BaySickGraph::InsertKind::Drum,  id - 100);
+    else if (id >= 200 && id < 200 + kMaxLayerPages)                             return vg.getInsertPreEQ(BaySickGraph::InsertKind::Layer, id - 200);
+    else if (id >= 300 && id < 300 + kMaxBassPages)                              return vg.getInsertPreEQ(BaySickGraph::InsertKind::Bass,  id - 300);
+    else if (id >= 400 && id < 500)                                              return vg.getInsertPreEQ(BaySickGraph::InsertKind::Audio, id - 400);
+    else if (id >= 600 && id < 600 + (int) MixerChannelIds::kMaxAuxStrips)       return vg.getInsertPreEQ(BaySickGraph::InsertKind::Aux,   id - 600);
+    else if (id >= 700 && id < 700 + (int) MixerChannelIds::kMaxVoxStrips)       return vg.getInsertPreEQ(BaySickGraph::InsertKind::Vox,   id - 700);
+    else if (id >= 800 && id < 800 + (int) MixerChannelIds::kMaxInstStrips)      return vg.getInsertPreEQ(BaySickGraph::InsertKind::Inst,  id - 800);
+    else if (id >= 900 && id < 900 + (int) MixerChannelIds::kMaxRustyStrips)     return vg.getInsertPreEQ(BaySickGraph::InsertKind::Rusty, id - 900);
+    else if (id >= 1000 && id < 1000 + (int) MixerChannelIds::kMaxPluginStrips)  return vg.getInsertPreEQ(BaySickGraph::InsertKind::Plugin, id - 1000);
     return nullptr;
 }
 
@@ -1065,7 +1065,7 @@ void EffectsPage::onChannelChanged()
 
 // 5F-4a: APVTS param listener - mirrors _bypass to rack.setRackBypassed().
 // Can be called on any thread (APVTS may fire from the audio thread), and the
-// audio thread is a second writer of the same flag via VibeGraph's per-block
+// audio thread is a second writer of the same flag via BaySickGraph's per-block
 // re-sync -- so EffectRack::mRackBypassed is a relaxed std::atomic<bool>, not
 // a plain bool.
 void EffectsPage::parameterChanged(const juce::String& paramId, float newValue)
@@ -1173,7 +1173,7 @@ static EffectRackAction::SlotSnapshots captureSlotSnapshots(EffectRack* rack)
 // Reachable by undo/redo of a rack VST3 load during playback.  Bracketing the
 // whole loop rather than each slot also makes a multi-slot restore atomic
 // with respect to the audio thread, which is what undo of a Move Effect wants.
-static void applySlotSnapshots(VibeSynthProcessor& proc,
+static void applySlotSnapshots(BaySickDAWProcessor& proc,
                                EffectRack* rack,
                                const EffectRackAction::SlotSnapshots& target,
                                std::array<bool, EffectRack::kNumSlots>& outChanged)
@@ -1398,7 +1398,7 @@ void EffectsPage::notifyRackContentsChanged()
 // halves live here because both have to happen together on EVERY mount path:
 // the stamps make the right-click Automate menu name the right lane, and the
 // registration is keyed to (type, variant), which a Mode switch changes.
-void EffectsPage::stampAndRegisterSlotEditor (VibeSynthProcessor& proc, int chId,
+void EffectsPage::stampAndRegisterSlotEditor (BaySickDAWProcessor& proc, int chId,
                                               EffectRack& rack, int slotIndex,
                                               SlotComponent& target)
 {
@@ -1435,7 +1435,7 @@ juce::String EffectsPage::getChannelPrefix() const
 // previously fell through to "instr_<id>".  Audio Clips Bus, Vox/Inst
 // buses (incl. spawnable extras), Drum / Audio / Vox / Inst inserts
 // all now have proper prefixes for slot-context tagging.  Insert ranges
-// sourced from MixerChannelIds + VibesynthConstants so size bumps stay
+// sourced from MixerChannelIds + BaySickConstants so size bumps stay
 // in sync (kMaxInstStrips bumped 6 -> 10 -> 20 over G-4/G-6).
 // QA-ModelShell TS1: extracted static so the wire-at-load sweep can derive
 // prefixes without the dropdown.

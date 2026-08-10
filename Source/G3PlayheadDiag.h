@@ -56,7 +56,7 @@ namespace G3PlayheadDiag
     //
     // THREAD SAFETY: MULTI-producer, single consumer (the drain timer).  The
     // render dispatcher does NOT serialize the work it schedules -- it submits
-    // every ready task to VibeThreadPool and then joins the pump itself -- so
+    // every ready task to BaySickThreadPool and then joins the pump itself -- so
     // the audio thread and any pool worker can be inside a different engine's
     // processBlock, and pushing, at the same instant.  Each producer therefore
     // CLAIMS its slot with fetch_add and publishes the filled record with that
@@ -163,7 +163,7 @@ namespace G3PlayheadDiag
 }
 
 // Owns the message-thread drain for the audio-thread readout ring above.  Held
-// by VibeSynthProcessor so it is created and destroyed on the message thread
+// by BaySickDAWProcessor so it is created and destroyed on the message thread
 // while the MessageManager is alive -- a static-lifetime Timer would be torn
 // down after JUCE's own shutdown.  Compiles to an empty object in Release.
 class G3PlayheadDiagDrainer

@@ -32,9 +32,9 @@ struct UpstreamLink
     // SENDS ONLY (ignored when isMainOut or isSc).  True means the destination
     // sums the source's PRE-FADER TAP -- the strip's signal before its fader x
     // mute x solo gain and before its pan -- instead of mOutputBuffer.  The tap
-    // lives on the source's VibeGraph node and is resolved through
-    // VibeGraph::getPreFaderTap; see Tasks/SendSourceRead.h for the one place
-    // that choice is made, and VibeGraph.h for the tap's contract.
+    // lives on the source's BaySickGraph node and is resolved through
+    // BaySickGraph::getPreFaderTap; see Tasks/SendSourceRead.h for the one place
+    // that choice is made, and BaySickGraph.h for the tap's contract.
     bool        prePost   = false;
     bool        isMainOut = false;  // true = main-out cable, false = send / SC
     bool        isSc      = false;  // true = sidechain edge (vs audio)

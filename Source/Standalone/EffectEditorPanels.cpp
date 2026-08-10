@@ -120,7 +120,7 @@ EditorPanelBase::EditorPanelBase()
         if (onOutputGainChanged)
             onOutputGainChanged((float)outputVolKnob->slider.getValue());
     };
-    outputVolKnob->slider.setLookAndFeel(&VibeLAF::get());
+    outputVolKnob->slider.setLookAndFeel(&BaySickLAF::get());
     // Default to white variant; Dynamics panels call setVolumeKnobVariant(true)
     outputVolKnob->slider.getProperties().set("volumeKnob", juce::var("white"));
     addAndMakeVisible(*outputVolKnob);
@@ -288,16 +288,16 @@ void EditorPanelBase::setVolumeKnobVariant(bool dark)
 
 void EditorPanelBase::childrenChanged()
 {
-    // Whenever a child is added, if it's a toggle-state button, force VibeLAF so
-    // drawButtonBackground in VibeLAF (switch-toggle filmstrip) is always called.
+    // Whenever a child is added, if it's a toggle-state button, force BaySickLAF so
+    // drawButtonBackground in BaySickLAF (switch-toggle filmstrip) is always called.
     // 2026-04-26: also opt in to "switchToggle" property - switch styling is
     // gated to opt-in callsites and effect panels qualify per the rule.
     for (auto* c : getChildren())
         if (auto* btn = dynamic_cast<juce::Button*>(c))
             if (btn->getClickingTogglesState())
             {
-                if (&btn->getLookAndFeel() != &VibeLAF::get())
-                    btn->setLookAndFeel(&VibeLAF::get());
+                if (&btn->getLookAndFeel() != &BaySickLAF::get())
+                    btn->setLookAndFeel(&BaySickLAF::get());
                 btn->getProperties().set("switchToggle", true);
             }
 }
@@ -5670,15 +5670,15 @@ struct AcousticSimulatorStylePanel : public EditorPanelBase
 
 // ─────────────────────────────────────────────────────────────────────────────
 // EQFader - Self-painted vertical fader for I-12 graphic EQ panels.
-// Bypasses TimeLAF/VibeLAF entirely so we get the locked spec look:
+// Bypasses TimeLAF/BaySickLAF entirely so we get the locked spec look:
 //   * Vertical track with center-detent notch
 //   * Rectangular thumb cap with bevel
 //   * Snaps to 0 dB within +/-1.5 dB of center
 // ─────────────────────────────────────────────────────────────────────────────
-class EQFader : public VibeSlider
+class EQFader : public BaySickSlider
 {
 public:
-    EQFader() : VibeSlider (juce::Slider::LinearVertical, juce::Slider::NoTextBox)
+    EQFader() : BaySickSlider (juce::Slider::LinearVertical, juce::Slider::NoTextBox)
     {
         setDoubleClickReturnValue (true, 0.0);
         // Disable LAF interference -- we paint everything ourselves.

@@ -21,7 +21,7 @@ public:
 private:
     static constexpr int kNumSliders = 6;
 
-    VibeSlider       mSliders[kNumSliders];
+    BaySickSlider       mSliders[kNumSliders];
 
     using SliderAtt = TaggedSliderAttachment;
     std::unique_ptr<SliderAtt> mSliderAtts[kNumSliders];

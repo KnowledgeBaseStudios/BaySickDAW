@@ -4,7 +4,7 @@
 #include "../Standalone/EngineChainProcessor.h"   // I-16 G-9: Pedals -> NAM/IR chain
 #include "../Standalone/UndoActions.h"            // QA-UndoCoverage Task 7: UndoContext + StructuralOpAction
 
-class VibeSynthProcessor;
+class BaySickDAWProcessor;
 class AriaControlPanel;
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -45,7 +45,7 @@ public:
 
     // QA-ModelShell TS1: the processor ref is needed at construction because
     // the Pedals + NAM/IR + chain trio is rig-owned and created in the ctor.
-    InstPage (VibeSynthProcessor& proc, int pageIndex);
+    InstPage (BaySickDAWProcessor& proc, int pageIndex);
     ~InstPage() override;
 
     void paint   (juce::Graphics&) override;
@@ -91,7 +91,7 @@ public:
     // engine chain (sfizz front-end optional, then Pedals -> NAM/IR).  Caller
     // must ensure the PluginProcessor's BaySickGuitars / BaySickBasses engine
     // exists before calling setSource(...) with a non-LiveInput value
-    // (typically via VibeSynthProcessor::loadBaySickGuitarsKit) - if the engine
+    // (typically via BaySickDAWProcessor::loadBaySickGuitarsKit) - if the engine
     // pointer is null when the chain is rebuilt, the source effectively
     // produces silence until a kit loads.
     Source getSource() const noexcept { return mSource; }
@@ -180,7 +180,7 @@ public:
     void loadInstPagePreset (const juce::File& xml);
 
     // ── G-7 (2026-04-29): Page Preset save/load (full chain) ─────────────────
-    void setProcessor (VibeSynthProcessor* p);
+    void setProcessor (BaySickDAWProcessor* p);
     // NOT CONSULTED TODAY.  The bus fallback this query was registered for
     // (saved _sendTo names kInstBus2 / kInstBus3, those buses are not active,
     // loader substitutes kInstBus) only exists in PagePresetIO's legacy
@@ -302,7 +302,7 @@ private:
 
     // G-7: full processor for Page Preset save/load.  mBusActiveQuery is
     // registered by the editor and read by nothing -- see setBusActiveQuery.
-    VibeSynthProcessor*                          mFullProcessor { nullptr };
+    BaySickDAWProcessor*                          mFullProcessor { nullptr };
     std::function<bool(int)>                     mBusActiveQuery;
 
     // G-7 (2026-04-29): listener-based dirty tracking - see ClipsPage for

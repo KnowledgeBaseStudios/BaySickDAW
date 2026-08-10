@@ -19,7 +19,7 @@
 - **Dynamics panels** (CompressorPanel, TransientShaperPanel) call `setVolumeKnobVariant(true)` → renders **black** filmstrip.
 - All other panels default to **white** filmstrip.
 - The variant is stored as slider property: `slider.getProperties().set("volumeKnob", "black"/"white")`.
-- `VibeLAF::drawRotarySlider` checks this property at the top and renders the filmstrip if present.
+- `BaySickLAF::drawRotarySlider` checks this property at the top and renders the filmstrip if present.
 
 ### Layout in each panel's resized()
 ```cpp
@@ -67,7 +67,7 @@ All toggle buttons were widened so the switch image occupies the left ~40px of t
 - **SaturationPanel toggles:** 90px
 - **DelayPanel toggles:** 80px
 
-### How switch image vs label split works (VibeLAF)
+### How switch image vs label split works (BaySickLAF)
 `drawButtonBackground` draws the pill toggle image into a fixed ~40px square on the left side of the button rect.
 `drawButtonText` draws the label into the remaining right portion.
 
@@ -78,10 +78,10 @@ All toggle buttons were widened so the switch image occupies the left ~40px of t
 **File:** `SharedUI.h`
 
 ```cpp
-class SnapSlider : public VibeSlider
+class SnapSlider : public BaySickSlider
 {
 public:
-    SnapSlider() : VibeSlider(juce::Slider::LinearVertical, juce::Slider::NoTextBox) {}
+    SnapSlider() : BaySickSlider(juce::Slider::LinearVertical, juce::Slider::NoTextBox) {}
     double snapValue(double v, DragMode) override
     {
         return (std::abs(v) < 1.5) ? 0.0 : v;
@@ -89,8 +89,8 @@ public:
 };
 ```
 
-In use as the Mixer strip fader (`MixerTrackStrip::mFader`).  The `VibeSlider` base is
-load-bearing: VibeSlider swallows the right-click so it reaches the per-window
+In use as the Mixer strip fader (`MixerTrackStrip::mFader`).  The `BaySickSlider` base is
+load-bearing: BaySickSlider swallows the right-click so it reaches the per-window
 `GlobalAutoRightClick` listener that raises the Automate menu.  Reverting the base to
 `juce::Slider` kills the mixer faders' Automate menu.
 
@@ -162,7 +162,7 @@ Tab paths themselves still draw their colored fills on that background.
 - `mPatternNameEdit` — `setVisible(false)`. Rename will move into the Pattern▾ dropdown (pending).
 
 ### Window title
-`VibeSynthWindow` ctor now passes `"BaySickDAW"` instead of `" "` to `DocumentWindow`.
+`BaySickDAWWindow` ctor now passes `"BaySickDAW"` instead of `" "` to `DocumentWindow`.
 
 ---
 
@@ -337,7 +337,7 @@ shortcut. Held notes release on mode-off, octave shift, and tab switch.
   instance types.  Order array only — the persisted `addFixed` tab ids are untouched.
 - **`kMaxSlots` corrected 11 → 12**: TS6's Plugins type made it 11 types + the "+" slot; with
   every type visible the width solver's stack arrays overflowed by one.
-- **App title** (L26): `VibeLAF::drawDocumentWindowTitleBar` uses stock-JUCE placement — icon +
+- **App title** (L26): `BaySickLAF::drawDocumentWindowTitleBar` uses stock-JUCE placement — icon +
   title centred as one unit, clamped into the title space.  Applies to every non-native
   `DocumentWindow`; the main frame is the only caller that sets an icon.
 
@@ -382,7 +382,7 @@ shortcut. Held notes release on mode-off, octave shift, and tab switch.
 
 ## 2026-08-03 — QA-Layout T3: window title strips — fill toggle, dissolved engine title bars, preset buttons on the strip
 
-**Files:** `WorkspaceWindow.h/.cpp`, `SharedUI.h/.cpp`, `VibePlayerEditor.h/.cpp`,
+**Files:** `WorkspaceWindow.h/.cpp`, `SharedUI.h/.cpp`, `BaySickPlayerEditor.h/.cpp`,
 `BaySickSynthEditor.h/.cpp`, `BaySickBassEditor.h/.cpp`, `HarmlessEditor.h/.cpp`,
 `BaySickPedalsEditor.h/.cpp`, `LayersPage.h/.cpp`, `BassPage.h/.cpp`, `DrumPage.h/.cpp`,
 `ClipsPage.h/.cpp`, `BaySickRustyDrumsPage.cpp`, `InstPage.h`, `StandaloneEditor.cpp`
@@ -392,11 +392,11 @@ shortcut. Held notes release on mode-off, octave shift, and tab switch.
   `toggleWorkspaceFill()` fills the workspace and toggles back to the pre-fill bounds; a manual
   drag or resize while filled clears the state.  Button order right-to-left: close, fill toggle,
   then the PageMenuBar's right-extras (preset button etc.).
-- **Engine title bars dissolved (Window-4/L2):** VibePlayer / BaySickSynth / BaySickBass /
+- **Engine title bars dissolved (Window-4/L2):** BaySickPlayer / BaySickSynth / BaySickBass /
   Harmless / BaySickPedals editors lost their internal `BaySickTitleBar` (32px reclaimed —
   content starts at 0).  The colored player name now renders CENTERED on the window title strip
   via `PageMenuBar::setCenterTitle` (BaySickTitleBar's bloom painter, 15pt).  Each editor keeps
-  its accent/name as `getEngineTitle()`/`getEngineAccent()` statics.  `VibePlayerEditor::
+  its accent/name as `getEngineTitle()`/`getEngineAccent()` statics.  `BaySickPlayerEditor::
   setInfoText` deleted (caller-less; its target bar is gone).
 - **Preset buttons on the strip (Window-3):** editors still OWN their `BaySickPresetButton`s;
   the pages expose `stripEngineTitle/Accent/PresetButton()` and fire `onEngineEditorRebuilt`
@@ -537,7 +537,7 @@ shortcut. Held notes release on mode-off, octave shift, and tab switch.
 
 ## 2026-08-04 - QA-Layout T10: mixer menus, Add heading, group buses, routing menus
 
-**Files:** `VibeGraph.h/.cpp`, `PluginProcessor.h/.cpp`, `MixerPage.h/.cpp`,
+**Files:** `BaySickGraph.h/.cpp`, `PluginProcessor.h/.cpp`, `MixerPage.h/.cpp`,
 `EffectsPage.cpp`, `StandaloneEditor.cpp`, `SharedUI.h/.cpp`, `PagePresetIO.cpp`
 
 - **L13 - "Add" titled menu:** second flat native-style heading right of "Menu"
@@ -573,7 +573,7 @@ shortcut. Held notes release on mode-off, octave shift, and tab switch.
 
 ## 2026-08-04 - QA-Layout T11: instance caps (L18) + two-sixteens drum kit (D3)
 
-**Files:** `VibesynthConstants.h`, `VibeGraph.h/.cpp`, `PatternManager.h/.cpp`,
+**Files:** `BaySickConstants.h`, `BaySickGraph.h/.cpp`, `PatternManager.h/.cpp`,
 `PluginProcessor.h/.cpp`, `MixerPage.cpp`, `EffectsPage.cpp`, `BuilderPage.cpp`,
 `StandaloneEditor.h/.cpp`, `DrumKitGrid.h/.cpp`
 
@@ -586,7 +586,7 @@ shortcut. Held notes release on mode-off, octave shift, and tab switch.
   summing the caps, so pre-existing projects' piano-roll routing is invalidated
   once.
 - **Literal sweep:** every stale range-check literal replaced with the
-  constants - VibeGraph prefix/friendly/defaultSendTo tables + pushScArrayToStrip
+  constants - BaySickGraph prefix/friendly/defaultSendTo tables + pushScArrayToStrip
   (+16/+50), MixerPage color/route/aux checks, EffectsPage aux dropdown (16->18)
   + audio dropdown (450->500), PatternManager ownerCategory (Vox 606 / Inst 706
   were stale BUGS below the real strip counts), BuilderPage group-assign +
@@ -605,11 +605,11 @@ shortcut. Held notes release on mode-off, octave shift, and tab switch.
 
 ---
 
-## 2026-08-04 - QA-Layout T7: real floors + Harmless four-column rework + VibePlayer knobs + pedal tile grids
+## 2026-08-04 - QA-Layout T7: real floors + Harmless four-column rework + BaySickPlayer knobs + pedal tile grids
 
 **Files:** `WorkspaceWindow.h/.cpp`, `StandaloneEditor.h/.cpp`, `EffectWindows.h/.cpp`,
 `EffectRack.h`, `EffectPresetIO.cpp`, `EffectEditorPanels.cpp`,
-`Harmless/HarmlessEditor.h/.cpp`, `VibePlayer/VibePlayerEditor.cpp`
+`Harmless/HarmlessEditor.h/.cpp`, `BaySickPlayer/BaySickPlayerEditor.cpp`
 
 - **Real floors (Jeff's approved sizing map, full-window dims):** the diag-era
   120x80 free-for-all is over - WorkspaceWindow's setMinimumSize body restored,
@@ -641,7 +641,7 @@ shortcut. Held notes release on mode-off, octave shift, and tab switch.
   filter-offset/part-mask stack inside Timbre is dissolved - those four knobs
   sit inline at full size in the full-width row instead of shrinking to ~12px.
   Part A/B dual-bind + rebindToPart untouched.
-- **VibePlayer (L15/Specific-1): kKnobSz 55 -> 18** with the knob+label stack
+- **BaySickPlayer (L15/Specific-1): kKnobSz 55 -> 18** with the knob+label stack
   now vertically centered per cell; routing-arrow centers follow the same math.
 - **Pedal tiles (Specific-4):** every pedal-capable panel now has a
   PanelMode::Pedal branch - a shared pedalTileGrid (generalizing the
@@ -769,7 +769,7 @@ shortcut. Held notes release on mode-off, octave shift, and tab switch.
   single click inside them.  `VKnob`-based controls never noticed (a VKnob
   listens to its own slider and tags it `vknob_slider` so the global handler
   skips it), which is why the effect panels and pedals kept working; every
-  `VibeSlider` went dark, because VibeSlider swallows the right-click on
+  `BaySickSlider` went dark, because BaySickSlider swallows the right-click on
   purpose and depends entirely on that listener to raise the menu.  That cost
   the players and the mixer strips their Automate menu, silently, since the
   shell landed.  Each `WorkspaceWindow` now owns a `GlobalAutoRightClick` and
@@ -796,7 +796,7 @@ shortcut. Held notes release on mode-off, octave shift, and tab switch.
   with no marker -- the tooltip carries the LIVE values above the legend and is
   rebuilt whenever a value changes.  Hover always yields the full numbers.
 - **Tooltips promoted to a single desktop window (Jeff-reported, 2026-08-04) -
-  another QA-ModelShell z-order regression.**  `VibeTooltip` was constructed
+  another QA-ModelShell z-order regression.**  `BaySickTooltip` was constructed
   with the editor as its parent, and JUCE's `displayTipInternal` forks on that:
   with a parent it positions inside the parent and DRAWS THERE; parentless it
   goes through `addToDesktop`.  A native child peer always renders above
@@ -884,7 +884,7 @@ shortcut. Held notes release on mode-off, octave shift, and tab switch.
   row (wrapping to two steals height from the envelope graph, which is the one
   thing that box exists to enlarge).
 - **Snap + grid** now use the app's unified divisions from
-  `VibesynthConstants.h`, triplets included -- this was the one place in the app
+  `BaySickConstants.h`, triplets included -- this was the one place in the app
   a triplet could not be snapped to.  Segment counts derive from
   `snapDivToTicks` so they cannot drift.  The grid follows the SELECTED division
   via `gridLadderForSnap` instead of a fixed 32 lines, so every snap target

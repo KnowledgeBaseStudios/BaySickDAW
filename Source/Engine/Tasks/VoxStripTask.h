@@ -5,9 +5,9 @@
 #include "../RenderTask.h"
 #include "../BlockContext.h"
 
-class VibeGraph;
+class BaySickGraph;
 class ISidechainEngine;
-class VibeSynthProcessor;
+class BaySickDAWProcessor;
 class BaySickVocalProcessor;
 
 // VoxStripTask
@@ -30,7 +30,7 @@ class BaySickVocalProcessor;
 //   4. SC predecessor pull -> ISidechainEngine push.
 //   5. engine.processBlock(blockView, voxPageMidi[index]) -- corrector +
 //      WET tap on the live stream, then the monitor merge, then rack + NAM.
-//   6. VibeGraph::processInsert(Vox, index, ...).
+//   6. BaySickGraph::processInsert(Vox, index, ...).
 //   7. No-overlap tail: armed && !listen writes silence to mOutputBuffer
 //      (capture happened; don't route).  Overlap blocks skip this -- the
 //      engine's muteLive already handled it.
@@ -40,8 +40,8 @@ public:
     VoxStripTask (juce::AudioProcessor* engine,
                   int                   index,
                   int                   channelIdIn,
-                  VibeGraph&            graph,
-                  VibeSynthProcessor&   processor);
+                  BaySickGraph&            graph,
+                  BaySickDAWProcessor&   processor);
 
     void run() override;
 
@@ -50,8 +50,8 @@ private:
     ISidechainEngine*      mScEngine      = nullptr;   // cached dynamic_cast
     BaySickVocalProcessor* mVocalEngine   = nullptr;   // cached dynamic_cast
     int                    mIndex         = 0;
-    VibeGraph*             mGraph         = nullptr;
-    VibeSynthProcessor*    mProcessor     = nullptr;
+    BaySickGraph*             mGraph         = nullptr;
+    BaySickDAWProcessor*    mProcessor     = nullptr;
     juce::String           mPrefix;   // "mixer_vox_<i>"
 
     // Strip param pointers, resolved LAZILY on first successful lookup -- never

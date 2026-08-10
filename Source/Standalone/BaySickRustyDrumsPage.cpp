@@ -62,7 +62,7 @@ juce::String BaySickRustyDrumsPage::getEngineType() const
                : juce::String (programLabel (mCurrentProgram));
 }
 
-BaySickRustyDrumsPage::BaySickRustyDrumsPage (VibeSynthProcessor& p)
+BaySickRustyDrumsPage::BaySickRustyDrumsPage (BaySickDAWProcessor& p)
     : mProcessor (p)
 {
     // QA-ProjectSave Task 11: wire dirty-listener pointers (the listener
@@ -734,7 +734,7 @@ void BaySickRustyDrumsPage::tearDownCurrentProgram()
 
     // QA-DispatcherAffinity Task 3 (2026-05-29): the piano-roll clear that
     // was previously inline here moved into
-    // VibeSynthProcessor::destroyBaySickRustyDrums (called below via
+    // BaySickDAWProcessor::destroyBaySickRustyDrums (called below via
     // mProcessor.destroyBaySickRustyDrums()).  Single source of truth for
     // "destroy Rusty completely" so the tab-delete path inherits the same
     // behavior automatically -- previously the tab-delete path's

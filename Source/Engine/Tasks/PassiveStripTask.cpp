@@ -1,5 +1,5 @@
 #include "PassiveStripTask.h"
-#include "../../VibeGraph.h"
+#include "../../BaySickGraph.h"
 #include "../../PluginProcessor.h"
 #include "../SidechainPullHelper.h"   // pullSidechainPredecessorsToGraph
 #include "SendSourceRead.h"           // post-fader output vs pre-fader send tap
@@ -7,8 +7,8 @@
 PassiveStripTask::PassiveStripTask (Kind                kind,
                                     int                 auxOrBusIndex,
                                     int                 channelIdIn,
-                                    VibeGraph&          graph,
-                                    VibeSynthProcessor& processor)
+                                    BaySickGraph&          graph,
+                                    BaySickDAWProcessor& processor)
     : mKind (kind),
       mIndex (auxOrBusIndex),
       mGraph (&graph),
@@ -66,12 +66,12 @@ void PassiveStripTask::run()
     {
         // Aux strips reuse the standard insert chain (polarity → preEq →
         // width → rack → postEq → fader × mute × solo → PDC → peak).
-        mGraph->processInsert (VibeGraph::InsertKind::Aux, mIndex,
+        mGraph->processInsert (BaySickGraph::InsertKind::Aux, mIndex,
                                blockView, mCtx->bpm, mCtx->anySolo);
     }
     else   // Kind::Bus
     {
-        // 2026-05-06 (Batch 9b): unified bus DSP via VibeGraph::processBus.
+        // 2026-05-06 (Batch 9b): unified bus DSP via BaySickGraph::processBus.
         // Predecessors have been summed into blockView above; processBus runs
         // the per-bus chain (preEq → rack → postEq → polarity/width → fader
         // × mute × solo → pan → peak meter) in-place.  Caller is responsible

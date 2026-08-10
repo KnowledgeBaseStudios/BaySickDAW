@@ -6,9 +6,9 @@
 #include "../BlockContext.h"
 #include "IdleSuspendFade.h"
 
-class VibeGraph;
+class BaySickGraph;
 class ISidechainEngine;
-class VibeSynthProcessor;
+class BaySickDAWProcessor;
 
 // InstStripTask
 // -------------
@@ -35,19 +35,19 @@ class VibeSynthProcessor;
 //      monitored).
 //   6. SC predecessor pull -> ISidechainEngine push.
 //   7. engine.processBlock(blockView, instPageMidi[index]).
-//   8. VibeGraph::processInsert(Inst, index, ...).
+//   8. BaySickGraph::processInsert(Inst, index, ...).
 //   9. Listen gate (no-overlap live case) -> silence if monitor off.
 //
 // QA-Ef (2026-05-21): this is the live audio plumbing.  Dry-recorder tap is
-// wired via VibeSynthProcessor::tapDryRecorder (see ::run).
+// wired via BaySickDAWProcessor::tapDryRecorder (see ::run).
 class InstStripTask : public RenderTask
 {
 public:
     InstStripTask (juce::AudioProcessor* engine,
                    int                   index,
                    int                   channelIdIn,
-                   VibeGraph&            graph,
-                   VibeSynthProcessor&   processor);
+                   BaySickGraph&            graph,
+                   BaySickDAWProcessor&   processor);
 
     void run() override;
 
@@ -55,8 +55,8 @@ private:
     juce::AudioProcessor* mEngine    = nullptr;
     ISidechainEngine*     mScEngine  = nullptr;   // cached dynamic_cast
     int                   mIndex     = 0;
-    VibeGraph*            mGraph     = nullptr;
-    VibeSynthProcessor*   mProcessor = nullptr;
+    BaySickGraph*            mGraph     = nullptr;
+    BaySickDAWProcessor*   mProcessor = nullptr;
     juce::String          mPrefix;   // "mixer_inst_<i>"
 
     // Strip param pointers, resolved LAZILY on first successful lookup -- never

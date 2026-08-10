@@ -27,7 +27,7 @@ namespace
     }
 }
 
-PluginsPage::PluginsPage (VibeSynthProcessor& p, int pageIndex)
+PluginsPage::PluginsPage (BaySickDAWProcessor& p, int pageIndex)
     : mProcessor (p), mPageIndex (pageIndex)
 {
     mTabName   = "Plugin " + juce::String (pageIndex + 1);

@@ -22,7 +22,7 @@ class BaySickVocalProcessor;
 //   - Shared time ruler above the 3-lane stack.
 //   - Lanes: Leader (Bass green) / Follower (Vox teal) / Output (Drums red),
 //     channel pickers on the Leader + Follower headers, composite waveforms
-//     from VibeSynthProcessor::renderChannelComposite (via processor hooks).
+//     from BaySickDAWProcessor::renderChannelComposite (via processor hooks).
 //   - Sync Points strip (between Leader + Follower): click to place, drag
 //     either side's handle, right-click delete, "Automatic Sync Points" seed.
 //   - Protected Areas strip (between Follower + Output): drag-create,

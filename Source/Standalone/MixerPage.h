@@ -40,7 +40,7 @@ class MixerPage : public juce::Component,
                   private juce::ScrollBar::Listener
 {
 public:
-    MixerPage(VibeSynthProcessor& processor, PatternManager& pm);
+    MixerPage(BaySickDAWProcessor& processor, PatternManager& pm);
     ~MixerPage() override;
 
     void paint  (juce::Graphics&) override;
@@ -158,7 +158,7 @@ public:
     void addAudioChannel(int row,   const juce::String& name);  // one strip per arrangement row
 
     // 5F-4b B2: create an aux strip at the next available index (0..15).
-    // Called by the "Add Mixer Strip" button. Registers the aux in VibeGraph + APVTS.
+    // Called by the "Add Mixer Strip" button. Registers the aux in BaySickGraph + APVTS.
     void addAuxChannel();
     // 5F-4b B7: create an aux strip at a specific index (for restoring saved projects).
     void addAuxChannelAtIndex(int idx);
@@ -300,7 +300,7 @@ public:
 private:
     // R2: shared popup-menu helper for Vox + Inst Arm-LED clicks.
     void showInputChannelPicker(int channelId);
-    VibeSynthProcessor& mProcessor;
+    BaySickDAWProcessor& mProcessor;
     PatternManager&     mPM;
 
     // ── Fixed left panel: Master strip ────────────────────────────────────────

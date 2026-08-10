@@ -89,7 +89,7 @@ private:
     // uniform 4-beat-per-bar -- song-level time-signature markers are
     // decorative there, and only a PATTERN owns a real signature.  The block's
     // playback window is computed in that same uniform domain
-    // (VibeSynthProcessor::processBlock, effectiveStartBars/effectiveLengthBars),
+    // (BaySickDAWProcessor::processBlock, effectiveStartBars/effectiveLengthBars),
     // so deriving this from a marker would make the ruler, gridlines and snap
     // disagree with where the automation actually plays.
     static constexpr int kBeatsPerBar = 4;
@@ -216,7 +216,7 @@ class EventEditorContent : public juce::Component,
                            private juce::Timer
 {
 public:
-    EventEditorContent(VibeSynthProcessor& p, juce::UndoManager& um);
+    EventEditorContent(BaySickDAWProcessor& p, juce::UndoManager& um);
     ~EventEditorContent() override;
 
     // QA-UndoCoverage Task 5 (12-iii): route lane edits + undo/redo through
@@ -263,7 +263,7 @@ public:
     EEAutomationGrid* getGrid() { return mGrid.get(); }
 
 private:
-    VibeSynthProcessor& mProcessor;
+    BaySickDAWProcessor& mProcessor;
     juce::UndoManager&  mUM;
     UndoContext         mCtx;
     void performViaCtx (const juce::String& label, juce::UndoableAction* action);
@@ -334,7 +334,7 @@ private:
 class EventEditor : public juce::DocumentWindow
 {
 public:
-    EventEditor(VibeSynthProcessor& p, juce::UndoManager& um,
+    EventEditor(BaySickDAWProcessor& p, juce::UndoManager& um,
                 PatternManager* pm, int blockIdx,
                 const juce::String& title = "Event Editor");
     ~EventEditor() override;

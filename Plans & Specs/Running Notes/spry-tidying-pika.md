@@ -141,6 +141,94 @@ handle, because `BaySickSynthProcessor` is already the BaySickSynth engine's
 processor and that collision is the reason the name was worth fixing at all.
 All spec calls for this batch are now closed.
 
+## 2026-08-10 - Task 0 - Pending QA-Soundness commit landed
+
+Commit `485499ae`, 43 files, tree clean afterwards. Contents: the 17-ruling fix
+pass, engine gain staging (Synth/Bass -12 dB, Harmless -6 dB, sqrt-N unison
+normalization), the NAMIR IR path-resolution fixes, the Phase 6 doc collapse,
+and this batch's plan + notes pair. Staged by name, not `git add -A`.
+
+One mechanical note for next time: `Assets/big_rusty_drums.svg` was already
+staged as a deletion, and `git add` on a deleted path fails with
+"pathspec did not match any files" because the file is gone from the working
+tree. Already-staged deletions need no re-add.
+
+## 2026-08-10 - Task 1 - Full `Vibe*` rename executed
+
+**13 file/folder moves, all via `git mv` so history follows:**
+`Source/VibePlayer/` -> `Source/BaySickPlayer/` plus its 7 files,
+`VibeGraph.h/.cpp` -> `BaySickGraph.h/.cpp`,
+`Engine/VibeThreadPool.h/.cpp` -> `Engine/BaySickThreadPool.h/.cpp`,
+`VibesynthConstants.h` -> `BaySickConstants.h`.
+
+**Substitution: 169 files changed, 1,711 identifiers replaced.** Higher than
+the ~1,548 pre-flight estimate because the estimate counted `Source/` +
+`CMakeLists.txt` only; the 20 System Reference docs carried the rest.
+
+**Method - whole-identifier anchoring, and why it mattered.** Every one of the
+24 identifiers was replaced through a `\b<name>\b` regex, never a bare `Vibe`
+substring. Two reasons, both load-bearing:
+
+1. **The Tape knob.** All 7 bare `Vibe` occurrences in the tree are the Tape
+   effect's user-facing **Vibe** control. A substring sweep would have renamed
+   the knob AND left `mTapeVibe` / `tape_vibe` / `"vibe"` half-renamed, breaking
+   its saved parameter values silently.
+2. **Prefix collisions.** `\bVibePlayer\b` correctly does NOT match inside
+   `VibePlayerProcessor`, and `\bVibeGraph\b` does not match inside
+   `VibeGraphInsertKindBridge`, so the map needed no ordering discipline.
+
+**Verified post-substitution:**
+- `grep -rnE "\bVibe[A-Za-z]*\b|\bVibesynth[A-Za-z]*\b" Source CMakeLists.txt`
+  returns exactly the 7 Tape-knob hits and nothing else.
+- `find Source -iname "*vibe*"` returns nothing.
+- The System Reference residual is 2 hits, both legitimate references to the
+  Tape Vibe knob (`Effect Modules.md:298`, `MANUAL-1 Screenshot List.md:1682`).
+- No `BaySickDAWProcessor` / `BaySickSynthProcessor` collision: the app
+  processor is `PluginProcessor.h:128`, the engine is
+  `BaySickSynthProcessor.h:16`, and 20 forward declarations resolved to the
+  correct one.
+- `"BaySickRackStates"` landed at all 7 sites (SC-9), and the three XML-shape
+  comments that describe the node were updated with it.
+
+**Historical docs untouched**, per SC-2: Implemented Work Log, Previously
+Implemented, Running Notes for closed batches, and closed Batch Plans all keep
+the names they were written with.
+
+**Anchoring proof, unplanned but useful.** 20 System Reference files matched the
+`Vibe*` grep; only 18 changed. The two that did not
+(`Effect Modules.md`, `MANUAL-1 Screenshot List.md`) contain ONLY the Tape
+effect's `Vibe` knob. That is the anchoring working exactly as intended, with no
+manual exclusion list needed.
+
+**Build gate: GREEN.** Six exit codes at 0, four correct link lines
+(Release + Debug `BaySickDAW.exe`, `BaySickPluginHost64.exe`,
+`BaySickPluginHost32.exe`), zero `error C|LNK|MSB`.
+
+### FINDING - the "warnings are already at zero" claim was wrong
+
+The batch plan's Context table originally said the QA-Cleanup-1 warning sweep
+"already reads 0 for C4702 / C4189 / C4505." That reading came from an
+**incremental** `build_log.txt` in which those translation units were never
+recompiled, so their warnings simply were not in the log.
+
+The rename touched effectively every header, which forced a genuine full
+rebuild, and four real sites appeared:
+
+| Warning | Site |
+|---|---|
+| C4702 unreachable code | `Source/BaySickPlayer/BaySickPlayerEditor.cpp:623` |
+| C4702 unreachable code | `Source/SampleLibrary.cpp:106` |
+| C4189 unused local `cx` | `Source/BaySickSynth/BaySickVisualizerScreen.cpp:144` |
+| C4189 unused local `hw` | `Source/BaySickSynth/BaySickVisualizerScreen.cpp:146` |
+
+C4505 is genuinely 0. None of the four is caused by the rename - a
+whole-identifier substitution cannot create unreachable code or orphan a local.
+They were always there and the incremental log was hiding them.
+
+Plan corrected in place (Context table now states the incremental-log error) and
+the four sites added as **Task 4b**. Lesson worth keeping: a warning count from
+an incremental build is not evidence of absence, only of not-recompiled.
+
 ### State at open
 
 41 dirty paths in the working tree, all QA-Soundness follow-up work (the

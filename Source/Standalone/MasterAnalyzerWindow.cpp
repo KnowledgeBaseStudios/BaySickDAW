@@ -26,7 +26,7 @@ namespace
     }
 }
 
-MasterAnalyzerView::MasterAnalyzerView (VibeSynthProcessor& proc)
+MasterAnalyzerView::MasterAnalyzerView (BaySickDAWProcessor& proc)
     : mProc (proc),
       mFft (kFftOrder),
       mWindow ((size_t) kFftSize, juce::dsp::WindowingFunction<float>::hann)

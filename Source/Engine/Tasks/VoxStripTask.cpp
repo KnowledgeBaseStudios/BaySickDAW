@@ -1,7 +1,7 @@
 #include "VoxStripTask.h"
 #include "../FrozenSourceRead.h"   // TS7 6.8: scope-matched frozen block read
 #include "../ChannelBufferArena.h"   // kChannelsPerStrip (scratch pre-size)
-#include "../../VibeGraph.h"
+#include "../../BaySickGraph.h"
 #include "../../PluginProcessor.h"
 #include "../../DSP/EngineSidechainHelper.h"
 #include "../../BaySickVocal/BaySickVocalProcessor.h"
@@ -10,8 +10,8 @@
 VoxStripTask::VoxStripTask (juce::AudioProcessor* engine,
                             int                   index,
                             int                   channelIdIn,
-                            VibeGraph&            graph,
-                            VibeSynthProcessor&   processor)
+                            BaySickGraph&            graph,
+                            BaySickDAWProcessor&   processor)
     : mEngine (engine),
       mScEngine (dynamic_cast<ISidechainEngine*> (engine)),
       mVocalEngine (dynamic_cast<BaySickVocalProcessor*> (engine)),
@@ -90,7 +90,7 @@ void VoxStripTask::run()
 
     // 2026-05-06 (Batch 9b Item 9): FilePlay -- audio clips routed to this Vox
     // engine (player.routeChannel == channelId).  Gates mirror the pre-scan in
-    // VibeSynthProcessor::processBlock (song mode + playing + pattern manager).
+    // BaySickDAWProcessor::processBlock (song mode + playing + pattern manager).
     // mCurrentBlockClipSnapshot is captured at the top of the audio callback
     // BEFORE the dispatcher fires this task and stays alive for the whole
     // block via the RetirementQueue ack protocol (Batch 9c B1).
@@ -106,7 +106,7 @@ void VoxStripTask::run()
     // QA-MultiBlockHazard (Task 2): one decode sum per block so a stateful
     // engine + rack advance once per block, not once per FilePlay clip.
     // Used by the pure-playback branch AND the QA-Fb armed-monitor merge.
-    VibeSynthProcessor::AudioClipBlockContext clipCtx;
+    BaySickDAWProcessor::AudioClipBlockContext clipCtx;
     bool anyClip = false;
     auto decodeRoutedClips = [&]()
     {
@@ -184,7 +184,7 @@ void VoxStripTask::run()
                                    mEngineScratch.getNumChannels());
         for (int c = 0; c < nc; ++c)
             blockView.copyFrom (c, 0, mEngineScratch, c, 0, n);
-        mGraph->processInsert (VibeGraph::InsertKind::Vox, mIndex,
+        mGraph->processInsert (BaySickGraph::InsertKind::Vox, mIndex,
                                blockView, mCtx->bpm, mCtx->anySolo);
         return;
     }
@@ -285,11 +285,11 @@ void VoxStripTask::run()
     pullSidechainPredecessorsToGraph (*mGraph, channelId, mPredecessors, n);
     if (mScEngine != nullptr)
     {
-        const VibeGraph::ScRecvArray scArr = mGraph->getScRecvArray (channelId);
-        juce::AudioBuffer<float>* scBufs[VibeGraph::kMaxScRecvSlots] = {};
-        for (int i = 0; i < VibeGraph::kMaxScRecvSlots; ++i)
+        const BaySickGraph::ScRecvArray scArr = mGraph->getScRecvArray (channelId);
+        juce::AudioBuffer<float>* scBufs[BaySickGraph::kMaxScRecvSlots] = {};
+        for (int i = 0; i < BaySickGraph::kMaxScRecvSlots; ++i)
             scBufs[i] = scArr[(size_t) i];
-        mScEngine->setSidechainBuffers (scBufs, VibeGraph::kMaxScRecvSlots);
+        mScEngine->setSidechainBuffers (scBufs, BaySickGraph::kMaxScRecvSlots);
     }
 
     // ── Engine + insert chain ─────────────────────────────────────────────────
@@ -328,7 +328,7 @@ void VoxStripTask::run()
         }
     }
 
-    mGraph->processInsert (VibeGraph::InsertKind::Vox, mIndex,
+    mGraph->processInsert (BaySickGraph::InsertKind::Vox, mIndex,
                            blockView, mCtx->bpm, mCtx->anySolo);
 
     // ── Listen gate ───────────────────────────────────────────────────────────

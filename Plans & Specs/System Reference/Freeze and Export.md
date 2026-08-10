@@ -18,7 +18,7 @@ Its three consumers differ only in what they do with each rendered block:
 `renderFreezeFile` taps one strip. It is never copied.
 
 **Rendering is the live processor rendering itself** - there is no second copy of
-the project. `VibeSynthProcessor::beginOfflineRender` suspends the audio device
+the project. `BaySickDAWProcessor::beginOfflineRender` suspends the audio device
 (so the render loop becomes the only caller of `processBlock`), sweeps every
 engine into non-realtime mode, resets the graph, and re-prepares everything at the
 render's sample rate. `endOfflineRender` reverses all of it and clears the

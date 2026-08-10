@@ -32,13 +32,13 @@ chain with the sfizz stage absent.
 
 **Ownership.** Unlike most engines, the sfizz trio (Guitars, Basses, RustyDrums)
 is **processor-owned**, not owned by `EngineRig` - it lives in
-`VibeSynthProcessor` and is reached through `getBaySickGuitars(pageIndex)`. The
+`BaySickDAWProcessor` and is reached through `getBaySickGuitars(pageIndex)`. The
 page never caches the pointer; every call re-queries, because a kit load can
 replace the instance. Teardown order matters: `rig.removeTab` must run **before**
 `destroyBaySickGuitars`, because the rig-owned chain holds the spliced sfizz
 stage pointer.
 
-**Kit loading** (`VibeSynthProcessor::loadBaySickGuitarsKit`):
+**Kit loading** (`BaySickDAWProcessor::loadBaySickGuitarsKit`):
 
 1. Clear the tab's active flag and the engine's own processing gate.
 2. Raise the host processBlock shield and settle the audio thread, so no render

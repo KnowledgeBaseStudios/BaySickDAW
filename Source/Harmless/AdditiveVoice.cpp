@@ -298,7 +298,7 @@ void AdditiveVoice::cutFast() noexcept
     // idle (renderNextBlock clears it).  startNote re-applies mAmpParams, so the
     // override never leaks into the next note on this voice.
     auto quick = mAmpParams;
-    quick.release = 0.0015f;   // ~1.5 ms (matches the VibePlayer voice-steal fade)
+    quick.release = 0.0015f;   // ~1.5 ms (matches the BaySickPlayer voice-steal fade)
     mAmpADSR.setParameters (quick);
     mAmpADSR.noteOff();
     mFltADSR1.noteOff();

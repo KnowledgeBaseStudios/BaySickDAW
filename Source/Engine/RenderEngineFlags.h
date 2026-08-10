@@ -11,7 +11,7 @@
 // QA-Ef (2026-05-21): the serial render path was deleted and the dispatcher
 // became the single, unconditional render path.  The flag now gates the
 // WORKER THREADS, not the audio thread: workers acquire-load it at the top
-// of VibeThreadPool::workerLoop and either run the graph in parallel (true)
+// of BaySickThreadPool::workerLoop and either run the graph in parallel (true)
 // or park immediately (false) so the audio thread drains the entire graph
 // itself via runUntilOrTimeout -- genuine serial execution through the
 // IDENTICAL dispatcher / task code, no duplicate path.  Flipping at runtime
@@ -22,7 +22,7 @@
 namespace RenderEngine
 {
     // Master switch for render-engine parallelism.  Read by the worker threads
-    // (acquire) in VibeThreadPool::workerLoop; written by the message thread
+    // (acquire) in BaySickThreadPool::workerLoop; written by the message thread
     // (release) from the Mixer "Multi-core Rendering" toggle.
     //
     //   true   -> worker threads run the render graph in parallel (production
@@ -81,7 +81,7 @@ namespace RenderEngine
     // from tripping on ordinary scheduler jitter -- 100 ms, which is the old
     // constant, so nothing changes at Jeff's 128 -- and the ceiling keeps a
     // huge buffer from stalling the audio thread for longer than that on a
-    // real deadlock.  Same shape as VibeSynthProcessor::settleAudioThread.
+    // real deadlock.  Same shape as BaySickDAWProcessor::settleAudioThread.
     inline constexpr double kWatchdogBlockPeriods = 32.0;
     inline constexpr double kWatchdogMinMillis    = 100.0;
     inline constexpr double kWatchdogMaxMillis    = 1000.0;

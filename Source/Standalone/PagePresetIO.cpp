@@ -2,7 +2,7 @@
 #include "../AppPaths.h"
 #include "../PluginProcessor.h"
 #include "../SampleLibrary.h"
-#include "../VibeGraph.h"
+#include "../BaySickGraph.h"
 #include "EnginePrefixUtil.h"
 
 namespace PagePresetIO
@@ -37,7 +37,7 @@ namespace PagePresetIO
 
     static juce::String insertKindString (PageKind k)
     {
-        // Maps to the "kind" string used by VibeGraph::saveRackStates /
+        // Maps to the "kind" string used by BaySickGraph::saveRackStates /
         // applyRackStates for InsertRack records.  Clip pages are bound
         // to Audio inserts, so they share the "Audio" kind.
         switch (k)
@@ -280,7 +280,7 @@ namespace PagePresetIO
     // Strip params capture / apply
     // ─────────────────────────────────────────────────────────────────────────
     static void captureStripParams (juce::XmlElement& parent,
-                                     VibeSynthProcessor& processor,
+                                     BaySickDAWProcessor& processor,
                                      const juce::String& stripPrefix)
     {
         auto* stripEl = parent.createNewChildElement ("Strip");
@@ -307,7 +307,7 @@ namespace PagePresetIO
     // preset can be loaded onto Layer 3.  Single-strip pages pass a one-
     // entry array; multi-strip pages (Rusty) pass the full list and the
     // loader matches each <Strip> to its prefix-mapped destination.
-    static void applyStripParams (VibeSynthProcessor& processor,
+    static void applyStripParams (BaySickDAWProcessor& processor,
                                    const juce::XmlElement& stripsEl,
                                    const juce::StringArray& destStripPrefixes,
                                    std::function<bool (int channelId)> isChannelActive)
@@ -406,7 +406,7 @@ namespace PagePresetIO
     // Insert + bus rack capture / apply
     // ─────────────────────────────────────────────────────────────────────────
     static void captureRacks (juce::XmlElement& parent,
-                               VibeSynthProcessor& processor,
+                               BaySickDAWProcessor& processor,
                                const PageChainConfig& cfg)
     {
         juce::ValueTree allRacks ("RackStates");
@@ -447,7 +447,7 @@ namespace PagePresetIO
         }
     }
 
-    static void applyRacks (VibeSynthProcessor& processor,
+    static void applyRacks (BaySickDAWProcessor& processor,
                              const juce::XmlElement& racksEl,
                              const PageChainConfig& cfg,
                              int destInsertIndexOverride /* -1 = use saved index */)
@@ -489,7 +489,7 @@ namespace PagePresetIO
     // ─────────────────────────────────────────────────────────────────────────
     // Public new struct-based API
     // ─────────────────────────────────────────────────────────────────────────
-    juce::String exportPagePreset (VibeSynthProcessor& processor,
+    juce::String exportPagePreset (BaySickDAWProcessor& processor,
                                     PageKind kind,
                                     const PageChainConfig& cfg)
     {
@@ -522,7 +522,7 @@ namespace PagePresetIO
         return root.toString (juce::XmlElement::TextFormat().singleLine());
     }
 
-    bool importPagePreset (VibeSynthProcessor& processor,
+    bool importPagePreset (BaySickDAWProcessor& processor,
                             PageKind kind,
                             const PageChainConfig& cfg,
                             const juce::String& xml)
@@ -766,7 +766,7 @@ namespace PagePresetIO
     // Legacy single-engine + single-strip API.  Implemented as a thin wrapper
     // around the new struct-based API so both write the same XML format.
     // ─────────────────────────────────────────────────────────────────────────
-    juce::String exportPagePreset (VibeSynthProcessor& processor,
+    juce::String exportPagePreset (BaySickDAWProcessor& processor,
                                     PageKind kind,
                                     int pageIndex,
                                     const juce::String& stripApvtsPrefix,
@@ -805,7 +805,7 @@ namespace PagePresetIO
         return xml;
     }
 
-    juce::String importPagePreset (VibeSynthProcessor& processor,
+    juce::String importPagePreset (BaySickDAWProcessor& processor,
                                     PageKind kind,
                                     int pageIndex,
                                     const juce::String& stripApvtsPrefix,

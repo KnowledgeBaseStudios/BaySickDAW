@@ -4,7 +4,7 @@
 #include <vector>
 
 class PatternManager;
-class VibeSynthProcessor;
+class BaySickDAWProcessor;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // ProjectBundler - QA-Export Task 4.
@@ -77,7 +77,7 @@ namespace ProjectBundler
     // base64 engine-state blobs that have to be decoded.  Passing nullptr limits
     // the result to PatternManager references (the pre-2026-07-26 behaviour).
     //
-    // `rackStatesXml`, when supplied, is a VibeGraph::saveRackStates snapshot.
+    // `rackStatesXml`, when supplied, is a BaySickGraph::saveRackStates snapshot.
     // Effects that hold user files (the Acoustic units' user IRs) can sit in
     // any bus or insert rack, and those live under project.xml's <Processor>
     // rather than <Tabs> -- without this the walk never sees them.
@@ -85,7 +85,7 @@ namespace ProjectBundler
     // Non-const PatternManager only because getBlock() has no const overload;
     // this reads and never mutates.
     std::vector<Reference> enumerate (PatternManager& pm,
-                                      const VibeSynthProcessor& processor,
+                                      const BaySickDAWProcessor& processor,
                                       const juce::XmlElement* tabsXml = nullptr,
                                       const juce::XmlElement* rackStatesXml = nullptr);
 

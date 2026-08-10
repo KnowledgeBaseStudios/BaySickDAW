@@ -421,7 +421,7 @@ BaySickVocalProcessor::BaySickVocalProcessor (juce::UndoManager* undoMgr)
 // ─── Destructor ───────────────────────────────────────────────────────────────
 // 2026-05-06 (Batch 9c N1): audio-thread shutdown safety net.  Owners should
 // ideally pre-flag teardown via setShuttingDown(true) and then wait out the
-// in-flight block via VibeSynthProcessor::settleAudioThread() (which waits for
+// in-flight block via BaySickDAWProcessor::settleAudioThread() (which waits for
 // two acknowledged block boundaries -- a fixed sleep cannot be correct at every
 // buffer size) so the audio thread sees the flag before any member starts
 // dying.  Setting it here as well so we still bail
@@ -684,7 +684,7 @@ void BaySickVocalProcessor::processBlock (juce::AudioBuffer<float>& buffer,
     // 2026-05-06 (Batch 9c N1): audio-thread shutdown gate.  Bail BEFORE
     // touching any members (apvts, mScHelper, mNamIrProc, mVocalChainRack)
     // so a teardown-in-progress doesn't race a half-destroyed member access.
-    // Mirrors VibeSynthProcessor::mProjectLoadInProgress check at the top
+    // Mirrors BaySickDAWProcessor::mProjectLoadInProgress check at the top
     // of its processBlock.
     if (mShuttingDown.load (std::memory_order_acquire))
     {

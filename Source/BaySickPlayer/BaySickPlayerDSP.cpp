@@ -1,4 +1,4 @@
-#include "VibePlayerDSP.h"
+#include "BaySickPlayerDSP.h"
 #include "../MissingFileReport.h"
 #include <cmath>
 #include <cctype>
@@ -7,16 +7,16 @@
 #include <string>    // std::stoi, std::string
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  VibeSampleManager
+//  BaySickSampleManager
 // ─────────────────────────────────────────────────────────────────────────────
 
-VibeSampleManager::VibeSampleManager()
+BaySickSampleManager::BaySickSampleManager()
 {
     mFormatManager.registerBasicFormats(); // WAV, AIFF, OGG
     std::memset (mRRCounters, 0, sizeof (mRRCounters));
 }
 
-void VibeSampleManager::clear()
+void BaySickSampleManager::clear()
 {
     mRegions.clear();
     mLoadedFolder = juce::File{};
@@ -25,7 +25,7 @@ void VibeSampleManager::clear()
 }
 
 //==============================================================================
-void VibeSampleManager::loadFolder (const juce::File& folder)
+void BaySickSampleManager::loadFolder (const juce::File& folder)
 {
     clear();
     mLoadedFolder = folder;
@@ -44,7 +44,7 @@ void VibeSampleManager::loadFolder (const juce::File& folder)
         auto buf = loadFile (f, mFormatManager, sr);
         if (!buf) continue;
 
-        VibeRegion r;
+        BaySickPlayerRegion r;
         r.sampleFile     = f;
         r.audioData      = buf;
         r.fileSampleRate = sr;
@@ -58,14 +58,14 @@ void VibeSampleManager::loadFolder (const juce::File& folder)
 }
 
 //==============================================================================
-void VibeSampleManager::loadSingleFile (const juce::File& file)
+void BaySickSampleManager::loadSingleFile (const juce::File& file)
 {
     clear();
     mLoadedFolder = file.getParentDirectory();
     double sr = 44100.0;
     auto buf = loadFile (file, mFormatManager, sr);
     if (!buf) return;
-    VibeRegion r;
+    BaySickPlayerRegion r;
     r.sampleFile     = file;
     r.audioData      = buf;
     r.fileSampleRate = sr;
@@ -78,7 +78,7 @@ void VibeSampleManager::loadSingleFile (const juce::File& file)
 }
 
 //==============================================================================
-void VibeSampleManager::loadSFZ (const juce::File& sfzFile)
+void BaySickSampleManager::loadSFZ (const juce::File& sfzFile)
 {
     clear();
     mLoadedFolder = sfzFile.getParentDirectory();
@@ -92,7 +92,7 @@ void VibeSampleManager::loadSFZ (const juce::File& sfzFile)
 // state and are inherited by every <region> that follows until the next
 // same-or-higher scope header.  <control> is orthogonal (default_path only).
 // Comments: // to end of line.
-void VibeSampleManager::parseSFZ (const juce::File& sfzFile)
+void BaySickSampleManager::parseSFZ (const juce::File& sfzFile)
 {
     const juce::File sfzDir = sfzFile.getParentDirectory();
     juce::StringArray lines;
@@ -104,21 +104,21 @@ void VibeSampleManager::parseSFZ (const juce::File& sfzFile)
     {
         Scope scope { Scope::None };
         bool  inControl { false };
-        VibeRegion globalDefaults;
-        VibeRegion masterDefaults;
-        VibeRegion groupDefaults;
-        VibeRegion current;
+        BaySickPlayerRegion globalDefaults;
+        BaySickPlayerRegion masterDefaults;
+        BaySickPlayerRegion groupDefaults;
+        BaySickPlayerRegion current;
 
         // Sub-O scope-priority sw_default init: first-wins per scope.
         // captureExplicitSwDefault writes here when sw_default appears in the
         // opcode stream; getInitialSwLast resolves the priority chain at
-        // end-of-parseSFZ to seed VibeSampleManager::mActiveSwLast.
+        // end-of-parseSFZ to seed BaySickSampleManager::mActiveSwLast.
         int explicitGlobalSwDefault { -1 };
         int explicitMasterSwDefault { -1 };
         int explicitGroupSwDefault  { -1 };
         int firstRegionSwDefault    { -1 };
 
-        void enterGlobal()  { globalDefaults = VibeRegion{};
+        void enterGlobal()  { globalDefaults = BaySickPlayerRegion{};
                               masterDefaults = globalDefaults;
                               groupDefaults  = masterDefaults;
                               scope = Scope::Global;  inControl = false; }
@@ -134,17 +134,17 @@ void VibeSampleManager::parseSFZ (const juce::File& sfzFile)
 
         // Push the current region into the output vector if it has audio data,
         // then reset current.  Safe to call on any header transition.
-        void tryFlushRegion (std::vector<VibeRegion>& regions)
+        void tryFlushRegion (std::vector<BaySickPlayerRegion>& regions)
         {
             if (scope == Scope::Region && current.audioData)
                 regions.push_back (current);
-            current = VibeRegion{};
+            current = BaySickPlayerRegion{};
         }
 
-        // Return pointer to the VibeRegion that subsequent opcodes should write
+        // Return pointer to the BaySickPlayerRegion that subsequent opcodes should write
         // to, based on current scope.  Returns nullptr outside any scope (e.g.
         // bare opcodes before the first header, or while inControl).
-        VibeRegion* currentTarget()
+        BaySickPlayerRegion* currentTarget()
         {
             switch (scope)
             {
@@ -386,7 +386,7 @@ void VibeSampleManager::parseSFZ (const juce::File& sfzFile)
     // Sub-L/N post-parse: populate mIsKeyswitch from the union of
     // sw_lokey..sw_hikey ranges across all loaded regions.  Engine queries
     // isKeyswitchNote(midiNote) on every incoming MIDI note in
-    // VibePlayerProcessor::processBlock to decide whether to dispatch to the
+    // BaySickPlayerProcessor::processBlock to decide whether to dispatch to the
     // synth (playable note) or update keyswitch state (keyswitch note).
     for (const auto& r : mRegions)
     {
@@ -428,7 +428,7 @@ void VibeSampleManager::parseSFZ (const juce::File& sfzFile)
 // readToEOL=true is used for path-type opcodes (sample=, default_path=) whose
 // values may contain spaces - those read to end of line rather than stopping at
 // the first whitespace.
-juce::String VibeSampleManager::sfzOpcode (const juce::String& line, const char* key,
+juce::String BaySickSampleManager::sfzOpcode (const juce::String& line, const char* key,
                                              bool readToEOL)
 {
     const juce::String needle = juce::String (key) + "=";
@@ -453,7 +453,7 @@ juce::String VibeSampleManager::sfzOpcode (const juce::String& line, const char*
 }
 
 //==============================================================================
-int VibeSampleManager::sfzNote (const juce::String& val)
+int BaySickSampleManager::sfzNote (const juce::String& val)
 {
     if (val.isEmpty()) return 60;
 
@@ -467,7 +467,7 @@ int VibeSampleManager::sfzNote (const juce::String& val)
 //==============================================================================
 // Convert SFZ-style note names to MIDI numbers.
 // SFZ standard: C4 = 60.
-int VibeSampleManager::noteNameToMidi (const juce::String& name)
+int BaySickSampleManager::noteNameToMidi (const juce::String& name)
 {
     if (name.isEmpty()) return 60;
 
@@ -499,7 +499,7 @@ int VibeSampleManager::noteNameToMidi (const juce::String& name)
 //==============================================================================
 // Detect root note from filename heuristic.
 // Scans for note name patterns like "A3", "C#4", "Bb2", or bare MIDI numbers.
-int VibeSampleManager::detectRootNote (const juce::String& filename)
+int BaySickSampleManager::detectRootNote (const juce::String& filename)
 {
     // Work in plain ASCII std::string for safe character operations
     const std::string f = filename.toUpperCase().toStdString();
@@ -566,7 +566,7 @@ int VibeSampleManager::detectRootNote (const juce::String& filename)
 
 //==============================================================================
 std::shared_ptr<juce::AudioBuffer<float>>
-VibeSampleManager::loadFile (const juce::File& f,
+BaySickSampleManager::loadFile (const juce::File& f,
                               juce::AudioFormatManager& fmt,
                               double& sampleRateOut)
 {
@@ -593,7 +593,7 @@ VibeSampleManager::loadFile (const juce::File& f,
 }
 
 //==============================================================================
-const VibeRegion* VibeSampleManager::findRegion (int midiNote, int velocity,
+const BaySickPlayerRegion* BaySickSampleManager::findRegion (int midiNote, int velocity,
                                                    int articulationGroup)
 {
     // Gather all candidates matching note + velocity + artic.  Use indices to
@@ -659,24 +659,24 @@ const VibeRegion* VibeSampleManager::findRegion (int midiNote, int velocity,
 }
 
 //==============================================================================
-// SFZ keyswitching API (Sub-N: state lives on VibeSampleManager).
+// SFZ keyswitching API (Sub-N: state lives on BaySickSampleManager).
 // Single-threaded - all calls come from the audio thread (processBlock or the
 // findRegion-adjacent code paths).
 
-bool VibeSampleManager::isKeyswitchNote (int midiNote) const noexcept
+bool BaySickSampleManager::isKeyswitchNote (int midiNote) const noexcept
 {
     if (midiNote < 0 || midiNote > 127) return false;
     return mIsKeyswitch[(size_t) midiNote];
 }
 
-void VibeSampleManager::handleKeyswitchNoteOn (int midiNote) noexcept
+void BaySickSampleManager::handleKeyswitchNoteOn (int midiNote) noexcept
 {
     if (midiNote < 0 || midiNote > 127) return;
     mActiveSwLast = midiNote;          // sw_last: last keyswitch pressed wins
     mSwDownHeld[(size_t) midiNote] = true;
 }
 
-void VibeSampleManager::handleKeyswitchNoteOff (int midiNote) noexcept
+void BaySickSampleManager::handleKeyswitchNoteOff (int midiNote) noexcept
 {
     if (midiNote < 0 || midiNote > 127) return;
     mSwDownHeld[(size_t) midiNote] = false;
@@ -684,7 +684,7 @@ void VibeSampleManager::handleKeyswitchNoteOff (int midiNote) noexcept
     // last-pressed keyswitch remains active until a new one is pressed).
 }
 
-void VibeSampleManager::resetKeyswitchState() noexcept
+void BaySickSampleManager::resetKeyswitchState() noexcept
 {
     mActiveSwLast    = -1;
     mSwDownHeld      = {};
@@ -692,7 +692,7 @@ void VibeSampleManager::resetKeyswitchState() noexcept
     for (auto& s : mKeyswitchLabels) s.clear();
 }
 
-juce::String VibeSampleManager::getKeyswitchLabel (int midiNote) const noexcept
+juce::String BaySickSampleManager::getKeyswitchLabel (int midiNote) const noexcept
 {
     if (midiNote < 0 || midiNote > 127) return {};
     return mKeyswitchLabels[(size_t) midiNote];
@@ -700,21 +700,21 @@ juce::String VibeSampleManager::getKeyswitchLabel (int midiNote) const noexcept
 
 
 // QA-VoicePool Task 2 (2026-05-25): ReversedMemoryAudioSource + new sibling
-// VibeForwardMemoryAudioSource moved to VibePlayerDSP.h so VibeVoice can own
+// BaySickForwardMemoryAudioSource moved to BaySickPlayerDSP.h so BaySickPlayerVoice can own
 // them as direct members for the fat-voice refactor.  No anon-namespace class
-// here; both sources defined alongside VibeSynthSound in the header.
+// here; both sources defined alongside BaySickPlayerSound in the header.
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  VibeVoice
+//  BaySickPlayerVoice
 // ─────────────────────────────────────────────────────────────────────────────
 
-VibeVoice::VibeVoice (VibeSampleManager& manager)
+BaySickPlayerVoice::BaySickPlayerVoice (BaySickSampleManager& manager)
     : mManager (manager)
 {
     mFilter.setType (juce::dsp::StateVariableTPTFilterType::lowpass);
 }
 
-void VibeVoice::prepareForPlayback (int blockSize)
+void BaySickPlayerVoice::prepareForPlayback (int blockSize)
 {
     mBlockSize = blockSize;
     mTmpBuffer.setSize (2, blockSize, false, true, false);
@@ -726,14 +726,14 @@ void VibeVoice::prepareForPlayback (int blockSize)
     mReverseResamp.prepareToPlay (blockSize, mSampleRate);
 }
 
-VibeVoice::~VibeVoice() { releaseResources(); }
+BaySickPlayerVoice::~BaySickPlayerVoice() { releaseResources(); }
 
 //==============================================================================
-void VibeVoice::releaseResources()
+void BaySickPlayerVoice::releaseResources()
 {
     // QA-VoicePool Task 2: fat sources stay allocated.  Per-note state is the
     // active-pointer pair + the shared_ptr to the region's audio buffer (so
-    // VibeSampleManager can free its regions on reload once all voices drop
+    // BaySickSampleManager can free its regions on reload once all voices drop
     // their references).
     mActiveSrc    = nullptr;
     mActiveResamp = nullptr;
@@ -748,7 +748,7 @@ void VibeVoice::releaseResources()
 }
 
 //==============================================================================
-void VibeVoice::setCurrentPlaybackSampleRate (double newRate)
+void BaySickPlayerVoice::setCurrentPlaybackSampleRate (double newRate)
 {
     juce::SynthesiserVoice::setCurrentPlaybackSampleRate (newRate);
     mSampleRate = newRate;
@@ -770,13 +770,13 @@ void VibeVoice::setCurrentPlaybackSampleRate (double newRate)
 }
 
 //==============================================================================
-bool VibeVoice::canPlaySound (juce::SynthesiserSound* s)
+bool BaySickPlayerVoice::canPlaySound (juce::SynthesiserSound* s)
 {
-    return dynamic_cast<VibeSynthSound*> (s) != nullptr;
+    return dynamic_cast<BaySickPlayerSound*> (s) != nullptr;
 }
 
 //==============================================================================
-void VibeVoice::startNote (int midiNote, float velocity,
+void BaySickPlayerVoice::startNote (int midiNote, float velocity,
                             juce::SynthesiserSound*,
                             int /*pitchWheelPos*/)
 {
@@ -785,7 +785,7 @@ void VibeVoice::startNote (int midiNote, float velocity,
     // QA-VoicePool Task 3: restore user's ADSR params if the previous note was
     // stolen with a quick-release override.  mPreStealAdsrParams holds either the
     // params at steal time OR any user-driven setAdsr updates that arrived during
-    // the override (see VibeVoice::setAdsr).
+    // the override (see BaySickPlayerVoice::setAdsr).
     if (mAdsrOverridden)
     {
         mAdsr.setParameters (mPreStealAdsrParams);
@@ -793,7 +793,7 @@ void VibeVoice::startNote (int midiNote, float velocity,
     }
 
     const int velInt = juce::roundToInt (velocity * 127.f);
-    const VibeRegion* region = mManager.findRegion (midiNote, velInt, mArticGroup);
+    const BaySickPlayerRegion* region = mManager.findRegion (midiNote, velInt, mArticGroup);
     if (!region || !region->audioData) { clearCurrentNote(); return; }
 
     mSampleBuffer = region->audioData;
@@ -801,7 +801,7 @@ void VibeVoice::startNote (int midiNote, float velocity,
     // QA-VoicePool Task 2: re-point the chosen fat source at the new region's
     // buffer + select the matching permanent resampler.  No heap allocation on
     // the audio thread.  Reverse playback uses ReversedMemoryAudioSource which
-    // reads the same buffer backward; forward uses VibeForwardMemoryAudioSource.
+    // reads the same buffer backward; forward uses BaySickForwardMemoryAudioSource.
     if (mReverse)
     {
         mReverseSrc.setBuffer (*mSampleBuffer);
@@ -825,7 +825,7 @@ void VibeVoice::startNote (int midiNote, float velocity,
     }
 
     // ResamplingAudioSource handles pitch shifting; per-note ratio drives transposition.
-    // S1 2026-04-21: global tune (semitones) + per-voice unison cents (set by VibeSynth fan-out).
+    // S1 2026-04-21: global tune (semitones) + per-voice unison cents (set by BaySickPlayerSynth fan-out).
     //  mNextUnisonCents already encodes (mDetune via mode) + (unisonSpread) per voice; consumed on startNote.
     const double pitchSemitones = (double) (midiNote - region->rootNote)
                                 + (double) region->tuneOffset
@@ -877,7 +877,7 @@ void VibeVoice::startNote (int midiNote, float velocity,
 
     // QA-VoicePool Task 2: flushBuffers() clears the resampler's per-channel
     // filter histories + readahead buffer; setResamplingRatio() updates the
-    // pitch ratio.  prepareToPlay was hoisted to VibeVoice::prepareForPlayback.
+    // pitch ratio.  prepareToPlay was hoisted to BaySickPlayerVoice::prepareForPlayback.
     mActiveResamp->flushBuffers ();
     mActiveResamp->setResamplingRatio (mGlideSamplesLeft > 0
         ? mGlideBaseRatio * std::pow (2.0, (double) mGlideSemisCur / 12.0)
@@ -933,7 +933,7 @@ void VibeVoice::startNote (int midiNote, float velocity,
 }
 
 //==============================================================================
-void VibeVoice::stopNote (float, bool allowTailOff)
+void BaySickPlayerVoice::stopNote (float, bool allowTailOff)
 {
     if (allowTailOff)
     {
@@ -951,7 +951,7 @@ void VibeVoice::stopNote (float, bool allowTailOff)
 }
 
 //==============================================================================
-void VibeVoice::renderNextBlock (juce::AudioBuffer<float>& outputBuffer,
+void BaySickPlayerVoice::renderNextBlock (juce::AudioBuffer<float>& outputBuffer,
                                   int startSample, int numSamples)
 {
     if (!mIsPlaying || mActiveResamp == nullptr) return;
@@ -1142,9 +1142,9 @@ void VibeVoice::renderNextBlock (juce::AudioBuffer<float>& outputBuffer,
 }
 
 //==============================================================================
-// Parameter setters - called from VibeSynth::forEachVoice.
-// CPU-safe: voices cache their own values; VibeSynth guards before broadcast.
-void VibeVoice::setFilterParams (float cutoffHz, float q) noexcept
+// Parameter setters - called from BaySickPlayerSynth::forEachVoice.
+// CPU-safe: voices cache their own values; BaySickPlayerSynth guards before broadcast.
+void BaySickPlayerVoice::setFilterParams (float cutoffHz, float q) noexcept
 {
     mBaseCutoff = juce::jlimit (20.f, 20000.f, cutoffHz);
     mBaseRes    = juce::jlimit (0.5f, 10.0f,  q);
@@ -1153,24 +1153,24 @@ void VibeVoice::setFilterParams (float cutoffHz, float q) noexcept
     mFilter.setResonance       (mBaseRes);
 }
 
-void VibeVoice::setDrive         (float drive)    noexcept { mDrive        = juce::jmax (1.f, drive); }
-void VibeVoice::setReduct        (float reduct)   noexcept { mReduct       = juce::jlimit (0.f, 1.f, reduct); }
-void VibeVoice::setVolume        (float vol)      noexcept { mVolume       = juce::jmax (0.f, vol); }
-void VibeVoice::setLfoAmt        (float amt)      noexcept { mLfoAmt       = juce::jlimit (0.f, 1.f, amt); }
-void VibeVoice::setStretch       (float stretch)  noexcept { mStretch      = juce::jlimit (0.5f, 2.f, stretch); }
-void VibeVoice::setMuffle        (float muffle)   noexcept { mMuffle       = juce::jlimit (0.f, 1.f, muffle); }
-void VibeVoice::setVelToMuffle   (float amt)      noexcept { mVelToMuffle  = juce::jlimit (0.f, 1.f, amt); }
-void VibeVoice::setHardness      (float hardness) noexcept { mHardness     = juce::jlimit (0.f, 1.f, hardness); }
-void VibeVoice::setVelToHardness (float amt)      noexcept { mVelToHardness= juce::jlimit (0.f, 1.f, amt); }
-void VibeVoice::setSensitivity   (float sens)     noexcept { mSensitivity  = juce::jlimit (0.f, 1.f, sens); }
+void BaySickPlayerVoice::setDrive         (float drive)    noexcept { mDrive        = juce::jmax (1.f, drive); }
+void BaySickPlayerVoice::setReduct        (float reduct)   noexcept { mReduct       = juce::jlimit (0.f, 1.f, reduct); }
+void BaySickPlayerVoice::setVolume        (float vol)      noexcept { mVolume       = juce::jmax (0.f, vol); }
+void BaySickPlayerVoice::setLfoAmt        (float amt)      noexcept { mLfoAmt       = juce::jlimit (0.f, 1.f, amt); }
+void BaySickPlayerVoice::setStretch       (float stretch)  noexcept { mStretch      = juce::jlimit (0.5f, 2.f, stretch); }
+void BaySickPlayerVoice::setMuffle        (float muffle)   noexcept { mMuffle       = juce::jlimit (0.f, 1.f, muffle); }
+void BaySickPlayerVoice::setVelToMuffle   (float amt)      noexcept { mVelToMuffle  = juce::jlimit (0.f, 1.f, amt); }
+void BaySickPlayerVoice::setHardness      (float hardness) noexcept { mHardness     = juce::jlimit (0.f, 1.f, hardness); }
+void BaySickPlayerVoice::setVelToHardness (float amt)      noexcept { mVelToHardness= juce::jlimit (0.f, 1.f, amt); }
+void BaySickPlayerVoice::setSensitivity   (float sens)     noexcept { mSensitivity  = juce::jlimit (0.f, 1.f, sens); }
 
 // S1 2026-04-21 setters
-void VibeVoice::setTune          (float semitones) noexcept { mTune         = juce::jlimit (-48.f, 48.f, semitones); }
-void VibeVoice::setVelToVolume   (float amt)       noexcept { mVelToVolume  = juce::jlimit (0.f, 1.f, amt); }
-void VibeVoice::setSampleStart   (float norm)      noexcept { mSampleStart  = juce::jlimit (0.f, 1.f, norm); }
-void VibeVoice::setLfoRate       (float hz)        noexcept { mLfoRate      = juce::jlimit (0.1f, 20.f, hz); }
+void BaySickPlayerVoice::setTune          (float semitones) noexcept { mTune         = juce::jlimit (-48.f, 48.f, semitones); }
+void BaySickPlayerVoice::setVelToVolume   (float amt)       noexcept { mVelToVolume  = juce::jlimit (0.f, 1.f, amt); }
+void BaySickPlayerVoice::setSampleStart   (float norm)      noexcept { mSampleStart  = juce::jlimit (0.f, 1.f, norm); }
+void BaySickPlayerVoice::setLfoRate       (float hz)        noexcept { mLfoRate      = juce::jlimit (0.1f, 20.f, hz); }
 
-void VibeVoice::setPan (float pan) noexcept
+void BaySickPlayerVoice::setPan (float pan) noexcept
 {
     // pan: -1 = hard left, 0 = centre, +1 = hard right
     const float p   = juce::jlimit (-1.f, 1.f, pan);
@@ -1179,7 +1179,7 @@ void VibeVoice::setPan (float pan) noexcept
     mPanR = std::sin (ang);
 }
 
-void VibeVoice::setAdsr (float a, float d, float s, float r) noexcept
+void BaySickPlayerVoice::setAdsr (float a, float d, float s, float r) noexcept
 {
     juce::ADSR::Parameters p;
     p.attack  = juce::jmax (0.001f, a);
@@ -1198,12 +1198,12 @@ void VibeVoice::setAdsr (float a, float d, float s, float r) noexcept
 
 // QA-VoicePool Task 3: initiateSteal saves the user's ADSR params and overrides
 // mAdsr's release to ~1.5 ms (~64 samples @ 44.1 kHz / ~72 @ 48 kHz - "instantly
-// fade it out" per Jeff's verbatim blueprint).  Caller (VibeSynth voiceCap branch)
+// fade it out" per Jeff's verbatim blueprint).  Caller (BaySickPlayerSynth voiceCap branch)
 // follows with stopNote(0.f, true) so the voice enters its quick-release naturally
 // inside renderNextBlock - no synchronous render past the audio block boundary.
 // Idempotent: re-stealing an already-overridden voice is a no-op (the in-flight
 // quick-release continues without disturbance).
-void VibeVoice::initiateSteal() noexcept
+void BaySickPlayerVoice::initiateSteal() noexcept
 {
     if (mAdsrOverridden)
         return;
@@ -1218,10 +1218,10 @@ void VibeVoice::initiateSteal() noexcept
 
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  VibeSynth
+//  BaySickPlayerSynth
 // ─────────────────────────────────────────────────────────────────────────────
 
-VibeSynth::VibeSynth()
+BaySickPlayerSynth::BaySickPlayerSynth()
 {
     // QA-0a (2026-05-07): set a placeholder sample rate before adding voices.
     // JUCE's Synthesiser::addVoice propagates the synth's current sample rate
@@ -1230,27 +1230,27 @@ VibeSynth::VibeSynth()
     // asserts during construction (Release silently accepts 0).  prepare()
     // overwrites with the real rate before any audio processing.
     mSynth.setCurrentPlaybackSampleRate (44100.0);
-    mSynth.addSound (new VibeSynthSound());
+    mSynth.addSound (new BaySickPlayerSound());
     // QA-VoicePool Task 3: physical pool over-provisioned to kMaxVoices (24) so
     // the steal quick-release fade-out lands on reserve slots; cache the
-    // VibeVoice* into mVoices alongside mSynth.addVoice so the audio-thread
+    // BaySickPlayerVoice* into mVoices alongside mSynth.addVoice so the audio-thread
     // voiceCap scan can iterate without dynamic_cast per voice (Sub-A=(a)).
     for (int i = 0; i < kMaxVoices; ++i)
     {
-        auto* v = new VibeVoice (mManager);
+        auto* v = new BaySickPlayerVoice (mManager);
         mSynth.addVoice (v);
         mVoices[i] = v;
     }
 }
 
 //==============================================================================
-void VibeSynth::prepare (double sampleRate, int maxBlockSize)
+void BaySickPlayerSynth::prepare (double sampleRate, int maxBlockSize)
 {
     mSampleRate = sampleRate;
     mSynth.setCurrentPlaybackSampleRate (sampleRate);
 
     // Prepare each voice's temp buffer via public method
-    forEachVoice ([maxBlockSize] (VibeVoice& v)
+    forEachVoice ([maxBlockSize] (BaySickPlayerVoice& v)
     {
         v.prepareForPlayback (maxBlockSize);
     });
@@ -1282,9 +1282,9 @@ void VibeSynth::prepare (double sampleRate, int maxBlockSize)
 // newPitch is reserved for future "don't steal a voice playing the same pitch"
 // logic; unused for now.  Returns nullptr only if zero active voices exist
 // (shouldn't happen at steal-time since activeCount >= cap is the precondition).
-VibeVoice* VibeSynth::findStealCandidate (int /*newPitch*/) const noexcept
+BaySickPlayerVoice* BaySickPlayerSynth::findStealCandidate (int /*newPitch*/) const noexcept
 {
-    VibeVoice*   victims[3] = { nullptr, nullptr, nullptr };
+    BaySickPlayerVoice*   victims[3] = { nullptr, nullptr, nullptr };
     juce::uint32 ages   [3] = {
         std::numeric_limits<juce::uint32>::max(),
         std::numeric_limits<juce::uint32>::max(),
@@ -1320,7 +1320,7 @@ VibeVoice* VibeSynth::findStealCandidate (int /*newPitch*/) const noexcept
 }
 
 //==============================================================================
-void VibeSynth::renderNextBlock (juce::AudioBuffer<float>& buffer,
+void BaySickPlayerSynth::renderNextBlock (juce::AudioBuffer<float>& buffer,
                                   juce::MidiBuffer& midi)
 {
     juce::ScopedNoDenormals noDenormals;
@@ -1494,7 +1494,7 @@ void VibeSynth::renderNextBlock (juce::AudioBuffer<float>& buffer,
                 // Pre-tag all voices with cents_i - juce::Synthesiser::noteOn will
                 // allocate exactly one idle voice and call startNote synchronously,
                 // which consumes mNextUnisonCents and resets it to 0.
-                forEachVoice ([cents_i] (VibeVoice& v) { v.setNextUnisonCents (cents_i); });
+                forEachVoice ([cents_i] (BaySickPlayerVoice& v) { v.setNextUnisonCents (cents_i); });
 
                 mSynth.noteOn (ch, note, vel);
             }
@@ -1514,9 +1514,9 @@ void VibeSynth::renderNextBlock (juce::AudioBuffer<float>& buffer,
                 {
                     const int val = msg.getControllerValue();
                     bool claimed = false;
-                    forEachVoice ([&claimed, val] (VibeVoice& v)
+                    forEachVoice ([&claimed, val] (BaySickPlayerVoice& v)
                                   { if (! claimed) claimed = v.tryRampTakeover (val); });
-                    forEachVoice ([] (VibeVoice& v) { v.clearRampStash(); });
+                    forEachVoice ([] (BaySickPlayerVoice& v) { v.clearRampStash(); });
                     continue;
                 }
                 // S-7: +CC10 pan.  #37: +CC86/CC89 -- both belong to the CC85
@@ -1527,7 +1527,7 @@ void VibeSynth::renderNextBlock (juce::AudioBuffer<float>& buffer,
                     || num == 74 || num == 84 || num == 86 || num == 89)
                 {
                     const int val = msg.getControllerValue();
-                    forEachVoice ([num, val] (VibeVoice& v)
+                    forEachVoice ([num, val] (BaySickPlayerVoice& v)
                                   { v.controllerMoved (num, val); });
                     continue;
                 }
@@ -1594,60 +1594,60 @@ void VibeSynth::renderNextBlock (juce::AudioBuffer<float>& buffer,
 //==============================================================================
 // CPU-guarded parameter setters - only push to voices when value actually changed.
 
-void VibeSynth::setFilterParams (float cutoffHz, float resonance) noexcept
+void BaySickPlayerSynth::setFilterParams (float cutoffHz, float resonance) noexcept
 {
     if (cutoffHz == mLastCutoff && resonance == mLastRes) return;
     mLastCutoff = cutoffHz;
     mLastRes    = resonance;
     const float q = 0.5f + resonance * 9.5f; // map 0-1 → Q 0.5-10
-    forEachVoice ([cutoffHz, q] (VibeVoice& v) { v.setFilterParams (cutoffHz, q); });
+    forEachVoice ([cutoffHz, q] (BaySickPlayerVoice& v) { v.setFilterParams (cutoffHz, q); });
 }
 
-void VibeSynth::setDrive (float drive) noexcept
+void BaySickPlayerSynth::setDrive (float drive) noexcept
 {
     if (drive == mLastDrive) return;
     mLastDrive = drive;
     // Map 0-1 → drive factor 1-12 (1 = unity, 12 = heavy saturation)
     const float d = 1.f + drive * 11.f;
-    forEachVoice ([d] (VibeVoice& v) { v.setDrive (d); });
+    forEachVoice ([d] (BaySickPlayerVoice& v) { v.setDrive (d); });
 }
 
-void VibeSynth::setReduct (float reduct) noexcept
+void BaySickPlayerSynth::setReduct (float reduct) noexcept
 {
     if (reduct == mLastReduct) return;
     mLastReduct = reduct;
-    forEachVoice ([reduct] (VibeVoice& v) { v.setReduct (reduct); });
+    forEachVoice ([reduct] (BaySickPlayerVoice& v) { v.setReduct (reduct); });
 }
 
-void VibeSynth::setVolume (float vol) noexcept
+void BaySickPlayerSynth::setVolume (float vol) noexcept
 {
     if (vol == mLastVol) return;
     mLastVol = vol;
-    forEachVoice ([vol] (VibeVoice& v) { v.setVolume (vol); });
+    forEachVoice ([vol] (BaySickPlayerVoice& v) { v.setVolume (vol); });
 }
 
-void VibeSynth::setPan (float pan) noexcept
+void BaySickPlayerSynth::setPan (float pan) noexcept
 {
     if (pan == mLastPan) return;
     mLastPan = pan;
-    forEachVoice ([pan] (VibeVoice& v) { v.setPan (pan); });
+    forEachVoice ([pan] (BaySickPlayerVoice& v) { v.setPan (pan); });
 }
 
-void VibeSynth::setAdsr (float a, float d, float s, float r) noexcept
+void BaySickPlayerSynth::setAdsr (float a, float d, float s, float r) noexcept
 {
     if (a == mLastAmpA && d == mLastAmpD && s == mLastAmpS && r == mLastAmpR) return;
     mLastAmpA = a; mLastAmpD = d; mLastAmpS = s; mLastAmpR = r;
-    forEachVoice ([a, d, s, r] (VibeVoice& v) { v.setAdsr (a, d, s, r); });
+    forEachVoice ([a, d, s, r] (BaySickPlayerVoice& v) { v.setAdsr (a, d, s, r); });
 }
 
-void VibeSynth::setLfoAmt (float amt) noexcept
+void BaySickPlayerSynth::setLfoAmt (float amt) noexcept
 {
     if (amt == mLastLfoAmt) return;
     mLastLfoAmt = amt;
-    forEachVoice ([amt] (VibeVoice& v) { v.setLfoAmt (amt); });
+    forEachVoice ([amt] (BaySickPlayerVoice& v) { v.setLfoAmt (amt); });
 }
 
-void VibeSynth::setStereo (float width) noexcept
+void BaySickPlayerSynth::setStereo (float width) noexcept
 {
     if (width == mLastStereo) return;
     mLastStereo   = width;
@@ -1655,7 +1655,7 @@ void VibeSynth::setStereo (float width) noexcept
     mStereoWidth  = 1.f + width;
 }
 
-void VibeSynth::setTreble (float treble) noexcept
+void BaySickPlayerSynth::setTreble (float treble) noexcept
 {
     if (treble == mLastTreble) return;
     mLastTreble  = treble;
@@ -1667,99 +1667,99 @@ void VibeSynth::setTreble (float treble) noexcept
     mTrebleGain  = juce::jlimit (-1.f, 1.f, treble / 12.f);
 }
 
-void VibeSynth::setStretch (float stretch) noexcept
+void BaySickPlayerSynth::setStretch (float stretch) noexcept
 {
     if (stretch == mLastStretch) return;
     mLastStretch = stretch;
-    forEachVoice ([stretch] (VibeVoice& v) { v.setStretch (stretch); });
+    forEachVoice ([stretch] (BaySickPlayerVoice& v) { v.setStretch (stretch); });
 }
 
-void VibeSynth::setMuffle (float muffle) noexcept
+void BaySickPlayerSynth::setMuffle (float muffle) noexcept
 {
     if (muffle == mLastMuffle) return;
     mLastMuffle = muffle;
-    forEachVoice ([muffle] (VibeVoice& v) { v.setMuffle (muffle); });
+    forEachVoice ([muffle] (BaySickPlayerVoice& v) { v.setMuffle (muffle); });
 }
 
-void VibeSynth::setVelToMuffle (float amt) noexcept
+void BaySickPlayerSynth::setVelToMuffle (float amt) noexcept
 {
     if (amt == mLastVelToMuffle) return;
     mLastVelToMuffle = amt;
-    forEachVoice ([amt] (VibeVoice& v) { v.setVelToMuffle (amt); });
+    forEachVoice ([amt] (BaySickPlayerVoice& v) { v.setVelToMuffle (amt); });
 }
 
-void VibeSynth::setHardness (float hardness) noexcept
+void BaySickPlayerSynth::setHardness (float hardness) noexcept
 {
     if (hardness == mLastHardness) return;
     mLastHardness = hardness;
-    forEachVoice ([hardness] (VibeVoice& v) { v.setHardness (hardness); });
+    forEachVoice ([hardness] (BaySickPlayerVoice& v) { v.setHardness (hardness); });
 }
 
-void VibeSynth::setVelToHardness (float amt) noexcept
+void BaySickPlayerSynth::setVelToHardness (float amt) noexcept
 {
     if (amt == mLastVelToHard) return;
     mLastVelToHard = amt;
-    forEachVoice ([amt] (VibeVoice& v) { v.setVelToHardness (amt); });
+    forEachVoice ([amt] (BaySickPlayerVoice& v) { v.setVelToHardness (amt); });
 }
 
-void VibeSynth::setSensitivity (float sens) noexcept
+void BaySickPlayerSynth::setSensitivity (float sens) noexcept
 {
     if (sens == mLastSensitivity) return;
     mLastSensitivity = sens;
-    forEachVoice ([sens] (VibeVoice& v) { v.setSensitivity (sens); });
+    forEachVoice ([sens] (BaySickPlayerVoice& v) { v.setSensitivity (sens); });
 }
 
-void VibeSynth::setArticulationGroup (int group) noexcept
+void BaySickPlayerSynth::setArticulationGroup (int group) noexcept
 {
     if (group == mLastArtic) return;
     mLastArtic = group;
-    forEachVoice ([group] (VibeVoice& v) { v.setArticulationGroup (group); });
+    forEachVoice ([group] (BaySickPlayerVoice& v) { v.setArticulationGroup (group); });
 }
 
 // S1 2026-04-21 CPU-guarded forwarders
-void VibeSynth::setTune (float semitones) noexcept
+void BaySickPlayerSynth::setTune (float semitones) noexcept
 {
     if (semitones == mLastTune) return;
     mLastTune = semitones;
-    forEachVoice ([semitones] (VibeVoice& v) { v.setTune (semitones); });
+    forEachVoice ([semitones] (BaySickPlayerVoice& v) { v.setTune (semitones); });
 }
 
-// S1 Incr3 2026-04-21: detune + detuneMode are authoritative on VibeSynth only
+// S1 Incr3 2026-04-21: detune + detuneMode are authoritative on BaySickPlayerSynth only
 // (used to compute per-voice mNextUnisonCents during fan-out). No voice-level state.
-void VibeSynth::setDetune (float cents) noexcept
+void BaySickPlayerSynth::setDetune (float cents) noexcept
 {
     if (cents == mLastDetune) return;
     mLastDetune = cents;
 }
 
-void VibeSynth::setDetuneMode (int mode) noexcept
+void BaySickPlayerSynth::setDetuneMode (int mode) noexcept
 {
     if (mode == mLastDetuneMode) return;
     mLastDetuneMode = mode;
 }
 
-void VibeSynth::setVelToVolume (float amt) noexcept
+void BaySickPlayerSynth::setVelToVolume (float amt) noexcept
 {
     if (amt == mLastVelToVolume) return;
     mLastVelToVolume = amt;
-    forEachVoice ([amt] (VibeVoice& v) { v.setVelToVolume (amt); });
+    forEachVoice ([amt] (BaySickPlayerVoice& v) { v.setVelToVolume (amt); });
 }
 
-void VibeSynth::setSampleStart (float norm) noexcept
+void BaySickPlayerSynth::setSampleStart (float norm) noexcept
 {
     if (norm == mLastSampleStart) return;
     mLastSampleStart = norm;
-    forEachVoice ([norm] (VibeVoice& v) { v.setSampleStart (norm); });
+    forEachVoice ([norm] (BaySickPlayerVoice& v) { v.setSampleStart (norm); });
 }
 
-void VibeSynth::setLfoRate (float hz) noexcept
+void BaySickPlayerSynth::setLfoRate (float hz) noexcept
 {
     if (hz == mLastLfoRate) return;
     mLastLfoRate = hz;
-    forEachVoice ([hz] (VibeVoice& v) { v.setLfoRate (hz); });
+    forEachVoice ([hz] (BaySickPlayerVoice& v) { v.setLfoRate (hz); });
 }
 
-void VibeSynth::setVoiceCap (int cap) noexcept
+void BaySickPlayerSynth::setVoiceCap (int cap) noexcept
 {
     // Enforcement happens in renderNextBlock manual dispatch (oldest-first steal).
     // QA-VoicePool Task 7 NIT 1 fix-up: clamp upper bound is kLogicalCap (16),
@@ -1773,25 +1773,25 @@ void VibeSynth::setVoiceCap (int cap) noexcept
     mLastVoiceCap = juce::jlimit (1, kLogicalCap, cap);
 }
 
-void VibeSynth::setCutSelf (bool on) noexcept
+void BaySickPlayerSynth::setCutSelf (bool on) noexcept
 {
     mCutSelf = on;
 }
 
-void VibeSynth::setCutSelfMode (bool cutAll) noexcept
+void BaySickPlayerSynth::setCutSelfMode (bool cutAll) noexcept
 {
     mCutAll = cutAll;
 }
 
-void VibeSynth::setReverse (bool rev) noexcept
+void BaySickPlayerSynth::setReverse (bool rev) noexcept
 {
     if (rev == mLastReverse) return;
     mLastReverse = rev;
     mReverse     = rev;
-    forEachVoice ([rev] (VibeVoice& v) { v.setReverse (rev); });
+    forEachVoice ([rev] (BaySickPlayerVoice& v) { v.setReverse (rev); });
 }
 
-void VibeSynth::setUnisonVoices (int n) noexcept
+void BaySickPlayerSynth::setUnisonVoices (int n) noexcept
 {
     const int clamped = juce::jlimit (1, 8, n);
     if (clamped == mLastUnisonVoices) return;
@@ -1799,7 +1799,7 @@ void VibeSynth::setUnisonVoices (int n) noexcept
     mUnisonVoices     = clamped;
 }
 
-void VibeSynth::setUnisonSpread (float cents) noexcept
+void BaySickPlayerSynth::setUnisonSpread (float cents) noexcept
 {
     const float clamped = juce::jlimit (0.f, 200.f, cents);
     if (clamped == mLastUnisonSpread) return;

@@ -4,13 +4,13 @@
 
 #include "../RenderTask.h"
 #include "../UpstreamLink.h"
-#include "../../VibeGraph.h"
+#include "../../BaySickGraph.h"
 
 // Which buffer a summing task should read for one incoming audio edge.
 //
 // Default is the source's mOutputBuffer -- the post-everything strip output.
 // A SEND edge whose prePost flag is set reads the source's pre-fader tap
-// instead (VibeGraph::getPreFaderTap), which is the strip's signal before its
+// instead (BaySickGraph::getPreFaderTap), which is the strip's signal before its
 // fader x mute x solo gain and before its pan.  Main-out edges and sidechain
 // edges never take that branch: main-out is the strip's actual output by
 // definition, and sidechain has its own documented tap (getScSourceTap, pulled
@@ -27,7 +27,7 @@
 // dependency counter that publishes mOutputBuffer publishes the tap with it.
 namespace SendSourceRead
 {
-    inline const juce::AudioBuffer<float>* bufferFor (VibeGraph& graph,
+    inline const juce::AudioBuffer<float>* bufferFor (BaySickGraph& graph,
                                                        const UpstreamLink& link) noexcept
     {
         if (link.source == nullptr)

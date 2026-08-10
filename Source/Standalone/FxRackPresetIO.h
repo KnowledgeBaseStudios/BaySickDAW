@@ -1,7 +1,7 @@
 #pragma once
 #include <JuceHeader.h>
 
-class VibeSynthProcessor;
+class BaySickDAWProcessor;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // FxRackPresetIO - QA-ModelShell TS5 (2026-07-29), Jeff's spec
@@ -43,12 +43,12 @@ namespace FxRackPresetIO
     // handed to that helper, not that the file is on disk yet.  outErr is set
     // (with false returned) only for the pre-write failures: no rack on the
     // channel, or the presets folder could not be created.
-    bool save (VibeSynthProcessor& proc, int channelId,
+    bool save (BaySickDAWProcessor& proc, int channelId,
                const juce::String& presetName, juce::String& outErr);
 
     // Loads onto whatever strip channelId names, rewriting the saved EQ
     // parameter prefix to the destination strip's.  Returns false + outErr when
     // the file is unreadable or the channel has no rack.
-    bool load (VibeSynthProcessor& proc, int channelId,
+    bool load (BaySickDAWProcessor& proc, int channelId,
                const juce::File& presetFile, juce::String& outErr);
 }

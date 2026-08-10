@@ -1,22 +1,22 @@
 #include "EngineInsertTask.h"
 #include "../FrozenSourceRead.h"   // TS7 6.8: scope-matched frozen block read
-#include "../../VibeGraph.h"
+#include "../../BaySickGraph.h"
 #include "../../DSP/EngineSidechainHelper.h"   // ISidechainEngine
 #include "../SidechainPullHelper.h"            // pullSidechainPredecessorsToGraph
 #include "../../DSP/AudioClipStreamer.h"       // TS7 §6.3: frozen-tab playback
 
 namespace
 {
-    inline VibeGraph::InsertKind toInsertKind (EngineInsertTask::Kind k) noexcept
+    inline BaySickGraph::InsertKind toInsertKind (EngineInsertTask::Kind k) noexcept
     {
         switch (k)
         {
-            case EngineInsertTask::Kind::Layer: return VibeGraph::InsertKind::Layer;
-            case EngineInsertTask::Kind::Bass:  return VibeGraph::InsertKind::Bass;
-            case EngineInsertTask::Kind::Drum:  return VibeGraph::InsertKind::Drum;
-            case EngineInsertTask::Kind::Plugin: return VibeGraph::InsertKind::Plugin;
+            case EngineInsertTask::Kind::Layer: return BaySickGraph::InsertKind::Layer;
+            case EngineInsertTask::Kind::Bass:  return BaySickGraph::InsertKind::Bass;
+            case EngineInsertTask::Kind::Drum:  return BaySickGraph::InsertKind::Drum;
+            case EngineInsertTask::Kind::Plugin: return BaySickGraph::InsertKind::Plugin;
         }
-        return VibeGraph::InsertKind::Layer;
+        return BaySickGraph::InsertKind::Layer;
     }
 }
 
@@ -24,7 +24,7 @@ EngineInsertTask::EngineInsertTask (juce::AudioProcessor* engine,
                                     Kind                  kind,
                                     int                   index,
                                     int                   channelIdIn,
-                                    VibeGraph&            graph)
+                                    BaySickGraph&            graph)
     : mEngine (engine),
       mScEngine (dynamic_cast<ISidechainEngine*> (engine)),
       mKind (kind),
@@ -80,11 +80,11 @@ void EngineInsertTask::run()
     pullSidechainPredecessorsToGraph (*mGraph, channelId, mPredecessors, n);
     if (mScEngine != nullptr)
     {
-        const VibeGraph::ScRecvArray scArr = mGraph->getScRecvArray (channelId);
-        juce::AudioBuffer<float>* scBufs[VibeGraph::kMaxScRecvSlots] = {};
-        for (int i = 0; i < VibeGraph::kMaxScRecvSlots; ++i)
+        const BaySickGraph::ScRecvArray scArr = mGraph->getScRecvArray (channelId);
+        juce::AudioBuffer<float>* scBufs[BaySickGraph::kMaxScRecvSlots] = {};
+        for (int i = 0; i < BaySickGraph::kMaxScRecvSlots; ++i)
             scBufs[i] = scArr[(size_t) i];
-        mScEngine->setSidechainBuffers (scBufs, VibeGraph::kMaxScRecvSlots);
+        mScEngine->setSidechainBuffers (scBufs, BaySickGraph::kMaxScRecvSlots);
     }
 
     // ── Engine render, OR the frozen file in its place (TS7 §6.3) ────────────

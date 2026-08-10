@@ -1,6 +1,6 @@
 #pragma once
 #include <JuceHeader.h>
-#include "../VibesynthConstants.h"
+#include "../BaySickConstants.h"
 #include "../PatternManager.h"
 #include "../DSP/SpectrumFeed.h"   // for SpectrumFeed::kSize used by ParametricEQDisplay
 
@@ -114,10 +114,10 @@ inline void applyFLKnobFeel (juce::Slider& s, double defaultValue)
 }
 
 // ── Shared LookAndFeel (forward declared -- defined in SharedUI.cpp) ──────────
-class VibeLAF : public juce::LookAndFeel_V4
+class BaySickLAF : public juce::LookAndFeel_V4
 {
 public:
-    VibeLAF();
+    BaySickLAF();
     void drawRotarySlider(juce::Graphics&, int x, int y, int w, int h,
                           float sp, float sa, float ea, juce::Slider&) override;
     void drawToggleButton(juce::Graphics&, juce::ToggleButton&, bool, bool) override;
@@ -143,7 +143,7 @@ public:
                        bool isVertical, int thumbStart, int thumbSize,
                        bool isOver, bool isDown) override;
     // ── TS7 §9.1/§9.3: desktop-window chrome ─────────────────────────────────
-    // VibeLAF is the app-wide default LookAndFeel (StandaloneEditor sets it), so
+    // BaySickLAF is the app-wide default LookAndFeel (StandaloneEditor sets it), so
     // overriding here is what makes every juce::DocumentWindow / DialogWindow
     // with a NON-native title bar paint the shell's strip -- no per-window
     // look-and-feel plumbing, and no second place for the look to drift to.
@@ -162,7 +162,7 @@ public:
                                         juce::Button* close,
                                         bool positionTitleBarButtonsOnLeft) override;
 
-    static VibeLAF& get() { static VibeLAF laf; return laf; }
+    static BaySickLAF& get() { static BaySickLAF laf; return laf; }
 
     // Helper: mark a tooltip string as automatable (appends tag)
     static juce::String automatable(const juce::String& tip)
@@ -171,20 +171,20 @@ public:
     }
 };
 
-// ── VibeTooltip ───────────────────────────────────────────────────────────────
-// Global tooltip window. Renders via VibeLAF::drawTooltip / getTooltipBounds.
+// ── BaySickTooltip ───────────────────────────────────────────────────────────────
+// Global tooltip window. Renders via BaySickLAF::drawTooltip / getTooltipBounds.
 // One instance owned by StandaloneEditor - applies to all child components.
-// APVTS-bound controls append "\n*Automatable*" via VibeLAF::automatable().
-class VibeTooltip : public juce::TooltipWindow
+// APVTS-bound controls append "\n*Automatable*" via BaySickLAF::automatable().
+class BaySickTooltip : public juce::TooltipWindow
 {
 public:
-    explicit VibeTooltip(juce::Component* parent, int delayMs = 500)
+    explicit BaySickTooltip(juce::Component* parent, int delayMs = 500)
         : juce::TooltipWindow(parent, delayMs)
     {
-        setLookAndFeel(&VibeLAF::get());
+        setLookAndFeel(&BaySickLAF::get());
     }
 
-    ~VibeTooltip() override
+    ~BaySickTooltip() override
     {
         setLookAndFeel(nullptr);
     }
@@ -547,7 +547,7 @@ private:
 
 // ── MixerLedButton (5F-4a) ───────────────────────────────────────────────────
 // LED-style toggle button with a glowing colored dot and optional small label.
-// Subclasses juce::Button directly so VibeLAF's filmstrip toggle path is
+// Subclasses juce::Button directly so BaySickLAF's filmstrip toggle path is
 // bypassed - prevents the "stuck toggle switch" rendering on mixer strips AND
 // the Effects page FX Bypass button. Works as a drop-in replacement for
 // juce::TextButton in toggle mode, supports ButtonAttachment.
@@ -1005,7 +1005,7 @@ public:
     }
 };
 
-// ── VibeSlider ───────────────────────────────────────────────────────────────
+// ── BaySickSlider ───────────────────────────────────────────────────────────────
 // A juce::Slider that swallows right-click mouseDown / mouseDrag events so the
 // slider value never changes on right-click. Left-click interaction is
 // unchanged. Right-click still propagates up to the app-wide
@@ -1020,11 +1020,11 @@ public:
 // is trying to right-click to reach the Automate menu.
 //
 // Defined ahead of VKnob because VKnob holds one by value.
-class VibeSlider : public juce::Slider
+class BaySickSlider : public juce::Slider
 {
 public:
-    VibeSlider() = default;
-    VibeSlider(SliderStyle style, TextEntryBoxPosition textPos = NoTextBox)
+    BaySickSlider() = default;
+    BaySickSlider(SliderStyle style, TextEntryBoxPosition textPos = NoTextBox)
         : juce::Slider(style, textPos) {}
 
     void mouseDown(const juce::MouseEvent& e) override
@@ -1049,10 +1049,10 @@ class VKnob : public juce::Component,
               private juce::Slider::Listener
 {
 public:
-    // VibeSlider so right-click never jogs the knob; the Automate menu still
+    // BaySickSlider so right-click never jogs the knob; the Automate menu still
     // fires because VKnob registers as a mouseListener here and
     // Component::internalMouseDown notifies listeners after the swallowed mouseDown.
-    VibeSlider   slider;
+    BaySickSlider   slider;
     juce::Label  label;
 
     // Set this to enable the right-click "Automate" context menu.
@@ -1210,12 +1210,12 @@ private:
 //     Switch up = false (OFF), down = true (ON). Clicking OFF/ON sets state.
 //
 // The underlying juce::ToggleButton is accessible via btn() and uses the
-// VibeLAF switch_toggle filmstrip regardless of the panel's current LAF.
+// BaySickLAF switch_toggle filmstrip regardless of the panel's current LAF.
 //
 // Right-click never flips the switch (button + label paths both swallow it):
 // it is reserved for the GlobalAutoRightClick "Automate" menu, which fires
 // via the app-wide mouse listener regardless of the swallow -- same
-// rationale as VibeSlider.  The menu appears only on toggles a panel has
+// rationale as BaySickSlider.  The menu appears only on toggles a panel has
 // registered via EditorPanelBase::addAutomatableToggle (componentID set).
 // ─────────────────────────────────────────────────────────────────────────────
 class DualLabelToggle : public juce::Component
@@ -1260,12 +1260,12 @@ private:
 
 // ── Fader with 0 dB snap ─────────────────────────────────────────────────────
 // LinearVertical fader that snaps to exactly 0.0 dB when dragged within ±1.5 dB.
-// SnapSlider inherits VibeSlider so the mixer fader gets the right-click
+// SnapSlider inherits BaySickSlider so the mixer fader gets the right-click
 // swallow behaviour for free.
-class SnapSlider : public VibeSlider
+class SnapSlider : public BaySickSlider
 {
 public:
-    SnapSlider() : VibeSlider(juce::Slider::LinearVertical, juce::Slider::NoTextBox) {}
+    SnapSlider() : BaySickSlider(juce::Slider::LinearVertical, juce::Slider::NoTextBox) {}
     double snapValue(double v, DragMode) override
     {
         return (std::abs(v) < 1.5) ? 0.0 : v;
@@ -1483,12 +1483,12 @@ private:
 
     struct BandControl {
         std::unique_ptr<juce::ComboBox>     typeCombo;  // dropdown for band filter type
-        // 2026-04-19: VibeSlider swallows right-click so it doesn't steal focus
+        // 2026-04-19: BaySickSlider swallows right-click so it doesn't steal focus
         // from the Automate menu popup. Polymorphic via juce::Slider base pointer
         // so existing code that takes juce::Slider* signatures still works.
-        std::unique_ptr<VibeSlider>         gainFader;  // bipolar vertical -18..+18 dB
-        std::unique_ptr<VibeSlider>         freqKnob;   // rotary 20..20000 Hz
-        std::unique_ptr<VibeSlider>         qKnob;      // rotary 0.1..10
+        std::unique_ptr<BaySickSlider>         gainFader;  // bipolar vertical -18..+18 dB
+        std::unique_ptr<BaySickSlider>         freqKnob;   // rotary 20..20000 Hz
+        std::unique_ptr<BaySickSlider>         qKnob;      // rotary 0.1..10
         // enableBtn removed - click the colored dot at the top of each column to toggle on/off
     };
     std::array<BandControl, kNumBands> mControls;
@@ -1503,7 +1503,7 @@ private:
     // D.4-Q6 (2026-05-01): EQ8 main-level output fader, surfaced as a 9th
     // vertical fader on the right of the band column area.  -18..+18 dB.
     // Bound to EQ8DSP::setMainLevel (or both Mid+Side in MsDSP mode).
-    std::unique_ptr<VibeSlider> mMainLevelFader;
+    std::unique_ptr<BaySickSlider> mMainLevelFader;
     juce::Rectangle<int>        mMainReadoutR {};
 
     // 12j follow-up Q1: shared inline TextEditor for readout editing. Positioned
@@ -1583,7 +1583,7 @@ private:
     // the EQ, so a band lane silently did nothing after a project load until the
     // user happened to visit the page.  Every one of those ids is a real APVTS
     // param, so registration moved to param materialization
-    // (VibeSynthProcessor::onMixerStripParamsCreated).
+    // (BaySickDAWProcessor::onMixerStripParamsCreated).
 
     // 12j: opens a CallOutBox popout with Threshold / Ratio / Attack / Release /
     // Range sliders + Upward toggle + live GR meter for the given band index.
@@ -1834,7 +1834,7 @@ private:
 //    call it; the FL-parity range above is now the only mode).
 // QA-RustyMeter Task 3 (2026-05-30): master-strip LUFS readout.  Shows ONE of
 // Momentary / Short-Term / Integrated at a time (small dropdown selector); all
-// three are fed each vblank by MixerPage from VibeSynthProcessor::getMasterLufs.
+// three are fed each vblank by MixerPage from BaySickDAWProcessor::getMasterLufs.
 // Sits between the master width knob and fader.  The strip holds no processor
 // ref, so values are pushed in (not polled) -- same as the strip's DBFSMeter.
 // Selected mode persists to settings.xml.  Layout (spec #1): the LUFS value on

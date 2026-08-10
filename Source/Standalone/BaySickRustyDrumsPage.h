@@ -33,7 +33,7 @@ class BaySickRustyDrumsPage : public juce::Component,
                               public juce::Timer
 {
 public:
-    BaySickRustyDrumsPage (VibeSynthProcessor& p);
+    BaySickRustyDrumsPage (BaySickDAWProcessor& p);
     ~BaySickRustyDrumsPage() override;
 
     void paint  (juce::Graphics&) override;
@@ -121,7 +121,7 @@ public:
     juce::String getEngineType() const;
 
 private:
-    VibeSynthProcessor& mProcessor;
+    BaySickDAWProcessor& mProcessor;
 
     int          mActiveTab   { 0 };
     juce::String mTabName     { "BaySickRustyDrums" };

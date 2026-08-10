@@ -83,11 +83,11 @@ private:
 
     // ── Top-Left Panel: Timbre, Routing, Blur, Trem, Vib/Legato ──────────────
     // Timbre
-    VibeSlider      mTimbreShapeSlider;  // hidden, APVTS attachment for timbre_shape
-    VibeSlider      mPartBShapeSlider;   // hidden, APVTS attachment for partB_timbre_shape
-    VibeSlider      mTimbreBlend;
-    VibeSlider      mPartALevel, mPartBLevel;
-    VibeSlider      mBrownian;
+    BaySickSlider      mTimbreShapeSlider;  // hidden, APVTS attachment for timbre_shape
+    BaySickSlider      mPartBShapeSlider;   // hidden, APVTS attachment for partB_timbre_shape
+    BaySickSlider      mTimbreBlend;
+    BaySickSlider      mPartALevel, mPartBLevel;
+    BaySickSlider      mBrownian;
     // S4 AG-1: Auto-gain mode 2-state toggle (REL / ABS).  D.4-Q1+Q2
     // (2026-05-01): moved from Timbre to Output cell to free space for the
     // new 2x2 stack of filter offsets + part masks.
@@ -95,76 +95,76 @@ private:
     // D.4-Q2 (2026-05-01): 2x2 stack added to Timbre cell.  Top row: filter 1
     // cutoff offset + filter 2 cutoff offset.  Bottom row: part A timbre filter
     // mask + part B timbre filter mask.
-    VibeSlider      mFlt1CutoffOfs;
-    VibeSlider      mFlt2CutoffOfs;
-    VibeSlider      mPartAMask;
-    VibeSlider      mPartBMask;
+    BaySickSlider      mFlt1CutoffOfs;
+    BaySickSlider      mFlt2CutoffOfs;
+    BaySickSlider      mPartAMask;
+    BaySickSlider      mPartBMask;
     // D.4-Q1 (2026-05-01): per-filter ADSR envelopes (8 knobs total) shown in
     // a new 2x2 ADSR panel placed to the right of each filter row.
-    VibeSlider      mFlt1A, mFlt1D, mFlt1S, mFlt1R;
-    VibeSlider      mFlt2A, mFlt2D, mFlt2S, mFlt2R;
+    BaySickSlider      mFlt1A, mFlt1D, mFlt1S, mFlt1R;
+    BaySickSlider      mFlt2A, mFlt2D, mFlt2S, mFlt2R;
     // Blur
-    VibeSlider      mBlurSize;
-    VibeSlider      mBlurTime;
-    VibeSlider      mBlurHarm;
+    BaySickSlider      mBlurSize;
+    BaySickSlider      mBlurTime;
+    BaySickSlider      mBlurHarm;
     // Prism
-    VibeSlider      mPrismAmt;
-    VibeSlider      mPrismMode;          // discrete 0-2
+    BaySickSlider      mPrismAmt;
+    BaySickSlider      mPrismMode;          // discrete 0-2
     // Tremolo
-    VibeSlider      mTremShapeSlider;    // hidden, APVTS attachment for trem_shape
-    VibeSlider      mTremDepth, mTremSpeed, mTremGap;
+    BaySickSlider      mTremShapeSlider;    // hidden, APVTS attachment for trem_shape
+    BaySickSlider      mTremDepth, mTremSpeed, mTremGap;
     // Vibrato
-    VibeSlider      mVibShapeSlider;     // hidden, APVTS attachment for vib_shape
-    VibeSlider      mVibDepth, mVibSpeed, mVibEnv;
+    BaySickSlider      mVibShapeSlider;     // hidden, APVTS attachment for vib_shape
+    BaySickSlider      mVibDepth, mVibSpeed, mVibEnv;
     // Legato
-    VibeSlider      mGlideTime, mLegatoLimit;
+    BaySickSlider      mGlideTime, mLegatoLimit;
     juce::TextButton mLegatoBtn { "LEGATO" };
 
     // ── Top-Middle Panel: Unison ──────────────────────────────────────────────
-    VibeSlider      mUnisonVoices;       // 1-9 discrete
-    VibeSlider      mUnisonType;         // 0-3 type
+    BaySickSlider      mUnisonVoices;       // 1-9 discrete
+    BaySickSlider      mUnisonType;         // 0-3 type
     juce::TextButton mUnisonAltBtn { "ALT" };
-    VibeSlider      mUnisonPan;          // unison_spread
-    VibeSlider      mUnisonPitch;        // unison_detune
-    VibeSlider      mUnisonPhase;        // unison_phase
+    BaySickSlider      mUnisonPan;          // unison_spread
+    BaySickSlider      mUnisonPitch;        // unison_detune
+    BaySickSlider      mUnisonPhase;        // unison_phase
 
     // ── Top-Right Panel: filters done via HarmlessFilterRow components above
     // Bottom FX row
-    VibeSlider      mPluckDecay;
+    BaySickSlider      mPluckDecay;
     juce::TextButton mPluckBlurBtn { "BLUR" };  // SLA-Impl #39: Pluck blur toggle (DSP shipped S1)
-    VibeSlider      mPhaserMix, mPhaserDepth, mPhaserRate;
-    VibeSlider      mPhaserWidth;             // Phaser WIDTH (= feedback)
-    VibeSlider      mPhaserOfs;               // Phaser OFS (= centre freq)
-    VibeSlider      mPhaserMaskRate;          // phaser_mask_rate
-    VibeSlider      mEQMix;
+    BaySickSlider      mPhaserMix, mPhaserDepth, mPhaserRate;
+    BaySickSlider      mPhaserWidth;             // Phaser WIDTH (= feedback)
+    BaySickSlider      mPhaserOfs;               // Phaser OFS (= centre freq)
+    BaySickSlider      mPhaserMaskRate;          // phaser_mask_rate
+    BaySickSlider      mEQMix;
 
     // ── Pitch group (SLA-Impl #17-21) - new section between BLUR/PRISM and TREMOLO ─
-    VibeSlider       mPitchFreq;        // pitch_semitones - "freq" number input
-    VibeSlider       mPitchDetune;      // pitch_cents - "detune" number input
-    VibeSlider       mPitchFreqFrac;    // pitch_freq_frac - chicken-head selector
+    BaySickSlider       mPitchFreq;        // pitch_semitones - "freq" number input
+    BaySickSlider       mPitchDetune;      // pitch_cents - "detune" number input
+    BaySickSlider       mPitchFreqFrac;    // pitch_freq_frac - chicken-head selector
     juce::TextButton mPitchOctBtn { "OCT" };   // UI-only display toggle
     juce::TextButton mPitchHzBtn  { "Hz" };    // UI-only display toggle
 
     // ── Bottom-Left Panel: Global, AmpEnv, LFO, Phase, Strum ─────────────────
     // Global
     juce::TextButton mPartABtn { "A" }, mPartBBtn { "B" };
-    VibeSlider       mPartSel;           // part_sel 0-1
-    VibeSlider       mVolume, mPan;
+    BaySickSlider       mPartSel;           // part_sel 0-1
+    BaySickSlider       mVolume, mPan;
     juce::TextButton mVelLinkBtn { "VEL" };
     juce::TextButton mCutSelfBtn { "CUT SELF" };
     juce::TextButton mCutSelfModeBtn { "SAME PITCH" };   // QA-CutSelfReview: Same Pitch / Cut All
     // Amp ADSR
-    VibeSlider      mAmpA, mAmpD, mAmpS, mAmpR;
+    BaySickSlider      mAmpA, mAmpD, mAmpS, mAmpR;
     // Phase (compact in amp row)
-    VibeSlider      mPhaseStart, mPhaseRand;
+    BaySickSlider      mPhaseStart, mPhaseRand;
     // LFO routing
-    VibeSlider      mLfoVel, mLfoVol, mLfoPitch;
-    VibeSlider       mLfoRate;       // global lfo_rate (13-step)
-    VibeSlider       mLfoShape;      // global lfo_shape (4-value chicken)
+    BaySickSlider      mLfoVel, mLfoVol, mLfoPitch;
+    BaySickSlider       mLfoRate;       // global lfo_rate (13-step)
+    BaySickSlider       mLfoShape;      // global lfo_shape (4-value chicken)
     juce::TextButton mLfoTempoBtn { "TEMPO" };  // global lfo_tempo bool
     // Strum
-    VibeSlider      mStrumDirSlider;     // 0-2 discrete
-    VibeSlider      mStrumTime, mStrumTns;
+    BaySickSlider      mStrumDirSlider;     // 0-2 discrete
+    BaySickSlider      mStrumTime, mStrumTns;
 
     // ── Section layout bounds (for paint) ─────────────────────────────────────
     // QA-Layout T7 (Specific-2): band + column frames, then one rect per

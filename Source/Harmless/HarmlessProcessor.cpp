@@ -320,7 +320,7 @@ HarmlessProcessor::createLayout (const juce::String& p)
         vid (p + "pan"), "Pan",
         juce::NormalisableRange<float> (-1.f, 1.f), 0.f));
 
-    // 2026-04-19 (S1): reverb_amount removed - VibeDAW's effects rack handles
+    // 2026-04-19 (S1): reverb_amount removed - BaySickDAW's effects rack handles
     // reverb/chorus/delay/etc on the Layers bus. In-instrument FX violates the
     // rack-everywhere pattern. PRESET-SAFE (param had no DSP effect).
 

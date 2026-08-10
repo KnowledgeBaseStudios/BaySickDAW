@@ -119,7 +119,7 @@ public:
     juce::AudioPluginFormatManager& formats() noexcept { return mFormats; }
 
     // The app-wide instance.  Same scope justification as
-    // DSPBase::sTransportPlaying: there is one VibeSynthProcessor per app, and
+    // DSPBase::sTransportPlaying: there is one BaySickDAWProcessor per app, and
     // EffectRack's factory is a plain EffectType switch with no route back to
     // the processor -- so a VST3 rack slot has no other way to reach the format
     // manager.  Set and cleared by this class's own ctor/dtor.

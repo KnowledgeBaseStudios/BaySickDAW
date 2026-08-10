@@ -16,7 +16,7 @@
 // Library tagging for Vox recordings happens via commitRecordingResult, and
 // re-tagging via Task 7's Properties Routing dropdown (when it lands).
 
-VoxPage::VoxPage (VibeSynthProcessor& proc, int pageIndex)
+VoxPage::VoxPage (BaySickDAWProcessor& proc, int pageIndex)
     : mPageIndex (pageIndex),
       mTabName   ("Vox " + juce::String (pageIndex + 1))
 {
@@ -499,7 +499,7 @@ void VoxPage::setSongTimeSelProviders (std::function<void(float,float)> setFn,
 // real method so the EQ-binding logic can fire when the StandaloneEditor
 // hands the full processor over (constructor's selectEngine fires before
 // setProcessor in the new spawn order).
-void VoxPage::setProcessor (VibeSynthProcessor* p)
+void VoxPage::setProcessor (BaySickDAWProcessor* p)
 {
     mFullProcessor = p;
     // J-6 EQ unification (2026-05-03): page-level EQ display removed; pre-rack
@@ -507,13 +507,13 @@ void VoxPage::setProcessor (VibeSynthProcessor* p)
 
     // QA-F Task 3: inject the BaySickAlign services (composite renderer +
     // clip signatures + channel list + project folder) into the vocal
-    // engine.  The engine never links against VibeSynthProcessor; these
+    // engine.  The engine never links against BaySickDAWProcessor; these
     // hooks are its only reach into the timeline.  All message-thread.
     if (auto* bv = dynamic_cast<BaySickVocalProcessor*> (mVocalProc))
     {
         bv->setOwnChannelId (MixerChannelIds::voxInsert (mPageIndex));
 
-        VibeSynthProcessor* full = mFullProcessor;
+        BaySickDAWProcessor* full = mFullProcessor;
         bv->onRenderComposite = [full] (int channelId, double& outStartBeat,
                                         juce::int64& outStartSample, double& outSr)
             -> juce::AudioBuffer<float>

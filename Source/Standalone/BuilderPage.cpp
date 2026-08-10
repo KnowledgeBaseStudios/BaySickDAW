@@ -2562,7 +2562,7 @@ AudioThumbnail* ArrangementGrid::getOrCreateThumbnail(const juce::String& path) 
     if (mThumbnails.count(path) == 0)
     {
         // P4: stored path may be relative ("Samples/kick.wav") - resolve via
-        // the callback (wired by BuilderPage to VibeSynthProcessor).  Cache
+        // the callback (wired by BuilderPage to BaySickDAWProcessor).  Cache
         // key uses the ORIGINAL path string so draw-code lookups (which pass
         // b.audioFilePath as-is) always hit the same entry.  When the
         // callback is unset, treat the string as an absolute path (pre-P4).
@@ -3095,7 +3095,7 @@ void ArrangementGrid::drawAudioClip(Graphics& g, const ArrangementBlock& b,
     //   Vox    (voxInsert   600..605) -> teal   0xff0fafa5
     //   Inst   (instInsert  700..705) -> navy   0xff1c3a8a
     //   unrouted / generic Audio row  -> the legacy teal-grey base
-    // Ranges mirror MixerChannelIds (Source/VibeGraph.h); kept as literals
+    // Ranges mirror MixerChannelIds (Source/BaySickGraph.h); kept as literals
     // here so BuilderPage doesn't pull in the heavy graph header just for
     // three int ranges.  Missing-file red still overrides everything.
     Colour base;
@@ -5466,7 +5466,7 @@ void ArrangementGrid::importAudioFile(const juce::String& path, int targetRow, f
     // QA-E Task 4 (2026-05-12): if the path is project-relative (e.g.
     // "Samples/foo.wav" from the audio library), File(path) resolves it
     // against CWD = the EXE's folder, not the project folder.  Fall through
-    // to onResolveStoredPath (VibeSynthProcessor::resolveProjectFile) when
+    // to onResolveStoredPath (BaySickDAWProcessor::resolveProjectFile) when
     // the as-is path doesn't exist, so library-relative paths from the
     // browser drag work the same as absolute paths from external drops.
     if (!f.existsAsFile() && onResolveStoredPath)
@@ -8368,7 +8368,7 @@ void ArrangementToolbar::resized()
 // ─────────────────────────────────────────────────────────────────────────────
 // BuilderPage
 // ─────────────────────────────────────────────────────────────────────────────
-BuilderPage::BuilderPage(VibeSynthProcessor& p, PatternManager& pm)
+BuilderPage::BuilderPage(BaySickDAWProcessor& p, PatternManager& pm)
     : mProcessor(p), mPM(pm)
 {
     setWantsKeyboardFocus(true);
@@ -9185,7 +9185,7 @@ bool BuilderPage::runOfflineLoop (const RenderOptions& opts,
 
     // ── Offline drive ────────────────────────────────────────────────────────
     // The LIVE processor renders itself: same engines, same graph, same racks
-    // as playback.  The old replica VibeSynthProcessor here had no pages and
+    // as playback.  The old replica BaySickDAWProcessor here had no pages and
     // therefore no instrument engines or strips -- vox/inst/instrument
     // exports rendered SILENT (the batch's origin finding).
     if (onOfflineRenderActive) onOfflineRenderActive (true);
@@ -9623,7 +9623,7 @@ bool BuilderPage::renderToFile (const RenderOptions& opts,
 // an intermediate, but a freeze file is also the thing the user can drag out and
 // keep, and 24-bit is half the disk for a difference nothing downstream can hear
 // after the rack it still passes through.
-bool BuilderPage::renderFreezeFile (VibeGraph::InsertKind kind, int index,
+bool BuilderPage::renderFreezeFile (BaySickGraph::InsertKind kind, int index,
                                     RenderTask* target,
                                     int patternIndex,
                                     const juce::File& dest,

@@ -3,7 +3,7 @@
 #include "../Hosting/HostedPlugin.h"
 #include "UndoActions.h"   // QA-UndoCoverage ruling 3a: UndoContext + StructuralOpAction
 
-class VibeSynthProcessor;
+class BaySickDAWProcessor;
 
 // ── PluginsPage ──────────────────────────────────────────────────────────────
 // QA-ModelShell TS6 (BLU-447): the view for one hosted-VST3-instrument tab.
@@ -23,7 +23,7 @@ class PluginsPage final : public juce::Component,
                           private juce::ChangeListener
 {
 public:
-    PluginsPage (VibeSynthProcessor& p, int pageIndex);
+    PluginsPage (BaySickDAWProcessor& p, int pageIndex);
     ~PluginsPage() override;
 
     void paint (juce::Graphics&) override;
@@ -133,7 +133,7 @@ private:
     void showPicker();
     void refreshNameMarker();
 
-    VibeSynthProcessor& mProcessor;
+    BaySickDAWProcessor& mProcessor;
     int                 mPageIndex { 0 };
     juce::String        mTabName;
     juce::Colour        mPageColor;

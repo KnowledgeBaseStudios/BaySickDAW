@@ -1,4 +1,4 @@
-#include "VibeGraph.h"
+#include "BaySickGraph.h"
 #include "DSP/LufsMeterDSP.h"   // QA-RustyMeter Task 3: master-bus EBU R128 LUFS
 #include "DSP/TruePeakMeter.h"  // QA-ModelShell TS7 CL-044: master-out true peak
 #include "Hosting/HostedPluginEffect.h"  // rack-slot offline sweep
@@ -21,20 +21,20 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 
 namespace {
-    static inline int computeChannelId(VibeGraph::InsertKind kind, int index) noexcept
+    static inline int computeChannelId(BaySickGraph::InsertKind kind, int index) noexcept
     {
         using namespace MixerChannelIds;
         switch (kind)
         {
-            case VibeGraph::InsertKind::Layer: return layerInsert(index);
-            case VibeGraph::InsertKind::Bass:  return bassInsert (index);
-            case VibeGraph::InsertKind::Drum:  return drumInsert (index);
-            case VibeGraph::InsertKind::Audio: return audioInsert(index);
-            case VibeGraph::InsertKind::Aux:   return auxStrip   (index);
-            case VibeGraph::InsertKind::Vox:   return voxInsert  (index);
-            case VibeGraph::InsertKind::Inst:  return instInsert (index);
-            case VibeGraph::InsertKind::Rusty: return rustyInsert(index);
-            case VibeGraph::InsertKind::Plugin: return pluginInsert(index);
+            case BaySickGraph::InsertKind::Layer: return layerInsert(index);
+            case BaySickGraph::InsertKind::Bass:  return bassInsert (index);
+            case BaySickGraph::InsertKind::Drum:  return drumInsert (index);
+            case BaySickGraph::InsertKind::Audio: return audioInsert(index);
+            case BaySickGraph::InsertKind::Aux:   return auxStrip   (index);
+            case BaySickGraph::InsertKind::Vox:   return voxInsert  (index);
+            case BaySickGraph::InsertKind::Inst:  return instInsert (index);
+            case BaySickGraph::InsertKind::Rusty: return rustyInsert(index);
+            case BaySickGraph::InsertKind::Plugin: return pluginInsert(index);
         }
         return -1;  // unreachable; defensive
     }
@@ -42,7 +42,7 @@ namespace {
 
 // ═══════════════════════════════════════════════════════════════════════════════
 //  Bus node struct definitions
-//  These are nested inside VibeGraph (forward-declared in VibeGraph.h).
+//  These are nested inside BaySickGraph (forward-declared in BaySickGraph.h).
 //  Each node:
 //    • holds non-owning refs to the shared engine and EQ DSP
 //    • owns its EffectRack (6 hot-swap slots)
@@ -173,14 +173,14 @@ namespace
         // CAS-max: each audio block, raise the running max in the node's
         // atomic if this block's compensated peak is louder.  The atomic is
         // drained by the PluginProcessor mirror sync once per block:
-        //   - buses: BusNode peakDbL/R -> VibeGraph member atomics
+        //   - buses: BusNode peakDbL/R -> BaySickGraph member atomics
         //     (exchange-store in processBus) -> PluginProcessor mirror
         //     (drainAndMerge in drainMeterAtomicsForUI) -> UI poll
         //     (exchange-and-reset).
-        //   - inserts (QA-AudioMeters 2026-05-24): InsertNode peakDb -> VibeGraph
+        //   - inserts (QA-AudioMeters 2026-05-24): InsertNode peakDb -> BaySickGraph
         //     per-kind public-member array (exchange-store in processInsert) ->
         //     PluginProcessor m<Kind>InsertPeakDb* mirror (drainAndMerge in
-        //     drainMeterAtomicsForUI) -> UI poll via VibeSynthProcessor::
+        //     drainMeterAtomicsForUI) -> UI poll via BaySickDAWProcessor::
         //     drainInsertPeakDbStereo (exchange-and-reset).
         auto casMax = [] (std::atomic<float>& a, float v) noexcept
         {
@@ -198,7 +198,7 @@ namespace
     // top half.  Computes sqrt(mean-square) in dB and CAS-maxes it into the
     // node's rms atoms.  The audio thread NEVER resets these (unlike peak, which
     // processInsert exchange-stores) -- the UI exchange-resets them via
-    // VibeGraph::drainInsertNodeRms, so the value is "max RMS since the last UI
+    // BaySickGraph::drainInsertNodeRms, so the value is "max RMS since the last UI
     // read", and the CAS-max is what merges several windows inside one UI frame.
     //
     // QA-Buffers (2026-08-09): the mean-square is taken over `win`, a fixed span
@@ -315,12 +315,12 @@ static void applyStereoPan (juce::AudioBuffer<float>& buf, float pan, int law) n
 // kinds lack some params); load() helper falls back to a sensible default.
 //
 // Batch 2 does NOT call processBlock() from anywhere. Batch 3 wires it in.
-struct VibeGraph::InsertNode
+struct BaySickGraph::InsertNode
 {
     // ── Identity ──────────────────────────────────────────────────────────────
     juce::String          name;
     juce::String          apvtsPrefix;
-    VibeGraph::InsertKind kind  { VibeGraph::InsertKind::Layer };
+    BaySickGraph::InsertKind kind  { BaySickGraph::InsertKind::Layer };
     int                   index { 0 };
     // QA-InsertMaps (2026-05-24): cached MixerChannelIds chId; set by
     // ensureInsertNode via computeChannelId(kind, index).  Lets processInsert
@@ -341,7 +341,7 @@ struct VibeGraph::InsertNode
     // QA-AudioMeters (2026-05-24): G1-pattern peak fields (parallel to L/B/D/
     // Master/FX/AudioClips/Vox/Inst/Rusty BusNodes).  InsertNode::processBlock
     // calls publishPeakReading which CAS-maxes into peakDb/L/R via the
-    // latency-comp ring; VibeGraph::processInsert exchange-stores these into
+    // latency-comp ring; BaySickGraph::processInsert exchange-stores these into
     // its per-kind public-member arrays at end of every processInsert call;
     // drainMeterAtomicsForUI drains those into PluginProcessor mirrors that
     // the UI polls.  peakDbSnap layer + peakDecayDbPerBlock field removed --
@@ -355,7 +355,7 @@ struct VibeGraph::InsertNode
 
     // QA-RustyMeter (2026-05-30): RMS accumulator for the split meter.
     // CAS-maxed by publishRms (audio thread); exchange-reset by the UI via
-    // VibeGraph::drainInsertNodeRms.  Not touched by processInsert (unlike peak).
+    // BaySickGraph::drainInsertNodeRms.  Not touched by processInsert (unlike peak).
     std::atomic<float>    rmsDbL { -60.f };
     std::atomic<float>    rmsDbR { -60.f };
     // QA-Buffers: the fixed-time averaging window behind those two.  Audio
@@ -389,7 +389,7 @@ struct VibeGraph::InsertNode
     std::atomic<bool>        scTapArmed { false };
 
     // ── Pre-fader send tap ────────────────────────────────────────────────────
-    // Armed at block rate by VibeGraph::armPreFaderTaps, and ONLY for a strip
+    // Armed at block rate by BaySickGraph::armPreFaderTaps, and ONLY for a strip
     // that is the source of at least one pre-fader send -- an unarmed strip pays
     // one relaxed load per block and copies nothing.
     //
@@ -403,7 +403,7 @@ struct VibeGraph::InsertNode
     std::atomic<bool>        preFaderTapArmed { false };
     CompDelayLine            preFaderTapDelay;
 
-    InsertNode(VibeGraph::InsertKind k, int i, int channelId,
+    InsertNode(BaySickGraph::InsertKind k, int i, int channelId,
                juce::String displayName, juce::String prefix)
         : name(std::move(displayName))
         , apvtsPrefix(std::move(prefix))
@@ -452,7 +452,7 @@ struct VibeGraph::InsertNode
     bool isSoloed() const noexcept { return load(pSolo, 0.f) > 0.5f; }
 
     // ── TS7 §6.2: pre-rack "Source Only" freeze tap ───────────────────────────
-    // Armed by VibeGraph::armFreezeTap for ONE insert during a freeze render.
+    // Armed by BaySickGraph::armFreezeTap for ONE insert during a freeze render.
     // The copy is taken at the very TOP of processBlock -- before preEq, and
     // therefore before the whole chain (preEq -> polarity -> width -> rack -> eq
     // -> fader -> pan).  That is what makes a frozen tab keep its rack live and
@@ -527,7 +527,7 @@ struct VibeGraph::InsertNode
         const bool bypass       = stripBypass || globalBypass;
         if (rack.isRackBypassed() != bypass)
             rack.setRackBypassed(bypass);
-        rack.setHostTransport (VibeGraph::blockTransport (bpm));
+        rack.setHostTransport (BaySickGraph::blockTransport (bpm));
         rack.process(buf);
 
         // Post-rack EQ (identity short-circuit + spectrum feed live inside).
@@ -591,7 +591,7 @@ struct VibeGraph::InsertNode
         // (CAS-max + latency-comp ring) -- same helper every BusNode uses.
         // Per-block decay used to live here as an open-coded load-decay-max-store;
         // ballistic decay now happens UI-side in DBFSMeter.  processInsert
-        // exchange-stores peakDb/L/R into VibeGraph's per-kind public-member
+        // exchange-stores peakDb/L/R into BaySickGraph's per-kind public-member
         // arrays at end of every processInsert call; drainMeterAtomicsForUI
         // drains those into PluginProcessor mirrors that UI polls.
         publishPeakReading (buf, peakRingL, peakRingR, peakRingIdx,
@@ -616,7 +616,7 @@ struct VibeGraph::InsertNode
 // comp delay, LUFS meter) is processMasterChain; every other bus runs
 // processChainOnly.  The L/B/D synth-render fallback paths died with the fold
 // (dead since QA-Ea Part A; zero callers).
-struct VibeGraph::InstrChannelNode
+struct BaySickGraph::InstrChannelNode
 {
     juce::String name;
     EQ8MsDSP     preEq;   // §P4.3 pre-rack
@@ -634,7 +634,7 @@ struct VibeGraph::InstrChannelNode
 
     // CL-044 (QA-ModelShell TS7): master-out spectrum tap.  Written by the MASTER
     // chain only; sibling buses never touch either member.  `specFeedActive` is
-    // owned by VibeGraph (not the node) so its lifetime is independent of the
+    // owned by BaySickGraph (not the node) so its lifetime is independent of the
     // node's.  Since §3.1 the tap is effectively ALWAYS live -- version
     // capture's always-on analysis want ORs with the analyzer window's -- so
     // the flag mostly records which clients hold it up.  Null on every
@@ -659,7 +659,7 @@ struct VibeGraph::InstrChannelNode
     std::atomic<float>  masterTpMaxDb { -144.0f };
 
     // QA-Eg: G1-pattern peak fields.  publishPeakReading writes peakDb/L/R +
-    // ring; processBus exchange-stores into VibeGraph member atomics;
+    // ring; processBus exchange-stores into BaySickGraph member atomics;
     // drainMeterAtomicsForUI drains those into PluginProcessor mirrors.
     std::atomic<float> peakDb  { -60.f };
     std::atomic<float> peakDbL { -60.f };
@@ -668,7 +668,7 @@ struct VibeGraph::InstrChannelNode
     int peakRingIdx { 0 };
 
     // QA-Buffers: fixed-time averaging window for this bus's RMS half.  The dB
-    // atoms it feeds are VibeGraph members (processBus picks the pair), but the
+    // atoms it feeds are BaySickGraph members (processBus picks the pair), but the
     // accumulator has to live with the node so each bus keeps its own.
     MeterRmsWindow rmsWin;
 
@@ -743,14 +743,14 @@ struct VibeGraph::InstrChannelNode
     // pre-rack EQ -> rack (strip bypass OR global kill-all) -> post-rack EQ
     // -> fader x mute x unified bus-solo gate -> polarity + M/S width -> pan
     // -> SC stash -> latency-compensated comp delay -> peak publish.
-    // anyBusSoloed = VibeGraph::anyBusSoloed(), computed once per block by the
+    // anyBusSoloed = BaySickGraph::anyBusSoloed(), computed once per block by the
     // caller and shared by every bus (QA-Ea Part A canonical formula:
     // silenced = muted || (anyBusSoloed && !soloed)).
     void processChainOnly(juce::AudioBuffer<float>& buf, double bpm,
                           bool anyBusSoloed)
     {
         if (buf.getNumChannels() >= 2) preEq.process(buf);   // §P4.3 (identity short-circuit + spectrum feed inside)
-        rack.setHostTransport (VibeGraph::blockTransport (bpm));
+        rack.setHostTransport (BaySickGraph::blockTransport (bpm));
         {
             const bool stripBypass  = loadParam(pBypass, 0.f) > 0.5f;
             const bool globalBypass = loadParam(pGlobalFxBypass, 0.f) > 0.5f;
@@ -823,7 +823,7 @@ struct VibeGraph::InstrChannelNode
     void processMasterChain(juce::AudioBuffer<float>& buf, double bpm)
     {
         if (buf.getNumChannels() >= 2) preEq.process(buf);   // §P4.3
-        rack.setHostTransport (VibeGraph::blockTransport (bpm));
+        rack.setHostTransport (BaySickGraph::blockTransport (bpm));
         // mixer_master_bypass bypasses the master rack only; master_fx_bypass
         // also bypasses every other strip's rack.  OR-ed together.
         {
@@ -908,13 +908,13 @@ struct VibeGraph::InstrChannelNode
 };
 
 // ═══════════════════════════════════════════════════════════════════════════════
-//  VibeGraph implementation
+//  BaySickGraph implementation
 // ═══════════════════════════════════════════════════════════════════════════════
 
-// TS7 per-block transport snapshot.  See VibeGraph.h for why this is static.
-DSPBase::HostTransport VibeGraph::sBlockTransport {};
+// TS7 per-block transport snapshot.  See BaySickGraph.h for why this is static.
+DSPBase::HostTransport BaySickGraph::sBlockTransport {};
 
-VibeGraph::VibeGraph()
+BaySickGraph::BaySickGraph()
 {
     // THREAD SAFETY: the audio thread range-fors mLiveInsertChannels every block
     // (isAnyInsertSoloed, rebuildRoutingFromApvts) while the message thread
@@ -930,13 +930,13 @@ VibeGraph::VibeGraph()
 }
 
 // Destructor defined here so unique_ptr<incomplete-type> compiles in the header
-VibeGraph::~VibeGraph()
+BaySickGraph::~BaySickGraph()
 {
     // unique_ptrs are destroyed in declaration order after this body
 }
 
 // ── prepare ───────────────────────────────────────────────────────────────────
-void VibeGraph::prepare(double sampleRate, int maxBlockSize)
+void BaySickGraph::prepare(double sampleRate, int maxBlockSize)
 {
     mSampleRate = sampleRate;
     mBlockSize  = maxBlockSize;
@@ -1036,7 +1036,7 @@ void VibeGraph::prepare(double sampleRate, int maxBlockSize)
 }
 
 // ── reset ─────────────────────────────────────────────────────────────────────
-void VibeGraph::reset()
+void BaySickGraph::reset()
 {
     for (auto& r : mLayerPageRacks) r.reset();
     for (auto& r : mBassPageRacks)  r.reset();
@@ -1076,7 +1076,7 @@ void VibeGraph::reset()
 }
 
 // ── buildFixedTopology ────────────────────────────────────────────────────────
-void VibeGraph::buildFixedTopology(juce::AudioProcessorValueTreeState& apvts)
+void BaySickGraph::buildFixedTopology(juce::AudioProcessorValueTreeState& apvts)
 {
     if (mTopologyBuilt) return;   // safe to call every prepareToPlay - no-op after first
 
@@ -1120,7 +1120,7 @@ void VibeGraph::buildFixedTopology(juce::AudioProcessorValueTreeState& apvts)
     }
 }
 
-void VibeGraph::processMasterBus(juce::AudioBuffer<float>& sumBuf, double bpm)
+void BaySickGraph::processMasterBus(juce::AudioBuffer<float>& sumBuf, double bpm)
 {
     if (mMasterNode == nullptr) return;
 
@@ -1136,7 +1136,7 @@ void VibeGraph::processMasterBus(juce::AudioBuffer<float>& sumBuf, double bpm)
 
 // QA-RustyMeter Task 3 (2026-05-30): UI read of the master LUFS (mode 0=Momentary
 // / 1=Short-Term / 2=Integrated).  Returns -120 if the master node isn't built.
-float VibeGraph::getMasterLufs (int mode) const noexcept
+float BaySickGraph::getMasterLufs (int mode) const noexcept
 {
     if (mMasterNode == nullptr) return -120.f;
     switch (mode)
@@ -1150,13 +1150,13 @@ float VibeGraph::getMasterLufs (int mode) const noexcept
 // QA-RustyMeter Task 3 (2026-05-30): clear the Integrated accumulation (Momentary
 // / Short-Term keep tracking).  Called by PluginProcessor on transport
 // play-from-top / loop-start.  Audio-thread safe (histogram fill, no alloc).
-void VibeGraph::resetMasterLufsIntegrated() noexcept
+void BaySickGraph::resetMasterLufsIntegrated() noexcept
 {
     if (mMasterNode != nullptr) mMasterNode->mLufs.resetIntegrated();
 }
 
 // CL-044 (QA-ModelShell TS7): master-out spectrum tap control + drain.
-void VibeGraph::setMasterSpectrumActive (bool on) noexcept
+void BaySickGraph::setMasterSpectrumActive (bool on) noexcept
 {
     mMasterSpecWanted.store (on, std::memory_order_relaxed);
     updateMasterTapFlag();
@@ -1166,25 +1166,25 @@ void VibeGraph::setMasterSpectrumActive (bool on) noexcept
 // half is always on -- so the tap can no longer be owned by whether the analyzer
 // window happens to be open.  Two independent wants, OR'd, rather than one
 // window's suspend hook writing the flag directly.
-void VibeGraph::setMasterAnalysisActive (bool on) noexcept
+void BaySickGraph::setMasterAnalysisActive (bool on) noexcept
 {
     mMasterAnalysisWanted.store (on, std::memory_order_relaxed);
     updateMasterTapFlag();
 }
 
-float VibeGraph::getMasterTruePeakMaxDb() const noexcept
+float BaySickGraph::getMasterTruePeakMaxDb() const noexcept
 {
     if (mMasterNode == nullptr) return -144.0f;
     return mMasterNode->masterTpMaxDb.load (std::memory_order_relaxed);
 }
 
-void VibeGraph::resetMasterTruePeakMax() noexcept
+void BaySickGraph::resetMasterTruePeakMax() noexcept
 {
     if (mMasterNode != nullptr)
         mMasterNode->masterTpMaxDb.store (-144.0f, std::memory_order_relaxed);
 }
 
-void VibeGraph::updateMasterTapFlag() noexcept
+void BaySickGraph::updateMasterTapFlag() noexcept
 {
     mMasterSpecActive.store (
         mMasterSpecWanted.load (std::memory_order_relaxed)
@@ -1197,7 +1197,7 @@ void VibeGraph::updateMasterTapFlag() noexcept
         mMasterNode->specFeedActive = &mMasterSpecActive;
 }
 
-bool VibeGraph::pollMasterSpectrum (float* dest, int& outCount) noexcept
+bool BaySickGraph::pollMasterSpectrum (float* dest, int& outCount) noexcept
 {
     outCount = 0;
     if (dest == nullptr || mMasterNode == nullptr) return false;
@@ -1207,14 +1207,14 @@ bool VibeGraph::pollMasterSpectrum (float* dest, int& outCount) noexcept
 
 // -144 when the tap is inactive: reporting a stale peak would be worse than
 // reporting none, since the analyzer cannot tell the difference.
-float VibeGraph::getMasterTruePeakDb() const noexcept
+float BaySickGraph::getMasterTruePeakDb() const noexcept
 {
     if (mMasterNode == nullptr) return -144.0f;
     if (! mMasterSpecActive.load (std::memory_order_relaxed)) return -144.0f;
     return mMasterNode->masterTpDb.load (std::memory_order_relaxed);
 }
 
-void VibeGraph::processBus(int busChId, juce::AudioBuffer<float>& buf,
+void BaySickGraph::processBus(int busChId, juce::AudioBuffer<float>& buf,
                             double bpm, int panLaw)
 {
     using namespace MixerChannelIds;
@@ -1362,7 +1362,7 @@ void VibeGraph::processBus(int busChId, juce::AudioBuffer<float>& buf,
     publishRms (buf, node->rmsWin, *rmsL, *rmsR);   // QA-RustyMeter split-meter RMS feed
 
     // Exchange-store the migrated buses' node-internal peak atomics into
-    // VibeGraph member atomics (parallel to L/B/D pattern at the top of this
+    // BaySickGraph member atomics (parallel to L/B/D pattern at the top of this
     // function).  Tasks 4-6 extend with else-if branches for the remaining
     // InstrChannelNode-backed buses.
     if (busChId == kClipsBus && mAudioClipsBusNode != nullptr)
@@ -1434,11 +1434,11 @@ void VibeGraph::processBus(int busChId, juce::AudioBuffer<float>& buf,
 
 // ── EffectRack getters ────────────────────────────────────────────────────────
 // 2026-05-05 dirty-flag wiring: walk every currently-known rack and chain
-// its onSlotsChanged into VibeGraph::onAnyRackChanged.  Called by
+// its onSlotsChanged into BaySickGraph::onAnyRackChanged.  Called by
 // PluginProcessor after it sets the onAnyRackChanged callback.  ensureInsertNode
 // also wires per-insert racks at creation time, so this only needs to cover
 // pre-built ones (bus + per-page + already-existing inserts).
-void VibeGraph::rebindAllRackHooks()
+void BaySickGraph::rebindAllRackHooks()
 {
     auto fire = [this]() { if (onAnyRackChanged) onAnyRackChanged(); };
 
@@ -1473,27 +1473,27 @@ void VibeGraph::rebindAllRackHooks()
             chain (&n->rack);
 }
 
-EffectRack* VibeGraph::getLayersBusRack()     { return mLayersNode       ? &mLayersNode      ->rack : nullptr; }
-EffectRack* VibeGraph::getBassBusRack()       { return mBassNode         ? &mBassNode        ->rack : nullptr; }
-EffectRack* VibeGraph::getDrumsBusRack()      { return mDrumsNode        ? &mDrumsNode       ->rack : nullptr; }
-EffectRack* VibeGraph::getMasterRack()        { return mMasterNode       ? &mMasterNode      ->rack : nullptr; }
-EffectRack* VibeGraph::getEffectsBusRack()    { return mEffectsBusNode   ? &mEffectsBusNode  ->rack : nullptr; }
+EffectRack* BaySickGraph::getLayersBusRack()     { return mLayersNode       ? &mLayersNode      ->rack : nullptr; }
+EffectRack* BaySickGraph::getBassBusRack()       { return mBassNode         ? &mBassNode        ->rack : nullptr; }
+EffectRack* BaySickGraph::getDrumsBusRack()      { return mDrumsNode        ? &mDrumsNode       ->rack : nullptr; }
+EffectRack* BaySickGraph::getMasterRack()        { return mMasterNode       ? &mMasterNode      ->rack : nullptr; }
+EffectRack* BaySickGraph::getEffectsBusRack()    { return mEffectsBusNode   ? &mEffectsBusNode  ->rack : nullptr; }
 
-EffectRack* VibeGraph::getAudioClipsBusRack() { return mAudioClipsBusNode ? &mAudioClipsBusNode->rack : nullptr; }
-EffectRack* VibeGraph::getVoxBusRack()        { return mVoxBusNode        ? &mVoxBusNode       ->rack : nullptr; }
-EffectRack* VibeGraph::getInstBusRack()       { return mInstBusNode       ? &mInstBusNode      ->rack : nullptr; }
-EffectRack* VibeGraph::getVoxBus2Rack()       { return mVoxBus2Node       ? &mVoxBus2Node      ->rack : nullptr; }
-EffectRack* VibeGraph::getInstBus2Rack()      { return mInstBus2Node      ? &mInstBus2Node     ->rack : nullptr; }
-EffectRack* VibeGraph::getInstBus3Rack()      { return mInstBus3Node      ? &mInstBus3Node     ->rack : nullptr; }
-EffectRack* VibeGraph::getRustyDrumsBusRack() { return mRustyDrumsBusNode ? &mRustyDrumsBusNode->rack : nullptr; }
-EffectRack* VibeGraph::getPluginsBusRack()    { return mPluginsBusNode    ? &mPluginsBusNode   ->rack : nullptr; }
-EffectRack* VibeGraph::getLayersBus2Rack()    { return mLayersBus2Node    ? &mLayersBus2Node   ->rack : nullptr; }
-EffectRack* VibeGraph::getBassBus2Rack()      { return mBassBus2Node      ? &mBassBus2Node     ->rack : nullptr; }
-EffectRack* VibeGraph::getClipsBus2Rack()     { return mClipsBus2Node     ? &mClipsBus2Node    ->rack : nullptr; }
-EffectRack* VibeGraph::getPluginsBus2Rack()   { return mPluginsBus2Node   ? &mPluginsBus2Node  ->rack : nullptr; }
-EffectRack* VibeGraph::getDrumsBus2Rack()     { return mDrumsBus2Node     ? &mDrumsBus2Node    ->rack : nullptr; }
+EffectRack* BaySickGraph::getAudioClipsBusRack() { return mAudioClipsBusNode ? &mAudioClipsBusNode->rack : nullptr; }
+EffectRack* BaySickGraph::getVoxBusRack()        { return mVoxBusNode        ? &mVoxBusNode       ->rack : nullptr; }
+EffectRack* BaySickGraph::getInstBusRack()       { return mInstBusNode       ? &mInstBusNode      ->rack : nullptr; }
+EffectRack* BaySickGraph::getVoxBus2Rack()       { return mVoxBus2Node       ? &mVoxBus2Node      ->rack : nullptr; }
+EffectRack* BaySickGraph::getInstBus2Rack()      { return mInstBus2Node      ? &mInstBus2Node     ->rack : nullptr; }
+EffectRack* BaySickGraph::getInstBus3Rack()      { return mInstBus3Node      ? &mInstBus3Node     ->rack : nullptr; }
+EffectRack* BaySickGraph::getRustyDrumsBusRack() { return mRustyDrumsBusNode ? &mRustyDrumsBusNode->rack : nullptr; }
+EffectRack* BaySickGraph::getPluginsBusRack()    { return mPluginsBusNode    ? &mPluginsBusNode   ->rack : nullptr; }
+EffectRack* BaySickGraph::getLayersBus2Rack()    { return mLayersBus2Node    ? &mLayersBus2Node   ->rack : nullptr; }
+EffectRack* BaySickGraph::getBassBus2Rack()      { return mBassBus2Node      ? &mBassBus2Node     ->rack : nullptr; }
+EffectRack* BaySickGraph::getClipsBus2Rack()     { return mClipsBus2Node     ? &mClipsBus2Node    ->rack : nullptr; }
+EffectRack* BaySickGraph::getPluginsBus2Rack()   { return mPluginsBus2Node   ? &mPluginsBus2Node  ->rack : nullptr; }
+EffectRack* BaySickGraph::getDrumsBus2Rack()     { return mDrumsBus2Node     ? &mDrumsBus2Node    ->rack : nullptr; }
 
-EffectRack* VibeGraph::getLayerPageRack(int idx)
+EffectRack* BaySickGraph::getLayerPageRack(int idx)
 {
     // 5F-4a Batch 6: prefer the InsertNode's rack; fall back to the legacy array.
     // QA-InsertMaps (2026-05-24): InsertNode lookup via flat array.
@@ -1502,7 +1502,7 @@ EffectRack* VibeGraph::getLayerPageRack(int idx)
     if (idx < 0 || idx >= kMaxLayerPages) return nullptr;
     return &mLayerPageRacks[idx];
 }
-EffectRack* VibeGraph::getBassPageRack(int idx)
+EffectRack* BaySickGraph::getBassPageRack(int idx)
 {
     // QA-InsertMaps (2026-05-24): InsertNode lookup via flat array.
     if (auto* node = getInsertNode(InsertKind::Bass, idx))
@@ -1511,7 +1511,7 @@ EffectRack* VibeGraph::getBassPageRack(int idx)
     return &mBassPageRacks[idx];
 }
 
-EffectRack* VibeGraph::getAuxRack(int idx)
+EffectRack* BaySickGraph::getAuxRack(int idx)
 {
     // QA-InsertMaps (2026-05-24): InsertNode lookup via flat array.
     if (auto* node = getInsertNode(InsertKind::Aux, idx))
@@ -1544,7 +1544,7 @@ EffectRack* VibeGraph::getAuxRack(int idx)
 // skipped to keep the periodic poll from glitching a running mix.  The audio
 // thread consumes totalLatencySamples atomically (metronome offset,
 // master-recorder trim).
-int VibeGraph::updateBusLatencies()
+int BaySickGraph::updateBusLatencies()
 {
     if (!mTopologyBuilt) return 0;
 
@@ -1796,44 +1796,44 @@ int VibeGraph::updateBusLatencies()
 }
 
 // ── EQ getters (post-rack bus EQs, one per channel) ──────────────────────────
-EQ8MsDSP* VibeGraph::getLayersBusEQ()     { return mLayersNode       ? &mLayersNode      ->eq : nullptr; }
-EQ8MsDSP* VibeGraph::getBassBusEQ()       { return mBassNode         ? &mBassNode        ->eq : nullptr; }
-EQ8MsDSP* VibeGraph::getDrumsBusEQ()      { return mDrumsNode        ? &mDrumsNode       ->eq : nullptr; }
-EQ8MsDSP* VibeGraph::getMasterEQ()        { return mMasterNode       ? &mMasterNode      ->eq : nullptr; }
-EQ8MsDSP* VibeGraph::getEffectsBusEQ()    { return mEffectsBusNode   ? &mEffectsBusNode  ->eq : nullptr; }
-EQ8MsDSP* VibeGraph::getAudioClipsBusEQ() { return mAudioClipsBusNode ? &mAudioClipsBusNode->eq  : nullptr; }
-EQ8MsDSP* VibeGraph::getVoxBusEQ()        { return mVoxBusNode        ? &mVoxBusNode       ->eq  : nullptr; }
-EQ8MsDSP* VibeGraph::getInstBusEQ()       { return mInstBusNode       ? &mInstBusNode      ->eq  : nullptr; }
-EQ8MsDSP* VibeGraph::getVoxBus2EQ()       { return mVoxBus2Node       ? &mVoxBus2Node      ->eq  : nullptr; }
-EQ8MsDSP* VibeGraph::getInstBus2EQ()      { return mInstBus2Node      ? &mInstBus2Node     ->eq  : nullptr; }
-EQ8MsDSP* VibeGraph::getInstBus3EQ()      { return mInstBus3Node      ? &mInstBus3Node     ->eq  : nullptr; }
-EQ8MsDSP* VibeGraph::getRustyDrumsBusEQ() { return mRustyDrumsBusNode ? &mRustyDrumsBusNode->eq  : nullptr; }
-EQ8MsDSP* VibeGraph::getPluginsBusEQ()    { return mPluginsBusNode    ? &mPluginsBusNode   ->eq  : nullptr; }
-EQ8MsDSP* VibeGraph::getLayersBus2EQ()    { return mLayersBus2Node    ? &mLayersBus2Node   ->eq  : nullptr; }
-EQ8MsDSP* VibeGraph::getBassBus2EQ()      { return mBassBus2Node      ? &mBassBus2Node     ->eq  : nullptr; }
-EQ8MsDSP* VibeGraph::getClipsBus2EQ()     { return mClipsBus2Node     ? &mClipsBus2Node    ->eq  : nullptr; }
-EQ8MsDSP* VibeGraph::getPluginsBus2EQ()   { return mPluginsBus2Node   ? &mPluginsBus2Node  ->eq  : nullptr; }
-EQ8MsDSP* VibeGraph::getDrumsBus2EQ()     { return mDrumsBus2Node     ? &mDrumsBus2Node    ->eq  : nullptr; }
+EQ8MsDSP* BaySickGraph::getLayersBusEQ()     { return mLayersNode       ? &mLayersNode      ->eq : nullptr; }
+EQ8MsDSP* BaySickGraph::getBassBusEQ()       { return mBassNode         ? &mBassNode        ->eq : nullptr; }
+EQ8MsDSP* BaySickGraph::getDrumsBusEQ()      { return mDrumsNode        ? &mDrumsNode       ->eq : nullptr; }
+EQ8MsDSP* BaySickGraph::getMasterEQ()        { return mMasterNode       ? &mMasterNode      ->eq : nullptr; }
+EQ8MsDSP* BaySickGraph::getEffectsBusEQ()    { return mEffectsBusNode   ? &mEffectsBusNode  ->eq : nullptr; }
+EQ8MsDSP* BaySickGraph::getAudioClipsBusEQ() { return mAudioClipsBusNode ? &mAudioClipsBusNode->eq  : nullptr; }
+EQ8MsDSP* BaySickGraph::getVoxBusEQ()        { return mVoxBusNode        ? &mVoxBusNode       ->eq  : nullptr; }
+EQ8MsDSP* BaySickGraph::getInstBusEQ()       { return mInstBusNode       ? &mInstBusNode      ->eq  : nullptr; }
+EQ8MsDSP* BaySickGraph::getVoxBus2EQ()       { return mVoxBus2Node       ? &mVoxBus2Node      ->eq  : nullptr; }
+EQ8MsDSP* BaySickGraph::getInstBus2EQ()      { return mInstBus2Node      ? &mInstBus2Node     ->eq  : nullptr; }
+EQ8MsDSP* BaySickGraph::getInstBus3EQ()      { return mInstBus3Node      ? &mInstBus3Node     ->eq  : nullptr; }
+EQ8MsDSP* BaySickGraph::getRustyDrumsBusEQ() { return mRustyDrumsBusNode ? &mRustyDrumsBusNode->eq  : nullptr; }
+EQ8MsDSP* BaySickGraph::getPluginsBusEQ()    { return mPluginsBusNode    ? &mPluginsBusNode   ->eq  : nullptr; }
+EQ8MsDSP* BaySickGraph::getLayersBus2EQ()    { return mLayersBus2Node    ? &mLayersBus2Node   ->eq  : nullptr; }
+EQ8MsDSP* BaySickGraph::getBassBus2EQ()      { return mBassBus2Node      ? &mBassBus2Node     ->eq  : nullptr; }
+EQ8MsDSP* BaySickGraph::getClipsBus2EQ()     { return mClipsBus2Node     ? &mClipsBus2Node    ->eq  : nullptr; }
+EQ8MsDSP* BaySickGraph::getPluginsBus2EQ()   { return mPluginsBus2Node   ? &mPluginsBus2Node  ->eq  : nullptr; }
+EQ8MsDSP* BaySickGraph::getDrumsBus2EQ()     { return mDrumsBus2Node     ? &mDrumsBus2Node    ->eq  : nullptr; }
 
 // §P4.3: Pre-rack bus EQs (NEW - every bus gets one).
-EQ8MsDSP* VibeGraph::getLayersBusPreEQ()     { return mLayersNode       ? &mLayersNode       ->preEq : nullptr; }
-EQ8MsDSP* VibeGraph::getBassBusPreEQ()       { return mBassNode         ? &mBassNode         ->preEq : nullptr; }
-EQ8MsDSP* VibeGraph::getDrumsBusPreEQ()      { return mDrumsNode        ? &mDrumsNode        ->preEq : nullptr; }
-EQ8MsDSP* VibeGraph::getMasterPreEQ()        { return mMasterNode       ? &mMasterNode       ->preEq : nullptr; }
-EQ8MsDSP* VibeGraph::getEffectsBusPreEQ()    { return mEffectsBusNode   ? &mEffectsBusNode   ->preEq : nullptr; }
-EQ8MsDSP* VibeGraph::getAudioClipsBusPreEQ() { return mAudioClipsBusNode ? &mAudioClipsBusNode->preEq : nullptr; }
-EQ8MsDSP* VibeGraph::getVoxBusPreEQ()        { return mVoxBusNode        ? &mVoxBusNode       ->preEq : nullptr; }
-EQ8MsDSP* VibeGraph::getInstBusPreEQ()       { return mInstBusNode       ? &mInstBusNode      ->preEq : nullptr; }
-EQ8MsDSP* VibeGraph::getVoxBus2PreEQ()       { return mVoxBus2Node       ? &mVoxBus2Node      ->preEq : nullptr; }
-EQ8MsDSP* VibeGraph::getInstBus2PreEQ()      { return mInstBus2Node      ? &mInstBus2Node     ->preEq : nullptr; }
-EQ8MsDSP* VibeGraph::getInstBus3PreEQ()      { return mInstBus3Node      ? &mInstBus3Node     ->preEq : nullptr; }
-EQ8MsDSP* VibeGraph::getRustyDrumsBusPreEQ() { return mRustyDrumsBusNode ? &mRustyDrumsBusNode->preEq : nullptr; }
-EQ8MsDSP* VibeGraph::getPluginsBusPreEQ()    { return mPluginsBusNode    ? &mPluginsBusNode   ->preEq : nullptr; }
-EQ8MsDSP* VibeGraph::getLayersBus2PreEQ()    { return mLayersBus2Node    ? &mLayersBus2Node   ->preEq : nullptr; }
-EQ8MsDSP* VibeGraph::getBassBus2PreEQ()      { return mBassBus2Node      ? &mBassBus2Node     ->preEq : nullptr; }
-EQ8MsDSP* VibeGraph::getClipsBus2PreEQ()     { return mClipsBus2Node     ? &mClipsBus2Node    ->preEq : nullptr; }
-EQ8MsDSP* VibeGraph::getPluginsBus2PreEQ()   { return mPluginsBus2Node   ? &mPluginsBus2Node  ->preEq : nullptr; }
-EQ8MsDSP* VibeGraph::getDrumsBus2PreEQ()     { return mDrumsBus2Node     ? &mDrumsBus2Node    ->preEq : nullptr; }
+EQ8MsDSP* BaySickGraph::getLayersBusPreEQ()     { return mLayersNode       ? &mLayersNode       ->preEq : nullptr; }
+EQ8MsDSP* BaySickGraph::getBassBusPreEQ()       { return mBassNode         ? &mBassNode         ->preEq : nullptr; }
+EQ8MsDSP* BaySickGraph::getDrumsBusPreEQ()      { return mDrumsNode        ? &mDrumsNode        ->preEq : nullptr; }
+EQ8MsDSP* BaySickGraph::getMasterPreEQ()        { return mMasterNode       ? &mMasterNode       ->preEq : nullptr; }
+EQ8MsDSP* BaySickGraph::getEffectsBusPreEQ()    { return mEffectsBusNode   ? &mEffectsBusNode   ->preEq : nullptr; }
+EQ8MsDSP* BaySickGraph::getAudioClipsBusPreEQ() { return mAudioClipsBusNode ? &mAudioClipsBusNode->preEq : nullptr; }
+EQ8MsDSP* BaySickGraph::getVoxBusPreEQ()        { return mVoxBusNode        ? &mVoxBusNode       ->preEq : nullptr; }
+EQ8MsDSP* BaySickGraph::getInstBusPreEQ()       { return mInstBusNode       ? &mInstBusNode      ->preEq : nullptr; }
+EQ8MsDSP* BaySickGraph::getVoxBus2PreEQ()       { return mVoxBus2Node       ? &mVoxBus2Node      ->preEq : nullptr; }
+EQ8MsDSP* BaySickGraph::getInstBus2PreEQ()      { return mInstBus2Node      ? &mInstBus2Node     ->preEq : nullptr; }
+EQ8MsDSP* BaySickGraph::getInstBus3PreEQ()      { return mInstBus3Node      ? &mInstBus3Node     ->preEq : nullptr; }
+EQ8MsDSP* BaySickGraph::getRustyDrumsBusPreEQ() { return mRustyDrumsBusNode ? &mRustyDrumsBusNode->preEq : nullptr; }
+EQ8MsDSP* BaySickGraph::getPluginsBusPreEQ()    { return mPluginsBusNode    ? &mPluginsBusNode   ->preEq : nullptr; }
+EQ8MsDSP* BaySickGraph::getLayersBus2PreEQ()    { return mLayersBus2Node    ? &mLayersBus2Node   ->preEq : nullptr; }
+EQ8MsDSP* BaySickGraph::getBassBus2PreEQ()      { return mBassBus2Node      ? &mBassBus2Node     ->preEq : nullptr; }
+EQ8MsDSP* BaySickGraph::getClipsBus2PreEQ()     { return mClipsBus2Node     ? &mClipsBus2Node    ->preEq : nullptr; }
+EQ8MsDSP* BaySickGraph::getPluginsBus2PreEQ()   { return mPluginsBus2Node   ? &mPluginsBus2Node  ->preEq : nullptr; }
+EQ8MsDSP* BaySickGraph::getDrumsBus2PreEQ()     { return mDrumsBus2Node     ? &mDrumsBus2Node    ->preEq : nullptr; }
 
 // ── Rack + bus EQ state serialization ────────────────────────────────────────
 
@@ -1852,7 +1852,7 @@ namespace {
     }
 }
 
-void VibeGraph::saveRackStates(juce::ValueTree& parent)
+void BaySickGraph::saveRackStates(juce::ValueTree& parent)
 {
     if (!mTopologyBuilt) return;
 
@@ -1964,7 +1964,7 @@ void VibeGraph::saveRackStates(juce::ValueTree& parent)
     }
 }
 
-void VibeGraph::clearAllRackStates()
+void BaySickGraph::clearAllRackStates()
 {
     auto wipe = [](EffectRack& r)
     {
@@ -1998,7 +1998,7 @@ void VibeGraph::clearAllRackStates()
             wipe (n->rack);
 }
 
-void VibeGraph::loadRackStates(const juce::ValueTree& parent)
+void BaySickGraph::loadRackStates(const juce::ValueTree& parent)
 {
     if (!mTopologyBuilt)
     {
@@ -2009,7 +2009,7 @@ void VibeGraph::loadRackStates(const juce::ValueTree& parent)
     applyRackStates(parent);
 }
 
-void VibeGraph::applyRackStates(const juce::ValueTree& parent)
+void BaySickGraph::applyRackStates(const juce::ValueTree& parent)
 {
     // 2026-05-05: when the saved record carries a `preEq` property (added in
     // the matching saveRackStates change above), restore it onto the node's
@@ -2139,31 +2139,31 @@ void VibeGraph::applyRackStates(const juce::ValueTree& parent)
 }
 
 // ── Instrument channel registry (one rack+EQ per audio row) ──────────────────
-juce::String VibeGraph::getInstrChannelName(int channelId) const
+juce::String BaySickGraph::getInstrChannelName(int channelId) const
 {
     auto it = mInstrChannelNodes.find(channelId);
     return it != mInstrChannelNodes.end() ? it->second->name : juce::String{};
 }
 
-std::vector<int> VibeGraph::getInstrChannelIds() const
+std::vector<int> BaySickGraph::getInstrChannelIds() const
 {
     return mInstrChannelOrder;
 }
 
-EffectRack* VibeGraph::getInstrChannelRack(int channelId)
+EffectRack* BaySickGraph::getInstrChannelRack(int channelId)
 {
     auto it = mInstrChannelNodes.find(channelId);
     return it != mInstrChannelNodes.end() ? &it->second->rack : nullptr;
 }
 
-EQ8MsDSP* VibeGraph::getInstrChannelEQ(int channelId)
+EQ8MsDSP* BaySickGraph::getInstrChannelEQ(int channelId)
 {
     auto it = mInstrChannelNodes.find(channelId);
     return it != mInstrChannelNodes.end() ? &it->second->eq : nullptr;
 }
 
 // ── Per-clip audio row channels (IDs 400 + row) ──────────────────────────────
-void VibeGraph::addAudioRowChannel(int row, const juce::String& displayName)
+void BaySickGraph::addAudioRowChannel(int row, const juce::String& displayName)
 {
     const int id = 400 + row;
     if (mInstrChannelNodes.count(id) > 0) return;
@@ -2174,7 +2174,7 @@ void VibeGraph::addAudioRowChannel(int row, const juce::String& displayName)
     if (onInstrChannelListChanged) onInstrChannelListChanged();
 }
 
-EffectRack* VibeGraph::getAudioRowRack(int row)
+EffectRack* BaySickGraph::getAudioRowRack(int row)
 {
     // 5F-4a Batch 6: prefer Audio InsertNode; fall back to legacy InstrChannelNode.
     // QA-InsertMaps (2026-05-24): InsertNode lookup via flat array.
@@ -2184,7 +2184,7 @@ EffectRack* VibeGraph::getAudioRowRack(int row)
     return it != mInstrChannelNodes.end() ? &it->second->rack : nullptr;
 }
 
-EQ8MsDSP* VibeGraph::getAudioRowEQ(int row)
+EQ8MsDSP* BaySickGraph::getAudioRowEQ(int row)
 {
     // 5F-4a Batch 6 migration: prefer the Audio InsertNode's EQ; fall back to
     // legacy InstrChannelNode. Mirrors the getAudioRowRack dual-path pattern.
@@ -2206,8 +2206,8 @@ EQ8MsDSP* VibeGraph::getAudioRowEQ(int row)
 //  rationale.
 // ═══════════════════════════════════════════════════════════════════════════════
 
-VibeGraph::InsertNode*
-VibeGraph::ensureInsertNode(InsertKind kind, int index,
+BaySickGraph::InsertNode*
+BaySickGraph::ensureInsertNode(InsertKind kind, int index,
                              const juce::String& displayName,
                              const juce::String& apvtsPrefix)
 {
@@ -2238,7 +2238,7 @@ VibeGraph::ensureInsertNode(InsertKind kind, int index,
         node->rebindApvts(*mApvts);
 
     // 2026-05-05 dirty-flag wiring: route this freshly-created insert rack's
-    // onSlotsChanged into VibeGraph::onAnyRackChanged → PluginProcessor →
+    // onSlotsChanged into BaySickGraph::onAnyRackChanged → PluginProcessor →
     // editor's markDirty.  Without this, slot type swaps via the Effects page
     // wouldn't flip the project dirty bit.
     node->rack.onSlotsChanged = [this] { if (onAnyRackChanged) onAnyRackChanged(); };
@@ -2249,7 +2249,7 @@ VibeGraph::ensureInsertNode(InsertKind kind, int index,
     return raw;
 }
 
-void VibeGraph::removeInsertNode(InsertKind kind, int index)
+void BaySickGraph::removeInsertNode(InsertKind kind, int index)
 {
     // QA-InsertMaps (2026-05-24): flat-array reset + companion-list erase.
     const int chId = computeChannelId(kind, index);
@@ -2265,8 +2265,8 @@ void VibeGraph::removeInsertNode(InsertKind kind, int index)
         mLiveInsertChannels.erase(it);
 }
 
-VibeGraph::InsertNode*
-VibeGraph::getInsertNode(InsertKind kind, int index)
+BaySickGraph::InsertNode*
+BaySickGraph::getInsertNode(InsertKind kind, int index)
 {
     // QA-InsertMaps (2026-05-24): flat-array lookup by ChannelId.
     const int chId = computeChannelId(kind, index);
@@ -2274,7 +2274,7 @@ VibeGraph::getInsertNode(InsertKind kind, int index)
     return mInsertsByChannel[(size_t) chId].get();
 }
 
-void VibeGraph::processInsert(InsertKind kind, int index,
+void BaySickGraph::processInsert(InsertKind kind, int index,
                                juce::AudioBuffer<float>& buf,
                                double bpm, bool anySolo)
 {
@@ -2291,7 +2291,7 @@ void VibeGraph::processInsert(InsertKind kind, int index,
         node->processBlock(buf, bpm, anySolo);
 
         // QA-AudioMeters fix-up (2026-05-24): CAS-max MERGE (not plain store) of
-        // the InsertNode's freshly published peak into VibeGraph's per-kind
+        // the InsertNode's freshly published peak into BaySickGraph's per-kind
         // public-member array for the (kind, index) slot.
         // QA-MultiBlockHazard (2026-07-02): processInsert is now called ONCE per
         // block for every InsertKind -- Audio / Vox / Inst were collapsed to a
@@ -2362,7 +2362,7 @@ void VibeGraph::processInsert(InsertKind kind, int index,
     }
 }
 
-EffectRack* VibeGraph::getInsertRack(InsertKind kind, int index)
+EffectRack* BaySickGraph::getInsertRack(InsertKind kind, int index)
 {
     if (auto* node = getInsertNode(kind, index))
         return &node->rack;
@@ -2374,7 +2374,7 @@ EffectRack* VibeGraph::getInsertRack(InsertKind kind, int index)
 // allowing several would mean several destinations to disambiguate for no gain.
 // Arming clears any previous arm so a cancelled render cannot leave a node
 // copying into a buffer nobody reads.
-void VibeGraph::armFreezeTap (InsertKind kind, int index)
+void BaySickGraph::armFreezeTap (InsertKind kind, int index)
 {
     disarmFreezeTap();
     if (auto* node = getInsertNode (kind, index))
@@ -2384,7 +2384,7 @@ void VibeGraph::armFreezeTap (InsertKind kind, int index)
     }
 }
 
-void VibeGraph::disarmFreezeTap()
+void BaySickGraph::disarmFreezeTap()
 {
     if (mFreezeTapNode != nullptr)
         mFreezeTapNode->freezeTapArmed.store (false, std::memory_order_relaxed);
@@ -2394,12 +2394,12 @@ void VibeGraph::disarmFreezeTap()
 // OFFLINE USE ONLY, same contract as getStripOutputForTap: valid on the render
 // thread between a processBlock return and the next call, while the device is
 // suspended.
-juce::AudioBuffer<float>* VibeGraph::getFreezeTapBuffer() noexcept
+juce::AudioBuffer<float>* BaySickGraph::getFreezeTapBuffer() noexcept
 {
     return mFreezeTapNode != nullptr ? &mFreezeTapNode->freezeTapBuf : nullptr;
 }
 
-juce::uint32 VibeGraph::getFreezeTapSeq() const noexcept
+juce::uint32 BaySickGraph::getFreezeTapSeq() const noexcept
 {
     return mFreezeTapNode != nullptr
              ? mFreezeTapNode->freezeTapSeq.load (std::memory_order_acquire) : 0;
@@ -2413,7 +2413,7 @@ juce::uint32 VibeGraph::getFreezeTapSeq() const noexcept
 // node directly.  Called from MixerPage::onVBlank (message thread); insert nodes
 // are created/destroyed on the message thread too, so getInsertNode can't race a
 // destroy here.
-std::pair<float, float> VibeGraph::drainInsertNodeRms (InsertKind kind, int index) noexcept
+std::pair<float, float> BaySickGraph::drainInsertNodeRms (InsertKind kind, int index) noexcept
 {
     constexpr float kNI = -std::numeric_limits<float>::infinity();
     if (auto* node = getInsertNode (kind, index))
@@ -2426,8 +2426,8 @@ std::pair<float, float> VibeGraph::drainInsertNodeRms (InsertKind kind, int inde
 // meter.  exchange-resets the per-bus rms member atoms (CAS-maxed audio-side by
 // publishRms in processBus); returns "max RMS since the last
 // call".  Master + unknown ids return {-inf,-inf} (Master is Full-layout, no RMS
-// top).  Direct VibeGraph read mirrored from drainInsertNodeRms -- no mirror.
-std::pair<float, float> VibeGraph::drainBusRms (int busChId) noexcept
+// top).  Direct BaySickGraph read mirrored from drainInsertNodeRms -- no mirror.
+std::pair<float, float> BaySickGraph::drainBusRms (int busChId) noexcept
 {
     using namespace MixerChannelIds;
     constexpr float kNI = -std::numeric_limits<float>::infinity();
@@ -2458,7 +2458,7 @@ std::pair<float, float> VibeGraph::drainBusRms (int busChId) noexcept
              r->exchange (kNI, std::memory_order_relaxed) };
 }
 
-EQ8MsDSP* VibeGraph::getInsertEQ(InsertKind kind, int index)
+EQ8MsDSP* BaySickGraph::getInsertEQ(InsertKind kind, int index)
 {
     if (auto* node = getInsertNode(kind, index))
         return &node->eq;
@@ -2466,7 +2466,7 @@ EQ8MsDSP* VibeGraph::getInsertEQ(InsertKind kind, int index)
 }
 
 // §P4.3: Pre-rack EQ on every InsertNode (Layer/Bass/Drum/Audio/Aux).
-EQ8MsDSP* VibeGraph::getInsertPreEQ(InsertKind kind, int index)
+EQ8MsDSP* BaySickGraph::getInsertPreEQ(InsertKind kind, int index)
 {
     if (auto* node = getInsertNode(kind, index))
         return &node->preEq;
@@ -2475,15 +2475,15 @@ EQ8MsDSP* VibeGraph::getInsertPreEQ(InsertKind kind, int index)
 
 // QA-AudioMeters (2026-05-24): getInsertPeakDb / getInsertPeakDbStereo /
 // drainInsertPeakDbStereo (the per-insert UI peak readers) are gone.  The UI
-// drain now lives on VibeSynthProcessor::drainInsertPeakDbStereo reading the
+// drain now lives on BaySickDAWProcessor::drainInsertPeakDbStereo reading the
 // per-kind PluginProcessor mirrors (m<Kind>InsertPeakDb*L/R[index]).  Audio
 // publishes via InsertNode::process -> publishPeakReading -> peakDb/L/R, then
-// processInsert exchange-stores into VibeGraph's per-kind public-member arrays
+// processInsert exchange-stores into BaySickGraph's per-kind public-member arrays
 // (see above), and drainMeterAtomicsForUI drains those into the PluginProcessor
 // mirrors at end-of-block.
 
 // 2026-05-02: end-of-audio-block snapshot promotion.  Called once per audio
-// block from PluginProcessor::processBlock AFTER all VibeGraph processing
+// block from PluginProcessor::processBlock AFTER all BaySickGraph processing
 // completes.  QA-AudioMeters (2026-05-24): the per-insert peakDb -> peakDbSnap
 // promotion half was removed (peakDbSnap layer deleted -- InsertNode now uses
 // the bus-pattern publishPeakReading + processInsert end-of-call exchange-
@@ -2492,7 +2492,7 @@ EQ8MsDSP* VibeGraph::getInsertPreEQ(InsertKind kind, int index)
 // DBFSMeter + VU input meters on every slot in every rack across every node
 // (InsertNode + BusNode) still rely on this end-of-block promotion to update
 // coherently with the rest of the meter chain.
-void VibeGraph::promoteAllRackSlotSnapshots()
+void BaySickGraph::promoteAllRackSlotSnapshots()
 {
     forEachRack ([] (EffectRack& r) { r.promoteSlotPeakSnapshots(); });
 }
@@ -2501,7 +2501,7 @@ void VibeGraph::promoteAllRackSlotSnapshots()
 // engine sweep never reached them: a bridged plugin kept its LIVE per-block
 // deadline against the much larger render block, missed it on the first block,
 // and rendered SILENCE into the exported file while the export reported success.
-void VibeGraph::setAllRackSlotsNonRealtime (bool offline)
+void BaySickGraph::setAllRackSlotsNonRealtime (bool offline)
 {
     forEachRack ([offline] (EffectRack& r)
     {
@@ -2510,7 +2510,7 @@ void VibeGraph::setAllRackSlotsNonRealtime (bool offline)
     });
 }
 
-void VibeGraph::forEachRack (const std::function<void (EffectRack&)>& fn)
+void BaySickGraph::forEachRack (const std::function<void (EffectRack&)>& fn)
 {
     auto promoteRack = [&fn] (EffectRack* r)
     {
@@ -2552,7 +2552,7 @@ void VibeGraph::forEachRack (const std::function<void (EffectRack&)>& fn)
 // QA-InsertMaps (2026-05-24): flat-array lookup via computeChannelId.  The
 // 2nd selectInsertMap-style switch that used to live here died with
 // selectInsertMap itself.
-int VibeGraph::getInsertChokeGroup(InsertKind kind, int index) const
+int BaySickGraph::getInsertChokeGroup(InsertKind kind, int index) const
 {
     const int chId = computeChannelId(kind, index);
     if (chId < 0 || chId >= kMaxStripChannels) return 0;
@@ -2566,7 +2566,7 @@ int VibeGraph::getInsertChokeGroup(InsertKind kind, int index) const
 //  5F-4a Batch 6: Bus + Master APVTS rebind + any-solo helper
 // ═══════════════════════════════════════════════════════════════════════════════
 
-void VibeGraph::rebindBusApvts()
+void BaySickGraph::rebindBusApvts()
 {
     if (mApvts == nullptr) return;
 
@@ -2591,7 +2591,7 @@ void VibeGraph::rebindBusApvts()
 
     // QA-Ea Part A (2026-05-21): cache bus _solo atomic pointers for the
     // anyBusSoloed() helper.  Order matches the mBusSoloPtr declaration in
-    // VibeGraph.h.  CPU-safeguarding standing rule: cache the raw atomic
+    // BaySickGraph.h.  CPU-safeguarding standing rule: cache the raw atomic
     // ptrs once + reuse, avoid string-keyed getRawParameterValue lookups
     // per audio block.  Master is excluded -- it has no _solo param + no
     // sibling to solo against.
@@ -2607,7 +2607,7 @@ void VibeGraph::rebindBusApvts()
             juce::String (kBusSoloPrefixes[i]) + "_solo");
 }
 
-bool VibeGraph::isAnyInsertSoloed() const noexcept
+bool BaySickGraph::isAnyInsertSoloed() const noexcept
 {
     // QA-InsertMaps (2026-05-24): single sweep over mLiveInsertChannels with
     // early-return on first soloed insert.  Replaces the pointer-init-list
@@ -2630,7 +2630,7 @@ bool VibeGraph::isAnyInsertSoloed() const noexcept
 // Called at audio rate (every block in every bus's processChainOnly path);
 // cached-atomic loads keep it O(11) per call with no per-block string-keyed
 // APVTS lookups.
-bool VibeGraph::anyBusSoloed() const noexcept
+bool BaySickGraph::anyBusSoloed() const noexcept
 {
     for (auto* p : mBusSoloPtr)
         if (p != nullptr && p->load (std::memory_order_relaxed) > 0.5f)
@@ -2849,7 +2849,7 @@ bool RoutingGraph::computeTopo(const std::vector<int>& ids)
 // C.4 Phase 1 (2026-04-30): per-strip SC receive buffer accessors.  Lazy
 // allocation matches the channel-accumulator pattern.  Slot 0..3 maps to
 // _sc_recv{N}_from APVTS / _sc_pick lookups in DSP modules.
-juce::AudioBuffer<float>* VibeGraph::getScRecvBuffer (int channelId, int slotIdx)
+juce::AudioBuffer<float>* BaySickGraph::getScRecvBuffer (int channelId, int slotIdx)
 {
     if (slotIdx < 0 || slotIdx >= kMaxScRecvSlots) return nullptr;
     auto& set = mScRecv[channelId];   // creates if missing
@@ -2866,7 +2866,7 @@ juce::AudioBuffer<float>* VibeGraph::getScRecvBuffer (int channelId, int slotIdx
 // getScSourceTap and armScSourceTaps; the pre-fader tap would have made three
 // copies of a seventeen-case switch that has to be extended in lockstep every
 // time a bus is added.
-VibeGraph::InstrChannelNode* VibeGraph::busNodeForChannel (int chId) const noexcept
+BaySickGraph::InstrChannelNode* BaySickGraph::busNodeForChannel (int chId) const noexcept
 {
     using namespace MixerChannelIds;
     switch (chId)
@@ -2896,7 +2896,7 @@ VibeGraph::InstrChannelNode* VibeGraph::busNodeForChannel (int chId) const noexc
 // QA-Fe2 SC delay-match (docket 1b): pre-compensation key tap lookup.
 // Mirrors the pushScArrayToStrip channel map; Master has no comp delay so
 // its output IS the natural tap (nullptr -> caller falls back).
-const juce::AudioBuffer<float>* VibeGraph::getScSourceTap (int channelId) const
+const juce::AudioBuffer<float>* BaySickGraph::getScSourceTap (int channelId) const
 {
     auto tapOf = [](const auto* node) -> const juce::AudioBuffer<float>*
     {
@@ -2914,7 +2914,7 @@ const juce::AudioBuffer<float>* VibeGraph::getScSourceTap (int channelId) const
 // Pre-fader send tap lookup.  Same channel map as the SC tap above, plus the
 // armed gate: an unarmed (or absent) node returns nullptr and the caller keeps
 // reading the source's post-everything mOutputBuffer.
-const juce::AudioBuffer<float>* VibeGraph::getPreFaderTap (int channelId) const
+const juce::AudioBuffer<float>* BaySickGraph::getPreFaderTap (int channelId) const
 {
     auto tapOf = [](const auto* node) -> const juce::AudioBuffer<float>*
     {
@@ -2933,7 +2933,7 @@ const juce::AudioBuffer<float>* VibeGraph::getPreFaderTap (int channelId) const
     return nullptr;
 }
 
-juce::AudioBuffer<float>* VibeGraph::getPreFaderTapBuffer (int channelId)
+juce::AudioBuffer<float>* BaySickGraph::getPreFaderTapBuffer (int channelId)
 {
     return const_cast<juce::AudioBuffer<float>*> (getPreFaderTap (channelId));
 }
@@ -2941,7 +2941,7 @@ juce::AudioBuffer<float>* VibeGraph::getPreFaderTapBuffer (int channelId)
 // QA-Fe2 SC delay-match: run the (consumer, slot) key-alignment delay in
 // place on the receive buffer.  Values are solved by updateBusLatencies on
 // the message thread; this path is audio-thread + allocation-free.
-void VibeGraph::applyScRecvDelay (int channelId, int slotIdx, int numSamples)
+void BaySickGraph::applyScRecvDelay (int channelId, int slotIdx, int numSamples)
 {
     if (slotIdx < 0 || slotIdx >= kMaxScRecvSlots) return;
     if (channelId < 0 || channelId >= kMaxStripChannels) return;
@@ -2965,7 +2965,7 @@ void VibeGraph::applyScRecvDelay (int channelId, int slotIdx, int numSamples)
 // QA-Fe2 SC delay-match: flag SC-edge source nodes so their process stashes
 // the pre-compensation tap.  Block rate from rebuildRoutingFromApvts (audio
 // thread) -- relaxed stores only, no allocation.
-void VibeGraph::armScSourceTaps()
+void BaySickGraph::armScSourceTaps()
 {
     using namespace MixerChannelIds;
     auto armCh = [this](int chId, bool on)
@@ -3002,7 +3002,7 @@ void VibeGraph::armScSourceTaps()
 // the send would repeat the previous block forever.  mOutputBuffer has the same
 // hazard and the same answer (RenderTask::clearOnSkip, and each task clearing
 // its arena view at the top of run()).
-void VibeGraph::armPreFaderTaps()
+void BaySickGraph::armPreFaderTaps()
 {
     using namespace MixerChannelIds;
 
@@ -3051,7 +3051,7 @@ void VibeGraph::armPreFaderTaps()
     mAnyPreFaderSend.store (any, std::memory_order_relaxed);
 }
 
-VibeGraph::ScRecvArray VibeGraph::getScRecvArray (int channelId)
+BaySickGraph::ScRecvArray BaySickGraph::getScRecvArray (int channelId)
 {
     ScRecvArray out {};
     auto it = mScRecv.find(channelId);
@@ -3064,7 +3064,7 @@ VibeGraph::ScRecvArray VibeGraph::getScRecvArray (int channelId)
     return out;
 }
 
-void VibeGraph::clearScRecvBuffers()
+void BaySickGraph::clearScRecvBuffers()
 {
     // C.4 follow-up (2026-04-30): only clear SC receive buffers whose
     // (dstId, slot) pair is NOT currently the destination of an active
@@ -3096,12 +3096,12 @@ void VibeGraph::clearScRecvBuffers()
 
 // C.4 Phase 1 (2026-04-30): push the strip's SC array to all SC-capable DSP
 // modules on the strip (preEq + rack + postEq).  Caller is responsible for
-// invoking before that strip's processBlock; VibeGraph::processInsert /
+// invoking before that strip's processBlock; BaySickGraph::processInsert /
 // processBlock / processBus do this internally for the strips they
 // own, and PluginProcessor's bus loop calls it for the Vox/Inst secondary
 // buses.  Address-only push so the call is cheap (4 pointer copies + maybe
 // 8 forwards into preEq/rack/postEq members).
-void VibeGraph::pushScArrayToStrip (int channelId)
+void BaySickGraph::pushScArrayToStrip (int channelId)
 {
     using namespace MixerChannelIds;
 
@@ -3157,10 +3157,10 @@ void VibeGraph::pushScArrayToStrip (int channelId)
 // Called once from the constructor.  Every id and prefix below is a
 // compile-time constant, so the whole bus half of mActiveChannels is built
 // here and left in place for the process lifetime -- see the member's comment
-// in VibeGraph.h for why rebuilding it per block was an audio-thread
+// in BaySickGraph.h for why rebuilding it per block was an audio-thread
 // allocation site.  Capacity covers the fixed half plus the entire chId space,
 // so the per-block live-insert append never reallocates.
-void VibeGraph::buildFixedBusChannels()
+void BaySickGraph::buildFixedBusChannels()
 {
     using namespace MixerChannelIds;
 
@@ -3203,7 +3203,7 @@ void VibeGraph::buildFixedBusChannels()
     mActiveChannels.reserve(mFixedBusChannelCount + (size_t) kMaxStripChannels);
 }
 
-void VibeGraph::rebuildRoutingFromApvts()
+void BaySickGraph::rebuildRoutingFromApvts()
 {
     if (mApvts == nullptr) return;
 
@@ -3245,7 +3245,7 @@ void VibeGraph::rebuildRoutingFromApvts()
 
 // ═══════════════════════════════════════════════════════════════════════════════
 //  5F-4b B2: Aux insert processing
-std::vector<int> VibeGraph::getAuxIndices() const
+std::vector<int> BaySickGraph::getAuxIndices() const
 {
     // QA-InsertMaps (2026-05-24): filter mLiveInsertChannels to Aux range
     // (kAuxBase..kAuxBase+kMaxAuxStrips); return per-Aux idx (chId - base).
@@ -3257,7 +3257,7 @@ std::vector<int> VibeGraph::getAuxIndices() const
     return result;
 }
 
-void VibeGraph::clearAuxInserts()
+void BaySickGraph::clearAuxInserts()
 {
     // QA-InsertMaps (2026-05-24): reset every Aux slot in the flat array +
     // erase the corresponding chIds from the companion live-list.

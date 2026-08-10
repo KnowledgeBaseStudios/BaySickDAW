@@ -4,7 +4,7 @@
 BaySickSynthDSP::BaySickSynthDSP()
 {
     // QA-0a (2026-05-07): placeholder sample rate before addVoice (see
-    // VibePlayerDSP::VibeSynth ctor for full reasoning).  prepare()
+    // BaySickPlayerDSP::BaySickPlayerSynth ctor for full reasoning).  prepare()
     // overwrites with the real rate before any audio processing.
     mSynth.setCurrentPlaybackSampleRate (44100.0);
     mSynth.addSound (new SynthSound());

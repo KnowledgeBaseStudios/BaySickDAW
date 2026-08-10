@@ -29,7 +29,7 @@ page never picks an engine type - `VoxPage::selectEngine` coerces any request to
   when the strip is live it copies the live input in, and if prior takes overlap
   the same moment it hands them to the engine as a block-scoped "monitor merge"
   so the chain processes the live voice and the earlier takes together. The task
-  then runs `VibeGraph::processInsert` for the Vox insert.
+  then runs `BaySickGraph::processInsert` for the Vox insert.
 - **Recording.** The processor's wet tap (`setWetRecorder`) captures the signal
   after realtime pitch correction and before the vocal chain; the dry tap
   captures the raw input. See "User-facing behavior" for what actually lands on

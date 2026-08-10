@@ -39,7 +39,7 @@ static inline double clipFilePosForBeat (double beatsIntoClip, double fileSample
 #include "BaySickRustyDrums/BaySickRustyDrumsProcessor.h"  // J-5: singleton sfizz drum-kit engine
 #include "BaySickGuitars/BaySickGuitarsProcessor.h"        // K-2: per-instance sfizz guitar engines
 #include "BaySickBasses/BaySickBassesProcessor.h"          // L-2: per-instance sfizz bass engines
-#include "VibePlayer/VibePlayerProcessor.h"       // D1.4-fix (c): drum tune compensation
+#include "BaySickPlayer/BaySickPlayerProcessor.h"       // D1.4-fix (c): drum tune compensation
 #include "BaySickVocal/BaySickVocalProcessor.h"   // I-16 G-9: wet recorder hand-off
 #include "Standalone/EngineChainProcessor.h"      // QA-Fe2 PDC: Inst strip engine-chain latency hook
 #include "DSP/EngineSidechainHelper.h"            // C.4 Phase 2.2: ISidechainEngine for engine-level SC push
@@ -396,7 +396,7 @@ static void emitBend (juce::MidiBuffer& dst, const PianoNote& note, int timeMs, 
 
 // ── Parameter layout ──────────────────────────────────────────────────────────
 juce::AudioProcessorValueTreeState::ParameterLayout
-VibeSynthProcessor::createParameterLayout()
+BaySickDAWProcessor::createParameterLayout()
 {
     std::vector<std::unique_ptr<juce::RangedAudioParameter>> params;
 
@@ -483,7 +483,7 @@ VibeSynthProcessor::createParameterLayout()
 // Hardware concurrency minus one (leave a core for the OS audio thread to
 // schedule on), capped at kMaxWorkers (8). Falls back to 4 on systems where
 // hardware_concurrency reports 0.
-int VibeSynthProcessor::computeRenderWorkerCount() noexcept
+int BaySickDAWProcessor::computeRenderWorkerCount() noexcept
 {
     const int hw      = (int) std::thread::hardware_concurrency();
     const int desired = hw > 0 ? juce::jmax (1, hw - 1) : 4;
@@ -491,7 +491,7 @@ int VibeSynthProcessor::computeRenderWorkerCount() noexcept
 }
 
 // ── Constructor / Destructor ──────────────────────────────────────────────────
-VibeSynthProcessor::VibeSynthProcessor()
+BaySickDAWProcessor::BaySickDAWProcessor()
     : AudioProcessor(BusesProperties()
         // R3 (2026-04-23): declare an input bus so JUCE feeds the audio
         // device's input channels into the processBlock buffer.
@@ -554,11 +554,11 @@ VibeSynthProcessor::VibeSynthProcessor()
     initMirrorArr (mRustyInsertPeakDbL, MixerChannelIds::kMaxRustyStrips);
     initMirrorArr (mRustyInsertPeakDbR, MixerChannelIds::kMaxRustyStrips);
 
-    // QA-AudioMeters: VibeGraph::kMaxAudioInserts must match this processor's
+    // QA-AudioMeters: BaySickGraph::kMaxAudioInserts must match this processor's
     // kMaxAudioRows (both = MixerState::kMaxAudioRows).  Static-asserted here
-    // since VibeGraph.cpp doesn't include PluginProcessor.h (circular include).
-    static_assert (VibeGraph::kMaxAudioInserts == kMaxAudioRows,
-                   "VibeGraph::kMaxAudioInserts must equal VibeSynthProcessor::kMaxAudioRows");
+    // since BaySickGraph.cpp doesn't include PluginProcessor.h (circular include).
+    static_assert (BaySickGraph::kMaxAudioInserts == kMaxAudioRows,
+                   "BaySickGraph::kMaxAudioInserts must equal BaySickDAWProcessor::kMaxAudioRows");
 
     // G-7 polish (2026-04-29): bumped low → normal.  At low priority the bg
     // thread was getting heavily preempted on Windows during the first few
@@ -590,7 +590,7 @@ VibeSynthProcessor::VibeSynthProcessor()
     setRetirementConsumersIdle (true);
 }
 
-VibeSynthProcessor::~VibeSynthProcessor()
+BaySickDAWProcessor::~BaySickDAWProcessor()
 {
     // The installed resolver captures `this`, so it has to be retired before
     // the object is.  Retiring it here (rather than never) is what stops a
@@ -616,7 +616,7 @@ VibeSynthProcessor::~VibeSynthProcessor()
 }
 
 // ── Preparation ───────────────────────────────────────────────────────────────
-void VibeSynthProcessor::prepareToPlay(double sampleRate, int samplesPerBlock)
+void BaySickDAWProcessor::prepareToPlay(double sampleRate, int samplesPerBlock)
 {
     mSampleRate = sampleRate;
     mBlockSize  = samplesPerBlock;
@@ -718,7 +718,7 @@ void VibeSynthProcessor::prepareToPlay(double sampleRate, int samplesPerBlock)
     }
     // G-3 (2026-04-28): re-prepare any registered Clip engines so host SR /
     // block-size changes (e.g. user switches audio device) propagate to
-    // VibePlayer / BaySickNAM/IR instances owned by ClipsPage tabs.
+    // BaySickPlayer / BaySickNAM/IR instances owned by ClipsPage tabs.
     {
         juce::SpinLock::ScopedLockType lk(mClipEngineLock);
         for (int i = 0; i < kMaxClipPages; ++i)
@@ -778,7 +778,7 @@ void VibeSynthProcessor::prepareToPlay(double sampleRate, int samplesPerBlock)
     // 5F-4a Batch 6: cache APVTS pointers in bus + master nodes (needs params registered).
     mVibeGraph.rebindBusApvts();
 
-    // 2026-05-05 dirty-flag wiring: route every VibeGraph rack's lifecycle
+    // 2026-05-05 dirty-flag wiring: route every BaySickGraph rack's lifecycle
     // events into the editor's project-dirty hook the same way main-APVTS
     // edits do.  Effects-page slot type swap / move-up/down / clear / bypass
     // doesn't write apvts, so without this rack lifecycle slips past the
@@ -825,7 +825,7 @@ void VibeSynthProcessor::prepareToPlay(double sampleRate, int samplesPerBlock)
 
     // Batch 7 (2026-05-06): register the always-on bus PassiveStripTasks --
     // kNumBatch7Buses of them -- here
-    // (after buildFixedTopology so VibeGraph bus nodes exist).
+    // (after buildFixedTopology so BaySickGraph bus nodes exist).
     // Idempotent - guarded by null checks so prepareToPlay can be called
     // repeatedly (sample-rate / buffer changes).  Master is excluded; it
     // gets its own MasterTask in Batch 8.
@@ -869,7 +869,7 @@ void VibeSynthProcessor::prepareToPlay(double sampleRate, int samplesPerBlock)
     }
 }
 
-void VibeSynthProcessor::releaseResources()
+void BaySickDAWProcessor::releaseResources()
 {
     // The device has stopped calling processBlock, so no settle can be
     // acknowledged from here on.  Without this clear, teardown after a device
@@ -887,7 +887,7 @@ void VibeSynthProcessor::releaseResources()
 // lifecycle: asserted only where the callback provably cannot run, cleared
 // before it can run again (Engine/RetirementQueue.h, CONSUMER-IDLE CONTRACT).
 // Message thread only -- setConsumerIdle takes the drainer's mutex.
-void VibeSynthProcessor::setRetirementConsumersIdle (bool consumerIsIdle)
+void BaySickDAWProcessor::setRetirementConsumersIdle (bool consumerIsIdle)
 {
     mClipRetirement.setConsumerIdle (consumerIsIdle);
 
@@ -898,7 +898,7 @@ void VibeSynthProcessor::setRetirementConsumersIdle (bool consumerIsIdle)
         mPatternManager->setRollConsumerIdle (consumerIsIdle);
 }
 
-bool VibeSynthProcessor::isBusesLayoutSupported(const BusesLayout& layouts) const
+bool BaySickDAWProcessor::isBusesLayoutSupported(const BusesLayout& layouts) const
 {
     // Output: stereo or mono.
     if (layouts.getMainOutputChannelSet() != juce::AudioChannelSet::stereo()
@@ -925,7 +925,7 @@ namespace {
 // timeline-WAV decode chain, read once per row per block from the ClipsPage
 // engine's APVTS.  Velocity-driven routings (velTo*) are inert on a timeline
 // clip; muffle/hardness fold into the filter with velocity N/A (matches
-// VibeVoice::startNote).  active=false when the engine isn't a BaySickPlayer
+// BaySickPlayerVoice::startNote).  active=false when the engine isn't a BaySickPlayer
 // (S7 guard) -> the decode stays raw (pre-batch behavior).
 struct ClipCtl
 {
@@ -945,7 +945,7 @@ struct ClipCtl
     float stretchSpeed = 1.f;  // Stretch knob = varispeed 0.5..2.0 (couples pitch+content-speed)
 };
 
-ClipCtl readClipCtl (VibePlayerProcessor* pl)
+ClipCtl readClipCtl (BaySickPlayerProcessor* pl)
 {
     ClipCtl c;
     if (pl == nullptr) return c;
@@ -959,9 +959,9 @@ ClipCtl readClipCtl (VibePlayerProcessor* pl)
     c.panL = std::cos (ang);
     c.panR = std::sin (ang);
 
-    // res 0..1 -> Q 0.5..10 (VibeSynth::setFilterParams); hardness adds to Q,
+    // res 0..1 -> Q 0.5..10 (BaySickPlayerSynth::setFilterParams); hardness adds to Q,
     // muffle lowers cutoff toward 200 Hz -- both with velocity N/A on a timeline
-    // clip (VibeVoice::startNote velFactor/velScale reduce to 1.0 at default).
+    // clip (BaySickPlayerVoice::startNote velFactor/velScale reduce to 1.0 at default).
     const float baseCut  = juce::jlimit (20.f, 20000.f, rd (p.cutoff));
     const float muffle   = juce::jlimit (0.f, 1.f, rd (p.muffle));
     const float hardness = juce::jlimit (0.f, 1.f, rd (p.hardness));
@@ -1016,7 +1016,7 @@ inline float clipAdsr (juce::int64 pos, juce::int64 len,
 
 } // namespace
 
-bool VibeSynthProcessor::renderAudioClipsForRow (int row,
+bool BaySickDAWProcessor::renderAudioClipsForRow (int row,
                                                   const AudioClipBlockContext& ctx,
                                                   juce::AudioBuffer<float>* mtDest)
 {
@@ -1198,13 +1198,13 @@ bool VibeSynthProcessor::renderAudioClipsForRow (int row,
                         && (std::abs (effStretchRatio - 1.0) > 0.001);
 
         // The Player's LFO is PITCH vibrato, not amplitude tremolo: it modulates the
-        // clip's READ POSITION, exactly as VibeVoice::renderNextBlock modulates the
+        // clip's READ POSITION, exactly as BaySickPlayerVoice::renderNextBlock modulates the
         // voice read increment, so one knob means one thing on a played note and on a
         // timeline clip.  Depth law and cents mapping are the voice path's verbatim
-        // (VibePlayerDSP.h kVibratoMaxCents), the phase increment comes off the LIVE
+        // (BaySickPlayerDSP.h kVibratoMaxCents), the phase increment comes off the LIVE
         // device rate so the wobble speed is sample-rate independent, and ONE per-clip
         // phase feeds all three read branches below so they cannot drift apart.
-        constexpr double kClipVibratoMaxCents = 50.0;   // == VibeVoice::kVibratoMaxCents
+        constexpr double kClipVibratoMaxCents = 50.0;   // == BaySickPlayerVoice::kVibratoMaxCents
         // 2^(50/1200) - 1: the read-rate deviation the vibrato itself produces at full
         // depth, reused as the cap on the gate-close walk-back so the walk home never
         // bends pitch harder than the effect the user was already hearing.
@@ -1772,7 +1772,7 @@ bool VibeSynthProcessor::renderAudioClipsForRow (int row,
 // per clip.  decodeFilePlayClip decodes ONE clip into the sum; the caller then
 // calls finalizeFilePlayStrip once.  Called by VoxStripTask / InstStripTask.
 // See header for invariants.
-bool VibeSynthProcessor::decodeFilePlayClip (AudioClipPlayer&             player,
+bool BaySickDAWProcessor::decodeFilePlayClip (AudioClipPlayer&             player,
                                              const AudioClipBlockContext& ctx,
                                              juce::AudioBuffer<float>&    sumDest)
 {
@@ -2494,7 +2494,7 @@ bool VibeSynthProcessor::decodeFilePlayClip (AudioClipPlayer&             player
 // summed FilePlay clips (engineSum, filled by decodeFilePlayClip), then route
 // into mtDest.  routeCh = the strip's channel id (all summed clips share it).
 // See header for invariants.
-void VibeSynthProcessor::finalizeFilePlayStrip (int                          routeCh,
+void BaySickDAWProcessor::finalizeFilePlayStrip (int                          routeCh,
                                                 const AudioClipBlockContext& ctx,
                                                 juce::MidiBuffer&            engineMidi,
                                                 juce::AudioBuffer<float>*    mtDest,
@@ -2517,10 +2517,10 @@ void VibeSynthProcessor::finalizeFilePlayStrip (int                          rou
         if (auto* sc = dynamic_cast<ISidechainEngine*> (eng))
         {
             const auto arr = mVibeGraph.getScRecvArray (channelId);
-            juce::AudioBuffer<float>* bufs[VibeGraph::kMaxScRecvSlots];
-            for (int s = 0; s < VibeGraph::kMaxScRecvSlots; ++s)
+            juce::AudioBuffer<float>* bufs[BaySickGraph::kMaxScRecvSlots];
+            for (int s = 0; s < BaySickGraph::kMaxScRecvSlots; ++s)
                 bufs[s] = arr[(size_t) s];
-            sc->setSidechainBuffers (bufs, VibeGraph::kMaxScRecvSlots);
+            sc->setSidechainBuffers (bufs, BaySickGraph::kMaxScRecvSlots);
         }
     };
 
@@ -2547,7 +2547,7 @@ void VibeSynthProcessor::finalizeFilePlayStrip (int                          rou
 
         pushScToEng (eng, MixerChannelIds::voxInsert (vi));
         eng->processBlock (engineSum, engineMidi);
-        mVibeGraph.processInsert (VibeGraph::InsertKind::Vox, vi,
+        mVibeGraph.processInsert (BaySickGraph::InsertKind::Vox, vi,
                                    engineSum, ctx.bpm, ctx.anySolo);
 
         const int nc = juce::jmin (mtDest->getNumChannels(), engineSum.getNumChannels());
@@ -2562,7 +2562,7 @@ void VibeSynthProcessor::finalizeFilePlayStrip (int                          rou
 
         pushScToEng (eng, MixerChannelIds::instInsert (ii));
         eng->processBlock (engineSum, engineMidi);
-        mVibeGraph.processInsert (VibeGraph::InsertKind::Inst, ii,
+        mVibeGraph.processInsert (BaySickGraph::InsertKind::Inst, ii,
                                    engineSum, ctx.bpm, ctx.anySolo);
 
         const int nc = juce::jmin (mtDest->getNumChannels(), engineSum.getNumChannels());
@@ -2572,7 +2572,7 @@ void VibeSynthProcessor::finalizeFilePlayStrip (int                          rou
 }
 
 // ── processBlock ──────────────────────────────────────────────────────────────
-void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
+void BaySickDAWProcessor::processBlock(juce::AudioBuffer<float>& buffer,
                                        juce::MidiBuffer& midiMessages)
 {
     // THREAD SAFETY: the acknowledgement settleAudioThread waits on.  It has to
@@ -3717,7 +3717,7 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
     // QA-Ef (2026-05-21): the dispatcher is the single, UNCONDITIONAL render
     // path.  The serial render tail that used to follow (skipped via an early
     // return when this flag was true) was DELETED here -- serial execution for
-    // diagnosis is now the worker-park mode inside VibeThreadPool
+    // diagnosis is now the worker-park mode inside BaySickThreadPool
     // (gMultiThreadedEngineEnabled == false), not a code branch.  The bare
     // scope block below just bounds the dispatch-body locals.
     {
@@ -3793,7 +3793,7 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
                 tp.timeSigNum = ts->numerator;
                 tp.timeSigDen = ts->denominator;
             }
-            VibeGraph::setBlockTransport (tp);
+            BaySickGraph::setBlockTransport (tp);
         }
 
         mRenderDispatcher.dispatchBlock (buffer, mtCtx);
@@ -3830,7 +3830,7 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
 // #25); extracting it fixed that.  D-5 invariant: MIDI rec -> master rec
 // (pre-metronome buffer) -> metronome/count-in.  bpm derives from the passed
 // playhead position.
-void VibeSynthProcessor::applyPostMixRecordAndMetro (juce::AudioBuffer<float>& buffer,
+void BaySickDAWProcessor::applyPostMixRecordAndMetro (juce::AudioBuffer<float>& buffer,
                                                      const juce::MidiBuffer& allMidi,
                                                      const juce::AudioPlayHead::PositionInfo& pos,
                                                      int numSamples)
@@ -4234,57 +4234,57 @@ void VibeSynthProcessor::applyPostMixRecordAndMetro (juce::AudioBuffer<float>& b
 // split meter's scrolling top half.  No PluginProcessor mirror -- the RMS is a
 // current value read straight off the insert node + exchange-reset there.
 std::pair<float, float>
-VibeSynthProcessor::drainInsertRmsDbStereo (VibeGraph::InsertKind kind, int index) noexcept
+BaySickDAWProcessor::drainInsertRmsDbStereo (BaySickGraph::InsertKind kind, int index) noexcept
 {
     return mVibeGraph.drainInsertNodeRms (kind, index);
 }
 
 // QA-RustyMeter part 2 (2026-05-30): bus RMS sibling for the split meter.  Thin
 // passthrough to mVibeGraph.drainBusRms -- like the insert RMS, the bus RMS is a
-// current value read straight off VibeGraph's per-bus atoms + exchange-reset
+// current value read straight off BaySickGraph's per-bus atoms + exchange-reset
 // there, so there is no PluginProcessor mirror (unlike the bus peak path).
 std::pair<float, float>
-VibeSynthProcessor::drainBusRmsDbStereo (int busChId) noexcept
+BaySickDAWProcessor::drainBusRmsDbStereo (int busChId) noexcept
 {
     return mVibeGraph.drainBusRms (busChId);
 }
 
 // QA-RustyMeter Task 3 (2026-05-30): master LUFS readout passthrough.  mode
 // 0=Momentary / 1=Short-Term / 2=Integrated.  Read once per UI vblank.
-float VibeSynthProcessor::getMasterLufs (int mode) const noexcept
+float BaySickDAWProcessor::getMasterLufs (int mode) const noexcept
 {
     return mVibeGraph.getMasterLufs (mode);
 }
 
 // CL-044 (QA-ModelShell TS7): master-out spectrum passthrough for the analyzer
-// window.  Both halves are gated inside VibeGraph, so an inactive tap is one
+// window.  Both halves are gated inside BaySickGraph, so an inactive tap is one
 // relaxed load per block on the audio side and a false return here.
-void VibeSynthProcessor::setMasterSpectrumActive (bool on) noexcept
+void BaySickDAWProcessor::setMasterSpectrumActive (bool on) noexcept
 {
     mVibeGraph.setMasterSpectrumActive (on);
 }
 
-bool VibeSynthProcessor::pollMasterSpectrum (float* dest, int& outCount) noexcept
+bool BaySickDAWProcessor::pollMasterSpectrum (float* dest, int& outCount) noexcept
 {
     return mVibeGraph.pollMasterSpectrum (dest, outCount);
 }
 
-float VibeSynthProcessor::getMasterTruePeakDb() const noexcept
+float BaySickDAWProcessor::getMasterTruePeakDb() const noexcept
 {
     return mVibeGraph.getMasterTruePeakDb();
 }
 
-void VibeSynthProcessor::setMasterAnalysisActive (bool on) noexcept
+void BaySickDAWProcessor::setMasterAnalysisActive (bool on) noexcept
 {
     mVibeGraph.setMasterAnalysisActive (on);
 }
 
-float VibeSynthProcessor::getMasterTruePeakMaxDb() const noexcept
+float BaySickDAWProcessor::getMasterTruePeakMaxDb() const noexcept
 {
     return mVibeGraph.getMasterTruePeakMaxDb();
 }
 
-void VibeSynthProcessor::resetMasterTruePeakMax() noexcept
+void BaySickDAWProcessor::resetMasterTruePeakMax() noexcept
 {
     mVibeGraph.resetMasterTruePeakMax();
 }
@@ -4294,7 +4294,7 @@ void VibeSynthProcessor::resetMasterTruePeakMax() noexcept
 // unfenced flag, so a block already past the tap's isRecording() test would
 // write into freed memory.  Close the gate, settle the in-flight block, THEN
 // stop the writer -- the same order the record path uses for mMasterTapLive.
-bool VibeSynthProcessor::startMasterCapture (const juce::File& target)
+bool BaySickDAWProcessor::startMasterCapture (const juce::File& target)
 {
     if (mCaptureRecorder.isRecording())
     {
@@ -4318,7 +4318,7 @@ bool VibeSynthProcessor::startMasterCapture (const juce::File& target)
     return true;
 }
 
-juce::File VibeSynthProcessor::stopMasterCapture()
+juce::File BaySickDAWProcessor::stopMasterCapture()
 {
     if (! mCaptureRecorder.isRecording()) return {};
     mCaptureTapLive.store (false, std::memory_order_release);
@@ -4334,7 +4334,7 @@ juce::File VibeSynthProcessor::stopMasterCapture()
 // Returns RenderTask*, not EngineInsertTask* (2026-07-30).  Vox and Inst strips
 // are plain RenderTasks, so the old return type could not express them and
 // freeze was structurally shut out of both -- see RenderTask::setFrozenSource.
-RenderTask* VibeSynthProcessor::renderTaskForTab (TabKind kind, int pageIndex) noexcept
+RenderTask* BaySickDAWProcessor::renderTaskForTab (TabKind kind, int pageIndex) noexcept
 {
     auto at = [] (auto& arr, int i) -> RenderTask*
     {
@@ -4367,30 +4367,30 @@ RenderTask* VibeSynthProcessor::renderTaskForTab (TabKind kind, int pageIndex) n
 // have armed the freeze tap on Layer page N while rendering Inst/Clips/Vox tab N,
 // producing a freeze file of the WRONG track with no error anywhere.  A missing
 // case is now a compiler warning instead of a silent mis-tap.
-static VibeGraph::InsertKind insertKindForTab (TabKind k) noexcept
+static BaySickGraph::InsertKind insertKindForTab (TabKind k) noexcept
 {
     switch (k)
     {
-        case TabKind::Layers:  return VibeGraph::InsertKind::Layer;
-        case TabKind::Bass:    return VibeGraph::InsertKind::Bass;
-        case TabKind::Drums:   return VibeGraph::InsertKind::Drum;
-        case TabKind::Plugins: return VibeGraph::InsertKind::Plugin;
-        case TabKind::Clips:   return VibeGraph::InsertKind::Audio;
-        case TabKind::Vox:     return VibeGraph::InsertKind::Vox;
-        case TabKind::Inst:    return VibeGraph::InsertKind::Inst;
+        case TabKind::Layers:  return BaySickGraph::InsertKind::Layer;
+        case TabKind::Bass:    return BaySickGraph::InsertKind::Bass;
+        case TabKind::Drums:   return BaySickGraph::InsertKind::Drum;
+        case TabKind::Plugins: return BaySickGraph::InsertKind::Plugin;
+        case TabKind::Clips:   return BaySickGraph::InsertKind::Audio;
+        case TabKind::Vox:     return BaySickGraph::InsertKind::Vox;
+        case TabKind::Inst:    return BaySickGraph::InsertKind::Inst;
         // The kit has THIRTEEN inserts, not one -- this returns the kind, and the
         // Rusty freeze path supplies the strip index per file rather than using
         // the single-index callers below.
-        case TabKind::Rusty:   return VibeGraph::InsertKind::Rusty;
+        case TabKind::Rusty:   return BaySickGraph::InsertKind::Rusty;
     }
-    return VibeGraph::InsertKind::Layer;   // unreachable; silences C4715
+    return BaySickGraph::InsertKind::Layer;   // unreachable; silences C4715
 }
 
 // §6.7.  The kind is spelled as a NAME, never the raw TabKind ordinal: the enum
 // is append-only today by accident rather than by rule (Plugins was appended for
 // exactly this reason), and inserting a value mid-enum would silently re-point
 // every freeze file a saved project refers to.  A name cannot drift that way.
-juce::File VibeSynthProcessor::freezeFileFor (TabKind kind, int pageIndex, int patternIndex)
+juce::File BaySickDAWProcessor::freezeFileFor (TabKind kind, int pageIndex, int patternIndex)
 {
     const juce::File dir = getProjectFreezeDir();
     if (dir == juce::File()) return {};
@@ -4419,7 +4419,7 @@ juce::File VibeSynthProcessor::freezeFileFor (TabKind kind, int pageIndex, int p
 // the song plus one file per pattern it has content in -- not every pattern, and
 // not the other instruments in those patterns, which is what keeps the per-
 // pattern cache cheap (a few bars each rather than an arrangement).
-std::vector<int> VibeSynthProcessor::patternsWithContentFor (TabKind kind, int pageIndex) const
+std::vector<int> BaySickDAWProcessor::patternsWithContentFor (TabKind kind, int pageIndex) const
 {
     std::vector<int> out;
     if (mPatternManager == nullptr) return out;
@@ -4457,7 +4457,7 @@ std::vector<int> VibeSynthProcessor::patternsWithContentFor (TabKind kind, int p
 }
 
 // §6.7's two cleanup rules, both of which were missing entirely.
-void VibeSynthProcessor::deleteFreezeFileFor (TabKind kind, int pageIndex)
+void BaySickDAWProcessor::deleteFreezeFileFor (TabKind kind, int pageIndex)
 {
     // EVERY SCOPE, not just the song file: a per-instrument freeze can leave one
     // file per pattern behind it, and deleting only the song render would strand
@@ -4476,7 +4476,7 @@ void VibeSynthProcessor::deleteFreezeFileFor (TabKind kind, int pageIndex)
 // The name up to (and including) the scope separator -- `tab_layers_0_`.  One
 // place builds it so the delete sweep, the orphan sweep and the per-scope file
 // naming cannot drift apart.
-juce::String VibeSynthProcessor::freezeFilePrefixFor (TabKind kind, int pageIndex) const
+juce::String BaySickDAWProcessor::freezeFilePrefixFor (TabKind kind, int pageIndex) const
 {
     const char* n = nullptr;
     switch (kind)
@@ -4498,7 +4498,7 @@ juce::String VibeSynthProcessor::freezeFilePrefixFor (TabKind kind, int pageInde
 // only ever grows: a tab deleted in a previous session leaves a song-length WAV
 // behind forever, and per-instrument freeze multiplies how many of those there
 // can be.
-void VibeSynthProcessor::sweepOrphanFreezeFiles()
+void BaySickDAWProcessor::sweepOrphanFreezeFiles()
 {
     const juce::File dir = getProjectFreezeDir();
     if (dir == juce::File() || ! dir.isDirectory()) return;
@@ -4592,7 +4592,7 @@ void VibeSynthProcessor::sweepOrphanFreezeFiles()
 // fader, pan, mute/solo and meter LIVE.  Only the drum sounds bake.  Capturing
 // at the kit BUS instead would have baked all thirteen strips' mixer settings --
 // see the plan's §6.9 entry for why that shape was abandoned.
-bool VibeSynthProcessor::setRustyFrozenPatternSourcesImpl (
+bool BaySickDAWProcessor::setRustyFrozenPatternSourcesImpl (
     const std::vector<std::unique_ptr<AudioClipStreamer>>* streams, int patternIndex)
 {
     for (size_t i = 0; i < mRustyRenderTasks.size(); ++i)
@@ -4611,13 +4611,13 @@ bool VibeSynthProcessor::setRustyFrozenPatternSourcesImpl (
     return true;
 }
 
-void VibeSynthProcessor::setRustyFrozenPatternSources (
+void BaySickDAWProcessor::setRustyFrozenPatternSources (
     const std::vector<std::unique_ptr<AudioClipStreamer>>* streams, int patternIndex)
 {
     setRustyFrozenPatternSourcesImpl (streams, patternIndex);
 }
 
-bool VibeSynthProcessor::freezeRustyKit (juce::String& outErr, bool byUser, bool reuseValid,
+bool BaySickDAWProcessor::freezeRustyKit (juce::String& outErr, bool byUser, bool reuseValid,
                                          bool songScopeOnly)
 {
     auto* tab = mEngineRig->findTab (TabKind::Rusty, 0);
@@ -4775,7 +4775,7 @@ bool VibeSynthProcessor::freezeRustyKit (juce::String& outErr, bool byUser, bool
     return true;
 }
 
-bool VibeSynthProcessor::freezeTab (TabKind kind, int pageIndex,
+bool BaySickDAWProcessor::freezeTab (TabKind kind, int pageIndex,
                                     juce::String& outErr, bool byUser, bool reuseValid,
                                     bool songScopeOnly)
 {
@@ -4961,7 +4961,7 @@ bool VibeSynthProcessor::freezeTab (TabKind kind, int pageIndex,
     return true;
 }
 
-void VibeSynthProcessor::retractFrozenSources (TabKind kind, int pageIndex)
+void BaySickDAWProcessor::retractFrozenSources (TabKind kind, int pageIndex)
 {
     if (kind == TabKind::Rusty)
     {
@@ -4987,12 +4987,12 @@ void VibeSynthProcessor::retractFrozenSources (TabKind kind, int pageIndex)
     }
 }
 
-int VibeSynthProcessor::freezePatternIndexNow() const noexcept
+int BaySickDAWProcessor::freezePatternIndexNow() const noexcept
 {
     return mPatternManager != nullptr ? mPatternManager->getCurrentPatternIndex() : -1;
 }
 
-void VibeSynthProcessor::unfreezeTab (TabKind kind, int pageIndex)
+void BaySickDAWProcessor::unfreezeTab (TabKind kind, int pageIndex)
 {
     auto* tab = mEngineRig->findTab (kind, pageIndex);
     if (tab == nullptr || ! tab->frozen) return;
@@ -5036,7 +5036,7 @@ void VibeSynthProcessor::unfreezeTab (TabKind kind, int pageIndex)
 // Automatic freezes land song-scope only; these two fill in the per-pattern
 // renders ONE at a time from the editor's quiet-tick poll, so an uninvited
 // render never stalls the app for a whole multi-pattern set.
-bool VibeSynthProcessor::findPendingPatternFreeze (TabKind& outKind, int& outPage,
+bool BaySickDAWProcessor::findPendingPatternFreeze (TabKind& outKind, int& outPage,
                                                    int& outPattern) const
 {
     if (mEngineRig == nullptr) return false;
@@ -5063,7 +5063,7 @@ bool VibeSynthProcessor::findPendingPatternFreeze (TabKind& outKind, int& outPag
     return false;
 }
 
-bool VibeSynthProcessor::renderPatternFreeze (TabKind kind, int pageIndex,
+bool BaySickDAWProcessor::renderPatternFreeze (TabKind kind, int pageIndex,
                                               int patternIndex, juce::String& outErr)
 {
     auto* tab = mEngineRig != nullptr ? mEngineRig->findTab (kind, pageIndex) : nullptr;
@@ -5142,7 +5142,7 @@ bool VibeSynthProcessor::renderPatternFreeze (TabKind kind, int pageIndex,
     return true;
 }
 
-bool VibeSynthProcessor::refreshFreeze (TabKind kind, int pageIndex, juce::String& outErr,
+bool BaySickDAWProcessor::refreshFreeze (TabKind kind, int pageIndex, juce::String& outErr,
                                         bool songScopeOnly)
 {
     auto* tab = mEngineRig->findTab (kind, pageIndex);
@@ -5192,7 +5192,7 @@ bool VibeSynthProcessor::refreshFreeze (TabKind kind, int pageIndex, juce::Strin
 }
 
 std::pair<float, float>
-VibeSynthProcessor::drainInsertPeakDbStereo (VibeGraph::InsertKind kind, int index) noexcept
+BaySickDAWProcessor::drainInsertPeakDbStereo (BaySickGraph::InsertKind kind, int index) noexcept
 {
     constexpr float kNI = -std::numeric_limits<float>::infinity();
     auto drainPair = [] (std::atomic<float>& l, std::atomic<float>& r) noexcept
@@ -5204,39 +5204,39 @@ VibeSynthProcessor::drainInsertPeakDbStereo (VibeGraph::InsertKind kind, int ind
     };
     switch (kind)
     {
-        case VibeGraph::InsertKind::Layer:
+        case BaySickGraph::InsertKind::Layer:
             if (index >= 0 && index < kMaxLayerPages)
                 return drainPair (mLayerInsertPeakDbL[index], mLayerInsertPeakDbR[index]);
             break;
-        case VibeGraph::InsertKind::Bass:
+        case BaySickGraph::InsertKind::Bass:
             if (index >= 0 && index < kMaxBassPages)
                 return drainPair (mBassInsertPeakDbL[index], mBassInsertPeakDbR[index]);
             break;
-        case VibeGraph::InsertKind::Drum:
+        case BaySickGraph::InsertKind::Drum:
             if (index >= 0 && index < kMaxDrumPages)
                 return drainPair (mDrumInsertPeakDbL[index], mDrumInsertPeakDbR[index]);
             break;
-        case VibeGraph::InsertKind::Audio:
+        case BaySickGraph::InsertKind::Audio:
             if (index >= 0 && index < kMaxAudioRows)
                 return drainPair (mAudioRowPeakDbL[index], mAudioRowPeakDbR[index]);
             break;
-        case VibeGraph::InsertKind::Aux:
+        case BaySickGraph::InsertKind::Aux:
             if (index >= 0 && index < MixerChannelIds::kMaxAuxStrips)
                 return drainPair (mAuxInsertPeakDbL[index], mAuxInsertPeakDbR[index]);
             break;
-        case VibeGraph::InsertKind::Vox:
+        case BaySickGraph::InsertKind::Vox:
             if (index >= 0 && index < MixerChannelIds::kMaxVoxStrips)
                 return drainPair (mVoxInsertPeakDbL[index], mVoxInsertPeakDbR[index]);
             break;
-        case VibeGraph::InsertKind::Inst:
+        case BaySickGraph::InsertKind::Inst:
             if (index >= 0 && index < MixerChannelIds::kMaxInstStrips)
                 return drainPair (mInstInsertPeakDbL[index], mInstInsertPeakDbR[index]);
             break;
-        case VibeGraph::InsertKind::Rusty:
+        case BaySickGraph::InsertKind::Rusty:
             if (index >= 0 && index < MixerChannelIds::kMaxRustyStrips)
                 return drainPair (mRustyInsertPeakDbL[index], mRustyInsertPeakDbR[index]);
             break;
-        case VibeGraph::InsertKind::Plugin:
+        case BaySickGraph::InsertKind::Plugin:
             if (index >= 0 && index < MixerChannelIds::kMaxPluginStrips)
                 return drainPair (mPluginInsertPeakDbL[index], mPluginInsertPeakDbR[index]);
             break;
@@ -5249,7 +5249,7 @@ VibeSynthProcessor::drainInsertPeakDbStereo (VibeGraph::InsertKind kind, int ind
 // after dispatchBlock.  Two parts (post-QA-AudioMeters):
 //   1. Bus mirrors -- every bus (Layers / Bass / Drums / Master / FX /
 //      AudioClips / Vox / Vox2 / Inst / Inst2 / Inst3 / Rusty) drains via
-//      the unified G1 loop: drainAndMerge from VibeGraph public-member atomics
+//      the unified G1 loop: drainAndMerge from BaySickGraph public-member atomics
 //      that the corresponding BusNode exchange-stored during the block.
 //   2. Insert mirrors -- every InsertKind (Layer / Bass / Drum / Audio / Aux /
 //      Vox / Inst / Rusty) drains the same way: drainAndMerge from
@@ -5257,7 +5257,7 @@ VibeSynthProcessor::drainInsertPeakDbStereo (VibeGraph::InsertKind kind, int ind
 //      (Audio kind drains into the existing mAudioRowPeakDb* arrays, kept under
 //      that name for Builder grid backward compat.)  Audio publishes via
 //      InsertNode::process -> publishPeakReading; processInsert exchange-stores
-//      InsertNode peakDb/L/R into the VibeGraph per-kind array; this drain
+//      InsertNode peakDb/L/R into the BaySickGraph per-kind array; this drain
 //      moves it into the PluginProcessor mirror that UI polls.
 // Pre-QA-AudioMeters there was also a Group 3 step -- per-insert peakDbSnap
 // promotion via promoteAllInsertPeakSnapshots -- that's gone (peakDbSnap layer
@@ -5266,7 +5266,7 @@ VibeSynthProcessor::drainInsertPeakDbStereo (VibeGraph::InsertKind kind, int ind
 // surface; effect-panel DBFSMeter + VU input meters).
 // All parts happen back-to-back so a UI vblank firing anywhere outside this
 // small window catches a coherent snapshot across every meter.
-void VibeSynthProcessor::drainMeterAtomicsForUI()
+void BaySickDAWProcessor::drainMeterAtomicsForUI()
 {
     constexpr float kPeakNegInf = -std::numeric_limits<float>::infinity();
     auto drainAndMerge = [kPeakNegInf] (std::atomic<float>& mirror, std::atomic<float>& nodeAtom) noexcept
@@ -5279,7 +5279,7 @@ void VibeSynthProcessor::drainMeterAtomicsForUI()
     };
     // Unified G1 bus drain -- every bus drained below
     // follows the same chain post-QA-Eg: BusNode peakDbL/R (audio-thread
-    // publishPeakReading) -> VibeGraph member atomic (processBus exchange-
+    // publishPeakReading) -> BaySickGraph member atomic (processBus exchange-
     // store) -> mirror (this drainAndMerge).
     drainAndMerge (mLayersPeakDbL, mVibeGraph.layersPeakDbL);
     drainAndMerge (mLayersPeakDbR, mVibeGraph.layersPeakDbR);
@@ -5393,7 +5393,7 @@ void VibeSynthProcessor::drainMeterAtomicsForUI()
 //  render reads >100% and false-tripped the overload/color at normal MT load.
 //  The sum-of-cores machinery is now meter-unused -> route to the Phase-6
 //  MT-diagnostic compile-gate (marathon 12e).]
-void VibeSynthProcessor::measureDspLoadAndOverload (juce::int64 t0Ticks, int numSamples)
+void BaySickDAWProcessor::measureDspLoadAndOverload (juce::int64 t0Ticks, int numSamples)
 {
     const double ticksPerSec = (double) juce::Time::getHighResolutionTicksPerSecond();
     const double bufDur      = numSamples / juce::jmax (1.0, mSampleRate);
@@ -5449,43 +5449,43 @@ namespace
     struct EqBusEntry
     {
         const char* prefix;
-        EQ8MsDSP* (*post) (VibeGraph&);
-        EQ8MsDSP* (*pre)  (VibeGraph&);
+        EQ8MsDSP* (*post) (BaySickGraph&);
+        EQ8MsDSP* (*pre)  (BaySickGraph&);
     };
 
     const EqBusEntry kEqBuses[] = {
-        { "mixer_layers",     [](VibeGraph& g) { return g.getLayersBusEQ();      }, [](VibeGraph& g) { return g.getLayersBusPreEQ();      } },
-        { "mixer_bass",       [](VibeGraph& g) { return g.getBassBusEQ();        }, [](VibeGraph& g) { return g.getBassBusPreEQ();        } },
-        { "mixer_drums",      [](VibeGraph& g) { return g.getDrumsBusEQ();       }, [](VibeGraph& g) { return g.getDrumsBusPreEQ();       } },
-        { "mixer_master",     [](VibeGraph& g) { return g.getMasterEQ();         }, [](VibeGraph& g) { return g.getMasterPreEQ();         } },
-        { "mixer_fx",         [](VibeGraph& g) { return g.getEffectsBusEQ();     }, [](VibeGraph& g) { return g.getEffectsBusPreEQ();     } },
-        { "mixer_clipsbus",   [](VibeGraph& g) { return g.getAudioClipsBusEQ();  }, [](VibeGraph& g) { return g.getAudioClipsBusPreEQ();  } },
-        { "mixer_voxbus",     [](VibeGraph& g) { return g.getVoxBusEQ();         }, [](VibeGraph& g) { return g.getVoxBusPreEQ();         } },
-        { "mixer_instbus",    [](VibeGraph& g) { return g.getInstBusEQ();        }, [](VibeGraph& g) { return g.getInstBusPreEQ();        } },
-        { "mixer_voxbus2",    [](VibeGraph& g) { return g.getVoxBus2EQ();        }, [](VibeGraph& g) { return g.getVoxBus2PreEQ();        } },
-        { "mixer_instbus2",   [](VibeGraph& g) { return g.getInstBus2EQ();       }, [](VibeGraph& g) { return g.getInstBus2PreEQ();       } },
-        { "mixer_instbus3",   [](VibeGraph& g) { return g.getInstBus3EQ();       }, [](VibeGraph& g) { return g.getInstBus3PreEQ();       } },
-        { "mixer_rustybus",   [](VibeGraph& g) { return g.getRustyDrumsBusEQ();  }, [](VibeGraph& g) { return g.getRustyDrumsBusPreEQ();  } },  // J-6
-        { "mixer_pluginbus",  [](VibeGraph& g) { return g.getPluginsBusEQ();     }, [](VibeGraph& g) { return g.getPluginsBusPreEQ();     } },  // TS6 (missed, fixed TS7)
-        { "mixer_layersbus2", [](VibeGraph& g) { return g.getLayersBus2EQ();     }, [](VibeGraph& g) { return g.getLayersBus2PreEQ();     } },  // T10
-        { "mixer_bassbus2",   [](VibeGraph& g) { return g.getBassBus2EQ();       }, [](VibeGraph& g) { return g.getBassBus2PreEQ();       } },
-        { "mixer_clipsbus2",  [](VibeGraph& g) { return g.getClipsBus2EQ();      }, [](VibeGraph& g) { return g.getClipsBus2PreEQ();      } },
-        { "mixer_pluginbus2", [](VibeGraph& g) { return g.getPluginsBus2EQ();    }, [](VibeGraph& g) { return g.getPluginsBus2PreEQ();    } },
-        { "mixer_drumsbus2",  [](VibeGraph& g) { return g.getDrumsBus2EQ();      }, [](VibeGraph& g) { return g.getDrumsBus2PreEQ();      } },  // QA-SOUNDNESS
+        { "mixer_layers",     [](BaySickGraph& g) { return g.getLayersBusEQ();      }, [](BaySickGraph& g) { return g.getLayersBusPreEQ();      } },
+        { "mixer_bass",       [](BaySickGraph& g) { return g.getBassBusEQ();        }, [](BaySickGraph& g) { return g.getBassBusPreEQ();        } },
+        { "mixer_drums",      [](BaySickGraph& g) { return g.getDrumsBusEQ();       }, [](BaySickGraph& g) { return g.getDrumsBusPreEQ();       } },
+        { "mixer_master",     [](BaySickGraph& g) { return g.getMasterEQ();         }, [](BaySickGraph& g) { return g.getMasterPreEQ();         } },
+        { "mixer_fx",         [](BaySickGraph& g) { return g.getEffectsBusEQ();     }, [](BaySickGraph& g) { return g.getEffectsBusPreEQ();     } },
+        { "mixer_clipsbus",   [](BaySickGraph& g) { return g.getAudioClipsBusEQ();  }, [](BaySickGraph& g) { return g.getAudioClipsBusPreEQ();  } },
+        { "mixer_voxbus",     [](BaySickGraph& g) { return g.getVoxBusEQ();         }, [](BaySickGraph& g) { return g.getVoxBusPreEQ();         } },
+        { "mixer_instbus",    [](BaySickGraph& g) { return g.getInstBusEQ();        }, [](BaySickGraph& g) { return g.getInstBusPreEQ();        } },
+        { "mixer_voxbus2",    [](BaySickGraph& g) { return g.getVoxBus2EQ();        }, [](BaySickGraph& g) { return g.getVoxBus2PreEQ();        } },
+        { "mixer_instbus2",   [](BaySickGraph& g) { return g.getInstBus2EQ();       }, [](BaySickGraph& g) { return g.getInstBus2PreEQ();       } },
+        { "mixer_instbus3",   [](BaySickGraph& g) { return g.getInstBus3EQ();       }, [](BaySickGraph& g) { return g.getInstBus3PreEQ();       } },
+        { "mixer_rustybus",   [](BaySickGraph& g) { return g.getRustyDrumsBusEQ();  }, [](BaySickGraph& g) { return g.getRustyDrumsBusPreEQ();  } },  // J-6
+        { "mixer_pluginbus",  [](BaySickGraph& g) { return g.getPluginsBusEQ();     }, [](BaySickGraph& g) { return g.getPluginsBusPreEQ();     } },  // TS6 (missed, fixed TS7)
+        { "mixer_layersbus2", [](BaySickGraph& g) { return g.getLayersBus2EQ();     }, [](BaySickGraph& g) { return g.getLayersBus2PreEQ();     } },  // T10
+        { "mixer_bassbus2",   [](BaySickGraph& g) { return g.getBassBus2EQ();       }, [](BaySickGraph& g) { return g.getBassBus2PreEQ();       } },
+        { "mixer_clipsbus2",  [](BaySickGraph& g) { return g.getClipsBus2EQ();      }, [](BaySickGraph& g) { return g.getClipsBus2PreEQ();      } },
+        { "mixer_pluginbus2", [](BaySickGraph& g) { return g.getPluginsBus2EQ();    }, [](BaySickGraph& g) { return g.getPluginsBus2PreEQ();    } },
+        { "mixer_drumsbus2",  [](BaySickGraph& g) { return g.getDrumsBus2EQ();      }, [](BaySickGraph& g) { return g.getDrumsBus2PreEQ();      } },  // QA-SOUNDNESS
     };
 
-    struct EqInsertFamily { VibeGraph::InsertKind kind; const char* prefixBase; int count; };
+    struct EqInsertFamily { BaySickGraph::InsertKind kind; const char* prefixBase; int count; };
 
     constexpr EqInsertFamily kEqInsertFamilies[] = {
-        { VibeGraph::InsertKind::Layer,  "mixer_layer_",  kMaxLayerPages },
-        { VibeGraph::InsertKind::Bass,   "mixer_bass_",   kMaxBassPages  },
-        { VibeGraph::InsertKind::Drum,   "mixer_drum_",   kMaxDrumPages  },
-        { VibeGraph::InsertKind::Audio,  "mixer_audio_",  VibeSynthProcessor::kMaxAudioRows },
-        { VibeGraph::InsertKind::Aux,    "mixer_aux_",    MixerChannelIds::kMaxAuxStrips    },
-        { VibeGraph::InsertKind::Vox,    "mixer_vox_",    MixerChannelIds::kMaxVoxStrips    },
-        { VibeGraph::InsertKind::Inst,   "mixer_inst_",   MixerChannelIds::kMaxInstStrips   },
-        { VibeGraph::InsertKind::Rusty,  "mixer_rusty_",  MixerChannelIds::kMaxRustyStrips  },  // J-6
-        { VibeGraph::InsertKind::Plugin, "mixer_plugin_", MixerChannelIds::kMaxPluginStrips },  // TS6
+        { BaySickGraph::InsertKind::Layer,  "mixer_layer_",  kMaxLayerPages },
+        { BaySickGraph::InsertKind::Bass,   "mixer_bass_",   kMaxBassPages  },
+        { BaySickGraph::InsertKind::Drum,   "mixer_drum_",   kMaxDrumPages  },
+        { BaySickGraph::InsertKind::Audio,  "mixer_audio_",  BaySickDAWProcessor::kMaxAudioRows },
+        { BaySickGraph::InsertKind::Aux,    "mixer_aux_",    MixerChannelIds::kMaxAuxStrips    },
+        { BaySickGraph::InsertKind::Vox,    "mixer_vox_",    MixerChannelIds::kMaxVoxStrips    },
+        { BaySickGraph::InsertKind::Inst,   "mixer_inst_",   MixerChannelIds::kMaxInstStrips   },
+        { BaySickGraph::InsertKind::Rusty,  "mixer_rusty_",  MixerChannelIds::kMaxRustyStrips  },  // J-6
+        { BaySickGraph::InsertKind::Plugin, "mixer_plugin_", MixerChannelIds::kMaxPluginStrips },  // TS6
     };
 
     constexpr int eqInsertSlotTotal()
@@ -5506,7 +5506,7 @@ namespace
 // allocation on this path.  A band whose Freq pointer is still null has not been
 // registered yet (new InsertNode whose ensureMixerStripParams has not run) and
 // is skipped, exactly as the old getParameter existence test did.
-void VibeSynthProcessor::updateEQFromCache (EQ8MsDSP* eq, int stripSlot, int bank)
+void BaySickDAWProcessor::updateEQFromCache (EQ8MsDSP* eq, int stripSlot, int bank)
 {
     if (eq == nullptr || stripSlot < 0 || stripSlot >= kEqNumStripSlots) return;
 
@@ -5570,7 +5570,7 @@ void VibeSynthProcessor::updateEQFromCache (EQ8MsDSP* eq, int stripSlot, int ban
 // it from its cached param pointers. Safe to call from processBlock - getters
 // return nullptr for indices that have no registered InsertNode, and the inner
 // band loop short-circuits on strips whose params are not cached yet.
-void VibeSynthProcessor::updateAllPostRackEQsFromApvts()
+void BaySickDAWProcessor::updateAllPostRackEQsFromApvts()
 {
     static_assert ((int) (sizeof (kEqBuses) / sizeof (kEqBuses[0])) == kEqNumBusSlots,
                    "kEqBuses and kEqNumBusSlots must agree - the EQ cache is indexed by both");
@@ -5595,7 +5595,7 @@ void VibeSynthProcessor::updateAllPostRackEQsFromApvts()
 // the `_preeq_` sub-prefix to read pre-EQ params + the new pre-EQ accessors.
 // Bus + insert pre-EQ DSPs were added in B2; their params in B3.  Called once
 // per processBlock alongside the post-rack version.
-void VibeSynthProcessor::updateAllPreRackEQsFromApvts()
+void BaySickDAWProcessor::updateAllPreRackEQsFromApvts()
 {
     for (int i = 0; i < kEqNumBusSlots; ++i)
         if (auto* eq = kEqBuses[i].pre (mVibeGraph))
@@ -5615,16 +5615,16 @@ void VibeSynthProcessor::updateAllPreRackEQsFromApvts()
 // through the two passes above.  Main level, phase mode, linear precision,
 // anti-cramping, proportional Q and the A/B spare have no parameter behind them
 // -- they live only in the DSP and in the saved rack blob, which File > Open
-// restores via VibeGraph::applyRackStates and File > New does not write at all.
+// restores via BaySickGraph::applyRackStates and File > New does not write at all.
 // Without this, a blank project keeps the previous one's output trim (audible:
 // EQ8DSP::isIdentity refuses to short-circuit on a non-zero main level) and its
-// linear-phase FFT latency (VibeGraph sums it into PDC), with the previous
+// linear-phase FFT latency (BaySickGraph sums it into PDC), with the previous
 // project's B bank still sitting in the spare.
 //
 // THREAD SAFETY: setPhaseMode allocates and frees the linear-phase processor and
 // the band push writes coefficients processBlock reads, so the caller runs this
 // under the project-load shield with a settle already paid.
-void VibeSynthProcessor::resetEqStatesToDefaults()
+void BaySickDAWProcessor::resetEqStatesToDefaults()
 {
     auto forEachSide = [this] (auto&& fn)
     {
@@ -5673,7 +5673,7 @@ void VibeSynthProcessor::resetEqStatesToDefaults()
 
 // ── CL-281 decode-once cache helpers ─────────────────────────────────────────
 
-juce::String VibeSynthProcessor::clipAudioCacheKey (const juce::File& resolvedFile)
+juce::String BaySickDAWProcessor::clipAudioCacheKey (const juce::File& resolvedFile)
 {
     if (! resolvedFile.existsAsFile())
         return {};
@@ -5694,7 +5694,7 @@ juce::String VibeSynthProcessor::clipAudioCacheKey (const juce::File& resolvedFi
 }
 
 DecodedClipAudioPtr
-VibeSynthProcessor::decodeClipAudioIfCacheable (juce::AudioFormatReader& reader)
+BaySickDAWProcessor::decodeClipAudioIfCacheable (juce::AudioFormatReader& reader)
 {
     // The threshold and the stereo fold are AudioClipStreamer's, read from that
     // class rather than restated, so cached and streamed clips split at exactly
@@ -5720,7 +5720,7 @@ VibeSynthProcessor::decodeClipAudioIfCacheable (juce::AudioFormatReader& reader)
 }
 
 // ── Audio clip playback ───────────────────────────────────────────────────────
-void VibeSynthProcessor::rebuildAudioClipPlayers()
+void BaySickDAWProcessor::rebuildAudioClipPlayers()
 {
     if (!mPatternManager) return;
 
@@ -5955,7 +5955,7 @@ void VibeSynthProcessor::rebuildAudioClipPlayers()
 // content even while the user monitors with the strip muted.
 // outStartBeat = the timeline beat of composite sample 0; composite index i
 // maps to timeline sample clipBeatToSample(outStartBeat, ...) + i.
-juce::AudioBuffer<float> VibeSynthProcessor::renderChannelComposite (int channelId,
+juce::AudioBuffer<float> BaySickDAWProcessor::renderChannelComposite (int channelId,
                                                                      double& outStartBeat,
                                                                      juce::int64& outStartSample)
 {
@@ -6268,7 +6268,7 @@ juce::AudioBuffer<float> VibeSynthProcessor::renderChannelComposite (int channel
     return composite;
 }
 
-juce::int64 VibeSynthProcessor::channelClipSignature (int channelId) const
+juce::int64 BaySickDAWProcessor::channelClipSignature (int channelId) const
 {
     if (mPatternManager == nullptr) return 0;
     juce::int64 sig = 0;
@@ -6345,7 +6345,7 @@ juce::int64 VibeSynthProcessor::channelClipSignature (int channelId) const
     return sig;
 }
 
-std::vector<std::pair<int, juce::String>> VibeSynthProcessor::listAudioClipChannels() const
+std::vector<std::pair<int, juce::String>> BaySickDAWProcessor::listAudioClipChannels() const
 {
     std::vector<std::pair<int, juce::String>> outList;
     if (mPatternManager == nullptr) return outList;
@@ -6395,7 +6395,7 @@ std::vector<std::pair<int, juce::String>> VibeSynthProcessor::listAudioClipChann
 // slot.
 //
 // Audio-clip choke is handled separately at clip-start time (Batch 4).
-void VibeSynthProcessor::applyChokeGroupDispatch(
+void BaySickDAWProcessor::applyChokeGroupDispatch(
     std::array<juce::MidiBuffer, kMaxLayerPages>& layerMidi,
     std::array<juce::MidiBuffer, kMaxBassPages>&  bassMidi,
     std::array<juce::MidiBuffer, kMaxDrumPages>&  drumMidi,
@@ -6405,7 +6405,7 @@ void VibeSynthProcessor::applyChokeGroupDispatch(
     int         numSamples,
     double      secPerBeat)
 {
-    using Kind = VibeGraph::InsertKind;
+    using Kind = BaySickGraph::InsertKind;
 
     // ── 1. Reset mutedByChoke on audio clips not currently in range ─────
     // A clip silenced by choke during a previous playback should start fresh
@@ -6503,13 +6503,13 @@ void VibeSynthProcessor::applyChokeGroupDispatch(
     }
 }
 
-void VibeSynthProcessor::updateDrumMixLevels()
+void BaySickDAWProcessor::updateDrumMixLevels()
 {
     // No-op now that DrumSynth is gone - per-drum-tab levels flow through
     // their mixer strips' faders, applied inside each drum InsertNode.
 }
 
-void VibeSynthProcessor::syncMixerFromPatternManager()
+void BaySickDAWProcessor::syncMixerFromPatternManager()
 {
     if (!mPatternManager) return;
     const auto& mx = mPatternManager->getMixer();
@@ -6547,7 +6547,7 @@ void VibeSynthProcessor::syncMixerFromPatternManager()
 // strips armed, the master output is captured to a single WAV.  MIDI mode
 // skips audio writers entirely - MidiRecorder handles note capture; Editor
 // drops the notes into the last-accessed piano roll on stop.
-void VibeSynthProcessor::startRecording (RecordMode mode,
+void BaySickDAWProcessor::startRecording (RecordMode mode,
                                           double startBeat,
                                           const juce::String& projectName,
                                           const juce::File& samplesFolder)
@@ -6685,7 +6685,7 @@ void VibeSynthProcessor::startRecording (RecordMode mode,
     }
 }
 
-VibeSynthProcessor::RecordResult VibeSynthProcessor::stopRecording()
+BaySickDAWProcessor::RecordResult BaySickDAWProcessor::stopRecording()
 {
     RecordResult out;
     // Close the audio thread out of EVERY tap first: the two container gates
@@ -6780,7 +6780,7 @@ VibeSynthProcessor::RecordResult VibeSynthProcessor::stopRecording()
 // thread).  Builds a non-owning AudioBuffer view via const_cast: JUCE's
 // AudioBuffer ctor wants non-const float**, but writeBlock takes its
 // buffer arg as const ref + only reads.
-void VibeSynthProcessor::tapDryRecorder (int channelId,
+void BaySickDAWProcessor::tapDryRecorder (int channelId,
                                           const float* monoSource,
                                           int numSamples)
 {
@@ -6811,7 +6811,7 @@ void VibeSynthProcessor::tapDryRecorder (int channelId,
 }
 
 // ── State persistence ─────────────────────────────────────────────────────────
-void VibeSynthProcessor::getStateInformation(juce::MemoryBlock& destData)
+void BaySickDAWProcessor::getStateInformation(juce::MemoryBlock& destData)
 {
     // QA-Ef close (2026-05-23): mirror serializeProject's manual-node-creation
     // for lazily-registered params so the VST3 host-save path matches the
@@ -6845,8 +6845,8 @@ void VibeSynthProcessor::getStateInformation(juce::MemoryBlock& destData)
     auto state = apvts.copyState();
 
     // Always rebuild the rack states child from scratch (avoid stale duplicate).
-    state.removeChild(state.getChildWithName("VibeRackStates"), nullptr);
-    juce::ValueTree rackStates("VibeRackStates");
+    state.removeChild(state.getChildWithName("BaySickRackStates"), nullptr);
+    juce::ValueTree rackStates("BaySickRackStates");
     mVibeGraph.saveRackStates(rackStates);
     state.addChild(rackStates, -1, nullptr);
 
@@ -6865,7 +6865,7 @@ void VibeSynthProcessor::getStateInformation(juce::MemoryBlock& destData)
     copyXmlToBinary(*xml, destData);
 }
 
-void VibeSynthProcessor::setStateInformation(const void* data, int sizeInBytes)
+void BaySickDAWProcessor::setStateInformation(const void* data, int sizeInBytes)
 {
     std::unique_ptr<juce::XmlElement> xmlState(getXmlFromBinary(data, sizeInBytes));
     if (!xmlState) return;
@@ -6894,7 +6894,7 @@ void VibeSynthProcessor::setStateInformation(const void* data, int sizeInBytes)
     clearAllAuxInserts();
 
     // Extract and apply rack states before passing to APVTS (keeps APVTS tree clean).
-    auto rackStates = state.getChildWithName("VibeRackStates");
+    auto rackStates = state.getChildWithName("BaySickRackStates");
     if (rackStates.isValid())
     {
         state.removeChild(rackStates, nullptr);
@@ -6947,7 +6947,7 @@ void VibeSynthProcessor::setStateInformation(const void* data, int sizeInBytes)
 //
 //   <BaySickDAWProject version="1">
 //     <Processor>
-//       <APVTSState>...</APVTSState>          ← APVTS + VibeRackStates child
+//       <APVTSState>...</APVTSState>          ← APVTS + BaySickRackStates child
 //     </Processor>
 //     <PatternManager version="1">
 //       <Patterns>...</Patterns>
@@ -6964,7 +6964,7 @@ void VibeSynthProcessor::setStateInformation(const void* data, int sizeInBytes)
 // ProjectManager writes this to <projectFolder>/project.xml.  The legacy
 // getStateInformation/setStateInformation blob format is kept untouched so any
 // prior state files still load (APVTS-only, no pattern content).
-void VibeSynthProcessor::serializeProject (juce::XmlElement& root)
+void BaySickDAWProcessor::serializeProject (juce::XmlElement& root)
 {
     root.setAttribute ("version", 1);
 
@@ -7019,7 +7019,7 @@ void VibeSynthProcessor::serializeProject (juce::XmlElement& root)
 // None of it lives in the per-tab engineData under <UIState> -- that captures
 // only each engine processor's own state -- so a template without this restores
 // tabs and engines onto a defaulted mixer.
-void VibeSynthProcessor::writeProcessorState (juce::XmlElement& root)
+void BaySickDAWProcessor::writeProcessorState (juce::XmlElement& root)
 {
     // QA-Ef (2026-05-22, refined after the 100->-1 reset was caught on the
     // Save Diag): for every registered APVTS param that lacks a tree node in
@@ -7070,8 +7070,8 @@ void VibeSynthProcessor::writeProcessorState (juce::XmlElement& root)
     // MemoryBlock blob.  copyState() flushes any pending live values to
     // existing nodes before snapshotting.
     auto state = apvts.copyState();
-    state.removeChild (state.getChildWithName ("VibeRackStates"), nullptr);
-    juce::ValueTree rackStates ("VibeRackStates");
+    state.removeChild (state.getChildWithName ("BaySickRackStates"), nullptr);
+    juce::ValueTree rackStates ("BaySickRackStates");
     mVibeGraph.saveRackStates (rackStates);
     state.addChild (rackStates, -1, nullptr);
 
@@ -7080,7 +7080,7 @@ void VibeSynthProcessor::writeProcessorState (juce::XmlElement& root)
         processor->addChildElement (stateXml.release());
 }
 
-void VibeSynthProcessor::applyPendingRackStates()
+void BaySickDAWProcessor::applyPendingRackStates()
 {
     // 2026-04-24: re-sync APVTS parameter adapters to the loaded state tree.
     // JUCE's replaceState binds every adapter to its matching tree child
@@ -7100,7 +7100,7 @@ void VibeSynthProcessor::applyPendingRackStates()
     mPendingProjectRackState = {};
 }
 
-void VibeSynthProcessor::resetToBlankState()
+void BaySickDAWProcessor::resetToBlankState()
 {
     // Project boundary: a clip that failed in the OLD project must report
     // again if the next project references it too.
@@ -7177,7 +7177,7 @@ void VibeSynthProcessor::resetToBlankState()
     }
 }
 
-void VibeSynthProcessor::setCurrentProjectFolder (const juce::File& folder)
+void BaySickDAWProcessor::setCurrentProjectFolder (const juce::File& folder)
 {
     {
         juce::ScopedLock sl (mProjectFolderLock);
@@ -7195,13 +7195,13 @@ void VibeSynthProcessor::setCurrentProjectFolder (const juce::File& folder)
                                   { return resolveProjectFile (stored); });
 }
 
-juce::File VibeSynthProcessor::getCurrentProjectFolder() const
+juce::File BaySickDAWProcessor::getCurrentProjectFolder() const
 {
     juce::ScopedLock sl (mProjectFolderLock);
     return mCurrentProjectFolder;
 }
 
-juce::File VibeSynthProcessor::resolveProjectFile (const juce::String& storedPath) const
+juce::File BaySickDAWProcessor::resolveProjectFile (const juce::String& storedPath) const
 {
     if (storedPath.isEmpty()) return {};
     // QA-ProjectSave Task 4 (2026-07-26): stable-root references resolve FIRST,
@@ -7218,7 +7218,7 @@ juce::File VibeSynthProcessor::resolveProjectFile (const juce::String& storedPat
     return mCurrentProjectFolder.getChildFile (storedPath);
 }
 
-void VibeSynthProcessor::deserializeProject (const juce::XmlElement& root)
+void BaySickDAWProcessor::deserializeProject (const juce::XmlElement& root)
 {
     // QA-Ef (2026-05-22): raise the project-load shield across the WHOLE load,
     // not just the teardown half.  restoreAuxStripsFromState (below) + the
@@ -7308,7 +7308,7 @@ void VibeSynthProcessor::deserializeProject (const juce::XmlElement& root)
 // Pairs with writeProcessorState.  Per-insert rack states are STASHED here and
 // replayed by applyPendingRackStates once the caller has rebuilt tabs + strips,
 // because the InsertNodes they target do not exist yet at this point.
-void VibeSynthProcessor::applyProcessorState (const juce::XmlElement& root)
+void BaySickDAWProcessor::applyProcessorState (const juce::XmlElement& root)
 {
     // Processor state - first child under <Processor>.
     if (auto* processor = root.getChildByName ("Processor"))
@@ -7319,7 +7319,7 @@ void VibeSynthProcessor::applyProcessorState (const juce::XmlElement& root)
             auto state = juce::ValueTree::fromXml (*child);
             if (! state.isValid()) continue;
 
-            auto rackStates = state.getChildWithName ("VibeRackStates");
+            auto rackStates = state.getChildWithName ("BaySickRackStates");
             if (rackStates.isValid())
             {
                 state.removeChild (rackStates, nullptr);
@@ -7363,7 +7363,7 @@ void VibeSynthProcessor::applyProcessorState (const juce::XmlElement& root)
 // A forwarder, not a gate: MissingFileReport is a header-only namespace with no
 // processor dependency, so any surface can drain.  See the header decl for when
 // a bare call is right and when a ScopedGesture is.
-void VibeSynthProcessor::reportMissingFilesIfAny (const juce::String& sourceNoun)
+void BaySickDAWProcessor::reportMissingFilesIfAny (const juce::String& sourceNoun)
 {
     MissingFileReport::reportIfAny (sourceNoun);
 }
@@ -7373,7 +7373,7 @@ void VibeSynthProcessor::reportMissingFilesIfAny (const juce::String& sourceNoun
 // audio path and UI can pick them up.  IMPORTANT: sourceState must be a deep
 // copy of the loaded tree taken BEFORE apvts.replaceState -- see the header
 // decl comment for the phantom-aux failure mode if we scan apvts.state.
-void VibeSynthProcessor::restoreAuxStripsFromState (const juce::ValueTree& sourceState)
+void BaySickDAWProcessor::restoreAuxStripsFromState (const juce::ValueTree& sourceState)
 {
     for (int idx = 0; idx < MixerChannelIds::kMaxAuxStrips; ++idx)
     {
@@ -7399,12 +7399,12 @@ void VibeSynthProcessor::restoreAuxStripsFromState (const juce::ValueTree& sourc
 
 // ── Editor factory (VST only) ─────────────────────────────────────────────────
 #ifdef VIBESYNTH_VST
-juce::AudioProcessorEditor* VibeSynthProcessor::createEditor()
+juce::AudioProcessorEditor* BaySickDAWProcessor::createEditor()
 {
-    return new VibesynthEditor(*this);
+    return new BaySickDAWPluginEditor(*this);
 }
 #else
-juce::AudioProcessorEditor* VibeSynthProcessor::createEditor()
+juce::AudioProcessorEditor* BaySickDAWProcessor::createEditor()
 {
     return nullptr; // Standalone uses StandaloneEditor, not AudioProcessorEditor
 }
@@ -7414,7 +7414,7 @@ juce::AudioProcessorEditor* VibeSynthProcessor::createEditor()
 #ifdef VIBESYNTH_VST
 juce::AudioProcessor* JUCE_CALLTYPE createPluginFilter()
 {
-    return new VibeSynthProcessor();
+    return new BaySickDAWProcessor();
 }
 #endif
 
@@ -7474,7 +7474,7 @@ namespace
 // (2026-04-25: addParamsForBaySickDrums had already gone with the legacy drum
 // processor.)
 
-void VibeSynthProcessor::addParamsForTrackEQ(const juce::String& prefix)
+void BaySickDAWProcessor::addParamsForTrackEQ(const juce::String& prefix)
 {
     // Post-rack EQ (existing behavior - IDs at prefix + "_mid_eq{b}{Suffix}").
     addParamsForEQBank(prefix, juce::String());
@@ -7482,7 +7482,7 @@ void VibeSynthProcessor::addParamsForTrackEQ(const juce::String& prefix)
 
 // §P4.3: Pre-rack EQ.  IDs at prefix + "_preeq_mid_eq{b}{Suffix}" so the
 // post-rack and pre-rack banks coexist on the same strip without collision.
-void VibeSynthProcessor::addParamsForTrackPreEQ(const juce::String& prefix)
+void BaySickDAWProcessor::addParamsForTrackPreEQ(const juce::String& prefix)
 {
     addParamsForEQBank(prefix, "preeq_");
 }
@@ -7491,7 +7491,7 @@ void VibeSynthProcessor::addParamsForTrackPreEQ(const juce::String& prefix)
 // "_" + subPrefix + "{mid|side}_eq{b}{Suffix}".
 //   subPrefix ""        → post-rack ("EQ" labels)
 //   subPrefix "preeq_"  → pre-rack  ("Pre EQ" labels - disambiguates automation menus)
-void VibeSynthProcessor::addParamsForEQBank(const juce::String& prefix,
+void BaySickDAWProcessor::addParamsForEQBank(const juce::String& prefix,
                                              const juce::String& subPrefix)
 {
     auto& ids = mRegisteredTrackParams[prefix];
@@ -7550,7 +7550,7 @@ void VibeSynthProcessor::addParamsForEQBank(const juce::String& prefix,
 // bus match runs FIRST so "mixer_bass" resolves to the bus rather than falling
 // into the "mixer_bass_" insert family.  Returns -1 for any prefix that owns no
 // EQ bank the sweep would ever visit.
-int VibeSynthProcessor::eqStripSlotForPrefix (const juce::String& prefix) noexcept
+int BaySickDAWProcessor::eqStripSlotForPrefix (const juce::String& prefix) noexcept
 {
     for (int i = 0; i < kEqNumBusSlots; ++i)
         if (prefix == kEqBuses[i].prefix)
@@ -7583,7 +7583,7 @@ int VibeSynthProcessor::eqStripSlotForPrefix (const juce::String& prefix) noexce
 // nothing -- a divergent copy is a silent no-op, not an error.
 namespace EqBandIds
 {
-    // Index order must match VibeSynthProcessor::EqBandParamSlot.
+    // Index order must match BaySickDAWProcessor::EqBandParamSlot.
     static const char* const kSuffixes[] = {
         "Freq", "Gain", "Q", "Type", "On", "Slope", "Mute", "Solo", "Channel",
         "Dynamic", "Threshold", "Ratio", "Attack", "Release", "Range", "Upward", "ScSource"
@@ -7604,7 +7604,7 @@ namespace EqBandIds
 // mEqParamCache declaration for the full contract).  Runs once per strip, right
 // after addParamsForEQBank has created the ids, so the pointers it resolves are
 // the ones that bank just registered.
-void VibeSynthProcessor::cacheEqParamPointers (const juce::String& prefix)
+void BaySickDAWProcessor::cacheEqParamPointers (const juce::String& prefix)
 {
     const int stripSlot = eqStripSlotForPrefix (prefix);
     if (stripSlot < 0) return;
@@ -7633,7 +7633,7 @@ void VibeSynthProcessor::cacheEqParamPointers (const juce::String& prefix)
 }
 
 // ── QA-ModelShell TS2: offline render drive ──────────────────────────────────
-bool VibeSynthProcessor::beginOfflineRender (double renderSampleRate, int renderBlockSize)
+bool BaySickDAWProcessor::beginOfflineRender (double renderSampleRate, int renderBlockSize)
 {
     if (renderSampleRate <= 0.0 || renderBlockSize <= 0) return false;
 
@@ -7706,7 +7706,7 @@ bool VibeSynthProcessor::beginOfflineRender (double renderSampleRate, int render
     return true;
 }
 
-void VibeSynthProcessor::endOfflineRender()
+void BaySickDAWProcessor::endOfflineRender()
 {
     // Reverse of begin: device config back, flags off, the render's own
     // tails cleared so they never bleed into live playback, playhead + mode
@@ -7782,13 +7782,13 @@ void VibeSynthProcessor::endOfflineRender()
 
 // ── Engine processor registration ────────────────────────────────────────────
 // See the declaration for why the binding lives here and is never undone.
-void VibeSynthProcessor::bindSampleLoadShield (juce::AudioProcessor* eng) noexcept
+void BaySickDAWProcessor::bindSampleLoadShield (juce::AudioProcessor* eng) noexcept
 {
-    if (auto* player = dynamic_cast<VibePlayerProcessor*> (eng))
+    if (auto* player = dynamic_cast<BaySickPlayerProcessor*> (eng))
         player->setHostProcessor (this);
 }
 
-void VibeSynthProcessor::registerLayerEngine(int idx, juce::AudioProcessor* eng)
+void BaySickDAWProcessor::registerLayerEngine(int idx, juce::AudioProcessor* eng)
 {
     bindSampleLoadShield (eng);
 
@@ -7797,12 +7797,12 @@ void VibeSynthProcessor::registerLayerEngine(int idx, juce::AudioProcessor* eng)
         if (idx >= 0 && idx < kMaxLayerPages) mLayerEngines[idx] = eng;
     }
     // 5F-4a: ensure mixer strip params + Layer InsertNode exist for this page.
-    // Message thread only - safe to call APVTS and VibeGraph.
+    // Message thread only - safe to call APVTS and BaySickGraph.
     if (idx >= 0 && idx < kMaxLayerPages && eng != nullptr)
     {
         const juce::String prefix = "mixer_layer_" + juce::String(idx);
         ensureMixerStripParams(prefix, MixerStripKind::Insert, MixerChannelIds::kLayersBus);
-        mVibeGraph.ensureInsertNode(VibeGraph::InsertKind::Layer, idx,
+        mVibeGraph.ensureInsertNode(BaySickGraph::InsertKind::Layer, idx,
                                      "Layer " + juce::String(idx + 1), prefix);
 
         // Batch 3 (2026-05-06): create + register the render task for this
@@ -7819,7 +7819,7 @@ void VibeSynthProcessor::registerLayerEngine(int idx, juce::AudioProcessor* eng)
 // Layer shape -- engine pointer under a SpinLock, mixer strip params, an
 // InsertNode, and an EngineInsertTask on the dispatcher.  The only differences
 // are the parent bus and which per-tab MIDI array the task reads.
-void VibeSynthProcessor::registerPluginEngine(int idx, juce::AudioProcessor* eng)
+void BaySickDAWProcessor::registerPluginEngine(int idx, juce::AudioProcessor* eng)
 {
     {
         juce::SpinLock::ScopedLockType lk(mPluginEngineLock);
@@ -7829,7 +7829,7 @@ void VibeSynthProcessor::registerPluginEngine(int idx, juce::AudioProcessor* eng
     {
         const juce::String prefix = "mixer_plugin_" + juce::String(idx);
         ensureMixerStripParams(prefix, MixerStripKind::Insert, MixerChannelIds::kPluginsBus);
-        mVibeGraph.ensureInsertNode(VibeGraph::InsertKind::Plugin, idx,
+        mVibeGraph.ensureInsertNode(BaySickGraph::InsertKind::Plugin, idx,
                                      "Plugin " + juce::String(idx + 1), prefix);
 
         auto task = std::make_unique<EngineInsertTask>(
@@ -7849,7 +7849,7 @@ void VibeSynthProcessor::registerPluginEngine(int idx, juce::AudioProcessor* eng
 // A fixed wait cannot make that claim at any single duration: one block is
 // 23 ms at 1024 samples / 44.1 kHz and 46 ms at 2048, so under a large ASIO
 // buffer it expires while the audio thread is still inside the render.
-void VibeSynthProcessor::settleAudioThread() noexcept
+void BaySickDAWProcessor::settleAudioThread() noexcept
 {
     jassert (juce::MessageManager::existsAndIsCurrentThread());
 
@@ -7907,7 +7907,7 @@ void VibeSynthProcessor::settleAudioThread() noexcept
 // at 128 samples / 48 kHz (2.7 ms a block, and two is the FLOOR: the shield can
 // land mid-block), scaling with the device buffer.  The mute itself was
 // accepted (Jeff, 2026-08-06) as the trade against the crash.
-void VibeSynthProcessor::unregisterPluginEngine(int idx)
+void BaySickDAWProcessor::unregisterPluginEngine(int idx)
 {
     if (idx < 0 || idx >= kMaxPluginPages) return;
     const bool shieldWasUp = isProjectLoadInProgress();
@@ -7928,7 +7928,7 @@ void VibeSynthProcessor::unregisterPluginEngine(int idx)
     // InsertNode retained on purpose - preserves mixer state if the tab returns.
 }
 
-void VibeSynthProcessor::unregisterLayerEngine(int idx)
+void BaySickDAWProcessor::unregisterLayerEngine(int idx)
 {
     if (idx < 0 || idx >= kMaxLayerPages) return;
     const bool shieldWasUp = isProjectLoadInProgress();   // see the shield note above
@@ -7948,7 +7948,7 @@ void VibeSynthProcessor::unregisterLayerEngine(int idx)
     setProjectLoadInProgress (shieldWasUp);
     // InsertNode retained on purpose - preserves mixer state if the page is re-opened.
 }
-void VibeSynthProcessor::registerBassEngine(int pageIdx, juce::AudioProcessor* eng)
+void BaySickDAWProcessor::registerBassEngine(int pageIdx, juce::AudioProcessor* eng)
 {
     bindSampleLoadShield (eng);
     if (pageIdx < 0 || pageIdx >= kMaxBassPages) return;
@@ -7960,7 +7960,7 @@ void VibeSynthProcessor::registerBassEngine(int pageIdx, juce::AudioProcessor* e
     {
         const juce::String prefix = "mixer_bass_" + juce::String(pageIdx);
         ensureMixerStripParams(prefix, MixerStripKind::Insert, MixerChannelIds::kBassBus);
-        mVibeGraph.ensureInsertNode(VibeGraph::InsertKind::Bass, pageIdx,
+        mVibeGraph.ensureInsertNode(BaySickGraph::InsertKind::Bass, pageIdx,
                                      "Bass " + juce::String(pageIdx + 1), prefix);
 
         // Batch 3 (2026-05-06): MT render task wrapper.
@@ -7971,7 +7971,7 @@ void VibeSynthProcessor::registerBassEngine(int pageIdx, juce::AudioProcessor* e
         mBassRenderTasks[(size_t) pageIdx] = std::move(task);
     }
 }
-void VibeSynthProcessor::unregisterBassEngine(int pageIdx)
+void BaySickDAWProcessor::unregisterBassEngine(int pageIdx)
 {
     if (pageIdx < 0 || pageIdx >= kMaxBassPages) return;
     const bool shieldWasUp = isProjectLoadInProgress();   // see the shield note above
@@ -7995,7 +7995,7 @@ void VibeSynthProcessor::unregisterBassEngine(int pageIdx)
 // ─────────────────────────────────────────────────────────────────────────────
 // QA-L-Fix (2026-07-19): per-drum kit trigger dispatch.  Audio thread only.
 // ─────────────────────────────────────────────────────────────────────────────
-int VibeSynthProcessor::drumPlayNoteRT (int drumIdx) const noexcept
+int BaySickDAWProcessor::drumPlayNoteRT (int drumIdx) const noexcept
 {
     if (drumIdx < 0 || drumIdx >= kMaxDrumPages) return 60;
     if (auto* p = mDrumPlayNotePtr[(size_t) drumIdx].load (std::memory_order_acquire))
@@ -8003,7 +8003,7 @@ int VibeSynthProcessor::drumPlayNoteRT (int drumIdx) const noexcept
     return 60;
 }
 
-void VibeSynthProcessor::dispatchDrumTriggers (
+void BaySickDAWProcessor::dispatchDrumTriggers (
     const juce::MidiMessage& msg,
     int samplePosition,
     int liveTargetKind,
@@ -8107,7 +8107,7 @@ void VibeSynthProcessor::dispatchDrumTriggers (
     }
 }
 
-void VibeSynthProcessor::tickCcTriggerHolds (
+void BaySickDAWProcessor::tickCcTriggerHolds (
     int numSamples,
     std::array<juce::MidiBuffer, kMaxDrumPages>& drumPageMidi) noexcept
 {
@@ -8136,7 +8136,7 @@ void VibeSynthProcessor::tickCcTriggerHolds (
 // into the audio graph the same way layers/bass do.  Mixer strip + InsertNode
 // reuse the existing Drum kind/range so the mixer UI stays consistent during
 // the D1 transition.
-void VibeSynthProcessor::registerDrumEngine(int pageIdx, juce::AudioProcessor* eng)
+void BaySickDAWProcessor::registerDrumEngine(int pageIdx, juce::AudioProcessor* eng)
 {
     bindSampleLoadShield (eng);
     if (pageIdx < 0 || pageIdx >= kMaxDrumPages) return;
@@ -8157,7 +8157,7 @@ void VibeSynthProcessor::registerDrumEngine(int pageIdx, juce::AudioProcessor* e
         mDrumPlayNotePtr[(size_t) pageIdx].store(
             apvts.getRawParameterValue(prefix + "_playNote"),
             std::memory_order_release);
-        mVibeGraph.ensureInsertNode(VibeGraph::InsertKind::Drum, pageIdx,
+        mVibeGraph.ensureInsertNode(BaySickGraph::InsertKind::Drum, pageIdx,
                                      "Drum " + juce::String(pageIdx + 1), prefix);
 
         // Batch 3 (2026-05-06): MT render task wrapper.
@@ -8172,7 +8172,7 @@ void VibeSynthProcessor::registerDrumEngine(int pageIdx, juce::AudioProcessor* e
     for (auto* e : mDrumEngines) if (e) { any = true; break; }
     mAnyDrumPageActive.store(any, std::memory_order_release);
 }
-void VibeSynthProcessor::unregisterDrumEngine(int pageIdx)
+void BaySickDAWProcessor::unregisterDrumEngine(int pageIdx)
 {
     if (pageIdx < 0 || pageIdx >= kMaxDrumPages) return;
     const bool shieldWasUp = isProjectLoadInProgress();   // see the shield note above
@@ -8203,7 +8203,7 @@ void VibeSynthProcessor::unregisterDrumEngine(int pageIdx)
 // strip, Clip engines share the existing Audio InsertNode for that row -
 // arrangement-playback audio + piano-roll-triggered audio mix into the same
 // strip so the user sees one channel per clip rather than two.
-void VibeSynthProcessor::registerClipEngine(int pageIdx, juce::AudioProcessor* eng)
+void BaySickDAWProcessor::registerClipEngine(int pageIdx, juce::AudioProcessor* eng)
 {
     bindSampleLoadShield (eng);
     if (pageIdx < 0 || pageIdx >= kMaxClipPages) return;
@@ -8229,7 +8229,7 @@ void VibeSynthProcessor::registerClipEngine(int pageIdx, juce::AudioProcessor* e
         task->setClipEngine (eng);
 }
 
-void VibeSynthProcessor::unregisterClipEngine(int pageIdx)
+void BaySickDAWProcessor::unregisterClipEngine(int pageIdx)
 {
     if (pageIdx < 0 || pageIdx >= kMaxClipPages) return;
 
@@ -8253,7 +8253,7 @@ void VibeSynthProcessor::unregisterClipEngine(int pageIdx)
 // The Vox / Inst InsertNode for the row was created when the user clicked
 // "Add Vox/Inst Strip" on the Mixer page (R3 wiring); we just register the
 // engine for audio-thread dispatch.
-void VibeSynthProcessor::registerVoxEngine(int pageIdx, juce::AudioProcessor* eng)
+void BaySickDAWProcessor::registerVoxEngine(int pageIdx, juce::AudioProcessor* eng)
 {
     if (pageIdx < 0 || pageIdx >= kMaxVoxPages) return;
     {
@@ -8275,7 +8275,7 @@ void VibeSynthProcessor::registerVoxEngine(int pageIdx, juce::AudioProcessor* en
     }
 }
 
-void VibeSynthProcessor::unregisterVoxEngine(int pageIdx)
+void BaySickDAWProcessor::unregisterVoxEngine(int pageIdx)
 {
     if (pageIdx < 0 || pageIdx >= kMaxVoxPages) return;
 
@@ -8299,7 +8299,7 @@ void VibeSynthProcessor::unregisterVoxEngine(int pageIdx)
     setProjectLoadInProgress (shieldWasUp);
 }
 
-void VibeSynthProcessor::registerInstEngine(int pageIdx, juce::AudioProcessor* eng)
+void BaySickDAWProcessor::registerInstEngine(int pageIdx, juce::AudioProcessor* eng)
 {
     if (pageIdx < 0 || pageIdx >= kMaxInstPages) return;
     {
@@ -8325,7 +8325,7 @@ void VibeSynthProcessor::registerInstEngine(int pageIdx, juce::AudioProcessor* e
     }
 }
 
-void VibeSynthProcessor::unregisterInstEngine(int pageIdx)
+void BaySickDAWProcessor::unregisterInstEngine(int pageIdx)
 {
     if (pageIdx < 0 || pageIdx >= kMaxInstPages) return;
 
@@ -8352,7 +8352,7 @@ void VibeSynthProcessor::unregisterInstEngine(int pageIdx)
 // §P4.3 B7 (2026-04-22): register/unregister{Layer,Bass,Drums}PageEQ APIs
 // deleted.  Per-page EQ DSPs (mLayerPageEQs / mBassPageEQs / mDrumsPageEQ)
 // are gone - pages now bind their EQ display to the InsertNode / BusNode
-// preEq directly via VibeGraph::getInsertPreEQ() / getXxxBusPreEQ().
+// preEq directly via BaySickGraph::getInsertPreEQ() / getXxxBusPreEQ().
 
 // QA-ApvtsAutomation (2026-07-25): registerParamsForTrack /
 // unregisterParamsForTrack / isTrackRegistered removed.  Everything they
@@ -8368,7 +8368,7 @@ void VibeSynthProcessor::unregisterInstEngine(int pageIdx)
 //  5F-4a: Mixer-strip lazy APVTS registration
 // ═══════════════════════════════════════════════════════════════════════════════
 
-void VibeSynthProcessor::addParamsForMixerStrip(const juce::String& prefix,
+void BaySickDAWProcessor::addParamsForMixerStrip(const juce::String& prefix,
                                                  MixerStripKind kind,
                                                  int defaultSendTo)
 {
@@ -8388,7 +8388,7 @@ void VibeSynthProcessor::addParamsForMixerStrip(const juce::String& prefix,
 
     // Universally present on every strip type:
     // 2026-04-30: max bumped down 10 → 5.6 dB to match the fader cap's
-    // visual range (kFaderMax in MixerTrackStrip + kFMax in VibeLAF's
+    // visual range (kFaderMax in MixerTrackStrip + kFMax in BaySickLAF's
     // drawLinearSlider were both changed at meter-rebuild time, but this
     // APVTS range wasn't - and SliderAttachment auto-overrides the
     // slider's setRange to match the param's range, so the cap travelled
@@ -8492,7 +8492,7 @@ void VibeSynthProcessor::addParamsForMixerStrip(const juce::String& prefix,
         addI(prefix + "_playNote", prefix + " Play Note", 0, 127, 60);
 }
 
-bool VibeSynthProcessor::ensureMixerStripParams(const juce::String& prefix,
+bool BaySickDAWProcessor::ensureMixerStripParams(const juce::String& prefix,
                                                  MixerStripKind kind,
                                                  int defaultSendTo)
 {
@@ -8528,7 +8528,7 @@ bool VibeSynthProcessor::ensureMixerStripParams(const juce::String& prefix,
     return true;
 }
 
-void VibeSynthProcessor::ensureMixerBusAndMasterParams()
+void BaySickDAWProcessor::ensureMixerBusAndMasterParams()
 {
     using namespace MixerChannelIds;
     ensureMixerStripParams("mixer_master",   MixerStripKind::Master, kOutput);
@@ -8573,7 +8573,7 @@ void VibeSynthProcessor::ensureMixerBusAndMasterParams()
 // x page + rusty.  Vox registers nothing (no vox MIDI -- Jeff 2026-07-23); clip
 // rolls follow the GLOBAL knob at full mix by design, no per-page params
 // (Jeff 2026-07-23).  Params persist with the project via APVTS state.
-void VibeSynthProcessor::ensureSwingParams()
+void BaySickDAWProcessor::ensureSwingParams()
 {
     auto addF = [&](const juce::String& id, const juce::String& name,
                     float def) -> std::atomic<float>*
@@ -8627,8 +8627,8 @@ void VibeSynthProcessor::ensureSwingParams()
     mSwingTruncRusty = addB("swing_rusty_trunc", "swing_rusty Truncate", false);
 }
 
-VibeSynthProcessor::SwingKnobBinding
-VibeSynthProcessor::makeSwingKnobBinding (const juce::String& mixId,
+BaySickDAWProcessor::SwingKnobBinding
+BaySickDAWProcessor::makeSwingKnobBinding (const juce::String& mixId,
                                           const juce::String& truncId)
 {
     SwingKnobBinding b;
@@ -8659,7 +8659,7 @@ VibeSynthProcessor::makeSwingKnobBinding (const juce::String& mixId,
     return b;
 }
 
-void VibeSynthProcessor::setSongMode (bool b)
+void BaySickDAWProcessor::setSongMode (bool b)
 {
     const bool was = mSongMode.exchange (b, std::memory_order_relaxed);
     if (was == b) return;
@@ -8703,13 +8703,13 @@ void VibeSynthProcessor::setSongMode (bool b)
 //  5F-4a: Audio-row mixer strip registration
 // ═══════════════════════════════════════════════════════════════════════════════
 
-void VibeSynthProcessor::ensureAudioInsert(int row, const juce::String& displayName)
+void BaySickDAWProcessor::ensureAudioInsert(int row, const juce::String& displayName)
 {
     if (row < 0 || row >= kMaxAudioRows) return;
 
     const juce::String prefix = "mixer_audio_" + juce::String(row);
     ensureMixerStripParams(prefix, MixerStripKind::Insert, MixerChannelIds::kClipsBus);
-    mVibeGraph.ensureInsertNode(VibeGraph::InsertKind::Audio, row,
+    mVibeGraph.ensureInsertNode(BaySickGraph::InsertKind::Audio, row,
                                  displayName.isNotEmpty() ? displayName
                                      : ("Audio " + juce::String(row + 1)),
                                  prefix);
@@ -8728,13 +8728,13 @@ void VibeSynthProcessor::ensureAudioInsert(int row, const juce::String& displayN
 }
 
 // 5F-4b B2: Aux strip registration (receive-only, default routes to Master).
-void VibeSynthProcessor::ensureAuxInsert(int idx, const juce::String& displayName)
+void BaySickDAWProcessor::ensureAuxInsert(int idx, const juce::String& displayName)
 {
     if (idx < 0 || idx >= MixerChannelIds::kMaxAuxStrips) return;   // matches MixerChannelIds aux range
 
     const juce::String prefix = "mixer_aux_" + juce::String(idx);
     ensureMixerStripParams(prefix, MixerStripKind::Insert, MixerChannelIds::kFxBus);
-    mVibeGraph.ensureInsertNode(VibeGraph::InsertKind::Aux, idx,
+    mVibeGraph.ensureInsertNode(BaySickGraph::InsertKind::Aux, idx,
                                  displayName.isNotEmpty() ? displayName
                                      : ("Aux " + juce::String(idx + 1)),
                                  prefix);
@@ -8760,7 +8760,7 @@ void VibeSynthProcessor::ensureAuxInsert(int idx, const juce::String& displayNam
 // across loads.  Audio-thread safety: each caller raises mProjectLoadInProgress
 // and waits out the in-flight block first, so processBlock is bailing to
 // silence while we mutate the render-task list.
-void VibeSynthProcessor::clearAllAuxInserts()
+void BaySickDAWProcessor::clearAllAuxInserts()
 {
     for (size_t i = 0; i < mAuxRenderTasks.size(); ++i)
     {
@@ -8776,25 +8776,25 @@ void VibeSynthProcessor::clearAllAuxInserts()
 // R1 (2026-04-23): Vox / Inst strip registration.  Same pattern as Aux but
 // each kind has its own bus parent (VoxBus / InstBus) instead of FxBus.
 // R2 adds the ASIO input-channel APVTS param at the same registration site.
-void VibeSynthProcessor::ensureVoxInsert(int idx, const juce::String& displayName)
+void BaySickDAWProcessor::ensureVoxInsert(int idx, const juce::String& displayName)
 {
     if (idx < 0 || idx >= MixerChannelIds::kMaxVoxStrips) return;
     const juce::String prefix = "mixer_vox_" + juce::String(idx);
     ensureMixerStripParams(prefix, MixerStripKind::Insert, MixerChannelIds::kVoxBus);
     addLiveInputParams (prefix);
-    mVibeGraph.ensureInsertNode(VibeGraph::InsertKind::Vox, idx,
+    mVibeGraph.ensureInsertNode(BaySickGraph::InsertKind::Vox, idx,
                                  displayName.isNotEmpty() ? displayName
                                      : ("Vox " + juce::String(idx + 1)),
                                  prefix);
 }
 
-void VibeSynthProcessor::ensureInstInsert(int idx, const juce::String& displayName)
+void BaySickDAWProcessor::ensureInstInsert(int idx, const juce::String& displayName)
 {
     if (idx < 0 || idx >= MixerChannelIds::kMaxInstStrips) return;
     const juce::String prefix = "mixer_inst_" + juce::String(idx);
     ensureMixerStripParams(prefix, MixerStripKind::Insert, MixerChannelIds::kInstBus);
     addLiveInputParams (prefix);
-    mVibeGraph.ensureInsertNode(VibeGraph::InsertKind::Inst, idx,
+    mVibeGraph.ensureInsertNode(BaySickGraph::InsertKind::Inst, idx,
                                  displayName.isNotEmpty() ? displayName
                                      : ("Inst " + juce::String(idx + 1)),
                                  prefix);
@@ -8804,12 +8804,12 @@ void VibeSynthProcessor::ensureInstInsert(int idx, const juce::String& displayNa
 // Vox/Inst but the parent bus is kRustyDrumsBus (the dedicated BaySickRustyDrums
 // bus), and there's no live-input param block (these strips receive only from
 // the singleton sfizz engine, never from a hardware input).
-void VibeSynthProcessor::ensureRustyInsert(int idx, const juce::String& displayName)
+void BaySickDAWProcessor::ensureRustyInsert(int idx, const juce::String& displayName)
 {
     if (idx < 0 || idx >= MixerChannelIds::kMaxRustyStrips) return;
     const juce::String prefix = "mixer_rusty_" + juce::String(idx);
     ensureMixerStripParams(prefix, MixerStripKind::Insert, MixerChannelIds::kRustyDrumsBus);
-    mVibeGraph.ensureInsertNode(VibeGraph::InsertKind::Rusty, idx,
+    mVibeGraph.ensureInsertNode(BaySickGraph::InsertKind::Rusty, idx,
                                  displayName.isNotEmpty() ? displayName
                                      : ("Rusty " + juce::String(idx + 1)),
                                  prefix);
@@ -8827,7 +8827,7 @@ void VibeSynthProcessor::ensureRustyInsert(int idx, const juce::String& displayN
     }
 }
 
-void VibeSynthProcessor::removeRustyInsert(int idx)
+void BaySickDAWProcessor::removeRustyInsert(int idx)
 {
     if (idx < 0 || idx >= MixerChannelIds::kMaxRustyStrips) return;
 
@@ -8839,7 +8839,7 @@ void VibeSynthProcessor::removeRustyInsert(int idx)
         mRustyRenderTasks[(size_t) idx].reset();
     }
 
-    mVibeGraph.removeInsertNode(VibeGraph::InsertKind::Rusty, idx);
+    mVibeGraph.removeInsertNode(BaySickGraph::InsertKind::Rusty, idx);
     // APVTS params persist (existing pattern - JUCE doesn't allow unregister).
     // Reset to defaults so a future re-create starts clean.  Common cleanup
     // covers: level (0 dB), pan (centre), mute/solo/polarity/bypass/arm (off).
@@ -8864,7 +8864,7 @@ void VibeSynthProcessor::removeRustyInsert(int idx)
 // J-5: BaySickRustyDrums singleton lifecycle
 // ─────────────────────────────────────────────────────────────────────────────
 
-bool VibeSynthProcessor::hasBaySickRustyDrums() const noexcept
+bool BaySickDAWProcessor::hasBaySickRustyDrums() const noexcept
 {
     return mRustyDrumsActive.load (std::memory_order_acquire);
 }
@@ -8875,13 +8875,13 @@ bool VibeSynthProcessor::hasBaySickRustyDrums() const noexcept
 // slot.  Mirrors the Rusty pattern but indexed by instIdx instead of singleton.
 // ─────────────────────────────────────────────────────────────────────────────
 
-BaySickGuitarsProcessor* VibeSynthProcessor::getBaySickGuitars (int instIdx) noexcept
+BaySickGuitarsProcessor* BaySickDAWProcessor::getBaySickGuitars (int instIdx) noexcept
 {
     if (instIdx < 0 || instIdx >= (int) kMaxInstPages) return nullptr;
     return mGuitarsEngine[(size_t) instIdx].get();
 }
 
-bool VibeSynthProcessor::loadBaySickGuitarsKit (int instIdx, const juce::File& sfzPath)
+bool BaySickDAWProcessor::loadBaySickGuitarsKit (int instIdx, const juce::File& sfzPath)
 {
     if (instIdx < 0 || instIdx >= (int) kMaxInstPages) return false;
     if (! sfzPath.existsAsFile()) return false;
@@ -8958,7 +8958,7 @@ bool VibeSynthProcessor::loadBaySickGuitarsKit (int instIdx, const juce::File& s
     return true;
 }
 
-void VibeSynthProcessor::destroyBaySickGuitars (int instIdx)
+void BaySickDAWProcessor::destroyBaySickGuitars (int instIdx)
 {
     if (instIdx < 0 || instIdx >= (int) kMaxInstPages) return;
 
@@ -8979,13 +8979,13 @@ void VibeSynthProcessor::destroyBaySickGuitars (int instIdx)
 // whose source = BaySickBasses owns one slot.
 // ─────────────────────────────────────────────────────────────────────────────
 
-BaySickBassesProcessor* VibeSynthProcessor::getBaySickBasses (int instIdx) noexcept
+BaySickBassesProcessor* BaySickDAWProcessor::getBaySickBasses (int instIdx) noexcept
 {
     if (instIdx < 0 || instIdx >= (int) kMaxInstPages) return nullptr;
     return mBassesEngine[(size_t) instIdx].get();
 }
 
-bool VibeSynthProcessor::loadBaySickBassesKit (int instIdx, const juce::File& sfzPath)
+bool BaySickDAWProcessor::loadBaySickBassesKit (int instIdx, const juce::File& sfzPath)
 {
     if (instIdx < 0 || instIdx >= (int) kMaxInstPages) return false;
     if (! sfzPath.existsAsFile()) return false;
@@ -9035,7 +9035,7 @@ bool VibeSynthProcessor::loadBaySickBassesKit (int instIdx, const juce::File& sf
     return true;
 }
 
-void VibeSynthProcessor::destroyBaySickBasses (int instIdx)
+void BaySickDAWProcessor::destroyBaySickBasses (int instIdx)
 {
     if (instIdx < 0 || instIdx >= (int) kMaxInstPages) return;
     mBassesActive[(size_t) instIdx].store (false, std::memory_order_release);
@@ -9045,12 +9045,12 @@ void VibeSynthProcessor::destroyBaySickBasses (int instIdx)
     }
 }
 
-BaySickRustyDrumsProcessor* VibeSynthProcessor::getBaySickRustyDrums() noexcept
+BaySickRustyDrumsProcessor* BaySickDAWProcessor::getBaySickRustyDrums() noexcept
 {
     return mRustyDrumsEngine.get();
 }
 
-bool VibeSynthProcessor::loadBaySickRustyDrumsKit (const juce::File& sfzPath)
+bool BaySickDAWProcessor::loadBaySickRustyDrumsKit (const juce::File& sfzPath)
 {
     if (! sfzPath.existsAsFile()) return false;
 
@@ -9127,7 +9127,7 @@ bool VibeSynthProcessor::loadBaySickRustyDrumsKit (const juce::File& sfzPath)
             mRenderDispatcher.unregisterTask(MixerChannelIds::rustyInsert(i));
             mRustyRenderTasks[(size_t) i].reset();
         }
-        mVibeGraph.removeInsertNode (VibeGraph::InsertKind::Rusty, i);
+        mVibeGraph.removeInsertNode (BaySickGraph::InsertKind::Rusty, i);
     }
 
     // Spawn one strip per discovered channel, in drummer-conventional order.
@@ -9185,7 +9185,7 @@ bool VibeSynthProcessor::loadBaySickRustyDrumsKit (const juce::File& sfzPath)
 // QA-ModelShell TS3 fix (2026-07-28): the offline lane replay's engine sweep
 // runs over EngineRig, which does not own these three -- so without this the
 // sfizz CC lanes would apply during playback and be absent from every render.
-void VibeSynthProcessor::forEachSfizzApvts (
+void BaySickDAWProcessor::forEachSfizzApvts (
     const std::function<void (juce::AudioProcessorValueTreeState&)>& fn)
 {
     if (! fn) return;
@@ -9197,7 +9197,7 @@ void VibeSynthProcessor::forEachSfizzApvts (
     if (auto* r = getBaySickRustyDrums()) fn (r->apvts);
 }
 
-void VibeSynthProcessor::destroyBaySickRustyDrums()
+void BaySickDAWProcessor::destroyBaySickRustyDrums()
 {
     // TS7 §6.8: the kit's freeze must not outlive the kit.  mRustyKitFrozen and
     // the rig tab's cached streams survived this function, so after a program
@@ -9320,7 +9320,7 @@ void VibeSynthProcessor::destroyBaySickRustyDrums()
     resetBusParam("_polarity", 0.0f);
 }
 
-void VibeSynthProcessor::resetBaySickRustyDrumsMixerState()
+void BaySickDAWProcessor::resetBaySickRustyDrumsMixerState()
 {
     // Walks every `mixer_rusty_*` insert prefix + `mixer_rustybus_*` and
     // resets the standard strip/bus params to the registered defaults.
@@ -9383,7 +9383,7 @@ void VibeSynthProcessor::resetBaySickRustyDrumsMixerState()
 // setInputChannelName / getInputChannelName below) since APVTS only handles
 // numeric ranged params.  Both round-trip via getStateInformation /
 // serializeProject (apvts.state is a juce::ValueTree that copies all attrs).
-void VibeSynthProcessor::addLiveInputParams (const juce::String& prefix)
+void BaySickDAWProcessor::addLiveInputParams (const juce::String& prefix)
 {
     // Use raw createAndAddParameter; idempotent (APVTS skips duplicates).
     if (apvts.getParameter (prefix + "_inputChannelIdx") == nullptr)
@@ -9435,7 +9435,7 @@ void VibeSynthProcessor::addLiveInputParams (const juce::String& prefix)
             prefix + " Monitor Mode", 0, 1, 1));
 }
 
-void VibeSynthProcessor::setInputChannelName (const juce::String& stripPrefix,
+void BaySickDAWProcessor::setInputChannelName (const juce::String& stripPrefix,
                                                 const juce::String& name)
 {
     juce::ScopedLock sl (mInputChannelNamesLock);
@@ -9443,7 +9443,7 @@ void VibeSynthProcessor::setInputChannelName (const juce::String& stripPrefix,
                               name, nullptr);
 }
 
-juce::String VibeSynthProcessor::getInputChannelName (const juce::String& stripPrefix) const
+juce::String BaySickDAWProcessor::getInputChannelName (const juce::String& stripPrefix) const
 {
     juce::ScopedLock sl (mInputChannelNamesLock);
     return apvts.state.getProperty (juce::Identifier (stripPrefix + "_inputChannelName"),

@@ -2,7 +2,7 @@
 #include <JuceHeader.h>
 #include "../Standalone/SharedUI.h"   // LRXHelper, Filmstrips
 
-// ── VibePlayerLAF - "Brushed Aluminum Mini-Player" ───────────────────────────
+// ── BaySickPlayerLAF - "Brushed Aluminum Mini-Player" ───────────────────────────
 //
 // Palette:
 //   Main panel        : #BCC6CC  (brushed aluminum)
@@ -15,10 +15,10 @@
 // Faders : custom ultra-slim horizontal track + thin pill thumb
 // Buttons: beveled dark rect, neon green glow border when active (A/B/C/D artic)
 // ─────────────────────────────────────────────────────────────────────────────
-class VibePlayerLAF : public juce::LookAndFeel_V4
+class BaySickPlayerLAF : public juce::LookAndFeel_V4
 {
 public:
-    VibePlayerLAF()
+    BaySickPlayerLAF()
     {
         setColour (juce::ResizableWindow::backgroundColourId, juce::Colour (0xFFBCC6CC));
         setColour (juce::ComboBox::backgroundColourId,        juce::Colour (0xFF1A1A1A));

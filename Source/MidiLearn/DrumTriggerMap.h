@@ -1,6 +1,6 @@
 #pragma once
 #include <JuceHeader.h>
-#include "../VibesynthConstants.h"
+#include "../BaySickConstants.h"
 #include <array>
 #include <atomic>
 

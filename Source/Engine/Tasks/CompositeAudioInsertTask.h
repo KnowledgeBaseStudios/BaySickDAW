@@ -5,10 +5,10 @@
 #include "../RenderTask.h"
 #include "../BlockContext.h"
 
-class VibeGraph;
+class BaySickGraph;
 class ISidechainEngine;
-class VibeSynthProcessor;
-class VibePlayerProcessor;
+class BaySickDAWProcessor;
+class BaySickPlayerProcessor;
 
 // CompositeAudioInsertTask
 // ------------------------
@@ -22,7 +22,7 @@ class VibePlayerProcessor;
 //
 //   2. Arrangement-clip flow (was AudioInsertTask): per-row decode of
 //      every NON-FilePlay AudioClipPlayer through the shared helper
-//      VibeSynthProcessor::renderAudioClipsForRow (mtDest = blockView).
+//      BaySickDAWProcessor::renderAudioClipsForRow (mtDest = blockView).
 //      Each clip's RAW decoded output is ADDED to blockView (additive).
 //
 // QA-MultiBlockHazard: both flows sum their RAW output into blockView, then the
@@ -38,7 +38,7 @@ class VibePlayerProcessor;
 //
 // Lifecycle (Strategy 1a):
 //   - One instance per audio row, created by
-//     VibeSynthProcessor::ensureAudioInsert and registered with the
+//     BaySickDAWProcessor::ensureAudioInsert and registered with the
 //     dispatcher under audioInsert(row).
 //   - registerClipEngine(pageIdx, eng) sets mClipEngine on the existing
 //     instance (no separate task registered, no most-recent-wins).
@@ -50,13 +50,13 @@ class CompositeAudioInsertTask : public RenderTask
 public:
     CompositeAudioInsertTask (int                 row,
                               int                 channelIdIn,
-                              VibeGraph&          graph,
-                              VibeSynthProcessor& processor);
+                              BaySickGraph&          graph,
+                              BaySickDAWProcessor& processor);
 
     void run() override;
 
     // Set/clear the optional clip-engine pointer (sampler-style juce::AudioProcessor).
-    // Called from VibeSynthProcessor::registerClipEngine /
+    // Called from BaySickDAWProcessor::registerClipEngine /
     // unregisterClipEngine.  setClipEngine(nullptr) is the unregister path.
     // Safe to call from the message thread; the audio thread reads via
     // an acquire-load on the same atomic.
@@ -70,8 +70,8 @@ public:
 
 private:
     int                                mIndex     = 0;
-    VibeGraph*                         mGraph     = nullptr;
-    VibeSynthProcessor*                mProcessor = nullptr;
+    BaySickGraph*                         mGraph     = nullptr;
+    BaySickDAWProcessor*                mProcessor = nullptr;
 
     // Clip-engine flow state.
     std::atomic<juce::AudioProcessor*> mClipEngine { nullptr };
@@ -79,7 +79,7 @@ private:
     // QA-ClipPlayback Task 2: cached BaySickPlayer cast of mClipEngine (null when
     // the clip engine isn't a BaySickPlayer, e.g. NAM/IR) so the timeline-WAV
     // decode reads its Player controls without a per-block dynamic_cast.
-    std::atomic<VibePlayerProcessor*>  mClipPlayer { nullptr };
+    std::atomic<BaySickPlayerProcessor*>  mClipPlayer { nullptr };
 
     // Arrangement-clip per-task scratch (pre-9b cross-task race fix).
     juce::AudioBuffer<float>           mClipScratch;

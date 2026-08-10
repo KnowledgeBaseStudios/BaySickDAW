@@ -16,7 +16,7 @@
 | `BaySickGuitars` | Guitars -> Pedals -> NAM/IR |
 | `BaySickBasses` | Basses -> Pedals -> NAM/IR |
 
-The sfizz front-ends are **not** rig-owned - `BaySickGuitars` and `BaySickBasses` stay processor-owned on their own race-safe kit-load paths, and the chain queries the pointer from `VibeSynthProcessor` every time it rebuilds. If the kit has not loaded yet the chain degrades to Pedals -> NAM/IR and the tab is silent until a follow-up rebuild splices the engine in.
+The sfizz front-ends are **not** rig-owned - `BaySickGuitars` and `BaySickBasses` stay processor-owned on their own race-safe kit-load paths, and the chain queries the pointer from `BaySickDAWProcessor` every time it rebuilds. If the kit has not loaded yet the chain degrades to Pedals -> NAM/IR and the tab is silent until a follow-up rebuild splices the engine in.
 
 **Teardown order is load-bearing.** `EngineRig::removeTab` must run before `destroyBaySickGuitars` / `destroyBaySickBasses`, because the rig-owned chain holds the spliced sfizz pointer; one audio block in the wrong order is a use-after-free.
 

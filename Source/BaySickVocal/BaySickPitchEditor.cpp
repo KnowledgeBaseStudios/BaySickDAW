@@ -9,7 +9,7 @@
 #include "../Standalone/SharedUI.h"
 #include "../Standalone/StandaloneEditor.h"
 #include "../TempoMapRead.h"   // LENGTH readout + playhead beat->sample
-#include "../VibesynthConstants.h"   // shared piano-roll zoom baselines (single source of truth)
+#include "../BaySickConstants.h"   // shared piano-roll zoom baselines (single source of truth)
 #include <algorithm>
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1792,7 +1792,7 @@ private:
     juce::ToggleButton mOnToggle;
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> mOnAtt, mSnapAtt;
     std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> mRootAtt, mScaleAtt, mEngineAtt;
-    VibeSlider       mFocus, mMod, mSpeed, mThroat;
+    BaySickSlider       mFocus, mMod, mSpeed, mThroat;
     std::unique_ptr<TaggedSliderAttachment> mFocusAtt, mModAtt, mSpeedAtt, mThroatAtt;
     juce::String mLengthText, mAnalysisBadge;
     bool mStale { false }, mStalePending { false }, mPlayGated { false };

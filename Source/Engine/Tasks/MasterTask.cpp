@@ -1,11 +1,11 @@
 #include "MasterTask.h"
-#include "../../VibeGraph.h"
+#include "../../BaySickGraph.h"
 #include "../../PluginProcessor.h"
 #include "../SidechainPullHelper.h"   // pullSidechainPredecessorsToGraph
 #include "SendSourceRead.h"           // post-fader output vs pre-fader send tap
 
-MasterTask::MasterTask (VibeGraph&          graph,
-                        VibeSynthProcessor& processor,
+MasterTask::MasterTask (BaySickGraph&          graph,
+                        BaySickDAWProcessor& processor,
                         std::atomic<bool>&  doneFlag)
     : mGraph (&graph),
       mProcessor (&processor),
@@ -38,7 +38,7 @@ void MasterTask::run()
 
     // ── Sum predecessors (the 11 bus PassiveStripTasks + any direct-to-
     //    master insert sends) into our slot.  Acquire ordering on the dep
-    //    counter (handled by VibeThreadPool::runOneTask) guarantees we see
+    //    counter (handled by BaySickThreadPool::runOneTask) guarantees we see
     //    each upstream's published mOutputBuffer.
     // The eleven bus cables are main-out edges, so they are always read from the
     // source's mOutputBuffer -- untouched by the pre-fader tap, which only a
@@ -74,6 +74,6 @@ void MasterTask::run()
 
     // ── Signal the dispatcher's runUntilOrTimeout pump ───────────────────────
     // Release ordering publishes our writes to blockView (== arena slot) to
-    // anyone who acquires this flag (VibeThreadPool::runUntilOrTimeout).
+    // anyone who acquires this flag (BaySickThreadPool::runUntilOrTimeout).
     mDoneFlag->store (true, std::memory_order_release);
 }

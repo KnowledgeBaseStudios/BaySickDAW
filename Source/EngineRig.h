@@ -3,7 +3,7 @@
 #include <vector>
 #include <map>
 #include <set>
-#include "VibesynthConstants.h"
+#include "BaySickConstants.h"
 
 // TS7 §6.3: a frozen tab streams its cached file instead of rendering its engine.
 // Included rather than forward-declared: EngineTab holds a unique_ptr to it, and
@@ -11,7 +11,7 @@
 // destroys an EngineTab -- which is more than one.
 #include "DSP/AudioClipStreamer.h"
 
-class VibeSynthProcessor;
+class BaySickDAWProcessor;
 class BaySickPedalsProcessor;
 class BaySickNAMIRProcessor;
 
@@ -219,7 +219,7 @@ public:
     // The rig threads it into every engine APVTS ctor and stamps each with an
     // undoOwnerTag, so a parameter transaction can be re-resolved to its target
     // after the engine that made it was destroyed and re-created.
-    EngineRig (VibeSynthProcessor& proc, juce::UndoManager& undoMgr);
+    EngineRig (BaySickDAWProcessor& proc, juce::UndoManager& undoMgr);
     ~EngineRig();
 
     static int          capacityOf (TabKind k) noexcept;
@@ -378,7 +378,7 @@ private:
     void unregisterFromProcessor (EngineTab& tab);
     void teardownEngine (EngineTab& tab, bool settleAfterUnregister);
 
-    VibeSynthProcessor& mProc;
+    BaySickDAWProcessor& mProc;
     juce::UndoManager&  mUndoManager;
     std::vector<std::unique_ptr<EngineTab>> mTabs;
     // Per-page fallback descriptions for the Plugins factory -- see

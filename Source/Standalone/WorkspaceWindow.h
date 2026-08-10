@@ -375,8 +375,8 @@ private:
     // component tree, but a contained window is a separate native peer with a
     // separate tree, so that listener never sees a click in here.  VKnob-based
     // controls kept working (a VKnob listens to its own slider and tags it so
-    // the global handler skips it); every VibeSlider did not, because
-    // VibeSlider swallows the right-click on purpose and depends entirely on
+    // the global handler skips it); every BaySickSlider did not, because
+    // BaySickSlider swallows the right-click on purpose and depends entirely on
     // this listener to raise the menu.  That is what silently cost the players
     // and the mixer strips their Automate menu when pages moved into contained
     // windows (Jeff, 2026-08-04).  The two listener scopes are disjoint, so

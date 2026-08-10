@@ -1,5 +1,5 @@
 #include "KeyBindsWindow.h"
-#include "SharedUI.h"   // VC palette + VibeLAF
+#include "SharedUI.h"   // VC palette + BaySickLAF
 #include "WindowChrome.h"   // TS7 §9.3
 
 namespace
@@ -161,7 +161,7 @@ namespace
     public:
         explicit CellButton (const juce::String& label) : juce::TextButton (label)
         {
-            setLookAndFeel (&VibeLAF::get());
+            setLookAndFeel (&BaySickLAF::get());
         }
 
         int  rowNumber  { -1 };
@@ -435,7 +435,7 @@ KeyBindsContent::KeyBindsContent (juce::ApplicationCommandManager& mgr)
 {
     mTabs.setColour (juce::TabbedComponent::backgroundColourId, VC::Bg);
     mTabs.setOutline (0);
-    mTabs.setLookAndFeel (&VibeLAF::get());
+    mTabs.setLookAndFeel (&BaySickLAF::get());
 
     mTabs.addTab (BSCommands::categoryName (BSCommands::Category::General),
                   VC::Bg, new KeyBindsTab (BSCommands::Category::General,   mgr), true);

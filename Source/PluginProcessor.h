@@ -4,13 +4,13 @@
 #include <map>
 #include <memory>
 #include <set>
-#include "VibesynthConstants.h"
+#include "BaySickConstants.h"
 // 2026-04-25: DrumSynth.h + DrumVoice + BaySickDrumsProcessor + DrumsPage
 // + BaySickDrumsEditor + BaySickDrumsLAF all deleted.  Drums now use the
 // dynamic per-tab DrumPage model with BaySickPlayer / BaySickSynth engines.
 #include "PatternManager.h"
 #include "DSP/EQ8MsDSP.h"
-#include "VibeGraph.h"
+#include "BaySickGraph.h"
 #include "MidiRecorder.h"
 #include "AudioFileRecorder.h"
 #include "DSP/AudioClipStreamer.h"
@@ -24,7 +24,7 @@
 // wrappers ship in Batches 3-8.
 #include "Engine/RenderEngineFlags.h"
 #include "Engine/ChannelBufferArena.h"
-#include "Engine/VibeThreadPool.h"
+#include "Engine/BaySickThreadPool.h"
 #include "Engine/RenderGraphDispatcher.h"
 #include "Engine/Tasks/EngineInsertTask.h"   // Batch 3: Layer/Bass/Drum task wrappers
 #include "Engine/Tasks/VoxStripTask.h"       // Batch 4: Vox live-input strip wrapper
@@ -125,7 +125,7 @@ private:
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (ClipSource)
 };
 
-class VibeSynthProcessor : public juce::AudioProcessor,
+class BaySickDAWProcessor : public juce::AudioProcessor,
                            private juce::ValueTree::Listener   // §P4.3 perf: dirty-flag EQ sync
 {
     // Multi-threaded render engine task wrappers (Batches 4+) read internal
@@ -140,8 +140,8 @@ class VibeSynthProcessor : public juce::AudioProcessor,
     friend class PassiveStripTask;        // Batch 7
     friend class MasterTask;              // Batch 8
 public:
-    VibeSynthProcessor();
-    ~VibeSynthProcessor() override;
+    BaySickDAWProcessor();
+    ~BaySickDAWProcessor() override;
 
     // ── AudioProcessor interface ──────────────────────────────────────────
     void prepareToPlay  (double sampleRate, int samplesPerBlock) override;
@@ -171,11 +171,11 @@ public:
     // as children of `root`.  Used by ProjectManager to produce project.xml.
     //   root must start empty; this fills it with <Processor>, <PatternManager>
     //   nodes + a "version" attribute.
-    // Non-const because apvts.copyState() + VibeGraph::saveRackStates both
+    // Non-const because apvts.copyState() + BaySickGraph::saveRackStates both
     // require non-const access; conceptually a read-only snapshot.
     void serializeProject  (juce::XmlElement& root);
     // QA-ProjectSave Task 2 (2026-07-26, docket 15=B): the <Processor> child
-    // alone (APVTS + VibeRackStates), shared with template save.  Carries every
+    // alone (APVTS + BaySickRackStates), shared with template save.  Carries every
     // mixer strip's fader/pan/width/routing + each insert's rack and post-rack
     // EQ -- none of which is in <UIState>'s per-tab engineData.
     void writeProcessorState (juce::XmlElement& root);
@@ -215,13 +215,13 @@ public:
     void deserializeProject (const juce::XmlElement& root);
 
     // File > New reset (2026-04-24): restore every APVTS param to its
-    // default value, clear VibeGraph rack states, and reset PatternManager.
+    // default value, clear BaySickGraph rack states, and reset PatternManager.
     // Caller is responsible for tearing down + rebuilding dynamic tabs - this
     // method deals only with processor-owned state.
     void resetToBlankState();
 
     // 2026-04-24: deferred rack state replay.  deserializeProject stashes
-    // VibeRackStates into mPendingProjectRackState and skips the immediate
+    // BaySickRackStates into mPendingProjectRackState and skips the immediate
     // apply, because per-insert racks (Layer / Bass / Drum / Audio / Aux /
     // Vox / Inst InsertNodes) don't exist yet - the editor creates them when
     // rebuilding tabs + audio strips.  The editor calls this at the END of
@@ -230,9 +230,9 @@ public:
     void applyPendingRackStates();
 
     // P1+P2 persistence (2026-04-24): StandaloneEditor owns tab + engine state
-    // (Harmless / BaySickSynth / VibePlayer / BaySickBass / BaySickDrums are
+    // (Harmless / BaySickSynth / BaySickPlayer / BaySickBass / BaySickDrums are
     // all per-page engine processors with their OWN apvts, not the main
-    // VibeSynthProcessor::apvts).  These callbacks let serializeProject /
+    // BaySickDAWProcessor::apvts).  These callbacks let serializeProject /
     // deserializeProject delegate that chunk of persistence up to the editor.
     //   onSerializeUIState  fired inside serializeProject - editor adds its
     //                       <UIState> child to the passed root element.
@@ -490,7 +490,7 @@ public:
     // ── 5F-4a: Audio-row mixer strip registration ────────────────────────────
     // Called when an audio clip is first placed on a new arrangement row.
     // Creates the `mixer_audio_{row}` APVTS params (if missing) and the Audio
-    // InsertNode in VibeGraph. Safe to call repeatedly.
+    // InsertNode in BaySickGraph. Safe to call repeatedly.
     void ensureAudioInsert(int row, const juce::String& displayName);
 
     // ── 5F-4b B2: Aux/Group strip registration ──────────────────────────────
@@ -501,11 +501,11 @@ public:
 
     // QA-Ef #4 (2026-05-22): tear down EVERY registered aux insert -- unregister
     // each PassiveStripTask from the render dispatcher, reset the task slot, and
-    // clear the VibeGraph aux InsertNodes.  Called from the three load-entry
+    // clear the BaySickGraph aux InsertNodes.  Called from the three load-entry
     // points BEFORE restoreAuxStripsFromState rebuilds from the loaded project,
     // so auxes from the prior session don't leak across loads:
-    //   - VibeSynthProcessor::deserializeProject (project open)
-    //   - VibeSynthProcessor::setStateInformation (VST3 host load)
+    //   - BaySickDAWProcessor::deserializeProject (project open)
+    //   - BaySickDAWProcessor::setStateInformation (VST3 host load)
     //   - StandaloneEditor::doFileNew (File > New)
     //   - StandaloneEditor::loadTemplate (apply template)
     // Each caller raises mProjectLoadInProgress + settles BEFORE calling this
@@ -742,12 +742,12 @@ public:
     // §P4.3 B7 (2026-04-22): per-page pre-rack EQ register/unregister APIs +
     // mDrumsEQDSP / mLayerPageEQs / mBassPageEQs / mDrumsPageEQ members all
     // deleted.  Pre-rack EQs now live on InsertNode / BusNode preEq members
-    // inside VibeGraph; pages bind their EQ display to those via
-    // VibeGraph::getInsertPreEQ() / getXxxBusPreEQ() + the mixer strip APVTS
+    // inside BaySickGraph; pages bind their EQ display to those via
+    // BaySickGraph::getInsertPreEQ() / getXxxBusPreEQ() + the mixer strip APVTS
     // prefix (mixer_{kind}_<N>_preeq_*).
 
     // ── EQ spectrum feed type (defined in DSP/SpectrumFeed.h, alias kept for compat) ──
-    using EQSpectrumFeed = VibeGraph::SpectrumFeed;
+    using EQSpectrumFeed = BaySickGraph::SpectrumFeed;
 
     // ── Level meter feeds (audio thread writes, UI timer reads) ───────────────
     // Peak dB for each mix section - used by MixerPage strip meters.
@@ -766,9 +766,9 @@ public:
     std::atomic<float> mVoxBusPeakDbR       { -60.0f };
     std::atomic<float> mInstBusPeakDbL      { -60.0f };
     std::atomic<float> mInstBusPeakDbR      { -60.0f };
-    // C.1 (2026-04-30): FX Bus peak - written by VibeGraph::processBus(kFxBus)
+    // C.1 (2026-04-30): FX Bus peak - written by BaySickGraph::processBus(kFxBus)
     // each block (mirrors the FX node's internal atomics so MixerPage
-    // can read alongside its peers without reaching into VibeGraph internals).
+    // can read alongside its peers without reaching into BaySickGraph internals).
     std::atomic<float> mFxBusPeakDbL        { -60.0f };
     std::atomic<float> mFxBusPeakDbR        { -60.0f };
     // G-6 (2026-04-29): secondary bus peak meters.
@@ -986,7 +986,7 @@ public:
     // block via load-acquire.  The pointer's target is owned by whoever
     // last took it OUT of the atomic (initial bootstrap in the ctor;
     // mutator's exchange returns the previous value to the retirement
-    // queue; ~VibeSynthProcessor explicitly deletes the final value).
+    // queue; ~BaySickDAWProcessor explicitly deletes the final value).
     std::atomic<AudioClipSnapshot*> mActiveAudioClips  { nullptr };
 
     // Mutator's monotonic generation counter.  Each rebuild assigns
@@ -1054,7 +1054,7 @@ public:
         // QA-ClipPlayback Task 2: the row's ClipsPage BaySickPlayer (null when the
         // clip engine isn't a BaySickPlayer) - the timeline-WAV decode reads its
         // Player controls live and applies them per-clip before the raw sum.
-        VibePlayerProcessor* clipPlayer = nullptr;
+        BaySickPlayerProcessor* clipPlayer = nullptr;
     };
 
     // Decode all non-FilePlay audio clips on `row` and sum their RAW output into
@@ -1160,10 +1160,10 @@ public:
     // exchange-reset** -- a second concurrent caller would receive -inf as the
     // first call's exchange already cleared the mirror.  Currently the only
     // consumer is MixerPage::onVBlank.
-    std::pair<float, float> drainInsertPeakDbStereo (VibeGraph::InsertKind kind, int index) noexcept;
+    std::pair<float, float> drainInsertPeakDbStereo (BaySickGraph::InsertKind kind, int index) noexcept;
     // QA-RustyMeter (2026-05-30): RMS sibling for the split meter; thin passthrough
     // to mVibeGraph.drainInsertNodeRms (no mirror -- RMS is read off the node).
-    std::pair<float, float> drainInsertRmsDbStereo (VibeGraph::InsertKind kind, int index) noexcept;
+    std::pair<float, float> drainInsertRmsDbStereo (BaySickGraph::InsertKind kind, int index) noexcept;
     // QA-RustyMeter part 2 (2026-05-30): bus RMS sibling; thin passthrough to
     // mVibeGraph.drainBusRms.  busChId is a MixerChannelIds bus id; kMaster (and
     // any unknown id) returns {-inf,-inf} (Master keeps a full peak bar, no RMS).
@@ -1244,7 +1244,7 @@ public:
     // (see setFreezePrune) -- the tap itself is still addressed by InsertKind.
     // §6.8: patternIndex < 0 renders SONG scope; anything else renders just that
     // pattern, which is what makes freeze work in pattern mode at all.
-    std::function<bool (VibeGraph::InsertKind, int index, RenderTask*, int patternIndex,
+    std::function<bool (BaySickGraph::InsertKind, int index, RenderTask*, int patternIndex,
                         const juce::File&, juce::String&)> onRenderFreezeFile;
 
     // §6.8 stepped progress: a per-instrument freeze is 1 + N renders, so a
@@ -1330,7 +1330,7 @@ public:
     bool isMasterCapturing() const { return mCaptureRecorder.isRecording(); }
 
     // ── Graph infrastructure (Phase 1A) ───────────────────────────────────────
-    VibeGraph mVibeGraph;
+    BaySickGraph mVibeGraph;
 
     // ── Recording (1G MIDI / 1H Audio) ────────────────────────────────────────
     // R5d (2026-04-24): rewritten to support mode-aware capture.
@@ -1750,7 +1750,7 @@ private:
     juce::ValueTree mPendingProjectRackState;
 
     // §P4.3 B7 (2026-04-22): per-page pre-rack EQ pointer arrays + SpinLocks
-    // deleted.  Pre-rack EQs now live on VibeGraph InsertNode / BusNode
+    // deleted.  Pre-rack EQs now live on BaySickGraph InsertNode / BusNode
     // preEq members - no more page-owned DSPs held here as non-owning ptrs.
 
     // ── State ─────────────────────────────────────────────────────────────
@@ -1923,7 +1923,7 @@ private:
         // Distinguishes self when iterating peers.
         enum class Src { Synth, Audio };
         Src                   src   { Src::Synth };
-        VibeGraph::InsertKind kind  { VibeGraph::InsertKind::Layer };   // synth only
+        BaySickGraph::InsertKind kind  { BaySickGraph::InsertKind::Layer };   // synth only
         int                   index { -1 };            // synth: insert idx; audio: clip idx
         int                   group { 0 };
         int                   sample { 0 };
@@ -2138,7 +2138,7 @@ public:
     std::function<void (const juce::String& prefix)> onMixerStripParamsCreated;
 
     // Bulk-register master + every fixed bus strip's params (idempotent).
-    // Must run before VibeGraph::rebindBusApvts, which caches raw pointers to
+    // Must run before BaySickGraph::rebindBusApvts, which caches raw pointers to
     // the params created here.
     void ensureMixerBusAndMasterParams();
     // QA-G3Smoke Swing (SW-6): eager global + per-player swing param
@@ -2250,7 +2250,7 @@ private:
     // and C++ guarantees member init order matches declaration order.
     static int computeRenderWorkerCount() noexcept;
 
-    VibeThreadPool        mRenderPool       { computeRenderWorkerCount() };
+    BaySickThreadPool        mRenderPool       { computeRenderWorkerCount() };
     ChannelBufferArena    mRenderArena;
     RenderGraphDispatcher mRenderDispatcher { mRenderPool, mRenderArena };
 
@@ -2327,5 +2327,5 @@ private:
     // above, which must still be alive when that runs.
     std::unique_ptr<EngineRig> mEngineRig;
 
-    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(VibeSynthProcessor)
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(BaySickDAWProcessor)
 };

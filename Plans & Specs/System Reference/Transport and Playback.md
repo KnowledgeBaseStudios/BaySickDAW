@@ -44,7 +44,7 @@ picks that flag up on its next tick and runs the same code path the Stop button
 does, including finalizing any recording in progress.
 
 **The metronome and count-in** are synthesized in the processor
-(`VibeSynthProcessor::applyPostMixRecordAndMetro`, `Source/PluginProcessor.cpp`)
+(`BaySickDAWProcessor::applyPostMixRecordAndMetro`, `Source/PluginProcessor.cpp`)
 and added to the master buffer **after** the recorder taps, so a click never ends
 up inside a recorded file or an export. Clicks are deferred by the project's
 total plugin latency so they land on the music rather than ahead of it. Nothing
@@ -195,8 +195,8 @@ processor and plain members on the editor, and is written into the project file'
 |---|---|---|
 | Tempo (base BPM) | `PatternManager` global tempo; also the playhead's base | project |
 | Tempo markers | `PatternManager` tempo changes (Builder ruler) | project |
-| Song / Pattern mode | `VibeSynthProcessor::mSongMode` (default Pattern) | **not saved**; every launch and every project open starts in Pattern mode |
-| Song loop on/off | `VibeSynthProcessor::mSongLoopMode` (default on) | project, `<SongLoop on>` |
+| Song / Pattern mode | `BaySickDAWProcessor::mSongMode` (default Pattern) | **not saved**; every launch and every project open starts in Pattern mode |
+| Song loop on/off | `BaySickDAWProcessor::mSongLoopMode` (default on) | project, `<SongLoop on>` |
 | Metronome on/off | `mMetro.enabled` (default off) | project, `<Metronome enabled>` |
 | Metronome volume | `mMetro.volume` (default 0.7) | project, `<Metronome volume>` |
 | Metronome sound | `mMetro.soundType` (0 Sine, 1 Click, 2 Wood, 3 Bell; default Sine) | project, `<Metronome soundType>` |
@@ -226,7 +226,7 @@ one of each and neither can be closed. The bar's 10 Hz timer starts in its
 constructor and stops in its destructor.
 
 `StandalonePlayHead` is created by the application object
-(`VibesynthStandaloneApp::initialise`) **before** the processor and the editor,
+(`BaySickDAWStandaloneApp::initialise`) **before** the processor and the editor,
 and it outlives them - the audio device callback advances it directly. Ordering
 that matters:
 

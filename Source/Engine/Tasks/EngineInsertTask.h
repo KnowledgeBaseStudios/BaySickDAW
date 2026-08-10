@@ -5,7 +5,7 @@
 #include "../RenderTask.h"
 #include "../BlockContext.h"
 
-class VibeGraph;
+class BaySickGraph;
 class ISidechainEngine;
 // TS7 §6.3: freeze playback reuses the clip streamer -- SPSC ring, background
 // prefetch AND TS2's offline synchronous-read mode, so a frozen tab renders
@@ -15,7 +15,7 @@ class AudioClipStreamer;
 // QA-ModelShell TS6 (BLU-447): Plugin joins the engine-driven kinds -- a hosted
 // VST3 instrument is rendered exactly like a Layer, differing only in which
 // per-tab MIDI array it reads.
-namespace VibeGraphInsertKindBridge { enum class Kind { Layer, Bass, Drum, Plugin }; }
+namespace BaySickGraphInsertKindBridge { enum class Kind { Layer, Bass, Drum, Plugin }; }
 
 // EngineInsertTask
 // ----------------
@@ -27,7 +27,7 @@ namespace VibeGraphInsertKindBridge { enum class Kind { Layer, Bass, Drum, Plugi
 //   2. Engine render: engine.processBlock(blockView, midiBuffer).  Block
 //      view is built per-block from mOutputBuffer's storage so getNumSamples
 //      reports the host's current block size, not the arena's max.
-//   3. Insert chain: VibeGraph::processInsert (polarity → preEq → width →
+//   3. Insert chain: BaySickGraph::processInsert (polarity → preEq → width →
 //      rack → postEq → fader × mute × solo → PDC → peak), in-place on
 //      blockView.
 //
@@ -41,15 +41,15 @@ namespace VibeGraphInsertKindBridge { enum class Kind { Layer, Bass, Drum, Plugi
 class EngineInsertTask : public RenderTask
 {
 public:
-    // Match VibeGraph::InsertKind without including VibeGraph.h here.
+    // Match BaySickGraph::InsertKind without including BaySickGraph.h here.
     // The .cpp casts to the real enum.
-    using Kind = VibeGraphInsertKindBridge::Kind;
+    using Kind = BaySickGraphInsertKindBridge::Kind;
 
     EngineInsertTask (juce::AudioProcessor* engine,
                       Kind                  kind,
                       int                   index,
                       int                   channelIdIn,
-                      VibeGraph&            graph);
+                      BaySickGraph&            graph);
 
     void run() override;
 
@@ -65,5 +65,5 @@ private:
     ISidechainEngine*     mScEngine = nullptr;   // cached dynamic_cast
     Kind                  mKind     = Kind::Layer;
     int                   mIndex    = 0;
-    VibeGraph*            mGraph    = nullptr;
+    BaySickGraph*            mGraph    = nullptr;
 };

@@ -30,7 +30,7 @@
 //     is placed on the grid and playback does not change.
 //
 // The DSP class is GUI-agnostic: the BaySickAlign editor feeds it channel
-// composites (VibeSynthProcessor::renderChannelComposite) and drives
+// composites (BaySickDAWProcessor::renderChannelComposite) and drives
 // analyzeOffline / applyWarp from user actions.
 // ─────────────────────────────────────────────────────────────────────────────
 

@@ -4,7 +4,7 @@
 // Phase 2+ page limits (each page = one engine instance, not a 4-layer stack)
 // QA-Layout T11 (L18): instance caps raised to their shipping values --
 // Layers 20 / Bass 10 / Drums 32 / Clips 100 / Vox 10 / Inst 30.  These are the
-// ONE statement of each cap: VibeGraph.h's MixerChannelIds::kMax*Strips are
+// ONE statement of each cap: BaySickGraph.h's MixerChannelIds::kMax*Strips are
 // DERIVED from them, so a page cap cannot outrun its strip cap.  Range checks
 // read the constants, never a bare literal.
 // NOTE the PR-target bases below are DERIVED by summing these caps, so this

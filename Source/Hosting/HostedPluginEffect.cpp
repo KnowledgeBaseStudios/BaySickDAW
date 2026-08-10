@@ -121,7 +121,7 @@ void HostedPluginEffect::setNonRealtime (DSPBase* dsp, bool b) noexcept
 
 int HostedPluginEffect::getLatencySamples() const
 {
-    // BLU-301: EffectRack accumulates this and pokes VibeGraph's bus PDC, so a
+    // BLU-301: EffectRack accumulates this and pokes BaySickGraph's bus PDC, so a
     // latency-heavy plugin lines up through the path that already exists.
     return mHosted != nullptr ? mHosted->getLatencySamples() : 0;
 }

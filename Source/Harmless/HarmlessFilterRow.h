@@ -30,10 +30,10 @@ public:
 private:
     // Controls
     juce::ComboBox  mTypeCombo;
-    VibeSlider      mEnvKnob;
-    VibeSlider      mFreqKnob;
-    VibeSlider      mResKnob;
-    VibeSlider      mKbTrack;
+    BaySickSlider      mEnvKnob;
+    BaySickSlider      mFreqKnob;
+    BaySickSlider      mResKnob;
+    BaySickSlider      mKbTrack;
 
     // Attachments
     using SliderAtt = TaggedSliderAttachment;

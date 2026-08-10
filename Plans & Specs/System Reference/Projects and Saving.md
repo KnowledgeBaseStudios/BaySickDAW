@@ -15,7 +15,7 @@ Three owners split the work:
   open, save, Save As, delete, rename, duplicate, the recent list, the autosave
   timer and the backup files. It holds one `juce::File` for "the current project
   folder" - empty means no project is open.
-- `Source/PluginProcessor.cpp` (`VibeSynthProcessor::serializeProject` /
+- `Source/PluginProcessor.cpp` (`BaySickDAWProcessor::serializeProject` /
   `deserializeProject`) owns the XML document itself.
 - `Source/Standalone/StandaloneEditor.cpp` owns the File menu, every dialog, and
   the `<UIState>` half of the document (tabs, windows, view state) which it
@@ -163,7 +163,7 @@ being loaded. Reports raised in the same moment are merged into a single dialog.
 
 | Element | Contents |
 |---|---|
-| `<Processor>` | The full APVTS parameter tree: every mixer strip's level, pan, width, mute, solo, polarity, bypass, arm, routing and sends; both 8-band M/S EQ banks per strip; the global parameters (master gain, master FX bypass, pan law, the four snap/quantize divisions). Plus `<VibeRackStates>` - every bus and insert effect rack. |
+| `<Processor>` | The full APVTS parameter tree: every mixer strip's level, pan, width, mute, solo, polarity, bypass, arm, routing and sends; both 8-band M/S EQ banks per strip; the global parameters (master gain, master FX bypass, pan law, the four snap/quantize divisions). Plus `<BaySickRackStates>` - every bus and insert effect rack. |
 | `<PatternManager>` | Patterns and their notes, the arrangement, row names / mute / solo / grouping / colors, the audio library, time markers, tempo changes and time-signature changes, and automation lane data. |
 | `<DenoiseProfiles>` | Per-recording noise profiles, keyed by recording name. Written only when some exist; cleared on every load so one project never inherits another's. |
 | `<MidiCCMappings>` | MIDI Learn bindings. Overlays the global defaults rather than replacing them. |

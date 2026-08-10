@@ -2,7 +2,7 @@
 #include <JuceHeader.h>
 #include <functional>
 
-class VibeSynthProcessor;
+class BaySickDAWProcessor;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // PagePresetIO - unified page-preset save/load for every page type
@@ -96,7 +96,7 @@ namespace PagePresetIO
         //   Rusty: ["mixer_rustybus", "mixer_rusty_0", ..., "mixer_rusty_12"]
         juce::StringArray stripPrefixes;
 
-        // VibeGraph InsertRack "kind" label to capture (matches saveRackStates'
+        // BaySickGraph InsertRack "kind" label to capture (matches saveRackStates'
         // "kind" property).  e.g. "Layer", "Bass", "Drum", "Audio", "Vox",
         // "Inst", "Rusty".
         juce::String insertRackKindLabel;
@@ -105,7 +105,7 @@ namespace PagePresetIO
         // only capture the listed indices (typical: [pageIndex]).
         juce::Array<int> insertRackIndices;
 
-        // VibeGraph BusRack ids to capture.  Used for pages that own a
+        // BaySickGraph BusRack ids to capture.  Used for pages that own a
         // dedicated bus (Rusty's RustyBus).  Empty for every other page -
         // shared buses don't belong in per-page presets.
         juce::StringArray busRackIds;
@@ -113,7 +113,7 @@ namespace PagePresetIO
 
     // Capture the page chain to an XML string.  Returns empty if the config
     // has no engine slots (nothing to save).
-    juce::String exportPagePreset (VibeSynthProcessor& processor,
+    juce::String exportPagePreset (BaySickDAWProcessor& processor,
                                     PageKind kind,
                                     const PageChainConfig& cfg);
 
@@ -123,7 +123,7 @@ namespace PagePresetIO
     // atomic.  On a multi-slot page (Inst: Pedals + NAM/IR + sfizz) every slot
     // applied before the failing one keeps its new state and there is no
     // rollback; strip params and racks are reached only after every slot applies.
-    bool importPagePreset (VibeSynthProcessor& processor,
+    bool importPagePreset (BaySickDAWProcessor& processor,
                            PageKind kind,
                            const PageChainConfig& cfg,
                            const juce::String& xml);
@@ -140,7 +140,7 @@ namespace PagePresetIO
     // surfaces but with a flatter signature.  New code should use the
     // `PageChainConfig`-based API above.
     // ─────────────────────────────────────────────────────────────────────────
-    juce::String exportPagePreset (VibeSynthProcessor& processor,
+    juce::String exportPagePreset (BaySickDAWProcessor& processor,
                                     PageKind kind,
                                     int pageIndex,
                                     const juce::String& stripApvtsPrefix,
@@ -148,7 +148,7 @@ namespace PagePresetIO
                                     const juce::String& engineType,
                                     const juce::String& enginePrefix);
 
-    juce::String importPagePreset (VibeSynthProcessor& processor,
+    juce::String importPagePreset (BaySickDAWProcessor& processor,
                                     PageKind kind,
                                     int pageIndex,
                                     const juce::String& stripApvtsPrefix,

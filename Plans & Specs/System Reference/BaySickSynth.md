@@ -433,7 +433,7 @@ Order that matters:
 ## Differs from Carry-Forward
 
 - Carry-Forward's engine-audition entry says "All 4 engine processors
-  (BaySickSynth/Bass/Harmless/VibePlayer)". There are now **seven** engines carrying the
+  (BaySickSynth/Bass/Harmless/BaySickPlayer)". There are now **seven** engines carrying the
   `auditionNote` pattern (the three sfizz engines were added), and BaySickSynth's version
   has grown a press-and-hold pair (`auditionNoteOn` / `auditionNoteOff`) with an
   accumulating note-off mask alongside the original one-shot exchange.

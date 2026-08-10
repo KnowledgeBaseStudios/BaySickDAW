@@ -11,7 +11,7 @@
 // toggle needs the type, and the definition is available in the .cpp.
 namespace Hosting { class HostedPluginInstance; }
 
-class VibeSynthProcessor;
+class BaySickDAWProcessor;
 
 // ── The Effects shell's satellite windows — QA-ModelShell TS5 (2026-07-29) ────
 // The Effects surface is no longer one page that stacks everything.  It is a
@@ -38,7 +38,7 @@ class EffectSlotWindow : public juce::Component,
                          private juce::Timer
 {
 public:
-    EffectSlotWindow (VibeSynthProcessor& proc,
+    EffectSlotWindow (BaySickDAWProcessor& proc,
                       int channelId,
                       juce::String slotUuid,
                       std::function<juce::String(int)> resolveChannelName,
@@ -81,7 +81,7 @@ private:
     // indices while its uuid travels with it.
     int  resolveSlot (EffectRack*& outRack) const;
 
-    VibeSynthProcessor&              mProc;
+    BaySickDAWProcessor&              mProc;
     const int                        mChannelId;
     const juce::String               mUuid;
     std::function<juce::String(int)> mResolveChannelName;
@@ -142,7 +142,7 @@ class EffectEqWindow : public juce::Component,
                        private juce::Timer
 {
 public:
-    EffectEqWindow (VibeSynthProcessor& proc,
+    EffectEqWindow (BaySickDAWProcessor& proc,
                     int channelId,
                     bool isPre,
                     std::function<juce::String(int)> resolveChannelName);
@@ -170,7 +170,7 @@ private:
     // would mean editing an EQ nothing is listening to.
     EQ8MsDSP* resolveEq() const;
 
-    VibeSynthProcessor&              mProc;
+    BaySickDAWProcessor&              mProc;
     const int                        mChannelId;
     const bool                       mIsPre;
     std::function<juce::String(int)> mResolveChannelName;
@@ -209,7 +209,7 @@ class EffectVisualWindow : public juce::Component,
                            private juce::Timer
 {
 public:
-    EffectVisualWindow (VibeSynthProcessor& proc,
+    EffectVisualWindow (BaySickDAWProcessor& proc,
                         int channelId,
                         juce::String slotUuid,
                         std::function<juce::String(int)> resolveChannelName);
@@ -254,7 +254,7 @@ private:
     // display immediately -- there is nothing to publish and nothing to wait for.
     DSPBase* resolveDsp() const;
 
-    VibeSynthProcessor& mProcessor;
+    BaySickDAWProcessor& mProcessor;
     int                 mChannelId;
     juce::String        mUuid;
     std::function<juce::String(int)> mResolveName;

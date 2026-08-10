@@ -1,7 +1,7 @@
 #pragma once
 #include <JuceHeader.h>
 #include "../PatternManager.h"
-#include "../VibesynthConstants.h"
+#include "../BaySickConstants.h"
 #include "SharedUI.h"
 #include "UndoActions.h"
 

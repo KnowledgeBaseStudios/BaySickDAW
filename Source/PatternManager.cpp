@@ -231,7 +231,7 @@ void PatternManager::renameManualAudioGroup(int category, const juce::String& ol
     // in different categories (the create default is "New Group"), and a
     // rename in one must not re-group the other's members.  Category from
     // the owner-channel ranges.  Literals mirror MixerChannelIds caps BY HAND
-    // (this core file doesn't see VibeGraph.h): Clips 400..499 = 0,
+    // (this core file doesn't see BaySickGraph.h): Clips 400..499 = 0,
     // Vox 600..609 = 1, Inst 700..729 = 2 (QA-Layout T11 caps).
     auto ownerCategory = [] (int ch) noexcept
     {

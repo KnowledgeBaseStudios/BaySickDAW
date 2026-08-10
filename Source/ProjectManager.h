@@ -1,7 +1,7 @@
 #pragma once
 #include <JuceHeader.h>
 
-class VibeSynthProcessor;
+class BaySickDAWProcessor;
 class PatternManager;
 
 namespace juce { class Timer; }
@@ -41,7 +41,7 @@ namespace juce { class Timer; }
 // project.  Only volatile sources (Downloads, Desktop, USB) land in Samples\.
 //
 // Phase P1 scope: skeleton class only - methods exist, serialization works
-// against VibeSynthProcessor::serializeProject/deserializeProject, but the UI
+// against BaySickDAWProcessor::serializeProject/deserializeProject, but the UI
 // (File menu / New/Open dialogs / autosave timer firing / dirty tracking) lands
 // in later phases P2-P5.  Recent-projects list is persisted to
 // Documents\BaySickDAW\settings.xml (see getSettingsFile).
@@ -49,7 +49,7 @@ namespace juce { class Timer; }
 class ProjectManager : private juce::Timer
 {
 public:
-    ProjectManager (VibeSynthProcessor& processor);
+    ProjectManager (BaySickDAWProcessor& processor);
     ~ProjectManager() override;
 
     // ── Default paths ────────────────────────────────────────────────────────
@@ -282,7 +282,7 @@ public:
     juce::String duplicateSample (const juce::File& src);
 
 private:
-    VibeSynthProcessor& mProcessor;
+    BaySickDAWProcessor& mProcessor;
     juce::File          mCurrentFolder;   // empty = no project open
 
     // ── Recent-projects list I/O ─────────────────────────────────────────────
@@ -303,7 +303,7 @@ private:
 
     // ── P5 state ─────────────────────────────────────────────────────────────
     // QA-UndoCoverage Task 9: mDirty + setDirtyInternal retired -- see the
-    // TransactionTracker on VibeSynthProcessor.
+    // TransactionTracker on BaySickDAWProcessor.
     std::atomic<juce::uint32> mChangeStamp { 0 };   // TS7 §3.3
     bool                      mIgnoreDirty { false };   // true during load/save
     int               mAutosaveSec { 900 };     // 15 min default

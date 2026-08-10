@@ -4,7 +4,7 @@
 
 // ── PolarityButton (5F-4a) ───────────────────────────────────────────────────
 // Single toggle button that shows "Standard" (off) or "Reverse" (on).
-// Subclasses juce::Button directly to bypass VibeLAF's filmstrip toggle.
+// Subclasses juce::Button directly to bypass BaySickLAF's filmstrip toggle.
 // Blue tint on text when in "Reverse" state.
 // ─────────────────────────────────────────────────────────────────────────────
 class PolarityButton : public juce::Button
@@ -282,7 +282,7 @@ public:
 
     // ── 5F-4a: APVTS binding for new controls (polarity/width/arm/bypass) ────
     // Call after setAutomationPrefix() AND after the APVTS params for this
-    // prefix have been registered (see VibeSynthProcessor::ensureMixerStripParams).
+    // prefix have been registered (see BaySickDAWProcessor::ensureMixerStripParams).
     // Creates SliderAttachment / ButtonAttachment for each new control so
     // changes flow both ways with APVTS. Safe to call repeatedly (tears down
     // previous attachments first).
@@ -309,9 +309,9 @@ private:
     MixerLedButton   mMuteBtn;
     MixerLedButton   mSoloBtn;
     juce::TextButton mFXBtn   { "FX Rack" };
-    // 2026-04-19: VibeSlider swallows right-click so right-click jogs the knob
+    // 2026-04-19: BaySickSlider swallows right-click so right-click jogs the knob
     // neither in value nor in rotary angle. Left-click drag works as before.
-    VibeSlider       mPanKnob;    // Rotary, -1..+1
+    BaySickSlider       mPanKnob;    // Rotary, -1..+1
     SnapSlider       mFader;      // LinearVertical, -60..+5.6 dB (matches the
                                   // _level param range AND the drawn dB marks)
     juce::Label      mDbLabel;
@@ -325,7 +325,7 @@ private:
     PolarityButton   mPolarityBtn;
 
     // Width knob: all strip types. Rotary, 0..2, default 1.0 (bipolar around 1).
-    VibeSlider       mWidthKnob;   // 2026-04-19: VibeSlider for right-click guard
+    BaySickSlider       mWidthKnob;   // 2026-04-19: BaySickSlider for right-click guard
 
     // Arm LED (red when armed). Insert strips only.
     MixerLedButton   mArmBtn;
@@ -336,7 +336,7 @@ private:
 
     // FX Bypass LED (blue). Every strip type (each owns a rack). Syncs with
     // EffectRack.setRackBypassed via the APVTS `_bypass` param (see
-    // InsertNode::processBlock in VibeGraph.cpp).
+    // InsertNode::processBlock in BaySickGraph.cpp).
     MixerLedButton   mBypassBtn;
 
     // Master FX Bypass LED (purple). Master strip ONLY. Global kill-all:

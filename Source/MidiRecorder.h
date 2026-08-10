@@ -43,7 +43,7 @@ private:
     std::atomic<bool> mRecording { false };
 
     // THREAD SAFETY: audio-thread liveness gate over mActive / mCompleted --
-    // the same shape as VibeSynthProcessor's mStripTapsLive gate over
+    // the same shape as BaySickDAWProcessor's mStripTapsLive gate over
     // mStripRecorders.  processBlock raises this BEFORE it tests mRecording
     // and lowers it on every exit path; start/stopRecording store
     // mRecording=false and then wait here before touching the vectors.
@@ -56,7 +56,7 @@ private:
 
     // Message thread only.  Blocks until any processBlock that already passed
     // the mRecording gate has left, which is what makes the gate a handshake
-    // rather than a hint.  Bounded, like VibeSynthProcessor::settleAudioThread
+    // rather than a hint.  Bounded, like BaySickDAWProcessor::settleAudioThread
     // (which MidiRecorder cannot reach from here): a block that never returns
     // means the audio thread is already wedged, and freezing the UI on it
     // forever would be worse than the race this closes.  Costs nothing when no

@@ -6,7 +6,7 @@
 // ── ApvtsDirtyTracker (2026-05-05) ───────────────────────────────────────────
 // Fires `onAny` on every property change in the tracked apvts.state.
 //
-// Each per-engine processor (Harmless, BaySickSynth, BaySickBass, VibePlayer,
+// Each per-engine processor (Harmless, BaySickSynth, BaySickBass, BaySickPlayer,
 // BaySickGuitars, BaySickBasses, BaySickRustyDrums, BaySickPedals,
 // BaySickNAMIR, BaySickVocal) owns its own `juce::AudioProcessorValueTreeState`
 // - separate from the main PluginProcessor's APVTS that ProjectManager's

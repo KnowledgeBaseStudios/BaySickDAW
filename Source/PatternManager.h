@@ -1,13 +1,13 @@
 #pragma once
 #include <JuceHeader.h>
-#include "VibesynthConstants.h"
+#include "BaySickConstants.h"
 #include "Engine/RetirementQueue.h"   // QA-G3Smoke #30b: roll-snapshot retirement (Batch-9c primitive)
 #include <cmath>
 #include <limits>
 #include <memory>
 
 // QA-Ee (96 PPQ): beats<->ticks converters.  kTicksPerBeat (a plain int) lives
-// in VibesynthConstants.h; these need juce::int64 so they live here, where every
+// in BaySickConstants.h; these need juce::int64 so they live here, where every
 // tick consumer already includes PatternManager.h.
 inline juce::int64 beatsToTicks (double beats) noexcept
 {
@@ -482,7 +482,7 @@ struct TimeSignature
 // The per-insert arrays below (drumSlot*, audioRow*) and bus-level fields stay
 // for now as a snapshot cache for undo/preset I/O and backward-compat with
 // existing save files. Audio thread should read APVTS after migration.
-// Batch 2 introduces InsertNode in VibeGraph which reads APVTS directly.
+// Batch 2 introduces InsertNode in BaySickGraph which reads APVTS directly.
 // Batch 3 removes the audio-thread usage of these fields from PluginProcessor.
 struct MixerState
 {

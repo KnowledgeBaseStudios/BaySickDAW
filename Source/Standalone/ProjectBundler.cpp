@@ -25,7 +25,7 @@ namespace
     void addRef (std::vector<Reference>& out,
                  const juce::String& storedPath,
                  const juce::String& origin,
-                 const VibeSynthProcessor& proc,
+                 const BaySickDAWProcessor& proc,
                  const juce::File& projectFolder)
     {
         if (storedPath.isEmpty()) return;
@@ -72,7 +72,7 @@ namespace
     // BaySickNAMIRProcessor::getStateInformation -- so those two entries were
     // dead weight while the real captures went unbundled.
     const char* const kPathAttrs[] = {
-        "bsp_loadPath",     // VibePlayer / BaySickPlayer sample, folder or SFZ
+        "bsp_loadPath",     // BaySickPlayer / BaySickPlayer sample, folder or SFZ
         "kitPath",          // sfizz Guitars / Basses
         "nam_filepath",   "ir_filepath",       // NAM/IR chain, slot A
         "nam_filepath_b", "ir_filepath_b",     // NAM/IR chain, slot B
@@ -117,7 +117,7 @@ namespace
     // Two base64 forms are in play and neither is self-describing:
     // MemoryBlock::toBase64Encoding writes a "<size>." prefix (Inst chain
     // children, pedal slots) while juce::Base64::toBase64 writes plain base64
-    // (VibeGraph rack properties, EffectRack slots).  fromBase64Encoding
+    // (BaySickGraph rack properties, EffectRack slots).  fromBase64Encoding
     // rejects the plain form outright, so a single-form decode silently walked
     // past half the tree.
     enum class B64Form { Prefixed, Plain };
@@ -298,7 +298,7 @@ juce::int64 estimateCopyBytes (const std::vector<Reference>& refs, Scope scope)
 }
 
 std::vector<Reference> enumerate (PatternManager& pm,
-                                  const VibeSynthProcessor& processor,
+                                  const BaySickDAWProcessor& processor,
                                   const juce::XmlElement* tabsXml,
                                   const juce::XmlElement* rackStatesXml)
 {

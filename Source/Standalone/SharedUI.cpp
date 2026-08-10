@@ -116,8 +116,8 @@ namespace Filmstrips
     }
 }
 
-// ============================================================ VibeLAF
-VibeLAF::VibeLAF()
+// ============================================================ BaySickLAF
+BaySickLAF::BaySickLAF()
 {
     setColour(juce::Slider::thumbColourId,               VC::Highlight);
     setColour(juce::Slider::rotarySliderFillColourId,    VC::Highlight);
@@ -146,7 +146,7 @@ VibeLAF::VibeLAF()
     setColour(juce::TabbedButtonBar::frontOutlineColourId, VC::Highlight.withAlpha(0.5f));
 }
 
-void VibeLAF::drawRotarySlider(juce::Graphics& g, int x,int y,int w,int h,
+void BaySickLAF::drawRotarySlider(juce::Graphics& g, int x,int y,int w,int h,
                                 float sp,float sa,float ea,juce::Slider& s)
 {
     // Volume knob filmstrip (Black for Dynamics, White for all others)
@@ -246,7 +246,7 @@ void VibeLAF::drawRotarySlider(juce::Graphics& g, int x,int y,int w,int h,
         g.drawLine(tx2, ty2, tx1, ty1, 1.5f);
     }
 }
-void VibeLAF::drawLinearSlider(juce::Graphics& g, int x, int y, int w, int h,
+void BaySickLAF::drawLinearSlider(juce::Graphics& g, int x, int y, int w, int h,
                                 float sp, float, float,
                                 juce::Slider::SliderStyle style, juce::Slider& s)
 {
@@ -520,7 +520,7 @@ void VibeLAF::drawLinearSlider(juce::Graphics& g, int x, int y, int w, int h,
     }
     (void)s;
 }
-void VibeLAF::drawToggleButton(juce::Graphics& g, juce::ToggleButton& b, bool isOver, bool isDown)
+void BaySickLAF::drawToggleButton(juce::Graphics& g, juce::ToggleButton& b, bool isOver, bool isDown)
 {
     // 2026-04-26: per project rule, switch-style toggle (filmstrip / pill)
     // is reserved for effect-panel toggles, FX-rack slot toggles, mixer
@@ -590,7 +590,7 @@ void VibeLAF::drawToggleButton(juce::Graphics& g, juce::ToggleButton& b, bool is
     g.drawFittedText(b.getButtonText(), b.getLocalBounds(), juce::Justification::centred, 1);
 }
 
-void VibeLAF::drawButtonBackground(juce::Graphics& g, juce::Button& b,
+void BaySickLAF::drawButtonBackground(juce::Graphics& g, juce::Button& b,
                                     const juce::Colour&, bool isOver, bool isDown)
 {
     auto bounds = b.getLocalBounds().toFloat();
@@ -744,9 +744,9 @@ void VibeLAF::drawButtonBackground(juce::Graphics& g, juce::Button& b,
         g.drawRoundedRectangle(bounds.reduced(0.5f), radius, 1.5f);
     }
 }
-juce::Font VibeLAF::getLabelFont(juce::Label&) { return juce::Font(11); }
+juce::Font BaySickLAF::getLabelFont(juce::Label&) { return juce::Font(11); }
 
-void VibeLAF::drawButtonText(juce::Graphics& g, juce::TextButton& b, bool /*isOver*/, bool /*isDown*/)
+void BaySickLAF::drawButtonText(juce::Graphics& g, juce::TextButton& b, bool /*isOver*/, bool /*isDown*/)
 {
     // Small toggle buttons: switch icon is on the left, text goes to the right of it.
     // 2026-04-26: matches drawButtonBackground - opt-in via "switchToggle" property.
@@ -770,7 +770,7 @@ void VibeLAF::drawButtonText(juce::Graphics& g, juce::TextButton& b, bool /*isOv
     juce::LookAndFeel_V4::drawButtonText(g, b, false, false);
 }
 
-void VibeLAF::drawScrollbar(juce::Graphics& g, juce::ScrollBar&,
+void BaySickLAF::drawScrollbar(juce::Graphics& g, juce::ScrollBar&,
                              int x, int y, int w, int h,
                              bool isVertical, int thumbStart, int thumbSize,
                              bool isOver, bool isDown)
@@ -871,7 +871,7 @@ namespace
     };
 }
 
-void VibeLAF::drawDocumentWindowTitleBar (juce::DocumentWindow& win, juce::Graphics& g,
+void BaySickLAF::drawDocumentWindowTitleBar (juce::DocumentWindow& win, juce::Graphics& g,
                                           int w, int h, int titleSpaceX, int titleSpaceW,
                                           const juce::Image* icon,
                                           bool /*drawTitleTextOnLeft*/)
@@ -915,7 +915,7 @@ void VibeLAF::drawDocumentWindowTitleBar (juce::DocumentWindow& win, juce::Graph
                 juce::Justification::centredLeft, true);
 }
 
-juce::Button* VibeLAF::createDocumentWindowButton (int buttonType)
+juce::Button* BaySickLAF::createDocumentWindowButton (int buttonType)
 {
     // Locked call 5a applied to desktop windows too: close only.  Minimise and
     // maximise are returned as null so DocumentWindow simply has none -- a
@@ -926,7 +926,7 @@ juce::Button* VibeLAF::createDocumentWindowButton (int buttonType)
     return nullptr;
 }
 
-void VibeLAF::positionDocumentWindowButtons (juce::DocumentWindow&,
+void BaySickLAF::positionDocumentWindowButtons (juce::DocumentWindow&,
                                              int titleBarX, int titleBarY,
                                              int titleBarW, int titleBarH,
                                              juce::Button* minimise, juce::Button* maximise,
@@ -942,7 +942,7 @@ void VibeLAF::positionDocumentWindowButtons (juce::DocumentWindow&,
     if (maximise != nullptr) maximise->setBounds ({});
 }
 
-void VibeLAF::drawGroupComponentOutline(juce::Graphics& g, int w, int h,
+void BaySickLAF::drawGroupComponentOutline(juce::Graphics& g, int w, int h,
                                          const juce::String& text,
                                          const juce::Justification& just,
                                          juce::GroupComponent&)
@@ -973,7 +973,7 @@ void VibeLAF::drawGroupComponentOutline(juce::Graphics& g, int w, int h,
     }
 }
 
-void VibeLAF::drawComboBox(juce::Graphics& g, int w, int h, bool isDown,
+void BaySickLAF::drawComboBox(juce::Graphics& g, int w, int h, bool isDown,
                              int bx, int by, int bw, int bh, juce::ComboBox& box)
 {
     auto bounds = juce::Rectangle<int>(0, 0, w, h).toFloat();
@@ -997,7 +997,7 @@ static constexpr int      kTipPad       = 6;
 static constexpr int      kTipFontSize  = 11;
 static constexpr int      kAutoFontSize = 10;
 
-void VibeLAF::drawTooltip(juce::Graphics& g, const juce::String& text, int width, int height)
+void BaySickLAF::drawTooltip(juce::Graphics& g, const juce::String& text, int width, int height)
 {
     auto bounds = juce::Rectangle<int>(0, 0, width, height).toFloat();
 
@@ -1043,7 +1043,7 @@ void VibeLAF::drawTooltip(juce::Graphics& g, const juce::String& text, int width
     }
 }
 
-juce::Rectangle<int> VibeLAF::getTooltipBounds(const juce::String& text,
+juce::Rectangle<int> BaySickLAF::getTooltipBounds(const juce::String& text,
                                                   juce::Point<int> screenPos,
                                                   juce::Rectangle<int> parentArea)
 {
@@ -1399,7 +1399,7 @@ void PageMenuBar::setTabSlots(const juce::StringArray& labels,
             // chrome body unchanged when active and only gain an outer glow
             // ring in the page accent.  Body stays legible at all times; the
             // ring is the active-state indicator.  See Path C in
-            // VibeLAF::drawButtonBackground for the rendering logic.
+            // BaySickLAF::drawButtonBackground for the rendering logic.
             btn->setColour(juce::TextButton::textColourOnId,   accent);
             btn->setColour(juce::TextButton::textColourOffId,  accent.withAlpha(0.55f));
             btn->getProperties().set("outlineGlowOnly", true);
@@ -2362,9 +2362,9 @@ juce::String ChickenHeadSelector::getTooltip()
 
 DualLabelToggle::DualLabelToggle()
 {
-    // Force VibeLAF on the switch so it uses the shared switch_toggle filmstrip
+    // Force BaySickLAF on the switch so it uses the shared switch_toggle filmstrip
     // regardless of the containing panel's LAF.
-    mBtn.setLookAndFeel(&VibeLAF::get());
+    mBtn.setLookAndFeel(&BaySickLAF::get());
     mBtn.getProperties().set("switchToggle", true);   // intentional switch - opt in to filmstrip
 
     auto setupLbl = [this](juce::Label& l, float ptSize, bool bold)
@@ -2575,12 +2575,12 @@ ParametricEQDisplay::ParametricEQDisplay()
         };
         addAndMakeVisible(*c.typeCombo);
 
-        // Bipolar gain fader (vertical). Tagged as "eqFader" so VibeLAF renders
+        // Bipolar gain fader (vertical). Tagged as "eqFader" so BaySickLAF renders
         // the metallic mixer-style cap with -18..+18 tick labels, a live dB
         // position pointer, and a numeric readout next to the cap.
-        // 2026-04-19: VibeSlider base swallows right-click so it stays draggable-
+        // 2026-04-19: BaySickSlider base swallows right-click so it stays draggable-
         // only on left-click; right-click falls through to the Automate menu.
-        c.gainFader = std::make_unique<VibeSlider>(juce::Slider::LinearVertical,
+        c.gainFader = std::make_unique<BaySickSlider>(juce::Slider::LinearVertical,
                                                    juce::Slider::NoTextBox);
         c.gainFader->getProperties().set("eqFader", true);
         c.gainFader->setRange(-18.0, 18.0);
@@ -2591,7 +2591,7 @@ ParametricEQDisplay::ParametricEQDisplay()
         addAndMakeVisible(*c.gainFader);
 
         // Freq knob (rotary, log-mapped via double-click or drag)
-        c.freqKnob = std::make_unique<VibeSlider>(juce::Slider::RotaryVerticalDrag,
+        c.freqKnob = std::make_unique<BaySickSlider>(juce::Slider::RotaryVerticalDrag,
                                                   juce::Slider::NoTextBox);
         c.freqKnob->setRange(20.0, 20000.0, 1.0);
         c.freqKnob->setSkewFactorFromMidPoint(1000.0);
@@ -2602,7 +2602,7 @@ ParametricEQDisplay::ParametricEQDisplay()
         addAndMakeVisible(*c.freqKnob);
 
         // Q knob (rotary)
-        c.qKnob = std::make_unique<VibeSlider>(juce::Slider::RotaryVerticalDrag,
+        c.qKnob = std::make_unique<BaySickSlider>(juce::Slider::RotaryVerticalDrag,
                                                juce::Slider::NoTextBox);
         c.qKnob->setRange(0.1, 10.0, 0.01);
         c.qKnob->setSkewFactorFromMidPoint(1.0);
@@ -2637,7 +2637,7 @@ ParametricEQDisplay::ParametricEQDisplay()
 
     // D.4-Q6: main-level output fader (9th vertical fader on the right of the
     // band column area).  Bipolar, -18..+18 dB, double-click to reset to 0.
-    mMainLevelFader = std::make_unique<VibeSlider> (juce::Slider::LinearVertical,
+    mMainLevelFader = std::make_unique<BaySickSlider> (juce::Slider::LinearVertical,
                                                      juce::Slider::NoTextBox);
     mMainLevelFader->getProperties().set ("eqFader", true);
     mMainLevelFader->setRange (-18.0, 18.0);
@@ -4524,7 +4524,7 @@ namespace
               mOnAttackChanged(std::move(onAttackChanged)),
               mOnReleaseChanged(std::move(onReleaseChanged))
         {
-            auto makeSlider = [&](VibeSlider& s, const juce::String& name,
+            auto makeSlider = [&](BaySickSlider& s, const juce::String& name,
                                   float lo, double skewMid, const juce::String& suffix)
             {
                 s.setSliderStyle(juce::Slider::RotaryVerticalDrag);
@@ -4549,7 +4549,7 @@ namespace
 
             // 12j follow-up Q2: Upward toggle removed - direction encoded in Range sign.
 
-            auto attachS = [&](VibeSlider& s, const juce::String& suffix) {
+            auto attachS = [&](BaySickSlider& s, const juce::String& suffix) {
                 return std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(
                            apvts, paramPrefix + juce::String(bandIdx) + suffix, s);
             };
@@ -4830,7 +4830,7 @@ namespace
         int     mBandIdx;
         float   mLiveGrDb { 0.f };
 
-        VibeSlider mThr, mRat, mAtt, mRel, mRng;
+        BaySickSlider mThr, mRat, mAtt, mRel, mRng;
         // 12j follow-up Q2: Upward toggle removed - Range is bipolar.
 
         // C.4 Phase 1: SC source dropdown + strip context.
@@ -6472,7 +6472,7 @@ void DBFSMeter::onVBlank()
     // QA-RustyMeter: EMA-smooth the incoming per-frame RMS (~50 ms window, #5b)
     // then push it into the scrolling history ring (Split layout only).  Newest
     // at mRmsHead-1; paintRmsWaveform reads back.  The audio thread publishes a
-    // fixed 5 ms windowed RMS (VibeGraph's MeterRmsWindow), CAS-maxed so several
+    // fixed 5 ms windowed RMS (BaySickGraph's MeterRmsWindow), CAS-maxed so several
     // windows landing inside one UI frame merge to their max; this EMA is the
     // display ballistic on top of it, and stays correct for multi-call InsertKinds.
     {

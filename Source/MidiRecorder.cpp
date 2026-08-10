@@ -1,6 +1,6 @@
 #include "MidiRecorder.h"
 
-// Matches the upper clamp in VibeSynthProcessor::settleAudioThread.  One block
+// Matches the upper clamp in BaySickDAWProcessor::settleAudioThread.  One block
 // is 46 ms at 2048 samples / 44.1 kHz, so this leaves several blocks of
 // headroom without stalling the message thread for a visible beat.
 static constexpr juce::uint32 kSettleTimeoutMs = 250;

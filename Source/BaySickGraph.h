@@ -7,7 +7,7 @@
 #include "DSP/SpectrumFeed.h"
 #include "DSP/EQ8MsDSP.h"
 #include "EffectRack.h"
-#include "VibesynthConstants.h"
+#include "BaySickConstants.h"
 
 // ── Meter latency-compensation toggle (2026-05-02) ───────────────────────────
 // When enabled, audio nodes delay their published peak readings by N blocks so
@@ -79,7 +79,7 @@ namespace MixerChannelIds
 
     // Per-kind strip caps.  A strip cap IS its page cap -- one page of a kind
     // owns exactly one insert strip, so these are DERIVED from
-    // VibesynthConstants.h rather than restated.  Raising a page cap therefore
+    // BaySickConstants.h rather than restated.  Raising a page cap therefore
     // raises the strip cap with it; a one-sided raise would leave the extra
     // pages with an empty prefixFromChannelId, i.e. no strip, no EQ bank and no
     // routing entry, silently.  Range checks read THESE, never a bare literal.
@@ -338,7 +338,7 @@ public:
 
     // Single fast-path predicate for the pre-fader send tap: true iff at least
     // one surviving send edge asked for it.  Recomputed AFTER computeTopo, so an
-    // edge dropped as a cycle cannot leave this reading true and make VibeGraph
+    // edge dropped as a cycle cannot leave this reading true and make BaySickGraph
     // fill a tap nobody pulls.
     bool hasPreFaderSends() const noexcept { return mHasPreFaderSend; }
 
@@ -381,8 +381,8 @@ private:
     bool computeTopo(const std::vector<int>& ids);
 };
 
-// ── VibeGraph ─────────────────────────────────────────────────────────────────
-// Phase 1A / 1I: Audio bus topology for VibeDAW.
+// ── BaySickGraph ─────────────────────────────────────────────────────────────────
+// Phase 1A / 1I: Audio bus topology for BaySickDAW.
 //
 // Fixed bus topology:
 //   Layers Bus ─┐
@@ -395,12 +395,12 @@ private:
 // channel EQ8MsDSP managed by PluginProcessor.  Mixer gain/mute/solo comes
 // from BusMix (written on the message thread, read on the audio thread).
 // ─────────────────────────────────────────────────────────────────────────────
-class VibeGraph
+class BaySickGraph
 {
 public:
     // ── Spectrum feed (audio thread writes, UI timer reads) ───────────────────
     // Definition moved to DSP/SpectrumFeed.h (shared with EQ8MsDSP per-instance
-    // feeds; see 5F-9 §12i). Alias preserves the existing VibeGraph::SpectrumFeed
+    // feeds; see 5F-9 §12i). Alias preserves the existing BaySickGraph::SpectrumFeed
     // name across every caller.
     using SpectrumFeed = ::SpectrumFeed;
 
@@ -421,8 +421,8 @@ public:
     BusMix busMix;   // written from message thread, read in processBlock
 
     // ── Construction / destruction ────────────────────────────────────────────
-    VibeGraph();
-    ~VibeGraph();
+    BaySickGraph();
+    ~BaySickGraph();
 
     // ── Lifecycle ─────────────────────────────────────────────────────────────
     // prepare() must be called before buildFixedTopology() and again on any
@@ -432,7 +432,7 @@ public:
 
     // Build the fixed bus topology.  Guards itself - no-op after first call so
     // safe to call every prepareToPlay().  All references must remain valid for
-    // the lifetime of this VibeGraph.
+    // the lifetime of this BaySickGraph.
     // 12i: SpectrumFeed refs dropped - each EQ8MsDSP owns its own pre/post feeds
     // (populated at its own process() I/O boundary). UI polls eq->preFeed /
     // eq->postFeed directly via ParametricEQDisplay::bindMsDSP.
@@ -562,7 +562,7 @@ public:
     // (BaySickVocal rack -- the spectral De-esser and De-reverb report real
     // FFT latency -- plus the strip's NAM/IR oversampling).  Queried by
     // updateBusLatencies so the vocal chain joins the compensation set.
-    // Wired once by VibeSynthProcessor; message thread only
+    // Wired once by BaySickDAWProcessor; message thread only
     // (updateBusLatencies allocates in setDelay).
     std::function<int(int voxIdx)> onGetVoxStripChainLatency;
 
@@ -573,7 +573,7 @@ public:
     std::function<int(int instIdx)> onGetInstStripEngineLatency;
 
     // Total algorithmic latency (strip-stage + bus-stage compensation target
-    // + master chain).  Read by VibeSynthProcessor::getLatencySamples() and,
+    // + master chain).  Read by BaySickDAWProcessor::getLatencySamples() and,
     // on the audio thread, by the metronome offset + master-recorder trim.
     std::atomic<int> totalLatencySamples { 0 };
 
@@ -631,7 +631,7 @@ public:
     InsertNode* getInsertNode   (InsertKind kind, int index);
 
     // Return the EffectRack owned by an InsertNode (or nullptr if the node
-    // doesn't exist). Lets non-VibeGraph code resolve what effect is loaded
+    // doesn't exist). Lets non-BaySickGraph code resolve what effect is loaded
     // in a given insert slot without touching the forward-declared struct.
     EffectRack* getInsertRack   (InsertKind kind, int index);
 
@@ -644,7 +644,7 @@ public:
     // split meter.  exchange-resets the per-bus rms member atoms below (CAS-maxed
     // audio-side by publishRms in processBus); returns
     // {-inf,-inf} for kMaster (Full layout, no RMS) or an unknown id.  Direct
-    // VibeGraph read -- no PluginProcessor mirror, parallel to drainInsertNodeRms.
+    // BaySickGraph read -- no PluginProcessor mirror, parallel to drainInsertNodeRms.
     std::pair<float, float> drainBusRms (int busChId) noexcept;
 
     // QA-RustyMeter Task 3 (2026-05-30): master-bus EBU R128 LUFS readout.
@@ -724,7 +724,7 @@ public:
     EQ8MsDSP*   getInsertEQ     (InsertKind kind, int index);
     EQ8MsDSP*   getInsertPreEQ  (InsertKind kind, int index);   // §P4.3
 
-    // 2026-05-05 dirty-flag wiring: fired from every VibeGraph-owned rack's
+    // 2026-05-05 dirty-flag wiring: fired from every BaySickGraph-owned rack's
     // onSlotsChanged (per-page racks, bus racks, insert racks).  PluginProcessor
     // wires this to its own onAnyStateChange so EffectsPage-driven rack
     // lifecycle (slot type swap, move-up/down, clear, bypass) flips the
@@ -737,9 +737,9 @@ public:
     void rebindAllRackHooks();
 
     // QA-AudioMeters (2026-05-24): per-insert peak readers moved to
-    // VibeSynthProcessor::drainInsertPeakDbStereo() — UI consumers exchange-
+    // BaySickDAWProcessor::drainInsertPeakDbStereo() — UI consumers exchange-
     // reset the per-kind PluginProcessor mirrors (m<Kind>InsertPeakDb*).  The
-    // VibeGraph-side per-insert getters / drainers + the peakDbSnap layer are
+    // BaySickGraph-side per-insert getters / drainers + the peakDbSnap layer are
     // gone (replaced by InsertNode publishPeakReading + processInsert
     // exchange-store + drainMeterAtomicsForUI 8-per-kind G1 drain).
 
@@ -776,7 +776,7 @@ public:
 
     // Batch 8 (2026-05-06): run the master bus DSP in-place on sumBuf.
     // Called by MasterTask.  Pushes SC array, runs the master node's
-    // processBlock, drains peak meters into the VibeGraph-level mirror
+    // processBlock, drains peak meters into the BaySickGraph-level mirror
     // atomics.  No-op if the master node hasn't been built.
     void        processMasterBus(juce::AudioBuffer<float>& sumBuf, double bpm);
 
@@ -817,7 +817,7 @@ public:
     juce::AudioBuffer<float>* getScRecvBuffer (int channelId, int slotIdx);
     // Returns a pointer to the channel's full SC array (4 stereo buffers).
     // Slots that have never been allocated are nullptr in the returned array.
-    // The array itself is owned by VibeGraph; do not free.
+    // The array itself is owned by BaySickGraph; do not free.
     using ScRecvArray = std::array<juce::AudioBuffer<float>*, kMaxScRecvSlots>;
     ScRecvArray getScRecvArray (int channelId);
     // Clear all SC receive buffers (call at the top of each block).
@@ -859,7 +859,7 @@ public:
     // Address-only push -- the actual buffer contents are filled by upstream
     // SC fanout (pullSidechainPredecessorsToGraph under MT), AFTER topo-sorted
     // source strips process.
-    // Called by VibeGraph internally for inserts + buses + master, and by
+    // Called by BaySickGraph internally for inserts + buses + master, and by
     // PluginProcessor for the Vox/Inst bus loop strips.
     void pushScArrayToStrip (int channelId);
 
@@ -875,7 +875,7 @@ public:
     std::vector<int> getAuxIndices() const;
 
     // QA-Ef #4 (2026-05-22): clear every registered aux InsertNode.  Called on
-    // project load via VibeSynthProcessor::clearAllAuxInserts from the three
+    // project load via BaySickDAWProcessor::clearAllAuxInserts from the three
     // load-entry points (deserializeProject / setStateInformation / doFileNew /
     // loadTemplate) BEFORE restoreAuxStripsFromState rebuilds from the loaded
     // project -- without this, auxes from the prior project's session persist
@@ -930,7 +930,7 @@ public:
     // a full peak bar, no RMS).  CAS-maxed audio-side by publishRms in processBus
     // (never reset there); the UI exchange-resets via
     // drainBusRms.  No mono sibling + no PluginProcessor mirror -- the UI reads
-    // these directly off VibeGraph, parallel to the InsertNode rms atoms.  The
+    // these directly off BaySickGraph, parallel to the InsertNode rms atoms.  The
     // ~50 ms window smoothing lives UI-side in DBFSMeter::onVBlank.
     std::atomic<float> layersRmsDbL        { -60.f }, layersRmsDbR        { -60.f };
     std::atomic<float> bassRmsDbL          { -60.f }, bassRmsDbR          { -60.f };
@@ -958,11 +958,11 @@ public:
     // drainMeterAtomicsForUI drains them into PluginProcessor mirrors that the UI
     // polls.  All 8 InsertKinds adopt this unified G1 pattern (ends the bus-vs-
     // insert architectural split QA-Eg's bus migration left exposed).
-    static constexpr int kMaxAudioInserts = 100; // matches VibeSynthProcessor::kMaxAudioRows + MixerState::kMaxAudioRows (static_assert in .cpp); T11: 50 -> 100
+    static constexpr int kMaxAudioInserts = 100; // matches BaySickDAWProcessor::kMaxAudioRows + MixerState::kMaxAudioRows (static_assert in .cpp); T11: 50 -> 100
 
     // QA-AudioMeters fix-up (2026-05-24): mono <kind>InsertPeakDb members
     // deleted as dead writes (no UI consumer ever read them; the UI reads L/R
-    // only via VibeSynthProcessor::drainInsertPeakDbStereo).
+    // only via BaySickDAWProcessor::drainInsertPeakDbStereo).
     std::array<std::atomic<float>, kMaxLayerPages>                    layerInsertPeakDbL  {}, layerInsertPeakDbR  {};
     std::array<std::atomic<float>, kMaxBassPages>                     bassInsertPeakDbL   {}, bassInsertPeakDbR   {};
     std::array<std::atomic<float>, kMaxDrumPages>                     drumInsertPeakDbL   {}, drumInsertPeakDbR   {};
@@ -977,8 +977,8 @@ public:
     static DSPBase::HostTransport sBlockTransport;
 
 private:
-    // ── Forward-declared nested bus node type (defined in VibeGraph.cpp) ──────
-    // unique_ptr with incomplete type - destructor defined in VibeGraph.cpp.
+    // ── Forward-declared nested bus node type (defined in BaySickGraph.cpp) ──────
+    // unique_ptr with incomplete type - destructor defined in BaySickGraph.cpp.
     // CL-301 (QA-ModelShell TS1, 2026-07-27): the five hand-written bus structs
     // (Layers/Bass/Drums/Master/Effects) are folded into this ONE type -- every
     // bus shares the same implementation; the master chain is a method,
@@ -1012,7 +1012,7 @@ private:
 
     // QA-Ea Part A (2026-05-21): cached bus _solo atomic pointers for the
     // anyBusSoloed() helper.  Bound in rebindBusApvts(); the array length must
-    // stay equal to kBusSoloPrefixes[] in VibeGraph.cpp, which is the list this
+    // stay equal to kBusSoloPrefixes[] in BaySickGraph.cpp, which is the list this
     // mirrors (Master is excluded -- no _solo param, no sibling to solo against).
     // CPU-safeguarding standing rule: avoid string-keyed getRawParameterValue
     // lookups per audio block; cache the raw atomic ptrs once + reuse.
@@ -1046,7 +1046,7 @@ private:
     // the per-kind maps (addInsertMap XML save, restoreInsert XML restore,
     // walkInserts, promoteRacksInMap, isAnyInsertSoloed,
     // rebuildRoutingFromApvts, prepare / reset sweeps).  ChId computed via
-    // `computeChannelId(kind, index)` helper in VibeGraph.cpp; cached on
+    // `computeChannelId(kind, index)` helper in BaySickGraph.cpp; cached on
     // `InsertNode::chId` at construction so the audio-thread `processInsert`
     // path reads it directly.  See §5 QA-InsertMaps + §9 thirty-third Forks.
     static constexpr int kMaxStripChannels = 1000;
@@ -1215,5 +1215,5 @@ private:
     std::size_t                                        mFixedBusChannelCount { 0 };
     void buildFixedBusChannels();
 
-    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(VibeGraph)
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(BaySickGraph)
 };

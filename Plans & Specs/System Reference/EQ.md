@@ -27,7 +27,7 @@ encode/decode when it needs to. The wrapper seeds the mid bank's bands to
 names say. `showMid` on the wrapper is a UI hint and does not affect audio -
 both banks always run.
 
-**Two per strip.** `VibeGraph::InsertNode` holds `preEq` and `eq`, and the bus
+**Two per strip.** `BaySickGraph::InsertNode` holds `preEq` and `eq`, and the bus
 nodes hold the same pair. The strip's block order is: freeze tap, **preEq**,
 polarity, stereo width, the effect rack, **eq**, then fader / mute / solo. The
 Effects window's `Pre EQ` and `Post EQ` buttons open these two.
@@ -240,7 +240,7 @@ for example `mixer_layer_0_mid_eq3Gain` (post-rack) or
 
 These parameters are the source of truth for a bus or insert EQ: they are
 re-pushed to the DSP every audio block from a pre-resolved pointer cache
-(`VibeSynthProcessor::updateEQFromCache`). After an A/B swap the widget writes
+(`BaySickDAWProcessor::updateEQFromCache`). After an A/B swap the widget writes
 the newly-visible bank back into the parameters so the next block cannot undo
 the swap.
 
@@ -269,7 +269,7 @@ stored raw, because both re-prepare the filter chain and change reported
 latency. `viewingSpare` is saved so the app knows which bank the stored bands
 *are*.
 
-`VibeGraph::saveRackStates` writes each strip's `preEq` and `eq` blobs beside
+`BaySickGraph::saveRackStates` writes each strip's `preEq` and `eq` blobs beside
 its rack blob into the project.
 
 ### Saved with a preset
@@ -310,7 +310,7 @@ trusting the pointer it was handed at construction, for the same reason.
 
 Ordering that matters: a phase-mode or anti-cramping change moves the reported
 latency, so the display fires `onLatencyChanged`, which the window wires to
-`VibeGraph::updateBusLatencies` -> `setLatencySamples`. Both halves must run or
+`BaySickGraph::updateBusLatencies` -> `setLatencySamples`. Both halves must run or
 compensation goes stale. The linear-phase processor is allocated and freed only
 from the message thread, never inside `process()`.
 

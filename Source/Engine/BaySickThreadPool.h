@@ -44,14 +44,14 @@ class RenderTask;
 // task that is not upstream of master (a childless producer, a freeze tap, a
 // strip routed nowhere) can still be inside run() when master signals, and
 // every task holds a BlockContext pointer into the caller's stack frame.
-class VibeThreadPool
+class BaySickThreadPool
 {
 public:
-    explicit VibeThreadPool (int requestedWorkers);
-    ~VibeThreadPool();
+    explicit BaySickThreadPool (int requestedWorkers);
+    ~BaySickThreadPool();
 
-    VibeThreadPool (const VibeThreadPool&)            = delete;
-    VibeThreadPool& operator= (const VibeThreadPool&) = delete;
+    BaySickThreadPool (const BaySickThreadPool&)            = delete;
+    BaySickThreadPool& operator= (const BaySickThreadPool&) = delete;
 
     int getWorkerCount() const noexcept { return mNumWorkers; }
 

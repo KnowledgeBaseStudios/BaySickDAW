@@ -36,7 +36,7 @@
 //        Per-band M/S routing also restricted to Stereo in linear modes
 //        (T2a option B; UI greys per-band channel picker). Latency reported
 //        via getLatencySamples() = AC latency + linear-phase latency (FFT/2)
-//        and propagates through EQ8MsDSP + VibeGraph::updateBusLatencies into
+//        and propagates through EQ8MsDSP + BaySickGraph::updateBusLatencies into
 //        host PDC. Mode-aware fade scaling (T2c) replaces the fixed 256-sample
 //        ramp from 12f - new fade length = min(latencyDelta, 4096) samples on
 //        every mode change, since linear modes can shift latency by 256-2048
@@ -52,7 +52,7 @@
 //        audible detector freqs. Spectrum feeds in EQ8MsDSP wrapper stay at
 //        host rate (taps live outside this class). PRESET-SAFE additive
 //        (mAntiCramping default false; serialised additively). Latency
-//        reported via getLatencySamples() so EQ8MsDSP + VibeGraph PDC sum
+//        reported via getLatencySamples() so EQ8MsDSP + BaySickGraph PDC sum
 //        propagates to the host. CPU ~2x when enabled (hence opt-in).
 //   12e  TPT (State-Variable, zero-delay-feedback) filter engine for LP/HP/BP
 //        band types (types 1, 2, 7). Peaking/Shelf/OFF/Tilt keep biquad because
@@ -240,7 +240,7 @@ public:
 
     // 12f: anti-cramping 2x oversampling toggle (opt-in per instance, default off).
     // Reports latency via getLatencySamples() - host PDC must be refreshed by the
-    // caller (EffectsPage already drives VibeGraph::updateBusLatencies on rack
+    // caller (EffectsPage already drives BaySickGraph::updateBusLatencies on rack
     // changes; toggle handler in showEQOptionsMenu does the same).
     void setAntiCramping(bool on);
     bool isAntiCramping() const noexcept { return mAntiCramping; }

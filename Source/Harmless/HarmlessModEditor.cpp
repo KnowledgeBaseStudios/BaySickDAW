@@ -15,7 +15,7 @@ void HarmlessModEditor::makeRotary (juce::Slider& s)
     s.setSliderStyle  (juce::Slider::RotaryVerticalDrag);
     // S4 Batch 4: show a small value-readout below each knob for clarity.
     // Width=0 keeps the text-box hidden but TextBoxBelow triggers the live
-    // drag popup via the VibeLAF default handling; setPopupDisplayEnabled
+    // drag popup via the BaySickLAF default handling; setPopupDisplayEnabled
     // gives the hover + drag value tooltip.
     s.setTextBoxStyle (juce::Slider::NoTextBox, false, 0, 0);
     s.setPopupDisplayEnabled (true, true, nullptr);

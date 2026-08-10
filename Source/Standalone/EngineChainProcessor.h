@@ -36,7 +36,7 @@ public:
     // its AudioProcessor::getLatencySamples() is a fixed 0 (it never calls
     // setLatencySamples), so we pull its live per-slot sum via the pedal
     // board's own getChainLatencySamples() instead.  Message thread -- feeds
-    // VibeGraph::onGetInstStripEngineLatency.
+    // BaySickGraph::onGetInstStripEngineLatency.
     int getChainLatencySamples();
 
     // ── AudioProcessor overrides ──────────────────────────────────────────────

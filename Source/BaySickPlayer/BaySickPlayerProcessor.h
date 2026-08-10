@@ -1,13 +1,13 @@
 #pragma once
 #include <JuceHeader.h>
-#include "VibePlayerDSP.h"
+#include "BaySickPlayerDSP.h"
 #include "../DSP/EngineSidechainHelper.h"
 #include "../Standalone/ApvtsDirtyTracker.h"
 
-class VibeSynthProcessor;
+class BaySickDAWProcessor;
 
-// ── VibePlayerProcessor (user-facing name: BaySickPlayer) ────────────────────
-// AudioProcessor wrapper for VibeSynth.
+// ── BaySickPlayerProcessor (user-facing name: BaySickPlayer) ────────────────────
+// AudioProcessor wrapper for BaySickPlayerSynth.
 // Owns its own APVTS; param IDs follow the consolidated plan convention:
 //   tk_{trackId}_bsp_{paramName}
 //
@@ -15,13 +15,13 @@ class VibeSynthProcessor;
 //   updateFromApvts() guards every setter with a cached last-value comparison.
 //   Only calls the setter when the value actually changed.
 // ─────────────────────────────────────────────────────────────────────────────
-class VibePlayerProcessor : public juce::AudioProcessor,
+class BaySickPlayerProcessor : public juce::AudioProcessor,
                             public ISidechainEngine
 {
 public:
     // undoMgr: QA-ModelShell TS1 dormant pre-wire -- bound into apvts so
     // QA-UndoCoverage can enable undo without a ctor sweep; unused until then.
-    explicit VibePlayerProcessor (const juce::String& trackId = "lay_0",
+    explicit BaySickPlayerProcessor (const juce::String& trackId = "lay_0",
                                   juce::UndoManager* undoMgr = nullptr);
 
     // ── AudioProcessor interface ──────────────────────────────────────────────
@@ -56,7 +56,7 @@ public:
     void setOnAnyStateChange (std::function<void()> fn) { mDirtyTracker.onAny = std::move (fn); }
 
     // Engine access for the editor
-    VibeSynth& getSynth() { return mSynth; }
+    BaySickPlayerSynth& getSynth() { return mSynth; }
 
     // Param prefix used for this instance
     const juce::String& getParamPrefix() const { return mPrefix; }
@@ -95,7 +95,7 @@ public:
                                                       std::memory_order_acq_rel);
     }
 
-    // P3 persistence (2026-04-24): wrappers around VibeSampleManager's
+    // P3 persistence (2026-04-24): wrappers around BaySickSampleManager's
     // loadFolder / loadSFZ / loadSingleFile that ALSO stash the loaded path
     // on `apvts.state` as non-APVTS properties.  setStateInformation replays
     // whichever one was last used so the samples come back on project load.
@@ -103,7 +103,7 @@ public:
     //   loadPath property value:  absolute path to the loaded asset
     // All editor code paths (drag-drop + Core Library menu + Drums slots)
     // go through these wrappers instead of reaching into the manager.
-    //   normalizeRoot = optional MIDI note for VibeSampleManager::normalizeRootNotes
+    //   normalizeRoot = optional MIDI note for BaySickSampleManager::normalizeRootNotes
     //   (e.g. 60 for drum-slot conventions).  -1 = don't normalize.
     // Message thread only - each one rebuilds the manager's region vector
     // behind the host's audio shield (see setHostProcessor / loadIntoManager).
@@ -115,18 +115,18 @@ public:
     // brackets every sample load, because rebuilding the region vector frees
     // memory the audio thread is indexing (see loadIntoManager).  This engine
     // has no other route to the top-level processor, so the processor binds
-    // itself here from VibeSynthProcessor::bindSampleLoadShield, which every
+    // itself here from BaySickDAWProcessor::bindSampleLoadShield, which every
     // register*Engine path that can be handed a BaySickPlayer calls -- that
     // happens at engine creation, ahead of any page that could issue a load.
     // Message thread only; never read on the audio thread.  Null leaves the
     // loads running unprotected against a live render.
-    void setHostProcessor (VibeSynthProcessor* host) noexcept { mHost = host; }
+    void setHostProcessor (BaySickDAWProcessor* host) noexcept { mHost = host; }
 
-    // const_cast: VibeSynth::getManager() has no const overload; the underlying
+    // const_cast: BaySickPlayerSynth::getManager() has no const overload; the underlying
     // region-count read is itself const.
     bool hasAnyRegions() const noexcept
     {
-        return const_cast<VibePlayerProcessor*> (this)->mSynth.getManager().hasAnyRegions();
+        return const_cast<BaySickPlayerProcessor*> (this)->mSynth.getManager().hasAnyRegions();
     }
 
     // C.4 Phase 2.2: engine-level SC primitive.
@@ -149,8 +149,8 @@ private:
     void loadIntoManager (const juce::String& kind, const juce::File& f,
                           int normalizeRoot);
 
-    VibeSynth        mSynth;
-    VibeSynthProcessor* mHost { nullptr };   // see setHostProcessor
+    BaySickPlayerSynth        mSynth;
+    BaySickDAWProcessor* mHost { nullptr };   // see setHostProcessor
     juce::String     mPrefix;
     juce::String     mTrackId;
     std::atomic<int> mAuditionNote    { -1 };
@@ -209,5 +209,5 @@ private:
     // 2026-05-05 dirty-flag wiring.  Declared LAST so apvts is fully constructed.
     ApvtsDirtyTracker mDirtyTracker { apvts };
 
-    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (VibePlayerProcessor)
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (BaySickPlayerProcessor)
 };

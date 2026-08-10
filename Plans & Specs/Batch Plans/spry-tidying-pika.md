@@ -23,7 +23,7 @@ checked individually before the collapse, not waved off:
 | Former batch | What was actually found |
 |---|---|
 | QA-Audit | Its source half already ran, as QA-Soundness: seven category sweeps over the whole tree, eight adversarial re-sweep rounds, 9,160 dead-code sites examined, ten dead files deleted. The findings ledger in `keen-combing-heron.md` IS the manifest this batch existed to produce. |
-| QA-Cleanup-1 | Reduced to a handful of mechanical fold-ins. The full-build warning sweep it called "likely the bulk of the effort" already reads 0 for C4702 / C4189 / C4505 in `build_log.txt`. |
+| QA-Cleanup-1 | Reduced to a handful of mechanical fold-ins plus a small real warning sweep. **Corrected 2026-08-10 at the Task 1 build gate:** the "already reads 0" claim in the first draft came from an INCREMENTAL `build_log.txt` where those translation units were never recompiled. The Task 1 rename touched every header and forced a full rebuild, which surfaced 2 x C4702 and 2 x C4189 at four real sites. C4505 is genuinely 0. Folded into Task 4b. |
 | QA-Cleanup-2 | Nothing to remove. All ten vendored libraries are live. `lunasvg` was the one dead folder and it went at QA-Soundness. |
 | QA-Cleanup-3 | Nothing to remove, and a filename grep here is actively dangerous (see Task 5). |
 | QA-Cleanup-4 | Already done. `.gitignore:8` covers `Files For Claude` and none of its 738 MB was ever tracked. |
@@ -555,6 +555,41 @@ path, which is the audio engine's hot path, so it is worth a real listen.
    lower than before, never higher.
 3. Open the Mixer hamburger menu. Everything except "Run MT Diagnostic"
    should still be there.
+
+- [ ] Brief one-liner -> surface + full `git status` -> WAIT -> commit.
+- [ ] `/draft-doc running-notes` -> apply.
+
+---
+
+### Task 4b - Clear the four warnings the full rebuild surfaced
+
+Found at the Task 1 build gate, not before it: the earlier "warnings are already
+at zero" reading came from an incremental log whose translation units had not
+been recompiled. The rename forced a full rebuild and four real sites appeared.
+They are dead-code shaped, which is exactly this batch's remit.
+
+- [ ] `Source/BaySickPlayer/BaySickPlayerEditor.cpp:623` - C4702 unreachable
+      code. Read the surrounding control flow first: an unreachable statement
+      usually means an unconditional `return` above it, so confirm whether the
+      dead line is the mistake or the `return` is.
+- [ ] `Source/SampleLibrary.cpp:106` - C4702 unreachable code. Same treatment.
+- [ ] `Source/BaySickSynth/BaySickVisualizerScreen.cpp:144` - C4189, `cx`
+      initialized and never referenced.
+- [ ] `Source/BaySickSynth/BaySickVisualizerScreen.cpp:146` - C4189, `hw`
+      initialized and never referenced. Both of these are in drawing code, so
+      check whether the intent was to USE them in a draw call that got dropped,
+      rather than deleting a variable that was supposed to do something.
+- [ ] C4505 (unreferenced local function) is genuinely 0 across the full build.
+      Record that; do not go looking for work that is not there.
+- [ ] **Build gate.** After the fix, `C4702` and `C4189` must both read 0 in
+      `build_log.txt` on a build that actually recompiled those files.
+
+**Tell Jeff:** two of these are in code that draws things, so:
+1. Open BaySickSynth and look at the visualizer screen. It should look exactly
+   as it does now. (If the unused variables turn out to be a dropped draw call,
+   that becomes a separate finding and comes back to you before anything ships.)
+2. Open a BaySickPlayer tab and use its editor normally: load a sample, move
+   the knobs, switch tabs. Nothing should differ.
 
 - [ ] Brief one-liner -> surface + full `git status` -> WAIT -> commit.
 - [ ] `/draft-doc running-notes` -> apply.

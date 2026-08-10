@@ -479,7 +479,7 @@ private:
 // ── SnapMode ──────────────────────────────────────────────────────────────────
 // QA-Ee Stage 2: SnapMode enum removed -- Builder snap is now the unified Int
 // 0..10 scheme (param Unified_BuilderSnapDiv), read live by the grid via
-// onGetSnapDiv().  See VibesynthConstants.h kUnifiedSnapLabels / snapDivToTicks.
+// onGetSnapDiv().  See BaySickConstants.h kUnifiedSnapLabels / snapDivToTicks.
 
 // ── ArrangementGrid ───────────────────────────────────────────────────────────
 // Piano-roll-style arrangement editor.
@@ -1288,7 +1288,7 @@ class BuilderPage : public juce::Component,
                     public juce::ScrollBar::Listener
 {
 public:
-    BuilderPage(VibeSynthProcessor& p, PatternManager& pm);
+    BuilderPage(BaySickDAWProcessor& p, PatternManager& pm);
     ~BuilderPage() override;
     void paint             (juce::Graphics&)       override;
     void resized           ()                      override;
@@ -1514,7 +1514,7 @@ public:
     // `patternIndex` < 0 renders the SONG arrangement; otherwise just that
     // pattern, so pattern mode reads audio of the right length at a loop-local
     // position instead of the song's opening bars.
-    bool renderFreezeFile (VibeGraph::InsertKind kind, int index,
+    bool renderFreezeFile (BaySickGraph::InsertKind kind, int index,
                            RenderTask* target,
                            int patternIndex,
                            const juce::File& dest,
@@ -1622,7 +1622,7 @@ public:
     void buildViewMenu  (juce::PopupMenu& m);
 
 private:
-    VibeSynthProcessor& mProcessor;
+    BaySickDAWProcessor& mProcessor;
     PatternManager&     mPM;
     StandalonePlayHead* mPlayHead { nullptr };
 

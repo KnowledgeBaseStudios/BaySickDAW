@@ -1188,7 +1188,7 @@ void AutomationBrowserPane::listBoxItemClicked(int row, const juce::MouseEvent&)
 // EventEditorContent
 // ─────────────────────────────────────────────────────────────────────────────
 
-EventEditorContent::EventEditorContent(VibeSynthProcessor& p, UndoManager& um)
+EventEditorContent::EventEditorContent(BaySickDAWProcessor& p, UndoManager& um)
     : mProcessor(p), mUM(um)
 {
     // Menu bar
@@ -2077,7 +2077,7 @@ void EventEditorContent::doConvertToClip()
 // EventEditor
 // ─────────────────────────────────────────────────────────────────────────────
 
-EventEditor::EventEditor(VibeSynthProcessor& p, UndoManager& um,
+EventEditor::EventEditor(BaySickDAWProcessor& p, UndoManager& um,
                          PatternManager* pm, int blockIdx,
                          const String& title)
     : DocumentWindow(title, Colour(0xff1a1c1e), DocumentWindow::allButtons)

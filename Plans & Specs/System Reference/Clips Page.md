@@ -6,9 +6,9 @@
 
 ## How it operates
 
-**One tab, one player.** `Source/Clips/ClipsPage.h/.cpp` is the view. The engine is always a `VibePlayerProcessor` (user-facing name: BaySickPlayer), owned by `EngineRig` under `TabKind::Clips` and keyed by the page index. `ClipsPage::selectEngine` is the activation point; passing `EngineType::None` is a no-op, and `EngineType::BaySickPlayer` asks the rig to build the engine, then builds the editor. The page holds a non-owning pointer to the engine, so closing the window leaves the clip playing.
+**One tab, one player.** `Source/Clips/ClipsPage.h/.cpp` is the view. The engine is always a `BaySickPlayerProcessor` (user-facing name: BaySickPlayer), owned by `EngineRig` under `TabKind::Clips` and keyed by the page index. `ClipsPage::selectEngine` is the activation point; passing `EngineType::None` is a no-op, and `EngineType::BaySickPlayer` asks the rig to build the engine, then builds the editor. The page holds a non-owning pointer to the engine, so closing the window leaves the clip playing.
 
-**The page index IS the audio row.** A Clips page's index is its mixer audio-insert row, capped by `kMaxClipPages = 100` (`Source/VibesynthConstants.h`). That gives the page:
+**The page index IS the audio row.** A Clips page's index is its mixer audio-insert row, capped by `kMaxClipPages = 100` (`Source/BaySickConstants.h`). That gives the page:
 
 | Thing | Value |
 |---|---|
@@ -22,7 +22,7 @@
 
 `spawnClipsTabIfMissing` is idempotent by file path and by row - the same file dropped on several Builder rows makes **one** Clips page, bound to the first drop's row - unless the caller is the Duplicate flow, which passes `allowDuplicate`.
 
-**Path handling.** The engine is always loaded from an absolute path resolved through `VibeSynthProcessor::resolveProjectFile`, while the audio-library entry is tagged with the **stored/relative** path (`Samples/<file>`) so it dedupes against every other library entry. The library entry carries `pageOwnerChannelId = audioInsert(row)`, which is how the Builder browser groups files under the Clips page that owns them.
+**Path handling.** The engine is always loaded from an absolute path resolved through `BaySickDAWProcessor::resolveProjectFile`, while the audio-library entry is tagged with the **stored/relative** path (`Samples/<file>`) so it dedupes against every other library entry. The library entry carries `pageOwnerChannelId = audioInsert(row)`, which is how the Builder browser groups files under the Clips page that owns them.
 
 **Threading.** Page construction, menus, preset IO and file copying are message-thread. The audio thread reads the registered engine through the processor's clip-engine registry.
 

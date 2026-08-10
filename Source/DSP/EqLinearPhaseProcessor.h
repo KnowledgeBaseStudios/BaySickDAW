@@ -29,7 +29,7 @@
 //           - OLA-add into the output ring at the current write head, advance by mHop
 //
 // Latency = N/2 samples (the centroid of the Hann window). Reported via
-// getLatencySamples() and summed into the host PDC by EQ8DSP/EQ8MsDSP/VibeGraph.
+// getLatencySamples() and summed into the host PDC by EQ8DSP/EQ8MsDSP/BaySickGraph.
 //
 // Cross-feature interactions (handled by the caller, EQ8DSP):
 //   - Per-band M/S (12h): restricted to Stereo in linear modes (T2a option B).

@@ -3,7 +3,7 @@
 #include "../Standalone/SharedUI.h"   // ParametricEQDisplay
 #include "../Standalone/UndoActions.h"   // QA-Fd: UndoContext plumb-through
 
-class VibeSynthProcessor;
+class BaySickDAWProcessor;
 class BaySickVocalEditor;
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -45,7 +45,7 @@ public:
 
     // QA-ModelShell TS1: the processor ref is needed at construction because
     // the vocal engine is rig-owned and picked in the ctor (H-6b).
-    VoxPage (VibeSynthProcessor& proc, int pageIndex);
+    VoxPage (BaySickDAWProcessor& proc, int pageIndex);
     ~VoxPage() override;
 
     void paint   (juce::Graphics&) override;
@@ -106,10 +106,10 @@ public:
 
     // ── G-7 (2026-04-29): Page Preset save/load (full chain) ─────────────────
     // Captures engine + strip params + insert rack + post-EQ.  setProcessor
-    // must be called by StandaloneEditor with the global VibeSynthProcessor.
+    // must be called by StandaloneEditor with the global BaySickDAWProcessor.
     // Bus fallback: if a saved _sendTo references kVoxBus2 and that bus isn't
     // active in the current project, the loader silently substitutes kVoxBus.
-    void setProcessor (VibeSynthProcessor* p);
+    void setProcessor (BaySickDAWProcessor* p);
     // QA-Fd 9a: the pitch editor joins the global undo -- StandaloneEditor
     // hands the context here; forwarded into the vocal editor (and re-applied
     // if the editor is ever rebuilt by selectEngine).
@@ -147,7 +147,7 @@ private:
     bool                                         mLocked { false };
 
     EngineType                                   mEngineType { EngineType::None };
-    std::unique_ptr<juce::AudioProcessor>        mPlayerProc;        // VibePlayerProcessor (H-6b: dead -- never created; enum back-compat only)
+    std::unique_ptr<juce::AudioProcessor>        mPlayerProc;        // BaySickPlayerProcessor (H-6b: dead -- never created; enum back-compat only)
     // QA-ModelShell TS1: non-owning view of the rig-owned BaySickVocal
     // ({Vox, pageIndex}); the editor IS view-owned and must die before the
     // page (its attachments reference the engine's APVTS).
@@ -159,7 +159,7 @@ private:
     // J-6 EQ unification (2026-05-03): mEQDisplay removed.
 
     // G-7: full processor + bus-active query for Page Preset save/load.
-    VibeSynthProcessor*                          mFullProcessor { nullptr };
+    BaySickDAWProcessor*                          mFullProcessor { nullptr };
     std::function<bool(int)>                     mBusActiveQuery;
     UndoContext                                  mUndoCtx;   // QA-Fd 9a
     std::function<double()>                      mTransportBeat;   // QA-Fd #7

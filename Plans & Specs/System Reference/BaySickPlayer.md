@@ -7,23 +7,23 @@ Bass and Drums tabs, and it is the engine that sits behind every Clips tab. On
 top of plain playback it adds pitch, envelope, filter, drive, stereo and unison
 controls, so one recorded note can be shaped into a usable instrument.
 
-Internally the source files still carry the old `VibePlayer` name
-(`Source/VibePlayer/`). The user never sees that name; the engine is called
+Internally the source files still carry the old `BaySickPlayer` name
+(`Source/BaySickPlayer/`). The user never sees that name; the engine is called
 BaySickPlayer everywhere on screen.
 
 ---
 
 ## How it operates
 
-Three classes do the work, all in `Source/VibePlayer/`:
+Three classes do the work, all in `Source/BaySickPlayer/`:
 
 | Class | File | Role |
 |---|---|---|
-| `VibePlayerProcessor` | `VibePlayerProcessor.h/.cpp` | The `juce::AudioProcessor` wrapper. Owns the APVTS, the sample-load entry points, and the audition atomics. |
-| `VibeSynth` / `VibeVoice` / `VibeSampleManager` | `VibePlayerDSP.h/.cpp` | The polyphonic engine, its voices, and the sample map. |
-| `VibePlayerEditor` | `VibePlayerEditor.h/.cpp` | The on-screen player window (7 control boxes plus the Preset button). |
+| `BaySickPlayerProcessor` | `BaySickPlayerProcessor.h/.cpp` | The `juce::AudioProcessor` wrapper. Owns the APVTS, the sample-load entry points, and the audition atomics. |
+| `BaySickPlayerSynth` / `BaySickPlayerVoice` / `BaySickSampleManager` | `BaySickPlayerDSP.h/.cpp` | The polyphonic engine, its voices, and the sample map. |
+| `BaySickPlayerEditor` | `BaySickPlayerEditor.h/.cpp` | The on-screen player window (7 control boxes plus the Preset button). |
 
-**Sample map.** `VibeSampleManager` holds a flat `std::vector<VibeRegion>`.
+**Sample map.** `BaySickSampleManager` holds a flat `std::vector<BaySickPlayerRegion>`.
 Each region carries its decoded audio (a `shared_ptr<juce::AudioBuffer<float>>`),
 its root note, key range, velocity range, round-robin position, articulation
 group, tune/volume offsets and the SFZ keyswitch fields (`sw_lokey`, `sw_hikey`,
@@ -40,14 +40,14 @@ group, tune/volume offsets and the SFZ keyswitch fields (`sw_lokey`, `sw_hikey`,
 Every file is decoded to memory at load time, capped at **60 seconds** per file,
 and mono files are duplicated to stereo. There is no streaming.
 
-**Voices.** `VibeSynth` wraps a `juce::Synthesiser` with a physical pool of
-**24** `VibeVoice` objects (`kMaxVoices`). The user-facing polyphony limit is
+**Voices.** `BaySickPlayerSynth` wraps a `juce::Synthesiser` with a physical pool of
+**24** `BaySickPlayerVoice` objects (`kMaxVoices`). The user-facing polyphony limit is
 lower (see Voice Cap below, default 16) - the extra 8 are a landing zone so a
 stolen voice can finish a ~1.5 ms fade while the new note starts on a free slot.
 Each voice owns a forward reader and a reverse reader plus one resampler each, so
 a note-on allocates nothing on the audio thread.
 
-**Per-voice signal path** (`VibeVoice::renderNextBlock`):
+**Per-voice signal path** (`BaySickPlayerVoice::renderNextBlock`):
 
 ```
 region sample -> resampler (pitch, stretch, glide)
@@ -59,18 +59,18 @@ region sample -> resampler (pitch, stretch, glide)
              -> volume x velocity scale x pan  -> mix into the output buffer
 ```
 
-**Per-engine post-processing** (`VibeSynth::renderNextBlock`, after all voices
+**Per-engine post-processing** (`BaySickPlayerSynth::renderNextBlock`, after all voices
 are summed): a one-pole high shelf at about 8 kHz (Treble), then mid/side stereo
 width (Stereo).
 
 **Threads.**
 
-- Audio thread: everything in `processBlock`, `VibeSynth`, `VibeVoice`, and
-  `VibeSampleManager::findRegion` / the keyswitch state handlers.
+- Audio thread: everything in `processBlock`, `BaySickPlayerSynth`, `BaySickPlayerVoice`, and
+  `BaySickSampleManager::findRegion` / the keyswitch state handlers.
 - Message thread: the three loaders, `clear()`, and `normalizeRootNotes`.
-- `VibeSampleManager` carries **no lock**. Every mutator rebuilds `mRegions`
+- `BaySickSampleManager` carries **no lock**. Every mutator rebuilds `mRegions`
   in place, which frees memory the audio thread may be indexing. Safety comes
-  from `VibePlayerProcessor::loadIntoManager`, which raises the host's
+  from `BaySickPlayerProcessor::loadIntoManager`, which raises the host's
   processBlock shield (`setProjectLoadInProgress(true)` + `settleAudioThread()`)
   around every load and lowers it after. A new mutation path that skips that
   bracket is a use-after-free, not a glitch.
@@ -300,13 +300,13 @@ allocation, and the audition atomics - all rebuilt from scratch on load.
 ## Lifetime and teardown
 
 - The engine is **model-owned**. `EngineRig::createEngineFor` constructs a
-  `VibePlayerProcessor` for a Layers / Bass / Drums / Clips tab when that tab's
+  `BaySickPlayerProcessor` for a Layers / Bass / Drums / Clips tab when that tab's
   engine type is set to `"BaySickPlayer"`, prepares it at the current sample rate
   (or 44100) with a 512-sample block, and tags its APVTS with a stable undo
   identity `rig:<kind>:<pageIndex>` so undo survives engine re-creation.
 - The page is a **view**. Closing a page window destroys the editor only; the
   engine keeps running and keeps making sound.
-- `VibeSynthProcessor::bindSampleLoadShield` hands the engine a pointer to the
+- `BaySickDAWProcessor::bindSampleLoadShield` hands the engine a pointer to the
   host processor (`setHostProcessor`) at creation, before any page can issue a
   load. Without it, sample loads run unprotected against a live render - see the
   shield note under *How it operates*.

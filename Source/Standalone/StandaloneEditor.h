@@ -54,7 +54,7 @@ class StandaloneEditor : public  juce::Component,
                          public  juce::ChangeListener
 {
 public:
-    StandaloneEditor(VibeSynthProcessor& p, StandalonePlayHead& ph,
+    StandaloneEditor(BaySickDAWProcessor& p, StandalonePlayHead& ph,
                      juce::AudioDeviceManager& dm);
     ~StandaloneEditor() override;
 
@@ -649,7 +649,7 @@ private:
     void registerBaySickRustyDrumsPianoRoll();   // J-7a (2026-05-03)
 
     // 2026-05-05 dirty-flag wiring helper.  Each per-engine processor
-    // (Harmless / BaySickSynth / BaySickBass / VibePlayer / BaySickGuitars /
+    // (Harmless / BaySickSynth / BaySickBass / BaySickPlayer / BaySickGuitars /
     // BaySickRustyDrums / BaySickPedals / BaySickNAMIR / BaySickVocal) owns
     // its own APVTS that's invisible to the main PluginProcessor's project-
     // dirty listener.  This helper dynamic_casts to each known type and
@@ -727,7 +727,7 @@ private:
     std::unique_ptr<juce::FileChooser> mTemplateChooser;   // for Set Default Template
 
     // ── Members ───────────────────────────────────────────────────────────────
-    VibeSynthProcessor&            mProcessor;
+    BaySickDAWProcessor&            mProcessor;
     StandalonePlayHead&            mPlayHead;
     juce::AudioDeviceManager&      mDeviceManager;
     juce::AudioIODeviceCallback*   mAudioCallback { nullptr }; // set by StandaloneApp
@@ -736,7 +736,7 @@ private:
     std::unique_ptr<PatternManager> mPM;
 
     // Project persistence (P1+ - 2026-04-23).  Owns the "current project"
-    // folder on disk, serializes/deserializes via VibeSynthProcessor.
+    // folder on disk, serializes/deserializes via BaySickDAWProcessor.
     std::unique_ptr<ProjectManager> mProjectManager;
 
     // ── File menu handlers (P2) ───────────────────────────────────────────────
@@ -763,7 +763,7 @@ private:
     // not dirty, calls continuation immediately.  Cancel aborts.
     void confirmDiscardChanges (std::function<void()> continuation);
 public:
-    // P5: called from VibeSynthWindow::closeButtonPressed to intercept the
+    // P5: called from BaySickDAWWindow::closeButtonPressed to intercept the
     // close-with-unsaved flow.  Returns true if quit should proceed
     // synchronously; returns false when a dialog is shown and the app should
     // wait for the user's choice (continuation calls quit() on accept).
@@ -864,7 +864,7 @@ private:
     }
 
 public:
-    // G1 review fix: public so VibeSynthWindow can flush held typed notes on
+    // G1 review fix: public so BaySickDAWWindow can flush held typed notes on
     // app deactivation (Alt+Tab mid-hold left the key-up with another app and
     // the note droned until refocus).  Idempotent; message thread.
     void releaseAllTypingNotes();
@@ -1036,7 +1036,7 @@ private:
     // and forwards any captured MIDI notes to the last-accessed piano
     // roll (R5d-midi).  Fire-and-forget - safe to call with an empty
     // result, so Pause / Stop / Record-disarm all use the same path.
-    void commitRecordingResult (const struct VibeSynthProcessor::RecordResult& res);
+    void commitRecordingResult (const struct BaySickDAWProcessor::RecordResult& res);
 
     // ── QA-Fe2 De-noise (2026-07-16) ─────────────────────────────────────
     // Take types written at record stop = File Settings checkboxes UNION the
@@ -1108,8 +1108,8 @@ private:
         }
     } mCountInTimer { *this };
 
-    // Global tooltip window (styled via VibeLAF::drawTooltip / getTooltipBounds)
-    std::unique_ptr<VibeTooltip> mTooltipWindow;
+    // Global tooltip window (styled via BaySickLAF::drawTooltip / getTooltipBounds)
+    std::unique_ptr<BaySickTooltip> mTooltipWindow;
     GlobalAutoRightClick         mAutoRightClick;  // global right-click → automate
 
     // ── Keymap framework (Phase A - 2026-04-26) ───────────────────────────────
@@ -1186,7 +1186,7 @@ private:
     // BaySickBasses) into the unified PianoRollPage.  dataAccessor points at
     // Pattern::instRoll[idx]; audition closures route to the engine's
     // auditionNote.  Caller (K-4 addBaySickGuitarsTab / L-3 addBaySickBassesTab)
-    // invokes after the engine is created via VibeSynthProcessor::loadKit.
+    // invokes after the engine is created via BaySickDAWProcessor::loadKit.
     void registerInstSourcePianoRoll (class InstPage* ip);
     void unregisterInstSourcePianoRoll (class InstPage* ip);
 
@@ -1311,7 +1311,7 @@ private:
 
     // Statics = every APVTS param (plus the derived "<prefix>_fader" aliases)
     // + "global_tempo".  Called from the ctor, after resetProjectState()'s full
-    // map clear, and from VibeSynthProcessor::onMixerStripParamsCreated -- a
+    // map clear, and from BaySickDAWProcessor::onMixerStripParamsCreated -- a
     // lazily-created strip's params did not exist at the earlier sweeps, and
     // param materialization is the model event that says they do now.
     void registerStaticAutomationHandlers();
@@ -1354,7 +1354,7 @@ private:
     // CC bank, cut-self pair) with applicators that re-resolve the engine
     // through the processor at apply time, so a kit swap or a
     // destroy/recreate cycle cannot strand them.
-    void registerSfizzEngineAutomation (VibeSynthProcessor::SfizzEngineKind kind,
+    void registerSfizzEngineAutomation (BaySickDAWProcessor::SfizzEngineKind kind,
                                         int instIdx);
 
     // ── Applicator lifetime (QA-ModelShell TS3, 2026-07-27) ─────────────────

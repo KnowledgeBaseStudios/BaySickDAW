@@ -1,5 +1,5 @@
 #include "DrumKitGrid.h"
-#include "../VibeGraph.h"        // MixerChannelIds::kDrumPagesPerBank -- the drum-bank split
+#include "../BaySickGraph.h"        // MixerChannelIds::kDrumPagesPerBank -- the drum-bank split
 #include "PianoRoll.h"           // T9 (L29): shared lane height/visibility statics on ControlLane
 #include "TypingKeyboardMap.h"   // D-4: bypass tool keys while typing-keyboard mode is on
 #include "../G3PlayheadDiag.h"   // [G3 PLAYHEAD] G-9 reading (QA-G3Smoke Task 1); Debug-only
@@ -2647,7 +2647,7 @@ void DrumKitGrid::toggleResizeFromLeftMode()
 
 namespace { struct DrumScaleLevelsHost : public juce::Component
 {
-    VibeSlider slider { juce::Slider::LinearHorizontal, juce::Slider::TextBoxRight };
+    BaySickSlider slider { juce::Slider::LinearHorizontal, juce::Slider::TextBoxRight };
     DrumScaleLevelsHost()
     {
         slider.setRange (0.0, 200.0, 1.0);

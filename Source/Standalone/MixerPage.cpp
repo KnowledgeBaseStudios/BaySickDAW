@@ -1125,7 +1125,7 @@ public:
 
 private:
     juce::Label        mDestLabel;
-    VibeSlider         mAmountSlider;
+    BaySickSlider         mAmountSlider;
     juce::ToggleButton mPrePostBtn;
     juce::TextButton   mDeleteBtn;
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> mAmountAtt;
@@ -1398,7 +1398,7 @@ juce::Point<float> MixerPage::getSocketPosition(int channelId) const
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-MixerPage::MixerPage(VibeSynthProcessor& processor, PatternManager& pm)
+MixerPage::MixerPage(BaySickDAWProcessor& processor, PatternManager& pm)
     : mProcessor(processor), mPM(pm)
 {
     // 5F-4a: ensure master + 5 bus strip APVTS params exist before we bind.
@@ -1605,7 +1605,7 @@ MixerPage::MixerPage(VibeSynthProcessor& processor, PatternManager& pm)
     // Aux Strip + the bus adds; Vox/Inst STRIP adds live on the ribbon's "+".
 
     // 5F-4b B7: restore any aux strips that were in the saved project.
-    // VibeGraph already has their InsertNodes (registered by restoreAuxStripsFromState
+    // BaySickGraph already has their InsertNodes (registered by restoreAuxStripsFromState
     // in setStateInformation). Create the matching UI strips.
     for (int idx : mProcessor.mVibeGraph.getAuxIndices())
         addAuxChannelAtIndex(idx);
@@ -2783,7 +2783,7 @@ void MixerPage::addAuxChannelAtIndex(int idx)
     const juce::String prefix = "mixer_aux_" + juce::String(idx);
     const juce::String name   = "Aux " + juce::String(idx + 1);
 
-    // Register the VibeGraph InsertNode + APVTS params (lazy / idempotent).
+    // Register the BaySickGraph InsertNode + APVTS params (lazy / idempotent).
     mProcessor.ensureAuxInsert(idx, name);
 
     auto strip = std::make_unique<MixerTrackStrip>(name,
@@ -2870,7 +2870,7 @@ void MixerPage::removeAuxChannel(int idx)
 // from mInstStrips / mVoxStrips / mClipsStrips.  The next addInstChannelAtIndex
 // (et al) would then bail at `if (count(idx) > 0) return;` and the user
 // couldn't re-add a tab at that slot.  These helpers drop the strip widget +
-// the order entry; the underlying VibeGraph InsertNode + APVTS params stay
+// the order entry; the underlying BaySickGraph InsertNode + APVTS params stay
 // alive so re-adding the same idx restores prior settings (matches the Aux
 // remove convention above).
 void MixerPage::removeInstChannel(int idx)
@@ -3144,7 +3144,7 @@ void MixerPage::deleteAuxStrip (int idx, int auxChannelId)
     const bool shieldWasUp = mProcessor.isProjectLoadInProgress();
     mProcessor.setProjectLoadInProgress (true);
     if (! shieldWasUp) mProcessor.settleAudioThread();
-    mProcessor.mVibeGraph.removeInsertNode (VibeGraph::InsertKind::Aux, idx);
+    mProcessor.mVibeGraph.removeInsertNode (BaySickGraph::InsertKind::Aux, idx);
     mProcessor.setProjectLoadInProgress (shieldWasUp);
 
     // Routing graph rebuild on the next block picks up the param changes.
@@ -3779,11 +3779,11 @@ void MixerPage::onVBlank()
     // meters they're sourced from -- no race between cable read and strip drain.
 
     // QA-AudioMeters (2026-05-24): unified per-insert drain via the new
-    // VibeSynthProcessor::drainInsertPeakDbStereo accessor.  Reads + exchange-
+    // BaySickDAWProcessor::drainInsertPeakDbStereo accessor.  Reads + exchange-
     // resets the m<Kind>InsertPeakDb*L/R[index] mirror that drainMeterAtomicsForUI
-    // populates from VibeGraph's per-kind public-member arrays.  Audio kind
+    // populates from BaySickGraph's per-kind public-member arrays.  Audio kind
     // shares this path (no more inline mAudioRowPeakDb*L/R exchange-reset).
-    auto drainStereoInsert = [&] (VibeGraph::InsertKind kind, int idx, MixerTrackStrip* strip)
+    auto drainStereoInsert = [&] (BaySickGraph::InsertKind kind, int idx, MixerTrackStrip* strip)
     {
         if (! strip) return;
         const auto [pkL, pkR] = mProcessor.drainInsertPeakDbStereo (kind, idx);
@@ -3794,25 +3794,25 @@ void MixerPage::onVBlank()
     };
 
     for (auto& [pageIdx, strip] : mLayerStrips)
-        drainStereoInsert (VibeGraph::InsertKind::Layer, pageIdx, strip.get());
+        drainStereoInsert (BaySickGraph::InsertKind::Layer, pageIdx, strip.get());
     for (auto& [pageIdx, strip] : mBassStrips)
-        drainStereoInsert (VibeGraph::InsertKind::Bass, pageIdx, strip.get());
+        drainStereoInsert (BaySickGraph::InsertKind::Bass, pageIdx, strip.get());
     for (auto& [slot, strip] : mDrumStrips)
-        drainStereoInsert (VibeGraph::InsertKind::Drum, slot, strip.get());
+        drainStereoInsert (BaySickGraph::InsertKind::Drum, slot, strip.get());
     for (auto& [row, strip] : mAudioStrips)
-        drainStereoInsert (VibeGraph::InsertKind::Audio, row, strip.get());
+        drainStereoInsert (BaySickGraph::InsertKind::Audio, row, strip.get());
     for (auto& [idx, strip] : mAuxStrips)
-        drainStereoInsert (VibeGraph::InsertKind::Aux, idx, strip.get());
+        drainStereoInsert (BaySickGraph::InsertKind::Aux, idx, strip.get());
     for (auto& [idx, strip] : mVoxStrips)
-        drainStereoInsert (VibeGraph::InsertKind::Vox, idx, strip.get());
+        drainStereoInsert (BaySickGraph::InsertKind::Vox, idx, strip.get());
     for (auto& [idx, strip] : mInstStrips)
-        drainStereoInsert (VibeGraph::InsertKind::Inst, idx, strip.get());
+        drainStereoInsert (BaySickGraph::InsertKind::Inst, idx, strip.get());
     // J-5 (2026-05-03): per-Rusty-strip peak meter drain.
     for (auto& [idx, strip] : mRustyStrips)
-        drainStereoInsert (VibeGraph::InsertKind::Rusty, idx, strip.get());
+        drainStereoInsert (BaySickGraph::InsertKind::Rusty, idx, strip.get());
     // TS6 (BLU-447) -- MISSED, fixed TS7 2026-07-30.
     for (auto& [idx, strip] : mPluginStrips)
-        drainStereoInsert (VibeGraph::InsertKind::Plugin, idx, strip.get());
+        drainStereoInsert (BaySickGraph::InsertKind::Plugin, idx, strip.get());
 
     if (mVoxBus2Strip)  drainStereoBus (mVoxBus2Strip .get(), kVoxBus2,  mProcessor.mVoxBus2PeakDbL,  mProcessor.mVoxBus2PeakDbR);
     if (mInstBus2Strip) drainStereoBus (mInstBus2Strip.get(), kInstBus2, mProcessor.mInstBus2PeakDbL, mProcessor.mInstBus2PeakDbR);

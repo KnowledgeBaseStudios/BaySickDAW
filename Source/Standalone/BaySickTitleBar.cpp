@@ -45,7 +45,7 @@ BaySickTitleBar::~BaySickTitleBar() = default;
 
 void BaySickTitleBar::paint (juce::Graphics& g)
 {
-    // Standardized dark background (matches existing Harmless/VibePlayer tone).
+    // Standardized dark background (matches existing Harmless/BaySickPlayer tone).
     g.fillAll (juce::Colour (0xFF141618));
 
     // 1px bottom divider for visual separation against the panel below.
@@ -130,15 +130,15 @@ BaySickPresetButton::BaySickPresetButton (const juce::String& label)
     setMouseClickGrabsKeyboardFocus (false);
     setClickingTogglesState (false);
 
-    // QA-A Phase 6 (2026-05-09): lock the preset button to VibeLAF (the app-
+    // QA-A Phase 6 (2026-05-09): lock the preset button to BaySickLAF (the app-
     // global LAF used by BaySickPedals + the rest of the chassis).  Engine
     // editors that set their own LAF (HarmlessLAF, BaySickSynthLAF,
-    // BaySickBassLAF, VibePlayerLAF) propagate that LAF to their child
+    // BaySickBassLAF, BaySickPlayerLAF) propagate that LAF to their child
     // components, which is what made the preset button look black on those
-    // engines and grey on Pedals.  Pinning to VibeLAF here means every
+    // engines and grey on Pedals.  Pinning to BaySickLAF here means every
     // preset button paints the same way Pedals' did before the propagation,
     // regardless of which engine page hosts it.
-    setLookAndFeel (&VibeLAF::get());
+    setLookAndFeel (&BaySickLAF::get());
 }
 
 BaySickPresetButton::~BaySickPresetButton()
@@ -153,7 +153,7 @@ void BaySickPresetButton::paintButton (juce::Graphics& g,
                                         bool isMouseOverButton,
                                         bool isButtonDown)
 {
-    // Background -- delegate to LookAndFeel (locked to VibeLAF in the ctor)
+    // Background -- delegate to LookAndFeel (locked to BaySickLAF in the ctor)
     // so the button picks up the standard app chassis hover / pressed
     // shading and matches Pedals' look exactly.
     getLookAndFeel().drawButtonBackground (g, *this,

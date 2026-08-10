@@ -15,7 +15,7 @@ struct BlockContext;
 // strip's processing - engine dispatch + insert chain + output publish for a
 // leaf, or upstream sum + bus chain + publish for a passive bus.
 //
-// Memory ordering (CRITICAL - see VibeThreadPool.cpp for enforcement):
+// Memory ordering (CRITICAL - see BaySickThreadPool.cpp for enforcement):
 //   - When a worker finishes a task and decrements each child's mDeps, the
 //     decrement uses memory_order_acq_rel. The release half publishes this
 //     task's writes to mOutputBuffer; the acquire half pairs with downstream
@@ -63,7 +63,7 @@ public:
     // send whose UpstreamLink::prePost is set reads the source's pre-fader tap
     // instead (Tasks/SendSourceRead.h), and a sidechain link reads the source's
     // SC stash (SidechainPullHelper.h). Both of those live on the source's
-    // VibeGraph node, not in the arena, and both are published by the same
+    // BaySickGraph node, not in the arena, and both are published by the same
     // release/acquire on the dependency counter as mOutputBuffer. Built by
     // RenderGraphDispatcher::rebuildLinks from RoutingGraph::edges() +
     // scEdges() whenever topology changes. Stable for the duration of a
@@ -74,7 +74,7 @@ public:
     // dispatcher when the task is registered. This is the strip's
     // post-everything output and the buffer downstream tasks pull by default.
     // It is the only ARENA slot a strip writes; the per-strip taps a strip also
-    // fills (sidechain stash, pre-fader send tap) live on its VibeGraph node.
+    // fills (sidechain stash, pre-fader send tap) live on its BaySickGraph node.
     juce::AudioBuffer<float>* mOutputBuffer = nullptr;
 
     // Per-block context (sample count, BPM, position info, MIDI buffers).
@@ -181,7 +181,7 @@ public:
     // blocks and is never zeroed on its own, so leaving it alone would feed
     // last block's audio (or, on the first block, uninitialised memory) into
     // whatever sums it downstream.  The pre-fader send tap has the identical
-    // hazard and is answered at the other end, by VibeGraph::armPreFaderTaps
+    // hazard and is answered at the other end, by BaySickGraph::armPreFaderTaps
     // clearing every armed tap before any task runs.
     // Whole buffer, not just mCtx->numSamples: BlockContext is only forward
     // declared here, and the arena slot is one max-block allocation anyway.

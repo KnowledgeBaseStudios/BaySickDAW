@@ -209,7 +209,7 @@ namespace MissingFileReport
     // "first noun in wins" rule reportIfAny applies to a coalesced batch.
     //
     // THE FLAG GATES ScopedGesture DESTRUCTORS AND NOTHING ELSE.  A direct
-    // reportIfAny inside an open scope - including VibeSynthProcessor::
+    // reportIfAny inside an open scope - including BaySickDAWProcessor::
     // reportMissingFilesIfAny, which forwards straight to it - drains there and
     // then and claims pendingNoun, so the OUTER gesture's entries get reported
     // under the INNER one's headline.  Coalescing still gets the user a single

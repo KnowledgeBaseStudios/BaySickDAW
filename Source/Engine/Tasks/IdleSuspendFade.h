@@ -24,7 +24,7 @@ struct IdleSuspendFade
 {
     // MAGIC-NUMBER CALIBRATION.  Fade-out reuses the 15 ms that is already
     // calibrated as click-free for the Inst monitor fork, and spends 15% of the
-    // 100 ms idle hold (VibeSynthProcessor::kIdleSuspendSeconds) - long enough
+    // 100 ms idle hold (BaySickDAWProcessor::kIdleSuspendSeconds) - long enough
     // for a decaying tail to reach zero smoothly, short enough not to move the
     // idle window meaningfully.
     //

@@ -29,7 +29,7 @@ private:
     float mX { 0.f }, mY { 0.f };
     juce::Rectangle<int> mPadBounds;
 
-    VibeSlider mXKnob, mYKnob, mZKnob;
+    BaySickSlider mXKnob, mYKnob, mZKnob;
     using SliderAtt = TaggedSliderAttachment;
     std::unique_ptr<SliderAtt> mXAtt, mYAtt, mZAtt;
 

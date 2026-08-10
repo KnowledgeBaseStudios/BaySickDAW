@@ -133,7 +133,7 @@ set(VIBESYNTH_DSP_SOURCES
     # QA-ModelShell TS6 (BLU-302): host end of the plugin sandbox bridge.
     Source/Hosting/SandboxedPluginClient.cpp
     Source/SampleLibrary.cpp
-    Source/VibeGraph.cpp
+    Source/BaySickGraph.cpp
     Source/SynthSound.cpp
     Source/WavetableOscillator.cpp
     Source/SynthFilter.cpp
@@ -156,9 +156,9 @@ set(VIBESYNTH_DSP_SOURCES
     Source/Harmless/HarmlessModEditor.cpp
     Source/Harmless/HarmlessModRegistry.cpp
     Source/Harmless/VisualizerScreen.cpp
-    # Phase 2B — VibePlayer (Disk Streaming Sampler) — DSP + Processor only
-    Source/VibePlayer/VibePlayerDSP.cpp
-    Source/VibePlayer/VibePlayerProcessor.cpp
+    # Phase 2B — BaySickPlayer (Disk Streaming Sampler) — DSP + Processor only
+    Source/BaySickPlayer/BaySickPlayerDSP.cpp
+    Source/BaySickPlayer/BaySickPlayerProcessor.cpp
     # Phase 2C — BaySickSynth (5-tab subtractive synth)
     Source/BaySickSynth/BaySickSynthVoice.cpp
     Source/BaySickSynth/BaySickSynthDSP.cpp
@@ -174,7 +174,7 @@ set(VIBESYNTH_DSP_SOURCES
     # Multi-threaded render engine.  RenderEngine::gMultiThreadedEngineEnabled is a
     # RUNTIME atomic (worker-park vs parallel), not a build gate -- the dispatcher
     # is the single render path either way.  Contract in Source/Engine/RenderEngineFlags.h.
-    Source/Engine/VibeThreadPool.cpp
+    Source/Engine/BaySickThreadPool.cpp
     Source/Engine/RenderGraphDispatcher.cpp
     # Batch 3 (2026-05-06): EngineInsertTask wraps Layer/Bass/Drum engine
     # dispatch + insert chain in one RenderTask subclass.
@@ -448,7 +448,7 @@ target_compile_definitions(BaySickDAW
     PRIVATE JUCE_MODULE_AVAILABLE_juce_audio_plugin_client=1
 )
 
-target_include_directories(BaySickDAW PRIVATE Source Source/Engine Source/Engine/Tasks Source/Harmless Source/VibePlayer Source/BaySickSynth Source/BaySickBass
+target_include_directories(BaySickDAW PRIVATE Source Source/Engine Source/Engine/Tasks Source/Harmless Source/BaySickPlayer Source/BaySickSynth Source/BaySickBass
     # moodycamel::ConcurrentQueue — vendored single-header MPMC queue for the
     # multi-threaded render engine. Drop concurrentqueue.h into this folder.
     "${CMAKE_CURRENT_SOURCE_DIR}/libs/concurrentqueue"
@@ -636,8 +636,8 @@ target_sources(BaySickDAWStandalone PRIVATE
     Source/Standalone/RustyDrumsMapWindow.cpp
     # Pattern colour picker (Phase F-1 — 2026-04-26)
     Source/Standalone/PatternColorPicker.cpp
-    # Phase 2B — VibePlayer Editor (standalone UI only — includes SharedUI.h)
-    Source/VibePlayer/VibePlayerEditor.cpp
+    # Phase 2B — BaySickPlayer Editor (standalone UI only — includes SharedUI.h)
+    Source/BaySickPlayer/BaySickPlayerEditor.cpp
     # 2026-04-25: legacy DrumsPage.cpp + BaySickDrumsEditor.cpp removed.
 )
 
@@ -645,7 +645,7 @@ target_compile_definitions(BaySickDAWStandalone
     PUBLIC ${VIBESYNTH_DEFS} VIBESYNTH_STANDALONE=1
 )
 
-target_include_directories(BaySickDAWStandalone PRIVATE Source Source/Engine Source/Engine/Tasks Source/Standalone Source/Harmless Source/VibePlayer Source/BaySickSynth Source/BaySickBass Source/BaySickNAMIR Source/BaySickPedals Source/BaySickRustyDrums Source/BaySickGuitars Source/BaySickBasses Source/BaySickVocal Source/Clips Source/Vox Source/Inst Source/MidiLearn Source/SlideSampler
+target_include_directories(BaySickDAWStandalone PRIVATE Source Source/Engine Source/Engine/Tasks Source/Standalone Source/Harmless Source/BaySickPlayer Source/BaySickSynth Source/BaySickBass Source/BaySickNAMIR Source/BaySickPedals Source/BaySickRustyDrums Source/BaySickGuitars Source/BaySickBasses Source/BaySickVocal Source/Clips Source/Vox Source/Inst Source/MidiLearn Source/SlideSampler
     # Rubber Band Library -- public headers (rubberband/*.h) so consumer code can
     # #include <rubberband/RubberBandLiveShifter.h>.  The compiled library links
     # via BaySickRubberBand (QA-Fe); this include is also propagated by that lib.

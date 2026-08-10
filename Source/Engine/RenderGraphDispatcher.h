@@ -8,9 +8,9 @@
 #include "RenderEngineFlags.h"
 
 class RenderTask;
-class VibeThreadPool;
+class BaySickThreadPool;
 class ChannelBufferArena;
-class RoutingGraph;   // VibeGraph.h - full def included only in the .cpp
+class RoutingGraph;   // BaySickGraph.h - full def included only in the .cpp
 struct BlockContext;  // BlockContext.h - caller fills before dispatchBlock
 
 // Owns the per-block render graph dispatch logic. Holds non-owning pointers
@@ -24,7 +24,7 @@ struct BlockContext;  // BlockContext.h - caller fills before dispatchBlock
 class RenderGraphDispatcher
 {
 public:
-    RenderGraphDispatcher (VibeThreadPool& pool, ChannelBufferArena& arena);
+    RenderGraphDispatcher (BaySickThreadPool& pool, ChannelBufferArena& arena);
     ~RenderGraphDispatcher();
 
     RenderGraphDispatcher (const RenderGraphDispatcher&)            = delete;
@@ -33,7 +33,7 @@ public:
     // Called from PluginProcessor::prepareToPlay. Resizes the arena to fit
     // the new block size and recomputes the per-block watchdog deadline from
     // the new block period; the worker pool itself is NOT recreated (per the
-    // lifetime contract - see VibeThreadPool.h).
+    // lifetime contract - see BaySickThreadPool.h).
     void prepare (double sampleRate, int maxBlockSize);
 
     // Register a non-owning task pointer. Called from the message thread
@@ -72,7 +72,7 @@ public:
     // slot to the main thread.
     //
     // This is one of the two conditions that end a block; the pool's
-    // outstanding-task count is the other (VibeThreadPool::blockComplete).
+    // outstanding-task count is the other (BaySickThreadPool::blockComplete).
     // The flag on its own says nothing about tasks that are not upstream of
     // master, and the count on its own cannot distinguish "everything ran"
     // from "master was starved and the graph went quiet without it".
@@ -121,7 +121,7 @@ public:
                         const BlockContext&       ctx);
 
 private:
-    VibeThreadPool&     mPool;
+    BaySickThreadPool&     mPool;
     ChannelBufferArena& mArena;
 
     // Tasks indexed by channelId for O(1) lookup at register / unregister.

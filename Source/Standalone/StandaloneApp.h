@@ -138,7 +138,7 @@ namespace MasterOutputRouting
 }
 
 // ── Standalone JUCE Application ───────────────────────────────────────────────
-class VibesynthStandaloneApp : public juce::JUCEApplication,
+class BaySickDAWStandaloneApp : public juce::JUCEApplication,
                                public juce::ChangeListener,
                                public juce::MidiInputCallback   // C.3 (2026-04-30)
 {
@@ -163,7 +163,7 @@ public:
                                      const juce::MidiMessage& message) override;
 
 private:
-    std::unique_ptr<VibeSynthProcessor>          mProcessor;
+    std::unique_ptr<BaySickDAWProcessor>          mProcessor;
     std::unique_ptr<StandalonePlayHead>          mPlayHead;
     std::unique_ptr<juce::AudioDeviceManager>    mDeviceManager;
     std::unique_ptr<juce::AudioProcessorPlayer>  mPlayer;

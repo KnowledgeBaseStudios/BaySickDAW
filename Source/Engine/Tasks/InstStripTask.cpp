@@ -1,7 +1,7 @@
 #include "InstStripTask.h"
 #include "../FrozenSourceRead.h"   // TS7 6.8: scope-matched frozen block read
 #include "../ChannelBufferArena.h"   // kChannelsPerStrip (scratch pre-size)
-#include "../../VibeGraph.h"
+#include "../../BaySickGraph.h"
 #include "../../PluginProcessor.h"
 #include "../../DSP/EngineSidechainHelper.h"
 #include "../../BaySickGuitars/BaySickGuitarsProcessor.h"   // getNumActiveVoices
@@ -11,8 +11,8 @@
 InstStripTask::InstStripTask (juce::AudioProcessor* engine,
                               int                   index,
                               int                   channelIdIn,
-                              VibeGraph&            graph,
-                              VibeSynthProcessor&   processor)
+                              BaySickGraph&            graph,
+                              BaySickDAWProcessor&   processor)
     : mEngine (engine),
       mScEngine (dynamic_cast<ISidechainEngine*> (engine)),
       mIndex (index),
@@ -99,7 +99,7 @@ void InstStripTask::run()
     const bool active    = channelOK && (armed || listen);
 
     // 2026-05-06 (Batch 9b Item 9): FilePlay -- audio clips routed to this
-    // Inst engine.  Gates mirror the pre-scan in VibeSynthProcessor::
+    // Inst engine.  Gates mirror the pre-scan in BaySickDAWProcessor::
     // processBlock; mCurrentBlockClipSnapshot is block-stable via the
     // RetirementQueue ack protocol (Batch 9c B1).
     const bool filePlay = mIndex >= 0
@@ -113,7 +113,7 @@ void InstStripTask::run()
     // Shared FilePlay decode: sums every routed clip into mEngineScratch.
     // QA-MultiBlockHazard (Task 2): one decode sum per block so a stateful
     // engine + rack advance once per block, not once per FilePlay clip.
-    VibeSynthProcessor::AudioClipBlockContext clipCtx;
+    BaySickDAWProcessor::AudioClipBlockContext clipCtx;
     bool anyClip = false;
     auto decodeRoutedClips = [&]()
     {
@@ -175,7 +175,7 @@ void InstStripTask::run()
     if (! active && FreezeRead::serveBlock (*this, *mCtx, blockView, n))
     {
         pullSidechainPredecessorsToGraph (*mGraph, channelId, mPredecessors, n);
-        mGraph->processInsert (VibeGraph::InsertKind::Inst, mIndex,
+        mGraph->processInsert (BaySickGraph::InsertKind::Inst, mIndex,
                                blockView, mCtx->bpm, mCtx->anySolo);
         return;
     }
@@ -252,7 +252,7 @@ void InstStripTask::run()
         if (midiEmpty && noVoices && ! auditionPending && ! slideActive)
         {
             auto& counter = mProcessor->mInstIdleBlocks[(size_t) mIndex];
-            if (counter >= VibeSynthProcessor::kIdleSuspendBlocks)
+            if (counter >= BaySickDAWProcessor::kIdleSuspendBlocks)
                 holdExpired = true;
             else
                 ++counter;
@@ -321,11 +321,11 @@ void InstStripTask::run()
     pullSidechainPredecessorsToGraph (*mGraph, channelId, mPredecessors, n);
     if (mScEngine != nullptr)
     {
-        const VibeGraph::ScRecvArray scArr = mGraph->getScRecvArray (channelId);
-        juce::AudioBuffer<float>* scBufs[VibeGraph::kMaxScRecvSlots] = {};
-        for (int i = 0; i < VibeGraph::kMaxScRecvSlots; ++i)
+        const BaySickGraph::ScRecvArray scArr = mGraph->getScRecvArray (channelId);
+        juce::AudioBuffer<float>* scBufs[BaySickGraph::kMaxScRecvSlots] = {};
+        for (int i = 0; i < BaySickGraph::kMaxScRecvSlots; ++i)
             scBufs[i] = scArr[(size_t) i];
-        mScEngine->setSidechainBuffers (scBufs, VibeGraph::kMaxScRecvSlots);
+        mScEngine->setSidechainBuffers (scBufs, BaySickGraph::kMaxScRecvSlots);
     }
 
     // ── Engine + insert chain ─────────────────────────────────────────────────
@@ -376,7 +376,7 @@ void InstStripTask::run()
         mMonitorDryGain = gEnd;
     }
 
-    mGraph->processInsert (VibeGraph::InsertKind::Inst, mIndex,
+    mGraph->processInsert (BaySickGraph::InsertKind::Inst, mIndex,
                            blockView, mCtx->bpm, mCtx->anySolo);
 
     // ── Listen gate ───────────────────────────────────────────────────────────

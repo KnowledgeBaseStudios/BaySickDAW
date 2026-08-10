@@ -61,7 +61,7 @@ struct EditorPanelBase : public juce::Component
 
     // Fired by panels whose controls change the DSP's getLatencySamples()
     // (lookahead toggles/knobs, FFT-size switches) so the host can refresh
-    // bus PDC (EffectsPage wires this to VibeGraph::updateBusLatencies).
+    // bus PDC (EffectsPage wires this to BaySickGraph::updateBusLatencies).
     // Without the poke, changing lookahead left compensation stale until the
     // next effect load.
     std::function<void()> onLatencyChanged;
@@ -154,7 +154,7 @@ struct EditorPanelBase : public juce::Component
     EditorPanelBase();
     ~EditorPanelBase();
 
-    // Forces VibeLAF onto any toggle-state button child so switch-toggle filmstrip fires
+    // Forces BaySickLAF onto any toggle-state button child so switch-toggle filmstrip fires
     // regardless of which custom LAF the derived panel sets on itself.
     void childrenChanged() override;
 

@@ -4745,7 +4745,7 @@ void PianoRollGrid::shiftTimeSelectionByLength(int direction)
 // flag.  Undoable.
 namespace { struct ScaleLevelsHost : public juce::Component
 {
-    VibeSlider slider { juce::Slider::LinearHorizontal, juce::Slider::TextBoxRight };
+    BaySickSlider slider { juce::Slider::LinearHorizontal, juce::Slider::TextBoxRight };
     ScaleLevelsHost()
     {
         slider.setRange (0.0, 200.0, 1.0);

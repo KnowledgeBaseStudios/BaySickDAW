@@ -51,7 +51,7 @@ juce::Array<juce::File> enumeratePresets()
     return out;
 }
 
-bool save (VibeSynthProcessor& proc, int channelId,
+bool save (BaySickDAWProcessor& proc, int channelId,
            const juce::String& presetName, juce::String& outErr)
 {
     auto* rack = EffectsPage::rackForChannelId (proc.mVibeGraph, channelId);
@@ -110,7 +110,7 @@ bool save (VibeSynthProcessor& proc, int channelId,
     return true;
 }
 
-bool load (VibeSynthProcessor& proc, int channelId,
+bool load (BaySickDAWProcessor& proc, int channelId,
            const juce::File& presetFile, juce::String& outErr)
 {
     auto xml = juce::XmlDocument::parse (presetFile);

@@ -29,7 +29,7 @@ of it. Every edit runs on the message thread and is wrapped in an undo transacti
 the whole arrangement into the app-wide undo history.
 
 The audio thread never touches the grid. It reads the block list directly inside
-`VibeSynthProcessor::processBlock` for pattern and automation scheduling, and reads audio
+`BaySickDAWProcessor::processBlock` for pattern and automation scheduling, and reads audio
 clips through per-clip `AudioClipStreamer` objects that `onArrangementChanged` rebuilds
 whenever a block moves, resizes or is deleted.
 

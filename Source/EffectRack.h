@@ -305,7 +305,7 @@ public:
     float drainSlotOutputLevel(int slot);       // dBFS
 
     // 2026-05-02: end-of-audio-block promotion of all slot atomics.  Called
-    // by VibeGraph::promoteAllRackSlotSnapshots() once per audio block (renamed
+    // by BaySickGraph::promoteAllRackSlotSnapshots() once per audio block (renamed
     // from promoteAllInsertPeakSnapshots in QA-AudioMeters 2026-05-24 when the
     // per-insert peakDbSnap layer was removed; rack-slot promotion is the
     // surviving half), walking every rack across every node + insert so the
@@ -315,13 +315,13 @@ public:
     // FX master switch - bypasses entire rack without destroying slot data.
     // Atomic because BOTH threads write it: the message thread from the FX-page
     // button / APVTS _bypass listener, and the audio thread from the per-block
-    // "APVTS is canonical" re-sync in VibeGraph's chain functions.  Relaxed is
+    // "APVTS is canonical" re-sync in BaySickGraph's chain functions.  Relaxed is
     // sufficient -- the flag publishes no other data and orders nothing.
     void setRackBypassed(bool bypass) { mRackBypassed.store (bypass, std::memory_order_relaxed); }
     bool isRackBypassed() const       { return mRackBypassed.load (std::memory_order_relaxed); }
 
     // Sum of getLatencySamples() across all active, non-bypassed slots.
-    // Returns 0 when rack is bypassed. Used by VibeGraph for PDC.
+    // Returns 0 when rack is bypassed. Used by BaySickGraph for PDC.
     int getTotalLatencySamples() const;
 
     // Read-only slot access

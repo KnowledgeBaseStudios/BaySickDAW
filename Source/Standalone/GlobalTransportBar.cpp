@@ -56,7 +56,7 @@ public:
         g.fillPath(tri);
     }
 
-    // Mirrors VibeLAF's LRX-12 "action button" raised-slab shape, but with a
+    // Mirrors BaySickLAF's LRX-12 "action button" raised-slab shape, but with a
     // tinted backdrop instead of VC::Chrome.  Used by the active states of
     // both PlayButton (green) and RecordButton (red) so they match the rest
     // of the transport row in every respect except colour.
@@ -419,7 +419,7 @@ GlobalTransportBar::GlobalTransportBar(StandalonePlayHead& ph)
     mSongLoopBtn->setMouseClickGrabsKeyboardFocus(false);
     mSongLoopBtn->setTooltip("Song playback: arrow + bar = play to end and stop / circle = loop");
     // 2026-04-26: default to loop (🔁) - was play-through (→).  Pairs with
-    // the matching default in `VibeSynthProcessor::mSongLoopMode`.
+    // the matching default in `BaySickDAWProcessor::mSongLoopMode`.
     mSongLoopBtn->setToggleState(true, juce::dontSendNotification);
     addAndMakeVisible(*mSongLoopBtn);
 
@@ -436,7 +436,7 @@ GlobalTransportBar::GlobalTransportBar(StandalonePlayHead& ph)
     // and the pattern dropdown).  0-100%, default 0, double-click resets to 0;
     // per-player Swing Mix knobs scale this on each title bar (SW-3).
     {
-        auto s = std::make_unique<VibeSlider>();
+        auto s = std::make_unique<BaySickSlider>();
         s->setSliderStyle (juce::Slider::RotaryVerticalDrag);
         s->setTextBoxStyle (juce::Slider::NoTextBox, true, 0, 0);
         s->setRange (0.0, 1.0, 0.0);

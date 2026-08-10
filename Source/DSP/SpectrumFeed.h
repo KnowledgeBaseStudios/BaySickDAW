@@ -10,9 +10,9 @@
 // If the UI thread happens to poll mid-write, it drops the frame (fine for a
 // visualiser) rather than copying torn data.
 //
-// Extracted from VibeGraph for reuse by DSP modules that want to expose their
+// Extracted from BaySickGraph for reuse by DSP modules that want to expose their
 // own pre/post spectrum taps (see 5F-9 §12i, EQ8MsDSP per-instance feeds).
-// `VibeGraph::SpectrumFeed` is retained as a `using` alias for back-compat.
+// `BaySickGraph::SpectrumFeed` is retained as a `using` alias for back-compat.
 // ─────────────────────────────────────────────────────────────────────────────
 struct SpectrumFeed
 {

@@ -14,7 +14,7 @@ opened it.
 `Source/EffectRack.h` / `Source/EffectRack.cpp` define the rack.
 `EffectRack::kNumSlots` is 6. One rack instance lives inside every audio node
 that can carry effects: the bus nodes and the per-strip `InsertNode`s owned by
-`VibeGraph` (`Source/VibeGraph.cpp`, `struct VibeGraph::InsertNode`), plus one
+`BaySickGraph` (`Source/BaySickGraph.cpp`, `struct BaySickGraph::InsertNode`), plus one
 owned by `BaySickVocalProcessor` for the Vocal Chain.
 
 The Vocal Chain is the one rack whose slots are **locked**: six fixed stages in
@@ -273,7 +273,7 @@ The rack's **whole-rack bypass is deliberately not in this tree** - it belongs
 to the strip's APVTS parameter `<mixerPrefix>_bypass` (for example
 `mixer_layer_0_bypass`), which the audio path re-reads every block.
 
-`VibeGraph::saveRackStates` writes one node per rack into the project with
+`BaySickGraph::saveRackStates` writes one node per rack into the project with
 `rack`, `preEq` and `eq` base64 properties; `applyRackStates` matches by
 id/name on load. A bus with no saved record is left as it was rather than
 cleared.

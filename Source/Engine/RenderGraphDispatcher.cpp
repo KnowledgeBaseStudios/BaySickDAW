@@ -1,13 +1,13 @@
 #include "RenderGraphDispatcher.h"
 #include "RenderTask.h"
 #include "BlockContext.h"   // Batch 8: per-block context built inside dispatchBlock
-#include "VibeThreadPool.h"
+#include "BaySickThreadPool.h"
 #include "ChannelBufferArena.h"
-#include "VibeGraph.h"   // RoutingGraph (Edge / ScEdge / topoOrder)
+#include "BaySickGraph.h"   // RoutingGraph (Edge / ScEdge / topoOrder)
 
 #include <algorithm>   // std::remove
 
-RenderGraphDispatcher::RenderGraphDispatcher (VibeThreadPool& pool,
+RenderGraphDispatcher::RenderGraphDispatcher (BaySickThreadPool& pool,
                                               ChannelBufferArena& arena)
     : mPool (pool), mArena (arena)
 {
@@ -321,10 +321,10 @@ void RenderGraphDispatcher::dispatchBlock (juce::AudioBuffer<float>& outputBuffe
     // boundary.  runOneTask (workers + audio-thread pump) adds to it below.
     // NOTHING reads the sum today -- getBusyTicks has no callers; the producer
     // is kept deliberately for the planned MT-diagnostic compile-gate (see
-    // VibeThreadPool.h), so do not retire this as dead code.
+    // BaySickThreadPool.h), so do not retire this as dead code.
     mPool.resetBusyTicks();
 
-    // Block-completion counter (VibeThreadPool::blockComplete).  Zeroed here,
+    // Block-completion counter (BaySickThreadPool::blockComplete).  Zeroed here,
     // before a single task is seeded, so a block that timed out with tasks
     // still in flight cannot leave its residue in this block's count.
     mPool.resetOutstandingTasks();
@@ -381,7 +381,7 @@ void RenderGraphDispatcher::dispatchBlock (juce::AudioBuffer<float>& outputBuffe
     // this block -- audio glitches once instead of locking up the whole DAW.
     //
     // The deadline is only ever tested when the pump has NOTHING left to run
-    // (see VibeThreadPool::runUntilOrTimeout), which is why single-core
+    // (see BaySickThreadPool::runUntilOrTimeout), which is why single-core
     // diagnostic mode -- where the audio thread runs the whole graph itself --
     // cannot trip it on slowness at all.  Keep that property.
     const double timeoutMs = mWatchdogTimeoutMs.load (std::memory_order_relaxed);

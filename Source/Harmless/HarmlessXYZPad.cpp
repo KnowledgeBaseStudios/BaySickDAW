@@ -31,7 +31,7 @@ void HarmlessXYZPad::attachToApvts (juce::AudioProcessorValueTreeState& apvts,
     // three mod knobs had no Automate menu.  QA-ModelShell TS3: stamping is all
     // this does now -- the applicator is registered model-side against the
     // engine APVTS and survives this pad.
-    auto wire = [&apvts] (const juce::String& id, VibeSlider& knob,
+    auto wire = [&apvts] (const juce::String& id, BaySickSlider& knob,
                           std::unique_ptr<SliderAtt>& att)
     {
         if (id.isEmpty()) return;

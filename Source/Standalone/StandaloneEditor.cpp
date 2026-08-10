@@ -20,7 +20,7 @@
 #include "BuilderPage.h"
 #include "PianoRollPage.h"
 #include "MixerPage.h"
-#include "../VibeGraph.h"   // MeterLatencyComp namespace (hamburger toggle)
+#include "../BaySickGraph.h"   // MeterLatencyComp namespace (hamburger toggle)
 #include "MetroPanel.h"
 #include "SlotComponent.h"  // effectTypeName() for automation display-name resolver
 #include "KeyBindings.h"
@@ -33,7 +33,7 @@
 #include "RustyDrumsMapWindow.h"
 #include "PatternColorPicker.h"
 #include "../BaySickSynth/BaySickSynthProcessor.h"   // D2 Batch 4: kit audition dispatch
-#include "../VibePlayer/VibePlayerProcessor.h"       // D2 Batch 4: kit audition dispatch
+#include "../BaySickPlayer/BaySickPlayerProcessor.h"       // D2 Batch 4: kit audition dispatch
 #include "../Harmless/HarmlessProcessor.h"           // step 2 commit 2: layer/bass register helpers
 #include "../BaySickBass/BaySickBassProcessor.h"     // step 2 commit 2: bass register helper
 #include "../BaySickRustyDrums/BaySickRustyDrumsProcessor.h"  // J-3: kit loader verify
@@ -156,7 +156,7 @@ public:
         {
             DrumTriggerVelocity::gUseFixed.store(mVelBox.getSelectedId() == 2,
                                                  std::memory_order_release);
-            VibesynthStandaloneApp::saveMidiTriggerVelocityPref();
+            BaySickDAWStandaloneApp::saveMidiTriggerVelocityPref();
         };
         addAndMakeVisible(mVelLbl);
         addAndMakeVisible(mVelBox);
@@ -480,9 +480,9 @@ private:
         // file (could be Documents or legacy Roaming after the P4b migration).
         // Hard-coding userApplicationDataDirectory dropped the pending file
         // into Roaming while startup looked for it next to the Documents file
-        // → settings appeared "stuck".  VibesynthStandaloneApp::getAudioSettingsFile
+        // → settings appeared "stuck".  BaySickDAWStandaloneApp::getAudioSettingsFile
         // is the single source of truth.
-        auto settingsFile = VibesynthStandaloneApp::getAudioSettingsFile();
+        auto settingsFile = BaySickDAWStandaloneApp::getAudioSettingsFile();
         settingsFile.getParentDirectory().createDirectory();
         auto f = settingsFile.getSiblingFile("audio_settings_pending.xml");
         bool written = f.replaceWithText(xml->toString());
@@ -729,7 +729,7 @@ struct PlaceholderPage : public juce::Component
 // ─────────────────────────────────────────────────────────────────────────────
 // Ctor
 // ─────────────────────────────────────────────────────────────────────────────
-StandaloneEditor::StandaloneEditor(VibeSynthProcessor& p, StandalonePlayHead& ph,
+StandaloneEditor::StandaloneEditor(BaySickDAWProcessor& p, StandalonePlayHead& ph,
                                    juce::AudioDeviceManager& dm)
     : mProcessor(p), mPlayHead(ph), mDeviceManager(dm),
       mUndoManager(p.mUndoManager)
@@ -948,7 +948,7 @@ StandaloneEditor::StandaloneEditor(VibeSynthProcessor& p, StandalonePlayHead& ph
     // ── sfizz engine ready -> lane registration ──────────────────────────────
     // QA-ModelShell TS3 fix: these three are processor-owned, so they need
     // their own model event; the rig's onEngineCreated never covers them.
-    mProcessor.onSfizzEngineReady = [this] (VibeSynthProcessor::SfizzEngineKind kind,
+    mProcessor.onSfizzEngineReady = [this] (BaySickDAWProcessor::SfizzEngineKind kind,
                                             int instIdx)
     {
         registerSfizzEngineAutomation (kind, instIdx);
@@ -1028,7 +1028,7 @@ StandaloneEditor::StandaloneEditor(VibeSynthProcessor& p, StandalonePlayHead& ph
     registerStaticAutomationHandlers();
 
     // ── Global LAF + Tooltip ──────────────────────────────────────────────────
-    juce::LookAndFeel::setDefaultLookAndFeel(&VibeLAF::get());
+    juce::LookAndFeel::setDefaultLookAndFeel(&BaySickLAF::get());
     // Jeff, 2026-08-04: NO parent component -- this makes the tooltip its own
     // desktop window instead of something painted into the frame's client area.
     // A parented TooltipWindow positions itself inside the parent and is drawn
@@ -1041,14 +1041,14 @@ StandaloneEditor::StandaloneEditor(VibeSynthProcessor& p, StandalonePlayHead& ph
     // one was visible while tooltips were not.  ONE tooltip for the whole app:
     // the per-WorkspaceWindow ones are gone, because a parentless tooltip's
     // peer gate always passes and keeping both showed two tips at once.
-    mTooltipWindow = std::make_unique<VibeTooltip>(nullptr, 600);
+    mTooltipWindow = std::make_unique<BaySickTooltip>(nullptr, 600);
 
     // Global right-click listener - catches any slider with a componentID set
     addMouseListener(&mAutoRightClick, true);
 
     // ── Menu bar ─────────────────────────────────────────────────────────────
     mMenuBar = std::make_unique<juce::MenuBarComponent>(this);
-    mMenuBar->setLookAndFeel(&VibeLAF::get());
+    mMenuBar->setLookAndFeel(&BaySickLAF::get());
     addAndMakeVisible(*mMenuBar);
 
     // ── Global Transport Bar - added FIRST so it is the background layer ──────
@@ -1108,7 +1108,7 @@ StandaloneEditor::StandaloneEditor(VibeSynthProcessor& p, StandalonePlayHead& ph
                             mRecordArmed = true;
                             if (mTransport) mTransport->setRecordArmed (true);
                             mProcessor.startRecording (
-                                VibeSynthProcessor::RecordMode::Audio,
+                                BaySickDAWProcessor::RecordMode::Audio,
                                 mPlayHead.getCurrentBeat(),
                                 mProjectManager->getCurrentName(),
                                 mProjectManager->getSamplesFolder());
@@ -1119,7 +1119,7 @@ StandaloneEditor::StandaloneEditor(VibeSynthProcessor& p, StandalonePlayHead& ph
                     return;
                 }
                 mProcessor.startRecording (
-                    VibeSynthProcessor::RecordMode::Audio,
+                    BaySickDAWProcessor::RecordMode::Audio,
                     mPlayHead.getCurrentBeat(),
                     mProjectManager->getCurrentName(),
                     mProjectManager->getSamplesFolder());
@@ -1144,7 +1144,7 @@ StandaloneEditor::StandaloneEditor(VibeSynthProcessor& p, StandalonePlayHead& ph
                     return;
                 }
                 mProcessor.startRecording (
-                    VibeSynthProcessor::RecordMode::Midi,
+                    BaySickDAWProcessor::RecordMode::Midi,
                     mPlayHead.getCurrentBeat(),
                     {}, {});
             }
@@ -2018,7 +2018,7 @@ StandaloneEditor::StandaloneEditor(VibeSynthProcessor& p, StandalonePlayHead& ph
     // ── TS7 §3: version capture ───────────────────────────────────────────────
     // The analysis half is ALWAYS on, so the master tap is armed for the whole
     // session rather than by a window's suspend hook.  This is the tap's second
-    // client (the analyzer window is the first); VibeGraph ORs the two wants, so
+    // client (the analyzer window is the first); BaySickGraph ORs the two wants, so
     // closing that window no longer stops analysis.
     mProcessor.setMasterAnalysisActive (true);
 
@@ -2143,7 +2143,7 @@ StandaloneEditor::~StandaloneEditor()
     // Inst / Clip / Layers / Bass / Drums / Rusty) THROUGH THE SAFE PATH
     // first.  Without this, the bare mPages.clear() below would destroy
     // VoxPages (etc.) directly, leaving the raw pointers in
-    // VibeSynthProcessor::mVoxEngines / mInstEngines / mLayerEngines /
+    // BaySickDAWProcessor::mVoxEngines / mInstEngines / mLayerEngines /
     // mBassEngines / mDrumEngines / mClipEngines dangling while the audio
     // device is still running.  The audio thread's per-block iteration
     // (PluginProcessor.cpp:2136 etc.) would then dynamic_cast through a
@@ -4137,7 +4137,7 @@ juce::String StandaloneEditor::resolveAutomationDisplayName(const juce::String& 
                             break;
                         }
             if (auto* inst = dynamic_cast<Hosting::HostedPluginInstance*> (
-                    const_cast<VibeSynthProcessor&> (mProcessor).engineRig()
+                    const_cast<BaySickDAWProcessor&> (mProcessor).engineRig()
                         .engineFor (TabKind::Plugins, idx)))
                 for (const auto& p : inst->getAutomatableParams())
                     if (p.id == pid) { prmLabel = p.name; break; }
@@ -4182,9 +4182,9 @@ juce::String StandaloneEditor::resolveAutomationDisplayName(const juce::String& 
         }
     }
 
-    using Kind = VibeGraph::InsertKind;
+    using Kind = BaySickGraph::InsertKind;
 
-    auto& vg = const_cast<VibeSynthProcessor&>(mProcessor).mVibeGraph;
+    auto& vg = const_cast<BaySickDAWProcessor&>(mProcessor).mVibeGraph;
 
     // C13 (2026-04-30): UUID-keyed slot paramIds.  setSlotContext now stamps
     // "<channelPrefix>_<32hex>_<knob>" instead of "<channelPrefix>_s<N>_<knob>"
@@ -5099,7 +5099,7 @@ std::unique_ptr<juce::Component> StandaloneEditor::createMixerPage()
     // so it arrives as a hook -- the model must not reach into a view.  Wired
     // here because this is where the editor already owns both.
     mProcessor.onRenderFreezeFile =
-        [this] (VibeGraph::InsertKind kind, int index, RenderTask* target,
+        [this] (BaySickGraph::InsertKind kind, int index, RenderTask* target,
                 int patternIndex, const juce::File& dest, juce::String& outErr) -> bool
         {
             if (mBuilderPage == nullptr) { outErr = "The Builder is not available."; return false; }
@@ -5345,7 +5345,7 @@ std::unique_ptr<juce::Component> StandaloneEditor::createEffectsPage()
         // visible drum strips). Dropdown ID 100+slot maps to mixer_drum_N via
         // EffectsPage::getMixerApvtsPrefixForChannel. Legacy InstrChannelNode
         // drums (5F-3 and earlier) are no longer registered - all drum audio
-        // now routes through VibeGraph's per-slot InsertNode (InsertKind::Drum).
+        // now routes through BaySickGraph's per-slot InsertNode (InsertKind::Drum).
         if (mMixerPage)
         {
             for (int slot : mMixerPage->getDrumStripIndices())
@@ -7431,7 +7431,7 @@ void StandaloneEditor::showPageForTab(int tabId)
             // notes excluded.  Stored under Documents/BaySickDAW/Presets/
             // Rusty Drums Page/My Presets/.
             juce::Component::SafePointer<StandaloneEditor> safeThisRusty (this);
-            auto buildRustyPresetCfg = [] (VibeSynthProcessor& processor)
+            auto buildRustyPresetCfg = [] (BaySickDAWProcessor& processor)
             {
                 PagePresetIO::PageChainConfig cfg;
                 if (auto* eng = processor.getBaySickRustyDrums())
@@ -7683,7 +7683,7 @@ void StandaloneEditor::showPageForTab(int tabId)
                     // 2026-05-07 (Batch 10): hot-swappable multi-core rendering
                     // toggle.  Click flips RenderEngine::gMultiThreadedEngineEnabled
                     // immediately.  QA-Ef (2026-05-21): the worker threads
-                    // acquire-load this at the top of VibeThreadPool::workerLoop
+                    // acquire-load this at the top of BaySickThreadPool::workerLoop
                     // -- true = full parallel, false = workers park and the audio
                     // thread drains the whole graph itself (single-core diagnostic;
                     // identical dispatcher / task code, zero parallelism).  No
@@ -7738,7 +7738,7 @@ void StandaloneEditor::showPageForTab(int tabId)
                                 // 2026-05-07 (Batch 10): hot-swap multi-core
                                 // rendering.  QA-Ef (2026-05-21): release-store
                                 // pairs with the worker threads' acquire-load
-                                // in VibeThreadPool::workerLoop; next block
+                                // in BaySickThreadPool::workerLoop; next block
                                 // picks the new mode (workers park vs run).
                                 // Phase 3 (2026-05-07): persist the new state
                                 // to settings.xml so it survives restarts.
@@ -7748,7 +7748,7 @@ void StandaloneEditor::showPageForTab(int tabId)
                                 // than the file under an abrupt shutdown.
                                 const bool wasOn = RenderEngine::gMultiThreadedEngineEnabled.load (std::memory_order_acquire);
                                 RenderEngine::gMultiThreadedEngineEnabled.store (! wasOn, std::memory_order_release);
-                                VibesynthStandaloneApp::saveMultiCoreRenderingPref();
+                                BaySickDAWStandaloneApp::saveMultiCoreRenderingPref();
                                 return;
                             }
                             if (r == 203)
@@ -7829,14 +7829,14 @@ void StandaloneEditor::showPageForTab(int tabId)
                             {
                                 MasterOutputRouting::gFirstOutputChannel.store (r - 300, std::memory_order_relaxed);
                                 MasterOutputRouting::gMasterIsMono.store (false, std::memory_order_relaxed);
-                                VibesynthStandaloneApp::saveMasterOutputRouting();
+                                BaySickDAWStandaloneApp::saveMasterOutputRouting();
                                 return;
                             }
                             if (r >= 400 && r < 500)
                             {
                                 MasterOutputRouting::gFirstOutputChannel.store (r - 400, std::memory_order_relaxed);
                                 MasterOutputRouting::gMasterIsMono.store (true, std::memory_order_relaxed);
-                                VibesynthStandaloneApp::saveMasterOutputRouting();
+                                BaySickDAWStandaloneApp::saveMasterOutputRouting();
                                 return;
                             }
                         });
@@ -8221,7 +8221,7 @@ void StandaloneEditor::wireDrumPageKitView (DrumPage* dp)
                 {
                     if (on) s->auditionNoteOn (n); else s->auditionNoteOff (n);
                 }
-                else if (auto* v = dynamic_cast<VibePlayerProcessor*> (eng))
+                else if (auto* v = dynamic_cast<BaySickPlayerProcessor*> (eng))
                 {
                     if (on) v->auditionNoteOn (n); else v->auditionNoteOff (n);
                 }
@@ -8352,7 +8352,7 @@ void StandaloneEditor::wirePianoRollPageKitView (PianoRollPage* prp)
                 {
                     if (on) s->auditionNoteOn (n); else s->auditionNoteOff (n);
                 }
-                else if (auto* v = dynamic_cast<VibePlayerProcessor*> (eng))
+                else if (auto* v = dynamic_cast<BaySickPlayerProcessor*> (eng))
                 {
                     if (on) v->auditionNoteOn (n); else v->auditionNoteOff (n);
                 }
@@ -8458,23 +8458,23 @@ void StandaloneEditor::registerLayerPianoRoll (LayersPage* lp)
     conn.auditionMomentary = [cast](int n) {
         if (auto* s = dynamic_cast<BaySickSynthProcessor*>(cast())) s->auditionNote(n);
         else if (auto* h = dynamic_cast<HarmlessProcessor*>(cast())) h->auditionNote(n);
-        else if (auto* v = dynamic_cast<VibePlayerProcessor*>(cast())) v->auditionNote(n);
+        else if (auto* v = dynamic_cast<BaySickPlayerProcessor*>(cast())) v->auditionNote(n);
     };
     conn.auditionOn = [cast](int n) {
         if (auto* s = dynamic_cast<BaySickSynthProcessor*>(cast())) s->auditionNoteOn(n);
         else if (auto* h = dynamic_cast<HarmlessProcessor*>(cast())) h->auditionNoteOn(n);
-        else if (auto* v = dynamic_cast<VibePlayerProcessor*>(cast())) v->auditionNoteOn(n);
+        else if (auto* v = dynamic_cast<BaySickPlayerProcessor*>(cast())) v->auditionNoteOn(n);
     };
     conn.auditionOff = [cast](int n) {
         if (auto* s = dynamic_cast<BaySickSynthProcessor*>(cast())) s->auditionNoteOff(n);
         else if (auto* h = dynamic_cast<HarmlessProcessor*>(cast())) h->auditionNoteOff(n);
-        else if (auto* v = dynamic_cast<VibePlayerProcessor*>(cast())) v->auditionNoteOff(n);
+        else if (auto* v = dynamic_cast<BaySickPlayerProcessor*>(cast())) v->auditionNoteOff(n);
     };
     // QA-SfzGroup Sub-Q (2026-05-27): BaySickPlayer engines hosting an SFZ
-    // with keyswitches expose human-readable labels via VibeSampleManager;
+    // with keyswitches expose human-readable labels via BaySickSampleManager;
     // returns empty for non-BaySickPlayer engines or non-keyswitch notes.
     conn.keyswitchLabelProvider = [cast](int n) -> juce::String {
-        if (auto* v = dynamic_cast<VibePlayerProcessor*>(cast()))
+        if (auto* v = dynamic_cast<BaySickPlayerProcessor*>(cast()))
             return v->getSynth().getManager().getKeyswitchLabel(n);
         return {};
     };
@@ -8503,24 +8503,24 @@ void StandaloneEditor::registerBassPianoRoll (BassPage* bp)
         if (auto* s = dynamic_cast<BaySickBassProcessor*>(cast())) s->auditionNote(n);
         else if (auto* y = dynamic_cast<BaySickSynthProcessor*>(cast())) y->auditionNote(n);
         else if (auto* h = dynamic_cast<HarmlessProcessor*>(cast())) h->auditionNote(n);
-        else if (auto* v = dynamic_cast<VibePlayerProcessor*>(cast())) v->auditionNote(n);
+        else if (auto* v = dynamic_cast<BaySickPlayerProcessor*>(cast())) v->auditionNote(n);
     };
     conn.auditionOn = [cast](int n) {
         if (auto* s = dynamic_cast<BaySickBassProcessor*>(cast())) s->auditionNoteOn(n);
         else if (auto* y = dynamic_cast<BaySickSynthProcessor*>(cast())) y->auditionNoteOn(n);
         else if (auto* h = dynamic_cast<HarmlessProcessor*>(cast())) h->auditionNoteOn(n);
-        else if (auto* v = dynamic_cast<VibePlayerProcessor*>(cast())) v->auditionNoteOn(n);
+        else if (auto* v = dynamic_cast<BaySickPlayerProcessor*>(cast())) v->auditionNoteOn(n);
     };
     conn.auditionOff = [cast](int n) {
         if (auto* s = dynamic_cast<BaySickBassProcessor*>(cast())) s->auditionNoteOff(n);
         else if (auto* y = dynamic_cast<BaySickSynthProcessor*>(cast())) y->auditionNoteOff(n);
         else if (auto* h = dynamic_cast<HarmlessProcessor*>(cast())) h->auditionNoteOff(n);
-        else if (auto* v = dynamic_cast<VibePlayerProcessor*>(cast())) v->auditionNoteOff(n);
+        else if (auto* v = dynamic_cast<BaySickPlayerProcessor*>(cast())) v->auditionNoteOff(n);
     };
     // QA-SfzGroup Sub-Q (2026-05-27): BaySickPlayer engines hosting an SFZ
-    // with keyswitches expose human-readable labels via VibeSampleManager.
+    // with keyswitches expose human-readable labels via BaySickSampleManager.
     conn.keyswitchLabelProvider = [cast](int n) -> juce::String {
-        if (auto* v = dynamic_cast<VibePlayerProcessor*>(cast()))
+        if (auto* v = dynamic_cast<BaySickPlayerProcessor*>(cast()))
             return v->getSynth().getManager().getKeyswitchLabel(n);
         return {};
     };
@@ -8547,20 +8547,20 @@ void StandaloneEditor::registerDrumPianoRoll (DrumPage* dp)
     auto cast = [dp]() { return dp->getEngineProcessor(); };
     conn.auditionMomentary = [cast](int n) {
         if (auto* s = dynamic_cast<BaySickSynthProcessor*>(cast())) s->auditionNote(n);
-        else if (auto* v = dynamic_cast<VibePlayerProcessor*>(cast())) v->auditionNote(n);
+        else if (auto* v = dynamic_cast<BaySickPlayerProcessor*>(cast())) v->auditionNote(n);
     };
     conn.auditionOn = [cast](int n) {
         if (auto* s = dynamic_cast<BaySickSynthProcessor*>(cast())) s->auditionNoteOn(n);
-        else if (auto* v = dynamic_cast<VibePlayerProcessor*>(cast())) v->auditionNoteOn(n);
+        else if (auto* v = dynamic_cast<BaySickPlayerProcessor*>(cast())) v->auditionNoteOn(n);
     };
     conn.auditionOff = [cast](int n) {
         if (auto* s = dynamic_cast<BaySickSynthProcessor*>(cast())) s->auditionNoteOff(n);
-        else if (auto* v = dynamic_cast<VibePlayerProcessor*>(cast())) v->auditionNoteOff(n);
+        else if (auto* v = dynamic_cast<BaySickPlayerProcessor*>(cast())) v->auditionNoteOff(n);
     };
     // QA-SfzGroup Sub-Q (2026-05-27): BaySickPlayer engines hosting an SFZ
-    // with keyswitches expose human-readable labels via VibeSampleManager.
+    // with keyswitches expose human-readable labels via BaySickSampleManager.
     conn.keyswitchLabelProvider = [cast](int n) -> juce::String {
-        if (auto* v = dynamic_cast<VibePlayerProcessor*>(cast()))
+        if (auto* v = dynamic_cast<BaySickPlayerProcessor*>(cast()))
             return v->getSynth().getManager().getKeyswitchLabel(n);
         return {};
     };
@@ -8743,7 +8743,7 @@ void StandaloneEditor::applyGlobalLockToggle (int bank)
 //   shape minus arrangement content, so every tab type round-trips and the
 //   loader is the project restore path:
 //     <BaySickTemplate name="..." version="2">
-//       <Processor>   ... APVTS + VibeRackStates (mixer, routing, racks, EQ)
+//       <Processor>   ... APVTS + BaySickRackStates (mixer, routing, racks, EQ)
 //       <UIState>     ... <Tabs> + strip names/orders (no session extras)
 //
 //   v1 FACTORY (shipped set, generate_factory_templates) - attribute-only:
@@ -9793,7 +9793,7 @@ void StandaloneEditor::stopPlayback()
     mPlayHead.seekTo(seekBeat);
 
     // Flush every engine's active voices (CC 123 All-Notes-Off + pending note-offs).
-    // This is the only flush that reaches Harmless / BaySick / VibePlayer, which
+    // This is the only flush that reaches Harmless / BaySick / BaySickPlayer, which
     // is why song-mode used to leave stuck notes after Stop.
     mProcessor.mFlushAllNotes.store(true, std::memory_order_release);
     mTransport->setPlayState(false, false);
@@ -10906,7 +10906,7 @@ void StandaloneEditor::spawnClipsTabIfMissing (int audioRow, const juce::String&
     // G-3 (2026-04-28): resolve the imported path BEFORE handing it to the
     // engine.  P4's copy-on-drop flow returns RELATIVE paths (e.g.
     // "Samples/file.wav") that are valid for project save/load but break
-    // VibePlayer's loadSampleFile (which uses juce::File without resolving
+    // BaySickPlayer's loadSampleFile (which uses juce::File without resolving
     // CWD).  resolveProjectFile produces an absolute path the engine can
     // open directly.
     juce::String resolvedPath = path;
@@ -11083,25 +11083,25 @@ void StandaloneEditor::registerClipPianoRoll (int idx, ClipsPage* cp)
     // per call so engine swaps via the picker survive without re-registering.
     conn.auditionMomentary = [cp](int n)
     {
-        if (auto* vp = dynamic_cast<VibePlayerProcessor*> (cp->getEngineProcessor()))
+        if (auto* vp = dynamic_cast<BaySickPlayerProcessor*> (cp->getEngineProcessor()))
             vp->auditionNote (n);
     };
     conn.auditionOn = [cp](int n)
     {
-        if (auto* vp = dynamic_cast<VibePlayerProcessor*> (cp->getEngineProcessor()))
+        if (auto* vp = dynamic_cast<BaySickPlayerProcessor*> (cp->getEngineProcessor()))
             vp->auditionNoteOn (n);
     };
     conn.auditionOff = [cp](int n)
     {
-        if (auto* vp = dynamic_cast<VibePlayerProcessor*> (cp->getEngineProcessor()))
+        if (auto* vp = dynamic_cast<BaySickPlayerProcessor*> (cp->getEngineProcessor()))
             vp->auditionNoteOff (n);
     };
     conn.rollMode = PianoRollContainer::RollMode::Standard;
 
     // QA-SfzGroup Sub-Q (2026-05-27): BaySickPlayer engines hosting an SFZ
-    // with keyswitches expose human-readable labels via VibeSampleManager.
+    // with keyswitches expose human-readable labels via BaySickSampleManager.
     conn.keyswitchLabelProvider = [cp](int n) -> juce::String {
-        if (auto* v = dynamic_cast<VibePlayerProcessor*>(cp->getEngineProcessor()))
+        if (auto* v = dynamic_cast<BaySickPlayerProcessor*>(cp->getEngineProcessor()))
             return v->getSynth().getManager().getKeyswitchLabel(n);
         return {};
     };
@@ -11208,7 +11208,7 @@ void StandaloneEditor::wireEngineDirtyHook (juce::AudioProcessor* eng)
     if (auto* p = dynamic_cast<HarmlessProcessor*>           (eng)) { p->setOnAnyStateChange (hook); return; }
     if (auto* p = dynamic_cast<BaySickSynthProcessor*>       (eng)) { p->setOnAnyStateChange (hook); return; }
     if (auto* p = dynamic_cast<BaySickBassProcessor*>        (eng)) { p->setOnAnyStateChange (hook); return; }
-    if (auto* p = dynamic_cast<VibePlayerProcessor*>         (eng)) { p->setOnAnyStateChange (hook); return; }
+    if (auto* p = dynamic_cast<BaySickPlayerProcessor*>         (eng)) { p->setOnAnyStateChange (hook); return; }
     if (auto* p = dynamic_cast<BaySickGuitarsProcessor*>     (eng)) { p->setOnAnyStateChange (hook); return; }
     if (auto* p = dynamic_cast<BaySickBassesProcessor*>      (eng)) { p->setOnAnyStateChange (hook); return; }
     if (auto* p = dynamic_cast<BaySickRustyDrumsProcessor*>  (eng)) { p->setOnAnyStateChange (hook); return; }
@@ -13667,7 +13667,7 @@ class ExportAudioDialog : public juce::Component,
 {
 public:
     ExportAudioDialog (BuilderPage& builder,
-                       VibeSynthProcessor& proc,
+                       BaySickDAWProcessor& proc,
                        juce::String defaultBaseName,
                        std::vector<MixerPage::StemPickEntry> stemEntries,
                        std::function<void (std::function<void()>)> ensureProjectSaved)
@@ -14249,7 +14249,7 @@ private:
     }
 
     BuilderPage&        mBuilder;
-    VibeSynthProcessor& mProc;
+    BaySickDAWProcessor& mProc;
     juce::String        mBaseName;
     std::function<void (std::function<void()>)> mEnsureSaved;
 
@@ -14416,7 +14416,7 @@ void StandaloneEditor::doExportProjectBundle()
                     // Rack-held references (the Acoustic units' user IRs) live
                     // under <Processor>, not <Tabs> -- the same snapshot the
                     // project save writes, so the walk sees every rack slot.
-                    juce::ValueTree rackStates ("VibeRackStates");
+                    juce::ValueTree rackStates ("BaySickRackStates");
                     mProcessor.mVibeGraph.saveRackStates (rackStates);
                     auto rackXml = rackStates.createXml();
                     auto refs = ProjectBundler::enumerate (*mPM, mProcessor, &tabsXml,
@@ -15569,10 +15569,10 @@ void StandaloneEditor::registerModelEngineAutomation (EngineTab& tab)
     }
 }
 
-void StandaloneEditor::registerSfizzEngineAutomation (VibeSynthProcessor::SfizzEngineKind kind,
+void StandaloneEditor::registerSfizzEngineAutomation (BaySickDAWProcessor::SfizzEngineKind kind,
                                                       int instIdx)
 {
-    using Kind = VibeSynthProcessor::SfizzEngineKind;
+    using Kind = BaySickDAWProcessor::SfizzEngineKind;
 
     // Re-resolve through the processor on every tick.  These engines are
     // destroyed and recreated by source switches and kit loads, so a captured
@@ -17399,7 +17399,7 @@ void StandaloneEditor::deserializeUIState (const juce::XmlElement& root)
         // via the same one-shot dialog as missing files (drained right after
         // deserialize).
         if (! decoded
-            || (xmlBlob && VibeSynthProcessor::decodeEngineBlob (mb) == nullptr))
+            || (xmlBlob && BaySickDAWProcessor::decodeEngineBlob (mb) == nullptr))
         {
             MissingFileReport::add ("Engine settings (corrupt data)", tabLabel);
             return;
@@ -18960,10 +18960,10 @@ namespace
             return -1;
 
         const int row = (rc >= kAudioBase
-                      && rc <  kAudioBase + VibeSynthProcessor::kMaxAudioRows)
+                      && rc <  kAudioBase + BaySickDAWProcessor::kMaxAudioRows)
                             ? (rc - kAudioBase)
                             : b.trackRow;
-        return (row >= 0 && row < VibeSynthProcessor::kMaxAudioRows) ? row : -1;
+        return (row >= 0 && row < BaySickDAWProcessor::kMaxAudioRows) ? row : -1;
     }
 }
 
@@ -19952,7 +19952,7 @@ bool StandaloneEditor::renameRecordingGroup (const juce::String& oldBase,
 }
 
 // ── R5d (2026-04-24): post-stop recording routing ───────────────────────────
-void StandaloneEditor::commitRecordingResult (const VibeSynthProcessor::RecordResult& res)
+void StandaloneEditor::commitRecordingResult (const BaySickDAWProcessor::RecordResult& res)
 {
     if (! mPM) return;
 

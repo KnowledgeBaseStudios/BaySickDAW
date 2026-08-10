@@ -3,7 +3,7 @@
 HarmlessSynth::HarmlessSynth()
 {
     // QA-0a (2026-05-07): placeholder sample rate before addVoice (see
-    // VibePlayerDSP::VibeSynth ctor for full reasoning).
+    // BaySickPlayerDSP::BaySickPlayerSynth ctor for full reasoning).
     mSynth.setCurrentPlaybackSampleRate (44100.0);
     mSynth.addSound (new SynthSound());
 

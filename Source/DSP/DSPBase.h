@@ -126,7 +126,7 @@ public:
     bool bypassed { false };
 
     // App-global transport-running flag.  One processor instance per app, so a
-    // static is the right scope: VibeSynthProcessor::processBlock stores it once
+    // static is the right scope: BaySickDAWProcessor::processBlock stores it once
     // per block; editor panels poll it (UI timer) to lock latency-changing
     // controls (lookahead / FFT-size toggles) while the transport runs --
     // flipping those mid-play would click and leave bus PDC misaligned.

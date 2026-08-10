@@ -157,8 +157,8 @@ public:
     void setMonitorMode (int m) noexcept { mMonitorMode.store (m, std::memory_order_release); }
 
     // 2026-05-06 (Batch 9c N1): atomic shutdown gate.  Mirrors
-    // VibeSynthProcessor::mProjectLoadInProgress.  Owners SHOULD raise
-    // setShuttingDown(true) and then call VibeSynthProcessor::settleAudioThread()
+    // BaySickDAWProcessor::mProjectLoadInProgress.  Owners SHOULD raise
+    // setShuttingDown(true) and then call BaySickDAWProcessor::settleAudioThread()
     // before destroying this instance -- the acknowledgement-based wait
     // StandaloneEditor::closeDynamicTabs and EngineRig::teardownEngine use, so
     // the audio thread has provably seen the flag and left processBlock.  A
@@ -174,7 +174,7 @@ public:
         { return mShuttingDown.load (std::memory_order_acquire); }
 
     // I-16 G-9 (2026-05-03): wet recording tap.  Plugged in by
-    // VibeSynthProcessor::startRecording when this strip is armed.
+    // BaySickDAWProcessor::startRecording when this strip is armed.
     // Captures the post-realtime-pitch / pre-vocal-chain signal (Option C
     // from G-9 spec).  Pass nullptr to clear (stopRecording).
     void setWetRecorder (class AudioFileRecorder* recorder) noexcept
@@ -186,8 +186,8 @@ public:
     // vocal chain rack (bypass-aware; De-reverb 2048, spectral De-esser
     // 1024/2048) plus the owned NAM/IR stage's oversampling latency, which
     // was written via setLatencySamples but never read by any aggregator
-    // before the full-graph pass.  Consumed by VibeGraph::updateBusLatencies
-    // via VibeSynthProcessor's hook.  Message thread.  The realtime pitch
+    // before the full-graph pass.  Consumed by BaySickGraph::updateBusLatencies
+    // via BaySickDAWProcessor's hook.  Message thread.  The realtime pitch
     // corrector's ~48 ms is deliberately NOT in this sum: it runs only while
     // live-monitoring, and folding it in would delay every other path to
     // match the cue mix the performer is singing against (see the QA-Fe2
@@ -233,7 +233,7 @@ public:
     // Analyze / versions / render are MESSAGE THREAD ONLY.  Applied maps
     // reach the audio thread as an immutable AlignPlaySnapshot (atomic swap +
     // retire ring, the BaySickPitchDSP contract): the clip-decode layer in
-    // VibeSynthProcessor::decodeFilePlayClip reads it per block and warps the
+    // BaySickDAWProcessor::decodeFilePlayClip reads it per block and warps the
     // follower channel's FilePlay read position live.  bsa_align_on is the
     // chain switch (decode reads the cached raw-param atomic).
     BaySickAlignDSP mAlign;
@@ -348,7 +348,7 @@ public:
         { return mRestoringState->load (std::memory_order_acquire); }
 
     // Services injected by the owning VoxPage (this engine must not link
-    // against VibeSynthProcessor).  All message-thread.
+    // against BaySickDAWProcessor).  All message-thread.
     std::function<juce::AudioBuffer<float> (int channelId, double& outStartBeat,
                                             juce::int64& outStartSample,
                                             double& outSampleRate)> onRenderComposite;

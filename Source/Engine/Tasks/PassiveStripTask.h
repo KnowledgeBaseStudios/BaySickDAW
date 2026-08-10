@@ -5,8 +5,8 @@
 #include "../RenderTask.h"
 #include "../BlockContext.h"
 
-class VibeGraph;
-class VibeSynthProcessor;
+class BaySickGraph;
+class BaySickDAWProcessor;
 
 // PassiveStripTask
 // ----------------
@@ -22,8 +22,8 @@ class VibeSynthProcessor;
 //      instead (SendSourceRead.h).  Aux strips are the usual destination of
 //      those, so this is the main consumer of the feature.
 //   2. Run the strip's DSP chain:
-//        Aux → VibeGraph::processInsert(Aux, idx, ...) (existing API).
-//        Bus → VibeGraph::processBus(channelId, ...) (Batch 9b).
+//        Aux → BaySickGraph::processInsert(Aux, idx, ...) (existing API).
+//        Bus → BaySickGraph::processBus(channelId, ...) (Batch 9b).
 //   3. mOutputBuffer now holds the strip's final output; downstream tasks
 //      pull from it.
 //
@@ -44,14 +44,14 @@ public:
     PassiveStripTask (Kind                kind,
                       int                 auxOrBusIndex,
                       int                 channelIdIn,
-                      VibeGraph&          graph,
-                      VibeSynthProcessor& processor);
+                      BaySickGraph&          graph,
+                      BaySickDAWProcessor& processor);
 
     void run() override;
 
 private:
     Kind                mKind;
     int                 mIndex;       // For Aux: 0..17. For Bus: not used (channelId carries the bus id)
-    VibeGraph*          mGraph;
-    VibeSynthProcessor* mProcessor;
+    BaySickGraph*          mGraph;
+    BaySickDAWProcessor* mProcessor;
 };

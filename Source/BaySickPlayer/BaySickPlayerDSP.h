@@ -5,10 +5,10 @@
 #include <memory>
 #include <vector>
 
-// ── VibeRegion ────────────────────────────────────────────────────────────────
+// ── BaySickPlayerRegion ────────────────────────────────────────────────────────────────
 // One zone in the sample map.  Pre-loaded audio lives in audioData to avoid
 // disk I/O on the audio thread during note-on.
-struct VibeRegion
+struct BaySickPlayerRegion
 {
     // Zone mapping
     int    rootNote          { 60 };   // MIDI pitch-accurate root
@@ -40,7 +40,7 @@ struct VibeRegion
     juce::File sampleFile;
 };
 
-// ── VibeSampleManager ─────────────────────────────────────────────────────────
+// ── BaySickSampleManager ─────────────────────────────────────────────────────────
 // Loads regions from a folder or SFZ file (message thread only).
 //
 // Disk I/O:  loadFolder / loadSFZ  (message thread, may block briefly)
@@ -48,14 +48,14 @@ struct VibeRegion
 //
 // THREAD SAFETY: this class carries NO lock.  The audio thread's reads are safe
 // only because every mutator - clear, the three loaders, normalizeRootNotes -
-// runs behind the host's processBlock shield + settle, which VibePlayerProcessor
+// runs behind the host's processBlock shield + settle, which BaySickPlayerProcessor
 // ::loadIntoManager raises for all of them.  They rebuild mRegions in place, and
 // a push_back reallocation frees the block a concurrent reader is indexing, so a
 // new mutation path that skips that bracket is a use-after-free, not a glitch.
-class VibeSampleManager
+class BaySickSampleManager
 {
 public:
-    VibeSampleManager();
+    BaySickSampleManager();
 
     // Clear and reload from a folder of WAV/AIFF files.
     // Root note detected from filename heuristics.
@@ -76,11 +76,11 @@ public:
     // Find the best matching region (audio thread safe).
     // Round-robin state is updated here (per note-per-artic).
     // Returns nullptr if nothing matches.
-    const VibeRegion* findRegion (int midiNote, int velocity, int articulationGroup);
+    const BaySickPlayerRegion* findRegion (int midiNote, int velocity, int articulationGroup);
 
     // For UI / state display
     juce::File                      getLoadedFolder()  const { return mLoadedFolder; }
-    const std::vector<VibeRegion>&  getRegions()       const { return mRegions; }
+    const std::vector<BaySickPlayerRegion>&  getRegions()       const { return mRegions; }
     bool                            hasAnyRegions()    const { return !mRegions.empty(); }
 
     // AudioFormatManager (shared with voices for creating readers)
@@ -88,7 +88,7 @@ public:
 
     // ── SFZ keyswitching (Sub-N: keyswitch state lives here) ──────────────────
     // Engine queries isKeyswitchNote() on every incoming MIDI note in
-    // VibePlayerProcessor::processBlock; if true, the event is stripped from
+    // BaySickPlayerProcessor::processBlock; if true, the event is stripped from
     // the MIDI buffer + routed to handleKeyswitchNoteOn/Off instead of being
     // dispatched to the synth.  Single-threaded (audio thread only).
     bool isKeyswitchNote        (int midiNote) const noexcept;
@@ -118,7 +118,7 @@ private:
     static int          sfzNote   (const juce::String& val);  // accepts "C4" or "60"
 
     juce::AudioFormatManager  mFormatManager;
-    std::vector<VibeRegion>   mRegions;
+    std::vector<BaySickPlayerRegion>   mRegions;
     juce::File                mLoadedFolder;
 
     // Per-[note][artic] round-robin counter (audio thread only)
@@ -137,27 +137,27 @@ private:
 
     void resetKeyswitchState() noexcept;
 
-    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (VibeSampleManager)
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (BaySickSampleManager)
 };
 
-// ── VibeSynthSound ────────────────────────────────────────────────────────────
+// ── BaySickPlayerSound ────────────────────────────────────────────────────────────
 // Trivial sound - all notes accepted; region lookup is in the voice.
-struct VibeSynthSound : public juce::SynthesiserSound
+struct BaySickPlayerSound : public juce::SynthesiserSound
 {
     bool appliesToNote    (int) override { return true; }
     bool appliesToChannel (int) override { return true; }
 };
 
-// ── VibeForwardMemoryAudioSource ──────────────────────────────────────────────
+// ── BaySickForwardMemoryAudioSource ──────────────────────────────────────────────
 // Fat forward reader of a shared AudioBuffer (QA-VoicePool Task 2: replaces the
 // per-note-on `new juce::MemoryAudioSource` allocation).  Owned permanently by
-// VibeVoice; startNote re-points at the new region's buffer via setBuffer().
+// BaySickPlayerVoice; startNote re-points at the new region's buffer via setBuffer().
 // Null buffer is the resting state (between notes) - getNextAudioBlock clears
 // the destination region and returns when mBuf is null.
-class VibeForwardMemoryAudioSource : public juce::PositionableAudioSource
+class BaySickForwardMemoryAudioSource : public juce::PositionableAudioSource
 {
 public:
-    VibeForwardMemoryAudioSource() noexcept = default;
+    BaySickForwardMemoryAudioSource() noexcept = default;
 
     void setBuffer (const juce::AudioBuffer<float>& buf) noexcept
     {
@@ -219,7 +219,7 @@ private:
 
 // ── ReversedMemoryAudioSource ─────────────────────────────────────────────────
 // Fat reverse reader of a shared AudioBuffer (QA-VoicePool Task 2 moved this
-// from VibePlayerDSP.cpp anon-namespace to enable direct VibeVoice membership;
+// from BaySickPlayerDSP.cpp anon-namespace to enable direct BaySickPlayerVoice membership;
 // original implementation S1 Incr3 2026-04-21).  Position semantics match the
 // forward source (0 = start of playback = last sample of buffer), so
 // sample-start seek works without special-casing the caller.
@@ -290,7 +290,7 @@ private:
     juce::int64 mPosFwd { 0 };   // forward-time position (0 = first sample emitted)
 };
 
-// ── VibeVoice ─────────────────────────────────────────────────────────────────
+// ── BaySickPlayerVoice ─────────────────────────────────────────────────────────────────
 // One polyphonic voice.
 //
 //   startNote   → find region → re-point fat sources → reset ADSR / filter / LFO
@@ -298,11 +298,11 @@ private:
 //   stopNote    → ADSR note-off (tail-off) or immediate clear
 //
 // CPU safeguarding: parameter setters check cached values before updating DSP.
-class VibeVoice : public juce::SynthesiserVoice
+class BaySickPlayerVoice : public juce::SynthesiserVoice
 {
 public:
-    explicit VibeVoice (VibeSampleManager& manager);
-    ~VibeVoice() override;
+    explicit BaySickPlayerVoice (BaySickSampleManager& manager);
+    ~BaySickPlayerVoice() override;
 
     // ── SynthesiserVoice interface ─────────────────────────────────────────────
     void setCurrentPlaybackSampleRate (double newRate) override;
@@ -411,7 +411,7 @@ public:
     void renderNextBlock (juce::AudioBuffer<float>& buf,
                           int startSample, int numSamples)             override;
 
-    // ── Lifecycle helper called by VibeSynth::prepare ─────────────────────────
+    // ── Lifecycle helper called by BaySickPlayerSynth::prepare ─────────────────────────
     void prepareForPlayback (int blockSize);
 
     // ── Parameter setters (CPU guarded - call from audio thread only) ──────────
@@ -435,20 +435,20 @@ public:
     void setSampleStart    (float norm)                         noexcept;
     void setLfoRate        (float hz)                           noexcept;
     void setReverse        (bool rev)                           noexcept { mReverse = rev; }
-    // Per-note unison tag applied on the next startNote (set by VibeSynth during fan-out):
+    // Per-note unison tag applied on the next startNote (set by BaySickPlayerSynth during fan-out):
     void setNextUnisonCents (float cents)                       noexcept { mNextUnisonCents = cents; }
     // Age tracking for voiceCap-based stealing
     juce::uint32 getNoteStartCounter() const noexcept           { return mNoteStartCounter; }
 
     // ── QA-VoicePool Task 3 — lock-free occupancy + L7(b) hybrid stealing ─────
-    // mIsActive is the supplemental atomic flag scanned by VibeSynth::findStealCandidate
+    // mIsActive is the supplemental atomic flag scanned by BaySickPlayerSynth::findStealCandidate
     // to avoid dynamic_cast loops on the hot audio path (Sub-A=(a)).  Set true at
     // startNote, cleared at ADSR-end or hard stopNote.  mInRelease tracks whether the
     // voice's amp envelope is in its release phase (used by L7(b) hybrid: prefer
     // release-phase oldest as steal victim, fallback to overall-oldest).
     bool isActive()        const noexcept { return mIsActive.load (std::memory_order_acquire); }
     bool isInRelease()     const noexcept { return mInRelease; }
-    // QA-VoicePool Task 3 look-ahead fix (2026-05-25): VibeSynth::renderNextBlock
+    // QA-VoicePool Task 3 look-ahead fix (2026-05-25): BaySickPlayerSynth::renderNextBlock
     // pre-scans the MIDI buffer for noteOffs that WILL be delivered this block
     // (i.e., not stripped by a same-pitch later noteOn) and flips this flag on
     // voices playing those pitches.  findStealCandidate's L7(b) 3-tier classifier
@@ -460,7 +460,7 @@ public:
     void setNoteOffQueued (bool v) noexcept { mNoteOffQueued = v; }
     // initiateSteal: override the amp ADSR's release to ~1.5 ms (64 samples @ 44.1 kHz)
     // and save the user's original params so the next startNote can restore them.
-    // Caller (VibeSynth voiceCap branch) follows with stopNote(0.f, true) so the
+    // Caller (BaySickPlayerSynth voiceCap branch) follows with stopNote(0.f, true) so the
     // voice enters its quick-release phase naturally inside renderNextBlock.
     // Idempotent: re-stealing an already-overridden voice is a no-op.
     void initiateSteal() noexcept;
@@ -468,7 +468,7 @@ public:
 private:
     void releaseResources();
 
-    VibeSampleManager& mManager;
+    BaySickSampleManager& mManager;
 
     // ── Playback sources (QA-VoicePool Task 2: fat voices owned permanently)
     // shared_ptr to the region's AudioBuffer keeps the sample alive while playing.
@@ -485,8 +485,8 @@ private:
     // constructed before the reference is taken, which means strict
     // declaration order matters.  Do NOT reorder.  A drive-by alphabetize or
     // accident-of-refactor reorder will silently produce a use-of-uninitialized-
-    // member at VibeVoice construction and segfault on the first note-on.
-    VibeForwardMemoryAudioSource mForwardSrc;
+    // member at BaySickPlayerVoice construction and segfault on the first note-on.
+    BaySickForwardMemoryAudioSource mForwardSrc;
     ReversedMemoryAudioSource    mReverseSrc;
 
     // Dual permanent resamplers - one per direction.  juce::ResamplingAudioSource
@@ -509,7 +509,7 @@ private:
 
     float  mDrive         { 1.0f };
     float  mReduct        { 0.0f };   // 0 = off, 1 = max lo-fi
-    float  mVolume        { 1.0f };   // set by VibeSynth (APVTS)
+    float  mVolume        { 1.0f };   // set by BaySickPlayerSynth (APVTS)
     float  mVelocityScale { 1.0f };   // per-note: velocity * region volumeOffset
     float  mPanL          { 1.0f };
     float  mPanR          { 1.0f };
@@ -564,7 +564,7 @@ private:
     float  mSampleStart   { 0.0f };   // skip-into offset 0-1 (fraction of sample length)
     bool   mReverse       { false };  // reverse playback direction
     float  mNextUnisonCents { 0.0f }; // applied on the next startNote then consumed (reset to 0)
-    juce::uint32 mNoteStartCounter { 0 }; // monotonic age tag (stamped from VibeSynth on startNote)
+    juce::uint32 mNoteStartCounter { 0 }; // monotonic age tag (stamped from BaySickPlayerSynth on startNote)
 
     // Per-note computed filter offsets (set in startNote from velocity + params)
     float  mBaseCutoff    { 20000.f };
@@ -609,7 +609,7 @@ private:
 
     // ── QA-VoicePool Task 3 — lock-free occupancy + steal-aware ADSR override ──
     // Sub-A=(a) explicit atomic isActive: supplements juce::SynthesiserVoice::isVoiceActive()
-    // so VibeSynth::findStealCandidate can scan voices without dynamic_cast per voice.
+    // so BaySickPlayerSynth::findStealCandidate can scan voices without dynamic_cast per voice.
     std::atomic<bool> mIsActive { false };
     // L7(b) hybrid stealing predicate: true between stopNote(allowTailOff=true) and
     // ADSR-end; cleared on startNote / hard stopNote / releaseResources.
@@ -622,19 +622,19 @@ private:
     // in-flight quick-release).
     juce::ADSR::Parameters mPreStealAdsrParams {};
     bool                   mAdsrOverridden     { false };
-    // QA-VoicePool Task 3 look-ahead fix: set by VibeSynth::renderNextBlock's
+    // QA-VoicePool Task 3 look-ahead fix: set by BaySickPlayerSynth::renderNextBlock's
     // pre-scan when a noteOff for this voice's pitch is queued for delivery this
     // block (and not stripped by a same-pitch later noteOn).  Transient - cleared
     // at the top of the pre-scan every block.  Audio-thread-only; plain bool is
     // sufficient (no cross-thread access).
     bool                   mNoteOffQueued      { false };
 
-    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (VibeVoice)
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (BaySickPlayerVoice)
 };
 
-// ── VibeSynth ─────────────────────────────────────────────────────────────────
+// ── BaySickPlayerSynth ─────────────────────────────────────────────────────────────────
 // Polyphonic sample player: up to 24 physical voices, articulation group switching.
-// Wraps juce::Synthesiser + VibeSampleManager.
+// Wraps juce::Synthesiser + BaySickSampleManager.
 //
 // QA-VoicePool Task 3: physical pool over-provisioned to 24 voices.  The user-facing
 // polyphony limit stays at 16 (enforced by the voiceCap APVTS param + the steal-on-
@@ -644,7 +644,7 @@ private:
 // it continues fading inside JUCE's normal renderNextBlock for ~64 samples while
 // the new note's mSynth.noteOn() allocates to one of the 8 reserve voices.  No
 // custom fade-buffer rendering, no synchronous writes past the audio block boundary.
-class VibeSynth
+class BaySickPlayerSynth
 {
 public:
     static constexpr int kMaxVoices  = 24;
@@ -654,14 +654,14 @@ public:
     // are the safe landing zone for the new note while the stolen voice fades.
     static constexpr int kLogicalCap = 16;
 
-    VibeSynth();
+    BaySickPlayerSynth();
 
     // ── Audio lifecycle ───────────────────────────────────────────────────────
     void prepare         (double sampleRate, int maxBlockSize);
     void renderNextBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midi);
 
     // ── Sample loading ────────────────────────────────────────────────────────
-    VibeSampleManager& getManager() { return mManager; }
+    BaySickSampleManager& getManager() { return mManager; }
 
     // ── Parameter setters (CPU guarded, call from processBlock) ───────────────
     // Each guard checks whether the value actually changed before pushing to voices.
@@ -696,7 +696,7 @@ public:
     void setUnisonSpread      (float cents)                          noexcept;
 
 private:
-    VibeSampleManager  mManager;
+    BaySickSampleManager  mManager;
     juce::Synthesiser  mSynth;
     double             mSampleRate { 44100.0 };
 
@@ -760,10 +760,10 @@ private:
                 fn (*mVoices[i]);
     }
 
-    // ── QA-VoicePool Task 3 — direct VibeVoice pointer cache + steal candidate scan ──
+    // ── QA-VoicePool Task 3 — direct BaySickPlayerVoice pointer cache + steal candidate scan ──
     // mVoices is populated in the ctor at addVoice time so the audio-thread voiceCap
     // branch can iterate the pool without dynamic_cast per voice (Sub-A=(a) rationale).
-    std::array<VibeVoice*, kMaxVoices> mVoices {};
+    std::array<BaySickPlayerVoice*, kMaxVoices> mVoices {};
 
     // findStealCandidate implements the L7(b) 3-tier steal policy: ADSR-release
     // voices first, then noteOff-queued or key-up voices, and physically-held keys
@@ -771,10 +771,10 @@ private:
     // mNoteStartCounter within a tier; there is deliberately NO overall-oldest
     // fallback across tiers - that steals a sustained lead note out from under a
     // looping chord.  The full tier table and the rest of the rationale sit at the
-    // definition in VibePlayerDSP.cpp; read it before changing the policy.
+    // definition in BaySickPlayerDSP.cpp; read it before changing the policy.
     // newPitch is reserved for a future "don't steal a voice playing the same
     // pitch" rule; unused for now.
-    VibeVoice* findStealCandidate (int newPitch) const noexcept;
+    BaySickPlayerVoice* findStealCandidate (int newPitch) const noexcept;
 
-    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (VibeSynth)
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (BaySickPlayerSynth)
 };

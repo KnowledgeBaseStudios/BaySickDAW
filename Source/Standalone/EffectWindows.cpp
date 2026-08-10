@@ -18,7 +18,7 @@
 
 // ═════════════════════════════════════════════════════════════════ EffectSlotWindow
 
-EffectSlotWindow::EffectSlotWindow (VibeSynthProcessor& proc,
+EffectSlotWindow::EffectSlotWindow (BaySickDAWProcessor& proc,
                                     int channelId,
                                     juce::String slotUuid,
                                     std::function<juce::String(int)> resolveChannelName,
@@ -496,7 +496,7 @@ void EffectSlotWindow::timerCallback()
 
 // ═══════════════════════════════════════════════════════════════════ EffectEqWindow
 
-EffectEqWindow::EffectEqWindow (VibeSynthProcessor& proc,
+EffectEqWindow::EffectEqWindow (BaySickDAWProcessor& proc,
                                 int channelId,
                                 bool isPre,
                                 std::function<juce::String(int)> resolveChannelName)
@@ -1091,7 +1091,7 @@ namespace T18Draw
 
 // ═══════════════════════════════════════════════════════════ EffectVisualWindow
 
-EffectVisualWindow::EffectVisualWindow (VibeSynthProcessor& proc,
+EffectVisualWindow::EffectVisualWindow (BaySickDAWProcessor& proc,
                                         int channelId,
                                         juce::String slotUuid,
                                         std::function<juce::String(int)> resolveChannelName)

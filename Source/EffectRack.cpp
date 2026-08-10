@@ -258,7 +258,7 @@ void EffectRack::clearSlot(int slot)
     retiringUuid          = mSlots[slot].uuid;
     mSlots[slot].uuid     = {};
     // An emptied slot must read as a factory-default slot.  Racks are
-    // long-lived graph-node members (that is why VibeGraph::clearAllRackStates
+    // long-lived graph-node members (that is why BaySickGraph::clearAllRackStates
     // exists), so anything left in these three bleeds into the next effect
     // dropped here -- including across a project boundary.
     mSlots[slot].outputGainDb = 0.f;
@@ -677,7 +677,7 @@ float EffectRack::drainSlotOutputLevel(int slot)
 
 // 2026-05-02: end-of-audio-block promotion of every slot's Run atomics into
 // the UI-visible Snapshot atomics.  Single drain-and-CAS-max per slot per
-// channel.  Called once per audio block by VibeGraph::promoteAllRackSlot
+// channel.  Called once per audio block by BaySickGraph::promoteAllRackSlot
 // Snapshots(), which walks every rack across every node and insert.
 void EffectRack::promoteSlotPeakSnapshots()
 {

@@ -9,7 +9,7 @@
 //
 // A self-contained bundle copies every externally-referenced file into
 // <project>\Samples and rewrites the saved references to "Samples/<name>".
-// VibeSynthProcessor::resolveProjectFile is the ONE reader that understands that
+// BaySickDAWProcessor::resolveProjectFile is the ONE reader that understands that
 // form; it also passes absolute paths straight through and hands
 // "library:" / "mysamples:" references to SampleLibrary.  Every other engine and
 // effect restore built a bare juce::File from the stored string instead, which
@@ -24,7 +24,7 @@
 // alternative means threading a resolver down every rack, pedal board and Inst
 // chain that can own a slot, plus every surface that loads an effect preset.
 //
-// Ownership / threading: one VibeSynthProcessor exists per app; it installs on
+// Ownership / threading: one BaySickDAWProcessor exists per app; it installs on
 // project-folder change and the installed callable outlives every reader.
 // Engine restores can run off the message thread during a project load while the
 // message thread installs, so the slot is lock-guarded; the callable is COPIED

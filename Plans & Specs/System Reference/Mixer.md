@@ -18,7 +18,7 @@ parameter in the processor's APVTS (`Source/PluginProcessor.cpp`,
 Closing the Mixer window changes nothing about the sound.
 
 **The channel-id vocabulary.** Every strip has a unique integer channel id
-(`MixerChannelIds`, `Source/VibeGraph.h`). That id is the key for routing, for
+(`MixerChannelIds`, `Source/BaySickGraph.h`). That id is the key for routing, for
 the cable overlay, for the Effects page, and for the APVTS prefix a strip's
 parameters live under (`prefixFromChannelId`, e.g. id 200 -> `mixer_layer_0`).
 
@@ -36,16 +36,16 @@ parameters live under (`prefixFromChannelId`, e.g. id 200 -> `mixer_layer_0`).
 | 800-812 | Rusty Drums inserts 1-13 |
 | 900-919 | Plugin inserts 1-20 |
 
-Per-family caps are derived from the page caps in `VibesynthConstants.h`, so a
+Per-family caps are derived from the page caps in `BaySickConstants.h`, so a
 strip cap is always its page cap.
 
-**Signal flow through one insert strip** (`VibeGraph::InsertNode::processBlock`,
-`Source/VibeGraph.cpp`): source audio -> pre-rack EQ -> polarity -> stereo width
+**Signal flow through one insert strip** (`BaySickGraph::InsertNode::processBlock`,
+`Source/BaySickGraph.cpp`): source audio -> pre-rack EQ -> polarity -> stereo width
 -> effects rack (bypassable) -> post-rack EQ -> fader x mute x solo (gain-ramped
 so moves do not zipper) -> pan (project pan law) -> sidechain tap -> latency
 compensation delay -> peak and RMS publish.
 
-**Signal flow through one bus** (`VibeGraph::InstrChannelNode::processChainOnly`):
+**Signal flow through one bus** (`BaySickGraph::InstrChannelNode::processChainOnly`):
 input sum -> pre-rack EQ -> rack -> post-rack EQ -> fader x mute x solo ->
 polarity -> stereo width -> pan -> sidechain stash -> compensation delay -> peak.
 Note the order difference: a bus applies its fader **before** polarity and width;
@@ -382,7 +382,7 @@ Order that matters:
   "pairwise within group" with a `silenced = muted || (inGroupSolo &&
   useGroupSolo && !soloed)` formula and lists it as an open defect (DSP-09). The
   code now has one formula for every bus, `silenced = muted || (anyBusSoloed &&
-  !soloed)`, computed once per block by `VibeGraph::anyBusSoloed()`, which reads
+  !soloed)`, computed once per block by `BaySickGraph::anyBusSoloed()`, which reads
   bus `_solo` parameters only and is forbidden from consulting channel-level
   solo.
 * **The five hand-written bus node types are gone.** Carry-Forward describes

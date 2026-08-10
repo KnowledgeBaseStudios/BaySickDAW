@@ -6,8 +6,8 @@
 #include "../BaySickBass/BaySickBassEditor.h"
 #include "../Harmless/HarmlessProcessor.h"
 #include "../Harmless/HarmlessEditor.h"
-#include "../VibePlayer/VibePlayerProcessor.h"
-#include "../VibePlayer/VibePlayerEditor.h"
+#include "../BaySickPlayer/BaySickPlayerProcessor.h"
+#include "../BaySickPlayer/BaySickPlayerEditor.h"
 #include "../SampleLibrary.h"
 #include "../MissingFileReport.h"
 #include "../UserFileSave.h"
@@ -16,7 +16,7 @@
 using namespace juce;
 
 // ── Constructor / Destructor ──────────────────────────────────────────────────
-BassPage::BassPage(VibeSynthProcessor& p, PatternManager& pm, int pageIndex)
+BassPage::BassPage(BaySickDAWProcessor& p, PatternManager& pm, int pageIndex)
     : mProcessor(p), mPM(pm), mPageIndex(juce::jlimit(0, kMaxBassPages - 1, pageIndex))
 {
     mPageColor = VC::BassCol[mPageIndex % juce::numElementsInArray (VC::BassCol)];
@@ -147,7 +147,7 @@ void BassPage::selectEngine(const juce::String& engineName)
         };
         if      (auto* he = dynamic_cast<HarmlessEditor*>      (mEngineEditor.get())) he->onPatchLoaded = onPatch;
         else if (auto* be = dynamic_cast<BaySickBassEditor*>   (mEngineEditor.get())) be->onPatchLoaded = onPatch;
-        else if (auto* pe = dynamic_cast<VibePlayerEditor*>    (mEngineEditor.get())) pe->onPatchLoaded = onPatch;
+        else if (auto* pe = dynamic_cast<BaySickPlayerEditor*>    (mEngineEditor.get())) pe->onPatchLoaded = onPatch;
     }
 
     // Smoke round 2 (Jeff): the SW-3 Swing Mix knob moved OFF the editor
@@ -163,7 +163,7 @@ void BassPage::selectEngine(const juce::String& engineName)
                 b->auditionNote(midiNote);
             else if (auto* h = dynamic_cast<HarmlessProcessor*>(mEngineProcessor))
                 h->auditionNote(midiNote);
-            else if (auto* v = dynamic_cast<VibePlayerProcessor*>(mEngineProcessor))
+            else if (auto* v = dynamic_cast<BaySickPlayerProcessor*>(mEngineProcessor))
                 v->auditionNote(midiNote);
         };
         mPianoRoll->onNoteAuditionOn = [this](int midiNote)
@@ -172,7 +172,7 @@ void BassPage::selectEngine(const juce::String& engineName)
                 b->auditionNoteOn(midiNote);
             else if (auto* h = dynamic_cast<HarmlessProcessor*>(mEngineProcessor))
                 h->auditionNoteOn(midiNote);
-            else if (auto* v = dynamic_cast<VibePlayerProcessor*>(mEngineProcessor))
+            else if (auto* v = dynamic_cast<BaySickPlayerProcessor*>(mEngineProcessor))
                 v->auditionNoteOn(midiNote);
         };
         mPianoRoll->onNoteAuditionOff = [this](int midiNote)
@@ -181,7 +181,7 @@ void BassPage::selectEngine(const juce::String& engineName)
                 b->auditionNoteOff(midiNote);
             else if (auto* h = dynamic_cast<HarmlessProcessor*>(mEngineProcessor))
                 h->auditionNoteOff(midiNote);
-            else if (auto* v = dynamic_cast<VibePlayerProcessor*>(mEngineProcessor))
+            else if (auto* v = dynamic_cast<BaySickPlayerProcessor*>(mEngineProcessor))
                 v->auditionNoteOff(midiNote);
         };
     }
@@ -208,7 +208,7 @@ juce::String BassPage::stripEngineTitle() const
 {
     if (dynamic_cast<HarmlessEditor*>    (mEngineEditor.get())) return HarmlessEditor::getEngineTitle();
     if (dynamic_cast<BaySickBassEditor*> (mEngineEditor.get())) return BaySickBassEditor::getEngineTitle();
-    if (dynamic_cast<VibePlayerEditor*>  (mEngineEditor.get())) return VibePlayerEditor::getEngineTitle();
+    if (dynamic_cast<BaySickPlayerEditor*>  (mEngineEditor.get())) return BaySickPlayerEditor::getEngineTitle();
     return {};
 }
 
@@ -216,7 +216,7 @@ juce::Colour BassPage::stripEngineAccent() const
 {
     if (dynamic_cast<HarmlessEditor*>    (mEngineEditor.get())) return HarmlessEditor::getEngineAccent();
     if (dynamic_cast<BaySickBassEditor*> (mEngineEditor.get())) return BaySickBassEditor::getEngineAccent();
-    if (dynamic_cast<VibePlayerEditor*>  (mEngineEditor.get())) return VibePlayerEditor::getEngineAccent();
+    if (dynamic_cast<BaySickPlayerEditor*>  (mEngineEditor.get())) return BaySickPlayerEditor::getEngineAccent();
     return {};
 }
 
@@ -224,7 +224,7 @@ juce::Component* BassPage::stripPresetButton() const
 {
     if (auto* e = dynamic_cast<HarmlessEditor*>    (mEngineEditor.get())) return e->getTitleStripPresetButton();
     if (auto* e = dynamic_cast<BaySickBassEditor*> (mEngineEditor.get())) return e->getTitleStripPresetButton();
-    if (auto* e = dynamic_cast<VibePlayerEditor*>  (mEngineEditor.get())) return e->getTitleStripPresetButton();
+    if (auto* e = dynamic_cast<BaySickPlayerEditor*>  (mEngineEditor.get())) return e->getTitleStripPresetButton();
     return nullptr;
 }
 
@@ -326,7 +326,7 @@ static juce::File bassEngineRootPresetsDir (const juce::String& engineName)
 static juce::String bassEngineLocalPrefix (juce::AudioProcessor* proc)
 {
     if (auto* bsb = dynamic_cast<BaySickBassProcessor*>(proc))   return bsb->getParamPrefix();
-    if (auto* bsp = dynamic_cast<VibePlayerProcessor*>(proc))    return bsp->getParamPrefix();
+    if (auto* bsp = dynamic_cast<BaySickPlayerProcessor*>(proc))    return bsp->getParamPrefix();
     if (auto* h   = dynamic_cast<HarmlessProcessor*>(proc))      return h  ->getParamPrefix();
     return {};
 }
@@ -336,7 +336,7 @@ static juce::String bassEngineLocalPrefix (juce::AudioProcessor* proc)
 static void bassApplyApvtsTree (juce::AudioProcessor* proc, const juce::ValueTree& vt)
 {
     if (auto* bsb = dynamic_cast<BaySickBassProcessor*>(proc))   { bsb->apvts.replaceStateKeepingUndoHistory(vt); return; }
-    if (auto* bsp = dynamic_cast<VibePlayerProcessor*>(proc))    { bsp->apvts.replaceStateKeepingUndoHistory(vt); return; }
+    if (auto* bsp = dynamic_cast<BaySickPlayerProcessor*>(proc))    { bsp->apvts.replaceStateKeepingUndoHistory(vt); return; }
     if (auto* h   = dynamic_cast<HarmlessProcessor*>(proc))      { h  ->apvts.replaceStateKeepingUndoHistory(vt); return; }
 }
 
@@ -801,7 +801,7 @@ void BassPage::loadPreset (const juce::File& xml)
     // for a saved patch.  No normalizeRootNotes - preserves the SFZ's
     // natural keymap for melodic playback (only DrumPage normalizes to 60).
     if (bspSample)
-        if (auto* vp = dynamic_cast<VibePlayerProcessor*>(mEngineProcessor))
+        if (auto* vp = dynamic_cast<BaySickPlayerProcessor*>(mEngineProcessor))
         {
             const juce::String kind = bspSample->getStringAttribute ("kind", "none");
             const juce::String pathStr = bspSample->getStringAttribute ("path");
@@ -884,7 +884,7 @@ void BassPage::savePatchAs()
 
             const auto dir = bassEnginePresetsDir (bp->mEngineType);
 
-            if (dynamic_cast<VibePlayerProcessor*> (bp->mEngineProcessor) != nullptr)
+            if (dynamic_cast<BaySickPlayerProcessor*> (bp->mEngineProcessor) != nullptr)
             {
                 // bsp_loadKind / bsp_loadPath ride the state XML root as
                 // attributes; the pair is written or neither is, so the
@@ -971,7 +971,7 @@ static juce::String bassEnginePrefixOf (juce::AudioProcessor* p)
 {
     if (auto* bsb = dynamic_cast<BaySickBassProcessor*> (p))   return bsb->getParamPrefix();
     if (auto* h   = dynamic_cast<HarmlessProcessor*>    (p))   return h  ->getParamPrefix();
-    if (auto* v   = dynamic_cast<VibePlayerProcessor*>  (p))   return v  ->getParamPrefix();
+    if (auto* v   = dynamic_cast<BaySickPlayerProcessor*>  (p))   return v  ->getParamPrefix();
     return {};
 }
 
@@ -1164,12 +1164,12 @@ void BassPage::subscribeToEngineApvtsState()
 {
     if (auto* h = dynamic_cast<HarmlessProcessor*>     (mEngineProcessor)) h->apvts.state.addListener (this);
     else if (auto* b = dynamic_cast<BaySickBassProcessor*> (mEngineProcessor)) b->apvts.state.addListener (this);
-    else if (auto* v = dynamic_cast<VibePlayerProcessor*>  (mEngineProcessor)) v->apvts.state.addListener (this);
+    else if (auto* v = dynamic_cast<BaySickPlayerProcessor*>  (mEngineProcessor)) v->apvts.state.addListener (this);
 }
 
 void BassPage::unsubscribeFromEngineApvtsState()
 {
     if (auto* h = dynamic_cast<HarmlessProcessor*>     (mEngineProcessor)) h->apvts.state.removeListener (this);
     else if (auto* b = dynamic_cast<BaySickBassProcessor*> (mEngineProcessor)) b->apvts.state.removeListener (this);
-    else if (auto* v = dynamic_cast<VibePlayerProcessor*>  (mEngineProcessor)) v->apvts.state.removeListener (this);
+    else if (auto* v = dynamic_cast<BaySickPlayerProcessor*>  (mEngineProcessor)) v->apvts.state.removeListener (this);
 }

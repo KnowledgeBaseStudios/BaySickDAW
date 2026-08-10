@@ -1,11 +1,11 @@
 #pragma once
 #include <JuceHeader.h>
-#include "VibePlayerProcessor.h"
-#include "VibePlayerLAF.h"
+#include "BaySickPlayerProcessor.h"
+#include "BaySickPlayerLAF.h"
 #include "../Standalone/SharedUI.h"   // ChickenHeadSelector (S2 2026-04-21)
 #include "../Standalone/BaySickTitleBar.h"   // QA-A (2026-05-09)
 
-// ── VibePlayerEditor (user-facing name: BaySickPlayer) ───────────────────────
+// ── BaySickPlayerEditor (user-facing name: BaySickPlayer) ───────────────────────
 // 6-box grid layout (600 × 560):
 //
 //   Header (36px):  "BAYSICKPLAYER" | [Preset ▾] | [?]
@@ -13,12 +13,12 @@
 //     Row 1: Sample Engine | Pitch & Voicing | Dynamics
 //     Row 2: Amp Envelope  | Vibrato         | Output
 // ─────────────────────────────────────────────────────────────────────────────
-class VibePlayerEditor : public juce::AudioProcessorEditor,
+class BaySickPlayerEditor : public juce::AudioProcessorEditor,
                           private juce::ValueTree::Listener
 {
 public:
-    explicit VibePlayerEditor (VibePlayerProcessor& p);
-    ~VibePlayerEditor() override;
+    explicit BaySickPlayerEditor (BaySickPlayerProcessor& p);
+    ~BaySickPlayerEditor() override;
 
     void paint   (juce::Graphics&) override;
     void resized () override;
@@ -58,7 +58,7 @@ private:
     static void initLabel (juce::Label& l,  const juce::String& text);
 
     // ── Look and Feel ─────────────────────────────────────────────────────────
-    VibePlayerLAF mLAF;
+    BaySickPlayerLAF mLAF;
 
     // ── Header ────────────────────────────────────────────────────────────────
     // Accent = VC::Warm (#D4A017), matching the Clips + Builder ribbon-tab
@@ -72,14 +72,14 @@ private:
     juce::Label mBoxHdr[7];
 
     // ── Box 1: Sample Engine ─────────────────────────────────────────────────
-    VibeSlider      mSampleStartKnob, mStretchKnob;
+    BaySickSlider      mSampleStartKnob, mStretchKnob;
     juce::Label     mSampleStartLbl,  mStretchLbl;
     DualLabelToggle mReverseTog,      mCutSelfTog,      mCutSelfModeTog;
 
     // ── Box 2: Pitch & Voicing ───────────────────────────────────────────────
-    VibeSlider mTuneKnob,          mVoiceCapKnob;
-    VibeSlider mUnisonVoicesKnob,  mDetuneKnob;
-    VibeSlider mUnisonSpreadKnob;
+    BaySickSlider mTuneKnob,          mVoiceCapKnob;
+    BaySickSlider mUnisonVoicesKnob,  mDetuneKnob;
+    BaySickSlider mUnisonSpreadKnob;
     juce::Label  mTuneLbl,           mVoiceCapLbl;
     juce::Label  mUnisonVoicesLbl,   mDetuneLbl;
     juce::Label  mUnisonSpreadLbl;
@@ -87,36 +87,36 @@ private:
     juce::Label  mDetuneModeLbl;
 
     // ── Box 3: Dynamics ──────────────────────────────────────────────────────
-    VibeSlider mSensKnob,     mVelVolKnob;
-    VibeSlider mVelMuffleKnob, mMuffleKnob;
-    VibeSlider mVelHardKnob,   mHardnessKnob;
+    BaySickSlider mSensKnob,     mVelVolKnob;
+    BaySickSlider mVelMuffleKnob, mMuffleKnob;
+    BaySickSlider mVelHardKnob,   mHardnessKnob;
     juce::Label  mSensLbl,      mVelVolLbl;
     juce::Label  mVelMuffleLbl, mMuffleLbl;
     juce::Label  mVelHardLbl,   mHardnessLbl;
 
     // ── Box 4: Amp Envelope ──────────────────────────────────────────────────
-    VibeSlider mAttackKnob,  mDecayKnob;
-    VibeSlider mSustainKnob, mReleaseKnob;
+    BaySickSlider mAttackKnob,  mDecayKnob;
+    BaySickSlider mSustainKnob, mReleaseKnob;
     juce::Label  mAttackLbl,   mDecayLbl;
     juce::Label  mSustainLbl,  mReleaseLbl;
 
     // ── Box 5: Vibrato (pitch modulation; the mLfo* names are the APVTS ids) ─
-    VibeSlider mLfoRateKnob, mLfoAmtKnob;
+    BaySickSlider mLfoRateKnob, mLfoAmtKnob;
     juce::Label  mLfoRateLbl,  mLfoAmtLbl;
 
     // ── Box 6: Filter (D.4-Q3 2026-05-01) ────────────────────────────────────
     // Surfaces 3 previously-hidden APVTS params: cutoff / res / reduct.
     // Sits between Vibrato (Box 5) and Output (now Box 7).  The artic_group param
-    // is live but deliberately has no UI knob (see VibePlayerEditor.cpp Box 6).
-    VibeSlider mFilterCutoffKnob, mFilterResKnob;
-    VibeSlider mFilterReductKnob;
+    // is live but deliberately has no UI knob (see BaySickPlayerEditor.cpp Box 6).
+    BaySickSlider mFilterCutoffKnob, mFilterResKnob;
+    BaySickSlider mFilterReductKnob;
     juce::Label  mFilterCutoffLbl,  mFilterResLbl;
     juce::Label  mFilterReductLbl;
 
     // ── Box 7: Output (was Box 6 before D.4-Q3) ──────────────────────────────
-    VibeSlider mPanKnob,    mStereoKnob;
-    VibeSlider mVolumeKnob, mTrebleKnob;
-    VibeSlider mDriveKnob;                // Overdrive
+    BaySickSlider mPanKnob,    mStereoKnob;
+    BaySickSlider mVolumeKnob, mTrebleKnob;
+    BaySickSlider mDriveKnob;                // Overdrive
     juce::Label  mPanLbl,     mStereoLbl;
     juce::Label  mVolumeLbl,  mTrebleLbl;
     juce::Label  mDriveLbl;
@@ -147,8 +147,8 @@ private:
     // D.4-Q3 (2026-05-01): Filter box attachments
     std::unique_ptr<SliderAtt> mFilterCutoffAtt, mFilterResAtt, mFilterReductAtt;
 
-    VibePlayerProcessor& mProc;
+    BaySickPlayerProcessor& mProc;
     bool mIsDrumContext { false };   // 2026-04-23: page-context flag (see setter)
 
-    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (VibePlayerEditor)
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (BaySickPlayerEditor)
 };

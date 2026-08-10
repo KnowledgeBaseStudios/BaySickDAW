@@ -5,7 +5,7 @@
 
 // ─── ISidechainEngine ───────────────────────────────────────────────────────
 // Tag interface inherited by all engine processors that consume engine-level
-// sidechain (Harmless / BaySickSynth / BaySickBass / VibePlayer / BaySickNAMIR
+// sidechain (Harmless / BaySickSynth / BaySickBass / BaySickPlayer / BaySickNAMIR
 // + future: BaySickPedals (Phase I), BaySickDrumKit, etc).  PluginProcessor's
 // render loop dynamic_casts the AudioProcessor* before each engine's
 // processBlock and pushes the strip's SC array via setSidechainBuffers.
@@ -20,14 +20,14 @@ public:
 
 // ─── EngineSidechainHelper ──────────────────────────────────────────────────
 // C.4 Phase 2.2 (2026-04-30): per-engine sidechain primitive.  Each player
-// engine processor (Harmless / BaySickSynth / BaySickBass / VibePlayer /
+// engine processor (Harmless / BaySickSynth / BaySickBass / BaySickPlayer /
 // BaySickNAMIR) holds one of these as a member.  PluginProcessor's render
 // loop pushes the engine's host InsertNode SC array via setSidechainBuffers
 // before processBlock; the engine calls updateLevel(numSamples) inside
 // processBlock to publish a current RMS level via getLevel(), which any
 // internal modulation source on the engine can sample.
 //
-// Address-only push: the actual sample data is owned by VibeGraph's per-strip
+// Address-only push: the actual sample data is owned by BaySickGraph's per-strip
 // scRecv buffers, filled by each task's pullSidechainPredecessorsToGraph from
 // upstream sources earlier in the topo-sorted process order.
 //

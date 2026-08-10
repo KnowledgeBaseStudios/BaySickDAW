@@ -1,6 +1,6 @@
 #include "ClipsPage.h"
-#include "../VibePlayer/VibePlayerProcessor.h"
-#include "../VibePlayer/VibePlayerEditor.h"   // QA-Layout T3: strip chrome cast
+#include "../BaySickPlayer/BaySickPlayerProcessor.h"
+#include "../BaySickPlayer/BaySickPlayerEditor.h"   // QA-Layout T3: strip chrome cast
 #include "../Standalone/EnginePrefixUtil.h"
 #include "../Standalone/PagePresetIO.h"
 #include "../PluginProcessor.h"
@@ -8,7 +8,7 @@
 #include "../SampleLibrary.h"
 #include "../MissingFileReport.h"
 #include "../UserFileSave.h"
-#include "../VibeGraph.h"           // QA-E Task 4: MixerChannelIds::audioInsert
+#include "../BaySickGraph.h"           // QA-E Task 4: MixerChannelIds::audioInsert
 #include "../PatternManager.h"      // QA-E Task 4: addAudioToLibrary
 #include "../Standalone/UndoActions.h"   // StructuralOpAction (lock toggle)
 
@@ -81,7 +81,7 @@ ClipsPage::~ClipsPage()
     detachDirtyListener();
 }
 
-void ClipsPage::setProcessor (VibeSynthProcessor* p)
+void ClipsPage::setProcessor (BaySickDAWProcessor* p)
 {
     mFullProcessor = p;
     // QA-ModelShell TS1: the tab becomes a model object as soon as the page
@@ -312,13 +312,13 @@ void ClipsPage::takeStateSnapshot()
 void ClipsPage::attachDirtyListener()
 {
     detachDirtyListener();
-    if (auto* vp = dynamic_cast<VibePlayerProcessor*> (mPlayerProc))
+    if (auto* vp = dynamic_cast<BaySickPlayerProcessor*> (mPlayerProc))
         vp->apvts.state.addListener (&mDirtyListener);
 }
 
 void ClipsPage::detachDirtyListener()
 {
-    if (auto* vp = dynamic_cast<VibePlayerProcessor*> (mPlayerProc))
+    if (auto* vp = dynamic_cast<BaySickPlayerProcessor*> (mPlayerProc))
         vp->apvts.state.removeListener (&mDirtyListener);
 }
 
@@ -348,7 +348,7 @@ void ClipsPage::savePagePreset (std::function<void()> onSaved)
 
             const juce::String stripPrefix = "mixer_audio_" + juce::String (safeThis->mPageIndex);
             juce::String enginePrefix;
-            if (auto* vp = dynamic_cast<VibePlayerProcessor*> (safeThis->mPlayerProc))
+            if (auto* vp = dynamic_cast<BaySickPlayerProcessor*> (safeThis->mPlayerProc))
                 enginePrefix = vp->getParamPrefix();
 
             const juce::String xml = PagePresetIO::exportPagePreset (
@@ -498,7 +498,7 @@ void ClipsPage::loadPagePreset (const juce::File& xml)
 
     const juce::String stripPrefix = "mixer_audio_" + juce::String (mPageIndex);
     juce::String enginePrefix;
-    if (auto* vp = dynamic_cast<VibePlayerProcessor*> (mPlayerProc))
+    if (auto* vp = dynamic_cast<BaySickPlayerProcessor*> (mPlayerProc))
         enginePrefix = vp->getParamPrefix();
 
     auto noFallback = [] (int) { return true; };
@@ -624,7 +624,7 @@ void ClipsPage::selectEngine (EngineType e)
         if (mPlayerProc != nullptr)
         {
             if (mClipPath.isNotEmpty())
-                if (auto* vp = dynamic_cast<VibePlayerProcessor*> (mPlayerProc))
+                if (auto* vp = dynamic_cast<BaySickPlayerProcessor*> (mPlayerProc))
                     vp->loadSampleFile (juce::File (mClipPath));
             mPlayerEditor.reset (mPlayerProc->createEditor());
             if (mPlayerEditor) addChildComponent (*mPlayerEditor);
@@ -645,7 +645,7 @@ void ClipsPage::selectEngine (EngineType e)
     // ordering in StandaloneEditor::onAudioClipAdded - addAudioChannel ran
     // before ensureAudioInsert so the strip's APVTS attachments silently
     // failed.  Fixed there + a defensive rebindApvts in
-    // VibeGraph::ensureInsertNode.  Pre-EQ binding is back on.)
+    // BaySickGraph::ensureInsertNode.  Pre-EQ binding is back on.)
     // J-6 EQ unification (2026-05-03): page-level EQ display removed; pre-rack
     // EQ is bound exclusively by EffectsPage (mixer_audio_<row>_preeq_*).
 
@@ -661,19 +661,19 @@ void ClipsPage::selectEngine (EngineType e)
 
 juce::String ClipsPage::stripEngineTitle() const
 {
-    if (dynamic_cast<VibePlayerEditor*> (mPlayerEditor.get())) return VibePlayerEditor::getEngineTitle();
+    if (dynamic_cast<BaySickPlayerEditor*> (mPlayerEditor.get())) return BaySickPlayerEditor::getEngineTitle();
     return {};
 }
 
 juce::Colour ClipsPage::stripEngineAccent() const
 {
-    if (dynamic_cast<VibePlayerEditor*> (mPlayerEditor.get())) return VibePlayerEditor::getEngineAccent();
+    if (dynamic_cast<BaySickPlayerEditor*> (mPlayerEditor.get())) return BaySickPlayerEditor::getEngineAccent();
     return {};
 }
 
 juce::Component* ClipsPage::stripPresetButton() const
 {
-    if (auto* e = dynamic_cast<VibePlayerEditor*> (mPlayerEditor.get())) return e->getTitleStripPresetButton();
+    if (auto* e = dynamic_cast<BaySickPlayerEditor*> (mPlayerEditor.get())) return e->getTitleStripPresetButton();
     return nullptr;
 }
 
@@ -703,7 +703,7 @@ void ClipsPage::setClipFilePath (const juce::String& p,
                                 : juce::String ("(no clip)"),
                             juce::dontSendNotification);
 
-    if (auto* vp = dynamic_cast<VibePlayerProcessor*> (mPlayerProc))
+    if (auto* vp = dynamic_cast<BaySickPlayerProcessor*> (mPlayerProc))
         if (p.isNotEmpty())
         {
             vp->loadSampleFile (juce::File (p));
@@ -745,7 +745,7 @@ void ClipsPage::setClipFilePath (const juce::String& p,
 // G-6 (2026-04-29): full-state export/import for Duplicate flow.
 // Single-engine page: just BaySickPlayer state.  Saves the actual processor
 // prefix (`getParamPrefix()`) so import can substitute correctly - the
-// VibePlayerProcessor prefix format is `tk_<trackId>_bsp_` which collapses
+// BaySickPlayerProcessor prefix format is `tk_<trackId>_bsp_` which collapses
 // to e.g. `tk_clip_5__bsp_` when trackId already ends in `_`, so we can't
 // reconstruct it from page index alone.
 // ─────────────────────────────────────────────────────────────────────────────
@@ -762,7 +762,7 @@ juce::String ClipsPage::exportClipState() const
         mPlayerProc->getStateInformation (mb);
         auto* sub = el.createNewChildElement ("PlayerState");
         sub->setAttribute ("data", mb.toBase64Encoding());
-        if (auto* vp = dynamic_cast<VibePlayerProcessor*> (mPlayerProc))
+        if (auto* vp = dynamic_cast<BaySickPlayerProcessor*> (mPlayerProc))
             sub->setAttribute ("prefix", vp->getParamPrefix());
     }
     return el.toString (juce::XmlElement::TextFormat().singleLine());
@@ -784,7 +784,7 @@ void ClipsPage::importClipState (const juce::String& xml)
             {
                 const juce::String srcPrefix = playerEl->getStringAttribute ("prefix");
                 juce::String dstPrefix;
-                if (auto* vp = dynamic_cast<VibePlayerProcessor*> (mPlayerProc))
+                if (auto* vp = dynamic_cast<BaySickPlayerProcessor*> (mPlayerProc))
                     dstPrefix = vp->getParamPrefix();
                 substituteApvtsPrefixInBinary (mb, srcPrefix, dstPrefix);
                 // G-7: suppress dirty flag during the bulk state restore so

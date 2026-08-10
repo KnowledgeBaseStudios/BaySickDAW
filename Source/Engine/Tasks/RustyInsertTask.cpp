@@ -1,14 +1,14 @@
 #include "RustyInsertTask.h"
 #include "../FrozenSourceRead.h"   // TS7 6.8: scope-matched frozen block read
-#include "../../VibeGraph.h"
+#include "../../BaySickGraph.h"
 #include "../../PluginProcessor.h"
 #include "../../BaySickRustyDrums/BaySickRustyDrumsProcessor.h"
 #include "../SidechainPullHelper.h"   // pullSidechainPredecessorsToGraph
 
 RustyInsertTask::RustyInsertTask (int                 stripIndex,
                                   int                 channelIdIn,
-                                  VibeGraph&          graph,
-                                  VibeSynthProcessor& processor)
+                                  BaySickGraph&          graph,
+                                  BaySickDAWProcessor& processor)
     : mStripIndex (stripIndex),
       mGraph (&graph),
       mProcessor (&processor)
@@ -109,6 +109,6 @@ void RustyInsertTask::run()
     pullSidechainPredecessorsToGraph (*mGraph, channelId, mPredecessors, n);
 
     // Insert chain (polarity → preEq → width → rack → postEq → fader → ...).
-    mGraph->processInsert (VibeGraph::InsertKind::Rusty, mStripIndex,
+    mGraph->processInsert (BaySickGraph::InsertKind::Rusty, mStripIndex,
                            blockView, mCtx->bpm, mCtx->anySolo);
 }

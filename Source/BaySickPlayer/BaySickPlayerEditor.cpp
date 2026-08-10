@@ -1,4 +1,4 @@
-#include "VibePlayerEditor.h"
+#include "BaySickPlayerEditor.h"
 #include "../AppPaths.h"
 #include "../MissingFileReport.h"
 #include "../SampleLibrary.h"
@@ -16,7 +16,7 @@ static constexpr int   kBoxTitleH    = 22;
 static constexpr int   kInnerPad     = 6;
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
-void VibePlayerEditor::initKnob (juce::Slider& s, const juce::String& tooltip)
+void BaySickPlayerEditor::initKnob (juce::Slider& s, const juce::String& tooltip)
 {
     s.setSliderStyle      (juce::Slider::RotaryVerticalDrag);
     s.setTextBoxStyle     (juce::Slider::NoTextBox, false, 0, 0);
@@ -25,7 +25,7 @@ void VibePlayerEditor::initKnob (juce::Slider& s, const juce::String& tooltip)
     if (tooltip.isNotEmpty()) s.setTooltip (tooltip);
 }
 
-void VibePlayerEditor::initLabel (juce::Label& l, const juce::String& text)
+void BaySickPlayerEditor::initLabel (juce::Label& l, const juce::String& text)
 {
     l.setText              (text, juce::dontSendNotification);
     l.setJustificationType (juce::Justification::centred);
@@ -35,7 +35,7 @@ void VibePlayerEditor::initLabel (juce::Label& l, const juce::String& text)
 
 // A load that yields zero regions is otherwise indistinguishable from success:
 // the tab renames to the pick, keys play silence.
-static void warnIfNothingLoaded (const VibePlayerProcessor& proc, const juce::File& f)
+static void warnIfNothingLoaded (const BaySickPlayerProcessor& proc, const juce::File& f)
 {
     if (proc.hasAnyRegions())
         return;
@@ -47,7 +47,7 @@ static void warnIfNothingLoaded (const VibePlayerProcessor& proc, const juce::Fi
 }
 
 // ── Constructor ───────────────────────────────────────────────────────────────
-VibePlayerEditor::VibePlayerEditor (VibePlayerProcessor& p)
+BaySickPlayerEditor::BaySickPlayerEditor (BaySickPlayerProcessor& p)
     : juce::AudioProcessorEditor (p), mProc (p)
 {
     setLookAndFeel (&mLAF);
@@ -98,7 +98,7 @@ VibePlayerEditor::VibePlayerEditor (VibePlayerProcessor& p)
     // Cut Self mode (QA-CutSelfReview): Same Pitch (top/off) vs Cut All (bottom/on).
     mCutSelfModeTog.setupNamed ("SAME PITCH", "Cut only the retriggered note",
                                 "CUT ALL",    "Cut every ringing voice on each new note");
-    // Match the other VibePlayer labels (0xFFB0B0B0 per initLabel).
+    // Match the other BaySickPlayer labels (0xFFB0B0B0 per initLabel).
     mReverseTog.setLabelColour (juce::Colour (0xFFB0B0B0));
     mCutSelfTog.setLabelColour (juce::Colour (0xFFB0B0B0));
     mCutSelfModeTog.setLabelColour (juce::Colour (0xFFB0B0B0));
@@ -208,11 +208,11 @@ VibePlayerEditor::VibePlayerEditor (VibePlayerProcessor& p)
         addAndMakeVisible (*s);
     for (auto* l : { &mPanLbl,  &mStereoLbl,  &mTrebleLbl,  &mDriveLbl  })
         addAndMakeVisible (*l);
-    // Master Volume knob: VibeLAF with "volumeKnob=white" property -> Volume White filmstrip.
+    // Master Volume knob: BaySickLAF with "volumeKnob=white" property -> Volume White filmstrip.
     mVolumeKnob.setSliderStyle     (juce::Slider::RotaryVerticalDrag);
     mVolumeKnob.setTextBoxStyle    (juce::Slider::NoTextBox, false, 0, 0);
     mVolumeKnob.setPopupDisplayEnabled (true, true, nullptr);
-    mVolumeKnob.setLookAndFeel     (&VibeLAF::get());
+    mVolumeKnob.setLookAndFeel     (&BaySickLAF::get());
     mVolumeKnob.getProperties().set ("volumeKnob", "white");
     mVolumeKnob.setTooltip         ("Master volume (overall engine gain)");
     initLabel                       (mVolumeLbl, "MASTER VOL");
@@ -333,13 +333,13 @@ VibePlayerEditor::VibePlayerEditor (VibePlayerProcessor& p)
     mProc.apvts.state.addListener (this);
 }
 
-VibePlayerEditor::~VibePlayerEditor()
+BaySickPlayerEditor::~BaySickPlayerEditor()
 {
     mProc.apvts.state.removeListener (this);
     setLookAndFeel (nullptr);
 }
 
-void VibePlayerEditor::valueTreeRedirected (juce::ValueTree& tree)
+void BaySickPlayerEditor::valueTreeRedirected (juce::ValueTree& tree)
 {
     if (tree != mProc.apvts.state) return;
     setSliderDoubleClickDefaultsFromApvts (*this, mProc.apvts);
@@ -365,7 +365,7 @@ static juce::Rectangle<int> boxRectFor (int idx, int editorW, int editorH)
 }
 
 // ── Paint ─────────────────────────────────────────────────────────────────────
-void VibePlayerEditor::paint (juce::Graphics& g)
+void BaySickPlayerEditor::paint (juce::Graphics& g)
 {
     // Background
     g.fillAll (juce::Colour (0xFF1A1C1F));
@@ -410,7 +410,7 @@ void VibePlayerEditor::paint (juce::Graphics& g)
 }
 
 // ── Resized ───────────────────────────────────────────────────────────────────
-void VibePlayerEditor::resized()
+void BaySickPlayerEditor::resized()
 {
     // ── Box layout helpers ───────────────────────────────────────────────────
     auto box = [&] (int i) { return boxRectFor (i, getWidth(), getHeight()); };
@@ -517,13 +517,13 @@ void VibePlayerEditor::resized()
 }
 
 // ── Preset management ─────────────────────────────────────────────────────────
-juce::File VibePlayerEditor::presetsDir()
+juce::File BaySickPlayerEditor::presetsDir()
 {
     // P4b (2026-04-23): moved Roaming -> Documents per unified-folder layout.
     return AppPaths::appRoot().getChildFile ("Presets/BaySickPlayer");
 }
 
-void VibePlayerEditor::showPresetMenu()
+void BaySickPlayerEditor::showPresetMenu()
 {
     juce::PopupMenu menu;
     menu.addSectionHeader ("Load Sample");
@@ -597,7 +597,7 @@ void VibePlayerEditor::showPresetMenu()
 
     // ── 2026-04-23: in-app Core Library browser, filtered to melodic packs ──
     // Drum packs (Hip Hop Drums / EDM Drums / Percussion) are hidden because
-    // VibePlayer is the engine on Layer / Bass pages where drum samples don't
+    // BaySickPlayer is the engine on Layer / Bass pages where drum samples don't
     // belong.  Skipped entirely when this editor is embedded inside a drum
     // slot (mIsDrumContext = true) since the outer BaySickDrumsEditor's slot
     // picker already handles library selection with the drum-pack filter.
@@ -758,7 +758,7 @@ void VibePlayerEditor::showPresetMenu()
     menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (mPresetBtn));
 }
 
-// The two non-APVTS properties VibePlayerProcessor stamps onto apvts.state on
+// The two non-APVTS properties BaySickPlayerProcessor stamps onto apvts.state on
 // every sample load, so the load can be replayed.  Spelled again here because
 // savePreset has to lift them back off the state to build <Sample>; they are
 // the processor's persistence contract, not this editor's, so a change there
@@ -766,7 +766,7 @@ void VibePlayerEditor::showPresetMenu()
 static const juce::Identifier kSavedLoadKind ("bsp_loadKind");
 static const juce::Identifier kSavedLoadPath ("bsp_loadPath");
 
-void VibePlayerEditor::savePreset (const juce::String& name)
+void BaySickPlayerEditor::savePreset (const juce::String& name)
 {
     // 2026-04-26: user presets go into "My Presets/" subfolder.
     const auto dir = presetsDir().getChildFile ("My Presets");
@@ -810,7 +810,7 @@ void VibePlayerEditor::savePreset (const juce::String& name)
 // The previous flat-XML parser silently failed on this format (root tag check
 // rejected the wrapper element), so presets loaded the filename but never
 // updated the apvts and never reloaded the sample.
-void VibePlayerEditor::loadPreset (const juce::File& f)
+void BaySickPlayerEditor::loadPreset (const juce::File& f)
 {
     MissingFileReport::ScopedGesture gesture ("preset");
 

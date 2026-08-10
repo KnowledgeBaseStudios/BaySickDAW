@@ -130,7 +130,7 @@ public:
     // division.  Surfaced as a "Global Record-Quantize" submenu in the Record-
     // button dropdown alongside ASIO / MIDI mode.  Owner of the underlying state
     // (APVTS param `Unified_RecordQuantizeDiv`) lives in StandaloneEditor /
-    // VibeSynthProcessor; this bar just reads the current value (for the menu
+    // BaySickDAWProcessor; this bar just reads the current value (for the menu
     // tick) and writes new picks via the setter callback.  Values are the shared
     // 11-label snap scheme (0=Off, 1=Line, 2=Bar ... 10=1/6 Step).
     std::function<int()>      onGetRecordQuantizeDiv;

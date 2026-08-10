@@ -19,7 +19,7 @@ struct BlockContext
     bool   anySolo    = false;
     // 2026-05-06 (Batch 9b): project-level master_pan_law (0=-3dB constant
     // power / 1=linear / 2=-6dB).  Read once by PluginProcessor at the top
-    // of the dispatch block; bus tasks pass it to VibeGraph::processBus.
+    // of the dispatch block; bus tasks pass it to BaySickGraph::processBus.
     int    panLaw     = 0;
 
     // TS7 §6.9: SONG MODE for this block.  Freeze substitution is gated on it in

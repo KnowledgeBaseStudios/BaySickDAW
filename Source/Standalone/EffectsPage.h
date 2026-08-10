@@ -7,8 +7,8 @@
 #include "SharedUI.h"
 #include "UndoActions.h"
 
-class VibeSynthProcessor;  // forward declaration - full header in .cpp
-class VibeGraph;           // QA-ProjectSave Task 7: resolveChannelDsp parameter
+class BaySickDAWProcessor;  // forward declaration - full header in .cpp
+class BaySickGraph;           // QA-ProjectSave Task 7: resolveChannelDsp parameter
 
 // ── EffectsPage — the FX rack window ──────────────────────────────────────────
 // QA-ModelShell TS5 (2026-07-29), Jeff's spec.  A small window that is a rack
@@ -39,7 +39,7 @@ class EffectsPage : public juce::Component,
                     private juce::AudioProcessorValueTreeState::Listener
 {
 public:
-    EffectsPage(TrackSelectionManager& tsm, VibeSynthProcessor& processor);
+    EffectsPage(TrackSelectionManager& tsm, BaySickDAWProcessor& processor);
     ~EffectsPage() override;
 
     // Switch the channel dropdown to the named channel and update the rows.
@@ -100,14 +100,14 @@ public:
     // the channel ID and looks the rack up per apply rather than holding a
     // pointer that would dangle.  TS5's windows resolve through the same calls
     // for the same reason.
-    static void        resolveChannelDsp (VibeGraph& vg, int id,
+    static void        resolveChannelDsp (BaySickGraph& vg, int id,
                                           EffectRack*& rack, EQ8MsDSP*& eq);
-    static EffectRack* rackForChannelId  (VibeGraph& vg, int id);
+    static EffectRack* rackForChannelId  (BaySickGraph& vg, int id);
     // The PRE-rack EQ for a channel.  QA-ModelShell TS5: extracted from
     // onChannelChanged, where it was a second copy of the channel switch --
     // exactly the fork the batch plan says not to make.  The EQ windows and the
     // page now share this one.
-    static EQ8MsDSP*   preEqForChannelId (VibeGraph& vg, int id);
+    static EQ8MsDSP*   preEqForChannelId (BaySickGraph& vg, int id);
 
     // QA-ModelShell TS1: dropdown-channel-id -> rack-prefix vocabulary,
     // usable without the dropdown (the sweep below + any model trigger).
@@ -121,7 +121,7 @@ public:
     // DSP-targeting automation across ALL channels.  Model-triggered after
     // rack states land at project/template load so lanes apply without the
     // Effects page ever being opened.
-    static void registerRackAutomationForAllChannels (VibeSynthProcessor& proc);
+    static void registerRackAutomationForAllChannels (BaySickDAWProcessor& proc);
 
     // ── Dead hosted plugin recovery ──────────────────────────────────────────
     // A VST3 slot is dead in one of two ways and only one of them is
@@ -159,9 +159,9 @@ public:
     // explicit retry.  Instantiating a VST3 is expensive and a permanently
     // missing one would otherwise re-attempt forever on the row poll.
     // Message thread only.  Returns true when the slot came back alive.
-    static bool retryDeadPluginSlot  (VibeSynthProcessor& proc, int chId,
+    static bool retryDeadPluginSlot  (BaySickDAWProcessor& proc, int chId,
                                       EffectRack& rack, int slotIndex);
-    static void retryDeadPluginSlots (VibeSynthProcessor& proc);
+    static void retryDeadPluginSlots (BaySickDAWProcessor& proc);
 
     // The view-independent body: registrations capture (chId, uuid, type,
     // suffix) and resolve rack -> slot -> DSP at apply time (null-owner,
@@ -169,7 +169,7 @@ public:
     // Takes the processor rather than just the graph because a lookahead-class
     // param has to run the same PDC refresh the panel's onLatencyChanged does,
     // and that is setLatencySamples(updateBusLatencies()) -- both halves.
-    static void registerSlotAutomationFor (VibeSynthProcessor& proc, int chId,
+    static void registerSlotAutomationFor (BaySickDAWProcessor& proc, int chId,
                                            const juce::String& channelPrefix,
                                            EffectRack& rackRef, int slotIndex);
 
@@ -178,13 +178,13 @@ public:
     // mount path -- including the ones inside SlotComponent's own menus, which
     // used to rebuild a panel and silently leave the stamps and the
     // variant-keyed registration behind.
-    static void stampAndRegisterSlotEditor (VibeSynthProcessor& proc, int chId,
+    static void stampAndRegisterSlotEditor (BaySickDAWProcessor& proc, int chId,
                                             EffectRack& rack, int slotIndex,
                                             SlotComponent& target);
 
 private:
     TrackSelectionManager& mTSM;
-    VibeSynthProcessor&    mProcessor;
+    BaySickDAWProcessor&    mProcessor;
     EffectRack*            mRack { nullptr };
     UndoContext            mUndoCtx;
 

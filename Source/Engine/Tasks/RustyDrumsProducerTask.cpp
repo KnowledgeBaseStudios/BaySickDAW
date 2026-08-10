@@ -2,7 +2,7 @@
 #include "../../PluginProcessor.h"
 #include "../../BaySickRustyDrums/BaySickRustyDrumsProcessor.h"
 
-RustyDrumsProducerTask::RustyDrumsProducerTask (VibeSynthProcessor& processor)
+RustyDrumsProducerTask::RustyDrumsProducerTask (BaySickDAWProcessor& processor)
     : mProcessor (&processor)
 {
     // channelId stays at -1 (default) - producer-style task with no arena slot.
@@ -78,7 +78,7 @@ void RustyDrumsProducerTask::run()
     bool holdExpired = false;
     if (midiEmpty && noVoices && ! auditionPending)
     {
-        if (mProcessor->mRustyIdleBlocks >= VibeSynthProcessor::kIdleSuspendBlocks)
+        if (mProcessor->mRustyIdleBlocks >= BaySickDAWProcessor::kIdleSuspendBlocks)
             holdExpired = true;
         else
             ++mProcessor->mRustyIdleBlocks;

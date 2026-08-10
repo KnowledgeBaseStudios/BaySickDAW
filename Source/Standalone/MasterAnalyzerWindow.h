@@ -7,7 +7,7 @@
 #include <deque>
 #include <vector>
 
-class VibeSynthProcessor;
+class BaySickDAWProcessor;
 
 // ── MasterAnalyzerView — CL-044 + CL-227 (QA-ModelShell TS7) ─────────────────
 // The master analyzer AND the loudness-report face are ONE window, not two
@@ -41,7 +41,7 @@ class MasterAnalyzerView : public juce::Component,
 public:
     enum class ViewMode { Loudness, Spectrum };
 
-    explicit MasterAnalyzerView (VibeSynthProcessor& proc);
+    explicit MasterAnalyzerView (BaySickDAWProcessor& proc);
     ~MasterAnalyzerView() override;
 
     void paint (juce::Graphics&) override;
@@ -103,7 +103,7 @@ private:
     void paintSpectrum (juce::Graphics&, juce::Rectangle<float>);
     void paintReadouts (juce::Graphics&, juce::Rectangle<float>);
 
-    VibeSynthProcessor& mProc;
+    BaySickDAWProcessor& mProc;
 
     // juce::dsp::FFT is not default-constructible -- must be in the ctor init
     // list (CLAUDE.md gotcha).

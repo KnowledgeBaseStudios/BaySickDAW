@@ -44,7 +44,7 @@ namespace WindowChrome
                         bool live, const juce::String& title = {});
 
     // Puts a desktop window on the shared chrome: non-native title bar (so the
-    // VibeLAF overrides paint it) AND the shared strip height.
+    // BaySickLAF overrides paint it) AND the shared strip height.
     //
     // The height call is the load-bearing half.  Without it a DocumentWindow uses
     // JUCE's own titleBarHeight, which is also 26 -- so the shell and the desktop

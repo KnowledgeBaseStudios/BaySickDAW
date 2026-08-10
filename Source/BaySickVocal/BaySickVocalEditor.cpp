@@ -357,7 +357,7 @@ private:
     using CAtt = juce::AudioProcessorValueTreeState::ComboBoxAttachment;
 
     // Top half (QA-Fd: master Bypass removed with bsv_bypass)
-    VibeSlider       mMixSlider;
+    BaySickSlider       mMixSlider;
     juce::Label      mMixLbl;
     juce::ComboBox   mABSlot;
     std::unique_ptr<SAtt> mMixAtt;
@@ -369,10 +369,10 @@ private:
     juce::Label      mKeyLbl;
     juce::ComboBox   mScaleCombo;
     juce::Label      mScaleLbl;
-    VibeSlider       mRetuneSpeed;       juce::Label mRetuneSpeedLbl;
-    VibeSlider       mStrength;          juce::Label mStrengthLbl;
-    VibeSlider       mHumanize;          juce::Label mHumanizeLbl;
-    VibeSlider       mThroatShift;       juce::Label mThroatShiftLbl;
+    BaySickSlider       mRetuneSpeed;       juce::Label mRetuneSpeedLbl;
+    BaySickSlider       mStrength;          juce::Label mStrengthLbl;
+    BaySickSlider       mHumanize;          juce::Label mHumanizeLbl;
+    BaySickSlider       mThroatShift;       juce::Label mThroatShiftLbl;
     juce::TextButton mFormantBtn;
     juce::Label      mPitchRefLbl;
 

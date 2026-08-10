@@ -1,11 +1,11 @@
-#include "VibePlayerProcessor.h"
+#include "BaySickPlayerProcessor.h"
 #include "../SampleLibrary.h"   // QA-ProjectSave Task 5: stable-root sample refs
 #include "../MissingFileReport.h"
 #include "../PluginProcessor.h"   // host audio shield around every sample load
 #include "../ProjectFileResolver.h"
-#include "VibePlayerEditor.h"
+#include "BaySickPlayerEditor.h"
 
-VibePlayerProcessor::VibePlayerProcessor (const juce::String& trackId, juce::UndoManager* undoMgr)
+BaySickPlayerProcessor::BaySickPlayerProcessor (const juce::String& trackId, juce::UndoManager* undoMgr)
     : juce::AudioProcessor (BusesProperties()
           .withOutput ("Output", juce::AudioChannelSet::stereo(), true)),
       apvts (*this, undoMgr, "BaySickPlayerState",
@@ -33,24 +33,24 @@ VibePlayerProcessor::VibePlayerProcessor (const juce::String& trackId, juce::Und
 }
 
 //==============================================================================
-bool VibePlayerProcessor::isBusesLayoutSupported (const BusesLayout& layouts) const
+bool BaySickPlayerProcessor::isBusesLayoutSupported (const BusesLayout& layouts) const
 {
     return layouts.getMainOutputChannelSet() == juce::AudioChannelSet::stereo()
         || layouts.getMainOutputChannelSet() == juce::AudioChannelSet::mono();
 }
 
-void VibePlayerProcessor::prepareToPlay (double sampleRate, int maxBlockSize)
+void BaySickPlayerProcessor::prepareToPlay (double sampleRate, int maxBlockSize)
 {
     mSynth.prepare (sampleRate, maxBlockSize);
 }
 
-juce::AudioProcessorEditor* VibePlayerProcessor::createEditor()
+juce::AudioProcessorEditor* BaySickPlayerProcessor::createEditor()
 {
-    return new VibePlayerEditor (*this);
+    return new BaySickPlayerEditor (*this);
 }
 
 //==============================================================================
-void VibePlayerProcessor::processBlock (juce::AudioBuffer<float>& buffer,
+void BaySickPlayerProcessor::processBlock (juce::AudioBuffer<float>& buffer,
                                          juce::MidiBuffer& midi)
 {
     juce::ScopedNoDenormals noDenormals;
@@ -94,7 +94,7 @@ void VibePlayerProcessor::processBlock (juce::AudioBuffer<float>& buffer,
     // Sub-M: keyswitch pre-scan.  Walk the MIDI buffer once; for every
     // note-on/note-off whose MIDI note is a keyswitch (per the loaded SFZ's
     // sw_lokey..sw_hikey range), route to the manager's keyswitch state
-    // handlers + STRIP the event from the buffer.  VibeSynth never sees
+    // handlers + STRIP the event from the buffer.  BaySickPlayerSynth never sees
     // keyswitch events - no voice-stealing trigger, no wasted cycles.
     // Non-keyswitch events copy through unchanged.  When no SFZ is loaded
     // (or no regions declare sw_lokey/sw_hikey), isKeyswitchNote returns
@@ -134,7 +134,7 @@ void VibePlayerProcessor::processBlock (juce::AudioBuffer<float>& buffer,
 }
 
 //==============================================================================
-void VibePlayerProcessor::updateFromApvts()
+void BaySickPlayerProcessor::updateFromApvts()
 {
     auto get = [&] (const char* name) -> float
     {
@@ -240,7 +240,7 @@ void VibePlayerProcessor::updateFromApvts()
 
 //==============================================================================
 juce::AudioProcessorValueTreeState::ParameterLayout
-VibePlayerProcessor::createLayout (const juce::String& p)
+BaySickPlayerProcessor::createLayout (const juce::String& p)
 {
     juce::AudioProcessorValueTreeState::ParameterLayout layout;
     auto vid = [] (const juce::String& id) { return juce::ParameterID { id, 1 }; };
@@ -389,7 +389,7 @@ static const juce::Identifier kLoadKindProp ("bsp_loadKind");
 static const juce::Identifier kLoadPathProp ("bsp_loadPath");
 static const juce::Identifier kLoadNormProp ("bsp_loadNormalize");   // MIDI root; -1 = none
 
-void VibePlayerProcessor::loadIntoManager (const juce::String& kind, const juce::File& f,
+void BaySickPlayerProcessor::loadIntoManager (const juce::String& kind, const juce::File& f,
                                            int normalizeRoot)
 {
     const bool isFolder = (kind == "folder");
@@ -401,7 +401,7 @@ void VibePlayerProcessor::loadIntoManager (const juce::String& kind, const juce:
     // drops the shared_ptr each region holds, then one push_back per decoded
     // file - while the audio thread walks the same vector with no lock of its
     // own (isKeyswitchNote per MIDI event, findRegion + the region field reads
-    // in VibeVoice::startNote).  The push_back reallocation is the sharp edge:
+    // in BaySickPlayerVoice::startNote).  The push_back reallocation is the sharp edge:
     // it frees the old block after moving, so a reader that already loaded the
     // size can index released heap.  normalizeRootNotes writes every region's
     // rootNote and has the same exposure, which is why it sits inside the
@@ -429,7 +429,7 @@ void VibePlayerProcessor::loadIntoManager (const juce::String& kind, const juce:
     if (mHost != nullptr) mHost->setProjectLoadInProgress (shieldWasUp);
 }
 
-void VibePlayerProcessor::loadSampleFolder (const juce::File& folder, int normalizeRoot)
+void BaySickPlayerProcessor::loadSampleFolder (const juce::File& folder, int normalizeRoot)
 {
     loadIntoManager ("folder", folder, normalizeRoot);
     apvts.state.setProperty (kLoadKindProp, "folder",                  nullptr);
@@ -437,7 +437,7 @@ void VibePlayerProcessor::loadSampleFolder (const juce::File& folder, int normal
     apvts.state.setProperty (kLoadNormProp, normalizeRoot,              nullptr);
 }
 
-void VibePlayerProcessor::loadSampleSFZ (const juce::File& sfzFile, int normalizeRoot)
+void BaySickPlayerProcessor::loadSampleSFZ (const juce::File& sfzFile, int normalizeRoot)
 {
     loadIntoManager ("sfz", sfzFile, normalizeRoot);
     apvts.state.setProperty (kLoadKindProp, "sfz",                      nullptr);
@@ -445,7 +445,7 @@ void VibePlayerProcessor::loadSampleSFZ (const juce::File& sfzFile, int normaliz
     apvts.state.setProperty (kLoadNormProp, normalizeRoot,              nullptr);
 }
 
-void VibePlayerProcessor::loadSampleFile (const juce::File& wavFile, int normalizeRoot)
+void BaySickPlayerProcessor::loadSampleFile (const juce::File& wavFile, int normalizeRoot)
 {
     loadIntoManager ("file", wavFile, normalizeRoot);
     apvts.state.setProperty (kLoadKindProp, "file",                     nullptr);
@@ -453,13 +453,13 @@ void VibePlayerProcessor::loadSampleFile (const juce::File& wavFile, int normali
     apvts.state.setProperty (kLoadNormProp, normalizeRoot,              nullptr);
 }
 
-void VibePlayerProcessor::getStateInformation (juce::MemoryBlock& dest)
+void BaySickPlayerProcessor::getStateInformation (juce::MemoryBlock& dest)
 {
     if (auto xml = apvts.copyState().createXml())
         copyXmlToBinary (*xml, dest);
 }
 
-void VibePlayerProcessor::setStateInformation (const void* data, int sz)
+void BaySickPlayerProcessor::setStateInformation (const void* data, int sz)
 {
     if (auto xml = getXmlFromBinary (data, sz))
     {

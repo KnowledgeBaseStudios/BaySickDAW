@@ -10,7 +10,7 @@
 // 760×340 panel, two-tone amp/cab faceplate using existing widget vocabulary
 // (VKnob / DualLabelToggle / ChickenHeadSelector).  No skeuomorphic filmstrips
 // - those were spec'd in NAM & IR Loader.txt §3.2 but Jeff's house style is
-// VibeLAF.  Picker buttons accept right-click for a recent-files popup; the
+// BaySickLAF.  Picker buttons accept right-click for a recent-files popup; the
 // whole component is also a FileDragAndDropTarget so .nam → loadNamModel and
 // .wav → loadImpulseResponse just work.
 // ─────────────────────────────────────────────────────────────────────────────

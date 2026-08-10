@@ -1,5 +1,5 @@
 #include "WorkspaceWindow.h"
-#include "SharedUI.h"   // VibeLAF + PageMenuBar
+#include "SharedUI.h"   // BaySickLAF + PageMenuBar
 #include "WindowChrome.h"   // TS7 §9.1: the one title-strip look
 #include "../ProjectManager.h"
 
@@ -71,7 +71,7 @@ WorkspaceWindow::WorkspaceWindow (juce::String persistKey, juce::String title)
     setOpaque (true);
 
     mCloseBtn = std::make_unique<juce::TextButton> ("x");
-    mCloseBtn->setLookAndFeel (&VibeLAF::get());
+    mCloseBtn->setLookAndFeel (&BaySickLAF::get());
     mCloseBtn->setTooltip ("Close this window (the engine keeps running)");
     mCloseBtn->onClick = [this]
     {

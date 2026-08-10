@@ -1,13 +1,13 @@
 #include "PluginEditor.h"
 using namespace juce;
 
-VibesynthEditor::VibesynthEditor(VibeSynthProcessor& p)
+BaySickDAWPluginEditor::BaySickDAWPluginEditor(BaySickDAWProcessor& p)
     : AudioProcessorEditor(p), mProcessor(p)
 {
     setSize(kW, kH);
 }
 
-void VibesynthEditor::paint(Graphics& g)
+void BaySickDAWPluginEditor::paint(Graphics& g)
 {
     g.fillAll(Colour(0xff1c1c1e));
 

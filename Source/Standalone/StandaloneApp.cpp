@@ -4,7 +4,7 @@
 #include "HeavyOperationOverlay.h"
 #include "BaySickAssets.h"   // BaySickDAWLogo_png / _pngSize (logo for splash + window icon)
 #include "EffectPresetIO.h"  // H-9 prep: seed factory presets at launch
-#include "../VibeGraph.h"    // MeterLatencyComp::recomputeFromDevice (2026-05-02)
+#include "../BaySickGraph.h"    // MeterLatencyComp::recomputeFromDevice (2026-05-02)
 #include "../ProjectManager.h"            // ProjectManager::getSettingsFile (Batch 10 Phase 3)
 #include "../Engine/RenderEngineFlags.h"  // gMultiThreadedEngineEnabled atomic (Batch 10 Phase 3)
 
@@ -12,12 +12,12 @@
  #include <windows.h>   // SetPriorityClass (process priority class)
 #endif
 
-// ── VibeSynthWindow ───────────────────────────────────────────────────────────
+// ── BaySickDAWWindow ───────────────────────────────────────────────────────────
 // Subclass so the OS close button actually quits the application.
-class VibeSynthWindow : public juce::DocumentWindow
+class BaySickDAWWindow : public juce::DocumentWindow
 {
 public:
-    VibeSynthWindow()
+    BaySickDAWWindow()
         : juce::DocumentWindow("BaySickDAW", juce::Colours::black,
                                juce::DocumentWindow::allButtons)
     {}
@@ -415,7 +415,7 @@ juce::Optional<juce::AudioPlayHead::PositionInfo> StandalonePlayHead::getPositio
 }
 
 // ── Audio settings persistence ────────────────────────────────────────────────
-juce::File VibesynthStandaloneApp::getAudioSettingsFile()
+juce::File BaySickDAWStandaloneApp::getAudioSettingsFile()
 {
     // P4b (2026-04-23): canonical location moved to Documents\BaySickDAW\.
     // On the FIRST launch with this build, ProjectManager's migration has
@@ -435,12 +435,12 @@ juce::File VibesynthStandaloneApp::getAudioSettingsFile()
 // J-A2 (2026-05-04): master-output routing persistence.  Lives in a sibling
 // file of audio_settings.xml so it stays per-machine (different audio
 // interfaces per workstation).
-juce::File VibesynthStandaloneApp::getMasterOutputFile()
+juce::File BaySickDAWStandaloneApp::getMasterOutputFile()
 {
     return getAudioSettingsFile().getSiblingFile ("master_output.xml");
 }
 
-void VibesynthStandaloneApp::loadMasterOutputRouting()
+void BaySickDAWStandaloneApp::loadMasterOutputRouting()
 {
     const auto f = getMasterOutputFile();
     if (! f.existsAsFile()) return;
@@ -452,7 +452,7 @@ void VibesynthStandaloneApp::loadMasterOutputRouting()
     MasterOutputRouting::gMasterIsMono.store (mono, std::memory_order_relaxed);
 }
 
-void VibesynthStandaloneApp::saveMasterOutputRouting()
+void BaySickDAWStandaloneApp::saveMasterOutputRouting()
 {
     juce::XmlElement xml ("MASTEROUT");
     xml.setAttribute ("firstChannel",
@@ -471,7 +471,7 @@ void VibesynthStandaloneApp::saveMasterOutputRouting()
 // RecentIRFiles, RecentProjects, etc.) the file already contains.  Default
 // is true when the key is missing, which matches the constexpr-default we
 // shipped in Phase 1 + 2.
-void VibesynthStandaloneApp::loadMultiCoreRenderingPref()
+void BaySickDAWStandaloneApp::loadMultiCoreRenderingPref()
 {
     const auto f = ProjectManager::getSettingsFile();
     if (! f.existsAsFile()) return;   // first launch -- keep the in-memory default (true)
@@ -483,7 +483,7 @@ void VibesynthStandaloneApp::loadMultiCoreRenderingPref()
     {
         const bool on = node->getBoolAttribute ("on", true);
         // release-store pairs with the worker threads' acquire-load in
-        // VibeThreadPool::workerLoop (QA-Ef, 2026-05-21).  Called before
+        // BaySickThreadPool::workerLoop (QA-Ef, 2026-05-21).  Called before
         // mDeviceManager->initialise so the very first audio callback already
         // sees the persisted value -- workers either run the graph in parallel
         // (true) or park immediately so the audio thread drains it itself
@@ -492,7 +492,7 @@ void VibesynthStandaloneApp::loadMultiCoreRenderingPref()
     }
 }
 
-void VibesynthStandaloneApp::saveMultiCoreRenderingPref()
+void BaySickDAWStandaloneApp::saveMultiCoreRenderingPref()
 {
     const auto f = ProjectManager::getSettingsFile();
     f.getParentDirectory().createDirectory();
@@ -521,7 +521,7 @@ void VibesynthStandaloneApp::saveMultiCoreRenderingPref()
 // <MidiTriggerVelocity fixed="0|1"/> in settings.xml, same sibling-preserving
 // pattern as MultiCoreRendering above.  Default (key missing) = From
 // controller, matching the in-memory default.
-void VibesynthStandaloneApp::loadMidiTriggerVelocityPref()
+void BaySickDAWStandaloneApp::loadMidiTriggerVelocityPref()
 {
     const auto f = ProjectManager::getSettingsFile();
     if (! f.existsAsFile()) return;
@@ -534,7 +534,7 @@ void VibesynthStandaloneApp::loadMidiTriggerVelocityPref()
                                               std::memory_order_release);
 }
 
-void VibesynthStandaloneApp::saveMidiTriggerVelocityPref()
+void BaySickDAWStandaloneApp::saveMidiTriggerVelocityPref()
 {
     const auto f = ProjectManager::getSettingsFile();
     f.getParentDirectory().createDirectory();
@@ -555,7 +555,7 @@ void VibesynthStandaloneApp::saveMidiTriggerVelocityPref()
     root->writeTo (f);
 }
 
-void VibesynthStandaloneApp::saveAudioSettings()
+void BaySickDAWStandaloneApp::saveAudioSettings()
 {
     if (!mDeviceManager) return;
     auto xml = mDeviceManager->createStateXml();
@@ -603,7 +603,7 @@ void VibesynthStandaloneApp::saveAudioSettings()
     f.replaceWithText(xml->toString());
 }
 
-void VibesynthStandaloneApp::changeListenerCallback(juce::ChangeBroadcaster*)
+void BaySickDAWStandaloneApp::changeListenerCallback(juce::ChangeBroadcaster*)
 {
     // Defer to next message-loop tick so the device manager finishes switching
     // before we serialize its state. Calling saveAudioSettings() synchronously
@@ -628,7 +628,7 @@ void VibesynthStandaloneApp::changeListenerCallback(juce::ChangeBroadcaster*)
     });
 }
 
-// ── VibesynthStandaloneApp ────────────────────────────────────────────────────
+// ── BaySickDAWStandaloneApp ────────────────────────────────────────────────────
 // Stamps every logged line with seconds since the logger was installed, which
 // is effectively seconds since launch.  Startup blocks the message thread in
 // several places (driver opens above all), and without elapsed time in the file
@@ -653,14 +653,14 @@ private:
     const double mStartMs;
 };
 
-void VibesynthStandaloneApp::initialise(const juce::String&)
+void BaySickDAWStandaloneApp::initialise(const juce::String&)
 {
    #if JUCE_WINDOWS
     // Lift the whole process above NORMAL class so audio/render scheduling
     // wins against background apps under load.  ABOVE_NORMAL, not HIGH or
     // REALTIME -- the aggressive classes starve input/compositing and can
     // priority-invert against drivers.  The per-thread boost for the render
-    // workers is MMCSS "Pro Audio" in VibeThreadPool::workerLoop.
+    // workers is MMCSS "Pro Audio" in BaySickThreadPool::workerLoop.
     SetPriorityClass (GetCurrentProcess(), ABOVE_NORMAL_PRIORITY_CLASS);
    #endif
 
@@ -739,7 +739,7 @@ void VibesynthStandaloneApp::initialise(const juce::String&)
     EffectPresetIO::seedFactoryPresets();
     juce::Logger::writeToLog ("startup: factory presets seeded");
 
-    mProcessor    = std::make_unique<VibeSynthProcessor>();
+    mProcessor    = std::make_unique<BaySickDAWProcessor>();
     mPlayHead     = std::make_unique<StandalonePlayHead>();
     mProcessor->setPlayHead(mPlayHead.get());
     mProcessor->setSeekDiscontinuityFlag(mPlayHead->getSeekDiscontinuityFlag());   // QA-Ed: backward-seek note-off flush
@@ -1205,7 +1205,7 @@ void VibesynthStandaloneApp::initialise(const juce::String&)
 
     juce::Logger::writeToLog ("startup: creating main window + editor");
 
-    mWindow = std::make_unique<VibeSynthWindow>();
+    mWindow = std::make_unique<BaySickDAWWindow>();
     // Window title-bar icon (reuses the embedded splash logo).
     {
         const juce::Image winIcon = juce::ImageCache::getFromMemory(
@@ -1246,7 +1246,7 @@ void VibesynthStandaloneApp::initialise(const juce::String&)
     juce::Logger::writeToLog ("startup: COMPLETE - main window visible");
 }
 
-void VibesynthStandaloneApp::shutdown()
+void BaySickDAWStandaloneApp::shutdown()
 {
     // Only auto-save the current device state if the user hasn't written a
     // pending-restart settings file.  If a pending file exists it means the
@@ -1342,7 +1342,7 @@ void VibesynthStandaloneApp::shutdown()
 // queue (CC -> APVTS dispatch) in processBlock.  Two parallel paths: the
 // live collector loses device origin (fine for engine-page MIDI), the learn
 // queue preserves it (so device-locked mappings can filter).
-void VibesynthStandaloneApp::handleIncomingMidiMessage (juce::MidiInput* source,
+void BaySickDAWStandaloneApp::handleIncomingMidiMessage (juce::MidiInput* source,
                                                          const juce::MidiMessage& message)
 {
     if (mProcessor == nullptr) return;
@@ -1367,4 +1367,4 @@ void VibesynthStandaloneApp::handleIncomingMidiMessage (juce::MidiInput* source,
     }
 }
 
-START_JUCE_APPLICATION(VibesynthStandaloneApp)
+START_JUCE_APPLICATION(BaySickDAWStandaloneApp)

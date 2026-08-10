@@ -237,7 +237,7 @@ public:
 
     // ── Linear vertical fader - standard fader-bar filmstrip + amber underglow
     // 2026-04-19 (S1.5b) per Jeff: "no fader bar like on every other fader in
-    // the app and we have no under glow". Switched to the same pattern VibeLAF
+    // the app and we have no under glow". Switched to the same pattern BaySickLAF
     // uses for non-mixer/non-EQ vertical faders: Filmstrips::fader() (128x128,
     // 31 frames - a real fader-bar visual with a metallic cap + grip lines)
     // plus an amber under-glow gradient from cap-bottom to track-bottom.

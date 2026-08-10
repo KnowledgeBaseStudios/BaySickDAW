@@ -17,7 +17,7 @@ Library - no drum samples ship inside the executable.
 `BaySickRustyDrumsProcessor`
 (`Source/BaySickRustyDrums/BaySickRustyDrumsProcessor.h/.cpp`) is a
 `juce::AudioProcessor` wrapping one `sfz::Sfizz` instance. It is
-**processor-owned** (held by `VibeSynthProcessor`, not by `EngineRig`) and
+**processor-owned** (held by `BaySickDAWProcessor`, not by `EngineRig`) and
 reached through `getBaySickRustyDrums()`. Its parameter prefix is `brd_`, with no
 page index, because there is only ever one.
 
@@ -66,7 +66,7 @@ and no remap layer. A curated table turns each internal name into a readable
 sound plus articulation ("Snare / Sidestick", "Hi-hat / Half Open Tip"); an
 unknown name falls back to a title-cased version of itself.
 
-**Kit loading** (`VibeSynthProcessor::loadBaySickRustyDrumsKit`) keeps the
+**Kit loading** (`BaySickDAWProcessor::loadBaySickRustyDrumsKit`) keeps the
 engine's active flag **false** for the whole load and raises the host processBlock
 shield around the entire mutation window - engine creation, prepare, producer-task
 registration, the SFZ parse, dispatcher task-list edits and the strip-insert loop.

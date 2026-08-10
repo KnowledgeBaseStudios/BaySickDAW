@@ -25,7 +25,7 @@ namespace
     constexpr int kFilenameW  = 320;
 }
 
-InstPage::InstPage (VibeSynthProcessor& proc, int pageIndex)
+InstPage::InstPage (BaySickDAWProcessor& proc, int pageIndex)
     : mPageIndex (pageIndex),
       mTabName   ("LiveInst " + juce::String (pageIndex + 1))
 {
@@ -189,7 +189,7 @@ InstPage::~InstPage()
 // unified config builder defined further down.  One config covers every Source
 // mode (LiveInput / BaySickGuitars / BaySickBasses).
 static PagePresetIO::PageChainConfig
-makeInstPresetConfig (VibeSynthProcessor& processor,
+makeInstPresetConfig (BaySickDAWProcessor& processor,
                        int                 pageIndex,
                        InstPage::Source    source,
                        juce::AudioProcessor* pedalsProc,
@@ -271,7 +271,7 @@ void InstPage::detachDirtyListener()
 // Inst-kind insert at this pageIndex; no bus rack since the Inst Bus is
 // shared across every Inst tab.
 static PagePresetIO::PageChainConfig
-makeInstPresetConfig (VibeSynthProcessor& processor,
+makeInstPresetConfig (BaySickDAWProcessor& processor,
                        int                 pageIndex,
                        InstPage::Source    source,
                        juce::AudioProcessor* pedalsProc,
@@ -1203,7 +1203,7 @@ void InstPage::toggleLockUndoable()
                       after ? "Lock Inst" : "Unlock Inst");
 }
 
-void InstPage::setProcessor (VibeSynthProcessor* p)
+void InstPage::setProcessor (BaySickDAWProcessor* p)
 {
     mFullProcessor = p;
     // J-6 EQ unification (2026-05-03): page-level EQ binding removed; pre-rack

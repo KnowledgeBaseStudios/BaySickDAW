@@ -2,9 +2,9 @@
 #include "../FrozenSourceRead.h"   // TS7 6.8: scope-matched frozen block read
 #include "../../PluginProcessor.h"
 #include "../../PatternManager.h"
-#include "../../VibeGraph.h"
+#include "../../BaySickGraph.h"
 #include "../../DSP/EngineSidechainHelper.h"
-#include "../../VibePlayer/VibePlayerProcessor.h"   // QA-ClipPlayback Task 2: complete type for the dynamic_cast in setClipEngine
+#include "../../BaySickPlayer/BaySickPlayerProcessor.h"   // QA-ClipPlayback Task 2: complete type for the dynamic_cast in setClipEngine
 #include "../SidechainPullHelper.h"
 
 #include <atomic>
@@ -12,8 +12,8 @@
 
 CompositeAudioInsertTask::CompositeAudioInsertTask (int                 row,
                                                     int                 channelIdIn,
-                                                    VibeGraph&          graph,
-                                                    VibeSynthProcessor& processor)
+                                                    BaySickGraph&          graph,
+                                                    BaySickDAWProcessor& processor)
     : mIndex (row),
       mGraph (&graph),
       mProcessor (&processor)
@@ -26,7 +26,7 @@ void CompositeAudioInsertTask::setClipEngine (juce::AudioProcessor* engine)
     mClipEngine.store (engine, std::memory_order_release);
     mScEngine .store (dynamic_cast<ISidechainEngine*> (engine),
                       std::memory_order_release);
-    mClipPlayer.store (dynamic_cast<VibePlayerProcessor*> (engine),
+    mClipPlayer.store (dynamic_cast<BaySickPlayerProcessor*> (engine),
                        std::memory_order_release);
 }
 
@@ -77,7 +77,7 @@ void CompositeAudioInsertTask::run()
     // §6.6's stale-plays-live rule.
     if (FreezeRead::serveBlock (*this, *mCtx, blockView, n))
     {
-        mGraph->processInsert (VibeGraph::InsertKind::Audio, mIndex,
+        mGraph->processInsert (BaySickGraph::InsertKind::Audio, mIndex,
                                blockView, mCtx->bpm, mCtx->anySolo);
         return;
     }
@@ -100,11 +100,11 @@ void CompositeAudioInsertTask::run()
         // source taps), so engine SC and rack/EQ SC read identical keys.
         if (auto* sc = mScEngine.load (std::memory_order_acquire))
         {
-            const VibeGraph::ScRecvArray scArr = mGraph->getScRecvArray (channelId);
-            juce::AudioBuffer<float>* scBufs[VibeGraph::kMaxScRecvSlots] = {};
-            for (int i = 0; i < VibeGraph::kMaxScRecvSlots; ++i)
+            const BaySickGraph::ScRecvArray scArr = mGraph->getScRecvArray (channelId);
+            juce::AudioBuffer<float>* scBufs[BaySickGraph::kMaxScRecvSlots] = {};
+            for (int i = 0; i < BaySickGraph::kMaxScRecvSlots; ++i)
                 scBufs[i] = scArr[(size_t) i];
-            sc->setSidechainBuffers (scBufs, VibeGraph::kMaxScRecvSlots);
+            sc->setSidechainBuffers (scBufs, BaySickGraph::kMaxScRecvSlots);
         }
 
         juce::MidiBuffer  emptyMidi;
@@ -147,7 +147,7 @@ void CompositeAudioInsertTask::run()
         if (auto* p = mProcessor->apvts.getRawParameterValue ("masterGain"))
             masterGain *= p->load();
 
-        VibeSynthProcessor::AudioClipBlockContext clipCtx;
+        BaySickDAWProcessor::AudioClipBlockContext clipCtx;
         clipCtx.bpm           = bpm;
         clipCtx.anySolo       = mCtx->anySolo;
         clipCtx.secPerBeat    = secPerBeat;
@@ -167,8 +167,8 @@ void CompositeAudioInsertTask::run()
     // -- Single insert-chain pass on the summed sources ----------------
     // polarity -> preEq -> width -> rack -> postEq -> fader x mute x solo ->
     // PDC -> peak.  One processInsert per block now (was per-flow + per-clip);
-    // see the CAS-max note at VibeGraph::processInsert.
+    // see the CAS-max note at BaySickGraph::processInsert.
     if (anySource)
-        mGraph->processInsert (VibeGraph::InsertKind::Audio, mIndex,
+        mGraph->processInsert (BaySickGraph::InsertKind::Audio, mIndex,
                                blockView, mCtx->bpm, mCtx->anySolo);
 }

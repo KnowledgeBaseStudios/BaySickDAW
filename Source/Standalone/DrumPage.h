@@ -36,14 +36,14 @@ struct KitDrumInfo
 };
 //
 // Engine choices: BaySickPlayer | BaySickSynth | BaySickBass | Harmless
-// Per-page APVTS prefix: drm_{N}.  Engine InsertNode: VibeGraph::InsertKind::Drum
+// Per-page APVTS prefix: drm_{N}.  Engine InsertNode: BaySickGraph::InsertKind::Drum
 // at index pageIndex (mixer_drum_<N>_*).
 // ─────────────────────────────────────────────────────────────────────────────
 class DrumPage : public juce::Component,
                  public juce::Timer
 {
 public:
-    DrumPage(VibeSynthProcessor& p, PatternManager& pm, int pageIndex);
+    DrumPage(BaySickDAWProcessor& p, PatternManager& pm, int pageIndex);
     ~DrumPage() override;
 
     void paint  (juce::Graphics&) override;
@@ -208,7 +208,7 @@ private:
     // 0 = not learning.  Absolute ms deadline for the 30 s auto-cancel.
     juce::uint32 mLearnDeadlineMs { 0 };
 
-    VibeSynthProcessor& mProcessor;
+    BaySickDAWProcessor& mProcessor;
     PatternManager&     mPM;
     int                 mPageIndex;   // 0..kMaxDrumPages-1
     juce::Colour        mPageColor;

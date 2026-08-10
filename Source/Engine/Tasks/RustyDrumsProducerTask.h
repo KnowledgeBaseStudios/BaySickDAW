@@ -7,7 +7,7 @@
 #include "IdleSuspendFade.h"
 
 class BaySickRustyDrumsProcessor;
-class VibeSynthProcessor;
+class BaySickDAWProcessor;
 
 // RustyDrumsProducerTask
 // ----------------------
@@ -24,18 +24,18 @@ class VibeSynthProcessor;
 // IdleSuspendFade::kFadeOutSeconds and only then skip processStrips entirely.
 // Wakes on the next block where any gate fails, ramping back to unity from
 // wherever the fade had got to.  Counter lives in
-// VibeSynthProcessor::mRustyIdleBlocks.
+// BaySickDAWProcessor::mRustyIdleBlocks.
 //
 // QA-Ef (2026-05-21): this is the live audio plumbing.
 class RustyDrumsProducerTask : public RenderTask
 {
 public:
-    RustyDrumsProducerTask (VibeSynthProcessor& processor);
+    RustyDrumsProducerTask (BaySickDAWProcessor& processor);
 
     void run() override;
 
 private:
-    VibeSynthProcessor* mProcessor = nullptr;
+    BaySickDAWProcessor* mProcessor = nullptr;
 
     // Idle-suspend shutdown envelope (see IdleSuspendFade.h).
     IdleSuspendFade mSuspendFade;

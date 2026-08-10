@@ -67,7 +67,7 @@ public:
     bool isBusesLayoutSupported (const BusesLayout&) const override;
 
     // ── Public interface ──────────────────────────────────────────────────────
-    // QA-UndoCoverage: the GLOBAL manager (VibeSynthProcessor-owned) -- ARIA
+    // QA-UndoCoverage: the GLOBAL manager (BaySickDAWProcessor-owned) -- ARIA
     // panel edits transact into the one app history.  Reference declared BEFORE
     // apvts so it is bound by the time the apvts constructor stores its address.
     juce::UndoManager&                 mUndoManager;

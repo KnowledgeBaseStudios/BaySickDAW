@@ -69,7 +69,7 @@ bool ProjectManager::isValidProjectName (const juce::String& name)
 // ──────────────────────────────────────────────────────────────────────────────
 // Construction
 // ──────────────────────────────────────────────────────────────────────────────
-ProjectManager::ProjectManager (VibeSynthProcessor& processor)
+ProjectManager::ProjectManager (BaySickDAWProcessor& processor)
     : mProcessor (processor)
 {
     // QA-UndoCoverage Task 9: the dirty edge now originates on the

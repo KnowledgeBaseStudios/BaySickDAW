@@ -6,14 +6,14 @@
 #include "../RenderTask.h"
 #include "../BlockContext.h"
 
-class VibeGraph;
-class VibeSynthProcessor;
+class BaySickGraph;
+class BaySickDAWProcessor;
 
 // MasterTask
 // ----------
 // The terminal task in the render graph.  Sums upstream bus + direct-to-
 // master predecessor outputs into its arena slot, runs the master DSP via
-// VibeGraph::processMasterBus (extracted Batch 8), and signals the
+// BaySickGraph::processMasterBus (extracted Batch 8), and signals the
 // dispatcher's mAllDone flag so the parallel pump unblocks.
 //
 // channelId = MixerChannelIds::kMaster (4).
@@ -30,7 +30,7 @@ class VibeSynthProcessor;
 //   3. Call mGraph->processMasterBus(blockView, mCtx->bpm) - runs master
 //      rack + EQ + fader + peak drain in-place.
 //   4. Set mDoneFlag.store(true, memory_order_release).  This is the
-//      signal VibeThreadPool::runUntilOrTimeout is polling; release ordering
+//      signal BaySickThreadPool::runUntilOrTimeout is polling; release ordering
 //      pairs with the dispatcher's acquire on the same flag and publishes
 //      our writes to the arena slot.
 //
@@ -40,14 +40,14 @@ class VibeSynthProcessor;
 class MasterTask : public RenderTask
 {
 public:
-    MasterTask (VibeGraph&          graph,
-                VibeSynthProcessor& processor,
+    MasterTask (BaySickGraph&          graph,
+                BaySickDAWProcessor& processor,
                 std::atomic<bool>&  doneFlag);
 
     void run() override;
 
 private:
-    VibeGraph*          mGraph     = nullptr;
-    VibeSynthProcessor* mProcessor = nullptr;
+    BaySickGraph*          mGraph     = nullptr;
+    BaySickDAWProcessor* mProcessor = nullptr;
     std::atomic<bool>*  mDoneFlag  = nullptr;   // dispatcher's mAllDone
 };
