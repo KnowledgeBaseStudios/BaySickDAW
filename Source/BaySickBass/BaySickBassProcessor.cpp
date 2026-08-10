@@ -87,9 +87,18 @@ void BaySickBassProcessor::processBlock (juce::AudioBuffer<float>& buffer,
     mSynth.renderNextBlock (buffer, midi);
 
     // 2026-04-25: master out parity with BaySickPlayer (default 0.8).
+    // GAIN STAGING (Jeff, 2026-08-10).  The oscillator table is FULL SCALE
+    // (buildSaw writes -1..+1) and nothing downstream scaled it, so one
+    // sustained note at the 0.8 default measured about -14 LUFS solo - a
+    // finished-master level out of a single instrument, with no room left for
+    // polyphony: a three-note chord clipped before the mixer fader saw it.
+    // -12 dB of headroom, applied once here rather than per voice so it cannot
+    // interact with unison or polyphony scaling.  This DOES quieten every
+    // existing patch by 12 dB, which is the point.
+    static constexpr float kOutputHeadroom = 0.251189f;   // -12 dB
     {
-        const float v = mCache.outVol;
-        if (v != 1.0f) buffer.applyGain (v);
+        const float v = mCache.outVol * kOutputHeadroom;
+        buffer.applyGain (v);
     }
 
     for (int c = 0; c < buffer.getNumChannels(); ++c)
@@ -173,7 +182,7 @@ BaySickBassProcessor::createLayout (const juce::String& p)
 
     layout.add (std::make_unique<juce::AudioParameterChoice> (
         vid (p + "voiceMode"), "Voice Mode",
-        juce::StringArray { "Poly", "Mono", "Lead", "Legato" }, 1));  // default: Mono
+        juce::StringArray { "Poly", "Mono", "Legato" }, 1));  // default: Mono
 
     layout.add (std::make_unique<juce::AudioParameterFloat> (
         vid (p + "glide"), "Glide",
@@ -397,7 +406,7 @@ void BaySickBassProcessor::updateFromApvts()
     const int vm = geti ("voiceMode");
     if (vm != mCache.voiceMode)
     {
-        mSynth.setVoiceMode ((BssVoiceMode) juce::jlimit (0, 3, vm));
+        mSynth.setVoiceMode ((BssVoiceMode) juce::jlimit (0, 2, vm));
         mCache.voiceMode = vm;
     }
 

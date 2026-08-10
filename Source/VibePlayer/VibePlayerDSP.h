@@ -531,11 +531,24 @@ private:
     float  mVelScaleTarget { 1.0f };
     float  mVelScaleStep   { 0.0f };
     int    mVelRampLeft    { 0 };
-    float  mLfoAmt        { 0.0f };   // vibrato / shimmer depth 0-1
+    float  mLfoAmt        { 0.0f };   // vibrato depth 0-1 (see kVibratoMaxCents)
 
-    // LFO for vibrato modulation
+    // Vibrato LFO.  This is PITCH modulation: renderNextBlock folds the LFO into
+    // the resampler read rate as a multiplicative ratio, so it composes with note
+    // pitch / region tune / global tune / unison detune / stretch (all already
+    // baked into mGlideBaseRatio) instead of fighting them.  Do not re-route it
+    // to a gain stage: modulating amplitude is tremolo, not vibrato.
+    // Calibration: full depth (mLfoAmt = 1) is +/- 50 cents peak, i.e. a
+    // one-semitone peak-to-peak swing - wide but still musical.
+    static constexpr double kVibratoMaxCents = 50.0;
     double mLfoPhase    { 0.0 };
     float  mLfoRate     { 5.5f };  // Hz
+
+    // Sub-block step for every pitch-modulated read (glide and/or vibrato).
+    // Derived from the live sample rate in setCurrentPlaybackSampleRate so the
+    // modulation is resolved at the same ~1.3 ms interval at 44.1 kHz and at
+    // 192 kHz - a fixed sample count would make the wobble shape rate-dependent.
+    int    mPitchModChunk { 64 };
 
     // New per-voice params
     float  mStretch       { 1.0f };   // playback speed multiplier 0.5-2.0

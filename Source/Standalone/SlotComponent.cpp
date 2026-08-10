@@ -883,7 +883,7 @@ juce::String SlotComponent::modeLabel() const
                 case CompressorDSP::Type::Modern: label = "Modern";   break;
                 case CompressorDSP::Type::FET:    label = "FET";      break;
                 case CompressorDSP::Type::Opto:   label = "Opto";     break;
-                case CompressorDSP::Type::CS:     label = "CS Style"; break;
+                case CompressorDSP::Type::CS:     label = "Pedal";    break;
             }
         }
     }
@@ -967,7 +967,7 @@ void SlotComponent::showModeMenu()
                   currentPick == (int) CompressorDSP::Type::FET);
         m.addItem(1 + (int) CompressorDSP::Type::Opto,   "Opto (Smooth)",     true,
                   currentPick == (int) CompressorDSP::Type::Opto);
-        m.addItem(1 + (int) CompressorDSP::Type::CS,     "CS Style (Sustain)", true,
+        m.addItem(1 + (int) CompressorDSP::Type::CS,     "Pedal (Sustain)",   true,
                   currentPick == (int) CompressorDSP::Type::CS);
     }
     else if (slot.type == EffectType::Saturation)

@@ -1017,18 +1017,20 @@ void BaySickNAMIRProcessor::applySnapshotToCurrent (int slot)
     // setStateInformation when the per-slot IR hasn't been loaded yet --
     // in that case load it now (one-time cost, not on every slot switch).
     //
-    // The "already loaded" test compares RESOLVED files because the two sides
-    // speak different forms: MicSimDSP records the ABSOLUTE path it opened,
-    // while a snapshot restored from a bundled project holds "Samples/<name>"
-    // -- a raw string compare between those never matches, and would reload the
-    // IR on every slot switch for the life of the project.
-    const juce::String currentPath = mMicSim.getUserIrPath (slot);
+    // The "already loaded" test compares RESOLVED FILES on BOTH sides, because
+    // neither side is guaranteed to be an absolute path: MicSimDSP now records a
+    // stable REFERENCE ("mysamples:<rel>" / "library:<rel>", or an absolute for
+    // anything outside those roots), and a snapshot restored from a bundled
+    // project holds "Samples/<name>".  Comparing a resolved file against a raw
+    // ref never matches, and would reload the IR on every slot switch for the
+    // life of the project.
+    const juce::String currentRef = mMicSim.getUserIrPath (slot);
     if (s.micUserIrPath.isEmpty())
     {
-        if (currentPath.isNotEmpty()) mMicSim.clearUserIr (slot);
+        if (currentRef.isNotEmpty()) mMicSim.clearUserIr (slot);
     }
     else if (const juce::File f = ProjectFileResolver::resolve (s.micUserIrPath);
-             f.getFullPathName() != currentPath)
+             f != ProjectFileResolver::resolve (currentRef))
     {
         // QA-Export Task 5: report instead of skipping quietly (see the project
         // -load path above for the same pattern).
@@ -1039,13 +1041,14 @@ void BaySickNAMIRProcessor::applySnapshotToCurrent (int slot)
             MissingFileReport::add ("Mic A user IR (failed to load)", s.micUserIrPath);
     }
 
-    const juce::String currentPathB = mMicSimB.getUserIrPath (slot);
+    // Same resolve-both-sides rule as Mic A above.
+    const juce::String currentRefB = mMicSimB.getUserIrPath (slot);
     if (s.micbUserIrPath.isEmpty())
     {
-        if (currentPathB.isNotEmpty()) mMicSimB.clearUserIr (slot);
+        if (currentRefB.isNotEmpty()) mMicSimB.clearUserIr (slot);
     }
     else if (const juce::File f = ProjectFileResolver::resolve (s.micbUserIrPath);
-             f.getFullPathName() != currentPathB)
+             f != ProjectFileResolver::resolve (currentRefB))
     {
         juce::String err;
         if (! f.existsAsFile())

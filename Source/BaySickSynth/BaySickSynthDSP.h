@@ -10,7 +10,8 @@
 // juce::Synthesiser for voice allocation / MIDI management.
 //
 // All parameter setters propagate immediately to every voice.
-// renderNextBlock performs mono/lead MIDI pre-processing before passing to
+// renderNextBlock performs the per-mode MIDI pre-processing (Mono note-off
+// injection, Legato retarget dispatch) before passing to
 // juce::Synthesiser.
 // Called from BaySickSynthProcessor::updateFromApvts() on the audio thread.
 // ─────────────────────────────────────────────────────────────────────────────
@@ -95,7 +96,7 @@ private:
     BroadcastSynthesiser mSynth;   // CCs reach idle voices too (per-note stash)
     BaySickSynthVoice* mVoices[kNumVoices] { nullptr };  // raw ptrs (owned by mSynth)
 
-    // ── Mono/Lead/Legato state ────────────────────────────────────────────────
+    // ── Mono/Legato state ────────────────────────────────────────────────
     BssVoiceMode mVoiceMode    { BssVoiceMode::Poly };
     int          mLastMonoNote { -1 };
     bool         mCutSelf      { false };   // QA-CutSelfReview: Poly-mode cut on note-on

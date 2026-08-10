@@ -2659,33 +2659,12 @@ Where a step says "check the trace", read `asio_trace.txt` next to `audio_settin
 
 **The save family — collision prompt, sanitizing, and abort-on-failure:**
 
-- [ ] **SND-13 — the three-button collision prompt.** Save under a name that already exists (Save
-      Page Preset As, Save Current Patch As, Save FX Rack Preset, Save as Template, Save Kit):
-      **Name Already Used** with **Replace / Save a Copy / Cancel**.  Replace overwrites in place
-      (the file's timestamp changes, no second file appears).  Save a Copy writes `name (2).xml`
-      and BOTH files survive.  Cancel writes nothing, shows NO error box, leaves the existing file
-      untouched, does NOT rename the tab and does NOT clear the dirty dot.  Escape behaves as
-      Cancel.  Re-saving a tweaked patch under its own prefilled name is the case that matters —
-      Replace must actually update in place, with no accumulating "(2)", "(3)".
+- [ ] **SND-13 to SND-16 - MOVED to section E.** The save family (collision prompt, filename
+      sanitizing, abort-on-failure, and the effect presets' deliberate no-prompt behavior)
+      is covered by E3 and E4, which own the preset walk. Both sections carried it after
+      this batch; per Jeff's ruling section E is the single owner, so these rows are pruned
+      rather than run twice. Nothing was dropped - E3/E4 carry the QA-Soundness contract.
       `D:__ R:__` notes:
-- [ ] **SND-14 — filenames are sanitized, not rejected.** Save a patch as `Verse 1/2`: it saves as
-      `Verse 12.xml` and the tab name agrees with the file on disk.  Type only illegal characters:
-      **Save failed** listing the characters to avoid.  Empty box: "Type a name for it first."
-      `D:__ R:__` notes:
-- [ ] **SND-15 — MUST-PASS: a failed or cancelled write destroys NOTHING.** Make the Presets folder
-      unwritable.  Dirty a tab's sound, Delete the tab, choose **Save Page Preset & Delete**: the
-      write fails, the message says the tab was not deleted, and the tab, its mixer strip, its rack
-      and its piano-roll content are all still there.  Walk it on Layers, Bass, Drums, Clips, Vox,
-      Inst and Plugins.  **On the Plugins page, then delete again immediately:** the three-button
-      unsaved-work prompt must appear AGAIN — a failed save must not have re-baselined the page as
-      clean.  Repeat the whole row with Cancel at the naming box instead of a failed write.
-      `D:__ R:__` notes:
-- [ ] **SND-16 — effect presets deliberately differ.** An effect's own **Save Current Preset...**
-      under an existing name writes `name (2)` with NO prompt and never overwrites.  That is the
-      one family that does not prompt — do not file it as an inconsistency.  `D:__ R:__` notes:
-
-**Two independent drum kits (32 drums, two banks, two buses):**
-
 - [ ] **SND-17 — two kits, two buses, no teardown.** Fill 1-16, switch to **17-32**, add sixteen
       more: adding the second kit never offers to tear the first one down.  The Mixer shows a
       Drums Bus carrying kit 1's strips and a **Drums Bus 2** carrying kit 2's; levels, sends and
@@ -2834,7 +2813,12 @@ Where a step says "check the trace", read `asio_trace.txt` next to `audio_settin
       (copy)"), Delete (confirmation naming the pattern; greyed at one pattern), Move Up and Move
       Down (Shift+Ctrl+Up/Down, greyed at the ends, blocks follow the move).  Nothing in the menu
       is dead, each is one undo row, and the item labels match the keys they fire.
-      `D:__ R:__` notes:
+      RUN THIS TWICE: once with
+      `Documents\BaySickDAW\keymap.xml` DELETED (fresh-install behavior, which is what a
+      tester sees) and once with your existing one in place. saveMappings writes that file on
+      every shortcut edit and restoreFromXml replays it over the new defaults, and one command
+      id was REUSED (cmdShowEffects -> cmdShowEffectsRack), so a saved diff on it lands on a
+      command with different behavior.  `D:__ R:__` notes:
 
 **Undo coverage for the newly-wrapped gestures:**
 
@@ -2962,9 +2946,21 @@ spot-verifies the flagged items instead of walking everything cold.
 
 ## §G — Test-to-failure
 
-Long-soak scenarios, scheduled as background soaks during G5:
+Long-soak scenarios.  These were "background soaks during G5"; G5 dissolved 2026-08-10 and
+the soak is a campaign item, run alongside the section walks rather than after them.
 
 - [ ] G-1. 100-track arrangement soak.
 - [ ] G-2. 50-clip audio soak.
 - [ ] G-3. Hours-long playback — leak/drift watch (memory, DSP%, position readout vs wall clock).
 - [ ] G-4. Sample-rate + buffer-size switch matrix mid-session.
+- [ ] **G-5 - CLEAN-SLATE BUILD (moved here 2026-08-10 when QA-RC-lite dissolved).** This is a
+      BUILD test, not a feature test, and it is the ONLY check on a path that has never run:
+      every build to date reused the existing `build/` folder.  Rename `build\` and `build32\`
+      aside (rename, do not delete - a failure is then one rename to undo), then run
+      `do_build.bat`.  It must locate Visual Studio through vswhere on its own, CONFIGURE the
+      missing build directory rather than dying on a cmake error, and finish with six exit codes
+      at 0 and four `vcxproj -> ....exe` link lines.  Then read the warning count in
+      `build_log.txt`: C4702 / C4189 / C4996 / C4505 should all be 0 and C4456 should be 2.
+      WHY IT MATTERS: this is exactly what a friend cloning the repo hits, and it is what
+      stranded Jeff on his laptop.  It is NOT what the tester installer exercises - that ships a
+      built exe and never compiles anything.  `D:__ R:__` notes:

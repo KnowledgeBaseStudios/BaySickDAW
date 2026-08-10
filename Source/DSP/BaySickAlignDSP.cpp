@@ -413,12 +413,6 @@ void BaySickAlignDSP::clearWarpMap()
     mActiveMap = std::make_shared<const WarpMap>();
 }
 
-bool BaySickAlignDSP::hasWarpMap() const noexcept
-{
-    juce::SpinLock::ScopedLockType lk (mMapLock);
-    return mActiveMap && mActiveMap->isValid();
-}
-
 // ─── applyWarp (QA-Fd Task 8: continuous smooth-map warp + pitch render) ─────
 namespace
 {

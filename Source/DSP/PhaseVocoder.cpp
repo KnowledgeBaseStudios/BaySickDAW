@@ -6,7 +6,7 @@ static constexpr float kTwoPi = 6.28318530717958647692f;
 // ── Constructor ───────────────────────────────────────────────────────────────
 
 PhaseVocoder::PhaseVocoder (int numChannels)
-    : mFFT   (kFFTOrder)
+    : mFFT   (std::make_unique<juce::dsp::FFT> (kFFTOrder))
     , mNumCh (numChannels)
     , mWindow (kFFTSize, 0.0f)
     , mFftA  (kFFTSize)
@@ -16,14 +16,7 @@ PhaseVocoder::PhaseVocoder (int numChannels)
     for (int i = 0; i < kFFTSize; ++i)
         mWindow[i] = 0.5f * (1.0f - std::cos (kTwoPi * i / (kFFTSize - 1)));
 
-    // OLA normalization: window applied twice (analysis + synthesis), so the
-    // overlapping frames sum Hann^2 at the SYNTHESIS hop: sum_j(w[n-j*Hs]^2)
-    // ~= (3/8)*N / Hs per sample -> scale = (8/3)*Hs/N (= 2/3 at Hs = N/4).
-    // juce::dsp::FFT already normalizes the inverse by 1/N internally, so
-    // there is NO extra N to cancel -- the old (2/3)/N assumed unnormalized
-    // IFFT and made stretched output ~1/N (~-66 dB, "clips don't play").
-    // Recomputed in setStretchRatio because Hs tracks the stretch ratio.
-    mWindowScale = (8.0f / 3.0f) * (float) mSynthHop / (float) kFFTSize;
+    updateSynthesisHop();
 
     mCh.resize (numChannels);
     for (auto& c : mCh)
@@ -35,26 +28,73 @@ PhaseVocoder::PhaseVocoder (int numChannels)
     }
 }
 
+// ── fftOrderForFileRate ───────────────────────────────────────────────────────
+
+int PhaseVocoder::fftOrderForFileRate (double fileSampleRate) noexcept
+{
+    if (! (fileSampleRate > 0.0))
+        return kFFTOrder;
+
+    // The invariant is the window's DURATION (kFFTSize at kReferenceRate, about
+    // 46 ms), so the sample count scales with the file rate and then snaps to
+    // the nearest power of two.  48 kHz lands back on kFFTOrder, which is what
+    // keeps the overwhelming majority of material identical to the pre-fix
+    // build.  The floor at kFFTOrder is not cosmetic: a shorter window would
+    // drive the analysis hop below kHopSize, and the external effective-stretch
+    // grid (see the header) only stays exact for whole-number multiples of it.
+    const double ideal = (double) kFFTSize * fileSampleRate / kReferenceRate;
+    const int    order = (int) std::lround (std::log2 (ideal));
+    return juce::jlimit (kFFTOrder, kMaxFFTOrder, order);
+}
+
 // ── prepare ───────────────────────────────────────────────────────────────────
 
-void PhaseVocoder::prepare (int maxOutputSamplesPerBlock)
+void PhaseVocoder::prepare (int maxOutputSamplesPerBlock, double fileSampleRate)
 {
+    const int order = fftOrderForFileRate (fileSampleRate);
+
+    if (order != mFFTOrder)
+    {
+        mFFTOrder = order;
+        mFFTSize  = 1 << order;
+        jassert (mFFTSize <= kMaxFFTSize);
+
+        // MESSAGE / WORKER THREAD ONLY: juce::dsp::FFT allocates its twiddle
+        // tables in the constructor, and the work buffers below allocate too.
+        mFFT = std::make_unique<juce::dsp::FFT> (order);
+
+        mWindow.assign ((size_t) mFFTSize, 0.0f);
+        for (int i = 0; i < mFFTSize; ++i)
+            mWindow[(size_t) i] = 0.5f * (1.0f - std::cos (kTwoPi * i / (mFFTSize - 1)));
+
+        mFftA.assign ((size_t) mFFTSize, Cx {});
+        mFftS.assign ((size_t) mFFTSize, Cx {});
+    }
+
+    mAnalysisHop = mFFTSize / 4;
+    updateSynthesisHop();   // Hs is a multiple of the analysis hop, which just moved
+
     // Capacity law for the OLA queue.  processFrame's add spans
-    // [outWriteAbs, outWriteAbs + kFFTSize) and the consumer only drains
+    // [outWriteAbs, outWriteAbs + mFFTSize) and the consumer only drains
     // between pushes, so the deepest the unread region ever gets is
     //   one block's production            = maxOutputSamplesPerBlock
-    // + the settling residue it may not take yet   (< kFFTSize)
-    // + one whole frame produced past that boundary (< kFFTSize)
-    // + the tail of the frame being written        (= kFFTSize)
+    // + the settling residue it may not take yet   (< mFFTSize)
+    // + one whole frame produced past that boundary (< mFFTSize)
+    // + the tail of the frame being written        (= mFFTSize)
     // Anything shallower wraps the OLA add onto samples the consumer has not
     // read - the export-only garble, since the offline loop runs a different
     // block size from the device.
-    const int floorSz = kOutBufFloor;
-    const int need    = juce::jmax (0, maxOutputSamplesPerBlock) + kFFTSize * 3;
+    const int floorSz = mFFTSize * 8;
+    const int need    = juce::jmax (0, maxOutputSamplesPerBlock) + mFFTSize * 3;
     const auto sz     = (size_t) juce::jmax (need, floorSz);
 
     for (auto& c : mCh)
-        c.outBuf.assign (sz, 0.0f);
+    {
+        c.inRing    .assign ((size_t) mFFTSize * 4,           0.0f);
+        c.lastPhase .assign ((size_t) (mFFTSize / 2 + 1),     0.0f);
+        c.phaseAccum.assign ((size_t) (mFFTSize / 2 + 1),     0.0f);
+        c.outBuf    .assign (sz,                              0.0f);
+    }
 
     // The absolute counters index modulo the size that just changed, and the
     // in-flight OLA tail belongs to the old geometry.
@@ -67,9 +107,30 @@ void PhaseVocoder::setStretchRatio (double ratio)
 {
     if (ratio == mStretchRatio) return;
     mStretchRatio = ratio;
-    mSynthHop     = juce::jmax (1, juce::roundToInt (kHopSize * ratio));
-    // Overlap density changes with Hs -> keep unity output level at any ratio.
-    mWindowScale  = (8.0f / 3.0f) * (float) mSynthHop / (float) kFFTSize;
+    updateSynthesisHop();
+}
+
+void PhaseVocoder::updateSynthesisHop()
+{
+    // Hs/Ha is an EXTERNAL contract, not a private detail: three call sites in
+    // PluginProcessor + BaySickAlignDSP compute the effective stretch as
+    // jmax(1, roundToInt(kHopSize * ratio)) / kHopSize and bookkeep produced
+    // samples with it.  Quantizing on kHopSize and multiplying by the overlap
+    // factor m = Ha / kHopSize makes the realized ratio
+    //   (m * jmax(1, round(kHopSize * r))) / (m * kHopSize)
+    // which is that grid EXACTLY at every window size, so a 96 / 192 kHz file
+    // gets the bigger window without the ~0.1 % position drift a hop-local
+    // rounding would introduce.
+    const int m = juce::jmax (1, mAnalysisHop / kHopSize);
+    mSynthHop   = m * juce::jmax (1, juce::roundToInt (kHopSize * mStretchRatio));
+
+    // OLA normalization: window applied twice (analysis + synthesis), so the
+    // overlapping frames sum Hann^2 at the SYNTHESIS hop: sum_j(w[n-j*Hs]^2)
+    // ~= (3/8)*N / Hs per sample -> scale = (8/3)*Hs/N (= 2/3 at Hs = N/4).
+    // juce::dsp::FFT already normalizes the inverse by 1/N internally, so
+    // there is NO extra N to cancel -- the old (2/3)/N assumed unnormalized
+    // IFFT and made stretched output ~1/N (~-66 dB, "clips don't play").
+    mWindowScale = (8.0f / 3.0f) * (float) mSynthHop / (float) mFFTSize;
 }
 
 // ── reset ─────────────────────────────────────────────────────────────────────
@@ -110,7 +171,7 @@ void PhaseVocoder::push (const juce::AudioBuffer<float>& in,
     while (done < numSamples)
     {
         const int chunk = juce::jmin (numSamples - done,
-                                      juce::jmax (1, kFFTSize - mCh[0].inAvail));
+                                      juce::jmax (1, mFFTSize - mCh[0].inAvail));
 
         for (int ch = 0; ch < (int) mCh.size(); ++ch)
         {
@@ -131,7 +192,7 @@ void PhaseVocoder::push (const juce::AudioBuffer<float>& in,
             c.inAvail += chunk;
         }
 
-        while (mCh[0].inAvail >= kFFTSize)
+        while (mCh[0].inAvail >= mFFTSize)
             processFrame();
 
         done += chunk;
@@ -227,12 +288,12 @@ int PhaseVocoder::getOutputAvailable() const
     if (mCh.empty()) return 0;
     const auto& c = mCh[0];
     // Output is "settled" (all overlapping frames have contributed) once the OLA
-    // write head is at least (kFFTSize - mSynthHop) ahead of the read head.
-    // Past mSynthHop >= kFFTSize the synthesis frames stop overlapping at all,
+    // write head is at least (mFFTSize - mSynthHop) ahead of the read head.
+    // Past mSynthHop >= mFFTSize the synthesis frames stop overlapping at all,
     // so there is nothing left to wait for: the floor at 0 stops a negative
     // margin from reporting MORE samples than were ever written.
     const int64_t settling = juce::jmax ((int64_t) 0,
-                                         (int64_t) kFFTSize - (int64_t) mSynthHop);
+                                         (int64_t) mFFTSize - (int64_t) mSynthHop);
     // A read cannot outrun the physical queue either - beyond one queue length
     // the modulo hands back slots the write head has already lapped.
     const int64_t produced = juce::jmin ((int64_t) c.outBuf.size(),
@@ -254,13 +315,13 @@ void PhaseVocoder::processFrame()
     // law (so playback does not slide out of sync), push()'s drain loop still
     // terminates, and the failure degrades to a dropout instead of silently
     // corrupting the queue.  With prepare() called this never fires.
-    if (mCh[0].outWriteAbs - mCh[0].outReadAbs + (int64_t) kFFTSize
+    if (mCh[0].outWriteAbs - mCh[0].outReadAbs + (int64_t) mFFTSize
             > (int64_t) outBufSize)
     {
         for (auto& c : mCh)
         {
-            c.inRead   = (c.inRead + kHopSize) % inRingSize;
-            c.inAvail -= kHopSize;
+            c.inRead   = (c.inRead + mAnalysisHop) % inRingSize;
+            c.inAvail -= mAnalysisHop;
         }
         return;
     }
@@ -274,25 +335,25 @@ void PhaseVocoder::processFrame()
         auto& c = mCh[ch];
 
         // ── 1. Build windowed analysis frame ──────────────────────────────
-        // Read kFFTSize samples from [inRead .. inRead+kFFTSize) (circular).
-        for (int i = 0; i < kFFTSize; ++i)
+        // Read mFFTSize samples from [inRead .. inRead+mFFTSize) (circular).
+        for (int i = 0; i < mFFTSize; ++i)
         {
             const int srcIdx = (c.inRead + i) % inRingSize;
             mFftA[i] = { c.inRing[srcIdx] * mWindow[i], 0.0f };
         }
 
         // ── 2. Forward FFT ────────────────────────────────────────────────
-        mFFT.perform (mFftA.data(), mFftS.data(), false);
+        mFFT->perform (mFftA.data(), mFftS.data(), false);
 
         // ── 3. Phase vocoder: instantaneous frequency → phase accumulation ─
-        for (int k = 0; k <= kFFTSize / 2; ++k)
+        for (int k = 0; k <= mFFTSize / 2; ++k)
         {
             const float mag = std::abs  (mFftS[k]);
             const float phi = std::arg  (mFftS[k]);
 
             // Expected phase advance for this bin at the analysis hop
-            const float expectedAdvance = kTwoPi * (float) k * (float) kHopSize
-                                          / (float) kFFTSize;
+            const float expectedAdvance = kTwoPi * (float) k * (float) mAnalysisHop
+                                          / (float) mFFTSize;
 
             // Deviation from expected (inter-frame phase difference)
             float dphi = phi - c.lastPhase[k] - expectedAdvance;
@@ -301,8 +362,8 @@ void PhaseVocoder::processFrame()
             dphi -= kTwoPi * std::round (dphi / kTwoPi);
 
             // True instantaneous frequency (radians per sample)
-            const float trueFreq = kTwoPi * (float) k / (float) kFFTSize
-                                   + dphi / (float) kHopSize;
+            const float trueFreq = kTwoPi * (float) k / (float) mFFTSize
+                                   + dphi / (float) mAnalysisHop;
 
             // Advance accumulator by the synthesis hop (pitch is preserved)
             c.phaseAccum[k] += trueFreq * (float) mSynthHop;
@@ -316,17 +377,17 @@ void PhaseVocoder::processFrame()
 
         // ── 4. Hermitian symmetry (required for real-valued IFFT output) ──
         mFftA[0]            = { mFftA[0].real(), 0.0f };                // DC - real only
-        mFftA[kFFTSize / 2] = { mFftA[kFFTSize / 2].real(), 0.0f };    // Nyquist
-        for (int k = 1; k < kFFTSize / 2; ++k)
-            mFftA[kFFTSize - k] = std::conj (mFftA[k]);
+        mFftA[mFFTSize / 2] = { mFftA[mFFTSize / 2].real(), 0.0f };    // Nyquist
+        for (int k = 1; k < mFFTSize / 2; ++k)
+            mFftA[mFFTSize - k] = std::conj (mFftA[k]);
 
         // ── 5. Inverse FFT ────────────────────────────────────────────────
-        mFFT.perform (mFftA.data(), mFftS.data(), true);
+        mFFT->perform (mFftA.data(), mFftS.data(), true);
 
         // ── 6. Synthesis window + normalize + overlap-add ─────────────────
         const int writeBase = (int) (c.outWriteAbs % outBufSize);
 
-        for (int i = 0; i < kFFTSize; ++i)
+        for (int i = 0; i < mFFTSize; ++i)
         {
             const float sample = mFftS[i].real() * mWindow[i] * mWindowScale;
             const int   physIdx = (writeBase + i) % outBufSize;
@@ -340,7 +401,7 @@ void PhaseVocoder::processFrame()
     // ── 7. Consume one analysis hop from the input ring ───────────────────
     for (auto& c : mCh)
     {
-        c.inRead  = (c.inRead + kHopSize) % inRingSize;
-        c.inAvail -= kHopSize;
+        c.inRead  = (c.inRead + mAnalysisHop) % inRingSize;
+        c.inAvail -= mAnalysisHop;
     }
 }

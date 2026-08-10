@@ -26,6 +26,8 @@ namespace
     // output variance, so both the -3 dB/oct (pink) and -6 dB/oct (brown) slopes
     // AND the loudness stay put across the rate matrix.  The exponent is 1 at
     // 44.1 kHz, so the derivation reproduces the published numbers exactly there.
+    // White reuses the same reference rate for its own in-band energy gain
+    // (mWhiteRateGain, see the header) so all three colors are pinned to one design point.
     constexpr double kNoiseDesignRate = 44100.0;
 
     constexpr float kPinkDesignPole[6] = { 0.99886f,   0.99332f,   0.96900f,
@@ -94,6 +96,8 @@ void BaySickSynthVoice::setCurrentPlaybackSampleRate (double newRate)
 
     repoleNoiseSection (newRate, kBrownDesignPole, kBrownDesignGain,
                         mBrownPole, mBrownGain);
+
+    mWhiteRateGain = (float) std::sqrt (newRate / kNoiseDesignRate);
 }
 
 //==============================================================================
@@ -771,7 +775,11 @@ void BaySickSynthVoice::renderNextBlock (juce::AudioBuffer<float>& buf,
             mNoiseSeed = mNoiseSeed * 1664525u + 1013904223u;
             const float whiteN = (int) mNoiseSeed * (1.0f / 2147483648.0f); // -1..1
 
-            float colouredN = whiteN;
+            // White (mNoiseColor == 0) carries the rate gain so its audible-band
+            // energy matches pink and brown across the rate matrix; the pink and
+            // brown sections below take the UNSCALED whiteN, since their own
+            // re-poled gains already hold their level.
+            float colouredN = whiteN * mWhiteRateGain;
 
             // Pink / brown poles + gains are re-derived per sample rate in
             // setCurrentPlaybackSampleRate; the b[6] and 0.5362 terms are flat
@@ -848,7 +856,11 @@ void BaySickSynthVoice::renderNextBlock (juce::AudioBuffer<float>& buf,
         if (mTransientSamplesRemaining > 0)
         {
             mTransientNoiseSeed = mTransientNoiseSeed * 1664525u + 1013904223u;
-            const float rawNoise = (int) mTransientNoiseSeed * (1.0f / 2147483648.0f);
+            // Same in-band energy correction as the main white path: the burst is
+            // flat-spectrum LCG noise, so without the gain the click thins out as
+            // the device rate rises.
+            const float rawNoise = (int) mTransientNoiseSeed * (1.0f / 2147483648.0f)
+                                 * mWhiteRateGain;
 
             // One-pole HPF for colour
             const float alpha = std::exp (-twoPi * mTransientColourHz / sr);

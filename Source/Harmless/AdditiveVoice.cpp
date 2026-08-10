@@ -434,7 +434,12 @@ void AdditiveVoice::renderNextBlock (juce::AudioBuffer<float>& outputBuffer,
     float* outR = (outputBuffer.getNumChannels() > 1)
                   ? outputBuffer.getWritePointer (1, startSample) : nullptr;
 
-    const float uniNorm  = 1.0f / float (mNumUnison);
+    // 1/sqrt(N), not 1/N (Jeff, 2026-08-10): detuned unison voices are
+    // INCOHERENT, so their powers add rather than their amplitudes - dividing by
+    // the count made Harmless get quieter every time a voice was added, while
+    // BaySickSynth/Bass already used the power-correct law.  That mismatch is
+    // most of why the two engines never sat at comparable levels.
+    const float uniNorm  = 1.0f / std::sqrt (float (mNumUnison));
     // Precompute the constant factor - avoids a float division per unison slot per sample.
     const float invSrWt  = wtSzF / float (mSampleRate);
 

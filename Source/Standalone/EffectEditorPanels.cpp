@@ -413,8 +413,8 @@ struct FETCompressorPanel : public EditorPanelBase, public juce::Timer
         // Attack + Release stored as integer position 0..7 (0=OFF) -- mapped to
         // ms via kAttackMs / kReleaseMs in the onValueChange callbacks.
         buildKnobs (*this, knobs, {
-            { "Input",   -60.f,   0.f, -12.f, 0.5f, "Input drive (1176-style): no threshold knob -- Input sets how hard the signal hits the fixed threshold, so MORE input (turn up) = MORE compression. Default is gentle (about the 1176 Input at '36')." },
-            { "Output",  -30.f,  30.f,  12.f, 0.5f, "Output / makeup gain (dB): the 1176 brings level back up here after compression. Up = more makeup (max +30 = the unit's loudest, dial '0'); 0 dB = unity (dial '30'); down = attenuate. Default +12 (dial '18'). Set it to match the bypassed level." },
+            { "Input",   -60.f,   0.f, -12.f, 0.5f, "Input drive (FET style): no threshold knob -- Input sets how hard the signal hits the fixed threshold, so MORE input (turn up) = MORE compression. The default is a gentle setting." },
+            { "Output",  -30.f,  30.f,  12.f, 0.5f, "Output / makeup gain (dB): brings the level back up after compression. Up = more makeup (max +30); 0 dB = unity; down = attenuate. Default +12. Set it to match the bypassed level." },
             { "Attack",   0.f,    7.f,   4.f,  1.f, "Attack position (0=OFF, 1=slow 800us, 7=fast 20us)" },
             { "Release",  0.f,    7.f,   4.f,  1.f, "Release position (0=OFF, 1=slow 1100ms, 7=fast 50ms)" },
         });
@@ -4687,7 +4687,7 @@ struct DistortionStylePanel : public EditorPanelBase
 
         buildKnobs (*this, knobs, {
             { "Dist",  0.f,   1.f,   0.5f, 0.001f, "Distortion amount (drives the hard-clipper into a square wave at max)" },
-            { "Tone",  0.f,   1.f,   0.5f, 0.001f, "Tone (Big-Muff style tilt EQ -- left = darker, right = brighter, center = scoop)" },
+            { "Tone",  0.f,   1.f,   0.5f, 0.001f, "Tone (mid-scoop tilt EQ -- left = darker, right = brighter, center = scooped mids)" },
             { "Level", -24.f, 12.f,  0.f,  0.1f,   "Output level (dB)" },
         });
 

@@ -65,7 +65,7 @@ VibePlayerEditor::VibePlayerEditor (VibePlayerProcessor& p)
     // ── Box titles ────────────────────────────────────────────────────────────
     const char* kBoxTitles[7] = {
         "SAMPLE ENGINE", "PITCH & VOICING", "DYNAMICS",
-        "AMP ENVELOPE",  "LFO",             "FILTER",   "OUTPUT"
+        "AMP ENVELOPE",  "VIBRATO",         "FILTER",   "OUTPUT"
     };
     for (int i = 0; i < 7; ++i)
     {
@@ -169,11 +169,12 @@ VibePlayerEditor::VibePlayerEditor (VibePlayerProcessor& p)
     for (auto* l : { &mAttackLbl,  &mDecayLbl,  &mSustainLbl,  &mReleaseLbl  })
         addAndMakeVisible (*l);
 
-    // ── Box 5: LFO ───────────────────────────────────────────────────────────
-    initModKnob (mLfoRateKnob, "LFO rate (Hz)");
-    initModKnob (mLfoAmtKnob,  "LFO / vibrato amount");
-    initLabel   (mLfoRateLbl,  "LFO RATE");
-    initLabel   (mLfoAmtLbl,   "LFO");
+    // ── Box 5: Vibrato ───────────────────────────────────────────────────────
+    initModKnob (mLfoRateKnob, "Vibrato rate (Hz) - how fast the pitch wobbles");
+    initModKnob (mLfoAmtKnob,  "Vibrato depth - how far the pitch wobbles "
+                               "(full = 50 cents up and down)");
+    initLabel   (mLfoRateLbl,  "VIB RATE");
+    initLabel   (mLfoAmtLbl,   "VIB DEPTH");
     for (auto* s : { &mLfoRateKnob, &mLfoAmtKnob }) addAndMakeVisible (*s);
     for (auto* l : { &mLfoRateLbl,  &mLfoAmtLbl  }) addAndMakeVisible (*l);
 
@@ -346,7 +347,7 @@ void VibePlayerEditor::valueTreeRedirected (juce::ValueTree& tree)
 
 // ── Box-rect helper (used by both paint and resized) ─────────────────────────
 // D.4-Q3 (2026-05-01): 7 boxes - top row has 3 boxes (Sample/Pitch/Dynamics),
-// bottom row has 4 boxes (AmpEnv/LFO/Filter/Output).  Top boxes are wider
+// bottom row has 4 boxes (AmpEnv/Vibrato/Filter/Output).  Top boxes are wider
 // than bottom boxes since they share the same total width split into 3 vs 4
 // columns.
 static juce::Rectangle<int> boxRectFor (int idx, int editorW, int editorH)
@@ -494,7 +495,7 @@ void VibePlayerEditor::resized()
     placeKnob (3, 0, 1, mSustainKnob, mSustainLbl);
     placeKnob (3, 1, 1, mReleaseKnob, mReleaseLbl);
 
-    // ── Box 4: LFO (2 knobs - centred in middle row of a 2x3 area) ───────────
+    // ── Box 4: Vibrato (2 knobs - centred in middle row of a 2x3 area) ──────
     placeKnob (4, 0, 1, mLfoRateKnob, mLfoRateLbl);
     placeKnob (4, 1, 1, mLfoAmtKnob,  mLfoAmtLbl);
 

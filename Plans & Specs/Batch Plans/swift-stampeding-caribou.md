@@ -143,31 +143,56 @@ mass-scrub). Fix everything found.
 ### Per-group loop (R1/R3/R4/R5)
 1. **Group start:** write the group's full §0 plan files (4-6), informed by current code state; surface together; Jeff approves once.
 2. **Per batch:** code all tasks → Jeff runs `do_build.bat` (Release+Debug) → I fix until clean → surface commit message + full git status → Jeff approves → commit (one commit per batch, Rule 9 format). Author the batch's Master Test Plan section from the plan file's verify scripts (scenarios derived from actual page/component code, physically executable). Draft + hold the Work Log close entry. Append running-notes entry (code-complete + findings; no per-task verify entries exist to log).
-3. **Group boundary:** `/review-batch` over the group's combined diff (findings fixed before proceeding, per the fix-or-reframe canon); Jeff runs the 15-30 min smoke — Debug exe first (jassert dialogs), then Release: launch, audio plays, big project loads, save/close/reopen round-trip (§7 items 1-5). G1/G2 add the ear-checks below.
-4. **Mid-run spec calls (Jeff's lock, 2026-07-08): EVERY spec call discovered during execution gets ASKED — never self-decided.** When one surfaces, I stop that piece, pose the options in chat, and while waiting I may only continue work that does NOT depend on the answer (never code past a call on a guess). Accepted cost: a little time per call; payoff: far less fix-it-in-testing churn. This is Rule 5 + `feedback_dont_make_unilateral_spec_calls` applied to execution, unchanged by bulk mode. Non-spec findings (plain bugs, dead code, etc.) log in running notes and route per Rule 3 at that batch's doc-close (section pass), as usual — and real bugs found mid-batch still get fixed in-batch per the standing rule.
+3. **Group boundary:** `/review-batch` over the group's combined diff (findings fixed before proceeding, per the fix-or-reframe canon); Jeff runs the 15-30 min smoke - Debug exe first (jassert dialogs), then Release: launch, audio plays, big project loads, save/close/reopen round-trip (§7 items 1-5). G1/G2 add the ear-checks below.
+4. **Mid-run spec calls (Jeff's lock, 2026-07-08): EVERY spec call discovered during execution gets ASKED - never self-decided.** When one surfaces, I stop that piece, pose the options in chat, and while waiting I may only continue work that does NOT depend on the answer (never code past a call on a guess). Accepted cost: a little time per call; payoff: far less fix-it-in-testing churn. This is Rule 5 + `feedback_dont_make_unilateral_spec_calls` applied to execution, unchanged by bulk mode. Non-spec findings (plain bugs, dead code, etc.) log in running notes and route per Rule 3 at that batch's doc-close (section pass), as usual - and real bugs found mid-batch still get fixed in-batch per the standing rule.
 5. **QA-ClipDrop trap fires** → capture evidence + log; fix at next boundary (immediately if it blocks the run).
 
 ### Checkpoint groups (§6 order preserved; boundaries adjustable at marathon)
-- **G1 — Transport + timeline foundations** (ear-check group): **QA-TransportDisplay**, QA-Chords, QA-TempoMap, QA-Eb, QA-Ec′. Ear-check: tempo-change sample accuracy by ear (position readout assists), stretch/resample behavior, chord stamping. **G1 completion = go/no-go checkpoint for the whole model.**
-- **G2 — Vocal/creative builds** (ear-check group): QA-F, QA-Fa, QA-Fb′, QA-Fc, QA-Fd (inserted 2026-07-11, §9 fifty-sixth), QA-Fe (inserted 2026-07-12, re-scoped 2026-07-13, §9 fifty-seventh/-eighth), QA-Fe2 (inserted 2026-07-16, §9 fifty-ninth — De-noise/De-reverb/Gate/browser groups, grown from the QA-Fe WORLD arc). Ear-checks mid-group: after QA-F (align/warp quality) and after QA-Fa (pitch-edit quality) — pitch/align DSP cannot be judged by smoke tests, and Fa builds on F's shifters.
-- **G3 — Builder/UX/engine polish:** QA-G′, QA-H′, QA-I, QA-J′(residuals only), QA-K (code items; DSP-08 hardware test → campaign), QA-L, QA-M, QA-Drum-Polish, QA-N, **QA-OctavePedal** (NEW 2026-07-13 — octave-pedal engine fix + pedal-mode UI rework + low-latency instrument monitoring; see Main Plan §9 fifty-eighth Forks entry). Plus the **metronome/time-signature regression** fix item (routed 2026-07-16 from QA-Fe2 close, §9 fifty-ninth; gated on Jeff's repro). Ten batches, three shrunk small.
-  *(UPDATED at G3 group open 2026-07-17 — see the "G3 group open" section at the bottom of this file: NINE batches — QA-Drum-Polish folded into QA-L (docket #11=B); the metronome/TS item became the full time-signature system inside QA-G (docket #14 + A/B/B1a/B2a — repro delivered, no longer gated); pattern-block slice folded into QA-G.)*
-- **G4 — Mechanical sweeps + data layer:** QA-VibeSlider, QA-NativeDialogs′, **QA-ApvtsAutomation**, QA-Verify (only the BaySickPedals preset FIX is code; the 10-engine walk → campaign), QA-Export, QA-ProjectSave, **QA-UndoCoverage**, QA-DirtyFlag.
-  *(UPDATED 2026-07-25: + QA-Soundness as batch 9, runs LAST — see `keen-combing-heron.md`. UPDATED 2026-07-27: + **QA-ModelShell** inserted DIRECTLY AFTER QA-ProjectSave — see the "G4 composition note — 2026-07-27" section at the bottom of this file. UPDATED 2026-08-06 at QA-Layout close: + **QA-Layout** inserted directly after QA-ModelShell — this note was missed at the 2026-08-03 insertion (Main Plan §5/§6/§9 sixty-seventh were updated; this line was not) and reconciled at the layout batch's close. Current order: gecko → pigeon → crane → pangolin → walrus → badger → **mammoth** → **layout** → yak (MERGED w/ stoat, Jeff 2026-08-06 — see Main Plan §9 sixty-ninth) → heron.)*
-- **CAMPAIGN — Master Test Plan execution** (absorbs QA-B + QA-Verify walk + QA-RC's page-by-page plan): Jeff walks sections in commit order; failures → I fix (fix commits reference the batch) → re-run scenario; **section pass → apply held Work Log entry + Main Plan STATUS:CLOSED + close commit for that batch (R2)**.
-- **G5 — Phase 6:** QA-Audit (docket decisions pre-resolved at marathon) → QA-Cleanup-1 → QA-PlayerRename → QA-Cleanup-2 → QA-Cleanup-3 → QA-Cleanup-4 — build-after-every-delete discipline unchanged. Then **QA-RC-lite**: 2nd clean build (delete build/, full rebuild, warning audit) + test-to-failure soak + a regression spot-pass (full page-by-page already ran in the campaign).
-- **G6 — Phase 7:** QA-Manuals, QA-Templates, **QA-LegalReview**, QA-Installer, QA-Updater, QA-Framework. Deferred call D-1: whether Manuals/Framework drafting overlaps the campaign (they're doc work; I can draft while Jeff tests).
+- **G1 - Transport + timeline foundations** (ear-check group): **QA-TransportDisplay**, QA-Chords, QA-TempoMap, QA-Eb, QA-Ec′. Ear-check: tempo-change sample accuracy by ear (position readout assists), stretch/resample behavior, chord stamping. **G1 completion = go/no-go checkpoint for the whole model.**
+- **G2 - Vocal/creative builds** (ear-check group): QA-F, QA-Fa, QA-Fb′, QA-Fc, QA-Fd (inserted 2026-07-11, §9 fifty-sixth), QA-Fe (inserted 2026-07-12, re-scoped 2026-07-13, §9 fifty-seventh/-eighth), QA-Fe2 (inserted 2026-07-16, §9 fifty-ninth - De-noise/De-reverb/Gate/browser groups, grown from the QA-Fe WORLD arc). Ear-checks mid-group: after QA-F (align/warp quality) and after QA-Fa (pitch-edit quality) - pitch/align DSP cannot be judged by smoke tests, and Fa builds on F's shifters.
+- **G3 - Builder/UX/engine polish:** QA-G′, QA-H′, QA-I, QA-J′(residuals only), QA-K (code items; DSP-08 hardware test → campaign), QA-L, QA-M, QA-Drum-Polish, QA-N, **QA-OctavePedal** (NEW 2026-07-13 - octave-pedal engine fix + pedal-mode UI rework + low-latency instrument monitoring; see Main Plan §9 fifty-eighth Forks entry). Plus the **metronome/time-signature regression** fix item (routed 2026-07-16 from QA-Fe2 close, §9 fifty-ninth; gated on Jeff's repro). Ten batches, three shrunk small.
+  *(UPDATED at G3 group open 2026-07-17 - see the "G3 group open" section at the bottom of this file: NINE batches - QA-Drum-Polish folded into QA-L (docket #11=B); the metronome/TS item became the full time-signature system inside QA-G (docket #14 + A/B/B1a/B2a - repro delivered, no longer gated); pattern-block slice folded into QA-G.)*
+- **G4 - Mechanical sweeps + data layer:** QA-VibeSlider, QA-NativeDialogs′, **QA-ApvtsAutomation**, QA-Verify (only the BaySickPedals preset FIX is code; the 10-engine walk → campaign), QA-Export, QA-ProjectSave, **QA-UndoCoverage**, QA-DirtyFlag.
+  *(UPDATED 2026-08-10: + **QA-Cleanup** as batch 10, now the LAST batch of G4 and of the coding run - it absorbs the whole dissolved G5 (see the G5 line below). UPDATED 2026-07-25: + QA-Soundness as batch 9, runs LAST - see `keen-combing-heron.md`. UPDATED 2026-07-27: + **QA-ModelShell** inserted DIRECTLY AFTER QA-ProjectSave - see the "G4 composition note - 2026-07-27" section at the bottom of this file. UPDATED 2026-08-06 at QA-Layout close: + **QA-Layout** inserted directly after QA-ModelShell - this note was missed at the 2026-08-03 insertion (Main Plan §5/§6/§9 sixty-seventh were updated; this line was not) and reconciled at the layout batch's close. Current order: gecko → pigeon → crane → pangolin → walrus → badger → **mammoth** → **layout** → yak (MERGED w/ stoat, Jeff 2026-08-06 - see Main Plan §9 sixty-ninth) → heron.)*
+- **CAMPAIGN - Master Test Plan execution** (absorbs QA-B + QA-Verify walk + QA-RC's page-by-page plan): Jeff walks sections in commit order; failures → I fix (fix commits reference the batch) → re-run scenario; **section pass → apply held Work Log entry + Main Plan STATUS:CLOSED + close commit for that batch (R2)**.
+- **~~G5 - Phase 6~~ DISSOLVED 2026-08-10 (Jeff).** The whole group is absorbed into G4's final
+  batch (QA-Cleanup, batch 10). Why each piece went away rather than moving:
+  **QA-Audit** - its source half already ran as QA-Soundness (seven category sweeps over the whole
+  tree, eight adversarial rounds, 9,160 dead-code sites examined); the findings ledger in
+  `keen-combing-heron.md` IS the manifest it was meant to produce.
+  **QA-Cleanup-1** - reduced to four mechanical fold-ins; the full-build warning sweep it called
+  "likely the bulk of the effort" is already at zero for C4702/C4189/C4996/C4505.
+  **QA-Cleanup-2** - verification only. All ten vendored libs are live; `lunasvg` was the one dead
+  folder and went at QA-Soundness. Jeff's rule: remove whole unused folders, never prune inside a
+  lib we use (upstream updates would fight the deletions - the sfizz precedent).
+  **QA-Cleanup-3** - verification only. Nothing in Assets/Resources/Presets/Templates is
+  unreferenced, and a filename grep is UNSAFE here: the tape IRs, hiss beds and acoustic IRs are
+  reached through constructed paths, and `Presets/BaySickDrums/` looks orphaned but is the Drums
+  pages' live preset home.
+  **QA-Cleanup-4** - already done; `.gitignore:8` covers `Files For Claude` and none of its 738 MB
+  was ever tracked.
+  **QA-PlayerRename** - folded into the same batch. The `vp_*` prefix the entry names does NOT
+  exist (params are `tk_<trackId>_bsp_`), so there is no saved-project exposure.
+  **QA-RC-lite** - dissolved into the CAMPAIGN: the clean-slate build moves there as a test, the
+  soak was already a campaign item, and the regression spot-pass is redundant with the campaign's
+  own full page-by-page.
+  **`/audit-security`** - built IN the cleanup batch (Jeff 2026-08-10, pick b) so its Tier-1 sweep
+  runs BEFORE the campaign rather than after.
+- **G5 (was G6) - Phase 7:** QA-Manuals, QA-Templates, **QA-LegalReview**, QA-Installer,
+  QA-Updater, QA-Framework. Renumbered 2026-08-10 when the old G5 dissolved. Deferred call D-1:
+  whether Manuals/Framework drafting overlaps the campaign (they're doc work; I can draft while
+  Jeff tests) - Jeff 2026-08-10: YES, this group starts while he runs the campaign.
 
 ### Master Test Plan (`Plans & Specs/Test Plans/v1-master-test-plan.md`)
 Sections, in this shape:
-- **§A Global smoke ladder** — §7 items 1-5 (also reused at every group boundary).
-- **§B Per-batch sections (commit order)** — numbered scenarios from each batch's plan-file verify scripts: steps, expected result, Debug-first/Release-confirm, checkbox, PASS/FAIL + notes, and a `blocks:` field naming the batch commit for bisect on failure.
-- **§C Deferred re-verify ledger** — the 4 parked items, inside QA-J-Verify's section.
-- **§D Cross-cutting regression** — §7 cross-batch multi-take session; MT stress arrangement; DSP-meter sanity across buffer sizes.
-- **§E Preset + patch-save walk** (QA-Verify content, expanded per Jeff 2026-07-08) — four families, all round-trip-verified (save → reload → identical state + audio), not just menu-clicked:
+- **§A Global smoke ladder** - §7 items 1-5 (also reused at every group boundary).
+- **§B Per-batch sections (commit order)** - numbered scenarios from each batch's plan-file verify scripts: steps, expected result, Debug-first/Release-confirm, checkbox, PASS/FAIL + notes, and a `blocks:` field naming the batch commit for bisect on failure.
+- **§C Deferred re-verify ledger** - the 4 parked items, inside QA-J-Verify's section.
+- **§D Cross-cutting regression** - §7 cross-batch multi-take session; MT stress arrangement; DSP-meter sanity across buffer sizes.
+- **§E Preset + patch-save walk** (QA-Verify content, expanded per Jeff 2026-07-08) - four families, all round-trip-verified (save → reload → identical state + audio), not just menu-clicked:
   1. **Engine presets:** 10 engines × every factory preset loads with all params restored + audio as expected; user preset save/reload identical; presets survive project save/load. Runs AFTER both PRESET-BREAKs (QA-ClipPlayback bipolar-stereo, QA-ApvtsAutomation BLU-492).
-  2. **Effect-rack presets:** per-effect preset menus + `EffectPresetIO` factory presets (e.g. "Slapback") — load applies correct state; user effect-preset save/reload round-trips.
-  3. **Engine "Save Current Patch As..." flows:** LayersPage (LayersPage.cpp:562), BassPage (:537), DrumPage (:1086 + synth submenu :577 + per-drum context menu), ClipsPage (:141) — saved patch reloads identical via the picker.
+  2. **Effect-rack presets:** per-effect preset menus + `EffectPresetIO` factory presets (e.g. "Slapback") - load applies correct state; user effect-preset save/reload round-trips.
+  3. **Engine "Save Current Patch As..." flows:** LayersPage (LayersPage.cpp:562), BassPage (:537), DrumPage (:1086 + synth submenu :577 + per-drum context menu), ClipsPage (:141) - saved patch reloads identical via the picker.
   4. **Page-level "Save Page Preset As..." / Load flows (the hamburger-menu page-save path):** all 7 page types — LayersPage (:1059), BassPage (:970), DrumPage (:1506), ClipsPage (:397), VoxPage (:115/:307), InstPage (:259/:629), Rusty kit menu (StandaloneEditor.cpp:5095) — save → delete page → reload from preset → full page state restored; PLUS the "Save Page Preset & Delete" 3-button prompt path on page delete, and BaySickPedals "Save as Default" (BaySickPedalsEditor.cpp:560). (Line refs = 2026-07-08 snapshot; re-resolve at test-plan authoring.)
 - **§F RC-grade audits** — menu walk, keybind audit, tooltip review, global FX bypass. Split: I pre-audit by code-read and produce candidate-discrepancy lists; Jeff spot-verifies the flagged items instead of walking everything cold.
 - **§G Test-to-failure** — long-soak scenarios (100 tracks, 50 clips, hours-long playback, SR/buffer switches) — scheduled as background soaks during G5.
@@ -225,7 +250,9 @@ Sections, in this shape:
 ## Verification
 1. **Pre-flight verifiable:** marathon table locked in this plan; test-plan skeleton + §0 line + §9 entry applied; tag pushed.
 2. **G1 = go/no-go:** 5 batches coded/built/committed ("4" corrected 2026-07-08 — the line predated QA-TransportDisplay's insertion), group review clean, smoke + ear-check pass. If G1's smoke fails badly or the cadence doesn't feel right, stop and reassess — the pre-bulk-run tag + backup make abort cheap.
-3. **Run success =** every §B section passed + closed, §C ledger cleared, §D-§G passed, Phase 6 clean 2nd build, QA-RC-lite green — at which point the Main Plan shows all V1 batches CLOSED and Phase 7 ships the release artifacts.
+3. **Run success =** every §B section passed + closed, §C ledger cleared, §D-§G passed, and the
+   clean-slate build test green (moved into the campaign 2026-08-10 when QA-RC-lite dissolved) -
+   at which point the Main Plan shows all V1 batches CLOSED and G5 ships the release artifacts.
 
 ## Marathon answers — LOCKED 2026-07-08 (pre-flight, first bulk-run session)
 
@@ -261,7 +288,7 @@ answers land per each batch's normal close routing (Rule 3 / R2), not eagerly.
 | 10b | DSP-11 | IN, feasibility-gated: build live ASIO buffer-size change + diagnose the prior crash as part of it; if the driver layer provably can't do it safely, surface evidence and fall back to the documented workaround (Jeff decides). |
 | 11 | QA-TempoMap model | Ruler flags/markers = STEPPED tempo-change points — the sample-indexed map stays a stepped list. RAMPS come via tempo AUTOMATION (the existing global_tempo path), not the map. Marker <-> automation precedence pinned at G1 plan write. |
 | 12a | AlertWindow migration | Migrate-as-sweep in QA-Cleanup-1. |
-| 12b | /audit-security agent | Build it pre-RC-lite (Tier-1 sweep runs before V1); Tier-2 once QA-Updater's network code exists. |
+| 12b | /audit-security agent | **RE-ROUTED 2026-08-10 (Jeff, pick b):** built IN the G4 QA-Cleanup batch, so the Tier-1 sweep runs BEFORE the campaign. Was "pre-RC-lite", which had no home once QA-RC-lite dissolved. Tier-2 still waits on QA-Updater's network code. |
 | 12c | Crash reporting | V1 = OS-native WER + per-release .pdb archival; no third-party SDK / symbol server. |
 | 12d | DSP meter cap | 2.0 (200%) for V1 Release (applied in Phase 6). |
 | 12e | MT diagnostic | Compile-flag gate (#if BAYSICKDAW_MT_DIAGNOSTIC) — out of V1 Release builds. |
@@ -309,7 +336,7 @@ answers land per each batch's normal close routing (Rule 3 / R2), not eagerly.
 | F | Which drag re-fits | Plain right-edge drag = trim/extend (unchanged). Shift+drag = re-fit (varispeed in Resample / pitch-locked stretch in Stretch, per 2b). |
 | G | Import behavior | See corrected 2c/2d rows above — true-length placement at project tempo, `originalBPM` = import-time project tempo, plays 1:1, no rounding, no import-time stretch. |
 | G3 start | 4a exact S-key/indicator interaction; 4c FL Humanize reference capture (Jeff screenshot); D-6 Riff Machine spec; D-8 Note Properties spec; **Builder pattern-block NOTE-PREVIEW spec (Jeff, G1 smoke):** the mini notes drawn ON arrangement pattern blocks must sit at their true musical positions within the block's viewport - 1 bar of notes fills exactly 1 bar of block regardless of the block's length or stretch (1-bar notes on a 2-bar block occupy only the first half) |
-| G6 start (QA-Templates open) | 13a specific genre picks; 13b gap-fill decisions (with the /preset-gaps report) |
+| G5 start (was G6; QA-Templates open) | 13a specific genre picks; 13b gap-fill decisions (with the /preset-gaps report) |
 
 ## Carry-Over — 2026-07-08 (G1 boundary, first bulk-run session)
 
@@ -602,7 +629,7 @@ answers land per each batch's normal close routing (Rule 3 / R2), not eagerly.
 - **Resume action:** collect Jeff's G1 smoke + ear-check results -> fix/fold findings -> one
   boundary commit (message + full status -> approval) -> give the honest model assessment ->
   **Jeff's GO/NO-GO on the bulk-run model.**  **RESOLVED 2026-07-09: GO** — G1 boundary closed at
-  commit 4920efa0; model continues through G6 at the ORIGINAL cadence (my proposed
+  commit 4920efa0; model continues through the final group at the ORIGINAL cadence (my proposed
   render-path-batch ear-checks REJECTED by Jeff — no added checks; only the two already-planned
   G2 mid-group ear-checks stand).  G2 starts when Jeff opens it.  On GO: G2 group start (plan
   files for QA-F / QA-Fa /

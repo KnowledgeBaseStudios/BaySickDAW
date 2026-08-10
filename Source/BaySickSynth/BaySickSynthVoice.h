@@ -16,7 +16,13 @@ enum class BssWaveform
 };
 
 enum class BssLFODest  { Filter = 0, Pitch, OscModifier, kCount };
-enum class BssVoiceMode { Poly = 0, Mono, Lead, Legato, kCount };
+// Lead was removed 2026-08-10 (Jeff's ruling): it fell through to the Mono
+// branch, so it had never behaved differently from Mono in any shipped build,
+// and the behavior it WOULD have been given is what Legato already does.
+// AudioParameterChoice persists normalized, so a project saved on Lead (2 of 4,
+// = 0.667) now reads back as Mono - which is exactly what it has always sounded
+// like, so nothing needed migrating.
+enum class BssVoiceMode { Poly = 0, Mono, Legato, kCount };
 
 // Filter type (unchanged)
 enum class BssFilterType { LowPass = 0, HighPass, BandPass, Notch, kCount };
@@ -84,7 +90,7 @@ public:
     void setGlideTime   (float secs);         // 0-2
 
     // ── Voice mode ────────────────────────────────────────────────────────────
-    void setVoiceMode   (BssVoiceMode mode);  // informational; Mono enforced at DSP level
+    void setVoiceMode   (BssVoiceMode mode);  // informational; every mode is enforced at DSP level
 
     // ── Mod wheel ─────────────────────────────────────────────────────────────
     void setModWheelDest (int dest);          // 0=Filter, 1=LFO
@@ -112,7 +118,8 @@ public:
 
     // ── Legato support ────────────────────────────────────────────────────────
     // Re-pitch to midiNote without retriggering envelopes / LFO / phases.
-    // DSP calls this in Legato mode when a new note arrives while previous still held.
+    // DSP calls this in Legato mode when a new note arrives while the
+    // previous one is still held.
     void retargetLegato (int midiNote);
     bool isInRelease() const { return mInRelease; }
 
@@ -206,6 +213,14 @@ private:
                            0.3104856f, 0.5329522f, -0.0168980f };
     float  mBrownPole    { 0.998f };
     float  mBrownGain    { 0.02f };
+    // White noise has no pole to re-derive, but the raw LCG output is a fixed
+    // per-sample variance spread flat over 0..rate/2, so its density inside the
+    // audible band falls as 1 / rate and white got quieter than pink and brown
+    // once those were made rate-invariant.  sqrt (rate / 44100) restores equal
+    // in-band energy and is exactly 1 at the 44.1 kHz design rate.  Applied to
+    // the white output only -- the whiteN that FEEDS the pink and brown sections
+    // must stay unscaled or their already-held levels would move with it.
+    float  mWhiteRateGain { 1.0f };
 
     // ── Voice mode ────────────────────────────────────────────────────────────
     BssVoiceMode mVoiceMode { BssVoiceMode::Poly };

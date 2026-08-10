@@ -754,6 +754,11 @@ void VibeVoice::setCurrentPlaybackSampleRate (double newRate)
     mSampleRate = newRate;
     mAdsr.setSampleRate (newRate);
 
+    // 1.3 ms of the LIVE rate: the pitch-modulated read (glide + vibrato) steps
+    // its resampling ratio once per chunk, so a rate-derived chunk keeps the
+    // modulation resolution constant across every device sample rate.
+    mPitchModChunk = juce::jlimit (16, 512, juce::roundToInt (newRate * 0.0013));
+
     juce::dsp::ProcessSpec spec;
     spec.sampleRate       = newRate;
     spec.maximumBlockSize = (juce::uint32) mBlockSize;
@@ -957,29 +962,61 @@ void VibeVoice::renderNextBlock (juce::AudioBuffer<float>& outputBuffer,
 
     // Read from resampled source (QA-VoicePool Task 2: mActiveResamp points
     // to either mForwardResamp or mReverseResamp; set by startNote).
-    // QA-H per-note glide: pull in 64-sample chunks with the ratio re-derived
-    // from the ramping semitone offset (~1.3 ms steps - smooth to the ear),
-    // then snap to the target ratio when the sweep completes.
-    if (mGlideSamplesLeft > 0)
+    //
+    // Pitch-modulated read.  Two independent sources of per-sample pitch motion
+    // share one path because both are pure semitone offsets on top of the note's
+    // settled ratio (mGlideBaseRatio, which already carries note pitch, region
+    // tune, global tune, unison detune and stretch):
+    //   - QA-H per-note glide: mGlideSemisCur ramps to zero over the slide.
+    //   - Vibrato: the LFO's signed cents offset.
+    // Both are summed in semitone space and turned into ONE multiplicative ratio
+    // per chunk, so they compose rather than clobber each other.  The chunk is a
+    // fixed slice of TIME (mPitchModChunk), not of samples.
+    // juce::ResamplingAudioSource reads at a fractional position and linearly
+    // interpolates between the two straddling input samples (its subSampleOffset
+    // alpha blend), so a modulated read needs no interpolation scheme of its own.
+    const bool vibratoOn = (mLfoAmt > 0.001f);
+
+    if (mGlideSamplesLeft > 0 || vibratoOn)
     {
+        const double lfoInc = (juce::MathConstants<double>::twoPi
+                                * (double) mLfoRate) / mSampleRate;
+        const double vibSemis = (double) mLfoAmt * (kVibratoMaxCents / 100.0);
+        const int    chunkMax = juce::jmax (1, mPitchModChunk);
+
         int done = 0;
         while (done < numSamples)
         {
-            const int chunk = juce::jmin (64, numSamples - done);
+            const int chunk = juce::jmin (chunkMax, numSamples - done);
+
+            double semis = (mGlideSamplesLeft > 0) ? (double) mGlideSemisCur : 0.0;
+            if (vibratoOn)
+                semis += vibSemis * std::sin (mLfoPhase);
+
             mActiveResamp->setResamplingRatio (mGlideBaseRatio
-                * std::pow (2.0, (double) mGlideSemisCur / 12.0));
+                * std::pow (2.0, semis / 12.0));
             juce::AudioSourceChannelInfo ci (&mTmpBuffer, done, chunk);
             mActiveResamp->getNextAudioBlock (ci);
-            const int adv = juce::jmin (chunk, mGlideSamplesLeft);
-            mGlideSemisCur    += mGlideSemisStep * (float) adv;
-            mGlideSamplesLeft -= adv;
-            if (mGlideSamplesLeft <= 0)
+
+            if (mGlideSamplesLeft > 0)
             {
-                mGlideSemisCur = 0.0f;
-                mActiveResamp->setResamplingRatio (mGlideBaseRatio);
+                const int adv = juce::jmin (chunk, mGlideSamplesLeft);
+                mGlideSemisCur    += mGlideSemisStep * (float) adv;
+                mGlideSamplesLeft -= adv;
+                if (mGlideSamplesLeft <= 0)
+                    mGlideSemisCur = 0.0f;
             }
+            if (vibratoOn)
+                mLfoPhase = std::fmod (mLfoPhase + lfoInc * (double) chunk,
+                                       juce::MathConstants<double>::twoPi);
             done += chunk;
         }
+
+        // Leave the resampler parked on the unmodulated ratio: the plain-read
+        // branch below never sets one, so a block that ends mid-wobble would
+        // otherwise strand the voice detuned once vibrato is turned off.
+        if (mGlideSamplesLeft <= 0)
+            mActiveResamp->setResamplingRatio (mGlideBaseRatio);
     }
     else
     {
@@ -1009,25 +1046,6 @@ void VibeVoice::renderNextBlock (juce::AudioBuffer<float>& outputBuffer,
             mBaseRes + mNoteResBias * 9.5f + mActiveResOffset);
         mFilter.setCutoffFrequency (effCutoff);
         mFilter.setResonance       (effRes);
-    }
-
-    // ── Vibrato/shimmer LFO ───────────────────────────────────────────────────
-    if (mLfoAmt > 0.001f)
-    {
-        const double phaseInc = (juce::MathConstants<double>::twoPi * mLfoRate) / mSampleRate;
-        for (int ch = 0; ch < 2; ++ch)
-        {
-            auto* d = mTmpBuffer.getWritePointer (ch);
-            double phase = mLfoPhase;
-            for (int i = 0; i < numSamples; ++i)
-            {
-                const float mod = 1.f + mLfoAmt * 0.12f * (float) std::sin (phase);
-                d[i] *= mod;
-                phase += phaseInc;
-            }
-        }
-        mLfoPhase = std::fmod (mLfoPhase + phaseInc * numSamples,
-                               juce::MathConstants<double>::twoPi);
     }
 
     // ── Drive (tanh waveshaper) ───────────────────────────────────────────────

@@ -186,7 +186,7 @@ the project on another machine and the pedal presents as loaded while doing no a
 
 ## Routing notes (Rule 3)
 
-Encoder/licensing artifacts route to QA-LegalReview (G6) — record the LAME version + license
+Encoder/licensing artifacts route to QA-LegalReview (G5, was G6) — record the LAME version + license
 file location in running notes at vendoring time. The dead `doNew/doSave/doOpen` stub trio
 (pre-existing) logs for close-time routing (likely QA-Cleanup), not deleted here.
 

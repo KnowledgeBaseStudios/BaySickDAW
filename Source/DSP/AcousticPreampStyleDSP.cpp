@@ -1,6 +1,7 @@
 #include "AcousticPreampStyleDSP.h"
 #include "../MissingFileReport.h"
 #include "../ProjectFileResolver.h"
+#include "../SampleLibrary.h"
 
 namespace
 {
@@ -271,7 +272,12 @@ bool AcousticPreampStyleDSP::loadUserIR (const juce::File& file, juce::String& o
         return false;
     }
 
-    mUserIRPath = file.getFullPathName();
+    // Persisted form, not the absolute path: an IR under Core Library or My
+    // Samples has to come back on another install or another Windows account,
+    // and an absolute path embeds this machine's user name.  refForPersist
+    // returns the absolute path for anything outside those roots, which is what
+    // the bundler then rewrites when a project is made self-contained.
+    mUserIRPath = SampleLibrary::refForPersist (file);
     if (mBody == Body::User) reloadConvIR();   // message-thread caller (panel)
     return true;
 }

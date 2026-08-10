@@ -129,17 +129,17 @@ BaySickBassEditor::BaySickBassEditor (BaySickBassProcessor& p)
     initLabel (mModWheelAmtLbl, "AMOUNT");    addAndMakeVisible (mModWheelAmtLbl);
 
     mVoiceModeLed   = std::make_unique<BssLedRadio> (avts, pid ("voiceMode"),
-                          juce::StringArray { "Poly", "Mono", "Lead", "Legato" }, 1, 4, ledCol);
+                          juce::StringArray { "Poly", "Mono", "Legato" }, 1, 3, ledCol);
 
     mCutSelfBtn.setClickingTogglesState (true);
     mCutSelfBtn.getProperties().set ("switchToggle", true);
     mCutSelfBtn.setTooltip ("Cut Self: when on, playing a note already held cuts the prior instance first.\n"
                             "Prevents phase stacking on rapid retrigs of the same note.\n"
-                            "Active in Poly mode only (Mono/Lead cut inherently; Legato retargets).");
+                            "Active in Poly mode only (Mono cuts inherently; Legato retargets).");
     addAndMakeVisible (mCutSelfBtn);
 
     // Cut Self mode toggle (QA-CutSelfReview): Same Pitch vs Cut All.  Label
-    // follows the toggle state.  Only bites in Poly (Mono/Lead cut inherently).
+    // follows the toggle state.  Only bites in Poly (Mono cuts inherently).
     mCutSelfModeBtn.setClickingTogglesState (true);
     mCutSelfModeBtn.setTooltip ("Cut Self mode: Same Pitch cuts only the retriggered note (default);\n"
                                 "Cut All cuts every ringing voice on each new note.");

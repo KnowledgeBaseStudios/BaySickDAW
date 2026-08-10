@@ -90,7 +90,9 @@ public:
 
     bool getNotchOn() const noexcept { return mNotchOn; }
 
-    // User IR file (Body::User).  Path is stored verbatim in save state.
+    // User IR file (Body::User).  Save state holds the persisted REFERENCE
+    // (SampleLibrary::refForPersist), so read it back through
+    // ProjectFileResolver::resolve rather than as a bare path.
     // Pass empty path to clear; panel button calls this from the file picker.
     // Returns false + outErr when the pick is missing or not readable audio,
     // leaving the current IR in place: the convolution stage reports nothing

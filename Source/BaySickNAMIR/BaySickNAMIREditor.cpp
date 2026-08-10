@@ -1021,16 +1021,18 @@ void BaySickNAMIREditor::updateLabels()
         mFullRigHint.setText ({}, juce::dontSendNotification);
 
     // H-6d: per-slot Mic IR label tracks the active slot's loaded user IR.
+    // RESOLVE before naming: getUserIrPath returns a persisted REFERENCE, and a
+    // bare juce::File built from "mysamples:<rel>" is not a valid absolute path.
     const juce::String micPath = processor.getMicSim().getUserIrPath (slot);
     mMicSimUserIrLabel.setText (micPath.isEmpty()
                                     ? juce::String ("(no IR loaded)")
-                                    : juce::File (micPath).getFileName(),
+                                    : ProjectFileResolver::resolve (micPath).getFileName(),
                                   juce::dontSendNotification);
 
     const juce::String micPathB = processor.getMicSimB().getUserIrPath (slot);
     mMicSimUserIrLabelB.setText (micPathB.isEmpty()
                                      ? juce::String ("(no IR loaded)")
-                                     : juce::File (micPathB).getFileName(),
+                                     : ProjectFileResolver::resolve (micPathB).getFileName(),
                                    juce::dontSendNotification);
 }
 

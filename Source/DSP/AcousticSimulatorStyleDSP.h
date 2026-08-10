@@ -63,6 +63,8 @@ public:
     // leaving the current IR in place: the convolution stage reports nothing
     // back, so an unchecked failure reads as the effect doing nothing.
     bool loadUserIR   (const juce::File& file, juce::String& outErr);
+    // The persisted REFERENCE (SampleLibrary::refForPersist), not an absolute
+    // path -- read it back through ProjectFileResolver::resolve.
     juce::String getUserIRPath() const { return mUserIRPath; }
 
     Mode  mMode      { Mode::Standard };

@@ -40,8 +40,10 @@ void BaySickSynthDSP::renderNextBlock (juce::AudioBuffer<float>& buf,
 
     if (mVoiceMode != BssVoiceMode::Poly)
     {
-        // Mono / Lead: inject noteOff for previous note before each noteOn
-        // to enforce monophonic behaviour without changing voice count.
+        // Mono: inject noteOff for previous note before each noteOn to enforce
+        // monophonic behaviour without changing voice count.  Every note is a
+        // fresh allocation, so every note re-articulates the envelopes -- that
+        // is the whole difference from Legato, which glides instead.
         juce::MidiBuffer processed;
 
         for (const auto meta : midi)
@@ -230,6 +232,7 @@ void BaySickSynthDSP::handleLegatoMidi (juce::MidiBuffer& midi)
 
     midi.swapWith (pass);
 }
+
 
 //==============================================================================
 // ── Setters - propagate to all voices ────────────────────────────────────────

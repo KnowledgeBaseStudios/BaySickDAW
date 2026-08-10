@@ -1,6 +1,7 @@
 #include "NAMPedalStyleDSP.h"
 #include "../MissingFileReport.h"   // QA-Export Task 5
 #include "../ProjectFileResolver.h"
+#include "../SampleLibrary.h"
 #include <NAM/get_dsp.h>
 #include <NAM/dsp.h>
 #include <filesystem>
@@ -85,11 +86,30 @@ void NAMPedalStyleDSP::setOutputDb (float db) { mOutputDb = juce::jlimit (-24.0f
 juce::String NAMPedalStyleDSP::getModelName() const
 {
     if (mModelPath.isEmpty()) return {};
+
+    // mModelPath is a persisted REFERENCE, not an absolute path, but EVERY ref
+    // shape keeps the file's own leaf as its last segment ("library:Pack/Foo.nam",
+    // "mysamples:Foo.nam", a bundle's "Samples/Foo.nam", a plain absolute), so
+    // the label is pure string work.
+    //
+    // Deliberately NOT resolved: this is a UI label refreshed on every panel
+    // build, and resolving a "library:" ref stats the filesystem and can bank a
+    // MissingFileReport entry.  None of the callers sit inside a ScopedGesture,
+    // so that entry would surface later under an unrelated gesture wearing that
+    // gesture's noun -- opening a pedal panel would make the NEXT project load
+    // claim the project references missing files.
+    juce::String ref = mModelPath;
+    if (SampleLibrary::isStableRef (ref))
+        ref = ref.fromFirstOccurrenceOf (":", false, false);
+    const auto leaf = ref.replaceCharacter ('\\', '/')
+                         .fromLastOccurrenceOf ("/", false, false)
+                         .upToLastOccurrenceOf (".", false, false);
+
     // QA-Export Task 5: never present a name we did not actually load -- that
     // reads as "loaded" while the pedal does no amp modeling at all.
     if (mModelMissing)
-        return juce::File (mModelPath).getFileNameWithoutExtension() + " (missing)";
-    return juce::File (mModelPath).getFileNameWithoutExtension();
+        return leaf + " (missing)";
+    return leaf;
 }
 
 bool NAMPedalStyleDSP::loadModel (const juce::File& file, juce::String& outErr)
@@ -147,7 +167,14 @@ bool NAMPedalStyleDSP::loadModel (const juce::File& file, juce::String& outErr)
             mSwapPending.store (true, std::memory_order_release);
         }
 
-        mModelPath = file.getFullPathName();
+        // Persisted form, not the absolute path: a capture under Core Library or
+        // My Samples has to come back on another install or another Windows
+        // account, and an absolute path embeds this machine's user name.
+        // refForPersist returns the absolute path for anything outside those
+        // roots -- which the default .nam home under Presets\Effects still is --
+        // and that is what the bundler rewrites when a project is made
+        // self-contained.
+        mModelPath = SampleLibrary::refForPersist (file);
         // The marker has to clear on EVERY successful load, not just the one
         // inside setStateInformation: a user who re-picks a working capture on
         // a pedal flagged missing would otherwise keep reading "(missing)" over
@@ -342,9 +369,11 @@ void NAMPedalStyleDSP::setStateInformation (const void* data, int sz)
             juce::String err;
             if (loadModel (f, err))
             {
-                // loadModel records the absolute file it opened; the reference
-                // that was SAVED is what has to survive the next save, or a
-                // bundled project rewrites itself back to this machine's paths.
+                // loadModel re-derives its own reference from the file it
+                // opened, which for a bundled project is the absolute path
+                // inside the project folder; the reference that was SAVED is
+                // what has to survive the next save, or a bundled project
+                // rewrites itself back to this machine's paths.
                 mModelPath    = path;
                 mModelMissing = false;
             }

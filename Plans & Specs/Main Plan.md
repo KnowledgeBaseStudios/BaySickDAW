@@ -2052,6 +2052,9 @@ kit fan-out behavior locked at docket #10 (a/a, default unmapped).
 - Verify (own plan file will detail): clicking a state-mutation control + reverting to original net state leaves the project clean (no dirty asterisk); Ctrl+Z to the exact state of the last save clears the dirty asterisk; a new edit after Ctrl+Z'ing past `savedUndoStep` correctly destroys the saved future (`savedUndoStep = -1`); every page's state mutations participate in undo correctly; every `setProperty(id, val, nullptr)` call site rewritten or explicitly justified; no `ApvtsDirtyTracker` `onAny` regressions (the listener is gone); UI header observes `currentUndoStep != savedUndoStep` dynamically; saves correctly sync the pointer.
 
 #### **QA-RC: Pre-Release Test Plan + RC Build** (added 2026-05-08 via Rule 3 — see §9)
+> **DISSOLVED 2026-08-10 (Jeff)** into the Master Test Plan campaign.  The clean-slate
+> build below is now campaign test **G-5**; the test-to-failure list is campaign section
+> **G**; the page-by-page walk IS the campaign.  Entry retained for its item detail.
 **Plan file:** TBD.
 - Items: LDT-414 (Q&A clean build + 2nd clean build + testing plan + test to failure) — original Phase 5G work that was never executed; expanded with QA-Inventory walk findings (LDT-096 menu audit, LDT-097 keybinds audit, LDT-296 Global Tooltip System review, FSW-303 global FX bypass verify).
 - Scope:
@@ -2068,6 +2071,12 @@ kit fan-out behavior locked at docket #10 (a/a, default unmapped).
 - Why this slot: AFTER all bug-fix + cleanup work lands. The whole point is verifying the cleaned-up build.
 
 ### Phase 6 — Pre-Release Cleanup Audit (its own phase, AFTER all 15 bug batches)
+
+> **COLLAPSED TO ONE BATCH 2026-08-10 (Jeff).**  The goal below stands unchanged;
+> the seven-batch shape did not.  QA-Soundness already executed the source-audit
+> half, and the vendored-lib / asset sweeps verified out with nothing to remove.
+> Phase 6 is now the single **QA-Cleanup** batch, run as the last batch of G4.
+> Full rationale in the section-6 sequencing note.
 
 The goal: ship a release that doesn't carry dead/bloated code, and where
 "people who are most interested in seeing how the back end works" can read
@@ -2087,7 +2096,45 @@ Every component in the build gets classified into:
   - *No reason found* — promote to Dead.
 - **Active** — in use by the build today. No-action.
 
+#### **QA-Cleanup: Phase 6 in one batch** (collapsed 2026-08-10, see §6 sequencing note)
+**Plan file:** [`Plans & Specs/Batch Plans/spry-tidying-pika.md`](Batch Plans/spry-tidying-pika.md)
+- **Slot:** the LAST batch of G4, and the last coding batch of the bulk run.
+  Jeff's call 2026-08-10: "we are going to wipe G5 completely out with the
+  cleanup work, and will move the build test into the test campaign."
+- **Why one batch instead of seven:** every remaining Phase 6 item was
+  verified individually before the collapse, not assumed away.  QA-Audit's
+  source sweep ran as QA-Soundness; QA-Cleanup-2 and -3 both resolve to
+  nothing-to-remove; QA-Cleanup-4 is already done by `.gitignore:8`;
+  QA-RC dissolved into the campaign.  What actually remains is the player
+  rename, four mechanical fold-ins, the two verification sweeps written up
+  as evidence, and one new security-audit agent.
+- Scope:
+  1. **QA-PlayerRename** - `VibePlayer*` -> `BaySickPlayer*` across source,
+     with the System Reference docs following.  Historical docs (Implemented
+     Work Log, Previously Implemented, Running Notes) stay as written.
+  2. **QA-Cleanup-1 fold-ins** - the four mechanical items that survive:
+     the dead per-page `mPianoRoll` writeback (3 pages), the dead
+     `Kind::Audio` case, the `RenderEngine::MtDiagnostic` namespace + its
+     menu item + instrumentation sites, and the unreachable
+     `ProjectBrowserWindow` block.
+  3. **Cleanup-2 / -3 verification, written up** - the sweeps ran and found
+     nothing to delete; the batch records WHY per library and per asset
+     folder so nobody re-runs a filename grep and deletes a runtime-composed
+     filename (see the §6 note on `loadCassetteIR`).
+  4. **`/audit-security` agent** - new, built in this batch (Jeff's pick "b",
+     2026-08-10), then run at Tier 1 over the app.  QA-Soundness audited
+     correctness; nothing has ever audited the app's handling of untrusted
+     input (project files, sample/IR/NAM files, hosted plugin binaries,
+     the Core Library fetcher's network path).
+- **Not in scope:** the group-boundary smoke.  All functional verification
+  belongs to the Master Test Plan campaign, which Jeff runs next.
+
 #### **QA-Audit: Codebase classification sweep (read-only)**
+> **SUPERSEDED 2026-08-10 (Jeff):** the source half of this sweep already ran, as
+> **QA-Soundness** (seven category sweeps over the whole tree, eight adversarial
+> re-sweep rounds, 9,160 dead-code sites examined, ten dead files deleted).  The
+> findings ledger in `Batch Plans/keen-combing-heron.md` IS the manifest this batch
+> was meant to produce.  Absorbed into the single **QA-Cleanup** batch.
 - Scope: sweep entire build (`Source/`, `libs/`, `Assets/`, `Kits/`,
   `Presets/`, `Templates/`, plus dev-repo scaffolding) and produce a
   classification manifest. NO code changes; this is the input doc that
@@ -2160,6 +2207,9 @@ Every component in the build gets classified into:
   codebase size, not complexity.
 
 #### **QA-Cleanup-1: Source code cleanup**
+> **SUPERSEDED 2026-08-10 (Jeff):** absorbed into the single **QA-Cleanup** batch, the last
+> of G4.  See the section-6 sequencing note for why each former Phase-6 batch collapsed.
+> Entry retained for its item detail, which the cleanup batch executes.
 - Items: execute the source-code section of the QA-Audit manifest.
   - **Folded in 2026-05-11 (QA-D close NIT-4 carry-forward via §9 eleventh Forks entry)**: per-page `LayersPage::setTabName` writeback to dead `mPianoRoll` state ([Source/Standalone/LayersPage.cpp:321-325](Source/Standalone/LayersPage.cpp) + parallels in `BassPage` / `DrumPage`).  QA-D STATE-02 added the writeback path that lands at a now-dead piano-roll state member (`mPianoRoll` is allocated but not user-visible post-D-5; unified `PianoRollPage` is what the user sees).  Two fix shapes: (i) minimal symptom-fix — delete the `setTabName` writeback lines in each per-page; (ii) full per-page `mPianoRoll` drop — delete the dead member entirely + walk every reference.  Routes here because dead-code shape, not functional bug.
   - **Folded in 2026-05-17 (QA-E Task 7 close-routing via §9 twenty-second Forks entry)**: dead flat-list `BrowserItem::Kind::Audio` choke-group / rename / switch cases in `BrowserPanel::showItemContextMenu` ([Source/Standalone/BuilderPage.cpp](Source/Standalone/BuilderPage.cpp), dead `Audio` case ~line 912).  Post-FILE-01 (QA-E Task 4 library-driven model) no `Audio`-kind `BrowserItem` is ever constructed, so these are unreachable duplicates of the live audio-choke path in `showAudioTreeContextMenu` (choke value lives on `AudioLibraryEntry`; live tree path unaffected).  Pure dead code, no behavior change to remove.  **Source-verified pre-delete guard:** `renameAudioAt` (`BuilderPage.cpp:1117`) is SHARED — called from the live tree path (`BuilderPage.cpp:411`) AND the dead flat-list case — so retain `renameAudioAt`; delete ONLY the dead `BrowserItem::Kind::Audio` flat-list call site.  Routes here because dead-code shape, not functional bug.
@@ -2177,6 +2227,9 @@ Every component in the build gets classified into:
 - Effort: medium-large (~6-10 hours; folded NIT-4 adds ~15-90 min depending on fix shape chosen; folded §60 dead flat-list audio paths add ~15-30 min — mechanical deletion of the dead `BrowserItem::Kind::Audio` case, `renameAudioAt` retained per the source-verified shared-use guard).
 
 #### **QA-PlayerRename: VibePlayer/* → BaySickPlayer/* internal rename** (forked in 2026-05-10 — see §9)
+> **SUPERSEDED 2026-08-10 (Jeff):** absorbed into the single **QA-Cleanup** batch, the last
+> of G4.  See the section-6 sequencing note for why each former Phase-6 batch collapsed.
+> Entry retained for its item detail, which the cleanup batch executes.
 - Items: QA-A finding #39 (close-time routing).
 - Scope: rename the `Source/VibePlayer/` directory to `Source/BaySickPlayer/`; rename `VibePlayerProcessor` / `VibePlayerEditor` / `VibePlayerDSP` / `VibePlayerLAF` and friends to their `BaySickPlayer*` counterparts; sweep every `#include`, every `dynamic_cast<VibePlayer...>`, every comment / doc reference; rename `vp_*` APVTS prefix where used; update CMakeLists target names. User-facing brand ("BaySickPlayer") is already locked since QA-A; this batch closes the source-side / class-side gap.
 - Risk: low (mechanical rename across files). One careful pass; risk is missing a stray include / cast in an unrelated file.
@@ -2184,6 +2237,9 @@ Every component in the build gets classified into:
 - Effort: medium (~2-3 hours, dominated by grep + careful sweep + project-load round-trip verification).
 
 #### **QA-Cleanup-2: Vendored libraries cleanup**
+> **SUPERSEDED 2026-08-10 (Jeff):** absorbed into the single **QA-Cleanup** batch, the last
+> of G4.  See the section-6 sequencing note for why each former Phase-6 batch collapsed.
+> Entry retained for its item detail, which the cleanup batch executes.
 - Items: execute the `libs/` section of the QA-Audit manifest.
 - Scope: prune unused vendored libs; for each kept lib, prune unused
   subdirs after grepping for unconditional `configure_file()` references.
@@ -2193,6 +2249,9 @@ Every component in the build gets classified into:
 - Effort: medium (~4-6 hours).
 
 #### **QA-Cleanup-3: Assets + presets cleanup**
+> **SUPERSEDED 2026-08-10 (Jeff):** absorbed into the single **QA-Cleanup** batch, the last
+> of G4.  See the section-6 sequencing note for why each former Phase-6 batch collapsed.
+> Entry retained for its item detail, which the cleanup batch executes.
 - Items: execute the assets section of the QA-Audit manifest.
 - Scope: prune unreferenced assets, kits, presets, templates; verify
   installer config still produces a functional shipping bundle; document
@@ -2202,6 +2261,9 @@ Every component in the build gets classified into:
 - Effort: medium (~4-6 hours).
 
 #### **QA-Cleanup-4: Dev-repo scaffolding cleanup (non-shipping)**
+> **SUPERSEDED 2026-08-10 (Jeff):** absorbed into the single **QA-Cleanup** batch, the last
+> of G4.  See the section-6 sequencing note for why each former Phase-6 batch collapsed.
+> Entry retained for its item detail, which the cleanup batch executes.
 - Scope: review and triage non-shipping dev artifacts:
   - `Files For Claude/` legacy docs — what's still relevant vs stale.
   - `build_*.txt`, `*_log.txt`, `null` and similar build-byproduct files
@@ -2383,16 +2445,47 @@ Option A.
 **Pre-release cleanup phase (6) — runs ONLY after all of QA-0..N + the
 2026-05-08 QA-Inventory close additions have landed and verified:**
 ```
-QA-Audit  →  QA-Cleanup-1  →  QA-PlayerRename******  →  QA-Cleanup-2  →  QA-Cleanup-3  →  QA-Cleanup-4  →  QA-RC****
+QA-Cleanup   (ONE batch - the last of G4 and of the coding run)
 ```
 
-QA-Audit is the keystone — it produces the manifest that drives 1..3.
-QA-Cleanup-4 (dev-repo scaffolding) is independent and could ride
-alongside QA-Audit if the user prefers; default sequencing keeps it last.
-**QA-RC** (release-candidate verification) was added 2026-05-08 at
-QA-Inventory close as the gate before Phase 7 — a full project lifecycle
-sweep across the cleaned-up build to confirm nothing regressed during
-the cleanup phase.
+**SUPERSEDED 2026-08-10 (Jeff).**  The seven-batch Phase 6 chain above
+collapsed to a single batch.  Former shape, for the record:
+`QA-Audit -> QA-Cleanup-1 -> QA-PlayerRename -> QA-Cleanup-2 ->
+QA-Cleanup-3 -> QA-Cleanup-4 -> QA-RC`.
+
+Why each piece went, verified rather than assumed:
+
+- **QA-Audit** was the keystone that produced the manifest driving 1..3.
+  Its SOURCE half already ran, as QA-Soundness: seven category sweeps
+  over the whole tree, eight adversarial re-sweep rounds, 9,160
+  dead-code sites examined, ten dead files deleted.  The findings ledger
+  in `Batch Plans/keen-combing-heron.md` IS that manifest.
+- **QA-Cleanup-1** keeps only four mechanical fold-ins.  The full-build
+  warning sweep it called "likely the bulk of the effort" is already at
+  zero for C4702 / C4189 / C4996 / C4505.
+- **QA-Cleanup-2** has nothing to delete.  Every one of the ten vendored
+  libraries is live; `lunasvg` was the single dead folder and went at
+  QA-Soundness.  Note `asiosdk`, `NeuralAmpModelerCore` and
+  `signalsmith-linear` all read as unreferenced to a filename grep and
+  are all load-bearing (CMake auto-detect for `JUCE_ASIO=1`, an
+  include-path `#include <NAM/...>`, and a FetchContent dependency of
+  signalsmith-stretch respectively).
+- **QA-Cleanup-3** has nothing to delete either, and a filename sweep is
+  ACTIVELY UNSAFE here: `loadCassetteIR` builds `"cassette tape_" + i +
+  ".wav"` at runtime, so all 20 tape files plus the acoustic IRs look
+  unreferenced and deleting them kills Tape mode silently through an
+  `existsAsFile()` fall-through.  `Presets/BaySickDrums/` likewise looks
+  orphaned (that engine class was deleted) but is the live preset home
+  for the Drums pages.
+- **QA-Cleanup-4** is already done: `.gitignore:8` covers
+  `Files For Claude` and none of its 738 MB was ever tracked.
+- **QA-PlayerRename** folds into the same batch.  The `vp_*` prefix its
+  entry names does not exist - params are `tk_<trackId>_bsp_` - so there
+  is no saved-project exposure.
+- **QA-RC / QA-RC-lite** dissolved into the CAMPAIGN: the clean-slate
+  build became a campaign test, the soak was already a campaign item,
+  and the regression spot-pass duplicated the campaign's own
+  page-by-page walk.
 
 \*\*\*\*\*\* **QA-PlayerRename** inserted 2026-05-10 at QA-A close
 (ninth Forks entry). Phase 6, after QA-Cleanup-1. Internal-source
@@ -2985,7 +3078,8 @@ QA-Templates, before QA-Installer** in Phase 7 (Jeff-approved via bulk-run plan
 approval).  Bucket: Other / Platform / Deferred, Meta, UI / L&F / Theming.  See
 §9 fifty-fifth Forks entry.
 
-**Phase 7 — Documentation, Templates, Installer (runs ONLY after QA-RC):**
+**Phase 7 — Documentation, Templates, Installer (runs after QA-Cleanup; the former
+QA-RC gate dissolved into the test campaign 2026-08-10):**
 ```
 QA-Manuals****  →  QA-Templates****  →  QA-LegalReview****************************************  →  QA-Installer****  →  QA-Updater*****  →  QA-Framework****
 ```
@@ -3388,7 +3482,7 @@ batches added for items with no existing surface match.
 | **QA-VibeSlider** | after QA-N | ~493 sliders flagged across the codebase that swallow right-click; refactor each call site to `VibeSlider` (SharedUI.h:956). User-approved as own batch given scope. |
 | **QA-Verify** | after QA-VibeSlider | walks every E-bucket "Done-claimed-but-unverified" item flagged during inventory; Release smoke pass per item; reroutes any miss to a fresh §5 follow-up batch. |
 | **QA-Export** | after QA-Verify | wires the Export Stems / Export Master flows that the existing ribbon/menu placeholders point at (no audio path written yet). |
-| **QA-RC** | after QA-Cleanup-4 | release-candidate sweep across the cleaned-up build before Phase 7 documentation/installer work begins. |
+| ~~**QA-RC**~~ | ~~after QA-Cleanup-4~~ | **DISSOLVED 2026-08-10 (Jeff)** into the Master Test Plan campaign: the clean-slate build became campaign test G-5, the soak was already a campaign item, and the regression spot-pass duplicated the campaign's own page-by-page walk. |
 | **QA-Manuals** | Phase 7 | beginner manual + in-app help screens (LDT-218, LDT-219, etc.). |
 | **QA-Templates** | Phase 7 | factory project templates / starter packs (LDT-220, LDT-221). |
 | **QA-Installer** | Phase 7 | Windows installer with embedded TTF fonts (LDT-173) + EULA + signed binary path. |
@@ -6018,7 +6112,7 @@ The initial "1/8-note-late" report was diagnosed to **TV audio output latency** 
 
 ### 2026-07-08 — Bulk-run expedite plan approved; 4 new batches inserted (QA-TransportDisplay / QA-ApvtsAutomation / QA-UndoCoverage / QA-LegalReview) (fifty-fifth Forks entry)
 
-**What happened:** Jeff asked to expedite everything past QA-UICleanup (the per-batch cadence — ~2.2 days/batch over 27 closed batches — projected ~11 more weeks for the ~36 remaining).  A full Main Plan read + 3-agent source-verification review produced the **bulk-run expedite plan**, approved by Jeff 2026-07-08 with a full folder backup + origin push in place: [`Plans & Specs/Batch Plans/swift-stampeding-caribou.md`](Batch Plans/swift-stampeding-caribou.md) is the governing run plan.  Mode summary (full detail + locked structural picks R1-R5 live in the run plan; the doc-discipline adjustments take effect at run open, which is gated on QA-UICleanup close): batches execute in §6 order grouped into checkpoint groups (G1-G6) with per-batch build+commit but NO per-task verify cycles; all functional verification moves to a sectioned Master Test Plan (`Plans & Specs/Test Plans/v1-master-test-plan.md`, created at run pre-flight); a batch's Work Log entry is drafted at code-complete and HELD; its §5 `STATUS:CLOSED` + close commit apply only when its test section passes; `/review-batch` runs once per group; full §0 plan files are written + approved per group just-in-time; smoke test at every group boundary + ear-checks in G1/G2; **every spec call discovered mid-run gets asked in the moment — never self-decided** (Jeff's explicit lock at plan review).
+**What happened:** Jeff asked to expedite everything past QA-UICleanup (the per-batch cadence — ~2.2 days/batch over 27 closed batches — projected ~11 more weeks for the ~36 remaining).  A full Main Plan read + 3-agent source-verification review produced the **bulk-run expedite plan**, approved by Jeff 2026-07-08 with a full folder backup + origin push in place: [`Plans & Specs/Batch Plans/swift-stampeding-caribou.md`](Batch Plans/swift-stampeding-caribou.md) is the governing run plan.  Mode summary (full detail + locked structural picks R1-R5 live in the run plan; the doc-discipline adjustments take effect at run open, which is gated on QA-UICleanup close): batches execute in §6 order grouped into checkpoint groups (G1-G5) with per-batch build+commit but NO per-task verify cycles; all functional verification moves to a sectioned Master Test Plan (`Plans & Specs/Test Plans/v1-master-test-plan.md`, created at run pre-flight); a batch's Work Log entry is drafted at code-complete and HELD; its §5 `STATUS:CLOSED` + close commit apply only when its test section passes; `/review-batch` runs once per group; full §0 plan files are written + approved per group just-in-time; smoke test at every group boundary + ear-checks in G1/G2; **every spec call discovered mid-run gets asked in the moment — never self-decided** (Jeff's explicit lock at plan review).
 
 **Source-verification findings folded into the run plan** (details there): QA-J's headline DSP-06 restructure already shipped via QA-MultiBlockHazard (QA-J re-scope to verify+residuals pending marathon confirm); QA-Ec ~half-absorbed (Stretch-follow works; Resample-follow / Rubber-Band stub / import default / fit-to-grid remain); QA-Fb's dual dry/wet tap already exists (bleed root-located in the WET tap's FilePlay window); QA-NativeDialogs ~90% native already (ProjectBrowserWindow is the sole conversion target); QA-G/QA-H/QA-VibeSlider shrunk; QA-TempoMap confirmed FULLY open.
 

@@ -126,6 +126,15 @@ void HarmlessProcessor::processBlock (juce::AudioBuffer<float>& buffer,
 
     mSynth.renderNextBlock (buffer, midi);
 
+    // GAIN STAGING (Jeff's measurement, 2026-08-10).  The three engines were
+    // never staged against each other.  With BaySickSynth/Bass trimmed 12 dB to
+    // leave polyphony headroom, the same note measured -19 LUFS there against
+    // -13 LUFS here, so Harmless comes down 6 dB to sit alongside them.  Applied
+    // at the engine output, after the routing matrix and the per-voice volume,
+    // so it is one place rather than a factor smeared through the voice chain.
+    static constexpr float kOutputHeadroom = 0.501187f;   // -6 dB
+    buffer.applyGain (kOutputHeadroom);
+
     // Flush NaN/Inf - a diverging SVF filter or malformed wavetable can produce
     // these, and Windows WASAPI will permanently silence the device stream if
     // any NaN reaches the audio hardware.

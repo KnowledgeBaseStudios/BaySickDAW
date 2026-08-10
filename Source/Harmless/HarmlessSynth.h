@@ -303,6 +303,51 @@ private:
     float mRmVol  { 1.0f };
     float mRmEnv  { 1.0f };
 
+    // rm_vol knob -> output gain.  Monotonic over the whole travel (g'(v) =
+    // 1.5 - v > 0 on [0,1]) with g(0) = 0 (silent) and g(1) = 1 (unity), so
+    // the top of the knob lands on the same unity the old skip-the-stage fast
+    // path produced.  The old curve was a bare 1.5*v that only ever ran while
+    // the gate was open, so the last step of the travel dropped 1.5 -> 1.0 (a
+    // 3.5 dB cliff).  The quadratic term absorbs that cliff by bending toward
+    // unity near the top instead of flattening the entire taper by 1/1.5,
+    // which keeps the lower travel close to its historical slope.
+    static constexpr float rmVolGainFor (float v) noexcept
+        { return v * (1.5f - 0.5f * v); }
+
+    // Ramped on the audio thread so dragging rm_vol cannot step the gain at
+    // block boundaries; reset() in prepare() derives the ramp from the live
+    // sample rate.  Seeded at unity because a Linear SmoothedValue otherwise
+    // default-constructs to 0: a render reached before prepare()/
+    // setRoutingMatrix() would open the skip gate (target != 1) and multiply
+    // the whole buffer by silence.
+    juce::SmoothedValue<float, juce::ValueSmoothingTypes::Linear> mRmVolGain { 1.0f };
+
+    // rm_clip knob -> soft-clip drive k, for the curve s -> tanh(s*k)/k.
+    // tanh(x) ~ x near zero, so the 1/k normalization IS the small-signal
+    // slope: the curve is unity for quiet material at every knob position and
+    // asymptotes to a ceiling of 1/k, so raising CLIP lowers the ceiling
+    // (progressively harder limiting) instead of raising the level.  The old
+    // 1/tanh(k) normalization was unity at FULL SCALE instead, which made every
+    // signal below full scale LOUDER by up to k (+15.6 dB at the top of the
+    // travel) - the CLIP half of the same cliff the rm_vol curve above fixed.
+    // k -> 0 is the identity (error is O(k^2)), so the bottom of the travel
+    // joins the bypassed path continuously and the engage threshold no longer
+    // steps.  Max 6 keeps the full-knob curve the shape the stage already had.
+    static constexpr float rmClipDriveFor (float v) noexcept { return v * 6.0f; }
+
+    // tanh(s*k)/k = s*(1 - (s*k)^2/3 + ...), so at k = 1e-3 the curve differs
+    // from the identity by under 4e-7 relative even at full scale - below the
+    // float epsilon of a 24-bit sample.  Bypassing there avoids dividing by a
+    // drive ramping through zero.
+    static constexpr float kRmClipMinDrive = 1.0e-3f;
+
+    // Seeded explicitly at the bypass value rather than relying on the default
+    // ctor.  Linear happens to default to 0, but Multiplicative asserts on a
+    // zero target, so a later smoothing-type change would turn a silent default
+    // into a crash - the same shape as the mRmVolGain default that rendered
+    // silence before its first prepare().
+    juce::SmoothedValue<float, juce::ValueSmoothingTypes::Linear> mRmClipDrive { 0.0f };
+
     // T1a tilt EQ filters: low-shelf + high-shelf with opposite-sign gain.
     juce::dsp::IIR::Filter<float> mTiltLoL, mTiltLoR, mTiltHiL, mTiltHiR;
     bool mTiltReady { false };

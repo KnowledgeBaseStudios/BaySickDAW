@@ -934,7 +934,7 @@ struct ClipCtl
     float cutoff = 20000.f, q = 0.5f;
     float drive  = 1.f;                    // 1..12, skipped at 1
     float reduct = 0.f;                    // 0..1
-    float lfoAmt = 0.f, lfoRate = 5.5f;    // amplitude tremolo
+    float lfoAmt = 0.f, lfoRate = 5.5f;    // pitch-vibrato depth 0-1 + rate in Hz
     float trebleGain = 0.f;                // -1..1 shelf
     float width = 1.f;                     // M/S width (WAV baseline 1.0)
     float atk = 0.f, dec = 0.f, sus = 1.f, rel = 0.f;
@@ -1191,8 +1191,162 @@ bool VibeSynthProcessor::renderAudioClipsForRow (int row,
         // continuity at the block seams (audible crackle), so plain reverse takes the
         // direct backward read below.  Reverse + stretch still flips into the vocoder
         // (the doReverse block inside this branch).
+        // Resolved BEFORE the vibrato setup because that branch consumes the modulation
+        // as a stream and carries no position offset, so the gate-close walk-back below
+        // must not arm for it.
         const bool usePV = (player.vocoder != nullptr)
                         && (std::abs (effStretchRatio - 1.0) > 0.001);
+
+        // The Player's LFO is PITCH vibrato, not amplitude tremolo: it modulates the
+        // clip's READ POSITION, exactly as VibeVoice::renderNextBlock modulates the
+        // voice read increment, so one knob means one thing on a played note and on a
+        // timeline clip.  Depth law and cents mapping are the voice path's verbatim
+        // (VibePlayerDSP.h kVibratoMaxCents), the phase increment comes off the LIVE
+        // device rate so the wobble speed is sample-rate independent, and ONE per-clip
+        // phase feeds all three read branches below so they cannot drift apart.
+        constexpr double kClipVibratoMaxCents = 50.0;   // == VibeVoice::kVibratoMaxCents
+        // 2^(50/1200) - 1: the read-rate deviation the vibrato itself produces at full
+        // depth, reused as the cap on the gate-close walk-back so the walk home never
+        // bends pitch harder than the effect the user was already hearing.
+        constexpr double kClipVibGlideRatio = 0.0293022366434921;
+        const bool vibOn = ctl.active && ctl.lfoAmt > 0.001f;
+        // Hard-zeroing the carried offset the moment the knob crosses the gate STEPS the
+        // read position.  The offset is the integral of a sine started at phase 0, so it
+        // lives in [0, 2A] instead of straddling zero, and 2A is ~75 file samples at the
+        // 5.5 Hz default and ~4.1k at the 0.1 Hz minimum - a click on turning vibrato
+        // off.  So while the gate is shut and the offset is still non-zero the modulated
+        // branch keeps running at zero depth and walks the offset home at a bounded rate.
+        // The walk assigns exactly 0.0 on its last step, which is what lets the plain
+        // readAndMix path resume bit-identically.
+        const bool vibGliding = (! vibOn) && (! usePV) && (player.clipVibOffset != 0.0);
+        const bool vibActive  = vibOn || vibGliding;
+        if (! vibActive)
+            player.clipVibOffset = 0.0;
+
+        const double vibInc     = (juce::MathConstants<double>::twoPi * (double) ctl.lfoRate) / mSampleRate;
+        const double vibIncSafe = juce::jmax (1.0e-9, vibInc);
+        const double vibPhase0  = player.clipLfoPhase;
+
+        // Reverse fetches its whole raw window in ONE readRaw, so the request has to fit
+        // pvInBuf.  Truncation is not a graceful degradation there: the reverse read
+        // descends from the TOP of the window, so a short buffer pins the first output
+        // samples to one held frame.  Trim the modulation depth for THIS block until the
+        // window fits instead.  Linear-in-scale is a conservative estimate of the
+        // widening, because exp(s*x) - 1 <= s*(exp(x) - 1) on s in [0, 1] by convexity.
+        // BOTH raw-read branches, not just reverse.  Neither can overrun the buffer -
+        // each clamps numRaw to pvInBuf - but a clamped window makes the kernel pin to
+        // its last frame, which is an audible held sample.  Trimming depth instead
+        // degrades gracefully.  The forward branch reaches this at a large buffer with a
+        // high-rate source on a lower-rate device and Stretch up (about 4096 x 8.5
+        // against a 34,816-sample buffer); rarer than the reverse case but the same
+        // failure, so it gets the same answer rather than being left to buzz.
+        double vibScale = 1.0;
+        if (vibActive && ! usePV)
+        {
+            const double semisF = vibOn ? (double) ctl.lfoAmt * (kClipVibratoMaxCents / 100.0) : 0.0;
+            const double peakF  = std::pow (2.0, semisF / 12.0);
+            const double excF   = vibOn
+                ? fileRate * (peakF - 1.0) * juce::jmin ((double) outSamples, 2.0 / vibIncSafe)
+                : juce::jmin (std::abs (player.clipVibOffset),
+                              kClipVibGlideRatio * fileRate * (double) outSamples);
+            const double rateMaxF = vibOn ? peakF : (1.0 + kClipVibGlideRatio);
+            // Forward spans outSamples (not outSamples-1) and reaches 4 past the top for
+            // the kernel's ip2, so it is the wider of the two by one step plus one sample.
+            const double spanN  = doReverse ? (double) (outSamples - 1) : (double) outSamples;
+            const double baseW  = spanN * fileRate + (doReverse ? 3.0 : 4.0);
+            const double extraW = spanN * fileRate * (rateMaxF - 1.0)
+                                + (doReverse ? 2.0 * excF + 6.0    // 4 = vibBlockExc's own
+                                                                   // constant on both edges,
+                                                                   // 2 = ceil() slack
+                                             : excF);              // forward shifts, not widens
+            const double headW  = (double) player.pvInBuf.getNumSamples() - baseW;
+            if (extraW > headW)
+                vibScale = juce::jlimit (0.0, 1.0, headW / juce::jmax (1.0e-9, extraW));
+        }
+        // The walk home keeps a floor under that trim - it has to terminate - and at a
+        // quarter rate its own contribution to the window is under 1% of the base read.
+        const double vibGlide = kClipVibGlideRatio * fileRate * juce::jmax (0.25, vibScale);
+
+        const double vibSemis = vibOn
+            ? (double) ctl.lfoAmt * (kClipVibratoMaxCents / 100.0) * vibScale : 0.0;
+        const double vibPeak  = std::pow (2.0, vibSemis / 12.0);
+        // E[2^(d.sin)] = I0(d.ln2) > 1, so an uncorrected vibrato consumes source
+        // FASTER than the timeline advances: the read would creep permanently ahead of
+        // position and the vocoder branch would slowly starve its output queue.
+        // Subtracting the series mean 1 + a^2/4 (exact to ~1e-8 across this 50-cent
+        // range) makes the deviation zero-mean; the residual 0.36 cents of flatness at
+        // full depth is inaudible.
+        const double vibLnPeak = vibSemis * (0.6931471805599453 / 12.0);   // ln(2)/12
+        const double vibMean   = 1.0 + vibLnPeak * vibLnPeak * 0.25;
+        // Fastest per-sample read advance this block can ask for, as a multiple of
+        // fileRate.  While the gate is shut the vibrato contributes nothing but the walk
+        // home still does: it moves the carried offset, and a NEGATIVE offset walking up
+        // toward zero adds its step on top of the unmodulated advance, so the read
+        // windows sized off this have to carry it.  Exactly 1.0 with no vibrato and no
+        // walk pending, which is what keeps the untouched paths bit-identical.
+        const double vibRateMax = vibOn ? (vibPeak - vibMean + 1.0)
+                                : (vibGliding ? 1.0 + kClipVibGlideRatio * juce::jmax (0.25, vibScale)
+                                              : 1.0);
+        // Integrating a bounded zero-mean deviation gives a bounded position offset:
+        // the limit is twice that analytic amplitude, so it never engages in normal
+        // running and exists only to stop a mid-flight depth / rate change from walking
+        // the read past the windows sized against it below.  While the gate is shut the
+        // limit is the carried magnitude itself, because the walk home only ever shrinks
+        // it and a zero limit would defeat the walk.
+        const double vibOffsetBound = vibOn
+            ? 2.0 * fileRate * (vibPeak - 1.0) / vibIncSafe + 8.0
+            : std::abs (player.clipVibOffset);
+        // The excursion the offset can accumulate WITHIN this block, either direction.
+        // This is the only term that WIDENS a read window: the carried offset SHIFTS it,
+        // because every loop below advances position and offset together.  Bounded both
+        // by the per-sample deviation over the block and by the analytic integral 2A/w,
+        // so it stays small even where the carried bound blows up at low LFO rates.
+        const double vibBlockExc = vibActive
+            ? 2.0 + (vibOn
+                     ? fileRate * (vibPeak - 1.0) * juce::jmin ((double) outSamples, 2.0 / vibIncSafe)
+                     : juce::jmin (std::abs (player.clipVibOffset), vibGlide * (double) outSamples))
+            : 0.0;
+
+        // Magic-circle (coupled-form) oscillator, RESEEDED from player.clipLfoPhase every
+        // block so that phase stays the authority across block boundaries.  eps =
+        // 2*sin(w/2) places the recurrence's eigenvalues exactly at exp(+-jw), and its
+        // state matrix has determinant 1, so the trajectory is pinned to a fixed ellipse:
+        // amplitude cannot drift over a long block the way a direct-form rotation's
+        // would.  y = sin(p) paired with x = cos(p - w/2) is the seed that lands on that
+        // exact trajectory (the pair sits a half sample apart, not in quadrature).
+        // Gated: vibNextDev is only ever reached with the knob up, and a normal
+        // project has every clip at zero, so an ungated seed would charge three libm
+        // calls per clip per block for a feature nobody switched on.
+        const double vibHalfInc = vibOn ? vibInc * 0.5 : 0.0;
+        const double vibEps     = vibOn ? 2.0 * std::sin (vibHalfInc) : 0.0;
+        double vibOscX = vibOn ? std::cos (vibPhase0 - vibHalfInc) : 0.0;
+        double vibOscY = vibOn ? std::sin (vibPhase0)               : 0.0;
+
+        // Signed rate DEVIATION for the next output sample (0 = read at the unmodulated
+        // rate), advancing the oscillator one step.  SEQUENTIAL BY CONTRACT: exactly one
+        // read branch runs per block and each consumes this in output order from sample
+        // 0, its catch-up tail loop included.
+        // Audio thread: this runs per output sample per clip, so neither std::sin nor
+        // std::pow may appear in it.  exp() by cubic Taylor series - |x| <= 0.0289 by
+        // construction (vibLnPeak at the full 50-cent depth), so the truncation error is
+        // under 3e-8, about 5e-5 cents, and it underestimates, which keeps vibRateMax a
+        // true upper bound on the modulated rate.
+        auto vibNextDev = [&] () noexcept -> double
+        {
+            const double x = vibLnPeak * vibOscY;
+            vibOscX -= vibEps * vibOscY;
+            vibOscY += vibEps * vibOscX;
+            return (1.0 + x * (1.0 + x * (0.5 + x * (1.0 / 6.0)))) - vibMean;
+        };
+        // One output sample of carried-offset motion: the modulated advance while the
+        // gate is open, the bounded walk home while it is shut.
+        auto vibStepOffset = [&] (double& off) noexcept
+        {
+            if (vibOn)                off += fileRate * vibNextDev();
+            else if (off >  vibGlide) off -= vibGlide;
+            else if (off < -vibGlide) off += vibGlide;
+            else                      off = 0.0;
+        };
 
         if (usePV)
         {
@@ -1266,9 +1420,12 @@ bool VibeSynthProcessor::renderAudioClipsForRow (int row,
                 // on every stretched clip), and the interp phase restarted at
                 // zero per block (fraction lost).  pvOutFrac carries the exact
                 // fractional output position across blocks.
-                const double needF   = player.pvOutFrac + (double) outSamples * effReadRatio;
-                const int    consume = (int) needF;
-                const int    peekWant = juce::jmin (consume + 2,
+                // Vibrato rides the OUTPUT read rate here (the vocoder's stretch law
+                // is per-block by construction), so the peek window is sized against
+                // the fastest sample the modulation can ask for.
+                const double needMax = player.pvOutFrac
+                                     + (double) outSamples * effReadRatio * vibRateMax;
+                const int    peekWant = juce::jmin ((int) needMax + 2,
                                                     player.pvOutBuf.getNumSamples());
                 player.pvOutBuf.clear (0, peekWant);
                 const int peeked = player.vocoder->peekOutput (player.pvOutBuf, 0, peekWant);
@@ -1276,9 +1433,15 @@ bool VibeSynthProcessor::renderAudioClipsForRow (int row,
                 if (peeked > 0)
                 {
                     const int pvCh = player.pvOutBuf.getNumChannels();
-                    for (int i = 0; i < outSamples; ++i)
+                    // The vocoder output is a stream this branch consumes, so the
+                    // modulated position needs no carried offset - pvOutFrac plus the
+                    // advanceOutput consume already carry it across the boundary.
+                    double modFP = player.pvOutFrac;
+                    int    i     = 0;
+                    for (; i < outSamples; ++i)
                     {
-                        const double exactFP = player.pvOutFrac + (double) i * effReadRatio;
+                        const double exactFP = vibOn ? modFP
+                                             : player.pvOutFrac + (double) i * effReadRatio;
                         const int    ip      = (int) exactFP;
                         const float  frac    = (float) (exactFP - ip);
 
@@ -1303,7 +1466,18 @@ bool VibeSynthProcessor::renderAudioClipsForRow (int row,
                             clipScratch.addSample (ch, bufOffset + i, v);
                             peak = juce::jmax (peak, std::abs (v));
                         }
+                        if (vibOn) modFP += effReadRatio * (vibNextDev() + 1.0);
                     }
+                    // A peek shortfall must not shorten the consume bookkeeping: finish
+                    // the modulated advance for the samples the break skipped, so the
+                    // demand stays the full block exactly as it did before vibrato.
+                    if (vibOn)
+                        for (; i < outSamples; ++i)
+                            modFP += effReadRatio * (vibNextDev() + 1.0);
+
+                    const double needF   = vibOn ? modFP
+                                         : player.pvOutFrac + (double) outSamples * effReadRatio;
+                    const int    consume = (int) needF;
                     const int adv = juce::jmin (consume, peeked);
                     player.vocoder->advanceOutput (adv);
                     player.pvOutFrac = needF - (double) adv;
@@ -1324,19 +1498,35 @@ bool VibeSynthProcessor::renderAudioClipsForRow (int row,
             // never touches the phase vocoder.  fileRate carries any varispeed.  pvInBuf is
             // free here (usePV is false so the vocoder branch didn't run) and is reused as
             // the raw-read scratch.
+            // The window has to cover the fastest descent the vibrato can ask for, and it
+            // starts at the block's ACTUAL first read frame, pvRefPos - carried offset.
+            // Sizing the two edges off the symmetric vibOffsetBound instead - which grows
+            // as 1/lfoRate, ~4.1k file samples at 0.1 Hz on a 44.1 kHz file and ~17.9k on
+            // a 192 kHz one - pushed the request past pvInBuf, and the truncation lands on
+            // the TOP of the window, which is exactly where a reverse read begins.  The
+            // carried offset only SHIFTS the window (position and offset advance together
+            // in the loop); only vibBlockExc widens it, and that is bounded by the block
+            // length.  Collapses to the unmodulated window exactly at zero depth.
+            const double vibOffCarried = player.clipVibOffset;
             const juce::int64 lowFrame = pvRefPos
-                - (juce::int64) std::ceil ((double) (outSamples - 1) * fileRate) - 1;
+                - (juce::int64) std::ceil ((double) (outSamples - 1) * fileRate * vibRateMax
+                                           + vibBlockExc + vibOffCarried) - 1;
             const juce::int64 loRead   = juce::jmax ((juce::int64) 0, lowFrame);
+            const juce::int64 hiFrame  = pvRefPos + 2
+                + (juce::int64) std::ceil (vibBlockExc - vibOffCarried);
             const int numRaw = (int) juce::jmax ((juce::int64) 0, juce::jmin (
-                juce::jmin (pvRefPos - loRead + 2, fileTotalSamples - loRead),
+                juce::jmin (hiFrame - loRead, fileTotalSamples - loRead),
                 (juce::int64) player.pvInBuf.getNumSamples()));
+            double revOff   = player.clipVibOffset;
+            int    revDone  = 0;
             player.pvInBuf.clear (0, numRaw);
             if (numRaw > 1 && player.source->readRaw (player.pvInBuf, 0, numRaw, loRead))
             {
                 const int pvCh = player.pvInBuf.getNumChannels();
-                for (int i = 0; i < outSamples; ++i)
+                for (; revDone < outSamples; ++revDone)
                 {
-                    const double idx = ((double) pvRefPos - (double) i * fileRate) - (double) loRead;
+                    const double idx = ((double) pvRefPos - (double) revDone * fileRate - revOff)
+                                       - (double) loRead;
                     if (idx < 0.0) break;                          // reached content start
                     int   ip   = (int) idx;
                     float frac = (float) (idx - ip);
@@ -1350,12 +1540,95 @@ bool VibeSynthProcessor::renderAudioClipsForRow (int row,
                         const float s0    = player.pvInBuf.getSample (srcCh, ip);
                         const float s1    = player.pvInBuf.getSample (srcCh, ip + 1);
                         const float v     = (s0 + frac * (s1 - s0)) * gain;
-                        clipScratch.addSample (ch, bufOffset + i, v);
+                        clipScratch.addSample (ch, bufOffset + revDone, v);
                         peak = juce::jmax (peak, std::abs (v));
                     }
+                    if (vibActive) vibStepOffset (revOff);
                 }
             }
+            if (vibActive)
+            {
+                // Advance for whatever the read bailed on too: the phase below moves by
+                // the whole block unconditionally, and an offset that lagged it would
+                // re-phase the wobble on the next block.
+                for (; revDone < outSamples; ++revDone)
+                    vibStepOffset (revOff);
+                player.clipVibOffset = juce::jlimit (-vibOffsetBound, vibOffsetBound, revOff);
+            }
             player.expectedFilePos = pvRefPos;
+        }
+        else if (vibActive)
+        {
+            // Per-sample pitch vibrato on the plain forward read.  readAndMix takes ONE
+            // rate for a whole block, so folding the LFO into that rate would quantize
+            // the wobble to one step per buffer and make its depth a function of the
+            // buffer size -- the exact defect this replaces.  Instead the raw window is
+            // fetched once and the same Catmull-Rom kernel runs here against a position
+            // advanced per sample.  pvInBuf is free (usePV is false) and is already the
+            // raw-read scratch for the reverse branch above.
+            //
+            // Bounds: the per-sample increment fileRate*(1+deviation) is strictly
+            // positive, so positions rise monotonically from startPos and can never
+            // exceed endPos; the window spans [floor(startPos)-1, ceil(endPos)+3)
+            // clamped into [0, fileTotalSamples), which is what the kernel's im1/ip2
+            // reach needs, and readRaw refuses anything outside the file anyway.  The
+            // gate-close walk home preserves both properties: it shifts the offset by at
+            // most kClipVibGlideRatio of fileRate per sample, too small to reverse the
+            // advance, and vibRateMax carries that step so endPos still bounds it when a
+            // negative offset walks UP toward zero.  Unlike the reverse branch this
+            // window was already anchored on the CARRIED offset rather than on its
+            // symmetric bound, so it never had that branch's low-LFO-rate blow-up -- but
+            // it shares the depth trim above, because a window clamped to pvInBuf pins
+            // the kernel to its last frame either way and a held sample is audible.
+            const double startPos = posD + player.clipVibOffset;
+            const double endPos   = startPos + (double) outSamples * fileRate * vibRateMax;
+            const juce::int64 loRead = juce::jmax ((juce::int64) 0,
+                                                   (juce::int64) std::floor (startPos) - 1);
+            const juce::int64 hiRead = juce::jmin (fileTotalSamples,
+                                                   (juce::int64) std::ceil (endPos) + 3);
+            const int numRaw = (int) juce::jmax ((juce::int64) 0,
+                juce::jmin (hiRead - loRead, (juce::int64) player.pvInBuf.getNumSamples()));
+
+            double fwdOff  = player.clipVibOffset;
+            int    fwdDone = 0;
+            player.pvInBuf.clear (0, numRaw);
+            if (numRaw > 1 && player.source->readRaw (player.pvInBuf, 0, numRaw, loRead))
+            {
+                const int pvCh = player.pvInBuf.getNumChannels();
+                for (; fwdDone < outSamples; ++fwdDone)
+                {
+                    const double rel = posD + (double) fwdDone * fileRate + fwdOff
+                                       - (double) loRead;
+                    const juce::int64 ipL = (juce::int64) std::floor (rel);
+                    if (ipL + 1 >= (juce::int64) numRaw) break;      // EOF inside the window
+                    if (ipL >= 0)
+                    {
+                        const int   ip   = (int) ipL;
+                        const float frac = (float) (rel - (double) ipL);
+                        const int   im1  = juce::jmax (0, ip - 1);
+                        const int   ip2  = juce::jmin (ip + 2, numRaw - 1);
+                        for (int ch = 0; ch < ctx.numOut; ++ch)
+                        {
+                            const int   srcCh = ch % pvCh;
+                            const float p0 = player.pvInBuf.getSample (srcCh, im1);
+                            const float p1 = player.pvInBuf.getSample (srcCh, ip);
+                            const float p2 = player.pvInBuf.getSample (srcCh, ip + 1);
+                            const float p3 = player.pvInBuf.getSample (srcCh, ip2);
+                            const float v  = (p1 + 0.5f * frac * ((p2 - p0)
+                                          + frac * (2.f * p0 - 5.f * p1 + 4.f * p2 - p3
+                                          + frac * (3.f * (p1 - p2) + p3 - p0)))) * gain;
+                            clipScratch.addSample (ch, bufOffset + fwdDone, v);
+                            peak = juce::jmax (peak, std::abs (v));
+                        }
+                    }
+                    vibStepOffset (fwdOff);
+                }
+            }
+            for (; fwdDone < outSamples; ++fwdDone)
+                vibStepOffset (fwdOff);
+            player.clipVibOffset = juce::jlimit (-vibOffsetBound, vibOffsetBound, fwdOff);
+            player.expectedFilePos = (juce::int64) std::llround (
+                posD + (double) outSamples * fileRate + fwdOff);
         }
         else
         {
@@ -1368,27 +1641,21 @@ bool VibeSynthProcessor::renderAudioClipsForRow (int row,
             player.expectedFilePos = (juce::int64) std::llround (posD + (double) outSamples * fileRate);
         }
 
+        // One phase for the whole clip, advanced by OUTPUT samples, so whichever read
+        // branch above ran the wobble is the same shape at the same place.
+        if (vibOn)
+            player.clipLfoPhase = std::fmod (player.clipLfoPhase + vibInc * (double) outSamples,
+                                             juce::MathConstants<double>::twoPi);
+
         // QA-ClipPlayback Task 2: run the ClipsPage BaySickPlayer control chain on
         // the decoded clip (before the declick + raw sum) so a timeline-WAV clip
-        // tracks the Player knobs.  Chain: tremolo -> drive -> reduction -> filter
-        // -> M/S width -> treble shelf -> volume x ADSR x pan.  Pan is LAST (after
-        // width) so it survives even at full-mono width.  Per-clip state on `player`.
+        // tracks the Player knobs.  Chain: drive -> reduction -> filter -> M/S width
+        // -> treble shelf -> volume x ADSR x pan.  Pan is LAST (after width) so it
+        // survives even at full-mono width.  The LFO is NOT in this chain: it is a
+        // pitch control and rides the read position above.  Per-clip state on `player`.
         if (ctl.active)
         {
             const int chs = clipScratch.getNumChannels();
-
-            if (ctl.lfoAmt > 0.001f)   // amplitude tremolo
-            {
-                const double inc = (juce::MathConstants<double>::twoPi * ctl.lfoRate) / mSampleRate;
-                for (int ch = 0; ch < chs; ++ch)
-                {
-                    auto* d = clipScratch.getWritePointer (ch, bufOffset);
-                    double ph = player.clipLfoPhase;
-                    for (int s = 0; s < outSamples; ++s) { d[s] *= 1.f + ctl.lfoAmt * 0.12f * (float) std::sin (ph); ph += inc; }
-                }
-                player.clipLfoPhase = std::fmod (player.clipLfoPhase + inc * outSamples,
-                                                 juce::MathConstants<double>::twoPi);
-            }
 
             if (ctl.drive > 1.001f)    // tanh waveshaper
             {
@@ -1868,13 +2135,20 @@ bool VibeSynthProcessor::decodeFilePlayClip (AudioClipPlayer&             player
                     // just reading.
                     player.vocoder->reset();
                     player.vocoder->setStretchRatio (rReq);
-                    constexpr int kPre = PhaseVocoder::kFFTSize;
+                    // LIVE window, not the compile-time maximum: the window is a
+                    // duration now, so a 96/192 kHz file runs a larger FFT.  Left
+                    // as the constant, feedCap fed 12,288 samples where the prime
+                    // needs 20,480, the engage gate below never passed, and every
+                    // warped Vox clip at those rates fell silently back to the
+                    // direct path - align simply never engaged.
+                    const int    winNow = player.vocoder->getFFTSize();
+                    const int    kPre   = winNow;
                     const double pStarTarget =
-                        ((double) kPre - (double) PhaseVocoder::kFFTSize * 0.5) * rEff
-                        + (double) PhaseVocoder::kFFTSize * 0.5;
+                        ((double) kPre - (double) winNow * 0.5) * rEff
+                        + (double) winNow * 0.5;
                     juce::int64 feedPos = (juce::int64) std::llround (pStart) - kPre;
                     int fed = 0;
-                    const int feedCap = PhaseVocoder::kFFTSize * 6;
+                    const int feedCap = winNow * 6;
                     while (player.vocoder->getOutputAvailable()
                                < (int) std::ceil (pStarTarget) + 16
                            && fed < feedCap)
@@ -5603,7 +5877,11 @@ void VibeSynthProcessor::rebuildAudioClipPlayers()
             // pull, and peekOutput is already clamped to pvOutBuf -- so pvOutCap
             // IS the maximum, not a new constant.  Without this the vocoder keeps
             // its fixed default queue and the output half stays undersized.
-            p.vocoder->prepare (pvOutCap);
+            // The FILE rate, not the device rate: the analysis window is a
+            // duration in the source material, so a 96 kHz file needs twice the
+            // sample count a 44.1 kHz one does to cover the same milliseconds.
+            // Set at line ~5547 above, so it is in hand here.
+            p.vocoder->prepare (pvOutCap, p.fileSampleRate);
         }
 
         p.expectedFilePos = 0;

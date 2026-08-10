@@ -54,6 +54,8 @@ public:
     // Load a .nam file.  Returns false + outErr filled on failure.
     bool loadModel (const juce::File& file, juce::String& outErr);
 
+    // The persisted REFERENCE (SampleLibrary::refForPersist), not an absolute
+    // path -- read it back through ProjectFileResolver::resolve.
     juce::String getModelPath() const { return mModelPath; }
     juce::String getModelName() const;   // filename without extension, "" if no model
 

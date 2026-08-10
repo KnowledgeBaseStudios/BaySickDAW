@@ -320,7 +320,6 @@ public:
     // ── Map state (message-thread convenience mirror) ────────────────────────
     void setWarpMap (const WarpMap& map);
     void clearWarpMap();
-    bool hasWarpMap() const noexcept;
 
     // ── Offline warp render (QA-Fd Task 8 smooth-map port) ──────────────────
     // MESSAGE/WORKER THREAD ONLY (allocates; PhaseVocoder passes).  Renders

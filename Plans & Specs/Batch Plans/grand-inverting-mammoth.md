@@ -1538,7 +1538,7 @@ authoritative punch-list for TS7.  Ten sections, each item independently checkab
 - [x] §10.2 **DONE.**  TS7 Carry-Over block stripped; the TS6 block is again the most recent, and
   the seam was verified rather than assumed.
 - [x] §10.3 **DONE** (Jeff, 2026-07-29): Help Index (menu id 601, no handler, no help-window class)
-  is **intended**, pending the G5/G6 manuals window — not a defect, and not to be "fixed" by wiring a
+  is **intended**, pending the G5 manuals window (was G6; G5 dissolved 2026-08-10 and G6 renumbered to G5) — not a defect, and not to be "fixed" by wiring a
   placeholder.  Recorded here rather than as a Future State entry because the manuals batch already
   owns the work; this only stops a later sweep from filing it as dead UI.
 - [x] §10.4 **DONE.**  Running-notes entries for §11, §3 and §9 appended; this checklist updated as

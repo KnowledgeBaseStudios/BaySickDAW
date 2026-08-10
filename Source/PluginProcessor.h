@@ -942,11 +942,16 @@ public:
         // QA-ClipPlayback Task 2: per-clip DSP state for the ClipsPage BaySickPlayer
         // control chain applied to timeline-WAV (Flow B) playback so a WAV clip
         // matches the sampler.  Prepared + reset at rebuildAudioClipPlayers time
-        // (like vocoder/pvInBuf).  Per-clip so filter / tremolo state never bleeds
+        // (like vocoder/pvInBuf).  Per-clip so filter / vibrato state never bleeds
         // between clips sharing a row.
         juce::dsp::StateVariableTPTFilter<float> clipFilter;
         float  clipTrebleLp[2] { 0.f, 0.f };   // one-pole treble-shelf state per channel
-        double clipLfoPhase    { 0.0 };        // amplitude-tremolo LFO phase
+        double clipLfoPhase    { 0.0 };        // pitch-vibrato LFO phase, output-sample domain
+        // Vibrato reads at a modulated rate while the render is handed an UNmodulated
+        // block-start file position every block, so the integrated position deviation
+        // has to survive the boundary - dropping it would re-splice the read at every
+        // buffer edge.  File-domain samples; bounded and zero-mean by construction.
+        double clipVibOffset   { 0.0 };
         int    clipReductStep  { 0 };          // sample-rate-reduction hold counter
     };
     // 2026-05-06 (Batch 9c B1): deferred-destruction GC pattern.

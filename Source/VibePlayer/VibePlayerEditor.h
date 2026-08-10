@@ -11,7 +11,7 @@
 //   Header (36px):  "BAYSICKPLAYER" | [Preset ▾] | [?]
 //   Body: 3 cols x 2 rows boxes
 //     Row 1: Sample Engine | Pitch & Voicing | Dynamics
-//     Row 2: Amp Envelope  | LFO             | Output
+//     Row 2: Amp Envelope  | Vibrato         | Output
 // ─────────────────────────────────────────────────────────────────────────────
 class VibePlayerEditor : public juce::AudioProcessorEditor,
                           private juce::ValueTree::Listener
@@ -68,7 +68,7 @@ private:
 
     // ── 7-box grid layout (D.4-Q3 2026-05-01 - 7th box "Filter" added):
     //    Row 1: Sample Engine | Pitch & Voicing | Dynamics
-    //    Row 2: Amp Envelope  | LFO | Filter | Output  (4-up bottom row)
+    //    Row 2: Amp Envelope  | Vibrato | Filter | Output  (4-up bottom row)
     juce::Label mBoxHdr[7];
 
     // ── Box 1: Sample Engine ─────────────────────────────────────────────────
@@ -100,13 +100,13 @@ private:
     juce::Label  mAttackLbl,   mDecayLbl;
     juce::Label  mSustainLbl,  mReleaseLbl;
 
-    // ── Box 5: LFO ───────────────────────────────────────────────────────────
+    // ── Box 5: Vibrato (pitch modulation; the mLfo* names are the APVTS ids) ─
     VibeSlider mLfoRateKnob, mLfoAmtKnob;
     juce::Label  mLfoRateLbl,  mLfoAmtLbl;
 
     // ── Box 6: Filter (D.4-Q3 2026-05-01) ────────────────────────────────────
     // Surfaces 3 previously-hidden APVTS params: cutoff / res / reduct.
-    // Sits between LFO (Box 5) and Output (now Box 7).  The artic_group param
+    // Sits between Vibrato (Box 5) and Output (now Box 7).  The artic_group param
     // is live but deliberately has no UI knob (see VibePlayerEditor.cpp Box 6).
     VibeSlider mFilterCutoffKnob, mFilterResKnob;
     VibeSlider mFilterReductKnob;

@@ -18,7 +18,7 @@
 //
 // Tab 1 – OSC:
 //   Left: Waveform ComboBox + Transpose/Modifier/Noise knobs (Waveform group)
-//   Mid : Poly/Mono/Lead LEDs + Glide knob (Voice Mode group)
+//   Mid : Poly/Mono/Legato LEDs + Glide knob (Voice Mode group)
 //   Right: Filter/LFO LEDs + Amount knob (Mod Wheel group)
 //
 // Tab 2 – Osc Env:   4 vertical sliders (A/D/S/R)

@@ -66,6 +66,14 @@ void HarmlessSynth::prepare (double sampleRate, int maxBlockSize)
     }
     mTiltReady = true;
     rebuildTiltEQ();
+
+    // 5 ms ramp, matching AdditiveVoice::mVolSmooth, so the routing-matrix VOL
+    // trim and the per-voice master volume settle over the same wall-clock time
+    // at any device rate.
+    mRmVolGain.reset (sampleRate, 0.005);
+    mRmVolGain.setCurrentAndTargetValue (rmVolGainFor (mRmVol));
+    mRmClipDrive.reset (sampleRate, 0.005);
+    mRmClipDrive.setCurrentAndTargetValue (rmClipDriveFor (mRmClip));
 }
 
 void HarmlessSynth::renderNextBlock (juce::AudioBuffer<float>& buffer,
@@ -253,21 +261,32 @@ void HarmlessSynth::renderNextBlock (juce::AudioBuffer<float>& buffer,
         mOutputPhaser.process (ctx);
     }
 
-    // T2-F routing matrix output stage: rm_vol gain trim then rm_clip tanh.
-    // rm_vol default 1.0 = unity; rm_clip default 0.0 = no clipping.
-    if (mRmVol != 1.0f || mRmClip > 0.001f)
+    // T2-F routing matrix output stage: rm_vol gain trim then the rm_clip soft
+    // clipper.  rm_vol default 1.0 = unity (rmVolGainFor(1) == 1); rm_clip
+    // default 0.0 = drive 0 = identity, so the default path is a bare gain.
+    // Both skip tests ask the smoothers rather than the raw knobs: a ramp still
+    // in flight has to keep being applied, and gating on the knob was itself
+    // the discontinuity - it made the last step of the rm_vol travel jump from
+    // 1.5x to unity, and made rm_clip step in with makeup gain already applied.
+    if (mRmVolGain.isSmoothing()   || mRmVolGain.getTargetValue() != 1.0f
+     || mRmClipDrive.isSmoothing() || mRmClipDrive.getTargetValue() > 0.0f)
     {
-        const int n      = buffer.getNumSamples();
-        const float gain = juce::jlimit (0.f, 2.f, mRmVol * 1.5f);   // 0..1 -> 0..1.5x
-        const float drv  = 1.0f + mRmClip * 5.0f;                     // 1..6
-        for (int ch = 0; ch < buffer.getNumChannels(); ++ch)
+        const int     n     = buffer.getNumSamples();
+        const int     numCh = buffer.getNumChannels();
+        float* const* chans = buffer.getArrayOfWritePointers();
+        for (int i = 0; i < n; ++i)
         {
-            float* d = buffer.getWritePointer (ch);
-            for (int i = 0; i < n; ++i)
+            // One advance per sample frame, shared by every channel - advancing
+            // inside the channel loop would run the ramps numCh times too fast.
+            const float gain = mRmVolGain.getNextValue();
+            const float drv  = mRmClipDrive.getNextValue();
+            const bool  clip = drv > kRmClipMinDrive;
+            const float norm = clip ? 1.0f / drv : 1.0f;
+            for (int ch = 0; ch < numCh; ++ch)
             {
-                float s = d[i] * gain;
-                if (mRmClip > 0.001f) s = std::tanh (s * drv) / std::tanh (drv);
-                d[i] = s;
+                float s = chans[ch][i] * gain;
+                if (clip) s = std::tanh (s * drv) * norm;
+                chans[ch][i] = s;
             }
         }
     }
@@ -736,6 +755,8 @@ void HarmlessSynth::setRoutingMatrix (float sub, float prot, float clip,
     mRmFx   = juce::jlimit (0.f, 1.f, fx);
     mRmVol  = juce::jlimit (0.f, 1.f, vol);
     mRmEnv  = juce::jlimit (0.f, 1.f, env);
+    mRmVolGain.setTargetValue (rmVolGainFor (mRmVol));
+    mRmClipDrive.setTargetValue (rmClipDriveFor (mRmClip));
 
     // Voice-level pieces broadcast: sub osc gain + env-on-amp depth.
     forEachVoice ([this] (AdditiveVoice& v)

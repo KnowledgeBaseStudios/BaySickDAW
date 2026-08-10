@@ -247,7 +247,10 @@ VibePlayerProcessor::createLayout (const juce::String& p)
 
     // ── UI knobs ──────────────────────────────────────────────────────────────
     layout.add (std::make_unique<juce::AudioParameterFloat> (
-        vid (p + "lfoAmt"), "LFO Amount",
+        // The ids stay "lfoAmt" / "lfo_rate": they are saved-project keys and the
+        // automation lane ids, and the clip-control atoms resolve by exactly those
+        // strings.  Only the DISPLAY names change, to say what the control now does.
+        vid (p + "lfoAmt"), "Vibrato Depth",
         juce::NormalisableRange<float> (0.f, 1.f), 0.f));
 
     layout.add (std::make_unique<juce::AudioParameterFloat> (
@@ -292,7 +295,7 @@ VibePlayerProcessor::createLayout (const juce::String& p)
         juce::NormalisableRange<float> (-1.f, 1.f), 0.f));
 
     layout.add (std::make_unique<juce::AudioParameterFloat> (
-        vid (p + "lfo_rate"), "LFO Rate",
+        vid (p + "lfo_rate"), "Vibrato Rate",
         juce::NormalisableRange<float> (0.1f, 20.f, 0.f, 0.5f), 5.5f));
 
     layout.add (std::make_unique<juce::AudioParameterFloat> (
