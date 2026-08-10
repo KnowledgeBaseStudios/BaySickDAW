@@ -1,5 +1,6 @@
 #include "BaySickBassEditor.h"
 #include "../AppPaths.h"
+#include "../UserFileSave.h"
 
 //==============================================================================
 // ── Static UI helpers ─────────────────────────────────────────────────────────
@@ -455,10 +456,25 @@ void BaySickBassEditor::valueTreeRedirected (juce::ValueTree& tree)
 
 void BaySickBassEditor::parameterChanged (const juce::String& paramID, float /*newValue*/)
 {
+    // SafePointer on every posted hop: the destructor removes the listeners, but a
+    // lambda already queued cannot be retracted, and this listener runs on whatever
+    // thread wrote the parameter (an offline render thread replaying an automation
+    // lane), so the post can outlive the editor.  Kept identical to the twin in
+    // BaySickSynthEditor so the two cannot drift.
+    juce::Component::SafePointer<BaySickBassEditor> self (this);
+
     if (paramID == mProc.pid ("lfo_sync"))
-        juce::MessageManager::callAsync ([this] { refreshLFOSyncEnableState(); });
+        juce::MessageManager::callAsync ([self]
+        {
+            if (self == nullptr) return;
+            self->refreshLFOSyncEnableState();
+        });
     else if (paramID == mProc.pid ("dualOscMode"))
-        juce::MessageManager::callAsync ([this] { refreshModifierTooltip(); });
+        juce::MessageManager::callAsync ([self]
+        {
+            if (self == nullptr) return;
+            self->refreshModifierTooltip();
+        });
 }
 
 void BaySickBassEditor::refreshModifierTooltip()
@@ -1033,16 +1049,22 @@ void BaySickBassEditor::savePreset (const juce::String& name)
 {
     // 2026-04-26: user presets go into "My Presets/" subfolder.
     const auto dir = presetsDir().getChildFile ("My Presets");
-    dir.createDirectory();
     auto state = mProc.apvts.copyState();
     if (auto xml = state.createXml())
-        xml->writeTo (dir.getChildFile (name + ".xml"));
+        UserFileSave::writeXmlAsync (dir, name, *xml, {});
 }
 
 void BaySickBassEditor::loadPreset (const juce::File& f)
 {
     auto xml = juce::XmlDocument::parse (f);
-    if (! xml || ! xml->hasTagName (mProc.apvts.state.getType())) return;
+    if (! xml || ! xml->hasTagName (mProc.apvts.state.getType()))
+    {
+        juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon,
+                                                "Load Preset",
+                                                "That preset file could not be read.",
+                                                "OK");
+        return;
+    }
 
     // 2026-04-30: notify page wrapper at the end so Bass tab + mixer strip
     // get renamed to the patch filename.  Fired after replaceState below.

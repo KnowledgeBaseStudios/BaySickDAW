@@ -43,7 +43,7 @@ public:
     // Sub-tab switching.  3 tabs: 0=Drum Kit, 1=Player, 2=Piano Roll.
     // Index 2 is a redirect handled at StandaloneEditor level (selecting
     // it switches the ribbon to PianoRollPage with this engine active);
-    // here we just track the requested index for callbacks.
+    // here we just track the requested index.
     void switchTab (int idx);
     int  getActiveTab() const { return mActiveTab; }
 
@@ -51,9 +51,6 @@ public:
     const juce::String& getTabName() const { return mTabName; }
 
     juce::Colour getPageColor() const { return mPageColor; }
-
-    // Fired AFTER switchTab runs.
-    std::function<void(int idx)> onSubTabChanged;
 
     // Fired when the kit's display name changes (program switch / preset load).
     std::function<void(const juce::String&)> onSoundNameChanged;

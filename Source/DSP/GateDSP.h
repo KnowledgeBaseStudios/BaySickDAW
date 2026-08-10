@@ -15,6 +15,9 @@ public:
     void process (juce::AudioBuffer<float>& buffer) override;
     void reset() override;
 
+    void getStateInformation (juce::MemoryBlock& dest) override;
+    void setStateInformation (const void* data, int sz) override;
+
     float getGainReductionDb() const noexcept override
         { return mGrDb.load (std::memory_order_relaxed); }
 

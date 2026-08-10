@@ -3,12 +3,16 @@
 #include "DSP/DSPBase.h"
 
 // ── EffectType ────────────────────────────────────────────────────────────────
-// I-1 (2026-05-02): extended with 17 new entries for the BaySickPedals 18-module
-// spec.  CS-Style Compressor is NOT a new entry -- it's a 4th Type within the
-// existing `Compressor` (added in I-4 via CompressorDSP::Type::CS).  All other
-// 17 modules get their own EffectType.  createEffect() returns nullptr for the
-// new entries until I-5+ ships the DSP classes; rack slots holding null effects
-// are simply skipped on the audio path.
+// I-1 (2026-05-02): extended for the BaySickPedals 18-module spec.  Not every
+// module has its own entry -- CS-Style Compressor is a 4th Type inside the
+// existing `Compressor` (CompressorDSP::Type::CS) and the pedal Overdrive is a
+// Type inside `Overdrive` (OverdriveDSP::Type::Pedal), so this enum is shorter
+// than the module list.
+//
+// createEffect() returns nullptr for any value it has no case for, and a rack
+// slot holding a null effect is skipped on the audio path -- that is what keeps
+// a project saved against an ordinal this build does not know from dereferencing
+// a null DSP on audio.
 //
 // IMPORTANT: keep the existing entries' integer values stable -- saved projects
 // store EffectType as int.  New entries append at the end with explicit values.
@@ -109,19 +113,23 @@ inline bool isPedalNativeType (EffectType type) noexcept
 // ── EffectRack ────────────────────────────────────────────────────────────────
 // Holds 6 hot-swappable DSP slots.
 //
-// Single-slot mutations (loadEffect/clearSlot/setSlotBypassed) use a wait-free
-// swap-pending pattern that mirrors BaySickNAMIRProcessor's NAM model swap:
+// Single-slot mutations (loadEffect/clearSlot/setSlotBypassed) use a swap-
+// pending pattern that mirrors BaySickNAMIRProcessor's NAM model swap:
 //   * Message thread parks the new effect in `pending` and sets `swapPending`.
 //   * Audio thread (top of process()) checks the flag, std::swap()s active and
-//     pending, clears the flag.  Old DSP destruction defers to the next
-//     message-thread mutation (which overwrites `pending`, dropping its old
-//     occupant on the message thread - never on audio).
-// Audio is NEVER blocked by single-slot mutations.
+//     pending, clears the flag.  The demoted DSP is dropped by the message
+//     thread - never on audio, and never while a lock is held.
+// loadEffect and clearSlot do take `mSlotsLock`, but only to drain a swap audio
+// has not consumed yet: during a project load the device is not running, so
+// waiting for audio to do it never returns.  setSlotBypassed is the one
+// mutation that takes no lock at all.
 //
 // Multi-slot mutations (moveSlotUp/Down, packSlotsToTop, setStateInformation)
-// still take `mSlotsLock` (juce::SpinLock) because their atomicity spans
-// multiple slots; audio's process() try-locks at the top and skips one block
-// if a multi-slot op is in flight.  These ops are user-UI-rare, so the
+// hold `mSlotsLock` (juce::SpinLock) across the whole rack because their
+// atomicity spans multiple slots.
+//
+// Audio NEVER blocks on any of this: process() try-locks at the top and skips
+// one block if a holder is in flight.  Every holder is user-UI-rare, so the
 // occasional one-block skip is acceptable.
 //
 // Message-thread writes are serialized through `mLoadLock` (CriticalSection)
@@ -184,7 +192,9 @@ public:
         // Without this, drive pedals at high gain produce big audible clicks
         // on bypass toggle because the dry/wet level mismatch is large.
         // Per-slot scratch buffer holds the dry input snapshot during the
-        // crossfade.  Lazy-resized in process() to match the current block.
+        // crossfade.  Pre-sized in prepare() -- the process() guard is only a
+        // fallback for a host that exceeds the prepared block size or channel
+        // count, never the normal allocation path.
         float                    bypassRampValue { 1.f };
         juce::AudioBuffer<float> dryScratch;
 
@@ -231,8 +241,11 @@ public:
 
     // ── Slot management (call from message thread) ────────────────────────────
     // Load a new effect into a slot. Calls prepare() immediately.
-    // uuidOverride is used by setStateInformation to restore a saved UUID;
-    // user-facing call sites leave it empty so a fresh UUID is generated.
+    // uuidOverride restores a saved slot identity -- an undo resurrection, or a
+    // re-pick of the plugin already in the slot -- so the slot's automation
+    // lanes keep resolving; user-facing call sites leave it empty so a fresh
+    // UUID is generated.  setStateInformation does NOT route through here: it
+    // stages its DSPs and installs their restored uuids itself.
     // QA-ModelShell TS6: pluginDesc names WHICH plugin an EffectType::VST3Plugin
     // slot holds -- the type alone cannot, since one ordinal covers every
     // plugin.  Applied before prepare(), so the hosted instance is prepared by
@@ -268,7 +281,7 @@ public:
 
     // C.4 Phase 1 (2026-04-30): per-slot SC receive line pick.  -1 = no SC,
     // 0..3 = strip's SC array index.  Pushed to slot's active DSP via setSidechainPick
-    // each block by setSidechainContext().
+    // each block by EffectRack::process().
     void setSlotSidechainPick (int slot, int pickIdx) noexcept;
     int  getSlotSidechainPick (int slot) const noexcept;
 
@@ -283,8 +296,6 @@ public:
     void setSidechainBuffers  (juce::AudioBuffer<float>* const* bufs, int count) noexcept;
 
     // Level accessors (UI thread reads, audio thread writes)
-    float getSlotInputLevel (int slot) const;   // 0..1 linear (peak)
-    float getSlotOutputLevel(int slot) const;   // dBFS
     // 2026-05-02: drain variants for vblank-locked metering -- exchange the
     // SNAPSHOT atomics with sentinel values and return the values.  Audio
     // CAS-maxes the Run companion atomics; promoteSlotPeakSnapshots() lifts
@@ -301,9 +312,13 @@ public:
     // entire app's effect-panel meter state ends each block coherent.
     void promoteSlotPeakSnapshots();
 
-    // FX master switch - bypasses entire rack without destroying slot data
-    void setRackBypassed(bool bypass) { mRackBypassed = bypass; }
-    bool isRackBypassed() const       { return mRackBypassed; }
+    // FX master switch - bypasses entire rack without destroying slot data.
+    // Atomic because BOTH threads write it: the message thread from the FX-page
+    // button / APVTS _bypass listener, and the audio thread from the per-block
+    // "APVTS is canonical" re-sync in VibeGraph's chain functions.  Relaxed is
+    // sufficient -- the flag publishes no other data and orders nothing.
+    void setRackBypassed(bool bypass) { mRackBypassed.store (bypass, std::memory_order_relaxed); }
+    bool isRackBypassed() const       { return mRackBypassed.load (std::memory_order_relaxed); }
 
     // Sum of getLatencySamples() across all active, non-bypassed slots.
     // Returns 0 when rack is bypassed. Used by VibeGraph for PDC.
@@ -349,7 +364,7 @@ public:
 private:
     std::array<Slot, kNumSlots> mSlots;
 
-    bool   mRackBypassed  { false };
+    std::atomic<bool> mRackBypassed { false };   // audio reads + writes, message thread writes
     double mSampleRate    { 44100.0 };
     int    mMaxBlock      { 512 };
     double mHostBPM       { 120.0 };
@@ -365,16 +380,22 @@ private:
 
     // I-0a (2026-05-02): serializes message-thread mutations against each
     // other (loadEffect, clearSlot, setSlotBypassed, moveSlot*, etc.) so
-    // two UI events can't tear pending/active state.  Audio thread NEVER
-    // acquires this -- it's purely message-thread serialization.
+    // two UI events can't tear pending/active state.  Audio thread MUST NEVER
+    // acquire this: the holds are unbounded (a hosted-VST3 teardown and the
+    // onSlotsChanged UI callback both run behind it), so blocking the render
+    // thread on it is a priority inversion.  setHostTransport used to take it
+    // every block; it does not any more -- mSlotsLock alone covers the slot
+    // walk, and every write it observes is either made under mSlotsLock or
+    // published by the per-slot swapPending release/acquire pair.
     juce::CriticalSection mLoadLock;
 
-    // Guards multi-slot mutations (moveSlotUp/Down, packSlotsToTop,
+    // Guards whole-rack mutations (moveSlotUp/Down, packSlotsToTop,
     // setStateInformation, prepare, reset, setHostBPM) against the audio
-    // thread.  Single-slot mutations (loadEffect/clearSlot/setSlotBypassed)
-    // do NOT take this lock -- they publish via the per-slot swapPending
-    // flag and are wait-free on the audio side.  Audio's process() try-locks
-    // to skip blocks during multi-slot rearrangements (rare UI clicks).
+    // thread, and is also taken briefly by loadEffect/clearSlot to drain a
+    // pending swap audio has not consumed.  setSlotBypassed is the only
+    // mutation that never takes it.  The audio-thread readers (process,
+    // setHostTransport) try-lock and skip a block rather than wait, so no
+    // holder can ever stall the render thread.
     juce::SpinLock mSlotsLock;
 
     // Factory: creates the DSPBase subclass for a given EffectType.

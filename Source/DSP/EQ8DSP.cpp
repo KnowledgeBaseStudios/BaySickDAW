@@ -1112,24 +1112,6 @@ float EQ8DSP::getBandGrDb(int i) const noexcept
     return mBands[i].currentGrDb.load(std::memory_order_relaxed);
 }
 
-float EQ8DSP::getBandEffectiveGainDbAtRangeLimit(int i) const noexcept
-{
-    if (i < 0 || i >= kNumBands) return 0.0f;
-    const auto& p = mBands[i].params;
-    if (!p.dynamic || !isDynamicSupportedType(p.type)) return p.gainDb;
-    // 12j follow-up Q2: signed rangeDb directly encodes direction + amount.
-    return p.gainDb + p.rangeDb;
-}
-
-void EQ8DSP::setBandKey(int i, int midiNote)
-{
-    if (i < 0 || i >= kNumBands) return;
-    const float f = 440.0f * std::pow(2.0f, (midiNote - 69) / 12.0f);
-    if (f == mBands[i].params.freq) return;
-    mBands[i].params.freq = f;
-    mBands[i].freqSmooth.setTargetValue(f);
-}
-
 EQ8DSP::Band EQ8DSP::getBand(int i) const
 {
     if (i < 0 || i >= kNumBands) return {};
@@ -1145,7 +1127,7 @@ void EQ8DSP::setMainLevel(float dB)
 
 // 12g: actual phase-mode dispatch.
 //   Standard      -> IIR path (today's behaviour)
-//   Linear        -> linear FFT @ 2048
+//   Linear        -> linear FFT at the Linear Phase Precision size (default 2048)
 //   HQ Plus       -> AC=on forced, no FFT
 //   HQ Linear     -> AC=on forced + linear FFT @ 4096
 //   HQ Extended   -> linear FFT @ 512 (low-latency variant)
@@ -1197,12 +1179,25 @@ void EQ8DSP::setPhaseMode(PhaseMode mode)
     mAcFadeRemaining = mAcFadeTarget;
 }
 
+// QA-Soundness: the Linear Phase Precision control governs the PLAIN Linear
+// mode only.  HQ Linear (4096) and HQ Extended (512) keep the sizes locked spec
+// 12g pinned to them, because a phase mode's ONLY effect on
+// EqLinearPhaseProcessor is its FFT size -- a global precision override would
+// make HQ Extended bit-identical to Linear and leave the mode selling nothing.
+int EQ8DSP::linearFftSize (PhaseMode mode, int precision) noexcept
+{
+    if (mode == PhaseMode::Linear)
+        return kPrecFftSizes[juce::jlimit (0, kNumLinearPrecisions - 1, precision)];
+
+    return EqLinearPhaseProcessor::fftSizeForMode ((int) mode);
+}
+
 // 12g: lazily allocate or free the linear-phase processor based on the
-// current phase mode + sample rate + design rate (which is 2*sr when AC is on,
-// matching HQ Plus / HQ Linear).
+// current phase mode + precision + sample rate + design rate (which is 2*sr
+// when AC is on, matching HQ Plus / HQ Linear).
 void EQ8DSP::reconfigureLinearProc()
 {
-    const int fftSize = EqLinearPhaseProcessor::fftSizeForMode ((int) mPhaseMode);
+    const int fftSize = linearFftSize (mPhaseMode, mLinearPrec);
     if (fftSize == 0)
     {
         // Standard / HQ Plus -> no linear processing.
@@ -1308,10 +1303,23 @@ float EQ8DSP::magnitudeForFrequencyStatic (float freq) const noexcept
     return (float) mag;
 }
 
+// A precision change resizes the linear-phase FFT, which shifts reported latency
+// exactly like a mode flip does - so it needs setPhaseMode's mode-aware output
+// fade too, or the host's PDC realignment lands as a click on a sustained note.
+// Reallocation happens inside reconfigureLinearProc, message thread only.
 void EQ8DSP::setLinearPhasePrecision(int precision)
 {
-    const int n = juce::jlimit(0, 4, precision);
-    if (n != mLinearPrec) mLinearPrec = n;
+    const int n = juce::jlimit(0, kNumLinearPrecisions - 1, precision);
+    if (n == mLinearPrec) return;
+
+    const int oldLatency = getLatencySamples();
+    mLinearPrec = n;
+    reconfigureLinearProc();
+
+    const int delta = std::abs (getLatencySamples() - oldLatency);
+    mAcFadeTarget    = juce::jlimit (kMinFadeSamples, kMaxFadeSamples,
+                                     juce::jmax (delta, kMinFadeSamples));
+    mAcFadeRemaining = mAcFadeTarget;
 }
 
 void EQ8DSP::setIIRModSpeed(float speed01)
@@ -1508,47 +1516,85 @@ float EQ8DSP::getMagnitudeForFrequency(float freq) const noexcept
     return (float) mag;
 }
 
-float EQ8DSP::getMagnitudeForFrequencyDb(float freq) const noexcept
+// -- Serialization ------------------------------------------------------------
+
+// One field list for both banks: the live bands and the A/B spare must never
+// diverge on what a saved band carries.
+static juce::ValueTree makeBandTree(int index, const EQ8DSP::Band& p)
 {
-    return juce::Decibels::gainToDecibels(getMagnitudeForFrequency(freq));
+    juce::ValueTree band("Band");
+    band.setProperty("index",  index,    nullptr);
+    band.setProperty("freq",   p.freq,   nullptr);
+    band.setProperty("gainDb", p.gainDb, nullptr);
+    band.setProperty("q",      p.q,      nullptr);
+    band.setProperty("type",   p.type,   nullptr);
+    band.setProperty("slope",  p.slope,  nullptr);
+    band.setProperty("on",        p.on,        nullptr);
+    band.setProperty("muted",     p.muted,     nullptr);
+    band.setProperty("soloed",    p.soloed,    nullptr);
+    band.setProperty("channel",   p.channel,   nullptr);   // 12h
+    // 12j: dynamic EQ fields (all PRESET-SAFE additive; defaults preserve
+    // v1 behavior so missing attributes on load just stay off).
+    band.setProperty("dynamic",   p.dynamic,   nullptr);
+    band.setProperty("threshold", p.threshold, nullptr);
+    band.setProperty("ratio",     p.ratio,     nullptr);
+    band.setProperty("attack",    p.attack,    nullptr);
+    band.setProperty("release",   p.release,   nullptr);
+    band.setProperty("rangeDb",   p.rangeDb,   nullptr);
+    band.setProperty("upward",    p.upward,    nullptr);
+    band.setProperty("scSource",  p.scSourceId,nullptr);   // Option B scaffolding
+    return band;
 }
 
-// -- Serialisation ------------------------------------------------------------
+// Fallbacks are the caller's CURRENT values, so an attribute missing from an
+// older file leaves that field at whatever the constructor seeded.
+static void readBandXml(const juce::XmlElement& src, EQ8DSP::Band& p)
+{
+    p.freq   = (float)src.getDoubleAttribute("freq",   p.freq);
+    p.gainDb = (float)src.getDoubleAttribute("gainDb", p.gainDb);
+    p.q      = (float)src.getDoubleAttribute("q",      p.q);
+    p.type   =        src.getIntAttribute   ("type",   p.type);
+    p.slope  =        src.getIntAttribute   ("slope",  p.slope);
+    p.on     =        src.getBoolAttribute  ("on",     p.on);
+    p.muted  =        src.getBoolAttribute  ("muted",  p.muted);
+    p.soloed =        src.getBoolAttribute  ("soloed", p.soloed);
+    p.channel= juce::jlimit(0, 4, src.getIntAttribute("channel", p.channel));   // 12h - fallback = current default (Stereo for bare, Mid/Side for wrapper-owned)
+    p.dynamic   =        src.getBoolAttribute  ("dynamic",   p.dynamic);
+    p.threshold = (float)src.getDoubleAttribute("threshold", p.threshold);
+    p.ratio     = (float)src.getDoubleAttribute("ratio",     p.ratio);
+    p.attack    = (float)src.getDoubleAttribute("attack",    p.attack);
+    p.release   = (float)src.getDoubleAttribute("release",   p.release);
+    p.rangeDb   = (float)src.getDoubleAttribute("rangeDb",   p.rangeDb);
+    p.upward    =        src.getBoolAttribute  ("upward",    p.upward);
+    p.scSourceId=        src.getIntAttribute   ("scSource",  p.scSourceId);
+}
 
 void EQ8DSP::getStateInformation(juce::MemoryBlock& dest)
 {
     juce::ValueTree state("EQ8DSP");
     for (int i = 0; i < kNumBands; ++i)
-    {
-        const auto& p = mBands[i].params;
-        juce::ValueTree band("Band");
-        band.setProperty("index",  i,        nullptr);
-        band.setProperty("freq",   p.freq,   nullptr);
-        band.setProperty("gainDb", p.gainDb, nullptr);
-        band.setProperty("q",      p.q,      nullptr);
-        band.setProperty("type",   p.type,   nullptr);
-        band.setProperty("slope",  p.slope,  nullptr);
-        band.setProperty("on",        p.on,        nullptr);
-        band.setProperty("muted",     p.muted,     nullptr);
-        band.setProperty("soloed",    p.soloed,    nullptr);
-        band.setProperty("channel",   p.channel,   nullptr);   // 12h
-        // 12j: dynamic EQ fields (all PRESET-SAFE additive; defaults preserve
-        // v1 behaviour so missing attributes on load just stay off).
-        band.setProperty("dynamic",   p.dynamic,   nullptr);
-        band.setProperty("threshold", p.threshold, nullptr);
-        band.setProperty("ratio",     p.ratio,     nullptr);
-        band.setProperty("attack",    p.attack,    nullptr);
-        band.setProperty("release",   p.release,   nullptr);
-        band.setProperty("rangeDb",   p.rangeDb,   nullptr);
-        band.setProperty("upward",    p.upward,    nullptr);
-        band.setProperty("scSource",  p.scSourceId,nullptr);   // Option B scaffolding
-        state.appendChild(band, nullptr);
-    }
+        state.appendChild(makeBandTree(i, mBands[i].params), nullptr);
+
+    // A/B compare spare bank, nested under ONE child rather than emitted as
+    // sibling <Band> nodes: setStateInformation's child loop has no tag-name
+    // check and keys purely off "index", so siblings would overwrite the live
+    // bank on load.
+    juce::ValueTree spare("Spare");
+    for (int i = 0; i < kNumBands; ++i)
+        spare.appendChild(makeBandTree(i, mSpare[i]), nullptr);
+    state.appendChild(spare, nullptr);
+
+    // Which bank the <Band> set above IS.  swapWithSpare() physically exchanges
+    // mBands and mSpare, so the saved bands are the B bank whenever this is true.
+    // Without it the reader cannot tell A from B and every A/B label inverts.
+    state.setProperty("viewingSpare",  mViewingSpare,   nullptr);
+
     state.setProperty("mainLevel",     mMainLevelDb,    nullptr);
     state.setProperty("iirModSpeed",   mIIRModSpeed,    nullptr);   // 12d
     state.setProperty("proportionalQ", mProportionalQ,  nullptr);   // 12b
     state.setProperty("antiCramping",  mAntiCramping,   nullptr);   // 12f
     state.setProperty("phaseMode",     (int) mPhaseMode, nullptr);  // 12g
+    state.setProperty("linearPrec",    mLinearPrec,      nullptr);  // 12g Linear FFT size
     auto xml = state.createXml();
     if (xml) juce::AudioProcessor::copyXmlToBinary(*xml, dest);
 }
@@ -1566,44 +1612,48 @@ void EQ8DSP::setStateInformation(const void* data, int sz)
     {
         int idx = child->getIntAttribute("index", -1);
         if (idx < 0 || idx >= kNumBands) continue;
-        auto& p = mBands[idx].params;
-        p.freq   = (float)child->getDoubleAttribute("freq",   p.freq);
-        p.gainDb = (float)child->getDoubleAttribute("gainDb", p.gainDb);
-        p.q      = (float)child->getDoubleAttribute("q",      p.q);
-        p.type   =        child->getIntAttribute   ("type",   p.type);
-        p.slope  =        child->getIntAttribute   ("slope",  p.slope);
-        p.on     =        child->getBoolAttribute  ("on",     p.on);
-        p.muted  =        child->getBoolAttribute  ("muted",  p.muted);
-        p.soloed =        child->getBoolAttribute  ("soloed", p.soloed);
-        p.channel= juce::jlimit(0, 4, child->getIntAttribute("channel", p.channel));   // 12h - fallback = current default (Stereo for bare, Mid/Side for wrapper-owned)
-        // 12j dynamic EQ fields (additive, PRESET-SAFE on missing).
-        p.dynamic   =        child->getBoolAttribute  ("dynamic",   p.dynamic);
-        p.threshold = (float)child->getDoubleAttribute("threshold", p.threshold);
-        p.ratio     = (float)child->getDoubleAttribute("ratio",     p.ratio);
-        p.attack    = (float)child->getDoubleAttribute("attack",    p.attack);
-        p.release   = (float)child->getDoubleAttribute("release",   p.release);
-        p.rangeDb   = (float)child->getDoubleAttribute("rangeDb",   p.rangeDb);
-        p.upward    =        child->getBoolAttribute  ("upward",    p.upward);
-        p.scSourceId=        child->getIntAttribute   ("scSource",  p.scSourceId);
+        readBandXml(*child, mBands[idx].params);
         // 12c: snap smoothers to restored values so the first process() block after
         // state-load doesn't ramp across a potentially large delta.
         snapBandSmoothersToParams(idx);
         mBands[idx].dirty = true;
     }
 
+    // A/B spare bank.  Inert data - swapWithSpare() is the only thing that ever
+    // copies it into mBands - so no smoother snap or band rebuild is owed here.
+    // Files without the child (and the EQ6DSP legacy path) keep the seeded spare.
+    if (auto* sp = xml->getChildByName("Spare"))
+        for (auto* sb : sp->getChildIterator())
+        {
+            const int idx = sb->getIntAttribute("index", -1);
+            if (idx < 0 || idx >= kNumBands) continue;
+            readBandXml(*sb, mSpare[idx]);
+        }
+
     if (isNew)
     {
         mMainLevelDb   = (float)xml->getDoubleAttribute("mainLevel",     0.0);
         mIIRModSpeed   = (float)xml->getDoubleAttribute("iirModSpeed",   mIIRModSpeed);
         mProportionalQ =        xml->getBoolAttribute  ("proportionalQ", mProportionalQ);
+        // Falls back to false, not to the current member: permanent bus EQ
+        // instances outlive a project load, so carrying the previous project's
+        // bank over would relabel this one's curve.
+        mViewingSpare  =        xml->getBoolAttribute  ("viewingSpare",  false);
         // 12f: PRESET-SAFE additive. Defaults false on missing (older state).
         const bool acSaved = xml->getBoolAttribute("antiCramping", mAntiCramping);
         if (acSaved != mAntiCramping)
             setAntiCramping(acSaved);   // re-prepare TPT/oversampler at new rate
 
-        // 12g: PRESET-SAFE additive. Defaults Standard on missing (older state).
+        // 12g: PRESET-SAFE additive. Defaults to the current member on missing
+        // (older state), which for precision is the 2048 that 12g had fixed
+        // Linear at - so state written before this was persisted sounds the same.
+        // Precision is restored BEFORE the mode so the mode's own reconfigure
+        // already sees the right FFT size.
+        const int lpSaved = xml->getIntAttribute("linearPrec", mLinearPrec);
+        setLinearPhasePrecision (juce::jlimit (0, kNumLinearPrecisions - 1, lpSaved));
+
         const int pmSaved = xml->getIntAttribute("phaseMode", (int) mPhaseMode);
-        const PhaseMode pmEnum = (PhaseMode) juce::jlimit (0, 4, pmSaved);
+        const PhaseMode pmEnum = (PhaseMode) juce::jlimit (0, (int) PhaseMode::Count - 1, pmSaved);
         if (pmEnum != mPhaseMode)
             setPhaseMode(pmEnum);   // reconfigures linear processor + AC if forced
     }

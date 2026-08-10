@@ -273,11 +273,6 @@ void HarmlessSynth::renderNextBlock (juce::AudioBuffer<float>& buffer,
     }
 }
 
-void HarmlessSynth::allNotesOff()
-{
-    mSynth.allNotesOff (0, true);
-}
-
 //==============================================================================
 void HarmlessSynth::setUnison (int numVoices, float detuneCents, float spread)
 {
@@ -444,9 +439,13 @@ void HarmlessSynth::applyGlobalLfoToAllTargets (int rateIdx, int shape, bool tem
     };
     const float cycleLen = kLens[juce::jlimit (0, 12, rateIdx)];
 
-    const juce::SpinLock::ScopedLockType lock (
-        const_cast<HarmlessModRegistry*> (mModRegistry)->getEditLock());
-
+    // Thread-safety: reached from the audio thread (processBlock ->
+    // updateFromApvts), so the registry's edit lock is deliberately NOT taken -
+    // blocking on a lock the UI holds across vector edits and ValueTree walks
+    // would stall the render callback.  Nothing here needs it: mTargets is
+    // written only at construction and is stable for the registry's lifetime,
+    // ModTarget::sources is a fixed std::array, and the only writes are leaf
+    // scalars - the same lock-free footing AdditiveVoice already reads them on.
     for (const auto& tgt : mModRegistry->getAllTargets())
     {
         auto& src = tgt->sources[(int) ModSource::LFO];
@@ -471,7 +470,8 @@ void HarmlessSynth::applyGlobalLfoVolDepth (float depth) noexcept
     // the cost is negligible.
     if (mModRegistry == nullptr) return;
     auto* mut = const_cast<HarmlessModRegistry*> (mModRegistry);
-    const juce::SpinLock::ScopedLockType lock (mut->getEditLock());
+    // Thread-safety: audio thread, one leaf-scalar write - no edit lock, for
+    // the same reason as applyGlobalLfoToAllTargets above.
     for (const auto& tgt : mModRegistry->getAllTargets())
     {
         if (tgt->paramId.endsWith ("_volume"))
@@ -487,7 +487,8 @@ void HarmlessSynth::applyGlobalLfoPitchDepth (float depth) noexcept
 {
     if (mModRegistry == nullptr) return;
     auto* mut = const_cast<HarmlessModRegistry*> (mModRegistry);
-    const juce::SpinLock::ScopedLockType lock (mut->getEditLock());
+    // Thread-safety: audio thread, one leaf-scalar write - no edit lock, for
+    // the same reason as applyGlobalLfoToAllTargets above.
     for (const auto& tgt : mModRegistry->getAllTargets())
     {
         if (tgt->paramId.endsWith ("_pitch_semitones"))
@@ -525,21 +526,6 @@ void HarmlessSynth::tickGlobalLfoVel (int numSamples) noexcept
 }
 
 // ── 2026-04-19 (S2 SLA) Blur extensions on engines ─────────────────────────
-void HarmlessSynth::setBlurTime (float t)
-{
-    mPartA.blur.setTimeScale (t);
-    mPartB.blur.setTimeScale (t);
-    mPartA.requestRebuild();
-    mPartB.requestRebuild();
-}
-void HarmlessSynth::setBlurHarm (float h)
-{
-    mPartA.blur.setHarmAxis (h);
-    mPartB.blur.setHarmAxis (h);
-    mPartA.requestRebuild();
-    mPartB.requestRebuild();
-}
-
 void HarmlessSynth::setBlurTimeA (float t)
 {
     mPartA.blur.setTimeScale (t);
@@ -585,58 +571,7 @@ void HarmlessSynth::setPartBShape (int shape)
     mPartB.setShape (kShapes[juce::jlimit (0, 3, shape)]);
 }
 
-//==============================================================================
-// Spectral module setters - set amount on both engines and rebuild wavetables.
-
-void HarmlessSynth::setPrismAmount (float amount)
-{
-    mPartA.prism.setAmount (amount);
-    mPartB.prism.setAmount (amount);
-    mPartA.requestRebuild();
-    mPartB.requestRebuild();
-}
-
-void HarmlessSynth::setPluckDecay (float amount)
-{
-    mPartA.pluck.setAmount (amount);
-    mPartB.pluck.setAmount (amount);
-    mPartA.requestRebuild();
-    mPartB.requestRebuild();
-}
-
-void HarmlessSynth::setBlurSize (float amount)
-{
-    mPartA.blur.setAmount (amount);
-    mPartB.blur.setAmount (amount);
-    mPartA.requestRebuild();
-    mPartB.requestRebuild();
-}
-
-void HarmlessSynth::setFilterMaskAmount (float amount)
-{
-    mPartA.filterMask.setAmount (amount);
-    mPartB.filterMask.setAmount (amount);
-    mPartA.requestRebuild();
-    mPartB.requestRebuild();
-}
-
-void HarmlessSynth::setPhaserMaskRate (float rate)
-{
-    mPartA.phaserMask.setRate (rate);
-    mPartB.phaserMask.setRate (rate);
-    mPartA.requestRebuild();
-    mPartB.requestRebuild();
-}
-
-void HarmlessSynth::setBrownianAmount (float amount)
-{
-    mPartA.setBrownianAmount (amount);
-    mPartB.setBrownianAmount (amount);
-    mPartA.requestRebuild();
-    mPartB.requestRebuild();
-}
-
-// ── 2026-04-19 (S3.5) Per-part split setters ──────────────────────────────
+// ── 2026-04-19 (S3.5) Per-part spectral module setters ─────────────────────
 void HarmlessSynth::setPrismAmountA      (float a) { mPartA.prism.setAmount (a);     mPartA.requestRebuild(); }
 void HarmlessSynth::setPrismAmountB      (float a) { mPartB.prism.setAmount (a);     mPartB.requestRebuild(); }
 void HarmlessSynth::setPluckDecayA       (float a) { mPartA.pluck.setAmount (a);     mPartA.requestRebuild(); }
@@ -729,15 +664,6 @@ void HarmlessSynth::setTimbreBlend (float blend) noexcept
     forEachVoice ([b] (AdditiveVoice& v) { v.setTimbreBlend (b); });
 }
 
-void HarmlessSynth::setPrismMode (int mode)
-{
-    const int m = juce::jlimit (0, 2, mode);
-    mPartA.prism.setMode (m);
-    mPartB.prism.setMode (m);
-    mPartA.requestRebuild();
-    mPartB.requestRebuild();
-}
-
 void HarmlessSynth::setPrismModeA (int mode)
 {
     mPartA.prism.setMode (juce::jlimit (0, 2, mode));
@@ -746,14 +672,6 @@ void HarmlessSynth::setPrismModeA (int mode)
 void HarmlessSynth::setPrismModeB (int mode)
 {
     mPartB.prism.setMode (juce::jlimit (0, 2, mode));
-    mPartB.requestRebuild();
-}
-
-void HarmlessSynth::setPluckBlur (bool blurOn)
-{
-    mPartA.pluck.setBlur (blurOn);
-    mPartB.pluck.setBlur (blurOn);
-    mPartA.requestRebuild();
     mPartB.requestRebuild();
 }
 

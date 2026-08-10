@@ -82,11 +82,6 @@ public:
     // threshold automatically. Manual Gain ignored.
     void setAutoMakeup  (bool on);
 
-    // C1 -- Enable/disable sidechain detection path. When true and a sidechain
-    // buffer is bound via setSidechainBuffer(), detection reads from the SC
-    // source instead of the main input. Flag is serialized.
-    void setUseSidechain (bool on);
-
     // C.4 Phase 1 (2026-04-30): SlotComponent header SC dropdown gate -- only
     // shown for effects that actually consume the SC signal.
     bool usesSidechain() const noexcept override { return true; }
@@ -99,16 +94,6 @@ public:
     // C4 -- Detection window / smoother time constant in ms (1..100). Applies to
     // RMS mode. Smaller = faster tracking; larger = smoother/musical.
     void setDetectionMs (float ms);
-
-    // Scaffolding for future external-sidechain routing. Stores which mixer
-    // channel id feeds the sidechain source (-1 = internal / no external).
-    // Serialized so v1 presets future-proof against Tier-3 routing-UI work.
-    // DSP reads are no-op today; VibeGraph routing does the actual wiring later.
-    void setSidechainSourceId (int channelId);
-
-    // Sidechain: pass a pointer to a buffer whose samples are used for level
-    // detection.  The buffer is NOT owned by this object.
-    void setSidechainBuffer (juce::AudioBuffer<float>* buf);
 
     // H-2 (2026-05-01): Type umbrella -- switches algorithm character.
     // 0 = Modern (default, current algo), 1 = FET, 2 = Opto, 3 = CS Style.
@@ -161,7 +146,6 @@ public:
     float sidechainHPF { 20.0f };   // C2: 20 Hz default = effectively off
     bool  peakDetection{ false };   // C3: false = RMS (default), true = peak
     float detectionMs  { 10.0f };   // C4: RMS window in ms
-    int   sidechainSourceId { -1 };  // scaffolding: -1 = internal detection path
     // QA-EffectsReview Task 6: FET (1176) all-buttons-in mode.  When true the
     // gain computer uses a program-dependent RISING ratio (the bias-shift
     // character) instead of the fixed button ratio.  Serialized; FET-only.

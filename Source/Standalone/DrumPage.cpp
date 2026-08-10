@@ -7,6 +7,8 @@
 #include "../VibePlayer/VibePlayerProcessor.h"
 #include "../VibePlayer/VibePlayerEditor.h"
 #include "../SampleLibrary.h"
+#include "../MissingFileReport.h"
+#include "../UserFileSave.h"
 #include "PagePresetIO.h"
 #include "StandaloneEditor.h"
 using namespace juce;
@@ -113,11 +115,12 @@ juce::File DrumPage::userPresetsDir()
 DrumPage::DrumPage(VibeSynthProcessor& p, PatternManager& pm, int pageIndex)
     : mProcessor(p), mPM(pm), mPageIndex(juce::jlimit(0, kMaxDrumPages - 1, pageIndex))
 {
-    mPageColor = VC::DrumCol[mPageIndex];
+    mPageColor = VC::DrumCol[mPageIndex % juce::numElementsInArray (VC::DrumCol)];
 
     // QA-ModelShell TS1: the tab is a model object from birth (idempotent;
-    // name syncs via setTabName; engine attaches at selectEngine).
-    mProcessor.engineRig().addTab (TabKind::Drums, mPageIndex, mTabName);
+    // engine attaches at selectEngine).  The model tab carries no display
+    // name -- (kind, pageIndex) is its identity, the name is the ribbon's.
+    mProcessor.engineRig().addTab (TabKind::Drums, mPageIndex);
 
     // 2026-04-26 (step 2 commit 3): Drum Kit and per-drum Piano Roll both
     // live on PianoRollPage now.  Skip building those sub-views here -
@@ -164,7 +167,6 @@ void DrumPage::switchTab(int idx)
     if (mPianoRoll) mPianoRoll->setVisible(mActiveTab == 2);
     if (mActiveTab == 2 && mPianoRoll) mPianoRoll->grabKeyboardFocus();
     resized();
-    if (onSubTabChanged) onSubTabChanged(mActiveTab);
 }
 
 // ── D2 Drum Kit hooks (forwarders to mDrumKitTab) ────────────────────────────
@@ -220,7 +222,7 @@ void DrumPage::setKitMenuHandler (std::function<void(juce::Component*)> fn)
     if (mDrumKitTab) mDrumKitTab->onKitMenuRequested = std::move (fn);
 }
 
-void DrumPage::setGlobalLockHandler (std::function<void()> fn)
+void DrumPage::setGlobalLockHandler (std::function<void(int bank)> fn)
 {
     if (mDrumKitTab) mDrumKitTab->onGlobalLockRequested = std::move (fn);
 }
@@ -316,7 +318,7 @@ void DrumPage::selectEngine(const juce::String& engineName)
     // QA-ModelShell TS1: the model constructs/swaps, prepares, and registers
     // the engine.  This page keeps a non-owning view pointer + the editor.
     auto& rig = mProcessor.engineRig();
-    rig.addTab (TabKind::Drums, mPageIndex, mTabName);
+    rig.addTab (TabKind::Drums, mPageIndex);
     mEngineProcessor = rig.setEngineType (TabKind::Drums, mPageIndex, engineName);
     if (mEngineProcessor != nullptr)
     {
@@ -543,9 +545,6 @@ void DrumPage::resized()
 void DrumPage::setTabName(const juce::String& name)
 {
     mTabName = name;
-    // QA-ModelShell TS1: every rename path funnels through here -- the one
-    // sync point for the model tab's name.
-    mProcessor.engineRig().renameTab (TabKind::Drums, mPageIndex, name);
     refreshPianoRollContextLabel();
 }
 
@@ -758,8 +757,13 @@ void DrumPage::showSoundPicker (juce::Component* anchor)
                     const bool isPlayer = px->hasTagName ("BaySickPlayerState");
                     dp->performSoundSwapGesture ("Load Drum Patch", [dp, xml, isPlayer]
                     {
-                        if (isPlayer) dp->loadPlayerPreset (xml);
-                        else          dp->loadSynthPreset (xml);
+                        juce::String fail;
+                        if (isPlayer) fail = dp->loadPlayerPreset (xml);
+                        else          fail = dp->loadSynthPreset (xml);
+                        if (fail.isNotEmpty())
+                            juce::AlertWindow::showMessageBoxAsync (
+                                juce::MessageBoxIconType::WarningIcon, "Load Drum Patch",
+                                xml.getFileNameWithoutExtension() + ": " + fail, "OK");
                     });
                 }
                 return;
@@ -772,6 +776,7 @@ void DrumPage::showSoundPicker (juce::Component* anchor)
 // ─────────────────────────────────────────────────────────────────────────────
 void DrumPage::loadSampleFile (const juce::File& f)
 {
+    MissingFileReport::ScopedGesture gesture ("sound");
     HeavyOperationOverlay::ScopedOp busy (StandaloneEditor::busyOverlayFor (this),
                                           "Loading Sample...", true);
     selectEngine ("BaySickPlayer");
@@ -788,11 +793,19 @@ void DrumPage::loadSampleFile (const juce::File& f)
         refreshPianoRollContextLabel();
         if (onSoundNameChanged) onSoundNameChanged (mSoundName);
         takeStateSnapshot();
+        // A load that produced no playable regions (corrupt/unsupported file)
+        // is otherwise indistinguishable from success: the name shows as
+        // loaded and the pad plays silence.
+        if (! vp->hasAnyRegions())
+            juce::AlertWindow::showMessageBoxAsync (
+                juce::MessageBoxIconType::WarningIcon, "Load Sample",
+                "Nothing playable could be loaded from:\n" + f.getFullPathName(), "OK");
     }
 }
 
 void DrumPage::loadSampleFolder (const juce::File& f)
 {
+    MissingFileReport::ScopedGesture gesture ("sound");
     HeavyOperationOverlay::ScopedOp busy (StandaloneEditor::busyOverlayFor (this),
                                           "Loading Samples...", true);
     selectEngine ("BaySickPlayer");
@@ -807,11 +820,16 @@ void DrumPage::loadSampleFolder (const juce::File& f)
         refreshPianoRollContextLabel();
         if (onSoundNameChanged) onSoundNameChanged (mSoundName);
         takeStateSnapshot();
+        if (! vp->hasAnyRegions())
+            juce::AlertWindow::showMessageBoxAsync (
+                juce::MessageBoxIconType::WarningIcon, "Load Samples",
+                "Nothing playable could be loaded from:\n" + f.getFullPathName(), "OK");
     }
 }
 
 void DrumPage::loadSampleSFZ (const juce::File& f)
 {
+    MissingFileReport::ScopedGesture gesture ("sound");
     HeavyOperationOverlay::ScopedOp busy (StandaloneEditor::busyOverlayFor (this),
                                           "Loading SFZ...", true);
     selectEngine ("BaySickPlayer");
@@ -825,19 +843,27 @@ void DrumPage::loadSampleSFZ (const juce::File& f)
         refreshPianoRollContextLabel();
         if (onSoundNameChanged) onSoundNameChanged (mSoundName);
         takeStateSnapshot();
+        if (! vp->hasAnyRegions())
+            juce::AlertWindow::showMessageBoxAsync (
+                juce::MessageBoxIconType::WarningIcon, "Load SFZ",
+                "Nothing playable could be loaded from:\n" + f.getFullPathName(), "OK");
     }
 }
 
-void DrumPage::loadSynthPreset (const juce::File& xml)
+juce::String DrumPage::loadSynthPreset (const juce::File& xml)
 {
     HeavyOperationOverlay::ScopedOp busy (StandaloneEditor::busyOverlayFor (this),
                                           "Loading Preset...", true);
     selectEngine ("BaySickSynth");
     auto* bss = dynamic_cast<BaySickSynthProcessor*>(mEngineProcessor);
-    if (bss == nullptr) return;
+    if (bss == nullptr)
+        return "BaySickSynth engine unavailable";
 
     auto px = juce::XmlDocument::parse (xml);
-    if (! px || ! px->hasTagName (bss->apvts.state.getType())) return;
+    if (! px)
+        return "preset could not be read";
+    if (! px->hasTagName (bss->apvts.state.getType()))
+        return "not a BaySickSynth preset";
 
     auto loaded = juce::ValueTree::fromXml (*px);
 
@@ -882,6 +908,7 @@ void DrumPage::loadSynthPreset (const juce::File& xml)
     refreshPianoRollContextLabel();
     if (onSoundNameChanged) onSoundNameChanged (mSoundName);
     takeStateSnapshot();
+    return {};
 }
 
 void DrumPage::newBlankPatch()
@@ -904,8 +931,11 @@ void DrumPage::clearSound()
 // QA-UndoCoverage Task 7: one drum-sound swap gesture (pick / preset / clear)
 // = one StructuralOpAction.  Before/after are full-chain Page Preset XML
 // snapshots; an empty side means "no engine" and applies as a clear.  The
-// undo of a sample load is itself a LOAD (async engines) -- accepted
-// property, Jeff 2026-08-06.
+// clear decision rides the captured intent flag, NOT the file: writeNew also
+// returns an empty File on a failed write, and replaying that as a clear
+// destroyed the loaded sound with no way back.  A side that had content but
+// no snapshot no-ops, matching the sibling pages.  The undo of a sample load
+// is itself a LOAD (async engines) -- accepted property, Jeff 2026-08-06.
 void DrumPage::performSoundSwapGesture (const juce::String& label,
                                         const std::function<void()>& op)
 {
@@ -916,8 +946,10 @@ void DrumPage::performSoundSwapGesture (const juce::String& label,
     const juce::String after = exportPagePresetXml();
     if (before == after) return;
 
-    const juce::File beforeF = before.isNotEmpty() ? UndoSnapshotStore::writeNew (before) : juce::File();
-    const juce::File afterF  = after.isNotEmpty()  ? UndoSnapshotStore::writeNew (after)  : juce::File();
+    const bool beforeWasEmpty = before.isEmpty();
+    const bool afterWasEmpty  = after.isEmpty();
+    const juce::File beforeF = beforeWasEmpty ? juce::File() : UndoSnapshotStore::writeNew (before);
+    const juce::File afterF  = afterWasEmpty  ? juce::File() : UndoSnapshotStore::writeNew (after);
     juce::Array<juce::File> owned;
     if (beforeF != juce::File()) owned.add (beforeF);
     if (afterF  != juce::File()) owned.add (afterF);
@@ -932,18 +964,51 @@ void DrumPage::performSoundSwapGesture (const juce::String& label,
         if (resolveSelf) return dynamic_cast<DrumPage*> (resolveSelf());
         return sp.getComponent();
     };
-    auto applyXmlOrClear = [livePage] (const juce::File& f)
+    auto applyXmlOrClear = [livePage] (const juce::File& f, bool sideWasEmpty)
     {
+        // The scope sits here rather than inside importPagePresetXml because
+        // the tab-spawn callers run that payload in a loop (one dialog per
+        // drum); this apply is one page, one gesture.  RAII rather than a
+        // drain at the tail so an outer gesture's entries are not taken and
+        // re-posted under this noun.
+        MissingFileReport::ScopedGesture gesture ("preset");
+
         auto* dp = livePage();
         if (dp == nullptr) return;
-        if (f == juce::File() || ! f.existsAsFile()) { dp->clearSoundInternal(); return; }
+        if (sideWasEmpty) { dp->clearSoundInternal(); return; }
+        if (! f.existsAsFile()) return;
         dp->importPagePresetXml (f.loadFileAsString());
     };
     mUndoCtx.perform (new StructuralOpAction (
-                          [applyXmlOrClear, beforeF] { applyXmlOrClear (beforeF); },
-                          [applyXmlOrClear, afterF]  { applyXmlOrClear (afterF); },
+                          [applyXmlOrClear, beforeF, beforeWasEmpty] { applyXmlOrClear (beforeF, beforeWasEmpty); },
+                          [applyXmlOrClear, afterF, afterWasEmpty]  { applyXmlOrClear (afterF, afterWasEmpty); },
                           owned),
                       label);
+}
+
+// Mirrors StandaloneEditor::applyGlobalLockToggle, scoped to one drum: the
+// per-kit button records a per-page before/after transaction, so the per-page
+// item cannot be the one lock gesture that escapes the history.  The apply
+// resolves the LIVE page for the same delete+resurrect reason documented on
+// performSoundSwapGesture.
+void DrumPage::toggleLockWithUndo()
+{
+    const bool before = mLocked;
+    const bool after  = ! before;
+    setLocked (after);
+    if (! mUndoCtx.isValid()) return;
+
+    auto resolveSelf = mUndoCtx.resolveOwnerPage;
+    auto sp = juce::Component::SafePointer<DrumPage> (this);
+    auto applyLocked = [resolveSelf, sp] (bool l)
+    {
+        auto* dp = resolveSelf ? dynamic_cast<DrumPage*> (resolveSelf())
+                               : sp.getComponent();
+        if (dp != nullptr) dp->setLocked (l);
+    };
+    mUndoCtx.perform (new StructuralOpAction ([applyLocked, before] { applyLocked (before); },
+                                              [applyLocked, after]  { applyLocked (after);  }),
+                      juce::String (after ? "Lock Drum" : "Unlock Drum"));
 }
 
 void DrumPage::clearSoundInternal()
@@ -1007,21 +1072,17 @@ void DrumPage::savePatchAs()
         {
             std::unique_ptr<juce::AlertWindow> own (aw);
             if (r != 1 || ! safeThis) return;
-            auto name = aw->getTextEditorContents ("name").trim();
-            if (name.isEmpty()) return;
+            const auto name = aw->getTextEditorContents ("name").trim();
             auto* dp = safeThis.getComponent();
             if (dp->mEngineProcessor == nullptr) return;
 
-            auto dir = userPresetsDir();
-            dir.createDirectory();
-            auto file = dir.getChildFile (name + ".xml");
-
+            juce::String contents;
             if (auto* bss = dynamic_cast<BaySickSynthProcessor*>(dp->mEngineProcessor))
             {
                 // BaySickSynth: just the apvts state.
                 auto state = bss->apvts.copyState();
                 if (auto xml = state.createXml())
-                    xml->writeTo (file, {});
+                    contents = xml->toString();
             }
             else if (auto* vp = dynamic_cast<VibePlayerProcessor*>(dp->mEngineProcessor))
             {
@@ -1062,30 +1123,51 @@ void DrumPage::savePatchAs()
                     }
                 }
 
-                root.writeTo (file, {});
+                contents = root.toString();
             }
 
-            dp->mSoundName = name;
-            dp->refreshPianoRollContextLabel();
-            if (dp->onSoundNameChanged) dp->onSoundNameChanged (name);
-            dp->takeStateSnapshot();   // saved patch is the new clean baseline
+            // Renaming the drum and re-baselining on a failed write reports a
+            // save that never happened, and the delete prompt then treats the
+            // patch as already captured to disk.  An engine whose state would
+            // not serialize yields empty contents, which the helper reports as
+            // the same failure rather than writing an empty patch.
+            UserFileSave::writeTextAsync (userPresetsDir(), name, contents,
+                [safeThis] (const UserFileSave::Result& saved)
+                {
+                    // A collision prompt can hold this open long enough for the
+                    // page to be closed, so the SafePointer is re-tested here
+                    // rather than trusted from the naming callback.
+                    if (! saved || ! safeThis) return;
+
+                    // Replace and Save a Copy land on different files, and the
+                    // drum takes its name from the one actually written.
+                    const juce::String savedName = saved.file.getFileNameWithoutExtension();
+                    safeThis->mSoundName = savedName;
+                    safeThis->refreshPianoRollContextLabel();
+                    if (safeThis->onSoundNameChanged) safeThis->onSoundNameChanged (savedName);
+                    safeThis->takeStateSnapshot();   // saved patch is the new clean baseline
+                },
+                "The drum was not saved.");
         }), false);
 }
 
 // D1.4-fix (c) - BaySickPlayer preset load.  Mirror of loadSynthPreset.
 // XML format: <BaySickPlayerState><BaySickPlayerState-apvts/><Sample kind=... path=.../></...>
 //   (the apvts state's root tag is BaySickPlayerState too - JUCE convention)
-// Sample path may be "library:rel/path" (resolved via SampleLibrary) or absolute.
-void DrumPage::loadPlayerPreset (const juce::File& xml)
+// The Sample path is a persisted ref: either library root's prefixed form
+// (resolved via SampleLibrary::resolvePersistedRef) or an absolute path.
+juce::String DrumPage::loadPlayerPreset (const juce::File& xml)
 {
     auto parsed = juce::XmlDocument::parse (xml);
-    if (! parsed || ! parsed->hasTagName ("BaySickPlayerState")) return;
+    if (! parsed || ! parsed->hasTagName ("BaySickPlayerState"))
+        return "preset could not be read";
 
     HeavyOperationOverlay::ScopedOp busy (StandaloneEditor::busyOverlayFor (this),
                                           "Loading Preset...", true);
     selectEngine ("BaySickPlayer");
     auto* vp = dynamic_cast<VibePlayerProcessor*>(mEngineProcessor);
-    if (vp == nullptr) return;
+    if (vp == nullptr)
+        return "BaySickPlayer engine unavailable";
 
     // 1. Apply the apvts state child (rewrite trackId prefix).
     if (auto* stateEl = parsed->getChildByName (vp->apvts.state.getType()))
@@ -1123,15 +1205,15 @@ void DrumPage::loadPlayerPreset (const juce::File& xml)
     }
 
     // 2. Reload sample reference.
+    juce::String sampleFail;
     if (auto* sampleEl = parsed->getChildByName ("Sample"))
     {
         const juce::String kind = sampleEl->getStringAttribute ("kind", "none");
         const juce::String pathStr = sampleEl->getStringAttribute ("path");
-        juce::File path;
-        if (pathStr.startsWith ("library:"))
-            path = SampleLibrary::getCoreLibraryDir().getChildFile (pathStr.substring (8));
-        else
-            path = juce::File (pathStr);
+        // resolvePersistedRef, not a local "library:" test: savePatchAs writes
+        // a "library:" stable ref for core-library files and a raw absolute
+        // path otherwise, and decoding a ref is SampleLibrary's job, not ours.
+        const juce::File path = SampleLibrary::resolvePersistedRef (pathStr);
 
         // 2026-05-02: route through the processor wrappers so the sample
         // path is stamped into apvts.state (project-save needs it for the
@@ -1154,13 +1236,19 @@ void DrumPage::loadPlayerPreset (const juce::File& xml)
             mLoadedSampleKind = SampleKind::SFZ;
             mLoadedSamplePath = path;
         }
-        // Sample missing or kind == none → leave engine with empty sample slot.
+        // kind == none -> a preset legitimately without a sample; a NAMED
+        // sample that failed to resolve leaves the slot empty and must not
+        // read as a fully loaded sound.
+        else if (kind != "none")
+            sampleFail = "sample missing: " + path.getFullPathName()
+                       + " (settings loaded; the drum is silent until you re-pick a sample)";
     }
 
     mSoundName = xml.getFileNameWithoutExtension();
     refreshPianoRollContextLabel();
     if (onSoundNameChanged) onSoundNameChanged (mSoundName);
     takeStateSnapshot();
+    return sampleFail;
 }
 
 int DrumPage::getPlayNote () const
@@ -1392,7 +1480,7 @@ void DrumPage::showContextMenu (juce::Component* anchor, bool fromKit)
                 return;
             }
 
-            if (r == kIdLock)         dp->setLocked (! dp->mLocked);
+            if (r == kIdLock)         dp->toggleLockWithUndo();
             else if (r == kIdPolyphony)
             {
                 if (auto* bss = dynamic_cast<BaySickSynthProcessor*>(dp->mEngineProcessor))
@@ -1556,7 +1644,12 @@ void DrumPage::importDrumState (const juce::String& xml)
     }
 
     mSoundName = name;
-    mLocked    = lock;
+    // Go through setLocked, not the field: the ribbon's own lock flag ([L]
+    // marker + its Delete guard) is only ever written by onLockChanged, so a
+    // bare field write leaves the duplicate locked on the page and unlocked in
+    // the ribbon.  setLocked early-outs on no change, so the usual
+    // false -> false duplicate stays silent.
+    setLocked (lock);
     refreshPianoRollContextLabel();
     if (onSoundNameChanged) onSoundNameChanged (mSoundName);
 }
@@ -1644,14 +1737,6 @@ void DrumPage::savePagePreset (std::function<void()> onSaved)
             if (r != 1 || ! safeThis) return;
 
             const juce::String name = aw->getTextEditorContents ("name").trim();
-            if (name.isEmpty()) return;
-
-            auto dir = PagePresetIO::myPresetsDirForPageKind (PagePresetIO::PageKind::Drum);
-            dir.createDirectory();
-            auto target = dir.getChildFile (name + ".xml");
-            int n = 2;
-            while (target.exists())
-                target = dir.getChildFile (name + " (" + juce::String (n++) + ").xml");
 
             const juce::String stripPrefix = "mixer_drum_" + juce::String (safeThis->mPageIndex);
             const juce::String enginePrefix = drumEnginePrefixOf (safeThis->mEngineProcessor);
@@ -1665,17 +1750,32 @@ void DrumPage::savePagePreset (std::function<void()> onSaved)
                 safeThis->mEngineType,
                 enginePrefix);
 
-            if (xml.isNotEmpty())
-                target.replaceWithText (xml);
+            UserFileSave::writeTextAsync (
+                PagePresetIO::myPresetsDirForPageKind (PagePresetIO::PageKind::Drum),
+                name, xml,
+                [safeThis, onSaved] (const UserFileSave::Result& saved)
+                {
+                    // A collision prompt can hold this open long enough for the
+                    // page to be closed, so the SafePointer is re-tested here
+                    // rather than trusted from the naming callback.
+                    if (! saved || ! safeThis) return;
 
-            safeThis->takeStateSnapshot();
-            if (onSaved) onSaved();   // G-7: chain delete after save completes
+                    safeThis->takeStateSnapshot();
+                    if (onSaved) onSaved();   // G-7: chain delete after save completes
+                },
+                UserFileSave::kTabNotDeleted);
         }), false);
 }
 
 void DrumPage::loadPagePreset (const juce::File& xml)
 {
     if (! xml.existsAsFile()) return;
+
+    // RAII rather than a drain at the tail: a bare drain inside an outer
+    // gesture (an undo that resurrects several tabs) takes that gesture's
+    // entries and posts them under this noun.  Only the outermost scope
+    // reports, so nesting keeps the noun the user reads correct.
+    MissingFileReport::ScopedGesture gesture ("preset");
 
     const juce::String savedEngineType = PagePresetIO::peekEngineType (xml);
     if (savedEngineType.isNotEmpty() && savedEngineType != mEngineType)
@@ -1708,7 +1808,12 @@ void DrumPage::loadPagePreset (const juce::File& xml)
         const auto path = vp->apvts.state.getProperty ("bsp_loadPath", juce::String()).toString();
         if (path.isNotEmpty())
         {
-            const juce::File f (path);
+            // bsp_loadPath is a PERSISTED REF (refForPersist), not a path: a
+            // sample under either library root is stored as "library:" /
+            // "mysamples:".  Building a juce::File from the raw string
+            // launders the prefix into mSoundName, which the kit file and the
+            // Save Patch As name box then carry to the tab and mixer strip.
+            const juce::File f = SampleLibrary::resolvePersistedRef (path);
             if      (kind == "folder") { mLoadedSampleKind = SampleKind::Folder; mLoadedSamplePath = f; mSoundName = f.getFileName(); }
             else if (kind == "sfz")    { mLoadedSampleKind = SampleKind::SFZ;    mLoadedSamplePath = f; mSoundName = f.getFileNameWithoutExtension(); }
             else if (kind == "file")   { mLoadedSampleKind = SampleKind::File;   mLoadedSamplePath = f; mSoundName = f.getFileNameWithoutExtension(); }

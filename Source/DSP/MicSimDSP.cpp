@@ -1,4 +1,6 @@
 #include "MicSimDSP.h"
+#include "../ProjectFileResolver.h"
+#include "../SampleLibrary.h"
 
 // ─────────────────────────────────────────────────────────────────────────────
 // MicSimDSP - H-6d (2026-05-02)
@@ -186,23 +188,44 @@ bool MicSimDSP::loadUserIr (const juce::File& f, juce::String& outErr, int slot)
         return false;
     }
 
-    try
-    {
-        mUserIrs[(size_t) s].loadImpulseResponse (f,
-                                       juce::dsp::Convolution::Stereo::yes,
-                                       juce::dsp::Convolution::Trim::yes,
-                                       0,  // 0 = use file size
-                                       juce::dsp::Convolution::Normalise::yes);
-        mUserIrPaths[(size_t) s] = f.getFullPathName();
-        mUserIrLoaded[(size_t) s].store (true, std::memory_order_release);
+    // The slot remembers a persisted REFERENCE, so "is this one already
+    // loaded?" has to resolve before it compares.  Callers that hold only the
+    // stored reference (BaySickNAMIRProcessor's A/B slot restore) re-ask for a
+    // load whenever their own resolved file does not string-match what the slot
+    // reports, which a reference never does -- without this early-out that
+    // rebuilds the convolution on every slot switch for the life of the project.
+    if (mUserIrLoaded[(size_t) s].load (std::memory_order_acquire)
+        && ProjectFileResolver::resolve (mUserIrPaths[(size_t) s]) == f)
         return true;
-    }
-    catch (const std::exception& e)
+
+    // juce::dsp::Convolution::loadImpulseResponse hands the file to its own
+    // background loader and reports nothing back, so an unreadable or non-audio
+    // pick used to land as "the slot names an IR and renders passthrough".
+    // Probe with a reader before committing -- same guard, same format set, as
+    // AcousticSimulatorStyleDSP::loadUserIR.
+    juce::AudioFormatManager fm;
+    fm.registerBasicFormats();
+    std::unique_ptr<juce::AudioFormatReader> reader (fm.createReaderFor (f));
+    if (reader == nullptr || reader->lengthInSamples <= 0)
     {
-        outErr = juce::String ("Failed to load IR: ") + e.what();
-        mUserIrLoaded[(size_t) s].store (false, std::memory_order_release);
+        outErr = "This file could not be read as audio:\n" + f.getFullPathName();
         return false;
     }
+
+    mUserIrs[(size_t) s].loadImpulseResponse (f,
+                                   juce::dsp::Convolution::Stereo::yes,
+                                   juce::dsp::Convolution::Trim::yes,
+                                   0,  // 0 = use file size
+                                   juce::dsp::Convolution::Normalise::yes);
+
+    // Persisted form, not the absolute path: an IR under Core Library or My
+    // Samples has to come back on another install or another Windows account,
+    // and an absolute path embeds this machine's user name.  refForPersist
+    // returns the absolute path for anything outside those roots, which is what
+    // the bundler then rewrites when a project is made self-contained.
+    mUserIrPaths[(size_t) s] = SampleLibrary::refForPersist (f);
+    mUserIrLoaded[(size_t) s].store (true, std::memory_order_release);
+    return true;
 }
 
 void MicSimDSP::clearUserIr (int slot)

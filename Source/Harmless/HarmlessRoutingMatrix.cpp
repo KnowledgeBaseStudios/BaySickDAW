@@ -2,7 +2,6 @@
 #include "HarmlessLAF.h"
 
 static const char* kSliderLabels[] = { "SUB", "PROT", "CLIP", "FX", "VOL", "ENV" };
-static const char* kToggleLabels[] = { "AUTO", "VEL", "S1", "S2", "S3", "S4" };
 
 HarmlessRoutingMatrix::HarmlessRoutingMatrix()
 {
@@ -19,9 +18,9 @@ HarmlessRoutingMatrix::HarmlessRoutingMatrix()
         addAndMakeVisible (s);
     }
     // 2026-04-19 (S1) per Jeff: the 6 LED toggles in the design doc are not
-    // wired and not needed - just the 6 faders. Toggles intentionally NOT
-    // added to the component so they don't paint/hit-test/take space.
-    juce::ignoreUnused (kToggleLabels);
+    // wired and not needed - just the 6 faders.  Dropped for good as BLU-630
+    // (Future State S2, "Won't do"); the member array that outlived the ruling
+    // was removed at QA-Soundness.
 }
 
 void HarmlessRoutingMatrix::attachToApvts (juce::AudioProcessorValueTreeState& apvts,

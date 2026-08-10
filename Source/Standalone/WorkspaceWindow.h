@@ -67,6 +67,9 @@ public:
     // Hands the page back WITHOUT destroying it -- for a reparent that must not
     // tear the page down.  Destroy-on-close does not use this (it wants the
     // page gone); it exists so a future move-between-frames is possible.
+    // HOLD-FOR-move-between-frames: zero callers by design (QA-Soundness T2
+    // verified 2026-08-06); delete only if the future move-between-frames idea
+    // is formally dropped.
     std::unique_ptr<juce::Component> releaseContent();
 
     // DEFAULT OPENING SIZE **and MINIMUM**, in WINDOW dimensions (chrome
@@ -131,6 +134,16 @@ public:
     // Lifetime plumbing (all message-thread).
     static const std::map<juce::String, juce::Rectangle<int>>& sessionBoundsMap();
     static void replaceSessionBounds (std::map<juce::String, juce::Rectangle<int>> m);
+    // The pre-fill restore rects are the bounds store's sibling and have the
+    // same project scope: leaving them behind makes a window in the next
+    // project open unfilled but report FILLED, then snap to a size that came
+    // from a project the user is no longer in.
+    static void replaceSessionRestoreRects (std::map<juce::String, juce::Rectangle<int>> m);
+    static const std::map<juce::String, juce::Rectangle<int>>& sessionRestoreRectsMap();
+    // Drop everything remembered for one persist key.  Both stores are keyed by
+    // effect UUID for the aux windows, and a UUID never revives, so the entry is
+    // dead the moment its effect is replaced.
+    static void forgetPlacement (const juce::String& persistKey);
     static void registerPlacementPersistentKey (const juce::String& key);
     // QA-Layout T7 fix: true for the four default tabs, whose placement is a
     // GLOBAL preference (settings.xml) by the T5 three-lifetime ruling.  A
@@ -244,8 +257,6 @@ public:
     void setTetherLocked   (bool locked);
     bool isTetherLocked() const noexcept { return mTetherLocked && tetherPartner() != nullptr; }
     WorkspaceWindow* tetherPartner()  const noexcept;
-    WorkspaceWindow* tetherFollower() const noexcept { return mTetherFollower.getComponent(); }
-    WorkspaceWindow* tetherLeader()   const noexcept { return mTetherLeader.getComponent(); }
 
     // Put the follower under this window, centered, matching width.  Called at
     // lock, at open, and whenever the leader's size changes -- which is what
@@ -382,15 +393,16 @@ private:
         WorkspaceWindow& owner;
     };
     Constrainer                                      mConstrainer { *this };
-    // Jeff, 2026-08-04.  The ctor installs a 320x200 PLACEHOLDER minimum, and
-    // attachTo uses the minimum as the first-open size.  That was harmless
-    // while every floor was known at creation, but an engine-driven floor is
-    // now deliberately unknown until the engine binds -- so such a window first
-    // opened at 320x200 and only reached its real size later, if at all.
-    // mFloorKnown says whether a REAL floor has been installed;
-    // mOpenedAtPlaceholder marks a window that opened before one arrived and
-    // has never been sized by the user, so the floor can snap it exactly rather
-    // than merely grow it.
+    // Jeff, 2026-08-04.  Opening size and resize floor are separate levers.
+    // The ctor installs ONLY the anti-degenerate minimum (kMinDegenerateW/H,
+    // 120x80); attachTo opens at mDefaultSize when one is known and at a
+    // neutral 480x320 otherwise, applying the constrainer minimum afterwards
+    // purely as a floor.  An engine-driven default is deliberately unknown
+    // until the engine binds, which is what these two exist for: mDefaultKnown
+    // says whether a REAL default has been installed, and mOpenedAtPlaceholder
+    // marks a window that opened before one arrived and has never been sized
+    // by the user, so setDefaultWindowSize can snap it exactly rather than
+    // merely grow it.
     bool                                             mDefaultKnown { false };
     bool                                             mOpenedAtPlaceholder { false };
     juce::Point<int>                                 mDefaultSize { 0, 0 };

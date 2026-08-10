@@ -79,11 +79,20 @@ void SaturationDSP::snapSmoothedToTargets()
 
 // -- DSPBase interface --------------------------------------------------------
 
+// prepare() frees and rebuilds the oversampler, the scratch vectors and the
+// Tape convolution, so it is legal ONLY when the audio thread cannot be inside
+// process() -- i.e. from EffectRack::prepare, which holds mSlotsLock, or before
+// the DSP is published.  Every other message-thread entry point (the OS chicken
+// head, preset loads) must go through stageOversampler() instead.
 void SaturationDSP::prepare (double sampleRate, int maxBlockSize)
 {
     mSampleRate = sampleRate;
     mMaxBlock   = maxBlockSize;
     updateFilters();
+
+    // Drop any staged-but-unadopted oversampler: this rebuild supersedes it.
+    mOsSwapPending.store (false, std::memory_order_release);
+    mOsPending.reset();
 
     // 9a/C2: (re)allocate the oversampler at the current factor.
     mOversampler = std::make_unique<juce::dsp::Oversampling<float>> (
@@ -93,7 +102,9 @@ void SaturationDSP::prepare (double sampleRate, int maxBlockSize)
         true /* maxQuality */);
     mOversampler->initProcessing ((size_t) maxBlockSize);
     mOversampler->reset();
-    mLatencySamples = (int) std::ceil (mOversampler->getLatencyInSamples());
+    mOsLog2Active = juce::jlimit (1, 4, mOsLog2);
+    mLatencySamples.store ((int) std::ceil (mOversampler->getLatencyInSamples()),
+                           std::memory_order_relaxed);
 
     allocateScratch();
 
@@ -240,15 +251,59 @@ void SaturationDSP::setAutoGain (bool on)
 {
     if (on != mAutoGain) mAutoGain = on;
 }
+
+void SaturationDSP::stageOversampler (int factorLog2)
+{
+    // MESSAGE THREAD ONLY.  Builds the replacement oversampler off to the side
+    // and publishes it with one release-store; never touches mOversampler,
+    // which the audio thread owns.
+    const int n = juce::jlimit (1, 4, factorLog2);
+
+    auto os = std::make_unique<juce::dsp::Oversampling<float>> (
+        2 /* numChannels */,
+        n,
+        juce::dsp::Oversampling<float>::filterHalfBandPolyphaseIIR,
+        true /* maxQuality */);
+    os->initProcessing ((size_t) mMaxBlock);
+    os->reset();
+
+    mOsPendLog2    = n;
+    mOsPendLatency = (int) std::ceil (os->getLatencyInSamples());
+    // Assigning here also destructs the PREVIOUSLY retired oversampler -- on
+    // this thread, which is the point of the pattern.
+    mOsPending = std::move (os);
+    mOsSwapPending.store (true, std::memory_order_release);
+}
+
+void SaturationDSP::drainOversamplerSwap() noexcept
+{
+    // AUDIO THREAD.  Adopts oversampler + factor + latency together, so neither
+    // body can index the upsampled block with a factor it was not built for.
+    if (! mOsSwapPending.load (std::memory_order_acquire)) return;
+    std::swap (mOversampler, mOsPending);
+    mOsLog2Active = mOsPendLog2;
+    mLatencySamples.store (mOsPendLatency, std::memory_order_relaxed);
+    mOsSwapPending.store (false, std::memory_order_release);
+}
+
 void SaturationDSP::setOversamplingFactor (int factorLog2)
 {
     // C2: 2x=1, 4x=2, 8x=3, 16x=4.
     const int n = juce::jlimit (1, 4, factorLog2);
     if (n == mOsLog2) return;
     mOsLog2 = n;
-    // Reallocate oversampler + refresh coefficients (bass split coef uses OS rate).
+    // Stage rather than prepare(): this runs from the UI thread while the audio
+    // thread may be inside processSamplesUp/Down.  The OS-rate-derived filter
+    // coefs (mBassLPCoef, mTapeHystAlphaOS) are refreshed here on the message
+    // thread, which is the same plain-scalar convention every other setter in
+    // this file uses.
     if (mSampleRate > 0.0)
-        prepare (mSampleRate, mMaxBlock);
+    {
+        updateFilters();
+        tapeUpdateFilters();
+        mTapeHystAlphaOSSmooth.setTargetValue (mTapeHystAlphaOS);
+        stageOversampler (n);
+    }
 }
 
 // ---- Legacy compatibility ---------------------------------------------------
@@ -381,6 +436,10 @@ float SaturationDSP::processTube (float x, float flowers, float dabs,
 
 void SaturationDSP::process (juce::AudioBuffer<float>& buffer)
 {
+    // Ahead of the bypass early-out: a staged oversampler must be adopted even
+    // on a block this effect otherwise does nothing with.
+    drainOversamplerSwap();
+
     if (bypassed) return;
 
     // H-10 (2026-05-02): Tape branches off to its own dedicated body --
@@ -407,7 +466,8 @@ void SaturationDSP::process (juce::AudioBuffer<float>& buffer)
 
     const int numCh     = std::min (buffer.getNumChannels(), 2);
     const int numChOS   = 2;   // oversampler is always stereo
-    const int kOsNow    = 1 << juce::jlimit (1, 4, mOsLog2);
+    // Factor the LIVE oversampler was built with, not the user-intent mOsLog2.
+    const int kOsNow    = 1 << juce::jlimit (1, 4, mOsLog2Active);
 
     const float a_shelf = mShelfCoef;
     const float a_bass  = mBassLPCoef;
@@ -732,8 +792,14 @@ void SaturationDSP::setStateInformation (const void* data, int sz)
         tapeSnapSmoothedToTargets();
         if (mSampleRate > 0.0)
         {
-            if (osChanged) prepare (mSampleRate, mMaxBlock);
-            else { updateFilters(); tapeUpdateFilters(); loadCassetteIR (mTapeCassetteIdx); }
+            // The preset menu hands this call the LIVE DSP the audio thread is
+            // processing, so prepare() here would free the oversampler, the
+            // scratch vectors and the Tape convolution out from under it.
+            // Stage the oversampler; the coef refresh below covers the rest.
+            if (osChanged) stageOversampler (mOsLog2);
+            updateFilters();
+            tapeUpdateFilters();
+            loadCassetteIR (mTapeCassetteIdx);
             reset();
         }
         return;
@@ -799,14 +865,16 @@ void SaturationDSP::setStateInformation (const void* data, int sz)
     tapeSnapSmoothedToTargets();
     if (mSampleRate > 0.0)
     {
+        // The preset menu hands this call the LIVE DSP the audio thread is
+        // processing, so prepare() here would free the oversampler, the scratch
+        // vectors and the Tape convolution out from under it.  Stage the
+        // oversampler at the restored factor; the coef refresh below covers the
+        // rest, and loadImpulseResponse is JUCE's own any-thread load path.
         if (osChanged)
-            prepare (mSampleRate, mMaxBlock);   // reallocate oversampler at restored factor
-        else
-        {
-            updateFilters();
-            tapeUpdateFilters();
-            loadCassetteIR (mTapeCassetteIdx);
-        }
+            stageOversampler (mOsLog2);
+        updateFilters();
+        tapeUpdateFilters();
+        loadCassetteIR (mTapeCassetteIdx);
         reset();
     }
 }
@@ -1042,12 +1110,6 @@ void SaturationDSP::setTapeInputGain (float linGain)
     if (n != mTapeInputGain) { mTapeInputGain = n; mTapeInGainSmooth.setTargetValue (n); }
 }
 
-void SaturationDSP::setTapeOutputGain (float linGain)
-{
-    const float n = juce::jmax (0.0f, linGain);
-    if (n != mTapeOutputGain) { mTapeOutputGain = n; mTapeOutGainSmooth.setTargetValue (n); }
-}
-
 void SaturationDSP::setTapeHiss (float h)
 {
     const float n = juce::jlimit (0.0f, 1.0f, h);
@@ -1176,7 +1238,8 @@ void SaturationDSP::processTape (juce::AudioBuffer<float>& buffer)
 
     const int numCh   = std::min (buffer.getNumChannels(), 2);
     const int numChOS = 2;
-    const int kOsNow  = 1 << juce::jlimit (1, 4, mOsLog2);
+    // Factor the LIVE oversampler was built with, not the user-intent mOsLog2.
+    const int kOsNow  = 1 << juce::jlimit (1, 4, mOsLog2Active);
     const int wowSize = (int) mTapeWowBufL.size();
 
     const float sr        = (float) mSampleRate;

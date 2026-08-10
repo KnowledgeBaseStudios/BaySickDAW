@@ -1,6 +1,7 @@
 #include "PagePresetIO.h"
 #include "../AppPaths.h"
 #include "../PluginProcessor.h"
+#include "../SampleLibrary.h"
 #include "../VibeGraph.h"
 #include "EnginePrefixUtil.h"
 
@@ -64,21 +65,45 @@ namespace PagePresetIO
         return false;
     }
 
+    // `recorded` is what separates "this preset never had a kit" from "this
+    // preset's kit is gone": the sfizz engines omit the <KitPath> child
+    // entirely when no kit is loaded, so an unresolvable path and an absent
+    // one both arrive as an empty juce::File and cannot be told apart from it.
+    struct SavedKitRef
+    {
+        bool         recorded { false };
+        juce::String storedRef;
+        juce::File   resolved;
+    };
+
     // Pull <KitPath path="..."/> out of the engine's getStateInformation blob
     // without applying it.  Sfizz engines write
     //   <RootTag><APVTS .../><KitPath path="..."/></RootTag>
     // so we just look for the KitPath child by name.
-    static juce::File extractKitPath (const juce::MemoryBlock& engineMb,
-                                       const juce::String& rootTag)
+    //
+    // The stored string is whatever SampleLibrary::refForPersist produced -
+    // a "library:<rel>" stable reference for shipped content, an absolute
+    // path otherwise - so it has to come back through resolvePersistedRef.
+    // Reading it as a raw juce::File turns every stable ref into a bogus
+    // relative file that fails existsAsFile().
+    static SavedKitRef extractKitPath (const juce::MemoryBlock& engineMb,
+                                        const juce::String& rootTag)
     {
-        if (rootTag.isEmpty()) return {};
+        SavedKitRef out;
+        if (rootTag.isEmpty()) return out;
         auto xml = juce::AudioProcessor::getXmlFromBinary (engineMb.getData(),
                                                             (int) engineMb.getSize());
         if (xml == nullptr || ! xml->hasTagName (rootTag))
-            return {};
+            return out;
         if (auto* k = xml->getChildByName ("KitPath"))
-            return juce::File (k->getStringAttribute ("path"));
-        return {};
+        {
+            out.storedRef = k->getStringAttribute ("path");
+            // A blank attribute is nothing to go on, so it counts as "not
+            // recorded" -- that keeps every message below naming a real path.
+            out.recorded  = out.storedRef.isNotEmpty();
+            out.resolved  = SampleLibrary::resolvePersistedRef (out.storedRef);
+        }
+        return out;
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -99,17 +124,37 @@ namespace PagePresetIO
     }
 
     // Returns false when the slot is sfizz-backed (kitLoadCallback present)
-    // and the kit referenced in the saved state isn't installed on disk -
-    // the caller surfaces an alert and aborts the rest of the import.  Other
-    // engine types and missing-data cases return true (silently skipped).
+    // and the saved state records no kit at all, or records one that is
+    // missing from disk or fails to load - the alert is shown here and the
+    // caller aborts the rest of the import.  Other engine types and
+    // missing-data cases return true (silently skipped).
     static bool applyEngineSlotFromXml (const juce::XmlElement& engineEl,
                                          const EngineSlot& slot)
     {
         if (slot.engine == nullptr) return true;
+
+        // ABSENT data stays silently skipped (the documented back-compat
+        // tolerance: an older preset simply lacks this engine's state).
+        // PRESENT-but-unreadable data is a different thing and now fails
+        // loudly -- it used to report success while applying nothing, so a
+        // damaged preset looked like it loaded.  The magic-number check is
+        // what actually catches corruption: in-attribute damage usually still
+        // base64-decodes, and setStateInformation would then no-op silently.
+        const auto rawData = engineEl.getStringAttribute ("data");
+        if (rawData.isEmpty()) return true;
+
         juce::MemoryBlock mb;
-        if (! mb.fromBase64Encoding (engineEl.getStringAttribute ("data")))
-            return true;
-        if (mb.getSize() == 0) return true;
+        const bool decoded = mb.fromBase64Encoding (rawData) && mb.getSize() > 0;
+        if (! decoded
+            || juce::AudioProcessor::getXmlFromBinary (mb.getData(), (int) mb.getSize()) == nullptr)
+        {
+            juce::AlertWindow::showMessageBoxAsync (
+                juce::MessageBoxIconType::WarningIcon,
+                "Load Page Preset",
+                "This preset's engine settings are damaged and could not be "
+                "applied.", "OK");
+            return false;
+        }
 
         const juce::String savedPrefix = engineEl.getStringAttribute ("prefix");
         if (savedPrefix.isNotEmpty() && slot.enginePrefix.isNotEmpty()
@@ -126,13 +171,26 @@ namespace PagePresetIO
             // WITHOUT the wrapper's active-flag guard - that's a crash path
             // because sfizz's internal hash maps get mutated while the
             // audio thread might be rendering.
-            const auto kitPath = extractKitPath (mb, slot.engineRootTag);
+            const auto savedKit = extractKitPath (mb, slot.engineRootTag);
+            if (! savedKit.recorded)
+            {
+                juce::AlertWindow::showMessageBoxAsync (
+                    juce::MessageBoxIconType::WarningIcon,
+                    "Load Page Preset",
+                    "This preset was saved with no kit loaded, so it has no "
+                    "sound to restore.\n\nPick a kit for this tab, or choose a "
+                    "different preset.",
+                    "OK");
+                return false;
+            }
+
+            const auto kitPath = savedKit.resolved;
             if (! kitPath.existsAsFile())
             {
                 juce::AlertWindow::showMessageBoxAsync (
                     juce::MessageBoxIconType::WarningIcon,
                     "Load Page Preset",
-                    "The saved kit path is missing from this machine:\n"
+                    "The saved kit is missing from this machine:\n"
                     + kitPath.getFullPathName()
                     + "\n\nInstall the kit, or pick a different preset.",
                     "OK");
@@ -140,7 +198,16 @@ namespace PagePresetIO
             }
 
             if (! slot.kitLoadCallback (kitPath))
+            {
+                juce::AlertWindow::showMessageBoxAsync (
+                    juce::MessageBoxIconType::WarningIcon,
+                    "Load Page Preset",
+                    "The kit could not be loaded:\n"
+                    + kitPath.getFullPathName()
+                    + "\n\nThe file may be damaged.",
+                    "OK");
                 return false;
+            }
 
             if (slot.engineApvts != nullptr)
             {
@@ -299,6 +366,22 @@ namespace PagePresetIO
                         newChId = kClipsBus;
                     else if (chId == kPluginsBus2 && isChannelActive && ! isChannelActive (chId))
                         newChId = kPluginsBus;
+                    // A drum strip's MAIN out is bank-bound: the mixer refuses
+                    // to route a kit-1 strip into Drums Bus 2 or the reverse
+                    // (MixerPage::isRouteAllowed), because that would run one
+                    // kit's audio through the other kit's inserts.  A preset
+                    // carries the bus id of the bank it was saved on, so the
+                    // destination page's own bank decides here.  Aux sends
+                    // target aux strips and are bank-agnostic, hence the
+                    // "_sendTo" test rather than paramIdIsSendDestination.
+                    else if ((chId == kDrumsBus || chId == kDrumsBus2)
+                             && id.endsWith ("_sendTo")
+                             && destPrefix.startsWith ("mixer_drum_"))
+                    {
+                        newChId = drumBusForPage (
+                            destPrefix.substring (juce::String ("mixer_drum_").length())
+                                      .getIntValue());
+                    }
 
                     if (newChId != chId)
                         natural = (float) newChId;
@@ -447,7 +530,15 @@ namespace PagePresetIO
         if (xml.isEmpty()) return false;
 
         auto parsed = juce::XmlDocument::parse (xml);
-        if (parsed == nullptr) return false;
+        if (parsed == nullptr)
+        {
+            juce::AlertWindow::showMessageBoxAsync (
+                juce::MessageBoxIconType::WarningIcon,
+                "Load Page Preset",
+                "That preset file could not be read.",
+                "OK");
+            return false;
+        }
 
         // 2026-05-05 backward-compat: accept three preset formats.
         //   1. v2 (consolidated)         - root <BaySickPagePreset version=2>
@@ -465,7 +556,15 @@ namespace PagePresetIO
         const bool isK7AriaRoot   = rootTag == "RustyDrumsPagePreset"
                                        || rootTag == "GuitarsPagePreset"
                                        || rootTag == "BassesPagePreset";
-        if (! isModernRoot && ! isK7AriaRoot) return false;
+        if (! isModernRoot && ! isK7AriaRoot)
+        {
+            juce::AlertWindow::showMessageBoxAsync (
+                juce::MessageBoxIconType::WarningIcon,
+                "Load Page Preset",
+                "That preset file could not be read.",
+                "OK");
+            return false;
+        }
 
         // Helper: when no <Engines> wrapper exists, wrap a top-level <Engine>
         // child into a synthetic <Engines> so the v2 apply path can iterate it.
@@ -718,13 +817,28 @@ namespace PagePresetIO
         if (xml.isEmpty()) return {};
 
         auto parsed = juce::XmlDocument::parse (xml);
-        if (parsed == nullptr) return {};
+        if (parsed == nullptr)
+        {
+            juce::AlertWindow::showMessageBoxAsync (
+                juce::MessageBoxIconType::WarningIcon,
+                "Load Page Preset",
+                "That preset file could not be read.",
+                "OK");
+            return {};
+        }
         const auto rootTag = parsed->getTagName();
         if (rootTag != "BaySickPagePreset"
             && rootTag != "RustyDrumsPagePreset"
             && rootTag != "GuitarsPagePreset"
             && rootTag != "BassesPagePreset")
+        {
+            juce::AlertWindow::showMessageBoxAsync (
+                juce::MessageBoxIconType::WarningIcon,
+                "Load Page Preset",
+                "That preset file could not be read.",
+                "OK");
             return {};
+        }
 
         // Map root-tag → engine type when the saved file is K-7 era and has
         // no inline `engineType` attribute.  v1 PagePresetIO + v2 saves carry

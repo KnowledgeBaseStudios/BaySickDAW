@@ -1,28 +1,12 @@
 #pragma once
 #include "UndoActions.h"
 #include <JuceHeader.h>
+#include <deque>
 #include "../PluginProcessor.h"
 #include "../PatternManager.h"
 #include "../DSP/LoudnessSpec.h"
 #include "SharedUI.h"
 #include "StandaloneApp.h"
-
-// ── PatternRowButton ──────────────────────────────────────────────────────────
-// TextButton that also fires onRightClick for right-click context menus.
-class PatternRowButton : public juce::TextButton
-{
-public:
-    using juce::TextButton::TextButton;
-    std::function<void()> onRightClick;
-
-    void mouseDown(const juce::MouseEvent& e) override
-    {
-        if (e.mods.isRightButtonDown())
-            { if (onRightClick) onRightClick(); }
-        else
-            TextButton::mouseDown(e);
-    }
-};
 
 // ── BrowserItem ───────────────────────────────────────────────────────────────
 // A single draggable box in the Browser panel. Used for all three tabs
@@ -186,7 +170,7 @@ private:
 class AudioGroupItem : public juce::TreeViewItem
 {
 public:
-    AudioGroupItem (const juce::String& name, juce::Colour accent, bool isAuto);
+    AudioGroupItem (const juce::String& name, juce::Colour accent);
 
     bool          mightContainSubItems () override               { return true; }
     int           getItemHeight        () const override         { return 24; }
@@ -195,15 +179,11 @@ public:
     void          paintItem            (juce::Graphics&, int, int) override;
     void          itemClicked          (const juce::MouseEvent&) override;
 
-    bool isAutoGroup() const noexcept   { return mIsAuto; }
-    const juce::String& getGroupName() const noexcept { return mName; }
-
     std::function<void(juce::Point<int>)> onContextMenu;
 
 private:
     juce::String mName;
     juce::Colour mAccent;
-    bool         mIsAuto { false };
 };
 
 // ── BrowserPanel ──────────────────────────────────────────────────────────────
@@ -235,8 +215,6 @@ public:
     // drag the (chevron-marked) grip back out to reopen.  The 28px click-strip
     // and its onExpandRequest are gone.
 
-    int  getSelectedPatternIndex() const { return mSelectedPat; }
-
     // Public alias for switchTab - used by BuilderPage::setBrowserTab + ribbon dropdown.
     void selectTab(int t) { switchTab(t); }
 
@@ -248,8 +226,11 @@ public:
     std::function<void(int tab, int refIdx)>  onDropTypeChanged;
     std::function<void(int)>                  onRenderPattern;   // right-click → Render to WAV
     std::function<void(int)>                  onSplitPattern;    // right-click → Split by Player Engine (QA-G)
-    std::function<void(const juce::String&)>  onImportAudio;     // File → Import Audio (path)
     std::function<void()>                     onArrangementChanged; // delete-block triggers → rebuild
+    // LIFETIME: a deleted library entry's baked waveform image + AudioThumbnail
+    // would otherwise sit in the grid's caches for the rest of the session.
+    // Wired by BuilderPage to ArrangementGrid::purgeWaveformCacheFor.
+    std::function<void(const juce::String& path)> onPurgeWaveformCache;
     // QA-E Task 5 (2026-05-15): fires when the user deletes the LAST library
     // entry owned by a page (Clips / Vox / Inst).  StandaloneEditor walks
     // mPages to find the owning page by channelId and closes its ribbon tab.
@@ -332,12 +313,20 @@ public:
     // these across.
     std::function<PatternListSnapshot()>            onCapturePatternSlice;
     std::function<void(const PatternListSnapshot&)> onApplyPatternSlice;
+    // Deleting a pattern also destroys its linked TS markers, which the slice
+    // does not carry, so that gesture borrows the grid's marker-aware wrapper
+    // instead.  BuilderPage wires this to ArrangementGrid::performPatternTsOp.
+    std::function<void(const juce::String& label, const std::function<void()>& op)>
+        onPerformPatternTsOp;
 
 private:
     // Wrap one browser gesture as one undo transaction (capture before, run
     // the op, capture after, perform).  Falls back to bare op() when the
     // context or slice hooks are unwired.
     void performPatternSliceOp (const juce::String& label, const std::function<void()>& op);
+    // Slice + linked markers in ONE transaction.  Falls back to the slice-only
+    // wrapper when the hook is unwired.
+    void performPatternTsOp (const juce::String& label, const std::function<void()>& op);
     void performLibraryOp      (const juce::String& label, bool withBlocks,
                                 const std::function<void()>& op);
     void performTemplateOp     (const juce::String& label, bool withBlocks,
@@ -408,7 +397,6 @@ public:
     // family), and shuffling them would destroy that.  Only the leaves move.
     enum class ItemSort { NewestFirst, OldestFirst, Alphabetical };
     void setItemSort (ItemSort s);
-    ItemSort getItemSort() const noexcept { return mItemSort; }
 private:
     ItemSort mItemSort { ItemSort::NewestFirst };
     // Orders a leaf list in place by the current mode.  ONE implementation, so
@@ -613,11 +601,6 @@ public:
         else if (refIdx >= 0)                      mBrowserSelection = refIdx;
     }
 
-    // Ghost clip for Source Picker drag preview
-    void setGhostClip(const juce::OptionalScopedPointer<ArrangementBlock>* ghost);
-    void clearGhostClip();
-    void placeGhostClip();
-
     // ── Selection ─────────────────────────────────────────────────────────────
     void selectAll     ();
     void clearSelection();
@@ -678,9 +661,16 @@ public:
     void performPatternSliceOp (const juce::String& label, const std::function<void()>& op);
     // Wrap one marker/TS/tempo gesture as one MarkerSetAction transaction.
     void performMarkerSetOp (const juce::String& label, const std::function<void()>& op);
-    // Wrap a pattern-TS gesture (setPatternTimeSig / resetPatternTimeSig):
-    // writes pattern fields AND marker lists, so a MarkerSetAction rides the
-    // slice action inside ONE transaction.
+    // The marker/TS/tempo snapshot pair, shared by every path that banks a
+    // MarkerSetAction (the marker wrapper, the pattern+TS wrapper, and
+    // Split by Player Engine, whose removePattern destroys the original
+    // pattern's linked markers).
+    MarkerSetSnapshot captureMarkerSet() const;
+    void              applyMarkerSet (const MarkerSetSnapshot& s);
+    // Wrap a gesture that writes pattern state AND marker lists - the pattern
+    // TS setters, and the pattern-list edits that re-point every linked
+    // marker's pattern index (insert / move / remove).  A MarkerSetAction
+    // rides the slice action inside ONE transaction.
     void performPatternTsOp (const juce::String& label, const std::function<void()>& op);
     // For rider actions appended into the transaction commitEdit just opened
     // (perform WITHOUT beginNewTransaction = same ActionSet, one Ctrl+Z).
@@ -696,7 +686,6 @@ public:
     std::function<void(AGTool)>      onToolChanged;
     std::function<void()>            onUndoRedoStateChanged;
     std::function<void(double beat)> onSeek;               // ruler bare-click → seek playhead
-    std::function<void()>                              onImportAudioRequested;  // File → Import Audio
     std::function<void()>                              onRowHeightChanged;      // Alt+scroll → notify TrackHeaderPanel
     std::function<void(int)>                           onOpenEventEditor;       // double-click or ctx-menu on Automation clip → open EventEditor
     // 2026-04-28 (G-2): signature extended to also pass the imported audio
@@ -751,17 +740,15 @@ public:
     // as an absolute path (pre-P4 behavior).
     std::function<juce::File(const juce::String& stored)> onResolveStoredPath;
 
-    // QA-Ea Task 0c (FL pre-roll record + non-destructive clip trim): three
+    // QA-Ea Task 0c (FL pre-roll record + non-destructive clip trim): two
     // callbacks supporting the slip-edit drag.  Wired by BuilderPage to
     // the transport / processor:
     //   onGetBPM               -> transport's getBPM()
     //   onGetSampleRate        -> processor's getSampleRate()
-    //   onRequestRebuildPlayers-> processor's rebuildAudioClipPlayers()
     // (The slip-edit mode read used to be a callback to the editor's
     // mSlipEditMode flag; replaced 2026-05-20 with internal mEditMode.)
     std::function<double()> onGetBPM;
     std::function<double()> onGetSampleRate;
-    std::function<void()>   onRequestRebuildPlayers;
     // QA-Ee Stage 2 (Builder snap): the grid reads the unified snap-division
     // index (0..10) LIVE from the Unified_BuilderSnapDiv APVTS param via this
     // getter (used by snapBar/snapBarAlt + drawGrid) and writes it via the setter
@@ -805,6 +792,9 @@ public:
     // so on-grid blocks show "Channel - Effect - Param" (or the user's rename)
     // instead of the raw paramId. Null = fall back to paramId.
     std::function<juce::String(const AutomationLane&)> onResolveDisplayName;
+    // Resolves a lane's paramId to the 0..1 value "Reset to Default" restores a
+    // control point to (StandaloneEditor::automationResetValue).  Null = 0.5.
+    std::function<float(const juce::String& paramId)> onResolveResetValue;
 
     // ── Row names (shared with TrackHeaderPanel) ──────────────────────────────
     // QA-G: row names live in PatternManager (project data, serialized in
@@ -878,13 +868,34 @@ public:
     int   rowHeightPx(int row) const;   // rowToY(row+1) - rowToY(row)
     int   totalVisibleBars() const;
 
+    // LIFETIME: drops one file's baked waveform image AND its AudioThumbnail.
+    // Message thread ONLY.  No getOrCreateThumbnail result may be live on the
+    // stack when this runs: ArrangementGrid::drawAudioClip holds the raw
+    // AudioThumbnail* for the duration of the draw, and the slip-edit drag
+    // read in mouseDrag holds it across its clamp math, so erasing under
+    // either would dangle it.  Callers are the library-delete cascades, which
+    // run from menu callbacks.
+    void purgeWaveformCacheFor (const juce::String& path);
+
 private:
     PatternManager&            mPM;
     juce::AudioFormatManager&  mAFM;
     juce::AudioThumbnailCache& mThumbCache;
 
     // Thumbnail cache: filePath → AudioThumbnail (mutable so const draw methods can populate)
+    // LIFETIME: same ceiling reasoning as mWaveformImages below -- the grid is
+    // a default tab that lives the whole session, and nothing evicts on clip
+    // delete, arrangement clear or project switch, so without a ceiling every
+    // file ever scrolled into view (including takes from projects closed hours
+    // ago) holds its level array until the process exits.  Evicted through the
+    // same helper as the image cache so the two cannot drift apart.
+    // MAGIC NUMBER: 256 entries.  A 3-minute 48k stereo file costs ~66 KB of
+    // min/max levels at the grid's 512 samples-per-thumb-sample, so this is a
+    // ~17 MB ceiling -- parity with the image cache, and far above any visible
+    // working set (drawBlocks culls to the on-screen rect).
+    static constexpr size_t kMaxThumbnails = 256;
     mutable std::map<juce::String, std::unique_ptr<juce::AudioThumbnail>> mThumbnails;
+    mutable std::deque<juce::String> mThumbnailOrder;
 
     // QA-Ea Task 0c (Rule 5 -- buttery-smooth slip-edit drag): cached
     // off-screen Image per file path.  Bakes the FULL file waveform once
@@ -903,6 +914,15 @@ private:
         bool        wasFullyLoadedWhenBaked { false };
     };
     mutable std::map<juce::String, WaveformImageCacheEntry> mWaveformImages;
+    // LIFETIME: the grid is a default tab that lives for the whole session, so
+    // the bake cache needs its own ceiling -- without one every file ever drawn
+    // (including deleted takes) holds its image until the process exits.  The
+    // deque is insertion order; the oldest entries are dropped once the map
+    // passes kMaxWaveformImages.  A dropped path simply re-bakes when it next
+    // scrolls into view.
+    // MAGIC NUMBER: 32 entries x 2048x64 ARGB = a 16 MB ceiling.
+    static constexpr size_t kMaxWaveformImages = 32;
+    mutable std::deque<juce::String> mWaveformImageOrder;
     const juce::Image* getOrBakeWaveformImage (const juce::String& path,
                                                 juce::AudioThumbnail* thumb) const;
 
@@ -942,9 +962,6 @@ private:
 
     // ── File drag ghost ────────────────────────────────────────────────────────
     bool         mFileDragActive { false };
-    juce::String mFileDragPath   {};
-    int          mFileDragX      { 0 };
-    int          mFileDragY      { 0 };
 
     // ── Interaction state ─────────────────────────────────────────────────────
     // Draw / resize
@@ -992,7 +1009,6 @@ private:
     bool          mSlipEditing             { false };
     int           mSlipEditIdx             { -1 };
     SlipEdge      mSlipEditEdge            { SlipEdge::Left };
-    int           mSlipEditDragOrigX       { 0 };
     juce::int64   mSlipEditOrigContent     { 0 };
     float         mSlipEditOrigLengthBeats { -1.f };
     // QA-Ea Task 0c (2026-05-20 - Option A): origin start in beats (sub-bar
@@ -1025,7 +1041,6 @@ private:
 
     // ── Inline automation curve handle drag ───────────────────────────────────
     int   mAutomCurveHandleDrag { -1 };  // original index in lane->points of left point, -1=none
-    float mAutomCurveHandleOrigTension { 0.f };
 
     // Marquee
     bool                 mMarqueeActive { false };
@@ -1049,6 +1064,12 @@ private:
     std::vector<char>                  mPendingRowMuted;
     std::vector<char>                  mPendingRowSoloed;
     juce::String                       mPendingLabel;
+    // Marker/TS/tempo state as of beginEdit.  commitEdit calls
+    // cleanupLinkedMarkers, which PERMANENTLY erases orphaned linked TS
+    // markers, and the ArrangementEditAction payload carries no markers -- so
+    // the before-side has to be banked here or an edit that orphans a marker
+    // destroys it with no way back.
+    MarkerSetSnapshot                  mPendingMarkers;
 
     // ── Clipboard ─────────────────────────────────────────────────────────────
     std::vector<ArrangementBlock> mClipboard;
@@ -1057,7 +1078,6 @@ private:
     int          mAutomEditBlock { -1 };   // block index being edited
     int          mAutomDragPoint { -1 };   // point index being dragged (-1 = none)
     bool         mAutomDragging  { false };
-    ControlPoint mAutomDragOrig  {};       // state before drag (for commitEdit)
 
     // ── Time selection (Ctrl+drag on ruler) ────────────────────────────────
     float mTimeSelStart    { -1.f };   // start bar (-1 = no selection)
@@ -1281,8 +1301,8 @@ public:
     bool keyPressed        (const juce::KeyPress&, juce::Component*) override;
 
     // ── QA-Export: offline render ────────────────────────────────────────────
-    // One harness, two entries.  renderPatternToWav keeps its old behaviour by
-    // expressing itself over renderToFile with Scope::Pattern.
+    // One harness: every entry point (song, section, pattern, per-track) fills
+    // a RenderOptions and expresses itself over renderToFile.
     struct RenderOptions
     {
         enum class Format { Wav, Ogg, Mp3 };
@@ -1466,6 +1486,12 @@ public:
     // thread).
     std::function<void(bool active)> onOfflineRenderActive;
 
+    // The two pattern entries in the Clips menu run editor-level dialogs that
+    // the page has no other route to - the same bodies the F2 / F3 commands
+    // invoke.  The grid carries no local handlers for either key.
+    std::function<void()> onRenamePatternRequest;
+    std::function<void()> onFindNextEmptyPatternRequest;
+
     // QA-ModelShell TS2: offline lane replay (render thread; called per block
     // by the offline loop).  Covers the lane classes the in-processBlock
     // replay cannot: engine-APVTS lanes via the rig, rack lanes via
@@ -1529,7 +1555,6 @@ public:
     // progress window with a working Cancel.
     void runExportWithProgress (const RenderOptions& opts);
 
-    void renderPatternToWav(int patternIndex);
     // TS7 §7.1: consolidate one arrangement row to a single WAV (audio rows only).
     void renderTrackRowToWav (int row);
 
@@ -1560,15 +1585,10 @@ public:
 
     // Called from toolbar ≡ menu / keyboard shortcuts
     void doImportAudio();
-    void doNew();
-    void doSave();
-    void doOpen();
-    void doExport();
     void doFindNextEmptyPattern();
     void doRenamePattern();
     void doPerformanceModeToggle();
     void doZoom(float factor);
-    void doNavigatePage(int pageIndex);  // 0=Layers, 1=Bass, 2=Drums, 3=Builder
     void doNewAutomationClip();
 
     // Grid accessor (used by StandaloneEditor to wire EventEditor callback)

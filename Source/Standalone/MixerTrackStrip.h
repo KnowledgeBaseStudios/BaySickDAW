@@ -147,8 +147,6 @@ public:
     void setSoloed  (bool soloed,bool notify = false);
 
     // ── State queries ─────────────────────────────────────────────────────────
-    float getFaderDb() const;
-    float getPan()     const { return (float)mPanKnob.getValue(); }
     bool  isMuted()    const { return mMuteBtn.getToggleState(); }
     bool  isSoloed()   const { return mSoloBtn.getToggleState(); }
     juce::String getName() const { return mNameLabel.getText(); }
@@ -191,6 +189,22 @@ public:
     void setNoLiveInput (bool b);
     bool isNoLiveInput() const noexcept { return mNoLiveInput; }
 
+    // Display-only marker for a sfizz Inst strip whose saved kit was
+    // substituted at restore.  Renders as an error-red NAME COLOR + a tooltip
+    // line -- NEVER as label text: getName() is mNameLabel.getText(), which is
+    // what <InstNames> persists AND what the in-place rename editor commits,
+    // and the 74 px name slot tail-ellipsizes any suffix anyway.
+    void setKitMissing (bool b)
+    {
+        if (b == mKitMissing) return;
+        mKitMissing = b;
+        // 0xffff5555 is the app's missing-file red (BaySickNAMIREditor kErrARGB).
+        mNameLabel.setColour (juce::Label::textColourId,
+                              mKitMissing ? juce::Colour (0xffff5555) : VC::Text);
+        refreshNameTooltip();
+        repaint();
+    }
+
     // Unique APVTS prefix for this strip (e.g. "mixer_layer_0", "mixer_master").
     // Stable across renames, used by the Effects Page dropdown mapping.
     const juce::String& getAutomationPrefix() const { return mAutomationPrefix; }
@@ -208,7 +222,7 @@ public:
     std::function<void(bool)>      onSoloChanged;
     std::function<void(float pan)>           onPanChanged;   // pan in -1..+1
     std::function<void(const juce::String&)> onFXClicked;    // route to Effects page, passes channel id
-    std::function<void(const juce::String&)> onNameChanged;  // fired when label edited (Layer/Bass only)
+    std::function<void(const juce::String&)> onNameChanged;  // fired when the label is edited, on every renameable strip type
 
     // ── Drag start/end for undo gesture capture ───────────────────────────────
     std::function<void()> onFaderDragStarted;
@@ -285,6 +299,7 @@ private:
     juce::Colour mAccent;
     int          mChannelId { -1 };  // MixerChannelIds value - set by MixerPage
     bool         mNoLiveInput { false }; // K-2: suppress arm/listen for sfizz-source Inst strips
+    bool         mKitMissing  { false };
     juce::Point<int> mSocketCentre;   // cable socket centre in local coords
     juce::String mAutomationPrefix;   // e.g. "mixer_layer_0"; source of truth for FX routing
 
@@ -297,7 +312,8 @@ private:
     // 2026-04-19: VibeSlider swallows right-click so right-click jogs the knob
     // neither in value nor in rotary angle. Left-click drag works as before.
     VibeSlider       mPanKnob;    // Rotary, -1..+1
-    SnapSlider       mFader;      // LinearVertical, -60..+6 dB
+    SnapSlider       mFader;      // LinearVertical, -60..+5.6 dB (matches the
+                                  // _level param range AND the drawn dB marks)
     juce::Label      mDbLabel;
 
     // 5F-4b B5: "+" add-send button
@@ -318,8 +334,9 @@ private:
     // Vox / Inst strips only.
     HeadphonesLedButton mListenBtn;
 
-    // FX Bypass LED (blue). Insert strips only. Syncs with EffectRack.setRackBypassed
-    // via the APVTS `_bypass` param (see InsertNode::processBlock in VibeGraph.cpp).
+    // FX Bypass LED (blue). Every strip type (each owns a rack). Syncs with
+    // EffectRack.setRackBypassed via the APVTS `_bypass` param (see
+    // InsertNode::processBlock in VibeGraph.cpp).
     MixerLedButton   mBypassBtn;
 
     // Master FX Bypass LED (purple). Master strip ONLY. Global kill-all:
@@ -361,13 +378,20 @@ private:
     void updateDbLabel();
 
     // QA-RustyMeter Task 5 (2026-05-30): hover tooltip = the full (possibly
-    // truncated) name, plus a "Double-click to rename" line where editable.
-    // Refreshed on construct / rename / setTrackName.  All strip types.
+    // truncated) name, plus the substituted-kit line and a "Double-click to
+    // rename" line where each applies.  Refreshed on construct / rename /
+    // setTrackName.  All strip types.  The kit line is RE-DERIVED here rather
+    // than written once by setKitMissing because project restore runs
+    // restoreStripNames -> setTrackName AFTER the tab loop that sets the flag;
+    // a directly-set tooltip would be wiped by that later pass.
     void refreshNameTooltip()
     {
-        const juce::String nm = mNameLabel.getText();
-        mNameLabel.setTooltip (mNameLabel.isEditableOnDoubleClick()
-                               ? nm + "\nDouble-click to rename" : nm);
+        juce::String tip = mNameLabel.getText();
+        if (mKitMissing)
+            tip += "\nSaved kit is missing - playing the default kit instead";
+        if (mNameLabel.isEditableOnDoubleClick())
+            tip += "\nDouble-click to rename";
+        mNameLabel.setTooltip (tip);
     }
 
     // Visibility helpers - driven by mType

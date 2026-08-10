@@ -50,11 +50,19 @@ void TransientShaperDSP::snapSmoothedToTargets()
 
 // -- DSPBase interface --------------------------------------------------------
 
+// prepare() frees and rebuilds the oversampler, so it is legal ONLY when the
+// audio thread cannot be inside process() -- i.e. from EffectRack::prepare,
+// which holds mSlotsLock, or before the DSP is published.  Every other
+// message-thread entry point must go through stageOversampler() instead.
 void TransientShaperDSP::prepare (double sampleRate, int maxBlockSize)
 {
     mSampleRate = sampleRate;
     mMaxBlock   = maxBlockSize;
     recalcEnvelopeCoefs();
+
+    // Drop any staged-but-unadopted oversampler: this rebuild supersedes it.
+    mOsSwapPending.store (false, std::memory_order_release);
+    mOsPending.reset();
 
     // 11b: Linkwitz-Riley 4th-order crossover prep.
     juce::dsp::ProcessSpec spec { sampleRate, (juce::uint32) maxBlockSize, 2 };
@@ -73,7 +81,8 @@ void TransientShaperDSP::prepare (double sampleRate, int maxBlockSize)
         true /* maxQuality */);
     mOversampler->initProcessing ((size_t) maxBlockSize);
     mOversampler->reset();
-    mLatencySamples = (int) std::ceil (mOversampler->getLatencyInSamples());
+    mLatencySamples.store ((int) std::ceil (mOversampler->getLatencyInSamples()),
+                           std::memory_order_relaxed);
 
     // Scratch
     mBandBuf.setSize (2, maxBlockSize, false, true, true);
@@ -182,14 +191,47 @@ void TransientShaperDSP::setGain (float dB)
     }
 }
 
+void TransientShaperDSP::stageOversampler (int factorLog2)
+{
+    // MESSAGE THREAD ONLY.  Builds the replacement oversampler off to the side
+    // and publishes it with one release-store; never touches mOversampler,
+    // which the audio thread owns.
+    const int n = juce::jlimit (1, 4, factorLog2);
+
+    auto os = std::make_unique<juce::dsp::Oversampling<float>> (
+        2 /* numChannels */,
+        n,
+        juce::dsp::Oversampling<float>::filterHalfBandPolyphaseIIR,
+        true /* maxQuality */);
+    os->initProcessing ((size_t) mMaxBlock);
+    os->reset();
+
+    mOsPendLatency = (int) std::ceil (os->getLatencyInSamples());
+    // Assigning here also destructs the PREVIOUSLY retired oversampler -- on
+    // this thread, which is the point of the pattern.
+    mOsPending = std::move (os);
+    mOsSwapPending.store (true, std::memory_order_release);
+}
+
+void TransientShaperDSP::drainOversamplerSwap() noexcept
+{
+    // AUDIO THREAD.  Adopts the oversampler and its latency together.
+    if (! mOsSwapPending.load (std::memory_order_acquire)) return;
+    std::swap (mOversampler, mOsPending);
+    mLatencySamples.store (mOsPendLatency, std::memory_order_relaxed);
+    mOsSwapPending.store (false, std::memory_order_release);
+}
+
 void TransientShaperDSP::setOsLog2 (int factorLog2)
 {
     // C1
     const int n = juce::jlimit (1, 4, factorLog2);
     if (n == mOsLog2) return;
     mOsLog2 = n;
+    // Stage rather than prepare(): this runs from the UI thread while the audio
+    // thread may be inside processSamplesUp/Down on the current oversampler.
     if (mSampleRate > 0.0)
-        prepare (mSampleRate, mMaxBlock);
+        stageOversampler (n);
 }
 
 void TransientShaperDSP::setStereoDetect (bool on)
@@ -226,6 +268,10 @@ void TransientShaperDSP::setSlowAttMs (float ms)
 
 void TransientShaperDSP::process (juce::AudioBuffer<float>& buffer)
 {
+    // Ahead of the bypass early-out: a staged oversampler must be adopted even
+    // on a block this effect otherwise does nothing with.
+    drainOversamplerSwap();
+
     if (bypassed) return;
 
     juce::ScopedNoDenormals noDenormals;   // A1
@@ -481,7 +527,10 @@ void TransientShaperDSP::setStateInformation (const void* data, int sz)
     snapSmoothedToTargets();
     if (mSampleRate > 0.0)
     {
-        if (osChanged) prepare (mSampleRate, mMaxBlock);
+        // The preset menu hands this call the LIVE DSP the audio thread is
+        // processing, so prepare() here would free the oversampler out from
+        // under it -- stage the replacement instead.
+        if (osChanged) stageOversampler (mOsLog2);
         mLR_LP.setCutoffFrequency (mSplitFreq);
         mLR_HP.setCutoffFrequency (mSplitFreq);
         reset();

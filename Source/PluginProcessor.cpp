@@ -3,6 +3,7 @@
 #include "TsMapRead.h"      // QA-G Task 6: stepped time-signature timeline (PatternManager publishes)
 #include "G3PlayheadDiag.h" // [G3 BAR1] smoke General-1 dropout reading (Debug-only)
 #include "MissingFileReport.h" // QA-Export Task 5: missing external-file collector
+#include "ProjectFileResolver.h"
 #include "SampleLibrary.h"  // QA-ProjectSave Task 4: stable-root reference resolver
 #include "EngineRig.h"      // QA-ModelShell TS1: model-side engine owner
 #include "Hosting/PluginManager.h"   // QA-ModelShell TS6: hosted-plugin scan + added list
@@ -46,6 +47,127 @@ static inline double clipFilePosForBeat (double beatsIntoClip, double fileSample
 #ifdef VIBESYNTH_VST
   #include "PluginEditor.h"
 #endif
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ClipSource - cached-PCM / streamed clip reads (CL-281)
+//
+// The streamed branch forwards verbatim.  The cached branch reproduces
+// AudioClipStreamer's RAM-mode reads: that path runs against a ring whose
+// capacity IS the file length, so its `pos % mCapacity` is the identity and the
+// only real difference here is that the index is used directly.  The 1:1 snap,
+// the Catmull-Rom kernel and the EOF breaks are deliberately identical -- a
+// clip must not change character because it happened to hit the cache.
+// ─────────────────────────────────────────────────────────────────────────────
+
+bool ClipSource::readRaw (juce::AudioBuffer<float>& dest,
+                          int destOffset,
+                          int numSamples,
+                          juce::int64 filePos)
+{
+    if (mData == nullptr)
+        return mStreamer->readRaw (dest, destOffset, numSamples, filePos);
+
+    if (numSamples <= 0)
+        return false;
+    if (filePos < 0 || filePos + numSamples > mData->lengthInSamples)
+        return false;
+
+    const int numDestCh = juce::jmin (dest.getNumChannels(), mData->numChannels);
+    for (int ch = 0; ch < numDestCh; ++ch)
+        juce::FloatVectorOperations::copy (dest.getWritePointer (ch) + destOffset,
+                                           mData->samples.getReadPointer (ch) + (int) filePos,
+                                           numSamples);
+    return true;
+}
+
+float ClipSource::readAndMix (juce::AudioBuffer<float>& dest,
+                              int    destOffset,
+                              int    numOutputSamples,
+                              double fileStartPos,
+                              double readRatio,
+                              int    numDestChannels,
+                              float  gain)
+{
+    if (mData == nullptr)
+        return mStreamer->readAndMix (dest, destOffset, numOutputSamples,
+                                      fileStartPos, readRatio, numDestChannels, gain);
+
+    if (numOutputSamples <= 0)
+        return 0.0f;
+
+    // At a true 1:1 rate the fractional start is a CONSTANT sub-sample delay,
+    // and interpolating for it trades bit-exact playback for a program-
+    // dependent interpolation floor.  Snapping to the nearest frame keeps the
+    // advance at exactly one frame per sample, so consecutive blocks stay
+    // continuous and the exact-copy path below takes over.
+    if (readRatio == 1.0)
+        fileStartPos = (double) (juce::int64) std::llround (fileStartPos);
+
+    const juce::int64 total      = mData->lengthInSamples;
+    const juce::int64 startFloor = (juce::int64) std::floor (fileStartPos);
+    // Everything below indexes from startFloor upward, so this is also what
+    // keeps every read in bounds.
+    if (startFloor < 0 || startFloor >= total)
+        return 0.0f;
+
+    const int srcChCount = juce::jmax (1, mData->numChannels);
+    float     peak       = 0.0f;
+
+    if (readRatio == 1.0 && fileStartPos == (double) startFloor)
+    {
+        for (int ch = 0; ch < numDestChannels; ++ch)
+        {
+            const float* src = mData->samples.getReadPointer (ch % srcChCount);
+            for (int i = 0; i < numOutputSamples; ++i)
+            {
+                const juce::int64 fp = startFloor + i;
+                if (fp >= total) break;
+
+                const float v = src[(int) fp] * gain;
+                dest.addSample (ch, destOffset + i, v);
+                peak = juce::jmax (peak, std::abs (v));
+            }
+        }
+    }
+    else
+    {
+        // 4-point Catmull-Rom for fractional rates (varispeed / tempo-follow /
+        // SR conversion).  Edge frames clamp at the file head and EOF.
+        for (int ch = 0; ch < numDestChannels; ++ch)
+        {
+            const float* src = mData->samples.getReadPointer (ch % srcChCount);
+            for (int i = 0; i < numOutputSamples; ++i)
+            {
+                const double      exactFP = fileStartPos + (double) i * readRatio;
+                const juce::int64 ip      = (juce::int64) exactFP;
+                const float       frac    = (float) (exactFP - (double) ip);
+
+                if (ip + 1 >= total) break;
+
+                const juce::int64 im1 = juce::jmax ((juce::int64) 0, ip - 1);
+                const juce::int64 ip2 = juce::jmin (ip + 2, total - 1);
+
+                const float p0 = src[(int) im1];
+                const float p1 = src[(int) ip];
+                const float p2 = src[(int) (ip + 1)];
+                const float p3 = src[(int) ip2];
+                const float v  = (p1 + 0.5f * frac * ((p2 - p0)
+                              + frac * (2.f * p0 - 5.f * p1 + 4.f * p2 - p3
+                              + frac * (3.f * (p1 - p2) + p3 - p0)))) * gain;
+                dest.addSample (ch, destOffset + i, v);
+                peak = juce::jmax (peak, std::abs (v));
+            }
+        }
+    }
+
+    return peak;
+}
+
+void ClipSource::requestSeek (juce::int64 filePos)
+{
+    if (mStreamer != nullptr)
+        mStreamer->requestSeek (filePos);
+}
 
 // 2026-04-30 (audit C11+C12) / S-6: the shared per-note expression block, carried as
 // standard MIDI so engines stay decoupled from the roll -- CC10 pan, PitchWheel fine
@@ -388,6 +510,13 @@ VibeSynthProcessor::VibeSynthProcessor()
 
     mEngineRig = std::make_unique<EngineRig> (*this, mUndoManager);
 
+   #if JUCE_DEBUG
+    // Starts the message-thread drain that turns the audio thread's POD [G3]
+    // records into log lines (G3PlayheadDiag.h).  Constructed here so the
+    // Timer's lifetime is the processor's, on the message thread.
+    mG3DiagDrainer = std::make_unique<G3PlayheadDiagDrainer>();
+   #endif
+
     // QA-ModelShell TS6: reads plugins.xml at construction (scan folders + the
     // added list), so both are available to project load without any UI.
     mPluginManager = std::make_unique<Hosting::PluginManager>();
@@ -395,14 +524,6 @@ VibeSynthProcessor::VibeSynthProcessor()
     // QA-L-Fix: -1 = no held note-trigger voice.  Value-initialisation would
     // give 0, which is a valid MIDI note.
     mNoteTriggerHeld.fill (-1);
-
-    // Set up polyphonic synth -- 8 voices
-    // QA-0a (2026-05-07): placeholder sample rate before addVoice (see
-    // VibePlayerDSP::VibeSynth ctor for full reasoning).
-    mSynth.setCurrentPlaybackSampleRate (44100.0);
-    mSynth.addSound(new SynthSound());
-    for (int i = 0; i < 8; ++i)
-        mSynth.addVoice(new SynthVoice());
 
     mAudioFormatManager.registerBasicFormats();  // WAV, AIFF, MP3, OGG, FLAC
 
@@ -459,10 +580,23 @@ VibeSynthProcessor::VibeSynthProcessor()
     auto* initialSnap = new AudioClipSnapshot();
     initialSnap->generation = 0;
     mActiveAudioClips.store (initialSnap, std::memory_order_release);
+
+    // THREAD SAFETY: no device has been opened, so no audio thread exists to be
+    // holding a retired snapshot -- the strongest form of the idle assertion
+    // RetirementQueue's CONSUMER-IDLE CONTRACT asks for.  Seeded here rather
+    // than defaulted inside the queue so the queue keeps leaking-not-dangling
+    // as its default; without it, a session where a device is never opened
+    // never publishes a generation and so never frees anything retired.
+    setRetirementConsumersIdle (true);
 }
 
 VibeSynthProcessor::~VibeSynthProcessor()
 {
+    // The installed resolver captures `this`, so it has to be retired before
+    // the object is.  Retiring it here (rather than never) is what stops a
+    // late restore path resolving through a dangling processor at shutdown.
+    ProjectFileResolver::install ({});
+
     apvts.state.removeListener(this);
     mAudioFileThread.stopThread (500);
 
@@ -487,25 +621,79 @@ void VibeSynthProcessor::prepareToPlay(double sampleRate, int samplesPerBlock)
     mSampleRate = sampleRate;
     mBlockSize  = samplesPerBlock;
 
-    mSynth.setCurrentPlaybackSampleRate(sampleRate);
-    mBassSynth.prepare(sampleRate, samplesPerBlock);
 
     // C.3 (2026-04-30): reset MIDI input collector for the current SR.  Without
     // this, removeNextBlockOfMessages can't compute correct sample offsets.
     mLiveMidiCollector.reset (sampleRate);
     // Only NOW may the MIDI input thread push into it -- see isLiveMidiReady.
     mLiveMidiReady.store (true, std::memory_order_release);
+    // A device is live, so settleAudioThread can expect acknowledgements.  Only
+    // a real device open may say so: the offline render path re-prepares this
+    // processor twice per render with no device behind it (see
+    // mOfflineReconfigureThread).
+    if (mOfflineReconfigureThread.load (std::memory_order_acquire)
+          != juce::Thread::getCurrentThreadId())
+        mAudioDevicePrepared.store (true, std::memory_order_release);
 
-    // Pre-allocate engine scratch buffers to avoid audio-thread allocation
-    mAudioRowScratch   .setSize(2, samplesPerBlock, false, true, false);
-    mAudioClipScratch  .setSize(2, samplesPerBlock, false, true, false);
-    // J-7a (2026-05-03): BaySickRustyDrums singleton scratch.
-    mRustyDrumsScratch .setSize(2, samplesPerBlock, false, true, false);
-    // R3 (2026-04-23): pre-allocate live-input scratch + snapshot.  Snapshot
-    // gets resized at first non-zero numInputs in processBlock; here we just
-    // guarantee a safe initial state.  Slot scratch is always stereo.
+    // THREAD SAFETY: a consumer is about to start publishing generations.  JUCE
+    // prepares before the first callback, so clearing idle anywhere in here is
+    // strictly ahead of the first setInUseGeneration -- the ordering half of the
+    // CONSUMER-IDLE CONTRACT that keeps the drainers from freeing a snapshot the
+    // audio thread still holds.
+    setRetirementConsumersIdle (false);
+
+    // Idle-suspend hold, re-derived because both terms it depends on are device
+    // state (see kIdleSuspendSeconds in the header for why it is a duration).
+    // A short final block only makes the realized hold LONGER than the
+    // calibration, which is the safe direction -- it suspends later, never
+    // earlier.
+    kIdleSuspendBlocks.store (
+        juce::jmax (1, (int) std::ceil (kIdleSuspendSeconds * sampleRate
+                                        / (double) juce::jmax (1, samplesPerBlock))),
+        std::memory_order_relaxed);
+
+    // QA-ClipPlayback Task 2's per-clip control filter is prepared when the clip
+    // player is BUILT, so it kept whatever rate was live at that moment.
+    // StateVariableTPTFilter bakes g = tan(pi*fc/sampleRate) at prepare time and
+    // never re-reads the rate, so a filter built at 96k and then run at 44.1k
+    // lowpasses at fc*44100/96000 -- bouncing a 96k session to a 44.1k file came
+    // out shelved off at ~9.2 kHz with live monitoring clean.  Re-preparing here
+    // covers every case that changes the running rate: a device change, the
+    // render-config prepare in beginOfflineRender, and its restore in
+    // endOfflineRender.
+    //
+    // THREAD SAFETY: the audio callback is stopped for a device change and
+    // suspended + settled for an offline render, so mutating the published
+    // snapshot in place is safe here.  The load is deliberately AFTER the
+    // consumer-idle clear above, so a concurrent message-thread rebuild cannot
+    // retire-and-free this snapshot underneath the sweep.
+    if (auto* clipSnap = mActiveAudioClips.load (std::memory_order_acquire))
+    {
+        const juce::dsp::ProcessSpec clipSpec { sampleRate,
+                                                (juce::uint32) juce::jmax (1, samplesPerBlock),
+                                                (juce::uint32) 2 };
+        for (auto& p : clipSnap->players)
+        {
+            p.clipFilter.prepare (clipSpec);
+            p.clipFilter.setType (juce::dsp::StateVariableTPTFilterType::lowpass);
+        }
+    }
+
+    // R3 (2026-04-23): pre-allocate live-input scratch + snapshot.  Slot
+    // scratch is always stereo.  The snapshot is sized for the ACTUAL
+    // negotiated input count (AudioProcessorPlayer calls setPlayConfigDetails
+    // before prepareToPlay), not a hardcoded stereo: any interface with more
+    // than two inputs used to reach the setSize in processBlock, i.e. a malloc
+    // in the render callback.
     mLiveInputSlotBuf  .setSize(2, samplesPerBlock, false, true, false);
-    mLiveInputSnapshot .setSize(2, samplesPerBlock, false, true, false);
+    mLiveInputSnapshot .setSize(juce::jmax (2, getTotalNumInputChannels()),
+                                samplesPerBlock, false, true, false);
+
+    // Audio-thread scratch: capacity established here so the per-block
+    // clear()/push_back cycles never call the allocator.
+    mPRPendingOffs .reserve (256);
+    mPRKeepScratch .reserve (256);
+    mChokeFireScratch.reserve (64);
 
     // Re-prepare any registered engine processors
     {
@@ -580,11 +768,10 @@ void VibeSynthProcessor::prepareToPlay(double sampleRate, int samplesPerBlock)
     mVibeGraph.prepare(sampleRate, samplesPerBlock);
 
     // Build the fixed bus topology the first time; no-op on subsequent calls.
-    // §P4.3 B7: drumsEQ ref removed - the drums bus node uses its own preEq member
-    // (sync'd via updateAllPreRackEQsFromApvts from mixer_drumsbus_preeq_*).
-    mVibeGraph.buildFixedTopology(mSynth, mBassSynth, apvts);
+    // §P4.3 B7: the drums bus node owns its own preEq member, sync'd via
+    // updateAllPreRackEQsFromApvts from mixer_drums_preeq_*.
+    mVibeGraph.buildFixedTopology(apvts);
 
-    // 5F-4a: register master + 5 bus strip params (idempotent).
     ensureMixerBusAndMasterParams();
     // QA-G3Smoke Swing (SW-6): global + per-player swing params + cached atomics.
     ensureSwingParams();
@@ -637,7 +824,7 @@ void VibeSynthProcessor::prepareToPlay(double sampleRate, int samplesPerBlock)
     mRenderPool.clearQueues();
 
     // Batch 7 (2026-05-06): register the always-on bus PassiveStripTasks --
-    // kNumBatch7Buses of them, 12 since TS6 added the Plugins bus -- here
+    // kNumBatch7Buses of them -- here
     // (after buildFixedTopology so VibeGraph bus nodes exist).
     // Idempotent - guarded by null checks so prepareToPlay can be called
     // repeatedly (sample-rate / buffer changes).  Master is excluded; it
@@ -659,6 +846,7 @@ void VibeSynthProcessor::prepareToPlay(double sampleRate, int samplesPerBlock)
         MixerChannelIds::kBassBus2,
         MixerChannelIds::kClipsBus2,
         MixerChannelIds::kPluginsBus2,
+        MixerChannelIds::kDrumsBus2,        // QA-SOUNDNESS
     };
     for (size_t i = 0; i < kBusChannelIds.size(); ++i)
     {
@@ -681,7 +869,34 @@ void VibeSynthProcessor::prepareToPlay(double sampleRate, int samplesPerBlock)
     }
 }
 
-void VibeSynthProcessor::releaseResources() {}
+void VibeSynthProcessor::releaseResources()
+{
+    // The device has stopped calling processBlock, so no settle can be
+    // acknowledged from here on.  Without this clear, teardown after a device
+    // stop waits out its whole timeout on every gesture.
+    mAudioDevicePrepared.store (false, std::memory_order_release);
+
+    // THREAD SAFETY: JUCE calls this only once the device has stopped invoking
+    // the audio callback, and nothing can invoke it again before prepareToPlay,
+    // so no thread can still be holding a retired snapshot.
+    setRetirementConsumersIdle (true);
+}
+
+// Both deferred-destruction queues gate on generations published by THIS
+// processor's audio thread, so the owner-side idle assertion tracks the device
+// lifecycle: asserted only where the callback provably cannot run, cleared
+// before it can run again (Engine/RetirementQueue.h, CONSUMER-IDLE CONTRACT).
+// Message thread only -- setConsumerIdle takes the drainer's mutex.
+void VibeSynthProcessor::setRetirementConsumersIdle (bool consumerIsIdle)
+{
+    mClipRetirement.setConsumerIdle (consumerIsIdle);
+
+    // The roll queue is PatternManager's, and the audio thread reaches it only
+    // through this pointer, so a null one means no consumer can have touched it
+    // yet; setPatternManager seeds it against the device state on arrival.
+    if (mPatternManager != nullptr)
+        mPatternManager->setRollConsumerIdle (consumerIsIdle);
+}
 
 bool VibeSynthProcessor::isBusesLayoutSupported(const BusesLayout& layouts) const
 {
@@ -826,7 +1041,7 @@ bool VibeSynthProcessor::renderAudioClipsForRow (int row,
     // protocol -- no per-site lock needed.
     for (auto& player : mCurrentBlockClipSnapshot->players)
     {
-        if (player.streamer == nullptr) continue;
+        if (player.source == nullptr) continue;
 
         // FilePlay clips are handled by the inline pass in processBlock.
         const int routeCh = player.routeChannel;
@@ -877,7 +1092,7 @@ bool VibeSynthProcessor::renderAudioClipsForRow (int row,
         const juce::int64 outPosInClip = (ctx.projectStart + bufOffset) - clipStart;
 
         const double readRatio = player.fileSampleRate / mSampleRate;
-        const juce::int64 fileTotalSamples = player.streamer->getTotalLength();
+        const juce::int64 fileTotalSamples = player.source->getTotalLength();
 
         // QA-Ea Task 0c slip-trim + QA-ClipPlayback Task 3 sample-start: the clip's
         // first playable file frame.  Rule-4 defensive floor + clamp keep it in range.
@@ -911,9 +1126,10 @@ bool VibeSynthProcessor::renderAudioClipsForRow (int row,
         const double effReadRatio    = readRatio    * pitchRatio * varispeed;
         const double fileRate        = (readRatio / stretchRatio) * varispeed;   // source frames per output frame
 
-        // reverse: RAM-loaded clips only (the forward-only disk streamer can't read
-        // backward without thrashing; >100 MB streaming clips play forward).
-        const bool doReverse = ctl.reverse && player.streamer->isRamLoaded();
+        // reverse: resident-audio clips only (the forward-only disk streamer
+        // can't read backward without thrashing; clips past the RAM threshold
+        // play forward).
+        const bool doReverse = ctl.reverse && player.source->isRamLoaded();
 
         // Timeline frame where the file runs out (from contentBase, via eff ratios).
         const juce::int64 playableFile = juce::jmax ((juce::int64) 0, fileTotalSamples - contentBase);
@@ -982,7 +1198,7 @@ bool VibeSynthProcessor::renderAudioClipsForRow (int row,
         {
             player.vocoder->setStretchRatio (effStretchRatio);
 
-            // player.expectedFilePos / streamer->seek track the absolute file frame.
+            // player.expectedFilePos / source->requestSeek track the absolute file frame.
             // For reverse it counts DOWN and the read chunk is flipped before push.
             const juce::int64 pvReadPos = player.expectedFilePos;
             const bool seekNeeded = unmuteResync ||
@@ -997,7 +1213,7 @@ bool VibeSynthProcessor::renderAudioClipsForRow (int row,
                 // synchronous disk prefill under the reader lock; calling it
                 // here (audio thread) blew the callback deadline on streamed
                 // files.  The bg thread fills; readRaw is silent until ready.
-                player.streamer->requestSeek (pvRefPos);
+                player.source->requestSeek (pvRefPos);
                 player.expectedFilePos = pvRefPos;
                 player.pvOutFrac       = 0.0;   // G1 fix: fresh fractional output position
             }
@@ -1013,10 +1229,17 @@ bool VibeSynthProcessor::renderAudioClipsForRow (int row,
                 ? player.expectedFilePos - numFileSamples
                 : player.expectedFilePos;
 
-            player.pvInBuf.clear();
+            // Audio thread: every pv scratch clear in this file is bounded to the
+            // region actually written.  The buffers are allocated for the worst
+            // case (~34,816 samples/ch) while a block touches a fraction of it, so
+            // a full-capacity memset is a per-output-sample cost that grows as
+            // 1/blockSize -- worst exactly where headroom is tightest.  The ranged
+            // clear zeroes that range on EVERY channel, so anything the reader
+            // leaves untouched still reads as silence.
+            player.pvInBuf.clear (0, numFileSamples);
             const bool inRange = (readAt >= 0) && (readAt + numFileSamples <= fileTotalSamples);
             const bool gotRaw  = inRange
-                && player.streamer->readRaw (player.pvInBuf, 0, numFileSamples, readAt);
+                && player.source->readRaw (player.pvInBuf, 0, numFileSamples, readAt);
 
             if (gotRaw)
             {
@@ -1045,9 +1268,10 @@ bool VibeSynthProcessor::renderAudioClipsForRow (int row,
                 // fractional output position across blocks.
                 const double needF   = player.pvOutFrac + (double) outSamples * effReadRatio;
                 const int    consume = (int) needF;
-                player.pvOutBuf.clear();
-                const int peeked = player.vocoder->peekOutput (player.pvOutBuf, 0,
-                    juce::jmin (consume + 2, player.pvOutBuf.getNumSamples()));
+                const int    peekWant = juce::jmin (consume + 2,
+                                                    player.pvOutBuf.getNumSamples());
+                player.pvOutBuf.clear (0, peekWant);
+                const int peeked = player.vocoder->peekOutput (player.pvOutBuf, 0, peekWant);
 
                 if (peeked > 0)
                 {
@@ -1106,8 +1330,8 @@ bool VibeSynthProcessor::renderAudioClipsForRow (int row,
             const int numRaw = (int) juce::jmax ((juce::int64) 0, juce::jmin (
                 juce::jmin (pvRefPos - loRead + 2, fileTotalSamples - loRead),
                 (juce::int64) player.pvInBuf.getNumSamples()));
-            player.pvInBuf.clear();
-            if (numRaw > 1 && player.streamer->readRaw (player.pvInBuf, 0, numRaw, loRead))
+            player.pvInBuf.clear (0, numRaw);
+            if (numRaw > 1 && player.source->readRaw (player.pvInBuf, 0, numRaw, loRead))
             {
                 const int pvCh = player.pvInBuf.getNumChannels();
                 for (int i = 0; i < outSamples; ++i)
@@ -1139,7 +1363,7 @@ bool VibeSynthProcessor::renderAudioClipsForRow (int row,
             // so fileRate here == readRatio scaled by varispeed -- pass fileRate (not the
             // raw readRatio) so the Stretch knob varispeeds the plain-playback path too.
             // posD keeps the fractional position (sub-sample block continuity).
-            peak = player.streamer->readAndMix (
+            peak = player.source->readAndMix (
                 clipScratch, bufOffset, outSamples, posD, fileRate, ctx.numOut, gain);
             player.expectedFilePos = (juce::int64) std::llround (posD + (double) outSamples * fileRate);
         }
@@ -1294,7 +1518,7 @@ bool VibeSynthProcessor::decodeFilePlayClip (AudioClipPlayer&             player
     const bool isInstRoute = routeCh >= MixerChannelIds::kInstBase
                            && routeCh <  MixerChannelIds::kInstBase + kMaxInstPages;
     if (! isVoxRoute && ! isInstRoute) return false;
-    if (player.streamer == nullptr)    return false;
+    if (player.source == nullptr)    return false;
     if (mPatternManager == nullptr)    return false;
     if (ctx.clipScratch == nullptr)    return false;
     if (ctx.mxState     == nullptr)    return false;
@@ -1359,7 +1583,7 @@ bool VibeSynthProcessor::decodeFilePlayClip (AudioClipPlayer&             player
     const int64 filePos = (int64) std::llround (posDB);
     // (readRatio above already carries the QA-Ec Resample tempo-follow term.)
 
-    const int64 fileTotalSamples = player.streamer->getTotalLength();
+    const int64 fileTotalSamples = player.source->getTotalLength();
     // EOF guard: clip extends past file end -> skip.  filePos < 0 is
     // unreachable post-Rule-4 floor (mirror of Site A).
     if (filePos >= fileTotalSamples)
@@ -1639,8 +1863,8 @@ bool VibeSynthProcessor::decodeFilePlayClip (AudioClipPlayer&             player
                     // Prime the vocoder so its first delivered output sample
                     // corresponds to input position pStart (OLA accounting:
                     // output o <-> input (o - N/2) / rEff + N/2, relative to
-                    // the reset).  Feed comes from the streamer ring, which
-                    // is resident around the position the direct path was
+                    // the reset).  Feed comes from the clip source, which is
+                    // resident around the position the direct path was
                     // just reading.
                     player.vocoder->reset();
                     player.vocoder->setStretchRatio (rReq);
@@ -1658,7 +1882,7 @@ bool VibeSynthProcessor::decodeFilePlayClip (AudioClipPlayer&             player
                         const int chunk = PhaseVocoder::kHopSize;
                         player.pvInBuf.clear (0, chunk);
                         if (feedPos >= 0
-                            && ! player.streamer->readRaw (player.pvInBuf, 0,
+                            && ! player.source->readRaw (player.pvInBuf, 0,
                                                            chunk, feedPos))
                         {
                             engageOk = false;
@@ -1710,7 +1934,7 @@ bool VibeSynthProcessor::decodeFilePlayClip (AudioClipPlayer&             player
                     if (seekNeeded)
                     {
                         player.vocoder->reset();
-                        player.streamer->requestSeek (pvRefPos);
+                        player.source->requestSeek (pvRefPos);
                         player.expectedFilePos = pvRefPos;
                         player.pvOutFrac       = 0.0;
                         player.alignInFrac     = 0.0;
@@ -1725,9 +1949,9 @@ bool VibeSynthProcessor::decodeFilePlayClip (AudioClipPlayer&             player
                         player.pvInBuf.getNumSamples(), (int) needIn);
                     player.alignInFrac = needIn - (double) numFileSamples;
 
-                    player.pvInBuf.clear();
+                    player.pvInBuf.clear (0, numFileSamples);
                     const bool gotRaw = numFileSamples > 0
-                        && player.streamer->readRaw (player.pvInBuf, 0,
+                        && player.source->readRaw (player.pvInBuf, 0,
                                                      numFileSamples,
                                                      player.expectedFilePos);
                     if (gotRaw)
@@ -1743,7 +1967,7 @@ bool VibeSynthProcessor::decodeFilePlayClip (AudioClipPlayer&             player
                         // Complementary direct leg at the SAME read position
                         // (no flam): engage fades it out, exit fades it in.
                         const double dirRate = tc / (double) outSamples;
-                        player.streamer->readAndMix (clipScratch, bufOffset,
+                        player.source->readAndMix (clipScratch, bufOffset,
                                                      outSamples, pStart, dirRate,
                                                      numOut, gain);
                         for (int i = 0; i < outSamples; ++i)
@@ -1760,10 +1984,11 @@ bool VibeSynthProcessor::decodeFilePlayClip (AudioClipPlayer&             player
                         const double needF   = player.pvOutFrac
                                              + (double) outSamples * outRate;
                         const int    consume = (int) needF;
-                        player.pvOutBuf.clear();
+                        const int    peekWant = juce::jmin (consume + 2,
+                                                            player.pvOutBuf.getNumSamples());
+                        player.pvOutBuf.clear (0, peekWant);
                         const int peeked = player.vocoder->peekOutput (
-                            player.pvOutBuf, 0,
-                            juce::jmin (consume + 2, player.pvOutBuf.getNumSamples()));
+                            player.pvOutBuf, 0, peekWant);
                         if (peeked > 0)
                         {
                             const int pvCh = player.pvOutBuf.getNumChannels();
@@ -1863,16 +2088,25 @@ bool VibeSynthProcessor::decodeFilePlayClip (AudioClipPlayer&             player
             player.vocoder->reset();
             // G1 smoke round 6: requestSeek, NOT seek() - see Path A (audio-
             // thread disk IO under the reader lock = blown deadline).
-            player.streamer->requestSeek (pvRefPos);
+            player.source->requestSeek (pvRefPos);
             player.expectedFilePos = pvRefPos;
             player.pvOutFrac       = 0.0;   // G1 fix: fresh fractional output position
         }
 
-        const int numFileSamples = (int) std::ceil (
-            (double) outSamples * readRatio / stretchRatio);
+        // Clamp to pvInBuf capacity, same reason and same shape as the Site A
+        // clamp in renderAudioClipsForRow and the align-warp clamp above: the
+        // demand is a RATIO of the block, so it overruns readRaw's write on the
+        // extremes of the matrix.  stretchRatio floors at 1/64 (a clip whose BPM
+        // tag survived the UI's jmax(1.f) floor pins it there), which asks for
+        // 64x the block -- 65,536 samples at a 1024 buffer against a 34,816-
+        // sample allocation.  Truncating degrades to a brief glitch on that
+        // degenerate clip instead of corrupting memory.
+        const int numFileSamples = (int) juce::jmin (
+            (juce::int64) std::ceil ((double) outSamples * readRatio / stretchRatio),
+            (juce::int64) player.pvInBuf.getNumSamples());
 
-        player.pvInBuf.clear();
-        const bool gotRaw = player.streamer->readRaw (
+        player.pvInBuf.clear (0, numFileSamples);
+        const bool gotRaw = player.source->readRaw (
             player.pvInBuf, 0, numFileSamples, player.expectedFilePos);
 
         if (gotRaw)
@@ -1885,9 +2119,10 @@ bool VibeSynthProcessor::decodeFilePlayClip (AudioClipPlayer&             player
             // at every block boundary on stretched clips).
             const double needF   = player.pvOutFrac + (double) outSamples * readRatio;
             const int    consume = (int) needF;
-            player.pvOutBuf.clear();
-            const int peeked = player.vocoder->peekOutput (player.pvOutBuf, 0,
-                juce::jmin (consume + 2, player.pvOutBuf.getNumSamples()));
+            const int    peekWant = juce::jmin (consume + 2,
+                                                player.pvOutBuf.getNumSamples());
+            player.pvOutBuf.clear (0, peekWant);
+            const int peeked = player.vocoder->peekOutput (player.pvOutBuf, 0, peekWant);
 
             if (peeked > 0)
             {
@@ -1933,7 +2168,7 @@ bool VibeSynthProcessor::decodeFilePlayClip (AudioClipPlayer&             player
     {
         // ── Direct path: SR-only interpolation (no BPM stretch) ──────────────
         // posDB keeps the fractional position (sub-sample block continuity).
-        peak = player.streamer->readAndMix (
+        peak = player.source->readAndMix (
             clipScratch, bufOffset, outSamples, posDB, readRatio, numOut, gain);
         player.expectedFilePos = (int64) std::llround (posDB + (double) outSamples * readRatio);
     }
@@ -2066,6 +2301,12 @@ void VibeSynthProcessor::finalizeFilePlayStrip (int                          rou
 void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
                                        juce::MidiBuffer& midiMessages)
 {
+    // THREAD SAFETY: the acknowledgement settleAudioThread waits on.  It has to
+    // be the FIRST statement -- ahead of the shield's early-out below -- because
+    // a shielded block that never acknowledged would leave every settle burning
+    // its full timeout instead of returning in a block or two.
+    mAudioBlockCounter.fetch_add (1, std::memory_order_release);
+
     // 2026-05-06: project-load barrier - bail immediately if the message
     // thread is mid-teardown (closeAllDynamicTabs / openProject /
     // restoreBackup).  Prevents use-after-free crashes inside engines
@@ -2084,12 +2325,11 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
     // mActiveAudioClips -- so the message-thread mutator can swap a new
     // snapshot in mid-block without breaking consistency.
     //
-    // The published mAudioInUseClipGen is read by RetirementQueue's drainer
-    // to know which retired snapshots are safe to destroy.  Bumping it here
-    // (release-store after the load-acquire) is what closes the GC race:
-    // any retired snapshot whose retiredBeforeGen > mAudioInUseClipGen at
-    // the time of retirement stays alive until this audio thread loads a
-    // newer snapshot in a future block and bumps the gen past it.
+    // The generation is published into the RetirementQueue via
+    // setInUseGeneration (release-store after the load-acquire), which is what
+    // closes the GC race: the drainer acquire-loads that published gen, so a
+    // retired snapshot whose retiredBeforeGen is still ahead of it stays alive
+    // until this audio thread loads a newer snapshot in a future block.
     {
         auto* snap = mActiveAudioClips.load (std::memory_order_acquire);
         // Bootstrap (ctor) guarantees this is non-null on first entry; the
@@ -2097,6 +2337,16 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
         mCurrentBlockClipSnapshot = snap;
         mClipRetirement.setInUseGeneration (snap->generation);
     }
+
+    // The roll queue's generation gate advances only when someone acquires a
+    // snapshot, and the note scheduler below acquires only while the transport
+    // is playing -- so a stopped transport froze the gate and every roll edit's
+    // retired table piled up behind it.  The result is deliberately discarded:
+    // this call exists for the generation publish alone.  Wait-free and
+    // allocation-free (one acquire-load plus one release-store), same cost as
+    // the clip publish above.
+    if (mPatternManager != nullptr)
+        (void) mPatternManager->acquireRollSnapshot();
 
     // QA-Fa recovery: capture each Vox engine's published align-warp
     // snapshot + chain/pitch gates ONCE per block (see mBlockAlignEntries).
@@ -2148,9 +2398,17 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
     const int numInputs = juce::jmin (buffer.getNumChannels(), getTotalNumInputChannels());
     if (numInputs > 0)
     {
+        // Never-fires safety net now that prepareToPlay sizes for the real
+        // input count.  GROW-ONLY: passing numSamples verbatim would SHRINK
+        // the prepared buffer on a driver whose first callback is short, and
+        // the next full-size block would allocate again.  Deliberately not a
+        // clamp on numInputs -- silently dropping channels would silently kill
+        // armed Vox / Inst strips on the dropped ones.
         if (mLiveInputSnapshot.getNumChannels() < numInputs
             || mLiveInputSnapshot.getNumSamples() < numSamples)
-            mLiveInputSnapshot.setSize (numInputs, numSamples, false, false, true);
+            mLiveInputSnapshot.setSize (juce::jmax (numInputs, mLiveInputSnapshot.getNumChannels()),
+                                        juce::jmax (numSamples, mLiveInputSnapshot.getNumSamples()),
+                                        false, false, true);
         for (int c = 0; c < numInputs; ++c)
             mLiveInputSnapshot.copyFrom (c, 0, buffer, c, 0, numSamples);
     }
@@ -2244,15 +2502,27 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
     }
 
     // ── Layers piano roll: build MIDI from piano roll + incoming MIDI ─────
-    juce::MidiBuffer allMidi;
+    // Members, not stack objects: clear() retains each buffer's allocation, so
+    // steady-state MIDI assembly costs zero mallocs on the audio thread.  The
+    // clear MUST happen here at the top -- the engine-side consumers do not
+    // clear their own feed, so a stale buffer would replay last block's notes.
+    auto& allMidi        = mAllMidi;
+    auto& layerPageMidi  = mLayerPageMidi;   // per-page MIDI for layer engines
+    auto& bassPageMidi   = mBassPageMidi;    // per-page MIDI for bass engines
+    auto& drumPageMidi   = mDrumPageMidi;    // D1.2: per-drum-page MIDI (dynamic-drum model)
+    auto& clipPageMidi   = mClipPageMidi;    // G-3 (2026-04-28): per-clip-page MIDI (sampler-style triggering)
+    auto& voxPageMidi    = mVoxPageMidi;     // G-4 (2026-04-28): per-Vox-page MIDI
+    auto& instPageMidi   = mInstPageMidi;    // G-4 (2026-04-28): per-Inst-page MIDI
+    auto& pluginPageMidi = mPluginPageMidi;  // QA-ModelShell TS6: per-plugin-tab MIDI
+    allMidi.clear();
+    for (auto& b : layerPageMidi)  b.clear();
+    for (auto& b : bassPageMidi)   b.clear();
+    for (auto& b : drumPageMidi)   b.clear();
+    for (auto& b : clipPageMidi)   b.clear();
+    for (auto& b : voxPageMidi)    b.clear();
+    for (auto& b : instPageMidi)   b.clear();
+    for (auto& b : pluginPageMidi) b.clear();
     allMidi.addEvents(midiMessages, 0, numSamples, 0);
-    std::array<juce::MidiBuffer, kMaxLayerPages>  layerPageMidi;   // per-page MIDI for layer engines
-    std::array<juce::MidiBuffer, kMaxBassPages>   bassPageMidi;    // per-page MIDI for bass engines
-    std::array<juce::MidiBuffer, kMaxDrumPages>   drumPageMidi;    // D1.2: per-drum-page MIDI (dynamic-drum model)
-    std::array<juce::MidiBuffer, kMaxClipPages>   clipPageMidi;    // G-3 (2026-04-28): per-clip-page MIDI (sampler-style triggering)
-    std::array<juce::MidiBuffer, kMaxVoxPages>    voxPageMidi;     // G-4 (2026-04-28): per-Vox-page MIDI
-    std::array<juce::MidiBuffer, kMaxInstPages>   instPageMidi;    // G-4 (2026-04-28): per-Inst-page MIDI
-    std::array<juce::MidiBuffer, kMaxPluginPages> pluginPageMidi;  // QA-ModelShell TS6: per-plugin-tab MIDI
 
     // ── Flush-all request (from Stop button) ──────────────────────────────
     // Sends All-Notes-Off to every engine + clears pending offs. We do this
@@ -2402,14 +2672,17 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
             }
 
            #if JUCE_DEBUG
-            // [G3 BAR1]: window readout on any block touching beat 0.
+            // [G3 BAR1]: window readout on any block touching beat 0.  POD into
+            // the diag ring -- a juce::String or a file write here would be an
+            // allocation / blocking IO inside the render callback.
             if (beatStart < 0.05 || (nWin > 1 && windows[1].winStart < 0.05))
-                G3PlayheadDiag::logBar1 ("windows n=" + juce::String (nWin)
-                    + " w0=[" + juce::String (windows[0].winStart, 4) + ","
-                    + juce::String (windows[0].winEnd, 4) + ")"
-                    + (nWin > 1 ? (" w1=[" + juce::String (windows[1].winStart, 4) + ","
-                                   + juce::String (windows[1].winEnd, 4) + ") wrapSmp="
-                                   + juce::String (wrapSmp)) : juce::String()));
+                G3PlayheadDiag::pushRT (
+                    "[G3 BAR1] windows nWin/w0Start/w0End/w1Start/w1End/wrapSmp", 6,
+                    (double) nWin,
+                    windows[0].winStart, windows[0].winEnd,
+                    nWin > 1 ? windows[1].winStart : 0.0,
+                    nWin > 1 ? windows[1].winEnd   : 0.0,
+                    (double) wrapSmp);
            #endif
 
             // QA-TempoMap: beat -> in-block sample offset within a window.
@@ -2470,7 +2743,7 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
                 // belongs to the seam-restarted full-pattern note, and
                 // flushing it would cut that note one block into the new pass.
                 const bool loopEndFlush = loopFlush && ! mPRLastBlockStraddled;
-                std::vector<PRPendingOff> keep;
+                mPRKeepScratch.clear();
                 for (auto& off : mPRPendingOffs)
                 {
                     if (seekFlush)                              { emitOff (off, 0);       continue; }
@@ -2482,9 +2755,9 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
                         emitOff (off, beatToSmpInWindow (off.beatOff, windows[0]));
                         continue;
                     }
-                    keep.push_back (off);
+                    mPRKeepScratch.push_back (off);
                 }
-                mPRPendingOffs = std::move (keep);
+                mPRPendingOffs.swap (mPRKeepScratch);
             }
             mPRLastBlockStraddled = straddle;
 
@@ -2644,11 +2917,10 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
                             // notes keep the instant CC10.
                            #if JUCE_DEBUG
                             if (absStart < 0.05)
-                                G3PlayheadDiag::logBar1 ("noteOn pitch=" + juce::String (note.midiNote)
-                                    + " absStart=" + juce::String (absStart, 4)
-                                    + " smp=" + juce::String (smp)
-                                    + " win=[" + juce::String (windows[w].winStart, 4) + ","
-                                    + juce::String (windows[w].winEnd, 4) + ")");
+                                G3PlayheadDiag::pushRT (
+                                    "[G3 BAR1] noteOn pitch/absStart/smp/winStart/winEnd", 5,
+                                    (double) note.midiNote, absStart, (double) smp,
+                                    windows[w].winStart, windows[w].winEnd);
                            #endif
                             emitPianoNoteOn (buf, note, smp, glideFrom, glideMs,
                                              note.type == NoteType::RetrigSlide && glideFrom >= 0);
@@ -2878,11 +3150,10 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
         }
     }
 
-    // ── Drum + Bass basic-sequence step triggering ────────────────────────
+    // ── Drum basic-sequence step triggering ───────────────────────────────
     if (!pos.getIsPlaying())
     {
         mLastDrumStep = -1;
-        mLastBassStep = -1;
     }
     else if (mPatternManager)
     {
@@ -2895,18 +3166,7 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
         if (step != mLastDrumStep && step >= 0 && step < pat.totalSteps())
         {
             mLastDrumStep = step;
-            // Legacy basic-step-sequencer drum trigger removed (DrumSynth gone).
-            // Per-drum-tab notes now flow through D1.2 dispatch above.
-        }
-
-        if (step != mLastBassStep && step >= 0 && step < pat.totalSteps())
-        {
-            mLastBassStep = step;
-            const auto& bStep = pat.bassSeq.basicGrid[0][step];
-            if (bStep.active)
-                mBassSynth.noteOn((int)mBassSynth.getParams().pitch, bStep.velocity);
-            else
-                mBassSynth.noteOff();
+            // Per-drum-tab notes flow through the D1.2 dispatch above.
         }
     }
 
@@ -2947,10 +3207,11 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
             float relPos = (float)((autoBar - clipStart) / effectiveLengthBars (blk));
             relPos = juce::jlimit(0.f, 1.f, relPos);
 
-            // QA-ModelShell TS2: shared evaluator (PatternManager.h) -- the
-            // offline render replay uses the same function, so live and
-            // exported automation cannot drift.
-            const float value01 = evalAutomationPointsAt (blk.automationLane.points, relPos);
+            // Shared evaluator (PatternManager.h) -- the offline render replay
+            // and the editor both call it, so live and exported automation
+            // cannot drift.  It reads the whole lane, so LFO mode and the
+            // per-point tension / Spline shapes render here too.
+            const float value01 = evalAutomationLaneAt (blk.automationLane, relPos);
 
             // Apply to APVTS parameter (setValue is audio-thread-safe)
             if (auto* param = apvts.getParameter(blk.automationLane.paramId))
@@ -2977,9 +3238,9 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
     // 2026-05-06 (Batch 9c B1): the per-site try-lock pattern this comment
     // used to describe is gone.  Audio thread now reads the AudioClipSnapshot
     // captured at the top of processBlock (mCurrentBlockClipSnapshot) and
-    // every iteration site -- FilePlay scan, song-mode Pass 1, Pass 2,
-    // applyChokeGroupDispatch, renderAudioClipsForRow, AudioInsertTask,
-    // VoxStripTask, InstStripTask -- reads from that single snapshot.
+    // every iteration site -- the FilePlay pre-scan, applyChokeGroupDispatch,
+    // renderAudioClipsForRow under CompositeAudioInsertTask, VoxStripTask,
+    // InstStripTask -- reads from that single snapshot.
     // Mutator (rebuildAudioClipPlayers) atomic-exchanges a new snapshot in
     // and retires the old to mClipRetirement; the slow ~AudioClipStreamer
     // destruction runs on the GC drainer thread, never on audio.
@@ -3155,7 +3416,7 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
 
         for (auto& p : mCurrentBlockClipSnapshot->players)
         {
-            if (p.routeChannel == 0 || p.streamer == nullptr) continue;
+            if (p.routeChannel == 0 || p.source == nullptr) continue;
             const int64 cs = clipBeatToSample (p.clipStartBeat, secPerBeatPS, mSampleRate);
             const int64 ce = clipBeatToSample (p.clipEndBeat,   secPerBeatPS, mSampleRate);
             if (blockEnd <= cs || blockStart >= ce) continue;
@@ -3275,17 +3536,12 @@ void VibeSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer,
         // the node-level atomics by this point; we just promote them.
         drainMeterAtomicsForUI();
 
-        // Drive the DSP-load meter + overload-protection path.  QA-N (DIAG-02):
-        // the MT meter now sums per-worker + audio-thread task busy time, so it
-        // reports TOTAL render work; toggle "Multi-core Rendering" off to see
-        // the serial-path wall-clock instead.
-        // NOT DURING AN OFFLINE RENDER (2026-07-30).  This measures wall-clock
-        // against the block's realtime duration, which is meaningless when the
-        // loop is deliberately running as fast as it can -- and it does not just
-        // report: past its threshold it STEALS SYNTH VOICES to shed load.  So a
-        // render slower than realtime (which an unthrottled progress repaint made
-        // certain) would silently drop notes out of the file being frozen.  A
-        // freeze that quietly loses voices is worse than a slow one.
+        // Drive the DSP-load meter: deadline-proximity wall-clock across
+        // dispatchBlock, the same math under MT and ST (the Multi-core toggle
+        // cannot change the reading), and purely a UI signal -- nothing sheds
+        // load.  NOT DURING AN OFFLINE RENDER: wall-clock against the block's
+        // realtime duration is meaningless when the loop deliberately runs
+        // faster than realtime, and would peg the meter + overload flash.
         if (! isNonRealtime())
             measureDspLoadAndOverload (t0, numSamples);
         return;
@@ -3305,6 +3561,20 @@ void VibeSynthProcessor::applyPostMixRecordAndMetro (juce::AudioBuffer<float>& b
                                                      const juce::AudioPlayHead::PositionInfo& pos,
                                                      int numSamples)
 {
+    // Nothing in here may run under an offline render.  Export, measure and
+    // freeze all drive this same processBlock, and auto-freeze can fire during a
+    // count-in while the user is recording, so a render's blocks would otherwise
+    // be folded into the live take.  The two audio taps below keep their own
+    // isNonRealtime() term; this is the funnel that also covers the MIDI
+    // recorder's clock and the pre-roll counter, which had none.  The pre-roll
+    // gap was the damaging one: the WAV writer IS gated, so the file never grew
+    // while the counter did, and commitRecordingResult subtracts the pre-roll
+    // from the file length -- an inflated counter drives the take's effective
+    // content negative, dropping the whole performance from the arrangement and
+    // the Audio Library with no message.
+    if (isNonRealtime())
+        return;
+
     const double bpm = pos.getBpm().orFallback (120.0);
 
     // ── MIDI recording: capture note events sent to the graph this block ─
@@ -3357,7 +3627,9 @@ void VibeSynthProcessor::applyPostMixRecordAndMetro (juce::AudioBuffer<float>& b
     // recording, and the take is silently corrupted with material from a
     // different part of the song.  The metronome block below was already gated
     // for exactly this reason; the recorders were missed.
-    if (! isNonRealtime() && mMasterRecorder.isRecording())
+    if (! isNonRealtime()
+        && mMasterTapLive.load (std::memory_order_acquire)
+        && mMasterRecorder.isRecording())
         mMasterRecorder.writeBlock (buffer);
 
     // TS7 §3.5: version capture's audio half, written at the SAME pre-metronome
@@ -3365,7 +3637,9 @@ void VibeSynthProcessor::applyPostMixRecordAndMetro (juce::AudioBuffer<float>& b
     // A SECOND AudioFileRecorder rather than mMasterRecorder itself: capture and
     // a user recording can be running at once, and sharing one writer would make
     // whichever started second silently steal the file from the first.
-    if (! isNonRealtime() && mCaptureRecorder.isRecording())
+    if (! isNonRealtime()
+        && mCaptureTapLive.load (std::memory_order_acquire)
+        && mCaptureRecorder.isRecording())
         mCaptureRecorder.writeBlock (buffer);
 
     // ── Metronome click DSP ───────────────────────────────────────────────────
@@ -3741,19 +4015,40 @@ void VibeSynthProcessor::resetMasterTruePeakMax() noexcept
     mVibeGraph.resetMasterTruePeakMax();
 }
 
+// THREAD SAFETY (both of these, message thread only): AudioFileRecorder::
+// stopRecording destroys the ThreadedWriter straight after clearing its own
+// unfenced flag, so a block already past the tap's isRecording() test would
+// write into freed memory.  Close the gate, settle the in-flight block, THEN
+// stop the writer -- the same order the record path uses for mMasterTapLive.
 bool VibeSynthProcessor::startMasterCapture (const juce::File& target)
 {
-    if (mCaptureRecorder.isRecording()) mCaptureRecorder.stopRecording();
+    if (mCaptureRecorder.isRecording())
+    {
+        mCaptureTapLive.store (false, std::memory_order_release);
+        settleAudioThread();
+        mCaptureRecorder.stopRecording();
+    }
     target.getParentDirectory().createDirectory();
+    // Gate raised BEFORE the writer opens so no block at the head of the capture
+    // falls between the two stores: the tap still short-circuits on
+    // isRecording(), which AudioFileRecorder sets last.
+    mCaptureTapLive.store (true, std::memory_order_release);
     // Same latency trim as the record path: the master tap is post-PDC, so the
     // capture would otherwise start totalLatencySamples late against the grid.
-    return mCaptureRecorder.startRecording (target, mSampleRate, 2,
-        juce::jmax (0, mVibeGraph.totalLatencySamples.load (std::memory_order_relaxed)));
+    if (! mCaptureRecorder.startRecording (target, mSampleRate, 2,
+            juce::jmax (0, mVibeGraph.totalLatencySamples.load (std::memory_order_relaxed))))
+    {
+        mCaptureTapLive.store (false, std::memory_order_release);
+        return false;
+    }
+    return true;
 }
 
 juce::File VibeSynthProcessor::stopMasterCapture()
 {
     if (! mCaptureRecorder.isRecording()) return {};
+    mCaptureTapLive.store (false, std::memory_order_release);
+    settleAudioThread();
     return mCaptureRecorder.stopRecording();
 }
 
@@ -3945,7 +4240,17 @@ void VibeSynthProcessor::sweepOrphanFreezeFiles()
     // names would have deleted every per-pattern render as an orphan the first
     // time this ran.  Rusty included -- its 13 strips are indices under the
     // `rusty` name, and omitting it swept the entire frozen kit.
-    juce::StringArray livePrefixes;
+    // The pattern set travels WITH the prefix: ownership is per SCOPE, not per
+    // tab.  Deleting a pattern re-indexes the arrangement but leaves that
+    // pattern's renders on disk, so a prefix-only match keeps `pat7.wav` forever
+    // in a project that now has three patterns -- and Save As / Duplicate copies
+    // the whole Freeze folder, so the dead weight compounds per copy.
+    struct LiveFreezeScope
+    {
+        juce::String     prefix;
+        std::vector<int> patterns;
+    };
+    std::vector<LiveFreezeScope> livePrefixes;
     static constexpr TabKind kAll[] = { TabKind::Layers, TabKind::Bass,
                                         TabKind::Drums,  TabKind::Clips,
                                         TabKind::Vox,    TabKind::Inst,
@@ -3956,13 +4261,16 @@ void VibeSynthProcessor::sweepOrphanFreezeFiles()
             {
                 if (k == TabKind::Rusty)
                 {
-                    // One tab, thirteen strip indices.
+                    // One tab, thirteen strip indices -- and ONE shared roll, so
+                    // every strip's pattern set is the kit's (index 0).
+                    const auto pats = patternsWithContentFor (k, 0);
                     for (int s = 0; s < MixerChannelIds::kMaxRustyStrips; ++s)
-                        livePrefixes.add (freezeFilePrefixFor (k, s));
+                        livePrefixes.push_back ({ freezeFilePrefixFor (k, s), pats });
                 }
                 else
                 {
-                    livePrefixes.add (freezeFilePrefixFor (k, i));
+                    livePrefixes.push_back ({ freezeFilePrefixFor (k, i),
+                                              patternsWithContentFor (k, i) });
                 }
             }
 
@@ -3970,8 +4278,31 @@ void VibeSynthProcessor::sweepOrphanFreezeFiles()
     {
         const juce::String name = f.getFileName();
         bool owned = false;
+
         for (const auto& p : livePrefixes)
-            if (name.startsWith (p)) { owned = true; break; }
+        {
+            if (! name.startsWith (p.prefix)) continue;
+
+            // A tail we cannot parse is KEPT, the same conservative rule the
+            // whole-name match already applies to a name we cannot attribute.
+            owned = true;
+
+            const juce::String tail = name.substring (p.prefix.length()).dropLastCharacters (4);
+            if (tail == "song") break;
+
+            if (tail.startsWith ("pat"))
+            {
+                const juce::String digits = tail.substring (3);
+                if (digits.isNotEmpty() && digits.containsOnly ("0123456789"))
+                {
+                    const int patIdx = digits.getIntValue();
+                    owned = false;
+                    for (int live : p.patterns)
+                        if (live == patIdx) { owned = true; break; }
+                }
+            }
+            break;
+        }
 
         if (! owned) f.deleteFile();
     }
@@ -4059,7 +4390,7 @@ bool VibeSynthProcessor::freezeRustyKit (juce::String& outErr, bool byUser, bool
     if (tab->frozen)
     {
         retractFrozenSources (TabKind::Rusty, 0);
-        juce::Thread::sleep (20);
+        settleAudioThread();
     }
 
     tab->freezeStreams.clear();
@@ -4330,7 +4661,7 @@ bool VibeSynthProcessor::freezeTab (TabKind kind, int pageIndex,
     task->setFrozenPatternSource (nullptr, -1);
     task->setFrozenSource (nullptr);
     if (tab->frozen)
-        juce::Thread::sleep (20);
+        settleAudioThread();
 
     tab->freezeStreams.clear();
     tab->freezeStreams.push_back (std::move (stream));
@@ -4410,8 +4741,8 @@ void VibeSynthProcessor::unfreezeTab (TabKind kind, int pageIndex)
 
     // One block's settle between the null and the free: the null stops NEW
     // reads, but a block already past its load still holds the old pointer
-    // until it finishes (the page-dtor contract's 20 ms).
-    juce::Thread::sleep (20);
+    // until it finishes (the page-dtor contract's one-block settle).
+    settleAudioThread();
 
     tab->freezeStreams.clear();
     tab->freezePatternStreams.clear();
@@ -4566,7 +4897,7 @@ bool VibeSynthProcessor::refreshFreeze (TabKind kind, int pageIndex, juce::Strin
     // Same one-block settle as unfreezeTab, same reason: a block that loaded
     // the pointer before the null is still reading the streamer these clears
     // destroy.
-    juce::Thread::sleep (20);
+    settleAudioThread();
     tab->freezeStreams.clear();
     tab->freezePatternStreams.clear();
 
@@ -4672,67 +5003,52 @@ void VibeSynthProcessor::drainMeterAtomicsForUI()
         while (cur < v && ! mirror.compare_exchange_weak (cur, v, std::memory_order_relaxed))
         {}
     };
-    // Unified G1 bus drain — every bus (12 total: Layers / Bass / Drums /
-    // Master / FX / AudioClips / Vox / Vox2 / Inst / Inst2 / Inst3 / Rusty)
-    // follows the same chain post-QA-Eg: BusNode peakDb (audio-thread
+    // Unified G1 bus drain -- every bus drained below
+    // follows the same chain post-QA-Eg: BusNode peakDbL/R (audio-thread
     // publishPeakReading) -> VibeGraph member atomic (processBus exchange-
     // store) -> mirror (this drainAndMerge).
-    drainAndMerge (mLayersPeakDb,  mVibeGraph.layersPeakDb);
     drainAndMerge (mLayersPeakDbL, mVibeGraph.layersPeakDbL);
     drainAndMerge (mLayersPeakDbR, mVibeGraph.layersPeakDbR);
-    drainAndMerge (mBassPeakDb,    mVibeGraph.bassPeakDb);
     drainAndMerge (mBassPeakDbL,   mVibeGraph.bassPeakDbL);
     drainAndMerge (mBassPeakDbR,   mVibeGraph.bassPeakDbR);
-    drainAndMerge (mDrumsPeakDb,   mVibeGraph.drumsPeakDb);
     drainAndMerge (mDrumsPeakDbL,  mVibeGraph.drumsPeakDbL);
     drainAndMerge (mDrumsPeakDbR,  mVibeGraph.drumsPeakDbR);
-    drainAndMerge (mMasterPeakDb,  mVibeGraph.masterPeakDb);
     drainAndMerge (mMasterPeakDbL, mVibeGraph.masterPeakDbL);
     drainAndMerge (mMasterPeakDbR, mVibeGraph.masterPeakDbR);
-    drainAndMerge (mFxBusPeakDb,   mVibeGraph.fxBusPeakDb);
     drainAndMerge (mFxBusPeakDbL,  mVibeGraph.fxBusPeakDbL);
     drainAndMerge (mFxBusPeakDbR,  mVibeGraph.fxBusPeakDbR);
-    drainAndMerge (mAudioClipsBusPeakDb,  mVibeGraph.audioClipsPeakDb);
     drainAndMerge (mAudioClipsBusPeakDbL, mVibeGraph.audioClipsPeakDbL);
     drainAndMerge (mAudioClipsBusPeakDbR, mVibeGraph.audioClipsPeakDbR);
-    drainAndMerge (mVoxBusPeakDb,    mVibeGraph.voxBusPeakDb);
     drainAndMerge (mVoxBusPeakDbL,   mVibeGraph.voxBusPeakDbL);
     drainAndMerge (mVoxBusPeakDbR,   mVibeGraph.voxBusPeakDbR);
-    drainAndMerge (mVoxBus2PeakDb,   mVibeGraph.voxBus2PeakDb);
     drainAndMerge (mVoxBus2PeakDbL,  mVibeGraph.voxBus2PeakDbL);
     drainAndMerge (mVoxBus2PeakDbR,  mVibeGraph.voxBus2PeakDbR);
-    drainAndMerge (mInstBusPeakDb,   mVibeGraph.instBusPeakDb);
     drainAndMerge (mInstBusPeakDbL,  mVibeGraph.instBusPeakDbL);
     drainAndMerge (mInstBusPeakDbR,  mVibeGraph.instBusPeakDbR);
-    drainAndMerge (mInstBus2PeakDb,  mVibeGraph.instBus2PeakDb);
     drainAndMerge (mInstBus2PeakDbL, mVibeGraph.instBus2PeakDbL);
     drainAndMerge (mInstBus2PeakDbR, mVibeGraph.instBus2PeakDbR);
-    drainAndMerge (mInstBus3PeakDb,  mVibeGraph.instBus3PeakDb);
     drainAndMerge (mInstBus3PeakDbL, mVibeGraph.instBus3PeakDbL);
     drainAndMerge (mInstBus3PeakDbR, mVibeGraph.instBus3PeakDbR);
-    drainAndMerge (mRustyDrumsBusPeakDb,  mVibeGraph.rustyDrumsBusPeakDb);
     drainAndMerge (mRustyDrumsBusPeakDbL, mVibeGraph.rustyDrumsBusPeakDbL);
     drainAndMerge (mRustyDrumsBusPeakDbR, mVibeGraph.rustyDrumsBusPeakDbR);
     // TS6 (BLU-447) -- MISSED, fixed TS7 2026-07-31.  Both the graph-side and
     // processor-side atomics existed; nothing connected them, so the Plugins bus
     // strip's dBFS meter sat at its floor while the waveform meter (fed from a
     // different surface) worked -- which is exactly how Jeff spotted it.
-    drainAndMerge (mPluginsBusPeakDb,  mVibeGraph.pluginsBusPeakDb);
     drainAndMerge (mPluginsBusPeakDbL, mVibeGraph.pluginsBusPeakDbL);
     drainAndMerge (mPluginsBusPeakDbR, mVibeGraph.pluginsBusPeakDbR);
     // QA-Layout T10: secondary group buses.
-    drainAndMerge (mLayersBus2PeakDb,   mVibeGraph.layersBus2PeakDb);
     drainAndMerge (mLayersBus2PeakDbL,  mVibeGraph.layersBus2PeakDbL);
     drainAndMerge (mLayersBus2PeakDbR,  mVibeGraph.layersBus2PeakDbR);
-    drainAndMerge (mBassBus2PeakDb,     mVibeGraph.bassBus2PeakDb);
     drainAndMerge (mBassBus2PeakDbL,    mVibeGraph.bassBus2PeakDbL);
     drainAndMerge (mBassBus2PeakDbR,    mVibeGraph.bassBus2PeakDbR);
-    drainAndMerge (mClipsBus2PeakDb,    mVibeGraph.clipsBus2PeakDb);
     drainAndMerge (mClipsBus2PeakDbL,   mVibeGraph.clipsBus2PeakDbL);
     drainAndMerge (mClipsBus2PeakDbR,   mVibeGraph.clipsBus2PeakDbR);
-    drainAndMerge (mPluginsBus2PeakDb,  mVibeGraph.pluginsBus2PeakDb);
     drainAndMerge (mPluginsBus2PeakDbL, mVibeGraph.pluginsBus2PeakDbL);
     drainAndMerge (mPluginsBus2PeakDbR, mVibeGraph.pluginsBus2PeakDbR);
+    // QA-SOUNDNESS: second drum kit's bus.
+    drainAndMerge (mDrumsBus2PeakDbL,   mVibeGraph.drumsBus2PeakDbL);
+    drainAndMerge (mDrumsBus2PeakDbR,   mVibeGraph.drumsBus2PeakDbR);
 
     // QA-AudioMeters (2026-05-24): per-kind insert mirror drain.  Same
     // drainAndMerge primitive as the bus loop above; 8 InsertKinds.  Audio
@@ -4791,11 +5107,11 @@ void VibeSynthProcessor::drainMeterAtomicsForUI()
     mVibeGraph.promoteAllRackSlotSnapshots();
 }
 
-// 2026-05-07 (Batch 10): DSP-load measurement + overload protection.
+// 2026-05-07 (Batch 10): DSP-load measurement.
 // Runs after dispatchBlock, which blocks until every render task completes, so
 // (now - t0) is the block's real render wall-clock = how close it came to the
 // buffer deadline.  That headroom fraction is what the meter DISPLAYS and what
-// the overload / color-tier / voice-steal thresholds are calibrated against
+// the overload / color-tier thresholds are calibrated against
 // (Jeff, a1 2026-07-19).  Both MT and ST use the same wall-clock: under MT it
 // already spans the parallel render (the audio thread waits for the workers).
 // [Superseded QA-N (DIAG-02), which read the pool's summed per-task busy ticks
@@ -4803,11 +5119,14 @@ void VibeSynthProcessor::drainMeterAtomicsForUI()
 //  render reads >100% and false-tripped the overload/color at normal MT load.
 //  The sum-of-cores machinery is now meter-unused -> route to the Phase-6
 //  MT-diagnostic compile-gate (marathon 12e).]
-// Voice-stealing on sustained 85% overload fires regardless of worker count.
 void VibeSynthProcessor::measureDspLoadAndOverload (juce::int64 t0Ticks, int numSamples)
 {
     const double ticksPerSec = (double) juce::Time::getHighResolutionTicksPerSecond();
     const double bufDur      = numSamples / juce::jmax (1.0, mSampleRate);
+    // A zero-length block carries no measurement, and the smoothing below is
+    // keyed on the block duration, so there is nothing to fold in.  Snapping the
+    // meter to zero here would be a lie about the render.
+    if (bufDur <= 0.0) return;
     // a1: wall-clock render duration across dispatchBlock (both MT + ST) -- the
     // deadline-proximity headroom, not QA-N's sum-of-cores total work.
     const double workSeconds =
@@ -4817,34 +5136,24 @@ void VibeSynthProcessor::measureDspLoadAndOverload (juce::int64 t0Ticks, int num
     // exceeds ~2x the deadline), but the exact V1 cap stays a HOLD-FOR-Phase-6
     // UX call (marathon 12d = 2.0) -- see Main Plan §5 QA-Audit + Future State
     // CL-291.  Left at 10.f (harmless: wall-clock won't reach it) pending that pass.
-    const float  rawLoad  = (bufDur > 0.0)
-                                ? juce::jlimit (0.f, 10.f, (float)(workSeconds / bufDur))
-                                : 0.f;
+    const float  rawLoad  = juce::jlimit (0.f, 10.f, (float) (workSeconds / bufDur));
 
-    // Exponential smoothing - ~80 ms time constant at 512/44100 block rate
+    // Exponential smoothing with a block-INDEPENDENT time constant.  The former
+    // fixed 0.85 / 0.15 pair was a per-BLOCK coefficient, so the meter's real
+    // response ran from ~1 ms at 192k/32 to ~571 ms at 44.1k/4096 and only hit
+    // its documented value at the one point it was tuned on.  kDspLoadTauSeconds
+    // reproduces exactly that point: -(512/44100) / ln(0.85) = 71.4 ms.
+    static constexpr double kDspLoadTauSeconds = 0.0714;
+    if (bufDur != mDspLoadAlphaBufDur)
+    {
+        mDspLoadAlphaBufDur = bufDur;
+        mDspLoadAlpha = (float) (1.0 - std::exp (-bufDur / kDspLoadTauSeconds));
+    }
+
     const float prev     = mAudioDspLoad.load (std::memory_order_relaxed);
-    const float smoothed = prev * 0.85f + rawLoad * 0.15f;
+    const float smoothed = prev + mDspLoadAlpha * (rawLoad - prev);
     mAudioDspLoad.store (smoothed,         std::memory_order_relaxed);
     mDspOverload95.store (smoothed > 0.95f, std::memory_order_relaxed);
-
-    // Sustained 85% detection - accumulate samples while above threshold
-    if (smoothed > 0.85f)
-        mOverload85Samples += numSamples;
-    else
-        mOverload85Samples = 0;
-
-    const bool over85 = (mOverload85Samples > (int64_t)(0.5 * mSampleRate));
-    mDspOverload85.store (over85, std::memory_order_relaxed);
-
-    if (over85)
-    {
-        // Steal all synth voices (tail-off = true → release envelopes play,
-        // no hard click). DrumSynth + BassSynth one-shot voices decay naturally.
-        mSynth.allNotesOff (1, true);
-        // Back off the counter so we don't re-trigger every block -
-        // next steal can only fire after another 250 ms of sustained overload.
-        mOverload85Samples = (int64_t)(0.25 * mSampleRate);
-    }
 }
 
 // ── Parameter sync helpers ────────────────────────────────────────────────────
@@ -4857,128 +5166,154 @@ void VibeSynthProcessor::measureDspLoadAndOverload (juce::int64 t0Ticks, int num
 
 
 // ── Session B: universal EQ update helpers ────────────────────────────────────
-// Generic APVTS-to-EQ syncer. Reads 9 params x 8 bands for both mid + side
-// inner EQs and applies via the standard setBand* setters (all internally
-// CPU-guarded so no-change calls are free). Works for any EQ8MsDSP whose
-// params were lazily registered via addParamsForTrackEQ.
-void VibeSynthProcessor::updateEQFromApvts(EQ8MsDSP* eq,
-                                           const juce::String& midPrefix,
-                                           const juce::String& sidePrefix)
+namespace
 {
-    if (!eq) return;
-    auto get = [this](const juce::String& id) -> float
+    // The ONE canonical enumeration of every mixer-strip prefix that owns an EQ
+    // bank.  Its order defines the EQ param-pointer cache's strip-slot index, so
+    // the registration-side resolver and both audio-side sweeps stay in lockstep
+    // by construction -- there is no second list that could drift out of order.
+    struct EqBusEntry
     {
-        if (auto* p = apvts.getRawParameterValue(id)) return p->load();
-        return 0.f;
+        const char* prefix;
+        EQ8MsDSP* (*post) (VibeGraph&);
+        EQ8MsDSP* (*pre)  (VibeGraph&);
     };
 
-    auto syncSide = [&](EQ8DSP& side, const juce::String& prefix)
+    const EqBusEntry kEqBuses[] = {
+        { "mixer_layers",     [](VibeGraph& g) { return g.getLayersBusEQ();      }, [](VibeGraph& g) { return g.getLayersBusPreEQ();      } },
+        { "mixer_bass",       [](VibeGraph& g) { return g.getBassBusEQ();        }, [](VibeGraph& g) { return g.getBassBusPreEQ();        } },
+        { "mixer_drums",      [](VibeGraph& g) { return g.getDrumsBusEQ();       }, [](VibeGraph& g) { return g.getDrumsBusPreEQ();       } },
+        { "mixer_master",     [](VibeGraph& g) { return g.getMasterEQ();         }, [](VibeGraph& g) { return g.getMasterPreEQ();         } },
+        { "mixer_fx",         [](VibeGraph& g) { return g.getEffectsBusEQ();     }, [](VibeGraph& g) { return g.getEffectsBusPreEQ();     } },
+        { "mixer_clipsbus",   [](VibeGraph& g) { return g.getAudioClipsBusEQ();  }, [](VibeGraph& g) { return g.getAudioClipsBusPreEQ();  } },
+        { "mixer_voxbus",     [](VibeGraph& g) { return g.getVoxBusEQ();         }, [](VibeGraph& g) { return g.getVoxBusPreEQ();         } },
+        { "mixer_instbus",    [](VibeGraph& g) { return g.getInstBusEQ();        }, [](VibeGraph& g) { return g.getInstBusPreEQ();        } },
+        { "mixer_voxbus2",    [](VibeGraph& g) { return g.getVoxBus2EQ();        }, [](VibeGraph& g) { return g.getVoxBus2PreEQ();        } },
+        { "mixer_instbus2",   [](VibeGraph& g) { return g.getInstBus2EQ();       }, [](VibeGraph& g) { return g.getInstBus2PreEQ();       } },
+        { "mixer_instbus3",   [](VibeGraph& g) { return g.getInstBus3EQ();       }, [](VibeGraph& g) { return g.getInstBus3PreEQ();       } },
+        { "mixer_rustybus",   [](VibeGraph& g) { return g.getRustyDrumsBusEQ();  }, [](VibeGraph& g) { return g.getRustyDrumsBusPreEQ();  } },  // J-6
+        { "mixer_pluginbus",  [](VibeGraph& g) { return g.getPluginsBusEQ();     }, [](VibeGraph& g) { return g.getPluginsBusPreEQ();     } },  // TS6 (missed, fixed TS7)
+        { "mixer_layersbus2", [](VibeGraph& g) { return g.getLayersBus2EQ();     }, [](VibeGraph& g) { return g.getLayersBus2PreEQ();     } },  // T10
+        { "mixer_bassbus2",   [](VibeGraph& g) { return g.getBassBus2EQ();       }, [](VibeGraph& g) { return g.getBassBus2PreEQ();       } },
+        { "mixer_clipsbus2",  [](VibeGraph& g) { return g.getClipsBus2EQ();      }, [](VibeGraph& g) { return g.getClipsBus2PreEQ();      } },
+        { "mixer_pluginbus2", [](VibeGraph& g) { return g.getPluginsBus2EQ();    }, [](VibeGraph& g) { return g.getPluginsBus2PreEQ();    } },
+        { "mixer_drumsbus2",  [](VibeGraph& g) { return g.getDrumsBus2EQ();      }, [](VibeGraph& g) { return g.getDrumsBus2PreEQ();      } },  // QA-SOUNDNESS
+    };
+
+    struct EqInsertFamily { VibeGraph::InsertKind kind; const char* prefixBase; int count; };
+
+    constexpr EqInsertFamily kEqInsertFamilies[] = {
+        { VibeGraph::InsertKind::Layer,  "mixer_layer_",  kMaxLayerPages },
+        { VibeGraph::InsertKind::Bass,   "mixer_bass_",   kMaxBassPages  },
+        { VibeGraph::InsertKind::Drum,   "mixer_drum_",   kMaxDrumPages  },
+        { VibeGraph::InsertKind::Audio,  "mixer_audio_",  VibeSynthProcessor::kMaxAudioRows },
+        { VibeGraph::InsertKind::Aux,    "mixer_aux_",    MixerChannelIds::kMaxAuxStrips    },
+        { VibeGraph::InsertKind::Vox,    "mixer_vox_",    MixerChannelIds::kMaxVoxStrips    },
+        { VibeGraph::InsertKind::Inst,   "mixer_inst_",   MixerChannelIds::kMaxInstStrips   },
+        { VibeGraph::InsertKind::Rusty,  "mixer_rusty_",  MixerChannelIds::kMaxRustyStrips  },  // J-6
+        { VibeGraph::InsertKind::Plugin, "mixer_plugin_", MixerChannelIds::kMaxPluginStrips },  // TS6
+    };
+
+    constexpr int eqInsertSlotTotal()
     {
-        for (int b = 0; b < 8; ++b)
+        int n = 0;
+        for (const auto& f : kEqInsertFamilies) n += f.count;
+        return n;
+    }
+} // namespace
+
+// Generic EQ syncer.  Reads the full per-band set -- 9 static params plus the
+// 8-param Dynamic block when registered -- x 8 bands for both mid + side inner
+// EQs and applies via the standard setBand* setters (all internally CPU-guarded
+// so no-change calls are free).
+//
+// AUDIO THREAD.  Every value arrives through the pre-resolved pointer cache
+// (see mEqParamCache in the header) -- no APVTS map lookup, no juce::String, no
+// allocation on this path.  A band whose Freq pointer is still null has not been
+// registered yet (new InsertNode whose ensureMixerStripParams has not run) and
+// is skipped, exactly as the old getParameter existence test did.
+void VibeSynthProcessor::updateEQFromCache (EQ8MsDSP* eq, int stripSlot, int bank)
+{
+    if (eq == nullptr || stripSlot < 0 || stripSlot >= kEqNumStripSlots) return;
+
+    auto syncSide = [this, stripSlot, bank] (EQ8DSP& side, int sideIdx)
+    {
+        for (int b = 0; b < kEqBands; ++b)
         {
-            juce::String bp = prefix + juce::String(b);
-            // Param existence check via getRawParameterValue returning null for
-            // unregistered params is handled by the get() lambda returning 0.f;
-            // we skip the band entirely if Freq isn't registered (implies this
-            // prefix has no params yet - new InsertNode not yet ensured etc).
-            if (!apvts.getParameter(bp + "Freq")) continue;
+            const auto& slots = mEqParamCache[(size_t) eqCacheIndex (stripSlot, bank, sideIdx, b)];
+
+            // Freq is the band's publication flag: the message thread stores it
+            // LAST with release, so a non-null read here makes all sixteen other
+            // pointers visible and the relaxed loads below are safe.
+            auto* freqP = slots.p[eqSlotFreq].load (std::memory_order_acquire);
+            if (freqP == nullptr) continue;
+
+            auto get = [&slots] (int which) -> float
+            {
+                if (auto* p = slots.p[which].load (std::memory_order_relaxed))
+                    return p->load (std::memory_order_relaxed);
+                return 0.f;
+            };
 
             auto cur = side.getBand(b);
-            float f  = get(bp + "Freq");
+            float f  = freqP->load (std::memory_order_relaxed);
             if (f  != cur.freq)   side.setBandFreq (b, f);
-            float gn = get(bp + "Gain");
+            float gn = get(eqSlotGain);
             if (gn != cur.gainDb) side.setBandGain (b, gn);
-            float q  = get(bp + "Q");
+            float q  = get(eqSlotQ);
             if (q  != cur.q)      side.setBandQ    (b, q);
-            int   t  = (int) get(bp + "Type");
+            int   t  = (int) get(eqSlotType);
             if (t  != cur.type)   side.setBandType (b, t);
-            int   s  = (int) get(bp + "Slope");
+            int   s  = (int) get(eqSlotSlope);
             if (s  != cur.slope)  side.setBandSlope(b, s);
-            side.setBandOn    (b, get(bp + "On")   > 0.5f);
-            side.setBandMuted (b, get(bp + "Mute") > 0.5f);
-            side.setBandSoloed(b, get(bp + "Solo") > 0.5f);
-            int ch = juce::jlimit(0, 4, (int) get(bp + "Channel"));
+            side.setBandOn    (b, get(eqSlotOn)   > 0.5f);
+            side.setBandMuted (b, get(eqSlotMute) > 0.5f);
+            side.setBandSoloed(b, get(eqSlotSolo) > 0.5f);
+            int ch = juce::jlimit(0, 4, (int) get(eqSlotChannel));
             if (ch != cur.channel) side.setBandChannel(b, ch);
-            // 12j Dynamic EQ params (read only when registered - Dynamic param's
+            // 12j Dynamic EQ params (read only when registered - Dynamic's
             // absence short-circuits all subsequent reads cheaply).
-            if (apvts.getParameter(bp + "Dynamic"))
+            if (slots.p[eqSlotDynamic].load (std::memory_order_relaxed) != nullptr)
             {
-                side.setBandDynamic  (b, get(bp + "Dynamic") > 0.5f);
-                float thr = get(bp + "Threshold"); if (thr != cur.threshold) side.setBandThreshold(b, thr);
-                float rt  = get(bp + "Ratio");     if (rt  != cur.ratio)     side.setBandRatio    (b, rt);
-                float at  = get(bp + "Attack");    if (at  != cur.attack)    side.setBandAttack   (b, at);
-                float re  = get(bp + "Release");   if (re  != cur.release)   side.setBandRelease  (b, re);
-                float rg  = get(bp + "Range");     if (rg  != cur.rangeDb)   side.setBandRange    (b, rg);
-                side.setBandUpward(b, get(bp + "Upward") > 0.5f);
-                int sc = (int) get(bp + "ScSource");
+                side.setBandDynamic  (b, get(eqSlotDynamic) > 0.5f);
+                float thr = get(eqSlotThreshold); if (thr != cur.threshold) side.setBandThreshold(b, thr);
+                float rt  = get(eqSlotRatio);     if (rt  != cur.ratio)     side.setBandRatio    (b, rt);
+                float at  = get(eqSlotAttack);    if (at  != cur.attack)    side.setBandAttack   (b, at);
+                float re  = get(eqSlotRelease);   if (re  != cur.release)   side.setBandRelease  (b, re);
+                float rg  = get(eqSlotRange);     if (rg  != cur.rangeDb)   side.setBandRange    (b, rg);
+                side.setBandUpward(b, get(eqSlotUpward) > 0.5f);
+                int sc = (int) get(eqSlotScSource);
                 if (sc != cur.scSourceId) side.setBandScSource(b, sc);
             }
         }
     };
 
-    if (midPrefix.isNotEmpty())  syncSide(eq->mid(),  midPrefix);
-    if (sidePrefix.isNotEmpty()) syncSide(eq->side(), sidePrefix);
+    syncSide (eq->mid(),  0);
+    syncSide (eq->side(), 1);
 }
 
-// Iterate every post-rack EQ instance (6 buses + up to 94 inserts) and sync it
-// from its APVTS prefix. Safe to call from processBlock every frame - getters
+// Iterate every post-rack EQ instance (18 buses + the insert families) and sync
+// it from its cached param pointers. Safe to call from processBlock - getters
 // return nullptr for indices that have no registered InsertNode, and the inner
-// band loop short-circuits on unregistered prefixes.
+// band loop short-circuits on strips whose params are not cached yet.
 void VibeSynthProcessor::updateAllPostRackEQsFromApvts()
 {
-    // Bus post-rack EQs (mixer_layers / mixer_bass / mixer_drums /
-    // mixer_master / mixer_fx / mixer_clipsbus).
-    struct BusPair { const char* prefix; EQ8MsDSP* (*getter)(VibeGraph&); };
-    static const BusPair kBusEQs[] = {
-        { "mixer_layers",   [](VibeGraph& g) { return g.getLayersBusEQ();    } },
-        { "mixer_bass",     [](VibeGraph& g) { return g.getBassBusEQ();      } },
-        { "mixer_drums",    [](VibeGraph& g) { return g.getDrumsBusEQ();     } },
-        { "mixer_master",   [](VibeGraph& g) { return g.getMasterEQ();       } },
-        { "mixer_fx",       [](VibeGraph& g) { return g.getEffectsBusEQ();   } },
-        { "mixer_clipsbus", [](VibeGraph& g) { return g.getAudioClipsBusEQ();} },
-        { "mixer_voxbus",   [](VibeGraph& g) { return g.getVoxBusEQ();       } },
-        { "mixer_instbus",  [](VibeGraph& g) { return g.getInstBusEQ();      } },
-        { "mixer_voxbus2",  [](VibeGraph& g) { return g.getVoxBus2EQ();      } },
-        { "mixer_instbus2", [](VibeGraph& g) { return g.getInstBus2EQ();     } },
-        { "mixer_instbus3", [](VibeGraph& g) { return g.getInstBus3EQ();     } },
-        { "mixer_rustybus", [](VibeGraph& g) { return g.getRustyDrumsBusEQ(); } },  // J-6
-        { "mixer_pluginbus", [](VibeGraph& g) { return g.getPluginsBusEQ();  } },  // TS6 (missed, fixed TS7)
-        { "mixer_layersbus2",  [](VibeGraph& g) { return g.getLayersBus2EQ();  } },  // T10
-        { "mixer_bassbus2",    [](VibeGraph& g) { return g.getBassBus2EQ();    } },
-        { "mixer_clipsbus2",   [](VibeGraph& g) { return g.getClipsBus2EQ();   } },
-        { "mixer_pluginbus2",  [](VibeGraph& g) { return g.getPluginsBus2EQ(); } },
-    };
-    for (const auto& bp : kBusEQs)
-    {
-        if (auto* eq = bp.getter(mVibeGraph))
-            updateEQFromApvts(eq,
-                              juce::String(bp.prefix) + "_mid_eq",
-                              juce::String(bp.prefix) + "_side_eq");
-    }
+    static_assert ((int) (sizeof (kEqBuses) / sizeof (kEqBuses[0])) == kEqNumBusSlots,
+                   "kEqBuses and kEqNumBusSlots must agree - the EQ cache is indexed by both");
+    static_assert (eqInsertSlotTotal() == kEqNumInsertSlots,
+                   "kEqInsertFamilies and kEqNumInsertSlots must agree - the EQ cache is indexed by both");
 
-    // Insert post-rack EQs (Layer / Bass / Drum / Audio / Aux / Vox / Inst).
-    struct InsertSet { VibeGraph::InsertKind kind; const char* prefixBase; int count; };
-    static const InsertSet kInsertSets[] = {
-        { VibeGraph::InsertKind::Layer, "mixer_layer_", kMaxLayerPages },
-        { VibeGraph::InsertKind::Bass,  "mixer_bass_",  kMaxBassPages  },
-        { VibeGraph::InsertKind::Drum,  "mixer_drum_",  kMaxDrumPages  },
-        { VibeGraph::InsertKind::Audio, "mixer_audio_", kMaxAudioRows  },
-        { VibeGraph::InsertKind::Aux,   "mixer_aux_",   MixerChannelIds::kMaxAuxStrips },
-        { VibeGraph::InsertKind::Vox,   "mixer_vox_",   MixerChannelIds::kMaxVoxStrips  },
-        { VibeGraph::InsertKind::Inst,  "mixer_inst_",  MixerChannelIds::kMaxInstStrips },
-        { VibeGraph::InsertKind::Rusty, "mixer_rusty_", MixerChannelIds::kMaxRustyStrips }, // J-6
-        { VibeGraph::InsertKind::Plugin, "mixer_plugin_", MixerChannelIds::kMaxPluginStrips }, // TS6
-    };
-    for (const auto& is : kInsertSets)
+    for (int i = 0; i < kEqNumBusSlots; ++i)
+        if (auto* eq = kEqBuses[i].post (mVibeGraph))
+            updateEQFromCache (eq, i, kEqBankPost);
+
+    int slot = kEqNumBusSlots;
+    for (const auto& fam : kEqInsertFamilies)
     {
-        for (int i = 0; i < is.count; ++i)
-        {
-            if (auto* eq = mVibeGraph.getInsertEQ(is.kind, i))
-            {
-                const juce::String prefix = juce::String(is.prefixBase) + juce::String(i);
-                updateEQFromApvts(eq, prefix + "_mid_eq", prefix + "_side_eq");
-            }
-        }
+        for (int i = 0; i < fam.count; ++i)
+            if (auto* eq = mVibeGraph.getInsertEQ (fam.kind, i))
+                updateEQFromCache (eq, slot + i, kEqBankPost);
+        slot += fam.count;
     }
 }
 
@@ -4988,74 +5323,150 @@ void VibeSynthProcessor::updateAllPostRackEQsFromApvts()
 // per processBlock alongside the post-rack version.
 void VibeSynthProcessor::updateAllPreRackEQsFromApvts()
 {
-    // Bus pre-rack EQs.
-    struct BusPair { const char* prefix; EQ8MsDSP* (*getter)(VibeGraph&); };
-    static const BusPair kBusPreEQs[] = {
-        { "mixer_layers",   [](VibeGraph& g) { return g.getLayersBusPreEQ();    } },
-        { "mixer_bass",     [](VibeGraph& g) { return g.getBassBusPreEQ();      } },
-        { "mixer_drums",    [](VibeGraph& g) { return g.getDrumsBusPreEQ();     } },
-        { "mixer_master",   [](VibeGraph& g) { return g.getMasterPreEQ();       } },
-        { "mixer_fx",       [](VibeGraph& g) { return g.getEffectsBusPreEQ();   } },
-        { "mixer_clipsbus", [](VibeGraph& g) { return g.getAudioClipsBusPreEQ();} },
-        { "mixer_voxbus",   [](VibeGraph& g) { return g.getVoxBusPreEQ();       } },
-        { "mixer_instbus",  [](VibeGraph& g) { return g.getInstBusPreEQ();      } },
-        { "mixer_voxbus2",  [](VibeGraph& g) { return g.getVoxBus2PreEQ();      } },
-        { "mixer_instbus2", [](VibeGraph& g) { return g.getInstBus2PreEQ();     } },
-        { "mixer_instbus3", [](VibeGraph& g) { return g.getInstBus3PreEQ();     } },
-        { "mixer_rustybus", [](VibeGraph& g) { return g.getRustyDrumsBusPreEQ(); } },  // J-6
-        { "mixer_pluginbus", [](VibeGraph& g) { return g.getPluginsBusPreEQ(); } },   // TS6 (missed, fixed TS7)
-        { "mixer_layersbus2",  [](VibeGraph& g) { return g.getLayersBus2PreEQ();  } },  // T10
-        { "mixer_bassbus2",    [](VibeGraph& g) { return g.getBassBus2PreEQ();    } },
-        { "mixer_clipsbus2",   [](VibeGraph& g) { return g.getClipsBus2PreEQ();   } },
-        { "mixer_pluginbus2",  [](VibeGraph& g) { return g.getPluginsBus2PreEQ(); } },
-    };
-    for (const auto& bp : kBusPreEQs)
-    {
-        if (auto* eq = bp.getter(mVibeGraph))
-            updateEQFromApvts(eq,
-                              juce::String(bp.prefix) + "_preeq_mid_eq",
-                              juce::String(bp.prefix) + "_preeq_side_eq");
-    }
+    for (int i = 0; i < kEqNumBusSlots; ++i)
+        if (auto* eq = kEqBuses[i].pre (mVibeGraph))
+            updateEQFromCache (eq, i, kEqBankPre);
 
-    // Insert pre-rack EQs (Layer / Bass / Drum / Audio / Aux / Vox / Inst).
-    struct InsertSet { VibeGraph::InsertKind kind; const char* prefixBase; int count; };
-    static const InsertSet kInsertSets[] = {
-        { VibeGraph::InsertKind::Layer, "mixer_layer_", kMaxLayerPages },
-        { VibeGraph::InsertKind::Bass,  "mixer_bass_",  kMaxBassPages  },
-        { VibeGraph::InsertKind::Drum,  "mixer_drum_",  kMaxDrumPages  },
-        { VibeGraph::InsertKind::Audio, "mixer_audio_", kMaxAudioRows  },
-        { VibeGraph::InsertKind::Aux,   "mixer_aux_",   MixerChannelIds::kMaxAuxStrips },
-        { VibeGraph::InsertKind::Vox,   "mixer_vox_",   MixerChannelIds::kMaxVoxStrips  },
-        { VibeGraph::InsertKind::Inst,  "mixer_inst_",  MixerChannelIds::kMaxInstStrips },
-        { VibeGraph::InsertKind::Rusty, "mixer_rusty_", MixerChannelIds::kMaxRustyStrips }, // J-6
-        { VibeGraph::InsertKind::Plugin, "mixer_plugin_", MixerChannelIds::kMaxPluginStrips }, // TS6
-    };
-    for (const auto& is : kInsertSets)
+    int slot = kEqNumBusSlots;
+    for (const auto& fam : kEqInsertFamilies)
     {
-        for (int i = 0; i < is.count; ++i)
-        {
-            if (auto* eq = mVibeGraph.getInsertPreEQ(is.kind, i))
-            {
-                const juce::String prefix = juce::String(is.prefixBase) + juce::String(i);
-                updateEQFromApvts(eq, prefix + "_preeq_mid_eq", prefix + "_preeq_side_eq");
-            }
-        }
+        for (int i = 0; i < fam.count; ++i)
+            if (auto* eq = mVibeGraph.getInsertPreEQ (fam.kind, i))
+                updateEQFromCache (eq, slot + i, kEqBankPre);
+        slot += fam.count;
     }
+}
+
+// Band values are APVTS-backed, so File > New's default sweep reaches them
+// through the two passes above.  Main level, phase mode, linear precision,
+// anti-cramping, proportional Q and the A/B spare have no parameter behind them
+// -- they live only in the DSP and in the saved rack blob, which File > Open
+// restores via VibeGraph::applyRackStates and File > New does not write at all.
+// Without this, a blank project keeps the previous one's output trim (audible:
+// EQ8DSP::isIdentity refuses to short-circuit on a non-zero main level) and its
+// linear-phase FFT latency (VibeGraph sums it into PDC), with the previous
+// project's B bank still sitting in the spare.
+//
+// THREAD SAFETY: setPhaseMode allocates and frees the linear-phase processor and
+// the band push writes coefficients processBlock reads, so the caller runs this
+// under the project-load shield with a settle already paid.
+void VibeSynthProcessor::resetEqStatesToDefaults()
+{
+    auto forEachSide = [this] (auto&& fn)
+    {
+        auto both = [&fn] (EQ8MsDSP* eq)
+        {
+            if (eq == nullptr) return;
+            fn (eq->mid());
+            fn (eq->side());
+        };
+
+        for (int i = 0; i < kEqNumBusSlots; ++i)
+        {
+            both (kEqBuses[i].post (mVibeGraph));
+            both (kEqBuses[i].pre  (mVibeGraph));
+        }
+        for (const auto& fam : kEqInsertFamilies)
+            for (int i = 0; i < fam.count; ++i)
+            {
+                both (mVibeGraph.getInsertEQ    (fam.kind, i));
+                both (mVibeGraph.getInsertPreEQ (fam.kind, i));
+            }
+    };
+
+    // Back to the main bank BEFORE the band sync: swapWithSpare exchanges the
+    // two banks, so leaving it until afterwards would push the freshly
+    // defaulted bands back into the spare and pull the old ones into view.
+    forEachSide ([] (EQ8DSP& s) { if (s.isViewingSpare()) s.swapWithSpare(); });
+
+    // Land the defaulted band values now rather than on the next block, so the
+    // saveToSpare below seeds the spare from defaults and not from the bank the
+    // outgoing project left behind.
+    updateAllPostRackEQsFromApvts();
+    updateAllPreRackEQsFromApvts();
+
+    forEachSide ([] (EQ8DSP& s)
+    {
+        s.lockSpare (false);
+        s.saveToSpare();
+        s.setPhaseMode (EQ8DSP::PhaseMode::Standard);
+        s.setLinearPhasePrecision (EQ8DSP::kDefaultLinearPrec);
+        s.setAntiCramping (false);
+        s.setProportionalQ (true);
+        s.setMainLevel (0.0f);
+    });
+}
+
+// ── CL-281 decode-once cache helpers ─────────────────────────────────────────
+
+juce::String VibeSynthProcessor::clipAudioCacheKey (const juce::File& resolvedFile)
+{
+    if (! resolvedFile.existsAsFile())
+        return {};
+
+    // Identity is the RESOLVED path, which is what collapses "library:x",
+    // "mysamples:x" and the absolute spelling of one file onto one entry.
+    // Lower-cased because this is a Windows-only app and its paths are
+    // case-insensitive, so two spellings that differ only in case ARE the same
+    // file and must not decode twice.
+    //
+    // Size + modification time are the change stamp: the decoded PCM is a
+    // function of the file's bytes and nothing else, so a file edited or
+    // replaced under a live project keys somewhere new and decodes again
+    // instead of playing stale audio.
+    return resolvedFile.getFullPathName().toLowerCase()
+         + "|" + juce::String (resolvedFile.getSize())
+         + "|" + juce::String (resolvedFile.getLastModificationTime().toMilliseconds());
+}
+
+DecodedClipAudioPtr
+VibeSynthProcessor::decodeClipAudioIfCacheable (juce::AudioFormatReader& reader)
+{
+    // The threshold and the stereo fold are AudioClipStreamer's, read from that
+    // class rather than restated, so cached and streamed clips split at exactly
+    // one place: a file the streamer would have RAM-loaded is cached instead,
+    // and everything bigger keeps streaming.
+    const juce::int64 len = reader.lengthInSamples;
+    const int numCh = (int) juce::jmin ((juce::int64) 2, (juce::int64) reader.numChannels);
+    if (len <= 0 || numCh <= 0)
+        return {};
+
+    const juce::int64 totalBytes = (juce::int64) sizeof (float)
+                                       * (juce::int64) numCh * len;
+    if (totalBytes <= 0 || totalBytes > AudioClipStreamer::kRamThresholdBytes)
+        return {};
+
+    auto decoded = std::make_shared<DecodedClipAudio>();
+    decoded->fileSampleRate  = (reader.sampleRate > 0.0) ? reader.sampleRate : 44100.0;
+    decoded->numChannels     = numCh;
+    decoded->lengthInSamples = len;
+    decoded->samples.setSize (numCh, (int) len, false, true, false);
+    reader.read (&decoded->samples, 0, (int) len, 0, true, true);
+    return decoded;
 }
 
 // ── Audio clip playback ───────────────────────────────────────────────────────
 void VibeSynthProcessor::rebuildAudioClipPlayers()
 {
     if (!mPatternManager) return;
-    // C.5b (post-revert): Builder grid is uniform 4-beat-per-bar (song-level
-    // TS markers are decorative-only).
-    constexpr double kBPB = 4.0;
 
     // 2026-05-06 (Batch 9c B1): build a fresh AudioClipSnapshot + assign it
     // a new monotonic generation.  Atomic-exchanges the publication pointer
-    // and retires the OLD snapshot to mClipRetirement so its slow
-    // ~AudioClipStreamer (file close + bg-thread unregister) runs on the
-    // GC drainer thread instead of here on the message thread.
+    // and retires the OLD snapshot to mClipRetirement so its slow teardown --
+    // ~AudioClipStreamer (file close + bg-thread unregister), plus the release
+    // of any cached PCM this was the last holder of -- runs on the GC drainer
+    // thread instead of here on the message thread.
+    // Set when this pass banks an undecodable-clip entry.  A live edit has to
+    // drain it: the store is process-wide, so an entry left banked by a
+    // drag-drop surfaces later under whatever unrelated gesture happens to
+    // drain next, wearing that gesture's source noun.
+    bool bankedUnreadable = false;
+
+    // CL-281: every cache key this pass actually used.  Anything left out of it
+    // is referenced by no clip in the arrangement being published, which is the
+    // eviction rule (see mDecodedClipCache).
+    std::set<juce::String> liveCacheKeys;
+
     auto newSnap = std::make_unique<AudioClipSnapshot>();
     auto& newPlayers = newSnap->players;
     for (int i = 0; i < mPatternManager->getNumBlocks(); ++i)
@@ -5079,9 +5490,41 @@ void VibeSynthProcessor::rebuildAudioClipPlayers()
         // current project folder.  Absolute paths fall through unchanged
         // (legacy pre-P4 projects stored full paths).
         const auto resolvedFile = resolveProjectFile (blk.audioFilePath);
-        std::unique_ptr<juce::AudioFormatReader> rawReader (
-            mAudioFormatManager.createReaderFor (resolvedFile));
-        if (!rawReader) continue;
+
+        // CL-281: the cache is consulted BEFORE the reader is opened, so a hit
+        // costs two stat calls instead of a file open plus a full decode.  This
+        // is what makes the same file placed four times decode once, and what
+        // stops every arrangement edit re-decoding the whole timeline.  A file
+        // replaced on disk changes size or modification time, so it keys to a
+        // different entry and decodes again.
+        const juce::String cacheKey = clipAudioCacheKey (resolvedFile);
+        DecodedClipAudioPtr cached;
+        if (cacheKey.isNotEmpty())
+        {
+            const auto it = mDecodedClipCache.find (cacheKey);
+            if (it != mDecodedClipCache.end())
+                cached = it->second;
+        }
+
+        std::unique_ptr<juce::AudioFormatReader> rawReader;
+        if (cached == nullptr)
+            rawReader.reset (mAudioFormatManager.createReaderFor (resolvedFile));
+
+        if (cached == nullptr && rawReader == nullptr)
+        {
+            // Present-but-undecodable (truncated WAV, sync artifact): the block
+            // stays visible on the grid and contributes silence, so it must not
+            // vanish into the missing-file report's blind spot.  Deduped per
+            // path -- this rebuild runs on every arrangement edit.
+            if (resolvedFile.existsAsFile()
+                && ! mReportedUnreadableClips.contains (blk.audioFilePath))
+            {
+                mReportedUnreadableClips.add (blk.audioFilePath);
+                MissingFileReport::add ("Clip audio (failed to load)", blk.audioFilePath);
+                bankedUnreadable = true;
+            }
+            continue;
+        }
 
         AudioClipPlayer p;
         // QA-Ea Task 0c (2026-05-20 - Option A slip-edit + sub-bar) / 8A:
@@ -5101,7 +5544,8 @@ void VibeSynthProcessor::rebuildAudioClipPlayers()
         p.routeChannel   = blk.routeChannel;   // I-16 G-9: Vox/Inst page link
         p.originalBPM    = (blk.originalBPM > 0.f) ? blk.originalBPM : 120.f;
         p.stretchMode    = blk.stretchMode;
-        p.fileSampleRate = rawReader->sampleRate;
+        p.fileSampleRate = (cached != nullptr) ? cached->fileSampleRate
+                                               : rawReader->sampleRate;
         // QA-Ea Task 0c (FL pre-roll record + non-destructive clip trim):
         // copy the block's file-position offset to the player so the audio
         // thread can read it without a back-pointer into ArrangementBlock.
@@ -5114,18 +5558,38 @@ void VibeSynthProcessor::rebuildAudioClipPlayers()
             if (mPatternManager->getAudioLibraryPath(li) == blk.audioFilePath)
                 { p.chokeGroup = mPatternManager->getAudioLibraryChokeGroup(li); break; }
 
-        // Create disk-streaming player.
-        // seek(0) synchronously pre-fills 2 seconds so the clip plays immediately.
-        p.streamer = std::make_unique<AudioClipStreamer> (std::move (rawReader),
-                                                         mAudioFileThread);
-        p.streamer->seek (0);
+        // CL-281: a cache MISS on a file at or under the RAM threshold decodes
+        // here, once, and the result is banked for every later clip and every
+        // later rebuild.  Anything bigger returns null and keeps the streaming
+        // path, whose seek(0) synchronously pre-fills kPrefillSeconds so the
+        // clip plays immediately.
+        if (cached == nullptr)
+        {
+            cached = decodeClipAudioIfCacheable (*rawReader);
+            if (cached != nullptr && cacheKey.isNotEmpty())
+                mDecodedClipCache[cacheKey] = cached;
+        }
+
+        if (cached != nullptr)
+        {
+            if (cacheKey.isNotEmpty())
+                liveCacheKeys.insert (cacheKey);
+            p.source = std::make_unique<ClipSource> (std::move (cached));
+        }
+        else
+        {
+            auto stream = std::make_unique<AudioClipStreamer> (std::move (rawReader),
+                                                               mAudioFileThread);
+            stream->seek (0);
+            p.source = std::make_unique<ClipSource> (std::move (stream));
+        }
 
         // QA-ClipPlayback Task 3: always create the phase vocoder so length-preserving
         // pitch (and reverse) work live on any clip, not just BPM-stretched ones.  It
         // is bypassed in the render when the clip is forward + unstretched + unpitched
         // (usePV false), so no CPU cost when idle -- only the buffer memory.
         {
-            const int pvCh = p.streamer->getNumChannels();
+            const int pvCh = p.source->getNumChannels();
             p.vocoder = std::make_unique<PhaseVocoder> (pvCh);
             // Pre-allocate scratch buffers - sized for worst-case block + PV headroom.
             // pvInBuf:  file samples fed into PV each block (up to ~4x block size for large stretch)
@@ -5135,17 +5599,25 @@ void VibeSynthProcessor::rebuildAudioClipPlayers()
             const int pvOutCap = maxBlockSamples * 4 + PhaseVocoder::kFFTSize;
             p.pvInBuf .setSize (pvCh, pvInCap,  false, true, false);
             p.pvOutBuf.setSize (pvCh, pvOutCap, false, true, false);
+            // The OLA queue has to admit what this consumer can ask for in one
+            // pull, and peekOutput is already clamped to pvOutBuf -- so pvOutCap
+            // IS the maximum, not a new constant.  Without this the vocoder keeps
+            // its fixed default queue and the output half stays undersized.
+            p.vocoder->prepare (pvOutCap);
         }
 
         p.expectedFilePos = 0;
         // QA-ClipPlayback Task 2: prepare the per-clip control-chain filter (message
         // thread -- allocation ok).  SVF lowpass, 2 ch, current sample rate.  maxBlock
-        // is nominal (processSample doesn't allocate per-block).
+        // is nominal (processSample doesn't allocate per-block).  The filter bakes
+        // its coefficients against the rate given here and never re-reads it, so
+        // prepareToPlay re-prepares every live player -- see the sweep there.
         {
-            juce::dsp::ProcessSpec spec { mSampleRate, (juce::uint32) 8192, (juce::uint32) 2 };
+            const juce::dsp::ProcessSpec spec { mSampleRate,
+                                                (juce::uint32) juce::jmax (1, mBlockSize),
+                                                (juce::uint32) 2 };
             p.clipFilter.prepare (spec);
             p.clipFilter.setType (juce::dsp::StateVariableTPTFilterType::lowpass);
-            p.clipFilter.reset();
         }
         newPlayers.push_back (std::move (p));
     }
@@ -5164,6 +5636,33 @@ void VibeSynthProcessor::rebuildAudioClipPlayers()
     if (oldRaw != nullptr)
         mClipRetirement.retire (std::unique_ptr<AudioClipSnapshot> (oldRaw),
                                  newGen);
+
+    // CL-281 eviction.  Runs AFTER the publish so the erase can only ever drop
+    // the map's own alias: the snapshot that just went live holds one per clip,
+    // and the retired one holds its own until the GC drainer destroys it.  An
+    // entry no clip references any more therefore frees here, on the message
+    // thread, and one that a still-retired snapshot is reading frees later on
+    // the drainer -- neither on the audio thread.
+    for (auto it = mDecodedClipCache.begin(); it != mDecodedClipCache.end(); )
+    {
+        if (liveCacheKeys.find (it->first) != liveCacheKeys.end())
+            ++it;
+        else
+            it = mDecodedClipCache.erase (it);
+    }
+
+    // Drained at the producer rather than at each of this function's ~10 call
+    // sites, so a caller added later cannot forget it.  Two things say "someone
+    // else owns this report", and a bare drain here would steal from both:
+    // the project-load shield (raised = a project/template restore is running
+    // and the entry belongs in that load's single batched dialog) and an open
+    // ScopedGesture (this rebuild is a side effect of a tab duplicate / preset
+    // load, not the gesture the user performed).  Neither is expressible as a
+    // ScopedGesture around this function -- the restore opens no scope of its
+    // own, so one here would become the outermost and drain mid-load.
+    if (bankedUnreadable && ! isProjectLoadInProgress() && ! isNonRealtime()
+        && ! MissingFileReport::isGestureOpen())
+        MissingFileReport::reportIfAny ("arrangement");
 }
 
 // ── QA-F Task 1: offline channel-composite renderer ──────────────────────────
@@ -5440,8 +5939,10 @@ juce::AudioBuffer<float> VibeSynthProcessor::renderChannelComposite (int channel
                 outAccum.clear();
                 outAccum.reserve ((size_t) outProjected);
 
-                // kHopSize-sized pushes with an immediate drain keep the PV's
-                // fixed input/OLA rings from overflowing at large ratios.
+                // The immediate pull() drain after every push is what keeps the
+                // OLA queue shallow at large ratios -- one frame at ratio 64
+                // advances the write head by 32768.  (The input ring is
+                // self-limiting; PhaseVocoder::push drains as it writes.)
                 juce::int64 fpos = srcA64 - preN;
                 const juce::int64 feedEnd = srcB64 + tailN;
                 while (fpos < feedEnd)
@@ -5611,8 +6112,9 @@ std::vector<std::pair<int, juce::String>> VibeSynthProcessor::listAudioClipChann
 // and inject a noteOff (per-channel allNotesOff) into their buffers at the
 // same sample position so the engines silence before consuming the buffer.
 //
-// Cost: O(buffers × notes × inserts).  In practice trivially small - typical
-// block has 0-3 noteOns and there are ≤ 28 inserts (8 layer + 4 bass + 16 drum).
+// Cost: O(buffers x notes x inserts).  In practice small - typical block has
+// 0-3 noteOns; the sweep covers every Layer / Bass / Drum / Vox / Inst page
+// slot.
 //
 // Audio-clip choke is handled separately at clip-start time (Batch 4).
 void VibeSynthProcessor::applyChokeGroupDispatch(
@@ -5647,17 +6149,10 @@ void VibeSynthProcessor::applyChokeGroupDispatch(
     }
 
     // ── 2. Build the fires list (synth note-ons + audio clip starts) ────
-    struct ChokeFire {
-        // Distinguishes self when iterating peers.
-        enum class Src { Synth, Audio };
-        Src   src;
-        Kind  kind { Kind::Layer };   // synth only
-        int   index { -1 };           // synth: insert idx; audio: clip idx
-        int   group { 0 };
-        int   sample { 0 };
-    };
-    std::vector<ChokeFire> fires;
-    fires.reserve(8);
+    // clear() retains capacity, so the common zero-choke-group case costs no
+    // allocator traffic at all (see mChokeFireScratch in the header).
+    auto& fires = mChokeFireScratch;
+    fires.clear();
 
     // Synth noteOns.
     auto scan = [&](Kind kind, int idx, juce::MidiBuffer& buf)
@@ -5781,7 +6276,18 @@ void VibeSynthProcessor::startRecording (RecordMode mode,
 {
     mRecordMode.store (mode, std::memory_order_relaxed);
     mRecordStartBeat = startBeat;
+    // Close the audio thread out of mStripRecorders before mutating it; it is
+    // re-opened after the last push_back below.
+    mStripTapsLive.store (false, std::memory_order_release);
+    mMasterTapLive.store (false, std::memory_order_release);
+    // THREAD SAFETY: the gates stop the NEXT block from entering a tap; this
+    // proves the block that already passed one has returned before clear()
+    // destroys the recorders it is holding.  stopRecording happens to leave the
+    // container empty today, which makes the clear look safe by caller ordering
+    // -- this makes it safe by construction instead.
+    settleAudioThread();
     mStripRecorders.clear();
+    mFailedStripArms.clear();
     // QA-Ea Task 0c (FL pre-roll record): zero the pre-roll sample counter
     // at the start of every Record session.  Accumulates count-in samples in
     // applyPostMixRecordAndMetro; drained into RecordResult::preRollSamples
@@ -5819,7 +6325,13 @@ void VibeSynthProcessor::startRecording (RecordMode mode,
             sr.file        = samplesFolder.getChildFile (
                 projectName + " - " + sr.displayName + " - " + ts + " - DRY.wav");
             sr.recorder    = std::make_unique<AudioFileRecorder>();
-            if (! sr.recorder->startRecording (sr.file, mSampleRate, 1)) continue;
+            if (! sr.recorder->startRecording (sr.file, mSampleRate, 1))
+            {
+                // An armed strip must never just vanish from the take results:
+                // the commit dialog names every failed capture.
+                mFailedStripArms.emplace_back (sr.channelId, sr.displayName);
+                continue;
+            }
 
             // I-16 G-9: Vox-only wet recorder + push pointer to the
             // BaySickVocalProcessor for this page so its processBlock taps
@@ -5849,7 +6361,11 @@ void VibeSynthProcessor::startRecording (RecordMode mode,
                     if (sr.wetRecorder->startRecording (sr.wetFile, mSampleRate, 1))
                         vp->setWetRecorder (sr.wetRecorder.get());
                     else
+                    {
                         sr.wetRecorder.reset();   // failed to open -> drop wet recording
+                        mFailedStripArms.emplace_back (sr.channelId,
+                                                       sr.displayName + " (wet take)");
+                    }
                 }
             }
 
@@ -5861,6 +6377,10 @@ void VibeSynthProcessor::startRecording (RecordMode mode,
     scan ("mixer_inst_", MixerChannelIds::kMaxInstStrips,
           MixerChannelIds::kInstBase, "Inst", /*isVox=*/false);
 
+    // Container is final -- publish it to the audio thread.  Release pairs with
+    // tapDryRecorder's acquire load.
+    mStripTapsLive.store (true, std::memory_order_release);
+
     // No strips armed -> fall back to master output capture.
     // QA-Fe2 PDC: the master tap is post-compensation, so the capture runs
     // totalLatencySamples late vs the beat grid -- trim that many leading
@@ -5869,14 +6389,48 @@ void VibeSynthProcessor::startRecording (RecordMode mode,
     {
         auto file = samplesFolder.getChildFile (
             projectName + " - Master - " + ts + ".wav");
-        mMasterRecorder.startRecording (file, mSampleRate, 2,
-            juce::jmax (0, mVibeGraph.totalLatencySamples.load (std::memory_order_relaxed)));
+        // Gate raised BEFORE the writer opens so no block at the head of the
+        // take falls between the two stores: the tap still short-circuits on
+        // isRecording(), which AudioFileRecorder sets last.
+        mMasterTapLive.store (true, std::memory_order_release);
+        if (! mMasterRecorder.startRecording (file, mSampleRate, 2,
+                juce::jmax (0, mVibeGraph.totalLatencySamples.load (std::memory_order_relaxed))))
+        {
+            mMasterTapLive.store (false, std::memory_order_release);
+            // Same rule as the armed strips above: a capture whose writer never
+            // opened must reach the commit dialog instead of vanishing.  With no
+            // strips armed this IS the take, so an unwritable Samples folder
+            // would otherwise lose the whole performance in silence.  Channel 0
+            // is the report's unknown-channel value; only the name is shown.
+            mFailedStripArms.emplace_back (0, "Master");
+        }
     }
 }
 
 VibeSynthProcessor::RecordResult VibeSynthProcessor::stopRecording()
 {
     RecordResult out;
+    // Close the audio thread out of EVERY tap first: the two container gates
+    // here, and the wet pointer each Vox engine holds (I-16 G-9, 2026-05-03).
+    mStripTapsLive.store (false, std::memory_order_release);
+    mMasterTapLive.store (false, std::memory_order_release);
+    for (auto& sr : mStripRecorders)
+    {
+        if (! sr.wetRecorder) continue;
+        const int voxIdx = sr.channelId - MixerChannelIds::kVoxBase;
+        if (voxIdx >= 0 && voxIdx < kMaxVoxPages)
+            if (auto* eng = mVoxEngines[voxIdx])
+                if (auto* vp = dynamic_cast<BaySickVocalProcessor*> (eng))
+                    vp->setWetRecorder (nullptr);
+    }
+
+    // THREAD SAFETY: the gates above stop the NEXT block from entering a tap;
+    // this proves the block that already passed one has returned.  It has to
+    // happen before the first AudioFileRecorder::stopRecording below, because
+    // that call destroys the ThreadedWriter an in-flight writeBlock is about to
+    // dereference (its own mRecording flag is cleared without any fence).
+    settleAudioThread();
+
     out.startBeat = mRecordStartBeat;
     out.midiNotes = mMidiRecorder.stopRecording();
     // QA-Ea Task 0c (FL pre-roll record): drain the pre-roll counter into
@@ -5884,36 +6438,59 @@ VibeSynthProcessor::RecordResult VibeSynthProcessor::stopRecording()
     // session so startRecording's defensive zero is belt+suspenders.
     out.preRollSamples = mPreRollSamples.exchange (0, std::memory_order_relaxed);
 
+    // A take whose writer refused blocks reached disk with a splice in it.  The
+    // count survives stopRecording (only the next startRecording zeroes it), so
+    // it is read after the writer closes.  Only reported for captures that
+    // produced a file -- one that produced none is already in failedStrips.
+    auto noteDrops = [&out] (const AudioFileRecorder& rec, int channelId,
+                             const juce::String& displayName)
+    {
+        const int dropped = rec.getDroppedBlockCount();
+        if (dropped > 0)
+            out.droppedTakes.push_back ({ channelId, displayName, dropped });
+    };
+
     if (mMasterRecorder.isRecording())
+    {
         out.masterFile = mMasterRecorder.stopRecording();
+        // Channel 0 is the report's unknown-channel value, matching the failed
+        // master arm in startRecording; only the name is shown.
+        if (out.masterFile.existsAsFile())
+            noteDrops (mMasterRecorder, 0, "Master");
+    }
 
     for (auto& sr : mStripRecorders)
     {
-        // I-16 G-9 (2026-05-03): clear the wet-recorder pointer on the
-        // BaySickVocalProcessor BEFORE stopping the writer, so the audio
-        // thread can't push another block into a stopped recorder.
-        if (sr.wetRecorder)
-        {
-            const int voxIdx = sr.channelId - MixerChannelIds::kVoxBase;
-            if (voxIdx >= 0 && voxIdx < kMaxVoxPages)
-                if (auto* eng = mVoxEngines[voxIdx])
-                    if (auto* vp = dynamic_cast<BaySickVocalProcessor*> (eng))
-                        vp->setWetRecorder (nullptr);
-        }
-
         if (sr.recorder && sr.recorder->isRecording())
         {
             auto f = sr.recorder->stopRecording();
             if (f.existsAsFile())
+            {
                 out.stripFiles.emplace_back (sr.channelId, f);
+                noteDrops (*sr.recorder, sr.channelId, sr.displayName);
+            }
+            else
+                out.failedStrips.emplace_back (sr.channelId, sr.displayName);
         }
         if (sr.wetRecorder && sr.wetRecorder->isRecording())
         {
             auto f = sr.wetRecorder->stopRecording();
             if (f.existsAsFile())
+            {
                 out.stripWetFiles.emplace_back (sr.channelId, f);
+                noteDrops (*sr.wetRecorder, sr.channelId,
+                           sr.displayName + " (wet take)");
+            }
+            else
+                out.failedStrips.emplace_back (sr.channelId,
+                                               sr.displayName + " (wet take)");
         }
     }
+    out.failedStrips.insert (out.failedStrips.end(),
+                             mFailedStripArms.begin(), mFailedStripArms.end());
+    mFailedStripArms.clear();
+    // The settle at the top already covers the destructors clear() runs -- the
+    // taps have been closed since before the first writer was stopped.
     mStripRecorders.clear();
     return out;
 }
@@ -5930,6 +6507,18 @@ void VibeSynthProcessor::tapDryRecorder (int channelId,
                                           int numSamples)
 {
     if (monoSource == nullptr || numSamples <= 0) return;
+    // An offline render drives this same path: setFreezePrune keeps the target
+    // tab's own strip task in the render's keep-set, so freezing a Vox or Inst
+    // tab (or any tab a live strip sidechain-keys) executes that strip task on
+    // every offline block.  The strip _arm param is persistent, so an armed take
+    // in progress would get the render's blocks spliced into its WAV -- silence
+    // or one repeated stale block, ahead of the performer's first note.  Same
+    // gate the master and capture taps carry.
+    if (isNonRealtime()) return;
+    // Entry gate: the message thread lowers this before it mutates or destroys
+    // mStripRecorders, so the audio thread never walks the container while it
+    // is being rebuilt or torn down.
+    if (! mStripTapsLive.load (std::memory_order_acquire)) return;
 
     for (auto& sr : mStripRecorders)
     {
@@ -6016,7 +6605,7 @@ void VibeSynthProcessor::setStateInformation(const void* data, int sizeInBytes)
     // Nest-aware via setProjectLoadInProgress(true/false); processBlock bails to
     // silence while the shield is up.
     setProjectLoadInProgress (true);
-    juce::Thread::sleep (30);
+    settleAudioThread();
 
     // QA-Ef close (2026-05-23): tear down every aux insert from the PRIOR plugin
     // session before the new project's params load and restoreAuxStripsFromState
@@ -6089,6 +6678,9 @@ void VibeSynthProcessor::setStateInformation(const void* data, int sizeInBytes)
 //       <AutomationTemplates>...</AutomationTemplates>
 //       (etc.)
 //     </PatternManager>
+//     <DenoiseProfiles>...</DenoiseProfiles>
+//     <MidiCCMappings>...</MidiCCMappings>    -- per-project MIDI Learn overlay
+//     <DrumTriggers>...</DrumTriggers>
 //   </BaySickDAWProject>
 //
 // ProjectManager writes this to <projectFolder>/project.xml.  The legacy
@@ -6123,6 +6715,16 @@ void VibeSynthProcessor::serializeProject (juce::XmlElement& root)
             if (pair.second.isValid()) e->setAttribute ("wet", pair.second.toBase64());
         }
     }
+
+    // MIDI Learn CC mappings and per-drum trigger bindings.  Both live here and
+    // NOT in writeProcessorState: that block is shared with template save, and a
+    // template must not carry one machine's controller bindings.  Same
+    // standalone-only placement rule as DenoiseProfiles above.
+    if (auto midiXml = mMidiLearn.saveToValueTree().createXml())
+        root.addChildElement (midiXml.release());
+
+    if (auto drumXml = mDrumTriggers.saveToValueTree().createXml())
+        root.addChildElement (drumXml.release());
 
     // P1+P2 persistence (2026-04-24): let StandaloneEditor append its tab +
     // engine state under a <UIState> child.  Callback is null in plugin /
@@ -6222,6 +6824,27 @@ void VibeSynthProcessor::applyPendingRackStates()
 
 void VibeSynthProcessor::resetToBlankState()
 {
+    // Project boundary: a clip that failed in the OLD project must report
+    // again if the next project references it too.
+    mReportedUnreadableClips.clear();
+
+    // Same boundary rule: profile keys are prefixed with the project name of the
+    // take they were learned from, so a profile carried across File > New or a
+    // template apply can never match a take in the new project -- it would just
+    // ride along in that project's XML forever.  (The open path clears these in
+    // deserializeProject before repopulating; New and template apply do not go
+    // through it.)
+    mDenoiseProfiles.clear();
+
+    // Same boundary rule again, and the same reason deserializeProject clears
+    // this when a project carries no node: bindings are keyed on drum page
+    // index, there are no global defaults behind them, and File > New hands the
+    // new project's first drum index 0 -- so an inherited binding lands on a
+    // drum the user never bound, fires from their pad, and demuxes recorded MIDI
+    // into the wrong lane.  serializeProject writes the node unconditionally, so
+    // one File > New makes the leak permanent project data.
+    mDrumTriggers.clearAll();
+
     // Reset every registered APVTS param to its default value.  Iterate via
     // getParameters() so lazy-registered engine / mixer-strip / rack params
     // all get swept regardless of when they were added.
@@ -6250,15 +6873,48 @@ void VibeSynthProcessor::resetToBlankState()
     // it wouldn't wipe pre-existing racks, which was the observed bug.
     mVibeGraph.clearAllRackStates();
 
-    // PatternManager back to one empty default pattern.
-    if (mPatternManager)
-        mPatternManager->reset();
+    // The EQ re-seed and PatternManager back to one empty default pattern.
+    //
+    // THREAD SAFETY: reset() clears mPatterns AND mArrangement, and the audio
+    // thread walks both bare -- the song-mode arrangement scheduler and the
+    // automation-clip loop iterate getBlock(), and the step trigger + metronome
+    // hold a reference from currentPattern() across their reads.  The EQ sweep
+    // reallocates linear-phase processors and writes coefficients the same
+    // thread reads.  Shield -> settle -> mutate -> restore is the established
+    // teardown idiom here: processBlock bails to silence at its top while the
+    // shield is up, and the settle proves the in-flight block returned before
+    // anything is freed.  Save/restore keeps an outer load's shield intact and
+    // skips a second settle, so File > Open (already shielded) pays nothing; a
+    // bare File > New pays two audio blocks of silence, which is the accepted
+    // trade.  One region for both so New pays that once.
+    {
+        const bool shieldWasUp = isProjectLoadInProgress();
+        setProjectLoadInProgress (true);
+        if (! shieldWasUp) settleAudioThread();
+
+        resetEqStatesToDefaults();
+        if (mPatternManager) mPatternManager->reset();
+
+        setProjectLoadInProgress (shieldWasUp);
+    }
 }
 
 void VibeSynthProcessor::setCurrentProjectFolder (const juce::File& folder)
 {
-    juce::ScopedLock sl (mProjectFolderLock);
-    mCurrentProjectFolder = folder;
+    {
+        juce::ScopedLock sl (mProjectFolderLock);
+        mCurrentProjectFolder = folder;
+    }
+
+    // Publishing here rather than at construction is what guarantees the
+    // resolver is live before the first engine reads a stored reference:
+    // ProjectManager calls this ahead of deserializeProject.  Engines and DSP
+    // classes reach the resolver through the free function because most are
+    // built by the EffectRack factory, which holds no processor reference.
+    // Installed OUTSIDE mProjectFolderLock: resolve() calls back into
+    // resolveProjectFile, which takes that same lock.
+    ProjectFileResolver::install ([this] (const juce::String& stored)
+                                  { return resolveProjectFile (stored); });
 }
 
 juce::File VibeSynthProcessor::getCurrentProjectFolder() const
@@ -6292,13 +6948,13 @@ void VibeSynthProcessor::deserializeProject (const juce::XmlElement& root)
     // registerTask, and the audio thread walks the render task list every
     // block; without the shield up across the rebuild a concurrent registerTask
     // races that iteration.  closeAllDynamicTabs (inside the UI rebuild) is
-    // nest-aware and leaves the shield raised while we hold it.  The 30 ms
-    // sleep drains any in-flight processBlock before we touch the graph (covers
-    // a 1024-sample block at 44.1 kHz).  processBlock bails to silence while the
-    // shield is up, so audio stays quiet for the brief load instead of
+    // nest-aware and leaves the shield raised while we hold it.  The settle
+    // drains any in-flight processBlock before we touch the graph, at whatever
+    // the device buffer size actually is.  processBlock bails to silence while
+    // the shield is up, so audio stays quiet for the brief load instead of
     // rendering a half-built graph.
     setProjectLoadInProgress (true);
-    juce::Thread::sleep (30);
+    settleAudioThread();
 
     if (onLoadProgress) onLoadProgress ("Reading project state...");
 
@@ -6339,6 +6995,21 @@ void VibeSynthProcessor::deserializeProject (const juce::XmlElement& root)
                 DenoiseProfile::fromBase64 (e->getStringAttribute ("raw")),
                 DenoiseProfile::fromBase64 (e->getStringAttribute ("wet")) };
         }
+
+    // MIDI Learn mappings, mirroring setStateInformation's semantics: a project
+    // with no node keeps whatever loadGlobalDefaults seeded at launch, so the
+    // per-project table OVERLAYS the globals rather than replacing them.  Older
+    // projects have no node and therefore behave exactly as before.
+    if (auto* midiXml = root.getChildByName (MidiLearnRegistry::kRootTag))
+        mMidiLearn.loadFromValueTree (juce::ValueTree::fromXml (*midiXml));
+
+    // Drum trigger bindings, also mirroring setStateInformation: there are no
+    // global defaults to fall back on, so a project without the node CLEARS --
+    // otherwise project B inherits project A's kit against project B's tabs.
+    if (auto* drumXml = root.getChildByName (DrumTriggerMap::kRootTag))
+        mDrumTriggers.loadFromValueTree (juce::ValueTree::fromXml (*drumXml));
+    else
+        mDrumTriggers.clearAll();
 
     // P1+P2 persistence: fire after main state is loaded so the editor's
     // engine-processor creation can inherit any APVTS-driven defaults.
@@ -6410,26 +7081,13 @@ void VibeSynthProcessor::applyProcessorState (const juce::XmlElement& root)
 // dialog stack on a project with several gone missing.
 // QA-ProjectSave Task 3 (2026-07-26): shared with template load, whose engines
 // carry the same external references.
-void VibeSynthProcessor::reportMissingFilesIfAny()
+//
+// A forwarder, not a gate: MissingFileReport is a header-only namespace with no
+// processor dependency, so any surface can drain.  See the header decl for when
+// a bare call is right and when a ScopedGesture is.
+void VibeSynthProcessor::reportMissingFilesIfAny (const juce::String& sourceNoun)
 {
-    if (! MissingFileReport::isEmpty())
-    {
-        auto entries = MissingFileReport::drain();
-        juce::String msg = "This project refers to files that are no longer where they were saved.\n"
-                           "The affected parts loaded WITHOUT them and will not make sound:\n\n";
-        const int shown = juce::jmin (12, (int) entries.size());
-        for (int i = 0; i < shown; ++i)
-            msg << "  " << entries[(size_t) i].what << ": " << entries[(size_t) i].path << "\n";
-        if ((int) entries.size() > shown)
-            msg << "  ...and " << ((int) entries.size() - shown) << " more\n";
-        msg << "\nRe-pick them on the relevant tab, or put the files back.";
-
-        juce::MessageManager::callAsync ([msg]
-        {
-            juce::AlertWindow::showMessageBoxAsync (
-                juce::MessageBoxIconType::WarningIcon, "Missing files", msg, "OK");
-        });
-    }
+    MissingFileReport::reportIfAny (sourceNoun);
 }
 
 // 5F-4b B7 / QA-Ef #4 (2026-05-22): scan a saved-file state tree for
@@ -6484,12 +7142,14 @@ juce::AudioProcessor* JUCE_CALLTYPE createPluginFilter()
 
 // ── Lazy APVTS registration ───────────────────────────────────────────────────
 // Mixer-strip params are registered on demand when a strip is first created
-// (ensureMixerStripParams).  Param objects remain in the APVTS tree forever --
-// JUCE has no remove API -- and mRegisteredTrackParams accumulates the ids added
-// under each mixer prefix so the EQ-bank helpers stay idempotent.
+// (ensureMixerStripParams).
+// JUCE has no remove API -- param objects remain in the APVTS tree forever -- so
+// every dyn* helper skips an id APVTS already holds; that check, not the
+// mRegisteredTrackParams id accumulator, is what makes re-registration safe.
 //
-// EQ naming: mixer_{kind}_{N}_{mid|side}_eq{b}_{freq|gain|q|type|on}, with the
-// pre-rack bank under the same prefix plus "preeq_".
+// EQ naming: <mixerPrefix>_{mid|side}_eq{b}{Suffix} -- Suffix is CamelCase with
+// no separating underscore (Freq/Gain/Q/Type/On/Slope/Mute/Solo/Channel plus the
+// Dynamic block).  The pre-rack bank inserts "preeq_" before {mid|side}.
 
 namespace
 {
@@ -6607,6 +7267,93 @@ void VibeSynthProcessor::addParamsForEQBank(const juce::String& prefix,
     }
 }
 
+// Maps a mixer-strip prefix onto its EQ cache strip slot: buses first in
+// kEqBuses order, then the insert families in kEqInsertFamilies order.  Exact
+// bus match runs FIRST so "mixer_bass" resolves to the bus rather than falling
+// into the "mixer_bass_" insert family.  Returns -1 for any prefix that owns no
+// EQ bank the sweep would ever visit.
+int VibeSynthProcessor::eqStripSlotForPrefix (const juce::String& prefix) noexcept
+{
+    for (int i = 0; i < kEqNumBusSlots; ++i)
+        if (prefix == kEqBuses[i].prefix)
+            return i;
+
+    int base = kEqNumBusSlots;
+    for (const auto& fam : kEqInsertFamilies)
+    {
+        const juce::String famBase (fam.prefixBase);
+        if (prefix.startsWith (famBase))
+        {
+            const juce::String tail = prefix.substring (famBase.length());
+            if (tail.isNotEmpty() && tail.containsOnly ("0123456789"))
+            {
+                const int idx = tail.getIntValue();
+                if (idx >= 0 && idx < fam.count)
+                    return base + idx;
+            }
+            return -1;
+        }
+        base += fam.count;
+    }
+    return -1;
+}
+
+// The ONE spelling every EQ-band CONSUMER composes from.  addParamsForEQBank is
+// the registration source of truth and builds the same strings inline; anything
+// that later looks a band's params up must go through here, because an APVTS
+// lookup is an exact string compare that returns null on a miss and reports
+// nothing -- a divergent copy is a silent no-op, not an error.
+namespace EqBandIds
+{
+    // Index order must match VibeSynthProcessor::EqBandParamSlot.
+    static const char* const kSuffixes[] = {
+        "Freq", "Gain", "Q", "Type", "On", "Slope", "Mute", "Solo", "Channel",
+        "Dynamic", "Threshold", "Ratio", "Attack", "Release", "Range", "Upward", "ScSource"
+    };
+    static const char* const kSides[]    = { "mid", "side" };
+    static const char* const kBankSubs[] = { "", "preeq_" };
+
+    // e.g. ("mixer_rusty_3", pre, side, 2) -> "mixer_rusty_3_preeq_side_eq2"
+    static juce::String bandPrefix (const juce::String& stripPrefix,
+                                    int bank, int side, int band)
+    {
+        return stripPrefix + "_" + kBankSubs[bank] + kSides[side]
+                 + "_eq" + juce::String (band);
+    }
+}
+
+// THREAD SAFETY: the message-thread half of the EQ param-pointer cache (see the
+// mEqParamCache declaration for the full contract).  Runs once per strip, right
+// after addParamsForEQBank has created the ids, so the pointers it resolves are
+// the ones that bank just registered.
+void VibeSynthProcessor::cacheEqParamPointers (const juce::String& prefix)
+{
+    const int stripSlot = eqStripSlotForPrefix (prefix);
+    if (stripSlot < 0) return;
+
+    static_assert ((int) (sizeof (EqBandIds::kSuffixes) / sizeof (EqBandIds::kSuffixes[0]))
+                       == (int) eqNumBandParamSlots,
+                   "EqBandIds::kSuffixes must carry one entry per EqBandParamSlot");
+
+    for (int bank = 0; bank < kEqBanksPerStrip; ++bank)
+        for (int side = 0; side < kEqSidesPerBank; ++side)
+            for (int b = 0; b < kEqBands; ++b)
+            {
+                const juce::String bp = EqBandIds::bandPrefix (prefix, bank, side, b);
+                auto& slots = mEqParamCache[(size_t) eqCacheIndex (stripSlot, bank, side, b)];
+
+                // Freq LAST and with release: it is the band's publication flag,
+                // so the audio thread's acquire-load of it makes these sixteen
+                // relaxed stores visible before it can act on any of them.
+                for (int s = eqSlotFreq + 1; s < eqNumBandParamSlots; ++s)
+                    slots.p[s].store (apvts.getRawParameterValue (bp + EqBandIds::kSuffixes[s]),
+                                      std::memory_order_relaxed);
+                slots.p[eqSlotFreq].store (
+                    apvts.getRawParameterValue (bp + EqBandIds::kSuffixes[eqSlotFreq]),
+                    std::memory_order_release);
+            }
+}
+
 // ── QA-ModelShell TS2: offline render drive ──────────────────────────────────
 bool VibeSynthProcessor::beginOfflineRender (double renderSampleRate, int renderBlockSize)
 {
@@ -6631,6 +7378,15 @@ bool VibeSynthProcessor::beginOfflineRender (double renderSampleRate, int render
     mOfflinePrevSong = isSongMode();
     mOfflinePrevHead = getPlayHead();
 
+    // A freeze re-render during project load arrives with the load shield
+    // raised, and processBlock's shield bail would clear every block of the
+    // render (the offline loop calls processBlock directly, so the suspension
+    // above does not gate it).  Dropping the shield here is safe because the
+    // device is already suspended -- the render loop is the only caller left
+    // -- and endOfflineRender restores it before the device resumes.
+    mOfflinePrevShield = isProjectLoadInProgress();
+    setProjectLoadInProgress (false);
+
     auto sweepNonRealtime = [this] (bool offline)
     {
         setNonRealtime (offline);
@@ -6647,6 +7403,9 @@ bool VibeSynthProcessor::beginOfflineRender (double renderSampleRate, int render
             if (auto* b = mBassesEngine[(size_t) i].get())  b->setNonRealtime (offline);
         }
         if (mRustyDrumsEngine) mRustyDrumsEngine->setNonRealtime (offline);
+        // Rack slots last: a hosted plugin in a mixer rack is a DSPBase inside
+        // an EffectRack, not a rig engine, so nothing above reaches it.
+        mVibeGraph.setAllRackSlotsNonRealtime (offline);
     };
     sweepNonRealtime (true);
 
@@ -6662,7 +7421,10 @@ bool VibeSynthProcessor::beginOfflineRender (double renderSampleRate, int render
 
     // Full re-prepare at the render config -- prepareToPlay sweeps every
     // engine + the graph, so the render rate is independent of the device's.
+    mOfflineReconfigureThread.store (juce::Thread::getCurrentThreadId(),
+                                     std::memory_order_release);
     prepareToPlay (renderSampleRate, renderBlockSize);
+    mOfflineReconfigureThread.store (nullptr, std::memory_order_release);
     return true;
 }
 
@@ -6671,8 +7433,25 @@ void VibeSynthProcessor::endOfflineRender()
     // Reverse of begin: device config back, flags off, the render's own
     // tails cleared so they never bleed into live playback, playhead + mode
     // restored, device resumed.
+
+    // A stored config, not an open device: juce::AudioProcessor keeps reporting
+    // the last negotiated rate after releaseResources, so this test says only
+    // whether there is something to restore.
     if (mOfflinePrevSr > 0.0 && mOfflinePrevBlk > 0)
+    {
+        mOfflineReconfigureThread.store (juce::Thread::getCurrentThreadId(),
+                                         std::memory_order_release);
         prepareToPlay (mOfflinePrevSr, mOfflinePrevBlk);
+        mOfflineReconfigureThread.store (nullptr, std::memory_order_release);
+    }
+
+    // The render was a consumer and prepareToPlay cleared the idle assertion for
+    // it; now that it has finished, the device is the only consumer left, and
+    // RetirementQueue's CONSUMER-IDLE CONTRACT wants the assertion back when
+    // there is no device -- otherwise nothing retired is ever freed.
+    // mAudioDevicePrepared is the truthful test for that (the offline prepares
+    // above are gated out of it).
+    setRetirementConsumersIdle (! mAudioDevicePrepared.load (std::memory_order_acquire));
 
     setNonRealtime (false);
     mEngineRig->forEachEngine ([] (juce::AudioProcessor& p)
@@ -6687,6 +7466,7 @@ void VibeSynthProcessor::endOfflineRender()
         if (auto* b = mBassesEngine[(size_t) i].get())  b->setNonRealtime (false);
     }
     if (mRustyDrumsEngine) mRustyDrumsEngine->setNonRealtime (false);
+    mVibeGraph.setAllRackSlotsNonRealtime (false);
 
     // CL-282: back to live streaming; report the render's underrun count
     // (expected 0 -- any other number means a silent gap got printed).
@@ -6713,13 +7493,27 @@ void VibeSynthProcessor::endOfflineRender()
 
     mOfflinePrevHead = nullptr;
 
+    // Shield back up (if it was) BEFORE the device resumes, so no live block
+    // runs against a project still mid-load.
+    setProjectLoadInProgress (mOfflinePrevShield);
+    mOfflinePrevShield = false;
+
     suspendProcessing (false);
     mOfflineRenderActive.store (false, std::memory_order_release);
 }
 
 // ── Engine processor registration ────────────────────────────────────────────
+// See the declaration for why the binding lives here and is never undone.
+void VibeSynthProcessor::bindSampleLoadShield (juce::AudioProcessor* eng) noexcept
+{
+    if (auto* player = dynamic_cast<VibePlayerProcessor*> (eng))
+        player->setHostProcessor (this);
+}
+
 void VibeSynthProcessor::registerLayerEngine(int idx, juce::AudioProcessor* eng)
 {
+    bindSampleLoadShield (eng);
+
     {
         juce::SpinLock::ScopedLockType lk(mLayerEngineLock);
         if (idx >= 0 && idx < kMaxLayerPages) mLayerEngines[idx] = eng;
@@ -6768,9 +7562,79 @@ void VibeSynthProcessor::registerPluginEngine(int idx, juce::AudioProcessor* eng
     }
 }
 
+// THREAD SAFETY: quiescent-state reclamation for the teardown shield -- the
+// same idea as RetirementQueue::setInUseGeneration, applied to processBlock as
+// a whole.  mAudioBlockCounter is published by the audio thread with release
+// semantics at the top of processBlock; this waiter observes it with acquire,
+// so once it has advanced twice the block that may have been mid-render when
+// the shield went up has provably returned and its writes are visible here.
+// A fixed wait cannot make that claim at any single duration: one block is
+// 23 ms at 1024 samples / 44.1 kHz and 46 ms at 2048, so under a large ASIO
+// buffer it expires while the audio thread is still inside the render.
+void VibeSynthProcessor::settleAudioThread() noexcept
+{
+    jassert (juce::MessageManager::existsAndIsCurrentThread());
+
+    // Nothing is calling processBlock in these states, so no acknowledgement
+    // can ever arrive and waiting would freeze the UI for the whole timeout
+    // instead of protecting anything.  mAudioDevicePrepared covers both never
+    // started and started-then-stopped; isSuspended covers the offline-render
+    // window, where the standalone player skips the device callback entirely
+    // (juce::AudioProcessorPlayer checks it) and the render loop that replaces
+    // it may be driven by this very thread.
+    if (! mAudioDevicePrepared.load (std::memory_order_acquire)) return;
+    if (isSuspended()) return;
+
+    const double sr  = mSampleRate;
+    const int    blk = mBlockSize;
+    if (sr <= 0.0 || blk <= 0) return;
+
+    // Four block periods is generous headroom over the two advances we need;
+    // the clamp keeps a tiny buffer from timing out on scheduler jitter and a
+    // huge one from stalling the message thread for a visible beat.
+    const int timeoutMs = juce::jlimit (10, 250,
+                                        (int) (4.0 * (double) blk * 1000.0 / sr) + 5);
+
+    const std::uint64_t start = mAudioBlockCounter.load (std::memory_order_acquire);
+    const juce::uint32  t0    = juce::Time::getMillisecondCounter();
+
+    while ((mAudioBlockCounter.load (std::memory_order_acquire) - start) < 2u)
+    {
+        if ((juce::uint32) (juce::Time::getMillisecondCounter() - t0)
+              >= (juce::uint32) timeoutMs)
+            break;
+
+        juce::Thread::sleep (1);
+    }
+}
+
+// Teardown shield for every unregister*Engine below.
+//
+// The audio thread walks the dispatcher's task vector on EVERY block, and each
+// of these functions erases from that vector and then FREES the task object.
+// On a user gesture (tab close, engine re-pick) no shield is up -- unlike a
+// project load -- so without this the erase races the range-for and the free
+// races an in-flight task->run().  Raising mProjectLoadInProgress bails
+// processBlock to silence at its top; the settle lets the in-flight block
+// finish before anything is freed.  ORDER: raise -> settle -> free -> restore.
+//
+// The shieldWasUp save/restore keeps an outer load's shield intact (a nested
+// teardown must not lower it early) AND skips the settle when the caller
+// already paid one, so closing many tabs at once costs a single mute.  Same
+// idiom as loadBaySickRustyDrumsKit / destroyBaySickRustyDrums; it is safe
+// because the shield is only ever raised from the message thread (see the
+// mProjectLoadInProgress declaration).
+//
+// Cost: two audio blocks of silence on a tab close / engine swap -- about 5 ms
+// at 128 samples / 48 kHz (2.7 ms a block, and two is the FLOOR: the shield can
+// land mid-block), scaling with the device buffer.  The mute itself was
+// accepted (Jeff, 2026-08-06) as the trade against the crash.
 void VibeSynthProcessor::unregisterPluginEngine(int idx)
 {
     if (idx < 0 || idx >= kMaxPluginPages) return;
+    const bool shieldWasUp = isProjectLoadInProgress();
+    setProjectLoadInProgress (true);
+    if (! shieldWasUp) settleAudioThread();
     // Task down BEFORE the engine pointer clears, so the dispatcher never sees
     // a task aimed at a dead engine.
     if (mPluginRenderTasks[(size_t) idx])
@@ -6778,14 +7642,20 @@ void VibeSynthProcessor::unregisterPluginEngine(int idx)
         mRenderDispatcher.unregisterTask(MixerChannelIds::pluginInsert(idx));
         mPluginRenderTasks[(size_t) idx].reset();
     }
-    juce::SpinLock::ScopedLockType lk(mPluginEngineLock);
-    mPluginEngines[idx] = nullptr;
+    {
+        juce::SpinLock::ScopedLockType lk(mPluginEngineLock);
+        mPluginEngines[idx] = nullptr;
+    }
+    setProjectLoadInProgress (shieldWasUp);
     // InsertNode retained on purpose - preserves mixer state if the tab returns.
 }
 
 void VibeSynthProcessor::unregisterLayerEngine(int idx)
 {
     if (idx < 0 || idx >= kMaxLayerPages) return;
+    const bool shieldWasUp = isProjectLoadInProgress();   // see the shield note above
+    setProjectLoadInProgress (true);
+    if (! shieldWasUp) settleAudioThread();
     // Batch 3: tear down the task BEFORE clearing the engine pointer so the
     // dispatcher never sees a task pointing at a dead engine.
     if (mLayerRenderTasks[(size_t) idx])
@@ -6793,12 +7663,16 @@ void VibeSynthProcessor::unregisterLayerEngine(int idx)
         mRenderDispatcher.unregisterTask(MixerChannelIds::layerInsert(idx));
         mLayerRenderTasks[(size_t) idx].reset();
     }
-    juce::SpinLock::ScopedLockType lk(mLayerEngineLock);
-    mLayerEngines[idx] = nullptr;
+    {
+        juce::SpinLock::ScopedLockType lk(mLayerEngineLock);
+        mLayerEngines[idx] = nullptr;
+    }
+    setProjectLoadInProgress (shieldWasUp);
     // InsertNode retained on purpose - preserves mixer state if the page is re-opened.
 }
 void VibeSynthProcessor::registerBassEngine(int pageIdx, juce::AudioProcessor* eng)
 {
+    bindSampleLoadShield (eng);
     if (pageIdx < 0 || pageIdx >= kMaxBassPages) return;
     {
         juce::SpinLock::ScopedLockType lk(mBassEngineLock);
@@ -6822,13 +7696,19 @@ void VibeSynthProcessor::registerBassEngine(int pageIdx, juce::AudioProcessor* e
 void VibeSynthProcessor::unregisterBassEngine(int pageIdx)
 {
     if (pageIdx < 0 || pageIdx >= kMaxBassPages) return;
+    const bool shieldWasUp = isProjectLoadInProgress();   // see the shield note above
+    setProjectLoadInProgress (true);
+    if (! shieldWasUp) settleAudioThread();
     if (mBassRenderTasks[(size_t) pageIdx])
     {
         mRenderDispatcher.unregisterTask(MixerChannelIds::bassInsert(pageIdx));
         mBassRenderTasks[(size_t) pageIdx].reset();
     }
-    juce::SpinLock::ScopedLockType lk(mBassEngineLock);
-    mBassEngines[pageIdx] = nullptr;
+    {
+        juce::SpinLock::ScopedLockType lk(mBassEngineLock);
+        mBassEngines[pageIdx] = nullptr;
+    }
+    setProjectLoadInProgress (shieldWasUp);
 }
 // 2026-04-25: registerDrumsEngine / unregisterDrumsEngine removed - legacy
 // 16-slot BaySickDrumsProcessor deleted.  Per-drum-tab registration uses
@@ -6973,12 +7853,14 @@ void VibeSynthProcessor::tickCcTriggerHolds (
     mAnyCcHoldActive = stillActive;
 }
 
-// D1.2 (2026-04-24): per-drum-page engine registration.  Each DrumPage tab
-// owns one independent engine; this wires it into the audio graph the same
-// way layers/bass do.  Mixer strip + InsertNode reuse the existing Drum
-// kind/range so the mixer UI stays consistent during the D1 transition.
+// D1.2 (2026-04-24): per-drum-page engine registration.  The engine is
+// rig-owned (EngineTab in EngineRig); this wires the raw, non-owning pointer
+// into the audio graph the same way layers/bass do.  Mixer strip + InsertNode
+// reuse the existing Drum kind/range so the mixer UI stays consistent during
+// the D1 transition.
 void VibeSynthProcessor::registerDrumEngine(int pageIdx, juce::AudioProcessor* eng)
 {
+    bindSampleLoadShield (eng);
     if (pageIdx < 0 || pageIdx >= kMaxDrumPages) return;
     {
         juce::SpinLock::ScopedLockType lk(mDrumEngineLock);
@@ -6987,7 +7869,11 @@ void VibeSynthProcessor::registerDrumEngine(int pageIdx, juce::AudioProcessor* e
     if (eng != nullptr)
     {
         const juce::String prefix = "mixer_drum_" + juce::String(pageIdx);
-        ensureMixerStripParams(prefix, MixerStripKind::Insert, MixerChannelIds::kDrumsBus);
+        // QA-SOUNDNESS (2026-08-07): bank 1 (pages 0..15) defaults to the Drums
+        // Bus, bank 2 (16..31) to Drums Bus 2.  Only the DEFAULT -- a project
+        // saved before this change restores its own _sendTo and is unaffected.
+        ensureMixerStripParams(prefix, MixerStripKind::Insert,
+                               MixerChannelIds::drumBusForPage(pageIdx));
         // Publish the play-pitch pointer for kit-trigger dispatch (the param
         // exists as of the ensure above; audio thread acquire-loads it).
         mDrumPlayNotePtr[(size_t) pageIdx].store(
@@ -7011,6 +7897,9 @@ void VibeSynthProcessor::registerDrumEngine(int pageIdx, juce::AudioProcessor* e
 void VibeSynthProcessor::unregisterDrumEngine(int pageIdx)
 {
     if (pageIdx < 0 || pageIdx >= kMaxDrumPages) return;
+    const bool shieldWasUp = isProjectLoadInProgress();   // see the shield note above
+    setProjectLoadInProgress (true);
+    if (! shieldWasUp) settleAudioThread();
     if (mDrumRenderTasks[(size_t) pageIdx])
     {
         mRenderDispatcher.unregisterTask(MixerChannelIds::drumInsert(pageIdx));
@@ -7026,6 +7915,7 @@ void VibeSynthProcessor::unregisterDrumEngine(int pageIdx)
     bool any = false;
     for (auto* e : mDrumEngines) if (e) { any = true; break; }
     mAnyDrumPageActive.store(any, std::memory_order_release);
+    setProjectLoadInProgress (shieldWasUp);
     // InsertNode retained - preserves mixer state if drum is re-added.
 }
 
@@ -7037,6 +7927,7 @@ void VibeSynthProcessor::unregisterDrumEngine(int pageIdx)
 // strip so the user sees one channel per clip rather than two.
 void VibeSynthProcessor::registerClipEngine(int pageIdx, juce::AudioProcessor* eng)
 {
+    bindSampleLoadShield (eng);
     if (pageIdx < 0 || pageIdx >= kMaxClipPages) return;
     {
         juce::SpinLock::ScopedLockType lk(mClipEngineLock);
@@ -7110,6 +8001,10 @@ void VibeSynthProcessor::unregisterVoxEngine(int pageIdx)
 {
     if (pageIdx < 0 || pageIdx >= kMaxVoxPages) return;
 
+    const bool shieldWasUp = isProjectLoadInProgress();   // see the shield note above
+    setProjectLoadInProgress (true);
+    if (! shieldWasUp) settleAudioThread();
+
     if (mVoxRenderTasks[(size_t) pageIdx])
     {
         mRenderDispatcher.unregisterTask(MixerChannelIds::voxInsert(pageIdx));
@@ -7123,6 +8018,7 @@ void VibeSynthProcessor::unregisterVoxEngine(int pageIdx)
     bool any = false;
     for (auto* e : mVoxEngines) if (e) { any = true; break; }
     mAnyVoxPageActive.store(any, std::memory_order_release);
+    setProjectLoadInProgress (shieldWasUp);
 }
 
 void VibeSynthProcessor::registerInstEngine(int pageIdx, juce::AudioProcessor* eng)
@@ -7155,6 +8051,10 @@ void VibeSynthProcessor::unregisterInstEngine(int pageIdx)
 {
     if (pageIdx < 0 || pageIdx >= kMaxInstPages) return;
 
+    const bool shieldWasUp = isProjectLoadInProgress();   // see the shield note above
+    setProjectLoadInProgress (true);
+    if (! shieldWasUp) settleAudioThread();
+
     if (mInstRenderTasks[(size_t) pageIdx])
     {
         mRenderDispatcher.unregisterTask(MixerChannelIds::instInsert(pageIdx));
@@ -7168,6 +8068,7 @@ void VibeSynthProcessor::unregisterInstEngine(int pageIdx)
     bool any = false;
     for (auto* e : mInstEngines) if (e) { any = true; break; }
     mAnyInstPageActive.store(any, std::memory_order_release);
+    setProjectLoadInProgress (shieldWasUp);
 }
 
 // §P4.3 B7 (2026-04-22): register/unregister{Layer,Bass,Drums}PageEQ APIs
@@ -7266,8 +8167,16 @@ void VibeSynthProcessor::addParamsForMixerStrip(const juce::String& prefix,
             VID(id), name, lo, hi, def));
     };
 
-    // Main-out: covers every reserved channel id (0..999). Default = natural parent.
+    // Main-out line 0: covers every reserved channel id (0..999). Default =
+    // natural parent.  Id and range are frozen -- saved projects hold it.
     addI(prefix + "_sendTo", prefix + " Send-To", 0, 999, defaultSendTo);
+
+    // Main-out lines 1..3: a strip may feed up to four destinations, each a
+    // full-level copy.  -1 = inactive, which is also how a project saved before
+    // these existed resolves (the param is simply absent from its state).
+    for (int m = 1; m < MixerChannelIds::kMaxMainOutsPerStrip; ++m)
+        addI(MixerChannelIds::mainOutParamId(prefix, m),
+             prefix + " Main Out " + juce::String(m) + " To", -1, 999, -1);
 
     // Sends 0..3: -1 = inactive, amount in dB (-60..+6), pre/post toggle.
     for (int s = 0; s < 4; ++s)
@@ -7314,15 +8223,21 @@ bool VibeSynthProcessor::ensureMixerStripParams(const juce::String& prefix,
 
     addParamsForMixerStrip(prefix, kind, defaultSendTo);
     // Session B: every mixer strip also gets a full EQ band param set under the
-    // same prefix (prefix + "_mid_eq" + b + suffix / "_side_eq" + b + suffix),
-    // so the post-rack EQ on this strip is automatable. Idempotent via the
-    // mRegisteredTrackParams guard inside addParamsForTrackEQ's dynF/I/B helpers.
+    // same prefix (prefix + "_mid_eq{b}<Suffix>" / "_side_eq{b}<Suffix>"), so the
+    // post-rack EQ on this strip is automatable.  Idempotent because dynF/dynB/dynI
+    // skip any id APVTS already holds -- there is no remove API, so a duplicate
+    // registration would be permanent.
     addParamsForTrackEQ(prefix);
     // §P4.3: every strip ALSO gets a pre-rack EQ block under
     // prefix + "_preeq_mid_eq{b}*" / "_preeq_side_eq{b}*".  Same idempotent
     // guard.  Bus/insert preEq DSPs (added in B2) bind to these params via
     // updateAllPreRackEQsFromApvts (B4).
     addParamsForTrackPreEQ(prefix);
+    // THREAD SAFETY: resolve this strip's EQ param pointers NOW, on the message
+    // thread, so the audio-thread sweep never has to look an id up in APVTS's
+    // adapterTable -- which this very function is concurrently emplacing into.
+    // Must follow both EQ-bank registrations above: it caches what they created.
+    cacheEqParamPointers(prefix);
     mRegisteredMixerStrips.insert(prefix);
     // QA-ModelShell TS3 (2026-07-27): automation registration for these ids is
     // triggered HERE, at param materialization, rather than by whatever view
@@ -7369,6 +8284,9 @@ void VibeSynthProcessor::ensureMixerBusAndMasterParams()
     ensureMixerStripParams("mixer_bassbus2",    MixerStripKind::Bus, kMaster);
     ensureMixerStripParams("mixer_clipsbus2",   MixerStripKind::Bus, kMaster);
     ensureMixerStripParams("mixer_pluginbus2",  MixerStripKind::Bus, kMaster);
+    // QA-SOUNDNESS (2026-08-07): second drum kit's bus -- registered here for
+    // the same reason as every bus above (no params, no _sendTo, no edge out).
+    ensureMixerStripParams("mixer_drumsbus2",   MixerStripKind::Bus, kMaster);
 }
 
 // QA-G3Smoke Swing (SW-6): eager bulk registration at startup (mirrors
@@ -7518,9 +8436,10 @@ void VibeSynthProcessor::ensureAudioInsert(int row, const juce::String& displayN
                                      : ("Audio " + juce::String(row + 1)),
                                  prefix);
 
-    // Batch 5 (2026-05-06): create the per-row AudioInsertTask if it doesn't
-    // exist yet.  No removeAudioInsert hook exists - audio inserts persist
-    // for the project lifetime; the unique_ptr cleans up on plugin destroy.
+    // Batch 5 (2026-05-06): create the per-row CompositeAudioInsertTask if it
+    // doesn't exist yet.  No removeAudioInsert hook exists - audio inserts
+    // persist for the project lifetime; the unique_ptr cleans up on plugin
+    // destroy.
     if (! mAudioRenderTasks[(size_t) row])
     {
         auto task = std::make_unique<CompositeAudioInsertTask>(
@@ -7561,8 +8480,8 @@ void VibeSynthProcessor::ensureAuxInsert(int idx, const juce::String& displayNam
 // doFileNew + loadTemplate paths -- BEFORE restoreAuxStripsFromState rebuilds
 // from the loaded project, so aux strips from the prior session don't leak
 // across loads.  Audio-thread safety: each caller raises mProjectLoadInProgress
-// + sleeps 30 ms first so processBlock is bailing while we mutate the render-
-// task list -- the dispatcher's mTasks mutation here is safe.
+// and waits out the in-flight block first, so processBlock is bailing to
+// silence while we mutate the render-task list.
 void VibeSynthProcessor::clearAllAuxInserts()
 {
     for (size_t i = 0; i < mAuxRenderTasks.size(); ++i)
@@ -7689,16 +8608,27 @@ bool VibeSynthProcessor::loadBaySickGuitarsKit (int instIdx, const juce::File& s
     if (instIdx < 0 || instIdx >= (int) kMaxInstPages) return false;
     if (! sfzPath.existsAsFile()) return false;
 
-    // Active flag dance (mirrors Rusty's J-7b race fix): keep the slot's flag
-    // FALSE during the entire load.  loadSfzFile mutates sfizz internal state
-    // for several ms; the audio thread must not call renderBlock against a
-    // half-parsed kit.  Flip true only after load completes.
-    // K-5 fix #5 (2026-05-05): also flip the engine's per-instance
-    // mProcessingEnabled gate so its processBlock early-exits when the audio
-    // thread happens to fire while the SFZ load is mutating sfizz hash maps.
-    // mGuitarsActive[] alone wasn't enough - the chain processor calls the
-    // engine's processBlock directly without checking that flag.
+    // Both gates stay FALSE for the whole load: mGuitarsActive[] alone is not
+    // enough, because the chain processor calls the engine's processBlock
+    // directly without consulting it, so the engine's own mProcessingEnabled
+    // comes down too (below, once the instance exists).
     mGuitarsActive[(size_t) instIdx].store (false, std::memory_order_release);
+
+    // THREAD SAFETY: those gates are check-then-act and drain nothing.  Once
+    // the audio thread is past its mProcessingEnabled load it is committed to
+    // renderBlock for the rest of that block, and loadKit's very first act is
+    // sfizz's prepareSfzLoad, which drops the regions and voices (and the file
+    // pool whenever the path differs) that the in-flight render is reading --
+    // so this is a free, not a stale table.  The vendored sfizz has no callback
+    // guard of its own: renderBlock and loadSfzFile are unsynchronized against
+    // each other.  The shield bails processBlock at its top and the
+    // acknowledgement-based settle waits for that block to return, so the sfizz
+    // mutation starts with no reader inside the engine.  Same bracket as
+    // loadBaySickRustyDrumsKit, shieldWasUp save/restore included so an outer
+    // project load keeps its shield.
+    const bool shieldWasUp = isProjectLoadInProgress();
+    setProjectLoadInProgress (true);
+    if (! shieldWasUp) settleAudioThread();
 
     {
         const juce::SpinLock::ScopedLockType sl (mGuitarsEngineLock[(size_t) instIdx]);
@@ -7732,15 +8662,19 @@ bool VibeSynthProcessor::loadBaySickGuitarsKit (int instIdx, const juce::File& s
     {
         // Even on failure, re-enable processing so the slot doesn't sit
         // permanently silent (the engine will produce silence from the
-        // partially-loaded state until a successful load replaces it).
+        // partially-loaded state until a successful load replaces it).  The
+        // shield has to come down on this path too, or the caller is left with
+        // audio bailed indefinitely.
         if (auto* eng = mGuitarsEngine[(size_t) instIdx].get())
             eng->setProcessingEnabled (true);
+        setProjectLoadInProgress (shieldWasUp);
         return false;
     }
 
     // Now safe - engine fully loaded.  Audio thread can begin rendering.
     if (auto* eng = mGuitarsEngine[(size_t) instIdx].get())
         eng->setProcessingEnabled (true);
+    setProjectLoadInProgress (shieldWasUp);
     mGuitarsActive[(size_t) instIdx].store (true, std::memory_order_release);
     if (onSfizzEngineReady) onSfizzEngineReady (SfizzEngineKind::Guitars, instIdx);
     return true;
@@ -7780,6 +8714,14 @@ bool VibeSynthProcessor::loadBaySickBassesKit (int instIdx, const juce::File& sf
 
     mBassesActive[(size_t) instIdx].store (false, std::memory_order_release);
 
+    // THREAD SAFETY: see loadBaySickGuitarsKit -- the two gates are
+    // check-then-act, so the shield + acknowledgement settle is what actually
+    // gets the audio thread out of renderBlock before loadKit frees sfizz's
+    // regions and samples underneath it.
+    const bool shieldWasUp = isProjectLoadInProgress();
+    setProjectLoadInProgress (true);
+    if (! shieldWasUp) settleAudioThread();
+
     {
         const juce::SpinLock::ScopedLockType sl (mBassesEngineLock[(size_t) instIdx]);
         if (! mBassesEngine[(size_t) instIdx])
@@ -7803,11 +8745,13 @@ bool VibeSynthProcessor::loadBaySickBassesKit (int instIdx, const juce::File& sf
     {
         if (auto* eng = mBassesEngine[(size_t) instIdx].get())
             eng->setProcessingEnabled (true);
+        setProjectLoadInProgress (shieldWasUp);
         return false;
     }
 
     if (auto* eng = mBassesEngine[(size_t) instIdx].get())
         eng->setProcessingEnabled (true);
+    setProjectLoadInProgress (shieldWasUp);
     mBassesActive[(size_t) instIdx].store (true, std::memory_order_release);
     if (onSfizzEngineReady) onSfizzEngineReady (SfizzEngineKind::Basses, instIdx);
     return true;
@@ -7851,11 +8795,11 @@ bool VibeSynthProcessor::loadBaySickRustyDrumsKit (const juce::File& sfzPath)
     // engine SpinLock did NOT actually cover (the lock was only held for
     // the pointer assignment, not for loadKit itself).  The shield closes
     // both that latent race AND the new race window that opens with
-    // Sub-A = (i)'s removal of the per-insert try-locks.  shieldWasUp
-    // refcounting matches the existing project-load entry-point pattern.
+    // Sub-A = (i)'s removal of the per-insert try-locks.  The shieldWasUp
+    // save/restore matches the existing project-load entry-point pattern.
     const bool shieldWasUp = isProjectLoadInProgress();
     setProjectLoadInProgress (true);
-    if (! shieldWasUp) juce::Thread::sleep (30);
+    if (! shieldWasUp) settleAudioThread();
 
     // Create the singleton on first call.  Shield raised above bails the
     // audio thread at processBlock top, so no concurrent reader exists.
@@ -7934,11 +8878,25 @@ bool VibeSynthProcessor::loadBaySickRustyDrumsKit (const juce::File& sfzPath)
     {
         auto* rustyTab = mEngineRig->findTab (TabKind::Rusty, 0);
         if (rustyTab == nullptr)
-            rustyTab = mEngineRig->addTab (TabKind::Rusty, 0, "Drum Kit");
+            rustyTab = mEngineRig->addTab (TabKind::Rusty, 0);
         if (rustyTab != nullptr && mRustyDrumsEngine != nullptr)
         {
-            rustyTab->freezeProcListener = std::make_unique<EngineTab::FreezeProcListener>();
+            // LIFETIME: a reload against the SAME singleton engine (page-preset
+            // apply reaches this without going through destroyBaySickRustyDrums)
+            // would otherwise free the old listener while the engine's listener
+            // array still holds its address -- the next parameter write walks
+            // that array through a dead vtable.  Same detach-before-destroy
+            // contract destroyBaySickRustyDrums and EngineRig::teardownEngine
+            // honor, and the reason freezeListenedProcs exists.
+            if (rustyTab->freezeProcListener != nullptr)
+            {
+                for (auto* p : rustyTab->freezeListenedProcs)
+                    if (p != nullptr) p->removeListener (rustyTab->freezeProcListener.get());
+                rustyTab->freezeProcListener.reset();
+            }
             rustyTab->freezeListenedProcs.clear();
+
+            rustyTab->freezeProcListener = std::make_unique<EngineTab::FreezeProcListener>();
             mRustyDrumsEngine->addListener (rustyTab->freezeProcListener.get());
             rustyTab->freezeListenedProcs.push_back (mRustyDrumsEngine.get());
         }
@@ -7987,7 +8945,7 @@ void VibeSynthProcessor::destroyBaySickRustyDrums()
 
         if (frozenTab->frozen)
         {
-            juce::Thread::sleep (20);
+            settleAudioThread();
             frozenTab->freezeStreams.clear();
             frozenTab->freezePatternStreams.clear();
             frozenTab->patternStamps.clear();
@@ -7997,6 +8955,26 @@ void VibeSynthProcessor::destroyBaySickRustyDrums()
                 mEngineRig->onFreezeStateChanged (TabKind::Rusty, 0);
         }
     }
+
+    // QA-DispatcherAffinity Task 3 (2026-05-29): raise the message-thread
+    // shield around the whole teardown.  Audio thread bails at processBlock
+    // top while we mutate (see the mProjectLoadInProgress check there) + the
+    // settle waits for any in-flight block to drain.  This replaces the
+    // safety the per-insert ScopedTryLockType previously provided -- Sub-A =
+    // (i) removed those try-locks so 13 RustyInsertTasks can run lock-free
+    // under MT execution.  The shieldWasUp save/restore matches the existing
+    // pattern at StandaloneEditor's closeAllDynamicTabs + project-load entry
+    // points.
+    //
+    // ORDER IS THE POINT: the shield sits ABOVE the task-list mutation, not
+    // below it.  The audio thread walks the dispatcher's task vector every
+    // block, and removeRustyInsert unregisters AND frees a RustyInsertTask,
+    // so raising the shield after the loop protected only the engine reset and
+    // left the task frees racing a live dispatch.  loadBaySickRustyDrumsKit is
+    // the correct sibling; this now mirrors it.
+    const bool shieldWasUp = isProjectLoadInProgress();
+    setProjectLoadInProgress (true);
+    if (! shieldWasUp) settleAudioThread();
 
     // Remove all 13 InsertNodes first (audio thread will see the Rusty chId range
     // [kRustyBase..kRustyBase+kMaxRustyStrips) emptied in mInsertsByChannel
@@ -8018,21 +8996,6 @@ void VibeSynthProcessor::destroyBaySickRustyDrums()
     // Then drop the engine.  Audio thread reads mRustyDrumsActive before
     // touching the engine pointer, so flip the active flag before freeing.
     mRustyDrumsActive.store (false, std::memory_order_release);
-
-    // QA-DispatcherAffinity Task 3 (2026-05-29): raise the message-thread
-    // shield around the engine destroy.  Audio thread bails at processBlock
-    // top while we reset (see PluginProcessor::processBlock guard at the
-    // mProjectLoadInProgress check) + the 30 ms sleep gives any in-flight
-    // block time to drain.  This replaces the safety the per-insert
-    // ScopedTryLockType previously provided -- Sub-A = (i) removed those
-    // try-locks so 13 RustyInsertTasks can run lock-free under MT
-    // execution; the shield closes the use-after-free window that would
-    // otherwise open if destroy fired mid-audio-block.  shieldWasUp
-    // refcounting matches the existing pattern at StandaloneEditor's
-    // closeAllDynamicTabs + project-load entry points.
-    const bool shieldWasUp = isProjectLoadInProgress();
-    setProjectLoadInProgress (true);
-    if (! shieldWasUp) juce::Thread::sleep (30);
 
     // QA-DispatcherAffinity Task 3 (2026-05-29): clear the Rusty piano roll
     // on every pattern.  Matches the destroy-confirmation dialog's promise
@@ -8087,53 +9050,46 @@ void VibeSynthProcessor::resetBaySickRustyDrumsMixerState()
     // freshly-spawned strips for the new program start clean.
     // QA-UndoCoverage Task 6: program-swap default pushes are programmatic.
     juce::AudioProcessorValueTreeState::ScopedProgrammaticParamWrites spw;
-    auto resetParam = [&] (const juce::String& id, float defaultVal)
+
+    // Ask each param for its OWN registered default rather than restating one
+    // here: a restated list has to be right on two independent axes (the id
+    // spelling AND the value) and an APVTS miss is silent, so a drifted entry
+    // resets nothing and says nothing.  getDefaultValue() is already 0-1
+    // normalized, which is what setValueNotifyingHost wants.
+    auto resetParam = [&] (const juce::String& id)
     {
         if (auto* p = dynamic_cast<juce::RangedAudioParameter*> (apvts.getParameter (id)))
-            p->setValueNotifyingHost (p->getNormalisableRange().convertTo0to1 (defaultVal));
+            p->setValueNotifyingHost (p->getDefaultValue());
     };
 
     auto resetStripPrefix = [&] (const juce::String& prefix)
     {
-        resetParam (prefix + "_level",    0.0f);
-        resetParam (prefix + "_pan",      0.0f);
-        resetParam (prefix + "_width",    1.0f);
-        resetParam (prefix + "_mute",     0.0f);
-        resetParam (prefix + "_solo",     0.0f);
-        resetParam (prefix + "_polarity", 0.0f);
-        resetParam (prefix + "_bypass",   0.0f);   // Insert-only; no-op for buses
-        resetParam (prefix + "_arm",      0.0f);   // Insert-only; no-op for buses
-        resetParam (prefix + "_chokeGroup", 0.0f);
-        // Sends - `_send{0..3}_to` to -1 (inactive), `_send{0..3}_amount` to 0 dB,
-        // `_send{0..3}_prepost` to 0 (post).
+        resetParam (prefix + "_level");
+        resetParam (prefix + "_pan");
+        resetParam (prefix + "_width");
+        resetParam (prefix + "_mute");
+        resetParam (prefix + "_solo");
+        resetParam (prefix + "_polarity");
+        resetParam (prefix + "_bypass");
+        resetParam (prefix + "_arm");   // vox/inst inserts only; no-op here
+        resetParam (prefix + "_chokeGroup");
         for (int s = 0; s < 4; ++s)
         {
-            resetParam (prefix + "_send" + juce::String (s) + "_to",      -1.0f);
-            resetParam (prefix + "_send" + juce::String (s) + "_amount",   0.0f);
-            resetParam (prefix + "_send" + juce::String (s) + "_prepost",  0.0f);
+            resetParam (prefix + "_send" + juce::String (s) + "_to");
+            resetParam (prefix + "_send" + juce::String (s) + "_amount");
+            resetParam (prefix + "_send" + juce::String (s) + "_prepost");
         }
-        // EQ band defaults - every band Bell, 0 dB, freq mid, Q 0.7.
-        for (int b = 0; b < 8; ++b)
-        {
-            for (auto side : { juce::String ("_mid_eq"), juce::String ("_side_eq") })
-            {
-                const auto bandPrefix = prefix + side + juce::String (b);
-                resetParam (bandPrefix + "_freq", 1000.0f);
-                resetParam (bandPrefix + "_gain",    0.0f);
-                resetParam (bandPrefix + "_q",       0.7f);
-                resetParam (bandPrefix + "_type",    0.0f);   // Bell
-                resetParam (bandPrefix + "_on",      0.0f);
-            }
-            for (auto side : { juce::String ("_preeq_mid_eq"), juce::String ("_preeq_side_eq") })
-            {
-                const auto bandPrefix = prefix + side + juce::String (b);
-                resetParam (bandPrefix + "_freq", 1000.0f);
-                resetParam (bandPrefix + "_gain",    0.0f);
-                resetParam (bandPrefix + "_q",       0.7f);
-                resetParam (bandPrefix + "_type",    0.0f);
-                resetParam (bandPrefix + "_on",      0.0f);
-            }
-        }
+        // Both EQ banks (post-rack + pre-rack), both M/S sides, every band and
+        // every band param -- composed through EqBandIds so this cannot drift
+        // from the spelling addParamsForEQBank registers.
+        for (int bank = 0; bank < kEqBanksPerStrip; ++bank)
+            for (int side = 0; side < kEqSidesPerBank; ++side)
+                for (int b = 0; b < kEqBands; ++b)
+                {
+                    const juce::String bp = EqBandIds::bandPrefix (prefix, bank, side, b);
+                    for (const char* suffix : EqBandIds::kSuffixes)
+                        resetParam (bp + suffix);
+                }
     };
 
     // Bus + every potential Rusty insert slot.
@@ -8151,10 +9107,6 @@ void VibeSynthProcessor::resetBaySickRustyDrumsMixerState()
 // serializeProject (apvts.state is a juce::ValueTree that copies all attrs).
 void VibeSynthProcessor::addLiveInputParams (const juce::String& prefix)
 {
-    auto& ids = mRegisteredMixerStrips.count (prefix) > 0
-                  ? mRegisteredTrackParams[prefix]   // unused entry safety
-                  : mRegisteredTrackParams[prefix];
-    juce::ignoreUnused (ids);
     // Use raw createAndAddParameter; idempotent (APVTS skips duplicates).
     if (apvts.getParameter (prefix + "_inputChannelIdx") == nullptr)
         apvts.createAndAddParameter (std::make_unique<juce::AudioParameterInt> (

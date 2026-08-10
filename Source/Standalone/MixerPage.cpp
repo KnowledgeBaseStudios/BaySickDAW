@@ -42,6 +42,12 @@ static constexpr juce::uint32 kEffectsTabPink = 0xffce3f8e;  // FX Bus + aux str
 // src.x + offset; hit-test must match or sends 2/3/4 hit zones miss).
 static constexpr int kSendOffsets[4] = { 0, 8, -8, 16 };
 
+// Same idea for a strip's main-out lines.  Line 0 stays exactly on the socket
+// so a single-main strip is unchanged; lines 1..3 fan out far enough that the
+// 10 px hit zones do not merge into one unclickable cable, and away from the
+// send offsets above so a main and a send from the same strip stay separable.
+static constexpr int kMainOutOffsets[4] = { 0, -12, 12, -24 };
+
 // QA-Eg fix-up (2026-05-24): Master cable cutout rectangle dimensions.  Tuned
 // against the live mixer build via a transient "Tune Master Cutout"
 // calibration UI (since removed); values baked in here as compile-time
@@ -67,7 +73,7 @@ static juce::Colour pickStripColor(int chId, int destChannelId)
     // group buses share their family accent.
     if (destChannelId == kLayersBus || destChannelId == kLayersBus2) return VC::LayerCol[0];
     if (destChannelId == kBassBus   || destChannelId == kBassBus2)   return VC::BassCol[0];
-    if (destChannelId == kDrumsBus)  return VC::DrumsCol;
+    if (destChannelId == kDrumsBus  || destChannelId == kDrumsBus2)  return VC::DrumsCol;
     if (destChannelId == kClipsBus  || destChannelId == kClipsBus2)  return VC::Warm;
     if (destChannelId == kFxBus)     return juce::Colour(kEffectsTabPink);
     // 2026-04-30: Vox + Inst destination buses got teal + navy mirrors of
@@ -244,14 +250,22 @@ void MixerPage::CableOverlay::paint(juce::Graphics& g)
         juce::Graphics::ScopedSaveState sss(g);
         if (! masterBounds.isEmpty()) g.excludeClipRegion(masterBounds);
 
-        // Pass A1: main-out cables (paint underneath sends).
+        // Pass A1: main-out cables (paint underneath sends).  The per-srcId
+        // counter fans a multi-main strip's cables apart; the routing graph
+        // emits a strip's lines in line order, so the counter IS the line
+        // index and hit-testing can reproduce the same offset.
+        std::map<int, int> mainLineIndex;
         for (const auto& e : edges)
         {
             if (! e.isMainOut) continue;
 
+            const int mIdx = mainLineIndex[e.srcId]++;
+
             auto src = owner.getSocketPosition(e.srcId);
             auto dst = owner.getSocketPosition(e.dstId);
             if (src.x < 0 || dst.x < 0) continue;
+
+            src.x += (float) kMainOutOffsets[mIdx % 4];
 
             g.setColour(cableTelemetry(e.srcId, juce::Colour(kCableMain)));
             g.strokePath(getMixerCablePath(src.x, src.y, dst.x, dst.y), mainStroke);
@@ -333,14 +347,24 @@ void MixerPage::CableOverlay::paint(juce::Graphics& g)
             g.strokePath(getMixerCablePath(src.x, src.y, dst.x, dst.y), stroke);
         };
 
-        // Pass B1: mains terminating at Master.
+        // Pass B1: mains terminating at Master.  Counter walks every main-out
+        // in lockstep with Phase A's pass so the line index -- and with it the
+        // fan-out offset -- matches what was drawn there.
+        std::map<int, int> mainLineIndexB;
         for (const auto& e : edges)
         {
             if (! e.isMainOut) continue;
+            const int mIdx = mainLineIndexB[e.srcId]++;
             if (e.dstId != kMasterCh) continue;
 
             auto src = owner.getSocketPosition(e.srcId);
             auto dst = owner.getSocketPosition(e.dstId);
+
+            // Fan out only a REAL socket: shifting the (-1,-1) sentinel would
+            // hide the missing-strip marker renderMasterStub tests for.
+            if (! (src.x == -1.f && src.y == -1.f))
+                src.x += (float) kMainOutOffsets[mIdx % 4];
+
             renderMasterStub(src, dst,
                              cableTelemetry(e.srcId, juce::Colour(kCableMain)),
                              mainStroke);
@@ -400,10 +424,15 @@ void MixerPage::CableOverlay::mouseDown(const juce::MouseEvent& e)
         auto hits = hitTestCablesAll(e.position);
         if (hits.empty()) return;
         const auto screenPt = e.getScreenPosition().toFloat();
+        // A main-out cable is actionable only when it is an EXTRA line (1..3):
+        // those can be deleted.  Line 0 has no editable properties -- moving it
+        // is a "+" menu action -- so it still opens nothing.
+        auto isActionable = [] (const CableHit& h)
+        { return ! h.isMainOut || h.mainLine >= 1; };
+
         if (hits.size() == 1)
         {
-            // QA-Eg: skip popup for single-hit mains (no editable props).
-            if (! hits.front().isMainOut)
+            if (isActionable (hits.front()))
                 showCablePopup(screenPt, hits.front());
             return;
         }
@@ -420,20 +449,20 @@ void MixerPage::CableOverlay::mouseDown(const juce::MouseEvent& e)
             if (h.isSidechain)
                 label = "Sidechain: " + srcName + " -> " + dstName;
             else if (h.isMainOut)
-                label = "Main: " + srcName + " -> " + dstName;
+                label = "Main " + juce::String (juce::jmax (0, h.mainLine) + 1) + ": "
+                      + srcName + " -> " + dstName;
             else
                 label = "Send " + juce::String(h.sendSlot + 1) + ": "
                       + srcName + " -> " + dstName;
-            // QA-Eg: main entries are grayed-out (no popup behind them); they
-            // appear in the chooser for visibility only.
-            const bool isActive = ! h.isMainOut;
-            chooser.addItem((int) i + 1, label, isActive);
+            // QA-Eg: a main entry with no popup behind it is grayed-out; it
+            // appears in the chooser for visibility only.
+            chooser.addItem((int) i + 1, label, isActionable (h));
         }
         chooser.showMenuAsync(juce::PopupMenu::Options{},
-            [this, hits, screenPt](int r)
+            [this, hits, screenPt, isActionable](int r)
             {
                 if (r > 0 && r <= (int) hits.size()
-                    && ! hits[(size_t)(r - 1)].isMainOut)
+                    && isActionable (hits[(size_t)(r - 1)]))
                     showCablePopup(screenPt, hits[(size_t)(r - 1)]);
             });
         return;
@@ -486,9 +515,12 @@ bool MixerPage::CableOverlay::isRouteAllowed(int srcId, int dstId) const
             || (dstId == kBassBus2   && owner.isBassBus2Active())
             || (dstId == kLayersBus2 && owner.isLayersBus2Active());
 
-    // Drum insert: Drums Bus · Master
+    // Drum insert: its OWN kit's Drums Bus · Master.  QA-SOUNDNESS (2026-08-07):
+    // the two kits are independent, so a bank-2 drum is offered Drums Bus 2 and
+    // never bank 1's bus (and vice versa) -- crossing the banks at the mixer
+    // would put one kit's audio back through the other kit's inserts.
     if (srcIsDrum)
-        return dstIsMaster || dstId == kDrumsBus;
+        return dstIsMaster || dstId == drumBusForPage (srcId - kDrumBase);
 
     // QA-ModelShell TS6 (BLU-447): Plugin insert: Plugins Bus, Layers Bus,
     // Bass Bus, Master.  Jeff's spec -- a VST strip moves under Layers or Bass
@@ -510,9 +542,13 @@ bool MixerPage::CableOverlay::isRouteAllowed(int srcId, int dstId) const
     // Audio insert: any bus EXCEPT FX · Master (FX reachable only via aux-send).
     // R1 (2026-04-23): added Vox + Inst bus destinations.
     // G-6 (2026-04-29): secondary Vox/Inst buses also valid destinations.
+    // QA-SOUNDNESS (2026-08-07): the second drums bus is offered on the same
+    // terms as the first and takes NO activation guard -- kDrumsBus2 has no
+    // *Active flag by design (its visibility is membership-driven in
+    // laidOutBus), unlike the Clips/Layers/Bass secondaries below.
     if (srcIsAudio)
         return dstIsMaster || dstId == kLayersBus || dstId == kBassBus
-            || dstId == kDrumsBus || dstId == kClipsBus
+            || dstId == kDrumsBus || dstId == kDrumsBus2 || dstId == kClipsBus
             || dstId == kVoxBus  || dstId == kInstBus
             || dstId == kVoxBus2 || dstId == kInstBus2 || dstId == kInstBus3
             || (dstId == kClipsBus2  && owner.isClipsBus2Active())
@@ -557,6 +593,36 @@ int MixerPage::CableOverlay::findAvailableSendSlot(const juce::String& prefix) c
                 return s;
     }
     return -1;   // all 4 slots occupied
+}
+
+// ── Main-out line helpers ────────────────────────────────────────────────────
+// Line 0 lives in <prefix>_sendTo (always active); lines 1..3 in
+// <prefix>_mainOut{N}_to with -1 = inactive.
+int MixerPage::CableOverlay::mainOutDest (const juce::String& prefix, int line) const
+{
+    if (prefix.isEmpty() || line < 0 || line >= MixerChannelIds::kMaxMainOutsPerStrip)
+        return -1;
+    if (auto* p = owner.mProcessor.apvts.getRawParameterValue (
+                      MixerChannelIds::mainOutParamId (prefix, line)))
+        return (int) p->load();
+    return -1;
+}
+
+int MixerPage::CableOverlay::findAvailableMainOutLine (const juce::String& prefix) const
+{
+    for (int line = 1; line < MixerChannelIds::kMaxMainOutsPerStrip; ++line)
+        if (mainOutDest (prefix, line) < 0)
+            return line;
+    return -1;
+}
+
+bool MixerPage::CableOverlay::isMainOutDestInUse (const juce::String& prefix, int dstId) const
+{
+    if (dstId < 0) return false;
+    for (int line = 0; line < MixerChannelIds::kMaxMainOutsPerStrip; ++line)
+        if (mainOutDest (prefix, line) == dstId)
+            return true;
+    return false;
 }
 
 // C.4 Phase 1 (2026-04-30): target-side SC slot finder -- SC lines are
@@ -665,32 +731,105 @@ void MixerPage::onAddCableRequestedFor(int srcChannelId)
         m.addSubMenu ("Sidechain...", scSub);
     }
 
-    // Move Output... -> legal main-out reroutes (absent on locked strips);
-    // current destination shows a tick.
+    // ── Main-out lines ────────────────────────────────────────────────────────
+    // A strip feeds up to kMaxMainOutsPerStrip destinations.  Line 0 is its
+    // permanent output and can only be MOVED; lines 1..3 are added and removed.
+    // Every line answers to the same three rules the single line always did:
+    // isRouteAllowed for this source type, no cycle against the whole edge set
+    // (which now includes every strip's extra lines), and no two lines of one
+    // strip on the same destination.  A main-out-locked strip (Master, buses,
+    // Rusty inserts) gets none of these submenus and so keeps exactly one.
     if (! isMainOutLocked (srcChannelId))
     {
-        juce::PopupMenu moveSub;
-        int currentDest = defaultSendTo (srcChannelId);
+        int line0Dest = defaultSendTo (srcChannelId);
         if (auto* p = mProcessor.apvts.getRawParameterValue (srcPrefix + "_sendTo"))
         {
             const int v = (int) p->load();
-            if (v >= 0) currentDest = v;
+            if (v >= 0) line0Dest = v;
         }
-        for (const auto& en : entries)
+
+        auto destName = [&entries] (int chId) -> juce::String
         {
-            if (en.channelId == srcChannelId) continue;
-            if (! mCableOverlay->isRouteAllowed (srcChannelId, en.channelId)) continue;
-            const int dstId = en.channelId;
-            const bool ticked = dstId == currentDest;
-            const bool ok = ticked || ! graph.wouldCreateCycle (srcChannelId, dstId);
-            moveSub.addItem (en.name, ok, ticked,
-                [safeThis, writeNatural, srcPrefix, dstId]
-                {
-                    if (safeThis) beginParamUndoGesture (safeThis->mProcessor.apvts, srcPrefix + "_sendTo"); // Task 6 (12-iv)
-                    writeNatural (srcPrefix + "_sendTo", (float) dstId);
-                });
+            for (const auto& en : entries)
+                if (en.channelId == chId) return en.name;
+            return friendlyName (chId);
+        };
+
+        // Move Output... -> retarget line 0; current destination shows a tick.
+        {
+            juce::PopupMenu moveSub;
+            for (const auto& en : entries)
+            {
+                if (en.channelId == srcChannelId) continue;
+                if (! mCableOverlay->isRouteAllowed (srcChannelId, en.channelId)) continue;
+                const int dstId = en.channelId;
+                const bool ticked = dstId == line0Dest;
+                const bool ok = ticked
+                             || (! mCableOverlay->isMainOutDestInUse (srcPrefix, dstId)
+                                 && ! graph.wouldCreateCycle (srcChannelId, dstId));
+                moveSub.addItem (en.name, ok, ticked,
+                    [safeThis, writeNatural, srcPrefix, dstId]
+                    {
+                        if (safeThis) beginParamUndoGesture (safeThis->mProcessor.apvts, srcPrefix + "_sendTo"); // Task 6 (12-iv)
+                        writeNatural (srcPrefix + "_sendTo", (float) dstId);
+                    });
+            }
+            m.addSubMenu ("Move Output...", moveSub);
         }
-        m.addSubMenu ("Move Output...", moveSub);
+
+        // Add Main Out... -> claim the first free line 1..3 for this target.
+        {
+            juce::PopupMenu addSub;
+            const bool haveFreeLine = mCableOverlay->findAvailableMainOutLine (srcPrefix) >= 0;
+            for (const auto& en : entries)
+            {
+                if (en.channelId == srcChannelId) continue;
+                if (! mCableOverlay->isRouteAllowed (srcChannelId, en.channelId)) continue;
+                const int dstId = en.channelId;
+                const bool ok = haveFreeLine
+                             && ! mCableOverlay->isMainOutDestInUse (srcPrefix, dstId)
+                             && ! graph.wouldCreateCycle (srcChannelId, dstId);
+                addSub.addItem (en.name, ok, false,
+                    [safeThis, writeNatural, srcPrefix, dstId]
+                    {
+                        if (! safeThis || safeThis->mCableOverlay == nullptr) return;
+                        if (safeThis->mCableOverlay->isMainOutDestInUse (srcPrefix, dstId)) return;
+                        const int line = safeThis->mCableOverlay->findAvailableMainOutLine (srcPrefix);
+                        if (line < 0) return;
+                        const juce::String id = MixerChannelIds::mainOutParamId (srcPrefix, line);
+                        beginParamUndoGesture (safeThis->mProcessor.apvts, id); // Task 6 (12-iv)
+                        writeNatural (id, (float) dstId);
+                    });
+            }
+            m.addSubMenu ("Add Main Out...", addSub);
+        }
+
+        // Remove Main Out... -> drop an extra line.  Line 0 is listed disabled
+        // rather than hidden so it is visible WHY it cannot be removed: a strip
+        // always keeps one output, and moving it is the other submenu.
+        {
+            juce::PopupMenu remSub;
+            for (int line = 0; line < kMaxMainOutsPerStrip; ++line)
+            {
+                const int dstId = (line == 0) ? line0Dest
+                                              : mCableOverlay->mainOutDest (srcPrefix, line);
+                if (dstId < 0) continue;
+                if (line == 0)
+                {
+                    remSub.addItem (destName (dstId) + "  (main output)", false, false, [] {});
+                    continue;
+                }
+                remSub.addItem (destName (dstId), true, false,
+                    [safeThis, writeNatural, srcPrefix, line]
+                    {
+                        if (! safeThis) return;
+                        const juce::String id = MixerChannelIds::mainOutParamId (srcPrefix, line);
+                        beginParamUndoGesture (safeThis->mProcessor.apvts, id); // Task 6 (12-iv)
+                        writeNatural (id, -1.0f);
+                    });
+            }
+            m.addSubMenu ("Remove Main Out...", remSub);
+        }
     }
 
     m.showMenuAsync (juce::PopupMenu::Options{});
@@ -737,6 +876,19 @@ MixerPage::CableOverlay::hitTestCablesAll(juce::Point<float> pt) const
         juce::Path hitZone;
         juce::PathStrokeType(10.f).createStrokedPath(hitZone, bezier);
         return hitZone.contains(pt);
+    };
+
+    // Reverse-lookup: which persisted main-out line (0..3) of this source
+    // currently points at dstId?  The paint-order index is NOT the line index
+    // when an earlier line sits inactive, and the popup acts on the persisted
+    // line.  -1 when the strip has no registered params (nothing to act on).
+    auto mainLineForDest = [this] (int srcId, int dstId) -> int
+    {
+        const juce::String prefix = MixerChannelIds::prefixFromChannelId (srcId);
+        if (prefix.isEmpty()) return -1;
+        for (int line = 0; line < MixerChannelIds::kMaxMainOutsPerStrip; ++line)
+            if (mainOutDest (prefix, line) == dstId) return line;
+        return -1;
     };
 
     // De-dupe helper for the Master-cutout pass below (avoids adding a cable
@@ -806,19 +958,28 @@ MixerPage::CableOverlay::hitTestCablesAll(juce::Point<float> pt) const
         }
     }
 
-    // Pass 2: main-out cables (no offset, no slot reverse-lookup needed).
+    // Pass 2: main-out cables.  Mirrors paint's Pass A1 counter so a strip with
+    // several mains hit-tests at the offsets those cables were drawn at; the
+    // line index is also what the popup needs to know WHICH line was clicked.
+    std::map<int, int> mainLineIndex;
     for (const auto& e : edges)
     {
         if (! e.isMainOut) continue;
+        const int mIdx = mainLineIndex[e.srcId]++;
+
         auto src = owner.getSocketPosition(e.srcId);
         auto dst = owner.getSocketPosition(e.dstId);
         if (src.x < 0 || dst.x < 0) continue;
+
+        src.x += (float) kMainOutOffsets[mIdx % 4];
+
         if (cableHits(src, dst))
         {
             CableHit hit;
             hit.srcId     = e.srcId;
             hit.dstId     = e.dstId;
             hit.isMainOut = true;
+            hit.mainLine  = mainLineForDest (e.srcId, e.dstId);
             hits.push_back(hit);
         }
     }
@@ -847,6 +1008,7 @@ MixerPage::CableOverlay::hitTestCablesAll(juce::Point<float> pt) const
                 hit.srcId     = e.srcId;
                 hit.dstId     = e.dstId;
                 hit.isMainOut = true;
+                hit.mainLine  = mainLineForDest (e.srcId, e.dstId);
                 hits.push_back(hit);
             }
             else
@@ -970,10 +1132,10 @@ private:
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> mPrePostAtt;
 };
 
-// QA-Eg: CableMainOutPopup class removed - main cables have no editable
-// properties; the popup was just a glorified tooltip.  Main cables now
-// appear as grayed-out entries in the right-click chooser (visibility
-// only) and have no popup behavior on single-hit right-click either.
+// QA-Eg: the old CableMainOutPopup was removed as a glorified tooltip.  A main
+// cable on line 0 still has no properties to edit and stays a grayed-out
+// chooser entry; the extra main lines carry a delete, whose popup is defined
+// inline in showCablePopup next to the SC one.
 }  // anon namespace
 
 void MixerPage::CableOverlay::showCablePopup(juce::Point<float> screenPt,
@@ -1060,10 +1222,69 @@ void MixerPage::CableOverlay::showCablePopup(juce::Point<float> screenPt,
     }
     else if (hit.isMainOut)
     {
-        // QA-Eg: main cables have no popup.  User drags the cable to move/
-        // remove the routing.  Chooser shows them grayed-out for visibility;
-        // single-hit right-click on a main does nothing.
-        return;
+        // Line 0 has no popup: it is the strip's permanent output and moving it
+        // is a "+" menu action.  An EXTRA line (1..3) gets a delete affordance
+        // here so a cable the user can see is a cable the user can cut.
+        if (hit.mainLine < 1) return;
+
+        const juce::String prefix = prefixFromChannelId (hit.srcId);
+        if (prefix.isEmpty()) return;
+        auto deleteAction = [this, prefix, line = hit.mainLine]
+        {
+            const juce::String id = MixerChannelIds::mainOutParamId (prefix, line);
+            beginParamUndoGesture (owner.mProcessor.apvts, id); // Task 6 (12-iv)
+            if (auto* p = dynamic_cast<juce::RangedAudioParameter*>(
+                    owner.mProcessor.apvts.getParameter (id)))
+                p->setValueNotifyingHost (p->getNormalisableRange().convertTo0to1 (-1.f));
+            // Same reason as the SC delete below: the routing graph rebuilds
+            // from APVTS on the next audio block, but nothing repaints the
+            // overlay off a param write, so the cut cable would linger.
+            repaint();
+        };
+
+        // MainOutCablePopup mirrors ScCablePopup: an info line plus Delete, no
+        // amount or pre/post (a main out is unity-gain by definition).
+        struct MainOutCablePopup : public juce::Component {
+            juce::Label      info;
+            juce::TextButton delBtn;
+            std::function<void()> onDelete;
+            MainOutCablePopup (juce::String src, juce::String dst, int line,
+                               std::function<void()> del)
+                : onDelete (std::move (del))
+            {
+                info.setText ("Main " + juce::String (line + 1) + ": "
+                                + src + " -> " + dst,
+                              juce::dontSendNotification);
+                info.setColour (juce::Label::textColourId, juce::Colours::white);
+                info.setJustificationType (juce::Justification::centred);
+                addAndMakeVisible (info);
+
+                delBtn.setButtonText ("Remove Main Out");
+                delBtn.setColour (juce::TextButton::buttonColourId,
+                                  juce::Colour (0xff4a3030));
+                delBtn.onClick = [this] {
+                    if (onDelete) onDelete();
+                    if (auto* cb = findParentComponentOfClass<juce::CallOutBox>())
+                        cb->dismiss();
+                };
+                addAndMakeVisible (delBtn);
+
+                setSize (230, 60);
+            }
+            void resized() override
+            {
+                info  .setBounds (0, 4, getWidth(), 22);
+                delBtn.setBounds (getWidth() / 2 - 65, 30, 130, 24);
+            }
+            void paint (juce::Graphics& g) override
+            {
+                g.fillAll (juce::Colour (0xff1e2024));
+            }
+        };
+
+        content = std::make_unique<MainOutCablePopup>(
+            getStripName (hit.srcId), getStripName (hit.dstId),
+            hit.mainLine, std::move (deleteAction));
     }
     else if (hit.sendSlot >= 0)
     {
@@ -1127,6 +1348,7 @@ void MixerPage::rebuildStripCache() const
     reg(kLayersBus,     mLayersBusStrip    .get());
     reg(kBassBus,       mBassBusStrip      .get());
     reg(kDrumsBus,      mDrumsBusStrip     .get());
+    reg(kDrumsBus2,     mDrumsBus2Strip    .get());
     reg(kFxBus,         mFXBusStrip        .get());
     reg(kClipsBus,      mAudioClipsBusStrip.get());
     reg(kVoxBus,        mVoxBusStrip       .get());
@@ -1215,6 +1437,10 @@ MixerPage::MixerPage(VibeSynthProcessor& processor, PatternManager& pm)
                               MixerTrackStrip::StripType::Bus, VC::BassCol[0]);
     mDrumsBusStrip      = std::make_unique<MixerTrackStrip>("Drums Bus",
                               MixerTrackStrip::StripType::Bus, VC::DrumsCol);
+    // QA-SOUNDNESS (2026-08-07): kit 2's bus.  Same Drums-red accent as Drums
+    // Bus so the two kits read as one family.
+    mDrumsBus2Strip     = std::make_unique<MixerTrackStrip>("Drums Bus 2",
+                              MixerTrackStrip::StripType::Bus, VC::DrumsCol);
     mFXBusStrip         = std::make_unique<MixerTrackStrip>("FX Bus",
                               MixerTrackStrip::StripType::Bus, juce::Colour(kEffectsTabPink));
     mAudioClipsBusStrip = std::make_unique<MixerTrackStrip>("Clips Bus",
@@ -1235,6 +1461,7 @@ MixerPage::MixerPage(VibeSynthProcessor& processor, PatternManager& pm)
     mLayersBusStrip    ->setAutomationPrefix("mixer_layers");
     mBassBusStrip      ->setAutomationPrefix("mixer_bass");
     mDrumsBusStrip     ->setAutomationPrefix("mixer_drums");
+    mDrumsBus2Strip    ->setAutomationPrefix("mixer_drumsbus2");
     mFXBusStrip        ->setAutomationPrefix("mixer_fx");
     mAudioClipsBusStrip->setAutomationPrefix("mixer_clipsbus");
     mVoxBusStrip       ->setAutomationPrefix("mixer_voxbus");
@@ -1246,6 +1473,7 @@ MixerPage::MixerPage(VibeSynthProcessor& processor, PatternManager& pm)
     mLayersBusStrip    ->setApvts(mProcessor.apvts, "mixer_layers");
     mBassBusStrip      ->setApvts(mProcessor.apvts, "mixer_bass");
     mDrumsBusStrip     ->setApvts(mProcessor.apvts, "mixer_drums");
+    mDrumsBus2Strip    ->setApvts(mProcessor.apvts, "mixer_drumsbus2");
     mFXBusStrip        ->setApvts(mProcessor.apvts, "mixer_fx");
     mAudioClipsBusStrip->setApvts(mProcessor.apvts, "mixer_clipsbus");
     mVoxBusStrip       ->setApvts(mProcessor.apvts, "mixer_voxbus");
@@ -1263,7 +1491,13 @@ MixerPage::MixerPage(VibeSynthProcessor& processor, PatternManager& pm)
     // FX Bus doesn't participate in the legacy MixerState struct (no dedicated
     // level/pan/mute/solo members), so wireBusCallbacks isn't used. Still wire
     // onFXClicked so its FX Rack button navigates to the Effects Page.
+    // Drums Bus 2, the secondary group buses and the Vox/Inst/Rusty/Plugins
+    // buses are all in that same class -- their fader/pan/mute/solo live only
+    // in APVTS, which is where the audio path and undo both read them.
     mFXBusStrip->onFXClicked = [this](const juce::String& id) {
+        if (onEffectsTabRequested) onEffectsTabRequested(id);
+    };
+    mDrumsBus2Strip->onFXClicked = [this](const juce::String& id) {
         if (onEffectsTabRequested) onEffectsTabRequested(id);
     };
     // R3.5: Vox + Inst bus FX rack buttons navigate to Effects page like other buses.
@@ -1306,6 +1540,11 @@ MixerPage::MixerPage(VibeSynthProcessor& processor, PatternManager& pm)
     // is what gates whether layoutScrollContent positions it on-screen.
     mScrollContent->addChildComponent(*mRustyDrumsBusStrip);
     mRustyDrumsBusStrip->setVisible(false);
+    // QA-SOUNDNESS: parented hidden so the empty kit-2 bus never flashes
+    // between construction and the first layout pass, which is what decides
+    // its visibility from then on (laidOutBus, membership-gated).
+    mScrollContent->addChildComponent(*mDrumsBus2Strip);
+    mDrumsBus2Strip->setVisible(false);
     // TS6 (BLU-447) -- MISSED, fixed TS7 2026-07-30.  This was the whole reason
     // the Plugins bus never appeared: the strip was constructed and configured
     // but never PARENTED, so it was an orphan Component that could not render no
@@ -1340,6 +1579,7 @@ MixerPage::MixerPage(VibeSynthProcessor& processor, PatternManager& pm)
     wireSendBtn(mLayersBusStrip.get());
     wireSendBtn(mBassBusStrip.get());
     wireSendBtn(mDrumsBusStrip.get());
+    wireSendBtn(mDrumsBus2Strip.get());
     wireSendBtn(mFXBusStrip.get());
     wireSendBtn(mAudioClipsBusStrip.get());
     wireSendBtn(mVoxBusStrip.get());
@@ -1352,6 +1592,7 @@ MixerPage::MixerPage(VibeSynthProcessor& processor, PatternManager& pm)
     mLayersBusStrip   ->setChannelId(MixerChannelIds::kLayersBus);
     mBassBusStrip     ->setChannelId(MixerChannelIds::kBassBus);
     mDrumsBusStrip    ->setChannelId(MixerChannelIds::kDrumsBus);
+    mDrumsBus2Strip   ->setChannelId(MixerChannelIds::kDrumsBus2);
     mFXBusStrip       ->setChannelId(MixerChannelIds::kFxBus);
     mAudioClipsBusStrip->setChannelId(MixerChannelIds::kClipsBus);
     mVoxBusStrip      ->setChannelId(MixerChannelIds::kVoxBus);
@@ -1409,7 +1650,7 @@ void MixerPage::addLayerChannel(int pageIndex, const juce::String& name)
         if (onEffectsTabRequested) onEffectsTabRequested(id);
     };
     strip->onNameChanged = [this, pageIndex](const juce::String& newName) {
-        if (onChannelRenamed) onChannelRenamed(pageIndex, newName);
+        if (onChannelRenamed) onChannelRenamed(StripKind::Layer, pageIndex, newName);
     };
 
     mScrollContent->addAndMakeVisible(*strip);
@@ -1442,7 +1683,7 @@ void MixerPage::addPluginChannel(int pageIndex, const juce::String& name)
         if (onEffectsTabRequested) onEffectsTabRequested(id);
     };
     strip->onNameChanged = [this, pageIndex](const juce::String& newName) {
-        if (onChannelRenamed) onChannelRenamed(pageIndex, newName);
+        if (onChannelRenamed) onChannelRenamed(StripKind::Plugin, pageIndex, newName);
     };
 
     mScrollContent->addAndMakeVisible(*strip);
@@ -1473,7 +1714,7 @@ void MixerPage::addBassChannel(int pageIndex, const juce::String& name)
         if (onEffectsTabRequested) onEffectsTabRequested(id);
     };
     strip->onNameChanged = [this, pageIndex](const juce::String& newName) {
-        if (onChannelRenamed) onChannelRenamed(pageIndex, newName);
+        if (onChannelRenamed) onChannelRenamed(StripKind::Bass, pageIndex, newName);
     };
 
     mScrollContent->addAndMakeVisible(*strip);
@@ -1507,7 +1748,7 @@ void MixerPage::addDrumChannel(int slot, const juce::String& name)
         onAddCableRequestedFor(chId);
     };
 
-    if (slot < MAX_DRUM_ROWS)
+    if (slot >= 0 && slot < kMaxDrumPages)
     {
         const int capturedSlot = slot;
         strip->onFaderDragStarted = [this] { mMixerStateBefore = mPM.getMixer(); };
@@ -1914,7 +2155,11 @@ void MixerPage::addVoxChannelAtIndex(int idx)
     strip->onFXClicked = [this](const juce::String& id) {
         if (onEffectsTabRequested) onEffectsTabRequested(id);
     };
-    strip->onNameChanged = [this](const juce::String&) {
+    // A Vox strip's name persists in <VoxNames>, but the owning Vox tab persists
+    // its own copy -- so the rename has to reach the tab too or the two names
+    // drift apart permanently.
+    strip->onNameChanged = [this, idx](const juce::String& newName) {
+        if (onChannelRenamed) onChannelRenamed (StripKind::Vox, idx, newName);
         if (getWidth() > 0) layoutScrollContent();
         if (onAudioStripRenamed) onAudioStripRenamed();
     };
@@ -2266,6 +2511,13 @@ void MixerPage::setInstStripNoLiveInput (int idx, bool b)
     it->second->setNoLiveInput (b);
 }
 
+void MixerPage::setInstStripKitMissing (int idx, bool b)
+{
+    auto it = mInstStrips.find (idx);
+    if (it == mInstStrips.end() || ! it->second) return;
+    it->second->setKitMissing (b);
+}
+
 void MixerPage::addInstChannelAtIndex(int idx)
 {
     if (idx < 0 || idx >= MixerChannelIds::kMaxInstStrips) return;
@@ -2286,7 +2538,10 @@ void MixerPage::addInstChannelAtIndex(int idx)
     strip->onFXClicked = [this](const juce::String& id) {
         if (onEffectsTabRequested) onEffectsTabRequested(id);
     };
-    strip->onNameChanged = [this](const juce::String&) {
+    // Same tab-agreement rule as the Vox strip above: <InstNames> persists the
+    // strip name, the Inst tab persists its own, so the rename must reach both.
+    strip->onNameChanged = [this, idx](const juce::String& newName) {
+        if (onChannelRenamed) onChannelRenamed (StripKind::Inst, idx, newName);
         if (getWidth() > 0) layoutScrollContent();
         if (onAudioStripRenamed) onAudioStripRenamed();
     };
@@ -2361,22 +2616,6 @@ void MixerPage::addRustyChannelAtIndex (int idx, const juce::String& name)
     }
 
     if (getWidth() > 0) resized();
-    if (onAudioStripRenamed) onAudioStripRenamed();
-}
-
-void MixerPage::removeRustyChannelAtIndex (int idx)
-{
-    auto it = mRustyStrips.find (idx);
-    if (it == mRustyStrips.end()) return;
-
-    if (it->second)
-        mScrollContent->removeChildComponent (it->second.get());
-    mStripCacheDirty = true;   // perf-audit H2: erase invalidates the strip cache.
-    mRustyStrips.erase (it);
-    mRustyOrder.erase (std::remove (mRustyOrder.begin(), mRustyOrder.end(), idx),
-                       mRustyOrder.end());
-
-    if (getWidth() > 0) layoutScrollContent();
     if (onAudioStripRenamed) onAudioStripRenamed();
 }
 
@@ -2735,6 +2974,7 @@ namespace
         if (prefix == "mixer_layers")    return kLayersBus;
         if (prefix == "mixer_bass")      return kBassBus;
         if (prefix == "mixer_drums")     return kDrumsBus;
+        if (prefix == "mixer_drumsbus2") return kDrumsBus2;
         if (prefix == "mixer_fx")        return kFxBus;
         if (prefix == "mixer_clipsbus")  return kClipsBus;
         if (prefix == "mixer_voxbus")    return kVoxBus;
@@ -2763,13 +3003,20 @@ namespace
         rp->setValueNotifyingHost (normalized);
     }
 
-    // Predicate: is this parameter id a primary _sendTo or one of the 4
-    // additional send destinations (_sendN_to)?
-    //
-    // Called once per registered parameter by every send sweep, so the four
-    // secondary suffixes are built once at first use rather than rebuilt (and
-    // freed) on each call -- with lazily-registered per-strip params the walk
-    // covers thousands of ids.
+    // Which kind of routing destination a parameter id names.  All three kinds
+    // must be swept when a destination strip is deleted -- a main line left
+    // pointing at a dead channel drops that strip out of the mix silently.
+    enum class DestKind
+    {
+        MainLine0,   // <prefix>_sendTo         -- the strip's permanent output
+        MainLineN,   // <prefix>_mainOut{N}_to  -- extra main outs, -1 = off
+        Send         // <prefix>_send{N}_to     -- aux send, -1 = off
+    };
+
+    // Called once per registered parameter by every sweep, so the suffix tables
+    // are built once at first use rather than rebuilt (and freed) on each call
+    // -- with lazily-registered per-strip params the walk covers thousands of
+    // ids.
     const juce::String& sendSuffix (int n)
     {
         static const juce::String suffixes[4] = { "_send0_to", "_send1_to",
@@ -2777,11 +3024,35 @@ namespace
         return suffixes[n];
     }
 
-    bool isSendDestId (const juce::String& id, bool& isPrimary)
+    const juce::String& mainLineSuffix (int n)
     {
-        if (id.endsWith ("_sendTo")) { isPrimary = true; return true; }
+        // Mirrors MixerChannelIds::mainOutParamId; the two must agree.
+        static_assert (MixerChannelIds::kMaxMainOutsPerStrip == 4,
+                       "mainLineSuffix needs one entry per main-out line");
+        static const juce::String suffixes[4] = { "_sendTo", "_mainOut1_to",
+                                                  "_mainOut2_to", "_mainOut3_to" };
+        return suffixes[n];
+    }
+
+    // Splits a destination id into its kind and the owning strip's prefix.
+    bool isSendDestId (const juce::String& id, DestKind& kind, juce::String& stripPrefix)
+    {
+        for (int n = 0; n < MixerChannelIds::kMaxMainOutsPerStrip; ++n)
+        {
+            const juce::String& sfx = mainLineSuffix (n);
+            if (! id.endsWith (sfx)) continue;
+            kind = (n == 0) ? DestKind::MainLine0 : DestKind::MainLineN;
+            stripPrefix = id.dropLastCharacters (sfx.length());
+            return true;
+        }
         for (int n = 0; n < 4; ++n)
-            if (id.endsWith (sendSuffix (n))) { isPrimary = false; return true; }
+        {
+            const juce::String& sfx = sendSuffix (n);
+            if (! id.endsWith (sfx)) continue;
+            kind = DestKind::Send;
+            stripPrefix = id.dropLastCharacters (sfx.length());
+            return true;
+        }
         return false;
     }
 
@@ -2809,45 +3080,30 @@ namespace
         // member-gated bus follows.
     }
 
-    // Walks every parameter whose id is a send-destination on a strip prefix.
-    // For each match where current value equals targetChId, calls onMatch
-    // (which decides what to reset to).  onMatch returns the new natural value.
+    // Walks every parameter whose id is a routing destination on a strip prefix
+    // -- both main-out lines and aux sends.  For each match where the current
+    // value equals targetChId, calls onMatch (which decides what to reset to).
+    // onMatch returns the new natural value.
     void sweepSendsTargeting (juce::AudioProcessor& processor,
                               int targetChId,
                               std::function<float (juce::RangedAudioParameter*,
                                                     int /*stripChId*/,
-                                                    bool /*isPrimary*/)> onMatch)
+                                                    DestKind)> onMatch)
     {
         for (auto* p : processor.getParameters())
         {
             auto* rp = dynamic_cast<juce::RangedAudioParameter*> (p);
             if (rp == nullptr) continue;
             const juce::String id = rp->getParameterID();
-            bool isPrimary = false;
-            if (! isSendDestId (id, isPrimary)) continue;
+            DestKind     kind = DestKind::Send;
+            juce::String stripPrefix;
+            if (! isSendDestId (id, kind, stripPrefix)) continue;
 
             const float current = rp->convertFrom0to1 (rp->getValue());
             if ((int) current != targetChId) continue;
 
-            // Extract strip prefix (everything before the trailing "_send..." tag).
-            juce::String stripPrefix;
-            if (isPrimary)
-                stripPrefix = id.dropLastCharacters (juce::String ("_sendTo").length());
-            else
-            {
-                // _sendN_to → strip prefix is everything up to "_sendN_to"
-                for (int n = 0; n < 4; ++n)
-                {
-                    const juce::String suffix = "_send" + juce::String (n) + "_to";
-                    if (id.endsWith (suffix))
-                    {
-                        stripPrefix = id.dropLastCharacters (suffix.length());
-                        break;
-                    }
-                }
-            }
             const int stripChId = channelIdFromMixerPrefix (stripPrefix);
-            const float newVal = onMatch (rp, stripChId, isPrimary);
+            const float newVal = onMatch (rp, stripChId, kind);
             writeParamNatural (rp, newVal);
         }
     }
@@ -2857,13 +3113,15 @@ namespace
 void MixerPage::deleteAuxStrip (int idx, int auxChannelId)
 {
     beginParamUndoGesture (mProcessor.apvts, MixerChannelIds::prefixFromChannelId (auxChannelId) + "_level"); // Task 6 (12-iv)
-    // Reset every send that targeted this aux.
-    //  - Primary _sendTo  → natural parent for that strip's channel id
-    //  - Secondary _sendN_to → -1 (inactive)
+    // Reset every route that targeted this aux.
+    //  - Main line 0 (_sendTo)      → natural parent for that strip's channel id
+    //  - Extra main lines / sends   → -1 (inactive)
+    // An extra main line goes inactive rather than to the natural parent: line 0
+    // already feeds that, and two lines on one destination is a double-sum.
     sweepSendsTargeting (mProcessor, auxChannelId,
-        [] (juce::RangedAudioParameter*, int stripChId, bool isPrimary) -> float
+        [] (juce::RangedAudioParameter*, int stripChId, DestKind kind) -> float
         {
-            if (isPrimary)
+            if (kind == DestKind::MainLine0)
                 return (float) MixerChannelIds::defaultSendTo (stripChId);
             return -1.0f;
         });
@@ -2873,7 +3131,21 @@ void MixerPage::deleteAuxStrip (int idx, int auxChannelId)
 
     // Free the audio-graph InsertNode.  Re-creating an aux at the same idx
     // calls ensureAuxInsert which lazily reallocates.
+    //
+    // THREAD SAFETY: the aux's PassiveStripTask persists for the project
+    // lifetime by design, so the audio thread reaches this node through
+    // processInsert on every block and can be inside its rack / EQs right now.
+    // Raise the project-load shield and settle FIRST so the in-flight block
+    // drains before the node is freed -- the same order clearAllAuxInserts and
+    // loadBaySickRustyDrumsKit use.  Costs a brief audio bail on a destructive
+    // gesture.  shieldWasUp keeps it nest-aware.  Do NOT unregister the render
+    // task here: its persistence is deliberate and processInsert no-ops on a
+    // null node.
+    const bool shieldWasUp = mProcessor.isProjectLoadInProgress();
+    mProcessor.setProjectLoadInProgress (true);
+    if (! shieldWasUp) mProcessor.settleAudioThread();
     mProcessor.mVibeGraph.removeInsertNode (VibeGraph::InsertKind::Aux, idx);
+    mProcessor.setProjectLoadInProgress (shieldWasUp);
 
     // Routing graph rebuild on the next block picks up the param changes.
     if (onAudioStripRenamed) onAudioStripRenamed();
@@ -2896,13 +3168,13 @@ void MixerPage::deleteSecondaryBus (int channelId)
                                                       : kInstBus;
 
     beginParamUndoGesture (mProcessor.apvts, prefixFromChannelId (channelId) + "_level"); // Task 6 (12-iv)
-    // Reroute any strip whose primary _sendTo targets this bus → parent bus.
-    // Reroute any _sendN_to targeting this bus → -1 (inactive) so we don't
-    // double-up the parent bus on multiple sends.
+    // Reroute any strip whose main line 0 targets this bus → parent bus.
+    // Extra main lines and sends targeting it go to -1 (inactive) so we don't
+    // double-up the parent bus, which line 0 may already feed.
     sweepSendsTargeting (mProcessor, channelId,
-        [parentBus] (juce::RangedAudioParameter*, int /*stripChId*/, bool isPrimary) -> float
+        [parentBus] (juce::RangedAudioParameter*, int /*stripChId*/, DestKind kind) -> float
         {
-            return isPrimary ? (float) parentBus : -1.0f;
+            return kind == DestKind::MainLine0 ? (float) parentBus : -1.0f;
         });
 
     // Hide the bus strip.  Audio InsertNode stays allocated (always alloc'd
@@ -2980,7 +3252,14 @@ void MixerPage::addAudioChannel(int row, const juce::String& name)
         if (row >= 0 && row < MixerState::kMaxAudioRows)
             mPM.getMixer().audioRowMute[row] = muted;
     };
-    strip->onNameChanged = [this](const juce::String&) {
+    // An audio-row strip has no <...Names> list of its own: the owning Clips tab
+    // is where the name is stored, and project load pushes that tab name back
+    // over the strip.  Renaming the strip therefore has to rename the tab -- and
+    // a row with no Clips tab behind it has nowhere to put the name at all, so
+    // the editor refuses that rename and snaps the label back rather than
+    // letting the edit look accepted until the next load eats it.
+    strip->onNameChanged = [this, row](const juce::String& newName) {
+        if (onChannelRenamed)    onChannelRenamed (StripKind::Audio, row, newName);
         if (onAudioStripRenamed) onAudioStripRenamed();
     };
 
@@ -3023,6 +3302,12 @@ void MixerPage::renameChannel(StripKind kind, int pageIdx, const juce::String& n
             if (auto it = mPluginStrips.find(pageIdx); it != mPluginStrips.end())
                 it->second->setTrackName(newName);
             break;
+        // Vox / Inst keep their own setters (the sfizz program pick and the
+        // project-load name restore both call them directly); the enum cases
+        // route through those rather than duplicating the relayout + Effects
+        // dropdown refresh they carry.
+        case StripKind::Vox:   setVoxStripName  (pageIdx, newName); break;
+        case StripKind::Inst:  setInstStripName (pageIdx, newName); break;
     }
 }
 
@@ -3068,6 +3353,7 @@ std::vector<MixerPage::StemPickEntry> MixerPage::getStemPickEntries() const
     if (mBassBus2Active)   add (mBassBus2Strip.get(),   kBassBus2,   false);   // T10
     addMap (mBassStrips,  mBassTabOrder,  &bassInsert);
     add (mDrumsBusStrip.get(),      kDrumsBus,  false);
+    add (mDrumsBus2Strip.get(),     kDrumsBus2, false);   // QA-SOUNDNESS
     addMap (mDrumStrips,  mDrumSlotOrder, &drumInsert);
     add (mAudioClipsBusStrip.get(), kClipsBus,  false);
     if (mClipsBus2Active)  add (mClipsBus2Strip.get(),  kClipsBus2,  false);   // T10
@@ -3235,7 +3521,7 @@ void MixerPage::syncFromModel()
 
     for (auto& [slot, strip] : mDrumStrips)
     {
-        if (slot < MAX_DRUM_ROWS)
+        if (slot >= 0 && slot < kMaxDrumPages)
         {
             strip->setFaderDb(juce::Decibels::gainToDecibels(mx.drumSlotLevel[slot], -60.0f));
             strip->setPan(mx.drumSlotPan[slot]);
@@ -3287,7 +3573,7 @@ void MixerPage::syncApvtsFromMixerState()
     writeBool ("mixer_clipsbus_solo",  mx.audioClipsBusSolo);
 
     // Drum slot inserts
-    for (int slot = 0; slot < MAX_DRUM_ROWS; ++slot)
+    for (int slot = 0; slot < kMaxDrumPages; ++slot)
     {
         const juce::String p = "mixer_drum_" + juce::String(slot);
         writeFloat(p + "_level", juce::Decibels::gainToDecibels(mx.drumSlotLevel[slot], -60.f));
@@ -3367,21 +3653,37 @@ void MixerPage::timerCallback()
         mCableOverlay->repaint();
     }
 
-    // Detect _sendTo changes on any strip and re-layout so strips visually
-    // move between bus groups when their main-out cable is rerouted.
+    // Detect main-out changes on any strip and re-layout so strips visually
+    // move between bus groups when their main-out cable is rerouted, and so a
+    // bus that only an EXTRA main line feeds appears (or disappears with it).
     {
         using namespace MixerChannelIds;
+        // The cached value is a fold of ALL of the strip's main-out lines, not
+        // line 0's destination: it exists purely as a change key.
         auto check = [&](int chId, const juce::String& prefix) -> bool
         {
-            if (auto* p = mProcessor.apvts.getRawParameterValue(prefix + "_sendTo"))
-            {
-                int cur = (int)p->load();
-                auto it = mLastSendToCache.find(chId);
-                if (it == mLastSendToCache.end() || it->second != cur)
+            // UNSIGNED fold: 1009^3 is over a billion, so line 0's destination
+            // alone overflows a signed int on nearly every strip, and signed
+            // overflow is undefined.  Unsigned wraparound is defined, and the
+            // value is only ever compared for equality, so narrowing once at
+            // the end costs nothing.
+            bool     haveAny = false;
+            unsigned fold    = 0;
+            for (int line = 0; line < kMaxMainOutsPerStrip; ++line)
+                if (auto* p = mProcessor.apvts.getRawParameterValue (mainOutParamId (prefix, line)))
                 {
-                    mLastSendToCache[chId] = cur;
-                    return true;
+                    haveAny = true;
+                    fold    = fold * 1009u + (unsigned) ((int) p->load() + 1);
                 }
+            if (! haveAny) return false;
+
+            const int key = (int) (fold & 0x7fffffffu);
+
+            auto it = mLastSendToCache.find(chId);
+            if (it == mLastSendToCache.end() || it->second != key)
+            {
+                mLastSendToCache[chId] = key;
+                return true;
             }
             return false;
         };
@@ -3464,6 +3766,7 @@ void MixerPage::onVBlank()
     drainStereoBus (mLayersBusStrip    .get(), kLayersBus,     mProcessor.mLayersPeakDbL,        mProcessor.mLayersPeakDbR);
     drainStereoBus (mBassBusStrip      .get(), kBassBus,       mProcessor.mBassPeakDbL,          mProcessor.mBassPeakDbR);
     drainStereoBus (mDrumsBusStrip     .get(), kDrumsBus,      mProcessor.mDrumsPeakDbL,         mProcessor.mDrumsPeakDbR);
+    drainStereoBus (mDrumsBus2Strip    .get(), kDrumsBus2,     mProcessor.mDrumsBus2PeakDbL,     mProcessor.mDrumsBus2PeakDbR);   // QA-SOUNDNESS
     drainStereoBus (mFXBusStrip        .get(), kFxBus,         mProcessor.mFxBusPeakDbL,         mProcessor.mFxBusPeakDbR);
     drainStereoBus (mAudioClipsBusStrip.get(), kClipsBus,      mProcessor.mAudioClipsBusPeakDbL, mProcessor.mAudioClipsBusPeakDbR);
     drainStereoBus (mVoxBusStrip       .get(), kVoxBus,        mProcessor.mVoxBusPeakDbL,        mProcessor.mVoxBusPeakDbR);
@@ -3545,6 +3848,7 @@ void MixerPage::onVBlank()
     pushPeak(mLayersBusStrip    .get());
     pushPeak(mBassBusStrip      .get());
     pushPeak(mDrumsBusStrip     .get());
+    pushPeak(mDrumsBus2Strip    .get());
     pushPeak(mFXBusStrip        .get());
     pushPeak(mAudioClipsBusStrip.get());
     pushPeak(mVoxBusStrip       .get());
@@ -3641,13 +3945,22 @@ void MixerPage::layoutScrollContent()
         return fallback;
     };
 
-    // Bucket each strip by destination channel id.
+    // Bucket each strip by its line-0 destination channel id.
     struct Member { MixerTrackStrip* strip; int width; int chId; int dest; };
     std::map<int, std::vector<Member>> buckets;
+
+    // Destinations reached by any strip's EXTRA main-out lines.  A strip sits
+    // in exactly one group (line 0's), so these targets need tracking
+    // separately or a bus fed only by an extra line would count as empty.
+    std::set<int> extraMainTargets;
 
     auto bucketPush = [&](MixerTrackStrip* s, int chId, int w, const juce::String& prefix) {
         int dest = getSendTo(prefix, defaultSendTo(chId));
         buckets[dest].push_back({ s, w, chId, dest });
+        for (int line = 1; line < kMaxMainOutsPerStrip; ++line)
+            if (auto* p = mProcessor.apvts.getRawParameterValue (mainOutParamId (prefix, line)))
+                if (const int d = (int) p->load(); d >= 0)
+                    extraMainTargets.insert (d);
     };
 
     for (int k : mLayerTabOrder)
@@ -3748,7 +4061,9 @@ void MixerPage::layoutScrollContent()
         {
             if (sa.active) continue;
             auto it = buckets.find (sa.chId);
-            if (it == buckets.end() || it->second.empty()) continue;
+            const bool routedTo = (it != buckets.end() && ! it->second.empty())
+                               || extraMainTargets.count (sa.chId) > 0;
+            if (! routedTo) continue;
             auto fn = sa.fn;
             juce::MessageManager::callAsync ([safeThis, fn]
             {
@@ -3804,14 +4119,18 @@ void MixerPage::layoutScrollContent()
     {
         auto it = buckets.find(busChId);
         const bool hasMembers = (it != buckets.end() && ! it->second.empty());
+        // A bus fed only by another strip's EXTRA main-out line has no bucket
+        // members -- buckets key off line 0 -- but audio does flow into it.
+        // Hiding it would leave a live route with no visible strip, no socket
+        // and so no cable the user could see or cut.
+        const bool routedTo = hasMembers || extraMainTargets.count (busChId) > 0;
 
         // QA-ProjectSave docket 18 (2026-07-26): an empty bus is hidden and
         // consumes no width, so its group gap closes instead of leaving a hole.
-        // `hasMembers` is the whole test: buckets are keyed by each EXISTING
-        // strip's _sendTo, so re-pointing a main-out at a bus re-buckets that
-        // strip INTO the bus's group -- for a bus, "something routes here" and
-        // "has members" are the same condition.  (Sends never enter into it;
-        // _sendN_to only ever lands on an aux strip.)
+        // "Routed to" is the whole test: buckets are keyed by each EXISTING
+        // strip's line-0 destination, so re-pointing a main-out at a bus
+        // re-buckets that strip INTO the bus's group.  (Sends never enter into
+        // it; _sendN_to only ever lands on an aux strip.)
         //
         // The flag-gated buses opt out: they are created by explicit user
         // action and must appear immediately, before anything is routed to them.
@@ -3821,8 +4140,8 @@ void MixerPage::layoutScrollContent()
         // while never-routed, and once it HAS had members and empties again
         // it auto-deactivates (flag only; no param sweep -- it is already
         // empty, and deleteSecondaryBus would recurse into this layout).
-        if (hasMembers) mBusEverRouted[busChId] = true;
-        if (! hasMembers && isSecondaryBus (busChId) && getBusEverRouted (busChId))
+        if (routedTo) mBusEverRouted[busChId] = true;
+        if (! routedTo && isSecondaryBus (busChId) && getBusEverRouted (busChId))
         {
             // No onAudioStripRenamed here -- it can re-enter this layout;
             // pickers read the active flag live on their next open anyway.
@@ -3830,7 +4149,7 @@ void MixerPage::layoutScrollContent()
             deactivateBusFlagOnly (busChId);
             return;
         }
-        if (! hasMembers && ! isAlwaysVisibleBus (busChId))
+        if (! routedTo && ! isAlwaysVisibleBus (busChId))
         {
             busStrip.setVisible (false);
             return;
@@ -3936,6 +4255,10 @@ void MixerPage::layoutScrollContent()
     if (mRustyDrumsBusActive && mRustyDrumsBusStrip)
         laidOutBus(*mRustyDrumsBusStrip, kRustyDrumsBus, VC::DrumsCol);
     laidOutBus(*mDrumsBusStrip,       kDrumsBus,  VC::DrumsCol);
+    // QA-SOUNDNESS (2026-08-07): kit 2's bus sits immediately right of kit 1's.
+    // No activation gate -- laidOutBus's own membership test hides it while no
+    // bank-2 drum strip routes to it, exactly as it does for Drums Bus.
+    laidOutBus(*mDrumsBus2Strip,      kDrumsBus2, VC::DrumsCol);
 
     x += kSepW;
     mScrollContent->setSize(x, mScrollContent->getHeight());
@@ -4023,14 +4346,6 @@ void MixerPage::resized()
 // ─────────────────────────────────────────────────────────────────────────────
 // Paint
 // ─────────────────────────────────────────────────────────────────────────────
-void MixerPage::drawSectionLabel(juce::Graphics& g, const juce::String& text,
-                                  juce::Rectangle<int> bounds) const
-{
-    g.setColour(VC::TextDim);
-    g.setFont(juce::Font(10.0f, juce::Font::bold));
-    g.drawText(text, bounds, juce::Justification::centred);
-}
-
 void MixerPage::paint(juce::Graphics& g)
 {
     g.fillAll(VC::Bg);

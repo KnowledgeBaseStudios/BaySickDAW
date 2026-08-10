@@ -57,7 +57,11 @@ public:
     float getInputVolDb() const { return mInputVolDb; }
 
     // QA-EffectsReview Task 3: PQ-3 Hi/Lo output gain-range switch (+20 dB in Hi).
-    enum class GainRange { Lo, Hi };
+    // Ordinals pinned: the range is persisted as the raw int ("gainRange"), so an
+    // insertion or re-order silently repoints every saved unit at a different
+    // range.  NEVER reorder or insert; append only, with an explicit value.  Same
+    // rule as EffectType in EffectRack.h.
+    enum class GainRange { Lo = 0, Hi = 1 };
     void      setGainRange (GainRange r);
     GainRange getGainRange() const { return mGainRange; }
 

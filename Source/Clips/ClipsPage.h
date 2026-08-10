@@ -13,9 +13,10 @@ class VibeSynthProcessor;
 // (G-6 cleanup, 2026-04-29: removed BaySickNAM/IR from Clips per Jeff's
 // "Clips is essentially a sample player" - NAM/IR belongs on the Inst page.)
 //
-// The page itself can ONLY be spawned via dragging or uploading a clip onto
-// the Builder grid or the Clips empty-state placeholder; the ribbon's Clip
-// dropdown is an instance switcher only (no `+ Add` entry).
+// Spawn routes: a clip dropped or imported onto the Builder grid, the ribbon
+// "+" slot (BaySickPlayer > Audio Clips), or the Clip dropdown's
+// "+ Add BaySickPlayer..." row.  Both ribbon routes open the same audio-file
+// picker -- a Clips page is born from a file, never from an engine pick.
 //
 // Views mirror Layer/Bass shape - Player / Piano Roll - but only Player is
 // locally rendered.  Piano Roll redirects to PianoRollPage via the Menu
@@ -28,7 +29,14 @@ public:
     // G-6 (2026-04-29): EngineType kept for compatibility with existing call
     // sites (importClipState reads/writes the active type).  Only valid
     // values are None and BaySickPlayer.
-    enum class EngineType { None, BaySickPlayer };
+    //
+    // Ordinals are pinned explicitly because this int is persisted: the project
+    // writer stores (int) getEngineType() and the loader casts the saved int
+    // straight back, and selectEngine consumes the value in live control flow
+    // (an unrecognized ordinal tears the engine down and never rebuilds it,
+    // leaving a silent Clips tab).  NEVER reorder or insert; append only, with
+    // an explicit value.  Same rule as EffectType in EffectRack.h.
+    enum class EngineType { None = 0, BaySickPlayer = 1 };
 
     explicit ClipsPage (int pageIndex);
     ~ClipsPage() override;
@@ -36,7 +44,7 @@ public:
     void paint   (juce::Graphics&) override;
     void resized () override;
 
-    // ── Sub-tab control (driven by StandaloneEditor's PageMenuBar pills) ─────
+    // ── Sub-tab control (driven by the window Menu dropdown's nav entries) ───
     void switchTab    (int idx);
     int  getActiveTab () const noexcept { return mActiveTab; }
 
@@ -53,8 +61,16 @@ public:
     // Library dedups by exact string).  libraryPath is that stored form;
     // when empty it falls back to p (preserves behavior for callers that
     // already pass a stored path).
+    //
+    // interactive == false suppresses the per-clip "nothing playable" alert:
+    // the project-restore path already routes both the unresolvable and the
+    // present-but-undecodable case into MissingFileReport, which drains once
+    // per load into a single batched dialog.  A restore that also alerted here
+    // would stack one box per clip on top of that batch.  Every user gesture
+    // (drop, spawn, preset apply) keeps the default and alerts immediately.
     void         setClipFilePath (const juce::String& p,
-                                  const juce::String& libraryPath = {});
+                                  const juce::String& libraryPath = {},
+                                  bool interactive = true);
 
     // ── Engine accessors ─────────────────────────────────────────────────────
     // selectEngine remains as the activation entry-point so spawnClipsTabIfMissing
@@ -71,13 +87,10 @@ public:
     juce::Component* stripPresetButton() const;
     std::function<void()> onEngineEditorRebuilt;
 
-    // G-3 (2026-04-28): fired BEFORE the active engine swaps so the editor
-    // can unregisterClipEngine while the OLD pointer is still valid.
-    std::function<void()> onEngineDestroying;
     std::function<void()> onEngineChanged;
 
     // ── Tab name (for ribbon rename) ─────────────────────────────────────────
-    void                setTabName (const juce::String& n);   // syncs the model tab's name (TS1)
+    void                setTabName (const juce::String& n);
     const juce::String& getTabName () const                 { return mTabName; }
 
     // ── G-6 (2026-04-29): full-state export/import for Duplicate flow ────────
@@ -103,8 +116,12 @@ public:
     std::function<void(int)>                     onSetChokeGroup;
 
     // Lock - protects tab from delete (sync'd to ribbon [L] prefix).
+    // setLocked is the raw applier: restore paths (project load, importClipState,
+    // page preset) and undo/redo replay use it so they bank no transaction.
+    // setLockedUndoable is the USER gesture - it applies and banks one.
     bool isLocked() const noexcept { return mLocked; }
     void setLocked (bool b) { if (b == mLocked) return; mLocked = b; if (onLockChanged) onLockChanged(); repaint(); }
+    void setLockedUndoable (bool wantLocked);
 
     // J-6 EQ unification (2026-05-03): EQ sub-tab + accessors removed.  Pre-rack
     // EQ for this Audio insert is exclusively edited via the Effects page
@@ -113,7 +130,7 @@ public:
     // Save / Load page preset - writes the entire ClipPageState XML to
     // Documents/BaySickDAW/Presets/Clips/My Presets/<name>.xml.  Load Preset
     // walks the same folder + Factory subfolders.
-    void savePatchAs();
+    void savePatchAs (std::function<void()> onSaved = {});
     void loadPreset (const juce::File& xml);
 
     // ── G-7 (2026-04-29): Page Preset save/load (full chain) ─────────────────

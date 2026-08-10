@@ -58,15 +58,23 @@ public:
     std::vector<RenderTask*> mChildren;
 
     // Upstream tasks this one consumes. PULL-model design: this task's run()
-    // iterates mPredecessors and reads each source's mOutputBuffer. Built by
+    // iterates mPredecessors and reads ONE buffer per link. That is the
+    // source's mOutputBuffer for main-out cables and for post-fader sends; a
+    // send whose UpstreamLink::prePost is set reads the source's pre-fader tap
+    // instead (Tasks/SendSourceRead.h), and a sidechain link reads the source's
+    // SC stash (SidechainPullHelper.h). Both of those live on the source's
+    // VibeGraph node, not in the arena, and both are published by the same
+    // release/acquire on the dependency counter as mOutputBuffer. Built by
     // RenderGraphDispatcher::rebuildLinks from RoutingGraph::edges() +
     // scEdges() whenever topology changes. Stable for the duration of a
     // block (rebuilt only between blocks).
     std::vector<UpstreamLink> mPredecessors;
 
     // Output buffer view. Owned by ChannelBufferArena; populated by the
-    // dispatcher when the task is registered. Each strip writes ONLY to this
-    // buffer; downstream tasks pull from it.
+    // dispatcher when the task is registered. This is the strip's
+    // post-everything output and the buffer downstream tasks pull by default.
+    // It is the only ARENA slot a strip writes; the per-strip taps a strip also
+    // fills (sidechain stash, pre-fader send tap) live on its VibeGraph node.
     juce::AudioBuffer<float>* mOutputBuffer = nullptr;
 
     // Per-block context (sample count, BPM, position info, MIDI buffers).
@@ -151,15 +159,19 @@ public:
     // frozen target, everything upstream of it, and the master).  A freeze
     // render of one track otherwise pays for the whole project every block.
     //
-    // WHY A FLAG AND NOT "DON'T SEED THE TASK":  the dispatcher's completion
-    // signal is MasterTask::run setting mAllDone, and master only runs when its
-    // dependency counter reaches zero -- which requires EVERY predecessor to
-    // have been through the pool.  Drop a task from the seed set and master
-    // starves, mAllDone never sets, and the block burns the full 100ms watchdog
-    // instead of ~2ms: measured at 2.15x realtime, TWENTY TIMES SLOWER than the
-    // unpruned render it was meant to speed up.  So the task must still flow
-    // through the pool and still decrement its children -- it just must not do
-    // any WORK.  The dependency graph is load-bearing; only run() is optional.
+    // WHY A FLAG AND NOT "DON'T SEED THE TASK":  half the dispatcher's
+    // completion signal is MasterTask::run setting mAllDone, and master only
+    // runs when its dependency counter reaches zero -- which requires EVERY
+    // predecessor to have been through the pool.  Drop a task from the seed set
+    // and master starves, mAllDone never sets, and the block burns the full
+    // 100ms watchdog instead of ~2ms: measured at 2.15x realtime, TWENTY TIMES
+    // SLOWER than the unpruned render it was meant to speed up.  So the task
+    // must still flow through the pool and still decrement its children -- it
+    // just must not do any WORK.  The dependency graph is load-bearing; only
+    // run() is optional.  The other half of the completion signal is the pool's
+    // outstanding-task count, which a skipped task satisfies for free: it is
+    // counted at submit and cleared on the way out of runOneTask like any
+    // other, precisely because it still goes through the pool.
     void setRenderSkipped (bool s) noexcept
         { mRenderSkipped.store (s, std::memory_order_release); }
     bool isRenderSkipped() const noexcept
@@ -168,7 +180,9 @@ public:
     // Stands in for run() when skipped.  The arena buffer is recycled across
     // blocks and is never zeroed on its own, so leaving it alone would feed
     // last block's audio (or, on the first block, uninitialised memory) into
-    // whatever sums it downstream.
+    // whatever sums it downstream.  The pre-fader send tap has the identical
+    // hazard and is answered at the other end, by VibeGraph::armPreFaderTaps
+    // clearing every armed tap before any task runs.
     // Whole buffer, not just mCtx->numSamples: BlockContext is only forward
     // declared here, and the arena slot is one max-block allocation anyway.
     void clearOnSkip() noexcept

@@ -31,8 +31,34 @@ PhaseVocoder::PhaseVocoder (int numChannels)
         c.inRing    .assign (kFFTSize * 4, 0.0f);
         c.lastPhase .assign (kNumBins,     0.0f);
         c.phaseAccum.assign (kNumBins,     0.0f);
-        c.outBuf    .assign (kFFTSize * 8, 0.0f);
+        c.outBuf    .assign (kOutBufFloor, 0.0f);
     }
+}
+
+// ── prepare ───────────────────────────────────────────────────────────────────
+
+void PhaseVocoder::prepare (int maxOutputSamplesPerBlock)
+{
+    // Capacity law for the OLA queue.  processFrame's add spans
+    // [outWriteAbs, outWriteAbs + kFFTSize) and the consumer only drains
+    // between pushes, so the deepest the unread region ever gets is
+    //   one block's production            = maxOutputSamplesPerBlock
+    // + the settling residue it may not take yet   (< kFFTSize)
+    // + one whole frame produced past that boundary (< kFFTSize)
+    // + the tail of the frame being written        (= kFFTSize)
+    // Anything shallower wraps the OLA add onto samples the consumer has not
+    // read - the export-only garble, since the offline loop runs a different
+    // block size from the device.
+    const int floorSz = kOutBufFloor;
+    const int need    = juce::jmax (0, maxOutputSamplesPerBlock) + kFFTSize * 3;
+    const auto sz     = (size_t) juce::jmax (need, floorSz);
+
+    for (auto& c : mCh)
+        c.outBuf.assign (sz, 0.0f);
+
+    // The absolute counters index modulo the size that just changed, and the
+    // in-flight OLA tail belongs to the old geometry.
+    reset();
 }
 
 // ── setStretchRatio ───────────────────────────────────────────────────────────
@@ -66,24 +92,50 @@ void PhaseVocoder::reset()
 void PhaseVocoder::push (const juce::AudioBuffer<float>& in,
                           int startSample, int numSamples)
 {
+    const int srcCh = juce::jmin (mNumCh, in.getNumChannels());
+    if (mCh.empty() || srcCh <= 0 || numSamples <= 0) return;
+
     const int inRingSize = (int) mCh[0].inRing.size();
 
-    for (int ch = 0; ch < juce::jmin (mNumCh, in.getNumChannels()); ++ch)
+    // Frames are drained AS the block is written, not after it.  That caps
+    // inAvail at one analysis window however many samples the caller hands
+    // over, which is what makes the ring's capacity independent of the host
+    // block size, the sample rate and the stretch ratio.  The old
+    // write-everything-then-drain form needed
+    //   block x (fileSR / deviceSR) / stretchRatio
+    // samples of free room and silently overwrote unread input past that -
+    // a 4096 block past a combined ratio of ~1.5 smeared and repeated
+    // fragments with nothing logged.
+    int done = 0;
+    while (done < numSamples)
     {
-        auto& c = mCh[ch];
-        const float* src = in.getReadPointer (ch) + startSample;
+        const int chunk = juce::jmin (numSamples - done,
+                                      juce::jmax (1, kFFTSize - mCh[0].inAvail));
 
-        for (int i = 0; i < numSamples; ++i)
+        for (int ch = 0; ch < (int) mCh.size(); ++ch)
         {
-            c.inRing[c.inWrite] = src[i];
-            c.inWrite = (c.inWrite + 1) % inRingSize;
-        }
-        c.inAvail += numSamples;
-    }
+            auto& c = mCh[ch];
+            const float* src = ch < srcCh
+                ? in.getReadPointer (ch) + startSample + done : nullptr;
 
-    // Process as many complete analysis frames as possible
-    while (mCh[0].inAvail >= kFFTSize)
-        processFrame();
+            int w = c.inWrite;
+            for (int i = 0; i < chunk; ++i)
+            {
+                c.inRing[w] = (src != nullptr) ? src[i] : 0.0f;
+                if (++w == inRingSize) w = 0;
+            }
+            c.inWrite  = w;
+            // Every channel, including any the caller did not supply:
+            // processFrame consumes the hop from all of them, so a partial
+            // advance here drives the unsupplied ones' inAvail negative.
+            c.inAvail += chunk;
+        }
+
+        while (mCh[0].inAvail >= kFFTSize)
+            processFrame();
+
+        done += chunk;
+    }
 }
 
 // ── pull ──────────────────────────────────────────────────────────────────────
@@ -91,24 +143,33 @@ void PhaseVocoder::push (const juce::AudioBuffer<float>& in,
 int PhaseVocoder::pull (juce::AudioBuffer<float>& out,
                          int startSample, int numSamples)
 {
+    if (mCh.empty()) return 0;
+
     const int avail  = getOutputAvailable();
-    const int toPull = juce::jmin (numSamples, avail);
+    // Same destination clamp peekOutput carries: avail can exceed the caller's
+    // buffer, and an unclamped copy writes past the heap allocation.
+    const int room   = juce::jmax (0, out.getNumSamples() - startSample);
+    const int toPull = juce::jmin (numSamples, juce::jmin (avail, room));
     if (toPull <= 0) return 0;
 
     const int outBufSize = (int) mCh[0].outBuf.size();
+    const int dstCh      = juce::jmin (mNumCh, out.getNumChannels());
 
-    for (int ch = 0; ch < juce::jmin (mNumCh, out.getNumChannels()); ++ch)
+    for (int ch = 0; ch < (int) mCh.size(); ++ch)
     {
         auto& c = mCh[ch];
-        float* dst = out.getWritePointer (ch) + startSample;
+        float* dst = ch < dstCh ? out.getWritePointer (ch) + startSample : nullptr;
 
         for (int i = 0; i < toPull; ++i)
         {
             const int physIdx = (int) ((c.outReadAbs + i) % outBufSize);
-            dst[i] = c.outBuf[physIdx];
+            if (dst != nullptr) dst[i] = c.outBuf[physIdx];
             c.outBuf[physIdx] = 0.0f;  // clear after read - essential for OLA correctness
         }
 
+        // Every channel: the read head is shared state (getOutputAvailable
+        // reads channel 0's), so advancing only the destination's channels
+        // drifts the rest into stale-slot territory.
         c.outReadAbs += toPull;
     }
 
@@ -118,6 +179,8 @@ int PhaseVocoder::pull (juce::AudioBuffer<float>& out,
 int PhaseVocoder::peekOutput (juce::AudioBuffer<float>& out,
                               int startSample, int numSamples)
 {
+    if (mCh.empty()) return 0;
+
     const int avail  = getOutputAvailable();
     // G1 smoke round 4: clamp to the destination's capacity - avail can
     // exceed the caller's scratch buffer (the OLA ring is several FFT frames
@@ -165,9 +228,16 @@ int PhaseVocoder::getOutputAvailable() const
     const auto& c = mCh[0];
     // Output is "settled" (all overlapping frames have contributed) once the OLA
     // write head is at least (kFFTSize - mSynthHop) ahead of the read head.
-    const int settling = kFFTSize - mSynthHop;
-    const int produced = (int) (c.outWriteAbs - c.outReadAbs);
-    return juce::jmax (0, produced - settling);
+    // Past mSynthHop >= kFFTSize the synthesis frames stop overlapping at all,
+    // so there is nothing left to wait for: the floor at 0 stops a negative
+    // margin from reporting MORE samples than were ever written.
+    const int64_t settling = juce::jmax ((int64_t) 0,
+                                         (int64_t) kFFTSize - (int64_t) mSynthHop);
+    // A read cannot outrun the physical queue either - beyond one queue length
+    // the modulo hands back slots the write head has already lapped.
+    const int64_t produced = juce::jmin ((int64_t) c.outBuf.size(),
+                                         c.outWriteAbs - c.outReadAbs);
+    return (int) juce::jmax ((int64_t) 0, produced - settling);
 }
 
 // ── processFrame (core algorithm) ─────────────────────────────────────────────
@@ -176,6 +246,24 @@ void PhaseVocoder::processFrame()
 {
     const int inRingSize = (int) mCh[0].inRing.size();
     const int outBufSize = (int) mCh[0].outBuf.size();
+
+    // AUDIO THREAD: capacity guard, clamp only - growing the queue here would
+    // be an allocation in the callback.  If this frame's OLA span would wrap
+    // onto output the consumer has not read, skip PRODUCING it but consume the
+    // input hop anyway: file consumption keeps tracking the caller's position
+    // law (so playback does not slide out of sync), push()'s drain loop still
+    // terminates, and the failure degrades to a dropout instead of silently
+    // corrupting the queue.  With prepare() called this never fires.
+    if (mCh[0].outWriteAbs - mCh[0].outReadAbs + (int64_t) kFFTSize
+            > (int64_t) outBufSize)
+    {
+        for (auto& c : mCh)
+        {
+            c.inRead   = (c.inRead + kHopSize) % inRingSize;
+            c.inAvail -= kHopSize;
+        }
+        return;
+    }
 
     // Precomputed per-bin expected phase advance per analysis hop
     // omega[k] = 2π * k * Ha / N

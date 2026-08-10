@@ -37,9 +37,10 @@
 //   * No chain-level params (each pedal owns its own gain/output knobs in
 //     I-5+ - locked spec call from 2026-05-02 session).
 //
-// Audio routing: NOT wired into the InsertNode graph yet.  G-9 (post-Phase I)
-// adds the wire-up.  For I-1 the processor is instantiable + state roundtrips
-// + can be hosted by InstPage's Pedals sub-tab, but no audio passes through it.
+// Audio routing: this processor is one stage of the Inst page's
+// EngineChainProcessor (LiveInput chain = Pedals -> NAM/IR; sfizz source modes
+// prepend the sfizz engine).  The chain, not this processor, is what the tab
+// registers as its engine.
 // ─────────────────────────────────────────────────────────────────────────────
 
 class BaySickPedalsProcessor : public juce::AudioProcessor
@@ -185,11 +186,17 @@ public:
     int getChainLatencySamples();
 
     // ── Pedalboard preset library ─────────────────────────────────────────────
-    // Documents/BaySickDAW/Presets/Pedalboards/{name}.xml - full 8-slot snapshot
-    // wrapped in <Pedalboard> envelope.  Distinct from per-pedal presets which
-    // use the existing EffectPresetIO framework (folder layout
+    // Documents/BaySickDAW/Presets/Pedalboards/ - full 8-slot snapshot wrapped
+    // in a <Pedalboard> envelope.  Distinct from per-pedal presets which use
+    // the existing EffectPresetIO framework (folder layout
     // Documents/BaySickDAW/Presets/Effects/{TypeName}/...).
     static juce::File pedalboardPresetsRoot();
+
+    // name is the raw typed string; naming and collision go through
+    // UserFileSave::resolveTarget, so an existing board of that name is
+    // suffixed rather than replaced and the file written is not always
+    // "<name>.xml".  Returns false + outErr for a caller that raises its own
+    // box.
     bool savePedalboardPreset (const juce::String& name, juce::String& outErr);
     bool loadPedalboardPreset (const juce::File& xml,    juce::String& outErr);
     juce::Array<juce::File> enumeratePedalboardPresets();
@@ -229,6 +236,15 @@ private:
 
     double mSampleRate { 44100.0 };
     int    mMaxBlock   { 512 };
+
+    // Audio-thread danger zone: isSlotBypassed runs per slot per block, so it
+    // must not build the `bsp_slot{N}_bypass` id (juce::String has no SSO --
+    // every concatenation is a heap allocation inside the render callback).
+    // Resolved once in the ctor body; the layout is static and an APVTS
+    // adapter's address lives as long as the apvts, so the cache never goes
+    // stale (a state restore rebinds the adapter's tree, it does not recreate
+    // the adapter).  Mirrors BaySickGuitarsProcessor's cc-param cache.
+    std::array<std::atomic<float>*, kNumSlots> mSlotBypassRaw {};
 
     // 2026-05-05 dirty-flag wiring.  Declared LAST so apvts is fully constructed.
     ApvtsDirtyTracker mDirtyTracker { apvts };

@@ -42,6 +42,10 @@
 #include "DSP/TunerStyleDSP.h"
 // I-15c (2026-05-03): User NAM Pedal (loads .nam capture).
 #include "DSP/NAMPedalStyleDSP.h"
+// The rack is where a slot uuid is minted and retired, so it is the one place
+// that can tell the automation registry a slot's lanes are gone.  Only the
+// VKnobAutomation hook block is used from here.
+#include "Standalone/SharedUI.h"
 
 // ── Ctor ──────────────────────────────────────────────────────────────────────
 EffectRack::EffectRack()
@@ -129,12 +133,15 @@ std::unique_ptr<DSPBase> EffectRack::createEffect(EffectType type)
 
 // ── Slot management ───────────────────────────────────────────────────────────
 // I-0a (2026-05-02): single-slot mutations (loadEffect/clearSlot/setSlotBypassed)
-// publish via per-slot swapPending atomic and DO NOT take mSlotsLock --- the
-// audio thread is wait-free on these paths.  mLoadLock serializes message-
-// thread mutations against each other.  Multi-slot mutations (moveSlot*,
-// packSlotsToTop, setStateInformation) still take mSlotsLock because their
-// atomicity spans multiple slots; audio's process() try-locks to skip during
-// those rare rearrangements.
+// hand the new DSP over through the per-slot swapPending atomic, so the audio
+// thread never waits for one to finish.  loadEffect and clearSlot DO take
+// mSlotsLock, but only to drain a swap audio has not consumed yet -- during a
+// project load the device is not running, so waiting on audio never returns.
+// setSlotBypassed is the one mutation that takes no lock at all: a single
+// relaxed store.  mLoadLock serializes message-thread mutations against each
+// other.  Multi-slot mutations (moveSlot*, packSlotsToTop, setStateInformation)
+// hold mSlotsLock across the WHOLE rack because their atomicity spans slots.
+// Audio never blocks on any of it -- process() try-locks and skips a block.
 
 void EffectRack::loadEffect(int slot, EffectType type, const juce::String& uuidOverride,
                             const juce::PluginDescription* pluginDesc)
@@ -158,13 +165,24 @@ void EffectRack::loadEffect(int slot, EffectType type, const juce::String& uuidO
 
     // Stable per-slot identity for automation paramIds. Fresh UUID on each
     // user-facing load (effect-type swap drops old automation, which matches
-    // intuition - different effect = different knobs). setStateInformation
-    // passes the saved UUID via uuidOverride to keep automation lanes alive
-    // across project save/load.
+    // intuition - different effect = different knobs). An undo restore passes
+    // the saved UUID via uuidOverride so a resurrected slot keeps its lanes;
+    // setStateInformation does not come through here -- it installs the
+    // restored uuid itself.
     juce::String newUuid = uuidOverride.isNotEmpty()
         ? uuidOverride
         : juce::Uuid().toString();
 
+    // Park the outgoing DSP (the OLD active demoted by the most recent swap)
+    // in a local so it destructs AFTER mLoadLock drops -- a hosted-VST3
+    // teardown must never run under a lock other threads can queue behind.
+    std::unique_ptr<DSPBase> leaving;
+    // Same reason `leaving` exists: the automation de-registration destroys
+    // std::function closures, so the uuid is hoisted here and the hook fires
+    // once every lock has dropped.
+    juce::String retiringUuid;
+
+    {
     const juce::ScopedLock lk (mLoadLock);
 
     // If a prior swap is still pending, drain it on the message thread under
@@ -184,15 +202,29 @@ void EffectRack::loadEffect(int slot, EffectType type, const juce::String& uuidO
     }
 
     // Move the new DSP into pending.  Any previously-parked DSP (the OLD
-    // active that was demoted by the most recent swap) destructs HERE on the
-    // message thread -- never on audio.
+    // active that was demoted by the most recent swap) is handed to `leaving`
+    // so it destructs on the message thread -- never on audio, and never
+    // under a lock.
+    leaving              = std::move (mSlots[slot].pending);
+    if (mSlots[slot].uuid != newUuid)
+        retiringUuid = mSlots[slot].uuid;
     mSlots[slot].pending = std::move (effect);
     mSlots[slot].type    = type;
     mSlots[slot].uuid    = newUuid;
 
     // Publish: audio's next process() will std::swap active <-> pending.
     mSlots[slot].swapPending.store (true, std::memory_order_release);
+    }
+    // `leaving` destructs here -- outside every lock.
 
+    // A retired uuid never revives, so its automation lanes are unreachable the
+    // moment it is replaced.  uuidOverride restores keep the SAME uuid, which is
+    // what keeps saved lanes alive across a project load.
+    if (retiringUuid.isNotEmpty() && VKnobAutomation::sOnUnregisterSlotUuid)
+        VKnobAutomation::sOnUnregisterSlotUuid (retiringUuid);
+
+    // Outside mLoadLock: onSlotsChanged runs arbitrary UI work, and holding a
+    // lock the audio thread could ever want across it is a priority inversion.
     if (onSlotsChanged) onSlotsChanged();
 }
 
@@ -200,6 +232,10 @@ void EffectRack::clearSlot(int slot)
 {
     if (slot < 0 || slot >= kNumSlots) return;
 
+    // Hoisted out of the lock -- see loadEffect.
+    juce::String retiringUuid;
+
+    {
     const juce::ScopedLock lk (mLoadLock);
 
     // If a prior swap is still pending, drain it on the message thread
@@ -219,7 +255,15 @@ void EffectRack::clearSlot(int slot)
     mSlots[slot].pending.reset();
     mSlots[slot].type     = EffectType::None;
     mSlots[slot].bypassed.store (false, std::memory_order_relaxed);
+    retiringUuid          = mSlots[slot].uuid;
     mSlots[slot].uuid     = {};
+    // An emptied slot must read as a factory-default slot.  Racks are
+    // long-lived graph-node members (that is why VibeGraph::clearAllRackStates
+    // exists), so anything left in these three bleeds into the next effect
+    // dropped here -- including across a project boundary.
+    mSlots[slot].outputGainDb = 0.f;
+    mSlots[slot].scPick       = -1;
+    mSlots[slot].basicMode    = true;
     mSlots[slot].swapPending.store (true, std::memory_order_release);
 
     // Complete the swap HERE, the same inline drain this function already does
@@ -236,13 +280,18 @@ void EffectRack::clearSlot(int slot)
         }
     }
     mSlots[slot].pending.reset();
+    }
 
+    // Outside mLoadLock -- see loadEffect.
+    if (retiringUuid.isNotEmpty() && VKnobAutomation::sOnUnregisterSlotUuid)
+        VKnobAutomation::sOnUnregisterSlotUuid (retiringUuid);
     if (onSlotsChanged) onSlotsChanged();
 }
 
 void EffectRack::moveSlotUp(int slot)
 {
     if (slot <= 0 || slot >= kNumSlots) return;
+    {
     const juce::ScopedLock          lkMsg   (mLoadLock);
     const juce::SpinLock::ScopedLockType lkAudio (mSlotsLock);
     // Drain any pending swaps on the affected slots so the std::swap below
@@ -260,13 +309,17 @@ void EffectRack::moveSlotUp(int slot)
     drain (mSlots[slot]);
     drain (mSlots[slot - 1]);
     std::swap (mSlots[slot], mSlots[slot - 1]);
+    }
 
+    // Outside BOTH locks: running a UI callback while holding mSlotsLock would
+    // spin the audio thread's try-lock for the whole callback.
     if (onSlotsChanged) onSlotsChanged();
 }
 
 void EffectRack::moveSlotDown(int slot)
 {
     if (slot < 0 || slot >= kNumSlots - 1) return;
+    {
     const juce::ScopedLock          lkMsg   (mLoadLock);
     const juce::SpinLock::ScopedLockType lkAudio (mSlotsLock);
     auto drain = [] (Slot& s) noexcept
@@ -280,7 +333,9 @@ void EffectRack::moveSlotDown(int slot)
     drain (mSlots[slot]);
     drain (mSlots[slot + 1]);
     std::swap (mSlots[slot], mSlots[slot + 1]);
+    }
 
+    // Outside BOTH locks -- see moveSlotUp.
     if (onSlotsChanged) onSlotsChanged();
 }
 
@@ -358,6 +413,12 @@ void EffectRack::packSlotsToTop()
                 mSlots[i].type     = EffectType::None;
                 mSlots[i].bypassed.store (false, std::memory_order_relaxed);
                 mSlots[i].uuid     = {};
+                // Emptied slots here are moved-FROM Slots, so these three still
+                // hold the packed-away effect's values -- reset for the same
+                // reason clearSlot does.
+                mSlots[i].outputGainDb = 0.f;
+                mSlots[i].scPick       = -1;
+                mSlots[i].basicMode    = true;
             }
         }
     }
@@ -389,26 +450,33 @@ void EffectRack::prepare(double sampleRate, int maxBlockSize)
     }
 
     for (auto& s : mSlots)
+    {
+        // The bypass-crossfade dry snapshot is sized HERE (message thread,
+        // where allocation is legal).  Without this the first bypass toggle of
+        // each slot mallocs inside the render callback -- inside the very
+        // crossfade whose job is to hide the bypass click.
+        s.dryScratch.setSize (juce::jmax (2, s.dryScratch.getNumChannels()),
+                              juce::jmax (1, maxBlockSize), false, true, true);
         if (s.active) s.active->prepare(sampleRate, maxBlockSize);
+    }
 }
 
 void EffectRack::process(juce::AudioBuffer<float>& buffer)
 {
-    if (mRackBypassed) return;
+    if (mRackBypassed.load (std::memory_order_relaxed)) return;
 
-    // Try-lock against multi-slot mutations only (moveSlot/pack/setStateInfo/
-    // prepare/reset/setHostBPM).  Single-slot loads/clears/bypass changes do
-    // NOT take this lock -- they publish via per-slot swapPending and audio
-    // is wait-free on those paths.  If a multi-slot op is currently in
-    // flight, skip this block (rare, user-UI-driven).
+    // Try-lock, never block.  Holders are the whole-rack mutations (moveSlot/
+    // pack/setStateInfo/prepare/reset/setHostBPM) plus the brief per-slot drain
+    // inside loadEffect/clearSlot.  All are user-UI-rare and hold only across
+    // pointer moves, so skipping a block costs less than any wait would.
     const juce::SpinLock::ScopedTryLockType tryLk (mSlotsLock);
     if (! tryLk.isLocked()) return;
 
-    // Per-slot wait-free swap-pending drain (mirrors NAM/IR pattern).  Audio
-    // thread is the publisher of `active`; message thread only ever writes
-    // `pending`.  After std::swap, `pending` holds the OLD active DSP -- it
-    // stays alive until the NEXT message-thread loadEffect on this slot
-    // overwrites `pending` (and destructs the old DSP on the message thread).
+    // Per-slot swap-pending drain (mirrors NAM/IR pattern).  Audio thread is
+    // the publisher of `active`; message thread only ever writes `pending`.
+    // After std::swap, `pending` holds the OLD active DSP -- the message
+    // thread is what drops it (loadEffect moves it aside, clearSlot and
+    // setStateInformation take it outright), never audio.
     for (auto& s : mSlots)
     {
         if (s.swapPending.load (std::memory_order_acquire))
@@ -482,6 +550,8 @@ void EffectRack::process(juce::AudioBuffer<float>& buffer)
         const bool rampActive = ! (s.bypassRampValue == 1.0f && rampTarget == 1.0f);
         if (rampActive)
         {
+            // Scratch preallocated in prepare(); the size guard only fires if
+            // the host exceeds the prepared block size or channel count.
             if (s.dryScratch.getNumChannels() < numCh
              || s.dryScratch.getNumSamples() < numSamples)
                 s.dryScratch.setSize (numCh, numSamples, false, false, true);
@@ -590,16 +660,6 @@ void EffectRack::setSidechainBuffers (juce::AudioBuffer<float>* const* bufs, int
     mScBufs  = mScArrCopy.data();
     mScCount = n;
 }
-float EffectRack::getSlotInputLevel(int slot) const
-{
-    return (slot >= 0 && slot < kNumSlots)
-        ? mSlots[slot].inputLevelRms.load(std::memory_order_relaxed) : 0.f;
-}
-float EffectRack::getSlotOutputLevel(int slot) const
-{
-    return (slot >= 0 && slot < kNumSlots)
-        ? mSlots[slot].outputLevelDb.load(std::memory_order_relaxed) : -96.f;
-}
 
 // 2026-05-02: drain variants exchange the SNAPSHOT atomics (audio promotes
 // Run -> Snap at end of each audio block via promoteSlotPeakSnapshots()).
@@ -617,8 +677,8 @@ float EffectRack::drainSlotOutputLevel(int slot)
 
 // 2026-05-02: end-of-audio-block promotion of every slot's Run atomics into
 // the UI-visible Snapshot atomics.  Single drain-and-CAS-max per slot per
-// channel.  Called once per audio block from VibeGraph::promoteAllInsert
-// PeakSnapshots() after walking every rack.
+// channel.  Called once per audio block by VibeGraph::promoteAllRackSlot
+// Snapshots(), which walks every rack across every node and insert.
 void EffectRack::promoteSlotPeakSnapshots()
 {
     auto promoteOne = [] (std::atomic<float>& runMax, std::atomic<float>& snap, float resetTo) noexcept
@@ -658,8 +718,16 @@ void EffectRack::reset()
 void EffectRack::setHostTransport(const DSPBase::HostTransport& tp)
 {
     mHostBPM = tp.bpm;
-    const juce::ScopedLock          lkMsg   (mLoadLock);
-    const juce::SpinLock::ScopedLockType lkAudio (mSlotsLock);
+    // AUDIO THREAD: the node chain functions call this one line before
+    // rack.process() every block.  It must therefore take NEITHER mLoadLock
+    // (unbounded message-thread holds behind it) NOR a blocking mSlotsLock.
+    // The try-lock matches process()'s contract exactly -- a failed try means
+    // process() is about to skip this block anyway, so a one-block-stale
+    // transport push is strictly better than spinning.  mSlotsLock alone is
+    // sufficient for the slot walk: every write to active/pending is either
+    // made under mSlotsLock or published by the swapPending release/acquire.
+    const juce::SpinLock::ScopedTryLockType lkAudio (mSlotsLock);
+    if (! lkAudio.isLocked()) return;
     for (auto& s : mSlots)
     {
         if (s.swapPending.load (std::memory_order_acquire))
@@ -694,7 +762,7 @@ void EffectRack::setHostBPM(double bpm)
 // ── PDC ───────────────────────────────────────────────────────────────────────
 int EffectRack::getTotalLatencySamples() const
 {
-    if (mRackBypassed) return 0;
+    if (mRackBypassed.load (std::memory_order_relaxed)) return 0;
     int total = 0;
     for (const auto& s : mSlots)
         if (s.active && ! s.bypassed.load (std::memory_order_relaxed))
@@ -761,90 +829,162 @@ void EffectRack::setStateInformation(const void* data, int sz)
     // Batch E #5: do NOT read "bypassed" here -- APVTS _bypass param drives it.
     // (Old projects with a stale XML "bypassed" property are silently ignored.)
 
+    // Three phases, because the two halves either side of the handover have to
+    // stay off the audio-facing lock for opposite reasons: building a DSP
+    // allocates and reads a state blob, and dropping the outgoing one destroys
+    // it (for a hosted VST3 slot that is the plugin teardown AND its helper
+    // process).  Only the pointer handover in between belongs under the lock,
+    // and it has to cover the WHOLE rack in one hold -- taking the lock per
+    // slot lets the audio thread in between iterations and render a
+    // half-restored rack, some slots new and some still old.
+    struct StagedSlot
+    {
+        std::unique_ptr<DSPBase> incoming;
+        std::unique_ptr<DSPBase> retiredActive;
+        std::unique_ptr<DSPBase> retiredPending;
+        EffectType   type         { EffectType::None };
+        juce::String uuid;
+        juce::String retiredUuid;
+        float        outputGainDb { 0.f };
+        int          scPick       { -1 };
+        bool         basicMode    { true };
+        bool         bypassed     { false };
+        bool         present      { false };
+    };
+    std::array<StagedSlot, (size_t) kNumSlots> staged;
+    bool anyStaged = false;
+
     for (int i = 0; i < state.getNumChildren(); ++i)
     {
         auto child = state.getChild(i);
-        if (child.hasType("Slot"))
+        if (! child.hasType("Slot")) continue;
+
+        const int slotIdx = (int)child.getProperty("index", -1);
+        if (slotIdx < 0 || slotIdx >= kNumSlots) continue;
+
+        auto type = (EffectType)(int)child.getProperty("type", 0);
+        bool byp  = (bool)(int)child.getProperty("bypassed", 0);
+        // 2026-04-30: restore per-slot Vol knob (default 0 dB if the
+        // saved project predates this fix and didn't write it).
+        float vol = (float)(double)child.getProperty("outputGainDb", 0.0);
+        // C13: restore saved UUID so automation paramIds match across load.
+        juce::String uuid = child.getProperty("uuid", "").toString();
+        // C.4 Phase 1: restore per-slot SC pick (default -1 = no SC).
+        int scPick = (int) child.getProperty("scPick", -1);
+        // QA-EffectsReview Task 1: restore Basic/Advanced (default 1=Basic for old projects).
+        bool basicMode = ((int) child.getProperty("basicMode", 1)) != 0;
+
+        auto& st  = staged[(size_t) slotIdx];
+        st.present = true;
+        st.type    = type;
+        anyStaged  = true;
+        // A repeated index in the XML must not leave an earlier child's built
+        // DSP staged behind a later child's type.
+        st.incoming.reset();
+
+        if (type == EffectType::None)
         {
-            int slotIdx = (int)child.getProperty("index", -1);
-            if (slotIdx < 0 || slotIdx >= kNumSlots) continue;
+            // An emptied slot must read as a factory-default slot -- racks are
+            // long-lived graph-node members, so anything left in these bleeds
+            // into the next effect dropped here.  Mirrors clearSlot().
+            st.uuid         = {};
+            st.bypassed     = false;
+            st.outputGainDb = 0.f;
+            st.scPick       = -1;
+            st.basicMode    = true;
+            continue;
+        }
 
-            auto type = (EffectType)(int)child.getProperty("type", 0);
-            bool byp  = (bool)(int)child.getProperty("bypassed", 0);
-            // 2026-04-30: restore per-slot Vol knob (default 0 dB if the
-            // saved project predates this fix and didn't write it).
-            float vol = (float)(double)child.getProperty("outputGainDb", 0.0);
-            // C13: restore saved UUID so automation paramIds match across
-            // load.  Empty when loading a pre-C13 project; loadEffect will
-            // generate a fresh UUID in that case.
-            juce::String uuid = child.getProperty("uuid", "").toString();
-            // C.4 Phase 1: restore per-slot SC pick (default -1 = no SC).
-            int scPick = (int) child.getProperty("scPick", -1);
-            // QA-EffectsReview Task 1: restore Basic/Advanced (default 1=Basic for old projects).
-            bool basicMode = ((int) child.getProperty("basicMode", 1)) != 0;
+        // I-0a fix (2026-05-02): we cannot use loadEffect followed by a write
+        // to pending -- audio could run between the two and swap pending into
+        // active (leaving pending null) before we get to write the state blob.
+        // Instead the new DSP is built and fully restored on this thread, and
+        // the install phase below hands it over whole.
+        auto effect = createEffect(type);
+        if (effect)
+        {
+            if (mSampleRate > 0.0)
+                effect->prepare(mSampleRate, mMaxBlock);
+            effect->setHostBPM(mHostBPM);
 
-            if (type != EffectType::None)
+            juce::String b64 = child.getProperty("data", "");
+            if (b64.isNotEmpty())
             {
-                // I-0a fix (2026-05-02): we cannot use loadEffect followed by
-                // a write to pending -- audio could run between the two and
-                // swap pending into active (leaving pending null) before we
-                // get to write the state blob.  Instead, build the new DSP
-                // locally, apply the saved state to it on this thread, THEN
-                // park it atomically via the same swap-pending publish that
-                // loadEffect uses.  Audio sees a fully-restored DSP on the
-                // first swap.
-                auto effect = createEffect(type);
-                if (effect)
-                {
-                    if (mSampleRate > 0.0)
-                        effect->prepare(mSampleRate, mMaxBlock);
-                    effect->setHostBPM(mHostBPM);
-
-                    juce::String b64 = child.getProperty("data", "");
-                    if (b64.isNotEmpty())
-                    {
-                        juce::MemoryOutputStream mos;
-                        juce::Base64::convertFromBase64(mos, b64);
-                        juce::MemoryBlock decoded = mos.getMemoryBlock();
-                        effect->setStateInformation(
-                            decoded.getData(), (int)decoded.getSize());
-                    }
-                }
-
-                juce::String newUuid = uuid.isNotEmpty()
-                    ? uuid
-                    : juce::Uuid().toString();
-
-                // Bulk-restore path: install the fully-prepared DSP into
-                // `active` directly under mSlotsLock (audio thread try-locks
-                // and skips the block).  Avoids the swap-pending drain wait
-                // during project load when the audio thread isn't yet producing
-                // blocks to consume the flag -- which previously caused a
-                // 1-second-per-slot hang adding up to minutes for a full project.
-                {
-                    const juce::ScopedLock                lkMsg   (mLoadLock);
-                    const juce::SpinLock::ScopedLockType  lkAudio (mSlotsLock);
-
-                    if (mSlots[slotIdx].swapPending.load (std::memory_order_acquire))
-                    {
-                        std::swap (mSlots[slotIdx].active, mSlots[slotIdx].pending);
-                        mSlots[slotIdx].swapPending.store (false, std::memory_order_release);
-                    }
-                    mSlots[slotIdx].active = std::move (effect);
-                    mSlots[slotIdx].pending.reset();
-                    mSlots[slotIdx].type   = type;
-                    mSlots[slotIdx].uuid   = newUuid;
-                }
-
-                setSlotBypassed(slotIdx, byp);
-                setSlotOutputGain(slotIdx, vol);
-                setSlotSidechainPick(slotIdx, scPick);
-                setSlotBasicMode(slotIdx, basicMode);
-            }
-            else
-            {
-                clearSlot(slotIdx);
+                juce::MemoryOutputStream mos;
+                juce::Base64::convertFromBase64(mos, b64);
+                juce::MemoryBlock decoded = mos.getMemoryBlock();
+                effect->setStateInformation(
+                    decoded.getData(), (int)decoded.getSize());
             }
         }
+
+        st.incoming     = std::move (effect);
+        // Pre-C13 saves carry no uuid: mint one rather than leaving it empty,
+        // or the slot's knobs would register under a blank key.
+        st.uuid         = uuid.isNotEmpty() ? uuid : juce::Uuid().toString();
+        st.bypassed     = byp;
+        st.outputGainDb = vol;
+        st.scPick       = scPick;
+        st.basicMode    = basicMode;
     }
+
+    if (! anyStaged) return;
+
+    // Bulk-restore path: install into `active` directly under mSlotsLock (audio
+    // thread try-locks and skips the block).  Avoids the swap-pending drain wait
+    // during project load when the audio thread isn't yet producing blocks to
+    // consume the flag -- which previously caused a 1-second-per-slot hang
+    // adding up to minutes for a full project.  The hold is a pointer handover
+    // and scalar writes, nothing more -- the outgoing DSPs leave by move and
+    // are destroyed once the lock has dropped.
+    {
+        const juce::ScopedLock                lkMsg   (mLoadLock);
+        const juce::SpinLock::ScopedLockType  lkAudio (mSlotsLock);
+
+        for (int s = 0; s < kNumSlots; ++s)
+        {
+            auto& st = staged[(size_t) s];
+            if (! st.present) continue;
+
+            if (mSlots[s].swapPending.load (std::memory_order_acquire))
+            {
+                std::swap (mSlots[s].active, mSlots[s].pending);
+                mSlots[s].swapPending.store (false, std::memory_order_release);
+            }
+            st.retiredActive  = std::move (mSlots[s].active);
+            st.retiredPending = std::move (mSlots[s].pending);
+            // Moved out rather than overwritten so the outgoing string's buffer
+            // is freed with `staged`, not inside this hold: the allocator has
+            // no business running under a lock the audio thread try-locks.
+            st.retiredUuid    = std::move (mSlots[s].uuid);
+
+            mSlots[s].active       = std::move (st.incoming);
+            mSlots[s].type         = st.type;
+            mSlots[s].uuid         = st.uuid;
+            mSlots[s].outputGainDb = st.outputGainDb;
+            mSlots[s].scPick       = st.scPick;
+            mSlots[s].basicMode    = st.basicMode;
+            mSlots[s].bypassed.store (st.bypassed, std::memory_order_relaxed);
+        }
+    }
+
+    // Outgoing DSPs die HERE, off every lock -- see loadEffect for why a
+    // hosted-VST3 teardown must never run under one.
+    for (auto& st : staged)
+    {
+        st.retiredActive.reset();
+        st.retiredPending.reset();
+    }
+
+    // Hoisted out of both locks -- see loadEffect: de-registration destroys
+    // std::function closures.  Only an emptied slot drops its lanes (clearSlot's
+    // behavior, which this path used to reach by calling it); a restored slot
+    // keeps whatever uuid landed, and its lanes are the caller's business --
+    // EffectsPage re-registers them after an FX-rack preset load.
+    for (const auto& st : staged)
+        if (st.present && st.type == EffectType::None
+            && st.retiredUuid.isNotEmpty() && VKnobAutomation::sOnUnregisterSlotUuid)
+            VKnobAutomation::sOnUnregisterSlotUuid (st.retiredUuid);
+
+    if (onSlotsChanged) onSlotsChanged();
 }

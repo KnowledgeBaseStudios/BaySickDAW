@@ -26,7 +26,6 @@ public:
     // ── Audio lifecycle ───────────────────────────────────────────────────────
     void prepare        (double sampleRate, int maxBlockSize);
     void renderNextBlock (juce::AudioBuffer<float>&, juce::MidiBuffer&);
-    void allNotesOff();
 
     // ── Engine access ─────────────────────────────────────────────────────────
     // Used by HarmlessProcessor and (in 3A-Final) HarmlessEditor to edit
@@ -63,14 +62,7 @@ public:
 
     // ── Beta: spectral module amounts ─────────────────────────────────────────
     // 2026-04-19 (S3.5): split into per-part setters. The A versions touch
-    // mPartA only; the B versions touch mPartB only. Old "both" setters kept
-    // for backward compatibility but unused by the processor (they call A+B).
-    void setPrismAmount      (float amount);   // back-compat: A + B
-    void setPluckDecay       (float amount);   // back-compat: A + B
-    void setBlurSize         (float amount);   // back-compat: A + B
-    void setFilterMaskAmount (float amount);   // back-compat: A + B
-    void setPhaserMaskRate   (float rate);     // back-compat: A + B
-    void setBrownianAmount   (float amount);   // back-compat: A + B
+    // mPartA only; the B versions touch mPartB only.
     // Per-part DSP setters (S3.5).
     void setPrismAmountA      (float amount);
     void setPrismAmountB      (float amount);
@@ -172,8 +164,6 @@ public:
 
     // ── 2026-04-19 (S2 SLA) - Blur extensions on the engine wavetable ─────────
     // S3.5: split into A/B variants.
-    void setBlurTime  (float t);   // back-compat: A + B
-    void setBlurHarm  (float h);   // back-compat: A + B
     void setBlurTimeA (float t);
     void setBlurTimeB (float t);
     void setBlurHarmA (float h);
@@ -191,12 +181,10 @@ public:
     void setTimbreBlend (float blend) noexcept;
     // T2-D prism_mode: 0 = stretched, 1 = bunched, 2 = scattered.
     // S3.5: split into A/B variants.
-    void setPrismMode   (int mode);          // back-compat: A + B
     void setPrismModeA  (int mode);
     void setPrismModeB  (int mode);
     // T2-N pluck_blur: ON adds a soft attack curve on top of the pluck decay.
     // S3.5: split into A/B variants.
-    void setPluckBlur   (bool blurOn);       // back-compat: A + B
     void setPluckBlurA  (bool blurOn);
     void setPluckBlurB  (bool blurOn);
     // T2-N strum_tns: tension on the strum delay distribution curve.

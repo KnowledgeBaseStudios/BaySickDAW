@@ -2,6 +2,8 @@
 #include <JuceHeader.h>
 #include "../Standalone/ApvtsDirtyTracker.h"
 #include <atomic>
+#include <array>
+#include <cstdint>
 #include <map>
 #include <memory>
 
@@ -117,9 +119,9 @@ public:
 
     // J-8b (2026-05-04): hi-hat pedal state.  Drives CC4 on the sfizz
     // engine (the kit's pedal-position controller - 0 = closed pedal,
-    // 127 = open pedal per Big Rusty Drums' cc_ranges).  Callable from
-    // the UI thread; sfizz's cc() is documented as message-thread safe
-    // when not concurrently rendering.
+    // 127 = open pedal per Big Rusty Drums' cc_ranges).  Callable from the
+    // UI thread because it never touches sfizz: it writes CC4 through APVTS
+    // and the parameterChanged listener queues it for processStrips' drain.
     void setHiHatPedalClosed (bool closed);
     bool isHiHatPedalClosed() const noexcept { return mHiHatPedalClosed.load(); }
 
@@ -166,7 +168,8 @@ public:
 
     // J-8 stage 2 (2026-05-04): ARIA control surface CC dispatch.  Writes the
     // value (0..127) for `cc` through APVTS so the change is undoable, projectable,
-    // and automatable.  The parameterChanged listener forwards to sfizz.
+    // and automatable.  The parameterChanged listener queues the CC; processStrips
+    // pushes it into sfizz on the audio thread.
     // 2026-05-05: kCcCount lifted to 512 so kit-author "extended CCs" >= 128
     // (e.g. Big Rusty Drums uses CC400/401 for limiter thresh/level) get
     // wired all the way through the panel ↔ APVTS ↔ sfizz pipeline instead
@@ -178,7 +181,9 @@ public:
     int  getKitDefaultCc (int cc) const;   // read-only snapshot of the kit's set_cc<N> values
     juce::String getCcLabel (int cc) const;   // kit's `label_cc<N>=<text>` (empty if none)
 
-    // APVTS listener - forwards every brd_cc<N> change to sfizz.
+    // APVTS listener.  Fires synchronously on whatever thread wrote the param,
+    // so it must NOT call mSfizz->cc() itself -- it only marks the CC dirty in
+    // mCcDirty and processStrips drains the marks (see mCcDirty below for why).
     void parameterChanged (const juce::String& paramId, float newValue) override;
 
     // 2026-05-05 dirty-flag wiring (see ApvtsDirtyTracker.h).
@@ -232,12 +237,22 @@ private:
     // table.  No anchoring, no remap - piano roll speaks raw kit MIDI.
     static std::vector<PianoRollKey> discoverPianoRollKeymap (const juce::File& kitRoot);
 
-    // J-8 stage 2 (2026-05-04): the live CC values are now stored in APVTS
-    // (one brd_cc<N> Int param per MIDI CC).  mCcState mirrors APVTS for
-    // legacy callers; mCcKitDefault is a read-only snapshot of the kit's
-    // `set_cc<N>=<int>` directives, used for double-click reset on the panel.
-    mutable juce::SpinLock     mCcStateLock;
-    std::map<int, int>         mCcState;
+    // THREAD SAFETY (mirrors BaySickGuitarsProcessor): parameterChanged runs on
+    // whichever thread wrote the param and must never call mSfizz->cc() itself
+    // -- sfizz mutates internal state in cc(), so a message-thread call races
+    // the audio thread's renderBlock.  The listener marks the CC dirty here and
+    // processStrips drains the marks; during a kit load the processor-level
+    // shield keeps processStrips from running, so marks accumulate and flush
+    // into a fully-parsed engine.  mCcRaw caches the APVTS atomics at
+    // construction so the drain does no string-keyed lookup on the audio thread.
+    std::array<std::atomic<float>*, kCcCount>            mCcRaw {};
+    static constexpr int kCcDirtyWords = kCcCount / 64;
+    std::array<std::atomic<std::uint64_t>, kCcDirtyWords> mCcDirty {};
+
+    // J-8 stage 2 (2026-05-04): the live CC values are stored in APVTS (one
+    // brd_cc<N> Int param per MIDI CC); mCcKitDefault is a read-only snapshot
+    // of the kit's `set_cc<N>=<int>` directives, used for double-click reset
+    // on the panel.
     mutable juce::SpinLock     mCcKitDefaultLock;
     std::map<int, int>         mCcKitDefault;
     mutable juce::SpinLock     mCcLabelLock;

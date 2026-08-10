@@ -63,6 +63,32 @@ void GateDSP::setReleaseMs (float ms)
     if (n != releaseMs) { releaseMs = n; calcCoefs(); }
 }
 
+void GateDSP::getStateInformation (juce::MemoryBlock& dest)
+{
+    juce::ValueTree state ("GateDSP");
+    state.setProperty ("threshold", thresholdDb, nullptr);
+    state.setProperty ("range",     rangeDb,     nullptr);
+    state.setProperty ("attack",    attackMs,    nullptr);
+    state.setProperty ("hold",      holdMs,      nullptr);
+    state.setProperty ("release",   releaseMs,   nullptr);
+    if (auto xml = state.createXml())
+        juce::AudioProcessor::copyXmlToBinary (*xml, dest);
+}
+
+void GateDSP::setStateInformation (const void* data, int sz)
+{
+    auto xml = juce::AudioProcessor::getXmlFromBinary (data, sz);
+    if (! xml || ! xml->hasTagName ("GateDSP")) return;
+    auto state = juce::ValueTree::fromXml (*xml);
+    // Restore through the setters, never the public fields: attack/hold/release
+    // only reach the coefficients via calcCoefs(), which the setters run.
+    setThresholdDb ((float) (double) state.getProperty ("threshold", -80.0));
+    setRangeDb     ((float) (double) state.getProperty ("range",     -60.0));
+    setAttackMs    ((float) (double) state.getProperty ("attack",      1.0));
+    setHoldMs      ((float) (double) state.getProperty ("hold",       50.0));
+    setReleaseMs   ((float) (double) state.getProperty ("release",   100.0));
+}
+
 void GateDSP::process (juce::AudioBuffer<float>& buffer)
 {
     if (bypassed) return;

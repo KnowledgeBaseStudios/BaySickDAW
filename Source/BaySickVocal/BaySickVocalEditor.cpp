@@ -112,10 +112,10 @@ public:
         mABSlot.addItem ("A", 1);
         mABSlot.addItem ("B", 2);
         mABSlot.setSelectedId (1, juce::dontSendNotification);
-        mABSlot.setTooltip ("A/B compare slot.  Each slot remembers a full set of chain "
-                              "settings -- build one tone in A, switch to B and build another, "
-                              "then flip between the two without losing either.  Automatable "
-                              "from the timeline.");
+        mABSlot.setTooltip ("A/B compare slot.  Each slot remembers its own Mix, realtime "
+                              "board and vocal chain settings -- build one tone in A, switch "
+                              "to B and build another, then flip between the two without "
+                              "losing either.  Automatable from the timeline.");
         mABAtt = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment> (
                       mProc.apvts, pid ("ab_slot"), mABSlot);
 
@@ -336,10 +336,10 @@ private:
                   "BaySickPitch sub-tab for offline note-by-note pitch editing.");
             mABSlot.setTooltip (rec
                 ? "Locked while recording - pick the A/B slot before the take"
-                : "A/B compare slot.  Each slot remembers a full set of chain "
-                  "settings -- build one tone in A, switch to B and build another, "
-                  "then flip between the two without losing either.  Automatable "
-                  "from the timeline.");
+                : "A/B compare slot.  Each slot remembers its own Mix, realtime "
+                  "board and vocal chain settings -- build one tone in A, switch "
+                  "to B and build another, then flip between the two without "
+                  "losing either.  Automatable from the timeline.");
         }
 
         // Note: PitchCorrectorDSP atomic readers aren't exposed via apvts; we

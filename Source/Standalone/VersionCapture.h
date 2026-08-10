@@ -1,6 +1,7 @@
 #pragma once
 #include <JuceHeader.h>
 #include "../DSP/LoudnessSpec.h"
+#include <memory>
 #include <vector>
 
 // -- VersionCapture -- QA-ModelShell TS7 §3 -------------------------------------
@@ -38,7 +39,7 @@ public:
     struct Version
     {
         int          id { 0 };            // 1-based take number within the session
-        juce::String label;               // "Take 3  -  14:22:07"
+        juce::String label;
         juce::String scopeLabel;          // what was playing
 
         std::vector<float> lufsCurve;     // Short-Term, sampled at kHistoryHz
@@ -57,8 +58,9 @@ public:
 
         // Empty when audio capture was off for this take.  Nothing ever deletes
         // a take's audio behind the user's back (Jeff, 2026-07-30: no cap) --
-        // session-only retention already discards the whole temp folder at close,
-        // and a retained take under <project>\Reports\ is theirs.
+        // session-only retention discards the whole temp folder at close, with
+        // sweepStaleSessions reclaiming at the next startup what an abnormal
+        // exit stranded, and a retained take under <project>\Reports\ is theirs.
         juce::File audioFile;
     };
 
@@ -143,10 +145,15 @@ public:
     // ── The list (§3.6) ──────────────────────────────────────────────────────
     const std::vector<Version>& versions() const noexcept { return mVersions; }
     const Version* find (int id) const noexcept;
-    void clearAll();
 
     // Session-only takes are deleted here; retained ones are left on disk.
     void discardSessionAudio();
+
+    // Startup reclaim: deletes session temp folders left behind by instances
+    // that never ran their destructor (crash, force-quit).  Skips any folder a
+    // running instance still owns.  Call once at startup on the message thread,
+    // before any take can open this session's folder.
+    static void sweepStaleSessions();
 
     // Sampling rate of lufsCurve.  Matches EBU Tech 3342's own rate and the
     // analyzer's live history, so a captured curve and a live one are the same
@@ -184,6 +191,12 @@ private:
 
     juce::File mSessionDir;   // lazily created temp dir for session-only takes
     juce::File sessionDir();
+    static juce::File sessionsParent();
+
+    // Open for as long as mSessionDir is ours.  An open file is what tells
+    // another instance's sweep that this folder is still in use, so it must
+    // outlive every take and be released before the folder is deleted.
+    std::unique_ptr<juce::FileOutputStream> mActiveLock;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (VersionCapture)
 };

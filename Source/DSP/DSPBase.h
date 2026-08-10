@@ -19,18 +19,35 @@ public:
     EffectVisualFeed&       visualFeed()       noexcept { return mVisualFeed; }
     const EffectVisualFeed& visualFeed() const noexcept { return mVisualFeed; }
 
+    // ── The feed's time axis (QA-Buffers, 2026-08-09) ────────────────────────
+    // A column is a fixed slice of TIME, not one audio block.  Publishing one
+    // column per block made the picture a function of the device buffer: the
+    // same 600-pixel strip spanned 1.7 s at a 128 buffer and 55.7 s at 4096, and
+    // it stretched the harmonic-bar hold in EffectWindows (max of the last 30
+    // columns) from 80 ms to 2.8 s.  With a fixed column period a strip's width
+    // in pixels IS a width in seconds at every buffer size and sample rate.
+    //
+    // CALIBRATION: one column = the duration of a 128-sample block at 44100 Hz.
+    // That is exactly what these visuals showed before this fix at the buffer
+    // size Jeff runs, so the picture there is unchanged and every other buffer
+    // size converges onto it.
+    static constexpr double kVisualColumnSeconds = 128.0 / 44100.0;
+
+    // For a panel that wants to label its own time axis instead of inferring the
+    // column rate from the block period (which is no longer the column period).
+    static constexpr double visualColumnSeconds() noexcept { return kVisualColumnSeconds; }
+
     // Does the AUDIO thread push columns into the feed?  This is a question
     // about publishing, nothing else.  Default false; a DSP that pushes
     // overrides to true.
     virtual bool hasVisualFeed() const { return false; }
 
     // Does this effect have a Visual window at all?  DELIBERATELY separate from
-    // hasVisualFeed() (QA-Layout T20, 2026-08-05): only four of the ten visuals
-    // are a scrolling history fed from the audio thread -- the rest (LFO scopes,
-    // transfer curves, harmonic bars, the delay grid, the reverb envelope) are
-    // parametric draws that read DSP state at paint time and push nothing.
-    // Answering the menu's question with hasVisualFeed() would hide the entry on
-    // every one of those while its window drew perfectly well.
+    // hasVisualFeed() (QA-Layout T20): whether a window exists and whether the
+    // audio thread publishes into it are different questions.  Every visual we
+    // ship is feed-driven, so this hook exists to keep a parametric-only visual
+    // -- one that reads DSP state at paint time and pushes nothing -- buildable
+    // without reworking the menu's presence gate.
     //
     // Defaults to hasVisualFeed() so a feed-driven effect needs one override,
     // not two; a parametric visual overrides THIS one alone.
@@ -150,10 +167,74 @@ protected:
         return mVisualFeed.isActive() && b.getNumSamples() > 0
                  ? b.getMagnitude (0, b.getNumSamples()) : 0.0f;
     }
+
+    // Samples per display column at the LIVE sample rate (see
+    // kVisualColumnSeconds).  Never zero, so the accumulator below always makes
+    // progress even if prepare() has not landed yet.
+    int visualColumnSamples() const noexcept
+    {
+        const double sr = mSampleRate > 0.0 ? mSampleRate : 44100.0;
+        return juce::jmax (1, juce::roundToInt (kVisualColumnSeconds * sr));
+    }
+
+    // QA-Buffers (2026-08-09): emits on ELAPSED TIME, not per block.  A block
+    // shorter than one column keeps accumulating its envelope into the pending
+    // column; a block longer than one column is sliced so the sub-block detail
+    // survives instead of collapsing into a single held peak.  `inPk` is the
+    // block's input peak, so it is held across every column that block emits --
+    // visualCaptureIn measures the input once, before the buffer is overwritten.
     void visualPushInOut (const juce::AudioBuffer<float>& b, float inPk) noexcept
     {
-        if (! mVisualFeed.isActive() || b.getNumSamples() <= 0) return;
-        const float o = juce::jlimit (0.0f, 1.0f, b.getMagnitude (0, b.getNumSamples()));
-        mVisualFeed.push (-o, o, juce::jlimit (0.0f, 1.0f, inPk), 0.0f);
+        const int n = b.getNumSamples();
+        if (! mVisualFeed.isActive() || n <= 0)
+        {
+            // Drop the part-built column rather than splicing it onto whatever
+            // arrives when the window is reopened.
+            mVisAccumSamples = 0;
+            mVisPendOut      = 0.0f;
+            mVisPendIn       = 0.0f;
+            return;
+        }
+
+        const int spc = visualColumnSamples();
+        // A sample-rate change between blocks can leave the accumulator past the
+        // new column length; restarting is cheaper than carrying a partial
+        // column measured against the old rate, and keeps `take` positive.
+        if (mVisAccumSamples >= spc)
+        {
+            mVisAccumSamples = 0;
+            mVisPendOut      = 0.0f;
+            mVisPendIn       = 0.0f;
+        }
+
+        // The input peak accumulates alongside the output one: a block SHORTER
+        // than a column (32 samples against a 128-sample column) contributes to
+        // a column it does not complete, and taking inPk verbatim would publish
+        // only the last such block's peak while the output kept all of them.
+        // The ghost-in / solid-out comparison is the whole point of the trace,
+        // so the two sides have to be measured over the same span.
+        mVisPendIn = juce::jmax (mVisPendIn, juce::jlimit (0.0f, 1.0f, inPk));
+
+        for (int pos = 0; pos < n;)
+        {
+            const int take = juce::jmin (n - pos, spc - mVisAccumSamples);
+            mVisPendOut       = juce::jmax (mVisPendOut, b.getMagnitude (pos, take));
+            pos              += take;
+            mVisAccumSamples += take;
+
+            if (mVisAccumSamples >= spc)
+            {
+                const float o = juce::jlimit (0.0f, 1.0f, mVisPendOut);
+                mVisualFeed.push (-o, o, mVisPendIn, 0.0f);
+                mVisAccumSamples = 0;
+                mVisPendOut      = 0.0f;
+                mVisPendIn       = 0.0f;
+            }
+        }
     }
+
+    // Audio thread only (the owning DSP's process()); the UI never reads these.
+    int   mVisAccumSamples { 0 };
+    float mVisPendOut      { 0.0f };
+    float mVisPendIn       { 0.0f };
 };

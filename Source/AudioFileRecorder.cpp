@@ -15,11 +15,12 @@ bool AudioFileRecorder::startRecording(const juce::File& outputFile,
     if (mRecording.load()) return false;
 
     mNumChannels        = numChannels;
-    mCurrentSampleRate  = sampleRate;
     mOutputFile         = outputFile;
     mSamplesSinceStart  = 0;
     mSkipRemaining      = juce::jmax (0, skipInitialSamples);
+    mDroppedBlocks.store (0, std::memory_order_relaxed);
     mFadeSamples        = juce::jmax (1, (int) std::round (sampleRate * 0.005));  // 5 ms
+    mFadedBuf.setSize (numChannels, kMaxExpectedBlock, false, true, false);
 
     outputFile.getParentDirectory().createDirectory();
 
@@ -37,14 +38,17 @@ bool AudioFileRecorder::startRecording(const juce::File& outputFile,
                                     0));
     if (! writer) return false;
 
-    // Background thread shared by all recorders (one per instance is fine;
-    // each capture is short-lived).  Lower priority than audio; higher than
-    // normal UI so disk writes keep up during heavy GUI redraws.
+    // One TimeSliceThread per recorder instance, owned by it and torn down in
+    // stopRecording; a multi-strip take arms several at once (dry + wet per Vox
+    // strip, plus the master and capture taps).  Priority::normal is the message
+    // thread's own band, so a heavy repaint can delay disk writes -- the
+    // ThreadedWriter buffer below is the headroom that absorbs that.
     mWriterThread = std::make_unique<juce::TimeSliceThread> ("AudioFileRecorderBG");
     mWriterThread->startThread (juce::Thread::Priority::normal);
 
     // 10 seconds of headroom.  One OS stall up to 10 s no longer drops
-    // samples; instead ThreadedWriter catches up when the stall clears.
+    // samples; instead ThreadedWriter catches up when the stall clears.  A
+    // longer stall still costs whole blocks -- writeBlock counts those.
     const int bufferSize = (int) (sampleRate * (double) kBufferSeconds);
     mThreadedWriter = std::make_unique<juce::AudioFormatWriter::ThreadedWriter> (
         writer.release(), *mWriterThread, bufferSize);
@@ -76,6 +80,10 @@ void AudioFileRecorder::writeBlock (const juce::AudioBuffer<float>& buffer)
     // hand the original buffer straight to ThreadedWriter (zero-copy).
     if (mSamplesSinceStart < mFadeSamples || offset > 0)
     {
+        // Defensive only -- startRecording pre-sized the scratch, so this
+        // fires (and heap-allocates on the audio thread) only if the device
+        // hands over a block larger than kMaxExpectedBlock.  Correctness of
+        // the take beats glitch-free monitoring in that pathological case.
         if (mFadedBuf.getNumChannels() < numCh || mFadedBuf.getNumSamples() < writeCount)
             mFadedBuf.setSize (numCh, writeCount, false, false, true);
 
@@ -94,14 +102,16 @@ void AudioFileRecorder::writeBlock (const juce::AudioBuffer<float>& buffer)
         }
 
         const float* const* chPtrs = mFadedBuf.getArrayOfReadPointers();
-        mThreadedWriter->write (chPtrs, writeCount);
+        noteWriteResult (mThreadedWriter->write (chPtrs, writeCount));
     }
     else
     {
         const float* const* chPtrs = buffer.getArrayOfReadPointers();
-        mThreadedWriter->write (chPtrs, writeCount);
+        noteWriteResult (mThreadedWriter->write (chPtrs, writeCount));
     }
 
+    // Advanced even on a dropped block: the ramp is a position in TIME since
+    // the take started, not a count of samples that reached disk.
     mSamplesSinceStart += writeCount;
 }
 

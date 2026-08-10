@@ -27,14 +27,15 @@ namespace BSCommands
         cmdStopAndDisarm   = 0x10002,
         cmdToggleRecord    = 0x10003,
 
-        // ── General - page switches (Phase B-1, 2026-04-26) ─────────────────
-        cmdShowMixer       = 0x10010,
-        cmdShowEffects     = 0x10011,
-        cmdShowBuilder     = 0x10012,
-        cmdShowLayers      = 0x10013,
-        cmdShowBass        = 0x10014,
-        cmdShowDrums       = 0x10015,
-        cmdShowPianoRoll   = 0x10016,
+        // ── General - page switches ─────────────────────────────────────────
+        cmdShowMixer        = 0x10010,
+        cmdShowEffectsRack  = 0x10011,
+        cmdShowBuilder      = 0x10012,
+        cmdShowPianoRoll    = 0x10016,
+        cmdShowPlayer       = 0x10017,
+        cmdShowEffectPanel  = 0x10018,
+        cmdShowDrumKit      = 0x10019,
+        cmdShowEventEditor  = 0x1001a,
 
         // ── General - file operations (Phase B-1) ───────────────────────────
         cmdFileNew         = 0x10020,
@@ -49,6 +50,15 @@ namespace BSCommands
         cmdNewPattern          = 0x10032,
         cmdNextPattern         = 0x10033,
         cmdPrevPattern         = 0x10034,
+
+        // ── General - pattern list editing ──────────────────────────────────
+        // No cmdDeletePattern: bare Delete is claimed page-locally by the
+        // Builder grid, Piano Roll, Drum Kit, Event Editor and pitch editor
+        // for their own selections, so pattern delete stays menu-only.
+        cmdInsertPattern       = 0x10035,
+        cmdClonePattern        = 0x10036,
+        cmdMovePatternUp       = 0x10037,
+        cmdMovePatternDown     = 0x10038,
 
         // ── General - transport extensions (Phase B-3, 2026-04-26) ──────────
         cmdToggleSongMode      = 0x10040,
@@ -138,8 +148,10 @@ namespace BSCommands
     // Keymap XML lives next to audio_settings.xml in <Documents>/BaySickDAW/.
     juce::File getKeymapFile();
 
-    // Write current mappings to keymap.xml.  Called whenever the user edits a
-    // shortcut in the popup.  Safe to call during editing - JUCE buffers writes.
+    // Write current mappings to keymap.xml.  Called once per shortcut edit in
+    // the popup.  Raises the family's "Save failed" box itself rather than
+    // returning a result: the rebind is already applied in the mapping set, so
+    // a caller has nothing to roll back - only the persistence is lost.
     void saveMappings (const juce::KeyPressMappingSet& set);
 
     // Restore mappings from disk.  Returns false if the file doesn't exist or

@@ -5,10 +5,10 @@
 
 namespace
 {
-    // Contained-window bounds live alongside the main frame's own WindowState
-    // in settings.xml, so window layout is a global preference rather than
-    // project data -- the user's arrangement of their workspace should not
-    // change when they open a different song.
+    // The settings.xml (lifetime-2) half of the T5 three-lifetime model: only
+    // keys registered placement-persistent -- the four default tabs -- keep
+    // placement globally.  Every other window's bounds are project content and
+    // are replaced wholesale on project load.
     constexpr const char* kRootTag   = "WorkspaceWindows";
     constexpr const char* kWindowTag = "W";
 
@@ -314,7 +314,7 @@ void WorkspaceWindow::paint (juce::Graphics& g)
 // QA-ModelShell TS6 (Jeff 2026-07-29): a hosted plugin brings its own surface
 // at its own size, so the window is sized to THAT rather than left at a
 // provisional floor with dead space around the plugin.  The inverse of
-// contentBounds(): add the chrome back on.
+// contentArea(): add the chrome back on.
 //
 // Clamped to the workspace so a plugin with a huge editor cannot open a window
 // bigger than the frame containing it -- with the constrainer's floor applied
@@ -1055,6 +1055,23 @@ const std::map<juce::String, juce::Rectangle<int>>& WorkspaceWindow::sessionBoun
 void WorkspaceWindow::replaceSessionBounds (std::map<juce::String, juce::Rectangle<int>> m)
 {
     sessionBounds() = std::move (m);
+}
+
+const std::map<juce::String, juce::Rectangle<int>>& WorkspaceWindow::sessionRestoreRectsMap()
+{
+    return sessionRestoreRects();
+}
+
+void WorkspaceWindow::replaceSessionRestoreRects (std::map<juce::String, juce::Rectangle<int>> m)
+{
+    sessionRestoreRects() = std::move (m);
+}
+
+void WorkspaceWindow::forgetPlacement (const juce::String& persistKey)
+{
+    if (persistKey.isEmpty()) return;
+    sessionBounds()      .erase (persistKey);
+    sessionRestoreRects().erase (persistKey);
 }
 
 void WorkspaceWindow::registerPlacementPersistentKey (const juce::String& key)

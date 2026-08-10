@@ -34,7 +34,7 @@
 //   A1 juce::ScopedNoDenormals in process()
 //   A2 CPU guards on all setters
 //   A4 setAttack dual-range kludge removed (panel always sends -100..100)
-//   A7 dead mFastR/mSlowR state removed; mSlowL replaced by mSlowMs (mean-square)
+//   A7 mSlowL replaced by mSlowMs (mean-square)
 //   C1 Oversampling factor chicken-head (2x/4x/8x/16x, default 4x)
 //   C2 Stereo envelope detection toggle (default off = mono-sum)
 //   C3 Dry/Wet mix knob (default 1.0 = current 100%-wet behavior)
@@ -52,7 +52,7 @@ public:
     void reset()                                        override;
     void getStateInformation (juce::MemoryBlock& dest)  override;
     void setStateInformation (const void* data, int sz) override;
-    int  getLatencySamples() const override { return mLatencySamples; }
+    int  getLatencySamples() const override { return mLatencySamples.load (std::memory_order_relaxed); }
 
     // C.4: TransientShaperDSP consumes external sidechain for detector path
     bool usesSidechain() const noexcept override { return true; }
@@ -128,7 +128,21 @@ private:
 
     // Oversampler around drive stage (11c)
     std::unique_ptr<juce::dsp::Oversampling<float>> mOversampler;
-    int mLatencySamples { 0 };
+    std::atomic<int> mLatencySamples { 0 };   // audio writes on swap, message thread reads for PDC
+
+    // Oversampler hot-swap (mirrors NAMPedalStyleDSP's active/pending pair).
+    // prepare() must NEVER run on a live DSP -- it frees the oversampler the
+    // audio thread is inside.  Message-thread entry points (the OS chicken head,
+    // preset loads) build the replacement here and publish it with a release-
+    // store; the audio thread adopts it at the top of process().  The retired
+    // oversampler is parked back in mOsPending and destructs on the NEXT
+    // message-thread stage call, never on audio.
+    std::unique_ptr<juce::dsp::Oversampling<float>> mOsPending;
+    std::atomic<bool> mOsSwapPending { false };
+    int mOsPendLatency { 0 };
+
+    void stageOversampler (int factorLog2);    // message thread: build + publish
+    void drainOversamplerSwap() noexcept;      // audio thread: top of process()
 
     // Scratch buffers
     juce::AudioBuffer<float> mBandBuf;  // 2ch x maxBlock - holds shaped signal between phases

@@ -1,4 +1,6 @@
 #include "AcousticSimulatorStyleDSP.h"
+#include "../MissingFileReport.h"
+#include "../ProjectFileResolver.h"
 
 namespace
 {
@@ -178,7 +180,11 @@ void AcousticSimulatorStyleDSP::reloadConvIR()
 
     if (mUserIRPath.isNotEmpty())
     {
-        juce::File f (mUserIRPath);
+        // mUserIRPath is whatever was persisted -- a bundled project stores
+        // "Samples/<name>.wav", which a bare juce::File would resolve against
+        // the process working directory and silently fall through to the
+        // identity IR below.
+        const juce::File f = ProjectFileResolver::resolve (mUserIRPath);
         if (f.existsAsFile())
         {
             mConv.loadImpulseResponse (f, juce::dsp::Convolution::Stereo::yes,
@@ -244,10 +250,37 @@ void AcousticSimulatorStyleDSP::setLevelDb (float db)
     mLevelDb = juce::jlimit (-24.0f, 12.0f, db);
 }
 
-void AcousticSimulatorStyleDSP::loadUserIR (const juce::File& file)
+bool AcousticSimulatorStyleDSP::loadUserIR (const juce::File& file, juce::String& outErr)
 {
-    mUserIRPath = file.existsAsFile() ? file.getFullPathName() : juce::String();
+    if (file == juce::File())        // documented clear
+    {
+        mUserIRPath = {};
+        if (mMode == Mode::User) reloadConvIR();
+        return true;
+    }
+
+    if (! file.existsAsFile())
+    {
+        outErr = "The file is missing:\n" + file.getFullPathName();
+        return false;
+    }
+
+    // juce::dsp::Convolution::loadImpulseResponse reports nothing back, and
+    // reloadConvIR falls back to a one-sample identity IR -- so an unreadable
+    // or non-audio pick used to land as "the effect silently does nothing".
+    // Probe with a reader before committing the path.
+    juce::AudioFormatManager fm;
+    fm.registerBasicFormats();
+    std::unique_ptr<juce::AudioFormatReader> reader (fm.createReaderFor (file));
+    if (reader == nullptr || reader->lengthInSamples <= 0)
+    {
+        outErr = "This file could not be read as audio:\n" + file.getFullPathName();
+        return false;
+    }
+
+    mUserIRPath = file.getFullPathName();
     if (mMode == Mode::User) reloadConvIR();   // message-thread caller (panel)
+    return true;
 }
 
 void AcousticSimulatorStyleDSP::process (juce::AudioBuffer<float>& buffer)
@@ -432,7 +465,15 @@ void AcousticSimulatorStyleDSP::setStateInformation (const void* data, int sz)
     auto state = juce::ValueTree::fromXml (*xml);
 
     mUserIRPath = state.getProperty ("userIR", juce::String()).toString();
-    setMode    ((int)            state.getProperty ("mode",     (int) Mode::Standard));
+    const auto savedMode = (int) state.getProperty ("mode", (int) Mode::Standard);
+    // Report here, not in reloadConvIR() -- prepare() and User-boundary mode
+    // flips re-run that outside the project-load drain window.  Gated on the
+    // saved mode because only User mode ever loads the path: a slot parked in a
+    // named mode would otherwise warn about an IR nothing was going to read.
+    if (savedMode == (int) Mode::User && mUserIRPath.isNotEmpty()
+        && ! ProjectFileResolver::resolve (mUserIRPath).existsAsFile())
+        MissingFileReport::add ("Acoustic Sim user IR", mUserIRPath);
+    setMode    (savedMode);
     setTopDb   ((float)(double)  state.getProperty ("topDb",    0.0));
     setBodyDb  ((float)(double)  state.getProperty ("bodyDb",   0.0));
     setReverb  ((float)(double)  state.getProperty ("reverb",   0.2));

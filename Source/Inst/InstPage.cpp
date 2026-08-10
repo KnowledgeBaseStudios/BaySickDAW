@@ -6,8 +6,9 @@
 #include "../BaySickGuitars/BaySickGuitarsProcessor.h"   // K-2: sfizz Guitars front-end
 #include "../BaySickBasses/BaySickBassesProcessor.h"     // L-2: sfizz Basses front-end
 #include "../Standalone/AriaControlPanel.h"             // K-5: ARIA panel + Binding
-#include "../Standalone/EnginePrefixUtil.h"
 #include "../Standalone/PagePresetIO.h"
+#include "../MissingFileReport.h"                       // nest-aware drain for the load gestures
+#include "../UserFileSave.h"                            // the one write-a-user-named-file path
 #include "../SampleLibrary.h"                           // K-5: getCoreLibraryDir
 #include "../PluginProcessor.h"
 #include "../EngineRig.h"                               // QA-ModelShell TS1: model-side engine owner
@@ -22,40 +23,6 @@ namespace
     // rebuildPlayerPanel).
     constexpr int kPad        = 12;
     constexpr int kFilenameW  = 320;
-}
-
-// I-0b (2026-05-02): Pedals tab placeholder.  I-15 will replace this with
-// the real BaySickPedals editor (4x4 hardware-rack layout).  Until then the
-// page renders a centered "BaySickPedals (I-1+)" message so the sub-tab is
-// navigable but doesn't surface unfinished UI.
-namespace
-{
-    class PedalsPlaceholder : public juce::Component
-    {
-    public:
-        PedalsPlaceholder() { setInterceptsMouseClicks (false, false); }
-        void paint (juce::Graphics& g) override
-        {
-            g.fillAll (juce::Colour (0xff181818));
-            auto bounds = getLocalBounds().toFloat().reduced (32.0f);
-
-            juce::Path p;
-            p.addRoundedRectangle (bounds, 12.0f);
-            juce::Path dashed;
-            const float dashes[] = { 8.0f, 6.0f };
-            juce::PathStrokeType (2.0f).createDashedStroke (dashed, p, dashes, 2);
-            g.setColour (juce::Colour (0xff1c3a8a).withAlpha (0.6f));
-            g.fillPath (dashed);
-
-            g.setColour (juce::Colour (0xffc0c0c0));
-            g.setFont (juce::Font (18.0f, juce::Font::plain));
-            g.drawText (
-                "BaySickPedals (skeleton present; rack UI lands in I-15)",
-                bounds.toNearestInt(),
-                juce::Justification::centred,
-                true);
-        }
-    };
 }
 
 InstPage::InstPage (VibeSynthProcessor& proc, int pageIndex)
@@ -90,7 +57,7 @@ InstPage::InstPage (VibeSynthProcessor& proc, int pageIndex)
     // the trio is permanent for the tab's lifetime.
     {
         auto& rig = proc.engineRig();
-        rig.addTab (TabKind::Inst, pageIndex, mTabName);
+        rig.addTab (TabKind::Inst, pageIndex);
         mChain = dynamic_cast<EngineChainProcessor*> (
             rig.setEngineType (TabKind::Inst, pageIndex, "Chain"));
         if (auto* tab = rig.findTab (TabKind::Inst, pageIndex))
@@ -126,7 +93,18 @@ InstPage::InstPage (VibeSynthProcessor& proc, int pageIndex)
         // this page's existing showPedalboardPresetMenu() routing (the button
         // itself mounts on the pedals window's title strip -- T3/T4).
         if (auto* pe = dynamic_cast<BaySickPedalsEditor*> (mPedalsEditor.get()))
+        {
             pe->onPedalboardPresetMenu = [this] { showPedalboardPresetMenu(); };
+            // A per-pedal preset restores that pedal's NAM capture and user IR,
+            // so the load can bank a missing file.  Nest-aware on purpose: the
+            // same load reached under an outer gesture (a page preset, a project
+            // restore) has to leave its entries for that scope, which a direct
+            // report would steal and post under this noun.
+            pe->onPresetLoaded = []
+            {
+                MissingFileReport::ScopedGesture gesture ("preset");
+            };
+        }
     }
 
     // K-5 (2026-05-05): sfizz player host.  The page's ONLY content now --
@@ -180,10 +158,6 @@ InstPage::InstPage (VibeSynthProcessor& proc, int pageIndex)
 void InstPage::setTabName (const juce::String& n)
 {
     mTabName = n;
-    // QA-ModelShell TS1: every rename path funnels through here -- the one
-    // sync point for the model tab's name.
-    if (mFullProcessor != nullptr)
-        mFullProcessor->engineRig().renameTab (TabKind::Inst, mPageIndex, n);
     repaint();
 }
 
@@ -211,9 +185,9 @@ InstPage::~InstPage()
     mNamIrProc  = nullptr;
 }
 
-// 2026-05-05: forward declaration so showEngineContextMenu / showPageActionsMenu
-// can call into the unified preset config builder defined further down.  One
-// config covers every Source mode (LiveInput / BaySickGuitars / BaySickBasses).
+// Forward declaration so the preset save/load members above can reach the
+// unified config builder defined further down.  One config covers every Source
+// mode (LiveInput / BaySickGuitars / BaySickBasses).
 static PagePresetIO::PageChainConfig
 makeInstPresetConfig (VibeSynthProcessor& processor,
                        int                 pageIndex,
@@ -221,102 +195,12 @@ makeInstPresetConfig (VibeSynthProcessor& processor,
                        juce::AudioProcessor* pedalsProc,
                        juce::AudioProcessor* namIrProc);
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Inst page-level preset folder + recursive folder→submenu walker (G-6 helpers,
-// retained verbatim).
-// ─────────────────────────────────────────────────────────────────────────────
-// 2026-05-05 consolidation: route every Inst preset through PagePresetIO's
-// per-kind directory ("Inst Page/My Presets") so saved files appear in the
-// load submenu (the previous `Inst/` literal didn't match where save wrote).
+// Every Inst preset routes through PagePresetIO's per-kind directory
+// ("Inst Page/My Presets") so saved files appear in the load submenu -- the
+// previous `Inst/` literal didn't match where save wrote.
 static juce::File instMyPresetsDir()
 {
     return PagePresetIO::myPresetsDirForPageKind (PagePresetIO::PageKind::Inst);
-}
-
-static void addInstPresetDirToMenu (juce::PopupMenu& menu,
-                                    const juce::File& dir,
-                                    int kPresetBase,
-                                    juce::Array<juce::File>& presetXmls)
-{
-    juce::Array<juce::File> dirs, files;
-    dir.findChildFiles (dirs,  juce::File::findDirectories, false);
-    dir.findChildFiles (files, juce::File::findFiles,       false, "*.xml");
-    dirs.sort();
-    files.sort();
-    for (auto& sub : dirs)
-    {
-        juce::PopupMenu subMenu;
-        addInstPresetDirToMenu (subMenu, sub, kPresetBase, presetXmls);
-        if (subMenu.getNumItems() > 0)
-            menu.addSubMenu (sub.getFileName(), subMenu);
-    }
-    for (auto& f : files)
-    {
-        const int id = kPresetBase + presetXmls.size();
-        presetXmls.add (f);
-        menu.addItem (id, f.getFileNameWithoutExtension());
-    }
-}
-
-void InstPage::showEngineContextMenu()
-{
-    constexpr int kIdLock           = 1;
-    constexpr int kIdRename         = 5;
-    constexpr int kIdDuplicate      = 12;
-    constexpr int kIdSavePagePreset = 20;
-    constexpr int kIdLoadPresetBase = 500;
-    constexpr int kIdDelete         = 99;
-
-    juce::PopupMenu menu;
-    menu.addItem (kIdLock, "Lock", true, mLocked);
-
-    menu.addSeparator();
-    menu.addItem (kIdRename,    "Rename...");
-    menu.addItem (kIdDuplicate, "Duplicate Inst (new tab)");
-
-    menu.addSeparator();
-    // 2026-05-05 consolidation: Save enabled when the page has anything in its
-    // chain - sfizz Player picked, NAM/IR loaded, or any pedal slot wired up.
-    // Load is always enabled (even on a blank tab) so the user can spawn a
-    // saved chain on a fresh tab.
-    const bool canSavePreset = (getEngineProcessor() != nullptr)
-                                || (mNamIrProc       != nullptr)
-                                || (mPedalsProc      != nullptr);
-    menu.addItem (kIdSavePagePreset, "Save Page Preset As...", canSavePreset);
-
-    juce::Array<juce::File> presetXmls;
-    {
-        juce::PopupMenu loadSub;
-        // 2026-05-05 consolidation: every Inst preset (regardless of source
-        // mode at save time) lives in the unified Inst Page folder.
-        const auto root = PagePresetIO::myPresetsDirForPageKind (PagePresetIO::PageKind::Inst);
-        if (root.isDirectory())
-            addInstPresetDirToMenu (loadSub, root, kIdLoadPresetBase, presetXmls);
-        if (presetXmls.isEmpty())
-            loadSub.addItem (-1, "(no presets installed)", false, false);
-        menu.addSubMenu ("Load Page Preset", loadSub);
-    }
-
-    menu.addSeparator();
-    menu.addItem (kIdDelete, "Delete Inst", ! mLocked);
-
-    juce::Component::SafePointer<InstPage> self (this);
-    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this),
-        [self, presetXmls = std::move (presetXmls), kIdLoadPresetBase] (int r)
-        {
-            if (! self || r <= 0) return;
-            if (r == kIdLock)        { self->setLocked (! self->mLocked); return; }
-            if (r == kIdRename    && self->onRenameRequested)    { self->onRenameRequested();    return; }
-            if (r == kIdDuplicate && self->onDuplicateRequested) { self->onDuplicateRequested(); return; }
-            if (r == kIdSavePagePreset) { self->savePagePreset();   return; }
-            if (r == kIdDelete)         { self->requestDelete();    return; }
-            if (r >= kIdLoadPresetBase
-                && r <  kIdLoadPresetBase + presetXmls.size())
-            {
-                self->loadPagePreset (presetXmls[r - kIdLoadPresetBase]);
-                return;
-            }
-        });
 }
 
 void InstPage::saveInstPagePreset()
@@ -334,24 +218,23 @@ void InstPage::saveInstPagePreset()
         {
             if (r != 1 || ! safeThis) return;
             const juce::String name = aw->getTextEditorContents ("name").trim();
-            if (name.isEmpty()) return;
 
-            auto dir = instMyPresetsDir();
-            dir.createDirectory();
-            auto target = dir.getChildFile (name + ".xml");
-            int n = 2;
-            while (target.exists())
-                target = dir.getChildFile (name + " (" + juce::String (n++) + ").xml");
-
-            const juce::String xml = safeThis->exportInstState();
-            if (xml.isNotEmpty())
-                target.replaceWithText (xml);
+            UserFileSave::writeTextAsync (instMyPresetsDir(), name,
+                                          safeThis->exportInstState(), {});
         }), true);
 }
 
 void InstPage::loadInstPagePreset (const juce::File& xml)
 {
-    if (! xml.existsAsFile()) return;
+    if (! xml.existsAsFile())
+    {
+        juce::AlertWindow::showMessageBoxAsync (
+            juce::MessageBoxIconType::WarningIcon,
+            "Load Page Preset",
+            "Preset could not be read:\n" + xml.getFullPathName(),
+            "OK");
+        return;
+    }
     const juce::String contents = xml.loadFileAsString();
     if (contents.isNotEmpty())
         importInstState (contents);
@@ -380,9 +263,11 @@ void InstPage::detachDirtyListener()
 
 // 2026-05-05 consolidation: build a unified PagePresetIO config covering every
 // Inst Source mode (LiveInput / BaySickGuitars / BaySickBasses).  Engine slots
-// list every processor the page owns (always Pedals + NAM/IR + the active
-// sfizz engine when present) so the saved preset round-trips the full chain
-// regardless of which sub-tab was visible at save.  Single mixer strip +
+// list every processor in the page's chain (always Pedals + NAM/IR + the
+// active sfizz engine when present) -- rig-owned stages plus the processor-
+// owned sfizz front end, all reached here through non-owning views -- so the
+// saved preset round-trips the full chain regardless of which sub-tab was
+// visible at save.  Single mixer strip +
 // Inst-kind insert at this pageIndex; no bus rack since the Inst Bus is
 // shared across every Inst tab.
 static PagePresetIO::PageChainConfig
@@ -398,7 +283,7 @@ makeInstPresetConfig (VibeSynthProcessor& processor,
                         : (source == InstPage::Source::BaySickGuitars) ? "BaySickGuitars"
                         :                                                "BaySickBasses";
 
-    // Pedals (live-input pedalboard) - always owned by every Inst page.
+    // Pedals (live-input pedalboard) - present on every Inst tab, so this slot is unconditional.
     if (pedalsProc != nullptr)
     {
         PagePresetIO::EngineSlot slot;
@@ -480,11 +365,10 @@ void InstPage::savePagePreset (std::function<void()> onSaved)
         return;
     }
 
-    // 2026-05-05 consolidation: one unified preset path captures Source mode +
-    // every owned engine slot (Pedals + NAM/IR + sfizz Player when present) +
-    // mixer strip + insert rack + both EQs.  Disabled at the menu level
-    // (showEngineContextMenu) when the page has nothing to save (no Pedals
-    // AND no NAM/IR AND no sfizz engine).
+    // One unified preset path captures Source mode + every owned engine slot
+    // (Pedals + NAM/IR + sfizz Player when present) + mixer strip + insert rack
+    // + both EQs, which is why showPageActionsMenu enables the entry for a
+    // LiveInput tab carrying only pedals or a NAM/IR load.
     auto* aw = new juce::AlertWindow ("Save Page Preset",
                                        "Enter a name for this Inst page preset:",
                                        juce::AlertWindow::NoIcon);
@@ -500,7 +384,6 @@ void InstPage::savePagePreset (std::function<void()> onSaved)
             if (r != 1 || ! safeThis) return;
 
             const juce::String name = aw->getTextEditorContents ("name").trim();
-            if (name.isEmpty()) return;
 
             const auto cfg = makeInstPresetConfig (
                 *safeThis->mFullProcessor,
@@ -509,26 +392,44 @@ void InstPage::savePagePreset (std::function<void()> onSaved)
                 safeThis->mPedalsProc,
                 safeThis->mNamIrProc);
 
-            auto dir = PagePresetIO::myPresetsDirForPageKind (PagePresetIO::PageKind::Inst);
-            dir.createDirectory();
-            auto target = dir.getChildFile (name + ".xml");
-            int n = 2;
-            while (target.exists())
-                target = dir.getChildFile (name + " (" + juce::String (n++) + ").xml");
-
             const juce::String xml = PagePresetIO::exportPagePreset (
                 *safeThis->mFullProcessor, PagePresetIO::PageKind::Inst, cfg);
-            if (xml.isNotEmpty())
-                target.replaceWithText (xml);
 
-            safeThis->takeStateSnapshot();
-            if (onSaved) onSaved();
+            // The tail lives inside the callback because this save is also the
+            // first half of "Save Page Preset & Delete": on anything but
+            // Succeeded -- a failed write, or the user answering Cancel to the
+            // collision prompt -- nothing below may run, least of all onSaved.
+            // safeThis is re-tested there because the collision prompt is a
+            // second modal, so the page can close while it is up.
+            UserFileSave::writeTextAsync (instMyPresetsDir(), name, xml,
+                [safeThis, onSaved] (const UserFileSave::Result& saved)
+                {
+                    if (! saved || ! safeThis) return;
+                    safeThis->takeStateSnapshot();
+                    if (onSaved) onSaved();
+                },
+                UserFileSave::kTabNotDeleted);
         }), false);
 }
 
 void InstPage::loadPagePreset (const juce::File& xml)
 {
-    if (! xml.existsAsFile()) return;
+    // Gesture boundary: the preset restores the sfizz kit, the pedalboard's NAM
+    // captures and the NAM/IR files, every one of which can bank a missing-file
+    // entry.  Scoped rather than drained at the tail because the kit-verify
+    // block below returns early, and nest-aware so the same load driven from an
+    // outer gesture reports under that gesture's noun instead of stealing it.
+    MissingFileReport::ScopedGesture gesture ("preset");
+
+    if (! xml.existsAsFile())
+    {
+        juce::AlertWindow::showMessageBoxAsync (
+            juce::MessageBoxIconType::WarningIcon,
+            "Load Page Preset",
+            "Preset could not be read:\n" + xml.getFullPathName(),
+            "OK");
+        return;
+    }
     if (mFullProcessor == nullptr) { loadInstPagePreset (xml); return; }
 
     const juce::String xmlText = xml.loadFileAsString();
@@ -557,9 +458,10 @@ void InstPage::loadPagePreset (const juce::File& xml)
     // engine blob (v2: <Engines>/<Engine label="Sfizz">; legacy K-7: top-level
     // <Engine>), base64-decodes its data, looks for <KitPath path=...> inside
     // the engine state's root, and hands that path to the page's loader.
-    // Falls through silently for LiveInput presets (no engine blob) or when
-    // the kit file is missing (the alert in PagePresetIO::importPagePreset
-    // handles that case).
+    // Falls through silently for LiveInput presets (no engine blob).  A
+    // missing kit file or failed kit load alerts here and aborts the import:
+    // PagePresetIO::importPagePreset can't cover this case because with no
+    // engine spawned, makeInstPresetConfig drops the Sfizz slot entirely.
     if (mSource == Source::BaySickGuitars
         || mSource == Source::BaySickBasses)
     {
@@ -611,14 +513,42 @@ void InstPage::loadPagePreset (const juce::File& xml)
                             {
                                 if (auto* kitEl = stateXml->getChildByName ("KitPath"))
                                 {
-                                    const juce::File kitPath (kitEl->getStringAttribute ("path"));
-                                    if (kitPath.existsAsFile())
+                                    // The engine writes this as a stable-root
+                                    // ref when the kit is under Core Library;
+                                    // resolvePersistedRef passes plain absolute
+                                    // paths through, so older blobs still load.
+                                    const juce::File kitPath =
+                                        SampleLibrary::resolvePersistedRef (
+                                            kitEl->getStringAttribute ("path"));
+                                    if (! kitPath.existsAsFile())
                                     {
-                                        if (mSource == Source::BaySickGuitars)
-                                            mFullProcessor->loadBaySickGuitarsKit (mPageIndex, kitPath);
-                                        else if (mSource == Source::BaySickBasses)
-                                            mFullProcessor->loadBaySickBassesKit  (mPageIndex, kitPath);
+                                        juce::AlertWindow::showMessageBoxAsync (
+                                            juce::MessageBoxIconType::WarningIcon,
+                                            "Load Page Preset",
+                                            "The saved kit path is missing from this machine:\n"
+                                            + kitPath.getFullPathName()
+                                            + "\n\nInstall the kit, or pick a different preset.",
+                                            "OK");
+                                        return;
                                     }
+                                    const bool kitOk = (mSource == Source::BaySickGuitars)
+                                        ? mFullProcessor->loadBaySickGuitarsKit (mPageIndex, kitPath)
+                                        : mFullProcessor->loadBaySickBassesKit  (mPageIndex, kitPath);
+                                    if (! kitOk)
+                                    {
+                                        juce::AlertWindow::showMessageBoxAsync (
+                                            juce::MessageBoxIconType::WarningIcon,
+                                            "Load Page Preset",
+                                            "The kit could not be loaded:\n"
+                                            + kitPath.getFullPathName()
+                                            + "\n\nThe file may be damaged.",
+                                            "OK");
+                                        return;
+                                    }
+                                    // Also covers makeInstPresetConfig's
+                                    // slot.kitLoadCallback below -- it reloads
+                                    // this same, already-verified kit path.
+                                    setKitMissing (false);
                                 }
                             }
                         }
@@ -648,16 +578,38 @@ void InstPage::loadPagePreset (const juce::File& xml)
     takeStateSnapshot();
 }
 
+// Lock / Rename / Duplicate belong HERE, not in a separate engine context menu.
+// Inst's old one was caller-less, which left Lock unsettable -- so the
+// page-locked delete guard could never engage for an Inst tab -- and left
+// Duplicate Inst with no route in the shipping UI at all.  Every sibling page
+// carries these in this same menu; one Delete only.  Rename additionally has an
+// independent route through the ribbon tab's right-click.
 void InstPage::showPageActionsMenu (juce::Component* anchor)
 {
+    constexpr int kIdLock           = 1;
+    constexpr int kIdRename         = 5;
+    constexpr int kIdDuplicate      = 12;
     constexpr int kIdSavePagePreset = 100;
     constexpr int kIdDeleteTab      = 101;
     constexpr int kIdLoadBase       = 1000;
 
     juce::PopupMenu menu;
     if (onBuildWindowNavMenu) { onBuildWindowNavMenu (menu); menu.addSeparator(); }
-    menu.addItem (kIdSavePagePreset, "Save Page Preset As...",
-                  getEngineProcessor() != nullptr);
+    menu.addItem (kIdLock, "Lock", true, mLocked);
+
+    menu.addSeparator();
+    menu.addItem (kIdRename,    "Rename...");
+    menu.addItem (kIdDuplicate, "Duplicate Inst (new tab)");
+
+    menu.addSeparator();
+    // 2026-05-05 consolidation: Save enabled when the page has anything in its
+    // chain - sfizz Player picked, NAM/IR loaded, or any pedal slot wired up.
+    // Load is always enabled (even on a blank tab) so the user can spawn a
+    // saved chain on a fresh tab.
+    const bool canSavePreset = (getEngineProcessor() != nullptr)
+                                || (mNamIrProc  != nullptr)
+                                || (mPedalsProc != nullptr);
+    menu.addItem (kIdSavePagePreset, "Save Page Preset As...", canSavePreset);
 
     juce::Array<juce::File> presetXmls;
     {
@@ -692,6 +644,9 @@ void InstPage::showPageActionsMenu (juce::Component* anchor)
         [safeThis, presetXmls = std::move (presetXmls), kIdLoadBase] (int r)
         {
             if (! safeThis || r <= 0) return;
+            if (r == kIdLock)           { safeThis->toggleLockUndoable(); return; }
+            if (r == kIdRename    && safeThis->onRenameRequested)    { safeThis->onRenameRequested();    return; }
+            if (r == kIdDuplicate && safeThis->onDuplicateRequested) { safeThis->onDuplicateRequested(); return; }
             if (r == kIdSavePagePreset) { safeThis->savePagePreset(); return; }
             if (r == kIdDeleteTab)      { safeThis->requestDelete();  return; }
             if (r >= kIdLoadBase && r < kIdLoadBase + presetXmls.size())
@@ -803,6 +758,10 @@ void InstPage::setSource (Source s)
 {
     if (s == mSource) return;
     mSource = s;
+    // A source change replaces the tab's whole engine identity, so any
+    // substituted-kit marker from the previous source no longer describes it.
+    // Both restore paths call setSource BEFORE setting the marker.
+    setKitMissing (false);
     rebuildEngineChain();
     rebuildPlayerPanel();
     // L-3 (2026-05-05): keep the program-picker button label in sync with
@@ -829,7 +788,6 @@ void InstPage::setSource (Source s)
         mPlayerTab->setVisible (mSource != Source::LiveInput);
         resized();
     }
-    if (onSourceChanged) onSourceChanged (mSource);
 }
 
 void InstPage::notifySourceEngineChanged()
@@ -1136,7 +1094,21 @@ bool InstPage::switchSfizzProgram (const juce::File& target)
     const bool ok = (mSource == Source::BaySickGuitars)
                       ? mFullProcessor->loadBaySickGuitarsKit (mPageIndex, target)
                       : mFullProcessor->loadBaySickBassesKit  (mPageIndex, target);
-    if (! ok) return false;
+    if (! ok)
+    {
+        juce::AlertWindow::showMessageBoxAsync (
+            juce::MessageBoxIconType::WarningIcon,
+            "Load Program",
+            "Could not load program:\n" + target.getFullPathName(),
+            "OK");
+        return false;
+    }
+
+    // The tab now plays what it says it plays.  Cleared here rather than off
+    // loadBaySickGuitarsKit/loadBaySickBassesKit returning true: the restore
+    // substitution IS a successful load of an existing file, so a load-success
+    // hook would wipe the marker two statements after it was set.
+    setKitMissing (false);
 
     // 3) Restore incoming program's saved state if cached.  Walk the
     //    cached PARAM tree directly and call setValueNotifyingHost on
@@ -1206,6 +1178,29 @@ void InstPage::switchSfizzProgramWithUndo (const juce::File& target)
                           [livePage, prior]  { if (auto* ip = livePage()) ip->switchSfizzProgram (prior); },
                           [livePage, target] { if (auto* ip = livePage()) ip->switchSfizzProgram (target); }),
                       "Program " + prettyProgramName (target));
+}
+
+void InstPage::toggleLockUndoable()
+{
+    const bool before = mLocked;
+    const bool after  = ! before;
+    setLocked (after);
+
+    if (! mUndoCtx.isValid()) return;
+
+    // Jeff ruling 2026-08-06: resolve the LIVE page at apply time (a
+    // delete+resurrect cycle replaces this object; SafePointer = fallback).
+    auto resolveSelf = mUndoCtx.resolveOwnerPage;
+    auto sp = juce::Component::SafePointer<InstPage> (this);
+    auto livePage = [resolveSelf, sp]() -> InstPage*
+    {
+        if (resolveSelf) return dynamic_cast<InstPage*> (resolveSelf());
+        return sp.getComponent();
+    };
+    mUndoCtx.perform (new StructuralOpAction (
+                          [livePage, before] { if (auto* ip = livePage()) ip->setLocked (before); },
+                          [livePage, after]  { if (auto* ip = livePage()) ip->setLocked (after);  }),
+                      after ? "Lock Inst" : "Unlock Inst");
 }
 
 void InstPage::setProcessor (VibeSynthProcessor* p)
@@ -1348,7 +1343,7 @@ void InstPage::showPedalboardPresetMenu()
     else
         opts = opts.withTargetComponent (mPedalsEditor.get());
     m.showMenuAsync (opts,
-        [this, pedals, presets] (int r)
+        [pedals, presets] (int r)
         {
             if (r == 0) return;
             if (r == 1)
@@ -1366,12 +1361,16 @@ void InstPage::showPedalboardPresetMenu()
                         {
                             if (result == 1)
                             {
+                                // No empty-name pre-check: savePedalboardPreset
+                                // reports that case itself, and guarding here
+                                // swallowed the message so pressing Save on the
+                                // empty field did nothing at all.
                                 const auto name = aw->getTextEditorContents ("name").trim();
-                                if (name.isNotEmpty())
-                                {
-                                    juce::String err;
-                                    pedals->savePedalboardPreset (name, err);
-                                }
+                                juce::String err;
+                                if (! pedals->savePedalboardPreset (name, err))
+                                    juce::AlertWindow::showMessageBoxAsync (
+                                        juce::MessageBoxIconType::WarningIcon,
+                                        "Save Pedalboard Preset", err, "OK");
                             }
                             delete aw;
                         }),
@@ -1388,8 +1387,18 @@ void InstPage::showPedalboardPresetMenu()
                 const int idx = r - 1000;
                 if (idx >= 0 && idx < presets.size())
                 {
+                    // A whole-board load restores all eight pedal DSPs, NAM
+                    // captures and user IRs included, so it reaches
+                    // MissingFileReport::add through them -- and a load that
+                    // reports an error can still have banked entries on its way
+                    // there, which a success-only drain left behind.
+                    MissingFileReport::ScopedGesture gesture ("preset");
+
                     juce::String err;
-                    pedals->loadPedalboardPreset (presets[idx], err);
+                    if (! pedals->loadPedalboardPreset (presets[idx], err))
+                        juce::AlertWindow::showMessageBoxAsync (
+                            juce::MessageBoxIconType::WarningIcon,
+                            "Load Pedalboard Preset", err, "OK");
                 }
             }
         });

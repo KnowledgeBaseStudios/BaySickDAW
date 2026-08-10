@@ -18,9 +18,7 @@ namespace WindowChrome
         const juce::Colour kFrameEdge   { 0xFF000000 };
     }
 
-    juce::Colour frameBg()   noexcept { return kFrameBg; }
     juce::Colour titleText() noexcept { return kTitleText; }
-    juce::Colour frameEdge() noexcept { return kFrameEdge; }
     juce::Colour titleBg (bool live) noexcept { return live ? kTitleBgLive : kTitleBg; }
 
     void paintFrame (juce::Graphics& g, juce::Rectangle<int> full)

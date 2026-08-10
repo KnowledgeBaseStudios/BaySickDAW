@@ -62,11 +62,10 @@ public:
     // an acquire-load on the same atomic.
     void setClipEngine (juce::AudioProcessor* engine);
 
-    // Per-task scratch used by renderAudioClipsForRow when this task's
-    // arrangement-clip flow runs.  Same API as the old AudioInsertTask
-    // helper -- the serial Pass 2 loop in PluginProcessor::processBlock
-    // also calls this so the new ownership pattern is exercised under
-    // flag=false ("no dead wiring" rule).  setSize avoidReallocating=true.
+    // Per-task scratch handed to renderAudioClipsForRow when this task's
+    // arrangement-clip flow runs.  Per-task rather than a shared processor
+    // buffer: rows decode concurrently, and one shared scratch cross-pollutes
+    // every strip with every row's clips (the pre-9b race).
     juce::AudioBuffer<float>& getClipScratch (int numChannels, int numSamples);
 
 private:

@@ -341,11 +341,11 @@ void LimiterDSP::process (juce::AudioBuffer<float>& buffer)
     float* L = buffer.getWritePointer (0);
     float* R = (numCh > 1) ? buffer.getWritePointer (1) : nullptr;
 
-    // ── 1. Input gain + soft-sat (write into detector sidechain + delay line) ─
-    // We build mScBuf = input after InputGain + SoftSat (i.e. the signal the
-    // limiter's gain reduction should protect). The oversampled TP detector
-    // reads from this pre-delay buffer. The same samples are written to the
-    // circular delay line for output.
+    // -- 1. Input gain -> detector sidechain + delay line -
+    // The TP detector reads mScBuf BEFORE the look-ahead delay while the same
+    // post-gain samples enter the delay line, so the gain reduction computed from
+    // a peak lands on that peak aheadSamples later. Detector source and SAT
+    // position are documented in the loop below.
     float* scL = mScBuf.getWritePointer (0);
     float* scR = mScBuf.getWritePointer (1);
 

@@ -4,17 +4,6 @@
 namespace Hosting
 {
 
-juce::String describeArch (PluginArch a) noexcept
-{
-    switch (a)
-    {
-        case PluginArch::X86: return "32-bit";
-        case PluginArch::X64: return "64-bit";
-        case PluginArch::Unknown:
-        default:              return "unknown";
-    }
-}
-
 // ── Persistence ──────────────────────────────────────────────────────────────
 // Global preference, not project data -- the user's installed plugins do not
 // change when they open a different song.  Sits beside settings.xml /
@@ -184,18 +173,6 @@ juce::Array<juce::PluginDescription> PluginManager::getAddedInstruments() const
     return out;
 }
 
-bool PluginManager::isOnAddedList (const juce::PluginDescription& d) const
-{
-    const auto id = d.createIdentifierString();
-    const juce::ScopedLock sl (mLock);
-
-    for (const auto& existing : mAdded.getTypes())
-        if (existing.createIdentifierString() == id)
-            return true;
-
-    return false;
-}
-
 void PluginManager::addToAddedList (const juce::Array<juce::PluginDescription>& toAdd)
 {
     if (toAdd.isEmpty())
@@ -228,6 +205,8 @@ void PluginManager::addToAddedList (const juce::Array<juce::PluginDescription>& 
 
     if (onAddedListChanged)
         onAddedListChanged();
+
+    sendChangeMessage();
 }
 
 void PluginManager::removeFromAddedList (const juce::PluginDescription& d)
@@ -241,6 +220,8 @@ void PluginManager::removeFromAddedList (const juce::PluginDescription& d)
 
     if (onAddedListChanged)
         onAddedListChanged();
+
+    sendChangeMessage();
 }
 
 std::unique_ptr<juce::PluginDescription> PluginManager::findAdded (const juce::String& identifier) const
@@ -378,6 +359,7 @@ void PluginManager::refineDescription (const juce::PluginDescription& d)
     {
         saveToDisk();
         if (onAddedListChanged) onAddedListChanged();
+        sendChangeMessage();
     }
 }
 
@@ -392,6 +374,20 @@ void PluginManager::run()
 
         for (const auto& d : mAdded.getTypes())
             alreadyAdded.add (d.createIdentifierString());
+    }
+
+    // The persisted list keeps folders that do not currently resolve
+    // (loadFromDisk), so a scan filters them out here.  isDirectory() can block
+    // for seconds on a dead network path, which is why it runs after mLock is
+    // released rather than under it -- every public getter takes that lock.
+    {
+        juce::FileSearchPath available;
+
+        for (int i = 0; i < folders.getNumPaths(); ++i)
+            if (folders[i].isDirectory())
+                available.add (folders[i]);
+
+        folders = available;
     }
 
     auto* fmt = vst3Format();
@@ -562,16 +558,25 @@ void PluginManager::loadFromDisk()
 
         for (auto* e : folders->getChildWithTagNameIterator ("Folder"))
         {
-            const juce::File dir (e->getStringAttribute ("path"));
+            const auto path = e->getStringAttribute ("path");
 
-            if (dir.isDirectory())
-                restored.add (dir);
+            if (path.isNotEmpty())
+                restored.add (juce::File (path));
         }
 
+        // A folder that does not resolve at launch is KEPT.  An external drive
+        // or network share that happens to be offline is still the user's
+        // folder, and this list is not display-only: every add/remove gesture
+        // rewrites the whole thing, so filtering here would let the next
+        // unrelated gesture delete it from disk permanently.  run() drops the
+        // unavailable ones for the duration of a scan instead.
+        //
         // A saved-but-now-empty list stays empty: the user may have removed the
         // defaults on purpose, and re-seeding would undo that on every launch.
-        if (folders->getNumChildElements() > 0)
-            mScanFolders = restored;
+        // Only a file with no <ScanFolders> element at all keeps the default
+        // seed above (saveToDisk always writes the element, so absence means
+        // never-configured, not emptied).
+        mScanFolders = restored;
     }
 
     if (auto* known = xml->getChildByName ("KNOWNPLUGINS"))
@@ -595,7 +600,13 @@ void PluginManager::saveToDisk() const
             root.addChildElement (known.release());
     }
 
-    root.writeTo (dataFile());
+    dataFile().getParentDirectory().createDirectory();
+
+    if (! root.writeTo (dataFile()) && ! mWarnedSaveFailure.exchange (true))
+        juce::AlertWindow::showMessageBoxAsync (juce::AlertWindow::WarningIcon,
+            "Plugin List Not Saved",
+            "Could not save the plugin list to:\n" + dataFile().getFullPathName()
+                + "\n\nAdded plugins and scan folders may be lost on the next launch.");
 }
 
 } // namespace Hosting

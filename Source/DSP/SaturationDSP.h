@@ -89,7 +89,7 @@ public:
     void reset()                                        override;
     void getStateInformation (juce::MemoryBlock& dest)  override;
     void setStateInformation (const void* data, int sz) override;
-    int  getLatencySamples() const override { return mLatencySamples; }
+    int  getLatencySamples() const override { return mLatencySamples.load (std::memory_order_relaxed); }
 
     // ---- New API ----------------------------------------------------------
     void setFlowers     (float v);    // 0-10  (even harmonics via tanh)
@@ -131,7 +131,6 @@ public:
     void setTapeFlutterRate  (float hz);    // 1..15
     void setTapeFlutterDepth (float d);     // 0..1
     void setTapeInputGain    (float linGain);
-    void setTapeOutputGain   (float linGain);
     void setTapeHiss         (float h);     // 0..1
     void setTapeBias         (float v);     // 0..10  (5 = neutral)
     void setTapePreShelfDb   (float dB);    // -12..+12
@@ -271,7 +270,28 @@ private:
 
     // 9a: oversampler + latency ------------------------------------------------
     std::unique_ptr<juce::dsp::Oversampling<float>> mOversampler;
-    int mLatencySamples { 0 };
+    std::atomic<int> mLatencySamples { 0 };   // audio writes on swap, message thread reads for PDC
+
+    // Oversampler hot-swap (mirrors NAMPedalStyleDSP's active/pending pair).
+    // prepare() must NEVER run on a live DSP: it frees this oversampler, the
+    // scratch vectors and the Tape convolution while the audio thread is inside
+    // them.  Message-thread entry points (the OS chicken head, preset loads)
+    // build the replacement here and publish it with a release-store; the audio
+    // thread adopts it -- together with the factor process() indexes the
+    // upsampled block by -- at the top of process().  The retired oversampler is
+    // parked back in mOsPending and destructs on the NEXT message-thread stage
+    // call, never on audio.
+    std::unique_ptr<juce::dsp::Oversampling<float>> mOsPending;
+    std::atomic<bool> mOsSwapPending { false };
+    int mOsPendLog2    { 2 };
+    int mOsPendLatency { 0 };
+    // Factor the LIVE oversampler was built with.  mOsLog2 above is the user's
+    // intent (persisted + read back by the panel); this is what process() and
+    // processTape() index by, so it swaps WITH the oversampler.
+    int mOsLog2Active  { 2 };
+
+    void stageOversampler (int factorLog2);    // message thread: build + publish
+    void drainOversamplerSwap() noexcept;      // audio thread: top of process()
 
     // H-7: Vocal Body post-saturation EQ -- one peaking dip + one high shelf
     // applied per channel at base rate when mVocalBody == true.

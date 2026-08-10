@@ -8,17 +8,22 @@
 
 // ── HarmlessModRegistry ───────────────────────────────────────────────────────
 // Per-target modulation registry for Harmless. Implements the S4 mod matrix:
-//   17 articulation targets x 7 modulation sources, each with per-tab curves
-//   (ENV + IMG) + depth + length + TEMPO/GLOBAL + SPD/TNS/SKEW/PW warp knobs.
+//   ModTargetIndex::NumTargets articulation targets x ModSource::NumSources
+//   modulation sources, each with per-tab curves (ENV + IMG) + depth + length
+//   + TEMPO/GLOBAL + SPD/TNS/SKEW/PW warp knobs.  Named from the enums rather
+//   than restated as numbers in prose, so the inventory cannot drift from the
+//   registration sequence in HarmlessProcessor::registerModTargets.
 //
 // Thread model:
 //   UI thread  - mutates ModTarget structs directly (via findTarget/getAllTargets).
 //                Calls publishSnapshot() after any edit. Cheap; just bumps an
 //                atomic generation counter and publishes the live state.
-//   Audio thread - at note-on only, calls getCurrentSnapshot() to grab a
-//                  read-only pointer to the current published state. Holds the
-//                  pointer for the voice's lifetime. Per-sample reads go
-//                  through it without locks.
+//   Audio thread - caches getSnapshotGeneration() at note-on, then re-checks it
+//                  once per block and rebuilds its active-target flags when the
+//                  generation moved, so a UI edit lands on sounding voices at
+//                  the next block boundary. Per-block reads walk getAllTargets()
+//                  directly - ModTarget pointers are stable for the registry's
+//                  lifetime and the audio thread never takes mEditLock.
 //
 // For v1 we skip ABA-safe snapshot retirement entirely: the live ModTarget
 // tree is the snapshot. As long as target/source/tab data layout does not

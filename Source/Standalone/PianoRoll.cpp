@@ -2504,8 +2504,7 @@ void PianoRollGrid::paint(Graphics& g)
     g.fillAll(VC::Bg);
     if (mPPB <= 0) return;
 
-    double totalBeats = mNumBars * 4.0;
-    int    visNotes   = b.getHeight() / mNoteH + 2;
+    int visNotes = b.getHeight() / mNoteH + 2;
 
     // ── Row backgrounds (scale-highlighted rows shown with teal tint) ────
     // mNoteYOffset accounts for the ruler strip at the top (kRulerH in drum/fixed mode).
@@ -2911,10 +2910,6 @@ void ControlLane::setVal(PianoNote& n, float v)
     }
 }
 
-float ControlLane::yToNormVal(int y) const
-{
-    return jlimit(0.f, 1.f, 1.f - (float)y / (float)jmax(1, getHeight()));
-}
 
 PianoNote* ControlLane::noteNearX(int x, int y) const
 {
@@ -3618,13 +3613,6 @@ void PianoRollContainer::setFixedNoteRange(int bottomMidi, int topMidi)
     mGrid->setFixedNoteRange(true, bottomMidi, topMidi);
     mGrid->setNoteYOffset(PianoRollGrid::kRulerH);
     syncScrollState();
-}
-
-void PianoRollContainer::setDrumMode()
-{
-    mDrumMode = true;
-    // Scale / chord state is now menu-driven; no toolbar controls to hide.
-    // Stamp tool (index 7) is never shown in the toolbar.
 }
 
 // Phase C §P4.2 (2026-04-24): dual-roll mode + active-slot for the Drums page.

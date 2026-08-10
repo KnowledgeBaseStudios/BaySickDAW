@@ -17,12 +17,6 @@ struct BlockContext;  // BlockContext.h - caller fills before dispatchBlock
 // to RenderTask instances registered by PluginProcessor as engines / strips
 // are created and destroyed.
 //
-// Phase 1 scaffolding (this commit)
-// ---------------------------------
-// dispatchBlock() is a stub that clears the host-supplied output buffer.
-// Per-strip wrappers ship in Batches 3-8; the full parallel pump (reset
-// counters → seed leaves → runUntil → master-publishes) lands in Batch 8.
-//
 // The class is constructed in PluginProcessor's member init list. It takes
 // references to the worker pool and arena, both of which are also value
 // members declared earlier in PluginProcessor.h so initialization order is
@@ -37,7 +31,8 @@ public:
     RenderGraphDispatcher& operator= (const RenderGraphDispatcher&) = delete;
 
     // Called from PluginProcessor::prepareToPlay. Resizes the arena to fit
-    // the new block size; the worker pool itself is NOT recreated (per the
+    // the new block size and recomputes the per-block watchdog deadline from
+    // the new block period; the worker pool itself is NOT recreated (per the
     // lifetime contract - see VibeThreadPool.h).
     void prepare (double sampleRate, int maxBlockSize);
 
@@ -70,11 +65,17 @@ public:
     void removeSyntheticDepsFor (RenderTask* task);
 
     // Batch 8 (2026-05-06): expose the dispatcher's done flag so the
-    // MasterTask can signal completion of a block.  MasterTask stores the
+    // MasterTask can signal that IT has run.  MasterTask stores the
     // reference at construction time and `release`-stores `true` at the
-    // end of its run().  Dispatcher's runUntil polls with `acquire` -
+    // end of its run().  Dispatcher's pump polls with `acquire` -
     // the release/acquire pair publishes Master's writes to the arena
     // slot to the main thread.
+    //
+    // This is one of the two conditions that end a block; the pool's
+    // outstanding-task count is the other (VibeThreadPool::blockComplete).
+    // The flag on its own says nothing about tasks that are not upstream of
+    // master, and the count on its own cannot distinguish "everything ran"
+    // from "master was starved and the graph went quiet without it".
     std::atomic<bool>& getAllDoneFlag() noexcept { return mAllDone; }
 
     // Rebuild every registered task's mPredecessors / mChildren / mInitialDeps
@@ -109,9 +110,13 @@ public:
     // responsibility to the caller so each task sees consistent context
     // built once at the dispatch site rather than rebuilt internally.
     //
-    // Pump: reset counters + assign ctx → seed leaves → runUntil(mAllDone)
-    // → MasterTask sets done flag with release ordering → main thread
-    // copies arena[kMaster] to outputBuffer.
+    // Pump: reset counters + assign ctx → seed leaves → pump until MasterTask
+    // has set the done flag AND every scheduled task has finished → main
+    // thread copies arena[kMaster] to outputBuffer.
+    //
+    // Returning while any task is still running would leave it reading ctx
+    // after this call returns, so the caller's context must stay alive for
+    // exactly as long as dispatchBlock is on the stack and no longer.
     void dispatchBlock (juce::AudioBuffer<float>& outputBuffer,
                         const BlockContext&       ctx);
 
@@ -131,8 +136,17 @@ private:
     // producer.mChildren stay coherent when topology changes.
     std::vector<std::pair<RenderTask*, RenderTask*>> mSyntheticDeps;
 
-    // Set true by the master task at the end of each block; runUntil polls
-    // this. Stored in dispatcher rather than RenderTask so the master task
-    // type can write to it without dispatcher header coupling.
+    // THREAD SAFETY: written by the message thread in prepare (a device change
+    // re-prepares mid-session), read by the audio thread once per block.
+    // Atomic because those can overlap; relaxed is enough -- a block that
+    // straddles the swap is correct with either the old or the new deadline,
+    // and no other state depends on which one it read.  Declared BEFORE the
+    // padded mAllDone so it does not share that flag's contended cache line.
+    std::atomic<double> mWatchdogTimeoutMs { RenderEngine::kWatchdogMinMillis };
+
+    // Set true by the master task at the end of each block; the pump polls
+    // this alongside the pool's outstanding count. Stored in dispatcher rather
+    // than RenderTask so the master task type can write to it without
+    // dispatcher header coupling.
     alignas (64) std::atomic<bool> mAllDone { false };
 };

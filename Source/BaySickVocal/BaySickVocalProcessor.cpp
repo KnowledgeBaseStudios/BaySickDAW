@@ -283,6 +283,104 @@ BaySickVocalProcessor::createLayout()
     return { params.begin(), params.end() };
 }
 
+// ─── A/B compare snapshot parameter set ───────────────────────────────────────
+// The two `bsv_ab_slot` slots each remember these values; everything else in
+// the tree is shared between them.  Lives next to createLayout deliberately --
+// a param added above without a line here is a param the A/B flip forgets.
+//
+// Deliberately absent: `bsv_ab_slot` (the selector cannot live inside its own
+// snapshot), `bsv_deesser_listen` (the de-esser's sidechain-audition monitor --
+// solo-class state, not tone), and the bsa_/bsp_ families, which are the
+// offline Align/Pitch editors' per-channel edit settings.
+namespace
+{
+    static const char* const kAbSnapshotParams[] =
+    {
+        "bsv_mix",
+
+        "bsv_pitch_realtime_bypass",
+        "bsv_pitch_key",
+        "bsv_pitch_scale",
+        "bsv_pitch_retuneSpeed",
+        "bsv_pitch_strength",
+        "bsv_pitch_formantPreserve",
+        "bsv_pitch_humanize",
+        "bsv_pitch_throatShift",
+
+        "bsv_gate_bypass",
+        "bsv_gate_threshold",
+        "bsv_gate_range",
+        "bsv_gate_attack",
+        "bsv_gate_hold",
+        "bsv_gate_release",
+
+        "bsv_dereverb_bypass",
+        "bsv_dereverb_reduction",
+        "bsv_dereverb_tail",
+        "bsv_dereverb_mix",
+
+        "bsv_deesser_bypass",
+        "bsv_deesser_msMode",
+        "bsv_deesser_freq",
+        "bsv_deesser_q",
+        "bsv_deesser_threshold",
+        "bsv_deesser_range",
+        "bsv_deesser_attack",
+        "bsv_deesser_release",
+        "bsv_deesser_lookahead",
+        "bsv_deesser_mix",
+        "bsv_deesser_modeBlend",
+        "bsv_deesser_spectral",
+        "bsv_deesser_lowlat",
+
+        "bsv_comp_bypass",
+        "bsv_comp_type",
+        "bsv_comp_threshold",
+        "bsv_comp_ratio",
+        "bsv_comp_attack",
+        "bsv_comp_release",
+        "bsv_comp_gain",
+        "bsv_comp_knee",
+        "bsv_comp_mix",
+        "bsv_comp_lookahead",
+        "bsv_comp_stereoLink",
+        "bsv_comp_autoMakeup",
+        "bsv_comp_detection",
+        "bsv_comp_scHpf",
+        "bsv_comp_kneeType",
+        "bsv_comp_peakDet",
+
+        "bsv_sat_bypass",
+        "bsv_sat_type",
+        "bsv_sat_vocalBody",
+        "bsv_sat_harmonicsMode",
+
+        "bsv_limiter_bypass",
+        "bsv_limiter_inGain",
+        "bsv_limiter_ceiling",
+        "bsv_limiter_satThresh",
+        "bsv_limiter_satCurve",
+        "bsv_limiter_scHpf",
+        "bsv_limiter_attack",
+        "bsv_limiter_release",
+        "bsv_limiter_ahead",
+        "bsv_limiter_relCurve",
+        "bsv_limiter_sustain",
+        "bsv_limiter_autoRelease",
+        "bsv_limiter_autoMakeup",
+        "bsv_limiter_stereoLink",
+        "bsv_limiter_mode",
+        "bsv_limiter_character",
+        "bsv_limiter_loudTargetOn",
+        "bsv_limiter_loudTargetLufs",
+        "bsv_limiter_autoCeiling",
+        "bsv_limiter_truePeakTargetDb",
+    };
+
+    constexpr int kNumAbSnapshotParams
+        = (int) (sizeof (kAbSnapshotParams) / sizeof (kAbSnapshotParams[0]));
+}
+
 // ─── Constructor ──────────────────────────────────────────────────────────────
 BaySickVocalProcessor::BaySickVocalProcessor (juce::UndoManager* undoMgr)
     : juce::AudioProcessor (BusesProperties()
@@ -310,20 +408,34 @@ BaySickVocalProcessor::BaySickVocalProcessor (juce::UndoManager* undoMgr)
     mAlignOnRaw        = apvts.getRawParameterValue ("bsa_align_on");
     mAlignPitchOnRaw   = apvts.getRawParameterValue ("bsa_pitch_on");
     mAlignTransposeRaw = apvts.getRawParameterValue ("bsa_pitch_transpose");
+
+    // A/B compare: parameterChanged captures the outgoing slot then restores
+    // the incoming one.  Both slots start holding the current values, so the
+    // first flip is inaudible until one side has been edited.
+    apvts.addParameterListener ("bsv_ab_slot", this);
+    mLastSlot = activeAbSlot();
+    captureSnapshotFromCurrent (0);
+    captureSnapshotFromCurrent (1);
 }
 
 // ─── Destructor ───────────────────────────────────────────────────────────────
 // 2026-05-06 (Batch 9c N1): audio-thread shutdown safety net.  Owners should
-// ideally pre-flag teardown via setShuttingDown(true) followed by ~30 ms of
-// sleep (mirrors VibeSynthProcessor's mProjectLoadInProgress barrier in
-// StandaloneEditor::closeAllDynamicTabs) so the audio thread sees the flag
-// before any member starts dying.  Setting it here as well so we still bail
+// ideally pre-flag teardown via setShuttingDown(true) and then wait out the
+// in-flight block via VibeSynthProcessor::settleAudioThread() (which waits for
+// two acknowledged block boundaries -- a fixed sleep cannot be correct at every
+// buffer size) so the audio thread sees the flag before any member starts
+// dying.  Setting it here as well so we still bail
 // on subsequent processBlock entries even if the owner forgot.  Without this,
 // the audio thread's mNamIrProc->processBlock(...) dispatches through a
 // vtable already zeroed by ~BaySickNAMIRProcessor and crashes.
 BaySickVocalProcessor::~BaySickVocalProcessor()
 {
     mShuttingDown.store (true, std::memory_order_release);
+    // Dropped before the listener is removed: an A/B swap already sitting in
+    // the message queue holds a weak copy of this token and bails once it
+    // expires (callAsync cannot be retracted).
+    mLife.reset();
+    apvts.removeParameterListener ("bsv_ab_slot", this);
     // QA-Fa recovery: owners raise the shutdown gate (and the clip snapshot
     // rebuild drops the channel's players) before teardown, so the decode
     // layer cannot be inside a block holding this pointer here.
@@ -706,6 +818,19 @@ void BaySickVocalProcessor::processBlock (juce::AudioBuffer<float>& buffer,
             mDenoiseWetLearner.pushBlock (mDenoiseMonoScratch.data(), numSamples);
         }
 
+        // The DRY tap is gated against offline blocks in tapDryRecorder, so the
+        // WET write has to be too: freezing a Vox tab runs this strip through
+        // the render, and a WET take that includes the render's blocks while
+        // its DRY partner excludes them drifts by the render's length -- which
+        // breaks the aligned pair the Vox page is built on.
+        //
+        // The gate wraps the ARM-EDGE detector as well as the write.  Nulling
+        // wetRec for the duration instead would read as a disarm on the way
+        // into the render and a re-arm on the way out, re-priming
+        // mWetLatencySkip mid-take and shifting the rest of the take by the
+        // corrector's latency.
+        if (! isNonRealtime())
+        {
         auto* wetRec = mWetRecorder.load (std::memory_order_acquire);
         // QA-Fe Task 4: on the arm edge, prime the latency skip so the recorded
         // WET take aligns to the record-arm moment (the LiveShifter delays its
@@ -750,6 +875,7 @@ void BaySickVocalProcessor::processBlock (juce::AudioBuffer<float>& buffer,
                 juce::AudioBuffer<float> monoView (monoPtrs, 1, toWrite);
                 wetRec->writeBlock (monoView);
             }
+        }
         }
     }
 
@@ -1478,10 +1604,22 @@ juce::File BaySickVocalProcessor::renderAlignedTake (juce::String& errorOut, boo
     juce::WavAudioFormat fmt;
     auto os = file.createOutputStream();
     if (os == nullptr) { errorOut = "Could not write " + file.getFullPathName(); return {}; }
+    // createWriterFor takes the stream only on success (it releases the pointer
+    // back to the caller when it fails), so hand it over after the null test or
+    // a failed create leaks the open file handle.
     std::unique_ptr<juce::AudioFormatWriter> writer (fmt.createWriterFor (
-        os.release(), mAlignState.analysisSampleRate, 1, 24, {}, 0));
+        os.get(), mAlignState.analysisSampleRate, 1, 24, {}, 0));
     if (writer == nullptr) { errorOut = "Could not create the WAV writer."; return {}; }
-    writer->writeFromAudioSampleBuffer (warped, 0, warped.getNumSamples());
+    os.release();
+
+    if (! writer->writeFromAudioSampleBuffer (warped, 0, warped.getNumSamples()))
+    {
+        // reset() first so the header flush happens before the file goes away.
+        writer.reset();
+        file.deleteFile();
+        errorOut = "Could not finish writing " + file.getFileName() + " (disk full?).";
+        return {};
+    }
     writer.reset();
 
     AlignRenderEntry e;
@@ -1591,7 +1729,15 @@ juce::File BaySickVocalProcessor::renderPitchedTake (juce::String& errorOut)
     std::unique_ptr<juce::AudioFormatWriter> writer (fmt.createWriterFor (
         os.release(), sr, 1, 24, {}, 0));
     if (writer == nullptr) { errorOut = "Could not create the WAV writer."; return {}; }
-    writer->writeFromAudioSampleBuffer (rendered, 0, rendered.getNumSamples());
+
+    if (! writer->writeFromAudioSampleBuffer (rendered, 0, rendered.getNumSamples()))
+    {
+        // reset() first so the header flush happens before the file goes away.
+        writer.reset();
+        file.deleteFile();
+        errorOut = "Could not finish writing " + file.getFileName() + " (disk full?).";
+        return {};
+    }
     writer.reset();
 
     AlignRenderEntry e;
@@ -1680,6 +1826,129 @@ juce::AudioProcessorEditor* BaySickVocalProcessor::createEditor()
     return new BaySickVocalEditor (*this);
 }
 
+// ─── A/B compare ──────────────────────────────────────────────────────────────
+// APVTS listener on `bsv_ab_slot`, fired synchronously on whatever thread wrote
+// the parameter.
+//
+// LIVE: the work is posted to the message thread because the swap walks the
+// whole snapshot parameter set -- that may not run on the realtime callback.
+// The post carries a weak lifetime token because this is a rig-owned tab engine
+// the message thread can free at any time, and a queued callAsync cannot be
+// retracted.
+//
+// OFFLINE: the writer already IS the render thread (automation replay), which
+// has no realtime deadline, so the work runs inline -- a message hop would land
+// after the block it belongs to, and during a freeze render the message thread
+// is blocked inside the render loop entirely.
+// ─────────────────────────────────────────────────────────────────────────────
+void BaySickVocalProcessor::parameterChanged (const juce::String& paramID, float newValue)
+{
+    if (paramID != "bsv_ab_slot") return;
+
+    // replaceState fires this listener while a project/page preset loads.  The
+    // restore seats both snapshots and mLastSlot itself, from the saved SlotA /
+    // SlotB children; letting a swap run here would capture the freshly
+    // restored values over the OTHER slot's stored tone and destroy it.
+    if (isRestoringState()) return;
+
+    const int newSlot = juce::jlimit (0, 1, (int) newValue);
+    if (newSlot == mLastSlot) return;
+
+    const int outgoingSlot = mLastSlot;
+
+    // A replay is not a user edit -- the same ruling that keeps a replay from
+    // marking engine content dirty or staling a freeze.  The two banks hold
+    // tones the user dialled by hand; capturing over the outgoing one on every
+    // lane transition would bank whatever the OTHER lanes have driven the chain
+    // to at that instant, destroying both tones over the length of a pass.  The
+    // slot still SWITCHES on replay -- only the capture is suppressed.
+    //
+    // The phase flag is thread_local and this listener runs synchronously on
+    // the writer's thread, so it must be read here and carried into the async
+    // hop below, which lands after the writer's scope has closed.
+    const bool userGesture = ! juce::AudioProcessorValueTreeState::programmaticWritePhase;
+
+    if (isNonRealtime())
+    {
+        if (userGesture) captureSnapshotFromCurrent (outgoingSlot);
+        applySnapshotToCurrent (newSlot);
+        mLastSlot = newSlot;
+        return;
+    }
+
+    std::weak_ptr<char> life (mLife);
+    juce::MessageManager::callAsync ([this, life, outgoingSlot, newSlot, userGesture]()
+    {
+        if (life.expired()) return;
+        if (userGesture) captureSnapshotFromCurrent (outgoingSlot);
+        applySnapshotToCurrent (newSlot);
+        mLastSlot = newSlot;
+    });
+}
+
+juce::ValueTree BaySickVocalProcessor::SlotSnapshot::toValueTree (const juce::Identifier& root) const
+{
+    juce::ValueTree v (root);
+    for (int i = 0; i < kNumAbSnapshotParams && i < (int) values.size(); ++i)
+        v.setProperty (juce::Identifier (kAbSnapshotParams[i]),
+                        values[(size_t) i], nullptr);
+    return v;
+}
+
+void BaySickVocalProcessor::SlotSnapshot::fromValueTree (const juce::ValueTree& v)
+{
+    values.resize ((size_t) kNumAbSnapshotParams, 0.0f);
+
+    // Keyed by param id, and absent ids are LEFT ALONE: the caller seeds the
+    // snapshot from the live parameters first, so an id the save predates
+    // restores to the value the project actually loaded with.
+    for (int i = 0; i < kNumAbSnapshotParams; ++i)
+    {
+        const juce::Identifier id (kAbSnapshotParams[i]);
+        if (v.hasProperty (id))
+            values[(size_t) i] = (float) v.getProperty (id);
+    }
+}
+
+int BaySickVocalProcessor::activeAbSlot() const noexcept
+{
+    if (auto* p = apvts.getRawParameterValue ("bsv_ab_slot"))
+        return juce::jlimit (0, 1, (int) p->load());
+    return 0;
+}
+
+void BaySickVocalProcessor::captureSnapshotFromCurrent (int slot)
+{
+    if (slot < 0 || slot > 1) return;
+
+    auto& s = mSnapshots[(size_t) slot];
+    s.values.resize ((size_t) kNumAbSnapshotParams, 0.0f);
+
+    for (int i = 0; i < kNumAbSnapshotParams; ++i)
+        if (auto* p = apvts.getRawParameterValue (kAbSnapshotParams[i]))
+            s.values[(size_t) i] = p->load();
+}
+
+void BaySickVocalProcessor::applySnapshotToCurrent (int slot)
+{
+    if (slot < 0 || slot > 1) return;
+
+    const auto& s = mSnapshots[(size_t) slot];
+    if ((int) s.values.size() != kNumAbSnapshotParams) return;
+
+    // Snapshot restores are programmatic.  Undo of an A/B flip stays correct
+    // WITHOUT these values in history -- undoing the bsv_ab_slot param re-fires
+    // parameterChanged, which re-applies the other slot's snapshot (the handler
+    // is self-healing).
+    juce::AudioProcessorValueTreeState::ScopedProgrammaticParamWrites spw;
+
+    for (int i = 0; i < kNumAbSnapshotParams; ++i)
+        if (auto* p = dynamic_cast<juce::RangedAudioParameter*> (
+                          apvts.getParameter (kAbSnapshotParams[i])))
+            p->setValueNotifyingHost (
+                p->getNormalisableRange().convertTo0to1 (s.values[(size_t) i]));
+}
+
 // ─── State save / load ────────────────────────────────────────────────────────
 //
 // H-6d (2026-05-02): captures the entire 6-sub-tab Vox page state, so the
@@ -1687,6 +1956,8 @@ juce::AudioProcessorEditor* BaySickVocalProcessor::createEditor()
 // faithfully.  Captured state per sub-tab:
 //
 //   BaySickVocals      -> APVTS (bsv_pitch_*, bsv_mix, bsv_ab_slot, etc.)
+//                          plus <SlotA> / <SlotB>, the two A/B compare
+//                          snapshots of the chain params (see SlotSnapshot)
 //   Vocal Chain        -> APVTS (bsv_deesser_*, bsv_comp_*, bsv_sat_*,
 //                                bsv_limiter_*); rack topology is fixed
 //   BaySickPitch       -> <PitchEdits> ValueTree child (note regions +
@@ -1719,10 +1990,20 @@ namespace
     // the per-block push re-imposes them over the blob on load (params stay
     // the source of truth for everything bound).
     constexpr const char* kVocalChainStateTag = "VocalChainState";
+    // Per-slot A/B snapshots.  Absence means "both slots start as the values
+    // the project loaded with", so a save made before A/B existed loads with
+    // exactly the tone it was saved with.
+    constexpr const char* kSlotATag = "SlotA";
+    constexpr const char* kSlotBTag = "SlotB";
 }
 
 void BaySickVocalProcessor::getStateInformation (juce::MemoryBlock& dest)
 {
+    // The active slot's live parameter values are what the user is looking at;
+    // the other slot's snapshot already holds what it had at the last flip.
+    // Without this the in-flight slot's edits since that flip are lost on save.
+    captureSnapshotFromCurrent (activeAbSlot());
+
     auto state = apvts.copyState();
 
     // Strip any prior children we own so saves are idempotent.
@@ -1739,6 +2020,11 @@ void BaySickVocalProcessor::getStateInformation (juce::MemoryBlock& dest)
     removeChild (kAlignEditsTag);
     removeChild (kNamIrStateTag);
     removeChild (kVocalChainStateTag);
+    removeChild (kSlotATag);
+    removeChild (kSlotBTag);
+
+    state.appendChild (mSnapshots[0].toValueTree (kSlotATag), nullptr);
+    state.appendChild (mSnapshots[1].toValueTree (kSlotBTag), nullptr);
 
     // QA-Fa: <PitchEdits> carries the BaySickPitch channel state -- analyzed
     // note regions + per-note edits, the analysis frame, the Pitched/ render
@@ -1880,6 +2166,16 @@ void BaySickVocalProcessor::setStateInformation (const void* data, int size)
         if (pitchChild.isValid())
             newState.removeChild (pitchChild, nullptr);
 
+        // Same for the A/B snapshots -- they are read back into mSnapshots
+        // below and must not land inside the live APVTS tree, which the freeze
+        // watcher listens to.
+        auto slotAChild = newState.getChildWithName (kSlotATag);
+        if (slotAChild.isValid())
+            newState.removeChild (slotAChild, nullptr);
+        auto slotBChild = newState.getChildWithName (kSlotBTag);
+        if (slotBChild.isValid())
+            newState.removeChild (slotBChild, nullptr);
+
         // QA-Fe migration: bsp_engine is net-new, so its absence marks a
         // pre-QA-Fe project whose bsa_pitch_algo still meant PSOLA/Granular/PV
         // (those engines are retired).  Default such projects to Rubber Band (0)
@@ -1896,6 +2192,18 @@ void BaySickVocalProcessor::setStateInformation (const void* data, int size)
             if (auto* p = apvts.getParameter ("bsa_pitch_algo"))
                 p->setValueNotifyingHost (p->convertTo0to1 (0.0f));
         }
+
+        // A/B: seed BOTH slots from the parameters just restored, then overlay
+        // whatever each stored slot actually carries.  A project with no SlotA /
+        // SlotB children (or a stored slot missing an id added since) therefore
+        // loads with the tone it was saved with on both sides -- no migration.
+        // No snapshot is applied back into APVTS here: the save captured the
+        // active slot FROM these same parameters, so the two already agree.
+        captureSnapshotFromCurrent (0);
+        captureSnapshotFromCurrent (1);
+        if (slotAChild.isValid()) mSnapshots[0].fromValueTree (slotAChild);
+        if (slotBChild.isValid()) mSnapshots[1].fromValueTree (slotBChild);
+        mLastSlot = activeAbSlot();
 
         mPitchRenders.clear();
         mPitchVersions.clear();

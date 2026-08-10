@@ -5,6 +5,7 @@
 #include "../SlideSampler/SlideSampler.h"
 #include <array>
 #include <atomic>
+#include <cstdint>
 #include <bitset>
 #include <map>
 #include <memory>
@@ -82,7 +83,7 @@ public:
     // the kit's `#include` chain (depth 4) collecting `set_cc<N>=<int>` defaults
     // into mCcKitDefault and `label_cc<N>=<text>` strings into mCcLabel.  The
     // collected defaults are pushed through APVTS so the parameter listener
-    // forwards each value to sfizz at the kit author's intended starting point.
+    // queues each value for sfizz at the kit author's intended starting point.
     bool loadKit (const juce::File& sfzPath);
 
     juce::File getCurrentKitPath() const { return mCurrentKitPath; }
@@ -103,7 +104,8 @@ public:
 
     // ARIA control surface CC dispatch.  Writes the value (0..127) through
     // APVTS so the change is undoable + automatable + serialized with project
-    // state.  The parameterChanged listener forwards to sfizz.
+    // state.  The parameterChanged listener queues the CC; processBlock pushes
+    // it into sfizz on the audio thread.
     // 2026-05-05: kCcCount lifted to 512 so kit-author "extended CCs" >= 128
     // get APVTS-bound (no kit Basses currently uses any, but matches Rusty).
     static constexpr int kCcCount = 512;
@@ -112,7 +114,9 @@ public:
     int  getKitDefaultCc (int cc) const;   // read-only snapshot of kit's set_cc<N> values
     juce::String getCcLabel (int cc) const; // kit's `label_cc<N>=<text>` (empty if none)
 
-    // APVTS listener - forwards every <prefix>cc<N> change to sfizz.
+    // APVTS listener.  Fires synchronously on whatever thread wrote the param,
+    // so it must NOT call mSfizz->cc() itself -- it only marks the CC dirty in
+    // mCcDirty and processBlock drains the marks (see mCcDirty below for why).
     void parameterChanged (const juce::String& paramId, float newValue) override;
 
     // L-5 fix #5 (2026-05-05): processing gate.  Set to false BEFORE loadKit
@@ -200,6 +204,16 @@ private:
     // map lookups on the audio thread).  The bass cc105 Mono choke reads
     // through the same provider inside SlideSampler::startSlide.
     std::array<std::atomic<float>*, kCcCount> mCcRaw {};
+
+    // THREAD SAFETY (mirrors BaySickGuitarsProcessor): parameterChanged runs on
+    // whichever thread wrote the param and must never call mSfizz->cc() itself
+    // -- sfizz mutates internal state in cc(), so a message-thread call races
+    // the audio thread's renderBlock.  The listener marks the CC dirty here;
+    // processBlock drains the marks below its processing gate, so marks made
+    // mid-loadKit flush into a fully-parsed engine.  Lock-free both sides,
+    // last-write-wins via mCcRaw.
+    static constexpr int kCcDirtyWords = kCcCount / 64;
+    std::array<std::atomic<std::uint64_t>, kCcDirtyWords> mCcDirty {};
 
     std::unique_ptr<sfz::Sfizz> mSfizz;
     juce::File                  mCurrentKitPath;

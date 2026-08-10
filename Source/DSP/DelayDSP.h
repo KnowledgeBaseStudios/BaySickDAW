@@ -10,7 +10,9 @@
 //     behavior: no echoes -- lo-fi / FB filter / FB distortion / tone run
 //     instantly on the input, i.e. a pure distortion/filter unit)
 //   • Keep-pitch smooth delay time changes (exponential slew)
-//   • Feedback chain: diffusion (4 allpass) → Lo-Fi → SVF filter (LP/HP/BP/Off)
+//   • Lo-Fi on the delay-line read -- before the feedback / output split, so
+//     every echo is crushed, not just the feedback build-up
+//   • Feedback chain: diffusion (4 allpass) → SVF filter (LP/HP/BP/Off)
 //     → distortion
 //   • LFO modulation of delay time and/or feedback filter cutoff
 //   • Tone filter (bipolar LP↔HP) on the output path
@@ -63,7 +65,7 @@ public:
     void setFeedbackFilterType(int t);    // 0=LP  1=HP  2=BP  3=Off(bypass)
     void setFeedbackCutoff   (float hz);
     void setFeedbackResonance(float q);
-    void setLoFiSampleRate   (float hz);  // 100..48000 (48000 = full quality)
+    void setLoFiSampleRate   (float hz);  // 100..48000 (48000 = off, at any device rate)
     void setLoFiBits         (float bits);// 1..24      (24    = full quality)
     void setModRate          (float hz);  // 0..20 Hz LFO rate
     void setModTimeMod       (float v);   // 0..1 depth of time modulation
@@ -104,9 +106,6 @@ public:
     // ── Legacy API ────────────────────────────────────────────────────────────
     void setFeedback  (float fb);
     void setWet       (float w);
-    void setHpHz      (float hz);
-    void setLpHz      (float hz);
-    void setPingPong  (bool en);
     void setSyncBPM   (bool en);
     void setSyncNote  (int numerator, int denominator);
 
@@ -267,6 +266,15 @@ private:
     // ── Constants ─────────────────────────────────────────────────────────────
     static constexpr float kMaxDelaySeconds = 3.0f;
     static constexpr int   kDiffStages      = 4;
+    // Top of the Lo-Fi rate knob, and its OFF position: the sample-and-hold is
+    // bypassed there whatever the device rate.  Must stay equal to the "lofisr"
+    // maximum in EffectParamMap.cpp and the panel knob range in
+    // EffectEditorPanels.cpp - move all three together.
+    static constexpr float kLoFiRateMaxHz   = 48000.0f;
+    // The feedback DC-blocker's pole was a bare per-sample constant (0.9995),
+    // i.e. a corner FREQUENCY that quadruples across the supported rate range.
+    // This is the measured 44.1 kHz corner being preserved, not a new spec.
+    static constexpr float kDcBlockHz       = 3.5f;
 
     // ── Main delay lines ──────────────────────────────────────────────────────
     std::vector<float> mLineL, mLineR;
@@ -349,6 +357,7 @@ private:
     float mLoFiHoldR  { 0.0f };
 
     // 5 Hz DC-blocker state (feedback-path, post-distortion / pre-level)
+    float mDcBlockR   { 0.9995f };   // derived from kDcBlockHz in prepare()
     float mDcBlockXL  { 0.0f }, mDcBlockYL { 0.0f };
     float mDcBlockXR  { 0.0f }, mDcBlockYR { 0.0f };
 

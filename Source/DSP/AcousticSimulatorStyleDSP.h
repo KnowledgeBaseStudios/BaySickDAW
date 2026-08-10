@@ -59,7 +59,10 @@ public:
     void setReverb    (float v01);           // Schroeder wet/dry
     void setLevelDb   (float db);            // -24..+12
 
-    void loadUserIR   (const juce::File& file);
+    // Returns false + outErr when the pick is missing or not readable audio,
+    // leaving the current IR in place: the convolution stage reports nothing
+    // back, so an unchecked failure reads as the effect doing nothing.
+    bool loadUserIR   (const juce::File& file, juce::String& outErr);
     juce::String getUserIRPath() const { return mUserIRPath; }
 
     Mode  mMode      { Mode::Standard };

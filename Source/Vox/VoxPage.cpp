@@ -1,8 +1,9 @@
 #include "VoxPage.h"
 #include "../BaySickVocal/BaySickVocalProcessor.h"
 #include "../BaySickVocal/BaySickVocalEditor.h"
-#include "../Standalone/EnginePrefixUtil.h"
 #include "../Standalone/PagePresetIO.h"
+#include "../MissingFileReport.h"
+#include "../UserFileSave.h"
 #include "../PluginProcessor.h"
 #include "../EngineRig.h"   // QA-ModelShell TS1: model-side engine owner
 
@@ -49,10 +50,6 @@ VoxPage::~VoxPage()
 void VoxPage::setTabName (const juce::String& n)
 {
     mTabName = n;
-    // QA-ModelShell TS1: every rename path funnels through here -- the one
-    // sync point for the model tab's name.
-    if (mFullProcessor != nullptr)
-        mFullProcessor->engineRig().renameTab (TabKind::Vox, mPageIndex, n);
     repaint();
 }
 
@@ -98,7 +95,7 @@ static void addVoxPresetDirToMenu (juce::PopupMenu& menu,
 }
 
 
-void VoxPage::saveVoxPagePreset()
+void VoxPage::saveVoxPagePreset (std::function<void()> onSaved)
 {
     auto* aw = new juce::AlertWindow ("Save Vox Page Preset",
                                        "Enter a name for this Vox page preset:",
@@ -109,31 +106,37 @@ void VoxPage::saveVoxPagePreset()
 
     juce::Component::SafePointer<VoxPage> safeThis (this);
     aw->enterModalState (true, juce::ModalCallbackFunction::create (
-        [safeThis, aw] (int r)
+        [safeThis, aw, onSaved] (int r)
         {
             if (r != 1 || ! safeThis) return;
             const juce::String name = aw->getTextEditorContents ("name").trim();
-            if (name.isEmpty()) return;
 
-            auto dir = voxMyPresetsDir();
-            dir.createDirectory();
-            auto target = dir.getChildFile (name + ".xml");
-            int n = 2;
-            while (target.exists())
-                target = dir.getChildFile (name + " (" + juce::String (n++) + ").xml");
-
-            const juce::String xml = safeThis->exportVoxState();
-            if (xml.isNotEmpty())
-                target.replaceWithText (xml);
+            UserFileSave::writeTextAsync (voxMyPresetsDir(), name,
+                                          safeThis->exportVoxState(),
+                [safeThis, onSaved] (const UserFileSave::Result& saved)
+                {
+                    // A collision prompt can hold this open long enough for the
+                    // page to be closed, so the SafePointer is re-tested here
+                    // rather than trusted from the naming callback.
+                    if (! saved || ! safeThis) return;
+                    if (onSaved) onSaved();
+                });
         }), true);
 }
 
 void VoxPage::loadVoxPagePreset (const juce::File& xml)
 {
-    if (! xml.existsAsFile()) return;
-    const juce::String contents = xml.loadFileAsString();
-    if (contents.isNotEmpty())
-        importVoxState (contents);
+    const juce::String contents = xml.existsAsFile() ? xml.loadFileAsString()
+                                                     : juce::String();
+    if (contents.isEmpty())
+    {
+        juce::AlertWindow::showMessageBoxAsync (
+            juce::MessageBoxIconType::WarningIcon,
+            "Load Page Preset",
+            "Preset could not be read:\n" + xml.getFullPathName());
+        return;
+    }
+    importVoxState (contents);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -162,8 +165,7 @@ void VoxPage::savePagePreset (std::function<void()> onSaved)
 {
     if (mFullProcessor == nullptr || getEngineProcessor() == nullptr)
     {
-        saveVoxPagePreset();
-        if (onSaved) onSaved();
+        saveVoxPagePreset (onSaved);
         return;
     }
 
@@ -182,14 +184,6 @@ void VoxPage::savePagePreset (std::function<void()> onSaved)
             if (r != 1 || ! safeThis) return;
 
             const juce::String name = aw->getTextEditorContents ("name").trim();
-            if (name.isEmpty()) return;
-
-            auto dir = PagePresetIO::myPresetsDirForPageKind (PagePresetIO::PageKind::Vox);
-            dir.createDirectory();
-            auto target = dir.getChildFile (name + ".xml");
-            int n = 2;
-            while (target.exists())
-                target = dir.getChildFile (name + " (" + juce::String (n++) + ").xml");
 
             const juce::String stripPrefix = "mixer_vox_" + juce::String (safeThis->mPageIndex);
             // H-6b: always BaySickVocal.  Engine prefix is the constant `bsv_`.
@@ -205,17 +199,42 @@ void VoxPage::savePagePreset (std::function<void()> onSaved)
                 engineType,
                 enginePrefix);
 
-            if (xml.isNotEmpty())
-                target.replaceWithText (xml);
+            UserFileSave::writeTextAsync (
+                PagePresetIO::myPresetsDirForPageKind (PagePresetIO::PageKind::Vox),
+                name, xml,
+                [safeThis, onSaved] (const UserFileSave::Result& saved)
+                {
+                    // A collision prompt can hold this open long enough for the
+                    // page to be closed, so the SafePointer is re-tested here
+                    // rather than trusted from the naming callback.
+                    if (! saved || ! safeThis) return;
 
-            safeThis->takeStateSnapshot();
-            if (onSaved) onSaved();   // G-7: chain delete after save completes
+                    safeThis->takeStateSnapshot();
+                    if (onSaved) onSaved();   // G-7: chain delete after save completes
+                },
+                UserFileSave::kTabNotDeleted);
         }), false);
 }
 
 void VoxPage::loadPagePreset (const juce::File& xml)
 {
-    if (! xml.existsAsFile()) return;
+    // RAII rather than a drain at the tail: a bare drain inside an outer
+    // gesture (an undo that resurrects several tabs) takes that gesture's
+    // entries and posts them under this noun.  Only the outermost scope
+    // reports, so nesting keeps the noun the user reads correct.  Declared
+    // ahead of the mFullProcessor fallback so that branch is covered too.
+    MissingFileReport::ScopedGesture gesture ("preset");
+
+    const juce::String contents = xml.existsAsFile() ? xml.loadFileAsString()
+                                                     : juce::String();
+    if (contents.isEmpty())
+    {
+        juce::AlertWindow::showMessageBoxAsync (
+            juce::MessageBoxIconType::WarningIcon,
+            "Load Page Preset",
+            "Preset could not be read:\n" + xml.getFullPathName());
+        return;
+    }
     if (mFullProcessor == nullptr) { loadVoxPagePreset (xml); return; }
 
     // H-6b (2026-05-01): always BaySickVocal.
@@ -242,7 +261,7 @@ void VoxPage::loadPagePreset (const juce::File& xml)
                                      getEngineProcessor(),
                                      enginePrefix,
                                      query,
-                                     xml.loadFileAsString());
+                                     contents);
     mSuppressDirty = false;
     takeStateSnapshot();
 }
@@ -379,14 +398,12 @@ void VoxPage::selectEngine (EngineType e)
     if (e == mEngineType && mVocalProc != nullptr)
         return;
 
-    if (onEngineDestroying) onEngineDestroying();
-
     if (! mVocalProc && mFullProcessor != nullptr)
     {
         // QA-ModelShell TS1: the model constructs, prepares, and registers
         // the vocal engine.  This page keeps a non-owning view pointer.
         auto& rig = mFullProcessor->engineRig();
-        rig.addTab (TabKind::Vox, mPageIndex, mTabName);
+        rig.addTab (TabKind::Vox, mPageIndex);
         mVocalProc = rig.setEngineType (TabKind::Vox, mPageIndex, "BaySickVocal");
 
         // QA-Fd #7: re-install the transport-beat hooks on a (re)built engine.

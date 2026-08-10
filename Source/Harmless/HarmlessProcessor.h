@@ -15,15 +15,17 @@
 //   Only calls the setter when the value actually changed.
 //
 // Phase 3A-Final TODO:
-//   createEditor() returns the HarmlessEditor (Basic/Advanced UI).
-//   Timbre-shape changes will trigger partA/B.setShape() on a background thread.
+//   partA/B setShape rebuilds a wavetable (juce::dsp::FFT) from
+//   updateFromApvts, so a timbre-shape edit does that work on the audio
+//   thread.  Move the rebuild to a background thread.
 // ─────────────────────────────────────────────────────────────────────────────
 class HarmlessProcessor : public juce::AudioProcessor,
                           public ISidechainEngine
 {
 public:
-    // undoMgr: QA-ModelShell TS1 dormant pre-wire -- bound into apvts so
-    // QA-UndoCoverage can enable undo without a ctor sweep; unused until then.
+    // undoMgr: bound into apvts so every parameter edit on this engine joins the
+    // one global undo history the processor owns; EngineRig threads the reference
+    // in at construction.  Passing null drops this engine out of undo entirely.
     explicit HarmlessProcessor (const juce::String& trackId = "lay_0",
                                 juce::UndoManager* undoMgr = nullptr);
 
@@ -110,6 +112,11 @@ private:
 
     HarmlessSynth       mSynth;
     juce::String        mPrefix;
+    // Audio-thread danger zone: updateFromApvts assembles parameter ids into a
+    // stack buffer rather than concatenating a juce::String (no SSO, so every
+    // concatenation is a heap allocation).  The prefix byte length is fixed at
+    // construction so the audio path only memcpys the suffix.
+    const int           mPrefixLen;
     juce::String        mTrackId;
     std::atomic<int>    mAuditionNote    { -1 };
     std::atomic<int>          mAuditionHoldOn { -1 };

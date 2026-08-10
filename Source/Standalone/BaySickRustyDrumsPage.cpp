@@ -3,7 +3,7 @@
 #include "../BaySickRustyDrums/BaySickRustyDrumsProcessor.h"
 #include "../BaySickRustyDrums/BaySickRustyDrumsKitGraphic.h"
 #include "AriaControlPanel.h"   // K-5 (2026-05-05): moved to Source/Standalone/
-#include "../VibeGraph.h"
+#include "../UserFileSave.h"
 #include "SampleLibrary.h"
 #include "StandaloneEditor.h"
 
@@ -70,10 +70,6 @@ BaySickRustyDrumsPage::BaySickRustyDrumsPage (VibeSynthProcessor& p)
     mDirtyListener.dirtyFlag = &mPageDirty;
     mDirtyListener.suppress  = &mSuppressDirty;
 
-    // Smoke #13 fix: the combo + preset button MUST exist before
-    // buildPlayerTab hosts them on the panel title bar -- the old order left
-    // both null at hosting time, so the guards skipped and the Load Player
-    // dropdown was parentless (invisible everywhere).
     buildProgramCombo();
     buildPlayerPresetButton();
     buildDrumKitTab();
@@ -143,7 +139,6 @@ void BaySickRustyDrumsPage::switchTab (int idx)
     if (mPlayerTab)    mPlayerTab   ->setVisible (mActiveTab == 1);
     if (mPianoRollTab) mPianoRollTab->setVisible (mActiveTab == 2);
     resized();
-    if (onSubTabChanged) onSubTabChanged (mActiveTab);
 }
 
 void BaySickRustyDrumsPage::setTabName (const juce::String& name)
@@ -242,12 +237,22 @@ bool BaySickRustyDrumsPage::loadKit (const juce::File& sfzPath)
 bool BaySickRustyDrumsPage::reloadForProjectRestore (const juce::File& sfzPath)
 {
     // Identify which program this kit file represents so the dropdown +
-    // mCurrentProgram enum line up.  Falls back to None for unknown paths.
+    // mCurrentProgram enum line up.
     Program target = Program::None;
     if (sfzPath.getFileName().equalsIgnoreCase ("01-full.sfz"))
         target = Program::Full;
     else if (sfzPath.getFileName().equalsIgnoreCase ("02-basic.sfz"))
         target = Program::Basic;
+
+    // This page's whole control surface -- program dropdown, ARIA panel,
+    // piano-roll engine label, program-tagged player presets -- is defined
+    // over Full and Basic only, so a kit outside that pair has no state the
+    // page can show or re-pick.  Loading it anyway used to leave the combo on
+    // "Load Player" and the roll on "(no engine)" while the kit played, so
+    // refuse it instead and let the caller name the file in the missing-files
+    // report.  Widening this means widening Program + the dropdown with it.
+    if (target == Program::None)
+        return false;
 
     // loadKit forwards to mProcessor.loadBaySickRustyDrumsKit (which is the
     // active-flag-protected path) AND fires onKitLoaded so the mixer strips
@@ -402,7 +407,6 @@ void BaySickRustyDrumsPage::savePlayerPresetAs (std::function<void()> onSaved)
             std::unique_ptr<juce::AlertWindow> own (aw);
             if (result != 1 || ! safe) return;
             const auto name = aw->getTextEditorContents ("name").trim();
-            if (name.isEmpty()) return;
 
             auto* engine = safe->mProcessor.getBaySickRustyDrums();
             if (engine == nullptr) return;
@@ -439,27 +443,49 @@ void BaySickRustyDrumsPage::savePlayerPresetAs (std::function<void()> onSaved)
                 pushParam ("brd_cc" + juce::String (cc));
             pushParam ("brd_outVol");
 
-            auto dir = safe->playerPresetsDir();
-            dir.createDirectory();
-            auto target = dir.getChildFile (name + ".xml");
-            int n = 2;
-            while (target.exists())
-                target = dir.getChildFile (name + " (" + juce::String (n++) + ").xml");
-            target.replaceWithText (root.toString (juce::XmlElement::TextFormat()
-                                                        .singleLine()));
+            const juce::String xml = root.toString (juce::XmlElement::TextFormat()
+                                                        .singleLine());
             // QA-ProjectSave Task 11: completion hook so the delete prompt's
             // "Save Page Preset & Delete" can chain the delete after the write.
-            // Cancel/invalid paths return above without firing it.
-            if (onSaved) onSaved();
+            // Cancel, invalid, cancelled-at-the-collision-prompt and
+            // failed-write paths all leave it unfired.
+            UserFileSave::writeTextAsync (safe->playerPresetsDir(), name, xml,
+                [safe, onSaved] (const UserFileSave::Result& saved)
+                {
+                    // A collision prompt can hold this open long enough for the
+                    // page to be closed, so the SafePointer is re-tested here
+                    // rather than trusted from the naming callback.
+                    if (! saved || ! safe) return;
+                    if (onSaved) onSaved();
+                },
+                UserFileSave::kTabNotDeleted);
         }), false);
 }
 
 void BaySickRustyDrumsPage::loadPlayerPresetFromFile (const juce::File& xml)
 {
-    if (! xml.existsAsFile()) return;
+    if (! xml.existsAsFile())
+    {
+        juce::AlertWindow::showMessageBoxAsync (
+            juce::MessageBoxIconType::WarningIcon,
+            "Big Rusty Drums",
+            "Could not load player preset '" + xml.getFileNameWithoutExtension()
+                + "' - the file is missing or not a valid player preset.",
+            "OK");
+        return;
+    }
 
     auto parsed = juce::XmlDocument::parse (xml);
-    if (! parsed || ! parsed->hasTagName ("RustyPlayerPreset")) return;
+    if (! parsed || ! parsed->hasTagName ("RustyPlayerPreset"))
+    {
+        juce::AlertWindow::showMessageBoxAsync (
+            juce::MessageBoxIconType::WarningIcon,
+            "Big Rusty Drums",
+            "Could not load player preset '" + xml.getFileNameWithoutExtension()
+                + "' - the file is missing or not a valid player preset.",
+            "OK");
+        return;
+    }
 
     // J-11 fix (2026-05-05): read the program the preset was saved on (if
     // recorded) so we can switch to it before applying CCs.  Older presets
@@ -662,7 +688,27 @@ bool BaySickRustyDrumsPage::loadProgram (Program target)
         tearDownCurrentProgram();
 
     if (! loadKit (sfzPath))
+    {
+        // The teardown above really did destroy the running program, so None
+        // is the honest state -- leaving mCurrentProgram on the old value
+        // would make BOTH dropdown entries dead (re-picking the new one is
+        // inert because the ComboBox id never changed, re-picking the old one
+        // dies on the target == mCurrentProgram early-out) with a silent,
+        // kit-less page behind them.  Inlined rather than calling
+        // unloadToNone(): that would re-run tearDownCurrentProgram against an
+        // engine that no longer exists and re-clear the pattern rolls.
+        mCurrentProgram = Program::None;
+        if (mProgramCombo) mProgramCombo->setSelectedId (0, juce::dontSendNotification);
+        if (onProgramChanged) onProgramChanged();
+        if (onSoundNameChanged) onSoundNameChanged ("BaySickRustyDrums");
+
+        juce::AlertWindow::showMessageBoxAsync (
+            juce::MessageBoxIconType::WarningIcon,
+            "Big Rusty Drums",
+            "Could not load program:\n" + sfzPath.getFullPathName(),
+            "OK");
         return false;
+    }
 
     mCurrentProgram = target;
     if (onProgramChanged) onProgramChanged();   // QA-E Task 8 NIT-1: new program now current

@@ -1,5 +1,6 @@
 #include "BaySickGuitarsProcessor.h"
 #include "../MissingFileReport.h"   // QA-Export Task 5
+#include "../SampleLibrary.h"
 #include "sfizz.hpp"
 #include <functional>
 #include <map>
@@ -36,8 +37,9 @@ BaySickGuitarsProcessor::BaySickGuitarsProcessor (int instIdx, juce::UndoManager
 
     // Listen on every <prefix>cc<N> APVTS param so widget edits, automation,
     // and project state restore all funnel into a single sfizz CC dispatch
-    // path.  Listener fires on the message thread; sfizz's cc() is documented
-    // as message-thread safe when not concurrently rendering.
+    // path.  The listener runs on the writer's thread and renderBlock may be
+    // live at that moment, so it never touches sfizz itself -- it marks
+    // mCcDirty and processBlock owns the actual mSfizz->cc() push.
     for (int cc = 0; cc < kCcCount; ++cc)
         apvts.addParameterListener (mCcParamRoot + juce::String (cc), this);
 
@@ -64,15 +66,16 @@ BaySickGuitarsProcessor::~BaySickGuitarsProcessor()
         apvts.removeParameterListener (mCcParamRoot + juce::String (cc), this);
 }
 
-void BaySickGuitarsProcessor::parameterChanged (const juce::String& paramId, float newValue)
+void BaySickGuitarsProcessor::parameterChanged (const juce::String& paramId, float)
 {
-    // <prefix>cc<N> → sfizz CC.  Pure dispatch.  Param IDs follow the form
+    // Dirty-mark only -- the value itself is not carried here; the audio
+    // thread reads the mCcRaw atomic at drain time, so the newest write wins
+    // even when several land between blocks.  Param IDs follow the form
     // `bgg_<instIdx>_cc<N>`, so `mCcParamRoot` is the concrete prefix to strip.
     if (! paramId.startsWith (mCcParamRoot)) return;
     const int cc = paramId.substring (mCcParamRoot.length()).getIntValue();
     if (cc < 0 || cc >= kCcCount) return;
-    const int v  = juce::jlimit (0, 127, (int) std::round (newValue));
-    if (mSfizz) mSfizz->cc (0, cc, v);
+    mCcDirty[(size_t) (cc >> 6)].fetch_or (1ull << (cc & 63), std::memory_order_release);
 }
 
 int BaySickGuitarsProcessor::getNumActiveVoices() const noexcept
@@ -283,6 +286,28 @@ void BaySickGuitarsProcessor::processBlock (juce::AudioBuffer<float>& buffer,
     }
 
     updateFromApvts();
+
+    // Drain the message-thread CC marks ahead of MIDI dispatch + render so a
+    // knob move lands before this block's noteOns read layer-activation state.
+    // Sitting below the processing gate is load-bearing: marks made mid-loadKit
+    // (the CC reset + set_cc default pushes) accumulate and flush on the first
+    // block after the gate reopens, never into a half-parsed engine.  Acquire
+    // pairs with the listener's release so mCcRaw reads at least the marked
+    // value.
+    if (mSfizz)
+    {
+        for (int w = 0; w < kCcDirtyWords; ++w)
+        {
+            auto bits = mCcDirty[(size_t) w].exchange (0, std::memory_order_acquire);
+            for (int b = 0; bits != 0; ++b, bits >>= 1)
+            {
+                if ((bits & 1ull) == 0) continue;
+                const int cc = (w << 6) | b;
+                if (auto* raw = mCcRaw[(size_t) cc])
+                    mSfizz->cc (0, cc, juce::jlimit (0, 127, (int) std::round (raw->load())));
+            }
+        }
+    }
 
     // Audition exchange (UI → audio thread).  Velocity packed into the upper
     // byte; legacy callers (velocity=0 → unpacked 0) get bumped back to 100.
@@ -614,7 +639,8 @@ bool BaySickGuitarsProcessor::loadKit (const juce::File& sfzPath)
     // prior values) because switching programs leaks values from the previous
     // kit - e.g. user adjusts CC100 on Green to 90, switches to Black (which
     // never set_cc100); without the reset CC100 would stay at 90.  The reset
-    // reaches sfizz via setValueNotifyingHost -> parameterChanged.
+    // reaches sfizz via setValueNotifyingHost -> parameterChanged's dirty
+    // mark, drained by processBlock once the processing gate reopens.
     // QA-UndoCoverage Task 6: kit-default pushes are programmatic (the kit
     // load itself becomes ONE structural transaction in Task 7).
     juce::AudioProcessorValueTreeState::ScopedProgrammaticParamWrites spw;
@@ -625,8 +651,8 @@ bool BaySickGuitarsProcessor::loadKit (const juce::File& sfzPath)
             p->setValueNotifyingHost (p->getNormalisableRange().convertTo0to1 (0.0f));
     }
 
-    // Push kit defaults through APVTS - drives the parameterChanged listener
-    // which forwards each value to sfizz.  Overrides the 0 reset above for
+    // Push kit defaults through APVTS - the parameterChanged marks land in
+    // sfizz via the processBlock drain.  Overrides the 0 reset above for
     // CCs the kit author explicitly set.
     for (auto& [cc, val] : kitDefaults)
     {
@@ -653,7 +679,11 @@ void BaySickGuitarsProcessor::getStateInformation (juce::MemoryBlock& dest)
     if (mCurrentKitPath != juce::File())
     {
         juce::ValueTree kitNode ("KitPath");
-        kitNode.setProperty ("path", mCurrentKitPath.getFullPathName(), nullptr);
+        // Persist as a stable-root ref when the kit lives under Core Library
+        // (every shipped kit does), so the saved path stops embedding the
+        // Windows user name and resolves under any account.  Falls back to
+        // absolute for anything outside.
+        kitNode.setProperty ("path", SampleLibrary::refForPersist (mCurrentKitPath), nullptr);
         root.appendChild (kitNode, nullptr);
     }
 
@@ -677,7 +707,9 @@ void BaySickGuitarsProcessor::setStateInformation (const void* data, int sz)
     //   2) replaceState second (the project's saved CCs overlay the kit defaults)
     if (auto kitNode = root.getChildWithName ("KitPath"); kitNode.isValid())
     {
-        const juce::File kit (kitNode.getProperty ("path").toString());
+        // resolvePersistedRef passes a plain absolute path straight through, so
+        // states written before the stable-ref switch keep loading.
+        const juce::File kit = SampleLibrary::resolvePersistedRef (kitNode.getProperty ("path").toString());
         if (kit.existsAsFile())
             loadKit (kit);
         else

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <atomic>
 
 // Render engine flags + tunables.
@@ -38,7 +39,7 @@ namespace RenderEngine
     // fix).  Pre-flip blockers (B2 GUI deadlock, N1 BaySickVocal shutdown
     // gate, ~StandaloneEditor teardown, B1 deferred-destruction GC) all
     // cleared in 3b2c85a / fdbe9e1 / 47ba7a2.  Watchdog
-    // (kWatchdogTimeoutMillis below) catches any remaining deadlocks
+    // (watchdogTimeoutMillis below) catches any remaining deadlocks
     // loudly instead of letting the audio thread hang.
     //
     // Worker threads read:   .load (std::memory_order_acquire)
@@ -61,13 +62,41 @@ namespace RenderEngine
 
     // 2026-05-06 (Batch 9c watchdog): block-timeout deadline for
     // RenderGraphDispatcher::dispatchBlock.  The audio thread bails after
-    // this many milliseconds of waiting on mAllDone instead of hanging
-    // forever -- catches missed routing-graph cycles, stuck workers, etc.
-    // 100 ms is much longer than any healthy block (worst case ~25 ms at
-    // 1024 samples / 44.1 kHz with a heavy session) so false positives
-    // are very unlikely.  When the watchdog fires it logs the incomplete
-    // task list + clears the output buffer for that block.
-    inline constexpr double kWatchdogTimeoutMillis = 100.0;
+    // this long waiting on mAllDone instead of hanging forever -- it
+    // catches missed routing-graph cycles and stuck workers.
+    //
+    // The watchdog must only ever mean DEADLOCK, never slowness, and the
+    // fixed 100 ms it used to be could not mean that at both ends of the
+    // supported range: 100 ms is 34 block periods at 128 samples / 44.1 kHz
+    // but only 1.08 at 4096 / 44.1 kHz, where any instantaneous load above
+    // 108% tripped it.  Firing there is strictly worse than not firing --
+    // one 4096 block is 92.9 ms, so bailing at 100 ms cannot save the
+    // deadline anyway, it just replaces real audio with a cleared block and
+    // hands the next block a desynced graph.  So derive the deadline from
+    // the live block period instead (RenderGraphDispatcher::prepare).
+    //
+    // MAGIC NUMBERS: 32 block periods is far past any plausible transient
+    // overload (a Debug build's ~5x slowdown included) while still bounding
+    // a genuine hang to under a second.  The clamp floor keeps a tiny buffer
+    // from tripping on ordinary scheduler jitter -- 100 ms, which is the old
+    // constant, so nothing changes at Jeff's 128 -- and the ceiling keeps a
+    // huge buffer from stalling the audio thread for longer than that on a
+    // real deadlock.  Same shape as VibeSynthProcessor::settleAudioThread.
+    inline constexpr double kWatchdogBlockPeriods = 32.0;
+    inline constexpr double kWatchdogMinMillis    = 100.0;
+    inline constexpr double kWatchdogMaxMillis    = 1000.0;
+
+    // Falls back to the floor when the rate/size pair is not known yet, so a
+    // dispatch that somehow precedes prepare still behaves as it did before.
+    inline double watchdogTimeoutMillis (double sampleRate, int blockSize) noexcept
+    {
+        if (sampleRate <= 0.0 || blockSize <= 0)
+            return kWatchdogMinMillis;
+
+        const double blockPeriodMs = 1000.0 * (double) blockSize / sampleRate;
+        return std::clamp (kWatchdogBlockPeriods * blockPeriodMs,
+                           kWatchdogMinMillis, kWatchdogMaxMillis);
+    }
 
     // Channel id space matches MixerChannelIds (0..999). The ChannelBufferArena
     // pre-allocates one stereo slot per id; most slots are unused at any given

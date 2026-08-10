@@ -51,6 +51,23 @@ public:
     // type that overrides it; the other twelve take DSPBase's no-op.
     void setHostTransport (const DSPBase::HostTransport&) override;
 
+    // ── Offline render ───────────────────────────────────────────────────────
+    // The processor's beginOfflineRender sweep walks itself, the rig engines
+    // and the sfizz trio.  A plugin in a MIXER RACK SLOT is none of those -- it
+    // is a DSPBase inside an EffectRack -- so it never learned a render was
+    // running: it rendered exports and freezes in realtime mode, and a BRIDGED
+    // one raced the live per-block ceiling against a render-sized block and
+    // lost, landing SILENCE in the WAV while the export reported success.
+    //
+    // Not an override: DSPBase has no non-realtime hook, and the other twelve
+    // effect types have no use for one.  The static form is for callers holding
+    // a DSPBase* (EffectRack::getSlotEffect), matching applyParamNorm below.
+    //
+    // NOT the audio thread.  A plugin's own setNonRealtime is free to
+    // reallocate -- the helper change-gates it for exactly that reason.
+    void setNonRealtime (bool) noexcept;
+    static void setNonRealtime (DSPBase*, bool) noexcept;
+
     // ── Automation ──────────────────────────────────────────────────────────
     // Lanes are keyed on the plugin's OWN stable parameter id
     // (HostedParameter::getParameterID -- for VST3 the id the plugin declares),
@@ -99,6 +116,10 @@ private:
 
     double mPreparedRate  { 0.0 };
     int    mPreparedBlock { 0 };
+
+    // Latched so a slot FILLED during a render (a state restore inside a freeze
+    // pass) comes up in the mode everything around it is rendering in.
+    bool   mNonRealtime   { false };
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (HostedPluginEffect)
 };

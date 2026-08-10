@@ -1,5 +1,6 @@
 #include "BaySickPitchEditor.h"
 #include "../AppPaths.h"
+#include "../UserFileSave.h"
 #include "BaySickPitchSubEditor.h"
 #include "BaySickVocalProcessor.h"
 #include "../Standalone/UndoBracket.h"
@@ -2916,20 +2917,13 @@ void BaySickPitchEditor::saveUserPreset()
         [self, aw] (int r)
         {
             if (r != 1 || ! self) return;
-            const juce::String name = aw->getTextEditorContents ("name").trim();
-            if (name.isEmpty()) return;
+            const juce::String name = aw->getTextEditorContents ("name");
 
             juce::XmlElement el ("BaySickPitchPreset");
             for (auto* id : { "bsp_focus", "bsp_mod", "bsp_speed" })
                 el.setAttribute (id, (double) self->paramValue (id));
 
-            auto dir = pitchPresetsDir();
-            dir.createDirectory();
-            auto target = dir.getChildFile (name + ".xml");
-            int n = 2;
-            while (target.exists())
-                target = dir.getChildFile (name + " (" + juce::String (n++) + ").xml");
-            target.replaceWithText (el.toString());
+            UserFileSave::writeXmlAsync (pitchPresetsDir(), name, el, {});
         }), true);
 }
 

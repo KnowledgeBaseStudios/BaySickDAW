@@ -1,4 +1,5 @@
 #include "BuilderPage.h"
+#include "../ProjectFileResolver.h"
 #include "../AppPaths.h"         // TS7: freeze_timing.txt lands beside the app
 #include "../BaySickRustyDrums/BaySickRustyDrumsProcessor.h"   // TS7 §6.9 kit freeze
 #include "TypingKeyboardMap.h"   // D-4: bypass tool keys while typing-keyboard mode is on
@@ -42,6 +43,23 @@ static bool isRightAltKeyDown() noexcept
     return false;
    #endif
 }
+
+// TS7 freeze-render stopwatch readout (Jeff, 2026-07-30).  Debug build only
+// (Jeff, 2026-08-07): the measurement it existed to take has been taken, and
+// the file is append-only with no cap or rotation, so a shipping build would
+// grow a file the user never asked for and cannot clear from inside the app.
+// The Release stub keeps the call sites compiling unchanged -- same shape as
+// G3PlayheadDiag.h.
+#if JUCE_DEBUG
+static void freezeTimingLog (const juce::String& line)
+{
+    DBG (line);
+    AppPaths::appRoot().getChildFile ("freeze_timing.txt")
+        .appendText (line + juce::newLine);
+}
+#else
+static void freezeTimingLog (const juce::String&) {}
+#endif
 
 // QA-E Task 7 (FILE-02): shared Audio Properties box.  PendingRoute is the
 // menu-tree result; buildAudioPropsControls builds the box (definition is an
@@ -266,8 +284,8 @@ void AudioCategoryItem::itemClicked (const MouseEvent& e)
 }
 
 // ── QA-Fe2: AudioGroupItem ───────────────────────────────────────────────────
-AudioGroupItem::AudioGroupItem (const String& name, Colour accent, bool isAuto)
-    : mName (name), mAccent (accent), mIsAuto (isAuto)
+AudioGroupItem::AudioGroupItem (const String& name, Colour accent)
+    : mName (name), mAccent (accent)
 {
     setOpen (true);
 }
@@ -344,7 +362,7 @@ BrowserPanel::BrowserPanel(PatternManager& pm,
     mDeleteBtn = std::make_unique<TextButton>("Delete");
     mDeleteBtn->onClick = [this] {
         if (mPM.getNumPatterns() > 1) {
-            performPatternSliceOp ("Delete Pattern", [this] {
+            performPatternTsOp ("Delete Pattern", [this] {
                 mPM.removePattern(mSelectedPat);
                 mSelectedPat = jlimit(0, mPM.getNumPatterns() - 1, mSelectedPat);
                 mPM.setCurrentPattern(mSelectedPat);
@@ -640,7 +658,7 @@ void BrowserPanel::rebuildAudioRows()
             const GroupBucket& bucket = gpair.second;
             const bool         isAuto = bucket.isAuto;
 
-            auto* grp = new AudioGroupItem (key, catAccent[ci], isAuto);
+            auto* grp = new AudioGroupItem (key, catAccent[ci]);
             grp->onContextMenu = [this, ci, key, isAuto] (Point<int> pt)
             {
                 showGroupContextMenu (ci, key, isAuto, pt);
@@ -1186,7 +1204,9 @@ void BrowserPanel::confirmAndDeleteLibraryEntry (int libIdx)
 
     const String path       = mPM.getAudioLibraryPath (libIdx);
     const int    owner      = mPM.getAudioLibraryPageOwner (libIdx);
-    const String fileName   = juce::File (path).getFileName();
+    // Resolved: a "mysamples:"/"library:" stored ref would otherwise put its
+    // prefix and relative folder into the confirmation prompt.
+    const String fileName   = ProjectFileResolver::resolve (path).getFileName();
     // owner == 0 means "generic Audio category" (master capture / untagged
     // drops) -- no owning page to close.
     const int    ownerCount = (owner != 0)
@@ -1232,17 +1252,26 @@ void BrowserPanel::confirmAndDeleteLibraryEntry (int libIdx)
             self->performLibraryOp ("Delete Audio", /*withBlocks*/ true, [&] {
                 // Cascade-remove blocks matching (path, owner).  Blocks routed
                 // to a DIFFERENT page (different routeChannel) stay.
-                for (int i = pm.getNumBlocks() - 1; i >= 0; --i)
-                    if (pm.getBlock (i).clipType == ClipType::Audio
-                        && pm.getBlock (i).audioFilePath == path
-                        && pm.getBlock (i).routeChannel  == owner)
-                        pm.removeBlock (i);
+                {
+                    // THREAD SAFETY (QA-SOUNDNESS 2026-08-07): removeBlock carries
+                    // its own audio-shield settle; one hoisted guard over the whole
+                    // cascade collapses N settles into one (the inner guards see the
+                    // shield already up and skip theirs).
+                    const PatternManager::ScopedAudioShield shield (pm);
+                    for (int i = pm.getNumBlocks() - 1; i >= 0; --i)
+                        if (pm.getBlock (i).clipType == ClipType::Audio
+                            && pm.getBlock (i).audioFilePath == path
+                            && pm.getBlock (i).routeChannel  == owner)
+                            pm.removeBlock (i);
+                }
 
                 // Remove the specific library entry by index (precise -- post-
                 // Task-5 schema may have multiple entries with same path under
                 // different page owners).
                 pm.removeAudioFromLibraryAt (libIdx);
             });
+
+            if (self->onPurgeWaveformCache) self->onPurgeWaveformCache (path);
 
             self->rebuildAudioRows();
             if (self->onArrangementChanged) self->onArrangementChanged();
@@ -1330,7 +1359,15 @@ void BrowserPanel::showLibraryPropertiesDialog (int libIdx)
                 // original entry is untouched.
                 if (! self->onDuplicateFileForCopy) return;
                 const juce::String np = self->onDuplicateFileForCopy (libPath);
-                if (np.isEmpty()) return;
+                if (np.isEmpty())
+                {
+                    juce::AlertWindow::showMessageBoxAsync (
+                        juce::AlertWindow::WarningIcon,
+                        "Couldn't duplicate file",
+                        "The file could not be copied. It may have been moved "
+                        "or deleted:\n\n" + libPath);
+                    return;
+                }
                 int target = pending->channelId;
                 if (pending->createKind >= 0 && self->onCreateRoutablePage)
                     target = self->onCreateRoutablePage (pending->createKind, np);
@@ -1364,7 +1401,8 @@ void BrowserPanel::showLibraryPropertiesDialog (int libIdx)
 // ─────────────────────────────────────────────────────────────────────────────
 // G-6 (2026-04-29): Duplicate... right-click flow on Audio tree leaves.
 // Recursive on Rename.  Self-contained: shows name prompt, resolves filename
-// conflicts (Overwrite / Cancel / Rename re-prompt), physically copies the
+// conflicts (Rename re-prompt / Cancel -- G-7's no-file-delete contract means
+// there is no Overwrite), physically copies the
 // WAV, then hands BOTH the source path AND the new file's absolute path to
 // the editor's onDuplicateClipSpawn callback so StandaloneEditor can spawn
 // a new ClipsPage on the copy AND clone the source page's full state
@@ -1374,7 +1412,16 @@ void BrowserPanel::runAudioDuplicateFlow (const juce::String& sourceAbsPath,
                                           const juce::String& defaultName)
 {
     File source (sourceAbsPath);
-    if (! source.existsAsFile()) return;
+    if (! source.existsAsFile())
+    {
+        juce::AlertWindow::showMessageBoxAsync (
+            juce::MessageBoxIconType::WarningIcon,
+            "Audio File Not Found",
+            "Cannot place this clip - the file is missing:\n\n" + sourceAbsPath
+            + "\n\nIt may have been moved or deleted. Restore the file, or "
+              "remove the entry from the browser (right-click > Remove).");
+        return;
+    }
 
     const String ext = source.getFileExtension();   // e.g. ".wav"
 
@@ -1396,7 +1443,20 @@ void BrowserPanel::runAudioDuplicateFlow (const juce::String& sourceAbsPath,
                 if (! self || result != 1) return;
 
                 const String typedName = aw->getTextEditorContents ("name").trim();
-                if (typedName.isEmpty()) return;
+
+                // The OK button is bound to Return and the editor is prefilled,
+                // so clear-and-Return is a natural gesture and has to say
+                // something.  The bail stays - an empty stem would build a
+                // destination named just ".wav".  Wording matches the
+                // UserFileSave family even though this flow is a raw copy.
+                if (typedName.isEmpty())
+                {
+                    juce::AlertWindow::showMessageBoxAsync (
+                        juce::MessageBoxIconType::WarningIcon,
+                        "Duplicate Clip",
+                        "Type a name for it first.");
+                    return;
+                }
 
                 // Build destination path: same folder as source, typed name,
                 // preserve extension.  Strip any extension the user typed
@@ -1407,7 +1467,15 @@ void BrowserPanel::runAudioDuplicateFlow (const juce::String& sourceAbsPath,
                 if (stem.endsWithIgnoreCase (ext)) stem = stem.dropLastCharacters (ext.length());
                 File dest = destDir.getChildFile (stem + ext);
 
-                if (dest == source) return;   // same file - no-op
+                if (dest == source)
+                {
+                    juce::AlertWindow::showMessageBoxAsync (
+                        juce::MessageBoxIconType::WarningIcon,
+                        "Duplicate Clip",
+                        "That is the name of the original file. Type a "
+                        "different name for the copy.");
+                    return;
+                }
 
                 if (dest.existsAsFile())
                 {
@@ -1578,6 +1646,13 @@ void BrowserPanel::performPatternSliceOp (const juce::String& label,
                       label);
 }
 
+void BrowserPanel::performPatternTsOp (const juce::String& label,
+                                       const std::function<void()>& op)
+{
+    if (onPerformPatternTsOp) { onPerformPatternTsOp (label, op); return; }
+    performPatternSliceOp (label, op);
+}
+
 void BrowserPanel::performLibraryOp (const juce::String& label, bool withBlocks,
                                      const std::function<void()>& op)
 {
@@ -1606,6 +1681,10 @@ void BrowserPanel::performLibraryOp (const juce::String& label, bool withBlocks,
         pm.restoreAudioLibrary (s.entries, s.manualGroups);
         if (s.includesBlocks)
         {
+            // THREAD SAFETY (QA-SOUNDNESS 2026-08-07): a whole-list block restore is
+            // 2N shielded mutations, so one hoisted guard is the difference between
+            // one settle and 2N of them on a single Ctrl+Z.
+            const PatternManager::ScopedAudioShield shield (pm);
             while (pm.getNumBlocks() > 0) pm.removeBlock (0);
             for (const auto& b : s.blocks) pm.addBlock (b);
         }
@@ -1644,6 +1723,9 @@ void BrowserPanel::performTemplateOp (const juce::String& label, bool withBlocks
         pm.restoreAutomationTemplates (s.templates);
         if (s.includesBlocks)
         {
+            // THREAD SAFETY (QA-SOUNDNESS 2026-08-07): see performLibraryOp -- one
+            // guard over the 2N restore instead of one settle per mutation.
+            const PatternManager::ScopedAudioShield shield (pm);
             while (pm.getNumBlocks() > 0) pm.removeBlock (0);
             for (const auto& b : s.blocks) pm.addBlock (b);
         }
@@ -1824,7 +1906,7 @@ void BrowserPanel::showItemContextMenu(BrowserItem& item, Point<int> /*globalPt*
                 case BrowserItem::Kind::Pattern:
                     if (mPM.getNumPatterns() > 1)
                     {
-                        performPatternSliceOp ("Delete Pattern", [this, idx] {
+                        performPatternTsOp ("Delete Pattern", [this, idx] {
                             mPM.removePattern(idx);
                             mSelectedPat = jlimit(0, mPM.getNumPatterns() - 1, mSelectedPat);
                             mPM.setCurrentPattern(mSelectedPat);
@@ -1860,10 +1942,16 @@ void BrowserPanel::showItemContextMenu(BrowserItem& item, Point<int> /*globalPt*
                                 // Cascade-remove any blocks created from this
                                 // template (matched by paramId).
                                 const String pid = mPM.getAutomationTemplate(tplIdx).paramId;
-                                for (int i = mPM.getNumBlocks() - 1; i >= 0; --i)
-                                    if (mPM.getBlock(i).clipType == ClipType::Automation
-                                        && mPM.getBlock(i).automationLane.paramId == pid)
-                                        mPM.removeBlock(i);
+                                {
+                                    // THREAD SAFETY (QA-SOUNDNESS 2026-08-07): one
+                                    // hoisted guard over the cascade -- the per-call
+                                    // shields inside removeBlock then cost nothing.
+                                    const PatternManager::ScopedAudioShield shield (mPM);
+                                    for (int i = mPM.getNumBlocks() - 1; i >= 0; --i)
+                                        if (mPM.getBlock(i).clipType == ClipType::Automation
+                                            && mPM.getBlock(i).automationLane.paramId == pid)
+                                            mPM.removeBlock(i);
+                                }
                                 mPM.removeAutomationTemplate(tplIdx);
                             });
                         }
@@ -2337,29 +2425,6 @@ int ArrangementGrid::hitTestAutomPoint(int blockIdx, int x, int y) const
     return -1;
 }
 
-// QA-G Task 5: evaluate a lane at normalized position t exactly the way the
-// playback applicator does (linear segments; Stepped holds the left value;
-// tension is not applied at runtime -- mirror of PluginProcessor's apply).
-static float evalAutomationLaneAt (std::vector<ControlPoint> pts, float t)
-{
-    if (pts.empty()) return 0.5f;
-    std::sort (pts.begin(), pts.end(),
-               [](const ControlPoint& a, const ControlPoint& b){ return a.timeTicks < b.timeTicks; });
-    if ((int) pts.size() == 1 || t <= pts.front().timeTicks) return pts.front().value01;
-    if (t >= pts.back().timeTicks) return pts.back().value01;
-    for (int i = 0; i < (int) pts.size() - 1; ++i)
-    {
-        if (t >= pts[i].timeTicks && t <= pts[i + 1].timeTicks)
-        {
-            if (pts[i].curveType == CurveType::Stepped) return pts[i].value01;
-            const float span = pts[i + 1].timeTicks - pts[i].timeTicks;
-            const float u    = (span > 0.f) ? (t - pts[i].timeTicks) / span : 0.f;
-            return pts[i].value01 + u * (pts[i + 1].value01 - pts[i].value01);
-        }
-    }
-    return pts.back().value01;
-}
-
 // QA-G Task 5: physically split a lane at a normalized cut position -- each
 // side keeps its own points renormalized to 0..1 plus an interpolated
 // boundary point, so both pieces keep playing exactly what they played
@@ -2367,7 +2432,7 @@ static float evalAutomationLaneAt (std::vector<ControlPoint> pts, float t)
 static void splitAutomationLane (AutomationLane& leftLane, AutomationLane& rightLane, float cutFrac)
 {
     cutFrac = juce::jlimit (0.001f, 0.999f, cutFrac);
-    const float cutVal = evalAutomationLaneAt (leftLane.points, cutFrac);
+    const float cutVal = evalAutomationLaneAt (leftLane, cutFrac);
 
     std::vector<ControlPoint> sorted = leftLane.points;
     std::sort (sorted.begin(), sorted.end(),
@@ -2466,6 +2531,31 @@ Colour ArrangementGrid::blockColour(const ArrangementBlock& b) const
 // ─────────────────────────────────────────────────────────────────────────────
 // Audio thumbnail helper
 // ─────────────────────────────────────────────────────────────────────────────
+
+// Oldest-first eviction, shared by the thumbnail cache and the baked-image
+// cache so their ceilings cannot drift apart.  `order` is insertion order.
+// `keep` is the path being fetched on THIS call: the caller dereferences the
+// returned pointer immediately, so it is rotated to the back rather than
+// dropped.  Both callers evict only on insert, so a repeat lookup of a live
+// path never reorders anything.
+namespace
+{
+    template <typename MapT>
+    void evictOldestEntries (MapT& cache,
+                             std::deque<juce::String>& order,
+                             size_t ceiling,
+                             const juce::String& keep)
+    {
+        while (cache.size() > ceiling && order.size() > 1)
+        {
+            const juce::String oldest = order.front();
+            order.pop_front();
+            if (oldest == keep) { order.push_back (oldest); continue; }
+            cache.erase (oldest);
+        }
+    }
+}
+
 AudioThumbnail* ArrangementGrid::getOrCreateThumbnail(const juce::String& path) const
 {
     if (path.isEmpty()) return nullptr;
@@ -2482,6 +2572,9 @@ AudioThumbnail* ArrangementGrid::getOrCreateThumbnail(const juce::String& path) 
         auto thumb = std::make_unique<AudioThumbnail>(512, mAFM, mThumbCache);
         thumb->setSource(new FileInputSource(absolute));
         mThumbnails[path] = std::move(thumb);
+        mThumbnailOrder.push_back (path);
+
+        evictOldestEntries (mThumbnails, mThumbnailOrder, kMaxThumbnails, path);
     }
     return mThumbnails.at(path).get();
 }
@@ -2501,7 +2594,17 @@ const juce::Image* ArrangementGrid::getOrBakeWaveformImage (
     const double totalSec = thumb->getTotalLength();
     if (totalSec <= 0.0) return nullptr;       // thumb hasn't read header yet
 
-    auto& entry = mWaveformImages[path];
+    auto it = mWaveformImages.find (path);
+    if (it == mWaveformImages.end())
+    {
+        it = mWaveformImages.emplace (path, WaveformImageCacheEntry{}).first;
+        mWaveformImageOrder.push_back (path);
+
+        evictOldestEntries (mWaveformImages, mWaveformImageOrder,
+                            kMaxWaveformImages, path);
+    }
+
+    auto& entry = it->second;
     const bool nowLoaded = thumb->isFullyLoaded();
 
     const bool needBake = ! entry.image.isValid()
@@ -2521,6 +2624,24 @@ const juce::Image* ArrangementGrid::getOrBakeWaveformImage (
         entry.wasFullyLoadedWhenBaked = nowLoaded;
     }
     return &entry.image;
+}
+
+void ArrangementGrid::purgeWaveformCacheFor (const juce::String& path)
+{
+    if (path.isEmpty()) return;
+    mWaveformImages.erase (path);
+    mThumbnails.erase (path);
+
+    // Both eviction deques have to lose the path too, or they accumulate
+    // entries naming keys no longer in either map.  At most one occurrence
+    // each: a path is pushed only on the insert that created its entry.
+    auto dropFromOrder = [&path] (std::deque<juce::String>& order)
+    {
+        const auto it = std::find (order.begin(), order.end(), path);
+        if (it != order.end()) order.erase (it);
+    };
+    dropFromOrder (mWaveformImageOrder);
+    dropFromOrder (mThumbnailOrder);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -3609,6 +3730,36 @@ void ArrangementGrid::beginEdit(const juce::String& label)
         mPendingRowMuted .push_back (mPM.isRowMuted (r)  ? (char) 1 : (char) 0);
         mPendingRowSoloed.push_back (mPM.isRowSoloed (r) ? (char) 1 : (char) 0);
     }
+    mPendingMarkers = captureMarkerSet();
+}
+
+// Snapshot equality for the commitEdit skip test.  The ruler structs are POD
+// plus one juce::String and carry no operator==, so the compare is spelled out
+// field by field.
+static bool markerSetsEqual (const MarkerSetSnapshot& a, const MarkerSetSnapshot& b)
+{
+    if (a.currentTsUid != b.currentTsUid) return false;
+    if (a.timeMarkers.size()    != b.timeMarkers.size())    return false;
+    if (a.timeSigChanges.size() != b.timeSigChanges.size()) return false;
+    if (a.tempoChanges.size()   != b.tempoChanges.size())   return false;
+
+    for (size_t i = 0; i < a.timeMarkers.size(); ++i)
+        if (a.timeMarkers[i].bar   != b.timeMarkers[i].bar
+            || a.timeMarkers[i].label != b.timeMarkers[i].label) return false;
+
+    for (size_t i = 0; i < a.timeSigChanges.size(); ++i)
+    {
+        const auto& x = a.timeSigChanges[i];
+        const auto& y = b.timeSigChanges[i];
+        if (x.bar != y.bar || x.num != y.num || x.den != y.den
+            || x.uid != y.uid || x.linkedPattern != y.linkedPattern) return false;
+    }
+
+    for (size_t i = 0; i < a.tempoChanges.size(); ++i)
+        if (a.tempoChanges[i].bar != b.tempoChanges[i].bar
+            || a.tempoChanges[i].bpm != b.tempoChanges[i].bpm) return false;
+
+    return true;
 }
 
 void ArrangementGrid::commitEdit()
@@ -3644,10 +3795,30 @@ void ArrangementGrid::commitEdit()
         });
 
     mUndoCtx.perform(action, mPendingLabel);
-    if (onUndoRedoStateChanged) onUndoRedoStateChanged();
     // QA-G Task 6: linked markers follow their blocks (delete/undo removal
     // half) + follower signatures re-derive after any block mutation.
     mPM.cleanupLinkedMarkers();
+
+    // cleanupLinkedMarkers erases orphaned linked markers for good, so the
+    // after-capture sits on ITS far side -- capture first and the snapshot
+    // would record markers this very edit then deletes, and redo would
+    // resurrect them.  Same pairing as performPatternTsOp: the
+    // ArrangementEditAction opened the named transaction, this appends into
+    // the SAME ActionSet (no beginNewTransaction between the performs), so one
+    // Ctrl+Z reverses blocks and markers together, and the marker action lands
+    // LAST on redo, after the block replay re-runs cleanup.
+    // commitEdit is the general arrangement-edit path, so the action is banked
+    // only when the set actually moved -- a no-op transaction on every drag
+    // would flood the history.
+    MarkerSetSnapshot markersAfter = captureMarkerSet();
+    if (! markerSetsEqual (mPendingMarkers, markersAfter))
+        mUndoCtx.manager->perform (new MarkerSetAction (
+            mPendingMarkers, std::move (markersAfter),
+            [sp = juce::Component::SafePointer<ArrangementGrid> (this)]
+            (const MarkerSetSnapshot& s)
+            { if (sp != nullptr) sp->applyMarkerSet (s); }));
+
+    if (onUndoRedoStateChanged) onUndoRedoStateChanged();
     if (onArrangementChanged)   onArrangementChanged();
 }
 
@@ -3658,8 +3829,15 @@ void ArrangementGrid::applySnapshot(const std::vector<ArrangementBlock>& blocks,
                                     const std::vector<char>& rowMuted,
                                     const std::vector<char>& rowSoloed)
 {
-    while (mPM.getNumBlocks() > 0) mPM.removeBlock(0);
-    for (const auto& b : blocks) mPM.addBlock(b);
+    {
+        // THREAD SAFETY (QA-SOUNDNESS 2026-08-07): every undo/redo of an
+        // arrangement edit lands here as a full teardown-and-rebuild, i.e. 2N
+        // individually-shielded mutations.  One hoisted guard turns a 100-block
+        // Ctrl+Z from 200 audio settles into one.
+        const PatternManager::ScopedAudioShield shield (mPM);
+        while (mPM.getNumBlocks() > 0) mPM.removeBlock(0);
+        for (const auto& b : blocks) mPM.addBlock(b);
+    }
     for (int i = 0; i < kNumRows; ++i)
         mPM.setRowName(i, rowNames[i]);
     // QA-G: restore per-row mute/solo/group so undo of Move/Insert-track is
@@ -3774,7 +3952,12 @@ void ArrangementGrid::deleteSelected()
     if (mSelection.empty()) return;
     beginEdit("Delete");
     std::sort(mSelection.rbegin(), mSelection.rend());
-    for (int idx : mSelection) mPM.removeBlock(idx);
+    {
+        // THREAD SAFETY (QA-SOUNDNESS 2026-08-07): one guard for the whole
+        // multi-select delete -- otherwise each removeBlock settles on its own.
+        const PatternManager::ScopedAudioShield shield (mPM);
+        for (int idx : mSelection) mPM.removeBlock(idx);
+    }
     commitEdit();
     mSelection.clear();
     resized(); repaint();
@@ -3855,11 +4038,16 @@ void ArrangementGrid::deleteTimeRegion()
 
     constexpr float kEps = 1.0e-4f;
     // 1) erase blocks whose START lies in [t0, t1).
-    for (int i = mPM.getNumBlocks() - 1; i >= 0; --i)
     {
-        const float bs = (float) effectiveStartBars (mPM.getBlock(i));
-        if (bs >= t0 - kEps && bs < t1 - kEps)
-            mPM.removeBlock(i);
+        // THREAD SAFETY (QA-SOUNDNESS 2026-08-07): a time-range delete can drop
+        // every block in the range; one guard, not one settle per erase.
+        const PatternManager::ScopedAudioShield shield (mPM);
+        for (int i = mPM.getNumBlocks() - 1; i >= 0; --i)
+        {
+            const float bs = (float) effectiveStartBars (mPM.getBlock(i));
+            if (bs >= t0 - kEps && bs < t1 - kEps)
+                mPM.removeBlock(i);
+        }
     }
     // 2) slide every block that starts at or after t1 left by removedBars.
     for (int i = 0; i < mPM.getNumBlocks(); ++i)
@@ -3897,11 +4085,16 @@ void ArrangementGrid::pasteClipboard()
     beginEdit("Paste");
     mSelection.clear();
     int pasteStart = jmax(0, (int)snapBar(mBarOff));
-    for (auto b : mClipboard) {
-        b.startBeats += (double) pasteStart * 4.0;
-        mPM.addBlock(b);
-        mSelection.push_back(mPM.getNumBlocks() - 1);
-        afterPatternBlockPlaced(b);   // QA-G Task 6
+    {
+        // THREAD SAFETY (QA-SOUNDNESS 2026-08-07): one guard for the whole paste --
+        // a per-block settle would stall the UI once per clipboard entry.
+        const PatternManager::ScopedAudioShield shield (mPM);
+        for (auto b : mClipboard) {
+            b.startBeats += (double) pasteStart * 4.0;
+            mPM.addBlock(b);
+            mSelection.push_back(mPM.getNumBlocks() - 1);
+            afterPatternBlockPlaced(b);   // QA-G Task 6
+        }
     }
     commitEdit();
     resized(); repaint();
@@ -3938,10 +4131,15 @@ void ArrangementGrid::duplicateSelected()
 
         beginEdit("Duplicate (Timeline)");
         mSelection.clear();
-        for (auto& nb : newBlocks) {
-            mPM.addBlock(nb);
-            mSelection.push_back(mPM.getNumBlocks() - 1);
-            afterPatternBlockPlaced(nb);   // QA-G Task 6
+        {
+            // THREAD SAFETY (QA-SOUNDNESS 2026-08-07): one guard for the whole
+            // duplicate burst instead of one settle per added block.
+            const PatternManager::ScopedAudioShield shield (mPM);
+            for (auto& nb : newBlocks) {
+                mPM.addBlock(nb);
+                mSelection.push_back(mPM.getNumBlocks() - 1);
+                afterPatternBlockPlaced(nb);   // QA-G Task 6
+            }
         }
         // Shift the time-selection to the new range so a second Ctrl+B repeats
         // the duplication forward.
@@ -3974,10 +4172,15 @@ void ArrangementGrid::duplicateSelected()
         newBlocks.push_back(b);
     }
     mSelection.clear();
-    for (auto& nb : newBlocks) {
-        mPM.addBlock(nb);
-        mSelection.push_back(mPM.getNumBlocks() - 1);
-        afterPatternBlockPlaced(nb);   // QA-G Task 6
+    {
+        // THREAD SAFETY (QA-SOUNDNESS 2026-08-07): as the timeline path above --
+        // one guard across the burst, not one settle per addBlock.
+        const PatternManager::ScopedAudioShield shield (mPM);
+        for (auto& nb : newBlocks) {
+            mPM.addBlock(nb);
+            mSelection.push_back(mPM.getNumBlocks() - 1);
+            afterPatternBlockPlaced(nb);   // QA-G Task 6
+        }
     }
     commitEdit();
     resized(); repaint();
@@ -3989,8 +4192,13 @@ void ArrangementGrid::duplicateSelected()
 // QA-UndoCoverage Task 4: the Split-by-Engine local SplitState /
 // SplitPatternUndoAction pair was promoted to PatternListSnapshot /
 // PatternListAction (UndoActions.h) so browser pattern ops and the transport
-// dropdown share the slice.  Linked TS markers stay outside the undo domain
-// (established seam).
+// dropdown share the slice.  The slice itself carries NO markers -- a gesture
+// that also re-points or destroys linked TS markers (the pattern TS setters,
+// insert / move / delete) must go through performPatternTsOp, which banks a
+// MarkerSetAction into the same transaction.  Split by Player Engine is the
+// one exception to the wrapper, because its capacity-abort path has to bail
+// without banking anything; it pairs the two actions inline instead, in the
+// same order and with the same helpers.
 PatternListSnapshot ArrangementGrid::capturePatternSlice() const
 {
     PatternListSnapshot s;
@@ -4015,9 +4223,15 @@ void ArrangementGrid::applyPatternSlice (const PatternListSnapshot& s)
     // gesture can reach.
     if (s.patterns.empty() || (int) s.rowNames.size() < kNumRows) return;
 
-    mPM.restorePatternList (s.patterns, s.currentPattern);
-    while (mPM.getNumBlocks() > 0) mPM.removeBlock (0);
-    for (const auto& b : s.blocks) mPM.addBlock (b);
+    {
+        // THREAD SAFETY (QA-SOUNDNESS 2026-08-07): a pattern-slice undo restores the
+        // pattern list AND rebuilds the whole block list (2N shielded mutations).
+        // One hoisted guard covers the lot for a single settle.
+        const PatternManager::ScopedAudioShield shield (mPM);
+        mPM.restorePatternList (s.patterns, s.currentPattern);
+        while (mPM.getNumBlocks() > 0) mPM.removeBlock (0);
+        for (const auto& b : s.blocks) mPM.addBlock (b);
+    }
     for (int r = 0; r < kNumRows; ++r)
     {
         mPM.setRowName (r, s.rowNames[(size_t) r]);
@@ -4048,36 +4262,38 @@ void ArrangementGrid::performPatternSliceOp (const juce::String& label,
                       label);
 }
 
+MarkerSetSnapshot ArrangementGrid::captureMarkerSet() const
+{
+    MarkerSetSnapshot s;
+    for (int i = 0; i < mPM.getNumTimeMarkers(); ++i)    s.timeMarkers.push_back (mPM.getTimeMarker (i));
+    for (int i = 0; i < mPM.getNumTimeSigChanges(); ++i) s.timeSigChanges.push_back (mPM.getTimeSigChange (i));
+    for (int i = 0; i < mPM.getNumTempoChanges(); ++i)   s.tempoChanges.push_back (mPM.getTempoChange (i));
+    s.currentTsUid = mPM.getCurrentTsMarkerUid();
+    return s;
+}
+
+void ArrangementGrid::applyMarkerSet (const MarkerSetSnapshot& s)
+{
+    mPM.restoreTimeMarkers (s.timeMarkers);
+    mPM.restoreTimeSigState (s.timeSigChanges, s.currentTsUid);
+    mPM.restoreTempoChanges (s.tempoChanges);
+    repaint();
+    if (onTempoMapChanged) onTempoMapChanged();
+}
+
 void ArrangementGrid::performMarkerSetOp (const juce::String& label,
                                           const std::function<void()>& op)
 {
     if (! mUndoCtx.isValid()) { op(); return; }
 
-    auto capture = [this]() -> MarkerSetSnapshot
-    {
-        MarkerSetSnapshot s;
-        for (int i = 0; i < mPM.getNumTimeMarkers(); ++i)    s.timeMarkers.push_back (mPM.getTimeMarker (i));
-        for (int i = 0; i < mPM.getNumTimeSigChanges(); ++i) s.timeSigChanges.push_back (mPM.getTimeSigChange (i));
-        for (int i = 0; i < mPM.getNumTempoChanges(); ++i)   s.tempoChanges.push_back (mPM.getTempoChange (i));
-        s.currentTsUid = mPM.getCurrentTsMarkerUid();
-        return s;
-    };
-
-    MarkerSetSnapshot before = capture();
+    MarkerSetSnapshot before = captureMarkerSet();
     op();
-    MarkerSetSnapshot after = capture();
+    MarkerSetSnapshot after = captureMarkerSet();
 
     auto apply = [sp = juce::Component::SafePointer<ArrangementGrid> (this)]
                  (const MarkerSetSnapshot& s)
-    {
-        if (sp == nullptr) return;
-        auto& pm = sp->mPM;
-        pm.restoreTimeMarkers (s.timeMarkers);
-        pm.restoreTimeSigState (s.timeSigChanges, s.currentTsUid);
-        pm.restoreTempoChanges (s.tempoChanges);
-        sp->repaint();
-        if (sp->onTempoMapChanged) sp->onTempoMapChanged();
-    };
+    { if (sp != nullptr) sp->applyMarkerSet (s); };
+
     mUndoCtx.perform (new MarkerSetAction (std::move (before), std::move (after),
                                            std::move (apply)),
                       label);
@@ -4088,21 +4304,11 @@ void ArrangementGrid::performPatternTsOp (const juce::String& label,
 {
     if (! mUndoCtx.isValid()) { op(); return; }
 
-    auto captureMarkers = [this]() -> MarkerSetSnapshot
-    {
-        MarkerSetSnapshot s;
-        for (int i = 0; i < mPM.getNumTimeMarkers(); ++i)    s.timeMarkers.push_back (mPM.getTimeMarker (i));
-        for (int i = 0; i < mPM.getNumTimeSigChanges(); ++i) s.timeSigChanges.push_back (mPM.getTimeSigChange (i));
-        for (int i = 0; i < mPM.getNumTempoChanges(); ++i)   s.tempoChanges.push_back (mPM.getTempoChange (i));
-        s.currentTsUid = mPM.getCurrentTsMarkerUid();
-        return s;
-    };
-
     PatternListSnapshot sliceBefore   = capturePatternSlice();
-    MarkerSetSnapshot   markersBefore = captureMarkers();
+    MarkerSetSnapshot   markersBefore = captureMarkerSet();
     op();
     PatternListSnapshot sliceAfter   = capturePatternSlice();
-    MarkerSetSnapshot   markersAfter = captureMarkers();
+    MarkerSetSnapshot   markersAfter = captureMarkerSet();
 
     auto sliceApply = [sp = juce::Component::SafePointer<ArrangementGrid> (this)]
                       (const PatternListSnapshot& s)
@@ -4110,15 +4316,7 @@ void ArrangementGrid::performPatternTsOp (const juce::String& label,
 
     auto markerApply = [sp = juce::Component::SafePointer<ArrangementGrid> (this)]
                        (const MarkerSetSnapshot& s)
-    {
-        if (sp == nullptr) return;
-        auto& pm = sp->mPM;
-        pm.restoreTimeMarkers (s.timeMarkers);
-        pm.restoreTimeSigState (s.timeSigChanges, s.currentTsUid);
-        pm.restoreTempoChanges (s.tempoChanges);
-        sp->repaint();
-        if (sp->onTempoMapChanged) sp->onTempoMapChanged();
-    };
+    { if (sp != nullptr) sp->applyMarkerSet (s); };
 
     // The slice opens the named transaction; the marker action appends into
     // the SAME ActionSet (no beginNewTransaction between performs), so one
@@ -4257,92 +4455,103 @@ void ArrangementGrid::performSplitByEngine (int patternIndex,
     if (patternIndex < 0 || patternIndex >= mPM.getNumPatterns() || parts.empty())
         return;
 
-    const PatternListSnapshot before = capturePatternSlice();
+    const PatternListSnapshot before        = capturePatternSlice();
+    const MarkerSetSnapshot   markersBefore = captureMarkerSet();
 
     // 1) Create the split patterns (appended; the original's TS state, bar
     //    count, and color carry over; only the part's roll is copied).
     const juce::String origName = mPM.getPattern (patternIndex).name;
     std::vector<int> newIdx;
-    for (const auto& part : parts)
-    {
-        const int ni = mPM.addPattern (origName + " - "
-                                       + engineTabName (part.first, part.second));
-        auto& np        = mPM.getPattern (ni);
-        const auto& src = mPM.getPattern (patternIndex);
-        np.bars = src.bars; np.stepsPerBar = src.stepsPerBar;
-        np.tsNum = src.tsNum; np.tsDen = src.tsDen;
-        np.tsLocked = src.tsLocked; np.tsBoundMarkerUid = src.tsBoundMarkerUid;
-        np.color = src.color;
-        switch (part.first)
-        {
-            case 0: np.layerRoll[(size_t) part.second] = src.layerRoll[(size_t) part.second]; break;
-            case 1: np.bassRoll [(size_t) part.second] = src.bassRoll [(size_t) part.second]; break;
-            case 2: np.drumRolls[(size_t) part.second] = src.drumRolls[(size_t) part.second]; break;
-            case 3: np.clipRoll [(size_t) part.second] = src.clipRoll [(size_t) part.second]; break;
-            case 4: np.instRoll [(size_t) part.second] = src.instRoll [(size_t) part.second]; break;
-            default: break;
-        }
-        newIdx.push_back (ni);
-    }
-
-    // 2) Replace blocks row by row, bottom-most original row first so row
-    //    insertions never shift rows still waiting to be processed.  Sibling
-    //    rows: the N-1 directly below when ALL whole-row blank, else insert
-    //    fresh rows there (owner rev: shift the in-the-way rows down,
-    //    stealing blank rows from the bottom).
-    const int nParts = (int) parts.size();
-    std::vector<int> rowsWithBlocks;
-    for (int i = 0; i < mPM.getNumBlocks(); ++i)
-    {
-        const auto& b = mPM.getBlock (i);
-        if (b.clipType == ClipType::Pattern && b.patternIndex == patternIndex)
-            if (std::find (rowsWithBlocks.begin(), rowsWithBlocks.end(), b.trackRow)
-                == rowsWithBlocks.end())
-                rowsWithBlocks.push_back (b.trackRow);
-    }
-    std::sort (rowsWithBlocks.rbegin(), rowsWithBlocks.rend());
-
     bool capacityBlocked = false;
-    for (int rowOrig : rowsWithBlocks)
     {
-        if (nParts > 1)
+        // THREAD SAFETY (QA-SOUNDNESS 2026-08-07): a split fires one shielded
+        // addPattern per part plus one shielded addBlock per sibling copy, so an
+        // unhoisted split pays a settle per mutation.  One guard over the whole
+        // pattern-create + block-replace burst makes it a single settle.  Nothing
+        // in here waits on the user -- the group prompt is answered before this
+        // function is called.
+        const PatternManager::ScopedAudioShield shield (mPM);
+
+        for (const auto& part : parts)
         {
-            if (rowOrig + nParts - 1 >= kNumRows) { capacityBlocked = true; break; }
-            bool allBlank = true;
-            for (int k = 1; k < nParts && allBlank; ++k)
-                allBlank = rowIsBlank (rowOrig + k);
-            if (! allBlank)
+            const int ni = mPM.addPattern (origName + " - "
+                                           + engineTabName (part.first, part.second));
+            auto& np        = mPM.getPattern (ni);
+            const auto& src = mPM.getPattern (patternIndex);
+            np.bars = src.bars; np.stepsPerBar = src.stepsPerBar;
+            np.tsNum = src.tsNum; np.tsDen = src.tsDen;
+            np.tsLocked = src.tsLocked; np.tsBoundMarkerUid = src.tsBoundMarkerUid;
+            np.color = src.color;
+            switch (part.first)
             {
-                if (! canInsertRows (nParts - 1)) { capacityBlocked = true; break; }
-                insertBlankRowsAt (rowOrig + 1, nParts - 1);
+                case 0: np.layerRoll[(size_t) part.second] = src.layerRoll[(size_t) part.second]; break;
+                case 1: np.bassRoll [(size_t) part.second] = src.bassRoll [(size_t) part.second]; break;
+                case 2: np.drumRolls[(size_t) part.second] = src.drumRolls[(size_t) part.second]; break;
+                case 3: np.clipRoll [(size_t) part.second] = src.clipRoll [(size_t) part.second]; break;
+                case 4: np.instRoll [(size_t) part.second] = src.instRoll [(size_t) part.second]; break;
+                default: break;
             }
+            newIdx.push_back (ni);
         }
-        const int nBlocks = mPM.getNumBlocks();
-        for (int i = 0; i < nBlocks; ++i)
+
+        // 2) Replace blocks row by row, bottom-most original row first so row
+        //    insertions never shift rows still waiting to be processed.  Sibling
+        //    rows: the N-1 directly below when ALL whole-row blank, else insert
+        //    fresh rows there (owner rev: shift the in-the-way rows down,
+        //    stealing blank rows from the bottom).
+        const int nParts = (int) parts.size();
+        std::vector<int> rowsWithBlocks;
+        for (int i = 0; i < mPM.getNumBlocks(); ++i)
         {
-            ArrangementBlock proto = mPM.getBlock (i);
-            if (proto.clipType != ClipType::Pattern
-                || proto.patternIndex != patternIndex
-                || proto.trackRow != rowOrig) continue;
-            mPM.getBlock (i).patternIndex = newIdx[0];
-            for (int k = 1; k < nParts; ++k)
+            const auto& b = mPM.getBlock (i);
+            if (b.clipType == ClipType::Pattern && b.patternIndex == patternIndex)
+                if (std::find (rowsWithBlocks.begin(), rowsWithBlocks.end(), b.trackRow)
+                    == rowsWithBlocks.end())
+                    rowsWithBlocks.push_back (b.trackRow);
+        }
+        std::sort (rowsWithBlocks.rbegin(), rowsWithBlocks.rend());
+
+        for (int rowOrig : rowsWithBlocks)
+        {
+            if (nParts > 1)
             {
-                ArrangementBlock sib = proto;
-                sib.patternIndex = newIdx[(size_t) k];
-                sib.trackRow     = rowOrig + k;
-                mPM.addBlock (sib);
+                if (rowOrig + nParts - 1 >= kNumRows) { capacityBlocked = true; break; }
+                bool allBlank = true;
+                for (int k = 1; k < nParts && allBlank; ++k)
+                    allBlank = rowIsBlank (rowOrig + k);
+                if (! allBlank)
+                {
+                    if (! canInsertRows (nParts - 1)) { capacityBlocked = true; break; }
+                    insertBlankRowsAt (rowOrig + 1, nParts - 1);
+                }
             }
-        }
-        if (joinGroups && nParts > 1)
-        {
-            const int gid = mPM.getRowGroup (rowOrig);
-            if (gid > 0)
+            const int nBlocks = mPM.getNumBlocks();
+            for (int i = 0; i < nBlocks; ++i)
             {
-                const juce::uint32 col = mPM.getRowGroupColor (rowOrig);
+                ArrangementBlock proto = mPM.getBlock (i);
+                if (proto.clipType != ClipType::Pattern
+                    || proto.patternIndex != patternIndex
+                    || proto.trackRow != rowOrig) continue;
+                mPM.getBlock (i).patternIndex = newIdx[0];
                 for (int k = 1; k < nParts; ++k)
                 {
-                    mPM.setRowGroup (rowOrig + k, gid);
-                    mPM.setRowGroupColor (rowOrig + k, col);
+                    ArrangementBlock sib = proto;
+                    sib.patternIndex = newIdx[(size_t) k];
+                    sib.trackRow     = rowOrig + k;
+                    mPM.addBlock (sib);
+                }
+            }
+            if (joinGroups && nParts > 1)
+            {
+                const int gid = mPM.getRowGroup (rowOrig);
+                if (gid > 0)
+                {
+                    const juce::uint32 col = mPM.getRowGroupColor (rowOrig);
+                    for (int k = 1; k < nParts; ++k)
+                    {
+                        mPM.setRowGroup (rowOrig + k, gid);
+                        mPM.setRowGroupColor (rowOrig + k, col);
+                    }
                 }
             }
         }
@@ -4364,16 +4573,32 @@ void ArrangementGrid::performSplitByEngine (int patternIndex,
         mPM.setCurrentPattern (newIdx[0]);
     mPM.removePattern (patternIndex);
 
-    const PatternListSnapshot after = capturePatternSlice();
+    // cleanupLinkedMarkers erases its own orphans, so it has to run BEFORE the
+    // after-capture or the snapshot records markers this gesture then deletes,
+    // and a redo would resurrect them.
+    mPM.cleanupLinkedMarkers();
+
+    const PatternListSnapshot after        = capturePatternSlice();
+    const MarkerSetSnapshot   markersAfter = captureMarkerSet();
     if (mUndoCtx.isValid())
+    {
+        // Same pairing as performPatternTsOp: the slice opens the named
+        // transaction, the marker action appends into the SAME ActionSet (no
+        // beginNewTransaction between the performs) so one Ctrl+Z reverses
+        // both.  Without it the original pattern's linked TS markers, which
+        // removePattern erased and re-indexed, never come back.
         mUndoCtx.perform (new PatternListAction (before, after,
                               [sp = juce::Component::SafePointer<ArrangementGrid> (this)]
                               (const PatternListSnapshot& s)
                               { if (sp != nullptr) sp->applyPatternSlice (s); }),
                           "Split by Player Engine");
+        mUndoCtx.manager->perform (new MarkerSetAction (markersBefore, markersAfter,
+                              [sp = juce::Component::SafePointer<ArrangementGrid> (this)]
+                              (const MarkerSetSnapshot& s)
+                              { if (sp != nullptr) sp->applyMarkerSet (s); }));
+    }
 
     mSelection.clear();
-    mPM.cleanupLinkedMarkers();
     resized(); repaint();
     if (onUndoRedoStateChanged) onUndoRedoStateChanged();
     if (onArrangementChanged)   onArrangementChanged();
@@ -5047,29 +5272,45 @@ void ArrangementGrid::showAudioClipProperties(int blockIdx)
 
     std::shared_ptr<juce::TextButton> routeBtn;
     std::shared_ptr<PendingRoute>     pending;
-    // G1 boundary: detected-tempo display (path-cached so reopening the
-    // dialog doesn't re-read the file; message thread only).
+    // G1 boundary: detected-tempo display (memoized so reopening the dialog
+    // doesn't re-read the file; message thread only).
     juce::String bpmDisplay;
     {
+        // LIFETIME: the memo is process-wide, so ONLY a successful read may be
+        // stored -- caching a miss would pin "(not detectable)" for the rest of
+        // the session on a file that was merely offline, still recording, or
+        // waiting to be re-linked.  Key = resolved path + modification time, so
+        // re-recording over the same name re-detects.
         static std::map<juce::String, BpmDetect::Estimate> sBpmCache;
-        auto it = sBpmCache.find (block.audioFilePath);
-        if (it == sBpmCache.end())
+
+        BpmDetect::Estimate est;
+        juce::File bf (block.audioFilePath);
+        if (! bf.existsAsFile() && onResolveStoredPath)
+            bf = onResolveStoredPath (block.audioFilePath);
+
+        if (bf.existsAsFile())
         {
-            BpmDetect::Estimate est;
-            juce::File bf (block.audioFilePath);
-            if (! bf.existsAsFile() && onResolveStoredPath)
-                bf = onResolveStoredPath (block.audioFilePath);
-            if (bf.existsAsFile())
+            const juce::String key = bf.getFullPathName() + "|"
+                + juce::String (bf.getLastModificationTime().toMilliseconds());
+            auto it = sBpmCache.find (key);
+            if (it != sBpmCache.end())
+            {
+                est = it->second;
+            }
+            else
             {
                 juce::AudioFormatManager bfm;
                 bfm.registerBasicFormats();
                 if (std::unique_ptr<juce::AudioFormatReader> rd { bfm.createReaderFor (bf) })
+                {
                     est = BpmDetect::detect (*rd);
+                    sBpmCache.emplace (key, est);
+                }
             }
-            it = sBpmCache.emplace (block.audioFilePath, est).first;
         }
-        bpmDisplay = it->second.confident
-            ? "Detected tempo: ~" + juce::String (it->second.bpm, 1) + " BPM"
+
+        bpmDisplay = est.confident
+            ? "Detected tempo: ~" + juce::String (est.bpm, 1) + " BPM"
             : juce::String ("Detected tempo: (not detectable)");
     }
 
@@ -5179,6 +5420,12 @@ void ArrangementGrid::showAudioClipProperties(int blockIdx)
                         }
                     }
                 }
+                else
+                    juce::AlertWindow::showMessageBoxAsync (
+                        juce::AlertWindow::WarningIcon,
+                        "Couldn't duplicate file",
+                        "The file could not be copied. It may have been moved "
+                        "or deleted:\n\n" + cur.audioFilePath);
                 return;   // a Copy was the action; don't also do an in-place edit
             }
 
@@ -5228,7 +5475,17 @@ void ArrangementGrid::importAudioFile(const juce::String& path, int targetRow, f
         if (resolved.existsAsFile())
             f = resolved;
     }
-    if (!f.existsAsFile()) { ClipDropDiag::log ("importAudioFile BAIL: file not found", "path=" + path + " (drop produced no clip/page/entry)"); return; }
+    if (!f.existsAsFile())
+    {
+        ClipDropDiag::log ("importAudioFile BAIL: file not found", "path=" + path + " (drop produced no clip/page/entry)");
+        juce::AlertWindow::showMessageBoxAsync (
+            juce::MessageBoxIconType::WarningIcon,
+            "Audio File Not Found",
+            "Cannot place this clip - the file is missing:\n\n" + path
+            + "\n\nIt may have been moved or deleted. Restore the file, or "
+              "remove the entry from the browser (right-click > Remove).");
+        return;
+    }
 
     // Read file metadata to get actual duration.
     // Use a local AudioFormatManager - message thread, so file I/O is fine.
@@ -5443,33 +5700,6 @@ void ArrangementGrid::placeAudioLibraryEntry(int libIdx, int targetRow, float ta
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Ghost clip helpers (Task 4 - Source Picker drag)
-// ─────────────────────────────────────────────────────────────────────────────
-void ArrangementGrid::setGhostClip(const juce::OptionalScopedPointer<ArrangementBlock>*)
-{
-    // API stub - ghost block set directly via mHasGhost/mGhostBlock
-}
-
-void ArrangementGrid::clearGhostClip()
-{
-    mHasGhost = false;
-    repaint();
-}
-
-void ArrangementGrid::placeGhostClip()
-{
-    if (!mHasGhost) return;
-    beginEdit("Place Clip");
-    mPM.addBlock(mGhostBlock);
-    mSelection.clear();
-    mSelection.push_back(mPM.getNumBlocks() - 1);
-    commitEdit();
-    afterPatternBlockPlaced(mGhostBlock);   // QA-G Task 6
-    mHasGhost = false;
-    resized(); repaint();
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
 // File Drag and Drop (Task 5 - audio import from OS)
 // ─────────────────────────────────────────────────────────────────────────────
 bool ArrangementGrid::isInterestedInFileDrag(const StringArray& files)
@@ -5483,8 +5713,6 @@ void ArrangementGrid::fileDragMove(const StringArray& files, int x, int y)
 {
     if (files.size() == 0) return;
     mFileDragActive = true;
-    mFileDragPath   = files[0];
-    mFileDragX = x; mFileDragY = y;
 
     mHasGhost = true;
     mGhostBlock.clipType      = ClipType::Audio;
@@ -5923,7 +6151,7 @@ void ArrangementGrid::mouseDown(const MouseEvent& e)
                 if (ptIdx >= 0)
                 {
                     juce::PopupMenu m;
-                    m.addItem(1, "Reset to midpoint");
+                    m.addItem(1, "Reset to Default");
                     m.addSeparator();
                     m.addItem(2, "Delete");
                     m.showMenuAsync(juce::PopupMenu::Options{}.withTargetComponent(this),
@@ -5934,8 +6162,18 @@ void ArrangementGrid::mouseDown(const MouseEvent& e)
                             if (ptIdx >= (int)lane.points.size()) return;
                             if (result == 1)
                             {
-                                beginEdit("Reset to Midpoint");
-                                lane.points[ptIdx].value01 = 0.5f;
+                                // A point already sitting at its default is the
+                                // COMMON case now that the reset resolves a real
+                                // default instead of a flat midpoint, so bank
+                                // nothing rather than give the user a history
+                                // entry whose undo does nothing visible.
+                                const float rv = onResolveResetValue
+                                    ? juce::jlimit (0.f, 1.f, onResolveResetValue (lane.paramId))
+                                    : 0.5f;
+                                if (lane.points[ptIdx].value01 == rv) return;
+
+                                beginEdit("Reset to Default");
+                                lane.points[ptIdx].value01 = rv;
                                 commitEdit();
                                 repaint();
                             }
@@ -5951,7 +6189,16 @@ void ArrangementGrid::mouseDown(const MouseEvent& e)
                                     return;
                                 }
                                 beginEdit("Delete Automation Point");
-                                lane.points.erase(lane.points.begin() + ptIdx);
+                                {
+                                    // THREAD SAFETY (QA-SOUNDNESS 2026-08-07): the
+                                    // audio thread's automation-clip loop iterates
+                                    // this point vector BY REFERENCE across a block,
+                                    // so erasing from it under playback is a read of
+                                    // shifted/destroyed elements.  Shield covers the
+                                    // erase only -- the undo/repaint tail is outside.
+                                    const PatternManager::ScopedAudioShield shield (mPM);
+                                    lane.points.erase(lane.points.begin() + ptIdx);
+                                }
                                 commitEdit();
                                 repaint();
                             }
@@ -6012,7 +6259,6 @@ void ArrangementGrid::mouseDown(const MouseEvent& e)
             mSlipEditIdx             = hit;
             mSlipEditEdge            = nearLeftEdge (hit, e.x) ? SlipEdge::Left
                                                                 : SlipEdge::Right;
-            mSlipEditDragOrigX       = e.x;
             mSlipEditOrigContent     = mPM.getBlock (hit).contentStartSamples;
             // QA-Ea Task 0c (2026-05-20): use effectiveLengthBeats so the
             // origin captures sub-bar precision even when lengthBeats == -1
@@ -6118,7 +6364,7 @@ void ArrangementGrid::mouseDown(const MouseEvent& e)
                     if (ptIdx >= 0)
                     {
                         juce::PopupMenu m;
-                        m.addItem(1, "Reset to midpoint");
+                        m.addItem(1, "Reset to Default");
                         m.addSeparator();
                         m.addItem(2, "Delete");
                         int blockSnap = hit;
@@ -6129,13 +6375,31 @@ void ArrangementGrid::mouseDown(const MouseEvent& e)
                                 if (blockSnap < 0 || blockSnap >= mPM.getNumBlocks()) return;
                                 auto& lane = mPM.getBlock(blockSnap).automationLane;
                                 if (ptSnap < 0 || ptSnap >= (int)lane.points.size()) return;
-                                beginEdit(result == 1 ? "Reset to Midpoint" : "Delete Point");
                                 if (result == 1)
-                                    lane.points[ptSnap].value01 = 0.5f;
+                                {
+                                    const float rv = onResolveResetValue
+                                        ? juce::jlimit (0.f, 1.f, onResolveResetValue (lane.paramId))
+                                        : 0.5f;
+                                    if (lane.points[ptSnap].value01 == rv) return;
+
+                                    beginEdit("Reset to Default");
+                                    lane.points[ptSnap].value01 = rv;
+                                    commitEdit();
+                                    repaint();
+                                }
                                 else if (result == 2)
-                                    lane.points.erase(lane.points.begin() + ptSnap);
-                                commitEdit();
-                                repaint();
+                                {
+                                    beginEdit("Delete Point");
+                                    {
+                                        // THREAD SAFETY (QA-SOUNDNESS 2026-08-07): see the
+                                        // Draw-tool delete above -- the audio thread holds a
+                                        // reference into this vector while it plays the clip.
+                                        const PatternManager::ScopedAudioShield shield (mPM);
+                                        lane.points.erase(lane.points.begin() + ptSnap);
+                                    }
+                                    commitEdit();
+                                    repaint();
+                                }
                             });
                     }
                     return;
@@ -6149,8 +6413,6 @@ void ArrangementGrid::mouseDown(const MouseEvent& e)
                 {
                     mAutomCurveHandleDrag = chIdx;
                     mAutomEditBlock       = hit;
-                    mAutomCurveHandleOrigTension =
-                        mPM.getBlock(hit).automationLane.points[chIdx].tension;
                     beginEdit("Adjust Curve");
                     return;
                 }
@@ -6161,7 +6423,6 @@ void ArrangementGrid::mouseDown(const MouseEvent& e)
                     // Start dragging existing point
                     mAutomDragPoint  = ptIdx;
                     mAutomDragging   = true;
-                    mAutomDragOrig   = mPM.getBlock(hit).automationLane.points[ptIdx];
                     beginEdit("Move Automation Point");
                 }
                 else if (!nearRightEdge(hit, e.x))
@@ -6177,10 +6438,18 @@ void ArrangementGrid::mouseDown(const MouseEvent& e)
                     pt.timeTicks = relX;
                     pt.value01   = relY;
                     auto& lane = mPM.getBlock(hit).automationLane;
-                    lane.points.push_back(pt);
-                    std::sort(lane.points.begin(), lane.points.end(),
-                        [](const ControlPoint& a, const ControlPoint& c)
-                            { return a.timeTicks < c.timeTicks; });
+                    {
+                        // THREAD SAFETY (QA-SOUNDNESS 2026-08-07): push_back can
+                        // REALLOCATE the point vector that the audio thread's
+                        // automation-clip loop is iterating by reference -- a
+                        // use-after-free.  The re-sort rides the same bracket so
+                        // the audio thread never sees a half-ordered lane either.
+                        const PatternManager::ScopedAudioShield shield (mPM);
+                        lane.points.push_back(pt);
+                        std::sort(lane.points.begin(), lane.points.end(),
+                            [](const ControlPoint& a, const ControlPoint& c)
+                                { return a.timeTicks < c.timeTicks; });
+                    }
                     commitEdit();
                     repaint();
                 }
@@ -6410,6 +6679,12 @@ bool ArrangementGrid::sliceOneBlock (int hit, double cutBars)
         }
         case ClipType::Automation:
         {
+            // THREAD SAFETY (QA-SOUNDNESS 2026-08-07): splitAutomationLane
+            // whole-assigns the LEFT lane's point vector, and that lane belongs
+            // to the LIVE block the audio thread's automation-clip loop may be
+            // iterating by reference.  (The right lane is a local copy until
+            // addBlock takes it, and addBlock carries its own shield.)
+            const PatternManager::ScopedAudioShield shield (mPM);
             splitAutomationLane (orig.automationLane, right.automationLane,
                 (float) ((cutBars - startBars) / jmax (1.0e-9, endBars - startBars)));
             break;
@@ -6468,7 +6743,13 @@ void ArrangementGrid::applySliceLine (juce::Point<int> start, juce::Point<int> e
     if (reqs.empty()) return;
 
     beginEdit ("Slice");
-    for (const auto& r : reqs) sliceOneBlock (r.idx, r.cutBars);
+    {
+        // THREAD SAFETY (QA-SOUNDNESS 2026-08-07): every sliceOneBlock appends the
+        // right-hand piece via addBlock, so a slice line crossing many rows would
+        // otherwise settle once per piece.  One guard for the whole line.
+        const PatternManager::ScopedAudioShield shield (mPM);
+        for (const auto& r : reqs) sliceOneBlock (r.idx, r.cutBars);
+    }
     commitEdit();
     resized(); repaint();
 }
@@ -6530,8 +6811,8 @@ void ArrangementGrid::mouseDrag(const MouseEvent& e)
             float dv = nextVal - p0.value01;
             if (nextTick <= 1.f && std::abs(dv) >= 0.02f)
             {
-                int bx = barToX((float) effectiveStartBars(blk));
-                int bw = jmax(4, barToX((float)(effectiveStartBars(blk) + blk.lengthBars)) - bx - 1);
+                // Tension is a VERTICAL-only drag (the FL curve handle), so the
+                // block's horizontal extent plays no part here.
                 int by = rowToY(blk.trackRow) + 2;
                 int bh = rowHeightPx(blk.trackRow) - 4;
                 float dragVal = jlimit(0.f, 1.f, 1.f - (float)(e.y - by) / (float)bh);
@@ -6559,10 +6840,28 @@ void ArrangementGrid::mouseDrag(const MouseEvent& e)
         // Midpoint detent: snap value to 0.5 within ±3%
         if (std::abs(relY - 0.5f) < 0.03f) relY = 0.5f;
 
-        if (mAutomDragPoint < (int)blk.automationLane.points.size())
+        auto& pts = blk.automationLane.points;
+        if (mAutomDragPoint < (int) pts.size())
         {
-            blk.automationLane.points[mAutomDragPoint].timeTicks = relX;
-            blk.automationLane.points[mAutomDragPoint].value01   = relY;
+            pts[(size_t) mAutomDragPoint].timeTicks = relX;
+            pts[(size_t) mAutomDragPoint].value01   = relY;
+
+            // evalAutomationLaneAt assumes points sorted by time and cannot sort
+            // (it runs on the audio thread), so a drag past a neighbour has to
+            // re-order as it goes rather than only on release.  The index
+            // follows its own point through the swaps.
+            while (mAutomDragPoint > 0
+                   && pts[(size_t) mAutomDragPoint - 1].timeTicks > relX)
+            {
+                std::swap (pts[(size_t) mAutomDragPoint - 1], pts[(size_t) mAutomDragPoint]);
+                --mAutomDragPoint;
+            }
+            while (mAutomDragPoint + 1 < (int) pts.size()
+                   && pts[(size_t) mAutomDragPoint + 1].timeTicks < relX)
+            {
+                std::swap (pts[(size_t) mAutomDragPoint + 1], pts[(size_t) mAutomDragPoint]);
+                ++mAutomDragPoint;
+            }
         }
         repaint();
         return;
@@ -6594,9 +6893,27 @@ void ArrangementGrid::mouseDrag(const MouseEvent& e)
         if (block.clipType == ClipType::Automation && !mResizeOrigPoints.empty()
             && mResizeOrigLen > 0.f)
         {
-            block.automationLane.points = mResizeOrigPoints;
-            for (auto& pt : block.automationLane.points)
-                pt.timeTicks = pt.timeTicks * mResizeOrigLen / newLenBars;
+            // THREAD SAFETY (QA-SOUNDNESS 2026-08-07): the audio thread's
+            // automation-clip loop iterates this point vector by reference, and
+            // this restore runs on EVERY mouse-move of the resize drag -- so it
+            // can neither reallocate the vector nor afford a ScopedAudioShield
+            // settle at drag rate (that would stall the drag and chop the audio
+            // on every move).  Rewriting the existing elements keeps the buffer
+            // address and the element count fixed, which is the same benign
+            // aligned-scalar case as dragging a single point.  The snapshot was
+            // taken from this block at mouseDown, so the sizes always match;
+            // only a size change can reallocate, and that branch alone shields.
+            auto& pts = block.automationLane.points;
+            if (pts.size() != mResizeOrigPoints.size())
+            {
+                const PatternManager::ScopedAudioShield shield (mPM);
+                pts = mResizeOrigPoints;
+            }
+            for (size_t i = 0; i < pts.size(); ++i)
+            {
+                pts[i] = mResizeOrigPoints[i];
+                pts[i].timeTicks = pts[i].timeTicks * mResizeOrigLen / newLenBars;
+            }
         }
 
         // QA-Ec (F): the Shift+drag re-fit applies ONCE at mouseUp (no
@@ -6947,7 +7264,15 @@ void ArrangementGrid::mouseUp(const MouseEvent& e)
                 && newBeats > 0.0
                 && std::abs (newBeats - mStretchOrigBeats) > 1e-9)
             {
-                blk.originalBPM = (float) juce::jlimit (1.0, 999.0,
+                // Bound the RATIO, not the raw BPM.  Stretch reach is
+                // originalBPM/projectBPM, so a fixed 999 ceiling gave the same
+                // drag a different limit at every tempo (8.3x at 120 BPM,
+                // 16.6x at 60).  Clamping against the live tempo instead makes
+                // the render's own [1/64, 64] guard the single boundary at
+                // every tempo, which is Jeff's ruling: the block plays what the
+                // user asked for rather than what the grid thinks is tasteful.
+                const double projBpm = juce::jlimit (20.0, 300.0, mPM.getGlobalTempo());
+                blk.originalBPM = (float) juce::jlimit (projBpm / 64.0, projBpm * 64.0,
                     (double) blk.originalBPM * (newBeats / mStretchOrigBeats));
                 // G1 boundary: a re-fit is a per-copy customization - detach
                 // from the library master so the follow dot stays truthful.
@@ -7760,8 +8085,13 @@ void TrackHeaderPanel::showTrackContextMenu(int row)
             case 4:
             {
                 mGrid.beginEdit("Delete Track Clips");
-                for (int i = mPM.getNumBlocks() - 1; i >= 0; --i)
-                    if (mPM.getBlock(i).trackRow == row) mPM.removeBlock(i);
+                {
+                    // THREAD SAFETY (QA-SOUNDNESS 2026-08-07): one guard for the
+                    // whole row sweep -- otherwise each clip on the row settles.
+                    const PatternManager::ScopedAudioShield shield (mPM);
+                    for (int i = mPM.getNumBlocks() - 1; i >= 0; --i)
+                        if (mPM.getBlock(i).trackRow == row) mPM.removeBlock(i);
+                }
                 mGrid.commitEdit();
                 notifyArrangementChanged();
                 mGrid.repaint();
@@ -8104,10 +8434,9 @@ BuilderPage::BuilderPage(VibeSynthProcessor& p, PatternManager& pm)
     mBrowser->onSplitPattern  = [this](int idx) {
         if (mGrid) mGrid->splitPatternByEngine(idx);
     };
-    mBrowser->onImportAudio   = [this](const String& path) {
-        if (mGrid) mGrid->importAudioFile(path, 0, 0.f);
-    };
     mBrowser->onArrangementChanged = [this] { notifyArrangementChanged(); };
+    mBrowser->onPurgeWaveformCache = [this] (const juce::String& p)
+    { if (mGrid) mGrid->purgeWaveformCacheFor (p); };
     // QA-UndoCoverage Task 4: pattern-list ops cascade into blocks, so the
     // browser borrows the grid's slice capture/apply.
     mBrowser->onCapturePatternSlice = [this]
@@ -8116,6 +8445,14 @@ BuilderPage::BuilderPage(VibeSynthProcessor& p, PatternManager& pm)
     {
         if (mGrid) mGrid->applyPatternSlice (s);
         if (mBrowser) mBrowser->refreshPatternTab();
+    };
+    // Pattern DELETE also drops the pattern's linked TS markers, which the
+    // slice does not carry, so it borrows the grid's marker-aware wrapper.
+    mBrowser->onPerformPatternTsOp = [this] (const juce::String& label,
+                                             const std::function<void()>& op)
+    {
+        if (mGrid) mGrid->performPatternTsOp (label, op);
+        else       op();
     };
     addAndMakeVisible(*mBrowser);
 
@@ -8137,7 +8474,6 @@ BuilderPage::BuilderPage(VibeSynthProcessor& p, PatternManager& pm)
                     mGrid->placeAudioLibraryEntry (libIdx, row, bar);
             });
     };
-    mGrid->onImportAudioRequested = [this] { doImportAudio(); };
     mGrid->onRowHeightChanged     = [this]
     {
         if (mTrackHeader && mGridViewport)   // zoom leg of the NAV-01 sync
@@ -8459,34 +8795,14 @@ void BuilderPage::doImportAudio()
         });
 }
 
-void BuilderPage::doNew()
-{
-    // Stub: would show unsaved-changes dialog then clear the project
-}
-
-void BuilderPage::doSave()
-{
-    // Stub: project save/load is Phase 5
-}
-
-void BuilderPage::doOpen()
-{
-    // Stub: project save/load is Phase 5
-}
-
-void BuilderPage::doExport()
-{
-    // Stub: export functionality is Phase 5
-}
-
 void BuilderPage::doFindNextEmptyPattern()
 {
-    if (mGrid) mGrid->keyPressed(KeyPress(KeyPress::F4Key));
+    if (onFindNextEmptyPatternRequest) onFindNextEmptyPatternRequest();
 }
 
 void BuilderPage::doRenamePattern()
 {
-    if (mGrid) mGrid->keyPressed(KeyPress(KeyPress::F2Key));
+    if (onRenamePatternRequest) onRenamePatternRequest();
 }
 
 void BuilderPage::doPerformanceModeToggle()
@@ -8626,20 +8942,10 @@ void BuilderPage::doNewAutomationClip()
         }), true);
 }
 
-void BuilderPage::doNavigatePage(int pageIndex)
-{
-    // Post a command to StandaloneEditor to switch to the appropriate tab
-    // (0=Layers, 1=Bass, 2=Drums, 3=Builder)
-    static const int kCmds[] = { 1, 2, 3, 4 };
-    if (pageIndex >= 0 && pageIndex < 4)
-        if (auto* top = getTopLevelComponent())
-            top->postCommandMessage(kCmds[pageIndex]);
-}
-
 // ─────────────────────────────────────────────────────────────────────────────
 // QA-Export Task 2 -- offline render harness.
 //
-// Generalised out of the old pattern-only renderPatternToWav.  The processor
+// Generalised out of the old pattern-only render path.  The processor
 // clone + block loop are unchanged in spirit; what song mode adds is the
 // arrangement sequence, song-only automation, arrangement audio clips (which a
 // fresh processor has no editor to publish for it), and a tempo-map-aware clock.
@@ -8703,7 +9009,7 @@ namespace
                 const double len       = effectiveLengthBars (*blk);
                 if (len <= 0.0 || bar < clipStart || bar >= clipStart + len) continue;
                 const float rel = juce::jlimit (0.f, 1.f, (float) ((bar - clipStart) / len));
-                const float v01 = evalAutomationPointsAt (blk->automationLane.points, rel);
+                const float v01 = evalAutomationLaneAt (blk->automationLane, rel);
                 // The live applicator's linear 20..300 BPM map.
                 return juce::jlimit (20.0, 300.0, 20.0 + (double) v01 * 280.0);
             }
@@ -9114,8 +9420,16 @@ bool BuilderPage::renderToFile (const RenderOptions& opts,
                 err = "Could not write to " + dest.getFullPathName();
                 return false;
             }
-            const int bits = (o.format == RenderOptions::Format::Ogg) ? o.oggQuality : o.bitDepth;
-            writer.reset (fmt->createWriterFor (os.release(), sampleRate, 2u, bits, {}, 0));
+            // FRAMEWORK QUIRK (Rule 6 cat. 4): the 6-arg createWriterFor maps its
+            // trailing pair to bitsPerSample / qualityOptionIndex, and the two
+            // formats read opposite halves.  Ogg encodes purely from the quality
+            // index (VBR = index * 0.1) and ignores the bit depth -- 32 is
+            // OggVorbisAudioFormat's only declared depth; WAV is the reverse and
+            // validates the depth it is given.
+            if (o.format == RenderOptions::Format::Ogg)
+                writer.reset (fmt->createWriterFor (os.release(), sampleRate, 2u, 32, {}, o.oggQuality));
+            else
+                writer.reset (fmt->createWriterFor (os.release(), sampleRate, 2u, o.bitDepth, {}, 0));
             if (writer == nullptr)
             {
                 err = "Could not create the audio writer for these settings.";
@@ -9179,10 +9493,10 @@ bool BuilderPage::renderToFile (const RenderOptions& opts,
             if (isMp3) return mp3.write (src->getArrayOfReadPointers(), n);
             return writer->writeFromAudioSampleBuffer (*src, 0, n);
         }
-        void close()
+        bool close()
         {
             writer.reset();
-            if (isMp3) mp3.close();
+            return isMp3 ? mp3.close() : true;
         }
     };
 
@@ -9204,14 +9518,26 @@ bool BuilderPage::renderToFile (const RenderOptions& opts,
     // (inside the project's Exports folder like everything else).
     struct StemSink { int channelId; size_t sinkIdx; };
     std::vector<StemSink> stemSinks;
+    // Strip display names are user-editable and not unique (duplicating a
+    // Clips tab yields two strips with the same name untouched), so repeats
+    // are suffixed here: two sinks resolving to one path would make the
+    // second open() fail on the first's live handle and abort the whole
+    // export.
+    juce::StringArray usedStemPaths;
     for (const auto& st : opts.stems)
     {
         if (st.channelId < 0) continue;
         const juce::String safe = juce::File::createLegalFileName (
             st.name.isNotEmpty() ? st.name : ("Strip " + juce::String (st.channelId)));
-        const juce::File d = opts.destination.getSiblingFile (
-            opts.destination.getFileNameWithoutExtension() + " - " + safe
-            + opts.destination.getFileExtension());
+        const juce::String stemBase = opts.destination.getFileNameWithoutExtension()
+                                      + " - " + safe;
+        const juce::String stemExt  = opts.destination.getFileExtension();
+        juce::File d = opts.destination.getSiblingFile (stemBase + stemExt);
+        int n = 2;
+        while (usedStemPaths.contains (d.getFullPathName(), true))
+            d = opts.destination.getSiblingFile (
+                stemBase + " (" + juce::String (n++) + ")" + stemExt);
+        usedStemPaths.add (d.getFullPathName());
 
         auto s = std::make_unique<FileSink>();
         if (! s->open (opts, sr, d, outErr))
@@ -9276,9 +9602,13 @@ bool BuilderPage::renderToFile (const RenderOptions& opts,
         });
 
     // Release files before any delete: on Windows an open handle blocks it.
-    for (auto& s : sinks) s->close();
+    bool closeOk = true;
+    for (auto& s : sinks) closeOk = s->close() && closeOk;
 
-    if (! ok)
+    if (ok && ! closeOk)
+        outErr = "Could not finish writing the export file (disk full?).";
+
+    if (! ok || ! closeOk)
     {
         for (auto& s : sinks) s->dest.deleteFile();
         return false;
@@ -9330,15 +9660,6 @@ bool BuilderPage::renderFreezeFile (VibeGraph::InsertKind kind, int index,
 
     graph.armFreezeTap (kind, index);
 
-    // TS7 §6.9 PRUNE.  A freeze render of one track was rendering the ENTIRE
-    // project every block -- every other engine, every rack, every clip stream --
-    // and then throwing all of it away.  The dispatcher now skips run() on
-    // everything the target does not depend on.  Armed and cleared on exactly
-    // the same lines as the tap, and NEVER inside runOfflineLoop: leaving it set
-    // when real-time playback resumes would silence the whole project except
-    // this one track.
-    mProcessor.setFreezePrune (target);
-
     juce::AudioFormatManager fm;
     fm.registerBasicFormats();
     std::unique_ptr<juce::AudioFormatWriter> writer;
@@ -9349,7 +9670,6 @@ bool BuilderPage::renderFreezeFile (VibeGraph::InsertKind kind, int index,
         if (! stream->openedOk())
         {
             graph.disarmFreezeTap();
-            mProcessor.setFreezePrune (nullptr);
             outErr = "Could not open the freeze file for writing.";
             return false;
         }
@@ -9358,7 +9678,6 @@ bool BuilderPage::renderFreezeFile (VibeGraph::InsertKind kind, int index,
         if (writer == nullptr)
         {
             graph.disarmFreezeTap();
-            mProcessor.setFreezePrune (nullptr);
             outErr = "Could not create the freeze writer.";
             return false;
         }
@@ -9367,6 +9686,18 @@ bool BuilderPage::renderFreezeFile (VibeGraph::InsertKind kind, int index,
     juce::int64  writtenSamples = 0;
     juce::uint32 lastTapSeq     = graph.getFreezeTapSeq();
     juce::int64  blocksWithTap  = 0;
+
+    // TS7 §6.9 PRUNE.  A freeze render of one track was rendering the ENTIRE
+    // project every block -- every other engine, every rack, every clip stream --
+    // and then throwing all of it away.  The dispatcher now skips run() on
+    // everything the target does not depend on.  Cleared on the same line as the
+    // tap disarm, and NEVER inside runOfflineLoop: leaving it set when real-time
+    // playback resumes would silence the whole project except this one track.
+    // Armed AFTER the writer setup above, because the audio device is still live
+    // until runOfflineLoop suspends it -- any live block inside the armed window
+    // renders with everything outside the keep-set skipped, so the window must
+    // not span the file I/O.  It also puts the arm past every early return.
+    mProcessor.setFreezePrune (target);
 
     const bool ok = runOfflineLoop (opts, outErr, std::move (shouldAbort),
                                     std::move (onProgress),
@@ -9417,15 +9748,13 @@ bool BuilderPage::renderFreezeFile (VibeGraph::InsertKind kind, int index,
         return false;
     }
 
-    // The measurement.  Ratio is the decisive number: the audio is silent for
+    // The measurement.  loopRatio is the decisive number: the audio is silent for
     // this whole span, so anything near or above 1.0x means freezing costs about
     // as long as listening to the part being frozen.
     {
         const double elapsedMs = juce::Time::getMillisecondCounterHiRes() - freezeT0;
         const double audioSecs = (writtenSamples > 0 && opts.sampleRate > 0.0)
                                    ? (double) writtenSamples / opts.sampleRate : 0.0;
-        const double ratio     = (audioSecs > 0.0)
-                                   ? (elapsedMs / 1000.0) / audioSecs : 0.0;
         // FIXED vs MARGINAL is the whole question (2026-07-30).  The first
         // measurement was 1.7 s of audio in 4.18 s -- 2.4x realtime -- but on a
         // render that short, entering and leaving offline mode (a full
@@ -9448,16 +9777,7 @@ bool BuilderPage::renderFreezeFile (VibeGraph::InsertKind kind, int index,
              << juce::String (teardownMs, 0) << "ms | LOOP ONLY "
              << juce::String (loopRatio, 4) << "x realtime -> " << dest.getFileName();
 
-        DBG (line);
-        // TO A FILE, not only DBG: DBG compiles to NOTHING in Release, so the
-        // Debug figure was the only one obtainable -- and Debug can be several
-        // times slower than Release on DSP code, which is exactly the variable
-        // that decides whether the loop is genuinely too slow or just unoptimised.
-        // A measurement you cannot take in the build that ships is not a
-        // measurement.  Appended so successive runs accumulate and can be
-        // compared; lands beside the app per the existing artifact convention.
-        AppPaths::appRoot().getChildFile ("freeze_timing.txt")
-            .appendText (line + juce::newLine);
+        freezeTimingLog (line);
     }
     return true;
 }
@@ -9573,9 +9893,7 @@ bool BuilderPage::renderKitFreezeFiles (const std::vector<juce::File>& dests,
              << "  [TS7 FREEZE] KIT " << n << " strips | "
              << juce::String (audioSecs, 2) << "s audio in "
              << juce::String (elapsedMs, 0) << "ms";
-        DBG (line);
-        AppPaths::appRoot().getChildFile ("freeze_timing.txt")
-            .appendText (line + juce::newLine);
+        freezeTimingLog (line);
     }
     return true;
 }
@@ -9700,7 +10018,7 @@ bool BuilderPage::measureRender (const RenderOptions& opts,
 
             if (elapsedSecs >= nextStSampleAt)
             {
-                nextStSampleAt = elapsedSecs + 0.1;
+                nextStSampleAt = elapsedSecs + 1.0 / MeasureResult::kCurveHz;
                 const float st = lufs.shortTerm();
                 lra.push (st);
                 out.lufsCurve.push_back (st);   // §2.7: the drawable curve
@@ -9775,7 +10093,7 @@ void BuilderPage::applyOfflineAutomationAt (double songBeat)
 
         const float rel = juce::jlimit (0.f, 1.f, (float) ((bar - clipStart) / len));
         const float v01 = juce::jlimit (0.f, 1.f,
-            evalAutomationPointsAt (blk.automationLane.points, rel));
+            evalAutomationLaneAt (blk.automationLane, rel));
         applyOfflineLaneValue (pid, v01);
     }
 }
@@ -10024,9 +10342,12 @@ void BuilderPage::applyOfflineLaneValue (const juce::String& pid, float v01)
     };
 
     // The Effects dropdown's channel-id vocabulary (the ids lane paramIds
-    // embed): buses 1-12, drums 100+, layers 200+, basses 300+, audio 400+,
-    // aux 600+, vox 700+, inst 800+, rusty 900+.
-    for (int id = 1; id <= 12; ++id)                                 if (tryRackChannel (id))       return;
+    // embed): buses 1-18, drums 100+, layers 200+, basses 300+, audio 400+,
+    // aux 600+, vox 700+, inst 800+, rusty 900+.  The bus bound tracks the LIVE
+    // registration sweep (EffectsPage::registerRackAutomationForAllChannels) by naming the
+    // same constant: a lane class that plays live but is missing here is
+    // silently dropped from every export and freeze render.
+    for (int id = 1; id <= MixerChannelIds::kDrumsBus2; ++id)        if (tryRackChannel (id))       return;
     for (int i = 0; i < kMaxDrumPages; ++i)                          if (tryRackChannel (100 + i))  return;
     for (int i = 0; i < kMaxLayerPages; ++i)                         if (tryRackChannel (200 + i))  return;
     for (int i = 0; i < kMaxBassPages; ++i)                          if (tryRackChannel (300 + i))  return;
@@ -10218,7 +10539,11 @@ void BuilderPage::startPatternRender (int patternIndex,
             opts.tail         = RenderOptions::Tail::Included;
             opts.patternIndex = patternIndex;
             opts.format       = RenderOptions::Format::Wav;
-            opts.sampleRate   = 44100.0;
+            // The SESSION's rate, like every other render path here (freeze,
+            // kit freeze, export).  A fixed 44100 silently resampled a 96 kHz
+            // session's stems on a flow that offers no rate control at all.
+            opts.sampleRate   = mProcessor.getSampleRate() > 0.0
+                                  ? mProcessor.getSampleRate() : 44100.0;
             opts.bitDepth     = 24;
             opts.destination  = dest;
 
@@ -10235,44 +10560,6 @@ void BuilderPage::startPatternRender (int patternIndex,
                 for (const auto& t : set)
                     opts.mixTapChannels.push_back (t.channelId);
             }
-
-            runExportWithProgress (opts);
-        });
-}
-
-void BuilderPage::renderPatternToWav(int patternIndex)
-{
-    if (patternIndex < 0 || patternIndex >= mPM.getNumPatterns()) return;
-    auto& pat = mPM.getPattern(patternIndex);
-    String defaultName = pat.name.replaceCharacter(' ', '_') + ".wav";
-
-    auto chooser = std::make_shared<FileChooser>(
-        "Render \"" + pat.name + "\" to WAV",
-        // QA-ModelShell TS2: exports live in <project>\Exports\ (locked
-        // destination spec; created on demand).
-        mProcessor.getProjectExportsDir().getChildFile(defaultName),
-        "*.wav");
-
-    chooser->launchAsync(
-        FileBrowserComponent::saveMode | FileBrowserComponent::canSelectFiles,
-        [this, patternIndex, chooser](const FileChooser& fc) {
-            auto dest = fc.getResult();
-            if (dest == File()) return;
-
-            // Same format defaults this path always used (44.1k / 24-bit); it
-            // now shares the song render's harness, progress window and cancel
-            // instead of blocking the message thread with its own loop.
-            // The old fixed 2 s tail becomes Tail::Included, which renders until
-            // the sound actually decays -- strictly better than guessing, and it
-            // stops truncating patterns that end on a long reverb.
-            RenderOptions opts;
-            opts.scope        = RenderOptions::Scope::Pattern;
-            opts.tail         = RenderOptions::Tail::Included;
-            opts.patternIndex = patternIndex;
-            opts.format       = RenderOptions::Format::Wav;
-            opts.sampleRate   = 44100.0;
-            opts.bitDepth     = 24;
-            opts.destination  = dest;
 
             runExportWithProgress (opts);
         });
@@ -10304,7 +10591,7 @@ BuilderPage::getPatternTracks (int patternIndex) const
                "Bass " + juce::String (i + 1));
     for (int i = 0; i < (int) pat.drumRolls.size(); ++i)
         addIf (pat.drumRolls[(size_t) i], MixerChannelIds::drumInsert (i),
-               "Drums " + juce::String (i + 1));
+               "Drum " + juce::String (i + 1));
     for (int i = 0; i < (int) pat.clipRoll.size(); ++i)
         addIf (pat.clipRoll[(size_t) i], MixerChannelIds::audioInsert (i),
                "Clip " + juce::String (i + 1));
@@ -10358,7 +10645,10 @@ void BuilderPage::renderTrackRowToWav (int row)
             opts.scope       = RenderOptions::Scope::Song;
             opts.tail        = RenderOptions::Tail::Included;
             opts.format      = RenderOptions::Format::Wav;
-            opts.sampleRate  = 44100.0;
+            // Session rate -- a row stem is meant to drop straight back into
+            // this project, so it must not arrive at a different rate.
+            opts.sampleRate  = mProcessor.getSampleRate() > 0.0
+                                 ? mProcessor.getSampleRate() : 44100.0;
             opts.bitDepth    = 24;
             opts.destination = dest;
             // ONE tap: the row's own strip, summed alone.  Everything else still
@@ -10399,7 +10689,7 @@ void BuilderPage::buildClipsMenu (PopupMenu& m)
     m.addItem ("Import Audio...",        [this] { doImportAudio(); });
     m.addSeparator();
     m.addItem ("Rename Pattern\tF2",     [this] { doRenamePattern(); });
-    m.addItem ("Find Next Empty\tF4",    [this] { doFindNextEmptyPattern(); });
+    m.addItem ("Find Next Empty\tF3",    [this] { doFindNextEmptyPattern(); });
     m.addItem ("New Automation Clip...", [this] { doNewAutomationClip(); });
     m.addSeparator();
     m.addItem ("Render Pattern to WAV...", [this]

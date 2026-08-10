@@ -9,6 +9,8 @@
 #include "../VibePlayer/VibePlayerProcessor.h"
 #include "../VibePlayer/VibePlayerEditor.h"
 #include "../SampleLibrary.h"
+#include "../MissingFileReport.h"
+#include "../UserFileSave.h"
 #include "PagePresetIO.h"
 #include "StandaloneEditor.h"
 using namespace juce;
@@ -17,11 +19,12 @@ using namespace juce;
 BassPage::BassPage(VibeSynthProcessor& p, PatternManager& pm, int pageIndex)
     : mProcessor(p), mPM(pm), mPageIndex(juce::jlimit(0, kMaxBassPages - 1, pageIndex))
 {
-    mPageColor = VC::BassCol[mPageIndex];
+    mPageColor = VC::BassCol[mPageIndex % juce::numElementsInArray (VC::BassCol)];
 
     // QA-ModelShell TS1: the tab is a model object from birth (idempotent;
-    // name syncs via setTabName; engine attaches at selectEngine).
-    mProcessor.engineRig().addTab (TabKind::Bass, mPageIndex, mTabName);
+    // engine attaches at selectEngine).  The model tab carries no display
+    // name -- (kind, pageIndex) is its identity, the name is the ribbon's.
+    mProcessor.engineRig().addTab (TabKind::Bass, mPageIndex);
 
     buildPlayerTab();
     // 2026-04-26 (step 2 commit 3): Piano Roll lives on PianoRollPage now.
@@ -57,7 +60,6 @@ void BassPage::switchTab(int idx)
     if (mPianoRoll) mPianoRoll->setVisible(mActiveTab == 1);
     if (mActiveTab == 1 && mPianoRoll) mPianoRoll->grabKeyboardFocus();
     resized();
-    if (onSubTabChanged) onSubTabChanged(mActiveTab);
 }
 
 // ── Tab builders ──────────────────────────────────────────────────────────────
@@ -127,7 +129,7 @@ void BassPage::selectEngine(const juce::String& engineName)
     // engine (mixer-strip params + InsertNode + render task included).  This
     // page keeps a non-owning view pointer and builds the editor.
     auto& rig = mProcessor.engineRig();
-    rig.addTab (TabKind::Bass, mPageIndex, mTabName);
+    rig.addTab (TabKind::Bass, mPageIndex);
     mEngineProcessor = rig.setEngineType (TabKind::Bass, mPageIndex, engineName);
     if (mEngineProcessor != nullptr)
         mEngineEditor.reset (mEngineProcessor->createEditor());
@@ -283,9 +285,6 @@ void BassPage::resized()
 void BassPage::setTabName(const juce::String& name)
 {
     mTabName = name;
-    // QA-ModelShell TS1: every rename path funnels through here -- the one
-    // sync point for the model tab's name.
-    mProcessor.engineRig().renameTab (TabKind::Bass, mPageIndex, name);
     refreshPianoRollContextLabel();
 }
 
@@ -600,7 +599,7 @@ void BassPage::showPageActionsMenu (juce::Component* anchor)
                 return;
             }
 
-            if      (r == kIdLock) bp->setLocked (! bp->mLocked);
+            if      (r == kIdLock) bp->toggleLockUndoable();
             else if (r == kIdPolyphony)
             {
                 const auto trackPrefix = juce::String ("tk_bas_") + juce::String (bp->mPageIndex) + "_";
@@ -681,12 +680,21 @@ void BassPage::importBassState (const juce::String& xml)
             mEngineProcessor->setStateInformation (mb.getData(), (int) mb.getSize());
         }
     }
-    mLocked = lock;
+    // Go through setLocked, not the field: the ribbon's own lock flag ([L]
+    // marker + its Delete guard) is only ever written by onLockChanged, so a
+    // bare field write leaves the duplicate locked on the page and unlocked in
+    // the ribbon.  setLocked early-outs on no change, so the usual
+    // false -> false duplicate stays silent.
+    setLocked (lock);
     refreshPianoRollContextLabel();
 }
 
 void BassPage::loadPreset (const juce::File& xml)
 {
+    // The SFZ reader banks every unresolved sample= line; without a scope of
+    // its own this gesture's entries surface later under whatever drains next.
+    MissingFileReport::ScopedGesture gesture ("preset");
+
     if (mEngineProcessor == nullptr || ! xml.existsAsFile()) return;
 
     auto px = juce::XmlDocument::parse (xml);
@@ -698,10 +706,11 @@ void BassPage::loadPreset (const juce::File& xml)
     HeavyOperationOverlay::ScopedOp busy (StandaloneEditor::busyOverlayFor (this),
                                           "Loading Preset...", true);
 
-    // 2026-04-26: detect BaySickPlayer factory wrapper format.  Outer
-    // <BaySickPlayerState> contains an inner <BaySickPlayerState> apvts
-    // state plus a <Sample kind path/> sibling pointing at the SFZ.
-    // Stash the Sample element here; loaded after apvts is applied below.
+    // BaySickPlayer nesting: an outer <BaySickPlayerState> holding the inner
+    // apvts state plus a <Sample kind path/> sibling.  Both the factory
+    // presets and savePatchAs write this shape, since the engine editor's own
+    // preset button reads the same folder and needs the engine's root tag.
+    // The Sample element is stashed here and loaded after apvts is applied.
     std::unique_ptr<juce::XmlElement> bspSample;
     if (px->hasTagName ("BaySickPlayerState"))
         if (auto* inner = px->getChildByName ("BaySickPlayerState"))
@@ -711,10 +720,13 @@ void BassPage::loadPreset (const juce::File& xml)
             px = std::make_unique<juce::XmlElement> (*inner);
         }
 
-    // Extract the inner apvts XML.  Two formats supported:
-    //   1. Wrapped <BaySickEnginePreset engine="X" data="base64-of-getStateInformation"/>
-    //      (savePatchAs output).  Decode + getXmlFromBinary to get the inner apvts XML.
-    //   2. Raw apvts XML (root tag = engine's apvts.state.getType()).
+    // Two roots reach here:
+    //   1. <BaySickEnginePreset data="base64-of-getStateInformation"/>.  Nothing
+    //      writes this any more - savePatchAs moved to the engine-native shapes
+    //      because every engine editor's own loadPreset gates on the engine's
+    //      root tag and silently rejected the wrapper.
+    //   2. Raw apvts XML (root tag = engine's apvts.state.getType()), which is
+    //      what savePatchAs writes for the synth engines.
     std::unique_ptr<juce::XmlElement> innerXml;
     if (px->hasTagName ("BaySickEnginePreset"))
     {
@@ -784,27 +796,40 @@ void BassPage::loadPreset (const juce::File& xml)
 
     bassApplyApvtsTree (mEngineProcessor, loaded);
 
-    // 2026-04-26: BaySickPlayer factory presets carry a sibling <Sample>
-    // element pointing at an SFZ in the Core Library.  Resolve and load
-    // it here.  No normalizeRootNotes - preserves SFZ's natural keymap
-    // for melodic playback (only DrumPage normalizes to 60).
+    // The <Sample> sibling names whatever the engine had loaded - a Core
+    // Library SFZ for the factory presets, any stable ref or absolute path
+    // for a saved patch.  No normalizeRootNotes - preserves the SFZ's
+    // natural keymap for melodic playback (only DrumPage normalizes to 60).
     if (bspSample)
         if (auto* vp = dynamic_cast<VibePlayerProcessor*>(mEngineProcessor))
         {
             const juce::String kind = bspSample->getStringAttribute ("kind", "none");
             const juce::String pathStr = bspSample->getStringAttribute ("path");
-            juce::File path;
-            if (pathStr.startsWith ("library:"))
-                path = SampleLibrary::getCoreLibraryDir().getChildFile (pathStr.substring (8));
-            else
-                path = juce::File (pathStr);
+            // resolvePersistedRef, not a local "library:" test: savePatchAs
+            // carries bsp_loadPath through verbatim, which refForPersist
+            // writes as a stable ref under EITHER library root, so a My
+            // Samples sample would otherwise read as missing.
+            const juce::File path = SampleLibrary::resolvePersistedRef (pathStr);
 
             // 2026-05-02: route through the processor wrappers so the
             // sample path lives on apvts.state for project-save replay.
             // No normalizeRoot here -- preserve SFZ keymap for melodic play.
-            if      (kind == "sfz"    && path.existsAsFile()) vp->loadSampleSFZ    (path);
-            else if (kind == "file"   && path.existsAsFile()) vp->loadSampleFile   (path);
-            else if (kind == "folder" && path.isDirectory())  vp->loadSampleFolder (path);
+            if (kind != "none")
+            {
+                bool ok = false;
+                if      (kind == "sfz"    && path.existsAsFile()) { vp->loadSampleSFZ    (path); ok = true; }
+                else if (kind == "file"   && path.existsAsFile()) { vp->loadSampleFile   (path); ok = true; }
+                else if (kind == "folder" && path.isDirectory())  { vp->loadSampleFolder (path); ok = true; }
+
+                if (! ok)
+                    juce::AlertWindow::showMessageBoxAsync (
+                        juce::MessageBoxIconType::WarningIcon,
+                        "Load Preset",
+                        "This preset's sample is missing from this machine:\n"
+                        + path.getFullPathName()
+                        + "\n\nThe preset's settings were applied but it will not make sound.",
+                        "OK");
+            }
         }
 
     // Use the preset's filename as the tab's display name.  Bass/Layers
@@ -832,22 +857,60 @@ void BassPage::savePatchAs()
         {
             std::unique_ptr<juce::AlertWindow> own (aw);
             if (r != 1 || ! safeThis) return;
-            auto name = aw->getTextEditorContents ("name").trim();
-            if (name.isEmpty()) return;
+            const auto name = aw->getTextEditorContents ("name").trim();
             auto* bp = safeThis.getComponent();
             if (bp->mEngineProcessor == nullptr) return;
 
-            auto dir = bassEnginePresetsDir (bp->mEngineType);
-            dir.createDirectory();
-            auto file = dir.getChildFile (name + ".xml");
-
+            // The engine editor's preset button on this page's title strip
+            // enumerates the same My Presets folder, and that editor's loader
+            // gates on the engine's own root tag - so the file must be
+            // written in the engine's native format, not a page-side wrapper
+            // (the old <BaySickEnginePreset> wrapper was silently rejected by
+            // every engine editor's loadPreset).  Mirrors LayersPage.
             juce::MemoryBlock mb;
             bp->mEngineProcessor->getStateInformation (mb);
-            juce::XmlElement root ("BaySickEnginePreset");
-            root.setAttribute ("engine", bp->mEngineType);
-            root.setAttribute ("data",   mb.toBase64Encoding());
-            root.writeTo (file, {});
-            bp->takeStateSnapshot();   // saved patch is the new clean baseline
+            auto stateXml = juce::AudioProcessor::getXmlFromBinary (
+                                mb.getData(), (int) mb.getSize());
+            if (! stateXml) return;
+
+            auto onWritten = [safeThis] (const UserFileSave::Result& saved)
+            {
+                // A collision prompt can hold this open long enough for the
+                // page to be closed, so the SafePointer is re-tested here
+                // rather than trusted from the naming callback.
+                if (! saved || ! safeThis) return;
+                safeThis->takeStateSnapshot();   // saved patch is the new clean baseline
+            };
+
+            const auto dir = bassEnginePresetsDir (bp->mEngineType);
+
+            if (dynamic_cast<VibePlayerProcessor*> (bp->mEngineProcessor) != nullptr)
+            {
+                // bsp_loadKind / bsp_loadPath ride the state XML root as
+                // attributes; the pair is written or neither is, so the
+                // reader's missing-sample box never names a blank file.
+                const juce::String kind = stateXml->getStringAttribute ("bsp_loadKind");
+                const juce::String path = stateXml->getStringAttribute ("bsp_loadPath");
+
+                juce::XmlElement root ("BaySickPlayerState");
+                root.addChildElement (stateXml.release());
+
+                const bool haveSample = kind.isNotEmpty() && kind != "none"
+                                        && path.isNotEmpty();
+                auto* sampleEl = root.createNewChildElement ("Sample");
+                sampleEl->setAttribute ("kind", haveSample ? kind
+                                                           : juce::String ("none"));
+                if (haveSample)
+                    sampleEl->setAttribute ("path", path);
+
+                UserFileSave::writeXmlAsync (dir, name, root, onWritten,
+                                             "The patch is still unsaved.");
+            }
+            else
+            {
+                UserFileSave::writeXmlAsync (dir, name, *stateXml, onWritten,
+                                             "The patch is still unsaved.");
+            }
         }), false);
 }
 
@@ -929,14 +992,6 @@ void BassPage::savePagePreset (std::function<void()> onSaved)
             if (r != 1 || ! safeThis) return;
 
             const juce::String name = aw->getTextEditorContents ("name").trim();
-            if (name.isEmpty()) return;
-
-            auto dir = PagePresetIO::myPresetsDirForPageKind (PagePresetIO::PageKind::Bass);
-            dir.createDirectory();
-            auto target = dir.getChildFile (name + ".xml");
-            int n = 2;
-            while (target.exists())
-                target = dir.getChildFile (name + " (" + juce::String (n++) + ").xml");
 
             const juce::String stripPrefix = "mixer_bass_" + juce::String (safeThis->mPageIndex);
             const juce::String enginePrefix = bassEnginePrefixOf (safeThis->mEngineProcessor);
@@ -950,11 +1005,20 @@ void BassPage::savePagePreset (std::function<void()> onSaved)
                 safeThis->mEngineType,
                 enginePrefix);
 
-            if (xml.isNotEmpty())
-                target.replaceWithText (xml);
+            UserFileSave::writeTextAsync (
+                PagePresetIO::myPresetsDirForPageKind (PagePresetIO::PageKind::Bass),
+                name, xml,
+                [safeThis, onSaved] (const UserFileSave::Result& saved)
+                {
+                    // A collision prompt can hold this open long enough for the
+                    // page to be closed, so the SafePointer is re-tested here
+                    // rather than trusted from the naming callback.
+                    if (! saved || ! safeThis) return;
 
-            safeThis->takeStateSnapshot();
-            if (onSaved) onSaved();   // G-7: chain delete after save completes
+                    safeThis->takeStateSnapshot();
+                    if (onSaved) onSaved();   // G-7: chain delete after save completes
+                },
+                UserFileSave::kTabNotDeleted);
         }), false);
 }
 
@@ -1018,6 +1082,12 @@ void BassPage::applyPagePresetXml (const juce::String& xmlText)
 {
     if (xmlText.isEmpty()) return;
 
+    // RAII rather than a drain at the tail: a bare drain inside an outer
+    // gesture (an undo that resurrects several tabs) takes that gesture's
+    // entries and posts them under this noun.  Only the outermost scope
+    // reports, so nesting keeps the noun the user reads correct.
+    MissingFileReport::ScopedGesture gesture ("preset");
+
     const juce::String savedEngineType = PagePresetIO::peekEngineTypeFromXml (xmlText);
     if (savedEngineType.isNotEmpty() && savedEngineType != mEngineType)
         selectEngine (savedEngineType);
@@ -1043,6 +1113,29 @@ void BassPage::setLocked (bool l)
     if (mLocked == l) return;
     mLocked = l;
     if (onLockChanged) onLockChanged();
+}
+
+void BassPage::toggleLockUndoable()
+{
+    const bool before = mLocked;
+    const bool after  = ! before;
+    setLocked (after);
+
+    if (! mUndoCtx.isValid()) return;
+
+    // Jeff ruling 2026-08-06: resolve the LIVE page at apply time (a
+    // delete+resurrect cycle replaces this object; SafePointer = fallback).
+    auto resolveSelf = mUndoCtx.resolveOwnerPage;
+    auto sp = juce::Component::SafePointer<BassPage> (this);
+    auto livePage = [resolveSelf, sp]() -> BassPage*
+    {
+        if (resolveSelf) return dynamic_cast<BassPage*> (resolveSelf());
+        return sp.getComponent();
+    };
+    mUndoCtx.perform (new StructuralOpAction (
+                          [livePage, before] { if (auto* bp = livePage()) bp->setLocked (before); },
+                          [livePage, after]  { if (auto* bp = livePage()) bp->setLocked (after);  }),
+                      after ? "Lock Bass" : "Unlock Bass");
 }
 
 void BassPage::takeStateSnapshot()

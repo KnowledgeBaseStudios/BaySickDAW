@@ -1,13 +1,22 @@
 #pragma once
 #include <JuceHeader.h>
+#include <atomic>
 
 // ── BssLedRadio ───────────────────────────────────────────────────────────────
 // A vertical stack of radio buttons with LED indicators.
 // Writes the selected index to an AudioParameterChoice via APVTS.
 // Shared between BaySickSynthEditor and BaySickBassEditor.
+//
+// Threading: APVTS dispatches parameterChanged synchronously on whatever thread
+// wrote the parameter, which for an automation lane is the offline render thread
+// -- never the message thread.  So the listener only mirrors state into atomics
+// and raises a flag; the repaint is issued by the poll timer instead.  Calling
+// repaint() from the writer's thread trips JUCE_ASSERT_MESSAGE_MANAGER_IS_LOCKED
+// in Debug and races the peer's unsynchronized deferredRepaints list in Release.
 // ─────────────────────────────────────────────────────────────────────────────
 class BssLedRadio : public juce::Component,
-                    private juce::AudioProcessorValueTreeState::Listener
+                    private juce::AudioProcessorValueTreeState::Listener,
+                    private juce::Timer
 {
 public:
     // Backward-compatible ctor: vertical 1-column stack.
@@ -28,16 +37,19 @@ public:
     void paint     (juce::Graphics& g) override;
     void mouseDown (const juce::MouseEvent& e) override;
 
-    int  getSelected() const { return mSelected; }
+    int  getSelected() const { return mSelected.load(); }
 
 private:
     void parameterChanged (const juce::String&, float newValue) override;
+    void timerCallback() override;
+    void parentHierarchyChanged() override;
 
     juce::AudioProcessorValueTreeState& mAvts;
     juce::String      mParamID;
     juce::StringArray mLabels;
     juce::Colour      mLedColour;
-    int               mSelected { 0 };
+    std::atomic<int>  mSelected     { 0 };
+    std::atomic<bool> mNeedsRepaint { false };
     int               mRows     { 0 };   // 0 = legacy 1-col LED-list mode
     int               mCols     { 1 };
 };
@@ -47,9 +59,12 @@ private:
 //                     Y = resonance (0–1, top=1).
 // Reads/writes directly to APVTS using the RangedAudioParameter pattern.
 // Shared between BaySickSynthEditor and BaySickBassEditor.
+//
+// Same cross-thread parameterChanged contract as BssLedRadio above.
 // ─────────────────────────────────────────────────────────────────────────────
 class BssFilterXYPad : public juce::Component,
-                       private juce::AudioProcessorValueTreeState::Listener
+                       private juce::AudioProcessorValueTreeState::Listener,
+                       private juce::Timer
 {
 public:
     BssFilterXYPad (juce::AudioProcessorValueTreeState& avts,
@@ -64,6 +79,8 @@ public:
 
 private:
     void parameterChanged (const juce::String&, float) override;
+    void timerCallback() override;
+    void parentHierarchyChanged() override;
     void updateDotFromApvts();
     void writeParamsFromDot();
 
@@ -74,6 +91,7 @@ private:
     juce::String mCutoffID, mResID;
     juce::Colour mDotColour;
 
-    float mDotX { 0.9f };  // normalised, 0=20Hz 1=20kHz
-    float mDotY { 0.0f };  // normalised, 0=res=0 (bottom), 1=res=1 (top)
+    std::atomic<float> mDotX { 0.9f };  // normalized, 0=20Hz 1=20kHz
+    std::atomic<float> mDotY { 0.0f };  // normalized, 0=res=0 (bottom), 1=res=1 (top)
+    std::atomic<bool>  mNeedsRepaint { false };
 };

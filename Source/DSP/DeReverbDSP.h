@@ -25,6 +25,9 @@ public:
     void process (juce::AudioBuffer<float>& buffer) override;
     void reset() override;
 
+    void getStateInformation (juce::MemoryBlock& dest) override;
+    void setStateInformation (const void* data, int sz) override;
+
     int getLatencySamples() const noexcept override { return kFFT; }
     float getGainReductionDb() const noexcept override
         { return mGrDb.load (std::memory_order_relaxed); }
@@ -44,8 +47,14 @@ private:
     static constexpr int kFFT   = 1 << kOrder;      // 2048
     static constexpr int kHop   = kFFT / 4;         // 75% overlap
     static constexpr int kBins  = kFFT / 2 + 1;
-    static constexpr int kHist  = 8;                // magnitude history frames
-    static constexpr int kDelayFrames = 3;          // skip direct sound (~35 ms)
+
+    // How far back the tail estimate reads the magnitude history so a note's
+    // own attack is never mistaken for its reverb.  A DURATION, not a frame
+    // count: the frame rate is sr/kHop, so the frame count that buys 35 ms at
+    // 44.1 kHz (3 frames of 11.6 ms) buys only 16 ms at 96 kHz and 8 ms at
+    // 192 kHz -- the direct sound leaks into the estimate and the voice goes
+    // hollow.  35 ms is the 44.1 kHz value, preserved.
+    static constexpr float kDirectGuardMs = 35.0f;
 
     struct Channel
     {
@@ -57,6 +66,7 @@ private:
 
     void processFrame (int numCh);
     void updateDecay();
+    void updateGuard();   // allocates mMagHist - prepare-time only
 
     juce::dsp::FFT mFFT { kOrder };
     std::vector<float> mWindow;
@@ -65,11 +75,23 @@ private:
     Channel mCh[2];
     std::vector<juce::dsp::Complex<float>> mSpec[2], mFftA, mFftS;
 
-    std::vector<float> mMagHist;                    // [kHist * kBins] ring of avg mags
-    int   mHistWrite { 0 };
+    std::vector<float> mMagHist;                    // [mHistFrames * kBins] ring of avg mags
+    int   mHistWrite   { 0 };
+    int   mGuardFrames { 3 };                       // kDirectGuardMs in frames at the live rate
+    int   mHistFrames  { 4 };                       // mGuardFrames + 1 (the delayed slot is the oldest)
     std::vector<float> mRev;                        // [kBins] running tail estimate
     std::vector<float> mGain, mGainSm;              // [kBins]
     float mDecayPerHop { 0.9f };
+
+    // The gain smoother's attack/release were bare per-FRAME coefficients, and
+    // the frame rate is sr/kHop -- so their real time constants shortened with
+    // the sample rate exactly like the direct-sound guard did.  These are the
+    // measured 44.1 kHz durations of the old 0.6 / 0.3 constants, preserved and
+    // then re-derived per rate in updateGuard().
+    static constexpr float kGainAttackMs  = 12.67f;   // was coef 0.6 per frame
+    static constexpr float kGainReleaseMs = 31.85f;   // was coef 0.3 per frame
+    float mGainAttackCoef  { 0.6f };
+    float mGainReleaseCoef { 0.3f };
 
     std::atomic<float> mGrDb { 0.0f };
 };

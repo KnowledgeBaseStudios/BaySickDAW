@@ -51,8 +51,8 @@ public:
     {
         Plate       = 0,   // Schroeder allpass cascade (B - distinct topology)
         Hall        = 1,   // Large FDN, hall character (C)
-        Chamber     = 2,   // Mid FDN, denser modulation (D)
-        Room        = 3,   // Small FDN + early-reflection taps (E)
+        Chamber     = 2,   // 4-stage nested allpass, no tail mod (D)
+        Room        = 3,   // 15-tap ER cloud + 4-comb Schroeder tail (E)
         VocalBooth  = 4    // Tight short-decay variant (F)
     };
 
@@ -274,8 +274,6 @@ private:
     std::array<int, kChamberOuterStages> mChOuterPosL  {}, mChOuterPosR  {};
     std::array<int, kChamberOuterStages> mChInnerPosL  {}, mChInnerPosR  {};
     std::array<float, kChamberOuterStages> mChInnerLPL {}, mChInnerLPR {};
-    float mChamberOuterCoef { 0.5f };
-    float mChamberInnerCoef { 0.6f };
 
     // ── H-9 stage E (2026-05-02): Room algorithm -- explicit 15-tap early-
     //   reflection cloud + short 4-comb Schroeder tail.  ER cloud captures
@@ -297,8 +295,6 @@ private:
     std::array<std::vector<float>, kRoomCombs> mRoomCombBufL, mRoomCombBufR;
     std::array<int, kRoomCombs>   mRoomCombDelay {}, mRoomCombPosL {}, mRoomCombPosR {};
     std::array<float, kRoomCombs> mRoomCombLPL {},  mRoomCombLPR  {};
-    float mRoomCombFB    { 0.65f };   // feedback gain (decay control)
-    float mRoomCombDampA { 0.4f  };   // 1-pole LP coefficient (HF damping)
 
     // ── H-9 stage F (2026-05-02): VocalBooth algorithm -- tiny dedicated
     //   4-line FDN with very short delays (7..15 ms), aggressive HF damp
@@ -308,9 +304,7 @@ private:
     static constexpr int kBoothFDN = 4;
     std::array<std::vector<float>, kBoothFDN> mVbFDNL, mVbFDNR;
     std::array<int, kBoothFDN>   mVbFDNLen {}, mVbFDNWrL {}, mVbFDNWrR {};
-    std::array<float, kBoothFDN> mVbFDNFeedGain {};
     std::array<float, kBoothFDN> mVbFDNLPL {}, mVbFDNLPR {};
-    float mVbDampAlpha { 0.32f };  // 1-pole LP coefficient (heavy)
     // Booth delay seeds in samples-at-44.1k (tight prime spread, 7..15 ms range)
     static constexpr int kBoothDelaySeeds [kBoothFDN] = { 309, 397, 487, 661 };
 

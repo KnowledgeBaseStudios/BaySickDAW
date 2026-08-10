@@ -107,7 +107,6 @@ private:
     juce::GroupComponent mWavGroup, mVoiceGroup, mModWheelGroup;
 
     juce::ComboBox mWaveformCbo;
-    juce::Label    mWaveformLbl;
     juce::ComboBox mDualOscModeCbo;
     juce::TextButton mOscSyncBtn { "SYNC" };
     juce::TextButton mRingModBtn { "RING" };

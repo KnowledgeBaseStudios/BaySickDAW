@@ -13,7 +13,8 @@
 // One Bass instrument page. Up to kMaxBassPages (4) instances.
 //
 // Two sub-tabs (J-6 EQ unification 2026-05-03 - EQ moved to Effects page):
-//   Tab 0 "Player"     - engine selector ComboBox (locks on first pick) + engine editor
+//   Tab 0 "Player"     - the engine's editor, full page (engine is chosen at
+//                        the ribbon "+" menu before the page exists -- L4)
 //   Tab 1 "Piano Roll" - PianoRollContainer bound to bassRoll[mPageIndex]
 //
 // Engine choices: Harmless | VibePlayer | BaySickBass
@@ -43,9 +44,6 @@ public:
 
     void switchTab(int idx);
 
-    // Fired AFTER switchTab applies the change.
-    std::function<void(int idx)> onSubTabChanged;
-
     // Fired once when the user selects an engine.
     std::function<void()> onEngineSelected;
 
@@ -73,9 +71,11 @@ public:
 
     void savePatchAs      ();
     // 2026-04-25: Load preset (factory + user) for the current engine.
-    // Handles both wrapped (savePatchAs) and raw apvts XML formats.
-    // Performs prefix substitution so the preset binds to this tab's
-    // track prefix regardless of where it was saved.
+    // Reads the two engine-native shapes savePatchAs writes - raw apvts XML,
+    // and the nested <BaySickPlayerState> + <Sample> form for the sample
+    // engine - plus the retired <BaySickEnginePreset> wrapper, which no
+    // writer produces any more.  Performs prefix substitution so the preset
+    // binds to this tab's track prefix regardless of where it was saved.
     void loadPreset       (const juce::File& xml);
     void requestDelete    ();
     juce::String exportBassState() const;
@@ -102,6 +102,9 @@ public:
     std::function<void(juce::PopupMenu&)> onBuildWindowNavMenu;
     bool isLocked() const { return mLocked; }
     void setLocked(bool l);   // D2: fires onLockChanged
+    // Every action undoable: the Menu's Lock entry rides one structural
+    // transaction.  Skips the wrap when no undo context is wired.
+    void toggleLockUndoable();
     std::function<void()>           onDeleteRequested;
     std::function<void(const juce::String& clipboardXml)> onDuplicateRequested;
     std::function<void()>           onLockChanged;

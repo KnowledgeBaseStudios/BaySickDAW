@@ -15,11 +15,11 @@
 // instances.  Functionally identical to LayersPage / BassPage - each drum tab
 // owns one independent engine instance + its own piano roll.
 //
-// Four sub-tabs (D2 added Drum Kit at index 0):
+// Three sub-tabs:
 //   Tab 0 "Drum Kit"   - 16-row drum-pad / step-sequencer view (cross-drum)
-//   Tab 1 "Player"     - engine selector + engine editor (locks on first pick)
+//   Tab 1 "Player"     - the engine's editor, full page (engine is chosen at
+//                        the ribbon "+" menu; sound picking is on the kit pads)
 //   Tab 2 "Piano Roll" - PianoRollContainer bound to drumRolls[mPageIndex]
-//   Tab 3 "EQ"         - EQ8 M/S (pre-rack)
 //
 // D2 Drum Kit data model
 // ─────────────────────────
@@ -57,7 +57,6 @@ public:
     void setUndoContext(const UndoContext& ctx);
 
     void switchTab(int idx);
-    std::function<void(int idx)> onSubTabChanged;
 
     // ── D2 Drum Kit hooks ─────────────────────────────────────────────────────
     // StandaloneEditor wires:
@@ -73,8 +72,9 @@ public:
     // Batch 5: Kit button click - opens Save/Load Kit popup.  StandaloneEditor
     // wires this since kit save/load needs ribbon + DrumPage management access.
     void setKitMenuHandler      (std::function<void(juce::Component* anchor)> fn);
-    // 2026-04-26: Global Lock/Unlock button click - wired by StandaloneEditor.
-    void setGlobalLockHandler   (std::function<void()> fn);
+    // Lock/Unlock button click - wired by StandaloneEditor.  The argument is
+    // the kit the grid is showing; the toggle applies to that kit alone.
+    void setGlobalLockHandler   (std::function<void(int bank)> fn);
     void refreshKitView ();
 
     std::function<void()> onEngineSelected;
@@ -145,8 +145,12 @@ public:
     void loadSampleFile   (const juce::File& f);
     void loadSampleFolder (const juce::File& f);
     void loadSampleSFZ    (const juce::File& f);
-    void loadSynthPreset  (const juce::File& xml);
-    void loadPlayerPreset (const juce::File& xml);   // D1.4-fix (c) BaySickPlayer
+    // Both preset loaders return a one-line failure description, empty on
+    // success.  A damaged preset or a missing sample still leaves the drum
+    // named and selectable -- the string is what keeps a silent slot from
+    // reading as a fully loaded sound.
+    juce::String loadSynthPreset  (const juce::File& xml);
+    juce::String loadPlayerPreset (const juce::File& xml);   // D1.4-fix (c) BaySickPlayer
     void newBlankPatch    ();
     void savePatchAs      ();
     void clearSound       ();
@@ -251,6 +255,9 @@ private:
     // the unwrapped clear body the undo-apply path uses.
     UndoContext mUndoCtx;
     void clearSoundInternal();
+    // mLocked has no APVTS parameter behind it, so the page menu's Lock item
+    // needs its own transaction to satisfy the every-action-undoable rule.
+    void toggleLockWithUndo();
 
     // Tab 2: Piano Roll
     std::unique_ptr<PianoRollContainer>         mPianoRoll;

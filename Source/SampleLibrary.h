@@ -51,8 +51,9 @@ public:
     const std::vector<SamplePack>& getDrumPacks()    const { return mDrumPacks; }
     const std::vector<SamplePack>& getMelodicPacks() const { return mMelodicPacks; }
 
-    // Single source of truth for pack classification.  Folder name contains
-    // "Drums" (case-insensitive substring) OR equals "Percussion" -> drum.
+    // Single source of truth for pack classification.  Folder name CONTAINS
+    // "Drums" or "Percussion" (case-insensitive substring) -> drum, so the
+    // shipped "Hip Hop Drums Package" / "Percussion Package" both match.
     // Used by SampleLibrary::scan AND by editor menu builders to filter the
     // top-level pack enumeration based on page context.
     static bool isDrumPack (const juce::String& folderName);
@@ -71,6 +72,58 @@ public:
     // Creates the folder + Core Library shortcut if missing.  Idempotent -
     // safe to call repeatedly (and on every startup).
     static void       ensureUserSamplesDir();
+
+    // -- Core content install state (content delivery, 2026-08-09) ------------
+    // listInstalledPackNames is the SINGLE enumerator for "which packs are on
+    // this machine": scan() builds the browser lists from it and the content
+    // installer tests completeness against it, so the two can never disagree
+    // about what counts as a pack.  A name starting with '.' is installer
+    // bookkeeping (marker / manifest), never a pack, and a folder still
+    // carrying its in-progress marker is a half-installed pack, never content.
+    static juce::StringArray listInstalledPackNames();
+
+    // A pack counts as present only when it holds at least one file at any
+    // depth.  An empty directory is exactly what an interrupted fetch leaves
+    // behind, so "the folder exists" is not evidence of anything.  Stops at the
+    // first file rather than walking a multi-GB tree.
+    static bool isPackPopulated (const juce::File& packDir);
+
+    // Planted inside a pack folder before the first file lands in it and
+    // removed only once that pack is fully in place.  Same discipline as
+    // adoptIntoUserSamples' incomplete-adoption marker, for the same reason: a
+    // pack that arrives half-written has to be DETECTABLE, because content the
+    // app then treats as complete is worse than content that is simply absent.
+    // isPackPopulated cannot answer this on its own - the marker itself is a
+    // file, so a folder holding nothing else still reads as populated.
+    static juce::File getPackInstallMarkerFile (const juce::File& packDir);
+    static bool       isPackInstallIncomplete  (const juce::File& packDir);
+
+    // Planted before the first byte of a content fetch is written and removed
+    // only once every pack the app knows about is installed.  Marker present at
+    // launch = a fetch died part-way.
+    static juce::File getCoreContentMarkerFile();
+
+    // Which release asset produced which folder on this machine.  The two can
+    // differ: an archive that carries its own top-level folder installs under
+    // THAT name, not under the name derived from the asset.  Without the
+    // record, a re-run cannot tell an installed pack from a missing one and
+    // would refetch gigabytes it already has.
+    static juce::File getCoreContentManifestFile();
+
+    struct CoreContentPack
+    {
+        juce::String asset;    // release asset file name, e.g. "Keys.Package.zip"
+        juce::String folder;   // folder it installed as, under CoreLibrary
+    };
+
+    struct CoreContentManifest
+    {
+        bool                         valid { false };   // false = no manifest on disk
+        juce::Array<CoreContentPack> packs;
+        juce::String                 sourceUrl;
+    };
+    static CoreContentManifest readCoreContentManifest();
+    static bool                writeCoreContentManifest (const CoreContentManifest& m);
 
     // ── Stable-root references (QA-ProjectSave Task 4, 2026-07-26) ───────────
     // A file living under Core Library or My Samples is reachable on any
@@ -113,10 +166,24 @@ public:
     // No-ops into a plain ref when the file is ALREADY under a stable root --
     // Core Library content in particular is never copied, since a 555 MB-1 GB
     // sfizz product folder per template is not a trade worth making.  Returns
-    // an empty string if the source does not exist or the copy fails.
+    // an empty string -- the caller keeps the ref it already had -- when the
+    // source is missing, when it is a bare .sfz (a pointer into a sample tree,
+    // deliberately never adopted; see the .cpp), when My Samples is
+    // unavailable, or when the copy fails.
     // Dedupes on size + last-modified, mirroring ProjectManager::importSample,
-    // then auto-suffixes " (2)" so a user sample is never overwritten.
-    static juce::String adoptIntoUserSamples (const juce::File& source);
+    // against already-suffixed copies as well as the base name, then
+    // auto-suffixes " (2)" so a user sample is never overwritten.
+    // createdOut, when given, collects the file or folder this call NEWLY
+    // copied (reuse and already-stable branches append nothing) -- so a caller
+    // whose save can still be cancelled can undo exactly its own copies.  A
+    // DIRECTORY copy that fails part-way deletes its own leftovers before
+    // returning, and keeps its incomplete marker when the OS refuses that
+    // delete, so a later save retries the folder rather than blessing a stump.
+    // A part-way FILE copy is left on disk as an orphan and is never
+    // referenced: it fails the size + modtime reuse test, so the next save
+    // suffixes past it.
+    static juce::String adoptIntoUserSamples (const juce::File& source,
+                                              juce::Array<juce::File>* createdOut = nullptr);
 
 private:
     SampleLibrary() = default;

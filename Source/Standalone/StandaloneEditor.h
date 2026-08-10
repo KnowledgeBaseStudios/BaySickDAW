@@ -2,6 +2,7 @@
 #include <JuceHeader.h>
 #include <optional>   // defaultSizeFor returns nothing when an engine is unbound
 #include <set>        // T21 tether stores (closed-by-hand / unlocked visual keys)
+#include <tuple>      // failed pattern-fill keys (kind, page, pattern)
 #include "../PluginProcessor.h"
 #include "StandaloneApp.h"
 #include "SharedUI.h"
@@ -38,12 +39,13 @@ class BaySickRustyDrumsPage;  // J-6 (2026-05-03): singleton drum-kit page
 //   - Header strip      (title + pattern selector + level dials)
 //   - GlobalTransportBar
 //   - RibbonTabBar      (Chrome-style dynamic tabs)
-//   - Content area      (switches between tab pages)
+//   - Workspace         (every page lives in its own contained window; all
+//                        windows are live at once, selecting a tab fronts one)
 //
-// Phase 1 tab layout:
-//   System tabs (permanent): Mixer | Effects | Builder
-//   Dynamic tabs:            Layers | Bass | Drums  (closeable, multiple allowed
-//                            except Drums which is limited to 1)
+// Ribbon tab layout:
+//   Required tabs (always present): Builder | Mixer | Effects | Piano Roll
+//   Instance types (shown once one exists; the "+" slot adds one by picking an
+//     engine): Clip | Vox | Inst | Layers | Bass | Drums | Plugins
 // ─────────────────────────────────────────────────────────────────────────────
 class StandaloneEditor : public  juce::Component,
                          public  juce::MenuBarModel,
@@ -66,12 +68,8 @@ public:
     void paintOverChildren(juce::Graphics&) override;
     void resized() override;
 
-    // handleCommandMessage: pages use this to request tab switches
-    void handleCommandMessage(int commandId) override;
-
     // Public access for audio thread / other components
     PatternManager& getPatternManager();
-    juce::UndoManager& getUndoManager() { return mUndoManager; }
 
     // ── Undo dispatch (call instead of UndoManager directly) ─────────────────
     // Takes ownership of action and forwards to the manager under a named
@@ -87,6 +85,15 @@ public:
     // QA-UndoCoverage Task 3: fires on every UndoManager change (perform /
     // undo / redo / clear) -- rebuilds the history labels from the real stack.
     void changeListenerCallback (juce::ChangeBroadcaster*) override;
+
+    // How long a file of `fileSeconds` is in beats when placed at `startBeat`,
+    // and the tempo in force THERE.  Every path that puts a WAV on the Builder
+    // grid resolves through this: a take recorded across a tempo change is
+    // otherwise sized (and stretch-stamped) at whatever the BPM field happened
+    // to read, so the same audio lands at two different lengths depending on
+    // which door it came in.  Message thread.
+    struct ClipTiming { double lengthBeats { 0.0 }; double bpmAtStart { 120.0 }; };
+    ClipTiming clipTimingFor (double fileSeconds, double startBeat) const;
 
     // QA-F (2026-07-09): place a BaySickAlign render-to-bake on the Builder
     // grid (row below the originals + row-mute A/B, alignBake-marked).
@@ -164,6 +171,29 @@ public:
     // Returns userDisplayName if non-empty, otherwise the auto-resolved name.
     juce::String displayNameFor(const AutomationLane& lane) const;
 
+    // The 0..1 value the Event Editor's / Builder grid's "Reset to Default"
+    // restores an automation point to (Jeff's ruling: a reset returns the point
+    // to the parameter's value from before automation touched it, not a
+    // hardcoded midpoint).  There is no durable pre-automation stash to read --
+    // the two song-mode baselines only exist while song mode is on -- so this
+    // resolves the parameter's own default instead, and falls back to the live
+    // control for the lane classes that have no default to read.  Wired into
+    // both grids as onResolveResetValue.
+    float automationResetValue (const juce::String& paramId) const;
+
+    // ── "Most recent" navigation targets ─────────────────────────────────────
+    // Session state on purpose: these answer "take me back to where I was",
+    // which is a property of this run, not of the project (the piano roll's own
+    // engine choice is the one that persists, and it keeps doing that itself).
+    //
+    // Each reports NONE -- nullptr / -1 -- both before anything qualifies and
+    // after the remembered target has been closed: all three resolve through
+    // their live registry on read, so none can hand back a stale id or a
+    // dangling window.
+    WorkspaceWindow* getMostRecentEffectPanel()    const;
+    EventEditor*     getMostRecentEventEditor()    const;
+    int              getMostRecentPlayerTabId()    const;
+
     // ── MenuBarModel ──────────────────────────────────────────────────────────
     juce::StringArray getMenuBarNames() override;
     juce::PopupMenu   getMenuForIndex(int menuIndex, const juce::String&) override;
@@ -174,9 +204,6 @@ public:
     void getAllCommands  (juce::Array<juce::CommandID>& out) override;
     void getCommandInfo  (juce::CommandID id, juce::ApplicationCommandInfo& info) override;
     bool perform         (const InvocationInfo& info) override;
-
-    // Public access to the command manager (used by Help > Key Binds popup).
-    juce::ApplicationCommandManager& getCommandManager() noexcept { return mCmdMgr; }
 
 private:
     // ── Internal types ────────────────────────────────────────────────────────
@@ -237,9 +264,11 @@ private:
     // True while deserializeUIState runs: nothing frames mid-load; the
     // end-of-load pass frames exactly the windows the project saved as open.
     bool mLoadingWindows { false };
-    // Destroy-on-close: closing a window destroys the WINDOW AND THE PAGE, and
-    // reopening rebuilds the page from the model.  The engine is untouched --
-    // it is rig-owned since TS1 -- so audio and automation are unaffected.
+    // Window-only close: the WINDOW goes; the page component and the rig-owned
+    // engine both stay alive, so audio and every automation lane are untouched.
+    // The page may NOT be freed here -- the editor's cached raw page pointers
+    // (mMixerPage and friends) are unguarded, so freeing it dangles all of them
+    // (crash detail in the .cpp).
     void closeWindowForTab (int tabId);
     // Recreate a destroyed page for `entry` and re-bind it to the rig's live
     // engine.  Returns false for the page types whose construction is still
@@ -299,6 +328,17 @@ private:
     // because locked is the default a pair opens in, so an absent entry -- and
     // therefore any older project -- restores tethered.
     std::set<juce::String> mVisualUnlockedKeys;
+
+    // Aux key of the single-effect panel the user opened or raised last.  The
+    // registry has no ordering of its own, so recency has to be recorded as it
+    // happens; the key is resolved back through findAuxWindow on read, which is
+    // what makes a closed panel report none.
+    juce::String mLastEffectPanelKey;
+    // Wired to EVERY aux window's onBroughtToFront.  The filtering lives here
+    // rather than at the wiring site because the same registry also holds the
+    // EQ, visual and analyzer windows, and only the effect panels are a
+    // navigation target.
+    void noteAuxWindowFronted (const juce::String& key);
 
     // QA-Layout T4 (Window-7): the Vox sub-page windows + the Inst
     // Pedals/NAM-IR windows.  Content hosts the PAGE-OWNED panel non-owned
@@ -368,6 +408,15 @@ private:
     // Re-renders queued by markEngineContentChanged, drained one per tick for
     // the same reason.
     std::vector<PendingFreeze> mFreezeRefreshQueue;
+    // The automatic freeze paths (stale refresh, pattern fill, auto-freeze) fire
+    // uninvited and retry on quiet ticks, so a broken Freeze folder would alert
+    // forever -- one alert per session, DBG thereafter.
+    bool mAutoFreezeFailureShown { false };
+    void reportAutomaticFreezeFailure (TabKind kind, int pageIndex, const juce::String& err);
+    // A pattern fill that failed is parked until the next content edit:
+    // findPendingPatternFreeze returns the same first gap every tick, so
+    // retrying would flash the overlay + stall on every quiet tick.
+    std::set<std::tuple<TabKind, int, int>> mFailedPatternFreezes;
     // Ruling 6a: push the export dialog's persisted spec choice into version
     // capture (init + every take start).
     void applyCaptureSpecFromPrefs();
@@ -376,6 +425,12 @@ private:
     // A rack changed under us: ask every satellite window on that channel to
     // re-check its target, and close the ones whose effect is gone.
     void closeDeadEffectWindows (int channelId);
+    // Save-side backstop for the same records.  False only for an effect-scoped
+    // window key ("fx:" / "vis:" / "vispos:" + channel + slot UUID) whose UUID no
+    // longer names a live rack slot; every other key passes.  Projects saved
+    // before the prune above already carry dead records -- they still LOAD, they
+    // just stop being rewritten.
+    bool effectWindowKeyStillLive (const juce::String& key) const;
 
     // ── TS7 §3: version capture ──────────────────────────────────────────────
     // Rides the existing 30 Hz automation timer (VersionCapture::kTimerHz), not
@@ -404,6 +459,12 @@ private:
     void applyEngineToNewestTabOfType (RibbonTabBar::TabType type,
                                        const juce::String& engine);
     void onTabSelected(int tabId);
+    // The "which page am I on" state every navigation gesture has to refresh.
+    // Both routes reach it: a ribbon click through onTabSelected, and a direct
+    // click on a contained window through that window's onBroughtToFront.  Held
+    // apart from showPageForTab's setup work so the front-brought path can stay
+    // honest without re-running it (and without re-entering toFront).
+    void updateActiveTabState (int tabId);
     void onTabClosed(int tabId);
     void onSubPageSelected(RibbonTabBar::TabType type, int subPageIndex);
     void showPageForTab(int tabId);
@@ -423,7 +484,10 @@ private:
     // Create page components for each type
     std::unique_ptr<juce::Component> createLayersPage();
     std::unique_ptr<juce::Component> createBassPage();
-    std::unique_ptr<juce::Component> createDrumPage();    // D1.4: dynamic-drum tab
+    // D1.4: dynamic-drum tab.  QA-SOUNDNESS: allocates inside the ACTIVE
+    // bank's index window, never "lowest free of 0..31" -- a drum added while
+    // kit 2 is on screen has to be a kit-2 drum (own slot range, own bus).
+    std::unique_ptr<juce::Component> createDrumPage();
 
     // P1+P2 persistence (2026-04-24): deterministic-index page creation used
     // by project load.  Returns null if `idx` is out of range or already in
@@ -453,14 +517,23 @@ private:
     void deleteTabWithUndo (int ribbonTabId);
     // The duplicate gesture as one transaction (undo removes the duplicate;
     // redo re-creates it at the same identity from its post-spawn snapshot).
-    void duplicateTabWithUndo (RibbonTabBar::TabType type, const juce::String& clipboardXml);
+    // QA-SOUNDNESS: `sourcePageIndex` is the DRUM case's bank hint -- a
+    // duplicate belongs to the same kit as the drum it copies, which is not
+    // necessarily the kit currently on screen.  -1 (every other type, and any
+    // caller that has no source index) falls back to the active bank.
+    void duplicateTabWithUndo (RibbonTabBar::TabType type, const juce::String& clipboardXml,
+                               int sourcePageIndex = -1);
 
     // QA-UndoCoverage Task 7 pass 2 (Jeff ruling 2a): capture + resurrect for
     // the Clips/Vox/Inst/Plugins/Rusty kinds.  The record mirrors
     // serializeTabsInto's per-kind Tab element; resurrect mirrors the
     // project-restore branches (same creation order, same race-safe loads).
     std::unique_ptr<juce::XmlElement> captureTabRecord (PageEntry& e);
+    // resurrectTabFromRecord is the gesture boundary: it rebuilds ONE tab under
+    // a MissingFileReport::ScopedGesture.  Impl carries the per-kind branches so
+    // every exit funnels through that one scope.
     int resurrectTabFromRecord (const juce::XmlElement& rec);
+    int resurrectTabFromRecordImpl (const juce::XmlElement& rec);
 
     // Review fix (2026-08-06): user-initiated tab ADD as one transaction for
     // the captureTabRecord kinds (undo closes the tab; redo resurrects it from
@@ -472,6 +545,32 @@ private:
     void wrapTabAddUndo (int ribbonTabId, const juce::String& label,
                          bool asRider = false);
     int  mSuppressAddUndoWrap = 0;
+
+    // ── Tab / mixer-strip rename ─────────────────────────────────────────────
+    // Both rename gestures (right-click tab > Rename, and editing a strip's
+    // name label) write the SAME four places -- ribbon label, the page's
+    // mTabName, the mixer strip label, the piano-roll context label -- so they
+    // share one apply body and one transaction.  The transaction is also what
+    // marks the project dirty: TransactionTracker derives dirt from undo depth
+    // alone, so a rename that opens no transaction is silently discarded at
+    // quit.  ONE transaction per gesture, never one per place written.
+    //
+    // Targets are keyed by page family + the page's own index, never by
+    // ribbonTabId: a tab deleted and later resurrected by undo comes back with
+    // a fresh ribbon id, so an action recorded against the old id would find
+    // nothing to reverse.
+    enum class RenameFamily { Layers, Bass, Drums, Inst, Clips, Plugins, Vox, Rusty };
+
+    PageEntry*   findRenameTarget (RenameFamily fam, int pageIndex) const;
+    bool         renameKeyFor     (const PageEntry& e, RenameFamily& famOut,
+                                   int& pageIndexOut) const;
+    juce::String tabNameOfPage    (const PageEntry& e) const;
+    juce::String uniqueTabNameFor (RenameFamily fam, int pageIndex,
+                                   const juce::String& candidate) const;
+    void         applyPageRename  (RenameFamily fam, int pageIndex,
+                                   const juce::String& name);
+    void         performPageRename (RenameFamily fam, int pageIndex,
+                                    const juce::String& typedName);
 
     // Project-load orchestration: tear down every dynamic (Layers / Bass /
     // Drums) tab + rebuild from a <UIState> element.  Safe to call repeatedly.
@@ -490,15 +589,25 @@ private:
     enum class TabTeardownScope { AllDynamic, LayersBassDrumsOnly };
     void closeDynamicTabs (TabTeardownScope scope);
 
-    void serializeStructuralUIState  (juce::XmlElement& ui);
-    void serializeTabsInto           (juce::XmlElement& tabs);
+    // Which of the two save shapes the tab walk is feeding.  Freeze is the one
+    // thing the structural walk emits that is PROJECT data and not skeleton
+    // data: the renders live in <project>\Freeze\ and the stamps are the
+    // original song's, so a template that carried them either failed to
+    // restore (New from Template has no project folder yet) or re-rendered the
+    // tab against the template's deliberately blank arrangement and came back
+    // frozen to silence.  `locked` stays in both -- that IS structural.
+    enum class SaveShape { Project, Template };
+
+    void serializeStructuralUIState  (juce::XmlElement& ui,   SaveShape shape);
+    void serializeTabsInto           (juce::XmlElement& tabs, SaveShape shape);
     // QA-ProjectSave Task 5 (2026-07-26, dockets 23/24): after a TEMPLATE's tab
     // walk, adopt every referenced file that is not already under a stable root
     // into My Samples and rewrite the reference to point there.  Project saves
     // do NOT call this -- a project has its own Samples folder, so its refs are
     // already portable with the folder; a template is one loose XML and has to
     // carry its dependencies somewhere durable.
-    void adoptTemplateSampleRefs     (juce::XmlElement& tabs);
+    void adoptTemplateSampleRefs     (juce::XmlElement& tabs,
+                                      juce::Array<juce::File>& createdOut);
     void serializeStripNamesAndOrders(juce::XmlElement& ui);
     void closeAllDynamicTabs();
     std::unique_ptr<juce::Component> createBuilderPage();
@@ -551,6 +660,21 @@ private:
     // Reorders mPages + mRibbon's tab list + refreshes every kit view.
     void moveDrumTab (int srcRow, int dstRow);
 
+    // ── QA-SOUNDNESS (2026-08-07, Jeff): two independent drum kits ─────────
+    // Bank identity is the SLOT RANGE and nothing else -- pages 0..15 are kit
+    // 1, 16..31 are kit 2 (MixerChannelIds::drumBankForPage).  No object
+    // stores a bank field, so nothing can disagree with the engine rig and a
+    // project saved before the split falls into kit 1 for free.  Every add /
+    // save / load path resolves the bank through these three.
+    int  activeDrumBank() const noexcept { return mActiveDrumBank; }
+    void setActiveDrumBank (int bank);            // stores + drives the kit view
+    int  firstFreeDrumIndexInBank (int bank) const;   // -1 when that bank is full
+    static juce::String drumBankLabel (int bank);     // "1-16" / "17-32"
+    void showDrumBankFullMessage (int bank);
+    // The kit the user is looking at.  Persisted with the rest of the UI state
+    // (it used to reset to kit 1 on every project open).
+    int  mActiveDrumBank { 0 };
+
     // ── Batch 5: Kit save/load ────────────────────────────────────────────
     // Kit XML format: <BaySickKit name="..." version="1">
     //                   <Drum slot="N">
@@ -558,18 +682,28 @@ private:
     //                   </Drum>  ... × non-empty slots
     //                 </BaySickKit>
     // Empty slots (no drum tab in ribbon) are simply omitted.
+    // QA-SOUNDNESS: a kit file is ONE bank -- slots are written normalized to
+    // 0..15 and remapped into the target bank's range on load, which is what
+    // lets a kit saved from kit 2 load into either kit (and every factory kit,
+    // all of which ship slots 0-15, load into kit 2).
     static juce::File kitsDir();         // <Documents>/BaySickDAW/Kits
     static juce::File userKitsDir();     // <kitsDir>/My Kits
     static juce::File factoryKitsDir();  // <kitsDir>/Factory
     void showKitMenu (juce::Component* anchor);    // popup with Save/Load
     void saveKitAs ();                              // prompt + write XML
     void loadKit   (const juce::File& kitXml);      // entry: confirm + dispatch
-    void loadKitImpl (const juce::File& kitXml);    // actual tear-down + rebuild
+    void loadKitImpl (const juce::File& kitXml, int bank);   // tear-down + rebuild, ONE bank
     // QA-UndoCoverage Task 7: loadKitImpl wrapped as ONE undo transaction.
-    void loadKitWithUndo (const juce::File& kitXml);
-    // 2026-04-26: Global Lock/Unlock prompt + cross-slot toggle.
-    void showGlobalLockPrompt ();
-    void applyGlobalLockToggle ();
+    void loadKitWithUndo (const juce::File& kitXml, int bank);
+    // Lock/Unlock prompt + toggle, scoped to ONE kit (bank 0 = drums 1-16,
+    // bank 1 = drums 17-32).  The kits lock independently.
+    void showGlobalLockPrompt (int bank);
+    void applyGlobalLockToggle (int bank);
+    // Undo/redo body for the bank toggle: a list of (drum page index, locked).
+    // Page-INDEX keyed, not pointer keyed -- a Drums tab can be closed and
+    // resurrected between the do and the undo, so both ends re-resolve through
+    // mPages at apply time, the live-page rule the rest of the history follows.
+    void applyDrumLockStates (const std::vector<std::pair<int, bool>>& states);
     // 2026-04-26: Templates (kit + 8 layers + 4 basses bundle).
     static juce::File templatesDir();         // <Documents>/BaySickDAW/Templates
     static juce::File factoryTemplatesDir();  // <templatesDir>/Factory
@@ -621,10 +755,6 @@ private:
     void doExportAudio();
     // QA-Export: zip-or-folder + scope dialog -> ProjectBundler.
     void doExportProjectBundle();
-    // Prompts the user for a project name.  Shown the first time they try to
-    // save (explicit Save or - later in P4 - a Builder audio drop) when no
-    // project folder exists yet.  Returns true if a project was created.
-    bool promptCreateProject (const juce::String& reasonExplanation = {});
     // Update the DocumentWindow title to show the current project name + dirty marker.
     void refreshWindowTitle();
 
@@ -889,6 +1019,18 @@ private:
     LastRollKind mLastRollKind  { LastRollKind::None };
     int          mLastRollIndex { -1 };   // page index for Layer/Bass; unused for Drums
 
+    // Most recently visited PLAYER tab, across every player family.  The
+    // ribbon's own last-used cache is per TYPE and so cannot answer "which
+    // player was I on"; this rides the same update point, which is what keeps
+    // it true for a ribbon click and for a click on a window alike.
+    // Player = the instrument families the user would call a player: Layers,
+    // Bass, Drums (the Rusty kit is a Drums-type tab), Clip, Vox, Inst,
+    // Plugins.  Mixer / Effects / Builder / PianoRoll are utility tabs and
+    // never claim it.  Validated against mPages on read, so a deleted tab
+    // reports none.
+    int mLastPlayerTabId { -1 };
+    static bool isPlayerTabType (RibbonTabBar::TabType t) noexcept;
+
     // R5d (2026-04-24): post-stop routing.  Drops any captured WAVs onto
     // the next free arrangement row (at the beat where Play was pressed),
     // and forwards any captured MIDI notes to the last-accessed piano
@@ -942,7 +1084,16 @@ private:
     // the 5 existing (all load-path) callers are unchanged; a future non-load
     // caller passes false to skip the end-of-restore clearDirty (defensive
     // guard so it can never wrongly clear a user's unsaved-edit state).
-    void restoreAudioStripsFromArrangement (bool isLoadContext = true);
+    // sourceNoun headlines the missing-file dialog this drains into at its tail.
+    // It has to travel with the call: this drain empties the store, so a caller
+    // that drains again afterwards under its own noun finds nothing and the
+    // user reads whichever noun got here first.
+    void restoreAudioStripsFromArrangement (bool isLoadContext = true,
+                                            const juce::String& sourceNoun = "project");
+    // The name an Audio-row strip is rebuilt with on the next load.  Shared
+    // with restoreAudioStripsFromArrangement so the two cannot drift: it is
+    // what the mixer snaps a rejected strip rename back to.
+    juce::String persistedAudioRowName (int row) const;
 
     // Single-shot timer that fires when the count-in period ends and starts the transport
     struct CountInTimer : public juce::Timer {
@@ -995,8 +1146,12 @@ private:
     // ClipsPage for this file?" dedup check.  Used by the picker's Duplicate
     // flow to spawn a second ClipsPage on the same WAV at a different audioRow.
     // Default false preserves drag-drop import semantics (one page per file).
+    // interactive is handed straight to ClipsPage::setClipFilePath -- false
+    // suppresses its per-clip "nothing playable" alert for restore paths, whose
+    // misses are already batched into MissingFileReport.
     void spawnClipsTabIfMissing (int audioRow, const juce::String& path,
-                                 bool allowDuplicate = false);
+                                 bool allowDuplicate = false,
+                                 bool interactive = true);
     // QA-ClipDrop Task 3 (SC-G/H, 2026-06-03): create the mixer strip + Clips
     // page for an audio clip at `row`, named from the SAMPLE (not the Builder
     // row label "Track N").  Shared by drag-drop (onAudioClipAdded),
@@ -1007,7 +1162,13 @@ private:
     // spawnClipsTabIfMissing so the "New Page"/Duplicate flows route through this
     // canonical helper too -- they used to call spawnClipsTabIfMissing directly
     // and skip the strip trio, yielding a page with no mixer strip.
-    void createClipStripAndPage (int row, const juce::String& path, bool allowDuplicate = false);
+    // interactive is forwarded through spawnClipsTabIfMissing to the page's
+    // setClipFilePath: project restore and undo resurrection pass false so a
+    // project with N missing clips raises ONE batched report instead of N
+    // stacked modal alerts.  Every user gesture keeps the default.
+    void createClipStripAndPage (int row, const juce::String& path,
+                                 bool allowDuplicate = false,
+                                 bool interactive = true);
     // QA-ClipDrop Task 3 (SC-G/J, 2026-06-03): "+ Add New Clip" handler -- copy
     // the picked file into the project (prompting to create one first if there
     // is none, then retrying), register it in the audio library, and spawn its
@@ -1077,21 +1238,39 @@ private:
     int spawnVoxTabIfMissing  (int voxIdx,  bool selectAfter = true);
     int spawnInstTabIfMissing (int instIdx, bool selectAfter = true);
 
-    // Phase B-1 helpers (page-switch commands).
+    // Page-switch command helpers.
     // Find the first tab of the given ribbon type and select it.  No-op when
     // no tab of that type exists.
     void selectFirstTabOfType (RibbonTabBar::TabType type);
-    // F11 - switch to the last-used Layer/Bass/Drum tab and land on its
-    // Piano Roll sub-tab.  Falls back to the first Layers tab + Piano Roll
-    // when no piano roll has been visited yet this session.
-    void showLastUsedPianoRoll();
+    // F10 / View > Show Piano Roll - open the unified Piano Roll page WITHOUT
+    // touching which engine it shows; that pick is the roll's own project-
+    // persisted state.
+    void showUnifiedPianoRoll();
+    // F11 / View > Show Drum Kit - the Piano Roll page on its 16-pad kit view.
+    void showDrumKitGrid();
+    // F7 / View > Show Player - the instrument tab last visited this session,
+    // falling back to the first one open.  No-op when none are open.
+    void showMostRecentPlayerTab();
 
-    // Phase B-2 helpers (pattern navigation).
+    // Pattern-navigation command helpers.
     void showRenamePatternDialog();   // F2
     void jumpToNextEmptyPattern();    // F3
     void createNewPattern();          // F4
     void cyclePattern (int delta);    // + / - (delta = ±1, wraps)
     bool isPatternEmpty (int idx) const;
+
+    // Pattern-list editing command helpers.  Insert / Delete / Move re-point
+    // every stored pattern index (arrangement blocks, linked time-signature
+    // markers, the selection), so their undo has to carry the marker set as
+    // well as the pattern list - hence performPatternTsOp, not the slice-only
+    // wrapper Clone can get away with.
+    void insertPatternAfterCurrent();   // Shift+Ctrl+Ins
+    void duplicateCurrentPattern();     // Alt+C
+    // Menu-only, no shortcut: bare Delete belongs to whichever editing surface
+    // has focus (Builder grid, Piano Roll, Drum Kit, Event Editor, pitch
+    // editor all delete their own selection with it).
+    void deleteCurrentPattern();
+    void moveCurrentPattern (int delta);  // Shift+Ctrl+Up / Down (delta = -1 / +1)
 
     // I-3c (2026-05-02): MIDI Learn UI controller.  Owns the 30s learn timer
     // and the Escape-cancels keyboard hook.  Wires all VKnobAutomation
@@ -1105,12 +1284,30 @@ private:
 
     // ── Automation playback (Phase 4D) ────────────────────────────────────────
     // Maps paramId → function that applies a 0..1 normalised value on the message thread.
-    // Populated automatically from APVTS params + registrations from panels/strips.
+    // Populated by the static APVTS sweep plus the model-side registrations
+    // (rig engine-created, sfizz-ready, mixer-strip param materialization,
+    // rack slot, pedal board, plugin tab).  NEVER against a view -- a
+    // widget-scoped applicator dies with its window and leaves a silent lane.
     std::map<juce::String, std::function<void(float)>> mAutomationApplicators;
 
     // Maps paramId → function that reads the current 0..1 value from the live control.
     // Used when creating automation blocks to seed the initial control points.
     std::map<juce::String, std::function<float()>>     mAutomationValueReaders;
+
+    // Drops every applicator + reader belonging to one retired rack/pedal slot
+    // UUID.  Both maps were insert-only outside the project-boundary clear, so
+    // swapping effects in a slot leaked their closures and left their ids in the
+    // Event Editor's target list looking like live lanes.  Message thread.
+    void unregisterAutomationForSlotUuid (const juce::String& slotUuid);
+
+    // The engine-tab half of the same problem, driven by
+    // EngineRig::onEngineDestroying.  Registration was model-side and permanent
+    // while removal existed only for rack/pedal slot uuids and the whole-map
+    // project-boundary clear, so a deleted tab's ids stayed in the Event
+    // Editor's New Automation list AND made the stale-lane detector answer
+    // "live" for a lane whose target was gone -- worse once the freed page
+    // index was reused by a tab running a different engine.  Message thread.
+    void unregisterAutomationForTab (TabKind kind, int pageIndex);
 
     // Statics = every APVTS param (plus the derived "<prefix>_fader" aliases)
     // + "global_tempo".  Called from the ctor, after resetProjectState()'s full
@@ -1224,6 +1421,30 @@ private:
     } mPatternLabelTimer { *this };
 
     // ── Event Editor windows (Phase 4D) ───────────────────────────────────────
+    // Most recently opened or activated Event Editor.  SafePointer, not a raw
+    // pointer: an editor is deleted out from under this the moment its window
+    // closes, and the accessor has to report none rather than hand back a dead
+    // window.
+    juce::Component::SafePointer<EventEditor> mLastEventEditor;
+    // EventEditor is a plain DocumentWindow with no front hook of its own, so
+    // recency comes from a listener attached at open -- JUCE raises
+    // componentBroughtToFront for every activation route a top-level window
+    // has (click, toFront, Alt+Tab).
+    //
+    // DECLARED BEFORE mEventEditors ON PURPOSE.  Members destruct in REVERSE
+    // declaration order, so being declared first means outliving the windows
+    // that hold this as a listener -- the other order would leave each editor
+    // calling into a dead object on its way out.
+    struct EventEditorFrontWatcher : public juce::ComponentListener
+    {
+        StandaloneEditor& owner;
+        explicit EventEditorFrontWatcher (StandaloneEditor& o) : owner (o) {}
+        void componentBroughtToFront (juce::Component& c) override
+        {
+            if (auto* ed = dynamic_cast<EventEditor*> (&c)) owner.mLastEventEditor = ed;
+        }
+    } mEventEditorFrontWatcher { *this };
+
     // Owned list of open EventEditor windows. Windows remove themselves on close.
     juce::OwnedArray<EventEditor> mEventEditors;
 

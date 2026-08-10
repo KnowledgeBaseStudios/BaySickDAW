@@ -6,14 +6,38 @@
 #include "../PluginProcessor.h"
 #include "../EngineRig.h"           // QA-ModelShell TS1: model-side engine owner
 #include "../SampleLibrary.h"
+#include "../MissingFileReport.h"
+#include "../UserFileSave.h"
 #include "../VibeGraph.h"           // QA-E Task 4: MixerChannelIds::audioInsert
 #include "../PatternManager.h"      // QA-E Task 4: addAudioToLibrary
+#include "../Standalone/UndoActions.h"   // StructuralOpAction (lock toggle)
 
 namespace
 {
     constexpr int kHeaderRowH = 36;     // filename strip at top of page
     constexpr int kPad        = 12;
     constexpr int kFilenameW  = 320;
+
+    // Live-page registry for undo entries.  A tab delete followed by an undo
+    // builds a BRAND NEW ClipsPage for the same page index, so an entry that
+    // captured `this` (or a SafePointer to it) would apply to a corpse and
+    // silently skip.  Page index is the identity the resurrection spine
+    // preserves, so entries resolve through here at apply time instead.
+    // Every ClipsPage ctor/dtor runs on the message thread; no locking needed
+    // and none is permitted (this is read from undo apply lambdas only).
+    juce::Array<ClipsPage*>& liveClipsPages()
+    {
+        static juce::Array<ClipsPage*> pages;
+        return pages;
+    }
+
+    ClipsPage* liveClipsPageForIndex (int pageIndex)
+    {
+        for (auto* p : liveClipsPages())
+            if (p != nullptr && p->getPageIndex() == pageIndex)
+                return p;
+        return nullptr;
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -28,6 +52,8 @@ ClipsPage::ClipsPage (int pageIndex)
     // the engine's apvts.state in selectEngine after engine creation).
     mDirtyListener.dirtyFlag = &mPageDirty;
     mDirtyListener.suppress  = &mSuppressDirty;
+
+    liveClipsPages().addIfNotAlreadyThere (this);
 
     // J-6 EQ unification (2026-05-03): EQ sub-tab removed; pre+post EQ on Effects page.
     // QA-Layout T2 (L4): the decorative BaySickPlayer picker is gone -- it
@@ -49,6 +75,8 @@ ClipsPage::ClipsPage (int pageIndex)
 
 ClipsPage::~ClipsPage()
 {
+    liveClipsPages().removeFirstMatchingValue (this);
+
     // G-7: drop the listener before the engine processor is destroyed.
     detachDirtyListener();
 }
@@ -60,18 +88,55 @@ void ClipsPage::setProcessor (VibeSynthProcessor* p)
     // can reach the rig (the ctor has no processor).  Idempotent; the engine
     // attaches at selectEngine.
     if (mFullProcessor != nullptr)
-        mFullProcessor->engineRig().addTab (TabKind::Clips, mPageIndex, mTabName);
+        mFullProcessor->engineRig().addTab (TabKind::Clips, mPageIndex);
 }
 
 void ClipsPage::setTabName (const juce::String& n)
 {
     mTabName = n;
-    // QA-ModelShell TS1: every rename path funnels through here -- the one
-    // sync point for the model tab's name.  (Spawn order calls this before
-    // setProcessor; addTab then carries the already-set name.)
-    if (mFullProcessor != nullptr)
-        mFullProcessor->engineRig().renameTab (TabKind::Clips, mPageIndex, n);
     repaint();
+}
+
+// Lock toggle - the user gesture, banked on the app's ONE undo history.
+// Every restore path (importClipState, project load, page preset) calls the raw
+// setLocked instead: replaying saved state is not a user edit and must not bank
+// a transaction, because the project's dirty flag IS the transaction pointer.
+//
+// The transaction is opened straight on the processor's manager rather than
+// through StandaloneEditor::doUndoAction because a Clips page holds no editor
+// pointer.  That manager is the app's only one, and the label is built in
+// doUndoAction's exact "<owner>|<label>" shape with the same "clip<N>" owner key
+// the editor's history resolver already assigns to Clips tabs, so the row reads
+// identically to every other tab's lock row.
+void ClipsPage::setLockedUndoable (bool wantLocked)
+{
+    // Setting the value it already has must not bank a transaction: that would
+    // leave the project asking to be saved, and the user an undo step, for
+    // having changed nothing.
+    if (wantLocked == mLocked) return;
+
+    setLocked (wantLocked);
+
+    if (mFullProcessor == nullptr) return;
+
+    const int  idx    = mPageIndex;
+    const bool after  = wantLocked;
+    const bool before = ! wantLocked;
+
+    const juce::String name = "clip" + juce::String (idx) + "|"
+                            + juce::String (after ? "Lock Clip" : "Unlock Clip");
+
+    // Gesture-merge fix (see UndoBracket.h): file any still-pending parameter
+    // flush into ITS transaction before this boundary moves, or one Ctrl+Z
+    // reverts both gestures.
+    juce::AudioProcessorValueTreeState::flushAllLiveInstancesToValueTrees();
+
+    auto& um = mFullProcessor->mUndoManager;
+    um.beginNewTransaction (name);
+    um.perform (new StructuralOpAction (
+                    [idx, before] { if (auto* cp = liveClipsPageForIndex (idx)) cp->setLocked (before); },
+                    [idx, after]  { if (auto* cp = liveClipsPageForIndex (idx)) cp->setLocked (after);  }),
+                name);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -176,7 +241,7 @@ void ClipsPage::showPageActionsMenu (juce::Component* anchor)
          kIdLoadPresetBase, kIdChokeBase] (int r)
         {
             if (! self || r <= 0) return;
-            if (r == kIdLock)        { self->setLocked (! self->mLocked); return; }
+            if (r == kIdLock)        { self->setLockedUndoable (! self->mLocked); return; }
             if (r == kIdRename    && self->onRenameRequested)    { self->onRenameRequested();    return; }
             if (r == kIdDuplicate && self->onDuplicateRequested) { self->onDuplicateRequested(); return; }
             if (r == kIdSavePagePreset) { self->savePagePreset(); return; }
@@ -195,7 +260,7 @@ void ClipsPage::showPageActionsMenu (juce::Component* anchor)
         });
 }
 
-void ClipsPage::savePatchAs()
+void ClipsPage::savePatchAs (std::function<void()> onSaved)
 {
     auto* aw = new juce::AlertWindow ("Save Clip Preset",
                                        "Enter a name for this Clip preset:",
@@ -206,23 +271,22 @@ void ClipsPage::savePatchAs()
 
     juce::Component::SafePointer<ClipsPage> safeThis (this);
     aw->enterModalState (true, juce::ModalCallbackFunction::create (
-        [safeThis, aw] (int r)
+        [safeThis, aw, onSaved] (int r)
         {
             if (r != 1 || ! safeThis) return;
             const juce::String name = aw->getTextEditorContents ("name").trim();
-            if (name.isEmpty()) return;
 
-            auto dir = clipsMyPresetsDir();
-            dir.createDirectory();
-            auto target = dir.getChildFile (name + ".xml");
-            // Auto-suffix on conflict instead of overwriting.
-            int n = 2;
-            while (target.exists())
-                target = dir.getChildFile (name + " (" + juce::String (n++) + ").xml");
-
-            const juce::String xml = safeThis->exportClipState();
-            if (xml.isNotEmpty())
-                target.replaceWithText (xml);
+            UserFileSave::writeTextAsync (clipsMyPresetsDir(), name,
+                                          safeThis->exportClipState(),
+                [safeThis, onSaved] (const UserFileSave::Result& saved)
+                {
+                    // A collision prompt can hold this open long enough for the
+                    // page to be closed, so the SafePointer is re-tested here
+                    // rather than trusted from the naming callback.
+                    if (! saved || ! safeThis) return;
+                    if (onSaved) onSaved();
+                },
+                UserFileSave::kTabNotDeleted);
         }), true);
 }
 
@@ -262,8 +326,7 @@ void ClipsPage::savePagePreset (std::function<void()> onSaved)
 {
     if (mFullProcessor == nullptr || mPlayerProc == nullptr)
     {
-        savePatchAs();   // fallback to engine-only if processor not yet wired
-        if (onSaved) onSaved();   // chain anyway so caller can complete
+        savePatchAs (onSaved);   // fallback to engine-only if processor not yet wired
         return;
     }
 
@@ -282,14 +345,6 @@ void ClipsPage::savePagePreset (std::function<void()> onSaved)
             if (r != 1 || ! safeThis) return;
 
             const juce::String name = aw->getTextEditorContents ("name").trim();
-            if (name.isEmpty()) return;
-
-            auto dir = PagePresetIO::myPresetsDirForPageKind (PagePresetIO::PageKind::Clip);
-            dir.createDirectory();
-            auto target = dir.getChildFile (name + ".xml");
-            int n = 2;
-            while (target.exists())
-                target = dir.getChildFile (name + " (" + juce::String (n++) + ").xml");
 
             const juce::String stripPrefix = "mixer_audio_" + juce::String (safeThis->mPageIndex);
             juce::String enginePrefix;
@@ -307,13 +362,15 @@ void ClipsPage::savePagePreset (std::function<void()> onSaved)
 
             if (xml.isEmpty()) return;
 
-            // G-7 (2026-04-29): copy the attached audio file to
-            // Documents/BaySickDAW/My Samples (if not already there) and
-            // embed a relative path in the preset XML so the file travels
-            // with the preset across projects.  Without this, loading a Clip
-            // preset on a different project leaves the engine pointed at a
-            // path that may not exist there.
+            // G-7 (2026-04-29): the preset embeds a path relative to
+            // Documents/BaySickDAW/My Samples so the file travels with the
+            // preset across projects.  The destination is only COMPUTED here;
+            // the audio copy itself lives in the write's success branch,
+            // because copying first left an orphan WAV in My Samples whenever
+            // the write was cancelled at the collision prompt or refused for
+            // an unusable name.
             juce::String clipRefRel;
+            juce::File copySource, copyDest;
             if (safeThis->mClipPath.isNotEmpty())
             {
                 SampleLibrary::ensureUserSamplesDir();
@@ -322,45 +379,119 @@ void ClipsPage::savePagePreset (std::function<void()> onSaved)
                 if (source.existsAsFile())
                 {
                     juce::File dest = mySamples.getChildFile (source.getFileName());
-                    // Auto-suffix on collision so we never overwrite a user
-                    // sample (no-file-delete contract).
-                    int sfx = 2;
-                    while (dest.existsAsFile()
-                            && dest.getFullPathName() != source.getFullPathName())
+
+                    // Size + modification time is the same identity test
+                    // SampleLibrary::adoptIntoUserSamples uses, and like that
+                    // one it has to run against every suffixed candidate rather
+                    // than the base name alone: once an unrelated file owns the
+                    // base name, testing only there treats the copy the LAST
+                    // save made as a stranger, so each re-save clones the audio
+                    // under the next free " (N)" and orphans the previous one
+                    // with no reclaim path.  The copy is not routed through that
+                    // helper because it returns a "mysamples:" / "library:" ref
+                    // while clipRef stores a bare name relative to My Samples.
+                    if (dest.getFullPathName() != source.getFullPathName())
                     {
-                        dest = mySamples.getChildFile (
-                            source.getFileNameWithoutExtension()
-                            + " (" + juce::String (sfx++) + ")"
-                            + source.getFileExtension());
+                        // Auto-suffix on collision so we never overwrite a user
+                        // sample (no-file-delete contract).
+                        int  sfx      = 2;
+                        bool adopted  = false;
+                        while (dest.existsAsFile())
+                        {
+                            if (dest.getSize() == source.getSize()
+                                && dest.getLastModificationTime()
+                                       == source.getLastModificationTime())
+                            {
+                                adopted = true;
+                                break;
+                            }
+
+                            dest = mySamples.getChildFile (
+                                source.getFileNameWithoutExtension()
+                                + " (" + juce::String (sfx++) + ")"
+                                + source.getFileExtension());
+                        }
+
+                        if (! adopted)
+                        {
+                            copySource = source;
+                            copyDest   = dest;
+                        }
                     }
-                    if (dest.getFullPathName() == source.getFullPathName()
-                            || source.copyFileTo (dest))
-                    {
-                        clipRefRel = dest.getFileName();   // relative to My Samples
-                    }
+
+                    clipRefRel = dest.getFileName();   // relative to My Samples
                 }
             }
 
             // Inject the clip reference into the saved XML before writing.
+            const auto dir =
+                PagePresetIO::myPresetsDirForPageKind (PagePresetIO::PageKind::Clip);
+
+            // A collision prompt can hold the write open long enough for the
+            // page to be closed, so the SafePointer is re-tested here rather
+            // than trusted from the naming callback.  The copy runs before
+            // that test: it needs only the two captured File values, and a
+            // written preset must get its audio even if the page is gone.
+            auto onWritten = [safeThis, onSaved, copySource, copyDest]
+                             (const UserFileSave::Result& saved)
+            {
+                if (! saved) return;
+
+                if (copyDest != juce::File()
+                    && ! copySource.copyFileTo (copyDest))
+                {
+                    juce::AlertWindow::showMessageBoxAsync (
+                        juce::MessageBoxIconType::WarningIcon,
+                        "Save Page Preset",
+                        "Couldn't copy the clip audio to "
+                        + copyDest.getFullPathName()
+                        + ".  The preset was saved but will report its audio "
+                          "missing, and the tab was not deleted.");
+                    return;
+                }
+
+                if (! safeThis) return;
+
+                safeThis->takeStateSnapshot();
+                if (onSaved) onSaved();   // G-7: chain delete after save completes
+            };
+
             if (auto parsed = juce::XmlDocument::parse (xml))
             {
                 if (clipRefRel.isNotEmpty())
                     parsed->setAttribute ("clipRef", clipRefRel);
-                parsed->writeTo (target, {});
+                UserFileSave::writeXmlAsync (dir, name, *parsed, onWritten,
+                                             UserFileSave::kTabNotDeleted);
             }
             else
             {
-                target.replaceWithText (xml);
+                UserFileSave::writeTextAsync (dir, name, xml, onWritten,
+                                              UserFileSave::kTabNotDeleted);
             }
-
-            safeThis->takeStateSnapshot();
-            if (onSaved) onSaved();   // G-7: chain delete after save completes
         }), false);
 }
 
 void ClipsPage::loadPagePreset (const juce::File& xml)
 {
-    if (! xml.existsAsFile()) return;
+    // RAII rather than a drain at the tail: a bare drain inside an outer
+    // gesture (an undo that resurrects several tabs) takes that gesture's
+    // entries and posts them under this noun.  Only the outermost scope
+    // reports, so nesting keeps the noun the user reads correct.
+    MissingFileReport::ScopedGesture gesture ("preset");
+
+    const juce::String contents = xml.existsAsFile() ? xml.loadFileAsString()
+                                                     : juce::String();
+    std::unique_ptr<juce::XmlElement> parsed;
+    if (contents.isNotEmpty())
+        parsed = juce::XmlDocument::parse (contents);
+    if (parsed == nullptr)
+    {
+        juce::AlertWindow::showMessageBoxAsync (
+            juce::MessageBoxIconType::WarningIcon,
+            "Load Page Preset",
+            "Preset could not be read:\n" + xml.getFullPathName());
+        return;
+    }
     if (mFullProcessor == nullptr) { loadPreset (xml); return; }
 
     if (mPlayerProc == nullptr) selectEngine (EngineType::BaySickPlayer);
@@ -372,7 +503,6 @@ void ClipsPage::loadPagePreset (const juce::File& xml)
 
     auto noFallback = [] (int) { return true; };
 
-    const juce::String contents = xml.loadFileAsString();
     // G-7: suppress dirty flag during the bulk state restore.
     mSuppressDirty = true;
     PagePresetIO::importPagePreset (*mFullProcessor,
@@ -387,18 +517,21 @@ void ClipsPage::loadPagePreset (const juce::File& xml)
 
     // G-7 (2026-04-29): if the preset embedded a clipRef pointing to a file
     // in My Samples, resolve it and bind the clip path so the page actually
-    // plays the original audio.  Falls through silently if the reference is
-    // missing (older engine-only preset) or the file vanished.
-    if (auto parsed = juce::XmlDocument::parse (contents))
+    // plays the original audio.  Only a preset with no clipRef at all (older
+    // engine-only preset) stays silent.
+    const juce::String clipRefRel = parsed->getStringAttribute ("clipRef");
+    if (clipRefRel.isNotEmpty())
     {
-        const juce::String clipRefRel = parsed->getStringAttribute ("clipRef");
-        if (clipRefRel.isNotEmpty())
-        {
-            const juce::File ref =
-                SampleLibrary::getUserSamplesDir().getChildFile (clipRefRel);
-            if (ref.existsAsFile())
-                setClipFilePath (ref.getFullPathName());
-        }
+        const juce::File ref =
+            SampleLibrary::getUserSamplesDir().getChildFile (clipRefRel);
+        if (ref.existsAsFile())
+            setClipFilePath (ref.getFullPathName());
+        else
+            juce::AlertWindow::showMessageBoxAsync (
+                juce::MessageBoxIconType::WarningIcon,
+                "Load Page Preset",
+                "Clip preset audio missing - re-pick or restore:\n"
+                + ref.getFullPathName());
     }
 
     takeStateSnapshot();
@@ -467,8 +600,8 @@ void ClipsPage::requestDelete()
 // ─────────────────────────────────────────────────────────────────────────────
 // Engine activation.  Single-engine page (BaySickPlayer only).  selectEngine
 // is the entry point spawnClipsTabIfMissing calls AFTER wiring callbacks so
-// onEngineDestroying / onEngineChanged fire correctly.  Passing None is a
-// no-op; passing BaySickPlayer lazy-creates the processor + editor.
+// onEngineChanged fires correctly.  Passing None is a no-op; passing
+// BaySickPlayer lazy-creates the processor + editor.
 // ─────────────────────────────────────────────────────────────────────────────
 juce::AudioProcessor* ClipsPage::getEngineProcessor() const noexcept
 {
@@ -480,15 +613,13 @@ void ClipsPage::selectEngine (EngineType e)
     if (e == mEngineType) return;
     if (e == EngineType::None) return;   // can't deactivate
 
-    if (onEngineDestroying) onEngineDestroying();
-
     if (e == EngineType::BaySickPlayer && ! mPlayerProc && mFullProcessor != nullptr)
     {
         // QA-ModelShell TS1: the model constructs, prepares, and registers
         // the engine (the "clip_<N>_" APVTS prefix is the rig's trackIdFor).
         // This page keeps a non-owning view pointer and builds the editor.
         auto& rig = mFullProcessor->engineRig();
-        rig.addTab (TabKind::Clips, mPageIndex, mTabName);
+        rig.addTab (TabKind::Clips, mPageIndex);
         mPlayerProc = rig.setEngineType (TabKind::Clips, mPageIndex, "BaySickPlayer");
         if (mPlayerProc != nullptr)
         {
@@ -563,7 +694,8 @@ void ClipsPage::switchTab (int idx)
 }
 
 void ClipsPage::setClipFilePath (const juce::String& p,
-                                 const juce::String& libraryPath)
+                                 const juce::String& libraryPath,
+                                 bool interactive)
 {
     mClipPath = p;
     mClipFileLabel.setText (p.isNotEmpty()
@@ -573,7 +705,18 @@ void ClipsPage::setClipFilePath (const juce::String& p,
 
     if (auto* vp = dynamic_cast<VibePlayerProcessor*> (mPlayerProc))
         if (p.isNotEmpty())
+        {
             vp->loadSampleFile (juce::File (p));
+            // Restore callers pass interactive = false: their misses are already
+            // batched into MissingFileReport and drained as one dialog per load,
+            // so alerting here too would stack a box per clip on top of it.
+            if (interactive && ! vp->hasAnyRegions())
+                juce::AlertWindow::showMessageBoxAsync (
+                    juce::MessageBoxIconType::WarningIcon,
+                    "Clip Audio",
+                    "Nothing playable could be loaded from:\n"
+                    + juce::File (p).getFullPathName());
+        }
 
     // QA-E Task 4 (2026-05-12): in addition to the engine preload above,
     // tag the audio library entry's pageOwnerChannelId so the browser walk

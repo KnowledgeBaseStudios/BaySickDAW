@@ -42,12 +42,9 @@ public:
     juce::Colour getPageColor() const { return mPageColor; }
     void setUndoContext(const UndoContext& ctx);
 
-    // Sub-tab switching - called by PageMenuBar tab slot buttons
+    // Sub-tab switching - driven by the window Menu dropdown's Player entry
+    // (onBuildWindowNavMenu); player pages mount no tab-slot cluster.
     void switchTab(int idx);
-
-    // Fired AFTER switchTab applies the change. StandaloneEditor wires this to
-    // auto-swap transport mode (Pattern when idx==1 piano roll, else Song).
-    std::function<void(int idx)> onSubTabChanged;
 
     // Fired once when the user selects an engine (first pick only, locks after).
     // StandaloneEditor uses this to add the mixer channel strip.
@@ -116,6 +113,9 @@ public:
     std::function<void(juce::PopupMenu&)> onBuildWindowNavMenu;
     bool isLocked() const { return mLocked; }
     void setLocked(bool l);   // D2: fires onLockChanged so ribbon + UI reflect the new state
+    // Every action undoable: the Menu's Lock entry rides one structural
+    // transaction.  Skips the wrap when no undo context is wired.
+    void toggleLockUndoable();
     std::function<void()>           onDeleteRequested;
     std::function<void(const juce::String& clipboardXml)> onDuplicateRequested;
     // D2: fired whenever mLocked toggles.  StandaloneEditor wires this to

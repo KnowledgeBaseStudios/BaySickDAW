@@ -2,6 +2,8 @@
 #include "UndoSnapshotStore.h"   // QA-UndoCoverage ruling 3a: swap snapshots
 #include "../PluginProcessor.h"
 #include "../EngineRig.h"
+#include "../MissingFileReport.h"
+#include "../UserFileSave.h"
 #include "SharedUI.h"   // VC palette
 #include "SlotComponent.h"
 #include "WorkspaceWindow.h"   // sizeToContent for hosted-plugin surfaces
@@ -12,6 +14,17 @@ namespace
     constexpr int kPickBtnH = 26;
     constexpr int kPickGap  = 6;    // between the picker button and the plugin
     constexpr int kEdge     = 8;    // page inset, matches resized()
+
+    // One spelling for the dead-plugin marker, shared with the rack slot's
+    // (SlotComponent::slotDisplayName) -- the same condition on two surfaces
+    // must not read two ways.
+    juce::String missingSuffix() { return " (missing)"; }
+
+    juce::String stripMissingMarker (const juce::String& s)
+    {
+        const auto suffix = missingSuffix();
+        return s.endsWith (suffix) ? s.dropLastCharacters (suffix.length()) : s;
+    }
 }
 
 PluginsPage::PluginsPage (VibeSynthProcessor& p, int pageIndex)
@@ -22,7 +35,14 @@ PluginsPage::PluginsPage (VibeSynthProcessor& p, int pageIndex)
 
     // Tab identity is created at page birth (TS1 convention) -- the model owns
     // the tab whether or not a plugin has been picked yet.
-    mProcessor.engineRig().addTab (TabKind::Plugins, mPageIndex, mTabName);
+    mProcessor.engineRig().addTab (TabKind::Plugins, mPageIndex);
+
+    // The added-plugin list is the "user put the missing plugin back" signal --
+    // see retryDeadPlugin.  Subscribed by the PAGE because page destruction on
+    // window close is off, so this object outlives every window its tab opens
+    // and is torn down only with the tab itself.
+    if (auto* pm = Hosting::PluginManager::getInstance())
+        pm->addChangeListener (this);
 
     mPickBtn.onClick = [this] { showPicker(); };
     addAndMakeVisible (mPickBtn);
@@ -48,6 +68,9 @@ void PluginsPage::parentHierarchyChanged()
 
 PluginsPage::~PluginsPage()
 {
+    if (auto* pm = Hosting::PluginManager::getInstance())
+        pm->removeChangeListener (this);
+
     stopTimer();
     // The editor dies with the view; the ENGINE does not -- EngineRig owns it
     // and onTabClosed is what removes the tab.
@@ -74,29 +97,58 @@ Hosting::HostedPluginInstance* PluginsPage::getHosted() const
 
 juce::String PluginsPage::getPluginName() const
 {
-    if (auto* h = getHosted())
-        return h->getDescription().name;
+    auto* h = getHosted();
+    if (h == nullptr) return {};
 
-    return {};
+    // Asked LIVE rather than cached: a bridged load result and a crash both land
+    // after this name is first rendered, and every surface re-reads it.
+    const juce::String name = h->getDescription().name;
+    return h->isAlive() ? name : name + missingSuffix();
 }
 
 juce::String PluginsPage::getDisplayName() const
 {
-    if (auto* h = getHosted())
+    auto* h = getHosted();
+    if (h == nullptr) return {};
+
+    if (! h->isAlive())
     {
-        const auto prog = h->getProgramName (h->getCurrentProgram());
-        if (prog.isNotEmpty()) return prog;
+        const juce::String base = mTabName.isNotEmpty() ? mTabName
+                                                        : h->getDescription().name;
+        return base + missingSuffix();
     }
-    return getPluginName();
+
+    // Revival edge: hand back the name the tab carried before the marker went
+    // on.  The cascade this rides ends in setTabName, so reporting the program
+    // name here would PERSIST it over a name the user chose.
+    if (mInMarkerFire && mTabName.isNotEmpty())
+        return mTabName;
+
+    const auto prog = h->getProgramName (h->getCurrentProgram());
+    return prog.isNotEmpty() ? prog : h->getDescription().name;
 }
 
 void PluginsPage::setTabName (const juce::String& n)
 {
-    mTabName = n;
+    // The dead-plugin marker is decoration on a name, never part of one: this is
+    // the far end of the rename cascade getDisplayName rides, and it is also what
+    // the project persists.  Stripping here is what keeps the marker from being
+    // saved into a tab name and then outliving the condition that caused it.
+    mTabName = stripMissingMarker (n);
 }
 
 void PluginsPage::showPicker()
 {
+    // One plugin per tab, for the tab's life: swapping the engine under a loaded
+    // tab is a feature we do not offer -- closing the tab and opening a new one
+    // does the same thing without destroying a live hosted instance under the
+    // audio thread.  The button is disabled once a plugin exists; this guard
+    // backs it up.  Only the PICKER is gated -- project restore, undo
+    // resurrection and page-preset load reach the rig through selectPluginById
+    // and are unaffected.
+    if (getEngineProcessor() != nullptr)
+        return;
+
     auto* pm = Hosting::PluginManager::getInstance();
 
     juce::PopupMenu m;
@@ -132,12 +184,26 @@ void PluginsPage::showPicker()
 
 void PluginsPage::selectPlugin (const juce::PluginDescription& desc)
 {
+    selectPluginById (desc.createIdentifierString());
+}
+
+void PluginsPage::selectPluginById (const juce::String& identifier)
+{
+    if (identifier.isEmpty())
+        return;
+
     const bool wasEmpty = (getEngineProcessor() == nullptr);
 
     // The identifier string IS the engineType -- construction, registration and
     // teardown all belong to the rig.
-    mProcessor.engineRig().setEngineType (TabKind::Plugins, mPageIndex,
-                                          desc.createIdentifierString());
+    //
+    // Deliberately NOT gated on the user's added-plugins list: the rig's
+    // Plugins factory falls back to the description stashed with the saved tab,
+    // which is the only thing that keeps a project (or an undo resurrection)
+    // loading its plugin after the user removed it from that list or a rescan
+    // dropped it.  Filtering here made that fallback unreachable.  The added
+    // list gates showPicker, which is what builds the user's own menu.
+    mProcessor.engineRig().setEngineType (TabKind::Plugins, mPageIndex, identifier);
 
     rebuildEditor();
 
@@ -148,15 +214,61 @@ void PluginsPage::selectPlugin (const juce::PluginDescription& desc)
         onPluginChanged();
 }
 
-void PluginsPage::selectPluginById (const juce::String& identifier)
+bool PluginsPage::retryDeadPlugin()
 {
-    auto* pm = Hosting::PluginManager::getInstance();
+    auto* h = getHosted();
+    if (h == nullptr || h->isAlive()) return false;
 
-    if (pm == nullptr || identifier.isEmpty())
+    const bool revived = mProcessor.engineRig().retryDeadPluginTab (mPageIndex);
+
+    // The instance changed identity whether or not it came back, so everything
+    // holding the old one is refreshed HERE rather than left to the poll: a page
+    // whose window is closed has no poll (peer-keyed suspend), and this can fire
+    // from the added-list edge at any time.
+    rebuildEditor();
+    refreshNameMarker();
+
+    // A new instance means a new parameter list and a new bridged-list-arrival
+    // hook, both of which the lane registration owns.
+    if (onParamListChanged) onParamListChanged();
+
+    return revived;
+}
+
+// The added list is the only edge there is; a rescan or an add/remove elsewhere
+// in the app lands here too, which is harmless -- the retry is gated on this
+// tab's own instance being dead.
+void PluginsPage::changeListenerCallback (juce::ChangeBroadcaster* source)
+{
+    if (source == nullptr || source != Hosting::PluginManager::getInstance())
         return;
 
-    if (auto desc = pm->findAdded (identifier))
-        selectPlugin (*desc);
+    retryDeadPlugin();
+}
+
+// The marker is part of the displayed name, so a change in aliveness renames the
+// tab / strip / roll -- the dead edge decorating the tab's name, the alive edge
+// handing that same name straight back.  Nothing is latched until there is a
+// listener to tell: during project restore the page exists before its rename
+// cascade is wired, and latching then would consume the only edge the marker
+// ever gets.
+void PluginsPage::refreshNameMarker()
+{
+    auto* h = getHosted();
+    if (h == nullptr) return;
+
+    const bool alive = h->isAlive();
+    if (alive == mNameAlive || ! onPluginChanged) return;
+
+    mNameAlive = alive;
+
+    // Seeded OUTSIDE the fire so the program-name watch holds the plugin's real
+    // live name -- seeding it with what the cascade publishes would leave the
+    // watch one poll away from renaming the tab back to the program anyway.
+    mLastDisplayName = getDisplayName();
+
+    const juce::ScopedValueSetter<bool> markerFire (mInMarkerFire, true);
+    onPluginChanged();
 }
 
 void PluginsPage::rebuildEditor()
@@ -175,6 +287,7 @@ void PluginsPage::rebuildEditor()
 
     if (eng == nullptr)
     {
+        mPickBtn.setEnabled (true);
         mPickBtn.setButtonText ("Select plugin...");
         resized();
         return;
@@ -183,6 +296,9 @@ void PluginsPage::rebuildEditor()
     if (auto* h = dynamic_cast<Hosting::HostedPluginInstance*> (eng))
         mBuiltAlive = h->isAlive();
 
+    // The pick button becomes a plain name label once the tab has its plugin --
+    // see showPicker for why the swap is gone.
+    mPickBtn.setEnabled (false);
     mPickBtn.setButtonText (getPluginName().isNotEmpty() ? getPluginName()
                                                          : juce::String ("Select plugin..."));
 
@@ -239,6 +355,8 @@ void PluginsPage::timerCallback()
     if (auto* h = dynamic_cast<Hosting::HostedPluginInstance*> (eng))
         if (h->isAlive() != mBuiltAlive)
             rebuildEditor();
+
+    refreshNameMarker();
 
     // Dirty baseline: one capture per engine, at its first alive poll.
     if (! mBaselineCaptured)
@@ -366,8 +484,12 @@ void PluginsPage::savePagePreset (std::function<void()> onSaved)
     auto* aw = new juce::AlertWindow ("Save Page Preset",
                                        "Enter a name for this plugin page preset:",
                                        juce::AlertWindow::NoIcon);
-    aw->addTextEditor ("name", getPluginName().isNotEmpty() ? getPluginName()
-                                                            : juce::String ("My Plugin"));
+    // Unmarked: this becomes a FILENAME on disk, and a preset saved while the
+    // plugin was missing would otherwise carry the marker for good (the state it
+    // writes is the retained last-known blob, which is perfectly valid).
+    const juce::String defaultName = stripMissingMarker (getPluginName());
+    aw->addTextEditor ("name", defaultName.isNotEmpty() ? defaultName
+                                                        : juce::String ("My Plugin"));
     aw->addButton ("Save",   1, juce::KeyPress (juce::KeyPress::returnKey));
     aw->addButton ("Cancel", 0, juce::KeyPress (juce::KeyPress::escapeKey));
 
@@ -379,14 +501,6 @@ void PluginsPage::savePagePreset (std::function<void()> onSaved)
             if (r != 1 || ! safeThis) return;
 
             const juce::String name = aw->getTextEditorContents ("name").trim();
-            if (name.isEmpty()) return;
-
-            auto dir = PagePresetIO::myPresetsDirForPageKind (PagePresetIO::PageKind::Plugins);
-            dir.createDirectory();
-            auto target = dir.getChildFile (name + ".xml");
-            int n = 2;
-            while (target.exists())
-                target = dir.getChildFile (name + " (" + juce::String (n++) + ").xml");
 
             // engineType = the plugin identifier string, so load knows which
             // plugin to instantiate before applying state.  Hosted plugins
@@ -401,18 +515,32 @@ void PluginsPage::savePagePreset (std::function<void()> onSaved)
                 safeThis->getEngineProcessor(),
                 safeThis->getEngineType(),
                 {});
-            if (xml.isNotEmpty())
-                target.replaceWithText (xml);
 
-            // Saved = clean: the delete prompt goes back to the plain confirm.
-            if (auto* h = safeThis->getHosted(); h != nullptr && h->isAlive())
-            {
-                safeThis->mBaselineTouchCount = h->getTouchCount();
-                safeThis->mBaselineProgram    = safeThis->getDisplayName();
-                safeThis->mBaselineCaptured   = true;
-            }
+            // The tail lives inside the callback because this save is also the
+            // first half of "Save Page Preset & Delete": on anything but
+            // Succeeded -- a failed write, or the user answering Cancel to the
+            // collision prompt -- nothing below may run, least of all onSaved
+            // and least of all the clean-baseline re-capture, which would make
+            // the next delete skip its unsaved-work prompt for work that was
+            // never written.  safeThis is re-tested because the collision
+            // prompt is a second modal, so the page can close while it is up.
+            const auto dir = PagePresetIO::myPresetsDirForPageKind (PagePresetIO::PageKind::Plugins);
+            UserFileSave::writeTextAsync (dir, name, xml,
+                [safeThis, onSaved] (const UserFileSave::Result& saved)
+                {
+                    if (! saved || ! safeThis) return;
 
-            if (onSaved) onSaved();
+                    // Saved = clean: the delete prompt goes back to the plain confirm.
+                    if (auto* h = safeThis->getHosted(); h != nullptr && h->isAlive())
+                    {
+                        safeThis->mBaselineTouchCount = h->getTouchCount();
+                        safeThis->mBaselineProgram    = safeThis->getDisplayName();
+                        safeThis->mBaselineCaptured   = true;
+                    }
+
+                    if (onSaved) onSaved();
+                },
+                UserFileSave::kTabNotDeleted);
         }), false);
 }
 
@@ -462,6 +590,14 @@ void PluginsPage::loadPagePreset (const juce::File& xml)
 {
     if (! xml.existsAsFile()) return;
 
+    // The preset restores this tab's insert rack, whose slots can hold effects
+    // that reference an external file (a user IR, a VST3 whose DLL is gone) and
+    // record a miss rather than failing loudly.  The scope reports that under
+    // THIS gesture's name; an entry left banked surfaces later attached to an
+    // unrelated load, naming a file that has nothing to do with what the user
+    // is looking at then.
+    MissingFileReport::ScopedGesture gesture ("preset");
+
     // Two-step, mirroring project restore: instantiate the preset's plugin
     // through the rig FIRST, then apply state (the bridge load path holds
     // early state until the remote instance is ready).
@@ -471,7 +607,10 @@ void PluginsPage::loadPagePreset (const juce::File& xml)
 
     if (wantedId.isNotEmpty() && getEngineType() != wantedId)
     {
-        // selectPluginById is a no-op when the plugin isn't on the added list.
+        // setEngineType clears the tab's engineType when the factory can't
+        // build the plugin.  A page preset carries no stashed description
+        // (that's the project/undo restore path), so the only resolver left is
+        // the added list.
         auto* aw = new juce::AlertWindow ("Load Page Preset",
             "This preset uses a plugin that is not in your added list.\n"
             "Add it under Options > Plugins, then load the preset again.",
@@ -506,6 +645,7 @@ void PluginsPage::showPageActionsMenu (juce::Component* anchor)
     constexpr int kIdSavePagePreset = 100;
     constexpr int kIdDeleteTab      = 101;
     constexpr int kIdAutomateLast   = 102;
+    constexpr int kIdRetryPlugin    = 103;
     constexpr int kIdLoadBase       = 1000;
     constexpr int kIdAutoBase       = 20000;
 
@@ -582,6 +722,16 @@ void PluginsPage::showPageActionsMenu (juce::Component* anchor)
         menu.addSubMenu ("Automate", autoSub);
     }
 
+    // The automatic recovery watches the added-plugin list, and putting a plugin
+    // back on that list is not the gesture every user reaches for -- so the retry
+    // is also here, by hand.  Shown only while the plugin is not alive: retrying
+    // a working one means nothing.  Same wording as the rack slot's retry.
+    if (auto* h = getHosted(); h != nullptr && ! h->isAlive())
+    {
+        menu.addSeparator();
+        menu.addItem (kIdRetryPlugin, "Retry Loading Plugin");
+    }
+
     // Delete on the hamburger too (Jeff, 2026-08-02) -- see LayersPage.
     menu.addSeparator();
     menu.addItem (kIdDeleteTab, "Delete Plugin");
@@ -594,6 +744,7 @@ void PluginsPage::showPageActionsMenu (juce::Component* anchor)
             if (! safeThis || r <= 0) return;
             if (r == kIdSavePagePreset) { safeThis->savePagePreset(); return; }
             if (r == kIdDeleteTab)      { safeThis->requestDelete();  return; }
+            if (r == kIdRetryPlugin)    { safeThis->retryDeadPlugin(); return; }
             if (r == kIdAutomateLast)
             {
                 if (auto* h = safeThis->getHosted())

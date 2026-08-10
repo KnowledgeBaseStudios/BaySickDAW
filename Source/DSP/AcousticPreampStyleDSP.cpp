@@ -1,4 +1,6 @@
 #include "AcousticPreampStyleDSP.h"
+#include "../MissingFileReport.h"
+#include "../ProjectFileResolver.h"
 
 namespace
 {
@@ -172,7 +174,11 @@ void AcousticPreampStyleDSP::reloadConvIR()
 
     if (mUserIRPath.isNotEmpty())
     {
-        juce::File f (mUserIRPath);
+        // mUserIRPath is whatever was persisted -- a bundled project stores
+        // "Samples/<name>.wav", which a bare juce::File would resolve against
+        // the process working directory and silently fall through to the
+        // identity IR below.
+        const juce::File f = ProjectFileResolver::resolve (mUserIRPath);
         if (f.existsAsFile())
         {
             mConv.loadImpulseResponse (f, juce::dsp::Convolution::Stereo::yes,
@@ -237,10 +243,37 @@ void AcousticPreampStyleDSP::setLevelDb (float db)
     mLevelDb = juce::jlimit (-24.0f, 12.0f, db);
 }
 
-void AcousticPreampStyleDSP::loadUserIR (const juce::File& file)
+bool AcousticPreampStyleDSP::loadUserIR (const juce::File& file, juce::String& outErr)
 {
-    mUserIRPath = file.existsAsFile() ? file.getFullPathName() : juce::String();
+    if (file == juce::File())        // documented clear
+    {
+        mUserIRPath = {};
+        if (mBody == Body::User) reloadConvIR();
+        return true;
+    }
+
+    if (! file.existsAsFile())
+    {
+        outErr = "The file is missing:\n" + file.getFullPathName();
+        return false;
+    }
+
+    // juce::dsp::Convolution::loadImpulseResponse reports nothing back, and
+    // reloadConvIR falls back to a one-sample identity IR -- so an unreadable
+    // or non-audio pick used to land as "the effect silently does nothing".
+    // Probe with a reader before committing the path.
+    juce::AudioFormatManager fm;
+    fm.registerBasicFormats();
+    std::unique_ptr<juce::AudioFormatReader> reader (fm.createReaderFor (file));
+    if (reader == nullptr || reader->lengthInSamples <= 0)
+    {
+        outErr = "This file could not be read as audio:\n" + file.getFullPathName();
+        return false;
+    }
+
+    mUserIRPath = file.getFullPathName();
     if (mBody == Body::User) reloadConvIR();   // message-thread caller (panel)
+    return true;
 }
 
 void AcousticPreampStyleDSP::process (juce::AudioBuffer<float>& buffer)
@@ -514,6 +547,12 @@ void AcousticPreampStyleDSP::setStateInformation (const void* data, int sz)
     setNotchOn   (((int)           state.getProperty ("notchOn",   0)) != 0);
     setLevelDb   ((float)(double)  state.getProperty ("levelDb",   0.0));
     bypassed = ((int) state.getProperty ("bypassed", 0)) != 0;
+
+    // Report here, not in reloadConvIR() -- prepare() and User-boundary body
+    // flips re-run that outside the project-load drain window.
+    if (mBody == Body::User && mUserIRPath.isNotEmpty()
+        && ! ProjectFileResolver::resolve (mUserIRPath).existsAsFile())
+        MissingFileReport::add ("Acoustic Preamp user IR", mUserIRPath);
 
     reloadConvIR();   // message-thread caller (preset/project load)
 }

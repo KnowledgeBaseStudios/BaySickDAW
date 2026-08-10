@@ -4,16 +4,14 @@
 
 // ── HarmlessXYZPad ────────────────────────────────────────────────────────────
 // 2D interactive pad for X/Y modulation + a Z knob below.
-// Mouse drag sets X/Y in -1..+1 range. onXYChanged(x, y) fires on change.
+// Mouse drag sets X/Y in -1..+1 range; the values reach the engine only
+// through the APVTS attachments on the X/Y knobs (attachToApvts).
 class HarmlessXYZPad : public juce::Component,
                        private juce::Slider::Listener
 {
 public:
-    std::function<void(float x, float y)> onXYChanged;
-
     HarmlessXYZPad();
 
-    void setXY (float x, float y);
     float getX() const noexcept { return mX; }
     float getY() const noexcept { return mY; }
 

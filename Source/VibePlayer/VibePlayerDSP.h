@@ -42,10 +42,16 @@ struct VibeRegion
 
 // ── VibeSampleManager ─────────────────────────────────────────────────────────
 // Loads regions from a folder or SFZ file (message thread only).
-// findRegion() is called from the audio thread - reads only, safe once loaded.
 //
 // Disk I/O:  loadFolder / loadSFZ  (message thread, may block briefly)
 // Audio use: findRegion             (audio thread, lock-free reads)
+//
+// THREAD SAFETY: this class carries NO lock.  The audio thread's reads are safe
+// only because every mutator - clear, the three loaders, normalizeRootNotes -
+// runs behind the host's processBlock shield + settle, which VibePlayerProcessor
+// ::loadIntoManager raises for all of them.  They rebuild mRegions in place, and
+// a push_back reallocation frees the block a concurrent reader is indexing, so a
+// new mutation path that skips that bracket is a use-after-free, not a glitch.
 class VibeSampleManager
 {
 public:
@@ -583,7 +589,6 @@ private:
     float  mCurTargetNote    { 60.0f };  // note the ratio currently targets
 
     // Resampling hold counter (for sample-rate reduction)
-    int    mReductHold  { 0 };
     int    mReductStep  { 0 };
 
     // Temp buffer used inside renderNextBlock
@@ -641,7 +646,6 @@ public:
     // ── Audio lifecycle ───────────────────────────────────────────────────────
     void prepare         (double sampleRate, int maxBlockSize);
     void renderNextBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midi);
-    void allNotesOff     ();
 
     // ── Sample loading ────────────────────────────────────────────────────────
     VibeSampleManager& getManager() { return mManager; }
@@ -748,12 +752,15 @@ private:
     // branch can iterate the pool without dynamic_cast per voice (Sub-A=(a) rationale).
     std::array<VibeVoice*, kMaxVoices> mVoices {};
 
-    // findStealCandidate implements L7(b) hybrid: scan mVoices for active candidates,
-    // prefer the oldest-by-mNoteStartCounter that's also in release phase; fall back
-    // to overall oldest if no release-phase voice is found.  Returns nullptr only
-    // if no active voices exist (shouldn't happen at steal time since activeCount
-    // >= cap is the precondition).  newPitch is reserved for future "don't steal a
-    // voice playing the same pitch" logic; unused for now.
+    // findStealCandidate implements the L7(b) 3-tier steal policy: ADSR-release
+    // voices first, then noteOff-queued or key-up voices, and physically-held keys
+    // only when neither of the first two tiers has a candidate.  Oldest by
+    // mNoteStartCounter within a tier; there is deliberately NO overall-oldest
+    // fallback across tiers - that steals a sustained lead note out from under a
+    // looping chord.  The full tier table and the rest of the rationale sit at the
+    // definition in VibePlayerDSP.cpp; read it before changing the policy.
+    // newPitch is reserved for a future "don't steal a voice playing the same
+    // pitch" rule; unused for now.
     VibeVoice* findStealCandidate (int newPitch) const noexcept;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (VibeSynth)

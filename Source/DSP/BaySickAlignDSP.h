@@ -174,11 +174,6 @@ struct WarpMap
 
     bool isValid() const noexcept { return anchors.size() >= 2; }
 
-    // Compute the source-side stretch ratio at a given dub time:
-    //    ratio = d(guideTime)/d(dubTime) at this position
-    // Returns 1.0 outside any anchor range (passthrough).
-    double getStretchRatioAt (double dubTimeSec) const noexcept;
-
     // Map a dub-side time to its guide-side equivalent (piecewise linear).
     double mapDubToGuide (double dubTimeSec) const noexcept;
 

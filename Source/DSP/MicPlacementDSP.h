@@ -62,7 +62,6 @@ public:
     float getAngleDeg()   const noexcept { return mAngleDeg; }
     int   getPolar()      const noexcept { return (int) mPolar; }
 
-    static const char* polarDisplayName (int idx);
 
 private:
     using StereoIIR = juce::dsp::ProcessorDuplicator<

@@ -20,14 +20,15 @@
 //   input -> pitch correction -> gate -> de-reverb -> de-esser -> compressor
 //         -> saturation -> limiter -> output
 //
-// Editor (H-6) - 6 sub-tabs:
+// Editor (H-6) - five panels (QA-Layout T4: the main one is the editor's
+// content; the other four open as contained windows, not tabs):
 //   1. BaySickVocals      (realtime pitch + page-wide controls)
 //   2. Vocal Chain        (gate / de-reverb / de-esser / compressor /
 //                          saturation / limiter rack)
 //   3. BaySickPitch       (offline note-by-note pitch editor)
 //   4. BaySickAlign       (offline channel-pair time-alignment editor)
-//   5. BaySickNAM/IR      (existing engine hosted as a sub-tab)
-//   6. Pre Rack EQ        (strip's existing Pre EQ8 M/S)
+//   5. BaySickNAM/IR      (this processor's embedded NAM/IR)
+// Pre + post EQ for the strip live on the Effects page, not here.
 //
 // QA-Fd 3a/12b: the page-master Bypass (bsv_bypass) is retired -- the chain
 // always runs so pitch/align edits are never silenced by a page switch.
@@ -36,7 +37,8 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 class BaySickVocalProcessor : public juce::AudioProcessor,
-                              public ISidechainEngine
+                              public ISidechainEngine,
+                              private juce::AudioProcessorValueTreeState::Listener
 {
 public:
     // undoMgr: QA-ModelShell TS1 dormant pre-wire -- bound into apvts (and
@@ -88,6 +90,31 @@ public:
     // the embedded NAMIR sub-processor has its own tracker wired separately.
     void setOnAnyStateChange (std::function<void()> fn) { mDirtyTracker.onAny = std::move (fn); }
 
+    // ── Per-slot A/B snapshot (mirrors BaySickNAMIRProcessor::SlotSnapshot) ──
+    // When `bsv_ab_slot` changes the processor restores the INCOMING slot's
+    // snapshot into APVTS; knobs follow through their attachments.  On a USER
+    // flip it first captures the OUTGOING slot's parameter values into that
+    // slot's snapshot -- on an automation replay it does not, because a replay
+    // is not an edit and would bank replay-time values over both hand-dialled
+    // tones.  The snapshotted id set is kAbSnapshotParams in the .cpp, sitting
+    // next to createLayout so the two stay in step.
+    //
+    // NOT in the snapshot (stays global across slots): `bsv_ab_slot` itself,
+    // `bsv_deesser_listen` (a sidechain-audition monitor state -- the de-esser's
+    // solo -- so a flip never drops you out of an audition), the bsa_/bsp_
+    // offline editor families (per-channel edit data, not chain tone), the
+    // unbound chain-DSP panel state carried in <VocalChainState>, and the
+    // embedded NAM/IR, which owns a second independent A/B pair of its own.
+    struct SlotSnapshot
+    {
+        // One real (un-normalized) value per kAbSnapshotParams entry, in table
+        // order.  Empty until the first capture.
+        std::vector<float> values;
+
+        juce::ValueTree toValueTree   (const juce::Identifier& root) const;
+        void            fromValueTree (const juce::ValueTree& v);
+    };
+
     // H-6c (2026-05-01) / QA-Fe2 (2026-07-16): Vocal Chain rack -- 6 locked
     // slots in fixed order:
     //   [0] Gate  [1] De-reverb  [2] De-esser  [3] Compressor
@@ -130,11 +157,13 @@ public:
     void setMonitorMode (int m) noexcept { mMonitorMode.store (m, std::memory_order_release); }
 
     // 2026-05-06 (Batch 9c N1): atomic shutdown gate.  Mirrors
-    // VibeSynthProcessor::mProjectLoadInProgress.  Owners SHOULD call
-    // setShuttingDown(true) ~30 ms before destroying this instance (same
-    // pattern StandaloneEditor::closeAllDynamicTabs uses on the main
-    // processor: setProjectLoadInProgress + Thread::sleep(30)) so the
-    // audio thread sees the flag in advance of member teardown.  The
+    // VibeSynthProcessor::mProjectLoadInProgress.  Owners SHOULD raise
+    // setShuttingDown(true) and then call VibeSynthProcessor::settleAudioThread()
+    // before destroying this instance -- the acknowledgement-based wait
+    // StandaloneEditor::closeDynamicTabs and EngineRig::teardownEngine use, so
+    // the audio thread has provably seen the flag and left processBlock.  A
+    // fixed sleep cannot make that claim at any single duration: one block is
+    // 23 ms at 1024 samples / 44.1 kHz and 46 ms at 2048.  The
     // destructor sets it as a final safety net; in either case, processBlock
     // bails out early instead of dereferencing mNamIrProc / mVocalChainRack
     // after their dtors begin (the observed crash was mNamIrProc->processBlock
@@ -532,6 +561,20 @@ private:
 
     // ── Per-block APVTS->DSP push (called at top of processBlock) ───────────
     void pushApvtsToDsp() noexcept;
+
+    // ── A/B compare (see SlotSnapshot above) ────────────────────────────────
+    void parameterChanged (const juce::String& paramID, float newValue) override;
+    int  activeAbSlot() const noexcept;          // bsv_ab_slot, clamped to 0/1
+    void captureSnapshotFromCurrent (int slot);  // message thread (or offline render)
+    void applySnapshotToCurrent     (int slot);
+
+    std::array<SlotSnapshot, 2> mSnapshots;
+    int                         mLastSlot { 0 };
+
+    // Lifetime token for the message-thread post made from parameterChanged.
+    // The destructor drops it early, so a queued swap holding a weak copy can
+    // tell that this engine is gone (callAsync has no cancel).
+    std::shared_ptr<char> mLife { std::make_shared<char> ('\0') };
 
     // ── Sample-rate / block state ────────────────────────────────────────────
     double mSampleRate = 44100.0;

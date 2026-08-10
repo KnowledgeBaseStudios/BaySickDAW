@@ -118,8 +118,11 @@ namespace PagePresetIO
                                     const PageChainConfig& cfg);
 
     // Restore a page from saved XML.  Returns true on success.  On failure
-    // (parse error, missing kit on disk, kitLoadCallback returns false, etc.)
-    // returns false WITHOUT applying any partial state.
+    // (parse error, damaged engine blob, missing kit on disk, kitLoadCallback
+    // returns false) returns false and stops at the failing point -- this is NOT
+    // atomic.  On a multi-slot page (Inst: Pedals + NAM/IR + sfizz) every slot
+    // applied before the failing one keeps its new state and there is no
+    // rollback; strip params and racks are reached only after every slot applies.
     bool importPagePreset (VibeSynthProcessor& processor,
                            PageKind kind,
                            const PageChainConfig& cfg,

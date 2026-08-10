@@ -57,6 +57,12 @@ void RustyDrumsProducerTask::run()
     // Idle suspend: if MIDI is empty AND no active voices for
     // kIdleSuspendBlocks consecutive blocks, skip the entire processStrips
     // call.  Wakes immediately on next block where either gate fails.
+    //
+    // The hold expiring starts a fade rather than an instant stop: the engine
+    // keeps rendering at falling gain for IdleSuspendFade::kFadeOutSeconds, and
+    // only once that reaches zero does the skip take over.  Same envelope and
+    // the same reasoning as InstStripTask - a shutdown that lands in one sample
+    // guillotines anything still ringing (see IdleSuspendFade.h).
     juce::MidiBuffer  emptyMidi;
     juce::MidiBuffer* midi = mCtx->rustyDrumsMidi != nullptr
                               ? mCtx->rustyDrumsMidi
@@ -69,16 +75,36 @@ void RustyDrumsProducerTask::run()
     // silently swallowed during idle-suspend.
     const bool auditionPending = engine->isAuditionPending();
 
+    bool holdExpired = false;
     if (midiEmpty && noVoices && ! auditionPending)
     {
         if (mProcessor->mRustyIdleBlocks >= VibeSynthProcessor::kIdleSuspendBlocks)
-            return;   // suspended this block
-        ++mProcessor->mRustyIdleBlocks;
+            holdExpired = true;
+        else
+            ++mProcessor->mRustyIdleBlocks;
     }
     else
     {
         mProcessor->mRustyIdleBlocks = 0;
     }
 
+    const auto suspendRamp = mSuspendFade.advance (holdExpired, n, mProcessor->mSampleRate);
+    if (suspendRamp.suspended)
+        return;   // faded out already - suspended this block
+
     engine->processStrips (n, *midi);
+
+    // getStripBuffer hands back a view onto the engine's multi-out scratch, so
+    // the ramp lands on the buffers the 13 RustyInsertTasks are about to copy
+    // (their synthetic dep on this producer orders them after this write).
+    if (! suspendRamp.isUnity())
+    {
+        const int strips = engine->getStripCount();
+        for (int s = 0; s < strips; ++s)
+        {
+            auto view = engine->getStripBuffer (s, n);
+            if (view.getNumChannels() > 0)
+                IdleSuspendFade::apply (view, suspendRamp);
+        }
+    }
 }

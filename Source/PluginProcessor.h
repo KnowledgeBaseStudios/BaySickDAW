@@ -1,14 +1,13 @@
 #pragma once
 #include <JuceHeader.h>
+#include <cstdint>
 #include <map>
+#include <memory>
 #include <set>
 #include "VibesynthConstants.h"
-#include "SynthVoice.h"
-#include "SynthSound.h"
 // 2026-04-25: DrumSynth.h + DrumVoice + BaySickDrumsProcessor + DrumsPage
 // + BaySickDrumsEditor + BaySickDrumsLAF all deleted.  Drums now use the
 // dynamic per-tab DrumPage model with BaySickPlayer / BaySickSynth engines.
-#include "BassSynth.h"
 #include "PatternManager.h"
 #include "DSP/EQ8MsDSP.h"
 #include "VibeGraph.h"
@@ -48,6 +47,83 @@ class EngineRig;   // QA-ModelShell TS1: model-side engine owner (member at clas
 // preserving the deliberate forward-declaration above.
 enum class TabKind;
 namespace Hosting { class PluginManager; }   // QA-ModelShell TS6
+
+// ── CL-281 decode-once clip cache ────────────────────────────────────────────
+// The decoded PCM of ONE resolved audio file.  Decoded on the message thread at
+// clip-rebuild time and SHARED, unchanged, by every clip that resolves to that
+// file -- the same WAV placed four times decodes once and the four clips read
+// one buffer.
+//
+// THREAD SAFETY / OWNERSHIP: nothing mutates a DecodedClipAudio after its
+// shared_ptr leaves the decoder, so the audio thread reads it with no
+// synchronization beyond the release-store that publishes the AudioClipSnapshot
+// holding the pointer.  A clip cannot mutate data another clip is reading: the
+// alias is shared_ptr<CONST>, and every per-clip read is a copy out.  The last
+// reference to drop frees the buffer -- for a retired snapshot that drop happens
+// on the RetirementQueue drainer thread, never on the audio thread.
+struct DecodedClipAudio
+{
+    juce::AudioBuffer<float> samples;            // numChannels x lengthInSamples, at fileSampleRate
+    double      fileSampleRate  { 44100.0 };
+    int         numChannels     { 2 };
+    juce::int64 lengthInSamples { 0 };
+};
+using DecodedClipAudioPtr = std::shared_ptr<const DecodedClipAudio>;
+
+// ── ClipSource ───────────────────────────────────────────────────────────────
+// One arrangement clip's read head.  Two backings behind one API:
+//   CACHED   - a shared DecodedClipAudio.  The whole file is resident, so there
+//              is no ring, no prefetch and no seek state to keep.
+//   STREAMED - an owned AudioClipStreamer, for files past
+//              AudioClipStreamer::kRamThresholdBytes.
+// The cached branch reproduces the streamer's own RAM-mode reads (which run
+// against a ring whose capacity IS the file length, so its modulo is identity):
+// same 1:1 snap, same Catmull-Rom kernel, same EOF behavior.
+//
+// AUDIO THREAD: readAndMix / readRaw allocate nothing and take no lock on
+// either backing.
+class ClipSource
+{
+public:
+    explicit ClipSource (DecodedClipAudioPtr cached) noexcept
+        : mCached (std::move (cached)), mData (mCached.get()) {}
+    explicit ClipSource (std::unique_ptr<AudioClipStreamer> streamed) noexcept
+        : mStreamer (std::move (streamed)) {}
+
+    float readAndMix (juce::AudioBuffer<float>& dest,
+                      int    destOffset,
+                      int    numOutputSamples,
+                      double fileStartPos,
+                      double readRatio,
+                      int    numDestChannels,
+                      float  gain);
+
+    bool readRaw (juce::AudioBuffer<float>& dest,
+                  int destOffset,
+                  int numSamples,
+                  juce::int64 filePos);
+
+    // Audio-thread-safe seek request.  No-op on the cached backing.
+    void requestSeek (juce::int64 filePos);
+
+    juce::int64 getTotalLength() const noexcept
+        { return mData != nullptr ? mData->lengthInSamples : mStreamer->getTotalLength(); }
+    int getNumChannels() const noexcept
+        { return mData != nullptr ? mData->numChannels : mStreamer->getNumChannels(); }
+    // Consumed by the reverse-playback gate: backward reads need the whole file
+    // resident, which a cached clip is by definition.
+    bool isRamLoaded() const noexcept
+        { return mData != nullptr ? true : mStreamer->isRamLoaded(); }
+
+private:
+    DecodedClipAudioPtr                mCached;             // null when streaming
+    std::unique_ptr<AudioClipStreamer> mStreamer;           // null when cached
+    // mCached.get(), hoisted so the audio-thread reads never touch the control
+    // block; also the branch selector (null == streaming).
+    const DecodedClipAudio*            mData { nullptr };
+
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (ClipSource)
+};
 
 class VibeSynthProcessor : public juce::AudioProcessor,
                            private juce::ValueTree::Listener   // §P4.3 perf: dirty-flag EQ sync
@@ -108,8 +184,31 @@ public:
     // rack states are stashed for applyPendingRackStates once tabs + strips exist.
     void applyProcessorState (const juce::XmlElement& root);
     // One-shot warning for external files engines could not find during a
-    // restore.  Call after every engine has finished loading.
-    void reportMissingFilesIfAny();
+    // restore.  Call after every engine has finished loading.  A thin forwarder
+    // to MissingFileReport::reportIfAny, kept because the restore paths already
+    // hold the processor -- the store itself needs nothing from it.
+    //
+    // The store is process-wide, so EVERY gesture that can reach
+    // MissingFileReport::add must drain -- an undrained entry does not just go
+    // unreported, it surfaces later under whatever operation happens to drain
+    // next, naming a file that has nothing to do with what the user is looking
+    // at.  Prefer a MissingFileReport::ScopedGesture at the TOP of the gesture:
+    // it cannot be forgotten on an early return, and it nests.  A bare call to
+    // this belongs only where the caller owns the whole load and opens no scope
+    // (project / template restore); made from INSIDE someone else's open scope
+    // it steals that scope's entries and headlines them with this noun.
+    // sourceNoun is what the headline calls the thing that referred to the file
+    // ("project", "preset", ...).
+    void reportMissingFilesIfAny (const juce::String& sourceNoun = "project");
+    // Public wrapper over the protected AudioProcessor decode helper so the
+    // restore walker can VALIDATE an internal engine's copyXmlToBinary blob
+    // (corrupt-data detection) before handing it to setStateInformation --
+    // in-attribute corruption usually still base64-decodes, so the XML magic
+    // check is what actually catches it.
+    static std::unique_ptr<juce::XmlElement> decodeEngineBlob (const juce::MemoryBlock& mb)
+    {
+        return getXmlFromBinary (mb.getData(), (int) mb.getSize());
+    }
 
     // Restores everything serializeProject wrote.  Caller is responsible for
     // syncing UI afterwards.  No-op if root is missing the expected children.
@@ -167,12 +266,13 @@ public:
     bool isBusesLayoutSupported(const BusesLayout& layouts) const override;
 
     // ── Public accessors ──────────────────────────────────────────────────
-    // QA-ModelShell TS1 (2026-07-27): processor-owned UndoManager, DORMANT
-    // plumbing only.  Declared BEFORE apvts because apvts binds it at
-    // construction (member init order = declaration order); EngineRig's
-    // factory threads it into every engine APVTS the same way.  Nothing
-    // consumes it yet -- StandaloneEditor's UndoManager stays authoritative
-    // until QA-UndoCoverage flips undo semantics onto this one.
+    // The app's ONE global undo history.  Declared BEFORE apvts because apvts
+    // binds it at construction (member init order = declaration order);
+    // EngineRig's factory threads the same manager into every engine APVTS and
+    // stamps each with an undoOwnerTag, so a parameter transaction can still be
+    // resolved after the engine that made it was destroyed and re-created.
+    // StandaloneEditor::mUndoManager is a REFERENCE to this one -- there is no
+    // second manager anywhere in the app.
     juce::UndoManager mUndoManager;
 
     // QA-UndoCoverage Task 8 (the absorbed QA-DirtyFlag spec, Jeff 2026-05-23):
@@ -276,9 +376,12 @@ public:
     }
 
     // QA-ModelShell TS7 (§6.7): `<project>\Freeze\` -- the frozen-track audio
-    // cache.  ONE file per track, overwritten in place on re-render.  Excluded
-    // from project bundles and from the Files browser: regenerable cache, not
-    // something the user made.
+    // cache.  A tab owns a FAMILY of files, one per scope: `_song` plus one
+    // `_patN` for every pattern it plays in, and Rusty spreads over its 13
+    // strip indices.  Each scope's file is overwritten in place on re-render,
+    // so a delete or orphan sweep must match the name PREFIX, never a single
+    // filename.  Excluded from project bundles and from the Files browser:
+    // regenerable cache, not something the user made.
     juce::File getProjectFreezeDir()
     {
         const juce::File proj = getCurrentProjectFolder();
@@ -287,9 +390,6 @@ public:
         fz.createDirectory();
         return fz;
     }
-
-    BassSynth& getBassSynth() { return mBassSynth; }
-    void       allNotesOff()  { mSynth.allNotesOff(1, false); }
 
     // Request the audio thread to flush every engine's active voices at the
     // start of the next processBlock (sends CC 123 All-Notes-Off + explicit
@@ -369,7 +469,19 @@ public:
 
     // Standalone: inject PatternManager reference so processBlock can
     // read mixer state and sequence data directly.
-    void setPatternManager(PatternManager* pm) { mPatternManager = pm; }
+    void setPatternManager (PatternManager* pm)
+    {
+        mPatternManager = pm;
+        // THREAD SAFETY: the roll retirement queue's consumer is our audio
+        // thread, which reaches it only through this pointer, so its idle
+        // assertion has to be seeded from the device state at the moment the
+        // pointer is published -- a device opened before the editor existed has
+        // already run prepareToPlay, which could not see us then.  Message
+        // thread only, and every device start is kicked off by a blocking
+        // message-thread call, so this cannot race one.
+        if (pm != nullptr)
+            pm->setRollConsumerIdle (! mAudioDevicePrepared.load (std::memory_order_acquire));
+    }
 
     // Rebuild AudioFormatReaders for all audio clips in the arrangement.
     // Call from the message thread after importing audio or changing the arrangement.
@@ -396,8 +508,8 @@ public:
     //   - VibeSynthProcessor::setStateInformation (VST3 host load)
     //   - StandaloneEditor::doFileNew (File > New)
     //   - StandaloneEditor::loadTemplate (apply template)
-    // Each caller raises mProjectLoadInProgress + sleeps 30 ms BEFORE calling
-    // this so the audio thread is bailing while we mutate the render-task list
+    // Each caller raises mProjectLoadInProgress + settles BEFORE calling this
+    // so the audio thread is bailing while we mutate the render-task list
     // (processBlock bails to silence while the shield is up).  Mirrors how
     // onTabClosed tears down per-tab engines; aux strips have no per-tab
     // teardown because they aren't tabs.
@@ -616,6 +728,17 @@ public:
     void registerInstEngine  (int pageIdx, juce::AudioProcessor* eng);
     void unregisterInstEngine(int pageIdx);
 
+    // THREAD SAFETY: a BaySickPlayer rebuilds its sample-region vector on every
+    // load gesture while the audio thread indexes that same vector, and the
+    // shield + settle that makes the rebuild safe lives on THIS processor -- the
+    // engine has no other route to it.  Called from the four register*Engine
+    // paths that can be handed a BaySickPlayer (Layers / Bass / Drums / Clips);
+    // the rig registers every engine at creation, before a page exists to issue
+    // a load, so no load can find the binding missing.  No unbind: this
+    // processor outlives every engine, so the pointer cannot dangle, and
+    // clearing it on unregister would silently unprotect a surviving engine.
+    void bindSampleLoadShield (juce::AudioProcessor* eng) noexcept;
+
     // §P4.3 B7 (2026-04-22): per-page pre-rack EQ register/unregister APIs +
     // mDrumsEQDSP / mLayerPageEQs / mBassPageEQs / mDrumsPageEQ members all
     // deleted.  Pre-rack EQs now live on InsertNode / BusNode preEq members
@@ -628,71 +751,54 @@ public:
 
     // ── Level meter feeds (audio thread writes, UI timer reads) ───────────────
     // Peak dB for each mix section - used by MixerPage strip meters.
-    // 2026-04-30: stereo L/R atomics added alongside the mono atomics for
-    // the new split DBFSMeter.  The mono atomics are still written (max(L,R))
-    // for legacy readers.  UI calls the new stereo getters below.
-    std::atomic<float> mMasterPeakDb        { -60.0f };
     std::atomic<float> mMasterPeakDbL       { -60.0f };
     std::atomic<float> mMasterPeakDbR       { -60.0f };
-    std::atomic<float> mLayersPeakDb        { -60.0f };
     std::atomic<float> mLayersPeakDbL       { -60.0f };
     std::atomic<float> mLayersPeakDbR       { -60.0f };
-    std::atomic<float> mBassPeakDb          { -60.0f };
     std::atomic<float> mBassPeakDbL         { -60.0f };
     std::atomic<float> mBassPeakDbR         { -60.0f };
-    std::atomic<float> mDrumsPeakDb         { -60.0f };
     std::atomic<float> mDrumsPeakDbL        { -60.0f };
     std::atomic<float> mDrumsPeakDbR        { -60.0f };
-    std::atomic<float> mAudioClipsBusPeakDb { -60.0f };
     std::atomic<float> mAudioClipsBusPeakDbL{ -60.0f };
     std::atomic<float> mAudioClipsBusPeakDbR{ -60.0f };
     // R3.5 (2026-04-23): Vox + Inst bus peaks (UI mixer-strip meters).
-    std::atomic<float> mVoxBusPeakDb        { -60.0f };
     std::atomic<float> mVoxBusPeakDbL       { -60.0f };
     std::atomic<float> mVoxBusPeakDbR       { -60.0f };
-    std::atomic<float> mInstBusPeakDb       { -60.0f };
     std::atomic<float> mInstBusPeakDbL      { -60.0f };
     std::atomic<float> mInstBusPeakDbR      { -60.0f };
     // C.1 (2026-04-30): FX Bus peak - written by VibeGraph::processBus(kFxBus)
     // each block (mirrors the FX node's internal atomics so MixerPage
     // can read alongside its peers without reaching into VibeGraph internals).
-    std::atomic<float> mFxBusPeakDb         { -60.0f };
     std::atomic<float> mFxBusPeakDbL        { -60.0f };
     std::atomic<float> mFxBusPeakDbR        { -60.0f };
     // G-6 (2026-04-29): secondary bus peak meters.
-    std::atomic<float> mVoxBus2PeakDb       { -60.0f };
     std::atomic<float> mVoxBus2PeakDbL      { -60.0f };
     std::atomic<float> mVoxBus2PeakDbR      { -60.0f };
-    std::atomic<float> mInstBus2PeakDb      { -60.0f };
     std::atomic<float> mInstBus2PeakDbL     { -60.0f };
     std::atomic<float> mInstBus2PeakDbR     { -60.0f };
-    std::atomic<float> mInstBus3PeakDb      { -60.0f };
     std::atomic<float> mInstBus3PeakDbL     { -60.0f };
     std::atomic<float> mInstBus3PeakDbR     { -60.0f };
     // J-7b (2026-05-04): RustyDrums Bus peak meter - written by the bus
     // pipeline post-fader/pan, drained at end of block alongside every
     // other bus meter so the UI strip sees signal activity.  Run variants
     // declared below alongside the other *Run atomics.
-    std::atomic<float> mRustyDrumsBusPeakDb     { -60.0f };
     std::atomic<float> mRustyDrumsBusPeakDbL    { -60.0f };
     std::atomic<float> mRustyDrumsBusPeakDbR    { -60.0f };
     // QA-ModelShell TS6 (BLU-447): hosted VST3 instrument bus.
-    std::atomic<float> mPluginsBusPeakDb        { -60.0f };
     std::atomic<float> mPluginsBusPeakDbL       { -60.0f };
     std::atomic<float> mPluginsBusPeakDbR       { -60.0f };
     // QA-Layout T10: secondary group buses.
-    std::atomic<float> mLayersBus2PeakDb        { -60.0f };
     std::atomic<float> mLayersBus2PeakDbL       { -60.0f };
     std::atomic<float> mLayersBus2PeakDbR       { -60.0f };
-    std::atomic<float> mBassBus2PeakDb          { -60.0f };
     std::atomic<float> mBassBus2PeakDbL         { -60.0f };
     std::atomic<float> mBassBus2PeakDbR         { -60.0f };
-    std::atomic<float> mClipsBus2PeakDb         { -60.0f };
     std::atomic<float> mClipsBus2PeakDbL        { -60.0f };
     std::atomic<float> mClipsBus2PeakDbR        { -60.0f };
-    std::atomic<float> mPluginsBus2PeakDb       { -60.0f };
     std::atomic<float> mPluginsBus2PeakDbL      { -60.0f };
     std::atomic<float> mPluginsBus2PeakDbR      { -60.0f };
+    // QA-SOUNDNESS (2026-08-07): second drum kit's bus.
+    std::atomic<float> mDrumsBus2PeakDbL        { -60.0f };
+    std::atomic<float> mDrumsBus2PeakDbR        { -60.0f };
 
     // QA-AudioMeters fix-up (2026-05-24): kPeakAtomicNegInf constant deleted.
     // It was introduced in QA-Eg but never referenced -- every drainAndMerge /
@@ -704,15 +810,54 @@ public:
 
     // ── 1M: Audio DSP load monitoring (audio thread writes, UI timer reads) ──
     // mAudioDspLoad : smoothed fraction of buffer window used by processBlock (0..1)
-    // mDspOverload85: true when load has been >85% for >500 ms (voice steal fired)
     // mDspOverload95: true when current smoothed load >95% (UI red flash)
+    // Nothing here protects against overload; both flags are UI signals only.
     std::atomic<float> mAudioDspLoad  { 0.0f };
-    std::atomic<bool>  mDspOverload85 { false };
     std::atomic<bool>  mDspOverload95 { false };
+    // Cached one-pole coefficient for the load meter, keyed on the block
+    // DURATION so the meter's response time in seconds is the same everywhere
+    // on the rate x block matrix.  Audio-thread-only (measureDspLoadAndOverload
+    // is the sole reader and writer) - no atomics needed.
+    double mDspLoadAlphaBufDur { -1.0 };
+    float  mDspLoadAlpha       { 0.0f };
 
     // ── Audio clip playback (song mode) ──────────────────────────────────────
     juce::AudioFormatManager  mAudioFormatManager;
     juce::TimeSliceThread     mAudioFileThread { "AudioClipBG" };
+
+    // ── CL-281 decode-once clip cache ────────────────────────────────────────
+    // MESSAGE THREAD ONLY.  The audio thread never touches this container -- it
+    // only reads the immutable buffers the published AudioClipSnapshot holds
+    // aliases to, which is why no lock, RCU snapshot or retirement queue is
+    // needed for the map itself.  rebuildAudioClipPlayers is the sole mutator
+    // and it is the sole reader.
+    //
+    // KEY: clipAudioCacheKey() -- the RESOLVED absolute path plus the file's
+    // size and modification time.  Resolution is what makes "library:kick.wav",
+    // "mysamples:kick.wav" and the absolute form one entry; size + mod time are
+    // what make a file REPLACED on disk decode again instead of playing stale
+    // PCM.  Nothing else changes the decoded result: trim, stretch, pitch,
+    // reverse and the Player chain all act downstream of the decode.
+    //
+    // EVICTION: an entry lives exactly as long as the published arrangement
+    // references its file.  Every rebuild collects the keys it used and drops
+    // every other entry, so a clip deleted from the timeline stops pinning its
+    // PCM at the next rebuild (which a delete itself triggers).  The bytes free
+    // when the LAST alias dies -- the map's, plus one per clip -- so a still-
+    // retired snapshot keeps its own audio alive until the GC drainer destroys
+    // it, and that free never lands on the audio thread.
+    std::map<juce::String, DecodedClipAudioPtr> mDecodedClipCache;
+
+    // Identity + change stamp for the cache key.  Empty when the file does not
+    // exist (an uncacheable reference must never share an entry with another).
+    static juce::String clipAudioCacheKey (const juce::File& resolvedFile);
+
+    // Decodes the whole file to float PCM when it is at or under
+    // AudioClipStreamer::kRamThresholdBytes (the SAME test and the same channel
+    // fold the streamer's own RAM path applies, read from that class rather
+    // than restated); returns null for anything bigger, which is the signal to
+    // keep streaming it.  Message thread -- allocates and does disk IO.
+    static DecodedClipAudioPtr decodeClipAudioIfCacheable (juce::AudioFormatReader& reader);
 
     struct AudioClipPlayer {
         double clipStartBeat  = 0.0;
@@ -744,9 +889,13 @@ public:
         // time.  Default 0 = play from file sample 0 (every pre-Task-0c
         // clip is unaffected; backwards-compatible).
         juce::int64 contentStartSamples { 0 };
-        // Disk-streaming reader - background thread pre-fetches, audio thread reads.
-        std::unique_ptr<AudioClipStreamer> streamer;
-        // Phase vocoder for BPM-aware time stretch (null when stretchMode=false).
+        // The clip's audio: a shared decoded buffer when the file is at or under
+        // AudioClipStreamer::kRamThresholdBytes (CL-281), otherwise an owned
+        // disk streamer whose background thread pre-fetches for the audio thread.
+        std::unique_ptr<ClipSource> source;
+        // Phase vocoder for BPM-aware time stretch.  ALWAYS created (QA-ClipPlayback
+        // Task 3) so length-preserving pitch and reverse work on any clip; the
+        // render bypasses it when the clip is forward + unstretched + unpitched.
         std::unique_ptr<PhaseVocoder> vocoder;
         // Pre-allocated scratch buffers used by the audio thread (no heap alloc in processBlock).
         juce::AudioBuffer<float> pvInBuf;   // raw file samples fed into vocoder
@@ -812,9 +961,11 @@ public:
     // retires the old one to mClipRetirement with retiredBeforeGen set to
     // the new snapshot's generation.  The drainer thread (owned by
     // RetirementQueue) destroys the old snapshot once the audio thread has
-    // demonstrably moved past the retire point (mAudioInUseClipGen >=
-    // retiredBeforeGen) -- guaranteeing the slow ~AudioClipStreamer (file
-    // close + TimeSliceClient unregister) NEVER runs on the audio thread.
+    // demonstrably moved past the retire point (the in-use gen the audio
+    // thread publishes via mClipRetirement.setInUseGeneration >=
+    // retiredBeforeGen) -- guaranteeing that neither the slow
+    // ~AudioClipStreamer (file close + TimeSliceClient unregister) nor the last
+    // DecodedClipAudio release (a multi-MB free) EVER runs on the audio thread.
     //
     // Replaces the pre-9c per-site try-lock pattern (audio bailed silent
     // for a block under MT contention) and the reverted a19c6e3 "lock for
@@ -832,11 +983,6 @@ public:
     // mutator's exchange returns the previous value to the retirement
     // queue; ~VibeSynthProcessor explicitly deletes the final value).
     std::atomic<AudioClipSnapshot*> mActiveAudioClips  { nullptr };
-
-    // Audio thread writes (release-store) at the top of every processBlock.
-    // RetirementQueue drainer reads (acquire-load) to decide which retired
-    // snapshots are safe to destroy.
-    std::atomic<std::uint64_t>      mAudioInUseClipGen { 0 };
 
     // Mutator's monotonic generation counter.  Each rebuild assigns
     // gen = mNextClipGen.fetch_add(1) + 1, so the first published snapshot
@@ -1121,7 +1267,23 @@ public:
 
     // TS7 §6.9: forwards to the dispatcher.  Exposed here because the renderer
     // lives on BuilderPage and must not reach into the private render graph.
-    void setFreezePrune (RenderTask* target) { mRenderDispatcher.setFreezePrune (target); }
+    //
+    // Thread safety: setFreezePrune walks every task's mPredecessors, which the
+    // audio thread clears and refills in rebuildLinks on EVERY block -- so the
+    // walk has to happen while the audio thread is not in the graph.  Shield
+    // (audio clears to silence) -> settle the in-flight block -> walk -> restore.
+    // Nest-aware: a caller that already raised the shield pays no second settle.
+    // The nullptr branch only stores a pointer and needs no barrier.
+    void setFreezePrune (RenderTask* target)
+    {
+        if (target == nullptr) { mRenderDispatcher.setFreezePrune (nullptr); return; }
+
+        const bool shieldWasUp = isProjectLoadInProgress();
+        setProjectLoadInProgress (true);
+        if (! shieldWasUp) settleAudioThread();
+        mRenderDispatcher.setFreezePrune (target);
+        setProjectLoadInProgress (shieldWasUp);
+    }
 
     bool freezeRustyKit (juce::String& outErr, bool byUser, bool reuseValid = false,
                          bool songScopeOnly = false);
@@ -1210,6 +1372,22 @@ public:
         // Noodling-discard + Early-Strike-clamp + input-quantize rules.
         // Zero when no count-in fired (existing behavior unchanged).
         juce::int64                               preRollSamples { 0 };
+        // Armed strips whose capture produced no file (writer failed to open
+        // at arm, or nothing landed on disk at stop).  The commit dialog names
+        // them -- an armed strip must never just vanish from the results.
+        std::vector<std::pair<int, juce::String>> failedStrips;    // channelId, displayName
+        // Captures that DID produce a file but with a hole in it: the disk
+        // writer refused whole blocks (see AudioFileRecorder::
+        // getDroppedBlockCount), so the WAV is spliced, not merely short.  Same
+        // contract as failedStrips -- a damaged take must reach the commit
+        // dialog rather than be handed back looking complete.
+        struct DroppedTake
+        {
+            int          channelId;      // MixerChannelIds; 0 for the master capture
+            juce::String displayName;
+            int          droppedBlocks;
+        };
+        std::vector<DroppedTake> droppedTakes;
     };
 
     // Called from StandaloneEditor onPlay when Record is armed.  Allocates
@@ -1229,11 +1407,21 @@ public:
     // StripRecorder whose channelId matches and writes one block of mono
     // input (typically a single channel of mLiveInputSnapshot).  Called from
     // VoxStripTask / InstStripTask::run on the audio thread when those strips
-    // are armed.  Pre-existing race hazard between iteration here and
-    // message-thread mutation in startRecording / stopRecording - documented
-    // in 9b, not closed.  Future hardening would either move mStripRecorders
-    // to shared_ptr-backed entries or use a small SpinLock around iteration;
-    // deferred.
+    // are armed.
+    //
+    // Thread safety: mStripRecorders is a plain vector the message thread
+    // clears and repopulates, so the audio thread must never be inside it
+    // while that happens.  mStripTapsLive is the gate -- start/stopRecording
+    // store false BEFORE touching the container and (start only) true after
+    // the last push_back, with a settle on the stop side so any block that
+    // already passed the gate has finished.  The strip _arm param is
+    // PERSISTENT and is not cleared by transport stop, so the audio thread is
+    // genuinely still calling in at the instant the container is mutated.
+    //
+    // Also a no-op under isNonRealtime(): setFreezePrune keeps the target tab's
+    // own strip task in a render's keep-set, so freezing a Vox or Inst tab runs
+    // that strip task on every offline block, and without the gate the render's
+    // blocks land in an armed take's WAV (see the gate at the top of the body).
     //
     // monoSource: read-only mono input pointer.  Typical usage:
     //   mProcessor->tapDryRecorder (channelId,
@@ -1248,17 +1436,19 @@ public:
     // effect meters get fed from the worker-thread peak writes.
     void drainMeterAtomicsForUI();
 
-    // 2026-05-07 (Batch 10): DSP-load measurement + overload protection.
+    // 2026-05-07 (Batch 10): DSP-load measurement.
     // Called once per block from processBlock after dispatchBlock returns,
     // so mAudioDspLoad reflects the actual cost of running worker tasks via
-    // runUntilOrTimeout.  Voice-stealing on sustained 85% overload also
-    // lives here.  Caller passes the t0 tick captured at the very top of
-    // processBlock.
+    // runUntilOrTimeout.  Caller passes the t0 tick captured at the very top
+    // of processBlock.
     void measureDspLoadAndOverload (juce::int64 t0Ticks, int numSamples);
 
     // 2026-05-18 (QA-Ea Task 0b): post-mix recorders + metronome/count-in.
     // Called once per block from processBlock after dispatchBlock returns;
     // feeds master + MIDI recorders and runs the metronome / count-in.
+    // Whole-function no-op under isNonRealtime() -- every writer in it is
+    // live-only, and it runs outside the task graph so setFreezePrune cannot
+    // shield it from an offline render (see the gate at the top of the body).
     // Pre-QA-Ef the 3 hardware-MIDI / master-rec / metronome paths lived
     // only in the deleted serial tail; the extraction landed during QA-Ea
     // Task 0b so the single render path inherits them (Forks #25 close-out).
@@ -1321,11 +1511,36 @@ private:
     AudioFileRecorder              mMasterRecorder;        // master-output fallback
     AudioFileRecorder              mCaptureRecorder;       // TS7 §3.5 version capture
     std::vector<StripRecorder>     mStripRecorders;        // per-armed-strip WAVs
+    // Audio-thread entry gate for mStripRecorders (see tapDryRecorder above).
+    std::atomic<bool>              mStripTapsLive { false };
+    // THREAD SAFETY: the same entry gate for the master tap in
+    // applyPostMixRecordAndMetro.  AudioFileRecorder::stopRecording destroys the
+    // ThreadedWriter immediately after clearing its own flag, so isRecording()
+    // alone leaves a window where a block already past that test writes into a
+    // freed writer.  stopRecording lowers this first and settles, which no
+    // recorder-internal flag can do for us.
+    std::atomic<bool>              mMasterTapLive { false };
+    // THREAD SAFETY: the same entry gate for the version-capture tap, which has
+    // the identical destroy-under-an-in-flight-block hazard.  Its own flag
+    // rather than mMasterTapLive: capture and a user recording run at the same
+    // time, so one stop must not close the other's tap.
+    std::atomic<bool>              mCaptureTapLive { false };
+    // Message-thread only (written in startRecording, drained by stopRecording
+    // into RecordResult::failedStrips): armed strips whose writer failed to
+    // open, so they never entered mStripRecorders.
+    std::vector<std::pair<int, juce::String>> mFailedStripArms;
+    // Message-thread dedupe for the unreadable-clip report: the player rebuild
+    // runs on every arrangement edit, and one broken clip must report once per
+    // session, not once per edit.
+    juce::StringArray mReportedUnreadableClips;
     std::atomic<RecordMode>        mRecordMode { RecordMode::Audio };
     double                         mRecordStartBeat { 0.0 };
     // QA-Ea Task 0c (FL pre-roll record): count-in samples accumulated
     // during the current Record session.  applyPostMixRecordAndMetro
-    // fetch_adds numSamples while isRecording() && mMetro.countInActive;
+    // fetch_adds numSamples while live && isRecording() && countInActive --
+    // the live term matters because the WAV writer is gated the same way, and
+    // commitRecordingResult subtracts this counter from the file length, so a
+    // counter that grew during a render the file never saw discards the take;
     // startRecording zeros it; stopRecording exchanges it into
     // RecordResult::preRollSamples.  One global counter applies to master
     // AND every strip block created by the session (Task 0c strip-recorder
@@ -1337,10 +1552,6 @@ private:
     // ── APVTS layout builder ──────────────────────────────────────────────
     static juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout();
 
-    // ── DSP engines ───────────────────────────────────────────────────────
-    juce::Synthesiser mSynth;       // polyphonic synth (piano roll playback)
-    BassSynth         mBassSynth;
-
     // ── Per-page engine processors (message thread sets, audio thread reads) ──
     juce::SpinLock                                         mLayerEngineLock;
     std::array<juce::AudioProcessor*, kMaxLayerPages>      mLayerEngines {};
@@ -1348,11 +1559,11 @@ private:
     std::array<juce::AudioProcessor*, kMaxPluginPages>     mPluginEngines {};
     juce::SpinLock                                         mBassEngineLock;
     std::array<juce::AudioProcessor*, kMaxBassPages>       mBassEngines {};
-    juce::AudioBuffer<float>                               mAudioRowScratch;    // bus accumulation (all clips summed)
-    juce::AudioBuffer<float>                               mAudioClipScratch;   // single-clip scratch for per-clip rack
 
     // D1.2 (2026-04-24): per-drum-page engine processors (dynamic-drum model).
-    // Each entry is one independent engine instance owned by a DrumPage tab.
+    // Each entry is a NON-OWNING pointer to one rig-owned engine instance
+    // (EngineTab::engine); the DrumPage is a view that caches the same pointer,
+    // so closing the page must never destroy what this array points at.
     // 2026-04-25: legacy mDrumsEngine + mDrumsEngineLock + mDrumsEngineBuf +
     // mDrumSlotBufs removed (BaySickDrumsProcessor deleted).
     juce::SpinLock                                         mDrumEngineLock;
@@ -1363,8 +1574,6 @@ private:
     // registerDrumEngine (the param exists by then); audio thread
     // acquire-loads per trigger.  null = strip not registered yet.
     std::array<std::atomic<std::atomic<float>*>, kMaxDrumPages> mDrumPlayNotePtr {};
-    juce::AudioBuffer<float>                               mDrumEngineBuf;     // per-drum render scratch
-    juce::AudioBuffer<float>                               mDrumEngineScratch; // per-drum sum scratch
     // Fast-path bypass - true only when at least one DrumPage tab has registered
     // an engine.  Audio thread checks this before doing any D1.2 work.
     std::atomic<bool>                                      mAnyDrumPageActive { false };
@@ -1375,7 +1584,6 @@ private:
     // same EffectRack / EQ / fader as the arrangement-playback audio.
     juce::SpinLock                                         mClipEngineLock;
     std::array<juce::AudioProcessor*, kMaxClipPages>       mClipEngines {};
-    juce::AudioBuffer<float>                               mClipEngineScratch;
     // Fast-path bypass - set true the moment ANY Clips tab registers an engine,
     // false when none remain.  Avoids the per-block iteration cost on projects
     // that don't use clips.  Same pattern as mAnyDrumPageActive.
@@ -1386,11 +1594,9 @@ private:
     // InsertNode (created by the Mixer page's "Add Vox/Inst Strip" flow).
     juce::SpinLock                                         mVoxEngineLock;
     std::array<juce::AudioProcessor*, kMaxVoxPages>        mVoxEngines {};
-    juce::AudioBuffer<float>                               mVoxEngineScratch;
     std::atomic<bool>                                      mAnyVoxPageActive { false };
     juce::SpinLock                                         mInstEngineLock;
     std::array<juce::AudioProcessor*, kMaxInstPages>       mInstEngines {};
-    juce::AudioBuffer<float>                               mInstEngineScratch;
     std::atomic<bool>                                      mAnyInstPageActive { false };
 
     // ── QA-G3Smoke Swing (SW-1..SW-6): cached raw param atomics ─────────────
@@ -1414,6 +1620,11 @@ private:
     std::atomic<float>* mSwingMixRusty { nullptr };
     std::atomic<float>* mSwingTruncRusty { nullptr };
 
+    // Message-thread drain for the [G3] audio-thread readout ring (see
+    // G3PlayheadDiag.h).  Owned here so its Timer lives and dies on the
+    // message thread with the processor; null in Release.
+    std::unique_ptr<class G3PlayheadDiagDrainer>           mG3DiagDrainer;
+
     // J-5 (2026-05-03): BaySickRustyDrums singleton engine.  Only one
     // instance per project.  Owned here so PluginProcessor can orchestrate
     // strip lifecycle on kit load/unload.  The class is forward-declared so
@@ -1423,13 +1634,33 @@ private:
     // as part of the Sub-K Serial Fallback retirement.  Lifecycle safety
     // is now provided exclusively by the mProjectLoadInProgress shield
     // raised at destroyBaySickRustyDrums + loadBaySickRustyDrumsKit (the
-    // shield bails the audio thread at processBlock top during the ~30 ms
+    // shield bails the audio thread at processBlock top for the whole
     // mutation window, so engine pointer reads on the audio path are
     // guaranteed stable for the block).
     std::unique_ptr<class BaySickRustyDrumsProcessor>      mRustyDrumsEngine;
     std::atomic<bool>                                      mRustyDrumsActive { false };
-    juce::AudioBuffer<float>                               mRustyDrumsScratch; // J-7a: per-block render target
     juce::MidiBuffer                                       mRustyDrumsMidi;    // J-7a: per-block MIDI feed
+
+    // Audio-thread only.  Per-block MIDI feeds, promoted out of processBlock's
+    // stack so the render callback stops heap-allocating: MidiBuffer::clear()
+    // is a clearQuick that RETAINS the backing store, whereas the old stack
+    // objects threw their capacity away at scope exit and re-malloc'd on the
+    // next block (222 of them, one malloc+free each for every buffer that took
+    // an event).  Cleared at the top of processBlock, never by the consumers.
+    //
+    // Thread-safety invariant: this is only sound because processBlock is never
+    // re-entered concurrently -- beginOfflineRender wins the one-render
+    // compare-exchange and suspends + settles before the offline loop becomes
+    // the sole caller.  mRustyDrumsMidi above already relies on the same
+    // invariant.
+    juce::MidiBuffer                                       mAllMidi;
+    std::array<juce::MidiBuffer, kMaxLayerPages>           mLayerPageMidi;
+    std::array<juce::MidiBuffer, kMaxBassPages>            mBassPageMidi;
+    std::array<juce::MidiBuffer, kMaxDrumPages>            mDrumPageMidi;
+    std::array<juce::MidiBuffer, kMaxClipPages>            mClipPageMidi;
+    std::array<juce::MidiBuffer, kMaxVoxPages>             mVoxPageMidi;
+    std::array<juce::MidiBuffer, kMaxInstPages>            mInstPageMidi;
+    std::array<juce::MidiBuffer, kMaxPluginPages>          mPluginPageMidi;
 
     // K-2 (2026-05-05): BaySickGuitars per-instance engines.  Up to kMaxInstPages
     // total instances; one engine per Inst page whose source = BaySickGuitars.
@@ -1457,11 +1688,34 @@ private:
     // 2026-05-06 Option A: per-tab idle-block counter for sfizz Inst tabs +
     // Rusty.  Increments each block where the tab has no MIDI activity AND
     // sfizz reports 0 active voices AND no audition pending.  When the
-    // counter exceeds kIdleSuspendBlocks, the tab's entire chain (sfizz +
+    // counter reaches kIdleSuspendBlocks, the tab's entire chain (sfizz +
     // Pedals + NAMIR + insert rack + EQ) is skipped on this block.  Wakes
     // immediately on the next block where any of those gates fail (MIDI,
-    // voice activity, audition).  Audio-thread-only state - no atomics.
-    static constexpr int kIdleSuspendBlocks = 9;   // ~200ms at 256/44.1k
+    // voice activity, audition).  The counters themselves are audio-thread-only
+    // state - no atomics.
+    //
+    // The hold is a real TIME, not a block count.  The old fixed 9 blocks was
+    // 26 ms at 128/44.1k and 836 ms at 4096 - a 32x spread across the supported
+    // range, so the same session suspended at wildly different points depending
+    // only on the buffer setting, and the lower the latency the sooner it fired.
+    // kIdleSuspendSeconds reproduces the pre-fix 512/44.1k calibration (9 blocks
+    // = 104 ms) at EVERY rate x block pair; kIdleSuspendBlocks is recomputed
+    // from it in prepareToPlay against the live sample rate and nominal block
+    // size.  Deliberately behavior-neutral at the reference config.  The suspend
+    // itself no longer guillotines a ringing tail: the clear sites fade in and
+    // out over a real duration (IdleSuspendFade, used by InstStripTask and
+    // RustyDrumsProducerTask), which is why this hold only has to decide WHEN
+    // the chain goes quiet, not how abruptly.
+    static constexpr double kIdleSuspendSeconds = 0.1;
+    // THREAD SAFETY / OWNERSHIP: written only by prepareToPlay (device stopped,
+    // or offline render suspended + settled), read on the audio thread by
+    // InstStripTask and RustyDrumsProducerTask.  Static because those two name
+    // it class-qualified and the app runs exactly one processor instance; the
+    // implicit atomic->int conversion is what keeps their
+    // `counter >= kIdleSuspendBlocks` tests compiling unchanged.  Seeded so
+    // that nothing can suspend before the first prepare establishes a rate.
+    static inline std::atomic<int> kIdleSuspendBlocks
+        { std::numeric_limits<int>::max() };
     std::array<int, kMaxInstPages> mInstIdleBlocks {};
     int mRustyIdleBlocks { 0 };
     // TS7 §6.9: every loaded kit strip is frozen, so the producer can skip the
@@ -1486,11 +1740,6 @@ private:
     // the snapshot through a single Vox / Inst InsertNode at a time.
     juce::AudioBuffer<float> mLiveInputSnapshot;
     juce::AudioBuffer<float> mLiveInputSlotBuf;
-
-    // F4 (2026-04-24): master-bus Play/Stop declick gain.  Ramps 0 <-> 1 over
-    // ~5 ms on transport state change so the output buffer never hard-flips
-    // between silence and live audio.  Audio-thread state; no lock.
-    float mMasterFadeGain { 0.0f };
 
     // 2026-04-24 deferred rack-state replay (see applyPendingRackStates doc above).
     juce::ValueTree mPendingProjectRackState;
@@ -1541,11 +1790,42 @@ public:
     // registerTask during rebuild raced the audio thread's render-task-list
     // iteration (use-after-free in RenderGraphDispatcher::dispatchBlock on a
     // save-file load).  Pairs with the dispatcher pre-sizing its task lists.
+    //
+    // THREAD SAFETY: the shield is raised ONLY from the message thread.  The
+    // callers nest it with a plain `const bool shieldWasUp = ...` save/restore
+    // rather than a refcount, which is correct only because of that: two
+    // threads raising it concurrently would let the inner restore lower it
+    // while the outer caller still needs it up.
     std::atomic<bool> mProjectLoadInProgress { false };
     void setProjectLoadInProgress (bool b) noexcept
         { mProjectLoadInProgress.store (b, std::memory_order_release); }
     bool isProjectLoadInProgress() const noexcept
         { return mProjectLoadInProgress.load (std::memory_order_acquire); }
+
+    // THREAD SAFETY: monotonic block count published by the audio thread with
+    // release semantics at the very top of processBlock -- before the shield's
+    // early-out, so a muted block still acknowledges.  settleAudioThread reads
+    // it with acquire; two advances prove the block that may have been in
+    // flight when the shield went up has returned.
+    alignas(64) std::atomic<std::uint64_t> mAudioBlockCounter { 0 };
+
+    // THREAD SAFETY: true only while a device is actually calling processBlock.
+    // Raised in prepareToPlay, and ONLY when the caller is not the offline
+    // reconfigure thread (see mOfflineReconfigureThread) -- a render's own
+    // re-prepares must not claim a device that was never opened.  Cleared in
+    // releaseResources and nowhere else: endOfflineRender READS this flag to
+    // re-derive the retirement-consumer idle assertion, it never writes it.
+    // Without the CLEAR half, a device that ran and then stopped (user picks
+    // "no device", driver drop) still looks live, so every settle waits out its
+    // whole timeout for an acknowledgement that can never arrive.
+    std::atomic<bool> mAudioDevicePrepared { false };
+
+    // Message thread only.  Blocks until the audio thread acknowledges (see
+    // mAudioBlockCounter), so a teardown may free what processBlock reads.
+    // Bounded by a timeout derived from the LIVE device buffer: one block is
+    // 23 ms at 1024 samples / 44.1 kHz and 46 ms at 2048, so no single fixed
+    // duration is right at every buffer size.
+    void settleAudioThread() noexcept;
 
     // P4: current project folder (for resolving relative audioFilePath strings).
     // Guarded by mProjectFolderLock since both message + audio threads read it.
@@ -1595,15 +1875,8 @@ public:
 
 private:
 
-    // Deferred editor init timer (Windows stability fix)
-    int mInitCounter { 0 };
-
     // Step-change tracking for basic sequence triggering (standalone)
     int mLastDrumStep { -1 };
-    int mLastBassStep { -1 };
-
-    // 1M: overload accumulator - audio thread only, no sync needed
-    int64_t mOverload85Samples { 0 };
 
     // ── Piano roll note scheduling (standalone) ───────────────────────────
     struct PRPendingOff {
@@ -1612,6 +1885,13 @@ private:
         int    target;    // 0..7 = layer page; kBassPRTarget+0..3 (8..11) = bass page index
     };
     std::vector<PRPendingOff> mPRPendingOffs;
+    // Audio-thread scratch for the per-block pending-off filter.  The filter
+    // used to build a fresh local vector and move-assign it over
+    // mPRPendingOffs, which freed the old buffer and reset capacity to zero --
+    // so every block re-grew from scratch inside the render callback.  clear()
+    // + swap() never deallocate, so both vectors keep their capacity for the
+    // session.  Reserved in prepareToPlay.
+    std::vector<PRPendingOff> mPRKeepScratch;
     // Audio-thread only.  True when the PREVIOUS block's scheduler ran the
     // straddle path (loop seam handled sample-exactly inside that block).
     // The QA-Ee loop-wrap flush exists for the wrap-on-a-block-boundary case
@@ -1627,6 +1907,26 @@ private:
 
     // ── Internal helpers ──────────────────────────────────────────────────
     void updateDrumMixLevels();
+
+    // One fire = one note-on / clip-start whose source has a choke group set.
+    // Hoisted out of applyChokeGroupDispatch so the list can live as a
+    // reserved member: the old local `std::vector` + reserve(8) was an
+    // unconditional malloc/free pair inside every render callback, paid even
+    // on projects with zero choke groups configured.
+    struct ChokeFire
+    {
+        // Distinguishes self when iterating peers.
+        enum class Src { Synth, Audio };
+        Src                   src   { Src::Synth };
+        VibeGraph::InsertKind kind  { VibeGraph::InsertKind::Layer };   // synth only
+        int                   index { -1 };            // synth: insert idx; audio: clip idx
+        int                   group { 0 };
+        int                   sample { 0 };
+    };
+    // Audio-thread only; cleared (never resized) per block, reserved in
+    // prepareToPlay.  Deliberately NOT a fixed-size array: a dense block can
+    // exceed any cap, and a cap would silently drop a choke.
+    std::vector<ChokeFire> mChokeFireScratch;
 
     // ── D3: choke-group dispatch (audio thread) ───────────────────────────
     // Scan synth note-ons + audio clip starts; if a fire's source has
@@ -1653,28 +1953,110 @@ private:
     // updateBassPageEQsFromApvts removed along with their DSP instances.
     // Pre-rack EQs now sync via updateAllPreRackEQsFromApvts below (unified
     // mixer-strip iteration).
-    // Session B: generic update helper for any EQ8MsDSP bound to an APVTS prefix pair.
-    // Reads all 9 band params x 8 bands x 2 sides and applies via the standard
-    // setBand* setters (CPU-guarded internally). Used for every post-rack EQ
-    // (bus + insert) whose params were lazily registered via addParamsForTrackEQ.
-    void updateEQFromApvts(EQ8MsDSP* eq,
-                           const juce::String& midPrefix,
-                           const juce::String& sidePrefix);
-    // Iterates every registered mixer strip (6 buses + up to 94 inserts) and
-    // calls updateEQFromApvts for each InsertNode/BusNode's EQ. No-op when a
+    // Session B: generic update helper for any EQ8MsDSP bound to one strip slot's
+    // param bank.  Reads all 17 band params x 8 bands x 2 sides and applies via
+    // the standard setBand* setters (CPU-guarded internally).  Used for every EQ
+    // (bus + insert, pre- and post-rack) whose params were lazily registered via
+    // addParamsForTrackEQ / addParamsForTrackPreEQ.
+    void updateEQFromCache (EQ8MsDSP* eq, int stripSlot, int bank);
+    // Iterates every registered mixer strip (18 buses + the insert families) and
+    // calls updateEQFromCache for each InsertNode/BusNode's EQ. No-op when a
     // given slot has no node (index out of range or not yet registered).
     void updateAllPostRackEQsFromApvts();
     void updateAllPreRackEQsFromApvts();   // §P4.3
 
+    // File > New: re-seed the half of every EQ that no parameter backs (main
+    // level, phase mode, linear precision, anti-cramping, proportional Q, the
+    // A/B spare and its lock).  MESSAGE THREAD, and the caller must already
+    // hold the project-load shield -- see the definition.
+    void resetEqStatesToDefaults();
+
+    // ── EQ param-pointer cache (QA-SOUNDNESS, 2026-08-07) ────────────────────
+    // THREAD SAFETY: the EQ sweep below runs on the AUDIO thread.  It used to
+    // reach every band value through apvts.getParameter (prefix + suffix) --
+    // a juce::String built per band (a heap allocation inside the render
+    // callback) feeding an O(log n) string-compare walk of APVTS's adapterTable,
+    // which the message thread concurrently emplaces into every time a mixer
+    // strip is lazily registered.  Resolving each band's std::atomic<float>*
+    // ONCE at registration removes the allocation and the map walk together:
+    // the sweep -- by far the heaviest reader, thousands of lookups per pass --
+    // no longer touches adapterTable at all.  (The automation-clip loop in
+    // processBlock still resolves its lane by id, so this does not make the map
+    // reader-free; it removes the only bulk reader.)
+    //
+    // OWNERSHIP / LIFETIME: APVTS owns every adapter through a std::unique_ptr
+    // held in a std::map, and nothing in this tree ever removes a parameter.
+    // std::map has node stability, so a later insert cannot move an existing
+    // adapter -- a cached pointer stays valid for the APVTS's whole lifetime.
+    //
+    // PUBLICATION: the message thread fills a band's slots and RELEASE-stores
+    // the Freq slot last; the audio thread ACQUIRE-loads Freq and skips the band
+    // while it is still null.  So a reader sees either no band at all or all
+    // seventeen pointers -- never a half-published one.  The table is a fixed
+    // size allocated once, never grown, so no reader can observe a moved array.
+    enum EqBandParamSlot
+    {
+        eqSlotFreq = 0, eqSlotGain, eqSlotQ, eqSlotType, eqSlotOn, eqSlotSlope,
+        eqSlotMute, eqSlotSolo, eqSlotChannel,
+        eqSlotDynamic, eqSlotThreshold, eqSlotRatio, eqSlotAttack,
+        eqSlotRelease, eqSlotRange, eqSlotUpward, eqSlotScSource,
+        eqNumBandParamSlots
+    };
+    struct EqBandParamPtrs
+    {
+        std::atomic<std::atomic<float>*> p[eqNumBandParamSlots] {};
+    };
+
+    static constexpr int kEqBands         = 8;
+    static constexpr int kEqSidesPerBank  = 2;    // mid, side
+    static constexpr int kEqBanksPerStrip = 2;    // post-rack, pre-rack
+    static constexpr int kEqBankPost      = 0;
+    static constexpr int kEqBankPre       = 1;
+    // Strip-slot space: the buses first, in kEqBuses order, then the insert
+    // families in kEqInsertFamilies order.  Both tables live in the .cpp and
+    // static_assert against these counts.
+    static constexpr int kEqNumBusSlots    = 18;   // kNumBatch7Buses + Master
+    static constexpr int kEqNumInsertSlots =
+        kMaxLayerPages + kMaxBassPages + kMaxDrumPages + kMaxAudioRows
+        + MixerChannelIds::kMaxAuxStrips   + MixerChannelIds::kMaxVoxStrips
+        + MixerChannelIds::kMaxInstStrips  + MixerChannelIds::kMaxRustyStrips
+        + MixerChannelIds::kMaxPluginStrips;
+    static constexpr int kEqNumStripSlots = kEqNumBusSlots + kEqNumInsertSlots;
+    static constexpr int kEqCacheSize =
+        kEqNumStripSlots * kEqBanksPerStrip * kEqSidesPerBank * kEqBands;
+
+    static int eqStripSlotForPrefix (const juce::String& prefix) noexcept;
+    static constexpr int eqCacheIndex (int stripSlot, int bank, int side, int band) noexcept
+    {
+        return ((stripSlot * kEqBanksPerStrip + bank) * kEqSidesPerBank + side)
+                   * kEqBands + band;
+    }
+    // Message thread only (calls into APVTS's map).  Idempotent.
+    void cacheEqParamPointers (const juce::String& prefix);
+
+    std::unique_ptr<EqBandParamPtrs[]> mEqParamCache
+        { std::make_unique<EqBandParamPtrs[]> ((size_t) kEqCacheSize) };
+
     // §P4.3 perf: ValueTree::Listener override.  Marks the EQ-sync dirty flag
-    // when ANY APVTS state property changes.  The next processBlock will run
+    // when an EQ APVTS state property changes.  The next processBlock will run
     // updateAllPost+PreRackEQsFromApvts; subsequent blocks skip until the next
     // change.  Catches param edits from UI (message thread), automation (audio
     // thread), and host-driven setValue calls - all uniformly route through
     // ValueTree::setProperty under the hood.
     void valueTreePropertyChanged (juce::ValueTree& tree, const juce::Identifier&) override
     {
-        mEQsDirty.store(true, std::memory_order_relaxed);
+        const auto pid = tree.getProperty ("id").toString();
+
+        // The sweep the flag arms walks every band of every registered strip,
+        // pre and post.  Arming it for ANY param meant a fader drag re-ran that
+        // whole sweep at the APVTS flush rate.  Every EQ id carries "_mid_eq" /
+        // "_side_eq" (optionally behind "_preeq_"), so this filter misses no EQ
+        // edit.  (The per-band juce::String rebuild that made an unfiltered
+        // sweep genuinely dangerous on the audio thread is gone -- see the EQ
+        // param-pointer cache above -- but the sweep is still pure waste when
+        // no EQ moved.)
+        if (pid.contains ("_eq"))
+            mEQsDirty.store(true, std::memory_order_relaxed);
         if (onAnyStateChange) onAnyStateChange();   // P5: project dirty tracking
 
         // TS7 §6.5: SWING was a missing freeze invalidator.  It lives in the MAIN
@@ -1692,7 +2074,6 @@ private:
         // "globalSwing" -- it does not share the prefix, so a prefix test alone
         // silently missed the one control that re-times every player at once
         // (found by Jeff asking which of the two this covered).
-        const auto pid = tree.getProperty ("id").toString();
         if (pid.startsWith ("swing_") || pid == "globalSwing")
             mSwingChangeStamp.fetch_add (1, std::memory_order_relaxed);
     }
@@ -1712,6 +2093,10 @@ public:
 private:
     void syncMixerFromPatternManager();
 
+    // Owner-side drive for the deferred-destruction drainers' idle assertion
+    // (Engine/RetirementQueue.h, CONSUMER-IDLE CONTRACT).  Message thread only.
+    void setRetirementConsumersIdle (bool consumerIsIdle);
+
     // Lazy registration helpers (called from ensureMixerStripParams)
     // QA-ApvtsAutomation (2026-07-25): the four engine mirror helpers removed
     // with registerParamsForTrack; 2026-04-25: addParamsForBaySickDrums before them.
@@ -1722,10 +2107,9 @@ private:
     void addParamsForEQBank      (const juce::String& prefix, const juce::String& subPrefix);
 
     // ── 5F-4a: Mixer-strip lazy APVTS registration ───────────────────────────
-    // Classifies which mixer-strip param family to register.
-    // Master: _level, _pan, _width only (no polarity/mute/solo/bypass/arm)
-    // Bus:    _level, _pan, _mute, _solo, _polarity, _width
-    // Insert: _level, _pan, _mute, _solo, _polarity, _width, _bypass, _arm
+    // Classifies which mixer-strip param family to register; the per-kind
+    // membership and the reasons for each omission live with the branches in
+    // addParamsForMixerStrip.
 public:
     enum class MixerStripKind { Master, Bus, Insert };
 private:
@@ -1748,8 +2132,9 @@ public:
     // registration it triggers.
     std::function<void (const juce::String& prefix)> onMixerStripParamsCreated;
 
-    // Bulk-register the five bus strips + master once at startup.
-    // Called from VibeGraph::buildFixedTopology via a callback wired in the constructor.
+    // Bulk-register master + every fixed bus strip's params (idempotent).
+    // Must run before VibeGraph::rebindBusApvts, which caches raw pointers to
+    // the params created here.
     void ensureMixerBusAndMasterParams();
     // QA-G3Smoke Swing (SW-6): eager global + per-player swing param
     // registration + raw-atomic caching (see the .cpp note for family scope).
@@ -1894,7 +2279,7 @@ private:
     // Batch 7 (2026-05-06): passive accumulator strip tasks.
     // Aux: created lazily via ensureAuxInsert; up to kMaxAuxStrips (18).
     // Bus: always-on buses registered idempotently in prepareToPlay.
-    static constexpr int kNumBatch7Buses = 16;   // QA-Layout T10: +4 secondary group buses
+    static constexpr int kNumBatch7Buses = 17;   // QA-SOUNDNESS: +Drums Bus 2
     std::array<std::unique_ptr<PassiveStripTask>, MixerChannelIds::kMaxAuxStrips> mAuxRenderTasks;
     std::array<std::unique_ptr<PassiveStripTask>, kNumBatch7Buses>                mBusRenderTasks;
 
@@ -1908,11 +2293,23 @@ private:
     int                  mOfflinePrevBlk  { 0 };
     bool                 mOfflinePrevSong { true };
     juce::AudioPlayHead* mOfflinePrevHead { nullptr };
+    bool                 mOfflinePrevShield { false };
     // ONE render at a time: export/measure drive begin/end from a background
     // thread while freeze renders drive it on the message thread -- two
     // interleaved suspend/restore sequences corrupt both.  Owned by
     // beginOfflineRender (compare-exchange) / endOfflineRender (clear).
     std::atomic<bool>    mOfflineRenderActive { false };
+    // Set to the calling thread around the two prepareToPlay calls the offline
+    // path makes itself, so prepareToPlay can tell a device open from a render
+    // reconfigure and only the former moves mAudioDevicePrepared.  Without that
+    // the flag stops being a statement about the device: getSampleRate() keeps
+    // reporting the last negotiated rate after releaseResources, so a render
+    // started with no device open restores its config and re-raises the flag,
+    // and every later settle then waits out its full timeout for an
+    // acknowledgement nothing can send.  A thread id rather than a bool because
+    // a real device open arriving mid-render runs on the device thread and must
+    // still be able to raise the flag.
+    std::atomic<juce::Thread::ThreadID> mOfflineReconfigureThread { nullptr };
 
     // QA-ModelShell TS6: declared immediately BEFORE the rig so it is destroyed
     // AFTER it -- hosted plugin instances live in the rig (instruments) and in

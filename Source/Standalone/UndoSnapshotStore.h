@@ -17,6 +17,13 @@ namespace UndoSnapshotStore
         return AppPaths::appRoot().getChildFile ("UndoSnapshots");
     }
 
+    // CONTRACT: an empty juce::File means the snapshot is NOT on disk.  Every
+    // caller has to test it, and a caller whose next step destroys what it just
+    // snapshotted (deleteTabWithUndo) has to abort that step and tell the user
+    // -- returning the File regardless is how a delete became unrecoverable
+    // while the history still showed an undoable "Delete" entry.  The callers
+    // that only swap a chain may keep bailing quietly; the destructive ones
+    // may not.
     inline juce::File writeNew (const juce::String& xmlContent)
     {
         static std::atomic<int> sCounter { 0 };
@@ -25,7 +32,9 @@ namespace UndoSnapshotStore
         const auto f = d.getChildFile ("snap_"
                           + juce::String (juce::Time::currentTimeMillis())
                           + "_" + juce::String (sCounter.fetch_add (1)) + ".xml");
-        f.replaceWithText (xmlContent);
+        if (! f.replaceWithText (xmlContent))
+            return {};
+
         return f;
     }
 

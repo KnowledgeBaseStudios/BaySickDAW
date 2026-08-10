@@ -120,29 +120,21 @@ struct EditorPanelBase : public juce::Component
 
     // Hook for panels that keep knobs in their own vectors (r1knobs, r2knobs)
     // instead of the base-class `knobs`. Return raw pointers to extra knobs so
-    // setSlotContext() can stamp paramIds on them and register automation
-    // applicators. Default implementation returns nothing; Chorus/Delay/Reverb/
-    // Limiter/Saturation override this because they split their knobs across
-    // two rows.
+    // setSlotContext() can stamp paramIds on them too -- an unstamped knob has no
+    // id for the model-side registry to answer.
     virtual std::vector<VKnob*> getExtraKnobs() { return {}; }
 
     // QA-EffectsReview Task 9: opt a toggle into the right-click "Automate"
     // system (first user: Reverb Freeze).  Call from the derived constructor;
     // setSlotContext() stamps the paramId (base + suffix) as componentID on
-    // the wrapper + its children (GlobalAutoRightClick reads the clicked
-    // component's id directly) and registers a 0/1 applicator + reader that
-    // drive the button with sendNotification -- the toggle's own onClick
-    // pushes to the DSP, mirroring how knob applicators drive the slider.
+    // the wrapper AND every child (GlobalAutoRightClick reads the clicked
+    // component's id directly, and a click can land on the switch or a
+    // forwarding label).  The lane itself is answered model-side through
+    // EffectParamMap; this panel only publishes the id and mirrors the DSP
+    // value back onto the button in refreshControlsFromDsp.
     void addAutomatableToggle(DualLabelToggle& tog, const juce::String& paramSuffix);
     struct AutoToggle { DualLabelToggle* tog; juce::String suffix; };
     std::vector<AutoToggle> mAutoToggles;
-
-    // H-7 (2026-05-01): hook fired when the slot's character mode (Compressor
-    // Type / Saturation Type) changes via the SlotComponent's Mode dropdown,
-    // and once at editor-mount time so the initial Type's layout is applied.
-    // Default no-op; CompressorPanel + SaturationPanel override to show/hide
-    // mode-specific knobs and re-layout.
-    virtual void onTypeChanged() {}
 
     // QA-F chain-wiring fix (2026-07-10): opt-in two-way APVTS binding for
     // hosts whose params are the source of truth (BaySickVocal's locked

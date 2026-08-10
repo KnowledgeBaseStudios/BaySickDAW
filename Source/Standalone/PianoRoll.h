@@ -518,7 +518,6 @@ private:
     PianoNote* noteNearX  (int x, int y = -1)  const;
     float      getVal     (const PianoNote& n)  const;
     void       setVal     (PianoNote& n, float v);
-    float      yToNormVal (int y)              const;
     void       scrubApply (int x0, int x1, float v0, float v1);
 
     PianoNote* mDragNote { nullptr };  // locked on mouseDown, cleared on mouseUp
@@ -536,18 +535,17 @@ private:
     int  mHeaderDragStartH { 0 };
 };
 
-// ── Helper: TextButton with right-click callback ───────────────────────────
+// ── Helper: TextButton that swallows right-click ───────────────────────────
+// QA-UICleanup SC8 retired the Snap button's right-click resolution picker;
+// left-click opens the dropdown instead.  Eating the event here is what keeps
+// right-click from opening it too: juce::Button::mouseDown / mouseUp do not
+// filter by mouse button, so a plain TextButton fires onClick on any button.
 class RightClickTextButton : public juce::TextButton
 {
 public:
-    std::function<void(const juce::MouseEvent&)> onRightMouseDown;
     void mouseDown(const juce::MouseEvent& e) override
     {
-        if (e.mods.isRightButtonDown())
-        {
-            if (onRightMouseDown) onRightMouseDown(e);
-            return;
-        }
+        if (e.mods.isRightButtonDown()) return;
         TextButton::mouseDown(e);
     }
 };
@@ -578,7 +576,6 @@ public:
     void setGhostData    (const std::vector<std::pair<const PianoRollData*, juce::Colour>>& ghosts);
     void setNoteColor    (juce::Colour c);
     void setFixedNoteRange(int bottomMidi, int topMidi);
-    void setDrumMode     ();
 
     // Phase C §P4.2 (2026-04-24): dual-roll mode for the Drums page.
     //   DrumGrid (0) = current 16-row fixed-range step grid.  Click writes
@@ -763,7 +760,6 @@ private:
     bool   mFixedRange        { false };
     int    mFixedRangeBottom  { 0 };
     int    mFixedRangeTop     { 127 };
-    bool   mDrumMode          { false };
     // Phase C §P4.2 (2026-04-24): roll-mode + active-slot for drum dual mode.
     // Container default Standard - DrumsPage flips to DrumGrid in its ctor.
     RollMode mRollMode    { RollMode::Standard };

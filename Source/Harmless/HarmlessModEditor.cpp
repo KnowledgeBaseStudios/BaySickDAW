@@ -268,9 +268,10 @@ HarmlessModEditor::HarmlessModEditor()
     };
     addAndMakeVisible (mTempoBtn);
 
-    // S4 Batch 4 update: SUSTAIN knob removed. sustainTime is now auto-derived
-    // from the curve's last peak via recomputeSustainTime(). Manual override
-    // deferred to Tier 3.
+    // S4 Batch 4: no SUSTAIN control here - the WYSIWYG curve plays over LENGTH
+    // verbatim and the DSP has no sustain-hold stage. ModCurveState::sustainTime
+    // survives for ValueTree round-tripping only (see HarmlessModRegistry.h);
+    // T3-PerPointSustain owns explicit sustain markers.
 
     // ── Warp knobs (SPD/TNS/SKEW/PW) - per-tab per-source per-target ──────
     for (auto* s : { &mSpdKnob, &mTnsKnob, &mSkewKnob, &mPwKnob })

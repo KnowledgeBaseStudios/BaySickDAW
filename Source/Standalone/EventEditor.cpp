@@ -34,22 +34,6 @@ void EEAutomationGrid::setBlock(PatternManager* pm, int blockIdx, float clipLeng
     repaint();
 }
 
-void EEAutomationGrid::setLaneReadOnly(const AutomationLane* /*lane*/, float clipLengthBeats)
-{
-    // read-only display: caller updates mPM to nullptr and provides lane externally
-    // For simplicity we just set mPM=nullptr and use setBlock instead
-    mPM        = nullptr;
-    mBlockIdx  = -1;
-    mTotalBeats = jmax(0.25f, clipLengthBeats);
-    repaint();
-}
-
-void EEAutomationGrid::setTotalBeats(float beats)
-{
-    mTotalBeats = jmax(0.25f, beats);
-    repaint();
-}
-
 void EEAutomationGrid::setTool(EETool t)
 {
     mTool = t;
@@ -60,13 +44,6 @@ void EEAutomationGrid::setTool(EETool t)
 void EEAutomationGrid::setLFOMode(bool lfo)
 {
     mLFOMode = lfo;
-    repaint();
-}
-
-void EEAutomationGrid::setPixelsPerBeat(float ppb)
-{
-    mPPBeat = jmax(4.f, ppb);
-    resized();
     repaint();
 }
 
@@ -241,10 +218,10 @@ void EEAutomationGrid::drawRuler(Graphics& g) const
 
     // Bar numbers and tick marks
     g.setFont(Font(9.f));
-    float barsTotal = mTotalBeats / (float)mBeatsPerBar;
+    float barsTotal = mTotalBeats / (float)kBeatsPerBar;
     for (int bar = 0; bar <= (int)std::ceil(barsTotal); ++bar)
     {
-        float beat = (float)bar * (float)mBeatsPerBar;
+        float beat = (float)bar * (float)kBeatsPerBar;
         float x    = beatToX(beat);
         if (x < kValLabelW - 1 || x > getWidth() + 1) continue;
         // Major bar tick
@@ -254,9 +231,9 @@ void EEAutomationGrid::drawRuler(Graphics& g) const
         g.setColour(kTextGray.withAlpha(0.85f));
         g.drawText(String(bar + 1), (int)x + 2, 0, 30, kRulerH - 3, Justification::centredLeft, false);
         // Beat subdivisions
-        for (int beat2 = 1; beat2 < mBeatsPerBar; ++beat2)
+        for (int beat2 = 1; beat2 < kBeatsPerBar; ++beat2)
         {
-            float x2 = beatToX((float)bar * mBeatsPerBar + beat2);
+            float x2 = beatToX((float)bar * kBeatsPerBar + beat2);
             if (x2 < kValLabelW || x2 > getWidth()) continue;
             g.setColour(kGridLineEE);
             g.drawVerticalLine((int)x2, (float)(kRulerH - 4), (float)kRulerH);
@@ -266,16 +243,15 @@ void EEAutomationGrid::drawRuler(Graphics& g) const
 
 void EEAutomationGrid::drawGrid(Graphics& g) const
 {
-    const int contentW = getWidth() - kValLabelW;
     const int contentH = getHeight() - kRulerH;
-    const float barsTotal = mTotalBeats / (float)mBeatsPerBar;
+    const float barsTotal = mTotalBeats / (float)kBeatsPerBar;
 
     // ── Vertical zebra stripes (per bar) ────────────────────────────────────
     for (int bar = 0; bar < (int)std::ceil(barsTotal); ++bar)
     {
         if (bar % 2 != 0) continue;
-        float x1 = beatToX((float)bar * mBeatsPerBar);
-        float x2 = beatToX((float)(bar + 1) * mBeatsPerBar);
+        float x1 = beatToX((float)bar * kBeatsPerBar);
+        float x2 = beatToX((float)(bar + 1) * kBeatsPerBar);
         x1 = jmax(x1, (float)kValLabelW);
         x2 = jmin(x2, (float)getWidth());
         g.setColour(kGridZebraEE);
@@ -309,7 +285,7 @@ void EEAutomationGrid::drawGrid(Graphics& g) const
     {
         float x = beatToX((float)b);
         if (x < kValLabelW || x > getWidth()) continue;
-        bool isMajor = (b % mBeatsPerBar == 0);
+        bool isMajor = (b % kBeatsPerBar == 0);
         g.setColour(isMajor ? kGridLineMjEE : kGridLineEE);
         g.drawVerticalLine((int)x, (float)kRulerH, (float)getHeight());
 
@@ -361,10 +337,9 @@ void EEAutomationGrid::buildCurvePath(Path& path) const
         }
         else if (ctype == CurveType::Spline && (int)pts.size() >= 2)
         {
-            // Catmull-Rom segment: use neighbouring points as tangent guides
+            // Catmull-Rom segment: the two ends are already in hand as x1/y1 and
+            // x2/y2, so only the outer neighbours (tangent guides) are read here.
             const ControlPoint& p0 = (i >= 2)        ? pts[i - 2] : pts[i - 1];
-            const ControlPoint& p1 = pts[i - 1];
-            const ControlPoint& p2 = pts[i];
             const ControlPoint& p3 = (i + 1 < (int)pts.size()) ? pts[i + 1] : pts[i];
 
             float x0r = beatToX(p0.timeTicks * mTotalBeats), y0r = valToY(p0.value01);
@@ -623,7 +598,7 @@ void EEAutomationGrid::drawLFOWaveform(Graphics& g) const
     {
         float norm  = (float)i / (float)steps;
         float beat  = norm * mTotalBeats;
-        float bar   = beat / (float)mBeatsPerBar;
+        float bar   = beat / (float)kBeatsPerBar;
         float phase = bar * rate * twoPi;
         float t01   = std::fmod(phase / twoPi, 1.f);
         if (t01 < 0.f) t01 += 1.f;
@@ -745,7 +720,7 @@ void EEAutomationGrid::mouseDown(const MouseEvent& e)
             juce::PopupMenu m;
             m.addItem(3, "Set Value...");
             m.addSeparator();
-            m.addItem(1, "Reset to midpoint");
+            m.addItem(1, "Reset to Default");
             m.addItem(2, "Delete");
             m.showMenuAsync(juce::PopupMenu::Options{}.withTargetComponent(this),
                 [this, hit](int result)
@@ -753,11 +728,21 @@ void EEAutomationGrid::mouseDown(const MouseEvent& e)
                     if (result == 3) { promptSetPointValue(hit); return; }   // QA-Ed Problem 1: type-in
                     auto* l = lanePtr();
                     if (!l || hit < 0 || hit >= (int)l->points.size()) return;
-                    AutomationLane before = *l;
                     if (result == 1)
                     {
-                        l->points[hit].value01 = 0.5f;
-                        commitEdit("Reset to Midpoint", before, *l);
+                        // A point already sitting at its default is the COMMON
+                        // case now that the reset resolves a real default
+                        // instead of a flat midpoint, so bank nothing rather
+                        // than give the user a history entry whose undo does
+                        // nothing visible.  Matches the two Builder-grid sites.
+                        const float rv = onResolveResetValue
+                            ? juce::jlimit (0.f, 1.f, onResolveResetValue (l->paramId))
+                            : 0.5f;
+                        if (l->points[hit].value01 == rv) return;
+
+                        AutomationLane before = *l;
+                        l->points[hit].value01 = rv;
+                        commitEdit("Reset to Default", before, *l);
                     }
                     else if (result == 2)
                     {
@@ -772,6 +757,7 @@ void EEAutomationGrid::mouseDown(const MouseEvent& e)
                                 onDeleteWholeAutomationRequested();
                             return;
                         }
+                        AutomationLane before = *l;
                         l->points.erase(l->points.begin() + hit);
                         commitEdit("Delete Point", before, *l);
                     }
@@ -1038,16 +1024,6 @@ void EEAutomationGrid::mouseUp(const MouseEvent& /*e*/)
             }
         }
         mMarqueeActive = false;
-        repaint();
-    }
-}
-
-void EEAutomationGrid::mouseWheelMove(const MouseEvent& e, const MouseWheelDetails& wheel)
-{
-    if (e.mods.isCtrlDown())
-    {
-        float factor = (wheel.deltaY > 0.f) ? 1.15f : (1.f / 1.15f);
-        mPPBeat = jlimit(4.f, 400.f, mPPBeat * factor);
         repaint();
     }
 }
@@ -1437,9 +1413,12 @@ void EventEditorContent::setBlock(PatternManager* pm, int blockIdx)
             dw->setName(cap);
         }
 
-        // Calculate clip length in beats
-        // Use 4 beats per bar as default if no time sig available
-        float clipBeats = (float)block.lengthBars * 4.f;
+        // effectiveLengthBeats, not lengthBars * 4: it honors a sliced or
+        // otherwise sub-bar block's exact span, and it is the same helper the
+        // playback evaluator's effectiveLengthBars divides by to turn song
+        // position into the lane's normalized relPos -- so the ruler the user
+        // drops points against matches where they actually play.
+        float clipBeats = (float)effectiveLengthBeats(block);
 
         mGrid->setBlock(pm, blockIdx, clipBeats);
 
@@ -1892,12 +1871,21 @@ void EventEditorContent::doImportMidi()
             if (!file.existsAsFile()) return;
             if (!mPM || mBlockIdx < 0 || mBlockIdx >= mPM->getNumBlocks()) return;
 
-            // Parse MIDI file for CC data on any channel
             FileInputStream stream(file);
-            if (!stream.openedOk()) return;
+            if (!stream.openedOk())
+            {
+                AlertWindow::showMessageBoxAsync(AlertWindow::WarningIcon,
+                    "Import MIDI CC", "Could not open \"" + file.getFileName() + "\".");
+                return;
+            }
 
             MidiFile midiFile;
-            if (!midiFile.readFrom(stream)) return;
+            if (!midiFile.readFrom(stream))
+            {
+                AlertWindow::showMessageBoxAsync(AlertWindow::WarningIcon,
+                    "Import MIDI CC", "\"" + file.getFileName() + "\" is not a valid MIDI file.");
+                return;
+            }
 
             midiFile.convertTimestampTicksToSeconds();
 

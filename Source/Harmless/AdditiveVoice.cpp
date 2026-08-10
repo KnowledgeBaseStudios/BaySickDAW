@@ -75,6 +75,27 @@ void AdditiveVoice::setCurrentPlaybackSampleRate (double newRate)
     mFilter2NotchHelper.prepare (spec);
     mFilter2NotchHelper.setCutoffFrequency (mFilter2Cutoff);
     mFilter2NotchHelper.setResonance       (mFilter2Res);
+    invalidateFilterCoeffCache();
+
+    // Filter-cutoff control tick, expressed as a sample count so the update
+    // period is the same wall-clock slice at every sample rate.  2 kHz is the
+    // calibration point: fast enough that a 5 ms filter attack still resolves
+    // into ~10 steps, cheap enough to afford per voice.
+    constexpr double kFilterControlRateHz = 2000.0;
+    mFltCtrlInterval  = juce::jmax (1, (int) std::lround (mSampleRate / kFilterControlRateHz));
+    mFltCtrlCountdown = 0;
+
+    // juce::ADSR recalculates its per-sample rates only inside setParameters,
+    // so setSampleRate alone would leave every envelope running at the OLD rate
+    // until the next retriggering note-on - which in legato may never come.
+    // Re-applying the LIVE parameters (not the stored defaults) preserves the
+    // per-note CC72 release scale and cutFast's quick-release override.
+    const auto ampP  = mAmpADSR .getParameters();
+    const auto fltP1 = mFltADSR1.getParameters();
+    const auto fltP2 = mFltADSR2.getParameters();
+    mAmpADSR .setSampleRate (mSampleRate);  mAmpADSR .setParameters (ampP);
+    mFltADSR1.setSampleRate (mSampleRate);  mFltADSR1.setParameters (fltP1);
+    mFltADSR2.setSampleRate (mSampleRate);  mFltADSR2.setParameters (fltP2);
 
     // S4 Option 2: pre-allocate per-voice engines on the UI thread so the
     // audio thread never allocates. Idle until the mod matrix (Batch 2b)
@@ -207,6 +228,9 @@ void AdditiveVoice::startNote (int midiNote, float velocity,
         mFltADSR2.setSampleRate (mSampleRate);
         mFltADSR2.setParameters (mFltParams2);
         mFltADSR2.noteOn();
+        // Force a cutoff tick on the note's first sample so the attack starts
+        // from the retriggered envelope value, not the previous note's tail.
+        mFltCtrlCountdown = 0;
         mFilter.reset();
         mFilter2.reset();
         mFilterNotchHelper .reset();   // T1c
@@ -241,8 +265,9 @@ void AdditiveVoice::startNote (int midiNote, float velocity,
 
 void AdditiveVoice::stopNote (float /*velocity*/, bool allowTailOff)
 {
-    // S4: mod gate flips to released. Envelope phase resumes from sustainTime
-    // toward 1.0 at the fixed release rate.
+    // S4: mod gate flips to released. If a mod envelope has not reached the
+    // end of its curve, the remainder advances over the voice's amp-ADSR
+    // release time, so short notes still fade through the unplayed segment.
     mModGateHeld = false;
 
     if (allowTailOff)
@@ -292,7 +317,7 @@ void AdditiveVoice::controllerMoved (int controllerNumber, int newValue)
 {
     // Batch E #2 (2026-05-01): CC 74 (Brightness) = per-note filter cutoff
     // offset.  Map 0..127 -> -2..+2 octaves.  Applied multiplicatively to
-    // both filter cutoffs in the per-block cutoff calculation.
+    // both filter cutoffs on the filter-cutoff control tick (mFltCtrlInterval).
     if (controllerNumber == 10)       // S-7: per-note pan (64 = center)
     {
         // Smoke #19 declick: sounding voices glide to the new channel pan
@@ -356,10 +381,9 @@ bool AdditiveVoice::tryRampTakeover (int targetNote)
     }
     // #11 (G-4): pan glides current -> CC89 target over the same span.
    #if JUCE_DEBUG
-    G3PlayheadDiag::logPan ("arm(harmless) pend=" + juce::String (mPanRampPend, 3)
-        + " from=" + juce::String (mNotePan, 3)
-        + " glideSamples=" + juce::String ((int) glideSamples)
-        + " timePending=" + juce::String ((int) mGlideTimePending));
+    G3PlayheadDiag::pushRT ("[G3 PAN] arm(harmless) pend/from/glideSamples/timePending",
+                            4, (double) mPanRampPend, (double) mNotePan,
+                            (double) glideSamples, (double) mGlideTimePending);
    #endif
     if (mPanRampPend > -2.0f)
     {
@@ -425,25 +449,15 @@ void AdditiveVoice::renderNextBlock (juce::AudioBuffer<float>& outputBuffer,
     const float freqCoeff = mPerNoteGlideActive ? mPerNoteGlideCoeff
                           : (mGlideTimeSec > 0.001f) ? mGlideCoeff : mFreqCoeff;
 
-    // S2 T2-A + SLA #34 + T2-N: per-block filter cutoff computation.
-    // Effective cutoff = baseCutoff * 2^((envAmt*envValue + cutoffOfs/12 +
-    //                                     kbTrack*(noteSemisAbove60))*freqOctaves)
-    // We sample the ADSR once at block start (NOT advancing it - the per-sample
-    // loop advances). The 4-octave swing on full env scaling is the standard
-    // synth-filter range. T2-E mod XYZ destination FilterCutoff (#1) adds another
-    // ±2 octaves of modulation summed in.
-    auto envSemisFor = [this] (juce::ADSR& env, float amt) -> float {
-        // Peek without advancing: getNextSample advances; instead estimate via
-        // the cached last ADSR position using `isActive` heuristic.
-        // For simplicity + correctness, advance + restore - JUCE ADSR has no
-        // peek API. Fall back: read what setSustainLevel etc would imply -
-        // for now use amt * 0.5 as a coarse mid-attack approximation.
-        // CORRECT: get one sample to see current value, but that advances state.
-        // Trade: take one sample now and apply that for the whole block.
-        return amt * env.getNextSample() * 48.0f;   // 4 octaves max swing
-    };
-    // Note: this advances the env by 1 sample. The per-sample loop below should
-    // NOT advance the filter env again. We accept the 1-sample lag.
+    // S2 T2-A + SLA #34 + T2-N: filter cutoff.
+    // Effective cutoff = baseCutoff * 2^((envAmt*envValue*48 + cutoffOfs +
+    //                                     kbTrack*noteSemisAbove60 + ...) / 12)
+    // The 4-octave (48-semitone) swing on full env scaling is the standard
+    // synth-filter range. T2-E mod XYZ destination FilterCutoff (#1) adds
+    // another +-2 octaves of modulation summed in.
+    // Everything but the envelope term is constant over the block; both filter
+    // envelopes advance once per SAMPLE inside the loop and the cutoff is
+    // re-derived on the mFltCtrlInterval tick.
 
     // S4 Batch 2b: VoiceLocal mod contributions for filter cutoff + resonance.
     // Pitch contribution added later where pitchOffsetSemis is computed.
@@ -458,38 +472,62 @@ void AdditiveVoice::renderNextBlock (juce::AudioBuffer<float>& outputBuffer,
 
     // Batch E #2: per-note CC74 cutoff offset, -2..+2 octaves = -24..+24 semis.
     const float perNoteSemis = mPerNoteCutoffOctaves * 12.0f;
-    const float flt1Semis = envSemisFor (mFltADSR1, mFlt1EnvAmt)
-                          + mFlt1CutoffOfs
-                          + mFlt1KbTrack * noteSemisAbove60
-                          + modFlt1Semis
-                          + perNoteSemis;
-    const float flt2Semis = envSemisFor (mFltADSR2, mFlt2EnvAmt)
-                          + mFlt2CutoffOfs
-                          + mFlt2KbTrack * noteSemisAbove60
-                          + modFlt2Semis
-                          + perNoteSemis;
-    const float flt1Cutoff = juce::jlimit (20.f, 20000.f,
-                                           mFilterCutoff  * std::pow (2.0f, flt1Semis / 12.0f));
-    const float flt2Cutoff = juce::jlimit (20.f, 20000.f,
-                                           mFilter2Cutoff * std::pow (2.0f, flt2Semis / 12.0f));
+    const float flt1StaticSemis = mFlt1CutoffOfs
+                                + mFlt1KbTrack * noteSemisAbove60
+                                + modFlt1Semis
+                                + perNoteSemis;
+    const float flt2StaticSemis = mFlt2CutoffOfs
+                                + mFlt2KbTrack * noteSemisAbove60
+                                + modFlt2Semis
+                                + perNoteSemis;
+    const float flt1EnvSemisPerUnit = mFlt1EnvAmt * 48.0f;
+    const float flt2EnvSemisPerUnit = mFlt2EnvAmt * 48.0f;
+
+    // Control tick: re-derive both cutoffs from the live envelope values.
+    // Guarded so a held (sustaining or zero-amount) envelope costs no
+    // coefficient recalculation - StateVariableTPTFilter::setCutoffFrequency
+    // runs a tan() per call.
+    auto applyCutoffTick = [&] (float env1, float env2)
+    {
+        const float c1 = juce::jlimit (20.f, 20000.f, mFilterCutoff
+            * std::pow (2.0f, (flt1StaticSemis + flt1EnvSemisPerUnit * env1) / 12.0f));
+        const float c2 = juce::jlimit (20.f, 20000.f, mFilter2Cutoff
+            * std::pow (2.0f, (flt2StaticSemis + flt2EnvSemisPerUnit * env2) / 12.0f));
+        if (c1 != mAppliedCutoff1)
+        {
+            mAppliedCutoff1 = c1;
+            if (mFilterType != 3)
+                mFilter.setCutoffFrequency (c1);
+            mFilterNotchHelper.setCutoffFrequency (c1);
+        }
+        if (c2 != mAppliedCutoff2)
+        {
+            mAppliedCutoff2 = c2;
+            if (mFilter2Type != 3)
+                mFilter2.setCutoffFrequency (c2);
+            mFilter2NotchHelper.setCutoffFrequency (c2);
+        }
+    };
+
     // S4 Batch 2b: resonance mod on top of the base value.
     // QA-H: per-note CC71 offset (+-1 Q) applies to both filters.
+    // No envelope feeds resonance, so it stays a block-rate update.
     const float effRes1 = juce::jlimit (0.05f, 10.0f, mFilterRes  + modFlt1Res + mActiveResOffset);
     const float effRes2 = juce::jlimit (0.05f, 10.0f, mFilter2Res + modFlt2Res + mActiveResOffset);
-    if (mFilterType != 3)
+    if (effRes1 != mAppliedRes1)
     {
-        mFilter.setCutoffFrequency (flt1Cutoff);
-        mFilter.setResonance       (effRes1);
+        mAppliedRes1 = effRes1;
+        if (mFilterType != 3)
+            mFilter.setResonance (effRes1);
+        mFilterNotchHelper.setResonance (effRes1);
     }
-    mFilterNotchHelper.setCutoffFrequency (flt1Cutoff);
-    mFilterNotchHelper.setResonance       (effRes1);
-    if (mFilter2Type != 3)
+    if (effRes2 != mAppliedRes2)
     {
-        mFilter2.setCutoffFrequency (flt2Cutoff);
-        mFilter2.setResonance       (effRes2);
+        mAppliedRes2 = effRes2;
+        if (mFilter2Type != 3)
+            mFilter2.setResonance (effRes2);
+        mFilter2NotchHelper.setResonance (effRes2);
     }
-    mFilter2NotchHelper.setCutoffFrequency (flt2Cutoff);
-    mFilter2NotchHelper.setResonance       (effRes2);
 
     // S4 Batch 2b: VoiceLocal mod dispatch.
     //   Bipolar (`contribution`, centered on 0 = no change):
@@ -510,6 +548,19 @@ void AdditiveVoice::renderNextBlock (juce::AudioBuffer<float>& outputBuffer,
 
     for (int s = 0; s < numSamples; ++s)
     {
+        // Filter envelopes advance exactly one sample per sample, so their
+        // wall-clock length is the user's set time at any buffer size.  The
+        // derived cutoff is applied on the sample-counted control tick; the
+        // countdown carries over from the previous block, so a short final
+        // block or a device change cannot shift the control rate.
+        const float fltEnv1 = mFltADSR1.getNextSample();
+        const float fltEnv2 = mFltADSR2.getNextSample();
+        if (--mFltCtrlCountdown <= 0)
+        {
+            mFltCtrlCountdown = mFltCtrlInterval;
+            applyCutoffTick (fltEnv1, fltEnv2);
+        }
+
         // ── Vibrato - pitch modulation (before frequency computation) ──────────
         float vibSemis = 0.0f;
         if (mVibDepth > 0.001f)
@@ -723,6 +774,7 @@ void AdditiveVoice::setFilterParams (float cutoffHz, float resonance)
         mFilter.setResonance       (r);
         mFilterNotchHelper.setCutoffFrequency (c);
         mFilterNotchHelper.setResonance       (r);
+        invalidateFilterCoeffCache();
     }
 }
 
@@ -800,6 +852,7 @@ void AdditiveVoice::setFilter2Params (float cutoffHz, float res) noexcept
         mFilter2NotchHelper.setType (juce::dsp::StateVariableTPTFilterType::bandpass);
         mFilter2NotchHelper.setCutoffFrequency (c);
         mFilter2NotchHelper.setResonance (r);
+        invalidateFilterCoeffCache();
     }
 }
 
@@ -860,6 +913,7 @@ void AdditiveVoice::setFilterType (int type) noexcept
     mFilterNotchHelper.setType (juce::dsp::StateVariableTPTFilterType::bandpass);
     mFilterNotchHelper.setCutoffFrequency (mFilterCutoff);
     mFilterNotchHelper.setResonance (mFilterRes);
+    invalidateFilterCoeffCache();
 }
 
 // ── 2026-04-19 (S2 T2-A) Filter envelopes / cutoff ofs / kb track ──────────
@@ -982,6 +1036,7 @@ void AdditiveVoice::setFilter2Type (int type) noexcept
     mFilter2NotchHelper.setType (juce::dsp::StateVariableTPTFilterType::bandpass);
     mFilter2NotchHelper.setCutoffFrequency (mFilter2Cutoff);
     mFilter2NotchHelper.setResonance (mFilter2Res);
+    invalidateFilterCoeffCache();
 }
 
 //==============================================================================

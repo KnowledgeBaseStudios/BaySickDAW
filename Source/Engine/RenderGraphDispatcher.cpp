@@ -36,14 +36,31 @@ RenderGraphDispatcher::~RenderGraphDispatcher()
 
 void RenderGraphDispatcher::prepare (double sampleRate, int maxBlockSize)
 {
-    juce::ignoreUnused (sampleRate);
     mArena.prepare (maxBlockSize);
+
+    // Derived from the PREPARED size rather than the per-block ctx.numSamples:
+    // that is the device's real block period, and a short final block does
+    // less work, so it needs no less headroom than a full one.
+    mWatchdogTimeoutMs.store (RenderEngine::watchdogTimeoutMillis (sampleRate, maxBlockSize),
+                              std::memory_order_relaxed);
 }
 
 void RenderGraphDispatcher::registerTask (RenderTask* task)
 {
     if (task == nullptr)
         return;
+
+    // rebuildLinks refills mPredecessors / mChildren on the AUDIO thread every
+    // block; clear() retains capacity, so reserving here (message thread, before
+    // the task is reachable from the pool) keeps the per-block refill inside the
+    // existing allocation instead of mallocing in the render callback the first
+    // block after any topology growth.  Overflow still just allocates as before -
+    // a task's child count is not bounded (any strip can sidechain from any
+    // other, and the Rusty producer alone carries 13 synthetic children).
+    task->mPredecessors.reserve (RoutingGraph::kMaxMainOutsPerStrip
+                                   + RoutingGraph::kMaxSendsPerStrip
+                                   + RoutingGraph::kMaxScRecvsPerStrip);
+    task->mChildren.reserve (64);
 
     const int chId = task->channelId;
 
@@ -161,6 +178,10 @@ void RenderGraphDispatcher::rebuildLinks (const RoutingGraph& routing)
         UpstreamLink link;
         link.source    = src;
         link.gainDb    = e.amountDb;
+        // Carries the pre-fader flag through to the consumer, which resolves it
+        // to the source's tap in SendSourceRead::bufferFor.  The src->dst
+        // dependency registered just below is ALSO what orders the tap write
+        // before that read -- a pre-fader send needs no ordering of its own.
         link.prePost   = e.prePost;
         link.isMainOut = e.isMainOut;
         link.isSc      = false;
@@ -297,9 +318,16 @@ void RenderGraphDispatcher::dispatchBlock (juce::AudioBuffer<float>& outputBuffe
         RenderEngine::MtDiagnostic::gBlockCount.fetch_add (1, std::memory_order_relaxed);
 
     // QA-N (DIAG-02): reset the pool's per-block busy accumulator at the block
-    // boundary.  runOneTask (workers + audio-thread pump) adds to it below;
-    // measureDspLoadAndOverload reads the sum after this dispatch returns.
+    // boundary.  runOneTask (workers + audio-thread pump) adds to it below.
+    // NOTHING reads the sum today -- getBusyTicks has no callers; the producer
+    // is kept deliberately for the planned MT-diagnostic compile-gate (see
+    // VibeThreadPool.h), so do not retire this as dead code.
     mPool.resetBusyTicks();
+
+    // Block-completion counter (VibeThreadPool::blockComplete).  Zeroed here,
+    // before a single task is seeded, so a block that timed out with tasks
+    // still in flight cannot leave its residue in this block's count.
+    mPool.resetOutstandingTasks();
 
     // ── Reset dep counters + assign ctx for every task ──────────────────────
     // Release ordering on the counter store pairs with the worker's acquire
@@ -328,23 +356,55 @@ void RenderGraphDispatcher::dispatchBlock (juce::AudioBuffer<float>& outputBuffe
             }
     }
 
-    // ── Main thread participates as worker until master signals done ────────
+    // ── Main thread participates as worker until the block is complete ──────
     // This is the parallel pump.  Workers process tasks from the pool's
     // queue; main thread joins as a worker (no dedicated spin-wait).  Loop
-    // exits when MasterTask sets mAllDone via release; main thread's
-    // acquire on mAllDone publishes Master's writes to the arena slot.
+    // exits when MasterTask has set mAllDone via release AND the pool's
+    // outstanding-task count has drained; the main thread's acquire on both
+    // publishes every task's writes to the arena.
     //
-    // 2026-05-06 (Batch 9c watchdog): bounded by kWatchdogTimeoutMillis so a
-    // missed routing-graph cycle / stuck worker / unfired Master flag
-    // doesn't hang the audio thread forever.  On timeout we log the
-    // incomplete task list and clear the output buffer for this block --
-    // audio glitches once instead of locking up the whole DAW.
-    const double tStart   = juce::Time::getMillisecondCounterHiRes();
-    const double deadline = tStart + RenderEngine::kWatchdogTimeoutMillis;
+    // WAITING ON mAllDone ALONE IS NOT ENOUGH.  Master's counter only reaches
+    // zero once everything UPSTREAM of it has finished, so on a well-formed
+    // graph its flag does imply those tasks are done -- but a task that is not
+    // an ancestor of master is unconstrained by it.  A producer whose
+    // consumers have already been unregistered, a freeze tap, a strip routed
+    // nowhere: all can still be inside run() when master signals, and every
+    // task reads mCtx, which points into processBlock's stack frame and into
+    // per-page MIDI buffers that die with it.  Returning early also hands
+    // those stragglers to the next block, whose first act is to reset the dep
+    // counters and reuse the arena they are still writing into.
+    //
+    // 2026-05-06 (Batch 9c watchdog): bounded by the block-period-derived
+    // deadline computed in prepare, so a missed routing-graph cycle / stuck
+    // worker / unfired Master flag doesn't hang the audio thread forever.  On
+    // timeout we log the incomplete task list and clear the output buffer for
+    // this block -- audio glitches once instead of locking up the whole DAW.
+    //
+    // The deadline is only ever tested when the pump has NOTHING left to run
+    // (see VibeThreadPool::runUntilOrTimeout), which is why single-core
+    // diagnostic mode -- where the audio thread runs the whole graph itself --
+    // cannot trip it on slowness at all.  Keep that property.
+    const double timeoutMs = mWatchdogTimeoutMs.load (std::memory_order_relaxed);
+    const double tStart    = juce::Time::getMillisecondCounterHiRes();
+    const double deadline  = tStart + timeoutMs;
     const bool   completed = mPool.runUntilOrTimeout (mAllDone, deadline);
 
     if (! completed)
     {
+        // Read before the drain below zeroes it.
+        const int outstanding = mPool.getOutstandingTasks();
+
+        // Drop every task still QUEUED for this block.  They would otherwise
+        // be picked up during the logging below or by a worker mid-way through
+        // the next block, and run against an arena and a BlockContext that
+        // have both moved on.  Safe to discard: dispatchBlock resets every
+        // mDeps at the top of the next block, so the dependency propagation
+        // these tasks owed their children is rebuilt from scratch rather than
+        // lost.  Tasks a worker has ALREADY popped still run to completion --
+        // nothing here can preempt them, which is why this is a narrowing of
+        // the window and not a closing of it.
+        mPool.clearQueues();
+
         // Build a one-line-per-incomplete-task diagnostic.  Logging from the
         // audio thread is exceptional here -- we already lost real-time
         // guarantees by timing out, so a synchronous Logger::writeToLog is
@@ -359,9 +419,11 @@ void RenderGraphDispatcher::dispatchBlock (juce::AudioBuffer<float>& outputBuffe
         const double elapsed = juce::Time::getMillisecondCounterHiRes() - tStart;
         juce::String msg;
         msg << "[RenderGraphDispatcher] BLOCK TIMEOUT after "
-            << juce::String (elapsed, 2) << "ms -- "
+            << juce::String (elapsed, 2) << "ms (limit "
+            << juce::String (timeoutMs, 2) << "ms) -- "
             << incomplete << "/" << (int) mTasks.size()
-            << " tasks incomplete, mAllDone="
+            << " tasks incomplete, " << outstanding
+            << " still outstanding, mAllDone="
             << (mAllDone.load (std::memory_order_relaxed) ? "true" : "false")
             << "\n";
         for (auto* t : mTasks)
@@ -378,11 +440,12 @@ void RenderGraphDispatcher::dispatchBlock (juce::AudioBuffer<float>& outputBuffe
         juce::Logger::writeToLog (msg);
 
         // Clear the host buffer so we emit silence for this block instead
-        // of whatever stale arena data might be there.  Any in-flight tasks
-        // continue running and will decrement child deps as they finish --
-        // those decrements race against the next block's mDeps reset,
-        // potentially desyncing the graph for one or two blocks before it
-        // settles.  Acceptable: the alternative is a permanent hang.
+        // of whatever stale arena data might be there.  The handful of tasks a
+        // worker had already popped keep running and will decrement child deps
+        // and the outstanding count as they finish -- those decrements race
+        // against the next block's resets, potentially desyncing the graph for
+        // a block before it settles.  Acceptable: the alternative is a
+        // permanent hang.
         outputBuffer.clear();
         return;
     }

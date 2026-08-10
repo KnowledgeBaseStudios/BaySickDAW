@@ -18,7 +18,13 @@
 Re-run at EVERY group boundary (15-30 min) and as the campaign opener. Debug exe FIRST (screenshot
 any jassert dialog), then confirm in Release. Don't run both exes simultaneously (ASIO exclusivity).
 
-- [ ] A1. Both configs build clean (`do_build.bat` — RELEASE_EXIT_CODE and DEBUG_EXIT_CODE both zero).
+- [ ] A1. Both configs build clean (`do_build.bat`). **The gate is FIVE exit codes, not two** —
+      `RELEASE_EXIT_CODE`, `DEBUG_EXIT_CODE`, `HELPER64_EXIT_CODE`, `HELPER32_CONFIG_EXIT_CODE`,
+      `HELPER32_EXIT_CODE`, all zero — PLUS four `vcxproj -> ....exe` link lines (two
+      `BaySickDAW.exe`, `BaySickPluginHost64.exe`, `BaySickPluginHost32.exe`) and zero
+      `error C` / `error LNK` / `error MSB` in `build_log.txt`.  The two-code version predates the
+      plugin-host helpers and would pass a build whose 32-bit helper never linked, which shows up
+      later as bridged plugins silently failing to load.
 - [ ] A2. Launch + audio plays (default project, transport runs, meters move, no jasserts).
 - [ ] A3. Big project loads (multi-engine stress project) — all tabs restore, plays without glitching.
 - [ ] A4. Save -> close -> reopen round-trip — state identical (tabs, patterns, mixer, engine params).
@@ -1246,7 +1252,9 @@ Release — mark each scenario `D:` and `R:`.
       Inst both variants): "FX Rack" at the right end of the sub-tab row jumps to that
       strip's rack on the Effects page. Piano Roll page: "Player Page" + "FX Rack"
       right of the roll dropdown act on the selected roll (edge picks: Drum Kit roll ->
-      first Drums tab / Drums Bus rack; Rusty -> Rusty Bus rack). `D:__ R:__` notes:
+      first Drums tab / Drums Bus rack; Rusty -> Rusty Bus rack). **QA-Soundness: there are now
+      TWO drums buses — "Drums Bus" is kit 1 (drums 1-16) and "Drums Bus 2" is kit 2 (17-32).
+      Verify against the bank the tab actually belongs to.** `D:__ R:__` notes:
 - [ ] **L-6 — duplicate names (FILE-03).** Get two same-named entries (+ Add New Clip
       picking an already-imported file): the second shows auto-numbered "(2)". Rename/
       delete one — the OTHER survives untouched (grid clip titles follow the right
@@ -1298,6 +1306,10 @@ L-11.
 Release — mark each scenario `D:` and `R:`.
 Background: a full-kit load used to destroy the Rusty tab (Drums-typed, caught in the
 type-wide teardown) and never re-spawn it; re-adding Rusty gave an empty page.
+**RE-SCOPE AT QA-Soundness:** drums are now TWO INDEPENDENT KITS of 16 (bank = page index / 16),
+each with its own bus. M-1 and M-2 were written when there was one kit — re-run each against BOTH
+banks, and add the case they cannot cover: with kit 1 and kit 2 both populated, loading a kit must
+affect only the bank it targets and leave the other bank AND Rusty untouched.
 
 - [ ] **M-1 — kit load leaves Rusty alone (LIFE-01).** Have a Rusty tab with a kit
       loaded AND one or more DrumPage drum tabs. Load a full kit from the kit menu:
@@ -2450,8 +2462,7 @@ Where a step says "check the trace", read `asio_trace.txt` next to `audio_settin
 
 ### §B.33 — QA-UndoCoverage (one global history + every-action undo + transaction-pointer dirty)
 
-> Authored at code-complete 2026-08-06 (merged batch: absorbs QA-DirtyFlag).  `blocks:` = the
-> one batch commit, backfilled at close.  Jeff's five rulings of 2026-08-06 are IN scope here
+> Authored at code-complete 2026-08-06 (merged batch: absorbs QA-DirtyFlag).  `blocks:` `5c43cfa0`.  Jeff's five rulings of 2026-08-06 are IN scope here
 > (all deletes undoable, Rusty program switch undoable, preset loads undoable, MIDI-learn
 > excluded, honest depth counts).  Expected everywhere: hardware MIDI-learn knob turns create
 > NO history rows (ruling 4b) while still moving the params.
@@ -2554,6 +2565,342 @@ Where a step says "check the trace", read `asio_trace.txt` next to `audio_settin
       Layers tab: pre-delete knob rows still undo/redo onto the resurrected
       engine. `D:__ R:__` notes:
 
+### §B.34 — QA-Soundness (silent failures, dead code, comment truth, threading, lifetime, persistence, divergence + 8 re-sweep rounds)
+
+> Authored at code-complete 2026-08-09.  `blocks:` (backfill the QA-Soundness close commit hash at
+> commit — the whole batch lands as ONE commit).  Debug exe FIRST (screenshot any jassert), then
+> Release — mark each scenario `D:` and `R:`.
+>
+> **This batch is invisible when it works**, so the section is two things: (a) break-it-deliberately
+> scenarios that prove a formerly-silent failure now REPORTS, and (b) targeted checks of every
+> surface that genuinely behaves differently.  Nine tasks plus eight re-sweep rounds; the findings
+> ledger these rows are derived from is in `Plans & Specs/Running Notes/keen-combing-heron.md`.
+>
+> **Rig setup, staged before you start:** the biggest existing project you have; a NAM capture
+> (`.nam`), a user IR `.wav`, a BaySickPlayer sample folder, a sfizz guitar/bass kit folder and an
+> arrangement clip WAV you are willing to RENAME and rename back; one VST3 you can move out of its
+> scan folder and put back; a second machine (or a fresh Windows account) for the bundle walk.
+> Where a step says **"make a folder unwritable"**, use Properties > Security > Edit > tick Deny
+> for Write on your own account, and untick it when the step is done — the plain read-only
+> attribute does not stop writes INTO a folder.
+>
+> The missing-file dialog is always titled **"Missing files"** and opens
+> `"This <noun> refers to files that are no longer where they were saved."`  The noun is the
+> gesture: project / template / preset / sound / kit / duplicated tab / restored tab / undo.
+> Getting the NOUN right is half of what these rows check.
+
+**Baseline — prove nothing broke:**
+
+- [ ] **SND-1 — MUST-PASS: the big project still works.** Launch, open your largest existing
+      project, play it end to end, save, close, reopen: same tabs in the same order, same engine
+      sounds, same mixer levels/routing/racks, same arrangement, same frozen tabs.  No jassert in
+      Debug, no missing-file dialog on a project whose files are all present.  `D:__ R:__` notes:
+- [ ] **SND-2 — Debug playback stopped poisoning itself.** The playhead diagnostic was doing
+      file writes on the audio thread in Debug builds, so every Debug ear check has been fighting
+      glitches the diagnostic manufactured.  Play a busy arrangement in DEBUG for a solid minute:
+      audio is as clean as Release and DSP% is comparable.  Debug-only glitching here is a FAIL.
+      `D:__ R:__` notes:
+- [ ] **SND-3 — no new dropouts at any buffer size.** Same heavy arrangement at 64 / 256 / 1024
+      samples, Release: no dropouts vs your pre-batch feel, DSP meter sane at each.  Then drag a
+      NON-EQ control (a fader, a synth knob) continuously while playing — the EQ sweep no longer
+      fires on unrelated controls, so this should be cheaper than before, never dearer.
+      `D:__ R:__` notes:
+
+**Silent failures now report (break the file, then put it back):**
+
+- [ ] **SND-4 — moved NAM capture.** Project with a NAM amp model + cab IR on a Vox or Inst tab AND
+      a NAM pedal capture in the pedalboard.  Quit, rename the `.nam` file, reopen: the Missing
+      files dialog fires ONCE, headed "This project", naming the capture by path.  The panel shows
+      the name with ` (missing)` appended in red rather than presenting it as loaded.  Rename the
+      file back, reopen: clean, no marker.  `D:__ R:__` notes:
+- [ ] **SND-5 — moved user IR.** Same walk for (a) the NAM/IR mic user IR on BOTH A and B slots,
+      (b) an Acoustic Simulator user IR and (c) an Acoustic Preamp user IR sitting in a MIXER rack
+      slot (not just a pedal slot).  Each is reported at load.  Then INTERACTIVELY pick an
+      unreadable file (rename a `.txt` to `.wav`) as a user IR: you get an error and the PREVIOUS
+      IR stays loaded — the effect must not silently become a bypass.  `D:__ R:__` notes:
+- [ ] **SND-6 — moved sample folder / SFZ / single file.** Layers or Bass tab loaded from a sample
+      folder: rename the folder, reopen.  Reported by name; the tab does not come back looking
+      loaded and playing nothing.  Repeat for an SFZ tab and a single-file tab.  Then load an SFZ
+      whose `sample=` files are PARTLY missing: the dead keys are reported (all-missing alerts
+      immediately).  `D:__ R:__` notes:
+- [ ] **SND-7 — moved clip WAV, and mid-session damage.** (a) Rename a WAV used by an arrangement
+      block, reopen: reported.  (b) With the project open, drag in a TRUNCATED/undecodable WAV
+      (copy a WAV and chop it in a hex or text editor): the problem is reported THEN, on that drop
+      — it must not sit in the store and surface later attached to an unrelated preset load naming
+      a file that is neither missing nor related.  `D:__ R:__` notes:
+- [ ] **SND-8 — one report per gesture, under the right noun.** With a file deliberately moved,
+      run each gesture and read the dialog's first line: load a page preset ("This preset"), load a
+      drum kit ("This kit"), pick a drum sound ("This sound"), duplicate a tab ("This duplicated
+      tab"), undo-resurrect a deleted Clips / Rusty / Layers tab ("This restored tab"), undo a rack
+      change ("This undo"), load a template ("This template").  Each fires EXACTLY ONCE.  The
+      kit-load undo is the one that used to stack — Ctrl+Z a 14-drum kit load and confirm ONE
+      dialog, not fourteen.  `D:__ R:__` notes:
+- [ ] **SND-9 — restore paths that used to skip in silence.** (a) Rename a Rusty Drums kit folder
+      and reopen a project that used it: reported, not a silently empty Rusty tab (shipped kits
+      persist as stable `library:` refs — this path used to fail the existence test outright and
+      drop the whole kit + CC restore).  (b) Rename a factory kit or a Layer/Bass preset a v1
+      template refers to and load that template: reported, not a half-empty template.
+      `D:__ R:__` notes:
+- [ ] **SND-10 — failed operations now say so.** (a) Delete a Rusty / player preset file from disk
+      while its menu is open, then pick it: an error, not a dead click.  (b) Event Editor > Import
+      MIDI CC Data on a non-MIDI file: an error, not silence.  (c) Properties dialog "Copy to..."
+      on a browser entry whose file you just renamed: an error, not a confirmed-then-nothing.
+      (d) "Duplicate..." on a browser row whose backing file is gone: same.  `D:__ R:__` notes:
+- [ ] **SND-11 — write failures are visible.** Make `Documents\BaySickDAW` unwritable and try each
+      of: saving a pedal preset from a pedal's own menu, Save as Default on a pedal slot, adding a
+      plugin scan folder under Options > Plugins (writes `plugins.xml`), and setting a default
+      template (writes `settings.xml`).  Each reports; none silently reverts on the next launch.
+      Undo the deny afterwards and confirm each now succeeds.  `D:__ R:__` notes:
+- [ ] **SND-12 — corrupt state fails loudly instead of half-loading.** Open a page-preset `.xml` in
+      Notepad and scramble a few characters INSIDE an engine's base64 `data=` attribute (keep the
+      XML well-formed), then load it: you get an error and the import ABORTS.  It must not report
+      success while leaving the engine at defaults.  A preset with the engine data element ABSENT
+      still loads (that tolerance is deliberate).  `D:__ R:__` notes:
+
+**The save family — collision prompt, sanitizing, and abort-on-failure:**
+
+- [ ] **SND-13 — the three-button collision prompt.** Save under a name that already exists (Save
+      Page Preset As, Save Current Patch As, Save FX Rack Preset, Save as Template, Save Kit):
+      **Name Already Used** with **Replace / Save a Copy / Cancel**.  Replace overwrites in place
+      (the file's timestamp changes, no second file appears).  Save a Copy writes `name (2).xml`
+      and BOTH files survive.  Cancel writes nothing, shows NO error box, leaves the existing file
+      untouched, does NOT rename the tab and does NOT clear the dirty dot.  Escape behaves as
+      Cancel.  Re-saving a tweaked patch under its own prefilled name is the case that matters —
+      Replace must actually update in place, with no accumulating "(2)", "(3)".
+      `D:__ R:__` notes:
+- [ ] **SND-14 — filenames are sanitized, not rejected.** Save a patch as `Verse 1/2`: it saves as
+      `Verse 12.xml` and the tab name agrees with the file on disk.  Type only illegal characters:
+      **Save failed** listing the characters to avoid.  Empty box: "Type a name for it first."
+      `D:__ R:__` notes:
+- [ ] **SND-15 — MUST-PASS: a failed or cancelled write destroys NOTHING.** Make the Presets folder
+      unwritable.  Dirty a tab's sound, Delete the tab, choose **Save Page Preset & Delete**: the
+      write fails, the message says the tab was not deleted, and the tab, its mixer strip, its rack
+      and its piano-roll content are all still there.  Walk it on Layers, Bass, Drums, Clips, Vox,
+      Inst and Plugins.  **On the Plugins page, then delete again immediately:** the three-button
+      unsaved-work prompt must appear AGAIN — a failed save must not have re-baselined the page as
+      clean.  Repeat the whole row with Cancel at the naming box instead of a failed write.
+      `D:__ R:__` notes:
+- [ ] **SND-16 — effect presets deliberately differ.** An effect's own **Save Current Preset...**
+      under an existing name writes `name (2)` with NO prompt and never overwrites.  That is the
+      one family that does not prompt — do not file it as an inconsistency.  `D:__ R:__` notes:
+
+**Two independent drum kits (32 drums, two banks, two buses):**
+
+- [ ] **SND-17 — two kits, two buses, no teardown.** Fill 1-16, switch to **17-32**, add sixteen
+      more: adding the second kit never offers to tear the first one down.  The Mixer shows a
+      Drums Bus carrying kit 1's strips and a **Drums Bus 2** carrying kit 2's; levels, sends and
+      routing are independent per bank.  With a bank full, adding again gives "Drum Kit Full"
+      pointing you at the other kit — nothing spills over.  `D:__ R:__` notes:
+- [ ] **SND-18 — kit load is scoped to the bank you are on.** On 17-32, **Kit v > Load Kit**: the
+      warning names 1-16 as unaffected (plus a line that BaySickRustyDrums is untouched when a
+      Rusty tab exists).  After the load, only 17-32 changed — kit 1's tabs, the Rusty tab and
+      every roll survive.  Save a kit FROM 17-32 and load it into 1-16, and vice versa: both work
+      (slots normalize to 0-15), and every factory kit loads into kit 2.  `D:__ R:__` notes:
+- [ ] **SND-19 — the lock is per kit.** "Lock/Unlock 17-32" prompts naming that kit and stating
+      the other is unaffected, then flips only those sixteen.  Tick "Don't show again" on kit 1's
+      prompt: kit 1 stops prompting, **kit 2 still prompts**.  Both answers survive a restart.
+      `D:__ R:__` notes:
+- [ ] **SND-20 — drums 17-32 are first-class.** On a kit-2 drum: move the fader and pan, Ctrl+Z —
+      the move undoes (the mixer arrays were 16 wide, so 17-32 had broken fader undo and did not
+      restore at all).  Save/reload: kit-2 strip state, per-drum MIDI note, choke group and MIDI
+      Learn trigger all come back.  The piano roll's SECOND drum-kit entry routes notes to the
+      right drums.  `D:__ R:__` notes:
+
+**Crash-class fixes — do these with the transport RUNNING:**
+
+- [ ] **SND-21 — load a sample on a Layers/Bass tab mid-playback.** Play a busy arrangement, then
+      load a sample folder, an SFZ and a single file onto a Layers tab, and again on a Bass tab —
+      half a dozen times each, including back-to-back loads.  No crash, no hang; the only audible
+      cost is the load itself.  `D:__ R:__` notes:
+- [ ] **SND-22 — sfizz kit work mid-playback.** With audio running: switch PROGRAM on a
+      BaySickGuitars Inst tab and on a BaySickBasses tab several times; add a new Inst tab and pick
+      each sfizz source (that spawns a kit load); load an Inst page preset; switch the Rusty
+      program Full <-> Basic.  No crash.  Then turn ARIA / CC knobs on all three sfizz engines
+      while playing: values land, no crash, no stuck notes.  `D:__ R:__` notes:
+- [ ] **SND-23 — undo/redo a rack VST3 during playback.** With audio running, load a VST3 into a
+      rack slot, Ctrl+Z, Ctrl+Alt+Z, repeatedly.  Then undo/redo a **Remove Effect** and a
+      **Move Effect** on a rack that has a VST3 in it.  No crash, and the rack never audibly
+      renders half-restored mid-move.  `D:__ R:__` notes:
+- [ ] **SND-24 — retry a dead plugin during playback.** Quit, move a VST3 DLL out of its folder,
+      reopen a project using it in BOTH a rack slot and a Plugins tab.  With audio running: put the
+      DLL back and re-add it under Options > Plugins — both revive automatically on that edge — and
+      use **Menu > Retry Loading Plugin** on each by hand.  No crash either way.  Also confirm a
+      bridged/bridge-preferred plugin survives the same retry.  `D:__ R:__` notes:
+- [ ] **SND-25 — teardown while audio runs.** With the transport playing: delete a tab of each type
+      (Layers, Bass, Drums, Clips, Vox, Inst, Plugins, Rusty), delete an aux strip, and stop a
+      recording.  No crash, no burst of noise at the moment of teardown.  `D:__ R:__` notes:
+- [ ] **SND-26 — MUST-PASS: an unwritable snapshot folder never eats work.** Make
+      `Documents\BaySickDAW\UndoSnapshots` unwritable, then (a) delete a Layers tab and (b) swap a
+      loaded drum's sound.  What must NOT happen: a History row reading "Delete" while Ctrl+Z
+      restores nothing, or restores an EMPTY tab with the right name; and Ctrl+Z on the drum swap
+      must not destroy the loaded drum (with Ctrl+Y unable to bring it back).  A browser-driven
+      auto-close warns honestly ("the tab was still closed, but undo cannot bring it back").
+      Undo the deny and confirm normal undo returns.  `D:__ R:__` notes:
+
+**Persistence round-trips — every serializer that changed:**
+
+- [ ] **SND-27 — MIDI learn + drum triggers.** Bind three parameters by MIDI learn and three drum
+      pads.  Save.  Open a DIFFERENT project: the drum trigger bindings are CLEARED (project B must
+      not inherit project A's pads), while parameter mappings fall back to your global
+      `MidiMappings.xml` defaults.  Reopen the first project: both are back exactly.
+      `D:__ R:__` notes:
+- [ ] **SND-28 — Gate + De-reverb.** Put a Gate and a De-reverb in mixer rack slots and dial
+      non-default values on every control; do the same on the vocal chain's Gate and De-reverb
+      stages.  Save/reload: every value restores (these two had no serializer at all — their
+      settings were lost on every reload).  `D:__ R:__` notes:
+- [ ] **SND-29 — EQ spare bank + Linear Phase Precision.** Dial bank A, **Copy A -> B**, dial B
+      differently, leave the view on B, set Processing Mode to Linear Phase and Precision to 4096.
+      Save/reload: both banks, WHICH bank you were viewing, and the Precision tick all restore (the
+      tick used to snap back to 1024 every reload and drove nothing).  Confirm Precision governs
+      plain Linear Phase only — HQ Linear and HQ Extended are unaffected by it, by design.
+      `D:__ R:__` notes:
+- [ ] **SND-30 — Vox A/B slots are real.** Build a full vocal sound on slot A, flip to B, build a
+      different one: A is intact when you flip back (both edits used to land on one shared set).
+      Save with B active, reload: both slots restore and the active one is B.  Then reload a
+      project saved on the OTHER slot and confirm the stored tone is not destroyed mid-restore —
+      run the same check on the NAM/IR stage's own A/B pair.  `D:__ R:__` notes:
+- [ ] **SND-31 — a dead plugin's state is not erased by saving.** Project with a Plugins tab whose
+      DLL you have moved away: SAVE the project in that state, put the DLL back, reopen.  The
+      plugin's own settings are still there — saving while the instance was not alive used to blank
+      the saved blob.  `D:__ R:__` notes:
+- [ ] **SND-32 — export options and hot-plugged MIDI.** (a) Export as OGG at each Quality setting
+      in the export dialog and confirm the file sizes differ (every OGG used to come out at the
+      same lowest quality regardless).  (b) Plug a MIDI controller in AFTER the app is running: it
+      plays the armed tab without a restart.  `D:__ R:__` notes:
+
+**Project bundle, end to end:**
+
+- [ ] **SND-33 — MUST-PASS: a self-contained bundle opens where the originals never existed.**
+      Build one project that uses ALL of: a NAM amp model + cab IR, a NAM pedal capture in the
+      pedalboard, a mic user IR, an Acoustic unit's user IR in a MIXER rack slot, a sfizz kit, a
+      BaySickPlayer sample folder from outside the project, and an arrangement audio clip from
+      Downloads.  File > Export Project Bundle > **Include my samples + outside files** (zip AND
+      folder — test both).  Now RENAME every one of those source folders so the original paths do
+      not exist (or take the bundle to the second machine / account), and open the bundle: every
+      capture, IR, kit, sample and clip resolves and plays, with NO Missing files dialog.  This is
+      the whole point of the rewrite — the copies used to land in `Samples\` still referenced by
+      their old absolute paths.  `D:__ R:__` notes:
+- [ ] **SND-34 — bundle honesty.** In the same export: two DIFFERENT files that share a basename
+      both travel (`x.wav` and `x (2).wav`) and each is referenced by the right block.  A reference
+      to a file you deleted is reported as "could not be found and are NOT in the bundle".  The
+      `Freeze\` folder is absent from the bundle.  Core Library references are left untouched.
+      Finally, open the bundle and re-export it: the references stay in bundle form rather than
+      being rewritten to the new machine's absolute paths.  `D:__ R:__` notes:
+
+**Freeze + offline render (the shield bracket changed):**
+
+- [ ] **SND-35 — freeze survives the shield.** Freeze a tab, save, reload: it comes back FROZEN and
+      audible (load-time re-renders used to be shield-bailed to silence).  Freeze a tab while the
+      transport is playing.  Make the project's `Freeze\` folder unwritable and freeze: you get a
+      message — a failed freeze must not leave a tab silently stale or silently live.
+      `D:__ R:__` notes:
+- [ ] **SND-36 — offline export parity.** Export a song that has (a) a frozen tab, (b) rack-slot
+      automation lanes on the SECOND-bus family (Vox Bus 2 / Inst Bus 2 / group bus 2s) and (c) a
+      Vox chain: the export matches what you hear live, and the second-bus lanes actually move in
+      the render.  Export the same song to WAV, OGG and MP3.  During and after the export the
+      project stays clean (no phantom dirty asterisk) and the history gains no rows.
+      `D:__ R:__` notes:
+
+**"(missing)" markers and revival:**
+
+- [ ] **SND-37 — the four marker surfaces.** With files moved away, confirm ` (missing)` appears
+      on: a hosted plugin in a rack slot (row plate + effect window title), a Plugins TAB (ribbon
+      tab, mixer strip and piano-roll label), a substituted sfizz Inst kit (ribbon tab AND mixer
+      strip — the player panel renders the substitute normally, so the label is the only tell), and
+      the NAM/IR LCDs (text turns red).  Then confirm the marker is DISPLAY ONLY: save the project
+      while marked, put the files back, reopen — no tab is called "(missing)" and nothing was
+      written into a saved name.  `D:__ R:__` notes:
+- [ ] **SND-38 — revival does not damage what it revives.** Rename a Plugins tab to "Lead", move
+      its DLL away, reopen, then put the DLL back and re-add it: the tab is STILL called "Lead" (a
+      successful revival used to overwrite the typed name with the plugin's own and persist it).  A
+      project that opens with its plugin already missing must NOT come up showing the dirty
+      asterisk.  And a FROZEN Plugins tab whose plugin died keeps playing its good freeze render —
+      add or remove an UNRELATED plugin under Options > Plugins and confirm the render is not
+      discarded.  `D:__ R:__` notes:
+
+**Keymap and menus:**
+
+- [ ] **SND-39 — the whole F2-F12 map.** F2 Rename/Color (ONE dialog carrying both, OK applies
+      both, Cancel applies neither, one undo row), F3 Find Next Empty Pattern, F4 New Pattern,
+      F5 Builder, F6 Mixer, F7 Player (Most Recent), F8 Effects Rack (Most Recent), F9 Effect Panel
+      (Most Recent), F10 Piano Roll (Most Recent), F11 Drum Kit, F12 Event Editor.  The three
+      "(Most Recent)" entries must land on the thing you were LAST on — open three player windows,
+      click into the second, press F7 — not on the first tab in the list.  With nothing ever
+      opened, F9/F12 do nothing rather than mis-firing.  The Key Binds window matches the behavior
+      in every row.  `D:__ R:__` notes:
+- [ ] **SND-40 — all seven Patterns menu items.** Rename / Color (F2), Find Next Empty (F3),
+      Insert One (Shift+Ctrl+Insert — later patterns shift down a slot and every arrangement block
+      still points at the right pattern), Clone (Alt+C — notes come with it, named "<name>
+      (copy)"), Delete (confirmation naming the pattern; greyed at one pattern), Move Up and Move
+      Down (Shift+Ctrl+Up/Down, greyed at the ends, blocks follow the move).  Nothing in the menu
+      is dead, each is one undo row, and the item labels match the keys they fire.
+      `D:__ R:__` notes:
+
+**Undo coverage for the newly-wrapped gestures:**
+
+- [ ] **SND-41 — renames undo, and rename the RIGHT thing.** Rename a tab of each type from the
+      ribbon and a strip of each type from the Mixer: each is ONE history row and Ctrl+Z restores
+      the old name everywhere it shows (ribbon, mixer strip, piano-roll dropdown, Effects channel
+      list).  Specifically: renaming a Plugins MIXER strip renames that tab and no other tab;
+      renaming a Vox or Inst tab from the ribbon reaches its mixer strip; an Audio/Clips strip
+      renamed in the Mixer keeps the name across save/reload; undo-resurrecting a deleted Vox tab
+      brings back ITS name, not a neighbor's.  `D:__ R:__` notes:
+- [ ] **SND-42 — lock toggles undo.** The per-page lock on Layers / Bass / Drums / Vox / Inst /
+      Plugins tabs and the per-kit drum lock (SND-19) are each one undoable row — toggle, Ctrl+Z,
+      the lock returns to its prior state.  **Known-open:** the CLIPS page lock toggle is not
+      undoable; see the list at the end of this section.  `D:__ R:__` notes:
+
+**Dead-code deletions and odds and ends:**
+
+- [ ] **SND-43 — nothing deleted was reachable.** 77 symbols and 3 files went.  Walk the surfaces
+      they lived on and confirm every control still draws and still works: Delay (HP/LP/ping-pong
+      area), Flanger dry/wet, the EQ8 band controls and its display, Harmless (XYZ pad, routing
+      matrix, mod destinations, Part A/B blend), the BaySickPlayer editor's filter section, the
+      BaySickSynth editor, the Rusty kit graphic, the Mixer page, the Builder browser and the
+      pedalboard.  No blank panels, no control that does nothing.  `D:__ R:__` notes:
+- [ ] **SND-44 — two absences that are BY DESIGN.** (a) The Help menu item still opens nothing —
+      it is held for the manuals window (Jeff's 2026-07-29 ruling); do not report it as dead UI.
+      (b) A Plugins tab offers NO picker to swap its plugin for a different one — plugin swap was
+      removed as a feature this batch.  Project restore, undo resurrection and tab close all still
+      work on Plugins tabs; do not report the absent picker as a regression.  `D:__ R:__` notes:
+- [ ] **SND-45 — Release stays quiet, Debug still traces.** Run RELEASE through a session that
+      drops a clip, loads a NAM/IR and freezes a tab: `clipdrop_diag_log.txt`,
+      `namir_state_log.txt` and `freeze_timing.txt` are NOT created in `Documents\BaySickDAW`.
+      Run DEBUG through the same session: all three ARE written.  `D:__ R:__` notes:
+- [ ] **SND-46 — engine-editor presets actually load.** Save a preset from the BaySickPlayer
+      editor's own preset button and load it back: it LOADS (every preset that editor saved was
+      previously unloadable while still renaming the tab and strip as though it had worked).
+      Spot-check the same save/load round-trip on the Harmless, BaySickSynth and BaySickBass
+      editors.  A Layers or Bass patch saved now loads from the engine editor's own preset button.
+      `D:__ R:__` notes:
+- [ ] **SND-47 — small fixes found in passing.** (a) On a Drums tab at the SMALLEST window size,
+      the **Kit v**, **1-16** and **17-32** buttons all render at full width (they were being
+      squeezed to zero).  (b) The Piano Roll entry on an EMPTY page reaches the real unified roll.
+      (c) Clicking directly into a window (not via the ribbon) updates "what am I on", so F7 / F8 /
+      F9 follow that click.  (d) Save as Template, then Cancel at the naming or collision prompt:
+      no orphan sample copies are left behind in My Samples.  `D:__ R:__` notes:
+
+**KNOWN-OPEN — deliberately NOT fixed this batch.  Do not report these as new:**
+
+1. **Automation-point reset is still "Reset to midpoint".** Right-clicking an automation point in
+   the Builder's automation lane offers "Reset to midpoint" and sets the value to 50%.  Jeff's
+   ruling — that reset should restore the value the parameter held BEFORE it was automated — was
+   recorded but never implemented; nothing in the tree stores a pre-automation value.  It is an
+   open owner requirement, not a discovered defect.
+2. **The Clips page lock toggle is not undoable.**  The other lock toggles were undo-wrapped this
+   batch; ClipsPage has no route to the undo context at all, so it was reported as 3-of-4 rather
+   than half-wrapped.
+3. **Bridged-plugin offline rendezvous.**  During an OFFLINE export, a bridged (32-bit, or
+   64-bit set to run bridged) plugin that misses its block deadline returns silence for the REST
+   of that render — the deadline was widened, but there is no resync after a miss.  Separately,
+   bridged plugins in RACK SLOTS are not covered by the offline widening at all and keep the 4 ms
+   realtime deadline during an export.  In-process plugins are unaffected; if an export comes back
+   silent from one bridged plugin, that is this, not a new bug.
+4. **~20 `C4189 unused local variable` compiler warnings** remain (BaySickVisualizerScreen,
+   PluginProcessor, BuilderPage x2, EventEditor x3, GlobalTransportBar, PianoRoll).  All
+   pre-existing, all cosmetic, verified not caused by this batch's deletions.  The build is
+   otherwise clean: five exit codes 0, four link lines, zero errors.
+
 ## §C — Deferred re-verify ledger
 
 Parked items from closed batches. Lands INSIDE QA-J-Verify's §B section when that section is
@@ -2586,8 +2933,22 @@ notes (line refs re-resolve at section authoring).
       effect-preset save/reload round-trips.
 - [ ] E3. Engine "Save Current Patch As..." flows — Layers / Bass / Drum (+ synth submenu + per-drum
       context menu) / Clips; saved patch reloads identical via the picker.
+      **CHANGED AT QA-Soundness — this step tests a flow that no longer exists as written.**
+      (a) A name that collides now raises a three-button prompt (Replace / Save a Copy / Cancel)
+      instead of silently overwriting; test all three answers, and confirm Cancel leaves the
+      existing file untouched AND does not clear the dirty dot or rename the tab.
+      (b) Illegal filename characters are now stripped rather than failing the write, so a name
+      like `Verse 1/2` saves as `Verse 12` — confirm the saved file and the tab name agree.
+      (c) Layers and Bass patches now write the ENGINE-NATIVE format, not the old page wrapper.
+      A patch saved BEFORE this batch must still load (the legacy reader is retained); a patch
+      saved NOW must load from the engine editor's own preset button, which the wrapper format
+      silently rejected.
 - [ ] E4. Page-level "Save Page Preset As..." / Load — all 7 page types; PLUS the "Save Page Preset
       & Delete" 3-button prompt path on page delete, and BaySickPedals "Save as Default".
+      **CHANGED AT QA-Soundness:** every one of these now routes through one shared save path, so
+      the collision prompt from E3(a) applies here too. The delete-chaining case is the one that
+      matters most — on a FAILED or CANCELLED write the tab must NOT be deleted. Test it by
+      making the Presets folder read-only and confirming the tab survives with a message.
 
 ## §F — RC-grade audits
 

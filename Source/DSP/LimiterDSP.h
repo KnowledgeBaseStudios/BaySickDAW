@@ -52,7 +52,12 @@ public:
     // ballistics only and leaves the parameter set identical -- as a variant it
     // would have meant 2 modes x 8 characters = 16 tables describing one set.
     // So character stays a selector, same as the Delay panel's model chickenhead.
-    enum class Mode { Limiter = 0, Maximizer };
+    //
+    // Ordinals pinned: the mode is persisted as the raw int ("mode"), so an
+    // insertion or re-order silently repoints every saved limiter at a different
+    // mode.  NEVER reorder or insert; append only, with an explicit value.  Same
+    // rule as EffectType in EffectRack.h.
+    enum class Mode { Limiter = 0, Maximizer = 1 };
 
     void setMode (Mode m);
     Mode getMode() const noexcept { return mMode; }
@@ -76,16 +81,23 @@ public:
     // Clean == today's fixed constants exactly (20 / 300 / 6 dB / no offset / no
     // scale / no sat), so a preset written before CL-243 -- which restores
     // character 0 by default -- sounds bit-identical to before.
+    //
+    // Ordinals pinned: the character is persisted as the raw int ("character"),
+    // and kCharacters in the .cpp is indexed by it, so an insertion or re-order
+    // silently repoints every saved limiter at different ballistics.  NEVER
+    // reorder or insert; append only, with an explicit value, ahead of Count.
+    // (Count deliberately stays un-valued so it keeps tracking the real end of
+    // the list.)  Same rule as EffectType in EffectRack.h.
     enum class Character
     {
-        Clean = 0,   // most transparent; the pre-CL-243 behaviour
-        Smooth,      // longer, gentler recovery
-        Tight,       // fast and controlled
-        Punch,       // transient-forward, hands to the slow envelope early
-        Glue,        // bus-style, slow and programme-dependent
-        Loud,        // maximum density, sat engaged
-        Warm,        // saturation-forward colour
-        Instant,     // near-zero-lookahead clip guard
+        Clean   = 0,   // most transparent; the pre-CL-243 behavior
+        Smooth  = 1,   // longer, gentler recovery
+        Tight   = 2,   // fast and controlled
+        Punch   = 3,   // transient-forward, hands to the slow envelope early
+        Glue    = 4,   // bus-style, slow and programme-dependent
+        Loud    = 5,   // maximum density, sat engaged
+        Warm    = 6,   // saturation-forward color
+        Instant = 7,   // near-zero-lookahead clip guard
         Count
     };
 

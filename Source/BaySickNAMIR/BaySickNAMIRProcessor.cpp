@@ -2,6 +2,7 @@
 #include "../AppPaths.h"
 #include "BaySickNAMIREditor.h"
 #include "../MissingFileReport.h"   // QA-Export Task 5
+#include "../ProjectFileResolver.h"
 
 // NAM core (C++20 internal; consumer translation unit is C++17 - only the
 // header pulls in Eigen / nlohmann, both of which are C++17-clean).
@@ -12,11 +13,17 @@
 #include <filesystem>
 #include <stdexcept>
 
-// 2026-05-05 (Bug C diagnostics): one-off file logger so the get/set state
-// trace works in both Debug and Release builds.  Writes lines to
-// Documents/BaySickDAW/namir_state_log.txt, append-mode.
+// 2026-05-05 (Bug C diagnostics): one-off file logger for the get/set state
+// trace.  Writes lines to Documents/BaySickDAW/namir_state_log.txt,
+// append-mode.
+//
+// Debug build only (Jeff, 2026-08-07).  It fires on every project save AND
+// load with no cap or rotation, so a shipping build would grow a file the user
+// never asked for and cannot clear from inside the app.  The Release stub
+// keeps the call sites compiling unchanged -- same shape as G3PlayheadDiag.h.
 namespace
 {
+   #if JUCE_DEBUG
     void namirLog (const juce::String& line)
     {
         const auto logFile = AppPaths::appRoot()
@@ -26,6 +33,9 @@ namespace
                               + "  " + line + juce::newLine;
         logFile.appendText (stamped);
     }
+   #else
+    void namirLog (const juce::String&) {}
+   #endif
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -48,16 +58,22 @@ BaySickNAMIRProcessor::BaySickNAMIRProcessor (juce::UndoManager* undoMgr)
     // message thread (prepareToPlay won't re-fire when only a param changes).
     apvts.addParameterListener ("oversampling", this);
 
-    // H-6d: per-slot A/B snapshot listener.  Fires on the message thread
-    // whenever ab_slot changes (UI click OR host automation).  parameterChanged
-    // captures the outgoing slot's tone state then restores the incoming
-    // slot's snapshot.  Knobs auto-update via APVTS attachment.
+    // H-6d: per-slot A/B snapshot listener.  Fires on the writing thread
+    // whenever ab_slot changes (UI click OR automation replay).  parameterChanged
+    // restores the incoming slot's snapshot, and on a USER flip first captures
+    // the outgoing slot's tone state -- an automation replay switches without
+    // capturing, and a state restore in flight (mRestoringState) does neither.
+    // Knobs auto-update via APVTS attachment.
     apvts.addParameterListener ("ab_slot", this);
     mLastSlot = getActiveSlot();
 }
 
 BaySickNAMIRProcessor::~BaySickNAMIRProcessor()
 {
+    // Dropped FIRST: any parameterChanged post already sitting in the message
+    // queue holds a weak copy of this token and bails out once it expires.
+    mLife.reset();
+
     apvts.removeParameterListener ("oversampling", this);
     apvts.removeParameterListener ("ab_slot", this);
 }
@@ -174,12 +190,10 @@ int BaySickNAMIRProcessor::resolveSlot (int slot) const
 }
 
 bool         BaySickNAMIRProcessor::hasNamModel        (int slot) const { return mNamLoaded   [(size_t) resolveSlot (slot)].load(); }
-bool         BaySickNAMIRProcessor::hasImpulseResponse (int slot) const { return mIrLoaded    [(size_t) resolveSlot (slot)].load(); }
+bool         BaySickNAMIRProcessor::hasIr              (int slot) const { return mIrLoaded    [(size_t) resolveSlot (slot)].load(); }
 bool         BaySickNAMIRProcessor::isFullRig          (int slot) const { return mNamIsFullRig[(size_t) resolveSlot (slot)].load(); }
 juce::String BaySickNAMIRProcessor::getNamFilePath     (int slot) const { return mNamPaths    [(size_t) resolveSlot (slot)]; }
 juce::String BaySickNAMIRProcessor::getIrFilePath      (int slot) const { return mIrPaths     [(size_t) resolveSlot (slot)]; }
-void         BaySickNAMIRProcessor::setNamFilePath     (const juce::String& p, int slot) { mNamPaths[(size_t) resolveSlot (slot)] = p; }
-void         BaySickNAMIRProcessor::setIrFilePath      (const juce::String& p, int slot) { mIrPaths [(size_t) resolveSlot (slot)] = p; }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // prepareToPlay - size scratch + warm filters / convolution / NAM / OS / gate.
@@ -291,10 +305,17 @@ void BaySickNAMIRProcessor::processBlock (juce::AudioBuffer<float>& buffer,
     // gate, since with nothing loaded the chain was approximately a unity
     // pipeline anyway.  Saves the per-block cost of every IIR filter +
     // gain stage on Inst tabs that haven't loaded a NAM yet.
+    // Audio-thread danger zone: gate on mIrLoaded, NEVER on getIrFilePath.
+    // mIrPaths is a bare juce::String array that loadImpulseResponse reassigns
+    // from the message thread with audio running; returning one by value here
+    // would copy-construct a refcounted String -- a plain pointer read followed
+    // by a retain, which can decrement a StringHolder the writer already freed.
+    // mIrLoaded is release-stored one line BEFORE the path write and is what
+    // the per-slot runIr gate already reads, so the two decisions now agree.
     const bool noModelOrIr =
            ! hasNamModel (0) && ! hasNamModel (1)
-        && getIrFilePath (0).isEmpty()
-        && getIrFilePath (1).isEmpty();
+        && ! mIrLoaded[0].load (std::memory_order_acquire)
+        && ! mIrLoaded[1].load (std::memory_order_acquire);
     if (noModelOrIr)
         return;
 
@@ -604,7 +625,11 @@ bool BaySickNAMIRProcessor::loadNamModel (const juce::String& filePath, juce::St
         outErr = "No file path provided.";
         return false;
     }
-    if (! juce::File (filePath).existsAsFile())
+    // filePath is the string that gets PERSISTED (see the assignment at the
+    // bottom), so it stays exactly as the caller wrote it: a bundled project
+    // stores "Samples/<name>.nam" and only the resolver knows what that means.
+    const juce::File resolved = ProjectFileResolver::resolve (filePath);
+    if (! resolved.existsAsFile())
     {
         outErr = "File not found: " + filePath;
         return false;
@@ -615,7 +640,7 @@ bool BaySickNAMIRProcessor::loadNamModel (const juce::String& filePath, juce::St
     try
     {
         nam::dspData data;
-        std::filesystem::path p (filePath.toStdString());
+        std::filesystem::path p (resolved.getFullPathName().toStdString());
         newModel = nam::get_dsp (p, data);
         if (! newModel)
         {
@@ -647,13 +672,11 @@ bool BaySickNAMIRProcessor::loadNamModel (const juce::String& filePath, juce::St
     catch (const std::exception& ex)
     {
         outErr = juce::String ("NAM load failed: ") + ex.what();
-        mLastNamError = outErr;
         return false;
     }
     catch (...)
     {
         outErr = "NAM load failed: unknown error.";
-        mLastNamError = outErr;
         return false;
     }
 
@@ -672,7 +695,6 @@ bool BaySickNAMIRProcessor::loadNamModel (const juce::String& filePath, juce::St
     }
 
     mNamPaths[(size_t) slot] = filePath;
-    mLastNamError = {};
     return true;
 }
 
@@ -685,63 +707,41 @@ bool BaySickNAMIRProcessor::loadImpulseResponse (const juce::String& filePath, j
         outErr = "No file path provided.";
         return false;
     }
-    juce::File f (filePath);
+    // Same contract as loadNamModel: resolve for the read, persist what came in.
+    const juce::File f = ProjectFileResolver::resolve (filePath);
     if (! f.existsAsFile())
     {
         outErr = "File not found: " + filePath;
         return false;
     }
 
-    if (! mPrepared)
+    // Framework quirk: juce::dsp::Convolution::loadImpulseResponse only QUEUES
+    // the file to its own background thread, so it cannot throw and never
+    // reports a decode failure back here.  A file it cannot read becomes an
+    // empty buffer, which fixNumChannels turns into a 1-sample unit impulse --
+    // a pass-through convolution indistinguishable from a loaded cab.  Decode
+    // it ourselves first so an unreadable file fails loudly instead.
     {
-        mIrPaths[(size_t) slot] = filePath;
-        outErr  = "Audio device not yet prepared; IR will load on next prepare.";
-        mLastIrError = outErr;
-        return false;
+        juce::AudioFormatManager fm;
+        fm.registerBasicFormats();
+        std::unique_ptr<juce::AudioFormatReader> reader (fm.createReaderFor (f));
+        if (reader == nullptr || reader->lengthInSamples <= 0)
+        {
+            outErr = "That file is not readable audio: " + filePath;
+            return false;
+        }
     }
 
-    try
-    {
-        mIr[(size_t) slot].loadImpulseResponse (
-            f,
-            juce::dsp::Convolution::Stereo   ::yes,
-            juce::dsp::Convolution::Trim     ::yes,
-            0,
-            juce::dsp::Convolution::Normalise::yes);
-    }
-    catch (const std::exception& ex)
-    {
-        outErr = juce::String ("IR load failed: ") + ex.what();
-        mLastIrError = outErr;
-        return false;
-    }
-    catch (...)
-    {
-        outErr = "IR load failed: unknown error.";
-        mLastIrError = outErr;
-        return false;
-    }
+    mIr[(size_t) slot].loadImpulseResponse (
+        f,
+        juce::dsp::Convolution::Stereo   ::yes,
+        juce::dsp::Convolution::Trim     ::yes,
+        0,
+        juce::dsp::Convolution::Normalise::yes);
 
     mIrLoaded[(size_t) slot].store (true, std::memory_order_release);
     mIrPaths[(size_t) slot] = filePath;
-    mLastIrError = {};
     return true;
-}
-
-void BaySickNAMIRProcessor::clearNamModel (int slot)
-{
-    slot = resolveSlot (slot);
-    const juce::ScopedLock lk (mLoadLock);
-    for (int spin = 0; spin < 1000 && mNamSwapPending[(size_t) slot].load (std::memory_order_acquire); ++spin)
-        juce::Thread::sleep (1);
-
-    std::unique_ptr<nam::DSP> oldPending = std::move (mNamPending[(size_t) slot]);
-    juce::ignoreUnused (oldPending);
-    mNamPending  [(size_t) slot].reset();
-    mNamLoaded   [(size_t) slot].store (false, std::memory_order_release);
-    mNamIsFullRig[(size_t) slot].store (false, std::memory_order_release);
-    mNamSwapPending[(size_t) slot].store (true, std::memory_order_release);
-    mNamPaths[(size_t) slot] = {};
 }
 
 bool BaySickNAMIRProcessor::loadUserMicIr (const juce::File& f, juce::String& outErr)
@@ -750,7 +750,6 @@ bool BaySickNAMIRProcessor::loadUserMicIr (const juce::File& f, juce::String& ou
     // Loads into the currently-active slot (matches the NAM/Cab IR pattern
     // where loadNamModel / loadImpulseResponse default to the active slot).
     const bool ok = mMicSim.loadUserIr (f, outErr, getActiveSlot());
-    if (! ok) mLastMicIrError = outErr;
     return ok;
 }
 
@@ -763,7 +762,6 @@ bool BaySickNAMIRProcessor::loadUserMicIrB (const juce::File& f, juce::String& o
 {
     const juce::ScopedLock lock (mLoadLock);
     const bool ok = mMicSimB.loadUserIr (f, outErr, getActiveSlot());
-    if (! ok) mLastMicIrError = outErr;
     return ok;
 }
 
@@ -772,44 +770,89 @@ void BaySickNAMIRProcessor::clearUserMicIrB()
     mMicSimB.clearUserIr (getActiveSlot());
 }
 
-void BaySickNAMIRProcessor::clearImpulseResponse (int slot)
-{
-    slot = resolveSlot (slot);
-    mIrLoaded[(size_t) slot].store (false, std::memory_order_release);
-    mIrPaths[(size_t) slot] = {};
-}
-
 // ─────────────────────────────────────────────────────────────────────────────
 // APVTS listener - oversampling factor change re-Resets loaded NAM models at
-// the new effective rate.  Fires from whatever thread APVTS hands us; the
-// actual work runs via callAsync on the message thread because Reset can
-// allocate.
+// the new effective rate, ab_slot swaps the per-slot tone snapshots.  Fires
+// synchronously on whatever thread wrote the parameter.
+//
+// LIVE: the work is posted to the message thread because Reset allocates and
+// the snapshot swap walks the whole parameter set - neither may run on the
+// realtime callback.  The post carries a weak lifetime token because this is a
+// rig-owned tab engine the message thread can free at any time, and a queued
+// callAsync cannot be retracted.
+//
+// OFFLINE: the writer already IS the render thread (automation replay), which
+// has no realtime deadline, so the work runs inline - a message hop would land
+// after the block it belongs to, and during a freeze render the message thread
+// is blocked inside the render loop entirely.
 // ─────────────────────────────────────────────────────────────────────────────
 void BaySickNAMIRProcessor::parameterChanged (const juce::String& paramID, float newValue)
 {
+    const bool offline = isNonRealtime();
+    std::weak_ptr<char> life (mLife);
+
     if (paramID == "oversampling")
     {
         const int newFactor = juce::jlimit (0, 2, (int) newValue);
-        juce::MessageManager::callAsync ([this, newFactor]()
+
+        if (offline)
         {
+            reResetNamForOversampling (newFactor);
+            return;
+        }
+
+        juce::MessageManager::callAsync ([this, life, newFactor]()
+        {
+            if (life.expired()) return;
             this->reResetNamForOversampling (newFactor);
         });
     }
     else if (paramID == "ab_slot")
     {
+        // replaceState fires this listener while a project/page preset loads.
+        // The restore seats both snapshots, mLastSlot and the Mic Sim active
+        // slot itself, from the saved SlotA / SlotB children; letting a swap
+        // run here would capture the freshly restored values over the OTHER
+        // slot's stored tone and destroy it.  (The oversampling branch above is
+        // deliberately NOT guarded: it only reconfigures DSP from the new value,
+        // and the restore's own model loads reset at the same factor anyway.)
+        if (isRestoringState()) return;
+
         const int newSlot = juce::jlimit (0, 1, (int) newValue);
         if (newSlot == mLastSlot) return;
         // Mic Sim's per-slot user IR is resident; just point at the new
-        // slot's IR (audio-thread-safe atomic store, no reload).  Other
-        // snapshot work is message-thread-only.
+        // slot's IR (audio-thread-safe atomic store, no reload).
         mMicSim .setActiveSlot (newSlot);
         mMicSimB.setActiveSlot (newSlot);
 
         const int outgoingSlot = mLastSlot;
-        juce::MessageManager::callAsync ([this, outgoingSlot, newSlot]()
+
+        // A replay is not a user edit -- the same ruling that keeps a replay
+        // from marking engine content dirty or staling a freeze.  The two banks
+        // hold tones the user dialled by hand; capturing over the outgoing one
+        // on every lane transition would bank whatever the OTHER lanes have
+        // driven the chain to at that instant, destroying both tones over the
+        // length of a pass.  The slot still SWITCHES on replay -- only the
+        // capture is suppressed.
+        //
+        // The phase flag is thread_local and this listener runs synchronously
+        // on the writer's thread, so it must be read here and carried into the
+        // async hop below, which lands after the writer's scope has closed.
+        const bool userGesture = ! juce::AudioProcessorValueTreeState::programmaticWritePhase;
+
+        if (offline)
         {
-            captureSnapshotFromCurrent (outgoingSlot);
-            applySnapshotToCurrent     (newSlot);
+            if (userGesture) captureSnapshotFromCurrent (outgoingSlot);
+            applySnapshotToCurrent (newSlot);
+            mLastSlot = newSlot;
+            return;
+        }
+
+        juce::MessageManager::callAsync ([this, life, outgoingSlot, newSlot, userGesture]()
+        {
+            if (life.expired()) return;
+            if (userGesture) captureSnapshotFromCurrent (outgoingSlot);
+            applySnapshotToCurrent (newSlot);
             mLastSlot = newSlot;
         });
     }
@@ -973,17 +1016,23 @@ void BaySickNAMIRProcessor::applySnapshotToCurrent (int slot)
     // currently loaded for that slot.  Mismatch can only happen on first
     // setStateInformation when the per-slot IR hasn't been loaded yet --
     // in that case load it now (one-time cost, not on every slot switch).
+    //
+    // The "already loaded" test compares RESOLVED files because the two sides
+    // speak different forms: MicSimDSP records the ABSOLUTE path it opened,
+    // while a snapshot restored from a bundled project holds "Samples/<name>"
+    // -- a raw string compare between those never matches, and would reload the
+    // IR on every slot switch for the life of the project.
     const juce::String currentPath = mMicSim.getUserIrPath (slot);
     if (s.micUserIrPath.isEmpty())
     {
         if (currentPath.isNotEmpty()) mMicSim.clearUserIr (slot);
     }
-    else if (s.micUserIrPath != currentPath)
+    else if (const juce::File f = ProjectFileResolver::resolve (s.micUserIrPath);
+             f.getFullPathName() != currentPath)
     {
         // QA-Export Task 5: report instead of skipping quietly (see the project
         // -load path above for the same pattern).
         juce::String err;
-        juce::File f (s.micUserIrPath);
         if (! f.existsAsFile())
             MissingFileReport::add ("Mic A user IR", s.micUserIrPath);
         else if (! mMicSim.loadUserIr (f, err, slot))
@@ -995,10 +1044,10 @@ void BaySickNAMIRProcessor::applySnapshotToCurrent (int slot)
     {
         if (currentPathB.isNotEmpty()) mMicSimB.clearUserIr (slot);
     }
-    else if (s.micbUserIrPath != currentPathB)
+    else if (const juce::File f = ProjectFileResolver::resolve (s.micbUserIrPath);
+             f.getFullPathName() != currentPathB)
     {
         juce::String err;
-        juce::File f (s.micbUserIrPath);
         if (! f.existsAsFile())
             MissingFileReport::add ("Mic B user IR", s.micbUserIrPath);
         else if (! mMicSimB.loadUserIr (f, err, slot))
@@ -1077,15 +1126,21 @@ void BaySickNAMIRProcessor::setStateInformation (const void* data, int sizeInByt
 {
     if (auto xml = getXmlFromBinary (data, sizeInBytes))
     {
-        // 2026-05-05 (Bug C diagnostics): log to a file so it works in both
-        // Debug and Release builds.  Output goes to
-        // Documents/BaySickDAW/namir_state_log.txt (open in Notepad).
+        // 2026-05-05 (Bug C diagnostics): Debug-build trace of the restore
+        // path.  Output goes to Documents/BaySickDAW/namir_state_log.txt
+        // (open in Notepad).
         namirLog ("setStateInformation: rootTag=" + xml->getTagName()
                   + " expected=" + apvts.state.getType().toString()
                   + " size=" + juce::String (sizeInBytes));
 
         if (xml->hasTagName (apvts.state.getType()))
         {
+            // Raise before replaceState: a saved ab_slot that differs from the
+            // live one fires the A/B listener mid-restore (see the guard in
+            // parameterChanged).  The queued clear at the bottom runs AFTER
+            // every hop the restore posted.
+            mRestoringState->store (true, std::memory_order_release);
+
             apvts.replaceStateKeepingUndoHistory (juce::ValueTree::fromXml (*xml));
             mNamPaths[0] = apvts.state.getProperty ("nam_filepath",   {}).toString();
             mIrPaths [0] = apvts.state.getProperty ("ir_filepath",    {}).toString();
@@ -1100,28 +1155,48 @@ void BaySickNAMIRProcessor::setStateInformation (const void* data, int sizeInByt
             juce::String err;
             if (mNamPaths[0].isNotEmpty())
             {
-                const bool ok = loadNamModel (mNamPaths[0], err, 0);
+                const bool exists = ProjectFileResolver::resolve (mNamPaths[0]).existsAsFile();
+                const bool ok = exists && loadNamModel (mNamPaths[0], err, 0);
+                if (! exists)
+                    MissingFileReport::add ("NAM model", mNamPaths[0]);
+                else if (! ok)
+                    MissingFileReport::add ("NAM model (failed to load)", mNamPaths[0]);
                 namirLog ("  loadNamModel slot=0 ok=" + juce::String (ok ? 1 : 0)
                           + " err='" + err + "'");
                 err.clear();
             }
             if (mNamPaths[1].isNotEmpty())
             {
-                const bool ok = loadNamModel (mNamPaths[1], err, 1);
+                const bool exists = ProjectFileResolver::resolve (mNamPaths[1]).existsAsFile();
+                const bool ok = exists && loadNamModel (mNamPaths[1], err, 1);
+                if (! exists)
+                    MissingFileReport::add ("NAM model", mNamPaths[1]);
+                else if (! ok)
+                    MissingFileReport::add ("NAM model (failed to load)", mNamPaths[1]);
                 namirLog ("  loadNamModel slot=1 ok=" + juce::String (ok ? 1 : 0)
                           + " err='" + err + "'");
                 err.clear();
             }
             if (mIrPaths [0].isNotEmpty())
             {
-                const bool ok = loadImpulseResponse (mIrPaths[0], err, 0);
+                const bool exists = ProjectFileResolver::resolve (mIrPaths[0]).existsAsFile();
+                const bool ok = exists && loadImpulseResponse (mIrPaths[0], err, 0);
+                if (! exists)
+                    MissingFileReport::add ("Amp IR", mIrPaths[0]);
+                else if (! ok)
+                    MissingFileReport::add ("Amp IR (failed to load)", mIrPaths[0]);
                 namirLog ("  loadImpulseResponse slot=0 ok=" + juce::String (ok ? 1 : 0)
                           + " err='" + err + "'");
                 err.clear();
             }
             if (mIrPaths [1].isNotEmpty())
             {
-                const bool ok = loadImpulseResponse (mIrPaths[1], err, 1);
+                const bool exists = ProjectFileResolver::resolve (mIrPaths[1]).existsAsFile();
+                const bool ok = exists && loadImpulseResponse (mIrPaths[1], err, 1);
+                if (! exists)
+                    MissingFileReport::add ("Amp IR", mIrPaths[1]);
+                else if (! ok)
+                    MissingFileReport::add ("Amp IR (failed to load)", mIrPaths[1]);
                 namirLog ("  loadImpulseResponse slot=1 ok=" + juce::String (ok ? 1 : 0)
                           + " err='" + err + "'");
                 err.clear();
@@ -1153,7 +1228,7 @@ void BaySickNAMIRProcessor::setStateInformation (const void* data, int sizeInByt
                 const auto& path = mSnapshots[(size_t) s].micUserIrPath;
                 if (path.isNotEmpty())
                 {
-                    juce::File irFile (path);
+                    const juce::File irFile = ProjectFileResolver::resolve (path);
                     if (! irFile.existsAsFile())
                         MissingFileReport::add ("Mic A user IR", path);
                     else if (! mMicSim.loadUserIr (irFile, err, s))
@@ -1162,7 +1237,7 @@ void BaySickNAMIRProcessor::setStateInformation (const void* data, int sizeInByt
                 const auto& pathB = mSnapshots[(size_t) s].micbUserIrPath;
                 if (pathB.isNotEmpty())
                 {
-                    juce::File irFileB (pathB);
+                    const juce::File irFileB = ProjectFileResolver::resolve (pathB);
                     if (! irFileB.existsAsFile())
                         MissingFileReport::add ("Mic B user IR", pathB);
                     else if (! mMicSimB.loadUserIr (irFileB, err, s))
@@ -1179,22 +1254,22 @@ void BaySickNAMIRProcessor::setStateInformation (const void* data, int sizeInByt
             if (slotA.isValid() || slotB.isValid())
                 applySnapshotToCurrent (mLastSlot);
 
-            // H-6d: restore the user-loaded mic IR file if its path was saved
-            // and the file still exists on disk.  This is the GLOBAL fallback
-            // for pre-A/B-snapshot projects; per-slot paths now live in the
-            // snapshots and are loaded by applySnapshotToCurrent above.
+            // H-6d: GLOBAL mic-IR fallback for pre-A/B-snapshot projects;
+            // per-slot paths now live in the snapshots and are loaded by
+            // applySnapshotToCurrent above.
             if (! slotA.isValid() && ! slotB.isValid())
             {
                 const juce::String micIrPath
                     = apvts.state.getProperty ("mic_user_ir_path", {}).toString();
                 if (micIrPath.isNotEmpty())
                 {
-                    juce::File irFile (micIrPath);
-                    if (irFile.existsAsFile())
-                        loadUserMicIr (irFile, err);
+                    const juce::File irFile = ProjectFileResolver::resolve (micIrPath);
+                    if (! irFile.existsAsFile())
+                        MissingFileReport::add ("Mic user IR", micIrPath);
+                    else if (! loadUserMicIr (irFile, err))
+                        MissingFileReport::add ("Mic user IR (failed to load)", micIrPath);
                 }
             }
-            juce::ignoreUnused (err);
 
             // 2026-05-05 (Bug C fix): notify the editor so file-name labels
             // refresh.  setStateInformation reloaded the NAM/IR correctly
@@ -1206,6 +1281,11 @@ void BaySickNAMIRProcessor::setStateInformation (const void* data, int sizeInByt
             if (onStateRestored)
                 juce::MessageManager::callAsync (
                     [cb = onStateRestored] { if (cb) cb(); });
+
+            // Queued AFTER every hop the restore posted (message-queue order);
+            // the lambda co-owns the flag so a torn-down processor is safe.
+            juce::MessageManager::callAsync (
+                [tok = mRestoringState] { tok->store (false, std::memory_order_release); });
         }
     }
 }

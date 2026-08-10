@@ -15,7 +15,7 @@
 //
 // Links ONLY juce_audio_processors + juce_events + juce_gui_basics.  It
 // deliberately pulls in none of BaySickDAW's own libraries (sfizz, NAM,
-// RubberBand, LAME, WORLD, lunasvg) -- every one of those is an x64 build in
+// RubberBand, LAME, WORLD) -- every one of those is an x64 build in
 // our tree and would otherwise have to be built x86 as well.  Keeping this
 // binary tiny is what makes the 32-bit half cheap.
 //

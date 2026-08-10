@@ -9,7 +9,7 @@
 // mute/solo per band, compare banks, and phase mode switching.
 //
 // 5F-9 sec.12 Phase 1 applied (2026-04-18):
-//   12a  getMagnitudeForFrequency() + getMagnitudeForFrequencyDb() for UI curve
+//   12a  getMagnitudeForFrequency() for UI curve
 //   12b  Proportional Q on Peaking bands (SSL/Neve "hardware" feel; toggle default on)
 //   12c  SmoothedValue per band freq/gain/Q + deferred block-rate coef rebuild
 //   12d  mIIRModSpeed wired as smoothing ramp length (was dead param)
@@ -23,7 +23,9 @@
 //   12g  Linear-phase / HQ modes via FFT convolution. PhaseMode (already an
 //        existing UI-only enum) now actively drives DSP behaviour:
 //          0 Standard      - today's IIR minimum-phase path (unchanged)
-//          1 Linear        - linear-phase FFT @ 2048-pt, no oversampling
+//          1 Linear        - linear-phase FFT, no oversampling; FFT size is the
+//                            one mode the Linear Phase Precision control picks
+//                            (256..4096, default 2048 = the size 12g fixed)
 //          2 HQ Plus       - AC=on forced; no FFT path (= just oversampled IIR)
 //          3 HQ Linear     - AC=on forced + linear-phase FFT @ 4096-pt
 //          4 HQ Extended   - linear-phase FFT @ 512-pt (low-latency variant)
@@ -69,8 +71,9 @@
 //        gainDb + currentGrDb) to the filter. Supported only on gain-bearing
 //        types (Peaking=0, LowShelf=3, HighShelf=4, Tilt=8). PRESET-SAFE
 //        (dynamic=false default preserves v1 behavior exactly). Per-band
-//        scSourceId APVTS scaffolding also added for future external-sidechain
-//        routing (Tier 3 T11); DSP today always reads internal band input.
+//        scSourceId selects the external sidechain the band detects off, picked
+//        from the band's Dynamic Params popout and resolved through the strip's
+//        four SC receive lines.  -1 leaves the band detecting its own input.
 //
 // Phase A retrospective:
 //   A1  juce::ScopedNoDenormals in process()
@@ -142,7 +145,14 @@ public:
         int   scSourceId { -1 };
     };
 
-    enum class PhaseMode { Standard, Linear, HQPlus, HQL, HQE };
+    // Ordinals are pinned explicitly because this int is persisted ("phaseMode")
+    // and EqLinearPhaseProcessor::fftSizeForMode switches on the raw value, so an
+    // insertion or re-order silently repoints every saved EQ at a different mode
+    // AND a different FFT size.  Values below match what was implicit before, so
+    // this pins current behavior and changes nothing.  NEVER reorder or insert;
+    // append only, with an explicit value, ahead of Count.  Same rule as
+    // EffectType in EffectRack.h.
+    enum class PhaseMode { Standard = 0, Linear = 1, HQPlus = 2, HQL = 3, HQE = 4, Count };
 
     EQ8DSP();
     ~EQ8DSP() override = default;
@@ -165,7 +175,6 @@ public:
     void setBandMuted (int i, bool muted);
     void setBandSoloed(int i, bool soloed);
     void setBandChannel(int i, int channel);   // 12h: 0..4 per Channel enum
-    void setBandKey   (int i, int midiNote);   // freq = 440*2^((note-69)/12)
 
     // 12j Dynamic EQ setters (PRESET-SAFE additive).
     void setBandDynamic  (int i, bool dynamic);
@@ -180,10 +189,6 @@ public:
     // 12j: UI polling - current gain reduction (dB, signed: negative = downward
     // compression, positive = upward expansion). Wait-free atomic read.
     float getBandGrDb (int i) const noexcept;
-    // 12j: UI ghost-range endpoint - returns the max-reduction or max-expansion
-    // gain (params.gainDb + sign*range) so the widget can draw a static outline
-    // of "how far this band CAN move" alongside the live animated curve.
-    float getBandEffectiveGainDbAtRangeLimit(int i) const noexcept;
 
     Band getBand(int i) const;
 
@@ -203,7 +208,23 @@ public:
             || mPhaseMode == PhaseMode::HQL
             || mPhaseMode == PhaseMode::HQE;
     }
-    void setLinearPhasePrecision(int precision);  // 0-4 maps to FFT 256/512/1024/2048/4096
+    // Linear Phase Precision: index into kPrecFftSizes, governing the PLAIN
+    // Linear mode's FFT size ONLY.  HQ Linear (4096) and HQ Extended (512) stay
+    // pinned by locked spec 12g: a phase mode's only effect on
+    // EqLinearPhaseProcessor IS its FFT size, so letting precision override every
+    // mode would make HQ Extended bit-identical to Linear and erase the mode.
+    static constexpr int kNumLinearPrecisions = 5;
+    static constexpr int kPrecFftSizes[kNumLinearPrecisions] = { 256, 512, 1024, 2048, 4096 };
+    // Index 3 == 2048, which IS the FFT size spec 12g fixed Linear at, so the
+    // default precision reproduces the pre-wiring sound exactly.
+    static constexpr int kDefaultLinearPrec = 3;
+
+    // Effective linear-phase FFT size for a (mode, precision) pair; 0 = no linear
+    // processing.  Single source of truth for the DSP and for the EQ menu's
+    // per-mode latency readout.
+    static int linearFftSize (PhaseMode mode, int precision) noexcept;
+
+    void setLinearPhasePrecision(int precision);
     int  getLinearPhasePrecision() const noexcept { return mLinearPrec; }
 
     // ---- IIR parameter smoothing (12d: wired to smoother ramp length) -------
@@ -242,7 +263,6 @@ public:
     // Thread-safe against audio thread (const read of coefficient pointers with
     // null-guard for OFF / unused-section filters).
     float getMagnitudeForFrequency   (float freq) const noexcept;
-    float getMagnitudeForFrequencyDb (float freq) const noexcept;
 
 private:
     using IIRFilter = juce::dsp::IIR::Filter<float>;
@@ -304,12 +324,19 @@ private:
 
     std::array<BandState, kNumBands> mBands;
     Band mSpare[kNumBands];
+    // Serialized alongside mBands/mSpare: swapWithSpare exchanges the two arrays,
+    // so without this the reader cannot tell which bank the saved bands ARE.
     bool mViewingSpare { false };
-    bool mSpareLocked  { false };   // A6: was public; now private with isSpareLocked()
+    // A6: was public; now private with isSpareLocked().  Deliberately NOT
+    // serialized: in M/S (bus) mode the widget's lock never reaches this flag,
+    // so persisting it would restore a stale false over the only lock state a
+    // bus EQ has, and re-seeding the widget from it every sync tick would undo
+    // the user's own click. Fixing the lock needs the widget path unified first.
+    bool mSpareLocked  { false };
 
     float     mMainLevelDb   { 0.0f };
     PhaseMode mPhaseMode     { PhaseMode::Standard };
-    int       mLinearPrec    { 2 };
+    int       mLinearPrec    { kDefaultLinearPrec };
     float     mIIRModSpeed   { 1.0f };   // 12d: wired to smoother ramp time
     bool      mProportionalQ { true };   // 12b: default on - SSL/Neve "hardware" feel
     bool      mAntiCramping  { false };  // 12f: opt-in 2x oversampling
@@ -335,14 +362,16 @@ private:
     int mAcFadeTarget    { 0 };
 
     // 12g: linear-phase processor (one per EQ instance, owns its own ring +
-    // FFT). Allocated lazily by setPhaseMode when a linear mode is selected,
-    // freed when reverting to Standard / HQ Plus.
+    // FFT). Allocated lazily when a linear mode is selected, freed when
+    // reverting to Standard / HQ Plus. Every (re)allocation goes through
+    // reconfigureLinearProc on the message thread - never the audio thread.
     EqLinearPhaseProcessor mLinearProc;
     bool mLinearIRDirty { true };
 
     // 12g: helper to (re)configure mLinearProc for the current phase mode +
-    // sample rate + design rate (AC composition). Called from setPhaseMode
-    // and from prepare() when re-init crosses a mode boundary.
+    // precision + sample rate + design rate (AC composition). Called from
+    // prepare(), from setPhaseMode (via its prepare call) and from
+    // setLinearPhasePrecision.
     void reconfigureLinearProc();
     // 12g: rebuild the linear-phase IR from the current static band design
     // (no dynamic GR per T2b option C). Cheap: N/2+1 magnitude callback calls.

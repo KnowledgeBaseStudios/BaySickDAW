@@ -2,6 +2,7 @@
 #include "EffectsPage.h"
 #include "../AppPaths.h"
 #include "../PluginProcessor.h"
+#include "../UserFileSave.h"
 
 namespace FxRackPresetIO
 {
@@ -53,14 +54,11 @@ juce::Array<juce::File> enumeratePresets()
 bool save (VibeSynthProcessor& proc, int channelId,
            const juce::String& presetName, juce::String& outErr)
 {
-    if (presetName.trim().isEmpty()) { outErr = "Preset needs a name."; return false; }
-
     auto* rack = EffectsPage::rackForChannelId (proc.mVibeGraph, channelId);
     if (rack == nullptr) { outErr = "This channel has no effects rack."; return false; }
 
     juce::XmlElement root ("BaySickFxRackPreset");
     root.setAttribute ("version", kVersion);
-    root.setAttribute ("name",    presetName);
 
     {
         juce::MemoryBlock mb;
@@ -97,8 +95,18 @@ bool save (VibeSynthProcessor& proc, int channelId,
     if (! dir.exists() && ! dir.createDirectory())
     { outErr = "Could not create the FX Rack presets folder."; return false; }
 
-    auto file = dir.getChildFile (juce::File::createLegalFileName (presetName) + ".xml");
-    if (! root.writeTo (file)) { outErr = "Could not write " + file.getFullPathName(); return false; }
+    // Stamped from the typed name's legal stem rather than the final file:
+    // the write is async and Save a Copy picks its suffixed path after the
+    // element below is deep-copied.  Nothing reads the attribute back.
+    root.setAttribute ("name", juce::File::createLegalFileName (presetName).trim());
+
+    // The rack dialog pre-fills the channel's own display name, so re-saving
+    // a channel's rack proposes the SAME name every time - exactly the case
+    // the Replace / Save a Copy / Cancel prompt exists for.  Naming, that
+    // prompt and the write's own failure box are all the helper's; outErr
+    // covers only the pre-write failures above, so a true return means the
+    // save was handed to the helper, not that the file is on disk.
+    UserFileSave::writeXmlAsync (dir, presetName, root, {});
     return true;
 }
 
@@ -112,12 +120,13 @@ bool load (VibeSynthProcessor& proc, int channelId,
     auto* rack = EffectsPage::rackForChannelId (proc.mVibeGraph, channelId);
     if (rack == nullptr) { outErr = "This channel has no effects rack."; return false; }
 
-    if (auto* rackEl = xml->getChildByName ("Rack"))
-    {
-        juce::MemoryBlock mb;
-        if (mb.fromBase64Encoding (rackEl->getStringAttribute ("data")) && mb.getSize() > 0)
-            rack->setStateInformation (mb.getData(), (int) mb.getSize());
-    }
+    auto* rackEl = xml->getChildByName ("Rack");
+    juce::MemoryBlock mb;
+    if (rackEl == nullptr
+        || ! mb.fromBase64Encoding (rackEl->getStringAttribute ("data"))
+        || mb.getSize() == 0)
+    { outErr = "The preset's rack data is missing or corrupt."; return false; }
+    rack->setStateInformation (mb.getData(), (int) mb.getSize());
 
     const juce::String destPrefix = EffectsPage::mixerPrefixForChannelId (channelId);
     if (auto* eqEl = xml->getChildByName ("Eq"))

@@ -30,6 +30,11 @@ public:
         juce::String name;
         bool         locked { false };  // D2: when true, ribbon shows "[L] " prefix and
                                         // refuses Delete from the dropdown.
+        // Display-only marker (a sfizz Inst tab whose saved kit was gone at
+        // restore, so a default kit was substituted).  Composed into the slot
+        // label at paint time like `locked`, and DELIBERATELY not persisted:
+        // serializeTabsInto writes `locked` but must never write this.
+        bool         kitMissing { false };
     };
 
     RibbonTabBar();
@@ -136,6 +141,11 @@ public:
     void setTabLocked (int tabId, bool locked);
     bool isTabLocked  (int tabId) const;
 
+    // Substituted-kit display marker.  Fires no change hook by design: a
+    // display marker is not a project edit and must not flip the dirty bit on
+    // a freshly-opened project.
+    void setTabKitMissing (int tabId, bool missing);
+
     // D2 Batch 4: move the N-th tab of `type` to position M (within the type).
     // Used by the kit-tab drag-reorder.  StandaloneEditor mirrors the same
     // move on its own mPages list so the kit view + dropdown order stay in
@@ -163,6 +173,19 @@ public:
     // the editor to refuse delete-the-last-instance with a friendly notice.
     // isLastOfType retired 2026-07-26 (QA-ProjectSave docket 18) -- its only
     // purpose was the >= 1 floor on Layers / Bass / Drums, which is gone.
+
+    // The same list, for a caller that wants it as a SUBMENU of its own menu
+    // (the master Edit menu).  buildAddMenu populates mAddMenuChoices, which
+    // handleAddMenuResult indexes -- so a caller must show the menu it just
+    // built and pass the raw result straight back, with nothing rebuilding the
+    // menu in between.
+    juce::PopupMenu buildAddMenu();
+    void            handleAddMenuResult (int resultId);
+
+    // True for any id buildAddMenu can produce.  The embedding caller tests
+    // with this rather than the id constants, which stay private -- the add
+    // menu owns its id space and nobody else needs to know its shape.
+    static bool     isAddMenuId (int resultId) noexcept;
 
 private:
     // Upper bound only (11 types + the "+" slot) -- used to size stack arrays
@@ -200,7 +223,7 @@ private:
 
     // QA-ModelShell TS4: the bar is no longer a fixed 10-slot strip.  The four
     // REQUIRED tabs (Builder / Mixer / Effects / Piano Roll) are always shown;
-    // the six instance types appear only while they have >= 1 instance and
+    // the seven instance types appear only while they have >= 1 instance and
     // vanish at zero, returning through the trailing "+" slot.  Slot indices
     // are therefore runtime, not a compile-time map.
     std::vector<TabType> visibleSlotTypes() const;
@@ -213,6 +236,7 @@ private:
     // The "+" menu: every add option, including the ones that used to live in
     // per-type dropdowns and the empty-state placeholders.
     void showAddMenu (juce::Rectangle<int> slotBounds);
+
 
     // Layout helpers
     // Jeff, 2026-08-04: the "+" is sized to TWICE its own glyph and nothing

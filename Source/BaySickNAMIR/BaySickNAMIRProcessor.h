@@ -37,10 +37,14 @@ namespace nam { class DSP; }
 //   (next load) - never on audio.  juce::dsp::Convolution provides its own
 //   wait-free swap internally.
 //
-//   Oversampling factor changes go through `parameterChanged` → message-
-//   thread async re-Reset of all loaded NAM models at the new OS-rate
-//   (mSampleRate * 2^factor).  RT-safe because the audio-thread swap-pending
-//   pattern still gates which model is visible to processBlock.
+//   Oversampling factor changes and A/B slot flips go through
+//   `parameterChanged`, which runs on whichever thread wrote the parameter.
+//   Live, both re-Reset all loaded NAM models at the new OS-rate
+//   (mSampleRate * 2^factor) / swap the slot snapshots asynchronously on the
+//   message thread, guarded by mLife; RT-safe because the audio-thread
+//   swap-pending pattern still gates which model is visible to processBlock.
+//   Under isNonRealtime() the writer is the render thread itself and the work
+//   runs inline, so it lands in the block being rendered.
 // ─────────────────────────────────────────────────────────────────────────────
 
 class BaySickNAMIRProcessor : public juce::AudioProcessor,
@@ -105,20 +109,17 @@ public:
     // reason and leaves the previously-active model/IR for that slot intact.
     bool loadNamModel         (const juce::String& filePath, juce::String& outErr, int slot = -1);
     bool loadImpulseResponse  (const juce::String& filePath, juce::String& outErr, int slot = -1);
-    void clearNamModel        (int slot = -1);
-    void clearImpulseResponse (int slot = -1);
 
     // ── Public state queries (per-slot; -1 = active) ──────────────────────────
+    // The remembered paths below survive a failed load so the file can relink
+    // later; hasNamModel / hasIr are the only truthful "is it running" answers
+    // and are what the editor must render from.
     bool         hasNamModel        (int slot = -1) const;
-    bool         hasImpulseResponse (int slot = -1) const;
+    bool         hasIr              (int slot = -1) const;
     bool         isFullRig          (int slot = -1) const;
-    juce::String getNamErrorMessage () const { return mLastNamError; }
-    juce::String getIrErrorMessage  () const { return mLastIrError;  }
 
     juce::String getNamFilePath (int slot = -1) const;
     juce::String getIrFilePath  (int slot = -1) const;
-    void         setNamFilePath (const juce::String& p, int slot = -1);
-    void         setIrFilePath  (const juce::String& p, int slot = -1);
 
     // ── H-6d Mic Sim + Mic Placement (post-IR, pre-master-output) ────────────
     // The two stages live as direct members of this processor so they ride
@@ -233,12 +234,10 @@ private:
     std::array<std::atomic<bool>, 2>         mNamLoaded;
     std::array<std::atomic<bool>, 2>         mNamIsFullRig;
     juce::CriticalSection                    mLoadLock;     // serializes msg-thread loads
-    juce::String                             mLastNamError;
 
     // ── IR convolution (zero-latency mode) - per slot ────────────────────────
     std::array<juce::dsp::Convolution, 2>  mIr;
     std::array<std::atomic<bool>, 2>       mIrLoaded;
-    juce::String                            mLastIrError;
 
     // ── Pre/post filters (stereo) ────────────────────────────────────────────
     using StereoIIR = juce::dsp::ProcessorDuplicator<
@@ -272,6 +271,11 @@ private:
 
     // ── File paths - saved as ValueTree custom string properties ─────────────
     // Index 0 = slot A, index 1 = slot B.
+    // MESSAGE THREAD ONLY (display + persistence).  The audio thread must never
+    // read these: juce::String's copy ctor is a plain pointer load then a
+    // refcount increment, so a concurrent reassign here would let the render
+    // callback retain a StringHolder the writer has already freed.  The audio
+    // path gates on the mNamLoaded / mIrLoaded atomics instead.
     std::array<juce::String, 2> mNamPaths;
     std::array<juce::String, 2> mIrPaths;
 
@@ -280,7 +284,6 @@ private:
     // ── H-6d post-IR stages ──────────────────────────────────────────────────
     MicSimDSP        mMicSim;
     MicPlacementDSP  mMicPlacement;
-    juce::String     mLastMicIrError;
 
     // ── QA-Fc dual-mic (Mic B parallel path) ─────────────────────────────────
     // mMicBGain ramps toward the `nam_micb_active` target so automating the
@@ -295,6 +298,25 @@ private:
     // ── Per-slot A/B snapshots (capture-then-restore on ab_slot change) ─────
     std::array<SlotSnapshot, 2> mSnapshots;
     int                          mLastSlot { 0 };
+
+    // Lifetime token for message-thread posts made from parameterChanged.  The
+    // destructor drops it before anything else, so a queued lambda holding a
+    // weak copy can tell that this engine is gone (callAsync has no cancel).
+    std::shared_ptr<char> mLife { std::make_shared<char> ('\0') };
+
+    // True while setStateInformation restores.  replaceState fires the ab_slot
+    // listener whenever the saved slot differs from the live one, and that swap
+    // would capture the freshly restored parameters over the OTHER slot's
+    // stored tone and destroy it -- the restore seats both snapshots and
+    // mLastSlot itself, from the saved SlotA / SlotB children.  shared_ptr so
+    // the deferred clear can never touch a dead processor (the lambda co-owns
+    // the flag); atomic because parameterChanged runs on whichever thread wrote
+    // the parameter, including the render thread offline.
+    std::shared_ptr<std::atomic<bool>> mRestoringState
+        = std::make_shared<std::atomic<bool>> (false);
+
+    bool isRestoringState() const noexcept
+        { return mRestoringState->load (std::memory_order_acquire); }
 
     void captureSnapshotFromCurrent (int slot);
     void applySnapshotToCurrent     (int slot);

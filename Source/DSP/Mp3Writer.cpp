@@ -1,5 +1,7 @@
 #include "Mp3Writer.h"
 
+#include <cstdio>
+
 #if BAYSICK_HAS_LAME
  #include <lame.h>
 #endif
@@ -128,11 +130,23 @@ bool Mp3Writer::close()
         mStream.reset();
 
         // The Xing/LAME header is a placeholder until the stream length is known,
-        // so it can only be written after the file is closed.  Without this the
-        // file still plays but seeking and duration display are wrong.
+        // so it can only be written after the file is closed.  Without it the
+        // file still plays, but it carries no encoder delay/padding (gapless
+        // playback breaks) and the zeroed placeholder frame at the head decodes
+        // as a short burst of leading silence.
         if (ok && mFile.existsAsFile())
         {
-            if (auto* f = std::fopen (mFile.getFullPathName().toRawUTF8(), "r+b"))
+            // Nothing sets this process's ANSI codepage to UTF-8, so the UCRT
+            // decodes a narrow path with the system codepage and toRawUTF8()
+            // fails to resolve any path holding a non-ASCII character -- while
+            // existsAsFile() above already went through the wide Win32 API and
+            // succeeded.  Open wide so the two agree.
+           #if JUCE_WINDOWS
+            FILE* f = _wfopen (mFile.getFullPathName().toWideCharPointer(), L"r+b");
+           #else
+            FILE* f = std::fopen (mFile.getFullPathName().toRawUTF8(), "r+b");
+           #endif
+            if (f != nullptr)
             {
                 lame_mp3_tags_fid (flags, f);
                 std::fclose (f);

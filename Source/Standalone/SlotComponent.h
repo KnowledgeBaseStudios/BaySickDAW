@@ -8,13 +8,14 @@
 // One slot in the Effects Rack. Two visual states:
 //
 //   Empty:  dark panel with "+" centered (dashed border).
-//           Click anywhere → showAddMenu() → onEffectChosen fires.
+//           Click anywhere -> showAddMenu().
 //           Menu appears at the mouse cursor position (Change D).
 //
 //   Loaded: 28px header strip painted directly:
 //             ● (bypass, green=active / red=bypassed)  ·  name  ·  ▲  ·  ▼  ·  ×
 //           + inline editor component (VKnob panel) fills the rest.
-//           All header actions are hit-tested in mouseDown() (Change B).
+//           mouseDown() hit-tests the bypass LED; the Mode / SC / Preset /
+//           Basic buttons are child components with their own onClick.
 //
 // Signal routing: slot 0 (top) is first in the DSP chain.
 // ─────────────────────────────────────────────────────────────────────────────
@@ -80,22 +81,12 @@ public:
     // Forward undo context to the inline editor panel (if it is an EditorPanelBase).
     void setEditorUndoContext(const UndoContext& ctx);
 
-    // Callbacks wired by EffectsPage
-    std::function<void(int slot, EffectType type)> onEffectChosen;
-    std::function<void(int slot)>                  onEffectRemoved;
-    std::function<void(int slot, bool up)>         onMoveRequested;
-
     // H-7 (2026-05-01): Mode-dropdown callback fired when the user picks a
     // character mode for an effect that supports one (Compressor: Modern/
     // FET/Opto; Saturation: Tube/Console).  Host wires this to drive the
     // DSP directly (regular FX rack) or to write APVTS (BaySickVocal).
     // newType is the int value of the effect's Type enum.
     std::function<void(int slot, int newType)>     onModeChanged;
-
-    // QA-EffectsReview Task 1: fired when the user flips Basic/Advanced on a
-    // rack slot.  EffectsPage wires this to EffectRack::setSlotBasicMode so the
-    // choice persists with the project.  basic == true means Basic mode.
-    std::function<void(int slot, bool basic)>      onBasicModeChanged;
 
     // C.4 Phase 1 (2026-04-30): SC source dropdown context.  EffectsPage wires
     // this when a slot's editor is rebuilt.  channelMixerPrefix is the strip's

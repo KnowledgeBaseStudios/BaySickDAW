@@ -13,10 +13,19 @@ namespace
 OverdriveDSP::OverdriveDSP() = default;
 
 // ─────────────────────────────────────────────────────────────────────────────
+// prepare() frees and rebuilds the oversampler, so it is legal ONLY when the
+// audio thread cannot be inside process() -- i.e. from EffectRack::prepare,
+// which holds mSlotsLock, or before the DSP is published.  Every other
+// message-thread entry point (the OS chicken head, preset loads) must go
+// through stageOversampler() instead.
 void OverdriveDSP::prepare (double sampleRate, int maxBlockSize)
 {
     mSampleRate = sampleRate;
     mMaxBlock   = juce::jmax (1, maxBlockSize);
+
+    // Drop any staged-but-unadopted oversampler: this rebuild supersedes it.
+    mOsSwapPending.store (false, std::memory_order_release);
+    mOsPending.reset();
 
     // ── TPT filters (stereo) ─────────────────────────────────────────────────
     juce::dsp::ProcessSpec spec;
@@ -40,7 +49,9 @@ void OverdriveDSP::prepare (double sampleRate, int maxBlockSize)
         juce::dsp::Oversampling<float>::filterHalfBandPolyphaseIIR,
         true /* maxQuality */);
     mOversampler->initProcessing ((size_t) mMaxBlock);
-    mLatencySamples = (int) std::ceil (mOversampler->getLatencyInSamples());
+    mOsLog2Active = juce::jlimit (1, 4, mOsLog2);
+    mLatencySamples.store ((int) std::ceil (mOversampler->getLatencyInSamples()),
+                           std::memory_order_relaxed);
 
     // ── Scratch buffers (stereo) ─────────────────────────────────────────────
     mBandBuf.setSize (2, mMaxBlock, false, true, true);
@@ -115,14 +126,6 @@ void OverdriveDSP::snapSmoothedToTargets()
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// refreshFilterCoefs() retired in the §6 retrospective pass -- A9 moved coef
-// updates inline into the per-sample process loop so fast Color / PostFilter
-// sweeps don't step at block boundaries. Function intentionally left defined
-// as a no-op in case future code still links against it; nothing in this
-// translation unit calls it.
-void OverdriveDSP::refreshFilterCoefs (int /*numSamples*/) {}
-
-// ─────────────────────────────────────────────────────────────────────────────
 // Setters - CPU-guarded. Coef recomputation moved INTO process() per spec §6c.
 // ─────────────────────────────────────────────────────────────────────────────
 void OverdriveDSP::setPreBand (float v)
@@ -187,18 +190,55 @@ void OverdriveDSP::setParallel (bool on)
     if (on != mParallel) mParallel = on;
 }
 
+void OverdriveDSP::stageOversampler (int factorLog2)
+{
+    // MESSAGE THREAD ONLY.  Builds the replacement oversampler and its OS-rate-
+    // derived scalars off to the side, then publishes the whole group with one
+    // release-store.  Never touches mOversampler -- the audio thread owns it.
+    const int n = juce::jlimit (1, 4, factorLog2);
+
+    auto os = std::make_unique<juce::dsp::Oversampling<float>> (
+        2 /* numChannels */,
+        n,
+        juce::dsp::Oversampling<float>::filterHalfBandPolyphaseIIR,
+        true /* maxQuality */);
+    os->initProcessing ((size_t) mMaxBlock);
+
+    const double osRate = mSampleRate * (double) (1 << n);
+    mOsPendLog2      = n;
+    mOsPendLatency   = (int) std::ceil (os->getLatencyInSamples());
+    mOsPendPedalHpfR = (float) (1.0 - (juce::MathConstants<double>::twoPi * 720.0 / osRate));
+    // Assigning here also destructs the PREVIOUSLY retired oversampler -- on
+    // this thread, which is the point of the pattern.
+    mOsPending = std::move (os);
+    mOsSwapPending.store (true, std::memory_order_release);
+}
+
+void OverdriveDSP::drainOversamplerSwap() noexcept
+{
+    // AUDIO THREAD.  Adopts oversampler + factor + latency + the OS-rate pedal
+    // HPF coef together, so process() can never index the upsampled block with
+    // a factor the live oversampler was not built for.
+    if (! mOsSwapPending.load (std::memory_order_acquire)) return;
+    std::swap (mOversampler, mOsPending);
+    mOsLog2Active = mOsPendLog2;
+    mLatencySamples.store (mOsPendLatency, std::memory_order_relaxed);
+    mPedalHpfR    = mOsPendPedalHpfR;
+    mOsSwapPending.store (false, std::memory_order_release);
+}
+
 void OverdriveDSP::setOversamplingFactor (int factorLog2)
 {
     // C5 -- 2x=1, 4x=2, 8x=3, 16x=4.
     const int n = juce::jlimit (1, 4, factorLog2);
     if (n == mOsLog2) return;
     mOsLog2 = n;
-    // Reallocate the oversampler for the new factor. prepare() does the work.
-    // We only call this from the UI thread; the next process() block will see
-    // the new latency via getLatencySamples(). Host-side PDC must be refreshed
-    // by the EffectRack (normal pattern when latency changes).
+    // Stage rather than prepare(): this runs from the UI thread while the audio
+    // thread may be inside processSamplesUp/Down on the current oversampler.
+    // Host-side PDC still has to be refreshed by the EffectRack once the swap
+    // lands (normal pattern when latency changes).
     if (mSampleRate > 0.0)
-        prepare (mSampleRate, mMaxBlock);
+        stageOversampler (n);
 }
 
 // ── Legacy compatibility ──────────────────────────────────────────────────────
@@ -217,6 +257,10 @@ void OverdriveDSP::setTone (float tone)
 // ─────────────────────────────────────────────────────────────────────────────
 void OverdriveDSP::process (juce::AudioBuffer<float>& buffer)
 {
+    // Ahead of the bypass early-out: a staged oversampler must be adopted even
+    // on a block this effect otherwise does nothing with.
+    drainOversamplerSwap();
+
     if (bypassed) return;
 
     juce::ScopedNoDenormals noDenormals;   // A1
@@ -334,9 +378,9 @@ void OverdriveDSP::process (juce::AudioBuffer<float>& buffer)
         return;   // Pedal mode is done; skip the Rack chain below.
     }
 
-    // C5 pulls the current OS factor out of the live oversampler (updated on
-    // setOversamplingFactor via prepare() reallocation).
-    const int kOsNow = 1 << mOsLog2;
+    // C5 -- the factor the LIVE oversampler was built with (adopted together
+    // with it in drainOversamplerSwap), not the user-intent mOsLog2.
+    const int kOsNow = 1 << mOsLog2Active;
     const float nyq  = (float) mSampleRate * 0.49f;
 
     // ── Step 1: in-series pre-LP. The whole signal is driven (no parallel clean ──
@@ -508,13 +552,13 @@ void OverdriveDSP::setStateInformation (const void* data, int sz)
     snapSmoothedToTargets();
     if (mSampleRate > 0.0)
     {
-        // C5 -- if OS factor changed in the preset, reallocate the oversampler.
-        // prepare() does everything, including filter reset + coef refresh.
+        // C5 -- if OS factor changed in the preset, STAGE the new oversampler.
+        // The preset menu hands this call the LIVE DSP the audio thread is
+        // processing, so prepare() here would free the oversampler out from
+        // under it.
         if (osChanged)
-        {
-            prepare (mSampleRate, mMaxBlock);
-            return;
-        }
+            stageOversampler (mOsLog2);
+
         const float nyq = (float) mSampleRate * 0.49f;
         mPreLpf.setCutoffFrequency (juce::jlimit (20.0f, nyq, mColor));
         mPreLpf.setResonance       (juce::MathConstants<float>::sqrt2 * 0.5f);

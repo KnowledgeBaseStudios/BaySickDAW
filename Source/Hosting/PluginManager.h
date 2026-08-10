@@ -36,8 +36,6 @@ enum class PluginArch
     X64
 };
 
-juce::String describeArch (PluginArch) noexcept;
-
 // A candidate the scan found but did NOT put on the addable results list.
 //
 // Jeff's spec 2026-07-29: a scan NEVER silently drops a plugin.  "My plugin
@@ -51,7 +49,8 @@ struct SkippedPlugin
     juce::String reason;
 };
 
-class PluginManager  : private juce::Thread,
+class PluginManager  : public  juce::ChangeBroadcaster,
+                       private juce::Thread,
                        private juce::AsyncUpdater
 {
 public:
@@ -79,7 +78,6 @@ public:
 
     void addToAddedList      (const juce::Array<juce::PluginDescription>&);
     void removeFromAddedList (const juce::PluginDescription&);
-    bool isOnAddedList       (const juce::PluginDescription&) const;
 
     // v3: a 32-bit plugin's stored description is a filename-only guess (this
     // 64-bit process cannot open the file), so the first successful bridged
@@ -110,6 +108,13 @@ public:
     std::function<void()> onScanProgress;
     std::function<void()> onScanFinished;
     std::function<void()> onAddedListChanged;
+
+    // The added list also broadcasts through juce::ChangeBroadcaster, because
+    // onAddedListChanged has exactly ONE owner (the plugin manager window claims
+    // it and clears it on close) and the added list has a second consumer: a
+    // rack slot whose plugin was missing re-attempts its load when the user puts
+    // the plugin back.  ChangeBroadcaster delivers on the MESSAGE THREAD, which
+    // is what keeps that re-instantiation off the audio thread.
 
     juce::AudioPluginFormatManager& formats() noexcept { return mFormats; }
 
@@ -151,6 +156,10 @@ private:
     std::atomic<float> mProgress      { 0.0f };
     std::atomic<bool>  mHasScanned    { false };
     std::atomic<bool>  mPendingFinish { false };
+
+    // One-shot gate so a persistent write failure cannot stack an alert per
+    // add/remove gesture; atomic + mutable because saveToDisk() is const.
+    mutable std::atomic<bool> mWarnedSaveFailure { false };
 
     inline static std::atomic<PluginManager*> sInstance { nullptr };
 

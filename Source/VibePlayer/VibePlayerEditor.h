@@ -105,12 +105,13 @@ private:
     juce::Label  mLfoRateLbl,  mLfoAmtLbl;
 
     // ── Box 6: Filter (D.4-Q3 2026-05-01) ────────────────────────────────────
-    // Surfaces 4 previously-hidden APVTS params: cutoff / res / reduct /
-    // artic_group.  Sits between LFO (Box 5) and Output (now Box 7).
+    // Surfaces 3 previously-hidden APVTS params: cutoff / res / reduct.
+    // Sits between LFO (Box 5) and Output (now Box 7).  The artic_group param
+    // is live but deliberately has no UI knob (see VibePlayerEditor.cpp Box 6).
     VibeSlider mFilterCutoffKnob, mFilterResKnob;
-    VibeSlider mFilterReductKnob, mFilterArticKnob;
+    VibeSlider mFilterReductKnob;
     juce::Label  mFilterCutoffLbl,  mFilterResLbl;
-    juce::Label  mFilterReductLbl,  mFilterArticLbl;
+    juce::Label  mFilterReductLbl;
 
     // ── Box 7: Output (was Box 6 before D.4-Q3) ──────────────────────────────
     VibeSlider mPanKnob,    mStereoKnob;
@@ -144,7 +145,7 @@ private:
     // detuneMode selector is wired manually (ChickenHeadSelector has no juce Attachment):
     std::unique_ptr<juce::ParameterAttachment> mDetuneModeAtt;
     // D.4-Q3 (2026-05-01): Filter box attachments
-    std::unique_ptr<SliderAtt> mFilterCutoffAtt, mFilterResAtt, mFilterReductAtt, mFilterArticAtt;
+    std::unique_ptr<SliderAtt> mFilterCutoffAtt, mFilterResAtt, mFilterReductAtt;
 
     VibePlayerProcessor& mProc;
     bool mIsDrumContext { false };   // 2026-04-23: page-context flag (see setter)

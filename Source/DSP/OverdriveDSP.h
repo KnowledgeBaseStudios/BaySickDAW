@@ -1,6 +1,7 @@
 #pragma once
 #include <JuceHeader.h>
 #include "DSPBase.h"
+#include <atomic>
 #include <memory>
 
 // ── OverdriveDSP - 5F-9 §6 DSP quality pass ──────────────────────────────────
@@ -27,12 +28,13 @@ class OverdriveDSP : public DSPBase
 {
 public:
     // I-4 (2026-05-02): Type umbrella covers two algorithm characters.
-    //   Rack  -- existing chain (Pre BPF + 4x oversampled atan + tone stack).
+    //   Rack  -- the in-series chain documented at the top of this file
+    //            (pre LPF + oversampled soft-clip + post LPF).
     //            Default; preserves all old projects bit-exact.
-    //   Pedal -- I-5 OD Style algorithm (frequency split + dual cascaded
-    //            soft-clip).  DSP body lands in I-5; Type::Pedal currently
-    //            falls through to the same Rack algorithm so the slot loads
-    //            and processes audio normally until I-5 fills it in.
+    //   Pedal -- OD Style: 80 Hz split (sub-80 stays clean), 500 Hz pre-clip
+    //            notch, oversampled dual cascaded tanh soft-clip, then tone
+    //            and level.  Its own branch in process(); the Rack chain is
+    //            untouched.
     enum class Type : int
     {
         Rack  = 0,
@@ -57,7 +59,7 @@ public:
     void reset()                                        override;
     void getStateInformation (juce::MemoryBlock& dest)  override;
     void setStateInformation (const void* data, int sz) override;
-    int  getLatencySamples() const override { return mLatencySamples; }
+    int  getLatencySamples() const override { return mLatencySamples.load (std::memory_order_relaxed); }
 
     // ── New API ──────────────────────────────────────────────────────────────
     void setPreBand    (float v);    // 0 = no pre-LP (full bandwidth), 1 = full LP at Color (smoothed, A3)
@@ -118,7 +120,25 @@ private:
     // ── 4× oversampler around the shaper (stereo) ────────────────────────────
     std::unique_ptr<juce::dsp::Oversampling<float>> mOversampler;
     juce::AudioBuffer<float> mBandBuf;      // stereo, mMaxBlock - the in-series drive signal (pre-shaper)
-    int  mLatencySamples { 0 };
+    std::atomic<int> mLatencySamples { 0 };   // audio writes on swap, message thread reads for PDC
+
+    // ── Oversampler hot-swap (mirrors NAMPedalStyleDSP's active/pending pair) ─
+    // prepare() must NEVER run on a live DSP -- it frees the oversampler the
+    // audio thread is inside.  Message-thread entry points (the OS chicken head,
+    // preset loads) BUILD the replacement here instead and publish it with a
+    // release-store; the audio thread adopts the whole group in one swap at the
+    // top of process().  The retired oversampler is parked back in mOsPending
+    // and destructs on the NEXT message-thread stage call, never on audio.
+    std::unique_ptr<juce::dsp::Oversampling<float>> mOsPending;
+    std::atomic<bool> mOsSwapPending  { false };
+    int   mOsPendLog2      { 2 };
+    int   mOsPendLatency   { 0 };
+    float mOsPendPedalHpfR { 0.0f };
+    // Factor the LIVE oversampler was built with.  mOsLog2 above is the user's
+    // intent (persisted + read back by the panel); this is what process()
+    // indexes the upsampled block with, so it swaps WITH the oversampler and
+    // never ahead of it.
+    int   mOsLog2Active    { 2 };
 
     // ── 5 Hz DC-blocker state (post-clip, pre-wet/dry) ───────────────────────
     float mDcX_L { 0.0f }, mDcY_L { 0.0f };
@@ -145,6 +165,7 @@ private:
     float mPedalHpfY[2] { 0.0f, 0.0f };
 
     // ── Helpers ──────────────────────────────────────────────────────────────
-    void refreshFilterCoefs(int numSamples);   // called at top of each process()
     void snapSmoothedToTargets();
+    void stageOversampler (int factorLog2);    // message thread: build + publish
+    void drainOversamplerSwap() noexcept;      // audio thread: top of process()
 };

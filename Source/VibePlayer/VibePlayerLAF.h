@@ -1,11 +1,11 @@
 #pragma once
 #include <JuceHeader.h>
-#include "../Standalone/SharedUI.h"   // TextureUtils, LRXHelper, Filmstrips
+#include "../Standalone/SharedUI.h"   // LRXHelper, Filmstrips
 
 // ── VibePlayerLAF - "Brushed Aluminum Mini-Player" ───────────────────────────
 //
 // Palette:
-//   Main panel        : #BCC6CC  (brushed aluminum - drawn via TextureUtils)
+//   Main panel        : #BCC6CC  (brushed aluminum)
 //   Recessed trench   : #121212  (near-black matte control panel)
 //   Active LED / glow : #A0DB2B  (neon green)
 //   Knobs / buttons   : #1A1A1A  (matte black)

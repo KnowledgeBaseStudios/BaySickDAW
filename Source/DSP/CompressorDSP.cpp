@@ -97,9 +97,9 @@ void CompressorDSP::setType (int t)
     // a different mode's release behavior.
     mOptoHistory = 0.0f;
 
-    // I-4 (2026-05-02): switching TO CS Style coerces ratio + release to
-    // CS-typical values (BOSS CS-3 reference: ~5:1 ratio, ~200ms release)
-    // and re-applies the Sustain macro.  Switching AWAY leaves the user's
+    // I-4 (2026-05-02): switching TO CS Style coerces ratio + release to the
+    // CS-3 model's values -- fixed 10:1, release derived from Attack -- and
+    // re-applies the Sustain macro.  Switching AWAY leaves the user's
     // explicit ratio/release intact -- a user who came from CS Style will
     // see whatever values the CS macro left in place, which is fine since
     // they're standard params on the other Types.
@@ -366,11 +366,10 @@ void CompressorDSP::process (juce::AudioBuffer<float>& buffer)
     const bool  visActive = mVisualFeed.isActive();
     const float visInPk   = visActive ? buffer.getMagnitude (0, numSamples) : 0.0f;
 
-    // C.4 Phase 1 (2026-04-30): pull SC source from the strip's SC array via
-    // mScPick (set each block by EffectRack from slot.scPick).  Overrides
-    // any legacy setSidechainBuffer / setUseSidechain wiring -- the strip's
-    // SC array is the single source of truth now.  scPick == -1 (no source
-    // selected) leaves SC off and detection falls back to the input buffer.
+    // C.4 Phase 1 (2026-04-30): the strip's SC array is the single source of
+    // truth for the detection source -- mScPick is set each block by
+    // EffectRack from slot.scPick.  scPick == -1 (no source selected) leaves
+    // SC off and detection falls back to the input buffer.
     if (auto* scBuf = getActiveSidechain())
     {
         useSidechain     = true;
@@ -797,7 +796,6 @@ void CompressorDSP::setLookaheadMs (float ms)
 
 void CompressorDSP::setStereoLink  (bool on) { if (on != stereoLink) stereoLink = on; }
 void CompressorDSP::setAutoMakeup  (bool on) { if (on != autoMakeup) autoMakeup = on; }
-void CompressorDSP::setUseSidechain (bool on) { if (on != useSidechain) useSidechain = on; }
 
 void CompressorDSP::setSidechainHPF (float hz)
 {
@@ -834,20 +832,6 @@ void CompressorDSP::setDetectionMs (float ms)
     }
 }
 
-void CompressorDSP::setSidechainSourceId (int channelId)
-{
-    // -1 = internal detection path (no external source selected).
-    // No clamp on positive range: MixerChannelIds space is 0..999 and will
-    // expand; we rely on VibeGraph to validate at routing time.
-    if (channelId < -1) channelId = -1;
-    if (sidechainSourceId != channelId) sidechainSourceId = channelId;
-}
-
-void CompressorDSP::setSidechainBuffer (juce::AudioBuffer<float>* buf)
-{
-    mSidechainBuffer = buf;
-}
-
 // -----------------------------------------------------------------------------
 void CompressorDSP::getStateInformation (juce::MemoryBlock& dest)
 {
@@ -865,11 +849,10 @@ void CompressorDSP::getStateInformation (juce::MemoryBlock& dest)
     state.setProperty ("lookaheadMs",   lookaheadMs,         nullptr);
     state.setProperty ("stereoLink",    (int)stereoLink,     nullptr);
     state.setProperty ("autoMakeup",    (int)autoMakeup,     nullptr);
-    // C2/C3/C4/scaffolding
+    // C2/C3/C4
     state.setProperty ("sidechainHPF",  sidechainHPF,        nullptr);
     state.setProperty ("peakDetection", (int)peakDetection,  nullptr);
     state.setProperty ("detectionMs",   detectionMs,         nullptr);
-    state.setProperty ("scSourceId",    sidechainSourceId,   nullptr);
     // H-2 (2026-05-01) -- Type umbrella character mode (Modern/FET/Opto/CS).
     // Default 0 = Modern preserves old presets bit-exact on load.
     state.setProperty ("type",          (int) mType,         nullptr);
@@ -911,7 +894,6 @@ void CompressorDSP::setStateInformation (const void* data, int sz)
     sidechainHPF       = (float)(double)state.getProperty ("sidechainHPF",  20.0);
     peakDetection      = ((int)state.getProperty ("peakDetection", 0)) != 0;
     detectionMs        = (float)(double)state.getProperty ("detectionMs",   10.0);
-    sidechainSourceId  = (int)state.getProperty ("scSourceId",  -1);
     // H-2 -- Type umbrella; absent in old projects (default 0 = Modern).
     // I-4: range bumped 0..2 -> 0..3 to admit CS Style.
     mType = static_cast<Type> (juce::jlimit (0, 3,

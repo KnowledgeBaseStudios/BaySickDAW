@@ -172,13 +172,19 @@ void HostedPluginInstance::instantiate()
         return;
     }
 
-    // NO PLAYHEAD SEED HERE, deliberately.  A first cut seeded one from
-    // getPlayHead() at this point; it could never fire, because instantiate() is
-    // only ever called from the constructor and an AudioProcessor's playhead is
-    // null until someone sets it.  Dead code that read as covering the case.
-    // The transport arrives instead when EngineRig::registerWithProcessor (or
-    // HostedPluginEffect's first transport push, for a rack slot) calls
-    // setPlayHead on this object, which forwards to mInner.
+    // Seed the fresh inner with any playhead this object already holds.  A
+    // no-op from the constructor (the playhead is null until
+    // EngineRig::registerWithProcessor, or HostedPluginEffect's first
+    // transport push for a rack slot, calls setPlayHead on this object, which
+    // forwards to mInner) -- but instantiate() is ALSO called from
+    // setStateInformation's bridge-mode swap, where the transport was attached
+    // long ago and neither attach path re-fires for an inner swap
+    // (HostedPluginEffect gates on mPlayHeadAttached, the rig sweep on a
+    // playhead POINTER change).  Without the seed, a plugin restored from
+    // bridged into in-process ran with no transport.
+    if (auto* ph = getPlayHead())
+        mInner->setPlayHead (ph);
+
     mInner->addListener (this);   // in-process "last touched" capture
     mState = HostedState::Ok;
     mError = {};
@@ -489,6 +495,14 @@ void HostedPluginInstance::getStateInformation (juce::MemoryBlock& dest)
     if (mSandbox != nullptr)      mSandbox->getState (inner);
     else if (mInner != nullptr)   mInner->getStateInformation (inner);
 
+    // A dead instance (missing DLL, failed load, crashed or timed-out helper)
+    // returns nothing; falling back to the retained blob is what stops a save
+    // from wiping the plugin's settings out of the project.
+    if (inner.getSize() == 0)
+        inner = mLastKnownState;
+    else
+        mLastKnownState = inner;
+
     if (inner.getSize() > 0)
         xml.setAttribute (kAttrBlob, inner.toBase64Encoding());
 
@@ -546,6 +560,10 @@ void HostedPluginInstance::setStateInformation (const void* data, int size)
     if (! inner.fromBase64Encoding (xml->getStringAttribute (kAttrBlob))
         || inner.getSize() == 0)
         return;
+
+    // Retained BEFORE the dispatch, so a plugin that never came up still carries
+    // its saved bytes through to the next save.
+    mLastKnownState = inner;
 
     if (mSandbox != nullptr)
         mSandbox->setState (inner.getData(), (int) inner.getSize());

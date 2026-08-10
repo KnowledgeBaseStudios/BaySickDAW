@@ -119,14 +119,6 @@ void FlangerDSP::setInvertWet (bool b)
 {
     if (b != mInvertWet) mInvertWet = b;
 }
-void FlangerDSP::setDryLevel (float dB)
-{
-    if (dB != mDryLevelDb) mDryLevelDb = dB;
-}
-void FlangerDSP::setWetLevel (float dB)
-{
-    if (dB != mWetLevelDb) mWetLevelDb = dB;
-}
 void FlangerDSP::setCrossLevel (float dB)
 {
     if (dB != mCrossLevelDb) mCrossLevelDb = dB;
@@ -152,7 +144,8 @@ void FlangerDSP::setHostBPM (double bpm)
 void FlangerDSP::recomputeDampAlpha()
 {
     // 1-pole LP state-feedback coefficient: a = exp(-2*pi*fc/sr).
-    // Floor fc at mSampleRate/2 so the filter stays stable.
+    // Bounds 20 Hz .. 0.45*SR: fc <= 0 would give a >= 1 (runaway inside the
+    // feedback loop), and the exp mapping only tracks a real cutoff below Nyquist.
     const double sr = (mSampleRate > 0.0) ? mSampleRate : 44100.0;
     const double fc = juce::jlimit (20.0, 0.45 * sr, (double) mDampHz);
     mDampAlpha = (float) std::exp (-juce::MathConstants<double>::twoPi * fc / sr);

@@ -71,13 +71,16 @@ public:
     void setAuditionHandlers(std::function<void(int rowIdx)> onOn,
                              std::function<void(int rowIdx)> onOff);
     void setReorderHandler  (std::function<void(int srcRow, int dstRow)> fn);
+    // Relabels the lock button for the kit on screen.  The sidebar never
+    // derives the bank itself -- the container owns the view selection.
+    void setKitViewPage     (int page);
 
     std::function<void(const juce::MouseEvent&,
                        const juce::MouseWheelDetails&)>    onWheel;
 
-    // 2026-04-26: Global Lock/Unlock - fired when the thin ruler-space button
-    // above the picker dropdowns is clicked.  Container forwards to DrumPage
-    // and ultimately StandaloneEditor for the confirm-prompt + actual toggle.
+    // Fired when the thin ruler-space lock button above the picker dropdowns
+    // is clicked.  The container stamps the viewed kit onto it and forwards to
+    // StandaloneEditor for the confirm-prompt + actual toggle.
     std::function<void()> onGlobalLockRequested;
 
     int rowFromY (int y) const;
@@ -97,7 +100,7 @@ private:
     std::array<std::unique_ptr<juce::TextButton>,   kNumRows> mPickers;
     std::array<std::unique_ptr<MixerLedButton>,     kNumRows> mMuteBtns;
     std::array<std::unique_ptr<MixerLedButton>,     kNumRows> mSoloBtns;
-    // 2026-04-26: thin global lock/unlock toggle in ruler row above pickers.
+    // Thin lock/unlock toggle in ruler row above pickers.
     std::unique_ptr<juce::TextButton>                         mGlobalLockBtn;
     using BtnAtt = juce::AudioProcessorValueTreeState::ButtonAttachment;
     std::array<std::unique_ptr<BtnAtt>, kNumRows>             mMuteAtt;
@@ -320,7 +323,6 @@ private:
     void        updateCursor         ();
 
     int         rowToPageIndex (int rowIdx) const;
-    int         pageIndexToRow (int pageIdx) const;
     PianoRollData* rollForRow  (int rowIdx) const;
 
     void finaliseMarquee ();
@@ -401,18 +403,17 @@ private:
     int  mHeaderDragStartH { 0 };
 };
 
-// ── Helper: TextButton with right-click callback ─────────────────────────
+// ── Helper: TextButton that swallows right-click ──────────────────────────
+// QA-UICleanup SC8 retired the Snap button's right-click resolution picker;
+// left-click opens the dropdown instead.  Eating the event here is what keeps
+// right-click from opening it too: juce::Button::mouseDown / mouseUp do not
+// filter by mouse button, so a plain TextButton fires onClick on any button.
 class DrumKitRightClickButton : public juce::TextButton
 {
 public:
-    std::function<void(const juce::MouseEvent&)> onRightMouseDown;
     void mouseDown(const juce::MouseEvent& e) override
     {
-        if (e.mods.isRightButtonDown())
-        {
-            if (onRightMouseDown) onRightMouseDown(e);
-            return;
-        }
+        if (e.mods.isRightButtonDown()) return;
         TextButton::mouseDown(e);
     }
 };
@@ -436,13 +437,20 @@ public:
     void setPatternManager (PatternManager* pm);
     void setApvts          (juce::AudioProcessorValueTreeState* a);
     void setKitRowProvider (std::function<std::vector<DrumKitRowInfo>()> fn);
-    // QA-Layout T11 (D3 ruling 1c+2a): the kit view covers 32 drum pages as
-    // TWO fixed sixteens -- pages 0..15 in view 0, 16..31 in view 1.  A drum
-    // NEVER moves between views (deleting one leaves a gap in its own view);
-    // the PR target list keeps ONE "Drum Kit" entry and this switch flips the
-    // visible sixteen.
+    // QA-SOUNDNESS (2026-08-07, Jeff): the two sixteens are two INDEPENDENT
+    // KITS, not one kit behind a view filter.  Slot range IS bank identity --
+    // pages 0..15 are kit 1, 16..31 are kit 2 (MixerChannelIds::
+    // drumBankForPage) -- so each kit owns its own drums bus, its own add
+    // allocation window and its own kit file.  Nothing stores a bank field:
+    // the page index already says which kit a drum belongs to, and a drum
+    // NEVER moves between kits (deleting one leaves a gap in its own kit).
+    // The PR target list keeps ONE "Drum Kit" entry and this switch picks
+    // which kit it is showing.
     void setKitViewPage (int page);
     int  getKitViewPage() const { return mKitViewPage; }
+    // Fired when the user picks the other kit.  StandaloneEditor mirrors it
+    // into the editor-side active bank, which is what add / save / load read.
+    std::function<void(int page)> onKitViewPageChanged;
     void setPlayheadBeat   (double beat);
     void setContextLabel   (const juce::String& text);
 
@@ -469,9 +477,10 @@ public:
     // open the Save Kit As / Load Kit popup.  Anchor passed for menu positioning.
     std::function<void(juce::Component* anchor)> onKitMenuRequested;
 
-    // 2026-04-26: Global Lock/Unlock button click - wired up the chain to
-    // StandaloneEditor where the confirm-prompt + cross-slot lock toggle live.
-    std::function<void()> onGlobalLockRequested;
+    // Lock/Unlock button click, carrying the kit the user is looking at.
+    // StandaloneEditor owns the confirm-prompt + the toggle, and the toggle is
+    // scoped to this bank -- the two kits lock independently.
+    std::function<void(int bank)> onGlobalLockRequested;
 
     void setActiveTool (DrumKitGrid::PRTool t);
     void applyZoom     (float factor);
@@ -519,10 +528,11 @@ private:
     std::unique_ptr<juce::TextButton>                mZoomInBtn, mZoomOutBtn;
     // Batch 5: Kit button - opens the Save Kit As / Load Kit popup.
     std::unique_ptr<juce::TextButton>                mKitBtn;
-    // QA-Layout T11 (D3): the two-sixteens view switch.  The container holds
-    // the RAW row provider + raw handlers; children get a view-filtered
-    // provider, and every child row index is translated back to a raw index
-    // before the stored handlers fire (handlers index the raw kit list).
+    // The kit switch (QA-Layout T11 D3; two independent kits since
+    // QA-SOUNDNESS).  The container holds the RAW row provider + raw handlers;
+    // children get a bank-filtered provider, and every child row index is
+    // translated back to a raw index before the stored handlers fire
+    // (handlers index the raw kit list).
     std::unique_ptr<juce::TextButton>                mKitView1Btn, mKitView2Btn;
     int                                              mKitViewPage { 0 };
     std::function<std::vector<DrumKitRowInfo>()>     mRawRowProvider;

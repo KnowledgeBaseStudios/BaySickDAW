@@ -17,7 +17,7 @@ if(MSVC)
 endif()
 
 # ── Local JUCE (no network / no DNS hit) ─────────────────────────────────────
-# JUCE 7.0.12 must be extracted to: C:\Users\jeffm\Documents\Vibesynth\juce\
+# Vendored JUCE 8.0.12 -- re-vendor from the matching release tag.
 set(JUCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/juce")
 if(NOT EXISTS "${JUCE_DIR}/CMakeLists.txt")
     message(FATAL_ERROR
@@ -27,25 +27,13 @@ if(NOT EXISTS "${JUCE_DIR}/CMakeLists.txt")
 endif()
 add_subdirectory("${JUCE_DIR}" juce_build)
 
-# ── Binary data (instrument samples) ─────────────────────────────────────────
-file(GLOB_RECURSE SAMPLE_FILES "${CMAKE_CURRENT_SOURCE_DIR}/Assets/Samples/*.wav")
-if(SAMPLE_FILES)
-    juce_add_binary_data(VibeSynthSamples SOURCES ${SAMPLE_FILES})
-else()
-    message(STATUS "No samples in Assets/Samples/ -- instrument mode silent until samples installed")
-    file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/stub_sample.txt" "no samples")
-    juce_add_binary_data(VibeSynthSamples SOURCES "${CMAKE_CURRENT_BINARY_DIR}/stub_sample.txt")
-endif()
-
 # ── Branding assets (logo / splash) ──────────────────────────────────────────
-# Unique HEADER_NAME + NAMESPACE so this doesn't collide with the existing
-# VibeSynthSamples default BinaryData.h/namespace.
+# Custom HEADER_NAME + NAMESPACE instead of the default BinaryData.h/BinaryData.
 juce_add_binary_data(BaySickDAWAssets
     HEADER_NAME "BaySickAssets.h"
     NAMESPACE   BaySickAssets
     SOURCES
         "${CMAKE_CURRENT_SOURCE_DIR}/Assets/BaySickDAWLogo.png"
-        "${CMAKE_CURRENT_SOURCE_DIR}/Assets/big_rusty_drums.svg"
         "${CMAKE_CURRENT_SOURCE_DIR}/Assets/big_rusty_drums.png"
         "${CMAKE_CURRENT_SOURCE_DIR}/Assets/control_tab.png"
 )
@@ -146,14 +134,11 @@ set(VIBESYNTH_DSP_SOURCES
     Source/Hosting/SandboxedPluginClient.cpp
     Source/SampleLibrary.cpp
     Source/VibeGraph.cpp
-    Source/SynthVoice.cpp
     Source/SynthSound.cpp
     Source/WavetableOscillator.cpp
-    Source/FMOscillator.cpp
     Source/SynthFilter.cpp
     Source/AdsrEnvelope.cpp
     Source/LFO.cpp
-    Source/BassSynth.cpp
     Source/PatternManager.cpp
     Source/ProjectManager.cpp
     Source/MidiRecorder.cpp
@@ -186,9 +171,9 @@ set(VIBESYNTH_DSP_SOURCES
     Source/BaySickBass/BaySickBassEditor.cpp
     # 2026-04-25: BaySickDrumsProcessor removed (legacy 16-slot kit superseded
     # by per-drum-tab dynamic engines).  DrumSynth.cpp also gone.
-    # Multi-threaded render engine (Phase 1 scaffolding, 2026-05-06) — flag is
-    # constexpr false; these compile but the dispatcher branch is elided in
-    # processBlock until per-strip integration ships in Batches 3-8.
+    # Multi-threaded render engine.  RenderEngine::gMultiThreadedEngineEnabled is a
+    # RUNTIME atomic (worker-park vs parallel), not a build gate -- the dispatcher
+    # is the single render path either way.  Contract in Source/Engine/RenderEngineFlags.h.
     Source/Engine/VibeThreadPool.cpp
     Source/Engine/RenderGraphDispatcher.cpp
     # Batch 3 (2026-05-06): EngineInsertTask wraps Layer/Bass/Drum engine
@@ -213,7 +198,6 @@ set(VIBESYNTH_DSP_SOURCES
 )
 
 set(VIBESYNTH_LINK_LIBS
-    VibeSynthSamples
     juce::juce_audio_utils
     juce::juce_dsp
 )
@@ -302,23 +286,6 @@ else()
     message(STATUS "sfizz not found at ${SFIZZ_DIR}/src/sfizz.h"
                    " — Phase J BaySickRustyDrums engine will be disabled.")
     set(BAYSICK_HAS_SFIZZ FALSE)
-endif()
-
-# ── J-8 (2026-05-04): vendored LunaSVG for high-fidelity SVG rendering ────────
-# JUCE's built-in SVG renderer is incomplete (no <linearGradient>/<radialGradient>
-# resolution, no `fill="url(#id)"` support).  Big Rusty Drums' kit graphic relies
-# on radial gradients for shells/heads/cymbals; without LunaSVG every piece would
-# render as a black ellipse.  LunaSVG (MIT) is single-deps (PlutoVG, vendored as
-# submodule) and renders to a pixel bitmap we wrap as juce::Image once at load.
-set(LUNASVG_DIR "${CMAKE_CURRENT_SOURCE_DIR}/libs/lunasvg")
-if(EXISTS "${LUNASVG_DIR}/include/lunasvg.h")
-    set(LUNASVG_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
-    add_subdirectory("${LUNASVG_DIR}" lunasvg_build)
-    set(BAYSICK_HAS_LUNASVG TRUE)
-else()
-    message(STATUS "LunaSVG not found at ${LUNASVG_DIR}/include/lunasvg.h"
-                   " — kit graphic will fall back to JUCE SVG (black blobs).")
-    set(BAYSICK_HAS_LUNASVG FALSE)
 endif()
 
 # ── QA-Fe (2026-07-13): vocal pitch-shift engines (WORLD / Rubber Band / Signalsmith) ──
@@ -520,7 +487,6 @@ target_sources(BaySickDAWStandalone PRIVATE
     # Phase 1 — new shell components
     Source/Standalone/GlobalTransportBar.cpp
     Source/Standalone/RibbonTabBar.cpp
-    Source/Standalone/InstrumentPage.cpp
     # Phase 2 — DSP modules
     Source/DSP/AudioClipStreamer.cpp
     Source/DSP/Mp3Writer.cpp                 # QA-Export (2026-07-25) - libmp3lame front end
@@ -649,12 +615,14 @@ target_sources(BaySickDAWStandalone PRIVATE
     Source/BaySickVocal/BaySickPitchEditor.cpp
     Source/BaySickVocal/BaySickPitchSubEditor.cpp
     Source/BaySickVocal/BaySickAlignEditor.cpp
-    # Phase G-2 — Clips page (engine picker hosts BaySickPlayer or
-    # BaySickNAM/IR; spawned via Builder drop or empty-state drop, never
-    # via the ribbon dropdown)
+    # Phase G-2 — Clips page (one BaySickPlayer per tab, no engine picker; spawned
+    # by a Builder drop, an empty-state drop, or the ribbon's
+    # "+ Add BaySickPlayer..." file-picker route)
     Source/Clips/ClipsPage.cpp
-    # Phase G-4 — Vox + Inst pages (same dual-engine A/B-style architecture
-    # as Clips, spawned by the Mixer page's "Add Vox/Inst Strip" buttons).
+    # Phase G-4 — Vox + Inst pages.  The mixer strip is created first (Mixer Add
+    # menu, ribbon "+", or project restore) and fires onVoxStripAdded /
+    # onInstStripAdded to spawn the page, so neither type can be rebuilt from the
+    # model alone.
     Source/Vox/VoxPage.cpp
     Source/Inst/InstPage.cpp
     # Phase 4D — Event Editor
@@ -722,13 +690,6 @@ if(BAYSICK_HAS_SFIZZ)
     target_compile_definitions(BaySickDAWStandalone PRIVATE BAYSICK_HAS_SFIZZ=1)
 endif()
 
-# J-8 — link LunaSVG (high-fidelity SVG → pixel bitmap rendering) when vendored.
-if(BAYSICK_HAS_LUNASVG)
-    target_link_libraries(BaySickDAWStandalone PRIVATE lunasvg)
-    target_include_directories(BaySickDAWStandalone PRIVATE "${LUNASVG_DIR}/include")
-    target_compile_definitions(BaySickDAWStandalone PRIVATE BAYSICK_HAS_LUNASVG=1)
-endif()
-
 # QA-Fe -- link the vocal pitch-shift engines (standalone-only) when vendored.
 # WORLD + Rubber Band are compiled static libs; Signalsmith is header-only (just
 # include paths).  Each gets a BAYSICK_HAS_<engine>=1 define so the IPitchShifter
@@ -790,7 +751,7 @@ endif()
 # down.  FL's measured shape: one process per bridged plugin.
 #
 # Links ONLY the three JUCE modules it needs and NONE of our vendored libraries
-# (sfizz / NAM / RubberBand / LAME / WORLD / lunasvg).  That is deliberate and
+# (sfizz / NAM / RubberBand / LAME / WORLD).  That is deliberate and
 # load-bearing: those are all x64 builds in this tree, and the 32-bit helper
 # (BLU-302 7b, built from this same source via a separate Win32 configure)
 # would otherwise require x86 builds of every one of them.  Keeping this binary

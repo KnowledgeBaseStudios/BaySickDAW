@@ -19,10 +19,11 @@
 // output; mix = 100% means full processed signal, mix = 0% means full
 // dry passthrough (regardless of Mode).
 //
-// Threading: setBuiltInModel + loadUserIr run on the message thread.  The
-// EQ-coeff swap (Built-in mode) is wait-free via per-band coefficient
-// pointer copy; user-IR convolution swap uses juce::dsp::Convolution's
-// own wait-free pattern.
+// Threading: setModel + loadUserIr run off the audio thread.  The EQ-coeff
+// swap (Built-in mode) is wait-free via per-band coefficient pointer copy;
+// user-IR convolution swap uses juce::dsp::Convolution's own wait-free
+// pattern.  process() gates the user-IR path on the per-slot atomic flag and
+// never reads the per-slot path strings, which the loader reassigns.
 // ─────────────────────────────────────────────────────────────────────────────
 
 class MicSimDSP
@@ -68,6 +69,12 @@ public:
     // Per-slot Mic IR (matches BaySickNAMIR's A/B slot model).  Both slots'
     // IRs stay resident in RAM; setActiveSlot() switches which is heard
     // instantly with no reload.  -1 in any slot arg means "active slot".
+    //
+    // Takes a RESOLVED file (callers resolve the stored reference through
+    // ProjectFileResolver first) and records the persisted reference for it.
+    // Returns false with outErr filled when the file cannot be read as audio;
+    // the slot is left exactly as it was in that case, so a failed pick never
+    // strips a working IR, and the caller reports the failure.
     bool loadUserIr   (const juce::File& f, juce::String& outErr, int slot = -1);
     void clearUserIr  (int slot = -1);
     void setActiveSlot (int slot) noexcept { mActiveSlot.store (juce::jlimit (0, 1, slot),
@@ -81,6 +88,9 @@ public:
         const int s = (slot < 0) ? getActiveSlot() : juce::jlimit (0, 1, slot);
         return mUserIrLoaded[(size_t) s].load (std::memory_order_acquire);
     }
+    // Returns the PERSISTED reference ("library:<rel>" / "mysamples:<rel>" or an
+    // absolute path), which is what gets saved -- never build a bare juce::File
+    // from it to open the file; resolve it through ProjectFileResolver.
     juce::String getUserIrPath (int slot = -1) const noexcept
     {
         const int s = (slot < 0) ? getActiveSlot() : juce::jlimit (0, 1, slot);

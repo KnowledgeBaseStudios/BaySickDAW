@@ -22,9 +22,11 @@ enum class BssVoiceMode { Poly = 0, Mono, Lead, Legato, kCount };
 enum class BssFilterType { LowPass = 0, HighPass, BandPass, Notch, kCount };
 
 // ── BaySickSynthVoice ─────────────────────────────────────────────────────────
-// A single polyphonic voice for BaySickSynth.
-// Owns: two WavetableOscillators (main + dual-osc), SynthFilter, two ADSR
-// envelopes (amp + filter), one LFO.
+// A single polyphonic voice for BaySickSynth (and, via BaySickSynthDSP, for
+// BaySickBass -- there is no separate bass voice class).
+// Owns: two WavetableOscillators (main + dual-osc), SynthFilter, three ADSR
+// envelopes (amp + filter + pitch), one LFO.  EVERY one of those is rate
+// dependent and must be prepared from setCurrentPlaybackSampleRate.
 //
 // All setters are called from BaySickSynthDSP before renderNextBlock.
 // renderNextBlock executes per-sample processing entirely in the inner loop.
@@ -161,6 +163,9 @@ private:
     float       mDriftCurrentCents { 0.0f };
     int         mDriftCounter    { 0 };
     uint32_t    mDriftRngState   { 0x8F1BBCDCu };
+    // One-pole smoothing coefficient for the drift glide, re-derived per sample
+    // rate so the wander takes the same wall-clock time on every device.
+    float       mDriftSmoothCoef { 0.0005f };
 
     // P3.11 unison - up to 6 detuned saw copies (voices 2-7) panned across stereo.
     int         mUnisonVoices    { 1 };
@@ -190,6 +195,17 @@ private:
     int    mNoiseColor   { 0 };
     float  mPinkB[7]     { 0, 0, 0, 0, 0, 0, 0 };   // Kellett pink-noise filter state
     float  mBrownState   { 0.0f };                  // Leaky integrator for brown
+    // The published Kellett pink poles/gains and the brown integrator pole are a
+    // 44.1 kHz design.  setCurrentPlaybackSampleRate re-derives them for the live
+    // rate so the noise keeps the same color and the same level on every device;
+    // the defaults here are the published values, which the derivation reproduces
+    // exactly at 44.1 kHz.
+    float  mPinkPole[6]  { 0.99886f,   0.99332f,   0.96900f,
+                           0.86650f,   0.55000f,  -0.7616f };
+    float  mPinkGain[6]  { 0.0555179f, 0.0750759f, 0.1538520f,
+                           0.3104856f, 0.5329522f, -0.0168980f };
+    float  mBrownPole    { 0.998f };
+    float  mBrownGain    { 0.02f };
 
     // ── Voice mode ────────────────────────────────────────────────────────────
     BssVoiceMode mVoiceMode { BssVoiceMode::Poly };

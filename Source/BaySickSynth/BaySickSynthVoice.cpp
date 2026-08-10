@@ -11,6 +11,42 @@ namespace
     constexpr float kEnvFullSweepOctaves   = 4.0f;   // envAmt=1 sweeps cutoff +/- 4 oct
     constexpr float kLfoFullSweepOctaves   = 2.0f;   // LFO at full depth = +/- 2 oct
     constexpr float kModWheelSweepOctaves  = 2.0f;   // mod wheel max = +2 oct
+
+    // Analog drift (P3.10) smoothing time constant.  Calibration: the shipped
+    // voicing used a fixed one-pole coefficient of 0.0005 per sample, which is a
+    // 1 / (0.0005 * 44100) = 45.35 ms time constant at 44.1 kHz.  Deriving the
+    // coefficient from this duration keeps the drift glide identical in seconds
+    // at every device rate (the fixed coefficient made it 4x slower at 192 kHz).
+    constexpr float kDriftSmoothTauSec = 0.045351f;
+
+    // Paul Kellett's pink-noise section poles/gains and the brown-noise leaky
+    // integrator are published for a 44.1 kHz design rate.  Re-poling by
+    // p' = sign(p) * |p| ^ (44100 / rate) holds each section's corner at the same
+    // frequency in Hz; scaling the gain by sqrt((1 - p'^2) / (1 - p^2)) holds its
+    // output variance, so both the -3 dB/oct (pink) and -6 dB/oct (brown) slopes
+    // AND the loudness stay put across the rate matrix.  The exponent is 1 at
+    // 44.1 kHz, so the derivation reproduces the published numbers exactly there.
+    constexpr double kNoiseDesignRate = 44100.0;
+
+    constexpr float kPinkDesignPole[6] = { 0.99886f,   0.99332f,   0.96900f,
+                                           0.86650f,   0.55000f,  -0.7616f };
+    constexpr float kPinkDesignGain[6] = { 0.0555179f, 0.0750759f, 0.1538520f,
+                                           0.3104856f, 0.5329522f, -0.0168980f };
+    constexpr float kBrownDesignPole = 0.998f;
+    constexpr float kBrownDesignGain = 0.02f;
+
+    void repoleNoiseSection (double rate, float designPole, float designGain,
+                             float& poleOut, float& gainOut) noexcept
+    {
+        const double exponent = kNoiseDesignRate / rate;
+        const double mag      = std::pow ((double) std::fabs (designPole), exponent);
+        const double pole     = designPole < 0.0f ? -mag : mag;
+        const double design   = (double) designPole;
+
+        poleOut = (float) pole;
+        gainOut = (float) ((double) designGain
+                           * std::sqrt ((1.0 - pole * pole) / (1.0 - design * design)));
+    }
 }
 
 BaySickSynthVoice::BaySickSynthVoice()
@@ -21,11 +57,43 @@ BaySickSynthVoice::BaySickSynthVoice()
 }
 
 //==============================================================================
+// EVERY rate-dependent member is prepared here.  Before QA-BufferMatrix only the
+// two oscillators were, so pitch tracked the device but the filter, both mod
+// envelopes, the pitch envelope and the LFO all ran at their 44.1 kHz default --
+// i.e. rate/44100 too fast (at 96 kHz a 500 Hz cutoff behaved like 1.09 kHz and a
+// 5 Hz LFO ran at 10.9 Hz).  Anything new that stores a per-sample coefficient
+// belongs in this function, not in a member initializer.
+//
+// Order-independent by construction: each helper's prepare() re-derives its
+// coefficients from the user values it already holds (AdsrEnvelope re-runs
+// setParameters on the stored ADSR, SynthFilter re-runs calcCoeffs on the stored
+// cutoff/Q, LFO re-runs recalc on the stored rate), so a device change cannot
+// reset the patch whether the DSP's setters ran before or after this call.
 void BaySickSynthVoice::setCurrentPlaybackSampleRate (double newRate)
 {
     juce::SynthesiserVoice::setCurrentPlaybackSampleRate (newRate);
-    mOsc.prepare  (newRate);
-    mOsc2.prepare (newRate);
+
+    // JUCE hands out a zero rate before a device exists; deriving from it would
+    // poison every coefficient with inf/NaN, so keep the last valid preparation.
+    if (newRate <= 0.0)
+        return;
+
+    mOsc.prepare     (newRate);
+    mOsc2.prepare    (newRate);
+    mFilter.prepare  (newRate);
+    mAmpEnv.prepare  (newRate);
+    mFltEnv.prepare  (newRate);
+    mPitchEnv.prepare (newRate);
+    mLFO.prepare     (newRate);
+
+    mDriftSmoothCoef = 1.0f - std::exp (-1.0f / (kDriftSmoothTauSec * (float) newRate));
+
+    for (int k = 0; k < 6; ++k)
+        repoleNoiseSection (newRate, kPinkDesignPole[k], kPinkDesignGain[k],
+                            mPinkPole[k], mPinkGain[k]);
+
+    repoleNoiseSection (newRate, kBrownDesignPole, kBrownDesignGain,
+                        mBrownPole, mBrownGain);
 }
 
 //==============================================================================
@@ -256,8 +324,8 @@ void BaySickSynthVoice::controllerMoved (int cc, int value)
         const float p = juce::jlimit (-1.0f, 1.0f, ((float) value - 64.0f) / 63.0f);
        #if JUCE_DEBUG
         if (mPanRampLeft > (int) (0.01 * getSampleRate()))   // a real (slide) ramp, not a declick
-            G3PlayheadDiag::logPan ("cc10 STOMP mid-ramp (bss): val=" + juce::String (p, 3)
-                + " rampLeft=" + juce::String (mPanRampLeft));
+            G3PlayheadDiag::pushRT ("[G3 PAN] cc10 STOMP mid-ramp (bss) val/rampLeft",
+                                    2, (double) p, (double) mPanRampLeft);
        #endif
         if (isVoiceActive())
         {
@@ -326,10 +394,9 @@ bool BaySickSynthVoice::tryRampTakeover (int targetNote)
     }
     // #11 (G-4): pan glides current -> CC89 target over the same span.
    #if JUCE_DEBUG
-    G3PlayheadDiag::logPan ("arm(bss) pend=" + juce::String (mPanRampPend, 3)
-        + " from=" + juce::String (mNotePan, 3)
-        + " glideSamples=" + juce::String ((int) glideSamples)
-        + " timePending=" + juce::String ((int) mGlideTimePending));
+    G3PlayheadDiag::pushRT ("[G3 PAN] arm(bss) pend/from/glideSamples/timePending",
+                            4, (double) mPanRampPend, (double) mNotePan,
+                            (double) glideSamples, (double) mGlideTimePending);
    #endif
     if (mPanRampPend > -2.0f)
     {
@@ -403,7 +470,7 @@ void BaySickSynthVoice::renderNextBlock (juce::AudioBuffer<float>& buf,
 
         // ── Analog drift (P3.10): slow per-voice pitch wander for warmth ──────
         //   Retargets to a new random offset every ~400 ms, smooths toward it
-        //   with a ~100 ms time constant so the motion is always audible but
+        //   with a ~45 ms time constant so the motion is always audible but
         //   never abrupt. ±25 cents at max = quarter-tone; typical musical use
         //   is 0.2-0.4 for subtle analog warmth.
         if (mDriftAmount > 0.0001f)
@@ -415,8 +482,7 @@ void BaySickSynthVoice::renderNextBlock (juce::AudioBuffer<float>& buf,
                 mDriftTargetCents = rnd * 25.0f;   // ±25 cents at max
                 mDriftCounter    = (int) (sr * 0.4f);
             }
-            // Faster exponential smoothing (~100 ms time constant @ 48 kHz).
-            mDriftCurrentCents += (mDriftTargetCents - mDriftCurrentCents) * 0.0005f;
+            mDriftCurrentCents += (mDriftTargetCents - mDriftCurrentCents) * mDriftSmoothCoef;
             pitchSemis += (mDriftCurrentCents / 100.0f) * mDriftAmount;
         }
 
@@ -707,21 +773,24 @@ void BaySickSynthVoice::renderNextBlock (juce::AudioBuffer<float>& buf,
 
             float colouredN = whiteN;
 
+            // Pink / brown poles + gains are re-derived per sample rate in
+            // setCurrentPlaybackSampleRate; the b[6] and 0.5362 terms are flat
+            // (no pole), so they carry no rate dependence and stay literal.
             if (mNoiseColor == 1)  // Pink (Paul Kellett filter, ~ -3 dB/oct slope)
             {
-                mPinkB[0] = 0.99886f * mPinkB[0] + whiteN * 0.0555179f;
-                mPinkB[1] = 0.99332f * mPinkB[1] + whiteN * 0.0750759f;
-                mPinkB[2] = 0.96900f * mPinkB[2] + whiteN * 0.1538520f;
-                mPinkB[3] = 0.86650f * mPinkB[3] + whiteN * 0.3104856f;
-                mPinkB[4] = 0.55000f * mPinkB[4] + whiteN * 0.5329522f;
-                mPinkB[5] = -0.7616f * mPinkB[5] - whiteN * 0.0168980f;
+                mPinkB[0] = mPinkPole[0] * mPinkB[0] + whiteN * mPinkGain[0];
+                mPinkB[1] = mPinkPole[1] * mPinkB[1] + whiteN * mPinkGain[1];
+                mPinkB[2] = mPinkPole[2] * mPinkB[2] + whiteN * mPinkGain[2];
+                mPinkB[3] = mPinkPole[3] * mPinkB[3] + whiteN * mPinkGain[3];
+                mPinkB[4] = mPinkPole[4] * mPinkB[4] + whiteN * mPinkGain[4];
+                mPinkB[5] = mPinkPole[5] * mPinkB[5] + whiteN * mPinkGain[5];
                 colouredN = (mPinkB[0] + mPinkB[1] + mPinkB[2] + mPinkB[3]
                            + mPinkB[4] + mPinkB[5] + mPinkB[6] + whiteN * 0.5362f) * 0.11f;
                 mPinkB[6] = whiteN * 0.115926f;
             }
             else if (mNoiseColor == 2)  // Brown (leaky integrator, ~ -6 dB/oct slope)
             {
-                mBrownState = 0.998f * mBrownState + whiteN * 0.02f;
+                mBrownState = mBrownPole * mBrownState + whiteN * mBrownGain;
                 mBrownState = juce::jlimit (-1.0f, 1.0f, mBrownState);
                 colouredN   = mBrownState * 3.5f;   // level-match to white
             }

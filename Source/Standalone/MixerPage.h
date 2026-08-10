@@ -10,7 +10,9 @@
 // ── MixerPage ─────────────────────────────────────────────────────────────────
 // Permanent system tab (Mixer).  Horizontal console layout with horizontal scroll.
 //
-// Default state: Master (fixed) + 4 Bus strips.
+// Default state: Master (fixed) + the Layers / Bass / Drums / FX / Clips /
+// Vox / Inst bus strips.  The RustyDrums, Plugins and Drums Bus 2 strips are
+// built at construction but stay hidden until a tab of that family exists.
 // Instrument channel strips are created lazily:
 //   addLayerChannel(pageIndex, name) - called when a Layers tab is opened
 //   addBassChannel (pageIndex, name) - called when a Bass tab is opened
@@ -19,9 +21,13 @@
 // Closing a tab removes its strip WIDGET only -- the InsertNode + APVTS
 // params persist, so re-adding the same index restores prior settings.
 //
-// Bidirectional name sync for Layer/Bass:
-//   mixer strip rename  → onChannelRenamed(tabId, newName) → ribbon renameTab()
-//   ribbon tab rename   → renameChannel(tabId, newName)    → strip setTrackName()
+// Name sync between a channel strip and its ribbon tab:
+//   mixer strip rename  -> onChannelRenamed(kind, pageIdx, newName) -> ribbon renameTab()
+//   ribbon tab rename   -> renameChannel  (kind, pageIdx, newName)  -> strip setTrackName()
+// Drum strips are not editable in the mixer, so those only travel ribbon -> strip.
+// Both directions land in ONE StandaloneEditor body and ONE undo transaction --
+// which is also the project's dirty signal, so neither may be short-circuited
+// here into a bare setTrackName.
 //
 // Strip order (left → right):
 //   [Master] | sep | [Layers Bus][Bass Bus][Drums Bus][FX Bus] | sep |
@@ -43,9 +49,31 @@ public:
     // Set by StandaloneEditor - called when any strip's FX button is clicked.
     std::function<void(const juce::String&)> onEffectsTabRequested;
 
-    // Fired when the user renames a Layer or Bass strip in the mixer.
-    // StandaloneEditor wires this to mRibbon->renameTab().
-    std::function<void(int tabId, const juce::String& newName)> onChannelRenamed;
+    // C.4 follow-up (2026-04-30): kind tag added because Layer / Bass / Drum
+    // strip maps are all keyed by per-type page index (0..N-1).  The old
+    // signature took only an index and searched maps in order Layer -> Bass
+    // -> Drum, stopping at first match -- which collided when Bass[0] and
+    // Drum[0] coexisted (renaming the Drum hit Bass's strip first).
+    // QA-ClipDrop Task 3 (SC-H, 2026-06-03): Audio added so a Clips ribbon-tab
+    // rename syncs through to its mixer strip (strips live in mAudioStrips keyed
+    // by the owning Clips-page row index) -- parity with Layer/Bass/Drum.
+    // TS6 (BLU-447) -- Plugin added TS7 2026-07-30 for the same reason Audio was
+    // added above: without an enum entry a plugin tab rename had no route to its
+    // mixer strip at all.
+    // Vox / Inst added for the REVERSE gap: their strips are renameable and
+    // their names persist in <VoxNames> / <InstNames>, but with no enum entry a
+    // strip rename never reached the owning tab, so the strip and the ribbon
+    // tab drifted into two permanent different names for one channel.
+    enum class StripKind { Layer, Bass, Drum, Audio, Plugin, Vox, Inst };
+
+    // Fired when the user renames a channel strip in the mixer.  StandaloneEditor
+    // resolves (kind, pageIdx) to the owning ribbon tab and renames it.  The kind
+    // is load-bearing in BOTH directions: without it an index alone cannot name a
+    // target, because every strip family numbers its own pages from 0.
+    // An Audio row whose Clips tab is gone has nowhere to store the name, so the
+    // editor snaps the label back through renameChannel and says why -- do not
+    // assume the strip still reads `newName` when this returns.
+    std::function<void(StripKind kind, int pageIdx, const juce::String& newName)> onChannelRenamed;
 
     // Fired when any audio row strip is renamed - StandaloneEditor rebuilds Effects dropdown.
     std::function<void()> onAudioStripRenamed;
@@ -180,10 +208,13 @@ public:
     // doesn't exist at the given index.
     void setInstStripNoLiveInput (int idx, bool b);
 
-    // J-5: BaySickRustyDrums strip add/remove (driven by kit-load lifecycle,
+    // Substituted-kit display marker for a sfizz Inst strip (red name + a
+    // tooltip line, never label text).  No-op if the strip doesn't exist.
+    void setInstStripKitMissing (int idx, bool b);
+
+    // J-5: BaySickRustyDrums strip add/clear (driven by kit-load lifecycle,
     // NOT user-clicks).  Idempotent - safe to call again with same idx.
     void addRustyChannelAtIndex (int idx, const juce::String& name);
-    void removeRustyChannelAtIndex (int idx);
     void clearAllRustyChannels();
 
     // D.3 (2026-05-01): override strip display order from a saved project.
@@ -222,19 +253,9 @@ public:
     }
     void setBusEverRouted (int chId, bool v) { mBusEverRouted[chId] = v; }
 
-    // Called by StandaloneEditor when a ribbon tab is renamed (ribbon → mixer sync).
-    // C.4 follow-up (2026-04-30): kind tag added because Layer / Bass / Drum
-    // strip maps are all keyed by per-type page index (0..N-1).  The old
-    // signature took only an index and searched maps in order Layer -> Bass
-    // -> Drum, stopping at first match -- which collided when Bass[0] and
-    // Drum[0] coexisted (renaming the Drum hit Bass's strip first).
-    // QA-ClipDrop Task 3 (SC-H, 2026-06-03): Audio added so a Clips ribbon-tab
-    // rename syncs through to its mixer strip (strips live in mAudioStrips keyed
-    // by the owning Clips-page row index) -- parity with Layer/Bass/Drum.
-    // TS6 (BLU-447) -- Plugin added TS7 2026-07-30 for the same reason Audio was
-    // added above: without an enum entry a plugin tab rename had no route to its
-    // mixer strip at all.
-    enum class StripKind { Layer, Bass, Drum, Audio, Plugin };
+    // Called by StandaloneEditor when a ribbon tab is renamed (ribbon -> mixer
+    // sync); the reverse direction is onChannelRenamed above, which declares the
+    // StripKind both share.
     void renameChannel(StripKind kind, int pageIdx, const juce::String& newName);
 
     // Connect to the global undo system.
@@ -320,6 +341,12 @@ private:
     std::unique_ptr<MixerTrackStrip> mLayersBusStrip;
     std::unique_ptr<MixerTrackStrip> mBassBusStrip;
     std::unique_ptr<MixerTrackStrip> mDrumsBusStrip;
+    // QA-SOUNDNESS (2026-08-07): kit 2's own drums bus.  Deliberately NOT one
+    // of the flag-gated secondary buses -- it is a system bus like Drums Bus,
+    // so it carries no activation flag, no Add-menu entry and no delete: it is
+    // always constructed and laidOutBus shows it exactly while a bank-2 drum
+    // strip routes to it, which is the same rule Drums Bus itself follows.
+    std::unique_ptr<MixerTrackStrip> mDrumsBus2Strip;
     std::unique_ptr<MixerTrackStrip> mFXBusStrip;
     std::unique_ptr<MixerTrackStrip> mAudioClipsBusStrip;
     // R1 (2026-04-23): Vox + Inst buses for live-input strip aggregation.
@@ -411,9 +438,10 @@ private:
     // layoutScrollContent().
     std::unique_ptr<juce::Component>                mDirectRoutingLabel;
 
-    // Cache of each strip's last-known _sendTo value. The timerCallback
-    // compares every tick; any delta triggers layoutScrollContent() so strips
-    // visually move when their main-out cable is rerouted.
+    // Change key folded from ALL of a strip's main-out lines (not a routing
+    // value anyone reads). The timerCallback compares every tick; any delta
+    // triggers layoutScrollContent() so strips visually move when a main-out
+    // cable is rerouted and buses appear / disappear with the extra lines.
     std::map<int, int>                              mLastSendToCache;
     // R3.5 (2026-04-23): cable-overlay scroll-detection cache.  Drives a
     // repaint when the viewport scroll position changed since the last
@@ -463,6 +491,17 @@ private:
         // (target-side encoding).  Returns -1 if all 4 receive lines are full.
         int findAvailableScRecvSlot(const juce::String& targetPrefix) const;
 
+        // ── Main-out lines ────────────────────────────────────────────────────
+        // Current destination of one main-out line (line 0 = the strip's
+        // permanent output; 1..3 return -1 when inactive).
+        int  mainOutDest (const juce::String& prefix, int line) const;
+        // First inactive extra line (1..3), or -1 when all four are in use.
+        int  findAvailableMainOutLine (const juce::String& prefix) const;
+        // Is dstId already fed by any of this strip's main-out lines?  Two
+        // lines to one destination would sum the strip in twice, so the menu
+        // refuses it.
+        bool isMainOutDestInUse (const juce::String& prefix, int dstId) const;
+
         // B6: right-click cable popup
         // Returns {srcId, dstId, sendSlotIdx} if a cable is near pt; else {-1,-1,-1}.
         // C.4 Phase 1 extends with sidechain detection: when isSidechain is
@@ -475,6 +514,10 @@ private:
             int  scRecvSlot = -1;
             bool isMainOut  = false;
             bool isSidechain= false;
+            // Which of the source's main-out lines this cable is (0..3), when
+            // isMainOut.  Line 0 is the strip's permanent output and has no
+            // delete affordance; 1..3 can be removed from the cable popup.
+            int  mainLine   = -1;
         };
         CableHit hitTestCable(juce::Point<float> pt) const;
         // QA-Eg: returns ALL cables within hit-zone of pt, in paint order
@@ -544,9 +587,6 @@ private:
     void wireMasterCallbacks();
     void wireBusCallbacks(MixerTrackStrip* strip, float& levelRef, float& panRef,
                           bool& muteRef, bool& soloRef);
-
-    void drawSectionLabel(juce::Graphics& g, const juce::String& text,
-                          juce::Rectangle<int> bounds) const;
 
     // ── Undo context + pending before-state ───────────────────────────────────
     UndoContext  mUndoCtx;

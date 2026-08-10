@@ -4,6 +4,7 @@
 
 #include "../RenderTask.h"
 #include "../BlockContext.h"
+#include "IdleSuspendFade.h"
 
 class BaySickRustyDrumsProcessor;
 class VibeSynthProcessor;
@@ -19,8 +20,10 @@ class VibeSynthProcessor;
 // so they finish-after the producer.
 //
 // Idle suspend: if MIDI is empty AND the engine reports 0 active voices for
-// kIdleSuspendBlocks consecutive blocks, skip processStrips entirely.  Wakes
-// immediately on next block where any gate fails.  Counter lives in
+// kIdleSuspendBlocks consecutive blocks, fade the rendered strips out over
+// IdleSuspendFade::kFadeOutSeconds and only then skip processStrips entirely.
+// Wakes on the next block where any gate fails, ramping back to unity from
+// wherever the fade had got to.  Counter lives in
 // VibeSynthProcessor::mRustyIdleBlocks.
 //
 // QA-Ef (2026-05-21): this is the live audio plumbing.
@@ -33,4 +36,7 @@ public:
 
 private:
     VibeSynthProcessor* mProcessor = nullptr;
+
+    // Idle-suspend shutdown envelope (see IdleSuspendFade.h).
+    IdleSuspendFade mSuspendFade;
 };

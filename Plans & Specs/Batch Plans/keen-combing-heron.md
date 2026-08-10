@@ -94,6 +94,16 @@ sweep (agents, one per sub-category)
   -> record in running notes (including anything REFUTED, and why)
 ```
 
+**Documentation capture rides every sweep (Jeff, 2026-08-06).** This is the last pass through the
+whole codebase before G4 closes, so every sweep agent ALSO returns a structured documentation
+capture for the areas it read - not findings, DESCRIPTION: what the system is, how it actually
+operates (signal/data flow, who owns what, what talks to what), the user-facing behavior and
+controls it exposes, its parameters and persistence shape, and its threading/lifetime rules.
+Captures accumulate in the running notes' documentation ledger as raw material; Task 9 consolidates
+them AFTER the tree stops changing so the docs describe the post-fix reality, never an
+intermediate state.  Two purposes, both Jeff's: a clean record of the true state of everything,
+and the source pool the user manuals get built from.
+
 **Verification is not optional.** An agent finding is a lead, not a fact
 (`feedback_verify_subagent_finding_premise`). A sweep this wide will generate plausible-but-wrong
 findings, and fixing a non-bug is worse than missing a real one — it churns working code.
@@ -188,7 +198,28 @@ findings, and fixing a non-bug is worse than missing a real one — it churns wo
   single pass would miss anything the earlier fixes created.
 - [ ] Repeat until a sweep round produces zero new confirmed findings. **This is what "the batch ends
   when it is clean" means in practice** (consequence of 1=a).
+- [ ] Refresh any documentation captures whose areas the fix rounds changed (the consolidation in
+  Task 9 must describe the clean tree, not a mid-fix snapshot).
 - [ ] Build gate.
+
+### Task 9 — System Reference consolidation (Jeff, 2026-08-06)
+
+- [ ] Consolidate the accumulated documentation captures into
+  `Plans & Specs/System Reference/<area>.md` - one doc per build-thing (the blueprint organizing
+  rule: by system, never by phase/batch), covering at minimum: purpose; how it operates (signal/
+  data flow, ownership, thread residency); **user-facing behavior + every control it exposes**
+  (this section is the manual-source material - written as what the USER sees and does, not as
+  code narration); parameters + persistence shape; lifetime/teardown rules; cross-references to
+  sibling systems.
+- [ ] `Plans & Specs/System Reference/INDEX.md` - one line per doc, what it covers, so a manual
+  writer (or a future session) can navigate the set cold.
+- [ ] Accuracy bar: these docs are written from the POST-FIX tree by agents that just audited it -
+  a claim in a System Reference doc that contradicts the code is the same defect class Task 3
+  exists to kill.  Spot-verify each doc against its code before filing.
+- [ ] These are NEW docs, not edits to Carry-Forward Reference (which stays a frozen 2026-05-07
+  snapshot by design) - but where the two disagree, the System Reference doc records the delta
+  explicitly so the pair reads coherently.
+- [ ] No build gate (docs-only task); the running notes record the full doc list.
 
 ## Batch close (bulk-run per-batch loop — one commit per batch)
 

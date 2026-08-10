@@ -28,13 +28,29 @@
 //   for tuners (invisible) and for pitch correction where the retune effect
 //   itself runs through a faster hop=256 PhaseVocoder (the pitch reading is
 //   slightly stale but the correction is sample-accurate within its hop).
+//   The window is a DURATION (see below), so that ~50 ms holds at every rate.
 //
-// Range (at 44.1 kHz; scales with sample rate):
+// Range:
 //   kMaxFreqHz 4186 -> tauMin ~10 -> C8 top (global).
-//   Analysis window is PER-INSTANCE (mWindowSize): the 2048 default -> ~44 Hz
-//   min (Octave / Synth / PitchCorrector, unchanged); the tuner sets 4096 ->
-//   ~21.5 Hz min (covers 5-string bass low B ~31 Hz).  The window governs the
-//   real minimum.
+//   The analysis window is PER-INSTANCE and quoted at kReferenceSampleRate:
+//   the 2048 default -> ~44 Hz min (Octave / Synth / PitchCorrector); the
+//   tuner sets 4096 -> ~21.5 Hz min (covers 5-string bass low B ~31 Hz).
+//   The lowest detectable frequency is analysisRate / (W/2).  A fixed sample
+//   count would push that floor up in proportion to the rate (the tuner's
+//   21.5 Hz reach would become 93 Hz at 192 kHz, i.e. deaf to every bass and
+//   guitar low string), so the floor has to be held against the rate.
+//
+//   It is held by DECIMATING rather than by growing the window, because YIN's
+//   difference function is O(W^2) per analysis over a hop that grows only
+//   linearly: at 192 kHz a rate-scaled window costs ~456% of one core against
+//   the hop period, and the failure mode is not a late reading but a WRONG one
+//   -- once the worker falls behind, pushAudio drops the NEWEST samples, the
+//   rolling window is spliced from discontinuous audio, and YIN locks onto
+//   spurious CMNDF minima.  So prepare() box-averages mDecim input samples into
+//   one analysis sample, giving an analysis rate that stays at 44.1/48 kHz
+//   across the whole matrix: the window (and therefore the CPU) is constant,
+//   and the Hz floor is constant with it.  Bit-identical at 44.1 kHz, where
+//   mDecim is 1 and the decimation path is bypassed entirely.
 // ─────────────────────────────────────────────────────────────────────────────
 
 class PitchTrackerYIN
@@ -44,23 +60,28 @@ public:
     // setAnalysisWindow) so the tuner can use a bigger window (bass range)
     // WITHOUT changing the latency of the other consumers (Octave / Synth /
     // PitchCorrector) that share this class and keep the 2048 default.
-    static constexpr int   kDefaultWindowSize = 2048;
-    static constexpr int   kDefaultHopSize    = 512;
-    static constexpr int   kMaxWindowSize     = 4096;    // the tuner's window; the ring is sized for this
-    static constexpr float kYinThreshold      = 0.15f;   // CMNDF detection threshold
-    static constexpr float kMinFreqHz         = 20.0f;   // global floor; the per-instance window clamps the real min
-    static constexpr float kMaxFreqHz         = 4186.0f; // C8 (global; benign for the 2048 consumers)
+    // All three sizes below are quoted AT kReferenceSampleRate; prepare()
+    // converts them to the live rate so the window stays a fixed duration.
+    static constexpr int    kDefaultWindowSize   = 2048;
+    static constexpr int    kDefaultHopSize      = 512;
+    static constexpr int    kMaxWindowSize       = 4096;    // the tuner's window
+    static constexpr double kReferenceSampleRate = 44100.0; // the rate the window sizes are calibrated at
+    static constexpr float  kYinThreshold        = 0.15f;   // CMNDF detection threshold
+    static constexpr float  kMinFreqHz           = 20.0f;   // global floor; the per-instance window clamps the real min
+    static constexpr float  kMaxFreqHz           = 4186.0f; // C8 (global; benign for the 2048 consumers)
 
     PitchTrackerYIN();
     ~PitchTrackerYIN();
 
     // Set the analysis window + hop BEFORE prepare().  Larger window reaches
     // lower frequencies (bass) at the cost of latency + worker CPU.  Default
-    // 2048/512; the tuner uses 4096/1024.  Clamped to kMaxWindowSize.
+    // 2048/512; the tuner uses 4096/1024.  Clamped to kMaxWindowSize.  Both
+    // are quoted at kReferenceSampleRate - prepare() rescales them.
     void setAnalysisWindow (int windowSize, int hopSize) noexcept;
 
     // Set sample rate + start the worker thread.  Idempotent - calling again
-    // restarts the worker at the new rate.
+    // restarts the worker at the new rate.  Sizes the ring + the working
+    // window for that rate, so it must never be called from the audio thread.
     void prepare (double sampleRate);
 
     // Stop worker + free internal state.  prepare() must be called again
@@ -89,18 +110,40 @@ private:
     std::unique_ptr<WorkerThread> mWorker;
 
     // Lock-free ring buffer (audio thread writes, worker thread reads).
-    // Sized to 4 * kWindowSize so a slow worker can't backpressure the
-    // audio thread; oldest-data-overruns are visible as a momentary stale
+    // Sized to 4 * the LIVE working window so a slow worker can't backpressure
+    // the audio thread; oldest-data-overruns are visible as a momentary stale
     // pitch reading (worker just continues from current ring position).
-    static constexpr int kRingSize = kMaxWindowSize * 4;
-    juce::AbstractFifo  mFifo { kRingSize };
+    // Resized in prepare() only - pushAudio() never touches the size.
+    static constexpr int kRingBaseSize = kMaxWindowSize * 4;
+    juce::AbstractFifo  mFifo { kRingBaseSize };
     std::vector<float>  mFifoBuf;
 
     // Published outputs - atomic for wait-free cross-thread reads.
     std::atomic<float>  mFreqHz     { 0.0f };
     std::atomic<float>  mConfidence { 0.0f };
 
-    double mSampleRate { 44100.0 };
-    int    mWindowSize { kDefaultWindowSize };   // per-instance analysis window (<= kMaxWindowSize)
+    // Push a run of ALREADY-DECIMATED analysis samples into the ring.
+    void writeToFifo (const float* src, int n) noexcept;
+
+    double mSampleRate { kReferenceSampleRate };
+    int    mWindowSize { kDefaultWindowSize };   // requested at kReferenceSampleRate (<= kMaxWindowSize)
     int    mHopSize    { kDefaultHopSize };
+
+    // Input samples box-averaged per analysis sample (1 at 44.1/48k, 2 at
+    // 88.2/96k, 4 at 176.4/192k), and the rate the ring therefore runs at.
+    // EVERYTHING downstream of the ring -- window, hop, tau range, and the
+    // tau->Hz conversion -- is measured against mAnalysisRate, never against
+    // mSampleRate; using the device rate for the conversion is the one line
+    // that silently reports every pitch a whole octave or two out.
+    int    mDecim        { 1 };
+    double mAnalysisRate { kReferenceSampleRate };
+
+    // Carry for a box-average straddling a block boundary.  Audio thread only.
+    float  mDecimSum   { 0.0f };
+    int    mDecimCount { 0 };
+
+    // The requested sizes converted to the ANALYSIS rate; snapshotted by the
+    // worker at run() start, so prepare() sets them before starting it.
+    int    mWorkWindow { kDefaultWindowSize };
+    int    mWorkHop    { kDefaultHopSize };
 };

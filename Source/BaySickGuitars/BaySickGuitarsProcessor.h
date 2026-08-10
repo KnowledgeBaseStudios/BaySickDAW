@@ -6,6 +6,7 @@
 #include <array>
 #include <atomic>
 #include <bitset>
+#include <cstdint>
 #include <map>
 #include <memory>
 
@@ -82,7 +83,7 @@ public:
     // the kit's `#include` chain (depth 4) collecting `set_cc<N>=<int>` defaults
     // into mCcKitDefault and `label_cc<N>=<text>` strings into mCcLabel.  The
     // collected defaults are pushed through APVTS so the parameter listener
-    // forwards each value to sfizz at the kit author's intended starting point.
+    // queues each value for sfizz at the kit author's intended starting point.
     bool loadKit (const juce::File& sfzPath);
 
     juce::File getCurrentKitPath() const { return mCurrentKitPath; }
@@ -103,7 +104,8 @@ public:
 
     // ARIA control surface CC dispatch.  Writes the value (0..127) through
     // APVTS so the change is undoable + automatable + serialized with project
-    // state.  The parameterChanged listener forwards to sfizz.
+    // state.  The parameterChanged listener queues the CC; processBlock pushes
+    // it into sfizz on the audio thread.
     // 2026-05-05: kCcCount lifted to 512 so kit-author "extended CCs" >= 128
     // get APVTS-bound (no kit Guitars currently uses any, but matches Rusty).
     static constexpr int kCcCount = 512;
@@ -112,7 +114,11 @@ public:
     int  getKitDefaultCc (int cc) const;   // read-only snapshot of kit's set_cc<N> values
     juce::String getCcLabel (int cc) const; // kit's `label_cc<N>=<text>` (empty if none)
 
-    // APVTS listener - forwards every <prefix>cc<N> change to sfizz.
+    // APVTS listener.  Fires synchronously on whatever thread wrote the param
+    // (message thread for knob drags + the 30 Hz automation applicator), so it
+    // must NOT call mSfizz->cc() itself: cc() mutates the layer/voice CC state
+    // renderBlock is concurrently reading, with no lock inside sfizz.  It only
+    // marks the CC dirty in mCcDirty; processBlock drains the marks.
     void parameterChanged (const juce::String& paramId, float newValue) override;
 
     // K-5 fix #5 (2026-05-05): processing gate.  Set to false BEFORE loadKit
@@ -207,6 +213,15 @@ private:
     // SlideSampler's block-rate CC provider reads lock-free (no string-keyed
     // map lookups on the audio thread).
     std::array<std::atomic<float>*, kCcCount> mCcRaw {};
+
+    // Message->audio CC handoff.  parameterChanged fetch_or's the CC's bit
+    // (release); processBlock exchanges each word to 0 (acquire) and pushes
+    // the mCcRaw value of every set bit into sfizz before MIDI dispatch and
+    // render.  Value rides the param atomic, so a mark drained late still
+    // delivers the newest value (last write wins); re-pushing an unchanged
+    // value is harmless (idempotent CC state).
+    static constexpr int kCcDirtyWords = kCcCount / 64;
+    std::array<std::atomic<std::uint64_t>, kCcDirtyWords> mCcDirty {};
 
     std::unique_ptr<sfz::Sfizz> mSfizz;
     juce::File                  mCurrentKitPath;

@@ -1,6 +1,7 @@
 #include "HarmlessProcessor.h"
 #include "HarmlessEditor.h"
 #include <cmath>
+#include <cstring>
 
 HarmlessProcessor::HarmlessProcessor (const juce::String& trackId, juce::UndoManager* undoMgr)
     : juce::AudioProcessor (BusesProperties()
@@ -8,7 +9,8 @@ HarmlessProcessor::HarmlessProcessor (const juce::String& trackId, juce::UndoMan
       apvts (*this, undoMgr, "HarmlessState",
              createLayout ("tk_" + trackId + "_harm_")),
       mTrackId (trackId),
-      mPrefix  ("tk_" + trackId + "_harm_")
+      mPrefix  ("tk_" + trackId + "_harm_"),
+      mPrefixLen ((int) mPrefix.getNumBytesAsUTF8())
 {
     // S4: register the 16 modulatable articulation targets. Param IDs baked
     // in now are permanent: renaming any of these in future = PRESET-BREAK.
@@ -550,10 +552,25 @@ HarmlessProcessor::createLayout (const juce::String& p)
 //==============================================================================
 void HarmlessProcessor::updateFromApvts()
 {
-    // Lambda helpers to keep the code concise.
+    // Audio-thread danger zone: reached from processBlock, so no allocation is
+    // permitted here.  juce::String has no small-string optimization, so
+    // mPrefix + name would malloc and free on every one of the ~100 reads
+    // below; the id is assembled in this stack buffer and passed as a
+    // StringRef, which the APVTS lookup consumes without copying.  The buffer
+    // is deliberately function-local, never a member: updateFromApvts is also
+    // called from the constructor on the message thread.
+    char idBuf[128];
+    std::memcpy (idBuf, mPrefix.toRawUTF8(), (size_t) mPrefixLen);
+
     auto getf = [&] (const char* name) -> float
     {
-        if (auto* p = apvts.getRawParameterValue (mPrefix + name))
+        const size_t nameLen = std::strlen (name);
+        jassert ((size_t) mPrefixLen + nameLen + 1 <= sizeof (idBuf));
+        if ((size_t) mPrefixLen + nameLen + 1 > sizeof (idBuf))
+            return 0.0f;
+
+        std::memcpy (idBuf + mPrefixLen, name, nameLen + 1);
+        if (auto* p = apvts.getRawParameterValue (juce::StringRef (idBuf)))
             return p->load();
         return 0.0f;
     };

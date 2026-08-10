@@ -1,5 +1,8 @@
 #include "VibePlayerProcessor.h"
 #include "../SampleLibrary.h"   // QA-ProjectSave Task 5: stable-root sample refs
+#include "../MissingFileReport.h"
+#include "../PluginProcessor.h"   // host audio shield around every sample load
+#include "../ProjectFileResolver.h"
 #include "VibePlayerEditor.h"
 
 VibePlayerProcessor::VibePlayerProcessor (const juce::String& trackId, juce::UndoManager* undoMgr)
@@ -383,10 +386,49 @@ static const juce::Identifier kLoadKindProp ("bsp_loadKind");
 static const juce::Identifier kLoadPathProp ("bsp_loadPath");
 static const juce::Identifier kLoadNormProp ("bsp_loadNormalize");   // MIDI root; -1 = none
 
+void VibePlayerProcessor::loadIntoManager (const juce::String& kind, const juce::File& f,
+                                           int normalizeRoot)
+{
+    const bool isFolder = (kind == "folder");
+    const bool isSfz    = (kind == "sfz");
+    const bool isFile   = (kind == "file");
+    if (! (isFolder || isSfz || isFile)) return;
+
+    // THREAD SAFETY: every manager loader rebuilds mRegions IN PLACE - clear()
+    // drops the shared_ptr each region holds, then one push_back per decoded
+    // file - while the audio thread walks the same vector with no lock of its
+    // own (isKeyswitchNote per MIDI event, findRegion + the region field reads
+    // in VibeVoice::startNote).  The push_back reallocation is the sharp edge:
+    // it frees the old block after moving, so a reader that already loaded the
+    // size can index released heap.  normalizeRootNotes writes every region's
+    // rootNote and has the same exposure, which is why it sits inside the
+    // bracket rather than after it.
+    //
+    // The host shield is the app-wide mechanism for this: it bails processBlock
+    // at its top, and the acknowledgement-based settle waits for the block that
+    // may already be inside the render to return.  shieldWasUp save/restore (not
+    // a refcount) because the shield is raised only from the message thread, so
+    // a load nested inside a project load leaves the outer shield up and pays no
+    // second settle.
+    const bool shieldWasUp = (mHost != nullptr) && mHost->isProjectLoadInProgress();
+    if (mHost != nullptr)
+    {
+        mHost->setProjectLoadInProgress (true);
+        if (! shieldWasUp) mHost->settleAudioThread();
+    }
+
+    if      (isFolder) mSynth.getManager().loadFolder     (f);
+    else if (isSfz)    mSynth.getManager().loadSFZ        (f);
+    else               mSynth.getManager().loadSingleFile (f);
+
+    if (normalizeRoot >= 0) mSynth.getManager().normalizeRootNotes (normalizeRoot);
+
+    if (mHost != nullptr) mHost->setProjectLoadInProgress (shieldWasUp);
+}
+
 void VibePlayerProcessor::loadSampleFolder (const juce::File& folder, int normalizeRoot)
 {
-    mSynth.getManager().loadFolder (folder);
-    if (normalizeRoot >= 0) mSynth.getManager().normalizeRootNotes (normalizeRoot);
+    loadIntoManager ("folder", folder, normalizeRoot);
     apvts.state.setProperty (kLoadKindProp, "folder",                  nullptr);
     apvts.state.setProperty (kLoadPathProp, SampleLibrary::refForPersist (folder),  nullptr);
     apvts.state.setProperty (kLoadNormProp, normalizeRoot,              nullptr);
@@ -394,8 +436,7 @@ void VibePlayerProcessor::loadSampleFolder (const juce::File& folder, int normal
 
 void VibePlayerProcessor::loadSampleSFZ (const juce::File& sfzFile, int normalizeRoot)
 {
-    mSynth.getManager().loadSFZ (sfzFile);
-    if (normalizeRoot >= 0) mSynth.getManager().normalizeRootNotes (normalizeRoot);
+    loadIntoManager ("sfz", sfzFile, normalizeRoot);
     apvts.state.setProperty (kLoadKindProp, "sfz",                      nullptr);
     apvts.state.setProperty (kLoadPathProp, SampleLibrary::refForPersist (sfzFile), nullptr);
     apvts.state.setProperty (kLoadNormProp, normalizeRoot,              nullptr);
@@ -403,17 +444,10 @@ void VibePlayerProcessor::loadSampleSFZ (const juce::File& sfzFile, int normaliz
 
 void VibePlayerProcessor::loadSampleFile (const juce::File& wavFile, int normalizeRoot)
 {
-    mSynth.getManager().loadSingleFile (wavFile);
-    if (normalizeRoot >= 0) mSynth.getManager().normalizeRootNotes (normalizeRoot);
+    loadIntoManager ("file", wavFile, normalizeRoot);
     apvts.state.setProperty (kLoadKindProp, "file",                     nullptr);
     apvts.state.setProperty (kLoadPathProp, SampleLibrary::refForPersist (wavFile), nullptr);
     apvts.state.setProperty (kLoadNormProp, normalizeRoot,              nullptr);
-}
-
-juce::File VibePlayerProcessor::getLoadedSampleFile() const
-{
-    const auto path = apvts.state.getProperty (kLoadPathProp, juce::String()).toString();
-    return path.isEmpty() ? juce::File() : SampleLibrary::resolvePersistedRef (path);
 }
 
 void VibePlayerProcessor::getStateInformation (juce::MemoryBlock& dest)
@@ -436,13 +470,26 @@ void VibePlayerProcessor::setStateInformation (const void* data, int sz)
         const int  norm = (int) apvts.state.getProperty (kLoadNormProp, -1);
         if (kind.isNotEmpty() && path.isNotEmpty())
         {
-            juce::File f = SampleLibrary::resolvePersistedRef (path);
+            // resolvePersistedRef reads the stable roots but hands anything
+            // else back as a bare juce::File, so a bundled project's
+            // "Samples/<name>" resolved against the process working directory.
+            const juce::File f = ProjectFileResolver::resolve (path);
             if (f.exists())
             {
-                if      (kind == "folder") mSynth.getManager().loadFolder     (f);
-                else if (kind == "sfz")    mSynth.getManager().loadSFZ        (f);
-                else if (kind == "file")   mSynth.getManager().loadSingleFile (f);
-                if (norm >= 0) mSynth.getManager().normalizeRootNotes (norm);
+                loadIntoManager (kind, f, norm);
+                if (! mSynth.getManager().hasAnyRegions())
+                    MissingFileReport::add ("BaySickPlayer sound", f.getFullPathName());
+            }
+            else
+            {
+                // The STORED reference, not the resolved file: a project-
+                // relative reference with no project folder open resolves to
+                // nothing, and an empty line in the missing-files dialog names
+                // nothing the user can go find.
+                MissingFileReport::add (kind == "folder" ? "Sample folder"
+                                      : kind == "sfz"    ? "SFZ instrument"
+                                                         : "Sample file",
+                                        path);
             }
         }
     }

@@ -1,5 +1,6 @@
 #include "EffectPresetIO.h"
 #include "../AppPaths.h"
+#include "../UserFileSave.h"
 
 #include "../EffectRack.h"
 #include "../DSP/DSPBase.h"
@@ -151,15 +152,6 @@ namespace
     constexpr const char* kVersionTag = "version";
     constexpr int         kPresetVersion = 1;
 
-    juce::String safeFileName (juce::String s)
-    {
-        // strip path-unsafe chars; fall back to "untitled"
-        for (auto c : juce::String ("\\/:*?\"<>|"))
-            s = s.replace (juce::String::charToString (c), "_");
-        s = s.trim();
-        return s.isNotEmpty() ? s : "untitled";
-    }
-
     bool writePresetXml (const juce::File& dest, EffectType type,
                           const juce::String& name,
                           const juce::MemoryBlock& dspState,
@@ -232,9 +224,26 @@ bool savePreset (DSPBase& dsp, EffectType type,
         outErr = "DSP returned empty state.";
         return false;
     }
-    const auto file = myPresetsDir (type).getChildFile (
-                          safeFileName (presetName) + ".xml");
-    return writePresetXml (file, type, presetName, blob, outErr);
+    // resolveTarget rather than UserFileSave::writeXmlAsync: the write helpers
+    // raise the family's warning box themselves, and this function reports
+    // through outErr for a caller that raises its own - the pair would stack
+    // two dialogs on one failure.  Naming and collision policy still come from
+    // the one place, so a second save of "Big Hall" suffixes instead of
+    // destroying the first.
+    const auto file = UserFileSave::resolveTarget (myPresetsDir (type), presetName);
+    if (file == juce::File())
+    {
+        outErr = presetName.trim().isEmpty()
+                     ? juce::String ("Type a name for it first.")
+                     : UserFileSave::unusableNameMessage (presetName);
+        return false;
+    }
+
+    // The name attribute has to be the resolved one: the suffix means the file
+    // is not always <typed name>.xml, and metadata that disagrees with the
+    // filename is how a preset ends up displaying as its own overwritten twin.
+    return writePresetXml (file, type, file.getFileNameWithoutExtension(),
+                            blob, outErr);
 }
 
 bool loadPreset (DSPBase& dsp, const juce::File& presetFile, juce::String& outErr)
@@ -665,8 +674,8 @@ void migrateTapeFolderToSaturation()
         {
             auto dst = satMyPresets.getChildFile (src.getFileName());
             if (dst.existsAsFile()) continue;   // skip name collision; user keeps both
-            src.copyFileTo (dst);
-            src.deleteFile();
+            if (src.copyFileTo (dst))
+                src.deleteFile();
         }
         // Clean up if My Presets is now empty.
         if (tapeMyPresets.getNumberOfChildFiles (juce::File::findFiles) == 0)

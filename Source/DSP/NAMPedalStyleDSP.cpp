@@ -1,5 +1,6 @@
 #include "NAMPedalStyleDSP.h"
 #include "../MissingFileReport.h"   // QA-Export Task 5
+#include "../ProjectFileResolver.h"
 #include <NAM/get_dsp.h>
 #include <NAM/dsp.h>
 #include <filesystem>
@@ -9,6 +10,13 @@ NAMPedalStyleDSP::~NAMPedalStyleDSP() = default;
 
 void NAMPedalStyleDSP::prepare (double sampleRate, int maxBlockSize)
 {
+    // Not the audio thread: every caller either holds the rack's slot lock
+    // (which shuts audio out for the duration) or is still building an
+    // unpublished DSP.  mLoadLock is what stops a concurrent loadModel from
+    // reassigning mNamPending out from under the prewarm at the bottom of
+    // this function.
+    const juce::ScopedLock lk (mLoadLock);
+
     mSampleRate = sampleRate;
     mMaxBlock   = maxBlockSize;
     mPrepared   = true;
@@ -118,32 +126,81 @@ bool NAMPedalStyleDSP::loadModel (const juce::File& file, juce::String& outErr)
         return false;
     }
 
+    // Whatever currently sits in pending leaves through this local so it
+    // destructs on the message thread, outside every lock.  A nam::DSP
+    // teardown frees its weight tensors -- far too much work to run under a
+    // lock the audio thread try-locks every block.
+    std::unique_ptr<nam::DSP> leaving;
+
     {
         const juce::ScopedLock lk (mLoadLock);
-        // Drain any prior unswapped pending so we don't leak the unique_ptr.
-        if (mSwapPending.load (std::memory_order_acquire))
+
         {
-            // No way to safely drain on the message thread without coordinating
-            // with audio.  But since the audio thread is the only one that
-            // un-flags swapPending, if we're racing here, the prior pending
-            // simply gets replaced by ours -- old pending unique_ptr destroys.
+            // mSwapLock is the only exclusion between this write and the audio
+            // thread's swap of the same pointer.  Holding it means pending is
+            // either a model audio never swapped in, or the old active audio
+            // demoted on its last drain -- in both cases unreachable from the
+            // audio thread, so taking ownership of it here is safe.
+            const juce::SpinLock::ScopedLockType lkAudio (mSwapLock);
+            leaving     = std::move (mNamPending);
+            mNamPending = std::move (newModel);
+            mSwapPending.store (true, std::memory_order_release);
         }
-        mNamPending = std::move (newModel);
-        mModelPath  = file.getFullPathName();
-        mSwapPending.store (true, std::memory_order_release);
+
+        mModelPath = file.getFullPathName();
+        // The marker has to clear on EVERY successful load, not just the one
+        // inside setStateInformation: a user who re-picks a working capture on
+        // a pedal flagged missing would otherwise keep reading "(missing)" over
+        // a capture that is loaded and audible.
+        mModelMissing = false;
     }
+    // `leaving` destructs here -- outside every lock.
 
     return true;
 }
 
+void NAMPedalStyleDSP::unloadModel()
+{
+    // Same publish discipline as loadModel with a null model: the audio thread
+    // takes it on its next drain and process() falls through to the dry path
+    // (Input/Drive, EQ, blend and Output trim still apply -- they are the
+    // user's settings, not the capture's).  The demoted model parks in
+    // mNamPending exactly as it would between two real loads, and leaves
+    // through the next load's `leaving`.
+    std::unique_ptr<nam::DSP> leaving;
+
+    {
+        const juce::ScopedLock lk (mLoadLock);
+
+        {
+            const juce::SpinLock::ScopedLockType lkAudio (mSwapLock);
+            leaving = std::move (mNamPending);
+            mSwapPending.store (true, std::memory_order_release);
+        }
+
+        mModelPath.clear();
+        mModelMissing = false;
+    }
+    // `leaving` destructs here -- outside every lock.
+}
+
 void NAMPedalStyleDSP::drainPendingSwap()
 {
+    // AUDIO THREAD.  The flag pre-check keeps the common case (no swap
+    // outstanding) free of any lock traffic whatsoever.
+    if (! mSwapPending.load (std::memory_order_acquire)) return;
+
+    // Try-lock, never block.  loadModel holds mSwapLock for two pointer moves
+    // and nothing else, so losing the race just means the drain is skipped for
+    // one block and the new model goes live on the next one -- inaudible, and
+    // strictly better than the render thread waiting on the message thread.
+    const juce::SpinLock::ScopedTryLockType lk (mSwapLock);
+    if (! lk.isLocked()) return;
+
     if (mSwapPending.load (std::memory_order_acquire))
     {
         std::swap (mNamActive, mNamPending);
         mSwapPending.store (false, std::memory_order_release);
-        // mNamPending now holds the OLD active (or nullptr); will be released
-        // next time loadModel runs.
     }
 }
 
@@ -270,22 +327,50 @@ void NAMPedalStyleDSP::setStateInformation (const void* data, int sz)
     bypassed = ((int) state.getProperty ("bypassed", 0)) != 0;
 
     const auto path = state.getProperty ("modelPath", juce::String()).toString();
-    if (path.isNotEmpty())
+    if (path.isEmpty())
     {
-        juce::File f (path);
+        // A state that names no capture has to LAND.  Skipping the branch left
+        // the previously-loaded model running under the previous name, so a
+        // model-less slot state restored as whatever the slot happened to hold.
+        unloadModel();
+    }
+    else
+    {
+        const juce::File f = ProjectFileResolver::resolve (path);
         if (f.existsAsFile())
         {
-            mModelMissing = false;
             juce::String err;
-            loadModel (f, err);
+            if (loadModel (f, err))
+            {
+                // loadModel records the absolute file it opened; the reference
+                // that was SAVED is what has to survive the next save, or a
+                // bundled project rewrites itself back to this machine's paths.
+                mModelPath    = path;
+                mModelMissing = false;
+            }
+            else
+            {
+                // The capture named by this state did not install, so the one
+                // already running has to go with it: leaving it published means
+                // the pedal renders the PREVIOUS capture under the new name,
+                // which is a sound the user never picked and a mismatch the
+                // panel cannot show.  unloadModel clears the path it drops, so
+                // the remembered reference is stamped back afterwards.
+                unloadModel();
+                mModelPath    = path;
+                mModelMissing = true;
+                MissingFileReport::add ("NAM capture (failed to load)", path);
+            }
         }
         else
         {
             // QA-Export Task 5: the path is remembered so the user can see WHICH
-            // capture went missing, but the model is NOT loaded -- so the name is
-            // now flagged missing (getModelName appends a marker) and reported.
-            // Previously this displayed the remembered name with nothing behind
-            // it, so the pedal looked loaded while producing no amp modeling.
+            // capture went missing, but nothing is installed behind it -- the
+            // name is flagged missing (getModelName appends a marker) and
+            // reported.  unloadModel is what makes "nothing installed" true:
+            // the branch used to leave whatever the slot was already running
+            // audible under the missing name.
+            unloadModel();
             mModelPath    = path;
             mModelMissing = true;
             MissingFileReport::add ("NAM capture", path);

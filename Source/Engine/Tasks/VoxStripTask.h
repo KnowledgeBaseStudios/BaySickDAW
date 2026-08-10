@@ -54,6 +54,20 @@ private:
     VibeSynthProcessor*    mProcessor     = nullptr;
     juce::String           mPrefix;   // "mixer_vox_<i>"
 
+    // Strip param pointers, resolved LAZILY on first successful lookup -- never
+    // in the ctor.  These ids are created by a different message-thread path
+    // (addLiveInputParams) than the one that builds this task, and nothing
+    // orders the two, so a ctor-time resolve could pin nullptr permanently and
+    // silently kill arm / listen / channel select on the strip.  The address is
+    // stable for the APVTS lifetime (adapterTable is only ever emplaced into),
+    // and plain pointers need no extra synchronization: they follow the same
+    // cross-block publication the task already relies on for mCtx.
+    std::atomic<float>* mArmP     = nullptr;
+    std::atomic<float>* mIdxP     = nullptr;
+    std::atomic<float>* mStereoP  = nullptr;
+    std::atomic<float>* mListenP  = nullptr;
+    std::atomic<float>* mMonModeP = nullptr;
+
     // QA-E Task 3 follow-up (2026-05-12): per-task FilePlay scratch buffers.
     // Replaces the previously-shared mProcessor->mAudioClipScratch +
     // mProcessor->mVoxEngineScratch.  Pre-fix MT FilePlay was a no-op (flag
@@ -62,6 +76,8 @@ private:
     // but flag is constexpr false" comment.  Per-task ownership eliminates
     // the cross-task data race that produced all-3-clips-mixed-into-every-
     // strip on playback.
+    // Both are grown to a full arena-sized block in the ctor (message thread);
+    // run()'s per-block setSize calls then stay inside that allocation.
     juce::AudioBuffer<float> mClipScratch;
     juce::AudioBuffer<float> mEngineScratch;
 };

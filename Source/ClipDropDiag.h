@@ -10,10 +10,13 @@
 // failure live: every step of the drop cascade logs to a file, and a popup
 // fires only on a bail / "produced nothing" anomaly.
 //
-// Mirrors the namirLog() one-off file-logger convention
-// (Documents/BaySickDAW/*.txt, works in both Debug and Release).  Rule-4
-// catalogued in Plans & Specs/Running Notes/fancy-kindling-dongarra.md; stripped
-// or kept at batch close per DS-2.
+// Debug build only (Jeff, 2026-08-07).  The trace is append-only with no cap
+// or rotation, so a shipping build would grow a file the user never asked for
+// and cannot clear from inside the app.  BOTH halves are gated together: the
+// popup body names the log file, so keeping alert() in Release would point the
+// user at something that never gets written.  Release keeps no-op stubs so the
+// cascade's call sites compile unchanged -- same shape as G3PlayheadDiag.h.
+// Rule-4 catalogued in Plans & Specs/Running Notes/fancy-kindling-dongarra.md.
 // ─────────────────────────────────────────────────────────────────────────────
 
 #include <JuceHeader.h>
@@ -21,13 +24,13 @@
 
 namespace ClipDropDiag
 {
+#if JUCE_DEBUG
     inline juce::File logFile()
     {
         return AppPaths::appRoot()
                    .getChildFile ("clipdrop_diag_log.txt");
     }
 
-    // Append-only file record (Debug + Release).  Every cascade step calls this.
     inline void log (const juce::String& stage, const juce::String& detail)
     {
         auto f = logFile();
@@ -49,4 +52,8 @@ namespace ClipDropDiag
                                                     "Clip-Drop Diagnostic", body);
         });
     }
+#else
+    inline void log   (const juce::String&, const juce::String&) {}
+    inline void alert (const juce::String&, const juce::String&) {}
+#endif
 }

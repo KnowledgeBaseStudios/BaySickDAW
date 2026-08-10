@@ -128,7 +128,6 @@ struct SlideRegionMap
 
     bool isEmpty() const noexcept { return samples.empty(); }
 
-    int numBands() const noexcept;
     int bendMaxUpSemis()   const noexcept;
     int bendMaxDownSemis() const noexcept;
 };

@@ -4,6 +4,8 @@
 #include "../DSP/EngineSidechainHelper.h"
 #include "../Standalone/ApvtsDirtyTracker.h"
 
+class VibeSynthProcessor;
+
 // ── VibePlayerProcessor (user-facing name: BaySickPlayer) ────────────────────
 // AudioProcessor wrapper for VibeSynth.
 // Owns its own APVTS; param IDs follow the consolidated plan convention:
@@ -103,10 +105,29 @@ public:
     // go through these wrappers instead of reaching into the manager.
     //   normalizeRoot = optional MIDI note for VibeSampleManager::normalizeRootNotes
     //   (e.g. 60 for drum-slot conventions).  -1 = don't normalize.
+    // Message thread only - each one rebuilds the manager's region vector
+    // behind the host's audio shield (see setHostProcessor / loadIntoManager).
     void loadSampleFolder  (const juce::File& folder,  int normalizeRoot = -1);
     void loadSampleSFZ     (const juce::File& sfzFile, int normalizeRoot = -1);
     void loadSampleFile    (const juce::File& wavFile, int normalizeRoot = -1);
-    juce::File getLoadedSampleFile() const;   // returns whatever's stashed (folder/sfz/file)
+
+    // THREAD SAFETY: the host whose processBlock shield + acknowledgement settle
+    // brackets every sample load, because rebuilding the region vector frees
+    // memory the audio thread is indexing (see loadIntoManager).  This engine
+    // has no other route to the top-level processor, so the processor binds
+    // itself here from VibeSynthProcessor::bindSampleLoadShield, which every
+    // register*Engine path that can be handed a BaySickPlayer calls -- that
+    // happens at engine creation, ahead of any page that could issue a load.
+    // Message thread only; never read on the audio thread.  Null leaves the
+    // loads running unprotected against a live render.
+    void setHostProcessor (VibeSynthProcessor* host) noexcept { mHost = host; }
+
+    // const_cast: VibeSynth::getManager() has no const overload; the underlying
+    // region-count read is itself const.
+    bool hasAnyRegions() const noexcept
+    {
+        return const_cast<VibePlayerProcessor*> (this)->mSynth.getManager().hasAnyRegions();
+    }
 
     // C.4 Phase 2.2: engine-level SC primitive.
     void setSidechainBuffers (juce::AudioBuffer<float>* const* bufs, int count) noexcept override
@@ -122,7 +143,14 @@ private:
     // CPU-guarded: reads APVTS and pushes to synth only when values changed.
     void updateFromApvts();
 
+    // The one place the manager's region vector is rebuilt.  kind is the same
+    // vocabulary the persisted bsp_loadKind property uses ("folder"/"sfz"/
+    // "file"); anything else is ignored.  Message thread only.
+    void loadIntoManager (const juce::String& kind, const juce::File& f,
+                          int normalizeRoot);
+
     VibeSynth        mSynth;
+    VibeSynthProcessor* mHost { nullptr };   // see setHostProcessor
     juce::String     mPrefix;
     juce::String     mTrackId;
     std::atomic<int> mAuditionNote    { -1 };

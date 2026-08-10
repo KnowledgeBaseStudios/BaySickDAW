@@ -106,14 +106,14 @@ public:
 
     void run() override
     {
-        // Per-instance window/hop, snapshotted once (constant for the worker's
-        // lifetime; set before prepare()).  Rolling window slides forward by H
-        // each iteration; first analysis fires once W samples have been pulled.
-        const int W = owner.mWindowSize;
-        const int H = owner.mHopSize;
+        // Live-rate window/hop, snapshotted once (constant for the worker's
+        // lifetime; prepare() computes them before starting this thread).
+        // Rolling window slides forward by H each iteration; first analysis
+        // fires once W samples have been pulled.
+        const int W = owner.mWorkWindow;
+        const int H = owner.mWorkHop;
         std::vector<float> rolling ((size_t) W, 0.0f);
-        std::vector<float> diff;
-        diff.reserve ((size_t) (W / 2));
+        mCmndf.reserve ((size_t) (W / 2));
 
         int totalIn = 0;     // cumulative samples pulled into rolling so far
         int sinceLast = 0;   // samples pulled since last analyze()
@@ -166,15 +166,19 @@ public:
 private:
     void analyze (const float* window, int W) noexcept
     {
-        // 1) Difference function over half the window.
-        std::vector<float> cmndf;
+        // 1) Difference function over half the window.  The buffer is a member
+        // so the per-analysis allocation happens once: the window grows with
+        // the sample rate, and this fires every hop.
+        auto& cmndf = mCmndf;
         computeDifference (window, W, cmndf);
 
         // 2) Cumulative Mean Normalized Difference Function (in-place).
         computeCMNDF (cmndf);
 
-        // 3) tau range from min/max frequency at current sample rate.
-        const double sr = (owner.mSampleRate > 0.0) ? owner.mSampleRate : 44100.0;
+        // 3) tau range from min/max frequency at the ANALYSIS rate -- the ring
+        //    holds decimated samples, so the device rate would misreport tau.
+        const double sr = (owner.mAnalysisRate > 0.0) ? owner.mAnalysisRate
+                                                      : kReferenceSampleRate;
         const int tauMin = juce::jmax (2, (int) std::floor (sr / (double) kMaxFreqHz));
         const int tauMax = juce::jmin ((int) cmndf.size() - 2,
                                        (int) std::ceil  (sr / (double) kMinFreqHz));
@@ -201,6 +205,7 @@ private:
         owner.mConfidence.store (confidence, std::memory_order_release);
     }
 
+    std::vector<float> mCmndf;   // worker-thread scratch (difference -> CMNDF, in place)
     PitchTrackerYIN& owner;
 };
 
@@ -210,7 +215,7 @@ private:
 
 PitchTrackerYIN::PitchTrackerYIN()
 {
-    mFifoBuf.resize ((size_t) kRingSize, 0.0f);
+    mFifoBuf.resize ((size_t) mFifo.getTotalSize(), 0.0f);
 }
 
 PitchTrackerYIN::~PitchTrackerYIN()
@@ -220,8 +225,8 @@ PitchTrackerYIN::~PitchTrackerYIN()
 
 void PitchTrackerYIN::setAnalysisWindow (int windowSize, int hopSize) noexcept
 {
-    // Call before prepare() -- the worker snapshots these at run() start.  The
-    // ring (kMaxWindowSize*4) already fits any window up to kMaxWindowSize.
+    // Call before prepare() -- prepare() converts these to the live rate and
+    // the worker snapshots the result at run() start.
     mWindowSize = juce::jlimit (256, kMaxWindowSize, windowSize);
     mHopSize    = juce::jlimit (64,  mWindowSize,    hopSize);
 }
@@ -230,7 +235,35 @@ void PitchTrackerYIN::prepare (double sampleRate)
 {
     if (mWorker != nullptr) releaseResources();
 
-    mSampleRate = (sampleRate > 0.0) ? sampleRate : 44100.0;
+    mSampleRate = (sampleRate > 0.0) ? sampleRate : kReferenceSampleRate;
+
+    // Decimate to keep the analysis rate near the reference (see the header):
+    // the window is a duration, so a fixed sample count would walk every
+    // consumer's low end upward with the rate -- but holding it by GROWING the
+    // window makes YIN's O(W^2) search outrun real time at 96 kHz and above.
+    // Box-averaging instead holds the Hz floor AND the CPU flat: mDecim lands
+    // on 1 / 2 / 4 and mAnalysisRate on 44.1 or 48 kHz at every rate in the
+    // supported matrix, so mWorkWindow never exceeds its 48 kHz value.
+    mDecim        = juce::jmax (1, (int) std::lround (mSampleRate / kReferenceSampleRate));
+    mAnalysisRate = mSampleRate / (double) mDecim;
+
+    // Scaling the hop by the same factor keeps the published-pitch latency in
+    // milliseconds constant too.
+    const double scale = mAnalysisRate / kReferenceSampleRate;
+    mWorkWindow = juce::jmax (256, (int) std::lround ((double) mWindowSize * scale));
+    mWorkHop    = juce::jlimit (64, mWorkWindow,
+                                (int) std::lround ((double) mHopSize * scale));
+
+    // Ring capacity follows the working window.  Sized HERE, on the prepare
+    // thread with the worker stopped and audio suspended: AbstractFifo::
+    // setTotalSize is not thread-safe and pushAudio() must never allocate.
+    const int ringSize = juce::jmax (kRingBaseSize, mWorkWindow * 4);
+    if (ringSize != mFifo.getTotalSize())
+    {
+        mFifo.setTotalSize (ringSize);
+        mFifoBuf.resize ((size_t) ringSize, 0.0f);
+    }
+
     reset();
 
     mWorker = std::make_unique<WorkerThread> (*this);
@@ -251,23 +284,52 @@ void PitchTrackerYIN::reset() noexcept
 {
     mFifo.reset();
     std::fill (mFifoBuf.begin(), mFifoBuf.end(), 0.0f);
+    mDecimSum   = 0.0f;
+    mDecimCount = 0;
     mFreqHz    .store (0.0f, std::memory_order_release);
     mConfidence.store (0.0f, std::memory_order_release);
+}
+
+void PitchTrackerYIN::writeToFifo (const float* src, int n) noexcept
+{
+    int s1 = 0, b1 = 0, s2 = 0, b2 = 0;
+    n = juce::jmin (n, mFifo.getFreeSpace());
+    if (n <= 0) return;   // ring full - drop oldest reading by skipping push
+
+    mFifo.prepareToWrite (n, s1, b1, s2, b2);
+    if (b1 > 0) std::memcpy (mFifoBuf.data() + s1, src,      (size_t) b1 * sizeof (float));
+    if (b2 > 0) std::memcpy (mFifoBuf.data() + s2, src + b1, (size_t) b2 * sizeof (float));
+    mFifo.finishedWrite (n);
 }
 
 void PitchTrackerYIN::pushAudio (const float* mono, int numSamples) noexcept
 {
     if (mono == nullptr || numSamples <= 0) return;
 
-    int s1 = 0, b1 = 0, s2 = 0, b2 = 0;
-    const int free = mFifo.getFreeSpace();
-    const int n    = juce::jmin (numSamples, free);
-    if (n <= 0) return;   // ring full - drop oldest reading by skipping push
+    if (mDecim <= 1) { writeToFifo (mono, numSamples); return; }
 
-    mFifo.prepareToWrite (n, s1, b1, s2, b2);
-    if (b1 > 0) std::memcpy (mFifoBuf.data() + s1, mono,           (size_t) b1 * sizeof (float));
-    if (b2 > 0) std::memcpy (mFifoBuf.data() + s2, mono + b1,      (size_t) b2 * sizeof (float));
-    mFifo.finishedWrite (n);
+    // Box-average mDecim input samples into one analysis sample.  The partial
+    // sum carries across the block boundary in members, so the decimation
+    // phase is continuous and a short final block cannot splice the ring.
+    // Fixed stack chunk: no allocation on the audio thread.
+    constexpr int kChunk = 256;
+    float     out[kChunk];
+    int       outN = 0;
+    const float inv = 1.0f / (float) mDecim;
+
+    for (int i = 0; i < numSamples; ++i)
+    {
+        mDecimSum += mono[i];
+        if (++mDecimCount < mDecim) continue;
+
+        out[outN++] = mDecimSum * inv;
+        mDecimSum   = 0.0f;
+        mDecimCount = 0;
+
+        if (outN == kChunk) { writeToFifo (out, outN); outN = 0; }
+    }
+
+    if (outN > 0) writeToFifo (out, outN);
 }
 
 void PitchTrackerYIN::pushAudio (const float* left, const float* right, int numSamples) noexcept

@@ -50,9 +50,11 @@ enum class TabKind { Layers, Bass, Drums, Clips, Vox, Inst, Plugins, Rusty };
 
 struct EngineTab
 {
+    // (kind, pageIndex) IS the identity.  There is deliberately no name here:
+    // the display name belongs to the ribbon tab, which is what persists it and
+    // what every consumer already reads it from.
     TabKind kind;
     int pageIndex = -1;
-    juce::String name;
     juce::String engineType;   // empty until an engine is picked
 
     // The processor registered for audio dispatch.  For Layers/Bass/Drums/
@@ -213,10 +215,10 @@ struct EngineTab
 class EngineRig
 {
 public:
-    // The UndoManager reference is DORMANT plumbing (QA-ModelShell conflict
-    // call 2=b): threaded into every engine APVTS ctor so QA-UndoCoverage can
-    // flip undo semantics on without another ctor sweep.  Nothing consumes it
-    // yet -- StandaloneEditor's manager stays authoritative until then.
+    // undoMgr is the app's ONE global undo history, owned by the processor.
+    // The rig threads it into every engine APVTS ctor and stamps each with an
+    // undoOwnerTag, so a parameter transaction can be re-resolved to its target
+    // after the engine that made it was destroyed and re-created.
     EngineRig (VibeSynthProcessor& proc, juce::UndoManager& undoMgr);
     ~EngineRig();
 
@@ -229,7 +231,7 @@ public:
     static juce::AudioProcessorValueTreeState* apvtsOf (juce::AudioProcessor* eng) noexcept;
 
     // ── Tab identity (message thread) ─────────────────────────────────────
-    EngineTab*       addTab  (TabKind k, int pageIndex, const juce::String& name);
+    EngineTab*       addTab  (TabKind k, int pageIndex);
     // deleteFreezeFiles: §6.8 lifetime rule.  A USER deleting the tab orphans
     // its freeze files (delete them); a project switch or app quit does NOT --
     // the files are the regenerable cache the content stamp reuses on the next
@@ -267,9 +269,6 @@ public:
     // hook rather than a direct call because the rig does not know where a
     // project lives -- the processor owns the Freeze folder.
     std::function<void (TabKind, int pageIndex)> onFreezeFileObsolete;
-    std::vector<EngineTab*> tabsOf (TabKind k);
-    int              allocateFreeIndex (TabKind k) const;   // first unused slot, -1 when full
-    void             renameTab (TabKind k, int pageIndex, const juce::String& newName);
 
     // ── Engine lifecycle (message thread) ─────────────────────────────────
     // Construct-or-swap the tab's engine and register it for audio dispatch.
@@ -282,10 +281,40 @@ public:
     juce::AudioProcessor* setEngineType (TabKind k, int pageIndex,
                                          const juce::String& engineType);
 
+    // Rebuild the tab's engine from the engineType it already carries, which is
+    // the one thing setEngineType structurally cannot do: its same-type no-op is
+    // keyed on the engine POINTER being non-null, and a hosted plugin that failed
+    // to load is a perfectly non-null engine -- so asking for the same plugin
+    // again did nothing at all.  Runs the real teardown (shield + settle) and
+    // then the real build path, so it is exactly as protected as an engine swap
+    // and leaves no step out.  MESSAGE THREAD ONLY.
+    juce::AudioProcessor* recreateEngine (TabKind k, int pageIndex);
+
+    // Plugins tab: rebuild a hosted instance that is no longer alive, carrying
+    // its settings across.  The outgoing instance answers getStateInformation
+    // with the bytes it was last restored with (HostedPlugin.h's last-known-state
+    // member), so a revival that would otherwise reset the user's plugin to its
+    // defaults keeps them.  Its DESCRIPTION travels too rather than an added-list
+    // lookup: the plugin may still not be on that list, which is the same reason
+    // a rack slot stores the whole description.  True when the rebuilt instance
+    // is alive.  MESSAGE THREAD ONLY.
+    //
+    // Runs the rebuild AND the state push under the project-load shield, because
+    // the push can re-instantiate the plugin (bridge-mode change) after the engine
+    // is already published to the dispatcher; and it preserves the tab's freeze,
+    // because the same plugin restored to working is not a change in what the tab
+    // produces.  Both are load-bearing -- see the body.
+    bool retryDeadPluginTab (int pageIndex);
+
     // Restore principle (HostedPlugin.h): the state blob carries the FULL
     // PluginDescription so a project keeps loading its plugins after the user
     // removed them from the added list.  The walker stashes it here BEFORE the
-    // select; the Plugins factory consumes it when findAdded comes up empty.
+    // select; the Plugins factory falls back to it when findAdded comes up empty.
+    //
+    // CONTRACT: stash immediately before the ONE select it describes.  The next
+    // Plugins build for that page consumes the entry whether it needed it or
+    // not, so it can never be inherited by a later select -- and a null desc
+    // clears the page rather than leaving the previous occupant's entry behind.
     void stashPluginRestoreDescription (int pageIndex,
                                         std::unique_ptr<juce::PluginDescription>);
 
@@ -336,6 +365,15 @@ public:
 
 private:
     juce::AudioProcessor* createEngineFor (EngineTab& tab, const juce::String& engineType);
+
+    // The LIVE device config an engine must be prepared at before it is handed
+    // to the dispatcher, with the fallback for the window before any device has
+    // prepared the processor (createEngineFor runs at project-restore time, which
+    // can precede the first prepareToPlay).  ONE resolver rather than a copy per
+    // register case: the copies are exactly how Layers/Bass/Drums ended up with
+    // no live re-prepare at all while their siblings had one.
+    void liveDeviceConfig (double& sampleRate, int& blockSize) const noexcept;
+
     void registerWithProcessor   (EngineTab& tab);
     void unregisterFromProcessor (EngineTab& tab);
     void teardownEngine (EngineTab& tab, bool settleAfterUnregister);
@@ -344,8 +382,17 @@ private:
     juce::UndoManager&  mUndoManager;
     std::vector<std::unique_ptr<EngineTab>> mTabs;
     // Per-page fallback descriptions for the Plugins factory -- see
-    // stashPluginRestoreDescription.  Consumed (erased) on use.
+    // stashPluginRestoreDescription.  Erased by the next Plugins build for that
+    // page (used or not), by removeTab with the tab identity the key stands for,
+    // and wholesale by teardownAll.  Not persisted: a restore hint that lives
+    // only from the walker's stash to the select immediately after it.
     std::map<int, std::unique_ptr<juce::PluginDescription>> mPluginRestoreDescs;
+
+    // The Plugins page retryDeadPluginTab is currently rebuilding, or -1.  Read
+    // by markEngineContentChanged to keep a revival from invalidating that tab's
+    // freeze.  Message thread only, so the plain save/restore around the rebuild
+    // is sufficient.
+    int mRevivingPluginPage { -1 };
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (EngineRig)
 };

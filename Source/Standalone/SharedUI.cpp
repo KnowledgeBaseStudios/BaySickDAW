@@ -9,11 +9,11 @@ namespace Filmstrips
 {
     static juce::File getDir()
     {
-        // exe is at: <root>/build/VibesynthStandalone_artefacts/Release/Vibesynth.exe
+        // exe is at: <root>/build/BaySickDAWStandalone_artefacts/<Config>/BaySickDAW.exe
         // go up 4 levels to reach project root, then into "Files For Claude/Filmstrips"
         return juce::File::getSpecialLocation(juce::File::currentApplicationFile)
             .getParentDirectory()   // Release
-            .getParentDirectory()   // VibesynthStandalone_artefacts
+            .getParentDirectory()   // BaySickDAWStandalone_artefacts
             .getParentDirectory()   // build
             .getParentDirectory()   // project root
             .getChildFile("Files For Claude/Filmstrips");
@@ -1085,7 +1085,7 @@ juce::Rectangle<int> VibeLAF::getTooltipBounds(const juce::String& text,
 // Toggle Buttons    |  -   | L1   |  -   |  -   |  -   |  ✓   |  -   | off-white text
 // Action Buttons    |  -   |  ✓   |  ✓   |  -   |  -   |  ✓   |  -   |
 // Nav Tabs          |  -   | actv |  -   |  -   |  -   |  ✓   |  -   |
-// Mixer Surface     |  ✓   |  -   |  -   |  -   |  ✓   |  ✓   |  -   | PENDING: no mixer yet
+// Mixer Surface     |  -   |  -   |  -   |  -   |  ✓   |  ✓   |  -   |
 // Effect Panels     |  ✓   |  -   |  -   |  -   |  -   |  ✓   |  ✓   | screws
 // Transport Bar     |  ✓   |  -   |  -   |  -   |  -   |  -   |  -   | brushed alum + LCD BPM
 // EQ Dots           |  -   | L1   |  -   |  ✓   |  -   |  -   |  -   | color bleed on hover
@@ -1096,122 +1096,13 @@ juce::Rectangle<int> VibeLAF::getTooltipBounds(const juce::String& text,
 // Plugin Window     |  -   |  -   |  -   |  -   |  ✓   |  -   |  -   | vignette on top
 // Combo Boxes       |  -   |  -   | arw  |  -   |  -   |  ✓   |  -   | off-white text
 // JewelIndicator    |  -   | L1   |  -   |  ✓   |  -   |  -   |  -   | faceted glass
-// Channel Strips    |  ✓   |  -   |  -   |  -   |  -   |  ✓   |  -   | PENDING: no mixer yet
+// Channel Strips    |  -   |  -   |  -   |  -   |  -   |  ✓   |  -   |
 // LCD Displays      |  -   |  -   |  -   |  -   |  -   |  -   |  -   | LCD ghost-segment
 //
 // Abbreviations: Tex=LRX-1 Texture, AO=LRX-2 Shadow Stack, Aniso=LRX-3 Anisotropic,
 //   Frsn=LRX-4 Fresnel, Vign=LRX-5 Vignette, Asym=LRX-6 Asymmetry, Topo=LRX-7 Topography
 //   L1=contact shadow only, metal=metal knobs, plas=plastic knobs, chrm=chrome caps,
 //   bezl=bezel, actv=active state only, arw=arrow button, drop=drop shadow only
-// ══════════════════════════════════════════════════════════════════════════════
-// LRX - TextureUtils  (cached image generation)
-// ══════════════════════════════════════════════════════════════════════════════
-std::map<juce::String, juce::Image>& TextureUtils::cache()
-{
-    static std::map<juce::String, juce::Image> c;
-    return c;
-}
-const juce::Image& TextureUtils::brushedAluminum(int w, int h)
-{
-    auto key = juce::String("ba_") + juce::String(w) + "_" + juce::String(h);
-    auto& c  = cache();
-    if (!c.count(key)) c[key] = makeBrushedAluminum(w, h);
-    return c[key];
-}
-const juce::Image& TextureUtils::voronoiCellular(int w, int h)
-{
-    auto key = juce::String("vo_") + juce::String(w) + "_" + juce::String(h);
-    auto& c  = cache();
-    if (!c.count(key)) c[key] = makeVoronoi(w, h);
-    return c[key];
-}
-const juce::Image& TextureUtils::fingerGrunge(int w, int h)
-{
-    auto key = juce::String("fg_") + juce::String(w) + "_" + juce::String(h);
-    auto& c  = cache();
-    if (!c.count(key)) c[key] = makeFingerGrunge(w, h);
-    return c[key];
-}
-
-juce::Image TextureUtils::makeBrushedAluminum(int w, int h)
-{
-    juce::Image img(juce::Image::ARGB, w, h, true);
-    juce::Graphics g(img);
-    juce::Random   rng(42);
-
-    // Horizontal scan lines with sinusoidal brightness - anisotropic sheen
-    for (int scanY = 0; scanY < h; ++scanY)
-    {
-        float t    = (float)scanY / juce::jmax(1, h - 1);
-        float base = 0.50f + 0.15f * std::sin(t * juce::MathConstants<float>::pi * 5.f);
-        float noise = (rng.nextFloat() - 0.5f) * 0.04f;
-        // Occasional bright streak (~1% of lines)
-        if (rng.nextFloat() < 0.012f)
-            base = juce::jmin(1.f, base + 0.40f);
-        float alpha = juce::jlimit(0.f, 1.f, base + noise);
-        g.setColour(juce::Colours::white.withAlpha(alpha));
-        g.drawHorizontalLine(scanY, 0.f, (float)w);
-    }
-    return img;
-}
-
-juce::Image TextureUtils::makeVoronoi(int w, int h)
-{
-    juce::Image img(juce::Image::ARGB, w, h, true);
-    constexpr int N = 28;
-    juce::Random  rng(17);
-    float px[N], py[N];
-    for (int i = 0; i < N; ++i) { px[i] = rng.nextFloat() * w; py[i] = rng.nextFloat() * h; }
-
-    for (int iy = 0; iy < h; ++iy)
-    {
-        for (int ix = 0; ix < w; ++ix)
-        {
-            float d1 = 1e9f, d2 = 1e9f;
-            for (int i = 0; i < N; ++i)
-            {
-                float d = (ix - px[i]) * (ix - px[i]) + (iy - py[i]) * (iy - py[i]);
-                if (d < d1) { d2 = d1; d1 = d; } else if (d < d2) d2 = d;
-            }
-            float boundary = 1.f - juce::jlimit(0.f, 1.f, (std::sqrt(d2) - std::sqrt(d1)) / 8.f);
-            img.setPixelAt(ix, iy, juce::Colour(0xff000000).withAlpha(boundary * 0.14f));
-        }
-    }
-    return img;
-}
-
-juce::Image TextureUtils::makeFingerGrunge(int w, int h)
-{
-    juce::Image img(juce::Image::ARGB, juce::jmax(1, w), juce::jmax(1, h), true);
-    juce::Graphics g(img);
-    juce::Random   rng(63);
-
-    // Smeared whorl blobs
-    for (int i = 0; i < 8; ++i)
-    {
-        float cx = rng.nextFloat() * w, cy = rng.nextFloat() * h;
-        float rx = w * (0.2f + rng.nextFloat() * 0.35f);
-        float ry = h * (0.08f + rng.nextFloat() * 0.15f);
-        float ang = rng.nextFloat() * juce::MathConstants<float>::pi;
-        juce::Path p; p.addEllipse(cx - rx, cy - ry, rx * 2.f, ry * 2.f);
-        p.applyTransform(juce::AffineTransform::rotation(ang, cx, cy));
-        g.setColour(juce::Colours::black.withAlpha(0.025f + rng.nextFloat() * 0.035f));
-        g.fillPath(p);
-    }
-    // Fine salt-and-pepper
-    int total = w * h / 18;
-    for (int i = 0; i < total; ++i)
-    {
-        float fx = rng.nextFloat() * w, fy = rng.nextFloat() * h;
-        float sz = 0.4f + rng.nextFloat() * 0.9f;
-        bool  bright = rng.nextBool();
-        float alpha  = rng.nextFloat() * 0.045f;
-        g.setColour((bright ? juce::Colours::white : juce::Colours::black).withAlpha(alpha));
-        g.fillEllipse(fx, fy, sz, sz);
-    }
-    return img;
-}
-
 // ══════════════════════════════════════════════════════════════════════════════
 // LRX - LRXHelper  (realism drawing utilities)
 // ══════════════════════════════════════════════════════════════════════════════
@@ -1321,6 +1212,9 @@ void LRXHelper::drawMountingScrews(juce::Graphics& g, juce::Rectangle<int> panel
     }
 }
 
+// HOLD-FOR-GL-RENDERER: disabled 2026-04-21 (CPU-renderer banding); re-enable
+// plan T3-LRX5Vignette, Future State BLU-370/BLU-489. Call site was
+// StandaloneEditor::paintOverChildren.
 void LRXHelper::drawVignette(juce::Graphics& g, juce::Rectangle<int> bounds, float strength)
 {
     auto bf = bounds.toFloat();
@@ -1330,15 +1224,6 @@ void LRXHelper::drawVignette(juce::Graphics& g, juce::Rectangle<int> bounds, flo
         juce::Colours::black.withAlpha(strength), bf.getX(), bf.getY(), true);
     g.setGradientFill(vignette);
     g.fillRect(bf);
-}
-
-void LRXHelper::applyGrunge(juce::Graphics& g, juce::Rectangle<int> bounds, float intensity)
-{
-    if (bounds.getWidth() < 2 || bounds.getHeight() < 2) return;
-    const auto& img = TextureUtils::fingerGrunge(bounds.getWidth(), bounds.getHeight());
-    g.setOpacity(intensity);
-    g.drawImageAt(img, bounds.getX(), bounds.getY());
-    g.setOpacity(1.f);
 }
 
 // ── PageMenuBar ───────────────────────────────────────────────────────────────
@@ -1445,31 +1330,9 @@ void PageMenuBar::setCenterTitle(const juce::String& name, juce::Colour accent)
     repaint();
 }
 
-void PageMenuBar::setMenuItems(std::vector<MenuItem> items)
-{
-    mMenuItems = std::move(items);
-}
-
 void PageMenuBar::setMenuBuilder(MenuBuilder builder)
 {
     mMenuBuilder = std::move(builder);
-}
-
-void PageMenuBar::addActionButton(const juce::String& label, std::function<void()> action)
-{
-    auto btn = std::make_unique<juce::TextButton>(label);
-    btn->onClick = action;
-    addAndMakeVisible(*btn);
-    mActionBtns.push_back(std::move(btn));
-    resized();
-}
-
-void PageMenuBar::clearActionButtons()
-{
-    for (auto& b : mActionBtns)
-        removeChildComponent(b.get());
-    mActionBtns.clear();
-    resized();
 }
 
 void PageMenuBar::addExtraRightComponent(juce::Component* c, int width)
@@ -1544,88 +1407,6 @@ void PageMenuBar::setTabSlots(const juce::StringArray& labels,
         addAndMakeVisible(*btn);
         mTabSlotBtns.push_back(std::move(btn));
     }
-    resized();
-}
-
-// Phase C §P4.2 (2026-04-24): split-tab-button used by Drums Piano Roll
-// sub-tab.  Body click hits the inherited TextButton onClick; right-edge
-// arrow zone triggers the arrow callback + paints a small ▾.  Dynamic label
-// callback (optional) refreshes button text on every paint.
-class SplitTabButton : public juce::TextButton
-{
-public:
-    static constexpr int kArrowZoneW = 14;
-    using TextButton::TextButton;
-
-    std::function<void(juce::Component*)> onArrow;
-    std::function<juce::String()>          getDynamicLabel;
-
-    bool hitTestArrow (int x) const noexcept
-    {
-        return x >= getWidth() - kArrowZoneW;
-    }
-
-    void mouseDown (const juce::MouseEvent& e) override
-    {
-        if (e.mods.isLeftButtonDown() && hitTestArrow (e.x) && onArrow)
-        {
-            onArrow (this);
-            return;   // do NOT fall through to TextButton's body-click path
-        }
-        juce::TextButton::mouseDown (e);
-    }
-
-    void paintButton (juce::Graphics& g, bool isOver, bool isDown) override
-    {
-        if (getDynamicLabel)
-        {
-            const auto txt = getDynamicLabel();
-            if (txt.isNotEmpty() && txt != getButtonText())
-                setButtonText (txt);
-        }
-        juce::TextButton::paintButton (g, isOver, isDown);
-
-        // Small ▾ in the arrow zone.
-        const float ax = (float) (getWidth() - kArrowZoneW * 0.5f);
-        const float ay = (float) getHeight() * 0.5f;
-        g.setColour (findColour (juce::TextButton::textColourOnId).withAlpha (0.85f));
-        juce::Path chev;
-        chev.addTriangle (ax - 3.5f, ay - 1.5f,
-                          ax + 3.5f, ay - 1.5f,
-                          ax,        ay + 3.0f);
-        g.fillPath (chev);
-    }
-};
-
-void PageMenuBar::setTabSlotArrow (int idx,
-                                    std::function<void(juce::Component*)> onArrow,
-                                    std::function<juce::String()> getDynamicLabel)
-{
-    if (idx < 0 || idx >= (int) mTabSlotBtns.size()) return;
-    auto* old = mTabSlotBtns[idx].get();
-    if (old == nullptr) return;
-
-    // Snapshot state we need to preserve.
-    const auto origLabel  = old->getButtonText();
-    const auto origToggle = old->getToggleState();
-    const auto origOnClk  = old->onClick;
-    const auto onCol      = old->findColour (juce::TextButton::buttonOnColourId);
-    const auto offCol     = old->findColour (juce::TextButton::buttonColourId);
-    const auto txtOn      = old->findColour (juce::TextButton::textColourOnId);
-    const auto txtOff     = old->findColour (juce::TextButton::textColourOffId);
-
-    removeChildComponent (old);
-    auto split = std::make_unique<SplitTabButton> (origLabel);
-    split->onClick          = origOnClk;
-    split->onArrow          = std::move (onArrow);
-    split->getDynamicLabel  = std::move (getDynamicLabel);
-    split->setToggleState   (origToggle, juce::dontSendNotification);
-    split->setColour (juce::TextButton::buttonOnColourId, onCol);
-    split->setColour (juce::TextButton::buttonColourId,   offCol);
-    split->setColour (juce::TextButton::textColourOnId,   txtOn);
-    split->setColour (juce::TextButton::textColourOffId,  txtOff);
-    addAndMakeVisible (*split);
-    mTabSlotBtns[idx] = std::move (split);
     resized();
 }
 
@@ -1952,32 +1733,8 @@ void PageMenuBar::updateMidSideActive(bool midActive)
 
 void PageMenuBar::showHamburgerMenu()
 {
-    // Custom builder takes precedence so components like ParametricEQDisplay
-    // can install full PopupMenu structures (submenus, checkmarks, conditional
-    // disables) that the flat mMenuItems list can't express.
     if (mMenuBuilder)
-    {
         mMenuBuilder (mHamburgerBtn.get());
-        return;
-    }
-
-    if (mMenuItems.empty()) return;
-    juce::PopupMenu menu;
-    for (int i = 0; i < (int)mMenuItems.size(); ++i)
-    {
-        const auto& item = mMenuItems[(size_t)i];
-        if (item.label == "-")
-            menu.addSeparator();
-        else
-            menu.addItem(i + 1, item.label);
-    }
-    auto opts = juce::PopupMenu::Options()
-        .withTargetComponent(mHamburgerBtn.get());
-    menu.showMenuAsync(opts, [this](int result) {
-        if (result > 0 && result <= (int)mMenuItems.size())
-            if (mMenuItems[(size_t)(result - 1)].action)
-                mMenuItems[(size_t)(result - 1)].action();
-    });
 }
 
 void PageMenuBar::paint(juce::Graphics& g)
@@ -2096,10 +1853,6 @@ void PageMenuBar::resized()
         if (it->comp != nullptr)
             it->comp->setBounds(b.removeFromRight(it->width).reduced(2, 1));
 
-    // Action buttons flush to right
-    for (auto it = mActionBtns.rbegin(); it != mActionBtns.rend(); ++it)
-        (*it)->setBounds(b.removeFromRight(60).reduced(2, 1));
-
     mCenterFreeR = b.getRight();
 }
 
@@ -2111,6 +1864,7 @@ namespace VKnobAutomation
                        std::function<void(float)>)> sOnRegisterApplicator;
     std::function<void(const juce::String& paramId,
                        std::function<float()>)> sOnRegisterReader;
+    std::function<void(const juce::String& slotUuid)>                            sOnUnregisterSlotUuid;
     std::function<juce::String(const juce::String& paramId)>                     sResolveMenuLabel;
     std::function<bool(const juce::String& paramId)>                             sShouldOfferModulate;
     std::function<void(const juce::String& paramId)>                             sOnModulateEnvelope;
@@ -2325,7 +2079,6 @@ void VKnob::paintOverChildren(juce::Graphics&)
 void VKnob::sliderDragStarted(juce::Slider* s)
 {
     mValueBeforeDrag = (float)s->getValue();
-    if (onDragStarted) onDragStarted(mValueBeforeDrag);
 }
 void VKnob::sliderDragEnded(juce::Slider* s)
 {
@@ -2552,10 +2305,7 @@ void ChickenHeadSelector::mouseDown(const juce::MouseEvent& e)
         mIsDragging = false;
         return;
     }
-    // Start rotary drag - capture angle from knob centre.
-    const auto c = getKnobBounds().getCentre();
-    mDragStartAngle = std::atan2(p.x - c.x, c.y - p.y);
-    mDragStartIdx   = mSelectedIdx;
+    // Start rotary drag.
     mIsDragging     = true;
 }
 
@@ -2741,503 +2491,6 @@ void DualLabelToggle::resized()
     }
 }
 
-// ============================================================ BasicStepCell
-BasicStepCell::BasicStepCell()
-{
-    setMouseCursor(juce::MouseCursor::PointingHandCursor);
-}
-void BasicStepCell::paint(juce::Graphics& g)
-{
-    auto b=getLocalBounds().toFloat().reduced(1);
-    if(active)
-    {
-        // Fill with row colour, height proportional to velocity
-        float velH = b.getHeight() * velocity;
-        juce::Rectangle<float> velRect(b.getX(), b.getBottom()-velH, b.getWidth(), velH);
-        g.setColour(mRowColour.withAlpha(0.85f));
-        g.fillRoundedRectangle(velRect,3);
-        // Outline
-        g.setColour(mRowColour);
-        g.drawRoundedRectangle(b,3,1.5f);
-        // Length indicator (right edge line)
-        if(length < 1.0f)
-        {
-            float lx = b.getX() + b.getWidth() * length;
-            g.setColour(juce::Colours::white.withAlpha(0.6f));
-            g.drawLine(lx, b.getY()+2, lx, b.getBottom()-2, 2.f);
-        }
-    }
-    else
-    {
-        g.setColour(juce::Colour(0xff2d2d4a));
-        g.fillRoundedRectangle(b,3);
-        g.setColour(VC::Accent.withAlpha(0.5f));
-        g.drawRoundedRectangle(b,3,0.5f);
-    }
-}
-void BasicStepCell::mouseDown(const juce::MouseEvent& e)
-{
-    mDragStart    = e.position;
-    mDragStartVel = velocity;
-    mDragStartLen = length;
-    mDragging     = false;
-}
-void BasicStepCell::mouseDrag(const juce::MouseEvent& e)
-{
-    float dx = e.position.x - mDragStart.x;
-    float dy = e.position.y - mDragStart.y;
-    if(std::abs(dx) > 4 || std::abs(dy) > 4) mDragging = true;
-    if(!mDragging) return;
-    if(std::abs(dy) > std::abs(dx))
-    {
-        // Vertical drag = velocity
-        velocity = juce::jlimit(0.05f, 1.0f, mDragStartVel - dy / (float)getHeight() * 2.f);
-    }
-    else
-    {
-        // Horizontal drag = length (drag right to extend)
-        length = juce::jlimit(0.1f, 4.0f, mDragStartLen + dx / (float)getWidth());
-    }
-    repaint();
-    if(onChange) onChange(rowIndex, stepIndex, active, velocity, length);
-}
-void BasicStepCell::mouseUp(const juce::MouseEvent&)
-{
-    if(!mDragging)
-    {
-        active = !active;
-        repaint();
-        if(onChange) onChange(rowIndex, stepIndex, active, velocity, length);
-    }
-    mDragging = false;
-}
-
-// ============================================================ BasicEnvelopeEditor
-BasicEnvelopeEditor::BasicEnvelopeEditor()
-{
-    auto mk=[this](const juce::String& lbl,float def,const juce::String& tip){
-        auto k=std::make_unique<VKnob>(lbl,def,tip);
-        k->slider.onValueChange=[this]{updateFromKnobs();};
-        addAndMakeVisible(*k);return k;
-    };
-    mAttack  = mk("Atk",  0.01f, "Attack time -- how fast each note rises");
-    mHold    = mk("Hold", 0.0f,  "Hold time -- how long the note stays at peak before decaying");
-    mDecay   = mk("Dec",  0.2f,  "Decay time -- how fast the note falls to sustain level");
-    mSustain = mk("Sus",  0.7f,  "Sustain level -- volume held while step is active");
-    mRelease = mk("Rel",  0.3f,  "Release time -- how fast the note fades after the step ends");
-    mAttack->slider.setRange(0.001, 2.0);
-    mHold->slider.setRange(0.0, 2.0);
-    mDecay->slider.setRange(0.001, 4.0);
-    mSustain->slider.setRange(0.0, 1.0);
-    mRelease->slider.setRange(0.001, 4.0);
-}
-void BasicEnvelopeEditor::updateFromKnobs()
-{
-    env.attack   = (float)mAttack->slider.getValue();
-    env.hold     = (float)mHold->slider.getValue();
-    env.decay    = (float)mDecay->slider.getValue();
-    env.sustain  = (float)mSustain->slider.getValue();
-    env.release_ = (float)mRelease->slider.getValue();
-    repaint();
-    if(onChange) onChange(env);
-}
-void BasicEnvelopeEditor::drawCurve(juce::Graphics& g, juce::Rectangle<int> area)
-{
-    // Draw AHDSR shape as a simple line curve
-    float W=(float)area.getWidth(), H=(float)area.getHeight();
-    float x0=(float)area.getX(), y0=(float)area.getBottom();
-    float total = env.attack+env.hold+env.decay+env.release_+0.1f;
-    auto tx=[&](float t){return x0 + (t/total)*W;};
-    auto ty=[&](float v){return y0 - v*H;};
-    juce::Path p;
-    p.startNewSubPath(x0, y0);
-    float t=env.attack; p.lineTo(tx(t), ty(1.f));
-    t+=env.hold;        p.lineTo(tx(t), ty(1.f));
-    t+=env.decay;       p.lineTo(tx(t), ty(env.sustain));
-    float susEnd=total-env.release_;
-    p.lineTo(tx(susEnd),ty(env.sustain));
-    p.lineTo(tx(total), ty(0.f));
-    g.setColour(VC::Blue.withAlpha(0.8f));
-    g.strokePath(p,juce::PathStrokeType(1.5f));
-    g.setColour(VC::Blue.withAlpha(0.15f));
-    p.lineTo(x0+W, y0); p.lineTo(x0, y0); p.closeSubPath();
-    g.fillPath(p);
-}
-void BasicEnvelopeEditor::paint(juce::Graphics& g)
-{
-    g.setColour(VC::Panel); g.fillRoundedRectangle(getLocalBounds().toFloat(),4);
-    g.setColour(VC::TextDim); g.setFont(juce::Font(9,juce::Font::bold));
-    g.drawText("AHDSR",getLocalBounds().removeFromTop(14),juce::Justification::centred);
-    int kw=52, curveW=getWidth()-5*kw-8;
-    drawCurve(g, juce::Rectangle<int>(4, 16, curveW, getHeight()-20));
-}
-void BasicEnvelopeEditor::resized()
-{
-    auto b=getLocalBounds().reduced(2);
-    b.removeFromTop(14);
-    int kw=52, curveW=b.getWidth()-5*kw-4;
-    b.removeFromLeft(curveW+4);
-    mAttack->setBounds(b.removeFromLeft(kw));
-    mHold->setBounds(b.removeFromLeft(kw));
-    mDecay->setBounds(b.removeFromLeft(kw));
-    mSustain->setBounds(b.removeFromLeft(kw));
-    mRelease->setBounds(b);
-}
-
-// ============================================================ SeqRoutingBar
-SeqRoutingBar::SeqRoutingBar()
-{
-    mRoutingBox=std::make_unique<juce::ComboBox>();
-    mRoutingBox->addItem("Basic Sequence",   1);
-    mRoutingBox->addItem("Complex Sequence", 2);
-    mRoutingBox->setSelectedId(1);
-    mRoutingBox->onChange=[this]{
-        mRouting=(mRoutingBox->getSelectedId()==2)
-                 ?SeqRouting::ComplexSequence:SeqRouting::BasicSequence;
-        updateVisibility();
-        if(onRoutingChanged) onRoutingChanged(mRouting);
-    };
-    addAndMakeVisible(*mRoutingBox);
-
-    mGoBtn=std::make_unique<juce::TextButton>("Go To Complex Sequence");
-    mGoBtn->setColour(juce::TextButton::buttonColourId, VC::Red);
-    mGoBtn->setColour(juce::TextButton::textColourOffId, juce::Colours::white);
-    mGoBtn->onClick=[this]{if(onGoToComplex) onGoToComplex();};
-    addAndMakeVisible(*mGoBtn);
-    updateVisibility();
-}
-void SeqRoutingBar::setRouting(SeqRouting r)
-{
-    mRouting=r;
-    mRoutingBox->setSelectedId(r==SeqRouting::ComplexSequence?2:1,juce::dontSendNotification);
-    updateVisibility();
-}
-SeqRouting SeqRoutingBar::getRouting() const { return mRouting; }
-void SeqRoutingBar::updateVisibility()
-{
-    bool complex=(mRouting==SeqRouting::ComplexSequence);
-    mGoBtn->setVisible(complex);
-}
-void SeqRoutingBar::paint(juce::Graphics& g)
-{
-    g.setColour(VC::Accent.withAlpha(0.5f));
-    g.fillRoundedRectangle(getLocalBounds().toFloat(),4);
-}
-void SeqRoutingBar::resized()
-{
-    auto b=getLocalBounds().reduced(4,2);
-    mRoutingBox->setBounds(b.removeFromLeft(180).reduced(0,2));
-    b.removeFromLeft(8);
-    if(mGoBtn->isVisible()) mGoBtn->setBounds(b.removeFromLeft(200).reduced(0,2));
-}
-
-// ============================================================ BasicSequenceGrid
-BasicSequenceGrid::BasicSequenceGrid(int numRows, const juce::StringArray& rowNames)
-    : mNumRows(numRows), mRowNames(rowNames)
-{
-    mContent  = std::make_unique<juce::Component>();
-    mViewport = std::make_unique<juce::Viewport>();
-    mViewport->setViewedComponent(mContent.get(), false);
-    mViewport->setScrollBarsShown(false, true);
-    addAndMakeVisible(*mViewport);
-    setNumSteps(DEFAULT_STEPS);
-}
-void BasicSequenceGrid::setNumSteps(int steps)
-{
-    mNumSteps = juce::jlimit(1, MAX_STEPS_TOTAL, steps);
-    rebuild();
-}
-void BasicSequenceGrid::setRowColour(int row, juce::Colour col)
-{
-    if(row<0||row>=(int)mCells.size()) return;
-    for(auto& cell : mCells[row]) if(cell) cell->setRowColour(col);
-}
-void BasicSequenceGrid::setStepData(int row, int step, bool active, float vel, float len)
-{
-    if(row<0||row>=(int)mCells.size()) return;
-    if(step<0||step>=(int)mCells[row].size()) return;
-    auto& c=mCells[row][step];
-    if(!c) return;
-    c->active=active; c->velocity=vel; c->length=len; c->repaint();
-}
-BasicStep BasicSequenceGrid::getStepData(int row, int step) const
-{
-    BasicStep s;
-    if(row>=0&&row<(int)mCells.size()&&step>=0&&step<(int)mCells[row].size())
-    {
-        auto& c=mCells[row][step];
-        if(c){s.active=c->active;s.velocity=c->velocity;s.length=c->length;}
-    }
-    return s;
-}
-void BasicSequenceGrid::rebuild()
-{
-    mContent->removeAllChildren();
-    mCells.clear();
-    mCells.resize(mNumRows);
-    for(int r=0;r<mNumRows;++r)
-    {
-        mCells[r].resize(mNumSteps);
-        for(int s=0;s<mNumSteps;++s)
-        {
-            auto cell=std::make_unique<BasicStepCell>();
-            cell->rowIndex=r; cell->stepIndex=s;
-            juce::Colour col = (r<4)?VC::LayerCol[r%4]:VC::Highlight;
-            cell->setRowColour(col);
-            cell->onChange=[this](int row,int step,bool a,float v,float l){
-                if(onStepChanged) onStepChanged(row,step,a,v,l);
-            };
-            mContent->addAndMakeVisible(*cell);
-            mCells[r][s]=std::move(cell);
-        }
-    }
-    layoutCells();
-}
-void BasicSequenceGrid::layoutCells()
-{
-    int contentW=kLabelW+mNumSteps*kStepW+8;
-    int contentH=mNumRows*kRowH+4;
-    mContent->setSize(contentW, contentH);
-    for(int r=0;r<mNumRows;++r)
-        for(int s=0;s<mNumSteps;++s)
-            if(mCells[r][s])
-                mCells[r][s]->setBounds(kLabelW+4+s*kStepW, 2+r*kRowH, kStepW-2, kRowH-4);
-}
-void BasicSequenceGrid::paint(juce::Graphics& g)
-{
-    g.fillAll(VC::Bg);
-    // Draw row labels on left
-    for(int r=0;r<mNumRows&&r<mRowNames.size();++r)
-    {
-        juce::Rectangle<int> lbl(0, 2+r*kRowH, kLabelW-4, kRowH-4);
-        g.setColour(VC::Panel);
-        g.fillRoundedRectangle(lbl.toFloat(),3);
-        juce::Colour col=(r<4)?VC::LayerCol[r%4]:VC::Highlight;
-        g.setColour(col);
-        g.setFont(juce::Font(9,juce::Font::bold));
-        g.drawFittedText(mRowNames[r],lbl.reduced(3,0),juce::Justification::centredLeft,2);
-    }
-    // Step numbers
-    g.setColour(VC::TextDim); g.setFont(juce::Font(8));
-    for(int s=0;s<mNumSteps;++s)
-        g.drawText(juce::String(s+1),kLabelW+4+s*kStepW,0,kStepW,14,juce::Justification::centred);
-    // Playhead
-    if(mPlayheadStep>=0&&mPlayheadStep<mNumSteps)
-    {
-        g.setColour(VC::Yellow.withAlpha(0.5f));
-        int px=kLabelW+4+mPlayheadStep*kStepW;
-        g.fillRect(px, 14, kStepW-2, mNumRows*kRowH-4);
-    }
-}
-void BasicSequenceGrid::resized()
-{
-    mViewport->setBounds(getLocalBounds());
-    layoutCells();
-}
-
-// ============================================================ FXChainStrip
-FXChainStrip::FXChainStrip(const juce::StringArray& slotLabels)
-{
-    static const char* kDefaultNames[] = { "Comp", "Drive", "Chorus", "Delay", "Reverb", "Spread" };
-    static const char* kK1[] = { "Thresh", "Drive", "Rate", "Time", "Room", "Width" };
-    static const char* kK2[] = { "Ratio",  "Tone",  "Depth","FB",   "Damp", "Mono" };
-    static const char* kK3[] = { "Gain",   "Wet",   "Wet",  "Wet",  "Wet",  "Wet"  };
-
-    int n = (slotLabels.size() > 0) ? juce::jmin(6, slotLabels.size()) : 6;
-    mSlots.resize(n);
-    for (int s = 0; s < n; ++s)
-    {
-        auto& slot = mSlots[s];
-        juce::String name = (s < slotLabels.size()) ? slotLabels[s] : kDefaultNames[s];
-        slot.toggle = std::make_unique<juce::ToggleButton>(name);
-        slot.toggle->getProperties().set("switchToggle", true);   // FX rack slot - intentional switch
-        addAndMakeVisible(*slot.toggle);
-        slot.k1 = std::make_unique<VKnob>(kK1[s], 0.5f, "");
-        slot.k2 = std::make_unique<VKnob>(kK2[s], 0.5f, "");
-        slot.k3 = std::make_unique<VKnob>(kK3[s], 0.0f, "");
-        addAndMakeVisible(*slot.k1); addAndMakeVisible(*slot.k2); addAndMakeVisible(*slot.k3);
-    }
-}
-void FXChainStrip::paint(juce::Graphics& g)
-{
-    g.setColour(VC::Panel); g.fillRoundedRectangle(getLocalBounds().toFloat(), 4.f);
-    int n = (int)mSlots.size();
-    if (n == 0) return;
-    int slotW = getWidth() / n;
-    g.setColour(VC::Accent.withAlpha(0.4f));
-    for (int i = 1; i < n; ++i)
-        g.drawVerticalLine(i * slotW, 4, getHeight() - 4);
-}
-void FXChainStrip::resized()
-{
-    int n = (int)mSlots.size();
-    if (n == 0) return;
-    auto b = getLocalBounds().reduced(4);
-    int slotW = b.getWidth() / n;
-    for (int s = 0; s < n; ++s)
-    {
-        auto& slot = mSlots[s];
-        auto area = b.removeFromLeft(slotW).reduced(2);
-        slot.toggle->setBounds(area.removeFromTop(22).reduced(1, 2));
-        area.removeFromTop(2);
-        int kh = area.getHeight() / 3;
-        slot.k1->setBounds(area.removeFromTop(kh));
-        slot.k2->setBounds(area.removeFromTop(kh));
-        slot.k3->setBounds(area);
-    }
-}
-
-// ============================================================ WaveformDisplay
-static std::vector<float> makeSineWave(int n = 256)
-{
-    std::vector<float> v(n);
-    for (int i = 0; i < n; ++i)
-        v[i] = std::sin(2.f * juce::MathConstants<float>::pi * i / n);
-    return v;
-}
-
-WaveformDisplay::WaveformDisplay()
-{
-    mSamples = makeSineWave();
-    setMouseCursor(juce::MouseCursor::PointingHandCursor);
-}
-
-void WaveformDisplay::setWaveform(const std::vector<float>& s) { mSamples = s; repaint(); }
-void WaveformDisplay::setColor(juce::Colour c) { mColor = c; repaint(); }
-
-juce::Path WaveformDisplay::buildCurvePath(juce::Rectangle<float> area) const
-{
-    if (mSamples.empty()) return {};
-    juce::Path p;
-    float w = area.getWidth(), h = area.getHeight();
-    float cx = area.getX(), cy = area.getCentreY();
-    int n = (int)mSamples.size();
-    for (int px = 0; px < (int)w; ++px)
-    {
-        int si = juce::jlimit(0, n - 1, (int)(px / w * n));
-        float y = cy - mSamples[si] * (h * 0.45f);
-        if (px == 0) p.startNewSubPath(cx, y);
-        else         p.lineTo(cx + px, y);
-    }
-    return p;
-}
-
-WaveformDisplay::DragTarget WaveformDisplay::hitTestMarker(juce::Point<float> p) const
-{
-    float w = (float)getWidth();
-    float sx = markerX(mStartPos, w);
-    float ex = markerX(mEndPos,   w);
-    if (std::abs(p.x - sx) < 8.f) return DragTarget::StartMarker;
-    if (std::abs(p.x - ex) < 8.f) return DragTarget::EndMarker;
-    return DragTarget::None;
-}
-
-void WaveformDisplay::paint(juce::Graphics& g)
-{
-    auto b = getLocalBounds();
-    float w = (float)b.getWidth(), h = (float)b.getHeight();
-
-    // Background
-    g.setColour(VC::Bg);
-    g.fillRoundedRectangle(b.toFloat(), 3.f);
-
-    // Waveform area (leave 14px for bottom label)
-    auto waveArea = b.toFloat().withTrimmedBottom(14.f).reduced(6.f, 4.f);
-
-    // Build waveform path
-    auto curvePath = buildCurvePath(waveArea);
-
-    // Gradient fill under curve
-    juce::ColourGradient grad(mColor.withAlpha(0.25f), 0.f, waveArea.getCentreY(),
-                               juce::Colours::transparentBlack, 0.f, waveArea.getBottom(), false);
-    g.setGradientFill(grad);
-    juce::Path fillPath = curvePath;
-    fillPath.lineTo(waveArea.getRight(), waveArea.getCentreY());
-    fillPath.lineTo(waveArea.getX(), waveArea.getCentreY());
-    fillPath.closeSubPath();
-    g.fillPath(fillPath);
-
-    // Glow pass (wide, low alpha)
-    g.setColour(mColor.withAlpha(0.18f));
-    g.strokePath(curvePath, juce::PathStrokeType(4.f));
-    // Main curve
-    g.setColour(mColor.withAlpha(0.85f));
-    g.strokePath(curvePath, juce::PathStrokeType(1.5f));
-
-    // Start/End markers
-    float sy = waveArea.getCentreY();
-    float startX = 6.f + mStartPos * waveArea.getWidth();
-    float endX   = 6.f + mEndPos   * waveArea.getWidth();
-    float topY   = waveArea.getY();
-    float botY   = waveArea.getBottom();
-
-    // Shaded region outside markers
-    g.setColour(VC::Bg.withAlpha(0.45f));
-    g.fillRect(6.f, topY, startX - 6.f, botY - topY);
-    g.fillRect(endX, topY, w - 6.f - endX, botY - topY);
-
-    // Marker lines + handle circles
-    auto drawMarker = [&](float mx)
-    {
-        g.setColour(VC::Text.withAlpha(0.8f));
-        g.drawLine(mx, topY, mx, botY, 1.5f);
-        g.setColour(VC::Text);
-        g.fillEllipse(mx - 5.f, topY - 1.f, 10.f, 10.f);
-        g.setColour(VC::Bg);
-        g.fillEllipse(mx - 3.f, topY + 1.f, 6.f, 6.f);
-    };
-    drawMarker(startX);
-    drawMarker(endX);
-
-    // Bottom hint text
-    g.setColour(VC::TextDim);
-    g.setFont(juce::Font(9));
-    g.drawText("Drag wave to reshape  |  Drag markers for start/end",
-               juce::Rectangle<float>(0.f, h - 14.f, w, 13.f),
-               juce::Justification::centred, false);
-}
-
-void WaveformDisplay::mouseDown(const juce::MouseEvent& e)
-{
-    mDrag = hitTestMarker(e.position);
-    if (mDrag == DragTarget::None && onSpeedChanged)
-    {
-        mDrag = DragTarget::Body;
-        mBodyDragStartY = e.position.y;
-        // Capture current LFO rate from the slider if available - default 1Hz
-        mBodyDragStartRate = 1.f;
-    }
-}
-
-void WaveformDisplay::mouseDrag(const juce::MouseEvent& e)
-{
-    if (mDrag == DragTarget::None) return;
-
-    if (mDrag == DragTarget::Body)
-    {
-        float delta = mBodyDragStartY - e.position.y;   // up = positive = faster
-        // 100px drag = 1 decade of LFO rate change
-        float newRate = mBodyDragStartRate * std::pow(10.f, delta / 100.f);
-        newRate = juce::jlimit(0.01f, 20.f, newRate);
-        if (onSpeedChanged) onSpeedChanged(newRate);
-        return;
-    }
-
-    float w = (float)getWidth() - 12.f;
-    float pos = juce::jlimit(0.f, 1.f, (e.position.x - 6.f) / w);
-    if (mDrag == DragTarget::StartMarker)
-        mStartPos = juce::jmin(pos, mEndPos - 0.02f);
-    else
-        mEndPos = juce::jmax(pos, mStartPos + 0.02f);
-    repaint();
-    if (onMarkersChanged) onMarkersChanged(mStartPos, mEndPos);
-}
-
-void WaveformDisplay::mouseUp(const juce::MouseEvent&)
-{
-    mDrag = DragTarget::None;
-}
-
 // ============================================================ ParametricEQDisplay
 #include "../DSP/EQ8DSP.h"
 #include "../DSP/EQ8MsDSP.h"
@@ -3319,7 +2572,6 @@ ParametricEQDisplay::ParametricEQDisplay()
                                       + juce::String(i) + "Freq"); // Task 6 (12-iv)
             setAPVTSFromBand(i);
             repaint();
-            if (onBandChanged) onBandChanged(i, mBands[i].freq, mBands[i].gainDb);
         };
         addAndMakeVisible(*c.typeCombo);
 
@@ -3926,7 +3178,6 @@ void ParametricEQDisplay::syncBandFromControl(int idx)
     // block, reads the stale default, and snaps the slider back.
     pushBandToDSP(idx);
     repaint();
-    if (onBandChanged) onBandChanged(idx, b.freq, b.gainDb);
 }
 
 void ParametricEQDisplay::resized()
@@ -4502,8 +3753,6 @@ void ParametricEQDisplay::mouseDown(const juce::MouseEvent& e)
     mDragBand    = hitBand;
     mUserDragging = true;
     mDragOrigin  = pos;
-    mDragStartFreq = mBands[hitBand].freq;
-    mDragStartGain = mBands[hitBand].gainDb;
 }
 
 void ParametricEQDisplay::mouseDrag(const juce::MouseEvent& e)
@@ -4530,7 +3779,6 @@ void ParametricEQDisplay::mouseDrag(const juce::MouseEvent& e)
     setAPVTSFromBand(mDragBand);
     pushBandToDSP(mDragBand);
     repaint();
-    if (onBandChanged) onBandChanged(mDragBand, mBands[mDragBand].freq, mBands[mDragBand].gainDb);
 }
 
 void ParametricEQDisplay::mouseUp(const juce::MouseEvent&)
@@ -4582,7 +3830,6 @@ void ParametricEQDisplay::mouseWheelMove(const juce::MouseEvent& e,
     setAPVTSFromBand(band);
     pushBandToDSP(band);
     repaint();
-    if (onBandChanged) onBandChanged(band, mBands[band].freq, mBands[band].gainDb);
     (void)e;
 }
 
@@ -5073,6 +4320,11 @@ void ParametricEQDisplay::drawHoverTooltip(juce::Graphics& g) const
 
 void ParametricEQDisplay::syncFromAPVTS()
 {
+    // Ahead of the early-out: APVTS mode draws no spectrum, but its CURVE is
+    // still a biquad magnitude evaluated at the sample rate, so the axis must
+    // track the device here too.
+    refreshSampleRateFromDevice();
+
     if (!mAPVTS || mLayerIdx < 0 || mUserDragging || mSyncing) return;
 
     juce::String p = "L" + juce::String(mLayerIdx) + "_";
@@ -5730,8 +4982,22 @@ void ParametricEQDisplay::setShowMid(bool showMid)
     repaint();
 }
 
+void ParametricEQDisplay::refreshSampleRateFromDevice()
+{
+    const double live = getLiveSampleRate();
+    if (live > 0.0 && std::abs (mSampleRateForFFT - live) > 1.0e-9)
+    {
+        setSampleRate (live);
+        repaint();   // every bin's frequency AND the whole drawn curve moved
+    }
+}
+
 void ParametricEQDisplay::syncFromDSP()
 {
+    // The axis has to be right before the frame that arrives below is mapped
+    // onto it, so this leads the poll.
+    refreshSampleRateFromDevice();
+
     // 12i: feed poll is ORDER-INDEPENDENT of the band-value sync below and must
     // run even during drag / mid-sync, or the analyser freezes while the user is
     // holding a handle. Kept above the mSyncing / mUserDragging guard.
@@ -5746,10 +5012,29 @@ void ParametricEQDisplay::syncFromDSP()
 
     // 12g: keep mPhaseMode in sync with the bound DSP so the popup checkmark
     // is correct after preset load / external mode change. Cheap (one int read).
+    //
+    // Same treatment for the A/B bank: the DSP owns which bank is live (swap
+    // goes through swapWithSpare) and now restores it from saved state, so the
+    // pill and the compare-menu direction must be read back or they invert
+    // after a project load or a window reopen. APVTS-only mode keeps its own
+    // flag - there is no DSP to ask - so it is deliberately not touched here.
+    bool dspViewingSpare = mViewingSpare;
     if (mBindMode == BindMode::DSP && mBoundDSP)
-        mPhaseMode = (int) mBoundDSP->getPhaseMode();
+    {
+        mPhaseMode      = (int) mBoundDSP->getPhaseMode();
+        dspViewingSpare = mBoundDSP->isViewingSpare();
+    }
     else if (mBindMode == BindMode::MsDSP && mBoundMsDsp)
-        mPhaseMode = (int) mBoundMsDsp->getPhaseMode();
+    {
+        mPhaseMode      = (int) mBoundMsDsp->getPhaseMode();
+        dspViewingSpare = mBoundMsDsp->mid().isViewingSpare();
+    }
+
+    if (dspViewingSpare != mViewingSpare)
+    {
+        mViewingSpare = dspViewingSpare;
+        refreshBankIndicator();
+    }
 
     // D.4-Q6: sync the main-level fader from DSP without firing onValueChange
     // (avoid the DSP->UI->DSP loop).  Only when not actively dragging the
@@ -6095,16 +5380,25 @@ void ParametricEQDisplay::showEQOptionsMenu(juce::Component* anchor)
         "HQ Extended (low-latency linear)"
     };
 
-    // Latency contribution per mode. Mirrors EqLinearPhaseProcessor::
-    // fftSizeForMode + EQ8DSP::getLatencySamples (Mid + Side serial in MsDSP).
-    auto modeLatencySamples = [this] (int m) -> int
+    // D.4-Q6 (2026-05-01): expose three previously-hidden EQ8 settings in this
+    // menu (Jeff confirmed these are options, not toolbar knobs).  All three
+    // apply only when a live DSP is bound (DSP mode or MsDSP mode); APVTS-only
+    // mode hides them.  Resolved up here because the per-mode latency readout
+    // below needs the bound DSP's Linear Phase Precision.
+    EQ8DSP* directDsp = (mBindMode == BindMode::DSP) ? mBoundDSP : nullptr;
+    EQ8MsDSP* msDsp   = (mBindMode == BindMode::MsDSP) ? mBoundMsDsp : nullptr;
+
+    // APVTS-only mode has no DSP to ask, so it falls back to the default
+    // precision - which is the FFT size spec 12g fixed Linear at anyway.
+    const int curPrec = directDsp ? directDsp->getLinearPhasePrecision()
+                      : msDsp     ? msDsp->mid().getLinearPhasePrecision()
+                                  : EQ8DSP::kDefaultLinearPrec;
+
+    // Latency contribution per mode. Mirrors EQ8DSP::linearFftSize +
+    // EQ8DSP::getLatencySamples (Mid + Side serial in MsDSP).
+    auto modeLatencySamples = [this, curPrec] (int m) -> int
     {
-        int linFft = 0;
-        switch (m) { case 1: linFft = 2048; break;
-                     case 3: linFft = 4096; break;
-                     case 4: linFft = 512;  break;
-                     default: linFft = 0;   break; }
-        const int linLat = linFft / 2;
+        const int linLat = EQ8DSP::linearFftSize ((EQ8DSP::PhaseMode) m, curPrec) / 2;
         const bool acOn  = (m == 2 || m == 3);
         const int acLat  = acOn ? 8 : 0;   // approx IIR halfband 1-stage
         const int perInner = linLat + acLat;
@@ -6124,25 +5418,20 @@ void ParametricEQDisplay::showEQOptionsMenu(juce::Component* anchor)
     }
     menu.addSubMenu("Processing Mode", modeMenu);
 
-    // D.4-Q6 (2026-05-01): expose three previously-hidden EQ8 settings here
-    // (Jeff confirmed these are options, not toolbar knobs).  All three apply
-    // only when a live DSP is bound (DSP mode or MsDSP mode); APVTS-only mode
-    // hides them.
-    EQ8DSP* directDsp = (mBindMode == BindMode::DSP) ? mBoundDSP : nullptr;
-    EQ8MsDSP* msDsp   = (mBindMode == BindMode::MsDSP) ? mBoundMsDsp : nullptr;
     if (directDsp != nullptr || msDsp != nullptr)
     {
         menu.addSeparator();
 
-        // Linear Phase Precision: 5-position radio (FFT size).  Only meaningful
-        // when a linear-phase processing mode is active.
-        const int curPrec = directDsp ? directDsp->getLinearPhasePrecision()
-                                      : msDsp->mid().getLinearPhasePrecision();
+        // Linear Phase Precision: 5-position radio picking the FFT size for the
+        // plain Linear Phase mode.  HQ Linear and HQ Extended keep their own
+        // spec'd sizes, so the submenu name says which mode this governs rather
+        // than offering a setting that silently does nothing in three of five
+        // modes.
         juce::PopupMenu precMenu;
         static const char* kPrecLabels[] = { "256 (low CPU)", "512", "1024", "2048 (default)", "4096 (high)" };
-        for (int p = 0; p < 5; ++p)
+        for (int p = 0; p < EQ8DSP::kNumLinearPrecisions; ++p)
             precMenu.addItem (20 + p, kPrecLabels[p], true, curPrec == p);
-        menu.addSubMenu ("Linear Phase Precision", precMenu);
+        menu.addSubMenu ("Linear Phase Precision (Linear Phase mode)", precMenu);
 
         // IIR Mod Speed: 5-position radio (smoother ramp time).
         const float curSpeed = directDsp ? directDsp->getIIRModSpeed()
@@ -7183,8 +6472,9 @@ void DBFSMeter::onVBlank()
     // QA-RustyMeter: EMA-smooth the incoming per-frame RMS (~50 ms window, #5b)
     // then push it into the scrolling history ring (Split layout only).  Newest
     // at mRmsHead-1; paintRmsWaveform reads back.  The audio thread publishes a
-    // per-block RMS (CAS-max, multi-call safe like the peak); the window
-    // smoothing lives here so it stays correct for the multi-call InsertKinds.
+    // fixed 5 ms windowed RMS (VibeGraph's MeterRmsWindow), CAS-maxed so several
+    // windows landing inside one UI frame merge to their max; this EMA is the
+    // display ballistic on top of it, and stays correct for multi-call InsertKinds.
     {
         const float alphaRms = juce::jlimit (0.f, 1.f,
             1.f - std::exp (-(float) dt / kRmsTimeConstSec));

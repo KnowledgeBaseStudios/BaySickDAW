@@ -1,5 +1,6 @@
 #include "BaySickAlignEditor.h"
 #include "../AppPaths.h"
+#include "../UserFileSave.h"
 #include "BaySickVocalProcessor.h"
 #include "../Standalone/UndoBracket.h"
 #include "../Standalone/BaySickTitleBar.h"
@@ -1478,24 +1479,28 @@ void BaySickAlignEditor::saveUserPreset()
         [self, aw] (int r)
         {
             if (r != 1 || ! self) return;
-            const juce::String name = aw->getTextEditorContents ("name").trim();
-            if (name.isEmpty()) return;
+            const juce::String name = aw->getTextEditorContents ("name");
 
             juce::XmlElement el ("BaySickAlignPreset");
             for (auto* id : kPresetParamIds)
                 el.setAttribute (id, (double) self->paramValue (id));
 
-            auto dir = alignPresetsDir();
-            dir.createDirectory();
-            auto target = dir.getChildFile (name + ".xml");
-            int n = 2;
-            while (target.exists())
-                target = dir.getChildFile (name + " (" + juce::String (n++) + ").xml");
-            target.replaceWithText (el.toString());
+            // snapshotPresetValues below re-baselines the reference that
+            // paramsDivergeFromSnapshot compares against, which is what drives
+            // the toolbar dirty light and bsa_preset_dirty.  A write that never
+            // landed - failed, or cancelled at the collision prompt - must not
+            // reach it, or a lost preset reports itself saved.
+            UserFileSave::writeXmlAsync (alignPresetsDir(), name, el,
+                [self] (const UserFileSave::Result& saved)
+                {
+                    // Re-tested here and not just above: the collision prompt
+                    // is another modal, so the page can close between the two.
+                    if (! saved || ! self) return;
 
-            beginParamUndoGesture (self->mProc.apvts, "bsa_preset"); // Task 6 (12-iv)
-            self->setParamValue ("bsa_preset", 6.0f);   // "(User)"
-            self->snapshotPresetValues();
+                    beginParamUndoGesture (self->mProc.apvts, "bsa_preset");
+                    self->setParamValue ("bsa_preset", 6.0f);   // "(User)"
+                    self->snapshotPresetValues();
+                });
         }), true);
 }
 

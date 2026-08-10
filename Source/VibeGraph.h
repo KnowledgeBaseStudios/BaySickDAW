@@ -1,15 +1,13 @@
 #pragma once
 #include <JuceHeader.h>
+#include <algorithm>
+#include <array>
 #include <unordered_map>
 #include <functional>
 #include "DSP/SpectrumFeed.h"
 #include "DSP/EQ8MsDSP.h"
 #include "EffectRack.h"
 #include "VibesynthConstants.h"
-
-// Forward declarations - full headers included in VibeGraph.cpp only
-class BassSynth;
-// DrumSynth forward-decl removed - class no longer used in graph (2026-04-25).
 
 // ── Meter latency-compensation toggle (2026-05-02) ───────────────────────────
 // When enabled, audio nodes delay their published peak readings by N blocks so
@@ -64,6 +62,11 @@ namespace MixerChannelIds
     constexpr int kBassBus2   = 15;
     constexpr int kClipsBus2  = 16;
     constexpr int kPluginsBus2 = 17;
+    // QA-SOUNDNESS (2026-08-07, Jeff): the Drum Kit grid's "1-16" and "17-32"
+    // buttons are two INDEPENDENT kits, not one kit behind a view filter, so
+    // each gets its own bus the way BaySickRustyDrums does.  Same
+    // always-allocated shape as the T10 group buses above.
+    constexpr int kDrumsBus2  = 18;
     constexpr int kAuxBase   = 100;  // Aux 0..17 → 100..117 (G-7 polish: 16 → 18)
     constexpr int kLayerBase = 200;  // Layer insert 0..19 → 200..219
     constexpr int kBassBase  = 300;  // Bass insert 0..9 → 300..309
@@ -74,19 +77,41 @@ namespace MixerChannelIds
     constexpr int kRustyBase = 800;  // J-4: BaySickRustyDrums insert 0..12 → 800..812
     constexpr int kPluginBase = 900; // TS6: hosted VST3 instrument insert 0..19 → 900..919
 
-    // QA-Layout T11 (L18): per-kind strip caps at their shipping values --
-    // mirrors of the kMax*Pages constants in VibesynthConstants.h (kept in
-    // lockstep BY HAND).  Range checks read THESE, never a bare literal (the
-    // old +16/+50 literals silently capped range checks below the page caps).
-    constexpr int kMaxLayerStrips = 20;
-    constexpr int kMaxBassStrips  = 10;
-    constexpr int kMaxDrumStrips  = 32;
-    constexpr int kMaxAudioStrips = 100;
-    constexpr int kMaxVoxStrips   = 10;  // T11: 6 → 10
-    constexpr int kMaxInstStrips  = 30;  // T11: 20 → 30
-    constexpr int kMaxAuxStrips   = 18;  // 5F-4b B2; bumped 16 → 18 in G-7 polish (2026-04-29)
+    // Per-kind strip caps.  A strip cap IS its page cap -- one page of a kind
+    // owns exactly one insert strip, so these are DERIVED from
+    // VibesynthConstants.h rather than restated.  Raising a page cap therefore
+    // raises the strip cap with it; a one-sided raise would leave the extra
+    // pages with an empty prefixFromChannelId, i.e. no strip, no EQ bank and no
+    // routing entry, silently.  Range checks read THESE, never a bare literal.
+    constexpr int kMaxLayerStrips = kMaxLayerPages;
+    constexpr int kMaxBassStrips  = kMaxBassPages;
+    constexpr int kMaxDrumStrips  = kMaxDrumPages;
+    constexpr int kMaxAudioStrips = kMaxClipPages;
+    constexpr int kMaxVoxStrips   = kMaxVoxPages;
+    constexpr int kMaxInstStrips  = kMaxInstPages;
+    constexpr int kMaxPluginStrips = kMaxPluginPages;
+    // These two have no page counterpart -- Aux strips are standalone sends and
+    // a Rusty kit's strips are its sound types, not tabs.
+    constexpr int kMaxAuxStrips   = 18;  // 5F-4b B2; bumped 16 -> 18 in G-7 polish (2026-04-29)
     constexpr int kMaxRustyStrips = 13;  // J-4: 13 sound types per BaySickRustyDrums kit (no doubles)
-    constexpr int kMaxPluginStrips = 20; // TS6: must stay equal to kMaxPluginPages
+
+    // QA-SOUNDNESS: drum pages split into two banks of this size -- pages
+    // 0..15 are kit 1, pages 16..31 are kit 2.  This is the ONE place the
+    // split is expressed; every drum-routing site resolves through
+    // drumBusForPage below rather than repeating the arithmetic.
+    constexpr int kDrumPagesPerBank = 16;
+
+    // Which bank does a drum page belong to (0 = kit 1, 1 = kit 2)?
+    inline int drumBankForPage (int pageIdx)
+    {
+        return pageIdx >= kDrumPagesPerBank ? 1 : 0;
+    }
+
+    // The drums bus a given drum page's insert feeds.
+    inline int drumBusForPage (int pageIdx)
+    {
+        return drumBankForPage (pageIdx) == 1 ? kDrumsBus2 : kDrumsBus;
+    }
 
     inline int layerInsert (int idx) { return kLayerBase + idx; }
     inline int bassInsert  (int idx) { return kBassBase  + idx; }
@@ -120,6 +145,7 @@ namespace MixerChannelIds
             case kBassBus2:   return "mixer_bassbus2";
             case kClipsBus2:  return "mixer_clipsbus2";
             case kPluginsBus2: return "mixer_pluginbus2";
+            case kDrumsBus2:  return "mixer_drumsbus2";
         }
         if (chId >= kLayerBase && chId < kLayerBase + kMaxLayerStrips) return "mixer_layer_" + juce::String(chId - kLayerBase);
         if (chId >= kBassBase  && chId < kBassBase  + kMaxBassStrips)  return "mixer_bass_"  + juce::String(chId - kBassBase);
@@ -142,7 +168,8 @@ namespace MixerChannelIds
             || chId == kVoxBus2   || chId == kInstBus2 || chId == kInstBus3
             || chId == kRustyDrumsBus || chId == kPluginsBus
             || chId == kLayersBus2 || chId == kBassBus2
-            || chId == kClipsBus2  || chId == kPluginsBus2;
+            || chId == kClipsBus2  || chId == kPluginsBus2
+            || chId == kDrumsBus2;
     }
 
     // Is this channel's main-out locked (cannot be rerouted)?
@@ -153,6 +180,26 @@ namespace MixerChannelIds
     {
         return chId == kMaster || isBus(chId)
             || (chId >= kRustyBase && chId < kRustyBase + kMaxRustyStrips);
+    }
+
+    // ── Main-out lines ────────────────────────────────────────────────────────
+    // A strip feeds up to four main destinations.  Four matches the aux-send
+    // slot count rather than inventing a second number.
+    //
+    // PERSISTENCE IS ADDITIVE: line 0 stays in `<prefix>_sendTo` with its
+    // historical 0..999 range and natural-parent default, so a project saved
+    // before this existed restores its single cable untouched.  Lines 1..3 are
+    // separate params, -1 = inactive, and simply do not exist in such a file.
+    //
+    // A main-out-locked strip (Master / buses / Rusty inserts) still has
+    // exactly one line: the UI never offers the extra lines, and the routing
+    // graph reads whatever is there, which for those strips is nothing.
+    inline constexpr int kMaxMainOutsPerStrip = 4;
+
+    inline juce::String mainOutParamId (const juce::String& prefix, int line)
+    {
+        if (line <= 0) return prefix + "_sendTo";
+        return prefix + "_mainOut" + juce::String (line) + "_to";
     }
 
     // Is this a valid send target from a Bus or Master strip?
@@ -186,6 +233,7 @@ namespace MixerChannelIds
             case kBassBus2:   return "Bass Bus 2";
             case kClipsBus2:  return "Clips Bus 2";
             case kPluginsBus2: return "Plugins Bus 2";
+            case kDrumsBus2:  return "Drums Bus 2";
         }
         if (chId >= kLayerBase && chId < kLayerBase + kMaxLayerStrips) return "Layer " + juce::String(chId - kLayerBase + 1);
         if (chId >= kBassBase  && chId < kBassBase  + kMaxBassStrips)  return "Bass "  + juce::String(chId - kBassBase  + 1);
@@ -222,10 +270,14 @@ namespace MixerChannelIds
             case kBassBus2:   return kMaster;
             case kClipsBus2:  return kMaster;
             case kPluginsBus2: return kMaster;
+            case kDrumsBus2:  return kMaster;
         }
         if (channelId >= kLayerBase && channelId < kLayerBase + kMaxLayerStrips) return kLayersBus;
         if (channelId >= kBassBase  && channelId < kBassBase  + kMaxBassStrips)  return kBassBus;
-        if (channelId >= kDrumBase  && channelId < kDrumBase  + kMaxDrumStrips)  return kDrumsBus;
+        // QA-SOUNDNESS: bank 1 (pages 0..15) -> Drums Bus, bank 2 (16..31) ->
+        // Drums Bus 2.  A pre-change project's saved _sendTo wins over this
+        // default, so existing slot-0..15 drums are untouched either way.
+        if (channelId >= kDrumBase  && channelId < kDrumBase  + kMaxDrumStrips)  return drumBusForPage (channelId - kDrumBase);
         if (channelId >= kAudioBase && channelId < kAudioBase + kMaxAudioStrips) return kClipsBus;
         if (channelId >= kAuxBase   && channelId < kAuxBase   + kMaxAuxStrips)  return kFxBus;
         if (channelId >= kVoxBase   && channelId < kVoxBase   + kMaxVoxStrips)  return kVoxBus;
@@ -237,7 +289,7 @@ namespace MixerChannelIds
 }
 
 // ── RoutingGraph (5F-4b B1a) ─────────────────────────────────────────────────
-// Resolves dynamic per-strip sendTo + sends[] from APVTS at block rate.
+// Resolves each strip's main-out lines + sends[] from APVTS at block rate.
 // Cycle detection via Kahn's topo sort. Audio path consumes topoOrder() in B1b.
 class RoutingGraph
 {
@@ -248,7 +300,10 @@ public:
         int   dstId;
         float amountDb;
         bool  prePost;      // true = pre-fader tap from src
-        bool  isMainOut;    // true = main-out cable (exactly one per src)
+        // true = main-out cable.  A src may have up to kMaxMainOutsPerStrip of
+        // these, each to a DIFFERENT dst (duplicates are refused); every one
+        // carries a full-level copy, the level is not split between them.
+        bool  isMainOut;
     };
 
     // C.4 Phase 1 (2026-04-30): sidechain edge.  Source's post-everything
@@ -264,6 +319,7 @@ public:
 
     static constexpr int kMaxSendsPerStrip   = 4;
     static constexpr int kMaxScRecvsPerStrip = 4;
+    static constexpr int kMaxMainOutsPerStrip = MixerChannelIds::kMaxMainOutsPerStrip;
 
     // Pre-flight cycle check (message thread). Would adding {src → dst} create
     // a cycle given the current edge list? Called before committing a cable drop.
@@ -280,10 +336,47 @@ public:
     const std::vector<Edge>&   edges()     const noexcept { return mEdges; }
     const std::vector<ScEdge>& scEdges()   const noexcept { return mScEdges; }
 
+    // Single fast-path predicate for the pre-fader send tap: true iff at least
+    // one surviving send edge asked for it.  Recomputed AFTER computeTopo, so an
+    // edge dropped as a cycle cannot leave this reading true and make VibeGraph
+    // fill a tap nobody pulls.
+    bool hasPreFaderSends() const noexcept { return mHasPreFaderSend; }
+
 private:
     std::vector<Edge>   mEdges;
     std::vector<ScEdge> mScEdges;
     std::vector<int>    mTopoOrder;
+    bool                mHasPreFaderSend { false };
+
+    // Composed APVTS ids per channel, built once per (chId, prefix) pair.
+    // rebuildFromApvts runs on the AUDIO THREAD every block, and juce::String
+    // has no small-string optimization, so composing these inline cost ~33
+    // heap allocations per channel per block -- the dominant allocation source
+    // on the block-rate routing path.
+    //
+    // Only the id TEXT is cached.  Every block still reads the live APVTS
+    // atomics through these ids, so a cable drag or an automated send amount
+    // lands on the very next block exactly as before.  An id is a pure
+    // function of the strip's prefix, so an entry is rebuilt only when that
+    // channel's prefix actually changes -- no external invalidation hook is
+    // needed, and a lazily-created parameter simply keeps resolving through
+    // the same id until it exists.  Entries for channels that go away are
+    // retained (the map is keyed by chId, which is a bounded space), so this
+    // is a fixed ceiling rather than a ratchet; a chId reused by a different
+    // strip re-composes on the prefix mismatch.
+    struct ChannelParamIds
+    {
+        juce::String prefix;
+        std::array<juce::String, kMaxMainOutsPerStrip> mainOutTo  {};
+        std::array<juce::String, kMaxSendsPerStrip>   sendTo      {};
+        std::array<juce::String, kMaxSendsPerStrip>   sendAmount  {};
+        std::array<juce::String, kMaxSendsPerStrip>   sendPrePost {};
+        std::array<juce::String, kMaxScRecvsPerStrip> scFrom      {};
+    };
+    std::unordered_map<int, ChannelParamIds> mChannelParamIds;
+
+    // Topo input list, reused so the block-rate path doesn't reallocate it.
+    std::vector<int>    mTopoIds;
 
     bool computeTopo(const std::vector<int>& ids);
 };
@@ -301,16 +394,10 @@ private:
 // Each bus node owns an EffectRack (6 slots) and holds a reference to the
 // channel EQ8MsDSP managed by PluginProcessor.  Mixer gain/mute/solo comes
 // from BusMix (written on the message thread, read on the audio thread).
-//
-// Phase-2 instrument nodes: lazy add/remove via addInstrumentNode /
-// removeInstrumentNode (uses the embedded AudioProcessorGraph registry).
 // ─────────────────────────────────────────────────────────────────────────────
 class VibeGraph
 {
 public:
-    // Opaque handle for Phase-2 instrument nodes
-    using NodeID = juce::AudioProcessorGraph::NodeID;
-
     // ── Spectrum feed (audio thread writes, UI timer reads) ───────────────────
     // Definition moved to DSP/SpectrumFeed.h (shared with EQ8MsDSP per-instance
     // feeds; see 5F-9 §12i). Alias preserves the existing VibeGraph::SpectrumFeed
@@ -351,11 +438,8 @@ public:
     // eq->postFeed directly via ParametricEQDisplay::bindMsDSP.
     // §P4.3 B7 (2026-04-22): all external page-EQ refs dropped.  Every bus now
     // owns its own preEq (pre-rack) and busEq (post-rack) directly.
-    // 2026-04-25: DrumSynth removed.  Drums-bus content now exclusively
-    // comes from per-drum-tab InsertNode outputs.
-    void buildFixedTopology(juce::Synthesiser&                  synth,
-                            BassSynth&                          bass,
-                            juce::AudioProcessorValueTreeState& apvts);
+    // Drums-bus content comes exclusively from per-drum-tab InsertNode outputs.
+    void buildFixedTopology(juce::AudioProcessorValueTreeState& apvts);
 
     // 2026-05-06 (Batch 9b): unified bus DSP dispatcher used by
     // PassiveStripTask's Bus mode.  `buf` is treated as in/out - caller must
@@ -404,6 +488,8 @@ public:
     EffectRack* getBassBus2Rack();
     EffectRack* getClipsBus2Rack();
     EffectRack* getPluginsBus2Rack();
+    // QA-SOUNDNESS: second drum kit's bus, same always-allocated shape.
+    EffectRack* getDrumsBus2Rack();
 
     // ── Per-page instrument EffectRacks ────────────────────────────────────────
     // These sit between each engine's pre-rack page EQ and the bus sum.
@@ -438,6 +524,7 @@ public:
     EQ8MsDSP* getBassBus2EQ();
     EQ8MsDSP* getClipsBus2EQ();
     EQ8MsDSP* getPluginsBus2EQ();
+    EQ8MsDSP* getDrumsBus2EQ();            // QA-SOUNDNESS
 
     // §P4.3: Pre-rack bus EQs - fresh EQ8MsDSP per bus, runs at the very start
     // of each bus's processBlock chain (input -> preEq -> rack -> postEq -> fader).
@@ -462,6 +549,7 @@ public:
     EQ8MsDSP* getBassBus2PreEQ();
     EQ8MsDSP* getClipsBus2PreEQ();
     EQ8MsDSP* getPluginsBus2PreEQ();
+    EQ8MsDSP* getDrumsBus2PreEQ();         // QA-SOUNDNESS
 
     // ── PDC - Plugin Delay Compensation ──────────────────────────────────────
     // Call from message thread after any effect is loaded/removed/bypassed.
@@ -502,20 +590,16 @@ public:
     // without a matching entry would keep its old session's effect chain.
     void clearAllRackStates();
 
-    // ── Dynamic instrument channel registry ───────────────────────────────────
-    // Each mixer channel that isn't a bus gets its own rack + post-rack EQ.
-    // IDs are assigned by addInstrChannel() and are stable for the session.
-    // Audio routing for non-bus channels is wired in Phase 2/3; containers exist now.
-    //
-    // Initial channels registered in buildFixedTopology:
-    //   "Layer 1" (id ~100), "Bass 1" (~101), "Drum Ch 1"–"Drum Ch 14" (~102–115)
+    // ── Instrument channel registry ───────────────────────────────────────────
+    // Holds per-audio-row channels ONLY - ids 400 + row, registered by
+    // addAudioRowChannel below - each with its own rack + post-rack EQ.
+    // Nothing registers into the 100-199 band: Layer / Bass / Drum racks live
+    // in the InsertNode storage (see InsertKind below), not here.
     //
     // EffectsPage sets onInstrChannelListChanged to rebuild its dropdown dynamically
     // whenever a new page is opened/closed.
-    std::function<void()>   onInstrChannelListChanged;   // fired on add/remove
+    std::function<void()>   onInstrChannelListChanged;   // fired on add
 
-    int                     addInstrChannel(const juce::String& displayName);
-    void                    removeInstrChannel(int channelId);
     juce::String            getInstrChannelName(int channelId) const;
     std::vector<int>        getInstrChannelIds() const;  // stable insertion order
     EffectRack*             getInstrChannelRack(int channelId);
@@ -527,7 +611,6 @@ public:
     void        addAudioRowChannel (int row, const juce::String& displayName);
     EffectRack* getAudioRowRack    (int row);
     EQ8MsDSP*   getAudioRowEQ      (int row);
-    bool        hasAudioRowChannel (int row) const;
 
     // ── 5F-4a: Per-insert audio nodes (new architecture) ─────────────────────
     // Each insert gets its own rack + post-rack EQ + polarity/width/fader path.
@@ -669,6 +752,16 @@ public:
     // exchange-store, so only the rack-slot promotion remains.
     void promoteAllRackSlotSnapshots();
 
+    // ONE walk over every rack in the graph, shared by both sweeps below.  A
+    // second hand-maintained copy of that rack list is precisely the two-lists-
+    // drift defect a new bus rack would fall through.
+    void forEachRack (const std::function<void (EffectRack&)>& fn);
+
+    // Offline-render edges: propagate the non-realtime state into hosted VST3
+    // plugins living in rack slots, which the processor's engine sweep cannot
+    // reach (they are DSPBase entries inside an EffectRack, not rig engines).
+    void setAllRackSlotsNonRealtime (bool offline);
+
     // D3: read this insert's choke group (0 = none, 1..16 = group id).
     // Returns 0 if the node doesn't exist or the param isn't bound.
     // Wait-free - reads the cached atomic pChokeGroup pointer.
@@ -734,6 +827,30 @@ public:
     // has no stash (Master) -- caller falls back to the post-everything
     // output buffer.  Audio thread.
     const juce::AudioBuffer<float>* getScSourceTap (int channelId) const;
+
+    // ── Pre-fader send tap ───────────────────────────────────────────────────
+    // The signal a strip carries at the point BEFORE its fader stage -- i.e.
+    // before fader gain, before the mute gate and before the solo gate, which
+    // this codebase applies as one combined gain (InsertNode::processBlock /
+    // InstrChannelNode::processChainOnly).  Pan sits after that gain in both
+    // chains, so the tap is pre-pan for free.
+    //
+    // A send edge with prePost == true reads THIS instead of the source's
+    // mOutputBuffer; prePost == false keeps reading mOutputBuffer, and sidechain
+    // edges keep reading their own getScSourceTap stash.  nullptr means the
+    // channel is not an armed pre-fader source (or has no node), and the caller
+    // falls back to mOutputBuffer.
+    //
+    // Audio thread.  Filled by the source strip's own chain pass, which the
+    // dispatcher already orders before every consumer via the send edge's
+    // mPredecessors / mChildren / mInitialDeps entry -- the same acquire on the
+    // dependency counter that publishes mOutputBuffer publishes this.
+    const juce::AudioBuffer<float>* getPreFaderTap (int channelId) const;
+    // Writable handle on the same buffer, for the handful of strip tasks that
+    // modify their output AFTER the chain pass (listen gate, idle-suspend fade)
+    // and must apply the identical change to the tap.  nullptr when unarmed.
+    juce::AudioBuffer<float>*       getPreFaderTapBuffer (int channelId);
+
     // Apply the per-(consumer, slot) key-alignment delay in place on the SC
     // receive buffer (values solved on the message thread by
     // updateBusLatencies).  Audio thread, allocation-free.
@@ -768,12 +885,7 @@ public:
     void clearAuxInserts();
 
     // ── Level meters (written by audio thread, read by UI timer) ─────────────
-    std::atomic<float> layersPeakDb  { -60.f };
-    std::atomic<float> bassPeakDb    { -60.f };
-    std::atomic<float> drumsPeakDb   { -60.f };
-    std::atomic<float> masterPeakDb  { -60.f };
-    // 2026-04-30: stereo L/R for split DBFSMeter.  Mono atomics above kept
-    // (= max(L, R)) for back-compat with legacy readers.
+    // 2026-04-30: stereo L/R for the split DBFSMeter.
     std::atomic<float> layersPeakDbL { -60.f };
     std::atomic<float> layersPeakDbR { -60.f };
     std::atomic<float> bassPeakDbL   { -60.f };
@@ -782,49 +894,39 @@ public:
     std::atomic<float> drumsPeakDbR  { -60.f };
     std::atomic<float> masterPeakDbL { -60.f };
     std::atomic<float> masterPeakDbR { -60.f };
-    std::atomic<float> fxBusPeakDb   { -60.f };
     std::atomic<float> fxBusPeakDbL  { -60.f };
     std::atomic<float> fxBusPeakDbR  { -60.f };
-    std::atomic<float> audioClipsPeakDb  { -60.f };
     std::atomic<float> audioClipsPeakDbL { -60.f };
     std::atomic<float> audioClipsPeakDbR { -60.f };
-    std::atomic<float> voxBusPeakDb      { -60.f };
     std::atomic<float> voxBusPeakDbL     { -60.f };
     std::atomic<float> voxBusPeakDbR     { -60.f };
-    std::atomic<float> voxBus2PeakDb     { -60.f };
     std::atomic<float> voxBus2PeakDbL    { -60.f };
     std::atomic<float> voxBus2PeakDbR    { -60.f };
-    std::atomic<float> instBusPeakDb     { -60.f };
     std::atomic<float> instBusPeakDbL    { -60.f };
     std::atomic<float> instBusPeakDbR    { -60.f };
-    std::atomic<float> instBus2PeakDb    { -60.f };
     std::atomic<float> instBus2PeakDbL   { -60.f };
     std::atomic<float> instBus2PeakDbR   { -60.f };
-    std::atomic<float> instBus3PeakDb    { -60.f };
     std::atomic<float> instBus3PeakDbL   { -60.f };
     std::atomic<float> instBus3PeakDbR   { -60.f };
-    std::atomic<float> rustyDrumsBusPeakDb  { -60.f };
     std::atomic<float> rustyDrumsBusPeakDbL { -60.f };
     std::atomic<float> rustyDrumsBusPeakDbR { -60.f };
-    std::atomic<float> pluginsBusPeakDb     { -60.f };   // QA-ModelShell TS6
     std::atomic<float> pluginsBusPeakDbL    { -60.f };
     std::atomic<float> pluginsBusPeakDbR    { -60.f };
     // QA-Layout T10: secondary group buses.
-    std::atomic<float> layersBus2PeakDb     { -60.f };
     std::atomic<float> layersBus2PeakDbL    { -60.f };
     std::atomic<float> layersBus2PeakDbR    { -60.f };
-    std::atomic<float> bassBus2PeakDb       { -60.f };
     std::atomic<float> bassBus2PeakDbL      { -60.f };
     std::atomic<float> bassBus2PeakDbR      { -60.f };
-    std::atomic<float> clipsBus2PeakDb      { -60.f };
     std::atomic<float> clipsBus2PeakDbL     { -60.f };
     std::atomic<float> clipsBus2PeakDbR     { -60.f };
-    std::atomic<float> pluginsBus2PeakDb    { -60.f };
     std::atomic<float> pluginsBus2PeakDbL   { -60.f };
     std::atomic<float> pluginsBus2PeakDbR   { -60.f };
+    // QA-SOUNDNESS: second drum kit's bus.
+    std::atomic<float> drumsBus2PeakDbL     { -60.f };
+    std::atomic<float> drumsBus2PeakDbR     { -60.f };
 
     // QA-RustyMeter part 2 (2026-05-30): per-bus windowed-RMS atoms for the
-    // split meter's scrolling top half.  11 non-master buses x L/R (Master keeps
+    // split meter's scrolling top half.  Every non-master bus x L/R (Master keeps
     // a full peak bar, no RMS).  CAS-maxed audio-side by publishRms in processBus
     // (never reset there); the UI exchange-resets via
     // drainBusRms.  No mono sibling + no PluginProcessor mirror -- the UI reads
@@ -847,6 +949,8 @@ public:
     std::atomic<float> bassBus2RmsDbL      { -60.f }, bassBus2RmsDbR      { -60.f };
     std::atomic<float> clipsBus2RmsDbL     { -60.f }, clipsBus2RmsDbR     { -60.f };
     std::atomic<float> pluginsBus2RmsDbL   { -60.f }, pluginsBus2RmsDbR   { -60.f };
+    // QA-SOUNDNESS: second drum kit's bus.
+    std::atomic<float> drumsBus2RmsDbL     { -60.f }, drumsBus2RmsDbR     { -60.f };
 
     // QA-AudioMeters (2026-05-24): per-kind insert peak atomics, parallel to the
     // per-bus atomics above.  InsertNode::process publishes via publishPeakReading;
@@ -872,22 +976,12 @@ public:
     // TS7 per-block transport snapshot -- see setBlockTransport above.
     static DSPBase::HostTransport sBlockTransport;
 
-    // ── Phase-2 instrument node registry ─────────────────────────────────────
-    // Nodes registered here will be integrated into the processing graph in a
-    // future session when the full AudioProcessorGraph path is wired.
-    NodeID addInstrumentNode(std::unique_ptr<juce::AudioProcessor> proc, int trackId);
-    void   removeInstrumentNode(int trackId);
-    bool   hasNode(int trackId) const;
-    int    getNodeCount() const { return (int)mTrackNodes.size(); }
-
-    juce::AudioProcessorGraph& getGraph() { return mGraph; }
-
 private:
     // ── Forward-declared nested bus node type (defined in VibeGraph.cpp) ──────
     // unique_ptr with incomplete type - destructor defined in VibeGraph.cpp.
     // CL-301 (QA-ModelShell TS1, 2026-07-27): the five hand-written bus structs
-    // (Layers/Bass/Drums/Master/Effects) are folded into this ONE type -- all
-    // 11 buses share the same implementation; the master chain is a method,
+    // (Layers/Bass/Drums/Master/Effects) are folded into this ONE type -- every
+    // bus shares the same implementation; the master chain is a method,
     // not a type.
     struct InstrChannelNode;   // the one bus/channel node type (rack + EQs + chain)
 
@@ -917,19 +1011,19 @@ private:
     std::unique_ptr<InstrChannelNode> mAudioClipsBusNode;  // rack+EQ for all audio clips (ID 6)
 
     // QA-Ea Part A (2026-05-21): cached bus _solo atomic pointers for the
-    // anyBusSoloed() helper.  Bound in rebindBusApvts().  Order matches
-    // kBusSoloPrefixes[12] in VibeGraph.cpp (layers / bass / drums / fx /
-    // clipsbus / voxbus / instbus / voxbus2 / instbus2 / instbus3 / rustybus /
-    // pluginbus).
+    // anyBusSoloed() helper.  Bound in rebindBusApvts(); the array length must
+    // stay equal to kBusSoloPrefixes[] in VibeGraph.cpp, which is the list this
+    // mirrors (Master is excluded -- no _solo param, no sibling to solo against).
     // CPU-safeguarding standing rule: avoid string-keyed getRawParameterValue
     // lookups per audio block; cache the raw atomic ptrs once + reuse.
-    std::array<std::atomic<float>*, 16> mBusSoloPtr {};
+    static constexpr int kNumSoloableBuses = 17;   // QA-SOUNDNESS: +Drums Bus 2
+    std::array<std::atomic<float>*, kNumSoloableBuses> mBusSoloPtr {};
 
-    // Instrument channel nodes: keyed by the ID returned by addInstrChannel().
-    // Insertion order preserved via mInstrChannelOrder for dropdown display.
+    // Instrument channel nodes: keyed by 400 + arrangement row, the id
+    // addAudioRowChannel assigns.  Insertion order preserved via
+    // mInstrChannelOrder for dropdown display.
     std::map<int, std::unique_ptr<InstrChannelNode>> mInstrChannelNodes;
     std::vector<int>                                 mInstrChannelOrder;
-    int                                              mNextInstrChannelId { 100 };
 
     // Per-page instrument EffectRacks - always live, prepared with the graph.
     // Applied after per-page EQ, before the bus sum, in PluginProcessor::processBlock.
@@ -982,6 +1076,9 @@ private:
     std::unique_ptr<InstrChannelNode> mBassBus2Node;
     std::unique_ptr<InstrChannelNode> mClipsBus2Node;
     std::unique_ptr<InstrChannelNode> mPluginsBus2Node;
+    // QA-SOUNDNESS (2026-08-07): bus for the second drum kit (pages 16..31),
+    // same always-allocated shape.
+    std::unique_ptr<InstrChannelNode> mDrumsBus2Node;
     // mRustyInserts std::map removed by QA-InsertMaps 2026-05-24 (flattened into
     // mInsertsByChannel above; chId range 800..812 for Rusty kit strips).
 
@@ -997,10 +1094,6 @@ private:
     // APVTS pointer captured at buildFixedTopology() - used by ensureInsertNode()
     // to rebind each insert's cached param pointers on creation.
     juce::AudioProcessorValueTreeState* mApvts { nullptr };
-
-    // Global "kill-all" FX bypass, read by every rack process site each block.
-    // Cached in buildFixedTopology() so audio-thread reads are lock-free.
-    std::atomic<float>* mGlobalFxBypassPtr { nullptr };
 
     // ── PDC compensation delay line ──────────────────────────────────────────
     // A simple stereo ring buffer. setDelay() resizes and resets it on the
@@ -1024,6 +1117,16 @@ private:
             mDelay = juce::jlimit(0, kMaxSamples, delaySamples);
             mNumCh = numChannels;
             mBuf.assign((size_t)(mNumCh * kMaxSamples), 0.f);
+            mWrite = 0;
+        }
+
+        // Zero the history without touching the delay length or the allocation.
+        // Audio-thread safe (no allocation: the vector is already at size), and
+        // used when a line resumes after a stretch of not being processed -- its
+        // ring would otherwise emit up to mDelay samples of whatever it last saw.
+        void clearRing() noexcept
+        {
+            std::fill(mBuf.begin(), mBuf.end(), 0.f);
             mWrite = 0;
         }
 
@@ -1066,6 +1169,30 @@ private:
     // Allocation-free (relaxed atomic bools on the nodes).
     void armScSourceTaps();
 
+    // The bus node behind a fixed-bus channel id, or nullptr for anything else
+    // (insert strips live in mInsertsByChannel; kMaster is deliberately NOT
+    // here -- getScSourceTap's contract is that master has no stash because it
+    // has no comp delay, and master is the terminal node so it is never a live
+    // send source either).
+    InstrChannelNode* busNodeForChannel (int chId) const noexcept;
+
+    // Audio thread (block rate, from rebuildRoutingFromApvts): arm the pre-fader
+    // tap on exactly those nodes that are the source of at least one pre-fader
+    // send this block, disarm every other node, and clear each armed tap so a
+    // strip that does not run this block (idle-suspended, pruned by a freeze
+    // render, a Clips row between clips) feeds silence into its send instead of
+    // repeating the previous block.  Allocation-free.
+    void armPreFaderTaps();
+
+    // Single fast-path check for the whole feature (the mAnyXActive pattern):
+    // with no pre-fader send anywhere, armPreFaderTaps returns on one relaxed
+    // load and no node ever copies anything.  Holds LAST block's answer so the
+    // sweep that disarms the final tap still runs once.
+    std::atomic<bool> mAnyPreFaderSend { false };
+    // Scratch for that sweep: chId -> is a pre-fader send source this block.
+    // Audio thread only; fixed size so it never allocates.
+    std::array<bool, (size_t) kMaxStripChannels> mPreFaderSrcFlags {};
+
     // 5F-4b B1b: routing state
     RoutingGraph                                       mRoutingGraph;
 
@@ -1073,11 +1200,20 @@ private:
     // Each ScSet is allocated lazily on first ensureScRecvBuffers() / getScRecvBuffer.
     struct ScSet { std::array<juce::AudioBuffer<float>, kMaxScRecvSlots> bufs; };
     std::unordered_map<int, ScSet>                     mScRecv;
-    std::vector<std::pair<int, juce::String>>          mActiveChannels;
 
-    // ── Phase-2 node registry (AudioProcessorGraph, not yet driving audio) ────
-    juce::AudioProcessorGraph mGraph;
-    std::map<int, NodeID>     mTrackNodes;
+    // Channel set handed to RoutingGraph::rebuildFromApvts every block.  The
+    // leading mFixedBusChannelCount entries are the always-registered buses;
+    // they are built ONCE by buildFixedBusChannels() from the constructor and
+    // never rebuilt, because juce::String has no small-string optimization and
+    // composing them from literals per block cost one StringHolder malloc per
+    // bus, plus the matching frees, on the audio thread.  The per-block rebuild
+    // only truncates back to that count and re-appends the live-insert tail.
+    // Capacity covers the
+    // whole chId space so the append can never realloc on the audio thread
+    // either (same reasoning as the mLiveInsertChannels reserve).
+    std::vector<std::pair<int, juce::String>>          mActiveChannels;
+    std::size_t                                        mFixedBusChannelCount { 0 };
+    void buildFixedBusChannels();
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(VibeGraph)
 };

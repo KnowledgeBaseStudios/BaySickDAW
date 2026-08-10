@@ -19,7 +19,13 @@ inline double ticksToBeats (juce::int64 ticks) noexcept
 }
 
 // ── Automation data ───────────────────────────────────────────────────────────
-enum class CurveType { Linear, Stepped, Spline };
+// Ordinals are pinned explicitly because this int is persisted: each automation
+// point writes "curve" as the raw enum value and the loader casts the saved int
+// straight back, so an insertion or re-order silently repoints every saved point
+// at a different curve shape.  Values below match what was implicit before, so
+// this pins current behavior and changes nothing.  NEVER reorder or insert;
+// append only, with an explicit value.  Same rule as EffectType in EffectRack.h.
+enum class CurveType { Linear = 0, Stepped = 1, Spline = 2 };
 
 struct ControlPoint
 {
@@ -28,33 +34,6 @@ struct ControlPoint
     CurveType curveType  { CurveType::Linear };
     float     tension    { 0.f };   // reserved for future Bezier
 };
-
-// QA-ModelShell TS2: the ONE control-point evaluator, shared by the live
-// engine replay (PluginProcessor) and the offline render replay so the two
-// cannot drift.  relPos = 0..1 position within the clip; points assumed
-// sorted by timeTicks.
-template <typename PointVec>
-inline float evalAutomationPointsAt (const PointVec& pts, float relPos)
-{
-    if (pts.empty()) return 0.5f;
-    if ((int) pts.size() == 1)          return pts[0].value01;
-    if (relPos <= pts.front().timeTicks) return pts.front().value01;
-    if (relPos >= pts.back().timeTicks)  return pts.back().value01;
-
-    for (int pi = 0; pi < (int) pts.size() - 1; ++pi)
-    {
-        if (relPos >= pts[pi].timeTicks && relPos <= pts[pi + 1].timeTicks)
-        {
-            if (pts[pi].curveType == CurveType::Stepped)
-                return pts[pi].value01;
-
-            const float span = pts[pi + 1].timeTicks - pts[pi].timeTicks;
-            const float t    = (span > 0.f) ? (relPos - pts[pi].timeTicks) / span : 0.f;
-            return pts[pi].value01 + t * (pts[pi + 1].value01 - pts[pi].value01);
-        }
-    }
-    return pts[0].value01;
-}
 
 struct AutomationLane
 {
@@ -86,21 +65,115 @@ struct AutomationLane
     juce::String              lastKnownName;
 
     // Evaluate the lane at normalised clip position pos01 (0 = start, 1 = end).
-    // Returns a normalised 0..1 parameter value.
+    // Returns a normalized 0..1 parameter value.  Forwards to
+    // evalAutomationLaneAt below -- the one evaluator.
     float evaluateAt(float pos01) const;
 };
 
+// The ONE lane evaluator.  A lane is more than its points -- LFO mode, per-point
+// tension and Spline segments are all user-reachable and all persisted -- so a
+// points-only evaluator alongside this one means the editor draws a curve the
+// render never plays.  Every replay path goes through here: the live editor
+// tick, the audio-thread APVTS pass, the offline tempo clock and the offline
+// lane replay.
+//
+// AUDIO THREAD: reached from PluginProcessor::processBlock, so no allocation --
+// points are ASSUMED SORTED by timeTicks.  Every mutation site sorts (Event
+// Editor add/move, the Builder grid drag, the ValueTree loader); a new one must
+// too.
+inline float evalAutomationLaneAt (const AutomationLane& lane, float relPos)
+{
+    relPos = juce::jlimit (0.f, 1.f, relPos);
+
+    if (lane.isLFO)
+    {
+        if (lane.lfoRate <= 0.f) return (lane.lfoMin + lane.lfoMax) * 0.5f;
+        const float phase = std::fmod (relPos / lane.lfoRate, 1.f);
+        float raw = phase;
+        switch (lane.lfoShape)
+        {
+            case 0: raw = 0.5f + 0.5f * std::sin (phase * juce::MathConstants<float>::twoPi); break;
+            case 1: raw = (phase < 0.5f) ? (phase * 2.f) : (2.f - phase * 2.f);               break;
+            case 2: raw = phase;                                                              break;
+            case 3: raw = (phase < 0.5f) ? 1.f : 0.f;                                         break;
+            default: break;
+        }
+        return juce::jlimit (0.f, 1.f, lane.lfoMin + raw * (lane.lfoMax - lane.lfoMin));
+    }
+
+    const auto& pts = lane.points;
+    if (pts.empty())               return 0.5f;
+    if (pts.size() == 1)           return pts[0].value01;
+    if (relPos <= pts.front().timeTicks) return pts.front().value01;
+    if (relPos >= pts.back().timeTicks)  return pts.back().value01;
+
+    int idx = 0;
+    for (int i = 0; i < (int) pts.size() - 1; ++i)
+        if (relPos >= pts[(size_t) i].timeTicks && relPos < pts[(size_t) i + 1].timeTicks)
+            { idx = i; break; }
+
+    const auto& p0   = pts[(size_t) idx];
+    const auto& p1   = pts[(size_t) idx + 1];
+    const float span = p1.timeTicks - p0.timeTicks;
+    if (span <= 0.f) return p0.value01;
+    const float t = (relPos - p0.timeTicks) / span;
+
+    switch (p0.curveType)
+    {
+        case CurveType::Stepped:
+            return p0.value01;
+
+        case CurveType::Spline:
+        {
+            // Catmull-Rom through the neighbouring values; clamped at the ends.
+            const float v0 = (idx > 0) ? pts[(size_t) idx - 1].value01 : p0.value01;
+            const float v1 = p0.value01;
+            const float v2 = p1.value01;
+            const float v3 = (idx + 2 < (int) pts.size()) ? pts[(size_t) idx + 2].value01
+                                                          : p1.value01;
+            const float t2 = t * t, t3 = t2 * t;
+            const float val = 0.5f * (  2.f * v1
+                                      + (-v0 + v2)                            * t
+                                      + (2.f * v0 - 5.f * v1 + 4.f * v2 - v3) * t2
+                                      + (-v0 + 3.f * v1 - 3.f * v2 + v3)      * t3);
+            return juce::jlimit (0.f, 1.f, val);
+        }
+
+        case CurveType::Linear:
+        default:
+        {
+            // FL Studio scaled-exponential transfer function:
+            //   t_factor = 1 - T / (0.5*T + 0.5)^2 ;  y = (t_factor^x - 1) / (t_factor - 1)
+            // Positive tension eases out, negative eases in.
+            const float T = juce::jlimit (-0.999f, 0.999f, p0.tension);
+            if (std::abs (T) < 0.001f)
+                return p0.value01 + t * (p1.value01 - p0.value01);
+
+            const float denom   = 0.5f * T + 0.5f;
+            const float tFactor = 1.0f - T / (denom * denom);
+            const float y = (std::abs (tFactor - 1.0f) < 0.0001f)
+                              ? t
+                              : (std::pow (std::abs (tFactor), t) - 1.0f) / (tFactor - 1.0f);
+            return p0.value01 + juce::jlimit (0.0f, 1.0f, y) * (p1.value01 - p0.value01);
+        }
+    }
+}
+
 // ── Piano roll note type ──────────────────────────────────────────────────────
-// Values serialize as ints ("t" note attr); new types APPEND so existing indices
-// stay stable.  RampSlide = takeover bend (no new attack - the sounding note
-// bends to this pitch across this note's length); RetrigSlide = own attack, pitch
-// glides in from the previous note's pitch.  Bend (QA-SlideSampler) = a native
-// pitch-wheel bend by a set amount, offered on the Guitars/Basses rolls only.
-enum class NoteType { Standard, RampSlide, Portamento, RetrigSlide, Bend };
+// Values serialize as ints ("t" note attr); ordinals are pinned explicitly so an
+// insertion or re-order cannot silently repoint every saved note at a different
+// behavior.  NEVER reorder or insert; append only, with an explicit value.  Same
+// rule as EffectType in EffectRack.h.  RampSlide = takeover bend (no new attack -
+// the sounding note bends to this pitch across this note's length); RetrigSlide =
+// own attack, pitch glides in from the previous note's pitch.  Bend
+// (QA-SlideSampler) = a native pitch-wheel bend by a set amount, offered on the
+// Guitars/Basses rolls only.
+enum class NoteType { Standard = 0, RampSlide = 1, Portamento = 2, RetrigSlide = 3, Bend = 4 };
 
 // QA-SlideSampler Task 4: the pitch contour a Bend note follows over its duration
-// (user-picked per note).  Serialized as an int ("bsh"); values APPEND.
-enum class BendShape { RampHold, RampWhole, UpBack, InstantHold };
+// (user-picked per note).  Serialized as an int ("bsh"); ordinals pinned, values
+// APPEND only -- never reorder or insert.
+enum class BendShape { RampHold = 0, RampWhole = 1, UpBack = 2, InstantHold = 3 };
 
 // ── Piano roll note ───────────────────────────────────────────────────────────
 struct PianoNote
@@ -156,72 +229,6 @@ struct PianoRollData
     bool riffMachineUsed { false };
 };
 
-// ── Basic sequence step (on-page grid) ───────────────────────────────────────
-struct BasicStep
-{
-    bool  active      { false };
-    float velocity    { 0.8f };   // 0-1
-    float length      { 1.0f };   // 1.0 = full step, 0.5 = half, etc (drag to resize)
-    float fxAmount    { 1.0f };   // 0-1 FX send for this step
-};
-
-// ── Simplified AHDSR for basic sequence ──────────────────────────────────────
-// Applies to all notes triggered by the basic sequence on this page.
-struct BasicEnvelope
-{
-    float attack  { 0.01f };   // sec
-    float hold    { 0.0f };    // sec
-    float decay   { 0.2f };    // sec
-    float sustain { 0.7f };    // 0-1
-    float release_{ 0.3f };    // sec
-};
-
-// ── Per-page routing ──────────────────────────────────────────────────────────
-struct PageSequenceData
-{
-    SeqRouting routing { SeqRouting::BasicSequence };
-
-    // Basic sequence grid -- rows depend on page:
-    // Layers: up to 8 rows (one per Layers page), Bass: 1 row, Drums: MAX_DRUM_SOUNDS rows
-    std::array<std::array<BasicStep, MAX_STEPS_TOTAL>, MAX_DRUM_SOUNDS> basicGrid;
-    BasicEnvelope basicEnv;
-
-    // Complex sequence data (A1-style, used when routing == ComplexSequence)
-    // Each row is one element (layer / bass sound / drum sound)
-    // MAX_DRUM_SOUNDS rows covers all three pages (4 layers, 1 bass, 10 drums)
-    struct ComplexStep
-    {
-        StepType  stepType  { StepType::ShortStep };
-        float     velocity  { 0.8f };
-        float     fxAmount  { 1.0f };
-        int       note      { 60 };
-        bool      active    { true };
-    };
-    std::array<std::array<ComplexStep, MAX_STEPS_TOTAL>, MAX_DRUM_SOUNDS> complexGrid;
-
-    // Complex sequence AHDSR (one per page, not per step)
-    struct ComplexEnvelope
-    {
-        float attack  { 0.01f };
-        float hold    { 0.0f };
-        float decay   { 0.2f };
-        float sustain { 0.7f };
-        float release_{ 0.3f };
-        float swing   { 0.0f };   // 0-1 swing amount
-        bool  triplet { false };
-    } complexEnv;
-
-    int  bars        { DEFAULT_BARS };
-    int  stepsPerBar { DEFAULT_SPB  };
-    int totalSteps() const { return juce::jlimit(1, MAX_STEPS_TOTAL, bars * stepsPerBar); }
-
-    PageSequenceData()
-    {
-        for (auto& row : basicGrid)   row.fill({});
-        for (auto& row : complexGrid) row.fill({});
-    }
-};
-
 // ── One bar-based pattern ─────────────────────────────────────────────────────
 struct Pattern
 {
@@ -252,17 +259,6 @@ struct Pattern
     // now (PatternManager::mGlobalTempo) and automatable via the "global_tempo"
     // paramId.  Old saved projects with <Pattern tempo="..."/> silently drop
     // the attribute on load.
-
-    // Per-page sequence data
-    PageSequenceData layerSeq;
-    PageSequenceData bassSeq;
-    PageSequenceData drumSeq;
-
-    // Drum grid (legacy basic -- kept for backward compat, mirrors drumSeq.basicGrid row 0-9)
-    std::array<std::array<bool, MAX_STEPS_TOTAL>, MAX_DRUM_SOUNDS> drumGrid;
-
-    // Per-row drum sound assignment: drumRowToSlot[row] = DrumType index, -1 = None
-    std::array<int, MAX_DRUM_ROWS> drumRowToSlot;
 
     int totalSteps() const { return juce::jlimit(1, MAX_STEPS_TOTAL, bars * stepsPerBar); }
     double stepLengthBeats() const { return 4.0 / juce::jmax(1, stepsPerBar); }
@@ -305,12 +301,6 @@ struct Pattern
     // per project (1-instance lock).  The roll covers the kit's full keymap;
     // J-7b layers a drummer-conventional remap on top of dispatch.
     PianoRollData baySickRustyDrumsRoll;
-
-    Pattern()
-    {
-        for (auto& arr : drumGrid) arr.fill(false);
-        drumRowToSlot.fill(-1);
-    }
 };
 
 // ── Time markers + per-bar time-signature changes (D-2, 2026-04-26) ─────────
@@ -350,7 +340,14 @@ struct TempoChange
 };
 
 // ── Clip type ─────────────────────────────────────────────────────────────────
-enum class ClipType { Pattern, Audio, Automation };
+// Ordinals are pinned explicitly because this int is persisted: every arrangement
+// block writes "clipType" as the raw enum value and the loader casts the saved int
+// straight back, so an insertion or re-order silently retypes every saved block
+// (a Pattern block reading back as Audio loses its notes and looks for a file that
+// was never there).  Values below match what was implicit before, so this pins
+// current behavior and changes nothing.  NEVER reorder or insert; append only,
+// with an explicit value.  Same rule as EffectType in EffectRack.h.
+enum class ClipType { Pattern = 0, Audio = 1, Automation = 2 };
 
 // ── Arrangement block ─────────────────────────────────────────────────────────
 struct ArrangementBlock
@@ -506,9 +503,12 @@ struct MixerState
     float bassPan    { 0.0f };
     float drumsPan   { 0.0f };
 
-    // Per-drum-row fader levels (rows 0-9, matches drumRowToSlot mapping)
-    std::array<float, MAX_DRUM_ROWS> drumSlotLevel;
-    std::array<float, MAX_DRUM_ROWS> drumSlotPan;
+    // Per-drum-strip fader state, indexed by drum page index.  Width is the
+    // drum PAGE cap, not MAX_DRUM_ROWS (16 = the kit grid's visible-row count):
+    // both drum banks' strips have to land in the snapshot that the mixer's
+    // undo transactions and its project restore read.
+    std::array<float, kMaxDrumPages> drumSlotLevel;
+    std::array<float, kMaxDrumPages> drumSlotPan;
 
     // Per-audio-row fader levels and mute (arrangement rows 0..99;
     // QA-Layout T11: 50 -> 100 with the Clips cap)
@@ -580,6 +580,49 @@ public:
     // handled by the RetirementQueue member's own teardown).
     ~PatternManager();
 
+    // ── Audio-thread shield (QA-SOUNDNESS 2026-08-07) ────────────────────
+    // THREAD SAFETY: the audio thread walks mPatterns and mArrangement LIVE
+    // during playback -- the song-mode scheduler iterates arrangement blocks,
+    // and the automation-clip loop holds a reference into a block's control-
+    // point vector across the block.  Any mutation that can reallocate or
+    // destroy elements of those containers is therefore a use-after-free
+    // unless the audio thread is stood down first.  PatternManager holds no
+    // processor reference, so the owner injects that capability here:
+    //   hook (true)  -> raise the processor's playback shield (processBlock
+    //                   bails to silence), block until the audio thread has
+    //                   acknowledged two block boundaries if it was not
+    //                   already up, and return the shield's PREVIOUS state
+    //   hook (prev)  -> restore that previous state
+    // Message thread only.  Unset in headless / unit-test construction, and
+    // during PatternManager's own constructor, where the guard is a no-op.
+    std::function<bool (bool raise)> audioShieldHook;
+
+    // The bracket itself.  Nest-aware: a mutation inside an already-shielded
+    // operation (project load, closeAllDynamicTabs, or a guard hoisted by a
+    // caller over a whole loop of mutations) costs no second settle, so a
+    // caller that mutates in a LOOP should hold one of these across the loop
+    // rather than paying a settle per iteration.
+    class ScopedAudioShield
+    {
+    public:
+        explicit ScopedAudioShield (PatternManager& owner) : mOwner (owner)
+        {
+            if (mOwner.audioShieldHook) mShieldWasUp = mOwner.audioShieldHook (true);
+        }
+
+        ~ScopedAudioShield()
+        {
+            if (mOwner.audioShieldHook) mOwner.audioShieldHook (mShieldWasUp);
+        }
+
+        ScopedAudioShield (const ScopedAudioShield&)            = delete;
+        ScopedAudioShield& operator= (const ScopedAudioShield&) = delete;
+
+    private:
+        PatternManager& mOwner;
+        bool            mShieldWasUp { false };
+    };
+
     // 2026-05-05 dirty-flag wiring: fired from every pattern-side mutation
     // (note edits, pattern CRUD, arrangement add/remove, time-marker
     // add/remove, color change, TS change).  StandaloneEditor wires it to
@@ -611,9 +654,28 @@ public:
         return snap;
     }
 
+    // THREAD SAFETY: owner-side idle assertion for the roll queue's drainer
+    // (Engine/RetirementQueue.h, CONSUMER-IDLE CONTRACT).  The consumer is the
+    // audio thread reaching us through the processor's PatternManager pointer,
+    // so only that processor's device lifecycle can make the claim truthfully
+    // -- it is the sole caller.  Message thread only.
+    void setRollConsumerIdle (bool consumerIsIdle)
+    {
+        mRollRetirement.setConsumerIdle (consumerIsIdle);
+    }
+
     // ── Pattern CRUD ──────────────────────────────────────────────────────
     int           addPattern      (const juce::String& name = "");
     int           duplicatePattern (int srcIndex);   // deep-copy; returns new index
+    // Patterns are referenced BY INDEX -- arrangement blocks, linked TS
+    // markers and the current selection each store one -- so these two
+    // re-point every stored reference through their own index mapping, the
+    // same cascade removePattern runs for deletion.  insertPattern clamps
+    // atIndex to [0, numPatterns] and returns the new pattern's index;
+    // movePattern returns false (and changes nothing) on an out-of-range or
+    // no-op move.
+    int           insertPattern   (int atIndex, const juce::String& name = {});
+    bool          movePattern     (int fromIndex, int toIndex);
     void          removePattern   (int index);
     void          renamePattern   (int index, const juce::String& name);
     Pattern&      getPattern    (int index);
@@ -713,8 +775,6 @@ public:
     // bar contains N * (4/D) PPQ beats - so 4/4 = 4 beats, 3/4 = 3, 6/8 = 3,
     // 7/8 = 3.5, etc.  When mTimeSigChanges is empty, defaults to 4/4.
     // Audio thread safe (read-only, no allocations).
-    double getBeatsPerBarAtBar  (int bar) const;
-    double getBeatsPerBarAtBeat (double beat) const;
     // Returns the (num,den) effective at the given bar.  Defaults to {4,4}.
     TimeSigChange getEffectiveTimeSigAtBar (int bar) const;
     // Convert PPQ beat position to (bar, beatInBar) honoring TS changes.
@@ -760,7 +820,6 @@ public:
     void                 addAudioToLibrary     (const juce::String& path,
                                                 const juce::String& alias = {},
                                                 int                 pageOwnerChannelId = 0);
-    void                 removeAudioFromLibrary(const juce::String& path);
 
     // QA-E Task 5 (2026-05-15): library lookup helpers for drag dedupe +
     // last-file-out delete cascade.
@@ -772,8 +831,7 @@ public:
     int                  findAudioLibraryIndexByPath        (const juce::String& path) const;
     int                  countAudioLibraryEntriesForChannel (int channelId) const;
     // QA-E Task 5: remove a specific entry by index (precise: multiple
-    // entries may share a path post-schema-change).  removeAudioFromLibrary
-    // (by path) still removes the FIRST matching entry for legacy callers.
+    // entries may share a path post-schema-change).
     void                 removeAudioFromLibraryAt           (int idx);
 
     int                  getNumAudioLibrary    () const { return (int)mAudioLibrary.size(); }
@@ -827,7 +885,6 @@ public:
     void                    removeAutomationTemplate(int idx);
     int                     getNumAutomationTemplates() const { return (int)mAutomationTemplates.size(); }
     const AutomationLane&   getAutomationTemplate   (int idx) const { return mAutomationTemplates[idx]; }
-    void                    renameAutomationTemplate(int idx, const juce::String& newParamId);
 
     // Set the template's user-facing display name (empty = revert to auto).
     // Does NOT touch paramId (keeps backend applicator bindings stable).
@@ -837,12 +894,6 @@ public:
     // AutomationTemplateAction (restorePatternList precedent).
     const std::vector<AutomationLane>& getAutomationTemplatesRaw() const { return mAutomationTemplates; }
     void restoreAutomationTemplates (const std::vector<AutomationLane>& templates);
-
-    // ── Drum sounds ───────────────────────────────────────────────────────
-    static const char* kDrumNames[MAX_DRUM_SOUNDS];
-    void enableDrum   (int slot, bool enabled);
-    bool isDrumEnabled(int slot) const { return mDrumEnabled[slot]; }
-    int  getNumEnabledDrums() const;
 
     // ── Mixer ─────────────────────────────────────────────────────────────
     MixerState& getMixer() { return mMixer; }
@@ -884,10 +935,6 @@ public:
     // furthest note/step end, bar-ceiled at the pattern's bpb, min 1 bar.  Drives
     // Builder tiling + song-mode tiling so blocks loop at their real content length.
     double getPatternContentBeats (int patternIndex) const;
-
-    // ── Check if complex sequence is active on any page ───────────────────
-    // Used by the UI to grey out / enable the Sequencer tab.
-    bool isComplexSequenceActive() const;
 
     // ── Serialisation ─────────────────────────────────────────────────────
     juce::ValueTree toValueTree() const;
@@ -935,7 +982,6 @@ private:
     std::vector<TempoChange>      mTempoChanges;
     int                           mCurrentPattern { 0 };
     double                        mGlobalTempo    { 120.0 };   // 2026-04-24
-    std::array<bool, MAX_DRUM_SOUNDS> mDrumEnabled;
     MixerState                    mMixer;
 
     // Per-track-row mute/solo state (arrangement gate).

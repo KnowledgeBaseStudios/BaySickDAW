@@ -228,10 +228,10 @@ private:
 // ── EffectRackAction ──────────────────────────────────────────────────────────
 // Before/after snapshot of the 6 rack slot types for load/remove/swap.
 // D.2 (2026-05-01): snapshot expanded from type-only to a full SlotSnapshot
-// (type + bypassed + outputGainDb + DSP state blob + UUID) so undo/redo of
-// Move/Load/Remove preserves the full slot configuration including knob
-// values and the slot's UUID (which keeps automation lanes pointed at the
-// right paramId after an undo).
+// (type + bypassed + outputGainDb + DSP state blob + UUID + sidechain pick +
+// Basic/Advanced mode) so undo/redo of Move/Load/Remove preserves the full
+// slot configuration including knob values and the slot's UUID (which keeps
+// automation lanes pointed at the right paramId after an undo).
 // ─────────────────────────────────────────────────────────────────────────────
 class EffectRackAction : public juce::UndoableAction
 {
@@ -243,6 +243,13 @@ public:
         float             outputGainDb { 0.0f };
         juce::MemoryBlock dspState;
         juce::String      uuid;
+        // Slot-level config the DSP blob cannot carry: EffectRack pushes scPick
+        // onto the effect on every audio block, so a restored dspState always
+        // loses to the Slot's own value, and basicMode is UI-only state the DSP
+        // never sees.  Both are snapshotted for EVERY slot including empty ones,
+        // so an undo cannot leave a stale pick behind for the next load.
+        int               scPick       { -1 };
+        bool              basicMode    { true };
     };
     using SlotSnapshots = std::array<SlotSnapshot, EffectRack::kNumSlots>;
     using ApplyFn       = std::function<void(const SlotSnapshots&)>;
@@ -367,8 +374,9 @@ private:
 // The slice is {patterns, currentPattern, blocks, row state} because
 // PatternManager::removePattern cascades: blocks of the dead pattern are
 // erased and every higher patternIndex is re-indexed -- a single-Pattern
-// payload cannot restore that.  Linked TS markers stay OUTSIDE the undo
-// domain (the Split-by-Engine seam).  Shape shared with the Split flow.
+// payload cannot restore that.  The slice itself carries NO markers, so any
+// gesture that also destroys or re-points linked TS markers must bank a
+// MarkerSetAction into the same transaction (see performPatternTsOp).
 // ─────────────────────────────────────────────────────────────────────────────
 struct PatternListSnapshot
 {

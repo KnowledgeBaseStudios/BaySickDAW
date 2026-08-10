@@ -63,6 +63,17 @@ public:
     // the InstPage side; this Phase 4.2 commit just ships the hook.
     std::function<void()> onPedalboardPresetMenu;
 
+    // Fired after a per-pedal preset load succeeds, so the hosting page can
+    // drain the process-wide MissingFileReport (a pedal's setStateInformation
+    // banks an unresolvable NAM capture / user IR there rather than skipping in
+    // silence).  Draining does NOT require the app processor -- reportIfAny and
+    // ScopedGesture are free functions in a header-only namespace -- so this
+    // hook is a routing choice, not a reachability constraint.  If it is ever
+    // left unwired the entries go unreported and surface under an unrelated
+    // gesture later; a ScopedGesture on the load itself would not have that
+    // failure mode.
+    std::function<void()> onPresetLoaded;
+
     // QA-A Phase 6 (2026-05-09): exposes the title-bar preset button so the
     // parent page (InstPage) can anchor its preset PopupMenu to the button
     // itself instead of the whole editor (which JUCE pins at the editor's

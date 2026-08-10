@@ -231,16 +231,6 @@ void BaySickSynthDSP::handleLegatoMidi (juce::MidiBuffer& midi)
     midi.swapWith (pass);
 }
 
-BaySickSynthVoice* BaySickSynthDSP::findVoiceForNote (int note)
-{
-    for (int i = 0; i < kNumVoices; ++i)
-        if (mVoices[i] != nullptr
-            && mVoices[i]->isVoiceActive()
-            && mVoices[i]->getCurrentlyPlayingNote() == note)
-            return mVoices[i];
-    return nullptr;
-}
-
 //==============================================================================
 // ── Setters - propagate to all voices ────────────────────────────────────────
 

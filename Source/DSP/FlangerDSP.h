@@ -4,7 +4,7 @@
 #include <vector>
 
 // ── FlangerDSP ────────────────────────────────────────────────────────────────
-// Stereo flanger with sine LFO, feedback (positive or negative for through-zero
+// Stereo flanger with sine LFO, feedback (positive or negative for inverted-comb
 // flanging), optional BPM sync, and wet/dry mix.
 // ─────────────────────────────────────────────────────────────────────────────
 class FlangerDSP : public DSPBase
@@ -35,8 +35,6 @@ public:
     void setShape          (float s);         // 0=sine, 1=triangle (morph)
     void setInvertFeedback (bool b);          // negate feedback signal
     void setInvertWet      (bool b);          // negate wet signal
-    void setDryLevel       (float dB);        // dry output level in dB
-    void setWetLevel       (float dB);        // wet output level in dB
     void setCrossLevel     (float dB);        // cross-channel wet mix (L->R, R->L) in dB
 
     float mRate           { 0.5f };

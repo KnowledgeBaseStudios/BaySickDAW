@@ -87,7 +87,7 @@ juce::String EngineRig::trackIdFor (TabKind k, int pageIndex)
 
 // ── Tab identity ─────────────────────────────────────────────────────────────
 
-EngineTab* EngineRig::addTab (TabKind k, int pageIndex, const juce::String& name)
+EngineTab* EngineRig::addTab (TabKind k, int pageIndex)
 {
     if (pageIndex < 0 || pageIndex >= capacityOf (k)) return nullptr;
     if (auto* existing = findTab (k, pageIndex)) return existing;
@@ -95,7 +95,6 @@ EngineTab* EngineRig::addTab (TabKind k, int pageIndex, const juce::String& name
     auto tab = std::make_unique<EngineTab>();
     tab->kind      = k;
     tab->pageIndex = pageIndex;
-    tab->name      = name;
     mTabs.push_back (std::move (tab));
     return mTabs.back().get();
 }
@@ -118,6 +117,22 @@ void EngineRig::removeTab (TabKind k, int pageIndex, bool deleteFreezeFiles)
             mProc.retractFrozenSources (k, pageIndex);
 
         teardownEngine (*mTabs[i], /*settleAfterUnregister=*/ true);
+
+        // teardownEngine early-returns on an engine-less tab, so its settle
+        // cannot be what covers the erase below -- and the erase destroys the
+        // freeze streamers a still-live insert task reads through the pointers
+        // retracted above.  Keyed on what is actually being freed rather than
+        // on whether an engine happens to exist, so removeTab is safe on its
+        // own instead of relying on the caller's statement order.
+        if (wasFrozen)
+            mProc.settleAudioThread();
+
+        // The stash is keyed on page index alone, so it has to die with the tab
+        // identity that index stands for: a Plugins tab at index N in the next
+        // project is not this one, and the factory would not know the difference.
+        if (k == TabKind::Plugins)
+            mPluginRestoreDescs.erase (pageIndex);
+
         mTabs.erase (mTabs.begin() + (long) i);
 
         // File delete AFTER teardown: Windows refuses to delete a file the
@@ -175,6 +190,15 @@ void EngineRig::markEngineContentChanged (TabKind k, int pageIndex)
     // They do not change what the tab produces -- they ARE what it produces, and
     // the render is in the middle of capturing exactly that.
     if (mProc.isNonRealtime()) return;
+
+    // NOR DURING A REVIVAL.  retryDeadPluginTab rebuilds the SAME plugin from the
+    // SAME description and pushes the SAME state blob back in, so nothing this
+    // tab produces changed -- while the rebuild routes through setEngineType,
+    // whose mark is written for a genuine engine SWAP.  Letting it through
+    // discards the freeze in the one situation freeze is most load-bearing: a
+    // frozen tab whose plugin is dead keeps playing its good render, and any
+    // unrelated edit to the added-plugin list would otherwise throw that away.
+    if (k == TabKind::Plugins && pageIndex == mRevivingPluginPage) return;
 
     auto* t = findTab (k, pageIndex);
     if (t == nullptr || ! t->frozen) return;
@@ -323,27 +347,6 @@ bool EngineRig::isFreezeStale (TabKind k, int pageIndex) const
     return t != nullptr && t->frozen && t->freezeStale;
 }
 
-std::vector<EngineTab*> EngineRig::tabsOf (TabKind k)
-{
-    std::vector<EngineTab*> out;
-    for (auto& t : mTabs)
-        if (t->kind == k) out.push_back (t.get());
-    return out;
-}
-
-int EngineRig::allocateFreeIndex (TabKind k) const
-{
-    const int cap = capacityOf (k);
-    for (int i = 0; i < cap; ++i)
-        if (findTab (k, i) == nullptr) return i;
-    return -1;
-}
-
-void EngineRig::renameTab (TabKind k, int pageIndex, const juce::String& newName)
-{
-    if (auto* t = findTab (k, pageIndex)) t->name = newName;
-}
-
 // ── Engine lifecycle ─────────────────────────────────────────────────────────
 
 juce::AudioProcessor* EngineRig::setEngineType (TabKind k, int pageIndex,
@@ -355,13 +358,14 @@ juce::AudioProcessor* EngineRig::setEngineType (TabKind k, int pageIndex,
     if (tab->engineType == engineType && tab->engine != nullptr)
         return tab->engine.get();
 
-    // Swap path keeps the page-era semantics: unregister + destroy with NO
-    // settle sleep (only full teardown settles).  unregisterTask does NOT
-    // fence the in-flight block -- the earlier claim here was false; what
-    // actually covers the swap is that it runs on the message thread from a
-    // user gesture while the strip's task early-outs on the null engine.
+    // The swap takes the same drain as a full teardown.  Nothing else covers it:
+    // EngineInsertTask caches its engine in the constructor and nothing ever nulls
+    // it, so a strip task cannot early-out on a dead engine, and the destroy below
+    // otherwise lands under whatever block is in flight -- for a hosted plugin that
+    // means unloading the module or unmapping the bridge's shared block while the
+    // audio thread is inside it.
     if (tab->engine != nullptr)
-        teardownEngine (*tab, /*settleAfterUnregister=*/ false);
+        teardownEngine (*tab, /*settleAfterUnregister=*/ true);
 
     tab->engineType = engineType;
     if (createEngineFor (*tab, engineType) == nullptr)
@@ -410,6 +414,125 @@ juce::AudioProcessor* EngineRig::setEngineType (TabKind k, int pageIndex,
     return tab->engine.get();
 }
 
+juce::AudioProcessor* EngineRig::recreateEngine (TabKind k, int pageIndex)
+{
+    auto* tab = findTab (k, pageIndex);
+    if (tab == nullptr || tab->engine == nullptr || tab->engineType.isEmpty())
+        return nullptr;
+
+    // Copied out first: teardownEngine clears the tab's engineType.
+    const juce::String type = tab->engineType;
+
+    teardownEngine (*tab, /*settleAfterUnregister=*/ true);
+
+    // setEngineType now meets an engine-less tab, so it runs its whole build
+    // path -- createEngineFor, registerWithProcessor, the freeze watcher and
+    // onEngineCreated -- instead of the early-return this function exists to
+    // get past.  Calling it rather than repeating those steps is the point:
+    // a parallel path is one missed step away from a leak or a dead lane.
+    return setEngineType (k, pageIndex, type);
+}
+
+bool EngineRig::retryDeadPluginTab (int pageIndex)
+{
+    auto* tab = findTab (TabKind::Plugins, pageIndex);
+    if (tab == nullptr) return false;
+
+    auto* dead = dynamic_cast<Hosting::HostedPluginInstance*> (tab->engine.get());
+    if (dead == nullptr || dead->isAlive()) return false;
+
+    // Nothing could be built anyway, so bail BEFORE the teardown -- trading a
+    // dead instance for no instance at all would take the tab's plugin identity
+    // with it and leave nothing left to retry.
+    if (Hosting::PluginManager::getInstance() == nullptr) return false;
+
+    // Both read while the outgoing instance still exists.
+    auto desc = std::make_unique<juce::PluginDescription> (dead->getDescription());
+    juce::MemoryBlock state;
+    dead->getStateInformation (state);
+
+    // The factory's added-list lookup is precisely what fails in this case, so
+    // it is handed the description the dead instance was built from.
+    stashPluginRestoreDescription (pageIndex, std::move (desc));
+
+    // Scoped to THIS page so anything else that marks during the rebuild still
+    // lands -- see the guard in markEngineContentChanged for why a revival is
+    // not a content change.
+    const int prevReviving = mRevivingPluginPage;
+    mRevivingPluginPage = pageIndex;
+
+    // THREAD SAFETY -- the twin of EffectsPage::retryDeadPluginSlot's shield, and
+    // it must not diverge from it.  registerWithProcessor publishes the rebuilt
+    // engine to the dispatcher, and the state push that follows reaches straight
+    // into the live plugin: HostedPluginInstance::setStateInformation hands the
+    // blob to mInner->setStateInformation, which almost no VST3 tolerates
+    // concurrently with its own processBlock, and can additionally re-instantiate
+    // -- freeing mInner outright -- when the blob's bridge mode differs from the
+    // mode the fresh instance came up in.  Shield raised so processBlock bails to
+    // silence, settle so the in-flight block has returned, and only then is
+    // anything published or pushed.  Nest-aware save/restore; recreateEngine's own
+    // teardown shield nests inside this one and so pays no second settle.
+    //
+    // The re-instantiate branch specifically cannot fire from a Plugins TAB as the
+    // surface stands, and the reason is worth writing down because it is not
+    // structural: setBridgePreference has exactly one caller outside
+    // HostedPluginInstance -- the RACK slot window's "Run bridged" item -- so a
+    // 64-bit tab instance is pinned at mBridgePreferred == false, and a 32-bit one
+    // is bridged from birth, leaving mInner and mSandbox both null on the one tab
+    // path that does re-instantiate (a bridge start that failed twice).  That is
+    // an accident of which window grew which menu.  The concurrent-setState hazard
+    // above is live here regardless, so the shield is unconditional.
+    const bool shieldWasUp = mProc.isProjectLoadInProgress();
+    mProc.setProjectLoadInProgress (true);
+    if (! shieldWasUp)
+        mProc.settleAudioThread();
+
+    auto* revived = recreateEngine (TabKind::Plugins, pageIndex);
+
+    if (revived != nullptr && state.getSize() > 0)
+        revived->setStateInformation (state.getData(), (int) state.getSize());
+
+    mProc.setProjectLoadInProgress (shieldWasUp);
+    mRevivingPluginPage = prevReviving;
+
+    // Belt and braces.  The factory consumes the stash unconditionally, but
+    // recreateEngine has early returns that never reach it (no tab, no engine,
+    // no engineType), and the stash above must not outlive this call either way.
+    mPluginRestoreDescs.erase (pageIndex);
+
+    if (revived == nullptr)
+    {
+        // No engine at all now, and the tab's engineType went with it -- there is
+        // nothing left for a cached render to be a render OF, so this one really
+        // is a content change and the suppression above must not cover it.
+        markEngineContentChanged (TabKind::Plugins, pageIndex);
+        return false;
+    }
+
+    // The rebuild installed a FRESH FreezeProcListener whose stamp starts at zero
+    // while freezeProcStampSeen still holds the outgoing listener's count, and the
+    // state push above bumps the new one besides.  Either mismatch makes the next
+    // drainEngineChangeStamps mark this tab stale after the fact and undo the
+    // suppression.
+    if (tab->freezeProcListener != nullptr)
+        tab->freezeProcStampSeen = tab->freezeProcListener->stamp.load (std::memory_order_acquire);
+
+    // The teardown destroyed this tab's RenderTask and the rebuild made a new one,
+    // which starts with no frozen source at all -- so a preserved freeze has to be
+    // re-published here or the tab silently drops back to playing live.
+    if (tab->frozen)
+    {
+        if (! tab->freezeStale && ! tab->freezeStreams.empty())
+            if (auto* task = mProc.renderTaskForTab (TabKind::Plugins, pageIndex))
+                task->setFrozenSource (tab->freezeStreams.front().get());
+
+        republishPatternSources (mProc.freezePatternIndexNow());
+    }
+
+    auto* inst = dynamic_cast<Hosting::HostedPluginInstance*> (revived);
+    return inst != nullptr && inst->isAlive();
+}
+
 juce::AudioProcessor* EngineRig::createEngineFor (EngineTab& tab, const juce::String& engineType)
 {
     const double srOr44100 = mProc.getSampleRate() > 0.0 ? mProc.getSampleRate() : 44100.0;
@@ -429,9 +552,12 @@ juce::AudioProcessor* EngineRig::createEngineFor (EngineTab& tab, const juce::St
         case TabKind::Drums:
         case TabKind::Clips:
         {
-            // Page-era creation prep kept verbatim (rate-or-44100, fixed 512):
-            // these are creation defaults; the device path re-prepares live
-            // engines on rate/block changes.
+            // A PLACEHOLDER prep, like every other kind's below: registration is
+            // what prepares the engine at the live device config, and the
+            // processor's own prepareToPlay sweep is what carries later device
+            // rate/block CHANGES.  (Until 2026-08-09 this comment claimed the
+            // device path was the only prepare these ever needed, and that is
+            // what hid the missing re-prepare in registerWithProcessor.)
             std::unique_ptr<juce::AudioProcessor> eng;
             if      (engineType == "Harmless")      { auto e = std::make_unique<HarmlessProcessor>     (trackId, &mUndoManager); e->apvts.undoOwnerTag = rigTag; eng = std::move (e); }
             else if (engineType == "BaySickPlayer") { auto e = std::make_unique<VibePlayerProcessor>   (trackId, &mUndoManager); e->apvts.undoOwnerTag = rigTag; eng = std::move (e); }
@@ -473,14 +599,26 @@ juce::AudioProcessor* EngineRig::createEngineFor (EngineTab& tab, const juce::St
             // convenience list, not the project's dependency record, and
             // resolving ONLY through it broke the restore principle documented
             // in HostedPlugin.h.
-            if (desc == nullptr)
+            //
+            // SINGLE USE, which is why the erase is unconditional rather than
+            // part of the fallback.  A stash is only ever written immediately
+            // before the one select it was derived for -- both writers do that,
+            // the restore walkers from the project blob and retryDeadPluginTab
+            // from the dead instance -- so once this select has run it describes
+            // nothing.  Leaving it behind whenever findAdded HIT (the common
+            // case) kept a description keyed on a bare page index alive past the
+            // tab's deletion and into the next project, where a later select for
+            // a DIFFERENT plugin that missed the added list would silently build
+            // this one while setEngineType still stamped the tab with the
+            // identifier that was actually asked for -- type and instance
+            // diverging with no signal, and the page's own "not in your added
+            // list" warning suppressed because the type read back correct.
+            auto stashed = mPluginRestoreDescs.find (tab.pageIndex);
+            if (stashed != mPluginRestoreDescs.end())
             {
-                auto it = mPluginRestoreDescs.find (tab.pageIndex);
-                if (it != mPluginRestoreDescs.end())
-                {
-                    desc = std::move (it->second);
-                    mPluginRestoreDescs.erase (it);
-                }
+                if (desc == nullptr)
+                    desc = std::move (stashed->second);
+                mPluginRestoreDescs.erase (stashed);
             }
             if (desc == nullptr) return nullptr;
 
@@ -517,6 +655,20 @@ juce::AudioProcessor* EngineRig::createEngineFor (EngineTab& tab, const juce::St
     return nullptr;
 }
 
+void EngineRig::liveDeviceConfig (double& sampleRate, int& blockSize) const noexcept
+{
+    sampleRate = mProc.getSampleRate();
+    blockSize  = mProc.getBlockSize();
+
+    // Only reachable before the audio device has ever prepared the processor
+    // (project restore can run first).  The values are arbitrary because nothing
+    // is rendering yet -- VibeSynthProcessor::prepareToPlay sweeps every
+    // registered engine the moment a real device arrives, so these are never the
+    // config an engine actually renders at.
+    if (sampleRate <= 0.0) sampleRate = 44100.0;
+    if (blockSize  <= 0)   blockSize  = 512;
+}
+
 void EngineRig::registerWithProcessor (EngineTab& tab)
 {
     if (tab.engine == nullptr) return;
@@ -533,17 +685,36 @@ void EngineRig::registerWithProcessor (EngineTab& tab)
 
     switch (tab.kind)
     {
-        case TabKind::Layers: mProc.registerLayerEngine (tab.pageIndex, eng); break;
-        case TabKind::Bass:   mProc.registerBassEngine  (tab.pageIndex, eng); break;
-        case TabKind::Drums:  mProc.registerDrumEngine  (tab.pageIndex, eng); break;
-        // QA-ModelShell TS6: prepared at the LIVE device config first -- a
-        // hosted plugin is created with a placeholder rate like the Clips/Vox/
-        // Inst group below, and a plugin that never sees a real prepare would
-        // run its DSP at the wrong rate.
+        // Prepared at the LIVE device config before registration, exactly like
+        // every kind below.  These three were the omission (fixed 2026-08-09):
+        // they registered straight off createEngineFor's placeholder prep, so an
+        // engine created while the device ran a LARGER block than that
+        // placeholder received blocks bigger than it had sized its buffers for --
+        // adding a tab, or loading any project, at a 1024-sample buffer put every
+        // Layers/Bass/Drums engine in that state until some unrelated device
+        // change happened to re-prepare it.
+        case TabKind::Layers:
+        case TabKind::Bass:
+        case TabKind::Drums:
+        {
+            double sr; int bs;
+            liveDeviceConfig (sr, bs);
+            eng->prepareToPlay (sr, bs);
+            if      (tab.kind == TabKind::Layers) mProc.registerLayerEngine (tab.pageIndex, eng);
+            else if (tab.kind == TabKind::Bass)   mProc.registerBassEngine  (tab.pageIndex, eng);
+            else                                  mProc.registerDrumEngine  (tab.pageIndex, eng);
+            break;
+        }
+
+        // QA-ModelShell TS6: a hosted plugin additionally needs the details set,
+        // not just a prepare -- JUCE's VST3 wrapper reads them back off the
+        // AudioProcessor.  Our own engines deliberately do NOT get that call: the
+        // processor's device sweep only re-prepares, so details set here would go
+        // stale on the next device change rather than track it.
         case TabKind::Plugins:
         {
-            const double sr = mProc.getSampleRate() > 0.0 ? mProc.getSampleRate() : 44100.0;
-            const int    bs = mProc.getBlockSize()  > 0   ? mProc.getBlockSize()  : 512;
+            double sr; int bs;
+            liveDeviceConfig (sr, bs);
             eng->setRateAndBufferSizeDetails (sr, bs);
             eng->prepareToPlay (sr, bs);
             mProc.registerPluginEngine (tab.pageIndex, eng);
@@ -558,8 +729,8 @@ void EngineRig::registerWithProcessor (EngineTab& tab)
             // device config immediately before registration (the old
             // onEngineChanged handler flow); their creation prep was a
             // placeholder.
-            const double sr = mProc.getSampleRate() > 0.0 ? mProc.getSampleRate() : 44100.0;
-            const int    bs = mProc.getBlockSize()  > 0   ? mProc.getBlockSize()  : 512;
+            double sr; int bs;
+            liveDeviceConfig (sr, bs);
             eng->prepareToPlay (sr, bs);
             if      (tab.kind == TabKind::Clips) mProc.registerClipEngine (tab.pageIndex, eng);
             else if (tab.kind == TabKind::Vox)   mProc.registerVoxEngine  (tab.pageIndex, eng);
@@ -628,9 +799,25 @@ void EngineRig::teardownEngine (EngineTab& tab, bool settleAfterUnregister)
         tab.freezeProcListener.reset();
     }
 
+    // THREAD SAFETY -- ordering invariant, and it is the whole point of this block.
+    // unregisterFromProcessor erases from the dispatcher's task list and frees the
+    // RenderTask; the resets below free the engine that task holds.  The audio
+    // thread walks that list and runs those tasks every block, so the shield goes
+    // up FIRST and the settle drains the in-flight block BEFORE anything is mutated
+    // or freed.  A settle placed AFTER the unregister fences nothing -- do not move
+    // it back.  shieldWasUp is the nest-aware save/restore idiom used by the Rusty
+    // kit load (safe because the shield is only ever raised from the message
+    // thread), so an outer project load or closeAllDynamicTabs keeps its own
+    // shield.  The brief mute this costs on a teardown gesture is the accepted
+    // trade.
+    const bool shieldWasUp = mProc.isProjectLoadInProgress();
+    mProc.setProjectLoadInProgress (true);
+    if (! shieldWasUp)
+        mProc.settleAudioThread();
+
     unregisterFromProcessor (tab);
     if (settleAfterUnregister)
-        juce::Thread::sleep (20);   // outlast one audio block (page-dtor contract)
+        mProc.settleAudioThread();   // outlast one audio block (page-dtor contract)
 
     // The chain wrapper holds raw pointers into ownedStages -- it must be
     // destroyed before them.
@@ -639,12 +826,20 @@ void EngineRig::teardownEngine (EngineTab& tab, bool settleAfterUnregister)
     tab.namIr  = nullptr;
     tab.ownedStages.clear();
     tab.engineType.clear();
+
+    mProc.setProjectLoadInProgress (shieldWasUp);
 }
 
 void EngineRig::stashPluginRestoreDescription (int pageIndex,
                                                std::unique_ptr<juce::PluginDescription> desc)
 {
-    if (desc != nullptr)
+    // A null desc CLEARS rather than skipping.  The caller resolved no
+    // description for this page, and skipping leaves whatever the page's
+    // PREVIOUS occupant stashed in place for the select that is about to run --
+    // the factory cannot tell that entry apart from one meant for this select.
+    if (desc == nullptr)
+        mPluginRestoreDescs.erase (pageIndex);
+    else
         mPluginRestoreDescs[pageIndex] = std::move (desc);
 }
 
@@ -895,7 +1090,7 @@ void EngineRig::teardownAll()
         anyEngine = true;
     }
     if (anyEngine)
-        juce::Thread::sleep (20);   // one settle for the whole rig
+        mProc.settleAudioThread();   // one settle for the whole rig
 
     for (auto& t : mTabs)
     {
@@ -905,4 +1100,7 @@ void EngineRig::teardownAll()
         t->ownedStages.clear();
     }
     mTabs.clear();
+
+    // Page indices address nothing once every tab is gone.
+    mPluginRestoreDescs.clear();
 }

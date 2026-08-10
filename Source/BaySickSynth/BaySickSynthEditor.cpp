@@ -1,5 +1,6 @@
 #include "BaySickSynthEditor.h"
 #include "../AppPaths.h"
+#include "../UserFileSave.h"
 
 //==============================================================================
 // ── Static UI helpers ─────────────────────────────────────────────────────────
@@ -462,10 +463,24 @@ void BaySickSynthEditor::valueTreeRedirected (juce::ValueTree& tree)
 
 void BaySickSynthEditor::parameterChanged (const juce::String& paramID, float /*newValue*/)
 {
+    // SafePointer on every posted hop: the destructor removes the listeners, but a
+    // lambda already queued cannot be retracted, and this listener runs on whatever
+    // thread wrote the parameter (an offline render thread replaying an automation
+    // lane), so the post can outlive the editor.
+    juce::Component::SafePointer<BaySickSynthEditor> self (this);
+
     if (paramID == mProc.pid ("lfo_sync"))
-        juce::MessageManager::callAsync ([this] { refreshLFOSyncEnableState(); });
+        juce::MessageManager::callAsync ([self]
+        {
+            if (self == nullptr) return;
+            self->refreshLFOSyncEnableState();
+        });
     else if (paramID == mProc.pid ("dualOscMode"))
-        juce::MessageManager::callAsync ([this] { refreshModifierTooltip(); });
+        juce::MessageManager::callAsync ([self]
+        {
+            if (self == nullptr) return;
+            self->refreshModifierTooltip();
+        });
 }
 
 void BaySickSynthEditor::refreshModifierTooltip()
@@ -1070,16 +1085,22 @@ void BaySickSynthEditor::savePreset (const juce::String& name)
     // 2026-04-26: user presets go into "My Presets/" subfolder so they're
     // grouped separately from the factory category folders in the picker.
     const auto dir = presetsDir().getChildFile ("My Presets");
-    dir.createDirectory();
     auto state = mProc.apvts.copyState();
     if (auto xml = state.createXml())
-        xml->writeTo (dir.getChildFile (name + ".xml"));
+        UserFileSave::writeXmlAsync (dir, name, *xml, {});
 }
 
 void BaySickSynthEditor::loadPreset (const juce::File& f)
 {
     auto xml = juce::XmlDocument::parse (f);
-    if (! xml || ! xml->hasTagName (mProc.apvts.state.getType())) return;
+    if (! xml || ! xml->hasTagName (mProc.apvts.state.getType()))
+    {
+        juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon,
+                                                "Load Preset",
+                                                "That preset file could not be read.",
+                                                "OK");
+        return;
+    }
 
     auto loaded = juce::ValueTree::fromXml (*xml);
 

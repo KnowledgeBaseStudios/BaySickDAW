@@ -36,11 +36,16 @@
 //     every processBlock, where `gen` is the generation of the snapshot it
 //     just loaded.
 //   * A dedicated background drainer thread (owned by this queue) wakes on
-//     each retire() (condvar notify) or every 50 ms (timeout fallback so it
-//     still drains when audio is paused / device closed and the consumer
-//     isn't ticking the in-use gen) and pops every entry whose
-//     retiredBeforeGen <= last-published in-use gen.  Those entries are
+//     each retire() (condvar notify), re-testing at least every 50 ms so a
+//     missed notify costs latency rather than progress, and pops every entry
+//     whose retiredBeforeGen <= last-published in-use gen.  Those entries are
 //     destroyed off the audio thread, off the producer, off the lock.
+//     The timeout re-tests the SAME generation predicate, so it does NOT
+//     rescue a consumer that has stopped ticking: with no processBlock
+//     publishing a gen (device never opened, device closed, or a publish
+//     that only runs on some transport states) nothing is ever freed and
+//     the queue grows for as long as the producer keeps retiring.  That
+//     case is the owner's to declare -- see CONSUMER-IDLE CONTRACT.
 //
 // WHY NOT std::shared_ptr<T>?
 //   shared_ptr keeps an object alive via atomic refcount; whichever thread
@@ -79,23 +84,50 @@
 //   * setInUseGeneration() may be called with any value; only the most
 //     recent matters.
 //
+// CONSUMER-IDLE CONTRACT
+//   * The generation gate is the ONLY thing that proves the consumer has
+//     let go of a retired object, so a queue whose consumer never ticks can
+//     never free anything.  setConsumerIdle(true) is the owner asserting the
+//     stronger fact that there is no consumer at all right now -- audio
+//     device never opened, or stopped so the callback cannot run again --
+//     and while it holds the drainer frees every pending entry regardless of
+//     generation.
+//   * The assertion must be TRUE at the moment it is made: set it true only
+//     where the consumer is provably stopped (JUCE calls releaseResources
+//     only after the device has stopped invoking the audio callback), and
+//     set it false BEFORE the consumer can call setInUseGeneration again
+//     (prepareToPlay).  A "the gen hasn't moved lately" heuristic is NOT a
+//     substitute: a stalled consumer still holds its raw snapshot pointer,
+//     so guessing here trades a leak for a use-after-free.
+//   * The default is NOT idle, so a queue whose owner never drives the flag
+//     stays purely generation-gated -- unconditional freeing is opt-in, and
+//     an owner that forgets to opt in leaks rather than dangles.
+//
 // USAGE
 //   struct AudioClipSnapshot { ...; uint64_t generation; };
 //   RetirementQueue<AudioClipSnapshot> mClipRetirement;
 //
-//   // Mutator (message thread):
+//   // Mutator (message thread).  The generation MUST be hoisted into a local
+//   // before release(): newSnap holds nullptr from the moment ownership passes
+//   // into the atomic, so reading newSnap->generation after the swap is a null
+//   // dereference.
 //   auto newSnap = std::make_unique<AudioClipSnapshot>(...);
-//   newSnap->generation = mNextGen.fetch_add(1, std::memory_order_relaxed) + 1;
+//   newSnap->generation = mNextGen.fetch_add (1, std::memory_order_relaxed) + 1;
+//   const std::uint64_t newGen = newSnap->generation;
 //   auto* oldRaw = mActiveSnap.exchange (newSnap.release(),
 //                                        std::memory_order_acq_rel);
-//   if (oldRaw)
-//       mClipRetirement.retire (std::unique_ptr<AudioClipSnapshot>(oldRaw),
-//                                /*retiredBeforeGen=*/ newSnap->generation);
+//   if (oldRaw != nullptr)
+//       mClipRetirement.retire (std::unique_ptr<AudioClipSnapshot> (oldRaw),
+//                               /*retiredBeforeGen=*/ newGen);
 //
-//   // Audio thread (top of processBlock):
+//   // Audio thread (top of processBlock).  The load is null until the first
+//   // publish, so both the gen stamp and every use of the snapshot are guarded.
 //   auto* snap = mActiveSnap.load (std::memory_order_acquire);
-//   mClipRetirement.setInUseGeneration (snap->generation);
-//   // ... use snap->players for the rest of the block ...
+//   if (snap != nullptr)
+//   {
+//       mClipRetirement.setInUseGeneration (snap->generation);
+//       // ... use snap->players for the rest of the block ...
+//   }
 // ─────────────────────────────────────────────────────────────────────────────
 
 template <typename T>
@@ -159,6 +191,18 @@ public:
         mInUseGen.store (gen, std::memory_order_release);
     }
 
+    // Owner side (message thread).  Declares whether a consumer exists at
+    // all -- see CONSUMER-IDLE CONTRACT above for when each value is true.
+    // Takes the mutex; never call from the audio thread.
+    void setConsumerIdle (bool consumerIsIdle)
+    {
+        {
+            std::lock_guard<std::mutex> lk (mMutex);
+            mConsumerIdle = consumerIsIdle;
+        }
+        mCv.notify_one();
+    }
+
     // For tests / introspection.  Takes the mutex briefly; do not call
     // from the audio thread.
     std::size_t pendingCount() const
@@ -179,10 +223,11 @@ private:
         std::unique_lock<std::mutex> lk (mMutex);
         while (! mStopping)
         {
-            // Wake on push (notify_one), or 50 ms timeout so we still make
-            // progress when audio is paused / device closed and the audio
-            // thread isn't ticking mInUseGen.  Spurious wakeups + the
-            // empty-queue case are handled by the predicate.
+            // Wake on push (notify_one); the 50 ms timeout only bounds how
+            // long a missed notify can delay a sweep -- it re-tests the same
+            // gates below, so it cannot free anything the gates don't allow.
+            // Spurious wakeups + the empty-queue case are handled by the
+            // predicate.
             mCv.wait_for (lk, std::chrono::milliseconds (50),
                           [this] { return mStopping
                                           || ! mEntries.empty(); });
@@ -192,6 +237,11 @@ private:
             const std::uint64_t inUse =
                 mInUseGen.load (std::memory_order_acquire);
 
+            // The owner has asserted there is no consumer to ack a gen, so
+            // no thread can still hold a retired pointer and everything
+            // pending is free to go.  Read under mMutex, which is held here.
+            const bool idle = mConsumerIdle;
+
             // Pop a batch of ready entries off the front.  Producer is
             // single-threaded and increments retiredBeforeGen monotonically,
             // so a single forward sweep suffices -- once we hit an entry
@@ -199,7 +249,7 @@ private:
             // not ready (FIFO + monotonic gen).
             std::vector<std::unique_ptr<T>> toDestroy;
             while (! mEntries.empty()
-                   && mEntries.front().retiredBeforeGen <= inUse)
+                   && (idle || mEntries.front().retiredBeforeGen <= inUse))
             {
                 toDestroy.push_back (std::move (mEntries.front().obj));
                 mEntries.pop_front();
@@ -219,5 +269,6 @@ private:
     std::deque<Entry>          mEntries;
     std::atomic<std::uint64_t> mInUseGen { 0 };
     bool                       mStopping { false };  // guarded by mMutex
+    bool                       mConsumerIdle { false };  // guarded by mMutex
     std::thread                mDrainer;
 };

@@ -1,4 +1,5 @@
 #include "VibePlayerDSP.h"
+#include "../MissingFileReport.h"
 #include <cmath>
 #include <cctype>
 #include <algorithm>
@@ -263,7 +264,11 @@ void VibeSampleManager::parseSFZ (const juce::File& sfzFile)
                     t->audioData      = loadFile (f, mFormatManager, sr);
                     t->sampleFile     = f;
                     t->fileSampleRate = sr;
+                    if (t->audioData == nullptr)
+                        MissingFileReport::add ("BaySickPlayer sample", f.getFullPathName());
                 }
+                else
+                    MissingFileReport::add ("BaySickPlayer sample", f.getFullPathName());
             }
         }
 
@@ -909,7 +914,6 @@ void VibeVoice::startNote (int midiNote, float velocity,
     }
     mAdsr.noteOn();
     mLfoPhase  = 0.0;
-    mReductHold = 0;
     mReductStep = 0;
     mIsPlaying  = true;
 
@@ -1567,13 +1571,6 @@ void VibeSynth::renderNextBlock (juce::AudioBuffer<float>& buffer,
             R[i] = mid - side;
         }
     }
-}
-
-//==============================================================================
-void VibeSynth::allNotesOff()
-{
-    for (int ch = 1; ch <= 16; ++ch)
-        mSynth.allNotesOff (ch, true);
 }
 
 //==============================================================================

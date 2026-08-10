@@ -51,18 +51,6 @@ namespace
     }
 }
 
-const char* MicPlacementDSP::polarDisplayName (int idx)
-{
-    switch ((Polar) idx)
-    {
-        case Polar::Omni:          return "Omni";
-        case Polar::Cardioid:      return "Cardioid";
-        case Polar::Supercardioid: return "Supercardioid";
-        case Polar::Hypercardioid: return "Hypercardioid";
-        case Polar::Figure8:       return "Figure-8";
-        default:                    return "Cardioid";
-    }
-}
 
 MicPlacementDSP::MicPlacementDSP()  = default;
 MicPlacementDSP::~MicPlacementDSP() = default;

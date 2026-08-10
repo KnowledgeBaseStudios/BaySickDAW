@@ -1,5 +1,6 @@
 #include "HarmlessEditor.h"
 #include "../AppPaths.h"
+#include "../UserFileSave.h"
 #include "../Standalone/SharedUI.h"   // VKnobAutomation hooks
 #include "../Standalone/UndoBracket.h"
 
@@ -34,12 +35,6 @@ static constexpr int kKnobSm  = 16;
 static constexpr float kTopBandFrac = 0.46f;   // top band; bottom takes the rest
 static constexpr float kTLFrac      = 0.34f;   // top: left column
 static constexpr float kTMFrac      = 0.11f;   // top: Unison column; filters take the rest
-// Bottom-band column fractions; the Mod Editor takes the remainder (~0.45).
-static constexpr float kBPitchFrac  = 0.12f;   // Pitch over LFO Mod
-static constexpr float kBStrumFrac  = 0.09f;   // Strum over XYZ pad
-static constexpr float kBToneFrac   = 0.12f;   // Blur/Prism over Amp Env
-static constexpr float kBFXFrac     = 0.12f;   // FX
-static constexpr float kBSpecFrac   = 0.10f;   // Spectrogram
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 static void setupRotary (juce::Slider& s)
@@ -50,19 +45,6 @@ static void setupRotary (juce::Slider& s)
     // 2026-04-19 (S1.5): live value popup on hover/drag, matching the VKnob
     // behaviour in the effects panels. Without this, tooltip shows only the
     // static text and there's no way to see the current numeric value.
-    s.setPopupDisplayEnabled (true, true, nullptr);
-}
-
-static void setupVertical (juce::Slider& s)
-{
-    // 2026-04-19 (S1 followup): switched from LinearBarVertical (no thumb,
-    // just a colored fill that looked like a "colored line with no fader")
-    // to LinearVertical so HarmlessLAF::drawLinearSlider renders a real
-    // metallic thumb cap + glowing fill + recessed track.
-    s.setSliderStyle    (juce::Slider::LinearVertical);
-    s.setTextBoxStyle   (juce::Slider::NoTextBox, false, 0, 0);
-    s.setScrollWheelEnabled (true);
-    // 2026-04-19 (S1.5): live value popup on hover/drag.
     s.setPopupDisplayEnabled (true, true, nullptr);
 }
 
@@ -568,11 +550,6 @@ HarmlessEditor::HarmlessEditor (HarmlessProcessor& p)
     // S2 wires
     wireMeta (mBlurTime,       "blur_time",        "Blur Time - kernel width scale (0..2, default 1)");
     wireMeta (mBlurHarm,       "blur_harm",        "Blur Harm - harmonic-axis bias (0..1)");
-    // QA-ApvtsAutomation Task 5 (BLU-378): the S4 note here claimed lfo_rate /
-    // lfo_shape were "ripped".  They were not -- both params are registered
-    // (HarmlessProcessor.cpp:494-495), read by the DSP (:960-961), and attached
-    // (:406-407).  Two visible, working knobs were simply missing their Automate
-    // menu on the strength of a stale comment.
     wireMeta (mLfoRate,        "lfo_rate",         "LFO Rate (global) - cycle length for every target's LFO source");
     wireMeta (mLfoShape,       "lfo_shape",        "LFO Shape (global) - Sine / Triangle / Saw / Square");
     // Bottom-Left
@@ -1378,10 +1355,7 @@ void HarmlessEditor::showPresetMenu()
                 aw->addButton ("Cancel", 0);
                 aw->enterModalState (true, juce::ModalCallbackFunction::create (
                     [this, aw] (int r) {
-                        if (r == 1) {
-                            auto name = aw->getTextEditorContents ("name").trim();
-                            if (name.isNotEmpty()) savePreset (name);
-                        }
+                        if (r == 1) savePreset (aw->getTextEditorContents ("name"));
                         delete aw;
                     }), true);
             }
@@ -1397,10 +1371,9 @@ void HarmlessEditor::savePreset (const juce::String& name)
 {
     // 2026-04-26: user presets go into "My Presets/" subfolder.
     const auto dir = presetsDir().getChildFile ("My Presets");
-    dir.createDirectory();
-    const auto f = dir.getChildFile (name + ".xml");
-    auto state   = mProc.apvts.copyState();
-    if (auto xml = state.createXml()) xml->writeTo (f);
+    auto state = mProc.apvts.copyState();
+    if (auto xml = state.createXml())
+        UserFileSave::writeXmlAsync (dir, name, *xml, {});
 }
 
 void HarmlessEditor::loadPreset (const juce::File& f)
@@ -1413,8 +1386,18 @@ void HarmlessEditor::loadPreset (const juce::File& f)
                                                         "Load Preset");   // ruling 3a
             ok = true;
         }
+
+    if (! ok)
+    {
+        juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon,
+                                                "Load Preset",
+                                                "That preset file could not be read.",
+                                                "OK");
+        return;
+    }
+
     // 2026-04-30: notify page wrapper so Layer/Bass tab + mixer strip get
     // renamed to the patch filename (matches DrumPage's sound-pick auto-rename).
-    if (ok && onPatchLoaded)
+    if (onPatchLoaded)
         onPatchLoaded (f.getFileNameWithoutExtension());
 }

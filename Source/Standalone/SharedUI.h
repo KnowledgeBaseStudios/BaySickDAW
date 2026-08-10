@@ -217,23 +217,6 @@ public:
     }
 };
 
-// ── LRX - Texture cache ───────────────────────────────────────────────────────
-// Generates and caches expensive textures (brushed aluminum, Voronoi, grunge).
-// All methods are thread-safe once the image has been generated (first call on
-// the message thread). Keys are derived from type + dimensions.
-struct TextureUtils
-{
-    static const juce::Image& brushedAluminum(int w, int h);
-    static const juce::Image& voronoiCellular(int w, int h);
-    static const juce::Image& fingerGrunge   (int w, int h);
-
-private:
-    static std::map<juce::String, juce::Image>& cache();
-    static juce::Image makeBrushedAluminum(int w, int h);
-    static juce::Image makeVoronoi        (int w, int h);
-    static juce::Image makeFingerGrunge   (int w, int h);
-};
-
 // ── LRX - Realism drawing helpers ────────────────────────────────────────────
 // Shared by all LAF classes. Static-only.
 struct LRXHelper
@@ -262,12 +245,11 @@ struct LRXHelper
                                    juce::Colour col = juce::Colour(0xff606070));
 
     // Global lens vignette (call from window paint())
+    // HOLD-FOR-GL-RENDERER: disabled 2026-04-21 (CPU-renderer banding); re-enable
+    // plan T3-LRX5Vignette, Future State BLU-370/BLU-489. Call site was
+    // StandaloneEditor::paintOverChildren.
     static void drawVignette(juce::Graphics& g, juce::Rectangle<int> bounds,
                              float strength = 0.45f);
-
-    // Fingerprint grunge overlay
-    static void applyGrunge(juce::Graphics& g, juce::Rectangle<int> bounds,
-                            float intensity = 0.06f);
 };
 
 // ── Filmstrip rendering helpers ───────────────────────────────────────────────
@@ -303,8 +285,6 @@ namespace Filmstrips
 class PageMenuBar : public juce::Component
 {
 public:
-    struct MenuItem { juce::String label; std::function<void()> action; };
-
     PageMenuBar();
 
     void setPageTitle(const juce::String& t);
@@ -316,16 +296,15 @@ public:
     // narrow-width collisions.  Empty name = nothing drawn.
     void setCenterTitle(const juce::String& name, juce::Colour accent);
     const juce::String& getPageTitle() const noexcept { return mTitle; }
-    void setMenuItems(std::vector<MenuItem> items);
 
-    // Universal page-actions menu (2026-04-19): components can install a custom
-    // menu builder that takes precedence over the simple mMenuItems list. Used
-    // by ParametricEQDisplay (and future per-tab actions across all pages) to
-    // surface their options through the ≡ hamburger instead of an in-component
-    // ... button. The builder is given the hamburger as the popup anchor; it
-    // is responsible for both populating + showing the menu (so it can include
-    // submenus, checkmarks, disabled items, etc. that the simple MenuItem list
-    // can't express). Pass nullptr to clear and revert to mMenuItems behaviour.
+    // Universal page-actions menu (2026-04-19): components install a menu
+    // builder that the hamburger invokes. Used by ParametricEQDisplay (and
+    // future per-tab actions across all pages) to surface their options
+    // through the hamburger instead of an in-component ... button. The builder
+    // is given the hamburger as the popup anchor; it is responsible for both
+    // populating + showing the menu, so it can include submenus, checkmarks
+    // and disabled items. Pass nullptr to clear -- the hamburger then opens
+    // nothing.
     using MenuBuilder = std::function<void(juce::Component* anchor)>;
     void setMenuBuilder(MenuBuilder builder);
     // QA-Layout T10 (L13): second flat titled heading right of "Menu" -- the
@@ -367,8 +346,6 @@ public:
     // in every other effect's menu is noise rather than discoverability.
     void setVisualSlot (std::function<void()> openVisual,
                         std::function<bool()> available);
-    void addActionButton(const juce::String& label, std::function<void()> action);
-    void clearActionButtons();
 
     // ── Non-owning extra components on the right (e.g. Kit ▾, Nav combo) ────────
     // Components are reparented into PageMenuBar. Call clear before the page hides.
@@ -397,16 +374,6 @@ public:
     // sets this small and leans on the slot's tooltip for the full name.
     void setTabSlotWidth (int px);
     void setTabSlotTooltip (int idx, const juce::String& tip);
-
-    // Phase C §P4.2 (2026-04-24): convert an existing tab-slot button into a
-    // split-button.  Body-click still fires the slot's onTabClick; clicks
-    // inside a small right-edge arrow zone fire `onArrow` instead (typically
-    // opens a mode-picker popup).  `getDynamicLabel`, if set, is polled on
-    // every paint so the button text reflects external state changes (e.g.
-    // "Drum Grid" vs "Full Piano Roll" for the Drums Piano Roll slot).
-    void setTabSlotArrow (int idx,
-                          std::function<void(juce::Component*)> onArrow,
-                          std::function<juce::String()> getDynamicLabel = {});
 
     // MID/SIDE slot (laid out after tab slots, only for EQ tab)
     void setMidSideSlots(std::function<void()> onMid, std::function<void()> onSide,
@@ -480,14 +447,12 @@ public:
 
 private:
     juce::String mTitle;
-    std::vector<MenuItem> mMenuItems;
     MenuBuilder           mMenuBuilder;
     MenuBuilder           mAddMenuBuilder;   // T10 (L13)
 
     std::unique_ptr<juce::TextButton> mHamburgerBtn;
     std::unique_ptr<juce::TextButton> mAddBtn;   // T10 (L13)
     std::vector<std::unique_ptr<juce::TextButton>> mExtraHeadings;   // T16
-    std::vector<std::unique_ptr<juce::TextButton>> mActionBtns;
 
     // Non-owning extra right components (e.g. Kit button, Nav combo).
     // SafePointer: see addExtraRightComponent.
@@ -901,6 +866,18 @@ namespace VKnobAutomation
     extern std::function<void(const juce::String& paramId,
                               std::function<float()>)> sOnRegisterReader;
 
+    // The counterpart to the two above, and the only removal path they have
+    // besides the wholesale clear at a project boundary.  Rack and pedal slot
+    // paramIds are "<channelPrefix>_<slotUuid>_<param>", and a slot mints a
+    // FRESH uuid on every user-facing load -- so without this, auditioning
+    // effects in one slot leaves a block of closures and a block of dead
+    // "Automate" menu targets behind on every swap, for the life of the
+    // session.  Fired with the RETIRING uuid; a uuid is unique, so matching on
+    // it needs no channel context.  MESSAGE THREAD ONLY -- it destroys
+    // std::function closures, so it must never be called under a lock the audio
+    // thread can want.
+    extern std::function<void(const juce::String& slotUuid)> sOnUnregisterSlotUuid;
+
     // QA-ModelShell TS3 (2026-07-27): the five register*Automation helpers that
     // lived here -- Slider / Button / Combo / Parameter / Selector -- are gone
     // with their last callers.  Every one of them tied a lane's lifetime to a
@@ -1097,8 +1074,7 @@ public:
     void setLocked(bool lock);
     bool isLocked() const noexcept { return mLocked; }
 
-    // Fired on drag start/end - use these to build undo actions.
-    std::function<void(float beforeVal)>             onDragStarted;
+    // Fired on drag end - use to build undo actions.
     std::function<void(float beforeVal, float after)> onDragEnded;
 
 private:
@@ -1196,8 +1172,6 @@ private:
     std::vector<Option> mOptions;
     int   mSelectedIdx { 0 };
     int   mHoverLetter { -1 };
-    float mDragStartAngle { 0.0f };
-    int   mDragStartIdx   { 0 };
     bool  mIsDragging     { false };
     juce::String mBodyTooltip;
     // Default letter colour (overridable by panel). Selected + hover are fixed.
@@ -1298,124 +1272,6 @@ public:
     }
 };
 
-// ── Basic Sequence step cell ──────────────────────────────────────────────────
-// One cell in the on-page basic sequence grid.
-// Click = toggle, vertical drag = velocity, horizontal drag = length.
-class BasicStepCell : public juce::Component
-{
-public:
-    int   rowIndex  { 0 };
-    int   stepIndex { 0 };
-    bool  active    { false };
-    float velocity  { 0.8f };  // 0-1
-    float length    { 1.0f };  // 1.0 = full step
-
-    std::function<void(int row, int step, bool active, float vel, float len)> onChange;
-
-    BasicStepCell();
-    void paint(juce::Graphics&) override;
-    void mouseDown(const juce::MouseEvent&) override;
-    void mouseDrag(const juce::MouseEvent&) override;
-    void mouseUp  (const juce::MouseEvent&) override;
-
-    void setRowColour(juce::Colour c) { mRowColour = c; repaint(); }
-
-private:
-    juce::Colour mRowColour { VC::Highlight };
-    juce::Point<float> mDragStart;
-    float mDragStartVel { 0.8f };
-    float mDragStartLen { 1.0f };
-    bool  mDragging     { false };
-};
-
-// ── Basic Sequence AHDSR envelope display + controls ─────────────────────────
-class BasicEnvelopeEditor : public juce::Component
-{
-public:
-    BasicEnvelope env;
-    std::function<void(const BasicEnvelope&)> onChange;
-
-    BasicEnvelopeEditor();
-    void resized() override;
-    void paint(juce::Graphics&) override;
-
-private:
-    std::unique_ptr<VKnob> mAttack, mHold, mDecay, mSustain, mRelease;
-    void updateFromKnobs();
-    void drawCurve(juce::Graphics& g, juce::Rectangle<int> area);
-};
-
-// ── Sequence routing bar (Basic / Complex dropdown + Go button) ───────────────
-class SeqRoutingBar : public juce::Component
-{
-public:
-    std::function<void(SeqRouting)> onRoutingChanged;
-    std::function<void()>           onGoToComplex;
-
-    SeqRoutingBar();
-    void setRouting(SeqRouting r);
-    SeqRouting getRouting() const;
-    void resized() override;
-    void paint(juce::Graphics&) override;
-
-private:
-    std::unique_ptr<juce::ComboBox>   mRoutingBox;
-    std::unique_ptr<juce::TextButton> mGoBtn;
-    SeqRouting mRouting { SeqRouting::BasicSequence };
-    void updateVisibility();
-};
-
-// ── FX chain strip (6 slots: On toggle + type label + 3 VKnobs each) ─────────
-class FXChainStrip : public juce::Component
-{
-public:
-    // slotLabels: display names for each slot ("Comp", "Dist", etc.)
-    FXChainStrip(const juce::StringArray& slotLabels = {});
-    void resized() override;
-    void paint(juce::Graphics&) override;
-
-private:
-    struct Slot {
-        std::unique_ptr<juce::ToggleButton> toggle;
-        std::unique_ptr<juce::Label>        label;
-        std::unique_ptr<VKnob>              k1, k2, k3;
-    };
-    std::vector<Slot> mSlots;
-};
-
-// ── Waveform display with start/end markers ───────────────────────────────────
-class WaveformDisplay : public juce::Component
-{
-public:
-    WaveformDisplay();
-    void setWaveform(const std::vector<float>& samples);
-    void setColor(juce::Colour c);
-    void setCurrentRate(float rate) { mBodyDragStartRate = rate; }  // keep in sync for drag origin
-
-    // Called when user drags start/end markers (values 0.0-1.0)
-    std::function<void(float startPos, float endPos)> onMarkersChanged;
-    // Called when user drags the waveform body up/down (maps to LFO rate 0.01-20Hz)
-    std::function<void(float rate)> onSpeedChanged;
-
-    void paint(juce::Graphics&) override;
-    void mouseDown(const juce::MouseEvent&) override;
-    void mouseDrag(const juce::MouseEvent&) override;
-    void mouseUp  (const juce::MouseEvent&) override;
-
-private:
-    std::vector<float> mSamples;
-    juce::Colour       mColor { VC::Highlight };
-    float mStartPos { 0.0f };
-    float mEndPos   { 1.0f };
-    enum class DragTarget { None, StartMarker, EndMarker, Body } mDrag { DragTarget::None };
-    float mBodyDragStartY    { 0.f };
-    float mBodyDragStartRate { 1.f };  // LFO rate at drag start
-
-    juce::Path buildCurvePath(juce::Rectangle<float> area) const;
-    DragTarget hitTestMarker(juce::Point<float> p) const;
-    float markerX(float pos, float w) const { return pos * w; }
-};
-
 // Forward declarations for DSP binding modes (defined in DSP/)
 class EQ8DSP;
 class EQ8MsDSP;
@@ -1479,6 +1335,29 @@ public:
     void pushSamples    (const float* data, int numSamples);
     void pushSamplesPre (const float* data, int numSamples);
     void setSampleRate(double sr) { mSampleRateForFFT = sr; }
+
+    // ── Live device rate ──────────────────────────────────────────────────
+    // Bin k of the analyser sits at k * (sr/2) / numBins and the EQ curve drawn
+    // over it is a biquad magnitude evaluated at sr, so a constant rate puts the
+    // picture and the audio on different axes: at 48 kHz the spectrum drew 8.1%
+    // flat, so a band dragged onto a visible peak landed roughly a semitone and
+    // a half off it.  Both readers take their value from here, so they cannot
+    // drift apart.
+    //
+    // Published rather than read from the bound DSP: DSPBase keeps its rate
+    // protected, and a display can exist (and draw its curve) before any audio
+    // has run.  One audio device per app, so a class-wide atomic is the right
+    // scope -- same idiom as DSPBase::sTransportPlaying.  Written from the
+    // standalone editor's device poll on the message thread; read by each
+    // display on its own sync tick.
+    static void setLiveSampleRate (double sr) noexcept
+    {
+        if (sr > 0.0) sLiveSampleRate.store (sr, std::memory_order_relaxed);
+    }
+    static double getLiveSampleRate() noexcept
+    {
+        return sLiveSampleRate.load (std::memory_order_relaxed);
+    }
 
     // ── Binding modes ──────────────────────────────────────────────────────
     // Mode 1: APVTS binding (Layers page)
@@ -1546,9 +1425,6 @@ public:
     // ── M/S display toggle (called by parent to force visibility of internal pill) ─
     void showMidSideToggle(bool show);   // force MID/SIDE pill to be visible/hidden
 
-    // Callback for band drag changes
-    std::function<void(int bandIdx, float newFreq, float newGainDb)> onBandChanged;
-
     // 12f: invoked after the user toggles anti-cramping in the options popup.
     // Pages bind this to refresh the host's PDC (mProcessor.setLatencySamples
     // (mProcessor.mVibeGraph.updateBusLatencies())). Optional - APVTS-bound
@@ -1600,7 +1476,6 @@ private:
     bool mFineAdjust    { false };   // Ctrl held → 0.1× sensitivity
     mutable int mHoveredBand { -1 };
     juce::Point<float> mDragOrigin;
-    float mDragStartFreq { 0.f }, mDragStartGain { 0.f };
 
     juce::Rectangle<int> mGraphArea;
     juce::Rectangle<int> mRightPanelArea;
@@ -1659,6 +1534,9 @@ private:
     int                                    mFifoIndex       { 0 };
     bool                                   mSpectrumReady   { false };
     double                                 mSampleRateForFFT{ 44100.0 };
+    inline static std::atomic<double>      sLiveSampleRate  { 44100.0 };
+    // Pulls sLiveSampleRate into mSampleRateForFFT; repaints only on a change.
+    void refreshSampleRateFromDevice();
     // 12i: pre-EQ spectrum storage (parallel to post-EQ above).
     std::array<float, kFFTSize>            mFifoBufferPre {};
     std::array<float, kFFTSize / 2>        mSpectrumDbPre {};
@@ -1749,7 +1627,6 @@ private:
     void drawPhaseCurve(juce::Graphics&) const;
     void drawCurve     (juce::Graphics&) const;
     void drawHandles   (juce::Graphics&) const;
-    void drawToolbar   (juce::Graphics&) const;
 
     void syncControlsFromBands();
     void syncBandFromControl(int idx);
@@ -2090,45 +1967,5 @@ private:
     // component has a peer.  Optional so we can null it out cleanly when
     // the meter is detached (e.g. tab switch).
     std::unique_ptr<juce::VBlankAttachment> mVBlank;
-};
-
-// ── Full basic sequence grid (rows x steps, scrollable) ──────────────────────
-class BasicSequenceGrid : public juce::Component
-{
-public:
-    // rowNames: displayed on left side of each row
-    // numRows: 4 for layers, 1 for bass, 10 for drums
-    BasicSequenceGrid(int numRows, const juce::StringArray& rowNames);
-
-    void setNumSteps(int steps);
-    void setRowColour(int row, juce::Colour col);
-    void setStepData(int row, int step, bool active, float vel, float len);
-    BasicStep getStepData(int row, int step) const;
-
-    std::function<void(int row, int step, bool active, float vel, float len)> onStepChanged;
-
-    void paint(juce::Graphics&) override;
-    void resized() override;
-
-    static constexpr int kRowH    = 36;
-    static constexpr int kLabelW  = 120;
-    static constexpr int kStepW   = 38;
-
-private:
-    int mNumRows  { 1 };
-    int mNumSteps { DEFAULT_STEPS };
-    juce::StringArray mRowNames;
-
-    // Cells stored as [row][step]
-    std::vector<std::vector<std::unique_ptr<BasicStepCell>>> mCells;
-
-    std::unique_ptr<juce::Viewport>   mViewport;
-    std::unique_ptr<juce::Component>  mContent;
-
-    // Playhead indicator drawn in paint()
-    int mPlayheadStep { -1 };
-
-    void rebuild();
-    void layoutCells();
 };
 

@@ -1,139 +1,15 @@
 #include "PatternManager.h"
+#include "ProjectFileResolver.h"
 #include "TsMapRead.h"
 
 // ── AutomationLane::evaluateAt ────────────────────────────────────────────────
 float AutomationLane::evaluateAt(float pos01) const
 {
-    pos01 = juce::jlimit(0.f, 1.f, pos01);
-
-    // ── LFO mode ──────────────────────────────────────────────────────────────
-    if (isLFO)
-    {
-        if (lfoRate <= 0.f) return (lfoMin + lfoMax) * 0.5f;
-        float phase = std::fmod(pos01 / lfoRate, 1.f);
-        float raw = 0.f;
-        switch (lfoShape)
-        {
-            case 0: // Sine
-                raw = 0.5f + 0.5f * std::sin(phase * juce::MathConstants<float>::twoPi);
-                break;
-            case 1: // Triangle
-                raw = (phase < 0.5f) ? (phase * 2.f) : (2.f - phase * 2.f);
-                break;
-            case 2: // Sawtooth
-                raw = phase;
-                break;
-            case 3: // Square
-                raw = (phase < 0.5f) ? 1.f : 0.f;
-                break;
-            default: raw = phase; break;
-        }
-        return juce::jlimit(0.f, 1.f, lfoMin + raw * (lfoMax - lfoMin));
-    }
-
-    // ── Point-based curve ─────────────────────────────────────────────────────
-    if (points.empty()) return 0.5f;
-    if (points.size() == 1) return points[0].value01;
-
-    // Work on a sorted copy (points may be in insertion order during editing)
-    auto sorted = points;
-    std::sort(sorted.begin(), sorted.end(),
-        [](const ControlPoint& a, const ControlPoint& b)
-            { return a.timeTicks < b.timeTicks; });
-
-    if (pos01 <= sorted.front().timeTicks) return sorted.front().value01;
-    if (pos01 >= sorted.back().timeTicks)  return sorted.back().value01;
-
-    // Find bracketing segment
-    int idx = 0;
-    for (int i = 0; i < (int)sorted.size() - 1; ++i)
-    {
-        if (pos01 >= sorted[i].timeTicks && pos01 < sorted[i + 1].timeTicks)
-        {
-            idx = i;
-            break;
-        }
-    }
-
-    const auto& p0 = sorted[idx];
-    const auto& p1 = sorted[idx + 1];
-    const float span = p1.timeTicks - p0.timeTicks;
-    if (span <= 0.f) return p0.value01;
-
-    const float t = (pos01 - p0.timeTicks) / span;
-
-    switch (p0.curveType)
-    {
-        case CurveType::Stepped:
-            return p0.value01;
-
-        case CurveType::Linear:
-        {
-            // FL Studio Scaled Exponential Transfer Function:
-            //   t_factor = 1 - T / (0.5*T + 0.5)^2
-            //   y = (t_factor^x - 1) / (t_factor - 1)
-            // Positive tension = ease-out, negative = ease-in.
-            float T = juce::jlimit(-0.999f, 0.999f, p0.tension);
-            if (std::abs(T) < 0.001f)
-                return p0.value01 + t * (p1.value01 - p0.value01);
-
-            float denom    = 0.5f * T + 0.5f;
-            float t_factor = 1.0f - T / (denom * denom);
-
-            float y;
-            if (std::abs(t_factor - 1.0f) < 0.0001f)
-                y = t;
-            else
-                y = (std::pow(std::abs(t_factor), t) - 1.0f) / (t_factor - 1.0f);
-
-            return p0.value01 + juce::jlimit(0.0f, 1.0f, y) * (p1.value01 - p0.value01);
-        }
-
-        case CurveType::Spline:
-        {
-            // Catmull-Rom using neighbouring points; clamp at ends
-            float v0 = (idx > 0)                       ? sorted[idx - 1].value01 : p0.value01;
-            float v1 = p0.value01;
-            float v2 = p1.value01;
-            float v3 = (idx + 2 < (int)sorted.size()) ? sorted[idx + 2].value01 : p1.value01;
-            float t2 = t * t, t3 = t2 * t;
-            float val = 0.5f * (
-                  2.f * v1
-                + (-v0 + v2)                         * t
-                + (2.f * v0 - 5.f * v1 + 4.f * v2 - v3) * t2
-                + (-v0 + 3.f * v1 - 3.f * v2 + v3)  * t3);
-            return juce::jlimit(0.f, 1.f, val);
-        }
-
-        default:
-            return p0.value01 + t * (p1.value01 - p0.value01);
-    }
+    return evalAutomationLaneAt (*this, pos01);
 }
-
-const char* PatternManager::kDrumNames[MAX_DRUM_SOUNDS] = {
-    // KICK (0-4)
-    "Kick Thump", "Kick Snap", "Kick Sub", "808 Kick", "Kick Short",
-    // SNARE (5-10)
-    "Snare Crack", "Snare Rim", "Snare Brush", "Rimshot", "Cross Stick", "Snare Ghost",
-    // HI-HAT (11-15)
-    "HH Closed", "HH Open", "HH Pedal", "HH Tight", "HH Loose",
-    // CYMBAL (16-20)
-    "Ride Bell", "Ride Edge", "Crash", "China", "Splash",
-    // TOM (21-24)
-    "Tom High", "Tom Mid", "Tom Low", "Floor Tom",
-    // PERC (25-30)
-    "Clap", "Snap", "Clave", "Cowbell", "Woodblock", "Shaker",
-    // ETHNIC (31-35)
-    "Tambourine", "Bongo High", "Bongo Low", "Conga", "Djembe",
-    // ELECTRONIC (36-41)
-    "808 Clap", "808 Tom", "Noise Hit", "Laser", "Glitch", "Vinyl Noise",
-    // FX (42-45)
-    "Reverse Cymbal", "Pitched Kick", "Sub Boom", "Impact"
-};
 
 PatternManager::PatternManager()
 {
-    mDrumEnabled.fill(false);
     for (int i = 0; i < kMaxArrangementRows; ++i)
         mRowNames[i] = defaultRowName(i);
     addPattern("Pattern 1");   // publishes the first roll-snapshot table via notifyContentChanged
@@ -184,7 +60,9 @@ void PatternManager::publishRollSnapshotFor (int patternIndex)
 {
     // Structural safety net: every pattern-count-changing CRUD also funnels
     // through notifyContentChanged -- a count mismatch rebuilds everything, so
-    // no explicit hook is needed in add/duplicate/remove.
+    // no explicit hook is needed in add / duplicate / insert / remove.  A
+    // SAME-count structural change (movePattern, restorePatternList) is
+    // invisible here and must publish all itself.
     if ((int) mPatternSnapCache.size() != (int) mPatterns.size())
     {
         publishAllRollSnapshots();
@@ -209,7 +87,10 @@ int PatternManager::addPattern(const juce::String& name)
     p.name = name.isEmpty() ? "Pattern " + juce::String(mPatterns.size()+1) : name;
     // QA-G Task 6 (docket #4): new patterns bind to the current-TS selection.
     p.tsBoundMarkerUid = mCurrentTsMarkerUid;
-    mPatterns.push_back(std::move(p));
+    {
+        const ScopedAudioShield shield (*this);
+        mPatterns.push_back(std::move(p));
+    }
     refreshPatternTimeSigs();
     notifyContentChanged();
     return (int)mPatterns.size() - 1;
@@ -220,7 +101,10 @@ int PatternManager::duplicatePattern(int srcIndex)
     if (srcIndex < 0 || srcIndex >= (int)mPatterns.size()) return -1;
     Pattern copy = mPatterns[srcIndex];   // deep-copy by value: notes, sequences, rolls
     copy.name = copy.name + " (copy)";
-    mPatterns.push_back(std::move(copy));
+    {
+        const ScopedAudioShield shield (*this);
+        mPatterns.push_back(std::move(copy));
+    }
     notifyContentChanged();
     return (int)mPatterns.size() - 1;
 }
@@ -262,7 +146,9 @@ void PatternManager::addAudioToLibrary(const juce::String& path,
     // point -- every add path (drops, Add New Clip, recordings) inherits it.
     auto displayOf = [] (const juce::String& p, const juce::String& a)
     {
-        return a.isNotEmpty() ? a : juce::File (p).getFileName();
+        // Resolved: a stored stable ref carries its prefix and relative
+        // folder, so two entries for the same file would not collide.
+        return a.isNotEmpty() ? a : ProjectFileResolver::resolve (p).getFileName();
     };
     juce::String finalAlias = alias;
     {
@@ -282,12 +168,6 @@ void PatternManager::addAudioToLibrary(const juce::String& path,
         }
     }
     mAudioLibrary.push_back({ path, finalAlias, 0 /* chokeGroup = none */, pageOwnerChannelId });
-}
-
-void PatternManager::removeAudioFromLibrary(const juce::String& path)
-{
-    for (auto it = mAudioLibrary.begin(); it != mAudioLibrary.end(); ++it)
-        if (it->path == path) { mAudioLibrary.erase(it); return; }
 }
 
 // QA-E Task 5 (2026-05-15): library lookup helpers.  See header.
@@ -409,12 +289,6 @@ void PatternManager::removeAutomationTemplate(int idx)
     mAutomationTemplates.erase(mAutomationTemplates.begin() + idx);
 }
 
-void PatternManager::renameAutomationTemplate(int idx, const juce::String& newParamId)
-{
-    if (idx < 0 || idx >= (int)mAutomationTemplates.size()) return;
-    mAutomationTemplates[idx].paramId = newParamId;
-}
-
 void PatternManager::setAutomationTemplateUserName(int idx, const juce::String& userName)
 {
     if (idx < 0 || idx >= (int)mAutomationTemplates.size()) return;
@@ -425,41 +299,126 @@ void PatternManager::setAutomationTemplateUserName(int idx, const juce::String& 
 void PatternManager::removePattern(int index)
 {
     if (index < 0 || index >= (int)mPatterns.size() || mPatterns.size() <= 1) return;
-    mPatterns.erase(mPatterns.begin() + index);
-    // QA-G (found during Split): the erase never re-indexed the rest of the
-    // project -- every block referencing a pattern ABOVE the removed index
-    // silently played the wrong (shifted) pattern, blocks OF the removed
-    // pattern dangled past the end, and linked TS markers kept stale pattern
-    // indices.  Re-index everything; blocks + markers of the dead pattern go.
-    for (int i = (int) mArrangement.size() - 1; i >= 0; --i)
     {
-        auto& b = mArrangement[(size_t) i];
-        if (b.clipType != ClipType::Pattern) continue;
-        if (b.patternIndex == index)
-            mArrangement.erase(mArrangement.begin() + i);
-        else if (b.patternIndex > index)
-            --b.patternIndex;
-    }
-    for (int i = (int) mTimeSigChanges.size() - 1; i >= 0; --i)
-    {
-        auto& ts = mTimeSigChanges[(size_t) i];
-        if (ts.linkedPattern == index)
+        // The re-index cascade is inside the shield too: a half-remapped
+        // arrangement read by the scheduler plays the wrong pattern.
+        const ScopedAudioShield shield (*this);
+        mPatterns.erase(mPatterns.begin() + index);
+        // QA-G (found during Split): the erase never re-indexed the rest of the
+        // project -- every block referencing a pattern ABOVE the removed index
+        // silently played the wrong (shifted) pattern, blocks OF the removed
+        // pattern dangled past the end, and linked TS markers kept stale pattern
+        // indices.  Re-index everything; blocks + markers of the dead pattern go.
+        for (int i = (int) mArrangement.size() - 1; i >= 0; --i)
         {
-            const int uid = ts.uid;
-            mTimeSigChanges.erase(mTimeSigChanges.begin() + i);
-            if (uid == mCurrentTsMarkerUid)
-                mCurrentTsMarkerUid = ((int) mTimeSigChanges.size() == 1)
-                                        ? mTimeSigChanges[0].uid : -1;
+            auto& b = mArrangement[(size_t) i];
+            if (b.clipType != ClipType::Pattern) continue;
+            if (b.patternIndex == index)
+                mArrangement.erase(mArrangement.begin() + i);
+            else if (b.patternIndex > index)
+                --b.patternIndex;
         }
-        else if (ts.linkedPattern > index)
-            --ts.linkedPattern;
+        for (int i = (int) mTimeSigChanges.size() - 1; i >= 0; --i)
+        {
+            auto& ts = mTimeSigChanges[(size_t) i];
+            if (ts.linkedPattern == index)
+            {
+                const int uid = ts.uid;
+                mTimeSigChanges.erase(mTimeSigChanges.begin() + i);
+                if (uid == mCurrentTsMarkerUid)
+                    mCurrentTsMarkerUid = ((int) mTimeSigChanges.size() == 1)
+                                            ? mTimeSigChanges[0].uid : -1;
+            }
+            else if (ts.linkedPattern > index)
+                --ts.linkedPattern;
+        }
+        if (mCurrentPattern > index) --mCurrentPattern;
+        mCurrentPattern = juce::jlimit(0, (int)mPatterns.size()-1, mCurrentPattern);
     }
-    if (mCurrentPattern > index) --mCurrentPattern;
-    mCurrentPattern = juce::jlimit(0, (int)mPatterns.size()-1, mCurrentPattern);
     refreshPatternTimeSigs();
     publishTimeSigMap();
     notifyContentChanged();
     if (onTimeSigStateChanged) onTimeSigStateChanged();
+}
+
+int PatternManager::insertPattern(int atIndex, const juce::String& name)
+{
+    const int oldCount = (int) mPatterns.size();
+    atIndex = juce::jlimit(0, oldCount, atIndex);
+
+    Pattern p;
+    p.name = name.isEmpty() ? "Pattern " + juce::String(oldCount + 1) : name;
+    // New patterns bind to the current-TS selection (follower lifecycle).
+    p.tsBoundMarkerUid = mCurrentTsMarkerUid;
+    {
+        const ScopedAudioShield shield (*this);
+        mPatterns.insert(mPatterns.begin() + atIndex, std::move(p));
+
+        // Same re-index cascade removePattern runs, under the insert's mapping:
+        // every stored reference at or after the insertion point shifts up one.
+        // Without it the arrangement silently plays the wrong pattern.
+        for (auto& b : mArrangement)
+            if (b.clipType == ClipType::Pattern && b.patternIndex >= atIndex)
+                ++b.patternIndex;
+        for (auto& ts : mTimeSigChanges)
+            if (ts.linkedPattern >= atIndex)
+                ++ts.linkedPattern;
+        // The selection follows the pattern it named, not the number it held.
+        if (mCurrentPattern >= atIndex) ++mCurrentPattern;
+    }
+
+    refreshPatternTimeSigs();
+    publishTimeSigMap();
+    notifyContentChanged();
+    if (onTimeSigStateChanged) onTimeSigStateChanged();
+    return atIndex;
+}
+
+bool PatternManager::movePattern(int fromIndex, int toIndex)
+{
+    const int count = (int) mPatterns.size();
+    if (fromIndex < 0 || fromIndex >= count) return false;
+    if (toIndex   < 0 || toIndex   >= count) return false;
+    if (fromIndex == toIndex)                return false;
+
+    // A move is a PERMUTATION, not removePattern's one-way shift: fromIndex
+    // becomes toIndex, every index between the two slides one step the
+    // opposite way, and anything outside [min,max] keeps its number.  An
+    // off-by-one here silently re-points a user's arrangement.
+    auto remap = [fromIndex, toIndex] (int idx) -> int
+    {
+        if (idx == fromIndex) return toIndex;
+        if (fromIndex < toIndex)
+            return (idx > fromIndex && idx <= toIndex) ? idx - 1 : idx;
+        return (idx >= toIndex && idx < fromIndex) ? idx + 1 : idx;
+    };
+
+    {
+        // The permutation reseats every Pattern between the two indices, so a
+        // reference the audio thread is holding cannot survive it.
+        const ScopedAudioShield shield (*this);
+        Pattern moved = std::move(mPatterns[(size_t) fromIndex]);
+        mPatterns.erase (mPatterns.begin() + fromIndex);
+        mPatterns.insert(mPatterns.begin() + toIndex, std::move(moved));
+
+        for (auto& b : mArrangement)
+            if (b.clipType == ClipType::Pattern)
+                b.patternIndex = remap(b.patternIndex);
+        for (auto& ts : mTimeSigChanges)
+            if (ts.linkedPattern >= 0)
+                ts.linkedPattern = remap(ts.linkedPattern);
+        mCurrentPattern = remap(mCurrentPattern);
+    }
+
+    // The pattern COUNT is unchanged, so the roll-table size check inside
+    // publishRollSnapshotFor cannot see that every cache slot moved --
+    // publish all (restorePatternList precedent).
+    publishAllRollSnapshots();
+    refreshPatternTimeSigs();
+    publishTimeSigMap();
+    notifyContentChanged();
+    if (onTimeSigStateChanged) onTimeSigStateChanged();
+    return true;
 }
 
 void PatternManager::restoreTimeMarkers (const std::vector<TimeMarker>& markers)
@@ -499,8 +458,12 @@ void PatternManager::restoreAutomationTemplates (const std::vector<AutomationLan
 void PatternManager::restorePatternList (const std::vector<Pattern>& patterns, int currentIndex)
 {
     if (patterns.empty()) return;
-    mPatterns = patterns;
-    mCurrentPattern = juce::jlimit(0, (int)mPatterns.size()-1, currentIndex);
+    {
+        // Whole-vector assignment destroys and reallocates every Pattern.
+        const ScopedAudioShield shield (*this);
+        mPatterns = patterns;
+        mCurrentPattern = juce::jlimit(0, (int)mPatterns.size()-1, currentIndex);
+    }
     // #30b: a same-count list swap changes EVERY pattern's content -- the
     // notifyContentChanged size check below can't see that, so publish all.
     publishAllRollSnapshots();
@@ -543,7 +506,10 @@ void PatternManager::addBlock(ArrangementBlock block)
     // decorative-only (visual reference on the Builder ruler), so deriving a
     // pattern's intrinsic TS from a marker would be confusing.  Pattern TS
     // is set explicitly via right-click → "Set Time Signature".
-    mArrangement.push_back(block);
+    {
+        const ScopedAudioShield shield (*this);
+        mArrangement.push_back(block);
+    }
     notifyContentChanged();
 }
 
@@ -551,7 +517,10 @@ void PatternManager::removeBlock(int index)
 {
     if (index >= 0 && index < (int)mArrangement.size())
     {
-        mArrangement.erase(mArrangement.begin() + index);
+        {
+            const ScopedAudioShield shield (*this);
+            mArrangement.erase(mArrangement.begin() + index);
+        }
         notifyContentChanged();
     }
 }
@@ -748,22 +717,6 @@ TimeSigChange PatternManager::getEffectiveTimeSigAtBar (int bar) const
         else break;   // sorted ascending; first ts.bar > bar means we're done
     }
     return eff;
-}
-
-double PatternManager::getBeatsPerBarAtBar (int bar) const
-{
-    const auto eff = getEffectiveTimeSigAtBar (bar);
-    // PPQ beat = quarter note.  Bar length in PPQ = num * (4/den).
-    const int den = (eff.den > 0) ? eff.den : 4;
-    return (double) eff.num * 4.0 / (double) den;
-}
-
-double PatternManager::getBeatsPerBarAtBeat (double beat) const
-{
-    int bar = 0;
-    double bib = 0.0;
-    beatToBarAndBeatInBar (beat, bar, bib);
-    return getBeatsPerBarAtBar (bar);
 }
 
 void PatternManager::beatToBarAndBeatInBar (double beat, int& outBar, double& outBeatInBar) const
@@ -1028,18 +981,6 @@ double PatternManager::barStartBeat (int bar) const
     return beatCounter;
 }
 
-void PatternManager::enableDrum(int slot, bool enabled)
-{
-    if (slot >= 0 && slot < MAX_DRUM_SOUNDS) mDrumEnabled[slot] = enabled;
-}
-
-int PatternManager::getNumEnabledDrums() const
-{
-    int count = 0;
-    for (bool e : mDrumEnabled) if (e) ++count;
-    return count;
-}
-
 // B-1: per-patternIndex content length in beats (furthest note/step end across
 // that pattern's rolls, ceiled to a bar at the pattern's bpb, min 1 bar).  The
 // Builder tiling + the song-mode scheduler feed off THIS so an 8-bar pattern
@@ -1077,10 +1018,10 @@ double PatternManager::getPatternContentBeats (int patternIndex) const
         return bars * patBpb;
     };
 
-    // C.5b: default loop = 1 pattern-bar (kMinBeats).  Note-end + step-end
-    // priorities below extend when content exists.  Block-driven priority
-    // dropped because Builder bars are uniform 4-beat while patterns play at
-    // their intrinsic TS - mixing units broke 7/4 → 3/4 transitions.
+    // C.5b: default loop = 1 pattern-bar (kMinBeats).  The note-end priority
+    // below extends when content exists.  Block-driven priority dropped
+    // because Builder bars are uniform 4-beat while patterns play at their
+    // intrinsic TS - mixing units broke 7/4 → 3/4 transitions.
     double loopBeats = kMinBeats;
 
     // ── Priority 2: furthest note end in any roll, ceiled to bar boundary ────
@@ -1112,50 +1053,12 @@ double PatternManager::getPatternContentBeats (int patternIndex) const
             loopBeats = juce::jmax (loopBeats, ceilToBarStart (latestEnd));
     }
 
-    // ── Priority 3: extend to cover any active basic-sequence steps ───────────
-    // The step index = (ppqPos / stepLen) % totalSteps, wrapping with mLoopBeats.
-    // If active steps exist beyond the current loop length, extend so they fire.
-    // C.5b: stepLen still uses 4-beat-per-bar reference for stepsPerBar - the
-    // basic step grid is grid-based, not TS-based.  This is consistent with
-    // how step grids work in FL-style sequencers.
-    {
-        auto scanSeq = [&](const PageSequenceData& seq) {
-            double stepLen = 4.0 / juce::jmax(1, seq.stepsPerBar);
-            int    total   = seq.totalSteps();
-            for (int row = 0; row < MAX_DRUM_SOUNDS; ++row)
-            {
-                for (int s = 0; s < total; ++s)
-                {
-                    if (seq.basicGrid[row][s].active)
-                    {
-                        double stepEnd = (s + 1) * stepLen;
-                        loopBeats = juce::jmax (loopBeats, ceilToBarStart (stepEnd));
-                    }
-                }
-            }
-        };
-        scanSeq(pat.layerSeq);
-        scanSeq(pat.bassSeq);
-        scanSeq(pat.drumSeq);
-    }
-
     return loopBeats;
 }
 
 double PatternManager::getEffectivePatternLoopBeats() const
 {
     return getPatternContentBeats (mCurrentPattern);
-}
-
-bool PatternManager::isComplexSequenceActive() const
-{
-    for (auto& p : mPatterns)
-    {
-        if (p.layerSeq.routing == SeqRouting::ComplexSequence) return true;
-        if (p.bassSeq.routing  == SeqRouting::ComplexSequence) return true;
-        if (p.drumSeq.routing  == SeqRouting::ComplexSequence) return true;
-    }
-    return false;
 }
 
 // ── Serialisation ─────────────────────────────────────────────────────────────
@@ -1290,12 +1193,18 @@ namespace
             cp.tension   = (float)(double) c.getProperty ("tension", 0.0);
             lane.points.push_back (cp);
         }
+        // evalAutomationLaneAt assumes sorted points and cannot sort (it runs on
+        // the audio thread), so the load boundary establishes the invariant.
+        std::sort (lane.points.begin(), lane.points.end(),
+                   [](const ControlPoint& a, const ControlPoint& b)
+                       { return a.timeTicks < b.timeTicks; });
         return lane;
     }
 }
 
 void PatternManager::reset()
 {
+    const ScopedAudioShield shield (*this);
     mPatterns.clear();
     mPatterns.emplace_back();   // one empty default pattern
     mCurrentPattern = 0;
@@ -1322,7 +1231,6 @@ void PatternManager::reset()
     mAudioLibrary.clear();
     mManualAudioGroups.clear();   // QA-Fe2
     mMixer = {};
-    mDrumEnabled.fill (true);
     for (auto& m : mRowMuted)  m.store (false, std::memory_order_relaxed);
     for (auto& s : mRowSoloed) s.store (false, std::memory_order_relaxed);
     for (int i = 0; i < kMaxArrangementRows; ++i)
@@ -1365,7 +1273,7 @@ juce::ValueTree PatternManager::toValueTree() const
     // Per-drum-row + per-audio-row arrays - pack as CSV strings for compactness
     {
         juce::StringArray slot, span, aLv, aMu;
-        for (int i = 0; i < MAX_DRUM_ROWS;          ++i) { slot.add(juce::String(mMixer.drumSlotLevel[i]));
+        for (int i = 0; i < kMaxDrumPages;          ++i) { slot.add(juce::String(mMixer.drumSlotLevel[i]));
                                                            span.add(juce::String(mMixer.drumSlotPan[i])); }
         for (int i = 0; i < MixerState::kMaxAudioRows; ++i) { aLv.add(juce::String(mMixer.audioRowLevel[i]));
                                                                aMu.add(mMixer.audioRowMute[i] ? "1" : "0"); }
@@ -1376,14 +1284,7 @@ juce::ValueTree PatternManager::toValueTree() const
     }
     root.addChild(mixNode, -1, nullptr);
 
-    // ── Drum-enabled flags + per-track row mute/solo ─────────────────────────
-    {
-        juce::ValueTree n("DrumEnabled");
-        juce::StringArray bits;
-        for (int i = 0; i < MAX_DRUM_SOUNDS; ++i) bits.add(mDrumEnabled[i] ? "1" : "0");
-        n.setProperty("bits", bits.joinIntoString(""), nullptr);
-        root.addChild(n, -1, nullptr);
-    }
+    // ── Per-track row mute/solo ──────────────────────────────────────────────
     {
         juce::ValueTree n("RowState");
         juce::StringArray mute, solo;
@@ -1428,96 +1329,6 @@ juce::ValueTree PatternManager::toValueTree() const
         pNode.setProperty("tsDen",       p.tsDen,       nullptr);
         pNode.setProperty("tsLocked",    p.tsLocked,    nullptr);
         pNode.setProperty("tsBoundUid",  p.tsBoundMarkerUid, nullptr);   // QA-G Task 6
-
-        // Legacy per-row drum step grid
-        for (int d = 0; d < MAX_DRUM_SOUNDS; ++d)
-        {
-            juce::String bits;
-            for (int s = 0; s < p.totalSteps(); ++s)
-                bits += p.drumGrid[d][s] ? "1" : "0";
-            juce::ValueTree dNode("Drum");
-            dNode.setProperty("slot", d, nullptr);
-            dNode.setProperty("grid", bits, nullptr);
-            pNode.addChild(dNode, -1, nullptr);
-        }
-
-        // Per-row drum-sound assignment (drumRowToSlot)
-        {
-            juce::StringArray vals;
-            for (int i = 0; i < MAX_DRUM_ROWS; ++i) vals.add(juce::String(p.drumRowToSlot[i]));
-            juce::ValueTree n("DrumRowToSlot");
-            n.setProperty("values", vals.joinIntoString(","), nullptr);
-            pNode.addChild(n, -1, nullptr);
-        }
-
-        // Per-page PageSequenceData - now writes basic+complex grids + full envelopes
-        auto savePageSeq = [&](const juce::String& tag, const PageSequenceData& seq)
-        {
-            juce::ValueTree seqNode(tag);
-            seqNode.setProperty("routing", (int)seq.routing,   nullptr);
-            seqNode.setProperty("bars",         seq.bars,       nullptr);
-            seqNode.setProperty("spb",          seq.stepsPerBar, nullptr);
-            seqNode.setProperty("bEnvA",        seq.basicEnv.attack,   nullptr);
-            seqNode.setProperty("bEnvH",        seq.basicEnv.hold,     nullptr);
-            seqNode.setProperty("bEnvD",        seq.basicEnv.decay,    nullptr);
-            seqNode.setProperty("bEnvS",        seq.basicEnv.sustain,  nullptr);
-            seqNode.setProperty("bEnvR",        seq.basicEnv.release_, nullptr);
-            seqNode.setProperty("cEnvA",        seq.complexEnv.attack,   nullptr);
-            seqNode.setProperty("cEnvH",        seq.complexEnv.hold,     nullptr);
-            seqNode.setProperty("cEnvD",        seq.complexEnv.decay,    nullptr);
-            seqNode.setProperty("cEnvS",        seq.complexEnv.sustain,  nullptr);
-            seqNode.setProperty("cEnvR",        seq.complexEnv.release_, nullptr);
-            seqNode.setProperty("cSwing",       seq.complexEnv.swing,    nullptr);
-            seqNode.setProperty("cTriplet",     seq.complexEnv.triplet,  nullptr);
-            // Basic + complex grids - only rows/steps that have non-default content.
-            for (int r = 0; r < MAX_DRUM_SOUNDS; ++r)
-            {
-                bool anyActive = false;
-                for (int s = 0; s < seq.totalSteps(); ++s)
-                    if (seq.basicGrid[r][s].active) { anyActive = true; break; }
-                if (! anyActive) continue;
-                juce::ValueTree rowN("BasicRow");
-                rowN.setProperty("row", r, nullptr);
-                for (int s = 0; s < seq.totalSteps(); ++s)
-                {
-                    const auto& st = seq.basicGrid[r][s];
-                    if (! st.active) continue;
-                    juce::ValueTree stN("Step");
-                    stN.setProperty("s",  s,           nullptr);
-                    stN.setProperty("v",  st.velocity, nullptr);
-                    stN.setProperty("l",  st.length,   nullptr);
-                    stN.setProperty("fx", st.fxAmount, nullptr);
-                    rowN.addChild(stN, -1, nullptr);
-                }
-                seqNode.addChild(rowN, -1, nullptr);
-            }
-            for (int r = 0; r < MAX_DRUM_SOUNDS; ++r)
-            {
-                bool any = false;
-                for (int s = 0; s < seq.totalSteps(); ++s)
-                    if (seq.complexGrid[r][s].active) { any = true; break; }
-                if (! any) continue;
-                juce::ValueTree rowN("ComplexRow");
-                rowN.setProperty("row", r, nullptr);
-                for (int s = 0; s < seq.totalSteps(); ++s)
-                {
-                    const auto& st = seq.complexGrid[r][s];
-                    if (! st.active) continue;
-                    juce::ValueTree stN("Step");
-                    stN.setProperty("s",  s,              nullptr);
-                    stN.setProperty("t",  (int)st.stepType, nullptr);
-                    stN.setProperty("v",  st.velocity,    nullptr);
-                    stN.setProperty("fx", st.fxAmount,    nullptr);
-                    stN.setProperty("n",  st.note,        nullptr);
-                    rowN.addChild(stN, -1, nullptr);
-                }
-                seqNode.addChild(rowN, -1, nullptr);
-            }
-            pNode.addChild(seqNode, -1, nullptr);
-        };
-        savePageSeq("LayerSeq", p.layerSeq);
-        savePageSeq("BassSeq",  p.bassSeq);
-        savePageSeq("DrumSeq",  p.drumSeq);
 
         // Piano-roll notes - layerRoll[0..kMaxLayerPages-1], bassRoll[0..kMaxBassPages-1], drumRoll
         juce::ValueTree rollsNode("Rolls");
@@ -1725,6 +1536,11 @@ juce::ValueTree PatternManager::toValueTree() const
 
 void PatternManager::fromValueTree(const juce::ValueTree& root)
 {
+    // Whole-body bracket: both containers are emptied and then refilled one
+    // push_back at a time, so there is no instant in here at which the audio
+    // thread could safely be walking them.  Reached from deserializeProject
+    // with the shield already up, where the guard nests for free.
+    const ScopedAudioShield shield (*this);
     mPatterns.clear();
     mArrangement.clear();
     mAudioLibrary.clear();
@@ -1763,7 +1579,10 @@ void PatternManager::fromValueTree(const juce::ValueTree& root)
             auto span = csv(mixNode.getProperty("drumSlotPan",   juce::String()).toString());
             auto aLv  = csv(mixNode.getProperty("audioRowLevel", juce::String()).toString());
             auto aMu  =     mixNode.getProperty("audioRowMute",  juce::String()).toString();
-            for (int i = 0; i < MAX_DRUM_ROWS; ++i)
+            // The per-index size test carries the pre-QA-SOUNDNESS 16-value CSV:
+            // a project saved before the second drum bank keeps its bank-1
+            // values and leaves slots 16-31 at their MixerState defaults.
+            for (int i = 0; i < kMaxDrumPages; ++i)
             {
                 if (i < slot.size()) mMixer.drumSlotLevel[i] = slot[i].getFloatValue();
                 if (i < span.size()) mMixer.drumSlotPan  [i] = span[i].getFloatValue();
@@ -1776,16 +1595,7 @@ void PatternManager::fromValueTree(const juce::ValueTree& root)
         }
     }
 
-    // ── DrumEnabled + row state ─────────────────────────────────────────────
-    {
-        auto n = root.getChildWithName("DrumEnabled");
-        if (n.isValid())
-        {
-            juce::String bits = n.getProperty("bits", juce::String()).toString();
-            for (int i = 0; i < MAX_DRUM_SOUNDS && i < bits.length(); ++i)
-                mDrumEnabled[i] = (bits[i] == '1');
-        }
-    }
+    // ── Row state ───────────────────────────────────────────────────────────
     {
         // Names + groups always reset to defaults first so a project without
         // <Row> children (or no RowState at all) never inherits prior state.
@@ -1838,83 +1648,6 @@ void PatternManager::fromValueTree(const juce::ValueTree& root)
         // F-1: missing color attribute → fall back to default (light grey).
         if (pNode.hasProperty("color"))
             p.color = juce::Colour ((juce::uint32) (int) pNode.getProperty ("color"));
-
-        for (const auto child : pNode)
-        {
-            if (child.hasType("Drum"))
-            {
-                int d = (int)child.getProperty("slot", 0);
-                juce::String bits = child.getProperty("grid", "").toString();
-                for (int s = 0; s < bits.length() && s < MAX_STEPS_TOTAL; ++s)
-                    if (d >= 0 && d < MAX_DRUM_SOUNDS) p.drumGrid[d][s] = (bits[s] == '1');
-            }
-            else if (child.hasType("DrumRowToSlot"))
-            {
-                auto vals = juce::StringArray::fromTokens(
-                    child.getProperty("values", juce::String()).toString(), ",", "");
-                for (int i = 0; i < MAX_DRUM_ROWS && i < vals.size(); ++i)
-                    p.drumRowToSlot[i] = vals[i].getIntValue();
-            }
-        }
-
-        auto loadPageSeq = [&](const juce::String& tag, PageSequenceData& seq)
-        {
-            auto seqNode = pNode.getChildWithName(tag);
-            if (!seqNode.isValid()) return;
-            seq.routing              = (SeqRouting)(int) seqNode.getProperty("routing", 0);
-            seq.bars                 = (int)             seqNode.getProperty("bars", DEFAULT_BARS);
-            seq.stepsPerBar          = (int)             seqNode.getProperty("spb",  DEFAULT_SPB);
-            seq.basicEnv.attack      = (float)(double)   seqNode.getProperty("bEnvA", 0.01);
-            seq.basicEnv.hold        = (float)(double)   seqNode.getProperty("bEnvH", 0.0);
-            seq.basicEnv.decay       = (float)(double)   seqNode.getProperty("bEnvD", 0.2);
-            seq.basicEnv.sustain     = (float)(double)   seqNode.getProperty("bEnvS", 0.7);
-            seq.basicEnv.release_    = (float)(double)   seqNode.getProperty("bEnvR", 0.3);
-            seq.complexEnv.attack    = (float)(double)   seqNode.getProperty("cEnvA", 0.01);
-            seq.complexEnv.hold      = (float)(double)   seqNode.getProperty("cEnvH", 0.0);
-            seq.complexEnv.decay     = (float)(double)   seqNode.getProperty("cEnvD", 0.2);
-            seq.complexEnv.sustain   = (float)(double)   seqNode.getProperty("cEnvS", 0.7);
-            seq.complexEnv.release_  = (float)(double)   seqNode.getProperty("cEnvR", 0.3);
-            seq.complexEnv.swing     = (float)(double)   seqNode.getProperty("cSwing",   0.0);
-            seq.complexEnv.triplet   = (bool)            seqNode.getProperty("cTriplet", false);
-            for (int i = 0; i < seqNode.getNumChildren(); ++i)
-            {
-                auto rn = seqNode.getChild(i);
-                const int r = (int) rn.getProperty("row", -1);
-                if (r < 0 || r >= MAX_DRUM_SOUNDS) continue;
-                if (rn.hasType("BasicRow"))
-                {
-                    for (int j = 0; j < rn.getNumChildren(); ++j)
-                    {
-                        auto st = rn.getChild(j);
-                        if (! st.hasType("Step")) continue;
-                        const int s = (int) st.getProperty("s", -1);
-                        if (s < 0 || s >= MAX_STEPS_TOTAL) continue;
-                        seq.basicGrid[r][s].active   = true;
-                        seq.basicGrid[r][s].velocity = (float)(double) st.getProperty("v", 0.8);
-                        seq.basicGrid[r][s].length   = (float)(double) st.getProperty("l", 1.0);
-                        seq.basicGrid[r][s].fxAmount = (float)(double) st.getProperty("fx", 1.0);
-                    }
-                }
-                else if (rn.hasType("ComplexRow"))
-                {
-                    for (int j = 0; j < rn.getNumChildren(); ++j)
-                    {
-                        auto st = rn.getChild(j);
-                        if (! st.hasType("Step")) continue;
-                        const int s = (int) st.getProperty("s", -1);
-                        if (s < 0 || s >= MAX_STEPS_TOTAL) continue;
-                        seq.complexGrid[r][s].active   = true;
-                        seq.complexGrid[r][s].stepType = (StepType)(int) st.getProperty("t", 0);
-                        seq.complexGrid[r][s].velocity = (float)(double) st.getProperty("v", 0.8);
-                        seq.complexGrid[r][s].fxAmount = (float)(double) st.getProperty("fx", 1.0);
-                        seq.complexGrid[r][s].note     = (int)           st.getProperty("n", 60);
-                    }
-                }
-            }
-        };
-        loadPageSeq("LayerSeq", p.layerSeq);
-        loadPageSeq("BassSeq",  p.bassSeq);
-        loadPageSeq("DrumSeq",  p.drumSeq);
 
         // Piano-roll notes
         auto rollsNode = pNode.getChildWithName("Rolls");

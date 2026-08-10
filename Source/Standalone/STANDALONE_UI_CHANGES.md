@@ -78,10 +78,10 @@ All toggle buttons were widened so the switch image occupies the left ~40px of t
 **File:** `SharedUI.h`
 
 ```cpp
-class SnapSlider : public juce::Slider
+class SnapSlider : public VibeSlider
 {
 public:
-    SnapSlider() : juce::Slider(juce::Slider::LinearVertical, juce::Slider::NoTextBox) {}
+    SnapSlider() : VibeSlider(juce::Slider::LinearVertical, juce::Slider::NoTextBox) {}
     double snapValue(double v, DragMode) override
     {
         return (std::abs(v) < 1.5) ? 0.0 : v;
@@ -89,7 +89,10 @@ public:
 };
 ```
 
-Kept for future use on the Mixer page faders. Do not remove.
+In use as the Mixer strip fader (`MixerTrackStrip::mFader`).  The `VibeSlider` base is
+load-bearing: VibeSlider swallows the right-click so it reaches the per-window
+`GlobalAutoRightClick` listener that raises the Automate menu.  Reverting the base to
+`juce::Slider` kills the mixer faders' Automate menu.
 
 ---
 
@@ -109,20 +112,22 @@ Three separate bars (Header 36px + Transport 36px + Ribbon 32px = 104px) collaps
 `mTransport` is added as the **first** child component so it is the background layer (lowest z-order).
 Pattern widgets and `mRibbon` are added after it, so they render on top of the transport's brushed-aluminum paint.
 ```cpp
-// In StandaloneEditor ctor — order matters:
+// In StandaloneEditor ctor -- order matters:
 addAndMakeVisible(*mTransport);    // z=background (paints brushed-aluminum for full bar)
+addAndMakeVisible(*mPosReadout);   // overlay -- added AFTER the bar or its paint hides it
 addAndMakeVisible(*mTitleLabel);   // hidden
-addAndMakeVisible(*mPatternBox);   // on top of transport
-addAndMakeVisible(*mAddPatternBtn);
-addAndMakeVisible(*mPatternNameEdit); // hidden
+addAndMakeVisible(*mPatternBtn);   // on top of transport
 addAndMakeVisible(*mRibbon);       // on top of transport
-addAndMakeVisible(*mPageMenuBar);
 ```
+
+The page menu is not an editor child: each contained window carries its own title strip.
 
 ### GlobalTransportBar changes
 - `PlayModeCombo` (juce::ComboBox for Song/Pattern) **removed** — redundant with the `SONG` toggle button.
-- Public constant `kControlsWidth = 406` added — the pixel x-position where transport controls end.
-  `StandaloneEditor::resized()` uses this to start the pattern selector.
+- Public constant `kControlsWidth` added -- the pixel x-position where transport controls end;
+  `StandaloneEditor::resized()` uses it to start the pattern button.  Its value tracks whatever
+  the transport section currently holds, so read it from `GlobalTransportBar.h` rather than
+  copying the number here.
 - CPU/RAM label (`mPerfLabel`) stays inside GlobalTransportBar at the far right of its bounds,
   which span the full bar width → CPU shows at the true window right edge.
 
@@ -138,8 +143,7 @@ auto bar = b.removeFromTop(kBarH);
 mTransport->setBounds(bar);   // full width background layer
 
 int py = bar.getY() + (kBarH - 28) / 2;
-mPatternBox   ->setBounds(bar.getX() + kPatStart,                 py, kPatBoxW, 28);
-mAddPatternBtn->setBounds(bar.getX() + kPatStart + kPatBoxW + 4,  py, kAddBtnW, 28);
+mPatternBtn->setBounds(bar.getX() + kPatStart, py, kPatBtnW, 28);
 
 int ribX = kPatStart + kPatBoxW + 4 + kAddBtnW + 8;
 int ribW = bar.getWidth() - ribX - kCPUReserve;
@@ -153,15 +157,12 @@ The parent `GlobalTransportBar`'s brushed-aluminum fills the whole bar including
 Tab paths themselves still draw their colored fills on that background.
 
 ### Hidden elements
-- `mTitleLabel` — `setVisible(false)`. Title now lives in the OS window title bar ("VibeDAW").
+- `mTitleLabel` -- `setVisible(false)`. Title now lives in the OS window title bar
+  ("BaySickDAW"; Debug builds append " [DEBUG]").
 - `mPatternNameEdit` — `setVisible(false)`. Rename will move into the Pattern▾ dropdown (pending).
 
 ### Window title
-`VibeSynthWindow` ctor now passes `"VibeDAW"` instead of `" "` to `DocumentWindow`.
-
-### Record button placeholder
-A Record button will be added to GlobalTransportBar between ■ (Stop) and BPM when recording
-is implemented. Space is available in the transport section (after the gap following Stop).
+`VibeSynthWindow` ctor now passes `"BaySickDAW"` instead of `" "` to `DocumentWindow`.
 
 ---
 
@@ -179,24 +180,6 @@ is implemented. Space is available in the transport section (after the gap follo
 ## 6. Tab Dropdown Arrows + Badges
 
 **Files:** `RibbonTabBar.h`, `RibbonTabBar.cpp`, `StandaloneEditor.h`, `StandaloneEditor.cpp`
-
-### What changed
-RibbonTabBar completely rewritten. Now shows exactly 6 permanent slots (no + button, no close X, no overflow):
-
-| Slot     | Dropdown? | Badge  | Dropdown contents                                    |
-|----------|-----------|--------|------------------------------------------------------|
-| Mixer    | No        | None   | —                                                    |
-| Effects  | Yes       | ② static  | Rack / EQ                                         |
-| Builder  | Yes       | ③ static  | Patterns / Audio Clips / Automation               |
-| Layers   | Yes       | dynamic   | Instance list + Rename + Delete + Add New Layers  |
-| Bass     | Yes       | dynamic   | Instance list + Rename + Delete + Add New Bass    |
-| Drums    | Yes       | ② static  | Sounds / EQ                                       |
-
-### How the 6-slot display works
-- `slotType(int slotIndex)` maps index 0..5 → TabType in fixed order
-- `slotRect(int slotIndex)` divides the ribbon width equally among 6 slots
-- `isSlotSelected(int slotIndex)` checks if the currently selected tab's type matches the slot type
-- `getSlotDisplayName(int slotIndex)` returns the active instance name for that type
 
 ### Hit testing
 - Click body → navigates to the active tab of that type (`getActiveTabForType`)
@@ -233,24 +216,10 @@ onTabRenamed(int tabId, const juce::String& name) // rename confirmed
 ### StandaloneEditor changes
 - `mHasDrumsTab` removed (Drums is permanent)
 - `onAddTabRequest()` now only accepts Layers/Bass types
-- `onSubPageSelected()` added — currently a stub (TODO: wire to page sub-tab switching)
+- `onSubPageSelected()` added -- routes Effects (Rack / Pre EQ / Post EQ) and Builder
+  (browser tab) picks only; every other type's dropdown lists that instance's WINDOWS
+  instead, via `StandaloneEditor::buildPageWindowRows`.
 - Menu "New Drums Tab" permanently disabled
-
----
-
-## Pending UI Tasks (not yet implemented)
-
-### Sub-page switching wiring
-`onSubPageSelected(type, subPageIndex)` is called when user picks from Effects/Builder/Drums dropdown.
-Need to wire it to internal tab-switching methods on EffectsPage, BuilderPage, and DrumsPage.
-
-### Pattern Dropdown (full implementation)
-`[Pattern▾]` should open a popup menu showing:
-- All patterns (to switch between them)
-- Rename current pattern (inline or dialog)
-- Delete current pattern
-Currently `mPatternBox` is a plain ComboBox. Needs replacing with a TextButton + PopupMenu.
-`mPatternNameEdit` is hidden until this is implemented.
 
 ---
 

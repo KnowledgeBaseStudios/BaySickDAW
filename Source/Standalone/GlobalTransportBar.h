@@ -119,12 +119,12 @@ public:
 
     // R5c (2026-04-24): record mode selector - ASIO (audio) or MIDI (into the
     // active piano-roll tab).  Dropdown chevron on the Record button opens the
-    // picker; setter writes back to GlobalTransportBar's internal state + fires
-    // onRecordModeChanged.
+    // picker; setter writes back to GlobalTransportBar's internal state and
+    // retags the Record button tooltip.  No change notification: StandaloneEditor
+    // polls getRecordMode() at record-start (onPlay) rather than subscribing.
     enum class RecordMode { Audio, Midi };
     RecordMode getRecordMode() const noexcept { return mRecordMode; }
     void       setRecordMode(RecordMode m);
-    std::function<void(RecordMode)> onRecordModeChanged;
 
     // QA-Ea Task 0c (FL pre-roll record) + QA-Ee Stage 4: global record-quantize
     // division.  Surfaced as a "Global Record-Quantize" submenu in the Record-

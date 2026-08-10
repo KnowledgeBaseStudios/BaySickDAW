@@ -16,11 +16,14 @@
 // PluginProcessor.h cannot include StandaloneApp.h (it is included BY it).
 //
 // THREADING: single writer = the message thread (StandalonePlayHead's rebuild
-// paths).  Readers = audio thread (per block) + message thread (UI cursor).
-// Publication is the same two-fence SEQLOCK protocol the QA-Ed anchor used:
-// writer bumps gSeq odd, stores payload relaxed, bumps even; readers retry on
-// odd/changed seq.  Fixed-capacity atomic arrays - no allocation, no locks,
-// no shared_ptr refcount contention on the audio thread.
+// paths).  Readers = audio thread (per block) + render workers + message
+// thread (UI cursor).  Publication is the same two-fence SEQLOCK protocol the
+// QA-Ed anchor used: writer bumps gSeq odd, stores payload relaxed, bumps
+// even.  Readers retry a BOUNDED number of times (detail::kMaxSeqRetries) and
+// then bail to a per-thread last-good value - an unbounded seqlock spin lets
+// the audio thread wait on a descheduled normal-priority writer for a whole
+// scheduler quantum, which is a dropout.  Fixed-capacity atomic arrays - no
+// allocation, no locks, no shared_ptr refcount contention on the audio thread.
 //
 // gCount == 0 means "no timeline published" (e.g. the legacy VST target where
 // the host owns tempo) - every consumer falls back to its pre-map linear math.
@@ -60,14 +63,42 @@ namespace TempoMap
 
     namespace detail
     {
+        // The writer's odd window is a handful of relaxed stores (tens of ns).
+        // A reader that loses this many attempts is therefore contending with a
+        // PREEMPTED writer, not a busy one, and no amount of further spinning
+        // helps - it just burns the audio thread's buffer deadline.  Four is
+        // far above the uncontended cost and still bails inside a few hundred
+        // nanoseconds.  Matches the SpectrumFeed contract: give up on a torn
+        // read rather than retry forever.
+        inline constexpr int kMaxSeqRetries = 4;
+
+        struct SegCache { int64_t sample; double beat; double bpm; double sr; };
+
+        // THREAD SAFETY: one cache PER READER THREAD, so the fallback tuple can
+        // never be torn by a concurrent reader - each thread only ever writes
+        // its own.  Constant-initialized POD, so it lives in the static TLS
+        // block the OS allocates at thread creation: no allocation, no lazy-init
+        // guard call, no lock on the audio path.  Seed = origin at the default
+        // 120 BPM / 44.1 kHz (PatternManager::mGlobalTempo's default), which
+        // only shows if a thread's very FIRST read exhausts its retries.
+        inline thread_local SegCache gLastGoodSeg { 0, 0.0, 120.0, 44100.0 };
+
         // One consistent read of segment fields under the seqlock.  `search`
         // receives n and returns the segment index to read.
+        //
+        // THREAD SAFETY: both loop exits are bounded - an odd sequence and a
+        // changed sequence each consume one attempt.  On exhaustion the caller
+        // gets this thread's last CONSISTENT segment tuple, never a torn one:
+        // musically that is one block of map math against the pre-edit tempo
+        // segment, which stays inside the map formula (it does NOT fall through
+        // to the pre-map linear branch, so the QA-Ed integer-exact loop-seam
+        // math is preserved).
         template <typename SearchFn>
         inline void readSeg (SearchFn&& search,
                              int64_t& outSample, double& outBeat,
                              double& outBpm, double& outSr) noexcept
         {
-            for (;;)
+            for (int attempt = 0; attempt < kMaxSeqRetries; ++attempt)
             {
                 const uint32_t s1 = gSeq.load (std::memory_order_acquire);
                 if ((s1 & 1u) != 0u) continue;
@@ -78,8 +109,16 @@ namespace TempoMap
                 outBpm    = gSegBpm   [i].load (std::memory_order_relaxed);
                 outSr     = gSampleRate.load  (std::memory_order_relaxed);
                 std::atomic_thread_fence (std::memory_order_acquire);
-                if (gSeq.load (std::memory_order_relaxed) == s1) return;
+                if (gSeq.load (std::memory_order_relaxed) == s1)
+                {
+                    gLastGoodSeg = { outSample, outBeat, outBpm, outSr };
+                    return;
+                }
             }
+            outSample = gLastGoodSeg.sample;
+            outBeat   = gLastGoodSeg.beat;
+            outBpm    = gLastGoodSeg.bpm;
+            outSr     = gLastGoodSeg.sr;
         }
     }
 
@@ -139,9 +178,16 @@ namespace TempoMap
     // First segment boundary strictly after `sample`, or -1 when the current
     // segment runs to the end.  Lets block-loop consumers (metronome) split a
     // block into constant-tempo spans instead of per-sample map lookups.
+    //
+    // THREAD SAFETY: bounded on both seqlock exits like detail::readSeg, but it
+    // must NOT fall back to a cached boundary - callers walk a cursor forward
+    // onto the returned value (PluginProcessor.cpp span splits), so a stale
+    // boundary at or behind `sample` would spin them forever.  On exhaustion it
+    // returns the already-defined -1: the block is treated as one constant-
+    // tempo span, which every caller handles.
     inline int64_t nextBoundaryAfter (int64_t sample) noexcept
     {
-        for (;;)
+        for (int attempt = 0; attempt < detail::kMaxSeqRetries; ++attempt)
         {
             const uint32_t s1 = gSeq.load (std::memory_order_acquire);
             if ((s1 & 1u) != 0u) continue;
@@ -155,5 +201,6 @@ namespace TempoMap
             std::atomic_thread_fence (std::memory_order_acquire);
             if (gSeq.load (std::memory_order_relaxed) == s1) return next;
         }
+        return -1;
     }
 }

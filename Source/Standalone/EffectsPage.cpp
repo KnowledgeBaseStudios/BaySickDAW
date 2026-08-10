@@ -2,6 +2,7 @@
 #include "EffectEditorPanels.h"
 #include "FxRackPresetIO.h"
 #include "../PluginProcessor.h"
+#include "../MissingFileReport.h"
 #include "../DSP/EffectParamMap.h"   // QA-ProjectSave Task 7 step 3
 #include "../Hosting/HostedPluginEffect.h"   // QA-ModelShell TS6: hosted plugin lanes
 
@@ -165,6 +166,13 @@ EffectsPage::EffectsPage(TrackSelectionManager& tsm, VibeSynthProcessor& process
 {
     mTSM.addChangeListener(this);
 
+    // The added-plugin list is the "user put the missing plugin back" signal --
+    // see retryDeadPluginSlot.  Registered from this page because it is one of
+    // the four system tabs, built with the editor and alive for the app's life,
+    // so the sweep cannot go unheard while a rack still holds a dead slot.
+    if (auto* pm = Hosting::PluginManager::getInstance())
+        pm->addChangeListener (this);
+
     // ── Top bar ───────────────────────────────────────────────────────────────
     mTrackLabel = std::make_unique<juce::Label>();
     mTrackLabel->setText("Channel:", juce::dontSendNotification);
@@ -264,13 +272,15 @@ void EffectsPage::parentHierarchyChanged()
 EffectsPage::~EffectsPage()
 {
     stopTimer();
-    // Defensive: visibilityChanged already removes the listener when the page
     // 2026-04-26 (B-5): no more per-page KeyListener on the top-level - undo
-    // / redo route through the global BSCommands manager.
+    // / redo route through the global BSCommands manager, so there is no key
+    // listener to detach here.
     if (mBypassParamId.isNotEmpty())
         mProcessor.apvts.removeParameterListener(mBypassParamId, this);
     mProcessor.mVibeGraph.onInstrChannelListChanged = nullptr;   // clear before destruction
     mTSM.removeChangeListener(this);
+    if (auto* pm = Hosting::PluginManager::getInstance())
+        pm->removeChangeListener (this);
     mTrackBox->setLookAndFeel(nullptr);
     // MixerLedButton doesn't use LAF, nothing to clean up here
     if (mPreEqBtn)  mPreEqBtn ->setLookAndFeel(nullptr);
@@ -311,8 +321,8 @@ void EffectsPage::rebuildChannelDropdown()
         };
 
         auto channelToMixerId = [](int dropdownId) -> int {
-            // Bus IDs in the dropdown match MixerChannelIds 1-12 directly.
-            if (dropdownId >= 1 && dropdownId <= 13) return dropdownId;   // TS6: +Plugins Bus
+            // Bus IDs in the dropdown match MixerChannelIds 1-18 directly.
+            if (dropdownId >= 1 && dropdownId <= kDrumsBus2) return dropdownId;
             if (dropdownId >= 100 && dropdownId < 200) return kDrumBase + (dropdownId - 100);
             if (dropdownId >= 200 && dropdownId < 216) return kLayerBase + (dropdownId - 200);
             if (dropdownId >= 300 && dropdownId < 316) return kBassBase  + (dropdownId - 300);
@@ -326,16 +336,17 @@ void EffectsPage::rebuildChannelDropdown()
         };
 
         // Separate buses from inserts - buses are group anchors, inserts go in buckets.
-        // J-6 (2026-05-03): bus id range expanded 1-6 → 1-12 to include
-        // VoxBus/InstBus/VoxBus2/InstBus2/InstBus3/RustyDrumsBus.
+        // The upper bound is the highest bus channel id; anything a bus id is
+        // not gets bucketed as an insert, so a bus left out here silently loses
+        // its own group anchor and shows up under DIRECT ROUTING instead.
         std::vector<Item> busItems;
         std::vector<Item> insertItems;
         for (auto& [id, name] : channels)
         {
             juce::String prefix = mixerPrefixForChannelId(id);
             Item it { id, name, prefix };
-            if (id >= 1 && id <= 13) busItems.push_back(it);
-            else                      insertItems.push_back(it);
+            if (id >= 1 && id <= kDrumsBus2) busItems.push_back(it);
+            else                             insertItems.push_back(it);
         }
 
         for (auto& it : insertItems)
@@ -418,6 +429,7 @@ void EffectsPage::rebuildChannelDropdown()
 
         // ── Drums Bus ─────────────────────────────────────────────────────
         addBusAndMembers(3, kDrumsBus, "DRUMS BUS", VC::DrumsCol);
+        addBusAndMembers(18, kDrumsBus2, "DRUMS BUS 2", VC::DrumsCol);   // QA-SOUNDNESS
 
         // J-6 (2026-05-03): EQ unification + missing bus groups.
         // ── RustyDrums Bus (J-5) ─────────────────────────────────────────
@@ -488,7 +500,7 @@ void EffectsPage::resolveChannelDsp (VibeGraph& vg, int id,
 {
     rack = nullptr;
     eq   = nullptr;
-    // IDs 1-5: fixed bus channels
+    // IDs 1-18: fixed bus channels (dropdown ids match MixerChannelIds)
     switch (id)
     {
     case 1:  rack = vg.getLayersBusRack();      eq = vg.getLayersBusEQ();     break;
@@ -508,6 +520,7 @@ void EffectsPage::resolveChannelDsp (VibeGraph& vg, int id,
     case 15: rack = vg.getBassBus2Rack();       eq = vg.getBassBus2EQ();      break;
     case 16: rack = vg.getClipsBus2Rack();      eq = vg.getClipsBus2EQ();     break;
     case 17: rack = vg.getPluginsBus2Rack();    eq = vg.getPluginsBus2EQ();   break;
+    case 18: rack = vg.getDrumsBus2Rack();      eq = vg.getDrumsBus2EQ();     break;   // QA-SOUNDNESS
     default:
         if (id >= 200 && id < 200 + kMaxLayerPages)
         {
@@ -799,6 +812,32 @@ EffectRack* EffectsPage::rackForChannelId (VibeGraph& vg, int id)
     return rack;
 }
 
+// The dropdown's channel-id vocabulary (the ids lane paramIds embed): 1-18
+// buses, 100+ drums, 200+ layers, 300+ basses, 400+ audio inserts, 600+ aux,
+// 700+ vox, 800+ inst, 900+ rusty, 1000+ plugin.  ONE copy of it -- two sweeps
+// spelling the ranges out separately would silently miss a channel class the
+// day one of them gained a strip type.
+static void forEachChannelWithRack (VibeGraph& vg,
+                                    const std::function<void(int, EffectRack&)>& fn)
+{
+    auto visit = [&vg, &fn] (int chId)
+    {
+        if (auto* rack = EffectsPage::rackForChannelId (vg, chId))
+            fn (chId, *rack);
+    };
+
+    for (int id = 1; id <= MixerChannelIds::kDrumsBus2; ++id)            visit (id);
+    for (int i = 0; i < kMaxDrumPages; ++i)                              visit (100 + i);
+    for (int i = 0; i < kMaxLayerPages; ++i)                             visit (200 + i);
+    for (int i = 0; i < kMaxBassPages; ++i)                              visit (300 + i);
+    for (int i = 0; i < MixerState::kMaxAudioRows; ++i)                  visit (400 + i);
+    for (int i = 0; i < (int) MixerChannelIds::kMaxAuxStrips; ++i)       visit (600 + i);
+    for (int i = 0; i < (int) MixerChannelIds::kMaxVoxStrips; ++i)       visit (700 + i);
+    for (int i = 0; i < (int) MixerChannelIds::kMaxInstStrips; ++i)      visit (800 + i);
+    for (int i = 0; i < (int) MixerChannelIds::kMaxRustyStrips; ++i)     visit (900 + i);
+    for (int i = 0; i < (int) MixerChannelIds::kMaxPluginStrips; ++i)    visit (1000 + i);
+}
+
 // QA-ModelShell TS1 (wire-at-load): rack automation used to be registered
 // only when the Effects page built a slot editor, so lanes went silent until
 // the page was VISITED after every project boundary.  This sweep runs after
@@ -808,32 +847,128 @@ EffectRack* EffectsPage::rackForChannelId (VibeGraph& vg, int id)
 // by key, so the two paths cannot disagree.
 void EffectsPage::registerRackAutomationForAllChannels (VibeSynthProcessor& proc)
 {
-    auto& vg = proc.mVibeGraph;
-
-    auto sweepChannel = [&vg, &proc] (int chId)
+    forEachChannelWithRack (proc.mVibeGraph, [&proc] (int chId, EffectRack& rack)
     {
-        auto* rack = rackForChannelId (vg, chId);
-        if (rack == nullptr) return;
         for (int s = 0; s < EffectRack::kNumSlots; ++s)
         {
-            if (rack->getSlotType (s) == EffectType::None) continue;
-            registerSlotAutomationFor (proc, chId, channelPrefixForId (chId), *rack, s);
+            if (rack.getSlotType (s) == EffectType::None) continue;
+            registerSlotAutomationFor (proc, chId, channelPrefixForId (chId), rack, s);
         }
-    };
+    });
+}
 
-    // The dropdown's channel-id vocabulary (the ids lane paramIds embed):
-    // 1-12 buses, 100+ drums, 200+ layers, 300+ basses, 400+ audio inserts,
-    // 600+ aux, 700+ vox, 800+ inst, 900+ rusty.
-    for (int id = 1; id <= 13; ++id)                                     sweepChannel (id);
-    for (int i = 0; i < kMaxDrumPages; ++i)                              sweepChannel (100 + i);
-    for (int i = 0; i < kMaxLayerPages; ++i)                             sweepChannel (200 + i);
-    for (int i = 0; i < kMaxBassPages; ++i)                              sweepChannel (300 + i);
-    for (int i = 0; i < MixerState::kMaxAudioRows; ++i)                  sweepChannel (400 + i);
-    for (int i = 0; i < (int) MixerChannelIds::kMaxAuxStrips; ++i)       sweepChannel (600 + i);
-    for (int i = 0; i < (int) MixerChannelIds::kMaxVoxStrips; ++i)       sweepChannel (700 + i);
-    for (int i = 0; i < (int) MixerChannelIds::kMaxInstStrips; ++i)      sweepChannel (800 + i);
-    for (int i = 0; i < (int) MixerChannelIds::kMaxRustyStrips; ++i)     sweepChannel (900 + i);
-    for (int i = 0; i < (int) MixerChannelIds::kMaxPluginStrips; ++i)    sweepChannel (1000 + i);
+bool EffectsPage::retryDeadPluginSlot (VibeSynthProcessor& proc, int chId,
+                                       EffectRack& rack, int slotIndex)
+{
+    if (slotIndex < 0 || slotIndex >= EffectRack::kNumSlots)          return false;
+    if (rack.getSlotType (slotIndex) != EffectType::VST3Plugin)       return false;
+
+    auto* hosted = dynamic_cast<Hosting::HostedPluginEffect*> (rack.getSlotEffect (slotIndex));
+    if (hosted == nullptr) return false;
+
+    auto* dead = hosted->getHosted();
+
+    // The two dead halves are split rather than merged into one early return,
+    // because they fail for opposite reasons and only one of them is a decline
+    // this code could ever stop making (header carries the full table).  No
+    // instance means the restore blob named no plugin, so the slot's identity is
+    // gone from the project itself and there is nothing to ask for -- tearing it
+    // down for a rebuild would cost the settle and the dirty fire and still land
+    // on an empty slot.  An instance that is not alive is the recoverable half.
+    if (dead == nullptr) return false;
+    if (dead->isAlive()) return false;
+
+    // Copied out BEFORE the rebuild.  The slot carries the whole description
+    // rather than an added-list reference, which is what makes this recoverable
+    // at all -- an identifier lookup would depend on the very list the user may
+    // still not have the plugin on.
+    const juce::PluginDescription desc = dead->getDescription();
+
+    // PROBE BEFORE COMMITTING -- everything below is expensive and unconditional
+    // once started: an audio-thread rendezvous (settleAudioThread), a full
+    // instance teardown and rebuild, an automation re-registration and a
+    // project-dirty fire, all paid PER DEAD SLOT on every added-list change.
+    // None of it can succeed while the binary the description names is not on
+    // disk: both load routes resolve fileOrIdentifier as a path (in-process
+    // through the VST3 format, bridged through the helper), so a missing one
+    // fails either way and the slot stays "(missing)" exactly as it was.  The
+    // absolute-path test comes first because juce::File asserts on a relative
+    // one, and a description with no path at all is left to the load to reject.
+    if (juce::File::isAbsolutePath (desc.fileOrIdentifier)
+        && ! juce::File (desc.fileOrIdentifier).exists())
+        return false;
+
+    // The dead instance answers with the bytes it was last restored with, so the
+    // user's settings survive the round trip (see HostedPluginInstance's
+    // last-known-state member).
+    juce::MemoryBlock state;
+    hosted->getStateInformation (state);
+
+    // THREAD SAFETY -- the publication and the state push must be ONE step from
+    // the audio thread's point of view, and the shield is what makes them one.
+    // loadEffect parks the new DSP in `pending` and the very next block promotes
+    // it into `active` and renders through it, so a push made after that lands on
+    // the object the audio thread is inside -- and that push is not merely a
+    // parameter write: HostedPluginInstance::setStateInformation hands the blob to
+    // mInner->setStateInformation, which almost no VST3 tolerates concurrently
+    // with its own processBlock, and re-instantiates (freeing the inner plugin
+    // outright) whenever the blob's bridge mode differs from the mode the fresh
+    // instance came up in -- which it does exactly when the user saved this slot
+    // with "Run bridged" on.  Shield raised so processBlock bails to silence,
+    // settle so the block already past that check has returned, THEN publish: no
+    // promotion can happen until the shield drops, by which point the DSP is fully
+    // configured.  Nest-aware save/restore, the same idiom
+    // EngineRig::teardownEngine uses and correct for the same reason (the shield
+    // is only ever raised from the message thread).
+    //
+    // It also keeps a user-bridged plugin from ever RENDERING inside the host: the
+    // rebuilt instance always comes up unbridged, because mBridgePreferred is
+    // per-instance and the fresh one has not been told yet, so without the shield
+    // it would process in-process for a block or two before the state flipped it
+    // into the sandbox.  What the shield does NOT buy is keeping the module out of
+    // the process -- loadEffect instantiates before any blob is read, so a 64-bit
+    // plugin the user bridged for stability is still LOADED here and a crash in
+    // its own load path still lands in this process.  Closing that needs the
+    // preference to reach the build, which loadEffect has no channel for.  A
+    // 32-bit plugin is unaffected either way: isBridgeForced makes instantiate
+    // refuse the in-process fallback outright.
+    //
+    // Deliberately NOT hoisted into retryDeadPluginSlots: every early return above
+    // runs first, so the mute is paid only for a slot that really has a dead
+    // plugin to revive.
+    const bool shieldWasUp = proc.isProjectLoadInProgress();
+    proc.setProjectLoadInProgress (true);
+    if (! shieldWasUp)
+        proc.settleAudioThread();
+
+    // Same uuid, so automation lanes and any open window on this slot keep
+    // resolving.
+    rack.loadEffect (slotIndex, EffectType::VST3Plugin,
+                     rack.getSlotUuid (slotIndex), &desc);
+
+    if (auto* revived = rack.getSlotEffect (slotIndex))
+        if (state.getSize() > 0)
+            revived->setStateInformation (state.getData(), (int) state.getSize());
+
+    proc.setProjectLoadInProgress (shieldWasUp);
+
+    // A new instance means a new parameter list and a new bridged-list-arrival
+    // hook, both of which the registration owns.
+    registerSlotAutomationFor (proc, chId, channelPrefixForId (chId), rack, slotIndex);
+    proc.setLatencySamples (proc.mVibeGraph.updateBusLatencies());
+
+    auto* now = dynamic_cast<Hosting::HostedPluginEffect*> (rack.getSlotEffect (slotIndex));
+    auto* inst = now != nullptr ? now->getHosted() : nullptr;
+    return inst != nullptr && inst->isAlive();
+}
+
+void EffectsPage::retryDeadPluginSlots (VibeSynthProcessor& proc)
+{
+    forEachChannelWithRack (proc.mVibeGraph, [&proc] (int chId, EffectRack& rack)
+    {
+        for (int s = 0; s < EffectRack::kNumSlots; ++s)
+            retryDeadPluginSlot (proc, chId, rack, s);
+    });
 }
 
 // QA-ModelShell TS5: the pre-rack EQ resolver, lifted verbatim out of
@@ -861,13 +996,14 @@ EQ8MsDSP* EffectsPage::preEqForChannelId (VibeGraph& vg, int id)
         case 15: return vg.getBassBus2PreEQ();
         case 16: return vg.getClipsBus2PreEQ();
         case 17: return vg.getPluginsBus2PreEQ();
+        case 18: return vg.getDrumsBus2PreEQ();     // QA-SOUNDNESS
         default: break;
     }
     if      (id >= 100 && id < 200)                                              return vg.getInsertPreEQ(VibeGraph::InsertKind::Drum,  id - 100);
     else if (id >= 200 && id < 200 + kMaxLayerPages)                             return vg.getInsertPreEQ(VibeGraph::InsertKind::Layer, id - 200);
     else if (id >= 300 && id < 300 + kMaxBassPages)                              return vg.getInsertPreEQ(VibeGraph::InsertKind::Bass,  id - 300);
     else if (id >= 400 && id < 500)                                              return vg.getInsertPreEQ(VibeGraph::InsertKind::Audio, id - 400);
-    else if (id >= 600 && id < 616)                                              return vg.getInsertPreEQ(VibeGraph::InsertKind::Aux,   id - 600);
+    else if (id >= 600 && id < 600 + (int) MixerChannelIds::kMaxAuxStrips)       return vg.getInsertPreEQ(VibeGraph::InsertKind::Aux,   id - 600);
     else if (id >= 700 && id < 700 + (int) MixerChannelIds::kMaxVoxStrips)       return vg.getInsertPreEQ(VibeGraph::InsertKind::Vox,   id - 700);
     else if (id >= 800 && id < 800 + (int) MixerChannelIds::kMaxInstStrips)      return vg.getInsertPreEQ(VibeGraph::InsertKind::Inst,  id - 800);
     else if (id >= 900 && id < 900 + (int) MixerChannelIds::kMaxRustyStrips)     return vg.getInsertPreEQ(VibeGraph::InsertKind::Rusty, id - 900);
@@ -928,8 +1064,10 @@ void EffectsPage::onChannelChanged()
 }
 
 // 5F-4a: APVTS param listener - mirrors _bypass to rack.setRackBypassed().
-// Can be called on any thread (APVTS may fire from audio thread); EffectRack's
-// setRackBypassed is a plain bool store so this is safe.
+// Can be called on any thread (APVTS may fire from the audio thread), and the
+// audio thread is a second writer of the same flag via VibeGraph's per-block
+// re-sync -- so EffectRack::mRackBypassed is a relaxed std::atomic<bool>, not
+// a plain bool.
 void EffectsPage::parameterChanged(const juce::String& paramId, float newValue)
 {
     if (paramId == mBypassParamId && mRack)
@@ -1004,6 +1142,10 @@ static EffectRackAction::SlotSnapshots captureSlotSnapshots(EffectRack* rack)
         s.bypassed     = rack->isSlotBypassed(i);
         s.outputGainDb = rack->getSlotOutputGain(i);
         s.uuid         = rack->getSlotUuid(i);
+        // Captured for empty slots too: the pick/mode live on the Slot, not on
+        // the effect, and survive a clearSlot.
+        s.scPick       = rack->getSlotSidechainPick(i);
+        s.basicMode    = rack->getSlotBasicMode(i);
         // Serialize DSP knob state into the snapshot.
         if (auto* eff = rack->getSlotEffect(i))
             eff->getStateInformation (s.dspState);
@@ -1012,17 +1154,51 @@ static EffectRackAction::SlotSnapshots captureSlotSnapshots(EffectRack* rack)
 }
 
 // Apply a target slot-snapshot.  Slots whose type+UUID match the current
-// state are diff-applied (only bypass / output-gain / DSP-state restored -
-// the existing effect instance is preserved).  Slots whose type or UUID
-// differ get their effect reloaded with the snapshot's UUID so automation
-// lanes survive.  Writes a parallel `outChanged` array indicating which
+// state are diff-applied (only bypass / output-gain / DSP-state / sidechain
+// pick / Basic-mode restored - the existing effect instance is preserved).
+// Slots whose type or UUID differ get their effect reloaded with the
+// snapshot's UUID so automation lanes survive.  Writes a parallel `outChanged` array indicating which
 // slots had their effect instance replaced (so callers can rebuild only the
 // affected editor panels - preserves slider SafePointers on untouched ones).
-static void applySlotSnapshots(EffectRack* rack,
+//
+// THREAD SAFETY: shielded, and the shield is load-bearing rather than
+// defensive.  loadEffect publishes the new DSP into the slot's `pending` with
+// swapPending set, and the audio thread promotes and renders it within one
+// block - so the setStateInformation below runs against an object audio is
+// already inside.  For a VST3 slot that is worse than a data race: no
+// PluginDescription is passed here, so the slot is published with mHosted
+// null and HostedPluginEffect::setStateInformation then constructs (or on a
+// re-apply destroys) the instance through setPlugin, while
+// HostedPluginEffect::process reads mHosted as a plain unguarded unique_ptr.
+// Reachable by undo/redo of a rack VST3 load during playback.  Bracketing the
+// whole loop rather than each slot also makes a multi-slot restore atomic
+// with respect to the audio thread, which is what undo of a Move Effect wants.
+static void applySlotSnapshots(VibeSynthProcessor& proc,
+                               EffectRack* rack,
                                const EffectRackAction::SlotSnapshots& target,
                                std::array<bool, EffectRack::kNumSlots>& outChanged)
 {
+    // Filled before every bail: the callers read this array unconditionally and
+    // it reaches them default-initialized.
     outChanged.fill(false);
+
+    // A rack lives inside an InsertNode and dies with its tab, so a channel that
+    // no longer resolves is the ordinary outcome of undoing past a tab delete --
+    // not an invariant break to assert on.
+    if (rack == nullptr)
+        return;
+
+    // A restored slot that references an external file (a user IR, a VST3 whose
+    // DLL is gone) records a miss rather than failing loudly, and undo is a user
+    // gesture that owns its own report.  ONE drain for the whole loop, and it
+    // outlives the shield restore below because it is declared above it.
+    MissingFileReport::ScopedGesture gesture ("undo");
+
+    const bool shieldWasUp = proc.isProjectLoadInProgress();
+    proc.setProjectLoadInProgress (true);
+    if (! shieldWasUp)
+        proc.settleAudioThread();
+
     for (int i = 0; i < EffectRack::kNumSlots; ++i)
     {
         const auto& tgt        = target[(size_t) i];
@@ -1051,7 +1227,55 @@ static void applySlotSnapshots(EffectRack* rack,
             rack->setSlotBypassed   (i, tgt.bypassed);
             rack->setSlotOutputGain (i, tgt.outputGainDb);
         }
+
+        // Outside the type guard: the rack reads scPick every audio block and
+        // SlotComponent reads basicMode when it (re)builds the panel, so both
+        // must be restored even on a now-empty slot or the next effect loaded
+        // there inherits the pick the undo was meant to erase.
+        rack->setSlotSidechainPick (i, tgt.scPick);
+        rack->setSlotBasicMode     (i, tgt.basicMode);
     }
+
+    proc.setProjectLoadInProgress (shieldWasUp);
+}
+
+// The apply body all three rack transactions share, bound to the channel the
+// action was RECORDED against.
+//
+// Binding is the whole point: an EffectRackAction carries slot snapshots and no
+// channel identity, while the page's own mRack follows the dropdown -- and moves
+// on a plain channel pick, on a mixer FX-button jump, and on any dropdown
+// rebuild whose previous selection went away (which falls back to Master).  An
+// apply that read mRack therefore wrote one channel's undo into whichever rack
+// happened to be showing, replacing that channel's live chain with a foreign
+// snapshot.  Resolving by captured id is the same lazy-resolve-by-key rule the
+// slot automation applicators already follow, and for the same reason: the rack
+// pointer cannot be held across the wait.
+EffectRackAction::ApplyFn EffectsPage::makeRackApply (int chId)
+{
+    // `this` is safe to capture -- the Effects page is a permanent system tab and
+    // outlives every transaction.  The RACK is not.
+    return [this, chId] (const EffectRackAction::SlotSnapshots& t)
+    {
+        auto* rack = rackForChannelId (mProcessor.mVibeGraph, chId);
+        if (rack == nullptr) return;
+
+        std::array<bool, EffectRack::kNumSlots> changed;
+        applySlotSnapshots (mProcessor, rack, t, changed);
+
+        // Re-register only the slots whose DSP was actually replaced.  The first
+        // perform() is skipped by EffectRackAction, so this runs on undo/redo
+        // only.  Keyed to the captured channel, not the page's selection, for
+        // the same reason the rack is.
+        for (int i = 0; i < EffectRack::kNumSlots; ++i)
+            if (changed[i])
+                registerSlotAutomationFor (mProcessor, chId,
+                                           channelPrefixForId (chId), *rack, i);
+
+        refreshAllRows();
+        if (onRackContentsChanged) onRackContentsChanged (chId);
+        mProcessor.setLatencySamples (mProcessor.mVibeGraph.updateBusLatencies());
+    };
 }
 
 void EffectsPage::onPluginChosen(int slotIndex, const juce::PluginDescription& desc)
@@ -1068,18 +1292,8 @@ void EffectsPage::onEffectChosen(int slotIndex, EffectType type,
     auto after = captureSlotSnapshots(mRack);
     if (mUndoCtx.isValid())
         mUndoCtx.perform(new EffectRackAction("Load Effect", before, after,
-            [this](const EffectRackAction::SlotSnapshots& t) {
-                std::array<bool, EffectRack::kNumSlots> changed;
-                applySlotSnapshots(mRack, t, changed);
-                // Re-register only the slots whose DSP was actually replaced.
-                // First perform() is skipped by EffectRackAction; this runs
-                // only on undo/redo.
-                for (int i = 0; i < EffectRack::kNumSlots; ++i)
-                    if (changed[i]) registerSlotAutomation(i);
-                refreshAllRows();
-                notifyRackContentsChanged();
-                mProcessor.setLatencySamples(mProcessor.mVibeGraph.updateBusLatencies());
-            }), "Load Effect");
+                                              makeRackApply (getCurrentChannelId())),
+                         "Load Effect");
     registerSlotAutomation(slotIndex);
     refreshAllRows();
     notifyRackContentsChanged();
@@ -1125,15 +1339,8 @@ void EffectsPage::performSlotRemoval (int slotIndex)
     auto after = captureSlotSnapshots(mRack);
     if (mUndoCtx.isValid())
         mUndoCtx.perform(new EffectRackAction("Remove Effect", before, after,
-            [this](const EffectRackAction::SlotSnapshots& t) {
-                std::array<bool, EffectRack::kNumSlots> changed;
-                applySlotSnapshots(mRack, t, changed);
-                for (int i = 0; i < EffectRack::kNumSlots; ++i)
-                    if (changed[i]) registerSlotAutomation(i);
-                refreshAllRows();
-                notifyRackContentsChanged();
-                mProcessor.setLatencySamples(mProcessor.mVibeGraph.updateBusLatencies());
-            }), "Remove Effect");
+                                              makeRackApply (getCurrentChannelId())),
+                         "Remove Effect");
 
     // Every slot may have shifted (pack-to-top), so re-register all.
     for (int i = 0; i < EffectRack::kNumSlots; ++i)
@@ -1153,15 +1360,8 @@ void EffectsPage::onMoveRequested(int slotIndex, bool up)
     auto after = captureSlotSnapshots(mRack);
     if (mUndoCtx.isValid())
         mUndoCtx.perform(new EffectRackAction("Move Effect", before, after,
-            [this](const EffectRackAction::SlotSnapshots& t) {
-                std::array<bool, EffectRack::kNumSlots> changed;
-                applySlotSnapshots(mRack, t, changed);
-                for (int i = 0; i < EffectRack::kNumSlots; ++i)
-                    if (changed[i]) registerSlotAutomation(i);
-                refreshAllRows();
-                notifyRackContentsChanged();
-                mProcessor.setLatencySamples(mProcessor.mVibeGraph.updateBusLatencies());
-            }), "Move Effect");
+                                              makeRackApply (getCurrentChannelId())),
+                         "Move Effect");
 
     // A move is a swap: both indices now hold a different uuid, so both
     // registrations have to follow.  (Open windows follow their own uuid and
@@ -1260,15 +1460,21 @@ juce::String EffectsPage::channelPrefixForId (int id)
         case 15: return "bass_bus2";
         case 16: return "clips_bus2";
         case 17: return "plugin_bus2";
+        case 18: return "drums_bus2";   // QA-SOUNDNESS
         default: break;
     }
     if (id >= 100 && id < 200)
         return "drum_" + juce::String(id - 100);
-    if (id >= 200 && id < 200 + kMaxLayerPages)         // 8 layers (200..207)
+    // Spans come from the constants, not from a count written here: these
+    // annotations have gone stale behind a capacity bump twice, and the inverse
+    // map in StandaloneEditor::resolveAutomationDisplayName iterates the SAME
+    // constants, so a reader who trusts a hardcoded number tightens that loop
+    // and un-names every lane above it.
+    if (id >= 200 && id < 200 + kMaxLayerPages)            // one-based: 200 -> layer_1
         return "layer_" + juce::String(id - 199);
-    if (id >= 300 && id < 300 + kMaxBassPages)          // 4 basses (300..303)
+    if (id >= 300 && id < 300 + kMaxBassPages)             // one-based: 300 -> bass_1
         return "bass_" + juce::String(id - 299);
-    if (id >= 400 && id < 400 + MixerState::kMaxAudioRows) // 50 audio inserts
+    if (id >= 400 && id < 400 + MixerState::kMaxAudioRows) // zero-based: 400 -> audio_0
         return "audio_" + juce::String(id - 400);
     // Aux/Vox/Inst/Rusty ranges mirror the J-6 dropdown numbering (Aux 600+ /
     // Vox 700+ / Inst 800+ / Rusty 900+).  These prefixes key the rack-slot
@@ -1314,6 +1520,7 @@ juce::String EffectsPage::mixerPrefixForChannelId(int id)
         case 15: return "mixer_bassbus2";
         case 16: return "mixer_clipsbus2";
         case 17: return "mixer_pluginbus2";
+        case 18: return "mixer_drumsbus2";    // QA-SOUNDNESS
         default: break;
     }
 
@@ -1381,8 +1588,18 @@ juce::String EffectsPage::getChannelDisplayName (int channelId) const
 // migrated to global BSCommands; the manager fires from any focus location.
 
 // ── ChangeListener ────────────────────────────────────────────────────────────
-void EffectsPage::changeListenerCallback(juce::ChangeBroadcaster*)
+void EffectsPage::changeListenerCallback(juce::ChangeBroadcaster* source)
 {
+    // Two broadcasters land here.  The plugin manager's is the edge that lets a
+    // slot whose plugin went missing try again; the track selection's is the
+    // repaint it has always been.
+    if (source != nullptr && source == Hosting::PluginManager::getInstance())
+    {
+        retryDeadPluginSlots (mProcessor);
+        refreshAllRows();
+        return;
+    }
+
     repaint();
 }
 
@@ -1493,6 +1710,12 @@ void EffectsPage::loadRackPresetMenu (juce::PopupMenu& into)
     {
         into.addItem (f.getFileNameWithoutExtension(), [this, f, chId]
         {
+            // Effects that reference an external file (a NAM capture, a user IR)
+            // record a miss rather than failing loudly, so this load owns the
+            // report -- an undrained entry otherwise surfaces later attached to
+            // an unrelated load.
+            MissingFileReport::ScopedGesture gesture ("preset");
+
             juce::String err;
             if (! FxRackPresetIO::load (mProcessor, chId, f, err))
             {

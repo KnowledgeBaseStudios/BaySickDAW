@@ -4,6 +4,7 @@
 
 #include "../RenderTask.h"
 #include "../BlockContext.h"
+#include "IdleSuspendFade.h"
 
 class VibeGraph;
 class ISidechainEngine;
@@ -21,8 +22,10 @@ class VibeSynthProcessor;
 //      then engine + insert chain ONCE on the sum (decodeFilePlayClip +
 //      finalizeFilePlayStrip; QA-MultiBlockHazard Task 2).
 //   3. Idle suspend (sfizz-source only): if MIDI is empty AND sfizz reports
-//      0 active voices for kIdleSuspendBlocks consecutive blocks, skip the
-//      whole chain. Wake instantly on next block where any gate fails.
+//      0 active voices for kIdleSuspendBlocks consecutive blocks, fade the
+//      strip out over IdleSuspendFade::kFadeOutSeconds and only then skip the
+//      whole chain.  Wakes on the next block where any gate fails, ramping
+//      back to unity from wherever the fade had got to.
 //   4. If active, copy live input from the snapshot (DRY tap fires on the
 //      raw snapshot when armed).
 //   5. QA-Fb Option A (locked 2026-07-10): live strip over FilePlay clips
@@ -56,10 +59,26 @@ private:
     VibeSynthProcessor*   mProcessor = nullptr;
     juce::String          mPrefix;   // "mixer_inst_<i>"
 
+    // Strip param pointers, resolved LAZILY on first successful lookup -- never
+    // in the ctor.  These ids are created by a different message-thread path
+    // (addLiveInputParams) than the one that builds this task, and nothing
+    // orders the two, so a ctor-time resolve could pin nullptr permanently and
+    // silently kill arm / listen / channel select on the strip.  The address is
+    // stable for the APVTS lifetime (adapterTable is only ever emplaced into),
+    // and plain pointers need no extra synchronization: they follow the same
+    // cross-block publication the task already relies on for mCtx.
+    std::atomic<float>* mArmP     = nullptr;
+    std::atomic<float>* mIdxP     = nullptr;
+    std::atomic<float>* mStereoP  = nullptr;
+    std::atomic<float>* mListenP  = nullptr;
+    std::atomic<float>* mMonModeP = nullptr;
+
     // QA-E Task 3 follow-up (2026-05-12): per-task FilePlay scratch buffers.
     // See VoxStripTask.h for full rationale -- per-task ownership eliminates
     // the cross-task data race on the previously-shared processor-level
     // scratches that produced all-clips-mixed-into-every-strip on MT playback.
+    // Both are grown to a full arena-sized block in the ctor (message thread);
+    // run()'s per-block setSize calls then stay inside that allocation.
     juce::AudioBuffer<float> mClipScratch;
     juce::AudioBuffer<float> mEngineScratch;
 
@@ -67,7 +86,13 @@ private:
     // pre-engine live signal is stashed here so the monitor output can cross-
     // fade back to it in Dry mode without a click.  mMonitorDryGain is the
     // smoothed dry weight (0 = With Effect, 1 = Dry); ramped one block per flip.
-    // Owned per-task (audio thread only) -- no cross-thread access.
+    // Owned per-task (audio thread only) -- no cross-thread access.  Pre-sized
+    // in the ctor for the same reason as the scratches above.
     juce::AudioBuffer<float> mMonitorDryBuf;
     float                    mMonitorDryGain { 0.0f };
+
+    // Idle-suspend shutdown envelope (see IdleSuspendFade.h).  The suspend
+    // skips the engine AND the insert chain, so without this the rack / NAM
+    // tail the chain was still rendering is cut to zero in one sample.
+    IdleSuspendFade mSuspendFade;
 };

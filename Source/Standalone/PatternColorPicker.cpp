@@ -183,4 +183,11 @@ void showAsync (juce::Component* /*anchor*/,
     // Window self-deletes on close.
 }
 
+std::unique_ptr<juce::ColourSelector> createSelector (juce::Colour current)
+{
+    auto sel = std::make_unique<ColourSelectorWithRecents>();
+    sel->setCurrentColour (current, juce::dontSendNotification);
+    return sel;
+}
+
 } // namespace PatternColorPicker

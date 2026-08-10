@@ -21,8 +21,11 @@
 //   2. push(fileAudio, startSample, numSamples)   - feed raw file samples
 //   3. pull(output, startSample, numSamples)       - get stretched output
 //   4. reset()                                      - on transport seek / loop
+// prepare() is the one exception - message/worker thread only, it allocates.
 //
-// Latency: kFFTSize - kHopSize = 1536 samples at the file sample rate.
+// Latency: kFFTSize - mSynthHop samples at the file sample rate (1536 at
+// stretch ratio 1; it shrinks as the ratio grows and reaches zero once the
+// synthesis hop covers a whole analysis window).
 
 class PhaseVocoder
 {
@@ -34,6 +37,17 @@ public:
 
     explicit PhaseVocoder (int numChannels);
 
+    // Size the output OLA queue for the deepest per-block demand this instance
+    // will ever see: the largest number of output samples the consumer draws
+    // between two push() calls (host block size x fileSR/deviceSR x any pitch
+    // read rate).  MESSAGE / WORKER THREAD ONLY - allocates, and resets all
+    // internal state.  Never call it from the audio callback.
+    //
+    // There is deliberately no input-side parameter: push() drains analysis
+    // frames as it writes, so the input ring's requirement is the analysis
+    // window itself and does not move with block size or sample rate.
+    void prepare (int maxOutputSamplesPerBlock);
+
     // Set time-stretch ratio.  Only recomputes if value has changed.
     void setStretchRatio (double ratio);
 
@@ -41,7 +55,9 @@ public:
     void reset();
 
     // Push numSamples per-channel raw file samples into the analysis queue.
-    // Internally triggers as many analysis frames as possible.
+    // Internally triggers as many analysis frames as possible.  Any length is
+    // safe: frames are drained AS the block is written, so the input ring
+    // cannot be outrun no matter how large the caller's block is.
     void push (const juce::AudioBuffer<float>& in, int startSample, int numSamples);
 
     // Pull up to numSamples of pitch-preserved stretched output.
@@ -63,6 +79,11 @@ public:
     int getOutputAvailable() const;
 
 private:
+    // Floor for the OLA queue, used until prepare() supplies the live demand.
+    // It is the pre-existing allocation, kept as the floor so nothing that
+    // works today gets a SMALLER buffer than it had.
+    static constexpr int kOutBufFloor = kFFTSize * 8;
+
     juce::dsp::FFT mFFT;
     int            mNumCh;
     double         mStretchRatio { 1.0 };
@@ -76,9 +97,13 @@ private:
     struct Channel
     {
         // ── Input queue ───────────────────────────────────────────────────
-        // Circular ring, size = kFFTSize * 4.
-        // inRead points to the oldest sample of the current analysis window.
-        // inAvail = samples available ahead of inRead.
+        // Circular ring.  inRead points to the oldest sample of the current
+        // analysis window; inAvail = samples available ahead of inRead.
+        // CAPACITY LAW: push() drains a frame the moment inAvail reaches
+        // kFFTSize, so inAvail is capped at kFFTSize and the ring only has to
+        // hold ONE analysis window - block size, sample rate and stretch ratio
+        // do not enter the sizing at all.  It is allocated at kFFTSize * 4 for
+        // margin, never resized.
         std::vector<float> inRing;
         int inRead  { 0 };
         int inWrite { 0 };
@@ -89,11 +114,14 @@ private:
         std::vector<float> phaseAccum;  // [kNumBins] - accumulated synthesis phase
 
         // ── Output OLA buffer ─────────────────────────────────────────────
-        // Linear (non-circular) with absolute counters so OLA indexing is simple.
-        // Size = kFFTSize * 8.  outReadAbs and outWriteAbs are absolute sample
-        // positions; physical index = pos % bufSize.  int64 so the counters
-        // can't overflow into a negative modulo under continuous playback (an
-        // int wraps after ~12 h @ 48k -> OOB read).
+        // outReadAbs and outWriteAbs are absolute sample positions; physical
+        // index = pos % bufSize.  int64 so the counters can't overflow into a
+        // negative modulo under continuous playback (an int wraps after ~12 h
+        // @ 48k -> OOB read).
+        // CAPACITY LAW: the whole push-then-drain block sits here between the
+        // two calls, so this one IS block-size and sample-rate dependent -
+        // see prepare(), which is how the live sizing gets in.  kFFTSize * 8
+        // is only the floor used before prepare() is called.
         std::vector<float> outBuf;
         int64_t outReadAbs  { 0 };  // next sample to deliver to caller
         int64_t outWriteAbs { 0 };  // OLA write head (advances by mSynthHop per frame)

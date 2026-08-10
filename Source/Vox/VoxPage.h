@@ -12,9 +12,12 @@ class BaySickVocalEditor;
 // Mirror of InstPage with Vox-specific colour + naming.  Engine list for V1
 // is just BaySickPlayer (sample playback of recorded vocal).  Phase H adds
 // `BaySickVocal` (the dedicated vocal channel-strip processor) as the
-// preferred default option.  Spawn triggers: the Mixer page's "Add Vox
-// Strip" button, the ribbon Vox dropdown's "+ Add New Vox" (G-6), and the
-// QA-Fa "+ Add New Vox From Export" flow.
+// preferred default option.  Spawn is strip-driven -- every
+// gesture that adds a Vox tab (the ribbon Vox dropdown's
+// "+ Add BaySickVocal", the QA-Fa "+ Add New Vox From Export" flow,
+// Duplicate, a project-load restore) reaches
+// MixerPage::addVoxChannelAtIndex, whose onVoxStripAdded cascade spawns the
+// page.
 //
 // QA-Fa recovery: the page owns a 4 Hz timer driving the stop-gated auto
 // re-analyze for the engine's Align + Pitch analyses (works with the
@@ -36,6 +39,8 @@ public:
     // EngineType retained for save/load back-compat but only BaySickVocal is
     // valid going forward.  Old projects with BaySickPlayer state silently
     // discard it on load (BaySickPlayer is no longer a Vox option).
+    // Persisted as a raw int: NEVER reorder or insert; append only, with an
+    // explicit value.  Same rule as EffectType in EffectRack.h.
     enum class EngineType { None, BaySickPlayer, BaySickVocal };
 
     // QA-ModelShell TS1: the processor ref is needed at construction because
@@ -71,10 +76,9 @@ public:
     // embedded NAM/IR sub-processor to install the markDirty hook.
     juce::AudioProcessor* getVocalProcessor() const noexcept { return mVocalProc; }
 
-    std::function<void()> onEngineDestroying;
     std::function<void()> onEngineChanged;
 
-    void                setTabName (const juce::String& n);   // syncs the model tab's name (TS1)
+    void                setTabName (const juce::String& n);
     const juce::String& getTabName () const                 { return mTabName; }
 
     // ── G-6 (2026-04-29): full-state export/import for Duplicate flow ────────
@@ -92,9 +96,12 @@ public:
 
     // J-6 EQ unification (2026-05-03): EQ accessors removed; pre-rack EQ on Effects page only.
 
-    // Save/Load PAGE preset - entire VoxPage state (currently just BaySickPlayer;
-    // Phase H adds BaySickVocal alongside).  XML matches exportVoxState format.
-    void saveVoxPagePreset();
+    // Save/Load PAGE preset - entire VoxPage state (the BaySickVocal engine; Vox
+    // tabs have no other engine).  XML matches exportVoxState format.
+    // onSaved runs only when the file reached disk: the write can stop on a
+    // collision prompt, so a caller chaining a delete behind the save must hand
+    // it over rather than firing it on return.
+    void saveVoxPagePreset (std::function<void()> onSaved = {});
     void loadVoxPagePreset (const juce::File& xml);
 
     // ── G-7 (2026-04-29): Page Preset save/load (full chain) ─────────────────

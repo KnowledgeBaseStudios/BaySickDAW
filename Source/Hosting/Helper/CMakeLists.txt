@@ -8,7 +8,7 @@ cmake_minimum_required(VERSION 3.22)
 # cannot be another target alongside the x64 app -- it needs its own configure
 # with -A Win32 into its own build directory.  Configuring the ROOT project that
 # way would drag in BaySickDAWStandalone and therefore x86 builds of sfizz, NAM,
-# RubberBand, LAME, WORLD and lunasvg, none of which we want or need.
+# RubberBand, LAME and WORLD, none of which we want or need.
 #
 # This project depends on NOTHING but vendored JUCE and one source file, which
 # is exactly what keeps the 32-bit half cheap.  The root CMakeLists still builds

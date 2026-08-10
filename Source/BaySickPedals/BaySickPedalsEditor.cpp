@@ -590,40 +590,72 @@ private:
                             {
                                 if (result == 1)
                                 {
+                                    // No empty-name pre-check: savePreset reports
+                                    // that case itself, and guarding here swallowed
+                                    // the message so clearing the prefilled name and
+                                    // pressing Save did nothing at all.
                                     const auto name = aw->getTextEditorContents ("name").trim();
-                                    if (name.isNotEmpty())
-                                    {
-                                        juce::String err;
-                                        EffectPresetIO::savePreset (*dsp, type, name, err);
-                                    }
+                                    juce::String err;
+                                    if (! EffectPresetIO::savePreset (*dsp, type, name, err))
+                                        juce::AlertWindow::showMessageBoxAsync (
+                                            juce::AlertWindow::WarningIcon,
+                                            "Could not save preset", err);
                                 }
                                 delete aw;
                             }),
                         false);
                     return;
                 }
-                if (r == 10) { EffectPresetIO::restoreDefaults (*dsp, type); return; }
-                if (r == 11) { juce::String err; EffectPresetIO::saveAsDefault (*dsp, type, err); return; }
+                if (r == 10)
+                {
+                    EffectPresetIO::restoreDefaults (*dsp, type);
+                    // Nothing else watches slot CONTENTS: the board's poll only
+                    // compares slot TYPE, which a preset apply leaves alone, so
+                    // the title and panel keep naming the previous capture
+                    // unless the tile is rebuilt here.  The rebuild replaces
+                    // this tile's child widgets, so it must come last.
+                    mParent.onSlotTypeChanged (mSlot);
+                    return;
+                }
+                if (r == 11)
+                {
+                    juce::String err;
+                    if (! EffectPresetIO::saveAsDefault (*dsp, type, err))
+                        juce::AlertWindow::showMessageBoxAsync (
+                            juce::AlertWindow::WarningIcon,
+                            "Could not save default", err);
+                    return;
+                }
                 if (r == 12) { EffectPresetIO::typeRoot (type).revealToUser(); return; }
 
+                auto loadChecked = [this, dsp] (const juce::File& f)
+                {
+                    juce::String err;
+                    if (! EffectPresetIO::loadPreset (*dsp, f, err))
+                    {
+                        juce::AlertWindow::showMessageBoxAsync (
+                            juce::AlertWindow::WarningIcon,
+                            "Could not load preset", err);
+                        return;
+                    }
+                    if (mParent.onPresetLoaded) mParent.onPresetLoaded();
+                    // Same as Restore Defaults above: the tile has to be rebuilt
+                    // from the live effect or it keeps naming the old preset.
+                    // Replaces this tile's child widgets, so it must come last.
+                    mParent.onSlotTypeChanged (mSlot);
+                };
                 if (r >= 1000 && r < 2000)
                 {
                     const int idx = r - 1000;
                     if (idx >= 0 && idx < factoryFiles.size())
-                    {
-                        juce::String err;
-                        EffectPresetIO::loadPreset (*dsp, factoryFiles[idx], err);
-                    }
+                        loadChecked (factoryFiles[idx]);
                     return;
                 }
                 if (r >= 2000)
                 {
                     const int idx = r - 2000;
                     if (idx >= 0 && idx < myFiles.size())
-                    {
-                        juce::String err;
-                        EffectPresetIO::loadPreset (*dsp, myFiles[idx], err);
-                    }
+                        loadChecked (myFiles[idx]);
                 }
             });
     }

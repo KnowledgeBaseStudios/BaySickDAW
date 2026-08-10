@@ -24,9 +24,11 @@ namespace nam { class DSP; }
 //   Blend         0..1            0 = dry, 1 = wet (default 1.0)
 //   Output        -24..+12 dB     final output trim
 //
-// Threading: model load is wait-free swap (mirrors BaySickNAMIRProcessor).
-// Audio thread sees published model via active/pending pair; new model
-// parked in pending, swap drained at top of process().
+// Threading: model loads publish through an active/pending pair on the same
+// discipline EffectRack uses for its slots -- see the member declarations for
+// the full contract.  The audio thread touches a lock only when a swap is
+// actually pending, and try-locks even then, so it never waits on the message
+// thread.
 // ─────────────────────────────────────────────────────────────────────────────
 
 class NAMPedalStyleDSP : public DSPBase
@@ -66,6 +68,13 @@ private:
     void rebuildEQ();
     void drainPendingSwap();   // audio-thread
 
+    // Publishes a NULL model on loadModel's discipline.  Every restore that
+    // does NOT end with a capture installed has to go through here -- a state
+    // naming no capture, and a state naming one we could not install -- because
+    // the model already running stays audible otherwise, under whatever name
+    // the restore just wrote.
+    void unloadModel();
+
     using IIRDup = juce::dsp::ProcessorDuplicator<juce::dsp::IIR::Filter<float>,
                                                     juce::dsp::IIR::Coefficients<float>>;
 
@@ -73,14 +82,32 @@ private:
     int    mMaxBlock   { 0 };
     bool   mPrepared   { false };
 
-    // Wait-free model swap.
+    // Model hot-swap.  Thread-safety contract:
+    //  - mNamActive is written ONLY by the audio thread, inside
+    //    drainPendingSwap().  Nothing else may swap or reset it; that is what
+    //    lets process() read it with no lock at all.
+    //  - mNamPending is written by the message thread (loadModel) and by the
+    //    audio thread's swap, and EVERY one of those writes is made under
+    //    mSwapLock.  Without it the audio thread can observe a half-published
+    //    pointer, or free a model the other thread still owns.
+    //  - mSwapPending is the flag that makes mNamPending valid; it is set
+    //    (release) only after the pointer is in place, and cleared only by the
+    //    audio thread once the swap is done.
+    //  - After a drain, mNamPending holds the OLD active model.  It stays
+    //    parked there until the next loadModel hands it to a local that
+    //    destructs on the message thread OUTSIDE every lock -- freeing a
+    //    nam::DSP releases its weight tensors, which must never run on audio
+    //    nor under a lock audio try-locks each block.
+    //  - mLoadLock serializes message-thread mutators against each other.
     std::unique_ptr<nam::DSP> mNamActive;
     std::unique_ptr<nam::DSP> mNamPending;
     std::atomic<bool>         mSwapPending { false };
+    juce::SpinLock            mSwapLock;
     juce::CriticalSection     mLoadLock;
     juce::String              mModelPath;
-    // QA-Export Task 5: true when mModelPath was restored but the file was gone,
-    // so getModelName() can say so instead of implying a loaded capture.
+    // True when mModelPath was restored but nothing was loaded behind it --
+    // the file was gone, OR it was present and would not load -- so
+    // getModelName() can say so instead of implying a loaded capture.
     bool                      mModelMissing { false };
 
     // Pre-allocated mono buffers for NAM (NAM model expects double-precision mono).

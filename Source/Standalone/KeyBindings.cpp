@@ -1,5 +1,6 @@
 #include "KeyBindings.h"
 #include "../AppPaths.h"
+#include "../UserFileSave.h"
 
 namespace BSCommands
 {
@@ -43,40 +44,45 @@ namespace
               juce::KeyPress ('R') },
 
             // ── Page switches ────────────────────────────────────────────────
+            { cmdShowBuilder, Category::General,
+              "Show Builder",
+              "Switch to the Builder page.",
+              juce::KeyPress (juce::KeyPress::F5Key) },
+
             { cmdShowMixer, Category::General,
               "Show Mixer",
               "Switch to the Mixer page.",
-              juce::KeyPress (juce::KeyPress::F5Key) },
-
-            { cmdShowEffects, Category::General,
-              "Show Effects (Most Recent)",
-              "Switch to the Effects page on the channel you last had open.",
               juce::KeyPress (juce::KeyPress::F6Key) },
 
-            { cmdShowBuilder, Category::General,
-              "Show Builder (Most Recent)",
-              "Switch to the Builder page.",
+            { cmdShowPlayer, Category::General,
+              "Show Player (Most Recent)",
+              "Switch to the instrument tab you were last on - Layers, Bass, Drums, Clip, Vox, Inst or Plugins. Falls back to the first one you have open; does nothing when you have none.",
               juce::KeyPress (juce::KeyPress::F7Key) },
 
-            { cmdShowLayers, Category::General,
-              "Show Layers (Most Recent)",
-              "Switch to the most-recently-used Layers tab.",
+            { cmdShowEffectsRack, Category::General,
+              "Show Effects Rack (Most Recent)",
+              "Switch to the Effects page, which comes back up on the channel you last had open there.",
               juce::KeyPress (juce::KeyPress::F8Key) },
 
-            { cmdShowBass, Category::General,
-              "Show Bass (Most Recent)",
-              "Switch to the most-recently-used Bass tab.",
+            { cmdShowEffectPanel, Category::General,
+              "Show Effect Panel (Most Recent)",
+              "Bring the single-effect panel you last opened back to the front. Does nothing until you have opened one, and nothing once you have closed it.",
               juce::KeyPress (juce::KeyPress::F9Key) },
 
-            { cmdShowDrums, Category::General,
-              "Show Drums (Most Recent)",
-              "Switch to the most-recently-used Drums tab. Lands on the Drum Kit sub-tab if that was your last view.",
+            { cmdShowPianoRoll, Category::General,
+              "Show Piano Roll (Most Recent)",
+              "Switch to the unified Piano Roll page on whichever engine its own dropdown is set to. That choice is saved with the project, so reopening a session lands on the same view.",
               juce::KeyPress (juce::KeyPress::F10Key) },
 
-            { cmdShowPianoRoll, Category::General,
-              "Show Piano Roll",
-              "Switch to the unified Piano Roll page (Drum Kit + every engine's piano roll, picked via the page dropdown).  Lands on the engine you were last editing; falls back to Drum Kit on first use.  Project save/load round-trips the active engine so reopening a session lands on the same view.",
+            { cmdShowDrumKit, Category::General,
+              "Show Drum Kit (Most Recent)",
+              "Switch to the Piano Roll page and show the 16-pad Drum Kit grid.",
               juce::KeyPress (juce::KeyPress::F11Key) },
+
+            { cmdShowEventEditor, Category::General,
+              "Show Event Editor (Most Recent)",
+              "Bring the Event Editor you last opened back to the front. Does nothing until you have opened one, and nothing once you have closed it.",
+              juce::KeyPress (juce::KeyPress::F12Key) },
 
             // ── File operations ──────────────────────────────────────────────
             { cmdFileNew, Category::General,
@@ -109,12 +115,12 @@ namespace
 
             // ── Pattern navigation ──────────────────────────────────────────
             { cmdRenameActivePattern, Category::General,
-              "Rename Active Pattern",
-              "Open a name editor on the pattern currently selected in the transport-bar dropdown.",
+              "Rename / Color",
+              "Open one dialog holding the name AND the color of the pattern currently selected in the transport-bar dropdown. OK applies both, Cancel applies neither.",
               juce::KeyPress (juce::KeyPress::F2Key) },
 
             { cmdNextEmptyPattern, Category::General,
-              "Jump to Next Empty Pattern",
+              "Find Next Empty Pattern",
               "Jump the pattern dropdown to the first pattern that contains no notes.",
               juce::KeyPress (juce::KeyPress::F3Key) },
 
@@ -132,6 +138,38 @@ namespace
               "Previous Pattern",
               "Cycle the transport-bar pattern dropdown to the previous pattern. Wraps around at the start.",
               juce::KeyPress ('-') },
+
+            // ── Pattern list editing ────────────────────────────────────────
+            // Ctrl+Shift+Insert, Alt+C and Ctrl+Shift+Up/Down were each checked
+            // against the catalog above AND every page-local keyPressed handler
+            // before binding: Insert appears nowhere in the tree, no Alt+letter
+            // table claims C, and every arrow handler excludes the Ctrl+Shift
+            // pair (Builder nudge is Shift-only, roll transpose is Ctrl-only).
+            { cmdInsertPattern, Category::General,
+              "Insert Pattern",
+              "Add a new empty pattern directly after the one selected in the transport-bar dropdown, and select it. Patterns after it shift down a slot; everything that pointed at them follows.",
+              juce::KeyPress (juce::KeyPress::insertKey,
+                              juce::ModifierKeys::ctrlModifier
+                              | juce::ModifierKeys::shiftModifier, 0) },
+
+            { cmdClonePattern, Category::General,
+              "Clone Pattern",
+              "Make a full copy of the selected pattern - all of its notes come with it - and select the copy.",
+              juce::KeyPress ('C', juce::ModifierKeys::altModifier, 0) },
+
+            { cmdMovePatternUp, Category::General,
+              "Move Pattern Up",
+              "Swap the selected pattern with the one above it in the list. Does nothing when it is already first.",
+              juce::KeyPress (juce::KeyPress::upKey,
+                              juce::ModifierKeys::ctrlModifier
+                              | juce::ModifierKeys::shiftModifier, 0) },
+
+            { cmdMovePatternDown, Category::General,
+              "Move Pattern Down",
+              "Swap the selected pattern with the one below it in the list. Does nothing when it is already last.",
+              juce::KeyPress (juce::KeyPress::downKey,
+                              juce::ModifierKeys::ctrlModifier
+                              | juce::ModifierKeys::shiftModifier, 0) },
 
             // ── Transport extensions ────────────────────────────────────────
             { cmdToggleSongMode, Category::General,
@@ -820,8 +858,15 @@ juce::File getKeymapFile()
 
 void saveMappings (const juce::KeyPressMappingSet& set)
 {
-    if (auto x = std::unique_ptr<juce::XmlElement> (set.createXml (true)))
-        x->writeTo (getKeymapFile());
+    // The rebind is already live in the mapping set, so there is no gesture to
+    // abort here -- but a write that never lands reverts every shortcut on the
+    // next launch, and silence there reads as "I must have forgotten to save".
+    const auto f = getKeymapFile();
+    auto x = std::unique_ptr<juce::XmlElement> (set.createXml (true));
+    if (x == nullptr || ! x->writeTo (f))
+        UserFileSave::showWriteFailure (f, "Your shortcuts work for now, but "
+                                           "they will be back to the defaults "
+                                           "next time you open the app.");
 }
 
 bool loadMappings (juce::KeyPressMappingSet& set)

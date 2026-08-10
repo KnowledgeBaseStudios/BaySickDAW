@@ -1,6 +1,8 @@
 #include "SandboxedPluginClient.h"
 #include "PluginManager.h"
 
+#include <cmath>
+
 namespace Hosting
 {
 
@@ -10,11 +12,44 @@ namespace
     const char* kBridgeUid = "BaySickPluginBridge";
 
     // How long the audio thread will wait for the helper to return a block.
-    // Deliberately a HARD ceiling rather than "however long the plugin takes":
-    // a bridged plugin that stalls must cost its own slot's audio, never the
-    // whole app's callback.  Sized well under a 512-frame block at 44.1k (11.6
-    // ms) so a miss degrades to silence rather than to a device xrun.
-    constexpr int kBlockDeadlineMs = 4;
+    // Still a HARD ceiling -- a bridged plugin that stalls must cost its own
+    // slot's audio, never the whole app's callback -- but DERIVED rather than
+    // constant, because the helper's work scales with the block size while a
+    // constant does not.  The old 4 ms was a different rule at every buffer
+    // setting: 138% of realtime at 128 frames / 44.1k (Jeff's own setting,
+    // where it holds the callback for 1.4 block periods and xruns the DEVICE
+    // instead of muting one slot) and 8.6% at 2048, where any ordinary plugin
+    // misses it and the export or the strip goes silent.
+    //
+    // A fraction of the LIVE block period is the invariant that holds at both
+    // ends: the helper always gets the same share of realtime, and the ceiling
+    // is always under one block period, so a stall costs this slot and never
+    // the device.  Three quarters leaves the rest of the app a quarter of the
+    // callback, and reproduces the old 4 ms exactly at 256 frames / 44.1k --
+    // the smallest buffer at which the old constant's own "well under a block"
+    // claim was ever true.
+    constexpr double kLiveDeadlineFraction = 0.75;
+
+    // The rendezvous wait takes whole milliseconds (WaitForSingleObject), so
+    // under ~1.3 ms of block period the fraction rounds away and this floor is
+    // what is actually waited.  At 32 frames / 44.1k that floor is longer than
+    // the block period; the integer wait API leaves no way to express less.
+    constexpr int kMinLiveDeadlineMs = 1;
+
+    // Bounds the pre-request drain (below).  The helper answers a request at
+    // most once, so one stale completion is all there can ever be; the cap is
+    // there so no amount of event-signal weirdness can spin the audio thread.
+    constexpr int kMaxStaleDrains = 4;
+
+    // OFFLINE ceiling.  An export or freeze renders on a worker with the device
+    // suspended, so there is no callback to starve and no reason to hold the
+    // live budget at all: offline is allowed to take as long as the plugin
+    // takes.  Deliberately NOT derived from the block period -- this is a
+    // wedged-helper hang guard, not a per-block budget, so it is a duration
+    // that stays the same whatever the render block is.  BOUNDED on purpose
+    // rather than infinite: a dead helper must fail the render rather than
+    // hang the app with no way out.
+    constexpr int kOfflineBlockDeadlineMs = 30000;
 
     // Handshake / load are message-thread operations and may legitimately take
     // a while (a plugin's own scan-time init).
@@ -25,6 +60,22 @@ SandboxedPluginClient::SandboxedPluginClient() = default;
 
 SandboxedPluginClient::~SandboxedPluginClient()
 {
+    // mTearingDown goes up before anything disconnects, because killWorkerProcess
+    // reaches handleConnectionLost through the same chain a real crash takes and
+    // ordinary teardown must not report a crash.
+    //
+    // THREAD SAFETY: mLife is deliberately NOT reset here.  The IPC reader thread
+    // builds weak copies of that same shared_ptr object while this runs, and the
+    // standard's atomicity guarantee covers the control block's counts, not the
+    // shared_ptr's own pointer members -- a concurrent reset() is a data race that
+    // can land a weak-count increment on an already-freed control block.
+    // killWorkerProcess -> disconnect joins the reader thread, so the member
+    // destruction that follows this body retires the token with no other thread
+    // able to touch it, and a marshalled callback still finds it expired: it
+    // cannot dispatch until the message thread returns to its queue, which is
+    // after the whole destructor.
+    mTearingDown.store (true, std::memory_order_release);
+
     // Best effort: ask nicely, then kill.  The destructor must not block on a
     // helper that is already wedged.
     if (mAlive.load())
@@ -112,6 +163,13 @@ void SandboxedPluginClient::prepare (double sampleRate, int maxBlockSize, int nu
     // with the Prepare that resizes it, so both ends always agree.
     mSharedBlockSize = maxBlockSize;
     mSharedChannels  = numChannels;
+    // The live rendezvous ceiling is a share of the block PERIOD, so the rate
+    // has to be kept: a device change re-prepares here and the deadline moves
+    // with it, and a short final block gets a proportionally shorter wait.
+    mMsPerSample     = sampleRate > 0.0 ? 1000.0 / sampleRate : 0.0;
+    // A fresh mapping is a fresh helper: whatever wedged the last render cannot
+    // still be true, so the slot gets to render again.
+    mOfflineWedged.store (false, std::memory_order_release);
     mSharedAudioName = "Local\\BaySickPluginBridge_" + juce::Uuid().toDashedString();
 
     const auto bytes = Bridge::SharedAudioBlock::bytesFor (maxBlockSize, numChannels);
@@ -141,6 +199,17 @@ void SandboxedPluginClient::releaseResources()
     mSharedAudio.close();
     mSharedBlockSize = 0;
     mSharedChannels  = 0;
+    mMsPerSample     = 0.0;
+    // The events die with the mapping, so nothing can be left latched for the
+    // next prepare to trip over.
+    mNeedsResync.store (false, std::memory_order_release);
+    mOfflineWedged.store (false, std::memory_order_release);
+}
+
+int SandboxedPluginClient::liveDeadlineMs (int numSamples) const noexcept
+{
+    return juce::jmax (kMinLiveDeadlineMs,
+                       (int) ((double) numSamples * mMsPerSample * kLiveDeadlineFraction));
 }
 
 bool SandboxedPluginClient::processBlock (juce::AudioBuffer<float>& buffer,
@@ -166,9 +235,10 @@ bool SandboxedPluginClient::processBlock (juce::AudioBuffer<float>& buffer,
     // AUDIO THREAD.  v3: NOTHING here touches the pipe.  The old path framed a
     // MemoryBlock (allocation) and handed it to the pipe write, which blocks up
     // to the pipe TIMEOUT when the helper stalls -- 15 seconds on the audio
-    // thread.  Now: raw stores into the mapping, one SetEvent, one bounded
-    // WaitForSingleObject.  A miss returns false and the caller clears; it does
-    // not retry, because a retry is just a second stall.
+    // thread.  Now: raw stores into the mapping, one SetEvent, and waits that
+    // are bounded in total by this block's deadline.  A miss returns false and
+    // the caller clears; the request is never re-issued, because a second
+    // request for the same block is just a second stall.
     //
     // INPUT IN.  An instrument's buffer is silence here and the copy is wasted,
     // but branching on isInstrument would mean the helper reading whatever the
@@ -200,9 +270,19 @@ bool SandboxedPluginClient::processBlock (juce::AudioBuffer<float>& buffer,
 
     const auto seq = mSequence.fetch_add (1) + 1;
 
+    // ONE load, feeding both the wire flag and the deadline: if the two could
+    // disagree within a block the helper would render in a mode the host is not
+    // waiting for.
+    const bool offline = mNonRealtime.load (std::memory_order_acquire);
+
+    // Once a render has proved this helper wedged, every later block fails the
+    // same way -- so fail them for free instead of paying the hang ceiling again.
+    if (offline && mOfflineWedged.load (std::memory_order_acquire))
+        return false;
+
     ctl->numSamples         = (std::uint32_t) n;
     ctl->numMidiBytes       = midiBytes;
-    ctl->nonRealtime        = mNonRealtime.load (std::memory_order_acquire) ? 1u : 0u;
+    ctl->nonRealtime        = offline ? 1u : 0u;
     ctl->bpm                = tp.bpm;
     ctl->ppqPosition        = tp.ppqPosition;
     ctl->timeInSamples      = (std::int64_t) tp.timeInSamples;
@@ -216,13 +296,52 @@ bool SandboxedPluginClient::processBlock (juce::AudioBuffer<float>& buffer,
     // desync the old path's ignored sequence field allowed to persist forever.
     ctl->sequence           = seq;
 
+    // RESYNC, and this is what keeps ONE missed block from muting the slot for
+    // the rest of the session.  Both rendezvous events are auto-reset and the
+    // protocol is strictly one block at a time, so a completion the helper
+    // posted AFTER we gave up is still latched when the next block starts: it
+    // satisfies the next wait instantly, its echoed sequence cannot match, and
+    // every following block fails identically -- silence with no meter and no
+    // error until the device is reopened.  Drained BEFORE the request so it can
+    // never eat this block's own reply, and bounded so the audio thread cannot
+    // spin.
+    if (mNeedsResync.exchange (false, std::memory_order_acq_rel))
+        for (int i = 0; i < kMaxStaleDrains && mSharedAudio.waitDone (0); ++i)
+            {}
+
     mSharedAudio.signalRequest();
 
-    if (! mSharedAudio.waitDone (kBlockDeadlineMs))
-        return false;
+    const int    deadlineMs = offline ? kOfflineBlockDeadlineMs : liveDeadlineMs (n);
+    const double startMs    = juce::Time::getMillisecondCounterHiRes();
+    bool         answered   = false;
 
-    if (ctl->replyOk == 0 || ctl->replySequence != seq)
+    // The other half of the resync: a late reply that arrives inside THIS
+    // block's window is consumed and rejected on its sequence, then the wait
+    // RESUMES for whatever budget is left rather than surrendering the block.
+    // getMillisecondCounterHiRes is QueryPerformanceCounter -- no allocation,
+    // no lock, safe here.
+    for (;;)
+    {
+        const double leftMs = (double) deadlineMs
+                            - (juce::Time::getMillisecondCounterHiRes() - startMs);
+
+        if (leftMs <= 0.0 || ! mSharedAudio.waitDone ((int) std::ceil (leftMs)))
+            break;
+
+        if (ctl->replyOk != 0 && ctl->replySequence == seq)
+        {
+            answered = true;
+            break;
+        }
+    }
+
+    if (! answered)
+    {
+        mNeedsResync.store (true, std::memory_order_release);
+        if (offline)
+            mOfflineWedged.store (true, std::memory_order_release);
         return false;
+    }
 
     // OUTPUT BACK.  Only after the reply -- the helper writes in place, so
     // reading before the rendezvous would race it.  Channels the helper does not
@@ -343,10 +462,19 @@ void SandboxedPluginClient::handleMessageFromWorker (const juce::MemoryBlock& mb
             if (onLoadResult)
             {
                 // READER THREAD here; the receiver updates UI-facing state.
+                // Weak token per the header's marshalled-callback rule: the
+                // consumer OWNS this client, so a reply dispatched after it dies
+                // would write through a dangling owner pointer.
                 juce::MessageManager::callAsync (
                     [cb = onLoadResult, ok = (r.ok != 0), err = getLastError(),
-                     inst = (r.isInstrument != 0), midi = (r.acceptsMidi != 0)]
-                    { cb (ok, err, inst, midi); });
+                     inst = (r.isInstrument != 0), midi = (r.acceptsMidi != 0),
+                     life = std::weak_ptr<char> (mLife)]
+                    {
+                        if (life.expired())
+                            return;
+
+                        cb (ok, err, inst, midi);
+                    });
             }
             break;
         }
@@ -361,10 +489,17 @@ void SandboxedPluginClient::handleMessageFromWorker (const juce::MemoryBlock& mb
             Bridge::EditorPayload e {};
             std::memcpy (&e, body, sizeof (e));
 
+            // READER THREAD here -- weak token per the header's rule.
             if (onEditorSize)
                 juce::MessageManager::callAsync (
-                    [cb = onEditorSize, w = (int) e.width, h = (int) e.height]
-                    { cb (w, h); });
+                    [cb = onEditorSize, w = (int) e.width, h = (int) e.height,
+                     life = std::weak_ptr<char> (mLife)]
+                    {
+                        if (life.expired())
+                            return;
+
+                        cb (w, h);
+                    });
             break;
         }
 
@@ -386,9 +521,16 @@ void SandboxedPluginClient::handleMessageFromWorker (const juce::MemoryBlock& mb
                 const juce::ScopedLock sl (mParamLock);
                 mParams = std::move (parsed);
             }
-            // READER THREAD here -- marshal like onLoadResult.
+            // READER THREAD here -- marshal like onLoadResult, weak token and all.
             if (onParameterList)
-                juce::MessageManager::callAsync ([cb = onParameterList] { cb(); });
+                juce::MessageManager::callAsync (
+                    [cb = onParameterList, life = std::weak_ptr<char> (mLife)]
+                    {
+                        if (life.expired())
+                            return;
+
+                        cb();
+                    });
             break;
         }
 
@@ -449,12 +591,28 @@ void SandboxedPluginClient::handleMessageFromWorker (const juce::MemoryBlock& mb
 void SandboxedPluginClient::handleConnectionLost()
 {
     // The helper died.  The audio thread's rendezvous needs no unsticking --
-    // its wait is the 4 ms deadline and a dead helper simply never signals.
+    // its wait is the block deadline and a dead helper simply never signals.
+    // These two must run on WHATEVER thread got here: the processBlock
+    // short-circuit and getState's bounded wait both depend on them.
     mAlive.store (false, std::memory_order_release);
     mStateReady.signal();
 
+    // Deliberate teardown is not a crash.
+    if (mTearingDown.load (std::memory_order_acquire))
+        return;
+
+    // MARSHALLED: this arrives on whichever thread noticed -- the IPC reader
+    // thread when the pipe closes, the message thread when the ping times out --
+    // while the consumer flips UI-facing state.  The weak token is the lifetime
+    // guard: this client is a MEMBER of that consumer, so a callback that
+    // outlives it would write through a dangling owner pointer.
     if (onCrashed)
-        onCrashed();
+        juce::MessageManager::callAsync (
+            [cb = onCrashed, life = std::weak_ptr<char> (mLife)]
+            {
+                if (! life.expired())
+                    cb();
+            });
 }
 
 } // namespace Hosting

@@ -162,8 +162,6 @@ private:
     VibeSlider       mLfoRate;       // global lfo_rate (13-step)
     VibeSlider       mLfoShape;      // global lfo_shape (4-value chicken)
     juce::TextButton mLfoTempoBtn { "TEMPO" };  // global lfo_tempo bool
-    // Mod XYZ destination dropdowns (S2 T2-E)
-    juce::ComboBox  mModXDest, mModYDest, mModZDest;
     // Strum
     VibeSlider      mStrumDirSlider;     // 0-2 discrete
     VibeSlider      mStrumTime, mStrumTns;
@@ -224,8 +222,6 @@ private:
     std::unique_ptr<SliderAtt> mLfoRateAtt;
     std::unique_ptr<SliderAtt> mLfoShapeAtt;
     std::unique_ptr<ButtonAtt> mLfoTempoAtt;
-    using ComboAtt = juce::AudioProcessorValueTreeState::ComboBoxAttachment;
-    std::unique_ptr<ComboAtt>  mModXDestAtt, mModYDestAtt, mModZDestAtt;
     // Bottom-left
     std::unique_ptr<SliderAtt> mPartSelAtt;
     std::unique_ptr<SliderAtt> mVolumeAtt, mPanAtt;

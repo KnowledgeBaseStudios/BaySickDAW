@@ -7,10 +7,6 @@
 // (after MIDI scheduling completes serially) and remain stable for the life
 // of the block. Tasks read fields they need; they MUST NOT write back into
 // this struct from worker threads.
-//
-// Phase 2 scaffolding: only the framework fields are defined now. Per-engine
-// MIDI buffer pointers + live-input snapshot are added in Batches 3-5 as the
-// corresponding strip wrappers ship.
 struct BlockContext
 {
     int    numSamples = 0;

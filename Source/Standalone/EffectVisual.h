@@ -18,10 +18,10 @@
 //
 // Design note for whoever adds the eleventh: the CONTAINER owns lifecycle,
 // timing and gating; CONTENT is a paint callback.  Resist moving per-effect
-// drawing in here.  A scrolling history is offered as a built-in because four
-// of the ten want exactly that; the rest (LFO scopes, transfer curves, harmonic
-// bars, delay grids, reverb envelopes) are parametric draws with no history and
-// should just paint.
+// drawing in here.  A scrolling history is offered as a built-in because it is
+// the shape every visual leads with; the layers an effect pairs beside it (LFO
+// scopes, transfer curves, harmonic bars, delay grids, reverb envelopes) stay
+// in that effect's own paint callback.
 // ─────────────────────────────────────────────────────────────────────────────
 
 // One timer for every visible visual in the app.
@@ -214,9 +214,9 @@ private:
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (EffectVisualStrip)
 };
 
-// Built-in renderer for the four visuals that ARE a scrolling history (limiter,
-// compressor, gate, transient shaper).  Supplied as a free function rather than
-// a mode flag on the strip so the parametric visuals never carry its state.
+// Built-in renderer for visuals that ARE a scrolling history.  Supplied as a
+// free function rather than a mode flag on the strip so no strip carries
+// history state it will never use.
 //
 // Draws right-to-left: newest column at the right edge, which is the direction
 // every meter of this kind moves and therefore the one users already read.

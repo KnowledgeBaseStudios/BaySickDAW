@@ -16,6 +16,39 @@ VersionCapture::~VersionCapture()
     discardSessionAudio();
 }
 
+juce::File VersionCapture::sessionsParent()
+{
+    return juce::File::getSpecialLocation (juce::File::tempDirectory)
+               .getChildFile ("BaySickDAW");
+}
+
+void VersionCapture::sweepStaleSessions()
+{
+    // Startup reclaim for the sessions an ABNORMAL exit stranded: the
+    // destructor is the only other cleanup, so a crash or force-quit leaves a
+    // whole session of full-length WAVs in temp with nothing that can ever find
+    // them again.  Same shape as UndoSnapshotStore::sweepAll.
+    const auto parent = sessionsParent();
+
+    if (! parent.isDirectory())
+        return;
+
+    for (const auto& d : parent.findChildFiles (juce::File::findDirectories, false, "Versions *"))
+    {
+        // A folder owned by a still-running instance holds its .active file
+        // open, and Windows refuses to delete a file another process has open
+        // -- so a refused delete IS the "someone still owns this" test.  A
+        // folder with no .active is from a build that predates the lock, or one
+        // whose lock could not be opened; either way nothing holds it.
+        const auto lock = d.getChildFile (".active");
+
+        if (lock.existsAsFile() && ! lock.deleteFile())
+            continue;
+
+        d.deleteRecursively();
+    }
+}
+
 juce::File VersionCapture::sessionDir()
 {
     if (mSessionDir != juce::File() && mSessionDir.isDirectory())
@@ -24,12 +57,19 @@ juce::File VersionCapture::sessionDir()
     // createTempFile gives a unique NAME; we want a unique FOLDER so
     // discardSessionAudio can delete the whole thing without walking a shared
     // temp dir and guessing which files were ours.
-    mSessionDir = juce::File::getSpecialLocation (juce::File::tempDirectory)
-                      .getChildFile ("BaySickDAW")
+    mSessionDir = sessionsParent()
                       .getChildFile ("Versions "
                           + juce::String (juce::Time::getCurrentTime()
                                               .toMilliseconds()));
     mSessionDir.createDirectory();
+
+    // Held open for as long as this session owns the folder; sweepStaleSessions
+    // reads it as the ownership marker.
+    mActiveLock = std::make_unique<juce::FileOutputStream> (mSessionDir.getChildFile (".active"));
+
+    if (mActiveLock->failedToOpen())
+        mActiveLock.reset();
+
     return mSessionDir;
 }
 
@@ -221,18 +261,13 @@ const VersionCapture::Version* VersionCapture::find (int id) const noexcept
     return nullptr;
 }
 
-void VersionCapture::clearAll()
-{
-    discardSessionAudio();
-    mVersions.clear();
-    mNextId    = 1;
-    mHaveKept  = false;
-    mCapturing = false;
-    if (onVersionsChanged) onVersionsChanged();
-}
-
 void VersionCapture::discardSessionAudio()
 {
+    // The ownership lock is released FIRST: Windows will not remove a directory
+    // that still holds an open file, which is the same property the sweep
+    // depends on.
+    mActiveLock.reset();
+
     // Only the session temp folder is removed.  Anything the user chose to
     // retain lives under the project and is theirs, not ours to delete.
     if (mSessionDir != juce::File() && mSessionDir.isDirectory())

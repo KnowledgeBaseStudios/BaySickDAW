@@ -8,7 +8,8 @@
 //
 // Algorithm (standard windowed-spectrum-processor):
 //   prepare:
-//     mFftSize = N (per-mode: HQE=512, Linear=2048, HQ Linear=4096)
+//     mFftSize = N, chosen by the caller (EQ8DSP::linearFftSize: HQE=512,
+//     HQ Linear=4096, plain Linear = the Linear Phase Precision size, 256..4096)
 //     mHop = N/2
 //     mWindow = Hann(N) - both analysis and synthesis windowed for OLA reconstruction
 //   rebuildIR:
@@ -81,7 +82,9 @@ public:
     // Per-mode FFT size lookup (T2d locked HQE at 512). EQ8DSP::PhaseMode
     // values: 0 Standard / 1 Linear / 2 HQ+ / 3 HQ Linear / 4 HQ Extended.
     // Standard + HQ+ return 0 (no linear processing); the others return the
-    // per-spec FFT size.
+    // per-spec FFT size.  NOT the authority for what actually gets prepared:
+    // EQ8DSP::linearFftSize wraps this and substitutes the user's Linear Phase
+    // Precision for the plain Linear mode.
     static int fftSizeForMode (int phaseMode) noexcept;
 
 private:

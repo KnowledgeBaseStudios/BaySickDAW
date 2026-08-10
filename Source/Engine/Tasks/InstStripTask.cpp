@@ -1,5 +1,6 @@
 #include "InstStripTask.h"
 #include "../FrozenSourceRead.h"   // TS7 6.8: scope-matched frozen block read
+#include "../ChannelBufferArena.h"   // kChannelsPerStrip (scratch pre-size)
 #include "../../VibeGraph.h"
 #include "../../PluginProcessor.h"
 #include "../../DSP/EngineSidechainHelper.h"
@@ -20,6 +21,17 @@ InstStripTask::InstStripTask (juce::AudioProcessor* engine,
       mPrefix ("mixer_inst_" + juce::String (index))
 {
     this->channelId = channelIdIn;
+
+    // Scratch buffers are grown to a whole arena-sized block HERE, on the
+    // message thread.  run() executes on pool workers, and its per-block setSize
+    // calls only skip the allocator while allocatedBytes already covers the
+    // request (juce::AudioBuffer::setSize, avoidReallocating branch) -- from a
+    // 0x0 buffer the first block that serves a recorded take, a freeze file or a
+    // Dry monitor flip would malloc on the render path instead.
+    const int maxBlock = juce::jmax (1, processor.mBlockSize);
+    mClipScratch   .setSize (ChannelBufferArena::kChannelsPerStrip, maxBlock, false, true, false);
+    mEngineScratch .setSize (ChannelBufferArena::kChannelsPerStrip, maxBlock, false, true, false);
+    mMonitorDryBuf .setSize (ChannelBufferArena::kChannelsPerStrip, maxBlock, false, true, false);
 }
 
 void InstStripTask::run()
@@ -48,15 +60,25 @@ void InstStripTask::run()
     // QA-Fb: hoisted above the FilePlay branch -- active now selects between
     // pure playback and the capture/monitor path below.  sfizz-active slots
     // ignore arm / listen - sfizz is the source, no live input.
+    // run() is on a pool worker (and on the audio callback itself via the
+    // main-as-worker pump), so building each id with juce::String every block is
+    // a heap allocation per param per strip.  Resolve once, then read through
+    // the cached pointers; an unresolved strip simply retries next block.
     auto& apvts = mProcessor->apvts;
-    const auto* armP    = apvts.getRawParameterValue (mPrefix + "_arm");
-    const auto* idxP    = apvts.getRawParameterValue (mPrefix + "_inputChannelIdx");
-    const auto* stereoP = apvts.getRawParameterValue (mPrefix + "_inputChannelStereo");
-    const auto* listenP = apvts.getRawParameterValue (mPrefix + "_listen");
+    if (mArmP    == nullptr) mArmP    = apvts.getRawParameterValue (mPrefix + "_arm");
+    if (mIdxP    == nullptr) mIdxP    = apvts.getRawParameterValue (mPrefix + "_inputChannelIdx");
+    if (mStereoP == nullptr) mStereoP = apvts.getRawParameterValue (mPrefix + "_inputChannelStereo");
+    if (mListenP == nullptr) mListenP = apvts.getRawParameterValue (mPrefix + "_listen");
     // QA-OctavePedal Task 5: live-monitor mode (0 = Dry raw input, 1 = With
     // Effect processed; default 1 = With Effect per Jeff 2026-07-18).  A
     // monitor-only fork applied around the engine render below.
-    const auto* monModeP    = apvts.getRawParameterValue (mPrefix + "_monitorMode");
+    if (mMonModeP == nullptr) mMonModeP = apvts.getRawParameterValue (mPrefix + "_monitorMode");
+
+    const auto* armP        = mArmP;
+    const auto* idxP        = mIdxP;
+    const auto* stereoP     = mStereoP;
+    const auto* listenP     = mListenP;
+    const auto* monModeP    = mMonModeP;
     const int   monitorMode = (monModeP != nullptr) ? (int) monModeP->load() : 1;
 
     const int  chIdx    = (idxP != nullptr) ? (int) idxP->load() : -1;
@@ -180,9 +202,17 @@ void InstStripTask::run()
 
     // ── Idle suspend (sfizz-source only) ─────────────────────────────────────
     // When the tab has no MIDI activity AND sfizz reports 0 active voices,
-    // skip the entire chain.  Wakes immediately on next block where any
-    // gate fails.  Live-input Inst tabs are NOT suspended (live audio +
-    // arm/listen can fire even with no MIDI).
+    // stop rendering the whole chain.  Wakes on the next block where any gate
+    // fails.  Live-input Inst tabs are NOT suspended (live audio + arm/listen
+    // can fire even with no MIDI).
+    //
+    // The skip takes out the insert chain as well as the engine, so it cannot
+    // be instantaneous: whatever the rack / NAM cab is still ringing would be
+    // cut off in one sample.  The hold expiring starts a fade instead, the
+    // chain keeps running at falling gain for its duration, and only then does
+    // the cheap cleared path take over (IdleSuspendFade.h).  Stays unity on
+    // every non-sfizz strip, where isUnity() below skips the ramp outright.
+    IdleSuspendFade::Ramp suspendRamp;
     if (sfizzActive)
     {
         int activeVoices = 0;
@@ -218,19 +248,25 @@ void InstStripTask::run()
             if (auto* b = mProcessor->getBaySickBasses (mIndex))
                 slideActive = b->isSlideActive();
 
+        bool holdExpired = false;
         if (midiEmpty && noVoices && ! auditionPending && ! slideActive)
         {
             auto& counter = mProcessor->mInstIdleBlocks[(size_t) mIndex];
             if (counter >= VibeSynthProcessor::kIdleSuspendBlocks)
-            {
-                mOutputBuffer->clear();   // suspended this block
-                return;
-            }
-            ++counter;
+                holdExpired = true;
+            else
+                ++counter;
         }
         else
         {
             mProcessor->mInstIdleBlocks[(size_t) mIndex] = 0;   // wake
+        }
+
+        suspendRamp = mSuspendFade.advance (holdExpired, n, mProcessor->mSampleRate);
+        if (suspendRamp.suspended)
+        {
+            mOutputBuffer->clear();   // faded out already - suspended this block
+            return;
         }
     }
 
@@ -239,9 +275,9 @@ void InstStripTask::run()
         // 2026-05-06 (Batch 9b Item 8): dry-recorder tap (RAW pre-chain mono)
         // - captured here so the recorded file is the unprocessed DI; chain
         // runs ONCE on the dry source.  Only fire when ARMED (monitor-only
-        // mode produces no recording).  Pre-existing race risk between this
-        // read of mStripRecorders and message-thread mutation in startRecording
-        // / stopRecording is documented at the helper site; not closed.
+        // mode produces no recording).  tapDryRecorder gates its own read of
+        // mStripRecorders on the mStripTapsLive flag the message thread lowers
+        // before mutating that vector.
         if (armed)
             mProcessor->tapDryRecorder (channelId,
                                          snapshot->getReadPointer (chIdx),
@@ -349,6 +385,24 @@ void InstStripTask::run()
     // Unarmed + !listen: silent strip, nothing to clear.
     // QA-Fb: overlap blocks skip this -- live was already cleared pre-merge
     // and clearing here would kill the monitored prior takes.
+    //
+    // The two edits below land AFTER the chain pass, which is where the
+    // pre-fader tap was filled, so each has to be applied to the tap as well or
+    // a pre-fader send would carry signal this strip is not actually producing.
+    // Null unless this strip is a pre-fader send source, so it costs one
+    // relaxed load otherwise.
+    auto* preFaderTap = mGraph->getPreFaderTapBuffer (channelId);
+
     if (! filePlay && armed && ! listen)
+    {
         blockView.clear();
+        if (preFaderTap != nullptr) preFaderTap->clear();
+    }
+
+    // Idle-suspend envelope, applied last so it covers the whole strip output
+    // the suspend is about to stop producing - the insert chain's tail, not
+    // just the sampler's own voices.
+    IdleSuspendFade::apply (blockView, suspendRamp);
+    if (preFaderTap != nullptr)
+        IdleSuspendFade::apply (*preFaderTap, suspendRamp);
 }

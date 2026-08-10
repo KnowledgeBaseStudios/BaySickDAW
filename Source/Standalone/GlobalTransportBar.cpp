@@ -639,7 +639,6 @@ void GlobalTransportBar::setRecordMode(RecordMode m)
                               + (m == RecordMode::Audio
                                  ? "ASIO"
                                  : "MIDI (piano roll tabs only)"));
-    if (onRecordModeChanged) onRecordModeChanged (m);
 }
 
 void GlobalTransportBar::togglePlayPause()
@@ -902,7 +901,6 @@ void GlobalTransportBar::resized()
     auto b = getLocalBounds().reduced(4, 3);
 
     // Left side: transport buttons
-    int btnH  = b.getHeight();
     int btnW  = 34;
     int space = 3;
 

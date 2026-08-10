@@ -19,7 +19,8 @@ class VibeSynthProcessor;
 // ─────────────────────────────────────────────────────────────────────────────
 
 class PluginsPage final : public juce::Component,
-                          private juce::Timer
+                          private juce::Timer,
+                          private juce::ChangeListener
 {
 public:
     PluginsPage (VibeSynthProcessor& p, int pageIndex);
@@ -40,18 +41,39 @@ public:
     juce::String getEngineType() const;
 
     // Human-readable name for the ribbon / roll label; empty until picked.
+    // Carries the dead-plugin marker -- see getDisplayName.
     juce::String getPluginName() const;
 
     // Preset-name linkage (2026-08-02): the plugin's CURRENT program name when
     // it publishes one (in-process reads live; bridged reads the v4 relay),
     // else the plugin name.  Most modern synths run private preset browsers
     // the host cannot see -- those simply stay on the plugin name.
+    //
+    // While the hosted instance is NOT alive this instead returns the tab's own
+    // name with " (missing)" appended -- the same wording the rack slot uses, so
+    // the two surfaces cannot describe one condition two ways.  Built on the TAB
+    // name rather than the plugin's on purpose: this string rides a rename
+    // cascade, and sourcing it from the plugin would replace a name the user
+    // chose.  setTabName strips the marker straight back off, so it is display
+    // only and nothing the project persists ever carries it.
+    //
+    // For the same reason it reports the bare TAB name during a marker refresh
+    // -- see mInMarkerFire.
     juce::String getDisplayName() const;
 
-    // Delegates to EngineRig.  Rebuilds the hosted editor afterwards.
+    // Rebuild a hosted instance that is no longer alive, keeping its settings
+    // (EngineRig::retryDeadPluginTab), then refresh every surface that cached
+    // the old one.  True when the rebuilt instance is alive.
+    bool retryDeadPlugin();
+
+    // Delegates to selectPluginById via the description's identifier string.
     void selectPlugin (const juce::PluginDescription&);
-    // Same, from the identifier the ribbon's "+" dropdown carries.  Resolves
-    // against the added list; a no-op if the plugin is no longer on it.
+    // The one route to EngineRig, also used by project restore, undo
+    // resurrection and page-preset load.  Rebuilds the hosted editor
+    // afterwards.  The rig owns description resolution (added list first, then
+    // the description stashed with the saved tab), so this never filters on the
+    // added list itself -- doing so would make that fallback unreachable and
+    // strand a restored tab with no engine.
     void selectPluginById (const juce::String& identifier);
 
     juce::AudioProcessor* getEngineProcessor() const;
@@ -103,8 +125,13 @@ public:
 private:
     UndoContext mUndoCtx;   // QA-UndoCoverage ruling 3a
     void timerCallback() override;
+    // The added-plugin list changing is the ONE "the user put the plugin back"
+    // signal, and it is edge-triggered by design: a plugin that is gone for good
+    // must not be retried on a clock forever.
+    void changeListenerCallback (juce::ChangeBroadcaster*) override;
     void rebuildEditor();
     void showPicker();
+    void refreshNameMarker();
 
     VibeSynthProcessor& mProcessor;
     int                 mPageIndex { 0 };
@@ -127,6 +154,21 @@ private:
     // Last display name the poll saw.  Empty = not yet learned; the first
     // arrival seeds quietly so restore state can't stomp a saved tab name.
     juce::String mLastDisplayName;
+
+    // Aliveness as the NAME surfaces last reported it.  Tracked apart from
+    // mBuiltAlive (which drives the editor rebuild) and apart from the display
+    // name: a project that restores with its plugin already missing never sees
+    // the name CHANGE, so the marker cannot ride the quiet-first-arrival watch
+    // above.  Deliberately NOT reset by rebuildEditor -- the revival's dead ->
+    // alive edge is the one that takes the marker back off.
+    bool mNameAlive { true };
+
+    // Set across the marker's whole rename cascade, which reads the name more
+    // than once, and hanging off "this fire is decoration, not an edit": it
+    // makes getDisplayName report the tab's own name on the revival edge, where
+    // the live branch's PROGRAM name would overwrite the name the user typed --
+    // the one thing the marker exists not to do.
+    bool mInMarkerFire { false };
 
     // Dirty baseline for the delete prompt: the touch counter + program name
     // at the tab's resting point.  requestDelete offers save-and-delete only

@@ -88,9 +88,8 @@ void MasterAnalyzerView::refreshVersions()
 {
     if (! mSourceBox) return;
 
-    // Rebuild wholesale: takes only ever append, but a clearAll can empty the
-    // list, and reconciling two orderings by hand is how a picker ends up
-    // pointing at the wrong take.
+    // Rebuild wholesale rather than appending the new take: reconciling two
+    // orderings by hand is how a picker ends up pointing at the wrong take.
     mRebuildingList = true;
     mSourceBox->clear (juce::dontSendNotification);
     mSourceBox->addItem ("Live", 1);   // ids are takeId + 1; 0 is not a legal id

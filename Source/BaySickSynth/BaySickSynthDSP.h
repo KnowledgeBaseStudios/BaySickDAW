@@ -117,7 +117,6 @@ private:
     int                 mLegatoSynthNote { -1 };
 
     void handleLegatoMidi (juce::MidiBuffer& midi);
-    BaySickSynthVoice* findVoiceForNote (int note);
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (BaySickSynthDSP)
 };

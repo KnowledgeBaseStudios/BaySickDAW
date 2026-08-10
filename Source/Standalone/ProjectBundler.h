@@ -58,12 +58,15 @@ namespace ProjectBundler
         bool              ok { false };
         juce::String      error;
         juce::StringArray missing;      // stored paths that resolved to nothing
-        int               filesCopied { 0 };
+        // What did not make it into the bundle intact: a source that would not
+        // copy, or a project.xml whose references could not be updated.
+        juce::StringArray copyFailed;
+        int               filesCopied { 0 };   // files this call added, not references to them
     };
 
     // Enumerates the audio references reachable from the pattern data: the
-    // project's audio library plus every arrangement block's audioFilePath,
-    // across every pattern.
+    // project's audio library plus every arrangement block's audioFilePath (the
+    // arrangement is project-global, not per-pattern).
     //
     // Every file reference the project depends on.
     //
@@ -74,11 +77,17 @@ namespace ProjectBundler
     // base64 engine-state blobs that have to be decoded.  Passing nullptr limits
     // the result to PatternManager references (the pre-2026-07-26 behaviour).
     //
+    // `rackStatesXml`, when supplied, is a VibeGraph::saveRackStates snapshot.
+    // Effects that hold user files (the Acoustic units' user IRs) can sit in
+    // any bus or insert rack, and those live under project.xml's <Processor>
+    // rather than <Tabs> -- without this the walk never sees them.
+    //
     // Non-const PatternManager only because getBlock() has no const overload;
     // this reads and never mutates.
     std::vector<Reference> enumerate (PatternManager& pm,
                                       const VibeSynthProcessor& processor,
-                                      const juce::XmlElement* tabsXml = nullptr);
+                                      const juce::XmlElement* tabsXml = nullptr,
+                                      const juce::XmlElement* rackStatesXml = nullptr);
 
     // Total bytes the bundle will copy under this scope, so the user is told the
     // size BEFORE a multi-hundred-MB write rather than after.
@@ -86,6 +95,13 @@ namespace ProjectBundler
 
     // Writes the bundle.  `projectFolder` is the source project directory.
     // Missing files are REPORTED, never silently dropped.
+    //
+    // Copied files are RE-REFERENCED: the bundle's own project.xml is rewritten
+    // so every file this call relocated into Samples/ is referenced at its new
+    // location (including a " (N)" rename forced by a basename collision).
+    // Without that the copies sit in the bundle referenced by nothing and the
+    // destination machine reports them missing -- so a rewrite that could not
+    // be completed lands in `copyFailed` rather than passing as a clean export.
     Result write (const std::vector<Reference>& refs,
                   const juce::File& projectFolder,
                   const juce::File& destination,

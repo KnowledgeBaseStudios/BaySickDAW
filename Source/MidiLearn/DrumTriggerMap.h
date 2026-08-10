@@ -103,8 +103,9 @@ public:
 
     // ── Audio thread ─────────────────────────────────────────────────────────
     // Fast-path bypass: one atomic load that says whether ANY drum has a
-    // binding, so the per-block dispatch can skip its 16-slot scan entirely
-    // until the user actually binds something (reference_audio_thread_fast_path_bypass).
+    // binding, so the per-block dispatch can skip its kMaxDrumPages-slot scan
+    // entirely until the user actually binds something
+    // (reference_audio_thread_fast_path_bypass).
     bool anyBound() const noexcept { return mAnyBound.load (std::memory_order_acquire); }
 
     // Lock-free acquire-load of one drum's binding.

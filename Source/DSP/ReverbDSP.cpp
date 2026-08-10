@@ -1698,7 +1698,7 @@ bool ReverbDSP::processRoom (juce::AudioBuffer<float>& buffer) noexcept
 // buffers from the main 8-line Hall FDN.
 //
 // Decay control: per-line feedback gain from user mDecay.  Damping LP
-// fixed-aggressive at ~mVbDampAlpha (low-cut in feedback so the tail
+// biased below the user's mHighDampHz (high-cut in feedback so the tail
 // stays dark and "small-room"-like).
 //
 // Returns false if buffers aren't sized.

@@ -1,5 +1,6 @@
 #include "HostedPluginEffect.h"
 #include "SandboxedPluginClient.h"
+#include "../MissingFileReport.h"
 
 namespace Hosting
 {
@@ -15,6 +16,11 @@ void HostedPluginEffect::setPlugin (const juce::PluginDescription& desc)
     // Fresh instance -- the playhead attaches to the NEW one on the next
     // transport push, not the destroyed one.
     mPlayHeadAttached = false;
+
+    // Before prepareToPlay, so the plugin allocates for the mode it will
+    // actually run in rather than being switched immediately afterwards.
+    if (mNonRealtime)
+        mHosted->setNonRealtime (true);
 
     if (mPreparedRate > 0.0)
     {
@@ -93,6 +99,26 @@ void HostedPluginEffect::setHostTransport (const DSPBase::HostTransport& tp)
     }
 }
 
+// Value-change gated: a plugin's setNonRealtime can be non-trivial (the bridge
+// helper gates its own forwarding for the same reason), and the offline sweep
+// runs over every slot of every rack on both edges of a render.
+void HostedPluginEffect::setNonRealtime (bool b) noexcept
+{
+    if (b == mNonRealtime)
+        return;
+
+    mNonRealtime = b;
+
+    if (mHosted != nullptr)
+        mHosted->setNonRealtime (b);
+}
+
+void HostedPluginEffect::setNonRealtime (DSPBase* dsp, bool b) noexcept
+{
+    if (auto* self = dynamic_cast<HostedPluginEffect*> (dsp))
+        self->setNonRealtime (b);
+}
+
 int HostedPluginEffect::getLatencySamples() const
 {
     // BLU-301: EffectRack accumulates this and pokes VibeGraph's bus PDC, so a
@@ -164,7 +190,19 @@ void HostedPluginEffect::setStateInformation (const void* data, int size)
     if (mHosted == nullptr)
     {
         if (auto desc = HostedPluginInstance::descriptionFromState (data, size))
+        {
             setPlugin (*desc);
+
+            // A plugin whose DLL moved used to restore silently and then present
+            // as a working effect, so it goes into the same missing-file dialog
+            // the sample- and capture-owning engines already feed.  IN-PROCESS
+            // FAILURES ONLY: a bridged plugin's load result arrives async over
+            // the wire, long after this returns -- that case is caught by the
+            // live "(missing)" name the rack row and window title render.
+            if (mHosted != nullptr && ! mHosted->isAlive())
+                MissingFileReport::add ("VST3 plugin (failed to load)",
+                                        desc->fileOrIdentifier);
+        }
     }
 
     if (mHosted != nullptr)

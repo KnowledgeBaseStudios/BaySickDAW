@@ -1,6 +1,7 @@
 #include "RibbonTabBar.h"
 #include "SharedUI.h"
 #include "../Hosting/PluginManager.h"   // QA-ModelShell TS6: added instrument list
+#include "../MissingFileReport.h"       // kNameSuffix (substituted-kit marker)
 
 // ── Colour helpers ───────────────────────────────────────────────────────────
 juce::Colour RibbonTabBar::tabColour(TabType type, bool active)
@@ -309,7 +310,13 @@ juce::String RibbonTabBar::getSlotDisplayName(int slotIndex) const
         if (type == TabType::Drums)  return "Drums";
         return {};
     }
-    return (tab->locked ? juce::String("[L] ") : juce::String()) + tab->name;
+    // Both decorations compose OUTSIDE Tab::name.  getTabName, the rename
+    // dialog seed and the saved-pattern-name path all read the raw name, so a
+    // decorated string cannot round-trip into anything persisted.
+    return (tab->locked ? juce::String("[L] ") : juce::String())
+         + tab->name
+         + (tab->kitMissing ? juce::String (MissingFileReport::kNameSuffix)
+                            : juce::String());
 }
 
 void RibbonTabBar::setTabLocked (int tabId, bool locked)
@@ -335,6 +342,22 @@ bool RibbonTabBar::isTabLocked (int tabId) const
     if (auto* t = getTabById (tabId))
         return t->locked;
     return false;
+}
+
+void RibbonTabBar::setTabKitMissing (int tabId, bool missing)
+{
+    for (auto& t : mTabs)
+    {
+        if (t.id == tabId)
+        {
+            if (t.kitMissing != missing)
+            {
+                t.kitMissing = missing;
+                repaint();
+            }
+            return;
+        }
+    }
 }
 
 void RibbonTabBar::moveTabOfType (TabType type, int srcRowOfType, int dstRowOfType)
@@ -535,7 +558,7 @@ void RibbonTabBar::mouseDown(const juce::MouseEvent& e)
 // The "+" menu.  Every way to bring a page into existence lives here, including
 // the routes that used to be buried in a populated type's dropdown (so they
 // were unreachable at zero instances) or on another page entirely.
-void RibbonTabBar::showAddMenu (juce::Rectangle<int> slotBounds)
+juce::PopupMenu RibbonTabBar::buildAddMenu()
 {
     // Jeff spec 2026-07-28: every entry is an ENGINE name, and the engine
     // decides the tab.  Engines that can live in more than one tab get a side
@@ -625,21 +648,41 @@ void RibbonTabBar::showAddMenu (juce::Rectangle<int> slotBounds)
     const bool rustyLive = onIsBaySickRustyDrumsActive && onIsBaySickRustyDrumsActive();
     m.addItem (3, "BaySickRustyDrums", ! rustyLive);
 
-    m.showMenuAsync (juce::PopupMenu::Options{}
+    return m;
+}
+
+// Split from buildAddMenu so the master Edit menu can embed the SAME list as a
+// submenu instead of keeping its own copy -- a second hand-written copy of this
+// list is exactly what went stale before (Edit offered three page-type entries
+// while the "+" had long since moved to engine names).  Both callers build the
+// menu here and dispatch here; mAddMenuChoices is populated by the build and
+// read by the dispatch, so the two must stay paired.
+bool RibbonTabBar::isAddMenuId (int resultId) noexcept
+{
+    // 1-3 are the three sfizz engines' dedicated spawn routes; everything else
+    // the menu offers is kAddEngineBaseId + index.
+    return (resultId >= 1 && resultId <= 3) || resultId >= kAddEngineBaseId;
+}
+
+void RibbonTabBar::handleAddMenuResult (int r)
+{
+    if (r <= 0) return;
+    if (r == 1) { if (onAddBaySickGuitarsRequest)    onAddBaySickGuitarsRequest();    return; }
+    if (r == 2) { if (onAddBaySickBassesRequest)     onAddBaySickBassesRequest();     return; }
+    if (r == 3) { if (onAddBaySickRustyDrumsRequest) onAddBaySickRustyDrumsRequest(); return; }
+
+    const int idx = r - kAddEngineBaseId;
+    if (idx >= 0 && idx < (int) mAddMenuChoices.size() && onAddEngineRequest)
+        onAddEngineRequest (mAddMenuChoices[(size_t) idx].type,
+                            mAddMenuChoices[(size_t) idx].engine);
+}
+
+void RibbonTabBar::showAddMenu (juce::Rectangle<int> slotBounds)
+{
+    buildAddMenu().showMenuAsync (juce::PopupMenu::Options{}
                         .withTargetComponent (this)
                         .withTargetScreenArea (localAreaToGlobal (slotBounds)),
-        [this] (int r)
-        {
-            if (r <= 0) return;
-            if (r == 1) { if (onAddBaySickGuitarsRequest)    onAddBaySickGuitarsRequest();    return; }
-            if (r == 2) { if (onAddBaySickBassesRequest)     onAddBaySickBassesRequest();     return; }
-            if (r == 3) { if (onAddBaySickRustyDrumsRequest) onAddBaySickRustyDrumsRequest(); return; }
-
-            const int idx = r - kAddEngineBaseId;
-            if (idx >= 0 && idx < (int) mAddMenuChoices.size() && onAddEngineRequest)
-                onAddEngineRequest (mAddMenuChoices[(size_t) idx].type,
-                                    mAddMenuChoices[(size_t) idx].engine);
-        });
+        [this] (int r) { handleAddMenuResult (r); });
 }
 
 // ── Dropdown menus ───────────────────────────────────────────────────────────
@@ -665,10 +708,6 @@ void RibbonTabBar::showDropdown(int slotIndex)
     case TabType::Vox:
     case TabType::Inst:
     case TabType::Plugins:
-        // G-6 (2026-04-29): always show the dropdown - even at 0 instances -
-        // so the +Add entry is reachable.  showInstanceDropdown handles the
-        // 0-instance case by showing only the +Add (skipping Pages/Rename/
-        // Delete which have no active instance to operate on).
         showInstanceDropdown(type, arrowR);
         break;
     default:
@@ -736,12 +775,19 @@ void RibbonTabBar::showInstanceDropdown(TabType type, juce::Rectangle<int> tabBo
     // ONLY the +Add (clean UX - nothing to navigate to or rename otherwise).
     if (count > 0)
     {
-        // List all instances - tick mark on the active one, "[L] " prefix if locked
+        // List all instances - tick mark on the active one, "[L] " prefix if
+        // locked, " (missing)" suffix on a substituted kit.  The slot itself
+        // can only show the ACTIVE tab's marker, so this is where a user sees
+        // which instance is the wrong one.
         for (auto& tab : mTabs)
         {
             if (tab.type == type)
             {
-                const juce::String label = (tab.locked ? juce::String("[L] ") : juce::String()) + tab.name;
+                const juce::String label =
+                    (tab.locked ? juce::String("[L] ") : juce::String())
+                    + tab.name
+                    + (tab.kitMissing ? juce::String (MissingFileReport::kNameSuffix)
+                                      : juce::String());
                 m.addItem(tab.id, label, true, tab.id == activeId);
             }
         }

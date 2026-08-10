@@ -1,8 +1,9 @@
 #include "DrumKitGrid.h"
+#include "../VibeGraph.h"        // MixerChannelIds::kDrumPagesPerBank -- the drum-bank split
 #include "PianoRoll.h"           // T9 (L29): shared lane height/visibility statics on ControlLane
 #include "TypingKeyboardMap.h"   // D-4: bypass tool keys while typing-keyboard mode is on
 #include "../G3PlayheadDiag.h"   // [G3 PLAYHEAD] G-9 reading (QA-G3Smoke Task 1); Debug-only
-#include <numeric>
+#include <limits>
 #include <algorithm>
 #include <map>
 #include <set>
@@ -103,13 +104,22 @@ DrumKitSidebar::DrumKitSidebar()
         mSoloBtns[i] = std::move(s);
     }
 
-    // 2026-04-26: thin Global Lock/Unlock button in the ruler row above the
-    // picker dropdowns.  Toggles every drum slot's locked state in one click
-    // (with a confirm-prompt the user can opt out of via "Don't show again").
-    mGlobalLockBtn = std::make_unique<TextButton>("Global Lock/Unlock");
-    mGlobalLockBtn->setTooltip("Lock or unlock every drum slot at once");
+    // Thin lock/unlock button in the ruler row above the picker dropdowns.
+    // Locks the drums of the kit on screen in one click (with a confirm-prompt
+    // the user can opt out of via "Don't show again").
+    mGlobalLockBtn = std::make_unique<TextButton>("Lock/Unlock");
     mGlobalLockBtn->onClick = [this] { if (onGlobalLockRequested) onGlobalLockRequested(); };
     addAndMakeVisible(*mGlobalLockBtn);
+    setKitViewPage(0);
+}
+
+void DrumKitSidebar::setKitViewPage(int page)
+{
+    if (! mGlobalLockBtn) return;
+    const String kit = (page == 1 ? "17-32" : "1-16");
+    mGlobalLockBtn->setButtonText("Lock/Unlock " + kit);
+    mGlobalLockBtn->setTooltip("Lock or unlock every drum in kit " + kit
+                              + ". The other kit is not affected.");
 }
 
 void DrumKitSidebar::setRowMetrics(int rulerH, int rowH)
@@ -195,7 +205,7 @@ void DrumKitSidebar::resized()
 {
     const auto b = getLocalBounds();
 
-    // Global Lock/Unlock button sits in the ruler band, spanning the same
+    // Lock/Unlock button sits in the ruler band, spanning the same
     // horizontal range as the picker column directly below it.
     if (mGlobalLockBtn)
     {
@@ -500,13 +510,6 @@ int DrumKitGrid::rowToPageIndex(int rowIdx) const
     return mRowsCache[rowIdx].pageIndex;
 }
 
-int DrumKitGrid::pageIndexToRow(int pageIdx) const
-{
-    for (int r = 0; r < (int) mRowsCache.size(); ++r)
-        if (mRowsCache[r].pageIndex == pageIdx) return r;
-    return -1;
-}
-
 PianoRollData* DrumKitGrid::rollForRow(int rowIdx) const
 {
     const int pageIdx = rowToPageIndex(rowIdx);
@@ -620,8 +623,10 @@ void DrumKitGrid::applySnapshot(const DrumKitSnapshot& snap)
     if (onUndoRedoStateChanged) onUndoRedoStateChanged();
 }
 
-// Undoable action wrapper for drum-kit edits.  Stores a snapshot of all 16
-// drumRolls; redo restores `after`, undo restores `before`.  mFirstPerform
+// Undoable action wrapper for drum-kit edits.  Snapshots all kMaxDrumPages
+// drumRolls -- BOTH kits, not just the one on screen, so one Ctrl+Z is correct
+// no matter which kit the edit was made in and which is showing when it is
+// undone.  Redo restores `after`, undo restores `before`.  mFirstPerform
 // matches PianoRollEditAction so the initial perform() (called from
 // commitEdit() right after the live edit was applied) is a no-op.
 class DrumKitEditAction : public juce::UndoableAction
@@ -3283,10 +3288,11 @@ DrumKitContainer::DrumKitContainer()
         if (mGrid) mGrid->mouseWheelMove(e, wheel);
     };
 
-    // 2026-04-26: forward sidebar's Global Lock/Unlock button click up to
-    // StandaloneEditor (via DrumPage → setGlobalLockHandler).
+    // Forward the sidebar's Lock/Unlock click up to StandaloneEditor, stamped
+    // with the kit on screen: the container is the only level that knows which
+    // of the two kits the button belongs to.
     mSidebar->onGlobalLockRequested = [this] {
-        if (onGlobalLockRequested) onGlobalLockRequested();
+        if (onGlobalLockRequested) onGlobalLockRequested(mKitViewPage);
     };
 
     // Toolbar.  QA-UICleanup Task 4: Tools wrench button removed; its popup folded
@@ -3373,14 +3379,15 @@ DrumKitContainer::DrumKitContainer()
     // Batch 5: Kit button.  Click defers to StandaloneEditor (wired via
     // onKitMenuRequested) which builds + shows the Save / Load Kit menu.
     mKitBtn = std::make_unique<TextButton>("Kit  v");
-    mKitBtn->setTooltip("Save / Load Kit (16-drum bundle)");
+    mKitBtn->setTooltip("Save / Load Kit (the 16 drums of the kit you are on)");
     mKitBtn->onClick = [this] {
         if (onKitMenuRequested) onKitMenuRequested(mKitBtn.get());
         if (mGrid) mGrid->grabKeyboardFocus();
     };
     addAndMakeVisible(*mKitBtn);
 
-    // QA-Layout T11 (D3): the two-sixteens view switch.
+    // The kit switch (QA-Layout T11 D3; QA-SOUNDNESS made the two sides
+    // independent kits with their own drums bus).
     auto makeViewBtn = [this](std::unique_ptr<TextButton>& btn, const char* label,
                               const char* tip, int page)
     {
@@ -3395,8 +3402,8 @@ DrumKitContainer::DrumKitContainer()
         };
         addAndMakeVisible(*btn);
     };
-    makeViewBtn(mKitView1Btn, "1-16",  "Show drums 1-16",  0);
-    makeViewBtn(mKitView2Btn, "17-32", "Show drums 17-32", 1);
+    makeViewBtn(mKitView1Btn, "1-16",  "Kit 1 - drums 1-16",  0);
+    makeViewBtn(mKitView2Btn, "17-32", "Kit 2 - drums 17-32", 1);
     mKitView1Btn->setToggleState(true, dontSendNotification);
 
     // Menu bar.
@@ -3407,7 +3414,7 @@ DrumKitContainer::DrumKitContainer()
     // Wire grid callbacks.
     mGrid->onZoom    = [this](float delta) { applyZoom((mPPB + delta) / mPPB); };
     mGrid->onZoomAnchored = [this](float f, int x) { applyZoomAnchored(f, x); };
-    mGrid->onHScroll = [this](double dB)   { mBeatOff = jmax(0.0, mBeatOff + dB); syncScrollState(); };
+    mGrid->onHScroll = [this](double dB)   { onHScrollDelta(dB); };
     mGrid->onNotesChanged = [this]
     {
         if (mLane) mLane->repaint();
@@ -3502,13 +3509,14 @@ void DrumKitContainer::repitchDrumHits(int pageIdx, int oldNote, int newNote)
 }
 
 // QA-Layout T11 (D3): the container holds the RAW provider/handlers; children
-// see only the active sixteen and their row indices are translated back to
+// see only the active kit and their row indices are translated back to
 // raw indices before the stored handlers fire (handlers index the raw list).
 std::vector<DrumKitRowInfo> DrumKitContainer::filteredKitRows() const
 {
     std::vector<DrumKitRowInfo> out;
     if (! mRawRowProvider) return out;
-    const int lo = mKitViewPage * 16, hi = lo + 16;
+    const int lo = mKitViewPage * MixerChannelIds::kDrumPagesPerBank;
+    const int hi = lo + MixerChannelIds::kDrumPagesPerBank;
     for (auto& r : mRawRowProvider())
         if (r.pageIndex >= lo && r.pageIndex < hi)
             out.push_back (r);
@@ -3551,8 +3559,10 @@ void DrumKitContainer::setKitViewPage (int page)
     mKitViewPage = page;
     if (mKitView1Btn) mKitView1Btn->setToggleState (page == 0, juce::dontSendNotification);
     if (mKitView2Btn) mKitView2Btn->setToggleState (page == 1, juce::dontSendNotification);
+    if (mSidebar) mSidebar->setKitViewPage (page);
     refreshKitView();
     repaint();
+    if (onKitViewPageChanged) onKitViewPageChanged (page);
 }
 
 void DrumKitContainer::setRowClickHandler(std::function<void(int, juce::Component*)> fn)
@@ -3836,26 +3846,45 @@ void DrumKitContainer::resized()
     if (mMenuBar) mMenuBar->setBounds(b.removeFromTop(kMenuBarH));
 
     auto row1 = b.removeFromTop(kToolbarH);
+
+    // Kit is pinned to the far-right end (like the other players' preset buttons)
+    // with the 1-16 / 17-32 bank switch beside it; the context label fills what
+    // is left in the middle.  This whole cluster is reserved BEFORE the left-hand
+    // controls take their bite: laying left-to-right first let the fixed-width
+    // tool strip swallow the row at the Piano Roll window's 691 px floor, and
+    // removeFromRight then clamped both bank toggles to zero width -- the bank
+    // switch was invisible and unclickable at ship defaults.  The seven tool
+    // buttons are the row's only elastic element, so they absorb the shortfall.
+    constexpr int kKitW    = 46;
+    constexpr int kBankHiW = 48;
+    constexpr int kBankLoW = 44;
+
+    auto rightCluster = row1.removeFromRight (kKitW + kBankHiW + kBankLoW);
+    if (mKitBtn)      mKitBtn     ->setBounds (rightCluster.removeFromRight (kKitW)   .reduced (2, 3));
+    if (mKitView2Btn) mKitView2Btn->setBounds (rightCluster.removeFromRight (kBankHiW).reduced (2, 3));
+    if (mKitView1Btn) mKitView1Btn->setBounds (rightCluster.removeFromRight (kBankLoW).reduced (2, 3));
+
     row1.removeFromLeft(4);
     mMagnetBtn->setBounds(row1.removeFromLeft(38).reduced(2, 3));
     row1.removeFromLeft(4);
+
+    // Must track the literals consumed below, between the tool strip and the
+    // context label -- it is what the elastic tool width is measured against.
+    constexpr int kTrailingW = 4 + 48 + 48 + 2 + 22 + 6 + 28 + 28;
+    constexpr int kToolWMax  = 62;   // matches Builder's tool strip
+    constexpr int kToolWMin  = 34;   // narrowest that still fits "Slice" / "Paint"
+    const int toolW = jlimit (kToolWMin, kToolWMax, (row1.getWidth() - kTrailingW) / 7);
+
     for (int i = 0; i < 7; ++i)
-        mToolBtns[i]->setBounds(row1.removeFromLeft(62).reduced(2, 3));   // 2026-04-26: 36→62 to match Builder
+        mToolBtns[i]->setBounds(row1.removeFromLeft(toolW).reduced(2, 3));
     row1.removeFromLeft(4);
-    mUndoBtn   ->setBounds(row1.removeFromLeft(48).reduced(2, 3));        // 40→48
-    mRedoBtn   ->setBounds(row1.removeFromLeft(48).reduced(2, 3));        // 40→48
+    mUndoBtn   ->setBounds(row1.removeFromLeft(48).reduced(2, 3));
+    mRedoBtn   ->setBounds(row1.removeFromLeft(48).reduced(2, 3));
     row1.removeFromLeft(2);
     mHistoryBtn->setBounds(row1.removeFromLeft(22).reduced(2, 3));
     row1.removeFromLeft(6);
-    // 2026-04-26: 22→28 so the +/- glyphs fit.
     mZoomOutBtn->setBounds(row1.removeFromLeft(28).reduced(2, 3));
     mZoomInBtn ->setBounds(row1.removeFromLeft(28).reduced(2, 3));
-    // QA-UICleanup Task 3 (SC9): Kit button pinned to the far-right end (like the
-    // other players' preset buttons); context label fills the space to its left.
-    if (mKitBtn) mKitBtn->setBounds(row1.removeFromRight(46).reduced(2, 3));
-    // QA-Layout T11 (D3): two-sixteens switch beside the Kit button.
-    if (mKitView2Btn) mKitView2Btn->setBounds(row1.removeFromRight(48).reduced(2, 3));
-    if (mKitView1Btn) mKitView1Btn->setBounds(row1.removeFromRight(44).reduced(2, 3));
     if (mContextLabel)
     {
         row1.removeFromLeft(8);

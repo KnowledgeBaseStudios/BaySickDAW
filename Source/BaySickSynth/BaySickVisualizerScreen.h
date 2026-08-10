@@ -1,4 +1,5 @@
 #pragma once
+#include <atomic>
 #include <JuceHeader.h>
 
 // ── BaySickVisualizerScreen ───────────────────────────────────────────────────
@@ -11,8 +12,10 @@
 //   3 - FLT ENV  : Same animated ADSR graph, filter envelope values
 //   4 - LFO      : Continuously scrolling LFO waveform (timer 30fps), cyan
 //
-// All graphs update via APVTS parameter listeners that trigger repaint().
-// The LFO tab additionally uses a juce::Timer for continuous scroll animation.
+// APVTS parameter listeners mark the screen dirty; the 30 fps timer issues the
+// actual repaint.  The listener fires on whichever thread wrote the parameter,
+// and during an offline render that is the render thread -- calling repaint()
+// there touches JUCE UI state from a non-message thread.
 // ─────────────────────────────────────────────────────────────────────────────
 class BaySickVisualizerScreen : public juce::Component,
                                  private juce::AudioProcessorValueTreeState::Listener,
@@ -60,6 +63,11 @@ private:
     float                               mLFOPhase           { 0.0f };
     juce::Colour                        mLedColour;
     std::atomic<float>*                 mEffectiveLfoRate   { nullptr };
+
+    // THREAD SAFETY: set by parameterChanged on the writer's thread, consumed
+    // by timerCallback on the message thread.  The timer already runs
+    // unconditionally at 30 fps, so this needs no lifecycle of its own.
+    std::atomic<bool>                   mNeedsRepaint       { false };
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (BaySickVisualizerScreen)
 };

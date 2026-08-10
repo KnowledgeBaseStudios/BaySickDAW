@@ -193,6 +193,13 @@ void StandalonePlayHead::rebuildTimeline (double forwardTempoOverride,
                                           bool   rebaseWhilePlaying)
 {
     // Message thread only (the timeline's single writer).
+    //
+    // sr is baked into every segment's sample position, so the published map is
+    // only valid for the rate it was built at.  Nothing here can notice a device
+    // rate change -- rebuilds are driven by tempo edits -- so the republish on a
+    // rate change is triggered from StandaloneEditor::pollDenoiseState's device
+    // watch, which compares TempoMap::gSampleRate against the live device and
+    // calls the normal publish path (pushTempoMarkersToPlayHead).
     const double  sr  = juce::jmax (1.0, mSampleRate.load());
     const int64_t now = mSamplePos.load();
 
@@ -1106,10 +1113,11 @@ void VibesynthStandaloneApp::initialise(const juce::String&)
     mDeviceManager->addChangeListener(this);
 
     // C.3 (2026-04-30): hardware MIDI input.  After initialise reads the saved
-    // device-state XML, enumerate all detected MIDI inputs and register the
-    // app as a callback for each.  First-launch default = enable all (Q1=B
-    // multi-device, all on); subsequent launches respect the saved state by
-    // only enabling devices that already had a MIDIINPUT entry in the XML.
+    // device-state XML, enumerate all detected MIDI inputs and settle which are
+    // enabled, then register the app as a callback once for all of them.
+    // First-launch default = enable all (Q1=B multi-device, all on); subsequent
+    // launches respect the saved state by only enabling devices that already
+    // had a MIDIINPUT entry in the XML.
     {
         bool anySavedMidiState = false;
         juce::StringArray savedMidiIds;
@@ -1146,15 +1154,21 @@ void VibesynthStandaloneApp::initialise(const juce::String&)
             }
 
         const bool enableAll = ! anySavedMidiState || ! savedMatchesAnyDevice;
-        for (const auto& d : availableMidi)
-        {
-            if (enableAll)
+        if (enableAll)
+            for (const auto& d : availableMidi)
                 mDeviceManager->setMidiInputDeviceEnabled (d.identifier, true);
-            // Register the callback for every available device.  JUCE only
-            // invokes it while the device is enabled, so toggling
-            // setMidiInputDeviceEnabled later is sufficient.
-            mDeviceManager->addMidiInputDeviceCallback (d.identifier, this);
-        }
+
+        // ONE registration with an EMPTY identifier, which is JUCE's own
+        // standalone pattern (juce_StandaloneFilterWindow.h).  Per-device
+        // registration cannot work here: addMidiInputDeviceCallback stores a
+        // concrete identifier only while that device is already enabled
+        // (juce_AudioDeviceManager.cpp), and setMidiInputDeviceEnabled never
+        // adds one back -- so a device plugged in after launch, or one enabled
+        // from Settings afterwards, would be listed and ticked while silently
+        // delivering nothing.  The empty entry is stored unconditionally and
+        // dispatched for every currently-enabled source, so per-device
+        // enablement still gates MIDI exactly as before.
+        mDeviceManager->addMidiInputDeviceCallback ({}, this);
 
         // G1 boundary diagnostics (2026-07-08, Keep): append the MIDI
         // enumeration story to audio_setup_log.txt - "(no MIDI devices
@@ -1288,16 +1302,13 @@ void VibesynthStandaloneApp::shutdown()
         shutdownOverlay->setStepLabel ("Releasing audio device...");
     if (mDeviceManager)
         mDeviceManager->removeChangeListener(this);
-    // C.3 (2026-04-30): unregister MIDI input callbacks before tearing down
-    // the device manager.  Defensive: ~AudioDeviceManager would clear them
+    // C.3 (2026-04-30): unregister the MIDI input callback before tearing down
+    // the device manager.  Defensive: ~AudioDeviceManager would clear it
     // anyway, but explicit removal prevents any race against in-flight MIDI
-    // thread work during shutdown.
+    // thread work during shutdown.  Empty identifier to match the single
+    // registration in initialize().
     if (mDeviceManager)
-    {
-        const auto availableMidi = juce::MidiInput::getAvailableDevices();
-        for (const auto& d : availableMidi)
-            mDeviceManager->removeMidiInputDeviceCallback (d.identifier, this);
-    }
+        mDeviceManager->removeMidiInputDeviceCallback ({}, this);
     if (mDeviceManager && mAdvancer)
         mDeviceManager->removeAudioCallback(mAdvancer.get());
     mAdvancer      = nullptr;

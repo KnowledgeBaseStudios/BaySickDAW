@@ -1,5 +1,4 @@
 #include "BaySickRustyDrumsKitGraphic.h"
-#include "../AppPaths.h"
 #include "BaySickRustyDrumsProcessor.h"
 #include "BaySickAssets.h"
 #include <set>
@@ -62,15 +61,14 @@ const ArticDef* findArtic (const juce::String& label)
 
 // ── Default 13-piece layout (calibrated rect → ellipse) ──────────────────────
 // Converted from the previous rect calibration: cx = x + w/2, cy = y + h/2,
-// rx = w/2, ry = h/2, rotation = 0.  User can refine via Calibrate mode.
+// rx = w/2, ry = h/2, rotation = 0.
 struct DefaultEllipse
 {
     const char* label;
     float cx, cy, rx, ry, rotDeg, tiltDeg;
 };
 
-// Calibrated 2026-05-04 against `Assets/big_rusty_drums.png` via the in-app
-// "Calibrate Hitboxes" mode (drag/resize/rotate/tilt + Save Layout export).
+// Calibrated 2026-05-04 against `Assets/big_rusty_drums.png`.
 // 25 articulations matching the curated middle-ground list from J-8c spec.
 constexpr DefaultEllipse kDefaultEllipses[] = {
     { "Crash 17",                  326.1f, 202.9f, 289.6f,  81.7f,  -2.6f, -30.8f },
@@ -108,22 +106,7 @@ inline float effectiveRy (const auto& h) noexcept
     return h.ry * std::cos (t);
 }
 
-constexpr int kTiltHandleFill = 0xff7fffd4;   // distinct teal so tilt vs rotate are obvious
-
-constexpr int kSelectedOutline    = 0xffffe680;
-constexpr int kCalibUnselected    = 0xff4dd2ff;
-constexpr int kPressedOutline     = 0xffffaa55;
-constexpr int kHandleFill         = 0xffffe680;
-constexpr int kHandleOutline      = 0xff202020;
-constexpr int kRotationHandleFill = 0xff4dd2ff;
-}
-
-// ── Static API: articulation labels for the dropdown ─────────────────────────
-juce::StringArray BaySickRustyDrumsKitGraphic::getArticulationLabels()
-{
-    juce::StringArray a;
-    for (const auto& def : kArtics) a.add (def.label);
-    return a;
+constexpr int kOutlineBlue        = 0xff4dd2ff;
 }
 
 // ── Construction ─────────────────────────────────────────────────────────────
@@ -153,22 +136,7 @@ void BaySickRustyDrumsKitGraphic::resetLayoutToDefaults()
     mHitboxes.reserve (std::size (kDefaultEllipses));
     for (const auto& d : kDefaultEllipses)
         mHitboxes.push_back ({ d.label, d.cx, d.cy, d.rx, d.ry, d.rotDeg, d.tiltDeg });
-    mSelectedIdx = -1;
-    mHoverIdx    = -1;
-    repaint();
-}
-
-void BaySickRustyDrumsKitGraphic::setCalibrationMode (bool enabled)
-{
-    if (mCalibrationMode == enabled) return;
-    mCalibrationMode = enabled;
-    if (! enabled)
-    {
-        mSelectedIdx = -1;
-        mDragMode    = DragMode::None;
-    }
-    setMouseCursor (enabled ? juce::MouseCursor::NormalCursor
-                            : juce::MouseCursor::PointingHandCursor);
+    mHoverIdx = -1;
     repaint();
 }
 
@@ -233,79 +201,6 @@ void BaySickRustyDrumsKitGraphic::paintHitboxOutline (juce::Graphics& g, const H
 
     g.setColour (col);
     g.strokePath (p, juce::PathStrokeType (strokeW), finalXf);
-}
-
-void BaySickRustyDrumsKitGraphic::paintHitboxHandles (juce::Graphics& g, const Hitbox& h) const
-{
-    // Compute the 8 axis-aligned bounding-box handles in ellipse-local space,
-    // then transform each through rotation + translation + image→component.
-    // Tilt compresses the local Y, so handles use effective_ry.
-    const float eRy = effectiveRy (h);
-    const float lr[2] = { -h.rx,  h.rx };   // left / right
-    const float tb[2] = { -eRy,   eRy   };  // top / bottom
-    const float mid = 0.0f;
-
-    const juce::Point<float> centersLocal[8] = {
-        { lr[0], tb[0] },                 // NW
-        { mid,   tb[0] },                 // N
-        { lr[1], tb[0] },                 // NE
-        { lr[0], mid   },                 // W
-        { lr[1], mid   },                 // E
-        { lr[0], tb[1] },                 // SW
-        { mid,   tb[1] },                 // S
-        { lr[1], tb[1] },                 // SE
-    };
-
-    const float rad = juce::degreesToRadians (h.rotDeg);
-    const float c = std::cos (rad), s = std::sin (rad);
-
-    for (auto& cl : centersLocal)
-    {
-        const float ix = cl.x * c - cl.y * s + h.cx;
-        const float iy = cl.x * s + cl.y * c + h.cy;
-        const auto cp = componentPointFromImage ({ ix, iy });
-        const float hs = 7.0f;
-        juce::Rectangle<float> hr (cp.x - hs, cp.y - hs, hs * 2, hs * 2);
-        g.setColour (juce::Colour (kHandleFill));
-        g.fillRect (hr);
-        g.setColour (juce::Colour (kHandleOutline));
-        g.drawRect (hr, 1.0f);
-    }
-
-    // Rotation handle (Z-axis spin): small disc above the ellipse top, on a stalk.
-    const float stalkLen = juce::jmax (40.0f, eRy * 0.5f);
-    auto localToImage = [&] (juce::Point<float> loc) -> juce::Point<float> {
-        return { loc.x * c - loc.y * s + h.cx,
-                 loc.x * s + loc.y * c + h.cy };
-    };
-    const auto topImg = localToImage ({ 0.0f, -eRy });
-    const auto rotImg = localToImage ({ 0.0f, -eRy - stalkLen });
-    const auto topComp = componentPointFromImage (topImg);
-    const auto rcp     = componentPointFromImage (rotImg);
-
-    g.setColour (juce::Colour (kRotationHandleFill).withAlpha (0.75f));
-    g.drawLine (topComp.x, topComp.y, rcp.x, rcp.y, 1.5f);
-    g.setColour (juce::Colour (kRotationHandleFill));
-    g.fillEllipse (rcp.x - 7.0f, rcp.y - 7.0f, 14.0f, 14.0f);
-    g.setColour (juce::Colour (kHandleOutline));
-    g.drawEllipse (rcp.x - 7.0f, rcp.y - 7.0f, 14.0f, 14.0f, 1.0f);
-
-    // Tilt handle (X-axis perspective tilt): teal disc on the LEFT of the
-    // ellipse, on a stalk perpendicular to the rotation handle.  Drag it
-    // up/down (in image space, after rotation) to tilt the ellipse forward
-    // / backward - compresses the rendered + hit-tested ry.
-    const float tiltStalk = juce::jmax (40.0f, h.rx * 0.5f);
-    const auto leftImg = localToImage ({ -h.rx, 0.0f });
-    const auto tiltImg = localToImage ({ -h.rx - tiltStalk, 0.0f });
-    const auto leftComp = componentPointFromImage (leftImg);
-    const auto tcp      = componentPointFromImage (tiltImg);
-
-    g.setColour (juce::Colour (kTiltHandleFill).withAlpha (0.75f));
-    g.drawLine (leftComp.x, leftComp.y, tcp.x, tcp.y, 1.5f);
-    g.setColour (juce::Colour (kTiltHandleFill));
-    g.fillEllipse (tcp.x - 7.0f, tcp.y - 7.0f, 14.0f, 14.0f);
-    g.setColour (juce::Colour (kHandleOutline));
-    g.drawEllipse (tcp.x - 7.0f, tcp.y - 7.0f, 14.0f, 14.0f, 1.0f);
 }
 
 void BaySickRustyDrumsKitGraphic::paint (juce::Graphics& g)
@@ -441,43 +336,13 @@ void BaySickRustyDrumsKitGraphic::paint (juce::Graphics& g)
         g.setFont (juce::Font (juce::FontOptions (12.0f)));
     }
 
-    // Calibration mode: draw all ellipses + handles on selected.
-    if (mCalibrationMode)
-    {
-        for (size_t i = 0; i < mHitboxes.size(); ++i)
-        {
-            const auto& h = mHitboxes[i];
-            const bool isSelected = ((int) i == mSelectedIdx);
-            const bool unassigned = (h.label == "(unassigned)");
-
-            const auto col = unassigned ? juce::Colour (0xffff5555)
-                                        : juce::Colour (isSelected ? kSelectedOutline
-                                                                   : kCalibUnselected);
-            paintHitboxOutline (g, h, col.withAlpha (isSelected ? 0.95f : 0.55f),
-                                isSelected ? 3.0f : 1.5f);
-
-            // Label tag near the ellipse center
-            const auto cp = componentPointFromImage ({ h.cx, h.cy });
-            const juce::Rectangle<float> lblBg (cp.x - 80.0f, cp.y - 9.0f, 160.0f, 18.0f);
-            g.setColour (juce::Colour (0xff000000).withAlpha (0.7f));
-            g.fillRect (lblBg);
-            g.setColour (juce::Colours::white);
-            g.setFont (juce::Font (12.0f));
-            g.drawText (h.label, lblBg.reduced (4.0f, 0.0f),
-                        juce::Justification::centred, true);
-
-            if (isSelected) paintHitboxHandles (g, h);
-        }
-        return;
-    }
-
-    // Normal mode: only show a thin outline while a piece is held pressed.
+    // Only show a thin outline while a piece is held pressed.
     // Hover state (mHoverIdx) is still tracked for the tooltip, but no
     // visual ring on hover - keeps the kit photo unobscured during browsing.
     if (mPressedIdx >= 0 && mPressedIdx < (int) mHitboxes.size())
     {
         const auto& h = mHitboxes[(size_t) mPressedIdx];
-        paintHitboxOutline (g, h, juce::Colour (kCalibUnselected).withAlpha (0.9f), 1.5f);
+        paintHitboxOutline (g, h, juce::Colour (kOutlineBlue).withAlpha (0.9f), 1.5f);
     }
 
     if (mEngine != nullptr)
@@ -525,104 +390,10 @@ int BaySickRustyDrumsKitGraphic::hitTestPiece (juce::Point<float> screenPt) cons
     return best;
 }
 
-BaySickRustyDrumsKitGraphic::DragMode
-BaySickRustyDrumsKitGraphic::hitTestHandle (juce::Point<float> screenPt, int boxIdx) const
-{
-    if (boxIdx < 0 || boxIdx >= (int) mHitboxes.size()) return DragMode::None;
-    const auto& h = mHitboxes[(size_t) boxIdx];
-    const float eRy = effectiveRy (h);
-    const auto p = imagePointFromComponent (screenPt);
-    const auto loc = toEllipseLocal (h, p);
-    const float hot = kHandleHotImage;
-
-    auto near = [&] (float lx, float ly) {
-        return std::abs (loc.x - lx) <= hot && std::abs (loc.y - ly) <= hot;
-    };
-
-    // Rotation handle - sits above the ellipse top.
-    const float stalkLen = juce::jmax (40.0f, eRy * 0.5f);
-    if (near (0.0f, -eRy - stalkLen)) return DragMode::Rotate;
-
-    // Tilt handle - sits to the left of the ellipse.
-    const float tiltStalk = juce::jmax (40.0f, h.rx * 0.5f);
-    if (near (-h.rx - tiltStalk, 0.0f)) return DragMode::Tilt;
-
-    if (near (-h.rx, -eRy)) return DragMode::ResizeNW;
-    if (near ( 0.0f, -eRy)) return DragMode::ResizeN;
-    if (near ( h.rx, -eRy)) return DragMode::ResizeNE;
-    if (near (-h.rx,  0.0f)) return DragMode::ResizeW;
-    if (near ( h.rx,  0.0f)) return DragMode::ResizeE;
-    if (near (-h.rx,  eRy)) return DragMode::ResizeSW;
-    if (near ( 0.0f,  eRy)) return DragMode::ResizeS;
-    if (near ( h.rx,  eRy)) return DragMode::ResizeSE;
-
-    // Inside the ellipse → move
-    const float nx = loc.x / juce::jmax (1e-3f, h.rx);
-    const float ny = loc.y / juce::jmax (1e-3f, eRy);
-    if (nx * nx + ny * ny <= 1.0f) return DragMode::Move;
-
-    return DragMode::None;
-}
-
-void BaySickRustyDrumsKitGraphic::updateCursorForHover (juce::Point<float> screenPt)
-{
-    if (! mCalibrationMode)
-    {
-        setMouseCursor (juce::MouseCursor::PointingHandCursor);
-        return;
-    }
-
-    DragMode m = DragMode::None;
-    if (mSelectedIdx >= 0) m = hitTestHandle (screenPt, mSelectedIdx);
-    if (m == DragMode::None && hitTestPiece (screenPt) >= 0) m = DragMode::Move;
-
-    switch (m)
-    {
-        case DragMode::Move:                                  setMouseCursor (juce::MouseCursor::DraggingHandCursor); break;
-        case DragMode::Rotate:
-        case DragMode::Tilt:                                  setMouseCursor (juce::MouseCursor::PointingHandCursor); break;
-        case DragMode::ResizeN:  case DragMode::ResizeS:      setMouseCursor (juce::MouseCursor::TopEdgeResizeCursor); break;
-        case DragMode::ResizeW:  case DragMode::ResizeE:      setMouseCursor (juce::MouseCursor::LeftEdgeResizeCursor); break;
-        case DragMode::ResizeNW: case DragMode::ResizeSE:     setMouseCursor (juce::MouseCursor::TopLeftCornerResizeCursor); break;
-        case DragMode::ResizeNE: case DragMode::ResizeSW:     setMouseCursor (juce::MouseCursor::TopRightCornerResizeCursor); break;
-        default:                                              setMouseCursor (juce::MouseCursor::NormalCursor); break;
-    }
-}
-
 // ── Mouse interaction ────────────────────────────────────────────────────────
 void BaySickRustyDrumsKitGraphic::mouseDown (const juce::MouseEvent& e)
 {
-    if (mCalibrationMode)
-    {
-        if (mSelectedIdx >= 0)
-        {
-            const auto m = hitTestHandle (e.position, mSelectedIdx);
-            if (m != DragMode::None)
-            {
-                mDragMode          = m;
-                mDragStartImagePos = imagePointFromComponent (e.position);
-                mDragOriginalBox   = mHitboxes[(size_t) mSelectedIdx];
-                return;
-            }
-        }
-        const int idx = hitTestPiece (e.position);
-        if (idx >= 0)
-        {
-            mSelectedIdx       = idx;
-            mDragMode          = DragMode::Move;
-            mDragStartImagePos = imagePointFromComponent (e.position);
-            mDragOriginalBox   = mHitboxes[(size_t) idx];
-        }
-        else
-        {
-            mSelectedIdx = -1;
-            mDragMode    = DragMode::None;
-        }
-        repaint();
-        return;
-    }
-
-    // Audition mode - disabled when no kit is loaded (overlay state).
+    // Audition is disabled when no kit is loaded (overlay state).
     if (! mKitLoaded) return;
     const int idx = hitTestPiece (e.position);
     if (idx < 0) return;
@@ -668,103 +439,8 @@ void BaySickRustyDrumsKitGraphic::mouseDown (const juce::MouseEvent& e)
     repaint();
 }
 
-void BaySickRustyDrumsKitGraphic::mouseDrag (const juce::MouseEvent& e)
-{
-    if (! mCalibrationMode || mDragMode == DragMode::None || mSelectedIdx < 0) return;
-
-    const auto cur = imagePointFromComponent (e.position);
-    Hitbox h = mDragOriginalBox;
-
-    switch (mDragMode)
-    {
-        case DragMode::Move:
-        {
-            h.cx = mDragOriginalBox.cx + (cur.x - mDragStartImagePos.x);
-            h.cy = mDragOriginalBox.cy + (cur.y - mDragStartImagePos.y);
-            break;
-        }
-        case DragMode::Rotate:
-        {
-            // Angle from center to current cursor minus angle from center to drag start.
-            const float a0 = std::atan2 (mDragStartImagePos.y - h.cy, mDragStartImagePos.x - h.cx);
-            const float a1 = std::atan2 (cur.y - h.cy, cur.x - h.cx);
-            const float deltaDeg = juce::radiansToDegrees (a1 - a0);
-            h.rotDeg = mDragOriginalBox.rotDeg + deltaDeg;
-            break;
-        }
-        case DragMode::Tilt:
-        {
-            // Convert drag movement into ellipse-local space; the component
-            // of motion along the ellipse's local Y axis maps to tilt.
-            // Drag toward the ellipse center → less tilt; drag away → more.
-            const auto locStart = toEllipseLocal (mDragOriginalBox, mDragStartImagePos);
-            const auto locCur   = toEllipseLocal (mDragOriginalBox, cur);
-            // Vertical drag along local Y inversely affects how "edge-on"
-            // the ellipse is.  Scale so a few hundred pixels of drag covers
-            // the full 0..89° range.
-            const float deltaPx = locCur.y - locStart.y;
-            const float kPxPerDeg = 4.0f;   // 4 px = 1°
-            h.tiltDeg = juce::jlimit (-89.0f, 89.0f,
-                                       mDragOriginalBox.tiltDeg + deltaPx / kPxPerDeg);
-            break;
-        }
-        default:
-        {
-            // Resize: convert drag delta into ellipse-local space, then adjust
-            // rx/ry plus shift center so the opposite handle stays anchored.
-            const auto locStart = toEllipseLocal (mDragOriginalBox, mDragStartImagePos);
-            const auto locCur   = toEllipseLocal (mDragOriginalBox, cur);
-            const float ldx = locCur.x - locStart.x;
-            const float ldy = locCur.y - locStart.y;
-
-            float dxRx = 0.f, dyRy = 0.f;     // change to rx, ry
-            float anchorXLocal = 0.f, anchorYLocal = 0.f;  // anchor (opposite handle) in old-local
-
-            switch (mDragMode)
-            {
-                case DragMode::ResizeE:  dxRx =  ldx;          anchorXLocal = -mDragOriginalBox.rx; break;
-                case DragMode::ResizeW:  dxRx = -ldx;          anchorXLocal =  mDragOriginalBox.rx; break;
-                case DragMode::ResizeS:  dyRy =  ldy;          anchorYLocal = -mDragOriginalBox.ry; break;
-                case DragMode::ResizeN:  dyRy = -ldy;          anchorYLocal =  mDragOriginalBox.ry; break;
-                case DragMode::ResizeSE: dxRx =  ldx; dyRy =  ldy;
-                                         anchorXLocal = -mDragOriginalBox.rx; anchorYLocal = -mDragOriginalBox.ry; break;
-                case DragMode::ResizeSW: dxRx = -ldx; dyRy =  ldy;
-                                         anchorXLocal =  mDragOriginalBox.rx; anchorYLocal = -mDragOriginalBox.ry; break;
-                case DragMode::ResizeNE: dxRx =  ldx; dyRy = -ldy;
-                                         anchorXLocal = -mDragOriginalBox.rx; anchorYLocal =  mDragOriginalBox.ry; break;
-                case DragMode::ResizeNW: dxRx = -ldx; dyRy = -ldy;
-                                         anchorXLocal =  mDragOriginalBox.rx; anchorYLocal =  mDragOriginalBox.ry; break;
-                default: break;
-            }
-
-            constexpr float kMinR = 12.0f;
-            h.rx = juce::jmax (kMinR, mDragOriginalBox.rx + dxRx * 0.5f);   // half because radius scales by /2
-            h.ry = juce::jmax (kMinR, mDragOriginalBox.ry + dyRy * 0.5f);
-
-            // Re-center so the anchor handle stays where it was on the image
-            // (anchorXLocal, anchorYLocal) - translate the center by the
-            // half-delta of rx/ry along the rotated axes.
-            const float halfDx = (h.rx - mDragOriginalBox.rx) * (anchorXLocal > 0 ? -1.0f : 1.0f);
-            const float halfDy = (h.ry - mDragOriginalBox.ry) * (anchorYLocal > 0 ? -1.0f : 1.0f);
-            const float rad = juce::degreesToRadians (h.rotDeg);
-            const float c = std::cos (rad), s = std::sin (rad);
-            h.cx = mDragOriginalBox.cx + (halfDx * c - halfDy * s);
-            h.cy = mDragOriginalBox.cy + (halfDx * s + halfDy * c);
-            break;
-        }
-    }
-
-    mHitboxes[(size_t) mSelectedIdx] = h;
-    repaint();
-}
-
 void BaySickRustyDrumsKitGraphic::mouseUp (const juce::MouseEvent& /*e*/)
 {
-    if (mCalibrationMode)
-    {
-        mDragMode = DragMode::None;
-        return;
-    }
     if (mPressedIdx >= 0)
     {
         mPressedIdx = -1;
@@ -774,7 +450,7 @@ void BaySickRustyDrumsKitGraphic::mouseUp (const juce::MouseEvent& /*e*/)
 
 void BaySickRustyDrumsKitGraphic::mouseMove (const juce::MouseEvent& e)
 {
-    updateCursorForHover (e.position);
+    setMouseCursor (juce::MouseCursor::PointingHandCursor);
     const int idx = hitTestPiece (e.position);
     if (idx != mHoverIdx)
     {
@@ -798,72 +474,4 @@ juce::String BaySickRustyDrumsKitGraphic::getTooltip()
 {
     if (mHoverIdx < 0 || mHoverIdx >= (int) mHitboxes.size()) return {};
     return mHitboxes[(size_t) mHoverIdx].label;
-}
-
-// ── Calibration: add / delete / label ────────────────────────────────────────
-void BaySickRustyDrumsKitGraphic::addHitboxAtCentre()
-{
-    Hitbox h;
-    h.label = "(unassigned)";
-    h.cx = kImageW * 0.5f;
-    h.cy = kImageH * 0.5f;
-    h.rx = 80.0f;
-    h.ry = 80.0f;
-    h.rotDeg  = 0.0f;
-    h.tiltDeg = 0.0f;
-    mHitboxes.push_back (h);
-    mSelectedIdx = (int) mHitboxes.size() - 1;
-    repaint();
-}
-
-void BaySickRustyDrumsKitGraphic::deleteSelectedHitbox()
-{
-    if (mSelectedIdx < 0 || mSelectedIdx >= (int) mHitboxes.size()) return;
-    mHitboxes.erase (mHitboxes.begin() + mSelectedIdx);
-    mSelectedIdx = -1;
-    mDragMode    = DragMode::None;
-    repaint();
-}
-
-juce::String BaySickRustyDrumsKitGraphic::getSelectedLabel() const
-{
-    if (mSelectedIdx < 0 || mSelectedIdx >= (int) mHitboxes.size()) return {};
-    return mHitboxes[(size_t) mSelectedIdx].label;
-}
-
-void BaySickRustyDrumsKitGraphic::setSelectedLabel (const juce::String& label)
-{
-    if (mSelectedIdx < 0 || mSelectedIdx >= (int) mHitboxes.size()) return;
-    mHitboxes[(size_t) mSelectedIdx].label = label;
-    repaint();
-}
-
-// ── Save layout ──────────────────────────────────────────────────────────────
-bool BaySickRustyDrumsKitGraphic::saveLayoutToFile (juce::File dest)
-{
-    if (dest == juce::File())
-        dest = AppPaths::appRoot()
-                   .getChildFile ("rusty_kit_hitboxes.txt");
-
-    dest.getParentDirectory().createDirectory();
-
-    juce::String s;
-    s << "// Updated rusty-kit hitbox table.  Paste into kDefaultEllipses[] in\n"
-         "// Source/BaySickRustyDrums/BaySickRustyDrumsKitGraphic.cpp.\n";
-    s << "// Format: { label, cx, cy, rx, ry, rotationDegrees, tiltDegrees }\n";
-    s << "constexpr DefaultEllipse kDefaultEllipses[] = {\n";
-    for (const auto& h : mHitboxes)
-    {
-        auto fmt = [] (float v) { return juce::String (v, 1).paddedLeft (' ', 8); };
-        s << "    { \"" << h.label << "\","
-          << " " << fmt (h.cx) << "f,"
-          << " " << fmt (h.cy) << "f,"
-          << " " << fmt (h.rx) << "f,"
-          << " " << fmt (h.ry) << "f,"
-          << " " << fmt (h.rotDeg) << "f,"
-          << " " << fmt (h.tiltDeg) << "f },\n";
-    }
-    s << "};\n";
-
-    return dest.replaceWithText (s);
 }

@@ -123,6 +123,46 @@ public:
     // Effects page ever being opened.
     static void registerRackAutomationForAllChannels (VibeSynthProcessor& proc);
 
+    // ── Dead hosted plugin recovery ──────────────────────────────────────────
+    // A VST3 slot is dead in one of two ways and only one of them is
+    // recoverable, so the two are named here rather than left to be inferred
+    // from the early returns:
+    //
+    //   RENDERING half -- the instance exists and reports not alive (the DLL
+    //     moved, it would not instantiate, it needs the bridge, or it crashed
+    //     mid-session).  It still carries the FULL PluginDescription the project
+    //     stored with it, so the slot knows exactly what to ask for and this is
+    //     the half the call can rebuild.  It still declines when the binary the
+    //     description names is not on disk -- both load routes resolve that path
+    //     and would fail, so the rebuild is skipped rather than paid for (see
+    //     the body's probe).  A plugin that came back at a DIFFERENT path is
+    //     therefore not recovered by this call: the stored path is the only
+    //     identity the slot has.  The row and window title render it as
+    //     "<name> (missing)".
+    //   LOADING half -- no instance was ever built, which happens only when the
+    //     restore blob carried no readable description.  The slot's identity is
+    //     then absent from the project itself: HostedPluginEffect holds no blob
+    //     without an instance, so nothing on disk or in memory still names the
+    //     plugin, and neither this call nor a project reload can recover it.
+    //     The row falls through to the EffectType name ("VST3 Plugin"), so such
+    //     a slot reads as a generic plugin rather than a missing one.  The
+    //     retry declines rather than tearing the slot down for a rebuild that
+    //     has nothing to rebuild from.
+    //
+    // Rebuilt through EffectRack::loadEffect with the slot's EXISTING uuid,
+    // which keeps every automation lane and open window resolving; the plugin's
+    // saved state is pushed back into the revived instance under the
+    // project-load shield, so the rebuilt DSP is fully configured before any
+    // audio block can reach it (see the body).
+    //
+    // EDGE-TRIGGERED ONLY -- the added-plugin list changing, or the slot menu's
+    // explicit retry.  Instantiating a VST3 is expensive and a permanently
+    // missing one would otherwise re-attempt forever on the row poll.
+    // Message thread only.  Returns true when the slot came back alive.
+    static bool retryDeadPluginSlot  (VibeSynthProcessor& proc, int chId,
+                                      EffectRack& rack, int slotIndex);
+    static void retryDeadPluginSlots (VibeSynthProcessor& proc);
+
     // The view-independent body: registrations capture (chId, uuid, type,
     // suffix) and resolve rack -> slot -> DSP at apply time (null-owner,
     // rack-scoped -- survives every panel/page death).
@@ -179,6 +219,13 @@ private:
     void onMoveRequested(int slotIndex, bool up);
     void onSlotBypassToggled (int slotIndex);
     void onSlotOpenRequested (int slotIndex);
+
+    // The apply body every rack transaction (Load / Remove / Move) shares.
+    // Takes the channel id at RECORD time and resolves the rack per apply: an
+    // EffectRackAction carries slot snapshots and no channel identity, and this
+    // page's selection has moved on by the time an undo arrives.  See the
+    // definition for what reading the live selection instead used to destroy.
+    EffectRackAction::ApplyFn makeRackApply (int chId);
 
     // Re-register a slot's automation after its effect identity changed.  The
     // panels no longer live here, so this is where a type/variant change gets

@@ -1,4 +1,5 @@
 #include "DeReverbDSP.h"
+#include <cmath>
 
 DeReverbDSP::DeReverbDSP()
 {
@@ -13,7 +14,7 @@ DeReverbDSP::DeReverbDSP()
     for (auto& s : mSpec) s.resize ((size_t) kFFT);
     mFftA.resize ((size_t) kFFT);
     mFftS.resize ((size_t) kFFT);
-    mMagHist.assign ((size_t) (kHist * kBins), 0.0f);
+    updateGuard();
     mRev.assign ((size_t) kBins, 0.0f);
     mGain.assign ((size_t) kBins, 1.0f);
     mGainSm.assign ((size_t) kBins, 1.0f);
@@ -31,6 +32,7 @@ void DeReverbDSP::prepare (double sampleRate, int maxBlockSize)
     mSampleRate = sampleRate;
     mMaxBlock   = maxBlockSize;
     updateDecay();
+    updateGuard();
     reset();
 }
 
@@ -62,6 +64,28 @@ void DeReverbDSP::updateDecay()
     mDecayPerHop = (float) std::pow (10.0, -3.0 * hopMs / juce::jmax (50.0, (double) tailMs));
 }
 
+// Allocates - callable from prepare()/construction only, never from process().
+void DeReverbDSP::updateGuard()
+{
+    const double sr    = juce::jmax (8000.0, mSampleRate);
+    const double hopMs = 1000.0 * (double) kHop / sr;
+    mGuardFrames = juce::jmax (1, (int) std::lround ((double) kDirectGuardMs / hopMs));
+    // One slot more than the guard: the delayed read lands on the oldest slot,
+    // which is exactly the one about to be overwritten by this frame's write.
+    mHistFrames  = mGuardFrames + 1;
+    mMagHist.assign ((size_t) (mHistFrames * kBins), 0.0f);
+    mHistWrite   = 0;
+
+    // One-pole per frame: coef = 1 - exp(-hop / tau).  At 44.1 kHz this
+    // reproduces the old fixed 0.6 / 0.3 to within a rounding step.
+    auto coefFor = [hopMs] (float ms)
+    {
+        return (float) (1.0 - std::exp (-hopMs / juce::jmax (1.0, (double) ms)));
+    };
+    mGainAttackCoef  = juce::jlimit (0.0f, 1.0f, coefFor (kGainAttackMs));
+    mGainReleaseCoef = juce::jlimit (0.0f, 1.0f, coefFor (kGainReleaseMs));
+}
+
 void DeReverbDSP::setReductionPct (float pct)
 {
     const float n = juce::jlimit (0.0f, 100.0f, pct);
@@ -78,6 +102,28 @@ void DeReverbDSP::setMixPct (float pct)
 {
     const float n = juce::jlimit (0.0f, 100.0f, pct);
     if (n != mixPct) mixPct = n;
+}
+
+void DeReverbDSP::getStateInformation (juce::MemoryBlock& dest)
+{
+    juce::ValueTree state ("DeReverbDSP");
+    state.setProperty ("reduction", reductionPct, nullptr);
+    state.setProperty ("tail",      tailMs,       nullptr);
+    state.setProperty ("mix",       mixPct,       nullptr);
+    if (auto xml = state.createXml())
+        juce::AudioProcessor::copyXmlToBinary (*xml, dest);
+}
+
+void DeReverbDSP::setStateInformation (const void* data, int sz)
+{
+    auto xml = juce::AudioProcessor::getXmlFromBinary (data, sz);
+    if (! xml || ! xml->hasTagName ("DeReverbDSP")) return;
+    auto state = juce::ValueTree::fromXml (*xml);
+    // Restore through the setters, never the public fields: only setTailMs
+    // re-runs updateDecay(), so mDecayPerHop would otherwise keep the old tail.
+    setReductionPct ((float) (double) state.getProperty ("reduction",  50.0));
+    setTailMs       ((float) (double) state.getProperty ("tail",      400.0));
+    setMixPct       ((float) (double) state.getProperty ("mix",       100.0));
 }
 
 void DeReverbDSP::processFrame (int numCh)
@@ -97,7 +143,7 @@ void DeReverbDSP::processFrame (int numCh)
 
     // Channel-average magnitude drives one shared gain field.
     float* hist = &mMagHist[(size_t) (mHistWrite * kBins)];
-    const int histDelayed = (mHistWrite + kHist - kDelayFrames) % kHist;
+    const int histDelayed = (mHistWrite + mHistFrames - mGuardFrames) % mHistFrames;
     const float* delayed = &mMagHist[(size_t) (histDelayed * kBins)];
 
     const float reduction = 2.0f * (reductionPct / 100.0f);       // 0..2x over-subtract
@@ -125,7 +171,7 @@ void DeReverbDSP::processFrame (int numCh)
 
         hist[(size_t) k] = mag;
     }
-    mHistWrite = (mHistWrite + 1) % kHist;
+    mHistWrite = (mHistWrite + 1) % mHistFrames;
 
     // Musical-noise suppression: 3-bin frequency smoothing + frame-rate time
     // smoothing (suppression engages fast, releases slower).
@@ -136,7 +182,7 @@ void DeReverbDSP::processFrame (int numCh)
         const float c2 = mGain[(size_t) juce::jmin (kBins - 1, k + 1)];
         const float target = (a + b + c2) / 3.0f;
         float& sm = mGainSm[(size_t) k];
-        const float coef = (target < sm) ? 0.6f : 0.3f;
+        const float coef = (target < sm) ? mGainAttackCoef : mGainReleaseCoef;
         sm += coef * (target - sm);
         minG = juce::jmin (minG, sm);
     }

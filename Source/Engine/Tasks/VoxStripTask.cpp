@@ -1,5 +1,6 @@
 #include "VoxStripTask.h"
 #include "../FrozenSourceRead.h"   // TS7 6.8: scope-matched frozen block read
+#include "../ChannelBufferArena.h"   // kChannelsPerStrip (scratch pre-size)
 #include "../../VibeGraph.h"
 #include "../../PluginProcessor.h"
 #include "../../DSP/EngineSidechainHelper.h"
@@ -20,6 +21,16 @@ VoxStripTask::VoxStripTask (juce::AudioProcessor* engine,
       mPrefix ("mixer_vox_" + juce::String (index))
 {
     this->channelId = channelIdIn;
+
+    // Scratch buffers are grown to a whole arena-sized block HERE, on the
+    // message thread.  run() executes on pool workers, and its per-block setSize
+    // calls only skip the allocator while allocatedBytes already covers the
+    // request (juce::AudioBuffer::setSize, avoidReallocating branch) -- from a
+    // 0x0 buffer the first block that serves a recorded take or a freeze file
+    // would malloc on the render path instead.
+    const int maxBlock = juce::jmax (1, processor.mBlockSize);
+    mClipScratch  .setSize (ChannelBufferArena::kChannelsPerStrip, maxBlock, false, true, false);
+    mEngineScratch.setSize (ChannelBufferArena::kChannelsPerStrip, maxBlock, false, true, false);
 }
 
 void VoxStripTask::run()
@@ -41,15 +52,25 @@ void VoxStripTask::run()
     // ── APVTS strip params ────────────────────────────────────────────────────
     // QA-Fb: hoisted above the FilePlay branch -- armed now selects between
     // pure playback and the capture path below.
+    // run() is on a pool worker (and on the audio callback itself via the
+    // main-as-worker pump), so building each id with juce::String every block is
+    // a heap allocation per param per strip.  Resolve once, then read through
+    // the cached pointers; an unresolved strip simply retries next block.
     auto& apvts = mProcessor->apvts;
-    const auto* armP    = apvts.getRawParameterValue (mPrefix + "_arm");
-    const auto* idxP    = apvts.getRawParameterValue (mPrefix + "_inputChannelIdx");
-    const auto* stereoP = apvts.getRawParameterValue (mPrefix + "_inputChannelStereo");
-    const auto* listenP = apvts.getRawParameterValue (mPrefix + "_listen");
+    if (mArmP    == nullptr) mArmP    = apvts.getRawParameterValue (mPrefix + "_arm");
+    if (mIdxP    == nullptr) mIdxP    = apvts.getRawParameterValue (mPrefix + "_inputChannelIdx");
+    if (mStereoP == nullptr) mStereoP = apvts.getRawParameterValue (mPrefix + "_inputChannelStereo");
+    if (mListenP == nullptr) mListenP = apvts.getRawParameterValue (mPrefix + "_listen");
     // QA-Fe Task 5: live-monitor mode (0 TrueDry / 1 BypassCorr / 2 WithEffect
     // [default since QA-Fe2 docket 2a -- the ~12 ms monitor shifter]); default
     // 2 when the param is absent (Inst strips / old state).
-    const auto* monModeP = apvts.getRawParameterValue (mPrefix + "_monitorMode");
+    if (mMonModeP == nullptr) mMonModeP = apvts.getRawParameterValue (mPrefix + "_monitorMode");
+
+    const auto* armP     = mArmP;
+    const auto* idxP     = mIdxP;
+    const auto* stereoP  = mStereoP;
+    const auto* listenP  = mListenP;
+    const auto* monModeP = mMonModeP;
     const int   monitorMode = (monModeP != nullptr) ? (int) monModeP->load() : 2;
 
     const int  chIdx    = (idxP != nullptr) ? (int) idxP->load() : -1;
@@ -195,9 +216,9 @@ void VoxStripTask::run()
         // 2026-05-06 (Batch 9b Item 8): dry-recorder tap (RAW pre-chain mono)
         // - captured here so the recorded file is the unprocessed DI; chain
         // runs ONCE on the dry source.  Only fire when ARMED (monitor-only
-        // mode produces no recording).  Pre-existing race risk between this
-        // read of mStripRecorders and message-thread mutation in startRecording
-        // / stopRecording is documented at the helper site; not closed.
+        // mode produces no recording).  tapDryRecorder gates its own read of
+        // mStripRecorders on the mStripTapsLive flag the message thread lowers
+        // before mutating that vector.
         if (armed)
             mProcessor->tapDryRecorder (channelId,
                                          snapshot->getReadPointer (chIdx),
@@ -318,6 +339,14 @@ void VoxStripTask::run()
     // QA-Fb: overlap blocks skip this -- the engine's muteLive already
     // removed the live stream from the monitor, and clearing here would kill
     // the merged prior takes.
+    //
+    // This edit lands AFTER the chain pass that filled the pre-fader tap, so it
+    // has to reach the tap too or a pre-fader send would carry a signal this
+    // strip is not producing.  Null unless the strip is a pre-fader source.
     if (! filePlay && armed && ! listen)
+    {
         blockView.clear();
+        if (auto* preFaderTap = mGraph->getPreFaderTapBuffer (channelId))
+            preFaderTap->clear();
+    }
 }

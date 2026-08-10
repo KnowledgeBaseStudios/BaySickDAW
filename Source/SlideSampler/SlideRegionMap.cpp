@@ -3,18 +3,6 @@
 #include <algorithm>
 #include <utility>
 
-int SlideRegionMap::numBands() const noexcept
-{
-    std::vector<std::pair<int, int>> bands;
-    for (const auto& s : samples)
-    {
-        const std::pair<int, int> b { s.loVel, s.hiVel };
-        if (std::find (bands.begin(), bands.end(), b) == bands.end())
-            bands.push_back (b);
-    }
-    return (int) bands.size();
-}
-
 int SlideRegionMap::bendMaxUpSemis() const noexcept
 {
     const int cents = (bendUpCents == kBendUnset) ? 200 : bendUpCents;   // sfizz default +200

@@ -13,6 +13,11 @@ void DelayDSP::prepare (double sampleRate, int maxBlockSize)
     mSampleRate = sampleRate;
     mMaxBlock   = maxBlockSize;
 
+    // One-pole DC-blocker pole from a corner FREQUENCY, so the corner stays put
+    // instead of quadrupling from 44.1 kHz to 192 kHz.
+    mDcBlockR = (float) std::exp (-2.0 * juce::MathConstants<double>::pi
+                                  * (double) kDcBlockHz / juce::jmax (8000.0, sampleRate));
+
     const int maxSamples = static_cast<int>(kMaxDelaySeconds * sampleRate) + 1;
     mLineL.assign(maxSamples, 0.0f);
     mLineR.assign(maxSamples, 0.0f);
@@ -446,6 +451,11 @@ void DelayDSP::process (juce::AudioBuffer<float>& buffer)
     const float lfoInc = static_cast<float>(
         juce::MathConstants<double>::twoPi * mModRate / mSampleRate);
 
+    // Lo-Fi sample-and-hold: both the on/off decision and the phase increment
+    // are block-invariant, so they are hoisted out of the per-sample loop.
+    const bool  loFiSrOn = (mLoFiRate < kLoFiRateMaxHz);
+    const float loFiInc  = mLoFiRate / static_cast<float>(juce::jmax (1.0, mSampleRate));
+
     // Slew coefficient for keep-pitch mode:
     // mSmoothing=0 -> fast (slewCoef~=0), mSmoothing=1 -> slow (~0.9997 at 48kHz)
     const float slewCoef = mKeepPitch
@@ -532,25 +542,39 @@ void DelayDSP::process (juce::AudioBuffer<float>& buffer)
         // feedback / output split) so the lo-fi character is heard on EVERY
         // echo - not just on echo #2+ via feedback-buildup, which was the old
         // placement and made lo-fi inaudible at low feedback levels.
+        //
+        // The sample-and-hold is OFF at the top of the knob's range, at every
+        // device rate.  It used to rely on the hold interval falling below one
+        // sample (rate >= device rate) to go transparent, which the knob can
+        // only reach at or below 48 kHz: above that, no knob position could
+        // disable it and every echo came back with an unmutable HF droop the
+        // dry signal did not have.  Bit crush is a separate control and still
+        // applies on top.
+        if (loFiSrOn)
         {
-            mLoFiPhase += mLoFiRate / static_cast<float>(mSampleRate);
+            mLoFiPhase += loFiInc;
             if (mLoFiPhase >= 1.0f)
             {
-                mLoFiPhase -= 1.0f;
+                // Full wrap, not a single subtraction: the increment exceeds 1
+                // whenever the lo-fi rate is above the device rate, and one
+                // subtraction let the phase creep upward without bound.
+                mLoFiPhase -= std::floor (mLoFiPhase);
                 mLoFiHoldL = rawReadL;
                 mLoFiHoldR = rawReadR;
             }
-            if (mLoFiBits < 23.0f || mLoFiRate < static_cast<float>(mSampleRate) - 1.0f)
-            {
-                rawReadL = bitcrush(mLoFiHoldL, mLoFiBits);
-                rawReadR = bitcrush(mLoFiHoldR, mLoFiBits);
-            }
-            else
-            {
-                rawReadL = mLoFiHoldL;
-                rawReadR = mLoFiHoldR;
-            }
+            rawReadL = mLoFiHoldL;
+            rawReadR = mLoFiHoldR;
         }
+        else
+        {
+            // Track the input while bypassed so turning the knob back down
+            // cannot replay a stale held sample as a click.
+            mLoFiHoldL = rawReadL;
+            mLoFiHoldR = rawReadR;
+        }
+
+        rawReadL = bitcrush(rawReadL, mLoFiBits);
+        rawReadR = bitcrush(rawReadR, mLoFiBits);
 
         // ── Feedback path ────────────────────────────────────────────────────
         float feedL = rawReadL;
@@ -614,7 +638,7 @@ void DelayDSP::process (juce::AudioBuffer<float>& buffer)
         //     Removes the DC injected by mFBDistSymmetry in Sat mode so it does
         //     not compound per repeat and eat headroom. y[n] = x[n] - x[n-1] + R*y[n-1]
         {
-            constexpr float R = 0.9995f;
+            const float R = mDcBlockR;
             const float dcOutL = feedL - mDcBlockXL + R * mDcBlockYL;
             mDcBlockXL = feedL; mDcBlockYL = dcOutL; feedL = dcOutL;
 
@@ -773,7 +797,7 @@ void DelayDSP::setFeedbackLevel (float v)
 }
 void DelayDSP::setLoFiSampleRate (float hz)
 {
-    const float n = std::max(100.0f, hz);
+    const float n = juce::jlimit(100.0f, kLoFiRateMaxHz, hz);
     if (n != mLoFiRate) mLoFiRate = n;
 }
 void DelayDSP::setLoFiBits (float b)
@@ -929,37 +953,6 @@ void DelayDSP::setWet (float w)
 {
     const float n = juce::jlimit(0.0f, 1.0f, w);
     if (n != wet) { wet = n; mWetOut = n; }
-}
-
-void DelayDSP::setHpHz (float hz)
-{
-    const float n = std::max(1.0f, hz);
-    if (n == hpHz && mFBFilterType == 1 && mFBCutoff == n) return;
-    hpHz          = n;
-    mFBFilterType = 1;   // HP
-    mFBCutoff     = n;
-    applyFBFilterType();
-}
-
-void DelayDSP::setLpHz (float hz)
-{
-    const float n = std::max(1.0f, hz);
-    if (n == lpHz) return;
-    lpHz = n;
-    // Legacy behaviour: if lpHz < 7000, bias FB filter toward LP at that cutoff.
-    if (lpHz < 7000.0f)
-    {
-        mFBFilterType = 0;   // LP
-        mFBCutoff     = lpHz;
-        applyFBFilterType();
-    }
-}
-
-void DelayDSP::setPingPong (bool en)
-{
-    if (en == pingPong) return;
-    pingPong    = en;
-    mDelayModel = en ? 2 : 0;
 }
 
 void DelayDSP::setSyncBPM (bool en)

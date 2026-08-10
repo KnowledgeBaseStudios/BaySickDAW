@@ -4,6 +4,7 @@
 #include "Standalone/UndoSnapshotStore.h"   // QA-UndoCoverage Task 9: load-boundary sweep
 #include "ClipDropDiag.h"            // QA-ClipDrop: diagnostic trap (2026-06-02)
 #include "SampleLibrary.h"           // QA-ProjectSave Task 4: source-aware import
+#include "CoreLibraryInstaller.h"    // content delivery (2026-08-09)
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Path helpers
@@ -20,8 +21,9 @@ juce::File ProjectManager::getSettingsFile()
     // recordings, presets, settings) lives under Documents\BaySickDAW\. Only
     // the CoreLibrary sample bundle stays in %LOCALAPPDATA% (too heavy to
     // round-trip through user-browsable paths + no reason to back it up with
-    // user work).  audio_settings.xml still lives in Roaming APPDATA (written
-    // by StandaloneApp::saveAudioSettings); that move is a separate task.
+    // user work).  audio_settings.xml is canonical here too; the Roaming copy
+    // survives only as a pre-migration fallback that getAudioSettingsFile picks
+    // up before runFirstLaunchHousekeeping (below) relocates it.
     return AppPaths::appRoot().getChildFile ("settings.xml");
 }
 
@@ -88,13 +90,6 @@ ProjectManager::ProjectManager (VibeSynthProcessor& processor)
 ProjectManager::~ProjectManager()
 {
     stopTimer();
-}
-
-void ProjectManager::setAutosaveIntervalSeconds (int seconds)
-{
-    mAutosaveSec = juce::jmax (0, seconds);
-    stopTimer();
-    if (mAutosaveSec > 0) startTimer (mAutosaveSec * 1000);
 }
 
 bool ProjectManager::isDirty() const
@@ -164,7 +159,10 @@ bool ProjectManager::restoreBackup (const juce::File& backupXml)
         if (live.existsAsFile()) live.copyFileTo (safety);
         // Copy the backup XML to project.xml + reload from disk so any path
         // resolution that happens during deserialize uses the new content.
-        backupXml.copyFileTo (live);
+        // Nothing in memory has been touched yet, so a failed copy bails clean
+        // and the caller's restore-failed alert fires instead of the session
+        // showing restored state that project.xml doesn't hold.
+        if (! backupXml.copyFileTo (live)) return false;
     }
 
     // Replay state into memory.  mIgnoreDirty so the propertyChanged storm
@@ -185,7 +183,22 @@ void ProjectManager::timerCallback()
     // hasProject==false branch lands the backup under
     // Documents\BaySickDAW\Backups\Unsaved\ so unsaved sessions can also
     // recover from a crash.
-    writeBackup();
+    if (writeBackup())
+    {
+        // Success resets the once-per-session gate so a recurring failure can
+        // resurface after an intervening good write.
+        mAutosaveWarnShown = false;
+        return;
+    }
+    if (mAutosaveWarnShown) return;
+    mAutosaveWarnShown = true;
+    const auto backupsDir = hasProject()
+        ? mCurrentFolder.getChildFile ("Backups")
+        : AppPaths::appRoot().getChildFile ("Backups").getChildFile ("Unsaved");
+    juce::AlertWindow::showMessageBoxAsync (juce::AlertWindow::WarningIcon,
+        "Autosave failed",
+        "Couldn't write a backup to:\n" + backupsDir.getFullPathName()
+            + "\n\nCheck disk space and permissions.");
 }
 
 bool ProjectManager::writeBackup()
@@ -353,11 +366,27 @@ bool ProjectManager::saveProjectAs (const juce::String& newName)
         target.getChildFile ("Samples").createDirectory();
     }
 
+    // The session has to point at the new folder before the write, because
+    // saveProject() writes to mCurrentFolder and landing it in the new folder is
+    // the entire point of Save As.  The write can still fail after that commit:
+    // copyDirectoryTo carries a read-only project.xml over verbatim, a sync
+    // client can hold the file, the disk can be full.  Both callers present a
+    // false return as "nothing happened" and tell the user so, and saveProject
+    // skips markSaved on failure, so the session must not be left bound to a
+    // folder the user was just told could not be created -- their next Ctrl+S
+    // would write the work into it instead of the project still on screen.
+    const auto previousFolder = mCurrentFolder;
+
     mCurrentFolder = target;
     mProcessor.setCurrentProjectFolder (target);
     // Write current in-memory state as the new folder's project.xml (may
     // differ from the copied file if the user made unsaved edits).
-    saveProject();   // pins the save point (Task 9)
+    if (! saveProject())
+    {
+        mCurrentFolder = previousFolder;
+        mProcessor.setCurrentProjectFolder (previousFolder);
+        return false;
+    }
     pushRecentProject (target);
     return true;
 }
@@ -430,6 +459,65 @@ void ProjectManager::runFirstLaunchHousekeeping()
         mShortcutCreated = true;
         saveSettings();
     }
+
+    // The shortcut above has always pointed at a folder nothing ever filled.
+    // This is the half that fills it.
+    offerCoreContentDownload (/*userAsked*/ false);
+}
+
+void ProjectManager::setSkipCoreContentPrompt (bool v)
+{
+    if (mSkipCoreContentPrompt == v) return;
+    mSkipCoreContentPrompt = v;
+    saveSettings();
+}
+
+void ProjectManager::offerCoreContentDownload (bool userAsked)
+{
+    if (CoreLibraryInstaller::isBusy()) return;
+
+    // A pack installed by hand, before this app ever fetched anything, is found
+    // by the same folder check as one this app installed: the installer derives
+    // each pack's folder name from its release asset and asks the disk.  So no
+    // adoption step is needed, and such a machine is never told its library is
+    // missing nor made to re-download gigabytes it already has.
+    const auto state = CoreLibraryInstaller::check();
+
+    if (state.status == CoreLibraryInstaller::Status::Complete)
+    {
+        if (userAsked)
+            juce::AlertWindow::showMessageBoxAsync (
+                juce::MessageBoxIconType::InfoIcon, "Sound content",
+                state.summary + "\n\nNothing needs downloading.", "OK");
+        return;
+    }
+
+    if (! userAsked && mSkipCoreContentPrompt) return;
+
+    // Posted rather than shown inline: this runs inside editor construction, and
+    // the app has to finish opening whether or not the content is here.  Every
+    // part that does not need samples stays usable either way.
+    juce::WeakReference<ProjectManager> weak (this);
+
+    juce::MessageManager::callAsync ([weak, state]
+    {
+        if (weak == nullptr) return;
+
+        CoreLibraryInstaller::offerDownload (state, [weak] (int choice)
+        {
+            if (choice == 1) return;                                 // Not Now
+            if (choice == 2) { if (auto* pm = weak.get()) pm->setSkipCoreContentPrompt (true); return; }
+
+            CoreLibraryInstaller::startFetch ([] (bool ok, juce::String message)
+            {
+                if (message.isEmpty()) return;
+                juce::AlertWindow::showMessageBoxAsync (
+                    ok ? juce::MessageBoxIconType::InfoIcon
+                       : juce::MessageBoxIconType::WarningIcon,
+                    "Sound content", message, "OK");
+            });
+        });
+    });
 }
 
 juce::File ProjectManager::duplicateProject (const juce::File& projectFolder,
@@ -610,8 +698,10 @@ void ProjectManager::loadSettings()
     }
     mShortcutCreated     = xml->getBoolAttribute ("shortcutCreated", false);
     mMigratedFromRoaming = xml->getBoolAttribute ("migratedFromRoaming", false);
-    mSkipGlobalLockPrompt = xml->getBoolAttribute ("skipGlobalLockPrompt", false);
+    mSkipGlobalLockPrompt[0] = xml->getBoolAttribute ("skipGlobalLockPromptBank0", false);
+    mSkipGlobalLockPrompt[1] = xml->getBoolAttribute ("skipGlobalLockPromptBank1", false);
     mSkipKitReplacePrompt = xml->getBoolAttribute ("skipKitReplacePrompt", false);
+    mSkipCoreContentPrompt = xml->getBoolAttribute ("skipCoreContentPrompt", false);
     const auto tpl = xml->getStringAttribute ("defaultTemplate");
     if (tpl.isNotEmpty()) mDefaultTemplate = juce::File (tpl);
 }
@@ -637,13 +727,26 @@ void ProjectManager::saveSettings()
     }
     root->setAttribute ("shortcutCreated",     mShortcutCreated);
     root->setAttribute ("migratedFromRoaming", mMigratedFromRoaming);
-    root->setAttribute ("skipGlobalLockPrompt", mSkipGlobalLockPrompt);
+    root->setAttribute ("skipGlobalLockPromptBank0", mSkipGlobalLockPrompt[0]);
+    root->setAttribute ("skipGlobalLockPromptBank1", mSkipGlobalLockPrompt[1]);
     root->setAttribute ("skipKitReplacePrompt", mSkipKitReplacePrompt);
+    root->setAttribute ("skipCoreContentPrompt", mSkipCoreContentPrompt);
     if (mDefaultTemplate != juce::File())
         root->setAttribute ("defaultTemplate", mDefaultTemplate.getFullPathName());
     else
         root->removeAttribute ("defaultTemplate");
-    f.replaceWithText (root->toString());
+    // Every caller is fire-and-forget message-thread housekeeping, so the
+    // failure surfaces here, once per session, rather than growing a bool
+    // return nobody checks.
+    if (! f.replaceWithText (root->toString()) && ! mSettingsWarnShown)
+    {
+        mSettingsWarnShown = true;
+        juce::AlertWindow::showMessageBoxAsync (juce::AlertWindow::WarningIcon,
+            "Settings save failed",
+            "Couldn't write " + f.getFullPathName()
+                + "\n\nRecent projects and preferences will not persist. "
+                  "Check disk space and permissions.");
+    }
 }
 
 void ProjectManager::setDefaultTemplate (const juce::File& folder)
@@ -652,10 +755,11 @@ void ProjectManager::setDefaultTemplate (const juce::File& folder)
     saveSettings();
 }
 
-void ProjectManager::setSkipGlobalLockPrompt (bool v)
+void ProjectManager::setSkipGlobalLockPrompt (int bank, bool v)
 {
-    if (mSkipGlobalLockPrompt == v) return;
-    mSkipGlobalLockPrompt = v;
+    const auto b = (size_t) juce::jlimit (0, 1, bank);
+    if (mSkipGlobalLockPrompt[b] == v) return;
+    mSkipGlobalLockPrompt[b] = v;
     saveSettings();
 }
 

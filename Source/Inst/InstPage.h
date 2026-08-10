@@ -12,13 +12,13 @@ class AriaControlPanel;
 // ─────────────────────────────────────────────────────────────────────────────
 // I-0b (2026-05-02): Restructured for Phase I.
 //   * BaySickPlayer engine REMOVED entirely (no projects in the wild had it).
-//   * No engine picker - both stage processors are pre-loaded into permanent
-//     sub-tabs (mirrors Vox page layout).
-//   * Sub-tabs (2 total - J-6 EQ unification 2026-05-03): BaySickPedals | BaySickNAM/IR.
-//     - BaySickPedals (sub-tab 0): I-1 will install BaySickPedalsProcessor +
-//       editor here.  For I-0b ships a placeholder component.
-//     - BaySickNAM/IR (sub-tab 1): hosts the existing BaySickNAMIRProcessor +
-//       BaySickNAMIREditor unchanged (same setup as the Vox page's NAM/IR sub-tab).
+// Inst hosts BaySickPedalsProcessor + BaySickNAMIRProcessor DIRECTLY, as two
+// rig-owned stages of the page's EngineChainProcessor (order Pedals -> NAM/IR,
+// with an optional sfizz front-end for the BaySickGuitars / BaySickBasses
+// sources).  There is no engine picker - the trio is permanent for the tab.
+// This is NOT the Vox arrangement: VoxPage owns no NAM/IR at all --
+// BaySickVocalProcessor embeds one and drives it from inside its own
+// processBlock -- so a NAM/IR change on one page does not carry to the other.
 //   * Spawned BY its mixer strip: addInstChannelAtIndex fires onInstStripAdded,
 //     which spawns this page.  Every entry point -- the Mixer's Add menu, the
 //     ribbon "+", a project load -- goes through that one call.
@@ -31,6 +31,8 @@ public:
     // Phase I: only "None" is meaningful (no engine picker exists).  selectEngine
     // is now a no-op kept for save-format back-compat -- no projects in the wild
     // use this field, but the dispatch site in StandaloneEditor still calls it.
+    // Persisted as a raw int: NEVER reorder or insert; append only, with an
+    // explicit value.  Same rule as EffectType in EffectRack.h.
     enum class EngineType { None, BaySickPlayer, BaySickNAMIR };
 
     // K-2 (2026-05-05): Inst page source mode.  LiveInput is the classic Inst
@@ -76,26 +78,24 @@ public:
     void selectEngine (EngineType /*e*/) {}
     EngineType getEngineType() const noexcept { return EngineType::None; }
 
-    // Returns the BaySickNAM/IR processor (the only audio-thread-active engine
-    // on the page in I-0b; BaySickPedals lands in I-1).  External callers
-    // (Page Preset I/O, applyEngineState in state-load) use this.
+    // Returns the EngineChainProcessor -- the single processor registered as this
+    // tab's engine, whose processBlock drives the whole stage list in order.  A
+    // caller that wants one specific stage must use getNamIrProcessor() /
+    // getPedalsProcessor(); downcasting this to a stage type yields null.
     juce::AudioProcessor* getEngineProcessor() const noexcept;
 
     juce::AudioProcessor* getNamIrProcessor() const noexcept { return mNamIrProc; }
     juce::AudioProcessor* getPedalsProcessor() const noexcept { return mPedalsProc; }
 
     // K-2 (2026-05-05): source mode access + setter.  setSource rebuilds the
-    // engine chain (sfizz front-end optional, then Pedals → NAM/IR) and fires
-    // onSourceChanged so MixerPage can flip the strip's noLiveInput flag and
-    // StandaloneEditor can update sub-tab visibility.  Caller must ensure the
-    // PluginProcessor's BaySickGuitars / BaySickBasses engine exists before
-    // calling setSource(...) with a non-LiveInput value (typically via
-    // VibeSynthProcessor::loadBaySickGuitarsKit) - if the engine pointer is
-    // null when the chain is rebuilt, the source effectively produces silence
-    // until a kit loads.
+    // engine chain (sfizz front-end optional, then Pedals -> NAM/IR).  Caller
+    // must ensure the PluginProcessor's BaySickGuitars / BaySickBasses engine
+    // exists before calling setSource(...) with a non-LiveInput value
+    // (typically via VibeSynthProcessor::loadBaySickGuitarsKit) - if the engine
+    // pointer is null when the chain is rebuilt, the source effectively
+    // produces silence until a kit loads.
     Source getSource() const noexcept { return mSource; }
     void   setSource (Source s);
-    std::function<void(Source)> onSourceChanged;
 
     // K-6 (2026-05-05): per-program state cache serialization for project
     // save/load.  serializeProgramCache writes one <Program filename="..."/>
@@ -117,10 +117,7 @@ public:
     void setUndoContext (const UndoContext& ctx) { mUndoCtx = ctx; }
     void switchSfizzProgramWithUndo (const juce::File& target);
 
-    std::function<void()> onEngineDestroying;
-    std::function<void()> onEngineChanged;
-
-    void                setTabName (const juce::String& n);   // syncs the model tab's name (TS1)
+    void                setTabName (const juce::String& n);
     const juce::String& getTabName () const                 { return mTabName; }
 
     // Jeff, 2026-08-05: the pedals window's Standard/Compact view lives on the
@@ -140,6 +137,11 @@ public:
     std::function<void()>                        onDeleteRequested;
     std::function<void()>                        onLockChanged;
 
+    // Fired when the substituted-kit display marker flips.  StandaloneEditor
+    // mirrors it onto the ribbon tab + the mixer strip.  Unlike onLockChanged
+    // this has NO persistence hook -- the marker is not project state.
+    std::function<void()>                        onKitMissingChanged;
+
     // Program-name linkage (2026-08-02): fired with the loaded program's
     // display name from the INTERACTIVE paths only (picker + the add-tab
     // default-kit autoload) -- project restore never fires it, so a saved
@@ -152,6 +154,23 @@ public:
 
     bool isLocked() const noexcept { return mLocked; }
     void setLocked (bool b) { if (b == mLocked) return; mLocked = b; if (onLockChanged) onLockChanged(); repaint(); }
+    // Every action undoable: the Menu's Lock entry rides one structural
+    // transaction.  Skips the wrap when no undo context is wired.
+    void toggleLockUndoable();
+
+    // Display-only: the project's saved kit was gone at restore and a default
+    // kit was substituted (or the kit failed to load), so the tab is labeled
+    // one instrument while playing another.  RUNTIME ONLY -- deliberately
+    // absent from exportInstState / serializeTabsInto / captureTabRecord: a
+    // persisted marker would survive reinstalling the kit forever.
+    bool isKitMissing() const noexcept { return mKitMissing; }
+    void setKitMissing (bool b)
+    {
+        if (b == mKitMissing) return;
+        mKitMissing = b;
+        if (onKitMissingChanged) onKitMissingChanged();
+        repaint();
+    }
 
     // J-6 EQ unification (2026-05-03): EQ accessors removed; pre-rack EQ on Effects page only.
 
@@ -161,10 +180,17 @@ public:
     void loadInstPagePreset (const juce::File& xml);
 
     // ── G-7 (2026-04-29): Page Preset save/load (full chain) ─────────────────
-    // Bus fallback: if a saved _sendTo references kInstBus2 / kInstBus3 and
-    // those buses aren't active in the current project, the loader silently
-    // substitutes kInstBus.
     void setProcessor (VibeSynthProcessor* p);
+    // NOT CONSULTED TODAY.  The bus fallback this query was registered for
+    // (saved _sendTo names kInstBus2 / kInstBus3, those buses are not active,
+    // loader substitutes kInstBus) only exists in PagePresetIO's legacy
+    // per-strip overload.  InstPage::loadPagePreset goes through the
+    // PageChainConfig overload instead, which has no isChannelActive field and
+    // hardcodes "every channel is active", so no substitution happens on an
+    // Inst preset load.  Nothing is broken by that -- MixerPage self-activates
+    // a secondary bus it finds a strip routed to -- but do not build Inst
+    // routing behavior on this query until it is either threaded through the
+    // config or removed outright.
     void setBusActiveQuery (std::function<bool(int channelId)> q) { mBusActiveQuery = std::move (q); }
     void savePagePreset (std::function<void()> onSaved = {});
     void loadPagePreset (const juce::File& xml);
@@ -178,7 +204,6 @@ public:
 private:
     // J-6 EQ unification (2026-05-03): buildEQTab removed.
     void layoutContent (juce::Rectangle<int> r);
-    void showEngineContextMenu();
     // K-2: rebuild the EngineChainProcessor stage list based on mSource.
     // For LiveInput the chain is {Pedals, NAMIR}.  For BaySickGuitars it's
     // {Guitars, Pedals, NAMIR} where Guitars is queried from PluginProcessor
@@ -189,6 +214,7 @@ private:
     Source                                       mSource    { Source::LiveInput };
     juce::String                                 mTabName;
     bool                                         mLocked { false };
+    bool                                         mKitMissing { false };
 
     // sfizz program display -- setSource()/updateSfizz paths drive it, and it
     // sits on the AriaControlPanel title bar.  QA-Layout T3 (L23): the
@@ -233,8 +259,9 @@ private:
 
 public:
     // K-5: PageMenuBar parks this button in extras-right when the page's
-    // source is sfizz-driven.  Always reads "Load Guitar" - actual loaded
-    // program surfaces on the clip-file label next to it.
+    // source is sfizz-driven.  Label tracks the source mode ("Load Guitar" /
+    // "Load Bass" / "Load Inst"); the actual loaded program surfaces on the
+    // clip-file label next to it.
     juce::TextButton* getProgramButton() const { return mProgramButton.get(); }
 
     // QA-Layout T15: the sfizz AriaControlPanel title bar is dissolved.  The
@@ -273,7 +300,8 @@ private:
     // commitRecordingResult; never had any callers).  Replaced by library-
     // driven ownership via AudioLibraryEntry.pageOwnerChannelId.
 
-    // G-7: full processor + bus-active query for Page Preset save/load.
+    // G-7: full processor for Page Preset save/load.  mBusActiveQuery is
+    // registered by the editor and read by nothing -- see setBusActiveQuery.
     VibeSynthProcessor*                          mFullProcessor { nullptr };
     std::function<bool(int)>                     mBusActiveQuery;
 

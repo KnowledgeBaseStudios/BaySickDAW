@@ -8,7 +8,7 @@ BaySickTitleBar::BaySickTitleBar (const juce::String& engineName,
     , mAccentColor (accentColor)
     , mBloom (bloom)
 {
-    // Title bar paints + reports geometry; parent owns the trailing widgets.
+    // Title bar paints only; the parent owns any widgets sitting over it.
     // Pass clicks through so trailing widgets sitting on top remain interactive
     // even if the parent makes them children of the bar.
     setInterceptsMouseClicks (false, true);
@@ -41,29 +41,7 @@ void BaySickTitleBar::setBloom (bool enabled)
     }
 }
 
-juce::Rectangle<int> BaySickTitleBar::getTrailingArea (int trailingWidth) const
-{
-    const int x = juce::jmax (kPaddingPx,
-                              getWidth() - kPaddingPx - trailingWidth);
-    return { x, 0, trailingWidth, getHeight() };
-}
-
-// Smoke round 2 (Jeff): the SW-3 bar-owned Swing Mix knob moved to the
-// PageMenuBar (SharedUI PageSwingKnob) so it's visible on every sub-tab;
-// this bar keeps only the hosted/reserved trailing machinery (G-16/G-14).
 BaySickTitleBar::~BaySickTitleBar() = default;
-
-void BaySickTitleBar::setTrailingWidthHint (int px)
-{
-    mTrailingHint = juce::jmax (0, px);
-    resized();
-}
-
-void BaySickTitleBar::setReservedTrailingWidth (int px)
-{
-    mReservedTrailing = juce::jmax (0, px);
-    resized();
-}
 
 void BaySickTitleBar::paint (juce::Graphics& g)
 {
@@ -82,10 +60,8 @@ void BaySickTitleBar::paint (juce::Graphics& g)
 
 void BaySickTitleBar::resized()
 {
-    // Parent-managed trailing widgets lay out via getTrailingArea(); the bar
-    // owns no hosted widgets since 2026-08-06 (the Rusty band's controls
-    // moved to the window title strip; the section tab row is laid by
-    // AriaControlPanel::resized, not by the bar).
+    // The bar owns no children -- each parent lays out its own chrome over the
+    // bar (e.g. the section tab row is placed by AriaControlPanel::resized).
 }
 
 void BaySickTitleBar::paintEngineName (juce::Graphics&       g,
@@ -172,12 +148,6 @@ BaySickPresetButton::~BaySickPresetButton()
     setLookAndFeel (nullptr);
 }
 
-void BaySickPresetButton::setLabelText (const juce::String& label)
-{
-    if (mLabel == label) return;
-    mLabel = label;
-    repaint();
-}
 
 void BaySickPresetButton::paintButton (juce::Graphics& g,
                                         bool isMouseOverButton,

@@ -34,10 +34,14 @@ BaySickRustyDrumsProcessor::BaySickRustyDrumsProcessor (juce::UndoManager& undoM
 
     // J-8 stage 2 (2026-05-04): listen on every brd_cc<N> APVTS param so widget
     // edits, automation, and project state restore all funnel into a single
-    // sfizz CC dispatch path.  Listener fires on the message thread; sfizz's
-    // cc() is documented as message-thread safe when not concurrently rendering.
+    // sfizz CC dispatch path.  The listener QUEUES (see mCcDirty); the old
+    // premise that cc() is message-thread safe was false -- it mutates sfizz
+    // state the audio thread reads.
     for (int cc = 0; cc < kCcCount; ++cc)
+    {
         apvts.addParameterListener ("brd_cc" + juce::String (cc), this);
+        mCcRaw[(size_t) cc] = apvts.getRawParameterValue ("brd_cc" + juce::String (cc));
+    }
 }
 
 BaySickRustyDrumsProcessor::~BaySickRustyDrumsProcessor()
@@ -48,30 +52,28 @@ BaySickRustyDrumsProcessor::~BaySickRustyDrumsProcessor()
 
 void BaySickRustyDrumsProcessor::parameterChanged (const juce::String& paramId, float newValue)
 {
-    // brd_cc<N> -> sfizz CC.  Pure dispatch; mCcState mirrors APVTS for project
-    // serialization + the panel's getCcValue queries.
+    // brd_cc<N> -> sfizz CC, QUEUED: the mark is drained by processStrips so
+    // sfizz's cc() only ever runs on the audio thread.  The value itself rides
+    // the mCcRaw param atomic, so only the bit needs publishing here.
     if (! paramId.startsWith ("brd_cc")) return;
     const int cc = paramId.substring (6).getIntValue();
     if (cc < 0 || cc >= kCcCount) return;
-    const int v  = juce::jlimit (0, 127, (int) std::round (newValue));
-    {
-        const juce::SpinLock::ScopedLockType lk (mCcStateLock);
-        mCcState[cc] = v;
-    }
-    if (mSfizz) mSfizz->cc (0, cc, v);
+    juce::ignoreUnused (newValue);
+    mCcDirty[(size_t) (cc >> 6)].fetch_or (1ull << (cc & 63), std::memory_order_release);
 }
 
 void BaySickRustyDrumsProcessor::setHiHatPedalClosed (bool closed)
 {
     mHiHatPedalClosed.store (closed);
     // CC4 = hi-hat pedal.  Route through APVTS so the change is undoable and
-    // serializes with project state; the parameter listener forwards to sfizz.
+    // serializes with project state; the parameter listener queues the CC and
+    // processStrips pushes it to sfizz.
     sendCc (4, closed ? 0 : 127);
 }
 
 // J-8 stage 2 (2026-05-04): ARIA control panel CC dispatch.  Writes through
 // APVTS so the change is undoable + automatable + serialized with project state.
-// The parameterChanged listener forwards the new value to the sfizz instance.
+// The parameterChanged listener queues it; processStrips pushes to sfizz.
 void BaySickRustyDrumsProcessor::sendCc (int cc, int value)
 {
     if (cc < 0 || cc >= kCcCount) return;
@@ -199,6 +201,25 @@ void BaySickRustyDrumsProcessor::processStrips (int numFrames, juce::MidiBuffer&
     juce::ScopedNoDenormals noDenormals;
 
     updateFromApvts();
+
+    // Drain the message-thread CC marks ahead of MIDI dispatch + render.
+    // Acquire pairs with the listener's release so mCcRaw reads at least the
+    // marked value.  Safe during kit loads: the processor-level shield keeps
+    // this from running until the engine is fully parsed.
+    if (mSfizz)
+    {
+        for (int w = 0; w < kCcDirtyWords; ++w)
+        {
+            auto bits = mCcDirty[(size_t) w].exchange (0, std::memory_order_acquire);
+            for (int b = 0; bits != 0; ++b, bits >>= 1)
+            {
+                if ((bits & 1ull) == 0) continue;
+                const int cc = (w << 6) | b;
+                if (auto* raw = mCcRaw[(size_t) cc])
+                    mSfizz->cc (0, cc, juce::jlimit (0, 127, (int) std::round (raw->load())));
+            }
+        }
+    }
 
     // Audition exchange (UI → audio thread).  J-8b: velocity packed into
     // the upper byte of the atomic; legacy callers (velocity=0 → unpacked
@@ -655,9 +676,10 @@ bool BaySickRustyDrumsProcessor::loadKit (const juce::File& sfzPath)
     }
 
     // Push kit defaults through APVTS - this drives the parameterChanged
-    // listener which forwards each value to sfizz.  `gestureSetValue` would
-    // be wrong here (would clobber project-restore state); use the ranged
-    // setter which respects the host's parameter pipeline.
+    // listener, which queues each value for processStrips' drain.
+    // `gestureSetValue` would be wrong here (would clobber project-restore
+    // state); use the ranged setter which respects the host's parameter
+    // pipeline.
     for (auto& [cc, val] : kitDefaults)
     {
         if (auto* p = dynamic_cast<juce::RangedAudioParameter*> (

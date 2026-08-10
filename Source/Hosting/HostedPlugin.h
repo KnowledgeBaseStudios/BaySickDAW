@@ -203,6 +203,15 @@ private:
 
     std::unique_ptr<juce::AudioPluginInstance> mInner;
 
+    // The last inner state blob we either restored or read back, kept so a save
+    // made while the plugin is NOT alive still writes the user's settings: with
+    // the DLL missing, the load failed or the bridge helper dead, both pointers
+    // above are null and the read below would otherwise yield nothing, silently
+    // erasing that plugin's entire stored state from the project on the next
+    // save.  A live instance always supersedes it.  MESSAGE THREAD ONLY -- both
+    // state calls arrive from project save/load and the freeze content stamp.
+    juce::MemoryBlock mLastKnownState;
+
     // Non-owning.  The panel window owns the editor; this is only so the
     // destructor can tell it to release the plugin's editor first.
     class HostedPluginEditor* mLiveEditor { nullptr };

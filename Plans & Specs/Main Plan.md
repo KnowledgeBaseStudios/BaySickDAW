@@ -2222,7 +2222,23 @@ These four batches were planned in the original `lucky-discovering-tiger` Phase 
 #### **QA-Manuals: 3 manuals (Quick Start + Music Tech + Design Tech)** (added 2026-05-08 via Rule 3 — see §9)
 **Plan file:** TBD.
 - Items: LDT-176 + LDT-415 (Manual 1 Quick Start, 10-15 pages, annotated screenshots), LDT-416 (Manual 2 Music Technical Reference, 40-50 pages, every knob/button/slider organized by page/engine), LDT-417 (Manual 3 Design Technical Document, formulas + signal flow + architecture diagrams).
-- Scope: write all three manuals. Image workflow per LDT-415 spec: Claude writes manual + detailed image descriptions, Jeff hands to Copilot for image generation, images returned for compilation. Update VibeDAW references to BaySickDAW.
+- Scope: write all three manuals. Update VibeDAW references to BaySickDAW.
+- **SCREENSHOTS ALREADY CAPTURED (2026-08-08, at QA-Soundness Task 9 close).** Jeff shot the full
+  set himself; they live at `Plans & Specs/System Reference/Pictures/`.  This SUPERSEDES the
+  LDT-415 "Claude writes image descriptions -> Copilot generates images" workflow for Manual 1 —
+  the images are real screenshots of the shipping app, not generated art.  The capture plan that
+  produced them, including the `SHOT-###` ids, is
+  `Plans & Specs/System Reference/MANUAL-1 Screenshot List.md`.
+- **Manual structure (Jeff, 2026-08-08 — supersedes the "Quick Start" reading of LDT-176):**
+  Manual 1 is a VISUAL ATLAS — every screen pictured with every visible element labelled, so a
+  reader can point at anything and identify it; its callouts footnote into Manual 2.  Manual 2 is
+  every knob and action and what it does; its footnotes lead into Manual 3.  Manual 3 is the
+  implementation and the DSP math.  The three are one cross-referenced system, so the callout
+  identifiers must be assigned once and stay stable across all three.
+- **Source material:** the 37-document System Reference set at `Plans & Specs/System Reference/`
+  is Manual 2's raw material, written from the post-fix tree at QA-Soundness Task 9.  Manual 3's
+  formulas come from READING THE DSP CODE — the old `Files For Claude/DSP Review/` specs predate
+  the implementation and describe an app that does not exist (Jeff, 2026-08-08).
 - Risk: low (no code changes).
 - Dependencies: QA-RC (need final stable feature set).
 - Effort: large (~30-50 hours, multi-session).

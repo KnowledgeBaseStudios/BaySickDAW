@@ -295,29 +295,6 @@ namespace
     }
 }
 
-// ─── WarpMap ──────────────────────────────────────────────────────────────────
-double WarpMap::getStretchRatioAt (double dubTimeSec) const noexcept
-{
-    if (anchors.size() < 2) return 1.0;
-    if (dubTimeSec <= anchors.front().dubTimeSec) return 1.0;
-    if (dubTimeSec >= anchors.back().dubTimeSec)  return 1.0;
-
-    // Find the segment containing dubTimeSec.
-    for (size_t i = 0; i + 1 < anchors.size(); ++i)
-    {
-        const auto& a = anchors[i];
-        const auto& b = anchors[i + 1];
-        if (dubTimeSec >= a.dubTimeSec && dubTimeSec < b.dubTimeSec)
-        {
-            const double dDub   = b.dubTimeSec   - a.dubTimeSec;
-            const double dGuide = b.guideTimeSec - a.guideTimeSec;
-            if (dDub <= 1e-9) return 1.0;
-            return dGuide / dDub;
-        }
-    }
-    return 1.0;
-}
-
 // ─── AlignPlaySnapshot ────────────────────────────────────────────────────────
 void AlignPlaySnapshot::computeTangents()
 {
@@ -468,9 +445,9 @@ namespace
         juce::int64 srcCursor = (juce::int64) std::llround (dStart * sampleRate) - preN;
         double srcFrac = 0.0;
 
-        // Review fix: feed chunks stay under the PhaseVocoder input ring
-        // (8192) minus its worst-case pending frame (kFFTSize-1) -- an
-        // oversized chunk overwrote unread input on steep detach ramps.
+        // The chunk size now bounds only the OUTPUT side -- how much OLA
+        // accumulates before the pull() drain below.  The input ring is
+        // self-limiting: PhaseVocoder::push drains analysis frames as it writes.
         juce::AudioBuffer<float> feed (1, 4096);
         juce::AudioBuffer<float> pull (1, 1 << 14);
         std::vector<float> outAccum;

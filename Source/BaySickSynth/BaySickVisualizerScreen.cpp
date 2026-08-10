@@ -43,7 +43,10 @@ void BaySickVisualizerScreen::setActiveTab (int tab)
 
 void BaySickVisualizerScreen::parameterChanged (const juce::String&, float)
 {
-    repaint();
+    // Never repaint here: this fires on the thread that wrote the parameter,
+    // which is the render thread during an offline export.  The 30 fps timer
+    // picks the mark up on the message thread.
+    mNeedsRepaint.store (true, std::memory_order_release);
 }
 
 void BaySickVisualizerScreen::timerCallback()
@@ -62,7 +65,8 @@ void BaySickVisualizerScreen::timerCallback()
         mLFOPhase += rate / 30.0f;
         if (mLFOPhase >= 1.0f) mLFOPhase -= 1.0f;
     }
-    if (mActiveTab == 4) repaint();
+    if (mActiveTab == 4 || mNeedsRepaint.exchange (false, std::memory_order_acquire))
+        repaint();
 }
 
 //==============================================================================

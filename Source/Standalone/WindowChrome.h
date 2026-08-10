@@ -28,10 +28,8 @@ namespace WindowChrome
     inline constexpr int kTitleH   = 26;
     inline constexpr int kBorderPx = 4;
 
-    juce::Colour frameBg()   noexcept;
     juce::Colour titleBg (bool live) noexcept;
     juce::Colour titleText() noexcept;
-    juce::Colour frameEdge() noexcept;
 
     // The window body behind everything, plus the 1px edge that separates one
     // floating window from the one under it.

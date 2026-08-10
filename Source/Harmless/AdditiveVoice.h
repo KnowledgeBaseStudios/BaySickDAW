@@ -306,6 +306,25 @@ private:
     float mFlt1KbTrack   { 0.0f };
     float mFlt2KbTrack   { 0.0f };
 
+    // Filter-cutoff control tick.  Both filter envelopes advance once per SAMPLE
+    // in renderNextBlock; only the derived cutoff is re-applied on this tick,
+    // because a pow() plus four tan()-based coefficient updates per sample per
+    // voice is not affordable.  The interval is a sample COUNT derived from the
+    // live sample rate in setCurrentPlaybackSampleRate, so the tick is the same
+    // wall-clock slice at every rate - a per-block tick would make the control
+    // rate (and, before this, the envelope rate itself) a function of the host
+    // buffer size.  The countdown deliberately persists across blocks: zeroing
+    // it per block would re-tie the tick to the buffer size.
+    int   mFltCtrlInterval  { 1 };
+    int   mFltCtrlCountdown { 0 };
+    // Coefficient values last pushed into the filter objects, so the control
+    // tick can skip the setter when nothing moved.  -1 = unknown; any write to
+    // the filters outside the tick must call invalidateFilterCoeffCache().
+    float mAppliedCutoff1 { -1.0f };
+    float mAppliedCutoff2 { -1.0f };
+    float mAppliedRes1    { -1.0f };
+    float mAppliedRes2    { -1.0f };
+
     // ── 2026-04-19 (S4) - Mod XYZ pad input values (consumed by mod matrix) ──
     float mModX { 0.0f }, mModY { 0.0f }, mModZ { 0.0f };
 
@@ -317,7 +336,7 @@ private:
     struct TargetVoiceState
     {
         bool  active          { false };  // any source for this target has non-zero depth
-        float envPhase        { 0.0f };   // 0..1; pauses at sustainTime while note held
+        float envPhase        { 0.0f };   // 0..1 over the source's LENGTH, then holds at 1
         float lfoPhase        { 0.0f };   // 0..1, wraps
         float capturedVel     { 1.0f };   // 0..1 velocity captured at note-on
         float capturedKey     { 0.5f };   // midi/127 captured at note-on
@@ -326,9 +345,9 @@ private:
     };
     std::array<TargetVoiceState, (int) ModTargetIndex::NumTargets> mTargets;
 
-    // Gate-held state: true between note-on and note-off. Envelope phase
-    // pauses at sustainTime while this is true; advances to 1.0 over release
-    // (~100 ms) when it goes false.
+    // Gate-held state: true between note-on and note-off. The mod envelope's
+    // phase advance keys off it: free-running over the source's LENGTH while
+    // held, then covering any remainder at the voice's amp-ADSR release rate.
     bool mModGateHeld { false };
 
     // Track last-applied contributions for VoiceEngine targets so we only
@@ -361,6 +380,17 @@ private:
     float mNoteVelocity { 1.0f };
 
     // ── Helpers ───────────────────────────────────────────────────────────────
+    // Any write to the filter objects made OUTSIDE renderNextBlock's control
+    // tick must invalidate the applied-coefficient cache, or the tick's
+    // value-changed guard will skip re-applying a value the filter no longer holds.
+    void invalidateFilterCoeffCache() noexcept
+    {
+        mAppliedCutoff1 = -1.0f;
+        mAppliedCutoff2 = -1.0f;
+        mAppliedRes1    = -1.0f;
+        mAppliedRes2    = -1.0f;
+    }
+
     void  recalcUnisonSlots();
     void  updateGlideCoeff();
     float readWavetable (const float* wt, int wtMask, float phase) const noexcept;

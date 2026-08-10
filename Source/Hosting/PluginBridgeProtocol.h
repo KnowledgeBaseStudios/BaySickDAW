@@ -55,11 +55,6 @@ namespace Hosting::Bridge
 // lane replay does not masquerade as user touches.
 inline constexpr std::uint32_t kProtocolVersion = 5;
 
-// Fits comfortably inside JUCE's InterprocessConnection message framing while
-// leaving room for the largest realistic plugin state blob; anything bigger is
-// chunked by the sender.
-inline constexpr std::uint32_t kMaxChunkBytes = 1u << 20;   // 1 MiB
-
 enum class MessageType : std::uint32_t
 {
     // host -> helper
@@ -77,7 +72,7 @@ enum class MessageType : std::uint32_t
     // helper -> host
     HandshakeReply = 101,
     LoadReply      = 102,
-    ProcessReply   = 103,
+    ProcessReply   = 103,   // RESERVED since v3 -- the reply rides the shared mapping
     StateBlob      = 104,
     ParameterList  = 105,
     EditorOpened   = 106,
@@ -202,15 +197,6 @@ inline juce::MemoryBlock frame (MessageType type, std::uint32_t sequence,
         mb.append (trailer, trailerBytes);
 
     return mb;
-}
-
-// The pipe name both sides agree on.  The helper receives it on its command
-// line; including the PID keeps two host instances (Jeff runs Debug and Release
-// side by side) from colliding on the same pipe.
-inline juce::String pipeNameFor (std::uint32_t hostPid, std::uint32_t slotId)
-{
-    return "BaySickPluginBridge_" + juce::String ((int) hostPid)
-         + "_" + juce::String ((int) slotId);
 }
 
 } // namespace Hosting::Bridge

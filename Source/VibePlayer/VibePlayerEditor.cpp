@@ -1,6 +1,8 @@
 #include "VibePlayerEditor.h"
 #include "../AppPaths.h"
+#include "../MissingFileReport.h"
 #include "../SampleLibrary.h"
+#include "../UserFileSave.h"
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 static constexpr int   kLblH         = 13;   // knob label height
@@ -29,6 +31,19 @@ void VibePlayerEditor::initLabel (juce::Label& l, const juce::String& text)
     l.setJustificationType (juce::Justification::centred);
     l.setFont              (juce::Font (10.0f));
     l.setColour            (juce::Label::textColourId, juce::Colour (0xFFB0B0B0));
+}
+
+// A load that yields zero regions is otherwise indistinguishable from success:
+// the tab renames to the pick, keys play silence.
+static void warnIfNothingLoaded (const VibePlayerProcessor& proc, const juce::File& f)
+{
+    if (proc.hasAnyRegions())
+        return;
+    juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon,
+        "Load Sample",
+        "No playable samples could be loaded from:\n" + f.getFullPathName()
+          + "\n\nIt may be damaged, or the samples it needs may be missing.",
+        "OK");
 }
 
 // ── Constructor ───────────────────────────────────────────────────────────────
@@ -163,10 +178,11 @@ VibePlayerEditor::VibePlayerEditor (VibePlayerProcessor& p)
     for (auto* l : { &mLfoRateLbl,  &mLfoAmtLbl  }) addAndMakeVisible (*l);
 
     // ── Box 6: Filter (D.4-Q3 2026-05-01) - 3 hidden APVTS params surfaced ──
-    // mFilterArticKnob removed from the UI on 2026-05-01: the bundled Core
-    // Library has zero SFZs that use `group=`, so any non-zero value silences
-    // the engine.  APVTS param `artic_group` retained so power-user automation
-    // + presets-with-non-zero-artic still apply; just no UI knob.
+    // The articulation-group knob was removed from the UI on 2026-05-01: the
+    // bundled Core Library has zero SFZs that use `group=`, so any non-zero
+    // value silences the engine.  APVTS param `artic_group` retained so
+    // power-user automation + presets-with-non-zero-artic still apply; just
+    // no UI knob.
     initModKnob (mFilterCutoffKnob, "Filter cutoff (Hz)");
     initModKnob (mFilterResKnob,    "Filter resonance / Q");
     initModKnob (mFilterReductKnob, "Lo-fi sample-rate reduction (0=off, 1=max grit)");
@@ -533,7 +549,9 @@ void VibePlayerEditor::showPresetMenu()
                 const auto f = ch.getResult();
                 if (f.isDirectory())
                 {
+                    MissingFileReport::ScopedGesture gesture ("sound");
                     mProc.loadSampleFolder (f);
+                    warnIfNothingLoaded (mProc, f);
                     if (onPatchLoaded) onPatchLoaded (f.getFileName());
                 }
             });
@@ -549,7 +567,9 @@ void VibePlayerEditor::showPresetMenu()
                 const auto f = ch.getResult();
                 if (f.existsAsFile())
                 {
+                    MissingFileReport::ScopedGesture gesture ("sound");
                     mProc.loadSampleSFZ (f);
+                    warnIfNothingLoaded (mProc, f);
                     if (onPatchLoaded) onPatchLoaded (f.getFileNameWithoutExtension());
                 }
             });
@@ -566,7 +586,9 @@ void VibePlayerEditor::showPresetMenu()
                 const auto f = ch.getResult();
                 if (f.existsAsFile())
                 {
+                    MissingFileReport::ScopedGesture gesture ("sound");
                     mProc.loadSampleFile (f);
+                    warnIfNothingLoaded (mProc, f);
                     if (onPatchLoaded) onPatchLoaded (f.getFileNameWithoutExtension());
                 }
             });
@@ -604,7 +626,9 @@ void VibePlayerEditor::showPresetMenu()
                         if (hasAudio)
                             m.addItem (c.getFileName(),
                                 [this, c] {
+                                    MissingFileReport::ScopedGesture gesture ("sound");
                                     mProc.loadSampleFolder (c);
+                                    warnIfNothingLoaded (mProc, c);
                                     if (onPatchLoaded) onPatchLoaded (c.getFileName());
                                 });
                         else
@@ -618,7 +642,9 @@ void VibePlayerEditor::showPresetMenu()
                     {
                         m.addItem (c.getFileNameWithoutExtension() + "  [SFZ]",
                             [this, c] {
+                                MissingFileReport::ScopedGesture gesture ("sound");
                                 mProc.loadSampleSFZ (c);
+                                warnIfNothingLoaded (mProc, c);
                                 if (onPatchLoaded) onPatchLoaded (c.getFileNameWithoutExtension());
                             });
                     }
@@ -626,7 +652,9 @@ void VibePlayerEditor::showPresetMenu()
                     {
                         m.addItem (c.getFileNameWithoutExtension(),
                             [this, c] {
+                                MissingFileReport::ScopedGesture gesture ("sound");
                                 mProc.loadSampleFile (c);
+                                warnIfNothingLoaded (mProc, c);
                                 if (onPatchLoaded) onPatchLoaded (c.getFileNameWithoutExtension());
                             });
                     }
@@ -729,30 +757,71 @@ void VibePlayerEditor::showPresetMenu()
     menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (mPresetBtn));
 }
 
+// The two non-APVTS properties VibePlayerProcessor stamps onto apvts.state on
+// every sample load, so the load can be replayed.  Spelled again here because
+// savePreset has to lift them back off the state to build <Sample>; they are
+// the processor's persistence contract, not this editor's, so a change there
+// has to come here too.
+static const juce::Identifier kSavedLoadKind ("bsp_loadKind");
+static const juce::Identifier kSavedLoadPath ("bsp_loadPath");
+
 void VibePlayerEditor::savePreset (const juce::String& name)
 {
     // 2026-04-26: user presets go into "My Presets/" subfolder.
     const auto dir = presetsDir().getChildFile ("My Presets");
-    dir.createDirectory();
-    if (auto xml = mProc.apvts.copyState().createXml())
-        xml->writeTo (dir.getChildFile (name + ".xml"));
+
+    const auto state = mProc.apvts.copyState();
+    auto stateXml = state.createXml();
+    if (! stateXml)
+        return;
+
+    // Nested, not the flat apvts Xml: flat clears the readers' root-tag gate
+    // (the apvts state root IS <BaySickPlayerState>) and then matches neither
+    // child they look for, so the preset applies nothing, reloads no sample,
+    // and still renames the tab as though it had loaded.
+    juce::XmlElement root ("BaySickPlayerState");
+    root.addChildElement (stateXml.release());
+
+    const juce::String kind = state.getProperty (kSavedLoadKind).toString();
+    const juce::String path = state.getProperty (kSavedLoadPath).toString();
+
+    // A kind with no path behind it is what makes the reader name a blank file
+    // in its "sample is missing" box, so the pair is written or neither is.
+    const bool haveSample = kind.isNotEmpty() && kind != "none" && path.isNotEmpty();
+
+    auto* sampleEl = root.createNewChildElement ("Sample");
+    sampleEl->setAttribute ("kind", haveSample ? kind : juce::String ("none"));
+    if (haveSample)
+        sampleEl->setAttribute ("path", path);
+
+    UserFileSave::writeXmlAsync (dir, name, root, {});
 }
 
 // D.4-Q3 fix (2026-05-01): preset XML format is the nested page-style format
-// written by Layer/Bass/Drum savePatchAs (mirror of DrumPage::loadPlayerPreset):
+// written by savePreset above and by Layer/Bass/Drum savePatchAs (mirror of
+// DrumPage::loadPlayerPreset):
 //   <BaySickPlayerState>
 //     <BaySickPlayerState>           ← inner = apvts state
 //       <PARAM id=... value=.../> ...
 //     </BaySickPlayerState>
-//     <Sample kind="sfz|file|folder" path="library:... | absolute"/>
+//     <Sample kind="sfz|file|folder" path="library:... | mysamples:... | absolute"/>
 //   </BaySickPlayerState>
 // The previous flat-XML parser silently failed on this format (root tag check
 // rejected the wrapper element), so presets loaded the filename but never
 // updated the apvts and never reloaded the sample.
 void VibePlayerEditor::loadPreset (const juce::File& f)
 {
+    MissingFileReport::ScopedGesture gesture ("preset");
+
     auto parsed = juce::XmlDocument::parse (f);
-    if (! parsed || ! parsed->hasTagName ("BaySickPlayerState")) return;
+    if (! parsed || ! parsed->hasTagName ("BaySickPlayerState"))
+    {
+        juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon,
+                                                "Load Preset",
+                                                "That preset file could not be read.",
+                                                "OK");
+        return;
+    }
 
     // 1. Apply the inner apvts state child (rewrite trackId prefix so a patch
     // saved under tk_lay_0_bsp_ loads cleanly under tk_bas_0_bsp_ etc.).
@@ -790,26 +859,36 @@ void VibePlayerEditor::loadPreset (const juce::File& f)
         mProc.apvts.replaceStateKeepingUndoHistory (loaded, "Load Preset");   // ruling 3a
     }
 
-    // 2. Reload the referenced sample (handles "library:rel/path" + absolute).
+    // 2. Reload the referenced sample.  resolvePersistedRef, not a local
+    // "library:" test: savePreset carries the path through verbatim from the
+    // processor's load-path property, which refForPersist writes as a stable
+    // ref under EITHER root, so a My Samples sample would otherwise resolve to
+    // a file named "mysamples:..." and read as missing.
     // In drum context, drum-pack samples get root-normalized to MIDI 60 so
     // they play at native pitch when triggered by the drum tab's note 60.
     if (auto* sampleEl = parsed->getChildByName ("Sample"))
     {
         const juce::String kind    = sampleEl->getStringAttribute ("kind", "none");
         const juce::String pathStr = sampleEl->getStringAttribute ("path");
-        juce::File path;
-        if (pathStr.startsWith ("library:"))
-            path = SampleLibrary::getCoreLibraryDir().getChildFile (pathStr.substring (8));
-        else
-            path = juce::File (pathStr);
+        const juce::File   path    = SampleLibrary::resolvePersistedRef (pathStr);
 
         const int normRoot = mIsDrumContext ? 60 : -1;
-        if (kind == "file" && path.existsAsFile())
-            mProc.loadSampleFile (path, normRoot);
-        else if (kind == "folder" && path.isDirectory())
-            mProc.loadSampleFolder (path, normRoot);
-        else if (kind == "sfz" && path.existsAsFile())
-            mProc.loadSampleSFZ (path, normRoot);
+        if (kind != "none")
+        {
+            bool ok = false;
+            if      (kind == "file"   && path.existsAsFile()) { mProc.loadSampleFile   (path, normRoot); ok = true; }
+            else if (kind == "folder" && path.isDirectory())  { mProc.loadSampleFolder (path, normRoot); ok = true; }
+            else if (kind == "sfz"    && path.existsAsFile()) { mProc.loadSampleSFZ    (path, normRoot); ok = true; }
+
+            if (! ok)
+                juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon,
+                    "Load Preset",
+                    "This preset's sample is missing from this machine:\n" + path.getFullPathName()
+                      + "\n\nThe preset's settings were applied but it will not make sound.",
+                    "OK");
+            else
+                warnIfNothingLoaded (mProc, path);
+        }
     }
 
     // 2026-04-30: notify page wrapper so Layer/Bass tab + mixer strip get

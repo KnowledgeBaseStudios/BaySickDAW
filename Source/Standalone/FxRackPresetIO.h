@@ -37,6 +37,12 @@ namespace FxRackPresetIO
 
     // channelId is the Effects-page channel vocabulary (1-12 buses, 100+ drums,
     // 200+ layers, ...) -- the same ids the automation lane prefixes embed.
+    // presetName is the raw typed string; naming, the collision prompt
+    // (Replace / Save a Copy / Cancel) and the write's own failure box are
+    // UserFileSave::writeXmlAsync's, so a true return means the save was
+    // handed to that helper, not that the file is on disk yet.  outErr is set
+    // (with false returned) only for the pre-write failures: no rack on the
+    // channel, or the presets folder could not be created.
     bool save (VibeSynthProcessor& proc, int channelId,
                const juce::String& presetName, juce::String& outErr);
 

@@ -1,4 +1,5 @@
 #include "BaySickNAMIREditor.h"
+#include "../ProjectFileResolver.h"
 #include "../AppPaths.h"
 #include "../Standalone/SharedUI.h"   // VKnobAutomation registration
 #include "../Standalone/UndoBracket.h"
@@ -377,7 +378,7 @@ BaySickNAMIREditor::BaySickNAMIREditor (BaySickNAMIRProcessor& p)
     {
         const auto path = processor.getMicSim().getUserIrPath();
         mMicSimUserIrLabel.setText (path.isEmpty() ? "(no IR loaded)"
-                                                    : juce::File (path).getFileName(),
+                                                    : ProjectFileResolver::resolve (path).getFileName(),
                                       juce::dontSendNotification);
     }
 
@@ -504,7 +505,7 @@ BaySickNAMIREditor::BaySickNAMIREditor (BaySickNAMIRProcessor& p)
     {
         const auto path = processor.getMicSimB().getUserIrPath();
         mMicSimUserIrLabelB.setText (path.isEmpty() ? "(no IR loaded)"
-                                                     : juce::File (path).getFileName(),
+                                                     : ProjectFileResolver::resolve (path).getFileName(),
                                        juce::dontSendNotification);
     }
 
@@ -981,14 +982,36 @@ void BaySickNAMIREditor::updateLabels()
     const juce::String namPath = processor.getNamFilePath (slot);
     const juce::String irPath  = processor.getIrFilePath  (slot);
 
-    mNamFileLabel.setText (namPath.isNotEmpty()
-                               ? juce::File (namPath).getFileName()
-                               : juce::String ("(no model loaded)"),
-                           juce::dontSendNotification);
-    mIrFileLabel .setText (irPath .isNotEmpty()
-                               ? juce::File (irPath).getFileName()
-                               : juce::String ("(no IR loaded)"),
-                           juce::dontSendNotification);
+    // The remembered path survives a failed load so the file can relink later,
+    // so the LCDs read the loaded flags rather than the strings: never present a
+    // name we did not actually load (same rule as NAMPedalStyleDSP::getModelName).
+    const bool namLive = processor.hasNamModel (slot);
+    const bool irLive  = processor.hasIr       (slot);
+
+    const bool namMissing = namPath.isNotEmpty() && ! namLive;
+    const bool irMissing  = irPath .isNotEmpty() && ! irLive;
+
+    mNamFileLabel.setColour (juce::Label::textColourId,
+                             juce::Colour (namMissing ? kErrARGB : kAmberARGB));
+    mIrFileLabel .setColour (juce::Label::textColourId,
+                             juce::Colour (irMissing  ? kErrARGB : kCabGreenARGB));
+
+    juce::String namText ("(no model loaded)");
+    if (namPath.isNotEmpty())
+    {
+        namText = juce::File (namPath).getFileName();
+        if (namMissing) namText += " (missing)";
+    }
+
+    juce::String irText ("(no IR loaded)");
+    if (irPath.isNotEmpty())
+    {
+        irText = juce::File (irPath).getFileName();
+        if (irMissing) irText += " (missing)";
+    }
+
+    mNamFileLabel.setText (namText, juce::dontSendNotification);
+    mIrFileLabel .setText (irText,  juce::dontSendNotification);
 
     if (processor.hasNamModel (slot) && processor.isFullRig (slot))
         mFullRigHint.setText (

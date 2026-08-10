@@ -30,8 +30,8 @@ class DSPBase;
 // factory preset, the next app launch re-seeds it.
 //
 // Preset XML format: just the DSP's getStateInformation blob, base64-encoded
-// inside a wrapper <EffectPreset> element with metadata (effectType, name,
-// timestamp).  Loading uses setStateInformation so per-DSP state (Type
+// inside a wrapper <EffectPreset> element with metadata (version, effectType,
+// name).  Loading uses setStateInformation so per-DSP state (Type
 // umbrella, A/B snapshots, etc.) round-trips faithfully.
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -60,8 +60,11 @@ namespace EffectPresetIO
     // Seeding ---------------------------------------------------------------
     // Run once at app startup -- writes any missing factory preset XMLs
     // to disk based on the static factory-preset table in EffectPresetIO.cpp.
-    // Idempotent: existing factory files are not overwritten unless the
-    // user deleted them (since we write on missing-file only).
+    // Idempotent per seed version: a factory file is written when it is missing
+    // OR when factory_seed_version.txt is behind kFactorySeedVersion.  Bump that
+    // constant whenever factoryTable() values or an effect's preset
+    // serialization changes, or existing installs keep their stale files.
+    // My Presets/ is never touched.
     void seedFactoryPresets();
 
     // H-10 cutover (2026-05-02): one-time migration of legacy Tape preset
@@ -77,7 +80,10 @@ namespace EffectPresetIO
 
     // Save / load -----------------------------------------------------------
     // Save a DSP's current state to the named user preset.  Returns true
-    // on success; on failure outErr describes why.
+    // on success; on failure outErr describes why.  presetName is the raw
+    // typed string: naming and collision go through UserFileSave::resolveTarget,
+    // so an existing preset of the same name is suffixed rather than replaced
+    // and the file on disk is not always "<presetName>.xml".
     bool savePreset (DSPBase& dsp,
                        EffectType type,
                        const juce::String& presetName,

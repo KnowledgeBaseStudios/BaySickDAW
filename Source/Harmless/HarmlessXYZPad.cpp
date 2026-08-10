@@ -23,13 +23,6 @@ void HarmlessXYZPad::sliderValueChanged (juce::Slider* s)
     repaint();
 }
 
-void HarmlessXYZPad::setXY (float x, float y)
-{
-    mX = juce::jlimit (-1.f, 1.f, x);
-    mY = juce::jlimit (-1.f, 1.f, y);
-    repaint();
-}
-
 void HarmlessXYZPad::attachToApvts (juce::AudioProcessorValueTreeState& apvts,
                                      const juce::String& xId, const juce::String& yId,
                                      const juce::String& zId)
@@ -107,9 +100,7 @@ void HarmlessXYZPad::updateFromMouse (const juce::MouseEvent& e)
     if (hw <= 0.f || hh <= 0.f) return;
     mX = juce::jlimit (-1.f, 1.f, (float(e.x) - cx) / hw);
     mY = juce::jlimit (-1.f, 1.f, -(float(e.y) - cy) / hh);
-    // Sync to knobs
     mXKnob.setValue (double(mX), juce::sendNotificationAsync);
     mYKnob.setValue (double(mY), juce::sendNotificationAsync);
-    if (onXYChanged) onXYChanged (mX, mY);
     repaint();
 }

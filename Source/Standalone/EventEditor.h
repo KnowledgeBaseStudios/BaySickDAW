@@ -29,12 +29,7 @@ public:
     // All edits snapshot the lane before/after and register AutomationLaneEditActions.
     void setBlock(PatternManager* pm, int blockIdx, float clipLengthBeats = 4.f);
 
-    // Direct lane pointer (no undo support - for display only)
-    void setLaneReadOnly(const AutomationLane* lane, float clipLengthBeats);
-
     float getTotalBeats() const { return mTotalBeats; }
-    void setTotalBeats(float beats);
-    void setBeatsPerBar(int bpb) { mBeatsPerBar = bpb; repaint(); }
 
     // Tool ─────────────────────────────────────────────────────────────────────
     void setTool(EETool t);
@@ -49,13 +44,8 @@ public:
     void setLFOMode(bool lfo);
     bool isLFOMode() const { return mLFOMode; }
 
-    // Zoom/scroll
-    void  setPixelsPerBeat(float ppb);
-    float getPixelsPerBeat() const { return mPPBeat; }
-
     // Selection helpers
     void selectAll();
-    void deselectAll() { mSelection.clear(); repaint(); }
     void deleteSelected();
 
     // Callbacks
@@ -77,13 +67,16 @@ public:
     std::function<juce::String(const juce::String& paramId, float val01)>      onFormatValue;
     std::function<float(const juce::String& paramId, const juce::String& text)> onParseValue;
 
+    // Resolves a lane's paramId to the 0..1 value "Reset to Default" restores a
+    // control point to (StandaloneEditor::automationResetValue).  Null = 0.5.
+    std::function<float(const juce::String& paramId)> onResolveResetValue;
+
     void paint   (juce::Graphics&) override;
     void resized ()                override;
     void mouseDown(const juce::MouseEvent&) override;
     void mouseDrag(const juce::MouseEvent&) override;
     void mouseUp  (const juce::MouseEvent&) override;
     void mouseMove(const juce::MouseEvent&) override;
-    void mouseWheelMove(const juce::MouseEvent&, const juce::MouseWheelDetails&) override;
     void mouseDoubleClick(const juce::MouseEvent&) override;
 
 private:
@@ -92,8 +85,14 @@ private:
     PatternManager*    mPM        { nullptr };
     int                mBlockIdx  { -1 };
     float              mTotalBeats{ 4.f };
-    int                mBeatsPerBar{ 4 };
-    float              mPPBeat    { 80.f };
+    // C.5b (post-revert): the Builder grid an automation block sits on is
+    // uniform 4-beat-per-bar -- song-level time-signature markers are
+    // decorative there, and only a PATTERN owns a real signature.  The block's
+    // playback window is computed in that same uniform domain
+    // (VibeSynthProcessor::processBlock, effectiveStartBars/effectiveLengthBars),
+    // so deriving this from a marker would make the ruler, gridlines and snap
+    // disagree with where the automation actually plays.
+    static constexpr int kBeatsPerBar = 4;
     bool               mLFOMode   { false };
     EETool             mTool      { EETool::Draw };
     int                mSnapSub   { 4 };   // 4 subdivisions per beat = 1/16 note snap

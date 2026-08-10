@@ -25,21 +25,26 @@ namespace juce { class Timer; }
 //   ├── Presets\<engine>\                (user-saved + factory presets)
 //   ├── Templates\                       (P6 default-template targets)
 //   ├── settings.xml                     (recent-projects + global prefs)
-//   ├── audio_settings.xml               (TODO: move from Roaming APPDATA)
+//   ├── audio_settings.xml               (machine-scoped audio device state)
 //   └── Sample Library.lnk               (P4/P6: shortcut to LocalAppData)
 //
 //   %LOCALAPPDATA%\BaySickDAW\
 //   └── CoreLibrary\<pack>\              (installed sample library)
 //
-// Each project is a folder - never a single file.  project.xml.bak is an
-// autosave sidecar written every 15 min (P5).  No path-reference mode - v1
-// is bundled-only for beginner safety.
+// Each project is a folder - never a single file.  Autosave writes a
+// timestamped copy every 15 min into <project>\Backups\ (newest 10 kept), or
+// into Documents\BaySickDAW\Backups\Unsaved\ when no project is open so an
+// unsaved session can still be recovered after a crash.
+// Samples under a stable root (Core Library / My Samples) are REFERENCED as a
+// `library:` / `mysamples:` string, not copied - they are reachable from any
+// project on this install, so a copy would duplicate factory content per
+// project.  Only volatile sources (Downloads, Desktop, USB) land in Samples\.
 //
 // Phase P1 scope: skeleton class only - methods exist, serialization works
 // against VibeSynthProcessor::serializeProject/deserializeProject, but the UI
 // (File menu / New/Open dialogs / autosave timer firing / dirty tracking) lands
 // in later phases P2-P5.  Recent-projects list is persisted to
-// %APPDATA%/BaySickDAW/settings.xml.
+// Documents\BaySickDAW\settings.xml (see getSettingsFile).
 // ──────────────────────────────────────────────────────────────────────────────
 class ProjectManager : private juce::Timer
 {
@@ -81,8 +86,10 @@ public:
     bool saveProject();
 
     // saveProjectAs: duplicates the current project folder to <root>/<newName>/
-    // (pure GarageBand-style - user doesn't pick a location).  Switches the
-    // "current" project to the new folder.  Returns true on success.
+    // (user doesn't pick a location).  Switches the "current" project to the new
+    // folder.  Returns true on success.  A false return is a session no-op: the
+    // new folder may exist on disk, but the session is left on the project it
+    // was already on, which is what both callers tell the user has happened.
     bool saveProjectAs (const juce::String& newName);
 
     // deleteProject: moveToTrash the given project folder (Recycle Bin).
@@ -101,7 +108,31 @@ public:
     //   - Creates Sample Library.lnk shortcut to %LOCALAPPDATA%/BaySickDAW/
     //     CoreLibrary/ the first time (guarded by a "shortcutCreated" flag
     //     in settings.xml so users who delete it don't see it come back).
+    //   - Checks whether the sound content is actually installed and, if not,
+    //     offers to fetch it (content delivery, 2026-08-09).
     void runFirstLaunchHousekeeping();
+
+    // -- Core sound content (content delivery, 2026-08-09) --------------------
+    // The offer the startup check raises, also callable on demand so a user who
+    // said "not now" (or "don't ask again") has a way back to it.  userAsked
+    // means the user reached for this deliberately: it ignores the "don't ask
+    // again" preference and reports when nothing is missing, where the startup
+    // path stays quiet in both those cases.
+    //
+    // Never blocks: the check is a directory listing, and the download runs on
+    // its own thread behind a progress window with a working Cancel.  An install
+    // with no content still opens the app; only the sampled instruments are
+    // affected, and they say so.
+    //
+    // NOT YET REACHABLE with userAsked == true: runFirstLaunchHousekeeping is
+    // the only caller and it passes false, so a user who chose "Not Now" or
+    // "Don't Ask Again" currently has no way back.  Needs one menu item wired to
+    // offerCoreContentDownload (true).
+    void offerCoreContentDownload (bool userAsked);
+
+    // "Don't ask again" from the startup offer.  Persisted in settings.xml.
+    bool getSkipCoreContentPrompt() const { return mSkipCoreContentPrompt; }
+    void setSkipCoreContentPrompt (bool v);
 
     // duplicateProject: copy the folder to <projects-root>/<newName>/.
     // Collision-safe (appends " (N)" if target exists).  Returns the new
@@ -197,16 +228,11 @@ public:
     // so the callback indirection keeps the dependency direction one-way.
     std::function<void()> onBeforeOpenProject;
 
-    // Autosave interval in seconds.  Default 15 minutes (900s) per the
-    // project-persistence lock.  Setting 0 disables autosave entirely.
-    void setAutosaveIntervalSeconds (int seconds);
-    int  getAutosaveIntervalSeconds() const { return mAutosaveSec; }
-
     // ── P6: Default template ─────────────────────────────────────────────────
-    // The default template (when set) is a project folder whose contents
-    // (project.xml + Samples/) are copied as the seed for every new project.
-    // Empty path = no template; new projects start blank.  Persisted in
-    // settings.xml so the choice survives across runs.
+    // The default template (when set) is a template XML file, loaded through
+    // StandaloneEditor::loadTemplate on the same path as any other template pick
+    // - nothing is copied.  Empty path = no template; new projects start blank.
+    // Persisted in settings.xml so the choice survives across runs.
     juce::File getDefaultTemplate() const   { return mDefaultTemplate; }
     void       setDefaultTemplate (const juce::File& folder);
     void       clearDefaultTemplate()       { setDefaultTemplate ({}); }
@@ -214,9 +240,15 @@ public:
     // ── 2026-04-26: "Don't show again" prompt prefs ──────────────────────────
     // Two confirm-prompts on the kit view that the user can opt out of.
     // Both default to false (prompt shown).
-    bool getSkipGlobalLockPrompt()  const { return mSkipGlobalLockPrompt;  }
+    //
+    // The lock opt-out is PER DRUM BANK because the gesture it guards is: the
+    // kit view locks 1-16 and 17-32 separately, so a "stop asking me" taken
+    // while locking one kit would otherwise silence the confirm for the other
+    // kit's drums, which the user never agreed to skip.  bank is clamped 0/1.
+    bool getSkipGlobalLockPrompt (int bank) const
+        { return mSkipGlobalLockPrompt[(size_t) juce::jlimit (0, 1, bank)]; }
     bool getSkipKitReplacePrompt()  const { return mSkipKitReplacePrompt;  }
-    void setSkipGlobalLockPrompt (bool v);
+    void setSkipGlobalLockPrompt (int bank, bool v);
     void setSkipKitReplacePrompt (bool v);
 
     // ── Backup discovery + restore ───────────────────────────────────────────
@@ -262,8 +294,12 @@ private:
     bool                    mShortcutCreated { false };   // one-shot flag
     juce::File              mDefaultTemplate;             // P6, empty = no template
     bool                    mMigratedFromRoaming { false }; // P4b, one-shot
-    bool                    mSkipGlobalLockPrompt { false };// 2026-04-26: kit-view prompt opt-outs
+    // 2026-04-26: kit-view prompt opt-outs.  Lock is indexed by drum bank
+    // (0 = drums 1-16, 1 = drums 17-32).
+    bool                    mSkipGlobalLockPrompt[2] { false, false };
     bool                    mSkipKitReplacePrompt { false };
+    bool                    mSkipCoreContentPrompt { false };   // content-delivery opt-out
+    bool                    mSettingsWarnShown { false };   // once-per-session write-failure alert gate
 
     // ── P5 state ─────────────────────────────────────────────────────────────
     // QA-UndoCoverage Task 9: mDirty + setDirtyInternal retired -- see the
@@ -272,7 +308,15 @@ private:
     bool                      mIgnoreDirty { false };   // true during load/save
     int               mAutosaveSec { 900 };     // 15 min default
     void timerCallback() override;              // autosave tick
-    bool writeBackup();                         // writes project.xml.bak
+    bool writeBackup();
+    // Once-per-session autosave-failure alert gate; reset by the next
+    // successful write so a recurring failure can resurface.
+    bool              mAutosaveWarnShown { false };
 
+    // The content-download offer is answered by a native message box that can
+    // sit open for as long as the user leaves it there, and its callback writes
+    // back to this object.  Weak-referenceable so that callback can tell whether
+    // the manager is still alive rather than assuming it.
+    JUCE_DECLARE_WEAK_REFERENCEABLE (ProjectManager)
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (ProjectManager)
 };

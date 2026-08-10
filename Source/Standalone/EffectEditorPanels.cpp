@@ -1,6 +1,7 @@
 #include "EffectEditorPanels.h"
 #include "UndoBracket.h"
 #include "EffectPresetIO.h"       // userNamPedalsDir / irDir chooser homes
+#include "../ProjectFileResolver.h"   // persisted refs are project-relative in a bundle
 #include "../Hosting/HostedPluginEffect.h"   // QA-ModelShell TS6: hosted plugin editor
 // D.4 (2026-05-01): force MSBuild to recompile this file - Compressor + Delay
 // knob additions were missing from the previous incremental build.
@@ -5471,16 +5472,26 @@ struct AcousticPreampStylePanel : public EditorPanelBase
             if (! mDsp) return;
             auto irHome = EffectPresetIO::irDir();
             irHome.createDirectory();
+            // The stored ref is what was persisted -- a bundled project holds
+            // "Samples/<name>.wav", which a bare juce::File would resolve
+            // against the process working directory.
             auto startDir = mDsp->getUserIRPath().isNotEmpty()
-                              ? juce::File (mDsp->getUserIRPath()).getParentDirectory()
+                              ? ProjectFileResolver::resolve (mDsp->getUserIRPath()).getParentDirectory()
                               : irHome;
             chooser = std::make_unique<juce::FileChooser> ("Pick acoustic IR", startDir, "*.wav");
             chooser->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
                 [this] (const juce::FileChooser& fc)
                 {
                     auto f = fc.getResult();
-                    if (! f.existsAsFile() || ! mDsp) return;
-                    mDsp->loadUserIR (f);
+                    if (f == juce::File() || ! mDsp) return;
+                    juce::String err;
+                    if (! mDsp->loadUserIR (f, err))
+                    {
+                        juce::AlertWindow::showMessageBoxAsync (
+                            juce::MessageBoxIconType::WarningIcon,
+                            "Load Acoustic IR", err, "OK");
+                        return;
+                    }
                     if (mDsp->mBody != AcousticPreampStyleDSP::Body::User)
                     {
                         mDsp->setBody ((int) AcousticPreampStyleDSP::Body::User);
@@ -5588,16 +5599,26 @@ struct AcousticSimulatorStylePanel : public EditorPanelBase
             if (! mDsp) return;
             auto irHome = EffectPresetIO::irDir();
             irHome.createDirectory();
+            // The stored ref is what was persisted -- a bundled project holds
+            // "Samples/<name>.wav", which a bare juce::File would resolve
+            // against the process working directory.
             auto startDir = mDsp->getUserIRPath().isNotEmpty()
-                              ? juce::File (mDsp->getUserIRPath()).getParentDirectory()
+                              ? ProjectFileResolver::resolve (mDsp->getUserIRPath()).getParentDirectory()
                               : irHome;
             chooser = std::make_unique<juce::FileChooser> ("Pick acoustic simulator IR", startDir, "*.wav");
             chooser->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
                 [this] (const juce::FileChooser& fc)
                 {
                     auto f = fc.getResult();
-                    if (! f.existsAsFile() || ! mDsp) return;
-                    mDsp->loadUserIR (f);
+                    if (f == juce::File() || ! mDsp) return;
+                    juce::String err;
+                    if (! mDsp->loadUserIR (f, err))
+                    {
+                        juce::AlertWindow::showMessageBoxAsync (
+                            juce::MessageBoxIconType::WarningIcon,
+                            "Load Acoustic IR", err, "OK");
+                        return;
+                    }
                     if (mDsp->mMode != AcousticSimulatorStyleDSP::Mode::User)
                     {
                         mDsp->setMode ((int) AcousticSimulatorStyleDSP::Mode::User);
@@ -6572,8 +6593,11 @@ struct NAMPedalStylePanel : public EditorPanelBase
         auto userPedals = EffectPresetIO::userNamPedalsDir();
         userPedals.createDirectory();
 
+        // getModelPath() returns the PERSISTED reference, not the file that was
+        // opened: a bundled project stores "Samples/<name>.nam", which a bare
+        // juce::File would resolve against the process working directory.
         auto startDir = mDsp->getModelPath().isNotEmpty()
-                            ? juce::File (mDsp->getModelPath()).getParentDirectory()
+                            ? ProjectFileResolver::resolve (mDsp->getModelPath()).getParentDirectory()
                             : userPedals;
 
         chooser = std::make_unique<juce::FileChooser>("Load NAM Pedal", startDir, "*.nam");

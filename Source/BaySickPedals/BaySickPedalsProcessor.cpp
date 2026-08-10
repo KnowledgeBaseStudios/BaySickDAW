@@ -1,8 +1,12 @@
 #include "BaySickPedalsProcessor.h"
 #include "../AppPaths.h"
+#include "../UserFileSave.h"
 #include "BaySickPedalsEditor.h"
 #include "../DSP/CompressorDSP.h"   // for I-15: Compressor in pedal slot defaults to Type::CS
 #include "../DSP/OverdriveDSP.h"    // for I-15: Overdrive in pedal slot defaults to Type::Pedal
+// The board mints and retires its own slot uuids, so it is the one place that
+// can tell the automation registry a pedal slot's lanes are gone.
+#include "../Standalone/SharedUI.h"
 
 namespace
 {
@@ -47,6 +51,13 @@ BaySickPedalsProcessor::BaySickPedalsProcessor (juce::UndoManager* undoMgr)
     mSlots[kSlotEQ   ].type   = EffectType::GraphicEQStyle;
     mSlots[kSlotEQ   ].active = EffectRack::createEffect (EffectType::GraphicEQStyle);
     // Slots 1-6 default to None (empty).
+
+    // Resolve the per-slot bypass atomics here, in the ctor BODY -- apvts is
+    // fully built by then (createLayout runs in the init list), so none of the
+    // eight can miss.  See mSlotBypassRaw's declaration for why the audio path
+    // must never rebuild these ids.
+    for (int s = 0; s < kNumSlots; ++s)
+        mSlotBypassRaw[(size_t) s] = apvts.getRawParameterValue (slotBypassId (s));
 }
 
 BaySickPedalsProcessor::~BaySickPedalsProcessor() = default;
@@ -118,9 +129,8 @@ DSPBase* BaySickPedalsProcessor::getSlotEffect (int slot) const noexcept
 bool BaySickPedalsProcessor::isSlotBypassed (int slot) const noexcept
 {
     if (slot < 0 || slot >= kNumSlots) return false;
-    if (auto* p = apvts.getRawParameterValue (slotBypassId (slot)))
-        return p->load() > 0.5f;
-    return false;
+    auto* p = mSlotBypassRaw[(size_t) slot];
+    return p != nullptr && p->load() > 0.5f;
 }
 
 int BaySickPedalsProcessor::getChainLatencySamples()
@@ -193,15 +203,24 @@ bool BaySickPedalsProcessor::loadEffect (int slot, EffectType type,
     if (effect && mSampleRate > 0.0)
         effect->prepare (mSampleRate, mMaxBlock);
 
+    // Hoisted out of mLoadLock: the automation de-registration destroys
+    // std::function closures, so it fires only once the lock has dropped.
+    juce::String retiringUuid;
+
     {
         const juce::ScopedLock lk (mLoadLock);
         publishPending (slot, std::move (effect), type);
         // Fresh identity on a user-facing swap (different pedal = different knobs,
         // so its old lanes should not follow); restoreFullState passes the saved
         // one so lanes survive a reload.  Mirrors EffectRack::loadEffect.
-        mSlots[(size_t) slot].uuid = uuidOverride.isNotEmpty() ? uuidOverride
+        const juce::String newUuid = uuidOverride.isNotEmpty() ? uuidOverride
                                                                : juce::Uuid().toString();
+        if (mSlots[(size_t) slot].uuid != newUuid)
+            retiringUuid = mSlots[(size_t) slot].uuid;
+        mSlots[(size_t) slot].uuid = newUuid;
     }
+    if (retiringUuid.isNotEmpty() && VKnobAutomation::sOnUnregisterSlotUuid)
+        VKnobAutomation::sOnUnregisterSlotUuid (retiringUuid);
     fireDirty();   // 2026-05-05 lifecycle dirty
     if (onSlotAutomationChanged) onSlotAutomationChanged();
     return true;
@@ -213,11 +232,16 @@ bool BaySickPedalsProcessor::clearSlot (int slot)
     // Slot 0 / 7 cannot be cleared -- they always hold their locked type.
     if (isSlotLocked (slot))           return false;
 
+    juce::String retiringUuid;
+
     {
         const juce::ScopedLock lk (mLoadLock);
         publishPending (slot, nullptr, EffectType::None);
+        retiringUuid = mSlots[(size_t) slot].uuid;
         mSlots[(size_t) slot].uuid = {};
     }
+    if (retiringUuid.isNotEmpty() && VKnobAutomation::sOnUnregisterSlotUuid)
+        VKnobAutomation::sOnUnregisterSlotUuid (retiringUuid);
     fireDirty();
     if (onSlotAutomationChanged) onSlotAutomationChanged();
     return true;
@@ -392,6 +416,25 @@ void BaySickPedalsProcessor::restoreFullState (const juce::ValueTree& state)
     auto slotsTree = state.getChildWithName ("Slots");
     if (! slotsTree.isValid()) return;
 
+    // Two phases, because both halves have to stay off the audio-facing lock for
+    // opposite reasons: building a DSP allocates and reads a state blob, and
+    // dropping the outgoing one destroys it (plus the std::function closures the
+    // de-registration below owns).  Only the pointer handover in between belongs
+    // under the lock, and it has to cover the WHOLE board in one hold -- taking
+    // the lock per slot lets the audio thread in between iterations and render a
+    // half-restored board, some slots new and some still old.
+    struct StagedSlot
+    {
+        std::unique_ptr<DSPBase> incoming;
+        std::unique_ptr<DSPBase> retiredActive;
+        std::unique_ptr<DSPBase> retiredPending;
+        EffectType               type { EffectType::None };
+        juce::String             uuid;
+        juce::String             retiredUuid;
+        bool                     present { false };
+    };
+    std::array<StagedSlot, (size_t) kNumSlots> staged;
+
     for (int i = 0; i < slotsTree.getNumChildren(); ++i)
     {
         auto slotTree = slotsTree.getChild (i);
@@ -431,32 +474,71 @@ void BaySickPedalsProcessor::restoreFullState (const juce::ValueTree& state)
             }
         }
 
-        // Bulk-restore path: install directly into active under mSlotsLock
-        // (audio try-locks and skips the block).  Same approach as
-        // EffectRack::setStateInformation -- avoids the 1s drain wait when
-        // audio isn't yet producing blocks during project load.
-        const juce::ScopedLock                 lkMsg   (mLoadLock);
-        const juce::SpinLock::ScopedLockType   lkAudio (mSlotsLock);
-
-        if (mSlots[slotIdx].swapPending.load (std::memory_order_acquire))
-        {
-            std::swap (mSlots[slotIdx].active, mSlots[slotIdx].pending);
-            mSlots[slotIdx].swapPending.store (false, std::memory_order_release);
-        }
-        mSlots[slotIdx].active = std::move (effect);
-        mSlots[slotIdx].pending.reset();
-        mSlots[slotIdx].type   = type;
         // Restore the saved automation identity so existing lanes keep pointing at
         // this pedal.  Pre-uuid saves carry none: mint one rather than leaving it
         // empty, or the slot's knobs would register under a blank key.
+        const juce::String savedUuid = slotTree.getProperty ("uuid", "").toString();
+
+        auto& st = staged[(size_t) slotIdx];
+        st.incoming = std::move (effect);
+        st.type     = type;
+        st.uuid     = type == EffectType::None
+                        ? juce::String()
+                        : (savedUuid.isNotEmpty() ? savedUuid : juce::Uuid().toString());
+        st.present  = true;
+    }
+
+    // Bulk-restore path: install directly into active under mSlotsLock (audio
+    // try-locks and skips the block).  Same approach as
+    // EffectRack::setStateInformation -- avoids the 1s drain wait when audio
+    // isn't yet producing blocks during project load.  The hold is a pointer
+    // handover and nothing more -- the outgoing DSPs leave by move and are
+    // destroyed once the lock has dropped.
+    {
+        const juce::ScopedLock                 lkMsg   (mLoadLock);
+        const juce::SpinLock::ScopedLockType   lkAudio (mSlotsLock);
+
+        for (int s = 0; s < kNumSlots; ++s)
         {
-            const juce::String savedUuid = slotTree.getProperty ("uuid", "").toString();
-            mSlots[slotIdx].uuid = type == EffectType::None
-                                     ? juce::String()
-                                     : (savedUuid.isNotEmpty() ? savedUuid
-                                                               : juce::Uuid().toString());
+            auto& st = staged[(size_t) s];
+            if (! st.present) continue;
+
+            if (mSlots[s].swapPending.load (std::memory_order_acquire))
+            {
+                std::swap (mSlots[s].active, mSlots[s].pending);
+                mSlots[s].swapPending.store (false, std::memory_order_release);
+            }
+            st.retiredActive  = std::move (mSlots[s].active);
+            st.retiredPending = std::move (mSlots[s].pending);
+            mSlots[s].active  = std::move (st.incoming);
+            mSlots[s].type    = st.type;
+            if (mSlots[s].uuid.isNotEmpty() && mSlots[s].uuid != st.uuid)
+                st.retiredUuid = mSlots[s].uuid;
+            mSlots[s].uuid    = st.uuid;
         }
     }
+
+    // Hoisted out of both locks: de-registration destroys std::function
+    // closures, so it must not run under a lock the audio thread can want.
+    juce::StringArray retiringUuids;
+    for (const auto& st : staged)
+        if (st.retiredUuid.isNotEmpty())
+            retiringUuids.add (st.retiredUuid);
+
+    // A project load reaches the retired lanes through resetProjectState's
+    // wholesale clear, but a pedalboard-preset restore has no such boundary --
+    // without this its lanes accumulate for the life of the session.  Posted
+    // rather than called inline: the hook is message-thread only and this can
+    // be pumped from a project load on another thread.  Queued ahead of the
+    // re-registration below so the stale keys are gone before the new ones land.
+    if (! retiringUuids.isEmpty())
+        juce::MessageManager::callAsync (
+            [uuids = retiringUuids]
+            {
+                if (! VKnobAutomation::sOnUnregisterSlotUuid) return;
+                for (const auto& u : uuids)
+                    VKnobAutomation::sOnUnregisterSlotUuid (u);
+            });
 
     // 2026-05-05 (Bug B fix): bulk-restore swaps DSP pointers on every slot.
     // The editor's timer-based rebuild only fires when the type enum changes,
@@ -508,22 +590,35 @@ juce::File BaySickPedalsProcessor::pedalboardPresetsRoot()
 bool BaySickPedalsProcessor::savePedalboardPreset (const juce::String& name,
                                                    juce::String& outErr)
 {
-    juce::String safeName = name.trim();
-    if (safeName.isEmpty()) { outErr = "Preset name cannot be empty."; return false; }
-    for (auto c : juce::String ("\\/:*?\"<>|"))
-        safeName = safeName.replace (juce::String::charToString (c), "_");
-
     auto dir = pedalboardPresetsRoot();
     if (! dir.createDirectory())
     {
         outErr = "Could not create folder: " + dir.getFullPathName();
         return false;
     }
-    auto target = dir.getChildFile (safeName + ".xml");
+
+    // resolveTarget rather than one of UserFileSave's write shapes: those raise
+    // the family's box themselves and this reports through outErr to a caller
+    // that raises its own, so the pair would stack two dialogs on one failure.
+    // What it replaces mattered more here than at the other out-param sites -
+    // the old code substituted "_" for a nine-character subset and wrote
+    // straight onto dir/<name>.xml, so "Crunch?" and "Crunch*" both landed on
+    // "Crunch_.xml" and the second save destroyed the first with no warning.
+    const auto target = UserFileSave::resolveTarget (dir, name);
+    if (target == juce::File())
+    {
+        outErr = name.trim().isEmpty()
+                     ? juce::String ("Type a name for it first.")
+                     : UserFileSave::unusableNameMessage (name);
+        return false;
+    }
 
     juce::XmlElement root (kPedalboardRootTag);
     root.setAttribute ("version", kStateVersion);
-    root.setAttribute ("name",    safeName);
+    // Stamped from the resolved file, not the typed string: the collision
+    // suffix means the two differ, and metadata that disagrees with the
+    // filename reads as the preset it just avoided overwriting.
+    root.setAttribute ("name",    target.getFileNameWithoutExtension());
 
     auto state = captureFullState();
     if (auto inner = state.createXml())
@@ -531,7 +626,7 @@ bool BaySickPedalsProcessor::savePedalboardPreset (const juce::String& name,
 
     if (! root.writeTo (target, juce::XmlElement::TextFormat()))
     {
-        outErr = "Could not write preset file: " + target.getFullPathName();
+        outErr = "Couldn't write " + target.getFullPathName() + ".";
         return false;
     }
     return true;

@@ -7,6 +7,7 @@
 #include "../DSP/OverdriveDSP.h"   // I-4: Mode dropdown for Overdrive (Rack vs Pedal)
 #include "../DSP/LimiterDSP.h"     // TS7: Mode dropdown for Limiter vs Maximizer
 #include "EffectPresetIO.h"
+#include "../MissingFileReport.h"
 #include "../Hosting/HostedPluginEffect.h"   // QA-ModelShell TS6: added-effects list + slot naming
 
 // Base id for hosted-plugin picker rows: kVst3PickerItemId + index into the
@@ -139,8 +140,8 @@ SlotComponent::SlotComponent(int slotIndex) : mSlotIndex(slotIndex)
 // QA-EffectsReview Task 1: Basic/Advanced toggle helpers.  The flag is owned by
 // the EffectRack slot (persisted with the project); the inline panel mirrors it
 // via EditorPanelBase::mBasicMode.  Toggling re-applies the panel layout IN PLACE
-// (no editor re-mount, so slider SafePointers / automation stay valid) and
-// notifies the host so the project dirty bit picks it up.
+// (no editor re-mount, so slider SafePointers / automation stay valid); the
+// project dirty bit flips through EffectRack::setSlotBasicMode -> onSlotsChanged.
 void SlotComponent::refreshBasicBtnLabel()
 {
     if (!mBasicBtn || !mRack) return;
@@ -152,7 +153,6 @@ void SlotComponent::toggleBasicMode()
     if (!mRack) return;
     const bool nb = ! mRack->getSlotBasicMode(mSlotIndex);
     mRack->setSlotBasicMode(mSlotIndex, nb);
-    if (onBasicModeChanged) onBasicModeChanged(mSlotIndex, nb);
     if (auto* base = dynamic_cast<EditorPanelBase*>(mEditor.get()))
     {
         base->mBasicMode = nb;
@@ -701,31 +701,12 @@ void SlotComponent::mouseDown(const juce::MouseEvent& e)
         if (mRack) mRack->setSlotBypassed(mSlotIndex, mBypassed);
         repaint();
     }
-    else if (! mLocked && mUpRect.contains(pos))
-    {
-        if (onMoveRequested) onMoveRequested(mSlotIndex, true);
-    }
-    else if (! mLocked && mDownRect.contains(pos))
-    {
-        if (onMoveRequested) onMoveRequested(mSlotIndex, false);
-    }
-    else if (! mLocked && mCloseRect.contains(pos))
-    {
-        if (onEffectRemoved) onEffectRemoved(mSlotIndex);
-    }
 }
 
 // ── Popup menu (Change D: appears at cursor, alphabetical, no EQ) ─────────────
 void SlotComponent::showAddMenu()
 {
-    const int slot = mSlotIndex;
-    juce::Component::SafePointer<SlotComponent> safeThis (this);
-    showEffectPickerMenu (mLastMousePosScreen,
-        [safeThis, slot] (EffectType t)
-        {
-            if (auto* s = safeThis.getComponent())
-                if (s->onEffectChosen) s->onEffectChosen (slot, t);
-        });
+    showEffectPickerMenu (mLastMousePosScreen, {});
 }
 
 void SlotComponent::showEffectPickerMenu (juce::Point<int> screenPos,
@@ -1171,7 +1152,7 @@ void SlotComponent::showPresetMenu()
                 {
                     const juce::String name = aw->getTextEditorContents ("name").trim();
                     delete aw;
-                    if (result != 1 || name.isEmpty()) return;
+                    if (result != 1) return;
                     juce::String err;
                     if (! EffectPresetIO::savePreset (*dsp, type, name, err))
                         juce::AlertWindow::showMessageBoxAsync (
@@ -1196,6 +1177,15 @@ void SlotComponent::showPresetMenu()
             const juce::String label = f.getFileNameWithoutExtension();
             sub.addItem (label, [this, dsp, f]()
             {
+                // Anything the preset's DSP could not find (a NAM capture, a
+                // user IR) records itself instead of failing loudly, so this
+                // gesture has to drain -- an undrained entry otherwise
+                // surfaces later attached to an unrelated load.  The scope
+                // rather than a tail call to reportIfAny: it covers the early
+                // return too, and a bare drain inside an outer gesture would
+                // steal that gesture's entries and post them under this noun.
+                MissingFileReport::ScopedGesture gesture ("preset");
+
                 juce::String err;
                 if (! EffectPresetIO::loadPreset (*dsp, f, err))
                 {
@@ -1278,6 +1268,12 @@ juce::String SlotComponent::effectTypeName(EffectType type)
         // the actual plugin.
         case EffectType::VST3Plugin:      return "VST3 Plugin";
 
+        // Only the pedalboard's compact slot dropdown asks for this one - the
+        // pedal tile names a NAM slot after the loaded capture instead, so the
+        // missing case left the dropdown rendering a loaded NAM pedal as the
+        // default "-" while the tile below it read correctly.
+        case EffectType::NAMPedalStyle:   return "NAM Pedal";
+
         // I-5 (2026-05-02): BaySickPedals Harmonics drive pedals batch.
         case EffectType::BluesDriveStyle: return "Blues Drive";
         case EffectType::DistortionStyle: return "Distortion";
@@ -1322,7 +1318,21 @@ juce::String SlotComponent::slotDisplayName (const EffectRack* rack, int slot)
             const auto name = hosted->getPluginName();
 
             if (name.isNotEmpty())
+            {
+                // The STORED description names the slot, so a plugin whose DLL
+                // moved, whose bridge helper never came up, or that died
+                // mid-session kept presenting as a working effect while it was
+                // in fact passing audio through untouched (in-process) or
+                // clearing the bus (bridged).  Asked LIVE rather than at build
+                // time: a bridged load result and a crash both land after the
+                // name is first rendered, and every surface polls this.
+                auto* inst = hosted->getHosted();
+
+                if (inst != nullptr && ! inst->isAlive())
+                    return name + " (missing)";
+
                 return name;
+            }
         }
 
     return effectTypeName (type);

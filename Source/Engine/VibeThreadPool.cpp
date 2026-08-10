@@ -61,6 +61,14 @@ void VibeThreadPool::submit (RenderTask* task) noexcept
     if (task == nullptr)
         return;
 
+    // Counted BEFORE the enqueue, not after: a worker can pop and finish this
+    // task the instant it lands in the queue, and the completion decrement
+    // must never be the first modification of the counter.  relaxed is enough
+    // for the count itself (modification order on a single atomic is total, so
+    // the decrement can never be seen ahead of this increment), and the
+    // enqueue's internal release keeps this store from sinking below it.
+    mOutstandingTasks.fetch_add (1, std::memory_order_relaxed);
+
     // moodycamel::ConcurrentQueue::enqueue() never blocks; it allocates a
     // new block internally if the producer's local block is full. The
     // allocation path is rare (amortized) but it CAN happen - to keep this
@@ -132,29 +140,25 @@ void VibeThreadPool::runOneTask (RenderTask* task) noexcept
             submit (child);
         }
     }
+
+    // LAST thing this task does, and it must stay last: the children above are
+    // already counted when this drops, and the release half publishes this
+    // task's output-buffer writes to the dispatcher's acquire poll.  The
+    // dispatcher's block ends on this count, so anything left below here would
+    // run after the audio thread believes no task is still touching mCtx -- a
+    // pointer into processBlock's stack frame.
+    mOutstandingTasks.fetch_sub (1, std::memory_order_acq_rel);
 }
 
-void VibeThreadPool::runUntil (std::atomic<bool>& done) noexcept
-{
-    while (! done.load (std::memory_order_acquire))
-    {
-        if (auto* task = tryPop())
-            runOneTask (task);
-        else
-            std::this_thread::yield();
-    }
-}
-
-// 2026-05-06 (Batch 9c watchdog): bounded variant.  We always run any task
-// available (greedy) -- the deadline is only checked on idle iterations
-// where there's nothing to do.  This biases toward "if work is available,
-// finish the block normally; only declare timeout when the system is
-// actually stuck waiting."
+// 2026-05-06 (Batch 9c watchdog): we always run any task available (greedy)
+// -- the deadline is only checked on idle iterations where there's nothing to
+// do.  This biases toward "if work is available, finish the block normally;
+// only declare timeout when the system is actually stuck waiting."
 bool VibeThreadPool::runUntilOrTimeout (std::atomic<bool>& done,
                                           double              deadlineMillisHiRes) noexcept
 {
     const bool capture = RenderEngine::MtDiagnostic::gCaptureOn.load (std::memory_order_relaxed);
-    while (! done.load (std::memory_order_acquire))
+    while (! blockComplete (done))
     {
         if (auto* task = tryPop())
         {
@@ -181,6 +185,12 @@ void VibeThreadPool::clearQueues() noexcept
     RenderTask* drained = nullptr;
     while (mImpl->queue.try_dequeue (drained))
         ; // discard
+
+    // A discarded task never reaches runOneTask's decrement, so its share of
+    // the count has to go with it.  Any task ALREADY popped by a worker still
+    // decrements after this store, taking the count negative until the next
+    // block resets it -- which is why blockComplete tests <= 0.
+    mOutstandingTasks.store (0, std::memory_order_relaxed);
 }
 
 void VibeThreadPool::workerLoop (int workerIndex) noexcept

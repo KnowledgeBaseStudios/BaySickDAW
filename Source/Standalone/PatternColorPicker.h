@@ -36,4 +36,10 @@ namespace PatternColorPicker
     void showAsync (juce::Component* anchor,
                     juce::Colour current,
                     std::function<void(juce::Colour)> onColourChanged);
+
+    // The same selector without a window around it, for hosts that put the
+    // color choice inside a larger dialog.  Caller owns it, sizes it, and is
+    // responsible for calling pushRecent() with the committed color -- a
+    // hosted selector has no close of its own to hang that on.
+    std::unique_ptr<juce::ColourSelector> createSelector (juce::Colour current);
 }

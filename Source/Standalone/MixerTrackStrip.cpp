@@ -13,10 +13,8 @@ namespace
     // 2026-04-30: Pan row tightened 36→28, Width row tightened 28→24
     // (saves 12 px total for the meter to grow into).
     constexpr int kNameH    = 20;
-    constexpr int kMeterH   = 80;   // unused now - meter is right-column flex
     constexpr int kMSH      = 20;   // Mute / Solo row
     constexpr int kPanH     = 28;   // was 36
-    constexpr int kFaderH   = 100;
     constexpr int kDbH      = 16;
     constexpr int kPadV     = 4;    // vertical padding between rows
 
@@ -42,8 +40,12 @@ MixerTrackStrip::MixerTrackStrip(const juce::String& trackName,
     mNameLabel.setFont(juce::Font(11.0f, juce::Font::bold));
     mNameLabel.setColour(juce::Label::textColourId, VC::Text);
     mNameLabel.setJustificationType(juce::Justification::centred);
-    // 2026-04-24: every user-creatable strip type is renameable.  Names persist
-    // via <AuxNames> / <VoxNames> / <InstNames> in UIState.
+    // Every user-creatable strip type is renameable, but the persistence route
+    // splits by type: Aux / Vox / Inst names ride their own <AuxNames> /
+    // <VoxNames> / <InstNames> lists in UIState, while Layer and Bass names
+    // survive only by renaming the owning page (onNameChanged -> the page's
+    // mTabName, which is what the saved tab record persists).  A renameable
+    // strip wired to neither route loses the edit on the next load.
     bool canRename = (type == StripType::LayerChannel
                       || type == StripType::BassChannel
                       || type == StripType::Aux
@@ -331,7 +333,7 @@ void MixerTrackStrip::setApvts(juce::AudioProcessorValueTreeState& apvts,
         }
     }
 
-    // Bypass - insert only (canonical store; EffectsPage button reads/writes the same param)
+    // Bypass - every strip type (canonical store; EffectsPage button reads/writes the same param)
     if (hasUtilityRow() && apvts.getParameter(paramPrefix + "_bypass") != nullptr)
         mBypassAtt = std::make_unique<ButtonAtt>(apvts, paramPrefix + "_bypass", mBypassBtn);
 
@@ -521,11 +523,6 @@ void MixerTrackStrip::setSoloed(bool soloed, bool notify)
     mUpdating = !notify;
     mSoloBtn.setToggleState(soloed, notify ? juce::sendNotification : juce::dontSendNotification);
     mUpdating = false;
-}
-
-float MixerTrackStrip::getFaderDb() const
-{
-    return (float)mFader.getValue();
 }
 
 void MixerTrackStrip::updateDbLabel()

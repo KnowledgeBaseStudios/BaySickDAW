@@ -357,6 +357,20 @@ void EffectSlotWindow::configureTitleStrip (PageMenuBar& bar)
                                    "This takes effect the next time the plugin loads.");
                            });
             }
+
+            // The automatic recovery watches the added-plugin list, and putting
+            // a plugin back on that list is not the gesture every user reaches
+            // for -- so the retry is also here, by hand.  Shown only while the
+            // plugin is not alive: retrying a working one means nothing, and
+            // this menu is short by design.
+            if (! hosted->isAlive())
+                m.addItem ("Retry Loading Plugin", [this]
+                {
+                    EffectRack* rack = nullptr;
+                    const int slot = resolveSlot (rack);
+                    if (rack == nullptr || slot < 0) return;
+                    EffectsPage::retryDeadPluginSlot (mProc, mChannelId, *rack, slot);
+                });
         }
 
         // QA-Layout T17: emits the "Visual" entry.  This window sets no FX Rack
