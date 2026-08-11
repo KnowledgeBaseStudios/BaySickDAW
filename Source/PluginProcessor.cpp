@@ -7471,9 +7471,10 @@ namespace
     }
 } // namespace
 
-// QA-ApvtsAutomation (2026-07-25): addParamsForHarmless / addParamsForVibePlayer
+// QA-ApvtsAutomation (2026-07-25): addParamsForHarmless / addParamsForBaySickPlayer
 // / addParamsForBaySickSynth / addParamsForBaySickBass / addParamsForEffectRack
-// removed with registerParamsForTrack.  They registered a "tk_{trackId}_*" mirror
+// removed with registerParamsForTrack.  (The player one was spelled
+// addParamsForVibePlayer when it existed; renamed here to match the tree.)  They registered a "tk_{trackId}_*" mirror
 // of the engine param sets that nothing ever read: the ids were mismatched with
 // the engine-tagged ids the editors actually stamp ("tk_lay_0_bss_noise" vs this
 // set's "tk_lay_0_oscMode"), so the family was automatable-to-nowhere.  Engine

@@ -94,10 +94,16 @@ public:
     //
     // The T8 rule is minimum == default: a window may not shrink below the size
     // its content was measured at, because our own panels do not scale and
-    // anything smaller is unreadable.  A hosted plugin's fixed-size surface DOES
-    // scale (HostedPluginEditor applies a transform), so it is the one case
-    // where a smaller window still shows a usable UI -- and without a lower
-    // floor the scaling could only ever grow, which is half a feature.
+    // anything smaller is unreadable.  A hosted plugin is the one exception,
+    // and for the OPPOSITE reason to the one that used to be written here: an
+    // earlier version of this comment claimed HostedPluginEditor applies a
+    // transform, and it does not -- that path was deleted at QA-Cleanup and the
+    // only surviving references to it are comments.  Nothing scales a plugin's
+    // surface, so its declared size is not a readability floor we can honour;
+    // it is just how big the plugin happens to be, and a plugin larger than the
+    // workspace would otherwise pin its window at a size that does not fit.
+    // The window is allowed to be smaller than the plugin: it clips, and the
+    // plugin's own magnify is the control that fixes that.
     //
     // Call AFTER setDefaultWindowSize: that resets the minimum to the default.
     void setResizeFloor (int minW, int minH);

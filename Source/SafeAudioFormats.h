@@ -24,8 +24,15 @@ namespace SafeAudioFormats
     {
         fm.registerBasicFormats();
 
-        // Not the default format: JUCE picks readers by extension, and this is
-        // the only one claiming ".mp3" now, so ordering does not matter.
+        // Not the default format.  ORDERING DOES MATTER, and the comment that
+        // used to sit here saying it did not was wrong (QA-Manuals MF-4):
+        // createReaderFor returns the FIRST format whose canHandleFile passes,
+        // and registerBasicFormats() used to register WindowsMediaAudioFormat
+        // ahead of this line while also claiming ".mp3".  Ours is last, so it
+        // only decodes .mp3 because CMakeLists now sets
+        // JUCE_USE_WINDOWS_MEDIA_FORMAT=0 as well as JUCE_USE_MP3AUDIOFORMAT=0.
+        // Both defines are load-bearing; dropping either one silently hands
+        // .mp3 back to a decoder we did not audit.
         fm.registerFormat (new MpglibAudioFormat(), false);
     }
 }

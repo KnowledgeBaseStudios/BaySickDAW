@@ -36,6 +36,7 @@ namespace BSCommands
         cmdShowEffectPanel  = 0x10018,
         cmdShowDrumKit      = 0x10019,
         cmdShowEventEditor  = 0x1001a,
+        cmdShowManuals      = 0x1001b,
 
         // ── General - file operations (Phase B-1) ───────────────────────────
         cmdFileNew         = 0x10020,

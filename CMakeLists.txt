@@ -73,6 +73,18 @@ set(VIBESYNTH_DEFS
     # it everywhere registerBasicFormats() used to be called.  Turning this back
     # on would register JUCE's decoder alongside ours for the same extension.
     JUCE_USE_MP3AUDIOFORMAT=0
+    # QA-Manuals (2026-08-11), MF-4 -- THE OTHER HALF OF THE ABOVE.  Turning
+    # JUCE's MP3 decoder off did NOT make mpglib the .mp3 decoder, because
+    # registerBasicFormats() also registers WindowsMediaAudioFormat, whose
+    # extension list LEADS with ".mp3" (juce_WindowsMediaAudioFormat.cpp:136),
+    # and AudioFormatManager::createReaderFor returns the FIRST format whose
+    # canHandleFile passes.  Windows Media registers before ours, so every .mp3
+    # was being decoded by Wmvcore -- a second unaudited parser on an
+    # untrusted-input path, which is the exact thing CL-289 moved MP3 off JUCE
+    # to avoid, and it bypassed MpglibReader's size ceilings with it.
+    # Off also drops .wma/.asf/.wm/.wmv, which no file filter in the app offers
+    # and no document mentions; they were only ever reachable by accident.
+    JUCE_USE_WINDOWS_MEDIA_FORMAT=0
     # QA-0a (2026-05-07): silence two AAX-format paramID asserts in JUCE's
     # validateParameter (paramID-too-long, paramID-trimmed-duplicate).
     # BaySickDAW is standalone-only -- no AAX target -- so these checks are
@@ -647,6 +659,7 @@ target_sources(BaySickDAWStandalone PRIVATE
     # Keymap framework (Phase A — 2026-04-26)
     Source/Standalone/KeyBindings.cpp
     Source/Standalone/KeyBindsWindow.cpp
+    Source/Standalone/ManualsWindow.cpp
     Source/Standalone/RustyDrumsMapWindow.cpp
     # Pattern colour picker (Phase F-1 — 2026-04-26)
     Source/Standalone/PatternColorPicker.cpp
@@ -655,9 +668,25 @@ target_sources(BaySickDAWStandalone PRIVATE
     # 2026-04-25: legacy DrumsPage.cpp + BaySickDrumsEditor.cpp removed.
 )
 
+# WebView2 is enabled on the STANDALONE TARGET ONLY, never in VIBESYNTH_DEFS.
+# The shared list also feeds BaySickPluginHost, and the 32-bit helper would then
+# need an x86 WebView2 build for a browser it never opens.  JUCE_WEB_BROWSER
+# lives in the shared list as =0, so it is removed rather than appended over --
+# defining the same macro twice is C4005 and last-wins is not a contract.
+#
+# Dynamic loading, not WITH_STATIC_LINKING: JUCE resolves the entry point with
+# LoadLibraryA + GetProcAddress (juce_WebBrowserComponent_windows.cpp:642-657),
+# so nothing links at build time and the vendored tree needs headers plus the
+# 160 KB loader DLL instead of a 10 MB static lib.
+set(BAYSICK_STANDALONE_DEFS ${VIBESYNTH_DEFS})
+list(REMOVE_ITEM BAYSICK_STANDALONE_DEFS JUCE_WEB_BROWSER=0)
+list(APPEND BAYSICK_STANDALONE_DEFS JUCE_WEB_BROWSER=1 JUCE_USE_WIN_WEBVIEW2=1)
+
 target_compile_definitions(BaySickDAWStandalone
-    PUBLIC ${VIBESYNTH_DEFS} VIBESYNTH_STANDALONE=1
+    PUBLIC ${BAYSICK_STANDALONE_DEFS} VIBESYNTH_STANDALONE=1
 )
+
+target_include_directories(BaySickDAWStandalone PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/libs/webview2/include")
 
 target_include_directories(BaySickDAWStandalone PRIVATE Source Source/Engine Source/Engine/Tasks Source/Standalone Source/Harmless Source/BaySickPlayer Source/BaySickSynth Source/BaySickBass Source/BaySickNAMIR Source/BaySickPedals Source/BaySickRustyDrums Source/BaySickGuitars Source/BaySickBasses Source/BaySickVocal Source/Clips Source/Vox Source/Inst Source/MidiLearn Source/SlideSampler
     # Rubber Band Library -- public headers (rubberband/*.h) so consumer code can
@@ -759,6 +788,17 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/Resources")
                 "$<TARGET_FILE_DIR:BaySickDAWStandalone>/Resources"
         VERBATIM)
 endif()
+
+# ── Stage WebView2Loader.dll next to the exe ──────────────────────────────────
+# JUCE LoadLibraryA's this by bare name, so it resolves out of the application
+# directory.  Without it the manuals window falls back to the IE engine.  This
+# is the LOADER, not the WebView2 Runtime itself -- the runtime is preinstalled
+# on Windows 11 and installer-provisioned elsewhere (QA-Installer).
+add_custom_command(TARGET BaySickDAWStandalone POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${CMAKE_CURRENT_SOURCE_DIR}/libs/webview2/x64/WebView2Loader.dll"
+            "$<TARGET_FILE_DIR:BaySickDAWStandalone>/WebView2Loader.dll"
+    VERBATIM)
 
 # ── BaySickPluginHost — the plugin sandbox helper (QA-ModelShell TS6, BLU-302) ─
 # Hosts ONE plugin in its own process, so a crashing plugin takes only itself

@@ -36,7 +36,7 @@ have. See `Sample Library.md`.
 
 | Document | Covers |
 |---|---|
-| `Workspace and Windows.md` | The fixed full-screen frame and the movable windows inside it: opening, closing, dragging, resizing, magnetism, the effect/visual tether, and where window positions are remembered. |
+| `Workspace and Windows.md` | The fixed full-screen frame and the movable windows inside it: the application menu bar and its Help menu, the manuals window, opening, closing, dragging, resizing, magnetism, the effect/visual tether, and where window positions are remembered. |
 | `Transport and Playback.md` | Play, stop, record, tempo, the position readout, Pattern vs Song mode, looping, the metronome and count-in, and what a recording captures. |
 | `Keyboard Shortcuts.md` | Every rebindable command and its default key, the Key Binds window, and a transcription of every page-local key and mouse gesture in the app. |
 | `Projects and Saving.md` | A project is a folder. New / Open / Save / Save As, the unsaved-changes prompt, autosave and backups, and the full per-project vs per-machine split. |
@@ -123,3 +123,17 @@ Every document follows the same shape:
 A few documents add a short **Not determined** list where the code did not settle
 a question. Those are real gaps, not oversights - do not paper over them in a
 manual.
+
+---
+
+## Two files here that are not system documents
+
+| File | What it is |
+|---|---|
+| `Verbatim Strings.md` | Every menu item, dialog title and dialog body the manuals must quote character-for-character, transcribed from the source literals. **Quote from there, never from a screenshot** - three separate Task 1 errors came from retyping a string from a picture. |
+| `MANUAL-1 Screenshot List.md` | **Not a capture plan.** The 723-shot plan and its `SHOT-###` ids are retired; the file survives as the code-read ELEMENT INVENTORY that callout lists are built from. Read its `Visible:` lines and its APPENDIX; ignore the sittings, counts and time budgets. |
+
+**Still to be written:** `Master Analyzer.md`. The window is in scope (SC-13) and
+its full string set is already harvested in `Verbatim Strings.md` section I, but
+the document itself lands with Manual 2's mixing chapter. Its INDEX row goes in
+alongside it, so that this index never points at a file that is not there.

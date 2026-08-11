@@ -45,12 +45,31 @@ stage pointer.
    is inside sfizz while its regions and file pool are freed.
 3. Create the processor if this is the first load; hand it the transport playhead
    and prepare it.
-4. `BaySickGuitarsProcessor::loadKit` parses the SFZ.
+4. `BaySickGuitarsProcessor::loadKit` runs the `SafeSfzKit` pre-flight walk over
+   the program and everything it pulls in, and parses the SFZ only if that safety walk (distinct from the shallower CC-default #include scan described below)
+   raises no objection.
 5. Re-open the processing gate, lower the shield, set the active flag, and fire
    `onSfizzEngineReady` (which registers automation lanes for every parameter).
 
 Step 2 is load-bearing. sfizz has no internal guard between `renderBlock` and
 `loadSfzFile`; the shield is the only thing keeping the two apart.
+**The kit is pre-flighted before sfizz sees it.** `SafeSfzKit::rejectReason`
+walks the program and every file it `#include`s - at most 8 levels deep, at most
+4096 file visits, at most 16 MB per file - and refuses the whole kit if it finds
+an `#include` cycle, an `#include` that leaves the kit folder or names a network
+share, a `$macro` whose value contains another `$macro`, a `sample=` or
+`default_path=` on a network share, an `.ogg` / `.aif` / `.aiff` sample, an
+opcode index above 512, or a NUL byte where text was expected. The walk
+resolves `#include` paths against the top-level file's folder, matching sfizz's
+own rule, and expands macros before testing anything, so a rule cannot be hidden
+behind a `#define`.
+
+The walk produces a one-line English reason, and **you are not shown it**. The
+reason is banked in the missing-files store as `Instrument kit refused - <reason>`
+against the kit's path; the picker's own box (below) names only the file. It
+reaches you later, if at all, inside the next **Missing files** dialog something
+else raises - under a headline about files no longer being where they were saved,
+which is not what happened.
 
 `loadKit` also walks the program's `#include` chain to a depth of 4, collecting:
 
@@ -161,7 +180,11 @@ program you are leaving are remembered for the session and come back if you
 switch back; the first visit to a program shows the kit author's defaults. The
 tab, its mixer strip and the piano-roll label all follow the program name.
 
-If the picker cannot load your choice, a box names the file and nothing changes.
+If the picker cannot load your choice, a warning box titled **Load Program**
+reads "Could not load program:" followed by the full path, and the tab keeps
+playing what it was playing. **The box gives no reason.** A kit refused by the
+pre-flight gate and a kit sfizz simply could not parse produce exactly the same
+box.
 
 ### The ARIA control panel
 

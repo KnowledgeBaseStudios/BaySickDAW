@@ -275,8 +275,8 @@ HT_SINE = 0; HT_SAW = 1; HT_SQUARE = 2; HT_TRIANGLE = 3
 HF_LP = 0; HF_HP = 1; HF_BP = 2; HF_NOTCH = 3
 
 # ─── BaySickPlayer engine defaults (2026-04-26) ──────────────────────────────
-# Mirror of VibePlayerProcessor::createLayout (Source/VibePlayer/
-# VibePlayerProcessor.cpp:170).  Param prefix is "tk_<trackId>_bsp_".
+# Mirror of BaySickPlayerProcessor::createLayout (Source/BaySickPlayer/
+# BaySickPlayerProcessor.cpp).  Param prefix is "tk_<trackId>_bsp_".
 # Preset XML format wraps the apvts state inside an outer <BaySickPlayerState>
 # along with a <Sample kind="sfz" path="library:Pack/File.sfz"/> sibling
 # (see savePatchAs in DrumPage.cpp:817).

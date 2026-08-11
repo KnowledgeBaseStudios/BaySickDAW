@@ -38,8 +38,14 @@ Visual window: `ChorusDSP`, `CompressorDSP`, `DelayDSP`, `FlangerDSP`,
 modes, so Tape is covered) and `TransientShaperDSP`. Publishing costs one
 relaxed atomic load per block while nothing is watching.
 
-Six modules consume a sidechain (`usesSidechain()` returns true): Compressor,
-Delay, Limiter, Reverb, Transient Shaper, and the pedal Noise Gate.
+Six built-in modules consume a sidechain (`usesSidechain()` returns true):
+Compressor, Delay, Limiter, Reverb, Transient Shaper, and the pedal Noise Gate.
+A hosted VST3 effect is a seventh case and the only one that is not a fixed
+property: `HostedPluginEffect::usesSidechain` asks the loaded plugin
+(`HostedPluginInstance::hasSidechainInput`), which becomes true once
+`prepareToPlay` has found an enabled input bus after bus 0. That discovery pass
+sits after the early return taken for a BRIDGED plugin, so a plugin running in
+its own process never reports a side-chain input and never gets the picker.
 
 ---
 
@@ -72,7 +78,7 @@ Delay, Limiter, Reverb, Transient Shaper, and the pedal Noise Gate.
 Evens out a performance: it turns the loud parts down so the quiet parts can
 come up. Four **Modes**, picked from the effect window's Menu. Each mode is a
 different panel because each one works differently. A Compressor loaded into a
-rack starts in **Modern**; loaded onto a pedalboard it starts in **CS Style**.
+rack starts in **Modern**; loaded onto a pedalboard it starts in **Pedal**.
 
 **Mode: Modern** - the full-featured version.
 
@@ -114,7 +120,7 @@ rack starts in **Modern**; loaded onto a pedalboard it starts in **CS Style**.
 | Comp / Limit toggle | two-way | Comp | Comp is about 3:1; Limit is effectively unlimited ratio |
 | Meter selector | Gain Reduction / Output +10 / Output +4 | - | What the needle shows |
 
-**Mode: CS Style (Sustain)** - a pedal-style sustainer.
+**Mode: Pedal (Sustain)** - a pedal-style sustainer.
 
 | Control | Range | Default | What it does |
 |---|---|---|---|
@@ -542,8 +548,8 @@ their controls are plain sliders that are never stamped.
 
 Because a suffix means different things in different modes, the automation key
 is (type, variant) - "attack" on a Modern compressor is milliseconds, on an FET
-compressor it is a switch position 0-7, and on a CS Style it is milliseconds on
-a different range.
+compressor it is a switch position 0-7, and on a Pedal-mode compressor it is
+milliseconds on a different range.
 
 **Not saved anywhere:** meter readings, gain-reduction values, tuner detection,
 the overload light on the Pro Parametric EQ, and every visual feed.

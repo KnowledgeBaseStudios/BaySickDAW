@@ -50,9 +50,8 @@ a note-on allocates nothing on the audio thread.
 **Per-voice signal path** (`BaySickPlayerVoice::renderNextBlock`):
 
 ```
-region sample -> resampler (pitch, stretch, glide)
+region sample -> resampler (pitch, stretch, glide, vibrato)
              -> amp ADSR
-             -> LFO amplitude modulation
              -> drive (tanh)
              -> sample-rate reduction (hold-and-repeat)
              -> state-variable low-pass filter
@@ -62,6 +61,17 @@ region sample -> resampler (pitch, stretch, glide)
 **Per-engine post-processing** (`BaySickPlayerSynth::renderNextBlock`, after all voices
 are summed): a one-pole high shelf at about 8 kHz (Treble), then mid/side stereo
 width (Stereo).
+**Vibrato is pitch, not volume.** The LFO is folded into the resampler's read
+ratio, never applied to the sample's amplitude. `BaySickPlayerVoice::renderNextBlock`
+sums the glide offset and the LFO offset in semitone space and turns the sum
+into one multiplicative ratio (`mGlideBaseRatio * pow (2, semis / 12)`), stepped
+once per `mPitchModChunk` - about 1.3 ms of the live device rate, clamped to
+16..512 samples - so the wobble has the same shape at 44.1 kHz and at 192 kHz.
+Full depth is `kVibratoMaxCents = 50.0`: plus or minus 50 cents around the note,
+a semitone peak to peak. When neither glide nor vibrato is running the voice
+takes a plain unmodulated read, and the modulated branch parks the resampler
+back on `mGlideBaseRatio` on the way out so a block that ends mid-wobble cannot
+strand the voice detuned.
 
 **Threads.**
 
@@ -97,9 +107,29 @@ path needs no normalization. Melodic tabs (Layers, Bass, Clips) pass `-1`
 **Timeline audio clips.** Audio clips placed on the arrangement do not go
 through the voices. `readClipCtl` in `Source/PluginProcessor.cpp` reads the
 Clips tab's BaySickPlayer parameter atoms once per row per block and applies the
-equivalent shaping (volume, pan, filter, drive, reduct, LFO, treble, width,
+equivalent shaping (volume, pan, filter, drive, reduct, treble, width,
 ADSR, pitch, reverse, sample start, stretch) directly to the decoded clip audio.
 So the player window on a Clips tab also shapes what you hear from the timeline.
+
+**Vibrato on a timeline clip.** The two Vibrato knobs are the one exception to
+that chain. They are pitch, so `renderAudioClipsForRow` folds them into the
+clip's **read position** instead of into the post-decode chain, on the same
+full-depth law as the voices (`kClipVibratoMaxCents = 50.0`, commented in source
+as equal to `BaySickPlayerVoice::kVibratoMaxCents`). All three read branches
+carry it: the phase-vocoder branch (which runs when the clip is time-stretched
+to the project tempo or when Tune / Detune is off zero - the Stretch knob is a
+varispeed and does not engage it), the plain reverse branch, and the plain
+forward branch. They share one per-clip LFO phase
+(`AudioClipPlayer::clipLfoPhase`) advanced by output samples, so they cannot
+drift apart. The rate deviation is made zero-mean before it is applied, because
+the average of `2^(depth * sine)` is greater than 1 and an uncorrected wobble
+would let the read creep permanently ahead of the timeline. On the two plain
+branches, turning the depth back to zero walks the carried position offset home
+at a bounded rate (`kClipVibGlideRatio`) rather than snapping it, which is what
+keeps the knob from clicking on the way down; the phase-vocoder branch takes the
+modulation as a stream and carries no offset, so it needs no walk. FilePlay
+clips (audio blocks routed to a Vox or Inst page) are decoded on a different
+path and get **no** vibrato.
 
 ---
 
@@ -181,8 +211,8 @@ this knob".
 
 | Control | Range / default | What it does |
 |---|---|---|
-| LFO RATE | 0.1 to 20 Hz, default 5.5 Hz | Speed of the wobble. |
-| LFO | 0 to 1, default 0 | Depth of the wobble. Note: the effect is a **volume** wobble (tremolo) of up to about 12 percent, even though the on-screen tooltip reads "LFO / vibrato amount". |
+| VIB RATE | 0.1 to 20 Hz, default 5.5 Hz | How fast the pitch wobbles. |
+| VIB DEPTH | 0 to 1, default 0 | How far the pitch wobbles. This is **pitch** vibrato, not a volume wobble. At full depth the pitch swings plus or minus 50 cents - half a semitone each way, a full semitone peak to peak. At 0 (and anywhere at or below 0.001) vibrato is off and the sample reads unmodulated. On a note you play the wobble restarts from zero at every note-on, so each note starts in tune and then moves. |
 
 **FILTER**
 
@@ -247,8 +277,8 @@ id already ends in one.
 | `decay` | float | 0.001 .. 10 s (skewed) | 0.5 | DECAY |
 | `sustain` | float | 0 .. 1 | 1.0 | SUSTAIN |
 | `release` | float | 0.001 .. 10 s (skewed) | 0.3 | RELEASE |
-| `lfo_rate` | float | 0.1 .. 20 Hz (skewed) | 5.5 | LFO RATE |
-| `lfoAmt` | float | 0 .. 1 | 0 | LFO |
+| `lfo_rate` | float | 0.1 .. 20 Hz (skewed) | 5.5 | VIB RATE |
+| `lfoAmt` | float | 0 .. 1 | 0 | VIB DEPTH |
 | `cutoff` | float | 20 .. 20000 Hz (skewed) | 20000 | CUTOFF |
 | `res` | float | 0 .. 1 | 0 | RES |
 | `reduct` | float | 0 .. 1 | 0 | REDUCT |
@@ -263,6 +293,14 @@ id already ends in one.
 that uses `group=`, so any non-zero value silences the engine. The parameter is
 kept so an automation lane or an old preset that carries a non-zero value still
 applies.
+
+`lfo_rate` and `lfoAmt` keep their old spellings even though the knobs now read
+VIB RATE and VIB DEPTH and the host-facing parameter names are **Vibrato Rate**
+and **Vibrato Depth**. The ids are saved-project keys, automation-lane keys and
+the keys the timeline clip path resolves its control atoms by, so renaming them
+would break existing songs. One consequence: the right-click **Automate** menu
+and the automation lane list build their labels from the id, not from the
+parameter name, so they read *Lfo Rate* and *LfoAmt*.
 
 **Saved with the project.** The whole APVTS state, plus three non-parameter
 properties stamped onto `apvts.state` by the loaders:

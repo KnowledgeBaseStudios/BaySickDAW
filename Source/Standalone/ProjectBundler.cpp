@@ -287,15 +287,54 @@ namespace
     {
         return kSamplesDir + "/" + fileName;
     }
+
+    // MF-2: ONE exclusion rule, shared by the estimator and the writer.  It was
+    // a lambda inside write(), which meant estimateCopyBytes could not see it and
+    // the two functions decided bundle contents independently -- the estimate
+    // counted only external references while both write branches took the whole
+    // project folder.  Duplicating the rule would just reproduce that.
+    const juce::String kFreezeDir = "Freeze";
+
+    bool isExcludedFromBundle (const juce::File& f, const juce::File& projectFolder)
+    {
+        const juce::String rel = f.getRelativePathFrom (projectFolder);
+        return rel.startsWith (kFreezeDir + juce::File::getSeparatorString())
+            || rel.startsWith (kFreezeDir + "/");
+    }
 }
 
-juce::int64 estimateCopyBytes (const std::vector<Reference>& refs, Scope scope)
+Estimate estimateBundle (const std::vector<Reference>& refs, Scope scope,
+                         const juce::File& projectFolder)
 {
-    juce::int64 total = 0;
+    Estimate e;
+
+    // The project folder itself, which is what write() copies wholesale in both
+    // modes.  For any project holding a recording this is the dominant term, and
+    // omitting it is what made the size warning silent on real projects.
+    if (projectFolder.isDirectory())
+    {
+        juce::Array<juce::File> projectFiles;
+        projectFolder.findChildFiles (projectFiles, juce::File::findFiles, true);
+
+        for (const auto& f : projectFiles)
+        {
+            if (isExcludedFromBundle (f, projectFolder)) continue;
+            e.bytes += f.getSize();
+            ++e.files;
+        }
+    }
+
+    // Plus the externals this scope pulls in alongside it.
     for (const auto& r : refs)
+    {
         if (needsCopying (r.kind, scope) && r.resolved.existsAsFile())
-            total += r.resolved.getSize();
-    return total;
+        {
+            e.bytes += r.resolved.getSize();
+            ++e.files;
+        }
+    }
+
+    return e;
 }
 
 std::vector<Reference> enumerate (PatternManager& pm,
@@ -391,19 +430,12 @@ Result write (const std::vector<Reference>& refs,
     // Everything lands under Samples/ inside the bundle, matching where the
     // project already keeps its own audio.
     const juce::String kSamplesDir = "Samples";
-    // TS7 §6.8: the freeze cache is regenerable and excluded from bundles.
-    const juce::String kFreezeDir  = "Freeze";
 
-    // True for anything the bundle deliberately leaves behind.  Matches on the
-    // path RELATIVE to the project folder, so a user's own "Freeze" folder
-    // nested somewhere else is not caught by accident.
-    auto isExcludedFromBundle = [&kFreezeDir] (const juce::File& f,
-                                               const juce::File& projectFolder)
-    {
-        const juce::String rel = f.getRelativePathFrom (projectFolder);
-        return rel.startsWith (kFreezeDir + juce::File::getSeparatorString())
-            || rel.startsWith (kFreezeDir + "/");
-    };
+    // kFreezeDir + isExcludedFromBundle are file-scope now (TS7 §6.8: the freeze
+    // cache is regenerable and excluded).  They moved out of here so
+    // estimateBundle applies the identical rule -- see the note at their
+    // definition.  Both match on the path RELATIVE to the project folder, so a
+    // user's own "Freeze" folder nested elsewhere is not caught by accident.
 
     std::vector<Reference> toCopy;
     for (const auto& r : refs)
@@ -419,6 +451,10 @@ Result write (const std::vector<Reference>& refs,
     // nothing and the destination machine reports it missing.
     std::map<juce::String, juce::String> remap;
     const juce::String kProjectXml = "project.xml";
+
+    // MF-2: zip entries have no post-hoc count (the archive is a single file),
+    // so they are tallied as they are added.
+    int zipEntriesWritten = 0;
 
     if (mode == Mode::Folder)
     {
@@ -524,6 +560,7 @@ Result write (const std::vector<Reference>& refs,
             remap[r.storedPath] = bundleRefFor (kSamplesDir, entryName);
 
             builder.addFile (r.resolved, 9, kSamplesDir + "/" + entryName);
+            ++zipEntriesWritten;
             ++result.filesCopied;
             tick();
         }
@@ -546,6 +583,7 @@ Result write (const std::vector<Reference>& refs,
                 builder.addFile (rewrittenXml.getFile(), 9, rel);
             else
                 builder.addFile (f, 9, rel);
+            ++zipEntriesWritten;
         }
         tick();
 
@@ -564,6 +602,28 @@ Result write (const std::vector<Reference>& refs,
             result.error = "Writing the zip failed.";
             return result;
         }
+    }
+
+    // MF-2: report what the bundle actually WEIGHS, measured off the finished
+    // artefact rather than re-derived from the inputs.  filesCopied stays what
+    // it always was (externals pulled in) because the rewrite logic keys off it;
+    // these two are the honest headline number.  For Zip this is the real
+    // compressed size on disk, which is why the pre-write estimate is described
+    // to the user as approximate.
+    if (mode == Mode::Folder)
+    {
+        juce::Array<juce::File> written;
+        destination.findChildFiles (written, juce::File::findFiles, true);
+        for (const auto& f : written)
+        {
+            result.totalBytes += f.getSize();
+            ++result.totalFiles;
+        }
+    }
+    else
+    {
+        result.totalBytes = destination.getSize();
+        result.totalFiles = zipEntriesWritten;
     }
 
     result.ok = true;

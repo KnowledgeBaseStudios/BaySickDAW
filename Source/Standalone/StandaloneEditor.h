@@ -1120,7 +1120,9 @@ private:
     // type only known in the .cpp - using base Component avoids needing the
     // full include here.
     juce::Component::SafePointer<juce::Component> mKeyBindsWin;
+    juce::Component::SafePointer<juce::Component> mManualsWin;
     void showKeyBindsWindow();
+    void showManualsWindow();
     juce::Component::SafePointer<juce::Component> mRustyDrumsMapWin;  // J-7b
     void showPluginsWindow();                                         // QA-ModelShell TS6
     juce::Component::SafePointer<juce::Component> mPluginsWin;

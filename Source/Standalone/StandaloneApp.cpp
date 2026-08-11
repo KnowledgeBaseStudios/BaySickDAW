@@ -1385,12 +1385,18 @@ void BaySickDAWStandaloneApp::handleIncomingMidiMessage (juce::MidiInput* source
 //
 // Why it MIGHT break plugins, which is why it needs testing before it returns.
 // JUCE loads a plugin with a plain LoadLibrary on a full path
-// (juce_Threads_windows.cpp:313) - no LOAD_WITH_ALTERED_SEARCH_PATH, and nothing
-// anywhere calls AddDllDirectory or SetDllDirectory.  So a plugin's OWN
-// dependency DLLs resolve through the standard order: app directory, System32,
-// Windows, current directory, PATH.  That call removes three of those, PATH
-// included, and large instruments (Spectrasonics et al) ship a shared runtime
-// that is found exactly that way.
+// (juce_Threads_windows.cpp:313) - no LOAD_WITH_ALTERED_SEARCH_PATH.  So a
+// plugin's OWN dependency DLLs resolve through the standard order: app
+// directory, System32, Windows, current directory, PATH.  That call removes
+// three of those, PATH included, and large instruments (Spectrasonics et al)
+// ship a shared runtime that is found exactly that way.
+//
+// One qualifier this comment used to get wrong: it said nothing anywhere calls
+// AddDllDirectory or SetDllDirectory.  ScopedPluginDllDirectory does -
+// SetDllDirectoryW, RAII-scoped across the load only (ScopedPluginDllDirectory.h:53).
+// That INSERTS the plugin's own folder into the standard order and removes
+// nothing, so it does not overlap with the risk described here; the two are
+// easy to confuse and are not interchangeable.
 //
 // So closing this from inside the process risks taking the plugin search path
 // with it, and that risk is UNMEASURED.  The fix with no plugin risk at all is

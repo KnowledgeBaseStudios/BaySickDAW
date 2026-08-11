@@ -158,7 +158,7 @@ The Menu contains, in order and only when they apply:
 |---|---|
 | **Show Advanced Controls** / **Show Basic Controls** | Flips the panel between the small everyday control set and the full one. Only offered for effects that actually have extra controls to hide. The window resizes to fit: about 691 x 268 in Basic, about 1047 x 268 in Advanced, about 358 x 268 for a pedal-style panel. |
 | **Mode: `<name>`...** | Character switch for the six effects that have one - Compressor, Saturation, Delay, Reverb, Overdrive, Limiter. Picking a mode rebuilds the panel, because the modes have different controls. |
-| **SC: `<source>`...** | Sidechain source picker. Only offered for effects that actually listen to a sidechain: Compressor, Limiter, Transient Shaper, Reverb, Delay, and the pedal Noise Gate. |
+| **SC: `<source>`...** | Sidechain source picker. Only offered for effects that actually listen to a sidechain: Compressor, Limiter, Transient Shaper, Reverb, Delay, the pedal Noise Gate, and any hosted VST3 effect that declares a side-chain input bus. A plugin running bridged never reports one, so the row is absent there. |
 | **Presets...** | Save Current Preset, Load: Factory, Load: My Presets, Restore Defaults, Save Current as Default, Manage Presets (opens the folder). |
 | **Visual** | Opens this effect's picture window. Only shown for effects that have one. |
 | *(hosted plugins only)* **Automate**, **Run bridged**, **Retry Loading Plugin** | See the plugin section below. |
@@ -177,11 +177,29 @@ from the Effects window's own Menu (see below) and can be -18, -17, -16, -15 or
 ### Sidechain
 
 A sidechain lets one channel's sound control an effect on another - the classic
-case is a kick drum pushing down a bass. The routing itself is made on the
-Mixer page, which gives a strip up to four sidechain receive lines. The slot's
-`SC:` menu then picks which of those lines drives *this* effect. `Off` means
-the effect uses its own input. If nothing is routed to the strip the menu says
-`(no sidechain cables routed to this strip)`.
+case is a kick drum pushing down a bass. It takes two steps, and doing only the
+first is the usual reason a sidechain appears to do nothing.
+
+1. **Route the cable on the Mixer page.** Click the **"+"** at the bottom of the
+   strip you want to use as the *source* (the kick), pick **Sidechain...**, then
+   pick the strip whose effect should react (the bass). Every other strip is
+   listed by name; the ones whose four receive lines are already full, and
+   anything that would create a feedback loop, are grayed out. A strip can
+   receive four sidechains.
+2. **Point the effect at that line.** Open the effect on the receiving strip and
+   use **Menu > `SC: Off...`**. The menu lists `Off` plus one row per routed
+   source, each named after the source strip, with a tick on the current pick.
+   `Off` means the effect uses its own input. If nothing is routed to the strip
+   the menu shows `Off`, a separator, and one disabled row reading
+   `(no sidechain cables routed to this strip)`.
+
+A **hosted VST3 effect** takes exactly the same two steps. The slot feeds the
+picked line into the plugin's own side-chain input bus, and with `Off` picked
+that bus is left silent, which is what an unconnected side-chain looks like to a
+plugin. The `SC:` row appears only for plugins that declare a side-chain input,
+and a plugin running bridged (**Menu > Run bridged (separate process)**) never
+reports one - so if the row is missing on a plugin you know has a side-chain,
+check whether it is bridged.
 
 ### The visual window
 
@@ -216,6 +234,16 @@ Add plugins to BaySickDAW under Options > Plugins first; they then appear in
 the picker's **VST Plugins** group. A plugin slot behaves like any other -
 bypass, move, remove, per-slot Vol, rack presets - and its window shows the
 plugin's own interface at the size the plugin asks for.
+Scanning runs in a helper process, so a plugin that crashes while being scanned
+never takes BaySickDAW down with it - it lands in Scan results as
+`Skipped: failed to load` and the scan carries on. See **Plugins Page.md**,
+"When a plugin crashes the scan", for the crash list and how it clears itself. BaySickDAW does not
+scale that interface. A resizable plugin follows the window edge you drag (it
+can refuse, and the window then re-fits to what the plugin accepted); a
+fixed-size one keeps its own size regardless - centered on a flat dark gray
+surround when the window is bigger, anchored top-left and clipped when the
+window is smaller. There are no scrollbars; the plugin's own magnify control is
+the size control.
 
 **`(missing)`** after the plugin's name in the row and window title means the
 slot still knows exactly which plugin it wants but does not have a working

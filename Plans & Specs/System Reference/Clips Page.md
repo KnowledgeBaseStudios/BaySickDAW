@@ -45,6 +45,7 @@ There is no engine choice to make. Clips is a sample player and nothing else.
 The picked file is **copied into your project's `Samples` folder**, so the project stays self-contained. The tab and the mixer strip are both named after the file (a file called `vocal chop 3.wav` gives you a tab called `vocal chop 3`); if the name comes out empty you get `Clip 1`, `Clip 2` and so on.
 
 If all 100 Clips pages are in use you get "No free Clips page - close one before adding another".
+An MP3 clip is decoded whole into memory when it is opened, so a very long one is refused rather than loaded: over 512 MB on disk, or more than about 22 minutes of 48 kHz stereo once decoded, and the file simply will not open. WAV, AIFF, FLAC and OGG have no such ceiling. See *Builder Page.md*.
 
 ### The Clips ribbon slot
 
@@ -57,6 +58,20 @@ The dropdown lists every clip (tick on the current one), then a **Pages:** secti
 The window shows the sample player's own editor. Along the window's top strip: the **Menu** button, the player's name and its preset button, and an **FX Rack** shortcut. Clips tabs deliberately have **no Swing Mix knob** - a clip is audio, not a note grid, so there is no swing to bend.
 
 A filename label exists on the page showing the audio file this tab is bound to ("(no clip)" when empty).
+**The player knobs shape the timeline blocks too.** The audio blocks this tab
+owns on the Builder grid are decoded straight by the audio engine rather than
+played through the player's voices, but `readClipCtl` in
+`Source/PluginProcessor.cpp` reads this tab's player parameters once per block
+and applies the same shaping to them: volume, pan, filter, drive, reduct,
+treble, stereo width, the amp envelope, tune and detune, reverse, sample start
+and stretch. The **VIBRATO** box is in there too and does on a timeline block
+exactly what it does on a played note - it wobbles the pitch by up to 50 cents
+either side at full depth, by modulating where in the file the block is read
+from. Depth and rate are one setting for the whole tab, so every block the page
+owns wobbles at the same speed and depth (each block keeps its own wobble
+position). Blocks routed away to a Vox or Inst page take a different playback
+path and are **not** shaped this way. Full control-by-control detail is in
+**BaySickPlayer.md**.
 
 ### The Menu (page actions)
 

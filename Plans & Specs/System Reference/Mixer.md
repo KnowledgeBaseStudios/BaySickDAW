@@ -157,19 +157,34 @@ does work.
 
 ### Routing: the "+" menu
 
-Click the **"+"** at the bottom of any strip. Three submenus:
+Click the **"+"** at the bottom of any strip except Master - Master's button in
+that position reads **Analyzer** and opens the master analyzer instead. Five
+submenus on a normal strip; a strip whose main output is fixed (Master, every
+bus, the Rusty Drums channels) gets only the first two:
 
 * **Send...** - lists the aux strips you can send a copy of this channel to.
   Targets that would create a feedback loop, and targets on a strip whose four
   send slots are already full, are grayed out. **New Aux Strip** at the bottom
   creates an aux and wires the send to it in one step.
-* **Sidechain...** - lists every other strip that still has a free sidechain
-  receive line. A sidechain sends this channel's finished output to another
-  channel as a *control* signal, so an effect over there (a compressor, a
-  dynamic EQ band) can react to it. Each strip can receive four sidechains.
+* **Sidechain...** - lists every other strip; the ones whose four sidechain
+  receive lines are all in use, and any that would create a loop, are grayed
+  out. A sidechain sends this channel's finished output to another channel as a
+  *control* signal, so an effect over there (a compressor, a dynamic EQ band, or
+  a hosted VST3 effect that has a side-chain input) can react to it. Each strip
+  can receive four sidechains. Routing the cable is only half the job: the
+  effect at the far end still has to pick that line from its own
+  **Menu > `SC: Off...`** - see *Effect Racks.md*.
 * **Move Output...** - changes where this channel's main output goes. Its
   current destination is ticked. Missing entirely on strips whose output is
   fixed: Master, every bus, and the Rusty Drums channels.
+* **Add Main Out...** - gives this channel a second, third or fourth main
+  output, so one strip can feed more than one destination at once. A strip
+  already using all four lines, a destination one of its lines already feeds,
+  and anything that would create a loop are all grayed out. Missing on the same
+  fixed-output strips as Move Output.
+* **Remove Main Out...** - drops one of those extra lines. The strip's original
+  output is listed too, but grayed and marked `(main output)`, because a strip
+  always keeps one.
 
 Which destinations are legal depends on the family:
 
@@ -226,11 +241,11 @@ its natural parent.
 
 | Entry | What it does |
 |---|---|
-| **Pan Law** | How much a centered signal is turned down so a pan sweep stays even in loudness. Circular (-3 dB at center, the default), Triangular (-6 dB), Square (0 dB). |
+| **Pan Law** | How much a centered signal is turned down so a pan sweep stays even in loudness. Three entries with a tick on the current one: Circular (-3 dB at center) - the default - then Triangular (-6 dB at center) and Square (0 dB at center). |
 | **Master Output** | Which physical outputs of your audio interface the mix goes to - each stereo pair, or any single output as mono. |
 | **Latency-compensate meters** | Off by default. On, the meters are delayed to line up with what you are actually hearing through the speakers. |
 | **Multi-core Rendering** | On by default. Off makes the audio engine do all the work on one thread - a diagnostic, not a feature. Takes effect on the next audio block, no restart. |
-| **Run MT Diagnostic (2s capture)** | Starts a 2-second measurement of how work is spread across threads and shows the result. The interface freezes briefly; audio keeps running. |
+
 
 ### Input picker (Vox / Inst strips)
 
@@ -366,7 +381,7 @@ Order that matters:
   metering; record-arm interacts with the Vox / Inst Arm LEDs.
 * **Workspace and Windows.md** - the window the Mixer lives in, and how its
   position is remembered.
-* **Keyboard Shortcuts.md** - F6 shows the Mixer.
+* **Keyboard Shortcuts.md** - F6 shows the Mixer.* **Master Analyzer.md** - the window the Master strip's Analyzer button opens.
 * **Effect Racks.md** and **EQ.md** - the Mixer's FX Rack button and FX Bypass
   LED are the entry points into them.
 * **Builder Page.md** / **Clips Page.md** - the audio rows that are the source of

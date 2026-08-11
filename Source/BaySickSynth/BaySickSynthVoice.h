@@ -19,9 +19,19 @@ enum class BssLFODest  { Filter = 0, Pitch, OscModifier, kCount };
 // Lead was removed 2026-08-10 (Jeff's ruling): it fell through to the Mono
 // branch, so it had never behaved differently from Mono in any shipped build,
 // and the behavior it WOULD have been given is what Legato already does.
-// AudioParameterChoice persists normalized, so a project saved on Lead (2 of 4,
-// = 0.667) now reads back as Mono - which is exactly what it has always sounded
-// like, so nothing needed migrating.
+//
+// WHAT AN OLD PROJECT ACTUALLY DOES, corrected 2026-08-11 (QA-Manuals): this
+// comment used to claim AudioParameterChoice persists NORMALIZED and that a
+// Lead project therefore reads back as Mono.  Both halves are wrong.  APVTS
+// stores the DENORMALISED value (juce_AudioProcessorValueTreeState.cpp:485
+// writes convertFrom0to1 (getValue())), and for AudioParameterChoice that is
+// the raw index, because its range is { 0, choices.size() - 1 } with interval 1.
+// So a project saved on Lead wrote 2, and 2 in the three-entry list is LEGATO -
+// which glides instead of retriggering, so it does not sound like the Mono it
+// used to play.  Old Poly (0) and Mono (1) still load correctly and old Legato
+// (3) clamps to 2, which lands right by luck.  Nothing crashes and nothing goes
+// silent, so this is left as-is per the no-backward-compat-pre-v1 rule; it is
+// recorded here so the next reader does not repeat the wrong reasoning.
 enum class BssVoiceMode { Poly = 0, Mono, Legato, kCount };
 
 // Filter type (unchanged)

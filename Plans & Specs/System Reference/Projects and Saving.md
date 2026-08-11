@@ -31,7 +31,7 @@ Documents\BaySickDAW\
 |   +-- Samples\               audio copied into the project
 |   +-- Backups\               autosave copies (newest 10)
 |   +-- Exports\               rendered audio (created on demand)
-|   +-- Reports\               loudness reports (created on demand)
+|   +-- Reports\               loudness reports + retained take audio (on demand)
 |   \-- Freeze\                frozen-track cache (regenerable)
 +-- My Samples\                your own sample folder (+ Core Library shortcut)
 +-- Presets\  Templates\  Kits\  Recordings\  UndoSnapshots\
@@ -39,7 +39,9 @@ Documents\BaySickDAW\
 +-- audio_settings.xml         this machine's audio device
 +-- ui_prefs.xml               dialog preferences
 +-- keymap.xml                 keyboard shortcuts
-\-- MidiMappings.xml           global MIDI Learn defaults
++-- MidiMappings.xml           global MIDI Learn defaults
++-- plugins.xml                scan folders + your added plugins
+\-- plugins_scan_crashes.txt   scan-crash blacklist (self-clearing)
 ```
 
 **Saving.** `serializeProject` builds one `<BaySickDAWProject version="1">`
@@ -87,6 +89,25 @@ characters, and names longer than 255 characters. Trailing dots and spaces are
 trimmed off. An invalid name raises "Invalid project name" and re-opens the
 naming box so you can try again. If a folder with that name already exists, the
 app appends " (2)", " (3)" and so on rather than overwriting anything.
+**A project.xml the app will not parse.** Every XML file BaySickDAW reads -
+project, preset, template, rack chain, key bindings, settings - goes through one
+parser that refuses two things outright: a `<!DOCTYPE` anywhere in the file
+(BaySickDAW never writes one, and honoring it would let a shared project pull
+content off your machine or off a network share the instant it is opened), and
+more than 512 levels of nested tags. The same 512-level cap is applied again to
+each engine's saved blob inside the project, because the outer file cannot see
+how deep those are.
+
+**The refusal never says which rule it hit**, and which box you get depends on
+the command. **Open Project...** checks for the file first, so a folder with no
+`project.xml` raises "Not a BaySickDAW project folder" reading "That folder has
+no project.xml inside it.", while a `project.xml` that is present but refused
+raises "Could not open project" reading "That folder doesn't contain a
+project.xml, or the file is corrupt." - a body that names the wrong problem.
+**Quick Open Project...** makes no such check, so missing and refused both raise
+that second box. **Open Recent** makes no check either, and reports both as
+"Could not open project" reading "The project folder may have been moved or
+deleted."
 
 ### Saving
 
@@ -179,6 +200,8 @@ being loaded. Reports raised in the same moment are merged into a single dialog.
 | `ui_prefs.xml` | File Settings dialog values (take types written at record stop, de-noise strength, auto-freeze CPU threshold, capture retention, "keep the audio of each take", "Enable Instrument Level Freeze") and the export loudness spec. |
 | `keymap.xml` | Your keyboard shortcut rebindings. |
 | `MidiMappings.xml` | Global MIDI Learn defaults. |
+| `plugins.xml` | The plugin manager's scan folders and your added-plugins list. |
+| `plugins_scan_crashes.txt` | Scan-crash blacklist. Holds the path of the plugin currently being scanned and is cleared again the moment that scan returns, so anything left in it is something that took the app down mid-scan. Blacklisted for one scan, then removed. UTF-16LE with a byte-order mark. |
 
 **Not saved at all:** the undo history (and its snapshot files), the frozen-track
 audio cache in `<project>\Freeze\` (regenerable, and rebuilt on load when it is

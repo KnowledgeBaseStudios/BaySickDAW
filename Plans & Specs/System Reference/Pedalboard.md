@@ -132,11 +132,16 @@ the same purpose.
 Choosing **Load NAM Pedal** immediately opens a file chooser for a `.nam`
 capture, because the pedal does nothing without one. The chooser starts in
 `Documents\BaySickDAW\Presets\Effects\Pedals\User NAM Pedals`. If the file
-fails to load you get a `NAM Load Failed` box with the reason.
+fails to load you get a `NAM Load Failed` box carrying the reason; a capture
+stopped by the sanity gate reads `This NAM capture was refused: <reason>.` A
+capture that fails when a **project** or **page preset** restores the board is
+reported differently: that reason is discarded, the pedal's name gains a
+` (missing)` suffix, and the path is listed in the **Missing files** dialog under
+`NAM capture (failed to load)`.
 
 Two pedals behave differently here than in a mixer rack:
 
-- **Compressor** loaded on the board comes up in **CS Style** mode (the
+- **Compressor** loaded on the board comes up in **Pedal** mode (the
   four-knob sustainer). In a rack it comes up in Modern.
 - **Overdrive** on the board comes up in **Pedal** mode (three knobs). In a
   rack it comes up in Rack mode.

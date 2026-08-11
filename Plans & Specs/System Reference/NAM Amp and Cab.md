@@ -108,7 +108,19 @@ replaces it.
 **OS** selector - oversampling around the amp model. **1x** is cheapest, **2x**
 reduces aliasing on high-gain models, **4x** is best quality and the most CPU.
 
-A red error line under the knobs reports the reason whenever a load fails.
+A red error line under the knobs carries the loader's reason, and a
+**BaySickNAM/IR** warning box repeats it, whenever a NAM or cabinet-IR load
+*you* asked for fails - browsing, dropping a file on the panel, or picking from
+the recents menu. (The MIC SIM user-IR pickers below raise the same box but
+leave the red line blank.) A capture stopped by the sanity gate reads
+`This NAM capture was refused: <reason>.`, where the reason names the offending
+field - for example "it declares an impossible sample rate (2000000000)" or
+"it declares too many layers (4096)".
+
+A load that fails during a **project restore** is different: the reason is
+thrown away and never displayed anywhere in a shipping build. All you get is the
+file's path in the **Missing files** dialog, listed under
+`NAM model (failed to load)`.
 
 ### MIC SIM A and MIC SIM B
 

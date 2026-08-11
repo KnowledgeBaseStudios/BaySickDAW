@@ -17,7 +17,6 @@
 // Discarded (don't apply to drums):
 //   - 88-key piano keyboard widget (replaced by DrumKitSidebar)
 //   - Pitch-based scale-snap
-//   - Vertical scrollbar (16 rows is fixed)
 //   - Pitch-bend control lane mode
 //   - Slide / Portamento note types
 //   - Row scale-tinting / black-key shading

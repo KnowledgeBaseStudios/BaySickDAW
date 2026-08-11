@@ -2238,8 +2238,12 @@ void DrumKitGrid::mouseWheelMove(const MouseEvent& e, const MouseWheelDetails& w
         return;
     }
 
-    // QA-Ee: no vertical zoom on the drum kit -- the 16 rows are fixed by design.
-    // Alt+scroll falls through to horizontal scroll like the bare wheel.
+    // QA-Ee: no vertical ZOOM on the drum kit -- row height auto-fits the
+    // window and the vertical scrollbar is the only vertical control.  (The
+    // "16 rows are fixed" wording this comment used to carry stopped being true
+    // when that scrollbar shipped at QA-Cleanup.)  Alt+scroll falls through to
+    // the bare-wheel branch, which scrolls rows or timeline depending on
+    // whether the rows currently overflow.
     if (e.mods.isCtrlDown())
     {
         const float factor = (wheel.deltaY > 0.f) ? 1.15f : (1.f / 1.15f);
@@ -3535,7 +3539,7 @@ DrumKitContainer::DrumKitContainer()
     mContextLabel->setInterceptsMouseClicks(false, false);
     addAndMakeVisible(*mContextLabel);
 
-    // Horizontal scrollbar (no V scrollbar - 16 rows are fixed).
+    // Horizontal scrollbar.
     mHScroll = std::make_unique<juce::ScrollBar>(false);
     mHScroll->setAutoHide(false);
     mHScroll->addListener(this);
@@ -3799,6 +3803,14 @@ void DrumKitContainer::syncScrollState()
         if (vVisible)
         {
             mVScroll->setRangeLimits(0.0, (double) contentH);
+            // MF-6 (QA-Manuals 2026-08-11): this range is in PIXELS, and
+            // ScrollBar's default singleStepSize is 0.1, so one wheel notch
+            // over the bar moved ~0.23 px.  scrollBarMoved truncates to int and
+            // syncScrollState writes that int straight back, discarding the
+            // remainder - so unhurried notches over the bar moved NOTHING at
+            // all.  One row per notch is the only step that matches what the
+            // bar is scrolling.
+            mVScroll->setSingleStepSize((double) rowH);
             mVScroll->setCurrentRange((double) mRowOff, (double) visibleH,
                                       juce::dontSendNotification);
         }

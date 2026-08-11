@@ -2918,8 +2918,16 @@ Where a step says "check the trace", read `asio_trace.txt` next to `audio_settin
       matrix, mod destinations, Part A/B blend), the BaySickPlayer editor's filter section, the
       BaySickSynth editor, the Rusty kit graphic, the Mixer page, the Builder browser and the
       pedalboard.  No blank panels, no control that does nothing.  `D:__ R:__` notes:
-- [ ] **SND-44 — two absences that are BY DESIGN.** (a) The Help menu item still opens nothing —
-      it is held for the manuals window (Jeff's 2026-07-29 ruling); do not report it as dead UI.
+- [ ] **SND-44 — one live surface and one absence that is BY DESIGN.** (a) **CORRECTED 2026-08-11
+      (QA-Manuals Task 1): `Help > Help Index` is NO LONGER dead.** The manuals window shipped
+      ahead of QA-Manuals, so this is now a POSITIVE check: `Help > Help Index (F1)` AND the bare
+      F1 key both open a desktop window titled "BaySickDAW Manuals", and F1 appears as a
+      rebindable row in the General category of the Key Binds window. Until the manuals are staged
+      into `<exe dir>\Manuals\`, that window correctly shows "The manuals are not installed."
+      naming the expected path, plus an "Open Manuals Folder" button - that placeholder is the
+      right answer on a dev build, not a defect. Report it as dead UI ONLY if F1 and the menu item
+      both do nothing at all. The prior wording here ("still opens nothing ... held for the
+      manuals window (Jeff's 2026-07-29 ruling); do not report it as dead UI") is retired.
       (b) A Plugins tab offers NO picker to swap its plugin for a different one — plugin swap was
       removed as a feature this batch.  Project restore, undo resurrection and tab close all still
       work on Plugins tabs; do not report the absent picker as a regression.  `D:__ R:__` notes:

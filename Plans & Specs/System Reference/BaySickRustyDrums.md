@@ -74,6 +74,22 @@ sfizz mutates internal state for seconds during a parse and has no guard of its
 own between that and `renderBlock`. Only when everything is built does the active
 flag go true and `onSfizzEngineReady` fire (registering automation lanes for
 every parameter).
+**The kit is pre-flighted before sfizz sees it, and before anything else does.**
+`SafeSfzKit::rejectReason` walks the program and every file it `#include`s - at
+most 8 levels deep, at most 4096 file visits, at most 16 MB per file - and
+refuses the kit outright on an `#include` cycle, an `#include` that leaves the
+kit folder or names a network share, a `$macro` whose value contains another
+`$macro`, a `sample=` or `default_path=` on a network share, an `.ogg` / `.aif`
+/ `.aiff` sample, an opcode index above 512, or a NUL byte where text was
+expected. It runs above `discoverChannels`, because that helper reads the same
+untrusted text and a gate that is not first is not a gate. The shipped
+`01-full.
+
+The walk produces a one-line English reason and **you are not shown it**. It is
+banked in the missing-files store as `Instrument kit refused - <reason>`; the box
+you get reads only "Could not load program:" and the path. On this tab that
+failure arrives *after* the previous program has been torn down, so the page is
+left empty with the Program dropdown cleared.
 
 Like the other sfizz engines, `loadKit` walks the program's `#include` chain to
 depth 4 collecting `#define $name value` macros, `set_cc<N>` starting positions

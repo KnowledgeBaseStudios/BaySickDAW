@@ -61,7 +61,23 @@ namespace ProjectBundler
         // What did not make it into the bundle intact: a source that would not
         // copy, or a project.xml whose references could not be updated.
         juce::StringArray copyFailed;
-        int               filesCopied { 0 };   // files this call added, not references to them
+        int               filesCopied { 0 };   // externals pulled in, not references to them
+        // MF-2: what the bundle actually WEIGHS.  filesCopied counts only files
+        // pulled in from outside the project folder, so on a project whose audio
+        // lives inside it (any recording) that number is 0 while the bundle is
+        // large.  These two are the whole bundle, project folder included.
+        juce::int64       totalBytes { 0 };
+        int               totalFiles { 0 };
+    };
+
+    // MF-2: what a bundle will weigh, counting the SAME two sets write() copies
+    // -- the project folder minus the excluded freeze cache, plus the external
+    // references this scope pulls in.  Reported before the write so a large
+    // export is a decision rather than a surprise.
+    struct Estimate
+    {
+        juce::int64 bytes { 0 };
+        int         files { 0 };
     };
 
     // Enumerates the audio references reachable from the pattern data: the
@@ -89,9 +105,16 @@ namespace ProjectBundler
                                       const juce::XmlElement* tabsXml = nullptr,
                                       const juce::XmlElement* rackStatesXml = nullptr);
 
-    // Total bytes the bundle will copy under this scope, so the user is told the
-    // size BEFORE a multi-hundred-MB write rather than after.
-    juce::int64 estimateCopyBytes (const std::vector<Reference>& refs, Scope scope);
+    // Size + file count of the bundle this scope will produce, so the user is
+    // told BEFORE a multi-hundred-MB write rather than after.  `projectFolder`
+    // is required: its own contents are the dominant term for any project that
+    // holds recordings, and the pre-MF-2 version omitted them entirely, which
+    // made the warning silent in exactly the case it exists for.
+    //
+    // Zip mode note for callers: these are UNCOMPRESSED bytes, so the finished
+    // archive is smaller than the figure reported.
+    Estimate estimateBundle (const std::vector<Reference>& refs, Scope scope,
+                             const juce::File& projectFolder);
 
     // Writes the bundle.  `projectFolder` is the source project directory.
     // Missing files are REPORTED, never silently dropped.

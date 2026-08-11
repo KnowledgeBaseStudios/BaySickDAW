@@ -145,7 +145,15 @@ void EffectSlotWindow::buildPanel()
             // stored window size.
             const WorkspaceWindow::ScopedSaveSuppress noSave;
 
-            win->sizeToContent (w, h);
+            // MF-7 (QA-Manuals 2026-08-11): the content area has to carry the
+            // plugin PLUS the bed SlotComponent::resized() insets it by, or the
+            // plugin is handed 2*kPanelOnlyInset less than it declared - a
+            // fixed-size editor then overhung its host and drew over the resize
+            // border, and a resizable one opened 4 px short of what it asked
+            // for.  The Plugins TAB never had this because PluginsPage's chrome
+            // math already matches its own layout.
+            constexpr int bed = SlotComponent::kPanelOnlyInset * 2;
+            win->sizeToContent (w + bed, h + bed);
 
             // NO PLUGIN-DERIVED FLOOR -- same reasoning as PluginsPage: the
             // floor beats the workspace clamp inside sizeToContent, so a plugin
@@ -483,7 +491,14 @@ void EffectSlotWindow::timerCallback()
     // Advanced 1047x268, Basic + toggle-less full panels 691x268.  Pushed on
     // the poll so a Mode swap or Basic toggle re-floors without new plumbing;
     // the change guard keeps it quiet.
-    if (onFloorChanged && mSlot != nullptr)
+    // MF-8 (QA-Manuals 2026-08-11): a hosted VST3 has NO generic panel size --
+    // its size is whatever the plugin declares, and onNaturalSizeChanged owns
+    // it.  Pushing the 691x268 default here fired on the FIRST poll tick (the
+    // guard starts at 0/0) which lands AFTER buildPanel, so every rack-slot
+    // plugin window was snapped to 691x268 AND given that as a constrainer
+    // minimum before the plugin's own fit could arrive.  A plugin editor
+    // smaller than that could never get a window that fit it.
+    if (onFloorChanged && mSlot != nullptr && mBuiltType != EffectType::VST3Plugin)
     {
         int fw = 691, fh = 268;
         if (isPedalNativeType (mBuiltType))                        { fw = 358;  fh = 268; }

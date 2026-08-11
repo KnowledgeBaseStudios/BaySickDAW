@@ -130,6 +130,22 @@ Loading a project that refers to a file which is no longer there raises one
 advice to re-pick them on the relevant tab or put the files back. The parts that
 depend on them load without them, so they may be silent - or, for some engines,
 may be playing a substitute you never picked.
+### If a sample cannot be read
+
+Separately from a file being absent, every audio file you point the app at is
+checked for plausibility before anything reads it: at most 32 channels, 1 to 64
+bits per sample, a sample rate above zero and no higher than 768000, and a single
+frame no wider than 5760 bytes. A file whose header fails any of those is dropped
+exactly as an unreadable file is, and **no reason is produced** - the check has
+no error channel at all.
+
+What you see therefore depends on where the file was going. A Drums or Clips tab
+says "Nothing playable could be loaded from:" and the path. A BaySickPlayer pick
+says "No playable samples could be loaded from:", the path, then "It may be
+damaged, or the samples it needs may be missing." An Acoustic Preamp or Acoustic
+Simulator IR pick says "This file could not be read as audio:" and the path. An
+audio file dropped on the arrangement says nothing at all - the clip is placed at
+a fallback four bars.
 
 ## Parameters and persistence
 

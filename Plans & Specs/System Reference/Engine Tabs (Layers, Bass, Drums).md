@@ -55,8 +55,9 @@ Every tab is born from the **"+" slot at the right end of the ribbon** (the tab 
 | **BaySickDrums > BaySickSynth** | a Drums tab whose sound is synthesized |
 
 (The same "+" menu also creates Clips, Vox, Inst and Plugins tabs - those have their own documents.)
+The main menu bar's **Edit > New Tab** submenu is that same menu, not a copy of it: the same rows in the same order, grayed out under the same conditions, doing the same thing when you pick one. Use whichever is closer to hand.
 
-Once a family has at least one tab, its own colored slot appears in the ribbon (Layers orange, Bass green, Drums red) and its dropdown arrow carries the same add rows scoped to that family: "+ Add Harmless", "+ Add BaySickPlayer", "+ Add BaySickSynth" on Layers; "+ Add Harmless", "+ Add BaySickPlayer", "+ Add BaySickBass" on Bass; "+ Add BaySickPlayer", "+ Add BaySickSynth" on Drums. **A family's slot vanishes from the ribbon when its last tab is deleted** and comes back through "+".
+Once a family has at least one tab, its own colored slot appears in the ribbon (Layers orange, Bass green, Drums red) and its dropdown arrow carries the same add rows scoped to that family: "+ Add Harmless", "+ Add BaySickPlayer", "+ Add BaySickSynth" on Layers; "+ Add Harmless", "+ Add BaySickPlayer", "+ Add BaySickBass" on Bass; "+ Add BaySickPlayer", "+ Add BaySickSynth" on Drums. **A family's slot vanishes from the ribbon when its last tab is deleted** and comes back through "+" or Edit > New Tab.
 
 New tabs are named `Layer 1`, `Bass 1`, `Drum 1` and count upward. The counters never reuse a number you deleted, so deleting Layer 3 and adding another gives you Layer 4.
 
@@ -140,6 +141,7 @@ Top right of the grid are three buttons: **1-16**, **17-32** and **Kit  v**.
 Clicking an empty row past the end of the list adds a new drum tab and opens its sound picker straight away.
 
 The kit grid itself is a drum sequencer with the same tools, snapping, zoom, undo and control lane (velocity and pan) as the piano roll.
+**Scrolling the rows.** The grid stretches its 16 rows to fill the window, down to a floor of 18 pixels per row. Shrink the Piano Roll window past the point where all 16 still fit at that floor and a 12-pixel vertical scrollbar appears down the right-hand edge of the grid. The sidebar scrolls with it in lockstep, so each drum's picker, M, S and audition key stay level with its row; the ruler band and the **Lock/Unlock 1-16** button pinned in it do not move. **While that scrollbar is on screen the plain mouse wheel scrolls the rows instead of the timeline** - at full height it goes back to scrolling the timeline, which is what it has always done here. The wheel does nothing over the scrollbar itself, so scroll from the grid or the sidebar, or drag the thumb. Shift + wheel scrolls the timeline either way, and Ctrl + wheel is still horizontal zoom. There is no vertical zoom on this grid. Hiding the control lane (View > Velocity Lane) hands the grid back however tall the lane currently is, 240 pixels at its default, which on a mid-sized window is enough for the scrollbar to disappear.
 
 ### Where a tab shows up elsewhere
 

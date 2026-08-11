@@ -22,8 +22,11 @@ namespace sfz { class Sfizz; }
 // Channel discovery rule (locked 2026-05-03 J-3):
 //   walk `<kitRoot>/Programs/mappings/*_map.sfz` masters; exclude variants
 //   matching `*_map_<articulation>.sfz` (basic / brush / mallet / perc / etc).
-//   For Big Rusty Drums this resolves to 14 channels (13 drum pieces +
-//   `kick_24_nodamp_map.sfz` as the alternate kick variant).
+//   For Big Rusty Drums this resolves to 13 channels - `kMaxRustyStrips`
+//   (BaySickGraph.h:96), which is also the hard cap on how many the graph can
+//   carry.  An earlier version of this comment said 14 by counting
+//   `kick_24_nodamp_map.sfz` as a fourteenth channel; it is an alternate kick
+//   VARIANT, not a strip of its own.
 struct KitChannel
 {
     juce::String name;        // e.g. "Kick", "Kick (No Damp)", "Snare", "Tom 14", "Hi-hat"

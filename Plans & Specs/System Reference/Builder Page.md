@@ -221,6 +221,12 @@ rows so each gets its own mixer strip. If a file is already in the project you a
 whether to reuse the existing routing, make a new page and strip, or cancel. If no project
 is open yet you are prompted to create one, then the drop completes.
 
+**MP3 carries a size ceiling the other formats do not.** An MP3 is decoded whole into
+memory the moment it is opened rather than streamed off disk, so a file over 512 MB on
+disk, or one that decodes to more than about 22 minutes of 48 kHz stereo, is refused
+outright - it reads as "could not be read" wherever you tried to use it, with no partial
+load. Convert a long MP3 to WAV or FLAC first. WAV, AIFF, FLAC and OGG have no such limit.
+
 ### Page menus
 
 The window's title strip carries three headings:
@@ -247,7 +253,7 @@ Cancel while the render runs.
 | Tail | Included / Cut | Included keeps rendering past the last note until the sound actually decays (capped at 60 seconds). Cut stops dead at the end. |
 | Format | WAV / OGG / MP3 | |
 | Quality | WAV: 16-bit / 24-bit / 32-bit float. OGG: Low / Medium / High / Highest. MP3: 128 / 192 / 256 / 320 kbps | Default 24-bit for WAV, High/256 otherwise. |
-| Sample rate | 44100 Hz / 48000 Hz | |
+| Sample rate | 44100 / 48000 / 88200 / 96000 / 176400 / 192000 Hz | Default 44100 Hz. With Format set to MP3 the four rates above 48000 Hz are grayed out - MPEG Layer III cannot encode them - and a rate already above 48000 Hz drops back to 48000 Hz. |
 | Dither | Off / Flat (TPDF) / Noise-Shaped | Applies to 16-bit WAV only. |
 | Normalize to | Checkbox plus a typed LUFS box, default -14 | Measures first, then re-renders with a fixed gain, capped so the true peak stays under the ceiling. |
 | Export stems (one file per mixer strip) | Checkbox revealing a per-strip checklist | Master and buses start unticked. Stems are tapped in the same single pass, so a bass ducked by the kick keeps its ducking. |

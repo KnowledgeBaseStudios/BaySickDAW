@@ -27,6 +27,7 @@
 #include "KeyBindings.h"
 #include "TypingKeyboardMap.h"   // D-4 typing-keyboard MIDI (QA-TransportDisplay)
 #include "KeyBindsWindow.h"
+#include "ManualsWindow.h"
 #include "PluginsManagerWindow.h"   // QA-ModelShell TS6: Options > Plugins
 #include "MasterAnalyzerWindow.h"   // QA-ModelShell TS7 CL-044: master spectrum satellite
 #include "LoudnessReportWriter.h"   // QA-ModelShell TS7 CL-227: HTML + CSV report
@@ -9686,6 +9687,9 @@ bool StandaloneEditor::perform (const InvocationInfo& info)
             // Same rule as the effect panel: nothing open, nothing happens.
             if (auto* ed = getMostRecentEventEditor()) ed->toFront (true);
             return true;
+        case BSCommands::cmdShowManuals:
+            showManualsWindow();
+            return true;
 
         // ── File operations (Phase B-1) ─────────────────────────────────
         case BSCommands::cmdFileNew:    doFileNew();    return true;
@@ -10017,6 +10021,20 @@ void StandaloneEditor::showRustyDrumsMapWindow()
     auto* w = new RustyDrumsMapWindow (mProcessor.getBaySickRustyDrums());
     WindowChrome::ownToMainWindow (*w, *this);   // TS7 §9.4
     mRustyDrumsMapWin = w;     // SafePointer - auto-clears when closed
+}
+
+// Help > Help Index (F1).  Owned by the main window like the other desktop
+// windows, and re-fronted rather than duplicated if it is already up.
+void StandaloneEditor::showManualsWindow()
+{
+    if (mManualsWin != nullptr)
+    {
+        mManualsWin->toFront (true);
+        return;
+    }
+    auto* w = new ManualsWindow();
+    WindowChrome::ownToMainWindow (*w, *this);
+    mManualsWin = w;     // SafePointer - auto-clears when the window deletes itself
 }
 
 void StandaloneEditor::showKeyBindsWindow()
@@ -11764,7 +11782,8 @@ juce::PopupMenu StandaloneEditor::getMenuForIndex(int menuIndex, const juce::Str
         break;
 
     case 5: // Help
-        // HOLD-FOR-MANUALS-WINDOW: no case 601 handler BY DESIGN -- Help Index waits on the G5/G6 manuals window (Jeff ruling 2026-07-29, grand-inverting-mammoth 10.3). Do not wire a placeholder or retire as dead UI.
+        // HOLD-FOR-MANUALS-WINDOW retired 2026-08-11: case 601 now opens
+        // ManualsWindow.  That marker held this item unwired from 2026-07-29.
         m.addItem(601, "Help Index  (F1)");
         m.addItem(603, "Key Binds...");
         m.addItem(604, "Rusty Drums Map...");
@@ -11944,6 +11963,10 @@ void StandaloneEditor::menuItemSelected(int id, int)
             "  - sfizz (BSD 2-Clause) - SFZ player engine\n"
             "  - LAME (LGPL) - MP3 encoding",
             "OK");
+        break;
+
+    case 601:   // Help > Help Index (F1)
+        showManualsWindow();
         break;
 
     case 603:   // Help > Key Binds...
@@ -13902,7 +13925,8 @@ private:
                 mBaseName.replaceCharacter (' ', '_') + ext),
             "*" + ext);
         mChooser->launchAsync (
-            juce::FileBrowserComponent::saveMode | juce::FileBrowserComponent::canSelectFiles,
+            juce::FileBrowserComponent::saveMode | juce::FileBrowserComponent::canSelectFiles
+                | juce::FileBrowserComponent::warnAboutOverwriting,
             [sp = juce::Component::SafePointer<ExportAudioDialog> (this)] (const juce::FileChooser& fc)
             {
                 if (sp == nullptr) return;
@@ -14208,8 +14232,12 @@ void StandaloneEditor::doExportProjectBundle()
                 asZip ? "Save project bundle" : "Choose a folder for the bundle",
                 suggested, asZip ? "*.zip" : "*");
 
+            // warnAboutOverwriting only reaches the FILE dialog -- the OS folder
+            // picker has no equivalent, so the folder branch guards the
+            // already-exists case itself further down rather than relying on it.
             const int flags = asZip
-                ? (juce::FileBrowserComponent::saveMode | juce::FileBrowserComponent::canSelectFiles)
+                ? (juce::FileBrowserComponent::saveMode | juce::FileBrowserComponent::canSelectFiles
+                       | juce::FileBrowserComponent::warnAboutOverwriting)
                 : (juce::FileBrowserComponent::saveMode | juce::FileBrowserComponent::canSelectDirectories);
 
             chooser->launchAsync (flags,
@@ -14235,21 +14263,22 @@ void StandaloneEditor::doExportProjectBundle()
                     auto refs = ProjectBundler::enumerate (*mPM, mProcessor, &tabsXml,
                                                            rackXml.get());
 
-                    // Docket 22 (Jeff's addition): show the size BEFORE writing,
-                    // so a large export is a decision rather than a surprise.
-                    const auto bytes = ProjectBundler::estimateCopyBytes (refs, scope);
-                    if (bytes > 0)
+                    // MF-1 / MF-2: every confirmation from here on is ASYNC and
+                    // the work continues inside its callback.  The synchronous
+                    // showOkCancelBox overload CANNOT work in this build:
+                    // ConcreteScopedMessageBoxImpl::showUnmanaged compiles its
+                    // runSync branch only under JUCE_MODAL_LOOPS_PERMITTED,
+                    // which is 0 here, so it always takes runAsync and returns
+                    // 0 -- "Cancel" -- before the box is even on screen.  The
+                    // size prompt below used that overload and was harmless
+                    // only because its old externals-only gate never fired;
+                    // correcting the estimate made it fire, and it then aborted
+                    // the export the instant it appeared.
+                    //
+                    // Nothing captured below touches the editor, so this chain
+                    // carries no lifetime hazard and needs no SafePointer.
+                    auto performWrite = [refs, projectFolder, dest, asZip, scope]
                     {
-                        const juce::String sizeMsg =
-                            "This bundle will copy "
-                            + juce::File::descriptionOfSizeInBytes (bytes)
-                            + " of audio alongside the project.\n\nContinue?";
-                        if (! juce::NativeMessageBox::showOkCancelBox (
-                                  juce::MessageBoxIconType::QuestionIcon,
-                                  "Export Project Bundle", sizeMsg, nullptr, nullptr))
-                            return;
-                    }
-
                     auto res  = ProjectBundler::write (
                         refs, projectFolder, dest,
                         asZip ? ProjectBundler::Mode::Zip : ProjectBundler::Mode::Folder,
@@ -14266,8 +14295,15 @@ void StandaloneEditor::doExportProjectBundle()
                     // Missing files are REPORTED, never silently dropped -- a
                     // bundle that quietly omits samples looks fine until it is
                     // opened somewhere else.
+                    // MF-2: report the bundle's real size and file count.  The
+                    // old line said "Extra files copied: N", which counts only
+                    // what came from OUTSIDE the project folder -- 0 on a
+                    // project whose audio is its own recordings, while the
+                    // bundle held them.
                     juce::String msg = "Bundle written to:\n" + dest.getFullPathName()
-                                     + "\n\nExtra files copied: " + juce::String (res.filesCopied);
+                                     + "\n\n" + juce::File::descriptionOfSizeInBytes (res.totalBytes)
+                                     + " across " + juce::String (res.totalFiles)
+                                     + (res.totalFiles == 1 ? " file." : " files.");
                     if (! res.missing.isEmpty())
                     {
                         msg << "\n\nWARNING - " << res.missing.size()
@@ -14304,6 +14340,57 @@ void StandaloneEditor::doExportProjectBundle()
                         clean ? juce::MessageBoxIconType::InfoIcon
                               : juce::MessageBoxIconType::WarningIcon,
                         "Export Project Bundle", msg, "OK");
+                    };   // performWrite
+
+                    // Docket 22 (Jeff's addition): show the size BEFORE writing,
+                    // so a large export is a decision rather than a surprise.
+                    // MF-2: the estimate counts the project folder too, because
+                    // both write branches copy it wholesale -- the old
+                    // externals-only figure was 0 on any project holding a
+                    // recording, so this never warned about the case it exists
+                    // for.
+                    const auto est = ProjectBundler::estimateBundle (refs, scope, projectFolder);
+
+                    auto confirmSize = [est, asZip, performWrite]
+                    {
+                        if (est.files <= 0) { performWrite(); return; }
+
+                        const juce::String sizeMsg =
+                            "This bundle will be about "
+                            + juce::File::descriptionOfSizeInBytes (est.bytes)
+                            + " across " + juce::String (est.files)
+                            + (est.files == 1 ? " file." : " files.")
+                            + (asZip ? juce::String (" The zip will be smaller once compressed.")
+                                     : juce::String())
+                            + "\n\nContinue?";
+
+                        juce::NativeMessageBox::showOkCancelBox (
+                            juce::MessageBoxIconType::QuestionIcon,
+                            "Export Project Bundle", sizeMsg, nullptr,
+                            juce::ModalCallbackFunction::create (
+                                [performWrite] (int r) { if (r == 1) performWrite(); }));
+                    };
+
+                    // MF-1 folder half: the OS folder picker has no overwrite
+                    // prompt to enable, and write() merges into whatever folder
+                    // it is handed via copyDirectoryTo -- same-named files are
+                    // replaced without a word.  Ask here, because nothing
+                    // downstream will.
+                    if (! asZip && dest.isDirectory()
+                        && dest.getNumberOfChildFiles (juce::File::findFilesAndDirectories) > 0)
+                    {
+                        juce::NativeMessageBox::showOkCancelBox (
+                            juce::MessageBoxIconType::WarningIcon,
+                            "Export Project Bundle",
+                            dest.getFileName() + " already has files in it.\n\n"
+                            "Files with the same names will be replaced. Continue?",
+                            nullptr,
+                            juce::ModalCallbackFunction::create (
+                                [confirmSize] (int r) { if (r == 1) confirmSize(); }));
+                        return;
+                    }
+
+                    confirmSize();
                 });
         }), true);
 }
@@ -15701,7 +15788,10 @@ std::optional<juce::Point<int>> StandaloneEditor::defaultSizeFor (const PageEntr
     if (dynamic_cast<VoxPage*>    (c)) return P { 1534, 455 };   // BaySickVocals
     if (dynamic_cast<InstPage*>   (c)) return P { 1047, 455 };   // BaySickGuitars / BaySickBasses
     if (dynamic_cast<BaySickRustyDrumsPage*> (c)) return P { 1047, 455 };
-    // Hosted plugins keep their plugin-derived floors (T12 stretch).
+    // Hosted plugins have no measured floor of their own: both setResizeFloor
+    // call sites pass (0, 0) deliberately, and the plugin's declared size
+    // arrives later via onNaturalSizeChanged.  This is just the generic
+    // fallback for anything unrecognised.
     return P { 640, 400 };
 }
 
@@ -17205,7 +17295,18 @@ void StandaloneEditor::deserializeUIState (const juce::XmlElement& root)
     {
         if (eng == nullptr || base64.isEmpty()) return;
         juce::MemoryBlock mb;
-        const bool decoded = mb.fromBase64Encoding (base64) && mb.getSize() > 0;
+        const bool decoded = mb.fromBase64Encoding (base64);
+
+        // MF-3: an EMPTY block is "this engine has no state", not corruption.
+        // MemoryBlock::toBase64Encoding writes a "<size>." prefix, so a
+        // stateless engine saves the two characters "0." rather than "" --
+        // which sails past the isEmpty() guard above.  EngineChainProcessor
+        // (what a live-input Inst tab's getEngineProcessor returns) has a no-op
+        // getStateInformation by design, so EVERY LiveInst tab in EVERY project
+        // reported "corrupt data" on load while nothing was actually wrong.
+        // Only a base64 failure, or a non-empty blob failing the XML magic
+        // check, is real corruption.
+        if (decoded && mb.getSize() == 0) return;
         // Hosted-plugin blobs are opaque (not copyXmlToBinary), so only the
         // internal engines get the XML magic check.  A corrupt blob restores
         // the tab at engine defaults -- report it instead of applying garbage,
@@ -18363,7 +18464,8 @@ void StandaloneEditor::exportCapturedTake (const VersionCapture::Version& v)
     auto chooser = std::make_shared<juce::FileChooser> (
         "Export take", suggested, "*.wav");
     chooser->launchAsync (juce::FileBrowserComponent::saveMode
-                              | juce::FileBrowserComponent::canSelectFiles,
+                              | juce::FileBrowserComponent::canSelectFiles
+                              | juce::FileBrowserComponent::warnAboutOverwriting,
         [chooser, src = v.audioFile] (const juce::FileChooser& fc)
         {
             const auto dest = fc.getResult();

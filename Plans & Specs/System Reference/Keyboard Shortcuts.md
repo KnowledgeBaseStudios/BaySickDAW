@@ -13,7 +13,7 @@ under **Help > Key Binds...**, with a plain-English tooltip on every row.
 
 `Source/Standalone/KeyBindings.cpp` holds one catalog with two halves:
 
-* **`getAllCommands()`** - 36 rebindable commands (35 filed under General, 1
+* **`getAllCommands()`** - 37 rebindable commands (36 filed under General, 1
   under Builder). Each has a stable numeric id, a category, a display name, a
   beginner tooltip and a default key.
 * **`getMouseRefRows()`** - display-only reference rows: mouse gestures and the
@@ -113,6 +113,7 @@ rebindable rows from the reference rows in each tab.
 | Show Piano Roll (Most Recent) | `F10` | Switches to the unified Piano Roll page on whichever engine its own dropdown is set to. That choice is saved with the project. |
 | Show Drum Kit (Most Recent) | `F11` | Switches to the Piano Roll page and shows the 16-pad Drum Kit grid. |
 | Show Event Editor (Most Recent) | `F12` | Brings the Event Editor you last opened back to the front. Does nothing until you have opened one, and nothing once you have closed it. |
+| Help Index | `F1` | Opens the manuals window - the same thing as **Help > Help Index**. It opens a window rather than switching a page; it is listed here because that is where it sits in the Key Binds window's General tab. |
 
 ### File
 
@@ -324,7 +325,21 @@ on. Turning the mode off, or switching tabs, releases anything still held.
 
 ### Drum Kit grid
 
-The 16 rows are fixed, so there is no vertical scroll or zoom.
+The 16 rows are fixed and there is no vertical zoom, but the rows do scroll. The
+grid stretches its rows to fill the window down to a floor of 18 pixels each;
+make the Piano Roll window short enough that all 16 no longer fit at that floor
+and a 12-pixel vertical scrollbar appears down the right-hand edge of the grid.
+The name sidebar scrolls with it, so each drum's picker, M, S and audition key
+stay level with its row, while the ruler band and the "Lock/Unlock 1-16" button
+pinned in it ("Lock/Unlock 17-32" on kit 2) stay put. **While that scrollbar is
+on screen the plain mouse wheel changes meaning: over the grid or the sidebar it
+scrolls the rows instead of the timeline.** At full height nothing overflows, the
+scrollbar is gone, and the plain wheel scrolls the timeline again. The wheel does
+nothing when the pointer is over the scrollbar itself - move onto the grid or the
+sidebar, or drag the scrollbar's thumb. Hiding the control lane
+(View > Velocity Lane) hands the grid back however tall the lane currently is,
+240 pixels at its default, which on a mid-sized window is enough for the
+scrollbar to go away.
 
 | Key | Effect |
 |---|---|
@@ -345,9 +360,24 @@ The 16 rows are fixed, so there is no vertical scroll or zoom.
 
 | Gesture | Effect |
 |---|---|
-| Mouse Wheel, Shift + Wheel | Scroll the timeline left and right |
+| Mouse Wheel (over the grid or the sidebar) | **Changes meaning with the window height.** While the vertical scrollbar is showing it scrolls the drum rows up and down; when it is not, it scrolls the timeline left and right. Never both at once. |
+| Shift + Wheel | Scroll the timeline left and right, whether or not the scrollbar is showing |
 | Ctrl + Wheel | Horizontal zoom anchored on the cursor |
+| Alt + Wheel (over the grid or the sidebar) | Same as the plain wheel - this grid has no vertical zoom |
 | Alt + Wheel (over the control lane) | Bump velocity/pan for the bar under the cursor by +/-0.05 (Shift+Alt+Wheel for +/-0.01) |
+| Right-Click + Wheel | Cycle through the tools. Same gesture as the Piano Roll. |
+
+The vertical scrollbar appears only when the grid is too short to show all 16
+rows at their 18 px minimum height, which is a function of window HEIGHT alone -
+widening the window changes nothing. Hiding the control lane (View > Velocity
+Lane) gives the rows back whatever height that lane was using, which is
+draggable between 16 and 240 px, so on a window near the threshold it can make
+the scrollbar come and go. The name sidebar scrolls in lockstep with the rows;
+the ruler band and the Lock/Unlock button stay pinned.
+
+**The wheel does nothing while the pointer is over the vertical scrollbar
+itself.** Move onto the grid or the sidebar to scroll the rows, or drag the
+scrollbar's thumb. Clicking the track pages up and down normally.
 
 Deliberately unbound here, with an explanation shown in the app: `M` (keyboard
 column - the drum grid uses a sidebar), `S` (note type - drum hits have no
@@ -443,7 +473,8 @@ you press a key, and it lives only for that one gesture.
 * **Transport and Playback.md** - what Space, Shift+Space, R, L, Home, Ctrl+M and
   Ctrl+P actually do to the transport, and the typing keyboard's note layout in
   context.
-* **Workspace and Windows.md** - F5 through F12 select and front page windows;
+* **Workspace and Windows.md** - the application menu bar and its Help menu; F1
+  opens the manuals window and F5 through F12 select and front page windows;
   why each window has to register the shortcut set itself.
 * **Mixer.md** - F6.
 * **Builder Page.md**, **Piano Roll.md**, **Engine Tabs (Layers, Bass, Drums).md**

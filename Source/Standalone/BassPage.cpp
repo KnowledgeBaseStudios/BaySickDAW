@@ -378,17 +378,24 @@ void BassPage::showPageActionsMenu (juce::Component* anchor)
     {
         bool isMono = false;
         bool canToggle = false;
-        const auto trackPrefix = juce::String ("tk_bas_") + juce::String (mPageIndex) + "_";
-        if (mEngineType == "BaySickBass")
+        // MF-5 (QA-Manuals 2026-08-11): these ids live on the ENGINE's own
+        // APVTS, not on the main processor's - BaySickBassProcessor builds its
+        // layout with createLayout ("tk_" + trackId + "_bsb_") against its own
+        // AudioProcessorValueTreeState.  Reading them off mProcessor.apvts
+        // returned nullptr every time, so the label was permanently
+        // "Polyphonic" and the click did nothing.  DrumPage always did this
+        // correctly; resolve through the engine the same way.
+        if (auto* bsb = dynamic_cast<BaySickBassProcessor*> (mEngineProcessor))
         {
-            // voiceMode raw: 0=Poly, 1=Mono, 2=Lead, 3=Legato (4-choice)
-            if (auto* p = mProcessor.apvts.getRawParameterValue (trackPrefix + "bsb_voiceMode"))
+            // voiceMode raw: 0=Poly, 1=Mono, 2=Legato.  Anything > 0 counts as
+            // monophonic for the label.
+            if (auto* p = bsb->apvts.getRawParameterValue (bsb->getParamPrefix() + "voiceMode"))
                 isMono = (int) std::round (p->load()) >= 1;
             canToggle = true;
         }
-        else if (mEngineType == "BaySickPlayer")
+        else if (auto* vp = dynamic_cast<BaySickPlayerProcessor*> (mEngineProcessor))
         {
-            if (auto* p = mProcessor.apvts.getRawParameterValue (trackPrefix + "bsp_voiceCap"))
+            if (auto* p = vp->apvts.getRawParameterValue (vp->getParamPrefix() + "voiceCap"))
                 isMono = p->load() <= 1.5f;
             canToggle = true;
         }
@@ -510,27 +517,29 @@ void BassPage::showPageActionsMenu (juce::Component* anchor)
             if      (r == kIdLock) bp->toggleLockUndoable();
             else if (r == kIdPolyphony)
             {
-                const auto trackPrefix = juce::String ("tk_bas_") + juce::String (bp->mPageIndex) + "_";
-                if (bp->mEngineType == "BaySickBass")
+                // MF-5: resolve through the engine's own APVTS - see the
+                // matching note where the menu label is built.
+                if (auto* bsb = dynamic_cast<BaySickBassProcessor*> (bp->mEngineProcessor))
                 {
-                    // 4-choice voiceMode: toggle Poly(0) <-> Mono(1) only.
-                    if (auto* p = bp->mProcessor.apvts.getParameter (trackPrefix + "bsb_voiceMode"))
+                    // voiceMode is Poly(0) / Mono(1) / Legato(2).  Toggle
+                    // Poly <-> Mono only; Legato stays a panel-only pick.
+                    if (auto* p = bsb->apvts.getParameter (bsb->getParamPrefix() + "voiceMode"))
                     {
                         const auto& range = p->getNormalisableRange();
                         const int curRaw  = (int) std::round (range.convertFrom0to1 (p->getValue()));
                         const int nextRaw = (curRaw == 0) ? 1 : 0;
-                        beginParamUndoGesture (bp->mProcessor.apvts, trackPrefix + "bsb_voiceMode"); // Task 6 (12-iv)
+                        beginParamUndoGesture (bsb->apvts, bsb->getParamPrefix() + "voiceMode"); // Task 6 (12-iv)
                         p->setValueNotifyingHost (range.convertTo0to1 ((float) nextRaw));
                     }
                 }
-                else if (bp->mEngineType == "BaySickPlayer")
+                else if (auto* vp = dynamic_cast<BaySickPlayerProcessor*> (bp->mEngineProcessor))
                 {
-                    if (auto* p = bp->mProcessor.apvts.getParameter (trackPrefix + "bsp_voiceCap"))
+                    if (auto* p = vp->apvts.getParameter (vp->getParamPrefix() + "voiceCap"))
                     {
                         const auto& range = p->getNormalisableRange();
                         const float curRaw  = range.convertFrom0to1 (p->getValue());
                         const float nextRaw = (curRaw <= 1.5f) ? 8.f : 1.f;
-                        beginParamUndoGesture (bp->mProcessor.apvts, trackPrefix + "bsp_voiceCap"); // Task 6 (12-iv)
+                        beginParamUndoGesture (vp->apvts, vp->getParamPrefix() + "voiceCap"); // Task 6 (12-iv)
                         p->setValueNotifyingHost (range.convertTo0to1 (nextRaw));
                     }
                 }

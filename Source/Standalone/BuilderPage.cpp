@@ -10485,7 +10485,8 @@ void BuilderPage::startPatternRender (int patternIndex,
         "*.wav");
 
     chooser->launchAsync (
-        juce::FileBrowserComponent::saveMode | juce::FileBrowserComponent::canSelectFiles,
+        juce::FileBrowserComponent::saveMode | juce::FileBrowserComponent::canSelectFiles
+            | juce::FileBrowserComponent::warnAboutOverwriting,
         [this, patternIndex, set, perTrack, chooser] (const juce::FileChooser& fc)
         {
             auto dest = fc.getResult();
@@ -10592,7 +10593,8 @@ void BuilderPage::renderTrackRowToWav (int row)
         "*.wav");
 
     chooser->launchAsync (
-        juce::FileBrowserComponent::saveMode | juce::FileBrowserComponent::canSelectFiles,
+        juce::FileBrowserComponent::saveMode | juce::FileBrowserComponent::canSelectFiles
+            | juce::FileBrowserComponent::warnAboutOverwriting,
         [this, chId, chooser] (const juce::FileChooser& fc)
         {
             auto dest = fc.getResult();

@@ -16,7 +16,7 @@ Three layers, each in its own file:
 | Layer | Files | Job |
 |---|---|---|
 | Processor | `Source/BaySickSynth/BaySickSynthProcessor.h` / `.cpp` | Owns the APVTS parameter set, reads it once per block, pushes changed values into the DSP, injects audition notes, applies the master out gain, scrubs NaN/Inf. |
-| Voice manager | `Source/BaySickSynth/BaySickSynthDSP.h` / `.cpp` | Owns 16 `BaySickSynthVoice` objects inside a `BroadcastSynthesiser`. Rewrites the incoming MIDI stream to implement Mono / Lead / Legato and the Cut Self behavior. |
+| Voice manager | `Source/BaySickSynth/BaySickSynthDSP.h` / `.cpp` | Owns 16 `BaySickSynthVoice` objects inside a `BroadcastSynthesiser`. Rewrites the incoming MIDI stream to implement Mono / Legato and the Cut Self behavior. |
 | Voice | `Source/BaySickSynth/BaySickSynthVoice.h` / `.cpp` | All per-note DSP, sample by sample. |
 
 The editor is `BaySickSynthEditor.h` / `.cpp`, with three helper components:
@@ -43,8 +43,11 @@ The editor is `BaySickSynthEditor.h` / `.cpp`, with three helper components:
 14. Cut-self fade, if a hard cut is running.
 15. Per-note pan, then summed into the stereo output.
 
-After the synthesiser returns, the processor multiplies by **Out Vol** and replaces any
-non-finite sample with zero.
+After the synthesizer returns, the processor multiplies by **Out Vol**, then by a fixed
+-12 dB calibration trim (`kOutputHeadroom` in `BaySickSynthProcessor.cpp`), and replaces
+any non-finite sample with zero. The trim is a constant baked into the output stage, not a
+control - the oscillator table runs at full scale, so without it a three-note chord clipped
+before the mixer fader ever saw it.
 
 **Threading.** `processBlock` runs on the audio thread. `updateFromApvts` is gated by an
 `ApvtsDirtyTracker`, so the ~50 parameter reads only happen on blocks where something
@@ -148,13 +151,12 @@ depends on the waveform and on the dual-osc tuning mode.
 breath and grit; a lot turns a note into a wind or snare sound. The color of the noise is
 set on the MOD tab.
 
-**VOICE MODE** (four buttons: Poly / Mono / Lead / Legato, default Poly).
+**VOICE MODE** (three buttons: Poly / Mono / Legato, default Poly).
 
 | Mode | Behavior |
 |---|---|
 | Poly | Full chords. Up to 16 notes ring at once. |
 | Mono | One note at a time - each new note cuts the one before it and retriggers the envelopes. |
-| Lead | Identical to Mono in the current build. The two settings run the same code path; the value is stored but nothing downstream reads it. |
 | Legato | One note at a time, but overlapping notes **slide** into each other without restarting the envelopes. Release the newer note while the older one is still held and the pitch slides back. This is the mode that makes SLIDE musical. |
 
 **CUT SELF** (toggle, default off) and the mode button beside it (**SAME PITCH** /
@@ -169,8 +171,11 @@ zero, a new note bends up or down from the note before it instead of jumping - b
 if the previous note is still held. In Legato mode this is the main expressive control.
 
 **OUT VOL** (knob, 0 to 1, default 0.8). The engine's own output level, before the mixer
-strip. 0.8 leaves a little headroom on purpose so the synth sits at about the same
-loudness as the sample player.
+strip. On top of whatever this knob is set to, the output stage applies a fixed -12 dB
+calibration trim that is not exposed as a control and does not show in any readout. That
+trim is deliberate: the oscillators run at full scale, so it is what leaves room for a
+chord. BaySickSynth is therefore quiet on its own, by design - it is meant to be brought
+up by what comes after it rather than by pinning OUT VOL to the top.
 
 **MOD WHEEL** group. Two buttons pick the destination - **Filter** (default) or **LFO** -
 and **AMOUNT** (knob, 0 to 1, default 0) sets how far the wheel goes. On Filter, a fully
@@ -345,7 +350,7 @@ and hold independent automation lanes.
 | `noise` | float | 0 - 1 | 0 |
 | `noiseOnly` | bool | - | off |
 | `noiseColor` | choice | White, Pink, Brown | White |
-| `voiceMode` | choice | Poly, Mono, Lead, Legato | Poly |
+| `voiceMode` | choice | Poly, Mono, Legato | Poly |
 | `glide` | float | 0 - 2 s | 0 |
 | `cutSelf` | bool | - | off |
 | `cutSelfMode` | bool | false = Same Pitch, true = Cut All | Same Pitch |

@@ -611,7 +611,7 @@ void SlotComponent::resized()
 {
     if (mPresentation == Presentation::PanelOnly)
     {
-        if (mEditor) mEditor->setBounds (getLocalBounds().reduced (2));
+        if (mEditor) mEditor->setBounds (getLocalBounds().reduced (kPanelOnlyInset));
         return;
     }
 

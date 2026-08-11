@@ -85,6 +85,11 @@ namespace
               "Bring the Event Editor you last opened back to the front. Does nothing until you have opened one, and nothing once you have closed it.",
               juce::KeyPress (juce::KeyPress::F12Key) },
 
+            { cmdShowManuals, Category::General,
+              "Help Index",
+              "Open the BaySickDAW manuals. Same as Help > Help Index.",
+              juce::KeyPress (juce::KeyPress::F1Key) },
+
             // ── File operations ──────────────────────────────────────────────
             { cmdFileNew, Category::General,
               "New Project",
@@ -641,16 +646,23 @@ namespace
             { Category::DrumKit, "Alt + X",
               "Scale Levels",
               "Open a popup with a velocity slider + numeric input.  OK applies the percentage (100 % = no change) to every selected drum hit's velocity." },
-            // Drum Kit - mouse modifiers (16 rows are fixed: horizontal only)
+            // Drum Kit - mouse modifiers.  The "16 rows are fixed, horizontal
+            // only" premise these three rows used to state died when the
+            // vertical scrollbar shipped at QA-Cleanup: the rows auto-fit down
+            // to kMinRowH and then overflow, so the bare wheel now has two
+            // meanings depending on whether the bar is live.
             { Category::DrumKit, "Mouse Wheel",
-              "Horizontal Scroll",
-              "Bare wheel scrolls the timeline left / right.  The 16 drum rows are fixed in place, so there is no vertical scroll." },
+              "Scroll (rows or timeline)",
+              "Changes meaning with the window height.  While the vertical scrollbar is showing, the bare wheel scrolls the 16 drum rows up / down; when it is not, it scrolls the timeline left / right.  Never both at once.  The wheel does nothing while the pointer is over the scrollbar itself - move onto the grid or the name sidebar." },
             { Category::DrumKit, "Shift + Wheel",
               "Horizontal Scroll",
-              "Also scrolls the timeline left / right." },
+              "Always scrolls the timeline left / right, whether or not the vertical scrollbar is showing." },
             { Category::DrumKit, "Ctrl + Wheel",
               "Horizontal Zoom",
-              "Cursor-anchored zoom - the beat under the mouse stays under the mouse.  There is no vertical zoom; the 16 rows are fixed by design." },
+              "Cursor-anchored zoom - the beat under the mouse stays under the mouse.  There is no vertical zoom on this grid; row height auto-fits and the scrollbar is the only vertical control." },
+            { Category::DrumKit, "Right-Click + Wheel",
+              "Cycle Tools",
+              "Hold the right mouse button and roll the wheel to cycle through the available tools.  Same gesture as the Piano Roll." },
             { Category::DrumKit, "Alt + Wheel (over Control Lane)",
               "Adjust Lane Value",
               "Over the velocity / pan bar strip below the grid: bump the lane's currently-displayed property for the drum hit whose bar is under the cursor by +/-0.05 (Shift+Alt+Wheel = +/-0.01 for fine adjustment).  When drum hits are selected, only those hits' bars are targetable - solves the chord-overlap drag-targets-wrong-hit bug.  Selected bars paint RED in the lane." },

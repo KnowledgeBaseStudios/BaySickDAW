@@ -1,4 +1,31 @@
-# MANUAL 1 — Screenshot List (Visual Atlas capture plan)
+# MANUAL 1 - Element Inventory (formerly the Visual Atlas capture plan)
+
+> **STATUS: RETIRED AS A CAPTURE PLAN. Kept as the ELEMENT INVENTORY.**
+> **Every `SHOT-###` id below is retired. Do not cite one anywhere.**
+>
+> Jeff killed the 723-shot capture plan on 2026-08-09. Manual 1 is a set of
+> roughly 53 densely annotated screens with **callout ids** (`<SCREEN>-<n>`,
+> e.g. `MIX-14`) as the footnote anchors, state variants carried as insets and
+> captions rather than as separate images. The complete figure set is the 53
+> images in `Pictures/`, and it is closed. Recorded as spec calls SC-1, SC-2 and
+> SC-3 in
+> [`Plans & Specs/Batch Plans/lucid-annotating-lemur.md`](../Batch Plans/lucid-annotating-lemur.md).
+>
+> **What this file still is, and why it survives:** the code-read enumeration of
+> every visible element in the app, produced by a seven-agent sweep. That is
+> exactly the raw material a callout list is built from, and nothing else in the
+> repo carries it. Read the `Visible:` lines as an element inventory; ignore the
+> `Reach:` lines, the sitting structure, the shot counts and the time budgets -
+> all of those describe a capture campaign that will never run.
+>
+> **The trap this banner exists to stop:** a reader who takes the numbers below
+> at face value concludes Manual 1 needs 723 images and cannot be written. A
+> session did exactly that on 2026-08-11 and reported the batch blocked. Do not
+> repeat it.
+>
+> The single most useful page here for Manual 1's prose is the **APPENDIX** at
+> the bottom: invisible hit targets, live-looking controls that do nothing, the
+> native-vs-styled dialog split, and the one-per-app elements.
 
 Compiled 2026-08-08 from a seven-agent parallel enumeration of the whole UI, then
 deduped and re-ordered for capture. Source areas: shell-and-menus, system-pages,
@@ -6,7 +33,7 @@ synth-editors, sampler-and-drums, vocal-suite, effect-panels, dialogs-and-window
 
 ---
 
-## THE NUMBER
+## THE NUMBER (historical - the plan this describes is retired)
 
 **723 shots.**
 
@@ -24,7 +51,7 @@ carries a note where a second area needs to footnote it.
 Every entry is a surface that looks meaningfully different from its neighbours.
 Cutting one costs a manual page that cannot be written.
 
-### Sittings
+### Sittings (historical - never run)
 
 **28 navigation sittings + 1 fault-state sitting = ~29-32 sessions.**
 
@@ -34,11 +61,19 @@ including setup and re-staging, budget **60-120 minutes per sitting** and
 **20-26 hours total**. The fault sitting is the slowest per-shot because almost
 every entry needs a save, a file move, and a relaunch.
 
-### How the ids work
+### How the ids work (RETIRED)
 
-`SHOT-001` .. `SHOT-723`, sequential and stable. Manuals 2 and 3 footnote
-against these ids, so **never renumber**. If a shot is dropped, retire the id;
-if a shot is added later, append at the end (SHOT-724+) rather than inserting.
+**`SHOT-001` .. `SHOT-723` are all retired.** No manual cites them and none ever
+will. Manual 1 anchors on callout ids of the form `<SCREEN>-<n>` (`MIX-14`,
+`SYN-OSC-3`), assigned once per figure, append-only within a screen, and retired
+rather than reused; Manuals 2 and 3 footnote against those. The join table is
+`Callout Registry.md` in this folder.
+
+The original text of this section, kept so the retirement is legible: the ids
+were sequential and stable, manuals 2 and 3 were to footnote against them, a
+dropped shot retired its id, and a late addition appended at SHOT-724+ rather
+than inserting. That scheme was replaced wholesale, not amended - keeping both
+would leave two competing anchor namespaces pointing at the same controls.
 
 ### Conventions used below
 
@@ -128,7 +163,7 @@ once you use the app.
 
 **SHOT-015 — Edit menu, undo and redo both greyed**
 - Reach: Launch fresh, do nothing, click "Edit".
-- Visible: Undo (Ctrl+Z) and Redo (Ctrl+Alt+Z) greyed / History... / sep / New Layers Tab / New Bass Tab / New Drums Tab / sep / New Automation Clip. **"New Drums Tab" is greyed in BOTH states — it is hardcoded disabled**, unlike Undo/Redo which are state-driven.
+- Visible: Undo (Ctrl+Z) and Redo (Ctrl+Alt+Z) greyed / History... / sep / "New Tab" (submenu) / sep / New Automation Clip. **No top-level row here is hardcoded disabled** - Undo and Redo are the only ones that ever grey, and both are state-driven. "New Tab" is not a menu of its own: it is the ribbon "+" list embedded whole, so its rows, its submenus and its greying are exactly SHOT-050 through SHOT-056 and do not need re-capturing here.
 
 **SHOT-016 — Patterns menu, single pattern (boundary greying)**
 - Reach: On a fresh project with exactly one pattern, click "Patterns".
@@ -153,7 +188,8 @@ once you use the app.
 
 **SHOT-021 — Help menu, open**
 - Reach: Click "Help".
-- Visible: Help Index (F1) / Key Binds... / Rusty Drums Map... / sep / About BaySickDAW v1.0. **"Help Index (F1)" has no handler by design** (held for the future manuals window) — it looks live and does nothing. The manual must say so rather than describe a screen that does not exist.
+- Visible: four items, exact literals `Help Index  (F1)` (note the DOUBLE space before the parenthesis), `Key Binds...`, `Rusty Drums Map...`, separator, `About BaySickDAW v1.0`.
+- **CORRECTED 2026-08-11 (QA-Manuals Task 1): "Help Index" is LIVE.** It was unwired from 2026-07-29 behind a `HOLD-FOR-MANUALS-WINDOW` marker; that marker is retired and `case 601` now calls `showManualsWindow()` (`StandaloneEditor.cpp:11785`, `:11968`, `:10028`). The window is a desktop `DocumentWindow` titled `BaySickDAW Manuals`, owned by the main window and re-fronted rather than duplicated. **F1 is live too, and was never wired to anything before** - `cmdShowManuals` (`0x1001b`) is a real rebindable command in the General category, labelled `Help Index` with the description `Open the BaySickDAW manuals. Same as Help > Help Index.` (`KeyBindings.cpp:88-91`). Do NOT repeat the retired line that said this item has no handler by design.
 
 ---
 
@@ -177,7 +213,7 @@ the Builder grid).
 
 **SHOT-024 — Edit menu, undo available**
 - Reach: Perform any undoable action, then click "Edit".
-- Visible: Undo and Redo rows now enabled; the rest identical, with "New Drums Tab" still greyed.
+- Visible: Undo and Redo rows now enabled; every other top-level row identical to SHOT-015. Nothing else at this level ever greys - the greyed rows inside "New Tab" are cap-driven and belong to SHOT-056.
 - Variant of: SHOT-015
 
 **SHOT-025 — Patterns menu, multiple patterns**
@@ -328,7 +364,7 @@ Lock one tab and freeze one tab before starting (needed for SHOT-048/049).
 **SHOT-050 — "+" add menu, open**
 - Reach: Click the narrow "+" slot at the right end of the ribbon.
 - Visible: Rows in locked order: BaySickVocal / BaySickLiveInst / BaySickGuitars / BaySickBasses / "VSTPlugin" (submenu) / "Harmless" (submenu) / BaySickSynth / "BaySickPlayer" (submenu) / BaySickBass / "BaySickDrums" (submenu) / BaySickRustyDrums. **Every entry names an ENGINE, never a page type** — the engine decides which tab it lands in.
-- Why separate: The ONLY way to bring a page type back once its last instance is deleted.
+- Why separate: The main route to bring a page type back once its last instance is deleted. It is no longer the only one - the master menu bar's Edit > New Tab embeds this exact menu - but it is the one the ribbon puts in front of the user.
 
 **SHOT-051 — "+" menu > Harmless submenu**
 - Reach: "+" > hover "Harmless".
@@ -523,7 +559,7 @@ Perform several undoable actions before SHOT-102.
 
 **SHOT-084 — Audio & MIDI Settings, populated**
 - Reach: Options > Audio Settings...
-- Visible: 480px-wide non-resizable dark dialog "Audio & MIDI Settings". Label+combo rows: Audio Mode, Audio Device, Sample Rate (44100 / 48000 / 88200 / 96000 / 192000 Hz), Buffer Size (64..2048 samples), Trigger Velocity (From controller / Fixed). A "MIDI Inputs:" block of stacked checkboxes, one per detected device. Footer: "Open ASIO Control Panel" on the left, "Apply" and "Close" on the right.
+- Visible: 480px-wide non-resizable dark dialog "Audio & MIDI Settings". Label+combo rows: Audio Mode, Audio Device, Sample Rate (44100 / 48000 / 88200 / 96000 / 176400 / 192000 Hz), Buffer Size (32..4096 samples), Trigger Velocity (From controller / Fixed). A "MIDI Inputs:" block of stacked checkboxes, one per detected device. Footer: "Open ASIO Control Panel" on the left, "Apply" and "Close" on the right.
 - Note: The dialog's HEIGHT scales with the number of MIDI devices.
 
 **SHOT-085 — Audio & MIDI Settings, no MIDI devices detected**
@@ -565,11 +601,11 @@ Perform several undoable actions before SHOT-102.
 
 **SHOT-092 — Plugins manager, never scanned**
 - Reach: Options > Plugins...
-- Visible: Resizable window "Plugins". Top filter row (label + text box, placeholder "name or manufacturer"). "Folders" header + folder list + Add Folder / Remove Folder / Reset Folders. Added-plugins header + 4-column table (Name / Kind / Manufacturer / File) + Remove. Results header + 4-column table (checkbox / Name / Kind / "File / reason skipped"), empty. Bottom: "Scan" button, "Add Checked" (disabled), hidden progress bar, status text "Press Scan to search the folders above."
+- Visible: Resizable window "Plugins". Top filter row (label + text box, placeholder "name or manufacturer"). "1.  Scan folders" header + folder list + "Add Folder..." / "Remove" / "Reset to Defaults". "2.  Added plugins" header + 4-column table (Name / Kind / Manufacturer / File) + "Remove Selected". "3.  Scan results" header + 4-column table (checkbox / Name / Kind / "File / reason skipped"), empty. Bottom: "Scan" button, "Add Checked" (disabled), hidden progress bar, status text "Press Scan to search the folders above."
 
 **SHOT-093 — Plugins manager, scan in progress**
 - Reach: Options > Plugins..., click Scan and capture while it runs.
-- Visible: Scan button now reads "Cancel Scan"; Add Folder / Remove Folder / Reset Folders all greyed; progress bar visible; status text showing the scanner's live line.
+- Visible: Scan button now reads "Cancel Scan"; "Add Folder...", "Remove" and "Reset to Defaults" all greyed; progress bar visible; status text showing the scanner's live line.
 - Why separate: Button labels, enablement and the progress bar all change.
 - Variant of: SHOT-092
 
@@ -632,6 +668,11 @@ Perform several undoable actions before SHOT-102.
 **SHOT-105 — About BaySickDAW dialog**
 - Reach: Help > About BaySickDAW v1.0
 - Visible: Info-icon message box "BaySickDAW v1.0"; version line, "Built with JUCE 7  |  (c) KnowledgeBase Studios", and a "Powered by:" list naming sfizz (BSD 2-Clause) and LAME (LGPL); single OK button. (The attribution list is knowingly incomplete.)
+**SHOT-724 - Manuals window (Help > Help Index, or F1)**
+- Reach: Help > Help Index, or press F1 from the main frame or any page window.
+- Visible (installed state): Resizable desktop DocumentWindow "BaySickDAW Manuals", opening 1100x800 centered, close button only, the shared 26px title strip, filled edge to edge by an embedded browser showing the manuals site staged at `<exe dir>\Manuals\index.html`. The app asks for the WebView2 backend, but JUCE silently substitutes the legacy IE control when WebView2 cannot be constructed, so do not caption the picture as WebView2 unless it has been confirmed on that machine.
+- Visible (missing state, and the one a development build actually shows): no browser at all - plain text over the app background reading "The manuals are not installed." / "They belong at:" / the full path / "A full install places them there. If you are running a development build, the manuals are built separately and staged into that folder.", with a single 200x30 button "Open Manuals Folder" horizontally centered, sitting just below the vertical middle of the window and well clear of the text block.
+- Why separate: Two completely different contents in the same frame, and the second is what every reader meets until the manuals are staged. Added 2026-08-11 (QA-Manuals Task 1). NOTE on the id: the SHOT-nnn scheme is RETIRED (see "How the ids work (RETIRED)" above). This number is a filing label for this list only, not an anchor any manual will cite, and it does not revive the retired numbering - do not read it as the append rule coming back.
 
 ---
 
@@ -1048,7 +1089,7 @@ live. Budget a long arrangement so SHOT-194's progress state is catchable.
 
 **SHOT-189 — Export Audio dialog, options state**
 - Reach: File > Export Audio...
-- Visible: Non-resizable dialog "Export Audio". Label+combo rows: Selection (Full Arrangement / Selected Section — the latter greyed with no ruler selection), Tail (Included / Cut), Format (WAV / OGG / MP3), Quality (contents change per format), Sample rate (44100 / 48000 Hz), Dither (Off / Flat (TPDF) / Noise-Shaped). A "Normalize to" checkbox + typed LUFS field + "LUFS" suffix. A "Check against" spec combo + a "Measure" button. Two BLANK monospace readout lines. An "Export stems (one file per mixer strip)" checkbox. Export and Cancel. A hidden progress bar row.
+- Visible: Non-resizable dialog "Export Audio". Label+combo rows: Selection (Full Arrangement / Selected Section — the latter greyed with no ruler selection), Tail (Included / Cut), Format (WAV / OGG / MP3), Quality (contents change per format), Sample rate (44100 / 48000 / 88200 / 96000 / 176400 / 192000 Hz - the four above 48000 gray out when Format is MP3), Dither (Off / Flat (TPDF) / Noise-Shaped). A "Normalize to" checkbox + typed LUFS field + "LUFS" suffix. A "Check against" spec combo + a "Measure" button. Two BLANK monospace readout lines. An "Export stems (one file per mixer strip)" checkbox. Export and Cancel. A hidden progress bar row.
 
 **SHOT-190 — Export Audio, Quality combo per format (3 crops)**
 - Reach: Open the Quality combo three times, once per Format setting.
@@ -1170,7 +1211,7 @@ audio interface makes SHOT-212/214/216 far more useful.
 
 **SHOT-211 — Mixer, Menu dropdown open**
 - Reach: Mixer > click "Menu" on the title strip.
-- Visible: "Pan Law" submenu (Circular (-3 dB at center) / Triangular (-6 dB) / Square (0 dB), tick on current); "Master Output" submenu; "Latency-compensate meters" (tickable); "Multi-core Rendering" (tickable); "Run MT Diagnostic (2s capture)".
+- Visible: FOUR entries, no separators - "Pan Law" submenu (Circular (-3 dB at center) / Triangular (-6 dB at center) / Square (0 dB at center), tick on current); "Master Output" submenu; "Latency-compensate meters" (tickable, unticked by default); "Multi-core Rendering" (tickable, ticked by default).
 
 **SHOT-212 — Mixer, Master Output submenu open**
 - Reach: Mixer > Menu > hover "Master Output".
@@ -1180,7 +1221,7 @@ audio interface makes SHOT-212/214/216 far more useful.
 
 **SHOT-213 — Mixer, "+" cable menu on a strip**
 - Reach: Click the "+" button at the bottom of any NON-Master strip.
-- Visible: Three submenus — "Send..." (every legal aux target plus "New Aux Strip", with illegal/cycle-creating targets greyed), "Sidechain..." (every strip with a free receive line), "Move Output..." (legal main-out destinations with a tick on the current one). **Move Output... is ABSENT on strips whose output is locked.**
+- Visible: Five submenus — "Send..." (every legal aux target plus "New Aux Strip", with illegal/cycle-creating targets greyed), "Sidechain..." (every OTHER strip, with the ones whose four receive lines are full and the cycle-creating ones greyed), "Move Output..." (legal main-out destinations with a tick on the current one), "Add Main Out..." and "Remove Main Out..." (whose line-0 row is greyed and reads "<dest>  (main output)"). **The last three are ABSENT on strips whose output is locked, so a locked strip shows only two submenus.**
 
 **SHOT-214 — Mixer, Arm LED input picker (Vox), armed**
 - Reach: Mixer > RIGHT-click the Arm LED on a Vox strip (left-click just toggles arm).
@@ -1238,17 +1279,15 @@ audio interface makes SHOT-212/214/216 far more useful.
 - Why separate: Only appears where cables overlap, and it is the only place main cables are listed at all.
 - Variant of: SHOT-222
 
-**SHOT-225 — MT Diagnostic prompt**
-- Reach: Mixer > Menu > "Run MT Diagnostic (2s capture)".
-- Visible: Info box "MT Diagnostic" instructing the user to start playback then click OK, warning the UI freezes for 2 seconds; OK and Cancel.
+**SHOT-225 — MT Diagnostic prompt (RETIRED)**
+- RETIRED (QA-Cleanup, commit ade5a10b): the "Run MT Diagnostic (2s capture)" entry and its prompt were deleted from the app. Nothing to photograph. The id is kept so the surrounding numbering does not shift.
 
-**SHOT-226 — MT Diagnostic result**
-- Reach: Complete the MT Diagnostic capture.
-- Visible: Info box "MT Diagnostic Result" with a tabular body: Build (Debug/Release), Multi-core ON/OFF, capture window, then counts for Blocks processed, Leaves submitted, Child submits, Total submits, Watchdog fires, Main-thread tasks with %, Worker tasks with %, Total tasks run, Worker spin/sleep finds, idle sleeps, wakes; OK.
+**SHOT-226 — MT Diagnostic result (RETIRED)**
+- RETIRED (QA-Cleanup, commit ade5a10b): the "MT Diagnostic Result" box and the counters behind it were deleted from the app. Nothing to photograph. The id is kept so the surrounding numbering does not shift.
 
 **SHOT-227 — Master Analyzer, Loudness view, live**
-- Reach: Ribbon > Mixer > on the MASTER strip click the "+" button (its tooltip reads "Open the master analyzer..."). **This is the only entry point — there is no View-menu route.**
-- Visible: Contained window "Master Analyzer" with its title strip and Menu button; a top control row with a source combo (defaulting to "Live") and a disabled "Export Take..." button; a readout strip of six cells — MOM, SHORT, INT (cyan), LRA ("--" when live), PEAK, TRUE PK (turning orange near/over the ceiling); a plot area with LU gridlines every 6 LU, a dashed cyan target line labelled e.g. "-14.0 LUFS", the cyan short-term loudness curve, and orange bars filling any span above the target.
+- Reach: Ribbon > Mixer > on the MASTER strip click the button reading "Analyzer" (every other strip's reads "+"; its tooltip reads "Open the master analyzer - loudness, spectrum and the render report"). **This is the only entry point — there is no View-menu route.**
+- Visible: Contained window "Master Analyzer" with its title strip and Menu button; a top control row with a source combo (defaulting to "Live") and a disabled "Export Take..." button; a readout strip of six cells — MOM, SHORT, INT (cyan), LRA ("--" when live), PEAK (turning orange above -0.1 dBFS), TRUE PK (turning orange above -1.0 dBTP); a plot area with LU gridlines every 6 LU, a dashed cyan target line labelled e.g. "-14.0 LUFS", the cyan short-term loudness curve, and orange bars filling any span above the target.
 
 **SHOT-228 — Master Analyzer, Spectrum view**
 - Reach: Master Analyzer > Menu > View > Spectrum.
@@ -1481,7 +1520,7 @@ sidechain routed to it and a strip with none.
 
 **SHOT-271 — Mode menu, Compressor**
 - Reach: Compressor effect window > Menu > "Mode: Modern...".
-- Visible: Modern (ticked), FET (Punchy), Opto (Smooth), CS Style (Sustain).
+- Visible: Modern (ticked), FET (Punchy), Opto (Smooth), Pedal (Sustain).
 
 **SHOT-272 — Mode menu, Saturation**
 - Reach: Saturation effect window > Menu > "Mode: Tube...".
@@ -1506,6 +1545,7 @@ sidechain routed to it and a strip with none.
 **SHOT-277 — Sidechain menu, sources routed**
 - Reach: On a strip with at least one sidechain cable routed to it, Compressor effect window > Menu > "SC: Off...".
 - Visible: "Off" (ticked when no pick) plus one row per routed SC receive line, each labelled with the friendly source-strip name.
+- Note: A hosted VST3 effect that declares a side-chain input opens the identical menu from the identical "SC: Off..." row; a plugin running bridged gets no "SC:" row at all, so shoot both if a bridged plugin is on hand.
 
 **SHOT-278 — Sidechain menu, nothing routed**
 - Reach: On a strip with no sidechain cables, Compressor effect window > Menu > "SC: Off...".
@@ -1575,8 +1615,8 @@ plain dark panel (Chorus, Flanger, Phaser, Wah, Synth, Acoustic Simulator, Tuner
 - Why separate: Third panel class; knobs are 0-100 face-plate scales, not dB.
 - Variant of: SHOT-286
 
-**SHOT-288 — Compressor, CS Style mode**
-- Reach: Compressor window > Menu > Mode > "CS Style (Sustain)".
+**SHOT-288 — Compressor, Pedal mode**
+- Reach: Compressor window > Menu > Mode > "Pedal (Sustain)".
 - Visible: Pedal-style face — four knobs Level / Tone / Attack / Sustain; GR meter; dBFS meter. **This panel DISABLES the shared right-edge Output Vol knob** (it owns its own Level), so the right edge looks different from every other stage.
 - Why separate: Fourth compressor face and the only one missing the standard Vol knob.
 - Variant of: SHOT-286
@@ -2255,7 +2295,7 @@ one saved kit, and a Rusty tab present (SHOT-443's wording changes when one exis
 
 **SHOT-417 — Drum Kit grid, kit 1-16, populated**
 - Reach: Ribbon > Piano Roll > engine pill > "Drum Kit".
-- Visible: A 20px MenuBarComponent (Edit / Tools / View); a 28px toolbar — Snap button (38px, highlighted when a division is active), seven tool buttons (Draw / Paint / Del / Mute / Slice / Sel / Zoom, elastic, active one toggled), Undo, Redo, "H", "-" and "+" zoom, a right-aligned context label, and pinned far right the bank switch "1-16" / "17-32" plus the "Kit  v" button. Below: the 202px sidebar (14px drag-handle column of three stacked bars, 120px picker button per row, 20px red M, 20px yellow S, 28px white audition key) with a ruler-row "Lock/Unlock 1-16" button spanning the picker+M+S width; and the grid — 14px ruler with bar numbers, alternating row stripes for the 16 rows, snap-ladder and bar gridlines, velocity-shaded rounded note blocks in each drum's accent colour. Horizontal scrollbar, then the control lane.
+- Visible: A 20px MenuBarComponent (Edit / Tools / View); a 28px toolbar — Snap button (38px, highlighted when a division is active), seven tool buttons (Draw / Paint / Del / Mute / Slice / Sel / Zoom, elastic, active one toggled), Undo, Redo, "H", "-" and "+" zoom, a right-aligned context label, and pinned far right the bank switch "1-16" / "17-32" plus the "Kit  v" button. Below: the 202px sidebar (14px drag-handle column of three stacked bars, 120px picker button per row, 20px red M, 20px yellow S, 28px white audition key) with a ruler-row "Lock/Unlock 1-16" button spanning the picker+M+S width; and the grid — 14px ruler with bar numbers, alternating row stripes for the 16 rows, snap-ladder and bar gridlines, velocity-shaded rounded note blocks in each drum's accent colour. Horizontal scrollbar, then the control lane. A 12px vertical scrollbar down the right-hand edge of the grid, present ONLY when the window is too short to show all 16 rows at their 18px minimum row height (it takes its column off the grid's width when it appears); the sidebar rows scroll with it while the ruler band and its Lock/Unlock button stay pinned.
 
 **SHOT-418 — Drum Kit grid, empty kit (no drums)**
 - Reach: Fresh project, or delete every Drums tab. Ribbon > Piano Roll > pill > "Drum Kit".
@@ -2535,7 +2575,7 @@ only). BaySickBass is a flat row (Bass only).
 
 **SHOT-467 — BaySickSynth, OSC tab (full editor, default)**
 - Reach: Ribbon "+" > BaySickSynth. The window opens on the OSC tab.
-- Visible: Top to bottom — a 120px visualizer scope panel (dark rounded panel, 3 horizontal grid lines + 1 centre vertical line, green oscillator trace, waveform name in small green text along the bottom); a 30px tab row of six buttons OSC / OSC ENV / FILTER / FLT ENV / LFO / MOD with OSC lit; a divider; then the control deck in three grouped columns — WAVEFORM (waveform combo, dual-osc-mode combo, TRANSPOSE / MODIFIER / NOISE knobs each with a numeric value box beneath, SYNC and RING switch buttons on the bottom row); VOICE MODE (a 1x4 lit button strip Poly | Mono | Lead | Legato, CUT SELF button, CUT SELF mode button reading "SAME PITCH", SLIDE and OUT VOL knobs); MOD WHEEL (a 1x2 lit strip Filter | LFO, AMOUNT knob).
+- Visible: Top to bottom — a 120px visualizer scope panel (dark rounded panel, 3 horizontal grid lines + 1 centre vertical line, green oscillator trace, waveform name in small green text along the bottom); a 30px tab row of six buttons OSC / OSC ENV / FILTER / FLT ENV / LFO / MOD with OSC lit; a divider; then the control deck in three grouped columns — WAVEFORM (waveform combo, dual-osc-mode combo, TRANSPOSE / MODIFIER / NOISE knobs each with a numeric value box beneath, SYNC and RING switch buttons on the bottom row); VOICE MODE (a 1x3 lit button strip Poly | Mono | Legato, CUT SELF button, CUT SELF mode button reading "SAME PITCH", SLIDE and OUT VOL knobs); MOD WHEEL (a 1x2 lit strip Filter | LFO, AMOUNT knob).
 
 **SHOT-468 — BaySickSynth, waveform dropdown open**
 - Reach: OSC tab > click the top combo in the WAVEFORM group.
@@ -2571,8 +2611,8 @@ only). BaySickBass is a flat row (Bass only).
 - Variant of: SHOT-467
 
 **SHOT-474 — BaySickSynth, VOICE MODE strip, each mode selected**
-- Reach: OSC tab > click Mono, then Lead, then Legato in the VOICE MODE strip (one capture per pick, or a composite of the four).
-- Visible: The 1x4 strip — the selected cell gets an accent-tinted fill, an accent top bar, an accent border and accent bold label text; unselected cells are flat dark with grey text.
+- Reach: OSC tab > click Mono, then Legato in the VOICE MODE strip (one capture per pick, or a composite of the three).
+- Visible: The 1x3 strip — the selected cell gets an accent-tinted fill, an accent top bar, an accent border and accent bold label text; unselected cells are flat dark with grey text.
 - Why separate: **This is the app's LED-radio idiom and it appears in five places in this editor** — it needs one clear picture.
 - Variant of: SHOT-467
 
@@ -2986,7 +3026,7 @@ via "+" > BaySickDrums > BaySickPlayer for the drum-context variant.
 
 **SHOT-552 — BaySickPlayer, full editor (7-box grid)**
 - Reach: Ribbon "+" > BaySickPlayer > Layers. The window opens showing the whole editor.
-- Visible: Top row of three boxes — SAMPLE ENGINE, PITCH & VOICING, DYNAMICS. Bottom row of four — AMP ENVELOPE, LFO, FILTER, OUTPUT. Every control is a small rotary with an uppercase label beneath; the DYNAMICS box also carries two drawn arrow glyphs between its columns.
+- Visible: Top row of three boxes — SAMPLE ENGINE, PITCH & VOICING, DYNAMICS. Bottom row of four — AMP ENVELOPE, VIBRATO, FILTER, OUTPUT. Every control is a small rotary with an uppercase label beneath; the DYNAMICS box also carries two drawn arrow glyphs between its columns.
 
 **SHOT-553 — BaySickPlayer, SAMPLE ENGINE box**
 - Reach: Shoot the top-left box titled "SAMPLE ENGINE".
@@ -3023,9 +3063,9 @@ via "+" > BaySickDrums > BaySickPlayer for the drum-context variant.
 - Reach: Shoot the bottom-row box titled "AMP ENVELOPE".
 - Visible: Title; four knobs in a 2x2 block labelled ATTACK, DECAY, SUSTAIN, RELEASE. **No envelope graph.**
 
-**SHOT-560 — BaySickPlayer, LFO box**
-- Reach: Shoot the bottom-row box titled "LFO".
-- Visible: Title; two knobs centred in the middle row labelled LFO RATE and LFO, with the rows above and below empty.
+**SHOT-560 — BaySickPlayer, VIBRATO box**
+- Reach: Shoot the bottom-row box titled "VIBRATO".
+- Visible: Title; two knobs centred in the middle row labelled VIB RATE and VIB DEPTH, with the rows above and below empty.
 - Why separate: A near-empty box with two knobs floating in the middle reads as unfinished; the atlas should show it as intentional.
 
 **SHOT-561 — BaySickPlayer, FILTER box**
@@ -3742,6 +3782,7 @@ Options > Plugins.
 **SHOT-681 — Hosted VST3 plugin in an effect window**
 - Reach: Options > Plugins, add a VST3 effect. Then Effects > slot chevron > VST Plugins > pick it > click the name plate.
 - Visible: The plugin's OWN editor UI filling the window, our title strip above it (strip name + plugin name), the Menu button and the bypass LED. **The window sizes itself to the plugin's declared editor size.**
+- Also capture, same window, using a FIXED-SIZE plugin: (a) the window dragged LARGER, so the plugin sits centered inside a flat 0xff1c1c1e surround; (b) the window dragged SMALLER, so the plugin anchors top-left and the overflow is clipped at the window edge with NO scrollbars. Nothing scales in either shot - that is the point of capturing both.
 
 **SHOT-682 — Hosted plugin Menu extras**
 - Reach: With a hosted plugin's effect window open, click Menu.
@@ -3754,7 +3795,7 @@ Options > Plugins.
 
 **SHOT-684 — Hosted VST3 instrument tab (Plugins page)**
 - Reach: Ribbon "+" > VSTPlugin > pick an instrument. Click the resulting purple Plugins ribbon slot.
-- Visible: The plugin's own editor UI hosted in a contained window with our title strip. Note for the manual: **hosted instrument tabs have no auditionNote** — the piano-roll keyboard reaches them through the live-MIDI route, so clicking roll keys works but behaves slightly differently from the in-house engines.
+- Visible: The plugin's own editor UI hosted in a contained window with our title strip. Note for the manual: **hosted instrument tabs have no auditionNote**- Also capture: the same tab with a RESIZABLE plugin, mid-drag on the window edge - its UI re-lays out to follow the frame, which a fixed-size plugin never does. Fixed-size vs resizable is the whole sizing story for hosted plugins and the manual has to show both. If the plugin is running bridged, note that its UI does not follow the window at all: it is centered while it fits and clipped when it does not. — the piano-roll keyboard reaches them through the live-MIDI route, so clicking roll keys works but behaves slightly differently from the in-house engines.
 
 ---
 
@@ -3879,13 +3920,14 @@ surfaces SHOT-686, 687, 688, 689, 690, 693, 703 and 705 together.
 
 **SHOT-704 — BaySickNAM/IR, error label**
 - Reach: Attempt to load a corrupt or unsupported .nam / .wav.
-- Visible: Red text right-aligned in the status row's RIGHT half carrying the loader's error string; some failures also raise a warning message box.
+- Visible: Red text right-aligned in the status row's RIGHT half carrying the loader's error string. Every NAM / IR failure on the interactive routes (browse, drag-drop, recents menu) also raises a `BaySickNAM/IR` warning box with the same text prefixed by "Couldn't load NAM model:", "Couldn't load IR:" or "Couldn't load dropped file:" - there is no label-only state. The MIC SIM A / MIC SIM B user-IR pickers are the reverse: box only, no red label. A refused capture reads "This NAM capture was refused: <reason>." A failure during a project restore raises NEITHER the label nor the box; it only reaches the Missing files report.
 - Why separate: The third state of the status row.
 - Variant of: SHOT-666
 
 **SHOT-705 — Missing files report**
 - Reach: Open a project (or load a template / page preset) after moving or deleting a referenced NAM capture, sfizz kit, user IR or sample.
 - Visible: Warning box "Missing files"; body explains the project/template/preset refers to files no longer where they were saved and that affected parts may be silent or playing a substitute; then up to 12 lines of "<what>: <path>" (e.g. "NAM capture: C:\..."), an "...and N more" tail, and closing advice to re-pick them or put the files back; OK.
+- Also lands here, with wording that does not fit: a kit REFUSED by the SFZ safety gate, listed as "Instrument kit refused - <reason>: <path>". The file is present and the headline still says it is no longer where it was saved. This is the only place the refusal reason is ever displayed, and it can arrive under an unrelated headline noun ("sound", "preset", "kit", "undo") long after the pick that caused it.
 - Why separate: The consolidated report a user meets on reopening a moved project.
 
 **SHOT-706 — "Using a different audio device" startup notice**
@@ -3900,7 +3942,7 @@ surfaces SHOT-686, 687, 688, 689, 690, 693, 703 and 705 together.
 
 **SHOT-708 — "Could not open project" warning**
 - Reach: Delete or corrupt a project's project.xml, then open it from File > Open Recent or Quick Open.
-- Visible: Warning box "Could not open project" saying the folder may have been moved or deleted, or contains no/corrupt project.xml; OK.
+- Visible: Warning box "Could not open project". Body from Open Recent: "The project folder may have been moved or deleted." Body from Quick Open Project...: "That folder doesn't contain a project.xml, or the file is corrupt." OK on both. Open Project... is NOT a route to this box for a deleted project.xml - it pre-checks the file and raises "Not a BaySickDAW project folder" / "That folder has no project.xml inside it." instead; it reaches "Could not open project" only when the file is present but the parser refuses it (a `<!DOCTYPE`, over 512 levels of nesting, or malformed XML), where the body then names the wrong problem.
 
 **SHOT-709 — "Save failed" / "Save As failed" / "Could not create project"**
 - Reach: Make the Projects folder read-only, then try File > Save, File > Save As... and File > New Project...
@@ -3965,6 +4007,10 @@ surfaces SHOT-686, 687, 688, 689, 690, 693, 703 and 705 together.
 **SHOT-723 — IR / NAM load failure alerts (effect panels)**
 - Reach: In the Acoustic Preamp / Acoustic Simulator / NAM Pedal, pick a non-audio .wav or a malformed .nam capture.
 - Visible: Warning alerts "Load Acoustic IR" or "NAM Load Failed" carrying the DSP's error string.
+**SHOT-724 - "Could not load program" (kit refused or unparseable)**
+- Reach: Copy a program out of `Core Library\Black&Green Guitars\Programs\` back into that same `Programs` folder under a new name, add a line reading `#define $A $A` to the copy, then pick the copy from Load Guitar. The Rusty tab cannot be staged by copying - it only ever loads `01-full.sfz` and `02-basic.sfz` by name - so for that variant back up `Core Library\Big Rusty Drums\Programs\01-full.sfz`, add the same line to the shipped file, pick Full, then restore the backup.
+- Visible: Warning box titled "Load Program" on a Guitars / Basses tab, or "Big Rusty Drums" on the Rusty tab, reading "Could not load program:" and the full path, OK. **No reason is given in the box.** On the Rusty tab the program that was loaded has already been torn down by the time the box appears, so the page is left empty and the Program dropdown clears; on an Inst tab the previous program keeps playing.
+- Why separate: Same wording as an ordinary parse failure but a different cause, and the one refusal in the app whose written explanation never reaches the box that reports it.
 
 ---
 
@@ -3984,10 +4030,20 @@ would otherwise cost a wasted sitting.
   ring (SHOT-590) and only hover raises a name (SHOT-591).
 
 **Live-looking things that intentionally do nothing**
-- Help > "Help Index (F1)" has no handler — reserved for these manuals.
+- ~~Help > "Help Index (F1)" has no handler — reserved for these manuals.~~
+  **RETIRED 2026-08-11 (QA-Manuals Task 1): this is now FALSE.** The manuals
+  window shipped; `Help > Help Index  (F1)` and the bare F1 key both open it.
+  Manual 1 documents it as live. Left visible rather than deleted because three
+  separate documents carried this claim and a silent removal would let it
+  reappear from one of the others.
 - Options > "MIDI is Omni (all devices) - Read Only" is a permanently disabled
   status row.
-- Edit > "New Drums Tab" is hardcoded disabled in every state.
+- ~~Edit > "New Drums Tab" is hardcoded disabled in every state.~~
+  **RETIRED 2026-08-11 (QA-Manuals): this is now FALSE.** The three fixed
+  page-type rows were replaced by a "New Tab" submenu that embeds the ribbon
+  "+" list whole, so the Edit menu has no hardcoded-disabled row left. Left
+  visible rather than deleted for the same reason as the Help Index entry
+  above - a second file still carries the claim.
 - On Vocal Chain slot headers the up/down/x glyphs are painted but inert, and the
   "SC" button opens nothing (SHOT-620).
 - The BaySickVocals live readout is hardcoded to "-- Hz / -- Hz / -- cents"
@@ -4000,9 +4056,9 @@ Every file/folder picker is also native. Everything else uses the app's dark
 styling.
 
 **Desktop vs contained windows** — page windows are native CHILD windows inside
-the fixed frame. Key Binds, Undo History, Plugins, Rusty Drums Map, Master
-Analyzer, Event Editor and every dialog are real DESKTOP windows owned by the
-main window (they float above it and minimise with it, but not above other
+the fixed frame. Key Binds, Undo History, Plugins, Rusty Drums Map, Manuals,
+Master Analyzer, Event Editor and every dialog are real DESKTOP windows owned
+by the main window (they float above it and minimise with it, but not above other
 apps). They share the same 26px title-strip look, so photograph at least one of
 each with desktop background visible so the difference reads.
 
@@ -4041,9 +4097,17 @@ stopping the transport per shot.
   `showInstanceDropdown`, so that menu can never appear.
 - The `count == 0` branch inside `RibbonTabBar::showInstanceDropdown` is
   unreachable — instance-type slots vanish entirely at zero tabs.
-- `DrumPage::buildDrumKitTab()` exists but is never called; the one live Drum Kit
-  surface is owned by PianoRollPage, which is why every Drum Kit shot routes
-  through Ribbon > Piano Roll > engine pill.
+- ~~`DrumPage::buildDrumKitTab()` exists but is never called~~ **CORRECTED
+  2026-08-11 (QA-Manuals Task 1): the function name is wrong and the dead-code
+  half is no longer true.** There is no `buildDrumKitTab` on `DrumPage` at all -
+  QA-Cleanup folded that dead member out. The only `buildDrumKitTab()` in the
+  tree is `BaySickRustyDrumsPage::buildDrumKitTab()`
+  (`BaySickRustyDrumsPage.cpp:158`), and it IS called (`:76`) - it builds
+  Rusty's own Drum Kit sub-tab, a different surface from the 16-pad grid.
+  **The routing conclusion still holds:** the 16-pad Drum Kit grid for ordinary
+  Drums tabs is owned by `PianoRollPage` (`DrumPage.cpp:126-127`, `:136` -
+  sub-tab index 0 redirects), which is why every Drum Kit view routes through
+  Ribbon > Piano Roll > engine pill.
 
 **Also true and worth a manual sidebar rather than a shot**
 - Drum banks 1-16 and 17-32 are two INDEPENDENT KITS, not one 32-slot kit.

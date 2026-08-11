@@ -1136,8 +1136,8 @@ void DrumPage::showContextMenu (juce::Component* anchor, bool fromKit)
         bool canToggle = false;
         if (auto* bss = dynamic_cast<BaySickSynthProcessor*>(mEngineProcessor))
         {
-            // voiceMode raw: 0=Poly, 1=Mono, 2=Lead, 3=Legato.  We treat
-            // anything > 0 as "monophonic-ish" for label purposes.
+            // voiceMode raw: 0=Poly, 1=Mono, 2=Legato.  We treat anything > 0
+            // as "monophonic-ish" for label purposes.
             if (auto* p = bss->apvts.getRawParameterValue (bss->getParamPrefix() + "voiceMode"))
                 isMono = (int) std::round (p->load()) >= 1;
             canToggle = true;
@@ -1309,8 +1309,8 @@ void DrumPage::showContextMenu (juce::Component* anchor, bool fromKit)
             {
                 if (auto* bss = dynamic_cast<BaySickSynthProcessor*>(dp->mEngineProcessor))
                 {
-                    // voiceMode is a 4-choice param: Poly(0) / Mono(1) / Lead(2) / Legato(3).
-                    // Toggle Poly <-> Mono ONLY (Lead/Legato are advanced; user wants binary).
+                    // voiceMode is Poly(0) / Mono(1) / Legato(2).
+                    // Toggle Poly <-> Mono ONLY (Legato is advanced; user wants binary).
                     if (auto* p = bss->apvts.getParameter (bss->getParamPrefix() + "voiceMode"))
                     {
                         const auto& range = p->getNormalisableRange();

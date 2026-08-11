@@ -73,6 +73,53 @@ maximized - there is only one valid frame geometry. Top to bottom it holds the
 menu bar, the transport row (transport controls, pattern button, position
 readout, ribbon tabs, performance readout), and then the workspace filling
 everything below.
+### The menu bar and the Help menu
+
+Across the top of the frame sits the application menu bar - **File**, **Edit**,
+**Patterns**, **View**, **Options**, **Help**. It is the only menu bar the frame
+itself owns; every window inside the workspace carries its own menu in its title
+strip instead.
+
+**Help** holds four entries, with a separator before the last one:
+
+| Entry | What it does |
+|---|---|
+| **Help Index  (F1)** | Opens the manuals window, described below. The label carries two spaces before the key hint. |
+| **Key Binds...** | Opens the **Key Binds** window: every rebindable command with its current shortcut, plus every page-local key and mouse gesture as a reference row. See `Keyboard Shortcuts.md`. |
+| **Rusty Drums Map...** | Opens the **Rusty Drums Map** window, a Key / MIDI / Sound / Articulation table of every note the Rusty kit answers to. It does not need a Rusty Drums tab open: with no kit loaded it parses the installed Big Rusty Drums kit instead, and if the Core Library is not installed either, the table comes up empty. See `BaySickRustyDrums.md`. |
+| **About BaySickDAW v1.0** | An information box titled "BaySickDAW v1.0" carrying the build line, a short "Powered by:" attribution list naming sfizz and LAME, and a single **OK** button. That list is knowingly incomplete. |
+
+### The manuals window
+
+**Help > Help Index**, or **F1** (its default key) from the main frame or any
+page window, opens **BaySickDAW Manuals**. It is a desktop window rather than a
+contained one: 1100 x 800 when it first opens, centered, freely resizable, with
+a close button and no minimize or maximize, wearing the same 26-pixel title
+strip as the app's other desktop windows. Like them it is *owned* by the main
+window, so it floats above the app and minimizes with it but never above other
+applications. Only one can exist - asking for it a second time brings the open
+window to the front rather than opening another.
+
+Inside it is an embedded browser. The manuals are a static web site the app
+expects to find staged beside the application executable at `Manuals\`, entry
+point `index.html`. Nothing in the app authors, validates, downloads or installs
+that content; the window only reads it.
+
+**When the manuals are not installed** the window does not open blank. It says
+so, in plain text over the app background:
+
+> The manuals are not installed.
+>
+> They belong at:
+> *(the full path it looked for, spelled out)*
+>
+> A full install places them there. If you are running a development build, the
+> manuals are built separately and staged into that folder.
+
+Below that message is one button, **Open Manuals Folder**. It creates the folder
+if it is not there and opens it in Explorer, so the manuals can be dropped in
+without hunting for the path.
+
 
 ### Opening and closing windows
 
@@ -130,8 +177,11 @@ sliding back in.
 **Every window has a minimum size, and that minimum is also its default opening
 size.** These are the measured "smallest still readable" figures for each page,
 so a window that refuses to shrink further is behaving correctly. The one
-exception is a hosted VST3 plugin's own surface, which scales - those windows are
-given a lower floor so the scaling can work in both directions.
+exception is a window hosting a third-party VST3 plugin. Nothing scales a
+plugin's own interface, so once the plugin has reported its size those windows
+drop to the bare 120 x 80 grab minimum and are free to be smaller than the
+plugin they contain. A window smaller than its plugin clips it - there are no
+scrollbars, and the plugin's own magnify control is what makes it fit.
 
 ### Effect windows and their visual windows (the tether)
 
@@ -267,7 +317,8 @@ Ordering that matters:
 
 * **Mixer.md**, **Transport and Playback.md** - the two surfaces that sit in and
   above the workspace respectively.
-* **Keyboard Shortcuts.md** - F5 through F12 select and front page windows.
+* **Keyboard Shortcuts.md** - F1 opens the manuals window; F5 through F12 select
+  and front page windows.
 * **Effect Racks.md** - the Effects page, the rack and the per-effect visuals;
   the tether described here is the geometry half of that relationship.
 * The ribbon tab bar (`Source/Standalone/RibbonTabBar.h`) owns tab creation,

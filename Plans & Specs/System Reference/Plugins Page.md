@@ -27,7 +27,7 @@ Only VST3 is supported, deliberately. VST2 hosting needs SDK headers that cannot
 
 **MIDI reaches it through the live-MIDI route.** A hosted plugin has no `auditionNote`; selecting its roll in the Piano Roll page makes it the live MIDI target (target kind 10). Do not add a second MIDI path for it.
 
-**The bridge (out-of-process hosting).** `Hosting::SandboxedPluginClient` launches one architecture-matched helper process per bridged plugin - `BaySickPluginHost64.exe` or `BaySickPluginHost32.exe`. A 64-bit process physically cannot load a 32-bit DLL, so **32-bit plugins are always bridged** (`isBridgeForced()`); 64-bit plugins run in-process by default. The audio thread never blocks on the helper: `processBlock` writes the block into shared memory, signals an event and waits with a hard deadline; a helper that misses it yields silence for that block. A bridged plugin's editor lives in the helper, so the host supplies a native child window for the helper to reparent the plugin's UI into.
+**The bridge (out-of-process hosting).** `Hosting::SandboxedPluginClient` launches one architecture-matched helper process per bridged plugin - `BaySickPluginHost64.exe` or `BaySickPluginHost32.exe`. The same two executables also carry the plugin SCAN: `Hosting::BridgedPluginScanner` is installed on the scan's `KnownPluginList`, so every file is loaded in a throwaway helper (`Source/Hosting/OutOfProcessScanner.h`) rather than in this process. Scanning is 64-bit-helper-only in practice, because 32-bit candidates are diverted before the load pass. A 64-bit process physically cannot load a 32-bit DLL, so **32-bit plugins are always bridged** (`isBridgeForced()`); 64-bit plugins run in-process by default. The audio thread never blocks on the helper: `processBlock` writes the block into shared memory, signals an event and waits with a hard deadline; a helper that misses it yields silence for that block. A bridged plugin's editor lives in the helper, so the host supplies a native child window for the helper to reparent the plugin's UI into.
 
 The **"Run bridged (separate process)" toggle exists only on the FX-rack slot window**, not on a Plugins tab. That is an accident of which window grew which menu, and it means a 64-bit tab instance is pinned in-process and a 32-bit one is bridged from birth.
 
@@ -46,6 +46,28 @@ Plugins do not appear anywhere until you tell the app about them. **Options > Pl
 1. **Scan folders** - the folders that get searched, seeded with the standard VST3 install locations, plus a button that opens a folder picker to add more.
 2. **Added** - the plugins you have chosen to use. **This is the list every other surface reads** - the "+" menu, the tab dropdown and the effects rack picker.
 3. **Scan results** - blank until you press Scan. Afterwards it lists everything found that is not already added, each with a checkbox, and an Add button that moves the checked ones into section 2. It also lists what the scan **could not** use with the reason, so "my plugin isn't in the list" always has an answer ("Skipped: VST2 is not supported" being the common one).
+### When a plugin crashes the scan
+
+Scanning a plugin means **loading** it, so a broken plugin can take down whatever process does the loading. That process is no longer BaySickDAW: every VST3 candidate is handed to a fresh helper process, `BaySickPluginHost64.exe`, staged next to `BaySickDAW.exe`. One helper per file, and a plugin that dies takes only its own helper with it - the scan keeps running, the progress bar keeps moving, and no dialog appears. The one exception is a broken install: if the helper is missing or will not start, the app falls back to loading the plugin itself.
+
+What you get instead is a dimmed, checkbox-less row in **Scan results** with the reason in the "File / reason skipped" column:
+
+| Reason text | What it means |
+|---|---|
+| `Skipped: failed to load` | The helper died scanning this file, hung past the 30-second scan timeout, or loaded the plugin and reported no plugin types. **This is what a scan crash looks like.** |
+| `Skipped: crashed during a previous scan` | This path was already listed in the crash file when the scan started, so it was skipped without being loaded at all. |
+| `Skipped: VST2 is not supported` | A `.dll` turned up in a scan folder. |
+
+**The crash file is `Documents\BaySickDAW\plugins_scan_crashes.txt`** - the app root, beside `settings.xml` and `audio_settings.xml`, **not** the folder `BaySickDAW.exe` runs from. It is JUCE's dead-man's-pedal file and it is written as **UTF-16LE with a byte-order mark and CRLF line endings**, so a plain text editor opens it fine but anything expecting plain ASCII may not.
+
+**It records a BaySickDAW crash, not a plugin crash.** A file's full path is written into it immediately before that file is scanned and taken out again the moment the scan of that file returns - and with the load happening in a helper it always returns, even when the helper is killed. A line therefore only survives if **BaySickDAW itself** went down mid-scan, which now needs that missing-helper fallback, because it is the only case where the app loads a plugin in its own process.
+
+**It clears itself, so there is no "delete a line to retry" step.** If a line does survive, the next scan blacklists that path for that run only, reports it as `Skipped: crashed during a previous scan`, and deletes the line as it walks past the file. The scan after that finds no entry for that plugin and tries it for real. One crash costs exactly one skipped scan and then recovers on its own. Nothing in the app clears the list by hand, and in this path nothing needs to.
+
+**The one case that needs you is a stranded line.** Clearing only happens when a scan actually walks past that file, which means the file has to still be inside one of your scan folders. Remove the folder or move the plugin and there is nothing left to clear the line: the path is blacklisted on every scan from then on and shows `Skipped: crashed during a previous scan` for good. Fix it by putting the folder back and scanning twice - the first scan clears the line, the second finds the plugin - or by closing BaySickDAW and deleting `plugins_scan_crashes.txt`.
+
+A 32-bit VST3 is never part of any of this. It is sorted out by architecture before the load pass and enters the results from its filename alone, so it is never handed to a scan helper and can neither crash a scan nor be blacklisted by one. `BaySickPluginHost32.exe` exists for *running* a bridged 32-bit plugin, not for scanning one.
+
 
 ### Making a Plugins tab
 
@@ -62,11 +84,11 @@ The Plugins ribbon slot is purple, carries the usual tab-count badge and frozen 
 
 The window is a **"Select plugin..." button** and, underneath it, the plugin's own interface. Once a plugin is loaded the button turns into a plain, disabled label showing the plugin's name - **one plugin per tab, for the tab's life.** To use a different plugin, delete the tab and add another. (That is deliberate: swapping the engine under a loaded tab would destroy a live hosted instance under the audio thread for no benefit.)
 
-The window **fits itself to the plugin's own surface** and follows the plugin if it resizes itself. Dragging the window's edge behaves in one of three ways:
+The window **fits itself to the plugin's own surface** and follows the plugin if it resizes itself. **BaySickDAW never scales a hosted plugin's interface.** The plugin's own magnify / zoom control is the only thing that changes how big its UI draws; all the window does is wrap that surface, clamped to the workspace. Dragging the window's edge behaves in one of three ways:
 
-- **Resizable plugin, in-process** - the resize is pushed through the plugin's own resize path and the plugin decides what it accepts.
-- **Fixed-size plugin, in-process** - the plugin snaps any size change back, so the app scales the picture instead. Aspect is preserved and centered, so you get letterbox bars rather than a stretched or clipped interface. It refuses to shrink below half size rather than render something unreadable.
-- **Bridged plugin** - cannot be scaled at all (its surface is another process's window). It is centered at its natural size and clipped to the frame.
+- **Resizable plugin, in-process** - the new frame size is pushed through the plugin's own resize path and the plugin decides what it accepts. A plugin with its own minimum simply stops shrinking, and the window then re-fits to whatever size the plugin settled on.
+- **Fixed-size plugin, in-process** - the plugin snaps any size change back, so it keeps its declared size whatever you do to the window. Make the window bigger and the plugin sits centered with a flat dark gray surround; make it smaller and the plugin anchors to the top-left and the overflow is clipped at the window edge. There are no scrollbars - the plugin's own magnify control is what makes it fit.
+- **Bridged plugin** - the host cannot resize it at all. Its surface is another process's window and the size is sent to the helper once, when the editor opens. It is centered at its natural size while it fits, and clipped to the frame when it does not.
 
 If no plugin is loaded the page reads **"No plugin loaded"**.
 
@@ -120,7 +142,7 @@ A save made while the plugin is **not** alive still writes your settings: the in
 
 **Saved with a page preset** (`Documents/BaySickDAW/Presets/Plugin Page/My Presets/*.xml`): the plugin identifier as the engine type, the plugin's state, every `mixer_plugin_<n>` parameter, the insert rack and the EQs. The default filename offered is the plugin's name with any "(missing)" marker stripped, because that becomes a filename on disk.
 
-**Per-machine, not per-project:** the scan folders, the added-plugins list and the per-plugin bridge preference all live in the plugin manager's own data file, not in a project.
+**Per-machine, not per-project:** the scan folders and the added-plugins list live in `Documents\BaySickDAW\plugins.xml`, not in a project, and the scan-crash blacklist sits beside it as `plugins_scan_crashes.txt`. The per-plugin **bridge preference is not** per-machine - it is written into the hosted instance's own state blob, so on a Plugins tab it rides `engineData` (see above) and in an FX-rack slot it rides the rack state. Either way it travels with the project.
 
 **Not saved:** the "(missing)" marker, the dirty baseline behind the delete prompt, and the discovered parameter list (rebuilt on every load; bridged lists arrive asynchronously after load).
 
@@ -145,7 +167,7 @@ The revival path (`EngineRig::retryDeadPluginTab`) is the most order-sensitive f
 ## Cross-references
 
 - **Engine Tabs (Layers, Bass, Drums).md**, **Clips Page.md**, **Inst Page.md** - the other "+"-menu tab families.
-- **Effect Racks.md** - VST3 **effects** in rack slots are the other consumer of the same hosting layer (`HostedPluginEffect`), and the rack slot window is where the "Run bridged" toggle lives.
+- **Effect Racks.md** - VST3 **effects** in rack slots are the other consumer of the same hosting layer (`HostedPluginEffect`), the rack slot window is where the "Run bridged" toggle lives, and a rack-slot plugin that declares a side-chain input gets the same `SC:` source picker every built-in sidechain effect gets (a bridged one does not).
 - **Automation.md** (lanes for plugin parameters), **Mixer.md**, **Freeze and Export.md**.
 
 ---

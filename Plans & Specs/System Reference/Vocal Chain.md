@@ -158,7 +158,7 @@ parameters to the DSP every audio block - so on a Vox chain a Detect move does n
 hold. Set Frequency and Q directly in the Advanced view instead.
 
 **Slot 3 - Compressor.** Evens out loud and quiet parts. **Mode** offers Modern,
-FET (Punchy), Opto (Smooth) and CS Style (Sustain); Modern is the default and is
+FET (Punchy), Opto (Smooth) and Pedal (Sustain); Modern is the default and is
 the one whose panel is wired to this chain's parameters.
 
 Modern panel controls: Threshold (-60 to 0 dB, default -12), Ratio (0.4-30,
@@ -168,12 +168,16 @@ default 4), Knee (0-18 dB, default 6), Makeup (-30 to +30 dB, default 0), Attack
 HPF (20-2000 Hz, default 20), plus Auto Makeup (off), Stereo Link (on), Peak
 Detection (off) and a Knee Type selector (0-7, default 1).
 
-Caveat, verified in code: the FET, Opto and CS Style panels write straight to the
+Caveat, verified in code: the FET, Opto and Pedal panels write straight to the
 DSP and are not bound to this chain's `bsv_comp_*` parameters, which the engine
 re-applies every audio block. On a Vox chain their knob moves are therefore
-overwritten. CS Style is worse: the chain's `bsv_comp_type` parameter only spans
-Modern / FET / Opto, so picking CS Style mounts the CS panel while the engine
-pushes the compressor back to Opto. Modern is the mode to use on a vocal chain.
+overwritten. Modern is the mode to use on a vocal chain.
+
+**Fixed 2026-08-11 (QA-Manuals MF-9):** picking Pedal used to mount the Pedal
+panel while the engine pushed the compressor straight back to Opto, because
+`bsv_comp_type` spanned Modern / FET / Opto only and the fourth value clamped to
+the top of that range. The parameter now spans all four, so the mode you pick is
+the mode that plays.
 
 **Slot 4 - Saturation.** Adds warmth and body. **Mode** offers Tube, Console and
 Tape; **Console** is the default here. The Console panel's Basic view is Drive

@@ -900,12 +900,17 @@ void HostedPluginEditor::remoteEditorSized (int w, int h)
     if (mOwnerGone || mRemoteHost == nullptr || w <= 0 || h <= 0)
         return;
 
-    // SECURITY (QA-Cleanup 2026-08-10): this number comes from the HELPER, and
-    // it does not stop at the window -- onNaturalSizeChanged feeds
-    // setResizeFloor, which PERSISTS as a minimum and deliberately overrides
-    // the workspace clamp.  So an absurd report survives the first (clamped,
-    // harmless-looking) resize and wins on the next one.  8K a side is past any
-    // real plugin editor.
+    // SECURITY (QA-Cleanup 2026-08-10): this number comes from the HELPER, so
+    // it is not ours to trust -- it sizes a component and drives a window fit.
+    // 8K a side is past any real plugin editor.
+    //
+    // The original rationale here said the number "does not stop at the window"
+    // because onNaturalSizeChanged feeds setResizeFloor as a PERSISTING minimum
+    // that overrides the workspace clamp.  That mechanism no longer exists
+    // (QA-Manuals 2026-08-11): both setResizeFloor call sites now pass (0, 0)
+    // deliberately, so an oversized report is clamped by the workspace and does
+    // not survive.  The clamp below stays regardless - a helper-supplied number
+    // should never reach a layout unbounded.
     constexpr int kMaxEditorEdge = 8192;
     w = juce::jmin (w, kMaxEditorEdge);
     h = juce::jmin (h, kMaxEditorEdge);

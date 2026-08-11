@@ -141,7 +141,7 @@ folder.
 | Tail | Included / Cut | Included | "Included" keeps rendering past the last note until the sound has actually decayed, so a long reverb is not chopped. "Cut" stops dead at the end. |
 | Format | WAV / OGG / MP3 | WAV | |
 | Quality | WAV: 16-bit / 24-bit / 32-bit float. OGG: Low / Medium / High / Highest. MP3: 128 / 192 / 256 / 320 kbps | 24-bit for WAV, High for OGG, 256 kbps for MP3 | One control, read three ways. |
-| Sample rate | 44100 Hz / 48000 Hz | 44100 Hz | |
+| Sample rate | 44100 / 48000 / 88200 / 96000 / 176400 / 192000 Hz | 44100 Hz | With Format set to MP3 the four rates above 48000 Hz are disabled - MPEG Layer III cannot encode them - and a rate already above 48000 Hz drops back to 48000 Hz. |
 | Dither | Off / Flat (TPDF) / Noise-Shaped | Off | Applies to 16-bit WAV exports. Flat is the safe default; Noise-Shaped moves the same noise out of the ear's most sensitive range. |
 | Normalize to `___` LUFS | checkbox + typed value | off, -14.0 | Measures the render first, then re-renders with a gain applied so it lands on your number. Works in both directions, and any boost is capped so the true peak stays under -1 dBTP. |
 | Export stems (one file per mixer strip) | checkbox + a checklist | off | Each checked strip gets its own file beside the main one, tapped during the **same** render pass - so sends stay separate and sidechain behavior (a bass compressor keyed by the kick) is in the stem by construction. |
@@ -235,7 +235,8 @@ remembered between openings.
 - *Project Bundles* - why the freeze cache is excluded from bundles.
 - *Automation* - offline lane replay, which is what makes an export match what
   you heard.
-- *Undo History* - freezing is not an undoable edit.
+- *Undo History* - freezing is not an undoable edit.- *Master Analyzer* - the window a Measure result opens itself into, and where a
+  saved report reopens.
 
 ## Differs from Carry-Forward
 

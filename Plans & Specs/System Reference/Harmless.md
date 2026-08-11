@@ -43,7 +43,9 @@ velocity x blend, sub oscillator added, filter 1, filter 2 (each with its own en
 keyboard tracking and cutoff offset), tremolo, amp envelope (scaled by the routing
 matrix's ENV control), per-note pan, stereo out. After the synthesiser returns,
 `HarmlessSynth` applies the output phaser, the tilt EQ, and the routing matrix's output
-gain and saturation. The processor then replaces any non-finite sample with zero.
+gain and saturation. The processor then applies a fixed -6 dB calibration trim
+(`kOutputHeadroom` in `HarmlessProcessor.cpp`) and replaces any non-finite sample with
+zero.
 
 **Audio-thread care.** `updateFromApvts` is gated by an `ApvtsDirtyTracker` so the ~100
 parameter reads only happen on blocks where something changed, and it assembles parameter
@@ -166,7 +168,10 @@ an additive sound than closing a filter afterwards. At 20 kHz nothing is masked.
 
 ### OUTPUT
 
-**VOL** (0 to 1, default 0.8) - the engine's master level, before the mixer strip.
+**VOL** (0 to 1, default 0.8) - the engine's master level, before the mixer strip. After it,
+the engine's output stage applies a fixed -6 dB calibration trim that is not exposed as a
+control. BaySickSynth and BaySickBass carry a 12 dB trim of the same kind, so all three
+synth engines arrive at the mixer already staged down, with room left for chords.
 **PAN** (-1 to +1, default center) - stereo position; the knob draws from the center out.
 
 **VEL** (toggle, default off). Velocity always scales Part A. With VEL **on**, velocity
@@ -234,16 +239,20 @@ each one does a specific job.
 |---|---|---|---|
 | SUB | 0 - 1 | 0 | Adds an extra sine one octave below every note. Instant weight underneath the sound. |
 | PROT | 0 - 1 | 0 | Rolls off the highest harmonics before the wavetable is built. Raise it if very high notes sound gritty or aliased. |
-| CLIP | 0 - 1 | 0 | Output saturation. Gently rounds the peaks; at high settings it audibly distorts. |
+| CLIP | 0 - 1 | 0 | Output saturation. Quiet material passes at the same level whatever this is set to; what raising it does is lower the ceiling the loudest peaks can reach, so it rounds them and then audibly distorts them. At the top of the travel that ceiling is about a sixth of full scale, so a hot patch gets noticeably squashed. |
 | FX | 0 - 1 | 1 | A master amount for the spectral modules (Prism, Pluck, Blur and friends). At 0 they are bypassed; at 1 they act at their knob settings. |
-| VOL | 0 - 1 | 1 | Output gain trim. **Behaves unusually:** at exactly 1.0 the trim stage is skipped entirely and the signal passes at unity. At any other value the gain applied is the knob value times 1.5 - so 0.667 is also unity, below that gets quieter down to silence at 0, and just under 1.0 is about 3.5 dB **louder** than 1.0. Expect a jump if you nudge it down from the top. |
+| VOL | 0 - 1 | 1 | Output gain trim inside the routing matrix, before the engine output stage. This is NOT the OUTPUT section VOL knob. It only ever cuts - full (the default) is unity and nothing above it exists. The taper runs smoothly downhill the whole way: roughly -1.5 dB at three quarters, -4 dB at half, -9 dB at a quarter, silence at 0. Moves are ramped over 5 ms, so dragging it does not click. |
 | ENV | 0 - 1 | 1 | How much the amp envelope shapes the note. At 1 the envelope is fully in charge; at 0 the note plays at a constant level (the envelope still decides when the voice is alive, it just stops changing the volume). |
 
 ### UNISON
 
 Stacks detuned copies of the note inside a single voice.
 
-- **VOICES** (1 to 9, default 1). 1 means unison is off.
+- **VOICES** (1 to 9, default 1). 1 means unison is off. The stack is normalized by the
+  square root of the count, so raising it thickens the sound without the level dropping
+  away underneath you. With PHASE at its default of 0 the copies all start together, so
+  the attack of a big stack can hit harder than a single voice even though the sustained
+  level holds steady.
 - **TYPE** (a four-position selector, default Pure). **Pure** spreads the copies evenly
   from flat to sharp. **Random** gives each copy a random offset. **Drifting** is Pure with
   an extra static per-slot wander, which sounds more alive. **Alt-only** alternates the

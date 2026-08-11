@@ -36,6 +36,14 @@ public:
     enum class Presentation { Inline, PanelOnly };
     void setPresentation (Presentation p);
 
+    // The bed a PanelOnly editor is inset by on every side.  MF-8's sibling
+    // (QA-Manuals 2026-08-11): EffectSlotWindow sizes its window to the hosted
+    // plugin's exact declared size, but resized() then hands the editor
+    // getLocalBounds().reduced (kPanelOnlyInset) -- so the plugin was getting
+    // 2*kPanelOnlyInset LESS than it asked for on each axis.  Both sites read
+    // this constant now; a literal in one of them is how they drifted apart.
+    static constexpr int kPanelOnlyInset = 2;
+
     explicit SlotComponent(int slotIndex);
     ~SlotComponent() override;
 

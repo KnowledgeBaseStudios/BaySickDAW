@@ -20,7 +20,7 @@ logic as its BaySickSynth twin; only the parameter prefix and the factory defaul
 | Layer | Files | Job |
 |---|---|---|
 | Processor | `Source/BaySickBass/BaySickBassProcessor.h` / `.cpp` | Owns the APVTS, reads it once per block, pushes changed values into the DSP, injects audition notes, applies the master out gain, scrubs NaN/Inf. |
-| Voice manager | `Source/BaySickSynth/BaySickSynthDSP.h` / `.cpp` | 16 voices in a `BroadcastSynthesiser`; rewrites MIDI for Mono / Lead / Legato and Cut Self. |
+| Voice manager | `Source/BaySickSynth/BaySickSynthDSP.h` / `.cpp` | 16 voices in a `BroadcastSynthesiser`; rewrites MIDI for Mono / Legato and Cut Self. |
 | Voice | `Source/BaySickSynth/BaySickSynthVoice.h` / `.cpp` | All per-note DSP. |
 | Editor | `Source/BaySickBass/BaySickBassEditor.h` / `.cpp` | The panel. A parallel copy of `BaySickSynthEditor` with the bass color set (`BaySickBassLAF.h`, accent `#33FF88`). |
 | Display | `Source/BaySickBass/BaySickBassVisualizerScreen.h` | A one-line subclass of `BaySickVisualizerScreen` that swaps in the bass green. |
@@ -32,7 +32,8 @@ Shared helper components come from `Source/BaySickSynth/BssEditorComponents.h` -
 LFO + pitch envelope + drift), filter cutoff (base times keyboard tracking, velocity
 tracking, filter envelope, LFO, mod wheel, per-note CC74), oscillator, noise, filter, amp
 envelope times velocity, burst multiplier, declick, transient click, unison stack,
-per-note pan, stereo out. Then the processor applies **Out Vol** and replaces any
+per-note pan, stereo out. Then the processor applies **Out Vol**, applies a fixed -12 dB
+calibration trim (`kOutputHeadroom` in `BaySickBassProcessor.cpp`), and replaces any
 non-finite sample with zero.
 
 **Threading.** `processBlock` is on the audio thread and the ~50 parameter reads are gated
@@ -149,17 +150,16 @@ above.
 **NOISE** (knob, 0 to 1, default 0). Mixes hiss on top of the oscillator. Small amounts
 add grit and attack noise to a bass.
 
-**VOICE MODE** (four buttons: Poly / Mono / Lead / Legato, default **Mono**).
+**VOICE MODE** (three buttons: Poly / Mono / Legato, default **Mono**).
 
 | Mode | Behavior |
 |---|---|
 | Poly | Full chords, up to 16 notes at once. |
 | Mono | One note at a time. Each new note cuts the previous one and restarts the envelopes. This is the default. |
-| Lead | Identical to Mono in the current build. The two settings run the same code path; the value is stored but nothing downstream reads it. |
 | Legato | One note at a time, but overlapping notes **slide** into each other without restarting the envelopes. With the default SLIDE of 0.08 s this is the classic sliding bass line. |
 
 **CUT SELF** (toggle, default off) and its mode button (**SAME PITCH** / **CUT ALL**,
-default Same Pitch). Poly mode only - Mono, Lead and Legato already cut. Same Pitch cuts
+default Same Pitch). Poly mode only - Mono and Legato already cut. Same Pitch cuts
 a still-ringing copy of the same note on retrigger; Cut All cuts every ringing voice on
 each new note. The cut is an instant, click-free fade, not a note-off, so there is no
 tail.
@@ -169,6 +169,10 @@ place from the previous note instead of jumping - but only while the previous no
 still held.
 
 **OUT VOL** (knob, 0 to 1, default 0.8). The engine's output level before the mixer strip.
+On top of this knob the output stage applies a fixed -12 dB calibration trim that is not
+exposed as a control. The oscillators run at full scale, so the trim is what leaves room
+for more than one note at a time. BaySickBass is deliberately quiet on its own - it is
+meant to be brought up by what comes after it rather than by pinning OUT VOL to the top.
 
 **MOD WHEEL** group. Two buttons pick the destination - **Filter** (default) or **LFO** -
 and **AMOUNT** (knob, 0 to 1, default 0) sets the depth. Routed to Filter, a fully raised
@@ -310,7 +314,7 @@ and the defaults differ.
 | `noise` | float | 0 - 1 | 0 |
 | `noiseOnly` | bool | - | off |
 | `noiseColor` | choice | White, Pink, Brown | White |
-| `voiceMode` | choice | Poly, Mono, Lead, Legato | **Mono** |
+| `voiceMode` | choice | Poly, Mono, Legato | **Mono** |
 | `glide` | float | 0 - 2 s | **0.08** |
 | `cutSelf` | bool | - | off |
 | `cutSelfMode` | bool | false = Same Pitch, true = Cut All | Same Pitch |
