@@ -1,4 +1,5 @@
 #include "InstPage.h"
+#include "SafeXml.h"   // XXE + depth-guarded XML parse (QA-Cleanup)
 #include "../BaySickNAMIR/BaySickNAMIRProcessor.h"
 #include "../BaySickNAMIR/BaySickNAMIREditor.h"   // QA-ApvtsAutomation: setAutomationPrefix
 #include "../BaySickPedals/BaySickPedalsProcessor.h"
@@ -465,7 +466,7 @@ void InstPage::loadPagePreset (const juce::File& xml)
     if (mSource == Source::BaySickGuitars
         || mSource == Source::BaySickBasses)
     {
-        if (auto parsed = juce::XmlDocument::parse (xmlText))
+        if (auto parsed = SafeXml::parse (xmlText))
         {
             const auto rootTag = parsed->getTagName();
             const bool acceptedRoot = rootTag == "BaySickPagePreset"
@@ -505,7 +506,7 @@ void InstPage::loadPagePreset (const juce::File& xml)
                                       ? juce::String ("BaySickGuitarsState")
                                       : juce::String ("BaySickBassesState"));
 
-                        if (auto stateXml = juce::AudioProcessor::getXmlFromBinary (
+                        if (auto stateXml = SafeXml::parseBinaryBlob (
                                 mb.getData(), (int) mb.getSize()))
                         {
                             if (engineRootTag.isEmpty()
@@ -1250,7 +1251,7 @@ juce::String InstPage::exportInstState() const
 void InstPage::importInstState (const juce::String& xml)
 {
     if (xml.isEmpty()) return;
-    auto parsed = juce::XmlDocument::parse (xml);
+    auto parsed = SafeXml::parse (xml);
     if (! parsed || ! parsed->hasTagName ("InstPageState")) return;
 
     if (auto* namIrEl = parsed->getChildByName ("NamIrState"))

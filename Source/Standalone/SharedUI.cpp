@@ -1,4 +1,5 @@
 #include "SharedUI.h"
+#include "SafeXml.h"   // XXE + depth-guarded XML parse (QA-Cleanup)
 #include "UndoBracket.h"
 #include "../ProjectManager.h"   // QA-RustyMeter Task 3: getSettingsFile (LUFS mode persistence)
 #include "WindowChrome.h"        // TS7 §9.1: shared title-strip look
@@ -6258,7 +6259,7 @@ LufsReadoutBox::LufsReadoutBox()
     // Load the persisted mode from settings.xml (preserve other sections).
     auto f = ProjectManager::getSettingsFile();
     if (f.existsAsFile())
-        if (auto xml = juce::XmlDocument::parse (f))
+        if (auto xml = SafeXml::parse (f))
             if (auto* node = xml->getChildByName ("MasterLufsMode"))
                 mMode = juce::jlimit (0, 2, node->getIntAttribute ("mode", 0));
     refreshTooltip();
@@ -6295,7 +6296,7 @@ void LufsReadoutBox::applyMode (int mode, bool persist)
         f.getParentDirectory().createDirectory();
         std::unique_ptr<juce::XmlElement> root;
         if (f.existsAsFile())
-            root = juce::XmlDocument::parse (f);
+            root = SafeXml::parse (f);
         if (root == nullptr)
             root = std::make_unique<juce::XmlElement> ("BaySickDAWSettings");
         root->removeChildElement (root->getChildByName ("MasterLufsMode"), true);

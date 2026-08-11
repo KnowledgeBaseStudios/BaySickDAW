@@ -20,7 +20,11 @@
 class BrowserItem : public juce::Component
 {
 public:
-    enum class Kind { Pattern, Audio, Automation };
+    // Audio is NOT a member: since QA-E Task 4's library-driven browser, audio
+    // rows are AudioBrowserItem (its own class, its own tree path), and no
+    // BrowserItem was ever constructed with an Audio kind again.  The dead
+    // enumerator and its five unreachable branches went at QA-Cleanup.
+    enum class Kind { Pattern, Automation };
 
     BrowserItem(Kind k, int index, const juce::String& displayName);
 

@@ -63,6 +63,12 @@ public:
                         const juce::MouseWheelDetails&)                     override;
 
     void setRowMetrics    (int rulerH, int rowH);
+    // Vertical scroll offset in PIXELS.  The kit auto-fits its 16 rows into the
+    // available height, but rowH has a floor (DrumKitGrid::kMinRowH), so a Piano
+    // Roll window shorter than kRulerH + 16 * kMinRowH cannot show them all.
+    // The container then exposes a vertical scrollbar and drives this offset.
+    void setRowYOffset    (int off);
+    int  rowsContentHeight() const { return kNumRows * mRowH; }
     void refresh();
 
     void setApvts          (juce::AudioProcessorValueTreeState* a);
@@ -86,8 +92,28 @@ public:
     int rowFromY (int y) const;
 
 private:
+    // Rows live in this child so JUCE clips them: the pickers / M / S are real
+    // components, and without a clipping parent a scrolled row would paint over
+    // the ruler band and the Lock button that sits in it.  It does not intercept
+    // mouse clicks itself (its children still do), so the sidebar keeps owning
+    // drag-reorder and audition hit-testing in its own coordinate space.
+    class RowsHolder : public juce::Component
+    {
+    public:
+        explicit RowsHolder (DrumKitSidebar& o) : owner (o)
+        {
+            setInterceptsMouseClicks (false, true);
+        }
+        void paint (juce::Graphics&) override;
+    private:
+        DrumKitSidebar& owner;
+    };
+
+    std::unique_ptr<RowsHolder> mRowsHolder;
+
     int mRulerH { 14 };
     int mRowH   { 24 };
+    int mRowOff { 0 };   // pixels scrolled off the top; 0 when everything fits
 
     juce::AudioProcessorValueTreeState* mApvts { nullptr };
     std::function<std::vector<DrumKitRowInfo>()>     mProvider;
@@ -233,6 +259,12 @@ public:
     static constexpr int kMinRowH     = 18;
     static constexpr int kMaxRowH     = 60;
     static constexpr int kKitMidiNote = 60;
+
+    // Bare-wheel vertical scroll, in ROWS.  Returns TRUE if it consumed the
+    // wheel; the grid only falls back to horizontal scroll when it did not, so
+    // the bare wheel never drives both axes at once.  At full height nothing
+    // overflows, it returns false, and the wheel behaves as it always has.
+    std::function<bool(int)> onVScroll;
 
     void setRowYOffset(int yOff)                  { mRowYOffset = yOff; repaint(); }
 
@@ -519,6 +551,16 @@ private:
     std::unique_ptr<juce::Label>         mContextLabel;
 
     std::unique_ptr<juce::ScrollBar>     mHScroll;
+    // Vertical scrollbar + offset.  Both are inert at full height: the kit
+    // auto-fits 16 rows and only overflows once the window is dragged below
+    // kRulerH + 16 * DrumKitGrid::kMinRowH.
+    std::unique_ptr<juce::ScrollBar>     mVScroll;
+    int  mRowOff { 0 };
+    // resized() ends in syncScrollState(), and syncScrollState() re-runs
+    // resized() when the bar appears or disappears (it changes the grid's
+    // width).  Without this the two call each other.
+    bool mInVBarRelayout { false };
+    bool rowsOverflow() const;
     bool mPushingToBars { false };
     void scrollBarMoved(juce::ScrollBar* sb, double newRangeStart) override;
 

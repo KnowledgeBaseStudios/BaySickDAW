@@ -1,10 +1,12 @@
 #include "BaySickPlayerDSP.h"
+#include "SafeAudioReader.h"   // channel/frame sanity gate (QA-Cleanup)
 #include "../MissingFileReport.h"
 #include <cmath>
 #include <cctype>
 #include <algorithm>
 #include <limits>
 #include <string>    // std::stoi, std::string
+#include "SafeAudioFormats.h"   // MP3 decode via vendored LAME (QA-Cleanup)
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  BaySickSampleManager
@@ -12,7 +14,7 @@
 
 BaySickSampleManager::BaySickSampleManager()
 {
-    mFormatManager.registerBasicFormats(); // WAV, AIFF, OGG
+    SafeAudioFormats::registerAll (mFormatManager); // WAV, AIFF, OGG
     std::memset (mRRCounters, 0, sizeof (mRRCounters));
 }
 
@@ -357,12 +359,19 @@ void BaySickSampleManager::parseSFZ (const juce::File& sfzFile)
             if (v.isNotEmpty()) t->swLast = sfzNote (v);
         }
         {
+            // SECURITY (QA-Cleanup 2026-08-10): clamped AT PARSE, not at each
+            // use.  sfzNote returns a bare getIntValue() and noteNameToMidi
+            // computes 12 * (octave + 1) + semitone with an unbounded octave,
+            // so an SFZ from anywhere could put any int here.  swDown / swUp
+            // index mSwDownHeld, a std::array<bool, 128>.  Six other sites in
+            // this file clamped their own copy and two did not; clamping once
+            // at the source is what makes that class of miss impossible.
             auto v = sfzOpcode (line, "sw_down");
-            if (v.isNotEmpty()) t->swDown = sfzNote (v);
+            if (v.isNotEmpty()) t->swDown = juce::jlimit (0, 127, sfzNote (v));
         }
         {
             auto v = sfzOpcode (line, "sw_up");
-            if (v.isNotEmpty()) t->swUp = sfzNote (v);
+            if (v.isNotEmpty()) t->swUp = juce::jlimit (0, 127, sfzNote (v));
         }
         {
             auto v = sfzOpcode (line, "sw_default");
@@ -570,13 +579,35 @@ BaySickSampleManager::loadFile (const juce::File& f,
                               juce::AudioFormatManager& fmt,
                               double& sampleRateOut)
 {
-    std::unique_ptr<juce::AudioFormatReader> reader (fmt.createReaderFor (f));
+    auto reader = SafeAudioReader::guard (
+        std::unique_ptr<juce::AudioFormatReader> (fmt.createReaderFor (f)));
     if (!reader) return nullptr;
 
     sampleRateOut = reader->sampleRate;
-    const int numCh  = juce::jmin (2, (int) reader->numChannels);
-    const auto maxSmp = (juce::int64) (reader->sampleRate * 60.0);  // cap at 60 seconds
-    const int numSmp = (int) juce::jmin (reader->lengthInSamples, maxSmp);
+    const int numCh  = juce::jlimit (1, 2, (int) reader->numChannels);
+
+    // SECURITY (QA-Cleanup 2026-08-10): the old cap was
+    // (int64) (reader->sampleRate * 60.0) -- derived from the sample rate the
+    // FILE declares, so a header claiming a huge rate defeated the very bound
+    // it was supposed to impose, and the (int) cast then truncated whatever
+    // survived.  A ~60-byte WAV could ask for gigabytes.  Bound against a real
+    // sample count instead, and keep the arithmetic in 64-bit until it is known
+    // to fit.  Mirrors the correct pattern at PluginProcessor.cpp:5703-5718.
+    // 60 SECONDS, as this has always been - not a fixed sample count.  A flat
+    // 192000 * 60 ceiling is a correct security bound but it quietly became
+    // 261 seconds at 44.1 kHz, tripling the memory a single sample can take
+    // (~92 MB instead of ~21 MB), per region, across a whole SFZ.  Clamp the
+    // file's claimed rate first so the DURATION is honest and the ceiling still
+    // cannot be inflated by the header.
+    constexpr juce::int64 kAbsoluteMaxSamples = 192000LL * 60LL;
+    const double safeRate = juce::jlimit (8000.0, 192000.0, reader->sampleRate);
+    const juce::int64 maxSmp = juce::jmin (kAbsoluteMaxSamples,
+                                           (juce::int64) (safeRate * 60.0));
+
+    const juce::int64 declared = reader->lengthInSamples;
+    if (declared <= 0) return nullptr;
+
+    const int numSmp = (int) juce::jmin (declared, maxSmp);
 
     auto buf = std::make_shared<juce::AudioBuffer<float>> (numCh, numSmp);
     reader->read (buf.get(), 0, numSmp, 0, true, numCh > 1);
@@ -633,21 +664,29 @@ const BaySickPlayerRegion* BaySickSampleManager::findRegion (int midiNote, int v
 
     if (numCandidates == 0) return nullptr;
 
-    // Check if regions have round-robin markers
-    bool hasRR = false;
+    // ONE scan answers both questions: is there round-robin here, and what is
+    // its total.  This used to be two passes over the same candidate array - a
+    // bool "any RR?" scan followed by a second scan for the value.
+    //
+    // SECURITY (QA-Cleanup 2026-08-10): the total must come from the region that
+    // DECLARES it, never from candidates[0].  Two regions on the same
+    // key/velocity/group where only the SECOND carries seq_length used to reach
+    // the modulo below with a total of 0, and a crafted or merely sloppy SFZ then
+    // divided by zero on the audio thread.  Reading the value in the same pass
+    // that detects it makes the zero case unrepresentable instead of guarded.
+    int rrTotal = 0;
     for (int j = 0; j < numCandidates; ++j)
-        if (mRegions[candidates[j]].roundRobinTotal > 0) { hasRR = true; break; }
+        if (const int t = mRegions[candidates[j]].roundRobinTotal; t > 0)
+        { rrTotal = t; break; }
 
-    if (!hasRR)
-        return &mRegions[candidates[0]]; // single region or no RR
+    if (rrTotal <= 0)
+        return &mRegions[candidates[0]];   // single region or no RR
 
     // Round-robin: pick the region whose roundRobinIndex matches the current counter
     const int noteKey    = juce::jlimit (0, 127, midiNote);
     const int articKey   = juce::jlimit (0, 3,   articulationGroup);
     int& counter         = mRRCounters[noteKey][articKey];
 
-    // Find the total from the first RR region
-    int rrTotal = mRegions[candidates[0]].roundRobinTotal;
     counter = (counter % rrTotal) + 1;  // SFZ seq_position is 1-based
 
     for (int j = 0; j < numCandidates; ++j)

@@ -1,4 +1,5 @@
 #include "BaySickPlayerEditor.h"
+#include "SafeXml.h"   // XXE + depth-guarded XML parse (QA-Cleanup)
 #include "../AppPaths.h"
 #include "../MissingFileReport.h"
 #include "../SampleLibrary.h"
@@ -619,11 +620,11 @@ void BaySickPlayerEditor::showPresetMenu()
                     {
                         // Folders that DIRECTLY contain audio files become a
                         // single "load folder" item; otherwise recurse.
-                        bool hasAudio = false;
-                        for (const auto& f : juce::RangedDirectoryIterator (
-                                                  c, false, "*.wav;*.aif;*.aiff;*.flac",
-                                                  juce::File::findFiles))
-                        { juce::ignoreUnused (f); hasAudio = true; break; }
+                        // End-sentinel compare, not a break-on-first loop: the
+                        // latter leaves the loop increment unreachable (C4702).
+                        juce::RangedDirectoryIterator audioIt (
+                            c, false, "*.wav;*.aif;*.aiff;*.flac", juce::File::findFiles);
+                        const bool hasAudio = (audioIt != juce::RangedDirectoryIterator());
                         if (hasAudio)
                             m.addItem (c.getFileName(),
                                 [this, c] {
@@ -814,7 +815,7 @@ void BaySickPlayerEditor::loadPreset (const juce::File& f)
 {
     MissingFileReport::ScopedGesture gesture ("preset");
 
-    auto parsed = juce::XmlDocument::parse (f);
+    auto parsed = SafeXml::parse (f);
     if (! parsed || ! parsed->hasTagName ("BaySickPlayerState"))
     {
         juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon,

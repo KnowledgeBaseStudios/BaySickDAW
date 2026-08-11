@@ -1,4 +1,5 @@
 #include "BaySickNAMIREditor.h"
+#include "SafeXml.h"   // XXE + depth-guarded XML parse (QA-Cleanup)
 #include "../ProjectFileResolver.h"
 #include "../AppPaths.h"
 #include "../Standalone/SharedUI.h"   // VKnobAutomation registration
@@ -1159,7 +1160,7 @@ juce::StringArray BaySickNAMIREditor::loadRecents (const juce::String& tag)
     const juce::File f = settingsFile();
     if (! f.existsAsFile()) return out;
 
-    if (auto xml = juce::XmlDocument::parse (f))
+    if (auto xml = SafeXml::parse (f))
     {
         const juce::String childTag = (tag == "nam") ? "RecentNAMFiles" : "RecentIRFiles";
         if (auto* root = xml->getChildByName (childTag))
@@ -1175,7 +1176,7 @@ void BaySickNAMIREditor::saveRecents (const juce::String& tag, const juce::Strin
     const juce::File f = settingsFile();
     std::unique_ptr<juce::XmlElement> root;
     if (f.existsAsFile())
-        root = juce::XmlDocument::parse (f);
+        root = SafeXml::parse (f);
     if (! root)
         root = std::make_unique<juce::XmlElement> ("Settings");
 

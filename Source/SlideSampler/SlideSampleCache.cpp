@@ -1,8 +1,10 @@
 #include "SlideSampleCache.h"
+#include "SafeAudioReader.h"   // channel/frame sanity gate (QA-Cleanup)
+#include "SafeAudioFormats.h"   // MP3 decode via vendored LAME (QA-Cleanup)
 
 SlideSampleCache::SlideSampleCache()
 {
-    mFormats.registerBasicFormats();
+    SafeAudioFormats::registerAll (mFormats);
 }
 
 std::shared_ptr<DecodedSlideSample> SlideSampleCache::getHandle (const juce::File& wav)
@@ -26,11 +28,17 @@ void SlideSampleCache::decodeNow (const std::shared_ptr<DecodedSlideSample>& han
     if (handle == nullptr || handle->ready.load (std::memory_order_acquire))
         return;             // already decoded (shared from another tab)
 
-    std::unique_ptr<juce::AudioFormatReader> reader (mFormats.createReaderFor (wav));
+    auto reader = SafeAudioReader::guard (
+        std::unique_ptr<juce::AudioFormatReader> (mFormats.createReaderFor (wav)));
     if (reader != nullptr && reader->lengthInSamples > 0)
     {
-        const int n  = (int) reader->lengthInSamples;
-        const int nc = juce::jmax (1, (int) reader->numChannels);
+        // SECURITY (QA-Cleanup 2026-08-10): lengthInSamples comes from the
+        // file's own header and JUCE does not clamp it against the real file
+        // size, so a truncating (int) cast could produce a wild allocation
+        // request from a tiny file.  Bound it before it is narrowed.
+        constexpr juce::int64 kMaxSamples = 192000LL * 60LL;   // 60 s at 192 kHz
+        const int n  = (int) juce::jmin (reader->lengthInSamples, kMaxSamples);
+        const int nc = juce::jlimit (1, 2, (int) reader->numChannels);
 
         handle->numFrames  = n;
         handle->sourceRate = reader->sampleRate > 0.0 ? reader->sampleRate : 44100.0;

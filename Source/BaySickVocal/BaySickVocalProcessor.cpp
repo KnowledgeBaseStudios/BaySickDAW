@@ -1,4 +1,5 @@
 #include "BaySickVocalProcessor.h"
+#include "SafeXml.h"   // XXE + depth-guarded XML parse (QA-Cleanup)
 #include "../AudioFileRecorder.h"   // I-16 G-9: wet recorder tap inside processBlock
 #include "../TempoMapRead.h"        // QA-Fa recovery: legacy-save origin-sample derivation
 #include "BaySickVocalEditor.h"
@@ -2132,7 +2133,7 @@ void BaySickVocalProcessor::getStateInformation (juce::MemoryBlock& dest)
 
 void BaySickVocalProcessor::setStateInformation (const void* data, int size)
 {
-    if (auto xml = getXmlFromBinary (data, size))
+    if (auto xml = SafeXml::parseBinaryBlob (data, size))
     {
         if (! xml->hasTagName (apvts.state.getType()))
             return;

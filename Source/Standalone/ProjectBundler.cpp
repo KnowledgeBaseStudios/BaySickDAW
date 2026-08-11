@@ -1,4 +1,5 @@
 #include "ProjectBundler.h"
+#include "SafeXml.h"   // XXE + depth-guarded XML parse (QA-Cleanup)
 #include "../PatternManager.h"
 #include "../PluginProcessor.h"
 #include "../SampleLibrary.h"
@@ -163,12 +164,12 @@ namespace
                 juce::MemoryBlock mb;
                 B64Form form {};
                 if (! decodeAnyBase64 (el.getStringAttribute (blobAttr), mb, form)) continue;
-                if (auto inner = juce::AudioProcessor::getXmlFromBinary (mb.getData(), (int) mb.getSize()))
+                if (auto inner = SafeXml::parseBinaryBlob (mb.getData(), (int) mb.getSize()))
                     walkXmlForPaths (*inner, found, depth + 1);
             }
 
             if (auto chain = el.getStringAttribute (kNestedXmlAttr); chain.isNotEmpty())
-                if (auto parsed = juce::XmlDocument::parse (chain))
+                if (auto parsed = SafeXml::parse (chain))
                     walkXmlForPaths (*parsed, found, depth + 1);
         }
 
@@ -210,7 +211,7 @@ namespace
                 juce::MemoryBlock mb;
                 B64Form form {};
                 if (! decodeAnyBase64 (el.getStringAttribute (blobAttr), mb, form)) continue;
-                auto inner = juce::AudioProcessor::getXmlFromBinary (mb.getData(), (int) mb.getSize());
+                auto inner = SafeXml::parseBinaryBlob (mb.getData(), (int) mb.getSize());
                 if (inner == nullptr) continue;
                 if (! rewriteXmlPaths (*inner, remap, depth + 1)) continue;
 
@@ -221,7 +222,7 @@ namespace
             }
 
             if (auto chain = el.getStringAttribute (kNestedXmlAttr); chain.isNotEmpty())
-                if (auto parsed = juce::XmlDocument::parse (chain))
+                if (auto parsed = SafeXml::parse (chain))
                     if (rewriteXmlPaths (*parsed, remap, depth + 1))
                     {
                         el.setAttribute (kNestedXmlAttr,
@@ -261,7 +262,7 @@ namespace
             return false;
         }
 
-        auto parsed = juce::XmlDocument::parse (src);
+        auto parsed = SafeXml::parse (src);
         if (parsed == nullptr)
         {
             result.copyFailed.add ("project.xml: could not be read, so the bundled copy "

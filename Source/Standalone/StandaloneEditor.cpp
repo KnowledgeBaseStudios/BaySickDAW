@@ -1,4 +1,5 @@
 #include "StandaloneEditor.h"
+#include "SafeXml.h"   // XXE + depth-guarded XML parse (QA-Cleanup)
 #include "UndoBracket.h"
 #include "UndoSnapshotStore.h"   // QA-UndoCoverage Task 7: structural-undo snapshots
 #include "PagePresetIO.h"        // Task 7: peekEngineTypeFromXml
@@ -58,6 +59,7 @@
 #include "../Inst/InstPage.h"                         // G-4: Inst page + empty state
 #include "../MidiLearn/MidiLearnUI.h"                  // I-3c: MIDI Learn UI controller
 #include "WindowChrome.h"                              // QA-ModelShell TS7 §9
+#include "SafeAudioFormats.h"   // MP3 decode via vendored LAME (QA-Cleanup)
 
 namespace
 {
@@ -2488,7 +2490,6 @@ std::unique_ptr<juce::Component> StandaloneEditor::createLayersPage()
 
     mUsedLayerIndices[idx] = true;
     auto page = std::make_unique<LayersPage>(mProcessor, *mPM, idx);
-    page->setPlayHead(&mPlayHead);
     page->setUndoContext(makeUndoContext("lay" + juce::String(idx)));
     // 2026-04-22: Removed auto-mode-swap (sub-tab → Pattern/Song).  User now
     // chooses Pattern or Song explicitly via the transport button.
@@ -2532,7 +2533,6 @@ std::unique_ptr<juce::Component> StandaloneEditor::createLayersPageAtIndex (int 
     if (mUsedLayerIndices[idx]) return nullptr;
     mUsedLayerIndices[idx] = true;
     auto page = std::make_unique<LayersPage> (mProcessor, *mPM, idx);
-    page->setPlayHead (&mPlayHead);
     page->setUndoContext (makeUndoContext ("lay" + juce::String (idx)));
     mLegacyLayersPage = page.get();
     return page;
@@ -2544,7 +2544,6 @@ std::unique_ptr<juce::Component> StandaloneEditor::createBassPageAtIndex (int id
     if (mUsedBassIndices[idx]) return nullptr;
     mUsedBassIndices[idx] = true;
     auto page = std::make_unique<BassPage> (mProcessor, *mPM, idx);
-    page->setPlayHead (&mPlayHead);
     page->setUndoContext (makeUndoContext ("bass" + juce::String (idx)));
     mLegacyBassPage = page.get();
     return page;
@@ -2562,7 +2561,6 @@ std::unique_ptr<juce::Component> StandaloneEditor::createBassPage()
 
     mUsedBassIndices[idx] = true;
     auto page = std::make_unique<BassPage>(mProcessor, *mPM, idx);
-    page->setPlayHead(&mPlayHead);
     page->setUndoContext(makeUndoContext("bass" + juce::String(idx)));
     // 2026-04-22: Removed auto-mode-swap.  See createLayersPage comment.
     mLegacyBassPage = page.get();
@@ -2739,7 +2737,7 @@ int StandaloneEditor::spawnDuplicateDrumTab (const juce::String& clipboardXml,
     dp->onRenameRequested = [this, newId] {
         if (mRibbon) mRibbon->startRename (newId);
     };
-    wireDrumPageKitView (dp);
+    wireDrumPagePlayNote (dp);
     registerDrumPianoRoll (dp);
 
     auto* entry = new PageEntry();
@@ -2764,7 +2762,6 @@ std::unique_ptr<juce::Component> StandaloneEditor::createDrumPageAtIndex (int id
     if (mUsedDrumIndices[idx]) return nullptr;
     mUsedDrumIndices[idx] = true;
     auto page = std::make_unique<DrumPage>(mProcessor, *mPM, idx);
-    page->setPlayHead(&mPlayHead);
     page->setUndoContext(makeUndoContext("drm" + juce::String(idx)));
     mLegacyDrumPage = page.get();
     return page;
@@ -3471,7 +3468,7 @@ std::unique_ptr<juce::Component> StandaloneEditor::createBuilderPage()
             auto liveId = std::make_shared<int> (ribbonTabId);
             auto undoFn = [this, snap, liveId]
             {
-                if (auto parsed = juce::XmlDocument::parse (snap.loadFileAsString()))
+                if (auto parsed = SafeXml::parse (snap.loadFileAsString()))
                 {
                     const int newId = resurrectTabFromRecord (*parsed);
                     if (newId >= 0) *liveId = newId;
@@ -5739,7 +5736,7 @@ void StandaloneEditor::onAddTabRequest(RibbonTabBar::TabType type)
             p->onRenameRequested = [this, newId] {
                 if (mRibbon) mRibbon->startRename (newId);
             };
-            wireDrumPageKitView (p);
+            wireDrumPagePlayNote (p);
             registerDrumPianoRoll (p);
         }
     }
@@ -7694,15 +7691,6 @@ void StandaloneEditor::showPageForTab(int tabId)
                                 true,                  // enabled
                                 mtOn);                 // checked
 
-                    // 2026-05-08 (QA-Md): diagnostic capture for the
-                    // MT-no-op-in-Debug investigation.  Click triggers a
-                    // 2-second counter capture window and pops an
-                    // AlertWindow with the per-thread task distribution.
-                    m.addItem (203,
-                                "Run MT Diagnostic (2s capture)",
-                                true,                  // enabled
-                                false);                // not checkable
-
                     // QA-Layout T10 (L30): "MIDI trigger velocity" moved to
                     // the Audio Settings dialog, beside the MIDI inputs it
                     // configures.
@@ -7749,79 +7737,6 @@ void StandaloneEditor::showPageForTab(int tabId)
                                 const bool wasOn = RenderEngine::gMultiThreadedEngineEnabled.load (std::memory_order_acquire);
                                 RenderEngine::gMultiThreadedEngineEnabled.store (! wasOn, std::memory_order_release);
                                 BaySickDAWStandaloneApp::saveMultiCoreRenderingPref();
-                                return;
-                            }
-                            if (r == 203)
-                            {
-                                // 2026-05-08 (QA-Md): 2-second diagnostic
-                                // capture.  OkCancel prompt -> on OK,
-                                // reset counters, set capture flag, sleep
-                                // 2 s on the message thread (UI freezes
-                                // briefly; audio thread keeps running),
-                                // then snapshot + AlertWindow with the
-                                // formatted body.
-                                juce::AlertWindow::showOkCancelBox (
-                                    juce::MessageBoxIconType::InfoIcon,
-                                    "MT Diagnostic",
-                                    "Start playback now, then click OK.\n"
-                                    "Capture runs for 2 seconds (UI freezes briefly).\n"
-                                    "(Cancel to abort.)",
-                                    "OK", "Cancel", nullptr,
-                                    juce::ModalCallbackFunction::create (
-                                        [safeThis] (int result)
-                                        {
-                                            if (! safeThis) return;
-                                            if (result != 1) return;  // 1 = OK, 0 = Cancel
-
-                                            RenderEngine::MtDiagnostic::reset();
-                                            RenderEngine::MtDiagnostic::gCaptureOn.store (true, std::memory_order_release);
-
-                                            juce::Thread::sleep (2000);
-
-                                            RenderEngine::MtDiagnostic::gCaptureOn.store (false, std::memory_order_release);
-                                            const auto snap = RenderEngine::MtDiagnostic::snapshot();
-
-                                            const bool      mtMode       = RenderEngine::gMultiThreadedEngineEnabled.load (std::memory_order_acquire);
-                                            const long long totalSubmits = snap.leavesSubmitted + snap.childSubmits;
-                                            const long long totalRun     = snap.mainThreadTasks + snap.workerTasks;
-                                            const double    mainPct      = totalRun > 0
-                                                ? 100.0 * (double) snap.mainThreadTasks / (double) totalRun
-                                                : 0.0;
-                                            const double    workerPct    = totalRun > 0
-                                                ? 100.0 * (double) snap.workerTasks / (double) totalRun
-                                                : 0.0;
-
-                                            juce::String body;
-                                            body
-                                              << "Build: "
-                                            #if JUCE_DEBUG
-                                              << "Debug"
-                                            #else
-                                              << "Release"
-                                            #endif
-                                              << "    Multi-core: " << (mtMode ? "ON" : "OFF (single-core diagnostic)") << "\n"
-                                              << "Capture window: 2 s\n\n"
-                                              << "Blocks processed:    " << snap.blockCount       << "\n"
-                                              << "Leaves submitted:    " << snap.leavesSubmitted  << "\n"
-                                              << "Child submits:       " << snap.childSubmits     << "\n"
-                                              << "Total submits:       " << totalSubmits          << "\n"
-                                              << "Watchdog fires:      " << snap.watchdogFires    << "\n\n"
-                                              << "Main-thread tasks:   " << snap.mainThreadTasks
-                                                  << "  (" << juce::String (mainPct,   1) << "%)\n"
-                                              << "Worker tasks (all):  " << snap.workerTasks
-                                                  << "  (" << juce::String (workerPct, 1) << "%)\n"
-                                              << "Total tasks run:     " << totalRun << "\n\n"
-                                              << "Worker spin finds:   " << snap.workerSpinFinds  << "\n"
-                                              << "Worker sleep finds:  " << snap.workerSleepFinds << "\n"
-                                              << "Worker idle sleeps:  " << snap.workerIdleSleeps << "\n"
-                                              << "Worker wakes:        " << snap.workerWakes      << "\n";
-
-                                            juce::AlertWindow::showMessageBoxAsync (
-                                                juce::MessageBoxIconType::InfoIcon,
-                                                "MT Diagnostic Result",
-                                                body,
-                                                "OK");
-                                        }));
                                 return;
                             }
                             // J-A2: master output selector handlers.
@@ -8094,21 +8009,14 @@ std::vector<KitDrumInfo> StandaloneEditor::getKitDrumList() const
 
 void StandaloneEditor::refreshAllKitViews()
 {
+    // 2026-04-26 (1b): the unified Piano Roll page hosts the only kit view;
+    // DrumPage stopped owning one at that migration.
     for (auto* entry : mPages)
     {
-        if (! entry) continue;
-        if (entry->type == RibbonTabBar::TabType::Drums)
-        {
-            if (auto* dp = dynamic_cast<DrumPage*> (entry->component.get()))
-                dp->refreshKitView();
-        }
-        // 2026-04-26 (1b): unified Piano Roll page also hosts a kit.
-        else if (entry->type == RibbonTabBar::TabType::PianoRoll)
-        {
-            if (auto* prp = dynamic_cast<PianoRollPage*> (entry->component.get()))
-                if (auto* kit = prp->getDrumKitContainer())
-                    kit->refreshKitView();
-        }
+        if (! entry || entry->type != RibbonTabBar::TabType::PianoRoll) continue;
+        if (auto* prp = dynamic_cast<PianoRollPage*> (entry->component.get()))
+            if (auto* kit = prp->getDrumKitContainer())
+                kit->refreshKitView();
     }
 }
 
@@ -8170,15 +8078,18 @@ void StandaloneEditor::moveDrumTab (int srcRow, int dstRow)
     refreshAllKitViews();
 }
 
-void StandaloneEditor::wireDrumPageKitView (DrumPage* dp)
+// 2026-08-10 (QA-Cleanup): this was `wireDrumPageKitView` and installed seven
+// kit-view callbacks on each DrumPage.  Every one of them landed on
+// DrumPage::mDrumKitTab, which has been null since the 2026-04-26 unified-kit
+// migration, so all seven were dead.  What remains is the one live wiring:
+// the drum's play-pitch change, which repitches its hits on the kit grid that
+// actually exists (PianoRollPage's).
+void StandaloneEditor::wireDrumPagePlayNote (DrumPage* dp)
 {
     if (! dp) return;
 
-    dp->setKitListProvider ([this]() { return getKitDrumList(); });
-
-    // QA-L-Fix (D-6): the user changed this drum's play pitch from the kit
-    // menu.  Routed to the unified Piano Roll kit grid because that grid owns
-    // the drumRolls undo stack; both kit views read the same data, so one
+    // QA-L-Fix (D-6): routed to the unified Piano Roll kit grid because that
+    // grid owns the drumRolls undo stack; both read the same data, so one
     // Ctrl+Z restores everywhere.
     dp->onPlayNoteChanged = [this] (int pageIdx, int oldNote, int newNote)
     {
@@ -8187,109 +8098,11 @@ void StandaloneEditor::wireDrumPageKitView (DrumPage* dp)
                 kit->repitchDrumHits (pageIdx, oldNote, newNote);
         refreshAllKitViews();
     };
-
-    // D2 Batch 4: per-row audition (press-and-hold) routed to the drum's
-    // engine via auditionNoteOn / auditionNoteOff.
-    // QA-L-Fix (D-4, owner call 2026-07-19): audition fires at the drum's
-    // assigned play note so the row preview matches how the drum sounds
-    // everywhere else.  `heldNote` latches the pitch used at press --
-    // auditionNoteOff targets a specific note, so releasing against a
-    // freshly-read (possibly changed) assignment would strand a voice.
-    // Shared by both handler copies below via shared_ptr.  Per-ROW rather than
-    // one shared slot: press-and-hold is mouse-driven today so rows can't
-    // overlap, but a single latch would silently mis-release the moment that
-    // stops being true (touch, or a keyboard-driven kit).
-    auto heldNotes = std::make_shared<std::array<int, kMaxDrumPages>> ();
-    heldNotes->fill (60);
-    auto auditionDispatch = [this, heldNotes] (int row, bool on)
-    {
-        auto list = getKitDrumList();
-        if (row < 0 || row >= (int) list.size()) return;
-        if (row >= kMaxDrumPages) return;
-        const int targetTabId = list[(size_t) row].ribbonTabId;
-        for (auto* entry : mPages)
-        {
-            if (! entry || entry->ribbonTabId != targetTabId) continue;
-            if (auto* targetDp = dynamic_cast<DrumPage*> (entry->component.get()))
-            {
-                auto& held = (*heldNotes)[(size_t) row];
-                if (on) held = targetDp->getPlayNote();
-                const int n = held;
-
-                auto* eng = targetDp->getEngineProcessor();
-                if (auto* s = dynamic_cast<BaySickSynthProcessor*> (eng))
-                {
-                    if (on) s->auditionNoteOn (n); else s->auditionNoteOff (n);
-                }
-                else if (auto* v = dynamic_cast<BaySickPlayerProcessor*> (eng))
-                {
-                    if (on) v->auditionNoteOn (n); else v->auditionNoteOff (n);
-                }
-            }
-            return;
-        }
-    };
-    dp->setKitAuditionHandlers (
-        [auditionDispatch] (int row) { auditionDispatch (row, true);  },
-        [auditionDispatch] (int row) { auditionDispatch (row, false); });
-
-    // D2 Batch 4: drag-reorder.  Kit view fires srcRow → dstRow on drop.
-    dp->setKitReorderHandler ([this] (int srcRow, int dstRow)
-    {
-        moveDrumTab (srcRow, dstRow);
-    });
-
-    dp->setKitRowClickHandler ([this] (int row, juce::Component* anchor)
-    {
-        // 2026-04-28 (G-3 follow-up): post-D1.4 unified migration, DrumPage
-        // no longer hosts its own kit container - `mDrumKitTab` stays null -
-        // so this row-click handler is effectively dead code (PianoRollPage's
-        // wireKitView handler is what actually fires).  Kept as a safety net
-        // and updated to match the unified pattern (no navigation away,
-        // no switchTab(0) which would render the empty redirect sub-tab).
-        auto list = getKitDrumList();
-
-        if (row < (int) list.size())
-        {
-            const int targetId = list[row].ribbonTabId;
-            for (auto* entry : mPages)
-            {
-                if (! entry || entry->ribbonTabId != targetId) continue;
-                if (auto* targetDp = dynamic_cast<DrumPage*> (entry->component.get()))
-                {
-                    if (targetDp->isEngineLocked())
-                        targetDp->showContextMenu (anchor, true);   // kit entry point
-                    else
-                        targetDp->showSoundPicker (anchor);
-                }
-                return;
-            }
-        }
-        else
-        {
-            onAddTabRequest (RibbonTabBar::TabType::Drums);
-            DrumPage* newDp = dynamic_cast<DrumPage*> (mVisiblePage);
-            if (mRibbon) mRibbon->selectTab (4);
-            onTabSelected (4);
-            if (mPianoRollPage)
-                mPianoRollPage->selectEngine ({ EngineKind::DrumKit, 0 });
-            if (newDp) newDp->showSoundPicker (anchor);
-        }
-    });
-
-    // Batch 5: Kit menu - opens Save Kit As / Load Kit popup anchored to the
-    // Kit button in this DrumKitContainer's toolbar.
-    dp->setKitMenuHandler ([this] (juce::Component* anchor) { showKitMenu (anchor); });
-
-    // Lock/Unlock - confirmable toggle over the drums of one kit.
-    dp->setGlobalLockHandler ([this] (int bank) { showGlobalLockPrompt (bank); });
 }
 
 // 2026-04-26 (1b): wires the unified Piano Roll page's DrumKitContainer with
-// the same callbacks `wireDrumPageKitView` installs on each DrumPage's
-// internal kit container.  Both kit views share `Pattern::drumRolls[]` data
-// so edits propagate either way; UI state (selection, scroll) is per-instance
-// until step 2 collapses the duplication.
+// the kit callbacks.  Since the 2026-04-26 unified migration this is the
+// ONLY kit view in the app; DrumPage no longer owns one.
 void StandaloneEditor::wirePianoRollPageKitView (PianoRollPage* prp)
 {
     if (! prp) return;
@@ -8904,7 +8717,7 @@ void StandaloneEditor::loadTemplate (const juce::File& templateXml)
 
 void StandaloneEditor::applyTemplate (const juce::File& templateXml)
 {
-    auto parsed = juce::XmlDocument::parse (templateXml);
+    auto parsed = SafeXml::parse (templateXml);
     if (! parsed || ! parsed->hasTagName ("BaySickTemplate"))
     {
         // The dirty gate may just have prompted a save -- ending in silence
@@ -9277,7 +9090,7 @@ void StandaloneEditor::saveKitAs()
                 if (stateXml.isEmpty()) continue;   // empty slot - skip
                 auto* slotEl = root.createNewChildElement ("Drum");
                 slotEl->setAttribute ("slot", pageIdx - base);
-                if (auto parsed = juce::XmlDocument::parse (stateXml))
+                if (auto parsed = SafeXml::parse (stateXml))
                     slotEl->addChildElement (parsed.release());
             }
 
@@ -9492,7 +9305,7 @@ void StandaloneEditor::loadKitImpl (const juce::File& kitXml, int bank)
             "Kit file not found:\n" + kitXml.getFullPathName());
         return;
     }
-    auto px = juce::XmlDocument::parse (kitXml);
+    auto px = SafeXml::parse (kitXml);
     if (! px)
     {
         juce::AlertWindow::showMessageBoxAsync (juce::AlertWindow::WarningIcon,
@@ -9648,7 +9461,7 @@ void StandaloneEditor::loadKitImpl (const juce::File& kitXml, int bank)
         dp->onRenameRequested = [this, newId] {
             if (mRibbon) mRibbon->startRename (newId);
         };
-        wireDrumPageKitView (dp);
+        wireDrumPagePlayNote (dp);
         registerDrumPianoRoll (dp);
 
         auto* entry = new PageEntry();
@@ -10331,7 +10144,7 @@ void StandaloneEditor::addBaySickRustyDrumsTab()
         auto gridSp = juce::Component::SafePointer<ArrangementGrid> (grid);
         auto apply = [this, gridSp] (const juce::File& f, const PatternListSnapshot& slice)
         {
-            if (auto parsed = juce::XmlDocument::parse (f.loadFileAsString()))
+            if (auto parsed = SafeXml::parse (f.loadFileAsString()))
             {
                 // Ruling 1A (2026-08-06): a record captured BEFORE the
                 // session's first program pick has no engine blob.  Restoring
@@ -12248,7 +12061,7 @@ void StandaloneEditor::loadTransportDisplayPref()
     if (! mPosReadout) return;
     const auto f = ProjectManager::getSettingsFile();
     if (! f.existsAsFile()) return;   // first launch - keep the beats default
-    if (auto root = juce::XmlDocument::parse (f))
+    if (auto root = SafeXml::parse (f))
         if (auto* node = root->getChildByName ("TransportDisplay"))
             mPosReadout->setShowTime (node->getBoolAttribute ("showTime", false));
 }
@@ -12262,7 +12075,7 @@ void StandaloneEditor::saveTransportDisplayPref (bool showTime)
     // pattern as saveMultiCoreRenderingPref - settings.xml is shared).
     std::unique_ptr<juce::XmlElement> root;
     if (f.existsAsFile())
-        root = juce::XmlDocument::parse (f);
+        root = SafeXml::parse (f);
     if (root == nullptr)
         root = std::make_unique<juce::XmlElement> ("BaySickDAWSettings");
 
@@ -12991,7 +12804,7 @@ int StandaloneEditor::resurrectTabFromRecordImpl (const juce::XmlElement& rec)
                         juce::MemoryBlock mb;
                         if (mb.fromBase64Encoding (sfizzData))
                         {
-                            if (auto xml = juce::AudioProcessor::getXmlFromBinary (mb.getData(), (int) mb.getSize()))
+                            if (auto xml = SafeXml::parseBinaryBlob (mb.getData(), (int) mb.getSize()))
                             {
                                 if (xml->hasTagName (engineRootTag))
                                 {
@@ -13035,7 +12848,7 @@ int StandaloneEditor::resurrectTabFromRecordImpl (const juce::XmlElement& rec)
             juce::MemoryBlock mb;
             if (mb.fromBase64Encoding (engineData))
             {
-                if (auto kitXml = juce::AudioProcessor::getXmlFromBinary (mb.getData(), (int) mb.getSize()))
+                if (auto kitXml = SafeXml::parseBinaryBlob (mb.getData(), (int) mb.getSize()))
                 {
                     if (kitXml->hasTagName ("BaySickRustyDrumsState"))
                     {
@@ -13173,7 +12986,7 @@ void StandaloneEditor::deleteTabWithUndo (int ribbonTabId)
             // strip/page rebuild notifications.
             if (isCVI && libApply) libApply (libSnap);
             const juce::String xmlText = snap.loadFileAsString();
-            if (auto parsed = juce::XmlDocument::parse (xmlText))
+            if (auto parsed = SafeXml::parse (xmlText))
             {
                 const int newId = resurrectTabFromRecord (*parsed);
                 if (newId >= 0) *liveId = newId;
@@ -13289,7 +13102,7 @@ void StandaloneEditor::wrapTabAddUndo (int ribbonTabId, const juce::String& labe
     auto undoFn = [this, liveId] { if (mRibbon) mRibbon->closeTab (*liveId); };
     auto redoFn = [this, snap, liveId]
     {
-        if (auto parsed = juce::XmlDocument::parse (snap.loadFileAsString()))
+        if (auto parsed = SafeXml::parse (snap.loadFileAsString()))
         {
             const int newId = resurrectTabFromRecord (*parsed);
             if (newId >= 0) *liveId = newId;
@@ -14749,7 +14562,7 @@ void StandaloneEditor::adoptTemplateSampleRefs (juce::XmlElement& tabs,
 
         juce::MemoryBlock mb;
         if (! mb.fromBase64Encoding (b64)) return;
-        auto xml = juce::AudioProcessor::getXmlFromBinary (mb.getData(), (int) mb.getSize());
+        auto xml = SafeXml::parseBinaryBlob (mb.getData(), (int) mb.getSize());
         if (! xml) return;
 
         const auto before = xml->getStringAttribute ("bsp_loadPath");
@@ -17945,7 +17758,7 @@ void StandaloneEditor::deserializeUIState (const juce::XmlElement& root)
                             juce::MemoryBlock mb;
                             if (mb.fromBase64Encoding (sfizzData))
                             {
-                                if (auto xml = juce::AudioProcessor::getXmlFromBinary (mb.getData(), (int) mb.getSize()))
+                                if (auto xml = SafeXml::parseBinaryBlob (mb.getData(), (int) mb.getSize()))
                                 {
                                     if (xml->hasTagName (engineRootTag))
                                     {
@@ -18035,7 +17848,7 @@ void StandaloneEditor::deserializeUIState (const juce::XmlElement& root)
                 dp2->onRenameRequested = [this, newId] {
                     if (mRibbon) mRibbon->startRename (newId);
                 };
-                wireDrumPageKitView (dp2);
+                wireDrumPagePlayNote (dp2);
                 registerDrumPianoRoll (dp2);
             }
             if (dp2 && engine.isNotEmpty())
@@ -18079,7 +17892,7 @@ void StandaloneEditor::deserializeUIState (const juce::XmlElement& root)
                 juce::MemoryBlock mb;
                 std::unique_ptr<juce::XmlElement> kitXml;
                 if (mb.fromBase64Encoding (engineData) && mb.getSize() > 0)
-                    kitXml = juce::AudioProcessor::getXmlFromBinary (
+                    kitXml = SafeXml::parseBinaryBlob (
                         mb.getData(), (int) mb.getSize());
 
                 if (kitXml == nullptr || ! kitXml->hasTagName ("BaySickRustyDrumsState"))
@@ -19136,7 +18949,7 @@ void StandaloneEditor::placeAlignedBake (const juce::File& bakeFile, double star
     double fileSeconds = 0.0;
     {
         juce::AudioFormatManager fmt;
-        fmt.registerBasicFormats();
+        SafeAudioFormats::registerAll (fmt);
         if (auto reader = std::unique_ptr<juce::AudioFormatReader> (
                 fmt.createReaderFor (bakeFile)))
             if (reader->sampleRate > 0.0)
@@ -19282,7 +19095,7 @@ void StandaloneEditor::placeVoxExportClip (const juce::File& exportFile, double 
     double fileSeconds = 0.0;
     {
         juce::AudioFormatManager fmt;
-        fmt.registerBasicFormats();
+        SafeAudioFormats::registerAll (fmt);
         if (auto reader = std::unique_ptr<juce::AudioFormatReader> (
                 fmt.createReaderFor (exportFile)))
             if (reader->sampleRate > 0.0)
@@ -19984,7 +19797,7 @@ void StandaloneEditor::commitRecordingResult (const BaySickDAWProcessor::RecordR
         double fileSampleRate = 44100.0;   // QA-Ea Task 0c: needed for pre-roll seconds
         {
             juce::AudioFormatManager fmt;
-            fmt.registerBasicFormats();
+            SafeAudioFormats::registerAll (fmt);
             if (auto reader = std::unique_ptr<juce::AudioFormatReader> (
                     fmt.createReaderFor (wavFile)))
             {

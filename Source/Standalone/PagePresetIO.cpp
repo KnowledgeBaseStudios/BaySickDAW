@@ -1,4 +1,5 @@
 #include "PagePresetIO.h"
+#include "SafeXml.h"   // XXE + depth-guarded XML parse (QA-Cleanup)
 #include "../AppPaths.h"
 #include "../PluginProcessor.h"
 #include "../SampleLibrary.h"
@@ -91,7 +92,7 @@ namespace PagePresetIO
     {
         SavedKitRef out;
         if (rootTag.isEmpty()) return out;
-        auto xml = juce::AudioProcessor::getXmlFromBinary (engineMb.getData(),
+        auto xml = SafeXml::parseBinaryBlob (engineMb.getData(),
                                                             (int) engineMb.getSize());
         if (xml == nullptr || ! xml->hasTagName (rootTag))
             return out;
@@ -146,7 +147,7 @@ namespace PagePresetIO
         juce::MemoryBlock mb;
         const bool decoded = mb.fromBase64Encoding (rawData) && mb.getSize() > 0;
         if (! decoded
-            || juce::AudioProcessor::getXmlFromBinary (mb.getData(), (int) mb.getSize()) == nullptr)
+            || SafeXml::parseBinaryBlob (mb.getData(), (int) mb.getSize()) == nullptr)
         {
             juce::AlertWindow::showMessageBoxAsync (
                 juce::MessageBoxIconType::WarningIcon,
@@ -211,7 +212,7 @@ namespace PagePresetIO
 
             if (slot.engineApvts != nullptr)
             {
-                if (auto kitXml = juce::AudioProcessor::getXmlFromBinary (
+                if (auto kitXml = SafeXml::parseBinaryBlob (
                         mb.getData(), (int) mb.getSize()))
                 {
                     if (kitXml->hasTagName (slot.engineRootTag))
@@ -529,7 +530,7 @@ namespace PagePresetIO
     {
         if (xml.isEmpty()) return false;
 
-        auto parsed = juce::XmlDocument::parse (xml);
+        auto parsed = SafeXml::parse (xml);
         if (parsed == nullptr)
         {
             juce::AlertWindow::showMessageBoxAsync (
@@ -739,7 +740,7 @@ namespace PagePresetIO
     juce::String peekSourceMode (const juce::File& xml)
     {
         if (! xml.existsAsFile()) return {};
-        auto parsed = juce::XmlDocument::parse (xml);
+        auto parsed = SafeXml::parse (xml);
         if (parsed == nullptr) return {};
         const auto rootTag = parsed->getTagName();
         if (rootTag != "BaySickPagePreset"
@@ -795,7 +796,7 @@ namespace PagePresetIO
         auto xml = exportPagePreset (processor, kind, cfg);
         if (engineProc != nullptr)
         {
-            auto parsed = juce::XmlDocument::parse (xml);
+            auto parsed = SafeXml::parse (xml);
             if (parsed != nullptr)
             {
                 parsed->setAttribute ("engineType", engineType);
@@ -816,7 +817,7 @@ namespace PagePresetIO
     {
         if (xml.isEmpty()) return {};
 
-        auto parsed = juce::XmlDocument::parse (xml);
+        auto parsed = SafeXml::parse (xml);
         if (parsed == nullptr)
         {
             juce::AlertWindow::showMessageBoxAsync (
@@ -893,7 +894,7 @@ namespace PagePresetIO
     // snapshots (they live as in-memory XML / temp files, not preset files).
     juce::String peekEngineTypeFromXml (const juce::String& xmlText)
     {
-        auto parsed = juce::XmlDocument::parse (xmlText);
+        auto parsed = SafeXml::parse (xmlText);
         if (parsed == nullptr) return {};
         const auto rootTag = parsed->getTagName();
         if (rootTag != "BaySickPagePreset"

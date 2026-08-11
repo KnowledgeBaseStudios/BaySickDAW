@@ -1,4 +1,5 @@
 #include "EffectRack.h"
+#include "SafeXml.h"   // XXE + depth-guarded XML parse (QA-Cleanup)
 #include "DSP/CompressorDSP.h"
 #include "DSP/ReverbDSP.h"
 #include "DSP/ChorusDSP.h"
@@ -820,7 +821,7 @@ void EffectRack::getStateInformation(juce::MemoryBlock& dest)
 
 void EffectRack::setStateInformation(const void* data, int sz)
 {
-    auto xml = juce::AudioProcessor::getXmlFromBinary(data, sz);
+    auto xml = SafeXml::parseBinaryBlob (data, sz);
     if (!xml) return;
 
     auto state = juce::ValueTree::fromXml(*xml);

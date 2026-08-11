@@ -9,7 +9,6 @@ namespace Hosting
 namespace
 {
     // The command-line id both ends agree on (JUCE requires short alphanumeric).
-    const char* kBridgeUid = "BaySickPluginBridge";
 
     // How long the audio thread will wait for the helper to return a block.
     // Still a HARD ceiling -- a bridged plugin that stalls must cost its own
@@ -54,6 +53,22 @@ namespace
     // Handshake / load are message-thread operations and may legitimately take
     // a while (a plugin's own scan-time init).
     constexpr int kStartupTimeoutMs = 15000;
+
+    // ONCE CONNECTED, the same 15 s is the wrong number (security MEDIUM-7).
+    // JUCE takes ONE timeout for launchWorkerProcess and then reuses it for
+    // every pipe read and write, so a single control message to a wedged helper
+    // froze the MESSAGE THREAD - the UI - for the full startup budget.
+    //
+    // mSendWedged below already makes that a one-time cost rather than a
+    // repeating one, but one 15-second freeze is still a hang as far as the user
+    // is concerned.  Re-pointed after the handshake succeeds via the vendored
+    // InterprocessConnection::setPipeMessageTimeout.
+    //
+    // 5 s rather than something tighter because a write is not always small: a
+    // plugin state blob can be megabytes, and a busy machine can legitimately
+    // take a moment to accept one.  Chosen as a judgment call, not measured -
+    // if a real plugin ever trips it, this is the number to raise.
+    constexpr int kConnectedWriteTimeoutMs = 5000;
 }
 
 SandboxedPluginClient::SandboxedPluginClient() = default;
@@ -108,14 +123,19 @@ bool SandboxedPluginClient::start (const juce::PluginDescription& desc, juce::St
         return false;
     }
 
-    if (! launchWorkerProcess (exe, kBridgeUid, kStartupTimeoutMs))
+    if (! launchWorkerProcess (exe, Hosting::Bridge::kBridgeUid, kStartupTimeoutMs))
     {
         errorOut = "Could not start the plugin bridge helper";
         return false;
     }
 
+    // The startup budget has been spent by here; every pipe operation from now
+    // on is a control message, so drop to the write budget (MEDIUM-7).
+    setWorkerPipeTimeout (kConnectedWriteTimeoutMs);
+
     mAlive.store (true);
     mLoadFailed.store (false);
+    mSendWedged.store (false, std::memory_order_release);
 
     Bridge::HandshakePayload hs {};
     hs.protocolVersion = Bridge::kProtocolVersion;
@@ -146,9 +166,19 @@ bool SandboxedPluginClient::sendFramed (Bridge::MessageType type,
     if (! mAlive.load())
         return false;
 
+    // Already proved unresponsive once: fail fast instead of freezing the UI
+    // for the write timeout again.  JUCE's ping thread declares the connection
+    // dead shortly after, which clears mAlive and makes this moot.
+    if (mSendWedged.load (std::memory_order_acquire))
+        return false;
+
     const auto seq = mSequence.fetch_add (1);
-    return sendMessageToWorker (Bridge::frame (type, seq, payload, payloadBytes,
-                                               trailer, trailerBytes));
+    const bool sent = sendMessageToWorker (Bridge::frame (type, seq, payload, payloadBytes,
+                                                          trailer, trailerBytes));
+    if (! sent)
+        mSendWedged.store (true, std::memory_order_release);
+
+    return sent;
 }
 
 void SandboxedPluginClient::prepare (double sampleRate, int maxBlockSize, int numChannels)
@@ -379,7 +409,10 @@ void SandboxedPluginClient::getState (juce::MemoryBlock& dest)
     // Message-thread call; a bounded wait is fine here and a dead helper simply
     // yields empty state rather than hanging a project save.
     if (mStateReady.wait (2000))
+    {
+        const juce::ScopedLock sl (mStateLock);
         dest = mPendingState;
+    }
 }
 
 void SandboxedPluginClient::setState (const void* data, int size)
@@ -535,7 +568,10 @@ void SandboxedPluginClient::handleMessageFromWorker (const juce::MemoryBlock& mb
         }
 
         case Bridge::MessageType::StateBlob:
-            mPendingState.replaceAll (body, bodyBytes);
+            {
+                const juce::ScopedLock sl (mStateLock);
+                mPendingState.replaceAll (body, bodyBytes);
+            }
             mStateReady.signal();
             break;
 

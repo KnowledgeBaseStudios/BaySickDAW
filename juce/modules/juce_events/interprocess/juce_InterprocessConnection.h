@@ -132,6 +132,29 @@ public:
     */
     bool createPipe (const String& pipeName, int pipeReceiveMessageTimeoutMs, bool mustNotExist = false);
 
+    /** BAYSICKDAW VENDORED CHANGE (QA-Cleanup 2026-08-11, security MEDIUM-7).
+
+        Re-points the pipe read/write timeout after the connection is already up.
+
+        WHY THIS EXISTS.  The timeout is supplied ONCE - via connectToPipe /
+        createPipe, or via ChildProcessCoordinator::launchWorkerProcess, which
+        forwards its single `timeoutMs` straight through - and it then serves two
+        jobs with opposite requirements.  As a STARTUP budget it must be generous:
+        a plugin-host helper loading a large sample library legitimately takes
+        many seconds.  As a PER-WRITE budget the same number is far too long: one
+        write to a wedged peer blocks the calling thread for the whole duration,
+        and for us that thread is the message thread, so the UI freezes.
+
+        Both members are read per-operation (see sendMessage / readNextMessage),
+        so lowering this once the handshake has succeeded is sufficient and needs
+        no reconnection.
+
+        Not upstream API.  Kept as a named method rather than making the member
+        protected so the reason survives a JUCE update, and so a merge conflict
+        here is loud rather than silent.
+    */
+    void setPipeMessageTimeout (int newTimeoutMs) noexcept   { pipeReceiveMessageTimeout = newTimeoutMs; }
+
     /** Whether the disconnect call should trigger callbacks. */
     enum class Notify { no, yes };
 

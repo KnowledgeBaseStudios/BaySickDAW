@@ -1,4 +1,5 @@
 #include "DrumPage.h"
+#include "SafeXml.h"   // XXE + depth-guarded XML parse (QA-Cleanup)
 #include "UndoBracket.h"
 #include "UndoSnapshotStore.h"   // QA-UndoCoverage Task 7: sound-swap snapshots
 #include "../AppPaths.h"
@@ -123,10 +124,11 @@ DrumPage::DrumPage(BaySickDAWProcessor& p, PatternManager& pm, int pageIndex)
     mProcessor.engineRig().addTab (TabKind::Drums, mPageIndex);
 
     // 2026-04-26 (step 2 commit 3): Drum Kit and per-drum Piano Roll both
-    // live on PianoRollPage now.  Skip building those sub-views here -
-    // mDrumKitTab + mPianoRoll stay null; sub-tab pills 0 (Drum Kit) and 2
-    // (Piano Roll) redirect to PianoRollPage via the editor's showPageForTab
-    // click handlers.  Player tab is now the default landing.
+    // live on PianoRollPage now.  Sub-tab indices 0 (Drum Kit) and 2 (Piano
+    // Roll) are REDIRECTS and own no component here; QA-Layout T4 (L11) moved
+    // their navigation into the page dropdown's "Pages:" list, so nothing here
+    // renders a sub-tab control.  That is why switchTab still clamps to 0..2.
+    // Player is the default landing.
     buildPlayerTab();
     // J-6 EQ unification (2026-05-03): EQ sub-tab removed; pre+post EQ live
     // on the Effects page (mixer_drum_<N>_preeq_* / mixer_drum_<N>_*).
@@ -154,88 +156,8 @@ void DrumPage::switchTab(int idx)
     // J-6 EQ unification (2026-05-03): tab order is 0 Drum Kit / 1 Player /
     // 2 Piano Roll (was: 0..3 with EQ as tab 3 - EQ moved to Effects page).
     mActiveTab = juce::jlimit(0, 2, idx);
-    if (mDrumKitTab)
-    {
-        mDrumKitTab->setVisible(mActiveTab == 0);
-        if (mActiveTab == 0)
-        {
-            mDrumKitTab->refreshKitView();
-            mDrumKitTab->grabKeyboardFocus();
-        }
-    }
     if (mPlayerTab) mPlayerTab->setVisible(mActiveTab == 1);
-    if (mPianoRoll) mPianoRoll->setVisible(mActiveTab == 2);
-    if (mActiveTab == 2 && mPianoRoll) mPianoRoll->grabKeyboardFocus();
     resized();
-}
-
-// ── D2 Drum Kit hooks (forwarders to mDrumKitTab) ────────────────────────────
-// KitDrumInfo (DrumPage's struct, has ribbonTabId) is converted on the fly to
-// DrumKitRowInfo (DrumKitGrid's struct, identical fields minus ribbonTabId).
-void DrumPage::setKitListProvider (std::function<std::vector<KitDrumInfo>()> fn)
-{
-    if (! mDrumKitTab) return;
-    auto wrapped = [fn = std::move(fn)] {
-        std::vector<DrumKitRowInfo> out;
-        if (! fn) return out;
-        const auto src = fn();
-        out.reserve(src.size());
-        for (const auto& s : src)
-        {
-            DrumKitRowInfo r;
-            r.pageIndex   = s.pageIndex;
-            r.displayName = s.displayName;
-            r.hasEngine   = s.hasEngine;
-            r.locked      = s.locked;
-            r.isActive    = s.isActive;
-            r.color       = s.color;
-            out.push_back(std::move(r));
-        }
-        return out;
-    };
-    mDrumKitTab->setKitRowProvider(std::move(wrapped));
-}
-
-void DrumPage::setKitRowClickHandler (std::function<void(int, juce::Component*)> fn)
-{
-    if (mDrumKitTab) mDrumKitTab->setRowClickHandler (std::move (fn));
-}
-
-void DrumPage::setKitAuditionHandlers (std::function<void(int)> onOn,
-                                       std::function<void(int)> onOff)
-{
-    if (mDrumKitTab) mDrumKitTab->setAuditionHandlers (std::move (onOn), std::move (onOff));
-}
-
-void DrumPage::setKitReorderHandler (std::function<void(int, int)> fn)
-{
-    if (mDrumKitTab) mDrumKitTab->setReorderHandler (std::move (fn));
-}
-
-void DrumPage::refreshKitView()
-{
-    if (mDrumKitTab) mDrumKitTab->refreshKitView();
-}
-
-void DrumPage::setKitMenuHandler (std::function<void(juce::Component*)> fn)
-{
-    if (mDrumKitTab) mDrumKitTab->onKitMenuRequested = std::move (fn);
-}
-
-void DrumPage::setGlobalLockHandler (std::function<void(int bank)> fn)
-{
-    if (mDrumKitTab) mDrumKitTab->onGlobalLockRequested = std::move (fn);
-}
-
-// J-6 EQ unification (2026-05-03): setEQMid removed; pre-rack EQ M/S toggle
-// is on the Effects page Pre EQ tab.
-
-void DrumPage::buildDrumKitTab()
-{
-    mDrumKitTab = std::make_unique<DrumKitContainer>();
-    mDrumKitTab->setPatternManager (&mPM);
-    mDrumKitTab->setApvts (&mProcessor.apvts);
-    addAndMakeVisible(*mDrumKitTab);
 }
 
 void DrumPage::buildPlayerTab()
@@ -249,46 +171,12 @@ void DrumPage::buildPlayerTab()
     addAndMakeVisible(*mPlayerTab);
 }
 
-void DrumPage::buildPianoRollTab()
-{
-    mPianoRoll = std::make_unique<PianoRollContainer>();
-    mPianoRoll->setData(&mPM.currentPattern().drumRolls[mPageIndex]);
-    // C.5b: pattern's intrinsic TS drives the piano roll's bar-line spacing.
-    mPianoRoll->setTimeSignature(mPM.currentPattern().tsNum, mPM.currentPattern().tsDen);
-    mPianoRoll->setNoteColor(mPageColor);
-    addAndMakeVisible(*mPianoRoll);
-
-    if (mTabName.isEmpty())
-        mTabName = "Drum " + juce::String(mPageIndex);
-    refreshPianoRollContextLabel();
-}
-
 // J-6 EQ unification (2026-05-03): buildEQTab removed.
-
-void DrumPage::setPlayHead(StandalonePlayHead* ph)
-{
-    mPlayHead = ph;
-    if (mPianoRoll)
-        mPianoRoll->onSeek = [ph](double b) { if (ph) ph->seekTo(b); };
-    if (mDrumKitTab)
-        mDrumKitTab->onSeek = [ph](double b) { if (ph) ph->seekTo(b); };
-    // Playhead beat is pumped via timerCallback (matches PianoRollContainer flow).
-}
 
 void DrumPage::setUndoContext(const UndoContext& ctx)
 {
     // QA-UndoCoverage Task 7: kept for the sound-swap structural gesture.
     mUndoCtx = ctx;
-    if (mPianoRoll)
-    {
-        mPianoRoll->setUndoContext(ctx);
-        if (ctx.showHistory) mPianoRoll->onShowHistoryWindow = ctx.showHistory;
-    }
-    if (mDrumKitTab)
-    {
-        mDrumKitTab->setUndoContext(ctx);
-        if (ctx.showHistory) mDrumKitTab->onShowHistoryWindow = ctx.showHistory;
-    }
 }
 
 void DrumPage::selectEngine(const juce::String& engineName)
@@ -313,7 +201,6 @@ void DrumPage::selectEngine(const juce::String& engineName)
     }
 
     mEngineType = engineName;
-    refreshPianoRollContextLabel();
 
     // QA-ModelShell TS1: the model constructs/swaps, prepares, and registers
     // the engine.  This page keeps a non-owning view pointer + the editor.
@@ -334,31 +221,6 @@ void DrumPage::selectEngine(const juce::String& engineName)
     // Smoke round 2 (Jeff): the SW-3 Swing Mix knob moved OFF the editor
     // title bar onto the PageMenuBar (StandaloneEditor wires it per
     // page-show) so it's visible on every sub-tab.
-
-    if (mPianoRoll)
-    {
-        mPianoRoll->onNoteAudition = [this](int midiNote)
-        {
-            if (auto* s = dynamic_cast<BaySickSynthProcessor*>(mEngineProcessor))
-                s->auditionNote(midiNote);
-            else if (auto* v = dynamic_cast<BaySickPlayerProcessor*>(mEngineProcessor))
-                v->auditionNote(midiNote);
-        };
-        mPianoRoll->onNoteAuditionOn = [this](int midiNote)
-        {
-            if (auto* s = dynamic_cast<BaySickSynthProcessor*>(mEngineProcessor))
-                s->auditionNoteOn(midiNote);
-            else if (auto* v = dynamic_cast<BaySickPlayerProcessor*>(mEngineProcessor))
-                v->auditionNoteOn(midiNote);
-        };
-        mPianoRoll->onNoteAuditionOff = [this](int midiNote)
-        {
-            if (auto* s = dynamic_cast<BaySickSynthProcessor*>(mEngineProcessor))
-                s->auditionNoteOff(midiNote);
-            else if (auto* v = dynamic_cast<BaySickPlayerProcessor*>(mEngineProcessor))
-                v->auditionNoteOff(midiNote);
-        };
-    }
 
     if (mEngineEditor && mPlayerTab)
         mPlayerTab->addAndMakeVisible(*mEngineEditor);
@@ -394,29 +256,10 @@ juce::Component* DrumPage::stripPresetButton() const
 
 void DrumPage::timerCallback()
 {
-    // J-6 EQ unification (2026-05-03): page-level EQ syncFromDSP removed;
-    // Effects-page Pre EQ tab handles its own polling.
-
-    if (mPlayHead)
-    {
-        const bool songMode = mProcessor.isSongMode();
-        const double beat = songMode ? -1.0 : mPlayHead->getCurrentBeat();
-        if (mPianoRoll)  mPianoRoll->setPlayheadBeat(beat);
-        if (mDrumKitTab) mDrumKitTab->setPlayheadBeat(beat);
-    }
-
-    if (mPianoRoll)
-    {
-        mPianoRoll->setData(&mPM.currentPattern().drumRolls[mPageIndex]);
-        mPianoRoll->setTimeSignature(mPM.currentPattern().tsNum, mPM.currentPattern().tsDen);
-    }
-
-    // While on the Drum Kit sub-tab, repaint at the timer rate so edits from
-    // the per-drum Piano Roll tab show up automatically (the kit view reads
-    // each drum's notes on every paint).
-    if (mActiveTab == 0 && mDrumKitTab)
-        mDrumKitTab->repaint();
-
+    // The 24 Hz timer survives the 2026-08-10 kit/roll view removal solely for
+    // MIDI Learn: the audio thread hands off a captured trigger and this is the
+    // message-thread pump that commits it.  No visual polling happens here -
+    // the playhead now belongs entirely to PianoRollPage.
     pollTriggerLearn();
 }
 
@@ -532,28 +375,17 @@ void DrumPage::paint(Graphics& g)
 void DrumPage::resized()
 {
     auto b = getLocalBounds();
-    if (mDrumKitTab) mDrumKitTab->setBounds(b);
     if (mPlayerTab)
     {
         mPlayerTab->setBounds(b);
         if (mEngineEditor && mPlayerTab->getHeight() > 0)
             mEngineEditor->setBounds(mPlayerTab->getLocalBounds());
     }
-    if (mPianoRoll) mPianoRoll->setBounds(b);
 }
 
 void DrumPage::setTabName(const juce::String& name)
 {
     mTabName = name;
-    refreshPianoRollContextLabel();
-}
-
-void DrumPage::refreshPianoRollContextLabel()
-{
-    if (!mPianoRoll) return;
-    const juce::String engine = mEngineType.isEmpty() ? juce::String("(no engine)")
-                                                      : mEngineType;
-    mPianoRoll->setContextLabel(mTabName + " - " + engine);
 }
 
 
@@ -752,7 +584,7 @@ void DrumPage::showSoundPicker (juce::Component* anchor)
                 // Detect engine from preset's root tag - BaySickPlayerState
                 // routes to the player loader, BaySickSynthState to the synth.
                 const auto xml = presetXmls[result - kPresetBase];
-                if (auto px = juce::XmlDocument::parse (xml))
+                if (auto px = SafeXml::parse (xml))
                 {
                     const bool isPlayer = px->hasTagName ("BaySickPlayerState");
                     dp->performSoundSwapGesture ("Load Drum Patch", [dp, xml, isPlayer]
@@ -790,7 +622,6 @@ void DrumPage::loadSampleFile (const juce::File& f)
         mLoadedSampleKind = SampleKind::File;
         mLoadedSamplePath = f;
         mSoundName = f.getFileNameWithoutExtension();
-        refreshPianoRollContextLabel();
         if (onSoundNameChanged) onSoundNameChanged (mSoundName);
         takeStateSnapshot();
         // A load that produced no playable regions (corrupt/unsupported file)
@@ -817,7 +648,6 @@ void DrumPage::loadSampleFolder (const juce::File& f)
         mLoadedSampleKind = SampleKind::Folder;
         mLoadedSamplePath = f;
         mSoundName = f.getFileName();
-        refreshPianoRollContextLabel();
         if (onSoundNameChanged) onSoundNameChanged (mSoundName);
         takeStateSnapshot();
         if (! vp->hasAnyRegions())
@@ -840,7 +670,6 @@ void DrumPage::loadSampleSFZ (const juce::File& f)
         mLoadedSampleKind = SampleKind::SFZ;
         mLoadedSamplePath = f;
         mSoundName = f.getFileNameWithoutExtension();
-        refreshPianoRollContextLabel();
         if (onSoundNameChanged) onSoundNameChanged (mSoundName);
         takeStateSnapshot();
         if (! vp->hasAnyRegions())
@@ -859,7 +688,7 @@ juce::String DrumPage::loadSynthPreset (const juce::File& xml)
     if (bss == nullptr)
         return "BaySickSynth engine unavailable";
 
-    auto px = juce::XmlDocument::parse (xml);
+    auto px = SafeXml::parse (xml);
     if (! px)
         return "preset could not be read";
     if (! px->hasTagName (bss->apvts.state.getType()))
@@ -905,7 +734,6 @@ juce::String DrumPage::loadSynthPreset (const juce::File& xml)
     mLoadedSamplePath = juce::File();
 
     mSoundName = xml.getFileNameWithoutExtension();
-    refreshPianoRollContextLabel();
     if (onSoundNameChanged) onSoundNameChanged (mSoundName);
     takeStateSnapshot();
     return {};
@@ -918,7 +746,6 @@ void DrumPage::newBlankPatch()
     mLoadedSamplePath = juce::File();
     // Engine starts at APVTS defaults - nothing to apply.
     mSoundName = "User Patch";
-    refreshPianoRollContextLabel();
     if (onSoundNameChanged) onSoundNameChanged (mSoundName);
     takeStateSnapshot();
 }
@@ -1024,7 +851,6 @@ void DrumPage::clearSoundInternal()
     mSoundName.clear();
     mLoadedSampleKind = SampleKind::None;
     mLoadedSamplePath = juce::File();
-    refreshPianoRollContextLabel();
     // Restore default tab name on clear so the ribbon doesn't keep the cleared sound's label.
     const juce::String defaultName = "Drum " + juce::String (mPageIndex + 1);
     if (onSoundNameChanged) onSoundNameChanged (defaultName);
@@ -1143,7 +969,6 @@ void DrumPage::savePatchAs()
                     // drum takes its name from the one actually written.
                     const juce::String savedName = saved.file.getFileNameWithoutExtension();
                     safeThis->mSoundName = savedName;
-                    safeThis->refreshPianoRollContextLabel();
                     if (safeThis->onSoundNameChanged) safeThis->onSoundNameChanged (savedName);
                     safeThis->takeStateSnapshot();   // saved patch is the new clean baseline
                 },
@@ -1158,7 +983,7 @@ void DrumPage::savePatchAs()
 // (resolved via SampleLibrary::resolvePersistedRef) or an absolute path.
 juce::String DrumPage::loadPlayerPreset (const juce::File& xml)
 {
-    auto parsed = juce::XmlDocument::parse (xml);
+    auto parsed = SafeXml::parse (xml);
     if (! parsed || ! parsed->hasTagName ("BaySickPlayerState"))
         return "preset could not be read";
 
@@ -1245,7 +1070,6 @@ juce::String DrumPage::loadPlayerPreset (const juce::File& xml)
     }
 
     mSoundName = xml.getFileNameWithoutExtension();
-    refreshPianoRollContextLabel();
     if (onSoundNameChanged) onSoundNameChanged (mSoundName);
     takeStateSnapshot();
     return sampleFail;
@@ -1556,7 +1380,7 @@ static void drumSubstituteEnginePrefixInBinary (juce::AudioProcessor* proc,
     if (tagStart < 0) return;
     const juce::String engineTagWithUnders = localPrefix.substring (tagStart, trailingUnder + 1);
 
-    auto xmlEl = juce::AudioProcessor::getXmlFromBinary (mb.getData(), (int) mb.getSize());
+    auto xmlEl = SafeXml::parseBinaryBlob (mb.getData(), (int) mb.getSize());
     if (! xmlEl) return;
 
     juce::ValueTree loaded = juce::ValueTree::fromXml (*xmlEl);
@@ -1618,7 +1442,7 @@ void DrumPage::importDrumState (const juce::String& xml)
     if (xml.isEmpty()) return;
     if (mLocked)       return;
 
-    auto parsed = juce::XmlDocument::parse (xml);
+    auto parsed = SafeXml::parse (xml);
     if (! parsed || ! parsed->hasTagName ("DrumPageState")) return;
 
     const juce::String engine = parsed->getStringAttribute ("engine");
@@ -1650,7 +1474,6 @@ void DrumPage::importDrumState (const juce::String& xml)
     // the ribbon.  setLocked early-outs on no change, so the usual
     // false -> false duplicate stays silent.
     setLocked (lock);
-    refreshPianoRollContextLabel();
     if (onSoundNameChanged) onSoundNameChanged (mSoundName);
 }
 
@@ -1828,7 +1651,6 @@ void DrumPage::loadPagePreset (const juce::File& xml)
         mSoundName = xml.getFileNameWithoutExtension();
     }
 
-    refreshPianoRollContextLabel();
 
     const juce::String newName = xml.getFileNameWithoutExtension();
     setTabName (newName);
@@ -1863,7 +1685,7 @@ void DrumPage::importPagePresetXml (const juce::String& xml)
 
     const juce::String savedEngineType = [&xml]
     {
-        auto parsed = juce::XmlDocument::parse (xml);
+        auto parsed = SafeXml::parse (xml);
         if (! parsed || ! parsed->hasTagName ("BaySickPagePreset")) return juce::String();
         return parsed->getStringAttribute ("engineType");
     }();

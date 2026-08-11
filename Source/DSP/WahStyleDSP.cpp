@@ -1,4 +1,5 @@
 #include "WahStyleDSP.h"
+#include "SafeXml.h"   // XXE + depth-guarded XML parse (QA-Cleanup)
 
 namespace
 {
@@ -117,7 +118,7 @@ void WahStyleDSP::getStateInformation (juce::MemoryBlock& dest)
 
 void WahStyleDSP::setStateInformation (const void* data, int sz)
 {
-    auto xml = juce::AudioProcessor::getXmlFromBinary (data, sz);
+    auto xml = SafeXml::parseBinaryBlob (data, sz);
     if (! xml || ! xml->hasTagName ("WahStyleDSP")) return;
     auto state = juce::ValueTree::fromXml (*xml);
     setPedalPosition ((float)(double) state.getProperty ("position", 0.5));

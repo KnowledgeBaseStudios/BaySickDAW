@@ -1,4 +1,5 @@
 #include "KeyBindings.h"
+#include "SafeXml.h"   // XXE + depth-guarded XML parse (QA-Cleanup)
 #include "../AppPaths.h"
 #include "../UserFileSave.h"
 
@@ -873,7 +874,7 @@ bool loadMappings (juce::KeyPressMappingSet& set)
 {
     auto f = getKeymapFile();
     if (! f.existsAsFile()) return false;
-    if (auto x = juce::XmlDocument::parse (f))
+    if (auto x = SafeXml::parse (f))
     {
         set.restoreFromXml (*x);
         return true;

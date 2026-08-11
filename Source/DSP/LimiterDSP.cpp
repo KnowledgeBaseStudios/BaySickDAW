@@ -1,4 +1,5 @@
 #include "LimiterDSP.h"
+#include "SafeXml.h"   // XXE + depth-guarded XML parse (QA-Cleanup)
 #include <algorithm>
 #include <cmath>
 
@@ -993,7 +994,7 @@ void LimiterDSP::getStateInformation (juce::MemoryBlock& dest)
 
 void LimiterDSP::setStateInformation (const void* data, int sz)
 {
-    std::unique_ptr<juce::XmlElement> xml (juce::AudioProcessor::getXmlFromBinary (data, sz));
+    std::unique_ptr<juce::XmlElement> xml (SafeXml::parseBinaryBlob (data, sz));
     if (! xml) return;
     if (! xml->hasTagName ("LimiterDSP")) return;
 

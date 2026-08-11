@@ -1,4 +1,7 @@
 #include "SaturationDSP.h"
+#include "SafeXml.h"   // XXE + depth-guarded XML parse (QA-Cleanup)
+#include "SafeAudioReader.h"   // channel/frame sanity gate (QA-Cleanup)
+#include "SafeAudioFormats.h"   // MP3 decode via vendored LAME (QA-Cleanup)
 
 namespace
 {
@@ -756,7 +759,7 @@ void SaturationDSP::getStateInformation (juce::MemoryBlock& dest)
 
 void SaturationDSP::setStateInformation (const void* data, int sz)
 {
-    auto xml = juce::AudioProcessor::getXmlFromBinary (data, sz);
+    auto xml = SafeXml::parseBinaryBlob (data, sz);
     if (!xml) return;
 
     // H-10 cutover (2026-05-02): old projects + presets saved before the
@@ -1207,13 +1210,14 @@ void SaturationDSP::loadAllCassetteHiss()
     mTapeHissLoaded = false;
 
     juce::AudioFormatManager fm;
-    fm.registerBasicFormats();
+    SafeAudioFormats::registerAll (fm);
     const auto dir = cassetteResourceDir().getChildFile ("Samples");
     for (int i = 0; i < kNumCassettes; ++i)
     {
         const auto f = dir.getChildFile ("cassette tape_" + juce::String (i + 1) + "_noise.wav");
         if (! f.existsAsFile()) continue;
-        std::unique_ptr<juce::AudioFormatReader> reader (fm.createReaderFor (f));
+        auto reader = SafeAudioReader::guard (
+            std::unique_ptr<juce::AudioFormatReader> (fm.createReaderFor (f)));
         if (reader == nullptr || reader->lengthInSamples <= 0) continue;
         const int ch  = (int) juce::jmin ((juce::uint32) 2, reader->numChannels);
         const int len = (int) juce::jmin ((juce::int64) (1 << 23), reader->lengthInSamples);

@@ -1,4 +1,5 @@
 #include "NoiseGateStyleDSP.h"
+#include "SafeXml.h"   // XXE + depth-guarded XML parse (QA-Cleanup)
 
 namespace
 {
@@ -130,7 +131,7 @@ void NoiseGateStyleDSP::getStateInformation (juce::MemoryBlock& dest)
 
 void NoiseGateStyleDSP::setStateInformation (const void* data, int sz)
 {
-    auto xml = juce::AudioProcessor::getXmlFromBinary (data, sz);
+    auto xml = SafeXml::parseBinaryBlob (data, sz);
     if (! xml || ! xml->hasTagName ("NoiseGateStyleDSP")) return;
     auto state = juce::ValueTree::fromXml (*xml);
     setThresholdDb ((float)(double) state.getProperty ("threshold", -40.0));

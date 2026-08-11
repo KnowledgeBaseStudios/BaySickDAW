@@ -1,4 +1,5 @@
 #include "ClipsPage.h"
+#include "SafeXml.h"   // XXE + depth-guarded XML parse (QA-Cleanup)
 #include "../BaySickPlayer/BaySickPlayerProcessor.h"
 #include "../BaySickPlayer/BaySickPlayerEditor.h"   // QA-Layout T3: strip chrome cast
 #include "../Standalone/EnginePrefixUtil.h"
@@ -456,7 +457,7 @@ void ClipsPage::savePagePreset (std::function<void()> onSaved)
                 if (onSaved) onSaved();   // G-7: chain delete after save completes
             };
 
-            if (auto parsed = juce::XmlDocument::parse (xml))
+            if (auto parsed = SafeXml::parse (xml))
             {
                 if (clipRefRel.isNotEmpty())
                     parsed->setAttribute ("clipRef", clipRefRel);
@@ -483,7 +484,7 @@ void ClipsPage::loadPagePreset (const juce::File& xml)
                                                      : juce::String();
     std::unique_ptr<juce::XmlElement> parsed;
     if (contents.isNotEmpty())
-        parsed = juce::XmlDocument::parse (contents);
+        parsed = SafeXml::parse (contents);
     if (parsed == nullptr)
     {
         juce::AlertWindow::showMessageBoxAsync (
@@ -771,7 +772,7 @@ juce::String ClipsPage::exportClipState() const
 void ClipsPage::importClipState (const juce::String& xml)
 {
     if (xml.isEmpty()) return;
-    auto parsed = juce::XmlDocument::parse (xml);
+    auto parsed = SafeXml::parse (xml);
     if (! parsed || ! parsed->hasTagName ("ClipPageState")) return;
 
     if (auto* playerEl = parsed->getChildByName ("PlayerState"))

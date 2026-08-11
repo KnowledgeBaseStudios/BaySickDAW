@@ -1,4 +1,5 @@
 #include "ProjectManager.h"
+#include "SafeXml.h"   // XXE + depth-guarded XML parse (QA-Cleanup)
 #include "AppPaths.h"
 #include "PluginProcessor.h"
 #include "Standalone/UndoSnapshotStore.h"   // QA-UndoCoverage Task 9: load-boundary sweep
@@ -148,7 +149,7 @@ juce::Array<juce::File> ProjectManager::listBackups() const
 bool ProjectManager::restoreBackup (const juce::File& backupXml)
 {
     if (! backupXml.existsAsFile()) return false;
-    auto parsed = juce::XmlDocument::parse (backupXml);
+    auto parsed = SafeXml::parse (backupXml);
     if (parsed == nullptr) return false;
 
     if (hasProject())
@@ -311,7 +312,7 @@ bool ProjectManager::openProject (const juce::File& folderOrXml)
     auto xml = folder.getChildFile ("project.xml");
     if (! xml.existsAsFile()) return false;
 
-    auto parsed = juce::XmlDocument::parse (xml);
+    auto parsed = SafeXml::parse (xml);
     if (parsed == nullptr) return false;
 
     mCurrentFolder = folder;
@@ -685,7 +686,7 @@ void ProjectManager::loadSettings()
 {
     auto f = getSettingsFile();
     if (! f.existsAsFile()) return;
-    auto xml = juce::XmlDocument::parse (f);
+    auto xml = SafeXml::parse (f);
     if (xml == nullptr) return;
     if (auto* recent = xml->getChildByName ("RecentProjects"))
     {
@@ -714,7 +715,7 @@ void ProjectManager::saveSettings()
     // Preserve any non-RecentProjects sections that other subsystems wrote.
     std::unique_ptr<juce::XmlElement> root;
     if (f.existsAsFile())
-        root = juce::XmlDocument::parse (f);
+        root = SafeXml::parse (f);
     if (root == nullptr)
         root = std::make_unique<juce::XmlElement> ("BaySickDAWSettings");
 

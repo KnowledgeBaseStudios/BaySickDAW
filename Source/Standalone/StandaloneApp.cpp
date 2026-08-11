@@ -1,4 +1,5 @@
 #include "StandaloneApp.h"
+#include "SafeXml.h"   // XXE + depth-guarded XML parse (QA-Cleanup)
 #include "../AppPaths.h"
 #include "StandaloneEditor.h"
 #include "HeavyOperationOverlay.h"
@@ -444,7 +445,7 @@ void BaySickDAWStandaloneApp::loadMasterOutputRouting()
 {
     const auto f = getMasterOutputFile();
     if (! f.existsAsFile()) return;
-    auto xml = juce::XmlDocument::parse (f);
+    auto xml = SafeXml::parse (f);
     if (xml == nullptr || ! xml->hasTagName ("MASTEROUT")) return;
     const int  first = xml->getIntAttribute ("firstChannel", 0);
     const bool mono  = xml->getBoolAttribute ("mono", false);
@@ -476,7 +477,7 @@ void BaySickDAWStandaloneApp::loadMultiCoreRenderingPref()
     const auto f = ProjectManager::getSettingsFile();
     if (! f.existsAsFile()) return;   // first launch -- keep the in-memory default (true)
 
-    auto root = juce::XmlDocument::parse (f);
+    auto root = SafeXml::parse (f);
     if (root == nullptr) return;
 
     if (auto* node = root->getChildByName ("MultiCoreRendering"))
@@ -503,7 +504,7 @@ void BaySickDAWStandaloneApp::saveMultiCoreRenderingPref()
     // <RecentIRFiles>, ProjectManager writes <RecentProjects>, etc.).
     std::unique_ptr<juce::XmlElement> root;
     if (f.existsAsFile())
-        root = juce::XmlDocument::parse (f);
+        root = SafeXml::parse (f);
     if (root == nullptr)
         root = std::make_unique<juce::XmlElement> ("BaySickDAWSettings");
 
@@ -526,7 +527,7 @@ void BaySickDAWStandaloneApp::loadMidiTriggerVelocityPref()
     const auto f = ProjectManager::getSettingsFile();
     if (! f.existsAsFile()) return;
 
-    auto root = juce::XmlDocument::parse (f);
+    auto root = SafeXml::parse (f);
     if (root == nullptr) return;
 
     if (auto* node = root->getChildByName ("MidiTriggerVelocity"))
@@ -541,7 +542,7 @@ void BaySickDAWStandaloneApp::saveMidiTriggerVelocityPref()
 
     std::unique_ptr<juce::XmlElement> root;
     if (f.existsAsFile())
-        root = juce::XmlDocument::parse (f);
+        root = SafeXml::parse (f);
     if (root == nullptr)
         root = std::make_unique<juce::XmlElement> ("BaySickDAWSettings");
 
@@ -585,7 +586,7 @@ void BaySickDAWStandaloneApp::saveAudioSettings()
 
         if (outEmpty || inEmpty)
         {
-            if (auto prev = juce::XmlDocument::parse (f))
+            if (auto prev = SafeXml::parse (f))
             {
                 const auto prevOut = prev->getStringAttribute ("audioOutputDeviceName");
                 const auto prevIn  = prev->getStringAttribute ("audioInputDeviceName");
@@ -805,7 +806,7 @@ void BaySickDAWStandaloneApp::initialise(const juce::String&)
 
     if (settingsFile.existsAsFile())
     {
-        auto xml = juce::XmlDocument::parse(settingsFile);
+        auto xml = SafeXml::parse (settingsFile);
         if (xml != nullptr)
         {
             xmlDeviceType = xml->getStringAttribute ("deviceType");
@@ -1123,7 +1124,7 @@ void BaySickDAWStandaloneApp::initialise(const juce::String&)
         juce::StringArray savedMidiIds;
         if (settingsFile.existsAsFile())
         {
-            if (auto savedXml = juce::XmlDocument::parse (settingsFile))
+            if (auto savedXml = SafeXml::parse (settingsFile))
             {
                 for (auto* c : savedXml->getChildIterator())
                     if (c->hasTagName ("MIDIINPUT"))
@@ -1367,4 +1368,35 @@ void BaySickDAWStandaloneApp::handleIncomingMidiMessage (juce::MidiInput* source
     }
 }
 
+// SECURITY (CL-289 Tier-1 part 3, DLL-1) - ATTEMPTED AND REVERTED 2026-08-10.
+//
+// The finding is real: the installer runs unelevated into
+// $LOCALAPPDATA\Programs\BaySickDAW (Installer/BaySickDAW-Tester.nsi:51, :124),
+// Windows searches the exe's own folder FIRST for a bare-name module, and JUCE
+// loads uxtheme.dll / UIAutomationCore.dll / dsound.dll by bare name - none of
+// them on the KnownDLLs list, all reachable at startup.  Anything running as the
+// user can drop a DLL there and get code running inside the DAW.
+//
+// The attempted fix was SetDefaultDllDirectories(LOAD_LIBRARY_SEARCH_SYSTEM32 |
+// LOAD_LIBRARY_SEARCH_USER_DIRS) at static-init.  It is OUT pending a real
+// plugin-hosting test, NOT because it was proven to break anything -- an
+// earlier note here claimed a Keyscape crash had disproved it, which was wrong:
+// that crash was on an installer build predating this change entirely.
+//
+// Why it MIGHT break plugins, which is why it needs testing before it returns.
+// JUCE loads a plugin with a plain LoadLibrary on a full path
+// (juce_Threads_windows.cpp:313) - no LOAD_WITH_ALTERED_SEARCH_PATH, and nothing
+// anywhere calls AddDllDirectory or SetDllDirectory.  So a plugin's OWN
+// dependency DLLs resolve through the standard order: app directory, System32,
+// Windows, current directory, PATH.  That call removes three of those, PATH
+// included, and large instruments (Spectrasonics et al) ship a shared runtime
+// that is found exactly that way.
+//
+// So closing this from inside the process risks taking the plugin search path
+// with it, and that risk is UNMEASURED.  The fix with no plugin risk at all is
+// to stop the install folder being user-writable - install to Program Files
+// with elevation - which leaves the search order untouched.  That is an
+// installer + product decision (a UAC prompt on an app aimed at first-time
+// users), so it is Jeff's call, and it is recorded in the Tier-1 report rather
+// than half-done here.
 START_JUCE_APPLICATION(BaySickDAWStandaloneApp)

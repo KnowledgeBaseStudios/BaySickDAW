@@ -1,4 +1,5 @@
 #include "DeEsserDSP.h"
+#include "SafeXml.h"   // XXE + depth-guarded XML parse (QA-Cleanup)
 #include <cmath>
 #include <algorithm>
 
@@ -542,7 +543,7 @@ void DeEsserDSP::getStateInformation (juce::MemoryBlock& dest)
 
 void DeEsserDSP::setStateInformation (const void* data, int sz)
 {
-    std::unique_ptr<juce::XmlElement> xml (juce::AudioProcessor::getXmlFromBinary (data, sz));
+    std::unique_ptr<juce::XmlElement> xml (SafeXml::parseBinaryBlob (data, sz));
     if (! xml || ! xml->hasTagName ("DeEsserDSP")) return;
 
     juce::ValueTree state = juce::ValueTree::fromXml (*xml);

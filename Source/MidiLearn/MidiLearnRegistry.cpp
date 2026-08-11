@@ -1,4 +1,5 @@
 #include "MidiLearnRegistry.h"
+#include "SafeXml.h"   // XXE + depth-guarded XML parse (QA-Cleanup)
 #include "../AppPaths.h"
 
 namespace
@@ -379,7 +380,7 @@ bool MidiLearnRegistry::loadGlobalDefaults()
 {
     const auto file = globalDefaultsFile();
     if (! file.existsAsFile()) return false;
-    auto xml = juce::parseXML (file);
+    auto xml = SafeXml::parse (file);
     if (! xml) return false;
     auto vt = juce::ValueTree::fromXml (*xml);
     if (! vt.isValid()) return false;

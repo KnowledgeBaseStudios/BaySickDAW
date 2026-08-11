@@ -1,4 +1,5 @@
 #include "BaySickBassEditor.h"
+#include "SafeXml.h"   // XXE + depth-guarded XML parse (QA-Cleanup)
 #include "../AppPaths.h"
 #include "../UserFileSave.h"
 
@@ -1056,7 +1057,7 @@ void BaySickBassEditor::savePreset (const juce::String& name)
 
 void BaySickBassEditor::loadPreset (const juce::File& f)
 {
-    auto xml = juce::XmlDocument::parse (f);
+    auto xml = SafeXml::parse (f);
     if (! xml || ! xml->hasTagName (mProc.apvts.state.getType()))
     {
         juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon,

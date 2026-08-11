@@ -58,10 +58,21 @@ set(VIBESYNTH_DEFS
     JUCE_DISPLAY_SPLASH_SCREEN=0
     JUCE_WIN32_USE_DIRECTWRITE=0
     JUCE_VST3_CAN_REPLACE_VST2=0
-    # 2026-04-28: MP3 patents expired April 2017; safe to enable.  Allows
-    # .mp3 drops on Builder + Clips empty-state to actually decode (default
-    # JUCE flag was 0 due to pre-2017 patent concerns that no longer apply).
-    JUCE_USE_MP3AUDIOFORMAT=1
+    # MP3 DECODE MOVED OFF JUCE (QA-Cleanup 2026-08-11, security).
+    #
+    # This was 1 from 2026-04-28 ("MP3 patents expired April 2017; safe to
+    # enable"), which is true about PATENTS and says nothing about the decoder.
+    # JUCE's is a ~3,185-line hand-port, described in its own header as a
+    # conversion of decompiled output, and it has never been audited - a second
+    # parser of untrusted input for a format we ALREADY ship a maintained
+    # decoder for, since libs/lame/mpglib is compiled into BaySickLame for
+    # export.
+    #
+    # .mp3 import is UNCHANGED for the user: Source/MpglibAudioFormat.h wraps
+    # mpglib as a juce::AudioFormat and SafeAudioFormats::registerAll installs
+    # it everywhere registerBasicFormats() used to be called.  Turning this back
+    # on would register JUCE's decoder alongside ours for the same extension.
+    JUCE_USE_MP3AUDIOFORMAT=0
     # QA-0a (2026-05-07): silence two AAX-format paramID asserts in JUCE's
     # validateParameter (paramID-too-long, paramID-trimmed-duplicate).
     # BaySickDAW is standalone-only -- no AAX target -- so these checks are
@@ -200,6 +211,9 @@ set(VIBESYNTH_DSP_SOURCES
 set(VIBESYNTH_LINK_LIBS
     juce::juce_audio_utils
     juce::juce_dsp
+    # SHA-256 for Core Library asset verification (QA-Cleanup 2026-08-11,
+    # security MEDIUM-6).  Header-and-source only, no external dependency.
+    juce::juce_cryptography
 )
 
 # ── BaySickNAM (Neural Amp Modeler) Core static library ─────────────────────

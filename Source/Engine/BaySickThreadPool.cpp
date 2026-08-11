@@ -100,32 +100,14 @@ void BaySickThreadPool::runOneTask (RenderTask* task) noexcept
     if (task == nullptr)
         return;
 
-    // QA-N (DIAG-02): accumulate this task's wall-clock into the per-block
-    // busy sum so the DSP meter can report TOTAL render work (audio-thread
-    // pump + every worker), not just the audio thread's critical path.  Gated
-    // on the MT flag: with workers parked (serial-diagnostic), only the audio
-    // thread runs tasks and its own processBlock wall-clock already IS the
-    // total -- so the tick reads would be pure overhead.  Zero cost when MT is
-    // off (the plan's contract).  relaxed: diagnostic, no ordering dependency.
     // TS7 §6.9: an offline freeze render prunes every task the frozen track does
     // not depend on.  The task still flows through the pool and still decrements
     // its children below -- skipping the DEPENDENCY work would starve MasterTask
     // and stall the block on its watchdog.  Only run() is skipped.
     if (task->isRenderSkipped())
-    {
         task->clearOnSkip();
-    }
-    else if (RenderEngine::gMultiThreadedEngineEnabled.load (std::memory_order_relaxed))
-    {
-        const auto s = juce::Time::getHighResolutionTicks();
-        task->run();
-        mBusyTicks.fetch_add (juce::Time::getHighResolutionTicks() - s,
-                              std::memory_order_relaxed);
-    }
     else
-    {
         task->run();
-    }
 
     // Decrement each child's dep counter. acq_rel guarantees that this
     // task's writes to mOutputBuffer are visible to the worker that picks
@@ -134,11 +116,7 @@ void BaySickThreadPool::runOneTask (RenderTask* task) noexcept
     {
         const int prev = child->mDeps.fetch_sub (1, std::memory_order_acq_rel);
         if (prev == 1)
-        {
-            if (RenderEngine::MtDiagnostic::gCaptureOn.load (std::memory_order_relaxed))
-                RenderEngine::MtDiagnostic::gChildSubmits.fetch_add (1, std::memory_order_relaxed);
             submit (child);
-        }
     }
 
     // LAST thing this task does, and it must stay last: the children above are
@@ -157,23 +135,16 @@ void BaySickThreadPool::runOneTask (RenderTask* task) noexcept
 bool BaySickThreadPool::runUntilOrTimeout (std::atomic<bool>& done,
                                           double              deadlineMillisHiRes) noexcept
 {
-    const bool capture = RenderEngine::MtDiagnostic::gCaptureOn.load (std::memory_order_relaxed);
     while (! blockComplete (done))
     {
         if (auto* task = tryPop())
         {
-            if (capture)
-                RenderEngine::MtDiagnostic::gMainThreadTasks.fetch_add (1, std::memory_order_relaxed);
             runOneTask (task);
         }
         else
         {
             if (juce::Time::getMillisecondCounterHiRes() >= deadlineMillisHiRes)
-            {
-                if (capture)
-                    RenderEngine::MtDiagnostic::gWatchdogFires.fetch_add (1, std::memory_order_relaxed);
                 return false;
-            }
             std::this_thread::yield();
         }
     }
@@ -221,8 +192,6 @@ void BaySickThreadPool::workerLoop (int workerIndex) noexcept
             continue;
         }
 
-        const bool capture = RenderEngine::MtDiagnostic::gCaptureOn.load (std::memory_order_relaxed);
-
         // Spin phase - tight loop, no yield. Typical inter-task gap is
         // microseconds; we'd rather burn a few cycles than pay a context
         // switch.
@@ -231,11 +200,6 @@ void BaySickThreadPool::workerLoop (int workerIndex) noexcept
         {
             if (auto* task = tryPop())
             {
-                if (capture)
-                {
-                    RenderEngine::MtDiagnostic::gWorkerSpinFinds.fetch_add (1, std::memory_order_relaxed);
-                    RenderEngine::MtDiagnostic::gWorkerTasks    .fetch_add (1, std::memory_order_relaxed);
-                }
                 runOneTask (task);
                 gotTask = true;
                 break;
@@ -251,11 +215,6 @@ void BaySickThreadPool::workerLoop (int workerIndex) noexcept
         if (auto* task = tryPop())
         {
             mImpl->activeWaiters.fetch_sub (1, std::memory_order_release);
-            if (capture)
-            {
-                RenderEngine::MtDiagnostic::gWorkerSleepFinds.fetch_add (1, std::memory_order_relaxed);
-                RenderEngine::MtDiagnostic::gWorkerTasks     .fetch_add (1, std::memory_order_relaxed);
-            }
             runOneTask (task);
             continue;
         }
@@ -263,13 +222,7 @@ void BaySickThreadPool::workerLoop (int workerIndex) noexcept
         // Wait until a submit() signals us, or shutdown wakes everyone.
         // -1 = no timeout. juce::WaitableEvent::signal is sticky, so if a
         // signal raced ahead of this wait it returns immediately.
-        if (capture)
-            RenderEngine::MtDiagnostic::gWorkerIdleSleeps.fetch_add (1, std::memory_order_relaxed);
-
         waker.wait (-1);
-
-        if (capture)
-            RenderEngine::MtDiagnostic::gWorkerWakes.fetch_add (1, std::memory_order_relaxed);
 
         mImpl->activeWaiters.fetch_sub (1, std::memory_order_release);
     }

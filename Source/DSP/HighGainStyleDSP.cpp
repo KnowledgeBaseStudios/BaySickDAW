@@ -1,4 +1,5 @@
 #include "HighGainStyleDSP.h"
+#include "SafeXml.h"   // XXE + depth-guarded XML parse (QA-Cleanup)
 
 namespace
 {
@@ -224,7 +225,7 @@ void HighGainStyleDSP::getStateInformation (juce::MemoryBlock& dest)
 
 void HighGainStyleDSP::setStateInformation (const void* data, int sz)
 {
-    auto xml = juce::AudioProcessor::getXmlFromBinary (data, sz);
+    auto xml = SafeXml::parseBinaryBlob (data, sz);
     if (! xml || ! xml->hasTagName ("HighGainStyleDSP")) return;
     auto state = juce::ValueTree::fromXml (*xml);
     setDist   ((float)(double) state.getProperty ("dist",   0.5));

@@ -5,21 +5,25 @@
 #include "../PatternManager.h"
 #include "../DSP/EQ8MsDSP.h"
 #include "SharedUI.h"
-#include "PianoRoll.h"
-#include "DrumKitGrid.h"
 #include "StandaloneApp.h"
 #include "UndoActions.h"
 
 // ── DrumPage ──────────────────────────────────────────────────────────────────
 // One Drums instrument page (D1.3, dynamic-drum model).  Up to kMaxDrumPages
 // instances.  Functionally identical to LayersPage / BassPage - each drum tab
-// owns one independent engine instance + its own piano roll.
+// owns one independent engine instance.
 //
 // Three sub-tabs:
-//   Tab 0 "Drum Kit"   - 16-row drum-pad / step-sequencer view (cross-drum)
+//   Tab 0 "Drum Kit"   - a REDIRECT, like tab 2.  The cross-drum kit view lives
+//                        on PianoRollPage; this page owns no kit component.
 //   Tab 1 "Player"     - the engine's editor, full page (engine is chosen at
 //                        the ribbon "+" menu; sound picking is on the kit pads)
-//   Tab 2 "Piano Roll" - PianoRollContainer bound to drumRolls[mPageIndex]
+//   Tab 2 "Piano Roll" - a REDIRECT, not a view.  The roll itself lives on the
+//                        unified PianoRollPage (2026-04-26); this page owns no
+//                        roll component.  QA-Layout T4 (L11) moved the row into
+//                        the page dropdown's "Pages:" list
+//                        (StandaloneEditor::buildPageWindowRows), which navigates
+//                        to the Piano Roll tab -- there is no sub-tab pill.
 //
 // D2 Drum Kit data model
 // ─────────────────────────
@@ -50,7 +54,6 @@ public:
     void resized() override;
     void timerCallback() override;
 
-    void setPlayHead(StandalonePlayHead* ph);
     int  getPageIndex()    const { return mPageIndex; }
     int  getActiveTab()    const { return mActiveTab; }
     juce::Colour getPageColor() const { return mPageColor; }
@@ -58,24 +61,6 @@ public:
 
     void switchTab(int idx);
 
-    // ── D2 Drum Kit hooks ─────────────────────────────────────────────────────
-    // StandaloneEditor wires:
-    //   getKitListProvider     - returns the cross-drum list in ribbon order
-    //   onKitRowClicked        - picker click → activate / add-new / context
-    //   onKitAuditionOn / Off  - piano-key press-and-hold (Batch 4)
-    //   onKitReorderRow        - drag-handle drop → reorder ribbon + kit (Batch 4)
-    void setKitListProvider     (std::function<std::vector<KitDrumInfo>()> fn);
-    void setKitRowClickHandler  (std::function<void(int row, juce::Component* anchor)> fn);
-    void setKitAuditionHandlers (std::function<void(int row)> onOn,
-                                 std::function<void(int row)> onOff);
-    void setKitReorderHandler   (std::function<void(int srcRow, int dstRow)> fn);
-    // Batch 5: Kit button click - opens Save/Load Kit popup.  StandaloneEditor
-    // wires this since kit save/load needs ribbon + DrumPage management access.
-    void setKitMenuHandler      (std::function<void(juce::Component* anchor)> fn);
-    // Lock/Unlock button click - wired by StandaloneEditor.  The argument is
-    // the kit the grid is showing; the toggle applies to that kit alone.
-    void setGlobalLockHandler   (std::function<void(int bank)> fn);
-    void refreshKitView ();
 
     std::function<void()> onEngineSelected;
     // D1.4-fix: drum tab name auto-update.  Fired whenever mSoundName changes
@@ -105,8 +90,6 @@ public:
 
     void                setTabName(const juce::String& name);
     const juce::String& getTabName() const { return mTabName; }
-
-    PianoRollContainer* getPianoRoll() const { return mPianoRoll.get(); }
 
     juce::String                getEngineType()      const { return mEngineType; }
     juce::AudioProcessor*       getEngineProcessor() const { return mEngineProcessor; }
@@ -171,7 +154,6 @@ public:
     {
         if (mLocked == l) return;
         mLocked = l;
-        refreshPianoRollContextLabel();
         if (onLockChanged) onLockChanged();
     }
 
@@ -212,13 +194,8 @@ private:
     PatternManager&     mPM;
     int                 mPageIndex;   // 0..kMaxDrumPages-1
     juce::Colour        mPageColor;
-    StandalonePlayHead* mPlayHead { nullptr };
 
     int  mActiveTab   { 0 };
-
-    // Tab 0: Drum Kit (D2 - cross-drum 16-row piano-roll-style view).
-    // Same content regardless of which drum tab is active in the ribbon.
-    std::unique_ptr<DrumKitContainer>           mDrumKitTab;
 
     // Tab 1: Player.  QA-Layout T2 (L4): the picker button + sound-name
     // label row is gone -- the engine editor fills the tab.
@@ -259,16 +236,10 @@ private:
     // needs its own transaction to satisfy the every-action-undoable rule.
     void toggleLockWithUndo();
 
-    // Tab 2: Piano Roll
-    std::unique_ptr<PianoRollContainer>         mPianoRoll;
-
     // J-6 EQ unification (2026-05-03): EQ tab + display removed; pre-rack EQ
     // is exclusively edited via the Effects page Pre EQ tab.
 
-    void buildDrumKitTab();
     void buildPlayerTab();
-    void buildPianoRollTab();
-    void refreshPianoRollContextLabel();
 
     juce::String trackId() const { return "drm_" + juce::String(mPageIndex); }
 

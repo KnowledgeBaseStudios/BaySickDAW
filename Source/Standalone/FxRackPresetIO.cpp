@@ -1,4 +1,5 @@
 #include "FxRackPresetIO.h"
+#include "SafeXml.h"   // XXE + depth-guarded XML parse (QA-Cleanup)
 #include "EffectsPage.h"
 #include "../AppPaths.h"
 #include "../PluginProcessor.h"
@@ -113,7 +114,7 @@ bool save (BaySickDAWProcessor& proc, int channelId,
 bool load (BaySickDAWProcessor& proc, int channelId,
            const juce::File& presetFile, juce::String& outErr)
 {
-    auto xml = juce::XmlDocument::parse (presetFile);
+    auto xml = SafeXml::parse (presetFile);
     if (! xml || ! xml->hasTagName ("BaySickFxRackPreset"))
     { outErr = "Not an FX Rack preset file."; return false; }
 

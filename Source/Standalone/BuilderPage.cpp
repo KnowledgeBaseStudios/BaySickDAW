@@ -1,4 +1,5 @@
 #include "BuilderPage.h"
+#include "SafeAudioReader.h"   // channel/frame sanity gate (QA-Cleanup)
 #include "../ProjectFileResolver.h"
 #include "../AppPaths.h"         // TS7: freeze_timing.txt lands beside the app
 #include "../BaySickRustyDrums/BaySickRustyDrumsProcessor.h"   // TS7 §6.9 kit freeze
@@ -21,6 +22,7 @@
 #include "../BaySickPedals/BaySickPedalsProcessor.h"   // QA-ModelShell TS3: offline pedal-board lanes
 #include "../Harmless/HarmlessProcessor.h"             // BLU-344: offline mod-editor lanes
 #include "../BaySickVocal/BaySickVocalProcessor.h"  // QA-ModelShell TS2: vox lane -> vocal + embedded NAM/IR
+#include "SafeAudioFormats.h"   // MP3 decode via vendored LAME (QA-Cleanup)
 
 // Smoke #45: minimal user32 import for the right-Alt check -- deliberately
 // NOT <windows.h>: its wingdi Rectangle() collides with juce::Rectangle
@@ -174,9 +176,7 @@ void BrowserItem::mouseDrag(const MouseEvent& e)
     // Require a small pixel threshold so single clicks don't kick off drags.
     if (e.getDistanceFromDragStart() < 3) return;
 
-    const char* kindStr = (mKind == Kind::Pattern   ? "pattern"
-                        :  mKind == Kind::Audio     ? "audio"
-                        :                              "auto");
+    const char* kindStr = (mKind == Kind::Pattern ? "pattern" : "auto");
     var description(String(kindStr) + ":" + String(mIndex));
 
     // Component snapshot at natural scale; JUCE applies its own alpha on
@@ -1757,7 +1757,6 @@ void BrowserPanel::openRenamePopup(BrowserItem& item)
             switch (kind)
             {
                 case BrowserItem::Kind::Pattern:    renamePatternAt   (idx, t); break;
-                case BrowserItem::Kind::Audio:      renameAudioAt     (idx, t); break;
                 case BrowserItem::Kind::Automation: renameAutomationAt(idx, t); break;
             }
         }
@@ -1778,9 +1777,6 @@ void BrowserPanel::showItemContextMenu(BrowserItem& item, Point<int> /*globalPt*
     const auto kind = item.getKind();
     const int  idx  = item.getIndex();
     BrowserItem* raw = &item;
-
-    // D3: choke-group submenu IDs for audio items: 200 = None, 201..216 = groups 1..16.
-    constexpr int kIdChokeBase = 200;
 
     PopupMenu m;
     m.addItem(1, "Rename...");
@@ -1803,20 +1799,6 @@ void BrowserPanel::showItemContextMenu(BrowserItem& item, Point<int> /*globalPt*
         }
     }
 
-    // D3: Choke Group submenu - audio items only (per-clip, persisted in the
-    // audio library entry).  Synth choke uses the per-tab context menu.
-    if (kind == BrowserItem::Kind::Audio)
-    {
-        m.addSeparator();
-        const int curGroup = mPM.getAudioLibraryChokeGroup(idx);
-        PopupMenu chokeSub;
-        chokeSub.addItem(kIdChokeBase, "None", true, curGroup == 0);
-        for (int g = 1; g <= 16; ++g)
-            chokeSub.addItem(kIdChokeBase + g, "Group " + String(g),
-                             true, curGroup == g);
-        m.addSubMenu("Choke Group", chokeSub);
-    }
-
     m.addSeparator();
     if (kind == BrowserItem::Kind::Pattern) {
         m.addItem(2, "Render to WAV...");
@@ -1826,18 +1808,9 @@ void BrowserPanel::showItemContextMenu(BrowserItem& item, Point<int> /*globalPt*
     m.addItem(3, "Delete");
 
     m.showMenuAsync(PopupMenu::Options().withTargetComponent(raw),
-        [this, kind, idx, raw, kIdChokeBase](int result)
+        [this, kind, idx, raw](int result)
         {
             if (result == 1) { openRenamePopup(*raw); return; }
-            // D3: choke-group submenu (200..216 → 0..16) for audio items.
-            if (kind == BrowserItem::Kind::Audio
-                && result >= kIdChokeBase && result <= kIdChokeBase + 16)
-            {
-                performLibraryOp ("Choke Group", /*withBlocks*/ false,
-                                  [this, idx, result]
-                                  { mPM.setAudioLibraryChokeGroup(idx, result - kIdChokeBase); });
-                return;
-            }
             if (result == 5 && kind == BrowserItem::Kind::Automation)
             {
                 // Clear the user rename; auto-resolver takes over again.
@@ -1913,22 +1886,6 @@ void BrowserPanel::showItemContextMenu(BrowserItem& item, Point<int> /*globalPt*
                         });
                         rebuildPatternRows();
                         if (onPatternSelected) onPatternSelected(mSelectedPat);
-                    }
-                    break;
-                case BrowserItem::Kind::Audio:
-                    if (idx < mAudioPaths.size())
-                    {
-                        // QA-E Task 5 (2026-05-15): convert flat-list idx to
-                        // library index by path lookup, then route through
-                        // the shared prompt+cascade helper.  findByPath
-                        // returns the FIRST matching entry; if multiple
-                        // entries share this path under different page
-                        // owners, only the first gets removed per Delete
-                        // click (V1 acceptable since the tree right-click
-                        // path uses precise libIdx).
-                        const int libIdx = mPM.findAudioLibraryIndexByPath (mAudioPaths[idx]);
-                        if (libIdx >= 0)
-                            confirmAndDeleteLibraryEntry (libIdx);
                     }
                     break;
                 case BrowserItem::Kind::Automation:
@@ -5084,8 +5041,8 @@ void ArrangementGrid::showClipContextMenu(int blockIdx)
                     if (af.existsAsFile())
                     {
                         juce::AudioFormatManager fm;
-                        fm.registerBasicFormats();
-                        if (std::unique_ptr<juce::AudioFormatReader> rd { fm.createReaderFor (af) })
+                        SafeAudioFormats::registerAll (fm);
+                        if (auto rd = SafeAudioReader::create (fm, af))
                         {
                             if (rd->sampleRate > 0 && rd->lengthInSamples > 0
                                 && b.originalBPM > 0.f)
@@ -5300,8 +5257,8 @@ void ArrangementGrid::showAudioClipProperties(int blockIdx)
             else
             {
                 juce::AudioFormatManager bfm;
-                bfm.registerBasicFormats();
-                if (std::unique_ptr<juce::AudioFormatReader> rd { bfm.createReaderFor (bf) })
+                SafeAudioFormats::registerAll (bfm);
+                if (auto rd = SafeAudioReader::create (bfm, bf))
                 {
                     est = BpmDetect::detect (*rd);
                     sBpmCache.emplace (key, est);
@@ -5490,8 +5447,9 @@ void ArrangementGrid::importAudioFile(const juce::String& path, int targetRow, f
     // Read file metadata to get actual duration.
     // Use a local AudioFormatManager - message thread, so file I/O is fine.
     juce::AudioFormatManager fm;
-    fm.registerBasicFormats();
-    std::unique_ptr<juce::AudioFormatReader> reader (fm.createReaderFor (f));
+    SafeAudioFormats::registerAll (fm);
+    auto reader = SafeAudioReader::guard (
+        std::unique_ptr<juce::AudioFormatReader> (fm.createReaderFor (f)));
 
     // QA-Ec (G, 2026-07-08): the clip lands at its TRUE wall-clock length at
     // the tempo in effect at the target bar (base + ruler tempo flags), and
@@ -5658,8 +5616,8 @@ void ArrangementGrid::placeAudioLibraryEntry(int libIdx, int targetRow, float ta
 
     // Read file metadata for exact lengthBeats (mirrors importAudioFile).
     juce::AudioFormatManager fm;
-    fm.registerBasicFormats();
-    std::unique_ptr<juce::AudioFormatReader> reader (fm.createReaderFor (f));
+    SafeAudioFormats::registerAll (fm);
+    auto reader = SafeAudioReader::create (fm, f);
     int   lengthBars  = 4;
     // QA-Ec (G): the library entry's stored BPM is the source of truth
     // (stamped at first import with the import tempo; user-editable via
@@ -6666,8 +6624,7 @@ bool ArrangementGrid::sliceOneBlock (int hit, double cutBars)
             const juce::File f = onResolveStoredPath
                 ? onResolveStoredPath (orig.audioFilePath)
                 : juce::File (orig.audioFilePath);
-            if (auto reader = std::unique_ptr<juce::AudioFormatReader> (
-                    mAFM.createReaderFor (f)))
+            if (auto reader = SafeAudioReader::create (mAFM, f))
             {
                 const double fileBPM = (orig.originalBPM > 0.f)
                     ? (double) orig.originalBPM : 120.0;
@@ -8372,7 +8329,7 @@ BuilderPage::BuilderPage(BaySickDAWProcessor& p, PatternManager& pm)
     : mProcessor(p), mPM(pm)
 {
     setWantsKeyboardFocus(true);
-    mAFM.registerBasicFormats();
+    SafeAudioFormats::registerAll (mAFM);
 
     // Source Picker / Browser
     mBrowser = std::make_unique<BrowserPanel>(pm, mAFM, mThumbCache);
@@ -9661,7 +9618,7 @@ bool BuilderPage::renderFreezeFile (BaySickGraph::InsertKind kind, int index,
     graph.armFreezeTap (kind, index);
 
     juce::AudioFormatManager fm;
-    fm.registerBasicFormats();
+    SafeAudioFormats::registerAll (fm);
     std::unique_ptr<juce::AudioFormatWriter> writer;
     {
         dest.getParentDirectory().createDirectory();
@@ -9811,7 +9768,7 @@ bool BuilderPage::renderKitFreezeFiles (const std::vector<juce::File>& dests,
     opts.sampleRate   = mProcessor.getSampleRate();
 
     juce::AudioFormatManager fm;
-    fm.registerBasicFormats();
+    SafeAudioFormats::registerAll (fm);
     juce::WavAudioFormat wav;
 
     std::vector<std::unique_ptr<juce::AudioFormatWriter>> writers;

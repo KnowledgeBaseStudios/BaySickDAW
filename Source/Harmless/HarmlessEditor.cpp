@@ -1,4 +1,5 @@
 #include "HarmlessEditor.h"
+#include "SafeXml.h"   // XXE + depth-guarded XML parse (QA-Cleanup)
 #include "../AppPaths.h"
 #include "../UserFileSave.h"
 #include "../Standalone/SharedUI.h"   // VKnobAutomation hooks
@@ -1379,7 +1380,7 @@ void HarmlessEditor::savePreset (const juce::String& name)
 void HarmlessEditor::loadPreset (const juce::File& f)
 {
     bool ok = false;
-    if (auto xml = juce::XmlDocument::parse (f))
+    if (auto xml = SafeXml::parse (f))
         if (xml->hasTagName (mProc.apvts.state.getType()))
         {
             mProc.apvts.replaceStateKeepingUndoHistory (juce::ValueTree::fromXml (*xml),

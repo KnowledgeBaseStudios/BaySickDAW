@@ -235,7 +235,23 @@ private:
     std::atomic<bool> mNonRealtime { false };
     std::atomic<bool> mLoadFailed  { false };
 
-    juce::MemoryBlock  mPendingState;
+    // A wedged helper used to cost the MESSAGE THREAD the full write timeout on
+    // EVERY action -- setState / setParameter / prepare / openEditor / close /
+    // Shutdown all go down this pipe, so deleting a stuck plugin paid it twice.
+    // The audio thread was always insulated (see the note by processBlock); the
+    // UI was not.  Latch on the first timed-out send so the ceiling is paid
+    // once rather than per click, exactly as mOfflineWedged does for renders.
+    // Cleared wherever the connection is re-established.
+    std::atomic<bool> mSendWedged { false };
+
+    // Written on the IPC reader thread, read from the message thread during
+    // project save -- the same hazard the note below records for mLastError,
+    // and the one member carrying a large HELPER-CONTROLLED buffer.  The helper
+    // picks the timing (answer GetState with a big blob, then immediately send
+    // a small one), so replaceAll can realloc underneath the copy.  Missed when
+    // every other cross-thread member here was given a lock.
+    mutable juce::CriticalSection mStateLock;
+    juce::MemoryBlock   mPendingState;
     juce::WaitableEvent mStateReady { true };
 
     // Written on the reader thread, read from the message thread -- a bare

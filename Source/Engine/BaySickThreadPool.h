@@ -89,17 +89,6 @@ public:
     // audio thread's critical-path wall-clock.  The dispatcher resets it at
     // block start.
     //
-    // NOTHING reads the sum today.  The DSP meter used to and no longer does:
-    // sum-of-cores is not deadline-proximity, so it false-tripped the overload
-    // tiers at healthy MT load and measureDspLoadAndOverload moved to render
-    // wall-clock (see its comment for the full reasoning).  The producer is kept
-    // deliberately, routed to the planned MT-diagnostic compile-gate alongside
-    // RenderEngine::MtDiagnostic; do not delete it as dead code.  relaxed
-    // everywhere: diagnostic measurement, no algorithmic dependency on the
-    // value.
-    void        resetBusyTicks() noexcept       { mBusyTicks.store (0, std::memory_order_relaxed); }
-    juce::int64 getBusyTicks()   const noexcept { return mBusyTicks.load (std::memory_order_relaxed); }
-
     // Zero the outstanding-task count at the block boundary.  The dispatcher
     // calls this before seeding the leaves; it is also what absorbs the count
     // left behind by a block that timed out with tasks still in flight.
@@ -137,15 +126,11 @@ private:
     int               mNumWorkers = 0;
     std::atomic<bool> mShutdown   { false };
 
-    // Cache-line isolated (workers fetch_add it concurrently under MT) so the
-    // contended accumulator never false-shares with mShutdown / mNumWorkers.
-    alignas (64) std::atomic<juce::int64> mBusyTicks { 0 };
-
     // Tasks submitted for this block that have not finished runOneTask.
     // Reaches zero ONLY at true graph quiescence: a task submits its
     // newly-ready children BEFORE decrementing itself, so the count already
     // covers them at the moment it drops.  Its own cache line - every worker
-    // RMWs it twice per task, and the block's completion signal must not share
-    // a line with the equally contended mBusyTicks.
+    // RMWs it twice per task, so the block's completion signal keeps a line to
+    // itself rather than sharing with mShutdown / mNumWorkers.
     alignas (64) std::atomic<int> mOutstandingTasks { 0 };
 };

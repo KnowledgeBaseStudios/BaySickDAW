@@ -1,4 +1,6 @@
 #include "DenoiseDSP.h"
+#include "SafeAudioReader.h"   // channel/frame sanity gate (QA-Cleanup)
+#include "SafeAudioFormats.h"   // MP3 decode via vendored LAME (QA-Cleanup)
 
 // ── DenoiseProfile serialization ─────────────────────────────────────────────
 
@@ -138,8 +140,9 @@ namespace
     std::unique_ptr<juce::AudioFormatReader> openWav (const juce::File& f)
     {
         juce::AudioFormatManager fm;
-        fm.registerBasicFormats();
-        return std::unique_ptr<juce::AudioFormatReader> (fm.createReaderFor (f));
+        SafeAudioFormats::registerAll (fm);
+        return SafeAudioReader::guard (
+            std::unique_ptr<juce::AudioFormatReader> (fm.createReaderFor (f)));
     }
 
     // Profile bins live on the profile's own sample-rate grid; remap by

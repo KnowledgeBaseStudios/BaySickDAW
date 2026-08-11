@@ -1,4 +1,5 @@
 #include "GateDSP.h"
+#include "SafeXml.h"   // XXE + depth-guarded XML parse (QA-Cleanup)
 
 GateDSP::GateDSP()
 {
@@ -77,7 +78,7 @@ void GateDSP::getStateInformation (juce::MemoryBlock& dest)
 
 void GateDSP::setStateInformation (const void* data, int sz)
 {
-    auto xml = juce::AudioProcessor::getXmlFromBinary (data, sz);
+    auto xml = SafeXml::parseBinaryBlob (data, sz);
     if (! xml || ! xml->hasTagName ("GateDSP")) return;
     auto state = juce::ValueTree::fromXml (*xml);
     // Restore through the setters, never the public fields: attack/hold/release

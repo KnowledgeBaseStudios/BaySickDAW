@@ -1,4 +1,5 @@
 #include "OverdriveDSP.h"
+#include "SafeXml.h"   // XXE + depth-guarded XML parse (QA-Cleanup)
 #include <cmath>
 
 namespace
@@ -526,7 +527,7 @@ void OverdriveDSP::getStateInformation (juce::MemoryBlock& dest)
 
 void OverdriveDSP::setStateInformation (const void* data, int sz)
 {
-    auto xml = juce::AudioProcessor::getXmlFromBinary (data, sz);
+    auto xml = SafeXml::parseBinaryBlob (data, sz);
     if (!xml || xml->getTagName() != "OverdriveDSP") return;
 
     mPreBand    = (float) xml->getDoubleAttribute ("preBand",    mPreBand);

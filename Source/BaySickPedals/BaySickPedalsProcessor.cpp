@@ -1,4 +1,5 @@
 #include "BaySickPedalsProcessor.h"
+#include "SafeXml.h"   // XXE + depth-guarded XML parse (QA-Cleanup)
 #include "../AppPaths.h"
 #include "../UserFileSave.h"
 #include "BaySickPedalsEditor.h"
@@ -571,7 +572,7 @@ void BaySickPedalsProcessor::getStateInformation (juce::MemoryBlock& dest)
 
 void BaySickPedalsProcessor::setStateInformation (const void* data, int sz)
 {
-    auto xml = juce::AudioProcessor::getXmlFromBinary (data, sz);
+    auto xml = SafeXml::parseBinaryBlob (data, sz);
     if (! xml) return;
     auto state = juce::ValueTree::fromXml (*xml);
     restoreFullState (state);
@@ -640,7 +641,7 @@ bool BaySickPedalsProcessor::loadPedalboardPreset (const juce::File& xml,
         outErr = "Preset file does not exist: " + xml.getFullPathName();
         return false;
     }
-    auto root = juce::parseXML (xml);
+    auto root = SafeXml::parse (xml);
     if (! root || ! root->hasTagName (kPedalboardRootTag))
     {
         outErr = "Preset file is not a Pedalboard preset.";

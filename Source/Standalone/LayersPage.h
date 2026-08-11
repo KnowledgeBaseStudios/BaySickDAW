@@ -5,7 +5,6 @@
 #include "../PatternManager.h"
 #include "../DSP/EQ8MsDSP.h"
 #include "SharedUI.h"
-#include "PianoRoll.h"
 #include "StandaloneApp.h"
 #include "UndoActions.h"
 
@@ -15,7 +14,12 @@
 // Two sub-tabs (J-6 EQ unification 2026-05-03 - EQ moved to Effects page):
 //   Tab 0 "Player"     - the engine's editor, full page (engine is chosen at
 //                        the ribbon "+" menu before the page exists -- L4)
-//   Tab 1 "Piano Roll" - PianoRollContainer bound to layerRoll[mPageIndex]
+//   Tab 1 "Piano Roll" - a REDIRECT, not a view.  The roll itself lives on the
+//                        unified PianoRollPage (2026-04-26); this page owns no
+//                        roll component.  QA-Layout T4 (L11) moved the row into
+//                        the page dropdown's "Pages:" list
+//                        (StandaloneEditor::buildPageWindowRows), which navigates
+//                        to the Piano Roll tab -- there is no sub-tab pill.
 //
 // Engine choices: Harmless | BaySickPlayer | BaySickSynth
 // QA-ModelShell TS1 (2026-07-27): the engine is MODEL-owned (EngineRig, keyed
@@ -24,7 +28,6 @@
 // -- construction, registration, and teardown all happen model-side.
 // ─────────────────────────────────────────────────────────────────────────────
 class LayersPage : public juce::Component,
-                   public juce::Timer,
                    private juce::ValueTree::Listener
 {
 public:
@@ -33,9 +36,7 @@ public:
 
     void paint  (juce::Graphics&) override;
     void resized() override;
-    void timerCallback() override;
 
-    void setPlayHead(StandalonePlayHead* ph);
     int  getPageIndex()   const { return mPageIndex; }
     int  getActiveTab()     const { return mActiveTab; }
     bool isEngineLocked()   const { return mEngineLocked; }
@@ -61,13 +62,9 @@ public:
     std::function<void()> onEngineEditorRebuilt;
 
     // Tab name sync - called by StandaloneEditor when the ribbon tab is
-    // renamed. Refreshes the piano-roll context label ("{tab} - {engine}").
+    // renamed.
     void                setTabName(const juce::String& name);
     const juce::String& getTabName() const { return mTabName; }
-
-    // Accessor for the piano-roll container (used by StandaloneEditor for
-    // time-selection-aware loop + stop-seek behavior).
-    PianoRollContainer* getPianoRoll() const { return mPianoRoll.get(); }
 
     // P1+P2 persistence (2026-04-24): expose the engine so StandaloneEditor
     // can round-trip the selection + the engine's internal state into the
@@ -133,7 +130,6 @@ private:
     PatternManager&     mPM;
     int                 mPageIndex;   // 0-7
     juce::Colour        mPageColor;   // from VC::LayerCol[mPageIndex]
-    StandalonePlayHead* mPlayHead { nullptr };
 
     // ── Tab system ────────────────────────────────────────────────────────────
     int  mActiveTab   { 0 };
@@ -154,19 +150,12 @@ private:
     juce::String mEngineType;
     juce::String mTabName;   // defaults to "Layer {pageIndex}"; overridden by ribbon rename
 
-    // ── Tab 1: Piano Roll ─────────────────────────────────────────────────────
-    std::unique_ptr<PianoRollContainer>         mPianoRoll;
-
     // J-6 EQ unification (2026-05-03): EQ tab + display removed; pre-rack EQ
     // is exclusively edited via the Effects page Pre EQ tab (same APVTS
     // params: mixer_layer_<N>_preeq_*).
 
     // ── Helpers ───────────────────────────────────────────────────────────────
     void buildPlayerTab();
-    void buildPianoRollTab();
-
-    // Push "{mTabName} - {mEngineType or (no engine)}" to mPianoRoll.
-    void refreshPianoRollContextLabel();
 
     // D2: dirty-snapshot for the requestDelete prompt.  Fresh snapshot taken
     // on engine creation and on every apvts.replaceState (preset load) via

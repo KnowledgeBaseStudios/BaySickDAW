@@ -65,9 +65,20 @@ namespace
 
     // Splice the #include chain into one line list.  Include paths resolve
     // against the INCLUDING file's dir; opcode lines are copied verbatim.
-    void expandIncludes (const juce::File& f, int depth, juce::StringArray& out)
+    // SECURITY (QA-Cleanup 2026-08-10): the depth cap alone is not a bound.
+    // Nothing stopped a file including itself, and nothing capped BREADTH, so
+    // 100 #include lines pointing back at the same file expand to 100^6 reads
+    // at depth 6 -- a sample pack that hangs the app on load.  The visited set
+    // makes a cycle terminate; the budget bounds the fan-out.
+    void expandIncludes (const juce::File& f, int depth, juce::StringArray& out,
+                         juce::StringArray& visited, int& budget)
     {
-        if (depth > 6 || ! f.existsAsFile()) return;
+        if (depth > 6 || budget <= 0 || ! f.existsAsFile()) return;
+
+        const auto key = f.getFullPathName();
+        if (visited.contains (key)) return;
+        visited.add (key);
+        --budget;
         juce::StringArray ls;
         ls.addLines (f.loadFileAsString());
         for (const auto& raw : ls)
@@ -80,7 +91,8 @@ namespace
                 if (q1 >= 0 && q2 > q1)
                 {
                     const auto rel = t.substring (q1 + 1, q2).replaceCharacter ('\\', '/');
-                    expandIncludes (f.getParentDirectory().getChildFile (rel), depth + 1, out);
+                    expandIncludes (f.getParentDirectory().getChildFile (rel), depth + 1,
+                                    out, visited, budget);
                 }
             }
             else
@@ -123,7 +135,9 @@ SlideRegionMap extractSlideRegions (const juce::File& programSfz)
     const juce::File sampleBase = programSfz.getParentDirectory();
 
     juce::StringArray lines;
-    expandIncludes (programSfz, 0, lines);
+    juce::StringArray visitedIncludes;
+    int includeBudget = 256;   // total files the chain may pull in
+    expandIncludes (programSfz, 0, lines, visitedIncludes, includeBudget);
 
     // SFZ opcode inheritance: region > group > master > global > control.
     using OpMap = std::map<juce::String, juce::String>;

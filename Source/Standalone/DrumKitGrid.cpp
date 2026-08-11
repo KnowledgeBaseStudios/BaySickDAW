@@ -78,6 +78,12 @@ static String midiToName(int midi)
 DrumKitSidebar::DrumKitSidebar()
 {
     setMouseCursor(MouseCursor::PointingHandCursor);
+
+    // Created BEFORE the row widgets: they are its children, not the sidebar's,
+    // so that scrolling them cannot spill over the ruler band.
+    mRowsHolder = std::make_unique<RowsHolder>(*this);
+    addAndMakeVisible(*mRowsHolder);
+
     for (int i = 0; i < kNumRows; ++i)
     {
         auto btn = std::make_unique<TextButton>("Pick a sound  v");
@@ -86,21 +92,21 @@ DrumKitSidebar::DrumKitSidebar()
         {
             if (mRowClickHandler) mRowClickHandler(rowIdx, mPickers[rowIdx].get());
         };
-        addAndMakeVisible(*btn);
+        mRowsHolder->addAndMakeVisible(*btn);
         mPickers[i] = std::move(btn);
 
         auto m = std::make_unique<MixerLedButton>("M");
         m->setClickingTogglesState(true);
         m->setOnColour(Colour(0xffff4444));
         m->setTooltip("Mute");
-        addAndMakeVisible(*m);
+        mRowsHolder->addAndMakeVisible(*m);
         mMuteBtns[i] = std::move(m);
 
         auto s = std::make_unique<MixerLedButton>("S");
         s->setClickingTogglesState(true);
         s->setOnColour(VC::Yellow);
         s->setTooltip("Solo");
-        addAndMakeVisible(*s);
+        mRowsHolder->addAndMakeVisible(*s);
         mSoloBtns[i] = std::move(s);
     }
 
@@ -120,6 +126,15 @@ void DrumKitSidebar::setKitViewPage(int page)
     mGlobalLockBtn->setButtonText("Lock/Unlock " + kit);
     mGlobalLockBtn->setTooltip("Lock or unlock every drum in kit " + kit
                               + ". The other kit is not affected.");
+}
+
+void DrumKitSidebar::setRowYOffset(int off)
+{
+    const int clamped = jmax(0, off);
+    if (mRowOff == clamped) return;
+    mRowOff = clamped;
+    resized();
+    repaint();
 }
 
 void DrumKitSidebar::setRowMetrics(int rulerH, int rowH)
@@ -215,10 +230,17 @@ void DrumKitSidebar::resized()
         mGlobalLockBtn->setBounds(btnX, b.getY() + 1, btnW, btnH);
     }
 
+    // Holder spans everything below the ruler and clips its children, so a
+    // scrolled row cannot reach the ruler band or the Lock button in it.
+    if (mRowsHolder)
+        mRowsHolder->setBounds(0, mRulerH, kWidth, jmax(0, b.getHeight() - mRulerH));
+
+    // Child bounds are HOLDER-relative, so the ruler offset is already applied
+    // by the holder's own position; only the scroll offset is subtracted here.
     for (int r = 0; r < kNumRows; ++r)
     {
-        const int y = b.getY() + mRulerH + r * mRowH;
-        auto row = Rectangle<int>(b.getX(), y, kWidth, mRowH).reduced(2);
+        const int y = r * mRowH - mRowOff;
+        auto row = Rectangle<int>(0, y, kWidth, mRowH).reduced(2);
         row.removeFromLeft(kHandleW);
         if (mPickers[r])  mPickers[r]->setBounds(row.removeFromLeft(kPickerW));
         if (mMuteBtns[r]) mMuteBtns[r]->setBounds(row.removeFromLeft(kMuteW).reduced(1));
@@ -232,15 +254,35 @@ void DrumKitSidebar::paint(Graphics& g)
     const auto b = getLocalBounds();
     g.fillAll(VC::Panel);
 
-    // Ruler band - match the grid's ruler band so the area lines up.
+    // Ruler band - match the grid's ruler band so the area lines up.  Painted
+    // here rather than in the holder so scrolled rows can never cover it.
     g.setColour(VC::Panel.brighter(0.12f));
     g.fillRect(0, 0, kWidth, mRulerH);
     g.setColour(VC::Accent.withAlpha(0.5f));
     g.drawHorizontalLine(mRulerH - 1, 0.f, (float) kWidth);
 
+    // Right edge separator (matches PianoKeyboard's).
+    g.setColour(VC::Accent);
+    g.fillRect(kWidth - 1, 0, 1, b.getHeight());
+}
+
+// Rows are drawn in HOLDER space: y = 0 is the first row's top at scroll 0.
+void DrumKitSidebar::RowsHolder::paint(Graphics& g)
+{
+    const int kNumRows = DrumKitSidebar::kNumRows;
+    const int kWidth   = DrumKitSidebar::kWidth;
+    const int kHandleW = DrumKitSidebar::kHandleW;
+    const int kPickerW = DrumKitSidebar::kPickerW;
+    const int kMuteW   = DrumKitSidebar::kMuteW;
+    const int kSoloW   = DrumKitSidebar::kSoloW;
+    const int kKeyW    = DrumKitSidebar::kKeyW;
+    const int mRowH    = owner.mRowH;
+    const int mRowOff  = owner.mRowOff;
+    const auto& mRows  = owner.mRows;
+
     for (int r = 0; r < kNumRows; ++r)
     {
-        const int y = mRulerH + r * mRowH;
+        const int y = r * mRowH - mRowOff;
         auto rowRect = Rectangle<int>(0, y, kWidth, mRowH);
         const bool isAlt = (r % 2) == 0;
         g.setColour(isAlt ? VC::Panel : VC::Bg.brighter(0.05f));
@@ -266,7 +308,7 @@ void DrumKitSidebar::paint(Graphics& g)
         // Audition piano key (rightmost, painted not a child).
         const int keyX = kHandleW + kPickerW + kMuteW + kSoloW;
         auto key = Rectangle<int>(keyX, y, kKeyW, mRowH).reduced(2);
-        const bool keyDown = (mActiveAuditionRow == r);
+        const bool keyDown = (owner.mActiveAuditionRow == r);
         g.setColour(keyDown ? Colour(0xffcccccc) : Colours::white);
         g.fillRect(key);
         g.setColour(Colours::black);
@@ -277,29 +319,25 @@ void DrumKitSidebar::paint(Graphics& g)
     for (int r = 0; r < (int) mRows.size() && r < kNumRows; ++r)
     {
         if (! mRows[r].isActive) continue;
-        if (! mPickers[r]) continue;
-        const auto pb = mPickers[r]->getBounds().expanded(1);
+        if (! owner.mPickers[r]) continue;
+        const auto pb = owner.mPickers[r]->getBounds().expanded(1);
         g.setColour(mRows[r].color);
         g.drawRect(pb, 2);
     }
 
     // Drop indicator for drag-reorder.
-    if (mReorderActive && mDragTargetRow >= 0)
+    if (owner.mReorderActive && owner.mDragTargetRow >= 0)
     {
-        const int y = mRulerH + mDragTargetRow * mRowH;
+        const int y = owner.mDragTargetRow * mRowH - mRowOff;
         g.setColour(Colours::white);
         g.fillRect(0, y - 1, kWidth, 2);
     }
-
-    // Right edge separator (matches PianoKeyboard's).
-    g.setColour(VC::Accent);
-    g.fillRect(kWidth - 1, 0, 1, b.getHeight());
 }
 
 int DrumKitSidebar::rowFromY(int y) const
 {
     if (y < mRulerH) return -1;
-    int r = (y - mRulerH) / jmax(1, mRowH);
+    int r = (y - mRulerH + mRowOff) / jmax(1, mRowH);
     return jlimit(0, kNumRows - 1, r);
 }
 
@@ -346,13 +384,13 @@ void DrumKitSidebar::mouseDrag(const MouseEvent& e)
     if (mDragSourceRow >= 0)
     {
         const int ey = e.getPosition().y;
-        const int dy = std::abs(ey - (mRulerH + mDragSourceRow * mRowH + mRowH / 2));
+        const int dy = std::abs(ey - (mRulerH - mRowOff + mDragSourceRow * mRowH + mRowH / 2));
         if (! mReorderActive && dy > 4)
             mReorderActive = true;
         if (mReorderActive)
         {
             const int newTarget = jlimit(0, (int) mRows.size(),
-                                         (ey - mRulerH) / jmax(1, mRowH));
+                                         (ey - mRulerH + mRowOff) / jmax(1, mRowH));
             if (newTarget != mDragTargetRow)
             {
                 mDragTargetRow = newTarget;
@@ -2214,6 +2252,10 @@ void DrumKitGrid::mouseWheelMove(const MouseEvent& e, const MouseWheelDetails& w
     }
     else
     {
+        // Bare wheel scrolls rows when there are rows off-screen, and falls
+        // back to the long-standing horizontal behavior when everything fits.
+        // Never both: onVScroll reports whether it consumed the wheel.
+        if (onVScroll && onVScroll(wheel.deltaY > 0.f ? 1 : -1)) return;
         if (onHScroll) onHScroll(-wheel.deltaY * 2.0);
     }
 }
@@ -3288,6 +3330,19 @@ DrumKitContainer::DrumKitContainer()
         if (mGrid) mGrid->mouseWheelMove(e, wheel);
     };
 
+    // Bare wheel scrolls rows ONLY while the vertical bar is live.  At full
+    // height it stays horizontal, which is what it has always done here; the
+    // grid falls back to onHScroll whenever this hook is not installed.
+    mGrid->onVScroll = [this](int dRows) -> bool {
+        if (! rowsOverflow() || ! mSidebar) return false;
+        const int rowH = jmax(1, mSidebar->rowsContentHeight()
+                                 / jmax(1, DrumKitSidebar::kNumRows));
+        const int before = mRowOff;
+        mRowOff = jmax(0, mRowOff - dRows * rowH);
+        syncScrollState();          // clamps mRowOff against the live content
+        return mRowOff != before;
+    };
+
     // Forward the sidebar's Lock/Unlock click up to StandaloneEditor, stamped
     // with the kit on screen: the container is the only level that knows which
     // of the two kits the button belongs to.
@@ -3485,6 +3540,15 @@ DrumKitContainer::DrumKitContainer()
     mHScroll->setAutoHide(false);
     mHScroll->addListener(this);
     addAndMakeVisible(*mHScroll);
+
+    // Vertical bar: unlike the horizontal one this is conditional, so autoHide
+    // stays off and syncScrollState owns its visibility explicitly.  It only
+    // appears once the window is short enough that 16 rows at the row-height
+    // floor no longer fit.
+    mVScroll = std::make_unique<juce::ScrollBar>(true);
+    mVScroll->setAutoHide(false);
+    mVScroll->addListener(this);
+    addChildComponent(*mVScroll);
 
     syncScrollState();
 }
@@ -3695,6 +3759,13 @@ void DrumKitContainer::onHScrollDelta(double dBeats)
     syncScrollState();
 }
 
+bool DrumKitContainer::rowsOverflow() const
+{
+    if (! mGrid || ! mSidebar) return false;
+    const int visibleH = mGrid->getHeight() - DrumKitGrid::kRulerH;
+    return visibleH > 0 && mSidebar->rowsContentHeight() > visibleH;
+}
+
 void DrumKitContainer::syncScrollState()
 {
     if (! mGrid || ! mSidebar || ! mLane) return;
@@ -3706,9 +3777,41 @@ void DrumKitContainer::syncScrollState()
     rowH = jlimit(DrumKitGrid::kMinRowH, DrumKitGrid::kMaxRowH, rowH);
 
     mGrid->setScrollState(mPPB, mBeatOff, rowH);
-    mGrid->setRowYOffset(DrumKitGrid::kRulerH);
     mLane->setScrollState(mPPB, mBeatOff);
     mSidebar->setRowMetrics(DrumKitGrid::kRulerH, rowH);
+
+    // Row-height auto-fit above has a floor (kMinRowH), so below roughly
+    // kRulerH + 16 * kMinRowH of grid height the rows no longer fit and the
+    // bottom drums become unreachable without this.  The bar is the only
+    // vertical control: no vertical zoom exists here by design.
+    const int visibleH = jmax(0, mGrid->getHeight() - DrumKitGrid::kRulerH);
+    const int contentH = mSidebar->rowsContentHeight();
+    const bool vVisible = visibleH > 0 && contentH > visibleH;
+
+    mRowOff = vVisible ? jlimit(0, contentH - visibleH, mRowOff) : 0;
+    mGrid->setRowYOffset(DrumKitGrid::kRulerH - mRowOff);
+    mSidebar->setRowYOffset(mRowOff);
+
+    if (mVScroll)
+    {
+        const bool wasVisible = mVScroll->isVisible();
+        mVScroll->setVisible(vVisible);
+        if (vVisible)
+        {
+            mVScroll->setRangeLimits(0.0, (double) contentH);
+            mVScroll->setCurrentRange((double) mRowOff, (double) visibleH,
+                                      juce::dontSendNotification);
+        }
+        // Showing or hiding the bar changes the grid's width, which changes the
+        // horizontal range - so the layout has to re-run before the bars are
+        // pushed, or the H thumb is sized against a stale width for one frame.
+        if (wasVisible != vVisible && ! mInVBarRelayout)
+        {
+            const juce::ScopedValueSetter<bool> guard (mInVBarRelayout, true);
+            resized();
+        }
+    }
+
     pushScrollStateToBars();
     repaint();
 }
@@ -3752,6 +3855,11 @@ void DrumKitContainer::scrollBarMoved(juce::ScrollBar* sb, double newStart)
     if (sb == mHScroll.get())
     {
         mBeatOff = jmax(0.0, newStart);
+        syncScrollState();
+    }
+    else if (sb == mVScroll.get())
+    {
+        mRowOff = jmax(0, (int) newStart);
         syncScrollState();
     }
 }
@@ -3900,8 +4008,15 @@ void DrumKitContainer::resized()
     const int by = b.getY();
     const int bw = b.getWidth();
 
+    // The vertical bar takes a column off the grid's right edge when it is
+    // showing.  syncScrollState decides that and re-runs resized() on a change.
+    const int vSbW = (mVScroll && mVScroll->isVisible()) ? kScrollBarSz : 0;
+
     mGrid->setBounds(bx + DrumKitSidebar::kWidth, by,
-                     bw - DrumKitSidebar::kWidth, gridH);
+                     bw - DrumKitSidebar::kWidth - vSbW, gridH);
+
+    if (mVScroll && vSbW > 0)
+        mVScroll->setBounds(bx + bw - kScrollBarSz, by, kScrollBarSz, gridH);
 
     if (mHScroll)
         mHScroll->setBounds(bx + DrumKitSidebar::kWidth, by + gridH,

@@ -1,4 +1,5 @@
 #include "PatternColorPicker.h"
+#include "SafeXml.h"   // XXE + depth-guarded XML parse (QA-Cleanup)
 #include "../AppPaths.h"
 #include "SharedUI.h"   // VC palette
 
@@ -117,7 +118,7 @@ std::vector<juce::Colour> loadRecents()
     auto f = getSettingsFile();
     if (! f.existsAsFile()) return out;
 
-    auto xml = juce::XmlDocument::parse (f);
+    auto xml = SafeXml::parse (f);
     if (xml == nullptr) return out;
 
     auto* node = xml->getChildByName ("RecentPatternColors");
@@ -141,7 +142,7 @@ void saveRecents (const std::vector<juce::Colour>& recents)
     // Read existing root (preserve other sections written by ProjectManager).
     std::unique_ptr<juce::XmlElement> root;
     if (f.existsAsFile())
-        root = juce::XmlDocument::parse (f);
+        root = SafeXml::parse (f);
     if (root == nullptr)
         root = std::make_unique<juce::XmlElement> ("BaySickDAWSettings");
 

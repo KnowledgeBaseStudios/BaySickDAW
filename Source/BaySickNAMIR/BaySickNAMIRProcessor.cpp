@@ -1,4 +1,7 @@
 #include "BaySickNAMIRProcessor.h"
+#include "SafeXml.h"   // XXE + depth-guarded XML parse (QA-Cleanup)
+#include "SafeNamModel.h"   // .nam dimension / prewarm gate (QA-Cleanup)
+#include "SafeAudioReader.h"   // channel/frame sanity gate (QA-Cleanup)
 #include "../AppPaths.h"
 #include "BaySickNAMIREditor.h"
 #include "../MissingFileReport.h"   // QA-Export Task 5
@@ -12,6 +15,7 @@
 #include <cmath>
 #include <filesystem>
 #include <stdexcept>
+#include "SafeAudioFormats.h"   // MP3 decode via vendored LAME (QA-Cleanup)
 
 // 2026-05-05 (Bug C diagnostics): one-off file logger for the get/set state
 // trace.  Writes lines to Documents/BaySickDAW/namir_state_log.txt,
@@ -635,6 +639,18 @@ bool BaySickNAMIRProcessor::loadNamModel (const juce::String& filePath, juce::St
         return false;
     }
 
+    // SECURITY (QA-Cleanup 2026-08-10): gate BEFORE nam::get_dsp.  The catch
+    // blocks below cannot help here - the vendored loader's failure modes are an
+    // unchecked over-read (no exception; on Windows an access violation is a
+    // Structured Exception, which /EHsc does not route to catch (...)) and a
+    // prewarm loop driven by a file-supplied length (throws nothing, simply
+    // never returns).  See SafeNamModel.h.
+    if (const auto why = SafeNamModel::rejectReason (resolved); why.isNotEmpty())
+    {
+        outErr = "This NAM capture was refused: " + why + ".";
+        return false;
+    }
+
     std::unique_ptr<nam::DSP> newModel;
     bool isFullRigFlag = false;
     try
@@ -723,8 +739,9 @@ bool BaySickNAMIRProcessor::loadImpulseResponse (const juce::String& filePath, j
     // it ourselves first so an unreadable file fails loudly instead.
     {
         juce::AudioFormatManager fm;
-        fm.registerBasicFormats();
-        std::unique_ptr<juce::AudioFormatReader> reader (fm.createReaderFor (f));
+        SafeAudioFormats::registerAll (fm);
+        auto reader = SafeAudioReader::guard (
+            std::unique_ptr<juce::AudioFormatReader> (fm.createReaderFor (f)));
         if (reader == nullptr || reader->lengthInSamples <= 0)
         {
             outErr = "That file is not readable audio: " + filePath;
@@ -1127,7 +1144,7 @@ void BaySickNAMIRProcessor::getStateInformation (juce::MemoryBlock& destData)
 
 void BaySickNAMIRProcessor::setStateInformation (const void* data, int sizeInBytes)
 {
-    if (auto xml = getXmlFromBinary (data, sizeInBytes))
+    if (auto xml = SafeXml::parseBinaryBlob (data, sizeInBytes))
     {
         // 2026-05-05 (Bug C diagnostics): Debug-build trace of the restore
         // path.  Output goes to Documents/BaySickDAW/namir_state_log.txt

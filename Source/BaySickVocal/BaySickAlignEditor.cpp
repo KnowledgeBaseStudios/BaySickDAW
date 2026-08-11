@@ -1,4 +1,5 @@
 #include "BaySickAlignEditor.h"
+#include "SafeXml.h"   // XXE + depth-guarded XML parse (QA-Cleanup)
 #include "../AppPaths.h"
 #include "../UserFileSave.h"
 #include "BaySickVocalProcessor.h"
@@ -1523,7 +1524,7 @@ void BaySickAlignEditor::loadUserPreset()
         [self, files] (int r)
         {
             if (! self || r <= 0 || r > files.size()) return;
-            auto xml = juce::parseXML (files[r - 1]);
+            auto xml = SafeXml::parse (files[r - 1]);
             if (xml == nullptr || ! xml->hasTagName ("BaySickAlignPreset")) return;
             beginParamUndoGesture (self->mProc.apvts, "bsa_preset"); // Task 6 (12-iv)
             for (auto* id : kPresetParamIds)

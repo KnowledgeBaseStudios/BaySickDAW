@@ -1,4 +1,5 @@
 #include "FlangerDSP.h"
+#include "SafeXml.h"   // XXE + depth-guarded XML parse (QA-Cleanup)
 
 // C4: sync-division table. Ordered long-to-short. Index 3 = 1/8 (v1 default).
 // `num/den` expresses the LFO cycle length in whole notes.
@@ -370,7 +371,7 @@ void FlangerDSP::getStateInformation (juce::MemoryBlock& dest)
 
 void FlangerDSP::setStateInformation (const void* data, int sz)
 {
-    auto xml = juce::AudioProcessor::getXmlFromBinary (data, sz);
+    auto xml = SafeXml::parseBinaryBlob (data, sz);
     if (!xml || xml->getTagName() != "FlangerDSP") return;
     mRate           = (float) xml->getDoubleAttribute ("rate",           mRate);
     mManualRate     = (float) xml->getDoubleAttribute ("manualRate",     mRate);   // (c) default to rate for pre-fix projects

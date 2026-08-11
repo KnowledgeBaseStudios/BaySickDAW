@@ -1,7 +1,10 @@
 #include "AcousticSimulatorStyleDSP.h"
+#include "SafeXml.h"   // XXE + depth-guarded XML parse (QA-Cleanup)
+#include "SafeAudioReader.h"   // channel/frame sanity gate (QA-Cleanup)
 #include "../MissingFileReport.h"
 #include "../ProjectFileResolver.h"
 #include "../SampleLibrary.h"
+#include "SafeAudioFormats.h"   // MP3 decode via vendored LAME (QA-Cleanup)
 
 namespace
 {
@@ -271,8 +274,9 @@ bool AcousticSimulatorStyleDSP::loadUserIR (const juce::File& file, juce::String
     // or non-audio pick used to land as "the effect silently does nothing".
     // Probe with a reader before committing the path.
     juce::AudioFormatManager fm;
-    fm.registerBasicFormats();
-    std::unique_ptr<juce::AudioFormatReader> reader (fm.createReaderFor (file));
+    SafeAudioFormats::registerAll (fm);
+    auto reader = SafeAudioReader::guard (
+        std::unique_ptr<juce::AudioFormatReader> (fm.createReaderFor (file)));
     if (reader == nullptr || reader->lengthInSamples <= 0)
     {
         outErr = "This file could not be read as audio:\n" + file.getFullPathName();
@@ -466,7 +470,7 @@ void AcousticSimulatorStyleDSP::getStateInformation (juce::MemoryBlock& dest)
 
 void AcousticSimulatorStyleDSP::setStateInformation (const void* data, int sz)
 {
-    auto xml = juce::AudioProcessor::getXmlFromBinary (data, sz);
+    auto xml = SafeXml::parseBinaryBlob (data, sz);
     if (! xml || ! xml->hasTagName ("AcousticSimulatorStyleDSP")) return;
     auto state = juce::ValueTree::fromXml (*xml);
 

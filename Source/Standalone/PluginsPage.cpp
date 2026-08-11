@@ -321,16 +321,27 @@ void PluginsPage::rebuildEditor()
             const int chromeW = 2 * kEdge;
             const int chromeH = kPickBtnH + kPickGap + 2 * kEdge;
 
+            // SUPPRESS THE SAVE.  This is a programmatic fit to the plugin, not
+            // a size the user chose - and WorkspaceWindow::resized() persists on
+            // every settled geometry change.  Without this, each fit overwrote
+            // the user's stored window size; while the fit was briefly
+            // oscillating it wrote a slightly smaller size every pass, so the
+            // window came back smaller on each reopen until it was barely
+            // visible.  ScopedSaveSuppress exists for exactly this ("a clamp is
+            // not a placement the user chose").
+            const WorkspaceWindow::ScopedSaveSuppress noSave;
+
             win->sizeToContent (juce::jmax (240, w + chromeW), h + chromeH);
 
-            // QA-Layout T12: floor from the minimum usable scale, and the
-            // CHROME does not scale -- only the plugin surface does, so the
-            // picker row and edges keep their full height in the floor.
-            const float floorScale = edRaw->canScaleSurface()
-                                       ? Hosting::HostedPluginEditor::kMinUsableScale
-                                       : 1.0f;
-            win->setResizeFloor (juce::jmax (240, (int) ((float) w * floorScale) + chromeW),
-                                 (int) ((float) h * floorScale) + chromeH);
+            // NO PLUGIN-DERIVED FLOOR (2026-08-11).  It used to be the plugin's
+            // size times the minimum usable SCALE, and nothing scales any more.
+            // Restoring it as the plugin's own size would be actively wrong:
+            // sizeToContent applies the floor AFTER the workspace clamp, so a
+            // plugin bigger than the workspace would force a window bigger than
+            // the workspace.  The window is free to be smaller than the plugin -
+            // it clips, and the plugin's own magnify is the control that fixes
+            // that.  0 leaves WorkspaceWindow's anti-degenerate minimum.
+            win->setResizeFloor (0, 0);
         };
 
         mEditor = std::move (ed);

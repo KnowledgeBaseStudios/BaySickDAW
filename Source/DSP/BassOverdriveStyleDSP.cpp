@@ -1,4 +1,5 @@
 #include "BassOverdriveStyleDSP.h"
+#include "SafeXml.h"   // XXE + depth-guarded XML parse (QA-Cleanup)
 
 namespace
 {
@@ -156,7 +157,7 @@ void BassOverdriveStyleDSP::getStateInformation (juce::MemoryBlock& dest)
 
 void BassOverdriveStyleDSP::setStateInformation (const void* data, int sz)
 {
-    auto xml = juce::AudioProcessor::getXmlFromBinary (data, sz);
+    auto xml = SafeXml::parseBinaryBlob (data, sz);
     if (! xml || ! xml->hasTagName ("BassOverdriveStyleDSP")) return;
     auto state = juce::ValueTree::fromXml (*xml);
     setGain    ((float)(double) state.getProperty ("gain",    0.5));

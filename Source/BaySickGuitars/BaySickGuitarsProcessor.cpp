@@ -1,4 +1,6 @@
 #include "BaySickGuitarsProcessor.h"
+#include "SafeXml.h"   // XXE + depth-guarded XML parse (QA-Cleanup)
+#include "SafeSfzKit.h"   // SFZ pre-flight gate (QA-Cleanup)
 #include "../MissingFileReport.h"   // QA-Export Task 5
 #include "../SampleLibrary.h"
 #include "sfizz.hpp"
@@ -531,6 +533,16 @@ bool BaySickGuitarsProcessor::loadKit (const juce::File& sfzPath)
     if (! sfzPath.existsAsFile() || ! mSfizz)
         return false;
 
+    // SECURITY (QA-Cleanup 2026-08-10): pre-flight BEFORE handing the kit to
+    // sfizz.  After loadSfz* it is too late - the macro and include hangs never
+    // return, and the Ogg overflow has already happened.  See SafeSfzKit.h.
+    if (const auto why = SafeSfzKit::rejectReason (sfzPath); why.isNotEmpty())
+    {
+        MissingFileReport::add ("Instrument kit refused - " + why,
+                                sfzPath.getFullPathName());
+        return false;
+    }
+
     if (! mSfizz->loadSfzFile (sfzPath.getFullPathName().toStdString()))
         return false;
 
@@ -548,10 +560,27 @@ bool BaySickGuitarsProcessor::loadKit (const juce::File& sfzPath)
     std::map<int, juce::String> kitLabels;
     std::map<juce::String, int> defines;   // SFZ `#define $name value` macros
     {
+        // SECURITY (QA-Cleanup 2026-08-10): a depth cap alone is not a bound --
+        // nothing stopped a file including itself and nothing capped BREADTH,
+        // so a crafted or merely broken pack could fan out to millions of reads
+        // and hang the app on load.  Same fix as SlideRegionMap::expandIncludes.
+        juce::StringArray visitedIncludes;
+        int includeBudget = 256;
+        // Every #include resolves against the TOP-LEVEL file's directory, which
+        // is what sfizz does (Parser.cpp:70-74, `_originalDirectory` assigned
+        // once).  Resolving against the including file's parent - as this did -
+        // silently found nothing below depth 2, so set_cc defaults declared in
+        // nested mapping files were never picked up.
+        const auto sfzRoot = sfzPath.getParentDirectory();
+
         std::function<void (const juce::File&, int)> scan;
         scan = [&] (const juce::File& f, int depth)
         {
-            if (depth > 4 || ! f.existsAsFile()) return;
+            if (depth > 4 || includeBudget <= 0 || ! f.existsAsFile()) return;
+            const auto visitKey = f.getFullPathName();
+            if (visitedIncludes.contains (visitKey)) return;
+            visitedIncludes.add (visitKey);
+            --includeBudget;
             const auto txt = f.loadFileAsString();
             juce::StringArray ls;
             ls.addLines (txt);
@@ -615,7 +644,7 @@ bool BaySickGuitarsProcessor::loadKit (const juce::File& sfzPath)
                     if (q1 >= 0 && q2 > q1)
                     {
                         const auto rel = t.substring (q1 + 1, q2);
-                        scan (f.getParentDirectory().getChildFile (rel), depth + 1);
+                        scan (sfzRoot.getChildFile (rel), depth + 1);
                     }
                 }
             }
@@ -693,7 +722,7 @@ void BaySickGuitarsProcessor::getStateInformation (juce::MemoryBlock& dest)
 
 void BaySickGuitarsProcessor::setStateInformation (const void* data, int sz)
 {
-    auto xml = getXmlFromBinary (data, sz);
+    auto xml = SafeXml::parseBinaryBlob (data, sz);
     if (! xml || ! xml->hasTagName ("BaySickGuitarsState"))
         return;
 

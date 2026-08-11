@@ -68,7 +68,14 @@ FloatSpec loNormalized { 0.0f, {0.0f, 1.0f}, kPermissiveBounds };
 FloatSpec hiNormalized { 1.0f, {0.0f, 1.0f}, kPermissiveBounds };
 FloatSpec loBipolar { -1.0f, {-1.0f, 1.0f}, kPermissiveBounds };
 FloatSpec hiBipolar { 1.0f, {-1.0f, 1.0f}, kPermissiveBounds };
-UInt16Spec ccNumber { 0, {0, config::numCCs}, 0 };
+// BAYSICKDAW VENDORED FIX (QA-Cleanup 2026-08-11): numCCs - 1, not numCCs.
+// This range is tested with containsWithEnd(), which is INCLUSIVE of the end, so
+// declaring it {0, 512} admitted cc==512 while every container it indexes holds
+// 512 entries (0..511).  `set_cc512=...` therefore reached
+// Synth::Impl::setDefaultHdcc and wrote defaultCCValues_[512] one past the end of
+// a std::array<float, 512>; that function's own ASSERT(ccNumber < numCCs) states
+// the real contract, and asserts compile out in Release.
+UInt16Spec ccNumber { 0, {0, config::numCCs - 1}, 0 };
 UInt16Spec smoothCC { 0, {0, 100}, kPermissiveUpperBound };
 FloatSpec stepCC { 0.0f, {0.0f, 127.0f}, kPermissiveUpperBound };
 UInt8Spec curveCC { 0, {0, 255}, 0 };

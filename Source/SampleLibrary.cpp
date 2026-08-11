@@ -1,4 +1,5 @@
 #include "SampleLibrary.h"
+#include "SafeXml.h"   // XXE + depth-guarded XML parse (QA-Cleanup)
 #include "AppPaths.h"
 #include "MissingFileReport.h"   // content-delivery: diagnose an absent pack once
 
@@ -102,14 +103,11 @@ bool SampleLibrary::isPackPopulated (const juce::File& packDir)
 
     // First hit wins.  A full recursive listing of a multi-GB pack runs at every
     // launch through the completeness check, and the question here is only
-    // "is there anything in here at all".
-    for (const auto& it : juce::RangedDirectoryIterator (packDir, true, "*",
-                                                          juce::File::findFiles))
-    {
-        juce::ignoreUnused (it);
-        return true;
-    }
-    return false;
+    // "is there anything in here at all", which the end sentinel answers
+    // without walking.  (A for-loop that returns on its first iteration leaves
+    // the loop increment unreachable -- C4702.)
+    juce::RangedDirectoryIterator it (packDir, true, "*", juce::File::findFiles);
+    return it != juce::RangedDirectoryIterator();
 }
 
 juce::File SampleLibrary::getPackInstallMarkerFile (const juce::File& packDir)
@@ -139,7 +137,7 @@ SampleLibrary::CoreContentManifest SampleLibrary::readCoreContentManifest()
     const auto f = getCoreContentManifestFile();
     if (! f.existsAsFile()) return m;
 
-    auto xml = juce::XmlDocument::parse (f);
+    auto xml = SafeXml::parse (f);
     if (xml == nullptr || ! xml->hasTagName ("BaySickCoreContent")) return m;
 
     m.sourceUrl = xml->getStringAttribute ("sourceUrl");
@@ -248,11 +246,41 @@ juce::String SampleLibrary::makeStableRef (const juce::File& f)
     return {};   // not under a stable root - caller copies or stores absolute
 }
 
+namespace
+{
+    // SECURITY (QA-Cleanup 2026-08-10): getChildFile RESOLVES ".." segments by
+    // trimming the parent, and returns an absolute path verbatim when handed
+    // one -- so "library:../../../../Windows/win.ini" and "library:C:\..."
+    // both walked straight out of the root the prefix names.  A prefix that
+    // confines nothing is worse than no prefix, because every reader assumes
+    // it did the confining.  Absolute stored paths remain supported, but they
+    // go through the untagged branch of resolvePersistedRef where the caller
+    // can see what it is getting.
+    bool stableRelIsSafe (const juce::String& rel)
+    {
+        if (rel.isEmpty()) return false;
+        if (juce::File::isAbsolutePath (rel)) return false;
+
+        const auto norm = rel.replaceCharacter ('\\', '/');
+        if (norm.startsWith ("/")) return false;
+
+        for (const auto& seg : juce::StringArray::fromTokens (norm, "/", {}))
+            if (seg == "..") return false;
+
+        return true;
+    }
+}
+
 juce::File SampleLibrary::resolveStableRef (const juce::String& storedPath)
 {
     if (storedPath.startsWith (kLibraryPrefix))
     {
         const auto rel = storedPath.substring ((int) juce::String (kLibraryPrefix).length());
+        if (! stableRelIsSafe (rel))
+        {
+            MissingFileReport::add ("Sample reference rejected (escapes the library)", rel);
+            return {};
+        }
         const auto f   = getCoreLibraryDir().getChildFile (rel);
 
         // Every caller already reports the FILE it failed to load; none of them
@@ -275,8 +303,15 @@ juce::File SampleLibrary::resolveStableRef (const juce::String& storedPath)
         return f;
     }
     if (storedPath.startsWith (kMySamplesPrefix))
-        return getUserSamplesDir().getChildFile (
-                   storedPath.substring ((int) juce::String (kMySamplesPrefix).length()));
+    {
+        const auto rel = storedPath.substring ((int) juce::String (kMySamplesPrefix).length());
+        if (! stableRelIsSafe (rel))
+        {
+            MissingFileReport::add ("Sample reference rejected (escapes My Samples)", rel);
+            return {};
+        }
+        return getUserSamplesDir().getChildFile (rel);
+    }
     return {};
 }
 

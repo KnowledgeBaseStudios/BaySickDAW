@@ -1,4 +1,5 @@
 #include "BaySickPlayerProcessor.h"
+#include "SafeXml.h"   // XXE + depth-guarded XML parse (QA-Cleanup)
 #include "../SampleLibrary.h"   // QA-ProjectSave Task 5: stable-root sample refs
 #include "../MissingFileReport.h"
 #include "../PluginProcessor.h"   // host audio shield around every sample load
@@ -461,7 +462,7 @@ void BaySickPlayerProcessor::getStateInformation (juce::MemoryBlock& dest)
 
 void BaySickPlayerProcessor::setStateInformation (const void* data, int sz)
 {
-    if (auto xml = getXmlFromBinary (data, sz))
+    if (auto xml = SafeXml::parseBinaryBlob (data, sz))
     {
         auto tree = juce::ValueTree::fromXml (*xml);
         apvts.replaceStateKeepingUndoHistory (tree);

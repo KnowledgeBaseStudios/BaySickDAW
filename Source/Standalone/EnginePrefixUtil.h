@@ -1,5 +1,6 @@
 #pragma once
 #include <JuceHeader.h>
+#include "SafeXml.h"   // XXE + depth-guarded XML parse (QA-Cleanup)
 
 // ─────────────────────────────────────────────────────────────────────────────
 // G-6 (2026-04-29): shared APVTS-prefix substitution for binary engine state.
@@ -28,7 +29,7 @@ inline void substituteApvtsPrefixInBinary (juce::MemoryBlock& mb,
     if (srcPrefix == dstPrefix || mb.getSize() == 0) return;
     if (srcPrefix.isEmpty() || dstPrefix.isEmpty()) return;
 
-    auto xmlEl = juce::AudioProcessor::getXmlFromBinary (mb.getData(), (int) mb.getSize());
+    auto xmlEl = SafeXml::parseBinaryBlob (mb.getData(), (int) mb.getSize());
     if (! xmlEl) return;
 
     juce::ValueTree loaded = juce::ValueTree::fromXml (*xmlEl);

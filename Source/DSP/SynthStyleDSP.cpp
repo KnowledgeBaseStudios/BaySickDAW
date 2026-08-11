@@ -1,4 +1,5 @@
 #include "SynthStyleDSP.h"
+#include "SafeXml.h"   // XXE + depth-guarded XML parse (QA-Cleanup)
 
 namespace
 {
@@ -432,7 +433,7 @@ void SynthStyleDSP::getStateInformation (juce::MemoryBlock& dest)
 
 void SynthStyleDSP::setStateInformation (const void* data, int sz)
 {
-    auto xml = juce::AudioProcessor::getXmlFromBinary (data, sz);
+    auto xml = SafeXml::parseBinaryBlob (data, sz);
     if (! xml || ! xml->hasTagName ("SynthStyleDSP")) return;
     auto state = juce::ValueTree::fromXml (*xml);
     setType        ((int)            state.getProperty ("type",      (int) Type::Lead1));

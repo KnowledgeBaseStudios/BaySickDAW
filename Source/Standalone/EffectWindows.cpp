@@ -134,22 +134,24 @@ void EffectSlotWindow::buildPanel()
     // Our own panels are unaffected -- they are built to the window, not the
     // other way round.
     if (auto* hosted = dynamic_cast<Hosting::HostedPluginEditor*> (mSlot->getEditor()))
-        hosted->onNaturalSizeChanged = [this, hosted] (int w, int h)
+        hosted->onNaturalSizeChanged = [this] (int w, int h)
         {
             auto* win = findParentComponentOfClass<WorkspaceWindow>();
             if (win == nullptr) return;
 
+            // A programmatic fit to the plugin, not a size the user chose, and
+            // WorkspaceWindow::resized() persists every settled geometry change
+            // -- so without the suppression each fit overwrites the user's
+            // stored window size.
+            const WorkspaceWindow::ScopedSaveSuppress noSave;
+
             win->sizeToContent (w, h);
 
-            // QA-Layout T12: the surface scales, so the window may go below the
-            // plugin's natural size -- but only as far as the UI stays usable.
-            // A bridged surface cannot scale at all, so its floor IS its natural
-            // size; shrinking further would only clip it.
-            const float floorScale = hosted->canScaleSurface()
-                                       ? Hosting::HostedPluginEditor::kMinUsableScale
-                                       : 1.0f;
-            win->setResizeFloor ((int) ((float) w * floorScale),
-                                 (int) ((float) h * floorScale));
+            // NO PLUGIN-DERIVED FLOOR -- same reasoning as PluginsPage: the
+            // floor beats the workspace clamp inside sizeToContent, so a plugin
+            // bigger than the workspace would force an oversized window.  0
+            // leaves WorkspaceWindow's anti-degenerate minimum.
+            win->setResizeFloor (0, 0);
         };
     // The panel's own timer must be able to ask whether the DSP it was built
     // against is STILL the one in this slot.  Its timer and this window's

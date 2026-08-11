@@ -1,4 +1,5 @@
 #include "VoxPage.h"
+#include "SafeXml.h"   // XXE + depth-guarded XML parse (QA-Cleanup)
 #include "../BaySickVocal/BaySickVocalProcessor.h"
 #include "../BaySickVocal/BaySickVocalEditor.h"
 #include "../Standalone/PagePresetIO.h"
@@ -668,7 +669,7 @@ juce::String VoxPage::exportVoxState() const
 void VoxPage::importVoxState (const juce::String& xml)
 {
     if (xml.isEmpty()) return;
-    auto parsed = juce::XmlDocument::parse (xml);
+    auto parsed = SafeXml::parse (xml);
     if (! parsed || ! parsed->hasTagName ("VoxPageState")) return;
 
     // H-6b: BaySickVocal state restore.

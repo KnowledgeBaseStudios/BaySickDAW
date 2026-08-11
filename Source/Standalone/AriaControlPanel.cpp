@@ -1,4 +1,5 @@
 #include "AriaControlPanel.h"
+#include "SafeXml.h"   // XXE + depth-guarded XML parse (QA-Cleanup)
 #include "SharedUI.h"   // VKnobAutomation popup glue
 
 namespace
@@ -770,7 +771,7 @@ void AriaControlPanel::parseGuiXml (const juce::File& xmlFile)
     mBackgroundImage = juce::Image();
 
     if (! xmlFile.existsAsFile()) return;
-    auto xml = juce::XmlDocument::parse (xmlFile);
+    auto xml = SafeXml::parse (xmlFile);
     if (xml == nullptr || ! xml->hasTagName ("GUI")) return;
 
     mNativeW = xml->getIntAttribute ("w", 775);

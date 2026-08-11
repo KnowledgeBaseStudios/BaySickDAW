@@ -1,4 +1,5 @@
 #include <JuceHeader.h>
+#include "../ScopedPluginDllDirectory.h"   // plugin sibling-DLL resolution (QA-Cleanup)
 #include <atomic>
 #include <thread>
 #include "../PluginBridgeProtocol.h"
@@ -26,7 +27,6 @@
 
 namespace
 {
-    const char* kBridgeUid = "BaySickPluginBridge";
 }
 
 class PluginHostWorker final : public juce::ChildProcessWorker,
@@ -70,6 +70,7 @@ public:
             case MT::SetState:       onSetState  (body, bodyBytes);   break;
             case MT::OpenEditor:     onOpenEditor(body, bodyBytes);   break;
             case MT::CloseEditor:    closeEditor();                   break;
+            case MT::ScanFile:       onScanFile  (body, bodyBytes);   break;
             case MT::Shutdown:       juce::JUCEApplication::quit();   break;
             default: break;
         }
@@ -115,6 +116,47 @@ private:
         out.protocolVersion = Hosting::Bridge::kProtocolVersion;
         out.hostArchBits    = (std::uint32_t) (sizeof (void*) * 8);
         reply (Hosting::Bridge::MessageType::HandshakeReply, &out, sizeof (out));
+    }
+
+    // v6: SCAN A FILE OUT OF PROCESS.
+    //
+    // The host used to do this itself, on a background thread, which was wrong
+    // twice over.  JUCE asserts that the VST3 scan path must run on the MESSAGE
+    // thread (juce_VST3PluginFormatImpl.h:299, JUCE_ASSERT_MESSAGE_THREAD) - a
+    // contract we were breaking silently, since the assert compiles out in
+    // Release.  And scanning LOADS the plugin, so one hostile or merely broken
+    // plugin took the whole DAW down with it mid-scan, losing the user's work.
+    //
+    // Here the scan runs on the helper's message thread, in a process that is
+    // allowed to die: the host sees the connection drop, blacklists the file via
+    // the dead-man's pedal, and carries on.
+    void onScanFile (const std::uint8_t* body, std::uint32_t bytes)
+    {
+        const auto path = juce::String::fromUTF8 ((const char*) body, (int) bytes);
+
+        juce::OwnedArray<juce::PluginDescription> found;
+
+        // Same sibling-DLL problem instantiation has: without the plugin's own
+        // folder on the search path a dependency goes missing and the scan
+        // reports nothing, or dies.  See ScopedPluginDllDirectory.h.
+        {
+            const Hosting::ScopedPluginDllDirectory dllDir { juce::File (path) };
+
+            for (auto* fmt : mFormats.getFormats())
+                fmt->findAllTypesForFile (found, path);
+        }
+
+        juce::XmlElement root ("PLUGINS");
+
+        for (auto* d : found)
+            if (auto x = d->createXml())
+                root.addChildElement (x.release());
+
+        const auto xml  = root.toString();
+        const auto utf8 = xml.toRawUTF8();
+
+        reply (Hosting::Bridge::MessageType::ScanResult, nullptr, 0,
+               utf8, (std::uint32_t) std::strlen (utf8));
     }
 
     void onLoad (const std::uint8_t* body, std::uint32_t bytes)
@@ -555,7 +597,7 @@ public:
 
         // Launched by the host only.  Run standalone and it exits immediately
         // rather than sitting in the background as an orphan.
-        if (! mWorker->initialiseFromCommandLine (commandLine, kBridgeUid))
+        if (! mWorker->initialiseFromCommandLine (commandLine, Hosting::Bridge::kBridgeUid))
         {
             mWorker.reset();
             quit();

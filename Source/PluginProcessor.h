@@ -1,5 +1,6 @@
 #pragma once
 #include <JuceHeader.h>
+#include "SafeXml.h"   // XXE + depth-guarded XML parse (QA-Cleanup)
 #include <cstdint>
 #include <map>
 #include <memory>
@@ -207,7 +208,7 @@ public:
     // check is what actually catches it.
     static std::unique_ptr<juce::XmlElement> decodeEngineBlob (const juce::MemoryBlock& mb)
     {
-        return getXmlFromBinary (mb.getData(), (int) mb.getSize());
+        return SafeXml::parseBinaryBlob (mb.getData(), (int) mb.getSize());
     }
 
     // Restores everything serializeProject wrote.  Caller is responsible for

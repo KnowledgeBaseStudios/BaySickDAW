@@ -1,4 +1,5 @@
 #include "EffectPresetIO.h"
+#include "SafeXml.h"   // XXE + depth-guarded XML parse (QA-Cleanup)
 #include "../AppPaths.h"
 #include "../UserFileSave.h"
 
@@ -185,7 +186,7 @@ namespace
             outErr = "Preset file does not exist: " + src.getFullPathName();
             return false;
         }
-        auto xml = juce::parseXML (src);
+        auto xml = SafeXml::parse (src);
         if (! xml || ! xml->hasTagName (kRootTag))
         {
             outErr = "Preset file is not a valid effect preset.";

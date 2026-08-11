@@ -60,6 +60,7 @@ inline — they save context budget and produce more consistent output.
 | `/preset-gaps` | `preset-coverage-mapper` | Audit factory + user preset library for genre / instrument-family gaps. Useful before QA-Templates batch. |
 | `/research [focus area]` | `competitive-research` | One-shot competitive sweep before milestones. Outputs draft Future State entries with verified-source confidence ratings. Run sparingly. |
 | `/architecture <topic>` | `daw-architecture-research` | Research how other DAWs solve a specific audio-engine architecture problem (threading, FFT planning, voice mgmt, lock-free patterns, etc.). Returns comparative analysis with implementation recommendation. On-demand only — pre-architecture-decision or pre-milestone. |
+| `/audit-security` | `security-auditor` | Audit handling of UNTRUSTED input (project/preset XML, sample/SFZ/IR/NAM files, hosted plugin binaries, the Core Library fetcher). Read-only; correctness is not its job. Pre-release, or when a new input surface lands. |
 | `/perf-audit` | `performance-auditor` | Recurring scan of BaySickDAW codebase for performance opportunities (audio-thread allocations, SIMD candidates, lock contention, FFT plan reuse, APVTS dirty-flag compliance, etc.). Context-aware — won't flag prepare-time allocations as audio-thread issues. Run every 3 batches OR pre-milestone. |
 
 **Cross-project** agents also available (live at `~/.claude/agents/`):
@@ -91,7 +92,8 @@ Highlights:
 - **Concept blocker** → `/explain <concept>`
 - **Pre-commit (Rule 9)** → write the brief one-liner directly, skip `/draft-commit`
 - **Batch close (mandatory)** → `/draft-doc batch-close` → `/review-batch` → apply draft → commit
-- **Pre-release** → `/audit-licenses`
+- **Pre-release** → `/audit-licenses` + `/audit-security` (Tier 1)
+- **New way of reading someone else's file lands** → `/audit-security`
 - **Pre-milestone** → `/research [focus]` (one-shot per focus)
 
 Anti-rules + the full table live in Main Plan §0.  When in doubt, ask

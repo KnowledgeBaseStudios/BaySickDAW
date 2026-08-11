@@ -73,6 +73,21 @@ namespace CoreLibraryInstaller
         // "Black Blue Basses" - a folder the sfizz kit paths do not resolve
         // against.  Verified against the installed CoreLibrary on disk.
         const char* folderName;
+
+        // Lowercase hex SHA-256 of the published asset, or nullptr while one has
+        // not been computed yet.
+        //
+        // WHY BOTH THIS AND `bytes` (QA-Cleanup 2026-08-11, security MEDIUM-6):
+        // a length check answers "did the whole download arrive", not "is this
+        // our file".  Any replacement padded to the same length passes it, and
+        // the archive is then UNPACKED - so the length check protects against a
+        // truncated transfer and against nothing hostile.
+        //
+        // nullptr is a REAL state, not a placeholder to be quietly ignored: see
+        // verifyAsset(), which refuses to treat an unhashed asset as verified and
+        // says so.  An empty-string field that silently passed would be a check
+        // that checks nothing, which is worse than no field at all.
+        const char* sha256;
     };
 
     // Sizes are the published asset lengths and are load-bearing twice: they
@@ -82,16 +97,32 @@ namespace CoreLibraryInstaller
     {
         static const std::vector<Asset> a
         {
-            { "Big.Rusty.Drums.zip",       619062262, "Big Rusty Drums"       },
-            { "Black.Blue.Basses.zip",    1008690586, "Black&Blue Basses"     },
-            { "Black.Green.Guitars.zip",   481838512, "Black&Green Guitars"   },
-            { "Brass.Package.zip",         479804303, "Brass Package"         },
-            { "EDM.Drums.Package.zip",      37364606, "EDM Drums Package"     },
-            { "Hip.Hop.Drums.Package.zip",  63700833, "Hip Hop Drums Package" },
-            { "Keys.Package.zip",          382424944, "Keys Package"          },
-            { "Percussion.Package.zip",    145628096, "Percussion Package"    },
-            { "Strings.Package.zip",       537952770, "Strings Package"       },
-            { "Woodwinds.Package.zip",     283777305, "Woodwinds Package"     }
+            // Hashes computed 2026-08-11 from the SOURCE zips that are uploaded
+            // to the release, at
+            // `Documents\VibeDAW Sample Library\GitHub Sample Library\vibedaw-samples`.
+            // Every byte count there matched this table exactly, which is what
+            // says they are the same objects as the published assets under their
+            // GitHub-sanitized names (spaces and '&' become dots on upload).
+            { "Big.Rusty.Drums.zip",       619062262, "Big Rusty Drums",
+              "a0751961adee003c451d453ff89032b5193cfb53a751203e37653dafd2091c61" },
+            { "Black.Blue.Basses.zip",    1008690586, "Black&Blue Basses",
+              "cf77fc782abf996826fe75cfd948d356968de7c8b967c471c6a433835d2b4f55" },
+            { "Black.Green.Guitars.zip",   481838512, "Black&Green Guitars",
+              "ba95221d32fb6386c5d0a0799b93904fd55520aca017c5f121da290075c140c0" },
+            { "Brass.Package.zip",         479804303, "Brass Package",
+              "7ebc9c2c91cb2b2cc3ecdff6713ca33cccf9c0baa7594b8629a98ab41bf52822" },
+            { "EDM.Drums.Package.zip",      37364606, "EDM Drums Package",
+              "af18aad87f2004defb6b3b80565b89841607c298b462bd10e2cdf5286b95fa20" },
+            { "Hip.Hop.Drums.Package.zip",  63700833, "Hip Hop Drums Package",
+              "137097fe6c9a4e7c316e986f51a61aec77a76b0225b146728190125d82a4791b" },
+            { "Keys.Package.zip",          382424944, "Keys Package",
+              "52a81362af9ea571835e1131911ba422909a5440d4241ca9903434cc8ffc3998" },
+            { "Percussion.Package.zip",    145628096, "Percussion Package",
+              "e30aca121d5589958257b6df51f54e9d79769b756cabf905590324f599988a8c" },
+            { "Strings.Package.zip",       537952770, "Strings Package",
+              "c661731501c4212e1521ba9388dee9ff6fc23de9fb0bcb6b8d9a574fa05a1110" },
+            { "Woodwinds.Package.zip",     283777305, "Woodwinds Package",
+              "b98e187bdf6ae07c71a5264b8bcb24dc62f50780d35f5e47d5bc216ccdcc3dc8" }
         };
         return a;
     }
@@ -609,6 +640,14 @@ namespace CoreLibraryInstaller
                 }
             }
 
+            // INTEGRITY BEFORE EXTRACT (MEDIUM-6).  Deliberately here rather than
+            // inside downloadAsset: an archive reused from a previous run's crash
+            // skips the download path entirely, and that copy has been sitting on
+            // a user-writable disk in the meantime.  Everything that reaches
+            // extractPack has passed through this.
+            if (! verifyAsset (archive, a, errOut))
+                return PackResult::failed;
+
             setStatusMessage ("Unpacking " + display + "  (" + juce::String (index)
                               + " of " + juce::String (total) + ")...");
             reportPack (kDownloadShareOfPack);
@@ -620,6 +659,45 @@ namespace CoreLibraryInstaller
             archive.deleteFile();
             reportPack (1.0);
             return PackResult::installed;
+        }
+
+        // Empty `errOut` + true = good.  False = refuse to unpack.
+        //
+        // An asset with no published hash yet CANNOT be verified, and this says
+        // so in the log rather than returning true as though it had been checked.
+        // It still installs - refusing nine of ten packs would break the product
+        // over a gap in our own release process - but the distinction between
+        // "verified" and "we did not look" stays visible, which is the whole
+        // reason the field is a nullable pointer instead of an empty string.
+        bool verifyAsset (const juce::File& archive, const Asset& a, juce::String& errOut)
+        {
+            if (a.sha256 == nullptr)
+            {
+                DBG ("[CoreLibrary] " << a.fileName
+                     << " has no published SHA-256; length check only.");
+                return true;
+            }
+
+            juce::FileInputStream in (archive);
+
+            if (! in.openedOk())
+            {
+                errOut = "the downloaded file could not be read for verification";
+                return false;
+            }
+
+            // Streamed, not read whole: these archives run to a gigabyte.
+            const auto actual = juce::SHA256 (in).toHexString().toLowerCase();
+
+            if (actual == juce::String (a.sha256).toLowerCase())
+                return true;
+
+            // The file is wrong, so it does not get a second life as a resume
+            // candidate on the next run.
+            archive.deleteFile();
+
+            errOut = "the downloaded file did not match its published checksum";
+            return false;
         }
 
         PackResult downloadAsset (const Asset& a, const juce::File& part,
@@ -643,9 +721,15 @@ namespace CoreLibraryInstaller
 
             const auto makeOptions = [&] () -> juce::URL::InputStreamOptions
             {
+                // ZERO redirects, deliberately.  The hop chain is resolved
+                // ABOVE with a scheme check on every step, so by the time this
+                // runs the URL is already settled - and leaving JUCE free to
+                // follow 10 more would hand the whole control back, since the
+                // settled server could answer this request with a fresh
+                // "302 -> http://" that nothing here would see.
                 const auto base = juce::URL::InputStreamOptions (juce::URL::ParameterHandling::inAddress)
                                       .withConnectionTimeoutMs (kConnectTimeoutMs)
-                                      .withNumRedirectsToFollow (10)
+                                      .withNumRedirectsToFollow (0)
                                       .withStatusCode (&statusCode);
 
                 // A release asset redirects to object storage that honours byte
@@ -660,7 +744,60 @@ namespace CoreLibraryInstaller
             setStatusMessage ("Connecting for " + display + "  (" + juce::String (index)
                               + " of " + juce::String (total) + ")...");
 
-            const juce::URL url (juce::String (kReleaseBaseUrl) + a.fileName);
+            // SECURITY (QA-Cleanup 2026-08-10): the base URL is a pinned HTTPS
+            // constant, but a release asset redirects to object storage and
+            // JUCE followed those hops itself.  Its Windows backend accepts a
+            // Location beginning "http://", so the transport could be silently
+            // downgraded mid-chain and nothing here would know.  Resolve the
+            // chain ourselves instead, refusing any non-HTTPS hop, then hand
+            // the settled URL to the unchanged download path below.
+            //
+            // This closes the DOWNGRADE half only.  Integrity is still just the
+            // exact-byte-length check further down, which a padded file passes.
+            // The complete fix is a published SHA-256 per asset, verified
+            // before extraction - that needs hashes published alongside the
+            // release, so it is not something this file can do on its own.
+            juce::URL url (juce::String (kReleaseBaseUrl) + a.fileName);
+
+            if (! url.getScheme().equalsIgnoreCase ("https"))
+            {
+                errOut = "the download address is not secure";
+                return PackResult::failed;
+            }
+
+            for (int hop = 0; hop < 10; ++hop)
+            {
+                int probeStatus = 0;
+                auto probe = url.createInputStream (
+                    juce::URL::InputStreamOptions (juce::URL::ParameterHandling::inAddress)
+                        .withConnectionTimeoutMs (kConnectTimeoutMs)
+                        .withNumRedirectsToFollow (0)
+                        .withStatusCode (&probeStatus));
+
+                if (threadShouldExit()) return PackResult::cancelled;
+                if (probe == nullptr) break;   // let the real request report it
+
+                if (probeStatus < 300 || probeStatus >= 400) break;   // settled
+
+                juce::String location;
+                if (auto* web = dynamic_cast<juce::WebInputStream*> (probe.get()))
+                    location = web->getResponseHeaders() ["Location"];
+
+                if (location.isEmpty()) break;
+
+                const juce::URL next = location.startsWithIgnoreCase ("http")
+                                         ? juce::URL (location)
+                                         : url.withNewSubPath (location);
+
+                if (! next.getScheme().equalsIgnoreCase ("https"))
+                {
+                    errOut = "the download was redirected to an insecure address";
+                    return PackResult::failed;
+                }
+
+                url = next;
+            }
+
             auto stream = url.createInputStream (makeOptions());
 
             if (threadShouldExit()) return PackResult::cancelled;

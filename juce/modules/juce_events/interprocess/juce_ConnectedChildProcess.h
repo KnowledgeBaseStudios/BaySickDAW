@@ -226,6 +226,26 @@ public:
     [[deprecated ("Replaced by sendMessageToWorker.")]]
     bool sendMessageToSlave (const MemoryBlock& mb) { return sendMessageToWorker (mb); }
 
+    /** BAYSICKDAW VENDORED CHANGE (QA-Cleanup 2026-08-11, security MEDIUM-7).
+
+        Re-points the pipe read/write timeout on the live connection.
+
+        launchWorkerProcess takes ONE `timeoutMs` and it then serves two jobs with
+        opposite requirements: as a STARTUP budget it must be generous (a helper
+        loading a large plugin legitimately takes seconds), but as a PER-WRITE
+        budget the same number blocks the calling thread for its full length on a
+        wedged peer - the message thread, in our case, so the UI freezes.
+
+        Call this once the handshake has succeeded to drop to a write-sized
+        budget.  InterprocessConnection reads the value per-operation, so this
+        takes effect immediately and needs no reconnection.
+
+        No-op before launchWorkerProcess, since there is no connection to re-point.
+
+        Not upstream API - paired with InterprocessConnection::setPipeMessageTimeout.
+    */
+    void setWorkerPipeTimeout (int newTimeoutMs) noexcept;
+
 private:
     std::shared_ptr<ChildProcess> childProcess;
 

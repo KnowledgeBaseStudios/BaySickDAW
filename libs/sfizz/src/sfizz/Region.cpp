@@ -20,10 +20,28 @@
 #include <random>
 #include <cassert>
 
+// BAYSICKDAW VENDORED FIX (QA-Cleanup 2026-08-11): an absolute ceiling.
+//
+// `defaultCapacity` reads like a bound and is NOT one - it only feeds reserve().
+// The resize() below took whatever `size` it was handed, and `size` comes from
+// the number inside an opcode NAME, which the file controls: `lfo60000_freq=1`
+// or an `egN_pointM` with a large M asked for that many elements PER REGION, of
+// LFODescription / FlexEGPoint rather than of bytes.  All 34 call sites share it.
+//
+// The ceiling is far above anything musical - a region with more than a few dozen
+// LFOs, EGs or EG points is already nonsense - so this refuses the opcode rather
+// than clamping, matching how sfizz treats other out-of-range indices (it drops
+// them; see the `>= config::numCCs` guards).  Refusing keeps the region's other
+// opcodes working instead of failing the whole kit.
+static constexpr unsigned kMaxExtendElements = 4096;
+
 template<class T>
 bool extendIfNecessary(std::vector<T>& vec, unsigned size, unsigned defaultCapacity)
 {
     if (size == 0)
+        return false;
+
+    if (size > kMaxExtendElements)
         return false;
 
     if (vec.capacity() == 0)
@@ -84,7 +102,10 @@ bool sfz::Region::parseOpcode(const Opcode& rawOpcode, bool cleanOpcode)
         delay = opcode.read(Default::delay);
         break;
     case hash("delay_oncc&"): // also delay_cc&
-        if (opcode.parameters.back() > config::numCCs)
+        // BAYSICKDAW VENDORED FIX (QA-Cleanup 2026-08-11): >= not >.
+        // config::numCCs is 512 and the containers this value indexes hold 512
+        // entries, so cc==512 passed the guard and landed one past the end.
+        if (opcode.parameters.back() >= config::numCCs)
             return false;
 
         delayCC[opcode.parameters.back()] = opcode.read(Default::delayMod);
@@ -99,7 +120,10 @@ bool sfz::Region::parseOpcode(const Opcode& rawOpcode, bool cleanOpcode)
         offsetRandom = opcode.read(Default::offsetRandom);
         break;
     case hash("offset_oncc&"): // also offset_cc&
-        if (opcode.parameters.back() > config::numCCs)
+        // BAYSICKDAW VENDORED FIX (QA-Cleanup 2026-08-11): >= not >.
+        // config::numCCs is 512 and the containers this value indexes hold 512
+        // entries, so cc==512 passed the guard and landed one past the end.
+        if (opcode.parameters.back() >= config::numCCs)
             return false;
 
         offsetCC[opcode.parameters.back()] = opcode.read(Default::offsetMod);
@@ -108,7 +132,10 @@ bool sfz::Region::parseOpcode(const Opcode& rawOpcode, bool cleanOpcode)
         sampleEnd = opcode.read(Default::sampleEnd);
         break;
     case hash("end_oncc&"): // also end_cc&
-        if (opcode.parameters.back() > config::numCCs)
+        // BAYSICKDAW VENDORED FIX (QA-Cleanup 2026-08-11): >= not >.
+        // config::numCCs is 512 and the containers this value indexes hold 512
+        // entries, so cc==512 passed the guard and landed one past the end.
+        if (opcode.parameters.back() >= config::numCCs)
             return false;
 
         endCC[opcode.parameters.back()] = opcode.read(Default::sampleEndMod);
@@ -130,13 +157,19 @@ bool sfz::Region::parseOpcode(const Opcode& rawOpcode, bool cleanOpcode)
         loopRange.setStart(opcode.read(Default::loopStart));
         break;
     case hash("loop_start_oncc&"): // also loop_start_cc&, loop_startcc&
-        if (opcode.parameters.back() > config::numCCs)
+        // BAYSICKDAW VENDORED FIX (QA-Cleanup 2026-08-11): >= not >.
+        // config::numCCs is 512 and the containers this value indexes hold 512
+        // entries, so cc==512 passed the guard and landed one past the end.
+        if (opcode.parameters.back() >= config::numCCs)
             return false;
 
         loopStartCC[opcode.parameters.back()] = opcode.read(Default::loopMod);
         break;
     case hash("loop_end_oncc&"): // also loop_end_cc&, loop_lengthcc&, loop_length_oncc&, loop_length_cc&
-        if (opcode.parameters.back() > config::numCCs)
+        // BAYSICKDAW VENDORED FIX (QA-Cleanup 2026-08-11): >= not >.
+        // config::numCCs is 512 and the containers this value indexes hold 512
+        // entries, so cc==512 passed the guard and landed one past the end.
+        if (opcode.parameters.back() >= config::numCCs)
             return false;
 
         loopEndCC[opcode.parameters.back()] = opcode.read(Default::loopMod);
@@ -1245,6 +1278,18 @@ bool sfz::Region::parseEGOpcode(const Opcode& opcode, absl::optional<EGDescripti
 
 bool sfz::Region::parseLFOOpcodeV2(const Opcode& opcode)
 {
+    // BAYSICKDAW VENDORED FIX (QA-Cleanup 2026-08-11): the dispatch that routes
+    // here and the code that FILLS `parameters` disagree about what carries an
+    // index.  Dispatch uses getLetterOnlyName(), which replaces each digit run
+    // with '&' purely textually and never fails, so "lfo4294967296_freq" still
+    // matches the "lfo&_" prefix.  `parameters` is filled by absl::SimpleAtoi
+    // into a uint32_t, which returns false on overflow and pushes NOTHING.
+    // front() on the resulting empty vector dereferences a null _Myfirst on
+    // MSVC: a deterministic crash while loading a kit.  Same bug below in
+    // parseEGOpcodeV2.
+    if (opcode.parameters.empty())
+        return false;
+
     const unsigned lfoNumber1Based = opcode.parameters.front();
 
     if (lfoNumber1Based <= 0)
@@ -1330,7 +1375,10 @@ bool sfz::Region::parseLFOOpcodeV2(const Opcode& opcode)
         lfo.delay = opcode.read(Default::lfoDelay);
         break;
     case hash("lfo&_delay_oncc&"):
-        if (opcode.parameters.back() > config::numCCs)
+        // BAYSICKDAW VENDORED FIX (QA-Cleanup 2026-08-11): >= not >.
+        // config::numCCs is 512 and the containers this value indexes hold 512
+        // entries, so cc==512 passed the guard and landed one past the end.
+        if (opcode.parameters.back() >= config::numCCs)
             return false;
 
         lfo.delayCC[opcode.parameters.back()] = opcode.read(Default::lfoDelayMod);
@@ -1339,7 +1387,10 @@ bool sfz::Region::parseLFOOpcodeV2(const Opcode& opcode)
         lfo.fade = opcode.read(Default::lfoFade);
         break;
     case hash("lfo&_fade_oncc&"):
-        if (opcode.parameters.back() > config::numCCs)
+        // BAYSICKDAW VENDORED FIX (QA-Cleanup 2026-08-11): >= not >.
+        // config::numCCs is 512 and the containers this value indexes hold 512
+        // entries, so cc==512 passed the guard and landed one past the end.
+        if (opcode.parameters.back() >= config::numCCs)
             return false;
 
         lfo.fadeCC[opcode.parameters.back()] = opcode.read(Default::lfoFadeMod);
@@ -1490,6 +1541,10 @@ bool sfz::Region::parseLFOOpcodeV2(const Opcode& opcode)
 
 bool sfz::Region::parseEGOpcodeV2(const Opcode& opcode)
 {
+    // BAYSICKDAW VENDORED FIX (QA-Cleanup 2026-08-11) - see parseLFOOpcodeV2.
+    if (opcode.parameters.empty())
+        return false;
+
     const unsigned egNumber1Based = opcode.parameters.front();
     if (egNumber1Based <= 0)
         return false;

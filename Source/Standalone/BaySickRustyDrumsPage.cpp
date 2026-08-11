@@ -1,4 +1,5 @@
 #include "BaySickRustyDrumsPage.h"
+#include "SafeXml.h"   // XXE + depth-guarded XML parse (QA-Cleanup)
 #include "../AppPaths.h"
 #include "../BaySickRustyDrums/BaySickRustyDrumsProcessor.h"
 #include "../BaySickRustyDrums/BaySickRustyDrumsKitGraphic.h"
@@ -475,7 +476,7 @@ void BaySickRustyDrumsPage::loadPlayerPresetFromFile (const juce::File& xml)
         return;
     }
 
-    auto parsed = juce::XmlDocument::parse (xml);
+    auto parsed = SafeXml::parse (xml);
     if (! parsed || ! parsed->hasTagName ("RustyPlayerPreset"))
     {
         juce::AlertWindow::showMessageBoxAsync (

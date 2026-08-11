@@ -595,10 +595,11 @@ juce::AudioProcessor* EngineRig::createEngineFor (EngineTab& tab, const juce::St
             auto desc = pm->findAdded (engineType);
 
             // Fall back to the description the project's own blob carried
-            // (stashed by the restore walker): the added list is the user's
-            // convenience list, not the project's dependency record, and
-            // resolving ONLY through it broke the restore principle documented
-            // in HostedPlugin.h.
+            // (stashed by the restore walker).  NARROWED 2026-08-10: the
+            // stashed description is itself added-list checked now, so this no
+            // longer resurrects an un-added plugin.  It covers the case where
+            // findAdded misses by IDENTIFIER while the same file path is still
+            // added - a rescan that changed a uid.
             //
             // SINGLE USE, which is why the erase is unconditional rather than
             // part of the fallback.  A stash is only ever written immediately

@@ -1,9 +1,12 @@
 #include "HostedPlugin.h"
+#include "SafeXml.h"   // XXE + depth-guarded XML parse (QA-Cleanup)
 #include "SandboxedPluginClient.h"
 // The bridged path needs the containing window's peer as the parent for the
 // plugin's remote surface, and its screen position for the parent-client
 // coordinate mapping.
 #include "../Standalone/WorkspaceWindow.h"
+#include "../MissingFileReport.h"   // refused-plugin restore line (QA-Cleanup)
+#include "ScopedPluginDllDirectory.h"   // plugin sibling-DLL resolution (QA-Cleanup)
 
 namespace Hosting
 {
@@ -21,12 +24,16 @@ namespace
 
     // Wrapper state tag + attributes.  The plugin's own blob rides as base64 so
     // the whole thing survives inside the rack's / tab's existing XML state,
-    // and the full PluginDescription rides as a child element so a restore can
-    // rebuild the instance without consulting the added list.
+    // and the full PluginDescription rides as a child element so a restore has
+    // something to identify the plugin BY.  Since 2026-08-10 that description is
+    // checked against the user's added list before anything is loaded - see
+    // descriptionFromState.
     const char* kStateTag    = "HostedPlugin";
     const char* kAttrBridged = "bridged";
     const char* kAttrBlob    = "blob";
 }
+
+
 
 // ─────────────────────────────────────────────────────────────────────────────
 // HostedPluginInstance
@@ -160,6 +167,13 @@ void HostedPluginInstance::instantiate()
     }
 
     juce::String err;
+
+   #if JUCE_WINDOWS
+    // Must wrap the load itself: the plugin's dependencies are resolved while
+    // its module is being brought in, not later.
+    const ScopedPluginDllDirectory dllDir { juce::File (mDesc.fileOrIdentifier) };
+   #endif
+
     mInner = mPlugins.formats().createPluginInstance (mDesc,
                                                       getSampleRate() > 0.0 ? getSampleRate() : 44100.0,
                                                       getBlockSize()  > 0   ? getBlockSize()  : 512,
@@ -397,11 +411,86 @@ void HostedPluginInstance::prepareToPlay (double sr, int blk)
     if (mInner == nullptr)
         return;
 
-    // Same order the JUCE plugin host uses: force the channel config the
-    // wrapper actually presents, THEN prepare.
-    mInner->setPlayConfigDetails (getTotalNumInputChannels(),
-                                  getTotalNumOutputChannels(), sr, blk);
+    // BUS COUNT must match the BUFFER we are going to hand it, not just the
+    // channel count of bus 0.
+    //
+    // setPlayConfigDetails only reshapes bus 0 (AudioProcessor.cpp: it calls
+    // setChannelLayoutOfBus for the main input and main output and nothing
+    // else).  A MULTI-OUTPUT instrument - Keyscape, Omnisphere, most orchestral
+    // libraries - keeps all its other output buses ENABLED through that call.
+    // JUCE then reports data.numOutputs = getBusCount(false) into the VST3
+    // ProcessData and maps every one of those buses onto the buffer we passed,
+    // which only ever has the two channels our wrapper declares.  The plugin
+    // receives bus pointers that were never backed by our buffer and writes
+    // through them.
+    //
+    // This is why a plain stereo VST3 was always fine and a big multi-out
+    // instrument died the moment audio started flowing.
+    // ENABLE every bus, do not disable them.  Disabling was tried and made it
+    // WORSE: getBusCount(false) stays at the plugin's real bus count either way
+    // (9 for Keyscape), JUCE passes that as data.numOutputs, and a disabled bus
+    // then arrives at the plugin with a NULL channel pointer.  A plugin that
+    // walks all of its buses writes straight through it -- an access violation
+    // at null + a small offset, inside the plugin, on the audio thread.
+    //
+    // Backed by real storage instead: every bus gets valid pointers, the plugin
+    // renders normally, and we take the main pair.  mInnerOutChannels drives the
+    // scratch allocation below.
+    // A LAYOUT CHANGE IS ILLEGAL WHILE THE PLUGIN IS ACTIVE.  JUCE asserts it
+    // outright (canApplyBusesLayout: "someone tried to change the layout while
+    // the AudioProcessor is running, call releaseResources first!"), and by the
+    // time registerWithProcessor re-prepares, the creation-time prepare has
+    // already activated the plugin.  Deactivate, reshape, then prepare.
+    mInner->releaseResources();
+
+    // enableAllBuses can legitimately REFUSE - not every plugin supports every
+    // bus being on at once.  A refusal is not fatal: we fall back to whatever
+    // layout it kept, and the scratch sizing below simply reflects that.
+    mInner->enableAllBuses();
+
+    // setRateAndBufferSizeDetails, NOT setPlayConfigDetails.
+    //
+    // setPlayConfigDetails reshapes bus 0 to the channel count we pass, and it
+    // was silently UNDOING enableAllBuses one line above: the diagnostic showed
+    // allBusesOn=1 and innerOut=2 in the same breath, which is the layout being
+    // opened up and then forced shut again.  We only need the rate and block
+    // size here; the layout is settled by the enableAllBuses above.
+    mInner->setRateAndBufferSizeDetails (sr, blk);
     mInner->prepareToPlay (sr, blk);
+
+    // Sized HERE, on the message thread.  processBlock must never allocate.
+    // Read AFTER the layout is settled and the plugin is prepared - this is the
+    // width JUCE will actually address, and the width the scratch must cover.
+    mInnerOutChannels = juce::jmax (mInner->getTotalNumOutputChannels(),
+                                    mInner->getTotalNumInputChannels());
+
+    if (mInnerOutChannels > getTotalNumOutputChannels())
+        mMultiOutScratch.setSize (mInnerOutChannels, juce::jmax (1, blk), false, true, true);
+    else
+        mMultiOutScratch.setSize (0, 0);
+
+    // SIDE-CHAIN INPUT DISCOVERY.  Bus 0 of the input side is the main input;
+    // the first ENABLED bus after it is the side-chain / aux input, and its
+    // channels sit at a fixed offset inside the process buffer that JUCE will
+    // compute for us.  Resolved here rather than per block because the layout
+    // cannot change without another prepare.
+    //
+    // A plugin with a side-chain always takes the wide-scratch path in
+    // processBlock, because mInnerOutChannels is max(out, in) and the side-chain
+    // pushes the input count past the 2-channel buffer we are handed.
+    mSidechainStartChannel = -1;
+    mSidechainChannels     = 0;
+
+    for (int b = 1; b < mInner->getBusCount (true); ++b)
+    {
+        if (auto* bus = mInner->getBus (true, b); bus != nullptr && bus->isEnabled())
+        {
+            mSidechainStartChannel = mInner->getChannelIndexInProcessBlockBuffer (true, b, 0);
+            mSidechainChannels     = bus->getNumberOfChannels();
+            break;
+        }
+    }
+
 
     // BLU-301: the plugin's own reported latency becomes ours, so the rack /
     // bus PDC sweep picks it up through the paths that already exist.
@@ -479,6 +568,80 @@ void HostedPluginInstance::processBlock (juce::AudioBuffer<float>& buffer, juce:
         return;
     }
 
+    // MULTI-OUTPUT PLUGINS render through a wider scratch buffer.
+    //
+    // JUCE passes the plugin data.numOutputs = getBusCount(false) -- the BUS
+    // COUNT.  Keyscape reports 9 output buses, and every one of them must be
+    // backed by real storage: a bus with no storage arrives as a null channel
+    // pointer, and a plugin that walks all of its buses writes through it.  That
+    // was the crash - an access violation at null + 0x20, inside the plugin.
+    //
+    // Diagnosed from the plugin's own numbers rather than inferred: it reported
+    // innerOut=2 (so a channel-count check PASSED) while outBuses=9.  Comparing
+    // channels missed it entirely; the mismatch was in buses.
+    if (mInnerOutChannels > buffer.getNumChannels()
+        && mMultiOutScratch.getNumChannels() >= mInnerOutChannels)
+    {
+        const int n = buffer.getNumSamples();
+
+        if (n <= mMultiOutScratch.getNumSamples())
+        {
+            mMultiOutScratch.clear();
+
+            // An effect's input rides in on the main bus; an instrument has none.
+            for (int ch = 0; ch < juce::jmin (buffer.getNumChannels(),
+                                              mMultiOutScratch.getNumChannels()); ++ch)
+                mMultiOutScratch.copyFrom (ch, 0, buffer, ch, 0, n);
+
+            // THE SIDE-CHAIN, into the bus the plugin actually reads it from.
+            // Without this a hosted compressor / gate / ducker has nothing to key
+            // off, which is most of the reason to put one in a rack slot at all.
+            // Left as silence when the user has picked no SC source, which is
+            // what an unconnected side-chain input should look like.
+            if (mSidechain != nullptr && mSidechainStartChannel >= 0)
+            {
+                const int copyN = juce::jmin (n, mSidechain->getNumSamples());
+
+                for (int ch = 0; ch < juce::jmin (mSidechainChannels,
+                                                  mSidechain->getNumChannels()); ++ch)
+                {
+                    const int dest = mSidechainStartChannel + ch;
+
+                    if (dest < mMultiOutScratch.getNumChannels() && copyN > 0)
+                        mMultiOutScratch.copyFrom (dest, 0, *mSidechain, ch, 0, copyN);
+                }
+            }
+
+            juce::AudioBuffer<float> wide (mMultiOutScratch.getArrayOfWritePointers(),
+                                           mMultiOutScratch.getNumChannels(), n);
+            mInner->processBlock (wide, midi);
+
+            // The MAIN output bus is bus 0, so its channels are the first ones.
+            for (int ch = 0; ch < buffer.getNumChannels(); ++ch)
+                buffer.copyFrom (ch, 0, mMultiOutScratch, ch, 0, n);
+
+            return;
+        }
+
+        // SCRATCH TOO SHORT FOR THIS BLOCK.  Falling through to the narrow call
+        // below would hand a multi-out plugin the 2-channel buffer - which IS
+        // the access violation this whole path exists to prevent, since the
+        // plugin walks buses we did not back with storage.  A block of silence
+        // is the only safe answer.
+        buffer.clear();
+        return;
+    }
+
+    // Same reasoning one level up: a plugin that NEEDS the wide buffer must
+    // never reach here.  mInnerOutChannels is 0 until prepareToPlay has run, so
+    // this also covers a process-before-prepare ordering bug rather than
+    // crashing on it.
+    if (mInnerOutChannels > buffer.getNumChannels())
+    {
+        buffer.clear();
+        return;
+    }
+
     mInner->processBlock (buffer, midi);
 }
 
@@ -511,25 +674,53 @@ void HostedPluginInstance::getStateInformation (juce::MemoryBlock& dest)
 
 std::unique_ptr<juce::PluginDescription> HostedPluginInstance::descriptionFromState (const void* data, int size)
 {
-    auto xml = juce::AudioProcessor::getXmlFromBinary (data, size);
+    auto xml = SafeXml::parseBinaryBlob (data, size);
 
     if (xml == nullptr || ! xml->hasTagName (kStateTag))
         return {};
 
-    if (auto* descXml = xml->getChildByName ("PLUGIN"))
-    {
-        auto desc = std::make_unique<juce::PluginDescription>();
+    auto* descXml = xml->getChildByName ("PLUGIN");
+    if (descXml == nullptr)
+        return {};
 
-        if (desc->loadFromXml (*descXml))
-            return desc;
+    auto desc = std::make_unique<juce::PluginDescription>();
+    if (! desc->loadFromXml (*descXml))
+        return {};
+
+    // SECURITY (QA-Cleanup 2026-08-10).  What this returns is handed to
+    // createPluginInstance, and PluginDescription::fileOrIdentifier is a full
+    // filesystem path that came out of a PROJECT FILE -- a thing users trade.
+    // Rebuilding from the blob instead of the added list was a deliberate
+    // choice (so a project referencing a since-un-added plugin still opens);
+    // accepting an arbitrary path was not, it was simply never looked at.  A
+    // project could name any .vst3, including one on a UNC share, and it would
+    // load and run silently with the user's privileges.
+    //
+    // Note the bridge is NOT a mitigation: "sandboxed" there means x86-vs-x64,
+    // the helper is a plain CreateProcess with no job object or token
+    // restriction, and a 64-bit Plugins tab runs in-process regardless.
+    //
+    // The check lives HERE, in the one parser, rather than at the three restore
+    // call sites -- the two missed SFZ clamps in this same batch are what a
+    // per-call-site guard looks like when it goes wrong.
+    if (auto* pm = PluginManager::getInstance())
+    {
+        for (const auto& known : pm->getAddedPlugins())
+            if (known.fileOrIdentifier.equalsIgnoreCase (desc->fileOrIdentifier))
+                return desc;
     }
 
+    // Refused, not silently dropped: this rides the same dialog a moved-DLL
+    // restore already feeds, so the user is told which plugin did not load and
+    // can add it deliberately if they want it.
+    MissingFileReport::add ("Plugin not in your added list - not loaded",
+                            desc->fileOrIdentifier);
     return {};
 }
 
 void HostedPluginInstance::setStateInformation (const void* data, int size)
 {
-    auto xml = getXmlFromBinary (data, size);
+    auto xml = SafeXml::parseBinaryBlob (data, size);
 
     if (xml == nullptr || ! xml->hasTagName (kStateTag))
         return;
@@ -709,6 +900,16 @@ void HostedPluginEditor::remoteEditorSized (int w, int h)
     if (mOwnerGone || mRemoteHost == nullptr || w <= 0 || h <= 0)
         return;
 
+    // SECURITY (QA-Cleanup 2026-08-10): this number comes from the HELPER, and
+    // it does not stop at the window -- onNaturalSizeChanged feeds
+    // setResizeFloor, which PERSISTS as a minimum and deliberately overrides
+    // the workspace clamp.  So an absurd report survives the first (clamped,
+    // harmless-looking) resize and wins on the next one.  8K a side is past any
+    // real plugin editor.
+    constexpr int kMaxEditorEdge = 8192;
+    w = juce::jmin (w, kMaxEditorEdge);
+    h = juce::jmin (h, kMaxEditorEdge);
+
     mNaturalW = w;
     mNaturalH = h;
     setSize (w, h);
@@ -735,33 +936,119 @@ void HostedPluginEditor::resized()
     if (mInner == nullptr)
         return;
 
+    // ── NO SCALING.  Read this before adding any back. ───────────────────────
+    //
+    // A host cannot scale a hosted VST3's UI with an AffineTransform.  It is not
+    // that the transform fails to reach the plugin - it reaches it as a SIZE
+    // CHANGE, twice, in a loop.  JUCE's own wrapper resolves the plugin's
+    // geometry through the transformed coordinate space
+    // (juce_VST3PluginFormat.cpp):
+    //
+    //   componentToVST3Rect  ->  localAreaToGlobal (r) * dpi
+    //   vst3ToComponentRect  ->  getLocalArea (nullptr, r / dpi)
+    //
+    // Both walk the parent chain and apply every ancestor transform.  So with a
+    // scale of s on an ancestor:
+    //
+    //   * componentMovedOrResized tells the plugin, via view->onSize(), that it
+    //     is s * its own pixels.  It re-lays out smaller while its native child
+    //     window keeps the old rect - the clipping and tearing.
+    //   * resizeToFit() reads view->getSize() back through the INVERSE, so the
+    //     editor's logical size becomes natural / s.
+    //   * our next fit then computes s' = frame / (natural / s) = s * s.
+    //
+    // The scale squares itself on every pass.  It survived window close because
+    // the plugin INSTANCE outlives the window (engines are model-owned), so
+    // view->getSize() reopened at the already-shrunken size and squared again -
+    // the surface halving on every reopen with the window size unchanged.
+    //
+    // IPlugViewContentScaleSupport is not an escape hatch either: it is a DPI
+    // hint, plugins that do not implement it ignore it silently, and after
+    // resizeToFit() a factor below 1 makes the editor LOGICALLY LARGER, which is
+    // the opposite of fitting.  The plugin's own magnify is the only real
+    // control, and it belongs to the user.
+    //
+    // So: the plugin sits at its own size and the window wraps it.
     if (mInner->isResizable())
     {
         // Push the frame size through the plugin's OWN path.  Its constrainer
-        // rejects or clamps as it likes and childBoundsChanged follows the
-        // result, so a plugin with a minimum simply stops shrinking.
-        mInner->setTransform ({});
-        mInner->setBounds (getLocalBounds());
-        return;
+        // rejects or clamps as it likes, so a plugin with a minimum simply stops
+        // shrinking.
+        //
+        // Not during the layout our own fit triggered - the plugin already told
+        // us what it wants and this pass exists to honour it, not to argue with
+        // it.
+        if (! mRefitting)
+            mInner->setBounds (getLocalBounds());
+
+        // READ BACK what the plugin actually accepted.  "Resizable" does not
+        // mean "any size": a plugin still has a constrainer and can clamp to its
+        // own minimum rather than filling a larger frame.  childBoundsChanged
+        // cannot report this - mInLayout is true for the whole of resized() and
+        // that callback early-returns on it, deliberately, so OUR layout is
+        // never mistaken for a plugin self-resize.
+        if (mInner->getWidth() != mNaturalW || mInner->getHeight() != mNaturalH)
+        {
+            mNaturalW = mInner->getWidth();
+            mNaturalH = mInner->getHeight();
+            requestWindowFit();
+        }
+    }
+    else
+    {
+        // Fixed size: the plugin snaps any bounds change back, so it is never
+        // told anything.  The window was already fitted to this size when the
+        // plugin declared it (buildInner / childBoundsChanged), so there is
+        // nothing to negotiate here and nothing that can oscillate.
+        mInner->setSize (juce::jmax (1, mNaturalW), juce::jmax (1, mNaturalH));
     }
 
-    // Fixed-size: bounds changes get snapped back by the plugin, so scale.
-    const int nw = juce::jmax (1, mNaturalW);
-    const int nh = juce::jmax (1, mNaturalH);
+    positionSurface();
+}
 
-    mInner->setTransform ({});
-    mInner->setBounds (0, 0, nw, nh);
+void HostedPluginEditor::positionSurface()
+{
+    if (mInner == nullptr)
+        return;
 
-    const float fit = juce::jmin ((float) getWidth()  / (float) nw,
-                                  (float) getHeight() / (float) nh);
-    const float scale = juce::jmax (kMinUsableScale, fit);
+    // Centred while it FITS, so the leftover reads as framing rather than as a
+    // broken offset.
+    //
+    // TOP-LEFT when it does not.  The plugin's UI is a native child window, and
+    // Windows clips a child window to its top-level parent's client rect and to
+    // NOTHING in between - not to the JUCE components it nominally sits inside.
+    // A centred overflow therefore spills upward over the page's menu row and
+    // the plugin picker.  Anchoring top-left puts every overflowing edge against
+    // a real window edge, where the clip is the one we want.
+    const int x = mInner->getWidth()  <= getWidth()
+                    ? (getWidth()  - mInner->getWidth())  / 2 : 0;
+    const int y = mInner->getHeight() <= getHeight()
+                    ? (getHeight() - mInner->getHeight()) / 2 : 0;
 
-    // Centre the scaled surface -- the leftover is symmetrical letterboxing,
-    // which reads as deliberate framing instead of an off-centre crop.
-    const float dx = ((float) getWidth()  - (float) nw * scale) * 0.5f;
-    const float dy = ((float) getHeight() - (float) nh * scale) * 0.5f;
+    mInner->setTopLeftPosition (x, y);
+}
 
-    mInner->setTransform (juce::AffineTransform::scale (scale).translated (dx, dy));
+void HostedPluginEditor::requestWindowFit()
+{
+    if (onNaturalSizeChanged == nullptr)
+        return;
+
+    // ASYNC on purpose: this fires the window's sizeToContent, which re-enters
+    // resized().  Inline would recurse through the layout we are inside.
+    juce::Component::SafePointer<HostedPluginEditor> safe (this);
+    const int w = mNaturalW, h = mNaturalH;
+
+    juce::MessageManager::callAsync ([safe, w, h]
+    {
+        if (safe == nullptr || safe->onNaturalSizeChanged == nullptr)
+            return;
+
+        // Suppress the frame-push for the layout THIS fit causes.  Without it a
+        // clamping plugin loops: it clamps -> we fit the window -> resized()
+        // pushes the new frame back at it -> it clamps again.
+        const juce::ScopedValueSetter<bool> noPush (safe->mRefitting, true);
+        safe->onNaturalSizeChanged (w, h);
+    });
 }
 
 void HostedPluginEditor::moved()
@@ -829,6 +1116,12 @@ void HostedPluginEditor::updateRemoteHostBounds()
     // natural size in its top-left, with the growth showing as dead space on
     // two sides.  Centring it puts the same leftover on all four sides, which
     // reads as framing instead of misalignment.
+    //
+    // Centring is right HERE and wrong in positionSurface() because the
+    // intersection below shrinks the PEER itself, so an oversized bridged plugin
+    // is genuinely clipped to the frame.  The in-process editor's native window
+    // is clipped only by the top-level peer, so it has to anchor top-left or its
+    // overflow spills over the page's own chrome.
     auto area = getLocalBounds();
 
     if (mNaturalW > 0 && mNaturalH > 0)
@@ -848,17 +1141,16 @@ void HostedPluginEditor::updateRemoteHostBounds()
 
 void HostedPluginEditor::childBoundsChanged (juce::Component* child)
 {
-    // A plugin can resize its own editor at any time (VST3's resizeView), and
-    // the frame follows it rather than clipping.
+    // A plugin can resize its own editor at any time (VST3's resizeView) - the
+    // magnify control does exactly this - and the window follows it rather than
+    // clipping.
     //
     // The test is against the plugin's LAST DECLARED size, not against our own
-    // bounds.  Scaling makes child-size and frame-size differ on purpose, so
-    // the old "differs from the frame" test fired on every scaled layout and
-    // would have dragged the window back to the plugin's natural size the
-    // instant anyone resized it.  mInLayout additionally excludes the bounds
-    // WE just set on a resizable plugin, which is our change, not the
-    // plugin's.
-    if (mInLayout || child != mInner.get() || mInner == nullptr)
+    // bounds: a plugin bigger than the workspace gets a frame smaller than
+    // itself on purpose, so "differs from the frame" would fire forever.
+    // mInLayout additionally excludes the bounds WE just set on a resizable
+    // plugin, which is our change, not the plugin's.
+    if (mInLayout || mInner == nullptr || child != mInner.get())
         return;
 
     const int w = mInner->getWidth();
@@ -878,6 +1170,17 @@ void HostedPluginEditor::childBoundsChanged (juce::Component* child)
 
 void HostedPluginEditor::paint (juce::Graphics& g)
 {
+    // ALWAYS fill, even when the plugin's surface exists.
+    //
+    // The constructor calls setOpaque(true), which PROMISES JUCE that this
+    // component paints every pixel of its bounds - so JUCE does not clear
+    // behind it.  Returning early here was safe only while the plugin's surface
+    // covered the whole frame.  A plugin that clamps its size, or that the user
+    // magnifies smaller, leaves an uncovered band, and with nothing painted
+    // there the band showed stale buffer content: visible tearing in the empty
+    // space around the plugin.
+    g.fillAll (juce::Colour (0xff1c1c1e));
+
     if (mInner != nullptr)
         return;
 

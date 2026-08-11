@@ -1,4 +1,5 @@
 #include "EQ8DSP.h"
+#include "SafeXml.h"   // XXE + depth-guarded XML parse (QA-Cleanup)
 
 // -- Default band parameters --------------------------------------------------
 // 2026-04-19: aligned with kEQDefaultFreqs in Source/Standalone/SharedUI.cpp
@@ -1601,7 +1602,7 @@ void EQ8DSP::getStateInformation(juce::MemoryBlock& dest)
 
 void EQ8DSP::setStateInformation(const void* data, int sz)
 {
-    auto xml = juce::AudioProcessor::getXmlFromBinary(data, sz);
+    auto xml = SafeXml::parseBinaryBlob (data, sz);
     if (!xml) return;
 
     bool isOld = (xml->getTagName() == "EQ6DSP");

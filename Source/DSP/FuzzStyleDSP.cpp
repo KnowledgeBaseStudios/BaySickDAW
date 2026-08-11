@@ -1,4 +1,5 @@
 #include "FuzzStyleDSP.h"
+#include "SafeXml.h"   // XXE + depth-guarded XML parse (QA-Cleanup)
 
 void FuzzStyleDSP::prepare (double sampleRate, int maxBlockSize)
 {
@@ -148,7 +149,7 @@ void FuzzStyleDSP::getStateInformation (juce::MemoryBlock& dest)
 
 void FuzzStyleDSP::setStateInformation (const void* data, int sz)
 {
-    auto xml = juce::AudioProcessor::getXmlFromBinary (data, sz);
+    auto xml = SafeXml::parseBinaryBlob (data, sz);
     if (! xml || ! xml->hasTagName ("FuzzStyleDSP")) return;
     auto state = juce::ValueTree::fromXml (*xml);
     setFuzz  ((float)(double) state.getProperty ("fuzz",  0.5));

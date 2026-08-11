@@ -1,4 +1,5 @@
 #include "BaySickBassProcessor.h"
+#include "SafeXml.h"   // XXE + depth-guarded XML parse (QA-Cleanup)
 #include "BaySickBassEditor.h"
 
 BaySickBassProcessor::BaySickBassProcessor (const juce::String& trackId, juce::UndoManager* undoMgr)
@@ -571,7 +572,7 @@ void BaySickBassProcessor::getStateInformation (juce::MemoryBlock& dest)
 
 void BaySickBassProcessor::setStateInformation (const void* data, int sz)
 {
-    if (auto xml = getXmlFromBinary (data, sz))
+    if (auto xml = SafeXml::parseBinaryBlob (data, sz))
         if (xml->hasTagName (apvts.state.getType()))
             apvts.replaceStateKeepingUndoHistory (juce::ValueTree::fromXml (*xml));
 }

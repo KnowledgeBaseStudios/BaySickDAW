@@ -1,4 +1,5 @@
 #include "BassCompressorStyleDSP.h"
+#include "SafeXml.h"   // XXE + depth-guarded XML parse (QA-Cleanup)
 
 namespace
 {
@@ -220,7 +221,7 @@ void BassCompressorStyleDSP::getStateInformation (juce::MemoryBlock& dest)
 
 void BassCompressorStyleDSP::setStateInformation (const void* data, int sz)
 {
-    auto xml = juce::AudioProcessor::getXmlFromBinary (data, sz);
+    auto xml = SafeXml::parseBinaryBlob (data, sz);
     if (! xml || ! xml->hasTagName ("BassCompressorStyleDSP")) return;
     auto state = juce::ValueTree::fromXml (*xml);
     // QA-EffectsReview Task 6: discrete threshold replaced the old "comp" macro.

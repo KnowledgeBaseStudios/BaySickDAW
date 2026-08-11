@@ -1,4 +1,5 @@
 #include "BaySickPitchEditor.h"
+#include "SafeXml.h"   // XXE + depth-guarded XML parse (QA-Cleanup)
 #include "../AppPaths.h"
 #include "../UserFileSave.h"
 #include "BaySickPitchSubEditor.h"
@@ -2946,7 +2947,7 @@ void BaySickPitchEditor::loadUserPreset()
         [self, files] (int r)
         {
             if (! self || r <= 0 || r > files.size()) return;
-            auto xml = juce::parseXML (files[r - 1]);
+            auto xml = SafeXml::parse (files[r - 1]);
             if (xml == nullptr || ! xml->hasTagName ("BaySickPitchPreset")) return;
             beginParamUndoGesture (self->mProc.apvts, "bsp_focus"); // Task 6 (12-iv)
             for (auto* id : { "bsp_focus", "bsp_mod", "bsp_speed" })

@@ -1,4 +1,5 @@
 #include "BassDriverStyleDSP.h"
+#include "SafeXml.h"   // XXE + depth-guarded XML parse (QA-Cleanup)
 
 namespace
 {
@@ -257,7 +258,7 @@ void BassDriverStyleDSP::getStateInformation (juce::MemoryBlock& dest)
 
 void BassDriverStyleDSP::setStateInformation (const void* data, int sz)
 {
-    auto xml = juce::AudioProcessor::getXmlFromBinary (data, sz);
+    auto xml = SafeXml::parseBinaryBlob (data, sz);
     if (! xml || ! xml->hasTagName ("BassDriverStyleDSP")) return;
     auto state = juce::ValueTree::fromXml (*xml);
     setDrive ((float)(double) state.getProperty ("drive", 0.5));

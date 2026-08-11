@@ -475,6 +475,7 @@ mirror the equivalents from that project's CLAUDE.md.
 | Global | `/standup` | `standup-summarizer` |
 | Global | `/extract-spec` | `spec-extractor` |
 | Global | `/audit-licenses` | `license-auditor` |
+| BaySickDAW | `/audit-security` | `security-auditor` |
 | BaySickDAW | `/read-doc` | `doc-reader` |
 | BaySickDAW | `/draft-doc` | `doc-drafter` |
 | BaySickDAW | `/review-batch` | `batch-code-reviewer` |
@@ -557,6 +558,20 @@ mirror the equivalents from that project's CLAUDE.md.
   daw-architecture-<topic>-<date>.md` via drafter pattern.
 - **Pre-release sweep** (before tagging V1) → `/audit-licenses`.
   Vendored libs, plugin licenses, asset attribution, EULA scope.
+- **Pre-release / pre-public-repo sweep** → `/audit-security` (built
+  2026-08-10 at QA-Cleanup, per the CL-289 decision call).  Tiers by
+  RELEASE PHASE, not by who owns the code — Tier 1 is the V1
+  pre-release pass and is FOUR parts run together: vendored CVE scan
+  against NVD / GitHub Advisories, file-parser audit (WAV / MP3 / SFZ /
+  project-XML / preset readers, OURS **and** vendored), DLL
+  search-order safety, and save-file format audit (XXE,
+  billion-laughs).  Tier 2 becomes runnable only when QA-Updater lands
+  (appcast XML, signature-verify chain, downloaded-binary handling);
+  Tier 3 is post-V1 cloud work.  **Do not invent new tiers** — scoping
+  a run to "our source only" at QA-Cleanup left two Tier-1 parts unrun
+  and pushed the XXE finding, which CL-289 named up front, out of the
+  first pass.  Output to `Plans & Specs/Research Reports/
+  security-audit-<date>*.md` via drafter pattern.
 - **Pre-QA-Templates batch** → `/preset-gaps`.  Gap analysis informs
   what factory presets the QA-Templates batch should add.
 - **Pre-milestone (V1, V2)** → `/research [focus area]` one-shot per
@@ -2301,6 +2316,39 @@ These four batches were planned in the original `lucky-discovering-tiger` Phase 
   is Manual 2's raw material, written from the post-fix tree at QA-Soundness Task 9.  Manual 3's
   formulas come from READING THE DSP CODE — the old `Files For Claude/DSP Review/` specs predate
   the implementation and describe an app that does not exist (Jeff, 2026-08-08).
+- **QA-CLEANUP DELTAS (added 2026-08-11 — the source material above is one batch stale).**
+  Both the System Reference set and the screenshots were captured at QA-Soundness Task 9, BEFORE
+  QA-Cleanup ran.  QA-Cleanup changed user-visible behaviour in six places, so those captures are
+  accurate everywhere EXCEPT the following.  Verify each against the shipping tree before writing.
+  - **Naming is already current — do not re-run a rename sweep.** QA-Cleanup Task 1 rewrote 18 of
+    the 20 affected System Reference docs to `BaySick*` in place.  The two it did not touch
+    (`Effect Modules.md`, `MANUAL-1 Screenshot List.md`) contain ONLY the Tape effect's **Vibe**
+    knob, which is DELIBERATELY still called Vibe (SC-8 scope c).  **Documentation trap:** the Tape
+    Advanced tab's Vibe / Hyst / Bias knobs keep those names in all three manuals; every other
+    `Vibe*` in the product is gone.  A manual that "helpfully" renames that knob is wrong.
+  - **Screenshots needing recapture (Manual 1):** the Drum Kit view (it gained a vertical scrollbar
+    when the window is shorter than the full grid — new UI element that must be labelled), the
+    Mixer hamburger menu (the MT Diagnostic item was removed), and any hosted-plugin window (sizing
+    behaviour changed, see below).  Everything else in `MANUAL-1 Screenshot List.md` still holds.
+  - **Manual 2 — hosted plugins, substantially rewritten behaviour.**  (a) A plugin window now
+    WRAPS the plugin at the plugin's own size; the host does not scale plugin UIs at all, and the
+    plugin's own magnify / zoom control is the only size control.  A plugin magnified past the
+    workspace clips at the right and bottom edges.  (b) Plugin scanning runs in a separate helper
+    process, so a plugin that crashes during scanning no longer takes the app down — it is
+    blacklisted in `plugins_scan_crashes.txt` at the app root and the scan continues.  The manual
+    must tell the user that file exists and that deleting a line from it retries that plugin.
+    (c) Plugins that ship their own sibling DLLs now load (they silently failed before).
+    (d) Multi-output instruments now work (they crashed before).
+  - **Manual 2 — refused files.** Malformed or hostile input is now REFUSED with a plain-English
+    reason instead of crashing or hanging: SFZ kits (Guitars / Basses / Rusty), NAM captures
+    (NAM-IR + the NAM pedal), project / preset XML, and audio files.  Document what the user sees
+    and what to do about it.  Reasons come from `Source/SafeSfzKit.h` and `Source/SafeNamModel.h`
+    (`rejectReason`) — quote the real strings, do not paraphrase.
+  - **Manual 3 — new architecture to cover:** the `BaySickPluginHost64/32.exe` helper processes now
+    do plugin SCANNING as well as 32-bit bridging (protocol v6); and the `Safe*` input-validation
+    layer (`SafeXml.h`, `SafeAudioReader.h`, `SafeNamModel.h`, `SafeSfzKit.h`) with its numeric
+    limits — XML 512 nesting depth, audio 32 channels, NAM 64 layers / 8192 dimension / 8 nesting,
+    SFZ `#include` depth 8 / 256 files / opcode index 512.
 - Risk: low (no code changes).
 - Dependencies: QA-RC (need final stable feature set).
 - Effort: large (~30-50 hours, multi-session).

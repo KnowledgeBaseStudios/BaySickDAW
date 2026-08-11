@@ -1,4 +1,5 @@
 #include "HarmlessProcessor.h"
+#include "SafeXml.h"   // XXE + depth-guarded XML parse (QA-Cleanup)
 #include "HarmlessEditor.h"
 #include <cmath>
 #include <cstring>
@@ -1105,7 +1106,7 @@ void HarmlessProcessor::getStateInformation (juce::MemoryBlock& dest)
 
 void HarmlessProcessor::setStateInformation (const void* data, int sz)
 {
-    if (auto xml = getXmlFromBinary (data, sz))
+    if (auto xml = SafeXml::parseBinaryBlob (data, sz))
     {
         if (xml->hasTagName (apvts.state.getType()))
         {

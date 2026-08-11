@@ -1,4 +1,6 @@
 #include "BaySickRustyDrumsProcessor.h"
+#include "SafeXml.h"   // XXE + depth-guarded XML parse (QA-Cleanup)
+#include "SafeSfzKit.h"   // SFZ pre-flight gate (QA-Cleanup)
 #include "../Standalone/UndoBracket.h"
 #include "../MissingFileReport.h"   // QA-Export Task 5
 #include "../SampleLibrary.h"       // QA-ProjectSave Task 5: stable-root kit refs
@@ -534,10 +536,27 @@ bool BaySickRustyDrumsProcessor::loadKit (const juce::File& sfzPath)
                                 ? programsDir.getParentDirectory()
                                 : programsDir;
 
-    // Discover channels FIRST so the wrapper builder knows the strip count
-    // and drummer-order indices.  J-8 (2026-05-04): pass the program SFZ so
-    // discoverChannels filters to only the pieces this program references -
-    // Basic spawns ~8 strips, Full spawns 13.
+    // SECURITY (QA-Cleanup 2026-08-10, ORDER CORRECTED 2026-08-11): pre-flight
+    // before ANYTHING reads the kit.  After loadSfz* it is too late - the macro
+    // and include hangs never return, and the Ogg overflow has already happened.
+    // See SafeSfzKit.h.
+    //
+    // This sat BELOW discoverChannels until 2026-08-11, which made the comment
+    // above it false: discoverChannels does `programSfzPath.loadFileAsString()`
+    // and scans the result, so the untrusted text was already read and parsed by
+    // the time the gate that exists to refuse it ran.  A gate is only a gate if
+    // it is the FIRST thing to touch the file.
+    if (const auto why = SafeSfzKit::rejectReason (sfzPath); why.isNotEmpty())
+    {
+        MissingFileReport::add ("Instrument kit refused - " + why,
+                                sfzPath.getFullPathName());
+        return false;
+    }
+
+    // Discover channels FIRST (of the load proper) so the wrapper builder knows
+    // the strip count and drummer-order indices.  J-8 (2026-05-04): pass the
+    // program SFZ so discoverChannels filters to only the pieces this program
+    // references - Basic spawns ~8 strips, Full spawns 13.
     mChannels = discoverChannels (kitRoot, sfzPath);
 
     // J-7b: synthesize an output-routed wrapper SFZ + load it via
@@ -545,6 +564,7 @@ bool BaySickRustyDrumsProcessor::loadKit (const juce::File& sfzPath)
     // with `output=N` injected into every `<master>` and `<group>` line,
     // so each region in each piece routes to its own sfizz output bus.
     // Always dump for inspection.
+
     juce::String wrapper = buildOutputRoutedSfzWrapper (sfzPath, kitRoot);
     if (wrapper.isNotEmpty())
         kitRoot.getChildFile ("_wrapper_dump.sfz").replaceWithText (wrapper);
@@ -574,10 +594,28 @@ bool BaySickRustyDrumsProcessor::loadKit (const juce::File& sfzPath)
     std::map<int, juce::String> kitLabels;
     std::map<juce::String, int> defines;   // SFZ `#define $name value` macros
     {
+        // SECURITY (QA-Cleanup 2026-08-10): a depth cap alone is not a bound --
+        // nothing stopped a file including itself and nothing capped BREADTH,
+        // so a crafted or merely broken pack could fan out to millions of reads
+        // and hang the app on load.  Same fix as SlideRegionMap::expandIncludes.
+        juce::StringArray visitedIncludes;
+        int includeBudget = 256;
+        // Every #include resolves against the TOP-LEVEL file's directory, which
+        // is what sfizz does (Parser.cpp:70-74, `_originalDirectory` assigned
+        // once) and what buildOutputRoutedSfzWrapper below already did.
+        // Resolving against the including file's parent - as this did - silently
+        // found nothing below depth 2, so set_cc defaults declared in nested
+        // mapping files were never picked up.
+        const auto sfzRoot = sfzPath.getParentDirectory();
+
         std::function<void (const juce::File&, int)> scan;
         scan = [&] (const juce::File& f, int depth)
         {
-            if (depth > 4 || ! f.existsAsFile()) return;
+            if (depth > 4 || includeBudget <= 0 || ! f.existsAsFile()) return;
+            const auto visitKey = f.getFullPathName();
+            if (visitedIncludes.contains (visitKey)) return;
+            visitedIncludes.add (visitKey);
+            --includeBudget;
             const auto txt = f.loadFileAsString();
             juce::StringArray ls;
             ls.addLines (txt);
@@ -641,7 +679,7 @@ bool BaySickRustyDrumsProcessor::loadKit (const juce::File& sfzPath)
                     if (q1 >= 0 && q2 > q1)
                     {
                         const auto rel = t.substring (q1 + 1, q2);
-                        scan (f.getParentDirectory().getChildFile (rel), depth + 1);
+                        scan (sfzRoot.getChildFile (rel), depth + 1);
                     }
                 }
             }
@@ -1011,7 +1049,7 @@ void BaySickRustyDrumsProcessor::getStateInformation (juce::MemoryBlock& dest)
 
 void BaySickRustyDrumsProcessor::setStateInformation (const void* data, int sz)
 {
-    auto xml = getXmlFromBinary (data, sz);
+    auto xml = SafeXml::parseBinaryBlob (data, sz);
     if (! xml || ! xml->hasTagName ("BaySickRustyDrumsState"))
         return;
 

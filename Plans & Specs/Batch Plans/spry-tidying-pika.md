@@ -24,9 +24,9 @@ checked individually before the collapse, not waved off:
 |---|---|
 | QA-Audit | Its source half already ran, as QA-Soundness: seven category sweeps over the whole tree, eight adversarial re-sweep rounds, 9,160 dead-code sites examined, ten dead files deleted. The findings ledger in `keen-combing-heron.md` IS the manifest this batch existed to produce. |
 | QA-Cleanup-1 | Reduced to a handful of mechanical fold-ins plus a small real warning sweep. **Corrected 2026-08-10 at the Task 1 build gate:** the "already reads 0" claim in the first draft came from an INCREMENTAL `build_log.txt` where those translation units were never recompiled. The Task 1 rename touched every header and forced a full rebuild, which surfaced 2 x C4702 and 2 x C4189 at four real sites. C4505 is genuinely 0. Folded into Task 4b. |
-| QA-Cleanup-2 | Nothing to remove. All ten vendored libraries are live. `lunasvg` was the one dead folder and it went at QA-Soundness. |
+| QA-Cleanup-2 | **First draft was WRONG.** Nine of the ten vendored libraries are live; `libs/eigen` (20 MB, 1809 tracked files) is NOT. The pre-flight counted a CMake mention of "eigen" as proof, but that line is `${NAM_CORE_DIR}/Dependencies/eigen` - NAM's OWN bundled copy - not the top-level folder. Verified 2026-08-10 at Task 5. |
 | QA-Cleanup-3 | Nothing to remove, and a filename grep here is actively dangerous (see Task 5). |
-| QA-Cleanup-4 | Already done. `.gitignore:8` covers `Files For Claude` and none of its 738 MB was ever tracked. |
+| QA-Cleanup-4 | Mostly done, and the first draft of this row was WRONG. `.gitignore:8` does cover `Files For Claude` and 0 files are tracked TODAY, but 138 files under it were tracked historically and untracked at commit `321c7c1b`. They are still in history: 136 blobs, 24.0 MB (92 txt / 32 png / 7 docx / 3 md / 2 webp / 2 jpg). The 738 MB figure is the current on-disk folder, most of which was never tracked. Corrected 2026-08-10 at Task 5. |
 | QA-PlayerRename | Folds in here. Its stated saved-project risk rests on a `vp_*` parameter prefix that does not exist. |
 | QA-RC / QA-RC-lite | Dissolved into the Master Test Plan campaign. |
 
@@ -69,6 +69,7 @@ must be committed first so this batch's diff is its own.
 | SC-9 | `"VibeRackStates"` renames with everything else, and existing saved projects lose their rack state | Follows from SC-8 - the consequence was stated in the option Jeff picked. Pre-v1 rule (`feedback_no_backward_compat_pre_v1`) forbids a migration shim, so the state is dropped rather than migrated. |
 | SC-10 | `mPianoRoll` gets the full drop, not the symptom fix | Jeff 2026-08-10, resolving SSC-2: *"yes do the mpianoroll drop."* The symptom fix no longer exists as an option (see SSC-2). |
 | SC-11 | `VibeSynthProcessor` -> **`BaySickDAWProcessor`** | Jeff 2026-08-10, resolving SSC-1a (pick a). Matches `BaySickDAWStandaloneApp` and the exe name, and cannot collide with the existing `BaySickSynthProcessor`. |
+| SC-12 | `DrumPage::mDrumKitTab` gets the same full drop as `mPianoRoll`, folded into Task 2 | Jeff 2026-08-10, pick (a) on the mid-task finding. Same deadness, same batch remit; splitting it across tasks would leave DrumPage half-cleaned. |
 
 ---
 
@@ -463,6 +464,26 @@ grep -rn "getPianoRoll()" Source             # zero callers
       `showPageForTab` handler and that path is untouched.
 - [ ] **Build gate** (same pinned invocation + same six-code check).
 
+**Folded in 2026-08-10 (SC-12): the same drop for `DrumPage::mDrumKitTab`.**
+`DrumPage::buildDrumKitTab()` has no caller either (only `BaySickRustyDrumsPage`
+builds its own kit), so that member is null for the page's whole life too. It
+carried a wider web than `mPianoRoll` did:
+
+- [ ] 7 public forwarders on DrumPage (`setKitListProvider`,
+      `setKitRowClickHandler`, `setKitAuditionHandlers`, `setKitReorderHandler`,
+      `refreshKitView`, `setKitMenuHandler`, `setGlobalLockHandler`) - every one
+      of them opens with `if (mDrumKitTab)` and returns.
+- [ ] `StandaloneEditor::refreshAllKitViews()` - drop the dead DrumPage branch,
+      keep the live PianoRollPage one.
+- [ ] `StandaloneEditor::wireDrumPageKitView()` - it installed all seven dead
+      callbacks PLUS one LIVE wiring (`dp->onPlayNoteChanged`, fired at
+      `DrumPage.cpp:1203`). Do NOT delete the function: shrink it to the live
+      wiring and RENAME it `wireDrumPagePlayNote`, because a function called
+      "wireKitView" that wires no kit view is the same misleading-name problem
+      this batch exists to fix. Update its 4 call sites + the header decl.
+- [ ] Its `auditionDispatch` / `heldNotes` block is a duplicate of the live one
+      in `wirePianoRollPageKitView`; the DrumPage copy goes with the rest.
+
 **Tell Jeff:** this only removes code that never ran, but the pages it removes
 it from are three you use constantly. Check:
 1. Open a Layers tab, a Bass tab and a Drums tab. Each should show the same
@@ -470,6 +491,16 @@ it from are three you use constantly. Check:
 2. On each, click the Piano Roll pill on the menu bar. It should jump to the
    unified Piano Roll page showing that tab's notes, exactly as it does today.
 3. Play a pattern with notes on all three. Nothing about playback should change.
+4. Drums specifically, since it lost the kit plumbing too: open the unified
+   Piano Roll page's drum kit. Rows should list every drum in ribbon order.
+   Click a row, drag a row to reorder, press-and-hold a row to audition, use
+   the Kit button's Save/Load menu, and use Lock/Unlock. All of those run
+   through the PianoRollPage kit, which is untouched - but they are the exact
+   gestures whose DEAD duplicates were just removed, so they are the ones worth
+   proving still work.
+5. On a Drums tab, change a drum's play pitch from its menu. Its hits should
+   repitch on the kit grid. That is the one wiring in the deleted function that
+   was actually live.
 
 - [ ] Brief one-liner -> surface + full `git status` -> WAIT -> commit.
 - [ ] `/draft-doc running-notes` -> apply.
@@ -601,6 +632,10 @@ They are dead-code shaped, which is exactly this batch's remit.
 No deletions (SC-5). The deliverable is the record of WHY, because every one of
 these reads as removable to a casual grep and is not.
 
+- [ ] **Do not count a name match as a reference.** `libs/eigen` was passed by
+      the pre-flight because CMake contains the string "eigen" - on a line that
+      points at `${NAM_CORE_DIR}/Dependencies/eigen`, NAM's own bundled copy.
+      Every claimed reference must be resolved to the actual folder.
 - [ ] Re-run the vendored-library sweep and record, per library, the thing that
       keeps it. The three that read as unreferenced and are all load-bearing:
       - `asiosdk` - no `#include` names it; CMake auto-detects the folder and
@@ -624,9 +659,17 @@ these reads as removable to a casual grep and is not.
 - [ ] Record the factory-preset caveat: the preset XML is generated by
       `gen_factory_presets.py`, so there is no hand-maintained list to diff a
       preset folder against. Any future preset audit has to read the generator.
-- [ ] Record Cleanup-4 as already done: `.gitignore:8` covers
-      `Files For Claude`; `git log --all -- "Files For Claude"` is empty, so
-      none of its 738 MB was ever tracked and there is no history to purge.
+- [ ] **Cleanup-4 is NOT simply "already done" - verify, do not assert.**
+      `.gitignore:8` covers `Files For Claude` and `git ls-files` returns 0, so
+      nothing is tracked today. But `git log --all -- "Files For Claude"` is
+      NOT empty: 3 commits touch it, 138 files were added and later untracked
+      at `321c7c1b`, and they remain in history at 136 blobs / 24.0 MB.
+      Record that honestly rather than repeating the "never tracked" claim.
+- [ ] Surface the history question to Jeff rather than deciding it: the repo is
+      going public, so whether 24 MB of personal spec docs, filmstrip PNGs and
+      .docx files should stay in history is his call. A history rewrite is the
+      only way to remove them and it invalidates every existing clone, so it is
+      not a thing to do quietly.
 - [ ] Apply all of the above to the running notes as a single dated evidence
       block, so the batch-close entry can quote it.
 
@@ -732,6 +775,36 @@ tools: Read, Grep, Glob, Bash
 - [ ] `/draft-doc running-notes` -> apply.
 
 ---
+
+## Tasks 8-16 - added DURING execution, not in the original punch-list
+
+**Recorded 2026-08-11 at batch close, after `/review-batch` flagged that ~60% of
+the diff had no line in this file.**  The audit trail was never missing - it is
+all in the running notes - but a reader diffing this plan against the commit
+would reasonably conclude work was smuggled in.  It was not; it was found.
+
+Every one of these is in scope under the standing rule that a QA batch fixes what
+it finds, and this is the LAST coding batch of the bulk run, so there is no later
+batch to route any of it to.  Full detail, including what was tried and reverted,
+is in `Plans & Specs/Running Notes/spry-tidying-pika.md`.
+
+| Task | What | Why it appeared |
+|------|------|-----------------|
+| 2c | Drum kit vertical scrollbar | Jeff found it testing the Task 2 build - the contained-window shell made the page height resizable and nothing revisited the fixed 16-row grid |
+| 8 | Ten security findings from the Tier-1 audit | Task 7 ran the audit; fixing what it returned is the point of running it |
+| 9 | CL-289 Tier-1 parts 1 + 3 (CVE scan, DLL safety) | I had invented my own tiering and left two of the four documented parts unrun |
+| 10 | `SafeAudioReader` / `SafeNamModel` / `SafeSfzKit` gates | The remaining Tier-1 items, each a gate placed before the vulnerable call |
+| 11 | DLL-1 attempt + REVERT | `SetDefaultDllDirectories` replaces the DLL search order; it broke plugin loading |
+| 12 | `ScopedPluginDllDirectory` (sibling DLLs) | Chasing Jeff's Keyscape crash - it was DLL-3, already in my own report, filed LOW on security impact with no note of its functional impact |
+| 13 | Out-of-process plugin scanning (protocol v6) | JUCE asserts the VST3 scan must be on the message thread; we broke it on every scan, and one bad plugin took the DAW down |
+| 14 | Four plugin-hosting defects incl. the editor-scaling removal | All four found by chasing the one crash; the scaling one was misdiagnosed twice before the JUCE source was read |
+| 15 | Open-decision sweep (items 1-7) | Jeff: decisions must be tracked to closure, not handed back |
+| 16 | sfizz parser audit + 4 vendored patches, MP3 decoder swap, SHA-256 asset verification | The audit was task 6a's remit; the other two were open items from task 15 |
+
+**Two of the fixes in this range were themselves defective and only caught on a
+second pass** (the `SafeSfzKit` include-resolution rewrite, and the MP3 decode
+loop).  That is the batch's most repeated lesson and it belongs here, not only in
+the notes: a fix to a security gate needs the same verification as the original.
 
 ## Verification (end-to-end smoke)
 

@@ -1,4 +1,5 @@
 #include "OctaveStyleDSP.h"
+#include "SafeXml.h"   // XXE + depth-guarded XML parse (QA-Cleanup)
 
 namespace
 {
@@ -732,7 +733,7 @@ void OctaveStyleDSP::getStateInformation (juce::MemoryBlock& dest)
 
 void OctaveStyleDSP::setStateInformation (const void* data, int sz)
 {
-    auto xml = juce::AudioProcessor::getXmlFromBinary (data, sz);
+    auto xml = SafeXml::parseBinaryBlob (data, sz);
     if (! xml || ! xml->hasTagName ("OctaveStyleDSP")) return;
     auto state = juce::ValueTree::fromXml (*xml);
     setMode        ((int)            state.getProperty ("mode",     (int) Mode::Polyphonic));

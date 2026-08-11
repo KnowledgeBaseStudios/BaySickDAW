@@ -1,4 +1,5 @@
 #include "FurmanEQStyleDSP.h"
+#include "SafeXml.h"   // XXE + depth-guarded XML parse (QA-Cleanup)
 
 constexpr float FurmanEQStyleDSP::kFreqMin[FurmanEQStyleDSP::kNumBands];
 constexpr float FurmanEQStyleDSP::kFreqMax[FurmanEQStyleDSP::kNumBands];
@@ -185,7 +186,7 @@ void FurmanEQStyleDSP::getStateInformation (juce::MemoryBlock& dest)
 
 void FurmanEQStyleDSP::setStateInformation (const void* data, int sz)
 {
-    auto xml = juce::AudioProcessor::getXmlFromBinary (data, sz);
+    auto xml = SafeXml::parseBinaryBlob (data, sz);
     if (! xml || ! xml->hasTagName ("FurmanEQStyleDSP")) return;
     auto state = juce::ValueTree::fromXml (*xml);
 

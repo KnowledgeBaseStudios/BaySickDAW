@@ -1,4 +1,6 @@
 #include "NAMPedalStyleDSP.h"
+#include "SafeXml.h"   // XXE + depth-guarded XML parse (QA-Cleanup)
+#include "SafeNamModel.h"   // .nam dimension / prewarm gate (QA-Cleanup)
 #include "../MissingFileReport.h"   // QA-Export Task 5
 #include "../ProjectFileResolver.h"
 #include "../SampleLibrary.h"
@@ -117,6 +119,14 @@ bool NAMPedalStyleDSP::loadModel (const juce::File& file, juce::String& outErr)
     if (! file.existsAsFile())
     {
         outErr = "File not found: " + file.getFullPathName();
+        return false;
+    }
+
+    // SECURITY (QA-Cleanup 2026-08-10): see the note at the NAMIR load site and
+    // SafeNamModel.h - the catch blocks below cannot catch an over-read or a hang.
+    if (const auto why = SafeNamModel::rejectReason (file); why.isNotEmpty())
+    {
+        outErr = "This NAM capture was refused: " + why + ".";
         return false;
     }
 
@@ -341,7 +351,7 @@ void NAMPedalStyleDSP::getStateInformation (juce::MemoryBlock& dest)
 
 void NAMPedalStyleDSP::setStateInformation (const void* data, int sz)
 {
-    auto xml = juce::AudioProcessor::getXmlFromBinary (data, sz);
+    auto xml = SafeXml::parseBinaryBlob (data, sz);
     if (! xml || ! xml->hasTagName ("NAMPedalStyleDSP")) return;
     auto state = juce::ValueTree::fromXml (*xml);
 

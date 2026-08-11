@@ -57,7 +57,14 @@ void HostedPluginEffect::process (juce::AudioBuffer<float>& buffer)
         return;
 
     mMidiScratch.clear();
+
+    // Hand the slot's chosen SC line to the plugin's side-chain input bus.
+    // getActiveSidechain() returns null when the user has picked no source, and
+    // the instance leaves the bus silent in that case - which is exactly what an
+    // unconnected side-chain should look like to the plugin.
+    mHosted->setSidechainSource (getActiveSidechain());
     mHosted->processBlock (buffer, mMidiScratch);
+    mHosted->setSidechainSource (nullptr);
 }
 
 void HostedPluginEffect::reset()

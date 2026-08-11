@@ -1,4 +1,6 @@
 #include "PluginProcessor.h"
+#include "SafeXml.h"   // XXE + depth-guarded XML parse (QA-Cleanup)
+#include "SafeAudioReader.h"   // channel/frame sanity gate (QA-Cleanup)
 #include "TempoMapRead.h"   // QA-TempoMap: stepped tempo timeline (standalone publishes; VST falls back)
 #include "TsMapRead.h"      // QA-G Task 6: stepped time-signature timeline (PatternManager publishes)
 #include "G3PlayheadDiag.h" // [G3 BAR1] smoke General-1 dropout reading (Debug-only)
@@ -44,6 +46,7 @@ static inline double clipFilePosForBeat (double beatsIntoClip, double fileSample
 #include "Standalone/EngineChainProcessor.h"      // QA-Fe2 PDC: Inst strip engine-chain latency hook
 #include "DSP/EngineSidechainHelper.h"            // C.4 Phase 2.2: ISidechainEngine for engine-level SC push
 #include <thread>                                 // 2026-05-06: hardware_concurrency for render worker count
+#include "SafeAudioFormats.h"   // MP3 decode via vendored LAME (QA-Cleanup)
 #ifdef VIBESYNTH_VST
   #include "PluginEditor.h"
 #endif
@@ -525,7 +528,7 @@ BaySickDAWProcessor::BaySickDAWProcessor()
     // give 0, which is a valid MIDI note.
     mNoteTriggerHeld.fill (-1);
 
-    mAudioFormatManager.registerBasicFormats();  // WAV, AIFF, MP3, OGG, FLAC
+    SafeAudioFormats::registerAll (mAudioFormatManager);  // WAV, AIFF, MP3, OGG, FLAC
 
     // QA-AudioMeters (2026-05-24): init all 8 per-kind insert peak mirror sets to
     // -60 dB.  These are the UI poll targets; audio thread writes via
@@ -4728,7 +4731,8 @@ bool BaySickDAWProcessor::freezeRustyKit (juce::String& outErr, bool byUser, boo
 
         for (const auto& f : pdests)
         {
-            std::unique_ptr<juce::AudioFormatReader> raw (mAudioFormatManager.createReaderFor (f));
+            auto raw = SafeAudioReader::guard (
+                std::unique_ptr<juce::AudioFormatReader> (mAudioFormatManager.createReaderFor (f)));
             if (raw == nullptr) { ok = false; break; }
             auto s = std::make_unique<AudioClipStreamer> (std::move (raw), mAudioFileThread);
             s->seek (0);
@@ -4864,7 +4868,8 @@ bool BaySickDAWProcessor::freezeTab (TabKind kind, int pageIndex,
     // plays from the first block rather than under-running into the live engine.
     auto openStream = [this] (const juce::File& f) -> std::unique_ptr<AudioClipStreamer>
     {
-        std::unique_ptr<juce::AudioFormatReader> r (mAudioFormatManager.createReaderFor (f));
+        auto r = SafeAudioReader::guard (
+            std::unique_ptr<juce::AudioFormatReader> (mAudioFormatManager.createReaderFor (f)));
         if (r == nullptr) return nullptr;
         auto s = std::make_unique<AudioClipStreamer> (std::move (r), mAudioFileThread);
         s->seek (0);
@@ -5072,7 +5077,8 @@ bool BaySickDAWProcessor::renderPatternFreeze (TabKind kind, int pageIndex,
 
     auto openStream = [this] (const juce::File& f) -> std::unique_ptr<AudioClipStreamer>
     {
-        std::unique_ptr<juce::AudioFormatReader> raw (mAudioFormatManager.createReaderFor (f));
+        auto raw = SafeAudioReader::guard (
+            std::unique_ptr<juce::AudioFormatReader> (mAudioFormatManager.createReaderFor (f)));
         if (raw == nullptr) return nullptr;
         auto s = std::make_unique<AudioClipStreamer> (std::move (raw), mAudioFileThread);
         s->seek (0);
@@ -5782,7 +5788,8 @@ void BaySickDAWProcessor::rebuildAudioClipPlayers()
 
         std::unique_ptr<juce::AudioFormatReader> rawReader;
         if (cached == nullptr)
-            rawReader.reset (mAudioFormatManager.createReaderFor (resolvedFile));
+            rawReader = SafeAudioReader::guard (
+                std::unique_ptr<juce::AudioFormatReader> (mAudioFormatManager.createReaderFor (resolvedFile)));
 
         if (cached == nullptr && rawReader == nullptr)
         {
@@ -5997,8 +6004,8 @@ juce::AudioBuffer<float> BaySickDAWProcessor::renderChannelComposite (int channe
         if (route != channelId)
             continue;
 
-        std::unique_ptr<juce::AudioFormatReader> reader (
-            mAudioFormatManager.createReaderFor (resolveProjectFile (blk.audioFilePath)));
+        auto reader = SafeAudioReader::guard (std::unique_ptr<juce::AudioFormatReader> (
+            mAudioFormatManager.createReaderFor (resolveProjectFile (blk.audioFilePath))));
         if (reader == nullptr || reader->lengthInSamples <= 0 || reader->sampleRate <= 0.0)
             continue;
 
@@ -6867,7 +6874,7 @@ void BaySickDAWProcessor::getStateInformation(juce::MemoryBlock& destData)
 
 void BaySickDAWProcessor::setStateInformation(const void* data, int sizeInBytes)
 {
-    std::unique_ptr<juce::XmlElement> xmlState(getXmlFromBinary(data, sizeInBytes));
+    std::unique_ptr<juce::XmlElement> xmlState(SafeXml::parseBinaryBlob (data, sizeInBytes));
     if (!xmlState) return;
 
     auto state = juce::ValueTree::fromXml(*xmlState);

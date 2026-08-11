@@ -1,4 +1,5 @@
 #include "ReverbDSP.h"
+#include "SafeXml.h"   // XXE + depth-guarded XML parse (QA-Cleanup)
 #include <cmath>
 #include <algorithm>
 
@@ -1062,7 +1063,7 @@ void ReverbDSP::getStateInformation (juce::MemoryBlock& dest)
 
 void ReverbDSP::setStateInformation (const void* data, int sz)
 {
-    auto xml = std::unique_ptr<juce::XmlElement> (juce::AudioProcessor::getXmlFromBinary (data, sz));
+    auto xml = std::unique_ptr<juce::XmlElement> (SafeXml::parseBinaryBlob (data, sz));
     if (!xml) return;
 
     if (xml->hasTagName ("ReverbDSP2"))

@@ -1,4 +1,5 @@
 #include "DeReverbDSP.h"
+#include "SafeXml.h"   // XXE + depth-guarded XML parse (QA-Cleanup)
 #include <cmath>
 
 DeReverbDSP::DeReverbDSP()
@@ -116,7 +117,7 @@ void DeReverbDSP::getStateInformation (juce::MemoryBlock& dest)
 
 void DeReverbDSP::setStateInformation (const void* data, int sz)
 {
-    auto xml = juce::AudioProcessor::getXmlFromBinary (data, sz);
+    auto xml = SafeXml::parseBinaryBlob (data, sz);
     if (! xml || ! xml->hasTagName ("DeReverbDSP")) return;
     auto state = juce::ValueTree::fromXml (*xml);
     // Restore through the setters, never the public fields: only setTailMs

@@ -1,4 +1,5 @@
 #include "TunerStyleDSP.h"
+#include "SafeXml.h"   // XXE + depth-guarded XML parse (QA-Cleanup)
 
 namespace
 {
@@ -152,7 +153,7 @@ void TunerStyleDSP::getStateInformation (juce::MemoryBlock& dest)
 
 void TunerStyleDSP::setStateInformation (const void* data, int sz)
 {
-    auto xml = juce::AudioProcessor::getXmlFromBinary (data, sz);
+    auto xml = SafeXml::parseBinaryBlob (data, sz);
     if (! xml || ! xml->hasTagName ("TunerStyleDSP")) return;
     auto state = juce::ValueTree::fromXml (*xml);
 

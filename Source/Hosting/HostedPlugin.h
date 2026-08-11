@@ -61,6 +61,17 @@ public:
     // the helper, so the host side supplies a window for the helper to reparent
     // the plugin's UI into rather than creating an editor itself.
     bool isRunningBridged() const noexcept { return mSandbox != nullptr; }
+
+    // ── Side-chain (QA-Cleanup 2026-08-11) ───────────────────────────────────
+    // True once prepareToPlay has found a side-chain input bus on the plugin.
+    // Drives whether the rack slot offers the SC source dropdown at all, so a
+    // plugin without one does not show a dead control.
+    bool hasSidechainInput() const noexcept { return mSidechainStartChannel >= 0; }
+
+    // Called immediately BEFORE processBlock, once per block, by the rack slot.
+    // The buffer is borrowed for that call only - it belongs to BaySickGraph's
+    // per-strip scRecv storage and must never be retained.
+    void setSidechainSource (const juce::AudioBuffer<float>* sc) noexcept { mSidechain = sc; }
     void openBridgedEditor  (void* parentWindowHandle, int width, int height);
     void closeBridgedEditor();
     // Bridged automation surface (null when in-process): the lanes resolve
@@ -166,11 +177,19 @@ public:
     // load-event time structurally saw an empty bridged list.
     std::function<void()> onParamListArrived;
 
-    // Pulls just the PluginDescription back out of a saved blob, so a restore
-    // path that has no instance yet can build one.  The FULL description is
-    // stored rather than only its identifier, deliberately: a project must keep
-    // loading its plugins even if the user has since removed them from the
-    // added list, so restore cannot depend on that list.
+    // Pulls the PluginDescription back out of a saved blob so a restore path
+    // with no instance yet can build one.
+    //
+    // CONTRACT CHANGED 2026-08-10 (QA-Cleanup, CL-289 Tier-1).  This used to
+    // return whatever the blob said, deliberately, so a project kept loading a
+    // plugin the user had since un-added.  That also meant a project file could
+    // name ANY .vst3 path - including one on a network share - and it was loaded
+    // and executed silently on open.  The description's fileOrIdentifier is now
+    // required to match the user's added list; a miss is refused and reported
+    // through MissingFileReport.  The blob still carries the FULL description
+    // (it is what the added-list match is made against, and what the rig's stash
+    // fallback uses when a rescan changed a plugin's identifier but not its
+    // path) - it is simply no longer trusted on its own.
     static std::unique_ptr<juce::PluginDescription> descriptionFromState (const void* data, int size);
 
 private:
@@ -191,6 +210,35 @@ private:
     std::unique_ptr<class SandboxedPluginClient> mSandbox;
 
     std::atomic<int> mLastTouchedIdx { -1 };
+
+    // MULTI-OUTPUT PLUGINS.  A plugin may expose far more output BUSES than the
+    // single stereo pair this wrapper presents (Keyscape: 9).  JUCE hands the
+    // plugin data.numOutputs = getBusCount(false) -- the bus COUNT, not the
+    // enabled-channel count -- so every one of those buses must be backed by
+    // real storage or the plugin writes through a null channel pointer.  Sized
+    // at prepareToPlay, never on the audio thread.
+    juce::AudioBuffer<float> mMultiOutScratch;
+    int                      mInnerOutChannels { 0 };
+
+    // ── Side-chain input (QA-Cleanup 2026-08-11) ─────────────────────────────
+    // Hosted plugins were never wired into the app's side-chain system at all,
+    // so a hosted compressor / gate / ducker could not be keyed off anything -
+    // which is most of what people put a plugin in a rack slot FOR.  Enabling
+    // all buses at prepare made it worse rather than better: the side-chain
+    // input bus switched ON and then received permanent silence, so the plugin
+    // believed a source was connected.
+    //
+    // Resolved at PREPARE, not per block: the channel offset of an input bus
+    // inside the process buffer is fixed by the layout, and asking for it every
+    // block would be pointless work on the audio thread.  -1 = the plugin has no
+    // side-chain input, which is the common case.
+    int mSidechainStartChannel { -1 };
+    int mSidechainChannels     { 0 };
+
+    // Borrowed for the duration of one block, set immediately before
+    // processBlock by the rack slot.  Never owned, never outlives the call.
+    const juce::AudioBuffer<float>* mSidechain { nullptr };
+
     std::atomic<int> mTouchCount     { 0 };
     std::atomic<std::int64_t> mStateApplyMs { 0 };
 
@@ -243,7 +291,6 @@ public:
 
     void paint (juce::Graphics&) override;
     void resized() override;
-    void childBoundsChanged (juce::Component*) override;
 
     // Fired whenever the plugin's own surface declares a size -- on mount, and
     // again if the plugin resizes itself (VST3's resizeView).  Hosts use it to
@@ -260,35 +307,29 @@ public:
     void parentHierarchyChanged() override;
     void moved() override;
 
-    // ── Stretch (QA-Layout T12 / L17) ────────────────────────────────────────
-    // Three cases, and they are genuinely different rather than one behaviour
-    // with edge cases:
+    // ── Surface sizing (QA-Layout T12 / L17; rewritten 2026-08-11) ───────────
+    // A HOST CANNOT SCALE A HOSTED PLUGIN'S UI.  This was built three times as
+    // an AffineTransform on an ancestor of the plugin's editor and it is not a
+    // tuning problem, it is structural -- see the note over resized() for the
+    // JUCE source that makes it impossible.  The plugin's own magnify / zoom is
+    // the only control that changes how big its UI draws.
     //
-    //   RESIZABLE, in-process  - the frame size is pushed through the plugin's
-    //                            OWN resize path.  Its constrainer decides what
-    //                            it accepts and we follow whatever it settles on.
-    //   FIXED-SIZE, in-process - the plugin snaps any bounds change back, so the
-    //                            surface is SCALED by an AffineTransform instead.
-    //                            Aspect preserved and centred, so the result is
-    //                            letterbox bars rather than a stretched or
-    //                            silently clipped UI.
-    //   BRIDGED                - CANNOT scale.  The surface is a native child
-    //                            peer holding another process's window; an
-    //                            AffineTransform on a JUCE component does not
-    //                            reach a peer, which is positioned in raw
-    //                            parent-client pixels.  It is centred at its
-    //                            natural size and clipped to the frame.
+    // So there is now ONE behaviour, not three:
     //
-    // The floor exists so "scaled down" never becomes "unusable": below this the
-    // window refuses to shrink further instead of rendering an unreadable UI.
-    static constexpr float kMinUsableScale = 0.5f;
+    //   the surface sits at whatever size the plugin declares, and the WINDOW
+    //   wraps that, clamped to the workspace.
+    //
+    // A resizable plugin additionally gets the frame pushed through its own
+    // resize path first, and whatever it settles on is the size we wrap.  A
+    // plugin magnified past the workspace anchors TOP-LEFT and clips against the
+    // window edge -- not centred, because a native child window is clipped by
+    // our window's client rect and by nothing in between, so a centred overflow
+    // would spill upward over the page's menu row.
+    //
+    // The bridged case was already this and never changed; it is now the rule
+    // rather than the exception.
 
-    // False for the bridged case -- hosts use it to explain the narrowing rather
-    // than leaving a window that just refuses to scale with no reason given.
-    bool canScaleSurface() const noexcept   { return mRemoteHost == nullptr; }
-
-    // The plugin's OWN declared size, tracked across self-resizes.  Window
-    // minimums derive from this * kMinUsableScale.
+    // The plugin's OWN declared size, tracked across self-resizes.
     int getNaturalWidth()  const noexcept   { return mNaturalW; }
     int getNaturalHeight() const noexcept   { return mNaturalH; }
 
@@ -306,6 +347,30 @@ private:
     bool mRemoteOpened { false };
 
     HostedPluginInstance& mOwner;
+
+    // A plugin can resize its own editor at any time (VST3's resizeView) and the
+    // window follows it, so this notification is load-bearing.
+    // Component::childBoundsChanged only ever fires for DIRECT children -- the
+    // scaling attempt parented the editor under a holder component, which
+    // silently severed this and had to be forwarded back by hand.  The editor is
+    // a direct child again; keep it one.
+    void childBoundsChanged (juce::Component* child) override;
+
+    // Asks the host window to wrap the plugin's current size.  Always async:
+    // the fit re-enters resized(), so inline would recurse through the layout it
+    // was called from.
+    void requestWindowFit();
+
+    // Centres the surface while it fits and anchors it top-left when it does
+    // not -- see the sizing note in the public section for why the two cases
+    // differ.
+    void positionSurface();
+
+    // True only across the window fit that OUR readback requested, so the
+    // resulting layout honours the plugin's chosen size instead of pushing the
+    // frame back at it and starting the argument over.
+    bool mRefitting { false };
+
     std::unique_ptr<juce::AudioProcessorEditor> mInner;
     bool mWasAlive   { false };
     bool mOwnerGone  { false };
@@ -313,10 +378,9 @@ private:
     // gone by the time we repaint.
     juce::String mMarkerTitle, mMarkerMessage;
 
-    // The plugin's own declared size.  Kept SEPARATE from our bounds because
-    // scaling makes the two deliberately differ -- "child size != frame size"
-    // used to be the test for a plugin self-resize, and that test is wrong the
-    // moment a transform is in play.
+    // The plugin's own declared size.  Kept SEPARATE from our bounds because a
+    // plugin bigger than the workspace gets a frame smaller than itself, so
+    // "child size != frame size" is not a usable test for a plugin self-resize.
     int  mNaturalW { 0 }, mNaturalH { 0 };
     // Guards the resized() -> setBounds -> childBoundsChanged -> host resize
     // -> resized() feedback loop that a resizable plugin would otherwise spin.

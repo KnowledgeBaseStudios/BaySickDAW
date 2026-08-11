@@ -53,7 +53,18 @@ namespace Hosting::Bridge
 // right-click hook of ours).  Bursts coalesce helper-side, and changes the
 // HOST itself just sent (automation playback) are suppressed at the source so
 // lane replay does not masquerade as user touches.
-inline constexpr std::uint32_t kProtocolVersion = 5;
+// 6 (2026-08-10): ScanFile / ScanResult -- plugin SCANNING moved out of
+// process.  It used to run in-process on a background thread, which broke
+// JUCE's documented "VST3 scan must be on the message thread" contract AND let
+// one crashing plugin take the whole DAW down mid-scan.  Host and helper are
+// built together by do_build.bat and staged side by side, so a version bump
+// never meets a stale peer.
+inline constexpr std::uint32_t kProtocolVersion = 6;
+
+// The ChildProcess handshake id.  Both sides must agree, so it lives here with
+// the rest of the protocol rather than being redeclared in each .cpp (it was,
+// identically, in two).
+inline constexpr const char* kBridgeUid = "BaySickPluginBridge";
 
 enum class MessageType : std::uint32_t
 {
@@ -68,6 +79,7 @@ enum class MessageType : std::uint32_t
     OpenEditor     = 8,
     CloseEditor    = 9,
     Shutdown       = 10,
+    ScanFile       = 11,  // v6: trailer = path to scan.  Reply is ScanResult.
 
     // helper -> host
     HandshakeReply = 101,
@@ -79,6 +91,7 @@ enum class MessageType : std::uint32_t
     Error          = 107,
     ProgramInfo    = 108,   // v4: payload + current program's name as trailer
     ParamTouched   = 109,   // v5: payload + "id \t name" trailer
+    ScanResult     = 110,   // v6: trailer = <PLUGINS> XML, one <PLUGIN> per type
 };
 
 #pragma pack (push, 1)

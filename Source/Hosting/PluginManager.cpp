@@ -1,4 +1,7 @@
 #include "PluginManager.h"
+#include "OutOfProcessScanner.h"   // helper-process plugin scanning (QA-Cleanup)
+#include "SandboxedPluginClient.h"
+#include "SafeXml.h"   // XXE + depth-guarded XML parse (QA-Cleanup)
 #include "../AppPaths.h"
 
 namespace Hosting
@@ -474,6 +477,28 @@ void PluginManager::run()
 
     // Empty search path on purpose: the ctor would otherwise walk the folders a
     // SECOND time, and setFilesOrIdentifiersToScan replaces the result anyway.
+    // OUT-OF-PROCESS SCAN (2026-08-10).  Every file below is loaded by a helper
+    // process, not by us.  Two reasons, both real:
+    //
+    //   * JUCE asserts the VST3 scan path must run on the MESSAGE thread
+    //     (juce_VST3PluginFormatImpl.h:299).  This function is a Thread::run,
+    //     so we were breaking that on every scan - silently, because the assert
+    //     compiles out in Release.  In the helper the scan runs on ITS message
+    //     thread, which is where the contract is satisfied.
+    //   * scanning LOADS the plugin, so one bad plugin used to take the whole
+    //     DAW down and lose the user's work.  Now it takes down a helper we are
+    //     happy to lose, JUCE's dead-man's pedal blacklists the file, and the
+    //     scan carries on to the next one.
+    //
+    // The helper is chosen by ARCHITECTURE: a 32-bit plugin can only be scanned
+    // by the 32-bit helper, the same reason it can only be loaded by one.
+    found.setCustomScanner (std::make_unique<BridgedPluginScanner> (
+        [] (const juce::File& pluginFile)
+        {
+            return SandboxedPluginClient::helperExecutable (
+                       architectureOf (pluginFile) == PluginArch::X86);
+        }));
+
     juce::PluginDirectoryScanner scanner (found, *fmt, juce::FileSearchPath(), true,
                                           deadMansPedalFile());
     scanner.setFilesOrIdentifiersToScan (loadable);
@@ -484,6 +509,8 @@ void PluginManager::run()
     {
         const auto next = scanner.getNextPluginFileThatWillBeScanned();
 
+        // No DLL-directory scope here any more: the load happens in the helper
+        // now, and the helper applies its own (PluginHostMain::onScanFile).
         if (! scanner.scanNextFile (true, nameBeingScanned))
             break;
 
@@ -547,7 +574,7 @@ void PluginManager::loadFromDisk()
     if (! f.existsAsFile())
         return;
 
-    const auto xml = juce::XmlDocument::parse (f);
+    const auto xml = SafeXml::parse (f);
 
     if (xml == nullptr)
         return;

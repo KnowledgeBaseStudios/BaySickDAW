@@ -15,8 +15,10 @@
 // factory builds this with no plugin and one of two things fills it in:
 //   * the picker calls setPlugin() with the chosen description, or
 //   * setStateInformation() rebuilds it from the saved blob, which carries the
-//     FULL PluginDescription -- so a project keeps loading its plugins even if
-//     the user has since removed them from the added list.
+//     FULL PluginDescription -- checked against the user's added list before it
+//     is loaded (QA-Cleanup 2026-08-10; a project file naming an arbitrary
+//     .vst3 path used to be loaded and executed silently).  A plugin that is not
+//     in that list is refused and reported, and the slot stays empty.
 // ─────────────────────────────────────────────────────────────────────────────
 
 namespace Hosting
@@ -43,6 +45,15 @@ public:
     void setStateInformation (const void*, int) override;
 
     int getLatencySamples() const override;
+
+    // Shows the SC source dropdown in the slot header only for plugins that
+    // actually declare a side-chain input, so one that cannot use it does not
+    // get a dead control.  Answered by the loaded plugin rather than hardcoded,
+    // unlike the twelve built-in effects where it is a fixed property.
+    bool usesSidechain() const noexcept override
+    {
+        return mHosted != nullptr && mHosted->hasSidechainInput();
+    }
 
     // TS7 (2026-07-31): a hosted VST3 in a rack slot had NO playhead, so its
     // tempo-synced delays, LFOs and arpeggiators had nothing to follow -- JUCE

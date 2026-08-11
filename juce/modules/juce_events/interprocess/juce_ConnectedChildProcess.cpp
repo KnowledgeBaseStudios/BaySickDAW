@@ -163,6 +163,16 @@ bool ChildProcessCoordinator::sendMessageToWorker (const MemoryBlock& mb)
     return false;
 }
 
+// BAYSICKDAW VENDORED CHANGE (QA-Cleanup 2026-08-11, security MEDIUM-7).
+// Silently does nothing with no connection, deliberately: the caller's sequence
+// is "launch, then narrow the budget", and a failed launch already reported
+// itself.  An assert here would fire on a path that is handled.
+void ChildProcessCoordinator::setWorkerPipeTimeout (int newTimeoutMs) noexcept
+{
+    if (connection != nullptr)
+        connection->setPipeMessageTimeout (newTimeoutMs);
+}
+
 bool ChildProcessCoordinator::launchWorkerProcess (const File& executable, const String& commandLineUniqueID,
                                                    int timeoutMs, int streamFlags)
 {

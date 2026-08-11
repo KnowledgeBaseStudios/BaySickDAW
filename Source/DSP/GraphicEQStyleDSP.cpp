@@ -1,4 +1,5 @@
 #include "GraphicEQStyleDSP.h"
+#include "SafeXml.h"   // XXE + depth-guarded XML parse (QA-Cleanup)
 
 constexpr float GraphicEQStyleDSP::kFreqs[GraphicEQStyleDSP::kNumBands];
 
@@ -97,7 +98,7 @@ void GraphicEQStyleDSP::getStateInformation (juce::MemoryBlock& dest)
 
 void GraphicEQStyleDSP::setStateInformation (const void* data, int sz)
 {
-    auto xml = juce::AudioProcessor::getXmlFromBinary (data, sz);
+    auto xml = SafeXml::parseBinaryBlob (data, sz);
     if (! xml || ! xml->hasTagName ("GraphicEQStyleDSP")) return;
     auto state = juce::ValueTree::fromXml (*xml);
     for (int i = 0; i < kNumBands; ++i)

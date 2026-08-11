@@ -314,16 +314,6 @@ void RenderGraphDispatcher::dispatchBlock (juce::AudioBuffer<float>& outputBuffe
         return;
     }
 
-    if (RenderEngine::MtDiagnostic::gCaptureOn.load (std::memory_order_relaxed))
-        RenderEngine::MtDiagnostic::gBlockCount.fetch_add (1, std::memory_order_relaxed);
-
-    // QA-N (DIAG-02): reset the pool's per-block busy accumulator at the block
-    // boundary.  runOneTask (workers + audio-thread pump) adds to it below.
-    // NOTHING reads the sum today -- getBusyTicks has no callers; the producer
-    // is kept deliberately for the planned MT-diagnostic compile-gate (see
-    // BaySickThreadPool.h), so do not retire this as dead code.
-    mPool.resetBusyTicks();
-
     // Block-completion counter (BaySickThreadPool::blockComplete).  Zeroed here,
     // before a single task is seeded, so a block that timed out with tasks
     // still in flight cannot leave its residue in this block's count.
@@ -345,16 +335,9 @@ void RenderGraphDispatcher::dispatchBlock (juce::AudioBuffer<float>& outputBuffe
     // ── Seed leaves ─────────────────────────────────────────────────────────
     // Tasks with mInitialDeps == 0 are ready immediately.  In a typical
     // graph these are the engine inserts (no upstream predecessors).
-    {
-        const bool capture = RenderEngine::MtDiagnostic::gCaptureOn.load (std::memory_order_relaxed);
-        for (auto* t : mTasks)
-            if (t != nullptr && t->mInitialDeps == 0)
-            {
-                if (capture)
-                    RenderEngine::MtDiagnostic::gLeavesSubmitted.fetch_add (1, std::memory_order_relaxed);
-                mPool.submit (t);
-            }
-    }
+    for (auto* t : mTasks)
+        if (t != nullptr && t->mInitialDeps == 0)
+            mPool.submit (t);
 
     // ── Main thread participates as worker until the block is complete ──────
     // This is the parallel pump.  Workers process tasks from the pool's

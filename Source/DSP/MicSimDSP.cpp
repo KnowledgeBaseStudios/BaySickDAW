@@ -1,6 +1,8 @@
 #include "MicSimDSP.h"
+#include "SafeAudioReader.h"   // channel/frame sanity gate (QA-Cleanup)
 #include "../ProjectFileResolver.h"
 #include "../SampleLibrary.h"
+#include "SafeAudioFormats.h"   // MP3 decode via vendored LAME (QA-Cleanup)
 
 // ─────────────────────────────────────────────────────────────────────────────
 // MicSimDSP - H-6d (2026-05-02)
@@ -204,8 +206,9 @@ bool MicSimDSP::loadUserIr (const juce::File& f, juce::String& outErr, int slot)
     // Probe with a reader before committing -- same guard, same format set, as
     // AcousticSimulatorStyleDSP::loadUserIR.
     juce::AudioFormatManager fm;
-    fm.registerBasicFormats();
-    std::unique_ptr<juce::AudioFormatReader> reader (fm.createReaderFor (f));
+    SafeAudioFormats::registerAll (fm);
+    auto reader = SafeAudioReader::guard (
+        std::unique_ptr<juce::AudioFormatReader> (fm.createReaderFor (f)));
     if (reader == nullptr || reader->lengthInSamples <= 0)
     {
         outErr = "This file could not be read as audio:\n" + f.getFullPathName();

@@ -141,9 +141,7 @@ void BaySickVisualizerScreen::paintOscTab (juce::Graphics& g,
     const int   waveform = juce::jlimit (0, 10, (int) getf ("waveform"));
     const float modifier = getf ("modifier");  // 0..1
 
-    const float cx = bounds.getCentreX();
     const float cy = bounds.getCentreY();
-    const float hw = bounds.getWidth()  * 0.45f;
     const float hh = bounds.getHeight() * 0.38f;
 
     const int kPts = 256;

@@ -1,4 +1,5 @@
 #include "BassPage.h"
+#include "SafeXml.h"   // XXE + depth-guarded XML parse (QA-Cleanup)
 #include "UndoBracket.h"
 #include "UndoSnapshotStore.h"   // QA-UndoCoverage: chain-swap snapshots
 #include "../AppPaths.h"
@@ -27,18 +28,19 @@ BassPage::BassPage(BaySickDAWProcessor& p, PatternManager& pm, int pageIndex)
     mProcessor.engineRig().addTab (TabKind::Bass, mPageIndex);
 
     buildPlayerTab();
-    // 2026-04-26 (step 2 commit 3): Piano Roll lives on PianoRollPage now.
-    // mPianoRoll stays null; menu-bar pill redirects via the editor.
+    // 2026-04-26 (step 2 commit 3): Piano Roll lives on PianoRollPage.
+    // QA-Layout T4 (L11) then moved the navigation into the page dropdown's
+    // "Pages:" list, so nothing here renders a sub-tab control.  Sub-tab index
+    // 1 is that redirect and owns no component, which is why switchTab still
+    // clamps to 0..1.
     // J-6 EQ unification (2026-05-03): EQ sub-tab removed - pre + post EQ
     // for this insert now live exclusively on the Effects page.
 
     switchTab(0);
-    startTimerHz(24);
 }
 
 BassPage::~BassPage()
 {
-    stopTimer();
     unsubscribeFromEngineApvtsState();
 
     // QA-ModelShell TS1: the engine is rig-owned and survives this view.
@@ -57,8 +59,6 @@ void BassPage::switchTab(int idx)
     // J-6 EQ unification: 2 sub-tabs only (Player + Piano Roll).
     mActiveTab = juce::jlimit(0, 1, idx);
     if (mPlayerTab) mPlayerTab->setVisible(mActiveTab == 0);
-    if (mPianoRoll) mPianoRoll->setVisible(mActiveTab == 1);
-    if (mActiveTab == 1 && mPianoRoll) mPianoRoll->grabKeyboardFocus();
     resized();
 }
 
@@ -72,39 +72,12 @@ void BassPage::buildPlayerTab()
     addAndMakeVisible(*mPlayerTab);
 }
 
-void BassPage::buildPianoRollTab()
-{
-    mPianoRoll = std::make_unique<PianoRollContainer>();
-    mPianoRoll->setData(&mPM.currentPattern().bassRoll[mPageIndex]);
-    // C.5b: pattern's intrinsic TS drives the piano roll's bar-line spacing.
-    mPianoRoll->setTimeSignature(mPM.currentPattern().tsNum, mPM.currentPattern().tsDen);
-    mPianoRoll->setNoteColor(mPageColor);
-    addAndMakeVisible(*mPianoRoll);
-
-    if (mTabName.isEmpty())
-        mTabName = "Bass " + juce::String(mPageIndex);
-    refreshPianoRollContextLabel();
-}
-
 // J-6 EQ unification (2026-05-03): buildEQTab removed - pre + post EQ now
 // live exclusively on the Effects page (mixer_bass_<N>_preeq_* / mixer_bass_<N>_*).
-
-// ── PlayHead ──────────────────────────────────────────────────────────────────
-void BassPage::setPlayHead(StandalonePlayHead* ph)
-{
-    mPlayHead = ph;
-    if (mPianoRoll)
-        mPianoRoll->onSeek = [ph](double b) { if (ph) ph->seekTo(b); };
-}
 
 void BassPage::setUndoContext(const UndoContext& ctx)
 {
     mUndoCtx = ctx;   // QA-UndoCoverage: chain-swap gestures (ruling 3a)
-    if (mPianoRoll)
-    {
-        mPianoRoll->setUndoContext(ctx);
-        if (ctx.showHistory) mPianoRoll->onShowHistoryWindow = ctx.showHistory;
-    }
 }
 
 // ── Engine selection ──────────────────────────────────────────────────────────
@@ -117,7 +90,6 @@ void BassPage::selectEngine(const juce::String& engineName)
 
     mEngineType   = engineName;
     mEngineLocked = true;
-    refreshPianoRollContextLabel();
 
     // View teardown only -- any previous engine is rig-owned.
     if (mEngineEditor && mPlayerTab)
@@ -153,38 +125,6 @@ void BassPage::selectEngine(const juce::String& engineName)
     // Smoke round 2 (Jeff): the SW-3 Swing Mix knob moved OFF the editor
     // title bar onto the PageMenuBar (StandaloneEditor wires it per
     // page-show) so it's visible on every sub-tab.
-
-    // Wire note audition callback (fires on note draw, pitch drag, and key click)
-    if (mPianoRoll)
-    {
-        mPianoRoll->onNoteAudition = [this](int midiNote)
-        {
-            if (auto* b = dynamic_cast<BaySickBassProcessor*>(mEngineProcessor))
-                b->auditionNote(midiNote);
-            else if (auto* h = dynamic_cast<HarmlessProcessor*>(mEngineProcessor))
-                h->auditionNote(midiNote);
-            else if (auto* v = dynamic_cast<BaySickPlayerProcessor*>(mEngineProcessor))
-                v->auditionNote(midiNote);
-        };
-        mPianoRoll->onNoteAuditionOn = [this](int midiNote)
-        {
-            if (auto* b = dynamic_cast<BaySickBassProcessor*>(mEngineProcessor))
-                b->auditionNoteOn(midiNote);
-            else if (auto* h = dynamic_cast<HarmlessProcessor*>(mEngineProcessor))
-                h->auditionNoteOn(midiNote);
-            else if (auto* v = dynamic_cast<BaySickPlayerProcessor*>(mEngineProcessor))
-                v->auditionNoteOn(midiNote);
-        };
-        mPianoRoll->onNoteAuditionOff = [this](int midiNote)
-        {
-            if (auto* b = dynamic_cast<BaySickBassProcessor*>(mEngineProcessor))
-                b->auditionNoteOff(midiNote);
-            else if (auto* h = dynamic_cast<HarmlessProcessor*>(mEngineProcessor))
-                h->auditionNoteOff(midiNote);
-            else if (auto* v = dynamic_cast<BaySickPlayerProcessor*>(mEngineProcessor))
-                v->auditionNoteOff(midiNote);
-        };
-    }
 
     if (mEngineEditor && mPlayerTab)
         mPlayerTab->addAndMakeVisible(*mEngineEditor);
@@ -228,27 +168,6 @@ juce::Component* BassPage::stripPresetButton() const
     return nullptr;
 }
 
-// ── Timer ─────────────────────────────────────────────────────────────────────
-void BassPage::timerCallback()
-{
-    // J-6 EQ unification (2026-05-03): page-level EQ display removed; the
-    // Effects-page Pre EQ tab handles its own syncFromDSP polling now.
-
-    // Update piano roll playhead - hidden in Song mode (playhead lives on Builder)
-    if (mPlayHead && mPianoRoll)
-    {
-        const bool songMode = mProcessor.isSongMode();
-        mPianoRoll->setPlayheadBeat(songMode ? -1.0 : mPlayHead->getCurrentBeat());
-    }
-
-    // Refresh piano roll data pointer when pattern changes
-    if (mPianoRoll)
-    {
-        mPianoRoll->setData(&mPM.currentPattern().bassRoll[mPageIndex]);
-        mPianoRoll->setTimeSignature(mPM.currentPattern().tsNum, mPM.currentPattern().tsDen);
-    }
-}
-
 // ── Component overrides ───────────────────────────────────────────────────────
 void BassPage::paint(Graphics& g)
 {
@@ -275,8 +194,6 @@ void BassPage::resized()
         if (mEngineEditor && mPlayerTab->getHeight() > 0)
             mEngineEditor->setBounds(mPlayerTab->getLocalBounds());
     }
-
-    if (mPianoRoll) mPianoRoll->setBounds(b);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -285,15 +202,6 @@ void BassPage::resized()
 void BassPage::setTabName(const juce::String& name)
 {
     mTabName = name;
-    refreshPianoRollContextLabel();
-}
-
-void BassPage::refreshPianoRollContextLabel()
-{
-    if (!mPianoRoll) return;
-    const juce::String engine = mEngineType.isEmpty() ? juce::String("(no engine)")
-                                                      : mEngineType;
-    mPianoRoll->setContextLabel(mTabName + " - " + engine);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -358,7 +266,7 @@ static void bassSubstituteEnginePrefixInBinary (juce::AudioProcessor* proc,
     if (tagStart < 0) return;
     const juce::String engineTagWithUnders = localPrefix.substring (tagStart, trailingUnder + 1);
 
-    auto xmlEl = juce::AudioProcessor::getXmlFromBinary (mb.getData(), (int) mb.getSize());
+    auto xmlEl = SafeXml::parseBinaryBlob (mb.getData(), (int) mb.getSize());
     if (! xmlEl) return;
 
     juce::ValueTree loaded = juce::ValueTree::fromXml (*xmlEl);
@@ -659,7 +567,7 @@ juce::String BassPage::exportBassState() const
 void BassPage::importBassState (const juce::String& xml)
 {
     if (xml.isEmpty() || mLocked) return;
-    auto parsed = juce::XmlDocument::parse (xml);
+    auto parsed = SafeXml::parse (xml);
     if (! parsed || ! parsed->hasTagName ("BassPageState")) return;
 
     const juce::String engine = parsed->getStringAttribute ("engine");
@@ -686,7 +594,6 @@ void BassPage::importBassState (const juce::String& xml)
     // the ribbon.  setLocked early-outs on no change, so the usual
     // false -> false duplicate stays silent.
     setLocked (lock);
-    refreshPianoRollContextLabel();
 }
 
 void BassPage::loadPreset (const juce::File& xml)
@@ -697,7 +604,7 @@ void BassPage::loadPreset (const juce::File& xml)
 
     if (mEngineProcessor == nullptr || ! xml.existsAsFile()) return;
 
-    auto px = juce::XmlDocument::parse (xml);
+    auto px = SafeXml::parse (xml);
     if (! px) return;
 
     // QA-I: context-menu preset path -- the engine is already locked, so
@@ -734,7 +641,7 @@ void BassPage::loadPreset (const juce::File& xml)
         if (data.isEmpty()) return;
         juce::MemoryBlock mb;
         if (! mb.fromBase64Encoding (data)) return;
-        if (auto x = juce::AudioProcessor::getXmlFromBinary (mb.getData(), (int) mb.getSize()))
+        if (auto x = SafeXml::parseBinaryBlob (mb.getData(), (int) mb.getSize()))
             innerXml = std::move (x);
     }
     else
@@ -869,7 +776,7 @@ void BassPage::savePatchAs()
             // every engine editor's loadPreset).  Mirrors LayersPage.
             juce::MemoryBlock mb;
             bp->mEngineProcessor->getStateInformation (mb);
-            auto stateXml = juce::AudioProcessor::getXmlFromBinary (
+            auto stateXml = SafeXml::parseBinaryBlob (
                                 mb.getData(), (int) mb.getSize());
             if (! stateXml) return;
 

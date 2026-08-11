@@ -1,4 +1,5 @@
 #include "EQ8MsDSP.h"
+#include "SafeXml.h"   // XXE + depth-guarded XML parse (QA-Cleanup)
 
 // 5F-9 sec.12 Phase 2 (12h): seed per-band channel defaults so today's behaviour
 // is preserved exactly (mMid bands route to channel=Mid, mSide bands to
@@ -119,7 +120,7 @@ void EQ8MsDSP::getStateInformation(juce::MemoryBlock& dest)
 
 void EQ8MsDSP::setStateInformation(const void* data, int sz)
 {
-    auto xml = juce::AudioProcessor::getXmlFromBinary(data, sz);
+    auto xml = SafeXml::parseBinaryBlob (data, sz);
     if (!xml || xml->getTagName() != "EQ8MsDSP") return;
 
     auto loadEQ = [&](const char* tag, EQ8DSP& eq)

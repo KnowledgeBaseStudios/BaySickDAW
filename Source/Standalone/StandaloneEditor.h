@@ -624,18 +624,17 @@ private:
 
     // ── D2 Drum Kit support ───────────────────────────────────────────────
     // Walk mPages, filter to TabType::Drums in ribbon order, build a
-    // KitDrumInfo list with active-tab marked.  Used by every DrumPage's
-    // DrumKitContainer via its provider callback.
+    // KitDrumInfo list with active-tab marked.  Feeds the kit grid's row
+    // provider on PianoRollPage.
     std::vector<KitDrumInfo> getKitDrumList() const;
-    // Iterate all DrumPage instances and call refreshKitView() on each.
-    // Triggered after add / remove / rename / active-tab change.
+    // Refresh the kit view.  Triggered after add / remove / rename /
+    // active-tab change.
     void refreshAllKitViews();
-    // Wire a freshly-created DrumPage's kit-view callbacks (provider + click
-    // handler).  Called from every DrumPage creation site.
-    void wireDrumPageKitView (class DrumPage* dp);
-    // 2026-04-26 (1b): same wiring as wireDrumPageKitView, applied directly
-    // to the DrumKitContainer hosted on PianoRollPage.  Both views share the
-    // same `Pattern::drumRolls[]` data so edits propagate either way.
+    // Wire a freshly-created DrumPage's play-pitch callback.  Called from
+    // every DrumPage creation site.
+    void wireDrumPagePlayNote (class DrumPage* dp);
+    // Wire the DrumKitContainer hosted on PianoRollPage.  Since the
+    // 2026-04-26 unified migration this is the app's only kit view.
     void wirePianoRollPageKitView (class PianoRollPage* prp);
 
     // 2026-04-26 (step 2 commit 2): register a freshly-created engine page

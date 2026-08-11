@@ -1,4 +1,5 @@
 #include "DelayDSP.h"
+#include "SafeXml.h"   // XXE + depth-guarded XML parse (QA-Cleanup)
 #include <cmath>
 #include <algorithm>
 
@@ -1045,7 +1046,7 @@ void DelayDSP::getStateInformation (juce::MemoryBlock& dest)
 // ─────────────────────────────────────────────────────────────────────────────
 void DelayDSP::setStateInformation (const void* data, int sz)
 {
-    std::unique_ptr<juce::XmlElement> xml(juce::AudioProcessor::getXmlFromBinary(data, sz));
+    std::unique_ptr<juce::XmlElement> xml(SafeXml::parseBinaryBlob (data, sz));
     if (!xml) return;
 
     // Accept both old and new format

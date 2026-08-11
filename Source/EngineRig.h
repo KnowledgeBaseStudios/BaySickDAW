@@ -307,9 +307,15 @@ public:
     bool retryDeadPluginTab (int pageIndex);
 
     // Restore principle (HostedPlugin.h): the state blob carries the FULL
-    // PluginDescription so a project keeps loading its plugins after the user
-    // removed them from the added list.  The walker stashes it here BEFORE the
-    // select; the Plugins factory falls back to it when findAdded comes up empty.
+    // PluginDescription, which is what a restore identifies the plugin BY.  The
+    // walker stashes it here BEFORE the select; the Plugins factory falls back
+    // to it when findAdded comes up empty.
+    //
+    // NARROWED 2026-08-10 (QA-Cleanup): descriptionFromState now requires the
+    // description to match the added list, so the fallback's original case - an
+    // un-added plugin still loading - is deliberately gone.  What it still does
+    // is cover an identifier MISS where the same file path IS added, i.e. a
+    // rescan that changed a plugin's uid.
     //
     // CONTRACT: stash immediately before the ONE select it describes.  The next
     // Plugins build for that page consumes the entry whether it needed it or

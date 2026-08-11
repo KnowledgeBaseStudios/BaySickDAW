@@ -1,4 +1,5 @@
 #include "WorkspaceWindow.h"
+#include "SafeXml.h"   // XXE + depth-guarded XML parse (QA-Cleanup)
 #include "SharedUI.h"   // BaySickLAF + PageMenuBar
 #include "WindowChrome.h"   // TS7 §9.1: the one title-strip look
 #include "../ProjectManager.h"
@@ -747,7 +748,7 @@ void WorkspaceWindow::loadSavedFillState()
     }
     else if (mPersistence == Persistence::Disk)
     {
-        if (auto xml = juce::XmlDocument::parse (ProjectManager::getSettingsFile()))
+        if (auto xml = SafeXml::parse (ProjectManager::getSettingsFile()))
             if (auto* root = xml->getChildByName (kRootTag))
                 for (auto* w : root->getChildWithTagNameIterator (kWindowTag))
                 {
@@ -1108,7 +1109,7 @@ juce::Rectangle<int> WorkspaceWindow::loadSavedBounds (bool& outHasPosition) con
     // Map miss on a Disk window: seed from settings.xml (the layout the last
     // exit flushed).  A record without x/y is a SIZE-ONLY seed -- player
     // placement is filtered out of the global file by design.
-    auto xml = juce::XmlDocument::parse (ProjectManager::getSettingsFile());
+    auto xml = SafeXml::parse (ProjectManager::getSettingsFile());
     if (! xml) return {};
     auto* root = xml->getChildByName (kRootTag);
     if (root == nullptr) return {};
@@ -1174,7 +1175,7 @@ void WorkspaceWindow::writeSessionToSettings()
     if (diskEligibleKeys().empty()) return;
 
     const auto file = ProjectManager::getSettingsFile();
-    auto xml = juce::XmlDocument::parse (file);
+    auto xml = SafeXml::parse (file);
     // MUST match the tag every other settings writer uses (ProjectManager
     // :605).  Inventing a different root here would produce a settings.xml
     // that parses but that no other reader recognises.

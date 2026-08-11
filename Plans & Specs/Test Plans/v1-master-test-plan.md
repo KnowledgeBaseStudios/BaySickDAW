@@ -13,18 +13,86 @@
 > logged findings, and the close commit lands. That is the ONLY doc-close path for G1-G4 batches.
 > §A also re-runs as the smoke ladder at every group boundary during the code phase.
 
+## How to read this document (start here if you are testing, not developing)
+
+**You have the repo and the plan documents, but you are not expected to have read them.**
+Every scenario is written to stand on its own. The codes and cross-references scattered through
+it are BREADCRUMBS for whoever fixes what you find, not homework for the person running the test.
+
+**Look up anything you want to.** The manuals exist to be read, the app is worth exploring, and
+knowing more about it makes you a better tester, not a slower one.
+
+**What you should NOT have to do is go hunting through project history to work out what a
+scenario is asking of you.** If a step only makes sense once you have chased down a tracking code
+or read some other document, that is a failure of how the scenario was WRITTEN — it is not
+something you were supposed to already know. Flag it and it gets rewritten in plain terms. You
+are never the problem in that situation.
+
+- **Scenario IDs** (`CLN-14`, `MS-32`, `A3`) are labels so we can discuss one test without
+  retyping it. Quote the ID when reporting.
+- **`D:__ R:__`** is where results go, and they are two different jobs. **`R:` is yours** — the
+  normal Release build, the one you installed. Put `PASS`, `FAIL` or a note there and leave `D:`
+  alone. **`D:` is Jeff's** — a slower Debug build that reports faults the normal build hides. He
+  runs it on whatever you mark FAIL, so a clear `R:` failure is what sends him there.
+- **"jassert"** is an error box only the Debug build shows, so you will not normally see one. If
+  you do, screenshot it — the file name and line number on it are the single most useful thing
+  you can send.
+- **Bracketed codes** like `SC-9`, `DLL-1`, `CL-289`, `BLU-302` are internal tracking numbers for
+  a specific decision or finding. They tell the fixer where to look. They are safe to ignore.
+- **`§` references** point elsewhere in THIS document, as context only, never as an instruction.
+- **Report anything that surprises you**, even where the scenario says it is expected. "Expected"
+  means do not be alarmed; it does not mean stay quiet.
+
+### Writing a FAIL that can actually be acted on
+
+A `FAIL` on its own means someone has to come and ask you five questions before anything can
+happen. These six lines are what let the fault be reproduced without you in the room. None of
+them require any technical knowledge.
+
+1. **What you did**, if it differed at all from the steps as written.
+2. **What you expected, and what happened instead.** Both halves — "it didn't work" does not say
+   whether nothing happened, the wrong thing happened, or the app fell over.
+3. **THE EXACT THING BY NAME.** This is the one that matters most and the one most often left
+   out. Not "an MP3" but `Kick_Loop_128.mp3`. Not "a plugin" but `Valhalla Supermassive`. Not "a
+   kit" but `Big Rusty Drums, 02-basic`. A fault that only happens with one particular file
+   cannot be found without knowing which file, and most of these scenarios are about specific
+   content.
+4. **Every time, sometimes, or once?** Say which. "Once, and I could not make it happen again" is
+   a genuinely useful answer — do not throw it away because it sounds weak.
+5. **Was the app still usable afterwards** — kept working, went silent, froze, or closed itself.
+6. **A screenshot** for anything you can see, and for any error box at all.
+
+**If the app closed itself or froze**, also say roughly what time it happened and send the
+contents of `Documents\BaySickDAW\` — that folder holds the app's settings and its logs,
+including `plugins_scan_crashes.txt`, which records any plugin that brought the app down while
+being scanned.
+
+**Do not tidy up before reporting.** If a project, sample or plugin state provoked it, keep it as
+it is and say so — being able to reopen the exact thing that broke is worth more than a tidy
+description of it.
+
+**The one thing worth knowing before you start:** some scenarios describe behaviour that changed
+ON PURPOSE, and say so. For those the question is always "does this work correctly now" — never
+"is this the same as it was".
+
 ## §A — Global smoke ladder
 
 Re-run at EVERY group boundary (15-30 min) and as the campaign opener. Debug exe FIRST (screenshot
 any jassert dialog), then confirm in Release. Don't run both exes simultaneously (ASIO exclusivity).
 
-- [ ] A1. Both configs build clean (`do_build.bat`). **The gate is FIVE exit codes, not two** —
+- [ ] A1. Both configs build clean (`do_build.bat`). **The gate is SIX exit codes, not two** —
       `RELEASE_EXIT_CODE`, `DEBUG_EXIT_CODE`, `HELPER64_EXIT_CODE`, `HELPER32_CONFIG_EXIT_CODE`,
-      `HELPER32_EXIT_CODE`, all zero — PLUS four `vcxproj -> ....exe` link lines (two
-      `BaySickDAW.exe`, `BaySickPluginHost64.exe`, `BaySickPluginHost32.exe`) and zero
+      `HELPER32_EXIT_CODE`, `ARTEFACTS_EXIT_CODE`, all zero — PLUS four `vcxproj -> ....exe` link
+      lines (two `BaySickDAW.exe`, `BaySickPluginHost64.exe`, `BaySickPluginHost32.exe`) and zero
       `error C` / `error LNK` / `error MSB` in `build_log.txt`.  The two-code version predates the
       plugin-host helpers and would pass a build whose 32-bit helper never linked, which shows up
       later as bridged plugins silently failing to load.
+      **`ARTEFACTS_EXIT_CODE` is not a compiler result** (added 2026-08-10 with the portable-build
+      rewrite; this step said FIVE until 2026-08-11): it checks the six exe files the app needs at
+      runtime are actually ON DISK.  That is the case the five compiler codes cannot see — a
+      locked-exe link failure leaves stale objects and still reports success.  Helper exes carrying
+      an OLDER timestamp than the main exes is CORRECT when the helper sources did not change;
+      `copy_if_different` is doing its job, not skipping work.
 - [ ] A2. Launch + audio plays (default project, transport runs, meters move, no jasserts).
 - [ ] A3. Big project loads (multi-engine stress project) — all tabs restore, plays without glitching.
 - [ ] A4. Save -> close -> reopen round-trip — state identical (tabs, patterns, mixer, engine params).
@@ -2400,9 +2468,17 @@ Where a step says "check the trace", read `asio_trace.txt` next to `audio_settin
 
 **Hosted plugins (T12):**
 
-- [ ] **LAY-B13 — plugin stretch.** A RESIZABLE plugin resizes natively with its
-      window.  A FIXED-SIZE plugin scales (free-transform, aspect kept) instead of
-      clipping; nothing is silently cut off at any window size. `D:__ R:__` notes:
+- [ ] **LAY-B13 — plugin sizing. [REWRITTEN 2026-08-11 at QA-Cleanup — the
+      original tested behaviour that no longer exists.]**  It read "a FIXED-SIZE
+      plugin scales (free-transform, aspect kept) instead of clipping; nothing is
+      silently cut off at any window size."  Host-side scaling of a hosted plugin
+      UI was removed at QA-Cleanup Task 14 because it is not achievable — see
+      §B.35 CLN-14.  Test the CURRENT contract instead: a RESIZABLE plugin
+      resizes natively with its window; a FIXED-SIZE plugin sits at its own size
+      and the WINDOW wraps it; the plugin's own magnify / zoom is the size
+      control; a plugin magnified past the workspace clips at the right and
+      bottom and never over the page menu row or the plugin picker.
+      `D:__ R:__` notes:
 
 **Piano roll + transport (T1 / T9):**
 
@@ -2880,10 +2956,212 @@ Where a step says "check the trace", read `asio_trace.txt` next to `audio_settin
    bridged plugins in RACK SLOTS are not covered by the offline widening at all and keep the 4 ms
    realtime deadline during an export.  In-process plugins are unaffected; if an export comes back
    silent from one bridged plugin, that is this, not a new bug.
-4. **~20 `C4189 unused local variable` compiler warnings** remain (BaySickVisualizerScreen,
-   PluginProcessor, BuilderPage x2, EventEditor x3, GlobalTransportBar, PianoRoll).  All
-   pre-existing, all cosmetic, verified not caused by this batch's deletions.  The build is
-   otherwise clean: five exit codes 0, four link lines, zero errors.
+4. ~~**~20 `C4189 unused local variable` compiler warnings** remain (BaySickVisualizerScreen,
+   PluginProcessor, BuilderPage x2, EventEditor x3, GlobalTransportBar, PianoRoll).~~
+   **CLEARED at QA-Cleanup Task 4b (2026-08-11) — `C4189` now greps to ZERO.** Do not chase these.
+   The residual warning set is `C4996` (the known-harmless `juce::Font` deprecation), plus
+   `C4324` / `C4100` / `C4458` / `C4457` / `C4390` from vendored code.  The build is otherwise
+   clean: six exit codes 0 (see §A1), four link lines, zero errors.
+
+### §B.35 — QA-Cleanup (Phase 6 in one batch: full rename, dead-code fold-ins, Tier-1 security fixes, four plugin-hosting defects)
+
+> Authored at code-complete 2026-08-11.  `blocks:` (backfill the QA-Cleanup close commit hash at
+> commit — Task 1 landed separately as `7f816b2e`, the rest lands as ONE commit).  Debug exe FIRST
+> (screenshot any jassert), then Release — mark each scenario `D:` and `R:`.
+>
+> **This is the LAST coding batch of the bulk run**, and it is three unrelated things wearing one
+> batch name: (a) a tree-wide rename that touched 169 files and can only break by breaking
+> everything, (b) dead-code removal that is invisible when correct, and (c) a run of real
+> defects found by chasing one plugin crash.  (c) is where the risk is — four separate
+> plugin-hosting bugs, each affecting a CLASS of commercial plugins rather than one product.
+>
+> **Rig setup, staged before you start:** a project saved BEFORE 2026-08-10 that has effect racks
+> populated (CLN-2 needs it); a project with a Drums tab holding all 16 drums; a deliberately
+> corrupted copy of an SFZ kit, a `.nam` capture, a project `.xml` and a `.wav` (edit them in a
+> text/hex editor — truncate, or paste garbage in the middle); a plugin that ships sibling DLLs
+> (Keyscape, Omnisphere, or any large sample-library instrument); a multi-output instrument; and a
+> plain stereo VST3 as the control.
+>
+> **The plain stereo VST3 is the control on purpose** — every one of the four hosting bugs was
+> invisible for a plain stereo plugin, which is exactly why they survived to the last batch.
+> A pass on a simple plugin proves nothing here.
+
+**Baseline — the rename touched 169 files, so prove nothing moved:**
+
+- [ ] **CLN-1 — MUST-PASS: the big project still works.** Launch, open your largest existing
+      project, play it end to end, save, close, reopen: same tabs in the same order, same engine
+      sounds, same mixer levels/routing/racks, same arrangement, same frozen tabs.  No jassert in
+      Debug.  `D:__ R:__` notes:
+- [ ] **CLN-2 — EXPECTED LOSS: pre-2026-08-10 projects come back with EMPTY effect racks.**  The
+      app was renamed this batch, and the tag it writes effect-rack settings under inside a project
+      file changed with it.  Nothing reads the old tag, and we deliberately did not write a
+      converter, because the app is pre-v1 and nobody has projects worth migrating yet (SC-9).
+      Open a project saved
+      before this batch: it must OPEN cleanly and restore everything else — tabs, engines, mixer
+      levels, routing, arrangement, automation — with ONLY the rack slots empty.  A crash, a
+      missing-file dialog, or any OTHER state loss is a real bug.  `D:__ R:__` notes:
+- [ ] **CLN-3 — rack state round-trips going forward.** In a NEW project, fill several rack slots
+      (including one hosted VST3), save, close, reopen: racks restore fully.  `D:__ R:__` notes:
+- [ ] **CLN-4 — the Tape "Vibe" knob survived the rename.** Tape effect > Advanced: the knob is
+      still labelled **Vibe** (with Hyst / Bias).  Move it off default, save the project, reload:
+      the value round-trips.  This is the one deliberate exception in the whole rename — a
+      substring sweep would have renamed the label AND half-renamed its parameter id, silently
+      resetting it.  `D:__ R:__` notes:
+
+**UI changes — two are visible, one is a removal:**
+
+- [ ] **CLN-5 — [NEW] drum kit vertical scroll.** With a Drums tab holding all 16 drums, shrink the
+      window until the kit grid is shorter than the full 16 rows: a vertical scrollbar APPEARS on
+      the grid's right edge and every drum is reachable.  Then check the things scrolling can
+      break: (a) drag-reorder picks up and drops on the row actually under the cursor, not the
+      one that would be there unscrolled; (b) clicking a drum still auditions the right sound;
+      (c) the sidebar's pickers and Mute/Solo scroll with their rows and are CLIPPED at the ruler
+      band — nothing draws over the ruler or the Lock button; (d) one wheel notch scrolls
+      vertically only, not sideways as well; (e) at full height the bar disappears and bare-wheel
+      goes back to horizontal.  `D:__ R:__` notes:
+- [ ] **CLN-6 — MT Diagnostic is gone.** Mixer hamburger menu: no "MT Diagnostic" item.  Every
+      remaining item in that menu still does what it says.  `D:__ R:__` notes:
+- [ ] **CLN-7 — per-page view state dropped.** Open a Layers / Bass / Drums page, switch its view,
+      switch tabs away and back, save/reload the project: the page opens where you expect and
+      nothing is stuck on a stale view.  `D:__ R:__` notes:
+
+**Refused files — the whole point is that these now REPORT instead of crashing or hanging.**
+In every case the app must stay up, the message must name the actual problem, and the
+GOOD version of the same file must still load afterwards:
+
+- [ ] **CLN-8 — malformed SFZ.** Point Guitars / Basses / Rusty at your corrupted `.sfz`: refused
+      with a plain-English reason, app alive.  **Then load a REAL kit and confirm it still works** —
+      the first version of this gate refused 22 of our own shipped kits, so the false-refusal case
+      is the one that matters.  Walk several stock kits, not one.  `D:__ R:__` notes:
+- [ ] **CLN-9 — malformed NAM.** Both NAM surfaces (NAM-IR page and the NAM pedal): corrupted
+      `.nam` refused with a reason; a good capture still loads and sounds right.  `D:__ R:__` notes:
+- [ ] **CLN-10 — corrupt project / preset XML.** Try to open the corrupted `.xml`: refused, no
+      crash, no hang, and the app is still usable afterwards.  `D:__ R:__` notes:
+- [ ] **CLN-11 — bad audio file.** Import the corrupted `.wav` as an arrangement clip and as a
+      BaySickPlayer sample: refused or handled, no hang.  A truncated file is the case that used
+      to spin.  `D:__ R:__` notes:
+
+**Hosted plugins — the four defects.  Use the sibling-DLL plugin and the multi-out instrument,
+NOT the plain stereo control:**
+
+- [ ] **CLN-12 — scan crash isolation.** Scan your plugin folder.  If any plugin crashes during
+      scanning the APP MUST SURVIVE: the crash is contained in the helper process, the plugin is
+      recorded in `plugins_scan_crashes.txt` at the app root, and the scan moves on to the next
+      one.  Check the file exists after a scan.  Confirm the scan finds the plugins it used to
+      find — this moved out of process, so a silent regression here looks like "no plugins
+      installed".  `D:__ R:__` notes:
+- [ ] **CLN-13 — sibling-DLL plugin loads.** Add the plugin that ships its own DLLs (Keyscape or
+      similar) as a Plugins tab: it loads, its editor appears, it makes sound.  This class of
+      plugin failed on every previous build.  `D:__ R:__` notes:
+- [ ] **CLN-14 — plugin window sizing.**  The app used to try to shrink a plugin's own interface
+      to fit the window.  That never actually worked — the plugin interpreted it as being resized
+      rather than zoomed, and the error compounded every time — so it was removed.  **A plugin's
+      own magnify / zoom control is now the only thing that changes how big its interface draws.**
+      Test what it does now: (a) the window WRAPS the plugin at the plugin's own size, with no dead bands
+      around it; (b) drive the plugin's OWN magnify / zoom across its full range — the window
+      follows each step and the image stays sharp, with no tearing and no clipped edge; (c) close
+      and reopen the plugin window five times — **it must come back the SAME size every time.**
+      Progressive shrinking on reopen was the original symptom and is the specific regression to
+      watch; (d) magnify past the workspace: the plugin clips at the right and bottom, never over
+      the page menu row or the plugin picker above it.  `D:__ R:__` notes:
+- [ ] **CLN-15 — multi-output instrument.** Load an instrument that reports multiple output buses
+      (orchestral libraries, drum instruments with per-piece outs).  It must play without crashing
+      and the main stereo pair must reach the mixer.  This was an access violation on the audio
+      thread on every previous build, so a plain load-and-hold-a-note IS the test.
+      `D:__ R:__` notes:
+- [ ] **CLN-16 — the plain stereo control still works.** Same plugin walk with an ordinary stereo
+      VST3 effect and instrument: nothing regressed while fixing the exotic cases.
+      `D:__ R:__` notes:
+
+**MP3 decoding moved off JUCE (added 2026-08-11).  Ear test, not a build test —
+this is the one area where a green build proves nothing:**
+
+- [ ] **CLN-18 — MP3 still imports everywhere it used to.** `.mp3` decoding now comes from the
+      vendored LAME tree (mpglib) instead of JUCE's decoder, which is switched off.  Every entry
+      point: drag an `.mp3` onto the arrangement as a clip; load one as a BaySickPlayer sample via
+      the picker AND by drag-drop.  All must load and play.  A file that silently refuses to load
+      is the failure mode.  `D:__ R:__` notes:
+- [ ] **CLN-19 — MUST-PASS: A/B an MP3 against the previous build.** Take an `.mp3` you know well,
+      play it in the PREVIOUS build and this one, and listen for: a shift in timing at the very
+      start, a click or gap at the beginning or end, and pitch/length correctness over a long file.
+      **MP3 encoder delay and padding are exactly where a decoder swap goes subtly wrong** — the
+      file still plays, it just starts a few milliseconds off.  Compare against the same file
+      rendered from a WAV source if you want a reference.  `D:__ R:__` notes:
+- [ ] **CLN-20 — long MP3, and memory.** MP3s are now decoded fully into memory when opened (which
+      is what the clip streamer already did for them, so this is not new cost).  Load a long MP3 —
+      5+ minutes — as an arrangement clip: it plays, seeking/scrubbing lands where you clicked, and
+      memory use settles rather than climbing.  `D:__ R:__` notes:
+- [ ] **CLN-21 — MP3 EXPORT is untouched, confirm it still works.** Export was always LAME and did
+      not change, but it shares the vendored library with the new decoder.  Export a song to `.mp3`
+      and play the result outside the app.  `D:__ R:__` notes:
+
+**sfizz parser fixes (added 2026-08-11).  Four bugs inside the vendored library;
+the first two are memory-safety and the kits are the only way to exercise them:**
+
+- [ ] **CLN-22 — MUST-PASS: every sfizz kit still loads and sounds right.** Guitars, Basses, and
+      BOTH Rusty programs (`01-full` and `02-basic`).  Play each across its range.  Four vendored
+      patches touched CC handling, LFO/EG opcode parsing and a container-growth path, so a kit that
+      loads but sounds WRONG matters as much as one that fails.  `D:__ R:__` notes:
+- [ ] **CLN-23 — CC defaults now actually apply, and this may CHANGE how kits sound.** The three
+      `set_cc` scanners resolved `#include` paths incorrectly and so never saw the nested mapping
+      files where most defaults live.  They do now.  If a kit sounds different from before — a
+      filter or level sitting somewhere new at load — that is this fix working, not a regression.
+      Check it sounds CORRECT rather than merely unchanged.  `D:__ R:__` notes:
+
+**Core Library asset verification (added 2026-08-11):**
+
+- [ ] **CLN-24 — a fresh Core Library install still completes.** Each downloaded pack is now
+      SHA-256 verified before it is unpacked.  All ten hashes were computed from the source zips
+      and confirmed byte-identical against the published release, so this should be invisible —
+      but a wrong hash refuses a pack outright, and the failure is total rather than subtle.
+      Install at least one pack on a machine without it (the EDM or Hip Hop pack is smallest) and
+      confirm it downloads, verifies and installs.  `D:__ R:__` notes:
+
+**Hosted-plugin side-chain (added 2026-08-11).  NET-NEW capability, not a
+regression check — hosted plugins were never connected to the side-chain system
+at all, before this batch or after it:**
+
+- [ ] **CLN-25 — a hosted plugin can finally be keyed off a side-chain.** Put a side-chain-capable
+      VST3 compressor / gate / ducker in a rack slot.  The slot header must now offer the **SC
+      source dropdown** — it appears only for plugins that declare a side-chain input, so a plugin
+      without one should still show no dropdown.  Pick a source, set the plugin to external
+      side-chain, and confirm it actually ducks/gates in time with that source.  `D:__ R:__` notes:
+- [ ] **CLN-26 — no source picked means silence, not a phantom signal.** Same plugin, SC source set
+      to none: the plugin must behave as though nothing is connected.  The failure this guards is
+      the opposite one — the side-chain bus being switched on and fed permanent silence, so a
+      plugin in external mode never opens or never compresses.  `D:__ R:__` notes:
+- [ ] **CLN-27 — the twelve built-in SC effects are unchanged.** Compressor, Limiter and Transient
+      Shaper on a strip with an SC cable: same behaviour as before this batch.  The rack forwards
+      the same buffers to built-ins and hosted plugins alike, so a mistake in the hosted path could
+      have disturbed the shared one.  `D:__ R:__` notes:
+
+**Build:**
+
+- [ ] **CLN-28 — `libs/eigen` deletion.** 1,809 vendored files were removed after being verified
+      unreferenced.  A normal incremental build already proves the tree compiles; the case that
+      matters is a build starting from an EMPTY build folder, which is the only time the build
+      system re-plans itself.  **That test already exists as G-5 near the end of this document
+      (the clean-slate build), so do not repeat it here** — this row exists only so that if the
+      clean-slate build fails, the deleted library is the first thing to suspect.
+      `D:n/a R:n/a`
+
+**Known issues going in — these are already understood, so do NOT report them:**
+
+1. **Windows will warn you that the app is from an unknown publisher when you install it.**
+   Expected.  Signing an installer so that warning goes away needs a certificate the project has
+   not bought yet.  Click through it.
+2. **The app installs to your user folder rather than to Program Files.**  Expected for now.
+   There is a security argument for moving it, and a hardening attempt in that direction was tried
+   during this batch and REMOVED because it stopped plugins from loading (it narrowed where
+   Windows looks for support files, and large instruments rely on the wider search).  Both the
+   install location and the certificate are decisions still to be made (tracked as DLL-1 / DLL-2).
+3. **Some development material is still stored in the project's history**, roughly 24 MB.  It is
+   excluded going forward and is being left alone deliberately rather than rewritten.  It does not
+   ship to users and has no effect on anything you can test.
+4. **There is no auto-update in this build**, so the security review of the update mechanism has
+   not happened — there is nothing to review yet.  Not a gap; it is simply a feature that does not
+   exist (the wider security plan calls this Tier 2, with cloud features as Tier 3, both after
+   v1).
 
 ## §C — Deferred re-verify ledger
 
@@ -2959,8 +3237,15 @@ the soak is a campaign item, run alongside the section walks rather than after t
       aside (rename, do not delete - a failure is then one rename to undo), then run
       `do_build.bat`.  It must locate Visual Studio through vswhere on its own, CONFIGURE the
       missing build directory rather than dying on a cmake error, and finish with six exit codes
-      at 0 and four `vcxproj -> ....exe` link lines.  Then read the warning count in
-      `build_log.txt`: C4702 / C4189 / C4996 / C4505 should all be 0 and C4456 should be 2.
+      at 0 and four `vcxproj -> ....exe` link lines.  Then read the warning counts in
+      `build_log.txt`.  **[CORRECTED 2026-08-11 at QA-Cleanup — the old expectations were wrong.]**
+      It said "C4702 / C4189 / C4996 / C4505 should all be 0 and C4456 should be 2."  Actual, from
+      the QA-Cleanup close build: **C4702 / C4189 / C4505 / C4456 are all 0** (C4189 was cleared at
+      Task 4b), and **C4996 is ~150 and is EXPECTED** — it is the `juce::Font` deprecation that
+      CLAUDE.md documents as harmless.  The rest (C4324 / C4100 / C4458 / C4457 / C4390) come from
+      vendored code.  Treat a NEW warning id as the signal, not the totals: a clean-slate build
+      recompiles every vendored library, so its counts will be HIGHER than an incremental build's
+      and the two are not comparable.
       WHY IT MATTERS: this is exactly what a friend cloning the repo hits, and it is what
       stranded Jeff on his laptop.  It is NOT what the tester installer exercises - that ships a
       built exe and never compiles anything.  `D:__ R:__` notes:
