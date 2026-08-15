@@ -80,6 +80,12 @@ public:
     // perform the actual tab-level operations (delete needs to remove the
     // ribbon entry, free indices, etc.; duplicate needs to spawn a new tab).
     std::function<void()>           onDeleteRequested;     // delete THIS drum tab
+
+    // Fired when showSoundPicker's menu closes: true if a sound was chosen,
+    // false if it was dismissed.  The Drum Kit's empty-row route creates its tab
+    // SILENTLY and opens the picker on it, so a dismiss has to take the tab back
+    // out again -- otherwise cancelling leaves an empty tab behind.
+    std::function<void(bool)>       onSoundPickerClosed;
     std::function<void(const juce::String& clipboardXml)> onDuplicateRequested;
         // editor receives serialized drum state, creates new tab, applies it
 

@@ -1,0 +1,130 @@
+<p>Six slots per channel, in series. A slot's window is keyed on the
+<em>effect</em>, not on the slot position &mdash; which is why reordering the
+rack moves an open window with its effect instead of leaving it pointing at
+whatever landed in that row.</p>
+
+<p>A rack preset captures all six slots plus both EQs for that channel.</p>
+
+<div class="codeblock"><div class="codehead">Source\EffectRack.h (Slot struct, swap-pending pattern, EffectType enum)</div><pre><code>// EffectRack.h -- Slot: the swap-pending pair + uuid identity (verbatim, abridged)
+    struct Slot
+    {
+        // Wait-free swap-pending pair (mirrors BaySickNAMIRProcessor pattern).
+        // Audio thread reads `active` for processing; message thread writes
+        // `pending` and sets `swapPending` to publish.  Audio swaps the two
+        // unique_ptrs at top of process() when the flag is set, then clears
+        // the flag.  After the swap, `pending` holds the OLD active DSP --
+        // its destructor runs on the next message-thread loadEffect on this
+        // slot (which overwrites `pending`).
+        std::unique_ptr&lt;DSPBase&gt; active;
+        std::unique_ptr&lt;DSPBase&gt; pending;
+        std::atomic&lt;bool&gt;        swapPending { false };
+
+        EffectType               type     { EffectType::None };
+        std::atomic&lt;bool&gt;        bypassed { false };          // audio reads, both threads write
+        float                    outputGainDb { 0.f };        // per-slot post-effect gain
+        // Stable identity for automation paramIds. Generated on loadEffect (and
+        // restored from XML on setStateInformation). Travels with the slot via
+        // std::swap on moveSlotUp/Down/packSlotsToTop so reorder preserves
+        // automation lanes. Empty slots have empty uuid.
+        juce::String             uuid;
+        // C.4 Phase 1 (2026-04-30): which SC receive line drives this slot&#x27;s
+        // effect (-1 = no SC, 0..3 = strip&#x27;s SC array index).
+        int                      scPick   { -1 };
+        bool                     basicMode { true };</code></pre></div>
+<details class="fullfn"><summary>Full function &mdash; Source\EffectRack.h (Slot struct, swap-pending pattern, EffectType enum)</summary><pre><code>// EffectRack.cpp -- EffectRack::loadEffect (full function, lines 147-230)
+void EffectRack::loadEffect(int slot, EffectType type, const juce::String&amp; uuidOverride,
+                            const juce::PluginDescription* pluginDesc)
+{
+    if (slot &lt; 0 || slot &gt;= kNumSlots) return;
+
+    // Build + prepare the new DSP OUTSIDE every lock (prepare can allocate).
+    auto effect = createEffect(type);
+
+    // QA-ModelShell TS6: instantiating the plugin happens here, outside the
+    // locks, for the same reason prepare() does -- loading a VST3 allocates and
+    // can block for a noticeable time.
+    if (effect &amp;&amp; type == EffectType::VST3Plugin &amp;&amp; pluginDesc != nullptr)
+        if (auto* hosted = dynamic_cast&lt;Hosting::HostedPluginEffect*&gt;(effect.get()))
+            hosted-&gt;setPlugin(*pluginDesc);
+
+    if (effect &amp;&amp; mSampleRate &gt; 0.0)
+        effect-&gt;prepare(mSampleRate, mMaxBlock);
+    if (effect)
+        effect-&gt;setHostBPM(mHostBPM);
+
+    // Stable per-slot identity for automation paramIds. Fresh UUID on each
+    // user-facing load (effect-type swap drops old automation, which matches
+    // intuition - different effect = different knobs). An undo restore passes
+    // the saved UUID via uuidOverride so a resurrected slot keeps its lanes;
+    // setStateInformation does not come through here -- it installs the
+    // restored uuid itself.
+    juce::String newUuid = uuidOverride.isNotEmpty()
+        ? uuidOverride
+        : juce::Uuid().toString();
+
+    // Park the outgoing DSP (the OLD active demoted by the most recent swap)
+    // in a local so it destructs AFTER mLoadLock drops -- a hosted-VST3
+    // teardown must never run under a lock other threads can queue behind.
+    std::unique_ptr&lt;DSPBase&gt; leaving;
+    // Same reason `leaving` exists: the automation de-registration destroys
+    // std::function closures, so the uuid is hoisted here and the hook fires
+    // once every lock has dropped.
+    juce::String retiringUuid;
+
+    {
+    const juce::ScopedLock lk (mLoadLock);
+
+    // If a prior swap is still pending, drain it on the message thread under
+    // mSlotsLock instead of waiting for audio to consume the flag.  Audio
+    // could be inactive (project load before audio device starts) in which
+    // case waiting forever is wrong; or rapidly active in which case taking
+    // mSlotsLock briefly is cheap.  Either way, drained-by-message-thread
+    // is correct -- the per-slot drain logic is identical to audio&#x27;s.
+    if (mSlots[slot].swapPending.load (std::memory_order_acquire))
+    {
+        const juce::SpinLock::ScopedLockType lkAudio (mSlotsLock);
+        if (mSlots[slot].swapPending.load (std::memory_order_acquire))
+        {
+            std::swap (mSlots[slot].active, mSlots[slot].pending);
+            mSlots[slot].swapPending.store (false, std::memory_order_release);
+        }
+    }
+
+    // Move the new DSP into pending.  Any previously-parked DSP (the OLD
+    // active that was demoted by the most recent swap) is handed to `leaving`
+    // so it destructs on the message thread -- never on audio, and never
+    // under a lock.
+    leaving              = std::move (mSlots[slot].pending);
+    if (mSlots[slot].uuid != newUuid)
+        retiringUuid = mSlots[slot].uuid;
+    mSlots[slot].pending = std::move (effect);
+    mSlots[slot].type    = type;
+    mSlots[slot].uuid    = newUuid;
+
+    // Publish: audio&#x27;s next process() will std::swap active &lt;-&gt; pending.
+    mSlots[slot].swapPending.store (true, std::memory_order_release);
+    }
+    // `leaving` destructs here -- outside every lock.
+
+    // A retired uuid never revives, so its automation lanes are unreachable the
+    // moment it is replaced.  uuidOverride restores keep the SAME uuid, which is
+    // what keeps saved lanes alive across a project load.
+    if (retiringUuid.isNotEmpty() &amp;&amp; VKnobAutomation::sOnUnregisterSlotUuid)
+        VKnobAutomation::sOnUnregisterSlotUuid (retiringUuid);
+
+    // Outside mLoadLock: onSlotsChanged runs arbitrary UI work, and holding a
+    // lock the audio thread could ever want across it is a priority inversion.
+    if (onSlotsChanged) onSlotsChanged();
+}</code></pre></details>
+<pre class="formulas">- `EffectRack::kNumSlots = 6` hot-swappable DSP slots per rack; every bus node and insert strip owns one rack.
+- EffectType ordinals are PERSISTED AS RAW INT in saved projects (FX-rack slots + pedal slots): APPEND-ONLY with explicit values. Rack effects 0-12 (None=0 .. DeEsser=12); pedal block 100-118 (101 deliberately dead — OverdriveStyle folded into OverdriveDSP::Type::Pedal, value never reused); Gate=119, DeReverb=120, VST3Plugin=121. `createEffect()` returns nullptr for unknown ordinals; a null slot is skipped on audio — that is what keeps a future-build project from dereferencing null DSP.
+- `VST3Plugin` is ONE ordinal for every hosted plugin: WHICH plugin is carried in the slot&#x27;s state blob (full PluginDescription), never in the type.
+- UUID identity contract: fresh `juce::Uuid().toString()` on each user-facing loadEffect (different effect = different knobs = old automation dropped); `uuidOverride` restores a saved identity (undo resurrection / re-pick) so lanes keep resolving; setStateInformation installs restored uuids itself (does not route through loadEffect); uuid travels with the slot on moveSlotUp/Down/packSlotsToTop via std::swap so REORDER PRESERVES automation lanes; empty slot = empty uuid; a retired uuid NEVER revives — `VKnobAutomation::sOnUnregisterSlotUuid` fires (outside every lock) the moment it is replaced.
+- Swap-pending protocol (wait-free for audio): message thread parks new DSP in `pending`, sets `swapPending` (release); audio std::swaps active&lt;-&gt;pending at top of process() and clears the flag; the demoted DSP destructs on the MESSAGE thread, outside every lock (`leaving` local). clearSlot additionally completes the swap inline so a removed hosted VST3 (plugin + helper process) is not parked until a touch that may never come.
+- Lock discipline: `mLoadLock` (CriticalSection) serializes message-thread mutations against each other — audio MUST NEVER acquire it (unbounded holds = priority inversion). `mSlotsLock` (SpinLock) guards whole-rack mutations; audio try-locks in process()/setHostTransport and skips one block rather than wait. `setSlotBypassed` is the one mutation that takes no lock.
+- Cleared-slot reset invariant: `outputGainDb = 0`, `scPick = -1`, `basicMode = true` — racks are long-lived graph-node members, so leftovers bleed into the next effect dropped there, including across a project boundary.
+- Bypass crossfade: `bypassRampValue` ramps 0..1 over kBypassRampMs; DSP keeps running during the ramp (wet+dry mix), skipped only once settled at 0 — kills the click on high-gain pedal bypass.
+- `onSlotsChanged` fires from every lifecycle mutation (loadEffect / clearSlot / moves / pack / bypass / output gain / setStateInformation) and always OUTSIDE the locks; StandaloneEditor wires it to ProjectManager::markDirty.
+- `scPick` (-1 or 0..3) is stored on the Slot, not APVTS — routing config, not automatable; pushed to the active DSP each process() via setSidechainPick.
+- Meter feed: Run/Snapshot atomic pairs — audio CAS-maxes Run during process, `promoteSlotPeakSnapshots()` lifts Run -&gt; Snapshot once per audio block (called by BaySickGraph::promoteAllRackSlotSnapshots), UI exchanges Snapshot on vblank.</pre>
+<p class="behind"><b>Behind:</b> <a href="manual-2.html#TABBAR-8">Effects slot</a>, <a href="manual-2.html#MIX-6">FX Rack</a>, <a href="manual-2.html#MIX-7">FX Bypass</a>, <a href="manual-2.html#MIX-8">Master FX By</a>, <a href="manual-2.html#PR-3">FX Rack</a>, <a href="manual-2.html#FX-1">Window title</a>, <a href="manual-2.html#FX-2">Bypass LED in the title strip</a>, <a href="manual-2.html#FX-6">Vol knob</a>, <a href="manual-2.html#FXM-1">Show Advanced Controls</a>, <a href="manual-2.html#FXRM-1">Save FX Rack Preset</a>, <a href="manual-2.html#FXRM-2">Load FX Rack Preset submenu</a>, <a href="manual-2.html#FXI-1">Channel: picker</a>, <a href="manual-2.html#FXI-2">FX Bypass</a>.</p>

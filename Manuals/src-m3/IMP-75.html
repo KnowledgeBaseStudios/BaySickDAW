@@ -1,0 +1,122 @@
+<p>Freezing renders a tab to audio so it costs almost nothing to play. Renders
+live in a <code>Freeze</code> folder inside the project, one per tab and one per
+pattern.</p>
+
+<p>Each render carries a <b>content stamp</b> &mdash; a hash of what produced it.
+If the tab's content changes, the stamp no longer matches, the render is stale,
+and the tab goes back to its live engine until it re-renders. That is the
+difference between the filled and hollow markers on the ribbon slot.</p>
+
+<p>Two behaviours worth knowing. A frozen tab plays silence while the transport
+is stopped, because there is nothing to stream. And an automation
+<em>replay</em> is explicitly not treated as an edit &mdash; without that, playing
+back automation would mark every frozen tab stale and set off a re-render
+cascade.</p>
+
+<div class="codeblock"><div class="codehead">- Source\EngineRig.cpp (FNV-1a helpers lines 847-889; EngineRig::freezeContentStamp lines 918-1036; staleness/retraction: markEngineContentChanged tail ~200-224, markPatternContentChanged 229-255, republishPatternSources 261-294, markAllFreezesStale 298-321)</div><pre><code>// FNV-1a content stamp primitives (EngineRig.cpp, anonymous namespace)
+    // FNV-1a.  Chosen over juce::String::hashCode because the inputs are mostly
+    // BINARY (an engine&#x27;s state blob, note structs) rather than text, and this
+    // folds bytes in one pass with no allocation.  Collision risk is the usual
+    // 32-bit birthday bound -- a false MATCH would reuse a stale render, so the
+    // stamp only ever gates REUSE, never correctness of a fresh render.
+    inline juce::uint32 fnvByte (juce::uint32 h, juce::uint8 b) noexcept
+    { return (h ^ b) * 16777619u; }
+
+    inline juce::uint32 fnvBytes (juce::uint32 h, const void* p, size_t n) noexcept
+    {
+        const auto* b = static_cast&lt;const juce::uint8*&gt; (p);
+        for (size_t i = 0; i &lt; n; ++i) h = fnvByte (h, b[i]);
+        return h;
+    }
+
+    inline juce::uint32 fnvDouble (juce::uint32 h, double d) noexcept
+    {
+        // Quantised before hashing: a double that round-trips through XML text
+        // can come back a few ULPs off, and an exact byte hash would then call
+        // every restored freeze stale -- the precise failure the span&#x27;s own
+        // tolerant compare exists to avoid.
+        const juce::int64 q = (juce::int64) std::llround (d * 1000.0);
+        return fnvBytes (h, &amp;q, sizeof (q));
+    }</code></pre></div>
+<details class="fullfn"><summary>Full function &mdash; - Source\EngineRig.cpp (FNV-1a helpers lines 847-889; EngineRig::freezeContentStamp lines 918-1036; staleness/retraction: markEngineContentChanged tail ~200-224, markPatternContentChanged 229-255, republishPatternSources 261-294, markAllFreezesStale 298-321)</summary><pre><code>juce::uint32 EngineRig::freezeContentStamp (TabKind k, int pageIndex, int patternIndex) const
+{
+    auto* pm = mProc.getPatternManager();
+    if (pm == nullptr) return 0;
+
+    const auto* t = findTab (k, pageIndex);
+
+    juce::uint32 h = 2166136261u;   // FNV offset basis
+
+    // 1. WHICH ENGINE, and its entire parameter state.  This is the player axis:
+    //    a preset change, a knob move or an engine swap all land here, which is
+    //    what makes the stamp catch things the coarse flags only guessed at.
+    auto hashProcessorState = [&amp;h] (juce::AudioProcessor* p)
+    {
+        if (p == nullptr) return;
+        juce::MemoryBlock mb;
+        p-&gt;getStateInformation (mb);
+        h = fnvBytes (h, mb.getData(), mb.getSize());
+    };
+
+    if (t != nullptr)
+    {
+        h = fnvBytes (h, t-&gt;engineType.toRawUTF8(), (size_t) t-&gt;engineType.getNumBytesAsUTF8());
+        hashProcessorState (t-&gt;engine.get());
+
+        // Inst is a CHAIN: the wrapper&#x27;s own blob says nothing about the pedal
+        // board or amp/IR baked into its freeze -- every owned stage counts.
+        for (const auto&amp; stage : t-&gt;ownedStages)
+            hashProcessorState (stage.get());
+    }
+    ...
+    // 2. Tempo -- moves every rendered sample in time.
+    h = fnvDouble (h, pm-&gt;getGlobalTempo());
+    for (int i = 0; i &lt; pm-&gt;getNumTempoChanges(); ++i)
+    {
+        const auto&amp; tc = pm-&gt;getTempoChange (i);
+        h = fnvBytes  (h, &amp;tc.bar, sizeof (tc.bar));
+        h = fnvDouble (h, tc.bpm);
+    }
+    ...
+    if (patternIndex &gt;= 0)
+    {
+        // PATTERN SCOPE: this pattern&#x27;s notes for this tab, and its length.
+        if (patternIndex &lt; pm-&gt;getNumPatterns())
+        {
+            const auto&amp; pat = pm-&gt;getPattern (patternIndex);
+            if (const auto* notes = rollNotesFor (pat, k, pageIndex))
+                h = fnvNotes (h, *notes);
+            h = fnvDouble (h, pm-&gt;getPatternContentBeats (patternIndex));
+        }
+        return h;
+    }
+
+    // SONG SCOPE: the arrangement decides what plays and when, plus every
+    // pattern&#x27;s notes for this tab (any of them can appear in the arrangement).
+    h = fnvDouble (h, pm-&gt;getSongEndBeats());
+
+    for (int i = 0; i &lt; pm-&gt;getNumBlocks(); ++i)
+    {
+        const auto&amp; b = const_cast&lt;PatternManager*&gt; (pm)-&gt;getBlock (i);
+        h = fnvBytes  (h, &amp;b.trackRow,     sizeof (b.trackRow));
+        h = fnvBytes  (h, &amp;b.patternIndex, sizeof (b.patternIndex));
+        h = fnvDouble (h, effectiveStartBeats  (b));
+        h = fnvDouble (h, effectiveLengthBeats (b));
+        // A muted block is silence in the render; toggling it must not reuse.
+        h = fnvByte   (h, (juce::uint8) (b.muted ? 1 : 0));
+    }
+
+    for (int p = 0; p &lt; pm-&gt;getNumPatterns(); ++p)
+        if (const auto* notes = rollNotesFor (pm-&gt;getPattern (p), k, pageIndex))
+            h = fnvNotes (h, *notes);
+
+    return h;
+}</code></pre></details>
+<pre class="formulas">- FNV-1a 32-bit: offset basis `2166136261u`, prime `16777619u`, per-byte `h = (h ^ b) * prime`. Doubles are quantized `llround(d * 1000.0)` (millibeats/milliunits) before hashing so XML text round-trip ULP drift doesn&#x27;t stale every restored freeze. A false MATCH only reuses a stale render — the stamp gates REUSE, never fresh-render correctness.
+- Stamp inputs, pattern scope: engine type string + full `getStateInformation` blob (plus every owned Inst chain stage; plus processor-owned sfizz engines/kit for Inst/Rusty), per-tab swing `_mix`/`_trunc` params, global tempo + tempo map (bar, bpm) + time-sig map (bar, num, den), this pattern&#x27;s notes for this tab (per note: midiNote, startBeat, durationBeats, velocity, finePitch, muted, type) + pattern content beats. Song scope adds `getSongEndBeats()` + every arrangement block (trackRow, patternIndex, effective start/length beats, muted) + every pattern&#x27;s notes for this tab.
+- Staleness model: two axes — the PLAYER changed (`markEngineContentChanged`: flag + insert every cached pattern into `stalePatterns`) vs THIS PATTERN&#x27;s notes changed (`markPatternContentChanged`: only that pattern index goes stale per tab, but the song render is retracted everywhere). Tempo/tempo-map changes invalidate everything (`markAllFreezesStale`).
+- Retraction contract: stale-plays-live takes effect the SAME BLOCK — `retractFrozenSources` publishes atomic nulls only; the streams stay owned by the tab, so no memory an in-flight audio block could be reading is freed. `republishPatternSources` re-points tasks whose current pattern render is still valid (gate: `stalePatterns.count(patternIndex) == 0`).
+- All staleness marking is gated on `!mProc.isNonRealtime()` — an automation replay during an offline render is not a user edit, and the render&#x27;s exit restore would otherwise stale every freeze.
+- Substitution: `FreezeRead::serveBlock` is the ONE serve site for five task types (EngineInsert, VoxStrip, InstStrip, CompositeAudioInsert, RustyInsert); the Rusty kit is THIRTEEN tasks and publishes via `setRustyFrozenPatternSources`. Return true = frozen file (or stopped-transport silence) fully replaced the live engine; false = run live. Pattern scope wraps the loop seam tail-then-head; rate mismatch goes through `readAndMix` with `ratio = fileRate / sessRate`.
+- Freeze files live in `&lt;project&gt;\Freeze\`; per-tab song render + per-pattern renders; restore reuse decided by comparing the saved stamp against `freezeContentStamp`.</pre>
+<p class="behind"><b>Behind:</b> <a href="manual-2.html#FILE-3">Auto-freeze above: slider and its 80 % rea...</a>, <a href="manual-2.html#FILE-6">Enable Instrument Level Freeze</a>, <a href="manual-2.html#BSVCM-6">Freeze</a>, <a href="manual-2.html#BSGBM-5">Freeze</a>, <a href="manual-2.html#BSSBM-4">Freeze</a>, <a href="manual-2.html#BSSBM-4">Freeze</a>, <a href="manual-2.html#BSPM-4">Freeze</a>, <a href="manual-2.html#BSRDMENU-5">Freeze</a>, <a href="manual-2.html#BSPLUGM-3">Freeze</a>.</p>

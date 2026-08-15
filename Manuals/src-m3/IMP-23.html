@@ -1,0 +1,84 @@
+<p>Pitch detection with a mute and a settable reference pitch.</p>
+
+<div class="codeblock"><div class="codehead">Source\DSP\TunerStyleDSP.cpp</div><pre><code>// TunerStyleDSP::getReading — Hz -&gt; note + cents, with string-snap modes
+    const float hz = mYin.getFrequencyHz();
+    if (hz &lt; PitchTrackerYIN::kMinFreqHz || hz &gt; PitchTrackerYIN::kMaxFreqHz) return false;
+
+    // Convert Hz -&gt; chromatic midi note (with cents).  Flat tuning references N
+    // semitones below standard: shift the note up by N so an N-flat string reads
+    // as its standard note name at 0 cents.
+    const float midiF = 69.0f + 12.0f * std::log2 (hz / mTrimHz) + (float) mFlatSemitones;
+    const int   midi  = (int) std::round (midiF);
+    const float cents = (midiF - (float) midi) * 100.0f;
+
+    if (mMode == Mode::Guitar)
+    {
+        // Snap to nearest guitar open string (compare in midi space).
+        int best = kGuitarOpenStrings[0];
+        int bestDist = std::abs (midi - best);
+        for (int s : kGuitarOpenStrings)
+        {
+            const int d = std::abs (midi - s);
+            if (d &lt; bestDist) { bestDist = d; best = s; }
+        }
+        target = best;
+        targetCents = (midiF - (float) target) * 100.0f;
+    }</code></pre></div>
+<details class="fullfn"><summary>Full function &mdash; Source\DSP\TunerStyleDSP.cpp</summary><pre><code>bool TunerStyleDSP::getReading (Reading&amp; out) const noexcept
+{
+    const float hz = mYin.getFrequencyHz();
+    if (hz &lt; PitchTrackerYIN::kMinFreqHz || hz &gt; PitchTrackerYIN::kMaxFreqHz) return false;
+
+    // Convert Hz -&gt; chromatic midi note (with cents).  Flat tuning references N
+    // semitones below standard: shift the note up by N so an N-flat string reads
+    // as its standard note name at 0 cents.
+    const float midiF = 69.0f + 12.0f * std::log2 (hz / mTrimHz) + (float) mFlatSemitones;
+    const int   midi  = (int) std::round (midiF);
+    const float cents = (midiF - (float) midi) * 100.0f;
+
+    int target = midi;
+    float targetCents = cents;
+
+    if (mMode == Mode::Guitar)
+    {
+        // Snap to nearest guitar open string (compare in midi space).
+        int best = kGuitarOpenStrings[0];
+        int bestDist = std::abs (midi - best);
+        for (int s : kGuitarOpenStrings)
+        {
+            const int d = std::abs (midi - s);
+            if (d &lt; bestDist) { bestDist = d; best = s; }
+        }
+        target = best;
+        targetCents = (midiF - (float) target) * 100.0f;
+    }
+    else if (mMode == Mode::Bass)
+    {
+        int best = kBassOpenStrings[0];
+        int bestDist = std::abs (midi - best);
+        for (int s : kBassOpenStrings)
+        {
+            const int d = std::abs (midi - s);
+            if (d &lt; bestDist) { bestDist = d; best = s; }
+        }
+        target = best;
+        targetCents = (midiF - (float) target) * 100.0f;
+    }
+
+    out.midiNote        = midi;
+    out.centsFromNote   = cents;
+    out.targetNote      = target;
+    out.centsFromTarget = targetCents;
+    out.frequencyHz     = hz;
+    return true;
+}</code></pre></details>
+<pre class="formulas">- YIN difference function: `d[tau] = sum_{i=0}^{W/2-1} (x[i] - x[i+tau])^2` over half the analysis window.
+- CMNDF normalization: `d&#x27;[0] = 1`, `d&#x27;[tau] = d[tau] * tau / sum_{j=1..tau} d[j]` — makes the 0.15-class threshold level-independent.
+- Pitch pick: first tau in [tauMin, tauMax] with `d&#x27;[tau] &lt; kYinThreshold`, descended to the local dip bottom; `tauMin = floor(sr/kMaxFreqHz)`, `tauMax = ceil(sr/kMinFreqHz)`.
+- Sub-sample refinement: parabolic fit `refinedTau = tau + (a - c) / (2(a - 2b + c))` over cmndf[tau-1..tau+1]; `freqHz = analysisRate / refinedTau`; `confidence = 1 - d&#x27;[tau]`.
+- Tuner window: 4096 samples / 1024 hop (vs. the shared 2048 default) so the low end reaches ~21.5 Hz at 44.1 kHz — covers bass low notes.
+- Note conversion: `midiF = 69 + 12*log2(hz / trimHz) + flatSemitones`; `cents = (midiF - round(midiF)) * 100`. Flat tuning 0..6 semitones shifts the reading up so an N-flat string reads its standard name at 0 cents.
+- Reference trim: 440 mode trims 436..445 Hz; 432 mode trims 428..437 Hz.
+- String snap: Guitar mode snaps to nearest of MIDI {40,45,50,55,59,64} (E2 A2 D3 G3 B3 E4); Bass mode {28,33,38,43} (E1 A1 D2 G2); Chromatic reports the nearest chromatic note.
+- Audio path: `process()` only mono-sums input into the tracker and (optionally) hard-mutes the output — the tuner never alters the signal otherwise.</pre>
+<p class="behind"><b>Behind:</b> <a href="manual-2.html#BSPDL-8">Tuner display</a>, <a href="manual-2.html#BSPDL-9">Tuner chicken-heads</a>.</p>

@@ -172,7 +172,7 @@ public:
 
         mCloseBtn.setButtonText("Close");
         mCloseBtn.setColour(juce::TextButton::buttonColourId,  VC::Panel);
-        mCloseBtn.setColour(juce::TextButton::textColourOffId, VC::TextDim);
+        mCloseBtn.setColour(juce::TextButton::textColourOffId, VC::Text);
         mCloseBtn.onClick = [this] {
             if (auto* dw = findParentComponentOfClass<juce::DialogWindow>())
                 dw->exitModalState(0);
@@ -4987,8 +4987,31 @@ void StandaloneEditor::applyPageRename (RenameFamily fam, int pageIndex,
     }
 
     if (mRibbon) mRibbon->renameTab (entry->ribbonTabId, name);
+
+    // The WINDOW carries the same name as its tab.  It used to be set once, at
+    // window construction, from whatever the tab was called then -- so every
+    // rename after that left the title strip showing the old name.  Most
+    // visible on a hosted plugin, where the tab is born "Plugin 3" and is
+    // renamed to the plugin's own name a moment later (Jeff, 2026-08-11).
+    if (entry->window != nullptr) entry->window->setTitle (name);
+
     refreshAllKitViews();                                    // D2: kit row labels
     if (mEffectsPage) mEffectsPage->rebuildChannelDropdown();
+}
+
+// Retitles the WINDOW belonging to a ribbon tab.  Separate from the rename path
+// above because the hosted-plugin name arrives through its own engine-selected /
+// plugin-changed callbacks rather than through a user rename.
+void StandaloneEditor::setWindowTitleForTab (int ribbonTabId, const juce::String& name)
+{
+    if (name.isEmpty()) return;
+
+    for (auto* e : mPages)
+        if (e != nullptr && e->ribbonTabId == ribbonTabId && e->window != nullptr)
+        {
+            e->window->setTitle (name);
+            return;
+        }
 }
 
 void StandaloneEditor::performPageRename (RenameFamily fam, int pageIndex,
@@ -5262,6 +5285,7 @@ std::unique_ptr<juce::Component> StandaloneEditor::createEffectsPage()
     {
         openEffectEqWindow (chId, pre);
     };
+    page->onOpenVuMeter = [this] { openMasterVuWindow(); };
     page->onRackContentsChanged = [this] (int chId)
     {
         closeDeadEffectWindows (chId);
@@ -5426,8 +5450,9 @@ std::unique_ptr<juce::Component> StandaloneEditor::createEffectsPage()
 // ─────────────────────────────────────────────────────────────────────────────
 // Tab events
 // ─────────────────────────────────────────────────────────────────────────────
-void StandaloneEditor::onAddTabRequest(RibbonTabBar::TabType type)
+void StandaloneEditor::onAddTabRequest(RibbonTabBar::TabType type, bool navigate)
 {
+    mLastAddedTabId = -1;
     // G-6 (2026-04-29): Clip ribbon +Add opens an OS file picker.  Defaults
     // to Documents/BaySickDAW/My Samples (created on demand, with a Core
     // Library shortcut inside).  On choose, route through the Builder
@@ -5747,10 +5772,20 @@ void StandaloneEditor::onAddTabRequest(RibbonTabBar::TabType type)
     entry->type        = type;
     entry->component   = std::move(page);
     mPages.add(entry);
-    hostPageInWindow (*entry);
+    mLastAddedTabId = newId;
 
-    mRibbon->selectTab(newId);
-    onTabSelected(newId);
+    // navigate=false leaves the tab WINDOWLESS on purpose.  hostPageInWindow
+    // already supports that state -- player windows frame lazily on first tab
+    // selection -- so skipping it here costs nothing and is what keeps an empty
+    // window off the screen until the caller has something to put in it.
+    if (navigate)
+    {
+        hostPageInWindow (*entry);
+
+        mRibbon->selectTab(newId);
+        onTabSelected(newId);
+    }
+
     if (type == RibbonTabBar::TabType::Drums) refreshAllKitViews();
 }
 
@@ -7419,8 +7454,12 @@ void StandaloneEditor::showPageForTab(int tabId)
             // close/fill chrome -- the T3 attempt failed by laying out against
             // the whole window and sliding behind the chrome; this mount
             // cannot reach it.
-            if (auto* pb = rp->getPlayerPresetButton()) mPageMenuBar->addExtraRightComponent (pb, 110);
-            if (auto* pc = rp->getProgramCombo())       mPageMenuBar->addExtraRightComponent (pc, 160);
+            // 76 + 80, not 110 + 160 (Jeff, 2026-08-12).  The strip centres the
+            // engine name in the span LEFT OVER after these, and 270px of extras
+            // left less than "BaySickRustyDrums" needs -- so the name rendered
+            // clipped.  Neither control was using the width it had booked.
+            if (auto* pb = rp->getPlayerPresetButton()) mPageMenuBar->addExtraRightComponent (pb, 76);
+            if (auto* pc = rp->getProgramCombo())       mPageMenuBar->addExtraRightComponent (pc, 80);
 
             // 2026-05-05 consolidation: Save / Load Page Preset goes through
             // the unified PagePresetIO API (PageKind::RustyDrums).  Captures
@@ -7489,6 +7528,14 @@ void StandaloneEditor::showPageForTab(int tabId)
                             safeThisRusty->onTabSelected (4);
                             if (prp != nullptr)
                                 prp->selectEngine ({ EngineKind::BaySickRustyDrums, 0 });
+                        });
+                        // Moved off the app-wide Help menu (Jeff, 2026-08-13):
+                        // the note-to-drum map is Rusty's own reference, so it
+                        // lives on Rusty's own Menu.
+                        m.addItem ("Rusty Drums Map...", [safeThisRusty]
+                        {
+                            if (safeThisRusty)
+                                safeThisRusty->showRustyDrumsMapWindow();
                         });
                         // QA-Layout T16: Freeze (Rusty has no FX Rack).
                         if (auto* bar = safeBarRusty.getComponent())
@@ -8215,19 +8262,36 @@ void StandaloneEditor::wirePianoRollPageKitView (PianoRollPage* prp)
         }
         else
         {
-            // Empty row: spawn a new drum tab (onAddTabRequest auto-navigates
-            // to it), then snap back to the unified Drum Kit view and open
-            // the picker on the freshly-spawned drum.
-            onAddTabRequest (RibbonTabBar::TabType::Drums);
-            DrumPage* newDp = dynamic_cast<DrumPage*> (mVisiblePage);
+            // Empty row: the tab is created SILENTLY -- no window, no
+            // navigation -- and the picker opens on it in place.
+            //
+            // It used to call onAddTabRequest(Drums), which frames the window
+            // AND navigates to it, then snap the view back and open the picker.
+            // So a window appeared, took focus and sat there before the user had
+            // chosen anything, which forced a pick or left an orphan (Jeff,
+            // 2026-08-11: "the window is for holding the engine not picking
+            // one").  A window now appears only once there is a sound in it.
+            onAddTabRequest (RibbonTabBar::TabType::Drums, /*navigate*/ false);
 
-            // Return user to the unified Drum Kit (PianoRoll ribbon = id 4).
-            if (mRibbon) mRibbon->selectTab (4);
-            onTabSelected (4);
-            if (mPianoRollPage)
-                mPianoRollPage->selectEngine ({ EngineKind::DrumKit, 0 });
+            const int addedId = mLastAddedTabId;
+            if (addedId < 0) return;   // bank full - onAddTabRequest already said so
 
-            if (newDp) newDp->showSoundPicker (anchor);
+            DrumPage* newDp = nullptr;
+            for (auto* e : mPages)
+                if (e != nullptr && e->ribbonTabId == addedId)
+                    newDp = dynamic_cast<DrumPage*> (e->component.get());
+
+            if (newDp == nullptr) return;
+
+            // Cancel takes the tab back out, so backing out of the menu leaves
+            // exactly what was there before.  A pick just frames the kit views.
+            newDp->onSoundPickerClosed = [this, addedId] (bool picked)
+            {
+                if (picked) { refreshAllKitViews(); return; }
+                deleteTabWithUndo (addedId);
+            };
+
+            newDp->showSoundPicker (anchor);
         }
     });
 
@@ -11786,7 +11850,9 @@ juce::PopupMenu StandaloneEditor::getMenuForIndex(int menuIndex, const juce::Str
         // ManualsWindow.  That marker held this item unwired from 2026-07-29.
         m.addItem(601, "Help Index  (F1)");
         m.addItem(603, "Key Binds...");
-        m.addItem(604, "Rusty Drums Map...");
+        // "Rusty Drums Map..." moved to the Rusty page's own window Menu
+        // (Jeff, 2026-08-13) -- a per-engine reference belongs on the engine,
+        // not on the app-wide Help menu.  Id 604 retired with it.
         m.addSeparator();
         m.addItem(602, "About BaySickDAW v1.0");
         break;
@@ -11973,9 +12039,9 @@ void StandaloneEditor::menuItemSelected(int id, int)
         showKeyBindsWindow();
         break;
 
-    case 604:   // Help > Rusty Drums Map...
-        showRustyDrumsMapWindow();
-        break;
+    // case 604 (Help > Rusty Drums Map...) retired 2026-08-13: the map opens
+    // from the Rusty page's window Menu instead.  showRustyDrumsMapWindow()
+    // is dispatched there directly rather than through a menu-result id.
 
     // J-6 (2026-05-03): cases 605 + 606 (BaySickRustyDrums Help-menu test
     // entries) removed - replaced by the "+ Add BaySickRustyDrums" entry on
@@ -12646,7 +12712,7 @@ int StandaloneEditor::resurrectTabFromRecordImpl (const juce::XmlElement& rec)
             // registration above seeded -- see the spawn path.
             pp->onEngineSelected = [this, newId, pageIndex, pp] {
                 const juce::String nm = pp->getDisplayName();
-                if (nm.isNotEmpty() && mRibbon) { mRibbon->renameTab (newId, nm); pp->setTabName (nm); }
+                if (nm.isNotEmpty() && mRibbon) { mRibbon->renameTab (newId, nm); pp->setTabName (nm); setWindowTitleForTab (newId, nm); }
                 const auto* tab = mRibbon->getTabById (newId);
                 if (mMixerPage)   mMixerPage->addPluginChannel (pageIndex, tab ? tab->name : "Plugin");
                 if (mEffectsPage) mEffectsPage->rebuildChannelDropdown();
@@ -12658,6 +12724,7 @@ int StandaloneEditor::resurrectTabFromRecordImpl (const juce::XmlElement& rec)
                 if (nm.isNotEmpty())
                 {
                     if (mRibbon) { mRibbon->renameTab (newId, nm); pp->setTabName (nm); }
+                    setWindowTitleForTab (newId, nm);
                     if (mMixerPage) mMixerPage->renameChannel (MixerPage::StripKind::Plugin, pageIndex, nm);
                 }
                 if (mPianoRollPage)
@@ -15763,20 +15830,20 @@ std::optional<juce::Point<int>> StandaloneEditor::defaultSizeFor (const PageEntr
     auto engineFloor = [] (const juce::String& title) -> std::optional<P>
     {
         if (title.isEmpty())                  return std::nullopt;   // not bound yet
-        if (title.contains ("Harmless"))      return P { 1047, 455 };
+        if (title.contains ("Harmless"))      return P { 1038, 554 };
         // Jeff, 2026-08-04: BaySickSynth and BaySickBass share one minimum.
         if (title.contains ("BaySickSynth")
-            || title.contains ("BaySickBass"))return P { 558,  455 };
-        if (title.contains ("BaySickPlayer")) return P { 490,  455 };
+            || title.contains ("BaySickBass"))return P { 519,  351 };
+        if (title.contains ("BaySickPlayer")) return P { 519,  351 };
         return std::nullopt;   // unknown engine -- say so rather than invent one
     };
 
     switch (entry.type)
     {
-        case TT::Mixer:     return P { 486, 455 };
-        case TT::Builder:   return P { 486, 268 };
-        case TT::Effects:   return P { 357, 268 };
-        case TT::PianoRoll: return P { 691, 268 };
+        case TT::Mixer:     return P { 495, 469 };
+        case TT::Builder:   return P { 495, 254 };
+        case TT::Effects:   return P { 495, 254 };
+        case TT::PianoRoll: return P { 519, 372 };
         default: break;
     }
 
@@ -15785,14 +15852,17 @@ std::optional<juce::Point<int>> StandaloneEditor::defaultSizeFor (const PageEntr
     if (auto* bp = dynamic_cast<BassPage*>   (c)) return engineFloor (bp->stripEngineTitle());
     if (auto* dp = dynamic_cast<DrumPage*>   (c)) return engineFloor (dp->stripEngineTitle());
     if (auto* cp = dynamic_cast<ClipsPage*>  (c)) return engineFloor (cp->stripEngineTitle());
-    if (dynamic_cast<VoxPage*>    (c)) return P { 1534, 455 };   // BaySickVocals
-    if (dynamic_cast<InstPage*>   (c)) return P { 1047, 455 };   // BaySickGuitars / BaySickBasses
-    if (dynamic_cast<BaySickRustyDrumsPage*> (c)) return P { 1047, 455 };
-    // Hosted plugins have no measured floor of their own: both setResizeFloor
-    // call sites pass (0, 0) deliberately, and the plugin's declared size
-    // arrives later via onNaturalSizeChanged.  This is just the generic
-    // fallback for anything unrecognised.
-    return P { 640, 400 };
+    if (dynamic_cast<VoxPage*>    (c)) return P { 519, 351 };    // BaySickVocals
+    if (dynamic_cast<InstPage*>   (c)) return P { 519, 351 };    // BaySickGuitars / BaySickBasses
+    if (dynamic_cast<BaySickRustyDrumsPage*> (c)) return P { 519, 351 };
+    // NO GENERIC FALLBACK (Jeff, 2026-08-11).  This used to answer 640x400 for
+    // anything unrecognised, which is the same failure the engine-not-bound case
+    // above describes: a made-up number is indistinguishable from a real one, so
+    // nothing downstream can tell there is a question outstanding.  It also
+    // quietly enabled the thing that must not happen -- a window opening with
+    // nothing in it.  Hosted plugins reach here too and are answered by the
+    // plugin's own size via onNaturalSizeChanged, not by us.
+    return std::nullopt;
 }
 
 void StandaloneEditor::pollPendingWindowDefaults()
@@ -16059,6 +16129,7 @@ void StandaloneEditor::openEffectSlotWindow (int channelId, int slotIndex)
             // the window stuck at 1047 wide with dead space where the advanced
             // controls had been.
             wnd->setSize (w, h);
+
         };
     }
 
@@ -16150,7 +16221,7 @@ void StandaloneEditor::openEffectVisualWindow (int channelId, const juce::String
     contentRaw->onRequestClose = [this, key] { closeAuxWindow (key); };
 
     auto* win = openAuxWindow (key, posKey, contentRaw->windowTitle(),
-                               std::move (content), 420, 220);
+                               std::move (content), 519, 204);
     if (win == nullptr) return;
 
     contentRaw->onTitleChanged = [win] (const juce::String& t) { win->setTitle (t); };
@@ -16222,7 +16293,7 @@ void StandaloneEditor::openEffectEqWindow (int channelId, bool pre)
     };
 
     auto* win = openAuxWindow (key, key, contentRaw->windowTitle(),
-                               std::move (content), 1047, 455);   // T7: approved map
+                               std::move (content), 519, 372);
     if (win == nullptr) return;
 
     contentRaw->onTitleChanged = [win] (const juce::String& t) { win->setTitle (t); };
@@ -16303,8 +16374,8 @@ void StandaloneEditor::openVoxSatelliteWindow (int voxIdx, VoxSat kind)
     // QA-Layout T7: real floors from the approved sizing map (window dims) --
     // Vocal Chain 1047x723, BaySickPitch 1534x724, BaySickAlign 1047x723,
     // NAM/IR 843x563.
-    static const int   kMinWs[]   = { 1047, 1534, 1047, 843 };
-    static const int   kMinHs[]   = { 723,  724,  723,  563 };
+    static const int   kMinWs[]   = { 519, 1015, 1015, 519 };
+    static const int   kMinHs[]   = { 722, 371,  351,  722 };
 
     const juce::String key = "voxsat:" + juce::String (voxIdx) + ":" + kKeyTag[(int) kind];
     if (auto* existing = findAuxWindow (key)) { existing->toFront (true); return; }
@@ -16430,6 +16501,14 @@ void StandaloneEditor::openInstPedalsWindow (int instIdx)
         bar->setCenterTitle (BaySickPedalsEditor::getEngineTitle(),
                              BaySickPedalsEditor::getEngineAccent());
 
+        // A LIVE-INPUT tab never frames its own page window, so it never passed
+        // through the place that used to install this -- which is why its Pedals
+        // and NAM/IR windows had no route to each other while Guitars and Basses
+        // did.  Installing it here covers every tab that can open this window.
+        if (auto* p = findInstPage())
+            installInstNavMenu (*p, juce::Component::SafePointer<InstPage> (p),
+                                juce::Component::SafePointer<PageMenuBar> (bar));
+
         // Jeff, 2026-08-05: View menu between Menu and the NAM/IR button.
         // Standard = the 4x2 pedalboard; Compact = one pedal at a time in an
         // Effects-sized window.  The editor owns its layout, this owns the
@@ -16466,13 +16545,13 @@ void StandaloneEditor::openInstPedalsWindow (int instIdx)
             {
                 auto* b = safeBar.getComponent();
                 if (b == nullptr) return;
-                b->setTabSlots ({ compact ? "N/I" : "NAM/IR" },
-                    [safe2, instIdx] (int)
-                    {
-                        if (safe2 != nullptr) safe2->openInstNamIrWindow (instIdx);
-                    }, -1, accent);
-                b->setTabSlotWidth (compact ? 30 : 74);
-                b->setTabSlotTooltip (0, "NAM/IR - open the amp + cabinet window");
+                // NO NAM/IR BUTTON (Jeff, 2026-08-11).  It is a Menu entry, like
+                // it is on every other surface -- a strip button for one
+                // destination is inconsistent with the rest of the app, and in
+                // Compact it had already been abbreviated to "N/I" and was
+                // crowding the centred logo.  The route lives in the nav menu
+                // installed above, which every Inst tab now gets.
+                b->setTabSlots ({}, {}, -1, accent);
 
                 b->clearExtraRightComponents();
                 if (auto* pe = pedals())
@@ -16534,7 +16613,7 @@ void StandaloneEditor::openInstNamIrWindow (int instIdx)
     contentRaw->onRequestClose = [this, key] { closeAuxWindow (key); };
 
     auto* win = openAuxWindow (key, key, ip->getTabName() + " - NAM/IR",
-                               std::move (content), 843, 563);   // T7: approved map
+                               std::move (content), 519, 722);
     if (win == nullptr) return;
 
     if (auto* bar = win->getPageMenu())
@@ -16543,11 +16622,75 @@ void StandaloneEditor::openInstNamIrWindow (int instIdx)
         {
             if (auto* p = findInstPage()) p->showPageActionsMenu (anchor);
         });
+        // Same continuity fix as the Pedals window: a live-input tab reaches
+        // NAM/IR without ever framing its own page window, so this is where it
+        // gets its nav menu.
+        if (auto* p = findInstPage())
+            installInstNavMenu (*p, juce::Component::SafePointer<InstPage> (p),
+                                juce::Component::SafePointer<PageMenuBar> (bar));
         // Jeff, 2026-08-04: the logo lives HERE, not as strip text with the
         // editor's own logo repeated directly below it.
         bar->setCenterTitle (BaySickNAMIREditor::getEngineTitle(),
                              BaySickNAMIREditor::getEngineAccent());
     }
+}
+
+// The Inst nav menu -- Pedals / NAM/IR / Piano Roll -- installed on EVERY Inst
+// page rather than only on the ones that frame their own window.
+//
+// It used to be assigned inline in the sfizz branch of the page-shown switch,
+// and a LIVE-INPUT tab never reaches that branch (its "player" IS the pedals
+// window, L10).  So on a LiveInst tab onBuildWindowNavMenu stayed null,
+// showPageActionsMenu skipped the whole nav block, and neither the Pedals
+// window nor the NAM/IR window offered a route to the other -- while Guitars
+// and Basses had both.  Same two windows, same menu, different tab: that is the
+// continuity Jeff asked for (2026-08-11), not just a missing item.
+void StandaloneEditor::installInstNavMenu (InstPage& ip,
+                                           juce::Component::SafePointer<InstPage> safe,
+                                           juce::Component::SafePointer<PageMenuBar> safeBar)
+{
+    ip.onBuildWindowNavMenu = [this, safe, safeBar] (juce::PopupMenu& m)
+    {
+        m.addItem ("Pedals", [this, safe]
+        {
+            if (auto* p = safe.getComponent())
+                openInstPedalsWindow (p->getPageIndex());
+        });
+        m.addItem ("NAM/IR", [this, safe]
+        {
+            if (auto* p = safe.getComponent())
+                openInstNamIrWindow (p->getPageIndex());
+        });
+
+        // Piano Roll is sfizz-only: a live-input tab has no sampled engine to
+        // show there, so the row is absent rather than present and dead.
+        if (auto* p0 = safe.getComponent())
+        {
+            if (p0->getSource() != InstPage::Source::LiveInput)
+            {
+                m.addItem ("Piano Roll", [this, safe]
+                {
+                    auto* p = safe.getComponent();
+                    if (p == nullptr) return;
+                    // Capture ALL state via locals BEFORE onTabSelected(4) --
+                    // the switch can destroy the page.
+                    const auto src    = p->getSource();
+                    const int pageIdx = p->getPageIndex();
+                    const EngineKind k = (src == InstPage::Source::BaySickGuitars)
+                                          ? EngineKind::BaySickGuitars
+                                          : EngineKind::BaySickBasses;
+                    auto* prp = mPianoRollPage;
+                    auto* rbn = mRibbon.get();
+                    if (rbn != nullptr) rbn->selectTab (4);
+                    onTabSelected (4);
+                    if (prp != nullptr)
+                        prp->selectEngine ({ k, pageIdx });
+                });
+            }
+        }
+
+        if (auto* bar = safeBar.getComponent()) bar->appendStandardItems (m);   // T16
+    };
 }
 
 void StandaloneEditor::closeVoxSatellites (int voxIdx)
@@ -16571,6 +16714,88 @@ void StandaloneEditor::closeInstSatellites (int instIdx)
 // CL-044 (QA-ModelShell TS7): the floating master analyzer.  One instance -- there
 // is one master bus, so a second window would draw the identical trace at twice
 // the cost.  Its own key means it never collides with an effect window.
+// The one VU in the app.  Shows the MASTER OUTPUT, which is what "0 VU" is
+// supposed to mean -- the level leaving the app, not one effect's input.
+//
+// LEVEL SOURCE: getMasterLufs(0), the momentary loudness of the master bus.
+// Chosen over the master PEAK atoms deliberately: those are drain-on-read and
+// the Mixer page is their only drainer, so a VU reading them would either steal
+// the Mixer's updates or -- with the Mixer window closed -- latch at the loudest
+// value since app start.  getMasterLufs is a const read of an always-running
+// meter tapped post fader/pan/width, so it needs no audio-path change and
+// cannot fight another consumer.  A 400 ms momentary window is also much closer
+// to VU ballistics than a sample peak is.
+void StandaloneEditor::openMasterVuWindow()
+{
+    const juce::String key = "vu:master";
+    if (auto* existing = findAuxWindow (key)) { existing->toFront (true); return; }
+
+    struct MasterVuView : public juce::Component, private juce::Timer
+    {
+        explicit MasterVuView (BaySickDAWProcessor& p) : mProc (p)
+        {
+            mVu = std::make_unique<VUMeter> (VUMeter::Vertical);
+            mVu->setTooltip ("Master output level");
+            addAndMakeVisible (*mVu);
+            startTimerHz (30);
+        }
+
+        void resized() override
+        {
+            if (mVu) mVu->setBounds (getLocalBounds().reduced (6));
+        }
+
+        void paint (juce::Graphics& g) override { g.fillAll (VC::Bg); }
+
+        void timerCallback() override
+        {
+            if (! mVu) return;
+
+            // dB -> the 0..1 the meter takes, the same conversion the panels
+            // used on their linear RMS feed.
+            const float lufs = mProc.getMasterLufs (0);
+            mVu->setLevel (lufs <= -120.0f ? 0.0f
+                                           : juce::Decibels::decibelsToGain (lufs));
+        }
+
+        BaySickDAWProcessor&       mProc;
+        std::unique_ptr<VUMeter>   mVu;
+    };
+
+    auto content = std::make_unique<MasterVuView> (mProcessor);
+
+    // Size is a placeholder until Jeff measures it -- the readout on the title
+    // strip is what he sets it from.
+    auto* win = openAuxWindow (key, key, "VU Meter", std::move (content), 180, 200);
+    if (win == nullptr) return;
+
+    // DIAGONAL-ONLY RESIZE (Jeff, 2026-08-11).  The meter is a drawn instrument
+    // face, so stretching one axis does not make it bigger -- it makes it look
+    // broken, and nothing on screen tells the user that is what they did.
+    // Locking the ratio means the only resize available is the one that still
+    // looks right.  0.9 is the 180x200 the window opens at.
+    win->setFixedAspect (180.0 / 200.0);
+
+    // AND a ceiling (Jeff, 2026-08-11).  The ratio lock holds until one axis
+    // reaches a limit; past that the drag carries on in the other direction and
+    // the shape breaks after all, which is the thing the lock was for.
+    win->setMaxWindowSize (290, 320);
+
+    // The calibration lives on the meter's OWN menu too (Jeff, 2026-08-12).
+    // Reaching the Effects rack menu to change what the needle in front of you
+    // reads is a detour; the same submenu is offered from both places off one
+    // definition, so they cannot disagree.
+    if (auto* bar = win->getPageMenu())
+        bar->setMenuBuilder ([] (juce::Component* anchor)
+        {
+            juce::PopupMenu m;
+            VUMeter::addCalibrationSubMenu (m);
+            m.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (anchor));
+        });
+
+    win->onCloseRequested = [this, key] { closeAuxWindow (key); };
+}
+
 void StandaloneEditor::openMasterAnalyzerWindow()
 {
     const juce::String key = "analyzer:master";
@@ -16582,7 +16807,7 @@ void StandaloneEditor::openMasterAnalyzerWindow()
     // T7: floor from the approved sizing map.  Placement is session-scoped
     // like every other satellite.
     auto* win = openAuxWindow (key, key, "Master Analyzer",
-                               std::move (content), 1047, 455);
+                               std::move (content), 519, 372);
     if (win == nullptr) return;
 
     // TS7 §3.6: the window READS capture, it does not own it -- capture has been
@@ -17454,7 +17679,7 @@ void StandaloneEditor::deserializeUIState (const juce::XmlElement& root)
                 // does not turn the label into the tab name twice.
                 pp->onEngineSelected = [this, newId, pageIndex, pp] {
                     const juce::String nm = pp->getDisplayName();
-                    if (nm.isNotEmpty() && mRibbon) { mRibbon->renameTab (newId, nm); pp->setTabName (nm); }
+                    if (nm.isNotEmpty() && mRibbon) { mRibbon->renameTab (newId, nm); pp->setTabName (nm); setWindowTitleForTab (newId, nm); }
                     const auto* tab = mRibbon->getTabById (newId);
                     if (mMixerPage)   mMixerPage->addPluginChannel (pageIndex, tab ? tab->name : "Plugin");
                     if (mEffectsPage) mEffectsPage->rebuildChannelDropdown();
@@ -17466,6 +17691,7 @@ void StandaloneEditor::deserializeUIState (const juce::XmlElement& root)
                     if (nm.isNotEmpty())
                     {
                         if (mRibbon) { mRibbon->renameTab (newId, nm); pp->setTabName (nm); }
+                    setWindowTitleForTab (newId, nm);
                         if (mMixerPage) mMixerPage->renameChannel (MixerPage::StripKind::Plugin, pageIndex, nm);
                     }
                     if (mPianoRollPage)

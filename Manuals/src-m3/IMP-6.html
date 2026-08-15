@@ -1,0 +1,172 @@
+<p>A cascade of gain stages, each adding harmonics. Cascading is what makes it
+sound like an amplifier rather than a mathematical clip.</p>
+
+<div class="codeblock"><div class="codehead">Source/DSP/OverdriveDSP.cpp</div><pre><code>// OverdriveDSP::process -- Pedal-mode dual cascaded soft-clip (oversampled loop)
+        const float drive = 1.0f + juce::jlimit (0.0f, 10.0f, mPreAmp) * 13.0f;
+            for (int i = 0; i &lt; upN; ++i)
+            {
+                // Stage 1: gentle pre-clip (warms the upper-mids).
+                const float s1 = std::tanh (d[i] * drive);
+                // 720 Hz 1-pole HPF between stages -- strips low-end mud so the
+                // second cascade stays tight under chords.
+                const float hy = mPedalHpfR * (mPedalHpfY[hch] + s1 - mPedalHpfX[hch]);
+                mPedalHpfX[hch] = s1;
+                mPedalHpfY[hch] = hy;
+                // Stage 2: harder cascade (the pedal&#x27;s punchy attack).
+                d[i] = std::tanh (hy * 1.6f);
+            }
+
+// OverdriveDSP::process -- Rack-mode soft-clip sigmoid with asymmetric bias
+        const float biasOffset = bias * 0.3f;                                // scaled so knob feels musical
+        const float biasFloor  = (biasOffset) / (1.0f + std::abs (biasOffset));   // f(bias) with drive=1
+                const float s       = upBlock.getSample (ch, upIdx);
+                const float driven  = drive * s + biasOffset;
+                // Soft-clip sigmoid: x/(1+|x|). Saturates to +/-1 smoothly.
+                const float shaped  = driven / (1.0f + std::abs (driven));
+                // Remove the static DC the bias would otherwise inject.
+                upBlock.setSample (ch, upIdx, shaped - biasFloor);</code></pre></div>
+<details class="fullfn"><summary>Full function &mdash; Source/DSP/OverdriveDSP.cpp</summary><pre><code>// OverdriveDSP::process -- Pedal-mode branch (mType == Type::Pedal), complete
+// except the clean-buf resize guard.  Rack-mode Steps 1-3 follow below;
+// serialisation and setters elided.
+    //   1. Split input at 80 Hz: HPF feeds the clipping path, LPF feeds the
+    //      clean blend (sub-80 keeps the low end intact, classic OD-3
+    //      character that &quot;doesn&#x27;t get muddy under heavy chords&quot;).
+    //   2. 4x oversample the HPF path.
+    //   3. Dual cascaded tanh soft-clip (two stages, second hits harder).
+    //   4. Downsample.
+    //   5. Sum drive + clean.
+    //   6. Tone LPF (PostFilter Hz, user knob).
+    //   7. PostGain (Level, user knob).
+    if (mType == Type::Pedal)
+    {
+        for (int ch = 0; ch &lt; numCh; ++ch)
+            mPedalCleanBuf.copyFrom (ch, 0, buffer, ch, 0, numSamples);
+
+        // HPF the main buffer (drive path).
+        {
+            juce::dsp::AudioBlock&lt;float&gt; blk (buffer);
+            auto sub = blk.getSubBlock (0, (size_t) numSamples)
+                          .getSubsetChannelBlock (0, (size_t) numCh);
+            juce::dsp::ProcessContextReplacing&lt;float&gt; ctx (sub);
+            mPedalSplitHpf.process (ctx);
+        }
+        // LPF the clean buf (clean blend path).
+        {
+            juce::dsp::AudioBlock&lt;float&gt; blk (mPedalCleanBuf);
+            auto sub = blk.getSubBlock (0, (size_t) numSamples)
+                          .getSubsetChannelBlock (0, (size_t) numCh);
+            juce::dsp::ProcessContextReplacing&lt;float&gt; ctx (sub);
+            mPedalSplitLpf.process (ctx);
+        }
+
+        // QA-EffectsReview Task 5: 500 Hz mid-notch on the drive path, pre-clip (1x).
+        for (int ch = 0; ch &lt; numCh; ++ch)
+        {
+            float* d = buffer.getWritePointer (ch);
+            auto&amp;  notch = (ch == 0) ? mPedalNotchL : mPedalNotchR;
+            for (int i = 0; i &lt; numSamples; ++i)
+                d[i] = notch.processSample (d[i]);
+        }
+
+        // Dual cascaded soft-clip on the drive path (oversampled).  QA-EffectsReview
+        // Task 5: drive ceiling raised 1+preAmp*4 -&gt; 1+preAmp*13 (~+43 dB) and a
+        // 720 Hz 1-pole HPF inserted between the two clip stages.
+        const float drive = 1.0f + juce::jlimit (0.0f, 10.0f, mPreAmp) * 13.0f;
+        juce::dsp::AudioBlock&lt;float&gt; driveBlock (buffer);
+        auto driveSub = driveBlock.getSubBlock (0, (size_t) numSamples)
+                                   .getSubsetChannelBlock (0, (size_t) numCh);
+        auto upBlock = mOversampler-&gt;processSamplesUp (driveSub);
+        const int upN   = (int) upBlock.getNumSamples();
+        const int upChs = (int) upBlock.getNumChannels();
+        for (int ch = 0; ch &lt; upChs; ++ch)
+        {
+            float* d = upBlock.getChannelPointer ((size_t) ch);
+            const int hch = juce::jmin (ch, 1);
+            for (int i = 0; i &lt; upN; ++i)
+            {
+                // Stage 1: gentle pre-clip (warms the upper-mids).
+                const float s1 = std::tanh (d[i] * drive);
+                // 720 Hz 1-pole HPF between stages -- strips low-end mud so the
+                // second cascade stays tight under chords.
+                const float hy = mPedalHpfR * (mPedalHpfY[hch] + s1 - mPedalHpfX[hch]);
+                mPedalHpfX[hch] = s1;
+                mPedalHpfY[hch] = hy;
+                // Stage 2: harder cascade (the pedal&#x27;s punchy attack).
+                d[i] = std::tanh (hy * 1.6f);
+            }
+        }
+        mOversampler-&gt;processSamplesDown (driveSub);
+
+        // Sum drive + clean back into the main buffer.
+        for (int ch = 0; ch &lt; numCh; ++ch)
+        {
+            float* drv = buffer.getWritePointer (ch);
+            const float* cln = mPedalCleanBuf.getReadPointer (ch);
+            for (int i = 0; i &lt; numSamples; ++i)
+                drv[i] += cln[i];
+        }
+
+        // Tone (PostFilter LPF) + Level (PostGain) at 1x.
+        const float toneHz = juce::jlimit (200.0f, 8000.0f, mPostFilter);
+        mLPF.setCutoffFrequency (toneHz);
+        {
+            juce::dsp::AudioBlock&lt;float&gt; blk (buffer);
+            auto sub = blk.getSubBlock (0, (size_t) numSamples)
+                          .getSubsetChannelBlock (0, (size_t) numCh);
+            juce::dsp::ProcessContextReplacing&lt;float&gt; ctx (sub);
+            mLPF.process (ctx);
+        }
+        if (mPostGain != 0.0f)
+            buffer.applyGain (juce::Decibels::decibelsToGain (mPostGain, -60.0f));
+
+        return;   // Pedal mode is done; skip the Rack chain below.
+    }
+
+// OverdriveDSP::process -- Rack-mode Step 2: oversampled soft-clip sigmoid.
+// (Step 1 pre-LP Color/PreBand blend and Step 3 post-LPF + gain + hard clip +
+// 5 Hz DC-blocker + parallel/blend mix are elided.)
+    for (int baseN = 0; baseN &lt; numSamples; ++baseN)
+    {
+        // Consume ONE smoothed drive + x100-scalar + bias per base sample, reuse
+        // across the kOsNow upsampled sub-samples. A5: x100 ramps smoothly
+        // instead of snapping -- no pop on toggle.
+        const float preAmp   = mPreAmpSmooth    .getNextValue();
+        const float x100s    = mX100ScalarSmooth.getNextValue();
+        const float bias     = mBiasSmooth      .getNextValue();
+        const float drive    = preAmp * x100s;
+
+        // C1 -- swap atan for x/(1+|x|) soft-clip sigmoid (spec formula).
+        // C2 -- pre-shaper bias adds asymmetric even harmonics; post-shaper
+        // subtract the DC equivalent so the static DC floor is removed (the
+        // 5 Hz DC-blocker downstream catches any residual drift).
+        const float biasOffset = bias * 0.3f;                                // scaled so knob feels musical
+        const float biasFloor  = (biasOffset) / (1.0f + std::abs (biasOffset));   // f(bias) with drive=1
+
+        for (int j = 0; j &lt; kOsNow; ++j)
+        {
+            const int upIdx = baseN * kOsNow + j;
+            if (upIdx &gt;= upN) break;
+            for (int ch = 0; ch &lt; 2; ++ch)
+            {
+                const float s       = upBlock.getSample (ch, upIdx);
+                const float driven  = drive * s + biasOffset;
+                // Soft-clip sigmoid: x/(1+|x|). Saturates to +/-1 smoothly.
+                const float shaped  = driven / (1.0f + std::abs (driven));
+                // Remove the static DC the bias would otherwise inject.
+                upBlock.setSample (ch, upIdx, shaped - biasFloor);
+            }
+        }
+    }</code></pre></details>
+<pre class="formulas">Pedal mode (Type::Pedal - the OD-3-style stage cascade / voicing):
+- 80 Hz split: TPT highpass feeds the drive path, TPT lowpass (Q = 0.7071 both) feeds a clean parallel path summed back after clipping - sub-80 Hz never distorts.
+- Voicing pre-clip: 500 Hz peaking notch, Q = 1.0, -4.5 dB, on the drive path at base rate.
+- Drive: `drive = 1 + preAmp*13` (preAmp 0..10 =&gt; drive 1..131, ~+42.3 dB ceiling).
+- Stage cascade (inside the oversampler, factor 2^osLog2, default 4x): stage 1 `s1 = tanh(x * drive)`; inter-stage 1-pole HPF at 720 Hz computed at the OS rate, R-form `hy = R*(y + s1 - xPrev)` with `R = 1 - 2*pi*720/osRate`; stage 2 `y = tanh(1.6 * hy)` (fixed 1.6 second-stage gain - the &quot;harder&quot; cascade).
+- Output: drive path + clean path summed, then Tone LPF (PostFilter clamped 200..8000 Hz in Pedal mode, Butterworth Q), then Level `10^(postGain/20)` with postGain limited to -18..0 dB (attenuate-only).
+
+Rack mode (Type::Rack):
+- Step 1 pre-shape: `driveInput = x + preBand*(LP_color(x) - x)` - PreBand (0..1) blends in a lowpass at Color Hz (20..20000, Butterworth Q) before the shaper; no parallel clean band, the whole signal is driven.
+- Step 2 shaper (oversampled): `drive = preAmp * x100Scalar` where x100Scalar ramps 1 &lt;-&gt; 100 over 20 ms (the x100 toggle = +40 dB); `biasOffset = bias*0.3` (bias knob -1..1); `y = (drive*x + biasOffset)/(1 + |drive*x + biasOffset|) - biasFloor`, `biasFloor = biasOffset/(1+|biasOffset|)` (removes static DC; asymmetry injects even harmonics).
+- Step 3: post LPF at PostFilter Hz (Butterworth), post gain -18..0 dB, hard clip to +/-1, 5 Hz DC blocker `y = x - xPrev + R*yPrev` with `R = 1 - 2*pi*5/sr`, then mix: Blend mode `out = (1-wet)*x + wet*processed`; Parallel mode `out = x + wet*processed` (dry stays full).
+- Oversampling factor user-selectable 2/4/8/16x (osLog2 1..4, default 2 = 4x), half-band polyphase IIR.</pre>
+<p class="behind"><b>Behind:</b> <a href="manual-2.html#FXPICK-2">Harmonics group</a>.</p>

@@ -1,0 +1,69 @@
+<p>BaySickGuitars, BaySickBasses and BaySickRustyDrums are driven by SFZ
+programs - instrument definitions that map hundreds of recorded samples
+across keys, velocities and articulations. The engine reads the program
+and the program defines the instrument: which samples exist, how velocity
+layers crossfade, which KEYSWITCH keys change articulation (the amber keys
+on the Piano Roll keyboard), and what incidental noises ride along. That
+is why the control surfaces differ per instrument - the panels are drawn
+from the loaded program itself - and why the Rusty Drums Map window can
+list every note the kit answers to: it reads the same program. The three
+engines load on their own race-safe paths and stay resident while their
+tabs exist; the kit's pedal state, stir loops and mic mix layers are all
+program features the panels expose rather than effects added on top.</p>
+
+<div class="codeblock"><div class="codehead">Source\BaySickGuitars\BaySickGuitarsProcessor.cpp (loadKit program-load path, processBlock MIDI/keyswitch dispatch; BaySickBasses mirrors it, BaySickRustyDrums is the singleton variant)</div><pre><code>// BaySickGuitarsProcessor::loadKit (program load path, head) -- Source/BaySickGuitars/BaySickGuitarsProcessor.cpp
+bool BaySickGuitarsProcessor::loadKit (const juce::File&amp; sfzPath)
+{
+    if (! sfzPath.existsAsFile() || ! mSfizz)
+        return false;
+
+    // SECURITY (QA-Cleanup 2026-08-10): pre-flight BEFORE handing the kit to
+    // sfizz.  After loadSfz* it is too late - the macro and include hangs never
+    // return, and the Ogg overflow has already happened.  See SafeSfzKit.h.
+    if (const auto why = SafeSfzKit::rejectReason (sfzPath); why.isNotEmpty())
+    {
+        MissingFileReport::add (&quot;Instrument kit refused - &quot; + why,
+                                sfzPath.getFullPathName());
+        return false;
+    }
+
+    if (! mSfizz-&gt;loadSfzFile (sfzPath.getFullPathName().toStdString()))
+        return false;
+
+    mCurrentKitPath = sfzPath;</code></pre></div>
+<details class="fullfn"><summary>Full function &mdash; Source\BaySickGuitars\BaySickGuitarsProcessor.cpp (loadKit program-load path, processBlock MIDI/keyswitch dispatch; BaySickBasses mirrors it, BaySickRustyDrums is the singleton variant)</summary><pre><code>    // QA-Sfizz-Followup (2026-06-01): reset every CC to 0 (off) before applying
+    // the kit&#x27;s set_cc overrides [...] The reset
+    // reaches sfizz via setValueNotifyingHost -&gt; parameterChanged&#x27;s dirty
+    // mark, drained by processBlock once the processing gate reopens.
+    juce::AudioProcessorValueTreeState::ScopedProgrammaticParamWrites spw;
+    for (int cc = 0; cc &lt; kCcCount; ++cc)
+    {
+        if (auto* p = dynamic_cast&lt;juce::RangedAudioParameter*&gt; (
+                apvts.getParameter (mCcParamRoot + juce::String (cc))))
+            p-&gt;setValueNotifyingHost (p-&gt;getNormalisableRange().convertTo0to1 (0.0f));
+    }
+
+    // Push kit defaults through APVTS - the parameterChanged marks land in
+    // sfizz via the processBlock drain.  Overrides the 0 reset above for
+    // CCs the kit author explicitly set.
+    for (auto&amp; [cc, val] : kitDefaults)
+    {
+        if (auto* p = dynamic_cast&lt;juce::RangedAudioParameter*&gt; (
+                apvts.getParameter (mCcParamRoot + juce::String (cc))))
+            p-&gt;setValueNotifyingHost (p-&gt;getNormalisableRange().convertTo0to1 ((float) val));
+    }
+
+    // QA-SlideSampler Task 1: build the blended-slide note-&gt;sample table for the
+    // center-voice default-keyswitch sustain articulation of the loaded program.
+    mSlideRegions = extractSlideRegions (sfzPath);
+    mSlideSampler.setProgram (mSlideRegions);   // rebuild zone tables (processing gate off here)
+
+    return true;
+}</code></pre></details>
+<pre class="formulas">- Program load path: SafeSfzKit pre-flight -&gt; `mSfizz-&gt;loadSfzFile(path)` -&gt; set_cc/label_cc scan (`#include` depth &lt;= 4, budget 256 files, macro resolution `set_cc4=$ht_lo_hi_init`) -&gt; CC reset-to-0 + kit-default push through APVTS -&gt; SlideSampler zone tables. State restore order is load-bearing: `loadKit` FIRST (kit defaults stamp the CC params), `replaceState` SECOND (the project&#x27;s saved CCs overlay them).
+- Keyswitches: sfizz handles them natively (region `sw_lokey`/`sw_last` machinery inside the vendored library); the wrapper additionally (a) mirrors `label_key`-style names via the local-patch `getKeyswitchLabels()` accessor for UI, (b) lets the SlideSampler swap articulation tables on the same note (`trySelectArticulation`), and (c) exempts keyswitch notes from cut-self. Notes and non-transport CCs pass straight through: `mSfizz-&gt;noteOn/noteOff/cc/pitchWheel` at the event&#x27;s sample `delay`.
+- Race-safe load: two gates both FALSE for the whole load (`mGuitarsActive[]` model-side, `mProcessingEnabled` engine-side, acquire/release atomics) + the project-load shield + acknowledgement-based `settleAudioThread()` -- the settle is what actually guarantees no audio-thread reader is inside `renderBlock` when `loadSfzFile` frees regions/voices, because the gates are check-then-act. CC writes made mid-load accumulate as dirty marks and drain on the first block after the gate reopens.
+- CC dispatch math: dirty bitset of `kCcCount = 512` bits in 64-bit words: mark `word[cc&gt;&gt;6] |= 1 &lt;&lt; (cc &amp; 63)` (release), drain via `exchange(0, acquire)` then `mSfizz-&gt;cc(0, cc, clamp(round(raw), 0, 127))`.
+- Pitch wheel: sfizz takes CENTERED -8192..+8192, so JUCE&#x27;s raw 0..16383 is converted `clamp(value - 8192, -8191, 8191)`.
+- Slide transport CCs (intercepted, never reach sfizz): CC84 anchor, CC5/CC37 14-bit glide ms `(hi &lt;&lt; 7) | lo`, CC86 loudness, CC87/88 bend amount/shape, CC85 arm. Bend wheel target: `semis * 100 / bendRangeCents * 8192`, clamped to +-8191/8192.</pre>
+<p class="behind"><b>Behind:</b> <a href="manual-2.html#BSGTR-1">Loaded-instrument field</a>, <a href="manual-2.html#BSGTR-2">Load Guitar</a>, <a href="manual-2.html#BSGTR-6">Releases slider</a>, <a href="manual-2.html#BSGTR-7">VIBRATO group</a>, <a href="manual-2.html#BSGTR-8">PERFORMANCE group</a>, <a href="manual-2.html#BSBAS-1">Loaded-instrument field</a>, <a href="manual-2.html#BSBAS-2">Load Bass</a>, <a href="manual-2.html#BSBAS-4">Swell / Release</a>, <a href="manual-2.html#BSBAS-6">VIBRATO group</a>, <a href="manual-2.html#BSBAS-7">Delay / Fade / Humanize knobs</a>, <a href="manual-2.html#BSRDMAIN-2">Program picker</a>, <a href="manual-2.html#BSRDMAIN-3">Section tab row</a>.</p>

@@ -170,16 +170,19 @@ public:
         // Mic Placement
         float placementDistance { 30.0f };
         float placementAngle    { 0.0f };
+        float placementHeight   { 0.0f };
         int   placementPolar    { 1 };
         float placementMix      { 100.0f };
 
         // QA-Fc dual-mic (Mic B).  Defaults match the `_b_` param defaults so
         // pre-dual-mic saves (no B properties) restore to Mic B off.
+        bool  micaActive        { false };
         bool  micbActive        { false };
         int   micSimBMode       { 0 };
         int   micSimBModel      { 0 };
         float micSimBMix        { 100.0f };
         juce::String micbUserIrPath;
+        float placementBHeight   { 0.0f };
         float placementBDistance { 30.0f };
         float placementBAngle    { 0.0f };
         int   placementBPolar    { 1 };
@@ -292,6 +295,8 @@ private:
     // off, processBlock skips the whole B path (one param read + branch).
     MicSimDSP        mMicSimB;
     MicPlacementDSP  mMicPlacementB;
+    float            mMicAGain { 0.0f };
+    bool             mMicAWasRunning { false };
     float            mMicBGain { 0.0f };
     bool             mMicBWasRunning { false };
 

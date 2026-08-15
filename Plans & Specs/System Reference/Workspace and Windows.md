@@ -86,7 +86,6 @@ strip instead.
 |---|---|
 | **Help Index  (F1)** | Opens the manuals window, described below. The label carries two spaces before the key hint. |
 | **Key Binds...** | Opens the **Key Binds** window: every rebindable command with its current shortcut, plus every page-local key and mouse gesture as a reference row. See `Keyboard Shortcuts.md`. |
-| **Rusty Drums Map...** | Opens the **Rusty Drums Map** window, a Key / MIDI / Sound / Articulation table of every note the Rusty kit answers to. It does not need a Rusty Drums tab open: with no kit loaded it parses the installed Big Rusty Drums kit instead, and if the Core Library is not installed either, the table comes up empty. See `BaySickRustyDrums.md`. |
 | **About BaySickDAW v1.0** | An information box titled "BaySickDAW v1.0" carrying the build line, a short "Powered by:" attribution list naming sfizz and LAME, and a single **OK** button. That list is knowingly incomplete. |
 
 ### The manuals window

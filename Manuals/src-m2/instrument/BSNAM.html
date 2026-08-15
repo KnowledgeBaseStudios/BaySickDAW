@@ -1,0 +1,109 @@
+<p>The NAM/IR window is the amp room. NAM stands for Neural Amp Modeler - a
+real amplifier, captured as a model that behaves like the original, drive
+and all. IR stands for impulse response - a real speaker cabinet, captured
+as its acoustic fingerprint. Load one of each and your dry signal comes out
+the other side sounding like it went through the rig. Two simulated
+microphones with real microphone physics complete the room.</p>
+
+<figure data-cluster="Amp and cab|1,2,3,4">
+
+<p id="BSNAM-1"><b>The AMP row.</b> <code>Load .nam...</code> loads an amp
+capture; the field names what is loaded, reads
+<code>(no model loaded)</code> when empty, and shows the filename in red
+with <code>(missing)</code> if the file has vanished from disk.
+<span id="BSNAM-2"></span>The <b>bypass</b> at the row's end takes the amp
+out of the path without unloading it - the instant with/without
+comparison.</p>
+
+<p id="BSNAM-3"><b>The CAB row</b> - the same pattern for the cabinet:
+<code>Load .wav IR...</code>, the field with the same empty and missing
+states, <span id="BSNAM-4"></span>and its own <b>bypass</b>. Amp without
+cab is raw and fizzy (the sound of an amp with no speaker); cab without
+amp is a natural tone-shaper. Both are legitimate moves, not mistakes.</p>
+
+<figure data-cluster="The signal chain knobs|5,6,7,8,9,10">
+
+<p id="BSNAM-5"><b>Input Gain</b> drives the model harder or softer -
+with an amp capture this behaves like the amp's own input knob: more gain,
+more breakup and grit; less, cleaner.
+<span id="BSNAM-6"></span><b>Gate Thr / Gate Rel</b> are a noise gate -
+a mute that opens only when signal is present. Threshold sets how loud you
+must play to open it; release, how quickly it closes after you stop.
+<span id="BSNAM-7"></span><b>Low Cut / High Cut</b> trim rumble and fizz
+before the cabinet. <span id="BSNAM-8"></span><b>Cab Mix</b> blends the
+cabinet-filtered sound against the unfiltered one, and
+<span id="BSNAM-9"></span><b>Output</b> sets the final level out.
+<span id="BSNAM-10"></span><b>OS</b> is oversampling - 1x / 2x / 4x - the
+engine internally running at a higher rate for a cleaner top end on
+distorted settings, at more CPU cost.</p>
+
+<figure data-cluster="A/B|11">
+
+<p id="BSNAM-11"><b>A / B.</b> Two complete rig memories. Set up one
+sound on A, another on B, and flip between them while playing - the only
+honest way to compare amps. This pair belongs to this window alone.</p>
+
+<figure data-cluster="The mic simulators|12,13,14,15,16,17">
+
+<p id="BSNAM-12"><b>MIC SIM A and B</b> - two identical microphone
+columns, because real cabs are usually miked twice and the blend IS the
+tone. <span id="BSNAM-13"></span>Each column's <b>Active switch</b> ships
+OFF - the mic sim adds nothing until you ask. Flipping it crossfades over
+a few milliseconds instead of clicking, so it is safe to automate
+mid-song. <span id="BSNAM-14"></span><b>Mode</b> chooses where the mic's
+character comes from: <code>Built-in</code> -
+<span id="BSNAM-15"></span>the <b>Model</b> dropdown's ten classic
+microphone archetypes - or <code>User IR</code>,
+<span id="BSNAM-16"></span>your own file loaded with <b>Load Mic
+IR...</b> (the loaded path shows where the Model dropdown sits).
+<span id="BSNAM-17"></span><b>Mix</b> sets how much of that mic's
+coloring applies.</p>
+
+<figure data-cluster="Mic placement|18,19,20,21,22,23,24">
+
+<p id="BSNAM-18"><b>MIC PLACEMENT</b> - where each microphone stands in
+the room, with the physics that implies.
+<span id="BSNAM-19"></span>The <b>Top / Side</b> button flips the view
+per mic: looking down on the cab, or at it from the side.
+<span id="BSNAM-20"></span><b>Polar</b> is the mic's pickup pattern - how
+it hears sound from different directions: <code>O</code>mni hears
+everything equally, <code>Card</code>ioid rejects what is behind it (the
+standard stage mic), <code>Sup</code>er and <code>Hyp</code>ercardioid
+reject harder, figure-<code>8</code> hears front and back but not the
+sides. <span id="BSNAM-21"></span><b>Distance</b> (1-150 cm): close is
+thick, bass-heavy, in-your-face; far is roomier and thinner.
+<span id="BSNAM-22"></span><b>Angle</b> swings the mic off the speaker's
+center axis - further off-axis is darker, exactly like the real thing.
+<span id="BSNAM-23"></span><b>Height</b> raises or lowers it off the
+cone's center; height adds to the true off-axis angle AND lengthens the
+path, so raising a mic both darkens and slightly distances it.
+<span id="BSNAM-24"></span><b>Mix</b> is the placement effect's own
+depth.</p>
+
+<figure data-cluster="The picture is a control|25,26,27,28,29">
+
+<p id="BSNAM-25"><b>Drag the microphone in the picture.</b> In TOP view
+the drag sets Distance and Angle at once; in SIDE view it sets Height and
+Angle while Distance stays on its knob. Double-click parks the mic back
+at its neutral spot. <span id="BSNAM-26"></span><b>The rings</b> mark
+distance (TOP) or 10 cm height steps (SIDE);
+<span id="BSNAM-27"></span><b>the bright zone</b> is the 15-degree
+on-axis cone where no off-axis darkening applies at all;
+<span id="BSNAM-28"></span><b>the proximity boundary</b> marks the 20 cm
+line inside which close-mic bass boost lives - in SIDE view it shrinks as
+the mic backs away, because proximity follows TRUE distance, not just
+height. <span id="BSNAM-29"></span><b>The readout</b> prints the numbers
+(<code>30 cm   0 deg</code>, plus height in SIDE view).
+When a mic's switch is off, <b>its whole
+column dims</b> to 40% and ignores the mouse, picture included - the look
+IS the state.</p>
+
+
+<p><b>The full-rig hint.</b> Some captures are
+<em>full-rig</em> - amp AND cabinet baked into one file. Load one and the
+status row says
+<code>Full-rig model - cabinet already included.  Consider bypassing the
+IR.</code> - because running a second cabinet over a baked-in one doubles
+the coloring, and it is the most common reason a rig sounds boxy.
+<b>Load failures</b> print their reason in red
+on the same row.</p>

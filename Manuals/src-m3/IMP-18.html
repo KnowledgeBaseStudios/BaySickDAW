@@ -1,0 +1,119 @@
+<p>Harder clipping, tighter low end.</p>
+
+<div class="codeblock"><div class="codehead">Source\DSP\DistortionStyleDSP.cpp</div><pre><code>// DistortionStyleDSP::process — hard clip at 4x + Big-Muff tilt EQ crossfade
+    // Drive scalar -- aggressive (DS-1 max drive is ~+50 dB).
+    const float drive = 1.0f + mDist * 49.0f;
+
+    // 2. Upsample, hard-clip at 4x, downsample.
+    auto upBlock = mOs.upsample (block);
+    const int upN   = (int) upBlock.getNumSamples();
+    const int upChs = (int) upBlock.getNumChannels();
+    for (int ch = 0; ch &lt; upChs; ++ch)
+    {
+        float* d = upBlock.getChannelPointer ((size_t) ch);
+        for (int i = 0; i &lt; upN; ++i)
+            d[i] = std::clamp (d[i] * drive, -1.0f, 1.0f);
+    }
+    mOs.downsample (block);
+    ...
+    // Crossfade: Tone=0 -&gt; all LPF (dark); Tone=1 -&gt; all HPF (bright); 0.5
+    // -&gt; equal mix (mid-scoop).
+    const float t   = juce::jlimit (0.0f, 1.0f, mTone);
+    const float gLp = 1.0f - t;
+    const float gHp = t;</code></pre></div>
+<details class="fullfn"><summary>Full function &mdash; Source\DSP\DistortionStyleDSP.cpp</summary><pre><code>void DistortionStyleDSP::process (juce::AudioBuffer&lt;float&gt;&amp; buffer)
+{
+    if (bypassed) return;
+    juce::ScopedNoDenormals noDenormals;
+
+    const int numCh = buffer.getNumChannels();
+    const int n     = buffer.getNumSamples();
+    if (numCh == 0 || n == 0) return;
+
+    juce::dsp::AudioBlock&lt;float&gt; block (buffer);
+
+    // 1. Pre-emphasis high-shelf at 1x.
+    {
+        juce::dsp::ProcessContextReplacing&lt;float&gt; ctx (block);
+        mPreEmphasis.process (ctx);
+    }
+
+    // Drive scalar -- aggressive (DS-1 max drive is ~+50 dB).
+    const float drive = 1.0f + mDist * 49.0f;
+
+    // 2. Upsample, hard-clip at 4x, downsample.
+    auto upBlock = mOs.upsample (block);
+    const int upN   = (int) upBlock.getNumSamples();
+    const int upChs = (int) upBlock.getNumChannels();
+    for (int ch = 0; ch &lt; upChs; ++ch)
+    {
+        float* d = upBlock.getChannelPointer ((size_t) ch);
+        for (int i = 0; i &lt; upN; ++i)
+            d[i] = std::clamp (d[i] * drive, -1.0f, 1.0f);
+    }
+    mOs.downsample (block);
+
+    // 3. Big-Muff tilt EQ: parallel LPF + HPF, crossfaded by Tone.  We need
+    // the HPF on a copy so we can sum the two paths back together.
+    if (mScratchHpf.getNumChannels() &lt; numCh || mScratchHpf.getNumSamples() &lt; n)
+        mScratchHpf.setSize (numCh, n, false, false, true);
+    for (int ch = 0; ch &lt; numCh; ++ch)
+        mScratchHpf.copyFrom (ch, 0, buffer, ch, 0, n);
+
+    {
+        juce::dsp::AudioBlock&lt;float&gt; lpfBlock (buffer);
+        juce::dsp::ProcessContextReplacing&lt;float&gt; lpfCtx (lpfBlock);
+        mToneLpf.process (lpfCtx);
+    }
+    {
+        juce::dsp::AudioBlock&lt;float&gt; hpfBlock (mScratchHpf);
+        // Restrict block to first n samples so we don&#x27;t run the filter on
+        // stale tail data when the buffer is smaller than maxBlock.
+        juce::dsp::AudioBlock&lt;float&gt; sub = hpfBlock.getSubBlock (0, (size_t) n);
+        juce::dsp::ProcessContextReplacing&lt;float&gt; hpfCtx (sub);
+        mToneHpf.process (hpfCtx);
+    }
+
+    // Crossfade: Tone=0 -&gt; all LPF (dark); Tone=1 -&gt; all HPF (bright); 0.5
+    // -&gt; equal mix (mid-scoop).
+    const float t   = juce::jlimit (0.0f, 1.0f, mTone);
+    const float gLp = 1.0f - t;
+    const float gHp = t;
+    for (int ch = 0; ch &lt; numCh; ++ch)
+    {
+        float* lpf = buffer.getWritePointer (ch);
+        const float* hpf = mScratchHpf.getReadPointer (ch);
+        for (int i = 0; i &lt; n; ++i)
+            lpf[i] = lpf[i] * gLp + hpf[i] * gHp;
+    }
+
+    // 4. 5 Hz DC blocker (defensive -- pre-emphasis + parallel filter pair
+    // can ring residual DC across bypass-ramp transients).
+    {
+        const float R = mDcCoef;
+        for (int ch = 0; ch &lt; numCh; ++ch)
+        {
+            float* d = buffer.getWritePointer (ch);
+            float&amp; xPrev = (ch == 0) ? mDcXL : mDcXR;
+            float&amp; yPrev = (ch == 0) ? mDcYL : mDcYR;
+            for (int i = 0; i &lt; n; ++i)
+            {
+                const float in = d[i];
+                const float y  = in - xPrev + R * yPrev;
+                xPrev = in;
+                yPrev = y;
+                d[i]  = y;
+            }
+        }
+    }
+
+    // 5. Output level.
+    if (mLevel != 0.0f)
+        buffer.applyGain (juce::Decibels::decibelsToGain (mLevel, -60.0f));
+}</code></pre></details>
+<pre class="formulas">- Drive scalar: `drive = 1 + dist01 * 49` (up to ~50x, &quot;DS-1 max drive is ~+50 dB&quot;).
+- Clipper: hard clip `clamp(x * drive, -1, +1)` at 4x oversampling.
+- Pre-emphasis: high-shelf at 1 kHz, Q = 0.7071, gain = `12 dB * dist01` (unity at Dist=0, +12 dB at Dist=1) — &quot;tightening as the drive increases&quot;.
+- Tone: Big-Muff-style tilt EQ — parallel first-order LPF at 250 Hz + first-order HPF at 1 kHz, crossfaded `out = lpf*(1-t) + hpf*t`. At Tone=0.5 the equal sum produces a natural mid-scoop near 500 Hz (geometric mean of 250 Hz and 1 kHz) with no explicit notch filter.
+- DC blocker: `y[n] = x[n] - x[n-1] + R*y[n-1]`, `R = 1 - 2*pi*5/sr` (5 Hz).
+- Level knob range: -24..+12 dB.</pre>

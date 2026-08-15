@@ -130,7 +130,6 @@ private:
     // must not be retried on a clock forever.
     void changeListenerCallback (juce::ChangeBroadcaster*) override;
     void rebuildEditor();
-    void showPicker();
     void refreshNameMarker();
 
     BaySickDAWProcessor& mProcessor;
@@ -138,7 +137,6 @@ private:
     juce::String        mTabName;
     juce::Colour        mPageColor;
 
-    juce::TextButton mPickBtn { "Select plugin..." };
 
     // The plugin's own editor, or its dead marker.  Owned here because the page
     // is the thing on screen; the INSTANCE is owned by EngineRig.

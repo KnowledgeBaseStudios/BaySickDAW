@@ -1,0 +1,75 @@
+<p>Runs a stage at a multiple of the sample rate so that distortion products land
+above the audible range instead of folding back into it as harshness. Costs CPU
+in direct proportion.</p>
+
+<div class="codeblock"><div class="codehead">- Source\DSP\PolyphaseOversampler.h (98 lines, header-only)</div><pre><code>// PolyphaseOversampler4x::prepare() -- the locked construction args
+    void prepare (int numChannels, int maxBlockSize)
+    {
+        using OS = juce::dsp::Oversampling&lt;float&gt;;
+        // numStages=2 = two halving filter stages = 4x oversampling factor.
+        // filterHalfBandPolyphaseIIR is the cheap-and-clean default
+        // (matches BaySickNAMIRProcessor::rebuildOversampling).
+        // isMaxQuality=true leans toward fewer artifacts.
+        mOS = std::make_unique&lt;OS&gt; ((size_t) numChannels,
+                                    /*numStages*/ (size_t) 2,
+                                    OS::filterHalfBandPolyphaseIIR,
+                                    /*isMaxQuality*/ true);
+        mOS-&gt;initProcessing ((size_t) maxBlockSize);
+        mNumChannels = numChannels;
+    }</code></pre></div>
+<details class="fullfn"><summary>Full function &mdash; - Source\DSP\PolyphaseOversampler.h (98 lines, header-only)</summary><pre><code>    void prepare (int numChannels, int maxBlockSize)
+    {
+        using OS = juce::dsp::Oversampling&lt;float&gt;;
+        // numStages=2 = two halving filter stages = 4x oversampling factor.
+        // filterHalfBandPolyphaseIIR is the cheap-and-clean default
+        // (matches BaySickNAMIRProcessor::rebuildOversampling).
+        // isMaxQuality=true leans toward fewer artifacts.
+        mOS = std::make_unique&lt;OS&gt; ((size_t) numChannels,
+                                    /*numStages*/ (size_t) 2,
+                                    OS::filterHalfBandPolyphaseIIR,
+                                    /*isMaxQuality*/ true);
+        mOS-&gt;initProcessing ((size_t) maxBlockSize);
+        mNumChannels = numChannels;
+    }
+
+    void reset()
+    {
+        if (mOS) mOS-&gt;reset();
+    }
+
+    bool isPrepared() const noexcept { return mOS != nullptr; }
+
+    int  getNumChannels() const noexcept { return mNumChannels; }
+
+    // Round-trip latency (in 1x samples) introduced by the polyphase IIR
+    // chain.  Forward this from your DSPBase::getLatencySamples() so the
+    // host&#x27;s PDC sum is correct.
+    int getLatencySamples() const noexcept
+    {
+        if (! mOS) return 0;
+        return (int) std::round (mOS-&gt;getLatencyInSamples());
+    }
+
+    // Returns a 4x-sample-count block sharing channels with the input.
+    // The returned block is owned by the internal Oversampling&lt;float&gt; --
+    // do NOT outlive the next downsample() call.
+    juce::dsp::AudioBlock&lt;float&gt; upsample (juce::dsp::AudioBlock&lt;float&gt; in)
+    {
+        jassert (mOS != nullptr);
+        return mOS-&gt;processSamplesUp (in);
+    }
+
+    // Writes the downsampled result back into the original 1x block.  Caller
+    // passes the same 1x block they upsampled (or any compatible block).
+    void downsample (juce::dsp::AudioBlock&lt;float&gt; out)
+    {
+        jassert (mOS != nullptr);
+        mOS-&gt;processSamplesDown (out);
+    }</code></pre></details>
+<pre class="formulas">- Factor: 4x = `numStages = 2` halving stages (each stage doubles the rate).
+- Filter type: `juce::dsp::Oversampling&lt;float&gt;::filterHalfBandPolyphaseIIR` (half-band polyphase IIR), `isMaxQuality = true`.
+- Channels: 1 (mono, the common pedal case - non-linear stages run post-mono-sum) or 2 (stereo).
+- Latency: `round(mOS-&gt;getLatencyInSamples())` in 1x samples, forwarded through `DSPBase::getLatencySamples()` so EffectRack sums per-slot latency into `PluginProcessor::setLatencySamples` (PDC).
+- Buffer sizing: `initProcessing(maxBlockSize)`; the upsampled block is owned by the internal Oversampling object and must not outlive the next `downsample()` call.
+- Consumers: BaySickPedals drive/distortion/fuzz/fuzz-octave/multi-band drive; same args as BaySickNAMIR&#x27;s oversampling chain. (The separately-designed 4x polyphase FIR in TruePeakMeter is IMP-49.)</pre>
+<p class="behind"><b>Behind:</b> <a href="manual-2.html#BSNAM-10">OS chicken-head</a>.</p>

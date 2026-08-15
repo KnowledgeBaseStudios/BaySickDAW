@@ -110,18 +110,16 @@ BaySickVocalProcessor::createLayout()
     addF ("dereverb_mix",      "De-reverb Mix",        0.f,  100.f, 100.f);
 
     // H-2 (2026-05-01) -- Compressor stage params.  The compressor is a
-    // single CompressorDSP instance with the Type dropdown selecting the mode.
+    // single CompressorDSP instance with the new Type dropdown selecting
+    // between Modern (default), FET (1176-style), and Opto (LA-2A-style).
     // Knob set exposed in H-6's editor adapts to the active Type.
     //
-    // MF-9 (QA-Manuals 2026-08-11): this spanned 0..2 while the slot's Mode
-    // menu is built by the shared SlotComponent::showModeMenu, which offers all
-    // FOUR CompressorDSP modes with no chain-awareness.  Picking the fourth
-    // mounted its panel and then setValueNotifyingHost CLAMPED 3 to the top of
-    // the range (2), so applyChainParams pushed Opto back into the DSP on the
-    // very next block: the user saw a Pedal face driving an Opto compressor.
-    // CompressorDSP has always implemented Type::CS, so widening the range is
-    // what makes the pick the UI already offers actually play.
-    addI ("comp_type",       "Compressor Type",  0,    3,    0);   // 0=Modern, 1=FET, 2=Opto, 3=Pedal
+    // THREE MODES, DELIBERATELY (Jeff, 2026-08-11).  CompressorDSP also has
+    // Type::CS ("Pedal"), and the vocal chain does not get it -- a pedal
+    // sustainer is not part of a vocal chain.  Do not widen this range to 0..3
+    // to "fix" the fourth mode appearing in the menu; the menu is what was
+    // wrong, and SlotComponent::showModeMenu now omits Pedal on chain slots.
+    addI ("comp_type",       "Compressor Type",  0,    2,    0);   // 0=Modern, 1=FET, 2=Opto
     addF ("comp_threshold",  "Compressor Threshold dB", -60.f, 0.f, -12.f);
     // QA-F chain-wiring fix (2026-07-10): ratio + attack widened to the
     // CompressorPanel knob ranges (attachment range-sync; defaults kept).

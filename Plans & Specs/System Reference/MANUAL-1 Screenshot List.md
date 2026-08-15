@@ -188,7 +188,7 @@ once you use the app.
 
 **SHOT-021 — Help menu, open**
 - Reach: Click "Help".
-- Visible: four items, exact literals `Help Index  (F1)` (note the DOUBLE space before the parenthesis), `Key Binds...`, `Rusty Drums Map...`, separator, `About BaySickDAW v1.0`.
+- Visible: three items, exact literals `Help Index  (F1)` (note the DOUBLE space before the parenthesis), `Key Binds...`, separator, `About BaySickDAW v1.0`. (`Rusty Drums Map...` moved to the Rusty window's own Menu, 2026-08-13.)
 - **CORRECTED 2026-08-11 (QA-Manuals Task 1): "Help Index" is LIVE.** It was unwired from 2026-07-29 behind a `HOLD-FOR-MANUALS-WINDOW` marker; that marker is retired and `case 601` now calls `showManualsWindow()` (`StandaloneEditor.cpp:11785`, `:11968`, `:10028`). The window is a desktop `DocumentWindow` titled `BaySickDAW Manuals`, owned by the main window and re-fronted rather than duplicated. **F1 is live too, and was never wired to anything before** - `cmdShowManuals` (`0x1001b`) is a real rebindable command in the General category, labelled `Help Index` with the description `Open the BaySickDAW manuals. Same as Help > Help Index.` (`KeyBindings.cpp:88-91`). Do NOT repeat the retired line that said this item has no handler by design.
 
 ---
@@ -661,7 +661,7 @@ Perform several undoable actions before SHOT-102.
 - Variant of: SHOT-102
 
 **SHOT-104 — Rusty Drums Map window**
-- Reach: Help > Rusty Drums Map... (works with or without a Rusty tab open — it falls back to parsing the installed Big Rusty Drums kit).
+- Reach: Rusty window > Menu > Rusty Drums Map... The window itself works with or without a kit loaded — it falls back to parsing the installed Big Rusty Drums kit.
 - Visible: Resizable DocumentWindow "Rusty Drums Map" (640x600) with a 24px header and a four-column table — Key / MIDI / Sound / Articulation — alternating row stripes, one row per kit-native note (e.g. C3 / 36 / Kick / ...).
 - Why separate: A whole reference table reachable only from the Help menu; a reader will never find it unless the atlas shows it.
 
@@ -1371,7 +1371,16 @@ At least one sidechain cable routed to one strip.
 
 **SHOT-241 — Effects, Menu dropdown (rack presets + VU calibration)**
 - Reach: Ribbon > Effects > click "Menu" on the window title strip.
-- Visible: Save FX Rack Preset... / "Load FX Rack Preset" submenu (greyed when nothing is saved) / sep / Open Presets Folder / sep / "VU Calibration (0 VU = ...)" submenu with -18 through -14 dBFS and a tick on the current setting.
+- Visible: Save FX Rack Preset... / "Load FX Rack Preset" submenu (greyed when nothing is saved) / sep / Open Presets Folder / sep / "VU Calibration (0 VU = ...)" submenu with -18 through -14 dBFS and a tick on the current setting / "VU Meter".
+
+**SHOT-241b — VU Meter window**
+- Reach: Effects > Menu > "VU Meter".
+- Visible: A 180x200 window titled "VU Meter" holding one analog VU face reading the master output, with CURRENT and MAX readout boxes beneath the needle. Resizes diagonally only (ratio locked at 180:200) and caps at 290x320.
+- Why separate: The only VU in the app and the only ratio-locked window.
+
+**SHOT-241c — VU Meter window, Menu dropdown**
+- Reach: VU Meter window > click "Menu".
+- Visible: The "VU Calibration (0 VU = ...)" submenu alone, -18 through -14 dBFS with a tick on the current setting - the SAME app-wide value the Effects rack menu sets.
 
 **SHOT-242 — Effects, Save FX Rack Preset dialog**
 - Reach: Effects > Menu > Save FX Rack Preset...
@@ -1520,7 +1529,7 @@ sidechain routed to it and a strip with none.
 
 **SHOT-271 — Mode menu, Compressor**
 - Reach: Compressor effect window > Menu > "Mode: Modern...".
-- Visible: Modern (ticked), FET (Punchy), Opto (Smooth), Pedal (Sustain).
+- Visible: Modern (ticked), FET (Punchy), Opto (Smooth), Pedal (Sustain). On a VOCAL CHAIN slot the fourth row is absent - that menu is three items (Jeff, 2026-08-11: a pedal sustainer is not a vocal-chain compressor).
 
 **SHOT-272 — Mode menu, Saturation**
 - Reach: Saturation effect window > Menu > "Mode: Tube...".
@@ -3154,7 +3163,7 @@ bar on this page — the window Menu IS the navigation.**
 
 **SHOT-573 — Rusty Player tab, no program loaded**
 - Reach: Add a BaySickRustyDrums tab. It lands on the Player sub-tab automatically.
-- Visible: Title strip: "Menu" dropdown, Swing Mix knob, then right-side extras — a "Player Preset" button (110px) and the Program ComboBox (160px) showing its placeholder **"Load Player"**. Below: a 32px BaySickTitleBar band (0xFF141618 fill, 1px 0xFF333537 divider) with NO section tab buttons yet. Body: a dark 0xff1a1a1a rectangle with grey centred 16pt text **"Loading control surface..."** — this IS the empty state despite the wording.
+- Visible: Title strip: "Menu" dropdown, Swing Mix knob, then right-side extras — a "Presets" button (76px) and the Program ComboBox (80px) showing its placeholder **"Load Player"**. The widths matter: the strip centres "BaySickRustyDrums" in the span these leave, and at the old 110 + 160 the name rendered clipped. Below: a 32px BaySickTitleBar band (0xFF141618 fill, 1px 0xFF333537 divider) with NO section tab buttons yet. Body: a dark 0xff1a1a1a rectangle with grey centred 16pt text **"Loading control surface..."** — this IS the empty state despite the wording.
 
 **SHOT-574 — Rusty Player tab, Full program, Main section**
 - Reach: Set the Program dropdown on the title strip to "Full".
@@ -3263,17 +3272,17 @@ bar on this page — the window Menu IS the navigation.**
 - Why separate: A two-item list whose PLACEHOLDER wording matches neither item — exactly the kind of thing an atlas caption fixes.
 
 **SHOT-594 — Rusty Player Preset menu, empty**
-- Reach: Rusty window > click "Player Preset" on the title strip, with no presets saved.
+- Reach: Rusty window > click "Presets" on the title strip, with no presets saved.
 - Visible: "Save Player Preset As..." (enabled only when an engine exists), separator, a section header "Load Player Preset", then a disabled greyed "(no presets saved)".
 - Why separate: This is the SHIPPING state.
 
 **SHOT-595 — Rusty Player Preset menu, populated**
-- Reach: Save at least one player preset first, then click "Player Preset".
+- Reach: Save at least one player preset first, then click "Presets".
 - Visible: The same menu with the saved names listed under "Load Player Preset" (read from `Documents/BaySickDAW/Presets/Rusty Player/My Presets`).
 - Variant of: SHOT-594
 
 **SHOT-596 — Save Player Preset dialog**
-- Reach: Rusty window > "Player Preset" > "Save Player Preset As...".
+- Reach: Rusty window > "Presets" > "Save Player Preset As...".
 - Visible: AlertWindow "Save Player Preset", message "Enter a name for this player preset:", text editor pre-filled "My Rusty Player", Save / Cancel.
 
 **SHOT-597 — Switch Rusty Drums program confirm**
@@ -3726,18 +3735,18 @@ Analyze/Apply. Same badge-catching trick as Sitting 25.
 - Visible: The same shape — up to 10 recent IR filenames, "Clear recent", or a disabled "(no recent IRs)".
 - Variant of: SHOT-670
 
-**SHOT-672 — BaySickNAM/IR, Mic Sim A, mode None**
-- Reach: In the MIC SIM A column, set the "Mode" chicken-head to its first position ("Off").
-- Visible: Section label "MIC SIM A"; a "Mode" caption + 3-position chicken-head (Off / Bln / User); **the Model combo and the Load Mic IR button/label are both HIDDEN**; the "Mix" knob remains.
-- Why separate: Two controls vanish — the column looks half-empty and a reader needs to know why.
+**SHOT-672 — BaySickNAM/IR, Mic A column OFF (default)**
+- Reach: Look at the left half of the mic area with the "Mic A Active" switch in its up/OFF position — the default.
+- Visible: Section labels "MIC SIM A" and "MIC PLACEMENT A", the Mode dropdown, model combo, IR button/label, Mix knob, polar selector, Distance / Angle / Height / Mix knobs AND the mic picture — **ALL dimmed to 40% alpha and disabled**; the polar chicken-head drawn locked (it still shows tooltips). The OFF/ON "Mic A Active" switch sits in the MIC SIM A heading band, 60px in from the column's right edge.
+- Why separate: The panel's DEFAULT state is both mics off, so this is what the reader opens to.
 
 **SHOT-673 — BaySickNAM/IR, Mic Sim A, mode Built-in**
-- Reach: Set the MIC SIM A "Mode" chicken-head to its middle position ("Bln").
-- Visible: A "Model" caption + the 10-entry model dropdown appear in the slot; the Load Mic IR button and path label stay hidden; Mix knob at the right.
+- Reach: Switch Mic A Active ON, then set the MIC SIM A "Mode" dropdown to "Built-in" (the default).
+- Visible: A "Model" caption + the 10-entry model dropdown appear in the slot; the Load Mic IR button and path label stay hidden; Mix knob at the right. The Mode dropdown has TWO entries only — Built-in and User IR; the mic being off is the switch's job, not a Mode.
 - Variant of: SHOT-672
 
 **SHOT-674 — BaySickNAM/IR, Mic Sim A, mode User IR**
-- Reach: Set the MIC SIM A "Mode" chicken-head to its third position ("User").
+- Reach: Set the MIC SIM A "Mode" dropdown to "User IR".
 - Visible: The Model dropdown is REPLACED IN THE SAME RECTANGLE by a green LCD-style path label reading "(no IR loaded)" or a filename, with a "Load Mic IR..." button beneath it (right-clicking that button clears the IR).
 - Why separate: **The combo and the label occupy the SAME rectangle** — comparing the two shots is the only way to see that.
 - Variant of: SHOT-672
@@ -3749,12 +3758,17 @@ Analyze/Apply. Same badge-catching trick as Sitting 25.
 
 **SHOT-676 — BaySickNAM/IR, Mic Placement A column**
 - Reach: Look at the MIC PLACEMENT A section below MIC SIM A.
-- Visible: Section label "MIC PLACEMENT A"; a "Polar" caption + 5-position chicken-head (O / Card / Sup / Hyp / 8 = Omni / Cardioid / Supercardioid / Hypercardioid / Figure-8); three knobs Distance / Angle / Mix.
-- Why separate: Its own control group with a five-way selector whose bezel marks are abbreviations.
+- Visible: Section label "MIC PLACEMENT A"; a "Top"/"Side" view button on the heading row; a "Polar" caption + 5-position chicken-head (O / Card / Sup / Hyp / 8 = Omni / Cardioid / Supercardioid / Hypercardioid / Figure-8); four knobs Distance / Angle / Height / Mix; and below them the draggable mic picture, showing distance rings, the bright on-axis zone and the red proximity disc, with the readout "30 cm   0 deg" at its bottom-right and "TOP" at its bottom-left.
+- Why separate: Its own control group with a five-way selector whose bezel marks are abbreviations, plus the only draggable spatial control in the engine.
+
+**SHOT-676b — BaySickNAM/IR, mic picture in SIDE view**
+- Reach: Click the "Top" button on the MIC PLACEMENT A heading so it reads "Side".
+- Visible: The picture re-centres on the speaker face — cab drawn face-on with the cone in the middle, 10 cm height rings around it, and the readout gaining a third field ("30 cm   0 deg   0 cm H"), "SIDE" at the bottom-left. Dragging now sets Height and Angle; Distance stays on its knob. Each mic has its OWN view button, so A can be in Side while B is in Top.
+- Variant of: SHOT-676
 
 **SHOT-677 — BaySickNAM/IR, Mic B column OFF (default)**
 - Reach: Look at the right half of the mic area with the "Mic B Active" switch in its up/OFF position — the default.
-- Visible: MIC SIM B and MIC PLACEMENT B section labels, mode selector, model combo, IR button/label, Mix knob, polar selector, Distance / Angle / Mix knobs — **ALL dimmed to 40% alpha and disabled**; the two chicken-heads drawn locked (they still show tooltips). The OFF/ON "Mic B Active" switch sits at the top-right of the MIC SIM B header band.
+- Visible: MIC SIM B and MIC PLACEMENT B section labels, Mode dropdown, model combo, IR button/label, Mix knob, polar selector, Distance / Angle / Height / Mix knobs and the mic picture — **ALL dimmed to 40% alpha and disabled**; the polar chicken-head drawn locked (it still shows tooltips). The OFF/ON "Mic B Active" switch sits in the MIC SIM B heading band, 60px in from the column's right edge — the SAME offset as Mic A's.
 - Why separate: An entire dimmed half-panel; a beginner will read it as broken.
 
 **SHOT-678 — BaySickNAM/IR, Mic B column ON**

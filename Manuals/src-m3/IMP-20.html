@@ -1,0 +1,117 @@
+<p>Cascaded stages, tight and scooped.</p>
+
+<div class="codeblock"><div class="codehead">Source\DSP\HighGainStyleDSP.cpp</div><pre><code>// HighGainStyleDSP::process — cascading two-stage clip at 4x
+    // Drive scalar -- huge at MT-2 max (+60 dB).
+    const float drive = 1.0f + mDist * 999.0f;   // up to ~1000x
+    constexpr float kStage1Ceiling = 0.85f;
+    constexpr float kStage2Ceiling = 1.0f;
+
+    for (int ch = 0; ch &lt; upChs; ++ch)
+    {
+        float* d = upBlock.getChannelPointer ((size_t) ch);
+        for (int i = 0; i &lt; upN; ++i)
+        {
+            // Stage 1: clamp at 0.85 with a tiny tanh-shaped ramp into the
+            // ceiling so the wave doesn&#x27;t square off perfectly.
+            float x = d[i] * drive;
+            x = std::tanh (x * 1.2f) * kStage1Ceiling;
+
+            // Stage 2: hard clamp at +/-1.  Locks the wave fully square.
+            x = std::clamp (x, -kStage2Ceiling, kStage2Ceiling);
+
+            d[i] = x;
+        }
+    }</code></pre></div>
+<details class="fullfn"><summary>Full function &mdash; Source\DSP\HighGainStyleDSP.cpp</summary><pre><code>void HighGainStyleDSP::process (juce::AudioBuffer&lt;float&gt;&amp; buffer)
+{
+    if (bypassed) return;
+    juce::ScopedNoDenormals noDenormals;
+
+    const int numCh = buffer.getNumChannels();
+    const int n     = buffer.getNumSamples();
+    if (numCh == 0 || n == 0) return;
+
+    juce::dsp::AudioBlock&lt;float&gt; block (buffer);
+
+    // 1. Fixed mid-boost pre-clip (1x).
+    {
+        juce::dsp::ProcessContextReplacing&lt;float&gt; ctx (block);
+        mFixedMidBoost.process (ctx);
+    }
+
+    // 2 + 3. Upsample, cascading hard clip at 4x, downsample.
+    auto upBlock = mOs.upsample (block);
+    const int upN   = (int) upBlock.getNumSamples();
+    const int upChs = (int) upBlock.getNumChannels();
+
+    // Drive scalar -- huge at MT-2 max (+60 dB).
+    const float drive = 1.0f + mDist * 999.0f;   // up to ~1000x
+    constexpr float kStage1Ceiling = 0.85f;
+    constexpr float kStage2Ceiling = 1.0f;
+
+    for (int ch = 0; ch &lt; upChs; ++ch)
+    {
+        float* d = upBlock.getChannelPointer ((size_t) ch);
+        for (int i = 0; i &lt; upN; ++i)
+        {
+            // Stage 1: clamp at 0.85 with a tiny tanh-shaped ramp into the
+            // ceiling so the wave doesn&#x27;t square off perfectly.  Acts as
+            // the first transistor stage.
+            float x = d[i] * drive;
+            x = std::tanh (x * 1.2f) * kStage1Ceiling;
+
+            // Stage 2: hard clamp at +/-1.  Locks the wave fully square.
+            x = std::clamp (x, -kStage2Ceiling, kStage2Ceiling);
+
+            d[i] = x;
+        }
+    }
+    mOs.downsample (block);
+
+    // 4. Fixed post-clip gyrator boosts (~100 Hz + ~5 kHz); the V is the valley between.
+    {
+        juce::dsp::ProcessContextReplacing&lt;float&gt; ctx (block);
+        mFixedScoopLo.process (ctx);
+        mFixedScoopHi.process (ctx);
+    }
+
+    // 5. User 3-band EQ.
+    {
+        juce::dsp::ProcessContextReplacing&lt;float&gt; ctx (block);
+        mUserLowShelf .process (ctx);
+        mUserMidPeak  .process (ctx);
+        mUserHighShelf.process (ctx);
+    }
+
+    // 6. 5 Hz DC blocker (defensive -- 5 biquad stages can store tiny DC
+    // across bypass-ramp transients).
+    {
+        const float R = mDcCoef;
+        for (int ch = 0; ch &lt; numCh; ++ch)
+        {
+            float* d = buffer.getWritePointer (ch);
+            float&amp; xPrev = (ch == 0) ? mDcXL : mDcXR;
+            float&amp; yPrev = (ch == 0) ? mDcYL : mDcYR;
+            for (int i = 0; i &lt; n; ++i)
+            {
+                const float in = d[i];
+                const float y  = in - xPrev + R * yPrev;
+                xPrev = in;
+                yPrev = y;
+                d[i]  = y;
+            }
+        }
+    }
+
+    // 7. Output level.
+    if (mLevel != 0.0f)
+        buffer.applyGain (juce::Decibels::decibelsToGain (mLevel, -60.0f));
+}</code></pre></details>
+<pre class="formulas">- Drive scalar: `drive = 1 + dist01 * 999` (up to ~1000x, &quot;MT-2 max +60 dB&quot;).
+- Stage 1 (transistor stage): `x = tanh(x * drive * 1.2) * 0.85` — tanh ramp into a 0.85 ceiling so the wave doesn&#x27;t square off perfectly.
+- Stage 2: hard clamp at +/-1.0 — locks the wave fully square. Both stages at 4x oversampling.
+- Fixed pre-clip mid boost: peak filter 1 kHz, Q = 1.2, +36 dB (the &quot;metal honk&quot;; the downstream tanh/clamp bound it).
+- Fixed post-clip &quot;V&quot;: NOT a mid cut — two gyrator-style peak boosts: 100 Hz, Q = 6, +10 dB and 5 kHz, Q = 3, +10 dB; the scoop is the valley between them.
+- User 3-band EQ: low shelf 80 Hz Q 0.7071 (+/-15 dB), mid peak 200-5000 Hz Q 1.0 (+/-15 dB, default 800 Hz), high shelf 5 kHz Q 0.7071 (+/-15 dB).
+- DC blocker: `y[n] = x[n] - x[n-1] + R*y[n-1]`, `R = 1 - 2*pi*5/sr`.
+- Level knob range: -24..+12 dB.</pre>

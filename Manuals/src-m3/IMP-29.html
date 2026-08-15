@@ -1,0 +1,87 @@
+<p>Voiced for a piezo pickup.</p>
+
+<div class="codeblock"><div class="codehead">Source\DSP\AcousticPreampStyleDSP.cpp</div><pre><code>// AcousticPreampStyleDSP::process — adaptive macro map (Resonance is the CEILING)
+        const float k         = mResonance01;
+        const float quackDb   = -7.0f * juce::jmin (1.0f, k * 2.0f);
+        const float bodyDepth = k * (0.55f + 0.45f * level01);
+        const float bloom     = transient01 * k;
+        const float lowExtra  = juce::jmax (0.0f, k - 0.5f) * 2.0f;
+
+        const int   bodyIdx = juce::jlimit (0, 2, (int) mBody);
+        const auto&amp; v       = kVoicing[bodyIdx];
+        const float fcs[3]  = { v.air,  v.top,  v.body };
+        const float qbs[3]  = { v.airQ, v.topQ, v.bodQ };
+        const float modeDb[3] = {
+            (bodyDepth * (5.0f + 4.0f * lowExtra) + bloom * 2.0f) * v.airW,   // air
+            (bodyDepth * 4.5f                     + bloom * 3.0f) * v.topW,   // top (pick knock)
+            (bodyDepth * 3.5f                     + bloom * 1.5f) * v.bodW    // body
+        };
+        const float tiltDb = v.shelfDb * k;
+        const float peakDb = v.peakDb  * k;</code></pre></div>
+<details class="fullfn"><summary>Full function &mdash; Source\DSP\AcousticPreampStyleDSP.cpp</summary><pre><code>        // 2. Block-rate dynamics analysis (mono-summed peak).
+        float blockPeak = 0.0f;
+        for (int ch = 0; ch &lt; numCh; ++ch)
+        {
+            const float* p = buffer.getReadPointer (ch);
+            for (int i = 0; i &lt; n; ++i) blockPeak = juce::jmax (blockPeak, std::abs (p[i]));
+        }
+        // Fast: instant attack / ~80 ms release (pick transients).
+        // Slow: ~400 ms one-pole (playing level).
+        const float blockSec = (float) n / (float) mSampleRate;
+        const float fastRel  = std::exp (-blockSec / 0.080f);
+        const float slowCf   = 1.0f - std::exp (-blockSec / 0.400f);
+        mEnvFast  = juce::jmax (blockPeak, mEnvFast * fastRel);
+        mEnvSlow += slowCf * (blockPeak - mEnvSlow);
+
+        // Playing level mapped over -42..-10 dBFS; transient = fast-over-slow.
+        const float slowDb      = juce::Decibels::gainToDecibels (mEnvSlow, -60.0f);
+        const float level01     = juce::jlimit (0.0f, 1.0f, (slowDb + 42.0f) / 32.0f);
+        const float transient01 = juce::jlimit (0.0f, 1.0f,
+            (mEnvFast - mEnvSlow) / juce::jmax (mEnvSlow, 1.0e-4f) * 0.5f);
+
+        // 3. Macro map -- the Resonance knob is the CEILING of the adaptive depth.
+        const float k         = mResonance01;
+        const float quackDb   = -7.0f * juce::jmin (1.0f, k * 2.0f);
+        const float bodyDepth = k * (0.55f + 0.45f * level01);
+        const float bloom     = transient01 * k;
+        const float lowExtra  = juce::jmax (0.0f, k - 0.5f) * 2.0f;
+
+        const int   bodyIdx = juce::jlimit (0, 2, (int) mBody);
+        const auto&amp; v       = kVoicing[bodyIdx];
+        const float fcs[3]  = { v.air,  v.top,  v.body };
+        const float qbs[3]  = { v.airQ, v.topQ, v.bodQ };
+        const float modeDb[3] = {
+            (bodyDepth * (5.0f + 4.0f * lowExtra) + bloom * 2.0f) * v.airW,   // air
+            (bodyDepth * 4.5f                     + bloom * 3.0f) * v.topW,   // top (pick knock)
+            (bodyDepth * 3.5f                     + bloom * 1.5f) * v.bodW    // body
+        };
+        const float tiltDb = v.shelfDb * k;
+        const float peakDb = v.peakDb  * k;
+
+        // 4. CPU-guarded coef refresh (only on real movement / body switch).
+        const bool bodyChanged = (mCoefBody != bodyIdx);
+        for (int m = 0; m &lt; 3; ++m)
+        {
+            const float qEff = qbs[m] / (1.0f + 0.30f * transient01);   // transients widen
+            if (bodyChanged || std::abs (modeDb[m] - mAppliedModeDb[m]) &gt; 0.05f
+                            || std::abs (qEff     - mAppliedModeQ[m])  &gt; 0.02f)
+            {
+                makePeakCoefs (mModes[m], mSampleRate, fcs[m], qEff, modeDb[m]);
+                mAppliedModeDb[m] = modeDb[m];
+                mAppliedModeQ[m]  = qEff;
+            }
+        }
+        if (bodyChanged || std::abs (quackDb - mAppliedQuackDb) &gt; 0.05f)
+        {
+            makePeakCoefs (mDeQuack, mSampleRate, 2000.0f, 1.1f, quackDb);
+            mAppliedQuackDb = quackDb;
+        }</code></pre></details>
+<pre class="formulas">- Envelope followers (block rate): fast = instant attack, release `exp(-blockSec/0.080)` (~80 ms); slow one-pole `1 - exp(-blockSec/0.400)` (~400 ms). `level01` maps slow env over -42..-10 dBFS (`(slowDb+42)/32`); `transient01 = clamp((fast - slow)/slow * 0.5)`.
+- Macro map (k = Resonance knob, the ceiling): de-quack cut `-7 dB * min(1, 2k)` at 2 kHz Q 1.1 (fully in by noon); `bodyDepth = k * (0.55 + 0.45*level01)` (breathes 55-100% with level); `bloom = transient01 * k`; `lowExtra = max(0, k-0.5)*2` (air mode gains extra weight past noon = &quot;adds bass&quot;).
+- Mode gains: air `(bodyDepth*(5 + 4*lowExtra) + bloom*2) * airW`; top `(bodyDepth*4.5 + bloom*3) * topW`; body `(bodyDepth*3.5 + bloom*1.5) * bodW`. Transients widen the modes: `qEff = qBase / (1 + 0.30*transient01)`.
+- Broadband body voice scales with the knob only: low shelf `shelfDb * k` at shelfHz; peak `peakDb * k` at peakHz/peakQ (Dreadnought +4 dB @100/−3 @900; Parlor −6 @180/+6 @1100; Jumbo +8 @130/−4.5 @700).
+- Convolution wet/dry (base IR and User IR alike): `out = dry*(1 - 0.5*res) + wet*res` — gentle dry duck so the wet has room.
+- Ambience: Schroeder/Freeverb — 4 parallel combs (feedback 0.84, damping 0.5, Freeverb lengths scaled by sr/44100, R channel offset ~+23 samples for width) summed * 0.25, then 2 series allpasses; wet/dry `dry*(1-0.5*amb) + wet*amb`.
+- Notch: TPT bandpass Q = 10 at 50..1000 Hz SUBTRACTED from the signal (band-stop); last in chain for feedback rejection.
+- Level: -24..+12 dB output gain. RBJ formulas as excerpted (`A = 10^(dB/40)`, standard cookbook).</pre>
+<p class="behind"><b>Behind:</b> <a href="manual-2.html#BSPDLP-5">Time group</a>.</p>

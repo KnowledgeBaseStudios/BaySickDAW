@@ -1,0 +1,119 @@
+<p>Finds the pitch of a monophonic signal by autocorrelation. Decimated before
+analysis &mdash; running it at full rate costs far more and finds the same
+answer.</p>
+
+<div class="codeblock"><div class="codehead">- Source\DSP\PitchTrackerYIN.cpp (355 lines)</div><pre><code>// PitchTrackerYIN::pushAudio() -- audio-thread box-average decimation
+    if (mDecim &lt;= 1) { writeToFifo (mono, numSamples); return; }
+
+    // Box-average mDecim input samples into one analysis sample.  The partial
+    // sum carries across the block boundary in members, so the decimation
+    // phase is continuous and a short final block cannot splice the ring.
+    // Fixed stack chunk: no allocation on the audio thread.
+    constexpr int kChunk = 256;
+    float     out[kChunk];
+    int       outN = 0;
+    const float inv = 1.0f / (float) mDecim;
+
+    for (int i = 0; i &lt; numSamples; ++i)
+    {
+        mDecimSum += mono[i];
+        if (++mDecimCount &lt; mDecim) continue;
+
+        out[outN++] = mDecimSum * inv;
+        mDecimSum   = 0.0f;
+        mDecimCount = 0;
+
+        if (outN == kChunk) { writeToFifo (out, outN); outN = 0; }
+    }
+
+    if (outN &gt; 0) writeToFifo (out, outN);</code></pre></div>
+<details class="fullfn"><summary>Full function &mdash; - Source\DSP\PitchTrackerYIN.cpp (355 lines)</summary><pre><code>// PitchTrackerYIN::prepare()
+void PitchTrackerYIN::prepare (double sampleRate)
+{
+    if (mWorker != nullptr) releaseResources();
+
+    mSampleRate = (sampleRate &gt; 0.0) ? sampleRate : kReferenceSampleRate;
+
+    // Decimate to keep the analysis rate near the reference (see the header):
+    // the window is a duration, so a fixed sample count would walk every
+    // consumer&#x27;s low end upward with the rate -- but holding it by GROWING the
+    // window makes YIN&#x27;s O(W^2) search outrun real time at 96 kHz and above.
+    // Box-averaging instead holds the Hz floor AND the CPU flat: mDecim lands
+    // on 1 / 2 / 4 and mAnalysisRate on 44.1 or 48 kHz at every rate in the
+    // supported matrix, so mWorkWindow never exceeds its 48 kHz value.
+    mDecim        = juce::jmax (1, (int) std::lround (mSampleRate / kReferenceSampleRate));
+    mAnalysisRate = mSampleRate / (double) mDecim;
+
+    // Scaling the hop by the same factor keeps the published-pitch latency in
+    // milliseconds constant too.
+    const double scale = mAnalysisRate / kReferenceSampleRate;
+    mWorkWindow = juce::jmax (256, (int) std::lround ((double) mWindowSize * scale));
+    mWorkHop    = juce::jlimit (64, mWorkWindow,
+                                (int) std::lround ((double) mHopSize * scale));
+
+    // Ring capacity follows the working window.  Sized HERE, on the prepare
+    // thread with the worker stopped and audio suspended: AbstractFifo::
+    // setTotalSize is not thread-safe and pushAudio() must never allocate.
+    const int ringSize = juce::jmax (kRingBaseSize, mWorkWindow * 4);
+    if (ringSize != mFifo.getTotalSize())
+    {
+        mFifo.setTotalSize (ringSize);
+        mFifoBuf.resize ((size_t) ringSize, 0.0f);
+    }
+
+    reset();
+
+    mWorker = std::make_unique&lt;WorkerThread&gt; (*this);
+    mWorker-&gt;startThread (juce::Thread::Priority::low);
+}
+
+// WorkerThread::analyze()
+    void analyze (const float* window, int W) noexcept
+    {
+        // 1) Difference function over half the window.  The buffer is a member
+        // so the per-analysis allocation happens once: the window grows with
+        // the sample rate, and this fires every hop.
+        auto&amp; cmndf = mCmndf;
+        computeDifference (window, W, cmndf);
+
+        // 2) Cumulative Mean Normalized Difference Function (in-place).
+        computeCMNDF (cmndf);
+
+        // 3) tau range from min/max frequency at the ANALYSIS rate -- the ring
+        //    holds decimated samples, so the device rate would misreport tau.
+        const double sr = (owner.mAnalysisRate &gt; 0.0) ? owner.mAnalysisRate
+                                                      : kReferenceSampleRate;
+        const int tauMin = juce::jmax (2, (int) std::floor (sr / (double) kMaxFreqHz));
+        const int tauMax = juce::jmin ((int) cmndf.size() - 2,
+                                       (int) std::ceil  (sr / (double) kMinFreqHz));
+
+        // 4) Find first sub-threshold minimum.
+        const int tau = findFirstMinimum (cmndf, tauMin, tauMax, kYinThreshold);
+        if (tau &lt; 0)
+        {
+            // No pitch detected - silence, noise, or fully unpitched material.
+            owner.mFreqHz    .store (0.0f, std::memory_order_release);
+            owner.mConfidence.store (0.0f, std::memory_order_release);
+            return;
+        }
+
+        // 5) Parabolic interpolation for sub-sample period precision.
+        const float refinedTau = parabolicInterpolate (cmndf, tau);
+        const float freqHz     = (refinedTau &gt; 0.0f)
+                               ? (float) (sr / (double) refinedTau)
+                               : 0.0f;
+        const float confidence = juce::jlimit (0.0f, 1.0f,
+                                                1.0f - cmndf[(size_t) tau]);
+
+        owner.mFreqHz    .store (freqHz,     std::memory_order_release);
+        owner.mConfidence.store (confidence, std::memory_order_release);
+    }</code></pre></details>
+<pre class="formulas">- Window/hop (quoted at reference rate, per-instance): default 2048/512 (Octave / Synth / PitchCorrector); tuner uses 4096/1024; `kMaxWindowSize = 4096`; `kReferenceSampleRate = 44100.0`.
+- Thresholds/range: `kYinThreshold = 0.15` (CMNDF), `kMinFreqHz = 20`, `kMaxFreqHz = 4186` (C8); tau range `tauMin = max(2, floor(sr/maxHz))`, `tauMax = min(cmndf.size()-2, ceil(sr/minHz))` at the ANALYSIS rate. Lowest detectable freq = `analysisRate / (W/2)`: ~44 Hz for 2048, ~21.5 Hz for 4096 (5-string bass low B ~31 Hz).
+- Decimation: `mDecim = max(1, round(deviceSR / 44100))` -&gt; 1 at 44.1/48k, 2 at 88.2/96k, 4 at 176.4/192k; `analysisRate = deviceSR / mDecim` (always ~44.1/48k). Box average of mDecim samples, partial-sum carry across block boundaries; audio-thread chunk buffer 256 floats on the stack. Bit-identical at 44.1 kHz (path bypassed). Rationale: rate-scaled window at 192 kHz would cost ~456% of a core (O(W^2) vs linear hop) and a starved worker splices the rolling window -&gt; WRONG readings, not just late ones.
+- Latency: ~46 ms window + ~5 ms worker poll = ~50 ms, held at every rate (window and hop both scaled to analysis rate).
+- Confidence: `1 - cmndf[tau]`, clamped 0..1; unvoiced publishes 0 Hz / 0 confidence.
+- Parabolic refinement: `delta = (a - c) / (2*(a - 2b + c))` around the minimum bin.
+- Ring: `kRingBaseSize = kMaxWindowSize * 4 = 16384`; live size `max(kRingBaseSize, mWorkWindow*4)`; full ring drops the NEWEST samples (push skipped); worker pulls at most one hop per iteration, waits 5 ms when under a hop is ready; analysis fires when `totalIn &gt;= W &amp;&amp; sinceLast &gt;= H`.
+- Worker priority: `juce::Thread::Priority::low`.</pre>
+<p class="behind"><b>Behind:</b> <a href="manual-2.html#BSV-11">Live readout</a>.</p>

@@ -1707,6 +1707,13 @@ public:
     // project dirty bit - without it, VU calibration edits would only
     // persist if the user explicitly saved before exiting.
     static std::function<void()> sOnCalibrationChanged;
+
+    // ONE definition of the calibration submenu.  It is offered from the
+    // Effects rack menu AND from the VU window's own menu (Jeff, 2026-08-12);
+    // two hand-built copies of a five-item radio group would drift the moment
+    // the range or the wording changed.
+    static void addCalibrationSubMenu (juce::PopupMenu& parent);
+
     static float getCalibrationDb()      { return sCalibrationDb; }
     static void  setCalibrationDb(float db)
     {

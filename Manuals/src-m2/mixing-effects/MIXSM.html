@@ -1,0 +1,24 @@
+<p>The routing menu, opened from a strip's <code>+</code> button. This is
+where signal leaves the normal path: sends, sidechains, and where the strip's
+output actually lands. On Master the <code>+</code> opens the Analyzer
+instead, and strips whose output is locked omit the output rows
+entirely.</p>
+
+<figure data-views="MIXSM">
+
+<p id="MIXSM-1"><b>Send...</b> - taps a copy of the strip to an AUX strip
+(the shared-reverb workflow: one reverb on an aux, many strips sending to
+it). <code>New Aux Strip</code> inside creates the destination on the
+spot.</p>
+
+<p id="MIXSM-2"><b>Sidechain...</b> - feeds this strip's signal to another
+strip's sidechain receive, so a compressor over there can duck to this
+strip. The kick-ducks-the-bass move starts here, on the kick's strip.</p>
+
+<p id="MIXSM-3"><b>Move Output...</b> - re-aims the strip's main output at a
+different destination; <span id="MIXSM-4"></span><b>Add Main Out...</b>
+lets a strip feed MORE than one destination at once, and
+<span id="MIXSM-5"></span><b>Remove Main Out...</b> takes an extra one away
+- its list always shows line 0 greyed as
+<code>&lt;dest&gt;  (main output)</code>, because the primary output is
+moved, never removed.</p>

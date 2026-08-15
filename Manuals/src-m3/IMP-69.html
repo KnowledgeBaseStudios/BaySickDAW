@@ -1,0 +1,59 @@
+<p><b>One undo manager for the whole application</b>, and it lives on the
+processor. The editor holds a reference to it, not a second one. That is why
+<kbd>ctrl + Z</kbd> undoes the last thing you did anywhere rather than the last
+thing you did on the page you are looking at.</p>
+
+<p>Edits are typed actions carrying a before and after state. A structural change
+&mdash; a big arrangement edit, a pattern delete &mdash; is stored as an XML
+snapshot beside the project rather than in memory, which is what lets a
+thirty-block drag undo in a single press.</p>
+
+<p>Depth is a user setting: 100, 250, 500 or 1000 transactions.</p>
+
+<div class="codeblock"><div class="codehead">Source\Standalone\UndoActions.h (UndoContext, typed actions, StructuralOpAction)</div><pre><code>// StandaloneEditor.cpp -- history depth setup (verbatim, lines 751-757)
+    // History depth (Jeff ruling 2026-08-06, &quot;this one is required&quot;): the menu
+    // numbers are TRANSACTION counts now.  JUCE&#x27;s cap is unit-based and every
+    // action of ours exceeds the old (n, 30) unit budgets, so all four menu
+    // settings silently retained ~30 transactions.  maxUnits = 1 forces the
+    // unit test permanently over, making minimumTransactionsToKeep the exact
+    // retained count.
+    mUndoManager.setMaxNumberOfStoredUnits (1, 100);</code></pre></div>
+<details class="fullfn"><summary>Full function &mdash; Source\Standalone\UndoActions.h (UndoContext, typed actions, StructuralOpAction)</summary><pre><code>// UndoActions.h -- struct UndoContext (full struct, lines 17-46)
+struct UndoContext
+{
+    juce::UndoManager* manager { nullptr };
+
+    // Perform an undoable action. Takes ownership. Also updates the global
+    // history-label list maintained by StandaloneEditor.
+    std::function&lt;bool(juce::UndoableAction*, const juce::String&amp; label)&gt; perform;
+
+    // Undo / redo - ALWAYS use these instead of calling manager-&gt;undo/redo() directly.
+    // These route through StandaloneEditor::globalUndo/Redo() so mHistoryCursor stays
+    // in sync and the history window refreshes correctly.
+    std::function&lt;void()&gt; undo;
+    std::function&lt;void()&gt; redo;
+
+    // Open the global undo history window (optional - wire where available).
+    std::function&lt;void()&gt; showHistory;
+
+    // Jeff ruling 2026-08-06 (fix now): page-lifetime undo entries must
+    // survive delete + resurrect cycles.  Resurrection creates a NEW page
+    // object, so a SafePointer captured at gesture time goes null and the
+    // entry silently skips.  Apply lambdas resolve the LIVE page through
+    // this instead: it returns the CURRENT page owning this context&#x27;s
+    // identity (the editor derives kind + pageIndex from the ctx owner key),
+    // or nullptr while the tab is genuinely absent -- the history ORDER
+    // re-creates it before its rows replay.  Wired by
+    // StandaloneEditor::makeUndoContext; null on non-page contexts.
+    std::function&lt;juce::Component*()&gt; resolveOwnerPage;
+
+    bool isValid() const { return manager != nullptr &amp;&amp; (bool)perform; }
+};</code></pre></details>
+<pre class="formulas">- ONE app-wide `juce::UndoManager`, owned by the processor, threaded by EngineRig into every engine APVTS ctor (each stamped with an undoOwnerTag so a parameter transaction re-resolves to its target after the engine is destroyed and re-created). Pages hold only an `UndoContext` by value.
+- Depth trick: `setMaxNumberOfStoredUnits(1, N)` — maxUnits = 1 keeps JUCE&#x27;s unit test PERMANENTLY over, so `minimumTransactionsToKeep` (the second argument) IS the retained transaction count. Menu depths: 100 (default) / 250 / 500 / 1000 (menu ids 510-513). The old (n, 30) shape silently collapsed every setting to ~30 transactions.
+- Skip-first convention (PianoRollEditAction / PitchEditAction / StructuralOpAction): the edit is ALREADY applied before commitEdit calls `UndoManager::perform()`, so the first perform() is a no-op; redo works on subsequent calls. AutomationLaneEditAction does NOT skip (perform applies mAfter directly).
+- Action taxonomy (all full before/after snapshots): PianoRollEditAction (note vectors), PitchEditAction (pitch note regions), AutomationLaneEditAction (whole lane), PatternListAction (project slice {patterns, currentPattern, blocks, row state} — removePattern cascades re-indexing, a single-Pattern payload cannot restore it; TS-marker gestures bank a MarkerSetAction into the SAME transaction), StructuralOpAction (tab add/delete/duplicate, engine pick/swap, kit load — undo/redo lambdas + owned snapshot files). Arrangement edits snapshot blocks + row names + per-row group/color/mute/solo.
+- Structural XML snapshots: engine-state &quot;screenshots&quot; written to `Documents/BaySickDAW/UndoSnapshots/snap_&lt;millis&gt;_&lt;counter&gt;.xml`; OWNED by the StructuralOpAction (dtor deletes them) — the store is bounded by the history depth; whole folder swept at startup, project load, and exit (undo history never survives the session). Empty-File contract: an empty File = snapshot NOT on disk; destructive callers (deleteTabWithUndo) must ABORT and tell the user, or a delete becomes unrecoverable while the history still shows an undoable entry.
+- Page-lifetime resolution: apply lambdas resolve the LIVE page via `UndoContext::resolveOwnerPage` (editor derives kind + pageIndex from the ctx owner key) — a SafePointer captured at gesture time goes null after delete+resurrect; history ORDER re-creates the tab before its rows replay.
+- History labels rebuild FROM THE MANAGER via change messages (attachment gestures transact outside doUndoAction, so write-side appends could never stay truthful). Always route undo/redo through ctx.undo/ctx.redo (StandaloneEditor::globalUndo/Redo keeps mHistoryCursor in sync); never call manager-&gt;undo() directly.</pre>
+<p class="behind"><b>Behind:</b> <a href="manual-2.html#FRAME-4">Edit menu</a>, <a href="manual-2.html#BLD-1">Edit menu</a>, <a href="manual-2.html#BLD-10">Undo / Redo</a>, <a href="manual-2.html#BLD-18">Row name</a>, <a href="manual-2.html#BLD-19">The grid canvas</a>, <a href="manual-2.html#PR-4">Edit menu</a>, <a href="manual-2.html#PR-11">Undo / Redo</a>, <a href="manual-2.html#BSPIT-15">Undo / Redo</a>, <a href="manual-2.html#BSA-6">Undo / Redo</a>, <a href="manual-2.html#EVT-2">Edit menu</a>, <a href="manual-2.html#UNDO-1">&gt;&gt; Current</a>, <a href="manual-2.html#UNDO-2">A history entry</a>.</p>

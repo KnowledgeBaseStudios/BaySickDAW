@@ -1,0 +1,85 @@
+<p>Silences anything below a threshold. Hysteresis means it opens and closes at
+slightly different levels, so a signal hovering at the threshold does not
+chatter. Hold keeps it open briefly after the level drops; range sets how far
+down "closed" is, so it can duck rather than mute.</p>
+<div class="codeblock"><div class="codehead">Source/DSP/GateDSP.cpp, Source/DSP/GateDSP.h (kHystDb constant, defaults)</div><pre><code>// GateDSP::process -- detector, Schmitt hysteresis, hold countdown, range floor
+        mEnv = (peak &gt; mEnv) ? peak : peak + mDetCoef * (mEnv - peak);
+
+        if (mEnv &gt;= openLin)
+        {
+            mOpen = true;
+            mHoldRemain = mHoldSamples;
+        }
+        else if (mOpen &amp;&amp; mEnv &lt; closeLin)
+        {
+            if (mHoldRemain &gt; 0) --mHoldRemain;
+            else                 mOpen = false;
+        }
+
+        const float target = mOpen ? 1.0f : floorLin;
+        const float coef   = (target &gt; mGain) ? mAttCoef : mRelCoef;
+        mGain = target + coef * (mGain - target);</code></pre></div>
+<details class="fullfn"><summary>Full function &mdash; Source/DSP/GateDSP.cpp, Source/DSP/GateDSP.h (kHystDb constant, defaults)</summary><pre><code>// GateDSP::process -- complete
+void GateDSP::process (juce::AudioBuffer&lt;float&gt;&amp; buffer)
+{
+    if (bypassed) return;
+    juce::ScopedNoDenormals nd;
+    const int numCh = buffer.getNumChannels();
+    const int n     = buffer.getNumSamples();
+    if (numCh &lt;= 0 || n &lt;= 0) return;
+
+    const float openLin  = juce::Decibels::decibelsToGain (thresholdDb);
+    const float closeLin = juce::Decibels::decibelsToGain (thresholdDb - kHystDb);
+    const float floorLin = juce::Decibels::decibelsToGain (rangeDb);
+    float minGain = 1.0f;
+
+    for (int i = 0; i &lt; n; ++i)
+    {
+        float peak = 0.0f;
+        for (int ch = 0; ch &lt; numCh; ++ch)
+            peak = juce::jmax (peak, std::abs (buffer.getReadPointer (ch)[i]));
+        mEnv = (peak &gt; mEnv) ? peak : peak + mDetCoef * (mEnv - peak);
+
+        if (mEnv &gt;= openLin)
+        {
+            mOpen = true;
+            mHoldRemain = mHoldSamples;
+        }
+        else if (mOpen &amp;&amp; mEnv &lt; closeLin)
+        {
+            if (mHoldRemain &gt; 0) --mHoldRemain;
+            else                 mOpen = false;
+        }
+
+        const float target = mOpen ? 1.0f : floorLin;
+        const float coef   = (target &gt; mGain) ? mAttCoef : mRelCoef;
+        mGain = target + coef * (mGain - target);
+        minGain = juce::jmin (minGain, mGain);
+
+        for (int ch = 0; ch &lt; numCh; ++ch)
+            buffer.getWritePointer (ch)[i] *= mGain;
+    }
+
+    mGrDb.store (juce::Decibels::gainToDecibels (juce::jmax (1.0e-4f, minGain)),
+                 std::memory_order_relaxed);
+}
+
+// GateDSP::calcCoefs -- complete
+void GateDSP::calcCoefs()
+{
+    const double sr = juce::jmax (8000.0, mSampleRate);
+    auto onePole = [sr] (float ms)
+        { return (float) std::exp (-1.0 / (juce::jmax (0.01, (double) ms) * 0.001 * sr)); };
+    mAttCoef     = onePole (attackMs);
+    mRelCoef     = onePole (releaseMs);
+    mDetCoef     = onePole (5.0f);
+    mHoldSamples = (int) (holdMs * 0.001 * sr);
+}</code></pre></details>
+<pre class="formulas">- Detector: stereo-linked peak (`max |x|` across channels), instantaneous attack (`peak &gt; env` snaps env = peak), one-pole release with FIXED 5 ms time constant: `env = peak + detCoef*(env - peak)`, `detCoef = exp(-1/(0.005*sr))`.
+- Schmitt hysteresis: open threshold = thresholdDb (linear `10^(thr/20)`); close threshold = thresholdDb - kHystDb, with kHystDb = 3.0 dB. Gate opens the instant env &gt;= open level; it only begins closing once env drops below thr-3 dB.
+- Hold: crossing the open threshold reloads `mHoldSamples = holdMs * 0.001 * sr` (holdMs 0..500 ms, default 50); while below the close threshold the counter decrements once per sample; the gate closes only when it reaches zero.
+- Range: closed-gate floor gain = `10^(rangeDb/20)` (rangeDb -80..0 dB, default -60) - the gate attenuates to the floor, it never mutes below it.
+- Gain smoothing: one-pole toward target (1.0 open, floorLin closed): `gain = target + coef*(gain - target)`; coef from attackMs (0.1..100 ms, default 1) when rising, releaseMs (5..2000 ms, default 100) when falling; `coef = exp(-1/(ms*0.001*sr))`.
+- GR meter: `20*log10(max(1e-4, minGain of block))`, i.e. clamped at -80 dB.
+- Defaults are fully transparent: threshold -80 dB (at the floor), so existing projects hear no change.</pre>
+<p class="behind"><b>Behind:</b> <a href="manual-2.html#BSVC-3">Slot name</a>, <a href="manual-2.html#BSNAM-6">Gate Thr / Gate Rel</a>.</p>

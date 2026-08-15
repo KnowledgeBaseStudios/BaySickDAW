@@ -1,0 +1,121 @@
+<p>Square-wave collapse; interacts strongly with the pickup.</p>
+
+<div class="codeblock"><div class="codehead">Source\DSP\FuzzStyleDSP.cpp</div><pre><code>// FuzzStyleDSP::process — three shaper modes at 4x oversampling
+    const float drive = (1.0f + mFuzz * 49.0f) * juce::Decibels::decibelsToGain (mBoost);
+
+    switch (mMode)
+    {
+        case Mode::M:
+            // Bias-starved gated clip.
+            const float x = d[i] * drive;
+            d[i] = (x &gt;= 0.0f) ? std::min (x, 0.5f)
+                                : std::tanh (x * 0.7f) * 1.0f;
+        case Mode::F:
+            // Symmetrical soft tanh.  Warm germanium character.
+            d[i] = std::tanh (d[i] * drive);
+        case Mode::O:
+            // Octavia: full-wave rectify then hard clip.
+            const float r = std::abs (d[i]) * drive - 0.5f;
+            d[i] = std::clamp (r, -1.0f, 1.0f);
+    }</code></pre></div>
+<details class="fullfn"><summary>Full function &mdash; Source\DSP\FuzzStyleDSP.cpp</summary><pre><code>void FuzzStyleDSP::process (juce::AudioBuffer&lt;float&gt;&amp; buffer)
+{
+    if (bypassed) return;
+    juce::ScopedNoDenormals noDenormals;
+
+    const int numCh = buffer.getNumChannels();
+    const int n     = buffer.getNumSamples();
+    if (numCh == 0 || n == 0) return;
+
+    juce::dsp::AudioBlock&lt;float&gt; block (buffer);
+    auto upBlock = mOs.upsample (block);
+    const int upN   = (int) upBlock.getNumSamples();
+    const int upChs = (int) upBlock.getNumChannels();
+
+    // Drive scales by Fuzz (1..50), then the Boost knob pushes the input harder
+    // into the clipper (QA-EffectsReview Task 5).  Same range across all modes;
+    // the character difference is in the shaper, not the gain.
+    const float drive = (1.0f + mFuzz * 49.0f) * juce::Decibels::decibelsToGain (mBoost);
+
+    switch (mMode)
+    {
+        case Mode::M:
+        {
+            // Bias-starved gated clip.  Positive half clamps tight at +0.5
+            // (the &quot;starve&quot;) while negative half passes through tanh with
+            // a wider knee (the &quot;gated&quot; wasp character).
+            for (int ch = 0; ch &lt; upChs; ++ch)
+            {
+                float* d = upBlock.getChannelPointer ((size_t) ch);
+                for (int i = 0; i &lt; upN; ++i)
+                {
+                    const float x = d[i] * drive;
+                    d[i] = (x &gt;= 0.0f) ? std::min (x, 0.5f)
+                                        : std::tanh (x * 0.7f) * 1.0f;
+                }
+            }
+            break;
+        }
+        case Mode::F:
+        {
+            // Symmetrical soft tanh.  Warm germanium character.
+            for (int ch = 0; ch &lt; upChs; ++ch)
+            {
+                float* d = upBlock.getChannelPointer ((size_t) ch);
+                for (int i = 0; i &lt; upN; ++i)
+                    d[i] = std::tanh (d[i] * drive);
+            }
+            break;
+        }
+        case Mode::O:
+        {
+            // Octavia: full-wave rectify then hard clip.  |x| produces a
+            // doubled fundamental (the upper-octave artefact).  Shift back
+            // toward zero-mean by subtracting 0.5 so the rectified stream
+            // doesn&#x27;t sit on a positive DC pedestal.
+            for (int ch = 0; ch &lt; upChs; ++ch)
+            {
+                float* d = upBlock.getChannelPointer ((size_t) ch);
+                for (int i = 0; i &lt; upN; ++i)
+                {
+                    const float r = std::abs (d[i]) * drive - 0.5f;
+                    d[i] = std::clamp (r, -1.0f, 1.0f);
+                }
+            }
+            break;
+        }
+    }
+
+    mOs.downsample (block);
+
+    // 5 Hz DC blocker -- strips the static bias the asymmetric and rectifier
+    // shapers leave at silence.  Without this the Octavia mode emits ~-6 dB
+    // of DC at rest and bypass-toggle clicks heavily.
+    {
+        const float R = mDcCoef;
+        for (int ch = 0; ch &lt; numCh; ++ch)
+        {
+            float* d = buffer.getWritePointer (ch);
+            float&amp; xPrev = (ch == 0) ? mDcXL : mDcXR;
+            float&amp; yPrev = (ch == 0) ? mDcYL : mDcYR;
+            for (int i = 0; i &lt; n; ++i)
+            {
+                const float in = d[i];
+                const float y  = in - xPrev + R * yPrev;
+                xPrev = in;
+                yPrev = y;
+                d[i]  = y;
+            }
+        }
+    }
+
+    if (mLevel != 0.0f)
+        buffer.applyGain (juce::Decibels::decibelsToGain (mLevel, -60.0f));
+}</code></pre></details>
+<pre class="formulas">- Drive scalar: `drive = (1 + fuzz01 * 49) * dBtoGain(boostDb)`; Fuzz maps 1..50x, Boost knob is 0..+20 dB extra input push. Same gain range across all three modes; character difference lives in the shaper.
+- Mode M (bias-starved gated clip): positive half `min(x, 0.5)` (hard starve at +0.5); negative half `tanh(x * 0.7)` (wider knee) — the &quot;gated wasp&quot; character.
+- Mode F (germanium): symmetric `tanh(x * drive)`.
+- Mode O (Octavia): full-wave rectify + hard clip: `clamp(|x| * drive - 0.5, -1, +1)` — rectification doubles the fundamental (upper-octave artifact); the -0.5 recenters toward zero-mean.
+- All shaping at 4x oversampling.
+- DC blocker: `y[n] = x[n] - x[n-1] + R*y[n-1]`, `R = 1 - 2*pi*5/sr` (5 Hz); without it Octavia mode emits ~-6 dB of DC at rest.
+- Level knob range: -24..+12 dB; Boost range 0..+20 dB.</pre>

@@ -1,0 +1,137 @@
+<p>Compression with the low end protected.</p>
+
+<div class="codeblock"><div class="codehead">Source\DSP\BassCompressorStyleDSP.cpp</div><pre><code>// BassCompressorStyleDSP — squared-domain gain computer + per-band envelope
+inline float computeBandGain (float envSq, float threshSq, float ratio)
+{
+    if (envSq &lt;= threshSq || ratio &lt;= 1.0f) return 1.0f;
+    // env above threshold -&gt; apply (1 - 1/ratio) of the over-threshold dB
+    // back as gain reduction.
+    const float envDb     = 0.5f * juce::Decibels::gainToDecibels (envSq, -120.0f);
+    const float threshDb  = 0.5f * juce::Decibels::gainToDecibels (threshSq, -120.0f);
+    const float overDb    = envDb - threshDb;
+    const float reductDb  = -overDb * (1.0f - 1.0f / ratio);
+    return juce::Decibels::decibelsToGain (reductDb, -60.0f);
+}
+
+// per band, per sample:
+                const float xSq = d[i] * d[i];
+                // Asymmetric envelope: fast attack, slow release.
+                const float coef = (xSq &gt; env) ? mAttackCoef : mReleaseCoef;
+                env = coef * env + (1.0f - coef) * xSq;
+                const float g = computeBandGain (env, threshSq, effRatio);
+                d[i] *= g;</code></pre></div>
+<details class="fullfn"><summary>Full function &mdash; Source\DSP\BassCompressorStyleDSP.cpp</summary><pre><code>void BassCompressorStyleDSP::process (juce::AudioBuffer&lt;float&gt;&amp; buffer)
+{
+    if (bypassed) return;
+    juce::ScopedNoDenormals noDenormals;
+
+    const int numCh = buffer.getNumChannels();
+    const int n     = buffer.getNumSamples();
+    if (numCh == 0 || n == 0) return;
+
+    auto ensureSize = [n, numCh] (juce::AudioBuffer&lt;float&gt;&amp; b)
+    {
+        if (b.getNumChannels() &lt; numCh || b.getNumSamples() &lt; n)
+            b.setSize (numCh, n, false, false, true);
+    };
+    ensureSize (mLowBuf);
+    ensureSize (mMidBuf);
+    ensureSize (mHighBuf);
+
+    // Split: copy input into Low and Mid, then HP the Mid into High.
+    for (int ch = 0; ch &lt; numCh; ++ch)
+    {
+        mLowBuf.copyFrom (ch, 0, buffer, ch, 0, n);
+        mMidBuf.copyFrom (ch, 0, buffer, ch, 0, n);
+    }
+    {
+        juce::dsp::AudioBlock&lt;float&gt; lowBlk (mLowBuf);
+        auto sub = lowBlk.getSubBlock (0, (size_t) n).getSubsetChannelBlock (0, (size_t) numCh);
+        juce::dsp::ProcessContextReplacing&lt;float&gt; ctx (sub);
+        mXover1Lp.process (ctx);
+    }
+    {
+        juce::dsp::AudioBlock&lt;float&gt; midBlk (mMidBuf);
+        auto sub = midBlk.getSubBlock (0, (size_t) n).getSubsetChannelBlock (0, (size_t) numCh);
+        juce::dsp::ProcessContextReplacing&lt;float&gt; ctx (sub);
+        mXover1Hp.process (ctx);
+    }
+    for (int ch = 0; ch &lt; numCh; ++ch)
+        mHighBuf.copyFrom (ch, 0, mMidBuf, ch, 0, n);
+    {
+        juce::dsp::AudioBlock&lt;float&gt; midBlk (mMidBuf);
+        auto sub = midBlk.getSubBlock (0, (size_t) n).getSubsetChannelBlock (0, (size_t) numCh);
+        juce::dsp::ProcessContextReplacing&lt;float&gt; ctx (sub);
+        mXover2Lp.process (ctx);
+    }
+    {
+        juce::dsp::AudioBlock&lt;float&gt; highBlk (mHighBuf);
+        auto sub = highBlk.getSubBlock (0, (size_t) n).getSubsetChannelBlock (0, (size_t) numCh);
+        juce::dsp::ProcessContextReplacing&lt;float&gt; ctx (sub);
+        mXover2Hp.process (ctx);
+    }
+
+    // Discrete threshold + direct ratio (no macro).
+    const float threshLin   = juce::Decibels::decibelsToGain (mThresholdDb, -120.0f);
+    const float threshSq    = threshLin * threshLin;
+    const float effRatio    = mRatio;
+
+    // Per-band per-sample compress, then sum.  Track worst-case GR for the
+    // meter (most-negative value across bands and channels).
+    float worstGrDb = 0.0f;
+
+    auto compressBand = [&amp;] (juce::AudioBuffer&lt;float&gt;&amp; bandBuf, BandState&amp; st)
+    {
+        for (int ch = 0; ch &lt; numCh; ++ch)
+        {
+            float* d = bandBuf.getWritePointer (ch);
+            float&amp; env = (ch == 0) ? st.envL : st.envR;
+            for (int i = 0; i &lt; n; ++i)
+            {
+                const float xSq = d[i] * d[i];
+                // Asymmetric envelope: fast attack, slow release.
+                const float coef = (xSq &gt; env) ? mAttackCoef : mReleaseCoef;
+                env = coef * env + (1.0f - coef) * xSq;
+                const float g = computeBandGain (env, threshSq, effRatio);
+                d[i] *= g;
+                if (g &lt; 1.0f)
+                {
+                    const float grDb = juce::Decibels::gainToDecibels (g, -60.0f);
+                    if (grDb &lt; worstGrDb) worstGrDb = grDb;
+                }
+            }
+        }
+    };
+
+    compressBand (mLowBuf,  mLow);
+    compressBand (mMidBuf,  mMid);
+    compressBand (mHighBuf, mHigh);
+
+    // Sum bands back into buffer.
+    for (int ch = 0; ch &lt; numCh; ++ch)
+    {
+        const float* lo = mLowBuf .getReadPointer (ch);
+        const float* mi = mMidBuf .getReadPointer (ch);
+        const float* hi = mHighBuf.getReadPointer (ch);
+        float* out      = buffer.getWritePointer (ch);
+        for (int i = 0; i &lt; n; ++i)
+            out[i] = lo[i] + mi[i] + hi[i];
+    }
+
+    // Output level.
+    if (mLevel != 0.0f)
+        buffer.applyGain (juce::Decibels::decibelsToGain (mLevel, -60.0f));
+
+    // GR meter hold + decay (same pattern as CompressorDSP).
+    const float prevGr    = mGainReductionDb.load (std::memory_order_relaxed);
+    const float decayedGr = juce::jmin (0.0f, prevGr + mGrDecayDbPerBlock);
+    mGainReductionDb.store (juce::jmin (worstGrDb, decayedGr),
+                              std::memory_order_relaxed);
+}</code></pre></details>
+<pre class="formulas">- 3-band multiband: Linkwitz-Riley crossovers at 200 Hz and 2 kHz (Low &lt; 200 &lt; Mid &lt; 2000 &lt; High); split as LP@200 -&gt; Low, HP@200 then LP@2k -&gt; Mid, HP@200 then HP@2k -&gt; High; bands summed after compression.
+- Envelope: per-band per-channel squared-domain one-pole, fast attack fixed 10 ms, release = Release knob 50..500 ms; `env = c*env + (1-c)*x^2`.
+- Gain computer (over-threshold only): `overDb = envDb - threshDb` (with `envDb = 0.5 * gainToDb(envSq)` — the 0.5 converts squared-domain back to amplitude dB); `reductionDb = -overDb * (1 - 1/ratio)`; gain = dbToGain(reductionDb).
+- Threshold knob: -48..0 dB (all three bands share it); Ratio 1..10:1; Level -24..+12 dB.
+- GR meter: worst-case (most negative) reduction across bands and channels, hold with 30 dB/s decay.
+- Preset migration: old &quot;comp&quot; macro 0..1 maps to threshold `-6 - 30*comp` dB.</pre>
+<p class="behind"><b>Behind:</b> <a href="manual-2.html#BSPDLP-2">Dynamics group</a>.</p>

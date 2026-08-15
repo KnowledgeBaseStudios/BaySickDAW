@@ -19,7 +19,7 @@ system:
 
 | Manual | What it is | Source material |
 |---|---|---|
-| **Manual 1 - Visual Atlas** | Every screen pictured, every visible element numbered and named, so a reader can point at anything on screen and identify it. Its callouts footnote into Manual 2. | The 42 screenshots at `Plans & Specs/System Reference/Pictures/` + the element enumeration in `MANUAL-1 Screenshot List.md` |
+| **Manual 1 - Visual Atlas** | Every screen pictured, every visible element numbered and named, so a reader can point at anything on screen and identify it. Its callouts footnote into Manual 2. | The 56 screenshots at `Plans & Specs/System Reference/Pictures/` + the element enumeration in `MANUAL-1 Screenshot List.md` |
 | **Manual 2 - Music Technical Reference** | Every knob, button, slider and action, and what it does. Organized by page and engine. Its footnotes lead into Manual 3. | The 37-doc System Reference set (10,876 lines, ~1,900 control-table rows) |
 | **Manual 3 - Design Technical Document** | The implementation: DSP math, signal flow, architecture. | READ FROM THE CODE. See "The DSP Review trap" below. |
 
@@ -31,7 +31,10 @@ footnote anchors rather than shot ids, and state variants carried as insets and
 captions rather than as separate images. Jeff then shot that set, expanding it
 to 42 files where a screen has tabs or sections (BaySickSynth's six panel tabs,
 Rusty's seven section tabs, Pedals' two, EQ's two, Effects' three), and closed
-the capture with "I have all of them done now."
+the capture with "I have all of them done now."  **That 42 is history, not the
+live count** - the set went 42 -> 45 -> 53 -> 55 -> **56** as figures were
+replaced and gaps filled.  Every count in this document is 56; the number on
+disk is the number that governs.
 
 **`MANUAL-1 Screenshot List.md` is therefore NOT a live capture plan.** Its
 `SHOT-###` ids are retired. What it still is, and what it was correctly called
@@ -334,13 +337,16 @@ Per `feedback_no_docs_only_commit_fix_wrong_comments`, wrong comments get fixed:
 
 ## The cross-reference system
 
-Three id namespaces. Every id is assigned once, is append-only within its
-block, and is retired rather than reused. Nothing ever renumbers. Section
-numbers are NOT ids.
+Three id namespaces. Section numbers are NOT ids. Callout numbering is
+contiguous per screen - a removal renumbers the screen and every
+cross-reference mechanically in one pass, coordinates carried through the map.
+(The never-renumber wording that stood here until 2026-08-13 was a constraint
+Claude invented during planning, not something Jeff asked for; corrected when
+it left figures with dots starting at 2.) `IMP-<n>` ids do not renumber.
 
 ### Namespace 1 - callout ids (`<SCREEN>-<n>`), owned by Manual 1
 
-Each of the 42 images gets a short SCREEN CODE. Each numbered callout drawn on
+Each of the 56 images gets a short SCREEN CODE - one code per FILE, so the code count is the file count. Each numbered callout drawn on
 that image is `<SCREEN>-<n>`, e.g. `MIX-14`. This is the scheme Jeff described
 as the spine and the one already proposed and accepted on 2026-08-09.
 
@@ -364,8 +370,13 @@ Two rules keep ids unique without a 2,000-row registry:
   taught; other images cross-reference it (`see MIX-7`) rather than minting a
   second id.
 
-Expected total: roughly 1,100-1,500 callouts across 42 images, which covers the
-~1,900 System Reference control rows once repeats collapse.
+**Actual total: 593 callouts across 56 images** (Task 2, 2026-08-12).  The
+estimates this document carried before then - 1,100-1,500 against 42 images,
+then 1,450-1,950 against 55 - were both made BEFORE the two collapse rules were
+applied to real screens, and both were roughly double the truth: a mixer strip is
+22 callouts in total rather than 22 per strip times the strip count, and every
+window title strip resolves to `see CHR` instead of minting seven fresh ids per
+screen.
 
 ### Namespace 2 - Manual 2 sections
 
@@ -397,7 +408,7 @@ order without renumbering.
 
 | ID | Decision | Reasoning |
 |---|---|---|
-| SC-1 | Manual 1 is a set of ~42 densely annotated screens, NOT 723 shots | Jeff 2026-08-09. The 723-shot list is retired as a capture plan. |
+| SC-1 | Manual 1 is a set of ~56 densely annotated screens, NOT 723 shots | Jeff 2026-08-09. The 723-shot list is retired as a capture plan. |
 | SC-2 | `MANUAL-1 Screenshot List.md` is kept as the ELEMENT INVENTORY, and its `SHOT-###` ids are retired | It is the code-read enumeration of every visible element; that is the callout raw material. Retiring the ids avoids a dead second anchor namespace competing with the callout ids. |
 | SC-3 | Callout ids are `<SCREEN>-<n>`, assigned once, append-only, retire-never-reuse | Jeff 2026-08-09, the `MIX-14` scheme. |
 | SC-4 | Manual 3's formulas come from reading the code; `Files For Claude/DSP Review/` is not opened | Jeff 2026-08-08. Those specs predate the implementation. |
@@ -414,7 +425,7 @@ order without renumbering.
 
 ---
 
-## Figure set (45 images, all on disk)
+## Figure set (56 images, all on disk)
 
 Verified present in `Plans & Specs/System Reference/Pictures/` on 2026-08-11.
 The 42 originals with three replaced in place, plus three new. Filenames below
@@ -435,7 +446,13 @@ Screen codes for the four new figures: `FXM`, `ANLZ`, `ANLZM`, `SEND`.
 
 ### Gap-fill round (2026-08-11, SSC-9 answered)
 
-Jeff supplied eight more figures after the coverage pass. Final count **53**.
+Jeff supplied eight more figures after the coverage pass, taking it to 53.
+Two more landed on 2026-08-12 with the surfaces they picture: `VU Meter.png`
+(the master VU window) and `Effects Rack Menu.png` (the rack Menu, which gained
+a `VU Meter` entry next to VU Calibration).  Both still need screen codes -
+Task 2 assigns them.  `Effects Rack.png` followed on 2026-08-12 and took
+`FXI`, the code the plan had already reserved for the rack page.  **Count on
+disk: 56.**
 
 | File | Screen code | Covers |
 |---|---|---|
@@ -465,11 +482,17 @@ NAM-IR) and the Master Analyzer are all covered.
 **Uncovered surfaces are listed in the open-questions section below.** Jeff
 rules on which get a figure.
 
-Two filename notes carried from the recon, cosmetic only: `Vocai Chain.png` is
-`Vocal Chain` misspelled (the window title inside the image reads
-`Vox 1 - Vocal Chain`), and `BaySickRustyDrums Hi-Hat.png` /
-`Noises and Clicks.png` differ from the app's tab labels `Hi-hat` / `Noises`.
-Neither blocks anything; the manual uses the app's labels, not the filenames.
+Two filename notes carried from the recon:
+
+- `Vocai Chain.png` was `Vocal Chain` misspelled. **RESOLVED 2026-08-12** - Jeff
+  renamed it to `Vocal Chain.png`; nothing linked to the old path.
+- `BaySickRustyDrums Hi-Hat.png` / `Noises and Clicks.png` were recorded as
+  "differing from the app's tab labels `Hi-hat` / `Noises`". **That had it
+  backwards** (Jeff, 2026-08-12): those filenames are the names the ARIA PANEL
+  ITSELF prints - the Noises page's own heading reads `NOISES AND CLICKS` - and
+  our ribbon tab button is the abbreviation, not the authority.  Nothing to fix.
+  The manual can use either, but must not treat the tab label as the panel's
+  real name.
 
 ---
 
@@ -701,7 +724,7 @@ sentence inherits a correct source.
 
 ### Task 2 - Allocate every id and build the registry
 
-- [ ] Assign the 42 screen codes per the table above.
+- [ ] Assign the 56 screen codes per the table above.
 - [ ] Walk each image, enumerate its visible elements against the element
       inventory, and assign callout ids. Apply the within-image and
       across-image collapse rules.

@@ -1,0 +1,72 @@
+<p>BaySickAlign fixes timing between two takes. Record a double of your
+lead vocal, or a harmony, and it will never land exactly with the original -
+close, but flamming on the consonants. This editor picks one take as the
+<em>leader</em>, treats this channel's take as the <em>follower</em>, and
+stretches the follower in time until the two move together.</p>
+
+<figure data-cluster="Presets and status|1,2,17,18">
+
+<p id="BSA-1"><b>The preset picker</b> holds alignment setups
+(<code>Close-Align</code> for tight doubles is the everyday one);
+<span id="BSA-17"></span>the <b>green dot</b> beside it lights when you
+have edited away from the saved preset - unsaved-changes at a glance.
+<span id="BSA-2"></span><b>Save / Load</b> manage your own presets.
+<span id="BSA-18"></span><b>The status badge</b> tells you where the
+engine is: <code>ANALYZING...</code> while it studies the takes,
+<code>RE-ANALYZE</code> when your edits need a fresh pass,
+<code>RE-ANALYZE ON STOP</code> when it is waiting for playback to end.</p>
+
+<figure data-cluster="The working buttons|3,4,5,6">
+
+<p id="BSA-3"><b>Analyze/Apply</b> is the button that does the work:
+compare both takes, match them moment to moment, apply the stretch.
+Nothing changes until you press it.
+<span id="BSA-4"></span><b>Versions</b> keeps earlier results to fall back
+to; <span id="BSA-5"></span><b>Render</b> commits the aligned audio;
+<span id="BSA-6"></span><b>Undo / Redo</b> step the editor's history.</p>
+
+<figure data-cluster="The lanes|7,8,10,12">
+
+<p id="BSA-7"><b>The ruler</b> reads minutes and seconds, not bars -
+alignment is about physical time.</p>
+
+<p id="BSA-8"><b>LEADER</b> is the reference take - the one that stays
+put. <code>Pick Leader...</code> chooses which channel that is.
+<span id="BSA-10"></span><b>FOLLOWER</b> is this page's own take, the one
+being moved. <span id="BSA-12"></span><b>OUTPUT</b> previews the aligned
+result once an Analyze has run. All three lanes read
+<code>No clips on this channel yet</code> until there is audio.</p>
+
+<figure data-cluster="The two thin strips|9,11">
+
+<p id="BSA-9"><b>SYNC POINTS</b> looks like a divider line, but it is an
+editing surface: click and drag in it to pin a moment of the follower to a
+moment of the leader. Use it when the automatic match gets a phrase wrong
+- one pin usually snaps the whole phrase into place.</p>
+
+<p id="BSA-11"><b>PROTECTED</b> is the same idea in reverse: drag across a
+stretch to mark it leave-alone. The aligner will not touch anything inside
+it - for the ad-lib that is SUPPOSED to be loose.</p>
+
+<figure data-cluster="The two engines|13,14">
+
+<p id="BSA-13"><b>The ALIGN box</b> - the timing half. <code>ON</code>
+enables it, the mode picker (<code>Close</code>) chooses how aggressive
+the matching is, <code>Fine Tune</code> trims the result, and
+<code>Max Shift</code> caps how far any moment may be dragged
+(<code>No Limit</code> uncaps it - useful when takes are wildly off).</p>
+
+<p id="BSA-14"><b>The PITCH box</b> - alignment can carry pitch along too,
+so a double does not just land with the lead but bends with it.
+<code>ON</code>, the shifter engine picker, what the leader and follower
+each are (<code>Leader Type</code> / <code>Follower Type</code>), then
+<code>Blend</code> / <code>Variation</code> / <code>Transpose</code> /
+<code>Formant Shift</code> for how much of the leader's pitch contour the
+follower takes and how its character survives the ride.</p>
+
+<figure data-cluster="Views and zoom|15,16">
+
+<p id="BSA-15"><b>Wave / Pitch / Energy</b> switch what the lanes draw:
+the waveforms, the pitch curves, or the loudness contours - whichever
+makes the mismatch easiest to SEE for the material at hand.
+<span id="BSA-16"></span><b>- / +</b> zoom the timeline.</p>

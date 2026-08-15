@@ -1,0 +1,191 @@
+<p>Several delayed copies with slowly varying delay times. Detuning by variation
+rather than by pitch shifting is what makes it thicken without sounding out of
+tune.</p>
+
+<div class="codeblock"><div class="codehead">- Source/DSP/ChorusDSP.h</div><pre><code>// ChorusDSP::process (voice-sum core) + ChorusDSP::evalLFO
+// Voice model: 3 voices -&gt; 1 read per LFO; 6 voices -&gt; 2 reads per LFO (second read +pi)
+for (int v = 0; v &lt; numVoices; ++v)
+{
+    const int   lfoIdx  = v % 3;
+    // Second batch of 3 voices (6-voice mode) gets 180° extra phase
+    const float extraPh = (v &gt;= 3) ? juce::MathConstants&lt;float&gt;::pi : 0.0f;
+
+    const float phL = mLFOPhase[lfoIdx] + extraPh;
+    const float phR = phL + stereoRad;
+
+    const float lfoValL = evalLFO(lfoParams[lfoIdx].wave, phL);
+    const float lfoValR = evalLFO(lfoParams[lfoIdx].wave, phR);
+
+    // Per-voice base offset - each of the up-to-6 voices has a unique prime offset.
+    const float voiceBase = baseSamplesRaw + voicePrimeOffsetSamples[v];
+
+    // Read positions (write − delay), wrapped to [0, mBufSize)
+    float rposL = static_cast&lt;float&gt;(mWritePos) - (voiceBase + depthSamples * lfoValL);
+    float rposR = static_cast&lt;float&gt;(mWritePos) - (voiceBase + depthSamples * lfoValR);
+    rposL -= static_cast&lt;float&gt;(mBufSize) * std::floor(rposL / static_cast&lt;float&gt;(mBufSize));
+    rposR -= static_cast&lt;float&gt;(mBufSize) * std::floor(rposR / static_cast&lt;float&gt;(mBufSize));
+
+    sumL += cubicInterp(mBufL, rposL, mBufSize);
+    sumR += cubicInterp(mBufR, rposR, mBufSize);
+}</code></pre></div>
+<details class="fullfn"><summary>Full function &mdash; - Source/DSP/ChorusDSP.h</summary><pre><code>// ChorusDSP::evalLFO -- the four selectable LFO shapes
+float ChorusDSP::evalLFO (int wave, float phase)
+{
+    switch (wave)
+    {
+        case 0:  // Sine
+            return std::sin(phase);
+
+        case 1:  // Triangle  (2/π) * asin(sin(phase))
+            return (2.0f / juce::MathConstants&lt;float&gt;::pi) * std::asin(std::sin(phase));
+
+        case 2:  // Multi-sine  0.7*sin(φ) + 0.3*sin(3φ) - harmonic blend
+            return 0.7f * std::sin(phase) + 0.3f * std::sin(3.0f * phase);
+
+        case 3:  // Organic  sin(φ) + sin(0.37φ) - non-harmonic, slower secondary wobble
+        default:
+            return 0.5f * (std::sin(phase) + std::sin(0.37f * phase));
+    }
+}
+
+// ChorusDSP::process -- full per-sample loop
+void ChorusDSP::process (juce::AudioBuffer&lt;float&gt;&amp; buffer)
+{
+    if (bypassed) return;
+
+    juce::ScopedNoDenormals noDenormals;
+
+    const int numSamples  = buffer.getNumSamples();
+    const int numChannels = buffer.getNumChannels();
+    if (numSamples == 0 || numChannels &lt; 1 || mBufSize == 0) return;
+
+    const float visIn = visualCaptureIn (buffer);   // T18
+
+    float* L = buffer.getWritePointer(0);
+    float* R = (numChannels &gt; 1) ? buffer.getWritePointer(1) : nullptr;
+
+    const int   numVoices    = (voices &gt;= 6) ? 6 : 3;
+
+    // Pre-compute per-voice prime base-delay offsets in samples.
+    std::array&lt;float, 6&gt; voicePrimeOffsetSamples;
+    for (int v = 0; v &lt; 6; ++v)
+        voicePrimeOffsetSamples[v] = static_cast&lt;float&gt;(
+            kVoicePrimeOffsetMs[v] * 0.001 * mSampleRate);
+
+    // Pre-compute LFO increments per sample
+    std::array&lt;float, 3&gt; lfoInc;
+    for (int k = 0; k &lt; 3; ++k)
+        lfoInc[k] = static_cast&lt;float&gt;(
+            juce::MathConstants&lt;double&gt;::twoPi * lfoParams[k].freq / mSampleRate);
+
+    for (int i = 0; i &lt; numSamples; ++i)
+    {
+        // Pull smoothed values once per sample
+        const float curDelayMs  = mDelaySmoothed .getNextValue();
+        const float curDepthMs  = mDepthSmoothed .getNextValue();
+        const float curStereoDg = mStereoSmoothed.getNextValue();
+        const float curWet      = mWetSmoothed   .getNextValue();
+
+        const float depthSamples   = curDepthMs * 0.001f * (float) mSampleRate;
+        const float baseSamplesRaw = std::max(depthSamples + 2.0f,
+                                      curDelayMs * 0.001f * (float) mSampleRate);
+        const float stereoRad      = curStereoDg * (juce::MathConstants&lt;float&gt;::pi / 180.0f);
+
+        const float inL = L[i];
+        const float inR = R ? R[i] : inL;
+
+        // ── LR4 crossover ────────────────────────────────────────────────────
+        const float lpL = mXoLP.processSample(0, inL);
+        const float lpR = mXoLP.processSample(1, inR);
+        const float hpL = mXoHP.processSample(0, inL);
+        const float hpR = mXoHP.processSample(1, inR);
+
+        // Select which band gets chorused
+        float procL, procR, passL, passR;
+        if (crossType == 0)   // HP: chorus the high band
+        {
+            procL = hpL;  procR = hpR;
+            passL = lpL;  passR = lpR;
+        }
+        else                  // LP: chorus the low band
+        {
+            procL = lpL;  procR = lpR;
+            passL = hpL;  passR = hpR;
+        }
+
+        // Write processed band into shared delay buffer
+        mBufL[mWritePos] = procL;
+        mBufR[mWritePos] = procR;
+
+        // ── Sum chorused voices ──────────────────────────────────────────────
+        float sumL = 0.0f, sumR = 0.0f;
+
+        for (int v = 0; v &lt; numVoices; ++v)
+        {
+            const int   lfoIdx  = v % 3;
+            // Second batch of 3 voices (6-voice mode) gets 180° extra phase
+            const float extraPh = (v &gt;= 3) ? juce::MathConstants&lt;float&gt;::pi : 0.0f;
+
+            const float phL = mLFOPhase[lfoIdx] + extraPh;
+            const float phR = phL + stereoRad;
+
+            const float lfoValL = evalLFO(lfoParams[lfoIdx].wave, phL);
+            const float lfoValR = evalLFO(lfoParams[lfoIdx].wave, phR);
+
+            // Per-voice base offset - each of the up-to-6 voices has a unique prime offset.
+            const float voiceBase = baseSamplesRaw + voicePrimeOffsetSamples[v];
+
+            // Read positions (write − delay), wrapped to [0, mBufSize)
+            float rposL = static_cast&lt;float&gt;(mWritePos) - (voiceBase + depthSamples * lfoValL);
+            float rposR = static_cast&lt;float&gt;(mWritePos) - (voiceBase + depthSamples * lfoValR);
+            rposL -= static_cast&lt;float&gt;(mBufSize) * std::floor(rposL / static_cast&lt;float&gt;(mBufSize));
+            rposR -= static_cast&lt;float&gt;(mBufSize) * std::floor(rposR / static_cast&lt;float&gt;(mBufSize));
+
+            sumL += cubicInterp(mBufL, rposL, mBufSize);
+            sumR += cubicInterp(mBufR, rposR, mBufSize);
+        }
+
+        const float scale = 1.0f / static_cast&lt;float&gt;(numVoices);
+        sumL *= scale;
+        sumR *= scale;
+
+        // ── Mix ──────────────────────────────────────────────────────────────
+        // Normal: out = passBand + (1-wet)*procBandDry + wet*chorusedProcBand
+        // WetOnly: out = wet * chorusedProcBand (kills dry pass-band + dry proc-band)
+        if (wetOnly)
+        {
+            L[i] = curWet * sumL;
+            if (R) R[i] = curWet * sumR;
+        }
+        else
+        {
+            L[i] = passL + (1.0f - curWet) * procL + curWet * sumL;
+            if (R) R[i] = passR + (1.0f - curWet) * procR + curWet * sumR;
+        }
+
+        // ── Advance LFO phases ───────────────────────────────────────────────
+        for (int k = 0; k &lt; 3; ++k)
+        {
+            mLFOPhase[k] += lfoInc[k];
+            while (mLFOPhase[k] &gt;= juce::MathConstants&lt;float&gt;::twoPi)
+                mLFOPhase[k] -= juce::MathConstants&lt;float&gt;::twoPi;
+        }
+
+        mWritePos = (mWritePos + 1) % mBufSize;
+    }
+
+    visualPushInOut (buffer, visIn);   // T18
+}</code></pre></details>
+<pre class="formulas">- Voice count: `numVoices = (voices &gt;= 6) ? 6 : 3` — exactly two modes, 3 or 6 voices. Voice v uses LFO `v % 3`; voices 3..5 (6-voice mode only) add pi (180 deg) of extra LFO phase.
+- Per-voice prime base-delay offsets (ms): `kVoicePrimeOffsetMs[6] = { 0, 2, 5, 1, 3, 7 }`. 3-voice mode uses rows 0..2 (0/2/5 ms); 6-voice mode adds 1/3/7 ms for voices 3..5. Prime spacing keeps voices from collapsing onto the same delay center when LFOs align.
+- Read position per voice/channel: `rpos = writePos - (baseSamples + primeOffsetSamples[v] + depthSamples * lfoVal)`, wrapped mod bufSize; `baseSamples = max(depthSamples + 2, delayMs*0.001*sr)` so the modulated read never overtakes the write head.
+- Stereo spread: right-channel LFO phase = left phase + `stereo * pi/180` (0..360 deg, default 120 deg). Initial LFO phases are pre-spread at prepare: `mLFOPhase[k] = 2*pi*k/3`.
+- 3 independent LFOs, per-LFO freq 0.01..10 Hz (defaults 0.5 / 0.7 / 0.9 Hz) and per-LFO wave:
+  - 0 Sine: `sin(phi)`
+  - 1 Triangle: `(2/pi)*asin(sin(phi))`
+  - 2 Multi: `0.7*sin(phi) + 0.3*sin(3*phi)`
+  - 3 Organic: `0.5*(sin(phi) + sin(0.37*phi))` (non-harmonic secondary wobble)
+- Voice sum normalized by `1/numVoices`. Delay reads use 4-point Catmull-Rom cubic interpolation (`a = -0.5*y0 + 1.5*y1 - 1.5*y2 + 0.5*y3` etc.).
+- LR4 (Linkwitz-Riley 24 dB/oct) crossover splits the input; `crossType` 0 = chorus the high band (HP), 1 = chorus the low band (LP); the other band passes dry. Mix: `out = passBand + (1-wet)*procDry + wet*chorusSum`; wetOnly: `out = wet*chorusSum`.
+- Ranges/defaults: delay 0.5..30 ms (default 8), depth 0..20 ms (default 8), wet 0..1 (default 0.5), crossover cutoff 20 Hz..min(20 kHz, 0.45*sr) (default 800 Hz). Buffer sized `kMaxDelayMs = 64 ms` (= 30 base + 20 depth + 7 largest prime + safety). All continuous params ride 20 ms linear smoothers.</pre>
+<p class="behind"><b>Behind:</b> <a href="manual-2.html#FXPICK-3">Modulation group</a>.</p>

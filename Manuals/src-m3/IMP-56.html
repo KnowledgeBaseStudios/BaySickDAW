@@ -1,0 +1,5 @@
+<p>The audio thread writes analysis data and the UI reads it without either ever
+waiting for the other. If the UI catches a write in progress it drops that frame
+and takes the next one.</p>
+<p><b>Dropping a frame is the correct outcome.</b> A visual is worth exactly
+nothing compared to an audio dropout, so the design makes the visual lose.</p>

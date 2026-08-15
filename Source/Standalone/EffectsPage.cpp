@@ -1666,14 +1666,10 @@ void EffectsPage::buildTitleMenu (juce::PopupMenu& m)
     // VU calibration -- app-wide, and this was the old page's "Meters" button.
     // It moves into the menu rather than costing a button on a small window.
     m.addSeparator();
-    juce::PopupMenu calib;
-    for (int db = -18; db <= -14; ++db)
-    {
-        const bool isCurrent = (VUMeter::getCalibrationDb() == (float) db);
-        calib.addItem (juce::String (db) + " dBFS", true, isCurrent,
-                       [db] { VUMeter::setCalibrationDb ((float) db); });
-    }
-    m.addSubMenu ("VU Calibration (0 VU = ...)", calib);
+    VUMeter::addCalibrationSubMenu (m);
+
+    // The one VU in the app: master output, its own window (Jeff, 2026-08-11).
+    m.addItem ("VU Meter", [this] { if (onOpenVuMeter) onOpenVuMeter(); });
 
     juce::ignoreUnused (chId);
 }

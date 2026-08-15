@@ -1,0 +1,113 @@
+<p>Polyphonic means notes coexist; monophonic means a new note replaces the
+last; legato is mono without retriggering the envelopes when notes overlap,
+which is what makes slides read as one gesture. The bass defaults mono with
+a little glide, the synth defaults poly - same engine, different start.
+Note CUTTING is the related family: CUT SELF makes a retriggered note stop
+its own previous instance; SAME PITCH narrows that to identical notes
+(flipping to CUT ALL widens it back); and choke groups extend the idea
+ACROSS tabs - any tabs sharing a group number cut each other, which is how
+an open hi-hat dies when the closed one plays. All of it happens at note-on
+inside the engine's voice allocator, so cutting is sample-accurate rather
+than a fade layered on afterward.</p>
+
+<div class="codeblock"><div class="codehead">Source\BaySickSynth\BaySickSynthDSP.cpp (Poly/Mono/Legato branch + Cut Self dispatch; shared by BaySickBass)</div><pre><code>// BaySickSynthDSP::renderNextBlock (Cut Self dispatch, Poly branch)
+        // Cut Self (Poly): on each note-on, hard-cut the matching voice (Same Pitch)
+        // or every active voice (Cut All) BEFORE rendering, so the retrigger starts
+        // clean.  cutFast() is an instant ~1 ms click-free fade-out - NOT a MIDI
+        // note-off (which JUCE turns into an ADSR tail-off = the old bleed).  Runs
+        // only on note-on events; mVoices[] is cached (no dynamic_cast).
+        if (mCutSelf)
+        {
+            for (const auto meta : filtered)
+            {
+                const auto msg = meta.getMessage();
+                if (! msg.isNoteOn())
+                    continue;
+
+                const int n = msg.getNoteNumber();
+                for (int vi = 0; vi &lt; kNumVoices; ++vi)
+                    if (auto* v = mVoices[vi];
+                        v != nullptr &amp;&amp; v-&gt;isVoiceActive()
+                        &amp;&amp; (mCutAll || v-&gt;getCurrentlyPlayingNote() == n))
+                        v-&gt;cutFast();
+            }
+        }</code></pre></div>
+<details class="fullfn"><summary>Full function &mdash; Source\BaySickSynth\BaySickSynthDSP.cpp (Poly/Mono/Legato branch + Cut Self dispatch; shared by BaySickBass)</summary><pre><code>void BaySickSynthDSP::renderNextBlock (juce::AudioBuffer&lt;float&gt;&amp; buf,
+                                        juce::MidiBuffer&amp; midi)
+{
+    // The per-pitch note-off counter (poly branch below) is poly-only; keep it
+    // zeroed in the other modes so Poly always resumes from a clean state.
+    if (mVoiceMode != BssVoiceMode::Poly)
+        std::fill_n (mNoteOnCount, 128, 0);
+
+    if (mVoiceMode == BssVoiceMode::Legato)
+    {
+        handleLegatoMidi (midi);
+        // handleLegatoMidi leaves only non-note events in `midi` for the synth
+        // (noteOns/Offs were handled directly against mLegatoVoice).
+        mSynth.renderNextBlock (buf, midi, 0, buf.getNumSamples());
+        return;
+    }
+
+    if (mVoiceMode != BssVoiceMode::Poly)
+    {
+        // Mono: inject noteOff for previous note before each noteOn to enforce
+        // monophonic behaviour without changing voice count.  Every note is a
+        // fresh allocation, so every note re-articulates the envelopes -- that
+        // is the whole difference from Legato, which glides instead.
+        juce::MidiBuffer processed;
+
+        for (const auto meta : midi)
+        {
+            const auto msg = meta.getMessage();
+
+            if (msg.isNoteOn())
+            {
+                if (mLastMonoNote &gt;= 0)
+                {
+                    processed.addEvent (
+                        juce::MidiMessage::noteOff (msg.getChannel(), mLastMonoNote),
+                        meta.samplePosition);
+                }
+                mLastMonoNote = msg.getNoteNumber();
+                processed.addEvent (msg, meta.samplePosition);
+            }
+            else if (msg.isNoteOff())
+            {
+                if (msg.getNoteNumber() == mLastMonoNote)
+                    mLastMonoNote = -1;
+                processed.addEvent (msg, meta.samplePosition);
+            }
+            else
+            {
+                processed.addEvent (msg, meta.samplePosition);
+            }
+        }
+
+        mSynth.renderNextBlock (buf, processed, 0, buf.getNumSamples());
+    }
+    else
+    {
+        mLastMonoNote = -1;
+        mLegatoHeldNotes.clear();
+        mLegatoVoice     = nullptr;
+        mLegatoSynthNote = -1;
+
+        // [Poly per-pitch note-off strip: mNoteOnCount[128] counters hold an
+        //  earlier same-pitch note-off until the LAST overlapping note of that
+        //  pitch ends; counters zero when the synth is fully silent and on
+        //  CC-123 All-Notes-Off / CC-120 All-Sound-Off. ~40 lines elided.]
+
+        // [Cut Self dispatch -- see excerpt above.]
+
+        mSynth.renderNextBlock (buf, filtered, 0, buf.getNumSamples());
+    }
+}</code></pre></details>
+<pre class="formulas">- Voice modes: Poly = pass-through with per-pitch note-off counting; Mono = injected note-off for the previous note before each note-on (fresh allocation, envelopes re-articulate); Legato = one persistent voice (V0), `retargetLegato` changes pitch/glide with NO envelope retrigger, last-note priority via a held-notes stack.
+- Cut Self modes: `cutSelfMode` false = Same Pitch (cut only the voice playing the retriggered note), true = Cut All (cut every ringing voice). Synth engines default Same Pitch; BaySickPlayer defaults Cut All (drums).
+- BaySickSynth cut fade: linear, `fadeSamples = max(1, sr * 0.001)` (~1 ms), `gain -= 1/fadeSamples` per sample applied to final L/R (so the unison stack fades too); voice retires at gain &lt;= 0.
+- Harmless cut: amp ADSR release overridden to 0.0015 s (~1.5 ms) then `noteOff()`; params restored at next `startNote`.
+- BaySickPlayer cut: `initiateSteal()` = the same ~1.5 ms quick-release used by voice stealing, then `stopNote(0, true)`; Cut All = `mSynth.allNotesOff(0, false)`.
+- sfizz engines (Guitars/Basses/RustyDrums) cut at note-on via `mSfizz-&gt;noteOff(delay, n, 0)` per note (Same Pitch) or a 0..127 noteOff sweep (Cut All) -- see IMP-89 excerpt.
+- Choke groups: per-insert APVTS param `&lt;prefix&gt;_chokeGroup` (0 = none, 1..16); at any note-on (or audio-clip start) in group G, every OTHER insert in group G gets `allNotesOff(1)` injected at the same sample position; audio-clip peers set `mutedByChoke = true`.</pre>
+<p class="behind"><b>Behind:</b> <a href="manual-2.html#BSHARM-1">OUTPUT section</a>, <a href="manual-2.html#BSSBOSC-10">VOICE MODE</a>, <a href="manual-2.html#BSSBOSC-11">CUT SELF</a>, <a href="manual-2.html#BSSBOSC-12">SAME PITCH; the face flips to CUT ALL whil...</a>, <a href="manual-2.html#BSSBOSC-13">SLIDE</a>, <a href="manual-2.html#BSGTR-3">CUT SELF</a>, <a href="manual-2.html#BSGTR-4">SAME PITCH; the face flips to CUT ALL whil...</a>, <a href="manual-2.html#BSBAS-3">Mono / Preroll</a>, <a href="manual-2.html#BSBAS-9">CUT SELF</a>, <a href="manual-2.html#BSBAS-10">SAME PITCH</a>, <a href="manual-2.html#BSSBM-6">Polyphony: Polyphonic / Monophonic</a>.</p>

@@ -1,0 +1,45 @@
+<p>The Event Editor (F12) - where automation curves are drawn. Point it at
+any automatable control and shape how that control moves over the song.</p>
+
+<figure data-views="EVT">
+
+<p id="EVT-1"><b>The menus</b> - <b>File</b>, <span id="EVT-2"></span>
+<b>Edit</b>, <span id="EVT-3"></span><b>Tools</b> and
+<span id="EVT-4"></span><b>View</b> - carry the editor's file, edit and
+view operations, <span id="EVT-5"></span>with <b>Target Control</b>
+re-pointing the editor at a different control and
+<span id="EVT-6"></span><b>Import MIDI</b> bringing controller data in as
+a curve.</p>
+
+<p id="EVT-7"><b>The target label</b> names what you are editing in plain
+words - <code>mixer master fader</code> - so there is never a question of
+whose curve this is.</p>
+
+<p id="EVT-8"><b>Auto / LFO.</b> Two kinds of source: a drawn curve, or a
+generated wobble. In LFO mode the top row gains
+<b>Min / Max / Rate</b> knobs - the wobble's floor, ceiling and speed -
+instead of hand-drawn points.</p>
+
+<p id="EVT-9"><b>New Automation Clip</b> starts a fresh clip on this
+target; <span id="EVT-16"></span><b>the Automation Clips list</b> shows
+every clip the target has, click to load one into the canvas.
+A clip whose target control was deleted washes
+red with a <code>[stale]</code> prefix - it still holds its data, but
+nothing consumes it.</p>
+
+<p id="EVT-10"><b>Snap</b> grids your points (<code>1/16</code> and the
+rest); <span id="EVT-11"></span><b>the value readout</b> and
+<span id="EVT-15"></span><b>the status line</b>
+(<code>Beat 0.97   0.997</code>) track position and value under the
+cursor.</p>
+
+<p id="EVT-12"><b>The canvas</b> is the curve itself - 0.00 to 1.00 over
+SONG time, bar by bar. (A Harmless mod curve looks similar but runs per
+note; this one runs over the song.)
+<span id="EVT-13"></span><b>Control points</b> are the circles you drag;
+<span id="EVT-14"></span><b>the tool row</b> - <code>D</code>raw,
+<code>P</code>aint, <code>E</code>rase, <code>I</code>nterpolate,
+<code>S</code>elect, <code>Z</code>oom - picks what the mouse does.</p>
+
+<p>The editor's mouse gestures and keys are listed on the Key Binds
+window's <code>Event Editor</code> tab, in the Help menu.</p>

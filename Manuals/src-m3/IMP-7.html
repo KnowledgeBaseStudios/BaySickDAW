@@ -1,0 +1,170 @@
+<p>Gentler colouring, in Console, Tape and Tube characters. The Tape mode carries
+the <b>Vibe</b> knob &mdash; the one deliberately kept name from an earlier name
+for the app.</p>
+
+<div class="codeblock"><div class="codehead">Source/DSP/SaturationDSP.cpp (all three engine bodies), Source/DSP/SaturationDSP.h (tapeAsymShaper)</div><pre><code>// SaturationDSP::processConsole -- Clean (SSL-style) voicing core
+        const float driveAmount = 1.0f + drive * 0.60f;          // 1.0..7.0
+        const float bias  = colorOn ? color * 0.07f : 0.0f;      // 0..0.7
+        const float sb    = std::tanh (bias);
+        const float sech2 = 1.0f - sb * sb;                      // sech^2 = 1 - tanh^2
+        return (std::tanh (x * driveAmount + bias) - sb) / (driveAmount * sech2);
+
+// SaturationDSP::processTube -- Flowers/Dabs shaper core (Type B shown)
+    const float flowers_out = flowersActive ? std::tanh (flowers * x) : 0.0f;
+                const float t    = std::tanh (dabs * x);
+                const float sign = (t &gt;= 0.0f) ? 1.0f : -1.0f;
+                dabs_out = sign * std::cbrt (t * t);
+
+// SaturationDSP::tapeAsymShaper (SaturationDSP.h) -- the Tape Vibe waveshaper
+    static float tapeAsymShaper (float x, float k) noexcept
+    {
+        const float sgn = (x &gt;= 0.0f) ? 1.0f : -1.0f;
+        return (x + k * x * x * sgn) / (1.0f + std::abs (x));
+    }
+
+// SaturationDSP::processTape -- Phase 2 inner loop: Vibe drives k, hysteresis integrates
+            const float x        = up[osN];
+            const float biasedX  = x + (biasNow - 5.0f) * 0.02f;
+            const float k        = 0.3f * vibeNow;
+            const float shaped   = tapeAsymShaper (biasedX, k);
+            hyst += alphaNow * (shaped - hyst);
+            up[osN] = hyst;</code></pre></div>
+<details class="fullfn"><summary>Full function &mdash; Source/DSP/SaturationDSP.cpp (all three engine bodies), Source/DSP/SaturationDSP.h (tapeAsymShaper)</summary><pre><code>// SaturationDSP::processConsole -- complete
+float SaturationDSP::processConsole (float x, float drive, float color,
+                                       bool colorOn, bool dirty, bool isLow) noexcept
+{
+    // Color = an asymmetric input bias -&gt; even (2nd) harmonics.  The tanh(bias)
+    // subtraction removes the operating-point DC and the sech^2(bias) slope
+    // normalization holds low-level gain at unity, so Color changes harmonic
+    // CONTENT not loudness, and it ramps continuously from bias=0 (no on-
+    // threshold step -&gt; no click).  bias=0 collapses to the plain soft-clip.
+    // (Same gain-compensated asymmetric-shaper approach as the Opto warmth.)
+    // Drive/bias coefficients are ear-calibration starting points.
+    if (! dirty)
+    {
+        // Clean (SSL-style): transparent soft-clip; Drive saturates at normal
+        // levels, output-compensated so enable doesn&#x27;t jump the loudness.
+        const float driveAmount = 1.0f + drive * 0.60f;          // 1.0..7.0
+        const float bias  = colorOn ? color * 0.07f : 0.0f;      // 0..0.7
+        const float sb    = std::tanh (bias);
+        const float sech2 = 1.0f - sb * sb;                      // sech^2 = 1 - tanh^2
+        return (std::tanh (x * driveAmount + bias) - sb) / (driveAmount * sech2);
+    }
+
+    // Dirty (Neve-style): low-frequency-weighted saturation -- the low band is
+    // driven much harder than the high (transformer LF saturation), with a
+    // slightly stronger even-harmonic Color.  Still unity at low level.
+    const float bandDrive   = isLow ? 2.2f : 0.8f;
+    const float driveAmount = (1.0f + drive * 0.60f) * bandDrive;
+    const float bias  = colorOn ? color * 0.08f : 0.0f;          // 0..0.8
+    const float sb    = std::tanh (bias);
+    const float sech2 = 1.0f - sb * sb;
+    return (std::tanh (x * driveAmount + bias) - sb) / (driveAmount * sech2);
+}
+
+// SaturationDSP::processTube -- complete
+float SaturationDSP::processTube (float x, float flowers, float dabs,
+                                   int tubeType, bool transformer) noexcept
+{
+    const bool flowersActive = (flowers &gt; 0.001f);
+    const bool dabsActive    = (dabs    &gt; 0.001f);
+
+    if (!flowersActive &amp;&amp; !dabsActive &amp;&amp; !transformer)
+        return x;
+
+    // Flowers - tanh even harmonics.
+    const float flowers_out = flowersActive ? std::tanh (flowers * x) : 0.0f;
+
+    // Dabs - type-dependent odd/even shapers.
+    float dabs_out = 0.0f;
+    if (dabsActive)
+    {
+        switch (tubeType)
+        {
+            case 0: // Type A - atan + cubic
+            {
+                const float a = std::atan (dabs * x) / juce::MathConstants&lt;float&gt;::halfPi;
+                dabs_out = a + 0.15f * (x * x * x);
+                break;
+            }
+            case 1: // Type B - sign(tanh) * |tanh|^(2/3)
+                    // A7: cbrt(t*t) is mathematically identical to |t|^(2/3) but ~3x faster.
+            {
+                const float t    = std::tanh (dabs * x);
+                const float sign = (t &gt;= 0.0f) ? 1.0f : -1.0f;
+                dabs_out = sign * std::cbrt (t * t);
+                break;
+            }
+            case 2: // Type C - x/(1+|d*x|) foldback
+            {
+                dabs_out = x / (1.0f + std::abs (dabs * x));
+                break;
+            }
+            default:
+                dabs_out = x;
+                break;
+        }
+    }
+
+    float out = flowers_out + dabs_out;
+
+    if (transformer)
+        out += 0.005f * std::tanh (8.0f * x);
+
+    return out;
+}
+
+// Hysteresis alpha helper (file-scope namespace) -- complete
+    // Hysteresis alpha (per-sample integrator coef for `y += alpha * (shaped - y)`).
+    // Spec at base rate: alpha_base = 0.2 + 0.8 * tapeSpeed.  HystAmount scales the
+    // memory: 0 = bypass (alpha=1), 1 = spec, 2 = strong.  Result is divided by
+    // the OS factor so cutoff stays constant regardless of OS factor (10c spec).
+    inline float computeTapeHystAlpha (float tapeSpeed, float hystAmount, int osFactor) noexcept
+    {
+        if (hystAmount &lt;= 0.001f) return 1.0f;
+        const float alphaBase   = 0.2f + 0.8f * juce::jlimit (0.0f, 1.0f, tapeSpeed);
+        const float alphaScaled = alphaBase / juce::jmax (0.01f, hystAmount);
+        return juce::jlimit (0.001f, 1.0f,
+                             alphaScaled / (float) juce::jmax (1, osFactor));
+    }
+
+// SaturationDSP::processTape -- Phase 2: oversampled shaper + hysteresis
+// (Phase 1 input gain + 5 kHz pre-emphasis, Phase 3 de-emphasis + wow/flutter
+// delay modulation + hiss + DC blocker + output gain, and the cassette-IR
+// convolution are elided.)
+    for (int ch = 0; ch &lt; numChOS; ++ch)
+    {
+        float* up = upBlock.getChannelPointer ((size_t) ch);
+        float&amp; hyst = (ch == 0) ? mTapeHystL : mTapeHystR;
+        for (int osN = 0; osN &lt; upN; ++osN)
+        {
+            const int   baseIdx  = osN / kOsNow;
+            const float vibeNow  = mTapeVibeScr[(size_t) baseIdx];
+            const float biasNow  = mTapeBiasScr[(size_t) baseIdx];
+            const float alphaNow = mTapeHystAlphaOSScr[(size_t) baseIdx];
+
+            const float x        = up[osN];
+            const float biasedX  = x + (biasNow - 5.0f) * 0.02f;
+            const float k        = 0.3f * vibeNow;
+            const float shaped   = tapeAsymShaper (biasedX, k);
+            hyst += alphaNow * (shaped - hyst);
+            up[osN] = hyst;
+        }
+    }
+    mOversampler-&gt;processSamplesDown (bandBlock);</code></pre></details>
+<pre class="formulas">Shared chain (Tube + Console body): input gain (Sensitivity -12..+12 dB) -&gt; 10 kHz pre-tone shelf -&gt; oversample (2^osLog2, default 4x) -&gt; 350 Hz one-pole LP band split AT THE OS RATE (`coef = exp(-2*pi*350/srOS)`) -&gt; per-band shaper -&gt; Bass Relief blends dry low back in (`low_out = relief*low + (1-relief)*low_proc`, relief 0..1) -&gt; downsample -&gt; 5 Hz DC blocker (`R = 1 - 2*pi*5/sr`) -&gt; 10 kHz post-tone shelf -&gt; wet/dry -&gt; out gain (with optional AutoGain = 1/sensGain).
+
+Console:
+- Clean (SSL-style): `driveAmount = 1 + 0.6*drive` (drive = Flowers knob 0..10 =&gt; 1..7); Color bias = `color*0.07` (color = Dabs knob 0..10 =&gt; bias 0..0.7); `y = (tanh(x*driveAmount + bias) - tanh(bias)) / (driveAmount * sech^2(bias))` where `sech^2 = 1 - tanh^2` - unity low-level gain, Color adds 2nd harmonic without a loudness jump.
+- Dirty (Neve-style): same form with `driveAmount` multiplied by bandDrive = 2.2 (low band) / 0.8 (high band) - transformer LF saturation; bias = `color*0.08`; Bass Relief is forced to 0 (the driven low dominates). Plus an LF &quot;bloom&quot;: one-pole low shelf ~90 Hz, +3.5 dB add-gain on the wet path (`coef = exp(-2*pi*90/sr)`, `addGain = 10^(3.5/20) - 1`).
+
+Tube:
+- Flowers stage: `tanh(flowers * x)` (flowers 0..10).
+- Dabs stage by Type: A = `atan(dabs*x)/(pi/2) + 0.15*x^3`; B = `sign(t) * |t|^(2/3)` with `t = tanh(dabs*x)` (computed as cbrt(t*t)); C = `x / (1 + |dabs*x|)`.
+- Output = flowers_out + dabs_out; Transformer toggle adds `0.005 * tanh(8*x)`.
+
+Tape (the Tape Vibe control):
+- Vibe knob (0..1) sets the asymmetry coefficient of the shaper: `k = 0.3 * vibe`; shaper `y = (x + k*x^2*sign(x)) / (1 + |x|)` - a soft-clip sigmoid whose x^2 term (scaled by Vibe) generates the even-harmonic tape color; Vibe=0 is the pure symmetric sigmoid.
+- Bias knob (0..10, center 5) pre-offsets the input: `biasedX = x + (bias - 5)*0.02` (+/-0.1 max DC offset).
+- Hysteresis (tape memory): one-pole integrator on the shaped signal, `hyst += alpha*(shaped - hyst)`, run at the OS rate; `alpha_base = 0.2 + 0.8*tapeSpeed`, scaled `alpha = clamp(alpha_base / hystAmount / osFactor, 0.001, 1)`; hystAmount 0 bypasses (alpha=1), 2 = strong memory.
+- Around it: 5 kHz pre-emphasis shelf / 4 kHz de-emphasis shelf (gains +/-12 dB), cassette LP 5..22 kHz (22 kHz = coef 0 = transparent), wow/flutter as a cubic-interpolated modulated delay - `totalMod = maxWowSamples*(wowDepth*sin(2*pi*wowPhase) + flutterDepth*flutter*0.3)` with `flutter = 0.9*sin(2*pi*flutterPhase) + 0.1*noiseLP` (noise one-pole 0.999/0.001), max wow 50 ms buffer, center delay 25 ms - plus sampled cassette hiss beds (or synthetic pink through a 200 Hz HPF at 0.1 gain), 5 Hz DC blocker, output gain, optional cassette-IR convolution.</pre>

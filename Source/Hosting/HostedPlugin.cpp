@@ -847,6 +847,9 @@ void HostedPluginEditor::buildInner()
 
     // Cached now so paint() never dereferences mOwner -- by repaint time the
     // instance may have been destroyed under us.
+    // A rebuild is a new mount: the next peer arrival must publish again.
+    mPublishedOnMount = false;
+
     mMarkerTitle   = mOwner.getDescription().name;
     mMarkerMessage = mOwner.getStateMessage();
 
@@ -941,120 +944,72 @@ void HostedPluginEditor::resized()
     if (mInner == nullptr)
         return;
 
-    // ── NO SCALING.  Read this before adding any back. ───────────────────────
-    //
-    // A host cannot scale a hosted VST3's UI with an AffineTransform.  It is not
-    // that the transform fails to reach the plugin - it reaches it as a SIZE
-    // CHANGE, twice, in a loop.  JUCE's own wrapper resolves the plugin's
-    // geometry through the transformed coordinate space
-    // (juce_VST3PluginFormat.cpp):
-    //
-    //   componentToVST3Rect  ->  localAreaToGlobal (r) * dpi
-    //   vst3ToComponentRect  ->  getLocalArea (nullptr, r / dpi)
-    //
-    // Both walk the parent chain and apply every ancestor transform.  So with a
-    // scale of s on an ancestor:
-    //
-    //   * componentMovedOrResized tells the plugin, via view->onSize(), that it
-    //     is s * its own pixels.  It re-lays out smaller while its native child
-    //     window keeps the old rect - the clipping and tearing.
-    //   * resizeToFit() reads view->getSize() back through the INVERSE, so the
-    //     editor's logical size becomes natural / s.
-    //   * our next fit then computes s' = frame / (natural / s) = s * s.
-    //
-    // The scale squares itself on every pass.  It survived window close because
-    // the plugin INSTANCE outlives the window (engines are model-owned), so
-    // view->getSize() reopened at the already-shrunken size and squared again -
-    // the surface halving on every reopen with the window size unchanged.
-    //
-    // IPlugViewContentScaleSupport is not an escape hatch either: it is a DPI
-    // hint, plugins that do not implement it ignore it silently, and after
-    // resizeToFit() a factor below 1 makes the editor LOGICALLY LARGER, which is
-    // the opposite of fitting.  The plugin's own magnify is the only real
-    // control, and it belongs to the user.
-    //
-    // So: the plugin sits at its own size and the window wraps it.
     if (mInner->isResizable())
     {
         // Push the frame size through the plugin's OWN path.  Its constrainer
         // rejects or clamps as it likes, so a plugin with a minimum simply stops
-        // shrinking.
-        //
-        // Not during the layout our own fit triggered - the plugin already told
-        // us what it wants and this pass exists to honour it, not to argue with
-        // it.
+        // shrinking.  Never scaled - a resizable plugin re-lays out instead.
+        mInner->setTransform ({});
+
+        // NOT during the layout our own fit triggered.  Measured 2026-08-11:
+        // without this guard a resizable plugin (Filterjam) oscillates - we push
+        // the frame, it reports a slightly different size, we re-fit the window,
+        // we push the new frame, it reports again.  Thirty reports in four
+        // seconds, 612 -> 712 -> 612, three full cycles, with the window
+        // chasing every one.
         if (! mRefitting)
             mInner->setBounds (getLocalBounds());
 
         // READ BACK what the plugin actually accepted.  "Resizable" does not
-        // mean "any size": a plugin still has a constrainer and can clamp to its
-        // own minimum rather than filling a larger frame.  childBoundsChanged
-        // cannot report this - mInLayout is true for the whole of resized() and
-        // that callback early-returns on it, deliberately, so OUR layout is
-        // never mistaken for a plugin self-resize.
+        // mean "any size": it still has a constrainer and can clamp to its own
+        // minimum rather than filling a larger frame.  childBoundsChanged cannot
+        // report this - mInLayout is true for the whole of resized() and that
+        // callback early-returns on it, deliberately, so OUR layout is never
+        // mistaken for a plugin self-resize.
         if (mInner->getWidth() != mNaturalW || mInner->getHeight() != mNaturalH)
         {
             mNaturalW = mInner->getWidth();
             mNaturalH = mInner->getHeight();
             requestWindowFit();
         }
-    }
-    else
-    {
-        // Fixed size: the plugin snaps any bounds change back, so it is never
-        // told anything.  The window was already fitted to this size when the
-        // plugin declared it (buildInner / childBoundsChanged), so there is
-        // nothing to negotiate here and nothing that can oscillate.
-        mInner->setSize (juce::jmax (1, mNaturalW), juce::jmax (1, mNaturalH));
-    }
-
-    positionSurface();
-}
-
-void HostedPluginEditor::positionSurface()
-{
-    if (mInner == nullptr)
         return;
+    }
 
-    // Centred while it FITS, so the leftover reads as framing rather than as a
-    // broken offset.
+    // FIXED-SIZE: the plugin sits at its own size and the WINDOW wraps it.
     //
-    // TOP-LEFT when it does not.  The plugin's UI is a native child window, and
-    // Windows clips a child window to its top-level parent's client rect and to
-    // NOTHING in between - not to the JUCE components it nominally sits inside.
-    // A centred overflow therefore spills upward over the page's menu row and
-    // the plugin picker.  Anchoring top-left puts every overflowing edge against
-    // a real window edge, where the clip is the one we want.
-    const int x = mInner->getWidth()  <= getWidth()
-                    ? (getWidth()  - mInner->getWidth())  / 2 : 0;
-    const int y = mInner->getHeight() <= getHeight()
-                    ? (getHeight() - mInner->getHeight()) / 2 : 0;
+    // NO TRANSFORM (Jeff's call, 2026-08-11).  This used to scale-to-fit with an
+    // AffineTransform, and JUCE forbids it in as many words --
+    // AudioProcessorEditor::editorResized asserts
+    // `getTransform() == hostScaleTransform` with the comment "applying your own
+    // transform will obliterate it".  That assert is what broke the debugger on
+    // every plugin load, and the transform is also what made a plugin float
+    // letterboxed inside a window that had not sized to it.
+    //
+    // Nothing is lost by dropping it: a FIXED-SIZE plugin has no stretch
+    // capability to expose, so "fit the window to the plugin" IS the whole
+    // behaviour.  Resizable plugins stretch through their own resize path in the
+    // branch above, which never used a transform.  The sanctioned way to scale a
+    // plugin is AudioProcessorEditor::setScaleFactor, which on VST3 routes to
+    // the plugin's own IPlugViewContentScaleSupport - it works only on plugins
+    // that implement it, so it is not a general answer either.
+    const int nw = juce::jmax (1, mNaturalW);
+    const int nh = juce::jmax (1, mNaturalH);
+
+    mInner->setTransform ({});
+    mInner->setSize (nw, nh);
+
+    // Centred while it FITS, so the leftover reads as framing.  TOP-LEFT when it
+    // does not: the plugin's UI is a native child window, clipped by the
+    // top-level window's client rect and by NOTHING in between, so a centred
+    // overflow spills upward over the page's own menu row.
+    const int x = nw <= getWidth()  ? (getWidth()  - nw) / 2 : 0;
+    const int y = nh <= getHeight() ? (getHeight() - nh) / 2 : 0;
 
     mInner->setTopLeftPosition (x, y);
+
 }
 
-void HostedPluginEditor::requestWindowFit()
-{
-    if (onNaturalSizeChanged == nullptr)
-        return;
 
-    // ASYNC on purpose: this fires the window's sizeToContent, which re-enters
-    // resized().  Inline would recurse through the layout we are inside.
-    juce::Component::SafePointer<HostedPluginEditor> safe (this);
-    const int w = mNaturalW, h = mNaturalH;
-
-    juce::MessageManager::callAsync ([safe, w, h]
-    {
-        if (safe == nullptr || safe->onNaturalSizeChanged == nullptr)
-            return;
-
-        // Suppress the frame-push for the layout THIS fit causes.  Without it a
-        // clamping plugin loops: it clamps -> we fit the window -> resized()
-        // pushes the new frame back at it -> it clamps again.
-        const juce::ScopedValueSetter<bool> noPush (safe->mRefitting, true);
-        safe->onNaturalSizeChanged (w, h);
-    });
-}
 
 void HostedPluginEditor::moved()
 {
@@ -1071,6 +1026,62 @@ void HostedPluginEditor::parentHierarchyChanged()
     // deferred-attach problem TS4 hit -- so attaching is retried here.
     if (mRemoteHost != nullptr && ! mRemoteOpened)
         attachRemoteHost();
+
+    // THE FIRST SIZE REPORT WAS ALWAYS DROPPED.  buildInner() fires
+    // onNaturalSizeChanged from inside our CONSTRUCTOR, and both consumers
+    // assign that callback on the already-built object (EffectWindows.cpp and
+    // PluginsPage.cpp both do `setEditor(...)` then `editor->onNaturalSizeChanged = ...`)
+    // -- so it always fired into a null std::function and the window never
+    // learned the plugin's size from it.
+    //
+    // At 125% display scaling that was INVISIBLE.  JUCE's VST3 wrapper starts
+    // with nativeScaleFactor 1.0 and corrects it from a MessageManager::callAsync
+    // after mount (juce_VST3PluginFormat.cpp), which changes the editor's size,
+    // which fires childBoundsChanged, which fits the window.  The window was
+    // being sized by the DPI correction, not by the report.  At 100% nothing
+    // changes after mount, nothing fires, and the window keeps its default --
+    // measured: a 612x344 plugin left in a 358x268 frame, clipped right and
+    // bottom.
+    //
+    // So publish once, async, after we have a peer: async because the plugin's
+    // real size is not knowable at construction (IPlugView::attached() runs
+    // before the scale correction), and once because childBoundsChanged is the
+    // correct reporter for every size change after this one.
+    if (mInner != nullptr && getPeer() != nullptr && ! mPublishedOnMount)
+    {
+        mPublishedOnMount = true;
+
+        juce::Component::SafePointer<HostedPluginEditor> safe (this);
+
+        juce::MessageManager::callAsync ([safe]
+        {
+            if (safe != nullptr)
+                safe->publishNaturalSize();
+        });
+    }
+}
+
+void HostedPluginEditor::publishNaturalSize()
+{
+    // Same detached-means-tearing-down rule as childBoundsChanged: this is
+    // posted async, so the window can be gone by the time it lands.  The
+    // SafePointer covers OUR deletion; this covers being detached while alive.
+    if (mOwnerGone || onNaturalSizeChanged == nullptr || mInner == nullptr
+        || getParentComponent() == nullptr)
+        return;
+
+    const int w = mInner->getWidth();
+    const int h = mInner->getHeight();
+
+    if (w <= 0 || h <= 0)
+        return;
+
+    mNaturalW = w;
+    mNaturalH = h;
+    setSize (w, h);
+
+
+    onNaturalSizeChanged (w, h);
 }
 
 void HostedPluginEditor::attachRemoteHost()
@@ -1122,11 +1133,8 @@ void HostedPluginEditor::updateRemoteHostBounds()
     // two sides.  Centring it puts the same leftover on all four sides, which
     // reads as framing instead of misalignment.
     //
-    // Centring is right HERE and wrong in positionSurface() because the
-    // intersection below shrinks the PEER itself, so an oversized bridged plugin
-    // is genuinely clipped to the frame.  The in-process editor's native window
-    // is clipped only by the top-level peer, so it has to anchor top-left or its
-    // overflow spills over the page's own chrome.
+    // Centring is right HERE because the intersection below shrinks the PEER
+    // itself, so an oversized bridged plugin is genuinely clipped to the frame.
     auto area = getLocalBounds();
 
     if (mNaturalW > 0 && mNaturalH > 0)
@@ -1144,6 +1152,33 @@ void HostedPluginEditor::updateRemoteHostBounds()
     mRemoteHost->setBounds (screenArea - win->getScreenPosition());
 }
 
+void HostedPluginEditor::requestWindowFit()
+{
+    if (onNaturalSizeChanged == nullptr)
+        return;
+
+    // ASYNC on purpose: this fires the window's sizeToContent, which re-enters
+    // resized().  Inline would recurse through the layout we are inside.
+    juce::Component::SafePointer<HostedPluginEditor> safe (this);
+    const int w = mNaturalW, h = mNaturalH;
+
+    juce::MessageManager::callAsync ([safe, w, h]
+    {
+        // Detached or dead by the time this lands -- same teardown rule as
+        // childBoundsChanged.  A fit needs a live parent chain to fit INTO.
+        if (safe == nullptr || safe->mOwnerGone
+            || safe->onNaturalSizeChanged == nullptr
+            || safe->getParentComponent() == nullptr)
+            return;
+
+        // Suppress the frame-push for the layout THIS fit causes.  Without it a
+        // clamping plugin loops: it clamps -> we fit the window -> resized()
+        // pushes the new frame back at it -> it clamps again.
+        const juce::ScopedValueSetter<bool> noPush (safe->mRefitting, true);
+        safe->onNaturalSizeChanged (w, h);
+    });
+}
+
 void HostedPluginEditor::childBoundsChanged (juce::Component* child)
 {
     // A plugin can resize its own editor at any time (VST3's resizeView) - the
@@ -1158,6 +1193,25 @@ void HostedPluginEditor::childBoundsChanged (juce::Component* child)
     if (mInLayout || mInner == nullptr || child != mInner.get())
         return;
 
+    // DETACHED means TEARING DOWN -- do not drive a window fit from here.
+    //
+    // Closing a plugin window crashed on exactly this path: ~SlotComponent
+    // removes us, and Component::removeChildComponent nulls our parentComponent
+    // BEFORE calling internalHierarchyChanged (juce_Component.cpp:1291-1292).
+    // That reaches JUCE's own ComponentMovementWatcher, which calls
+    // VST3PluginWindow::componentVisibilityChanged -> resizeToFit -> setSize on
+    // the plugin's editor, which lands right back here as a size CHANGE.  We
+    // then fired onNaturalSizeChanged, whose consumer resolves the parent
+    // WorkspaceWindow -- still reachable, but already inside ~WorkspaceWindow --
+    // and called sizeToContent on it.  Access violation in
+    // WorkspaceWindow::resized().
+    //
+    // A real plugin self-resize can only happen while we are IN the hierarchy,
+    // so requiring a parent costs nothing and closes the whole teardown cascade
+    // at its source rather than at each consumer.
+    if (getParentComponent() == nullptr)
+        return;
+
     const int w = mInner->getWidth();
     const int h = mInner->getHeight();
 
@@ -1169,8 +1223,18 @@ void HostedPluginEditor::childBoundsChanged (juce::Component* child)
 
     setSize (w, h);
 
-    if (onNaturalSizeChanged)
-        onNaturalSizeChanged (w, h);
+    // ASYNC, NEVER INLINE.  This callback arrives from deep inside JUCE's own
+    // machinery -- attachPluginWindow() -> resizeView() -> setSize() lands here
+    // while the plugin's window is still being attached.  Firing the window fit
+    // inline re-entered that unfinished work: sizeToContent relaid the whole
+    // window chain, which set our bounds, which ran resized(), which called
+    // setTransform, which took JUCE back into AudioProcessorEditor::editorResized
+    // before attachPluginWindow had returned.  That crashed on Keyscape load.
+    //
+    // requestWindowFit posts to the message queue instead, so the fit happens
+    // after JUCE has finished, and it sets mRefitting so the resulting layout
+    // honours the plugin's size instead of pushing a frame back at it.
+    requestWindowFit();
 }
 
 void HostedPluginEditor::paint (juce::Graphics& g)

@@ -1,0 +1,53 @@
+<p>A starting project rather than a starting sound &mdash; tabs, buses and racks
+already in place.</p>
+
+<p class="behind"><b>Behind:</b> <a href="manual-2.html#FMENU-2">New from Template submenu</a>, <a href="manual-2.html#FMENU-8">Save as Template</a>, <a href="manual-2.html#OMENU-1">General submenu</a>.</p>
+<div class="codeblock"><div class="codehead">Source\Standalone\StandaloneEditor.cpp (loadTemplate lines 8766-8781, applyTemplate lines 8783-8937, saveTemplateAs lines 8939+)</div><pre><code>// StandaloneEditor.h -- template dirs + the SaveShape split (verbatim)
+    // Which of the two save shapes the tab walk is feeding.  Freeze is the one
+    // thing the structural walk emits that is PROJECT data and not skeleton
+    // data: the renders live in &lt;project&gt;\Freeze\ and the stamps are the
+    // original song&#x27;s, so a template that carried them either failed to
+    // restore (New from Template has no project folder yet) or re-rendered the
+    // tab against the template&#x27;s deliberately blank arrangement and came back
+    // frozen to silence.  `locked` stays in both -- that IS structural.
+    enum class SaveShape { Project, Template };
+
+    // 2026-04-26: Templates (kit + 8 layers + 4 basses bundle).
+    static juce::File templatesDir();         // &lt;Documents&gt;/BaySickDAW/Templates
+    static juce::File factoryTemplatesDir();  // &lt;templatesDir&gt;/Factory
+    static juce::File userTemplatesDir();     // &lt;templatesDir&gt;/My Templates
+    // File &gt; New from Template submenu: files listed at menu-build time,
+    // resolved by id at dispatch (rebuilt on every menu open).
+    static constexpr int kTemplateMenuLoadBase = 900;
+    juce::Array&lt;juce::File&gt; mTemplateMenuFiles;
+    void saveTemplateAs ();                            // prompt + write XML
+    void loadTemplate (const juce::File&amp; templateXml); // dirty gate -&gt; applyTemplate
+    // The actual teardown + rebuild, past the save prompt.  Never call directly:
+    // loadTemplate owns the unsaved-changes gate for every entry point.
+    void applyTemplate (const juce::File&amp; templateXml);</code></pre></div>
+<details class="fullfn"><summary>Full function &mdash; Source\Standalone\StandaloneEditor.cpp (loadTemplate lines 8766-8781, applyTemplate lines 8783-8937, saveTemplateAs lines 8939+)</summary><pre><code>// StandaloneEditor.cpp -- StandaloneEditor::loadTemplate (full function, lines 8766-8781)
+void StandaloneEditor::loadTemplate (const juce::File&amp; templateXml)
+{
+    if (! templateXml.existsAsFile())
+    {
+        juce::AlertWindow::showMessageBoxAsync (
+            juce::MessageBoxIconType::WarningIcon, &quot;Load Template&quot;,
+            &quot;The template file is missing:\n&quot; + templateXml.getFullPathName(), &quot;OK&quot;);
+        return;
+    }
+
+    juce::Component::SafePointer&lt;StandaloneEditor&gt; safeThis (this);
+    confirmDiscardChanges ([safeThis, templateXml]
+    {
+        if (safeThis) safeThis-&gt;applyTemplate (templateXml);
+    });
+}</code></pre></details>
+<pre class="formulas">- Folder layout: `Documents/BaySickDAW/Templates/` with `Factory/` and `My Templates/` subfolders; File &gt; New from Template submenu ids start at `kTemplateMenuLoadBase = 900`, file list rebuilt on every menu open, resolved by id at dispatch.
+- Root tag `&quot;BaySickTemplate&quot;`; `version` attribute (default 1) forks the apply: v2 = project-shaped, v1 = the shipped factory schema (kit + Layer/Bass entries).
+- Template scope (SaveShape::Template vs Project): a template saves the whole SETUP — every tab and its sound, mixer levels, routing, effects, EQ — but NO patterns, notes, arrangement, or audio library (&quot;start writing on a blank canvas&quot;). FREEZE state is excluded from templates (renders live in &lt;project&gt;\Freeze\ with the original song&#x27;s stamps — carrying them either failed to restore or re-rendered against the blank arrangement and came back frozen to silence); `locked` stays in BOTH shapes (that IS structural). Template saves also route through `adoptTemplateSampleRefs` — volatile-source samples are copied into My Samples and re-referenced, because a template is one loose XML with no Samples folder of its own (projects skip this; their folder travels).
+- Entry gate: `loadTemplate` owns the unsaved-changes gate (`confirmDiscardChanges`) for EVERY entry point; `applyTemplate` is never called directly.
+- Shield discipline: the whole apply runs under the project-load shield (nest-aware save/restore, settle only when this call raised it) because it is a load-type rebuild (~13 render tasks registered) that can run mid-playback; `clearAllAuxInserts()` under the shield before the rebuild (aux strips have no per-tab teardown hook — same call at every load-type entry point).
+- v2 semantics: loading a template is NEW PROJECT semantics, not a merge — `closeAllDynamicTabs` + `clearDynamicStrips` + `resetToBlankState`, mirroring doFileNew order exactly, then `applyProcessorState` (mixer/routing/racks/EQ) + `deserializeUIState` (tabs + strip names/orders) + `restoreAudioStripsFromArrangement(true, &quot;template&quot;)`. Order invariants: clearDynamicStrips BEFORE applyProcessorState (it resets aux/vox/inst next-index counters); per-insert racks replay INSIDE restoreAudioStripsFromArrangement after ensureAudioInsert (calling applyPendingRackStates earlier consumes the self-clearing stash before the Audio InsertNodes exist — racks come back empty). Missing-file reports headline &quot;template&quot;, not &quot;project&quot;.
+- v1 factory schema: tears down ONLY Layers/Bass/Drums (`closeDynamicTabs(TabTeardownScope::LayersBassDrumsOnly)` — Clips/Vox/Inst/Rusty survive because this branch cannot rebuild them; deliberately NO clearDynamicStrips); `&lt;Kit path=...&gt;` loads via `loadKitImpl(factoryKitsDir()/path, bank 0)` (a v1 template describes ONE kit, slots 0-15); `&lt;Layer&gt;`/`&lt;Bass&gt;` entries walk in order (slots line up N=0,1,2,...) with attributes `engine`, `presetPath` (relative to Presets root), `locked`; a named-but-missing preset is reported via MissingFileReport (the tab still spawns at engine defaults); focus lands on the first new Layer tab.
+- Default template: ProjectManager persists a template XML path in settings.xml; new projects load it through the SAME loadTemplate path — nothing is copied (the folder-seed clone died in QA-ProjectSave Task 10).</pre>
+<p class="behind"><b>Behind:</b> <a href="manual-2.html#FMENU-2">New from Template submenu</a>, <a href="manual-2.html#FMENU-8">Save as Template</a>, <a href="manual-2.html#OMENU-1">General submenu</a>.</p>

@@ -1,0 +1,130 @@
+<p>Where the synth family starts from a wave and subtracts, Harmless builds
+sound by summing harmonics directly - which is why it can do things
+filters cannot. Its two parts, A and B, are two harmonic recipes running
+simultaneously, crossfaded by the MIX control (the A/B selector on the
+panel only chooses which part the shared knobs edit - both always sound).
+The harmonic masks thin each part's overtone set; BLUR smears harmonic
+energy in time; PRISM shifts harmonics off their exact multiples, running
+from chorus-like shimmer to full clangor; and the brownian control adds
+per-harmonic wander. Its two filters and their envelopes run inside the
+additive engine per sample. The modulation editor attaches a per-note curve
+to almost any Harmless control - each note runs the curve privately from
+its own start, which is a different thing from song-position automation:
+one is performance shape, the other is arrangement.</p>
+
+<div class="codeblock"><div class="codehead">Source\Harmless\HarmonicEngine.cpp (buildWavetable -- 516 partials summed into a wavetable via IFFT; Blur runs here, Prism shifts bins here)</div><pre><code>// HarmonicEngine::buildWavetable (partial assembly into IFFT bins) -- Source/Harmless/HarmonicEngine.cpp
+    for (int i = 0; i &lt; kNumPartials; ++i)
+    {
+        const float amp = workAmps[i];
+        if (amp &lt; 1.0e-6f)
+            continue;
+
+        const float phase = workPhases[i];
+
+        // Prism: fractional bin offset for inharmonicity.
+        // At prism.amount=0 this is 0 and binF is the integer partial index.
+        const float binF = float (i + 1) + prism.getFrequencyShift (i);
+
+        if (binF &lt; 1.0f || binF &gt;= float (kFFTSize / 2 - 1))
+            continue;
+
+        // [sin/cos from LUT with linear interpolation -- elided]
+
+        // Fractional bin: interpolate energy between floor and ceil bins.
+        const int   binLo = int (binF);
+        const int   binHi = binLo + 1;
+        const float hi    = binF - float (binLo);
+        const float lo    = 1.0f - hi;
+
+        // JUCE FFT interleaved layout: d[2k] = Re[k], d[2k+1] = Im[k]
+        if (binLo &gt;= 1 &amp;&amp; binLo &lt; kFFTSize / 2)
+        {
+            mFFTData[2 * binLo]     += amp * cosVal * lo;
+            mFFTData[2 * binLo + 1] += amp * sinVal * lo;
+        }
+        if (binHi &lt; kFFTSize / 2)
+        {
+            mFFTData[2 * binHi]     += amp * cosVal * hi;
+            mFFTData[2 * binHi + 1] += amp * sinVal * hi;
+        }
+    }
+
+    // ── 4. Inverse FFT → time-domain waveform ─────────────────────────────────
+    mFFT.performRealOnlyInverseTransform (mFFTData.data());</code></pre></div>
+<details class="fullfn"><summary>Full function &mdash; Source\Harmless\HarmonicEngine.cpp (buildWavetable -- 516 partials summed into a wavetable via IFFT; Blur runs here, Prism shifts bins here)</summary><pre><code>void HarmonicEngine::buildWavetable()
+{
+    // Choose the buffer that is NOT currently being read by the audio thread.
+    int    readIdx  = mReadBuf.load (std::memory_order_acquire);
+    int    buildIdx = 1 - readIdx;
+    float* buf      = (buildIdx == 0) ? mBufA.data() : mBufB.data();
+
+    // ── 1. Make working copies so the user&#x27;s partial data is never modified ──
+    std::array&lt;float, kNumPartials&gt; workAmps   = amplitudes;
+    std::array&lt;float, kNumPartials&gt; workPhases = phases;
+
+    // ── 2. Apply spectral modules (all except Prism, which acts below) ────────
+    auto withScaledAmount = [this] (auto&amp; mod, auto&amp;&amp; runFn)
+    {
+        const float saved = mod.getAmount();
+        mod.setAmount (saved * mSpectralFxScale);
+        runFn();
+        mod.setAmount (saved);
+    };
+    withScaledAmount (pluck,      [&amp;] { pluck     .processPartials (workAmps.data(), workPhases.data(), kNumPartials); });
+    withScaledAmount (blur,       [&amp;] { blur      .processPartials (workAmps.data(), workPhases.data(), kNumPartials); });
+    withScaledAmount (filterMask, [&amp;] { filterMask.processPartials (workAmps.data(), workPhases.data(), kNumPartials); });
+    withScaledAmount (phaserMask, [&amp;] { phaserMask.processPartials (workAmps.data(), workPhases.data(), kNumPartials); });
+
+    // [nyquist protect: soft exp rolloff above kNumPartials/4 -- elided]
+
+    // ── 2a. Auto-gain pass (S4 AG-1) ──────────────────────────────────────────
+    {
+        const float headroom = 1.0f / float (kNumPartials);
+        if (mAutoGainMode == 0)
+        {
+            float peakAmp = 0.0f;
+            for (int i = 0; i &lt; kNumPartials; ++i)
+                peakAmp = std::max (peakAmp, workAmps[i]);
+            if (peakAmp &gt; headroom)
+            {
+                const float scale = headroom / peakAmp;
+                for (int i = 0; i &lt; kNumPartials; ++i)
+                    workAmps[i] *= scale;
+            }
+        }
+        else
+        {
+            for (int i = 0; i &lt; kNumPartials; ++i)
+                if (workAmps[i] &gt; headroom)
+                    workAmps[i] = headroom;
+        }
+    }
+
+    // ── 2b. Brownian spectral weighting (1/n^α rolloff) ───────────────────────
+    if (mBrownianAmount &gt; 0.001f)
+    {
+        for (int i = 0; i &lt; kNumPartials; ++i)
+            workAmps[i] *= std::pow (1.0f / float (i + 1), mBrownianAmount);
+    }
+
+    // ── 3. Assemble IFFT input ─────────────────────────────────────────────────
+    std::fill (mFFTData.begin(), mFFTData.end(), 0.0f);
+    // [per-partial bin-scatter loop -- see excerpt above]
+
+    // ── 4. Inverse FFT → time-domain waveform ─────────────────────────────────
+    mFFT.performRealOnlyInverseTransform (mFFTData.data());
+
+    // [── 5. Normalise to ±1 peak; ── 6. atomic double-buffer publish
+    //  (mReadBuf.store(buildIdx, release), mReady, mGeneration bump) -- elided]
+}</code></pre></details>
+<pre class="formulas">- Additive synthesis is done OFFLINE into a wavetable: 516 partials (`kNumPartials`) scattered into IFFT bins, `performRealOnlyInverseTransform`, normalize to ±1, atomic double-buffer publish. The voice then plays the table -- harmonic &quot;summing&quot; per sample is a single wavetable read, not 516 sines.
+- Base spectra: saw `a_n = 1/n`; square odd-only `1/n`; triangle odd-only `1/n^2` with alternating pi phase; sine = fundamental only.
+- Prism: fractional bin `binF = (i+1) + shift(i)`; stretched `amount * n^2 * 1e-4` (piano-string law), bunched `amount * sqrt(n) * 1e-2`, scattered `amount * n * (+-) * 5e-3`; energy split linearly between floor/ceil bins (`lo = 1 - frac`, `hi = frac`).
+- Blur: 3 box-blur passes (Gaussian approximation) over the amplitude spectrum; kernel half-width `max(1, amount * 25 * timeScale)`; harm-axis mode steps by 2 (harmonic-only smear).
+- Pluck: `amps[i] *= exp(-rate * i)`, `rate = amount * 1e-4 * (blur ? 0.5 : 1)`.
+- Auto-gain headroom: `1 / kNumPartials` per bin; Relative mode scales all partials by `headroom/peak`, Absolute clips each.
+- Brownian rolloff: `amps[i] *= (1/(i+1))^alpha`.
+- Playback increment: `inc = currentHz * unisonMult * (kFFTSize / sampleRate)` table samples per audio sample; linear-interp table read with power-of-two mask.
+- Parts A and B are SIMULTANEOUS layers: per-sample `sample = wtA(phaseA)*pA + wtB(phaseB)*pB`; `timbre_blend` crossfades (`aEff = A*(1-blend)`, `bEff = B + A*blend`), and the mod-matrix TimbreBlend target pushes `pA *= (1 - max(0, +m))`, `pB *= (1 - max(0, -m))`.
+- Sub oscillator: sine one octave below (`currentHz * 0.5`) added post-stack.</pre>
+<p class="behind"><b>Behind:</b> <a href="manual-2.html#BSHARM-2">TREMOLO section</a>, <a href="manual-2.html#BSHARM-3">ROUTING section</a>, <a href="manual-2.html#BSHARM-4">VIBRATO / LEGATO section</a>, <a href="manual-2.html#BSHARM-6">FILTER 1 + ADSR</a>, <a href="manual-2.html#BSHARM-7">FILTER 2 + ADSR</a>, <a href="manual-2.html#BSHARM-8">TIMBRE section, A / B part selector</a>, <a href="manual-2.html#BSHARM-9">PART A / PART B waveform buttons</a>, <a href="manual-2.html#BSHARM-10">MIX</a>, <a href="manual-2.html#BSHARM-11">VOICE A / VOICE B / BROWN / F1 OFS / F2 OF...</a>, <a href="manual-2.html#BSHARM-12">PITCH section</a>, <a href="manual-2.html#BSHARM-14">STRUM section</a>, <a href="manual-2.html#BSHARM-15">FX</a>, <a href="manual-2.html#BSHARM-17">BLUR / PRISM</a>, <a href="manual-2.html#BSHARM-18">MOD XY pad with the X / Y / Z knobs beneat...</a>.</p>

@@ -1,0 +1,50 @@
+<p>Reshapes an electric guitar toward an acoustic.</p>
+
+<div class="codeblock"><div class="codehead">Source\DSP\AcousticSimulatorStyleDSP.cpp</div><pre><code>// AcousticSimulatorStyleDSP::rebuildBodyEQ — the per-mode voicing curves
+    const float depth = juce::jlimit (0.0f, 1.0f, (mBodyDb + 15.0f) / 30.0f);
+    switch (mMode)
+    {
+        case Mode::Standard:   // Balanced dreadnought: low-mid scoop + presence.
+            a = makePeakFilter (mSampleRate, 600.0f, 1.2f, dbToGain (-8.0f * depth));
+            b = makePeakFilter (mSampleRate, 4000.0f, 0.9f, dbToGain (4.0f * depth));
+            break;
+        case Mode::Jumbo:      // Massive low shelf + low-mid cut -- big-body bloom.
+            a = makeLowShelf   (mSampleRate, 110.0f, 0.7f, dbToGain (10.0f * depth));
+            b = makePeakFilter (mSampleRate, 550.0f, 1.0f, dbToGain (-5.0f * depth));
+            break;
+        case Mode::Enhanced:   // Hi-fi sheen: strong high shelf + supporting low shelf.
+            a = makeHighShelf  (mSampleRate, 6000.0f, 0.7f, dbToGain (9.0f * depth));
+            b = makeLowShelf   (mSampleRate, 180.0f, 0.7f, dbToGain (4.0f * depth));
+            break;
+        case Mode::Piezo:      // Undersaddle quack @ ~2.5 kHz + tight low cut.
+            a = makePeakFilter (mSampleRate, 2500.0f, 1.5f, dbToGain (10.0f * depth));
+            b = makeHighPass   (mSampleRate, 100.0f, 0.7f);
+            break;
+    }</code></pre></div>
+<details class="fullfn"><summary>Full function &mdash; Source\DSP\AcousticSimulatorStyleDSP.cpp</summary><pre><code>void AcousticSimulatorStyleDSP::rebuildPickupEQ()
+{
+    // Static -4 dB peak at 2.5 kHz, Q ~0.7.  Flattens electric pickup
+    // resonance peak that exists in single-coil + humbucker frequency
+    // response and is absent on acoustic body output.
+    auto coefs = juce::dsp::IIR::Coefficients&lt;float&gt;::makePeakFilter
+                    (mSampleRate, 2500.0f, 0.7f,
+                     juce::Decibels::decibelsToGain (-4.0f));
+    *mPickupEQ.state = *coefs;
+}
+
+void AcousticSimulatorStyleDSP::rebuildTopShelf()
+{
+    // High-shelf at 4 kHz; gain modulated by envelope (set per sample).
+    const float maxGainDb = juce::jlimit (-15.0f, 15.0f, mTopDb);
+    auto coefs = juce::dsp::IIR::Coefficients&lt;float&gt;::makeHighShelf
+                    (mSampleRate, 4000.0f, 0.7f,
+                     juce::Decibels::decibelsToGain (maxGainDb));
+    *mTopShelf.state = *coefs;
+}</code></pre></details>
+<pre class="formulas">- Pickup De-Emphasis: static -4 dB peak at 2.5 kHz Q 0.7 — flattens the electric pickup resonance absent on acoustic output.
+- Top knob (transient shaper): high shelf at 4 kHz Q 0.7 with gain = Top (-15..+15 dB) processed in parallel; blended per sample by transient amount: `out = dry + transient * (shelf - dry)`. Envelope: 5 ms attack / 100 ms release one-pole peak follower; long-term average one-pole coef 0.9995; `transient = clamp((env/avg - 1) * 0.5, 0, 1)`. Negative Top ducks the highs on attacks.
+- Body knob: -15..+15 dB maps to `depth01 = (body + 15)/30` — bottom = off, center ~60%, top = full.
+- Named modes: bundled body IR convolution wet `min(1, depth01 * 1.2)`, dry `1 - wet*0.5`, then two voicing stages with depth baked into the gains: Standard (-8 dB*d @600 Q1.2, +4 dB*d @4k Q0.9), Jumbo (+10 dB*d low shelf @110, -5 dB*d @550 Q1.0), Enhanced (+9 dB*d high shelf @6k, +4 dB*d low shelf @180), Piezo (+10 dB*d @2.5k Q1.5 + fixed 100 Hz highpass).
+- User mode: user IR convolution only, wet = depth01, dry = 1 - depth01*0.5; voicing stages set to identity.
+- Reverb: Schroeder — 4 parallel combs (lengths 1641/1719/1481/1392 L, +23 R offset, scaled by sr/44100) summed * 0.25 into 2 series allpasses; wet/dry `dry*(1-0.5*rev) + wet*rev`.
+- Level: -24..+12 dB.</pre>

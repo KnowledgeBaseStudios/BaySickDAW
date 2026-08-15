@@ -1,0 +1,96 @@
+<p>Heavier, with a blend to keep the clean signal.</p>
+
+<div class="codeblock"><div class="codehead">Source\DSP\BassOverdriveStyleDSP.cpp</div><pre><code>// BassOverdriveStyleDSP::process — grit-floor hard clip + Balance blend
+    // Hard clip at 4x oversampled, from a grit floor (never fully clean).
+    const float drive = kGritFloor + mGain * (kMaxDrive - kGritFloor);
+    juce::dsp::AudioBlock&lt;float&gt; block (buffer);
+    auto upBlock = mOs.upsample (block);
+    for (int ch = 0; ch &lt; upChs; ++ch)
+    {
+        float* d = upBlock.getChannelPointer ((size_t) ch);
+        for (int i = 0; i &lt; upN; ++i)
+            d[i] = std::clamp (d[i] * drive, -1.0f, 1.0f);
+    }
+    mOs.downsample (block);
+
+    // Balance: dry/wet blend.  0 = all dry, 1 = all wet.
+    const float w = juce::jlimit (0.0f, 1.0f, mBalance);
+    const float dGain = 1.0f - w;
+    ...
+            wet[i] = dry[i] * dGain + wet[i] * w;</code></pre></div>
+<details class="fullfn"><summary>Full function &mdash; Source\DSP\BassOverdriveStyleDSP.cpp</summary><pre><code>void BassOverdriveStyleDSP::process (juce::AudioBuffer&lt;float&gt;&amp; buffer)
+{
+    if (bypassed) return;
+    juce::ScopedNoDenormals noDenormals;
+
+    const int numCh = buffer.getNumChannels();
+    const int n     = buffer.getNumSamples();
+    if (numCh == 0 || n == 0) return;
+
+    if (mDryScratch.getNumChannels() &lt; numCh || mDryScratch.getNumSamples() &lt; n)
+        mDryScratch.setSize (numCh, n, false, false, true);
+    for (int ch = 0; ch &lt; numCh; ++ch)
+        mDryScratch.copyFrom (ch, 0, buffer, ch, 0, n);
+
+    // 1 + 2 + 3. Hard clip at 4x oversampled, from a grit floor (never fully clean).
+    const float drive = kGritFloor + mGain * (kMaxDrive - kGritFloor);
+    juce::dsp::AudioBlock&lt;float&gt; block (buffer);
+    auto upBlock = mOs.upsample (block);
+    const int upN   = (int) upBlock.getNumSamples();
+    const int upChs = (int) upBlock.getNumChannels();
+    for (int ch = 0; ch &lt; upChs; ++ch)
+    {
+        float* d = upBlock.getChannelPointer ((size_t) ch);
+        for (int i = 0; i &lt; upN; ++i)
+            d[i] = std::clamp (d[i] * drive, -1.0f, 1.0f);
+    }
+    mOs.downsample (block);
+
+    // 4. Balance: dry/wet blend.  0 = all dry, 1 = all wet.
+    {
+        const float w = juce::jlimit (0.0f, 1.0f, mBalance);
+        const float dGain = 1.0f - w;
+        for (int ch = 0; ch &lt; numCh; ++ch)
+        {
+            float* wet = buffer.getWritePointer (ch);
+            const float* dry = mDryScratch.getReadPointer (ch);
+            for (int i = 0; i &lt; n; ++i)
+                wet[i] = dry[i] * dGain + wet[i] * w;
+        }
+    }
+
+    // 5. Active Baxandall shelving EQ AFTER the blend.
+    {
+        juce::dsp::ProcessContextReplacing&lt;float&gt; ctx (block);
+        mLowShelf .process (ctx);
+        mHighShelf.process (ctx);
+    }
+
+    // 6. 5 Hz DC blocker (defensive).
+    {
+        const float R = mDcCoef;
+        for (int ch = 0; ch &lt; numCh; ++ch)
+        {
+            float* d = buffer.getWritePointer (ch);
+            float&amp; xPrev = (ch == 0) ? mDcXL : mDcXR;
+            float&amp; yPrev = (ch == 0) ? mDcYL : mDcYR;
+            for (int i = 0; i &lt; n; ++i)
+            {
+                const float in = d[i];
+                const float y  = in - xPrev + R * yPrev;
+                xPrev = in;
+                yPrev = y;
+                d[i]  = y;
+            }
+        }
+    }
+
+    // 7. Output level.
+    if (mLevel != 0.0f)
+        buffer.applyGain (juce::Decibels::decibelsToGain (mLevel, -60.0f));
+}</code></pre></details>
+<pre class="formulas">- Drive: `drive = 1.6 + gain01 * (50 - 1.6)` — grit floor 1.6x means the pedal is NEVER fully clean (diodes always in-circuit, clipping peaks above ~1/1.6 = 0.625); max 50x reaches fuzz territory well before noon (ODB-3 behavior).
+- Clipper: hard clip `clamp(x * drive, -1, +1)` at 4x oversampling.
+- Balance knob: post-clip dry/wet blend `out = dry*(1-bal) + wet*bal` (0 = all dry, 1 = all wet).
+- EQ (after the blend — &quot;active Baxandall&quot;): low shelf 100 Hz Q 0.7071 +/-15 dB, high shelf 3 kHz Q 0.7071 +/-15 dB.
+- DC blocker 5 Hz (`R = 1 - 2*pi*5/sr`); Level -24..+12 dB.</pre>

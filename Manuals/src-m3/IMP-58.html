@@ -1,0 +1,147 @@
+<p>The workspace windows are real operating-system child windows inside the app
+frame, not drawings. That buys correct overlapping and native resize, and it
+costs one non-obvious rule:</p>
+
+<div class="warn">
+  <b>Anything drawn into the frame renders <em>beneath</em> every child window,
+  no matter what.</b> There is no ordering trick that crosses that boundary. It
+  is why the app has exactly one tooltip window and why it belongs to the
+  desktop rather than to the frame &mdash; a tooltip parented to the frame would
+  appear behind the very window that raised it.
+</div>
+
+<p>Repeating UI work starts and stops when a window gains or loses its OS handle
+rather than in constructors, because a page can exist before it is ever framed.</p>
+
+
+
+<div class="codeblock"><div class="codehead">Source\Standalone\WorkspaceWindow.h (contract note, lines 13-42; Workspace anchor, lines 469-533)</div><pre><code>// WorkspaceWindow.h -- the child-peer contract (class banner, verbatim)
+// ── WorkspaceWindow — QA-ModelShell TS4 (2026-07-28) ─────────────────────────
+// One contained window inside the fixed main frame (locked call 2b: FL-style
+// contained workspace, not free-floating documents).
+//
+// WHY A NATIVE CHILD PEER RATHER THAN A DRAWN COMPONENT.  A hosted VST3 editor
+// (TS6) is a foreign HWND, and a foreign HWND always draws ON TOP of everything
+// JUCE paints into its parent&#x27;s client area -- z-order between an OS window and
+// a drawn component is not a thing the OS can express.  So a drawn window frame
+// would be permanently underneath every plugin editor the user opened.  Making
+// OUR windows native children too puts them in the same z-order space as the
+// plugin surfaces, which is the only arrangement where &quot;bring this window to
+// front&quot; can work for both.
+//
+// FRAMEWORK CONTRACT (verified against the vendored JUCE, 2026-07-28 --
+// juce_Windowing_windows.cpp; there is no other user of this in the tree, so it
+// is written down here rather than rediscovered):
+//   * addToDesktop (flags, parentHwnd) with a non-null parent sets WS_CHILD on
+//     the created window (:2239) and passes the parent to CreateWindowEx
+//     (:2437).  It is a real OS child window.
+//   * COORDINATE SPACE DIFFERS FROM A TOP-LEVEL PEER, in both directions:
+//       - setBounds feeds SetWindowPos, and Windows reads x/y of a WS_CHILD as
+//         PARENT-CLIENT relative (:1614);
+//       - getBounds returns getWindowClientRect, likewise parent-relative
+//         (:1653) -- the screen-relative branch above it is the
+//         parentToAddTo == nullptr case only.
+//     Set and get therefore agree, and both are in the PARENT WINDOW&#x27;S CLIENT
+//     space.  Positions here are consequently offset by the workspace&#x27;s own
+//     origin within the main window, NOT by screen coordinates -- see
+//     Workspace::originInParentClient.</code></pre></div>
+<details class="fullfn"><summary>Full function &mdash; Source\Standalone\WorkspaceWindow.h (contract note, lines 13-42; Workspace anchor, lines 469-533)</summary><pre><code>// WorkspaceWindow.cpp -- WorkspaceWindow::attachTo (full function, lines 667-756)
+void WorkspaceWindow::attachTo (Workspace&amp; ws)
+{
+    mWorkspace = &amp;ws;
+    ws.addWindow (this);
+
+    // Parent-client space: the peer&#x27;s coordinates are measured from the MAIN
+    // window&#x27;s client origin, so the workspace&#x27;s own offset inside the frame
+    // has to be added on.  (See the contract note in the header -- this is the
+    // one line that differs from how a top-level JUCE window is positioned.)
+    //
+    // WAIT FOR A LAID-OUT WORKSPACE, not just a peer (fix 2026-08-04).  A
+    // zero-size Workspace reports originInParentClient() as (0,0), so every
+    // window restored at that moment landed short by the real origin -- saved
+    // at origin (1,91), restored against (0,0), i.e. 91px too high, every
+    // launch.  It also collapsed the first-open default size, which is a
+    // fraction of the workspace, to its 480x320 floor.  Both symptoms, one
+    // cause.  Queue instead; Workspace::resized drains the queue once the
+    // frame is laid out and the handle + bounds are both real.
+    auto* parent = ws.getNativeParentHandle();
+    if (parent == nullptr || ws.getWidth() &lt;= 0 || ws.getHeight() &lt;= 0)
+    {
+        ws.queueForAttach (this);
+        return;
+    }
+
+    bool hasPos = true;
+    auto saved = loadSavedBounds (hasPos);
+    // First open: the window&#x27;s OWN minimum is its natural size -- those are
+    // the measured &quot;smallest still readable&quot; numbers, which Jeff set as both
+    // the floor and the default (2026-08-04).  Offset per already-open window
+    // so a fresh window never lands exactly on top of the one before it.  A
+    // SIZE-ONLY seed (T5: player sizes carry across projects, placement does
+    // not) keeps its size and takes the default spot.
+    const int step = 28 * juce::jmin (6, ws.getWindows().size() - 1);
+    if (saved.isEmpty())
+    {
+        // Nothing remembered.  Use the default if it is already known; if it is
+        // not (engine-derived size, engine still binding) open at a neutral
+        // placeholder and flag it, so setDefaultWindowSize snaps the window the
+        // moment the default arrives.  It still OPENS now rather than waiting:
+        // a page whose engine never binds must not end up with no window.
+        mOpenedAtPlaceholder = ! mDefaultKnown;
+        const auto sz = mDefaultKnown ? mDefaultSize
+                                      : juce::Point&lt;int&gt; { 480, 320 };
+        saved = juce::Rectangle&lt;int&gt; (24 + step, 24 + step, sz.x, sz.y);
+    }
+    else if (! hasPos)
+        saved.setPosition (24 + step, 24 + step);
+    // Never reopen below the window&#x27;s own minimum.  When the default is not yet
+    // known the constrainer still holds the anti-degenerate clamp, and
+    // setDefaultWindowSize raises the window when the real number lands.
+    saved.setSize (juce::jmax (saved.getWidth(),  mConstrainer.getMinimumWidth()),
+                   juce::jmax (saved.getHeight(), mConstrainer.getMinimumHeight()));
+    setBounds (saved);
+
+    addToDesktop (0, parent);
+    const auto o = ws.originInParentClient();
+    setTopLeftPosition (saved.getX() + o.x, saved.getY() + o.y);
+
+    // LAND ON SCREEN (Jeff, 2026-08-05).  attachTo was the one path that never
+    // checked a window&#x27;s opening position -- clampWindowsIntoView runs only from
+    // Workspace::resized(), so a window opened after the last workspace layout
+    // was placed verbatim and never looked at.
+    //
+    // TWO GUARDS, both learned the hard way when the first attempt shipped
+    // without either and had to be reverted:
+    //
+    //  1. SAVES SUPPRESSED.  This runs AFTER addToDesktop, so setTopLeftPosition
+    //     reaches moved() -&gt; saveBounds().  Without the suppression the clamped
+    //     position is written into the store as though the user had chosen it,
+    //     and the real placement is destroyed on the spot.
+    //  2. POSITION ONLY.  Never resize to fit; a window is allowed to exceed the
+    //     workspace, it just may not START outside it.
+    //
+    // The partial-workspace case is covered by the machinery that already
+    // exists rather than by testing for it here: the frame passes through a
+    // smaller size on its way to full, this clamp pulls windows in against it,
+    // and then Workspace::resized() sees a GROWING workspace and calls
+    // restoreWindowsToSavedBounds() -- which is only able to put them back
+    // because guard 1 kept the store clean.
+    {
+        const ScopedSaveSuppress noSave;
+        setBounds (clampPositionToWorkspace (getBounds()));
+    }
+
+    loadSavedFillState();   // Jeff 2026-08-06: both sizes survive a restart
+
+    setVisible (true);
+    toFront (true);
+}</code></pre></details>
+<pre class="formulas">- Child-peer coordinate contract: `addToDesktop(0, parentHwnd)` creates a real WS_CHILD OS window (vendored JUCE juce_Windowing_windows.cpp :2239, :2437). setBounds AND getBounds agree in the PARENT WINDOW&#x27;S CLIENT space (:1614 set, :1653 get). Window position = workspace-local position + `Workspace::originInParentClient()`.
+- Z-ORDER TRAP: a native child peer always renders ABOVE anything drawn into its parent — `setAlwaysOnTop` does NOT cross the drawn/native boundary. Any overlay meant to cover the workspace must be promoted to its own desktop window (the app&#x27;s one `VibeTooltip` is parentless for exactly this reason).
+- Windows are contained INSIDE the fixed fullscreen main frame (locked call 2b — FL-style contained workspace); the shell chose native children specifically because a hosted VST3 editor is a foreign HWND, and only native-vs-native shares one z-order space.
+- Deferred attach: pages are built in StandaloneEditor&#x27;s constructor, before the frame has an HWND — `queueForAttach` + `Workspace::resized()` drains once the workspace is laid out (`getNativeParentHandle() != nullptr &amp;&amp; w &gt; 0 &amp;&amp; h &gt; 0`). A zero-size workspace reports origin (0,0), which misplaced every restored window by the real origin (91 px) until the queue was added.
+- First-open placement: cascade offset `step = 28 * min(6, openWindows - 1)`, origin (24 + step, 24 + step); placeholder size 480x320 when no engine-derived default is known yet (`mOpenedAtPlaceholder` lets `setDefaultWindowSize` snap it later).
+- attachTo&#x27;s landing clamp is POSITION ONLY and runs under `ScopedSaveSuppress` — a programmatic clamp must never reach the bounds store (that shipped once on 2026-08-05 and destroyed real placements).
+- Both the Workspace&#x27;s window array and the tether links are `juce::Component::SafePointer` — destroy-on-close means either end can die first; a dead pointer degrades to a no-op instead of a crash (three drag/magnetism/teardown crashes forced this).
+- Peer-keyed suspend convention (project-wide): repeating UI work starts/stops in `parentHierarchyChanged()` keyed on `getPeer() != nullptr`, never in constructors (pages can exist unframed).</pre>
+<p class="behind"><b>Behind:</b> <a href="manual-2.html#FRAME-6">View menu</a>, <a href="manual-2.html#VMENU-1">Show Builder  (F5)</a>, <a href="manual-2.html#VMENU-2">Show Mixer  (F6)</a>, <a href="manual-2.html#VMENU-3">Show Player (Most Recent)  (F7)</a>, <a href="manual-2.html#VMENU-4">Show Effects Rack (Most Recent)  (F8)</a>, <a href="manual-2.html#VMENU-5">Show Effect Panel (Most Recent)  (F9)</a>, <a href="manual-2.html#VMENU-6">Show Piano Roll (Most Recent)  (F10)</a>, <a href="manual-2.html#VMENU-7">Show Drum Kit (Most Recent)  (F11)</a>, <a href="manual-2.html#VMENU-8">Show Event Editor (Most Recent)  (F12)</a>.</p>

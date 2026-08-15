@@ -1,0 +1,118 @@
+<p>BaySickPlayer maps audio files across the keyboard and replays them
+pitched: playing a note above or below the sample's root plays it faster or
+slower. Root notes are read from filenames where they can be, and on a
+Drums tab every sample's root is pinned to the trigger key so each drum
+plays at its recorded pitch - the rule that makes one folder behave as a
+kit on a Drums tab and as an instrument on a Layers tab. STRETCH runs
+tempo-relative time-stretching (clamped to sane ratios) so loops follow
+the song's BPM. The velocity system routes playing force three ways -
+into loudness, into a muffle filter for soft hits, into a hardness tilt
+for loud ones - which is what lets one sample sound played rather than
+triggered. Sample start, reverse, unison stacking, the subtractive filter
+and the ADSR complete the voice; each is covered by its shared topic.</p>
+
+<div class="codeblock"><div class="codehead">Source\BaySickPlayer\BaySickPlayerDSP.cpp (BaySickPlayerVoice::startNote / renderNextBlock)</div><pre><code>// BaySickPlayerVoice::startNote (pitch ratio + stretch clamp) -- Source/BaySickPlayer/BaySickPlayerDSP.cpp
+    // ResamplingAudioSource handles pitch shifting; per-note ratio drives transposition.
+    // S1 2026-04-21: global tune (semitones) + per-voice unison cents (set by BaySickPlayerSynth fan-out).
+    //  mNextUnisonCents already encodes (mDetune via mode) + (unisonSpread) per voice; consumed on startNote.
+    const double pitchSemitones = (double) (midiNote - region-&gt;rootNote)
+                                + (double) region-&gt;tuneOffset
+                                + (double) mTune
+                                + (double) mNextUnisonCents / 100.0;
+    mNextUnisonCents = 0.0f;  // consume the tag
+    const double pitchRatio = std::pow (2.0, pitchSemitones / 12.0);
+    const double resampRatio = (region-&gt;fileSampleRate / mSampleRate) * pitchRatio
+                               * (double) juce::jlimit (0.5f, 2.0f, mStretch);</code></pre></div>
+<details class="fullfn"><summary>Full function &mdash; Source\BaySickPlayer\BaySickPlayerDSP.cpp (BaySickPlayerVoice::startNote / renderNextBlock)</summary><pre><code>void BaySickPlayerVoice::startNote (int midiNote, float velocity,
+                            juce::SynthesiserSound* /*sound*/,
+                            int /*pitchWheelPos*/)
+{
+    releaseResources();
+
+    // [QA-VoicePool: restore user&#x27;s ADSR params after a steal override -- elided]
+
+    const int velInt = juce::roundToInt (velocity * 127.f);
+    const BaySickPlayerRegion* region = mManager.findRegion (midiNote, velInt, mArticGroup);
+    if (!region || !region-&gt;audioData) { clearCurrentNote(); return; }
+
+    mSampleBuffer = region-&gt;audioData;
+
+    // QA-VoicePool Task 2: re-point the chosen fat source at the new region&#x27;s
+    // buffer + select the matching permanent resampler.  No heap allocation on
+    // the audio thread.
+    if (mReverse)
+    {
+        mReverseSrc.setBuffer (*mSampleBuffer);
+        mActiveSrc    = &amp;mReverseSrc;
+        mActiveResamp = &amp;mReverseResamp;
+    }
+    else
+    {
+        mForwardSrc.setBuffer (*mSampleBuffer);
+        mActiveSrc    = &amp;mForwardSrc;
+        mActiveResamp = &amp;mForwardResamp;
+    }
+
+    // Sample-start skip-into (S1 2026-04-21) applied to the source before resampling.
+    if (mSampleStart &gt; 0.0f &amp;&amp; mSampleBuffer-&gt;getNumSamples() &gt; 0)
+    {
+        const juce::int64 startPos = (juce::int64)
+            (juce::jlimit (0.f, 0.999f, mSampleStart) * (float) mSampleBuffer-&gt;getNumSamples());
+        mActiveSrc-&gt;setNextReadPosition (startPos);
+    }
+
+    // [pitch ratio + resampRatio -- see excerpt above]
+
+    // [QA-H per-note glide arm (CC84 slide/porta): mGlideSemisCur ramps to zero
+    //  over tSec = ((CC5&lt;&lt;7)|CC37) ms or 60 ms fallback -- elided]
+
+    mActiveResamp-&gt;flushBuffers ();
+    mActiveResamp-&gt;setResamplingRatio (mGlideSamplesLeft &gt; 0
+        ? mGlideBaseRatio * std::pow (2.0, (double) mGlideSemisCur / 12.0)
+        : resampRatio);
+
+    // Sensitivity: reshape velocity curve (0→flat, 1→very responsive)
+    const float sensExp = 2.0f - mSensitivity * 1.8f; // 0→2.0, 0.5→1.1, 1→0.2
+    const float adjustedVelocity = std::pow (juce::jlimit (0.001f, 1.f, velocity), sensExp);
+
+    // Per-note velocity + region volume offset (kept separate from mVolume).
+    // S1 2026-04-21: VEL-&gt;VOLUME amount crossfades between flat (1.0) and full velocity scaling.
+    const float volVelMix = (1.0f - mVelToVolume) + mVelToVolume * adjustedVelocity;
+    mVelocityScale = juce::Decibels::decibelsToGain (region-&gt;volumeOffset) * volVelMix;
+
+    // Muffle: reduce filter cutoff. MUFFLE is a static control; VEL→MUFFLE routes
+    // velocity so that louder hits bypass some of the muffle (brighter on loud hits).
+    {
+        const float velFactor = 1.0f - mVelToMuffle * adjustedVelocity;
+        mNoteCutoffBias = mMuffle * velFactor * (mBaseCutoff - 200.f);
+    }
+    // Hardness: HARDNESS is a base resonance control (always active). VEL→HARDNESS
+    // scales it with velocity so that louder hits are harder-sounding.
+    {
+        const float velScale = 1.0f - mVelToHardness * (1.0f - adjustedVelocity);
+        mNoteResBias = mHardness * velScale;
+    }
+
+    mFilter.reset();
+    // QA-H: per-note CC72 release scale on top of the user&#x27;s base ADSR
+    {
+        auto p = mAdsrBase;
+        p.release = juce::jmax (0.001f, p.release * mActiveRelScale);
+        mAdsr.setParameters (p);
+    }
+    mAdsr.noteOn();
+    mLfoPhase  = 0.0;
+    mReductStep = 0;
+    mIsPlaying  = true;
+
+    // [mIsActive flag + monotonic note counter for oldest-first stealing -- elided]
+}</code></pre></details>
+<pre class="formulas">- Root-note pitch ratio: `pitchSemitones = (midiNote - rootNote) + region.tuneOffset + globalTune + unisonCents/100`; `pitchRatio = 2^(pitchSemitones/12)`.
+- Resampling ratio: `resampRatio = (fileSampleRate / deviceSampleRate) * pitchRatio * clamp(stretch, 0.5, 2.0)` -- the Stretch knob is varispeed (pitch + speed together, tape-style).
+- Root-note source: `VibeSampleManager::detectRootNote` parses filename numbers as MIDI notes; drum pages pass `normalizeRoot = 60` so voice pitch `midiNote - 60` plays the file at recorded pitch on the default trigger note (CLAUDE.md drum-root rule).
+- Tempo-relative stretch clamp (clip path, QA-Ec): Stretch mode `stretchRatio = clamp(originalBPM / projectBPM, 1/64, 64)` (length pinned, phase-vocoder stretch); Resample mode `tempoFollow = clamp(projectBPM / originalBPM, 1/64, 64)` rides the varispeed slots (vinyl law: rate and pitch move together). Guards degenerate `originalBPM` from collapsing the window math into silence.
+- Velocity sensitivity curve: `adjVel = vel^(2 - sensitivity * 1.8)` (sens 0 -&gt; exponent 2.0 flat-feel, 0.5 -&gt; 1.1, 1 -&gt; 0.2 very responsive).
+- VEL-&gt;VOLUME: `volVelMix = (1 - amt) + amt * adjVel`; note gain = `dbToGain(region.volumeOffset) * volVelMix`.
+- VEL-&gt;MUFFLE: cutoff bias `= muffle * (1 - velToMuffle * adjVel) * (baseCutoff - 200)`; applied as `effCutoff = clamp(baseCutoff - bias, 20, 20000)` -- louder hits bypass the muffle (brighter).
+- VEL-&gt;HARDNESS: res bias `= hardness * (1 - velToHardness * (1 - adjVel))`; `effRes = clamp(baseRes + bias * 9.5 + cc71Offset, 0.5, 10)` -- louder hits harder.
+- Per-note glide/vibrato compose in semitone space: resampler ratio per chunk `= glideBaseRatio * 2^((glideSemis + vibSemis * sin(lfoPhase)) / 12)`; `juce::ResamplingAudioSource` does the fractional-position linear interpolation.</pre>

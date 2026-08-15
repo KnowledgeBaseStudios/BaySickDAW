@@ -1,0 +1,293 @@
+<p>Each voice starts as a shaped wave: the WAVEFORM picker chooses the
+family, the MODIFIER bends its harmonic recipe continuously rather than
+jumping between fixed shapes, and TRANSPOSE moves it in musical steps. On
+top of that sit the character layers from the MOD panel: a noise generator
+with selectable color (and a NOISE ONLY mode that mutes the oscillator for
+percussion patches), a transient generator that staples a short bright
+click to each note's front, a burst engine that retriggers a note into a
+rapid roll, and a slow random drift that loosens the tuning the way analog
+hardware does. SYNC and RING are the two classic two-oscillator tricks -
+hard cycle-locking and multiplication - producing tearing and metallic
+spectra respectively. The BaySickBass is this same voice with different
+defaults and its own accent color; every control exists on both.</p>
+
+<div class="codeblock"><div class="codehead">Source\BaySickSynth\BaySickSynthVoice.cpp (BaySickSynthVoice::renderNextBlock -- oscillator switch, modifier, noise/transient/burst/drift; shared by BaySickBass via BaySickSynthDSP)</div><pre><code>// BaySickSynthVoice::renderNextBlock (section 7: waveform generation, representative cases)
+            // ── Pulse (variable width, inline phase) ──────────────────────────
+            case BssWaveform::Pulse:
+            {
+                mPhase1 += (double) playFreq / (double) sr;
+                if (mPhase1 &gt;= 1.0) mPhase1 -= 1.0;
+                const float pw = juce::jlimit (0.05f, 0.95f, effModifier);
+                sample = ((float) mPhase1 &lt; pw) ? 0.5f : -0.5f;
+                break;
+            }
+
+            // ── Bell (FM synthesis, 2:1 ratio) ────────────────────────────────
+            case BssWaveform::Bell:
+            {
+                const float fmFreq  = playFreq * 2.0f;
+                const float fmBeta  = effModifier * 20.0f;   // FM index 0..20
+                mFMModPhase += (double) fmFreq / (double) sr;
+                if (mFMModPhase &gt;= 1.0) mFMModPhase -= 1.0;
+                const float modOut  = std::sin ((float) mFMModPhase * twoPi) * fmBeta;
+                mFMCarrierPhase += (double) playFreq / (double) sr;
+                if (mFMCarrierPhase &gt;= 1.0) mFMCarrierPhase -= 1.0;
+                sample = std::sin ((float) mFMCarrierPhase * twoPi + modOut);
+                break;
+            }
+
+            // ── DeafSaw (saw through one-pole LP) ─────────────────────────────
+            case BssWaveform::DeafSaw:
+            {
+                mPhase1 += (double) playFreq / (double) sr;
+                if (mPhase1 &gt;= 1.0) mPhase1 -= 1.0;
+                const float rawSaw = 1.0f - 2.0f * (float) mPhase1;
+
+                const float fc    = 100.0f + effModifier * effModifier * 2900.0f;
+                const float alpha = 1.0f - std::exp (-twoPi * fc / sr);
+                mDeafSawState += alpha * (rawSaw - mDeafSawState);
+                sample = mDeafSawState;
+                break;
+            }</code></pre></div>
+<details class="fullfn"><summary>Full function &mdash; Source\BaySickSynth\BaySickSynthVoice.cpp (BaySickSynthVoice::renderNextBlock -- oscillator switch, modifier, noise/transient/burst/drift; shared by BaySickBass via BaySickSynthDSP)</summary><pre><code>void BaySickSynthVoice::renderNextBlock (juce::AudioBuffer&lt;float&gt;&amp; buf,
+                                          int startSample, int numSamples)
+{
+    if (!isVoiceActive()) return;
+    if (buf.getNumChannels() &lt; 2) return;
+
+    auto* L = buf.getWritePointer (0);
+    auto* R = buf.getWritePointer (1);
+    const float sr  = (float) getSampleRate();
+    const float twoPi = juce::MathConstants&lt;float&gt;::twoPi;
+
+    for (int i = startSample; i &lt; startSample + numSamples; ++i)
+    {
+        // [slide loudness / pan ramps, glide, LFO, pitch env -- see IMP-83/85]
+
+        // ── Analog drift (P3.10): slow per-voice pitch wander for warmth ──────
+        //   Retargets to a new random offset every ~400 ms, smooths toward it
+        //   with a ~45 ms time constant so the motion is always audible but
+        //   never abrupt. ±25 cents at max = quarter-tone; typical musical use
+        //   is 0.2-0.4 for subtle analog warmth.
+        if (mDriftAmount &gt; 0.0001f)
+        {
+            if (--mDriftCounter &lt;= 0)
+            {
+                mDriftRngState = mDriftRngState * 1664525u + 1013904223u;
+                const float rnd = (int) mDriftRngState * (1.0f / 2147483648.0f); // -1..1
+                mDriftTargetCents = rnd * 25.0f;   // ±25 cents at max
+                mDriftCounter    = (int) (sr * 0.4f);
+            }
+            mDriftCurrentCents += (mDriftTargetCents - mDriftCurrentCents) * mDriftSmoothCoef;
+            pitchSemis += (mDriftCurrentCents / 100.0f) * mDriftAmount;
+        }
+
+        float playFreq = mCurrentFreqHz;
+        if (pitchSemis != 0.0f)
+            playFreq *= std::pow (2.0f, pitchSemis / 12.0f);
+        playFreq = juce::jlimit (20.0f, 22000.0f, playFreq);
+
+        // ── 4. Effective modifier (LFO can modulate) ──────────────────────────
+        float effModifier = mModifier;
+        if (mLFODest == BssLFODest::OscModifier)
+            effModifier = juce::jlimit (0.0f, 1.0f, mModifier + effectiveLFO * 0.3f);
+
+        // [filter env + effective cutoff -- see IMP-82]
+
+        // ── 7. Generate oscillator sample ─────────────────────────────────────
+        float sample = 0.0f;
+
+        if (! mNoiseOnlyMode)
+        {
+        switch (mWaveform)
+        {
+            // ── Saw (single wavetable) ────────────────────────────────────────
+            case BssWaveform::Saw:
+                mOsc.setFrequency (playFreq);
+                sample = mOsc.getNextSample();
+                break;
+
+            // ── Saw + Saw (two detuned saws) ──────────────────────────────────
+            case BssWaveform::SawSaw:
+            {
+                float osc1Hz = playFreq;
+                float osc2Hz = playFreq;
+                if (mDualOscMode == 1)        // Hz Offset: osc2 = osc1 + offset
+                {
+                    osc2Hz = juce::jlimit (20.0f, 22000.0f, playFreq + effModifier * 2000.0f);
+                }
+                else if (mDualOscMode == 2)   // Absolute Hz: osc2 = fixed freq
+                {
+                    osc2Hz = 20.0f * std::pow (1000.0f, effModifier);  // log 20..20000
+                }
+                else                          // Musical: current detune behaviour
+                {
+                    const float detHz = playFreq * (std::pow (2.0f, effModifier * 50.0f / 1200.0f) - 1.0f);
+                    osc1Hz = playFreq + detHz * 0.5f;
+                    osc2Hz = playFreq - detHz * 0.5f;
+                }
+
+                float s1 = 0.0f, s2 = 0.0f;
+                if (mOscSync)
+                {
+                    // Hard sync: osc2 phase resets whenever osc1 wraps.
+                    mSyncPhase1 += (double) osc1Hz / (double) sr;
+                    if (mSyncPhase1 &gt;= 1.0) { mSyncPhase1 -= 1.0; mSyncPhase2 = 0.0; }
+                    mSyncPhase2 += (double) osc2Hz / (double) sr;
+                    if (mSyncPhase2 &gt;= 1.0) mSyncPhase2 -= 1.0;
+                    s1 = 1.0f - 2.0f * (float) mSyncPhase1;
+                    s2 = 1.0f - 2.0f * (float) mSyncPhase2;
+                }
+                else
+                {
+                    mOsc.setFrequency  (osc1Hz);
+                    mOsc2.setFrequency (osc2Hz);
+                    s1 = mOsc.getNextSample();
+                    s2 = mOsc2.getNextSample();
+                }
+                sample = mRingMod ? (s1 * s2) : ((s1 + s2) * 0.5f);
+                break;
+            }
+
+            // [Pulse / SawSquare / SquareSquare / Bell / DeafSaw: see excerpt;
+            //  SawSquare &amp; SquareSquare repeat the SawSaw structure with square taps
+            //  s = (phase &lt; 0.5) ? 1 : -1]
+
+            // ── Supersaw (7-voice unison) ─────────────────────────────────────
+            case BssWaveform::Supersaw:
+                mOsc.setDetune   (effModifier * 0.5f);  // 0..0.5 semitones spread
+                mOsc.setFrequency (playFreq);
+                sample = mOsc.getNextSample();
+                break;
+
+            // ── SpreadOct (root + octave up + octave down) ────────────────────
+            case BssWaveform::SpreadOct:
+            {
+                mPhase1 += (double) playFreq          / (double) sr;
+                mPhase2 += (double) playFreq * 2.0f   / (double) sr;
+                mPhase3 += (double) playFreq * 0.5f   / (double) sr;
+                if (mPhase1 &gt;= 1.0) mPhase1 -= 1.0;
+                if (mPhase2 &gt;= 1.0) mPhase2 -= 1.0;
+                if (mPhase3 &gt;= 1.0) mPhase3 -= 1.0;
+                const float s1 = 1.0f - 2.0f * (float) mPhase1;
+                const float s2 = 1.0f - 2.0f * (float) mPhase2;
+                const float s3 = 1.0f - 2.0f * (float) mPhase3;
+                const float mix = effModifier;
+                sample = s1 * (1.0f - mix * 0.5f) + (s2 + s3) * mix * 0.25f;
+                break;
+            }
+
+            // [SpreadFifth: same shape with ratios 1.5 and 2/3]
+
+            // ── Sine (pure sine, P3.2) ────────────────────────────────────────
+            case BssWaveform::Sine:
+            {
+                mPhase1 += (double) playFreq / (double) sr;
+                if (mPhase1 &gt;= 1.0) mPhase1 -= 1.0;
+                sample = std::sin ((float) mPhase1 * twoPi);
+                break;
+            }
+
+            default:
+                break;
+        }
+        }  // end if (!mNoiseOnlyMode)
+
+        // ── 8. Noise (P3.9: white / pink / brown colour) ──────────────────────
+        if (mNoiseOnlyMode || mNoiseLevel &gt; 0.001f)
+        {
+            mNoiseSeed = mNoiseSeed * 1664525u + 1013904223u;
+            const float whiteN = (int) mNoiseSeed * (1.0f / 2147483648.0f); // -1..1
+
+            float colouredN = whiteN * mWhiteRateGain;
+
+            if (mNoiseColor == 1)  // Pink (Paul Kellett filter, ~ -3 dB/oct slope)
+            {
+                mPinkB[0] = mPinkPole[0] * mPinkB[0] + whiteN * mPinkGain[0];
+                mPinkB[1] = mPinkPole[1] * mPinkB[1] + whiteN * mPinkGain[1];
+                mPinkB[2] = mPinkPole[2] * mPinkB[2] + whiteN * mPinkGain[2];
+                mPinkB[3] = mPinkPole[3] * mPinkB[3] + whiteN * mPinkGain[3];
+                mPinkB[4] = mPinkPole[4] * mPinkB[4] + whiteN * mPinkGain[4];
+                mPinkB[5] = mPinkPole[5] * mPinkB[5] + whiteN * mPinkGain[5];
+                colouredN = (mPinkB[0] + mPinkB[1] + mPinkB[2] + mPinkB[3]
+                           + mPinkB[4] + mPinkB[5] + mPinkB[6] + whiteN * 0.5362f) * 0.11f;
+                mPinkB[6] = whiteN * 0.115926f;
+            }
+            else if (mNoiseColor == 2)  // Brown (leaky integrator, ~ -6 dB/oct slope)
+            {
+                mBrownState = mBrownPole * mBrownState + whiteN * mBrownGain;
+                mBrownState = juce::jlimit (-1.0f, 1.0f, mBrownState);
+                colouredN   = mBrownState * 3.5f;   // level-match to white
+            }
+
+            const float noiseGain = mNoiseOnlyMode
+                ? (mNoiseLevel &gt; 0.001f ? mNoiseLevel : 1.0f)
+                : mNoiseLevel;
+            sample += colouredN * noiseGain;
+        }
+
+        // ── 9. Filter ─────────────────────────────────────────────────────────
+        sample = mFilter.processSample (sample);
+
+        // ── 10. Amp envelope + velocity (blendable 0..1) ──────────────────────
+        const float ampVal = mAmpEnv.getNextSample();
+        const float velScale = mVelAmpTrack * mCurrentVelocity + (1.0f - mVelAmpTrack);
+        sample *= ampVal * velScale;
+
+        // ── 10a. Multi-burst modulator (P3.6) ──────────────────────────────────
+        if (mBurstMode)
+        {
+            const float burstSpacingSamples = juce::jmax (1.0f, mBurstSpacingMs * 0.001f * sr);
+            const int   burstIdx            = (int) ((float) mBurstSamplesElapsed / burstSpacingSamples);
+
+            if (burstIdx &lt; mBurstCount)
+            {
+                const float timeInBurst = std::fmod ((float) mBurstSamplesElapsed, burstSpacingSamples);
+                const float tau         = burstSpacingSamples * 0.25f;
+                const float burstMul    = std::exp (-timeInBurst / tau);
+                sample *= burstMul;
+            }
+            // else: bursts complete -&gt; multiplier = 1 (pass-through)
+            ++mBurstSamplesElapsed;
+        }
+
+        // [declick fade-in]
+
+        // ── 10b. Transient injector (P3.5) ────────────────────────────────────
+        //   Added AFTER amp envelope + filter so the &quot;click&quot; plays at full
+        //   level regardless of attack time / filter cutoff.
+        if (mTransientSamplesRemaining &gt; 0)
+        {
+            mTransientNoiseSeed = mTransientNoiseSeed * 1664525u + 1013904223u;
+            const float rawNoise = (int) mTransientNoiseSeed * (1.0f / 2147483648.0f)
+                                 * mWhiteRateGain;
+
+            // One-pole HPF for colour
+            const float alpha = std::exp (-twoPi * mTransientColourHz / sr);
+            const float y = alpha * (mTransientHPFState + rawNoise - mTransientPrevInput);
+            mTransientHPFState  = y;
+            mTransientPrevInput = rawNoise;
+
+            // Exp-decay envelope: 1.0 at t=0, ~0.02 at t=duration
+            const float envT = 1.0f - (float) mTransientSamplesRemaining / (float) mTransientSamplesTotal;
+            const float env  = std::exp (-envT * 4.0f);
+
+            sample += y * env * mTransientAmount;
+            --mTransientSamplesRemaining;
+        }
+
+        // [10c unison stack -- see IMP-84; cut fade + stereo out + retire -- see IMP-85]
+    }
+}</code></pre></details>
+<pre class="formulas">- Phase accumulators: `phase += freq / sr`, wrap at 1.0. Saw: `1 - 2*phase`; square: `phase &lt; 0.5 ? +1 : -1`; pulse: `phase &lt; pw ? 0.5 : -0.5` with `pw = clamp(modifier, 0.05, 0.95)`.
+- Modifier (the one MODIFIER knob, 0..1) is per-waveform: dual-osc Musical detune `detHz = f*(2^(mod*50/1200) - 1)` split ± half; Hz Offset `osc2 = f + mod*2000`; Absolute `osc2 = 20 * 1000^mod` (log 20..20000 Hz); Supersaw detune spread `mod * 0.5` semitones; Bell FM index `beta = mod * 20`; DeafSaw cutoff `fc = 100 + mod^2 * 2900`; Spread mix `s1*(1 - mix/2) + (s2+s3)*mix/4`.
+- Hard sync: osc2 phase resets to 0 whenever osc1 wraps. Ring mod: `s1 * s2` instead of `(s1 + s2)/2`.
+- Bell FM (2:1): `sample = sin(carrierPhase*2pi + sin(modPhase*2pi) * beta)`, modulator at `2 * playFreq`.
+- DeafSaw one-pole LP: `alpha = 1 - exp(-2pi*fc/sr)`, `state += alpha * (in - state)`.
+- Noise LCG: `seed = seed * 1664525 + 1013904223`; white `(int)seed / 2^31` in -1..1; white in-band gain `sqrt(rate/44100)` (`mWhiteRateGain`). Pink = Paul Kellett 6-section filter with poles/gains re-derived per rate: `p&#x27; = sign(p)*|p|^(44100/rate)`, `g&#x27; = g * sqrt((1-p&#x27;^2)/(1-p^2))`. Brown = leaky integrator `state = pole*state + white*gain`, clamp ±1, output `* 3.5`.
+- Analog drift: retarget every 0.4 s to `rand * 25` cents; one-pole smooth with `coef = 1 - exp(-1/(0.045351 * sr))` (~45 ms tau); contribution `(cents/100) * amount` semitones.
+- Transient injector: HPF&#x27;d noise burst, `y = alpha * (state + in - prevIn)` with `alpha = exp(-2pi*colourHz/sr)`; envelope `exp(-envT * 4)` over `durationMs`; added post-envelope/filter.
+- Multi-burst (handclap): pulse index `elapsed / spacingSamples`; within each of `burstCount` pulses `mul = exp(-t / tau)`, `tau = spacing * 0.25`; multiplier 1 after all bursts.
+- Amp: `sample *= env * (velAmpTrack * velocity + (1 - velAmpTrack))`.
+- Pitch: `midiToHz(n) = 440 * 2^((n - 69)/12)`; glide is geometric: `ratio = (target/current)^(1/glideSamples)`, `freq *= ratio` per sample.</pre>
+<p class="behind"><b>Behind:</b> <a href="manual-2.html#BSSBOSC-3">WAVEFORM picker</a>, <a href="manual-2.html#BSSBOSC-4">Tuning-mode picker</a>, <a href="manual-2.html#BSSBOSC-5">TRANSPOSE</a>, <a href="manual-2.html#BSSBOSC-6">MODIFIER</a>, <a href="manual-2.html#BSSBOSC-7">NOISE</a>, <a href="manual-2.html#BSSBOSC-8">SYNC</a>, <a href="manual-2.html#BSSBOSC-9">RING</a>, <a href="manual-2.html#BSSBOSC-14">OUT VOL</a>, <a href="manual-2.html#BSSBOSC-15">MOD WHEEL destination</a>, <a href="manual-2.html#BSSBOSC-16">Mod-wheel AMOUNT</a>, <a href="manual-2.html#BSSBMOD-1">NO... / noise group</a>, <a href="manual-2.html#BSSBMOD-2">TRANSIENT group</a>, <a href="manual-2.html#BSSBMOD-3">BURST ENV BURST switch</a>, <a href="manual-2.html#BSSBMOD-4">COUNT / SPACING</a>.</p>

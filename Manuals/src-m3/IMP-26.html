@@ -1,0 +1,79 @@
+<p>The parametric option on the pedalboard EQ slot - you choose the frequencies rather than getting fixed ones.</p>
+
+<div class="codeblock"><div class="codehead">Source\DSP\FurmanEQStyleDSP.cpp</div><pre><code>// FurmanEQStyleDSP::process — preamp sigmoid + 3 parametric bands + Hi/Lo range
+    if (mInputVolDb &gt; 0.001f)
+    {
+        const float preGain = juce::Decibels::decibelsToGain (mInputVolDb);
+        float blockPeak = 0.0f;
+        for (int ch = 0; ch &lt; numCh; ++ch)
+        {
+            float* p = buffer.getWritePointer (ch);
+            for (int i = 0; i &lt; n; ++i)
+            {
+                const float driven = p[i] * preGain;                 // pre-tanh drive
+                blockPeak = juce::jmax (blockPeak, std::abs (driven));
+                // tanh smoothly limits the boosted signal.  At low gain
+                // tanh(x) ~= x so this is transparent below ~0 dBFS.
+                p[i] = std::tanh (driven);
+            }
+        }
+        mClipLevel.store (blockPeak, std::memory_order_relaxed);
+    }</code></pre></div>
+<details class="fullfn"><summary>Full function &mdash; Source\DSP\FurmanEQStyleDSP.cpp</summary><pre><code>void FurmanEQStyleDSP::process (juce::AudioBuffer&lt;float&gt;&amp; buffer)
+{
+    if (bypassed) return;
+    juce::ScopedNoDenormals noDenormals;
+
+    const int numCh = buffer.getNumChannels();
+    const int n     = buffer.getNumSamples();
+    if (numCh == 0 || n == 0) return;
+
+    // ── Preamp: master input volume + sigmoid soft-clip ─────────────────────
+    // QA-EffectsReview Task 3: the +86 dB total range emerges from this preamp
+    // (now capped at +26 dB) PLUS the boost bands + the Hi switch, not the
+    // preamp alone.  We track the pre-tanh peak for the overload LED.
+    if (mInputVolDb &gt; 0.001f)
+    {
+        const float preGain = juce::Decibels::decibelsToGain (mInputVolDb);
+        float blockPeak = 0.0f;
+        for (int ch = 0; ch &lt; numCh; ++ch)
+        {
+            float* p = buffer.getWritePointer (ch);
+            for (int i = 0; i &lt; n; ++i)
+            {
+                const float driven = p[i] * preGain;                 // pre-tanh drive
+                blockPeak = juce::jmax (blockPeak, std::abs (driven));
+                // tanh smoothly limits the boosted signal.  At low gain
+                // tanh(x) ~= x so this is transparent below ~0 dBFS.
+                p[i] = std::tanh (driven);
+            }
+        }
+        mClipLevel.store (blockPeak, std::memory_order_relaxed);
+    }
+    else
+    {
+        mClipLevel.store (0.0f, std::memory_order_relaxed);          // no preamp -&gt; no overload
+    }
+
+    // ── 3 parametric bands (only if EQ-bypass switch is OFF) ────────────────
+    if (! mEqBypassed)
+    {
+        juce::dsp::AudioBlock&lt;float&gt; blk (buffer);
+        auto sub = blk.getSubBlock (0, (size_t) n).getSubsetChannelBlock (0, (size_t) numCh);
+        juce::dsp::ProcessContextReplacing&lt;float&gt; ctx (sub);
+
+        for (auto&amp; b : mBands) b.process (ctx);
+    }
+
+    // ── Hi/Lo output gain-range switch (+20 dB in Hi) ───────────────────────
+    // QA-EffectsReview Task 3.  Applied to the whole output regardless of the
+    // EQ-bypass switch (it is an output gain stage, not part of the band block).
+    if (mGainRange == GainRange::Hi)
+        buffer.applyGain (juce::Decibels::decibelsToGain (20.0f));
+}</code></pre></details>
+<pre class="formulas">- 3 fully parametric peak bands: Low sweeps 25-500 Hz (default 80), Mid 150-2500 Hz (default 1 kHz), High 600-10000 Hz (default 5 kHz).
+- Per-band Boost: -60..+20 dB; at &lt;= -59.99 dB the band gain is forced to 0.0001 linear (-80 dB, an effective kill/notch).
+- Per-band Q: 0.2..3.8 (PQ-3 Q range), default 0.7.
+- Preamp: input volume 0..+26 dB followed by `tanh(x * preGain)` sigmoid soft clip — transparent below ~0 dBFS since tanh(x) ~ x for small x; the pre-tanh block peak feeds the overload LED (`mClipLevel`).
+- Hi/Lo gain-range switch: Hi adds a flat +20 dB output stage, applied even when the band block is EQ-bypassed.
+- Total available gain (~+86 dB reference behavior) emerges from preamp (+26) + three +20 dB bands + Hi switch (+20), not from one stage.</pre>

@@ -1,0 +1,152 @@
+<p>Packs the project and, optionally, every sample and outside file it refers to,
+so it opens on a machine that has none of your library. The size estimate counts
+the project folder as well as the referenced files.</p>
+
+<div class="codeblock"><div class="codehead">Source\Standalone\ProjectBundler.h (the walker + writer API)</div><pre><code>// ProjectBundler.cpp -- reference classification + copy rule (verbatim, lines 17-63)
+    RefKind classify (const juce::File&amp; resolved, const juce::File&amp; projectFolder)
+    {
+        if (resolved == juce::File() || ! resolved.existsAsFile()) return RefKind::Missing;
+        if (isUnder (resolved, projectFolder))                     return RefKind::ProjectRelative;
+        if (isUnder (resolved, SampleLibrary::getUserSamplesDir()))return RefKind::UserSamples;
+        if (isUnder (resolved, SampleLibrary::getCoreLibraryDir()))return RefKind::CoreLibrary;
+        return RefKind::Absolute;
+    }
+
+    // Files the destination machine will not have unless we bring them.
+    // Docket 22=b: Core Library NEVER copies -- any install that can open the
+    // project already has it, and copying it would mean GB-scale bundles once
+    // engine references (sfizz kits) are part of the walk.
+    bool needsCopying (RefKind k, Scope scope)
+    {
+        switch (k)
+        {
+            case RefKind::UserSamples:
+            case RefKind::Absolute:        return scope == Scope::SelfContained;
+            case RefKind::CoreLibrary:     return false;
+            case RefKind::ProjectRelative: return false;   // inside the folder already
+            case RefKind::Missing:         return false;
+        }
+        return false;
+    }</code></pre></div>
+<details class="fullfn"><summary>Full function &mdash; Source\Standalone\ProjectBundler.h (the walker + writer API)</summary><pre><code>// ProjectBundler.h -- the whole API surface (verbatim, lines 22-135, banner trimmed)
+namespace ProjectBundler
+{
+    // Where a referenced file actually lives.  This drives both what the user is
+    // told and what SelfContained has to copy.
+    enum class RefKind
+    {
+        ProjectRelative,   // already inside the project folder - travels for free
+        UserSamples,       // Documents\BaySickDAW\My Samples
+        CoreLibrary,       // shipped factory content
+        Absolute,          // anywhere else on disk
+        Missing            // stored path resolves to nothing
+    };
+
+    struct Reference
+    {
+        juce::String storedPath;   // exactly as persisted in the project
+        juce::File   resolved;     // absolute location, or File() when Missing
+        RefKind      kind { RefKind::Missing };
+        juce::String origin;       // human-readable &quot;where this came from&quot;
+    };
+
+    enum class Mode  { Zip, Folder };
+
+    // QA-ProjectSave docket 22=b (2026-07-26): NEITHER scope copies Core Library
+    // content any more.  Anyone who can open a BaySickDAW project has BaySickDAW
+    // installed and therefore has the Core Library, so copying it in bought
+    // nothing -- and once engine references are walked it would drag 555 MB-1 GB
+    // sfizz product folders into every bundle.
+    //
+    // References     - files the project itself owns (its Samples folder).
+    // SelfContained  - additionally copy My Samples + absolute references, i.e.
+    //                  everything not guaranteed to exist on the target install.
+    enum class Scope { References, SelfContained };
+
+    struct Result
+    {
+        bool              ok { false };
+        juce::String      error;
+        juce::StringArray missing;      // stored paths that resolved to nothing
+        // What did not make it into the bundle intact: a source that would not
+        // copy, or a project.xml whose references could not be updated.
+        juce::StringArray copyFailed;
+        int               filesCopied { 0 };   // externals pulled in, not references to them
+        // MF-2: what the bundle actually WEIGHS.  filesCopied counts only files
+        // pulled in from outside the project folder, so on a project whose audio
+        // lives inside it (any recording) that number is 0 while the bundle is
+        // large.  These two are the whole bundle, project folder included.
+        juce::int64       totalBytes { 0 };
+        int               totalFiles { 0 };
+    };
+
+    // MF-2: what a bundle will weigh, counting the SAME two sets write() copies
+    // -- the project folder minus the excluded freeze cache, plus the external
+    // references this scope pulls in.  Reported before the write so a large
+    // export is a decision rather than a surprise.
+    struct Estimate
+    {
+        juce::int64 bytes { 0 };
+        int         files { 0 };
+    };
+
+    // Enumerates the audio references reachable from the pattern data: the
+    // project&#x27;s audio library plus every arrangement block&#x27;s audioFilePath (the
+    // arrangement is project-global, not per-pattern).
+    //
+    // `tabsXml`, when supplied, is the &lt;Tabs&gt; element StandaloneEditor produces
+    // for project/template save.  It is how engine-held references get walked:
+    // clip paths and sfizz kit paths are plain attributes, NAM captures and user
+    // IRs live in the Inst chain XML, and BaySickPlayer sample paths sit inside
+    // base64 engine-state blobs that have to be decoded.  Passing nullptr limits
+    // the result to PatternManager references (the pre-2026-07-26 behaviour).
+    //
+    // `rackStatesXml`, when supplied, is a BaySickGraph::saveRackStates snapshot.
+    // Effects that hold user files (the Acoustic units&#x27; user IRs) can sit in
+    // any bus or insert rack, and those live under project.xml&#x27;s &lt;Processor&gt;
+    // rather than &lt;Tabs&gt; -- without this the walk never sees them.
+    //
+    // Non-const PatternManager only because getBlock() has no const overload;
+    // this reads and never mutates.
+    std::vector&lt;Reference&gt; enumerate (PatternManager&amp; pm,
+                                      const BaySickDAWProcessor&amp; processor,
+                                      const juce::XmlElement* tabsXml = nullptr,
+                                      const juce::XmlElement* rackStatesXml = nullptr);
+
+    // Size + file count of the bundle this scope will produce, so the user is
+    // told BEFORE a multi-hundred-MB write rather than after.  `projectFolder`
+    // is required: its own contents are the dominant term for any project that
+    // holds recordings, and the pre-MF-2 version omitted them entirely, which
+    // made the warning silent in exactly the case it exists for.
+    //
+    // Zip mode note for callers: these are UNCOMPRESSED bytes, so the finished
+    // archive is smaller than the figure reported.
+    Estimate estimateBundle (const std::vector&lt;Reference&gt;&amp; refs, Scope scope,
+                             const juce::File&amp; projectFolder);
+
+    // Writes the bundle.  `projectFolder` is the source project directory.
+    // Missing files are REPORTED, never silently dropped.
+    //
+    // Copied files are RE-REFERENCED: the bundle&#x27;s own project.xml is rewritten
+    // so every file this call relocated into Samples/ is referenced at its new
+    // location (including a &quot; (N)&quot; rename forced by a basename collision).
+    // Without that the copies sit in the bundle referenced by nothing and the
+    // destination machine reports them missing -- so a rewrite that could not
+    // be completed lands in `copyFailed` rather than passing as a clean export.
+    Result write (const std::vector&lt;Reference&gt;&amp; refs,
+                  const juce::File&amp; projectFolder,
+                  const juce::File&amp; destination,
+                  Mode mode,
+                  Scope scope,
+                  std::function&lt;bool()&gt; shouldAbort = {},
+                  std::function&lt;void(double)&gt; onProgress = {});
+}</code></pre></details>
+<pre class="formulas">- Reference classification order (first match wins): Missing (unresolvable/nonexistent) -&gt; ProjectRelative (inside the project folder) -&gt; UserSamples (Documents\BaySickDAW\My Samples) -&gt; CoreLibrary (shipped factory content) -&gt; Absolute (anywhere else).
+- Copy rule per scope: `References` scope copies NOTHING external (only the project&#x27;s own folder travels); `SelfContained` additionally copies UserSamples + Absolute. Core Library NEVER copies in either scope (docket 22=b: any install that can open the project has it; copying would drag 555 MB-1 GB sfizz product folders into every bundle). ProjectRelative and Missing never copy.
+- References are DEDUPED on the stored-path string (one file referenced by twenty blocks copies once, reports once); resolution goes through `proc.resolveProjectFile` (the ProjectFileResolver single source of truth).
+- Walk coverage: PatternManager (audio library + every arrangement block&#x27;s audioFilePath — arrangement is project-global) + `tabsXml` (engine-held refs: clip paths, sfizz kit paths as attributes; NAM captures + user IRs in the Inst chain XML; BaySickPlayer sample paths DECODED from base64 engine-state blobs) + `rackStatesXml` (user IRs in any bus/insert rack, living under &lt;Processor&gt; not &lt;Tabs&gt;). Passing nullptr for tabsXml = pattern-data-only walk.
+- Freeze cache excluded: `kFreezeDir = &quot;Freeze&quot;` at the project ROOT only (relative-path prefix test, so a user&#x27;s own nested &quot;Freeze&quot; folder is not caught); the bundle writer deletes `&lt;destination&gt;/Freeze` and the estimate skips it — the freeze cache is regenerable.
+- Size estimate (MF-2): counts the SAME two sets write() copies — project folder minus freeze cache, plus scope-pulled externals — reported BEFORE the write; Zip figures are UNCOMPRESSED bytes (archive will be smaller). Result.totalBytes/totalFiles cover the whole bundle; filesCopied counts only pulled-in externals (0 for a recording-heavy project whose audio is already inside).
+- Integrity rules: missing files are REPORTED (Result.missing), never silently dropped; copied files are RE-REFERENCED — the bundle&#x27;s project.xml is rewritten to each file&#x27;s new Samples/ location (including &quot; (N)&quot; basename-collision renames); a rewrite that cannot complete lands in `copyFailed` rather than passing as clean.
+- Modes: Zip or Folder. Threading: message thread or background thread only — file IO + allocation, never the audio callback. `shouldAbort` polled for cancel; `onProgress(double)` for the progress window.</pre>
+<p class="behind"><b>Behind:</b> <a href="manual-2.html#BUNDLE-1">Bundle as</a>, <a href="manual-2.html#BUNDLE-2">Contents</a>, <a href="manual-2.html#BUNDLE-3">Export / Cancel</a>, <a href="manual-2.html#FMENU-12">Export Project Bundle</a>.</p>

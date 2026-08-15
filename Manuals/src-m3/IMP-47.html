@@ -1,0 +1,111 @@
+<p>Estimates tempo from audio. Behind the Tap button and the tempo field.</p>
+
+<div class="codeblock"><div class="codehead">- Source\DSP\BpmDetect.h (119 lines, header-only, namespace BpmDetect)</div><pre><code>// BpmDetect::detect() -- comb-scored autocorrelation core
+        // 3) autocorrelation over the 60-200 BPM lag range (+ double-lag
+        //    headroom for the comb), comb-scored: score(L) = r(L) + r(2L)/2
+        //    + r(L/2)/3.
+        const double fps    = sr / (double) kFrame;
+        const int    minLag = juce::jmax (2, (int) std::floor (fps * 60.0 / 200.0));
+        const int    maxLag = (int) std::ceil (fps * 60.0 / 60.0);
+        if (maxLag * 2 + 1 &gt;= nFrames) return out;
+
+        std::vector&lt;double&gt; r ((size_t) (maxLag * 2 + 2), 0.0);
+        for (int lag = juce::jmax (1, minLag / 2); lag &lt;= maxLag * 2 + 1; ++lag)
+        {
+            double s = 0.0;
+            for (int f = 0; f + lag &lt; nFrames; ++f)
+                s += (double) flux[(size_t) f] * flux[(size_t) (f + lag)];
+            r[(size_t) lag] = s / (double) (nFrames - lag);
+        }
+
+        double bestScore = 0.0, meanScore = 0.0;
+        int    bestLag = 0, scored = 0;
+        for (int lag = minLag; lag &lt;= maxLag; ++lag)
+        {
+            double s = r[(size_t) lag];
+            if ((size_t) (lag * 2) &lt; r.size()) s += 0.5  * r[(size_t) (lag * 2)];
+            if (lag / 2 &gt;= juce::jmax (1, minLag / 2)) s += 0.33 * r[(size_t) (lag / 2)];
+            meanScore += s;
+            ++scored;
+            if (s &gt; bestScore) { bestScore = s; bestLag = lag; }
+        }</code></pre></div>
+<details class="fullfn"><summary>Full function &mdash; - Source\DSP\BpmDetect.h (119 lines, header-only, namespace BpmDetect)</summary><pre><code>    inline Estimate detect (juce::AudioFormatReader&amp; reader)
+    {
+        Estimate out;
+        const double sr = reader.sampleRate;
+        if (sr &lt;= 0.0 || reader.lengthInSamples &lt;= 0 || reader.numChannels == 0)
+            return out;
+
+        // Bounded analysis: up to 60 s, read in envelope-frame chunks so the
+        // whole file never loads.  512-sample frames at 44.1k = ~86 Hz
+        // envelope - plenty for 60-200 BPM periodicity.
+        constexpr double kMaxAnalyzeSeconds = 60.0;
+        constexpr int    kFrame             = 512;
+        const juce::int64 total = juce::jmin (reader.lengthInSamples,
+                                              (juce::int64) (sr * kMaxAnalyzeSeconds));
+        const int nFrames = (int) (total / kFrame);
+        if (nFrames &lt; 172)   // &lt; ~2 s of material: nothing to lock onto
+            return out;
+
+        // 1) per-frame log energy.
+        std::vector&lt;float&gt; env ((size_t) nFrames, 0.0f);
+        juce::AudioBuffer&lt;float&gt; chunk ((int) reader.numChannels, kFrame);
+        for (int f = 0; f &lt; nFrames; ++f)
+        {
+            reader.read (&amp;chunk, 0, kFrame, (juce::int64) f * kFrame, true, true);
+            double e = 0.0;
+            for (int ch = 0; ch &lt; chunk.getNumChannels(); ++ch)
+            {
+                const float* d = chunk.getReadPointer (ch);
+                for (int i = 0; i &lt; kFrame; ++i)
+                    e += (double) d[i] * d[i];
+            }
+            env[(size_t) f] = std::log10 (1.0f + (float) e);
+        }
+
+        // 2) onset strength = half-wave-rectified energy flux, mean-removed
+        //    so the autocorrelation measures periodicity, not DC.
+        std::vector&lt;float&gt; flux ((size_t) nFrames, 0.0f);
+        double mean = 0.0;
+        for (int f = 1; f &lt; nFrames; ++f)
+        {
+            flux[(size_t) f] = juce::jmax (0.0f, env[(size_t) f] - env[(size_t) f - 1]);
+            mean += flux[(size_t) f];
+        }
+        mean /= (double) juce::jmax (1, nFrames - 1);
+        for (auto&amp; v : flux) v -= (float) mean;
+
+        // [stage 3 = the comb-scored autocorrelation shown in the excerpt]
+
+        if (bestLag &lt;= 0 || scored == 0 || bestScore &lt;= 0.0)
+            return out;
+        meanScore /= (double) scored;
+
+        // 4) parabolic peak refinement -&gt; sub-BPM precision (the .01 display).
+        double lagF = (double) bestLag;
+        if (bestLag &gt; minLag &amp;&amp; bestLag &lt; maxLag)
+        {
+            const double y0 = r[(size_t) (bestLag - 1)];
+            const double y1 = r[(size_t) bestLag];
+            const double y2 = r[(size_t) (bestLag + 1)];
+            const double den = y0 - 2.0 * y1 + y2;
+            if (std::abs (den) &gt; 1e-12)
+                lagF += 0.5 * (y0 - y2) / den;
+        }
+
+        out.bpm = juce::jlimit (40.0, 260.0, 60.0 * fps / lagF);
+        // Confidence: the winning comb peak must clearly dominate the field.
+        // 2.0x-over-mean is a starting calibration - tune at the campaign if
+        // real material over/under-triggers.
+        out.confident = meanScore &gt; 1e-12 &amp;&amp; bestScore &gt; 2.0 * meanScore;
+        return out;
+    }</code></pre></details>
+<pre class="formulas">- Analysis bound: up to 60 s (`kMaxAnalyzeSeconds = 60.0`), frame size `kFrame = 512` (~86 Hz envelope rate at 44.1k); minimum `nFrames &gt;= 172` (~2 s) or no estimate.
+- Envelope: per-frame log energy `log10(1 + sum(x^2))` over all channels.
+- Onset strength: half-wave-rectified first difference of the log energy, mean-removed.
+- Lag range: 60-200 BPM -&gt; `minLag = max(2, floor(fps * 60/200))`, `maxLag = ceil(fps * 60/60)` where `fps = sr / 512`; autocorrelation computed out to `2*maxLag + 1` for the comb, normalized by `(nFrames - lag)`.
+- Comb score (octave guard): `score(L) = r(L) + 0.5*r(2L) + 0.33*r(L/2)`.
+- Parabolic refinement: `lagF += 0.5*(y0 - y2)/(y0 - 2*y1 + y2)` for sub-BPM precision (the .01 display).
+- Output: `bpm = clamp(60 * fps / lagF, 40, 260)`.
+- Confidence gate: `bestScore &gt; 2.0 * meanScore` (winning comb peak must clearly dominate the scored field; 2.0x is a starting calibration).</pre>
+<p class="behind"><b>Behind:</b> <a href="manual-2.html#TRAN-6">BPM field</a>, <a href="manual-2.html#TRAN-7">TAP</a>.</p>

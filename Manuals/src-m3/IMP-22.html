@@ -1,0 +1,65 @@
+<p>A resonant peak swept by a pedal or an envelope.</p>
+
+<div class="codeblock"><div class="codehead">Source\DSP\WahStyleDSP.cpp</div><pre><code>// WahStyleDSP — sweep constants + cutoff mapping
+constexpr float kSweepMinHz    = 400.0f;
+constexpr float kSweepMaxHz    = 2200.0f;
+constexpr float kBandpassQ     = 4.5f;       // resonant character
+constexpr float kBassLpfHz     = 200.0f;
+constexpr float kBassLpfBlendDb = -6.0f;     // Rich mode blend level
+
+void WahStyleDSP::updateCutoff()
+{
+    if (mSampleRate &lt;= 0.0) return;
+    const float p  = juce::jlimit (0.0f, 1.0f, mPedalPosition);
+    const float hz = kSweepMinHz * std::pow (kSweepMaxHz / kSweepMinHz, p);
+    mBandpass.setCutoffFrequency (juce::jlimit (kSweepMinHz, kSweepMaxHz, hz));
+}</code></pre></div>
+<details class="fullfn"><summary>Full function &mdash; Source\DSP\WahStyleDSP.cpp</summary><pre><code>void WahStyleDSP::process (juce::AudioBuffer&lt;float&gt;&amp; buffer)
+{
+    if (bypassed) return;
+    juce::ScopedNoDenormals noDenormals;
+
+    const int numCh = buffer.getNumChannels();
+    const int n     = buffer.getNumSamples();
+    if (numCh == 0 || n == 0) return;
+
+    // Rich mode: snapshot input into scratch BEFORE the bandpass overwrites it,
+    // run LP on scratch, then blend back in after the bandpass stage.
+    if (mMode == Mode::Rich)
+    {
+        if (mBassScratch.getNumChannels() &lt; numCh || mBassScratch.getNumSamples() &lt; n)
+            mBassScratch.setSize (numCh, n, false, false, true);
+        for (int ch = 0; ch &lt; numCh; ++ch)
+            mBassScratch.copyFrom (ch, 0, buffer, ch, 0, n);
+
+        juce::dsp::AudioBlock&lt;float&gt; bassBlk (mBassScratch);
+        auto bassSub = bassBlk.getSubBlock (0, (size_t) n).getSubsetChannelBlock (0, (size_t) numCh);
+        juce::dsp::ProcessContextReplacing&lt;float&gt; bassCtx (bassSub);
+        mBassLpf.process (bassCtx);
+    }
+
+    // Bandpass on the main buffer.
+    {
+        juce::dsp::AudioBlock&lt;float&gt; blk (buffer);
+        auto sub = blk.getSubBlock (0, (size_t) n).getSubsetChannelBlock (0, (size_t) numCh);
+        juce::dsp::ProcessContextReplacing&lt;float&gt; ctx (sub);
+        mBandpass.process (ctx);
+    }
+
+    // Rich mode: blend the bass LP back in.
+    if (mMode == Mode::Rich)
+    {
+        const float blend = juce::Decibels::decibelsToGain (kBassLpfBlendDb, -60.0f);
+        for (int ch = 0; ch &lt; numCh; ++ch)
+        {
+            float* wah = buffer.getWritePointer (ch);
+            const float* bass = mBassScratch.getReadPointer (ch);
+            for (int i = 0; i &lt; n; ++i)
+                wah[i] += bass[i] * blend;
+        }
+    }
+}</code></pre></details>
+<pre class="formulas">- Sweep: resonant TPT state-variable bandpass, Q = 4.5, cutoff log-mapped from pedal position: `hz = 400 * (2200/400)^pos01` — 400 Hz (heel) to 2.2 kHz (toe).
+- Vintage mode: bandpass only (fully swept, classic wah — everything outside the resonant peak is filtered away).
+- Rich mode: same bandpass plus a parallel bass path — input low-passed at 200 Hz (TPT lowpass, Butterworth Q = sqrt(2)/2 ~ 0.7071) blended back in at -6 dB, so the low end survives the sweep.
+- No oversampling, no waveshaping — the pedal is purely a swept filter.</pre>

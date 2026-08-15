@@ -1,0 +1,98 @@
+<p>Presets exist at several scales &mdash; one effect, one engine, one rack, one
+page &mdash; and each is saved separately.</p>
+
+<p>A/B snapshots are a different mechanism: a pair of complete settings for one
+surface, swapped instantly for comparison. <b>There are several independent A/B
+pairs</b> and they do not move together: the Vox page has one, NAM/IR has one,
+the EQ has one, BaySickPitch has one. That is deliberate &mdash; comparing two
+mic placements should not also swap your vocal chain.</p>
+
+<div class="codeblock"><div class="codehead">Source\Standalone\EffectPresetIO.h (per-effect preset IO + factory seeding)</div><pre><code>// EffectPresetIO.h -- module banner (verbatim, lines 9-36)
+// ─────────────────────────────────────────────────────────────────────────────
+// EffectPresetIO - H-9 prep (2026-05-02)
+// ─────────────────────────────────────────────────────────────────────────────
+// Generic factory + user preset save/load for every effect-rack DSP.  Adds
+// a Preset menu next to each SlotComponent&#x27;s bypass LED so users can:
+//   - Save Current Preset    → writes XML to My Presets folder
+//   - Load Preset             → walks Factory + My Presets folders
+//   - Restore Default         → resets DSP to construction defaults
+//   - Save as Default         → user-defined &quot;Init&quot; preset for this effect
+//   - Manage Presets          → opens the folder in Explorer
+//
+// Folder layout:
+//   Documents/BaySickDAW/Presets/Effects/{TypeName}/Factory/{name}.xml
+//   Documents/BaySickDAW/Presets/Effects/{TypeName}/My Presets/{name}.xml
+//   Documents/BaySickDAW/Presets/Effects/{TypeName}/Default.xml   (optional)
+//
+// Factory presets are SEEDED on first launch via seedFactoryPresets():
+// each factory preset is defined as a configure-lambda that takes a fresh
+// DSPBase + sets its parameters; the framework runs the lambda on a temp
+// DSP, calls getStateInformation, writes the XML to disk.  After seeding
+// the Factory folder is read-only by convention -- if the user deletes a
+// factory preset, the next app launch re-seeds it.
+//
+// Preset XML format: just the DSP&#x27;s getStateInformation blob, base64-encoded
+// inside a wrapper &lt;EffectPreset&gt; element with metadata (version, effectType,
+// name).  Loading uses setStateInformation so per-DSP state (Type
+// umbrella, A/B snapshots, etc.) round-trips faithfully.
+// ─────────────────────────────────────────────────────────────────────────────</code></pre></div>
+<details class="fullfn"><summary>Full function &mdash; Source\Standalone\EffectPresetIO.h (per-effect preset IO + factory seeding)</summary><pre><code>// EffectPresetIO.h -- API surface (verbatim, lines 38-113, comments trimmed to signatures)
+namespace EffectPresetIO
+{
+    // Folder names per effect type (used for both filesystem layout and
+    // user-facing menu titles).  Keep these stable -- changing them breaks
+    // all existing user presets.
+    juce::String typeFolderName (EffectType type);
+
+    juce::File   presetsRoot();                         // .../Presets/Effects
+    juce::File   typeRoot     (EffectType type);        // .../Presets/Effects/{Type}
+    juce::File   factoryDir   (EffectType type);        // .../{Type}/Factory
+    juce::File   myPresetsDir (EffectType type);        // .../{Type}/My Presets
+    juce::File   defaultFile  (EffectType type);        // .../{Type}/Default.xml
+
+    // Shared asset folders that are NOT per-EffectType.
+    juce::File   userNamPedalsDir();   // .../Pedals/User NAM Pedals  (.nam captures)
+    juce::File   irDir();              // .../IR                     (user impulse responses)
+
+    void ensureFolderTree (EffectType type);   // mkdir-p the three folders above
+
+    // Seeding: run once at app startup -- writes any missing factory preset XMLs
+    // to disk based on the static factory-preset table in EffectPresetIO.cpp.
+    // Idempotent per seed version: a factory file is written when it is missing
+    // OR when factory_seed_version.txt is behind kFactorySeedVersion.  Bump that
+    // constant whenever factoryTable() values or an effect&#x27;s preset
+    // serialization changes, or existing installs keep their stale files.
+    // My Presets/ is never touched.
+    void seedFactoryPresets();
+
+    // H-10 cutover: one-time migration of legacy Tape preset folder into
+    // Saturation/.  Idempotent; call BEFORE seedFactoryPresets.
+    void migrateTapeFolderToSaturation();
+
+    // Save a DSP&#x27;s current state to the named user preset.  presetName is the
+    // raw typed string: naming and collision go through UserFileSave::resolveTarget,
+    // so an existing preset of the same name is suffixed rather than replaced
+    // and the file on disk is not always &quot;&lt;presetName&gt;.xml&quot;.
+    bool savePreset (DSPBase&amp; dsp, EffectType type,
+                     const juce::String&amp; presetName, juce::String&amp; outErr);
+
+    // Load a preset XML into the DSP (factory or user; path fully qualified).
+    bool loadPreset (DSPBase&amp; dsp, const juce::File&amp; presetFile, juce::String&amp; outErr);
+
+    // Restore DSP to construction defaults (fresh-DSP approach).
+    void restoreDefaults (DSPBase&amp; dsp, EffectType type);
+
+    // Save current state as the user&#x27;s &quot;default&quot; preset (Default.xml in type root).
+    bool saveAsDefault (DSPBase&amp; dsp, EffectType type, juce::String&amp; outErr);
+
+    juce::Array&lt;juce::File&gt; enumerateFactory   (EffectType type);
+    juce::Array&lt;juce::File&gt; enumerateMyPresets (EffectType type);
+}</code></pre></details>
+<pre class="formulas">- Effect-preset folder layout: `Documents/BaySickDAW/Presets/Effects/{TypeName}/Factory/{name}.xml`, `.../{TypeName}/My Presets/{name}.xml`, `.../{TypeName}/Default.xml` (optional user &quot;Init&quot;). `typeFolderName` strings must stay STABLE — changing one breaks all existing user presets. Shared non-per-type folders: `.../Pedals/User NAM Pedals` (.nam captures) and `.../IR` (user impulse responses).
+- Preset XML format: the DSP&#x27;s getStateInformation blob, base64-encoded inside `&lt;EffectPreset&gt;` with metadata (version, effectType, name); load = setStateInformation so per-DSP state (Type umbrella, A/B snapshots) round-trips faithfully.
+- Factory seeding: configure-lambda per factory preset runs on a TEMP DSP -&gt; getStateInformation -&gt; XML on disk. Idempotent per seed version: file written when missing OR `factory_seed_version.txt` &lt; `kFactorySeedVersion` (bump whenever factoryTable values or serialization change). My Presets/ never touched; a deleted factory preset re-seeds next launch. `migrateTapeFolderToSaturation` runs BEFORE seeding (one-time Tape -&gt; Saturation fold, collision-skipping, idempotent).
+- Save collision rule: presetName routes through `UserFileSave::resolveTarget` — an existing same-name preset is SUFFIXED, never silently replaced (the MF-1 silent-overwrite class of fix); the on-disk file is not always `&lt;presetName&gt;.xml`.
+- Page presets (root tag `&lt;BaySickPagePreset&gt;`, version 2): capture every engine state (all sub-tab engines), every mixer-strip APVTS param, insert rack + BOTH pre and post EQ8 M/S, and a dedicated bus&#x27;s rack + EQs (Rusty: 13 strips + 1 bus as first-class config). Piano-roll notes EXCLUDED by design (musical content, not sound design).
+- PageKind folder scheme: `Documents/BaySickDAW/Presets/&lt;Kind&gt; Page/My Presets/...`; PageKind = { Layer, Bass, Drum, Clip, Vox, Inst, RustyDrums, Plugins }.
+- EngineSlot invariants: `engineLabel` must round-trip byte-for-byte (it keys which slot a saved record belongs to); `enginePrefix` lets the loader rewrite APVTS ids when loading into a different page index; `kitLoadCallback` (sfizz engines only) runs the race-safe kit load BEFORE APVTS apply — sfizz crashes on a mid-render kit reload otherwise; non-sfizz engines leave it null and fall back to setStateInformation.</pre>
+<p class="behind"><b>Behind:</b> <a href="manual-2.html#DKIT-8">Kit v</a>, <a href="manual-2.html#FXM-4">Presets</a>, <a href="manual-2.html#FXRM-3">Open Presets Folder</a>, <a href="manual-2.html#BSRDMAIN-1">Presets</a>, <a href="manual-2.html#BSV-2">A/B snapshot picker</a>, <a href="manual-2.html#BSVC-5">Preset</a>, <a href="manual-2.html#BSPIT-16">A</a>, <a href="manual-2.html#BSA-1">Preset picker</a>, <a href="manual-2.html#BSNAM-11">A / B slot buttons</a>, <a href="manual-2.html#BSPDL-2">Preset picker</a>, <a href="manual-2.html#BSVCM-10">Save Page Preset As</a>, <a href="manual-2.html#BSVCM-11">Load Page Preset submenu</a>, <a href="manual-2.html#BSPDLM-6">Save Page Preset As</a>.</p>

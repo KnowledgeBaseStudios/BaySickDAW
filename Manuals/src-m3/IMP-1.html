@@ -1,0 +1,228 @@
+<p>Turns the loud parts down so the quiet parts can come up. Four characters:
+<b>Modern</b> is clean and transparent; <b>FET</b> is fast and aggressive, the
+sound of a hardware box that grabs transients; <b>Opto</b> is slow and smooth,
+modelled on a light-and-photocell circuit; <b>Pedal</b> is a guitar sustainer and
+is offered only outside the vocal chain.</p>
+<p>Opto's release is program-dependent: it blends a fast and a slow release
+coefficient by a running measure of how much reduction has been happening, so
+sustained material recovers slowly and a single transient recovers fast. Modern's
+knee variants add an automatic release on top.</p>
+<div class="codeblock"><div class="codehead">Source/DSP/CompressorDSP.cpp (mechanism), Source/DSP/CompressorDSP.h (Type enum, state members)</div><pre><code>// CompressorDSP::computeGainDb -- the gain computer, per Type
+    const float overshoot = levelDb - threshold;
+
+    if (mType == Type::Opto)
+    {
+        if (overshoot &lt;= 0.0f) return 0.0f;
+        const float t    = juce::jlimit (0.0f, 1.0f, overshoot / 20.0f);
+        const float effR = optoLimit ? (8.0f + t * (80.0f - 8.0f))
+                                     : (1.5f + t * (4.0f  - 1.5f));
+        return (1.0f / effR - 1.0f) * overshoot;   // negative dB gain reduction
+    }
+
+    if (mType == Type::FET &amp;&amp; fetAllButtons &amp;&amp; overshoot &gt; 0.0f)
+    {
+        constexpr float kAbBase = 8.0f;    // ratio at threshold
+        constexpr float kAbTop  = 20.0f;   // ratio ceiling
+        constexpr float kAbSpan = 18.0f;   // dB of overshoot to reach the ceiling
+        const float t = juce::jlimit (0.0f, 1.0f, overshoot / kAbSpan);
+        effectiveRatio = kAbBase + t * (kAbTop - kAbBase);
+    }
+
+// CompressorDSP::process -- Opto fast/slow release blend driven by GR history
+            if (mType == Type::Opto &amp;&amp; releasing)
+            {
+                // mOptoHistory is the running magnitude of GR (positive dB).
+                // Map 0..6 dB GR history to 0..1 weight, blend the two coefs.
+                const float w = juce::jlimit (0.0f, 1.0f, mOptoHistory / 6.0f);
+                rCoef = (1.0f - w) * mOptoFastRelCoef + w * mOptoSlowRelCoef;
+            }</code></pre></div>
+<details class="fullfn"><summary>Full function &mdash; Source/DSP/CompressorDSP.cpp (mechanism), Source/DSP/CompressorDSP.h (Type enum, state members)</summary><pre><code>// CompressorDSP::computeGainDb -- complete
+float CompressorDSP::computeGainDb (float levelDb) const noexcept
+{
+    // Use smoothed values where we snapshot them (levelDb and ratio come in
+    // separately); this function reads the smoothed threshold/ratio via the
+    // public members which are updated each sample by the caller.
+    const float overshoot = levelDb - threshold;
+
+    // Opto (LA-2A): level-dependent RISING ratio -- the T4 cell&#x27;s nonlinear,
+    // program-dependent curve, not a fixed ratio.  Comp rises 1.5:1 -&gt; 4:1 (~3:1
+    // average, the LA-2A Compress spec); Limit rises 8:1 -&gt; 80:1 -- a SOFT ceiling
+    // that holds the output within ~0.25 dB of threshold at the top (actually
+    // limiting, but optical/musical, not a brickwall).  Mode = the optoLimit flag
+    // (NOT ratio: setRatio clamps to 30, so a ratio&gt;50 sentinel was unreachable).
+    // Returns GR directly; the ~10 ms optical attack holds sustained level, not peaks.
+    if (mType == Type::Opto)
+    {
+        if (overshoot &lt;= 0.0f) return 0.0f;
+        const float t    = juce::jlimit (0.0f, 1.0f, overshoot / 20.0f);
+        const float effR = optoLimit ? (8.0f + t * (80.0f - 8.0f))
+                                     : (1.5f + t * (4.0f  - 1.5f));
+        return (1.0f / effR - 1.0f) * overshoot;   // negative dB gain reduction
+    }
+
+    float effectiveRatio = ratio;
+
+    // FET (1176) all-buttons-in: a program-dependent RISING ratio -- the bias
+    // shift makes the effective ratio climb with level, and that shifting curve
+    // (not a fixed number) is the all-buttons character.  Aggressive-but-
+    // controlled: ~8:1 at threshold rising to ~20:1 by +18 dB over, capped there
+    // (limits hard but the curve stays monotonic).  Overrides the button ratio.
+    if (mType == Type::FET &amp;&amp; fetAllButtons &amp;&amp; overshoot &gt; 0.0f)
+    {
+        constexpr float kAbBase = 8.0f;    // ratio at threshold
+        constexpr float kAbTop  = 20.0f;   // ratio ceiling
+        constexpr float kAbSpan = 18.0f;   // dB of overshoot to reach the ceiling
+        const float t = juce::jlimit (0.0f, 1.0f, overshoot / kAbSpan);
+        effectiveRatio = kAbBase + t * (kAbTop - kAbBase);
+    }
+
+    // Vintage knee is a Modern-algorithm character only (the FET/Opto/CS panels
+    // never expose the knee selector; FET forces a hard knee).  Gate on Modern
+    // so a stale mKneeType can&#x27;t apply the optical taper to another Type.
+    const bool isVintage = (mType == Type::Modern) &amp;&amp; (mKneeType == 2 || mKneeType == 6);
+    if (isVintage &amp;&amp; overshoot &gt; 0.0f)
+    {
+        const float floorRatio = std::min (ratio, 2.0f);
+        const float t = juce::jlimit (0.0f, 1.0f, overshoot / 12.0f);
+        effectiveRatio = ratio + t * (floorRatio - ratio);   // ratio -&gt; floorRatio over 12 dB
+        effectiveRatio = std::max (effectiveRatio, floorRatio);
+    }
+
+    if (kneeDb &gt; 0.0f)
+    {
+        // Soft-knee region: [threshold - knee/2 .. threshold + knee/2]
+        const float halfKnee = kneeDb * 0.5f;
+        if (overshoot &lt; -halfKnee)
+            return 0.0f;                        // below knee - no gain change
+
+        if (overshoot &lt;= halfKnee)
+        {
+            // Inside the knee: quadratic interpolation
+            const float x = (overshoot + halfKnee) / kneeDb; // 0..1
+            const float gainChange = (1.0f / effectiveRatio - 1.0f) * (x * x) * halfKnee;
+            return gainChange;
+        }
+    }
+    else
+    {
+        if (overshoot &lt;= 0.0f)
+            return 0.0f;
+    }
+
+    // Above knee (or hard-knee above threshold)
+    return threshold + overshoot / effectiveRatio - levelDb;
+}
+
+// CompressorDSP::calcCoefs -- complete (all time constants)
+void CompressorDSP::calcCoefs()
+{
+    // One-pole smoothing coefficients: coef = exp(-1 / (time_s * sr))
+    const double sr = (mSampleRate &gt; 0.0) ? mSampleRate : 44100.0;
+    mAttackCoef  = static_cast&lt;float&gt; (std::exp (-1.0 / (attackMs   * 0.001 * sr)));
+    mReleaseCoef = static_cast&lt;float&gt; (std::exp (-1.0 / (releaseMs  * 0.001 * sr)));
+    // C4 -- RMS smoother time constant is now user-controlled (detectionMs).
+    mRmsCoef     = static_cast&lt;float&gt; (std::exp (-1.0 / (detectionMs * 0.001 * sr)));
+
+    // A6 -- TCR coefficients depend only on sample rate; moved here from process().
+    mTcrAttCoef  = static_cast&lt;float&gt;(std::exp(-1.0 / (0.5 * sr)));
+    mTcrRelCoef  = static_cast&lt;float&gt;(std::exp(-1.0 / (1.0 * sr)));
+
+    // C3 -- Peak detector: fast attack (~0.1 ms), slow release (= detectionMs).
+    mPeakAttCoef = static_cast&lt;float&gt;(std::exp(-1.0 / (0.0001 * sr)));
+    mPeakRelCoef = static_cast&lt;float&gt;(std::exp(-1.0 / (detectionMs * 0.001 * sr)));
+
+    // H-2 -- Opto multi-stage release coefficients.  60 ms fast / 3 s slow,
+    // blended by mOptoHistory which itself averages over ~1 sec.  Mirrors the
+    // LA-2A two-stage release: ~60 ms to half, then a long program-dependent
+    // crawl (real T4 cell is 0.5-5 s).  QA-EffectsReview Task 6: slow stage
+    // lengthened 500 ms -&gt; 3 s for the signature long LA-2A tail.
+    mOptoFastRelCoef   = static_cast&lt;float&gt;(std::exp(-1.0 / (0.060 * sr)));
+    mOptoSlowRelCoef   = static_cast&lt;float&gt;(std::exp(-1.0 / (3.000 * sr)));
+    mOptoHistoryCoef   = static_cast&lt;float&gt;(std::exp(-1.0 / (1.000 * sr)));
+}
+
+// CompressorDSP::process -- envelope smoothing (TCR + Opto blend) and Opto history
+// tracker, plus the FET/Opto per-sample color stages.  (Detection, lookahead,
+// makeup/mix, CS tilt-EQ and metering sections of process() elided.)
+        auto smoothOne = [&amp;](float&amp; env, float target) -&gt; float
+        {
+            const bool releasing = (target &gt;= env);
+            float rCoef = rel;
+            if (mType == Type::Opto &amp;&amp; releasing)
+            {
+                // mOptoHistory is the running magnitude of GR (positive dB).
+                // Map 0..6 dB GR history to 0..1 weight, blend the two coefs.
+                const float w = juce::jlimit (0.0f, 1.0f, mOptoHistory / 6.0f);
+                rCoef = (1.0f - w) * mOptoFastRelCoef + w * mOptoSlowRelCoef;
+            }
+            else if (isTCR &amp;&amp; releasing)
+            {
+                const float tcrNorm = juce::jlimit(0.0f, 1.0f, mTCRLevel / 0.1f);
+                const float dynRel  = std::max(1.0f, releaseMs / (1.0f + tcrNorm * 4.0f));
+                rCoef = static_cast&lt;float&gt;(std::exp(-1.0 / (dynRel * 0.001 * sr)));
+            }
+            const float c = (target &lt; env) ? att : rCoef;
+            env = c * env + (1.0f - c) * target;
+            return env;
+        };
+
+        float grL = smoothOne(mEnvL, targetDbL);
+        float grR = stereoLink ? (mEnvR = grL) : smoothOne(mEnvR, targetDbR);
+
+        // H-2 -- Opto memory tracker: one-pole running magnitude of current GR
+        // over a ~1 sec window.  Drives the fast/slow release blend on next
+        // sample.  Always updated when Type=Opto, even outside release phase,
+        // so sustained material&#x27;s history is always current.
+        if (mType == Type::Opto)
+        {
+            const float curGrMag = -std::min (grL, grR);   // negative GR -&gt; positive magnitude
+            mOptoHistory = mOptoHistoryCoef * mOptoHistory
+                         + (1.0f - mOptoHistoryCoef) * curGrMag;
+        }
+
+        // FET (1176) gain-stage color: always-on tanh harmonic shaping on the WET
+        // output (QA-EffectsReview Task 6 moved it here from the GR control signal,
+        // where it was gated &gt; 6 dB GR and nearly inaudible).  /(1+drv) normalizes
+        // to UNITY at low level (no rest-level jump); drive grows with GR depth
+        // (-gr) but is CAPPED at 12 dB GR so heavy all-buttons crush colors rather
+        // than fuzzes out (aggressive-but-controlled).  gr is negative dB.
+        if (mType == Type::FET)
+        {
+            const float grCapL = std::min (12.0f, std::max (0.0f, -grL));
+            const float grCapR = std::min (12.0f, std::max (0.0f, -grR));
+            const float drvL = 0.08f + 0.05f * grCapL;
+            const float drvR = 0.08f + 0.05f * grCapR;
+            wetL = std::tanh (wetL * (1.0f + drvL)) / (1.0f + drvL);
+            wetR = std::tanh (wetR * (1.0f + drvR)) / (1.0f + drvR);
+        }
+
+        // Opto (LA-2A) tube warmth: gentle EVEN-harmonic (2nd) coloration via an
+        // asymmetric tanh -- the small bias offset makes the curve asymmetric
+        // (generates 2nd harmonic); subtracting tanh(bias) removes the static
+        // offset and /(1+drv) keeps low level ~unity (no level jump).  Drive +
+        // bias grow subtly with GR depth, capped (LA-2A is a gentle leveler).
+        if (mType == Type::Opto)
+        {
+            const float grCapL = std::min (12.0f, std::max (0.0f, -grL));
+            const float grCapR = std::min (12.0f, std::max (0.0f, -grR));
+            const float drvL  = 0.04f + 0.03f * grCapL;
+            const float drvR  = 0.04f + 0.03f * grCapR;
+            const float biasL = 0.20f * drvL;
+            const float biasR = 0.20f * drvR;
+            wetL = (std::tanh (wetL * (1.0f + drvL) + biasL) - std::tanh (biasL)) / (1.0f + drvL);
+            wetR = (std::tanh (wetR * (1.0f + drvR) + biasR) - std::tanh (biasR)) / (1.0f + drvR);
+        }</code></pre></details>
+<pre class="formulas">- One-pole envelope coefficient (all ballistics): `coef = exp(-1 / (time_ms * 0.001 * sr))`; update is `env = coef*env + (1-coef)*target`. Attack coef from attackMs (0..400 ms), release from releaseMs (1..4000 ms), RMS detector window from detectionMs (1..100 ms, default 10).
+- Peak detector (peakDetection=true): attack time 0.1 ms (`exp(-1/(0.0001*sr))`), release = detectionMs. Level in dB: `20*log10(max(peak, 1e-9))`.
+- Gain computer, hard knee: `gain_dB = threshold + overshoot/ratio - levelDb` for overshoot &gt; 0, else 0. Ratio range 0.4..30 (&lt;1 = upward expansion).
+- Soft knee (kneeDb &gt; 0), inside [thr - knee/2, thr + knee/2]: `x = (overshoot + knee/2)/knee`, `gain_dB = (1/ratio - 1) * x^2 * (knee/2)` (quadratic interpolation). Knee widths by kneeType index mod 4: Hard=0, Medium=6, Vintage=7, Soft=15 dB.
+- Vintage knee (kneeType 2 or 6, Modern only): effective ratio relaxes linearly from `ratio` to `floorRatio = min(ratio, 2)` over the first 12 dB of overshoot.
+- TCR auto-release (kneeType &gt;= 4, the &quot;/R&quot; variants): slow level tracker with attack tau 0.5 s (`exp(-1/(0.5*sr))`) and release tau 1.0 s; on release, `tcrNorm = clamp(mTCRLevel/0.1, 0, 1)`, `dynRel_ms = max(1, releaseMs / (1 + 4*tcrNorm))` - loud sustained level shortens release up to 5x.
+- Opto (LA-2A) rising ratio: `t = clamp(overshoot/20 dB, 0, 1)`; Comp mode `effR = 1.5 + t*(4 - 1.5)`; Limit mode `effR = 8 + t*(80 - 8)`; `GR_dB = (1/effR - 1) * overshoot`.
+- Opto history release blend: fast release tau 60 ms, slow tau 3 s; history is a 1 s one-pole average of GR magnitude; blend weight `w = clamp(history/6 dB, 0, 1)`; `rCoef = (1-w)*fastCoef + w*slowCoef`.
+- Opto warmth: `drv = 0.04 + 0.03*min(12, -gr)`, `bias = 0.20*drv`, `y = (tanh(x*(1+drv) + bias) - tanh(bias)) / (1+drv)` (2nd harmonic; unity at low level).
+- FET (1176): peak detection + hard knee forced on selection; fresh FET defaults makeup to +12 dB. All-buttons rising ratio: 8:1 at threshold to 20:1 at +18 dB overshoot, capped. FET color: `drv = 0.08 + 0.05*min(12, -gr)`, `y = tanh(x*(1+drv))/(1+drv)`.
+- CS (&quot;Pedal&quot;/BOSS CS-3 style): ratio fixed 10:1, threshold fixed -24 dB; Sustain macro `s01` sets input drive `csInputDriveDb = 24*s01` (applied to detector AND audio) and makeup `6*s01` dB; release derived from the Attack knob: `releaseMs = jmap(clamp(attackMs,1,50), 1, 50, 800, 100)` (fast attack -&gt; long release); Tone is a high shelf at 3 kHz, +/-9 dB at knob extremes ((csTone01-0.5)*2 * 9 dB), low shelf pinned flat; Level trim -12..+12 dB applied last.
+- Auto-makeup (per block): `makeup_dB = -computeGainDb(threshold + 6 dB)`.
+- Lookahead: 0..5 ms delay on the audio path only (detector un-delayed); GR meter decays at 30 dB/sec.</pre>
+<p class="behind"><b>Behind:</b> <a href="manual-2.html#FXM-2">Mode: &lt;name&gt;</a>, <a href="manual-2.html#FXPICK-1">Dynamic group</a>, <a href="manual-2.html#BSVC-6">Slot mode button</a>, <a href="manual-2.html#BSVC-8">Gain-reduction meter</a>.</p>

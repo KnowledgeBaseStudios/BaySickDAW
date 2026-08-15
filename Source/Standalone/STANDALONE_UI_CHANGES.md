@@ -729,6 +729,15 @@ shortcut. Held notes release on mode-off, octave shift, and tab switch.
   `AriaControlPanel::Binding::hostTitleBar` keeps the band with NO name, the
   two controls are hosted on it again, and the strip's centered
   "BaySickRustyDrums" is gone because the kit artwork already carries the logo.
+  - **REVERSED 2026-08-06:** the Aria band hosts the SECTION TAB ROW instead, so
+    the Program selector + preset button went back to the window title strip
+    (`addExtraRightComponent`, which lays out inside the menu bar and therefore
+    cannot reach behind the chrome the way the T3 attempt did), and the centered
+    red "BaySickRustyDrums" is back with them.
+  - **Widths trimmed 2026-08-12:** the button reads "Presets" at 76px and the
+    Program combo is 80px, down from "Player Preset" at 110 and 160.  The strip
+    centers the engine name in the span the right-hand extras LEAVE, so 270px of
+    extras rendered the name clipped to "BaySickRustyD...".
 - **Title text rule (Jeff, 2026-08-04):** a window with a logo shows no plain
   title text; a window without one CENTERS it instead of pinning it left.
 - **Harmless `layoutRow` scales an over-tall block down.**  Wrapping alone was

@@ -160,7 +160,6 @@ private:
     juce::String                                 mClipPath;
     bool                                         mLocked { false };
 
-    juce::Label                                  mClipFileLabel;
     EngineType                                   mEngineType { EngineType::None };
     // QA-ModelShell TS1: non-owning view of the rig-owned BaySickPlayerProcessor
     // ({Clips, pageIndex}); the editor IS view-owned and must die before the

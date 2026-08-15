@@ -266,10 +266,32 @@ void WorkspaceWindow::setDefaultWindowSize (int w, int h)
     }
 
     // A remembered size from before this window's default was known -- or from
-    // a run where the minimum was suspended -- must come up to the new floor.
+    // the run where the minimum was suspended for measuring -- must come up to
+    // the new floor.
     if (getWidth() < mDefaultSize.x || getHeight() < mDefaultSize.y)
         setSize (juce::jmax (getWidth(),  mDefaultSize.x),
                  juce::jmax (getHeight(), mDefaultSize.y));
+}
+
+void WorkspaceWindow::setFixedAspect (double widthOverHeight)
+{
+    mConstrainer.setFixedAspectRatio (widthOverHeight);
+}
+
+void WorkspaceWindow::setMaxWindowSize (int maxW, int maxH)
+{
+    mConstrainer.setMaximumSize (juce::jmax (1, maxW), juce::jmax (1, maxH));
+}
+
+void WorkspaceWindow::setUserResizable (bool canResize)
+{
+    if (mResizer == nullptr) return;
+
+    // Left VISIBLE but deaf: the border component paints nothing, so hiding it
+    // would change no pixels, and keeping it in the hierarchy means the window
+    // can be made resizable again without rebuilding anything.  Only the hit
+    // testing goes away.
+    mResizer->setInterceptsMouseClicks (canResize, canResize);
 }
 
 void WorkspaceWindow::setResizeFloor (int minW, int minH)

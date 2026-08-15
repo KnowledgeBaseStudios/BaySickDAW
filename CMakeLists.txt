@@ -616,6 +616,7 @@ target_sources(BaySickDAWStandalone PRIVATE
     # Phase G-1 — BaySickNAM/IR engine (Neural Amp Modeler + IR cabinet)
     Source/BaySickNAMIR/BaySickNAMIRProcessor.cpp
     Source/BaySickNAMIR/BaySickNAMIREditor.cpp
+    Source/BaySickNAMIR/MicPlacementView.cpp
     # Phase I-1 — BaySickPedals (8-slot guitar/bass pedal rack; editor lands in I-15)
     Source/BaySickPedals/BaySickPedalsProcessor.cpp
     Source/BaySickPedals/BaySickPedalsEditor.cpp
@@ -786,6 +787,20 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/Resources")
         COMMAND ${CMAKE_COMMAND} -E copy_directory
                 "${CMAKE_CURRENT_SOURCE_DIR}/Resources"
                 "$<TARGET_FILE_DIR:BaySickDAWStandalone>/Resources"
+        VERBATIM)
+endif()
+
+# ── Stage the manuals next to the exe (QA-Manuals Task 3) ────────────────────
+# ManualsWindow::manualsIndexFile() resolves <exe dir>/Manuals/index.html, so the
+# authored HTML has to land beside the binary or F1 shows the missing-manuals
+# fallback.  Mirrors the Resources/ staging directly above; the tree is small
+# (HTML + one stylesheet + the figure PNGs) so a plain re-copy each build is
+# cheaper than tracking individual files.
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/Manuals")
+    add_custom_command(TARGET BaySickDAWStandalone POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+                "${CMAKE_CURRENT_SOURCE_DIR}/Manuals"
+                "$<TARGET_FILE_DIR:BaySickDAWStandalone>/Manuals"
         VERBATIM)
 endif()
 

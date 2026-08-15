@@ -258,6 +258,13 @@ Section "${APP_NAME} (required)" SEC_APP
   SetOutPath "$INSTDIR\Resources"
   File /r /x "Thumbs.db" /x "desktop.ini" "${RELEASE_DIR}\Resources\*"
 
+  ; The manuals.  F1 in the app loads $INSTDIR\Manuals\manual.html, and the
+  ; three "BaySickDAW Manual - *.pdf" files beside it are the printable
+  ; copies, one per depth level, so a tester picks the version they want.
+  DetailPrint "Installing the manuals..."
+  SetOutPath "$INSTDIR\Manuals"
+  File /r /x "Thumbs.db" /x "desktop.ini" "${RELEASE_DIR}\Manuals\*"
+
   ; ---------------------------------------------------------------------------
   ; Factory content into the user data root.  Documents\BaySickDAW is what
   ; Source\AppPaths.h resolves to, and every preset and template reader in the
@@ -326,7 +333,7 @@ SectionEnd
 
 !insertmacro MUI_FUNCTION_DESCRIPTION_BEGIN
   !insertmacro MUI_DESCRIPTION_TEXT ${SEC_APP} \
-    "The application, the two plugin host helpers, the audio resources it loads at run time, and the factory presets and templates."
+    "The application, the two plugin host helpers, the audio resources it loads at run time, the manual (F1 in the app, plus printable PDFs), and the factory presets and templates."
   !insertmacro MUI_DESCRIPTION_TEXT ${SEC_DESKTOP} \
     "Put a ${APP_NAME} shortcut on your desktop. There is a Start Menu shortcut either way."
 !insertmacro MUI_FUNCTION_DESCRIPTION_END
@@ -370,8 +377,9 @@ Section "Uninstall"
   Delete "$INSTDIR\${HELPER64_EXE}"
   Delete "$INSTDIR\${HELPER32_EXE}"
 
-  ; Bounded: this subtree is created by this installer and holds nothing else.
+  ; Bounded: these subtrees are created by this installer and hold nothing else.
   RMDir /r "$INSTDIR\Resources"
+  RMDir /r "$INSTDIR\Manuals"
 
   Delete "$INSTDIR\${UNINST_EXE}"
 

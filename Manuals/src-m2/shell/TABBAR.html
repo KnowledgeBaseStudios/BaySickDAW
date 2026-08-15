@@ -1,0 +1,47 @@
+﻿<p>The ribbon is the app's main navigation: one slot per tab type, always
+across the top. Click a slot and its page opens. Everything you build lives
+behind one of these.</p>
+
+<figure data-cluster="Anatomy of a slot|1,2,3,4,5">
+
+<p id="TABBAR-1"><b>A slot.</b> Every tab type has one, in a fixed order.
+<span id="TABBAR-2"></span><b>The name</b> reads bold white while its
+type is selected and dim otherwise, and
+<span id="TABBAR-5"></span>a thin <b>top stripe</b> marks the active
+slot. <span id="TABBAR-3"></span><b>The chevron</b> is only the slot's
+bottom-right corner: clicking THERE opens the type's dropdown - its list
+of tabs - while clicking anywhere else on the slot simply navigates. Two
+targets on one button; the corner is the menu.
+<span id="TABBAR-4"></span><b>The count badge</b> shows how many tabs of
+that type exist.</p>
+
+<p><b><code>(missing)</code></b> after a slot's name means
+its files are absent from disk - the sound content it needs is not
+installed or has moved.</p>
+
+<figure data-cluster="The slots themselves|6,7,8,9,10,11">
+
+<p id="TABBAR-6"><b>Four are always there</b>: Builder (the tie-dye
+gradient - the arrangement), <span id="TABBAR-7"></span>Mixer (purple, no
+chevron - there is only one mixer),
+<span id="TABBAR-8"></span>Effects (pink), and
+<span id="TABBAR-9"></span>Piano Roll (near-black, no chevron).</p>
+
+<p id="TABBAR-10"><b>The instance slots</b> - Clips gold, Vox teal, Inst
+navy, Layers orange, Bass green, Drums red, Plugins purple - exist only
+while at least one tab of their type does, and vanish at zero. Do not
+panic when one disappears; it means the last tab of that kind was
+deleted. <span id="TABBAR-11"></span><b>The <code>+</code> slot</b> is
+where every tab is born, and the only road back to a type whose slot has
+vanished.</p>
+
+<figure data-cluster="The performance readout|12">
+
+<p id="TABBAR-12"><b>The performance readout</b> - three tiny rows at the
+right: <code>SYS</code>/<code>DSP</code> (computer load / audio-engine
+load), <code>MEM</code>/<code>LAT</code> (memory / latency),
+<code>UND</code>/<code>PF</code> (undo depth / prefetch). Green is fine,
+yellow is working hard, and a flashing red <code>DSP</code> means the
+audio engine is about to run out of time - freeze your heaviest tab.
+Hover the readout: its tooltip carries the live numbers and the legend
+for all six abbreviations.</p>

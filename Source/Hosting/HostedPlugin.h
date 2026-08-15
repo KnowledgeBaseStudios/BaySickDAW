@@ -307,29 +307,35 @@ public:
     void parentHierarchyChanged() override;
     void moved() override;
 
-    // ── Surface sizing (QA-Layout T12 / L17; rewritten 2026-08-11) ───────────
-    // A HOST CANNOT SCALE A HOSTED PLUGIN'S UI.  This was built three times as
-    // an AffineTransform on an ancestor of the plugin's editor and it is not a
-    // tuning problem, it is structural -- see the note over resized() for the
-    // JUCE source that makes it impossible.  The plugin's own magnify / zoom is
-    // the only control that changes how big its UI draws.
+    // ── Stretch (QA-Layout T12 / L17) ────────────────────────────────────────
+    // Three cases, and they are genuinely different rather than one behaviour
+    // with edge cases:
     //
-    // So there is now ONE behaviour, not three:
+    //   RESIZABLE, in-process  - the frame size is pushed through the plugin's
+    //                            OWN resize path.  Its constrainer decides what
+    //                            it accepts and we follow whatever it settles on.
+    //   FIXED-SIZE, in-process - the plugin snaps any bounds change back, so the
+    //                            surface is SCALED by an AffineTransform instead.
+    //                            Aspect preserved and centred, so the result is
+    //                            letterbox bars rather than a stretched or
+    //                            silently clipped UI.
+    //   BRIDGED                - CANNOT scale.  The surface is a native child
+    //                            peer holding another process's window; an
+    //                            AffineTransform on a JUCE component does not
+    //                            reach a peer, which is positioned in raw
+    //                            parent-client pixels.  It is centred at its
+    //                            natural size and clipped to the frame.
     //
-    //   the surface sits at whatever size the plugin declares, and the WINDOW
-    //   wraps that, clamped to the workspace.
-    //
-    // A resizable plugin additionally gets the frame pushed through its own
-    // resize path first, and whatever it settles on is the size we wrap.  A
-    // plugin magnified past the workspace anchors TOP-LEFT and clips against the
-    // window edge -- not centred, because a native child window is clipped by
-    // our window's client rect and by nothing in between, so a centred overflow
-    // would spill upward over the page's menu row.
-    //
-    // The bridged case was already this and never changed; it is now the rule
-    // rather than the exception.
+    // The floor exists so "scaled down" never becomes "unusable": below this the
+    // window refuses to shrink further instead of rendering an unreadable UI.
+    static constexpr float kMinUsableScale = 0.5f;
 
-    // The plugin's OWN declared size, tracked across self-resizes.
+    // False for the bridged case -- hosts use it to explain the narrowing rather
+    // than leaving a window that just refuses to scale with no reason given.
+    bool canScaleSurface() const noexcept   { return mRemoteHost == nullptr; }
+
+    // The plugin's OWN declared size, tracked across self-resizes.  Window
+    // minimums derive from this * kMinUsableScale.
     int getNaturalWidth()  const noexcept   { return mNaturalW; }
     int getNaturalHeight() const noexcept   { return mNaturalH; }
 
@@ -356,19 +362,25 @@ private:
     // a direct child again; keep it one.
     void childBoundsChanged (juce::Component* child) override;
 
-    // Asks the host window to wrap the plugin's current size.  Always async:
-    // the fit re-enters resized(), so inline would recurse through the layout it
-    // was called from.
-    void requestWindowFit();
+    // Re-reads the plugin's size and fires onNaturalSizeChanged with it.  Exists
+    // because buildInner()'s report happens in the constructor, before either
+    // consumer has assigned that callback -- see the note in
+    // parentHierarchyChanged().
+    void publishNaturalSize();
 
-    // Centres the surface while it fits and anchors it top-left when it does
-    // not -- see the sizing note in the public section for why the two cases
-    // differ.
-    void positionSurface();
+    // Guards publishNaturalSize to one post per mount.  childBoundsChanged owns
+    // every size change after the first.
+    bool mPublishedOnMount { false };
+
+    // Asks the host window to wrap the plugin's current size.  Always async: the
+    // fit re-enters resized(), so inline would recurse through the layout it was
+    // called from.
+    void requestWindowFit();
 
     // True only across the window fit that OUR readback requested, so the
     // resulting layout honours the plugin's chosen size instead of pushing the
-    // frame back at it and starting the argument over.
+    // frame back at it and restarting the argument.  Without it a resizable
+    // plugin oscillates - measured on Filterjam, 2026-08-11.
     bool mRefitting { false };
 
     std::unique_ptr<juce::AudioProcessorEditor> mInner;

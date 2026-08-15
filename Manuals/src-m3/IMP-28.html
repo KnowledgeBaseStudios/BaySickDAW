@@ -1,0 +1,128 @@
+<p>Plays back a capture of a real pedal rather than modelling one.</p>
+
+<div class="codeblock"><div class="codehead">Source\DSP\NAMPedalStyleDSP.cpp</div><pre><code>// NAMPedalStyleDSP::process — mono-sum + NAM inference core
+    if (mNamActive)
+    {
+        // Mono-sum input (average channels).
+        const float scale = (numCh &gt; 1) ? (1.0f / (float) numCh) : 1.0f;
+        for (int i = 0; i &lt; n; ++i)
+        {
+            float s = 0.0f;
+            for (int ch = 0; ch &lt; numCh; ++ch)
+                s += buffer.getReadPointer (ch)[i];
+            mMonoIn[(size_t) i] = (double) (s * scale);
+        }
+
+        double* inP[1]  = { mMonoIn .data() };
+        double* outP[1] = { mMonoOut.data() };
+        try { mNamActive-&gt;process (inP, outP, n); }
+        catch (...) { std::fill (mMonoOut.begin(), mMonoOut.begin() + n, 0.0); }
+
+        // Spread NAM mono output across both channels (dual-mono).
+        for (int ch = 0; ch &lt; numCh; ++ch)
+        {
+            float* dst = buffer.getWritePointer (ch);
+            for (int i = 0; i &lt; n; ++i)
+                dst[i] = (float) mMonoOut[(size_t) i];
+        }
+    }</code></pre></div>
+<details class="fullfn"><summary>Full function &mdash; Source\DSP\NAMPedalStyleDSP.cpp</summary><pre><code>void NAMPedalStyleDSP::process (juce::AudioBuffer&lt;float&gt;&amp; buffer)
+{
+    if (bypassed) return;
+    juce::ScopedNoDenormals noDenormals;
+
+    const int numCh = buffer.getNumChannels();
+    const int n     = buffer.getNumSamples();
+    if (numCh == 0 || n == 0) return;
+
+    drainPendingSwap();
+
+    // Snapshot dry input for blend.
+    if (mDryScratch.getNumChannels() &lt; numCh || mDryScratch.getNumSamples() &lt; n)
+        mDryScratch.setSize (numCh, n, false, false, true);
+    for (int ch = 0; ch &lt; numCh; ++ch)
+        mDryScratch.copyFrom (ch, 0, buffer, ch, 0, n);
+
+    // ── Pre-model Input/Drive ───────────────────────────────────────────────
+    if (! juce::approximatelyEqual (mInputDb, 0.0f))
+    {
+        const float g = juce::Decibels::decibelsToGain (mInputDb, -60.0f);
+        buffer.applyGain (g);
+    }
+
+    // ── Mono-sum + NAM inference (only if a model is loaded) ────────────────
+    if (mNamActive)
+    {
+        if ((int) mMonoIn .size() &lt; n) mMonoIn .resize ((size_t) n);
+        if ((int) mMonoOut.size() &lt; n) mMonoOut.resize ((size_t) n);
+
+        // Mono-sum input (average channels).
+        const float scale = (numCh &gt; 1) ? (1.0f / (float) numCh) : 1.0f;
+        for (int i = 0; i &lt; n; ++i)
+        {
+            float s = 0.0f;
+            for (int ch = 0; ch &lt; numCh; ++ch)
+                s += buffer.getReadPointer (ch)[i];
+            mMonoIn[(size_t) i] = (double) (s * scale);
+        }
+
+        double* inP[1]  = { mMonoIn .data() };
+        double* outP[1] = { mMonoOut.data() };
+        try { mNamActive-&gt;process (inP, outP, n); }
+        catch (...)
+        {
+            std::fill (mMonoOut.begin(), mMonoOut.begin() + n, 0.0);
+        }
+
+        // Spread NAM mono output across both channels (dual-mono).
+        for (int ch = 0; ch &lt; numCh; ++ch)
+        {
+            float* dst = buffer.getWritePointer (ch);
+            for (int i = 0; i &lt; n; ++i)
+                dst[i] = (float) mMonoOut[(size_t) i];
+        }
+    }
+    // else: no model loaded -- buffer carries the (input-gained) signal through
+
+    // ── Post-model 3-band EQ ────────────────────────────────────────────────
+    if (! juce::approximatelyEqual (mLowDb, 0.0f)
+        || ! juce::approximatelyEqual (mMidDb, 0.0f)
+        || ! juce::approximatelyEqual (mHighDb, 0.0f))
+    {
+        juce::dsp::AudioBlock&lt;float&gt; blk (buffer);
+        auto sub = blk.getSubBlock (0, (size_t) n).getSubsetChannelBlock (0, (size_t) numCh);
+        juce::dsp::ProcessContextReplacing&lt;float&gt; ctx (sub);
+        mLowShelf .process (ctx);
+        mMidPeak  .process (ctx);
+        mHighShelf.process (ctx);
+    }
+
+    // ── Blend (dry/wet mix) ─────────────────────────────────────────────────
+    if (! juce::approximatelyEqual (mBlend01, 1.0f))
+    {
+        const float wet = mBlend01;
+        const float dry = 1.0f - mBlend01;
+        for (int ch = 0; ch &lt; numCh; ++ch)
+        {
+            float* w = buffer.getWritePointer (ch);
+            const float* d = mDryScratch.getReadPointer (ch);
+            for (int i = 0; i &lt; n; ++i)
+                w[i] = w[i] * wet + d[i] * dry;
+        }
+    }
+
+    // ── Output trim ─────────────────────────────────────────────────────────
+    if (! juce::approximatelyEqual (mOutputDb, 0.0f))
+    {
+        const float g = juce::Decibels::decibelsToGain (mOutputDb, -60.0f);
+        buffer.applyGain (g);
+    }
+}</code></pre></details>
+<pre class="formulas">- Signal chain: Input/Drive trim (-24..+24 dB) -&gt; mono-sum (channel average) -&gt; NAM neural inference (`nam::DSP::process`, double precision, mono) -&gt; dual-mono spread -&gt; 3-band EQ -&gt; Blend -&gt; Output trim (-24..+12 dB).
+- EQ: low shelf 100 Hz Q 0.7, mid peak 1 kHz Q 0.7, high shelf 5 kHz Q 0.7 — each +/-15 dB; the whole EQ block is skipped when all three sit at 0 dB.
+- Blend: `out = wet*blend01 + dry*(1 - blend01)` against the pre-everything dry snapshot (default 1.0 = fully wet).
+- Model load: `SafeNamModel::rejectReason` gate (dimension/prewarm sanity on the untrusted .nam JSON) -&gt; `nam::get_dsp(path, data)` -&gt; `ResetAndPrewarm(sr, maxBlock)`; the built model is published via a pending pointer + `mSwapPending` release-store; the audio thread try-locks a SpinLock and `std::swap`s active/pending — never blocks, worst case the swap lands one block later. Old models destruct on the message thread outside all locks (weight-tensor teardown is too heavy for an audio-adjacent lock).
+- No model loaded: the pedal passes the (input-gained) signal through — EQ/Blend/Output still apply.
+- Inference exceptions fill the block with silence rather than propagate.
+- Model path persists as a stable ref (`library:`/`mysamples:` prefixes) so projects survive machine/user changes; missing captures keep the name flagged &quot;(missing)&quot; with nothing installed behind it.</pre>
+<p class="behind"><b>Behind:</b> <a href="manual-2.html#BSPDLP-1">User NAM Pedal group</a>.</p>

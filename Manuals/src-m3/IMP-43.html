@@ -1,0 +1,71 @@
+<p>Third-party engines, each with its own trade between quality, CPU and
+character. Offered as a choice because no single one is best on every voice.</p>
+
+<div class="codeblock"><div class="codehead">- Source\DSP\LibraryPitchShifters.cpp (569 lines - the three wrapper classes + factory; OUR code, wrapping vendored libs)</div><pre><code>// RubberBandShifter::bake() -- realtime-mode engine driven block-by-block (our wrapper)
+        using RB = RubberBand::RubberBandStretcher;
+        // Offline mode fixes pitch for the whole pass; time-varying edits need
+        // the REAL-TIME engine driven block-by-block.  OptionPitchHighConsistency
+        // is the only mode that takes per-block pitch changes without a
+        // discontinuity across the 1.0 boundary (must be set at construction).
+        const int opts = RB::OptionProcessRealTime
+                       | RB::OptionEngineFiner
+                       | RB::OptionFormantPreserved
+                       | RB::OptionPitchHighConsistency;
+        RB rb ((size_t) juce::jmax (8000.0, sr), 1, opts, 1.0,
+               (double) juce::jmax (0.0625f, envAt (pitchRatio, 0, n, 1.0f)));
+        rb.setFormantScale (formantAuto (formantScale, 0, n));
+
+        const int pad   = (int) rb.getPreferredStartPad();  // input silence to prepend
+        const int delay = (int) rb.getStartDelay();         // output frames to discard
+...
+            rb.setPitchScale ((double) juce::jmax (0.0625f, envAt (pitchRatio, envIdx, n, 1.0f)));
+            rb.setFormantScale (formantAuto (formantScale, envIdx, n));
+            const float* const* ip = &amp;src;
+            rb.process (ip, (size_t) chunk, isFinal);
+            drain();</code></pre></div>
+<details class="fullfn"><summary>Full function &mdash; - Source\DSP\LibraryPitchShifters.cpp (569 lines - the three wrapper classes + factory; OUR code, wrapping vendored libs)</summary><pre><code>        long long srcCursor = 0;   // integer source samples fed (excludes pad)
+        int edited = 0;
+        while (edited &lt; nOut)
+        {
+            const int    B  = juce::jmin (block, nOut - edited);
+            const double s0 = srcPosExt (srcPos, nOut, (double) edited);
+            const double s1 = srcPosExt (srcPos, nOut, (double) (edited + B));
+            long long inN = (long long) std::llround (s1) - srcCursor;
+            if (inN &lt;= 0)
+            {
+                if (s1 &lt; (double) srcCursor - 4.0)   // backward map step = detach cut
+                {
+                    rb.reset();
+                    outBase = edited; produced = 0;   // re-anchor output after the cut
+                    srcCursor = (long long) std::llround (juce::jmax (0.0, s0));
+                    prime();
+                    inN = juce::jmax ((long long) 1, (long long) std::llround (s1) - srcCursor);
+                }
+                else
+                    inN = 1;
+            }
+            inN = juce::jlimit ((long long) 1, (long long) (16 * block), inN);
+
+            const int em = juce::jlimit (0, nOut - 1, edited + B / 2);
+            rb.setTimeRatio   ((double) B / (double) inN);
+            rb.setPitchScale  ((double) juce::jmax (0.0625f, envAt (pitchRatio, em, nOut, 1.0f)));
+            rb.setFormantScale (formantAuto (formantScale, em, nOut));
+
+            ibuf.resize ((size_t) inN);
+            for (long long k = 0; k &lt; inN; ++k)
+            {
+                const long long idx = srcCursor + k;
+                ibuf[(size_t) k] = (idx &gt;= 0 &amp;&amp; idx &lt; nIn) ? in[(size_t) idx] : 0.0f;
+            }
+            const float* ip = ibuf.data(); const float* const* ipp = &amp;ip;
+            rb.process (ipp, (size_t) inN, false);
+            srcCursor += inN;
+            drain();
+            edited += B;
+        }</code></pre></details>
+<pre class="formulas">- Engine ids match `bsp_engine` / `bsa_pitch_algo` params: RubberBand = 0, Signalsmith = 1, World = 2.
+- Rubber Band: options `OptionProcessRealTime | OptionEngineFiner | OptionFormantPreserved | OptionPitchHighConsistency` (last one required for per-block pitch changes without a 1.0-boundary discontinuity, set at construction). Pitch-scale floor 0.0625 (-4 octaves). bake block 1024; bakeWarped block 256, `inN` clamp [1, 16*block], time ratio = `B/inN`. Start pad = `getPreferredStartPad()` silence prepended; `getStartDelay()` output frames discarded. Backward map step &gt; 4 samples = detach cut -&gt; `rb.reset()` + output re-anchor + re-prime. Tail flush cap `pad + delay + 8*block` (bake: `pad + delay + 4*block`). `formantAuto`: |scale-1| &lt; 1e-4 -&gt; 0.0 (RB automatic = 1/pitchScale under FormantPreserved).
+- Signalsmith: fixed seed 1234 (deterministic renders); `presetDefault(1, sr)`; tonality limit `8000/sr`; total latency = `inputLatency() + outputLatency()`; 1:1 in/out streaming (time ratio 1), feed `n + totalLat`, discard first `totalLat`. Envelopes converted via `ratioToSemis = 12*log2(max(1e-4, ratio))`; formant with `compensatePitch = true`. bake block 512, bakeWarped block 256; same &gt;4-sample backward-step cut detection with `st.reset()`.
+- WORLD: Harvest `frame_period = 5.0` ms, `f0_floor = 71.0` Hz (keeps CheapTrick FFT at 2048; lower forces 4096), `f0_ceil = 1100.0` Hz; spectral rows `H = fftSize/2 + 1`. Formant preservation is structural (f0 scaled, envelope fixed). bakeWarped re-times analysis frames on the edited timeline: f0 from NEAREST source frame (never interpolate across a voiced/unvoiced 0), envelope + aperiodicity lerp linearly; detach jumps are clean splices (WORLD rebuilds phase per frame). Output RMS matched to input, gain cap 4.0 (WORLD Synthesis runs ~1.14x hot on vocal).
+- Shared: `envAt` edge-clamped per-sample envelope read, nullptr = neutral 1.0; `srcPosExt` identity-slope extrapolation outside [0, nOut) for latency priming and tail flush; sample-rate floor `max(8000, sr)`.</pre>
+<p class="behind"><b>Behind:</b> <a href="manual-2.html#BSPIT-10">Engine picker</a>, <a href="manual-2.html#BSA-14">PITCH box</a>.</p>

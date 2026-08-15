@@ -236,7 +236,7 @@ Every widget, whatever it looks like, is one MIDI controller value from 0 to 127
 | Control | What it does |
 |---|---|
 | **Menu** | The three view entries, Freeze, and Save / Load Page Preset. |
-| **Player Preset** | Save / load the kit's own sound settings only (see below). |
+| **Presets** | Save / load the kit's own sound settings only - a *Player Preset*, see below. The button reads "Presets"; its tooltip names what it saves. |
 | **Program** | Full / Basic. |
 | Swing knob | Per-player swing amount. |
 
@@ -268,7 +268,7 @@ still send it out to an aux strip.
 
 ### The note map reference
 
-**Help > Rusty Drums Map...** opens a scrollable table of every kit-native note:
+**Rusty Drums Map...** on the Rusty window's Menu opens a scrollable table of every kit-native note:
 key name, MIDI number, sound, and articulation. It reads the loaded kit when
 there is one, and falls back to parsing the installed kit directly when no Rusty
 tab has been spawned yet - so you can look the map up before adding the tab. If
@@ -391,7 +391,7 @@ the audition atomic; and sfizz's internal voice state.
 - The count of hi-hat, snare and tom **articulations** reachable from the piano
   roll is whatever the installed kit's `keymap.sfz` declares; the app parses it
   at load rather than hard-coding it, so this document does not state a number.
-  The Help > Rusty Drums Map window is the authoritative list for whatever kit
+  The Rusty Drums Map window is the authoritative list for whatever kit
   is installed.
 - `BaySickRustyDrumsProcessor.h` carries a comment saying discovery "resolves to
   14 channels". It does not - the two kick masters collapse into one bucket, so

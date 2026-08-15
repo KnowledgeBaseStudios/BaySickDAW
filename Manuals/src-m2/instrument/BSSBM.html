@@ -1,0 +1,66 @@
+<p>The menu on a BaySickSynth or BaySickBass tab's window - one menu, two
+namings (<code>Layer</code> / <code>Bass</code>). It belongs to the
+<em>tab</em>, not the engine - a BaySickPlayer tab shows the identical menu -
+so everything here is about the tab as a whole: where to look, and the
+housekeeping.</p>
+
+<figure data-views="BSSBM">
+
+<p id="BSSBM-1"><b>Player.</b> The engine view - the synth panels you are
+probably looking at right now. The tick marks it while it is showing.</p>
+
+<p id="BSSBM-2"><b>Piano Roll.</b> Jumps to the Piano Roll already pointed at
+this tab, so the notes you draw land on this synth. Same result as pressing
+F10 with this window focused.</p>
+
+<p id="BSSBM-3"><b>FX Rack.</b> Opens this channel's effects rack - the
+six-slot rack that sits between the synth and the mixer. Anything you load
+there shapes only this tab's sound.</p>
+
+<p id="BSSBM-4"><b>Freeze.</b> Renders this tab to audio and plays the render
+instead of running the synth live - the sound stays identical while the CPU
+cost drops to almost nothing. It greys out when freezing is not possible, and
+the tooltip tells you why. The label's color is its status: cyan means frozen
+and playing its render, orange means you have edited something since, so the
+render is stale and needs a re-freeze.</p>
+
+<p id="BSSBM-5"><b>Lock Layer / Lock Bass.</b> Protects the tab from accidental edits; the
+tick shows while locked, and the ribbon slot gains an <code>[L]</code> prefix
+so you can see it from anywhere.</p>
+
+<p id="BSSBM-6"><b>Polyphony.</b> Reads the engine's voice mode -
+<code>Polyphonic</code> (chords) or <code>Monophonic</code> (one note at a
+time) - and clicking it toggles between them. The synth starts polyphonic;
+the bass starts monophonic, because basslines almost always want one note
+at a time with the built-in slide between them - a preference, not a
+limit. On a Harmless layer it reads <code>(n/a)</code> and greys out:
+Harmless is always polyphonic.</p>
+
+<p id="BSSBM-7"><b>Rename...</b> Names the tab. The name follows it everywhere -
+ribbon slot, mixer strip, exports.</p>
+
+<p id="BSSBM-8"><b>Duplicate Layer / Bass (new tab).</b> Clones this tab - engine,
+settings, everything - into a fresh tab. This is the copy operation; there is
+no separate copy/paste for tabs. Greys out until the tab has an engine.</p>
+
+<p id="BSSBM-9"><b>Choke Group.</b> Puts the tab in one of sixteen cut groups.
+Tabs sharing a group cut each other off - the classic use is an open and a
+closed hi-hat silencing one another. <code>None</code> keeps it out of the
+game.</p>
+
+<p id="BSSBM-10"><b>Save Current Patch As...</b> Saves the engine's current
+sound - just the sound, not the tab - so you can load it on any other
+BaySickSynth tab later.</p>
+
+<p id="BSSBM-11"><b>Load Preset.</b> The saved-patch tree for this engine,
+factory folders and your own. Reads <code>(no presets installed)</code> when
+there is nothing to show.</p>
+
+<p id="BSSBM-12"><b>Save Page Preset As...</b> Saves the whole page - engine
+sound plus the page's own settings - as one recallable preset.</p>
+
+<p id="BSSBM-13"><b>Load Page Preset.</b> Loads one of those.</p>
+
+<p id="BSSBM-14"><b>Delete Layer / Delete Bass.</b> Removes the tab, its engine and its sound
+from the project. The arrangement keeps whatever audio you froze or rendered,
+but the live instrument is gone.</p>

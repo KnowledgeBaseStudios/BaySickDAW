@@ -1,0 +1,65 @@
+<p>Adds a pitched copy. Polyphonic mode tracks chords rather than a single note.</p>
+
+<div class="codeblock"><div class="codehead">Source\DSP\OctaveStyleDSP.cpp</div><pre><code>// OctaveStyleDSP::process — Vintage mode: Schmitt flip-flop dividers + rectifier
+            // Schmitt trigger zero-crossing detection.
+            bool prevHi = mSchmittHi;
+            if (mono &gt; kSchmittHi) mSchmittHi = true;
+            else if (mono &lt; kSchmittLo) mSchmittHi = false;
+
+            const bool zeroCross = (mSchmittHi != prevHi);
+            if (zeroCross)
+            {
+                if (++mDivBy2Counter &gt;= 2) { mDivBy2Counter = 0; mDivBy2OutSign = -mDivBy2OutSign; }
+                if (++mDivBy4Counter &gt;= 4) { mDivBy4Counter = 0; mDivBy4OutSign = -mDivBy4OutSign; }
+            }
+            const float env = std::abs (mono);
+            // -1 oct = square wave at half input frequency.
+            const float minus1 = mDivBy2OutSign * env;
+            // -2 oct = square wave at quarter input frequency.
+            const float minus2 = mDivBy4OutSign * env;
+            // +1 oct = full-wave rectifier (Octavia trick).
+            const float plus1raw = std::abs (mono) - 0.5f * env;</code></pre></div>
+<details class="fullfn"><summary>Full function &mdash; Source\DSP\OctaveStyleDSP.cpp</summary><pre><code>void OctaveStyleDSP::GranularShifter::process (const float* input,
+                                                float* output,
+                                                int numSamples)
+{
+    const float ratio = pitchRatio;
+    const float invGrain = 1.0f / (float) grainSize;
+
+    for (int i = 0; i &lt; numSamples; ++i)
+    {
+        ring[(size_t) writePos] = input[i];
+        writePos = (writePos + 1) % kBufferSize;
+
+        // [ELIDED: adjust(readPos1/readPos2) — jump a head back by grainSize when
+        //  it gets within one grain of the write head, forward when it falls more
+        //  than (kBufferSize - grainSize) behind; keeps rp bounded in the ring.]
+
+        const float s1 = interp (readPos1);
+        const float s2 = interp (readPos2);
+
+        // [ELIDED: windowPhase(rp) = fmod(writePos - rp, grainSize) / grainSize]
+
+        const float w1 = hann (windowPhase (readPos1));
+        const float w2 = hann (windowPhase (readPos2));
+
+        // #35 final form (smoke #55): plain overlap-add.  Unity now comes from
+        // the STRUCTURE -- setGrainSize re-anchors the pair to an exact
+        // half-grain offset (Hann halves sum to 1.0 at every phase) and head
+        // jumps preserve phase mod grain.
+        output[i] = s1 * w1 + s2 * w2;
+
+        readPos1 += (double) ratio;
+        if (readPos1 &gt;= (double) kBufferSize) readPos1 -= (double) kBufferSize;
+        readPos2 += (double) ratio;
+        if (readPos2 &gt;= (double) kBufferSize) readPos2 -= (double) kBufferSize;
+    }
+}</code></pre></details>
+<pre class="formulas">- Range knob: first-order LPF, log sweep 300 Hz -&gt; 3 kHz: `hz = 300 * (3000/300)^range01` (feeds the shift paths only; dry stays unfiltered).
+- Granular pitch ratios: +1 oct = 2.0, -1 oct = 0.5, -2 oct = 0.25; two read heads a half-grain apart, Hann-windowed overlap-add `out = s1*w1 + s2*w2` (Hann halves sum to unity at every phase).
+- Grain size: period-aligned — `grain = clamp(nPer * P, 256, kBufferSize/2)` with `nPer = round(1024 / P)`; on a chord P comes from the lowest detected poly note, on a confident single note from YIN.
+- Doubler handoff hysteresis: engage at YIN confidence &gt; 0.55, release &lt; 0.35; per-block one-pole fade coef 0.25 (~50-90 ms).
+- PeriodDoubler: octave divisor 2 (-1 oct) / 4 (-2 oct); crossfade length `clamp(period * 0.25, kXfadeMin..kXfadeMax)`; lag window `0.5P + xfade + 8` .. `3P + xfade`; mark validated only if &gt;= 0.5 period since the last; synthetic marks fill gaps &gt; 2P, full re-sync at gap &gt; 6P.
+- Vintage mode: Schmitt trigger (kSchmittHi/kSchmittLo thresholds) drives flip-flop dividers — sign flips every 2 crossings (-1 oct square) and every 4 crossings (-2 oct square), each scaled by `env = |mono|`; +1 oct = full-wave rectifier `|mono| - 0.5*env`.
+- Transient duck (Polyphonic): fast env ~1 ms attack / ~15 ms release, slow env ~80 ms; attack detected when `fastEnv &gt; slowEnv * 1.5 + 0.01`; shifted voices duck to gain 0.4 and recover ~25 ms; shifted voices low-passed at 5 kHz (one-pole).
+- Mix: `out = dry*direct + p1*oct1Up + m1*oct1Down + m2*oct2Down` (each 0..1), then 5 Hz DC blocker `R = 1 - 2*pi*5/sr`.</pre>

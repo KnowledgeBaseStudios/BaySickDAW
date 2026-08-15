@@ -1,0 +1,72 @@
+<p>Key listeners are dispatched in <b>reverse</b> registration order, and they run
+<em>before</em> the focused component's own key handling. The last thing
+registered therefore wins.</p>
+
+<p>That is the whole mechanism behind per-category bindings: a page registers its
+listener when it appears, so its bindings take precedence while it has focus, and
+the app-wide bindings resume when it does not.</p>
+
+<div class="codeblock"><div class="codehead">- juce\modules\juce_gui_basics\windows\juce_ComponentPeer.cpp (vendored JUCE — ComponentPeer::handleKeyPress lines 196-233, handleKeyUpOrDown lines 235-263)</div><pre><code>// ComponentPeer::handleKeyPress (vendored juce_ComponentPeer.cpp) - THE reverse loop
+bool ComponentPeer::handleKeyPress (const KeyPress&amp; keyInfo)
+{
+    bool keyWasUsed = false;
+
+    for (auto* target = getTargetForKeyPress(); target != nullptr; target = target-&gt;getParentComponent())
+    {
+        const WeakReference&lt;Component&gt; deletionChecker (target);
+
+        if (auto* keyListeners = target-&gt;keyListeners.get())
+        {
+            for (int i = keyListeners-&gt;size(); --i &gt;= 0;)
+            {
+                keyWasUsed = keyListeners-&gt;getUnchecked (i)-&gt;keyPressed (keyInfo, target);
+
+                if (keyWasUsed || deletionChecker == nullptr)
+                    return keyWasUsed;
+
+                i = jmin (i, keyListeners-&gt;size());
+            }
+        }
+
+        keyWasUsed = target-&gt;keyPressed (keyInfo);
+
+        if (keyWasUsed || deletionChecker == nullptr)
+            break;
+    }</code></pre></div>
+<details class="fullfn"><summary>Full function &mdash; - juce\modules\juce_gui_basics\windows\juce_ComponentPeer.cpp (vendored JUCE — ComponentPeer::handleKeyPress lines 196-233, handleKeyUpOrDown lines 235-263)</summary><pre><code>bool ComponentPeer::handleKeyUpOrDown (const bool isKeyDown)
+{
+    bool keyWasUsed = false;
+
+    for (auto* target = getTargetForKeyPress(); target != nullptr; target = target-&gt;getParentComponent())
+    {
+        const WeakReference&lt;Component&gt; deletionChecker (target);
+
+        keyWasUsed = target-&gt;keyStateChanged (isKeyDown);
+
+        if (keyWasUsed || deletionChecker == nullptr)
+            break;
+
+        if (auto* keyListeners = target-&gt;keyListeners.get())
+        {
+            for (int i = keyListeners-&gt;size(); --i &gt;= 0;)
+            {
+                keyWasUsed = keyListeners-&gt;getUnchecked (i)-&gt;keyStateChanged (isKeyDown, target);
+
+                if (keyWasUsed || deletionChecker == nullptr)
+                    return keyWasUsed;
+
+                i = jmin (i, keyListeners-&gt;size());
+            }
+        }
+    }
+
+    return keyWasUsed;
+}</code></pre></details>
+<pre class="formulas">- The JUCE loop: `for (int i = keyListeners-&gt;size(); --i &gt;= 0;)` — listeners dispatch in REVERSE registration order, so HIGHEST PRIORITY = REGISTERED LAST. For `keyPressed`, listeners run BEFORE the target component&#x27;s own virtual `keyPressed`. The walk then continues UP the parent chain (`target = target-&gt;getParentComponent()`) until something consumes the key.
+- Asymmetry: `handleKeyUpOrDown` runs the component&#x27;s VIRTUAL `keyStateChanged` FIRST, then the listeners (still reversed). `handleKeyPress` is the opposite (listeners first).
+- Deletion safety in the loop: `WeakReference&lt;Component&gt; deletionChecker` bails if a handler deletes the target; `i = jmin (i, keyListeners-&gt;size())` re-clamps if a handler removed listeners.
+- Unhandled Tab falls through to `moveKeyboardFocusToSibling` (shift reverses direction).
+- Our registration rule (three sites, identical order): the KeyPressMappingSet (command bindings) registers FIRST, the editor&#x27;s typing-keyboard note gate (`this`) registers LAST — so bare note letters (R / S / H) outrank the letter command bindings they collide with. Sites: the editor constructor, every page WorkspaceWindow (`entry.window`), every aux/satellite WorkspaceWindow.
+- Why every window needs its own pair: a contained WorkspaceWindow is its OWN desktop component — key presses bubble to the window peer and STOP, never reaching the editor. And `setFirstCommandTarget(this)` is required because the command manager&#x27;s default target resolution walks up from the focused component, which inside a parentless desktop window finds nothing.
+- Mapping load order: `resetToDefaultMappings()` first, then `BSCommands::loadMappings` overlays user-saved bindings.</pre>
+<p class="behind"><b>Behind:</b> <a href="manual-2.html#BLD-8">A tool button</a>, <a href="manual-2.html#PR-10">Tool buttons</a>, <a href="manual-2.html#DKIT-9">Sel</a>, <a href="manual-2.html#EVT-14">Tool row</a>, <a href="manual-2.html#KEYS-1">Category tabs</a>, <a href="manual-2.html#KEYS-2">Action column</a>, <a href="manual-2.html#KEYS-3">Shortcut column</a>, <a href="manual-2.html#KEYS-4">Set</a>, <a href="manual-2.html#KEYS-5">Reset</a>.</p>

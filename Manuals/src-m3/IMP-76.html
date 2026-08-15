@@ -1,0 +1,97 @@
+<p><b>An export is not a recording of playback.</b> The live processor renders
+itself: it suspends, sweeps every engine into non-realtime mode, resets the
+graph, re-prepares everything, renders, then restores the lot. Only one render
+runs at a time.</p>
+
+<p>Export, the loudness <b>Measure</b> button and freeze all use the <em>same</em>
+render core &mdash; one implementation, so they cannot disagree about what your
+song sounds like.</p>
+
+<p>During a render, clip reads switch to blocking. Offline rendering outruns the
+normal read-ahead by design, so waiting for the disk is correct there and would
+be a dropout anywhere else.</p>
+
+<div class="codeblock"><div class="codehead">- Source\PluginProcessor.cpp (BaySickDAWProcessor::beginOfflineRender lines 7644-7715, endOfflineRender lines 7717+)</div><pre><code>// BaySickDAWProcessor::beginOfflineRender (PluginProcessor.cpp) - entry gate + suspend
+bool BaySickDAWProcessor::beginOfflineRender (double renderSampleRate, int renderBlockSize)
+{
+    if (renderSampleRate &lt;= 0.0 || renderBlockSize &lt;= 0) return false;
+
+    // ONE render at a time, whoever asks: export/measure call this from their
+    // background thread while freeze renders call it on the message thread.
+    // Two interleaved suspend/restore sequences corrupt both renders AND the
+    // restore set, so the loser fails cleanly instead.
+    bool expected = false;
+    if (! mOfflineRenderActive.compare_exchange_strong (expected, true))
+        return false;
+
+    // Device callbacks stop reaching processBlock (the standalone player
+    // checks isSuspended and outputs silence); the render loop becomes the
+    // only caller.  One settle outlasts any in-flight device block.
+    suspendProcessing (true);
+    juce::Thread::sleep (30);
+
+    mOfflinePrevSr   = getSampleRate();
+    mOfflinePrevBlk  = getBlockSize();
+    mOfflinePrevSong = isSongMode();
+    mOfflinePrevHead = getPlayHead();</code></pre></div>
+<details class="fullfn"><summary>Full function &mdash; - Source\PluginProcessor.cpp (BaySickDAWProcessor::beginOfflineRender lines 7644-7715, endOfflineRender lines 7717+)</summary><pre><code>    // A freeze re-render during project load arrives with the load shield
+    // raised, and processBlock&#x27;s shield bail would clear every block of the
+    // render (the offline loop calls processBlock directly, so the suspension
+    // above does not gate it).  Dropping the shield here is safe because the
+    // device is already suspended -- the render loop is the only caller left
+    // -- and endOfflineRender restores it before the device resumes.
+    mOfflinePrevShield = isProjectLoadInProgress();
+    setProjectLoadInProgress (false);
+
+    auto sweepNonRealtime = [this] (bool offline)
+    {
+        setNonRealtime (offline);
+        mEngineRig-&gt;forEachEngine ([offline] (juce::AudioProcessor&amp; p)
+        {
+            p.setNonRealtime (offline);
+            // The vocal&#x27;s embedded NAM/IR is not a rig-owned stage.
+            if (auto* v = dynamic_cast&lt;BaySickVocalProcessor*&gt; (&amp;p))
+                v-&gt;getNamIrProcessor().setNonRealtime (offline);
+        });
+        for (int i = 0; i &lt; (int) kMaxInstPages; ++i)
+        {
+            if (auto* g = mGuitarsEngine[(size_t) i].get()) g-&gt;setNonRealtime (offline);
+            if (auto* b = mBassesEngine[(size_t) i].get())  b-&gt;setNonRealtime (offline);
+        }
+        if (mRustyDrumsEngine) mRustyDrumsEngine-&gt;setNonRealtime (offline);
+        // Rack slots last: a hosted plugin in a mixer rack is a DSPBase inside
+        // an EffectRack, not a rig engine, so nothing above reaches it.
+        mVibeGraph.setAllRackSlotsNonRealtime (offline);
+    };
+    sweepNonRealtime (true);
+
+    // CL-282: clip streamers switch to synchronous blocking reads (a fast
+    // render outruns the background prefetch by design); counter reset so
+    // endOfflineRender&#x27;s report proves the export had zero silent gaps.
+    AudioClipStreamer::sUnderrunCount.store (0, std::memory_order_relaxed);
+    AudioClipStreamer::sPeakPrefillMs.store (0.0f, std::memory_order_relaxed);
+    AudioClipStreamer::sOfflineRender.store (true, std::memory_order_release);
+
+    // Wet-tail hygiene: the render must not open on live reverb/delay tails.
+    mVibeGraph.reset();
+
+    // Full re-prepare at the render config -- prepareToPlay sweeps every
+    // engine + the graph, so the render rate is independent of the device&#x27;s.
+    mOfflineReconfigureThread.store (juce::Thread::getCurrentThreadId(),
+                                     std::memory_order_release);
+    prepareToPlay (renderSampleRate, renderBlockSize);
+    mOfflineReconfigureThread.store (nullptr, std::memory_order_release);
+    return true;
+}</code></pre></details>
+<pre class="formulas">- One-render-at-a-time: `mOfflineRenderActive.compare_exchange_strong(false, true)` — the loser fails cleanly (export/measure call from a background thread, freeze renders from the message thread).
+- Suspend settle: `suspendProcessing(true)` + `juce::Thread::sleep(30)` ms outlasts any in-flight device block; the standalone player outputs silence while suspended.
+- Restore set saved by begin: previous sample rate, block size, song mode, playhead, project-load shield. Restored by end in reverse, plus `mVibeGraph.reset()` on both sides (no live tails into the render, no render tails into live) and `mLastEnginePlayHead` re-seeding.
+- Non-realtime sweep covers: the processor itself, every rig engine (incl. the vocal&#x27;s embedded NAM/IR processor), per-page Guitars/Basses sfizz engines, the Rusty kit, and every mixer rack slot (`setAllRackSlotsNonRealtime`) — hosted rack plugins are DSPBase objects inside EffectRacks, not rig engines.
+- CL-282 streamer contract: `AudioClipStreamer::sOfflineRender = true` switches clip reads to synchronous blocking; `sUnderrunCount`/`sPeakPrefillMs` reset at begin, count reported at end (expected 0).
+- `kOfflineBlock = 2048` samples (CL-056) — lane-replay step ~46 ms at 44.1k, same class as the live 30 Hz applicator tick; `kMaxTailSeconds = 60.0` (ceiling, not duration); default sr fallback 44100.0; output channels `kNumCh = 2`.
+- Tail-decay detection: magnitude `&lt; 1.0e-5f` (~-100 dBFS) sustained for `0.25 * sr` samples ends the tail; only evaluated PAST the content span.
+- Progress: throttled to &gt;= 100 ms between callbacks (~10 Hz); content phase maps to 0..0.9, tail phase 0.9..1.0. (Unthrottled per-block progress was itself most of a 1.17x &quot;render is slow&quot; measurement — the overlay repaint is a synchronous full-window software raster.)
+- Pattern scope: length from `getPatternContentBeats` (never `Pattern.bars`, which is dead data at DEFAULT_BARS = 4); `mLoopStartBeats = 0` / `mCachedPatternLoopBeats = endBeats` set for the render and restored FIRST, before `endOfflineRender` resumes the device (§7.3).
+- Automation: whole loop under `ScopedProgrammaticParamWrites` (export leaves undo history byte-identical); non-main-APVTS lane classes replay via `applyOfflineAutomationAt(head.mBeatPos)` per block, main-APVTS lanes replay inside processBlock, the tempo lane drives the OfflineHead clock itself; song/section scope only (`followLane = scope != Pattern`).
+- The LIVE processor renders itself (same engines/graph/racks as playback); the OfflineHead publishes `isPlaying = true` for the whole render.</pre>
+<p class="behind"><b>Behind:</b> <a href="manual-2.html#BSPIT-14">Render</a>, <a href="manual-2.html#BSA-5">Render</a>, <a href="manual-2.html#ANLZ-2">Export Take</a>, <a href="manual-2.html#EXP-1">Selection</a>, <a href="manual-2.html#EXP-2">Tail</a>, <a href="manual-2.html#EXP-4">Quality</a>, <a href="manual-2.html#EXP-5">Sample rate</a>, <a href="manual-2.html#EXP-6">Dither</a>, <a href="manual-2.html#EXP-9">Measure</a>, <a href="manual-2.html#EXP-10">Export stems (one file per mixer strip). O...</a>, <a href="manual-2.html#EXP-11">Export / Cancel</a>.</p>

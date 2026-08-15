@@ -133,34 +133,34 @@ void EffectSlotWindow::buildPanel()
     // rather than leaving the panel floating in a provisionally-sized frame.
     // Our own panels are unaffected -- they are built to the window, not the
     // other way round.
+    // The plugin owns its size, so our frame is not a resize handle for it --
+    // see WorkspaceWindow::setUserResizable.  Re-asserted on every buildPanel
+    // because a slot's effect can change from a plugin to one of our own panels
+    // and back.
+    if (auto* w0 = findParentComponentOfClass<WorkspaceWindow>())
+        w0->setUserResizable (dynamic_cast<Hosting::HostedPluginEditor*> (mSlot->getEditor()) == nullptr);
+
     if (auto* hosted = dynamic_cast<Hosting::HostedPluginEditor*> (mSlot->getEditor()))
-        hosted->onNaturalSizeChanged = [this] (int w, int h)
+        hosted->onNaturalSizeChanged = [this, hosted] (int w, int h)
         {
             auto* win = findParentComponentOfClass<WorkspaceWindow>();
             if (win == nullptr) return;
 
-            // A programmatic fit to the plugin, not a size the user chose, and
-            // WorkspaceWindow::resized() persists every settled geometry change
-            // -- so without the suppression each fit overwrites the user's
-            // stored window size.
-            const WorkspaceWindow::ScopedSaveSuppress noSave;
 
-            // MF-7 (QA-Manuals 2026-08-11): the content area has to carry the
-            // plugin PLUS the bed SlotComponent::resized() insets it by, or the
-            // plugin is handed 2*kPanelOnlyInset less than it declared - a
-            // fixed-size editor then overhung its host and drew over the resize
-            // border, and a resizable one opened 4 px short of what it asked
-            // for.  The Plugins TAB never had this because PluginsPage's chrome
-            // math already matches its own layout.
-            constexpr int bed = SlotComponent::kPanelOnlyInset * 2;
-            win->sizeToContent (w + bed, h + bed);
+            win->sizeToContent (w, h);
 
-            // NO PLUGIN-DERIVED FLOOR -- same reasoning as PluginsPage: the
-            // floor beats the workspace clamp inside sizeToContent, so a plugin
-            // bigger than the workspace would force an oversized window.  0
-            // leaves WorkspaceWindow's anti-degenerate minimum.
-            win->setResizeFloor (0, 0);
+            // QA-Layout T12: the surface scales, so the window may go below the
+            // plugin's natural size -- but only as far as the UI stays usable.
+            // A bridged surface cannot scale at all, so its floor IS its natural
+            // size; shrinking further would only clip it.
+            const float floorScale = hosted->canScaleSurface()
+                                       ? Hosting::HostedPluginEditor::kMinUsableScale
+                                       : 1.0f;
+            win->setResizeFloor ((int) ((float) w * floorScale),
+                                 (int) ((float) h * floorScale));
+
         };
+    else if (mSlot->getEditor() != nullptr)
     // The panel's own timer must be able to ask whether the DSP it was built
     // against is STILL the one in this slot.  Its timer and this window's
     // rebuild poll are independent, so a project load can destroy the DSP and
@@ -491,18 +491,30 @@ void EffectSlotWindow::timerCallback()
     // Advanced 1047x268, Basic + toggle-less full panels 691x268.  Pushed on
     // the poll so a Mode swap or Basic toggle re-floors without new plumbing;
     // the change guard keeps it quiet.
-    // MF-8 (QA-Manuals 2026-08-11): a hosted VST3 has NO generic panel size --
-    // its size is whatever the plugin declares, and onNaturalSizeChanged owns
-    // it.  Pushing the 691x268 default here fired on the FIRST poll tick (the
-    // guard starts at 0/0) which lands AFTER buildPanel, so every rack-slot
-    // plugin window was snapped to 691x268 AND given that as a constrainer
-    // minimum before the plugin's own fit could arrive.  A plugin editor
-    // smaller than that could never get a window that fit it.
+    // A hosted VST3 is EXCLUDED: these are generic OUR-PANEL sizes and a plugin
+    // has its own.  onNaturalSizeChanged already fits the window to the plugin
+    // AND installs a plugin-derived floor (natural * kMinUsableScale); pushing
+    // 691x268 afterwards overwrote both, because the handler calls
+    // setDefaultWindowSize -- which RESETS the constrainer minimum -- and then
+    // setSize outright.  Measured 2026-08-11: a 612x344 plugin fitted to
+    // 620x378 with a 306x172 floor, then got snapped to 691x268, and resized()
+    // duly scaled it to min(691/612, 268/344) = 0.78 inside a box too wide and
+    // too short.
+    //
+    // This exclusion was tried once BEFORE the scaling restore and made things
+    // worse, which is why the wording matters: back then onNaturalSizeChanged
+    // passed setResizeFloor (0, 0), so removing this push left the bare
+    // anti-degenerate 120x80 as the only minimum.  It is safe now precisely
+    // BECAUSE the plugin-derived floor is back.  The two changes only work
+    // together -- do not remove one and keep the other.
     if (onFloorChanged && mSlot != nullptr && mBuiltType != EffectType::VST3Plugin)
     {
-        int fw = 691, fh = 268;
-        if (isPedalNativeType (mBuiltType))                        { fw = 358;  fh = 268; }
-        else if (mSlot->hasBasicMode() && ! mSlot->isBasicMode())  { fw = 1047; fh = 268; }
+        int fw = 519, fh = 168;
+        // An individual pedal (Blues Drive, Fuzz, Wah, NAM Pedal, ...) opened as
+        // its own effect window uses the COMPACT PEDALBOARD size -- same panel,
+        // same size, wherever it is opened from (Jeff, 2026-08-11).
+        if (isPedalNativeType (mBuiltType))                        { fw = 331;  fh = 331; }
+        else if (mSlot->hasBasicMode() && ! mSlot->isBasicMode())  { fw = 1038; fh = 168; }
         if (fw != mLastFloorW || fh != mLastFloorH)
         {
             mLastFloorW = fw; mLastFloorH = fh;

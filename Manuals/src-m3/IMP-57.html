@@ -1,0 +1,99 @@
+<p>Every dynamic tab's engine is owned by a central rig, keyed by tab kind and
+page index. <b>Pages are views, not owners.</b> Closing a window destroys the
+view; the engine keeps running.</p>
+
+<p>That single decision is why closing a window never silences anything, why the ribbon can bring a window back with its
+state intact, and why a page must never cache an engine pointer &mdash; it looks
+the engine up through the rig each time.</p>
+
+<p>Three sampled instruments sit outside the rig &mdash; BaySickGuitars,
+BaySickBasses and BaySickRustyDrums are owned by the processor because they have
+their own load paths that must not race with a window closing.</p>
+
+<div class="warn">
+  <b>Teardown order is load-bearing.</b> Removing a tab from the rig has to
+  happen before the sampled-instrument chains are destroyed, because the
+  rig-owned chain holds a pointer into that stage. One audio block in the wrong
+  order reads freed memory.
+</div>
+
+<div class="codeblock"><div class="codehead">Source\EngineRig.h (class + EngineTab identity)</div><pre><code>// EngineRig.h -- TabKind enum + EngineTab identity (the (kind, pageIndex) key)
+enum class TabKind { Layers, Bass, Drums, Clips, Vox, Inst, Plugins, Rusty };
+
+struct EngineTab
+{
+    // (kind, pageIndex) IS the identity.  There is deliberately no name here:
+    // the display name belongs to the ribbon tab, which is what persists it and
+    // what every consumer already reads it from.
+    TabKind kind;
+    int pageIndex = -1;
+    juce::String engineType;   // empty until an engine is picked
+
+    // The processor registered for audio dispatch.  For Layers/Bass/Drums/
+    // Clips this is the instrument itself; for Vox the vocal processor; for
+    // Inst the EngineChainProcessor wrapper.
+    std::unique_ptr&lt;juce::AudioProcessor&gt; engine;
+
+    // Support processors the registered engine references but does not own
+    // (Inst: [pedals, namIr] -- the chain wrapper holds raw pointers into
+    // these).  Teardown order is enforced in EngineRig::teardownEngine, not
+    // by member order: the chain must die before its stages.
+    std::vector&lt;std::unique_ptr&lt;juce::AudioProcessor&gt;&gt; ownedStages;</code></pre></div>
+<details class="fullfn"><summary>Full function &mdash; Source\EngineRig.h (class + EngineTab identity)</summary><pre><code>// EngineRig.cpp -- EngineRig::removeTab (full function, lines 102-146)
+void EngineRig::removeTab (TabKind k, int pageIndex, bool deleteFreezeFiles)
+{
+    for (size_t i = 0; i &lt; mTabs.size(); ++i)
+    {
+        if (mTabs[i]-&gt;kind != k || mTabs[i]-&gt;pageIndex != pageIndex) continue;
+
+        // ORDER IS LOAD-BEARING (the Clips-close use-after-free): a Clips
+        // strip&#x27;s Composite task SURVIVES this teardown -- audio inserts
+        // persist for the project lifetime -- so its frozen-source pointers
+        // must be nulled BEFORE the streamers die, and the settle inside
+        // teardownEngine is what lets an in-flight block drain between the
+        // null and the erase.  Harmless for the kinds whose task dies with
+        // the unregister.
+        const bool wasFrozen = mTabs[i]-&gt;frozen;
+        if (wasFrozen)
+            mProc.retractFrozenSources (k, pageIndex);
+
+        teardownEngine (*mTabs[i], /*settleAfterUnregister=*/ true);
+
+        // teardownEngine early-returns on an engine-less tab, so its settle
+        // cannot be what covers the erase below -- and the erase destroys the
+        // freeze streamers a still-live insert task reads through the pointers
+        // retracted above.  Keyed on what is actually being freed rather than
+        // on whether an engine happens to exist, so removeTab is safe on its
+        // own instead of relying on the caller&#x27;s statement order.
+        if (wasFrozen)
+            mProc.settleAudioThread();
+
+        // The stash is keyed on page index alone, so it has to die with the tab
+        // identity that index stands for: a Plugins tab at index N in the next
+        // project is not this one, and the factory would not know the difference.
+        if (k == TabKind::Plugins)
+            mPluginRestoreDescs.erase (pageIndex);
+
+        mTabs.erase (mTabs.begin() + (long) i);
+
+        // File delete AFTER teardown: Windows refuses to delete a file the
+        // streamer still holds open.  And only on a USER delete -- a project
+        // switch or app quit keeps the files, which are the regenerable cache
+        // the content stamp reuses on the next load (§6.8).
+        if (wasFrozen &amp;&amp; deleteFreezeFiles &amp;&amp; onFreezeFileObsolete)
+            onFreezeFileObsolete (k, pageIndex);
+        return;
+    }
+}</code></pre></details>
+<pre class="formulas">- Identity key: `(TabKind kind, int pageIndex)` IS the tab identity; no name stored (display name lives on the ribbon tab). `pageIndex` valid range is `[0, capacityOf(kind))`.
+- `TabKind` enum is APPEND-ONLY: `{ Layers, Bass, Drums, Clips, Vox, Inst, Plugins, Rusty }` — insertion would re-point anything persisting the raw ordinal. Freeze filenames spell the kind as a NAME (PluginProcessor::freezeFileFor), so appending is safe.
+- Capacities: Layers/Bass/Drums/Clips/Vox/Inst/Plugins from `kMax*Pages` constants in BaySickConstants.h; `Rusty` capacity = 1 (project singleton, always pageIndex 0).
+- Track-id prefix vocabulary (embedded in APVTS param ids + serialized blobs; must match page-era spellings exactly): `lay_N`, `bas_N`, `drm_N`, `clip_N_` (trailing underscore is load-bearing); Vox/Inst/Plugins/Rusty have no prefix.
+- Teardown ordering invariants (teardownEngine): (1) detach freeze watcher + proc listener BEFORE engine/APVTS destruction (members destruct reverse declaration order); (2) shield up (`setProjectLoadInProgress(true)`) + `settleAudioThread()` BEFORE unregister — a settle AFTER the unregister fences nothing; (3) chain wrapper (`tab.engine`) resets BEFORE `ownedStages.clear()` (chain holds raw pointers into stages); (4) shield is nest-aware save/restore (`shieldWasUp`).
+- removeTab ordering: retract frozen sources -&gt; teardownEngine (settleAfterUnregister=true) -&gt; extra settle if wasFrozen (streamer erase must outlast an in-flight block) -&gt; erase Plugins restore-desc stash -&gt; erase tab -&gt; delete freeze files LAST (Windows can&#x27;t delete an open file), and only on a USER delete (`deleteFreezeFiles=true`) — project switch / app quit keeps the regenerable cache.
+- Rig-wide sequencing (CLAUDE.md/EngineRig contract): `rig.removeTab` runs BEFORE `destroyBaySickGuitars/Basses` — the rig-owned Inst chain holds the spliced sfizz stage pointer; one audio block in the wrong order = use-after-free.
+- All rig mutation is MESSAGE THREAD only; audio thread reads the processor&#x27;s SpinLock-guarded raw-pointer arrays kept in sync by register*/unregister*.
+- `apvtsOf` resolves the 7 engine-family APVTSes by dynamic_cast; hosted plugins deliberately return null (their lanes key on the plugin&#x27;s own stable parameter ids).
+- Freeze span: `kSongScope = -1` for whole-arrangement; `contentStamp` is a 32-bit FNV-1a hash (`(h ^ b) * 16777619u`), 0 = unknown = always mismatch; doubles quantized `llround(d * 1000.0)` before hashing; span `matches()` tolerance is `1.0e-4` on lengthBeats/bpm (XML decimal round-trip).
+- Staleness has two additive axes: PLAYER axis (`markEngineContentChanged` — invalidates every cached pattern for one tab) and PATTERN axis (`markPatternContentChanged` — invalidates one pattern across every frozen tab). `markEngineContentChanged` is gated on `!isNonRealtime()` (offline automation replay is not a user edit — self-sustaining re-render loop otherwise) and on `pageIndex != mRevivingPluginPage`.</pre>
+<p class="behind"><b>Behind:</b> <a href="manual-2.html#FRAME-10">Ribbon tab bar</a>, <a href="manual-2.html#TABBAR-1">A ribbon slot</a>, <a href="manual-2.html#TABBAR-2">Slot name row</a>, <a href="manual-2.html#TABBAR-3">Slot chevron</a>, <a href="manual-2.html#TABBAR-4">Instance-count badge</a>, <a href="manual-2.html#TABBAR-5">Active-slot top stripe, 2px</a>, <a href="manual-2.html#TABBAR-6">Builder slot</a>, <a href="manual-2.html#TABBAR-10">An instance-type slot (Clips gold / Vox te...</a>, <a href="manual-2.html#TABBAR-11">+ add-tab slot</a>, <a href="manual-2.html#TABUTN-1">BaySickVocal</a>, <a href="manual-2.html#TABUTN-2">BaySickLiveInst</a>, <a href="manual-2.html#TABUTN-3">BaySickGuitars</a>, <a href="manual-2.html#TABUTN-4">BaySickBasses</a>.</p>

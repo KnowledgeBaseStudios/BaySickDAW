@@ -1,0 +1,203 @@
+<p>A compressor that only listens to the sibilant range, plus a spectral stage
+that works on the offending frequencies rather than the whole signal &mdash; so a
+harsh <em>s</em> is softened without the whole word ducking.</p>
+
+<div class="codeblock"><div class="codehead">Source/DSP/DeEsserDSP.cpp (time-domain engine + spectral wrapper), Source/DSP/SibilanceSpectralProcessor.cpp (Engine::Spectral STFT core)</div><pre><code>// DeEsserDSP::process -- sidechain-HPF detector, saturating GR curve, Wide/Split blend
+        // -- Envelope follower (peak detector, atk/rel one-pole) -------------
+        const float magL = std::abs (scL);
+        const float magR = std::abs (scR);
+        const float cL = (magL &gt; mEnvL) ? att : rel;
+        const float cR = (magR &gt; mEnvR) ? att : rel;
+        mEnvL = cL * mEnvL + (1.0f - cL) * magL;
+        mEnvR = cR * mEnvR + (1.0f - cR) * magR;
+
+        // Stereo-linked detector: louder channel drives both gain paths.
+        const float envLink = std::max (mEnvL, mEnvR);
+        const float envDb   = 20.0f * std::log10 (std::max (envLink, 1e-9f));
+
+        float grDb = 0.0f;
+        const float overshoot = envDb - thrDb;
+        if (overshoot &gt; 0.0f)
+        {
+            // Softer-than-linear pull-down: 1 - exp(-x/N) maps overshoot to
+            // [0..1] saturating curve, then scale by rangeDb.
+            const float t  = 1.0f - std::exp (-overshoot / 6.0f);   // 0..1
+            grDb = rangeDb * t;                                     // 0..rangeDb (negative)
+        }
+
+            const float lowL   = mAudLpfL.processSample (0, audioL);
+            const float highL  = mAudHpfL.processSample (0, audioL);
+            const float wideL  = audioL * grLin;
+            const float splitL = lowL + highL * grLin;
+            wetL = wideL + (splitL - wideL) * blend;</code></pre></div>
+<details class="fullfn"><summary>Full function &mdash; Source/DSP/DeEsserDSP.cpp (time-domain engine + spectral wrapper), Source/DSP/SibilanceSpectralProcessor.cpp (Engine::Spectral STFT core)</summary><pre><code>// DeEsserDSP::process -- time-domain per-sample core (Stereo M/S mode shown;
+// the MidOnly/SideOnly recompose branch, Listen monitor output, lookahead
+// ring bookkeeping and GR-meter publish are elided).
+    for (int i = 0; i &lt; numSamples; ++i)
+    {
+        const float thrDb   = mThresholdSmoothed.getNextValue();
+        const float rangeDb = mRangeSmoothed    .getNextValue();
+        const float curMix  = mMixSmoothed      .getNextValue();
+
+        // -- Pull source samples -----------------------------------------
+        const float drySrcL = outL[i];
+        const float drySrcR = isStereo ? outR[i] : drySrcL;
+
+        // M/S detection / application axis selection.  Stereo uses raw L/R;
+        // Mid uses (L+R)/2 in both detector and apply path; Side uses (L-R)/2.
+        float dL = drySrcL;
+        float dR = drySrcR;
+        if (mMsMode == MsMode::MidOnly)
+        {
+            const float mid = (drySrcL + drySrcR) * 0.5f;
+            dL = dR = mid;
+        }
+        else if (mMsMode == MsMode::SideOnly)
+        {
+            const float side = (drySrcL - drySrcR) * 0.5f;
+            dL = dR = side;
+        }
+
+        // -- Sidechain HPF on detection signal ---------------------------
+        const float scL = mScHpfL.processSample (0, dL);
+        const float scR = isStereo ? mScHpfR.processSample (0, dR) : scL;
+
+        // -- Envelope follower (peak detector, atk/rel one-pole) ---------
+        const float magL = std::abs (scL);
+        const float magR = std::abs (scR);
+        const float cL = (magL &gt; mEnvL) ? att : rel;
+        const float cR = (magR &gt; mEnvR) ? att : rel;
+        mEnvL = cL * mEnvL + (1.0f - cL) * magL;
+        mEnvR = cR * mEnvR + (1.0f - cR) * magR;
+
+        // Stereo-linked detector: louder channel drives both gain paths.
+        const float envLink = std::max (mEnvL, mEnvR);
+        const float envDb   = 20.0f * std::log10 (std::max (envLink, 1e-9f));
+
+        // -- Threshold gate + GR computation -----------------------------
+        // overshoot = how far above threshold the detector is.  Map 0..N dB
+        // overshoot to 0..rangeDb (negative) reduction with a soft proportional
+        // curve.  rangeDb is the FLOOR (max reduction).
+        float grDb = 0.0f;
+        const float overshoot = envDb - thrDb;
+        if (overshoot &gt; 0.0f)
+        {
+            // Softer-than-linear pull-down: 1 - exp(-x/N) maps overshoot to
+            // [0..1] saturating curve, then scale by rangeDb.
+            const float t  = 1.0f - std::exp (-overshoot / 6.0f);   // 0..1
+            grDb = rangeDb * t;                                     // 0..rangeDb (negative)
+        }
+        if (grDb &lt; blockMaxGrDb) blockMaxGrDb = grDb;
+
+        const float grLin = juce::Decibels::decibelsToGain (grDb);
+
+        // -- Apply GR: continuous Wide&lt;-&gt;Split blend on the DELAYED audio --
+        // Wide = full-band duck; Split = only the fixed-4 kHz high band ducks.
+        const float blend = mModeSmoothed.getNextValue();   // 0=Wide .. 1=Split
+        float wetL, wetR;
+
+        if (mMsMode == MsMode::Stereo)
+        {
+            const float lowL   = mAudLpfL.processSample (0, audioL);
+            const float highL  = mAudHpfL.processSample (0, audioL);
+            const float wideL  = audioL * grLin;
+            const float splitL = lowL + highL * grLin;
+            wetL = wideL + (splitL - wideL) * blend;
+            monL = (1.0f - grLin) * (audioL + (highL - audioL) * blend);
+            // ... (right channel identical; M/S branch elided) ...
+        }
+
+        // -- Wet/dry mix --------------------------------------------------
+        outL[i] = audioL + curMix * (wetL - audioL);
+        if (outR) outR[i] = audioR + curMix * (wetR - audioR);
+    }
+
+// SibilanceSpectralProcessor::processFrame -- spectral detection + per-bin mask
+// (Engine::Spectral).  Analysis, event gate and mask update shown; the
+// conjugate-symmetric resynthesis / overlap-add write-back is elided.
+    // -- Pass 1: analyze both channels, band level per channel --------------
+    float bandDb[2] = { -120.0f, -120.0f };
+    for (int ch = 0; ch &lt; numCh; ++ch)
+    {
+        auto&amp; c = mCh[ch];
+        for (int i = 0; i &lt; N; ++i)
+        {
+            const int srcIdx = (c.inRead + i) % ringSize;
+            mFftA[(size_t) i] = { c.inRing[(size_t) srcIdx] * window[i], 0.0f };
+        }
+        fft.perform (mFftA.data(), mSpec[ch].data(), false);
+
+        // Peak in-band bin, not mean RMS: the mean over ~400 bins reads
+        // 15-25 dB below the time-domain path&#x27;s peak envelope of the same
+        // material, which would desensitize the SHARED Thresh knob when
+        // switching engines.  Peak-bin tracks the (spectrally concentrated)
+        // ess and keeps knob parity.
+        float peak = 0.0f;
+        for (int k = loBin; k &lt;= hiBin; ++k)
+            peak = juce::jmax (peak, std::abs (mSpec[ch][(size_t) k]) * magNorm);
+        bandDb[ch] = 20.0f * std::log10 (juce::jmax (peak, 1.0e-9f));
+    }
+
+    // Stereo-linked event gate (louder channel drives both) -- same saturating
+    // overshoot-&gt;reduction curve as the time-domain detector.
+    const float envDb     = (numCh &gt; 1) ? juce::jmax (bandDb[0], bandDb[1]) : bandDb[0];
+    const float overshoot = envDb - p.thresholdDb;
+    const float eventT    = (overshoot &gt; 0.0f) ? (1.0f - std::exp (-overshoot / 6.0f)) : 0.0f;
+    const float eventDb   = p.rangeDb * eventT;   // &lt;= 0
+
+    float frameMinGainDb = 0.0f;
+
+    // -- Pass 2: per-channel mask + apply + resynthesize --------------------
+    for (int ch = 0; ch &lt; numCh; ++ch)
+    {
+        auto&amp; c = mCh[ch];
+
+        for (int k = 0; k &lt; numBins; ++k)
+        {
+            const bool inBand = (k &gt;= loBin &amp;&amp; k &lt;= hiBin);
+
+            float sel = 0.0f;
+            if (inBand)
+            {
+                const float magDb = 20.0f * std::log10 (
+                    juce::jmax (std::abs (mSpec[ch][(size_t) k]) * magNorm, 1.0e-9f));
+                float&amp; fl = c.floorDb[(size_t) k];
+                const float fc = (magDb &gt; fl) ? floorUpCoef : floorDnCoef;
+                fl = fc * fl + (1.0f - fc) * magDb;
+                sel = juce::jlimit (0.0f, 1.0f, (magDb - fl - kSelLoDb) / (kSelHiDb - kSelLoDb));
+            }
+
+            // Wide = uniform event duck; Split = selectivity-shaped, in-band only.
+            const float tgtDb = eventDb * ((1.0f - blend) + blend * (inBand ? sel : 0.0f));
+            const float tgt   = juce::Decibels::decibelsToGain (tgtDb);
+
+            float&amp; g = c.gain[(size_t) k];
+            const float gc = (tgt &lt; g) ? atkCoef : relCoef;
+            g = gc * g + (1.0f - gc) * tgt;
+        }
+
+        // 3-bin frequency smoothing of the gain mask (prevents isolated bins
+        // gating on/off frame-to-frame -&gt; &quot;birdies&quot;).
+        mGainScratch[0] = c.gain[0];
+        for (int k = 1; k &lt; numBins - 1; ++k)
+            mGainScratch[(size_t) k] = (c.gain[(size_t) (k - 1)]
+                                      + c.gain[(size_t) k]
+                                      + c.gain[(size_t) (k + 1)]) * (1.0f / 3.0f);
+        mGainScratch[(size_t) (numBins - 1)] = c.gain[(size_t) (numBins - 1)];</code></pre></details>
+<pre class="formulas">Time-domain engine (Engine 0):
+- Detector: peak follower with one-pole atk/rel: `env = c*env + (1-c)*|x|`, `c = exp(-1/(ms*0.001*sr))`; attackMs 0.1..30 (default 1), releaseMs 10..500 (default 80). Stereo-linked: `envDb = 20*log10(max(envL, envR))`.
+- Detector sidechain HPF: cutoff = Freq knob (4000..12000 Hz, default 6500), resonance = Q knob (0.5..4, default 1.4) - a resonant HPF, so the Freq/Q pair tunes the detector to the ess.
+- GR curve (saturating, NOT ratio-based): `t = 1 - exp(-overshoot/6)`; `grDb = rangeDb * t`. rangeDb (-48..0, default -14) is the reduction FLOOR; 6 dB is the curve&#x27;s e-folding constant.
+- Application split: fixed 4 kHz Linkwitz-Riley-ish HP/LP pair (Q = 0.7071); the user&#x27;s Freq knob only moves the detector HPF, never the split.
+- Wide/Split continuous blend (modeBlend 0..100 -&gt; blend 0..1): `wet = wide + (split - wide)*blend`, where `wide = audio*grLin` (full-band duck) and `split = low + high*grLin` (high band only ducks).
+- M/S: Mid axis = (L+R)/2, Side = (L-R)/2; detector and apply both run on the chosen axis, the untouched axis is recomposed unchanged.
+- Lookahead 0..kMaxLookaheadMs on the audio path only; GR meter hold + 30 dB/sec decay.
+
+Spectral engine (Engine 1, SibilanceSpectralProcessor):
+- STFT: Hann window, 75% overlap, window applied on analysis AND synthesis; OLA scale = 2/3 (cancels the Hann^2 sum of 3/2; juce FFT already divides the inverse by N). HQ = 2048 FFT / 512 hop, LL = 1024 / 256. Latency = one full FFT frame.
+- Band = [Freq knob .. 16 kHz] in bins; magnitude calibration `magNorm = 4/N` (full-scale sine peaks its bin at ~N/4 under Hann).
+- Event gate: peak in-band bin per channel, stereo-linked max; same curve as the time path: `eventDb = rangeDb * (1 - exp(-overshoot/6))`.
+- Per-bin sibilance selectivity: each bin keeps a floor EMA in dB - rise tau 800 ms (kFloorUpTauMs), fall tau 200 ms (kFloorDnTauMs), frame coef `exp(-hopMs/tauMs)`; selectivity ramp `sel = clamp((magDb - floor - 3)/(12 - 3), 0, 1)` (kSelLoDb=3, kSelHiDb=12: 3 dB above floor = untouched, 12 dB = full share). Floor init -80 dB.
+- Per-bin target: `tgtDb = eventDb * ((1-blend) + blend * (inBand ? sel : 0))` - Wide end ducks every bin uniformly by the event amount, Split end shapes the duck by per-bin selectivity, in-band only.
+- Per-bin gain smoothing at frame rate with the user&#x27;s attack/release: `g = gc*g + (1-gc)*tgt`, gc from `exp(-hopMs/ms)`, attack coef when tgt &lt; g.
+- 3-bin moving-average smoothing of the gain mask before applying (anti-&quot;birdie&quot;); applied magnitude-only (complex bin scaled, phase preserved). Listen monitor uses `1 - g` through the same pipeline.</pre>

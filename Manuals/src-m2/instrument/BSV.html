@@ -1,0 +1,71 @@
+<p>The Vox page is the live pitch corrector: it listens to the voice on this
+channel, works out what note is being sung, and pulls it gently - or
+instantly - onto the right one. This window is the tuner itself; the deeper
+vocal editors open from its menu.</p>
+
+<figure data-cluster="Mix, snapshots, and the switch|1,2,3">
+
+<p id="BSV-1"><b>Mix</b> blends the corrected voice against the untouched
+one. Full right, you hear only the corrected signal - the normal setting.
+Pull it back and the original voice comes through underneath, softening the
+effect; this is also how you keep a natural take and just reinforce it.</p>
+
+<p id="BSV-2"><b>A/B</b> holds two complete snapshots of this page's
+settings so you can set the corrector up two different ways and flip
+between them on the same voice - the honest way to decide. This pair
+belongs to the Vox page alone; the amp window and the EQ have their own,
+separate A/Bs.</p>
+
+<p id="BSV-3"><b>Realtime Pitch</b> is the master switch, and the label
+shows its CURRENT state - <code>OFF</code> means off right now, click to
+turn it on. Nothing below does anything while this is off.</p>
+
+<figure data-cluster="What counts as in tune|4,5">
+
+<p id="BSV-4"><b>Root</b> and <span id="BSV-5"></span><b>Scale</b> tell
+the corrector which notes are legal. A scale is the set of notes a song
+uses; the root is its home note. <code>Chromatic</code> means "every
+semitone is legal" - the corrector just nudges to the nearest note, the
+transparent setting. Pick a real key (root C, scale Minor, say) and the
+corrector snaps only to that key's notes - which is where the deliberate,
+hard-tuned pop vocal sound lives.</p>
+
+<figure data-cluster="How the correction behaves|6,7,8">
+
+<p id="BSV-6"><b>Retune ms</b> is how FAST the pull happens, in
+milliseconds. Slow (high numbers): drift gets corrected without anyone
+hearing the correction happen - natural. Near zero: the voice arrives on
+the note already perfect, with that robotic snap between notes. This one
+knob is most of the difference between "tuned" and "auto-tuned"; both are
+legitimate sounds, and this chooses.</p>
+
+<p id="BSV-7"><b>Strength</b> is how far off-pitch material gets pulled
+toward the target. 100% lands dead on the note; less leaves some of the
+singer's own intonation in place. <span id="BSV-8"></span><b>Humanize</b>
+adds back the tiny natural wavering that real voices have, so long held
+notes do not freeze into a flat line.</p>
+
+<figure data-cluster="Voice character|9,10">
+
+<p id="BSV-9"><b>Throat</b> resizes the modeled vocal tract - the physical
+shape the voice resonates in. Bigger reads deeper and darker; smaller,
+brighter and thinner. A subtle character control at small moves, a
+creature-maker at big ones.</p>
+
+<p id="BSV-10"><b>Formant Preserve.</b> Formants are the resonances that
+make a voice sound like a PERSON rather than a pitch. When correction
+moves the pitch, this keeps those resonances where they were - so the
+voice stays itself. Leave it on; turn it off only when the chipmunk
+artifact is the effect you are chasing.</p>
+
+<figure data-cluster="The readout|11">
+
+<p id="BSV-11"><b>The readout</b> shows the corrector's live thinking:
+<code>Detected</code> (the note you actually sang), <code>Target</code>
+(the note the scale says you meant), <code>Shift</code> (the distance
+between them, in cents - hundredths of a semitone). Dashes mean it has no
+pitch to lock onto yet.</p>
+
+<p>The page corrects whatever the channel carries - a live
+microphone or prerecorded audio clips - so you can audition settings
+against a recorded take without singing a note.</p>

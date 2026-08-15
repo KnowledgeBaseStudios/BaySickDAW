@@ -45,16 +45,18 @@ namespace
 
 juce::File ManualsWindow::manualsIndexFile()
 {
+    // The manual is ONE document since the 2026-08-13 unification; F1 lands
+    // straight in it (Jeff: the landing page was a pointless extra step).
     return juce::File::getSpecialLocation (juce::File::currentApplicationFile)
                .getParentDirectory()
                .getChildFile ("Manuals")
-               .getChildFile ("index.html");
+               .getChildFile ("manual.html");
 }
 
 ManualsWindow::ManualsWindow()
     : juce::DocumentWindow ("BaySickDAW Manuals",
                             VC::Bg,
-                            juce::DocumentWindow::closeButton)
+                            juce::DocumentWindow::allButtons)
 {
     WindowChrome::applyToDesktopWindow (*this);   // TS7 section 9.3
     setResizable (true, true);
@@ -89,7 +91,10 @@ ManualsWindow::ManualsWindow()
         setContentOwned (browser, true);
     }
 
+    // Maximized by default (Jeff, 2026-08-14); the centreWithSize is the
+    // restore size the maximize button toggles back to.
     centreWithSize (1100, 800);
+    setFullScreen (true);
     setVisible (true);
     toFront (true);
 }

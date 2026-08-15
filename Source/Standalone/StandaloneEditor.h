@@ -361,6 +361,19 @@ private:
     // View > Master Analyzer.
     void openMasterAnalyzerWindow();
 
+    // The app's ONE VU meter, in its own window: master OUTPUT level.  Opened
+    // from the effects rack menu next to VU Calibration (Jeff, 2026-08-11) -- the
+    // per-panel input VUs were removed because they cost 120px on every effect
+    // panel.
+    void openMasterVuWindow();
+
+    // Installs the Inst nav menu (Pedals / NAM/IR / Piano Roll) on an Inst page.
+    // Called for EVERY Inst page -- see the definition for why a live-input tab
+    // used to miss it entirely.
+    void installInstNavMenu (InstPage& ip,
+                             juce::Component::SafePointer<InstPage> safe,
+                             juce::Component::SafePointer<PageMenuBar> safeBar);
+
     // TS7 §6.8: freezes read out of a project file during deserialize, applied
     // after the whole graph exists.  Collected rather than applied inline because
     // the tabs they name do not exist yet at read time.
@@ -455,7 +468,14 @@ private:
     // with one instance each -- they open empty and delete down to zero like
     // every other tab type, so a saved project or template never carries tabs
     // the user did not ask for.
-    void onAddTabRequest(RibbonTabBar::TabType type);
+    // navigate=false creates the tab WITHOUT framing a window or selecting it.
+    // Used by the Drum Kit's empty-row picker, which must not put a window on
+    // screen before a sound has been chosen.  The new tab's id lands in
+    // mLastAddedTabId.
+    void onAddTabRequest(RibbonTabBar::TabType type, bool navigate = true);
+
+    // Id of the tab the last onAddTabRequest created, or -1 if it made none.
+    int  mLastAddedTabId { -1 };
     void applyEngineToNewestTabOfType (RibbonTabBar::TabType type,
                                        const juce::String& engine);
     void onTabSelected(int tabId);
@@ -562,6 +582,10 @@ private:
     enum class RenameFamily { Layers, Bass, Drums, Inst, Clips, Plugins, Vox, Rusty };
 
     PageEntry*   findRenameTarget (RenameFamily fam, int pageIndex) const;
+
+    // Retitles a tab's WINDOW.  Used by the hosted-plugin name callbacks, which
+    // rename the ribbon tab directly rather than going through a user rename.
+    void         setWindowTitleForTab (int ribbonTabId, const juce::String& name);
     bool         renameKeyFor     (const PageEntry& e, RenameFamily& famOut,
                                    int& pageIndexOut) const;
     juce::String tabNameOfPage    (const PageEntry& e) const;

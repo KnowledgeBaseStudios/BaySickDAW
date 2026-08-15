@@ -1,0 +1,78 @@
+<p>Plugins run in a <b>separate process</b>, so a plugin that crashes takes only
+its own helper down. Scanning runs out of process too &mdash; a plugin that
+crashes on load cannot take your session with it.</p>
+
+<p>The bridge protocol is at version 6. Two message ids are permanently
+reserved and unused:</p>
+
+<table>
+  <thead><tr><th>Id</th><th>Name</th><th>Status</th></tr></thead>
+  <tbody>
+    <tr><td>4</td><td><code>Process</code></td><td>Reserved since v3</td></tr>
+    <tr><td>103</td><td><code>ProcessReply</code></td><td>Reserved since v3</td></tr>
+  </tbody>
+</table>
+
+<div class="note">
+  <b>Audio and MIDI do not travel over the message protocol.</b> Per-block data
+  crosses through a shared memory mapping, with a pair of named events
+  (<code>_req</code> and <code>_done</code>) as the rendezvous. The protocol
+  carries setup, parameters and state &mdash; never samples. Sending audio down a
+  message channel is what makes bridged plugins unusable, and those two ids are
+  kept reserved so nobody re-adds it.
+</div>
+
+<p>A hosted effect can also take a sidechain: the host lends the plugin its
+strip's sidechain receive buffer for exactly one call, then takes it back.</p>
+
+<div class="codeblock"><div class="codehead">- Source\Hosting\PluginBridgeProtocol.h (the whole wire format, kProtocolVersion = 6)</div><pre><code>// Hosting::Bridge protocol version history + version constant (PluginBridgeProtocol.h)
+// 6 (2026-08-10): ScanFile / ScanResult -- plugin SCANNING moved out of
+// process.  It used to run in-process on a background thread, which broke
+// JUCE&#x27;s documented &quot;VST3 scan must be on the message thread&quot; contract AND let
+// one crashing plugin take the whole DAW down mid-scan.  Host and helper are
+// built together by do_build.bat and staged side by side, so a version bump
+// never meets a stale peer.
+inline constexpr std::uint32_t kProtocolVersion = 6;
+
+// The ChildProcess handshake id.  Both sides must agree, so it lives here with
+// the rest of the protocol rather than being redeclared in each .cpp (it was,
+// identically, in two).
+inline constexpr const char* kBridgeUid = &quot;BaySickPluginBridge&quot;;</code></pre></div>
+<details class="fullfn"><summary>Full function &mdash; - Source\Hosting\PluginBridgeProtocol.h (the whole wire format, kProtocolVersion = 6)</summary><pre><code>enum class MessageType : std::uint32_t
+{
+    // host -&gt; helper
+    Handshake      = 1,
+    LoadPlugin     = 2,
+    Prepare        = 3,
+    Process        = 4,   // RESERVED since v3 -- per-block work rides the shared mapping
+    SetParameter   = 5,
+    GetState       = 6,
+    SetState       = 7,
+    OpenEditor     = 8,
+    CloseEditor    = 9,
+    Shutdown       = 10,
+    ScanFile       = 11,  // v6: trailer = path to scan.  Reply is ScanResult.
+
+    // helper -&gt; host
+    HandshakeReply = 101,
+    LoadReply      = 102,
+    ProcessReply   = 103,   // RESERVED since v3 -- the reply rides the shared mapping
+    StateBlob      = 104,
+    ParameterList  = 105,
+    EditorOpened   = 106,
+    Error          = 107,
+    ProgramInfo    = 108,   // v4: payload + current program&#x27;s name as trailer
+    ParamTouched   = 109,   // v5: payload + &quot;id \t name&quot; trailer
+    ScanResult     = 110,   // v6: trailer = &lt;PLUGINS&gt; XML, one &lt;PLUGIN&gt; per type
+};</code></pre></details>
+<pre class="formulas">- `kProtocolVersion = 6`; version history: v2 transport + MIDI trailer; v3 per-block path LEFT THE PIPE (audio/MIDI/transport/reply ride the shared mapping&#x27;s control header, rendezvous = a pair of named auto-reset events; the pipe send allocated a MemoryBlock per block and could block the audio thread up to the 15 s pipe timeout); v4 ProgramInfo; v5 ParamTouched; v6 ScanFile/ScanResult (out-of-process scanning — in-process scan broke JUCE&#x27;s &quot;VST3 scan on the message thread&quot; contract and let a crashing plugin kill the DAW). Helper reports its version in the handshake; the host refuses a mismatch.
+- `kBridgeUid = &quot;BaySickPluginBridge&quot;` — the juce::ChildProcess{Coordinator,Worker} handshake id.
+- Architecture-neutral wire rules: fixed-width ints/floats only (no int/long/size_t/bool/untyped enum); no pointer crosses the wire (HWND as uint64); `#pragma pack(1)` + static_asserts (Header 16 B, HandshakePayload 8, PreparePayload 16, SetParameterPayload 8, EditorPayload 16, LoadReplyPayload 24, ProgramInfoPayload 8, ParamTouchedPayload 4).
+- Framing: `Header{type, payloadBytes, sequence, reserved}` — payloadBytes counts payload + trailer so unknown types are skippable; sequence echoed in replies so late replies are discardable.
+- Per-block MIDI cap `kMaxMidiBytesPerBlock = 4096`; MIDI wire format in the control area, hand-written (helper may be x86): per event `int32 samplePosition, int32 numBytes, raw bytes`.
+- Timeouts (SandboxedPluginClient.cpp anonymous namespace): `kStartupTimeoutMs = 15000` (launch + handshake + load), then re-pointed to `kConnectedWriteTimeoutMs = 5000` via the vendored `InterprocessConnection::setPipeMessageTimeout` (security MEDIUM-7 — JUCE reuses the launch timeout for every pipe op, so a wedged helper froze the UI 15 s per message); `kOfflineBlockDeadlineMs = 30000` (offline hang guard, deliberately NOT derived from block period); `kMaxStaleDrains = 4`.
+- Helper selection: `PluginManager::architectureOf(file) == PluginArch::X86` picks `BaySickPluginHost32.exe`, else `BaySickPluginHost64.exe`; both ship beside the app binary (a process can only load a plugin of its own architecture — the entire reason the bridge exists). Both are built by the same `do_build.bat` run (x64 into `build\`, x86 into `build32\`) and staged into both `BaySickDAWStandalone_artefacts` configs, so a version bump never meets a stale peer.
+- LoadPlugin trailer since v3: `path + &#x27;\n&#x27; + identifierString` (the identifier alone contains no path; path feeds `findAllTypesForFile`, identifier disambiguates shell-plugin sub-plugins).
+- Failure containment: `mSendWedged` makes a wedged pipe a one-time cost; JUCE&#x27;s ping thread then declares the connection dead. Destructor sends Shutdown best-effort, then `killWorkerProcess()`.
+- Prepare creates the shared audio mapping on the message thread (audio path never allocates), channel-major float, helper processes in place; A FRESH MAPPING NAME PER PREPARE (an old name still open in the helper would hand it the old view — silent wrong-audio). Live rendezvous deadline is a share of the block period (`mMsPerSample = 1000.0 / sampleRate`).</pre>
+<p class="behind"><b>Behind:</b> <a href="manual-2.html#FRAME-7">Options menu</a>, <a href="manual-2.html#TABUTN-5">VSTPlugin submenu</a>, <a href="manual-2.html#FXPICK-6">VST Plugins submenu</a>, <a href="manual-2.html#PLUG-1">Filter:</a>, <a href="manual-2.html#PLUG-2">1. Scan folders</a>, <a href="manual-2.html#PLUG-3">Add Folder... / Remove / Reset to Defaults</a>, <a href="manual-2.html#PLUG-4">2. Added plugins table</a>, <a href="manual-2.html#PLUG-5">Remove Selected</a>, <a href="manual-2.html#PLUG-6">3. Scan results table</a>.</p>

@@ -15,10 +15,6 @@
 
 namespace
 {
-    constexpr int kHeaderRowH = 36;     // filename strip at top of page
-    constexpr int kPad        = 12;
-    constexpr int kFilenameW  = 320;
-
     // Live-page registry for undo entries.  A tab delete followed by an undo
     // builds a BRAND NEW ClipsPage for the same page index, so an entry that
     // captured `this` (or a SafePointer to it) would apply to a corpse and
@@ -60,16 +56,6 @@ ClipsPage::ClipsPage (int pageIndex)
     // QA-Layout T2 (L4): the decorative BaySickPlayer picker is gone -- it
     // existed to look like Vox/Inst and to anchor the context menu, which
     // now lives on the title strip's Menu dropdown (showPageActionsMenu).
-
-    addAndMakeVisible (mClipFileLabel);
-    mClipFileLabel.setJustificationType (juce::Justification::centredLeft);
-    mClipFileLabel.setColour (juce::Label::textColourId,        juce::Colour (0xff66ff88));
-    mClipFileLabel.setColour (juce::Label::backgroundColourId,  juce::Colour (0xff1a1a1a));
-    mClipFileLabel.setColour (juce::Label::outlineColourId,     juce::Colour (0xff333333));
-    mClipFileLabel.setBorderSize ({ 2, 6, 2, 6 });
-    mClipFileLabel.setText ("(no clip)", juce::dontSendNotification);
-    mClipFileLabel.setTooltip ("The audio file this Clips tab is bound to.  "
-                                "Set by drag/drop onto Builder or onto the Clips empty-state page.");
 
     switchTab (0);
 }
@@ -699,10 +685,6 @@ void ClipsPage::setClipFilePath (const juce::String& p,
                                  bool interactive)
 {
     mClipPath = p;
-    mClipFileLabel.setText (p.isNotEmpty()
-                                ? juce::File (p).getFileName()
-                                : juce::String ("(no clip)"),
-                            juce::dontSendNotification);
 
     if (auto* vp = dynamic_cast<BaySickPlayerProcessor*> (mPlayerProc))
         if (p.isNotEmpty())
@@ -816,18 +798,11 @@ void ClipsPage::importClipState (const juce::String& xml)
 void ClipsPage::paint (juce::Graphics& g)
 {
     g.fillAll (juce::Colour (0xff181818));
-    g.setColour (juce::Colour (0xff0a0a0a));
-    g.fillRect (0, 0, getWidth(), kHeaderRowH);
-    g.setColour (juce::Colour (0xff333333));
-    g.fillRect (0, kHeaderRowH, getWidth(), 1);
 }
 
 void ClipsPage::resized()
 {
-    auto r = getLocalBounds();
-    auto header = r.removeFromTop (kHeaderRowH).reduced (kPad, 6);
-    mClipFileLabel.setBounds (header.removeFromLeft (juce::jmin (kFilenameW, header.getWidth())));
-    layoutEditor (r);
+    layoutEditor (getLocalBounds());
 }
 
 void ClipsPage::layoutEditor (juce::Rectangle<int> r)

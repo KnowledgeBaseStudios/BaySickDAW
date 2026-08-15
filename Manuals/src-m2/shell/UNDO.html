@@ -1,0 +1,19 @@
+<p>The Undo History window - the whole undo stack laid out, clickable.</p>
+
+<figure data-views="UNDO">
+
+<p>The window lists every undoable transaction in order.
+<span id="UNDO-1"></span><b><code>&gt;&gt; Current</code></b> marks
+where you are: everything above it is done, everything below is redoable.</p>
+
+<p id="UNDO-2"><b>Click any entry</b> and the whole app jumps to that
+state - ten steps back in one click, or forward again. Nothing is lost by
+looking; the redo entries stay until you edit from an earlier point.</p>
+
+<p><b>Depth</b> is yours to set - 100, 250, 500 or 1000
+transactions, under <code>Options &gt; Undo History Size</code>. The list
+holds that many and quietly drops the oldest.</p>
+
+<p>Big structural edits - arrangement rearrangements, track
+operations - undo as ONE step each, however much they touched. One action,
+one entry, one click back.</p>

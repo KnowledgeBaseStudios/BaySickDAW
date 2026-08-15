@@ -1,0 +1,82 @@
+<p>MP3 decoding comes from a vendored LAME tree, not from the framework's own
+decoder &mdash; which is switched off at build time.</p>
+<div class="note">
+  <b>Why bother.</b> MP3 is an untrusted-input path: it is a file somebody else
+  made, parsed by code that runs on your machine. The framework's decoder is a
+  hand-ported one that has not been audited for that. Pinning the decoder is only
+  meaningful if nothing else can claim the format first, which is why format
+  registration was collapsed to a single place &mdash; see
+  <a href="#safe-inputs">the guarded readers</a>.
+</div>
+
+<div class="codeblock"><div class="codehead">- Source\MpglibAudioFormat.h (decode — MpglibReader / MpglibAudioFormat over vendored LAME mpglib)</div><pre><code>// MpglibReader constructor decode loop (MpglibAudioFormat.h)
+        // ONE FRAME PER CALL, then drain the decoder with len = 0.
+        //
+        // hip_decode_headers is NOT a one-frame call, whatever its name suggests:
+        // it loops internally (mpglib_interface.c:400-418) writing at
+        // `pcm_l + totsize` until the decoder is empty, so ITS output buffer must
+        // hold every frame contained in the pushed chunk.  A 32 kbps 48 kHz file
+        // has 96-byte frames, so a 1024-byte push decodes ten of them - 11,520
+        // samples - and a 24 kbps MPEG-2 file is worse.  That is an ordinary
+        // low-bitrate MP3 overrunning the heap, not a crafted one.
+        //
+        // hip_decode1_headers returns AT MOST one frame (lame.h says so), which
+        // is what makes the buffer below sufficient rather than hopeful.
+        constexpr int kMaxFrame = 1152;
+        constexpr int kPcmSlack = kMaxFrame * 8;
+
+        std::vector&lt;short&gt; pcmL ((size_t) kPcmSlack), pcmR ((size_t) kPcmSlack);
+        std::vector&lt;float&gt; outL, outR;</code></pre></div>
+<details class="fullfn"><summary>Full function &mdash; - Source\MpglibAudioFormat.h (decode — MpglibReader / MpglibAudioFormat over vendored LAME mpglib)</summary><pre><code>        hip_t hip = hip_decode_init();
+
+        if (hip == nullptr)
+            return;
+        ...
+        mp3data_struct info {};
+        auto* src = static_cast&lt;unsigned char*&gt; (encoded.getData());
+        const auto total = encoded.getSize();
+        size_t pos = 0;
+        bool overflowed = false;
+        bool failed = false;
+
+        while (pos &lt; total &amp;&amp; ! overflowed &amp;&amp; ! failed)
+        {
+            const int chunk = (int) juce::jmin ((size_t) 1024, total - pos);
+
+            int got = hip_decode1_headers (hip, src + pos, (size_t) chunk,
+                                           pcmL.data(), pcmR.data(), &amp;info);
+            pos += (size_t) chunk;
+
+            while (got != 0)
+            {
+                if (got &lt; 0)                // malformed stream: keep what decoded
+                { failed = true; break; }
+
+                if ((juce::int64) outL.size() + got &gt; MpglibAudio::kMaxDecodedSamples)
+                { overflowed = true; break; }
+
+                outL.insert (outL.end(), pcmL.begin(), pcmL.begin() + got);
+                if (info.stereo &gt; 1)
+                    outR.insert (outR.end(), pcmR.begin(), pcmR.begin() + got);
+
+                // len = 0 flushes what the chunk above already buffered.
+                got = hip_decode1_headers (hip, src + pos, 0,
+                                           pcmL.data(), pcmR.data(), &amp;info);
+            }
+        }
+
+        hip_decode_exit (hip);
+
+        if (overflowed || outL.empty() || info.samplerate &lt;= 0)
+            return;
+
+        numChannels    = (info.stereo &gt; 1) ? 2u : 1u;
+        sampleRate     = (double) info.samplerate;
+        lengthInSamples = (juce::int64) outL.size();</code></pre></details>
+<pre class="formulas">- Everything is behind `BAYSICK_HAS_LAME`; the decoder replaced JUCE&#x27;s `JUCE_USE_MP3AUDIOFORMAT` (a ~3,185-line unaudited decompiler-port), switched off in CMakeLists (`JUCE_USE_WINDOWS_MEDIA_FORMAT=0` per MF-4). `libs/lame/mpglib/*.c` is already compiled into the BaySickLame target with `HAVE_MPGLIB`.
+- Decode ceilings: `kMaxDecodedSamples = 48000 * 60 * 22` (~22 min of 48 kHz — ~512 MB decoded stereo float, real peak ~double with intermediates alive); `kMaxEncodedBytes = 512 MB` pre-check (MP3 compresses ~10x at worst-useful bitrates). Overflow = refuse the file, not truncate.
+- Decode loop: 1024-byte pushes into `hip_decode1_headers` (AT MOST one frame per call), then drain with `len = 0`; `kMaxFrame = 1152`, PCM scratch `kPcmSlack = kMaxFrame * 8` shorts per channel. int16 → float scale `1.0f / 32768.0f`. `AudioBuffer::setSize` failure detected explicitly (HeapBlock without throwOnFailure → null buffer).
+- Encoder: CBR only (`vbr_off`), `lame_set_quality(2)`, JOINT_STEREO for 2ch / MONO for 1ch, `bWriteVbrTag = 1`. Worst-case output buffer `1.25 * numSamples + 7200` bytes (LAME&#x27;s documented bound); flush buffer minimum 7200 bytes.
+- `lame_encode_buffer_ieee_float` takes planar -1..+1 floats (JUCE&#x27;s native layout); mono feeds the left pointer to both args.
+- Xing/LAME seek header written post-close via `lame_mp3_tags_fid` on a re-opened `r+b` FILE*; Windows opens with `_wfopen` wide because the UCRT decodes narrow paths with the system codepage (non-ASCII path mismatch vs JUCE&#x27;s wide Win32 calls).</pre>
+<p class="behind"><b>Behind:</b> <a href="manual-2.html#EXP-3">Format</a>.</p>

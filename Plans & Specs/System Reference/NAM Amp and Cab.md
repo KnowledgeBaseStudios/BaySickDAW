@@ -126,15 +126,19 @@ file's path in the **Missing files** dialog, listed under
 
 Two independent virtual microphones over the same post-cabinet signal. **Mic B is
 summed, not blended** - two real mics on one source add together, and with
-identical settings the two together are about 6 dB louder than one. A **Mic B
-Active** OFF / ON switch turns the second mic on; with it off the chain is
-byte-identical to a single-mic chain.
+identical settings the two together are about 6 dB louder than one.
 
-Each mic has a **Mode** selector:
+Each mic has its own **OFF / ON** switch in its heading, and **both start OFF**.
+With both off the cabinet output reaches the chain with no mic model on it at
+all. Switching a mic on or off crossfades over 15 ms rather than stepping, so it
+is safe to automate. Mic A's switch fades between the modelled and unmodelled
+cabinet signal; Mic B's fades its parallel path in and out of the sum.
+
+Each mic then has a **Mode** dropdown, which chooses WHICH mic - the switch has
+already decided whether there is one:
 
 | Mode | What it does |
 |---|---|
-| **Off** | No mic coloring at all - the cabinet output passes straight through. |
 | **Built-in** | Applies one of ten built-in mic voicings. These are **EQ curves**, not impulse responses: four parametric bands per model, shaped to approximate the published frequency response of that kind of microphone. |
 | **User IR** | Loads a real captured microphone impulse response from a `.wav` file and convolves the signal through it. Nothing is bundled - you supply the file. |
 
@@ -170,12 +174,34 @@ Where each virtual mic sits in front of the cabinet.
 | Control | What it does | Range | Default |
 |---|---|---|---|
 | **Distance** | How far the mic is from the source. Closer is louder, brighter, and adds proximity-effect bass (peaking near 1 cm and gone by about 20 cm); further is quieter and darker as air absorbs the top end. | 1-150 cm | 30 cm |
-| **Angle** | How far off-axis the mic points. 0 is straight on. Moving off-axis past about 15 degrees progressively darkens the top end and reduces level according to the polar pattern. | -90 to +90 degrees | 0 |
+| **Angle** | How far off-axis the mic points, left or right. 0 is straight on. Moving off-axis past about 15 degrees progressively darkens the top end and reduces level according to the polar pattern. | -90 to +90 degrees | 0 |
+| **Height** | How far the mic sits above or below the centre of the cone. It is combined with Angle into the true off-axis angle (`cos eff = cos h * cos v`) and lengthens the path to the mic (`sqrt(distance^2 + height^2)`), so raising a mic both darkens it and backs it off slightly - the same thing that happens on a real cab. | -30 to +30 cm | 0 |
 | **Polar** | The pickup pattern: **Omni** (equal pickup all round, no proximity effect and no off-axis darkening), **Cardioid** (heart-shaped, rejects the rear), **Supercardioid** (tighter, small rear lobe), **Hypercardioid** (sharper still, pronounced side rejection), **Figure-8** (bidirectional, equal front and rear, strong side rejection). | five patterns | Cardioid |
 | **Mix** | Blend between the placed and unplaced signal. | 0-100 % | 100 % |
 
-Offsetting Mic B's distance and angle from Mic A's is what produces the
+Offsetting Mic B's distance, angle and height from Mic A's is what produces the
 comb-filtered color you get from two real mics at different distances.
+
+Under each mic's knobs is a **picture** of that mic in front of the cabinet.
+Dragging the mic moves it and writes the same parameters the knobs do;
+double-clicking returns it to 30 cm, on axis, at cone height. A **Top / Side**
+button on each placement heading swaps that mic's view, independently of the
+other's:
+
+| View | Looking at | What dragging sets |
+|---|---|---|
+| **Top** | Down on the cab from above. | Distance and Angle. |
+| **Side** | The speaker face, cone centred. | Height and Angle. Distance is not representable here and stays on its knob. |
+
+Everything drawn is a real term in the model rather than decoration: the rings
+are distance marks (Top) or 10 cm height marks (Side), the bright zone is the
+region inside 15 degrees off-axis where no darkening is applied at all, and the
+red band is the 20 cm proximity boundary - which in the side view closes up as
+the mic backs off and disappears entirely past 20 cm, because proximity follows
+the true distance and not the height alone.
+
+What the pictures deliberately do NOT show is position across the cone face,
+from dust cap to edge. The model has no term for it.
 
 ## Parameters and persistence
 
@@ -196,16 +222,22 @@ on different pages stay distinct.
 | `cab_mix` | 0-100 % | 100 |
 | `oversampling` | 1x / 2x / 4x | 1x |
 | `ab_slot` | A / B | A |
-| `nam_micsim_mode` | None / Built-in / User IR | None |
+| `nam_mica_active` | bool | false |
+| `nam_micsim_mode` | Built-in / User IR | Built-in |
 | `nam_micsim_model` | the ten built-in models | Live Vocal Dynamic |
 | `nam_micsim_mix` | 0-100 % | 100 |
 | `nam_placement_distance_cm` | 1-150 cm | 30 |
 | `nam_placement_angle_deg` | -90 to +90 deg | 0 |
+| `nam_placement_height_cm` | -30 to +30 cm | 0 |
 | `nam_placement_polar` | Omni / Cardioid / Supercardioid / Hypercardioid / Figure-8 | Cardioid |
 | `nam_placement_mix` | 0-100 % | 100 |
 | `nam_micb_active` | bool | false |
 | `nam_micsim_b_mode` / `_b_model` / `_b_mix` | same as Mic A | same as Mic A |
-| `nam_placement_b_distance_cm` / `_b_angle_deg` / `_b_polar` / `_b_mix` | same as Mic A | same as Mic A |
+| `nam_placement_b_distance_cm` / `_b_angle_deg` / `_b_height_cm` / `_b_polar` / `_b_mix` | same as Mic A | same as Mic A |
+
+`nam_micsim_mode` is NOT the DSP's own mode enum. `MicSimDSP::Mode` still counts
+None / Built-in / User IR from 0, and the processor passes this parameter's index
+plus one - the mic being off is the Active switch's job now, on both mics.
 
 **Saved with the project** (and with a page preset, because a page preset captures
 the host engine's state, which embeds this one):

@@ -1,0 +1,89 @@
+<p>The Oscillator panel is where the sound is born. An oscillator is the part
+of a synth that actually vibrates - everything else in the instrument only
+shapes what this panel generates. It is also where the synth decides how it
+behaves when you play more than one note.</p>
+
+<figure data-cluster="The display and the panel tabs|1,2">
+
+<p id="BSSBOSC-1"><b>The display</b> - the strip under the title bar -
+draws whatever the open panel is about. Here that is the raw wave itself:
+change the waveform below and the drawing changes with it. On the other
+panels it becomes the envelope shape, the filter's response curve, the
+LFO's wave.</p>
+
+<p id="BSSBOSC-2"><b>The panel tabs</b> - <code>OSC</code> /
+<code>OSC ENV</code> / <code>FILTER</code> / <code>FLT ENV</code> /
+<code>LFO</code> / <code>MOD</code> - are the synth's six pages, and the
+green one is where you are. Important: all six are always running. The tabs
+only change what you are LOOKING at, never what you are hearing.</p>
+
+<figure data-cluster="Waveform and tuning|3,4,5,6,7,8,9">
+
+<p id="BSSBOSC-3"><b>WAVEFORM</b> is the basic tone color - the shape the
+oscillator vibrates in, which decides which frequencies the raw sound
+contains. <code>SAW</code> (the default) is bright and buzzy and contains
+everything, which makes it the best raw material for filtering. Squares
+are hollow like a clarinet, sines are pure and soft like a whistle, and
+the others live in between. If a patch feels wrong at its core - not the
+brightness, the CHARACTER - come back here first.</p>
+
+<p id="BSSBOSC-4"><b>The tuning-mode picker</b> (<code>Musical</code>)
+sets what the two knobs beside it mean. In Musical mode
+<span id="BSSBOSC-5"></span><b>TRANSPOSE</b> moves the whole oscillator in
+semitones - the steps between piano keys - so +12 is exactly one octave
+up. <span id="BSSBOSC-6"></span><b>MODIFIER</b> reshapes the chosen
+waveform continuously: small turns shift its harmonic balance, big turns
+can push one shape most of the way toward another. It is the "same wave,
+different flavor" knob.</p>
+
+<p id="BSSBOSC-7"><b>NOISE</b> mixes plain noise - the sound of static -
+in with the wave. A touch adds breath and grit to the attack; a lot buries
+the pitch entirely, which is what snares and hats are made of.</p>
+
+<p id="BSSBOSC-8"><b>SYNC</b> and <span id="BSSBOSC-9"></span><b>RING</b>
+are the two classic second-oscillator tricks, both OFF in most patches and
+both worth trying deliberately rather than discovering by accident. SYNC
+forces a hidden second wave to restart in lockstep with the first,
+producing the tearing, aggressive lead sound. RING multiplies the two
+waves instead of adding them, producing bell-like, metallic tones that do
+not sit on the normal pitch grid.</p>
+
+<figure data-cluster="Voice mode and note cutting|10,11,12,13,14">
+
+<p id="BSSBOSC-10"><b>VOICE MODE</b> - three buttons, one lit, deciding
+what happens when notes overlap. <code>Poly</code> (polyphonic): notes
+coexist, so chords work. <code>Mono</code> (monophonic): one note at a
+time - a new note silences the last, the way most basslines want.
+<code>Legato</code>: mono, but when notes overlap the envelopes do NOT
+restart - the pitch just moves - so runs and slides read as one connected
+gesture. The synth starts Poly; the bass starts Mono.</p>
+
+<p id="BSSBOSC-11"><b>CUT SELF</b> - when the same note retriggers, stop
+the old one instead of letting the two ring together.
+<span id="BSSBOSC-12"></span><b>SAME PITCH</b> narrows the rule to
+identical notes only (and its face flips to <code>CUT ALL</code> when you
+want every new note to cut). Together they keep fast repeated lines clean
+instead of smearing into mud.</p>
+
+<p id="BSSBOSC-13"><b>SLIDE</b> is glide: in the mono modes, how long the
+pitch takes to travel from the last note to the new one. Zero snaps
+instantly. Raise it and every note slews into the next - THE synth-bass
+move. The bass ships with a little already on.</p>
+
+<p id="BSSBOSC-14"><b>OUT VOL</b> is the engine's own output level, before
+the mixer strip ever sees it. If a patch distorts the channel no matter
+where the fader is, pull this back - the overload is happening in here.</p>
+
+<figure data-cluster="The mod wheel|15,16">
+
+<p id="BSSBOSC-15"><b>MOD WHEEL</b> - if you have a MIDI keyboard, its
+left-hand wheel can drive this synth. The switch picks the target -
+<code>Filter</code> (brightness under your thumb) or <code>LFO</code>
+(wobble depth under your thumb) - and
+<span id="BSSBOSC-16"></span><b>AMOUNT</b> sets how hard the wheel pushes
+it. No hardware plugged in? These simply sit idle.</p>
+
+<p><b>The readouts.</b> Every knob on every panel prints
+its exact value beneath it. When a drag will not land on the number you
+want, right-click the knob and <code>Type in value...</code> takes it
+directly.</p>

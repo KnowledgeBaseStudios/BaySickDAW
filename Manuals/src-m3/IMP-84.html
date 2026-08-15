@@ -1,0 +1,54 @@
+<p>Unison plays several copies of each note at once, slightly detuned and
+spread across the stereo field - thickness by controlled disagreement. The
+critical rule shared by every engine that stacks (BaySickSynth/Bass,
+BaySickPlayer, Harmless, the sampled guitars): voice gain follows the square
+root of the voice count, not the count itself. Doubling the voices raises
+energy, not perceived level - so adding voices changes width and density
+while the mix balance survives. Detune spreads the copies in pitch, stereo
+spread distributes them in space, and Harmless adds a TYPE control for HOW
+the copies disagree - pure offsets, random scatter, slow drift, or
+alternating signs.</p>
+
+<div class="codeblock"><div class="codehead">Source\BaySickSynth\BaySickSynthVoice.cpp (in-voice detuned saw stack, section 10c of renderNextBlock; shared by BaySickBass)</div><pre><code>// BaySickSynthVoice::renderNextBlock (section 10c: unison stack + sqrt(N) gain law)
+        float Lout = sample;
+        float Rout = sample;
+        if (mUnisonVoices &gt; 1 &amp;&amp; playFreq &gt; 1.0f)
+        {
+            const int   N   = mUnisonVoices;
+            const float maxCents = mUnisonDetune * 50.0f;   // ±50 cents at max
+            const float envGain  = ampVal * velScale;
+            const float levelN   = 1.0f / std::sqrt ((float) N);
+
+            for (int u = 1; u &lt; N; ++u)
+            {
+                // Symmetric position in [-1, +1] across the N-1 extra voices
+                const float pos       = ((float)(u - 1) / (float)(N - 1)) * 2.0f - 1.0f;
+                const float detuneHz  = playFreq * (std::pow (2.0f, pos * maxCents / 1200.0f) - 1.0f);
+                const float uniFreq   = playFreq + detuneHz;
+
+                mUniPhase[u - 1] += (double) uniFreq / (double) sr;
+                if (mUniPhase[u - 1] &gt;= 1.0) mUniPhase[u - 1] -= 1.0;
+
+                float uniSaw = (1.0f - 2.0f * (float) mUniPhase[u - 1]) * envGain * levelN;
+
+                // Pan: pos * spread (-1 = left, +1 = right)
+                const float pan = pos * mUnisonSpread;
+                Lout += uniSaw * (0.5f * (1.0f - pan));
+                Rout += uniSaw * (0.5f * (1.0f + pan));
+            }
+        }</code></pre></div>
+<details class="fullfn"><summary>Full function &mdash; Source\BaySickSynth\BaySickSynthVoice.cpp (in-voice detuned saw stack, section 10c of renderNextBlock; shared by BaySickBass)</summary><pre><code>    // Stagger unison phases so the stack sounds naturally detuned even at t=0.
+    for (int u = 0; u &lt; 6; ++u)
+    {
+        mDriftRngState = mDriftRngState * 1664525u + 1013904223u;
+        mUniPhase[u] = (double)((int) mDriftRngState) * (1.0 / 2147483648.0) * 0.5 + 0.5;
+    }</code></pre></details>
+<pre class="formulas">- sqrt(N) gain compensation (QA-Soundness gain-staging pass, both synth engines): stack level `levelN = 1 / sqrt(N)`. Rationale: detuned copies are incoherent, powers add, so `1/sqrt(N)` holds perceived level constant as voices are added (`1/N` made it quieter per voice).
+  - BaySickSynth/Bass: `const float levelN = 1.0f / std::sqrt ((float) N);` (each extra saw scaled by it; main voice stays at unity, centered).
+  - Harmless: `const float uniNorm = 1.0f / std::sqrt (float (mNumUnison));` applied to the summed slot output.
+- Stack position: `pos = ((u-1)/(N-1)) * 2 - 1` in [-1, +1].
+- Detune: BaySickSynth `detuneHz = f * (2^(pos * maxCents/1200) - 1)`, `maxCents = detuneKnob * 50` (±50 cents max); Harmless `mult[u] = 2^(bias * detuneCents / 1200)`; Player `cents_i = detPart + spreadPart` folded into the note&#x27;s pitch as `cents_i / 100` semitones (see IMP-88 resampling ratio).
+- Stereo spread: BaySickSynth linear pan `pan = pos * spread`, `L += s * 0.5*(1-pan)`, `R += s * 0.5*(1+pan)`; Harmless constant-power `panL = cos(angle)`, `panR = sin(angle)` with `angle = (panPos+1) * pi/4`.
+- Phase stagger at note-on: LCG `state = state * 1664525 + 1013904223`, mapped to phase in [0, 1) so the stack never starts phase-coherent.
+- Player unison is a true voice-spawn: up to `N = 8` real `BaySickPlayerVoice` allocations per note-on, each tagged with its own cents before `mSynth.noteOn`.</pre>
+<p class="behind"><b>Behind:</b> <a href="manual-2.html#BSHARM-5">UNISON section</a>, <a href="manual-2.html#BSHARM-26">TYPE chicken-head in UNISON</a>, <a href="manual-2.html#BSSBMOD-6">UNISON</a>, <a href="manual-2.html#BSGTR-5">Unison / Width / Detune knobs</a>, <a href="manual-2.html#BSBAS-5">Unison / Width</a>.</p>

@@ -38,6 +38,21 @@ qa-dispatcheraffinity-trace*.log
 # Auto-saved Untitled-project backups — runtime, not source.
 Backups/Unsaved/
 
+# Undo-history structural snapshots (UndoSnapshotStore) — one XML per structural
+# op, written to the app root at runtime and pruned when the undo manager drops
+# the transaction. Same class as Backups/Unsaved/; was never listed.
+UndoSnapshots/
+
+# Manuals packaged for sending to someone. Regenerable from Manuals/ in one
+# command, so it is an output rather than a source — same reasoning as build/.
+/BaySickDAW-Manuals.zip
+
+# The three printable manuals (one per depth level) — printed from
+# Manuals/manual.html by headless Edge, ~30 MB of regenerable binary that
+# would churn on every manual edit. The installer picks them up from the
+# staged Manuals/ folder; they are outputs, not source.
+/Manuals/*.pdf
+
 # Per-machine general settings (recent files, multi-core toggle, etc.) — modified every app launch.
 settings.xml
 

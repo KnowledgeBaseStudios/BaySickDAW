@@ -1,0 +1,82 @@
+<p>The roll edits whichever tab its own picker names, independently of what the
+ribbon is showing. The Drum Kit is the same window with a drum tab bound to it
+&mdash; the rows become drums instead of pitches.</p>
+
+<div class="codeblock"><div class="codehead">Source\PatternManager.h (PianoNote — the note model, lines 179-220)</div><pre><code>// BaySickBassProcessor.cpp -- the auditionNote atomic-exchange pattern, top of processBlock
+    const int auditNote = mAuditionNote.exchange (-1);
+    if (auditNote &gt;= 0 &amp;&amp; auditNote &lt;= 127)
+    {
+        midi.addEvent (juce::MidiMessage::noteOn  (1, auditNote, (juce::uint8) 100), 0);
+        midi.addEvent (juce::MidiMessage::noteOff (1, auditNote),
+                       juce::jmax (1, buffer.getNumSamples() - 1));
+    }
+
+    // Stuck-note fix: drain EVERY pending hold-off (mask), then the last-wins
+    // hold-on -- see auditionNoteOff.
+    juce::uint64 offWords[2];
+    for (int w = 0; w &lt; 2; ++w)
+    {
+        offWords[w] = mAuditionHoldOff[w].exchange (0, std::memory_order_acq_rel);
+        if (offWords[w])
+            for (int b = 0; b &lt; 64; ++b)
+                if (offWords[w] &amp; (1ull &lt;&lt; b))
+                    midi.addEvent (juce::MidiMessage::noteOff (1, w * 64 + b), 0);
+    }
+    const int holdOnNote = mAuditionHoldOn.exchange (-1);
+    if (holdOnNote &gt;= 0 &amp;&amp; holdOnNote &lt;= 127)
+    {
+        midi.addEvent (juce::MidiMessage::noteOn  (1, holdOnNote, (juce::uint8) 100), 0);
+        // Review fix: press AND release landed inside ONE block -- close the
+        // note at block-end or it rings forever (see HarmlessProcessor).
+        if (offWords[holdOnNote &gt;&gt; 6] &amp; (1ull &lt;&lt; (holdOnNote &amp; 63)))
+            midi.addEvent (juce::MidiMessage::noteOff (1, holdOnNote),
+                           juce::jmax (1, buffer.getNumSamples() - 1));
+    }</code></pre></div>
+<details class="fullfn"><summary>Full function &mdash; Source\PatternManager.h (PianoNote — the note model, lines 179-220)</summary><pre><code>// PatternManager.h -- struct PianoNote (the note model, full struct, lines 179-220)
+struct PianoNote
+{
+    int      midiNote      { 60 };                   // 0–127
+    double   startBeat     { 0.0 };                  // from pattern start, in beats
+    double   durationBeats { 0.25 };                 // note length in beats
+    float    velocity      { 0.8f };                 // 0–1
+    float    panning       { 0.0f };                 // -1 (left) to +1 (right)
+    float    finePitch     { 0.0f };                 // cents ±100
+    NoteType type          { NoteType::Standard };   // Standard / RampSlide / RetrigSlide / Portamento
+    bool     muted         { false };                // muted notes play silently
+    int      groupId       { -1 };                   // -1 = ungrouped; same id = grouped
+    float    filterCutoff  { 0.5f };                 // 0=closed, 1=fully open (control lane)
+    float    releaseAmt    { 0.5f };                 // release-time scale, 0.5 = neutral (CC72)
+    float    resonance     { 0.5f };                 // filter resonance offset, 0.5 = neutral (CC71)
+    // §P4.2 Phase C1: drum slot index (0..15) for drumRoll notes.
+    //   -1 = not a drum note (used on layerRoll / bassRoll).
+    int      slotIndex     { -1 };
+    // QA-Ee Stage 3b: 96 PPQ tick representation, authoritative on disk (serialized as
+    // `st`/`dt`).  startBeat/durationBeats remain the in-memory editing values (kept
+    // tick-aligned by the snap engine); `st`/`dt` are derived from them at save, and
+    // these fields are filled from `st`/`dt` (or migrated legacy beats) on load.
+    // KEEP THESE LAST: positional aggregate-inits elsewhere init the leading fields
+    // (PianoNote{ midiNote, startBeat, durationBeats, velocity, ... }); trailing fields
+    // just take their defaults there.  Inserting mid-struct breaks those brace-inits.
+    // Defaults mirror startBeat 0 / durationBeats 0.25 (24t = 1/16 note).
+    juce::int64 startTicks    { 0 };
+    juce::int64 durationTicks { 24 };
+    // QA-SlideSliceGlide S-4: Portamento glide length in beats.  A Porta note
+    // glides over this instead of its own length or the block length; ignored by
+    // the other note types.  Kept after the tick fields so positional brace-inits
+    // (which stop at `type`, field 7) never reach it.
+    double      portaLengthBeats { 1.0 };
+    // QA-SlideSampler Task 4: native &quot;Bend&quot; note (Guitars/Basses).  bendSemitones
+    // = signed bend amount, gated to the patch&#x27;s real range at the UI; bendShape =
+    // the pitch contour over the note.  Ignored by other note types + engines.
+    // KEEP LAST (same brace-init reasoning as portaLengthBeats above).
+    double      bendSemitones { 0.0 };
+    BendShape   bendShape     { BendShape::RampHold };
+};</code></pre></details>
+<pre class="formulas">- Audition pattern (all 7 engine processors: BaySickSynth, BaySickBass, Harmless, BaySickPlayer, BaySickGuitars, BaySickBasses, BaySickRustyDrums): `auditionNote(int)` stores into `std::atomic&lt;int&gt; mAuditionNote { -1 }`; processBlock opens with `int n = mAuditionNote.exchange(-1); if (n &gt;= 0) { noteOn at sample 0, noteOff at max(1, numSamples-1) }`. Lock-free by design — validated against Vital/Surge XT (daw-architecture-research 2026-05-08 §3); do NOT replace with `juce::MidiMessageCollector` (it has a CriticalSection mutex).
+- One-shot audition: noteOn velocity 100, auto-noteOff at block end. Held audition: `mAuditionHoldOn` (last-wins int) + `mAuditionHoldOff[2]` (a 128-bit accumulate MASK, `fetch_or(1ull &lt;&lt; (note &amp; 63))` into word `note &gt;&gt; 6`) — offs ACCUMULATE so a fast drag can&#x27;t drop one; drain order is offs first, then hold-on; a press+release landing inside ONE block closes at block-end or it rings forever.
+- sfizz trio (Guitars/Basses/RustyDrums) packs VELOCITY into the upper byte of the same atomic: `packed = note | (velocity &lt;&lt; 8)`; unpack `note = packed &amp; 0x7F`, `vel = (packed &gt;&gt; 8) &amp; 0x7F`, vel 0 bumped to 100 (legacy callers). They also expose `isAuditionPending()` (`mAuditionNote.load(acquire) != -1`) so the idle-suspend dispatcher wakes the chain.
+- Dispatch route: pages resolve engines THROUGH the rig (never cached pointers); Inst tabs wire roll-keyboard clicks via `EngineConnection::auditionMomentary`; RustyDrums wires kit-graphic hitboxes the same way; hosted VST3 instrument tabs have NO auditionNote — the roll keyboard reaches them through the live-MIDI route (EngineKind::Plugin = target kind 10), never a second synthesized MIDI path.
+- Roll audition UX contract: held audition fires on mouseDown of Draw/Move, releases on mouseUp; a pitch change mid-drag fires AuditionOff(prev) then AuditionOn(new) — continuous sustained note following the dragged pitch (FL piano-roll feel). `triggerAudition` always releases the prior held note first (`mAuditionHeldNote`).
+- Note model: `PianoNote` fields and ranges — midiNote 0..127, velocity 0..1 (default 0.8), panning -1..+1, finePitch ±100 cents, control lanes filterCutoff/releaseAmt/resonance all 0..1 with 0.5 neutral (release = CC72, resonance = CC71), groupId -1 = ungrouped, slotIndex -1 = not a drum note. Ticks authoritative on disk (`st`/`dt`, 96 PPQ; default durationTicks 24 = 1/16). NoteType: Standard / RampSlide / RetrigSlide / Portamento (+ native Bend via bendSemitones/bendShape on Guitars/Basses). Struct-layout invariant: new fields go LAST — positional brace-inits stop at field 7 (`type`).
+- Drum-mode keyboard preview: note = 36 + slotIndex -&gt; `auditionSlot(note - 36)` (PianoRollContainer::onNotePreview).</pre>
+<p class="behind"><b>Behind:</b> <a href="manual-2.html#TABBAR-9">Piano Roll slot</a>, <a href="manual-2.html#PR-1">Tab picker</a>, <a href="manual-2.html#PR-5">Tools menu</a>, <a href="manual-2.html#PR-6">Scale menu</a>, <a href="manual-2.html#PR-7">Chords menu</a>, <a href="manual-2.html#PR-8">View menu</a>, <a href="manual-2.html#PR-9">Snap toggle</a>, <a href="manual-2.html#PR-12">H</a>, <a href="manual-2.html#PR-17">Octave label</a>, <a href="manual-2.html#PR-18">Note grid</a>, <a href="manual-2.html#PR-19">Controller lane picker</a>, <a href="manual-2.html#PR-20">Controller lane</a>.</p>

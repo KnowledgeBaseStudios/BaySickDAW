@@ -29,7 +29,10 @@
 class MicSimDSP
 {
 public:
-    // Modes (matches the APVTS Int param `nam_micsim_mode`)
+    // NO LONGER 1:1 WITH `nam_micsim_mode` (Jeff, 2026-08-11).  That param lists
+    // Built-in / User IR only -- the mic being off is the Mic A / Mic B Active
+    // switch now -- so the processor passes index + 1.  None is still the DSP's
+    // passthrough and is what the switch's ramp fades toward.
     enum class Mode : int
     {
         None     = 0,

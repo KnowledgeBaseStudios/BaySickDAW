@@ -101,10 +101,14 @@ static void layoutKnobsH(juce::Rectangle<int> b,
 // ── EditorPanelBase method implementations ────────────────────────────────────
 EditorPanelBase::EditorPanelBase()
 {
-    // VU input meter - all panels create it; panels without VU call disableVU()
-    vuIn = std::make_unique<VUMeter>(VUMeter::Vertical);
-    vuIn->setTooltip("Input level");
-    addAndMakeVisible(*vuIn);
+    // NO PER-PANEL VU (Jeff, 2026-08-11).  The input VU cost 120px of width on
+    // every effect panel, which is most of what made the panels wide.  There is
+    // ONE VU now and it is its own window, showing the master OUTPUT -- opened
+    // from the effects rack menu next to VU Calibration.
+    //
+    // vuIn stays as a member and every panel's resized() still guards on it, so
+    // the layouts simply stop reserving the strip; disableVU() also still works
+    // for anything that calls it.  Nothing else had to change in 13 panels.
 
     // DBFS output meter - compact mode always on (floor -20 dBFS, labels truncated)
     dbfsOut = std::make_unique<DBFSMeter>();

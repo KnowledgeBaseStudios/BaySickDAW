@@ -1,0 +1,157 @@
+<p>Automation lanes are registered against the <b>model</b>, never against a
+widget, and an applicator re-resolves its target through the model each time it
+fires.</p>
+
+<div class="warn">
+  <b>This is not a style preference.</b> Windows are destroyed when they close,
+  so a lane bound to a widget would be a dead lane the moment the user closed
+  that window &mdash; and it would fail silently, playing back nothing.
+</div>
+
+<p>A consequence worth knowing: any new kind of lane needs both its live
+registration and its offline-replay branch added in the same change, or it will
+play correctly while you listen and be missing from the exported file.</p>
+
+<p>Harmless's modulation curves are a different system in the same shape. Those
+run across each <em>note</em> on a 0-1 phase; automation clips run on song
+position in ticks. The two are deliberately not shared.</p>
+
+<div class="codeblock"><div class="codehead">Source\Standalone\StandaloneEditor.cpp (registerModelEngineAutomation, lines 15425-15537)</div><pre><code>// StandaloneEditor.cpp -- registerModelEngineAutomation: the model-scoped applicator
+            if (VKnobAutomation::sOnRegisterApplicator)
+                VKnobAutomation::sOnRegisterApplicator (pid,
+                    [resolveTarget, which, paramId, gated] (float v01)
+                    {
+                        auto* t = resolveTarget (which);
+                        if (t == nullptr) return;
+                        if (gated)
+                            if (auto* v = dynamic_cast&lt;BaySickVocalProcessor*&gt; (t))
+                                if (v-&gt;onIsStripRecording &amp;&amp; v-&gt;onIsStripRecording())
+                                    return;
+                        if (auto* ap = EngineRig::apvtsOf (t))
+                            if (auto* param = ap-&gt;getParameter (paramId))
+                                param-&gt;setValueNotifyingHost (juce::jlimit (0.0f, 1.0f, v01));
+                    });   // model-scoped: re-resolves through the rig at apply time</code></pre></div>
+<details class="fullfn"><summary>Full function &mdash; Source\Standalone\StandaloneEditor.cpp (registerModelEngineAutomation, lines 15425-15537)</summary><pre><code>// StandaloneEditor.cpp -- StandaloneEditor::registerModelEngineAutomation
+// (full function, lines 15425-15537)
+void StandaloneEditor::registerModelEngineAutomation (EngineTab&amp; tab)
+{
+    const TabKind kind = tab.kind;
+    const int     idx  = tab.pageIndex;
+
+    enum class Target { MainEngine, VocalNam, InstNam };
+
+    auto resolveTarget = [this, kind, idx] (Target which) -&gt; juce::AudioProcessor*
+    {
+        auto* t = mProcessor.engineRig().findTab (kind, idx);
+        if (t == nullptr) return nullptr;
+        switch (which)
+        {
+            case Target::MainEngine: return t-&gt;engine.get();
+            case Target::VocalNam:
+                if (auto* v = dynamic_cast&lt;BaySickVocalProcessor*&gt; (t-&gt;engine.get()))
+                    return &amp;v-&gt;getNamIrProcessor();
+                return nullptr;
+            case Target::InstNam:    return t-&gt;namIr;
+        }
+        return nullptr;
+    };
+
+    auto registerParamsOf = [resolveTarget] (Target which, juce::AudioProcessor* proc,
+                                             const juce::String&amp; lanePrefix)
+    {
+        if (proc == nullptr || EngineRig::apvtsOf (proc) == nullptr) return;
+
+        for (auto* p : proc-&gt;getParameters())
+        {
+            auto* rp = dynamic_cast&lt;juce::RangedAudioParameter*&gt; (p);
+            if (rp == nullptr) continue;
+            const juce::String pid     = lanePrefix + rp-&gt;paramID;
+            const juce::String paramId = rp-&gt;paramID;
+
+            // Vocal capture lock (owner call 2026-07-25, docket 4=A): while the
+            // strip is recording, a write to the realtime-board set is vetoed
+            // for the same reason the UI greys those controls out.  The lane is
+            // not consumed -- the next tick after the veto clears applies
+            // normally.  Moved here from BaySickVocalEditor&#x27;s registration when
+            // TS3 retired the widget wrappers; the veto had to travel with it or
+            // an automated take would start clicking again.
+            const bool gated = (which == Target::MainEngine)
+                               &amp;&amp; BaySickVocalProcessor::isCaptureGated (paramId);
+
+            if (VKnobAutomation::sOnRegisterApplicator)
+                VKnobAutomation::sOnRegisterApplicator (pid,
+                    [resolveTarget, which, paramId, gated] (float v01)
+                    {
+                        auto* t = resolveTarget (which);
+                        if (t == nullptr) return;
+                        if (gated)
+                            if (auto* v = dynamic_cast&lt;BaySickVocalProcessor*&gt; (t))
+                                if (v-&gt;onIsStripRecording &amp;&amp; v-&gt;onIsStripRecording())
+                                    return;
+                        if (auto* ap = EngineRig::apvtsOf (t))
+                            if (auto* param = ap-&gt;getParameter (paramId))
+                                param-&gt;setValueNotifyingHost (juce::jlimit (0.0f, 1.0f, v01));
+                    });   // model-scoped: re-resolves through the rig at apply time
+
+            if (VKnobAutomation::sOnRegisterReader)
+                VKnobAutomation::sOnRegisterReader (pid,
+                    [resolveTarget, which, paramId]() -&gt; float
+                    {
+                        if (auto* t = resolveTarget (which))
+                            if (auto* ap = EngineRig::apvtsOf (t))
+                                if (auto* param = ap-&gt;getParameter (paramId))
+                                    return param-&gt;getValue();
+                        return 0.5f;
+                    });
+        }
+    };
+
+    switch (kind)
+    {
+        case TabKind::Layers:
+        case TabKind::Bass:
+        case TabKind::Drums:
+        case TabKind::Clips:
+            registerParamsOf (Target::MainEngine, tab.engine.get(), {});
+            // BLU-344: Harmless also carries non-parameter mod-editor targets.
+            // No-op for the other engine types.
+            registerHarmlessModAutomation (kind, idx);
+            break;
+
+        case TabKind::Vox:
+        {
+            const juce::String pre = &quot;vox&quot; + juce::String (idx) + &quot;_&quot;;
+            registerParamsOf (Target::MainEngine, tab.engine.get(), pre);
+            if (auto* v = dynamic_cast&lt;BaySickVocalProcessor*&gt; (tab.engine.get()))
+                registerParamsOf (Target::VocalNam, &amp;v-&gt;getNamIrProcessor(), pre);
+            break;
+        }
+
+        case TabKind::Inst:
+            registerParamsOf (Target::InstNam, tab.namIr,
+                              &quot;inst&quot; + juce::String (idx) + &quot;_&quot;);
+            // The board&#x27;s own lanes, plus the subscription that re-keys them
+            // when the user swaps a pedal.  Wired here rather than in InstPage
+            // because the board outlives every view of it.
+            registerPedalAutomation (idx);
+            if (tab.pedals != nullptr)
+            {
+                juce::Component::SafePointer&lt;StandaloneEditor&gt; safeThis (this);
+                tab.pedals-&gt;onSlotAutomationChanged = [safeThis, idx]
+                {
+                    if (auto* ed = safeThis.getComponent())
+                        ed-&gt;registerPedalAutomation (idx);
+                };
+            }
+            break;
+    }
+}</code></pre></details>
+<pre class="formulas">- Model-side rule (project invariant): ALL automation registration is model-side, keyed off model events (onEngineCreated, onMixerStripParamsCreated, onSfizzEngineReady, rack/pedal model events). NEVER register against a widget — destroy-on-close windows make every widget-scoped registration a guaranteed dead lane. Applicators re-resolve their target THROUGH the rig at apply time (resolveTarget -&gt; findTab -&gt; apvtsOf), never through a captured pointer.
+- Landing rule: any NEW lane class needs its live registration AND an `applyOfflineLaneValue` branch in the SAME pass, or it plays live and silently vanishes from exports.
+- Lane-id vocabulary (prefix grammar): Layers/Bass/Drums/Clips = bare engine paramID (no prefix); Vox = `vox&lt;N&gt;_&lt;paramId&gt;` (engine + its embedded NAM/IR share the prefix, tried in that order); Inst NAM/IR = `inst&lt;N&gt;_&lt;paramId&gt;`; pedal board = `inst&lt;N&gt;_pedals_&lt;slotUuid&gt;_&lt;suffix&gt;` (slot resolved BY UUID, never index — reorder carries the uuid); hosted Plugins tab = `plugtab&lt;N&gt;_vst_&lt;pluginParamId&gt;`. The digits-immediately-after-word parse is what keeps `vox_bus` / `inst_0` RACK prefixes from colliding (they carry an underscore first).
+- Offline replay filters (applyOfflineAutomationAt, mirrors the live in-processBlock replay): clipType == Automation, not muted, row audible, paramId non-empty, points non-empty, `global_tempo` excluded (the clock&#x27;s job), main-APVTS lanes excluded (they replay inside processBlock identically to live). Builder grid is uniform 4 beats per bar: `bar = songBeat / 4.0`; relative position `rel = (bar - clipStart) / len` clamped 0..1; the SAME shared point evaluator (`evalAutomationLaneAt`) serves live and offline.
+- Applicator writes the PARAMETER, not the control: `param-&gt;setValueNotifyingHost(jlimit(0,1,v01))`. For Harmless dual-part controls, both `part` ids get applicators (a control-driven applicator would collapse two lanes onto whichever part is bound).
+- Vocal capture gate: writes to the realtime-board set are VETOED while the strip records (`BaySickVocalProcessor::isCaptureGated` + `onIsStripRecording`); the lane is not consumed — the next tick after the veto clears applies normally.
+- Reader fallback returns 0.5f when the target cannot be resolved.
+- The offline write path is itself why `EngineRig::markEngineContentChanged` early-outs on `isNonRealtime()`: setValueNotifyingHost on the engine APVTS is the exact tree the freeze watcher listens to — a replay is not a user edit.</pre>
+<p class="behind"><b>Behind:</b> <a href="manual-2.html#EQB-4">Band Automate submenu</a>, <a href="manual-2.html#FX-3">A panel knob</a>, <a href="manual-2.html#EVT-5">Target Control menu</a>, <a href="manual-2.html#EVT-7">Target label</a>, <a href="manual-2.html#EVT-8">Auto / LFO</a>, <a href="manual-2.html#EVT-9">New Automation Clip</a>, <a href="manual-2.html#EVT-12">Curve canvas</a>, <a href="manual-2.html#EVT-13">A control point</a>, <a href="manual-2.html#EVT-16">Automation Clips list</a>, <a href="manual-2.html#PRMMNU-1">Automate: &lt;target&gt;</a>.</p>

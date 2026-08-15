@@ -1,5 +1,6 @@
 #pragma once
 #include <JuceHeader.h>
+#include "MicPlacementView.h"
 #include "BaySickNAMIRProcessor.h"
 #include "../Standalone/SharedUI.h"
 #include "../Standalone/BaySickTitleBar.h"   // QA-A (2026-05-09)
@@ -131,7 +132,9 @@ private:
     juce::Label   mMicSimSectionLbl;
     juce::Label   mMicPlacementSectionLbl;
 
-    ChickenHeadSelector mMicSimMode;          // None / Built-in / User IR
+    DualLabelToggle     mMicAActiveToggle;
+    std::unique_ptr<ButtonAtt> mMicAActiveAtt;
+    juce::ComboBox      mMicSimMode;          // Built-in / User IR
     juce::Label         mMicSimModeLbl;
     juce::ComboBox      mMicSimModelCombo;    // 10 built-in archetypes
     juce::Label         mMicSimModelLbl;
@@ -144,8 +147,10 @@ private:
     juce::Label         mMicPlacementPolarLbl;
     VKnob               mMicPlacementDistanceKnob;
     VKnob               mMicPlacementAngleKnob;
+    VKnob               mMicPlacementHeightKnob;
     VKnob               mMicPlacementMixKnob;
     std::unique_ptr<SliderAtt> mMicPlacementDistanceAtt, mMicPlacementAngleAtt,
+                               mMicPlacementHeightAtt,
                                  mMicPlacementMixAtt;
 
     void browseForMicUserIr();
@@ -158,7 +163,7 @@ private:
     DualLabelToggle mMicBActiveToggle;
     std::unique_ptr<ButtonAtt> mMicBActiveAtt;
 
-    ChickenHeadSelector mMicSimModeB;
+    juce::ComboBox      mMicSimModeB;
     juce::Label         mMicSimModeBLbl;
     juce::ComboBox      mMicSimModelComboB;
     juce::Label         mMicSimModelBLbl;
@@ -171,8 +176,21 @@ private:
     juce::Label         mMicPlacementPolarBLbl;
     VKnob               mMicPlacementDistanceKnobB;
     VKnob               mMicPlacementAngleKnobB;
+    VKnob               mMicPlacementHeightKnobB;
+
+    // The draggable mic pictures (Jeff, 2026-08-11).  One per virtual mic, each
+    // bound to that mic's own distance / angle / polar params -- so the knobs
+    // above them and the picture are the SAME placement, like the Harmless XYZ
+    // pad.  Top / Side is a rendering choice, not a different model: see the
+    // header note on MicPlacementView.
+    std::unique_ptr<MicPlacementView> mPlacementViewA, mPlacementViewB;
+    // ONE TOGGLE PER MIC (Jeff, 2026-08-11) -- the two mics are placed
+    // independently, so which view each is looked at in is independent too.
+    juce::TextButton                  mPlacementViewToggleA { "Top" };
+    juce::TextButton                  mPlacementViewToggleB { "Top" };
     VKnob               mMicPlacementMixKnobB;
     std::unique_ptr<SliderAtt> mMicPlacementDistanceBAtt, mMicPlacementAngleBAtt,
+                               mMicPlacementHeightBAtt,
                                  mMicPlacementMixBAtt;
 
     juce::Rectangle<int> mMicColumnDivider;   // painted A | B separator
@@ -180,6 +198,7 @@ private:
     void browseForMicUserIrB();
     void updateMicSimModeBUI();
     void updateMicSimModelTooltipB();
+    void updateMicAEnabled();
     void updateMicBEnabled();    // dims/disables the Mic B column when inactive
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (BaySickNAMIREditor)

@@ -1,0 +1,172 @@
+<p>A hard ceiling nothing gets past. Its Maximizer mode adds a true-peak aware
+ceiling using a BS.1770-4 polyphase meter, so the limit holds after the signal is
+converted back to sound &mdash; which is not the same as holding on the samples.</p>
+<div class="codeblock"><div class="codehead">Source/DSP/LimiterDSP.cpp, Source/DSP/LimiterDSP.h (servo/trim constants), Source/DSP/TruePeakMeter.cpp (BS.1770-4-style true-peak interpolator)</div><pre><code>// LimiterDSP::process -- envelope helper, gain computer, auto-release blend
+    auto envStep = [attackCoef, releaseCoef, relStep, curve]
+                   (float env, float peak) -&gt; float
+    {
+        if (peak &gt; env)
+            return attackCoef * env + (1.0f - attackCoef) * peak;
+
+        // Release: blend linear and exponential decay toward `peak`.
+        const float expRel = releaseCoef * env + (1.0f - releaseCoef) * peak;
+        float linRel = env - relStep;
+        if (linRel &lt; peak) linRel = peak;       // don&#x27;t overshoot
+        return (1.0f - curve) * linRel + curve * expRel;
+    };
+
+    auto computeGain = [] (float env, float ceilingLin) -&gt; float
+    {
+        return (env &gt; ceilingLin) ? (ceilingLin / std::max (env, 1e-9f)) : 1.0f;
+    };
+
+            if (autoRel)
+            {
+                mEnvFast = envStepFast (mEnvFast, peak);
+                mEnvSlow = envStepSlow (mEnvSlow, peak);
+                const float env     = juce::jmax (mEnvFast, mEnvSlow);
+                const float grLin   = computeGain (env, ceilingLin);
+                const float grDbNow = juce::Decibels::gainToDecibels (grLin, -96.0f);
+                const float blendSlow = juce::jlimit (0.0f, 1.0f, -grDbNow / autoKneeDb);
+                const float blended = (1.0f - blendSlow) * mEnvFast + blendSlow * mEnvSlow;
+                gainL = computeGain (blended, ceilingLin);
+            }</code></pre></div>
+<details class="fullfn"><summary>Full function &mdash; Source/DSP/LimiterDSP.cpp, Source/DSP/LimiterDSP.h (servo/trim constants), Source/DSP/TruePeakMeter.cpp (BS.1770-4-style true-peak interpolator)</summary><pre><code>// LimiterDSP::updateLoudnessServo -- complete (CL-244 Maximizer loudness servo)
+void LimiterDSP::updateLoudnessServo (int numSamples)
+{
+    const float st = mOutLufs.shortTerm();
+    // Below the absolute gate there is no programme to measure.  Holding the last
+    // value rather than unwinding to 0 is what stops the servo from pumping the
+    // gain back up through every gap in the music.
+    if (st &lt;= -70.0f) return;
+
+    const float blockSecs = (float) numSamples / (float) juce::jmax (1.0, mSampleRate);
+    const float maxStep   = kServoDbPerSec * blockSecs;
+    const float err       = mLoudnessTargetLufs - st;
+
+    float servo = mServoDb.load();
+    servo += juce::jlimit (-maxStep, maxStep, err);
+    mServoDb.store (juce::jlimit (-kServoRangeDb, kServoRangeDb, servo));
+}
+
+// LimiterDSP::updateCeilingTrim -- complete (BLU-108 auto-ceiling trim)
+void LimiterDSP::updateCeilingTrim (int numSamples)
+{
+    const float tpDb = mOutTpDb.load();
+    if (tpDb &lt;= -140.0f) return;   // no output yet
+
+    const float blockSecs = (float) numSamples / (float) juce::jmax (1.0, mSampleRate);
+    const float over      = tpDb - mTruePeakTargetDb;
+
+    float trim = mCeilingTrimDb.load();
+    if (over &gt; 0.0f)
+        trim -= juce::jmin (over, kTrimDownDbPerSec * blockSecs);
+    else if (trim &lt; 0.0f)
+        // Only recover while there is measurable headroom, so the loop settles
+        // just under the target instead of oscillating across it.
+        trim += juce::jmin (-trim, juce::jmin (-over, kTrimUpDbPerSec * blockSecs));
+
+    mCeilingTrimDb.store (juce::jlimit (-kTrimMaxDb, 0.0f, trim));
+}
+
+// TruePeakMeter::pushAndPeak -- complete (4-phase polyphase inter-sample peak,
+// the BS.1770-4-style true-peak estimator the auto-ceiling reads)
+float TruePeakMeter::pushAndPeak (int ch, float x) noexcept
+{
+    auto&amp; hist = mHist[(size_t) ch];
+    int&amp;  pos  = mHistPos[(size_t) ch];
+
+    hist[(size_t) pos] = x;
+    pos = (pos + 1) % kTapsPerPhase;
+
+    const auto&amp; b = bank();
+    float peak = 0.0f;
+
+    for (int p = 0; p &lt; kPhases; ++p)
+    {
+        float acc = 0.0f;
+        // Walk history newest-first: index (pos - 1 - k) modulo the ring.
+        int idx = pos - 1;
+        for (int k = 0; k &lt; kTapsPerPhase; ++k)
+        {
+            if (idx &lt; 0) idx += kTapsPerPhase;
+            acc += b[(size_t) p][(size_t) k] * hist[(size_t) idx];
+            --idx;
+        }
+        peak = juce::jmax (peak, std::abs (acc));
+    }
+    return peak;
+}
+
+// LimiterDSP::process -- detector&#x27;s own 4x-oversampled per-sample true peak,
+// ceiling application, SAT, hard clamp and post-clamp auto-makeup.  (Input-gain
+// / delay-line write pass, unlinked per-channel path, meters and visual feed
+// elided; the linked-mode envelope path is shown in the excerpt above.)
+    for (int i = 0; i &lt; numSamples; ++i)
+    {
+        float pMax = 0.0f;
+        for (int j = 0; j &lt; kOsFactor; ++j)
+        {
+            const int k = i * kOsFactor + j;
+            if (k &gt;= upN) break;
+            pMax = juce::jmax (pMax, std::abs (upBlock.getSample (0, k)));
+            pMax = juce::jmax (pMax, std::abs (upBlock.getSample (1, k)));
+        }
+        mTpPeaks[(size_t) i] = pMax;
+    }
+
+        // Consume the ceiling smoother per sample so 15ms ramps apply here too.
+        // BLU-108&#x27;s trim is added on top for the same single-writer reason.
+        const float ceilingDb  = mCeilingSmooth.getNextValue() + ceilTrimDb;
+        const float ceilingLin = juce::Decibels::decibelsToGain (ceilingDb);
+
+            float peak = mTpPeaks[(size_t) i];
+            if (susOn)   // SUSTAIN: hold via mean-square window (true-peak preserved by the max)
+            {
+                mMeanSqL = (1.0f - susCoef) * peak * peak + susCoef * mMeanSqL;
+                peak = juce::jmax (peak, std::sqrt (mMeanSqL));
+            }
+
+        // Apply gain reduction.  Makeup is deliberately NOT folded in here --
+        // see the block below for why it moved.
+        outL *= gainL;
+        outR *= gainR;
+
+        if (satDrive &gt; 0.0f)
+        {
+            outL = softSat (outL, satDrive, satCv);
+            outR = softSat (outR, satDrive, satCv);
+        }
+
+        // Hard ceiling clamp -- the limiter&#x27;s actual guarantee, taken BEFORE
+        // makeup.
+        outL = juce::jlimit (-ceilingLin, ceilingLin, outL);
+        outR = juce::jlimit (-ceilingLin, ceilingLin, outR);
+
+        if (autoMakeupOn)
+        {
+            const float outCeil = ceilingLin * makeupLin;
+            outL = juce::jlimit (-outCeil, outCeil, outL * makeupLin);
+            outR = juce::jlimit (-outCeil, outCeil, outR * makeupLin);
+        }
+
+// LimiterDSP::softSat -- complete (post-limiter saturation stage)
+float LimiterDSP::softSat (float x, float drive, float curve)
+{
+    if (drive &lt; 0.001f) return x;
+    // curve shapes the effective drive: higher curve -&gt; steeper knee
+    const float effDrive = drive * (1.0f + curve * 3.0f);
+    return std::tanh (effDrive * x) / effDrive;
+}</code></pre></details>
+<pre class="formulas">- Detector true peak: sidechain is 4x oversampled (juce::dsp::Oversampling, factor log2=2, half-band polyphase IIR, maxQuality); per base sample the peak is `max(|up|)` over the 4 OS sub-samples of both channels (linked) or per channel (unlinked). Gain reduction lands on the peak `aheadSamples` later via the 0..10 ms look-ahead delay line.
+- Output true-peak meter (feeds auto-ceiling): TruePeakMeter is a 4-phase (kPhases=4), 12-taps-per-phase (48-tap) polyphase FIR interpolator - the BS.1770-4 true-peak estimator shape. Prototype: windowed sinc, cutoff 0.92 x base-rate Nyquist (kCutoffFractionOfNyquist=0.92), Kaiser window beta 8.0 (~ -80 dB stopband); each polyphase branch normalized to unity DC gain. True peak = max |phase output| across the 4 phases.
+- Envelope: attack one-pole `coef = exp(-1/(ms*0.001*sr))` (attackMs 0.1..20 ms); release blends linear and exponential decay: `env&#x27; = (1-curve)*max(peak, env - step) + curve*(relCoef*env + (1-relCoef)*peak)`, where `step = 1/(relMs*0.001*sr)` and `curve = clamp(releaseCurve + character.curveOffset, 0, 1)`.
+- Gain computer: `gain = (env &gt; ceilingLin) ? ceilingLin/env : 1` (ceiling in dB, -24..+12, +BLU-108 trim, 15 ms smoothed).
+- Auto-release (Maximizer characters): two envelopes, fast/slow, with per-character release times; `blendSlow = clamp(-grDb / autoKneeDb, 0, 1)` computed from `env = max(fast, slow)`; final gain from `blended = (1-blendSlow)*fast + blendSlow*slow`.
+- Character table {relFastMs, relSlowMs, autoKneeDb, curveOff, relScale, satAutoDrive}: Clean {20, 300, 6, 0, 1.0, 0}, Smooth {40, 600, 10, +0.30, 1.40, 0}, Tight {12, 180, 5, -0.15, 0.70, 0}, Punch {8, 250, 3, -0.25, 0.80, 0}, Glue {60, 800, 12, +0.30, 1.60, 0}, Loud {6, 120, 4, -0.30, 0.50, 0.35}, Warm {25, 350, 7, +0.15, 1.10, 0.55}, Instant {2, 40, 2, -0.40, 0.30, 0.20}. User release time is scaled by relScale. Limiter mode always resolves to Clean; characters are Maximizer-only.
+- SUSTAIN hold: mean-square EMA `meanSq&#x27; = (1-c)*peak^2 + c*meanSq` with `c = exp(-1/(sustainMs*0.001*sr))` (0 = off); detector peak = `max(peak, sqrt(meanSq))`.
+- SAT (post-limiter): `drive = (1 - satThresh)*5 + character.satAutoDrive*5`; `effDrive = drive*(1 + 3*curve)`; `y = tanh(effDrive*x)/effDrive` (unity small-signal gain).
+- Hard ceiling clamp `+/-ceilingLin` after SAT, before makeup. Auto-makeup applies `makeupLin = 10^(-ceilingDb/20)` AFTER the clamp with output ceiling `ceilingLin*makeupLin` (== 1.0 by construction).
+- Loudness servo (Maximizer, CL-244): once per block; err = targetLUFS - shortTermLUFS; step clamped to kServoDbPerSec=1.5 dB/s x blockSecs; servo offset clamped +/- kServoRangeDb=12 dB; gated below -70 LUFS (absolute gate - holds last value through silence). Servo dB adds on top of the input-gain knob.
+- Auto-ceiling trim (Maximizer, BLU-108): over = outputTruePeakDb - truePeakTargetDb (-6..0 dBTP, default -1); engage `trim -= min(over, 3.0 dB/s x blockSecs)` (kTrimDownDbPerSec=3.0); recover `trim += min(-trim, min(-over, 0.5 dB/s x blockSecs))` (kTrimUpDbPerSec=0.5) only while under target; clamp [-6, 0] dB (kTrimMaxDb=6). Asymmetric by design: engaging late clips, releasing early re-clips.
+- Meters: level and GR hold+decay at 30 dB/sec per block. Latency = aheadSamples + oversampler latency.</pre>

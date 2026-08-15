@@ -1,0 +1,57 @@
+<p>A project is one XML file plus a folder of the audio it recorded. The
+unsaved marker in the title bar is driven by a dirty flag every engine reports
+into.</p>
+
+<p>The <code>[L]</code> lock marker on a ribbon slot is composed when the slot is
+painted &mdash; it is not part of the saved tab name, so unlocking leaves the
+name exactly as you typed it.</p>
+
+<div class="codeblock"><div class="codehead">Source\ProjectManager.h (folder conventions, dirty model)</div><pre><code>// ProjectManager.h -- folder conventions (class banner, verbatim, lines 17-41)
+// Conventions locked (see blueprint Project Persistence section +
+// 2026-04-23 unified-layout revision):
+//
+//   Documents\BaySickDAW\                ← user-visible, one-folder rule
+//   ├── Projects\&lt;name&gt;\
+//   │   ├── project.xml                  ← single serialized state doc
+//   │   └── Samples\                     (project-bundled audio, copy-on-drop)
+//   ├── Recordings\                      (audio captures)
+//   ├── Presets\&lt;engine&gt;\                (user-saved + factory presets)
+//   ├── Templates\                       (P6 default-template targets)
+//   ├── settings.xml                     (recent-projects + global prefs)
+//   ├── audio_settings.xml               (machine-scoped audio device state)
+//   └── Sample Library.lnk               (P4/P6: shortcut to LocalAppData)
+//
+//   %LOCALAPPDATA%\BaySickDAW\
+//   └── CoreLibrary\&lt;pack&gt;\              (installed sample library)
+//
+// Each project is a folder - never a single file.  Autosave writes a
+// timestamped copy every 15 min into &lt;project&gt;\Backups\ (newest 10 kept), or
+// into Documents\BaySickDAW\Backups\Unsaved\ when no project is open so an
+// unsaved session can still be recovered after a crash.
+// Samples under a stable root (Core Library / My Samples) are REFERENCED as a
+// `library:` / `mysamples:` string, not copied - they are reachable from any
+// project on this install, so a copy would duplicate factory content per
+// project.  Only volatile sources (Downloads, Desktop, USB) land in Samples\.</code></pre></div>
+<details class="fullfn"><summary>Full function &mdash; Source\ProjectManager.h (folder conventions, dirty model)</summary><pre><code>// ProjectManager.cpp -- ProjectManager::saveProject (full function, lines 329-340)
+bool ProjectManager::saveProject()
+{
+    if (! hasProject()) return false;
+
+    juce::XmlElement root (&quot;BaySickDAWProject&quot;);
+    mProcessor.serializeProject (root);
+
+    auto xml = mCurrentFolder.getChildFile (&quot;project.xml&quot;);
+    const bool ok = xml.replaceWithText (root.toString());
+    if (ok) markSaved();   // Task 9: save pins the pointer, never clears history
+    return ok;
+}</code></pre></details>
+<pre class="formulas">- One-folder rule: everything user-visible under `Documents\BaySickDAW\`; a project is a FOLDER (never a single file) at `Projects\&lt;name&gt;\` holding `project.xml` (root tag &quot;BaySickDAWProject&quot;) + `Samples\`. Installed sample content at `%LOCALAPPDATA%\BaySickDAW\CoreLibrary\&lt;pack&gt;\`.
+- Sample referencing rule: samples under a stable root are stored as `library:` / `mysamples:` strings, NEVER copied; only volatile sources (Downloads, Desktop, USB) are copied into Samples\ (`importSample`, deduped by filename; `duplicateSample` always makes a fresh &quot; (N)&quot;-numbered copy).
+- Save gate (dirty model, QA-UndoCoverage Task 9): the unconditional bool is RETIRED — DIRTY is a transaction-pointer mismatch on the processor&#x27;s TransactionTracker. `markSaved()` pins saved = current (the asterisk clears at the save point and RETURNS the moment Ctrl+Z walks past it); `clearDirty()` is the load-boundary reset (clears undo history, sweeps UndoSnapshotStore, resets pointers, fires clean); `markDirty()` now only advances the monotonic change stamp (version capture&#x27;s detector — NOT cleared by save: it asks &quot;has anything changed since&quot;, not &quot;are there unsaved edits&quot;).
+- Load suppression: `mIgnoreDirty` gates markDirty during load/save; nest-safe (callers stash the prior value). `onBeforeOpenProject` fires before any load work so a mid-playback load halts the transport cleanly.
+- Autosave: timer every `mAutosaveSec = 900` (15 min default), fires REGARDLESS of dirty state (FL convention — dirty gates the close prompt + asterisk, never backup writes). Backup filename `&quot;&lt;stem&gt;_backup_YYYY-MM-DD_HH-MM.xml&quot;`, same-minute collisions get &quot; (N)&quot;. Rolling retention: newest 10 kept, rest deleted. No project open -&gt; `Documents\BaySickDAW\Backups\Unsaved\` with stem &quot;Untitled&quot;. Backups never clear dirty. Failure alert is once-per-session, reset by the next successful write.
+- Restore semantics: project open -&gt; backup copied over project.xml AND reloaded, original preserved as `project.xml.before-restore`; no project open -&gt; deserialized into memory only, user must File &gt; Save to commit.
+- Save As: duplicates the whole folder (preserves Samples/), collision-safe &quot; (N)&quot;; the session points at the NEW folder BEFORE the write (saveProject writes to mCurrentFolder), and on write failure rolls back to the previous folder — a false return is a session no-op.
+- Project-name validation: rejects `&lt;&gt;:&quot;/\|?*` and reserved device names (CON, PRN, AUX, NUL, COM1..9, LPT1..9); trims whitespace + trailing dot; empty = invalid.
+- Templates load through StandaloneEditor::loadTemplate, never as folder copies (the clone-a-project flow died in QA-ProjectSave Task 10); default template path persisted in settings.xml.</pre>
+<p class="behind"><b>Behind:</b> <a href="manual-2.html#FRAME-1">BaySickDAW</a>, <a href="manual-2.html#FRAME-2">unsaved marker</a>, <a href="manual-2.html#FRAME-3">File menu</a>, <a href="manual-2.html#FILE-1">Take-type checkboxes</a>, <a href="manual-2.html#FILE-4">Keep captured takes:</a>, <a href="manual-2.html#FILE-5">Also keep the audio of each take</a>, <a href="manual-2.html#FMENU-1">New Project...  (Ctrl+N)</a>, <a href="manual-2.html#FMENU-3">Open Project...  (Ctrl+O)</a>, <a href="manual-2.html#FMENU-4">Quick Open Project</a>, <a href="manual-2.html#FMENU-5">Open Recent submenu</a>, <a href="manual-2.html#FMENU-6">Save  (Ctrl+S)</a>, <a href="manual-2.html#FMENU-7">Save As...  (Shift+Ctrl+S)</a>.</p>

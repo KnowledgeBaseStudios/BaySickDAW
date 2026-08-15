@@ -8,7 +8,7 @@ rem THIS DOES NOT BUILD THE SHIPPING INSTALLER.  It packages the current Release
 rem build so a tester can be handed one file instead of a build tree.  The real
 rem release installer belongs to the QA-Installer batch, which is blocked on
 rem QA-Manuals, QA-Templates and QA-LegalReview - none of which have run.  There
-rem is no manual, no license page, no legal review and no code signature in what
+rem is no license page, no legal review and no code signature in what
 rem this produces.  See Installer\BaySickDAW-Tester.nsi for the full list of
 rem what is and is not in the package.
 rem

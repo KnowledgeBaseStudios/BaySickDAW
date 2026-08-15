@@ -1,0 +1,88 @@
+<p>The same eight bands able to work on the middle of the stereo image, the
+sides, or both. Per band, not per EQ.</p>
+
+<div class="codeblock"><div class="codehead">- Source/DSP/EQ8DSP.cpp (EQ8DSP::processBands M/S-domain pass — the live encode/decode)</div><pre><code>// EQ8DSP::processBands -- M/S encode, per-band M/S processing, decode
+if (needMS)
+{
+    float* M = mMsScratch.getWritePointer(0);
+    float* S = mMsScratch.getWritePointer(1);
+
+    for (int n = 0; n &lt; numSamples; ++n)
+    {
+        M[n] = 0.5f * (L[n] + R[n]);
+        S[n] = 0.5f * (L[n] - R[n]);
+    }
+
+    // ... per-band filtering on M or S (below) ...
+
+    for (int n = 0; n &lt; numSamples; ++n)
+    {
+        L[n] = M[n] + S[n];
+        R[n] = M[n] - S[n];
+    }
+}</code></pre></div>
+<details class="fullfn"><summary>Full function &mdash; - Source/DSP/EQ8DSP.cpp (EQ8DSP::processBands M/S-domain pass — the live encode/decode)</summary><pre><code>// EQ8DSP::processBands -- full M/S-domain pass (verbatim)
+    // M/S-domain pass (Mid / Side). Only runs when any enabled band uses M/S
+    // routing AND the block is stereo.
+    if (L &amp;&amp; R &amp;&amp; mMsScratch.getNumSamples() &gt;= numSamples)
+    {
+        bool needMS = false;
+        for (int bi = 0; bi &lt; kNumBands; ++bi)
+        {
+            if (!bandShouldProcess(bi)) continue;
+            const int ch = mBands[bi].params.channel;
+            if (ch == Channel::Mid || ch == Channel::Side) { needMS = true; break; }
+        }
+
+        if (needMS)
+        {
+            float* M = mMsScratch.getWritePointer(0);
+            float* S = mMsScratch.getWritePointer(1);
+
+            for (int n = 0; n &lt; numSamples; ++n)
+            {
+                M[n] = 0.5f * (L[n] + R[n]);
+                S[n] = 0.5f * (L[n] - R[n]);
+            }
+
+            for (int bi = 0; bi &lt; kNumBands; ++bi)
+            {
+                if (!bandShouldProcess(bi)) continue;
+                auto&amp; bs = mBands[bi];
+                const int ch = bs.params.channel;
+                if (ch != Channel::Mid &amp;&amp; ch != Channel::Side) continue;
+
+                float* target = (ch == Channel::Mid) ? M : S;
+                const int ns = bs.activeSections;
+
+                if (bs.useTPT)
+                {
+                    for (int s = 0; s &lt; ns; ++s)
+                        for (int n = 0; n &lt; numSamples; ++n)
+                            target[n] = bs.tptL[s].processSample(0, target[n]);
+                }
+                else
+                {
+                    for (int s = 0; s &lt; ns; ++s)
+                    {
+                        if (!bs.filtersL[s].coefficients) continue;
+                        for (int n = 0; n &lt; numSamples; ++n)
+                            target[n] = bs.filtersL[s].processSample(target[n]);
+                    }
+                }
+            }
+
+            for (int n = 0; n &lt; numSamples; ++n)
+            {
+                L[n] = M[n] + S[n];
+                R[n] = M[n] - S[n];
+            }
+        }
+    }</code></pre></details>
+<pre class="formulas">- Encode: `M = 0.5*(L + R)`, `S = 0.5*(L - R)`. Decode: `L = M + S`, `R = M - S` (exact inverse; unity round trip when no band touches M or S).
+- Per-band routing (`Band::channel`, 12h): 0 Stereo (process L and R in place), 1 Mid, 2 Side, 3 LOnly, 4 ROnly. Mid/Side bands run their filter cascade on the encoded M or S channel only, using the band&#x27;s L-side filter state (`filtersL` / `tptL`) — one mono chain per M/S band.
+- The encode/decode pair runs at most ONCE per block, and only when at least one enabled, un-muted, solo-eligible band routes to Mid or Side (`needMS` scan) and the block is stereo; scratch buffer `mMsScratch` is pre-allocated in prepare (2 channels, `maxBlockSize * 2` for the anti-cramping 2x oversampled case).
+- Band grouping is legal because biquad chains are LTI: L/R-domain bands (Stereo/LOnly/ROnly) process first in place, then the M/S group encodes/processes/decodes — the composite transfer function is order-independent.
+- Bus-level wrapper `EQ8MsDSP`: two full EQ8DSP instances (16 bands total). `mid()`&#x27;s 8 bands default to channel = Mid, `side()`&#x27;s to channel = Side; both inner EQs receive the full stereo buffer in series (the wrapper no longer encodes). Latency = sum of both inner EQs&#x27; latencies; identity = both inner identity; the dynamic-EQ detector&#x27;s M/S domains use the same `0.5*(L+R)` / `0.5*(L-R)` folding (see `processDynamic`).
+- In linear-phase modes, per-band M/S routing is restricted to Stereo (T2a option B; the UI greys the per-band channel picker).</pre>
+<p class="behind"><b>Behind:</b> <a href="manual-2.html#EQ-2">MID / SIDE</a>, <a href="manual-2.html#EQB-3">Channel submenu</a>.</p>

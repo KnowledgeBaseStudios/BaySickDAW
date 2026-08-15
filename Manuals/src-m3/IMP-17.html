@@ -1,0 +1,99 @@
+<p>Light, transparent, cleans up when you play softer.</p>
+
+<div class="codeblock"><div class="codehead">Source\DSP\BluesDriveStyleDSP.cpp</div><pre><code>// BluesDriveStyleDSP::process — envelope-driven dual-stage shaper at 4x
+    const float drive = driveAmount (mDrive);
+    const int upN     = (int) upBlock.getNumSamples();
+    const int upChs   = (int) upBlock.getNumChannels();
+    for (int ch = 0; ch &lt; upChs; ++ch)
+    {
+        float* d = upBlock.getChannelPointer ((size_t) ch);
+        for (int i = 0; i &lt; upN; ++i)
+        {
+            const float s1  = std::tanh (d[i] * drive + 0.2f) - 0.19f;   // asym (2nd)
+            const float a   = juce::jlimit (-1.0f, 1.0f, s1);
+            const float cub = 1.5f * a - 0.5f * a * a * a;               // cubic (3rd)
+            const float mix = juce::jlimit (0.0f, 1.0f, std::abs (s1));  // louder -&gt; more cubic
+            d[i] = s1 + mix * (cub - s1);
+        }
+    }</code></pre></div>
+<details class="fullfn"><summary>Full function &mdash; Source\DSP\BluesDriveStyleDSP.cpp</summary><pre><code>void BluesDriveStyleDSP::process (juce::AudioBuffer&lt;float&gt;&amp; buffer)
+{
+    if (bypassed) return;
+    juce::ScopedNoDenormals noDenormals;
+
+    const int numCh = buffer.getNumChannels();
+    const int n     = buffer.getNumSamples();
+    if (numCh == 0 || n == 0) return;
+
+    juce::dsp::AudioBlock&lt;float&gt; block (buffer);
+
+    // 1. Upsample to 4x.
+    auto upBlock = mOs.upsample (block);
+
+    // 2. Envelope-driven dual-stage shaper at 4x (QA-EffectsReview Task 5).
+    //    Stage 1: asymmetric tanh (pre-add 0.2 DC, post-subtract 0.19 -- the
+    //    0.01 residual is the intentional bias floor; the DC blocker strips it).
+    //    Then cross-fade stage 1 -&gt; a cubic soft-clip (1.5a - 0.5a^3) by |s1|,
+    //    so the dominant harmonic shifts 2nd -&gt; 3rd as the player digs in.
+    const float drive = driveAmount (mDrive);
+    const int upN     = (int) upBlock.getNumSamples();
+    const int upChs   = (int) upBlock.getNumChannels();
+    for (int ch = 0; ch &lt; upChs; ++ch)
+    {
+        float* d = upBlock.getChannelPointer ((size_t) ch);
+        for (int i = 0; i &lt; upN; ++i)
+        {
+            const float s1  = std::tanh (d[i] * drive + 0.2f) - 0.19f;   // asym (2nd)
+            const float a   = juce::jlimit (-1.0f, 1.0f, s1);
+            const float cub = 1.5f * a - 0.5f * a * a * a;               // cubic (3rd)
+            const float mix = juce::jlimit (0.0f, 1.0f, std::abs (s1));  // louder -&gt; more cubic
+            d[i] = s1 + mix * (cub - s1);
+        }
+    }
+
+    // 3. Downsample back to 1x in-place.
+    mOs.downsample (block);
+
+    // 4. Tone-stack LPF at 1x (cheap; no aliasing concern post-shaper).
+    juce::dsp::ProcessContextReplacing&lt;float&gt; ctx (block);
+    mToneLpf.process (ctx);
+
+    // 5. ~100 Hz +3.5 dB body peak (QA-EffectsReview Task 5: the low-mid bump).
+    mBodyPeak.process (ctx);
+
+    // 6. 5 Hz DC blocker -- strips the static 0.0074 bias the shaper leaves
+    // at silence.  Without this the dBFS meter registers ~-42 dB at rest
+    // and toggling bypass clicks because the bypassed signal is 0 but the
+    // un-bypassed signal sits on a DC pedestal.
+    {
+        const float R = mDcCoef;
+        for (int ch = 0; ch &lt; numCh; ++ch)
+        {
+            float* d = buffer.getWritePointer (ch);
+            float&amp; xPrev = (ch == 0) ? mDcXL : mDcXR;
+            float&amp; yPrev = (ch == 0) ? mDcYL : mDcYR;
+            for (int i = 0; i &lt; n; ++i)
+            {
+                const float in = d[i];
+                const float y  = in - xPrev + R * yPrev;
+                xPrev = in;
+                yPrev = y;
+                d[i]  = y;
+            }
+        }
+    }
+
+    // 7. Output level.
+    if (mLevel != 0.0f)
+        buffer.applyGain (juce::Decibels::decibelsToGain (mLevel, -60.0f));
+}</code></pre></details>
+<pre class="formulas">- Drive scalar: `drive = 1 + drive01 * 29` (unity at 0, ~30x at max; &quot;comparable to BD-2 max position&quot;).
+- Stage 1 (asymmetric tanh, 2nd harmonic): `s1 = tanh(x * drive + 0.2) - 0.19` — 0.2 DC pre-bias, 0.19 post-subtract; the 0.01 residual is an intentional bias floor stripped by the DC blocker.
+- Stage 2 (cubic soft clip, 3rd harmonic): `cub = 1.5a - 0.5a^3` with `a = clamp(s1, -1, 1)`.
+- Envelope crossfade: `out = s1 + |s1| * (cub - s1)` — dominant harmonic shifts 2nd -&gt; 3rd as level rises.
+- Runs at 4x oversampling (upsample -&gt; shape -&gt; downsample).
+- Tone: first-order LPF, log sweep 500 Hz -&gt; 5 kHz: `hz = 500 * (5000/500)^tone01`.
+- Body: fixed peak filter at 100 Hz, Q = 0.7071, +3.5 dB.
+- DC blocker: `y[n] = x[n] - x[n-1] + R*y[n-1]`, `R = 1 - 2*pi*5/sr` (~0.999 at 44.1 kHz), strips the static 0.0074 shaper bias.
+- Level knob range: -24..+12 dB, applied as `Decibels::decibelsToGain(mLevel, -60)`.</pre>
+<p class="behind"><b>Behind:</b> <a href="manual-2.html#FXPICK-5">Pedals submenu</a>, <a href="manual-2.html#BSPDL-3">An empty slot</a>, <a href="manual-2.html#BSPDL-4">A filled slot</a>, <a href="manual-2.html#BSPDL-5"></a>, <a href="manual-2.html#BSPDL-7">Slot ON footswitch</a>, <a href="manual-2.html#BSPDLP-3">Harmonics group</a>, <a href="manual-2.html#BSPDLP-6">Clear</a>.</p>

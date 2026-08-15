@@ -1,0 +1,52 @@
+<p>Long files are streamed from disk rather than held in memory, with read-ahead.
+The <code>UND</code> and <code>PF</code> readouts are this subsystem reporting
+when the disk could not keep up.</p>
+
+<div class="codeblock"><div class="codehead">- Source\DSP\AudioClipStreamer.h</div><pre><code>// AudioClipStreamer::ensureRangeBlockingForOffline (AudioClipStreamer.cpp)
+bool AudioClipStreamer::ensureRangeBlockingForOffline (int64 needStart)
+{
+    if (! sOfflineRender.load (std::memory_order_relaxed) || mRamMode)
+        return false;
+
+    needStart = juce::jmax ((int64) 0, needStart);
+    if (needStart &gt;= mTotalLength)
+        return false;   // past EOF: normal silence, not an underrun
+
+    // The seek() shape executed inline on the render thread: restart the
+    // ring at the needed position and synchronously prefill.  Blocking here
+    // is the point -- no live audio callback runs while the flag is set.
+    juce::CriticalSection::ScopedLockType lk (mReaderLock);
+
+    mSeekPending  .store (false,     std::memory_order_release);
+    mRingReadHead .store (needStart, std::memory_order_release);
+    mRingWriteHead.store (needStart, std::memory_order_release);
+
+    const int prefill = (int) juce::jmin (
+        (int64) (mFileSampleRate * kPrefillSeconds),
+        mTotalLength - needStart);
+    if (prefill &gt; 0)
+        fillIntoRing (needStart, prefill);
+
+    mReady.store (true, std::memory_order_release);
+    return mRingWriteHead.load (std::memory_order_acquire) &gt; needStart;
+}</code></pre></div>
+<details class="fullfn"><summary>Full function &mdash; - Source\DSP\AudioClipStreamer.h</summary><pre><code>// ── AudioClipStreamer ─────────────────────────────────────────────────────────
+// Disk-streaming audio engine for arrangement audio clips.
+//
+// Architecture:
+//   - SPSC ring buffer (4 seconds at file sample rate).
+//   - Background thread (TimeSliceClient) pre-fetches audio from disk.
+//   - Audio thread calls readAndMix() with a stateless file position each block.
+//   - Linear interpolation for sample-rate conversion.
+//   - Seek detection: if filePos jumps outside the ring window, the audio thread
+//     flags a seek and the background thread handles the refill asynchronously.
+//     The audio thread returns silence for any block during a seek.</code></pre></details>
+<pre class="formulas">- `kBufSeconds = 4.0` — ring covers 4 s at the file&#x27;s native sample rate; `mCapacity = (int)(mFileSampleRate * kBufSeconds)`.
+- `kPrefillSeconds = 3.5` — synchronous pre-fill on seek (~88% of the ring); bumped from 2.0 in G-7 polish alongside bg-thread priority low → normal to kill the first-bar MP3 skip.
+- `kChunkSize = 8192` samples per background read.
+- `kRamThresholdBytes = 100 * 1024 * 1024` — files at or under 100 MB raw float-PCM load entirely into RAM at construction (bumped from 15 MB; MP3 decode is ~10x slower per chunk than WAV). 100 MB ≈ 9.5 min stereo @ 44.1k.
+- Background pacing: return `50` ms at EOF, `10` ms when ring &gt; 75% full (`available &gt;= mCapacity * 0.75`), `0` (come back immediately) otherwise.
+- Ring physical index for file position fp: `fp % mCapacity`; ring covers absolute file positions `[wh - capacity, wh)`.
+- `kContiguitySlack = 4096` samples — a miss within this window of `mLastServedEnd` counts as an underrun (`sUnderrunCount++`, Debug `jassertfalse`); outside it, it&#x27;s a user seek and is not counted.
+- Offline contract: `sOfflineRender` (static atomic, set by begin/endOfflineRender) makes `readRaw`/`readAndMix` call `ensureRangeBlockingForOffline` — the seek() shape run inline on the render thread under `mReaderLock` — instead of returning silence; offline the underrun count should stay 0 and `endOfflineRender` reports it.
+- `sPeakPrefillMs` — session-peak fill wall-clock via `compare_exchange_weak` max loop; reset at start of an offline render.</pre>

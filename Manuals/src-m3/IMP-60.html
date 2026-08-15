@@ -1,0 +1,108 @@
+<p>The class is <code>BaySickGraph</code>. (The processor's member is still named
+<code>mVibeGraph</code> from an earlier name for the app &mdash; the member name
+is not the subsystem name.)</p>
+
+<p>Every strip runs the same chain, in this order:</p>
+
+<table>
+  <thead><tr><th>#</th><th>Stage</th></tr></thead>
+  <tbody>
+    <tr><td>1</td><td>Input</td></tr>
+    <tr><td>2</td><td>Pre EQ</td></tr>
+    <tr><td>3</td><td>The six-slot rack</td></tr>
+    <tr><td>4</td><td>Post EQ</td></tr>
+    <tr><td>5</td><td>Fader, pan and width</td></tr>
+  </tbody>
+</table>
+
+<p>That is why the Pre EQ cleans up before anything else processes it and the
+Post EQ shapes the finished result &mdash; and why the strip meter, which is
+tapped after stage 5, shows what you actually hear rather than what came in.</p>
+
+<p>Peak meters are latency-compensated: each node writes its block peak into a
+16-entry ring and reads back at a compensation offset, so meters on strips with
+different plugin delays still line up with each other.</p>
+
+<div class="codeblock"><div class="codehead">Source\BaySickGraph.h (MixerChannelIds registry, RoutingGraph class, BaySickGraph topology banner)</div><pre><code>// BaySickGraph.h -- MixerChannelIds: the channel-id registry (verbatim, abridged to ids)
+namespace MixerChannelIds
+{
+    constexpr int kOutput    = 0;    // Terminal sink - only Master routes here
+    constexpr int kLayersBus = 1;
+    constexpr int kBassBus   = 2;
+    constexpr int kDrumsBus  = 3;
+    constexpr int kMaster    = 4;
+    constexpr int kFxBus     = 5;
+    constexpr int kClipsBus  = 6;
+    constexpr int kVoxBus    = 7;    // R1 (2026-04-23): live-vocal strip bus
+    constexpr int kInstBus   = 8;    // R1: live-instrument strip bus
+    constexpr int kVoxBus2   = 9;    // G-6: optional 2nd Vox bus
+    constexpr int kInstBus2  = 10;   // G-6: optional 2nd Inst bus
+    constexpr int kInstBus3  = 11;   // G-6: optional 3rd Inst bus
+    constexpr int kRustyDrumsBus = 12; // J-4 (2026-05-03): dedicated bus for BaySickRustyDrums strips
+    constexpr int kPluginsBus = 13;
+    constexpr int kLayersBus2 = 14;
+    constexpr int kBassBus2   = 15;
+    constexpr int kClipsBus2  = 16;
+    constexpr int kPluginsBus2 = 17;
+    constexpr int kDrumsBus2  = 18;
+    constexpr int kAuxBase   = 100;  // Aux 0..17 → 100..117 (G-7 polish: 16 → 18)
+    constexpr int kLayerBase = 200;  // Layer insert 0..19 → 200..219
+    constexpr int kBassBase  = 300;  // Bass insert 0..9 → 300..309
+    constexpr int kAudioBase = 400;  // Audio insert 0..99 → 400..499 (ends flush at kDrumBase)
+    constexpr int kDrumBase  = 500;  // Drum insert 0..31 → 500..531
+    constexpr int kVoxBase   = 600;  // R1: Vox insert 0..9 → 600..609
+    constexpr int kInstBase  = 700;  // R1: Inst insert 0..29 → 700..729
+    constexpr int kRustyBase = 800;  // J-4: BaySickRustyDrums insert 0..12 → 800..812
+    constexpr int kPluginBase = 900; // TS6: hosted VST3 instrument insert 0..19 → 900..919</code></pre></div>
+<details class="fullfn"><summary>Full function &mdash; Source\BaySickGraph.h (MixerChannelIds registry, RoutingGraph class, BaySickGraph topology banner)</summary><pre><code>// BaySickGraph.cpp -- BaySickGraph::rebuildRoutingFromApvts (full function, lines 3206-3244)
+void BaySickGraph::rebuildRoutingFromApvts()
+{
+    if (mApvts == nullptr) return;
+
+    // Truncate to the fixed bus half instead of clearing: those entries are
+    // constant for the process lifetime, and re-composing their prefixes would
+    // put one juce::String allocation per bus per block on the audio thread.  ChId is
+    // already known on the node, so the per-kind chId helpers (layerInsert /
+    // bassInsert / ...) aren&#x27;t needed below -- node-&gt;chId is the source of truth.
+    mActiveChannels.resize(mFixedBusChannelCount);
+
+    // QA-InsertMaps (2026-05-24): single sweep over mLiveInsertChannels
+    // replaces 8 per-kind emplace_back blocks (Layer / Bass / Drum / Audio /
+    // Aux / Vox / Inst / Rusty -- see commit history for each block&#x27;s
+    // historical comment context).  All 8 InsertKinds register their
+    // _sendTo / _sendN_to APVTS values into the routing graph through this
+    // unified pass; Vox / Inst / Rusty inclusion is preserved (was added
+    // R1 + J-5 with their own comment blocks; consolidated here).
+    for (int chId : mLiveInsertChannels)
+        if (auto* n = mInsertsByChannel[(size_t) chId].get())
+            mActiveChannels.emplace_back(chId, n-&gt;apvtsPrefix);
+
+    mRoutingGraph.rebuildFromApvts(*mApvts, mActiveChannels);
+
+    // C.4 Phase 1 (2026-04-30): pre-allocate SC receive buffers for every
+    // (dst, slot) pair the routing graph references this block.  Pulls
+    // allocation off the audio thread; the audio loop&#x27;s getScRecvBuffer
+    // calls then hit existing buffers and just .clear() them.
+    for (const auto&amp; sce : mRoutingGraph.scEdges())
+        getScRecvBuffer(sce.dstId, sce.dstSlot);
+
+    // QA-Fe2 SC delay-match: re-flag SC-edge source nodes from the fresh
+    // edge list so their process stashes the pre-compensation key tap.
+    armScSourceTaps();
+
+    // Same shape for the pre-fader send tap: re-flag its sources from the fresh
+    // edge list, and clear each armed tap before any strip runs this block.
+    armPreFaderTaps();
+}</code></pre></details>
+<pre class="formulas">- Channel-id ranges (MixerChannelIds): buses 0-18 (kOutput=0, kLayersBus=1, kBassBus=2, kDrumsBus=3, kMaster=4, kFxBus=5, kClipsBus=6, kVoxBus=7, kInstBus=8, kVoxBus2=9, kInstBus2=10, kInstBus3=11, kRustyDrumsBus=12, kPluginsBus=13, kLayersBus2=14, kBassBus2=15, kClipsBus2=16, kPluginsBus2=17, kDrumsBus2=18); Aux 100-117; Layer inserts 200+; Bass 300+; Audio 400-499 (ends flush at kDrumBase); Drum 500-531; Vox 600+; Inst 700+; Rusty 800-812; Plugin 900+.
+- Strip caps DERIVE from page caps in BaySickConstants.h (`kMaxLayerStrips = kMaxLayerPages` etc.) — one page of a kind owns exactly one insert strip; a one-sided raise silently leaves extra pages with no strip/EQ/routing. Non-page caps: `kMaxAuxStrips = 18`, `kMaxRustyStrips = 13`.
+- Drum-kit split: `kDrumPagesPerBank = 16`; pages 0..15 = kit 1 -&gt; kDrumsBus, 16..31 = kit 2 -&gt; kDrumsBus2; `drumBankForPage` / `drumBusForPage` are the ONE expression of the split.
+- APVTS prefix mapping is total over live ids via `prefixFromChannelId` (e.g. 200 -&gt; &quot;mixer_layer_0&quot;); an id outside all ranges returns empty = no strip.
+- `rebuildRoutingFromApvts` runs on the AUDIO THREAD at block rate (called at the top of every processBlock, PluginProcessor.cpp:3504). It truncates `mActiveChannels` to `mFixedBusChannelCount` (bus entries are constant per process lifetime — avoids per-bus String allocation per block), then appends every live insert from `mLiveInsertChannels` + `mInsertsByChannel` (the flat array + companion live-list is the QA-InsertMaps unified pattern replacing 8 per-kind blocks).
+- After rebuild: SC receive buffers pre-allocated per (dstId, dstSlot) edge (allocation pulled off the steady-state audio path), then `armScSourceTaps()` + `armPreFaderTaps()` re-flag source nodes from the FRESH edge list.
+- Mixer strip pattern audit checklist (~15 sites): `rebuildRoutingFromApvts`&#x27;s mActiveChannels is the critical one — a new strip kind missing here has no routing entry at all.
+- `isMainOutLocked(chId)` = Master, all buses, and Rusty inserts (800-812): their main-out cannot be rerouted. `isValidBusSendTarget(dst)` — buses/master may only send to Aux strips (100..117).
+- `defaultSendTo`: Master -&gt; kOutput; every bus -&gt; kMaster (FxBus included); Layer inserts -&gt; kLayersBus; Bass -&gt; kBassBus; Drum -&gt; `drumBusForPage`; Audio -&gt; kClipsBus; Aux -&gt; kFxBus; Vox -&gt; kVoxBus; Inst -&gt; kInstBus; Rusty -&gt; kRustyDrumsBus; Plugin -&gt; kPluginsBus; unknown -&gt; kMaster.
+- `anyBusSoloed()` reads BUS `_solo` only (O(11) cached-atomic loads); MUST NEVER call `isAnyInsertSoloed()` — the prior bug muted whole buses when one strip soloed (§9 nineteenth Forks guardrail).
+- Meter latency compensation: `MeterLatencyComp::kRingSize = 16` blocks max (`kRingMask = kRingSize - 1`), gCompensationBlocks atomic read per block, 0 = off.</pre>
+<p class="behind"><b>Behind:</b> <a href="manual-2.html#TABBAR-7">Mixer slot</a>, <a href="manual-2.html#MIX-1">Add</a>, <a href="manual-2.html#MIX-2">Strip header</a>, <a href="manual-2.html#MIX-3">Bus collapse triangle</a>, <a href="manual-2.html#MIX-4">M</a>, <a href="manual-2.html#MIX-5">S</a>, <a href="manual-2.html#MIX-9">Pan knob</a>, <a href="manual-2.html#MIX-10">Width knob</a>, <a href="manual-2.html#MIX-11">Polarity toggle</a>, <a href="manual-2.html#MIX-13">Channel fader</a>, <a href="manual-2.html#MIX-14">Fader scale, dB</a>, <a href="manual-2.html#MIX-16">Gain readout</a>, <a href="manual-2.html#MIXMNU-1">Pan Law submenu</a>.</p>

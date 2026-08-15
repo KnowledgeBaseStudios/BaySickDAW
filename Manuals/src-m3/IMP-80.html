@@ -1,0 +1,68 @@
+<p>Chains with nothing to do are suspended so they cost nothing, and woken when
+something arrives &mdash; including a single auditioned note, which each sampled
+engine reports as pending so the chain can wake before it plays.</p>
+
+<p>Separately, and more importantly: the message thread must sometimes wait for
+the audio thread before freeing something the audio thread might be reading.</p>
+
+<div class="note">
+  <b>It waits for an acknowledgement, not for a fixed time.</b> The audio thread
+  publishes a block counter at the very top of every block &mdash; before any
+  early-out, so even a muted block acknowledges. The waiter needs to see it
+  advance twice, which proves the block that may have been in flight has
+  returned. The timeout is derived from the live buffer size, because one block
+  is 23&nbsp;ms at 1024 samples and 46&nbsp;ms at 2048, and no single fixed wait
+  is right at both.
+</div>
+
+<p>The <code>DSP</code> readout is load as a percentage of the buffer window, not
+of the CPU &mdash; which is why raising the buffer lowers the number for the same
+project.</p>
+
+<div class="codeblock"><div class="codehead">- Source\Engine\Tasks\InstStripTask.cpp (the idle-suspend gate + predicates, lines 203-271)</div><pre><code>// InstStripTask idle-suspend predicates (InstStripTask.cpp)
+        // QA-C DSP-10 (2026-05-10): peek audition state from any sfizz engine
+        // bound to this Inst index.  An audition queued via auditionNote(int)
+        // must wake the chain so processBlock can mAuditionNote.exchange(-1)
+        // and produce sound.  Without this, audition during idle-suspend is
+        // silently swallowed.
+        bool auditionPending = false;
+        if (auto* g = mProcessor-&gt;getBaySickGuitars (mIndex))
+            auditionPending = g-&gt;isAuditionPending();
+        if (! auditionPending)
+            if (auto* b = mProcessor-&gt;getBaySickBasses (mIndex))
+                auditionPending = b-&gt;isAuditionPending();
+        ...
+        bool holdExpired = false;
+        if (midiEmpty &amp;&amp; noVoices &amp;&amp; ! auditionPending &amp;&amp; ! slideActive)
+        {
+            auto&amp; counter = mProcessor-&gt;mInstIdleBlocks[(size_t) mIndex];
+            if (counter &gt;= BaySickDAWProcessor::kIdleSuspendBlocks)
+                holdExpired = true;
+            else
+                ++counter;
+        }
+        else
+        {
+            mProcessor-&gt;mInstIdleBlocks[(size_t) mIndex] = 0;   // wake
+        }</code></pre></div>
+<details class="fullfn"><summary>Full function &mdash; - Source\Engine\Tasks\InstStripTask.cpp (the idle-suspend gate + predicates, lines 203-271)</summary><pre><code>    // QA-C DSP-10 (2026-05-10): audition-pending peek so the idle-suspend
+    // predicate wakes the chain when an audition note is queued via
+    // auditionNote(int).  Without this, the dispatcher skips processBlock
+    // and the audition is silently swallowed.
+    bool isAuditionPending() const noexcept
+    {
+        return mAuditionNote.load (std::memory_order_acquire) != -1;
+    }
+
+    // QA-G3Smoke Task 12: slide-tail peek for the same idle-suspend predicate.
+    // SlideSampler voices (gesture + ring-out tails + release zones) don&#x27;t
+    // count in sfizz&#x27;s getNumActiveVoices, so without this term the dispatcher
+    // suspends the chain mid-tail and the ring-out freezes.
+    bool isSlideActive() const noexcept { return mSlideSampler.isActive(); }</code></pre></details>
+<pre class="formulas">- Suspend predicate (all four must hold to advance the idle counter): `midiEmpty &amp;&amp; noVoices &amp;&amp; !auditionPending &amp;&amp; !slideActive`. Any failure resets the counter to 0 (immediate wake). Applies to sfizz-source Inst tabs and the Rusty kit only; live-input Inst tabs are NEVER suspended (live audio + arm/listen can fire with no MIDI).
+- `isAuditionPending()` = `mAuditionNote.load(memory_order_acquire) != -1` — a peek on the same atomic the engine-audition pattern uses (`processBlock` opens with `mAuditionNote.exchange(-1)`), added QA-C DSP-10 on the 3 sfizz engines (Guitars / Basses / RustyDrums) so an audition queued during suspend wakes the chain instead of being silently swallowed.
+- `isSlideActive()` — SlideSampler voices (gesture + ring-out tails + release zones) don&#x27;t count in sfizz&#x27;s `getNumActiveVoices`; without this term the chain suspends mid-slide and the tail freezes (QA-G3Smoke Task 12).
+- Hold: `kIdleSuspendSeconds = 0.1` (a DURATION — reproduces the old 9-block calibration at 512/44.1k = 104 ms at every rate x block pair; the old fixed 9 blocks spanned 26 ms at 128/44.1k to 836 ms at 4096, a 32x spread). `kIdleSuspendBlocks = max(1, ceil(kIdleSuspendSeconds * sampleRate / samplesPerBlock))`, recomputed in prepareToPlay, seeded to `INT_MAX` so nothing can suspend before the first prepare. Counters (`mInstIdleBlocks[]`, `mRustyIdleBlocks`) are audio-thread-only, no atomics.
+- The skip takes out the WHOLE chain (sfizz + Pedals + NAMIR + insert rack + EQ), so suspend fades rather than guillotines: `kFadeOutSeconds = 0.015` (15 ms, reuses the Inst-monitor-fork click-free calibration, 15% of the 100 ms hold), `kFadeInSeconds = 0.003` (3 ms de-zipper — asymmetric on purpose: a long fade-in would soften the attack of the very note that woke the chain). The ramp is confined to the first `rampSamples` of the block — the fade length is a duration, never a function of buffer size (a 3 ms wake ramp smeared over a 4096-sample block would be 93 ms). `suspended` is true only once `startGain &lt;= 0` with the hold expired; the caller then clears the output and returns (steady idle costs one predicate check + a buffer clear).
+- Gain position carries across blocks in `mGain`, so the fade behaves identically at every buffer size from 32 to 4096; `IdleSuspendFade::apply` is shared so the two call sites (InstStripTask, RustyDrumsProducerTask) cannot drift on the ramp/hold split; `isUnity()` skips the ramp outright on non-sfizz strips.</pre>
+<p class="behind"><b>Behind:</b> <a href="manual-2.html#FRAME-11">Perf readout</a>, <a href="manual-2.html#TABBAR-12">Perf readout</a>, <a href="manual-2.html#AUD-4">Buffer Size:</a>.</p>

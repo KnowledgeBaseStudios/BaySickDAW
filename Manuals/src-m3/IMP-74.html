@@ -1,0 +1,100 @@
+<p>Every reader and writer of a file path goes through one resolver, so a
+project moved between machines resolves the same way everywhere and a missing
+file is reported once rather than failing in five different ways.</p>
+
+<p>Sample root notes are detected from filenames, which is a guess &mdash; a
+drum named with a number in it can be read as a pitch. Drum pages therefore load
+their samples pinned to a fixed reference note, which is why a kick on a Drums
+tab plays as recorded instead of far too high.</p>
+
+<div class="codeblock"><div class="codehead">- Source\BaySickPlayer\BaySickPlayerDSP.cpp (BaySickSampleManager::detectRootNote, lines 511-574; loaders at lines 30-88) —</div><pre><code>// BaySickDAWProcessor::resolveProjectFile (PluginProcessor.cpp)
+juce::File BaySickDAWProcessor::resolveProjectFile (const juce::String&amp; storedPath) const
+{
+    if (storedPath.isEmpty()) return {};
+    // QA-ProjectSave Task 4 (2026-07-26): stable-root references resolve FIRST,
+    // ahead of the absolute test -- &quot;library:...&quot; / &quot;mysamples:...&quot; are not
+    // absolute paths and would otherwise fall through to the project-relative
+    // branch and resolve to nonsense inside the project folder.
+    if (SampleLibrary::isStableRef (storedPath))
+        return SampleLibrary::resolveStableRef (storedPath);
+    // Absolute paths pass through (pre-P4 projects stored absolute audio paths).
+    if (juce::File::isAbsolutePath (storedPath)) return juce::File (storedPath);
+    // Relative paths - resolve against current project folder.
+    juce::ScopedLock sl (mProjectFolderLock);
+    if (mCurrentProjectFolder == juce::File()) return {};
+    return mCurrentProjectFolder.getChildFile (storedPath);
+}</code></pre></div>
+<details class="fullfn"><summary>Full function &mdash; - Source\BaySickPlayer\BaySickPlayerDSP.cpp (BaySickSampleManager::detectRootNote, lines 511-574; loaders at lines 30-88) —</summary><pre><code>// Detect root note from filename heuristic.
+// Scans for note name patterns like &quot;A3&quot;, &quot;C#4&quot;, &quot;Bb2&quot;, or bare MIDI numbers.
+int BaySickSampleManager::detectRootNote (const juce::String&amp; filename)
+{
+    // Work in plain ASCII std::string for safe character operations
+    const std::string f = filename.toUpperCase().toStdString();
+    const int len = (int) f.size();
+
+    // Scan for note-name pattern: [A-G][#B]?[0-9]
+    for (int i = 0; i &lt; len - 1; ++i)
+    {
+        const char c = f[(size_t) i];
+        if (c &lt; &#x27;A&#x27; || c &gt; &#x27;G&#x27;) continue;
+
+        // Not preceded by a letter (part of a word)
+        if (i &gt; 0 &amp;&amp; std::isalpha ((unsigned char) f[(size_t)(i - 1)])) continue;
+
+        int  pos          = i + 1;
+        bool hasAccidental = false;
+
+        if (pos &lt; len &amp;&amp; (f[(size_t) pos] == &#x27;#&#x27; || f[(size_t) pos] == &#x27;B&#x27;))
+        {
+            // &#x27;B&#x27; as flat: only treat as flat if followed by a digit
+            if (f[(size_t) pos] == &#x27;B&#x27;)
+            {
+                if (pos + 1 &gt;= len || !std::isdigit ((unsigned char) f[(size_t)(pos + 1)]))
+                    continue; // it&#x27;s the note letter B, not a flat
+            }
+            hasAccidental = true;
+            ++pos;
+        }
+
+        if (pos &gt;= len) continue;
+        if (!std::isdigit ((unsigned char) f[(size_t) pos])) continue;
+
+        // Support negative octave: look for &#x27;-&#x27; just before the note letter
+        int octEnd = pos;
+        // Grab the note name + digit
+        juce::String noteName;
+        if (i &gt; 0 &amp;&amp; f[(size_t)(i - 1)] == &#x27;-&#x27;)
+            noteName = juce::String (f.c_str() + i - 1, (size_t)(octEnd - i + 2));
+        else
+            noteName = juce::String (f.c_str() + i, (size_t)(octEnd - i + 1));
+
+        const int midi = noteNameToMidi (noteName.trimCharactersAtStart (&quot; &quot;));
+        if (midi &gt;= 0 &amp;&amp; midi &lt;= 127) return midi;
+    }
+
+    // Fallback: look for a standalone 1-3 digit number in the filename
+    for (int i = 0; i &lt; len; ++i)
+    {
+        if (!std::isdigit ((unsigned char) f[(size_t) i])) continue;
+        int j = i + 1;
+        while (j &lt; len &amp;&amp; std::isdigit ((unsigned char) f[(size_t) j])) ++j;
+        const int num = std::stoi (f.substr ((size_t) i, (size_t)(j - i)));
+        if (num &gt;= 0 &amp;&amp; num &lt;= 127)
+        {
+            const bool okL = (i == 0 || !std::isalnum ((unsigned char) f[(size_t)(i - 1)]));
+            const bool okR = (j &gt;= len || !std::isalnum ((unsigned char) f[(size_t) j]));
+            if (okL &amp;&amp; okR) return num;
+        }
+        i = j - 1;
+    }
+
+    return 60; // default C4
+}</code></pre></details>
+<pre class="formulas">- Root-note filename heuristic order: (1) note-name pattern `[A-G][#B]?[-]?[0-9]` not preceded by a letter, with &#x27;B&#x27; treated as flat only when a digit follows; (2) fallback standalone 1-3 digit number in 0..127 with non-alnum boundaries on both sides; (3) default `60` (C4).
+- MIDI conversion: `12 * (octave + 1) + semitone`; missing octave defaults to 4. Negative octaves (&quot;C-1&quot;) supported via the leading &#x27;-&#x27;.
+- The classic trap this feeds: `Kick_01.wav` → bare-number fallback → rootNote = 1 → ~30x pitch shift. Drum pages therefore pass `normalizeRoot = 60` to `loadSampleFolder/loadSampleSFZ/loadSampleFile`; `BaySickPlayerProcessor::loadIntoManager` forwards it to `normalizeRootNotes` INSIDE the audio-shield bracket (it rewrites every region&#x27;s rootNote while the audio thread could be reading). `loadSingleFile` always initializes rootNote = 60. Voice pitch is `midiNote - rootNote`.
+- `loadFolder` accepts `.wav .aiff .aif .flac` (non-recursive), sorted; per-file rootNote from `detectRootNote(fileNameWithoutExtension)`, key/vel ranges 0-127.
+- Sample load ceiling (`loadFile`): `kAbsoluteMaxSamples = 192000 * 60`; the file&#x27;s claimed rate is clamped to 8000..192000 first, then `maxSmp = min(kAbsoluteMaxSamples, safeRate * 60.0)` — a 60-SECOND bound the header can&#x27;t inflate.
+- Reference resolution order in `resolveProjectFile`: stable refs (`library:` / `mysamples:` via SampleLibrary) FIRST, then absolute paths pass through, then relative resolves against `mCurrentProjectFolder` under `mProjectFolderLock` (empty File when no project). Self-contained bundles store `Samples/&lt;name&gt;` relative refs.
+- ProjectFileResolver is a lock-guarded process-wide slot (header-only namespace, not a per-object hook — EffectRack-built effects have no processor reference); the callable is COPIED out before invocation so the slot lock is never held across the processor&#x27;s project-folder lock. Uninstalled fallback = `SampleLibrary::resolvePersistedRef`.</pre>
+<p class="behind"><b>Behind:</b> <a href="manual-2.html#DKIT-4">Pick a sound v</a>, <a href="manual-2.html#FMENU-10">Import Audio</a>, <a href="manual-2.html#OMENU-5">Get Sound Content</a>, <a href="manual-2.html#BLDM-1">Import Audio</a>.</p>

@@ -1,0 +1,21 @@
+<p>Not an <code>IMP-</code> topic of its own, but it cuts across several. Every
+kind of file the app did not write is read through a guarded entry point rather
+than directly. There are <b>five</b> of them:</p>
+
+<table>
+  <thead><tr><th>Guard</th><th>Covers</th></tr></thead>
+  <tbody>
+    <tr><td><code>SafeXml</code></td><td>Project, preset and template files</td></tr>
+    <tr><td><code>SafeAudioReader</code></td><td>Audio files</td></tr>
+    <tr><td><code>SafeNamModel</code></td><td>Amp captures</td></tr>
+    <tr><td><code>SafeSfzKit</code></td><td>Sampled instrument definitions</td></tr>
+    <tr><td><code>SafeAudioFormats</code></td><td>The single place audio formats are registered</td></tr>
+  </tbody>
+</table>
+
+<p>The last one matters because a decoder must be chosen in exactly one place:
+one registration point is what lets MP3 decoding be pinned to a known
+implementation rather than to whatever claims the extension first &mdash; see
+<a href="#IMP-55">MP3 decode (vendored mpglib) and MP3 write</a>.</p>
+
+<!-- ═══════════════════════════════════════════════════════════════════════ -->

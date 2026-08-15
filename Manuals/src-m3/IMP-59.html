@@ -1,0 +1,79 @@
+<p>One set of paint helpers draws every title strip, so the shell windows and the
+desktop dialogs cannot drift apart. Window positions and sizes are remembered per
+window.</p>
+
+<p>The centred window name is laid out in the space <em>left over</em> after the
+left cluster and the right-hand extras &mdash; not centred on the whole strip.
+Centring on the strip is what put a title underneath the Menu button whenever a
+window got narrow.</p>
+
+<p>Some windows constrain their own resizing: the VU meter keeps its aspect ratio
+and stops at a maximum, because a drawn instrument face stretched on one axis is
+simply wrong and nothing on screen would say so.</p>
+
+<div class="codeblock"><div class="codehead">Source\Standalone\WindowChrome.h (shared chrome metrics)</div><pre><code>// WindowChrome.h -- the ONE source of truth for frame + title-strip look
+namespace WindowChrome
+{
+    // Locked call 4a.  kBorderPx is the resize-drag thickness the contained
+    // shell uses; desktop windows keep their own JUCE border.
+    inline constexpr int kTitleH   = 26;
+    inline constexpr int kBorderPx = 4;
+
+    juce::Colour titleBg (bool live) noexcept;
+    juce::Colour titleText() noexcept;
+
+    // The window body behind everything, plus the 1px edge that separates one
+    // floating window from the one under it.
+    void paintFrame (juce::Graphics&amp;, juce::Rectangle&lt;int&gt; full);
+
+    void paintTitleBar (juce::Graphics&amp;, juce::Rectangle&lt;int&gt; area,
+                        bool live, const juce::String&amp; title = {});
+
+    // Puts a desktop window on the shared chrome: non-native title bar (so the
+    // BaySickLAF overrides paint it) AND the shared strip height.
+    void applyToDesktopWindow (juce::DocumentWindow&amp; win);
+
+    // Makes `win` an OWNED window of the main application window ... An owned
+    // window is kept above its owner BY THE OS and above nothing else,
+    // and it minimises with the owner.  That is exactly the relationship wanted.
+    void ownToMainWindow (juce::Component&amp; win, const juce::Component&amp; insideMain);
+}</code></pre></div>
+<details class="fullfn"><summary>Full function &mdash; Source\Standalone\WindowChrome.h (shared chrome metrics)</summary><pre><code>// WorkspaceWindow.h -- the THREE-LIFETIME persistence model (verbatim, lines 130-156)
+    // QA-Layout T5: the THREE-LIFETIME model (Jeff&#x27;s 2026-07-28 ruling).
+    //
+    //   Lifetime 1 -- the in-memory map -- is the ONE live store.  EVERY
+    //   window (Disk or Session) writes it on move/resize/close and reads it
+    //   on open, so close/reopen returns to the same spot universally.
+    //   Lifetime 2 -- settings.xml -- written ONCE at app exit from a
+    //   FILTERED view of the map (writeSessionToSettings): sizes for every
+    //   Disk-marked window, placement only for keys registered
+    //   placement-persistent (the four default tabs).  Read only as a seed
+    //   when the map misses.  The old parse-and-rewrite-per-close is gone.
+    //   Lifetime 3 -- the project file -- StandaloneEditor serializes the
+    //   full map + per-window open state and REPLACES the map on load.
+    //
+    //   Disk    - eligible for the settings.xml exit write.  Jeff, 2026-08-04:
+    //             this is ONLY the four default tabs (Builder / Mixer /
+    //             Effects / Piano Roll), size AND position.  Nothing else goes
+    //             in that file.  It previously defaulted to Disk for every page
+    //             window and wrote every window&#x27;s SIZE globally, gating only
+    //             POSITION to the four -- the exact inverse of the ruling, and
+    //             what left 143 records in settings.xml feeding stale sizes to
+    //             players on every cold start.
+    //   Session - map only.  EVERY other window: players, effect windows,
+    //             satellites.  Their size and placement are session state
+    //             (lifetime 1) and project content (lifetime 3); a cold start
+    //             with no project opens them at their DEFAULT size.
+    enum class Persistence { Disk, Session };</code></pre></details>
+<pre class="formulas">- Chrome metrics: `WindowChrome::kTitleH = 26`, `WindowChrome::kBorderPx = 4`. `WorkspaceWindow::kTitleH` / `kBorderPx` are ALIASES of these (constexpr, ~40 call sites keep the old names). DocumentWindow&#x27;s own titleBarHeight also happens to be 26 — they match by coincidence unless routed through `applyToDesktopWindow`, which sets both the non-native title bar and the shared height.
+- Anti-degenerate floor: `kMinDegenerateW = 120`, `kMinDegenerateH = 80` (installed in ctor; only floor before a real default is known). Placeholder open size 480x320.
+- T8 sizing rule: minimum == default (&quot;smallest still readable&quot; measured numbers serve as both). `setDefaultWindowSize` sets default AND minimum; `setResizeFloor` lowers ONLY the floor (hosted plugin surfaces scale, ours don&#x27;t) and must be called AFTER `setDefaultWindowSize`.
+- Snap magnetism: `kSnapPx = 10` (soft — nudges flush within 10 px of another window&#x27;s opposing edge or a workspace edge; drag pushes past it, never a lock). Move path (`applyMagnetism`) translates the whole window; resize path (`applyResizeMagnetism`) snaps each moved edge independently.
+- Drag-warp runaway guard: `kMaxWarpsPerDrag = 64`.
+- Three-lifetime persistence: (1) static in-memory map `sessionBounds()` — the ONE live store, workspace-local rects keyed by persistKey; (2) settings.xml — written ONCE at app exit via `writeSessionToSettings`, ONLY the four default tabs (Builder / Mixer / Effects / Piano Roll) are Disk-marked, size + position for them, `rx/ry/rw/rh` pre-fill restore rect when flushed filled; (3) the project file — StandaloneEditor serializes the full map + per-window open state and REPLACES the map on load.
+- Global-placement keys (the four default tabs) must be seeded via `seedGlobalPlacementKeys` BEFORE any window frames — `isGlobalPlacementKey` filters project restores so a project&#x27;s stale copy never beats the user&#x27;s global placement.
+- persistKey is stable per LOGICAL window (e.g. &quot;Mixer&quot;, &quot;Layers:2&quot;), not per object — destroy-on-close makes the key the only carrier of position. Aux-window keys are effect UUIDs; `forgetPlacement` drops entries when a UUID dies (UUIDs never revive).
+- Bounds are stored WORKSPACE-LOCAL (`getBounds()` translated by `-originInParentClient()`); storing raw parent-client bounds made windows creep down-right on every close/reopen cycle.
+- `ScopedSaveSuppress` (static depth counter) gates every programmatic move out of the store; saveBounds() also refuses when the workspace pointer is null (no space to convert into).
+- settings.xml root tag must be `&quot;BaySickDAWSettings&quot;` (must match ProjectManager&#x27;s writer); records live under `kRootTag`/`kWindowTag` children keyed by `key` attribute.</pre>
+<p class="behind"><b>Behind:</b> <a href="manual-2.html#BSPDL-1">View</a>.</p>

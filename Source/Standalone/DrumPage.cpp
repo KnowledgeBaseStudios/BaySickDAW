@@ -508,8 +508,23 @@ void DrumPage::showSoundPicker (juce::Component* anchor)
          kIdNone, kIdNewPatch, kIdSaveAs, kIdBrowseSmp, kIdLoadSFZ,
          kLibBase, kPresetBase] (int result) mutable
         {
-            if (! safeThis || result <= 0) return;
+            // Dismissed with nothing chosen.  The kit-row entry point creates
+            // its tab SILENTLY before opening this menu, so it needs to know a
+            // cancel happened or the tab is orphaned with no sound in it.
+            if (! safeThis) return;
+
+            if (result <= 0)
+            {
+                if (auto* d = safeThis.getComponent())
+                    if (d->onSoundPickerClosed)
+                        d->onSoundPickerClosed (false);
+                return;
+            }
+
             auto* dp = safeThis.getComponent();
+
+            if (dp->onSoundPickerClosed)
+                dp->onSoundPickerClosed (true);
 
             if (result == kIdNone)            { dp->clearSound();    return; }
             if (result == kIdNewPatch)

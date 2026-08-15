@@ -660,7 +660,7 @@ on the NAM/IR editor — the Vox tab's NAM/IR sub-tab or the Inst tab's NAM/IR s
 stages only run when the page has a NAM model or cab IR loaded (existing engine gate — with
 neither loaded the whole NAM/IR chain is a passthrough, Mic A included), so load a .nam or a
 cab IR first. Feed the chain something sustained: an Inst DI, a held Vox note, or FilePlay
-clips on the channel. "Mic B Active" is the OFF/ON switch at the top-right of the Mic B
+clips on the channel. "Mic B Active" is the OFF/ON switch in the MIC SIM B heading band of the Mic B
 column. Sound-quality listening rides the G2 boundary ear-check; these scenarios are
 functional. Debug first, then Release.
 

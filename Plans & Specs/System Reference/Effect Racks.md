@@ -226,7 +226,8 @@ data while someone is watching.
 | **Save FX Rack Preset...** | Saves all six slots *and* both EQs for the selected channel under a name you type. |
 | **Load FX Rack Preset** | Lists your saved rack presets; picking one replaces the whole rack and both EQs on the selected channel. |
 | **Open Presets Folder** | Opens the folder those files live in. |
-| **VU Calibration (0 VU = ...)** | App-wide reference for every VU meter: -18 through -14 dBFS. |
+| **VU Calibration (0 VU = ...)** | App-wide reference for every VU meter: -18 through -14 dBFS. The same submenu is offered on the VU Meter window's own menu, off one definition - either place sets the same app-wide value. |
+| **VU Meter** | Opens the VU Meter window: one analog VU on the master output. It is the only VU in the app - effect panels carry a dBFS bar and, where the effect has one, a gain-reduction meter, but no VU of their own. |
 
 ### Third-party plugins in a slot
 

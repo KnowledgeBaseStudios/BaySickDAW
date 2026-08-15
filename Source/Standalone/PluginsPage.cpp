@@ -11,9 +11,7 @@
 
 namespace
 {
-    constexpr int kPickBtnH = 26;
-    constexpr int kPickGap  = 6;    // between the picker button and the plugin
-    constexpr int kEdge     = 8;    // page inset, matches resized()
+    constexpr int kEdge = 8;    // page inset, matches resized()
 
     // One spelling for the dead-plugin marker, shared with the rack slot's
     // (SlotComponent::slotDisplayName) -- the same condition on two surfaces
@@ -43,9 +41,6 @@ PluginsPage::PluginsPage (BaySickDAWProcessor& p, int pageIndex)
     // and is torn down only with the tab itself.
     if (auto* pm = Hosting::PluginManager::getInstance())
         pm->addChangeListener (this);
-
-    mPickBtn.onClick = [this] { showPicker(); };
-    addAndMakeVisible (mPickBtn);
 
     rebuildEditor();
     startTimerHz (4);
@@ -135,51 +130,6 @@ void PluginsPage::setTabName (const juce::String& n)
     // the project persists.  Stripping here is what keeps the marker from being
     // saved into a tab name and then outliving the condition that caused it.
     mTabName = stripMissingMarker (n);
-}
-
-void PluginsPage::showPicker()
-{
-    // One plugin per tab, for the tab's life: swapping the engine under a loaded
-    // tab is a feature we do not offer -- closing the tab and opening a new one
-    // does the same thing without destroying a live hosted instance under the
-    // audio thread.  The button is disabled once a plugin exists; this guard
-    // backs it up.  Only the PICKER is gated -- project restore, undo
-    // resurrection and page-preset load reach the rig through selectPluginById
-    // and are unaffected.
-    if (getEngineProcessor() != nullptr)
-        return;
-
-    auto* pm = Hosting::PluginManager::getInstance();
-
-    juce::PopupMenu m;
-    juce::Array<juce::PluginDescription> instruments;
-
-    if (pm != nullptr)
-        instruments = pm->getAddedInstruments();   // already alphabetical
-
-    if (instruments.isEmpty())
-    {
-        m.addSectionHeader ("VST Plugins");
-        m.addItem (1, "None added - see Options > Plugins", false, false);
-    }
-    else
-    {
-        for (int i = 0; i < instruments.size(); ++i)
-            m.addItem (i + 1, instruments.getReference (i).name);
-    }
-
-    juce::Component::SafePointer<PluginsPage> safeThis (this);
-
-    m.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&mPickBtn),
-        [safeThis, instruments] (int result)
-        {
-            auto* self = safeThis.getComponent();
-
-            if (self == nullptr || result < 1 || result > instruments.size())
-                return;
-
-            self->selectPlugin (instruments.getReference (result - 1));
-        });
 }
 
 void PluginsPage::selectPlugin (const juce::PluginDescription& desc)
@@ -287,8 +237,6 @@ void PluginsPage::rebuildEditor()
 
     if (eng == nullptr)
     {
-        mPickBtn.setEnabled (true);
-        mPickBtn.setButtonText ("Select plugin...");
         resized();
         return;
     }
@@ -296,11 +244,7 @@ void PluginsPage::rebuildEditor()
     if (auto* h = dynamic_cast<Hosting::HostedPluginInstance*> (eng))
         mBuiltAlive = h->isAlive();
 
-    // The pick button becomes a plain name label once the tab has its plugin --
-    // see showPicker for why the swap is gone.
-    mPickBtn.setEnabled (false);
-    mPickBtn.setButtonText (getPluginName().isNotEmpty() ? getPluginName()
-                                                         : juce::String ("Select plugin..."));
+
 
     // Built DIRECTLY, not via createEditorIfNeeded: HostedPluginEditor is a
     // plain Component on purpose, because an AudioProcessorEditor of the hosted
@@ -318,30 +262,28 @@ void PluginsPage::rebuildEditor()
             auto* win = findParentComponentOfClass<WorkspaceWindow>();
             if (win == nullptr) return;
 
-            const int chromeW = 2 * kEdge;
-            const int chromeH = kPickBtnH + kPickGap + 2 * kEdge;
+            // A Plugins tab is nothing BUT a hosted plugin, so its window is
+            // never a resize handle -- the plugin's own magnify / drag corner
+            // is.  See WorkspaceWindow::setUserResizable.
+            win->setUserResizable (false);
 
-            // SUPPRESS THE SAVE.  This is a programmatic fit to the plugin, not
-            // a size the user chose - and WorkspaceWindow::resized() persists on
-            // every settled geometry change.  Without this, each fit overwrote
-            // the user's stored window size; while the fit was briefly
-            // oscillating it wrote a slightly smaller size every pass, so the
-            // window came back smaller on each reopen until it was barely
-            // visible.  ScopedSaveSuppress exists for exactly this ("a clamp is
-            // not a placement the user chose").
-            const WorkspaceWindow::ScopedSaveSuppress noSave;
+            const int chromeW = 2 * kEdge;
+            // Matches resized(): no picker row once the plugin is loaded, and by
+            // the time a natural size arrives it always is.
+            const int chromeH = 2 * kEdge;
+
 
             win->sizeToContent (juce::jmax (240, w + chromeW), h + chromeH);
 
-            // NO PLUGIN-DERIVED FLOOR (2026-08-11).  It used to be the plugin's
-            // size times the minimum usable SCALE, and nothing scales any more.
-            // Restoring it as the plugin's own size would be actively wrong:
-            // sizeToContent applies the floor AFTER the workspace clamp, so a
-            // plugin bigger than the workspace would force a window bigger than
-            // the workspace.  The window is free to be smaller than the plugin -
-            // it clips, and the plugin's own magnify is the control that fixes
-            // that.  0 leaves WorkspaceWindow's anti-degenerate minimum.
-            win->setResizeFloor (0, 0);
+            // QA-Layout T12: floor from the minimum usable scale, and the
+            // CHROME does not scale -- only the plugin surface does, so the
+            // picker row and edges keep their full height in the floor.
+            const float floorScale = edRaw->canScaleSurface()
+                                       ? Hosting::HostedPluginEditor::kMinUsableScale
+                                       : 1.0f;
+            win->setResizeFloor (juce::jmax (240, (int) ((float) w * floorScale) + chromeW),
+                                 (int) ((float) h * floorScale) + chromeH);
+
         };
 
         mEditor = std::move (ed);
@@ -425,9 +367,11 @@ void PluginsPage::resized()
 {
     auto b = getLocalBounds().reduced (kEdge);
 
-    mPickBtn.setBounds (b.removeFromTop (kPickBtnH).removeFromLeft (240));
-    b.removeFromTop (kPickGap);
-
+    // NO PICKER ROW (Jeff, 2026-08-11).  A Plugins tab only exists because a
+    // plugin was chosen to create it, so the button could never do anything --
+    // it was a disabled label wearing a button, eating 32px off the top of the
+    // plugin's own UI.  The plugin's NAME is in the window title strip now,
+    // which is where every other window carries its identity.
     if (mEditor != nullptr)
         mEditor->setBounds (b);
 }

@@ -1,0 +1,134 @@
+<p>An EQ that does not shift phase, at the cost of latency and pre-ringing. Worth
+it on a master, rarely worth it on a single track.</p>
+
+<div class="codeblock"><div class="codehead">- Source/DSP/EqLinearPhaseProcessor.h</div><pre><code>// EqLinearPhaseProcessor::fftSizeForMode + EQ8DSP::linearFftSize -- mode -&gt; FFT size
+int EqLinearPhaseProcessor::fftSizeForMode (int phaseMode) noexcept
+{
+    // 0 Standard, 2 HQ+ -&gt; no linear processing
+    // 1 Linear         -&gt; 2048
+    // 3 HQ Linear      -&gt; 4096
+    // 4 HQ Extended    -&gt; 512  (&quot;economical&quot; - lower latency, less precision)
+    switch (phaseMode)
+    {
+        case 1: return 2048;
+        case 3: return 4096;
+        case 4: return 512;
+        default: return 0;
+    }
+}
+
+int EQ8DSP::linearFftSize (PhaseMode mode, int precision) noexcept
+{
+    if (mode == PhaseMode::Linear)
+        return kPrecFftSizes[juce::jlimit (0, kNumLinearPrecisions - 1, precision)];
+
+    return EqLinearPhaseProcessor::fftSizeForMode ((int) mode);
+}</code></pre></div>
+<details class="fullfn"><summary>Full function &mdash; - Source/DSP/EqLinearPhaseProcessor.h</summary><pre><code>// EqLinearPhaseProcessor::rebuildIR -- zero-phase (= linear-phase) IR design
+void EqLinearPhaseProcessor::rebuildIR (const std::function&lt;float(float)&gt;&amp; magnitudeFn)
+{
+    if (mFftSize &lt;= 0 || ! magnitudeFn) return;
+    const float sr   = (float) mSampleRate;
+    const int   nyq  = mFftSize / 2;
+    const float binHz = sr / (float) mFftSize;
+    for (int k = 0; k &lt;= nyq; ++k)
+    {
+        const float f = (float) k * binHz;
+        // Clamp magnitude to a sane range to defend against pathological
+        // band setups (e.g. boosted Peaking with extreme Q at Nyquist).
+        const float mag = juce::jlimit (0.0f, 256.0f, magnitudeFn (f));
+        mIrMagBins[(size_t) k] = mag;
+    }
+}
+
+// EqLinearPhaseProcessor::process -- per-sample ring I/O + frame trigger
+void EqLinearPhaseProcessor::process (juce::dsp::AudioBlock&lt;float&gt;&amp; block)
+{
+    if (! isReady()) return;
+
+    const int numSamples = (int) block.getNumSamples();
+    const int numCh      = juce::jmin ((int) block.getNumChannels(), (int) mChannels.size());
+
+    for (int ch = 0; ch &lt; numCh; ++ch)
+    {
+        float* data = block.getChannelPointer ((size_t) ch);
+        auto&amp;  cs   = mChannels[(size_t) ch];
+
+        for (int n = 0; n &lt; numSamples; ++n)
+        {
+            // Append input sample
+            cs.inRing[(size_t) cs.inWritePos] = data[n];
+            cs.inWritePos = (cs.inWritePos + 1) % mFftSize;
+
+            // Replace input sample with delayed-and-EQd output from OLA ring
+            data[n] = cs.outRing[(size_t) cs.outReadPos];
+            // Clear after read so the next OLA accumulation lands on zero
+            cs.outRing[(size_t) cs.outReadPos] = 0.0f;
+            cs.outReadPos = (cs.outReadPos + 1) % mFftSize;
+
+            // Fire a frame every mHop samples
+            ++cs.samplesSinceFrame;
+            if (cs.samplesSinceFrame &gt;= mHop)
+            {
+                cs.samplesSinceFrame = 0;
+                processFrame (ch);
+            }
+        }
+    }
+}
+
+// EqLinearPhaseProcessor::processFrame -- windowed spectral convolution
+void EqLinearPhaseProcessor::processFrame (int channelIndex)
+{
+    auto&amp; cs = mChannels[(size_t) channelIndex];
+
+    // The most recent N samples are precisely the entire ring, in order
+    // [inWritePos, inWritePos+1, ..., inWritePos+N-1] (mod N).
+    for (int i = 0; i &lt; mFftSize; ++i)
+    {
+        const int srcIdx = (cs.inWritePos + i) % mFftSize;
+        const float winSample = cs.inRing[(size_t) srcIdx] * mWindow[(size_t) i];
+        mFftScratch[(size_t) i] = juce::dsp::Complex&lt;float&gt; (winSample, 0.0f);
+    }
+
+    // Forward FFT in place
+    mFft-&gt;perform (mFftScratch.data(), mFftScratch.data(), false);
+
+    // Multiply each bin by IR magnitude (real). Bin k mirrors to bin N-k for
+    // a real-valued signal, but juce::dsp::FFT gives the full N-bin output;
+    // we apply the magnitude symmetrically so the inverse stays real.
+    const int nyq = mFftSize / 2;
+    for (int k = 0; k &lt;= nyq; ++k)
+    {
+        const float mag = mIrMagBins[(size_t) k];
+        mFftScratch[(size_t) k] = mFftScratch[(size_t) k] * mag;
+        if (k &gt; 0 &amp;&amp; k &lt; nyq)
+        {
+            const int mirror = mFftSize - k;
+            mFftScratch[(size_t) mirror] = mFftScratch[(size_t) mirror] * mag;
+        }
+    }
+
+    // Inverse FFT in place
+    mFft-&gt;perform (mFftScratch.data(), mFftScratch.data(), true);
+
+    // Apply synthesis window + OLA-add into the output ring at the write head.
+    // Write head wraps modulo N. After the frame we advance it by mHop so the
+    // next frame&#x27;s window overlaps with this one&#x27;s second half.
+    int writeIdx = cs.outWritePos;
+    for (int i = 0; i &lt; mFftSize; ++i)
+    {
+        const float synth = mFftScratch[(size_t) i].real() * mWindow[(size_t) i] * mNormScale;
+        cs.outRing[(size_t) writeIdx] += synth;
+        writeIdx = (writeIdx + 1) % mFftSize;
+    }
+    cs.outWritePos = (cs.outWritePos + mHop) % mFftSize;
+}</code></pre></details>
+<pre class="formulas">- Topology: 50%-overlap-add Hann-windowed short-time Fourier convolution (windowed-spectrum processor). Hop = N/2; both analysis AND synthesis apply the Hann window `w[i] = 0.5 - 0.5*cos(2*pi*i/N)`.
+- Phase modes -&gt; FFT size N: Standard (0) and HQ Plus (2) = 0 (no linear path); Linear (1) = the Linear Phase Precision pick from `kPrecFftSizes = { 256, 512, 1024, 2048, 4096 }` (default index 3 = 2048); HQ Linear (3) = 4096 pinned; HQ Extended (4) = 512 pinned (&quot;economical&quot; low-latency variant). HQ Plus and HQ Linear also force anti-cramping (2x oversampling) on, and when AC is active the design rate is `2*sr`.
+- IR design: zero-phase = linear-phase. `mIrMagBins[k] = clamp(magnitudeFn(k * sr/N), 0, 256)` for k = 0..N/2 — real magnitudes, no phase term. The magnitude callback is `EQ8DSP::magnitudeForFrequencyStatic`, which uses the STATIC design gain per band (dynamic-EQ GR excluded per T2b option C); per-band M/S is restricted to Stereo in linear modes (T2a option B).
+- Spectral multiply is applied symmetrically (`bin k` and `bin N-k` for 0 &lt; k &lt; N/2) so the IFFT output stays real.
+- OLA reconstruction scale: with Hann^2 at 50% overlap, overlap-summed window-squared per output sample = `sumW2 / hop`; `mNormScale = 1 / (sumW2/hop)` restores unity pass-through when all IR mags are 1.
+- Latency = N/2 samples (Hann-window centroid): the output write head is initialized `hop` ahead of the read head. Reported via `getLatencySamples()`, summed through EQ8DSP (plus AC oversampler latency) -&gt; EQ8MsDSP (mid + side) -&gt; BaySickGraph::updateBusLatencies into host PDC.
+- Mode-change click masking (T2c): output fade length = `min(latencyDelta, 4096)` samples (minimum 256) armed on every AC or phase-mode change.
+- Frame rate = sr/hop per channel (e.g. N=2048 @ 48 kHz -&gt; 47 frames/s/ch; N=4096 -&gt; 23).</pre>

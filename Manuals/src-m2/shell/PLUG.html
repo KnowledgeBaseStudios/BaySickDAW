@@ -1,0 +1,32 @@
+<p>The Plugins dialog (<code>Options &gt; Plugins...</code>) - how
+third-party VST3s get into the app. Three numbered steps, top to bottom.</p>
+
+<figure data-views="PLUG">
+
+<p id="PLUG-1"><b>Filter</b> narrows every list below by name or
+manufacturer.</p>
+
+<p id="PLUG-2"><b>1. Scan folders</b> - where the scan looks.
+<span id="PLUG-3"></span><b>Add Folder... / Remove / Reset to
+Defaults</b> manage the list; the defaults cover the standard VST3
+locations.</p>
+
+<p id="PLUG-4"><b>2. Added plugins</b> - what the app already knows:
+<code>Name</code> / <code>Kind</code> / <code>Manufacturer</code> /
+<code>File</code>. <code>Kind</code> matters: an <code>Instrument</code>
+appears in the ribbon's VSTPlugin list, an <code>Effect</code> in the rack
+picker's. <span id="PLUG-5"></span><b>Remove Selected</b> forgets one.</p>
+
+<p id="PLUG-7"><b>Scan</b> searches the folders - out of process, so a
+plugin that crashes while being probed cannot take the app down.
+While it runs the button reads
+<code>Cancel Scan</code> and a progress bar tracks it.</p>
+
+<p id="PLUG-6"><b>3. Scan results</b> - what the scan found:
+<code>Name</code> / <code>Kind</code> / <code>File</code>, with the
+last column doubling as the reason a plugin was skipped.
+<span id="PLUG-9"></span><b>The checkbox</b> in the first column is the
+decision - tick what you want (skipped rows have no box), and
+<span id="PLUG-8"></span><b>Add Checked</b> - which counts your ticks in
+its label, <code>Add Checked (N)</code> - moves them into the Added
+list.</p>

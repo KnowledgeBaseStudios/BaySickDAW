@@ -1,0 +1,117 @@
+<p>The built-in shifting methods.</p>
+
+<div class="codeblock"><div class="codehead">- Source\DSP\PitchShifters.h (214 lines, header-only)</div><pre><code>// CepstralFormantEngine::processFrame() -- envelope replacement core
+        // Target envelope: dry&#x27;s (preserve) or wet&#x27;s own (throat-only),
+        // frequency-scaled by the throat ratio.
+        const float scale = std::pow (2.0f, -throatSemis / 12.0f);   // sample source bin = k*scale
+        auto&amp; srcEnv = preserve ? mEnvDry : mEnvWet;
+        for (int k = 0; k &lt;= kSize / 2; ++k)
+        {
+            const float pos = (float) k * scale;
+            const int   k0  = (int) pos;
+            float target;
+            if (k0 + 1 &lt;= kSize / 2)
+            {
+                const float fr = pos - (float) k0;
+                target = srcEnv[(size_t) k0] * (1.0f - fr) + srcEnv[(size_t) k0 + 1] * fr;
+            }
+            else
+                target = srcEnv[(size_t) (kSize / 2)];
+
+            // Correction in the log domain, clamped +/-24 dB per bin so a
+            // near-silent envelope can&#x27;t blow the frame up.
+            const float corr = juce::jlimit (-2.7631f, 2.7631f, target - mEnvWet[(size_t) k]);
+            const float g    = std::exp (corr);
+            mSpecWet[(size_t) k] *= g;
+            if (k &gt; 0 &amp;&amp; k &lt; kSize / 2)
+                mSpecWet[(size_t) (kSize - k)] = std::conj (mSpecWet[(size_t) k]);
+        }</code></pre></div>
+<details class="fullfn"><summary>Full function &mdash; - Source\DSP\PitchShifters.h (214 lines, header-only)</summary><pre><code>// CepstralFormantEngine::processFrame()
+    void processFrame (bool preserve, float throatSemis) noexcept
+    {
+        // Windowed frames end at the current input head.
+        const juce::int64 frameStart = mInAbs - kSize;
+        for (int i = 0; i &lt; kSize; ++i)
+        {
+            const size_t src = (size_t) ((frameStart + i) % kSize);
+            mFrameWet[(size_t) i] = { mWetRing[src] * mWindow[(size_t) i], 0.0f };
+            if (preserve)
+                mFrameDry[(size_t) i] = { mDryRing[src] * mWindow[(size_t) i], 0.0f };
+        }
+        mFFT-&gt;perform (mFrameWet.data(), mSpecWet.data(), false);
+        if (preserve)
+            mFFT-&gt;perform (mFrameDry.data(), mSpecDry.data(), false);
+
+        // Log-magnitude envelopes via cepstral lifter.
+        computeEnvelope (mSpecWet, mEnvWet);
+        if (preserve)
+            computeEnvelope (mSpecDry, mEnvDry);
+
+        // Target envelope: dry&#x27;s (preserve) or wet&#x27;s own (throat-only),
+        // frequency-scaled by the throat ratio.
+        const float scale = std::pow (2.0f, -throatSemis / 12.0f);   // sample source bin = k*scale
+        auto&amp; srcEnv = preserve ? mEnvDry : mEnvWet;
+        for (int k = 0; k &lt;= kSize / 2; ++k)
+        {
+            const float pos = (float) k * scale;
+            const int   k0  = (int) pos;
+            float target;
+            if (k0 + 1 &lt;= kSize / 2)
+            {
+                const float fr = pos - (float) k0;
+                target = srcEnv[(size_t) k0] * (1.0f - fr) + srcEnv[(size_t) k0 + 1] * fr;
+            }
+            else
+                target = srcEnv[(size_t) (kSize / 2)];
+
+            // Correction in the log domain, clamped +/-24 dB per bin so a
+            // near-silent envelope can&#x27;t blow the frame up.
+            const float corr = juce::jlimit (-2.7631f, 2.7631f, target - mEnvWet[(size_t) k]);
+            const float g    = std::exp (corr);
+            mSpecWet[(size_t) k] *= g;
+            if (k &gt; 0 &amp;&amp; k &lt; kSize / 2)
+                mSpecWet[(size_t) (kSize - k)] = std::conj (mSpecWet[(size_t) k]);
+        }
+
+        mFFT-&gt;perform (mSpecWet.data(), mFrameWet.data(), true);
+
+        // Hann synthesis window + (8/3)*Hs/N OLA normalization (PhaseVocoder
+        // convention: window applied twice, 75% overlap).
+        const float olaScale = (8.0f / 3.0f) * (float) kHop / (float) kSize;
+        const int olaSize = (int) mOla.size();
+        for (int i = 0; i &lt; kSize; ++i)
+        {
+            const size_t idx = (size_t) ((mOlaWriteAbs + i) % (juce::int64) olaSize);
+            mOla[idx] += mFrameWet[(size_t) i].real() * mWindow[(size_t) i] * olaScale;
+        }
+        mOlaWriteAbs += kHop;
+    }
+
+// CepstralFormantEngine::computeEnvelope()
+    void computeEnvelope (const std::array&lt;juce::dsp::Complex&lt;float&gt;, kSize&gt;&amp; spec,
+                          std::array&lt;float, kSize / 2 + 1&gt;&amp; env) noexcept
+    {
+        for (int k = 0; k &lt; kSize; ++k)
+        {
+            const float m = std::abs (spec[(size_t) k]);
+            mCepIn[(size_t) k] = { std::log (juce::jmax (m, 1.0e-9f)), 0.0f };
+        }
+        mFFT-&gt;perform (mCepIn.data(), mCepOut.data(), true);   // -&gt; quefrency
+        for (int q = 0; q &lt; kSize; ++q)
+        {
+            const bool keep = (q &lt;= mLifterBins) || (q &gt;= kSize - mLifterBins);
+            if (! keep) mCepOut[(size_t) q] = { 0.0f, 0.0f };
+        }
+        mFFT-&gt;perform (mCepOut.data(), mCepIn.data(), false);  // -&gt; log-spectral envelope
+        for (int k = 0; k &lt;= kSize / 2; ++k)
+            env[(size_t) k] = mCepIn[(size_t) k].real();
+    }</code></pre></details>
+<pre class="formulas">- STFT geometry: `kOrder = 9` -&gt; FFT `kSize = 512`, hop `kHop = 128` (75% overlap), Hann analysis + synthesis windows, OLA scale `(8/3)*Hs/N` (PhaseVocoder convention).
+- Latency: `2*kSize - kHop = 896` samples (~20 ms @ 44.1k) on top of the upstream shifter; opt-in path only.
+- Cepstral lifter cutoff: `mLifterBins = clamp(round(sr * 0.001), 8, kSize/4)` - ~1 ms quefrency, below the shortest vocal pitch period (~2 ms at a 500 Hz soprano) so harmonics never leak into the envelope. Default member init 44.
+- Envelope: log-magnitude (floor 1e-9) -&gt; IFFT to quefrency -&gt; keep `q &lt;= lifterBins` or `q &gt;= kSize - lifterBins` -&gt; FFT back.
+- Throat frequency-axis scale: source bin = `k * 2^(-throatSemis/12)`, linear-interpolated.
+- Per-bin correction clamp: `+/-2.7631` in log domain = +/-24 dB (`20*log10(e^2.7631) ~= 24 dB`); gain `g = exp(corr)`.
+- OLA ring: `kSize * 3` floats - peak occupancy is write-frontier + kSize minus the settle-lagged read head = exactly `2*kSize`; 3x leaves margin. Settled-output rule: deliver when `mOutReadAbs &lt; mOlaWriteAbs - (kSize - kHop)`; clear-after-read.
+- Frame cadence: fires when `mInAbs &gt;= kSize &amp;&amp; (mInAbs % kHop) == 0`.
+- `formantShiftMono` no-op gate: `|throatSemis| &lt; 0.01`.</pre>

@@ -80,6 +80,9 @@ public:
     // design: switching strips here leaves already-open windows alone.
     std::function<void(int channelId, int slotIndex)> onOpenSlotPanel;
     std::function<void(int channelId, bool pre)>      onOpenEqWindow;
+
+    // Opens the master VU meter window (rack menu, next to VU Calibration).
+    std::function<void()>                             onOpenVuMeter;
     // A slot's contents changed (loaded / cleared / moved / undone), so any
     // open window on that strip must re-check what it is showing.  The windows
     // also poll for this; the callback is the immediate path, not the only one.

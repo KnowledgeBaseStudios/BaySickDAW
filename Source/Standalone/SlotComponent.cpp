@@ -512,18 +512,23 @@ void SlotComponent::paint(juce::Graphics& g)
                                         nameW, mBypassRect.getHeight()),
                    juce::Justification::centredLeft);
 
-        // Navigation glyphs
-        g.setFont(juce::Font(14.0f));
-        g.setColour(VC::TextDim);
-        g.drawText(juce::String::fromUTF8("\xe2\x96\xb2"),  // UTF-8 for ▲
-                   mUpRect,   juce::Justification::centred);
-        g.drawText(juce::String::fromUTF8("\xe2\x96\xbc"),  // UTF-8 for ▼
-                   mDownRect, juce::Justification::centred);
+        // Navigation glyphs.  A locked slot (the Vocal Chain) can't reorder or
+        // close, and nothing hit-tests these rects - painting them there was
+        // dead decoration promising gestures that don't exist (Jeff, 2026-08-13).
+        if (! mLocked)
+        {
+            g.setFont(juce::Font(14.0f));
+            g.setColour(VC::TextDim);
+            g.drawText(juce::String::fromUTF8("\xe2\x96\xb2"),  // UTF-8 for ▲
+                       mUpRect,   juce::Justification::centred);
+            g.drawText(juce::String::fromUTF8("\xe2\x96\xbc"),  // UTF-8 for ▼
+                       mDownRect, juce::Justification::centred);
 
-        // Close glyph (reddish)
-        g.setColour(juce::Colour(0xffcc4444));
-        g.drawText(juce::String::fromUTF8("\xc3\x97"),      // UTF-8 for ×
-                   mCloseRect, juce::Justification::centred);
+            // Close glyph (reddish)
+            g.setColour(juce::Colour(0xffcc4444));
+            g.drawText(juce::String::fromUTF8("\xc3\x97"),      // UTF-8 for ×
+                       mCloseRect, juce::Justification::centred);
+        }
     }
 }
 
@@ -611,7 +616,7 @@ void SlotComponent::resized()
 {
     if (mPresentation == Presentation::PanelOnly)
     {
-        if (mEditor) mEditor->setBounds (getLocalBounds().reduced (kPanelOnlyInset));
+        if (mEditor) mEditor->setBounds (getLocalBounds().reduced (2));
         return;
     }
 
@@ -959,16 +964,21 @@ void SlotComponent::showModeMenu()
         if (auto* c = dynamic_cast<CompressorDSP*>(mRack->getSlotEffect(mSlotIndex)))
             currentPick = (int) c->mType;
         // I-4 (2026-05-02): friendly Mode-menu labels with parenthetical
-        // descriptors per locked spec (option B).  CS Style is the new
-        // 4th Type alongside Modern/FET/Opto.
+        // descriptors per locked spec (option B).  Pedal is the 4th Type
+        // alongside Modern/FET/Opto.
         m.addItem(1 + (int) CompressorDSP::Type::Modern, "Modern",            true,
                   currentPick == (int) CompressorDSP::Type::Modern);
         m.addItem(1 + (int) CompressorDSP::Type::FET,    "FET (Punchy)",      true,
                   currentPick == (int) CompressorDSP::Type::FET);
         m.addItem(1 + (int) CompressorDSP::Type::Opto,   "Opto (Smooth)",     true,
                   currentPick == (int) CompressorDSP::Type::Opto);
-        m.addItem(1 + (int) CompressorDSP::Type::CS,     "Pedal (Sustain)",   true,
-                  currentPick == (int) CompressorDSP::Type::CS);
+        // Vocal Chain does not get Pedal (Jeff, 2026-08-11).  A pedal sustainer
+        // is not a vocal-chain compressor, and the chain's bsv_comp_type spans
+        // Modern/FET/Opto only -- offering it here mounted its panel and let
+        // applyChainParams override the DSP back on the next audio block.
+        if (! mVocalChainSlot)
+            m.addItem(1 + (int) CompressorDSP::Type::CS, "Pedal (Sustain)",   true,
+                      currentPick == (int) CompressorDSP::Type::CS);
     }
     else if (slot.type == EffectType::Saturation)
     {

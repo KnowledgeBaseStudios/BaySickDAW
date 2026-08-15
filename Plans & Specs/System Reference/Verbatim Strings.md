@@ -258,7 +258,6 @@ Help menu (`StandaloneEditor.cpp:11783-11791`), in order:
 
     "Help Index  (F1)"            id 601   <- TWO spaces before the parenthesis
     "Key Binds..."                id 603
-    "Rusty Drums Map..."          id 604
     ---- separator ----
     "About BaySickDAW v1.0"       id 602
 

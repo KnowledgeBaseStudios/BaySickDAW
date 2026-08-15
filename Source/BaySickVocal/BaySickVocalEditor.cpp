@@ -242,64 +242,98 @@ public:
     {
         g.fillAll (juce::Colour (0xff14161a));
 
-        // Top half / bottom half divider line
-        const int half = getHeight() / 2;
+        // THE SPLIT COMES FROM resized() (Jeff, 2026-08-11).  paint() used to
+        // divide at getHeight()/2 while resized() divided elsewhere, so the
+        // caption landed on top of the Root / Scale row.  One layout, computed
+        // once, read by both.
         g.setColour (juce::Colours::white.withAlpha (0.08f));
-        g.drawHorizontalLine (half, 0.0f, (float) getWidth());
+        g.drawHorizontalLine (mSplitY, 0.0f, (float) getWidth());
 
-        // Bottom-half caption preserved -- this is descriptive of the
-        // section's contents (realtime correction widgets), not an engine
-        // title, so it stays as a g.drawText caption for now.
+        // Descriptive of the section's contents rather than an engine title, so
+        // it stays a drawn caption.
         g.setColour (juce::Colours::white.withAlpha (0.5f));
         g.setFont (juce::Font (12.0f, juce::Font::bold));
-        g.drawText ("REALTIME PITCH CORRECTION", juce::Rectangle<int> (16, half + 4, 280, 18),
+        g.drawText ("REALTIME PITCH CORRECTION",
+                    juce::Rectangle<int> (12, mSplitY + 3, getWidth() - 24, 14),
                     juce::Justification::centredLeft);
     }
 
     void resized() override
     {
-        // QA-Layout T4: the internal title bar is gone -- content starts at 0.
-        const int half = getHeight() / 2;
-        auto top = getLocalBounds().removeFromTop (half).reduced (16, 8);
-        auto bot = getLocalBounds().withTrimmedTop (half).reduced (16, 24);
+        // Laid out FROM the panel size (Jeff, 2026-08-11).  This used to be a
+        // fixed pixel run that needed ~900px of width and 90px knobs; in a
+        // 519x351 window the right-hand half simply fell off the edge and the
+        // Mix knob was enormous because it was sized for a window three times
+        // as wide.  Everything below derives from getWidth()/getHeight().
+        auto all = getLocalBounds().reduced (10, 6);
 
-        // Top half: Mix knob | A/B combo (QA-Fd: Bypass slot removed)
-        const int btnH = 28;
-        mMixLbl     .setBounds (top.getX(), top.getY(), 90, 16);
-        mMixSlider  .setBounds (top.getX(), top.getY() + 16, 90, 90);
-        top.removeFromLeft (102);
+        const int btnH  = 26;
+        const int lblH  = 15;
 
-        mABSlot     .setBounds (top.removeFromLeft (80).withSizeKeepingCentre (72, btnH));
+        // ── Top band: Mix knob + A/B slot ───────────────────────────────────
+        auto top = all.removeFromTop (juce::jmax (74, all.getHeight() / 3));
+        mSplitY = top.getBottom() + 2;   // published for paint()
+        const int mixK = juce::jlimit (44, 64, top.getHeight() - lblH - 4);
 
-        // Bottom half: row of pitch correction controls
-        // Layout: [Pitch Bypass] [Key] [Scale] [Retune] [Strength] [Humanize] [Throat] [Formant] [Pitch readout]
-        const int ctrlW = 96;
-        const int rowY  = bot.getY() + 16;
+        mMixLbl   .setBounds (top.getX(), top.getY(), mixK, lblH);
+        mMixSlider.setBounds (top.getX(), top.getY() + lblH, mixK, mixK);
 
-        mPitchBypassBtn.setBounds (bot.getX(),                  rowY + 30, 130, btnH);
-        mKeyLbl        .setBounds (bot.getX() + 142,            rowY,      80,  16);
-        mKeyCombo      .setBounds (bot.getX() + 142,            rowY + 18, 80,  btnH);
-        mScaleLbl      .setBounds (bot.getX() + 230,            rowY,      130, 16);
-        mScaleCombo    .setBounds (bot.getX() + 230,            rowY + 18, 130, btnH);
+        mABSlot.setBounds (top.getX() + mixK + 14,
+                           top.getY() + lblH + (mixK - btnH) / 2, 66, btnH);
 
-        const int knobsX = bot.getX() + 372;
-        const int knobY  = rowY;
-        mRetuneSpeedLbl.setBounds (knobsX,             knobY,      ctrlW, 16);
-        mRetuneSpeed   .setBounds (knobsX,             knobY + 16, ctrlW, 90);
-        mStrengthLbl   .setBounds (knobsX + ctrlW,     knobY,      ctrlW, 16);
-        mStrength      .setBounds (knobsX + ctrlW,     knobY + 16, ctrlW, 90);
-        mHumanizeLbl   .setBounds (knobsX + ctrlW * 2, knobY,      ctrlW, 16);
-        mHumanize      .setBounds (knobsX + ctrlW * 2, knobY + 16, ctrlW, 90);
-        mThroatShiftLbl.setBounds (knobsX + ctrlW * 3, knobY,      ctrlW, 16);
-        mThroatShift   .setBounds (knobsX + ctrlW * 3, knobY + 16, ctrlW, 90);
+        all.removeFromTop (4);
 
-        mFormantBtn    .setBounds (knobsX + ctrlW * 4, knobY + 30, 140, btnH);
+        // ── Bottom band: realtime pitch correction ──────────────────────────
+        auto bot = all;
+        mPitchRefLbl.setBounds (bot.removeFromBottom (18));
+        bot.removeFromTop (20);   // the REALTIME PITCH CORRECTION caption band
 
-        // Live pitch readout pinned at bottom
-        mPitchRefLbl   .setBounds (bot.removeFromBottom (28));
+        auto row1 = bot.removeFromTop (btnH + lblH);
+        {
+            auto r = row1;
+            mPitchBypassBtn.setBounds (r.removeFromLeft (124)
+                                        .withSizeKeepingCentre (124, btnH));
+            r.removeFromLeft (8);
+            auto keyCol = r.removeFromLeft (62);
+            mKeyLbl  .setBounds (keyCol.removeFromTop (lblH));
+            mKeyCombo.setBounds (keyCol.removeFromTop (btnH));
+            r.removeFromLeft (8);
+            auto scaleCol = r.removeFromLeft (juce::jmin (132, r.getWidth()));
+            mScaleLbl  .setBounds (scaleCol.removeFromTop (lblH));
+            mScaleCombo.setBounds (scaleCol.removeFromTop (btnH));
+        }
+
+        bot.removeFromTop (6);
+
+        // Four knobs + the formant toggle share the last row.  Knob width comes
+        // from what is actually left, so a narrower window shrinks them instead
+        // of pushing the last one off the edge.
+        auto knobRow = bot;
+        const int formantW = 108;
+        const int slotW    = juce::jmax (46, (knobRow.getWidth() - formantW - 8) / 4);
+        const int knobK    = juce::jlimit (36, 58, knobRow.getHeight() - lblH - 2);
+
+        auto placeKnob = [&] (juce::Slider& k, juce::Label& l)
+        {
+            auto col = knobRow.removeFromLeft (slotW);
+            l.setBounds (col.getX(), col.getY(), slotW, lblH);
+            k.setBounds (col.getX() + (slotW - knobK) / 2, col.getY() + lblH, knobK, knobK);
+        };
+        placeKnob (mRetuneSpeed, mRetuneSpeedLbl);
+        placeKnob (mStrength,    mStrengthLbl);
+        placeKnob (mHumanize,    mHumanizeLbl);
+        placeKnob (mThroatShift, mThroatShiftLbl);
+
+        knobRow.removeFromLeft (8);
+        mFormantBtn.setBounds (knobRow.removeFromLeft (juce::jmin (formantW, knobRow.getWidth()))
+                                      .withSizeKeepingCentre (formantW, btnH));
     }
 
 private:
+    // Where the page-controls band ends and the realtime-pitch section begins.
+    // Computed in resized(), drawn by paint() -- see the note there.
+    int mSplitY { 0 };
+
     void timerCallback() override
     {
         // Realtime board locks while THIS strip captures a take (owner call
@@ -401,6 +435,7 @@ public:
             auto sc = std::make_unique<SlotComponent> (i);
             sc->setRack (&mProc.mVocalChainRack);
             sc->setLocked (true);
+            sc->setVocalChainSlot (true);   // omits Compressor's Pedal mode
 
             mountSlotEditor (*sc, i);
 

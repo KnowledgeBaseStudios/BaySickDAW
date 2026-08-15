@@ -1,0 +1,79 @@
+<p>Every engine shapes its notes with the same four-stage idea: attack (rise
+to full), decay (fall to the held level), sustain (the held level itself),
+release (the fade after note-off). BaySickSynth and BaySickBass run one ADSR
+on volume, one on the filter and one on pitch per voice; BaySickPlayer runs
+its amp envelope over the sample; Harmless adds phase-start control on top of
+its ADSR. The engines differ in their DEFAULTS, not the mechanism - the bass
+ships snappier than the synth on both amp and filter envelopes, which is most
+of why it reads as a bass. Envelope stages are recalculated per voice at note
+start, and the Harmless filter envelopes advance per SAMPLE rather than per
+block, which is why fast Harmless sweeps stay smooth at any buffer size.</p>
+
+<div class="codeblock"><div class="codehead">Source\AdsrEnvelope.cpp (the ADSR used by BaySickSynth/BaySickBass voices: mAmpEnv, mFltEnv, mPitchEnv in BaySickSynthVoice)</div><pre><code>// AdsrEnvelope::getNextSample() -- Source/AdsrEnvelope.cpp
+float AdsrEnvelope::getNextSample()
+{
+    switch (mStage)
+    {
+        case Stage::Attack:
+            mLevel += mAttackCoef * (1.01f - mLevel);
+            if (mLevel &gt;= 1.0f) { mLevel = 1.0f; mStage = Stage::Decay; }
+            break;
+
+        case Stage::Decay:
+            mLevel += mDecayCoef * (mSustain - 1.01f - mLevel);
+            if (mLevel &lt;= mSustain) { mLevel = mSustain; mStage = Stage::Sustain; }
+            break;
+
+        case Stage::Sustain:
+            mLevel = mSustain;
+            break;
+
+        case Stage::Release:
+            mLevel += mReleaseCoef * (0.0f - 1.01f - mLevel);
+            if (mLevel &lt;= 0.0001f) { mLevel = 0.0f; mStage = Stage::Idle; }
+            break;
+
+        case Stage::Idle:
+        default:
+            mLevel = 0.0f;
+            break;
+    }
+    return mLevel;
+}</code></pre></div>
+<details class="fullfn"><summary>Full function &mdash; Source\AdsrEnvelope.cpp (the ADSR used by BaySickSynth/BaySickBass voices: mAmpEnv, mFltEnv, mPitchEnv in BaySickSynthVoice)</summary><pre><code>// AdsrEnvelope::setParameters / calcCoef / noteOn / noteOff -- Source/AdsrEnvelope.cpp
+void AdsrEnvelope::setParameters (float attackSec, float decaySec, float sustain, float releaseSec)
+{
+    mAttack       = attackSec;
+    mDecay        = decaySec;
+    mSustain      = juce::jlimit (0.0f, 1.0f, sustain);
+    mRelease      = releaseSec;
+    mAttackCoef   = calcCoef (attackSec,  mSampleRate);
+    mDecayCoef    = calcCoef (decaySec,   mSampleRate);
+    mReleaseCoef  = calcCoef (releaseSec, mSampleRate);
+}
+
+void AdsrEnvelope::noteOn()
+{
+    mStage = Stage::Attack;
+}
+
+void AdsrEnvelope::noteOff()
+{
+    if (mStage != Stage::Idle)
+        mStage = Stage::Release;
+}
+
+float AdsrEnvelope::calcCoef (float timeSec, double sampleRate)
+{
+    if (timeSec &lt;= 0.0f) return 1.0f;
+    return static_cast&lt;float&gt; (1.0 - std::exp (-1.0 / (timeSec * sampleRate)));
+}</code></pre></details>
+<pre class="formulas">- One-pole coefficient: `coef = 1 - exp(-1 / (timeSec * sampleRate))`; `timeSec &lt;= 0` gives `coef = 1` (instant).
+- Attack: `level += attackCoef * (1.01 - level)` -- target overshoots to 1.01 so the exponential actually reaches 1.0 and hands off to Decay.
+- Decay: `level += decayCoef * (sustain - 1.01 - level)` -- undershoot target `sustain - 1.01` guarantees crossing `sustain`.
+- Release: `level += releaseCoef * (0.0 - 1.01 - level)` -- undershoot target -1.01; voice retires when `level &lt;= 0.0001`.
+- Sustain: `level = sustain` held every sample.
+- Amp/filter/pitch envelopes in BaySickSynth all call `getNextSample()` once per sample inside `BaySickSynthVoice::renderNextBlock` (stages advance per sample).
+- Harmless: `juce::ADSR` filter envelopes advance one sample per sample; the derived filter cutoff is only re-applied on a 2 kHz control tick (`mFltCtrlInterval = round(sampleRate / 2000)` samples), so a 5 ms filter attack still resolves into ~10 cutoff steps.
+- Per-note release scale (CC72, both engines): `release = max(0.001, baseRelease * relScale)` where `relScale = 2^((cc/127 - 0.5) * 4)` (0.25x..4x).</pre>
+<p class="behind"><b>Behind:</b> <a href="manual-2.html#BSHARM-16">AMP ENV / PHASE</a>, <a href="manual-2.html#BSSBOENV-1">AMP ENV group</a>, <a href="manual-2.html#BSSBOENV-2">Amp VEL</a>, <a href="manual-2.html#BSSBOENV-3">PITCH ENV group</a>, <a href="manual-2.html#BSSBOENV-4">Pitch AMOUNT</a>, <a href="manual-2.html#BSSBFENV-1">ATTACK / DECAY / SUSTAIN / RELEASE sliders</a>, <a href="manual-2.html#BSSBFENV-2">AMOU... / AMOUNT</a>.</p>

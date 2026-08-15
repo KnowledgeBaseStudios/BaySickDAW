@@ -1,0 +1,80 @@
+<p>The Mixer is where everything meets: every tab and bus in the project as
+a vertical strip, the Master pinned at the left, and the routing between
+them drawn as actual cables underneath. Every strip has the same anatomy,
+so learn one and you have learned them all.</p>
+
+<figure data-cluster="Headers and buses|1,2,3">
+
+<p id="MIX-1"><b>Add</b> creates a new strip - an aux (a free strip for
+shared effects) or one of the group buses.
+<span id="MIX-2"></span><b>The strip header</b> names the channel, with
+its accent color as the top rule - the same color its tab and windows
+carry, so you can find a channel by color alone.
+<span id="MIX-3"></span>On Bus strips, <b>the collapse triangle</b> folds
+that bus's member channels away to save space (greyed while the bus is
+empty).</p>
+
+<figure data-cluster="Mute, solo, and the rack|4,5,6,7,8">
+
+<p id="MIX-4"><b>M</b> mutes the strip - silences it.
+<span id="MIX-5"></span><b>S</b> solos it - silences everything ELSE,
+the fastest way to hear one channel alone. Both are per-strip and
+stackable: solo two strips and you hear just those two.</p>
+
+<p id="MIX-6"><b>FX Rack</b> opens this channel's six-slot effects rack,
+and <span id="MIX-7"></span><b>FX Bypass</b> switches the whole rack out
+while keeping every slot's settings - the honest before/after of "what
+are my effects actually doing." <span id="MIX-8"></span>The Master strip
+has its own <b>Master FX Bypass</b> for the master rack - the whole-mix
+version of the same question.</p>
+
+<figure data-cluster="Pan, width, polarity|9,10,11,12">
+
+<p id="MIX-9"><b>Pan</b> places the strip left-to-right in the stereo
+picture. <span id="MIX-10"></span><b>Width</b> narrows or widens its
+stereo image - fully narrow collapses it to mono (which is how you check
+whether a sound survives on a phone speaker), wide pushes it beyond
+natural.</p>
+
+<p id="MIX-11"><b>The polarity toggle</b> (<code>Standard</code> /
+<code>Reverse</code>) flips the waveform upside down. Alone it is
+inaudible. It matters when two related signals play together and hollow
+each other out - flip one, and if the sound suddenly fills back in, you
+found the problem. (Pan law - how loudness behaves across a pan sweep -
+is a global choice in the window Menu, not a strip control.)</p>
+
+<p id="MIX-12"><b>The Master's metering dropdown</b> picks what the
+master meter reads - <code>Integrated</code>, <code>Momentary</code> and
+the rest of the loudness family covered on the Analyzer's page.</p>
+
+<figure data-cluster="Fader and meter|13,14,15,16">
+
+<p id="MIX-13"><b>The fader</b> is the channel's level - the mixing
+control - riding a <span id="MIX-14"></span><b>dB scale</b> where 0 is
+"as recorded," positive is louder, and every 6 dB down is roughly half.
+<span id="MIX-15"></span><b>The meter</b> beside it reads what actually
+leaves the strip: peak bars below for the instantaneous level, and - on
+every strip but Master - a scrolling history band above showing the last
+few seconds' shape, so a spike that already happened is still visible.
+<span id="MIX-16"></span><b>The readout</b> prints the fader's exact
+dB.</p>
+
+<figure data-cluster="Routing|17,18">
+
+<p><b>The jack</b> at each strip's foot is where routing
+cables land - a marker, not a button.
+<span id="MIX-17"></span><b>The <code>+</code></b> beside it opens that
+strip's routing menu - sends, sidechains, outputs - covered on the Send
+Menu page. (On Master, the <code>+</code> opens
+<span id="MIX-18"></span><b>the Analyzer</b> instead.)</p>
+
+<p><b>The cables</b> draw every route in the project; the
+bright one is selected. <b>Right-click a
+cable</b> to edit it in place: a send cable gets its level slider (-60 to
++6 dB), a <code>Pre-Fader</code> switch (send the sound before the fader,
+so the echo stays when you pull the voice down) and
+<code>Delete Send</code>; sidechain cables offer <code>Delete</code>;
+an extra main-out offers <code>Remove Main Out</code>.</p>
+
+<p><b>The scrollbar</b> slides through the strips; Master
+stays pinned left so the end of the chain never leaves view.</p>

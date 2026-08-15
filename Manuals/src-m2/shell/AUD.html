@@ -1,0 +1,29 @@
+<p>Audio Settings - the connection between BaySickDAW and your hardware.</p>
+
+<figure data-views="AUD">
+
+<p id="AUD-1"><b>Audio Mode</b> - <code>Windows Audio</code> for
+plug-and-play, <code>ASIO</code> for serious low-latency work with an
+audio interface. <span id="AUD-2"></span><b>Audio Device</b> picks the
+hardware within that mode. ASIO note: recording needs the input and output
+on the SAME ASIO device name.</p>
+
+<p id="AUD-3"><b>Sample Rate</b> (<code>48000 Hz</code> is a fine
+default) and <span id="AUD-4"></span><b>Buffer Size</b> - the fundamental
+trade: small buffers mean less delay between playing and hearing but more
+CPU strain; large buffers are safe but laggy for live playing. The
+<code>DSP</code> readout on the ribbon is load as a percentage of this
+buffer window - if it runs hot, a bigger buffer buys headroom.</p>
+
+<p id="AUD-5"><b>MIDI Inputs</b> - one checkbox per detected device;
+<code>(no MIDI devices detected)</code> replaces
+the list when nothing is plugged in.
+<span id="AUD-6"></span><b>Trigger Velocity</b> - take note force
+<code>From controller</code>, or pin every note to a fixed value.</p>
+
+<p id="AUD-7"><b>Open ASIO Control Panel</b> opens the interface's own
+settings app; it lights up whenever the live device offers one.</p>
+
+<p id="AUD-8"><b>Apply</b> stages the change - it takes effect on the next
+start, which is why the dialog says so - and <b>Close</b> leaves things
+as they were.</p>

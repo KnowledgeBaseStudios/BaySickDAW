@@ -1,0 +1,155 @@
+<p>A very short modulated delay fed back on itself, producing the moving comb of
+peaks and notches. Through-zero flanging sweeps the delay through zero for the
+jet-engine effect.</p>
+
+<div class="codeblock"><div class="codehead">- Source/DSP/FlangerDSP.h</div><pre><code>// FlangerDSP::process (feedback-path core)
+// Write to delay buffer (input + feedback from previous output)
+mBufL[mWritePos] = inL + fb * mFbL;
+mBufR[mWritePos] = inR + fb * mFbR;
+
+// 4b: cubic Catmull-Rom read
+float delL = cubicReadBack (mBufL, delaySampL, mWritePos, bufSize);
+float delR = cubicReadBack (mBufR, delaySampR, mWritePos, bufSize);
+
+// 4a + C3: apply damp LP INSIDE feedback loop (before capturing feedback).
+// `dampAlpha` is the state-feedback coefficient derived from mDampHz.
+// dampAlpha ~= 0  -&gt; passthrough (cutoff &gt;= SR/2, effectively off)
+// dampAlpha -&gt; 1  -&gt; heavy LP (cutoff near 0)
+if (dampAlpha &gt; 1.0e-4f)
+{
+    mDampStateL = dampAlpha * mDampStateL + (1.0f - dampAlpha) * delL;
+    mDampStateR = dampAlpha * mDampStateR + (1.0f - dampAlpha) * delR;
+    delL = mDampStateL;
+    delR = mDampStateR;
+}
+
+// Capture feedback (post-damp, pre-invertWet so feedback doesn&#x27;t double-invert)
+mFbL = delL;
+mFbR = delR;
+
+// Optional invert wet (output only - feedback stays positive-phase via mFbL/R)
+if (invertWet) { delL = -delL; delR = -delR; }
+
+// Mix: dry + wet + cross
+if (L) L[n] = dryScale * inL + wetScale * delL + crossScale * delR;
+if (R) R[n] = dryScale * inR + wetScale * delR + crossScale * delL;</code></pre></div>
+<details class="fullfn"><summary>Full function &mdash; - Source/DSP/FlangerDSP.h</summary><pre><code>// FlangerDSP::process
+void FlangerDSP::process (juce::AudioBuffer&lt;float&gt;&amp; buffer)
+{
+    if (bypassed) return;
+
+    juce::ScopedNoDenormals noDenormals;   // A1
+
+    const int numSamples = buffer.getNumSamples();
+    const int numCh      = buffer.getNumChannels();
+
+    float* L = numCh &gt; 0 ? buffer.getWritePointer (0) : nullptr;
+    float* R = numCh &gt; 1 ? buffer.getWritePointer (1) : nullptr;
+
+    if (mBufL.empty()) return;
+
+    const float visIn = visualCaptureIn (buffer);   // T18
+
+    const int    bufSize         = (int) mBufL.size();
+    // Stereo phase offset for R channel: convert degrees to 0..1 phase fraction
+    const double stereoPhaseFrac = (double) mStereoPhase / 360.0;
+    const float  dryLin          = juce::Decibels::decibelsToGain (mDryLevelDb);
+    const float  wetLin          = juce::Decibels::decibelsToGain (mWetLevelDb);
+    const float  crossLin        = (mCrossLevelDb &gt; -90.0f)
+                                      ? juce::Decibels::decibelsToGain (mCrossLevelDb)
+                                      : 0.0f;
+    const bool   invertWet  = mInvertWet;
+    const float  fbSign     = mInvertFeedback ? -1.0f : 1.0f;
+    const float  dampAlpha  = mDampAlpha;   // C3: cached per block
+
+    for (int n = 0; n &lt; numSamples; ++n)
+    {
+        // 4c + A2/A3/A4: pull smoothed Rate/Depth/Feedback/Wet/Delay/Shape per-sample
+        const float  rate         = mRateSmooth    .getNextValue();
+        const float  depth        = mDepthSmooth   .getNextValue();
+        const float  feedback     = mFeedbackSmooth.getNextValue();
+        const float  curWet       = mWetSmooth     .getNextValue();
+        const float  curDelay     = mDelaySmooth   .getNextValue();
+        const float  curShape     = mShapeSmooth   .getNextValue();
+        const double phaseInc     = (double) rate / mSampleRate;
+        const float  sweepSamp    = (float) (depth * 0.001 * mSampleRate);
+        const float  baseDelaySamp = (float) (curDelay * 0.001 * mSampleRate);
+        const float  fb           = fbSign * feedback;
+
+        // Legacy wet/dry (0-1) blended with new dB levels:
+        // If user only uses old mWet knob, mWetLevelDb=0 and mDryLevelDb=0 -&gt; unity gains.
+        const float  wetScale   = curWet * wetLin;
+        const float  dryScale   = (1.0f - curWet) * dryLin;
+        const float  crossScale = curWet * crossLin;
+
+        // LFO evaluation with smoothed shape. F2: skip asin branch when shape ~= 0.
+        const bool useTri = curShape &gt; 1.0e-4f;
+        auto lfoVal = [useTri, curShape] (double ph) -&gt; float
+        {
+            const double twoPiPh = juce::MathConstants&lt;double&gt;::twoPi * ph;
+            const float  s = 0.5f + 0.5f * (float) std::sin (twoPiPh);
+            if (! useTri) return s;
+            const float tri = 0.5f + (float) (std::asin (std::sin (twoPiPh))
+                                              / juce::MathConstants&lt;double&gt;::pi);
+            return s * (1.0f - curShape) + tri * curShape;
+        };
+
+        // LFO for L and R channels (R has stereo phase offset)
+        const float lfoL = lfoVal (mPhase);
+        const float lfoR = lfoVal (std::fmod (mPhase + stereoPhaseFrac, 1.0));
+
+        // Compute delay times in samples: base + LFO-swept depth
+        float delaySampL = juce::jlimit (0.0f, (float) (bufSize - 2), baseDelaySamp + lfoL * sweepSamp);
+        float delaySampR = juce::jlimit (0.0f, (float) (bufSize - 2), baseDelaySamp + lfoR * sweepSamp);
+
+        const float inL = L ? L[n] : 0.0f;
+        const float inR = R ? R[n] : inL;
+
+        // Write to delay buffer (input + feedback from previous output)
+        mBufL[mWritePos] = inL + fb * mFbL;
+        mBufR[mWritePos] = inR + fb * mFbR;
+
+        // 4b: cubic Catmull-Rom read
+        float delL = cubicReadBack (mBufL, delaySampL, mWritePos, bufSize);
+        float delR = cubicReadBack (mBufR, delaySampR, mWritePos, bufSize);
+
+        // 4a + C3: apply damp LP INSIDE feedback loop (before capturing feedback).
+        // `dampAlpha` is the state-feedback coefficient derived from mDampHz.
+        // dampAlpha ~= 0  -&gt; passthrough (cutoff &gt;= SR/2, effectively off)
+        // dampAlpha -&gt; 1  -&gt; heavy LP (cutoff near 0)
+        if (dampAlpha &gt; 1.0e-4f)
+        {
+            mDampStateL = dampAlpha * mDampStateL + (1.0f - dampAlpha) * delL;
+            mDampStateR = dampAlpha * mDampStateR + (1.0f - dampAlpha) * delR;
+            delL = mDampStateL;
+            delR = mDampStateR;
+        }
+
+        // Capture feedback (post-damp, pre-invertWet so feedback doesn&#x27;t double-invert)
+        mFbL = delL;
+        mFbR = delR;
+
+        // Optional invert wet (output only - feedback stays positive-phase via mFbL/R)
+        if (invertWet) { delL = -delL; delR = -delR; }
+
+        // Mix: dry + wet + cross
+        if (L) L[n] = dryScale * inL + wetScale * delL + crossScale * delR;
+        if (R) R[n] = dryScale * inR + wetScale * delR + crossScale * delL;
+
+        mWritePos = (mWritePos + 1) % bufSize;
+        mPhase   += phaseInc;
+        // A5: while-wrap (was std::fmod). Cheaper for bounded phase increments
+        // and avoids a floating-point division per sample.
+        while (mPhase &gt;= 1.0) mPhase -= 1.0;
+        while (mPhase &lt;  0.0) mPhase += 1.0;
+    }
+
+    visualPushInOut (buffer, visIn);   // T18
+}</code></pre></details>
+<pre class="formulas">- Delay time per channel: `delaySamp = clamp(baseDelaySamp + lfo * sweepSamp, 0, bufSize-2)` where `baseDelaySamp = delayMs*0.001*sr` (base 0..20 ms, default 0) and `sweepSamp = depthMs*0.001*sr` (depth 0..10 ms, default 5). LFO output is unipolar 0..1, so the sweep runs base..base+depth; with base = 0 the sweep bottoms out at 0 samples — the &quot;through-zero&quot; point where inverted wet fully cancels the dry.
+- Wet polarity: `invertWet` negates the wet tap at OUTPUT only; the feedback capture (`mFbL/R`) is taken pre-inversion so feedback does not double-invert. `invertFeedback` applies `fbSign = -1` to the feedback coefficient: `fb = fbSign * feedback`, feedback range -1..+1 (default +0.5).
+- Feedback path: buffer write is `in + fb * prevWetOutput`; the delayed read passes through a 1-pole LP damper INSIDE the loop: `y = a*y_prev + (1-a)*x`, `a = exp(-2*pi*fc/sr)`, fc = mDampHz clamped 20 Hz..0.45*sr (knob range 200..20000 Hz; 20 kHz ~ transparent, a ~= 0).
+- LFO: sine morphed to triangle by `shape` 0..1: `s = 0.5 + 0.5*sin(2*pi*ph)`; `tri = 0.5 + asin(sin(2*pi*ph))/pi`; `out = s*(1-shape) + tri*shape`. Rate 0.05..5 Hz (default 0.5). Right channel phase offset = `stereoPhase/360` cycle fraction (0..360 deg).
+- Mix: `out_L = dryScale*inL + wetScale*wetL + crossScale*wetR` (channels mirrored), with `wetScale = wet * 10^(wetLevelDb/20)`, `dryScale = (1-wet) * 10^(dryLevelDb/20)`, `crossScale = wet * 10^(crossLevelDb/20)` (cross default -96 dB = off; treated as 0 below -90 dB).
+- BPM sync: LFO period = `noteFrac * 4 * (60/BPM)` seconds, rate = 1/period. Division table (whole-note num/den): 1/1, 1/2, 1/4, 1/8 (default idx 3), 1/8D = 3/16, 1/4T = 1/6, 1/16, 1/8T = 1/12.
+- Buffer: `kMaxDelayMs = 40 ms` (20 base + 10 depth + headroom); reads via 4-point Catmull-Rom. Continuous params ride ~20 ms linear smoothers.</pre>

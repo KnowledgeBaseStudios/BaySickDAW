@@ -94,19 +94,37 @@ public:
     //
     // The T8 rule is minimum == default: a window may not shrink below the size
     // its content was measured at, because our own panels do not scale and
-    // anything smaller is unreadable.  A hosted plugin is the one exception,
-    // and for the OPPOSITE reason to the one that used to be written here: an
-    // earlier version of this comment claimed HostedPluginEditor applies a
-    // transform, and it does not -- that path was deleted at QA-Cleanup and the
-    // only surviving references to it are comments.  Nothing scales a plugin's
-    // surface, so its declared size is not a readability floor we can honour;
-    // it is just how big the plugin happens to be, and a plugin larger than the
-    // workspace would otherwise pin its window at a size that does not fit.
-    // The window is allowed to be smaller than the plugin: it clips, and the
-    // plugin's own magnify is the control that fixes that.
+    // anything smaller is unreadable.  A hosted plugin's fixed-size surface DOES
+    // scale (HostedPluginEditor applies a transform), so it is the one case
+    // where a smaller window still shows a usable UI -- and without a lower
+    // floor the scaling could only ever grow, which is half a feature.
     //
     // Call AFTER setDefaultWindowSize: that resets the minimum to the default.
     void setResizeFloor (int minW, int minH);
+
+    // Turns OUR border-drag resize off for this window (Jeff, 2026-08-11).
+    //
+    // For a hosted plugin the size is the PLUGIN's to decide: a resizable one
+    // has its own drag corner with its own proportions, and a fixed-size one
+    // has its own magnify / zoom (Keyscape's even refuses a magnification too
+    // big for the screen).  Since nothing scales a plugin surface any more,
+    // dragging our frame could only ever clip the plugin or leave dead surround
+    // around it -- neither is a size anyone wants.  So the plugin drives, the
+    // window follows through onNaturalSizeChanged, and the frame itself is not
+    // a handle.
+    void setUserResizable (bool canResize);
+
+    // Locks this window's proportions: it can still be resized, but only along
+    // the diagonal, so the content cannot be warped out of shape.  Used by the
+    // VU meter window (Jeff, 2026-08-11) -- a stretched VU looks broken rather
+    // than resized, and a user has no way to tell the difference.
+    // 0 clears the lock.
+    void setFixedAspect (double widthOverHeight);
+
+    // Upper bound on this window's size.  Pairs with setFixedAspect: a ratio
+    // lock alone has nothing to stop it, so past the point where one axis runs
+    // out the drag keeps going on the other and the shape breaks anyway.
+    void setMaxWindowSize (int maxW, int maxH);
 
 
     // QA-Layout T5: the THREE-LIFETIME model (Jeff's 2026-07-28 ruling).
@@ -298,6 +316,7 @@ public:
     juce::Rectangle<int> clampResizeToWorkspace (juce::Rectangle<int> target) const;
 
     void paint (juce::Graphics&) override;
+
     void resized() override;
     void moved() override;
     void broughtToFront() override;

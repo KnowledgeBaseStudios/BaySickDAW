@@ -1,0 +1,69 @@
+<p>The transport drives everything. The metronome, the recorders and the DSP load
+meter are all switched off during an offline render &mdash; a render is not a
+performance, and none of those belong in a file.</p>
+
+<p>Audio device changes are written down and applied on the next launch rather
+than swapped under a running engine.</p>
+
+<div class="codeblock"><div class="codehead">Source\PluginProcessor.h (MetroDSP struct, lines 1844-1880)</div><pre><code>// PluginProcessor.cpp -- the swing push (scheduling-time transform, in scheduleRollWindows)
+                    // SW-2/SW-4 (QA-G3Smoke Swing): scheduling-time transform.
+                    // An off-beat 16th (odd index in the PATTERN-LOCAL grid;
+                    // floor keeps humanized starts coherent) is pushed by
+                    // global x player-mix x half a 16th.  Local, not absolute,
+                    // so block placement never changes a pattern&#x27;s feel.  The
+                    // whole note shifts (its off rides rawStart below).
+                    double localStart = note.startBeat;
+                    bool   swung      = false;
+                    if (swingAmt &gt; 0.0
+                        &amp;&amp; (((int) std::floor (localStart / 0.25)) &amp; 1) != 0)
+                    {
+                        localStart += swingAmt;
+                        swung = true;
+                    }</code></pre></div>
+<details class="fullfn"><summary>Full function &mdash; Source\PluginProcessor.h (MetroDSP struct, lines 1844-1880)</summary><pre><code>// PluginProcessor.h -- struct MetroDSP (full struct, lines 1845-1880)
+    struct MetroDSP {
+        enum SoundType { Sine = 0, Click, Wood, Bell };
+
+        std::atomic&lt;bool&gt;  enabled      { false };
+        std::atomic&lt;float&gt; volume       { 0.7f };
+        std::atomic&lt;int&gt;   soundType    { (int)Sine };
+        // Count-in (independent of transport):
+        std::atomic&lt;bool&gt;   countInActive { false };
+        std::atomic&lt;double&gt; countInBpm    { 120.0 };
+        // QA-G Task 6: signature at the record position (song = marker map,
+        // pattern = pattern&#x27;s effective TS), captured by the record path so
+        // count-in clicks run in DENOMINATOR units with the right accent.
+        std::atomic&lt;int&gt;    countInNum    { 4 };
+        std::atomic&lt;int&gt;    countInDen    { 4 };
+        // Audio-thread-only state (no atomic needed):
+        double lastBeatFloor    { -99999.0 };
+        int    clickSampLeft    { 0 };
+        bool   clickIsAccent    { false };
+        float  clickPhase       { 0.f };
+        // Count-in audio-thread state:
+        double countInPhase     { 0.0 };   // beats elapsed since count-in started
+        bool   countInWasActive { false }; // edge-detect to reset phase on start
+        int    countInBeatsFired{ 0 };     // 2026-04-26 (D-5 fix): tracks how many
+                                           // count-in clicks have fired so the loop
+                                           // doesn&#x27;t double-fire beat 1 after its
+                                           // initial trigger (fires in-loop once the
+                                           // QA-Fe2 PDC deferral elapses).
+        // QA-Fe2 PDC (2026-07-16): the compensated mix reaches this buffer
+        // totalLatencySamples late, so clicks defer by the same amount or
+        // they LEAD the music (default-audible now that De-reverb ships
+        // active).  countInDelaySamp defers the whole count-in once at its
+        // rising edge; transportWasPlaying edge-inits the transport click
+        // grid so the deferral can&#x27;t fire a stale catch-up click at play.
+        int    countInDelaySamp { 0 };
+        bool   transportWasPlaying { false };
+    } mMetro;</code></pre></details>
+<pre class="formulas">- Swing push formula (SW-4): `effectivePush = globalSwing * playerMix * 0.125 beats` (half a 16th). Applies to OFF-BEAT 16ths only: `(floor(localStart / 0.25) &amp; 1) != 0` — odd 16th index in the PATTERN-LOCAL grid (local, not absolute, so block placement never changes a pattern&#x27;s feel). The whole note shifts (note-off rides the pushed start).
+- Swing param ids (`ensureSwingParams`, eager bulk registration at startup): `globalSwing` (default 0) + per-player `swing_&lt;kind&gt;_&lt;i&gt;_mix` (default 1) / `swing_&lt;kind&gt;_&lt;i&gt;_trunc` (default false) for layer/bass/drum/inst/plugin families + rusty. Clip rolls take FULL GLOBAL (null mix pointer = mix 1.0, Jeff 2026-07-23); Vox rolls are swing-EXCLUDED (no vox MIDI).
+- Truncate rule (SW-5): a pushed note that newly overlaps the NEXT same-pitch note has its off clipped to that note&#x27;s POST-SWING start — same-pitch scope only, chords stay intact; active only when `swingTrunc &amp;&amp; swung`.
+- Count-in: independent of transport, gated on `isRecording() &amp;&amp; countInActive`. Clicks run in DENOMINATOR units: `clickIv = 4.0 / ciDen` quarter-beats per click (7/8 counts seven 8ths per bar); accent when `(countInBeatsFired - 1) % ciNum == 0` (bar start). Signature captured AT RECORD START (song = marker map at record position; pattern = pattern&#x27;s effective TS).
+- D-5 fix: beat 1 fires IMMEDIATELY once the PDC deferral elapses (formerly waited a full beat — user heard 3 clicks instead of 4); `countInBeatsFired` prevents double-firing beat 1.
+- PDC alignment (QA-Fe2): both count-in and transport clicks defer by `pdcSamples` (total latency) or they LEAD the compensated mix; `countInDelaySamp` defers the whole count-in once at its rising edge; `transportWasPlaying` edge-inits the transport click grid so no stale catch-up click fires at play.
+- Click synthesis: Sine 880/440 Hz (accent/normal), Wood 450/280 Hz, Bell 1100/660 Hz, Click = noise burst; durations Click 5 ms, Wood 12 ms, Sine 18 ms, Bell 40 ms; envelope t^2 (Bell linear).
+- Transport metronome runs only while playing AND count-in inactive AND enabled; tempo-map-aware — the block is split at tempo steps AND time-signature boundaries into constant-tempo spans (MetroSpan spans[4]) so tick placement stays sample-exact through a marker; the grid derives from the DELAYED clock (transport minus pdcSamples); clicks for negative beats suppressed. `isNonRealtime()` gates the metronome out of offline renders.
+- Scheduler snapshot: note dispatch reads `mPatternManager-&gt;acquireRollSnapshot()` — the old per-family try-locks silently DISCARDED note-ons in contended blocks, and layers/bass/rusty read live vectors bare (torn reads); the snapshot ends both hazards.</pre>
+<p class="behind"><b>Behind:</b> <a href="manual-2.html#FRAME-9">Global transport bar</a>, <a href="manual-2.html#TRAN-1">Play</a>, <a href="manual-2.html#TRAN-2">Pause</a>, <a href="manual-2.html#TRAN-3">Stop</a>, <a href="manual-2.html#TRAN-4">Record</a>, <a href="manual-2.html#TRAN-5">Record mode chevron</a>, <a href="manual-2.html#TRAN-9">Loop-mode toggle</a>, <a href="manual-2.html#TRAN-10">Metronome</a>, <a href="manual-2.html#TRAN-11">Metronome chevron</a>, <a href="manual-2.html#TRAN-15">Position readout</a>, <a href="manual-2.html#BLD-22">Playhead</a>, <a href="manual-2.html#PR-15">Playhead</a>, <a href="manual-2.html#AUD-1">Audio Mode:</a>, <a href="manual-2.html#AUD-2">Audio Device:</a>.</p>

@@ -1,0 +1,148 @@
+<p>A send copies a strip's signal to a bus while the strip keeps playing where it
+was. A move-output relocates it. A strip may feed several main outputs at once.
+The cables drawn on the Mixer are the real graph, not decoration.</p>
+
+<div class="codeblock"><div class="codehead">Source\BaySickGraph.h (Edge/ScEdge structs, main-out line rules, pre-fader tap contract)</div><pre><code>// BaySickGraph.h -- RoutingGraph edge model (verbatim, lines 297-322)
+    struct Edge
+    {
+        int   srcId;
+        int   dstId;
+        float amountDb;
+        bool  prePost;      // true = pre-fader tap from src
+        // true = main-out cable.  A src may have up to kMaxMainOutsPerStrip of
+        // these, each to a DIFFERENT dst (duplicates are refused); every one
+        // carries a full-level copy, the level is not split between them.
+        bool  isMainOut;
+    };
+
+    // C.4 Phase 1 (2026-04-30): sidechain edge.  Source&#x27;s post-everything
+    // tap feeds dst&#x27;s SC receive line `dstSlot` (0..3).  Cycle check covers
+    // SC + main + send edges combined (a strip mustn&#x27;t sidechain itself
+    // through any path that loops back).
+    struct ScEdge
+    {
+        int srcId;
+        int dstId;
+        int dstSlot;        // 0..3, the receive line index on dst
+    };
+
+    static constexpr int kMaxSendsPerStrip   = 4;
+    static constexpr int kMaxScRecvsPerStrip = 4;
+    static constexpr int kMaxMainOutsPerStrip = MixerChannelIds::kMaxMainOutsPerStrip;</code></pre></div>
+<details class="fullfn"><summary>Full function &mdash; Source\BaySickGraph.h (Edge/ScEdge structs, main-out line rules, pre-fader tap contract)</summary><pre><code>// BaySickGraph.cpp -- RoutingGraph::rebuildFromApvts (full function, lines 2672-2777)
+bool RoutingGraph::rebuildFromApvts(juce::AudioProcessorValueTreeState&amp; apvts,
+                                     const std::vector&lt;std::pair&lt;int, juce::String&gt;&gt;&amp; activeChannels)
+{
+    mEdges.clear();
+    mEdges.reserve(activeChannels.size() * (kMaxMainOutsPerStrip + kMaxSendsPerStrip));
+    mScEdges.clear();
+    mScEdges.reserve(activeChannels.size() * kMaxScRecvsPerStrip);
+
+    auto loadInt = [&amp;](const juce::String&amp; id, int fallback)
+    {
+        if (auto* p = apvts.getRawParameterValue(id)) return (int) p-&gt;load();
+        return fallback;
+    };
+    auto loadFloat = [&amp;](const juce::String&amp; id, float fallback)
+    {
+        if (auto* p = apvts.getRawParameterValue(id)) return p-&gt;load();
+        return fallback;
+    };
+    auto loadBool = [&amp;](const juce::String&amp; id, bool fallback)
+    {
+        if (auto* p = apvts.getRawParameterValue(id)) return p-&gt;load() &gt; 0.5f;
+        return fallback;
+    };
+
+    for (const auto&amp; [chId, prefix] : activeChannels)
+    {
+        // Compose this channel&#x27;s ids only when they are missing or its prefix
+        // changed; steady state is a map lookup plus a string compare.
+        auto&amp; pid = mChannelParamIds[chId];
+        if (pid.prefix != prefix)
+        {
+            pid.prefix     = prefix;
+            for (int m = 0; m &lt; kMaxMainOutsPerStrip; ++m)
+                pid.mainOutTo[(size_t) m] = MixerChannelIds::mainOutParamId (prefix, m);
+            for (int s = 0; s &lt; kMaxSendsPerStrip; ++s)
+            {
+                const juce::String sp = prefix + &quot;_send&quot; + juce::String(s);
+                pid.sendTo     [(size_t) s] = sp + &quot;_to&quot;;
+                pid.sendAmount [(size_t) s] = sp + &quot;_amount&quot;;
+                pid.sendPrePost[(size_t) s] = sp + &quot;_prepost&quot;;
+            }
+            for (int s = 0; s &lt; kMaxScRecvsPerStrip; ++s)
+                pid.scFrom[(size_t) s] = prefix + &quot;_sc_recv&quot; + juce::String(s) + &quot;_from&quot;;
+        }
+
+        // Main-out lines.  Line 0 falls back to the natural parent (a strip
+        // always has one main out); lines 1..3 fall back to -1 = inactive, which
+        // is also what a project saved before they existed resolves to.
+        // Duplicate destinations across two lines of the SAME strip are dropped
+        // here as well as refused by the UI: two edges src -&gt; dst would sum that
+        // strip into the destination twice, i.e. +6 dB, not a second route.
+        int mainDsts[kMaxMainOutsPerStrip] = {};
+        int numMainDsts = 0;
+        for (int m = 0; m &lt; kMaxMainOutsPerStrip; ++m)
+        {
+            const int fallback = (m == 0) ? MixerChannelIds::defaultSendTo(chId) : -1;
+            const int dst = loadInt(pid.mainOutTo[(size_t) m], fallback);
+            if (dst &lt; 0 || dst == chId) continue;
+
+            bool dup = false;
+            for (int k = 0; k &lt; numMainDsts; ++k)
+                if (mainDsts[k] == dst) { dup = true; break; }
+            if (dup) continue;
+            mainDsts[numMainDsts++] = dst;
+
+            Edge e; e.srcId = chId; e.dstId = dst;
+            e.amountDb = 0.f; e.prePost = false; e.isMainOut = true;
+            mEdges.push_back(e);
+        }
+        for (int s = 0; s &lt; kMaxSendsPerStrip; ++s)
+        {
+            const int dst = loadInt(pid.sendTo[(size_t) s], -1);
+            if (dst &lt; 0 || dst == chId) continue;
+            Edge e; e.srcId = chId; e.dstId = dst;
+            e.amountDb = loadFloat(pid.sendAmount [(size_t) s], 0.f);
+            e.prePost  = loadBool (pid.sendPrePost[(size_t) s], false);
+            e.isMainOut = false;
+            mEdges.push_back(e);
+        }
+
+        // C.4 Phase 1 (2026-04-30): SC receive lines.  Each strip reads up
+        // to 4 _sc_recv{N}_from params (channel id of the source, -1 = empty).
+        // Build SC edges as src -&gt; this strip on receive line N.
+        for (int s = 0; s &lt; kMaxScRecvsPerStrip; ++s)
+        {
+            const int src = loadInt(pid.scFrom[(size_t) s], -1);
+            if (src &lt; 0 || src == chId) continue;
+            ScEdge e; e.srcId = src; e.dstId = chId; e.dstSlot = s;
+            mScEdges.push_back(e);
+        }
+    }
+
+    mTopoIds.clear();
+    mTopoIds.reserve(activeChannels.size());
+    for (const auto&amp; [chId, _] : activeChannels) mTopoIds.push_back(chId);
+    const bool topoOk = computeTopo(mTopoIds);
+
+    // AFTER computeTopo: a cycle makes it erase edges from mEdges, and an edge
+    // that no longer exists must not keep a tap armed for a consumer that will
+    // never pull it.
+    mHasPreFaderSend = false;
+    for (const auto&amp; e : mEdges)
+        if (e.prePost &amp;&amp; ! e.isMainOut) { mHasPreFaderSend = true; break; }
+
+    return topoOk;
+}</code></pre></details>
+<pre class="formulas">- Per-strip limits: `kMaxMainOutsPerStrip = 4`, `kMaxSendsPerStrip = 4`, `kMaxScRecvsPerStrip = 4` (main-out count deliberately matches the send-slot count).
+- APVTS parameter id grammar (composed once per (chId, prefix) and cached — juce::String has no SSO, ~33 heap allocs/channel/block without the cache): main-out line 0 = `&lt;prefix&gt;_sendTo` (historical 0..999 range, natural-parent default); lines 1..3 = `&lt;prefix&gt;_mainOut{N}_to` (-1 = inactive, additive persistence — absent in old projects); sends = `&lt;prefix&gt;_send{N}_to` / `_send{N}_amount` / `_send{N}_prepost`; sidechain = `&lt;prefix&gt;_sc_recv{N}_from` (-1 = empty, value is the SOURCE channel id, slot N is the receive line 0..3 on the destination).
+- Main-out edges: `amountDb = 0` (full-level copy, level is NOT split across lines); duplicate destinations across two lines of one strip are dropped here AND refused by the UI (two src-&gt;dst edges would sum +6 dB); self-edge (dst == chId) skipped.
+- Send edges: `amountDb` from `_send{N}_amount`, `prePost` from `_send{N}_prepost`. prePost == true reads the PRE-FADER TAP (before fader gain, before the combined mute+solo gate; pre-pan for free since pan sits after that gain); prePost == false reads the source&#x27;s mOutputBuffer.
+- SC edges: source&#x27;s POST-EVERYTHING tap feeds dst&#x27;s SC receive buffer at slot 0..3, except armed delay-match sources which stash a PRE-COMPENSATION key tap (`getScSourceTap`); `applyScRecvDelay` applies the per-(consumer, slot) key-alignment delay solved on the message thread by `updateBusLatencies`.
+- Cycle handling: Kahn&#x27;s topological sort over main + send + SC edges COMBINED (one DAG — a sidechain cable cannot sneak past the check via an audio path). On a cycle: all edges between unresolved nodes are erased and topo retried; `rebuildFromApvts` returns false. Pre-flight `wouldCreateCycle(src,dst)` (message thread DFS from dst) gates the cable drop before it commits.
+- `mHasPreFaderSend` is recomputed AFTER computeTopo — an edge dropped as a cycle must not leave a tap armed for a consumer that will never pull it.
+- Ordering guarantee: an SC or send edge adds &quot;src processes before dst&quot; to the topo constraints — the same acquire on the dependency counter that publishes mOutputBuffer publishes the pre-fader tap.
+- Bus/master sends are restricted to Aux strips only (`isValidBusSendTarget`: dst in [kAuxBase, kAuxBase + kMaxAuxStrips)).</pre>
+<p class="behind"><b>Behind:</b> <a href="manual-2.html#MIX-17">+</a>, <a href="manual-2.html#MIXSM-1">Send... submenu</a>, <a href="manual-2.html#MIXSM-3">Move Output... submenu</a>, <a href="manual-2.html#MIXSM-4">Add Main Out... submenu</a>, <a href="manual-2.html#MIXSM-5">Remove Main Out... submenu</a>, <a href="manual-2.html#MIXMNU-2">Master Output submenu</a>, <a href="manual-2.html#MIXADD-2">Vox Bus through Plugins Bus</a>.</p>

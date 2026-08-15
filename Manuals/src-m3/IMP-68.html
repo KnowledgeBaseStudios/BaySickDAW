@@ -1,0 +1,82 @@
+<p>The close-up editor for one automation clip. A desktop window with its own
+menu bar rather than a workspace window, which is why it has a corner grip
+instead of a resize border.</p>
+
+<div class="codeblock"><div class="codehead">Source\PatternManager.h (ControlPoint / AutomationLane storage + the ONE evaluator, lines 21-160)</div><pre><code>// PatternManager.h -- the curve storage (verbatim, lines 21-47)
+// ── Automation data ───────────────────────────────────────────────────────────
+// Ordinals are pinned explicitly because this int is persisted: each automation
+// point writes &quot;curve&quot; as the raw enum value and the loader casts the saved int
+// straight back, so an insertion or re-order silently repoints every saved point
+// at a different curve shape.  Values below match what was implicit before, so
+// this pins current behavior and changes nothing.  NEVER reorder or insert;
+// append only, with an explicit value.  Same rule as EffectType in EffectRack.h.
+enum class CurveType { Linear = 0, Stepped = 1, Spline = 2 };
+
+struct ControlPoint
+{
+    float     timeTicks  { 0.f };   // 0..1, fraction of clip length
+    float     value01    { 0.5f };  // 0..1, normalized parameter value
+    CurveType curveType  { CurveType::Linear };
+    float     tension    { 0.f };   // reserved for future Bezier
+};
+
+struct AutomationLane
+{
+    juce::String              paramId;
+    std::vector&lt;ControlPoint&gt; points;
+    bool  isLFO   { false };
+    int   lfoShape { 0 };   // 0=Sine 1=Triangle 2=Saw 3=Square
+    float lfoRate  { 1.f }; // period in beats
+    float lfoMin   { 0.f };
+    float lfoMax   { 1.f };</code></pre></div>
+<details class="fullfn"><summary>Full function &mdash; Source\PatternManager.h (ControlPoint / AutomationLane storage + the ONE evaluator, lines 21-160)</summary><pre><code>// PatternManager.h -- segment interpolation inside evalAutomationLaneAt
+// (verbatim, lines 121-159 -- the per-curve-type math)
+    switch (p0.curveType)
+    {
+        case CurveType::Stepped:
+            return p0.value01;
+
+        case CurveType::Spline:
+        {
+            // Catmull-Rom through the neighbouring values; clamped at the ends.
+            const float v0 = (idx &gt; 0) ? pts[(size_t) idx - 1].value01 : p0.value01;
+            const float v1 = p0.value01;
+            const float v2 = p1.value01;
+            const float v3 = (idx + 2 &lt; (int) pts.size()) ? pts[(size_t) idx + 2].value01
+                                                          : p1.value01;
+            const float t2 = t * t, t3 = t2 * t;
+            const float val = 0.5f * (  2.f * v1
+                                      + (-v0 + v2)                            * t
+                                      + (2.f * v0 - 5.f * v1 + 4.f * v2 - v3) * t2
+                                      + (-v0 + 3.f * v1 - 3.f * v2 + v3)      * t3);
+            return juce::jlimit (0.f, 1.f, val);
+        }
+
+        case CurveType::Linear:
+        default:
+        {
+            // FL Studio scaled-exponential transfer function:
+            //   t_factor = 1 - T / (0.5*T + 0.5)^2 ;  y = (t_factor^x - 1) / (t_factor - 1)
+            // Positive tension eases out, negative eases in.
+            const float T = juce::jlimit (-0.999f, 0.999f, p0.tension);
+            if (std::abs (T) &lt; 0.001f)
+                return p0.value01 + t * (p1.value01 - p0.value01);
+
+            const float denom   = 0.5f * T + 0.5f;
+            const float tFactor = 1.0f - T / (denom * denom);
+            const float y = (std::abs (tFactor - 1.0f) &lt; 0.0001f)
+                              ? t
+                              : (std::pow (std::abs (tFactor), t) - 1.0f) / (tFactor - 1.0f);
+            return p0.value01 + juce::jlimit (0.0f, 1.0f, y) * (p1.value01 - p0.value01);
+        }
+    }</code></pre></details>
+<pre class="formulas">- Curve storage unit: `ControlPoint { timeTicks (0..1 fraction of clip length, despite the name), value01 (0..1 normalized), curveType, tension }` inside `AutomationLane { paramId, points, isLFO, lfoShape, lfoRate, lfoMin, lfoMax, userDisplayName, lastKnownName }`. Points are kept SORTED by timeTicks (every mutation site sorts — audio-thread evaluator assumes it).
+- `CurveType { Linear=0, Stepped=1, Spline=2 }` persisted as raw int (&quot;curve&quot; attr) — append-only, explicit values, never reorder.
+- Segment math (curve type is on the LEFT point of each segment): Stepped holds p0.value01; Spline is Catmull-Rom `0.5 * (2v1 + (-v0+v2)t + (2v0-5v1+4v2-v3)t^2 + (-v0+3v1-3v2+v3)t^3)` through neighbouring values, clamped at the ends; Linear with tension uses the FL Studio scaled-exponential transfer `t_factor = 1 - T/(0.5T+0.5)^2; y = (t_factor^t - 1)/(t_factor - 1)` with T clamped to ±0.999 (positive tension eases out, negative eases in; |T| &lt; 0.001 degrades to plain lerp).
+- LFO mode replaces the point curve: shapes 0=Sine 1=Triangle 2=Saw 3=Square, `phase = fmod(relPos / lfoRate, 1)`, output mapped lfoMin..lfoMax; lfoRate &lt;= 0 returns the mid value.
+- Editor edit contract: every edit snapshots the lane BEFORE and AFTER and registers an `AutomationLaneEditAction` (UndoActions.h) through the app&#x27;s undo choke point (`UndoContext`); curve-handle drags and point drags each keep their own before-snapshot.
+- Deleting a lane&#x27;s LAST point does not leave an empty block: `onDeleteWholeAutomationRequested` fires and the host prompts to delete the whole automation block instead (QA-ProjectSave 2026-07-26).
+- Real-unit readout: APVTS lanes format/parse via the parameter&#x27;s own getText()/getValueForText() (identical to its knob + host automation); `global_tempo` is the one non-APVTS lane (20..300 BPM mapping). &quot;Reset to Default&quot; resolves per-paramId via onResolveResetValue; null = 0.5 (Event Editor point-reset ruling).
+- Grid domain: the Builder grid an automation block sits on is uniform 4-beat-per-bar (`kBeatsPerBar = 4`) — a PATTERN owns a real signature, song TS markers are decorative here, and the playback window is computed in the same uniform domain, so ruler/gridlines/snap/playback agree.
+- Layout/snap constants: kRulerH=18, kValLabelW=34, kNodeR=4.0 hit radius; snap = subdivisions per beat, clamped 1..32, default 4 (1/16 note); Alt overrides snap. Tools: Draw / Paint / Erase / Interpolate / Select / Zoom.</pre>
+<p class="behind"><b>Behind:</b> <a href="manual-2.html#EVT-1">File menu</a>, <a href="manual-2.html#EVT-3">Tools menu</a>, <a href="manual-2.html#EVT-4">View menu</a>, <a href="manual-2.html#EVT-6">Import MIDI menu</a>, <a href="manual-2.html#EVT-10">Snap: picker</a>, <a href="manual-2.html#EVT-11">Value readout</a>, <a href="manual-2.html#EVT-15">Status line</a>.</p>

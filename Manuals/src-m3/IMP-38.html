@@ -1,0 +1,151 @@
+<p>Detects pitch, decides the nearest allowed note, and shifts toward it at the
+retune rate. Formant preservation keeps the voice sounding like the same person
+while the pitch moves.</p>
+
+<div class="codeblock"><div class="codehead">- Source\DSP\PitchCorrectorDSP.cpp (implementation, 413 lines)</div><pre><code>// PitchCorrectorDSP::process() - detection -&gt; snap -&gt; ratio -&gt; smooth -&gt; shift
+    if (detHz &gt; 0.0f &amp;&amp; confidence &gt; 0.4f)
+    {
+        const float detMidi = hzToMidi (detHz);
+
+        // QA-F Task 5 note-change hysteresis: hold the current target note until
+        // the sung pitch commits to a different one.  0.65 st past the semitone
+        // midpoint stops vibrato riding a boundary from flip-flopping the target.
+        if (mCurrentTargetMidi &lt; 0.0f
+            || std::abs (detMidi - mCurrentTargetMidi) &gt; 0.65f)
+            mCurrentTargetMidi = snapMidiToScale (detMidi);
+
+        const float targetHz  = midiToHz (mCurrentTargetMidi);
+        const float fullRatio = targetHz / juce::jmax (detHz, 1.0f);
+        targetRatio           = 1.0f + (fullRatio - 1.0f) * mStrength;
+
+        if (mHumanizeCents &gt; 0.001f)
+        {
+            mHumanizePhase += nextRandPm1() * mHumanizeCents * 0.05f;
+            mHumanizePhase  = juce::jlimit (-mHumanizeCents, mHumanizeCents, mHumanizePhase);
+            targetRatio    *= std::pow (2.0f, mHumanizePhase / 1200.0f);   // cents -&gt; ratio
+        }
+
+        targetHzPub = targetHz;
+    }
+    else
+    {
+        mCurrentTargetMidi = -1.0f;   // unvoiced: re-snap fresh next phrase
+    }</code></pre></div>
+<details class="fullfn"><summary>Full function &mdash; - Source\DSP\PitchCorrectorDSP.cpp (implementation, 413 lines)</summary><pre><code>// PitchCorrectorDSP::process() -- core (lines 257-409, housekeeping elided)
+void PitchCorrectorDSP::process (juce::AudioBuffer&lt;float&gt;&amp; buffer)
+{
+    const int numSamples = buffer.getNumSamples();
+    const int numCh      = buffer.getNumChannels();
+    if (numSamples &lt;= 0 || numCh &lt;= 0) return;
+
+    float* L = buffer.getWritePointer (0);
+    float* R = (numCh &gt; 1) ? buffer.getWritePointer (1) : nullptr;
+
+    // Always feed the tracker so UI / future stages see live pitch.  Stereo
+    // input is averaged inside pushAudio().
+    if (R != nullptr) mTracker.pushAudio (L, R, numSamples);
+    else              mTracker.pushAudio (L, numSamples);
+
+    // [ELIDED: settled-bypass fast path + engage-edge cold start, lines 272-304]
+
+    // Read the latest pitch reading once per block (tracker is ~50 ms behind).
+    const float detHz      = mTracker.getFrequencyHz();
+    const float confidence = mTracker.getConfidence();
+
+    float targetRatio = 1.0f;
+    float targetHzPub = 0.0f;
+
+    if (detHz &gt; 0.0f &amp;&amp; confidence &gt; 0.4f)
+    {
+        const float detMidi = hzToMidi (detHz);
+
+        if (mCurrentTargetMidi &lt; 0.0f
+            || std::abs (detMidi - mCurrentTargetMidi) &gt; 0.65f)
+            mCurrentTargetMidi = snapMidiToScale (detMidi);
+
+        const float targetHz  = midiToHz (mCurrentTargetMidi);
+        const float fullRatio = targetHz / juce::jmax (detHz, 1.0f);
+        targetRatio           = 1.0f + (fullRatio - 1.0f) * mStrength;
+
+        if (mHumanizeCents &gt; 0.001f)
+        {
+            mHumanizePhase += nextRandPm1() * mHumanizeCents * 0.05f;
+            mHumanizePhase  = juce::jlimit (-mHumanizeCents, mHumanizeCents, mHumanizePhase);
+            targetRatio    *= std::pow (2.0f, mHumanizePhase / 1200.0f);   // cents -&gt; ratio
+        }
+
+        targetHzPub = targetHz;
+    }
+    else
+    {
+        mCurrentTargetMidi = -1.0f;   // unvoiced: re-snap fresh next phrase
+    }
+
+    // [ELIDED: formant option / throat fScale change-guarded pushes, lines 344-352]
+
+    // Accumulate mono input, then drain whole shifter blocks.
+    if (R != nullptr)
+        for (int i = 0; i &lt; numSamples; ++i) mMonoIn[(size_t) i] = 0.5f * (L[i] + R[i]);
+    else
+        for (int i = 0; i &lt; numSamples; ++i) mMonoIn[(size_t) i] = L[i];
+    mInFifo.push (mMonoIn.data(), numSamples);
+
+    const float retCoef = mRetuneCoef;
+    while (mBlockSize &gt; 0 &amp;&amp; mInFifo.size() &gt;= mBlockSize)
+    {
+        mInFifo.pop (mInBlock.data(), mBlockSize);
+        // Advance the ratio smoothing across the block so the RetuneSpeed time
+        // constant is unchanged by the shifter&#x27;s block granularity.
+        for (int k = 0; k &lt; mBlockSize; ++k)
+            mCurrentShiftRatio = retCoef * mCurrentShiftRatio + (1.0f - retCoef) * targetRatio;
+
+        if (mLive)
+        {
+            const double ps = juce::jlimit (0.25, 4.0, (double) mCurrentShiftRatio);
+            if (ps != mLivePitchScale)       { mLive-&gt;setPitchScale   (ps);     mLivePitchScale   = ps; }
+            if (fScale != mLiveFormantScale) { mLive-&gt;setFormantScale (fScale); mLiveFormantScale = fScale; }
+            const float* ip[1] = { mInBlock.data() };
+            float*       op[1] = { mOutBlock.data() };
+            mLive-&gt;shift (ip, op);
+            mOutFifo.push (mOutBlock.data(), mBlockSize);
+        }
+        else
+        {
+            mOutFifo.push (mInBlock.data(), mBlockSize);   // shifter absent: passthrough
+        }
+    }
+
+    // Pop this block&#x27;s worth of wet, then equal-power crossfade dry &lt;-&gt; wet.
+    // The wet stream carries the shifter latency; at the engage edge it is the
+    // primed silence filling in -- the documented one-time delay jump (B6).
+    mOutFifo.pop (mWetOut.data(), numSamples);
+
+    const float fadeTgt = wantOn ? 1.0f : 0.0f;
+    constexpr float halfPi = juce::MathConstants&lt;float&gt;::halfPi;
+    for (int i = 0; i &lt; numSamples; ++i)
+    {
+        mEngageFade = (fadeTgt &gt; mEngageFade)
+            ? juce::jmin (1.0f, mEngageFade + mEngageFadeStep)
+            : juce::jmax (0.0f, mEngageFade - mEngageFadeStep);
+        const float gW  = std::sin (mEngageFade * halfPi);
+        const float gD  = std::cos (mEngageFade * halfPi);
+        const float wet = mWetOut[(size_t) i];
+
+        L[i] = L[i] * gD + wet * gW;
+        if (R != nullptr) R[i] = R[i] * gD + wet * gW;   // mono wet to both channels
+    }
+}</code></pre></details>
+<pre class="formulas">- Engine: RubberBand `RubberBandLiveShifter`, options `OptionFormantPreserved | OptionWindowShort`; ~48 ms latency; `mLatencySamples = getStartDelay() + getBlockSize()`.
+- Tracker gate: correction targets update only when `detHz &gt; 0` AND YIN `confidence &gt; 0.4f`.
+- Note-change hysteresis: target held until `|detMidi - mCurrentTargetMidi| &gt; 0.65` semitones (0.65 st past midpoint stops vibrato flip-flop).
+- MIDI/Hz: `midiToHz = 440 * 2^((midi-69)/12)`; `hzToMidi = 12*log2(hz/440) + 69`.
+- Shift ratio: `fullRatio = targetHz / max(detHz, 1)`; strength blend `targetRatio = 1 + (fullRatio - 1) * mStrength` (Strength 0..1).
+- RetuneSpeed smoothing (per-sample one-pole): `coef = exp(-1 / (retuneMs * 0.001 * sr))`; RetuneSpeed 0..100 ms, 0 = snap. Smoothing advanced per shifter-block sample so the time constant is block-size independent.
+- Humanize: random walk `phase += randPm1 * cents * 0.05`, clamped to +/- cents (0..20); applied as `ratio *= 2^(phase/1200)`. RNG is xorshift32 (`x^=x&lt;&lt;13; x^=x&gt;&gt;17; x^=x&lt;&lt;5`), seed `0x12345678`.
+- Throat: -12..+12 semis -&gt; formant scale `2^(semis/12)`; `|semis| &lt; 0.01` -&gt; 0.0 (auto-preserve).
+- Pitch scale clamp into shifter: `jlimit(0.25, 4.0, ratio)`.
+- Engage/disengage: ~40 ms equal-power crossfade, `mEngageFadeStep = 1/(0.04*sr)` (default 1/1764); gains `gW = sin(fade*pi/2)`, `gD = cos(fade*pi/2)`.
+- FIFO capacity: `cap = 2*(mBlockSize + mMaxBlock) + 64`; out FIFO primed with `mBlockSize` zeros.
+- Scale tables: 13 scales (Chromatic..Blues), 12-bool masks copied verbatim from PianoRoll.cpp `kScaleDefs` (kScaleMasks, PitchCorrectorDSP.cpp lines 20-34).
+- UI publish: shift in cents = `1200 * log2(max(ratio, 0.001))`.</pre>
+<p class="behind"><b>Behind:</b> <a href="manual-2.html#BSV-1">Mix knob</a>, <a href="manual-2.html#BSV-3">Realtime Pitch OFF</a>, <a href="manual-2.html#BSV-4">Root picker</a>, <a href="manual-2.html#BSV-5">Scale picker</a>, <a href="manual-2.html#BSV-6">Retune ms</a>, <a href="manual-2.html#BSV-7">Strength</a>, <a href="manual-2.html#BSV-8">Humanize</a>, <a href="manual-2.html#BSV-9">Throat</a>, <a href="manual-2.html#BSV-10">Formant Preserve</a>.</p>

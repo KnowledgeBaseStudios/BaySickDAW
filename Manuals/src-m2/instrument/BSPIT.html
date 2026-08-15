@@ -1,0 +1,81 @@
+<p>BaySickPitch is the offline pitch editor: it studies a recorded take,
+draws every note the singer actually sang as a block on a canvas, and lets
+you drag those blocks to repair or rewrite the melody. Offline means it
+works on the recording, not the live signal - so it can be surgical in a
+way the realtime corrector cannot.</p>
+
+<figure data-cluster="Tools and analysis|1,2,3,4,5,6">
+
+<p id="BSPIT-1"><b>Save / Load</b> keep the editor's whole state - the
+analysis and your edits - as something you can leave and come back to.</p>
+
+<p id="BSPIT-2"><b>Slice</b> cuts a detected note in two where you click -
+for when the analysis heard one long note where the singer really sang
+two. <span id="BSPIT-3"></span><b>Edit</b> is the everyday tool: drag
+notes up or down to retune them, drag their ends to stretch, drag whole
+notes in time.</p>
+
+<p id="BSPIT-4"><b>Send Notes to...</b> exports the detected melody as
+NOTES - sing a line, send it to a synth tab, and the synth plays your
+melody. The lazy and excellent way to write instrument parts.</p>
+
+<p id="BSPIT-5"><b>ON</b> enables the pitch stage in the channel's signal
+path; <span id="BSPIT-22"></span>the <b>selection readout</b> beside it
+describes what you currently have selected, as bars and as time.</p>
+
+<p id="BSPIT-6"><b>The status readout</b> reports the analysis, including
+<code>ANALYSIS FAILED</code> with the reason when a take cannot be
+tracked (too noisy, too quiet, no clear pitch).</p>
+
+<figure data-cluster="Key and snapping|7,8,9,10,11,12,13,14,15,16">
+
+<p id="BSPIT-7"><b>Root</b> and <span id="BSPIT-8"></span><b>Scale</b>
+define the song's key - the set of legal notes -
+and <span id="BSPIT-9"></span><b>Snap</b> makes dragged notes land on it.
+Drag roughly; land perfectly.</p>
+
+<p id="BSPIT-10"><b>The engine picker</b> chooses which pitch-shifting
+algorithm does the audio surgery. <code>Rubber Band - Balanced</code> is
+the sensible default; the alternatives trade processing speed against
+artifacts, and on a difficult voice it is worth trying more than one.</p>
+
+<p id="BSPIT-11"><b>Snapshot</b> and <span id="BSPIT-12"></span>
+<b>Versions</b> are checkpoints - save a state you like before
+experimenting further. <span id="BSPIT-13"></span><b>Reset</b> returns a
+selection to what the analysis originally heard.
+<span id="BSPIT-14"></span><b>Render</b> commits your edits to actual
+audio. <span id="BSPIT-15"></span><b>Undo / Redo</b> step the editor's own
+history. <span id="BSPIT-16"></span><b>A</b> toggles auto-scroll - the
+canvas follows playback (the keyboard key <code>A</code> does the same).</p>
+
+<figure data-cluster="Edit character|17">
+
+<p id="BSPIT-17"><b>Focus / Mod / Speed / Throat</b> shape how edits
+SOUND. <b>Focus</b> - how tightly an edited note holds its center pitch
+versus keeping the singer's natural waver. <b>Mod</b> - how much of the
+original modulation (vibrato) survives the edit. <b>Speed</b> - how fast
+transitions between edited notes happen. <b>Throat</b> - the vocal-tract
+size of shifted material, so a note moved far can keep sounding like the
+same person.</p>
+
+<figure data-cluster="The canvas|18,19,20,21,23">
+
+<p id="BSPIT-18"><b>The keyboard</b> down the left edge maps the canvas to
+pitches (<code>C2</code> to <code>C6</code>), and
+<span id="BSPIT-19"></span><b>the ruler</b> across the top maps it to song
+time in bars.</p>
+
+<p id="BSPIT-20"><b>The canvas</b> is the editor itself: the thin
+continuous line is the pitch the singer actually produced, and the blocks
+are the notes the analysis heard - the things you grab. It reads
+<code>This channel has no audio clips to analyze.</code> until the channel
+has a recording. <span id="BSPIT-21"></span><b>The info bar</b> along the
+bottom tracks whatever is under your cursor - <code>Pitch:</code>,
+<code>Cents:</code> (hundredths of a semitone off center),
+<code>Length:</code> - plus <code>[detached]</code> / <code>[moved]</code>
+/ <code>[edited]</code> flags on notes you have changed.
+<span id="BSPIT-23"></span><b>Scrollbars</b> on both axes move the
+view.</p>
+
+<p>The editor's shortcuts and mouse gestures are listed on the Key Binds
+window's <code>Vocal Editor</code> tab, in the Help menu.</p>

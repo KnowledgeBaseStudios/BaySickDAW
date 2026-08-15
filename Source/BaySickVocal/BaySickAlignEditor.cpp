@@ -873,9 +873,14 @@ public:
             g.drawText (title, r.removeFromTop (18).reduced (8, 2),
                         juce::Justification::centredLeft);
         };
-        drawBox (b.removeFromTop (mAlignBoxH), "ALIGN");
-        b.removeFromTop (6);
-        drawBox (b, "PITCH");
+        // THE BOXES COME FROM resized() (Jeff, 2026-08-11).  paint() used to
+        // draw ALIGN at a hardcoded mAlignBoxH while resized() packed the
+        // controls to their own height -- so the two disagreed and the PITCH
+        // controls rendered inside the drawn ALIGN box.  One layout, computed
+        // once, read by both.
+        if (! mAlignBox.isEmpty()) drawBox (mAlignBox, "ALIGN");
+        if (! mPitchBox.isEmpty()) drawBox (mPitchBox, "PITCH");
+        juce::ignoreUnused (b);
 
         // Knob / combo captions
         g.setColour (kTextDim);
@@ -897,45 +902,70 @@ public:
 
     void resized() override
     {
-        auto b = getLocalBounds().reduced (6);
+        // KNOB SIZE COMES FROM THE PANEL (Jeff, 2026-08-11).  This was a fixed
+        // run of 74x76 knobs and 78px rows adding up to ~440px of content in a
+        // panel that is ~285px tall at the 1015x351 window -- so the PITCH box
+        // ran off the bottom and Transpose / Formant Shift were cut in half.
+        // Everything below is derived, so the boxes shrink instead of spilling.
+        auto b = getLocalBounds().reduced (6, 4);
 
-        auto align = b.removeFromTop (mAlignBoxH);
-        align.removeFromTop (18);
-        auto row1 = align.removeFromTop (24).reduced (8, 0);
-        mAlignOn.setBounds (row1.removeFromLeft (52));
+        const int hdrH  = 15;   // painted section caption
+        const int rowH   = 22;
+        const int capH   = 11;  // knob caption strip
+        const int gap    = 4;
+
+        // Three knob rows total (1 in ALIGN, 2 in PITCH) plus the fixed rows.
+        const int fixed  = hdrH + rowH + capH            // ALIGN
+                         + gap
+                         + hdrH + rowH + capH + rowH + capH + capH + rowH   // PITCH
+                         + gap * 3;
+        const int knobH  = juce::jlimit (34, 76, (b.getHeight() - fixed) / 3);
+        const int knobW  = juce::jmin (74, knobH);
+
+        auto placePair = [&] (juce::Rectangle<int> row, juce::Component& a, juce::Component& c)
+        {
+            a.setBounds (row.removeFromLeft (row.getWidth() / 2)
+                            .withSizeKeepingCentre (knobW, knobH));
+            c.setBounds (row.withSizeKeepingCentre (knobW, knobH));
+        };
+
+        // ── ALIGN ───────────────────────────────────────────────────────────
+        auto align = b.removeFromTop (hdrH + rowH + capH + knobH);
+        mAlignBox = align;                     // published for paint()
+        align.removeFromTop (hdrH);
+        auto row1 = align.removeFromTop (rowH).reduced (8, 0);
+        mAlignOn.setBounds (row1.removeFromLeft (48));
         row1.removeFromLeft (6);
         mModeCombo.setBounds (row1);
-        align.removeFromTop (14);   // knob caption strip
-        auto aKnobs = align.removeFromTop (78);
-        mFineTune.setBounds (aKnobs.removeFromLeft (aKnobs.getWidth() / 2)
-                                   .withSizeKeepingCentre (74, 76));
-        mMaxShift.setBounds (aKnobs.withSizeKeepingCentre (74, 76));
+        align.removeFromTop (capH);
+        placePair (align.removeFromTop (knobH), mFineTune, mMaxShift);
 
-        b.removeFromTop (6);
+        b.removeFromTop (gap);
+
+        // ── PITCH ───────────────────────────────────────────────────────────
         auto pitch = b;
-        pitch.removeFromTop (18);
-        auto prow = pitch.removeFromTop (24).reduced (8, 0);
-        mPitchOn.setBounds (prow.removeFromLeft (52));
+        mPitchBox = pitch;                     // published for paint()
+        pitch.removeFromTop (hdrH);
+        auto prow = pitch.removeFromTop (rowH).reduced (8, 0);
+        mPitchOn.setBounds (prow.removeFromLeft (48));
         prow.removeFromLeft (6);
         mAlgoCombo.setBounds (prow);
-        pitch.removeFromTop (14);   // band caption strip
-        auto brow = pitch.removeFromTop (22).reduced (8, 0);
+
+        pitch.removeFromTop (capH);
+        auto brow = pitch.removeFromTop (rowH).reduced (8, 0);
         mTypeGuide.setBounds (brow.removeFromLeft ((brow.getWidth() - 4) / 2));
         brow.removeFromLeft (4);
         mTypeDub.setBounds (brow);
-        pitch.removeFromTop (14);
-        auto knobRow = pitch.removeFromTop (78);
-        mRange    .setBounds (knobRow.removeFromLeft (knobRow.getWidth() / 2)
-                                     .withSizeKeepingCentre (74, 76));
-        mVariation.setBounds (knobRow.withSizeKeepingCentre (74, 76));
-        pitch.removeFromTop (14);
-        auto knobRow2 = pitch.removeFromTop (78);
-        mTranspose   .setBounds (knobRow2.removeFromLeft (knobRow2.getWidth() / 2)
-                                         .withSizeKeepingCentre (74, 76));
-        mFormantShift.setBounds (knobRow2.withSizeKeepingCentre (74, 76));
-        pitch.removeFromTop (4);
-        auto frow = pitch.removeFromTop (24).reduced (8, 0);
-        mFormantOn.setBounds (frow.removeFromLeft (100));
+
+        pitch.removeFromTop (capH);
+        placePair (pitch.removeFromTop (knobH), mRange, mVariation);
+
+        pitch.removeFromTop (capH);
+        placePair (pitch.removeFromTop (knobH), mTranspose, mFormantShift);
+
+        pitch.removeFromTop (gap);
+        auto frow = pitch.removeFromTop (rowH).reduced (8, 0);
+        mFormantOn.setBounds (frow.removeFromLeft (juce::jmin (100, frow.getWidth())));
     }
 
 private:
@@ -971,7 +1001,9 @@ private:
     BaySickAlignEditor& mOwner;
     juce::AudioProcessorValueTreeState& mApvts;
 
-    int mAlignBoxH { 140 };   // Flexibility row removed 2026-07-11 (-36 px)
+    // The two section boxes, computed in resized() and drawn by paint().  They
+    // are ONE layout rather than two independent ones -- see the note in paint().
+    juce::Rectangle<int> mAlignBox, mPitchBox;
 
     juce::ToggleButton mAlignOn, mPitchOn, mFormantOn;
     juce::ComboBox     mModeCombo, mAlgoCombo, mTypeGuide, mTypeDub;

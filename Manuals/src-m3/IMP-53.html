@@ -1,0 +1,37 @@
+<p>Each strip carries <b>four</b> sidechain receive lines, and each effect slot
+picks which one it listens to. That is why several effects on one strip can duck
+from different sources.</p>
+
+<div class="codeblock"><div class="codehead">- Source\DSP\EngineSidechainHelper.h (ISidechainEngine tag interface + EngineSidechainHelper primitive)</div><pre><code>// EngineSidechainHelper::setSidechainBuffers / updateLevel (EngineSidechainHelper.h)
+class EngineSidechainHelper
+{
+public:
+    static constexpr int kMaxSlots = 4;   // matches RoutingGraph::kMaxScRecvsPerStrip
+
+    // C.4 Phase 2.2 fix (2026-05-01): COPY pointers into our own fixed-size
+    // array.  Caller previously passed a stack-local array; storing its
+    // pointer caused a dangling-pointer crash on the next audio block once
+    // the lambda that built it had returned.  Now we hold our own copy.
+    void setSidechainBuffers (juce::AudioBuffer&lt;float&gt;* const* bufs, int count) noexcept
+    {
+        const int n = juce::jlimit (0, kMaxSlots, count);
+        for (int i = 0; i &lt; n; ++i)
+            mBufs[i] = bufs[i];
+        for (int i = n; i &lt; kMaxSlots; ++i)
+            mBufs[i] = nullptr;
+        mCount = n;
+    }</code></pre></div>
+<details class="fullfn"><summary>Full function &mdash; - Source\DSP\EngineSidechainHelper.h (ISidechainEngine tag interface + EngineSidechainHelper primitive)</summary><pre><code>class ISidechainEngine
+{
+public:
+    virtual ~ISidechainEngine() = default;
+    virtual void setSidechainBuffers (juce::AudioBuffer&lt;float&gt;* const* bufs, int count) noexcept = 0;
+    virtual float getSidechainLevel() const noexcept = 0;
+};</code></pre></details>
+<pre class="formulas">- `RoutingGraph::kMaxScRecvsPerStrip = 4` (BaySickGraph.h line 321); `BaySickGraph::kMaxScRecvSlots = RoutingGraph::kMaxScRecvsPerStrip` (line 816). `EngineSidechainHelper::kMaxSlots = 4` mirrors it.
+- Also per strip: `kMaxSendsPerStrip = 4`; `kMaxMainOutsPerStrip = MixerChannelIds::kMaxMainOutsPerStrip`.
+- Receive-line APVTS ids: `&lt;prefix&gt;_sc_recv{0..3}_from`, value = channel id of the source, `-1` = empty line. Self-loops (`src == chId`) are skipped.
+- Level published by `updateLevel`: `rms = sqrt(sumSq / (numSamples * chCount))`, max across up to 4 slots, up to 2 channels each; stored in a `std::atomic&lt;float&gt;` with `memory_order_relaxed`.
+- Address-only push: sample data is owned by BaySickGraph&#x27;s per-strip scRecv buffers; slots never allocated stay nullptr; buffers are cleared (not freed) at top of each block.
+- Key alignment: `pullSidechainPredecessorsToGraph` prefers the source&#x27;s PRE-compensation tap (`getScSourceTap`), then applies `applyScRecvDelay` per (consumer, slot) so keys meet late consumer points.</pre>
+<p class="behind"><b>Behind:</b> <a href="manual-2.html#FXM-3">SC: &lt;state&gt;</a>, <a href="manual-2.html#MIXSM-2">Sidechain... submenu</a>, <a href="manual-2.html#BSVC-7">SC: Off</a>.</p>

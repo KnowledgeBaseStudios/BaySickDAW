@@ -1,0 +1,53 @@
+<p>A pattern is a reusable block of notes; the arrangement is those blocks placed
+on a 500-row grid. Deleting a pattern retires its markers and its placed blocks
+with it, so the grid can never hold a block pointing at something that no longer
+exists.</p>
+
+<div class="codeblock"><div class="codehead">Source\BaySickConstants.h (kTicksPerBeat, snap grid)</div><pre><code>// BaySickConstants.h -- the 96 PPQ tick model + snap grid (verbatim, lines 45-79)
+// QA-Ee (96 PPQ): authoritative musical-domain resolution.  One beat (one
+// quarter-note) = 96 ticks.  Every straight AND triplet division lands on an
+// integer tick count (Bar=384, Beat=96, 1/8=48, 1/8-triplet=32, 1/16=24,
+// 1/32=12, 1/32-triplet=8, 1/64=6, 1/64-triplet=4).  Rides ABOVE QA-Ed&#x27;s
+// int64-sample transport.  beats&lt;-&gt;ticks converters live in PatternManager.h.
+static constexpr int kTicksPerBeat = 96;
+
+// Fixed tick grid for the FIXED divisions (param idx 2..10).  idx 0 (Off) +
+// idx 1 (Line) are not fixed values -&gt; return 0 (the caller handles them).
+inline int snapDivToTicks (int idx) noexcept
+{
+    switch (idx)
+    {
+        case 2:  return kTicksPerBeat * 4;   // Bar      = 384
+        case 3:  return kTicksPerBeat;       // Beat     = 96
+        case 4:  return kTicksPerBeat / 2;   // 1/2 Beat = 48
+        case 5:  return kTicksPerBeat / 3;   // 1/3 Beat = 32  (eighth triplet)
+        case 6:  return kTicksPerBeat / 4;   // Step     = 24  (1/16)
+        case 7:  return kTicksPerBeat / 8;   // 1/2 Step = 12  (1/32)
+        case 8:  return kTicksPerBeat / 12;  // 1/3 Step = 8   (1/32 triplet)
+        case 9:  return kTicksPerBeat / 16;  // 1/4 Step = 6   (1/64)
+        case 10: return kTicksPerBeat / 24;  // 1/6 Step = 4   (1/64 triplet)
+        default: return 0;                   // 0 Off / 1 Line: not a fixed grid
+    }
+}</code></pre></div>
+<details class="fullfn"><summary>Full function &mdash; Source\BaySickConstants.h (kTicksPerBeat, snap grid)</summary><pre><code>// PatternManager.h -- beats&lt;-&gt;ticks converters (full functions, lines 9-19)
+// QA-Ee (96 PPQ): beats&lt;-&gt;ticks converters.  kTicksPerBeat (a plain int) lives
+// in BaySickConstants.h; these need juce::int64 so they live here, where every
+// tick consumer already includes PatternManager.h.
+inline juce::int64 beatsToTicks (double beats) noexcept
+{
+    return (juce::int64) std::llround (beats * (double) kTicksPerBeat);
+}
+inline double ticksToBeats (juce::int64 ticks) noexcept
+{
+    return (double) ticks / (double) kTicksPerBeat;
+}</code></pre></details>
+<pre class="formulas">- Tick model: `kTicksPerBeat = 96` (96 PPQ) — every straight AND triplet division is an integer tick count: Bar=384, Beat=96, 1/2 Beat=48, 1/3 Beat (8th triplet)=32, Step (1/16)=24, 1/2 Step (1/32)=12, 1/3 Step (1/32 triplet)=8, 1/4 Step (1/64)=6, 1/6 Step (1/64 triplet)=4. Rides ABOVE the int64-sample transport (QA-Ed). Converters: `beatsToTicks = llround(beats * 96)`, `ticksToBeats = ticks / 96.0`.
+- Unified snap: 11-index scheme shared by Builder / PianoRoll / Record-Quantize (`kNumUnifiedSnapDivs = 11`; idx 0 = Off, 1 = Line [dynamic ladder Bar/Beat/1-8/1-16/1-32/1-64, rung live when g/384 * pixelsPerBar &gt;= min-line-px], 2..10 = fixed tick grid above).
+- Note persistence: `PianoNote.startTicks`/`durationTicks` (serialized `st`/`dt`) are AUTHORITATIVE ON DISK; startBeat/durationBeats are the in-memory editing values, kept tick-aligned by the snap engine, derived at save, refilled at load (legacy beats migrated). Field-order invariant: tick fields and later additions stay LAST — positional brace-inits elsewhere stop at field 7 (`type`). Note defaults: midiNote 60, durationBeats 0.25 (= 24 ticks = 1/16), velocity 0.8.
+- Enum ordinals persisted as raw int (append-only, explicit values, same rule as EffectType): `ClipType { Pattern=0, Audio=1, Automation=2 }`, `CurveType { Linear=0, Stepped=1, Spline=2 }`.
+- Pattern defaults: DEFAULT_BARS=4, DEFAULT_SPB=4, MAX_STEPS_TOTAL=64; `totalSteps = clamp(1, 64, bars*stepsPerBar)`; `stepLengthBeats = 4.0/stepsPerBar`; default color 0xffb0b0b0. Per-pattern tempo REMOVED 2026-04-24 — tempo is global (`global_tempo` paramId).
+- Time signature per pattern: tsNum/tsDen are the EFFECTIVE signature every consumer reads; tsLocked=true = user-set; false = follower re-derived live (placed -&gt; earliest-block marker; unplaced -&gt; bound marker -&gt; current-TS selection -&gt; 4/4).
+- Rolls are per-tab arrays keyed by pageIndex (layerRoll/bassRoll/drumRolls/clipRoll/voxRoll/instRoll/pluginRoll, capacities = kMax*Pages) + two singletons (legacy drumRoll for migration, baySickRustyDrumsRoll).
+- ArrangementBlock: START is beats-authoritative (ONE double `startBeats`, may be negative for slip-edit pre-roll); bar index DERIVED (`floor(startBeats/4)`); length is `lengthTicks` when &gt; 0, else `lengthBars * 4` beats (`kLengthTicksUnset = -1`). XML still writes/reads startBar+startTicks at full precision, no migration. `contentOffsetTicks` = pattern-content phase in grid ticks (384/bar); audio clips continue via `contentStartSamples` instead.
+- The ONE lane evaluator: `evalAutomationLaneAt` serves live editor tick, audio-thread APVTS pass, offline tempo clock and offline lane replay — points ASSUMED SORTED by timeTicks (every mutation site sorts); reached from processBlock so no allocation. LFO shapes: 0=Sine 1=Triangle 2=Saw 3=Square; empty lane returns 0.5.</pre>
+<p class="behind"><b>Behind:</b> <a href="manual-2.html#FRAME-5">Patterns menu</a>, <a href="manual-2.html#TRAN-8">PATTERN</a>, <a href="manual-2.html#TRAN-13">Swing knob</a>, <a href="manual-2.html#TRAN-14">Pattern dropdown</a>, <a href="manual-2.html#BLD-2">View menu</a>, <a href="manual-2.html#BLD-3">Patterns / Files / Auto</a>, <a href="manual-2.html#BLD-4">+ Add</a>, <a href="manual-2.html#BLD-5">Delete</a>, <a href="manual-2.html#BLD-6">A pattern row in the picker</a>, <a href="manual-2.html#BLD-7">Snap toggle</a>, <a href="manual-2.html#BLD-9">Stretch (S) v</a>, <a href="manual-2.html#BLD-11">H</a>, <a href="manual-2.html#BLD-12">- / +</a>, <a href="manual-2.html#BLD-13">Breadcrumb</a>.</p>

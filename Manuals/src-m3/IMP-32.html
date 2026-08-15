@@ -1,0 +1,104 @@
+<p>Preamp grit that keeps the fundamental clean.</p>
+
+<div class="codeblock"><div class="codehead">Source\DSP\BassDriverStyleDSP.cpp</div><pre><code>// BassDriverStyleDSP::process — adaptive drive + asymmetric soft-clip at 4x
+    const float baseDrive = 1.0f + mDrive * 14.0f;
+    ...
+        float* env = mDriveEnvBuf.getWritePointer (0);
+        for (int i = 0; i &lt; n; ++i)
+        {
+            float mono = 0.0f;
+            for (int ch = 0; ch &lt; numCh; ++ch)
+                mono += mCleanSumBuf.getSample (ch, i);
+            mono = std::abs (mono / (float) numCh);
+            const float coef = (mono &gt; mEnv) ? mEnvAtkCoef : mEnvRelCoef;
+            mEnv += (mono - mEnv) * coef;
+            const float lift = std::tanh (mEnv * kEnvSens);   // 0..~1
+            env[i] = baseDrive * (kDriveFloor + (1.0f - kDriveFloor) * lift);
+        }
+    ...
+            for (int i = 0; i &lt; upN; ++i)
+            {
+                const int baseIdx = juce::jmin (n - 1, i / osRatio);
+                const float x = d[i] * env[baseIdx] + kAsymBias;
+                d[i] = std::tanh (x) - kAsymBiasOffset;
+            }</code></pre></div>
+<details class="fullfn"><summary>Full function &mdash; Source\DSP\BassDriverStyleDSP.cpp</summary><pre><code>    // 2. Sum Mid + High into the &quot;to-be-clipped&quot; path.
+    for (int ch = 0; ch &lt; numCh; ++ch)
+    {
+        const float* mid  = mMidBuf .getReadPointer (ch);
+        const float* high = mHighBuf.getReadPointer (ch);
+        float* clean      = mCleanSumBuf.getWritePointer (ch);
+        for (int i = 0; i &lt; n; ++i)
+            clean[i] = mid[i] + high[i] * mHigh;
+    }
+
+    // 3a. MDP-style dynamics-adaptive drive (QA-EffectsReview Task 5).  An envelope
+    // follower on the Mid+High sum sets a per-base-sample drive: soft playing gets
+    // kDriveFloor of the Drive knob (stays cleaner / keeps dynamics), digging in
+    // lifts it toward the full knob value (the grind comes in on harder playing).
+    const float baseDrive = 1.0f + mDrive * 14.0f;
+    if (mDriveEnvBuf.getNumSamples() &lt; n)
+        mDriveEnvBuf.setSize (1, n, false, false, true);
+    {
+        float* env = mDriveEnvBuf.getWritePointer (0);
+        for (int i = 0; i &lt; n; ++i)
+        {
+            float mono = 0.0f;
+            for (int ch = 0; ch &lt; numCh; ++ch)
+                mono += mCleanSumBuf.getSample (ch, i);
+            mono = std::abs (mono / (float) numCh);
+            const float coef = (mono &gt; mEnv) ? mEnvAtkCoef : mEnvRelCoef;
+            mEnv += (mono - mEnv) * coef;
+            const float lift = std::tanh (mEnv * kEnvSens);   // 0..~1
+            env[i] = baseDrive * (kDriveFloor + (1.0f - kDriveFloor) * lift);
+        }
+    }
+
+    // 3b. Asymmetric soft-clip on the Mid+High sum at 4x oversampled, at the
+    // adaptive drive (mapped per base sample).  Base scalar 1..15 (bass drivers
+    // are gentler than guitar overdrives).
+    for (int ch = 0; ch &lt; numCh; ++ch)
+        mClippedSumBuf.copyFrom (ch, 0, mCleanSumBuf, ch, 0, n);
+    {
+        juce::dsp::AudioBlock&lt;float&gt; clipBlk (mClippedSumBuf);
+        auto clipSub = clipBlk.getSubBlock (0, (size_t) n).getSubsetChannelBlock (0, (size_t) numCh);
+        auto upBlock = mOs.upsample (clipSub);
+        const int upN     = (int) upBlock.getNumSamples();
+        const int upChs   = (int) upBlock.getNumChannels();
+        const int osRatio = (n &gt; 0) ? juce::jmax (1, upN / n) : 4;
+        const float* env  = mDriveEnvBuf.getReadPointer (0);
+        for (int ch = 0; ch &lt; upChs; ++ch)
+        {
+            float* d = upBlock.getChannelPointer ((size_t) ch);
+            for (int i = 0; i &lt; upN; ++i)
+            {
+                const int baseIdx = juce::jmin (n - 1, i / osRatio);
+                const float x = d[i] * env[baseIdx] + kAsymBias;
+                d[i] = std::tanh (x) - kAsymBiasOffset;
+            }
+        }
+        mOs.downsample (clipSub);
+    }
+
+    // 4. Blend clean Mid+High (mCleanSumBuf) with clipped Mid+High
+    //    (mClippedSumBuf) per the Blend knob, then write into buffer along
+    //    with the clean Low band.  buffer = low*mLow + (clean*(1-blend) +
+    //    clipped*blend).
+    const float blend = juce::jlimit (0.0f, 1.0f, mBlend);
+    const float gC    = 1.0f - blend;
+    const float gW    = blend;
+    for (int ch = 0; ch &lt; numCh; ++ch)
+    {
+        const float* low     = mLowBuf       .getReadPointer (ch);
+        const float* cleanMH = mCleanSumBuf  .getReadPointer (ch);
+        const float* wetMH   = mClippedSumBuf.getReadPointer (ch);
+        float* out           = buffer.getWritePointer (ch);
+        for (int i = 0; i &lt; n; ++i)
+            out[i] = low[i] * mLow + cleanMH[i] * gC + wetMH[i] * gW;
+    }</code></pre></details>
+<pre class="formulas">- Band split: Linkwitz-Riley crossovers at 500 Hz (low/mid — lows below 500 stay clean, BB-1X behavior) and 2 kHz (mid/high).
+- Drive scalar: `baseDrive = 1 + drive01 * 14` (1..15x — bass drivers gentler than guitar ODs).
+- Adaptive drive (MDP-style): envelope follower on the Mid+High sum (~3 ms attack, ~80 ms release); `lift = tanh(env * 3)`; per-sample drive = `baseDrive * (0.4 + 0.6 * lift)` — soft playing gets 40% of the knob, digging in reaches 100%.
+- Shaper: asymmetric tanh at 4x oversampling: `y = tanh(x * drive + 0.2) - tanh(0.2)` — same bias approach as Blues Drive.
+- Mix: `out = low * Low + cleanMidHigh * (1 - Blend) + clippedMidHigh * Blend`; the High knob pre-trims the high band before the clip path.
+- DC blocker 5 Hz; Level -24..+12 dB.</pre>

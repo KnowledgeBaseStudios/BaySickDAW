@@ -1,0 +1,37 @@
+<p>A Plugins tab - a third-party VST3 instrument living in its own window.
+The window IS the plugin's own interface; BaySickDAW provides the frame,
+the routing and the safety net.</p>
+
+<figure data-views="BSPLUG">
+
+<p id="BSPLUG-1"><b>The window title</b> is the TAB's name
+(<code>Plugin 1</code>), not the plugin's - rename the tab and the window
+follows. The plugin's own name lives inside its surface.</p>
+
+<p><b>Size:</b> the window opens at whatever size the plugin
+declares and is not user-resizable - a Plugins tab is nothing but the
+hosted plugin, so there is no frame worth dragging.</p>
+
+<p><b>The safety net:</b> the plugin runs out of process, in
+a sandbox helper. If it crashes, the helper dies and BaySickDAW keeps
+playing - your project never goes down with someone else's code.</p>
+
+<p><b>Automation</b> goes through the window Menu's
+<code>Automate</code> submenu - <code>Last Touched</code> plus the full
+parameter list - because a third-party plugin's knobs cannot be known by
+name in advance. Wiggle the control in the plugin, then pick Last
+Touched.</p>
+
+<p><b>If the plugin dies,</b> the surface is replaced by a
+marker naming it and the reason - <code>This plugin closed
+unexpectedly</code>, <code>32-bit plugin - requires the plugin
+bridge</code>, or <code>The plugin could not be loaded</code> - and the
+window title gains <code>(missing)</code>. The menu offers
+<code>Retry Loading Plugin</code> while it is down.</p>
+
+<p id="BSPLUG-2"><b>Swing Mix</b> - the small knob on the title bar next to
+Menu - sets how much of the transport's global Swing this instrument
+feels, from none to full. Swing pushes every second sixteenth-note late to
+make parts groove; per-player mix means the drums can swing hard while the
+guitar stays straight. Right-click offers <code>Truncate Swing
+Notes</code> for cleaning up notes that swing pushed into each other.</p>

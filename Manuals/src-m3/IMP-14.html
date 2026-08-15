@@ -1,0 +1,145 @@
+<p>Eight bands, each with a type, frequency, gain and Q. A dynamic band applies
+its gain only when the level in that band crosses a threshold, so it can sit idle
+until the problem happens.</p>
+<div class="codeblock"><div class="codehead">- Source/DSP/EQ8DSP.h</div><pre><code>// EQ8DSP::makeOneSection -- the 9 band types (one biquad section)
+EQ8DSP::Coeffs::Ptr EQ8DSP::makeOneSection(float sr, float freq,
+                                             float gainDb, float q, int type) const
+{
+    float f  = juce::jlimit(20.0f, sr * 0.499f, freq);
+    float qv = juce::jlimit(0.05f, 20.0f, q);
+    float g  = gainDb;
+
+    switch (type)
+    {
+        case 0:  return Coeffs::makePeakFilter  (sr, f, qv, juce::Decibels::decibelsToGain(g));
+        case 1:  return Coeffs::makeLowPass     (sr, f, qv);
+        case 2:  return Coeffs::makeHighPass    (sr, f, qv);
+        case 3:  return Coeffs::makeLowShelf    (sr, f, qv, juce::Decibels::decibelsToGain(g));
+        case 4:  return Coeffs::makeHighShelf   (sr, f, qv, juce::Decibels::decibelsToGain(g));
+        case 5:  return Coeffs::makeNotch       (sr, f, qv);
+        case 6:  return nullptr;   // OFF - no filter
+        case 7:  return Coeffs::makeBandPass    (sr, f, qv);
+        default: return Coeffs::makePeakFilter  (sr, f, qv, juce::Decibels::decibelsToGain(g));
+    }
+}</code></pre></div>
+<details class="fullfn"><summary>Full function &mdash; - Source/DSP/EQ8DSP.h</summary><pre><code>// EQ8DSP::isDynamicSupportedType + EQ8DSP::processDynamic -- the dynamic EQ engine
+bool EQ8DSP::isDynamicSupportedType(int type) const noexcept
+{
+    // Only gain-bearing types support dynamic mode. LP/HP/Notch/BP/OFF have no
+    // meaningful &quot;gain&quot; axis for a dynamic curve to modulate. Tilt is two
+    // shelves so it&#x27;s gain-bearing too.
+    return type == 0 /*Peaking*/ || type == 3 /*LowShelf*/
+        || type == 4 /*HighShelf*/ || type == 8 /*Tilt*/;
+}
+
+void EQ8DSP::processDynamic(int i, int numSamples)
+{
+    auto&amp; bs = mBands[i];
+    const auto&amp; p = bs.params;
+
+    if (!p.dynamic || !isDynamicSupportedType(p.type) || p.type == 6 /*OFF*/)
+    {
+        bs.currentGrDb.store(0.0f, std::memory_order_relaxed);
+        return;
+    }
+    if (mSampleRate &lt;= 0.0) return;
+
+    // Make sure detector coefs match the current band freq/Q.
+    if (!bs.detFilterL.coefficients) updateDetector(i);
+
+    // Detector source: the saved original input (parallel-detector model).
+    // C.4 Phase 1 (2026-04-30): if this band has scSourceId in 0..3, swap
+    // the detector source for the strip&#x27;s SC array entry at that index.
+    const juce::AudioBuffer&lt;float&gt;* detSrc = &amp;mDetInput;
+    if (p.scSourceId &gt;= 0 &amp;&amp; mScBufs != nullptr
+        &amp;&amp; p.scSourceId &lt; mScCount &amp;&amp; mScBufs[p.scSourceId] != nullptr)
+    {
+        auto* cand = mScBufs[p.scSourceId];
+        if (cand-&gt;getNumSamples() &gt;= numSamples &amp;&amp; cand-&gt;getNumChannels() &gt; 0)
+            detSrc = cand;
+    }
+
+    // Pick the relevant channel domain from the chosen detector source based
+    // on the band&#x27;s channel routing. Stereo + LOnly use L; ROnly uses R; Mid
+    // uses (L+R)/2; Side uses (L-R)/2 computed on the fly.
+    const float* detSrcL = detSrc-&gt;getReadPointer(0);
+    const float* detSrcR = detSrc-&gt;getNumChannels() &gt; 1
+                         ? detSrc-&gt;getReadPointer(1) : detSrcL;
+
+    // Envelope follower constants (one-pole smoother with asymmetric times).
+    // coef = exp(-1 / (time_ms * sr / 1000)) is the standard formula.
+    const float sr      = (float) mSampleRate;
+    const float attMs   = juce::jmax(0.1f, p.attack);
+    const float relMs   = juce::jmax(1.0f, p.release);
+    const float attCoef = std::exp(-1.0f / (0.001f * attMs  * sr));
+    const float relCoef = std::exp(-1.0f / (0.001f * relMs  * sr));
+
+    float envLlocal = bs.envL;
+    float envRlocal = bs.envR;
+
+    for (int n = 0; n &lt; numSamples; ++n)
+    {
+        float inL = 0.0f, inR = 0.0f;
+        switch (p.channel)
+        {
+            case Channel::Stereo: inL = detSrcL[n]; inR = detSrcR[n]; break;
+            case Channel::Mid:    inL = 0.5f * (detSrcL[n] + detSrcR[n]); inR = inL; break;
+            case Channel::Side:   inL = 0.5f * (detSrcL[n] - detSrcR[n]); inR = inL; break;
+            case Channel::LOnly:  inL = detSrcL[n];  inR = 0.0f; break;
+            case Channel::ROnly:  inL = 0.0f;        inR = detSrcR[n]; break;
+            default:              inL = detSrcL[n]; inR = detSrcR[n]; break;
+        }
+        const float detL = std::abs(bs.detFilterL.processSample(inL));
+        const float detR = std::abs(bs.detFilterR.processSample(inR));
+
+        const float coefL = (detL &gt; envLlocal) ? attCoef : relCoef;
+        const float coefR = (detR &gt; envRlocal) ? attCoef : relCoef;
+        envLlocal = coefL * envLlocal + (1.0f - coefL) * detL;
+        envRlocal = coefR * envRlocal + (1.0f - coefR) * detR;
+    }
+    bs.envL = envLlocal;
+    bs.envR = envRlocal;
+
+    // Stereo-link: louder-of-L/R drives GR.
+    const float env = juce::jmax(envLlocal, envRlocal);
+    const float envDb = juce::Decibels::gainToDecibels(env + 1.0e-12f, -120.0f);
+
+    // 12j follow-up Q2: direction + amount derived from signed rangeDb.
+    //   rangeDb &lt; 0  -&gt; downward compression up to |range| dB (cut above threshold)
+    //   rangeDb &gt; 0  -&gt; upward expansion up to +range dB (boost below threshold)
+    //   rangeDb == 0 -&gt; no modulation (GR stays at 0)
+    const float thr     = p.threshold;
+    const float ratio   = juce::jmax(1.0f, p.ratio);
+    const bool  isUp    = (p.rangeDb &gt; 0.0f);
+    const float rangeMag= std::abs(p.rangeDb);
+    float grDb = 0.0f;
+
+    if (rangeMag &gt; 0.0f)
+    {
+        if (isUp)
+        {
+            const float under = thr - envDb;
+            if (under &gt; 0.0f)
+                grDb = under * (1.0f - 1.0f / ratio);   // positive = boost
+            grDb = juce::jmin(grDb, rangeMag);
+        }
+        else
+        {
+            const float over = envDb - thr;
+            if (over &gt; 0.0f)
+                grDb = -over * (1.0f - 1.0f / ratio);   // negative = cut
+            grDb = juce::jmax(grDb, -rangeMag);
+        }
+    }
+
+    bs.currentGrDb.store(grDb, std::memory_order_relaxed);
+}</code></pre></details>
+<pre class="formulas">- Band types (per-band `type` 0..8): 0 Bell/Peaking, 1 LP, 2 HP, 3 LowShelf, 4 HighShelf, 5 Notch, 6 OFF (null filter), 7 BandPass, 8 Tilt (= low shelf at +g plus high shelf at -g at the same pivot freq, 2 sections). All from JUCE RBJ `Coefficients` factories; freq clamped 20 Hz..0.499*sr, Q clamped 0.05..20.
+- Slopes (`slope` 0..6): 0 Center-2 = 1 section (user Q); 1/2/3 Steep-4/6/8 = 2/3/4 cascaded sections with Butterworth Q ladders `kSteepQ` = {0.5412, 1.3066}, {0.5176, 0.7071, 1.9318}, {0.5098, 0.6013, 0.9000, 2.5628}; 4/5/6 Gentle-4/6/8 = 2/3/4 sections all at `kGentleQ = 0.7071` (Linkwitz-Riley style). Bell/shelf cascades split gain: `sectionGain = gainDb / numSections`.
+- Filter engines (12e): LP/HP/BP run TPT (zero-delay-feedback SVF); Peaking/shelves/Notch/Tilt stay RBJ biquads. Up to `kMaxSections = 4` biquads per band, `kNumBands = 8`.
+- Proportional Q (12b, default on, Peaking only): `effQ = userQ * (1 + |gainDb|/18)` — Q narrows as gain rises.
+- Dynamic EQ (12j): only on gain-bearing types (0/3/4/8). Detector = bandpass biquad at the band&#x27;s freq/Q (HOST rate, parallel-detector model: detectors see the ORIGINAL block input, or an external sidechain via `scSourceId` 0..3). Envelope: one-pole per channel, `coef = exp(-1/(ms*0.001*sr))`, attack 0.1..500 ms (default 10), release 1..2000 ms (default 100); stereo-linked by max(L,R).
+- Gain computer: with `over = envDb - threshold` (threshold -60..0 dB, default -18; ratio 1..20, default 2): downward (rangeDb &lt; 0): `grDb = -over * (1 - 1/ratio)` clamped to `-|rangeDb|`; upward (rangeDb &gt; 0): `grDb = (thr - envDb) * (1 - 1/ratio)` clamped to `+rangeDb`. rangeDb signed -18..+18 dB, default 0 = no modulation. Effective filter gain = `designGain + grDb`, applied via block-rate coefficient rebuild.
+- Linear-mode interaction: dynamic EQ is disabled while a linear-phase mode is active (T2b option C); the UI menu labels the toggle &quot;Make Dynamic  (disabled in Linear modes)&quot;.
+- UI (SharedUI.cpp): the type dropdown offers Bell/LP/HP/LShelf/HShelf/Notch/Off/BPass/Tilt; the drawn curve uses `effGain = gainDb + (dynamic ? currentGrDb : 0)` so dynamic bands animate; a ghost outline draws the range endpoint; a dynamic params popout carries Thr / Ratio / Atk / Rel / Range / Up columns.</pre>
+<p class="behind"><b>Behind:</b> <a href="manual-2.html#EQ-1">Pre EQ / Post EQ</a>, <a href="manual-2.html#EQ-3">A Bank</a>, <a href="manual-2.html#EQ-4">Grid</a>, <a href="manual-2.html#EQ-5">Frequency scale</a>, <a href="manual-2.html#EQ-6">A band handle</a>, <a href="manual-2.html#EQ-7">Band M</a>, <a href="manual-2.html#EQ-8">Band S</a>, <a href="manual-2.html#EQ-9">Band type box</a>, <a href="manual-2.html#EQ-10">Band gain fader</a>, <a href="manual-2.html#EQ-11">Band gain readout</a>, <a href="manual-2.html#EQ-12">Band frequency knob and readout</a>, <a href="manual-2.html#EQ-13">Band Q knob and readout</a>, <a href="manual-2.html#EQ-14">Main column</a>, <a href="manual-2.html#EQB-1">Filter Type submenu</a>.</p>

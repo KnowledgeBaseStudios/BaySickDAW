@@ -1,0 +1,134 @@
+<p>Ten microphone archetypes. <b>These are EQ curves, not impulse responses</b>
+&mdash; four parametric bands per model, shaped to approximate the published
+response of that kind of microphone. Cheaper than convolution and honest about
+what it is; loading a real capture is the <code>User IR</code> option.</p>
+<div class="codeblock"><div class="codehead">Source\DSP\MicSimDSP.cpp</div><pre><code>// MicSimDSP — 4-band-per-model archetype table (first two of ten shown)
+struct BandSpec { float freq; float q; float gainDb; };
+
+// LiveVocalDynamic (SM58-style cardioid dynamic)
+{ &quot;Live Vocal Dynamic&quot;,
+  &quot;Live vocals, sturdy stage mic&quot;,
+  {{   80.0f, 0.7f, -6.0f },
+   {  400.0f, 1.0f, -1.5f },
+   { 5000.0f, 1.4f, +5.0f },
+   {10000.0f, 0.7f, -3.0f }} },
+
+// BroadcastDynamic (SM7B-style)
+{ &quot;Broadcast Dynamic&quot;,
+  &quot;Podcasting, voiceover, smooth vocals&quot;,
+  {{  100.0f, 0.7f, -1.0f },
+   { 1000.0f, 1.0f,  0.0f },
+   { 4000.0f, 1.4f, +2.0f },
+   {10000.0f, 0.7f, -2.0f }} },</code></pre></div>
+<details class="fullfn"><summary>Full function &mdash; Source\DSP\MicSimDSP.cpp</summary><pre><code>namespace
+{
+    struct BandSpec { float freq; float q; float gainDb; };
+    struct ModelSpec
+    {
+        const char* displayName;
+        const char* typicalUse;
+        BandSpec    bands[4];
+    };
+
+    // 10 built-in mic-archetype fingerprints.  Generic descriptive names
+    // only -- no trademarked product names ship in the binary.  Curve
+    // values are 4-band parametric EQ approximations of typical published
+    // FR characteristics.  These are &quot;in the style of&quot; the named archetype.
+    static const ModelSpec kModels[(int) MicSimDSP::Model::kNumModels] =
+    {
+        // LiveVocalDynamic (SM58-style cardioid dynamic)
+        { &quot;Live Vocal Dynamic&quot;,
+          &quot;Live vocals, sturdy stage mic&quot;,
+          {{   80.0f, 0.7f, -6.0f },
+           {  400.0f, 1.0f, -1.5f },
+           { 5000.0f, 1.4f, +5.0f },
+           {10000.0f, 0.7f, -3.0f }} },
+
+        // BroadcastDynamic (SM7B-style)
+        { &quot;Broadcast Dynamic&quot;,
+          &quot;Podcasting, voiceover, smooth vocals&quot;,
+          {{  100.0f, 0.7f, -1.0f },
+           { 1000.0f, 1.0f,  0.0f },
+           { 4000.0f, 1.4f, +2.0f },
+           {10000.0f, 0.7f, -2.0f }} },
+
+        // WorkhorseCardioid (Beta 58 / e835-style dynamic)
+        { &quot;Workhorse Cardioid&quot;,
+          &quot;Backing vocals, brighter lead vox&quot;,
+          {{  100.0f, 0.7f, -4.0f },
+           {  250.0f, 1.0f, -1.0f },
+           { 6000.0f, 1.4f, +6.0f },
+           {12000.0f, 0.7f, +2.0f }} },
+
+        // VintageLDC87 (U87-style large diaphragm condenser)
+        { &quot;Vintage LDC &#x27;87&quot;,
+          &quot;Studio lead vocal, classic LDC sound&quot;,
+          {{   80.0f, 0.7f, +1.0f },
+           { 1000.0f, 1.0f,  0.0f },
+           { 8000.0f, 1.0f, +3.0f },
+           {12000.0f, 1.4f, +4.0f }} },
+
+        // ModernLDC (TLM103-style)
+        { &quot;Modern LDC&quot;,
+          &quot;Modern vocals, voiceover&quot;,
+          {{  100.0f, 0.7f, -1.0f },
+           {  800.0f, 1.0f,  0.0f },
+           { 6000.0f, 1.0f, +4.0f },
+           {12000.0f, 1.4f, +5.0f }} },
+
+        // MultiPatternLDC (C414-style)
+        { &quot;Multi-Pattern LDC&quot;,
+          &quot;Versatile studio LDC, pop vocals&quot;,
+          {{   80.0f, 0.7f,  0.0f },
+           {  250.0f, 1.0f, -1.0f },
+           { 5000.0f, 1.4f, +3.0f },
+           {14000.0f, 1.4f, +5.0f }} },
+
+        // TubeLDC (ELA M 251 / C12-style vintage tube)
+        { &quot;Tube LDC&quot;,
+          &quot;Character vocals, jazz, soul&quot;,
+          {{   80.0f, 0.7f, +2.0f },
+           {  350.0f, 1.0f, -1.5f },
+           { 6000.0f, 1.0f, +2.5f },
+           {10000.0f, 0.7f, +3.0f }} },
+
+        // PencilSDC (KM184-style small diaphragm)
+        { &quot;Pencil SDC&quot;,
+          &quot;Acoustic guitar, drum overheads, hi-hat&quot;,
+          {{  100.0f, 0.7f, -1.0f },
+           { 1000.0f, 1.0f,  0.0f },
+           { 8000.0f, 1.0f, +1.0f },
+           {14000.0f, 1.0f, +2.0f }} },
+
+        // Ribbon (R-121-style figure-8)
+        { &quot;Ribbon&quot;,
+          &quot;Guitar amps, brass, character vocal&quot;,
+          {{   80.0f, 0.7f, +2.0f },
+           {  500.0f, 1.0f, +1.0f },
+           { 5000.0f, 1.0f, -3.0f },
+           {12000.0f, 0.7f, -6.0f }} },
+
+        // KickDrum (D112 / Beta 52-style)
+        { &quot;Kick Drum&quot;,
+          &quot;Kick drum, bass cabinets&quot;,
+          {{   60.0f, 1.0f, +6.0f },
+           {  400.0f, 1.4f, -6.0f },
+           { 4000.0f, 1.4f, +6.0f },
+           {10000.0f, 0.7f, +2.0f }} },
+    };
+}</code></pre></details>
+<pre class="formulas">- Each of the 10 archetypes is a serial cascade of 4 peak-filter biquads (`makePeakFilter(sr, freq, q, dbToGain(gainDb))`) — 4-band parametric approximations of published frequency-response characteristics, &quot;in the style of&quot; (no trademarked names in the binary).
+- The table, condensed (freq Hz / Q / dB, four bands each):
+  - Live Vocal Dynamic (SM58-style): 80/0.7/-6, 400/1.0/-1.5, 5000/1.4/+5, 10000/0.7/-3
+  - Broadcast Dynamic (SM7B-style): 100/0.7/-1, 1000/1.0/0, 4000/1.4/+2, 10000/0.7/-2
+  - Workhorse Cardioid (Beta 58 / e835-style): 100/0.7/-4, 250/1.0/-1, 6000/1.4/+6, 12000/0.7/+2
+  - Vintage LDC &#x27;87 (U87-style): 80/0.7/+1, 1000/1.0/0, 8000/1.0/+3, 12000/1.4/+4
+  - Modern LDC (TLM103-style): 100/0.7/-1, 800/1.0/0, 6000/1.0/+4, 12000/1.4/+5
+  - Multi-Pattern LDC (C414-style): 80/0.7/0, 250/1.0/-1, 5000/1.4/+3, 14000/1.4/+5
+  - Tube LDC (ELA M 251 / C12-style): 80/0.7/+2, 350/1.0/-1.5, 6000/1.0/+2.5, 10000/0.7/+3
+  - Pencil SDC (KM184-style): 100/0.7/-1, 1000/1.0/0, 8000/1.0/+1, 14000/1.0/+2
+  - Ribbon (R-121-style): 80/0.7/+2, 500/1.0/+1, 5000/1.0/-3, 12000/0.7/-6
+  - Kick Drum (D112 / Beta 52-style): 60/1.0/+6, 400/1.4/-6, 4000/1.4/+6, 10000/0.7/+2
+- Modes: None (passthrough), BuiltIn (the 4-band cascade), UserIR (two A/B convolution slots, Trim+Normalise, SafeAudioReader-probed before commit).
+- Output: wet/dry `out = wet*mix + dry*(1-mix)`; full-wet skips the blend loop.</pre>
+<p class="behind"><b>Behind:</b> <a href="manual-2.html#BSNAM-12">MIC SIM A heading. MIC SIM B is the same c...</a>, <a href="manual-2.html#BSNAM-14">Mode dropdown</a>, <a href="manual-2.html#BSNAM-15">Model dropdown</a>, <a href="manual-2.html#BSNAM-16">User-IR path label</a>, <a href="manual-2.html#BSNAM-17">Mic Sim Mix</a>.</p>

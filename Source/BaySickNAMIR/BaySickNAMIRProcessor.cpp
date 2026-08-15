@@ -132,8 +132,14 @@ BaySickNAMIRProcessor::createLayout()
         juce::StringArray { "A", "B" }, 0));
 
     // ── H-6d Mic Sim ─────────────────────────────────────────────────────────
+    // TWO choices, not three (Jeff, 2026-08-11).  "None" was the mic being off,
+    // which is now what the Mic A Active switch says -- and on Mic B it said it
+    // twice, once here and once on that mic's own switch.  Index 0 is Built-in,
+    // so the DSP mode is index + 1 (see processBlock); MicSimDSP::Mode::None is
+    // now unreachable from the UI and is reached by the switch instead.
+    layout.add (std::make_unique<B> (PID ("nam_mica_active", 1), "Mic A Active", false));
     layout.add (std::make_unique<C> (PID ("nam_micsim_mode", 1), "Mic Sim Mode",
-        juce::StringArray { "None", "Built-in", "User IR" }, 0));
+        juce::StringArray { "Built-in", "User IR" }, 0));
     layout.add (std::make_unique<C> (PID ("nam_micsim_model", 1), "Mic Sim Model",
         juce::StringArray { "Live Vocal Dynamic", "Broadcast Dynamic",
                               "Workhorse Cardioid", "Vintage LDC '87",
@@ -147,6 +153,12 @@ BaySickNAMIRProcessor::createLayout()
         juce::NormalisableRange<float> (1.0f, 150.0f, 0.5f), 30.0f));
     layout.add (std::make_unique<F> (PID ("nam_placement_angle_deg", 1), "Mic Angle",
         juce::NormalisableRange<float> (-90.0f, 90.0f, 0.5f), 0.0f));
+    // Vertical offset from the centre of the cone (Jeff, 2026-08-11).  The
+    // engine still takes ONE off-axis angle; height is combined with Angle in
+    // processBlock, which is why MicPlacementDSP needed no change.  0 is dead
+    // centre, so a project saved before this loads sounding identical.
+    layout.add (std::make_unique<F> (PID ("nam_placement_height_cm", 1), "Mic Height",
+        juce::NormalisableRange<float> (-30.0f, 30.0f, 0.5f), 0.0f));
     layout.add (std::make_unique<C> (PID ("nam_placement_polar", 1), "Polar Pattern",
         juce::StringArray { "Omni", "Cardioid", "Supercardioid",
                               "Hypercardioid", "Figure-8" }, 1));
@@ -156,7 +168,7 @@ BaySickNAMIRProcessor::createLayout()
     // ── QA-Fc dual-mic (Mic B - parallel path, summed) ───────────────────────
     layout.add (std::make_unique<B> (PID ("nam_micb_active", 1), "Mic B Active", false));
     layout.add (std::make_unique<C> (PID ("nam_micsim_b_mode", 1), "Mic B Sim Mode",
-        juce::StringArray { "None", "Built-in", "User IR" }, 0));
+        juce::StringArray { "Built-in", "User IR" }, 0));
     layout.add (std::make_unique<C> (PID ("nam_micsim_b_model", 1), "Mic B Sim Model",
         juce::StringArray { "Live Vocal Dynamic", "Broadcast Dynamic",
                               "Workhorse Cardioid", "Vintage LDC '87",
@@ -166,6 +178,8 @@ BaySickNAMIRProcessor::createLayout()
         juce::NormalisableRange<float> (0.0f, 100.0f, 1.0f), 100.0f));
     layout.add (std::make_unique<F> (PID ("nam_placement_b_distance_cm", 1), "Mic B Distance",
         juce::NormalisableRange<float> (1.0f, 150.0f, 0.5f), 30.0f));
+    layout.add (std::make_unique<F> (PID ("nam_placement_b_height_cm", 1), "Mic B Height",
+        juce::NormalisableRange<float> (-30.0f, 30.0f, 0.5f), 0.0f));
     layout.add (std::make_unique<F> (PID ("nam_placement_b_angle_deg", 1), "Mic B Angle",
         juce::NormalisableRange<float> (-90.0f, 90.0f, 0.5f), 0.0f));
     layout.add (std::make_unique<C> (PID ("nam_placement_b_polar", 1), "Mic B Polar Pattern",
@@ -281,6 +295,41 @@ int BaySickNAMIRProcessor::oversamplingLatencySamples (int factor) const
 // ─────────────────────────────────────────────────────────────────────────────
 // processBlock - full Phase G-1.3 chain.
 // ─────────────────────────────────────────────────────────────────────────────
+namespace
+{
+    // HEIGHT -> the one off-axis angle MicPlacementDSP takes.
+    //
+    // The engine is rotationally symmetric about the speaker axis
+    // (polarResponse is cos(angle); the off-axis shelf uses abs(angle)), so it
+    // wants the TRUE off-axis angle rather than one component of it.  With a
+    // horizontal angle h and a height y at horizontal distance d:
+    //
+    //     v   = atan(y / d)            the vertical angle the height implies
+    //     eff = acos(cos h * cos v)    the actual angle off the axis
+    //     r   = sqrt(d^2 + y^2)        the actual straight-line distance
+    //
+    // Feeding those two in means proximity, air absorption, off-axis darkening
+    // and polar gain are all correct for a mic that is off-centre vertically,
+    // with nothing changed inside the DSP itself.  Height 0 reduces to exactly
+    // the old behaviour, which is what makes existing projects load unchanged.
+    struct PlacementGeometry { float distanceCm; float angleDeg; };
+
+    PlacementGeometry combinePlacement (float distCm, float angleDeg, float heightCm) noexcept
+    {
+        distCm = juce::jmax (1.0f, distCm);
+
+        const float h = juce::degreesToRadians (angleDeg);
+        const float v = std::atan2 (heightCm, distCm);
+
+        const float cosEff = juce::jlimit (-1.0f, 1.0f, std::cos (h) * std::cos (v));
+        const float effDeg = juce::radiansToDegrees (std::acos (cosEff))
+                               * (angleDeg < 0.0f ? -1.0f : 1.0f);
+
+        return { std::sqrt (distCm * distCm + heightCm * heightCm),
+                 juce::jlimit (-90.0f, 90.0f, effDeg) };
+    }
+}
+
 void BaySickNAMIRProcessor::processBlock (juce::AudioBuffer<float>& buffer,
                                           juce::MidiBuffer&)
 {
@@ -482,48 +531,78 @@ void BaySickNAMIRProcessor::processBlock (juce::AudioBuffer<float>& buffer,
     // in-place next -- stash the feed first.  micBRun stays true through the
     // ramp-out so toggling off glides to silence instead of stepping; once
     // settled at 0 the whole B path costs one param read + two compares.
+    //
+    // BOTH mics are switched now (Jeff, 2026-08-11), and the pre-mic tap serves
+    // both: it is B's INPUT and it is also A's dry side, because A processes the
+    // main buffer in place and switching it off has to fade back to something.
+    const bool micAActive = get ("nam_mica_active") > 0.5f;
     const bool micBActive = get ("nam_micb_active") > 0.5f;
+    const bool micARun    = micAActive || mMicAGain > 0.0f;
     const bool micBRun    = micBActive || mMicBGain > 0.0f;
-    if (micBRun)
+
+    if (micARun || micBRun)
     {
-        if (! mMicBWasRunning)
-        {
-            // Rising edge after idle: the B convolution FIFO + filter state
-            // still hold audio from the last active period -- flush so the
-            // ramp-in starts from silence, not a replay of stale signal.
-            mMicSimB.reset();
-            mMicPlacementB.reset();
-        }
         if (mPreMicScratch.getNumSamples() < numSamples)
             mPreMicScratch.setSize (2, numSamples, false, false, true);
         for (int ch = 0; ch < juce::jmin (2, numCh); ++ch)
             mPreMicScratch.copyFrom (ch, 0, buffer, ch, 0, numSamples);
     }
+
+    // Rising edge after idle: the convolution FIFO + filter state still hold
+    // audio from the last active period -- flush so the ramp-in starts from
+    // silence, not a replay of stale signal.
+    if (micARun && ! mMicAWasRunning) { mMicSim .reset(); mMicPlacement .reset(); }
+    if (micBRun && ! mMicBWasRunning) { mMicSimB.reset(); mMicPlacementB.reset(); }
+    mMicAWasRunning = micARun;
     mMicBWasRunning = micBRun;
 
-    // ── 7b. H-6d Mic Sim (post-IR) ───────────────────────────────────────────
+    // ── 7b/7c. H-6d Mic Sim + Mic Placement (post-IR, in place) ─────────────
+    if (micARun)
     {
-        const int   modeI  = juce::jlimit (0, 2, (int) get ("nam_micsim_mode"));
-        const int   modelI = juce::jlimit (0, (int) MicSimDSP::Model::kNumModels - 1,
-                                              (int) get ("nam_micsim_model"));
-        const float mix01  = juce::jlimit (0.0f, 1.0f, get ("nam_micsim_mix") * 0.01f);
-        mMicSim.setMode  ((MicSimDSP::Mode) modeI);
-        mMicSim.setModel (modelI);
-        mMicSim.setMix   (mix01);
-        mMicSim.process  (buffer);
-    }
+        {
+            const int   modeI  = 1 + juce::jlimit (0, 1, (int) get ("nam_micsim_mode"));
+            const int   modelI = juce::jlimit (0, (int) MicSimDSP::Model::kNumModels - 1,
+                                                  (int) get ("nam_micsim_model"));
+            const float mix01  = juce::jlimit (0.0f, 1.0f, get ("nam_micsim_mix") * 0.01f);
+            mMicSim.setMode  ((MicSimDSP::Mode) modeI);
+            mMicSim.setModel (modelI);
+            mMicSim.setMix   (mix01);
+            mMicSim.process  (buffer);
+        }
+        {
+            const float distCm = get ("nam_placement_distance_cm");
+            const float angle  = get ("nam_placement_angle_deg");
+            const float height = get ("nam_placement_height_cm");
+            const int   polar  = juce::jlimit (0, 4, (int) get ("nam_placement_polar"));
+            const float mix01  = juce::jlimit (0.0f, 1.0f, get ("nam_placement_mix") * 0.01f);
+            const auto  geo    = combinePlacement (distCm, angle, height);
+            mMicPlacement.setDistanceCm (geo.distanceCm);
+            mMicPlacement.setAngleDeg   (geo.angleDeg);
+            mMicPlacement.setPolar      (polar);
+            mMicPlacement.setMix        (mix01);
+            mMicPlacement.process       (buffer);
+        }
 
-    // ── 7c. H-6d Mic Placement (post-MicSim) ─────────────────────────────────
-    {
-        const float distCm = get ("nam_placement_distance_cm");
-        const float angle  = get ("nam_placement_angle_deg");
-        const int   polar  = juce::jlimit (0, 4, (int) get ("nam_placement_polar"));
-        const float mix01  = juce::jlimit (0.0f, 1.0f, get ("nam_placement_mix") * 0.01f);
-        mMicPlacement.setDistanceCm (distCm);
-        mMicPlacement.setAngleDeg   (angle);
-        mMicPlacement.setPolar      (polar);
-        mMicPlacement.setMix        (mix01);
-        mMicPlacement.process       (buffer);
+        // Same 15 ms ramp the B path uses, but crossfading toward the DRY tap
+        // rather than toward silence: switching Mic A off means no mic model on
+        // the cab, not no cab.
+        const float target = micAActive ? 1.0f : 0.0f;
+        const float step   = 1.0f / juce::jmax (1.0f, 0.015f * (float) mSampleRate);
+        float gEnd = mMicAGain;
+        for (int ch = 0; ch < juce::jmin (2, numCh); ++ch)
+        {
+            float g = mMicAGain;   // both channels trace the same trajectory
+            float* w       = buffer.getWritePointer (ch);
+            const float* d = mPreMicScratch.getReadPointer (ch);
+            for (int i = 0; i < numSamples; ++i)
+            {
+                g = (target > g) ? juce::jmin (target, g + step)
+                                 : juce::jmax (target, g - step);
+                w[i] = d[i] + (w[i] - d[i]) * g;
+            }
+            gEnd = g;
+        }
+        mMicAGain = gEnd;
     }
 
     // ── 7d. QA-Fc Mic B (parallel Sim + Placement over the pre-mic tap) ─────
@@ -537,7 +616,7 @@ void BaySickNAMIRProcessor::processBlock (juce::AudioBuffer<float>& buffer,
             mMicBScratch.copyFrom (ch, 0, mPreMicScratch, ch, 0, numSamples);
 
         {
-            const int   modeI  = juce::jlimit (0, 2, (int) get ("nam_micsim_b_mode"));
+            const int   modeI  = 1 + juce::jlimit (0, 1, (int) get ("nam_micsim_b_mode"));
             const int   modelI = juce::jlimit (0, (int) MicSimDSP::Model::kNumModels - 1,
                                                   (int) get ("nam_micsim_b_model"));
             const float mix01  = juce::jlimit (0.0f, 1.0f, get ("nam_micsim_b_mix") * 0.01f);
@@ -549,10 +628,12 @@ void BaySickNAMIRProcessor::processBlock (juce::AudioBuffer<float>& buffer,
         {
             const float distCm = get ("nam_placement_b_distance_cm");
             const float angle  = get ("nam_placement_b_angle_deg");
+            const float height = get ("nam_placement_b_height_cm");
+            const auto  geoB   = combinePlacement (distCm, angle, height);
             const int   polar  = juce::jlimit (0, 4, (int) get ("nam_placement_b_polar"));
             const float mix01  = juce::jlimit (0.0f, 1.0f, get ("nam_placement_b_mix") * 0.01f);
-            mMicPlacementB.setDistanceCm (distCm);
-            mMicPlacementB.setAngleDeg   (angle);
+            mMicPlacementB.setDistanceCm (geoB.distanceCm);
+            mMicPlacementB.setAngleDeg   (geoB.angleDeg);
             mMicPlacementB.setPolar      (polar);
             mMicPlacementB.setMix        (mix01);
             mMicPlacementB.process       (mMicBScratch);
@@ -890,12 +971,14 @@ juce::ValueTree BaySickNAMIRProcessor::SlotSnapshot::toValueTree (const juce::Id
     v.setProperty ("cabMix",            cabMix,            nullptr);
     v.setProperty ("namBypass",         namBypass,         nullptr);
     v.setProperty ("cabBypass",         cabBypass,         nullptr);
+    v.setProperty ("micaActive",        micaActive,        nullptr);
     v.setProperty ("micSimMode",        micSimMode,        nullptr);
     v.setProperty ("micSimModel",       micSimModel,       nullptr);
     v.setProperty ("micSimMix",         micSimMix,         nullptr);
     v.setProperty ("micUserIrPath",     micUserIrPath,     nullptr);
     v.setProperty ("placementDistance", placementDistance, nullptr);
     v.setProperty ("placementAngle",    placementAngle,    nullptr);
+    v.setProperty ("placementHeight",   placementHeight,   nullptr);
     v.setProperty ("placementPolar",    placementPolar,    nullptr);
     v.setProperty ("placementMix",      placementMix,      nullptr);
     v.setProperty ("micbActive",         micbActive,         nullptr);
@@ -905,6 +988,7 @@ juce::ValueTree BaySickNAMIRProcessor::SlotSnapshot::toValueTree (const juce::Id
     v.setProperty ("micbUserIrPath",     micbUserIrPath,     nullptr);
     v.setProperty ("placementBDistance", placementBDistance, nullptr);
     v.setProperty ("placementBAngle",    placementBAngle,    nullptr);
+    v.setProperty ("placementBHeight",   placementBHeight,   nullptr);
     v.setProperty ("placementBPolar",    placementBPolar,    nullptr);
     v.setProperty ("placementBMix",      placementBMix,      nullptr);
     return v;
@@ -921,12 +1005,14 @@ void BaySickNAMIRProcessor::SlotSnapshot::fromValueTree (const juce::ValueTree& 
     cabMix            = (float) v.getProperty ("cabMix",            cabMix);
     namBypass         = (bool)  v.getProperty ("namBypass",         namBypass);
     cabBypass         = (bool)  v.getProperty ("cabBypass",         cabBypass);
+    micaActive        = (bool)  v.getProperty ("micaActive",        micaActive);
     micSimMode        = (int)   v.getProperty ("micSimMode",        micSimMode);
     micSimModel       = (int)   v.getProperty ("micSimModel",       micSimModel);
     micSimMix         = (float) v.getProperty ("micSimMix",         micSimMix);
     micUserIrPath     =         v.getProperty ("micUserIrPath",     micUserIrPath).toString();
     placementDistance = (float) v.getProperty ("placementDistance", placementDistance);
     placementAngle    = (float) v.getProperty ("placementAngle",    placementAngle);
+    placementHeight   = (float) v.getProperty ("placementHeight",   placementHeight);
     placementPolar    = (int)   v.getProperty ("placementPolar",    placementPolar);
     placementMix      = (float) v.getProperty ("placementMix",      placementMix);
     micbActive         = (bool)  v.getProperty ("micbActive",         micbActive);
@@ -936,6 +1022,7 @@ void BaySickNAMIRProcessor::SlotSnapshot::fromValueTree (const juce::ValueTree& 
     micbUserIrPath     =         v.getProperty ("micbUserIrPath",     micbUserIrPath).toString();
     placementBDistance = (float) v.getProperty ("placementBDistance", placementBDistance);
     placementBAngle    = (float) v.getProperty ("placementBAngle",    placementBAngle);
+    placementBHeight   = (float) v.getProperty ("placementBHeight",   placementBHeight);
     placementBPolar    = (int)   v.getProperty ("placementBPolar",    placementBPolar);
     placementBMix      = (float) v.getProperty ("placementBMix",      placementBMix);
 }
@@ -963,12 +1050,14 @@ void BaySickNAMIRProcessor::captureSnapshotFromCurrent (int slot)
     s.cabMix            = getF ("cab_mix",                   s.cabMix);
     s.namBypass         = getF ("nam_bypass", 0.0f) > 0.5f;
     s.cabBypass         = getF ("cab_bypass", 0.0f) > 0.5f;
+    s.micaActive        = getF ("nam_mica_active", 0.0f) > 0.5f;
     s.micSimMode        = (int) getF ("nam_micsim_mode",     (float) s.micSimMode);
     s.micSimModel       = (int) getF ("nam_micsim_model",    (float) s.micSimModel);
     s.micSimMix         = getF ("nam_micsim_mix",            s.micSimMix);
     s.micUserIrPath     = mMicSim.getUserIrPath (slot);
     s.placementDistance = getF ("nam_placement_distance_cm", s.placementDistance);
     s.placementAngle    = getF ("nam_placement_angle_deg",   s.placementAngle);
+    s.placementHeight   = getF ("nam_placement_height_cm",   s.placementHeight);
     s.placementPolar    = (int) getF ("nam_placement_polar", (float) s.placementPolar);
     s.placementMix      = getF ("nam_placement_mix",         s.placementMix);
     s.micbActive         = getF ("nam_micb_active", 0.0f) > 0.5f;
@@ -978,6 +1067,7 @@ void BaySickNAMIRProcessor::captureSnapshotFromCurrent (int slot)
     s.micbUserIrPath     = mMicSimB.getUserIrPath (slot);
     s.placementBDistance = getF ("nam_placement_b_distance_cm", s.placementBDistance);
     s.placementBAngle    = getF ("nam_placement_b_angle_deg",   s.placementBAngle);
+    s.placementBHeight   = getF ("nam_placement_b_height_cm",   s.placementBHeight);
     s.placementBPolar    = (int) getF ("nam_placement_b_polar", (float) s.placementBPolar);
     s.placementBMix      = getF ("nam_placement_b_mix",         s.placementBMix);
 }
@@ -1012,11 +1102,13 @@ void BaySickNAMIRProcessor::applySnapshotToCurrent (int slot)
     setF ("cab_mix",                   s.cabMix);
     setB ("nam_bypass",                s.namBypass);
     setB ("cab_bypass",                s.cabBypass);
+    setB ("nam_mica_active",           s.micaActive);
     setF ("nam_micsim_mode",           (float) s.micSimMode);
     setF ("nam_micsim_model",          (float) s.micSimModel);
     setF ("nam_micsim_mix",            s.micSimMix);
     setF ("nam_placement_distance_cm", s.placementDistance);
     setF ("nam_placement_angle_deg",   s.placementAngle);
+    setF ("nam_placement_height_cm",   s.placementHeight);
     setF ("nam_placement_polar",       (float) s.placementPolar);
     setF ("nam_placement_mix",         s.placementMix);
     setB ("nam_micb_active",           s.micbActive);
@@ -1025,6 +1117,7 @@ void BaySickNAMIRProcessor::applySnapshotToCurrent (int slot)
     setF ("nam_micsim_b_mix",          s.micSimBMix);
     setF ("nam_placement_b_distance_cm", s.placementBDistance);
     setF ("nam_placement_b_angle_deg",   s.placementBAngle);
+    setF ("nam_placement_b_height_cm",   s.placementBHeight);
     setF ("nam_placement_b_polar",       (float) s.placementBPolar);
     setF ("nam_placement_b_mix",         s.placementBMix);
 

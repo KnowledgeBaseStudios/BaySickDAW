@@ -1,0 +1,163 @@
+<p>A chain of allpass filters producing moving notches. Unlike a flanger the
+notches are not evenly spaced, which is why it swirls rather than whooshes.</p>
+
+<div class="codeblock"><div class="codehead">- Source/DSP/PhaserDSP.h</div><pre><code>// PhaserDSP::process (allpass cascade core)
+// sec.7a: log-scaled LFO -&gt; frequency mapping
+const float logMinHz = std::log (minHz);
+const float logMaxHz = std::log (maxHz);
+// ...
+const float centerHzL = std::exp (logMinHz + lfoL * (logMaxHz - logMinHz));
+const float centerHzR = std::exp (logMinHz + lfoR * (logMaxHz - logMinHz));
+
+// All-pass coefficients (one per channel)
+const float tL  = std::tan (juce::MathConstants&lt;float&gt;::pi * centerHzL / sr);
+const float a1L = (tL - 1.0f) / (tL + 1.0f);
+const float tR  = std::tan (juce::MathConstants&lt;float&gt;::pi * centerHzR / sr);
+const float a1R = (tR - 1.0f) / (tR + 1.0f);
+
+// Process through N active all-pass stages
+for (int s = 0; s &lt; activeStages; ++s)
+{
+    const float yL = a1L * procL + mXL[(size_t) s] - a1L * mYL[(size_t) s];
+    const float yR = a1R * procR + mXR[(size_t) s] - a1R * mYR[(size_t) s];
+
+    mXL[(size_t) s] = procL;  mYL[(size_t) s] = yL;
+    mXR[(size_t) s] = procR;  mYR[(size_t) s] = yR;
+
+    procL = yL;
+    procR = yR;
+}</code></pre></div>
+<details class="fullfn"><summary>Full function &mdash; - Source/DSP/PhaserDSP.h</summary><pre><code>// PhaserDSP::process
+void PhaserDSP::process (juce::AudioBuffer&lt;float&gt;&amp; buffer)
+{
+    if (bypassed) return;
+
+    juce::ScopedNoDenormals noDenormals;   // A1
+
+    const int numSamples = buffer.getNumSamples();
+    const int numCh      = buffer.getNumChannels();
+    if (numSamples &lt;= 0 || numCh &lt;= 0) return;
+    if ((int) mXL.size() &lt; kMaxStages) return;
+
+    float* L = numCh &gt; 0 ? buffer.getWritePointer (0) : nullptr;
+    float* R = numCh &gt; 1 ? buffer.getWritePointer (1) : nullptr;
+
+    const float visIn = visualCaptureIn (buffer);   // T18
+
+    const float sr           = (float) mSampleRate;
+    const float nyqLimit     = sr * 0.499f;
+    const float fbSign       = mInvertFeedback ? -1.0f : 1.0f;
+    const int   activeStages = juce::jlimit (1, kMaxStages, mNumStages);
+    const int   waveIdx      = juce::jlimit (0, 3, mLFOWaveIdx);
+    const float invSr        = 1.0f / sr;
+
+    for (int n = 0; n &lt; numSamples; ++n)
+    {
+        const float rate        = mRateSmooth    .getNextValue();
+        const float fb          = juce::jlimit (-1.2f, 1.2f, mFeedbackSmooth.getNextValue()) * fbSign;
+        const float minHzRaw    = mMinDepthSmooth.getNextValue();
+        const float maxHzRaw    = mMaxDepthSmooth.getNextValue();
+        const float wet         = juce::jlimit (0.0f, 1.0f, mWetSmooth.getNextValue());
+        const float dry         = 1.0f - wet;
+        const float stereoFrac  = mStereoSmooth  .getNextValue();
+        const float outLin      = mOutGainSmooth .getNextValue();
+        const float xfb         = juce::jlimit (0.0f, 1.0f, mCrossFBSmooth.getNextValue());
+        const float minHz       = juce::jlimit (10.0f,  nyqLimit, minHzRaw);
+        const float maxHz       = juce::jlimit (minHz,  nyqLimit, maxHzRaw);
+
+        // sec.7a: log-scaled LFO -&gt; frequency mapping
+        const float logMinHz = std::log (minHz);
+        const float logMaxHz = std::log (maxHz);
+
+        // Per-channel raw LFO phase
+        // A6: single-branch wrap replaces std::fmod for stereo-offset path.
+        double phaseRaw = mPhase;           // L phase
+        double phaseR   = mPhase + (double) stereoFrac;
+        if (phaseR &gt;= 1.0) phaseR -= 1.0;
+
+        // C3: evaluate selected LFO wave -&gt; 0..1 output for each channel.
+        float lfoL = 0.0f, lfoR = 0.0f;
+        switch (waveIdx)
+        {
+            case 0:  // Sine
+                lfoL = 0.5f + 0.5f * (float) std::sin (juce::MathConstants&lt;double&gt;::twoPi * phaseRaw);
+                lfoR = 0.5f + 0.5f * (float) std::sin (juce::MathConstants&lt;double&gt;::twoPi * phaseR);
+                break;
+            case 1:  // Triangle
+                lfoL = 1.0f - 2.0f * std::abs ((float) phaseRaw - 0.5f);
+                lfoR = 1.0f - 2.0f * std::abs ((float) phaseR   - 0.5f);
+                break;
+            case 2:  // Saw (descending: 1 -&gt; 0 over one cycle)
+                lfoL = 1.0f - (float) phaseRaw;
+                lfoR = 1.0f - (float) phaseR;
+                break;
+            case 3:  // Sample &amp; Hold
+            default:
+                if (phaseRaw &lt; mLastPhaseL) mSHL = mSHRng.nextFloat();   // wrap detected
+                if (phaseR   &lt; mLastPhaseR) mSHR = mSHRng.nextFloat();
+                mLastPhaseL = phaseRaw;
+                mLastPhaseR = phaseR;
+                lfoL = mSHL;
+                lfoR = mSHR;
+                break;
+        }
+
+        const float centerHzL = std::exp (logMinHz + lfoL * (logMaxHz - logMinHz));
+        const float centerHzR = std::exp (logMinHz + lfoR * (logMaxHz - logMinHz));
+
+        // All-pass coefficients (one per channel)
+        const float tL  = std::tan (juce::MathConstants&lt;float&gt;::pi * centerHzL / sr);
+        const float a1L = (tL - 1.0f) / (tL + 1.0f);
+        const float tR  = std::tan (juce::MathConstants&lt;float&gt;::pi * centerHzR / sr);
+        const float a1R = (tR - 1.0f) / (tR + 1.0f);
+
+        const float inL = L ? L[n] : 0.0f;
+        const float inR = R ? R[n] : inL;
+
+        // C5: cross-channel feedback. xfb=0 -&gt; same as v1; xfb=1 -&gt; feedback fully swaps.
+        // Use a linear blend: primary = 1-xfb*0.5, cross = xfb*0.5 (conserves feedback energy).
+        const float mainFb  = 1.0f - 0.5f * xfb;
+        const float crossFb = 0.5f * xfb;
+
+        float procL = inL + fb * (mainFb * mFbL + crossFb * mFbR);
+        float procR = inR + fb * (mainFb * mFbR + crossFb * mFbL);
+
+        // Process through N active all-pass stages
+        for (int s = 0; s &lt; activeStages; ++s)
+        {
+            const float yL = a1L * procL + mXL[(size_t) s] - a1L * mYL[(size_t) s];
+            const float yR = a1R * procR + mXR[(size_t) s] - a1R * mYR[(size_t) s];
+
+            mXL[(size_t) s] = procL;  mYL[(size_t) s] = yL;
+            mXR[(size_t) s] = procR;  mYR[(size_t) s] = yR;
+
+            procL = yL;
+            procR = yR;
+        }
+
+        procL = juce::jlimit (-4.0f, 4.0f, procL);
+        procR = juce::jlimit (-4.0f, 4.0f, procR);
+
+        mFbL = procL;
+        mFbR = procR;
+
+        const float outL = (dry * inL + wet * procL) * outLin;
+        const float outR = (dry * inR + wet * procR) * outLin;
+
+        if (L) L[n] = outL;
+        if (R) R[n] = outR;
+
+        // A4: while-wrap replaces std::fmod (cheaper; the added delta is always &gt; 0).
+        mPhase += (double) rate * (double) invSr;
+        while (mPhase &gt;= 1.0) mPhase -= 1.0;
+    }
+
+    visualPushInOut (buffer, visIn);   // T18
+}</code></pre></details>
+<pre class="formulas">- Stage count: runtime-dynamic 1..24 (`kMaxStages = 24`, default `mNumStages = 4`). The buffer for all 24 stages is always allocated, so `setStages` is a pure int assign (no click on count change). Every stage in the cascade shares ONE per-channel coefficient a1 — all N first-order allpasses sit at the same swept center frequency. Notch count for N identical first-order stages: N/2 notches (e.g. 4 stages -&gt; 2 notches), spaced where the cumulative phase shift crosses odd multiples of pi.
+- First-order allpass (per stage, direct form): `y[n] = a1*x[n] + x[n-1] - a1*y[n-1]`, with `a1 = (t - 1)/(t + 1)`, `t = tan(pi * centerHz / sr)`.
+- Notch spacing / sweep mapping is LOGARITHMIC: `centerHz = exp(log(minHz) + lfo * (log(maxHz) - log(minHz)))`, lfo in 0..1. Min/Max depth 10..20000 Hz (defaults 200 / 2000 Hz), clamped to `0.499*sr`. Legacy 0..1 Depth knob maps to `minHz = 200*max(0.01, depth)`, `maxHz = 2000`.
+- Feedback: -1.2..+1.2 (default 0.5), optional sign invert; the whole cascade output (clamped +/-4) feeds back to the input. Cross-channel feedback C5: `proc = in + fb*(mainFb*ownFb + crossFb*otherFb)` with `mainFb = 1 - 0.5*xfb`, `crossFb = 0.5*xfb` (energy-conserving blend).
+- LFO waves (0..1 unipolar): Sine `0.5 + 0.5*sin(2*pi*ph)`; Triangle `1 - 2*|ph - 0.5|`; Saw descending `1 - ph`; S&amp;H resampled on phase wrap. Stereo: R phase = L phase + `stereoPhase/360` (0..360 deg).
+- Rate: 0.05 Hz up to Range max — Slow = 2 Hz, Fast = 10 Hz (`getRateMaxHz()`; default Fast). BPM sync: period = `noteFrac * 4 * (60/BPM)`; division table 1/1, 1/2, 1/4 (default idx 2), 1/8, 1/8D = 3/16, 1/4T = 1/6, 1/16, 1/8T = 1/12.
+- Output: `out = (dry*in + wet*proc) * outGainLin`, wet default 0.5, out gain -18..+18 dB. Smoothing times: rate/feedback/stereo/crossFB 20 ms, min/max depth 30 ms, wet/out gain 15 ms.</pre>

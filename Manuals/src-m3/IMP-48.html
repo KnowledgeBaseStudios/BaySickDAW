@@ -1,0 +1,144 @@
+<p>Loudness as people perceive it, not as a peak meter sees it. Momentary is a
+400&nbsp;ms window, short-term 3&nbsp;s, integrated the whole programme, and
+range the spread between the quiet and loud parts.</p>
+
+<div class="codeblock"><div class="codehead">- Source\DSP\LufsMeterDSP.cpp (170 lines) + LufsMeterDSP.h (84 lines) - K-weighting, momentary/short-term windows, gated integrated</div><pre><code>// LufsMeterDSP::designKWeighting() -- bilinear-from-constants (exact at any fs)
+    // Stage 1 — high shelf.
+    {
+        const double f0 = 1681.9744509555319, G = 3.99984385397, Q = 0.7071752369554193;
+        const double K  = std::tan (juce::MathConstants&lt;double&gt;::pi * f0 / fs);
+        const double Vh = std::pow (10.0, G / 20.0);
+        const double Vb = std::pow (Vh, 0.4996667741545416);
+        const double a0 = 1.0 + K / Q + K * K;
+        auto* c = mk ((Vh + Vb * K / Q + K * K) / a0,
+                      2.0 * (K * K - Vh) / a0,
+                      (Vh - Vb * K / Q + K * K) / a0,
+                      2.0 * (K * K - 1.0) / a0,
+                      (1.0 - K / Q + K * K) / a0);
+        mShelfL.coefficients = c;   // pointer copy (shared, immutable); state is per-channel
+        mShelfR.coefficients = c;
+    }
+
+    // Stage 2 — RLB high-pass.
+    {
+        const double f0 = 38.13547087613982, Q = 0.5003270373253953;
+        const double K  = std::tan (juce::MathConstants&lt;double&gt;::pi * f0 / fs);
+        const double a0 = 1.0 + K / Q + K * K;
+        auto* c = mk (1.0 / a0, -2.0 / a0, 1.0 / a0,
+                      2.0 * (K * K - 1.0) / a0,
+                      (1.0 - K / Q + K * K) / a0);
+        mHpL.coefficients = c;
+        mHpR.coefficients = c;
+    }</code></pre></div>
+<details class="fullfn"><summary>Full function &mdash; - Source\DSP\LufsMeterDSP.cpp (170 lines) + LufsMeterDSP.h (84 lines) - K-weighting, momentary/short-term windows, gated integrated</summary><pre><code>// LufsMeterDSP::process() + closeBin() + windowLufs()
+void LufsMeterDSP::process (const juce::AudioBuffer&lt;float&gt;&amp; buf)
+{
+    const int n  = buf.getNumSamples();
+    const int nc = buf.getNumChannels();
+    if (n &lt;= 0 || nc &lt;= 0) return;
+
+    const float* L = buf.getReadPointer (0);
+    const float* R = (nc &gt;= 2) ? buf.getReadPointer (1) : L;
+
+    for (int s = 0; s &lt; n; ++s)
+    {
+        const float kl = mHpL.processSample (mShelfL.processSample (L[s]));   // shelf -&gt; RLB
+        const float kr = mHpR.processSample (mShelfR.processSample (R[s]));
+        mCurL += (double) kl * (double) kl;
+        mCurR += (double) kr * (double) kr;
+        if (++mSampleInBin &gt;= mSamplesPerBin)
+            closeBin();
+    }
+}
+
+void LufsMeterDSP::closeBin()
+{
+    mBinEL[(size_t) mBinHead] = mCurL;
+    mBinER[(size_t) mBinHead] = mCurR;
+    mCurL = mCurR = 0.0;
+    mSampleInBin = 0;
+    mBinHead = (mBinHead + 1) % kShortTermBins;
+    if (mBinsFilled &lt; kShortTermBins) ++mBinsFilled;
+
+    mM.store (windowLufs (kMomentaryBins), std::memory_order_relaxed);
+    mS.store (windowLufs (kShortTermBins), std::memory_order_relaxed);
+
+    if (++mBinsSinceGate &gt;= kGateStepBins)
+    {
+        mBinsSinceGate = 0;
+        accumulateIntegrated();
+    }
+}
+
+// Ungated window loudness over the most-recent `bins` (capped to what&#x27;s filled).
+float LufsMeterDSP::windowLufs (int bins) const
+{
+    const int avail = juce::jmin (bins, mBinsFilled);
+    if (avail &lt;= 0) return -120.f;
+
+    double eL = 0.0, eR = 0.0;
+    for (int i = 0; i &lt; avail; ++i)
+    {
+        const int j = (mBinHead - 1 - i + 2 * kShortTermBins) % kShortTermBins;
+        eL += mBinEL[(size_t) j];
+        eR += mBinER[(size_t) j];
+    }
+    const double ms = (eL + eR) / ((double) mSamplesPerBin * (double) avail);   // G_L=G_R=1
+    return (float) lufsFromMs (ms);
+}
+
+// Form one 400 ms gating block from the bin ring; histogram it (after the -70
+// absolute gate); then recompute the integrated value via the -10 LU relative
+// gate over the histogram.  Called once per 100 ms (75% overlap).
+void LufsMeterDSP::accumulateIntegrated()
+{
+    if (mBinsFilled &lt; kMomentaryBins) return;   // need a full 400 ms first
+
+    double eL = 0.0, eR = 0.0;
+    for (int i = 0; i &lt; kMomentaryBins; ++i)
+    {
+        const int j = (mBinHead - 1 - i + 2 * kShortTermBins) % kShortTermBins;
+        eL += mBinEL[(size_t) j];
+        eR += mBinER[(size_t) j];
+    }
+    const double blockMs   = (eL + eR) / ((double) mSamplesPerBin * (double) kMomentaryBins);
+    const double blockLufs = lufsFromMs (blockMs);
+    if (blockLufs &lt; kAbsGateLufs) return;       // absolute -70 LUFS gate (drop at insert)
+
+    int bin = (int) std::floor ((blockLufs - kHistMinLufs) / kHistStep + 0.5);
+    bin = juce::jlimit (0, kHistBins - 1, bin);
+    mHistSumMs[(size_t) bin] += blockMs;
+    mHistCount[(size_t) bin] += 1;
+
+    // Pass 1 — mean energy of all absolute-gated blocks -&gt; relative threshold.
+    double    sumAll = 0.0;
+    long long cntAll = 0;
+    for (int b = 0; b &lt; kHistBins; ++b) { sumAll += mHistSumMs[(size_t) b]; cntAll += mHistCount[(size_t) b]; }
+    if (cntAll == 0) { mIntegratedLufs.store (-120.f, std::memory_order_relaxed); return; }
+
+    const double meanAll       = sumAll / (double) cntAll;
+    const double relThreshLufs = lufsFromMs (meanAll) + kRelGateLu;   // mean - 10 LU
+    int relBin = (int) std::ceil ((relThreshLufs - kHistMinLufs) / kHistStep);
+    relBin = juce::jlimit (0, kHistBins, relBin);
+
+    // Pass 2 — mean energy of blocks above the relative gate.
+    double    sumG = 0.0;
+    long long cntG = 0;
+    for (int b = relBin; b &lt; kHistBins; ++b) { sumG += mHistSumMs[(size_t) b]; cntG += mHistCount[(size_t) b]; }
+
+    const double integ = (cntG &gt; 0) ? lufsFromMs (sumG / (double) cntG)
+                                    : lufsFromMs (meanAll);
+    mIntegratedLufs.store ((float) integ, std::memory_order_relaxed);
+}</code></pre></details>
+<pre class="formulas">- K-weighting (bilinear-from-constants, exact at any fs; constants cross-checked across libebur128 + loudness.py + klangfreund):
+  - Stage 1 high shelf: `f0 = 1681.9744509555319` Hz, `G = 3.99984385397` dB, `Q = 0.7071752369554193`; `Vh = 10^(G/20)`, `Vb = Vh^0.4996667741545416`, `K = tan(pi*f0/fs)`.
+  - Stage 2 RLB high-pass: `f0 = 38.13547087613982` Hz, `Q = 0.5003270373253953`; numerator {1, -2, 1}/a0.
+  - Acceptance @48k: shelf ~{b0=1.53512, b1=-2.69170, b2=1.19839, a1=-1.69066, a2=0.73248}; RLB ~{1,-2,1, a1=-1.99005, a2=0.99007}. Order: shelf -&gt; RLB per channel.
+- LUFS conversion: `lufsFromMs(ms) = -0.691 + 10*log10(ms)` (`kOffset = -0.691` BS.1770 absolute offset); -120 floor.
+- Bin geometry: `kBinsPerSec = 20` (50 ms bins, &gt;= 10 Hz EBU hop); `kMomentaryBins = 8` (400 ms); `kShortTermBins = 60` (3 s, also the ring size); `kGateStepBins = 2` (100 ms gating step = 75% overlap of 400 ms blocks). Channel weights `G_L = G_R = 1` (stereo).
+- Integrated gating: absolute gate `kAbsGateLufs = -70.0` (blocks dropped at insert); relative gate `kRelGateLu = -10.0` LU below the mean of all absolute-gated blocks, recomputed from the histogram each step (two-pass). Histogram: 0.1 LU bins over -70..+5 LUFS (`kHistBins = 751`), fixed size = alloc-free.
+- Momentary/Short-Term: ungated energy mean over the last 8 / 60 bins; published via relaxed atomics; -120 until filled. `resetIntegrated()` on play-from-top/loop leaves M/S running.
+- LRA (Tech 3342, `LoudnessRangeAccumulator`): input = stream of Short-Term readings; absolute gate -70 LUFS (discarded at push); relative gate = energy-domain gated mean `+ kRelGateLu` where `kRelGateLu = -20.0` LU (Tech 3342, NOT R128&#x27;s -10); LRA = `max(0, P95 - P10)` percentile span of surviving readings; same 751-bin 0.1 LU histogram; returns 0 with insufficient material.
+- Delivery targets (`LoudnessSpec::get` table): Streaming -14 LUFS +/-1 LU, -1 dBTP; Streaming -16 (Apple/spoken); EBU R128 -23 +/-0.5 LU, -1 dBTP; ATSC A/85 -24 LKFS +/-2 LU, -2 dBTP; BS.1770-4 measure-only. `resolved()` copies short-term ceiling = the integrated target for every spec that checks integrated.
+- Violation coalescing (`LoudnessViolation`): consecutive breaches within `kGapSeconds = 0.5` merge into one span; `kMaxRows = 400` cap with explicit truncated flag.</pre>
+<p class="behind"><b>Behind:</b> <a href="manual-2.html#MIX-12">Master metering-mode dropdown</a>, <a href="manual-2.html#MIX-15">Strip meter</a>, <a href="manual-2.html#MIX-18">Analyzer</a>, <a href="manual-2.html#FX-7">Output dBFS meter</a>, <a href="manual-2.html#BSVC-9">Slot Vol and its dBFS meter</a>, <a href="manual-2.html#ANLZ-1">Source picker</a>, <a href="manual-2.html#ANLZ-3">MOM</a>, <a href="manual-2.html#ANLZ-4">SHORT</a>, <a href="manual-2.html#ANLZ-5">INT</a>, <a href="manual-2.html#ANLZ-6">LRA</a>, <a href="manual-2.html#ANLZ-9">History graph, scale 0 to -40 LUFS</a>, <a href="manual-2.html#ANLZ-10">Target line</a>, <a href="manual-2.html#ANLZM-1">View group</a>.</p>

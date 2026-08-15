@@ -1,0 +1,43 @@
+<p>The Export Audio dialog - your song out of the app and into a file.</p>
+
+<figure data-views="EXP">
+
+<p id="EXP-1"><b>Selection</b> - render the <code>Full Arrangement</code>
+or a narrower range; <code>Selected Section</code> greys until the ruler
+has a time selection to use. <span id="EXP-2"></span><b>Tail</b> decides
+whether reverb and delay ringing past the end gets written or the file cuts
+at the last bar.</p>
+
+<p id="EXP-3"><b>Format</b> (WAV and the alternatives),
+<span id="EXP-4"></span><b>Quality</b> (24-bit is the safe modern default)
+and <span id="EXP-5"></span><b>Sample rate</b> - renders run at the
+session's rate unless you change it; rates above 48 kHz grey for MP3 and
+drop to 48000. <span id="EXP-6"></span><b>Dither</b> applies proper noise
+shaping when reducing bit depth - <code>Off</code> unless you are exporting
+below the session depth.</p>
+
+<p id="EXP-7"><b>Normalize to</b> scales the render to a LUFS loudness of
+your choosing, and <span id="EXP-8"></span><b>Check against</b> compares
+the result to a streaming target without changing anything.
+Choosing <code>Custom</code> reveals the
+<b>Custom ref (LUFS)</b> entry for your own number.</p>
+
+<p id="EXP-9"><b>Measure</b> runs the loudness measurement WITHOUT
+exporting - through the very same offline render the export uses, so the
+numbers are the export's numbers. <b>The
+readout</b> below it reports <code>Measuring...</code>, then integrated
+loudness, range and true peak with a verdict line - in spec, or how far
+off.</p>
+
+<p id="EXP-10"><b>Export stems</b> writes one file per mixer strip instead
+of one mix; switching it on reveals a checkbox per strip so you pick which
+stems you want.</p>
+
+<p id="EXP-11"><b>Export / Cancel</b> run it or close it, and
+<b>the progress bar</b> tracks a running render or
+measure along the bottom.</p>
+
+<p>Worth knowing: an export is a true offline render - the
+engine suspends, switches everything to offline mode, and renders faster
+than real time. It is a calculation, not a recording, which is why it is
+sample-accurate every time.</p>

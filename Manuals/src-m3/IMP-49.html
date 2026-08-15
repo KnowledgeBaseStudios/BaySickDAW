@@ -1,0 +1,119 @@
+<p>A BS.1770-4 polyphase meter that finds peaks <em>between</em> samples. Those
+peaks are real once the signal is converted back to sound, which is why a file
+that looks safe on a sample meter can still distort on playback.</p>
+
+<div class="codeblock"><div class="codehead">- Source\DSP\TruePeakMeter.cpp (148 lines)</div><pre><code>// TruePeakMeter::pushAndPeak() -- 4-phase interpolated peak per input sample
+float TruePeakMeter::pushAndPeak (int ch, float x) noexcept
+{
+    auto&amp; hist = mHist[(size_t) ch];
+    int&amp;  pos  = mHistPos[(size_t) ch];
+
+    hist[(size_t) pos] = x;
+    pos = (pos + 1) % kTapsPerPhase;
+
+    const auto&amp; b = bank();
+    float peak = 0.0f;
+
+    for (int p = 0; p &lt; kPhases; ++p)
+    {
+        float acc = 0.0f;
+        // Walk history newest-first: index (pos - 1 - k) modulo the ring.
+        int idx = pos - 1;
+        for (int k = 0; k &lt; kTapsPerPhase; ++k)
+        {
+            if (idx &lt; 0) idx += kTapsPerPhase;
+            acc += b[(size_t) p][(size_t) k] * hist[(size_t) idx];
+            --idx;
+        }
+        peak = juce::jmax (peak, std::abs (acc));
+    }
+    return peak;
+}</code></pre></div>
+<details class="fullfn"><summary>Full function &mdash; - Source\DSP\TruePeakMeter.cpp (148 lines)</summary><pre><code>// besselI0() -- Kaiser window shaping term
+    double besselI0 (double x)
+    {
+        double sum = 1.0, term = 1.0;
+        const double halfSq = (x * 0.5) * (x * 0.5);
+        for (int k = 1; k &lt; 40; ++k)
+        {
+            term *= halfSq / (double) (k * k);
+            sum  += term;
+            if (term &lt; 1.0e-16 * sum) break;
+        }
+        return sum;
+    }
+
+    // CALIBRATION (Rule 6 cat. 5): cutoff sits at 0.92 of the base-rate Nyquist
+    // rather than exactly at it.  With only 12 taps per phase the transition band
+    // is wide, and pushing the cutoff to Nyquist trades stopband attenuation for
+    // passband that carries no audible content -- 20.3 kHz..22.05 kHz at 44.1 k.
+    // 0.92 keeps the response flat through 20 kHz at 44.1/48/96 k while holding
+    // the stopband under -80 dB, which is what the true-peak estimate needs.
+    constexpr double kCutoffFractionOfNyquist = 0.92;
+
+    // Kaiser beta 8.0 -&gt; ~-80 dB stopband.  Higher beta widens the transition
+    // faster than 12 taps per phase can absorb.
+    constexpr double kKaiserBeta = 8.0;
+
+// TruePeakMeter::bank()
+const TruePeakMeter::Bank&amp; TruePeakMeter::bank()
+{
+    // Built once, on first use, and const thereafter -- so concurrent readers on
+    // the audio and render threads share it without synchronisation.  C++11
+    // guarantees the initialisation itself is thread-safe.
+    static const Bank b = []
+    {
+        constexpr int kTotalTaps = kPhases * kTapsPerPhase;   // 48
+
+        // Prototype: windowed sinc lowpass at the 4x rate, gain kPhases so each
+        // polyphase branch ends up with unity DC gain.
+        std::array&lt;double, kTotalTaps&gt; proto {};
+        const double centre = (double) (kTotalTaps - 1) * 0.5;
+        // Normalised cutoff as a fraction of the 4x-rate Nyquist.
+        const double fc = kCutoffFractionOfNyquist / (double) kPhases;
+        const double i0Beta = besselI0 (kKaiserBeta);
+
+        for (int n = 0; n &lt; kTotalTaps; ++n)
+        {
+            const double t = (double) n - centre;
+            const double sinc = (std::abs (t) &lt; 1.0e-12)
+                                  ? 1.0
+                                  : std::sin (juce::MathConstants&lt;double&gt;::pi * fc * t)
+                                      / (juce::MathConstants&lt;double&gt;::pi * fc * t);
+
+            // Kaiser window over the full prototype length.
+            const double r = t / centre;                       // -1 .. +1
+            const double arg = 1.0 - juce::jlimit (-1.0, 1.0, r) * juce::jlimit (-1.0, 1.0, r);
+            const double win = besselI0 (kKaiserBeta * std::sqrt (juce::jmax (0.0, arg))) / i0Beta;
+
+            proto[(size_t) n] = fc * sinc * win;
+        }
+
+        // Split into phases and normalise each branch to unity DC gain.  Doing it
+        // per branch rather than globally is what stops a constant input from
+        // wobbling between phases, which would read as inter-sample peak that is
+        // not there.
+        Bank out {};
+        for (int p = 0; p &lt; kPhases; ++p)
+        {
+            double sum = 0.0;
+            for (int k = 0; k &lt; kTapsPerPhase; ++k)
+                sum += proto[(size_t) (k * kPhases + p)];
+
+            const double norm = (std::abs (sum) &gt; 1.0e-12) ? (1.0 / sum) : 1.0;
+            for (int k = 0; k &lt; kTapsPerPhase; ++k)
+                out[(size_t) p][(size_t) k] = (float) (proto[(size_t) (k * kPhases + p)] * norm);
+        }
+        return out;
+    }();
+
+    return b;
+}</code></pre></details>
+<pre class="formulas">- Geometry: `kPhases = 4` (4x oversampling), `kTapsPerPhase = 12` -&gt; 48 taps total (BS.1770-4 Annex 2 geometry). Per-channel history ring 12 samples deep.
+- Prototype: Kaiser-windowed sinc lowpass at the 4x rate; normalized cutoff `fc = 0.92 / 4` of the 4x-rate Nyquist. Cutoff calibration: 0.92 of base-rate Nyquist keeps response flat through 20 kHz at 44.1/48/96k while holding stopband under -80 dB (12 taps/phase gives a wide transition band; exact-Nyquist cutoff would waste attenuation on 20.3-22.05 kHz).
+- Kaiser beta = 8.0 -&gt; ~-80 dB stopband (higher beta widens the transition faster than 12 taps can absorb). besselI0 series, 40-term cap, converges ~20 terms for beta &lt;= 12; early-out at `term &lt; 1e-16 * sum`.
+- Window: `win = I0(beta * sqrt(1 - r^2)) / I0(beta)`, `r = t/centre` in -1..+1; tap value `fc * sinc(pi*fc*t) * win`.
+- Per-BRANCH DC normalization (each phase scaled to unity DC gain independently) - prevents a constant input from wobbling between phases and reading as phantom inter-sample peak.
+- Peak: running max of `|phase output|` across all 4 phases, all channels; `truePeakDb = gainToDecibels(maxLin, -144 floor)`.
+- Bank built once via C++11 thread-safe static; audio/render-thread safe, alloc-free after `prepare()`. `resetPeak()` clears only the max (keeps filter history for seamless metering-window restarts); the running max is a plain float - same-thread read, or the owner publishes an atomic mirror (LimiterDSP does).</pre>
+<p class="behind"><b>Behind:</b> <a href="manual-2.html#ANLZ-7">PEAK</a>, <a href="manual-2.html#ANLZ-8">TRUE PK</a>.</p>

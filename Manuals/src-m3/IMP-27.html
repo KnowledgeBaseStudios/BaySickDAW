@@ -1,0 +1,47 @@
+<p>Tracks the played notes and synthesises against them.</p>
+
+<div class="codeblock"><div class="codehead">Source\DSP\SynthStyleDSP.cpp</div><pre><code>// SynthStyleDSP — oscillator core + mono tracking path
+inline float waveSample (double phase01, const WaveMix&amp; mix)
+{
+    const float twoPi = juce::MathConstants&lt;float&gt;::twoPi;
+    const float sineVal = std::sin ((float) phase01 * twoPi);
+    // Polynomial saw: 2*x - 1 where x in [0,1)
+    const float sawVal  = 2.0f * (float) phase01 - 1.0f;
+    const float sqrVal  = (phase01 &lt; 0.5) ? 1.0f : -1.0f;
+    return mix.sine * sineVal + mix.saw * sawVal + mix.sqr * sqrVal;
+}
+
+// In process(), mono mode: YIN pitch drives the oscillator, input level drives the env
+        const float trackedHz  = mYin.getFrequencyHz();
+        const float confidence = mYin.getConfidence();
+        if (trackedHz &gt; 0.0f &amp;&amp; confidence &gt; 0.2f)
+        {
+            const float shifted = trackedHz * std::pow (2.0f, profile.octaveShift / 12.0f);
+            mPhaseInc = (double) shifted / mSampleRate;
+        }
+        ...
+            const float absX = std::abs (monoIn[i]);
+            const float coef = (absX &gt; mEnvelope) ? mEnvCoefAtt : mEnvCoefRel;
+            mEnvelope = coef * mEnvelope + (1.0f - coef) * absX;
+            float s = waveSample (mPhase, mix);
+            s *= mEnvelope;</code></pre></div>
+<details class="fullfn"><summary>Full function &mdash; Source\DSP\SynthStyleDSP.cpp</summary><pre><code>    // 1. Build mono mix for YIN.
+    {
+        float* mono = mMonoIn.getWritePointer (0);
+        const float* l = buffer.getReadPointer (0);
+        const float* r = (numCh &gt; 1) ? buffer.getReadPointer (1) : l;
+        for (int i = 0; i &lt; n; ++i)
+            mono[i] = 0.5f * (l[i] + r[i]);
+    }
+    // 2-3. QA-EffectsReview Task 4: mono (YIN, 1 voice) vs poly (FFT tracker + voice pool).
+    const auto&amp;  profile = kProfiles[(int) mType];
+    const WaveMix mix    = variationMix (mType, mVariation);</code></pre></details>
+<pre class="formulas">- Pitch-to-synth: mono mode tracks YIN (accepts frequency at confidence &gt; 0.2, else holds last pitch and lets the envelope decay); poly mode uses the FFT PolyPitchTracker feeding a voice pool (Guitar: 70-1300 Hz full poly; Bass: 35-400 Hz, max 2 notes).
+- Oscillator: `out = sine*sin(2*pi*p) + saw*(2p - 1) + sqr*(p &lt; 0.5 ? +1 : -1)` with per-Type/Variation crossfade weights (table above); Variation 1..11 maps to `v = (variation-1)/10`.
+- Type octave shift: `freq * 2^(octaveShift/12)` — Bass -12 semitones, Bell +12.
+- Envelope: attack/release one-poles from the profile table (`coef = exp(-1/(ms*0.001*sr))`), following `|input|`; synth amplitude = env (mono) or `0.4 * inputEnv * sum(voices)` (poly headroom scaling).
+- LFO: rate log-mapped 0.1..10 Hz (`hz = 0.1 * 100^rate01`). For Organ/Seq2 the LFO multiplies amplitude: `s *= (1 - depth + depth * lfo01)` (rotary/stutter). For all other types it sweeps the filter cutoff +/-1 octave at full depth: `modHz = baseHz * 2^(lfo * depth)`, updated at block rate.
+- Tone: TPT lowpass (Butterworth Q sqrt(2)/2), base cutoff log-mapped 200..8000 Hz times the profile&#x27;s brightness bias (0.45 Bass .. 1.45 Bell); clamp [50 Hz, min(8 kHz, 0.45*sr)].
+- Voice allocation: reuse a voice within 3% of the note frequency; else first free (env &lt; 1e-3, un-gated); else steal the quietest; fresh voices restart phase at 0.
+- Mix: `out = dry*directLevel + synth*effectLevel`; 5 Hz DC blocker (`R = 1 - 2*pi*5/sr`) at the end.</pre>
+<p class="behind"><b>Behind:</b> <a href="manual-2.html#BSPDLP-4">Modulation group</a>.</p>

@@ -1,0 +1,105 @@
+<p>Four real effects, all from two numbers plus a pattern:</p>
+<table>
+  <thead><tr><th>Effect</th><th>Depends on</th></tr></thead>
+  <tbody>
+    <tr><td>Level, falling with distance</td><td>Distance</td></tr>
+    <tr><td>Air absorption &mdash; further is darker</td><td>Distance</td></tr>
+    <tr><td>Proximity bass lift, gone by about 20&nbsp;cm</td><td>Distance and pattern</td></tr>
+    <tr><td>Off-axis darkening, none inside 15 degrees</td><td>Angle and pattern</td></tr>
+  </tbody>
+</table>
+<p><b>Height is folded into those two numbers</b> rather than being a third
+dimension the model has to know about. The model is rotationally symmetric about
+the speaker axis, so one effective off-axis angle is the complete answer:</p>
+<table>
+  <tbody>
+    <tr><td>Vertical angle</td><td><code>v = atan2(height, distance)</code></td></tr>
+    <tr><td>Effective off-axis angle</td><td><code>cos eff = cos h &times; cos v</code></td></tr>
+    <tr><td>True path length</td><td><code>r = sqrt(distance&sup2; + height&sup2;)</code></td></tr>
+  </tbody>
+</table>
+<p>So raising a mic both darkens it <em>and</em> moves it further away &mdash;
+which is what happens when you raise a real stand, and it falls out of the
+geometry rather than being added as a rule.</p>
+<p>What the model has no term for is position across the speaker cone, from dust
+cap to edge. The side view looks like it should do that. It does not.</p>
+<div class="codeblock"><div class="codehead">Source\DSP\MicPlacementDSP.cpp</div><pre><code>// MicPlacementDSP::updateCoefs — distance/angle/pattern combined into 3 filters + gain
+    // Air-absorption LP cutoff: 20 kHz at 1 cm, ~6 kHz at 150 cm (log interp).
+    const float dist01    = (mDistanceCm - 1.0f) / 149.0f;       // 0..1
+    const float airLp_log = juce::jmap (dist01, std::log (20000.0f), std::log (6000.0f));
+    const float airLpHz   = std::exp (airLp_log);
+
+    // Proximity-effect bass shelf: peaks ~+8 dB at 1 cm cardioid,
+    // fades to 0 dB by ~20 cm; never applies for Omni.
+    const float proxScalar  = proximityScalar (mPolar);
+    const float proxNear    = juce::jlimit (0.0f, 1.0f, (20.0f - mDistanceCm) / 19.0f);
+    const float proxGainDb  = 8.0f * proxNear * proxScalar;
+
+    // Off-axis darkening high shelf: past ~15 deg, max ~-8 dB at +/-90.
+    const float angleAbs = std::abs (mAngleDeg);
+    const float angle01  = juce::jlimit (0.0f, 1.0f, (angleAbs - 15.0f) / 75.0f);
+    const float darkenDb = ((mPolar == Polar::Omni) ? 0.0f : -8.0f) * angle01;
+
+    // Distance ~1/sqrt(r) + polar gain.
+    const float distGain = juce::jlimit (0.1f, 1.5f,
+                                           1.0f / std::sqrt (mDistanceCm / 30.0f));
+    const float polarGain = polarResponse (mPolar, mAngleDeg);
+    mGainLin = distGain * polarGain;</code></pre></div>
+<details class="fullfn"><summary>Full function &mdash; Source\DSP\MicPlacementDSP.cpp</summary><pre><code>void MicPlacementDSP::updateCoefs()
+{
+    // ── Air-absorption LP cutoff: 20 kHz at 1 cm, ~6 kHz at 150 cm
+    //    (linear interpolation in log-frequency).
+    const float dist01    = (mDistanceCm - 1.0f) / 149.0f;       // 0..1
+    const float airLp_log = juce::jmap (dist01,
+                                          std::log (20000.0f),
+                                          std::log (6000.0f));
+    const float airLpHz   = std::exp (airLp_log);
+    auto airC = juce::dsp::IIR::Coefficients&lt;float&gt;::makeFirstOrderLowPass (mSampleRate, airLpHz);
+    *mAirLp.state = *airC;
+
+    // ── Proximity-effect bass shelf: peaks ~+8 dB at 1 cm cardioid,
+    //    fades to 0 dB by ~20 cm; never applies for Omni.
+    const float proxScalar  = proximityScalar (mPolar);
+    const float proxNear    = juce::jlimit (0.0f, 1.0f, (20.0f - mDistanceCm) / 19.0f);
+    const float proxGainDb  = 8.0f * proxNear * proxScalar;
+    auto proxC = juce::dsp::IIR::Coefficients&lt;float&gt;::makeLowShelf (
+                       mSampleRate, 200.0f, 0.7f,
+                       juce::Decibels::decibelsToGain (proxGainDb));
+    *mProximityShelf.state = *proxC;
+
+    // ── Off-axis darkening high shelf.  As |angle| grows past ~15
+    //    degrees, the shelf cuts the top end progressively (max ~-8 dB
+    //    at +/-90 degrees for cardioid).  Omni stays flat.  Figure-8 is
+    //    actually brighter directly off-axis at +/-180 but for the +/-90
+    //    range we model here it simply darkens like cardioid.
+    const float angleAbs = std::abs (mAngleDeg);
+    const float angle01  = juce::jlimit (0.0f, 1.0f, (angleAbs - 15.0f) / 75.0f);
+    const float darkenMax = (mPolar == Polar::Omni) ? 0.0f : -8.0f;
+    const float darkenDb  = darkenMax * angle01;
+    auto darkC = juce::dsp::IIR::Coefficients&lt;float&gt;::makeHighShelf (
+                       mSampleRate, 4000.0f, 0.7f,
+                       juce::Decibels::decibelsToGain (darkenDb));
+    *mOffAxisShelf.state = *darkC;
+
+    // ── Distance + polar gain attenuation.
+    //    Distance follows ~1/r law clamped to a sane near-field range
+    //    (1cm = 1.0, 30cm = ~0.6, 150cm = ~0.25).  Polar gain layers on
+    //    top.
+    const float distGain = juce::jlimit (0.1f, 1.5f,
+                                           1.0f / std::sqrt (mDistanceCm / 30.0f));
+    const float polarGain = polarResponse (mPolar, mAngleDeg);
+    mGainLin = distGain * polarGain;
+
+    mLastDistanceCm = mDistanceCm;
+    mLastAngleDeg   = mAngleDeg;
+    mLastPolar      = (int) mPolar;
+}</code></pre></details>
+<pre class="formulas">- Distance range 1..150 cm; angle range -90..+90 degrees; five polar patterns.
+- Distance gain (~inverse-square-root of normalized distance): `distGain = clamp(1/sqrt(distanceCm/30), 0.1, 1.5)` — 1 cm ~ 1.0 (clamped from 5.5 to 1.5 ceiling), 30 cm = 1.0 by the formula (comment cites 30cm ~ 0.6 against the un-normalized 1/r intent), 150 cm ~ 0.45 pre-clamp floor 0.1.
+- Air absorption: first-order LP whose cutoff interpolates in LOG frequency from 20 kHz at 1 cm to 6 kHz at 150 cm: `hz = exp(jmap(dist01, ln 20000, ln 6000))`.
+- Proximity effect: low shelf at 200 Hz Q 0.7; gain `8 dB * proxNear * proxScalar` with `proxNear = clamp((20 - cm)/19, 0, 1)` (fades out by 20 cm) and per-pattern scalar Omni 0 / Cardioid 1.0 / Super 1.15 / Hyper 1.25 / Figure-8 1.5.
+- Off-axis darkening: high shelf at 4 kHz Q 0.7; `darkenDb = -8 * clamp((|angle| - 15)/75, 0, 1)` for all patterns except Omni (flat).
+- Polar (angle) response, standard first-order patterns: Omni 1; Cardioid `0.5 + 0.5 cos a`; Supercardioid `0.37 + 0.63 cos a`; Hypercardioid `0.25 + 0.75 cos a`; Figure-8 `cos a` (negative past 90 deg = rear-lobe phase invert). Front-half patterns floor at 0.
+- Angle and distance COMBINE multiplicatively: `mGainLin = distGain * polarGain`, applied after the three filters; then wet/dry `out = wet*mix + dry*(1-mix)`.
+- Coefficients rebuild only when distance, angle, or pattern actually changed (block-rate dirty check).</pre>
+<p class="behind"><b>Behind:</b> <a href="manual-2.html#BSNAM-13">Mic Active switch, OFF / ON</a>, <a href="manual-2.html#BSNAM-18">MIC PLACEMENT A heading. MIC PLACEMENT B i...</a>, <a href="manual-2.html#BSNAM-19">Top / Side view button</a>, <a href="manual-2.html#BSNAM-20">Polar chicken-head</a>, <a href="manual-2.html#BSNAM-21">Distance</a>, <a href="manual-2.html#BSNAM-22">Angle</a>, <a href="manual-2.html#BSNAM-23">Height</a>, <a href="manual-2.html#BSNAM-24">Placement Mix</a>, <a href="manual-2.html#BSNAM-25">Mic picture</a>, <a href="manual-2.html#BSNAM-26">Distance rings (TOP) / 10 cm height rings ...</a>, <a href="manual-2.html#BSNAM-27">On-axis bright zone</a>, <a href="manual-2.html#BSNAM-28">Proximity boundary</a>, <a href="manual-2.html#BSNAM-29">Placement readout</a>.</p>

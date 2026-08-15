@@ -1,0 +1,84 @@
+<p>A gate voiced for guitar hiss.</p>
+
+<div class="codeblock"><div class="codehead">Source\DSP\NoiseGateStyleDSP.cpp</div><pre><code>// NoiseGateStyleDSP::process — RMS envelope + Schmitt gate, per sample
+            // RMS one-pole envelope (squared domain to avoid sqrt per sample).
+            const float x = det[i];
+            env = mRmsCoef * env + (1.0f - mRmsCoef) * (x * x);
+
+            // Schmitt trigger: open above threshold, close only once the env falls
+            // 3 dB below it (hysteresis -&gt; no chatter when the signal hovers there).
+            if (open) { if (env &lt;  closeSq)  open = false; }
+            else      { if (env &gt;= threshSq) open = true;  }
+
+            const float targetGain = open ? 1.0f : floorLin;
+            // Fast OPEN (~1 ms attack), slow CLOSE (Decay knob): pick the coef by
+            // whether the gain is rising toward open or falling toward the floor.
+            const float coef = (targetGain &gt; gain) ? mAttackCoef : mDecayCoef;
+            gain = coef * gain + (1.0f - coef) * targetGain;
+
+            aud[i] *= gain;</code></pre></div>
+<details class="fullfn"><summary>Full function &mdash; Source\DSP\NoiseGateStyleDSP.cpp</summary><pre><code>void NoiseGateStyleDSP::process (juce::AudioBuffer&lt;float&gt;&amp; buffer)
+{
+    if (bypassed) return;
+    juce::ScopedNoDenormals noDenormals;
+
+    const int numCh = buffer.getNumChannels();
+    const int n     = buffer.getNumSamples();
+    if (numCh == 0 || n == 0) return;
+
+    // Pick the detector source.  DI mode falls back to Self if no sidechain
+    // is wired (so the gate still does something useful before the user
+    // sets up a sidechain feed).
+    const juce::AudioBuffer&lt;float&gt;* detSrc = &amp;buffer;
+    if (mSource == Source::DI)
+    {
+        if (auto* sc = getActiveSidechain())
+            if (sc-&gt;getNumSamples() &gt;= n &amp;&amp; sc-&gt;getNumChannels() &gt; 0)
+                detSrc = sc;
+    }
+
+    const float threshLin = juce::Decibels::decibelsToGain (mThresholdDb, -120.0f);
+    const float threshSq  = threshLin * threshLin;
+    // Schmitt close point: 3 dB below threshold (squared domain).
+    const float closeLin  = juce::Decibels::decibelsToGain (mThresholdDb - kHysteresisDb, -120.0f);
+    const float closeSq   = closeLin * closeLin;
+    const float floorDb   = (mMode == Mode::Mute) ? kMuteFloorDb : kReductionFloorDb;
+    const float floorLin  = juce::Decibels::decibelsToGain (floorDb, -120.0f);
+
+    const int detCh = detSrc-&gt;getNumChannels();
+    for (int ch = 0; ch &lt; numCh; ++ch)
+    {
+        const int detChIdx = juce::jmin (ch, detCh - 1);
+        const float* det = detSrc-&gt;getReadPointer (detChIdx);
+        float* aud       = buffer .getWritePointer (ch);
+        float&amp; env       = (ch == 0) ? mEnvL  : mEnvR;
+        float&amp; gain      = (ch == 0) ? mGainL : mGainR;
+        bool&amp;  open      = (ch == 0) ? mOpenL : mOpenR;
+
+        for (int i = 0; i &lt; n; ++i)
+        {
+            // RMS one-pole envelope (squared domain to avoid sqrt per sample).
+            const float x = det[i];
+            env = mRmsCoef * env + (1.0f - mRmsCoef) * (x * x);
+
+            // Schmitt trigger: open above threshold, close only once the env falls
+            // 3 dB below it (hysteresis -&gt; no chatter when the signal hovers there).
+            if (open) { if (env &lt;  closeSq)  open = false; }
+            else      { if (env &gt;= threshSq) open = true;  }
+
+            const float targetGain = open ? 1.0f : floorLin;
+            // Fast OPEN (~1 ms attack), slow CLOSE (Decay knob): pick the coef by
+            // whether the gain is rising toward open or falling toward the floor.
+            const float coef = (targetGain &gt; gain) ? mAttackCoef : mDecayCoef;
+            gain = coef * gain + (1.0f - coef) * targetGain;
+
+            aud[i] *= gain;
+        }
+    }
+}</code></pre></details>
+<pre class="formulas">- Detector: 5 ms RMS one-pole in the squared domain: `env = c*env + (1-c)*x^2` with `c = exp(-1/(0.005*sr))` — no per-sample sqrt; thresholds are squared instead.
+- Threshold knob: -60..0 dB; open at `env &gt;= thresh^2`.
+- Schmitt hysteresis: close only at 3 dB below threshold (`kHysteresisDb = 3`), so a signal hovering at threshold cannot chatter.
+- Gain smoothing: fast open, attack coef `exp(-1/(0.001*sr))` (~1 ms) so transients aren&#x27;t faded in; close at the Decay knob rate `exp(-1/(decayMs*0.001*sr))`, Decay 1..1000 ms.
+- Modes: Reduction mode floors the closed gain at -20 dB; Mute mode at -60 dB.
+- Source: Self keys off the pedal&#x27;s own input; DI keys off the sidechain feed (falls back to Self when no sidechain is wired).</pre>

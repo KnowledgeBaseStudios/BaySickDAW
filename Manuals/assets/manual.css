@@ -1,0 +1,196 @@
+/* BaySickDAW manuals - one stylesheet for all three, screen and print.
+   Authoring format is HTML (SC-8); the PDF is generated from these same files,
+   so anything that only works on screen has to degrade rather than vanish. */
+
+:root {
+  --bg:        #16171b;
+  --panel:     #1d1f24;
+  --panel-2:   #24262c;
+  --line:      #333640;
+  --text:      #e6e7ea;
+  --text-dim:  #a0a4ad;
+  --accent:    #ff4d6d;
+  --accent-2:  #00e5ff;
+  --link:      #6fd3ff;
+  --code-bg:   #101216;
+  --marker:    #ff4d6d;
+  --marker-fg: #ffffff;
+}
+
+* { box-sizing: border-box; }
+
+html { scroll-behavior: smooth; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 16px/1.65 "Segoe UI", system-ui, -apple-system, sans-serif;
+}
+
+.wrap { max-width: 1180px; margin: 0 auto; padding: 0 28px 96px; }
+
+/* ── Masthead ─────────────────────────────────────────────────────────── */
+header.masthead {
+  border-bottom: 1px solid var(--line);
+  background: linear-gradient(180deg, #1b1d22, #16171b);
+  padding: 34px 0 26px;
+  margin-bottom: 34px;
+}
+header.masthead h1 {
+  margin: 0 0 6px;
+  font-size: 30px;
+  letter-spacing: .4px;
+}
+header.masthead h1 .brand { color: var(--accent); }
+header.masthead p { margin: 0; color: var(--text-dim); }
+
+/* ── Nav ──────────────────────────────────────────────────────────────── */
+nav.manuals { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 18px; }
+nav.manuals a {
+  display: block;
+  padding: 8px 16px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--panel);
+  color: var(--text);
+  text-decoration: none;
+  font-size: 14px;
+}
+nav.manuals a:hover { border-color: var(--accent); color: #fff; }
+nav.manuals a.here { border-color: var(--accent); background: var(--panel-2); }
+
+/* ── Cards on the landing page ────────────────────────────────────────── */
+.cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 18px; }
+.card {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel);
+  padding: 22px;
+}
+.card h2 { margin: 0 0 4px; font-size: 19px; }
+.card h2 a { color: var(--text); text-decoration: none; }
+.card h2 a:hover { color: var(--accent); }
+.card .who { color: var(--accent-2); font-size: 13px; margin: 0 0 10px; }
+.card p { margin: 0 0 10px; color: var(--text-dim); font-size: 14px; }
+
+/* ── Headings ─────────────────────────────────────────────────────────── */
+h2.chapter {
+  margin: 52px 0 4px;
+  padding-top: 18px;
+  border-top: 2px solid var(--accent);
+  font-size: 25px;
+}
+h3.section { margin: 34px 0 8px; font-size: 19px; color: #fff; }
+h4.sub { margin: 24px 0 6px; font-size: 16px; color: var(--accent-2); }
+
+.lede { color: var(--text-dim); margin: 0 0 18px; }
+
+/* ── Control entries: the Manual 2 spine ──────────────────────────────── */
+.ctrl {
+  border-left: 3px solid var(--line);
+  padding: 2px 0 2px 16px;
+  margin: 20px 0;
+}
+.ctrl:target { border-left-color: var(--accent); }
+.ctrl .hd { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; }
+.ctrl .cid {
+  font: 600 12px/1 ui-monospace, Consolas, monospace;
+  color: var(--marker-fg);
+  background: var(--marker);
+  padding: 4px 7px;
+  border-radius: 3px;
+  white-space: nowrap;
+}
+.ctrl .name { font-weight: 600; font-size: 16px; }
+.ctrl .where { color: var(--text-dim); font-size: 13px; }
+.ctrl p { margin: 8px 0 0; }
+.ctrl .refs { margin-top: 7px; font-size: 13px; color: var(--text-dim); }
+.ctrl .refs a { color: var(--link); text-decoration: none; }
+.ctrl .refs a:hover { text-decoration: underline; }
+
+/* ── Callout boxes ────────────────────────────────────────────────────── */
+.note, .warn {
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--accent-2);
+  border-radius: 4px;
+  background: var(--panel);
+  padding: 12px 16px;
+  margin: 18px 0;
+  font-size: 15px;
+}
+.warn { border-left-color: #ffb300; }
+.note b, .warn b { color: #fff; }
+
+/* ── Tables ───────────────────────────────────────────────────────────── */
+table { border-collapse: collapse; width: 100%; margin: 16px 0; font-size: 14px; }
+th, td { border: 1px solid var(--line); padding: 7px 10px; text-align: left; vertical-align: top; }
+th { background: var(--panel-2); color: #fff; font-weight: 600; }
+tbody tr:nth-child(even) { background: rgba(255,255,255,.02); }
+
+code, kbd {
+  font: 13px/1.4 ui-monospace, Consolas, monospace;
+  background: var(--code-bg);
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  padding: 1px 5px;
+}
+kbd { color: var(--accent-2); }
+
+a { color: var(--link); }
+
+/* ── Print / PDF ──────────────────────────────────────────────────────── */
+@media print {
+  :root {
+    --bg: #fff; --panel: #fff; --panel-2: #f2f2f4; --line: #bbb;
+    --text: #111; --text-dim: #555; --link: #0645ad;
+    /* --code-bg stayed at its dark screen value until 2026-08-15, which
+       printed code/kbd/pre as near-black text on a near-black pill. */
+    --code-bg: #f2f2f4;
+  }
+  /* Screen cyan is unreadable on the light print pill. */
+  kbd { color: #00707e; }
+  body { font-size: 11pt; }
+  .wrap { max-width: none; padding: 0; }
+  nav.manuals, .noprint { display: none; }
+  h2.chapter { break-before: page; }
+  .ctrl, table, .note, .warn, figure { break-inside: avoid; }
+  a { text-decoration: none; }
+}
+
+/* ── Search results panel (assets/search.js) ──────────────────────────────── */
+.jump { position: relative; }
+.results {
+  display: none;
+  position: absolute;
+  left: 0; right: 0;
+  top: calc(100% + 4px);
+  max-height: 60vh;
+  overflow-y: auto;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--panel-2);
+  box-shadow: 0 10px 28px rgba(0,0,0,.6);
+  z-index: 40;
+}
+.results.open { display: block; }
+.results button {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 7px 10px;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  background: none;
+  color: var(--text);
+  cursor: pointer;
+  font: inherit;
+}
+.results button:last-child { border-bottom: 0; }
+.results button:hover, .results button.on { background: rgba(255,77,109,.16); }
+.results .t { display: block; font-size: 12.5px; font-weight: 600; }
+.results .s { display: block; font-size: 11.5px; color: var(--text-dim); line-height: 1.35; }
+.results .c { display: block; font-size: 10.5px; color: var(--accent-2); margin-top: 2px; }
+.results mark { background: rgba(255,209,0,.28); color: inherit; border-radius: 2px; padding: 0 1px; }
+
+@media print { .results { display: none !important; } }

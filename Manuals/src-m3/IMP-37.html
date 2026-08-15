@@ -1,0 +1,106 @@
+<p>The amp is a neural capture of a real amplifier; the cabinet is an impulse
+response convolved with the signal. Neither is a model of a <em>kind</em> of
+gear &mdash; both are recordings of specific gear.</p>
+<p>An amp capture that already includes a cabinet is a "full rig" capture; the
+window says so, and the cabinet stage should be bypassed for those.</p>
+
+<div class="codeblock"><div class="codehead">Source\BaySickNAMIR\BaySickNAMIRProcessor.cpp</div><pre><code>// BaySickNAMIRProcessor::loadNamModel — SafeNamModel gate + nam::get_dsp + prewarm
+    if (const auto why = SafeNamModel::rejectReason (resolved); why.isNotEmpty())
+    {
+        outErr = &quot;This NAM capture was refused: &quot; + why + &quot;.&quot;;
+        return false;
+    }
+    ...
+        nam::dspData data;
+        std::filesystem::path p (resolved.getFullPathName().toStdString());
+        newModel = nam::get_dsp (p, data);
+        ...
+        // Full-rig auto-detect: peek metadata.gear_type (&quot;amp_cab&quot; /
+        // &quot;amp_pedal_cab&quot; mean the capture already includes a cabinet so the
+        // editor will suggest auto-bypassing the IR convolution).
+        if (data.metadata.contains (&quot;gear_type&quot;) &amp;&amp; data.metadata[&quot;gear_type&quot;].is_string())
+        {
+            const std::string g = data.metadata[&quot;gear_type&quot;].get&lt;std::string&gt;();
+            isFullRigFlag = (g == &quot;amp_cab&quot; || g == &quot;amp_pedal_cab&quot;);
+        }
+        ...
+            const double osRate     = mSampleRate * (double) (1 &lt;&lt; osFactor);
+            const int    osMaxBlock = mMaxBlock   * (1 &lt;&lt; osFactor);
+            newModel-&gt;ResetAndPrewarm (osRate, osMaxBlock);</code></pre></div>
+<details class="fullfn"><summary>Full function &mdash; Source\BaySickNAMIR\BaySickNAMIRProcessor.cpp</summary><pre><code>bool BaySickNAMIRProcessor::loadNamModel (const juce::String&amp; filePath, juce::String&amp; outErr, int slot)
+{
+    slot = resolveSlot (slot);
+    ...
+    const juce::File resolved = ProjectFileResolver::resolve (filePath);
+    if (! resolved.existsAsFile()) { outErr = &quot;File not found: &quot; + filePath; return false; }
+
+    // SECURITY (QA-Cleanup 2026-08-10): gate BEFORE nam::get_dsp.  The catch
+    // blocks below cannot help here - the vendored loader&#x27;s failure modes are an
+    // unchecked over-read (no exception; on Windows an access violation is a
+    // Structured Exception, which /EHsc does not route to catch (...)) and a
+    // prewarm loop driven by a file-supplied length (throws nothing, simply
+    // never returns).  See SafeNamModel.h.
+    if (const auto why = SafeNamModel::rejectReason (resolved); why.isNotEmpty())
+    {
+        outErr = &quot;This NAM capture was refused: &quot; + why + &quot;.&quot;;
+        return false;
+    }
+
+    std::unique_ptr&lt;nam::DSP&gt; newModel;
+    bool isFullRigFlag = false;
+    try
+    {
+        nam::dspData data;
+        std::filesystem::path p (resolved.getFullPathName().toStdString());
+        newModel = nam::get_dsp (p, data);
+        if (! newModel) { outErr = &quot;NAM core returned a null model.&quot;; return false; }
+
+        // Full-rig auto-detect: peek metadata.gear_type (&quot;amp_cab&quot; /
+        // &quot;amp_pedal_cab&quot; mean the capture already includes a cabinet so the
+        // editor will suggest auto-bypassing the IR convolution).
+        if (data.metadata.contains (&quot;gear_type&quot;) &amp;&amp; data.metadata[&quot;gear_type&quot;].is_string())
+        {
+            const std::string g = data.metadata[&quot;gear_type&quot;].get&lt;std::string&gt;();
+            isFullRigFlag = (g == &quot;amp_cab&quot; || g == &quot;amp_pedal_cab&quot;);
+        }
+
+        if (mPrepared)
+        {
+            // Reset at the active oversampling rate so this slot is ready to
+            // run as soon as the audio thread swaps it in.
+            int osFactor = 0;
+            if (auto* pp = apvts.getRawParameterValue (&quot;oversampling&quot;))
+                osFactor = juce::jlimit (0, 2, (int) pp-&gt;load());
+            const double osRate     = mSampleRate * (double) (1 &lt;&lt; osFactor);
+            const int    osMaxBlock = mMaxBlock   * (1 &lt;&lt; osFactor);
+            newModel-&gt;ResetAndPrewarm (osRate, osMaxBlock);
+        }
+    }
+    catch (const std::exception&amp; ex) { outErr = juce::String (&quot;NAM load failed: &quot;) + ex.what(); return false; }
+    catch (...) { outErr = &quot;NAM load failed: unknown error.&quot;; return false; }
+
+    {
+        const juce::ScopedLock lk (mLoadLock);
+        for (int spin = 0; spin &lt; 1000 &amp;&amp; mNamSwapPending[(size_t) slot].load (std::memory_order_acquire); ++spin)
+            juce::Thread::sleep (1);
+
+        std::unique_ptr&lt;nam::DSP&gt; oldPending = std::move (mNamPending[(size_t) slot]);
+        juce::ignoreUnused (oldPending);
+
+        mNamPending  [(size_t) slot] = std::move (newModel);
+        mNamIsFullRig[(size_t) slot].store (isFullRigFlag, std::memory_order_release);
+        mNamLoaded   [(size_t) slot].store (true,          std::memory_order_release);
+        mNamSwapPending[(size_t) slot].store (true,        std::memory_order_release);
+    }
+
+    mNamPaths[(size_t) slot] = filePath;
+    return true;
+}</code></pre></details>
+<pre class="formulas">- Load gate order: `ProjectFileResolver::resolve` (bundled &quot;Samples/x.nam&quot; refs) -&gt; `SafeNamModel::rejectReason` BEFORE `nam::get_dsp` (the vendored loader&#x27;s failure modes — unchecked over-read = Windows SEH access violation that `/EHsc` catch(...) never sees, and a file-supplied prewarm loop length that never returns — cannot be caught after the fact) -&gt; `nam::get_dsp(path, data)` -&gt; `ResetAndPrewarm(sr * 2^osFactor, maxBlock * 2^osFactor)` at the ACTIVE oversampling rate.
+- Full-rig detect: `metadata.gear_type` of &quot;amp_cab&quot; or &quot;amp_pedal_cab&quot; flags the capture as already containing a cabinet (editor suggests auto-bypassing the IR).
+- Publish/adopt: pending pointer per slot + `mNamSwapPending` release-store; loader spin-waits up to 1000 ms for a prior un-adopted swap; audio thread swaps active/pending wait-free at block top (no dealloc on the audio thread).
+- Inference: mono-sum `0.5*(L+R)`, double-precision `nam-&gt;process(in, out, n)`, broadcast back dual-mono; oversampling factor 0/1/2 = host rate / 2x / 4x via `juce::dsp::Oversampling` (`processSamplesUp` -&gt; NAM at the raised rate -&gt; `processSamplesDown`); exceptions produce silence for that block.
+- Cabinet IR: `juce::dsp::Convolution` per slot, loaded with Stereo::yes, Trim::yes, size 0 (= whole file), Normalise::yes; a pre-decode with SafeAudioReader makes unreadable files fail loudly (JUCE&#x27;s own loader silently degrades to a 1-sample unit impulse = inaudible passthrough).
+- Cab wet/dry: `out = conv*cabMix + dry*(1-cabMix)` with `cabMix01 = cab_mix% * 0.01`; skipped entirely when the slot has no IR or cab_bypass is on.
+- Chain order: input gain -&gt; noise gate (pre-NAM, on the dry guitar) -&gt; NAM (A/B slot) -&gt; low-cut HPF + high-cut LPF -&gt; cabinet IR convolution -&gt; dual mic sim/placement -&gt; output gain.</pre>
+<p class="behind"><b>Behind:</b> <a href="manual-2.html#BSNAM-1">AMP row</a>, <a href="manual-2.html#BSNAM-2">Amp bypass</a>, <a href="manual-2.html#BSNAM-3">CAB row</a>, <a href="manual-2.html#BSNAM-4">Cab bypass</a>, <a href="manual-2.html#BSNAM-5">Input Gain</a>, <a href="manual-2.html#BSNAM-7">Low Cut / High Cut</a>, <a href="manual-2.html#BSNAM-8">Cab Mix</a>, <a href="manual-2.html#BSNAM-9">Output</a>.</p>

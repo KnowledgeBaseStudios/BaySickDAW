@@ -1,0 +1,118 @@
+<p>Finds several simultaneous pitches. Harder, less certain, and what the
+send-notes-to feature uses.</p>
+
+<div class="codeblock"><div class="codehead">- Source\DSP\PolyPitchTracker.cpp (205 lines)</div><pre><code>// PolyPitchTracker::WorkerThread::analyze() -- greedy harmonic-sum detection
+        constexpr int H = 8;                                  // harmonics summed
+        const float scoreThresh = meanMag * (float) H * 3.0f;
+
+        auto binOf   = [binHz] (float f) { return (int) std::lround (f / binHz); };
+        auto scoreAt = [&amp;] (float f)
+        {
+            float s = 0.0f;
+            for (int h = 1; h &lt;= H; ++h)
+            {
+                const int b = binOf (f * (float) h);
+                if (b &lt; 1 || b &gt;= half) break;
+                s += mWork[(size_t) b] / (float) h;           // weight lower harmonics
+            }
+            return s;
+        };
+
+        NoteSet ns;
+        for (int note = 0; note &lt; maxNotes; ++note)
+        {
+            // Coarse search over a 50-cent f0 grid.
+            float bestS = 0.0f, bestF = 0.0f;
+            for (float f = minHz; f &lt;= maxHz; f *= 1.02930224f /* +50 cents */)
+            {
+                const float s = scoreAt (f);
+                if (s &gt; bestS) { bestS = s; bestF = f; }
+            }
+            if (bestF &lt;= 0.0f || bestS &lt; scoreThresh) break;</code></pre></div>
+<details class="fullfn"><summary>Full function &mdash; - Source\DSP\PolyPitchTracker.cpp (205 lines)</summary><pre><code>    void analyze (const float* window, const float* hann,
+                  juce::dsp::FFT&amp; fft, std::vector&lt;float&gt;&amp; fftBuf)
+    {
+        const int W = kWindowSize;
+        for (int i = 0; i &lt; W; ++i) fftBuf[(size_t) i] = window[i] * hann[i];
+        std::fill (fftBuf.begin() + W, fftBuf.end(), 0.0f);
+        fft.performFrequencyOnlyForwardTransform (fftBuf.data());   // magnitudes in [0, W/2]
+
+        const int    half  = W / 2;
+        const double sr    = (owner.mSampleRate &gt; 0.0) ? owner.mSampleRate : 44100.0;
+        const float  binHz = (float) (sr / (double) W);
+        const float  minHz = juce::jmax (binHz * 2.0f, owner.mMinHz.load (std::memory_order_relaxed));
+        const float  maxHz = juce::jmin (owner.mMaxHz.load (std::memory_order_relaxed),
+                                         (float) (sr * 0.45));
+        const int    maxNotes = juce::jlimit (1, kMaxNotes,
+                                              owner.mMaxNotesReq.load (std::memory_order_relaxed));
+
+        // Working magnitude copy (claimed harmonics get zeroed out per note).
+        std::copy (fftBuf.begin(), fftBuf.begin() + half, mWork.begin());
+
+        // Noise-floor estimate -&gt; a real note must stack harmonics well above it.
+        float meanMag = 0.0f;
+        for (int k = 1; k &lt; half; ++k) meanMag += mWork[(size_t) k];
+        meanMag /= (float) juce::jmax (1, half - 1);
+
+        constexpr int H = 8;                                  // harmonics summed
+        const float scoreThresh = meanMag * (float) H * 3.0f;
+
+        auto binOf   = [binHz] (float f) { return (int) std::lround (f / binHz); };
+        auto scoreAt = [&amp;] (float f)
+        {
+            float s = 0.0f;
+            for (int h = 1; h &lt;= H; ++h)
+            {
+                const int b = binOf (f * (float) h);
+                if (b &lt; 1 || b &gt;= half) break;
+                s += mWork[(size_t) b] / (float) h;           // weight lower harmonics
+            }
+            return s;
+        };
+
+        NoteSet ns;
+        for (int note = 0; note &lt; maxNotes; ++note)
+        {
+            // Coarse search over a 50-cent f0 grid.
+            float bestS = 0.0f, bestF = 0.0f;
+            for (float f = minHz; f &lt;= maxHz; f *= 1.02930224f /* +50 cents */)
+            {
+                const float s = scoreAt (f);
+                if (s &gt; bestS) { bestS = s; bestF = f; }
+            }
+            if (bestF &lt;= 0.0f || bestS &lt; scoreThresh) break;
+
+            // Refine +/- 1 semitone at ~10-cent steps.
+            float refF = bestF, refS = bestS;
+            for (float f = bestF * 0.9438f; f &lt;= bestF * 1.0595f; f *= 1.005777f)
+            {
+                const float s = scoreAt (f);
+                if (s &gt; refS) { refS = s; refF = f; }
+            }
+            ns.freqs[ns.count++] = refF;
+
+            // Subtract the claimed note&#x27;s harmonics from the working spectrum.
+            for (int h = 1; h &lt;= H; ++h)
+            {
+                const int b = binOf (refF * (float) h);
+                if (b &lt; 1 || b &gt;= half) break;
+                for (int d = -2; d &lt;= 2; ++d)
+                    if (b + d &gt;= 1 &amp;&amp; b + d &lt; half) mWork[(size_t) (b + d)] = 0.0f;
+            }
+        }
+
+        // Publish via seqlock (odd -&gt; write -&gt; even).
+        owner.mSeq.fetch_add (1, std::memory_order_acq_rel);
+        owner.mShared = ns;
+        owner.mSeq.fetch_add (1, std::memory_order_release);
+    }</code></pre></details>
+<pre class="formulas">- Geometry: `kFftOrder = 12` -&gt; window 4096 (~93 ms @ 44.1k), hop 1024, Hann window, `juce::dsp::FFT::performFrequencyOnlyForwardTransform`.
+- Note cap: `kMaxNotes = 6`; consumer-settable via `setMaxNotes` (Bass uses 1-2).
+- Frequency range defaults: 70..1200 Hz (`mMinHz`/`mMaxHz` atomics, set per instrument Guitar vs Bass); floor clamped to `binHz * 2`, ceiling to `sr * 0.45`.
+- Harmonic-sum score: `H = 8` harmonics, weight `1/h` per harmonic (`s += mag[bin(f*h)] / h`).
+- Detection threshold: `scoreThresh = meanMag * H * 3.0` where meanMag = mean magnitude over bins [1, half) (noise-floor estimate).
+- Coarse grid step: x1.02930224 per step = +50 cents (`2^(50/1200)`); refine pass over +/- 1 semitone (`bestF * 0.9438` .. `bestF * 1.0595`) at x1.005777 = ~10-cent steps.
+- Spectral subtraction: zero claimed note&#x27;s harmonic bins +/- 2 bins each, for all 8 harmonics.
+- Ring: `kRingSize = kWindowSize * 4 = 16384`; worker pulls at most one hop per 5 ms-wait iteration.
+- Publish: seqlock - odd/even `mSeq` bumps around the `NoteSet` write; readers retry up to 8 attempts on torn reads (wait-free for the audio thread).</pre>
+<p class="behind"><b>Behind:</b> <a href="manual-2.html#BSPIT-4">Send Notes to</a>.</p>

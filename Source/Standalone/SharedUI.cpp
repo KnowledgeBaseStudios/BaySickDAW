@@ -870,6 +870,44 @@ namespace
             g.drawLine (x.getX(), x.getBottom(), x.getRight(), x.getY(), 1.4f);
         }
     };
+
+    class ChromeMinimiseButton : public juce::Button
+    {
+    public:
+        ChromeMinimiseButton() : juce::Button ("minimise") {}
+
+        void paintButton (juce::Graphics& g, bool isOver, bool isDown) override
+        {
+            auto b = getLocalBounds().toFloat();
+            if (isOver || isDown)
+            {
+                g.setColour (juce::Colours::white.withAlpha (isDown ? 0.22f : 0.12f));
+                g.fillRect (b);
+            }
+            const auto x = b.reduced (b.getWidth() * 0.33f, b.getHeight() * 0.33f);
+            g.setColour (WindowChrome::titleText());
+            g.drawLine (x.getX(), x.getBottom(), x.getRight(), x.getBottom(), 1.4f);
+        }
+    };
+
+    class ChromeMaximiseButton : public juce::Button
+    {
+    public:
+        ChromeMaximiseButton() : juce::Button ("maximise") {}
+
+        void paintButton (juce::Graphics& g, bool isOver, bool isDown) override
+        {
+            auto b = getLocalBounds().toFloat();
+            if (isOver || isDown)
+            {
+                g.setColour (juce::Colours::white.withAlpha (isDown ? 0.22f : 0.12f));
+                g.fillRect (b);
+            }
+            const auto x = b.reduced (b.getWidth() * 0.33f, b.getHeight() * 0.33f);
+            g.setColour (WindowChrome::titleText());
+            g.drawRect (x, 1.4f);
+        }
+    };
 }
 
 void BaySickLAF::drawDocumentWindowTitleBar (juce::DocumentWindow& win, juce::Graphics& g,
@@ -918,12 +956,16 @@ void BaySickLAF::drawDocumentWindowTitleBar (juce::DocumentWindow& win, juce::Gr
 
 juce::Button* BaySickLAF::createDocumentWindowButton (int buttonType)
 {
-    // Locked call 5a applied to desktop windows too: close only.  Minimise and
-    // maximise are returned as null so DocumentWindow simply has none -- a
-    // maximised satellite covering the app is not a state this shell has a way
-    // back out of.
+    // Locked call 5a still holds for the satellites: their DocumentWindow
+    // masks request the close button ONLY, so they never ask for these.
+    // Buttons exist here for windows that DO ask -- the manuals window
+    // requests all three (Jeff, 2026-08-14).
     if (buttonType == juce::DocumentWindow::closeButton)
         return new ChromeCloseButton();
+    if (buttonType == juce::DocumentWindow::minimiseButton)
+        return new ChromeMinimiseButton();
+    if (buttonType == juce::DocumentWindow::maximiseButton)
+        return new ChromeMaximiseButton();
     return nullptr;
 }
 
@@ -934,13 +976,18 @@ void BaySickLAF::positionDocumentWindowButtons (juce::DocumentWindow&,
                                              juce::Button* close,
                                              bool /*positionTitleBarButtonsOnLeft*/)
 {
-    // Square, right-aligned, inset by the same 4px the shell's close button uses.
-    if (close != nullptr)
-        close->setBounds (juce::Rectangle<int> (titleBarX + titleBarW - titleBarH,
-                                                titleBarY, titleBarH, titleBarH)
-                              .reduced (4));
-    if (minimise != nullptr) minimise->setBounds ({});
-    if (maximise != nullptr) maximise->setBounds ({});
+    // Square, right-aligned, inset by the same 4px the shell's close button
+    // uses; maximise and minimise stack leftward of close when present.
+    auto slot = [&] (int i)
+    {
+        return juce::Rectangle<int> (titleBarX + titleBarW - (i + 1) * titleBarH,
+                                     titleBarY, titleBarH, titleBarH)
+                   .reduced (4);
+    };
+    int i = 0;
+    if (close    != nullptr) close->setBounds (slot (i++));
+    if (maximise != nullptr) maximise->setBounds (slot (i++));
+    if (minimise != nullptr) minimise->setBounds (slot (i++));
 }
 
 void BaySickLAF::drawGroupComponentOutline(juce::Graphics& g, int w, int h,
@@ -1751,11 +1798,22 @@ void PageMenuBar::paint(juce::Graphics& g)
     // Page title.  Jeff's rule (2026-08-04): a window carrying its own logo /
     // engine wordmark shows NO plain title text -- the logo IS the identity.
     // A window without one centres the title instead of pinning it left.
+    //
+    // Centred in the FREE SPAN, not on the strip -- the same fix the coloured
+    // engine name below got on 2026-08-05, which this path never received.  On
+    // the strip it slid under the Menu button the moment a window got narrow,
+    // and the 180px VU window made that visible as "MenuVU Meter".
     if (mTitle.isNotEmpty() && mTabSlotBtns.empty() && mCenterName.isEmpty())
     {
         g.setColour(VC::TextDim.withAlpha(0.7f));
         g.setFont(juce::Font(10.f, juce::Font::bold));
-        g.drawText(mTitle, getLocalBounds(), juce::Justification::centred, false);
+
+        const int freeL = juce::jmin (mCenterFreeL, mCenterFreeR);
+        const int freeW = juce::jmax (0, mCenterFreeR - freeL);
+        g.drawText(mTitle,
+                   freeW > 0 ? juce::Rectangle<int> (freeL, 0, freeW, getHeight())
+                             : getLocalBounds(),
+                   juce::Justification::centred, false);
     }
 
     // QA-Layout T3 (Window-4/L2): centered colored engine name, bloom style.
@@ -5741,6 +5799,18 @@ void ParametricEQDisplay::drawPhaseCurve(juce::Graphics& g) const
 // ============================================================ VUMeter
 float VUMeter::sCalibrationDb = -18.f;
 std::function<void()> VUMeter::sOnCalibrationChanged;
+
+void VUMeter::addCalibrationSubMenu (juce::PopupMenu& parent)
+{
+    juce::PopupMenu calib;
+    for (int db = -18; db <= -14; ++db)
+    {
+        const bool isCurrent = (getCalibrationDb() == (float) db);
+        calib.addItem (juce::String (db) + " dBFS", true, isCurrent,
+                       [db] { setCalibrationDb ((float) db); });
+    }
+    parent.addSubMenu ("VU Calibration (0 VU = ...)", calib);
+}
 
 VUMeter::VUMeter(Style style) : mStyle(style)
 {

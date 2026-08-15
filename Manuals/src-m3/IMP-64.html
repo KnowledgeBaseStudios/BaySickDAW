@@ -1,0 +1,98 @@
+<p>Arming a control and binding the next controller movement to it. There is no
+mapping window; the right-click menu is the entire interface.</p>
+
+<p>Notes played from the UI &mdash; clicking a roll key, clicking a drum on the
+kit graphic &mdash; reach the engine through a single atomic swap read at the top
+of the audio block, rather than through a queue with a lock in it.</p>
+
+<div class="codeblock"><div class="codehead">Source\MidiLearn\MidiLearnRegistry.h (registry + event queue, entire mechanism)</div><pre><code>// MidiLearnRegistry.h -- MessageType + Mapping (the binding record, verbatim)
+    enum class MessageType
+    {
+        Cc              = 0,    // Control Change (uses ccNumber 0..127)
+        PitchBend       = 1,    // 14-bit value 0..16383 -&gt; normalised 0..1
+        ChannelPressure = 2,    // 7-bit value 0..127
+        // PolyAftertouch deferred -- rare in beginner gear, learnable later.
+    };
+
+    struct Mapping
+    {
+        juce::String paramId;                            // APVTS paramId
+        MessageType  msgType    { MessageType::Cc };
+        int          ccNumber   { 0 };                   // 0..127 for CC
+        int          channel    { 0 };                   // 0 = Omni, 1..16
+        juce::String deviceName;                         // empty = any device
+        juce::String formula;                            // empty = linear (I-3c)
+    };</code></pre></div>
+<details class="fullfn"><summary>Full function &mdash; Source\MidiLearn\MidiLearnRegistry.h (registry + event queue, entire mechanism)</summary><pre><code>// MidiLearnRegistry.h -- class banner + learn handshake (verbatim, lines 8-45 + 99-123)
+// ─────────────────────────────────────────────────────────────────────────────
+// MidiLearnRegistry - Phase I-3b (2026-05-02)
+// ─────────────────────────────────────────────────────────────────────────────
+// App-wide MIDI Learn registry.  Maps incoming hardware MIDI events to APVTS
+// param updates so the user can right-click any knob, pick &quot;MIDI Learn&quot;, and
+// bind a hardware control to it.
+//
+// FL-mirrored mapping granularity (locked 2026-05-02):
+//   * Each mapping captures {message type, CC# / pitch-bend / aftertouch,
+//     channel, device name} so two keyboards on different ports can each
+//     control different params.
+//   * User can later edit a mapping to widen channel to Omni or change device.
+//   * Pitch-bend and channel-aftertouch are first-class learnable types
+//     alongside CC; poly aftertouch deferred (rare in beginner gear).
+//
+// Threading:
+//   * Mutators (setMapping / removeMapping / load / save) on message thread
+//     under mLock (juce::SpinLock).
+//   * Audio thread dispatch (`dispatchEvent`) try-locks; if it can&#x27;t, skips
+//     the event (one missed CC frame is unnoticeable for human-driven CCs).
+//   * Lookup is O(N mappings) per dispatch -- expected count is small (&lt;100).
+//     Keeps the data model simple; can switch to a hashed lookup if profiling
+//     shows it.
+//
+// Persistence:
+//   * Per-project: serialised inside the project&#x27;s PluginProcessor::getState
+//     output as a `&lt;MidiCCMappings&gt;` ValueTree child.  Loaded by
+//     setStateInformation on project open.
+//   * Global default: Documents/BaySickDAW/MidiMappings.xml -- saved when
+//     the user picks &quot;Save as global default&quot; in the right-click menu (I-3c).
+//     Loaded at app launch BEFORE per-project state restores; per-project
+//     mappings overlay on top of globals.
+//
+// Value mapping curve:
+//   * v1 ships LINEAR only (CC 0..127 -&gt; param min..max via NormalisableRange).
+//   * Per-mapping `formula` field reserved for I-3c power-user formula
+//     evaluation (FL-style).  Empty formula = linear.
+// ─────────────────────────────────────────────────────────────────────────────
+
+    // ── Learn-mode capture (used by I-3c right-click menu) ───────────────────
+    // The UI calls beginLearn(paramId), then polls takeCapturedMapping() on the
+    // message thread and commits with setMapping().
+    //
+    // 2026-07-19: the capture callback was REMOVED.  It ran on the audio thread
+    // and, between the std::function copy, the callback&#x27;s own
+    // MessageManager::callAsync, the std::map insert, and the onChanged()
+    // notify, put four separate heap allocations in the render callback.  The
+    // audio thread now only fills a pre-constructed Mapping under the existing
+    // lock (refcount traffic on already-owned strings, no allocation) and sets
+    // a flag; every allocating step moved to the message thread.  Same handshake
+    // shape as DrumTriggerMap.
+    void beginLearn (const juce::String&amp; paramId);
+    void cancelLearn();
+    bool isLearning() const noexcept;
+    juce::String getLearnTargetParamId() const;
+
+    // Message thread.  Returns true and fills `out` exactly once per capture.
+    bool takeCapturedMapping (Mapping&amp; out);
+
+    // Audio-thread (or MIDI thread): if a learn target is active and this event
+    // is a learnable type, record it for the message thread and return true
+    // (caller suppresses the event from regular dispatch).
+    bool tryCaptureLearn (const juce::String&amp; sourceDeviceName,
+                          const juce::MidiMessage&amp; msg);</code></pre></details>
+<pre class="formulas">- Binding record: `Mapping { paramId, msgType, ccNumber 0..127, channel (0 = Omni, 1..16), deviceName (empty = any device), formula (empty = linear) }`. One paramId has AT MOST one mapping; re-learning replaces. Learnable types: CC, PitchBend (14-bit 0..16383 -&gt; 0..1), ChannelPressure (7-bit); poly aftertouch deferred.
+- Match rule (`eventMatchesMapping`): msgType + ccNumber + channel + deviceName all must match; channel 0 (Omni) matches any channel, empty deviceName matches any device.
+- Value curve: v1 is LINEAR only — CC 0..127 -&gt; param min..max via NormalisableRange; `formula` field reserved for FL-style formulas (I-3c).
+- Dispatch is BLOCK-RATE (locked spec, Jeff 2026-05-02): events fire at the audio-block boundary, not sample-accurate. `dispatchEvent` try-locks; a missed CC frame is unnoticeable for human-driven CCs. Lookup O(N), expected N &lt; 100.
+- Learn handshake (allocation-free on audio): UI `beginLearn(paramId)` -&gt; audio/MIDI thread `tryCaptureLearn` fills a PRE-CONSTRUCTED Mapping under the lock and sets an atomic flag (the old callback design put FOUR heap allocations in the render callback and was removed 2026-07-19) -&gt; message thread polls `takeCapturedMapping` (fires exactly once per capture) -&gt; commits with `setMapping`. Captured events are suppressed from regular dispatch.
+- Persistence: per-project as `&lt;MidiCCMappings&gt;` ValueTree child inside getState output (kRootTag = &quot;MidiCCMappings&quot;); global defaults at `Documents/BaySickDAW/MidiMappings.xml`, loaded at app launch BEFORE per-project state — per-project mappings OVERLAY globals.
+- MidiLearnEventQueue (MIDI thread -&gt; audio thread MPSC bridge): `kMaxBacklog = 1024` events (oldest dropped past that), `kMaxDevices = 32` interned device names (fixed array, entries never destroyed — safe for audio to hold a const&amp; while MIDI appends; table-full returns -1 = empty device name). Device names interned to int ids because the drain&#x27;s String clear() used to run free() INSIDE the render callback. Drain swaps buffers under a try-lock then iterates OUTSIDE the lock (fn reaches setValueNotifyingHost). Only 2-3-byte messages admitted — sysex would reintroduce an audio-thread free; filter before pushing.</pre>
+<p class="behind"><b>Behind:</b> <a href="manual-2.html#TRAN-12">Typing-keyboard MIDI</a>, <a href="manual-2.html#PRMMNU-3">MIDI Learn</a>, <a href="manual-2.html#AUD-5">MIDI Inputs:</a>, <a href="manual-2.html#AUD-6">Trigger Velocity:</a>, <a href="manual-2.html#OMENU-7">MIDI is Omni (all devices)</a>.</p>

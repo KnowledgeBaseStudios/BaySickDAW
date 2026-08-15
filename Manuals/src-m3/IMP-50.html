@@ -1,0 +1,136 @@
+<p>A deliberately slow meter with second-order needle movement, because a VU is
+about how loud something feels rather than what its peaks are. The calibration
+setting decides what level the needle calls zero, and it is app-wide.</p>
+
+<div class="codeblock"><div class="codehead">- Source\Standalone\SharedUI.cpp - VUMeter implementation, lines 5752-5897 (ballistics/calibration; paint code follows to ~6280)</div><pre><code>// VUMeter::onVBlank() -- vertical hardware-VU ballistics
+        // 2026-05-02: ditched the ANSI C16.5-1942 spring-damper.  Rationale:
+        // a 300 ms rise time literally cannot register a 10 ms snare hit at
+        // 60+ Hz vblank cadence, so transient signals showed -16 VU when a
+        // continuous identical-level signal pegged the meter.  Replaced with
+        // simple snap-up + dB-domain decay -- same ballistics as DBFSMeter,
+        // matches what FL / Logic / ProTools &quot;VU-style&quot; meters actually do
+        // (none of them implement true ANSI ballistics). ...
+        const double nowMs = juce::Time::getMillisecondCounterHiRes();
+        const double dt    = juce::jlimit (0.001, 0.100,
+                                            (mLastVBlankMs &lt;= 0.0) ? 1.0 / 60.0
+                                                                    : (nowMs - mLastVBlankMs) * 0.001);
+        mLastVBlankMs = nowMs;
+        constexpr float kVuDecayDbPerSec = 25.f;
+        const float decayDb = (float) (kVuDecayDbPerSec * dt);
+
+        // Drain the running-max input atomic (audio CAS-maxes between frames;
+        // exchange-with-0 starts a fresh window for the next frame).
+        const float raw01 = mLevelRms01.exchange (0.f, std::memory_order_relaxed);
+        const float dBFS  = (raw01 &lt;= 0.f) ? -100.f : 20.f * std::log10 (raw01);
+
+        // Map to VU dB via the calibration target (0 VU = e.g. -18 dBFS).
+        const float calibTarget = VUMeter::getCalibrationDb();
+        const float vuDb = juce::jlimit (kVuMin - 1.f, kVuMax + 60.f,
+                                          dBFS - calibTarget);
+
+        // Snap-up + decay on the displayed value (in VU dB space).
+        if (vuDb &gt; mDisplayLevel) mDisplayLevel = vuDb;
+        else                       mDisplayLevel = juce::jmax (kVuMin, mDisplayLevel - decayDb);</code></pre></div>
+<details class="fullfn"><summary>Full function &mdash; - Source\Standalone\SharedUI.cpp - VUMeter implementation, lines 5752-5897 (ballistics/calibration; paint code follows to ~6280)</summary><pre><code>// VUMeter::onVBlank() -- horizontal path + MAX peak tracking (completing the excerpt)
+void VUMeter::onVBlank()
+{
+    if (mStyle == Horizontal)
+    {
+        // 2026-05-02: drain via exchange-and-reset so the audio thread starts
+        // a fresh max window after each frame.  Decay applied in UI thread.
+        const float incoming = mLevel.exchange (0.f, std::memory_order_relaxed);
+        if (incoming &gt; 0.f) mLevel.store (incoming, std::memory_order_relaxed);
+
+        if (mPeakHoldFrames &gt; 0) --mPeakHoldFrames;
+        else
+            mPeak.store(juce::jmax(0.f, mPeak.load(std::memory_order_relaxed) - kFallRate * 0.5f),
+                        std::memory_order_relaxed);
+        repaint();
+        return;
+    }
+
+    // [vertical ballistics block quoted in the excerpt, then:]
+
+        // MAX peak tracking -- hold ~1 s, then decay.  Same wall-clock-based
+        // timer so it stays consistent across monitor refresh rates.
+        if (vuDb &gt; mPeakDb)
+        {
+            mPeakDb = vuDb;
+            mPeakMaxHoldFrames = 0;
+        }
+        else
+        {
+            mPeakMaxHoldFrames++;
+            if (mPeakMaxHoldFrames &gt; 60)   // ~1 s @ 60 Hz, slightly less @ higher refresh
+                mPeakDb = juce::jmax (kVuMin, mPeakDb - decayDb);
+        }
+
+        // mCurrentPos / mVelocity legacy spring state -- compute from
+        // mDisplayLevel so the existing paint() code that reads mCurrentPos
+        // keeps rendering at the right needle position.
+        mCurrentPos = juce::jlimit (0.f, 1.f, (mDisplayLevel - kVuMin) / (kVuMax - kVuMin));
+        mVelocity   = 0.f;
+
+    repaint();
+}
+
+// VUMeter::setLevel() -- audio-side CAS-max feed
+void VUMeter::setLevel(float rms01)
+{
+    float clamped = juce::jlimit(0.f, 1.f, rms01);
+
+    // 2026-05-02: CAS-max so multiple per-frame pushes from the audio path
+    // capture running max instead of overwriting the last write.  UI vblank
+    // exchange-and-resets to start a fresh window each frame.
+    auto casMax = [] (std::atomic&lt;float&gt;&amp; a, float v) noexcept
+    {
+        float cur = a.load (std::memory_order_relaxed);
+        while (cur &lt; v &amp;&amp; ! a.compare_exchange_weak (cur, v, std::memory_order_relaxed))
+        {}
+    };
+
+    if (mStyle == Horizontal)
+    {
+        casMax (mLevel, clamped);
+        casMax (mPeak,  clamped);
+    }
+    else
+    {
+        // Vertical hardware VU path -- vblank handler drives spring-damper
+        // ballistics off mLevelRms01.
+        casMax (mLevelRms01, clamped);
+    }
+}
+
+// Calibration statics (SharedUI.cpp 5753-5766 + SharedUI.h 1717-1724)
+float VUMeter::sCalibrationDb = -18.f;
+std::function&lt;void()&gt; VUMeter::sOnCalibrationChanged;
+
+void VUMeter::addCalibrationSubMenu (juce::PopupMenu&amp; parent)
+{
+    juce::PopupMenu calib;
+    for (int db = -18; db &lt;= -14; ++db)
+    {
+        const bool isCurrent = (getCalibrationDb() == (float) db);
+        calib.addItem (juce::String (db) + &quot; dBFS&quot;, true, isCurrent,
+                       [db] { setCalibrationDb ((float) db); });
+    }
+    parent.addSubMenu (&quot;VU Calibration (0 VU = ...)&quot;, calib);
+}
+
+    static float getCalibrationDb()      { return sCalibrationDb; }
+    static void  setCalibrationDb(float db)
+    {
+        const float clamped = juce::jlimit(-18.f, -14.f, db);
+        if (sCalibrationDb == clamped) return;
+        sCalibrationDb = clamped;
+        if (sOnCalibrationChanged) sOnCalibrationChanged();
+    }</code></pre></details>
+<pre class="formulas">- Scale: `kVuMin = -20` VU to `kVuMax = +3` VU (the classic hardware arc); needle position `mCurrentPos = (displayLevel - kVuMin)/(kVuMax - kVuMin)` clamped 0..1; red block covers the 0..+3 VU arc segment (paint code).
+- Calibration: `0 VU = sCalibrationDb` dBFS; default -18, range -18..-14 in 1 dB menu steps, clamped in `setCalibrationDb`; `vuDb = dBFS - calibTarget` clamped [kVuMin-1, kVuMax+60]. Persists via `&lt;VUCalibration&gt;` in serializeUIState/deserializeUIState; change fires `sOnCalibrationChanged` -&gt; `ProjectManager::markDirty` (no-fire on no-op). One shared submenu builder serves both the Effects rack menu and the VU window menu.
+- Input mapping: `setLevel` takes normalized RMS 0..1; `dBFS = 20*log10(raw01)` (-100 when 0). Audio side CAS-max accumulates a running max between frames; vblank drains with `exchange(0)`.
+- Ballistics: snap-up (instant rise) + dB-domain decay at `kVuDecayDbPerSec = 25` dB/s (~ANSI fall-time perception without the sluggish rise; the ANSI C16.5-1942 spring-damper was ditched - a 300 ms rise cannot register a 10 ms snare at 60+ Hz vblank cadence). Delta-time from wall clock, `dt` clamped [0.001, 0.100] s (first frame 1/60), so 60/120/144 Hz monitors see the same dB/s fall.
+- MAX peak: snap-up, hold 60 vblank frames (~1 s @ 60 Hz), then decay at the same 25 dB/s.
+- Horizontal (legacy GR bar) constants: `kFallRate = 0.05` per tick (applied x0.5 per frame to `mPeak`), `kPeakHoldMs = 1500`, `kDecayDbPerSec = 20` (MAX peak, declared in header); GR input clamped [-40, 0] dB.
+- Refresh: `juce::VBlankAttachment` created in `parentHierarchyChanged()` keyed on `getPeer() != nullptr` (never in the constructor - peer-keyed suspend convention).</pre>
+<p class="behind"><b>Behind:</b> <a href="manual-2.html#FXRM-4">VU Calibration (0 VU = ...) submenu</a>, <a href="manual-2.html#FXRM-5">VU Meter</a>, <a href="manual-2.html#VUMTR-1">Analog VU face</a>, <a href="manual-2.html#VUMTR-2">CURRENT and MAX readout boxes</a>, <a href="manual-2.html#VUMTR-3">VU Calibration (0 VU = ...) on this window...</a>.</p>

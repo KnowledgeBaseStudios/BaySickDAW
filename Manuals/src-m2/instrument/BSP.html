@@ -1,0 +1,91 @@
+<p>BaySickPlayer plays audio files as an instrument: load a sound - a note,
+a drum, a chunk of a song - and the keyboard replays it at different
+pitches. This page decides where playback starts, what happens when notes
+pile up, how your playing force shapes the tone, and what the sound leaves
+the engine like.</p>
+
+<p id="BSP-7"><b>Preset</b> on the title bar saves and recalls the
+player's whole setup as a patch.</p>
+
+<figure data-cluster="Playback|1">
+
+<p id="BSP-1"><b>SMPL START</b> skips into the recording before playing -
+the way to trim a slow or noisy beginning off a sample without editing the
+file. <b>STRETCH</b> time-stretches the sample
+relative to the song's tempo (within sane limits), so a loop recorded at
+one speed keeps up when your song runs at another.
+<b>REVERSE</b> plays it backwards.</p>
+
+<figure data-cluster="Note cutting and voices|2">
+
+<p id="BSP-2"><b>CUT SELF</b> makes a retriggered note stop its previous
+self instead of overlapping it, and
+<b>SAME P...</b> narrows that to identical
+repeated notes (its face flips to <code>CUT ALL</code> for cutting
+everything). Essential for hi-hats and sample basses - without cutting,
+fast lines smear into mush. <b>VOICE CAP</b> caps
+how many notes can sound at once: 1 is one-at-a-time (mono), higher lets
+chords ring.</p>
+
+<figure data-cluster="Tuning and thickness|3">
+
+<p id="BSP-3"><b>TUNE</b> retunes the sample - for a recording that was
+not quite on pitch, or deliberate detuning.
+<b>UNISON</b> plays stacked copies of each note,
+<b>DETUNE</b> spreads their tunings apart, and
+<b>SPREAD</b> fans them across the stereo field
+- the disagreement between copies is what thickness is made of.
+<b>DET MODE</b> (the R / S / P switch) picks the
+pattern the copies detune in.</p>
+
+<figure data-cluster="Velocity - force into tone|4">
+
+<p id="BSP-4">Velocity is how hard a note is played - on a keyboard,
+your finger; in the Piano Roll, the note's velocity bar.
+<b>SENS</b> is the overall sensitivity to it, and the three routed pairs
+put force to work on the TONE, not just the volume:
+<b>VEL&gt;MASTER</b> lets force drive loudness;
+<b>VEL&gt;MUFFLE</b> with its <b>MUFFLE</b> knob
+darkens soft hits - play gently and the sound rounds off, like a softly
+struck drum; <b>VEL&gt;HARD</b> with
+<b>HARDNESS</b> brightens hard hits. The arrows painted on the panel show
+the routing. Set together, one sample stops being a trigger and starts
+being an instrument.</p>
+
+<figure data-cluster="Envelope and vibrato|5">
+
+<p id="BSP-5"><b>AMP ENVELOPE</b> - the note's volume life-story, four
+stages: <b>ATTACK</b> is the fade-in time (zero = instant, raised = the
+sample swells in), <b>DECAY</b> the fall from that first peak,
+<b>SUSTAIN</b> the level held while the key is down (a level, not a
+time), <b>RELEASE</b> the fade after you let go. It runs on top of
+whatever shape the recording already has - so a one-shot can become a
+pad, or a long sample can be clipped tight.</p>
+
+<p><b>VIBRATO</b> - <code>VIB RATE</code> and depth put a
+gentle pitch wobble on held notes.</p>
+
+<figure data-cluster="Filter and output|6">
+
+<p id="BSP-6"><b>FILTER</b> - a tone control over the sample:
+<code>CUTOFF</code> sets where the brightness stops (left darker, right
+brighter), <code>RES</code> adds a peak right at that point, and
+<code>REDUCT</code> is bit-reduction - deliberate digital grit, the lo-fi
+crunch of old samplers.</p>
+
+<p><b>OUTPUT</b> - the final voicing before the mixer:
+<code>PAN</code> position, <code>STEREO</code> width,
+<code>OVERDRIVE</code> for saturation, a <code>TREBLE</code> tilt, and
+the <code>MASTER</code> level.</p>
+
+<p>One rule worth knowing: on a Drums tab, this player pins
+every sample's root so each drum plays at its recorded pitch on its own
+key - which is why a kit folder sounds right on a Drums tab, and the same
+folder can be played melodically on a Layers tab.</p>
+
+<p id="BSP-8"><b>Swing Mix</b> - the small knob on the title bar next to
+Menu - sets how much of the transport's global Swing this instrument
+feels, from none to full. Swing pushes every second sixteenth-note late to
+make parts groove; per-player mix means the drums can swing hard while the
+guitar stays straight. Right-click offers <code>Truncate Swing
+Notes</code> for cleaning up notes that swing pushed into each other.</p>

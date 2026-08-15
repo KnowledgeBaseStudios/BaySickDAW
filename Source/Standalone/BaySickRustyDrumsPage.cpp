@@ -331,7 +331,10 @@ juce::File BaySickRustyDrumsPage::playerPresetsDir() const
 
 void BaySickRustyDrumsPage::buildPlayerPresetButton()
 {
-    mPlayerPresetBtn = std::make_unique<juce::TextButton> ("Player Preset");
+    // "Presets" (Jeff, 2026-08-12).  The full "Player Preset" was wide enough
+    // to squeeze the strip's centred engine name into an ellipsis; the tooltip
+    // still says which kind of preset this is.
+    mPlayerPresetBtn = std::make_unique<juce::TextButton> ("Presets");
     mPlayerPresetBtn->setTooltip ("Save / load player preset (kit CC values only)");
     mPlayerPresetBtn->setColour (juce::TextButton::buttonColourId, VC::Surface);
     mPlayerPresetBtn->setColour (juce::TextButton::textColourOffId, VC::Text);

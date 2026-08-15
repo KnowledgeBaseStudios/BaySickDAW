@@ -1,0 +1,155 @@
+<p>The offline editor. Analyses the whole take first, so it can be right about
+note boundaries in a way a realtime corrector cannot &mdash; a realtime one has
+to decide before it has heard the end of the word.</p>
+
+<div class="codeblock"><div class="codehead">- Source\DSP\BaySickPitchDSP.cpp (1193 lines)</div><pre><code>// BaySickPitchDSP::computeEnvelopes() - per-sample edit -&gt; envelope resolver (bake input)
+        const float smoothCoef = 1.0f - std::exp (-1.0f / (float) (speedMs * 0.001 * sr));
+        const float gainCoef   = 1.0f - std::exp (-1.0f / (float) (0.005 * sr));
+...
+                // Center knob (Newtone model): a micro-tonal pull of the EDITED
+                // center toward the nearest semitone CENTER -- always, scale-
+                // independent, whether or not Snap is on (Snap only governs the
+                // editor drag-wall + the Ctrl+A force, never this per-sample pull).
+                const float base   = r.midi + r.shiftSemis;
+                const float target = std::round (base);
+                targetSemis = r.shiftSemis + (target - base) * focus01;
+...
+                // Vib knob is ADDITIVE on top of the natural vibrato (mult 1 =
+                // nothing added); flattening the REAL wiggle is Variation&#x27;s job.
+                const float addMult = (r.vibDepthMult * modAmt) - 1.0f;
+                if (std::abs (addMult) &gt; 0.01f)
+                {
+                    const float baseDepth = (r.vibDepthCents &gt; 0.0f) ? r.vibDepthCents : 25.0f;
+                    const float rate      = r.vibRateHz * r.vibRateMult;
+                    st.vibPhase += juce::MathConstants&lt;double&gt;::twoPi * rate / sr;
+                    if (st.vibPhase &gt; juce::MathConstants&lt;double&gt;::twoPi)
+                        st.vibPhase -= juce::MathConstants&lt;double&gt;::twoPi;
+                    fastSemis += (float) std::sin (st.vibPhase)
+                               * juce::jlimit (-300.0f, 300.0f, baseDepth * addMult) / 100.0f;
+                }
+...
+        st.smoothedSemis   += (targetSemis   - st.smoothedSemis)   * smoothCoef;
+        st.smoothedFormant += (targetFormant - st.smoothedFormant) * smoothCoef;
+        st.smoothedGain    += (gain          - st.smoothedGain)    * gainCoef;
+
+        outRatio  [i] = std::pow (2.0f, (st.smoothedSemis + fastSemis) / 12.0f);
+        outFormant[i] = st.smoothedFormant;
+        outGain   [i] = st.smoothedGain;</code></pre></div>
+<details class="fullfn"><summary>Full function &mdash; - Source\DSP\BaySickPitchDSP.cpp (1193 lines)</summary><pre><code>// BaySickPitchDSP::analyzeComposite() -- Stage 1 voiced runs + Stage 2 glide-merge
+    BaySickAlignDSP::estimateF0Track (mono, numSamples, sampleRate, kF0Hop, mF0Track);
+    const double hopSec = kF0Hop / sampleRate;
+    const int    numFrames = (int) mF0Track.size();
+
+    // ── Stage 1: voiced runs (gap + sustained-jump splits), NO discard ──────
+    struct Run
+    {
+        int f0 { 0 }, f1 { 0 };           // frame span [f0, f1)
+        std::vector&lt;float&gt; midi;          // per-frame MIDI
+        int anchorCount { 0 };
+    };
+    std::vector&lt;Run&gt; runs;
+
+    std::vector&lt;float&gt; midiFrames;
+    int runStart = -1, gapCount = 0, jumpCount = 0;
+
+    auto flushRun = [&amp;] (int endFrameExclusive)
+    {
+        if (runStart &lt; 0) return;
+        if (! midiFrames.empty() &amp;&amp; endFrameExclusive &gt; runStart)
+        {
+            Run run;
+            run.f0   = runStart;
+            run.f1   = endFrameExclusive;
+            run.midi = midiFrames;
+            run.anchorCount = (int) midiFrames.size();
+            runs.push_back (std::move (run));
+        }
+        runStart = -1;
+        midiFrames.clear();
+        gapCount = jumpCount = 0;
+    };
+
+    for (int f = 0; f &lt; numFrames; ++f)
+    {
+        const float hz = mF0Track[(size_t) f];
+        if (hz &lt;= 0.0f)
+        {
+            if (runStart &gt;= 0 &amp;&amp; ++gapCount &gt;= kGapFrames)
+                flushRun (f - gapCount + 1);
+            continue;
+        }
+        gapCount = 0;
+        const float m = hzToMidiF (hz);
+
+        if (runStart &lt; 0)
+        {
+            runStart = f;
+            midiFrames.clear();
+            midiFrames.push_back (m);
+            continue;
+        }
+
+        const float med = medianOf (midiFrames);
+        if (std::abs (m - med) &gt; kSplitSemis)
+        {
+            if (++jumpCount &gt;= kSplitHoldFrames)
+            {
+                // The jump frames belong to the NEW note.
+                const int splitAt = f - jumpCount + 1;
+                for (int k = 0; k &lt; jumpCount - 1 &amp;&amp; ! midiFrames.empty(); ++k)
+                    midiFrames.pop_back();
+                flushRun (splitAt);
+                runStart = splitAt;
+                midiFrames.assign ((size_t) jumpCount, m);
+                jumpCount = 0;
+            }
+            else
+                midiFrames.push_back (m);
+        }
+        else
+        {
+            jumpCount = 0;
+            midiFrames.push_back (m);
+        }
+    }
+    flushRun (numFrames);
+
+    // ── Stage 2: glide-merge (right-to-left so chains collapse into the
+    //    stable note they lead into). ...
+    for (int i = (int) runs.size() - 2; i &gt;= 0; --i)
+    {
+        auto&amp; cur  = runs[(size_t) i];
+        auto&amp; next = runs[(size_t) i + 1];
+        if (next.f0 - cur.f1 &gt; 1) continue;   // real gap: no merge
+
+        const double curLen = (cur.f1 - cur.f0) * hopSec;
+        bool merge = curLen &lt; kMinNoteSec;
+        if (! merge &amp;&amp; curLen &lt; kGlideMergeMaxSec &amp;&amp; ! cur.midi.empty())
+        {
+            std::vector&lt;float&gt; anchor (next.midi.end() - next.anchorCount,
+                                       next.midi.end());
+            const float nextMed = medianOf (anchor);
+            float lo = cur.midi.front(), hi = cur.midi.front();
+            for (float v : cur.midi) { lo = juce::jmin (lo, v); hi = juce::jmax (hi, v); }
+            const bool ramps = std::abs (cur.midi.back() - nextMed) + 0.3f
+                             &lt; std::abs (cur.midi.front() - nextMed);
+            merge = ramps &amp;&amp; (hi - lo) &gt; kGlideMinRangeSemis;
+        }
+        if (! merge) continue;
+
+        next.f0 = cur.f0;
+        next.midi.insert (next.midi.begin(), cur.midi.begin(), cur.midi.end());
+        runs.erase (runs.begin() + i);
+    }</code></pre></details>
+<pre class="formulas">- F0 analysis: `kF0Hop = 512` samples (hop; YIN window stays 2048 = 75% overlap) via shared `BaySickAlignDSP::estimateF0Track`.
+- Segmentation constants (BaySickPitchDSP.cpp lines 23-45): `kGapFrames = 8` (~93 ms at 44.1k/512-hop, note ends), `kSplitSemis = 0.6f` (pitch-jump threshold vs running median), `kSplitHoldFrames = 8` (jump must hold), `kMinNoteSec = 0.06`, `kEditCarryTolSec = 0.05` (edit carry across re-analysis, +/-50 ms), `kGlideMergeMaxSec = 0.12`, `kGlideMinRangeSemis = 0.8f`, `kSliceRelGate = 0.02f` (2% of peak frame RMS), `kSliceAbsGate = 1.0e-4f`, `kAttachGapFrames = 2` (~23 ms fold window).
+- Ramp test for glide merge: `|cur.back - nextMed| + 0.3 &lt; |cur.front - nextMed|` AND range `&gt; 0.8` semis.
+- Vibrato: depth = `sqrt(2) * RMS(deviation) * 100` cents (sine assumption), clamp 0..300; ignored under 15 cents; rate = `zeroCrossings / (2 * anchorSec)`, clamp 3..9 Hz.
+- Knob ranges: Focus 0..1, Mod 0..2, Speed 5..300 ms, Throat -12..+12 semis. Focus pull: `targetSemis = shift + (round(midi+shift) - (midi+shift)) * focus01`.
+- Smoothing: note-center glide `coef = 1 - exp(-1/(speedMs*0.001*sr))`; volume-gain smoother fixed ~5 ms `1 - exp(-1/(0.005*sr))`. Per-sample modulation (`fastSemis`: pitch shape clamp +/-24 semis, Variation deviation gate &lt; 6 semis, vibrato) rides POST-smoother.
+- Ratio: `2^((smoothedSemis + fastSemis)/12)`; formant scale `2^((formantSemis + throat)/12)`.
+- Cache handoff crossfade: ~30 ms (`mCacheFadeLen = max(1, 0.030*sr)`); linear old-&gt;new.
+- Retire rings: 8-deep for cache + time-map snapshots; two hazard pointers (`mCacheHazardPlaying`/`mCacheHazardFading`) pin caches across blocks.
+- Time map: reuses `AlignPlaySnapshot` monotone-cubic anchors (guide=EDITED, dub=SOURCE); strict dst monotonicity nudge `dst[i] = max(dst[i], dst[i-1] + 1e-3)` (detach jump -&gt; ~1 ms ramp); detach-cut detection in bake: guide window &lt;= 2 ms with dub jump backward or &gt; 50 ms forward (legal warp ratio rail 3:1). timeMapHash: `h = h*1000003 + llround(sec*1e4)` chain, detached mixes `h*31 + 7/1`.
+- Default bake engine: `PitchEngine::RubberBand`; neutral gate (no bake, dry playback): no edits AND `focus &lt; 0.001` AND `|mod-1| &lt; 0.01` AND `|throat| &lt; 0.01`.</pre>
+<p class="behind"><b>Behind:</b> <a href="manual-2.html#BSPIT-1">Save / Load</a>, <a href="manual-2.html#BSPIT-2">Slice tool</a>, <a href="manual-2.html#BSPIT-3">Edit tool</a>, <a href="manual-2.html#BSPIT-5">ON checkbox</a>, <a href="manual-2.html#BSPIT-6">ANALYSIS FAILED</a>, <a href="manual-2.html#BSPIT-7">Root picker</a>, <a href="manual-2.html#BSPIT-8">Scale picker</a>, <a href="manual-2.html#BSPIT-9">Snap</a>, <a href="manual-2.html#BSPIT-11">Snapshot</a>, <a href="manual-2.html#BSPIT-12">Versions</a>, <a href="manual-2.html#BSPIT-13">Reset</a>, <a href="manual-2.html#BSPIT-17">Focus / Mod / Speed / Throat knobs with th...</a>, <a href="manual-2.html#BSPIT-18">Keyboard and octave labels down the left, ...</a>, <a href="manual-2.html#BSPIT-20">Pitch canvas</a>.</p>

@@ -1,0 +1,92 @@
+<p>Estimates a noise profile and subtracts it. Behind the "Cleaned" take types.</p>
+
+<div class="codeblock"><div class="codehead">- Source\DSP\DenoiseDSP.cpp (341 lines)</div><pre><code>// Denoise::cleanFile() -- spectral subtraction gain + birdies suppression
+        for (int k = 0; k &lt; bins; ++k)
+        {
+            const float re = fftData[(size_t) (k * 2)];
+            const float im = fftData[(size_t) (k * 2 + 1)];
+            const float m  = std::sqrt (re * re + im * im);
+            gain[(size_t) k] = (m &gt; 1.0e-12f)
+                ? juce::jmax (gainFloor, 1.0f - overSub * prof[(size_t) k] / m)
+                : gainFloor;
+        }
+        // Musical-noise (&quot;birdies&quot;) suppression: 3-bin frequency smoothing +
+        // one-pole time smoothing of the gain field.
+        gSm[0] = gain[0];
+        for (int k = 1; k &lt; bins - 1; ++k)
+            gSm[(size_t) k] = (gain[(size_t) (k - 1)] + gain[(size_t) k] + gain[(size_t) (k + 1)]) / 3.0f;
+        gSm[(size_t) (bins - 1)] = gain[(size_t) (bins - 1)];
+        for (int k = 0; k &lt; bins; ++k)
+        {
+            gPrev[(size_t) k] += 0.5f * (gSm[(size_t) k] - gPrev[(size_t) k]);
+            const float g = gPrev[(size_t) k];
+            fftData[(size_t) (k * 2)]     *= g;
+            if (k &gt; 0 &amp;&amp; k &lt; bins - 1) fftData[(size_t) (k * 2 + 1)] *= g;
+        }</code></pre></div>
+<details class="fullfn"><summary>Full function &mdash; - Source\DSP\DenoiseDSP.cpp (341 lines)</summary><pre><code>void DenoiseLearner::processPending()
+{
+    if (mFFT == nullptr) return;
+    const int size = (int) mRing.size();
+    const juce::int64 w = mWrite.load (std::memory_order_acquire);
+    if (w - mRead &gt; (juce::int64) size)          // overwritten -&gt; resync
+        mRead = w - size + DenoiseProfile::kFFT;
+
+    while (w - mRead &gt;= (juce::int64) DenoiseProfile::kFFT)
+    {
+        for (int i = 0; i &lt; DenoiseProfile::kFFT; ++i)
+            mFrame[(size_t) i] = mRing[(size_t) ((mRead + i) % size)];
+        mRead += kHop;
+
+        double e = 0.0;
+        for (int i = 0; i &lt; DenoiseProfile::kFFT; ++i) e += mFrame[(size_t) i] * mFrame[(size_t) i];
+        const float rms = (float) std::sqrt (e / DenoiseProfile::kFFT);
+        if (rms &lt; 1.0e-5f) continue;             // unrouted/silent strip: never learn digital zero
+
+        for (int i = 0; i &lt; DenoiseProfile::kFFT; ++i)
+            mFftData[(size_t) i] = mFrame[(size_t) i] * mWindow[(size_t) i];
+        std::fill (mFftData.begin() + DenoiseProfile::kFFT, mFftData.end(), 0.0f);
+        mFFT-&gt;performRealOnlyForwardTransform (mFftData.data());
+
+        const juce::ScopedLock sl (mFloorLock);
+        const int learned = mFrames.load (std::memory_order_relaxed);
+
+        // Voice gate: once warm, skip frames far above the tracked floor so
+        // singing/speech never inflates the room fingerprint.
+        if (learned &gt; 20)
+        {
+            double fe = 0.0, be = 0.0;
+            for (int k = 0; k &lt; DenoiseProfile::kBins; ++k)
+            {
+                const float re = mFftData[(size_t) (k * 2)];
+                const float im = mFftData[(size_t) (k * 2 + 1)];
+                fe += std::sqrt (re * re + im * im);
+                be += mFloor[(size_t) k];
+            }
+            if (be &gt; 1.0e-9 &amp;&amp; fe &gt; 4.0 * be) continue;    // &gt; +12 dB over floor = voice
+        }
+
+        for (int k = 0; k &lt; DenoiseProfile::kBins; ++k)
+        {
+            const float re = mFftData[(size_t) (k * 2)];
+            const float im = mFftData[(size_t) (k * 2 + 1)];
+            const float m  = std::sqrt (re * re + im * im);
+            float&amp; fl = mFloor[(size_t) k];
+            if (learned &lt; 20)       fl = (learned == 0) ? m : juce::jmin (fl, m);
+            else if (m &lt; fl)        fl += 0.30f * (m - fl);   // fast down: chase minima
+            else                    fl += 0.004f * (m - fl);  // slow up: track drifting rooms
+        }
+        mFrames.store (learned + 1, std::memory_order_release);
+    }
+}</code></pre></details>
+<pre class="formulas">- STFT geometry: `kFFT = 1024` (order 10), `kBins = 513`, Hann window; learner hop `kHop = 256`; cleaner hop = `kFFT/4 = 256` (75% overlap); OLA normalized by the running window-squared sum (`wsum`), falling back to the dry sample where `wsum &lt;= 1e-6`.
+- Learner ring: 4 s mono (`sr * 4.0`); audio-thread `pushBlock` is wait-free (ring write + release publish); overrun resync `mRead = w - size + kFFT`.
+- Silence gate: frame RMS `&lt; 1e-5` skipped (never learn digital zero from an unrouted strip).
+- Voice gate (after 20 warm frames): skip when summed frame magnitude `&gt; 4.0x` summed floor (~ +12 dB over floor).
+- Floor follower: first 20 frames = running minimum; then asymmetric one-pole - fast down `fl += 0.30*(m - fl)` (chase minima), slow up `fl += 0.004*(m - fl)` (track drifting rooms).
+- Profile maturity: `snapshot()` returns invalid until &gt;= 40 frames learned (~0.25 s).
+- Subtraction: `gain[k] = max(gainFloor, 1 - overSub * prof[k]/m)`. Strength calibration: Strong = `overSub 2.00`, `gainFloor 0.25` (-12 dB, the &quot;cleantake&quot; prototype); Light = `overSub 1.25`, `gainFloor 0.50` (-6 dB).
+- Birdies suppression: 3-bin box smoothing across frequency + one-pole time smoothing `gPrev += 0.5*(gSm - gPrev)` per frame.
+- Stereo: gain field computed once from the mono fold, applied identically per channel (keeps the stereo image); mono path skips the second FFT round-trip.
+- Output: length/rate match input exactly; bit depth = 32 for float or &gt;24-bit sources else `max(16, bitsPerSample)`; failure never leaves a partial out file.
+- Profile serialization: Base64 of {version=1 int, sampleRate double, kBins int, kBins floats}.</pre>
+<p class="behind"><b>Behind:</b> <a href="manual-2.html#FILE-2">De-noise strength:</a>.</p>

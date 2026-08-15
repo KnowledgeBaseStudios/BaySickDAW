@@ -110,8 +110,8 @@ public:
     // window's 268 height does not leave a usable pedal below the picker.
     static juce::Point<int> windowSizeFor (ViewMode m)
     {
-        return m == ViewMode::Compact ? juce::Point<int> { 357, 355 }
-                                      : juce::Point<int> { 1534, 455 };
+        return m == ViewMode::Compact ? juce::Point<int> { 331, 331 }
+                                      : juce::Point<int> { 1038, 554 };
     }
 
 private:

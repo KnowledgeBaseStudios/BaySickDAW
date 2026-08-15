@@ -1,0 +1,79 @@
+/* Sticky contents + jump box for Manuals 2 and 3.
+   593 entries in one scroll is a wall, not a reference; this is the lookup. */
+
+.wrap.withnav { display: grid; grid-template-columns: 250px minmax(0, 1fr); gap: 32px; align-items: start; }
+
+.sidenav {
+  position: sticky;
+  top: 14px;
+  max-height: calc(100vh - 28px);
+  overflow-y: auto;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel);
+  padding: 14px;
+  font-size: 13px;
+}
+.sidenav h4 {
+  margin: 16px 0 8px;
+  font-size: 11px;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+.sidenav a {
+  display: block;
+  padding: 3px 7px;
+  border-left: 2px solid transparent;
+  border-radius: 0 3px 3px 0;
+  color: var(--text-dim);
+  text-decoration: none;
+  line-height: 1.35;
+}
+.sidenav a.c { color: var(--text); font-weight: 600; margin-top: 9px; }
+.sidenav a.s { padding-left: 16px; font-size: 12px; }
+.sidenav a:hover { background: var(--panel-2); color: #fff; }
+.sidenav a.here { border-left-color: var(--accent); color: #fff; background: var(--panel-2); }
+
+.sidenav .navhint { margin: 8px 0 0; font-size: 11px; color: var(--text-dim); line-height: 1.4; }
+
+.jump label {
+  display: block;
+  font-size: 11px;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  margin-bottom: 5px;
+}
+.jump input {
+  width: 100%;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  background: var(--code-bg);
+  color: var(--text);
+  font: 13px ui-monospace, Consolas, monospace;
+}
+.jump input:focus { outline: none; border-color: var(--accent); }
+#jumphint { color: #ffb300; font-size: 11px; min-height: 14px; margin-top: 4px; }
+
+/* Landing on an entry should be obvious without hunting for it. */
+.ctrl.flash, h3.flash, h4.flash {
+  animation: land 1.5s ease-out;
+}
+@keyframes land {
+  from { background: rgba(0,229,255,.20); }
+  to   { background: transparent; }
+}
+.ctrl { scroll-margin-top: 16px; }
+h2.chapter, h3.section, h4.sub { scroll-margin-top: 16px; }
+
+@media (max-width: 900px) {
+  .wrap.withnav { grid-template-columns: 1fr; }
+  .sidenav { position: static; max-height: none; }
+}
+
+@media print {
+  .wrap.withnav { display: block; }
+  .sidenav { display: none; }
+}
