@@ -254,8 +254,8 @@ struct LRXHelper
 
 // ── Filmstrip rendering helpers ───────────────────────────────────────────────
 // All filmstrips are vertical PNG strips (frames stacked top-to-bottom).
-// Images are lazy-loaded at first use from "Files For Claude/Filmstrips/" relative
-// to the project root (4 directories above the standalone .exe).
+// Images are lazy-loaded at first use from "Resources/Filmstrips/" next to the
+// exe (staged there by CMake post-build; packaged by the installer).
 namespace Filmstrips
 {
     // Draw one frame from a filmstrip. normalizedValue is 0.0 (first frame) to

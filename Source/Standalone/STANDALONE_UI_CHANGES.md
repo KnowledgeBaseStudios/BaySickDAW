@@ -14,8 +14,8 @@
 - Fader asset is kept and will be reused on the Mixer page.
 
 ### Volume knob filmstrips
-- `Filmstrips::volumeBlack()` loads `Files For Claude/Filmstrips/Volume Black.png` — 70×70, 100 frames.
-- `Filmstrips::volumeWhite()` loads `Files For Claude/Filmstrips/Volume White.png` — 70×70, 100 frames.
+- `Filmstrips::volumeBlack()` loads `Resources/Filmstrips/Volume Black.png` — 70×70, 100 frames.
+- `Filmstrips::volumeWhite()` loads `Resources/Filmstrips/Volume White.png` — 70×70, 100 frames.
 - **Dynamics panels** (CompressorPanel, TransientShaperPanel) call `setVolumeKnobVariant(true)` → renders **black** filmstrip.
 - All other panels default to **white** filmstrip.
 - The variant is stored as slider property: `slider.getProperties().set("volumeKnob", "black"/"white")`.

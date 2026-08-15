@@ -396,6 +396,21 @@ no remaining consumers and D5 closes.
       the exact failing elements (code pill, kbd, codeblock pre); all
       three PDFs reprinted, restaged both configs, zip + installer
       rebuilt.
+- [x] G25. Installed app lost every filmstrip + the VU meter (Jeff,
+      2026-08-15; ruled option A). Filmstrips::getDir() resolved the art
+      by walking FOUR parents up from the exe to the repo root, then into
+      the gitignored "Files For Claude/Filmstrips" - a layout only the
+      dev build tree has, so every install fell back to the drawn knobs
+      and generic meter. The nine PNGs (8.2 MB: four group-knob strips,
+      Chicken Head, Volume Black/White, Switch Toggle, VU Meter) also
+      lived ONLY on this machine, untracked. Fix: PNGs moved into repo
+      Resources/Filmstrips/ (now tracked; CMake already stages Resources/
+      next to the exe in both configs and the installer already packages
+      it - zero CMake/.nsi change), getDir() re-pointed to
+      "<exe>\Resources\Filmstrips", stale path comments corrected in
+      SharedUI.h + STANDALONE_UI_CHANGES.md. Footnote: the code's
+      "Fader Slider.png" load has no file anywhere - faders were on the
+      drawn fallback even in the dev tree, unchanged by this fix.
 
 ## Parked / standing items
 

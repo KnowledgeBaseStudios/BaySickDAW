@@ -10,14 +10,13 @@ namespace Filmstrips
 {
     static juce::File getDir()
     {
-        // exe is at: <root>/build/BaySickDAWStandalone_artefacts/<Config>/BaySickDAW.exe
-        // go up 4 levels to reach project root, then into "Files For Claude/Filmstrips"
+        // Exe-relative so it resolves in the build tree AND an installed copy
+        // alike: CMake stages repo Resources/ next to the exe post-build, and
+        // the installer packages that same folder (G25 - the old dev-tree
+        // relative path made every install lose the filmstrips).
         return juce::File::getSpecialLocation(juce::File::currentApplicationFile)
-            .getParentDirectory()   // Release
-            .getParentDirectory()   // BaySickDAWStandalone_artefacts
-            .getParentDirectory()   // build
-            .getParentDirectory()   // project root
-            .getChildFile("Files For Claude/Filmstrips");
+            .getParentDirectory()
+            .getChildFile("Resources/Filmstrips");
     }
 
     static juce::Image loadStrip(const juce::String& filename)

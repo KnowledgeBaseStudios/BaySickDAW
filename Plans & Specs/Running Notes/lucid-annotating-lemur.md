@@ -2477,6 +2477,22 @@ near-black print text. Fixed in the print palette (`--code-bg` light, kbd
 cyan darkened for contrast), verified against computed styles on the exact
 failing elements, and all three PDFs reprinted + restaged + repackaged.
 
+### G25 - installed app lost the filmstrips and VU meter
+
+Jeff installed the tester package and every knob fell back to the drawn
+stand-ins, with the VU meter replaced by the generic drawn one.
+`Filmstrips::getDir()` resolved the art four parent-hops up from the exe
+into the gitignored `Files For Claude/Filmstrips` - a dev-tree-only
+layout, so it had worked on every build-tree run and broke on the first
+real install. Worse, the nine PNGs (8.2 MB) were untracked and existed
+only on this machine. Jeff ruled option A: the PNGs moved into repo
+`Resources/Filmstrips/` (tracked from now on), the loader re-pointed at
+`<exe>\Resources\Filmstrips` - which the existing CMake staging and
+installer packaging both already carry, so no CMake or .nsi change -
+and the stale path comments corrected. Footnote: `Fader Slider.png`
+never existed anywhere; faders were already on the drawn fallback in the
+dev tree too, and this fix leaves them as they were.
+
 ### Tester installer updated
 
 The installer now packages `$INSTDIR\Manuals` (the HTML manual plus the
