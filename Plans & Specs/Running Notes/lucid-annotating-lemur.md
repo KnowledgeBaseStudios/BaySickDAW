@@ -2493,6 +2493,55 @@ and the stale path comments corrected. Footnote: `Fader Slider.png`
 never existed anywhere; faders were already on the drawn fallback in the
 dev tree too, and this fix leaves them as they were.
 
+Committed as `e619d091`. Jeff installed the rebuilt package
+(`20260815-1322`, 54.3 MB) and confirmed in-app: knobs and VU meter are
+back. G25 CLOSED.
+
+## 2026-08-15 - Master test plan staleness audit + fix (Jeff's request)
+
+Jeff spotted B.31's 125% mentions and asked for a currency check of the whole
+plan; then ruled every finding fixed now rather than left for the G4
+reconciliation pass. Audit method: full read of SS A, B.1-B.3, B.18,
+B.31-B.35 and C-G, plus a keyword sweep of the entire file against every
+behavior change from QA-Soundness, QA-Cleanup and QA-Manuals; each suspect
+verified against source before editing.
+
+Fixed in `v1-master-test-plan.md`:
+
+- **B.31.0 RETIRED** (completed collection pass; superseded by the 100%
+  re-cut; its DIAG rig no longer exists) with the text kept as the
+  floor-derivation record. The "why 125% is safe" paragraph marked
+  historical.
+- **B.31.1 RE-SCOPED** to a one-time deliberate-125% stress run (Jeff runs
+  100% now; the drift mode only exists at fractional scales). Re-scope
+  chosen over retirement to keep the coverage - flagged to Jeff in chat.
+- **CLN-14 rewritten a second time** to the restored-scaling contract
+  (wrap at natural size, fixed-size surface scales to the 0.5 floor
+  letterboxed, resizable resizes natively, bridged never scales - from
+  HostedPlugin.h's three-case model, verified in source); **LAY-B13 now
+  defers to CLN-14** instead of carrying a third copy.
+- **TS6 header** protocol v3 -> v6 (verified `kProtocolVersion = 6`).
+- **MS-32** "hamburger toggle" -> the window Menu's "Run bridged (separate
+  process)" (verified in EffectWindows.cpp).
+- **MS-47** got the CLN-2/SC-9 carve-out (pre-rename projects lose racks
+  by design - was a guaranteed false FAIL).
+- **L-1 / L-5 / CLN-6** hamburger-era gestures updated; L-5 only HALF
+  changed - the Piano Roll's "Player Page"/"FX Rack" buttons still exist
+  (verified in StandaloneEditor.cpp), so only the per-page strip-button
+  half was rewritten.
+- **PS-20** annotated with the MF-2 estimate correction.
+- **NEW SS B.36 authored mid-batch** (11 rows, MAN-1..11): the MF fix pass
+  (MF-1/2/3/5/6/9 - MF-7/8 excluded, they were reverted), the swing knob,
+  mic placement, the master VU window, the manuals window, and MAN-11 -
+  the installed-copy asset smoke that would have caught G25. Extended at
+  code-complete.
+
+One finding WITHDRAWN during verification: MS-20's satellite list does not
+get the manuals window or the VU window - the manuals window is an
+independent desktop window (plain DocumentWindow, no owner z-order) and
+the VU window is a contained aux window, so neither is in MS-20's class.
+Both got their own B.36 rows instead.
+
 ### Tester installer updated
 
 The installer now packages `$INSTDIR\Manuals` (the HTML manual plus the

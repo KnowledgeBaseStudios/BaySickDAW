@@ -1302,7 +1302,7 @@ marathon 10a — not part of this section.)*
 Release — mark each scenario `D:` and `R:`.
 
 - [ ] **L-1 — right-click menu trigger (UI-01).** Open any menu (drum context menu,
-      hamburger, pattern dropdown): RIGHT-click over a highlighted item — nothing
+      any window's Menu, pattern dropdown): RIGHT-click over a highlighted item — nothing
       activates and the menu stays up; left-click still selects. Spot-check in two
       different menus. `D:__ R:__` notes:
 - [ ] **L-2 — deleted-slot lane names (UI-02).** Automate a rack knob (right-click ->
@@ -1316,10 +1316,12 @@ Release — mark each scenario `D:` and `R:`.
 - [ ] **L-4 — Builder header sync (NAV-01).** Scroll the Builder vertically, then
       resize the window and zoom rows: track header rows stay glued to grid rows at
       every step (no one-tick lag). `D:__ R:__` notes:
-- [ ] **L-5 — nav buttons (#18 + C).** Every page type (Layers/Bass/Drums/Clips/Vox/
-      Inst both variants): "FX Rack" at the right end of the sub-tab row jumps to that
-      strip's rack on the Effects page. Piano Roll page: "Player Page" + "FX Rack"
-      right of the roll dropdown act on the selected roll (edge picks: Drum Kit roll ->
+- [ ] **L-5 — nav to the rack (#18 + C).** **[GESTURE UPDATED 2026-08-15: QA-Layout T16 moved
+      the per-page "FX Rack" strip button into the window's Menu.]** Every page type
+      (Layers/Bass/Drums/Clips/Vox/Inst both variants): the window's **Menu > FX Rack** jumps to
+      that strip's rack on the Effects page. Piano Roll window: the "Player Page" + "FX Rack"
+      buttons right of the roll dropdown are still buttons and act on the selected roll (edge
+      picks: Drum Kit roll ->
       first Drums tab / Drums Bus rack; Rusty -> Rusty Bus rack). **QA-Soundness: there are now
       TWO drums buses — "Drums Bus" is kit 1 (drums 1-16) and "Drums Bus 2" is kit 2 (17-32).
       Verify against the bank the tab actually belongs to.** `D:__ R:__` notes:
@@ -2117,7 +2119,11 @@ account for PS-17, and one project whose samples you can deliberately move.
       a clean machine with everything resolving.
 - [ ] **PS-20 — Docket 22: honest export scopes.** The bundle dialog shows a size estimate
       before writing; self-contained no longer copies Core Library (a 555 MB-kit project makes a
-      small bundle that still loads on the target machine).
+      small bundle that still loads on the target machine).  **[UPDATED at QA-Manuals MF-2: the
+      estimate now includes the project folder itself and reads "about X across N files", with a
+      "smaller once compressed" note on zip; the result reports "X across N files".  The old
+      estimate silently omitted the project folder — a small number here on a big project is the
+      regression.]**
 - [ ] **PS-21 — Automation DSP-targeting (badger scope).** Automate a Compressor knob (any of
       Modern/FET/Opto/CS) AND the slot's outbound volume on Layer 0; switch the Effects page
       channel dropdown to Layer 1; play: BOTH keep applying. (Full effect-type coverage:
@@ -2155,10 +2161,20 @@ CL-282 full telemetry live here too -- MS-8 and the perf-strip checks cover them
 > (2026-08-03) replaced the old drag-and-report table with a DIAG-DRIVEN collection: the app
 > records the numbers itself, Jeff just drives the windows, then hands back the diag file.
 
-#### B.31.0 — Window minimum-size collection (DO THIS FIRST — diag-driven, QA-Layout T6)
+#### ~~B.31.0 — Window minimum-size collection (DO THIS FIRST — diag-driven, QA-Layout T6)~~ **RETIRED 2026-08-15 — COMPLETED AND THEN SUPERSEDED, DO NOT RUN.**
 
-Rig: the QA-Layout T6 build at Jeff's normal **125% display scale** (the constrained case — see
-the note at the bottom).  The build carries the `[QA-Layout DIAG]` instrumentation:
+This collection pass already happened: it fed QA-Layout T7, which set the real floors.  Then
+QA-Manuals re-measured EVERY window at **100% display scale** and applied Jeff's 23-row size
+table verbatim — his 2026-08-11 ruling made 100% the target (the 125% rig below was his display
+setting at the time, since changed).  The `[QA-Layout DIAG]` instrumented build this step
+requires (live WxH readouts, floors dropped to 120x80) no longer exists, so the step cannot be
+run as written and has nothing left to collect.  Floors and defaults are checked by MS-14 and
+LAY-B1..B5 as normal scenarios.  The text below is retained as the record of how the floors
+were derived.  `D:n/a R:n/a`
+
+Rig (historical): the QA-Layout T6 build at Jeff's then-normal **125% display scale** (the
+constrained case — see the note at the bottom).  The build carries the `[QA-Layout DIAG]`
+instrumentation:
 
 - Every contained window shows a live **WxH readout** (yellow, monospace) on its title strip.
 - Every actual size change **appends a line** to `Documents\BaySickDAW\window-sizing-diag.txt`
@@ -2187,23 +2203,32 @@ QA-Layout T6; every persist key on it must appear in the diag file):
 Hand-back = `window-sizing-diag.txt` (plus any "natural"/commentary notes).  QA-Layout T7 sets
 the real floors from it; coverage is verified against the T6 checklist before T7 starts.
 
-**Why 125% does not corrupt these numbers.**  JUCE lays out in LOGICAL pixels and converts to
-physical only at the window boundary, so a collision point is a property of the page's layout, not
-of the display scale.  Jeff's 125% makes his screen SMALLER in logical pixels (a 2560-wide monitor
-is 2048 logical), so it is the tighter case — floors picked here are automatically safe at 100%.
+**Why 125% did not corrupt these numbers** (historical, part of the retired step).  JUCE lays
+out in LOGICAL pixels and converts to physical only at the window boundary, so a collision point
+is a property of the page's layout, not of the display scale.  125% made the screen SMALLER in
+logical pixels (a 2560-wide monitor is 2048 logical), so it was the tighter case — floors picked
+there are automatically safe at 100%.
 
-#### B.31.1 — DPI round-trip drift (125%-specific, run right after B.31.0)
+#### B.31.1 — DPI round-trip drift (RE-SCOPED 2026-08-15: run once at a DELIBERATE 125%)
+
+**The premise changed:** Jeff runs 100% display scale now (the 2026-08-11 ruling), and at an
+integral scale the failure mode below does not exist.  It only bites at FRACTIONAL scales, which
+other machines — testers' included — may still use, so the check survives as a one-time stress
+run at a deliberately-set scale rather than an every-campaign row.  Set Windows display scale to
+**125%** (Settings > System > Display) before the walk and put it back to your normal setting
+after.
 
 Fractional display scales do not map logical pixels onto integers (1.25 leaves .25/.5/.75
 remainders), and JUCE's own windowing source notes non-integral client-area sizes at fractional
 scale.  A 1px rounding error on each save/restore would ACCUMULATE, walking windows off-position
 over successive runs.
 
-- [ ] Open 3 windows, place them at distinctive spots, note exact positions.
+- [ ] At 125%: open 3 windows, place them at distinctive spots, note exact positions.
 - [ ] Quit and relaunch.  Positions identical?
 - [ ] Repeat the quit/relaunch TWICE MORE.  Any cumulative drift, in any direction, is a FAIL —
       the failure mode is gradual, so a single restart does not prove it.
 - [ ] Same check for window SIZE, not just position.
+- [ ] Restore your normal display scale.
 
 #### B.31.2 — the reconciled batch smoke (SUPERSEDES the plan file's TS1-TS7 blocks)
 
@@ -2277,14 +2302,16 @@ TS5 -- effects windows:
 - [ ] **MS-27 — FX rack preset.** Six slots + both EQs round-trip onto a different strip.
       `D:__ R:__` notes:
 
-TS6 -- hosting + bridge (protocol v3 -- entirely unheard):
+TS6 -- hosting + bridge (protocol v6 at walk time -- v3 when this was authored, bumped when
+QA-Cleanup moved plugin scanning out of process; the subsystem is still entirely unheard):
 - [ ] **MS-28 — scan.** Finds the installed plugins.  `D:__ R:__` notes:
 - [ ] **MS-29 — VST3 effect.** Loads in a rack slot, sounds, saves/reloads state, automates,
       window composes.  `D:__ R:__` notes:
 - [ ] **MS-30 — VST3 instrument.** Plays from the roll, exports.  [NEW] a held roll-preview note
       survives a tab switch without hanging.  `D:__ R:__` notes:
 - [ ] **MS-31 — latency alignment.** Latency-heavy plugin stays aligned.  `D:__ R:__` notes:
-- [ ] **MS-32 — [CHANGED] the bridge, end to end.** Bridge a 64-bit plugin (hamburger toggle,
+- [ ] **MS-32 — [CHANGED] the bridge, end to end.** Bridge a 64-bit plugin (the plugin window's
+      Menu > "Run bridged (separate process)",
       save + reopen -- the toggle applies on load): SOUND through the shared-memory path, notes
       received, tempo followed, knobs automate (bridged lanes), editor window fits the plugin's
       real size.  `D:__ R:__` notes:
@@ -2328,7 +2355,10 @@ End-to-end:
       pre-batch.  `D:__ R:__` notes:
 - [ ] **MS-46 — full export of it.** Per MS-3..MS-9 in one pass.  `D:__ R:__` notes:
 - [ ] **MS-47 — compatibility.** Old projects + v2 templates + page presets load unchanged.
-      `D:__ R:__` notes:
+      **[CARVE-OUT 2026-08-15: this row predates the QA-Cleanup rename.]** A project saved
+      before 2026-08-10 comes back with EMPTY effect racks and that is EXPECTED (SC-9 — see
+      CLN-2, which owns that case); everything else must still restore.  "Unchanged" applies in
+      full only to projects saved after the rename.  `D:__ R:__` notes:
 - [ ] **MS-48 — CPU dividend.** All-windows-closed cheaper than the old always-alive tabs;
       several open costs more (expected, FL-style).  `D:__ R:__` notes:
 
@@ -2468,17 +2498,15 @@ Where a step says "check the trace", read `asio_trace.txt` next to `audio_settin
 
 **Hosted plugins (T12):**
 
-- [ ] **LAY-B13 — plugin sizing. [REWRITTEN 2026-08-11 at QA-Cleanup — the
-      original tested behaviour that no longer exists.]**  It read "a FIXED-SIZE
-      plugin scales (free-transform, aspect kept) instead of clipping; nothing is
-      silently cut off at any window size."  Host-side scaling of a hosted plugin
-      UI was removed at QA-Cleanup Task 14 because it is not achievable — see
-      §B.35 CLN-14.  Test the CURRENT contract instead: a RESIZABLE plugin
-      resizes natively with its window; a FIXED-SIZE plugin sits at its own size
-      and the WINDOW wraps it; the plugin's own magnify / zoom is the size
-      control; a plugin magnified past the workspace clips at the right and
-      bottom and never over the page menu row or the plugin picker.
-      `D:__ R:__` notes:
+- [ ] **LAY-B13 — plugin sizing. [REWRITTEN 2026-08-15 at QA-Manuals — this row has now been
+      wrong in BOTH directions.]**  The original tested host-side scaling; the QA-Cleanup
+      rewrite tested its removal; the removal was then reversed (the compounding-error symptom
+      was Windows 125% display scaling, not our transform — Jeff's ruling restored the scaling
+      and made 100% the target).  Rather than carry a third copy of the contract here, **run
+      §B.35 CLN-14, which owns the full walk** (wrap at natural size, fixed-size surface scales
+      to a 50% floor with letterboxing, resizable resizes natively, bridged never scales,
+      plugin's own zoom re-fits, same-size-on-reopen, workspace clipping).  Mark this row with
+      CLN-14's result.  `D:__ R:__` notes:
 
 **Piano roll + transport (T1 / T9):**
 
@@ -3027,7 +3055,7 @@ Where a step says "check the trace", read `asio_trace.txt` next to `audio_settin
       band — nothing draws over the ruler or the Lock button; (d) one wheel notch scrolls
       vertically only, not sideways as well; (e) at full height the bar disappears and bare-wheel
       goes back to horizontal.  `D:__ R:__` notes:
-- [ ] **CLN-6 — MT Diagnostic is gone.** Mixer hamburger menu: no "MT Diagnostic" item.  Every
+- [ ] **CLN-6 — MT Diagnostic is gone.** The Mixer window's Menu: no "MT Diagnostic" item.  Every
       remaining item in that menu still does what it says.  `D:__ R:__` notes:
 - [ ] **CLN-7 — per-page view state dropped.** Open a Layers / Bass / Drums page, switch its view,
       switch tabs away and back, save/reload the project: the page opens where you expect and
@@ -3061,17 +3089,25 @@ NOT the plain stereo control:**
 - [ ] **CLN-13 — sibling-DLL plugin loads.** Add the plugin that ships its own DLLs (Keyscape or
       similar) as a Plugins tab: it loads, its editor appears, it makes sound.  This class of
       plugin failed on every previous build.  `D:__ R:__` notes:
-- [ ] **CLN-14 — plugin window sizing.**  The app used to try to shrink a plugin's own interface
-      to fit the window.  That never actually worked — the plugin interpreted it as being resized
-      rather than zoomed, and the error compounded every time — so it was removed.  **A plugin's
-      own magnify / zoom control is now the only thing that changes how big its interface draws.**
-      Test what it does now: (a) the window WRAPS the plugin at the plugin's own size, with no dead bands
-      around it; (b) drive the plugin's OWN magnify / zoom across its full range — the window
-      follows each step and the image stays sharp, with no tearing and no clipped edge; (c) close
-      and reopen the plugin window five times — **it must come back the SAME size every time.**
-      Progressive shrinking on reopen was the original symptom and is the specific regression to
-      watch; (d) magnify past the workspace: the plugin clips at the right and bottom, never over
-      the page menu row or the plugin picker above it.  `D:__ R:__` notes:
+- [ ] **CLN-14 — plugin window sizing.  [REWRITTEN AGAIN 2026-08-15 at QA-Manuals — the
+      QA-Cleanup removal this row described was itself reversed.]**  The QA-Cleanup version said
+      host-side scaling was removed and a plugin's own magnify / zoom was the only size control.
+      That removal turned out to be a misdiagnosis: the compounding-error symptom it blamed on
+      scaling was Windows **125% display scaling** stacking a second transform (proved by
+      instrumentation — the symptom moved with the OS setting, no rebuild), so Jeff ruled the
+      scaling restored and **100% display scale is the target**.  The CURRENT contract, from
+      `HostedPlugin.h`'s three-case model: (a) on open the window WRAPS the plugin at the
+      plugin's own natural size, no dead bands; (b) drag the window smaller — a FIXED-SIZE
+      in-process plugin's surface SCALES down with it, aspect kept (letterbox bars, never a
+      stretched or clipped UI), and the window refuses to shrink below 50% of natural; a
+      RESIZABLE plugin resizes through its own path instead (its constrainer decides); a
+      BRIDGED plugin never scales — it stays centred at natural size and clips to the frame;
+      (c) drive the plugin's OWN magnify / zoom across its full range — the window follows each
+      step and the image stays sharp; (d) close and reopen the plugin window five times — **it
+      must come back the SAME size every time.**  Progressive shrinking on reopen was the
+      original symptom and is the specific regression to watch; (e) magnify past the workspace:
+      the plugin clips at the right and bottom, never over the page menu row or the plugin
+      picker above it.  Run at 100% display scale.  `D:__ R:__` notes:
 - [ ] **CLN-15 — multi-output instrument.** Load an instrument that reports multiple output buses
       (orchestral libraries, drum instruments with per-piece outs).  It must play without crashing
       and the main stereo pair must reach the mixer.  This was an access violation on the audio
@@ -3170,6 +3206,96 @@ at all, before this batch or after it:**
    not happened — there is nothing to review yet.  Not a gap; it is simply a feature that does not
    exist (the wider security plan calls this Tier 2, with cloud features as Tier 3, both after
    v1).
+
+### §B.36 — QA-Manuals (the manual + everything the writing shook loose)
+
+> **Authored MID-BATCH 2026-08-15 (Jeff's call: fix the plan's gaps now).**  QA-Manuals is not
+> code-complete — this section covers what has SHIPPED so far (the MF fix pass, the window
+> re-cut, the swing knob, mic placement, the master VU window, the manuals window, and the
+> installed-copy asset fix) and gets extended at code-complete.  `blocks:` `17cb22f5` (Tasks
+> 0-1 incl. MF-1..9), `ec45b178` (Tasks 2-9 + PDFs + installer), `e619d091` (filmstrips).
+> The hosted-plugin scaling restore is covered by §B.35 CLN-14 (rewritten), not repeated here.
+> Debug exe FIRST (screenshot any jassert), then Release — mark each scenario `D:` and `R:`.
+
+**The MF fix pass (found while writing the manual):**
+
+- [ ] **MAN-1 — save choosers prompt before overwriting (MF-1).** Each of the five file-save
+      choosers (the Builder's two save flows, Export Audio, Export Project Bundle as zip, and
+      Export Take): pick an EXISTING file's name — a native overwrite prompt appears; Cancel
+      leaves the file untouched.  Then bundle-export to a FOLDER that already has files in it:
+      an OK/Cancel names the folder and says same-named files will be replaced, BEFORE any
+      writing starts.  `D:__ R:__` notes:
+- [ ] **MAN-2 — bundle estimate tells the truth (MF-2).** Export a bundle from a real project:
+      the prompt reads "about X across N files" and X plausibly covers the PROJECT FOLDER, not
+      just external refs (a near-zero estimate on a big project is the old bug).  Zip mode adds
+      "smaller once compressed".  OK actually starts the write (the confirmation is async now —
+      a prompt whose OK does nothing is a FAIL), and the result reports the finished artefact's
+      real size and file count.  `D:__ R:__` notes:
+- [ ] **MAN-3 — LiveInst tabs stopped crying corrupt (MF-3).** Open a project with recorded
+      Vox/Inst (LiveInst) tabs: NO "Missing files -> Engine settings (corrupt data)" dialog.
+      Pedals + NAM/IR settings on those tabs still restore (they ride a different attribute and
+      must not have been caught in the fix).  A genuinely corrupt engine blob still reports.
+      `D:__ R:__` notes:
+- [ ] **MAN-4 — Layers/Bass Polyphony toggle actually works (MF-5).** On a Layers tab and a Bass
+      tab: the Polyphonic/Monophonic label reflects the real state, clicking flips it, and the
+      change is audible (chords collapse to one note in mono).  Both were dead — the label
+      permanently "Polyphonic", the click a no-op — while Drums always worked; use a Drums tab
+      as the control.  `D:__ R:__` notes:
+- [ ] **MAN-5 — drum-kit wheel steps rows (MF-6 + the keybind row).** With the drum-kit vertical
+      scrollbar showing: one unhurried wheel notch over the bar moves exactly one row (it used
+      to move nothing).  And right-click + wheel over the drum grid cycles tools, with that
+      gesture now listed in the Key Binds window's Drum Kit tab.  `D:__ R:__` notes:
+- [ ] **MAN-6 — Vocal Chain compressor menu is three modes, deliberately (MF-9 redone).** A
+      vocal-chain slot's compressor mode menu offers Modern / FET / Opto and NO "Pedal
+      (Sustain)"; effect racks and the pedalboard still offer all four.  (First fix widened the
+      range instead — Jeff's ruling was the opposite; the row is the guard against it coming
+      back.)  `D:__ R:__` notes:
+
+**Controls added alongside the manual work:**
+
+- [ ] **MAN-7 — per-player Swing Mix knob.** Every player window's title strip carries a small
+      knob immediately right of "Menu" (the red ring): drag sets Swing Mix 0-100% (name readout
+      while dragging, tooltip names it), double-click resets to 100%, right-click opens a menu
+      with the "Truncate Swing Notes" toggle.  It scales how much of the GLOBAL swing that
+      player follows — set global swing high, pull one player's mix to 0%, confirm that player
+      alone plays straight.  The Drum Kit window has NO swing knob by design (its sixteen
+      players each have their own).  `D:__ R:__` notes:
+- [ ] **MAN-8 — NAM/IR mic placement plot.** On the NAM/IR page, each mic (A and B) has a
+      draggable mic-in-front-of-cab plot where the old logo strip was: dragging the mic moves
+      the Distance and Angle knobs and vice versa (it is a literal plot of those two params, not
+      a picture).  The top/side toggle is PER MIC; in side view, vertical drag is the new Height
+      (+/-30 cm) and height audibly darkens/lengthens the tone as it leaves the axis.  Rings are
+      30 cm marks (10 cm in side view), the bright wedge/lens is the no-darkening zone, the red
+      disc is the 20 cm proximity boundary.  Placement (incl. height) survives: preset save,
+      page save, project save/reload, bundle export, and BOTH A/B slot snapshots per mic.
+      `D:__ R:__` notes:
+- [ ] **MAN-9 — one master VU window, no per-panel strips.** Effect panels no longer carry an
+      input VU strip — none of the 13.  The Effects rack menu (next to VU Calibration) opens
+      ONE "VU" window showing the master outgoing signal: opens at 180x200, stretches
+      diagonally only (aspect locked), caps at 290x320, and re-opening from the menu fronts the
+      existing window rather than spawning a second.  `D:__ R:__` notes:
+
+**The manuals window:**
+
+- [ ] **MAN-10 — F1 opens the real manual.** With Manuals staged/installed: F1 (or Help > Help
+      Index) opens the manuals window FULLSCREEN with minimize / maximize / close chrome (the
+      only satellite that gets min/max — Key Binds, Undo History etc. stay close-only).  The
+      left tree navigates; the three-level switch (In View / In Depth / In The Weeds) adds
+      depth cumulatively; clicking a numbered dot highlights its caption row and clicking the
+      row's number pulses the dot on the picture.  The `Manuals` folder beside the exe also
+      carries the three printable PDFs ("BaySickDAW Manual - In View / In Depth / In The
+      Weeds"), one per depth level, text readable (G24: no black pills).  `D:__ R:__` notes:
+
+**Installed-copy smoke (G25 — this exact defect shipped once):**
+
+- [ ] **MAN-11 — MUST-PASS: an INSTALLED copy keeps its art.** On a machine or account without
+      the repo (or after renaming the repo folder aside), install the tester package and run
+      it: knobs are Jeff's filmstrip art (group knobs, volume knobs, the chicken-head, the
+      switch toggles), the VU meter is the filmstrip meter, and F1 opens the manual from the
+      install folder.  Flat drawn stand-in knobs or a generic drawn meter on an installed copy
+      = FAIL.  Every pre-2026-08-15 run was from the build tree, which is exactly how the
+      filmstrip path bug shipped — the installed copy is the only rig that tests this.
+      `D:__ R:__` notes:
 
 ## §C — Deferred re-verify ledger
 
