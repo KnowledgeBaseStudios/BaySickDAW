@@ -1251,6 +1251,7 @@ private:
     void spawnDuplicateClipsTab (class ClipsPage* sourceCp);
     void spawnDuplicateVoxTab   (class VoxPage*   sourceVp);
     void spawnDuplicateInstTab  (class InstPage*  sourceIp);
+    void spawnDuplicatePluginsTab (class PluginsPage* sourcePp);   // Jeff, 2026-08-16
     // selectAfter controls whether the new tab takes focus.  false = stay put
     // (strip-driven adds, so several can be added without being yanked away on
     // each one).  true = navigate to the new tab, for gestures where the user

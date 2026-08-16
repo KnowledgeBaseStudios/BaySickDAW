@@ -93,6 +93,11 @@ public:
     // Fired when the pick changes, so the ribbon / roll labels can follow.
     std::function<void()> onPluginChanged;
 
+    // Rename / Duplicate (Jeff, 2026-08-16): the Plugins Menu carries the same
+    // Rename / Replace / Duplicate trio as the other page types.
+    std::function<void()> onRenameRequested;
+    std::function<void()> onDuplicateRequested;
+
     // G-7 parity with the other page kinds: confirm prompt (offering a
     // page-preset save when a plugin is loaded), then fire onDeleteRequested.
     void requestDelete();

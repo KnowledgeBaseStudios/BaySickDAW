@@ -58,6 +58,9 @@ public:
 
     // P1+P2 persistence: StandaloneEditor calls this during project load.
     void selectEngine (const juce::String& engineName);
+    // Replace Engine (Jeff, 2026-08-16) + cross-engine page-preset loads: the
+    // swap path with the one-shot pick gate bypassed (see LayersPage twin).
+    void selectEngineInternal (const juce::String& engineName);
 
     // QA-Layout T3 (Window-3/4): title-strip chrome for the hosted engine --
     // see LayersPage.h for the contract.

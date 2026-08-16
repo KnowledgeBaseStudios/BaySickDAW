@@ -411,6 +411,36 @@ no remaining consumers and D5 closes.
       SharedUI.h + STANDALONE_UI_CHANGES.md. Footnote: the code's
       "Fader Slider.png" load has no file anywhere - faders were on the
       drawn fallback even in the dev tree, unchanged by this fix.
+- [x] G26. Replace-feature menu pass (Jeff's spec + 4 new shots,
+      2026-08-16): BSSBM re-based on the shared
+      Synth-Player-Harmless picture + updated Bass picture, BSPM on the
+      shared picture, BSPLUGM on the new Plugins picture; NEW BSHARMM
+      (Harmless finally has a menu entry, Sub of BSHARM) and NEW BSDM
+      (BaySickDrums Menu, Main, right before the Rusty block; documents
+      both access routes) - 88 -> 90 figures. Replace rows added at
+      BSSBM-8/BSPM-8/BSHARMM-8 and BSPLUGM-4..6
+      (Rename/Replace/Duplicate), shifts swept across registry +
+      chapters; In Depth Replace prose on BSSBM (full contract) with
+      BSPM/BSHARMM deferring to it, full walk on BSDM + BSPLUGM. Fresh
+      estimated dot sets on all five figures, PRE-NUDGE - Jeff
+      rearranges. Regenerated green: 90 figures, 731 markers (delta
+      +30 = +1+1+3+15+10, exact), 112 close-ups, 89/89 topics; staged
+      both configs + zip. PDFs deliberately NOT reprinted - they go
+      stale until Jeff's nudge lands, then one reprint + installer
+      rebuild carries everything.
+- [x] G27. Nudges merged + BSDRUMS parent entry (Jeff, 2026-08-16):
+      eighth coords export merged, all 731 dots validated. Jeff's
+      follow-up spec: NEW `BSDRUMS` entry (BaySickDrums, Main,
+      `Drum Kit.png`) above the menu explaining the TWO ways of picking
+      drums - by location (kit pad vs the ribbon +) and by type (sample
+      via BaySickPlayer vs synth patch via BaySickSynth) - rowless
+      prose entry like FXV; `BSDM` re-parented as its Sub so the nav
+      reads BaySickDrums > BaySickDrums Menu. 91 figures. Three PDFs
+      reprinted from the nudged manual, restaged both configs, zip
+      refreshed, installer rebuilt:
+      Installer\BaySickDAW-1.2.0-20260816-1157-Tester-Setup.exe
+      (54.2 MB - carries the audio fix, Replace, kits, WebView2 loader
+      and the 91-figure manual together).
 
 ## Parked / standing items
 

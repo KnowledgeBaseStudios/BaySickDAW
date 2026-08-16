@@ -847,11 +847,23 @@ void BaySickDAWStandaloneApp::initialise(const juce::String&)
         // names the device in a dialog, and preserves the user's choice for the
         // next launch.  It also removes JUCE's extra open attempt, which on a
         // failing ASIO driver costs another 3 s of blocked message thread.
-        initErr = mDeviceManager->initialise(64, 64, xml.get(), false);
+        //
+        // CHANNELS REQUESTED = 2, NOT 64 (2026-08-16).  The channel count here
+        // seeds the default masks (we strip the saved mask attributes above), and
+        // JUCE bounds it only by what the DRIVER CLAIMS it could do - a Razer
+        // headset driver claims 64, so requesting 64 negotiated a 64-channel
+        // WASAPI stream on 2-channel hardware: silence on one tester's machine, a
+        // squeak on another, and the master-pair clamp in PlayHeadAdvancer
+        // defeated by 62 phantom channels.  ASIO breadth does NOT come from this
+        // number: the ASIO-only override below re-widens to the device's real
+        // channel count after the open (Jeff's 22-out board keeps its 21/22
+        // master pair).  Windows drivers are meant to run plain stereo (Jeff's
+        // 2026-05-05 ruling).
+        initErr = mDeviceManager->initialise(2, 2, xml.get(), false);
     }
     else
     {
-        initErr = mDeviceManager->initialiseWithDefaultDevices(64, 64);
+        initErr = mDeviceManager->initialiseWithDefaultDevices(2, 2);
     }
 
     juce::Logger::writeToLog ("startup: audio device init done");
@@ -1016,7 +1028,9 @@ void BaySickDAWStandaloneApp::initialise(const juce::String&)
                 if (t == nullptr || t->getTypeName() == "ASIO") continue;
 
                 mDeviceManager->setCurrentAudioDeviceType (t->getTypeName(), true);
-                mDeviceManager->initialiseWithDefaultDevices (64, 64);
+                // 2 not 64: this loop is non-ASIO by construction, and Windows
+                // drivers get stereo (see the channel note at the main initialise).
+                mDeviceManager->initialiseWithDefaultDevices (2, 2);
 
                 if (auto* fb = mDeviceManager->getCurrentAudioDevice())
                 {

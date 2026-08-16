@@ -23,9 +23,10 @@
 ;       engines load at run time from <exe folder>\Resources.  Without it
 ;       those effects silently fall back to doing nothing.
 ;   Into Documents\BaySickDAW:
-;     Presets\   - the factory preset library
-;     Templates\ - the factory project templates
-;   Nothing installed those two before this script existed; the app only ever
+;     Presets\      - the factory preset library
+;     Templates\    - the factory project templates
+;     Kits\Factory\ - the factory drum kits (the Drums page Kit menu)
+;   Nothing installed these before this script existed; the app only ever
 ;   read them from a folder someone had to populate by hand.
 ;
 ; WHAT IT DELIBERATELY DOES NOT CARRY
@@ -104,8 +105,10 @@ RequestExecutionLevel user
 !insertmacro RequireInput "${RELEASE_DIR}\${HELPER64_EXE}" "the 64-bit plugin host helper"
 !insertmacro RequireInput "${RELEASE_DIR}\${HELPER32_EXE}" "the 32-bit plugin host helper"
 !insertmacro RequireInput "${RELEASE_DIR}\Resources\*.*"   "the Resources folder next to the Release exe"
+!insertmacro RequireInput "${RELEASE_DIR}\WebView2Loader.dll" "the WebView2 loader next to the Release exe (without it the manual renders through the IE fallback)"
 !insertmacro RequireInput "${REPO_ROOT}\Presets\*.*"       "the Presets folder at the repository root"
 !insertmacro RequireInput "${REPO_ROOT}\Templates\*.*"     "the Templates folder at the repository root"
+!insertmacro RequireInput "${REPO_ROOT}\Kits\Factory\*.*"  "the factory drum kits at the repository root"
 
 ; -----------------------------------------------------------------------------
 ; Package metadata
@@ -246,6 +249,12 @@ Section "${APP_NAME} (required)" SEC_APP
   File "${RELEASE_DIR}\${HELPER64_EXE}"
   File "${RELEASE_DIR}\${HELPER32_EXE}"
 
+  ; The WebView2 loader.  The manuals window (F1) needs it beside the exe;
+  ; without it JUCE silently falls back to the IE web control, whose ancient
+  ; JS engine cannot run the manual's script (2026-08-16 - a tester's
+  ; "syntax error" in the manual was exactly this fallback).
+  File "${RELEASE_DIR}\WebView2Loader.dll"
+
   ; NSIS TRAP, and it is a silent one: "File /r <dir>" does NOT mean "that one
   ; directory".  It searches the source's PARENT recursively for every directory
   ; whose name matches, and packages all of them, rebuilding their relative
@@ -287,6 +296,13 @@ Section "${APP_NAME} (required)" SEC_APP
 
   SetOutPath "$DOCUMENTS\${APP_NAME}\Templates"
   File /r /x "My Templates" /x "Thumbs.db" /x "desktop.ini" "${REPO_ROOT}\Templates\*"
+
+  ; Factory drum kits (2026-08-16 - a tester's Kit menu was EMPTY: the app
+  ; reads kits from Documents\BaySickDAW\Kits\Factory, which only the dev
+  ; machine had because the repo doubles as its data root).  "My Kits" is the
+  ; user's own saved kits - excluded for the same reason as "My Presets".
+  SetOutPath "$DOCUMENTS\${APP_NAME}\Kits\Factory"
+  File /r /x "My Kits" /x "Thumbs.db" /x "desktop.ini" "${REPO_ROOT}\Kits\Factory\*"
 
   ; Back to the install folder so the shortcuts below get it as their
   ; start-in directory.
@@ -333,7 +349,7 @@ SectionEnd
 
 !insertmacro MUI_FUNCTION_DESCRIPTION_BEGIN
   !insertmacro MUI_DESCRIPTION_TEXT ${SEC_APP} \
-    "The application, the two plugin host helpers, the audio resources it loads at run time, the manual (F1 in the app, plus printable PDFs), and the factory presets and templates."
+    "The application, the two plugin host helpers, the audio resources it loads at run time, the manual (F1 in the app, plus printable PDFs), and the factory presets, templates and drum kits."
   !insertmacro MUI_DESCRIPTION_TEXT ${SEC_DESKTOP} \
     "Put a ${APP_NAME} shortcut on your desktop. There is a Start Menu shortcut either way."
 !insertmacro MUI_FUNCTION_DESCRIPTION_END
@@ -376,6 +392,7 @@ Section "Uninstall"
   Delete "$INSTDIR\${APP_EXE}"
   Delete "$INSTDIR\${HELPER64_EXE}"
   Delete "$INSTDIR\${HELPER32_EXE}"
+  Delete "$INSTDIR\WebView2Loader.dll"
 
   ; Bounded: these subtrees are created by this installer and hold nothing else.
   RMDir /r "$INSTDIR\Resources"

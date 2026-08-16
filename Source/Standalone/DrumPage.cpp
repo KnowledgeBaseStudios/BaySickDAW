@@ -513,18 +513,30 @@ void DrumPage::showSoundPicker (juce::Component* anchor)
             // cancel happened or the tab is orphaned with no sound in it.
             if (! safeThis) return;
 
+            // ONE-SHOT: the callback is the kit-row ADD flow's orphan guard
+            // (cancel deletes the just-created tab).  It was left installed
+            // after the first pick, so any LATER picker open on that page -
+            // the kit-row re-pick, or Replace Sound (2026-08-16) - deleted
+            // the whole tab on a mere cancel.  Move it out before firing so
+            // one add gesture gets exactly one verdict.
             if (result <= 0)
             {
                 if (auto* d = safeThis.getComponent())
-                    if (d->onSoundPickerClosed)
-                        d->onSoundPickerClosed (false);
+                    if (auto cb = std::move (d->onSoundPickerClosed))
+                    {
+                        d->onSoundPickerClosed = nullptr;
+                        cb (false);
+                    }
                 return;
             }
 
             auto* dp = safeThis.getComponent();
 
-            if (dp->onSoundPickerClosed)
-                dp->onSoundPickerClosed (true);
+            if (auto cb = std::move (dp->onSoundPickerClosed))
+            {
+                dp->onSoundPickerClosed = nullptr;
+                cb (true);
+            }
 
             if (result == kIdNone)            { dp->clearSound();    return; }
             if (result == kIdNewPatch)
@@ -1135,6 +1147,10 @@ void DrumPage::showContextMenu (juce::Component* anchor, bool fromKit)
     constexpr int kIdMidiLearn    = 30;
     constexpr int kIdMidiForget   = 31;
     constexpr int kIdDelete    = 99;
+    // Replace Sound (Jeff, 2026-08-16): re-opens the add-time sample/synth
+    // picker on the existing tab.  All loads inside it are already undo-wrapped
+    // and engine-swapping (performSoundSwapGesture + selectEngine).
+    constexpr int kIdReplace   = 13;
 
     juce::PopupMenu menu;
     // T15: nav entries only on the Menu-dropdown shape -- a kit pad's
@@ -1172,6 +1188,7 @@ void DrumPage::showContextMenu (juce::Component* anchor, bool fromKit)
 
     menu.addSeparator();
     menu.addItem (kIdRename, "Rename...");
+    menu.addItem (kIdReplace, "Replace Sound...", ! mLocked);
     menu.addItem (kIdDuplicate, "Duplicate Drum (new tab)", ! mEngineType.isEmpty());
 
     menu.addSeparator();
@@ -1273,15 +1290,25 @@ void DrumPage::showContextMenu (juce::Component* anchor, bool fromKit)
     menu.addItem (kIdDelete, "Delete Drum", ! mLocked);   // locked drums can't be deleted
 
     juce::Component::SafePointer<DrumPage> safeThis (this);
+    juce::Component::SafePointer<juce::Component> anchorSafe (anchor);
     menu.showMenuAsync (
         juce::PopupMenu::Options().withTargetComponent (anchor),
-        [safeThis, pagePresetXmls = std::move (pagePresetXmls),
-         kIdLock, kIdPolyphony, kIdRename, kIdDuplicate,
+        [safeThis, anchorSafe, pagePresetXmls = std::move (pagePresetXmls),
+         kIdLock, kIdPolyphony, kIdRename, kIdDuplicate, kIdReplace,
          kIdChokeBase, kIdNoteBase, kIdMidiLearn, kIdMidiForget,
          kIdSaveAs, kIdSavePagePreset, kIdPageLoadBase, kIdDelete] (int r) mutable
         {
             if (! safeThis || r <= 0) return;
             auto* dp = safeThis.getComponent();
+
+            if (r == kIdReplace)
+            {
+                // Re-anchor to the page itself if the menu's anchor died while
+                // the popup was up (kit pads rebuild on kit refreshes).
+                auto* at = anchorSafe.getComponent();
+                dp->showSoundPicker (at != nullptr ? at : dp);
+                return;
+            }
 
             // Page-preset load submenu (1000 + i -> pagePresetXmls[i]).
             if (r >= kIdPageLoadBase && r < kIdPageLoadBase + pagePresetXmls.size())

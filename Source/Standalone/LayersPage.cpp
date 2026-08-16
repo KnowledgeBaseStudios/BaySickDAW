@@ -84,7 +84,11 @@ void LayersPage::setUndoContext(const UndoContext& ctx)
 void LayersPage::selectEngine(const juce::String& engineName)
 {
     if (mEngineLocked) return;
+    selectEngineInternal (engineName);
+}
 
+void LayersPage::selectEngineInternal(const juce::String& engineName)
+{
     HeavyOperationOverlay::ScopedOp busy (StandaloneEditor::busyOverlayFor (this),
                                           "Loading " + engineName + "...", true);
 
@@ -381,6 +385,10 @@ void LayersPage::showPageActionsMenu (juce::Component* anchor)
     // Page-preset load submenu - 1000 + i indexes into pagePresetXmls[].
     constexpr int kIdLoadBase  = 1000;
     constexpr int kIdDelete    = 99;
+    // Replace Engine submenu (Jeff, 2026-08-16) - 60 + i indexes kLayerEngines.
+    constexpr int kIdReplaceBase = 60;
+    static const char* const kLayerEngines[] = { "Harmless", "BaySickSynth", "BaySickPlayer" };
+    constexpr int kNumLayerEngines = 3;
 
     juce::PopupMenu menu;
     if (onBuildWindowNavMenu) { onBuildWindowNavMenu (menu); menu.addSeparator(); }
@@ -423,6 +431,18 @@ void LayersPage::showPageActionsMenu (juce::Component* anchor)
 
     menu.addSeparator();
     menu.addItem (kIdRename, "Rename...");
+    // Replace Engine (Jeff, 2026-08-16): swap this tab's engine in place -
+    // notes, strip, rack and window all stay; no delete prompt because the
+    // tab never dies.  Current engine ticked and disabled; locked pages
+    // can't swap, same rule as Delete.
+    {
+        juce::PopupMenu repSub;
+        for (int i = 0; i < kNumLayerEngines; ++i)
+            repSub.addItem (kIdReplaceBase + i, kLayerEngines[i],
+                            mEngineType != kLayerEngines[i],
+                            mEngineType == kLayerEngines[i]);
+        menu.addSubMenu ("Replace Engine", repSub, ! mLocked && ! mEngineType.isEmpty());
+    }
     menu.addItem (kIdDuplicate, "Duplicate Layer (new tab)", ! mEngineType.isEmpty());
 
     menu.addSeparator();
@@ -497,10 +517,21 @@ void LayersPage::showPageActionsMenu (juce::Component* anchor)
          pagePresetXmls = std::move (pagePresetXmls),
          kIdLock, kIdPolyphony, kIdRename, kIdDuplicate, kIdChokeBase,
          kIdSaveAs, kIdLoadPresetBase, kIdSavePagePreset, kIdLoadBase,
-         kIdDelete] (int r) mutable
+         kIdDelete, kIdReplaceBase, kNumLayerEngines] (int r) mutable
         {
             if (! safeThis || r <= 0) return;
             auto* lp = safeThis.getComponent();
+
+            // Replace Engine submenu (60 + i -> kLayerEngines[i]).  One
+            // structural row; undo restores the old engine with its settings.
+            if (r >= kIdReplaceBase && r < kIdReplaceBase + kNumLayerEngines)
+            {
+                static const char* const kEngines[] = { "Harmless", "BaySickSynth", "BaySickPlayer" };
+                const juce::String name = kEngines[r - kIdReplaceBase];
+                lp->performChainSwapGesture ("Replace Engine",
+                    [lp, name] { lp->selectEngineInternal (name); });
+                return;
+            }
 
             // Page-preset load submenu (1000 + i -> pagePresetXmls[i]).
             if (r >= kIdLoadBase && r < kIdLoadBase + pagePresetXmls.size())
@@ -1099,10 +1130,14 @@ void LayersPage::applyPagePresetXml (const juce::String& xmlText)
     // reports, so nesting keeps the noun the user reads correct.
     MissingFileReport::ScopedGesture gesture ("preset");
 
-    // First peek the engineType so we can swap engines if needed.
+    // First peek the engineType so we can swap engines if needed.  Through the
+    // INTERNAL route: the public selectEngine no-ops once the "+"-time pick has
+    // locked, which left this swap dead - a cross-engine page preset imported
+    // the saved blob into the OLD engine (found 2026-08-16 while building
+    // Replace Engine, which shares this path).
     const juce::String savedEngineType = PagePresetIO::peekEngineTypeFromXml (xmlText);
     if (savedEngineType.isNotEmpty() && savedEngineType != mEngineType)
-        selectEngine (savedEngineType);
+        selectEngineInternal (savedEngineType);
 
     const juce::String stripPrefix = "mixer_layer_" + juce::String (mPageIndex);
     const juce::String enginePrefix = layerEnginePrefixOf (mEngineProcessor);

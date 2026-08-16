@@ -80,23 +80,26 @@ so reshaping a crop box never moves a dot.
 | Instrument | 5 | `BSPIT` | BaySickPitch | Sub | `BSV` | `BaySickPitch.png` | full |
 | Instrument | 6 | `BSPDL` | BaySickPedals | Main | - | `BaySickPedals.png` | full + bar crop |
 | Instrument | 7 | `BSPDLM` | BaySickPedals Menu | Sub | `BSPDL` | `BaySickPedals Menu.png` | full |
-| Instrument | 9 | `BSPDLP` | BaySickPedals Picker List | Sub | `BSPDL` | `BaySickPedals List.png` | full |
-| Instrument | 10 | `BSGTR` | BaySickGuitars | Sub | `BSPDL` | `BaySickGuitars.png` | full |
-| Instrument | 11 | `BSBAS` | BaySickBasses | Sub | `BSPDL` | `BaySickBasses.png` | full |
-| Instrument | 12 | `BSGBM` | BaySickGuitars/Basses Menu | Sub | `BSPDL` `BSGTR` `BSBAS` | `BaySickGuitars & Basses Menu.png` | full |
-| Instrument | 13 | `BSNAM` | BaySickNAM/IR | Sub | `BSPDL` `BSGTR` `BSBAS` `BSV` | `BaySickNAMIR.png` | full |
-| Instrument | 14 | `BSHARM` | Harmless | Main | - | `Harmless.png` | full |
+| Instrument | 8 | `BSPDLP` | BaySickPedals Picker List | Sub | `BSPDL` | `BaySickPedals List.png` | full |
+| Instrument | 9 | `BSGTR` | BaySickGuitars | Sub | `BSPDL` | `BaySickGuitars.png` | full |
+| Instrument | 10 | `BSBAS` | BaySickBasses | Sub | `BSPDL` | `BaySickBasses.png` | full |
+| Instrument | 11 | `BSGBM` | BaySickGuitars/Basses Menu | Sub | `BSPDL` `BSGTR` `BSBAS` | `BaySickGuitars & Basses Menu.png` | full |
+| Instrument | 12 | `BSNAM` | BaySickNAM/IR | Sub | `BSPDL` `BSGTR` `BSBAS` `BSV` | `BaySickNAMIR.png` | full |
+| Instrument | 13 | `BSHARM` | Harmless | Main | - | `Harmless.png` | full |
+| Instrument | 14 | `BSHARMM` | Harmless Menu | Sub | `BSHARM` | `BaySickSynth-BaySickPlayer-Harmless Menu.png` | full |
 | Instrument | 15 | `BSSB` | BaySickSynth/Bass Family | Main | - | `BaySickSynth FLT.png` + `BaySickBass Titlebar Crop.png` | crop |
 | Instrument | 16 | `BSSBT` | BaySickSynth/Bass Titlebar | Sub | `BSSB` | `BaySickSynth FLT.png` + `BaySickBass Titlebar Crop.png` | crop |
-| Instrument | 17 | `BSSBM` | BaySickSynth/Bass Menu | Sub | `BSSB` | `BaySickSynth Menu.png` + `BaySickBass Menu.png` | full |
+| Instrument | 17 | `BSSBM` | BaySickSynth/Bass Menu | Sub | `BSSB` | `BaySickSynth-BaySickPlayer-Harmless Menu.png` + `BaySickBass Menu Updated.png`  | full |
 | Instrument | 18 | `BSSBOSC` | BaySickSynth/Bass Oscillator | Sub | `BSSB` | `BaySickSynth OSC.png` | crop |
 | Instrument | 19 | `BSSBOENV` | BaySickSynth/Bass Oscillator Envelope | Sub | `BSSB` | `BaySickSynth OSC ENV.png` | crop |
 | Instrument | 20 | `BSSBFLT` | BaySickSynth/Bass Filter | Sub | `BSSB` | `BaySickSynth FLT.png` | crop |
 | Instrument | 21 | `BSSBFENV` | BaySickSynth/Bass Filter Envelope | Sub | `BSSB` | `BaySickSynth FLT ENV.png` | crop |
 | Instrument | 22 | `BSSBLFO` | BaySickSynth/Bass LFO | Sub | `BSSB` | `BaySickSynth LFO.png` | crop |
 | Instrument | 23 | `BSSBMOD` | BaySickSynth/Bass Mod | Sub | `BSSB` | `BaySickSynth MOD.png` | crop |
-| Instrument | 26 | `BSP` | BaySickPlayer | Main | - | `BaySickPlayer.png` | full |
-| Instrument | 27 | `BSPM` | BaySickPlayer Menu | Sub | `BSP` | `BaySickPlayer Menu.png` | full |
+| Instrument | 24 | `BSP` | BaySickPlayer | Main | - | `BaySickPlayer.png` | full |
+| Instrument | 25 | `BSPM` | BaySickPlayer Menu | Sub | `BSP` | `BaySickSynth-BaySickPlayer-Harmless Menu.png`  | full |
+| Instrument | 26 | `BSDRUMS` | BaySickDrums | Main | - | `Drum Kit.png` | full |
+| Instrument | 27 | `BSDM` | BaySickDrums Menu | Sub | `BSDRUMS` | `BaySickDrum Menu.png` | full |
 | Instrument | 28 | `BSRDTTL` | BaySickRustyDrums | Main | - | `BaySickRustyDrums Main.png` | crop |
 | Instrument | 29 | `BSRDMENU` | BaySickRustyDrums Menu | Sub | `BSRDTTL` | `BaySickRustyDrums Menu.png` | full |
 | Instrument | 30 | `BSRDMAIN` | BaySickRustyDrums Main | Sub | `BSRDTTL` | `BaySickRustyDrums Main.png` | full |
@@ -109,7 +112,7 @@ so reshaping a crop box never moves a dot.
 | Instrument | 37 | `BSRDKIT` | BaySickRustyDrums Drum Kit | Sub | `BSRDTTL` | `BaySickRustyDrums Drum Kit.png` | full |
 | Instrument | 38 | `BSRDMAP` | BaySickRustyDrums Note Map | Sub | `BSRDTTL` | `Rusty Keys.png` | full |
 | Instrument | 39 | `BSPLUG` | Hosted Plugin | Main | - | `Hosted Plugin.png` | full |
-| Instrument | 40 | `BSPLUGM` | Hosted Plugin Menu | Sub | `BSPLUG` | `Hosted Plugin Menu.png` | full |
+| Instrument | 40 | `BSPLUGM` | Hosted Plugin Menu | Sub | `BSPLUG` | `BaySickPlugins Menu.png`  | full |
 | Mixing & Effects | 1 | `MIX` | Mixer | Main | - | `Mixer.png` | full |
 | Mixing & Effects | 2 | `MIXMNU` | Mixer Menu | Sub | `MIX` | `Mixer Menu.png` | full |
 | Mixing & Effects | 3 | `MIXADD` | Mixer Add | Sub | `MIX` | `Mixer Add.png` | full |
@@ -399,6 +402,25 @@ Menu, Oscillator, Oscillator Envelope, Filter, Filter Envelope, LFO, Mod
 - all direct children of the Family. Also `BSGBM` gained `BSPDL` as its
 placement parent so the sidebar shows it flat under the Pedals family
 after Basses instead of folded under Guitars.
+
+### Replace-feature menu pass - 2026-08-16 (Jeff's spec)
+
+The Replace feature changed four menus and Jeff shot four new pictures, so
+the menu figures re-based: `BSSBM` now shows the shared
+`BaySickSynth-BaySickPlayer-Harmless Menu.png` beside
+`BaySickBass Menu Updated.png`; `BSPM` shows the shared picture alone;
+`BSPLUGM` shows `BaySickPlugins Menu.png`. Two NEW figures (88 -> 90):
+`BSHARMM` (Harmless Menu - Harmless had no menu entry; Sub of `BSHARM`) and
+`BSDM` (BaySickDrums Menu - Main, placed right before the BaySickRustyDrums
+block; reached from a kit pad's right-click or the drum window's Menu).
+New rows: `Replace Engine` at `BSSBM-8`/`BSPM-8`/`BSHARMM-8` (old 8+
+renumbered +1), and `Rename...`/`Replace Plugin`/`Duplicate Plugin` at
+`BSPLUGM-4`..`6` (old 4-7 -> 7-10). Jeff's nudge export merged same day
+(731 dots validated). Follow-up (Jeff): NEW `BSDRUMS` (BaySickDrums, Main,
+`Drum Kit.png`, rowless prose entry - the two ways of picking drums, by
+location and by type) sits above the menu, and `BSDM` re-parented as its
+Sub - 91 figures total. Instrument-group Ords renumbered sequentially to
+make room.
 
 ### Drum Kit gesture rows struck; keybind pointers added - 2026-08-14 (Jeff)
 
@@ -979,6 +1001,31 @@ Additive engine, single page, no tabs. Grouped by the painted section captions. 
 | BSHARM-25 | `DEPTH` / `LENGTH` / `TEMPO` / `SPD` / `TNS` / `SKEW` / `PW` - the curve shaping row | Writing | IMP-87 | `Automation.md` |
 | BSHARM-26 | `TYPE` chicken-head in `UNISON` - `Pure` / `Random` / `Drifting` / `Alt-only` | Instruments | IMP-84 | `Harmless.md` |
 | BSHARM-27 | `Swing Mix` knob on the title bar, right of `Menu` - scales the global Swing for this player; right-click offers `Truncate Swing Notes` | Tabs | IMP-65 | `Patterns and Arrangement.md` |
+### `BSHARMM` - `BaySickSynth-BaySickPlayer-Harmless Menu.png`
+
+The Harmless tab's menu - the same tab menu every Layers-family engine shows
+(one shared picture; the menu belongs to the TAB, not the engine). Harmless
+had no menu entry of its own until 2026-08-16. `Polyphony` reads `(n/a)` and
+greys on a Harmless layer - Harmless is always polyphonic.
+
+| Callout | On-screen label | Manual 2 | IMP | System Reference |
+|---|---|---|---|---|
+| BSHARMM-1 | `Player` - the engine view, tick when shown | Tabs | IMP-57 | `Workspace and Windows.md` |
+| BSHARMM-2 | `Piano Roll` - jumps the roll to this tab | Tabs | IMP-57 | `Workspace and Windows.md` |
+| BSHARMM-3 | `FX Rack` - *see FXI* | Mixing | IMP-62 | `Effect Racks.md` |
+| BSHARMM-4 | `Freeze` - renders this tab and plays the render instead. Greys when unavailable, with the reason in its tooltip; label color signals state - cyan while frozen, orange once the render goes stale | Tabs | IMP-75 | `Freeze and Export.md` |
+| BSHARMM-5 | `Lock Layer` - tick when locked; a locked tab shows `[L] ` on its ribbon slot | Tabs | IMP-70 | `Workspace and Windows.md` |
+| BSHARMM-6 | `Polyphony: (n/a)` - greyed on Harmless; the engine is always polyphonic | Tabs | IMP-85 | `Workspace and Windows.md` |
+| BSHARMM-7 | `Rename...` | Tabs | IMP-57 | `Workspace and Windows.md` |
+| BSHARMM-8 | `Replace Engine` submenu - swap this tab's engine in place; the notes, mixer settings, effects and window all stay. Tick = the current engine; greys while the tab is locked | Tabs | IMP-57 | `Workspace and Windows.md` |
+| BSHARMM-9 | `Duplicate Layer (new tab)` - greys with no engine loaded | Tabs | IMP-57 | `Workspace and Windows.md` |
+| BSHARMM-10 | `Choke Group` submenu - `None` / `Group 1` through `Group 16`; same-group tabs cut each other off | Tabs | IMP-57 | `Workspace and Windows.md` |
+| BSHARMM-11 | `Save Current Patch As...` | Tabs | IMP-72 | `Presets.md` |
+| BSHARMM-12 | `Load Preset` submenu - the engine's preset tree; `(no presets installed)` when empty | Tabs | IMP-72 | `Presets.md` |
+| BSHARMM-13 | `Save Page Preset As...` | Tabs | IMP-72 | `Presets.md` |
+| BSHARMM-14 | `Load Page Preset` submenu | Tabs | IMP-72 | `Presets.md` |
+| BSHARMM-15 | `Delete Layer` | Tabs | IMP-72 | `Workspace and Windows.md` |
+
 ### `BSP` - `BaySickPlayer.png`
 
 The sample player. Also what a Clips tab is, so `Clips Page.md` documents the
@@ -1881,7 +1928,7 @@ window you are in.
 |---|---|---|---|---|
 | BSSBT-1 | `Preset` dropdown - the patch picker | Instruments | IMP-72 | `Presets.md` |
 | BSSBT-2 | `Swing Mix` knob on the title bar, right of `Menu` - scales the global Swing for this player; right-click offers `Truncate Swing Notes` | Tabs | IMP-65 | `Patterns and Arrangement.md` |
-### `BSSBM` - `BaySickSynth Menu.png` + `BaySickBass Menu.png`
+### `BSSBM` - `BaySickSynth-BaySickPlayer-Harmless Menu.png` + `BaySickBass Menu Updated.png`
 
 The family's tab menu - both menus in one entry; one shape, two namings
 (`Layer` / `Bass`). The menu belongs to the TAB, not the engine, so the
@@ -1896,16 +1943,17 @@ BaySickPlayer picture is identical (see BSPM).
 | BSSBM-5 | `Lock Layer` / `Lock Bass` - tick when locked; a locked tab shows `[L] ` on its ribbon slot | Tabs | IMP-70 | `Workspace and Windows.md` |
 | BSSBM-6 | `Polyphony: Polyphonic` / `Monophonic` - reads the engine's voice mode; click toggles it. The synth starts polyphonic, the bass monophonic. `Polyphony: (n/a)`, greyed, on a Harmless layer | Tabs | IMP-85 | `Workspace and Windows.md` |
 | BSSBM-7 | `Rename...` | Tabs | IMP-57 | `Workspace and Windows.md` |
-| BSSBM-8 | `Duplicate Layer / Bass (new tab)` - greys with no engine loaded | Tabs | IMP-57 | `Workspace and Windows.md` |
-| BSSBM-9 | `Choke Group` submenu - `None` / `Group 1` through `Group 16`; same-group tabs cut each other off | Tabs | IMP-57 | `Workspace and Windows.md` |
-| BSSBM-10 | `Save Current Patch As...` | Tabs | IMP-72 | `Presets.md` |
-| BSSBM-11 | `Load Preset` submenu - the engine's preset tree; `(no presets installed)` when empty | Tabs | IMP-72 | `Presets.md` |
-| BSSBM-12 | `Save Page Preset As...` | Tabs | IMP-72 | `Presets.md` |
-| BSSBM-13 | `Load Page Preset` submenu | Tabs | IMP-72 | `Presets.md` |
-| BSSBM-14 | `Delete Layer` / `Delete Bass` | Tabs | IMP-72 | `Workspace and Windows.md` |
+| BSSBM-8 | `Replace Engine` submenu - swap this tab's engine in place; the notes, mixer settings, effects and window all stay. Tick = the current engine; greys while the tab is locked | Tabs | IMP-57 | `Workspace and Windows.md` |
+| BSSBM-9 | `Duplicate Layer / Bass (new tab)` - greys with no engine loaded | Tabs | IMP-57 | `Workspace and Windows.md` |
+| BSSBM-10 | `Choke Group` submenu - `None` / `Group 1` through `Group 16`; same-group tabs cut each other off | Tabs | IMP-57 | `Workspace and Windows.md` |
+| BSSBM-11 | `Save Current Patch As...` | Tabs | IMP-72 | `Presets.md` |
+| BSSBM-12 | `Load Preset` submenu - the engine's preset tree; `(no presets installed)` when empty | Tabs | IMP-72 | `Presets.md` |
+| BSSBM-13 | `Save Page Preset As...` | Tabs | IMP-72 | `Presets.md` |
+| BSSBM-14 | `Load Page Preset` submenu | Tabs | IMP-72 | `Presets.md` |
+| BSSBM-15 | `Delete Layer` / `Delete Bass` | Tabs | IMP-72 | `Workspace and Windows.md` |
 
 
-### `BSPM` - `BaySickPlayer Menu.png`
+### `BSPM` - `BaySickSynth-BaySickPlayer-Harmless Menu.png`
 
 The Layers-tab menu as it reads on a BaySickPlayer tab - identical to the BaySickSynth one (see BSSBM); the menu belongs to the TAB, not the engine.
 
@@ -1918,14 +1966,44 @@ The Layers-tab menu as it reads on a BaySickPlayer tab - identical to the BaySic
 | BSPM-5 | `Lock Layer` - tick when locked; a locked tab shows `[L] ` on its ribbon slot | Tabs | IMP-70 | `Workspace and Windows.md` |
 | BSPM-6 | `Polyphony: Polyphonic` / `Monophonic` - reads the engine's voice cap; click toggles it | Tabs | IMP-85 | `Workspace and Windows.md` |
 | BSPM-7 | `Rename...` | Tabs | IMP-57 | `Workspace and Windows.md` |
-| BSPM-8 | `Duplicate Layer (new tab)` - greys with no engine loaded | Tabs | IMP-57 | `Workspace and Windows.md` |
-| BSPM-9 | `Choke Group` submenu - `None` / `Group 1` through `Group 16`; same-group tabs cut each other off | Tabs | IMP-57 | `Workspace and Windows.md` |
-| BSPM-10 | `Save Current Patch As...` | Tabs | IMP-72 | `Presets.md` |
-| BSPM-11 | `Load Preset` submenu - the engine's preset tree; `(no presets installed)` when empty | Tabs | IMP-72 | `Presets.md` |
-| BSPM-12 | `Save Page Preset As...` | Tabs | IMP-72 | `Presets.md` |
-| BSPM-13 | `Load Page Preset` submenu | Tabs | IMP-72 | `Presets.md` |
-| BSPM-14 | `Delete Layer` | Tabs | IMP-57 | `Workspace and Windows.md` |
+| BSPM-8 | `Replace Engine` submenu - swap this tab's engine in place; the notes, mixer settings, effects and window all stay. Tick = the current engine; greys while the tab is locked | Tabs | IMP-57 | `Workspace and Windows.md` |
+| BSPM-9 | `Duplicate Layer (new tab)` - greys with no engine loaded | Tabs | IMP-57 | `Workspace and Windows.md` |
+| BSPM-10 | `Choke Group` submenu - `None` / `Group 1` through `Group 16`; same-group tabs cut each other off | Tabs | IMP-57 | `Workspace and Windows.md` |
+| BSPM-11 | `Save Current Patch As...` | Tabs | IMP-72 | `Presets.md` |
+| BSPM-12 | `Load Preset` submenu - the engine's preset tree; `(no presets installed)` when empty | Tabs | IMP-72 | `Presets.md` |
+| BSPM-13 | `Save Page Preset As...` | Tabs | IMP-72 | `Presets.md` |
+| BSPM-14 | `Load Page Preset` submenu | Tabs | IMP-72 | `Presets.md` |
+| BSPM-15 | `Delete Layer` | Tabs | IMP-57 | `Workspace and Windows.md` |
 
+
+### `BSDRUMS` - `Drum Kit.png`
+
+Where drums come from - the entry that frames the menu below. Two choices
+happen when a drum is picked, and they are independent: WHERE you pick it
+(the Drum Kit's pads, or the ribbon `+`) and WHAT KIND of sound it is
+(a sample through BaySickPlayer, or a synth patch through BaySickSynth).
+No callout rows - the picture is the Drum Kit page where most picking
+happens; the mechanics live in the chapter text and the menu entry below.
+
+### `BSDM` - `BaySickDrum Menu.png`
+
+The per-drum menu - right-click any pad on the Drum Kit, or open the Menu on
+that drum's own player window (the window route adds the view rows and page
+presets around this same core). Every drum tab is its own player, so this is
+the drum twin of the Layers tab menu.
+
+| Callout | On-screen label | Manual 2 | IMP | System Reference |
+|---|---|---|---|---|
+| BSDM-1 | `Lock Drum` - tick when locked; a locked drum can't be deleted or replaced | Tabs | IMP-70 | `Workspace and Windows.md` |
+| BSDM-2 | `Polyphony: Polyphonic` / `Monophonic` - reads the drum engine's voice mode; click toggles it | Tabs | IMP-85 | `Workspace and Windows.md` |
+| BSDM-3 | `Rename...` | Tabs | IMP-57 | `Workspace and Windows.md` |
+| BSDM-4 | `Replace Sound...` - opens the same picker as adding a drum (samples, library sounds, SFZ, synth patches); the drum's notes, mixer settings and effects stay. Backing out changes nothing | Tabs | IMP-57 | `Drum Kit.md` |
+| BSDM-5 | `Duplicate Drum (new tab)` - greys with no sound loaded | Tabs | IMP-57 | `Workspace and Windows.md` |
+| BSDM-6 | `Choke Group` submenu - `None` / `Group 1` through `Group 16`; the classic open/closed hi-hat cutoff | Tabs | IMP-57 | `Workspace and Windows.md` |
+| BSDM-7 | `MIDI Note` submenu - the drum's play pitch, with the current assignment at the top | Tabs | IMP-57 | `Drum Kit.md` |
+| BSDM-8 | `MIDI Learn` - bind a pad or key to trigger this drum; the label carries the current binding, and `MIDI Forget` appears below it once bound | Writing | IMP-64 | `MIDI Learn.md` |
+| BSDM-9 | `Save Current Patch As...` | Tabs | IMP-72 | `Presets.md` |
+| BSDM-10 | `Delete Drum` - greys while locked | Tabs | IMP-57 | `Workspace and Windows.md` |
 
 ### `BSRDTTL` - `BaySickRustyDrums Main.png`
 
@@ -1953,7 +2031,7 @@ The BaySickRustyDrums window menu. No FX Rack entry here.
 | BSRDMENU-7 | `Load Page Preset` submenu | Tabs | IMP-72 | `Presets.md` |
 
 
-### `BSPLUGM` - `Hosted Plugin Menu.png`
+### `BSPLUGM` - `BaySickPlugins Menu.png`
 
 The hosted-plugin window menu.
 
@@ -1962,10 +2040,13 @@ The hosted-plugin window menu.
 | BSPLUGM-1 | `Piano Roll` - jumps the roll to this plugin tab | Instruments | IMP-57 | `Plugins Page.md` |
 | BSPLUGM-2 | `FX Rack` - *see FXI* | Mixing | IMP-62 | `Effect Racks.md` |
 | BSPLUGM-3 | `Freeze` - renders this tab and plays the render instead. Greys when unavailable, with the reason in its tooltip; label color signals state - cyan while frozen, orange once the render goes stale | Tabs | IMP-75 | `Freeze and Export.md` |
-| BSPLUGM-4 | `Save Page Preset As...` | Tabs | IMP-72 | `Presets.md` |
-| BSPLUGM-5 | `Load Page Preset` submenu | Tabs | IMP-72 | `Presets.md` |
-| BSPLUGM-6 | `Automate` submenu - the hosted plugin's parameters; picking one opens that parameter's automation lane | Writing | IMP-63 | `Automation.md` |
-| BSPLUGM-7 | `Delete Plugin` | Tabs | IMP-57 | `Workspace and Windows.md` |
+| BSPLUGM-4 | `Rename...` | Tabs | IMP-57 | `Workspace and Windows.md` |
+| BSPLUGM-5 | `Replace Plugin` submenu - swap the hosted plugin in place; the notes, mixer settings, effects and window all stay. Lists your added instruments; tick = the current plugin | Tabs | IMP-57 | `Plugins Page.md` |
+| BSPLUGM-6 | `Duplicate Plugin (new tab)` - clones plugin + settings into a fresh tab; greys with no plugin loaded | Tabs | IMP-57 | `Plugins Page.md` |
+| BSPLUGM-7 | `Save Page Preset As...` | Tabs | IMP-72 | `Presets.md` |
+| BSPLUGM-8 | `Load Page Preset` submenu | Tabs | IMP-72 | `Presets.md` |
+| BSPLUGM-9 | `Automate` submenu - the hosted plugin's parameters; picking one opens that parameter's automation lane | Writing | IMP-63 | `Automation.md` |
+| BSPLUGM-10 | `Delete Plugin` | Tabs | IMP-57 | `Workspace and Windows.md` |
 
 
 ### `MIXMNU` - `Mixer Menu.png`

@@ -1,0 +1,48 @@
+<p>The per-drum menu. Two ways in: right-click any pad on the Drum Kit, or
+open the Menu on that drum's own player window - the window route wraps
+this same core with the view rows (Player / Piano Roll / FX Rack / Freeze)
+and the page-preset entries. Every drum tab is its own player, so this is
+the drum twin of the Layers tab menu, trimmed to what a drum needs.</p>
+
+<figure data-views="BSDM">
+
+<p id="BSDM-1"><b>Lock Drum.</b> Protects the drum from accidental edits -
+a locked drum cannot be deleted or have its sound replaced. The tick shows
+while locked.</p>
+
+<p id="BSDM-2"><b>Polyphony.</b> Reads the drum engine's voice mode and
+clicking toggles it. Most drums want polyphonic (overlapping hits ring
+together); monophonic makes each hit cut the last - useful for 808s.</p>
+
+<p id="BSDM-3"><b>Rename...</b> Names the drum; the name follows it to the
+kit pad, the ribbon slot and the mixer strip.</p>
+
+<p id="BSDM-4"><b>Replace Sound...</b> Opens the same picker you used when
+adding the drum - browse a sample, pick a library sound, load an SFZ,
+choose a synth patch, or start a blank patch - and loads your pick into
+this drum. The drum's notes, its mixer settings, its effects and its kit
+position all stay; only the sound changes, even when the pick crosses
+engine type (a sample onto a synth drum, or back). Backing out of the
+picker changes nothing, and one undo brings the old sound back.</p>
+
+<p id="BSDM-5"><b>Duplicate Drum (new tab).</b> Clones the drum - sound,
+settings, everything - onto the next free pad in this kit's bank.</p>
+
+<p id="BSDM-6"><b>Choke Group.</b> Sixteen cut groups; same-group drums cut
+each other off. The classic use is an open and a closed hi-hat silencing
+one another.</p>
+
+<p id="BSDM-7"><b>MIDI Note.</b> The drum's play pitch - the note it sounds
+at, with the current assignment shown at the top. Every drum starts on C5;
+move it to retune a sample without touching the engine.</p>
+
+<p id="BSDM-8"><b>MIDI Learn.</b> Binds a pad or key on your controller to
+trigger this drum; the label carries the current binding, and a
+<b>MIDI Forget</b> row appears below it once bound.</p>
+
+<p id="BSDM-9"><b>Save Current Patch As...</b> Saves the drum's sound so any
+other drum can load it later.</p>
+
+<p id="BSDM-10"><b>Delete Drum.</b> Removes the drum, its tab and its strip.
+Greys while locked. If you only want a different sound in the same slot,
+that is what <b>Replace Sound...</b> is for - no delete needed.</p>

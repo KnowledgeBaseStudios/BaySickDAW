@@ -5674,6 +5674,13 @@ void StandaloneEditor::onAddTabRequest(RibbonTabBar::TabType type, bool navigate
                 if (! mRibbon) return;
                 deleteTabWithUndo (newId);
             };
+            // Rename / Duplicate (Jeff, 2026-08-16): same trio as the other
+            // page types.  Raw p, like every other hook in this block --
+            // page destruction on window close is off.
+            p->onRenameRequested = [this, newId] {
+                if (mRibbon) mRibbon->startRename (newId);
+            };
+            p->onDuplicateRequested = [this, p] { spawnDuplicatePluginsTab (p); };
             // Instrument lanes (ruling 2-b): registration re-runs on every
             // param-count change (bridged lists arrive async).  The Automate
             // pick re-registers too, then opens the lane.
@@ -11635,6 +11642,63 @@ void StandaloneEditor::spawnDuplicateInstTab (InstPage* sourceIp)
         const auto* tab = mRibbon->getTabById (newRibbonId);
         wrapTabAddUndo (newRibbonId,
                         "Duplicate " + (tab ? tab->name : juce::String ("Inst Tab")));
+    }
+}
+
+// Jeff, 2026-08-16: the Plugins Menu carries the same Rename / Replace /
+// Duplicate trio as the other page types.  Same spine as the Inst duplicate:
+// captureTabRecord is the one capture that carries the plugin identifier +
+// state blob, and resurrectTabFromRecordImpl the one restore that consumes
+// it, so Duplicate cannot fall behind what undo can rebuild.
+void StandaloneEditor::spawnDuplicatePluginsTab (PluginsPage* sourcePp)
+{
+    if (sourcePp == nullptr) return;
+
+    PageEntry* sourceEntry = nullptr;
+    for (auto* entry : mPages)
+    {
+        if (! entry || entry->type != RibbonTabBar::TabType::Plugins) continue;
+        if (dynamic_cast<PluginsPage*> (entry->component.get()) == sourcePp) { sourceEntry = entry; break; }
+    }
+    if (sourceEntry == nullptr) return;
+
+    auto rec = captureTabRecord (*sourceEntry);
+    if (rec == nullptr) return;
+
+    // mUsedPluginIndices is the allocator createPluginsPage consults, so the
+    // free-slot pick reads it rather than re-deriving from a page scan.
+    int newIdx = -1;
+    for (int i = 0; i < (int) kMaxPluginPages; ++i)
+        if (! mUsedPluginIndices[(size_t) i]) { newIdx = i; break; }
+    if (newIdx < 0)
+    {
+        juce::AlertWindow::showMessageBoxAsync (
+            juce::MessageBoxIconType::WarningIcon, "No free Plugins page",
+            "All pages of this type are in use.  Close one before adding another.");
+        return;
+    }
+
+    // The copy is a NEW tab: it takes the free index and the default name its
+    // spawn mints, not the source's name (two tabs answering to one name).
+    rec->setAttribute ("pageIndex", newIdx);
+    rec->removeAttribute ("name");
+
+    ++mSuppressAddUndoWrap;
+    const int newRibbonId = resurrectTabFromRecordImpl (*rec);
+    --mSuppressAddUndoWrap;
+
+    // Gesture boundary, same rule as the Inst duplicate: a duplicate of a tab
+    // whose plugin has since gone missing banks a missing-file entry.
+    mProcessor.reportMissingFilesIfAny ("duplicated tab");
+
+    if (newRibbonId >= 0 && mRibbon)
+    {
+        mRibbon->selectTab (newRibbonId);
+        onTabSelected (newRibbonId);
+
+        const auto* tab = mRibbon->getTabById (newRibbonId);
+        wrapTabAddUndo (newRibbonId,
+                        "Duplicate " + (tab ? tab->name : juce::String ("Plugin Tab")));
     }
 }
 

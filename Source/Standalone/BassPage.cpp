@@ -84,7 +84,11 @@ void BassPage::setUndoContext(const UndoContext& ctx)
 void BassPage::selectEngine(const juce::String& engineName)
 {
     if (mEngineLocked) return;
+    selectEngineInternal (engineName);
+}
 
+void BassPage::selectEngineInternal(const juce::String& engineName)
+{
     HeavyOperationOverlay::ScopedOp busy (StandaloneEditor::busyOverlayFor (this),
                                           "Loading " + engineName + "...", true);
 
@@ -366,6 +370,10 @@ void BassPage::showPageActionsMenu (juce::Component* anchor)
     // Page-preset load submenu - 1000 + i indexes into pagePresetXmls[].
     constexpr int kIdLoadBase  = 1000;
     constexpr int kIdDelete    = 99;
+    // Replace Engine submenu (Jeff, 2026-08-16) - 60 + i indexes kBassEngines.
+    constexpr int kIdReplaceBase = 60;
+    static const char* const kBassEngines[] = { "Harmless", "BaySickPlayer", "BaySickBass" };
+    constexpr int kNumBassEngines = 3;
 
     juce::PopupMenu menu;
     if (onBuildWindowNavMenu) { onBuildWindowNavMenu (menu); menu.addSeparator(); }
@@ -408,6 +416,15 @@ void BassPage::showPageActionsMenu (juce::Component* anchor)
 
     menu.addSeparator();
     menu.addItem (kIdRename, "Rename...");
+    // Replace Engine (Jeff, 2026-08-16) - see the LayersPage twin for the contract.
+    {
+        juce::PopupMenu repSub;
+        for (int i = 0; i < kNumBassEngines; ++i)
+            repSub.addItem (kIdReplaceBase + i, kBassEngines[i],
+                            mEngineType != kBassEngines[i],
+                            mEngineType == kBassEngines[i]);
+        menu.addSubMenu ("Replace Engine", repSub, ! mLocked && ! mEngineType.isEmpty());
+    }
     menu.addItem (kIdDuplicate, "Duplicate Bass (new tab)", ! mEngineType.isEmpty());
 
     menu.addSeparator();
@@ -480,10 +497,20 @@ void BassPage::showPageActionsMenu (juce::Component* anchor)
          pagePresetXmls = std::move (pagePresetXmls),
          kIdLock, kIdPolyphony, kIdRename, kIdDuplicate, kIdChokeBase,
          kIdSaveAs, kIdLoadPresetBase, kIdSavePagePreset, kIdLoadBase,
-         kIdDelete] (int r) mutable
+         kIdDelete, kIdReplaceBase, kNumBassEngines] (int r) mutable
         {
             if (! safeThis || r <= 0) return;
             auto* bp = safeThis.getComponent();
+
+            // Replace Engine submenu (60 + i -> kBassEngines[i]).
+            if (r >= kIdReplaceBase && r < kIdReplaceBase + kNumBassEngines)
+            {
+                static const char* const kEngines[] = { "Harmless", "BaySickPlayer", "BaySickBass" };
+                const juce::String name = kEngines[r - kIdReplaceBase];
+                bp->performChainSwapGesture ("Replace Engine",
+                    [bp, name] { bp->selectEngineInternal (name); });
+                return;
+            }
 
             // Page-preset load submenu (1000 + i -> pagePresetXmls[i]).
             if (r >= kIdLoadBase && r < kIdLoadBase + pagePresetXmls.size())
@@ -1004,9 +1031,11 @@ void BassPage::applyPagePresetXml (const juce::String& xmlText)
     // reports, so nesting keeps the noun the user reads correct.
     MissingFileReport::ScopedGesture gesture ("preset");
 
+    // INTERNAL route - the public selectEngine no-ops once locked, which left
+    // this cross-engine swap dead (see the LayersPage twin, found 2026-08-16).
     const juce::String savedEngineType = PagePresetIO::peekEngineTypeFromXml (xmlText);
     if (savedEngineType.isNotEmpty() && savedEngineType != mEngineType)
-        selectEngine (savedEngineType);
+        selectEngineInternal (savedEngineType);
 
     const juce::String stripPrefix = "mixer_bass_" + juce::String (mPageIndex);
     const juce::String enginePrefix = bassEnginePrefixOf (mEngineProcessor);

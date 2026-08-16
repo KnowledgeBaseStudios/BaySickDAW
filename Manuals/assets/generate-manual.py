@@ -38,7 +38,7 @@ for m in re.finditer(r'^\| (Shell|Instrument|Mixing & Effects) \| (\d+) \| `([A-
                       parents=re.findall(r'`([A-Z\-]+)`', par),
                       files=re.findall(r'`([^`]+)`', files) or [files.strip().strip('`')])
     ORDER.append(code)
-assert len(ORDER) == 88
+assert len(ORDER) == 91
 GROUPS = ["Shell", "Instrument", "Mixing & Effects"]
 GSLUG = {"Shell": "shell", "Instrument": "instrument", "Mixing & Effects": "mixing-effects"}
 CHILDREN = {}

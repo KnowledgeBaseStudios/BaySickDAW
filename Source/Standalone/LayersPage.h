@@ -76,6 +76,11 @@ public:
     // restore the saved engine before pushing the engine's state back.  The
     // internal combo callback still uses the same method.
     void selectEngine (const juce::String& engineName);
+    // Replace Engine (Jeff, 2026-08-16) + cross-engine page-preset loads: the
+    // swap path with the one-shot pick gate bypassed.  selectEngine() locks
+    // after the first pick so the "+"-time choice cannot be silently re-run;
+    // deliberate swaps come through here.
+    void selectEngineInternal (const juce::String& engineName);
 
     void savePatchAs      ();
     // 2026-04-25: Load preset (factory + user) for the current engine.

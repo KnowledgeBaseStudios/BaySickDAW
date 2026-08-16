@@ -14,15 +14,33 @@ render - especially worthwhile for heavy third-party instruments, since a
 frozen plugin costs almost no CPU. Greyed when unavailable (tooltip says
 why); cyan = frozen, orange = stale.</p>
 
-<p id="BSPLUGM-4"><b>Save Page Preset As...</b> and
-<span id="BSPLUGM-5"></span><b>Load Page Preset</b> save and recall the tab's
+<p id="BSPLUGM-4"><b>Rename...</b> Names the tab; the name follows it to the
+ribbon slot, the mixer strip and exports. A plugin's own program changes can
+also rename the tab, so a name you type here is worth typing after you have
+settled on a sound.</p>
+
+<p id="BSPLUGM-5"><b>Replace Plugin.</b> Swaps which plugin this tab hosts -
+the list is your added instruments, the same one the ribbon's <code>+</code>
+shows, with a tick on the current one. The notes on the roll, the mixer
+strip, the effects rack and the window all stay; the outgoing plugin's own
+settings leave with it, and the newcomer arrives in its own default state.
+Automation lanes drawn on the old plugin's parameters grey out in the Event
+Editor. No delete question - nothing is deleted - and one undo brings the
+old plugin back with its settings.</p>
+
+<p id="BSPLUGM-6"><b>Duplicate Plugin (new tab).</b> Clones this tab - same
+plugin, same settings - onto a fresh tab with its own default name. Greys
+until a plugin is loaded.</p>
+
+<p id="BSPLUGM-7"><b>Save Page Preset As...</b> and
+<span id="BSPLUGM-8"></span><b>Load Page Preset</b> save and recall the tab's
 setup, including the plugin's own state, as one preset.</p>
 
-<p id="BSPLUGM-6"><b>Automate.</b> The plugin's parameter list. Pick one and
+<p id="BSPLUGM-9"><b>Automate.</b> The plugin's parameter list. Pick one and
 its automation lane opens - the way to draw movement into a plugin whose
 knobs BaySickDAW cannot see directly. The top entry tracks the last control
 you touched inside the plugin, so the workflow is: wiggle the knob in the
 plugin, open this menu, pick <code>Last Touched</code>.</p>
 
-<p id="BSPLUGM-7"><b>Delete Plugin.</b> Removes the tab and unloads the
+<p id="BSPLUGM-10"><b>Delete Plugin.</b> Removes the tab and unloads the
 plugin.</p>

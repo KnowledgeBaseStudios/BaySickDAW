@@ -2956,9 +2956,12 @@ Where a step says "check the trace", read `asio_trace.txt` next to `audio_settin
       right answer on a dev build, not a defect. Report it as dead UI ONLY if F1 and the menu item
       both do nothing at all. The prior wording here ("still opens nothing ... held for the
       manuals window (Jeff's 2026-07-29 ruling); do not report it as dead UI") is retired.
-      (b) A Plugins tab offers NO picker to swap its plugin for a different one — plugin swap was
-      removed as a feature this batch.  Project restore, undo resurrection and tab close all still
-      work on Plugins tabs; do not report the absent picker as a regression.  `D:__ R:__` notes:
+      (b) **[CORRECTED 2026-08-16 — the old wording overstated the ruling.]** What QA-Soundness
+      removed was the always-visible swap BUTTON (Jeff: a misclick hazard serving no purpose where
+      it sat), never the capability.  A Plugins tab still shows no standing picker, and as of
+      QA-Manuals the deliberate route exists instead: the window Menu's "Replace Plugin" submenu
+      (see B.36 MAN-12).  Project restore, undo resurrection and tab close all still work on
+      Plugins tabs; do not report the absent standing picker as a regression.  `D:__ R:__` notes:
 - [ ] **SND-45 — Release stays quiet, Debug still traces.** Run RELEASE through a session that
       drops a clip, loads a NAM/IR and freezes a tab: `clipdrop_diag_log.txt`,
       `namir_state_log.txt` and `freeze_timing.txt` are NOT created in `Documents\BaySickDAW`.
@@ -3286,16 +3289,52 @@ at all, before this batch or after it:**
       carries the three printable PDFs ("BaySickDAW Manual - In View / In Depth / In The
       Weeds"), one per depth level, text readable (G24: no black pills).  `D:__ R:__` notes:
 
+**Replace (Jeff's spec, 2026-08-16 — swap the sound, keep the setup):**
+
+- [ ] **MAN-12 — Replace on all four tab types.** The rule everywhere: notes, mixer strip,
+      rack/EQs, sends and window placement SURVIVE; the old engine's own knob settings go;
+      automation lanes on the old engine's knobs grey in the Event Editor; a frozen tab drops
+      its freeze as stale; NO delete prompt anywhere; one undo row ("Replace Engine" /
+      "Replace Plugin" / the drum load's own row) restores the old sound whole.
+      (a) **Layers** window Menu, between Rename and Duplicate: "Replace Engine" lists
+      Harmless / BaySickSynth / BaySickPlayer with the current one ticked and disabled — swap
+      with notes on the roll and an effect on the rack, confirm both survive and play.
+      (b) **Bass** same walk, list is Harmless / BaySickPlayer / BaySickBass.
+      (c) **Drums**: "Replace Sound..." between Rename and Duplicate on BOTH the page window's
+      Menu and the kit pad's right-click — opens the same sample/synth picker as adding a drum;
+      pick across engine types (sample onto a synth drum and back).  **Cancel the picker: the
+      tab must survive** — a cancel used to DELETE a kit-added drum tab (the add flow's orphan
+      guard was left armed; made one-shot this batch), so cancel-on-existing-drum is the
+      specific regression to walk.
+      (d) **Plugins** window Menu: the Menu now carries the full Rename / Replace / Duplicate
+      trio (it had none of the three).  "Replace Plugin" between them lists the added
+      instruments (same list as the ribbon "+", current ticked); swap and confirm the roll's
+      notes drive the new plugin.  Rename... renames the tab; "Duplicate Plugin (new tab)"
+      clones plugin + settings onto a new tab with its own default name, one undoable add.
+      (e) Locked pages: the Replace entry is disabled while locked, same rule as Delete.
+      (f) NOT offered on Clips, Guitars/Basses, or Rusty (Jeff's ruling — single-sample,
+      already-swappable, and two-different-kits respectively); confirm absent.  `D:__ R:__` notes:
+- [ ] **MAN-13 — cross-engine page presets actually swap engines.** Save a page preset from a
+      BaySickSynth layer, load it onto a Harmless layer: the tab comes back as BaySickSynth with
+      the preset's settings (the swap call sat behind the engine-pick lock and silently no-oped
+      until 2026-08-16 — the old behavior imported the blob into the WRONG engine).  Same walk
+      on a Bass tab.  Undo returns the Harmless setup whole.  `D:__ R:__` notes:
+
 **Installed-copy smoke (G25 — this exact defect shipped once):**
 
-- [ ] **MAN-11 — MUST-PASS: an INSTALLED copy keeps its art.** On a machine or account without
-      the repo (or after renaming the repo folder aside), install the tester package and run
-      it: knobs are Jeff's filmstrip art (group knobs, volume knobs, the chicken-head, the
-      switch toggles), the VU meter is the filmstrip meter, and F1 opens the manual from the
-      install folder.  Flat drawn stand-in knobs or a generic drawn meter on an installed copy
-      = FAIL.  Every pre-2026-08-15 run was from the build tree, which is exactly how the
-      filmstrip path bug shipped — the installed copy is the only rig that tests this.
-      `D:__ R:__` notes:
+- [ ] **MAN-11 — MUST-PASS: an INSTALLED copy keeps its art, kits, manual, and sound.** On a
+      machine or account without the repo (or after renaming the repo folder aside), install
+      the tester package and run it: (a) knobs are Jeff's filmstrip art (group knobs, volume
+      knobs, the chicken-head, the switch toggles) and the VU meter is the filmstrip meter —
+      flat drawn stand-ins = FAIL; (b) the Drums page **Kit menu lists the 29 factory kits**
+      and one loads and plays; (c) F1 opens the manual from the install folder and it RENDERS
+      — navigation tree working, dots clickable (a manual that shows but does nothing is the
+      IE-fallback signature: WebView2Loader.dll missing); (d) on **Windows audio** (no ASIO),
+      notes actually sound, clean — silence or a squeak here is the 64-channel-open regression
+      (`audio_setup_log.txt` must show 2 active output channels, not the device's inflated
+      claim).  Every one of these four shipped broken at least once because every dev-rig run
+      had the repo at `Documents\BaySickDAW` and ASIO — the installed copy is the only rig
+      that tests any of them.  `D:__ R:__` notes:
 
 ## §C — Deferred re-verify ledger
 

@@ -39,28 +39,42 @@ Harmless is always polyphonic.</p>
 <p id="BSSBM-7"><b>Rename...</b> Names the tab. The name follows it everywhere -
 ribbon slot, mixer strip, exports.</p>
 
-<p id="BSSBM-8"><b>Duplicate Layer / Bass (new tab).</b> Clones this tab - engine,
+<p id="BSSBM-8"><b>Replace Engine.</b> Swaps which engine this tab runs - the
+list is the same one the ribbon's <code>+</code> offers for this tab type,
+with a tick on what you have now. Everything that belongs to the
+<em>tab</em> stays exactly as it was: the notes on the roll, the mixer
+strip's level and routing, the effects rack, the window and its placement.
+What goes is the engine's own sound - the new engine arrives on its default
+patch, because the old engine's knob settings mean nothing to it. Automation
+you drew on the old engine's own knobs goes quiet and those lanes grey out
+in the Event Editor (lanes on the mixer strip or the effects keep playing -
+their targets never left), and a frozen tab drops its render as stale.
+There is no delete question because nothing is deleted - and one undo puts
+the old engine back exactly as it was, settings and all. Greys while the
+tab is locked.</p>
+
+<p id="BSSBM-9"><b>Duplicate Layer / Bass (new tab).</b> Clones this tab - engine,
 settings, everything - into a fresh tab. This is the copy operation; there is
 no separate copy/paste for tabs. Greys out until the tab has an engine.</p>
 
-<p id="BSSBM-9"><b>Choke Group.</b> Puts the tab in one of sixteen cut groups.
+<p id="BSSBM-10"><b>Choke Group.</b> Puts the tab in one of sixteen cut groups.
 Tabs sharing a group cut each other off - the classic use is an open and a
 closed hi-hat silencing one another. <code>None</code> keeps it out of the
 game.</p>
 
-<p id="BSSBM-10"><b>Save Current Patch As...</b> Saves the engine's current
+<p id="BSSBM-11"><b>Save Current Patch As...</b> Saves the engine's current
 sound - just the sound, not the tab - so you can load it on any other
 BaySickSynth tab later.</p>
 
-<p id="BSSBM-11"><b>Load Preset.</b> The saved-patch tree for this engine,
+<p id="BSSBM-12"><b>Load Preset.</b> The saved-patch tree for this engine,
 factory folders and your own. Reads <code>(no presets installed)</code> when
 there is nothing to show.</p>
 
-<p id="BSSBM-12"><b>Save Page Preset As...</b> Saves the whole page - engine
+<p id="BSSBM-13"><b>Save Page Preset As...</b> Saves the whole page - engine
 sound plus the page's own settings - as one recallable preset.</p>
 
-<p id="BSSBM-13"><b>Load Page Preset.</b> Loads one of those.</p>
+<p id="BSSBM-14"><b>Load Page Preset.</b> Loads one of those.</p>
 
-<p id="BSSBM-14"><b>Delete Layer / Delete Bass.</b> Removes the tab, its engine and its sound
+<p id="BSSBM-15"><b>Delete Layer / Delete Bass.</b> Removes the tab, its engine and its sound
 from the project. The arrangement keeps whatever audio you froze or rendered,
 but the live instrument is gone.</p>

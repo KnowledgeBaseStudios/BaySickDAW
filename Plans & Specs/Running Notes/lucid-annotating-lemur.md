@@ -2542,6 +2542,210 @@ independent desktop window (plain DocumentWindow, no owner z-order) and
 the VU window is a contained aux window, so neither is in MS-20's class.
 Both got their own B.36 rows instead.
 
+## 2026-08-16 - Windows-audio silence/squeak on tester machines - the 64-channel open
+
+**Two failing machines, one root.** Jeff's tester got NO sound (installed
+copy, Razer BlackShark V2 Pro headset, Windows Audio); Jeff got a high
+squeak on any note on a second computer over Windows audio, while ASIO on
+his board was fine. A second Claude session instrumented the tester's
+machine and delivered the decisive measurement: a live, healthy WASAPI
+session on the right endpoint receiving PURE DIGITAL SILENCE while the
+app's internal meters moved - plus the anomaly from our own
+`audio_setup_log.txt`: **64 active output channels on a stereo headset**.
+
+### Root cause, verified in source
+
+`StandaloneApp.cpp` opened every device with
+`initialise (64, 64, ...)` / `initialiseWithDefaultDevices (64, 64)` - a
+breadth chosen for big ASIO interfaces. Three facts stack into the bug:
+
+1. We deliberately STRIP the saved channel-mask attributes from
+   `audio_settings.xml` before the open, so JUCE always derives default
+   masks from the requested count: bits 0..63 all set.
+2. JUCE bounds that mask only by the driver's CLAIMED `maxNumChannels`
+   (`juce_WASAPI_windows.cpp:473`), and the Razer driver claims 64 - so
+   the app negotiated a 64-channel WASAPI stream on 2-channel hardware.
+   What a driver does with that is per-driver garbage: silence on the
+   Razer, the squeak on the other machine's driver.
+3. Jeff's own `master_output.xml` carries `firstChannel="20"` - CORRECT
+   for the Tascam's 21/22 main pair on ASIO - and `PlayHeadAdvancer`'s
+   safety clamp (`jlimit (0, no-2, rawFirst)`) is defeated when `no` is
+   64 phantoms: on any Windows driver claiming enough channels, the
+   master lands on dead channels 20/21. The tester has NO routing file
+   (default 0), which is what proved the negotiation itself - not just
+   the routing - is broken.
+
+### The fix (Jeff's go, 2026-08-16)
+
+Request **2 channels, not 64**, at all three init sites (saved-settings
+open, no-settings open, and the non-ASIO fallback loop). ASIO breadth
+never came from this number: the ASIO-only override block re-widens to
+the device's real channel count right after the open (verified - that
+block is why the Tascam runs 22 outs and the 21/22 master pair today).
+Windows drivers now negotiate plain stereo - per Jeff's standing
+2026-05-05 ruling that Windows-mode drivers run their natural stereo -
+and the master-pair clamp is meaningful again, so even a stale
+`firstChannel=20` lands safely on 0/1 over Windows audio.
+
+Same bug class as G25's filmstrips: a path the dev rig never exercises
+(the dev machine runs ASIO; testers run Windows audio). The B.36
+installed-copy smoke gains audio for the same reason it gained art.
+
+Also from the second session's report, owned as untriaged: a JS syntax
+error reported at manual.html line 15298 on the installed copy - NOT
+previously caught, to be checked after the audio fix lands.
+
+Jeff verified the audio fix in-app: "That fixed it." Installer
+`20260816-0820` carried it.
+
+## 2026-08-16 - Installer completeness audit - empty Kit menu + the manual's real JS story
+
+Jeff's follow-up from testing: the installed copy's Drums-page Kit menu
+lists NO kits (samples present, kit definitions absent), and his direct
+concern - what else is the installer missing, and will the full installer
+inherit this?
+
+**The audit that answers it:** every disk location the app reads resolves
+through `AppPaths::appRoot()` (the QA-ProjectSave single-authority rule)
+or is exe-relative. Swept BOTH complete lists against the installer
+payload. Result: exactly TWO gaps, everything else accounted for
+(remaining appRoot children are user/runtime content that must NOT ship;
+all other exe-relative reads - IRs, Tape, Filmstrips, Manuals, helpers -
+already packaged).
+
+1. **`Kits\Factory`** (29 factory kit families, tracked): the app reads
+   kits from `Documents\BaySickDAW\Kits\Factory`; the installer populated
+   Presets and Templates there but never Kits. Only the dev machine had
+   them because the repo IS its data root. Fix: installer packages
+   `Kits\Factory` (excluding `My Kits`, mirroring the My Presets safety
+   rule), RequireInput gate added, header + component description updated.
+2. **`WebView2Loader.dll`**: CMake stages it beside the exe; the .nsi
+   never carried it. Without it JUCE silently substitutes the IE web
+   control - whose ancient JS engine cannot run the manual's script.
+   **That retroactively explains the tester's "JS syntax error at
+   manual.html:15298"** - the repo copy node-checks clean; the tester's
+   machine was rendering it through IE. Fix: packaged + uninstall Delete.
+
+Hygiene found on the way: `Kits/My Kits/My Kit 1.xml` (Jeff's own saved
+kit) was TRACKED - the My Presets/My Templates/My Samples ignore rule was
+never mirrored for Kits. Ignore rule added, file untracked (stays on
+disk).
+
+MAN-11 re-scoped from art-only to the full installed-copy smoke: art,
+factory kits in the menu, manual actually rendering (IE-fallback
+signature documented), and Windows-audio sound (2 active channels in
+audio_setup_log.txt). All four items shipped broken at least once for the
+same reason: every dev-rig run had the repo at Documents\BaySickDAW and
+ASIO.
+
+## 2026-08-16 - Replace (Jeff's feature spec) - swap the sound, keep the setup
+
+Jeff's ask: replace a tab's sound without the delete flow - the setup
+(notes, strip, rack, window) stays, only the sound changes. Docket
+answered: (1) Layers/Bass show the ENGINE list, same set as the ribbon
+"+"; (2) scope = Layers, Bass, Drums, Plugins - NOT Clips
+(single-sample), NOT Guitars/Basses (already swap sounds), NOT Rusty
+(two kits, two different setups); (3) Plugins INCLUDED - Jeff's
+correction of the record: the QA-Soundness removal was the standing
+swap button as a misclick hazard, never the capability (SND-44b's "removed
+as a feature" wording corrected in the plan); (4) in-batch now. Placement
+ruling: between Rename and Duplicate.
+
+### What shipped
+
+Mostly a re-exposure of machinery that survived the picker removal:
+`EngineRig::setEngineType` was already a complete audio-thread-safe swap
+(teardown drain, create, markEngineContentChanged, re-register, freeze
+watcher), and the per-page `performChainSwapGesture` /
+`performSoundSwapGesture` helpers already give one structural undo row
+off page-preset-XML snapshots.
+
+- **Layers/Bass:** public `selectEngine` keeps its one-shot lock (the
+  "+"-time pick guard); new `selectEngineInternal` bypasses it for
+  deliberate swaps. "Replace Engine" submenu between Rename and
+  Duplicate (current engine ticked + disabled, disabled while page
+  locked), wrapped in performChainSwapGesture("Replace Engine").
+- **Drums:** "Replace Sound..." between Rename and Duplicate on BOTH
+  menu routes (window Menu + kit pad right-click) - opens the existing
+  add-time sample/synth picker, whose loads were already undo-wrapped
+  and engine-swapping.
+- **Plugins:** "Replace Plugin" submenu listing
+  PluginManager::getAddedInstruments() exactly like the ribbon "+",
+  wrapped in performChainSwapGesture("Replace Plugin") around
+  selectPluginById.  Jeff's follow-up ruling: the Plugins Menu gets the
+  full Rename / Replace / Duplicate trio like the other page types (it
+  had none of the three).  Rename rides the ribbon rename; Duplicate is
+  new `spawnDuplicatePluginsTab` on the Inst duplicate's spine
+  (captureTabRecord + resurrectTabFromRecordImpl, free index off
+  mUsedPluginIndices, default name, one undoable add).
+
+### Two latent defects found and fixed on the way
+
+1. **Cross-engine page-preset loads never swapped the engine.**
+   `applyPagePresetXml` (Layers AND Bass) calls selectEngine when the
+   preset's engineType differs - but selectEngine no-ops once the pick
+   lock is set, so the swap was dead code and the preset's engine blob
+   imported into the WRONG engine. Both now route through
+   selectEngineInternal. MAN-13 covers it.
+2. **Cancelling the drum sound picker could DELETE the tab.** The
+   kit-row ADD flow installs onSoundPickerClosed as its orphan guard
+   (cancel = take the just-created tab back out) and never cleared it -
+   so a later picker open on that same page (the kit row's own re-pick
+   path at StandaloneEditor:8258, or the new Replace) fired the armed
+   guard on cancel and deleteTabWithUndo took the whole drum. The
+   callback is now consumed ONE-SHOT at fire. MAN-12(c) walks it.
+
+MAN-12 (all four surfaces + the survival contract) and MAN-13 added to
+B.36; SND-44(b) corrected; STANDALONE_UI_CHANGES.md section 21.
+
+Manual follow-up pending: the new menu rows change the player-menu
+figures - Jeff re-shoots the menus after verifying, then registry rows +
+dots for the Replace entries ride his export, same flow as the nudge era.
+
+### The manual pass (Jeff's 4 shots + spec, same day - G26)
+
+Jeff shot the four new menus and specced the manual update: BaySickDrums
+Menu as its OWN entry right before BaySickRustyDrums (documenting both
+access routes), new pictures on the Synth/Player/Bass menu figures, a
+brand-new Harmless Menu entry (it never had one), fresh dots everywhere
+(he rearranges), and Replace documented basic-in-the-box +
+mechanics-in-In-Depth.
+
+Executed: BSSBM re-based on `BaySickSynth-BaySickPlayer-Harmless
+Menu.png` + `BaySickBass Menu Updated.png`, BSPM on the shared picture,
+BSPLUGM on `BaySickPlugins Menu.png`; NEW `BSHARMM` (Sub of BSHARM) and
+NEW `BSDM` (Main, before the Rusty block) take the figure count 88 -> 90
+(generator assert updated). Replace rows at BSSBM-8/BSPM-8/BSHARMM-8;
+BSPLUGM gained Rename/Replace/Duplicate at 4..6 (old 4-7 -> 7-10);
+renumber sweeps ran across registry + all chapters. In Depth prose: the
+full Replace contract lives on BSSBM's chapter; BSPM/BSHARMM defer to it
+with per-engine color; BSDM and BSPLUGM carry their own full walks.
+Fresh estimated dot sets (menu-geometry model, x=9%) on all five figures
+- PRE-NUDGE, Jeff rearranges. Regenerate green: 90 figures, 731 markers
+(the +30 delta reconciles exactly), 112 close-ups, 89/89 topics; staged
+both configs, zip refreshed. Registry ledger note added. PDFs
+deliberately left stale until Jeff's nudge lands - one reprint +
+installer rebuild then carries code + manual together.
+
+### Nudges merged + the BSDRUMS parent (G27, same day)
+
+Jeff's eighth coords export merged - 731 dots, all validated against
+rows. His follow-up spec landed with it: a `BSDRUMS` entry above the
+menu explaining the two INDEPENDENT choices in picking a drum - WHERE
+(a Drum Kit pad: empty pad = create + picker, cancel = clean removal;
+or the ribbon `+` > BaySickDrums with the engine choice up front) and
+WHAT KIND (sample via BaySickPlayer vs synth patch via BaySickSynth,
+never a commitment - the picker crosses types and Replace swaps the
+engine underneath). Built as a rowless prose entry on `Drum Kit.png`
+(the FXV shape), with `BSDM` re-parented as its Sub so the nav reads
+BaySickDrums > BaySickDrums Menu. 91 figures; generator assert updated
+again. Three PDFs reprinted from the nudged manual (In View 8.8 MB /
+In Depth 9.7 MB / In The Weeds 10.9 MB), restaged both configs, zip
+refreshed, installer rebuilt:
+`BaySickDAW-1.2.0-20260816-1157-Tester-Setup.exe` (54.2 MB) - the one
+package now carries the audio fix, Replace, kits, the WebView2 loader
+and the 91-figure manual.
+
 ### Tester installer updated
 
 The installer now packages `$INSTDIR\Manuals` (the HTML manual plus the

@@ -910,3 +910,35 @@ shortcut. Held notes release on mode-off, octave shift, and tab switch.
   exact-width right-anchored segments, so an over-wide pair pushes SYS off the
   left edge with no marker), the tooltip carries the LIVE values above the
   legend and rebuilds whenever a value changes.
+
+---
+
+## 21. Replace on the page menus (Jeff's spec, 2026-08-16)
+
+**Files:** `LayersPage.h/.cpp`, `BassPage.h/.cpp`, `DrumPage.cpp`, `PluginsPage.cpp`
+
+- Swap a tab's sound/engine in place: notes, mixer strip, rack/EQs and window
+  placement all survive; no delete prompt (the tab never dies); one undo row.
+- **Layers / Bass:** "Replace Engine" submenu between Rename and Duplicate,
+  listing the same engines the ribbon "+" offers for that tab type, current
+  one ticked + disabled.  Runs through the new `selectEngineInternal` (the
+  public `selectEngine` stays one-shot-locked so the "+"-time pick cannot be
+  silently re-run).  Cross-engine page-preset loads also route through the
+  internal call now - the swap in `applyPagePresetXml` sat behind the lock
+  and silently no-oped before.
+- **Drums:** "Replace Sound..." between Rename and Duplicate, on BOTH menu
+  routes (page window Menu and the kit pad right-click) - opens the existing
+  add-time sample/synth picker; all its loads were already undo-wrapped and
+  engine-swapping.  The picker's add-flow orphan-guard callback
+  (`onSoundPickerClosed`) is now consumed ONE-SHOT at fire - it used to stay
+  armed and a later cancel deleted the whole tab.
+- **Plugins:** the Menu gained the full Rename / Replace / Duplicate trio
+  (Jeff: "it should just like the others" - it had none of the three).
+  Rename... rides the ribbon rename; "Replace Plugin" lists the added
+  instruments exactly like the ribbon "+"; "Duplicate Plugin (new tab)"
+  rides the captureTabRecord + resurrectTabFromRecordImpl spine, same as
+  the Inst duplicate (`spawnDuplicatePluginsTab`).  Per Jeff's 2026-08-16
+  ruling the QA-Soundness removal was about the standing swap BUTTON being
+  a misclick hazard, not the capability.
+- NOT offered on Clips / Guitars / Basses / Rusty (Jeff's ruling).  Disabled
+  while the page is locked, same rule as Delete.

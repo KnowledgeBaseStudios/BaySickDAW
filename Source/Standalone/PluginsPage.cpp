@@ -1,5 +1,6 @@
 #include "PluginsPage.h"
 #include "UndoSnapshotStore.h"   // QA-UndoCoverage ruling 3a: swap snapshots
+#include "../Hosting/PluginManager.h"   // Replace Plugin list (2026-08-16)
 #include "../PluginProcessor.h"
 #include "../EngineRig.h"
 #include "../MissingFileReport.h"
@@ -603,9 +604,45 @@ void PluginsPage::showPageActionsMenu (juce::Component* anchor)
     constexpr int kIdRetryPlugin    = 103;
     constexpr int kIdLoadBase       = 1000;
     constexpr int kIdAutoBase       = 20000;
+    // Replace Plugin submenu (Jeff, 2026-08-16) - 5000 + i indexes replaceList.
+    constexpr int kIdReplaceBase    = 5000;
+    constexpr int kIdRename         = 110;
+    constexpr int kIdDuplicate      = 111;
 
     juce::PopupMenu menu;
     if (onBuildWindowNavMenu) { onBuildWindowNavMenu (menu); menu.addSeparator(); }
+
+    // Rename / Replace / Duplicate trio, same order as the other page types
+    // (Jeff, 2026-08-16 - this menu had none of the three before Replace).
+    menu.addItem (kIdRename, "Rename...");
+
+    // Replace Plugin (Jeff's 2026-08-16 ruling: the QA-Soundness removal was
+    // about the always-visible swap button being a misclick hazard, not the
+    // capability).  Swaps the hosted plugin in place - notes, strip, rack and
+    // window all stay; the old plugin's own settings go with it.  Same list
+    // as the ribbon "+" (added instruments, alphabetical), current plugin
+    // ticked and disabled.
+    juce::Array<juce::PluginDescription> replaceList;
+    {
+        if (auto* pm = Hosting::PluginManager::getInstance())
+            replaceList = pm->getAddedInstruments();
+
+        juce::PopupMenu repSub;
+        const juce::String curId = getEngineType();
+        if (replaceList.isEmpty())
+            repSub.addItem (-98, "None added - see Options > Plugins", false, false);
+        else
+            for (int i = 0; i < replaceList.size(); ++i)
+            {
+                const bool isCurrent = replaceList[i].createIdentifierString() == curId;
+                repSub.addItem (kIdReplaceBase + i, replaceList[i].name, ! isCurrent, isCurrent);
+            }
+        menu.addSubMenu ("Replace Plugin", repSub);
+    }
+
+    menu.addItem (kIdDuplicate, "Duplicate Plugin (new tab)", getEngineProcessor() != nullptr);
+
+    menu.addSeparator();
     menu.addItem (kIdSavePagePreset, "Save Page Preset As...", getHosted() != nullptr);
 
     juce::Array<juce::File> presetXmls;
@@ -694,9 +731,21 @@ void PluginsPage::showPageActionsMenu (juce::Component* anchor)
     juce::Component::SafePointer<PluginsPage> safeThis (this);
     menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (anchor),
         [safeThis, presetXmls = std::move (presetXmls),
-         autoParams = std::move (autoParams), kIdLoadBase, kIdAutoBase] (int r)
+         autoParams = std::move (autoParams),
+         replaceList = std::move (replaceList), kIdLoadBase, kIdAutoBase,
+         kIdReplaceBase, kIdRename, kIdDuplicate] (int r)
         {
             if (! safeThis || r <= 0) return;
+            if (r == kIdRename)    { if (safeThis->onRenameRequested)    safeThis->onRenameRequested();    return; }
+            if (r == kIdDuplicate) { if (safeThis->onDuplicateRequested) safeThis->onDuplicateRequested(); return; }
+            if (r >= kIdReplaceBase && r < kIdReplaceBase + replaceList.size())
+            {
+                auto* pp = safeThis.getComponent();
+                const juce::String id = replaceList[r - kIdReplaceBase].createIdentifierString();
+                pp->performChainSwapGesture ("Replace Plugin",
+                    [pp, id] { pp->selectPluginById (id); });
+                return;
+            }
             if (r == kIdSavePagePreset) { safeThis->savePagePreset(); return; }
             if (r == kIdDeleteTab)      { safeThis->requestDelete();  return; }
             if (r == kIdRetryPlugin)    { safeThis->retryDeadPlugin(); return; }
