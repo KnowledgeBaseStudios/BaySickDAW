@@ -2746,6 +2746,36 @@ refreshed, installer rebuilt:
 package now carries the audio fix, Replace, kits, the WebView2 loader
 and the 91-figure manual.
 
+## 2026-08-17 - Ghost Plugins Bus over the Inst Bus (Jeff's find + Jeff's diagnosis)
+
+Jeff loaded `Untitled Project (132)` (two LiveInst tabs, no plugins) and
+saw a "Plugins Bus" sitting where the Inst Bus belongs - dead meter,
+sound fine, Add Inst Bus skipping to the second one. First-pass theories
+(bus-id shift in the <Buses> element, sendTo mis-mapping, defaultSendTo
+range overlap) all died against the FILE, which was clean: two Inst
+tabs, sendTo=8 (kInstBus), zero plugin records, all secondary buses
+saved inactive. His screenshots then settled it, and HIS diagnosis was
+the right one: a bus not covered by all the teardown mechanics. The
+strip was frozen at minimized-window size with the real Inst Bus
+visible BEHIND it and its cable dangling mid-screen - the signature of
+a component that stopped being laid out but never stopped being drawn.
+
+Root cause, two stacked holes in `MixerPage`:
+
+1. `removePluginChannel` retired the bus (last plugin strip gone) by
+   clearing `mPluginsBusActive` WITHOUT hiding `mPluginsBusStrip`.
+   Layout skips inactive buses, so the still-visible strip froze at its
+   last bounds. (The Rusty twin hides correctly - this hole was
+   Plugins-only.)
+2. The project-load sweep's hide was gated `if (mPluginsBusActive &&
+   ...)` - the very flag hole 1 had already cleared - so the ghost rode
+   into the next project. Jeff hit exactly this: his Replace/Duplicate
+   plugin testing ended with a tab delete (hole 1), then loading 132
+   skipped the sweep (hole 2).
+
+Fix: the retire path hides as well as deactivates, and the load sweep
+is unconditional. MAN-14 added to B.36 with the full repro.
+
 ### G28 - nudge bar gated Debug-only (Jeff's call)
 
 Jeff caught that the installed manual showed the authoring bar. His

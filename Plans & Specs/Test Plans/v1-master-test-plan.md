@@ -3320,6 +3320,16 @@ at all, before this batch or after it:**
       until 2026-08-16 — the old behavior imported the blob into the WRONG engine).  Same walk
       on a Bass tab.  Undo returns the Harmless setup whole.  `D:__ R:__` notes:
 
+- [ ] **MAN-14 — the Plugins Bus retires cleanly (Jeff's find, 2026-08-17).** Add a Plugins tab
+      (bus appears), then delete the tab: the Plugins Bus strip AND its jack/cable disappear —
+      not just stop being laid out.  Then, with the mixer window at a small size, repeat the
+      delete and load a DIFFERENT project (no plugins): no ghost "Plugins Bus" floating at
+      stale bounds over the Inst Bus with a dangling cable.  The original repro: the retire
+      path cleared the active flag without hiding the strip, layout skips inactive buses so
+      the strip froze at its last bounds, and the project-load sweep was gated on the very
+      flag the retire had already cleared — so the ghost rode into the next project.
+      `D:__ R:__` notes:
+
 **Installed-copy smoke (G25 — this exact defect shipped once):**
 
 - [ ] **MAN-11 — MUST-PASS: an INSTALLED copy keeps its art, kits, manual, and sound.** On a

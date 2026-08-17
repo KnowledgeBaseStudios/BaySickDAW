@@ -2658,11 +2658,12 @@ void MixerPage::clearDynamicStrips()
     // reset; without it a plugin strip from the OUTGOING project survived into
     // the incoming one, bound to an APVTS prefix whose engine no longer exists.
     mPluginStrips.clear();   mPluginOrder  .clear();
-    if (mPluginsBusActive && mPluginsBusStrip)
-    {
-        mPluginsBusActive = false;
-        mPluginsBusStrip->setVisible(false);
-    }
+    // UNCONDITIONAL hide (2026-08-17): gating it on the flag skipped the
+    // sweep whenever the flag was already false with the strip leaked
+    // visible (the removePluginChannel hole above) - the ghost then rode
+    // straight into the incoming project.
+    mPluginsBusActive = false;
+    if (mPluginsBusStrip) mPluginsBusStrip->setVisible(false);
     // QA-Layout T10: project-load reset for every user-added secondary bus --
     // the incoming project's <Buses> element re-activates its own set.
     // (Vox2/Inst2/3 previously leaked across projects; with activation now
@@ -2936,7 +2937,17 @@ void MixerPage::removePluginChannel(int pageIndex)
                        mPluginOrder.end());
     // Last plugin strip gone -> the bus strip retires with it, matching the
     // secondary Vox/Inst buses rather than the always-visible FX/Master pair.
-    if (mPluginStrips.empty()) mPluginsBusActive = false;
+    // HIDE as well as deactivate (Jeff's find, 2026-08-17): layout skips an
+    // inactive bus, so a still-visible strip freezes at its last bounds and
+    // floats over whatever occupies that space next - his repro was a ghost
+    // "Plugins Bus" at minimized-window size covering the Inst Bus, cable
+    // dangling, surviving into the NEXT project because the load reset's
+    // hide was gated on the flag this line had already cleared.
+    if (mPluginStrips.empty())
+    {
+        mPluginsBusActive = false;
+        if (mPluginsBusStrip) mPluginsBusStrip->setVisible (false);
+    }
     if (getWidth() > 0) resized();
     if (onAudioStripRenamed) onAudioStripRenamed();
 }
