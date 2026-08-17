@@ -420,7 +420,12 @@ main { margin-left: 272px; width: calc(var(--fsw, 100vw) - 289px); }
   section.figd { break-before: page; }
 }
 .wrap.atlas { display: block; max-width: none; padding-right: 22px; }
-.nudge { left: 256px; }
+/* Authoring bar renders only when the page is ASKED for it (?nudge=1).
+   The Debug build's F1 asks; Release, the installed copy and a plain
+   browser open never do (Jeff, 2026-08-16).  Gate class lives on <html>
+   because setLevel REPLACES body.className wholesale. */
+.nudge { left: 256px; display: none; }
+html.nudge-on .nudge { display: flex; }
 
 .nv { line-height: 1.15; }
 /* Long names must wrap INSIDE the anchor box, beside the fold arrow -
@@ -558,6 +563,8 @@ const M2CROPS = {m2crops};
     document.querySelectorAll('img[loading]').forEach(function (im) {
       im.loading = 'eager';
     });
+  if (q.get('nudge') === '1')
+    document.documentElement.classList.add('nudge-on');
 
   const RANK = { view: 0, depth: 1, weeds: 2 };
   function levelOf() { return document.body.className.replace('level-', ''); }

@@ -87,7 +87,14 @@ ManualsWindow::ManualsWindow()
 
         // A bare Windows path is not a URL -- WebView2 wants file:///C:/...,
         // which juce::URL builds from the File.
-        browser->goToURL (juce::URL (index).toString (false));
+        juce::String url = juce::URL (index).toString (false);
+       #if JUCE_DEBUG
+        // Authoring-only: the page renders its nudge bar solely when ASKED
+        // (?nudge=1), and only the Debug build asks -- Release and every
+        // installed copy can never surface it (Jeff, 2026-08-16).
+        url << "?nudge=1";
+       #endif
+        browser->goToURL (url);
         setContentOwned (browser, true);
     }
 

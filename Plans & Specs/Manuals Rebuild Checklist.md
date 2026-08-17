@@ -441,6 +441,17 @@ no remaining consumers and D5 closes.
       Installer\BaySickDAW-1.2.0-20260816-1157-Tester-Setup.exe
       (54.2 MB - carries the audio fix, Replace, kits, WebView2 loader
       and the 91-figure manual together).
+- [x] G28. Nudge bar gated Debug-only (Jeff's call, 2026-08-16): testers
+      saw the authoring bar at the bottom of F1. The page now renders it
+      ONLY when asked via ?nudge=1 (gate class on <html> - setLevel
+      replaces body.className wholesale), and only the Debug build's
+      ManualsWindow asks (JUCE_DEBUG appends the param). Release, the
+      installed copy and a plain browser open never show it; Jeff
+      authors normally via F1 in the Debug exe (browser authoring still
+      possible by adding ?nudge=1 by hand). Regenerated, restaged,
+      installer rebuilt:
+      Installer\BaySickDAW-1.2.0-20260816-2152-Tester-Setup.exe. PDFs
+      untouched - the bar was already print-hidden.
 
 ## Parked / standing items
 

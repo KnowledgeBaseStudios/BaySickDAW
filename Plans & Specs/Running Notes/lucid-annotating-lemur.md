@@ -2746,6 +2746,17 @@ refreshed, installer rebuilt:
 package now carries the audio fix, Replace, kits, the WebView2 loader
 and the 91-figure manual.
 
+### G28 - nudge bar gated Debug-only (Jeff's call)
+
+Jeff caught that the installed manual showed the authoring bar. His
+design: show it only in Debug so a user can never hit it and he authors
+normally. Shipped exactly that: the page renders the bar only when the
+URL asks (?nudge=1; gate class on <html> because setLevel replaces
+body.className), and only the Debug build's ManualsWindow appends the
+param under JUCE_DEBUG. Release, installed copies and plain browser
+opens never show it. Build green, restaged, installer rebuilt
+(`20260816-2152`). PDFs untouched - the bar was already print-hidden.
+
 ### Tester installer updated
 
 The installer now packages `$INSTDIR\Manuals` (the HTML manual plus the
