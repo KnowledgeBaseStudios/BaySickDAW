@@ -4,6 +4,11 @@
 #include "WindowChrome.h"   // TS7 §9.1: the one title-strip look
 #include "../ProjectManager.h"
 
+#if JUCE_WINDOWS
+ #include <windows.h>
+ #include <commctrl.h>   // SetWindowSubclass -- comctl32 is already linked by JUCE
+#endif
+
 namespace
 {
     // The settings.xml (lifetime-2) half of the T5 three-lifetime model: only
@@ -185,6 +190,91 @@ Workspace* WorkspaceWindow::workspace() const noexcept
     return mWorkspace.getComponent();
 }
 
+#if JUCE_WINDOWS
+namespace
+{
+    // One id for every WorkspaceWindow subclass -- the instance is carried in
+    // the ref data, so the id only has to be unique against OTHER subclassers
+    // of the same HWND.
+    constexpr UINT_PTR kForeignClickSubclassId = 0x8B5D;
+
+    LRESULT CALLBACK foreignClickProc (HWND h, UINT msg, WPARAM wp, LPARAM lp,
+                                       UINT_PTR, DWORD_PTR ref)
+    {
+        // WM_PARENTNOTIFY's LOW word is the child event.  Only the three
+        // button-downs raise: WM_CREATE / WM_DESTROY come through here too, and
+        // a plugin that creates helper windows at load would otherwise front
+        // itself uninvited.
+        if (msg == WM_PARENTNOTIFY)
+        {
+            const UINT childEvent = LOWORD (wp);
+            if (childEvent == WM_LBUTTONDOWN || childEvent == WM_RBUTTONDOWN
+                || childEvent == WM_MBUTTONDOWN)
+            {
+                if (auto* win = reinterpret_cast<WorkspaceWindow*> (ref))
+                {
+                    // ASYNC.  We are inside the child's mouse-down dispatch;
+                    // re-ordering windows synchronously from here re-enters
+                    // layout underneath the plugin that is still processing its
+                    // own click.  The message-thread hop lands the raise after
+                    // the plugin is done with it.
+                    juce::Component::SafePointer<WorkspaceWindow> safe (win);
+                    juce::MessageManager::callAsync ([safe]
+                    {
+                        // toFront(FALSE) -- raise without taking keyboard focus.
+                        // The click already gave Windows focus to the plugin's
+                        // own HWND, which is what the user wants when they click
+                        // into a plugin; grabbing it back here would break typing
+                        // into the plugin's own fields.  Raising still fires
+                        // broughtToFront, so the ribbon sync is unaffected.
+                        if (auto* w = safe.getComponent()) w->toFront (false);
+                    });
+                }
+            }
+        }
+
+        return DefSubclassProc (h, msg, wp, lp);
+    }
+}
+#endif
+
+void WorkspaceWindow::installForeignClickHook()
+{
+   #if JUCE_WINDOWS
+    auto* peer = getPeer();
+    if (peer == nullptr) return;
+
+    auto* hwnd = static_cast<HWND> (peer->getNativeHandle());
+    if (hwnd == nullptr || hwnd == mHookedHwnd) return;
+
+    removeForeignClickHook();   // peer was recreated -- drop the stale one first
+
+    if (SetWindowSubclass (hwnd, foreignClickProc, kForeignClickSubclassId,
+                           (DWORD_PTR) this))
+        mHookedHwnd = hwnd;
+   #endif
+}
+
+void WorkspaceWindow::removeForeignClickHook()
+{
+   #if JUCE_WINDOWS
+    if (mHookedHwnd == nullptr) return;
+    RemoveWindowSubclass (static_cast<HWND> (mHookedHwnd), foreignClickProc,
+                          kForeignClickSubclassId);
+    mHookedHwnd = nullptr;
+   #endif
+}
+
+// Peer-keyed, per the convention documented in the header: a window can exist
+// unframed, and its peer is created (and can be recreated) after construction.
+void WorkspaceWindow::parentHierarchyChanged()
+{
+    juce::Component::parentHierarchyChanged();
+
+    if (getPeer() != nullptr) installForeignClickHook();
+    else                      removeForeignClickHook();
+}
+
 WorkspaceWindow::~WorkspaceWindow()
 {
     // NO saveBounds() here (removed 2026-08-04).  A destructor runs while the
@@ -195,6 +285,9 @@ WorkspaceWindow::~WorkspaceWindow()
     // drag-release, border resize + move (resized/moved), the close button,
     // the fill toggle, and the exit flush that runs before teardown
     // (StandaloneEditor::flushWindowBoundsNow).
+    // The subclass ref data is `this`; leaving it installed past our death
+    // would hand a destroyed window to the next child click.
+    removeForeignClickHook();
     if (mCloseBtn) mCloseBtn->setLookAndFeel (nullptr);
     // Unhook before the listener object dies -- a page detached here (see
     // below) outlives this window and would otherwise keep a dangling entry.

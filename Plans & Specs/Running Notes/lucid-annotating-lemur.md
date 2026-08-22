@@ -2776,6 +2776,47 @@ Root cause, two stacked holes in `MixerPage`:
 Fix: the retire path hides as well as deactivates, and the load sweep
 is unconditional. MAN-14 added to B.36 with the full repro.
 
+## 2026-08-17 - Plugin windows only raised from the title strip
+
+Jeff: clicking a hosted plugin's panel - or turning a knob on it - did not
+bring its window forward or make it active; only the title strip did.
+Both shapes, instruments on Plugins tabs and effects in rack slots.
+
+Cause: `setBroughtToFrontOnMouseClick(true)` (WorkspaceWindow ctor) covers
+every click JUCE routes, and JUCE walks the clicked component's ancestor
+chain to raise the window - so a knob six levels down in one of OUR pages
+works. A hosted plugin's UI is not ours: in-process it is the plugin's own
+native child window, bridged it is the helper process's window reparented
+into a child peer. Neither dispatches through JUCE, so the ancestor walk
+never ran and the window never learned it had been clicked. The title
+strip is drawn by us, which is exactly why it was the one thing that
+worked.
+
+Fix: Windows sends `WM_PARENTNOTIFY` up the parent chain on a child-window
+mouse-down, and JUCE creates child peers with exstyle 0 - no
+`WS_EX_NOPARENTNOTIFY` (`juce_Windowing_windows.cpp:2429`) - so the message
+reaches our peer for BOTH shapes, including the cross-process bridged one.
+WorkspaceWindow now subclasses its own peer (`SetWindowSubclass`; comctl32
+is already linked by JUCE) and raises on the three button-down child
+events. Three deliberate details:
+
+- **Async raise.** The notify arrives inside the child's own mouse-down
+  dispatch; re-ordering windows synchronously re-enters layout underneath a
+  plugin still processing its click. A message-thread hop lands the raise
+  after it is done.
+- **`toFront(false)`, not `true`.** The click already gave Windows focus to
+  the plugin's HWND, which is what the user wants; grabbing keyboard focus
+  back would break typing into the plugin's own fields. Raising still fires
+  `broughtToFront`, so the ribbon sync is unaffected.
+- **Button-downs only.** `WM_PARENTNOTIFY` also carries WM_CREATE /
+  WM_DESTROY, so a plugin spawning helper windows at load would otherwise
+  front itself uninvited.
+
+Install is peer-keyed in `parentHierarchyChanged` (a window can exist
+unframed, and peers can be recreated); the destructor removes it, since the
+subclass ref data is `this`. MAN-15 added to B.36 covering both shapes, the
+bridged case, and the two must-nots.
+
 ### G28 - nudge bar gated Debug-only (Jeff's call)
 
 Jeff caught that the installed manual showed the authoring bar. His

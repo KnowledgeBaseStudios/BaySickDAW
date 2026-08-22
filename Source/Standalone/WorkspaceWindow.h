@@ -323,6 +323,22 @@ public:
     void mouseDown (const juce::MouseEvent&) override;
     void mouseDrag (const juce::MouseEvent&) override;
     void mouseUp   (const juce::MouseEvent&) override;
+    void parentHierarchyChanged() override;
+
+    // FOREIGN-SURFACE CLICKS (Jeff, 2026-08-17).  setBroughtToFrontOnMouseClick
+    // raises this window for any click JUCE routes, which is every one of OUR
+    // controls -- but a hosted plugin's UI is a native child window owned by the
+    // plugin (or, bridged, by the helper process).  Its mouse events never enter
+    // the JUCE hierarchy at all, so clicking a plugin's panel or turning one of
+    // its knobs left the window unraised and unfocused; only our drawn title
+    // strip worked.  Windows sends WM_PARENTNOTIFY up the parent chain on a
+    // child-window mouse-down, and JUCE gives child peers exstyle 0 (no
+    // WS_EX_NOPARENTNOTIFY, juce_Windowing_windows.cpp:2429), so the message
+    // reaches this window's HWND for the in-process AND the bridged shape.
+    // These install/remove a subclass on our own peer to catch it.
+    void installForeignClickHook();
+    void removeForeignClickHook();
+    void* mHookedHwnd { nullptr };
 
     // TS7 §9.1: aliases, not values -- the numbers live in WindowChrome with the
     // colours.  NOTE this does NOT make the two strip heights impossible to

@@ -3330,6 +3330,18 @@ at all, before this batch or after it:**
       flag the retire had already cleared — so the ghost rode into the next project.
       `D:__ R:__` notes:
 
+- [ ] **MAN-15 — clicking a plugin's own UI raises its window (Jeff's find, 2026-08-17).** Put a
+      hosted plugin window BEHIND another window, then click its panel background — not the
+      title strip — and it comes forward.  Repeat by grabbing one of its knobs: the same raise,
+      and the knob still turns (the click is not eaten).  Walk it on BOTH shapes, an instrument
+      on a Plugins tab and an effect in a rack slot, and once more on a BRIDGED plugin (the
+      surface is another process's window there, so it is the case most likely to differ).
+      Then confirm what must NOT happen: typing into a plugin's own text field still works
+      after the raise (we raise without taking keyboard focus), and a plugin that spawns
+      helper windows on load does not front itself uninvited.  Before the fix only the title
+      strip raised these windows — a plugin's UI is a foreign native window whose clicks never
+      reach us.  `D:__ R:__` notes:
+
 **Installed-copy smoke (G25 — this exact defect shipped once):**
 
 - [ ] **MAN-11 — MUST-PASS: an INSTALLED copy keeps its art, kits, manual, and sound.** On a
