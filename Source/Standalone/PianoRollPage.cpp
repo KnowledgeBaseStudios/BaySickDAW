@@ -1,7 +1,6 @@
 #include "PianoRollPage.h"
 #include "SharedUI.h"
 #include "StandaloneApp.h"   // StandalonePlayHead
-#include "../G3PlayheadDiag.h"   // [G3 PLAYHEAD] G-9 reading (QA-G3Smoke Task 1); Debug-only
 
 // QA-D STATE-02 follow-on: shared composer for the piano-roll context label.
 // Format: "{displayName} - {engineType-or-(no engine)}".  Mirrors the
@@ -101,17 +100,6 @@ void PianoRollPage::timerCallback()
     // modulo -- tiling is gone).  Pattern mode: the loop-local beat as before.
     const double beat = ! song ? cur
                        : (songLocalBeatProvider ? songLocalBeatProvider (cur) : -1.0);
-
-#if JUCE_DEBUG
-    if (beat >= 0.0 && mPlayHead->isPlaying())
-    {
-        int lat = -1; double sr = 0.0;
-        if (g3DiagDeviceInfo) g3DiagDeviceInfo (lat, sr);
-        G3PlayheadDiag::log ("tick beat=" + juce::String (beat, 4)
-                             + " latSamples=" + juce::String (lat)
-                             + " sr=" + juce::String (sr, 1));
-    }
-#endif
 
     // Drum Kit pump (always alive - even when not the active view, the kit
     // keeps its playhead in sync so switching back is seamless).

@@ -1626,10 +1626,6 @@ private:
     std::atomic<float>* mSwingMixRusty { nullptr };
     std::atomic<float>* mSwingTruncRusty { nullptr };
 
-    // Message-thread drain for the [G3] audio-thread readout ring (see
-    // G3PlayheadDiag.h).  Owned here so its Timer lives and dies on the
-    // message thread with the processor; null in Release.
-    std::unique_ptr<class G3PlayheadDiagDrainer>           mG3DiagDrainer;
 
     // J-5 (2026-05-03): BaySickRustyDrums singleton engine.  Only one
     // instance per project.  Owned here so PluginProcessor can orchestrate
@@ -2300,6 +2296,9 @@ private:
     bool                 mOfflinePrevSong { true };
     juce::AudioPlayHead* mOfflinePrevHead { nullptr };
     bool                 mOfflinePrevShield { false };
+    // The TempoMap rate the LIVE session was published at, restored by
+    // endOfflineRender (Jeff's 44.1-export-on-a-48k-device bug, 2026-08-22).
+    double               mOfflinePrevMapSr { 0.0 };
     // ONE render at a time: export/measure drive begin/end from a background
     // thread while freeze renders drive it on the message thread -- two
     // interleaved suspend/restore sequences corrupt both.  Owned by

@@ -1,5 +1,4 @@
 #include "BaySickSynthVoice.h"
-#include "../G3PlayheadDiag.h"   // [G3 PAN] smoke-#19 arm readout (Debug-only)
 #include <cmath>
 
 // Batch E #9 (2026-05-01): musical-range constants extracted from hot path.
@@ -326,11 +325,6 @@ void BaySickSynthVoice::controllerMoved (int cc, int value)
         // voice (audible click whenever any note carried a pan).  Idle voices
         // set instantly so the next startNote reads exact channel state.
         const float p = juce::jlimit (-1.0f, 1.0f, ((float) value - 64.0f) / 63.0f);
-       #if JUCE_DEBUG
-        if (mPanRampLeft > (int) (0.01 * getSampleRate()))   // a real (slide) ramp, not a declick
-            G3PlayheadDiag::pushRT ("[G3 PAN] cc10 STOMP mid-ramp (bss) val/rampLeft",
-                                    2, (double) p, (double) mPanRampLeft);
-       #endif
         if (isVoiceActive())
         {
             mPanRampTarget = p;
@@ -397,11 +391,6 @@ bool BaySickSynthVoice::tryRampTakeover (int targetNote)
         mVelRampStep   = (mVelRampTarget - mCurrentVelocity) / (float) mVelRampLeft;
     }
     // #11 (G-4): pan glides current -> CC89 target over the same span.
-   #if JUCE_DEBUG
-    G3PlayheadDiag::pushRT ("[G3 PAN] arm(bss) pend/from/glideSamples/timePending",
-                            4, (double) mPanRampPend, (double) mNotePan,
-                            (double) glideSamples, (double) mGlideTimePending);
-   #endif
     if (mPanRampPend > -2.0f)
     {
         if (glideSamples > 1.0f)

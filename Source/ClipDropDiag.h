@@ -15,7 +15,7 @@
 // and cannot clear from inside the app.  BOTH halves are gated together: the
 // popup body names the log file, so keeping alert() in Release would point the
 // user at something that never gets written.  Release keeps no-op stubs so the
-// cascade's call sites compile unchanged -- same shape as G3PlayheadDiag.h.
+// cascade's call sites compile unchanged.
 // Rule-4 catalogued in Plans & Specs/Running Notes/fancy-kindling-dongarra.md.
 // ─────────────────────────────────────────────────────────────────────────────
 

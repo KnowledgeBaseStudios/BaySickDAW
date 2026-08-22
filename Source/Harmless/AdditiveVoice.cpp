@@ -1,5 +1,4 @@
 #include "AdditiveVoice.h"
-#include "../G3PlayheadDiag.h"   // [G3 PAN] smoke-#19 arm readout (Debug-only)
 #include <cmath>
 
 AdditiveVoice::AdditiveVoice()
@@ -380,11 +379,6 @@ bool AdditiveVoice::tryRampTakeover (int targetNote)
         mVelRampStep   = (mVelRampTarget - mNoteVelocity) / (float) mVelRampLeft;
     }
     // #11 (G-4): pan glides current -> CC89 target over the same span.
-   #if JUCE_DEBUG
-    G3PlayheadDiag::pushRT ("[G3 PAN] arm(harmless) pend/from/glideSamples/timePending",
-                            4, (double) mPanRampPend, (double) mNotePan,
-                            (double) glideSamples, (double) mGlideTimePending);
-   #endif
     if (mPanRampPend > -2.0f)
     {
         if (glideSamples > 1.0f)

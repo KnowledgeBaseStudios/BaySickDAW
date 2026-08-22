@@ -2776,6 +2776,102 @@ Root cause, two stacked holes in `MixerPage`:
 Fix: the retire path hides as well as deactivates, and the load sweep
 is unconditional. MAN-14 added to B.36 with the full repro.
 
+## 2026-08-22 - Export renders were wrong at any rate but the device's
+
+Jeff: exports silent (a song of sfizz notes played its FIRST NOTE then
+nothing) and, on a second project, recorded guitar clips came back
+"ever so slightly slow and metallic", longer than they should be.
+
+### The wrong turns, recorded because they cost time
+
+Two of my framings were wrong and Jeff corrected both. I claimed the
+export "matched the grid" on length - he pointed out same length says
+nothing about same data and proposed the null test. Then I misread his
+answer about live playback and declared export exonerated; he had meant
+the EXPORTED wav sounds wrong when played back, not the takes. The takes
+were always fine. Export was the bug the whole time.
+
+File forensics narrowed it: the export had the takes' spectrum (within
+2 dB across every band) and their RMS, but 0.02 waveform correlation at
+every alignment against take 1, take 2 and their sum, onset 75 ms late.
+Right content, reassembled wrong. That ruled out re-amping (no cab
+rolloff), rate conversion, and the stretch engine (libBPM 120 == project
+120, so the ratio is exactly 1.0 and the vocoder bypass holds). It could
+not name the cause, so the render got instrumented instead.
+
+### Root cause, from the render's own numbers
+
+`offline_render_diag.txt` showed per-block windows advancing 0.09288
+beats in beatStart but only reaching 0.08533 in beatEnd - every window
+8.1% short, leaving a GAP before the next block. 0.08533/0.09288 =
+0.91875 = **44100/48000**.
+
+Every TempoMap segment's sample position is baked at the rate the map
+was published with - the live DEVICE rate - and per rebuildTimeline's own
+comment the only republish trigger is a device rate CHANGE. Jeff listens
+through a TV (`audio_settings.xml`: 48000) and exported at 44100, so the
+whole render read the timeline through the wrong divisor. Notes fell in
+the window gaps (one note, then silence); clip positions resolved to
+wrong file offsets (garbled, late, long). Jeff proved it independently
+before the fix by exporting at 48000, which was clean.
+
+Fix: the render republishes the timeline at ITS rate in
+beginOfflineRender and restores the device rate in endOfflineRender
+(`republishTempoMapAtRate` - beats and tempi are musical facts, only
+sample positions move). Verified by Jeff in Release: exports work.
+
+### The VST3 jasserts Jeff caught alongside it
+
+`JUCE_ASSERT_MESSAGE_THREAD` firing from `setStateForAllEventBuses` /
+`VST3PluginInstanceHeadless::prepareToPlay` during the render's graph
+reset and re-prepare. Not cosmetic - JUCE's own comment: "The VST3 spec
+requires that IComponent::setupProcessing() is called on the message
+thread. If you call it from a different thread, some plugins may break."
+Export and Measure drive that from their background thread; freeze runs
+on the message thread and never tripped it. JUCE's prepareToPlay takes a
+MessageManagerLock for the setup half, but releaseResources -> deactivate
+takes none - the exposed path, and three of Jeff's four stacks. Our own
+HostedPlugin.cpp assumes message-thread execution in as many words.
+
+Fix: both halves now run through `MessageManager::callSync`, which calls
+DIRECTLY when already on the message thread (freeze keeps its exact
+behaviour and pays nothing) and marshals only for background callers.
+The reconfigure-thread marker is set inside the job so prepareToPlay's
+"is this a real device open" test still names the running thread. A
+failed post unwinds the suspend instead of leaving the device muted.
+
+### Housekeeping in the same pass
+
+- **Debug PDB**: the link died twice on LNK1140 while adding a few lines
+  - the Debug PDB sits at ~300 MB because the whole tree carries full
+  debug info, and it was on the default page format's ceiling.
+  `/PDBPAGESIZE:16384` on Debug only (Release untouched - its PDBs are
+  archived to SymbolStore and must stay portable). Not /DEBUG:FASTLINK,
+  which would leave the PDB depending on the .obj tree.
+- **Diagnostics retired** (Jeff's call after a full inventory):
+  `offline_render_diag` (its question answered) and the entire
+  G3PlayheadDiag facility - which turned out to host THREE readings, not
+  one: [G3 PLAYHEAD] click-vs-playhead (spec call G-9), [G3 PAN]
+  arm readouts in two voices, [G3 BAR1] scheduler readouts. Header,
+  message-thread drainer, the g3DiagDeviceInfo plumbing through
+  StandaloneEditor/PianoRollPage, and three stale cross-references all
+  gone; zero references remain. Surviving diags and the reasoning are in
+  the inventory Jeff reviewed: the two Release-active audio logs
+  (asio_trace, audio_setup_log) stay - audio_setup_log is what diagnosed
+  the 64-channel bug - plus Debug-only clipdrop / namir / freeze_timing.
+- MAN-16 (rate-mismatch export, both shapes + freeze) and MAN-17 (hosted
+  plugins across a render) added to B.36; SND-45 updated for the retired
+  log.
+
+### Still open
+
+- My song-scope loop-bounds change from earlier in the hunt is still in
+  the tree. It was NOT the cure (the EMIT evidence proved that), but it
+  is correct on its own terms - a song export renders the timeline once,
+  so zero loop bounds are right, and the diag showed the live UI writing
+  16.0 into those atomics mid-render. Kept deliberately, flagged here
+  rather than left implied.
+
 ## 2026-08-17 - Plugin windows only raised from the title strip
 
 Jeff: clicking a hosted plugin's panel - or turning a knob on it - did not

@@ -2,7 +2,6 @@
 #include "../BaySickGraph.h"        // MixerChannelIds::kDrumPagesPerBank -- the drum-bank split
 #include "PianoRoll.h"           // T9 (L29): shared lane height/visibility statics on ControlLane
 #include "TypingKeyboardMap.h"   // D-4: bypass tool keys while typing-keyboard mode is on
-#include "../G3PlayheadDiag.h"   // [G3 PLAYHEAD] G-9 reading (QA-G3Smoke Task 1); Debug-only
 #include <limits>
 #include <algorithm>
 #include <map>
@@ -1420,13 +1419,6 @@ void DrumKitGrid::mouseMove(const MouseEvent& e)
 // ─────────────────────────────────────────────────────────────────────────────
 void DrumKitGrid::mouseDown(const MouseEvent& e)
 {
-#if JUCE_DEBUG
-    G3PlayheadDiag::log ("click(kit) x=" + juce::String (e.x) + " y=" + juce::String (e.y)
-                         + " rawBeat=" + juce::String (xToBeat (e.x), 4)
-                         + " snapBeat=" + juce::String (snapBeat (xToBeat (e.x)), 4)
-                         + " snapDiv=" + juce::String (onGetSnapDiv ? onGetSnapDiv() : -1)
-                         + " playheadBeat=" + juce::String (mPlayhead, 4));
-#endif
     if (mPM == nullptr) return;
     refreshRowsCache();   // ensure rowToPageIndex sees current drum state
     grabKeyboardFocus();

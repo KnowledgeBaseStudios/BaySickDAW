@@ -24,7 +24,7 @@
 // Debug build only (Jeff, 2026-08-07).  It fires on every project save AND
 // load with no cap or rotation, so a shipping build would grow a file the user
 // never asked for and cannot clear from inside the app.  The Release stub
-// keeps the call sites compiling unchanged -- same shape as G3PlayheadDiag.h.
+// keeps the call sites compiling unchanged.
 namespace
 {
    #if JUCE_DEBUG

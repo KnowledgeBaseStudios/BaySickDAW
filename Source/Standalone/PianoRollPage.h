@@ -139,8 +139,7 @@ public:
     std::function<bool()> isSongMode;
 
     // #30 (QA-G3Smoke): output latency + sample rate for the playhead's visual
-    // latency compensation (the page has no processor handle).  Permanent --
-    // distinct from the Debug-only g3DiagDeviceInfo below.
+    // latency compensation (the page has no processor handle).
     std::function<void(int& latencySamples, double& sampleRate)> deviceInfoProvider;
 
     // #31 (QA-G3Smoke): song-mode playhead.  Editor maps a SONG beat to the
@@ -159,13 +158,6 @@ public:
     // timer tick (128-bit mask: lo = notes 0..63, hi = 64..127).  The active
     // roll's keyboard lights those keys so the user sees what they're playing.
     std::function<void(uint64_t&, uint64_t&)> liveHeldNotesProvider;
-
-#if JUCE_DEBUG
-    // [G3 PLAYHEAD] G-9 reading (QA-G3Smoke Task 1): the page has no processor
-    // handle, so the editor supplies output latency + sample rate for the
-    // per-tick readout.  Debug-only; stripped with the diagnostic at batch close.
-    std::function<void(int& latencySamples, double& sampleRate)> g3DiagDeviceInfo;
-#endif
 
     // Editor sets this so PianoRollPage can build its dropdown popup with the
     // ribbon's current Layer/Bass/Drum order.  Returns the engines in the

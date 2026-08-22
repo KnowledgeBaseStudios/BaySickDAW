@@ -1,6 +1,5 @@
 #include "PianoRoll.h"
 #include "TypingKeyboardMap.h"   // D-4: bypass tool keys while typing-keyboard mode is on
-#include "../G3PlayheadDiag.h"   // [G3 PLAYHEAD] G-9 reading (QA-G3Smoke Task 1); Debug-only
 #include <numeric>
 #include <algorithm>
 #include <set>
@@ -1755,13 +1754,6 @@ void PianoRollGrid::mouseDoubleClick (const MouseEvent& e)
 
 void PianoRollGrid::mouseDown(const MouseEvent& e)
 {
-#if JUCE_DEBUG
-    G3PlayheadDiag::log ("click(roll) x=" + juce::String (e.x) + " y=" + juce::String (e.y)
-                         + " rawBeat=" + juce::String (xToBeat (e.x), 4)
-                         + " snapBeat=" + juce::String (snapBeat (xToBeat (e.x)), 4)
-                         + " snapDiv=" + juce::String (onGetSnapDiv ? onGetSnapDiv() : -1)
-                         + " playheadBeat=" + juce::String (mPlayhead, 4));
-#endif
     if (!mData) return;
     grabKeyboardFocus();
     if (e.getNumberOfClicks() == 1) mLastClickCreated = false;

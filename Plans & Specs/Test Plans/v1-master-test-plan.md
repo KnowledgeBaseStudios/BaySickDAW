@@ -2965,7 +2965,11 @@ Where a step says "check the trace", read `asio_trace.txt` next to `audio_settin
 - [ ] **SND-45 — Release stays quiet, Debug still traces.** Run RELEASE through a session that
       drops a clip, loads a NAM/IR and freezes a tab: `clipdrop_diag_log.txt`,
       `namir_state_log.txt` and `freeze_timing.txt` are NOT created in `Documents\BaySickDAW`.
-      Run DEBUG through the same session: all three ARE written.  `D:__ R:__` notes:
+      Run DEBUG through the same session: all three ARE written.  **[UPDATED 2026-08-22:
+      `g3_playhead_log.txt` is RETIRED - the whole G3PlayheadDiag facility ([G3 PLAYHEAD]
+      click readings, [G3 PAN] arm readouts, [G3 BAR1] scheduler readouts) was removed with
+      its questions answered, so that file should now never appear in EITHER build.]**
+      `D:__ R:__` notes:
 - [ ] **SND-46 — engine-editor presets actually load.** Save a preset from the BaySickPlayer
       editor's own preset button and load it back: it LOADS (every preset that editor saved was
       previously unloadable while still renaming the tab and strip as though it had worked).
@@ -3341,6 +3345,29 @@ at all, before this batch or after it:**
       helper windows on load does not front itself uninvited.  Before the fix only the title
       strip raised these windows — a plugin's UI is a foreign native window whose clicks never
       reach us.  `D:__ R:__` notes:
+
+**Export (Jeff's 2026-08-22 hunt — one root cause behind two very different failures):**
+
+- [ ] **MAN-16 — MUST-PASS: export at a rate the DEVICE IS NOT RUNNING AT.** This is the whole
+      bug: every TempoMap segment's sample position is baked at the rate the map was published
+      with (the live device's), and the only thing that republished it was a device rate change
+      — so a render at any other rate read the entire timeline through the wrong divisor.  Set
+      the audio device to one rate (48000 is what Jeff's TV forces) and export at ANOTHER
+      (44100).  Walk BOTH shapes: (a) a project of MIDI notes on a sfizz Inst tab — every note
+      must sound, not just the first (the windows came up 44100/48000 = 0.91875 as long as the
+      block they had to cover, so notes fell into the gaps); (b) a project of recorded audio
+      clips — the export must match what you hear, at the right length, not late/long/garbled
+      (clip positions resolved to the wrong file offsets).  Then repeat with export rate ==
+      device rate, which always worked and is the control.  Also walk Pattern scope and a
+      FREEZE at a mismatched rate — same render core, same exposure.  `D:__ R:__` notes:
+- [ ] **MAN-17 — hosted plugins survive an export (VST3 main-thread rule).** With a hosted VST3
+      in a rack slot AND one on a Plugins tab, run an Export, a Measure, and a Freeze.  Debug:
+      NO jassert from `setStateForAllEventBuses` / `VST3PluginInstanceHeadless::prepareToPlay`
+      (the VST3 spec requires setupProcessing/setActive/activateBus on the message thread; the
+      render now marshals its graph reset + re-prepare there).  Both builds: the plugin still
+      sounds correct after the render, the app does not hang at export start or end (the
+      marshal blocks the render thread on the message thread — a deadlock would show here),
+      and a bridged plugin behaves the same.  `D:__ R:__` notes:
 
 **Installed-copy smoke (G25 — this exact defect shipped once):**
 

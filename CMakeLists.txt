@@ -767,6 +767,23 @@ if(MSVC)
     target_link_options(BaySickDAWStandalone PRIVATE
         $<$<CONFIG:Release>:/DEBUG /OPT:REF /OPT:ICF>)
 
+    # ── Debug PDB headroom (2026-08-22) ──────────────────────────────────────
+    # The Debug link died on LNK1140 ("limit exceeded for program database")
+    # twice while adding a handful of lines: the Debug PDB is ~289 MB (Release
+    # ~184 MB) because the whole tree -- vendored JUCE, sfizz, LAME, NAM, the
+    # DSP set -- carries full debug info, and it sat right on the default
+    # 4096-byte page format's ceiling.  Any header-level addition tipped it.
+    #
+    # /PDBPAGESIZE is Microsoft's documented remedy and raises the ceiling ~4x
+    # with no other behavioural change: the PDB stays STANDALONE, so breakpoints
+    # and jassert stack traces are exactly as before.  Deliberately NOT
+    # /DEBUG:FASTLINK, which is smaller and links faster but leaves the PDB
+    # referencing the .obj tree -- fine until a clean build pulls those out from
+    # under it.  Debug only; Release is untouched (its PDBs are archived to
+    # SymbolStore for minidump symbolication and must stay portable).
+    target_link_options(BaySickDAWStandalone PRIVATE
+        $<$<CONFIG:Debug>:/PDBPAGESIZE:16384>)
+
     # 2026-05-06: enable AVX2 codegen for the whole standalone target.  MSVC
     # x64 default is /arch:SSE2 (128-bit XMM); AVX2 lets the compiler auto-
     # vectorize hot DSP loops with 256-bit YMM registers — typical 15-25%

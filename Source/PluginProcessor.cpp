@@ -1,9 +1,66 @@
 #include "PluginProcessor.h"
 #include "SafeXml.h"   // XXE + depth-guarded XML parse (QA-Cleanup)
 #include "SafeAudioReader.h"   // channel/frame sanity gate (QA-Cleanup)
-#include "TempoMapRead.h"   // QA-TempoMap: stepped tempo timeline (standalone publishes; VST falls back)
+#include "TempoMapRead.h"
+
+namespace
+{
+    // Re-express the SAME musical timeline at a DIFFERENT sample rate.
+    //
+    // Jeff, 2026-08-22.  Every TempoMap segment's SAMPLE position is baked at
+    // the rate the map was published with -- the live DEVICE rate -- and the
+    // only republish trigger is a device rate CHANGE.  So an offline render at
+    // a rate the device is not running at read the whole timeline through the
+    // wrong divisor: measured, a 44.1 kHz export against a 48 kHz device
+    // produced per-block scheduling windows exactly 44100/48000 = 0.91875 as
+    // long as the block they had to cover, so notes fell into the gaps between
+    // consecutive windows (one note, then silence) and timeline clips resolved
+    // to the wrong file positions (right spectrum, no waveform relationship,
+    // late and over-long).  Exporting AT the device rate was clean, which is
+    // what pinned it.
+    //
+    // Beats and tempi are musical facts and do not move; only sample positions
+    // do, so each segment is re-derived from the previous exactly as
+    // StandalonePlayHead::rebuildTimeline builds it.  Returns the rate that WAS
+    // in force so the caller can put it back.
+    //
+    // FILE-STATIC, not a TempoMapRead.h inline: that header is included across
+    // the tree and the extra inline tipped the Debug link over LNK1140 (the PDB
+    // was already at 184 MB).  Only the offline render needs this.
+    //
+    // Same sole-writer rule as TempoMap::publish.  The render qualifies: the
+    // device is suspended and the editor's rate watch is gated on
+    // ! isNonRealtime().
+    double republishTempoMapAtRate (double newSampleRate) noexcept
+    {
+        const double oldSr = TempoMap::gSampleRate.load (std::memory_order_relaxed);
+        const int    n     = TempoMap::gCount.load (std::memory_order_acquire);
+
+        if (n <= 0 || newSampleRate <= 0.0)            return oldSr;
+        if (std::abs (newSampleRate - oldSr) < 1.0e-9) return oldSr;
+
+        std::vector<int64_t> smp ((size_t) n);
+        std::vector<double>  bt  ((size_t) n), bp ((size_t) n);
+
+        for (int i = 0; i < n; ++i)
+        {
+            bt[(size_t) i] = TempoMap::gSegBeat[i].load (std::memory_order_relaxed);
+            bp[(size_t) i] = TempoMap::gSegBpm [i].load (std::memory_order_relaxed);
+        }
+
+        // Entry 0 is sample 0 / beat 0 by the publish contract; the rest walk
+        // forward at the NEW rate.
+        smp[0] = 0;
+        for (int i = 1; i < n; ++i)
+            smp[(size_t) i] = smp[(size_t) i - 1]
+                + (int64_t) std::llround ((bt[(size_t) i] - bt[(size_t) i - 1]) * 60.0 * newSampleRate
+                                          / juce::jmax (1.0e-6, bp[(size_t) i - 1]));
+
+        TempoMap::publish (smp.data(), bt.data(), bp.data(), n, newSampleRate);
+        return oldSr;
+    }
+}   // QA-TempoMap: stepped tempo timeline (standalone publishes; VST falls back)
 #include "TsMapRead.h"      // QA-G Task 6: stepped time-signature timeline (PatternManager publishes)
-#include "G3PlayheadDiag.h" // [G3 BAR1] smoke General-1 dropout reading (Debug-only)
 #include "MissingFileReport.h" // QA-Export Task 5: missing external-file collector
 #include "ProjectFileResolver.h"
 #include "SampleLibrary.h"  // QA-ProjectSave Task 4: stable-root reference resolver
@@ -512,13 +569,6 @@ BaySickDAWProcessor::BaySickDAWProcessor()
     apvts.undoOwnerTag = "main";
 
     mEngineRig = std::make_unique<EngineRig> (*this, mUndoManager);
-
-   #if JUCE_DEBUG
-    // Starts the message-thread drain that turns the audio thread's POD [G3]
-    // records into log lines (G3PlayheadDiag.h).  Constructed here so the
-    // Timer's lifetime is the processor's, on the message thread.
-    mG3DiagDrainer = std::make_unique<G3PlayheadDiagDrainer>();
-   #endif
 
     // QA-ModelShell TS6: reads plugins.xml at construction (scan folders + the
     // added list), so both are available to project load without any UI.
@@ -1643,6 +1693,11 @@ bool BaySickDAWProcessor::renderAudioClipsForRow (int row,
                 clipScratch, bufOffset, outSamples, posD, fileRate, ctx.numOut, gain);
             player.expectedFilePos = (juce::int64) std::llround (posD + (double) outSamples * fileRate);
         }
+
+        // Per-clip read facts: where in the FILE this block came from, at what
+        // rate, through which branch, and what came out.  A clip whose source
+        // position does not advance by outSamples*fileRate every block is being
+        // reassembled wrong, whatever it sounds like (Jeff, 2026-08-22).
 
         // One phase for the whole clip, advanced by OUTPUT samples, so whichever read
         // branch above ran the wobble is the same shape at the same place.
@@ -2948,19 +3003,6 @@ void BaySickDAWProcessor::processBlock(juce::AudioBuffer<float>& buffer,
                 windows[nWin++] = { beatStart, beatEnd, 0 };
             }
 
-           #if JUCE_DEBUG
-            // [G3 BAR1]: window readout on any block touching beat 0.  POD into
-            // the diag ring -- a juce::String or a file write here would be an
-            // allocation / blocking IO inside the render callback.
-            if (beatStart < 0.05 || (nWin > 1 && windows[1].winStart < 0.05))
-                G3PlayheadDiag::pushRT (
-                    "[G3 BAR1] windows nWin/w0Start/w0End/w1Start/w1End/wrapSmp", 6,
-                    (double) nWin,
-                    windows[0].winStart, windows[0].winEnd,
-                    nWin > 1 ? windows[1].winStart : 0.0,
-                    nWin > 1 ? windows[1].winEnd   : 0.0,
-                    (double) wrapSmp);
-           #endif
 
             // QA-TempoMap: beat -> in-block sample offset within a window.
             // Map path: offset = exact sample distance from the window's
@@ -3192,13 +3234,6 @@ void BaySickDAWProcessor::processBlock(juce::AudioBuffer<float>& buffer,
                             // #11 (G-4): RT glide note-ons carry pan as a CC89
                             // ramp target (glides over the slide); Porta + plain
                             // notes keep the instant CC10.
-                           #if JUCE_DEBUG
-                            if (absStart < 0.05)
-                                G3PlayheadDiag::pushRT (
-                                    "[G3 BAR1] noteOn pitch/absStart/smp/winStart/winEnd", 5,
-                                    (double) note.midiNote, absStart, (double) smp,
-                                    windows[w].winStart, windows[w].winEnd);
-                           #endif
                             emitPianoNoteOn (buf, note, smp, glideFrom, glideMs,
                                              note.type == NoteType::RetrigSlide && glideFrom >= 0);
                             // B-3: the off is the note's ORIGINAL end (rawStart-based),
@@ -3304,6 +3339,7 @@ void BaySickDAWProcessor::processBlock(juce::AudioBuffer<float>& buffer,
                     const double offsetBeats  = juce::jmax (0.0, ticksToBeats (blk.contentOffsetTicks));
                     const double origin       = blkStartBeat - offsetBeats;
                     const double contentEnd   = juce::jmin (blkEndBeat, origin + contentBeats);
+
                     if (contentEnd <= blkStartBeat) continue;
 
                     auto sched = [&] (const std::vector<PianoNote>& notes, juce::MidiBuffer& buf, int target,
@@ -7702,15 +7738,66 @@ bool BaySickDAWProcessor::beginOfflineRender (double renderSampleRate, int rende
     AudioClipStreamer::sPeakPrefillMs.store (0.0f, std::memory_order_relaxed);
     AudioClipStreamer::sOfflineRender.store (true, std::memory_order_release);
 
-    // Wet-tail hygiene: the render must not open on live reverb/delay tails.
-    mVibeGraph.reset();
 
-    // Full re-prepare at the render config -- prepareToPlay sweeps every
-    // engine + the graph, so the render rate is independent of the device's.
-    mOfflineReconfigureThread.store (juce::Thread::getCurrentThreadId(),
-                                     std::memory_order_release);
-    prepareToPlay (renderSampleRate, renderBlockSize);
-    mOfflineReconfigureThread.store (nullptr, std::memory_order_release);
+    // THE TIMELINE MUST SPEAK THE RENDER'S RATE (Jeff, 2026-08-22).  Every
+    // TempoMap segment's sample position is baked at the rate it was published
+    // with -- the live DEVICE rate -- and every beat<->sample conversion the
+    // render performs goes through it: the per-block scheduling window, the
+    // clip start/end positions, the loop-wrap math.  Rendering at a rate the
+    // device is not running at therefore read the whole timeline through the
+    // wrong divisor.  Republished here, restored in endOfflineRender.
+    //
+    // Safe as a lone writer: the device is suspended above and the editor's
+    // rate watch is gated on ! isNonRealtime(), which the sweep just set.
+    // ── ON THE MESSAGE THREAD (Jeff, 2026-08-22) ────────────────────────────
+    // Everything below reaches hosted VST3 plugins, and the VST3 spec requires
+    // IComponent::setupProcessing / setActive / activateBus on the MAIN thread.
+    // JUCE asserts it outright and says why: "some plugins may break".  Export
+    // and Measure drive this from their own background thread, so the whole
+    // sequence used to run off-thread -- and while JUCE's prepareToPlay takes a
+    // MessageManagerLock for the setup half, the releaseResources -> deactivate
+    // half takes none, which is the exposed path (three of the four asserts
+    // Jeff caught).  Our own code assumes it too: HostedPlugin.cpp sizes its
+    // scratch "HERE, on the message thread".
+    //
+    // callSync runs the job DIRECTLY when already on the message thread, so the
+    // freeze render (which is) keeps its exact previous behaviour and pays
+    // nothing; only the background-thread callers marshal.
+    //
+    // TempoMap::publish rides along for the same reason -- it is documented
+    // message-thread-only.
+    const bool reconfigured = juce::MessageManager::callSync (
+        [this, renderSampleRate, renderBlockSize]
+        {
+            mOfflinePrevMapSr = republishTempoMapAtRate (renderSampleRate);
+
+            // Wet-tail hygiene: the render must not open on live reverb/delay tails.
+            mVibeGraph.reset();
+
+            // Full re-prepare at the render config -- prepareToPlay sweeps every
+            // engine + the graph, so the render rate is independent of the device's.
+            //
+            // The thread marker is set INSIDE this job: prepareToPlay compares it
+            // against getCurrentThreadId() to tell a render's re-prepare from a
+            // real device open, so it has to name the thread actually running.
+            mOfflineReconfigureThread.store (juce::Thread::getCurrentThreadId(),
+                                             std::memory_order_release);
+            prepareToPlay (renderSampleRate, renderBlockSize);
+            mOfflineReconfigureThread.store (nullptr, std::memory_order_release);
+        });
+
+    if (! reconfigured)
+    {
+        // The message loop could not take the job (shutting down).  Undo the
+        // suspend rather than leaving the device muted with a render flag set.
+        sweepNonRealtime (false);
+        AudioClipStreamer::sOfflineRender.store (false, std::memory_order_release);
+        setProjectLoadInProgress (mOfflinePrevShield);
+        suspendProcessing (false);
+        mOfflineRenderActive.store (false, std::memory_order_release);
+        return false;
+    }
+
     return true;
 }
 
@@ -7723,13 +7810,26 @@ void BaySickDAWProcessor::endOfflineRender()
     // A stored config, not an open device: juce::AudioProcessor keeps reporting
     // the last negotiated rate after releaseResources, so this test says only
     // whether there is something to restore.
-    if (mOfflinePrevSr > 0.0 && mOfflinePrevBlk > 0)
+    // Timeline back to the LIVE device rate before anything re-prepares
+    // against it (see the note in beginOfflineRender).
+    // Message thread again, for the same reason as the begin half: this
+    // re-prepare deactivates and re-activates every hosted VST3.
+    juce::MessageManager::callSync ([this]
     {
-        mOfflineReconfigureThread.store (juce::Thread::getCurrentThreadId(),
-                                         std::memory_order_release);
-        prepareToPlay (mOfflinePrevSr, mOfflinePrevBlk);
-        mOfflineReconfigureThread.store (nullptr, std::memory_order_release);
-    }
+        if (mOfflinePrevMapSr > 0.0)
+        {
+            republishTempoMapAtRate (mOfflinePrevMapSr);
+            mOfflinePrevMapSr = 0.0;
+        }
+
+        if (mOfflinePrevSr > 0.0 && mOfflinePrevBlk > 0)
+        {
+            mOfflineReconfigureThread.store (juce::Thread::getCurrentThreadId(),
+                                             std::memory_order_release);
+            prepareToPlay (mOfflinePrevSr, mOfflinePrevBlk);
+            mOfflineReconfigureThread.store (nullptr, std::memory_order_release);
+        }
+    });
 
     // The render was a consumer and prepareToPlay cleared the idle assertion for
     // it; now that it has finished, the device is the only consumer left, and
@@ -7759,6 +7859,7 @@ void BaySickDAWProcessor::endOfflineRender()
     AudioClipStreamer::sOfflineRender.store (false, std::memory_order_release);
     DBG ("[TS2 EXPORT] clip-stream underruns this render: "
          << AudioClipStreamer::sUnderrunCount.load (std::memory_order_relaxed));
+
 
     mVibeGraph.reset();
 
@@ -9457,3 +9558,4 @@ juce::String BaySickDAWProcessor::getInputChannelName (const juce::String& strip
     return apvts.state.getProperty (juce::Identifier (stripPrefix + "_inputChannelName"),
                                      juce::String()).toString();
 }
+

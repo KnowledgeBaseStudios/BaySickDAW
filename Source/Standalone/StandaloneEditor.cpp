@@ -2274,14 +2274,6 @@ void StandaloneEditor::buildDefaultTabs()
             }
             return -1.0;
         };
-#if JUCE_DEBUG
-        // [G3 PLAYHEAD] G-9 reading (QA-G3Smoke Task 1); Debug-only.
-        mPianoRollPage->g3DiagDeviceInfo = [this] (int& lat, double& sr)
-        {
-            lat = mProcessor.getTotalOutputLatency();
-            sr  = mProcessor.getSampleRate();
-        };
-#endif
         // Live-note monitor: the page timer reads held hardware-MIDI notes from
         // the processor each tick to light the active roll's keyboard.
         mPianoRollPage->liveHeldNotesProvider = [this](uint64_t& lo, uint64_t& hi)

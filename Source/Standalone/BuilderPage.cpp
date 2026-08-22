@@ -10,7 +10,6 @@
 #include "../SampleLibrary.h"     // doImportAudio start dir (My Samples)
 #include <map>                    // G1 boundary: detected-tempo display cache
 #include "../ClipDropDiag.h"        // QA-ClipDrop: diagnostic trap (2026-06-02)
-#include "../G3PlayheadDiag.h"      // [G3 PLAYHEAD] G-9 reading (QA-G3Smoke Task 1); Debug-only
 #include "../DSP/Mp3Writer.h"       // QA-Export: MP3 encoder front end
 #include "../TempoMapRead.h"        // QA-Export: offline head reads the live tempo timeline
 #include "../EngineRig.h"           // QA-ModelShell TS2: offline lane replay resolves engines model-side
@@ -50,8 +49,7 @@ static bool isRightAltKeyDown() noexcept
 // (Jeff, 2026-08-07): the measurement it existed to take has been taken, and
 // the file is append-only with no cap or rotation, so a shipping build would
 // grow a file the user never asked for and cannot clear from inside the app.
-// The Release stub keeps the call sites compiling unchanged -- same shape as
-// G3PlayheadDiag.h.
+// The Release stub keeps the call sites compiling unchanged.
 #if JUCE_DEBUG
 static void freezeTimingLog (const juce::String& line)
 {
@@ -6002,12 +6000,6 @@ void ArrangementGrid::primeClickMemoryFrom (int blockIdx)
 
 void ArrangementGrid::mouseDown(const MouseEvent& e)
 {
-#if JUCE_DEBUG
-    G3PlayheadDiag::log ("click(builder) x=" + juce::String (e.x) + " y=" + juce::String (e.y)
-                         + " rawBar=" + juce::String (xToBar (e.x), 4)
-                         + " snapBar=" + juce::String (snapBar (xToBar (e.x)), 4)
-                         + " playheadBar=" + juce::String (mPlayheadBar, 4));
-#endif
     grabKeyboardFocus();
 
     // ── 2026-04-26 (D-7 sub-4): click-outside-time-range clears state ────
@@ -9188,6 +9180,23 @@ bool BuilderPage::runOfflineLoop (const RenderOptions& opts,
     else
     {
         mProcessor.setSongMode (true);
+
+        // TS7 §7.3, THE SONG HALF (Jeff, 2026-08-22).  The pattern branch above
+        // sets its own loop bounds because the offline head advances
+        // MONOTONICALLY and never performs the loop wrap the live playhead does.
+        // The song branch was left inheriting whatever the live session last put
+        // in those atomics -- and with a song loop active (both failing projects
+        // had SongLoop on) the stale pair drives BOTH the scheduler's
+        // straddle-wrap windows and the note-off clamp
+        // offHi = min(blkEndBeat, loopEndBeat), so every note past the stale
+        // bound is cut: the same "one note then silence" TS7 fixed for patterns,
+        // reached by the other scope.
+        //
+        // A song export renders the timeline ONCE, start to end, so the loop is
+        // simply off for the render: 0 disables every `loopEndBeat > 0.0` gate in
+        // the scheduler.  Restored with the pattern branch's values below.
+        mProcessor.mLoopStartBeats.store (0.0, std::memory_order_relaxed);
+        mProcessor.mCachedPatternLoopBeats.store (0.0, std::memory_order_relaxed);
     }
 
     // The head was fast-forwarded to the section start by the span math above
