@@ -1,4 +1,5 @@
 #include "BaySickPlayerDSP.h"
+#include "../DSP/PanLaw.h"
 #include "SafeAudioReader.h"   // channel/frame sanity gate (QA-Cleanup)
 #include "../MissingFileReport.h"
 #include <cmath>
@@ -1157,21 +1158,24 @@ void BaySickPlayerVoice::renderNextBlock (juce::AudioBuffer<float>& outputBuffer
     const int   outChs = outputBuffer.getNumChannels();
     if (outChs >= 2)
     {
-        // S-7: per-note pan (CC10) as a center-preserving balance on top of the
-        // voice pan (center note = unity, so existing behavior is unchanged).
-        auto npLOf = [] (float p) noexcept { return p <= 0.0f ? 1.0f : 1.0f - p; };
-        auto npROf = [] (float p) noexcept { return p >= 0.0f ? 1.0f : 1.0f + p; };
+        // Engine pan + note pan as ONE position through the project law
+        // (placement for a mono sample, balance for a stereo one -- the same
+        // per-channel pair here).  A note-pan ramp ramps the gains across the
+        // block between the two positions' gains.
+        const auto law  = baysick::pan::currentLaw();
+        const auto gEnd = baysick::pan::monoGains (mPan + mNotePan, law);
         if (panRamping)
         {
+            const auto gStart = baysick::pan::monoGains (mPan + panSegStart, law);
             outputBuffer.addFromWithRamp (0, startSample, mTmpBuffer.getReadPointer (0), numSamples,
-                                          gain * mPanL * npLOf (panSegStart), gain * mPanL * npLOf (mNotePan));
+                                          gain * gStart.l, gain * gEnd.l);
             outputBuffer.addFromWithRamp (1, startSample, mTmpBuffer.getReadPointer (1), numSamples,
-                                          gain * mPanR * npROf (panSegStart), gain * mPanR * npROf (mNotePan));
+                                          gain * gStart.r, gain * gEnd.r);
         }
         else
         {
-            outputBuffer.addFrom (0, startSample, mTmpBuffer, 0, 0, numSamples, gain * mPanL * npLOf (mNotePan));
-            outputBuffer.addFrom (1, startSample, mTmpBuffer, 1, 0, numSamples, gain * mPanR * npROf (mNotePan));
+            outputBuffer.addFrom (0, startSample, mTmpBuffer, 0, 0, numSamples, gain * gEnd.l);
+            outputBuffer.addFrom (1, startSample, mTmpBuffer, 1, 0, numSamples, gain * gEnd.r);
         }
     }
     else
@@ -1211,11 +1215,7 @@ void BaySickPlayerVoice::setLfoRate       (float hz)        noexcept { mLfoRate 
 
 void BaySickPlayerVoice::setPan (float pan) noexcept
 {
-    // pan: -1 = hard left, 0 = centre, +1 = hard right
-    const float p   = juce::jlimit (-1.f, 1.f, pan);
-    const float ang = (p + 1.f) * juce::MathConstants<float>::halfPi * 0.5f;
-    mPanL = std::cos (ang);
-    mPanR = std::sin (ang);
+    mPan = juce::jlimit (-1.f, 1.f, pan);
 }
 
 void BaySickPlayerVoice::setAdsr (float a, float d, float s, float r) noexcept

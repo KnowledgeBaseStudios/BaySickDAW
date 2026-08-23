@@ -1005,10 +1005,14 @@ ClipCtl readClipCtl (BaySickPlayerProcessor* pl)
     auto rd = [] (std::atomic<float>* a) { return a != nullptr ? a->load() : 0.f; };
 
     c.volume = rd (p.volume);
-    const float pan = juce::jlimit (-1.f, 1.f, rd (p.pan));
-    const float ang = (pan + 1.f) * juce::MathConstants<float>::halfPi * 0.5f;   // equal-power
-    c.panL = std::cos (ang);
-    c.panR = std::sin (ang);
+    // The project law (QA-TrueLevel SC-4): placement for a mono file, balance
+    // for a stereo one -- both are the same per-channel pair here.  Center is
+    // unity; the old hardcoded cos/sin took 3 dB off every clip at center.
+    {
+        const auto g = baysick::pan::monoGains (rd (p.pan), baysick::pan::currentLaw());
+        c.panL = g.l;
+        c.panR = g.r;
+    }
 
     // res 0..1 -> Q 0.5..10 (BaySickPlayerSynth::setFilterParams); hardness adds to Q,
     // muffle lowers cutoff toward 200 Hz -- both with velocity N/A on a timeline
@@ -2634,6 +2638,11 @@ void BaySickDAWProcessor::processBlock(juce::AudioBuffer<float>& buffer,
     // a shielded block that never acknowledged would leave every settle burning
     // its full timeout instead of returning in a block or two.
     mAudioBlockCounter.fetch_add (1, std::memory_order_release);
+
+    // The one project pan law, published for every engine + the clip decode
+    // (DSP/PanLaw.h thread model).  Raw pointer cached once below.
+    if (mPanLawParam == nullptr) mPanLawParam = apvts.getRawParameterValue ("master_pan_law");
+    if (mPanLawParam != nullptr) baysick::pan::publishLaw (mPanLawParam->load());
 
     // 2026-05-06: project-load barrier - bail immediately if the message
     // thread is mid-teardown (closeAllDynamicTabs / openProject /

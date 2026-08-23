@@ -1,5 +1,6 @@
 #pragma once
 #include <JuceHeader.h>
+#include "../DSP/PanLaw.h"
 #include "../SynthSound.h"
 #include "../WavetableOscillator.h"
 #include "../SynthFilter.h"
@@ -248,6 +249,7 @@ private:
     // a center-preserving balance in the render output so a centered note is
     // unchanged.  Fixes app-wide panning (Issue 5B: CC10 was emitted, never read).
     float mNotePan { 0.0f };
+    baysick::pan::GainCache mPanGains;   // note pan -> gains via the project law
 
     // S-6(C): RampSlide loudness ramp.  CC86 stashes the target velocity; CC85
     // arms a per-sample ramp of mCurrentVelocity from the base note's value to the

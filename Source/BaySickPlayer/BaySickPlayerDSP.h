@@ -511,10 +511,12 @@ private:
     float  mReduct        { 0.0f };   // 0 = off, 1 = max lo-fi
     float  mVolume        { 1.0f };   // set by BaySickPlayerSynth (APVTS)
     float  mVelocityScale { 1.0f };   // per-note: velocity * region volumeOffset
-    float  mPanL          { 1.0f };
-    float  mPanR          { 1.0f };
-    // S-7: per-note pan from CC10 (-1..+1, 0 = center), composed with mPanL/mPanR
-    // as a center-preserving balance (Issue 5B: CC10 was emitted, never read).
+    // Engine pan POSITION (-1..+1).  The gains come from the one project law at
+    // render time, with the note pan added as a position first (QA-TrueLevel
+    // SC-4 / SC-5) -- never two laws multiplied.
+    float  mPan           { 0.0f };
+    // S-7: per-note pan from CC10 (-1..+1, 0 = center) (Issue 5B: CC10 was
+    // emitted, never read).
     float  mNotePan       { 0.0f };
     // #11 (G-4): CC89 pan-ramp target (-999 = none pending).  Armed at the RP
     // takeover / RT glide noteOn; mNotePan glides current -> target at block

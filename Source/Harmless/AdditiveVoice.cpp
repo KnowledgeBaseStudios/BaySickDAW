@@ -536,6 +536,7 @@ void AdditiveVoice::renderNextBlock (juce::AudioBuffer<float>& outputBuffer,
     //     updateModContributions's `blendUni` product rule.
     const float modPitchSemis  = mTargets[(size_t) ModTargetIndex::Pitch]      .contribution * 12.0f;
     const float modPan         = mTargets[(size_t) ModTargetIndex::Pan]        .contribution;
+    const auto  panLaw         = baysick::pan::currentLaw();
     const float modTimbreBlend = mTargets[(size_t) ModTargetIndex::TimbreBlend].contribution;
     const float modVolMult     = mTargets[(size_t) ModTargetIndex::Volume]    .uniMult;
     const float modPartAMul    = mTargets[(size_t) ModTargetIndex::PartALevel].uniMult;
@@ -716,18 +717,13 @@ void AdditiveVoice::renderNextBlock (juce::AudioBuffer<float>& outputBuffer,
         // S4 Batch 2b: mod-matrix contributions for volume + pan. modVolMult
         // is a unipolar envelope (1.0 = unchanged); modPan bipolar.
         const float gain = envEffective * vol * tremMult * modVolMult;
-        // Pan mod shifts the stereo balance from the static mMasterPanL/R.
-        // Constant-power blend: drift left = raise L, lower R (and vice versa).
-        const float panBias = juce::jlimit (-1.f, 1.f, modPan);
-        const float lScale  = juce::jlimit (0.f, 1.5f, 1.0f - panBias);
-        const float rScale  = juce::jlimit (0.f, 1.5f, 1.0f + panBias);
-        // S-7: per-note pan (CC10) as a center-preserving balance on top of the
-        // master + mod pan (center note = unity, no change to existing behavior).
-        const float npL = mNotePan <= 0.0f ? 1.0f : 1.0f - mNotePan;
-        const float npR = mNotePan >= 0.0f ? 1.0f : 1.0f + mNotePan;
-        outL[s] += sampleL * mMasterPanL * gain * lScale * npL;
+        // Master pan + note pan (CC10) + pan modulation as ONE position through
+        // the project law; the cache only recomputes when the position moves
+        // (a ramp or a modulator), never for a static note.
+        const auto& pg = mPanGains.get (mMasterPan + mNotePan + modPan, panLaw);
+        outL[s] += sampleL * pg.l * gain;
         // T1h: skip stereo write entirely if mono path (caller never allocated R).
-        if (outR) outR[s] += sampleR * mMasterPanR * gain * rScale * npR;
+        if (outR) outR[s] += sampleR * pg.r * gain;
     }
 
     if (!mAmpADSR.isActive())
@@ -785,10 +781,7 @@ void AdditiveVoice::setVolume (float vol)
 
 void AdditiveVoice::setPan (float pan)
 {
-    const float angle = (juce::jlimit (-1.0f, 1.0f, pan) + 1.0f)
-                        * juce::MathConstants<float>::halfPi * 0.5f;
-    mMasterPanL = std::cos (angle);
-    mMasterPanR = std::sin (angle);
+    mMasterPan = juce::jlimit (-1.0f, 1.0f, pan);
 }
 
 void AdditiveVoice::setGlide (float glideTimeSec)

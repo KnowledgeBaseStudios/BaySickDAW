@@ -415,6 +415,7 @@ void BaySickSynthVoice::renderNextBlock (juce::AudioBuffer<float>& buf,
     auto* R = buf.getWritePointer (1);
     const float sr  = (float) getSampleRate();
     const float twoPi = juce::MathConstants<float>::twoPi;
+    const auto  panLaw = baysick::pan::currentLaw();
 
     for (int i = startSample; i < startSample + numSamples; ++i)
     {
@@ -907,12 +908,12 @@ void BaySickSynthVoice::renderNextBlock (juce::AudioBuffer<float>& buf,
         }
 
         // ── 11. Stereo output ─────────────────────────────────────────────────
-        // S-7: per-note pan as a center-preserving balance (center = unity both
-        // sides, so a centered note is bit-identical to the pre-pan output).
-        const float npL = mNotePan <= 0.0f ? 1.0f : 1.0f - mNotePan;
-        const float npR = mNotePan >= 0.0f ? 1.0f : 1.0f + mNotePan;
-        L[i] += Lout * npL;
-        R[i] += Rout * npR;
+        // Per-note pan through the project law (BaySickSynth has no engine pan
+        // knob of its own; the strip pan is the other stage).  Center = unity,
+        // so a centered note is bit-identical to the pre-pan output.
+        const auto& pg = mPanGains.get (mNotePan, panLaw);
+        L[i] += Lout * pg.l;
+        R[i] += Rout * pg.r;
 
         if (mCutFadeActive && mCutFadeGain <= 0.0f)
         {

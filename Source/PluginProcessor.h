@@ -2307,6 +2307,7 @@ private:
     // interleaved suspend/restore sequences corrupt both.  Owned by
     // beginOfflineRender (compare-exchange) / endOfflineRender (clear).
     std::atomic<bool>    mOfflineRenderActive { false };
+    std::atomic<float>*  mPanLawParam { nullptr };   // master_pan_law, published per block (DSP/PanLaw.h)
     // Set to the calling thread around the two prepareToPlay calls the offline
     // path makes itself, so prepareToPlay can tell a device open from a render
     // reconfigure and only the former moves mAudioDevicePrepared.  Without that

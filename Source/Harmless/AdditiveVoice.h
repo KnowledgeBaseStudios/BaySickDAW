@@ -1,5 +1,6 @@
 #pragma once
 #include <JuceHeader.h>
+#include "../DSP/PanLaw.h"
 #include "HarmonicEngine.h"
 #include "HarmlessModRegistry.h"
 #include "SynthSound.h"   // in Source/ - on the include path via CMake
@@ -236,10 +237,12 @@ private:
     bool   mGlideTimePending { false };
     bool   mPerNoteGlideActive { false };
     float  mPerNoteGlideCoeff  { 0.997f };
-    float  mMasterPanL      { 1.0f };   // from setPan() - constant-power
-    float  mMasterPanR      { 1.0f };
-    // S-7: per-note pan from CC10 (-1..+1, 0 = center), composed with the master
-    // pan as a center-preserving balance (Issue 5B: CC10 was emitted, never read).
+    // Engine pan POSITION from setPan(); master + note + mod pan combine as
+    // ONE position through the project law at render (QA-TrueLevel SC-4/SC-5).
+    float  mMasterPan       { 0.0f };
+    baysick::pan::GainCache mPanGains;
+    // S-7: per-note pan from CC10 (-1..+1, 0 = center) (Issue 5B: CC10 was
+    // emitted, never read).
     float  mNotePan         { 0.0f };
     // S-6(C): RampSlide loudness ramp - CC86 stashes the target velocity, CC85 arms
     // a per-sample ramp of mNoteVelocity from base to slide over the glide time.

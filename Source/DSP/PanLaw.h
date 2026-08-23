@@ -1,5 +1,6 @@
 #pragma once
 #include <JuceHeader.h>
+#include <atomic>
 #include <cmath>
 
 // ── The one pan law (QA-TrueLevel, Jeff 2026-08-22) ─────────────────────────
@@ -28,6 +29,25 @@ namespace baysick::pan
     inline Law lawFromParam (float v) noexcept
     {
         return v >= 0.5f ? Law::Flat : Law::Ramped;
+    }
+
+    // THREAD MODEL: the ONE project law, published by the host processor at the
+    // top of every audio block from master_pan_law (the audio thread is the
+    // writer); every engine voice, the clip decode and the MT strip tasks read
+    // it with a relaxed load.  Process-wide on purpose: a project has one law
+    // by definition, the app is standalone-only, and a global reaches engines
+    // created outside the rig (auditions, pickers) that a per-engine pointer
+    // hand-off would miss.  Same precedent as MasterOutputRouting /
+    // AudioClipStreamer::sOfflineRender.
+    inline std::atomic<int> gLaw { (int) Law::Ramped };
+
+    inline void publishLaw (float paramValue) noexcept
+    {
+        gLaw.store ((int) lawFromParam (paramValue), std::memory_order_relaxed);
+    }
+    inline Law currentLaw() noexcept
+    {
+        return (Law) gLaw.load (std::memory_order_relaxed);
     }
 
     struct MonoGains { float l { 1.0f }, r { 1.0f }; };
@@ -60,6 +80,26 @@ namespace baysick::pan
         constexpr float kSqrt2 = 1.41421356f;
         return { kSqrt2 * std::cos (t), kSqrt2 * std::sin (t) };
     }
+
+    // For per-sample render loops whose position glides (note-pan ramps, pan
+    // modulation): trig only when the position or the law actually changes,
+    // which is never for a static note (CPU Safeguarding).
+    struct GainCache
+    {
+        MonoGains gains;
+        float     pos { 0.0f };
+        Law       law { Law::Ramped };
+
+        const MonoGains& get (float position, Law l) noexcept
+        {
+            if (position != pos || l != law)
+            {
+                pos = position; law = l;
+                gains = monoGains (position, l);
+            }
+            return gains;
+        }
+    };
 
     // Balance of STEREO material: each side scaled by its mono gain, no
     // crossfeed.  Engine pans on stereo samples / stereo clip files (SFZ-spec
