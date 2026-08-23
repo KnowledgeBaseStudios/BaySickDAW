@@ -1453,6 +1453,17 @@ public:
     static constexpr double kViolationGapSeconds = LoudnessViolation::kGapSeconds;
     static constexpr int    kMaxViolationRows    = LoudnessViolation::kMaxRows;
 
+    // ── Offline session, MESSAGE THREAD ONLY (Jeff's ruling B, 2026-08-22) ──
+    // Entering/leaving offline mode activates and deactivates every hosted
+    // VST3, which the VST3 spec requires on the message thread.  Callers that
+    // drive a render from a worker open the session BEFORE starting the worker
+    // and close it after it finishes, so the render thread never waits on the
+    // message thread (the export dialog joins its worker FROM the message
+    // thread, so such a wait deadlocks).  Every runOfflineLoop consumer needs
+    // a session open around it.
+    bool enterOfflineRender (double sampleRate, juce::String& outErr);
+    void leaveOfflineRender();
+
     bool measureRender (const RenderOptions& opts,
                         MeasureResult& out,
                         juce::String& outErr,

@@ -13784,8 +13784,15 @@ public:
     ~ExportAudioDialog() override
     {
         // renderToFile polls shouldAbort per block and restores everything on
-        // the abort path, so this join is bounded.
+        // the abort path, so this join is bounded.  It is ALSO deadlock-free
+        // since ruling B: the worker no longer waits on the message thread for
+        // its offline session, so it can always reach the next abort poll.
         stopThread (10000);
+
+        // The completion handler bails when the window has gone, so closing
+        // mid-render would otherwise strand the session -- device suspended,
+        // offline flag set, app silent.  A no-op when nothing is open.
+        mBuilder.leaveOfflineRender();
     }
 
     void resized() override
@@ -14078,6 +14085,32 @@ private:
 
     void beginJob()
     {
+        // SESSION FIRST, on the message thread (Jeff's ruling B, 2026-08-22).
+        // Entering offline mode resets and re-prepares the graph, activating and
+        // deactivating every hosted VST3 -- which the VST3 spec requires on the
+        // message thread.  Doing it inside the worker made the worker wait on
+        // the message thread, and this dialog joins the worker FROM the message
+        // thread (~ExportAudioDialog -> stopThread), so closing the window
+        // during a render's setup or teardown deadlocked until the join timed
+        // out and killed the worker mid-render.
+        //
+        // Normalize runs TWO passes, each needing its own clean session (the
+        // graph reset between them is what stops pass 2 opening on pass 1's
+        // tails), so the session is per PASS: opened here, closed in
+        // the completion handler, which re-enters for pass 2 if there is one.
+        if (mJob == Job::Render && mOpts.normalize && mPass == Pass::Single)
+            mPass = Pass::NormalizeMeasure;
+
+        juce::String enterErr;
+        if (! mBuilder.enterOfflineRender (mOpts.sampleRate, enterErr))
+        {
+            juce::AlertWindow::showMessageBoxAsync (
+                juce::MessageBoxIconType::WarningIcon, "Export failed",
+                enterErr.isEmpty() ? juce::String ("Could not enter offline render mode.")
+                                   : enterErr, "OK");
+            return;
+        }
+
         mState = State::Rendering;
         mProgress = 0.0;
         setOptionControlsEnabled (false);
@@ -14147,6 +14180,7 @@ private:
                 [sp = juce::Component::SafePointer<ExportAudioDialog> (this), ok, err, m]
                 {
                     if (sp == nullptr) return;
+                    sp->mBuilder.leaveOfflineRender();   // ruling B: session is ours
                     sp->returnToOptions();
                     if (ok)
                     {
@@ -14171,41 +14205,70 @@ private:
             return;
         }
 
-        // CL-045: measure-then-gain.  Pass 1 = the CL-227 backend (meters,
-        // no files, 0..50% of the bar); gain = target minus measured, BOTH
+        // CL-045: measure-then-gain.  Pass 1 = the CL-227 backend (meters, no
+        // files, 0..50% of the bar); gain = target minus measured, BOTH
         // directions, with any boost capped so the estimated true peak stays
-        // under the ceiling; pass 2 renders with the gain applied uniformly
-        // at every writer (main + stems).
-        if (mOpts.normalize)
+        // under the ceiling; pass 2 renders with the gain applied uniformly at
+        // every writer (main + stems).
+        //
+        // The two passes are two WORKER RUNS now (ruling B): each needs its own
+        // offline session and only the message thread may open one, so the gain
+        // is computed and the session flipped in the completion handler below.
+        if (mPass == Pass::NormalizeMeasure)
         {
             BuilderPage::MeasureResult m;
             ok = mBuilder.measureRender (mOpts, m, err,
                 [this]           { return threadShouldExit(); },
                 [this] (double p) { mProgress = p * 0.5; });
-            if (ok)
-            {
-                float gainDb = mOpts.lufsTarget - m.integratedLufs;
-                gainDb = juce::jmin (gainDb, mOpts.ceilingDbTp - m.truePeakDb);
-                mOpts.postGainDb = gainDb;
-            }
+
+            juce::MessageManager::callAsync (
+                [sp = juce::Component::SafePointer<ExportAudioDialog> (this), ok, err, m]
+                {
+                    if (sp == nullptr) return;
+                    sp->mBuilder.leaveOfflineRender();   // pass 1's session
+
+                    if (! ok)
+                    {
+                        sp->finishExport (false, err);
+                        return;
+                    }
+
+                    float gainDb = sp->mOpts.lufsTarget - m.integratedLufs;
+                    gainDb = juce::jmin (gainDb, sp->mOpts.ceilingDbTp - m.truePeakDb);
+                    sp->mOpts.postGainDb = gainDb;
+
+                    // Pass 1's worker is returning; wait for it before the
+                    // restart (bounded -- it no longer waits on us).
+                    sp->waitForThreadToExit (5000);
+                    sp->mPass = Pass::NormalizeRender;
+                    sp->beginJob();
+                });
+            return;
         }
 
-        if (ok)
-            ok = mBuilder.renderToFile (mOpts, err,
-                [this]           { return threadShouldExit(); },
-                [this] (double p) { mProgress = mOpts.normalize ? 0.5 + p * 0.5 : p; });
+        ok = mBuilder.renderToFile (mOpts, err,
+            [this]           { return threadShouldExit(); },
+            [this] (double p) { mProgress = mPass == Pass::NormalizeRender ? 0.5 + p * 0.5 : p; });
 
         juce::MessageManager::callAsync (
             [sp = juce::Component::SafePointer<ExportAudioDialog> (this), ok, err]
             {
                 if (sp == nullptr) return;   // window was closed mid-render
-                sp->stopTimer();
-                if (auto* dw = sp->findParentComponentOfClass<juce::DialogWindow>())
-                    dw->exitModalState (ok ? 1 : 0);
-                if (! ok && err != "Export cancelled.")
-                    juce::AlertWindow::showMessageBoxAsync (
-                        juce::MessageBoxIconType::WarningIcon, "Export failed", err);
+                sp->mBuilder.leaveOfflineRender();
+                sp->finishExport (ok, err);
             });
+    }
+
+    // Message thread.  One exit for every export outcome so the dialog can
+    // never close with a pass still believing it owns a session.
+    void finishExport (bool ok, const juce::String& err)
+    {
+        stopTimer();
+        if (auto* dw = findParentComponentOfClass<juce::DialogWindow>())
+            dw->exitModalState (ok ? 1 : 0);
+        if (! ok && err != "Export cancelled.")
+            juce::AlertWindow::showMessageBoxAsync (
+                juce::MessageBoxIconType::WarningIcon, "Export failed", err);
     }
 
     BuilderPage&        mBuilder;
@@ -14233,6 +14296,14 @@ private:
     juce::Label      mPercent;
     double           mProgress { 0.0 };
     State            mState { State::Options };
+
+    // Normalize renders TWO passes and each needs its own clean offline session
+    // (the graph reset between them is what stops pass 2 opening on pass 1's
+    // reverb tails).  The worker cannot flip the session itself -- that would
+    // mean waiting on the message thread -- so each pass is its own worker run
+    // and the flip happens in the completion handler.
+    enum class Pass { Single, NormalizeMeasure, NormalizeRender };
+    Pass             mPass { Pass::Single };
     enum class Job { Render, Measure };
     Job              mJob    { Job::Render };
     LoudnessSpec::Id mSpecId { LoudnessSpec::Id::Streaming14 };

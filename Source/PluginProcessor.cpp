@@ -7738,66 +7738,44 @@ bool BaySickDAWProcessor::beginOfflineRender (double renderSampleRate, int rende
     AudioClipStreamer::sPeakPrefillMs.store (0.0f, std::memory_order_relaxed);
     AudioClipStreamer::sOfflineRender.store (true, std::memory_order_release);
 
+    // MESSAGE THREAD, GUARANTEED BY THE CALLER (Jeff's ruling B, 2026-08-22).
+    // Everything below reaches hosted VST3 plugins, and the VST3 spec requires
+    // IComponent::setupProcessing / setActive / activateBus on the MAIN thread --
+    // JUCE asserts it and says why: "some plugins may break".
+    //
+    // The first cut marshalled here with MessageManager::callSync so a worker
+    // could call in.  That was replaced: the export dialog joins its worker FROM
+    // the message thread, so a worker waiting on the message thread deadlocked
+    // whenever the window was closed during a render's setup or teardown.  Every
+    // caller now opens and closes the session from the message thread itself
+    // (BuilderPage::enterOfflineRender / leaveOfflineRender), so there is no
+    // cross-thread wait left anywhere on this path.
+    jassert (juce::MessageManager::getInstance()->isThisTheMessageThread());
 
     // THE TIMELINE MUST SPEAK THE RENDER'S RATE (Jeff, 2026-08-22).  Every
     // TempoMap segment's sample position is baked at the rate it was published
     // with -- the live DEVICE rate -- and every beat<->sample conversion the
-    // render performs goes through it: the per-block scheduling window, the
-    // clip start/end positions, the loop-wrap math.  Rendering at a rate the
-    // device is not running at therefore read the whole timeline through the
-    // wrong divisor.  Republished here, restored in endOfflineRender.
+    // render performs goes through it: the per-block scheduling window, the clip
+    // start/end positions, the loop-wrap math.  Rendering at a rate the device is
+    // not running at therefore read the whole timeline through the wrong divisor
+    // (a 44.1k export on a 48k device: 0.91875).  Restored in endOfflineRender.
     //
-    // Safe as a lone writer: the device is suspended above and the editor's
-    // rate watch is gated on ! isNonRealtime(), which the sweep just set.
-    // ── ON THE MESSAGE THREAD (Jeff, 2026-08-22) ────────────────────────────
-    // Everything below reaches hosted VST3 plugins, and the VST3 spec requires
-    // IComponent::setupProcessing / setActive / activateBus on the MAIN thread.
-    // JUCE asserts it outright and says why: "some plugins may break".  Export
-    // and Measure drive this from their own background thread, so the whole
-    // sequence used to run off-thread -- and while JUCE's prepareToPlay takes a
-    // MessageManagerLock for the setup half, the releaseResources -> deactivate
-    // half takes none, which is the exposed path (three of the four asserts
-    // Jeff caught).  Our own code assumes it too: HostedPlugin.cpp sizes its
-    // scratch "HERE, on the message thread".
-    //
-    // callSync runs the job DIRECTLY when already on the message thread, so the
-    // freeze render (which is) keeps its exact previous behaviour and pays
-    // nothing; only the background-thread callers marshal.
-    //
-    // TempoMap::publish rides along for the same reason -- it is documented
-    // message-thread-only.
-    const bool reconfigured = juce::MessageManager::callSync (
-        [this, renderSampleRate, renderBlockSize]
-        {
-            mOfflinePrevMapSr = republishTempoMapAtRate (renderSampleRate);
+    // Safe as a lone writer: the device is suspended above, the editor's rate
+    // watch is gated on ! isNonRealtime() which the sweep just set, and publish
+    // is message-thread-only -- which the caller guarantees.
+    mOfflinePrevMapSr = republishTempoMapAtRate (renderSampleRate);
 
-            // Wet-tail hygiene: the render must not open on live reverb/delay tails.
-            mVibeGraph.reset();
+    // Wet-tail hygiene: the render must not open on live reverb/delay tails.
+    mVibeGraph.reset();
 
-            // Full re-prepare at the render config -- prepareToPlay sweeps every
-            // engine + the graph, so the render rate is independent of the device's.
-            //
-            // The thread marker is set INSIDE this job: prepareToPlay compares it
-            // against getCurrentThreadId() to tell a render's re-prepare from a
-            // real device open, so it has to name the thread actually running.
-            mOfflineReconfigureThread.store (juce::Thread::getCurrentThreadId(),
-                                             std::memory_order_release);
-            prepareToPlay (renderSampleRate, renderBlockSize);
-            mOfflineReconfigureThread.store (nullptr, std::memory_order_release);
-        });
-
-    if (! reconfigured)
-    {
-        // The message loop could not take the job (shutting down).  Undo the
-        // suspend rather than leaving the device muted with a render flag set.
-        sweepNonRealtime (false);
-        AudioClipStreamer::sOfflineRender.store (false, std::memory_order_release);
-        setProjectLoadInProgress (mOfflinePrevShield);
-        suspendProcessing (false);
-        mOfflineRenderActive.store (false, std::memory_order_release);
-        return false;
-    }
-
+    // Full re-prepare at the render config -- prepareToPlay sweeps every engine
+    // + the graph, so the render rate is independent of the device's.  The
+    // thread marker lets prepareToPlay tell a render's re-prepare from a real
+    // device open.
+    mOfflineReconfigureThread.store (juce::Thread::getCurrentThreadId(),
+                                     std::memory_order_release);
+    prepareToPlay (renderSampleRate, renderBlockSize);
+    mOfflineReconfigureThread.store (nullptr, std::memory_order_release);
     return true;
 }
 
@@ -7812,24 +7790,23 @@ void BaySickDAWProcessor::endOfflineRender()
     // whether there is something to restore.
     // Timeline back to the LIVE device rate before anything re-prepares
     // against it (see the note in beginOfflineRender).
-    // Message thread again, for the same reason as the begin half: this
+    // Message thread again, guaranteed by the caller (see the begin half): this
     // re-prepare deactivates and re-activates every hosted VST3.
-    juce::MessageManager::callSync ([this]
-    {
-        if (mOfflinePrevMapSr > 0.0)
-        {
-            republishTempoMapAtRate (mOfflinePrevMapSr);
-            mOfflinePrevMapSr = 0.0;
-        }
+    jassert (juce::MessageManager::getInstance()->isThisTheMessageThread());
 
-        if (mOfflinePrevSr > 0.0 && mOfflinePrevBlk > 0)
-        {
-            mOfflineReconfigureThread.store (juce::Thread::getCurrentThreadId(),
-                                             std::memory_order_release);
-            prepareToPlay (mOfflinePrevSr, mOfflinePrevBlk);
-            mOfflineReconfigureThread.store (nullptr, std::memory_order_release);
-        }
-    });
+    if (mOfflinePrevMapSr > 0.0)
+    {
+        republishTempoMapAtRate (mOfflinePrevMapSr);
+        mOfflinePrevMapSr = 0.0;
+    }
+
+    if (mOfflinePrevSr > 0.0 && mOfflinePrevBlk > 0)
+    {
+        mOfflineReconfigureThread.store (juce::Thread::getCurrentThreadId(),
+                                         std::memory_order_release);
+        prepareToPlay (mOfflinePrevSr, mOfflinePrevBlk);
+        mOfflineReconfigureThread.store (nullptr, std::memory_order_release);
+    }
 
     // The render was a consumer and prepareToPlay cleared the idle assertion for
     // it; now that it has finished, the device is the only consumer left, and

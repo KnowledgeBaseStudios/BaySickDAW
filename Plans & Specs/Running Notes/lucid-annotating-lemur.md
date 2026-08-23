@@ -2863,6 +2863,57 @@ failed post unwinds the suspend instead of leaving the device muted.
   plugins across a render) added to B.36; SND-45 updated for the retired
   log.
 
+### Ruling B - the offline session moved to the message thread
+
+The first cut of the VST3 fix marshalled begin/endOfflineRender with
+`MessageManager::callSync`.  My own follow-up audit found that introduced
+a deadlock: `~ExportAudioDialog` joins its worker with `stopThread(10000)`
+FROM the message thread, and the destructor's own comment states the
+invariant it relied on - "renderToFile polls shouldAbort per block ... so
+this join is bounded".  The marshal broke that: during setup/teardown the
+worker was waiting on the message thread and could not reach an abort
+poll, so closing the export window in that window deadlocked until the
+join timed out and `killThread` fired on a thread holding the processor
+suspended.
+
+I offered A (pumping join, ~10 lines) or B (hoist the session to the
+message thread, architecturally right).  **Jeff chose B on the merits.**
+I then came back twice trying to walk him to A after discovering B was
+bigger than I had quoted - re-litigating a settled decision, which is
+exactly what he called out.  Recorded because the failure was mine and
+the pattern is the point: a bad cost estimate is my problem to absorb,
+not grounds to reopen his call.
+
+What shipped:
+
+- `runOfflineLoop` no longer owns the session.  It asserts one is open and
+  keeps only thread-agnostic work (span math, pattern + loop bounds, song
+  mode, playhead, the block loop, the transport restores - which still
+  land before teardown, while the device is suspended, as before).
+- New `BuilderPage::enterOfflineRender` / `leaveOfflineRender`, message-
+  thread-only and asserting it.  A `ScopedOfflineSession` RAII helper
+  serves the message-thread consumers.
+- Consumers: `renderFreezeFile` + `renderKitFreezeFiles` take the RAII
+  session inline (already message thread); `RenderJob` opens before
+  `launchThread` and closes in `threadComplete`; `ExportAudioDialog` opens
+  per pass and closes in its completion handler.
+- **Normalize is now TWO worker runs.**  Each pass needs its own clean
+  session - the graph reset between them is what stops pass 2 opening on
+  pass 1's reverb tails - and the worker cannot flip a session itself
+  without waiting on the message thread.  So the gain is computed and the
+  session flipped in the completion handler, which re-enters and restarts
+  the worker for pass 2.
+- The dialog's destructor also leaves the session: the completion handler
+  bails when the window is gone, which would otherwise strand the app with
+  the device suspended and the offline flag set.
+- `begin/endOfflineRender` dropped the callSync marshals entirely - no
+  cross-thread wait remains on this path, only a jassert that the caller
+  got the thread right.
+
+Build green.  Installer `20260822-1438`.  This touched the whole export
+path, so it needs a full re-verify: plain export, export with Normalize,
+stems, Measure, freeze, and one deliberate mid-render window close.
+
 ### Still open
 
 - My song-scope loop-bounds change from earlier in the hunt is still in

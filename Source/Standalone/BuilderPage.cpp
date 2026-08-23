@@ -9037,6 +9037,71 @@ namespace
 // (begin/endOfflineRender + the full restore set), the lane-aware clock, the
 // per-block lane replay, tail-decay handling.  Consumers differ only in what
 // they do with each rendered block (write files / feed meters / tap a strip).
+namespace
+{
+    // RAII for the message-thread consumers (the two freeze renders).  The
+    // worker-driven consumers cannot use this -- their session has to outlive
+    // the call, opened before the worker starts and closed after it ends.
+    struct ScopedOfflineSession
+    {
+        ScopedOfflineSession (BuilderPage& p, double sr, juce::String& err)
+            : page (p), entered (p.enterOfflineRender (sr, err)) {}
+        ~ScopedOfflineSession() { if (entered) page.leaveOfflineRender(); }
+
+        BuilderPage& page;
+        const bool   entered;
+    };
+}
+
+// ── Offline session: MESSAGE THREAD ONLY ────────────────────────────────────
+// Split out of runOfflineLoop (Jeff's ruling B, 2026-08-22).  beginOfflineRender
+// resets and re-prepares the graph and endOfflineRender does it again; both
+// reach every hosted VST3's activation, which the VST3 spec requires on the
+// message thread.  Marshalling from the worker was tried first and rejected: it
+// made the render thread wait on the message thread, and the export dialog joins
+// its worker FROM the message thread (~ExportAudioDialog -> stopThread), so a
+// window close during a render's setup or teardown deadlocked until the join
+// timed out and killed the thread mid-render.  Owning the session from the
+// message thread removes the cross-thread wait entirely.
+bool BuilderPage::enterOfflineRender (double sampleRate, juce::String& outErr)
+{
+    jassert (juce::MessageManager::getInstance()->isThisTheMessageThread());
+
+    if (onOfflineRenderActive) onOfflineRenderActive (true);
+
+    // Stopwatch split (see renderFreezeFile): enter/leave offline mode is FIXED
+    // cost paid regardless of render length, so it must be timed separately from
+    // the per-block loop or a short render reads as catastrophically slow.
+    const double offlineT0 = juce::Time::getMillisecondCounterHiRes();
+    const double sr = sampleRate > 0.0 ? sampleRate : 44100.0;
+
+    if (! mProcessor.beginOfflineRender (sr, kOfflineBlock))
+    {
+        if (onOfflineRenderActive) onOfflineRenderActive (false);
+        outErr = "Could not enter offline render mode.";
+        return false;
+    }
+
+    mFreezeSetupMs = juce::Time::getMillisecondCounterHiRes() - offlineT0;
+    return true;
+}
+
+void BuilderPage::leaveOfflineRender()
+{
+    jassert (juce::MessageManager::getInstance()->isThisTheMessageThread());
+
+    if (! mProcessor.isOfflineRenderActive())
+        return;   // never entered, or already left -- leaving twice is not an error
+
+    // Restore-set back (device config, playhead, song mode), tails cleared,
+    // device resumed.  The render's own transport mutations were already put
+    // back by runOfflineLoop, while the device was still suspended.
+    const double teardownT0 = juce::Time::getMillisecondCounterHiRes();
+    mProcessor.endOfflineRender();
+    mFreezeTeardownMs = juce::Time::getMillisecondCounterHiRes() - teardownT0;
+    if (onOfflineRenderActive) onOfflineRenderActive (false);
+}
+
 bool BuilderPage::runOfflineLoop (const RenderOptions& opts,
                                   juce::String& outErr,
                                   std::function<bool()> shouldAbort,
@@ -9137,23 +9202,26 @@ bool BuilderPage::runOfflineLoop (const RenderOptions& opts,
     // as playback.  The old replica BaySickDAWProcessor here had no pages and
     // therefore no instrument engines or strips -- vox/inst/instrument
     // exports rendered SILENT (the batch's origin finding).
-    if (onOfflineRenderActive) onOfflineRenderActive (true);
+    // THE SESSION IS THE CALLER'S (Jeff's ruling B, 2026-08-22).  Entering and
+    // leaving offline mode resets and re-prepares the graph, which activates and
+    // deactivates every hosted VST3 -- and the VST3 spec requires that on the
+    // MESSAGE thread.  Export and the Builder's own render job drive this loop
+    // from a worker, so the session is opened by the caller BEFORE the worker
+    // starts and closed after it finishes; nothing here ever waits on the
+    // message thread, which is what keeps the dialog's join bounded.
+    //
+    // Everything below is plain state (pattern index, loop bounds, song mode,
+    // playhead) and is thread-agnostic, so it stays on the worker.
+    jassert (mProcessor.isOfflineRenderActive());
+    if (! mProcessor.isOfflineRenderActive())
+    {
+        outErr = "Offline render mode was not entered by the caller.";
+        return false;
+    }
 
     // Pattern-scope exports used to mutate the LIVE current pattern with no
     // restore; part of the locked restore set now.
     const int prevPatternIndex = mPM.getCurrentPatternIndex();
-
-    // Stopwatch split (see renderFreezeFile): enter/leave offline mode is FIXED
-    // cost paid regardless of render length, so it must be timed separately from
-    // the per-block loop or a short render reads as catastrophically slow.
-    const double offlineT0 = juce::Time::getMillisecondCounterHiRes();
-    if (! mProcessor.beginOfflineRender (sr, kBlk))
-    {
-        if (onOfflineRenderActive) onOfflineRenderActive (false);
-        outErr = "Could not enter offline render mode.";
-        return false;
-    }
-    mFreezeSetupMs = juce::Time::getMillisecondCounterHiRes() - offlineT0;
 
     // TS7 §7.3 FIX -- the pattern render produced one note then silence, in a file
     // shorter than the pattern.  ONE root cause behind both symptoms.
@@ -9315,12 +9383,9 @@ bool BuilderPage::runOfflineLoop (const RenderOptions& opts,
     mProcessor.mLoopStartBeats       .store (prevLoopStart, std::memory_order_relaxed);
     mProcessor.mCachedPatternLoopBeats.store (prevLoopEnd,  std::memory_order_relaxed);
 
-    // Leave offline mode on EVERY exit path: restore-set back (device config,
-    // playhead, song mode), tails cleared, device resumed.
-    const double teardownT0 = juce::Time::getMillisecondCounterHiRes();
-    mProcessor.endOfflineRender();
-    mFreezeTeardownMs = juce::Time::getMillisecondCounterHiRes() - teardownT0;
-    if (onOfflineRenderActive) onOfflineRenderActive (false);
+    // Offline mode is left by the CALLER (leaveOfflineRender), on the message
+    // thread, after this returns -- see the note at the top.  The restores above
+    // still land first, while the device is suspended, exactly as before.
 
     if (aborted)
     {
@@ -9665,6 +9730,9 @@ bool BuilderPage::renderFreezeFile (BaySickGraph::InsertKind kind, int index,
     // not span the file I/O.  It also puts the arm past every early return.
     mProcessor.setFreezePrune (target);
 
+    ScopedOfflineSession session (*this, opts.sampleRate, outErr);
+    if (! session.entered) return false;
+
     const bool ok = runOfflineLoop (opts, outErr, std::move (shouldAbort),
                                     std::move (onProgress),
         [&graph, &writer, &writtenSamples, &lastTapSeq, &blocksWithTap]
@@ -9814,6 +9882,9 @@ bool BuilderPage::renderKitFreezeFiles (const std::vector<juce::File>& dests,
     // Armed AFTER the writer setup above, so none of its early returns can leave
     // the prune set.  See renderFreezeFile for why leaking it is dangerous.
     mProcessor.setFreezePrune (target);
+
+    ScopedOfflineSession session (*this, opts.sampleRate, outErr);
+    if (! session.entered) return false;
 
     const bool ok = runOfflineLoop (opts, outErr, std::move (shouldAbort),
                                     std::move (onProgress),
@@ -10355,6 +10426,11 @@ void BuilderPage::runExportWithProgress (const RenderOptions& opts)
 
         void threadComplete (bool userPressedCancel) override
         {
+            // MESSAGE THREAD.  Close the session the launcher opened -- see the
+            // note there; the worker never touches it.
+            if (auto* page = mOwner.getComponent())
+                page->leaveOfflineRender();
+
             if (! userPressedCancel && ! mOk)
                 juce::AlertWindow::showMessageBoxAsync (
                     juce::MessageBoxIconType::WarningIcon, "Export failed", mErr, "OK");
@@ -10366,6 +10442,21 @@ void BuilderPage::runExportWithProgress (const RenderOptions& opts)
         juce::String  mErr;
         bool          mOk { false };
     };
+
+    // Session opened HERE, on the message thread, before the worker starts, and
+    // closed in threadComplete (also message thread).  Entering offline mode
+    // activates/deactivates every hosted VST3 and the VST3 spec requires that on
+    // the message thread; doing it from the worker instead made the worker wait
+    // on the message thread while the message thread joined the worker.
+    juce::String enterErr;
+    if (! enterOfflineRender (opts.sampleRate, enterErr))
+    {
+        juce::AlertWindow::showMessageBoxAsync (
+            juce::MessageBoxIconType::WarningIcon, "Export failed",
+            enterErr.isEmpty() ? juce::String ("Could not enter offline render mode.") : enterErr,
+            "OK");
+        return;
+    }
 
     (new RenderJob (*this, opts))->launchThread();
 }
