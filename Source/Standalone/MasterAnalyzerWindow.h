@@ -63,6 +63,7 @@ public:
     // Export the selected take's audio.  Wired by the editor because a file
     // chooser is not this component's business.
     std::function<void(const VersionCapture::Version&)> onExportTake;
+    std::function<void(int /*takeId*/)>                 onRemoveTake;   // QA-TrueLevel SC-14
 
     // Driven from the window's title-strip menu.  Spectrum view implies the
     // LIVE source: the spectrum is live data (no spectrum is captured for a
@@ -139,6 +140,7 @@ private:
     VersionCapture*                   mVersions { nullptr };
     std::unique_ptr<juce::ComboBox>   mSourceBox;
     std::unique_ptr<juce::TextButton> mExportBtn;
+    std::unique_ptr<juce::TextButton> mRemoveBtn;   // QA-TrueLevel SC-14
     int  mSelectedTakeId { 0 };        // 0 = Live
     bool mRebuildingList { false };    // suppresses onChange during repopulate
     void applySelection();

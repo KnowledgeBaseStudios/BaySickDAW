@@ -43,6 +43,7 @@ public:
         juce::String scopeLabel;          // what was playing
 
         std::vector<float> lufsCurve;     // Short-Term, sampled at kHistoryHz
+        std::vector<float> momentaryCurve; // QA-TrueLevel SC-14: Momentary, same rate
         float  integratedLufs { -120.0f };
         float  lraLu          {    0.0f };
         float  truePeakDb     { -144.0f };
@@ -62,6 +63,12 @@ public:
         // sweepStaleSessions reclaiming at the next startup what an abnormal
         // exit stranded, and a retained take under <project>\Reports\ is theirs.
         juce::File audioFile;
+
+        // QA-TrueLevel SC-14: the session report this take lives in (empty for
+        // session-only takes), and whether it was loaded FROM a report rather
+        // than captured here.  Export / remove rewrite that file.
+        juce::File reportFile;
+        bool       fromReport { false };
     };
 
     VersionCapture() = default;
@@ -127,6 +134,7 @@ public:
                bool         playing,
                juce::uint32 changeStamp,
                float        shortTermLufs,
+               float        momentaryLufs,
                float        truePeakDb,
                const juce::String& scopeLabel);
 
@@ -145,6 +153,11 @@ public:
     // ── The list (§3.6) ──────────────────────────────────────────────────────
     const std::vector<Version>& versions() const noexcept { return mVersions; }
     const Version* find (int id) const noexcept;
+    // QA-TrueLevel SC-14: takes loaded from a report join the list (fresh id),
+    // and a take can be dropped from it; both fire onVersionsChanged.
+    int  importVersion (Version v);
+    void removeVersion (int id);
+    void setVersionReportFile (int id, const juce::File& f);
 
     // Session-only takes are deleted here; retained ones are left on disk.
     void discardSessionAudio();

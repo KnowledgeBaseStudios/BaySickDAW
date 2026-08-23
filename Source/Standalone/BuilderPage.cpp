@@ -10215,6 +10215,7 @@ bool BuilderPage::measureRender (const RenderOptions& opts,
                 const float st = lufs.shortTerm();
                 lra.push (st);
                 out.lufsCurve.push_back (st);   // §2.7: the drawable curve
+                out.momentaryCurve.push_back (lufs.momentary());   // SC-14
                 out.maxShortTermLufs = juce::jmax (out.maxShortTermLufs, st);
 
                 // Only Custom carries a short-term ceiling today -- none of the

@@ -58,6 +58,9 @@ MasterAnalyzerView::MasterAnalyzerView (BaySickDAWProcessor& proc)
     };
     addAndMakeVisible (*mSourceBox);
 
+    // QA-TrueLevel SC-15: exports the take's REPORT (every take has one; the
+    // audio rides along when it was captured), so the button lights for any
+    // selected take instead of only audio-captured ones.
     mExportBtn = std::make_unique<juce::TextButton> ("Export Take...");
     mExportBtn->setEnabled (false);
     mExportBtn->onClick = [this]
@@ -67,12 +70,24 @@ MasterAnalyzerView::MasterAnalyzerView (BaySickDAWProcessor& proc)
     };
     addAndMakeVisible (*mExportBtn);
 
+    mRemoveBtn = std::make_unique<juce::TextButton> ("Remove Take");
+    mRemoveBtn->setEnabled (false);
+    mRemoveBtn->onClick = [this]
+    {
+        if (mVersions == nullptr || ! onRemoveTake || mSelectedTakeId <= 0) return;
+        const int id = mSelectedTakeId;
+        selectSource (0);
+        onRemoveTake (id);
+    };
+    addAndMakeVisible (*mRemoveBtn);
+
     refreshVersions();
 }
 
 void MasterAnalyzerView::resized()
 {
     auto r = getLocalBounds().removeFromTop ((int) kControlsH).reduced (4, 3);
+    if (mRemoveBtn) { mRemoveBtn->setBounds (r.removeFromRight (96)); r.removeFromRight (4); }
     if (mExportBtn) mExportBtn->setBounds (r.removeFromRight (96));
     r.removeFromRight (4);
     if (mSourceBox) mSourceBox->setBounds (r);
@@ -134,16 +149,13 @@ void MasterAnalyzerView::applySelection()
     if (v == nullptr)
     {
         if (mExportBtn) mExportBtn->setEnabled (false);
+        if (mRemoveBtn) mRemoveBtn->setEnabled (false);
         showLive();
         return;
     }
 
-    // Only a take captured WITH audio can be exported.  Disabled rather than
-    // hidden, so the reason stays visible next to the "(no audio)" the list
-    // already shows.
-    if (mExportBtn)
-        mExportBtn->setEnabled (v->audioFile != juce::File()
-                                && v->audioFile.existsAsFile());
+    if (mExportBtn) mExportBtn->setEnabled (true);
+    if (mRemoveBtn) mRemoveBtn->setEnabled (true);
 
     showRenderedCurve (v->lufsCurve, v->integratedLufs, v->lraLu,
                        v->truePeakDb, v->label);

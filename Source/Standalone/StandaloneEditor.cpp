@@ -2036,7 +2036,7 @@ StandaloneEditor::StandaloneEditor(BaySickDAWProcessor& p, StandalonePlayHead& p
         openUiPrefs()->getBoolValue ("fsCaptureAudio", false));
     // §3.4: session-only is the default (id 1); id 2 is <project>\Reports\.
     mVersionCapture.setRetainInProject (
-        openUiPrefs()->getIntValue ("fsCaptureRetain", 1) == 2);
+        openUiPrefs()->getIntValue ("fsCaptureRetain", 2) == 2);   // SC-13: project by default
 
     // Ruling 6a (2026-07-31): takes are judged against the export dialog's
     // persisted spec choice -- ONE loudness standard everywhere.  setSpec had
@@ -2070,44 +2070,32 @@ StandaloneEditor::StandaloneEditor(BaySickDAWProcessor& p, StandalonePlayHead& p
     // machinery.  Violations are absent because a capture measures Short-Term
     // loudness on a UI timer rather than scanning blocks; the curve, the summary
     // and the verdicts are all real.
+    // QA-TrueLevel SC-14: ONE report per session, takes as sections.  The first
+    // retained take of a session creates the file; every later one rewrites it
+    // with every take that belongs to it.
     mVersionCapture.onPersistTake = [this] (const VersionCapture::Version& v)
     {
         const auto dir = mProcessor.getProjectReportsDir();
         if (dir == juce::File()) return;
 
-        BuilderPage::MeasureResult m;
-        m.lufsCurve      = v.lufsCurve;
-        m.integratedLufs = v.integratedLufs;
-        m.lraLu          = v.lraLu;
-        m.truePeakDb     = v.truePeakDb;
-        m.maxShortTermLufs = v.maxShortTerm;
-        m.durationSeconds  = v.durationSec;
-        m.violations          = v.violations;          // §5.3 flagged moments
-        m.violationsTruncated = v.violationsTruncated;
-        m.specId              = mVersionCapture.getSpec().id;
-        m.customTargetLufs    = mVersionCapture.getSpec().integratedLufs;
-        m.truePeakInSpec      = (m.truePeakDb <= mVersionCapture.getSpec().maxTruePeakDb);
-        m.integratedInSpec    = (! mVersionCapture.getSpec().checksIntegrated)
-                              || (std::abs (m.integratedLufs
-                                            - mVersionCapture.getSpec().integratedLufs)
-                                  <= mVersionCapture.getSpec().toleranceLu);
-
-        LoudnessReportWriter::Context ctx;
-        ctx.projectName   = mProjectManager ? mProjectManager->getCurrentFolder()
-                                                  .getFileNameWithoutExtension()
-                                            : juce::String();
-        ctx.scopeLabel    = v.scopeLabel;
-        ctx.timestampLabel = v.label;
+        const juce::File proj = mProcessor.getCurrentProjectFolder();
+        if (mSessionReportFile == juce::File() || mSessionReportProject != proj)
+        {
+            mSessionReportProject = proj;
+            mSessionReportFile = dir.getChildFile (
+                proj.getFileNameWithoutExtension() + " - Session "
+                + juce::Time::getCurrentTime().formatted ("%Y-%m-%d %H-%M") + ".html");
+        }
+        mVersionCapture.setVersionReportFile (v.id, mSessionReportFile);
 
         juce::String err;
-        if (! LoudnessReportWriter::write (dir, v.label.replaceCharacter (':', '-'),
-                                           m, ctx, /*wantCsv*/ false, err))
+        if (! writeSessionReport (mSessionReportFile, err))
         {
             // The writer's own contract: a failure is SHOWN, never swallowed.
             // Once per session, not per take -- this fires automatically at
             // every take end, and a broken Reports folder would otherwise
             // popup on every loop wrap.
-            DBG ("[TS7 CAPTURE] take report write failed: " << err);
+            DBG ("[TS7 CAPTURE] session report write failed: " << err);
             if (! mTakeReportErrorShown)
             {
                 mTakeReportErrorShown = true;
@@ -3649,9 +3637,9 @@ std::unique_ptr<juce::Component> StandaloneEditor::createBuilderPage()
         // page.  A file carrying no block is refused rather than opened empty.
         panel->onOpenReport = [this] (const juce::File& f)
         {
-            BuilderPage::MeasureResult    m;
+            std::vector<LoudnessReportWriter::Take> takes;
             LoudnessReportWriter::Context ctx;
-            if (! LoudnessReportWriter::readEmbedded (f, m, ctx))
+            if (! LoudnessReportWriter::readEmbeddedAll (f, takes, ctx))
             {
                 juce::AlertWindow::showMessageBoxAsync (
                     juce::AlertWindow::WarningIcon,
@@ -3662,14 +3650,36 @@ std::unique_ptr<juce::Component> StandaloneEditor::createBuilderPage()
                     "been edited and re-saved by another program may not.");
                 return;
             }
+            // SC-14: every take in the file joins the analyzer's Source list
+            // (skipping ones already loaded from this file), and the first is
+            // shown.  They then export / remove like captured takes.
+            int firstId = -1;
+            for (const auto& t : takes)
+            {
+                bool have = false;
+                for (const auto& ex : mVersionCapture.versions())
+                    if (ex.fromReport && ex.reportFile == f && ex.label == t.label) { have = true; firstId = firstId < 0 ? ex.id : firstId; break; }
+                if (have) continue;
+                VersionCapture::Version v;
+                v.label          = t.label.isNotEmpty() ? t.label : f.getFileNameWithoutExtension();
+                v.scopeLabel     = t.scopeLabel;
+                v.lufsCurve      = t.m.lufsCurve;
+                v.momentaryCurve = t.m.momentaryCurve;
+                v.integratedLufs = t.m.integratedLufs;
+                v.lraLu          = t.m.lraLu;
+                v.truePeakDb     = t.m.truePeakDb;
+                v.maxShortTerm   = t.m.maxShortTermLufs;
+                v.durationSec    = t.m.durationSeconds;
+                v.violations     = t.m.violations;
+                v.violationsTruncated = t.m.violationsTruncated;
+                v.reportFile     = f;
+                const int id = mVersionCapture.importVersion (std::move (v));
+                if (firstId < 0) firstId = id;
+            }
             openMasterAnalyzerWindow();
             if (auto* win = findAuxWindow ("analyzer:master"))
                 if (auto* v = dynamic_cast<MasterAnalyzerView*> (win->getContent()))
-                    v->showRenderedCurve (m.lufsCurve, m.integratedLufs, m.lraLu,
-                                          m.truePeakDb,
-                                          ctx.scopeLabel.isNotEmpty()
-                                              ? ctx.scopeLabel
-                                              : f.getFileNameWithoutExtension());
+                    if (firstId > 0) v->selectSource (firstId);
         };
 
         panel->onEnumerateAudio = [this]() -> std::vector<CategorizedAudioEntry>
@@ -17019,6 +17029,7 @@ void StandaloneEditor::openMasterAnalyzerWindow()
     {
         exportCapturedTake (v);
     };
+    viewRaw->onRemoveTake = [this] (int takeId) { removeCapturedTake (takeId); };   // SC-14
 
     if (auto* bar = win->getPageMenu())
     {
@@ -19135,46 +19146,119 @@ void StandaloneEditor::pollVersionCapture()
                           DSPBase::isTransportPlaying(),
                           mProjectManager ? mProjectManager->getChangeStamp() : 0u,
                           mProcessor.getMasterLufs (1),
+                          mProcessor.getMasterLufs (0),   // SC-14: momentary alongside
                           // INSTANTANEOUS, not the running max: a flagged moment
                           // has to be timecoded, and the max carries no time.
                           mProcessor.getMasterTruePeakDb(),
                           currentScopeLabel());
 }
 
+// QA-TrueLevel SC-14 / SC-15: a take exports as its own report (the analysis
+// every take has), with the captured audio copied alongside when there is one.
+// Replaces the audio-only export whose button could never light up under the
+// default settings.
+LoudnessReportWriter::Take StandaloneEditor::takeFromVersion (const VersionCapture::Version& v) const
+{
+    LoudnessReportWriter::Take t;
+    t.label      = v.label;
+    t.scopeLabel = v.scopeLabel;
+    auto& m = t.m;
+    m.lufsCurve        = v.lufsCurve;
+    m.momentaryCurve   = v.momentaryCurve;
+    m.integratedLufs   = v.integratedLufs;
+    m.lraLu            = v.lraLu;
+    m.truePeakDb       = v.truePeakDb;
+    m.maxShortTermLufs = v.maxShortTerm;
+    m.maxMomentaryLufs = -120.0f;
+    for (float x : v.momentaryCurve) m.maxMomentaryLufs = juce::jmax (m.maxMomentaryLufs, x);
+    m.durationSeconds  = v.durationSec;
+    m.violations          = v.violations;
+    m.violationsTruncated = v.violationsTruncated;
+    m.specId           = mVersionCapture.getSpec().id;
+    m.customTargetLufs = mVersionCapture.getSpec().integratedLufs;
+    const auto spec = m.resolvedSpec();
+    m.truePeakInSpec   = (m.truePeakDb <= spec.maxTruePeakDb);
+    m.integratedInSpec = (! spec.checksIntegrated)
+                       || (std::abs (m.integratedLufs - spec.integratedLufs) <= spec.toleranceLu);
+    return t;
+}
+
+bool StandaloneEditor::writeSessionReport (const juce::File& reportFile, juce::String& err)
+{
+    std::vector<LoudnessReportWriter::Take> takes;
+    for (const auto& v : mVersionCapture.versions())
+        if (v.reportFile == reportFile) takes.push_back (takeFromVersion (v));
+
+    if (takes.empty())
+    {
+        // The last take of a file was removed: the file goes with it.
+        if (reportFile.existsAsFile()) reportFile.deleteFile();
+        return true;
+    }
+    LoudnessReportWriter::Context ctx;
+    ctx.projectName    = mProcessor.getCurrentProjectFolder().getFileNameWithoutExtension();
+    ctx.timestampLabel = reportFile.getFileNameWithoutExtension().fromFirstOccurrenceOf (" - Session ", false, false);
+    if (ctx.timestampLabel.isEmpty()) ctx.timestampLabel = reportFile.getFileNameWithoutExtension();
+    const bool ok = LoudnessReportWriter::writeSession (reportFile.getParentDirectory(),
+                                                        reportFile.getFileNameWithoutExtension(),
+                                                        takes, ctx, err);
+    if (ok && mBuilderPage)
+        if (auto* bp = mBuilderPage->getBrowserPanel()) bp->refreshRenderRows();
+    return ok;
+}
+
 void StandaloneEditor::exportCapturedTake (const VersionCapture::Version& v)
 {
-    if (v.audioFile == juce::File() || ! v.audioFile.existsAsFile())
-    {
-        juce::AlertWindow::showMessageBoxAsync (
-            juce::AlertWindow::WarningIcon, "No audio for this take",
-            "This take was captured as analysis only, so there is no audio file "
-            "to export.\n\nTurn on version audio capture in File Settings to "
-            "keep the audio for future takes.");
-        return;
-    }
-
-    const auto suggested = juce::File::getSpecialLocation (
-                               juce::File::userMusicDirectory)
-                               .getChildFile (v.label.replaceCharacter (':', '-')
-                                              + ".wav");
-
-    auto chooser = std::make_shared<juce::FileChooser> (
-        "Export take", suggested, "*.wav");
+    const auto suggested = juce::File::getSpecialLocation (juce::File::userMusicDirectory)
+                               .getChildFile (v.label.replaceCharacter (':', '-') + ".html");
+    auto chooser = std::make_shared<juce::FileChooser> ("Export take as report", suggested, "*.html");
+    const int takeId = v.id;
     chooser->launchAsync (juce::FileBrowserComponent::saveMode
                               | juce::FileBrowserComponent::canSelectFiles
                               | juce::FileBrowserComponent::warnAboutOverwriting,
-        [chooser, src = v.audioFile] (const juce::FileChooser& fc)
+        [this, chooser, takeId] (const juce::FileChooser& fc)
         {
             const auto dest = fc.getResult();
             if (dest == juce::File()) return;
+            const auto* ver = mVersionCapture.find (takeId);
+            if (ver == nullptr) return;
+
+            LoudnessReportWriter::Context ctx;
+            ctx.projectName    = mProcessor.getCurrentProjectFolder().getFileNameWithoutExtension();
+            ctx.timestampLabel = ver->label;
+            juce::String err;
+            if (! LoudnessReportWriter::writeSession (dest.getParentDirectory(),
+                                                      dest.getFileNameWithoutExtension(),
+                                                      { takeFromVersion (*ver) }, ctx, err))
+            {
+                juce::AlertWindow::showMessageBoxAsync (
+                    juce::AlertWindow::WarningIcon, "Export failed", err);
+                return;
+            }
             // Copy, not move: the take must stay playable in the analyzer after
             // the user has exported it.
-            if (dest.existsAsFile()) dest.deleteFile();
-            if (! src.copyFileTo (dest))
-                juce::AlertWindow::showMessageBoxAsync (
-                    juce::AlertWindow::WarningIcon, "Export failed",
-                    "The take could not be written to:\n" + dest.getFullPathName());
+            if (ver->audioFile != juce::File() && ver->audioFile.existsAsFile())
+            {
+                const auto wav = dest.withFileExtension ("wav");
+                if (wav.existsAsFile()) wav.deleteFile();
+                ver->audioFile.copyFileTo (wav);
+            }
         });
+}
+
+void StandaloneEditor::removeCapturedTake (int takeId)
+{
+    const auto* v = mVersionCapture.find (takeId);
+    if (v == nullptr) return;
+    const juce::File report = v->reportFile;
+    mVersionCapture.removeVersion (takeId);
+    if (report != juce::File())
+    {
+        juce::String err;
+        if (! writeSessionReport (report, err))
+            juce::AlertWindow::showMessageBoxAsync (
+                juce::AlertWindow::WarningIcon, "Report not updated", err);
+    }
 }
 
 // TS7: the render notice for the AUTOMATIC paths (Jeff, 2026-07-30).
@@ -20277,8 +20361,8 @@ void StandaloneEditor::showFileSettingsDialog()
             addAndMakeVisible (captureLbl);
             captureRetain.addItem ("This session only", 1);
             captureRetain.addItem ("In the project Reports folder", 2);
-            captureRetain.setSelectedId (p->getIntValue ("fsCaptureRetain", 1),
-                                         juce::dontSendNotification);
+            captureRetain.setSelectedId (p->getIntValue ("fsCaptureRetain", 2),
+                                         juce::dontSendNotification);   // SC-13
             captureRetain.onChange = [this] { save(); };
             addAndMakeVisible (captureRetain);
 
@@ -20376,7 +20460,7 @@ void StandaloneEditor::showFileSettingsDialog()
     {
         auto p = openUiPrefs();
         mVersionCapture.setAudioCaptureEnabled (p->getBoolValue ("fsCaptureAudio", false));
-        mVersionCapture.setRetainInProject (p->getIntValue ("fsCaptureRetain", 1) == 2);
+        mVersionCapture.setRetainInProject (p->getIntValue ("fsCaptureRetain", 2) == 2);   // SC-13
         // §6.9: the Freeze buttons appear/disappear on the spot.  A setting that
         // needs a restart to take effect reads as broken, and this one is the
         // only way to reach the feature at all.

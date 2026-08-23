@@ -1450,6 +1450,10 @@ public:
         // report's curve is built from, so one capture serves both.
         std::vector<float> lufsCurve;
         static constexpr int kCurveHz = 10;
+        // QA-TrueLevel SC-14: the Momentary curve at the same 10 Hz.  400 ms
+        // windows at 100 ms hops ARE BS.1770's gating-block series, so the
+        // report can compute an exact gated integrated value for any region.
+        std::vector<float> momentaryCurve;
 
         // §5.1's SPECTRUM SNAPSHOT.  Averaged over the whole render, in dB, one
         // value per log-spaced band across 20 Hz - 20 kHz.

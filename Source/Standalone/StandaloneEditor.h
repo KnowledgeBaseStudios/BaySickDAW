@@ -18,6 +18,7 @@
 #include "PagePresetIO.h"   // G-7: PageKind enum used in helper signatures below
 #include "HeavyOperationOverlay.h"
 #include "VersionCapture.h"   // QA-ModelShell TS7 §3: per-playback-pass capture
+#include "LoudnessReportWriter.h"   // QA-TrueLevel SC-14: session reports
 
 class PatternManager;
 class ProjectManager;
@@ -605,6 +606,12 @@ private:
     // Effects dropdown and the browser list with the processor's model.  Bound
     // to BaySickDAWProcessor::onDirectStripsChanged; the model is the truth.
     void syncDirectStripsFromModel();
+
+    // QA-TrueLevel SC-14: one session report per project per app session.
+    juce::File mSessionReportFile, mSessionReportProject;
+    LoudnessReportWriter::Take takeFromVersion (const VersionCapture::Version& v) const;
+    bool writeSessionReport (const juce::File& reportFile, juce::String& err);
+    void removeCapturedTake (int takeId);
     void locateDirectStripFile (int idx, std::function<void()> onDone = nullptr);
 
     // ── QA-TrueLevel SC-12 (Jeff, 2026-08-22): missing audio, browser-wide ──

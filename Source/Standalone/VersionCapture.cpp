@@ -114,6 +114,7 @@ void VersionCapture::poll (juce::uint32 playStartEdges,
                            bool         playing,
                            juce::uint32 changeStamp,
                            float        shortTermLufs,
+                           float        momentaryLufs,
                            float        truePeakDb,
                            const juce::String& scopeLabel)
 {
@@ -163,6 +164,7 @@ void VersionCapture::poll (juce::uint32 playStartEdges,
     mTickDivider = 0;
 
     mCurrent.lufsCurve.push_back (shortTermLufs);
+    mCurrent.momentaryCurve.push_back (momentaryLufs);
     mCurrent.maxShortTerm = juce::jmax (mCurrent.maxShortTerm, shortTermLufs);
     mLra.push (shortTermLufs);
 
@@ -259,6 +261,34 @@ const VersionCapture::Version* VersionCapture::find (int id) const noexcept
     for (const auto& v : mVersions)
         if (v.id == id) return &v;
     return nullptr;
+}
+
+int VersionCapture::importVersion (Version v)
+{
+    v.id = mNextId++;
+    v.fromReport = true;
+    mVersions.push_back (std::move (v));
+    if (onVersionsChanged) onVersionsChanged();
+    return mVersions.back().id;
+}
+
+void VersionCapture::removeVersion (int id)
+{
+    const auto it = std::find_if (mVersions.begin(), mVersions.end(),
+                                  [id] (const Version& v) { return v.id == id; });
+    if (it == mVersions.end()) return;
+    // A session-only take's audio goes with it; a retained one is the user's.
+    if (it->reportFile == juce::File() && ! it->fromReport
+        && it->audioFile != juce::File() && it->audioFile.existsAsFile())
+        it->audioFile.deleteFile();
+    mVersions.erase (it);
+    if (onVersionsChanged) onVersionsChanged();
+}
+
+void VersionCapture::setVersionReportFile (int id, const juce::File& f)
+{
+    for (auto& v : mVersions)
+        if (v.id == id) { v.reportFile = f; return; }
 }
 
 void VersionCapture::discardSessionAudio()
