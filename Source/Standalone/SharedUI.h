@@ -21,6 +21,8 @@ namespace VC {
     inline const juce::Colour Yellow    = juce::Colour(0xffffcc00);
     inline const juce::Colour Orange    = juce::Colour(0xffff9f1c);
     inline const juce::Colour Purple    = juce::Colour(0xff7b61ff);
+    // QA-TrueLevel SC-10: Direct to Master strips belong to no engine family.
+    inline const juce::Colour DirectGrey = juce::Colour(0xff8a8f96);
     inline const juce::Colour Red       = juce::Colour(0xffe94560);
     // Hardware-inspired
     inline const juce::Colour Warm      = juce::Colour(0xffd4a017);   // amber / gold

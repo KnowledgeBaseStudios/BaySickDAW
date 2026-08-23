@@ -332,6 +332,7 @@ void EffectsPage::rebuildChannelDropdown()
             if (dropdownId >= 800 && dropdownId < 800 + (int) kMaxInstStrips)  return kInstBase  + (dropdownId - 800);
             if (dropdownId >= 900 && dropdownId < 900 + (int) kMaxRustyStrips) return kRustyBase + (dropdownId - 900);
             if (dropdownId >= 1000 && dropdownId < 1000 + (int) kMaxPluginStrips) return kPluginBase + (dropdownId - 1000);
+            if (dropdownId >= 1100 && dropdownId < 1100 + (int) kMaxDirectStrips) return kDirectBase + (dropdownId - 1100);
             return dropdownId;
         };
 
@@ -618,6 +619,14 @@ void EffectsPage::resolveChannelDsp (BaySickGraph& vg, int id,
             rack = vg.getInsertRack(BaySickGraph::InsertKind::Plugin, idx);
             eq   = vg.getInsertEQ  (BaySickGraph::InsertKind::Plugin, idx);
         }
+        else if (id >= 1100 && id < 1100 + (int) MixerChannelIds::kMaxDirectStrips)
+        {
+            // QA-TrueLevel SC-10: Direct to Master strips carry a rack + EQ
+            // like any insert.
+            const int idx = id - 1100;
+            rack = vg.getInsertRack(BaySickGraph::InsertKind::Direct, idx);
+            eq   = vg.getInsertEQ  (BaySickGraph::InsertKind::Direct, idx);
+        }
         break;
     }
 }
@@ -836,6 +845,7 @@ static void forEachChannelWithRack (BaySickGraph& vg,
     for (int i = 0; i < (int) MixerChannelIds::kMaxInstStrips; ++i)      visit (800 + i);
     for (int i = 0; i < (int) MixerChannelIds::kMaxRustyStrips; ++i)     visit (900 + i);
     for (int i = 0; i < (int) MixerChannelIds::kMaxPluginStrips; ++i)    visit (1000 + i);
+    for (int i = 0; i < (int) MixerChannelIds::kMaxDirectStrips; ++i)    visit (1100 + i);
 }
 
 // QA-ModelShell TS1 (wire-at-load): rack automation used to be registered
@@ -1008,6 +1018,7 @@ EQ8MsDSP* EffectsPage::preEqForChannelId (BaySickGraph& vg, int id)
     else if (id >= 800 && id < 800 + (int) MixerChannelIds::kMaxInstStrips)      return vg.getInsertPreEQ(BaySickGraph::InsertKind::Inst,  id - 800);
     else if (id >= 900 && id < 900 + (int) MixerChannelIds::kMaxRustyStrips)     return vg.getInsertPreEQ(BaySickGraph::InsertKind::Rusty, id - 900);
     else if (id >= 1000 && id < 1000 + (int) MixerChannelIds::kMaxPluginStrips)  return vg.getInsertPreEQ(BaySickGraph::InsertKind::Plugin, id - 1000);
+    else if (id >= 1100 && id < 1100 + (int) MixerChannelIds::kMaxDirectStrips)  return vg.getInsertPreEQ(BaySickGraph::InsertKind::Direct, id - 1100);
     return nullptr;
 }
 
@@ -1492,6 +1503,8 @@ juce::String EffectsPage::channelPrefixForId (int id)
         return "rusty_" + juce::String(id - 900);
     if (id >= 1000 && id < 1000 + (int) MixerChannelIds::kMaxPluginStrips)
         return "plugin_" + juce::String(id - 1000);
+    if (id >= 1100 && id < 1100 + (int) MixerChannelIds::kMaxDirectStrips)
+        return "direct_" + juce::String(id - 1100);
     return "fx";
 }
 
@@ -1547,6 +1560,8 @@ juce::String EffectsPage::mixerPrefixForChannelId(int id)
         return "mixer_rusty_" + juce::String(id - 900);
     if (id >= 1000 && id < 1000 + (int) MixerChannelIds::kMaxPluginStrips)
         return "mixer_plugin_" + juce::String(id - 1000);
+    if (id >= 1100 && id < 1100 + (int) MixerChannelIds::kMaxDirectStrips)
+        return "mixer_direct_" + juce::String(id - 1100);
 
     return {};
 }

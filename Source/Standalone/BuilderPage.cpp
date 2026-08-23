@@ -10492,6 +10492,9 @@ void BuilderPage::applyOfflineLaneValue (const juce::String& pid, float v01)
     for (int i = 0; i < (int) MixerChannelIds::kMaxRustyStrips; ++i) if (tryRackChannel (900 + i))  return;
     // QA-ModelShell TS6: hosted VST3 instrument strips (dropdown 1000+).
     for (int i = 0; i < (int) MixerChannelIds::kMaxPluginStrips; ++i) if (tryRackChannel (1000 + i)) return;
+    // QA-TrueLevel SC-10: Direct to Master strips (dropdown 1100+) -- offline
+    // rack automation must see them or an export drops their lanes.
+    for (int i = 0; i < (int) MixerChannelIds::kMaxDirectStrips; ++i) if (tryRackChannel (1100 + i)) return;
 }
 
 void BuilderPage::runExportWithProgress (const RenderOptions& opts)

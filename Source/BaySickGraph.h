@@ -76,6 +76,10 @@ namespace MixerChannelIds
     constexpr int kInstBase  = 700;  // R1: Inst insert 0..29 → 700..729
     constexpr int kRustyBase = 800;  // J-4: BaySickRustyDrums insert 0..12 → 800..812
     constexpr int kPluginBase = 900; // TS6: hosted VST3 instrument insert 0..19 → 900..919
+    // QA-TrueLevel SC-10 (2026-08-22): Direct to Master strips -- a file playing
+    // straight into the master from its own strip, no page, no engine.  Must
+    // stay under kMaxStripChannels (1000).
+    constexpr int kDirectBase = 950; // Direct insert 0..15 → 950..965
 
     // Per-kind strip caps.  A strip cap IS its page cap -- one page of a kind
     // owns exactly one insert strip, so these are DERIVED from
@@ -90,6 +94,9 @@ namespace MixerChannelIds
     constexpr int kMaxVoxStrips   = kMaxVoxPages;
     constexpr int kMaxInstStrips  = kMaxInstPages;
     constexpr int kMaxPluginStrips = kMaxPluginPages;
+    // No page counterpart either: a Direct to Master strip is spawned from the
+    // browser, one per added file.
+    constexpr int kMaxDirectStrips = 16;
     // These two have no page counterpart -- Aux strips are standalone sends and
     // a Rusty kit's strips are its sound types, not tabs.
     constexpr int kMaxAuxStrips   = 18;  // 5F-4b B2; bumped 16 -> 18 in G-7 polish (2026-04-29)
@@ -122,6 +129,7 @@ namespace MixerChannelIds
     inline int instInsert  (int idx) { return kInstBase  + idx; }
     inline int rustyInsert (int idx) { return kRustyBase + idx; }
     inline int pluginInsert (int idx) { return kPluginBase + idx; }
+    inline int directInsert (int idx) { return kDirectBase + idx; }
 
     // Derive the APVTS prefix from a channel id (e.g. 200 → "mixer_layer_0").
     inline juce::String prefixFromChannelId (int chId)
@@ -156,6 +164,7 @@ namespace MixerChannelIds
         if (chId >= kInstBase  && chId < kInstBase  + kMaxInstStrips)  return "mixer_inst_"  + juce::String(chId - kInstBase);
         if (chId >= kRustyBase && chId < kRustyBase + kMaxRustyStrips) return "mixer_rusty_" + juce::String(chId - kRustyBase);
         if (chId >= kPluginBase && chId < kPluginBase + kMaxPluginStrips) return "mixer_plugin_" + juce::String(chId - kPluginBase);
+        if (chId >= kDirectBase && chId < kDirectBase + kMaxDirectStrips) return "mixer_direct_" + juce::String(chId - kDirectBase);
         return {};
     }
 
@@ -176,10 +185,13 @@ namespace MixerChannelIds
     // J-5 (2026-05-03): Rusty inserts join Master + buses as locked main-out
     // (each Rusty strip is permanently bound to kRustyDrumsBus; sends can
     // still go out to aux strips via the per-strip "+" send button).
+    // QA-TrueLevel SC-10: a Direct to Master strip is "direct" by definition --
+    // its main out is the master and stays there.
     inline bool isMainOutLocked (int chId)
     {
         return chId == kMaster || isBus(chId)
-            || (chId >= kRustyBase && chId < kRustyBase + kMaxRustyStrips);
+            || (chId >= kRustyBase && chId < kRustyBase + kMaxRustyStrips)
+            || (chId >= kDirectBase && chId < kDirectBase + kMaxDirectStrips);
     }
 
     // ── Main-out lines ────────────────────────────────────────────────────────
@@ -244,6 +256,7 @@ namespace MixerChannelIds
         if (chId >= kInstBase  && chId < kInstBase  + kMaxInstStrips)  return "Inst "  + juce::String(chId - kInstBase  + 1);
         if (chId >= kRustyBase && chId < kRustyBase + kMaxRustyStrips) return "Rusty " + juce::String(chId - kRustyBase + 1);
         if (chId >= kPluginBase && chId < kPluginBase + kMaxPluginStrips) return "Plugin " + juce::String(chId - kPluginBase + 1);
+        if (chId >= kDirectBase && chId < kDirectBase + kMaxDirectStrips) return "Direct " + juce::String(chId - kDirectBase + 1);
         return "Ch " + juce::String(chId);
     }
 
@@ -284,6 +297,7 @@ namespace MixerChannelIds
         if (channelId >= kInstBase  && channelId < kInstBase  + kMaxInstStrips) return kInstBus;
         if (channelId >= kRustyBase && channelId < kRustyBase + kMaxRustyStrips) return kRustyDrumsBus;
         if (channelId >= kPluginBase && channelId < kPluginBase + kMaxPluginStrips) return kPluginsBus;
+        if (channelId >= kDirectBase && channelId < kDirectBase + kMaxDirectStrips) return kMaster;
         return kMaster;
     }
 }
@@ -614,7 +628,7 @@ public:
     // Each insert gets its own rack + post-rack EQ + polarity/width/fader path.
     // Driven by APVTS reads in the audio thread (memoized per block).
     // Batch 1 declares the API; Batch 2 defines InsertNode and the process loop.
-    enum class InsertKind { Layer, Bass, Drum, Audio, Aux, Vox, Inst, Rusty, Plugin };
+    enum class InsertKind { Layer, Bass, Drum, Audio, Aux, Vox, Inst, Rusty, Plugin, Direct };
 
     struct InsertNode;
 
@@ -970,6 +984,7 @@ public:
     std::array<std::atomic<float>, MixerChannelIds::kMaxInstStrips>   instInsertPeakDbL   {}, instInsertPeakDbR   {};
     std::array<std::atomic<float>, MixerChannelIds::kMaxRustyStrips>  rustyInsertPeakDbL  {}, rustyInsertPeakDbR  {};
     std::array<std::atomic<float>, MixerChannelIds::kMaxPluginStrips> pluginInsertPeakDbL {}, pluginInsertPeakDbR {};
+    std::array<std::atomic<float>, MixerChannelIds::kMaxDirectStrips> directInsertPeakDbL {}, directInsertPeakDbR {};
 
     // TS7 per-block transport snapshot -- see setBlockTransport above.
     static DSPBase::HostTransport sBlockTransport;

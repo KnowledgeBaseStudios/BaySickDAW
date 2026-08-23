@@ -600,6 +600,12 @@ private:
     // Drums) tab + rebuild from a <UIState> element.  Safe to call repeatedly.
     void serializeUIState   (juce::XmlElement& root);
     void deserializeUIState (const juce::XmlElement& root);
+
+    // QA-TrueLevel SC-10: reconcile the Mixer's Direct to Master strips, the
+    // Effects dropdown and the browser list with the processor's model.  Bound
+    // to BaySickDAWProcessor::onDirectStripsChanged; the model is the truth.
+    void syncDirectStripsFromModel();
+    void locateDirectStripFile (int idx);   // Task 5: native chooser at the last-known folder
     // QA-ProjectSave Task 2 (2026-07-26): the structural half of the UI state,
     // shared by project save and template save.  A template IS this and nothing
     // more -- serializeUIState wraps it with the session extras (active tab,

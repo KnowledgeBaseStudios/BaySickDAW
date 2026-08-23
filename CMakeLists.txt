@@ -202,6 +202,8 @@ set(VIBESYNTH_DSP_SOURCES
     # Batch 3 (2026-05-06): EngineInsertTask wraps Layer/Bass/Drum engine
     # dispatch + insert chain in one RenderTask subclass.
     Source/Engine/Tasks/EngineInsertTask.cpp
+    # QA-TrueLevel SC-10 (2026-08-22): Direct to Master file strip task.
+    Source/Engine/Tasks/DirectFileTask.cpp
     # Batch 4 (2026-05-06): Vox + Inst live-input strip wrappers.
     Source/Engine/Tasks/VoxStripTask.cpp
     Source/Engine/Tasks/InstStripTask.cpp

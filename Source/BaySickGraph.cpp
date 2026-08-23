@@ -36,6 +36,7 @@ namespace {
             case BaySickGraph::InsertKind::Inst:  return instInsert (index);
             case BaySickGraph::InsertKind::Rusty: return rustyInsert(index);
             case BaySickGraph::InsertKind::Plugin: return pluginInsert(index);
+            case BaySickGraph::InsertKind::Direct: return directInsert(index);
         }
         return -1;  // unreachable; defensive
     }
@@ -1004,6 +1005,7 @@ void BaySickGraph::prepare(double sampleRate, int maxBlockSize)
     initArray (instInsertPeakDbL);   initArray (instInsertPeakDbR);
     initArray (rustyInsertPeakDbL);  initArray (rustyInsertPeakDbR);
     initArray (pluginInsertPeakDbL); initArray (pluginInsertPeakDbR);
+    initArray (directInsertPeakDbL); initArray (directInsertPeakDbR);
 }
 
 // ── reset ─────────────────────────────────────────────────────────────────────
@@ -1913,6 +1915,7 @@ void BaySickGraph::saveRackStates(juce::ValueTree& parent)
             case InsertKind::Inst:  return "Inst";
             case InsertKind::Rusty: return "Rusty";   // J-9 (2026-05-05)
             case InsertKind::Plugin: return "Plugin"; // QA-ModelShell TS6
+            case InsertKind::Direct: return "Direct"; // QA-TrueLevel SC-10
         }
         return "Unknown";   // defensive; unreachable for any valid kind
     };
@@ -2076,6 +2079,7 @@ void BaySickGraph::applyRackStates(const juce::ValueTree& parent)
         if (s == "Inst")  return InsertKind::Inst;
         if (s == "Rusty") return InsertKind::Rusty;   // J-9 (2026-05-05)
         if (s == "Plugin") return InsertKind::Plugin; // QA-ModelShell TS6
+        if (s == "Direct") return InsertKind::Direct; // QA-TrueLevel SC-10
         // QA-InsertMaps Task 5 close (2026-05-25): unknown kind label -> nullopt
         // -> skipped at call site.  Restores pre-batch drop-unknown behavior
         // (pre-batch's 8 per-kind iterations dropped unrecognised labels by
@@ -2327,6 +2331,10 @@ void BaySickGraph::processInsert(InsertKind kind, int index,
             case InsertKind::Plugin:
                 if (index >= 0 && index < MixerChannelIds::kMaxPluginStrips)
                     storeAxes (pluginInsertPeakDbL [index], pluginInsertPeakDbR [index]);
+                break;
+            case InsertKind::Direct:
+                if (index >= 0 && index < MixerChannelIds::kMaxDirectStrips)
+                    storeAxes (directInsertPeakDbL [index], directInsertPeakDbR [index]);
                 break;
         }
     }
@@ -3122,6 +3130,7 @@ void BaySickGraph::pushScArrayToStrip (int channelId)
     if (channelId >= kInstBase  && channelId < kInstBase  + kMaxInstStrips)  return pushInsert(InsertKind::Inst,  channelId - kInstBase);
     if (channelId >= kRustyBase && channelId < kRustyBase + kMaxRustyStrips) return pushInsert(InsertKind::Rusty, channelId - kRustyBase);
     if (channelId >= kPluginBase && channelId < kPluginBase + kMaxPluginStrips) return pushInsert(InsertKind::Plugin, channelId - kPluginBase);
+    if (channelId >= kDirectBase && channelId < kDirectBase + kMaxDirectStrips) return pushInsert(InsertKind::Direct, channelId - kDirectBase);
 }
 
 // Called once from the constructor.  Every id and prefix below is a

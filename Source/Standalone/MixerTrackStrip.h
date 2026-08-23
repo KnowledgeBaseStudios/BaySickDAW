@@ -280,6 +280,19 @@ public:
     void resized   ()                        override;
     void mouseDown (const juce::MouseEvent&) override;   // G-7: right-click → onContextMenuRequested
 
+    // QA-TrueLevel SC-12: a strip whose file is gone (Direct to Master after
+    // "Proceed missing") greys out under a "+" overlay; a left click on the
+    // strip then fires onMissingFileClicked, which the editor answers with the
+    // native chooser at the file's last-known folder.
+    void setMissingFile (bool missing)
+    {
+        if (mMissingFile == missing) return;
+        mMissingFile = missing;
+        repaint();
+    }
+    bool isMissingFile() const noexcept { return mMissingFile; }
+    std::function<void()> onMissingFileClicked;
+
     // ── 5F-4a: APVTS binding for new controls (polarity/width/arm/bypass) ────
     // Call after setAutomationPrefix() AND after the APVTS params for this
     // prefix have been registered (see BaySickDAWProcessor::ensureMixerStripParams).
@@ -290,6 +303,8 @@ public:
                   const juce::String& paramPrefix);
 
 private:
+    bool mMissingFile { false };
+
     // QA-E Task 5 (2026-05-15): the C3 (2026-05-04) parameterChanged + manual
     // listener-install workaround was removed when arm-button wiring switched
     // to a unified ButtonAttachment + onRightClick path.  ButtonAttachment

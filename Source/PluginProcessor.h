@@ -28,6 +28,7 @@
 #include "Engine/BaySickThreadPool.h"
 #include "Engine/RenderGraphDispatcher.h"
 #include "Engine/Tasks/EngineInsertTask.h"   // Batch 3: Layer/Bass/Drum task wrappers
+#include "Engine/Tasks/DirectFileTask.h"     // QA-TrueLevel SC-10: Direct to Master strips
 #include "Engine/Tasks/VoxStripTask.h"       // Batch 4: Vox live-input strip wrapper
 #include "Engine/Tasks/InstStripTask.h"      // Batch 4: Inst source-mode-aware wrapper
 #include "Engine/Tasks/CompositeAudioInsertTask.h"  // QA-0 (2026-05-07): per-row composite (replaces ClipPageTask + AudioInsertTask)
@@ -700,6 +701,29 @@ public:
     // Layer/Bass/Drum is the right reference and Vox/Inst is not.
     void registerPluginEngine  (int pageIdx, juce::AudioProcessor* eng);
     void unregisterPluginEngine(int pageIdx);
+
+    // ── QA-TrueLevel SC-10 (Jeff, 2026-08-22): Direct to Master strips ───────
+    // A file playing straight into the master from its own strip: no page, no
+    // engine, no audio-library entry.  The processor owns the model (name +
+    // stored path) and the render task; the editor owns the Mixer strip and
+    // the browser row and rebuilds both from onDirectStripsChanged.  Message
+    // thread only.  storedPath is project-relative when the file sits inside
+    // the project folder, so the strip survives the project being moved.
+    struct DirectStrip
+    {
+        juce::String name;
+        juce::String storedPath;
+        bool         missing { false };   // file absent at last open/relink
+    };
+    int        addDirectStrip     (const juce::File& file, const juce::String& name);
+    void       removeDirectStrip  (int idx);
+    bool       relinkDirectStrip  (int idx, const juce::File& file);
+    void       renameDirectStrip  (int idx, const juce::String& name);
+    void       clearDirectStrips  ();
+    const DirectStrip* getDirectStrip (int idx) const;
+    juce::File resolveDirectStripFile (int idx) const;
+    std::vector<int> getDirectStripIndices() const;
+    std::function<void()> onDirectStripsChanged;
     void registerBassEngine   (int pageIdx, juce::AudioProcessor* eng);
     void unregisterBassEngine (int pageIdx);
     // 2026-04-25: registerDrumsEngine / unregisterDrumsEngine removed
@@ -1155,6 +1179,8 @@ public:
     std::atomic<float> mRustyInsertPeakDbR[MixerChannelIds::kMaxRustyStrips];
     std::atomic<float> mPluginInsertPeakDbL[MixerChannelIds::kMaxPluginStrips];
     std::atomic<float> mPluginInsertPeakDbR[MixerChannelIds::kMaxPluginStrips];
+    std::atomic<float> mDirectInsertPeakDbL[MixerChannelIds::kMaxDirectStrips];   // QA-TrueLevel SC-10
+    std::atomic<float> mDirectInsertPeakDbR[MixerChannelIds::kMaxDirectStrips];
 
     // QA-AudioMeters: UI-side exchange-and-reset drain for any insert kind.
     // Returns the running max-since-last-call for the (kind, index) pair from
@@ -2025,7 +2051,7 @@ private:
         kMaxLayerPages + kMaxBassPages + kMaxDrumPages + kMaxAudioRows
         + MixerChannelIds::kMaxAuxStrips   + MixerChannelIds::kMaxVoxStrips
         + MixerChannelIds::kMaxInstStrips  + MixerChannelIds::kMaxRustyStrips
-        + MixerChannelIds::kMaxPluginStrips;
+        + MixerChannelIds::kMaxPluginStrips + MixerChannelIds::kMaxDirectStrips;
     static constexpr int kEqNumStripSlots = kEqNumBusSlots + kEqNumInsertSlots;
     static constexpr int kEqCacheSize =
         kEqNumStripSlots * kEqBanksPerStrip * kEqSidesPerBank * kEqBands;
@@ -2260,6 +2286,13 @@ private:
     // own the storage so destruction is well-defined.
     std::array<std::unique_ptr<EngineInsertTask>, kMaxLayerPages> mLayerRenderTasks;
     std::array<std::unique_ptr<EngineInsertTask>, kMaxPluginPages> mPluginRenderTasks;   // TS6
+    // QA-TrueLevel SC-10: Direct to Master model + tasks, indexed by strip slot.
+    std::array<std::unique_ptr<DirectStrip>,    MixerChannelIds::kMaxDirectStrips> mDirectStrips;
+    std::array<std::unique_ptr<DirectFileTask>, MixerChannelIds::kMaxDirectStrips> mDirectTasks;
+    bool openDirectStripTask  (int idx, const juce::File& file);
+    void closeDirectStripTask (int idx);
+    void serializeDirectStrips   (juce::XmlElement& root) const;
+    void deserializeDirectStrips (const juce::XmlElement& root);
     std::array<std::unique_ptr<EngineInsertTask>, kMaxBassPages>  mBassRenderTasks;
     std::array<std::unique_ptr<EngineInsertTask>, kMaxDrumPages>  mDrumRenderTasks;
 

@@ -888,6 +888,7 @@ StandaloneEditor::StandaloneEditor(BaySickDAWProcessor& p, StandalonePlayHead& p
     // save/load to the editor.  These are fired inside serialize/deserialize.
     mProcessor.onSerializeUIState   = [this](juce::XmlElement& root)       { serializeUIState (root); };
     mProcessor.onDeserializeUIState = [this](const juce::XmlElement& root) { deserializeUIState (root); };
+    mProcessor.onDirectStripsChanged = [this] { syncDirectStripsFromModel(); };   // QA-TrueLevel SC-10
 
     // QA-ModelShell TS1: model-side automation registration.  The rig fires
     // this at EVERY engine creation (user pick, project restore, template
@@ -3591,6 +3592,36 @@ std::unique_ptr<juce::Component> StandaloneEditor::createBuilderPage()
                      mProcessor.getProjectReportsDir() };
         };
 
+        // QA-TrueLevel SC-10: Direct to Master.  The processor owns the model;
+        // the browser lists it and forwards the gestures.
+        panel->onEnumerateDirectToMaster = [this]() -> std::vector<BrowserPanel::DirectToMasterInfo>
+        {
+            std::vector<BrowserPanel::DirectToMasterInfo> out;
+            for (int idx : mProcessor.getDirectStripIndices())
+                if (const auto* s = mProcessor.getDirectStrip (idx))
+                    out.push_back ({ idx, s->name, mProcessor.resolveDirectStripFile (idx).getFullPathName() });
+            return out;
+        };
+        panel->onAddDirectToMaster = [this] (const juce::File& f)
+        {
+            if (mProcessor.addDirectStrip (f, f.getFileNameWithoutExtension()) < 0)
+                juce::AlertWindow::showMessageBoxAsync (
+                    juce::MessageBoxIconType::WarningIcon, "Direct to Master",
+                    "Could not open that file, or all " + juce::String (MixerChannelIds::kMaxDirectStrips)
+                    + " Direct to Master strips are in use.", "OK");
+            if (mProjectManager) mProjectManager->markDirty();
+        };
+        panel->onRenameDirectToMaster = [this] (int idx, const juce::String& name)
+        {
+            mProcessor.renameDirectStrip (idx, name);
+            if (mProjectManager) mProjectManager->markDirty();
+        };
+        panel->onRemoveDirectToMaster = [this] (int idx)
+        {
+            mProcessor.removeDirectStrip (idx);
+            if (mProjectManager) mProjectManager->markDirty();
+        };
+
         // TS7 §11.6: a saved report opens IN THE APP, in the analyzer -- the
         // same view the user watched live -- by replaying the data block the
         // writer embedded in the HTML.  That block is why the report is not
@@ -4250,6 +4281,7 @@ juce::String StandaloneEditor::resolveAutomationDisplayName(const juce::String& 
             for (int i = 0; i < (int) MixerChannelIds::kMaxInstStrips; ++i)    add (800 + i);
             for (int i = 0; i < (int) MixerChannelIds::kMaxRustyStrips; ++i)   add (900 + i);
             for (int i = 0; i < (int) MixerChannelIds::kMaxPluginStrips; ++i)  add (1000 + i);
+            for (int i = 0; i < (int) MixerChannelIds::kMaxDirectStrips; ++i)  add (1100 + i);
             return m;
         }();
 
@@ -4410,6 +4442,8 @@ juce::String StandaloneEditor::resolveAutomationDisplayName(const juce::String& 
         // Rusty has no per-strip name getter on MixerPage (see the same gap in
         // tryMixerNonSlot below) -- family default only.
         if (chId >= 900 && chId < 1000) return "Rusty " + juce::String (chId - 900 + 1);
+        if (chId >= 1100 && chId < 1100 + (int) MixerChannelIds::kMaxDirectStrips)
+            return named (stripName (&MixerPage::getDirectStripName, chId - 1100), "Direct", chId - 1100);
         if (chId >= 1000)
             return named (stripName (&MixerPage::getPluginStripName, chId - 1000), "Plugin", chId - 1000);
         return {};
@@ -4711,6 +4745,7 @@ juce::String StandaloneEditor::resolveAutomationDisplayName(const juce::String& 
             { "mixer_inst_",  Kind::Inst,  "LiveInst"  },
             { "mixer_rusty_", Kind::Rusty, "Rusty"     },
             { "mixer_plugin_", Kind::Plugin, "Plugin"  },   // TS6 (missed, fixed TS7)
+            { "mixer_direct_", Kind::Direct, "Direct"  },   // QA-TrueLevel SC-10
         };
         for (const auto& e : kInsertEntries)
         {
@@ -4733,6 +4768,7 @@ juce::String StandaloneEditor::resolveAutomationDisplayName(const juce::String& 
                 else if (e.kind == Kind::Audio) channelLabel = mMixerPage->getAudioStripName(insertIdx);
                 else if (e.kind == Kind::Aux)   channelLabel = mMixerPage->getAuxStripName(insertIdx);
                 else if (e.kind == Kind::Plugin) channelLabel = mMixerPage->getPluginStripName(insertIdx);
+                else if (e.kind == Kind::Direct) channelLabel = mMixerPage->getDirectStripName(insertIdx);
                 else if (e.kind == Kind::Vox)   channelLabel = mMixerPage->getVoxStripName(insertIdx);
                 else if (e.kind == Kind::Inst)  channelLabel = mMixerPage->getInstStripName(insertIdx);
                 // Rusty has no per-strip name getter; its entry falls through
@@ -5068,6 +5104,11 @@ std::unique_ptr<juce::Component> StandaloneEditor::createMixerPage()
             case MixerPage::StripKind::Plugin: fam = RenameFamily::Plugins; break;
             case MixerPage::StripKind::Vox:    fam = RenameFamily::Vox;     break;
             case MixerPage::StripKind::Inst:   fam = RenameFamily::Inst;    break;
+            // QA-TrueLevel SC-10: no page behind a Direct strip -- the name
+            // lives on the processor's model, and the browser row follows.
+            case MixerPage::StripKind::Direct:
+                mProcessor.renameDirectStrip (pageIndex, newName);
+                return;
         }
 
         if (findRenameTarget (fam, pageIndex) == nullptr)
@@ -5413,6 +5454,11 @@ std::unique_ptr<juce::Component> StandaloneEditor::createEffectsPage()
             // pre-EQ, prefix, automation sweep); nothing ever EMITTED an id in it.
             for (int idx : mMixerPage->getPluginStripIndices())
                 result.push_back({1000 + idx, mMixerPage->getPluginStripName(idx)});
+            // QA-TrueLevel SC-10: Direct to Master strips, 1100+.  Their
+            // _sendTo is the master, so the Effects dropdown files them under
+            // DIRECT ROUTING on its own.
+            for (int idx : mMixerPage->getDirectStripIndices())
+                result.push_back({1100 + idx, mMixerPage->getDirectStripName(idx)});
         }
 
         // J-6 (2026-05-03): Rusty inserts (when singleton is spawned).
@@ -17578,6 +17624,61 @@ void StandaloneEditor::advanceCountersFromRestoredTabs()
     mNextPluginNameNum  = juce::jmax (mNextPluginNameNum,  maxPlugin + 1);
 }
 
+
+// QA-TrueLevel SC-10.  Model -> views, idempotent: called on every add /
+// remove / rename / relink and after a project restore (the processor fires it
+// after the UI rebuild that wipes the mixer's dynamic strips).
+void StandaloneEditor::syncDirectStripsFromModel()
+{
+    if (mMixerPage == nullptr) return;
+
+    const auto model = mProcessor.getDirectStripIndices();
+    for (int idx : mMixerPage->getDirectStripIndices())
+        if (std::find (model.begin(), model.end(), idx) == model.end())
+            mMixerPage->removeDirectChannel (idx);
+
+    for (int idx : model)
+    {
+        const auto* s = mProcessor.getDirectStrip (idx);
+        if (s == nullptr) continue;
+        const bool had = std::find (mMixerPage->getDirectStripIndices().begin(),
+                                    mMixerPage->getDirectStripIndices().end(), idx)
+                         != mMixerPage->getDirectStripIndices().end();
+        if (! had) mMixerPage->addDirectChannel (idx, s->name);
+        else       mMixerPage->renameChannel (MixerPage::StripKind::Direct, idx, s->name);
+        mMixerPage->setDirectChannelMissing (idx, s->missing);
+        if (auto* strip = mMixerPage->getDirectStrip (idx))
+            strip->onMissingFileClicked = [this, idx] { locateDirectStripFile (idx); };
+    }
+
+    if (mEffectsPage) mEffectsPage->rebuildChannelDropdown();
+    if (mBuilderPage)
+        if (auto* bp = mBuilderPage->getBrowserPanel())
+            bp->refreshRenderRows();
+}
+
+void StandaloneEditor::locateDirectStripFile (int idx)
+{
+    const auto* s = mProcessor.getDirectStrip (idx);
+    if (s == nullptr) return;
+    const juce::File last = mProcessor.resolveDirectStripFile (idx);
+    const juce::File startIn = last.getParentDirectory().isDirectory()
+                                 ? last.getParentDirectory()
+                                 : mProcessor.getProjectExportsDir();
+    auto chooser = std::make_shared<juce::FileChooser> (
+        "Locate \"" + s->name + "\"", startIn, "*.wav;*.mp3;*.ogg;*.flac;*.aiff;*.aif");
+    chooser->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
+        [this, idx, chooser] (const juce::FileChooser& fc)
+        {
+            const auto f = fc.getResult();
+            if (f == juce::File() || ! f.existsAsFile()) return;
+            if (! mProcessor.relinkDirectStrip (idx, f))
+                juce::AlertWindow::showMessageBoxAsync (
+                    juce::MessageBoxIconType::WarningIcon, "Direct to Master",
+                    "That file could not be opened.", "OK");
+            else if (mProjectManager) mProjectManager->markDirty();
+        });
+}
 
 void StandaloneEditor::deserializeUIState (const juce::XmlElement& root)
 {

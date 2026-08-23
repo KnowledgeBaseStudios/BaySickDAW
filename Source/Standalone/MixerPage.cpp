@@ -101,6 +101,7 @@ static juce::Colour pickStripColor(int chId, int destChannelId)
     if (chId >= kInstBase  && chId < kInstBase  + kMaxInstStrips) return juce::Colour(0xFF1C3A8A);
     if (chId >= kRustyBase && chId < kRustyBase + kMaxRustyStrips) return VC::DrumsCol;
     if (chId >= kPluginBase && chId < kPluginBase + kMaxPluginStrips) return VC::Purple;
+    if (chId >= kDirectBase && chId < kDirectBase + kMaxDirectStrips) return VC::DirectGrey;
     return VC::Accent;
 }
 
@@ -497,6 +498,7 @@ bool MixerPage::CableOverlay::isRouteAllowed(int srcId, int dstId) const
     const bool srcIsInst   = (srcId >= kInstBase  && srcId < kInstBase  + kMaxInstStrips);
     const bool srcIsRusty  = (srcId >= kRustyBase && srcId < kRustyBase + kMaxRustyStrips);
     const bool srcIsPlugin = (srcId >= kPluginBase && srcId < kPluginBase + kMaxPluginStrips);
+    const bool srcIsDirect = (srcId >= kDirectBase && srcId < kDirectBase + kMaxDirectStrips);
 
     const bool dstIsMaster = (dstId == kMaster);
     const bool dstIsAux    = (dstId >= kAuxBase && dstId < kAuxBase + kMaxAuxStrips);
@@ -521,6 +523,11 @@ bool MixerPage::CableOverlay::isRouteAllowed(int srcId, int dstId) const
     // would put one kit's audio back through the other kit's inserts.
     if (srcIsDrum)
         return dstIsMaster || dstId == drumBusForPage (srcId - kDrumBase);
+
+    // QA-TrueLevel SC-10: a Direct to Master strip goes to the master, full stop
+    // (its main out is locked there; this is the aux-send side).
+    if (srcIsDirect)
+        return dstIsMaster || dstIsAux;
 
     // QA-ModelShell TS6 (BLU-447): Plugin insert: Plugins Bus, Layers Bus,
     // Bass Bus, Master.  Jeff's spec -- a VST strip moves under Layers or Bass
@@ -1373,6 +1380,7 @@ void MixerPage::rebuildStripCache() const
     for (auto& [idx,   strip] : mInstStrips)  reg(kInstBase  + idx,   strip.get());
     for (auto& [idx,   strip] : mRustyStrips) reg(kRustyBase + idx,   strip.get());
     for (auto& [idx,   strip] : mPluginStrips) reg(kPluginBase + idx, strip.get());
+    for (auto& [idx,   strip] : mDirectStrips) reg(kDirectBase + idx, strip.get());
 }
 
 juce::Point<float> MixerPage::getSocketPosition(int channelId) const
@@ -1693,6 +1701,60 @@ void MixerPage::addPluginChannel(int pageIndex, const juce::String& name)
     mStripCacheDirty  = true;
 
     if (getWidth() > 0) resized();
+}
+
+// QA-TrueLevel SC-10: Direct to Master strip.  Engine-less and page-less: a
+// file plays into it (DirectFileTask) and it sits under the master because its
+// _sendTo is the master and locked there.  Layer shape (no arm / monitor).
+void MixerPage::addDirectChannel(int idx, const juce::String& name)
+{
+    if (mDirectStrips.count(idx) > 0) return;
+
+    auto strip = std::make_unique<MixerTrackStrip>(name,
+        MixerTrackStrip::StripType::LayerChannel, VC::DirectGrey);
+    const juce::String prefix = "mixer_direct_" + juce::String(idx);
+    strip->setAutomationPrefix(prefix);
+    strip->setApvts(mProcessor.apvts, prefix);
+    strip->setChannelId(MixerChannelIds::directInsert(idx));
+    strip->onAddSendRequested = [this](int chId) {
+        onAddCableRequestedFor(chId);
+    };
+    strip->onFXClicked = [this](const juce::String& id) {
+        if (onEffectsTabRequested) onEffectsTabRequested(id);
+    };
+    strip->onNameChanged = [this, idx](const juce::String& newName) {
+        if (onChannelRenamed) onChannelRenamed(StripKind::Direct, idx, newName);
+    };
+
+    mScrollContent->addAndMakeVisible(*strip);
+    mDirectStrips[idx] = std::move(strip);
+    mDirectOrder.push_back(idx);
+    mStripCacheDirty = true;
+
+    if (getWidth() > 0) resized();
+}
+
+void MixerPage::removeDirectChannel(int idx)
+{
+    mStripCacheDirty = true;
+    mDirectStrips.erase(idx);
+    mDirectOrder.erase(std::remove(mDirectOrder.begin(), mDirectOrder.end(), idx),
+                       mDirectOrder.end());
+    if (getWidth() > 0) resized();
+    if (onAudioStripRenamed) onAudioStripRenamed();
+}
+
+void MixerPage::setDirectChannelMissing(int idx, bool missing)
+{
+    if (auto it = mDirectStrips.find(idx); it != mDirectStrips.end() && it->second)
+        it->second->setMissingFile(missing);
+}
+
+juce::String MixerPage::getDirectStripName (int idx) const
+{
+    auto it = mDirectStrips.find (idx);
+    return (it != mDirectStrips.end() && it->second) ? it->second->getName()
+                                                     : juce::String ("Direct " + juce::String (idx + 1));
 }
 
 void MixerPage::addBassChannel(int pageIndex, const juce::String& name)
@@ -2658,6 +2720,7 @@ void MixerPage::clearDynamicStrips()
     // reset; without it a plugin strip from the OUTGOING project survived into
     // the incoming one, bound to an APVTS prefix whose engine no longer exists.
     mPluginStrips.clear();   mPluginOrder  .clear();
+    mDirectStrips.clear();   mDirectOrder  .clear();   // QA-TrueLevel SC-10
     // UNCONDITIONAL hide (2026-08-17): gating it on the flag skipped the
     // sweep whenever the flag was already false with the strip leaked
     // visible (the removePluginChannel hole above) - the ghost then rode
@@ -3313,6 +3376,10 @@ void MixerPage::renameChannel(StripKind kind, int pageIdx, const juce::String& n
             if (auto it = mPluginStrips.find(pageIdx); it != mPluginStrips.end())
                 it->second->setTrackName(newName);
             break;
+        case StripKind::Direct:
+            if (auto it = mDirectStrips.find(pageIdx); it != mDirectStrips.end())
+                it->second->setTrackName(newName);
+            break;
         // Vox / Inst keep their own setters (the sfizz program pick and the
         // project-load name restore both call them directly); the enum cases
         // route through those rather than duplicating the relayout + Effects
@@ -3379,6 +3446,7 @@ std::vector<MixerPage::StemPickEntry> MixerPage::getStemPickEntries() const
     if (mRustyDrumsBusActive) add (mRustyDrumsBusStrip.get(), kRustyDrumsBus, false);
     if (mPluginsBusActive) { add (mPluginsBusStrip.get(), kPluginsBus, false);
                              addMap (mPluginStrips, mPluginOrder, &pluginInsert); }
+    addMap (mDirectStrips, mDirectOrder, &directInsert);   // QA-TrueLevel SC-10
     if (mPluginsBus2Active) add (mPluginsBus2Strip.get(), kPluginsBus2, false);   // T10
     addMap (mRustyStrips, mRustyOrder,    &rustyInsert);
     add (mFXBusStrip.get(),         kFxBus,     false);
@@ -3727,6 +3795,8 @@ void MixerPage::timerCallback()
         // reroute the feature exists for would never re-lay-out.
         for (int k : mPluginOrder)
             anyChange |= check(pluginInsert(k), "mixer_plugin_" + juce::String(k));
+        for (int k : mDirectOrder)
+            anyChange |= check(directInsert(k), "mixer_direct_" + juce::String(k));
 
         if (anyChange)
         {
@@ -3824,6 +3894,8 @@ void MixerPage::onVBlank()
     // TS6 (BLU-447) -- MISSED, fixed TS7 2026-07-30.
     for (auto& [idx, strip] : mPluginStrips)
         drainStereoInsert (BaySickGraph::InsertKind::Plugin, idx, strip.get());
+    for (auto& [idx, strip] : mDirectStrips)
+        drainStereoInsert (BaySickGraph::InsertKind::Direct, idx, strip.get());   // QA-TrueLevel
 
     if (mVoxBus2Strip)  drainStereoBus (mVoxBus2Strip .get(), kVoxBus2,  mProcessor.mVoxBus2PeakDbL,  mProcessor.mVoxBus2PeakDbR);
     if (mInstBus2Strip) drainStereoBus (mInstBus2Strip.get(), kInstBus2, mProcessor.mInstBus2PeakDbL, mProcessor.mInstBus2PeakDbR);
@@ -3882,6 +3954,7 @@ void MixerPage::onVBlank()
     for (auto& kv : mInstStrips)  pushPeak(kv.second.get());
     for (auto& kv : mRustyStrips) pushPeak(kv.second.get());
     for (auto& kv : mPluginStrips) pushPeak(kv.second.get());   // TS6
+    for (auto& kv : mDirectStrips) pushPeak(kv.second.get());   // QA-TrueLevel
     if (mPluginsBusStrip) pushPeak(mPluginsBusStrip.get());     // TS6
 
     bool cableDirty = (mPeakSnapshotScratch.size() != mLastPeakSnapshot.size());
@@ -4049,6 +4122,15 @@ void MixerPage::layoutScrollContent()
         if (it != mPluginStrips.end())
             bucketPush(it->second.get(), pluginInsert(k), layerW,
                        "mixer_plugin_" + juce::String(k));
+    }
+    // QA-TrueLevel SC-10: _sendTo is the master, so the bucket lands under the
+    // master strip -- the same grouping a Layers strip moved to master gets.
+    for (int k : mDirectOrder)
+    {
+        auto it = mDirectStrips.find(k);
+        if (it != mDirectStrips.end())
+            bucketPush(it->second.get(), directInsert(k), layerW,
+                       "mixer_direct_" + juce::String(k));
     }
 
     // QA-Layout T10: a routed-to secondary bus SELF-ACTIVATES -- preset and

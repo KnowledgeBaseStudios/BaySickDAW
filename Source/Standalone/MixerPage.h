@@ -64,7 +64,7 @@ public:
     // their names persist in <VoxNames> / <InstNames>, but with no enum entry a
     // strip rename never reached the owning tab, so the strip and the ribbon
     // tab drifted into two permanent different names for one channel.
-    enum class StripKind { Layer, Bass, Drum, Audio, Plugin, Vox, Inst };
+    enum class StripKind { Layer, Bass, Drum, Audio, Plugin, Vox, Inst, Direct };
 
     // Fired when the user renames a channel strip in the mixer.  StandaloneEditor
     // resolves (kind, pageIdx) to the owning ribbon tab and renames it.  The kind
@@ -153,6 +153,11 @@ public:
     // Strips persist once created; passing an empty name to addDrumChannel is a no-op.
     void addLayerChannel(int pageIndex, const juce::String& name);
     void addPluginChannel(int pageIndex, const juce::String& name);   // TS6 (BLU-447)
+    // QA-TrueLevel SC-10: Direct to Master strip -- engine-less, grey, locked to
+    // the master.  Mirrors the Layer shape (no arm / monitor).
+    void addDirectChannel(int idx, const juce::String& name);
+    void removeDirectChannel(int idx);
+    void setDirectChannelMissing(int idx, bool missing);   // Task 5: grey + "+" overlay
     void addBassChannel (int pageIndex, const juce::String& name);
     void addDrumChannel (int slot,  const juce::String& name);
     void addAudioChannel(int row,   const juce::String& name);  // one strip per arrangement row
@@ -292,6 +297,13 @@ public:
     // plugin strips as members of its PLUGINS BUS group.
     std::vector<int> getPluginStripIndices() const { return mPluginOrder; }
     juce::String     getPluginStripName (int idx) const;
+    std::vector<int> getDirectStripIndices() const { return mDirectOrder; }
+    juce::String     getDirectStripName (int idx) const;
+    MixerTrackStrip* getDirectStrip (int idx) const
+    {
+        auto it = mDirectStrips.find (idx);
+        return it != mDirectStrips.end() ? it->second.get() : nullptr;
+    }
 
     // P4 persistence (2026-04-24): horizontal scroll position for save/restore.
     int  getScrollX() const;
@@ -430,6 +442,8 @@ private:
     // is engine-driven, not user-driven.
     std::map<int, std::unique_ptr<MixerTrackStrip>> mRustyStrips;
     std::map<int, std::unique_ptr<MixerTrackStrip>> mPluginStrips;   // TS6
+    std::map<int, std::unique_ptr<MixerTrackStrip>> mDirectStrips;   // QA-TrueLevel SC-10
+    std::vector<int>                                mDirectOrder;
     std::vector<int>                                mRustyOrder;
     std::vector<int>                                mPluginOrder;   // TS6
 

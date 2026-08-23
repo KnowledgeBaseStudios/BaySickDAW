@@ -584,6 +584,23 @@ void MixerTrackStrip::paint(juce::Graphics& g)
     // parity).  The strip used to draw them in an 18 px column to the
     // left of the meter, but with the meter now in the strip's right
     // column there's no room for an external tick column anyway.
+
+    if (mMissingFile)
+    {
+        // Dim the whole strip and sit a "+" over it: "the file is gone, click
+        // to point me at it".  Drawn last so it covers the controls.
+        g.setColour (juce::Colours::black.withAlpha (0.55f));
+        g.fillRect (getLocalBounds());
+        const float d  = (float) juce::jmin (getWidth(), 44);
+        const float cx = getWidth() * 0.5f, cy = getHeight() * 0.40f;
+        g.setColour (VC::DirectGrey.withAlpha (0.9f));
+        g.drawEllipse (cx - d * 0.5f, cy - d * 0.5f, d, d, 2.0f);
+        g.drawLine (cx - d * 0.28f, cy, cx + d * 0.28f, cy, 3.0f);
+        g.drawLine (cx, cy - d * 0.28f, cx, cy + d * 0.28f, 3.0f);
+        g.setFont (juce::Font (11.0f, juce::Font::plain));
+        g.drawFittedText ("File missing", getLocalBounds().withY ((int) (cy + d * 0.6f)).withHeight (30),
+                          juce::Justification::centredTop, 2);
+    }
 }
 
 // 2026-04-30: TWO-COLUMN layout per Jeff's spec.
@@ -750,6 +767,11 @@ void MixerTrackStrip::mouseDown (const juce::MouseEvent& e)
     if (e.mods.isPopupMenu() && onContextMenuRequested)
     {
         onContextMenuRequested (e.getScreenPosition());
+        return;
+    }
+    if (mMissingFile && onMissingFileClicked)
+    {
+        onMissingFileClicked();
         return;
     }
     juce::Component::mouseDown (e);
