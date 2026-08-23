@@ -211,15 +211,26 @@ void AudioBrowserItem::paintItem (Graphics& g, int width, int height)
     g.fillRoundedRectangle (r, 3.0f);
 
     // Accent stripe on left
-    g.setColour (mEntry.accent);
+    g.setColour (mMissing ? mEntry.accent.withAlpha (0.35f) : mEntry.accent);
     g.fillRoundedRectangle (r.withWidth (4.0f), 1.5f);
 
     // Label
-    g.setColour (Colour (0xffe0e4ec));
+    g.setColour (mMissing ? Colour (0xff8a8f96) : Colour (0xffe0e4ec));
     g.setFont (Font (12.0f));
     g.drawText (mEntry.displayName,
-                r.withTrimmedLeft (10.0f).withTrimmedRight (4.0f).toNearestInt(),
+                r.withTrimmedLeft (10.0f).withTrimmedRight (mMissing ? 22.0f : 4.0f).toNearestInt(),
                 Justification::centredLeft, true);
+
+    if (mMissing)
+    {
+        // "+": the file is gone, click to point the app at it (SC-12).
+        const auto box = r.removeFromRight (18.0f).reduced (2.0f);
+        g.setColour (Colour (0xff8a8f96));
+        g.drawEllipse (box, 1.5f);
+        const float cx = box.getCentreX(), cy = box.getCentreY(), a = box.getWidth() * 0.28f;
+        g.drawLine (cx - a, cy, cx + a, cy, 2.0f);
+        g.drawLine (cx, cy - a, cx, cy + a, 2.0f);
+    }
 }
 
 void AudioBrowserItem::itemClicked (const MouseEvent& e)
@@ -232,6 +243,11 @@ void AudioBrowserItem::itemClicked (const MouseEvent& e)
     if (e.getNumberOfClicks() == 2)
     {
         if (onRenameRequested) onRenameRequested();
+        return;
+    }
+    if (mMissing && onLocateRequested)
+    {
+        onLocateRequested();
         return;
     }
     // Single left click: TreeView default selection behavior, plus the
@@ -590,6 +606,16 @@ void BrowserPanel::rebuildAudioRows()
             mLastAudioSel = leaf->getAudioLibIdx();
             if (onDropTypeChanged) onDropTypeChanged (1, mLastAudioSel);
         };
+        // QA-TrueLevel SC-12: missing file -> grey + "+", click = Locate.
+        if (onIsAudioMissing && e.audioLibIdx >= 0
+            && onIsAudioMissing (mPM.getAudioLibraryPath (e.audioLibIdx)))
+        {
+            leaf->setMissing (true);
+            leaf->onLocateRequested = [this, leaf]
+            {
+                if (onLocateAudio) onLocateAudio (leaf->getAudioLibIdx());
+            };
+        }
         return leaf;
     };
 
@@ -1177,14 +1203,19 @@ void BrowserPanel::showAudioTreeContextMenu (AudioBrowserItem& item, Point<int> 
     constexpr int kIdDelete     = 3;
     constexpr int kIdProperties = 4;   // QA-E Task 7 (FILE-02)
     constexpr int kIdReveal     = 7;
+    constexpr int kIdLocate     = 8;   // QA-TrueLevel SC-12
     constexpr int kIdChokeBase  = 200;
     constexpr int kIdRegenLight  = 300;   // QA-Fe2 De-noise
     constexpr int kIdRegenStrong = 301;
 
     PopupMenu m;
+    // QA-TrueLevel SC-12: the same Locate the load-time prompt offers, so a
+    // file parked as "missing" can be found later without reopening the project.
+    const bool missing = onIsAudioMissing && onIsAudioMissing (mPM.getAudioLibraryPath (libIdx));
+    if (missing) { m.addItem (kIdLocate, "Locate..."); m.addSeparator(); }
     m.addItem (kIdRename,    "Rename...");
     m.addItem (kIdDuplicate, "Duplicate...");
-    m.addItem (kIdReveal,    "Show in Explorer");
+    m.addItem (kIdReveal,    "Show in Explorer", ! missing);
     // QA-E Task 7 (FILE-02): the library entry is the source of truth for
     // routing.  Editing this moves every grid copy still following it.
     m.addItem (kIdProperties, "Properties...");
@@ -1271,6 +1302,11 @@ void BrowserPanel::showAudioTreeContextMenu (AudioBrowserItem& item, Point<int> 
             if (result == kIdProperties)
             {
                 showLibraryPropertiesDialog (libIdx);
+                return;
+            }
+            if (result == kIdLocate)
+            {
+                if (onLocateAudio) onLocateAudio (libIdx);
                 return;
             }
             if (result >= kIdChokeBase && result <= kIdChokeBase + 16)
@@ -1724,6 +1760,12 @@ void BrowserPanel::refreshPatternTab()
 void BrowserPanel::refreshRenderRows()
 {
     rebuildRenderRows();
+}
+
+void BrowserPanel::refreshAllAudioRows()
+{
+    if (mActiveTab == 1) rebuildAudioRows();   // rebuildAudioRows also rebuilds the render rows
+    else                 rebuildRenderRows();
 }
 
 // ── QA-UndoCoverage Task 4: browser gesture wrappers ─────────────────────────
@@ -3082,6 +3124,23 @@ void ArrangementGrid::drawPatternClip(Graphics& g, const ArrangementBlock& b,
     } else {
         g.setColour(base.brighter(0.3f).withAlpha(0.55f));
         g.drawRoundedRectangle((float)x + 0.5f, (float)y + 0.5f, (float)w - 1.f, (float)h - 1.f, 3.f, 1.f);
+    }
+
+    // QA-TrueLevel SC-12: missing file -> dim + "+" (click-to-locate lives on
+    // the browser row; the grid only explains the silence).
+    if (onIsAudioFileMissing && onIsAudioFileMissing (b.audioFilePath))
+    {
+        g.setColour (Colour (0x99000000));
+        g.fillRoundedRectangle ((float) x, (float) y, (float) w, (float) h, 3.f);
+        if (w >= 18 && h >= 18)
+        {
+            const float d = (float) jmin (w, h, 16);
+            const float cx = (float) x + (float) w * 0.5f, cy = (float) y + (float) h * 0.5f;
+            g.setColour (Colour (0xff8a8f96));
+            g.drawEllipse (cx - d * 0.5f, cy - d * 0.5f, d, d, 1.5f);
+            g.drawLine (cx - d * 0.28f, cy, cx + d * 0.28f, cy, 2.f);
+            g.drawLine (cx, cy - d * 0.28f, cx, cy + d * 0.28f, 2.f);
+        }
     }
 
     // Muted overlay - 2026-04-26 (D-1): 30% black wash + diagonal hatch.

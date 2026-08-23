@@ -126,12 +126,18 @@ public:
     // Wired by BrowserPanel so right-click can route into the existing
     // Choke Group / Delete / Rename context flow.
     std::function<void(juce::Point<int>)> onContextMenu;
+    // QA-TrueLevel SC-12: the file behind this row is gone.  The row dims
+    // under a "+" and a plain click fires onLocateRequested instead of select.
+    void setMissing (bool m) { mMissing = m; }
+    bool isMissing() const noexcept { return mMissing; }
+    std::function<void()>                 onLocateRequested;
     std::function<void()>                 onRenameRequested;
     // QA-H Task 8 (#20): fires on plain single click (drop-type tracking).
     std::function<void()>                 onSelected;
 
 private:
     CategorizedAudioEntry mEntry;
+    bool mMissing { false };
 };
 
 // AudioRootItem - invisible root holding the 3 category nodes.  Concrete
@@ -313,6 +319,9 @@ public:
     // Jeff 2026-08-06: master-capture takes land in the Exports folder at
     // record-commit; the editor pokes this so the new file shows immediately.
     void refreshRenderRows();
+    // QA-TrueLevel SC-12: library rows + render rows, for missing-file state
+    // changes (the timer refresh hashes names only and would not notice).
+    void refreshAllAudioRows();
 
     // Pattern-list ops cascade into blocks (removePattern re-indexes), so the
     // slice capture/apply lives on the ArrangementGrid; BuilderPage wires
@@ -389,6 +398,10 @@ public:
     // panel lists them and forwards the gestures.
     struct DirectToMasterInfo { int stripId { -1 }; juce::String name; juce::String fullPath; };
     std::function<std::vector<DirectToMasterInfo>()>                       onEnumerateDirectToMaster;
+    // QA-TrueLevel SC-12: missing-file state for library rows.  The editor
+    // owns the truth (a stored path whose file is gone) and the Locate flow.
+    std::function<bool(const juce::String& /*storedPath*/)>                onIsAudioMissing;
+    std::function<void(int /*libIdx*/)>                                    onLocateAudio;
     std::function<void(const juce::File&)>                                 onAddDirectToMaster;
     std::function<void(int /*stripId*/, const juce::String& /*newName*/)>  onRenameDirectToMaster;
     std::function<void(int /*stripId*/)>                                   onRemoveDirectToMaster;
@@ -741,6 +754,9 @@ public:
     // bar are where it landed, so the import can place it there.
     std::function<void(const juce::String& /*fullPath*/, int /*row*/, float /*bar*/)>
                                                                         onRenderFileDropped;
+    // QA-TrueLevel SC-12: a block whose file is gone draws dimmed with a "+"
+    // so the silence is explained on the grid as well as in the browser.
+    std::function<bool(const juce::String& /*storedPath*/)>             onIsAudioFileMissing;
     // Owner call 2026-07-11: per-clip Properties "Move" mirrors the browser
     // dialog exactly by sharing its lambda -- relocate the library entry's
     // owner + props and propagate to every FOLLOWING copy (isOverride==false),

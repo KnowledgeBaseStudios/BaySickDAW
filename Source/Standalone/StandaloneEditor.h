@@ -605,7 +605,33 @@ private:
     // Effects dropdown and the browser list with the processor's model.  Bound
     // to BaySickDAWProcessor::onDirectStripsChanged; the model is the truth.
     void syncDirectStripsFromModel();
-    void locateDirectStripFile (int idx);   // Task 5: native chooser at the last-known folder
+    void locateDirectStripFile (int idx, std::function<void()> onDone = nullptr);
+
+    // ── QA-TrueLevel SC-12 (Jeff, 2026-08-22): missing audio, browser-wide ──
+    // After every project load the sweep finds every library file and Direct
+    // to Master file that no longer resolves and asks, one prompt per file:
+    // Locate (native chooser at the last-known folder, repaths everything that
+    // carried the old path), Proceed without it (row + grid blocks + strip
+    // grey under a "+", click = Locate), or Remove (the file and its path go;
+    // a page left with nothing else on it then gets the standard Save Page
+    // Preset & Delete / Delete / Cancel prompt).  mMissingAudioPaths is the
+    // fact "this stored path has no file" that every view paints from.
+    struct MissingAudioItem
+    {
+        bool         direct { false };
+        int          idx    { -1 };
+        juce::String name, storedPath;
+        juce::File   lastKnown;
+    };
+    std::set<juce::String>        mMissingAudioPaths;
+    std::vector<MissingAudioItem> mMissingQueue;
+    void         runMissingAudioSweep();
+    void         promptNextMissingAudio();
+    void         locateAudioLibraryFile (int libIdx, std::function<void()> onDone = nullptr);
+    bool         relinkAudioPath (const juce::String& oldStored, const juce::File& newFile);
+    void         removeAudioPath (const juce::String& storedPath);
+    juce::String storedPathFor (const juce::File& f) const;
+    void         refreshMissingAudioViews();
     // QA-ProjectSave Task 2 (2026-07-26): the structural half of the UI state,
     // shared by project save and template save.  A template IS this and nothing
     // more -- serializeUIState wraps it with the session extras (active tab,

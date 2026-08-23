@@ -242,6 +242,9 @@ public:
     //                       state has been restored - editor reads <UIState>
     //                       and rebuilds tabs + engines.
     std::function<void(juce::XmlElement&)>       onSerializeUIState;
+    // QA-TrueLevel SC-12: fired once the load shield is down, so the editor
+    // can run the interactive missing-file sweep on a finished project.
+    std::function<void()>                        onProjectLoaded;
     std::function<void(const juce::XmlElement&)> onDeserializeUIState;
 
     // Load-progress hook: deserializeProject reports phase labels so the

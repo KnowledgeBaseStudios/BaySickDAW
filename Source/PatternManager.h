@@ -850,6 +850,12 @@ public:
     bool                 getAudioLibraryStretchMode (int idx) const
         { return (idx >= 0 && idx < (int) mAudioLibrary.size()) ? mAudioLibrary[idx].stretchMode : true; }
     void                 setAudioLibraryAlias  (int idx, const juce::String& alias);
+    // QA-TrueLevel SC-12: relink after a file moved.  Path only -- the caller
+    // re-stamps the blocks that carry the old string.
+    void                 setAudioLibraryPath   (int idx, const juce::String& path)
+    {
+        if (idx >= 0 && idx < (int) mAudioLibrary.size()) mAudioLibrary[(size_t) idx].path = path;
+    }
     void                 setAudioLibraryChokeGroup (int idx, int group);
     void                 setAudioLibraryPageOwner (int idx, int channelId);
     // QA-E Task 7 (FILE-02): set the source-of-truth pitch / BPM / stretch

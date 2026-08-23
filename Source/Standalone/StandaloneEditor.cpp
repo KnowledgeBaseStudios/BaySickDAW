@@ -889,6 +889,12 @@ StandaloneEditor::StandaloneEditor(BaySickDAWProcessor& p, StandalonePlayHead& p
     mProcessor.onSerializeUIState   = [this](juce::XmlElement& root)       { serializeUIState (root); };
     mProcessor.onDeserializeUIState = [this](const juce::XmlElement& root) { deserializeUIState (root); };
     mProcessor.onDirectStripsChanged = [this] { syncDirectStripsFromModel(); };   // QA-TrueLevel SC-10
+    mProcessor.onProjectLoaded = [this]
+    {
+        // Off the load call stack: the load gesture's own dialogs drain first.
+        juce::Component::SafePointer<StandaloneEditor> sp (this);
+        juce::MessageManager::callAsync ([sp] { if (sp) sp->runMissingAudioSweep(); });
+    };
 
     // QA-ModelShell TS1: model-side automation registration.  The rig fires
     // this at EVERY engine creation (user pick, project restore, template
@@ -3616,6 +3622,18 @@ std::unique_ptr<juce::Component> StandaloneEditor::createBuilderPage()
             mProcessor.renameDirectStrip (idx, name);
             if (mProjectManager) mProjectManager->markDirty();
         };
+
+        // QA-TrueLevel SC-12: missing-file state + Locate for library rows.
+        panel->onIsAudioMissing = [this] (const juce::String& stored)
+        {
+            return mMissingAudioPaths.count (stored) > 0;
+        };
+        panel->onLocateAudio = [this] (int libIdx) { locateAudioLibraryFile (libIdx); };
+        if (auto* grid = page->getGrid())
+            grid->onIsAudioFileMissing = [this] (const juce::String& stored)
+            {
+                return mMissingAudioPaths.count (stored) > 0;
+            };
         panel->onRemoveDirectToMaster = [this] (int idx)
         {
             mProcessor.removeDirectStrip (idx);
@@ -12874,11 +12892,8 @@ int StandaloneEditor::resurrectTabFromRecordImpl (const juce::XmlElement& rec)
         // vanished file has to reach the report instead or the resurrect is
         // silent; the wrapper drains it at the gesture tail.  Mirror of the
         // deserializeUIState Clips branch.
-        if (clipPath.isNotEmpty()
-            && ! mProcessor.resolveProjectFile (clipPath).existsAsFile())
-        {
-            MissingFileReport::add ("Clip audio", clipPath);
-        }
+        // A vanished file reaches the QA-TrueLevel SC-12 sweep (Locate /
+        // Proceed / Remove) after the load instead of the summary report.
         createClipStripAndPage (pageIndex, clipPath, /*allowDuplicate*/ false,
                                 /*interactive*/ false);
         for (auto* entry : mPages)
@@ -17657,10 +17672,10 @@ void StandaloneEditor::syncDirectStripsFromModel()
             bp->refreshRenderRows();
 }
 
-void StandaloneEditor::locateDirectStripFile (int idx)
+void StandaloneEditor::locateDirectStripFile (int idx, std::function<void()> onDone)
 {
     const auto* s = mProcessor.getDirectStrip (idx);
-    if (s == nullptr) return;
+    if (s == nullptr) { if (onDone) onDone(); return; }
     const juce::File last = mProcessor.resolveDirectStripFile (idx);
     const juce::File startIn = last.getParentDirectory().isDirectory()
                                  ? last.getParentDirectory()
@@ -17668,16 +17683,233 @@ void StandaloneEditor::locateDirectStripFile (int idx)
     auto chooser = std::make_shared<juce::FileChooser> (
         "Locate \"" + s->name + "\"", startIn, "*.wav;*.mp3;*.ogg;*.flac;*.aiff;*.aif");
     chooser->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
-        [this, idx, chooser] (const juce::FileChooser& fc)
+        [this, idx, chooser, onDone] (const juce::FileChooser& fc)
         {
             const auto f = fc.getResult();
-            if (f == juce::File() || ! f.existsAsFile()) return;
-            if (! mProcessor.relinkDirectStrip (idx, f))
-                juce::AlertWindow::showMessageBoxAsync (
-                    juce::MessageBoxIconType::WarningIcon, "Direct to Master",
-                    "That file could not be opened.", "OK");
-            else if (mProjectManager) mProjectManager->markDirty();
+            if (f != juce::File() && f.existsAsFile())
+            {
+                if (! mProcessor.relinkDirectStrip (idx, f))
+                    juce::AlertWindow::showMessageBoxAsync (
+                        juce::MessageBoxIconType::WarningIcon, "Direct to Master",
+                        "That file could not be opened.", "OK");
+                else if (mProjectManager) mProjectManager->markDirty();
+            }
+            if (onDone) onDone();
         });
+}
+
+// ── QA-TrueLevel SC-12: missing audio ────────────────────────────────────────
+
+juce::String StandaloneEditor::storedPathFor (const juce::File& f) const
+{
+    const juce::File proj = mProcessor.getCurrentProjectFolder();
+    if (proj != juce::File() && f.isAChildOf (proj))
+        return f.getRelativePathFrom (proj).replaceCharacter ('\\', '/');
+    return f.getFullPathName();
+}
+
+void StandaloneEditor::refreshMissingAudioViews()
+{
+    if (mBuilderPage == nullptr) return;
+    if (auto* bp = mBuilderPage->getBrowserPanel()) bp->refreshAllAudioRows();
+    if (auto* grid = mBuilderPage->getGrid()) grid->repaint();
+}
+
+void StandaloneEditor::runMissingAudioSweep()
+{
+    mMissingAudioPaths.clear();
+    mMissingQueue.clear();
+    std::set<juce::String> seen;
+
+    if (mPM)
+    {
+        for (int i = 0; i < mPM->getNumAudioLibrary(); ++i)
+        {
+            const juce::String stored = mPM->getAudioLibraryPath (i);
+            if (stored.isEmpty() || seen.count (stored)) continue;
+            seen.insert (stored);
+            const juce::File f = mProcessor.resolveProjectFile (stored);
+            if (f != juce::File() && f.existsAsFile()) continue;
+
+            mMissingAudioPaths.insert (stored);
+            MissingAudioItem it;
+            it.idx        = i;
+            it.storedPath = stored;
+            it.lastKnown  = f;
+            const juce::String alias = mPM->getAudioLibraryAlias (i);
+            it.name = alias.isNotEmpty() ? alias
+                                         : (f != juce::File() ? f.getFileName() : stored);
+            mMissingQueue.push_back (it);
+        }
+    }
+
+    for (int idx : mProcessor.getDirectStripIndices())
+    {
+        const auto* s = mProcessor.getDirectStrip (idx);
+        if (s == nullptr || ! s->missing) continue;
+        MissingAudioItem it;
+        it.direct     = true;
+        it.idx        = idx;
+        it.name       = s->name;
+        it.storedPath = s->storedPath;
+        it.lastKnown  = mProcessor.resolveDirectStripFile (idx);
+        mMissingQueue.push_back (it);
+    }
+
+    refreshMissingAudioViews();
+    promptNextMissingAudio();
+}
+
+void StandaloneEditor::promptNextMissingAudio()
+{
+    if (mMissingQueue.empty()) { refreshMissingAudioViews(); return; }
+    const MissingAudioItem item = mMissingQueue.front();
+    mMissingQueue.erase (mMissingQueue.begin());
+
+    const juce::String where = item.lastKnown != juce::File() ? item.lastKnown.getFullPathName()
+                                                              : item.storedPath;
+    auto* aw = new juce::AlertWindow (
+        "Missing file",
+        "\"" + item.name + "\" is no longer where it was saved:\n" + where
+        + "\n\nLocate it, go on without it (it shows greyed with a + until you do), "
+          "or remove it from the project.",
+        juce::AlertWindow::QuestionIcon);
+    aw->addButton ("Locate...",          1, juce::KeyPress (juce::KeyPress::returnKey));
+    aw->addButton ("Proceed without it", 2, juce::KeyPress (juce::KeyPress::escapeKey));
+    aw->addButton ("Remove",             3);
+
+    juce::Component::SafePointer<StandaloneEditor> sp (this);
+    aw->enterModalState (true, juce::ModalCallbackFunction::create (
+        [sp, aw, item] (int r)
+        {
+            std::unique_ptr<juce::AlertWindow> own (aw);
+            if (sp == nullptr) return;
+            auto next = [sp] { if (sp) sp->promptNextMissingAudio(); };
+            if (r == 1)
+            {
+                if (item.direct) sp->locateDirectStripFile (item.idx, next);
+                else             sp->locateAudioLibraryFile (item.idx, next);
+                return;
+            }
+            if (r == 3)
+            {
+                if (item.direct) sp->mProcessor.removeDirectStrip (item.idx);
+                else             sp->removeAudioPath (item.storedPath);
+                if (sp->mProjectManager) sp->mProjectManager->markDirty();
+            }
+            next();
+        }), false);
+}
+
+void StandaloneEditor::locateAudioLibraryFile (int libIdx, std::function<void()> onDone)
+{
+    if (! mPM || libIdx < 0 || libIdx >= mPM->getNumAudioLibrary()) { if (onDone) onDone(); return; }
+    const juce::String stored = mPM->getAudioLibraryPath (libIdx);
+    const juce::File   last   = mProcessor.resolveProjectFile (stored);
+    const juce::File   startIn = last.getParentDirectory().isDirectory()
+                                   ? last.getParentDirectory()
+                                   : mProcessor.getCurrentProjectFolder().getChildFile ("Samples");
+    const juce::String alias = mPM->getAudioLibraryAlias (libIdx);
+    const juce::String name  = alias.isNotEmpty() ? alias : last.getFileName();
+
+    auto chooser = std::make_shared<juce::FileChooser> (
+        "Locate \"" + name + "\"", startIn, "*.wav;*.mp3;*.ogg;*.flac;*.aiff;*.aif");
+    chooser->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
+        [this, stored, chooser, onDone] (const juce::FileChooser& fc)
+        {
+            const auto f = fc.getResult();
+            if (f != juce::File() && f.existsAsFile())
+            {
+                if (! relinkAudioPath (stored, f))
+                    juce::AlertWindow::showMessageBoxAsync (
+                        juce::MessageBoxIconType::WarningIcon, "Locate file",
+                        "That file could not be opened.", "OK");
+            }
+            if (onDone) onDone();
+        });
+}
+
+// Every carrier of the old stored path moves together: library entries (one
+// file can sit under several page owners), arrangement blocks, and any Clips
+// page whose engine preloads it.  Then the clip players rebuild from the
+// blocks, which is what actually reopens the audio.
+bool StandaloneEditor::relinkAudioPath (const juce::String& oldStored, const juce::File& newFile)
+{
+    if (! mPM || ! newFile.existsAsFile()) return false;
+    const juce::String newStored = storedPathFor (newFile);
+
+    for (int i = 0; i < mPM->getNumAudioLibrary(); ++i)
+        if (mPM->getAudioLibraryPath (i) == oldStored)
+            mPM->setAudioLibraryPath (i, newStored);
+
+    for (int i = 0; i < mPM->getNumBlocks(); ++i)
+    {
+        auto& b = mPM->getBlock (i);
+        if (b.clipType == ClipType::Audio && b.audioFilePath == oldStored)
+            b.audioFilePath = newStored;
+    }
+
+    for (auto* entry : mPages)
+    {
+        if (! entry || entry->type != RibbonTabBar::TabType::Clip) continue;
+        if (auto* cp = dynamic_cast<ClipsPage*> (entry->component.get()))
+            if (cp->getClipFilePath() == oldStored
+                || cp->getClipFilePath() == mProcessor.resolveProjectFile (oldStored).getFullPathName())
+                cp->setClipFilePath (newFile.getFullPathName(), newStored, /*interactive*/ false);
+    }
+
+    mMissingAudioPaths.erase (oldStored);
+    mProcessor.rebuildAudioClipPlayers();
+    if (mProjectManager) mProjectManager->markDirty();
+    refreshMissingAudioViews();
+    return true;
+}
+
+// "Remove" from the prompt: the file's entries and blocks go, nothing else on
+// the owning page is touched.  A page left with no other file on it is then
+// offered the standard delete trio through its own requestDelete flow (Save
+// Page Preset & Delete / Delete / Cancel) -- the user may want the setup even
+// though the file is gone.
+void StandaloneEditor::removeAudioPath (const juce::String& storedPath)
+{
+    if (! mPM) return;
+    std::set<int> owners;
+    for (int i = mPM->getNumAudioLibrary() - 1; i >= 0; --i)
+    {
+        if (mPM->getAudioLibraryPath (i) != storedPath) continue;
+        owners.insert (mPM->getAudioLibraryPageOwner (i));
+        mPM->removeAudioFromLibraryAt (i);
+    }
+    for (int i = mPM->getNumBlocks() - 1; i >= 0; --i)
+    {
+        const auto& b = mPM->getBlock (i);
+        if (b.clipType == ClipType::Audio && b.audioFilePath == storedPath)
+            mPM->removeBlock (i);
+    }
+    mMissingAudioPaths.erase (storedPath);
+    mProcessor.rebuildAudioClipPlayers();
+    refreshMissingAudioViews();
+    if (mBuilderPage)
+        if (auto* grid = mBuilderPage->getGrid()) grid->repaint();
+
+    using namespace MixerChannelIds;
+    for (int owner : owners)
+    {
+        bool otherFiles = false;
+        for (int i = 0; i < mPM->getNumAudioLibrary(); ++i)
+            if (mPM->getAudioLibraryPageOwner (i) == owner) { otherFiles = true; break; }
+        if (otherFiles) continue;
+
+        PageEntry* pe = nullptr;
+        if (owner >= kVoxBase && owner < kVoxBase + kMaxVoxStrips)
+            pe = findRenameTarget (RenameFamily::Vox, owner - kVoxBase);
+        else if (owner >= kInstBase && owner < kInstBase + kMaxInstStrips)
+            pe = findRenameTarget (RenameFamily::Inst, owner - kInstBase);
+        else if (owner >= kAudioBase && owner < kAudioBase + kMaxAudioStrips)
+            pe = findRenameTarget (RenameFamily::Clips, owner - kAudioBase);
+        if (pe != nullptr && mRibbon && mRibbon->onTabDeleteRequested)
+            mRibbon->onTabDeleteRequested (pe->ribbonTabId);
+    }
 }
 
 void StandaloneEditor::deserializeUIState (const juce::XmlElement& root)
@@ -18122,11 +18354,8 @@ void StandaloneEditor::deserializeUIState (const juce::XmlElement& root)
             // for the one-shot report deserializeProject raises at the end of
             // the load (shared with QA-Export's engine-side reporting), rather
             // than a dialog per clip.
-            if (clipPath.isNotEmpty()
-                && ! mProcessor.resolveProjectFile (clipPath).existsAsFile())
-            {
-                MissingFileReport::add ("Clip audio", clipPath);
-            }
+            // A vanished file reaches the QA-TrueLevel SC-12 sweep (Locate /
+            // Proceed / Remove) after the load instead of the summary report.
             createClipStripAndPage (pageIndex, clipPath, /*allowDuplicate*/ false,
                                     /*interactive*/ false);
             for (auto* entry : mPages)

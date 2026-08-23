@@ -7357,6 +7357,7 @@ void BaySickDAWProcessor::deserializeProject (const juce::XmlElement& root)
     setProjectLoadInProgress (false);
 
     reportMissingFilesIfAny();
+    if (onProjectLoaded) onProjectLoaded();
 }
 
 // QA-ProjectSave Task 3 (2026-07-26, docket 15=B): the <Processor> apply on its
