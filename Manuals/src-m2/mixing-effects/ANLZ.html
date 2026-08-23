@@ -4,50 +4,69 @@ number is called LUFS (loudness units relative to full scale): a scale built
 to match human hearing, where a typical streaming target is around -14. This
 window is how you stop guessing.</p>
 
-<figure data-cluster="Source and takes|1,2">
+<figure data-cluster="Source and takes|1,2,3,4">
 
 <p id="ANLZ-1"><b>The source picker</b> chooses what is measured:
 <code>Live</code> - whatever is playing right now - or a captured
-<em>take</em>, a stored measurement pass you can inspect afterwards.
-Takes with no audio in them show a 
-<code>(no audio)</code> suffix.
-<span id="ANLZ-2"></span><b>Export Take...</b> writes a take to disk; it
-greys until a usable take exists.</p>
+<em>take</em>, a stored measurement pass you can inspect afterwards. Every
+playback pass becomes a take on its own. Takes with no audio in them show a
+<code>(no audio)</code> suffix; takes opened from a report show
+<code>(report)</code>. <span id="ANLZ-2"></span><b>vs ...</b> lays a second
+take over the Loudness view so two passes can be compared on one graph.
+<span id="ANLZ-3"></span><b>Export Take...</b> writes the selected take as
+its own report file (with its audio alongside when the take was captured
+with audio), and <span id="ANLZ-4"></span><b>Remove Take</b> drops the take
+from the list and from the session report it was saved in.</p>
 
-<figure data-cluster="The six numbers|3,4,5,6,7,8">
+<figure data-cluster="The view bar|5">
 
-<p id="ANLZ-3"><b>MOM</b> - momentary - is the last 0.4 seconds: the
-"right now" loudness. <span id="ANLZ-4"></span><b>SHORT</b> averages the
-last 3 seconds - the phrase you just heard.
-<span id="ANLZ-5"></span><b>INT</b> - integrated - is the whole
-program measured start to finish, and it is THE number: the one streaming
-platforms judge, which is why it sits highlighted and why the target line
-refers to it. <span id="ANLZ-6"></span><b>LRA</b> - loudness range - is
-how dynamic the song is: how far the quiet parts sit from the loud ones.
-<span id="ANLZ-7"></span><b>PEAK</b> is the single highest sample, and
-<span id="ANLZ-8"></span><b>TRUE PK</b> is the true peak BETWEEN samples
-- digital audio can spike between its own snapshots, and true peak
-predicts the clipping that appears after conversion to MP3 or on cheap
-players. Keep it under about -1.</p>
+<p id="ANLZ-5"><b>Levels / Loudness / Spectrum</b> are the window's three
+faces - how loud it is right now is a number, whether it stayed there is a
+line over time, what it is made of is a spectrum - and <b>Reset</b> clears
+everything that accumulates: integrated loudness, the history, both true-peak
+maxima, the over-ceiling count and the spectrum's peak hold.</p>
 
-<figure data-cluster="The graph|9,10">
+<figure data-cluster="Levels|6">
 
-<p id="ANLZ-9"><b>The history graph</b> scrolls the loudness story over
-time on a 0 to -40 LUFS scale, and
-<span id="ANLZ-10"></span><b>the target line</b> - dashed cyan, labelled
-with its value (<code>-14.0 LUFS</code>) - is where you are aiming, set
-from the Menu. Where the curve rides above the
-target, <b>the over-target fill</b> paints the excess orange - visible
-loudness debt, the part a platform would turn down.</p>
+<p id="ANLZ-6"><b>Levels</b> is the number view. The big <b>INTEGRATED</b>
+reading is the whole program measured start to finish - THE number streaming
+platforms judge - colored against your target: green within 1 LU, amber
+within 3, red beyond, with the offset in LU under it. <b>M</b> (momentary,
+the last 0.4 seconds) and <b>S</b> (short-term, the last 3 seconds) are
+bars centered on the target, so "on target" is the middle of the bar.
+<b>TRUE PEAK</b> shows each channel separately with the ceiling marked and
+the running maximum beside it, counts the moments that went over the
+ceiling, and reads out PLR and PSR (peak minus integrated, peak minus
+short-term - how much headroom the dynamics are using). <b>CORR</b> fills
+to the right for left/right that agree and to the left, in red, for content
+that cancels when someone plays the mix in mono.</p>
 
-<p>The readouts show <code>--</code> until there is signal:
-dashes, not zeros, because silence measures as nothing.
-While a captured take is selected, an orange
-<b><code>RENDER:</code></b> overlay sits on the readout row so a stored
-measurement can never be mistaken for the live one.</p>
+<figure data-cluster="Loudness|7">
 
-<p><b>The Spectrum view</b> - switched from the Menu - is
-the same window's other face: energy across the frequency range on a log
-grid, a cyan averaged trace over a grey peak-hold trace. Loudness tells
-you how much; spectrum tells you WHERE - too much low end and a dull top
-read instantly here.</p>
+<p id="ANLZ-7"><b>Loudness</b> is the story over time: short-term loudness
+as a filled area with the momentary line over it, a dashed green target
+line, the loudness-range band shaded amber (where the song lives between
+its quiet and loud parts), and a time axis. The history is the whole
+session or the whole take: the mouse wheel zooms, dragging pans,
+double-click shows everything, and hovering reads the time and the S / M
+values under the pointer. The side cells carry <b>INTEGRATED</b>,
+<b>SHORT-TERM</b>, <b>MOMENTARY</b>, <b>LRA</b> and <b>MAX TP L / R</b>.
+While a take is selected an orange <b><code>TAKE:</code></b> caption sits
+in the corner so a stored measurement can never be mistaken for the live
+one.</p>
+
+<figure data-cluster="Spectrum|8,9,10">
+
+<p id="ANLZ-8"><b>Spectrum</b> is energy across the frequency range on a
+log grid: a filled cyan averaged trace under a grey peak-hold trace, <b>MAX
+TP L / R</b> in the corner and two dBFS level bars at the side. Loudness
+tells you how much; spectrum tells you WHERE - too much low end and a dull
+top read instantly here. <span id="ANLZ-9"></span><b>Tilt</b> slopes the
+display by 0, 3 or 4.5 dB per octave (at 3, pink noise reads flat, which is
+how most finished mixes are judged), and <span id="ANLZ-10"></span><b>1/3
+oct</b> shows third-octave bars instead of the line.</p>
+
+<p>The readouts show <code>--.-</code> until there is signal: dashes, not
+zeros, because silence measures as nothing. The target and the true-peak
+ceiling the views grade against come from the loudness spec picked in the
+Menu (the same one the Export Audio dialog uses).</p>

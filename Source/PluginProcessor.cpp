@@ -7160,6 +7160,11 @@ void BaySickDAWProcessor::resetToBlankState()
     // Project boundary: a clip that failed in the OLD project must report
     // again if the next project references it too.
     mReportedUnreadableClips.clear();
+    // QA-TrueLevel SC-10: every load-type entry point lands here (New, template
+    // apply); the Direct strips have no per-tab teardown, so they clear here
+    // exactly as the aux inserts do -- or the old project's file keeps playing
+    // into the new project's master and is saved into its project.xml.
+    clearDirectStrips();
 
     // Same boundary rule: profile keys are prefixed with the project name of the
     // take they were learned from, so a profile carried across File > New or a
@@ -7952,191 +7957,6 @@ void BaySickDAWProcessor::registerPluginEngine(int idx, juce::AudioProcessor* en
 // A fixed wait cannot make that claim at any single duration: one block is
 // 23 ms at 1024 samples / 44.1 kHz and 46 ms at 2048, so under a large ASIO
 // buffer it expires while the audio thread is still inside the render.
-// ── QA-TrueLevel SC-10: Direct to Master strips ──────────────────────────────
-// Register/unregister mirror the engine pairs above: strip params + insert node
-// + render task, under the load shield so the audio thread never sees a
-// half-built task list.  The streamer lives in the task; a relink (Task 5
-// Locate) closes and reopens it.
-
-bool BaySickDAWProcessor::openDirectStripTask (int idx, const juce::File& file)
-{
-    using namespace MixerChannelIds;
-    if (idx < 0 || idx >= kMaxDirectStrips) return false;
-    closeDirectStripTask (idx);
-
-    std::unique_ptr<juce::AudioFormatReader> raw (mAudioFormatManager.createReaderFor (file));
-    if (raw == nullptr) return false;
-    auto streamer = std::make_unique<AudioClipStreamer> (std::move (raw), mAudioFileThread);
-    streamer->seek (0);
-
-    const juce::String prefix = "mixer_direct_" + juce::String (idx);
-    ensureMixerStripParams (prefix, MixerStripKind::Insert, kMaster);
-    mVibeGraph.ensureInsertNode (BaySickGraph::InsertKind::Direct, idx,
-                                 "Direct " + juce::String (idx + 1), prefix);
-
-    const bool shieldWasUp = isProjectLoadInProgress();
-    setProjectLoadInProgress (true);
-    if (! shieldWasUp) settleAudioThread();
-    auto task = std::make_unique<DirectFileTask> (idx, directInsert (idx), mVibeGraph,
-                                                  std::move (streamer));
-    mRenderDispatcher.registerTask (task.get());
-    mDirectTasks[(size_t) idx] = std::move (task);
-    setProjectLoadInProgress (shieldWasUp);
-    return true;
-}
-
-void BaySickDAWProcessor::closeDirectStripTask (int idx)
-{
-    using namespace MixerChannelIds;
-    if (idx < 0 || idx >= kMaxDirectStrips) return;
-    if (! mDirectTasks[(size_t) idx]) return;
-    const bool shieldWasUp = isProjectLoadInProgress();
-    setProjectLoadInProgress (true);
-    if (! shieldWasUp) settleAudioThread();
-    mRenderDispatcher.unregisterTask (directInsert (idx));
-    mDirectTasks[(size_t) idx].reset();
-    setProjectLoadInProgress (shieldWasUp);
-}
-
-int BaySickDAWProcessor::addDirectStrip (const juce::File& file, const juce::String& name)
-{
-    using namespace MixerChannelIds;
-    if (! file.existsAsFile()) return -1;
-    int idx = -1;
-    for (int i = 0; i < kMaxDirectStrips; ++i)
-        if (! mDirectStrips[(size_t) i]) { idx = i; break; }
-    if (idx < 0) return -1;
-
-    auto strip = std::make_unique<DirectStrip>();
-    strip->name = name.isNotEmpty() ? name : file.getFileNameWithoutExtension();
-    const juce::File proj = getCurrentProjectFolder();
-    strip->storedPath = (proj != juce::File() && file.isAChildOf (proj))
-                          ? file.getRelativePathFrom (proj).replaceCharacter ('\\', '/')
-                          : file.getFullPathName();
-    strip->missing = ! openDirectStripTask (idx, file);
-    mDirectStrips[(size_t) idx] = std::move (strip);
-    if (onDirectStripsChanged) onDirectStripsChanged();
-    return idx;
-}
-
-void BaySickDAWProcessor::removeDirectStrip (int idx)
-{
-    using namespace MixerChannelIds;
-    if (idx < 0 || idx >= kMaxDirectStrips || ! mDirectStrips[(size_t) idx]) return;
-    closeDirectStripTask (idx);
-    mVibeGraph.removeInsertNode (BaySickGraph::InsertKind::Direct, idx);
-    mDirectStrips[(size_t) idx].reset();
-    if (onDirectStripsChanged) onDirectStripsChanged();
-}
-
-bool BaySickDAWProcessor::relinkDirectStrip (int idx, const juce::File& file)
-{
-    using namespace MixerChannelIds;
-    if (idx < 0 || idx >= kMaxDirectStrips || ! mDirectStrips[(size_t) idx]) return false;
-    if (! file.existsAsFile()) return false;
-    auto& s = *mDirectStrips[(size_t) idx];
-    const juce::File proj = getCurrentProjectFolder();
-    s.storedPath = (proj != juce::File() && file.isAChildOf (proj))
-                     ? file.getRelativePathFrom (proj).replaceCharacter ('\\', '/')
-                     : file.getFullPathName();
-    s.missing = ! openDirectStripTask (idx, file);
-    if (onDirectStripsChanged) onDirectStripsChanged();
-    return ! s.missing;
-}
-
-void BaySickDAWProcessor::renameDirectStrip (int idx, const juce::String& name)
-{
-    using namespace MixerChannelIds;
-    if (idx < 0 || idx >= kMaxDirectStrips || ! mDirectStrips[(size_t) idx]) return;
-    if (name.trim().isEmpty()) return;
-    mDirectStrips[(size_t) idx]->name = name.trim();
-    if (onDirectStripsChanged) onDirectStripsChanged();
-}
-
-void BaySickDAWProcessor::clearDirectStrips()
-{
-    using namespace MixerChannelIds;
-    bool any = false;
-    for (int i = 0; i < kMaxDirectStrips; ++i)
-    {
-        if (! mDirectStrips[(size_t) i]) continue;
-        closeDirectStripTask (i);
-        mVibeGraph.removeInsertNode (BaySickGraph::InsertKind::Direct, i);
-        mDirectStrips[(size_t) i].reset();
-        any = true;
-    }
-    if (any && onDirectStripsChanged) onDirectStripsChanged();
-}
-
-const BaySickDAWProcessor::DirectStrip* BaySickDAWProcessor::getDirectStrip (int idx) const
-{
-    using namespace MixerChannelIds;
-    if (idx < 0 || idx >= kMaxDirectStrips) return nullptr;
-    return mDirectStrips[(size_t) idx].get();
-}
-
-juce::File BaySickDAWProcessor::resolveDirectStripFile (int idx) const
-{
-    const auto* s = getDirectStrip (idx);
-    if (s == nullptr) return {};
-    if (juce::File::isAbsolutePath (s->storedPath)) return juce::File (s->storedPath);
-    const juce::File proj = getCurrentProjectFolder();
-    return proj != juce::File() ? proj.getChildFile (s->storedPath) : juce::File();
-}
-
-std::vector<int> BaySickDAWProcessor::getDirectStripIndices() const
-{
-    using namespace MixerChannelIds;
-    std::vector<int> out;
-    for (int i = 0; i < kMaxDirectStrips; ++i)
-        if (mDirectStrips[(size_t) i]) out.push_back (i);
-    return out;
-}
-
-void BaySickDAWProcessor::serializeDirectStrips (juce::XmlElement& root) const
-{
-    using namespace MixerChannelIds;
-    auto* e = root.createNewChildElement ("DirectToMaster");
-    for (int i = 0; i < kMaxDirectStrips; ++i)
-    {
-        const auto* s = mDirectStrips[(size_t) i].get();
-        if (s == nullptr) continue;
-        auto* c = e->createNewChildElement ("Strip");
-        c->setAttribute ("idx",  i);
-        c->setAttribute ("name", s->name);
-        c->setAttribute ("path", s->storedPath);
-    }
-}
-
-// Restores the model and opens what can be opened; a file that is gone stays
-// in the model flagged missing so the Task 5 prompt can offer Locate / Proceed
-// / Remove instead of the strip silently vanishing.
-void BaySickDAWProcessor::deserializeDirectStrips (const juce::XmlElement& root)
-{
-    using namespace MixerChannelIds;
-    for (int i = 0; i < kMaxDirectStrips; ++i)
-    {
-        closeDirectStripTask (i);
-        if (mDirectStrips[(size_t) i]) mVibeGraph.removeInsertNode (BaySickGraph::InsertKind::Direct, i);
-        mDirectStrips[(size_t) i].reset();
-    }
-    if (auto* e = root.getChildByName ("DirectToMaster"))
-    {
-        for (auto* c : e->getChildWithTagNameIterator ("Strip"))
-        {
-            const int idx = c->getIntAttribute ("idx", -1);
-            if (idx < 0 || idx >= kMaxDirectStrips || mDirectStrips[(size_t) idx]) continue;
-            auto strip = std::make_unique<DirectStrip>();
-            strip->name       = c->getStringAttribute ("name");
-            strip->storedPath = c->getStringAttribute ("path");
-            mDirectStrips[(size_t) idx] = std::move (strip);
-            const juce::File f = resolveDirectStripFile (idx);
-            mDirectStrips[(size_t) idx]->missing = ! (f.existsAsFile() && openDirectStripTask (idx, f));
-        }
-    }
-    if (onDirectStripsChanged) onDirectStripsChanged();
-}
-
 void BaySickDAWProcessor::settleAudioThread() noexcept
 {
     jassert (juce::MessageManager::existsAndIsCurrentThread());
@@ -8173,6 +7993,206 @@ void BaySickDAWProcessor::settleAudioThread() noexcept
         juce::Thread::sleep (1);
     }
 }
+
+// ── QA-TrueLevel SC-10: Direct to Master strips ──────────────────────────────
+// The strip's params + insert node materialize with the MODEL (add / restore /
+// relink), unconditionally, so a strip whose file is missing still has a bound
+// fader / pan / rack and keeps its saved values; only the render task depends
+// on the file.  Register / unregister mirror the engine pairs: under the load
+// shield + settle so the audio thread never sees a half-built task list, and
+// the node is freed INSIDE that window (the audio thread derefs the live node
+// list every block -- same rule the Aux delete path follows).
+
+juce::String BaySickDAWProcessor::storedProjectPathFor (const juce::File& file) const
+{
+    const juce::File proj = getCurrentProjectFolder();
+    if (proj != juce::File() && file.isAChildOf (proj))
+        return file.getRelativePathFrom (proj).replaceCharacter ('\\', '/');
+    return file.getFullPathName();
+}
+
+void BaySickDAWProcessor::ensureDirectStripInfra (int idx)
+{
+    using namespace MixerChannelIds;
+    const juce::String prefix = "mixer_direct_" + juce::String (idx);
+    ensureMixerStripParams (prefix, MixerStripKind::Insert, kMaster);
+    mVibeGraph.ensureInsertNode (BaySickGraph::InsertKind::Direct, idx,
+                                 "Direct " + juce::String (idx + 1), prefix);
+}
+
+bool BaySickDAWProcessor::openDirectStripTask (int idx, const juce::File& file)
+{
+    using namespace MixerChannelIds;
+    if (idx < 0 || idx >= kMaxDirectStrips) return false;
+    closeDirectStripTask (idx);
+
+    std::unique_ptr<juce::AudioFormatReader> raw (mAudioFormatManager.createReaderFor (file));
+    if (raw == nullptr) return false;
+    auto streamer = std::make_unique<AudioClipStreamer> (std::move (raw), mAudioFileThread);
+    streamer->seek (0);
+
+    ensureDirectStripInfra (idx);
+
+    const bool shieldWasUp = isProjectLoadInProgress();
+    setProjectLoadInProgress (true);
+    if (! shieldWasUp) settleAudioThread();
+    auto task = std::make_unique<DirectFileTask> (idx, directInsert (idx), mVibeGraph,
+                                                  std::move (streamer));
+    mRenderDispatcher.registerTask (task.get());
+    mDirectTasks[(size_t) idx] = std::move (task);
+    setProjectLoadInProgress (shieldWasUp);
+    return true;
+}
+
+void BaySickDAWProcessor::closeDirectStripTask (int idx)
+{
+    using namespace MixerChannelIds;
+    if (idx < 0 || idx >= kMaxDirectStrips) return;
+    if (! mDirectTasks[(size_t) idx]) return;
+    const bool shieldWasUp = isProjectLoadInProgress();
+    setProjectLoadInProgress (true);
+    if (! shieldWasUp) settleAudioThread();
+    mRenderDispatcher.unregisterTask (directInsert (idx));
+    mDirectTasks[(size_t) idx].reset();
+    setProjectLoadInProgress (shieldWasUp);
+}
+
+void BaySickDAWProcessor::tearDownDirectStrip (int idx)
+{
+    const bool shieldWasUp = isProjectLoadInProgress();
+    setProjectLoadInProgress (true);
+    if (! shieldWasUp) settleAudioThread();
+    closeDirectStripTask (idx);
+    mVibeGraph.removeInsertNode (BaySickGraph::InsertKind::Direct, idx);
+    mDirectStrips[(size_t) idx].reset();
+    setProjectLoadInProgress (shieldWasUp);
+}
+
+int BaySickDAWProcessor::addDirectStrip (const juce::File& file, const juce::String& name)
+{
+    using namespace MixerChannelIds;
+    if (! file.existsAsFile()) return -1;
+    int idx = -1;
+    for (int i = 0; i < kMaxDirectStrips; ++i)
+        if (! mDirectStrips[(size_t) i]) { idx = i; break; }
+    if (idx < 0) return -1;
+
+    auto strip = std::make_unique<DirectStrip>();
+    strip->name       = name.isNotEmpty() ? name : file.getFileNameWithoutExtension();
+    strip->storedPath = storedProjectPathFor (file);
+    ensureDirectStripInfra (idx);
+    strip->missing = ! openDirectStripTask (idx, file);
+    mDirectStrips[(size_t) idx] = std::move (strip);
+    if (onDirectStripsChanged) onDirectStripsChanged();
+    return idx;
+}
+
+void BaySickDAWProcessor::removeDirectStrip (int idx)
+{
+    using namespace MixerChannelIds;
+    if (idx < 0 || idx >= kMaxDirectStrips || ! mDirectStrips[(size_t) idx]) return;
+    tearDownDirectStrip (idx);
+    if (onDirectStripsChanged) onDirectStripsChanged();
+}
+
+bool BaySickDAWProcessor::relinkDirectStrip (int idx, const juce::File& file)
+{
+    using namespace MixerChannelIds;
+    if (idx < 0 || idx >= kMaxDirectStrips || ! mDirectStrips[(size_t) idx]) return false;
+    if (! file.existsAsFile()) return false;
+    auto& s = *mDirectStrips[(size_t) idx];
+    s.storedPath = storedProjectPathFor (file);
+    s.missing = ! openDirectStripTask (idx, file);
+    if (onDirectStripsChanged) onDirectStripsChanged();
+    return ! s.missing;
+}
+
+void BaySickDAWProcessor::renameDirectStrip (int idx, const juce::String& name)
+{
+    using namespace MixerChannelIds;
+    if (idx < 0 || idx >= kMaxDirectStrips || ! mDirectStrips[(size_t) idx]) return;
+    if (name.trim().isEmpty()) return;
+    mDirectStrips[(size_t) idx]->name = name.trim();
+    if (onDirectStripsChanged) onDirectStripsChanged();
+}
+
+void BaySickDAWProcessor::clearDirectStrips()
+{
+    using namespace MixerChannelIds;
+    bool any = false;
+    for (int i = 0; i < kMaxDirectStrips; ++i)
+    {
+        if (! mDirectStrips[(size_t) i]) continue;
+        tearDownDirectStrip (i);
+        any = true;
+    }
+    if (any && onDirectStripsChanged) onDirectStripsChanged();
+}
+
+const BaySickDAWProcessor::DirectStrip* BaySickDAWProcessor::getDirectStrip (int idx) const
+{
+    using namespace MixerChannelIds;
+    if (idx < 0 || idx >= kMaxDirectStrips) return nullptr;
+    return mDirectStrips[(size_t) idx].get();
+}
+
+juce::File BaySickDAWProcessor::resolveDirectStripFile (int idx) const
+{
+    const auto* s = getDirectStrip (idx);
+    return s != nullptr ? resolveProjectFile (s->storedPath) : juce::File();
+}
+
+std::vector<int> BaySickDAWProcessor::getDirectStripIndices() const
+{
+    using namespace MixerChannelIds;
+    std::vector<int> out;
+    for (int i = 0; i < kMaxDirectStrips; ++i)
+        if (mDirectStrips[(size_t) i]) out.push_back (i);
+    return out;
+}
+
+void BaySickDAWProcessor::serializeDirectStrips (juce::XmlElement& root) const
+{
+    using namespace MixerChannelIds;
+    auto* e = root.createNewChildElement ("DirectToMaster");
+    for (int i = 0; i < kMaxDirectStrips; ++i)
+    {
+        const auto* s = mDirectStrips[(size_t) i].get();
+        if (s == nullptr) continue;
+        auto* c = e->createNewChildElement ("Strip");
+        c->setAttribute ("idx",  i);
+        c->setAttribute ("name", s->name);
+        c->setAttribute ("path", s->storedPath);
+    }
+}
+
+// Restores the model, materializes each strip's params + node, and opens what
+// can be opened; a file that is gone stays in the model flagged missing so the
+// Task 5 prompt can offer Locate / Proceed / Remove instead of the strip
+// silently vanishing.
+void BaySickDAWProcessor::deserializeDirectStrips (const juce::XmlElement& root)
+{
+    using namespace MixerChannelIds;
+    for (int i = 0; i < kMaxDirectStrips; ++i)
+        if (mDirectStrips[(size_t) i]) tearDownDirectStrip (i);
+    if (auto* e = root.getChildByName ("DirectToMaster"))
+    {
+        for (auto* c : e->getChildWithTagNameIterator ("Strip"))
+        {
+            const int idx = c->getIntAttribute ("idx", -1);
+            if (idx < 0 || idx >= kMaxDirectStrips || mDirectStrips[(size_t) idx]) continue;
+            auto strip = std::make_unique<DirectStrip>();
+            strip->name       = c->getStringAttribute ("name");
+            strip->storedPath = c->getStringAttribute ("path");
+            mDirectStrips[(size_t) idx] = std::move (strip);
+            ensureDirectStripInfra (idx);
+            const juce::File f = resolveDirectStripFile (idx);
+            mDirectStrips[(size_t) idx]->missing = ! (f.existsAsFile() && openDirectStripTask (idx, f));
+        }
+    }
+    if (onDirectStripsChanged) onDirectStripsChanged();
+}
+
 
 // Teardown shield for every unregister*Engine below.
 //

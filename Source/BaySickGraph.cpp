@@ -620,6 +620,7 @@ struct BaySickGraph::InstrChannelNode
     std::atomic<float>  masterTpMaxDbL { -144.0f }, masterTpMaxDbR { -144.0f };
     std::atomic<float>  masterCorr { 0.0f };
     float corrLR { 0.0f }, corrLL { 0.0f }, corrRR { 0.0f };
+    float corrK { 0.99993f };   // ~300 ms one-pole, set from the real rate at prepare
     // TS7 §3.1: the running MAX across a capture take, beside the per-block
     // value the readout shows.  A take's true peak cannot be sampled by the UI
     // timer -- at ~43 blocks/sec against a 30 Hz poll, the one block carrying
@@ -677,6 +678,8 @@ struct BaySickGraph::InstrChannelNode
         scTap.setSize(2, juce::jmax(1, blockSize), false, true, false);
         preFaderTap.setSize(2, juce::jmax(1, blockSize), false, true, false);
         mLufs.prepareToPlay(sr);        // derive K-weighting + bin ring
+        corrK = (float) std::exp (-1.0 / (0.3 * juce::jmax (1.0, sr)));
+        corrLR = corrLL = corrRR = 0.0f;
         // CL-044: sized to the feed's own capacity, not the block size, so a
         // later block-size increase cannot outrun it before the next prepare.
         specMonoScratch.assign((size_t) SpectrumFeed::kSize, 0.0f);
@@ -885,7 +888,7 @@ struct BaySickGraph::InstrChannelNode
                 // ~300 ms one-pole, per sample (the KBS Meter Suite's Correlation).
                 const float* cl = buf.getReadPointer (0);
                 const float* cr = buf.getReadPointer (1);
-                const float  k  = std::exp (-1.0f / (0.3f * 48000.0f));
+                const float  k  = corrK;
                 for (int s = 0; s < buf.getNumSamples(); ++s)
                 {
                     corrLR = cl[s] * cr[s] + k * (corrLR - cl[s] * cr[s]);

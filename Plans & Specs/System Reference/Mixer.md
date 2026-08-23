@@ -241,7 +241,7 @@ its natural parent.
 
 | Entry | What it does |
 |---|---|
-| **Pan Law** | How much a centered signal is turned down so a pan sweep stays even in loudness. Three entries with a tick on the current one: Circular (-3 dB at center) - the default - then Triangular (-6 dB at center) and Square (0 dB at center). |
+| **Pan Law** | How a pan sweep behaves, project-wide - every pan knob in the app follows it (strips, buses, master, the engine pan knobs, per-note pan, timeline clips). Two entries with a tick on the current one and a tooltip on hover: Ramped - the default - keeps a sound at its level at center and rises by up to 3 dB as it pans toward one side, so it feels equally loud anywhere in the field; Flat holds the side you pan toward at its level while the other side fades, so a sound is loudest at center and about 3 dB quieter at the sides. Both leave a centered sound untouched. Strips, buses and the master pan the FL way: the far side folds into the near side, so a 100% pan is the mono sum of both sides in one channel. |
 | **Master Output** | Which physical outputs of your audio interface the mix goes to - each stereo pair, or any single output as mono. |
 | **Latency-compensate meters** | Off by default. On, the meters are delayed to line up with what you are actually hearing through the speakers. |
 | **Multi-core Rendering** | On by default. Off makes the audio engine do all the work on one thread - a diagnostic, not a feature. Takes effect on the next audio block, no restart. |
@@ -314,8 +314,10 @@ Every strip also carries two full 8-band mid/side EQ banks, post-rack at
 `<prefix>_preeq_{mid|side}_eq{b}<Suffix>`. Those are documented with the Effects
 and EQ systems, not here.
 
-Global mixer parameters: `masterGain`, `master_fx_bypass` (Bool, default false),
-`master_pan_law` (Int 0-2, default 0 = Circular).
+Global mixer parameters: `master_fx_bypass` (Bool, default false),
+`master_pan_law` (Int 0-1, default 0 = Ramped; 1 = Flat). The hidden `masterGain`
+parameter (default 0.8, never bound to a control) was deleted in QA-TrueLevel -
+the master fader is the only gain on the master chain.
 
 **Saved with the project:** the whole APVTS state (so every fader, pan, mute,
 solo, width, polarity, bypass, collapse state, routing and send setting), plus -

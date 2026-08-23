@@ -396,7 +396,7 @@ public:
 
     // QA-TrueLevel SC-10: Direct to Master.  The editor owns the strips; the
     // panel lists them and forwards the gestures.
-    struct DirectToMasterInfo { int stripId { -1 }; juce::String name; juce::String fullPath; };
+    struct DirectToMasterInfo { int stripId { -1 }; juce::String name; juce::String fullPath; bool missing { false }; };
     std::function<std::vector<DirectToMasterInfo>()>                       onEnumerateDirectToMaster;
     // QA-TrueLevel SC-12: missing-file state for library rows.  The editor
     // owns the truth (a stored path whose file is gone) and the Locate flow.
@@ -405,6 +405,7 @@ public:
     std::function<void(const juce::File&)>                                 onAddDirectToMaster;
     std::function<void(int /*stripId*/, const juce::String& /*newName*/)>  onRenameDirectToMaster;
     std::function<void(int /*stripId*/)>                                   onRemoveDirectToMaster;
+    std::function<void(int /*stripId*/)>                                   onLocateDirectToMaster;   // SC-12
     // §11.5/§11.5a: add a rendered file to the project.  Not a callback -- the
     // whole flow is reachable from here (mPM plus the routing callbacks the
     // Properties dialog already uses), and routing it through the editor would

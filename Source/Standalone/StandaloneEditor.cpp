@@ -3593,16 +3593,23 @@ std::unique_ptr<juce::Component> StandaloneEditor::createBuilderPage()
             std::vector<BrowserPanel::DirectToMasterInfo> out;
             for (int idx : mProcessor.getDirectStripIndices())
                 if (const auto* s = mProcessor.getDirectStrip (idx))
-                    out.push_back ({ idx, s->name, mProcessor.resolveDirectStripFile (idx).getFullPathName() });
+                    out.push_back ({ idx, s->name, mProcessor.resolveDirectStripFile (idx).getFullPathName(), s->missing });
             return out;
         };
+        panel->onLocateDirectToMaster = [this] (int idx) { locateDirectStripFile (idx); };
         panel->onAddDirectToMaster = [this] (const juce::File& f)
         {
-            if (mProcessor.addDirectStrip (f, f.getFileNameWithoutExtension()) < 0)
+            const int idx = mProcessor.addDirectStrip (f, f.getFileNameWithoutExtension());
+            if (idx < 0)
                 juce::AlertWindow::showMessageBoxAsync (
                     juce::MessageBoxIconType::WarningIcon, "Direct to Master",
-                    "Could not open that file, or all " + juce::String (MixerChannelIds::kMaxDirectStrips)
+                    "All " + juce::String (MixerChannelIds::kMaxDirectStrips)
                     + " Direct to Master strips are in use.", "OK");
+            else if (const auto* s = mProcessor.getDirectStrip (idx); s != nullptr && s->missing)
+                juce::AlertWindow::showMessageBoxAsync (
+                    juce::MessageBoxIconType::WarningIcon, "Direct to Master",
+                    "The strip was added but that file could not be decoded. "
+                    "Click the strip to point it at a different file.", "OK");
             if (mProjectManager) mProjectManager->markDirty();
         };
         panel->onRenameDirectToMaster = [this] (int idx, const juce::String& name)
@@ -17721,10 +17728,7 @@ void StandaloneEditor::locateDirectStripFile (int idx, std::function<void()> onD
 
 juce::String StandaloneEditor::storedPathFor (const juce::File& f) const
 {
-    const juce::File proj = mProcessor.getCurrentProjectFolder();
-    if (proj != juce::File() && f.isAChildOf (proj))
-        return f.getRelativePathFrom (proj).replaceCharacter ('\\', '/');
-    return f.getFullPathName();
+    return mProcessor.storedProjectPathFor (f);
 }
 
 void StandaloneEditor::refreshMissingAudioViews()
@@ -19249,7 +19253,11 @@ void StandaloneEditor::exportCapturedTake (const VersionCapture::Version& v)
             {
                 const auto wav = dest.withFileExtension ("wav");
                 if (wav.existsAsFile()) wav.deleteFile();
-                ver->audioFile.copyFileTo (wav);
+                if (! ver->audioFile.copyFileTo (wav))
+                    juce::AlertWindow::showMessageBoxAsync (
+                        juce::MessageBoxIconType::WarningIcon, "Export",
+                        "The report was written, but the take's audio could not be copied to:\n"
+                        + wav.getFullPathName());
             }
         });
 }

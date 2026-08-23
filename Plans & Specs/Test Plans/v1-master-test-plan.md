@@ -3385,6 +3385,131 @@ at all, before this batch or after it:**
       had the repo at `Documents\BaySickDAW` and ASIO — the installed copy is the only rig
       that tests any of them.  `D:__ R:__` notes:
 
+### §B.37 — QA-TrueLevel (honest levels, one pan law, Direct to Master, missing files, session reports, the analyzer)
+
+> **Authored at code-complete 2026-08-22.**  One batch by Jeff's ruling; nine tasks, each its
+> own checkpoint commit.  The batch changes every project's ABSOLUTE level (the hidden Master
+> Gain is gone: +1.9 dB everywhere) and the balance between engine families (Harmless /
+> BaySickPlayer / timeline clips come up +3 dB at default pan; BaySickSynth, hosted plugins
+> and the sfizz-based Inst tabs do not move) - both are rulings, not regressions.  Debug exe FIRST (screenshot any
+> jassert), then Release.  The analyzer figure in the manual (SHOT-227/228/229, `Analyzer.png`)
+> needs a RE-SHOOT for the new views - the prose is updated, the picture is the old window.
+
+**Levels:**
+
+- [ ] **TL-1 — MUST-PASS: the master fader is the only master gain.** Open project 132 at its
+      saved state, play: the master LUFS box reads ~1.9 dB higher than the last QA-Manuals build
+      and nothing else about the mix changed.  Pull the master fader to -6: every source drops
+      6 dB together - clips included (they used to take the fader TWICE in the multi-core path,
+      so they would have dropped 12).  Export: the file matches the live meter with no offset.
+      `D:__ R:__` notes:
+- [ ] **TL-2 — engine families sit level.** A Layers tab on Harmless, one on BaySickSynth, a
+      BaySickPlayer drum, a timeline clip and a hosted plugin tab, every pan at default: the
+      Harmless / BaySickPlayer / clip sources read +3 dB over the last build; BaySickSynth and
+      the plugin do not move.  (Before this batch BaySickSynth and plugins were 3 dB hotter
+      than everything else at default pan.)  `D:__ R:__` notes:
+- [ ] **TL-3 — re-import round trip.** Normalize an export to -14, drop the file into a fresh
+      project as a clip with every fader at unity, pans centered, and the Clips page's Volume
+      knob at 1.0 (it defaults to 0.8 - Jeff's ruling D): the master integrated reading is -14
+      within 0.5 LU (the old chain took ~7 dB off it).  `D:__ R:__` notes:
+
+**Pan law (Mixer menu > Pan Law):**
+
+- [ ] **TL-4 — two laws, tooltips.** The submenu shows Ramped and Flat only, a tick on the
+      current one, and hovering a row shows its tooltip.  A project saved with the old third
+      entry opens on Flat.  `D:__ R:__` notes:
+- [ ] **TL-5 — MUST-PASS: no step at center, Ramped rises.** A mono sample on a Layers strip,
+      Ramped: sweep the strip pan slowly L -> R watching the master meter - no jump anywhere
+      (the old law skipped itself at center and dropped 3 dB on the first tick), level rises
+      toward the side, about +3 dB at 100%.  Same sweep under Flat: the near side holds, the
+      far side fades, no jump.  Repeat on a BUS pan and on the MASTER pan.  `D:__ R:__` notes:
+- [ ] **TL-6 — every pan knob follows the law.** Harmless's pan knob, a BaySickPlayer pan
+      knob, and the Clips-page pan all sweep exactly as the strip pan did in TL-5 under each
+      law.  `D:__ R:__` notes:
+- [ ] **TL-7 — the fold.** A STEREO file as a clip, strip pan 100% right under Ramped: the
+      left side's content is audible in the RIGHT channel (the far side folds into the near
+      side, FL-style) and the left channel is silent; a left-only file panned 100% right reads
+      about -3 dB on the right (Jeff's FL measurement), a both-sides file reads about +3 dB.
+      `D:__ R:__` notes:
+- [ ] **TL-8 — note pan and engine pan add as positions.** Piano roll: a note with note-pan
+      hard LEFT on a Layers tab whose engine pan knob is hard RIGHT plays CENTERED (positions
+      add; two laws are never multiplied).  Harmless unison spread sounds unchanged.
+      `D:__ R:__` notes:
+
+**Browser + Direct to Master:**
+
+- [ ] **TL-9 — the Exports/Reports right-click menu exists.** Right-click an Exports row:
+      "Add to Project..." (every page, the three new-page entries, then Direct to Master) and
+      "Show in Explorer" (was "Reveal in Explorer" - renamed on every row that has a file).
+      Right-click a Reports row: "Open in Analyzer" + "Show in Explorer".  Dragging an export
+      onto the grid still works.  (The menu was built dead - the rows were never wired to it.)
+      `D:__ R:__` notes:
+- [ ] **TL-10 — MUST-PASS: Direct to Master.** Export row > Add to Project > Direct to Master:
+      a grey strip appears under the master (grouped like a Layers strip moved to master), the
+      browser lists it under "Direct to Master", the Exports row is still there, no library
+      entry was created.  Play from bar 1: the export plays in sync with the song; stop / seek
+      / loop follow the transport.  Fader / mute / solo / rack work; solo it to A/B against the
+      mix.  A -14 normalized export on a D2M strip at unity reads -14 integrated on the
+      analyzer.  Rename from the row (double-click or Rename...) and from the strip - both
+      views follow.  Remove from the row: strip gone, Exports row untouched.  Save, reopen:
+      restored.  Export the project: the D2M strip is in the file.  The Effects page lists it
+      under DIRECT ROUTING with a rack + EQ.  `D:__ R:__` notes:
+
+**Missing files (after a project opens):**
+
+- [ ] **TL-11 — Locate.** Rename an export on disk that a D2M strip uses, open the project: the
+      prompt names the file and its last-known path; Locate... opens a file box at that folder;
+      pick the renamed file - the strip plays.  Same with a clip's wav moved away: Locate
+      repaths the library entry, its grid blocks and its Clips page, and the clip plays.
+      `D:__ R:__` notes:
+- [ ] **TL-12 — Proceed.** Same setup, "Proceed without it": the D2M strip greys under a "+"
+      and clicking it opens the file box; a library file's browser row and its grid blocks grey
+      under a "+", clicking the row (or Locate... on its right-click menu) opens the box;
+      picking the file reinstates everything.  `D:__ R:__` notes:
+- [ ] **TL-13 — Remove, page kept or offered.** "Remove" on a clip that shares its page with
+      another clip: only that clip and its blocks go, no page prompt.  "Remove" on the only
+      file of a page: the Save Page Preset & Delete / Delete / Cancel prompt appears; Cancel
+      keeps the page.  "Remove" on a D2M strip: it is gone.  Several files missing: one prompt
+      per file, in sequence.  `D:__ R:__` notes:
+
+**Reports + capture:**
+
+- [ ] **TL-14 — defaults.** Fresh settings: File Settings shows "In the project Reports folder"
+      selected for captured takes.  `D:__ R:__` notes:
+- [ ] **TL-15 — MUST-PASS: one session report, takes as sections.** Play three passes, stop
+      each: ONE new file under Reports (`<project> - Session <stamp>.html`) with three takes
+      inside; the browser lists it; Open in Analyzer adds all three to the Source list marked
+      (report) and shows the first.  Open the HTML in a browser: three sections, each with
+      its summary cells, a chart (wheel zooms, drag pans, double-click resets), hover readout;
+      shift-drag a region on take 2 - the readout's Integrated for that region matches the
+      app's number for the same span within 0.2 LU, LRA / max S / max M present.  Tick two
+      takes > Save selected as report: a new self-contained file with just those two, which
+      also opens in the analyzer.  `D:__ R:__` notes:
+- [ ] **TL-16 — export + remove a take.** Analyzer: select a take - Export Take... is lit
+      (it never was under default settings before); it writes that take as its own report
+      (+ a .wav beside it when the take had audio).  Remove Take: the take leaves the list and
+      the session file now holds two; removing the last take deletes the file.
+      `D:__ R:__` notes:
+
+**The analyzer (against the KBS Meter Suite plugin, side by side):**
+
+- [ ] **TL-17 — Levels view.** Big INTEGRATED graded green / amber / red against the target
+      with the LU offset, M and S bars centered on the target, TRUE PEAK per channel with the
+      ceiling marked and the running max, the over-ceiling count, PLR / PSR, CORR (play a
+      mono source: +1; flip one channel's polarity: -1, red).  `D:__ R:__` notes:
+- [ ] **TL-18 — Loudness view.** Short-term fill + momentary line + dashed green target +
+      amber LRA band; wheel / drag / double-click / hover work on live history and on a take;
+      "vs ..." overlays a second take in amber; side cells INTEGRATED / SHORT-TERM / MOMENTARY
+      / LRA / MAX TP L R.  Picking a spec in Menu > Target moves the target AND the ceiling.
+      `D:__ R:__` notes:
+- [ ] **TL-19 — Spectrum view.** Filled averaged trace under a grey peak hold, MAX TP L / R in
+      the corner, dBFS bars at the side; Tilt cycles 0 / 3 / 4.5 (pink noise reads flat at 3);
+      1/3 oct shows bars.  Reset clears hold, maxima, history and the over count.
+      `D:__ R:__` notes:
+- [ ] **TL-20 — no regressions in what the analyzer feeds.** Version capture still starts and
+      ends takes with the transport; the Export Audio dialog's Measure still opens the analyzer
+      on the measured curve (now with the momentary line).  `D:__ R:__` notes:
+
 ## §C — Deferred re-verify ledger
 
 Parked items from closed batches. Lands INSIDE QA-J-Verify's §B section when that section is

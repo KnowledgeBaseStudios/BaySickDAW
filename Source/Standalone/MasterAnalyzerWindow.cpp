@@ -7,7 +7,7 @@
 namespace
 {
     // The app's analyzer palette: the suite's cyan accent over the KBS Meter
-    // Suite's dark panel, with its verdict colours (green on target, amber
+    // Suite's dark panel, with its verdict colors (green on target, amber
     // within 3 LU, red beyond) and its red for anything over the ceiling.
     const juce::Colour kCyan   { 0xff00fff2 };
     const juce::Colour kOrange { 0xffff9100 };
@@ -328,6 +328,7 @@ void MasterAnalyzerView::resetHistory()
     mOverCeilingLive = 0;
     mPeakDb = mAvgDb;
     mProc.resetMasterTruePeakMax();
+    mProc.mVibeGraph.resetMasterLufsIntegrated();   // the reading the tooltip promises to clear
     mViewX0 = mViewX1 = 0.0;
     repaint();
 }
@@ -594,7 +595,7 @@ void MasterAnalyzerView::loudnessRow (juce::Graphics& g, juce::Rectangle<float> 
         g.setColour (kCyan.withAlpha (0.85f));
         g.fillRoundedRectangle (track.withWidth (track.getWidth() * t), 2.0f);
     }
-    // The target sits at the centre of the scale: "on target" is the middle
+    // The target sits at the center of the scale: "on target" is the middle
     // of the bar rather than a number to remember.
     const float mid = track.getX() + track.getWidth() * 0.5f;
     g.setColour (kText.withAlpha (0.5f));
@@ -663,7 +664,7 @@ void MasterAnalyzerView::paintCorrelation (juce::Graphics& g, juce::Rectangle<fl
     auto track = r.removeFromTop (juce::jmax (9.0f, r.getHeight() * 0.5f)).reduced (0.0f, 2.0f);
     g.setColour (kTrack);
     g.fillRoundedRectangle (track, 2.0f);
-    // Fills outward from the centre: right for correlated, left for the
+    // Fills outward from the center: right for correlated, left for the
     // out-of-phase content that vanishes on a mono system.
     const float mid = track.getX() + track.getWidth() * 0.5f;
     const float w   = track.getWidth() * 0.5f * std::abs (c);
@@ -929,9 +930,9 @@ void MasterAnalyzerView::paintSpectrum (juce::Graphics& g, juce::Rectangle<float
                 }
                 else
                 {
-                    const float centre = 0.5f * (pos0 + pos1);
-                    const int ka = juce::jlimit (1, kNumBins - 2, (int) centre);
-                    const float frac = juce::jlimit (0.0f, 1.0f, centre - (float) ka);
+                    const float center = 0.5f * (pos0 + pos1);
+                    const int ka = juce::jlimit (1, kNumBins - 2, (int) center);
+                    const float frac = juce::jlimit (0.0f, 1.0f, center - (float) ka);
                     m  = mAvgDb[(size_t) ka]  + (mAvgDb[(size_t) (ka + 1)]  - mAvgDb[(size_t) ka])  * frac;
                     hd = mPeakDb[(size_t) ka] + (mPeakDb[(size_t) (ka + 1)] - mPeakDb[(size_t) ka]) * frac;
                 }
@@ -970,7 +971,7 @@ void MasterAnalyzerView::paintSpectrum (juce::Graphics& g, juce::Rectangle<float
     paintLevelBars (g, side);
 }
 
-// Live dBFS beside the spectrum, so the analyser answers "how loud" as well as
+// Live dBFS beside the spectrum, so the analyzer answers "how loud" as well as
 // "made of what".
 void MasterAnalyzerView::paintLevelBars (juce::Graphics& g, juce::Rectangle<float> r)
 {

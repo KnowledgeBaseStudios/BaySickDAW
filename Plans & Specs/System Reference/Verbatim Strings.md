@@ -25,10 +25,9 @@ on the button. None of those survive being retyped from a picture.
 ## A. THE MIXER HAMBURGER (StandaloneEditor.cpp:7626-7699)
 Four items, in this order, and nothing else:
 
-  1. "Pan Law"                        (submenu)
-       "Circular (-3 dB at center)"
-       "Triangular (-6 dB at center)"
-       "Square (0 dB at center)"
+  1. "Pan Law"                        (submenu, rows carry hover tooltips)
+       "Ramped"
+       "Flat"
   2. "Master Output"                  (submenu)
        stereo-pair rows built as  <n>/<n+1> + "  (" + <name1> + " / " + <name2> + ")"
          e.g.  1/2  (Out 1 / Out 2)      [note: TWO spaces before the paren]

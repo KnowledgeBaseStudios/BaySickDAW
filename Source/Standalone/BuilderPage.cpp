@@ -842,6 +842,7 @@ void BrowserPanel::rebuildRenderRows()
         if (onEnumerateDirectToMaster)
         {
             std::vector<CategorizedAudioEntry> entries;
+            std::vector<bool> missingFlags;
             for (const auto& d : onEnumerateDirectToMaster())
             {
                 CategorizedAudioEntry e;
@@ -857,8 +858,18 @@ void BrowserPanel::rebuildRenderRows()
             for (const auto& e : entries)
             {
                 auto* leaf = new AudioBrowserItem (e);
+                const int stripId = e.groupName.getIntValue();
                 leaf->onContextMenu     = [this, leaf] (Point<int> pt) { showAudioTreeContextMenu (*leaf, pt); };
                 leaf->onRenameRequested = [this, leaf] { beginRenameDirectToMaster (leaf->getGroupName().getIntValue(), leaf->getDisplayName()); };
+                // SC-12: a strip whose file is gone greys under a "+"; click = Locate.
+                if (! juce::File (e.fullPath).existsAsFile())
+                {
+                    leaf->setMissing (true);
+                    leaf->onLocateRequested = [this, stripId]
+                    {
+                        if (onLocateDirectToMaster) onLocateDirectToMaster (stripId);
+                    };
+                }
                 mDirectCat->addSubItem (leaf);
             }
         }
@@ -1160,6 +1171,7 @@ void BrowserPanel::showAudioTreeContextMenu (AudioBrowserItem& item, Point<int> 
         PopupMenu m;
         if (isDirect)
         {
+            if (! f.existsAsFile()) { m.addItem (6, "Locate..."); m.addSeparator(); }
             m.addItem (4, "Rename...");
             m.addItem (5, "Remove");
         }
@@ -1192,6 +1204,7 @@ void BrowserPanel::showAudioTreeContextMenu (AudioBrowserItem& item, Point<int> 
                 else if (r == 3) { f.revealToUser(); }
                 else if (r == 4) { beginRenameDirectToMaster (stripId, curName); }
                 else if (r == 5) { if (onRemoveDirectToMaster) onRemoveDirectToMaster (stripId); rebuildRenderRows(); }
+                else if (r == 6) { if (onLocateDirectToMaster) onLocateDirectToMaster (stripId); }
             });
         return;
     }

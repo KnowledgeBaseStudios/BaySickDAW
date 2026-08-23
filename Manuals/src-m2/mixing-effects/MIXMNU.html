@@ -2,11 +2,17 @@
 
 <figure data-views="MIXMNU">
 
-<p id="MIXMNU-1"><b>Pan Law</b> - how level behaves as a pan knob sweeps:
-<code>Circular (-3 dB at center)</code> keeps perceived loudness even
-through the sweep (the usual choice), <code>Triangular (-6 dB at
-center)</code> sums panned pairs cleanly, <code>Square (0 dB at
-center)</code> changes nothing at center. One law for the whole mixer.</p>
+<p id="MIXMNU-1"><b>Pan Law</b> - how a pan knob sweeps, for the whole
+project: every pan knob in the app follows it, on strips, buses, the master,
+the engine pan knobs, per-note pan and timeline clips. <code>Ramped</code>
+(the default) keeps a sound at its level at center and lets it rise by up to
+3 dB as it moves toward one side, so it feels equally loud anywhere in the
+field. <code>Flat</code> holds the side you pan toward at its level while the
+other side fades, so a sound is loudest at center and about 3 dB quieter at
+the sides. Neither changes a sound that sits at center. Hover a row for its
+tooltip. On mixer strips, buses and the master the far side folds into the
+near side as you pan, so a 100% pan is the mono sum of both sides in one
+channel.</p>
 
 <p id="MIXMNU-2"><b>Master Output</b> - where the master lands on your
 audio device.</p>

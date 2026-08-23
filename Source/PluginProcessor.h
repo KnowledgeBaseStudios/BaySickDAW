@@ -725,6 +725,10 @@ public:
     void       clearDirectStrips  ();
     const DirectStrip* getDirectStrip (int idx) const;
     juce::File resolveDirectStripFile (int idx) const;
+    // The ONE writer of the stored form every reader resolves through
+    // resolveProjectFile: project-relative inside the project folder, absolute
+    // outside it.
+    juce::String storedProjectPathFor (const juce::File& file) const;
     std::vector<int> getDirectStripIndices() const;
     std::function<void()> onDirectStripsChanged;
     void registerBassEngine   (int pageIdx, juce::AudioProcessor* eng);
@@ -2297,6 +2301,8 @@ private:
     std::array<std::unique_ptr<DirectFileTask>, MixerChannelIds::kMaxDirectStrips> mDirectTasks;
     bool openDirectStripTask  (int idx, const juce::File& file);
     void closeDirectStripTask (int idx);
+    void ensureDirectStripInfra (int idx);
+    void tearDownDirectStrip (int idx);
     void serializeDirectStrips   (juce::XmlElement& root) const;
     void deserializeDirectStrips (const juce::XmlElement& root);
     std::array<std::unique_ptr<EngineInsertTask>, kMaxBassPages>  mBassRenderTasks;

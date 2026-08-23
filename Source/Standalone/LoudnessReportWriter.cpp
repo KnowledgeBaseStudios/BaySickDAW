@@ -11,6 +11,12 @@ namespace
              + juce::String ((int) ((s - (double) total) * 10.0));
     }
 
+    // A label containing "-->" would close the comment the data block lives in.
+    juce::String safe (const juce::String& s)
+    {
+        return s.replace ("\n", " ").replace ("-->", "- ->");
+    }
+
     juce::String curveCsv (const std::vector<float>& c)
     {
         juce::String s;
@@ -153,14 +159,14 @@ juce::String LoudnessReportWriter::buildDataBlock (const std::vector<Take>& take
 {
     juce::String d;
     d << dataOpenTag() << "\n";
-    d << "project=" << ctx.projectName.replace ("\n", " ")    << "\n";
-    d << "stamp="   << ctx.timestampLabel.replace ("\n", " ") << "\n";
+    d << "project=" << safe (ctx.projectName)    << "\n";
+    d << "stamp="   << safe (ctx.timestampLabel) << "\n";
     for (const auto& t : takes)
     {
         const auto& m = t.m;
         d << "[take]\n";
-        d << "label="     << t.label.replace ("\n", " ")      << "\n";
-        d << "scope="     << t.scopeLabel.replace ("\n", " ") << "\n";
+        d << "label="     << safe (t.label)      << "\n";
+        d << "scope="     << safe (t.scopeLabel) << "\n";
         d << "spec="      << (int) m.specId                    << "\n";
         d << "customtgt=" << juce::String (m.customTargetLufs, 2) << "\n";
         d << "target="    << juce::String (m.resolvedSpec().integratedLufs, 2) << "\n";

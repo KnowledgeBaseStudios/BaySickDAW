@@ -199,11 +199,23 @@ Three tabs:
   **Inst** (files bound to a page), plus **Exports** and **Reports** (files you have
   rendered, read straight out of the project's folders). A Sort button orders the items
   inside each group by newest, oldest or name.
-  Right-click a Clips / Vox / Inst file for Rename..., Duplicate..., Reveal in Explorer,
+  Right-click a Clips / Vox / Inst file for Rename..., Duplicate..., Show in Explorer,
   Properties..., a Regenerate De-noise submenu on a cleaned take, a Choke Group submenu, and
-  Delete. Right-click an Exports or Reports file for Open in Analyzer (reports only), Add to
-  Project..., and Reveal in Explorer. Right-click a category heading to create a group, or a
-  group heading to rename it.
+  Delete (a file that is missing adds Locate... at the top). Right-click an Exports file for
+  Add to Project... (every existing page, a new Clip / Vox / Inst page, or Direct to Master)
+  and Show in Explorer; a Reports file for Open in Analyzer and Show in Explorer; a Direct to
+  Master row for Rename..., Remove and Show in Explorer. Right-click a category heading to
+  create a group, or a group heading to rename it.
+- **Direct to Master** - the grey group between Inst and Exports: each row is a Direct to
+  Master strip, a file playing straight into the master from its own mixer strip (no page,
+  no library entry; the Exports row it came from stays listed). Double-click renames.
+- **Missing files** - after a project opens, every library file or Direct to Master file
+  that is no longer where it was saved gets a prompt: Locate... (a file box at the last
+  known folder; picking repaths everything that used it), Proceed without it (the row, its
+  grid blocks and its strip grey out under a "+"; click the row or the strip to locate it
+  later), or
+  Remove (the file and its path go; a page left with nothing else on it then offers Save
+  Page Preset & Delete / Delete / Cancel).
 - **Auto** - the reusable automation lanes.
 
 Drag any browser item onto the grid to place it. Clicking an item also arms it, so the Draw

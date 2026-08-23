@@ -288,8 +288,13 @@ public:
     {
         if (mMissingFile == missing) return;
         mMissingFile = missing;
+        // While the file is gone the WHOLE strip is the Locate target: the
+        // children stop taking clicks (a fader drag on a silent strip means
+        // nothing) and the overlay draws over them in paintOverChildren.
+        setInterceptsMouseClicks (true, ! missing);
         repaint();
     }
+    void paintOverChildren (juce::Graphics&) override;
     bool isMissingFile() const noexcept { return mMissingFile; }
     std::function<void()> onMissingFileClicked;
 

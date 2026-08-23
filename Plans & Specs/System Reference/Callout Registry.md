@@ -1417,23 +1417,23 @@ takes. Opened from the Mixer, *see MIX-18*.
 
 | Callout | On-screen label | Manual 2 | IMP | System Reference |
 |---|---|---|---|---|
-| ANLZ-1 | Source picker - `Live`, or one of the captured takes | Mixing | IMP-48 | `Mixer.md` |
-| ANLZ-2 | `Export Take...` - greyed until a take exists | Mixing | IMP-76 | `Freeze and Export.md` |
-| ANLZ-3 | `MOM` - momentary loudness, 400 ms window | Mixing | IMP-48 | `Mixer.md` |
-| ANLZ-4 | `SHORT` - short-term loudness, 3 s | Mixing | IMP-48 | `Mixer.md` |
-| ANLZ-5 | `INT` - integrated loudness. Highlighted because it is the one the target line is about | Mixing | IMP-48 | `Mixer.md` |
-| ANLZ-6 | `LRA` - loudness range | Mixing | IMP-48 | `Mixer.md` |
-| ANLZ-7 | `PEAK` - sample peak | Mixing | IMP-49 | `Mixer.md` |
-| ANLZ-8 | `TRUE PK` - BS.1770-4 true peak, which can exceed sample peak | Mixing | IMP-49 | `Mixer.md` |
-| ANLZ-9 | History graph, scale 0 to -40 LUFS | Mixing | IMP-48 | `Mixer.md` |
-| ANLZ-10 | Target line - dashed cyan, labelled with its value (`-14.0 LUFS`). Set from the Menu | Mixing | IMP-48 | `Mixer.md` |
+| ANLZ-1 | Source picker - `Live`, or one of the captured takes (`(report)` marks a take loaded from a report) | Mixing | IMP-48 | `Mixer.md` |
+| ANLZ-2 | `vs ...` - overlay a second take on the Loudness view for A/B | Mixing | IMP-48 | `Mixer.md` |
+| ANLZ-3 | `Export Take...` - writes the selected take as its own report (plus its audio when captured). Greyed on Live | Mixing | IMP-76 | `Freeze and Export.md` |
+| ANLZ-4 | `Remove Take` - drops the selected take from the list and from its session report | Mixing | IMP-76 | `Freeze and Export.md` |
+| ANLZ-5 | View bar - `Levels` / `Loudness` / `Spectrum`, the current one lit; `Tilt` and `1/3 oct` appear on Spectrum; `Reset` clears everything that accumulates | Mixing | IMP-48 | `Mixer.md` |
+| ANLZ-6 | Levels view - big INTEGRATED graded against the target (green within 1 LU, amber within 3, red beyond) with the offset in LU; `M` and `S` bars centered on the target; TRUE PEAK per channel with the ceiling marked and the running max, the count of moments over the ceiling, PLR / PSR; CORR filling right for correlated, left (red) for out-of-phase | Mixing | IMP-48 | `Mixer.md` |
+| ANLZ-7 | Loudness view - short-term as a filled area, momentary as a line, the dashed green target, the loudness-range band shaded amber; wheel zooms, drag pans, double-click shows the whole history, hover reads time / S / M. Side cells INTEGRATED, SHORT-TERM, MOMENTARY, LRA, MAX TP L / R | Mixing | IMP-48 | `Mixer.md` |
+| ANLZ-8 | Spectrum view - log-frequency, per-column averaged trace over a grey peak hold, MAX TP L / R in the corner, dBFS bars at the side | Mixing | IMP-49 | `Mixer.md` |
+| ANLZ-9 | `Tilt` - 0, 3 or 4.5 dB per octave slope (pink noise reads flat at 3) | Mixing | IMP-49 | `Mixer.md` |
+| ANLZ-10 | `1/3 oct` - third-octave bars instead of the line | Mixing | IMP-49 | `Mixer.md` |
 ### `ANLZM` - `Analyzer Menu.png`
 
 | Callout | On-screen label | Manual 2 | IMP | System Reference |
 |---|---|---|---|---|
-| ANLZM-1 | `View` group - `Loudness` / `Spectrum`, ticked | Mixing | IMP-48 | `Mixer.md` |
+| ANLZM-1 | `View` group - `Levels` / `Loudness` / `Spectrum`, ticked | Mixing | IMP-48 | `Mixer.md` |
 | ANLZM-2 | `Source` group - `Live`, then the captured takes. `No captured takes yet` is the greyed empty state | Mixing | IMP-48 | `Mixer.md` |
-| ANLZM-3 | `Target` group - `Streaming (-14 LUFS)`, `Streaming (-16 LUFS)`, `EBU R128 (-23 LUFS)`, `ATSC A/85 (-24 LKFS)` | Mixing | IMP-34 | `Mixer.md` |
+| ANLZM-3 | `Target` group - `Streaming (-14 LUFS)`, `Streaming (-16 LUFS)`, `EBU R128 (-23 LUFS)`, `ATSC A/85 (-24 LKFS)`. Sets the target AND the true-peak ceiling the views grade against | Mixing | IMP-34 | `Mixer.md` |
 | ANLZM-4 | `Custom...` - a target of your own. While a custom target is active the row reads `Custom (-X.X LUFS)...` and carries the tick | Mixing | IMP-34 | `Mixer.md` |
 | ANLZM-5 | `Reset history` - clears the graph and the integrated reading | Mixing | IMP-48 | `Mixer.md` |
 
@@ -2055,7 +2055,7 @@ The Mixer window menu.
 
 | Callout | On-screen label | Manual 2 | IMP | System Reference |
 |---|---|---|---|---|
-| MIXMNU-1 | `Pan Law` submenu | Mixing | IMP-60 | `Mixer.md` |
+| MIXMNU-1 | `Pan Law` submenu - `Ramped` / `Flat`, hover tooltips | Mixing | IMP-60 | `Mixer.md` |
 | MIXMNU-2 | `Master Output` submenu | Mixing | IMP-61 | `Mixer.md` |
 | MIXMNU-3 | `Latency-compensate meters` | Mixing | IMP-48 | `Mixer.md` |
 | MIXMNU-4 | `Multi-core Rendering` - tick when on | Mixing | IMP-60 | `Mixer.md` |

@@ -230,7 +230,12 @@ remembered between openings.
 
 ## Cross-references
 
-- *Projects and Saving* - the `Freeze\`, `Exports\` and `Reports\` folders, and
+- *Projects and Saving* - the `Freeze\`, `Exports\` and `Reports\` folders (a Reports file is
+  ONE report per session with every captured take as a section - File Settings' "Keep captured
+  takes" defaults to the project Reports folder; the page is interactive in any browser: zoom /
+  pan the curves, shift-drag a region for its integrated loudness, LRA and max M / S, tick takes
+  and "Save selected as report" to write a new file; Export Take... in the analyzer writes one
+  take as its own report), and
   the save-first interlock.
 - *Project Bundles* - why the freeze cache is excluded from bundles.
 - *Automation* - offline lane replay, which is what makes an export match what

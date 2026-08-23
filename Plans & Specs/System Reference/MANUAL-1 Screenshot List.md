@@ -874,11 +874,11 @@ least one automation clip. Take every Builder shot in one pass off that project.
 
 **SHOT-143 — Browser, Files leaf right-click menu (library file)**
 - Reach: Builder > Files > right-click a leaf under Clips, Vox or Inst.
-- Visible: Rename... / Duplicate... / Reveal in Explorer / Properties... / (on a "CLEANED" take only) a "Regenerate De-noise" submenu with Light + Strong / sep / "Choke Group" submenu (None + Group 1..16, tick on current) / sep / Delete.
+- Visible: (Locate... / sep, only when the file is missing) Rename... / Duplicate... / Show in Explorer / Properties... / (on a "CLEANED" take only) a "Regenerate De-noise" submenu with Light + Strong / sep / "Choke Group" submenu (None + Group 1..16, tick on current) / sep / Delete.
 
 **SHOT-144 — Browser, Files leaf right-click menu (Exports / Reports)**
 - Reach: Builder > Files > expand Exports (or Reports) after doing an export > right-click a leaf.
-- Visible: For an audio export — "Add to Project..." + "Reveal in Explorer". For a report — "Open in Analyzer" + "Reveal in Explorer".
+- Visible: For an audio export — "Add to Project..." + "Show in Explorer". For a report — "Open in Analyzer" + "Show in Explorer". For a Direct to Master row — "Rename..." / "Remove" + "Show in Explorer".
 - Why separate: Renders are not library entries and get a completely different, much shorter menu.
 - Variant of: SHOT-143
 
@@ -1211,7 +1211,7 @@ audio interface makes SHOT-212/214/216 far more useful.
 
 **SHOT-211 — Mixer, Menu dropdown open**
 - Reach: Mixer > click "Menu" on the title strip.
-- Visible: FOUR entries, no separators - "Pan Law" submenu (Circular (-3 dB at center) / Triangular (-6 dB at center) / Square (0 dB at center), tick on current); "Master Output" submenu; "Latency-compensate meters" (tickable, unticked by default); "Multi-core Rendering" (tickable, ticked by default).
+- Visible: FOUR entries, no separators - "Pan Law" submenu (Ramped / Flat, tick on current, hover tooltip on each); "Master Output" submenu; "Latency-compensate meters" (tickable, unticked by default); "Multi-core Rendering" (tickable, ticked by default).
 
 **SHOT-212 — Mixer, Master Output submenu open**
 - Reach: Mixer > Menu > hover "Master Output".
@@ -1287,17 +1287,17 @@ audio interface makes SHOT-212/214/216 far more useful.
 
 **SHOT-227 — Master Analyzer, Loudness view, live**
 - Reach: Ribbon > Mixer > on the MASTER strip click the button reading "Analyzer" (every other strip's reads "+"; its tooltip reads "Open the master analyzer - loudness, spectrum and the render report"). **This is the only entry point — there is no View-menu route.**
-- Visible: Contained window "Master Analyzer" with its title strip and Menu button; a top control row with a source combo (defaulting to "Live") and a disabled "Export Take..." button; a readout strip of six cells — MOM, SHORT, INT (cyan), LRA ("--" when live), PEAK (turning orange above -0.1 dBFS), TRUE PK (turning orange above -1.0 dBTP); a plot area with LU gridlines every 6 LU, a dashed cyan target line labelled e.g. "-14.0 LUFS", the cyan short-term loudness curve, and orange bars filling any span above the target.
+- Visible: Contained window "Master Analyzer" with its title strip and Menu button; a top control row with a source combo (defaulting to "Live"), a "vs ..." overlay combo, and disabled "Export Take..." / "Remove Take" buttons; a view bar — Levels / Loudness / Spectrum (current lit) and Reset; the Loudness body: short-term loudness as a filled cyan area with the momentary line over it, LU gridlines every 6 LU weighted below the target, a dashed green "TARGET -14.0" line, the loudness-range band shaded amber, a time axis, and side cells INTEGRATED (graded green / amber / red against the target), SHORT-TERM, MOMENTARY, LRA, MAX TP L / R.
 
 **SHOT-228 — Master Analyzer, Spectrum view**
 - Reach: Master Analyzer > Menu > View > Spectrum.
-- Visible: Same frame and readout strip; the plot replaced by a log-frequency spectrum — vertical gridlines labelled 50, 100, 200, 500, 1k, 2k, 5k, 10k along the bottom, horizontal dB gridlines every 12 dB, a grey peak-hold trace and a brighter cyan averaged trace.
+- Visible: Same frame; the view bar gains "Tilt 0" and "1/3 oct"; the plot is a log-frequency spectrum — vertical gridlines labelled 50, 100, 200, 500, 1k, 2k, 5k, 10k along the bottom, horizontal dB gridlines every 12 dB, a grey peak-hold trace over a filled cyan averaged trace, "MAX TP L / R" in the top-left corner, and two dBFS level bars at the right.
 - Why separate: A completely different plot with different axes and legends.
 - Variant of: SHOT-227
 
 **SHOT-229 — Master Analyzer, showing a rendered / captured take**
 - Reach: File > Export Audio... > "Measure" and let it finish (the Analyzer opens itself), or open the Analyzer and pick a take from its source combo.
-- Visible: Loudness view with the render curve; **MOM and SHORT read "--", PEAK reads "--"**, INT and TRUE PK carry the measured numbers, LRA now shows a value; an orange "RENDER: <label>" caption bottom-right of the readout strip; "Export Take..." enabled if the take has audio.
+- Visible: Loudness view with the take's curves (short-term fill + momentary line); the side cells carry the take's INTEGRATED, its last SHORT-TERM / MOMENTARY values, its LRA and its true peak; an orange "TAKE: <label>" caption top-right; "Export Take..." and "Remove Take" enabled. Wheel / drag zooms and pans the whole take.
 - Why separate: Half the readout cells go blank and an orange caption appears — a state a reader will otherwise think is a broken meter.
 - Variant of: SHOT-227
 
