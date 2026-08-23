@@ -38,7 +38,7 @@ public:
 
     // Clears ONLY the running maximum -- keeps filter history, so a metering
     // window can restart mid-stream without a discontinuity at the seam.
-    void resetPeak() noexcept { mMaxLin = 0.0f; }
+    void resetPeak() noexcept { mMaxLin = 0.0f; mMaxLinCh[0] = mMaxLinCh[1] = 0.0f; }
 
     // Feed a block.  Accumulates into the running maximum across all channels
     // present (up to the prepared count).
@@ -47,6 +47,10 @@ public:
     float truePeakLinear() const noexcept { return mMaxLin; }
     float truePeakDb()     const noexcept
         { return juce::Decibels::gainToDecibels (mMaxLin, -144.0f); }
+    // QA-TrueLevel SC-16: the analyzer shows true peak PER CHANNEL (a peak on
+    // one side is a different problem from a peak on both).
+    float truePeakDbChannel (int ch) const noexcept
+        { return juce::Decibels::gainToDecibels (mMaxLinCh[(size_t) juce::jlimit (0, 1, ch)], -144.0f); }
 
 private:
     // Feed one channel.  Private because process() is the only caller -- a
@@ -61,6 +65,7 @@ private:
     std::vector<std::array<float, kTapsPerPhase>> mHist;
     std::vector<int>                              mHistPos;
     float                                         mMaxLin { 0.0f };
+    std::array<float, 2>                          mMaxLinCh { 0.0f, 0.0f };
 
     float pushAndPeak (int ch, float x) noexcept;
 };

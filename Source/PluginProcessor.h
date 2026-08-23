@@ -1339,6 +1339,9 @@ public:
     // test then propagates to everything at once.
     juce::AudioPlayHead* enginePlayHead() const noexcept { return mLastEnginePlayHead; }
     float getMasterTruePeakDb() const noexcept;
+    float getMasterTruePeakDbChannel (int ch) const noexcept    { return mVibeGraph.getMasterTruePeakDbChannel (ch); }
+    float getMasterTruePeakMaxDbChannel (int ch) const noexcept { return mVibeGraph.getMasterTruePeakMaxDbChannel (ch); }
+    float getMasterCorrelation() const noexcept                 { return mVibeGraph.getMasterCorrelation(); }
 
     // ── TS7 §3: version capture support ──────────────────────────────────────
     // Edge counters (§3.2) read by the editor's timer; the audio thread never

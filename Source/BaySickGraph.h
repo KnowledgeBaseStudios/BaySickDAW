@@ -693,6 +693,10 @@ public:
     // overshoot lands in.
     float getMasterTruePeakMaxDb() const noexcept;
     void  resetMasterTruePeakMax() noexcept;
+    // QA-TrueLevel SC-16: per-channel true peak + L/R correlation, same tap.
+    float getMasterTruePeakDbChannel (int ch) const noexcept;
+    float getMasterTruePeakMaxDbChannel (int ch) const noexcept;
+    float getMasterCorrelation() const noexcept;
 
     // Return the post-rack EQ owned by an InsertNode (or nullptr). Parallels
     // getInsertRack - same opaque-InsertNode reason.

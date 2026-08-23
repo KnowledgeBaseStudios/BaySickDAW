@@ -613,6 +613,13 @@ struct BaySickGraph::InstrChannelNode
     // boundary, so there is no seam in the measurement.
     TruePeakMeter       specTp;
     std::atomic<float>  masterTpDb { -144.0f };
+    // QA-TrueLevel SC-16: per-channel true peak (instant + running max) and the
+    // L/R correlation (+1 mono, 0 uncorrelated, negative cancels in a mono
+    // fold), all at the same post-fader tap the LUFS meter reads.
+    std::atomic<float>  masterTpDbL { -144.0f }, masterTpDbR { -144.0f };
+    std::atomic<float>  masterTpMaxDbL { -144.0f }, masterTpMaxDbR { -144.0f };
+    std::atomic<float>  masterCorr { 0.0f };
+    float corrLR { 0.0f }, corrLL { 0.0f }, corrRR { 0.0f };
     // TS7 §3.1: the running MAX across a capture take, beside the per-block
     // value the readout shows.  A take's true peak cannot be sampled by the UI
     // timer -- at ~43 blocks/sec against a 30 Hz poll, the one block carrying
@@ -866,6 +873,29 @@ struct BaySickGraph::InstrChannelNode
             specTp.process (buf);
             const float tpDb = specTp.truePeakDb();
             masterTpDb.store (tpDb, std::memory_order_relaxed);
+            {
+                const float l = specTp.truePeakDbChannel (0), r = specTp.truePeakDbChannel (1);
+                masterTpDbL.store (l, std::memory_order_relaxed);
+                masterTpDbR.store (r, std::memory_order_relaxed);
+                if (l > masterTpMaxDbL.load (std::memory_order_relaxed)) masterTpMaxDbL.store (l, std::memory_order_relaxed);
+                if (r > masterTpMaxDbR.load (std::memory_order_relaxed)) masterTpMaxDbR.store (r, std::memory_order_relaxed);
+            }
+            if (buf.getNumChannels() >= 2)
+            {
+                // ~300 ms one-pole, per sample (the KBS Meter Suite's Correlation).
+                const float* cl = buf.getReadPointer (0);
+                const float* cr = buf.getReadPointer (1);
+                const float  k  = std::exp (-1.0f / (0.3f * 48000.0f));
+                for (int s = 0; s < buf.getNumSamples(); ++s)
+                {
+                    corrLR = cl[s] * cr[s] + k * (corrLR - cl[s] * cr[s]);
+                    corrLL = cl[s] * cl[s] + k * (corrLL - cl[s] * cl[s]);
+                    corrRR = cr[s] * cr[s] + k * (corrRR - cr[s] * cr[s]);
+                }
+                const float d = std::sqrt (corrLL * corrRR);
+                masterCorr.store (d > 1.0e-9f ? juce::jlimit (-1.0f, 1.0f, corrLR / d) : 0.0f,
+                                  std::memory_order_relaxed);
+            }
 
             // Plain load/compare/store, not a CAS loop: this is the only writer
             // (one audio thread), and the UI's clear racing a store can at worst
@@ -1153,7 +1183,31 @@ float BaySickGraph::getMasterTruePeakMaxDb() const noexcept
 void BaySickGraph::resetMasterTruePeakMax() noexcept
 {
     if (mMasterNode != nullptr)
-        mMasterNode->masterTpMaxDb.store (-144.0f, std::memory_order_relaxed);
+    {
+        mMasterNode->masterTpMaxDb .store (-144.0f, std::memory_order_relaxed);
+        mMasterNode->masterTpMaxDbL.store (-144.0f, std::memory_order_relaxed);
+        mMasterNode->masterTpMaxDbR.store (-144.0f, std::memory_order_relaxed);
+    }
+}
+
+float BaySickGraph::getMasterTruePeakDbChannel (int ch) const noexcept
+{
+    if (mMasterNode == nullptr || ! mMasterSpecActive.load (std::memory_order_relaxed)) return -144.0f;
+    return ch == 0 ? mMasterNode->masterTpDbL.load (std::memory_order_relaxed)
+                   : mMasterNode->masterTpDbR.load (std::memory_order_relaxed);
+}
+
+float BaySickGraph::getMasterTruePeakMaxDbChannel (int ch) const noexcept
+{
+    if (mMasterNode == nullptr) return -144.0f;
+    return ch == 0 ? mMasterNode->masterTpMaxDbL.load (std::memory_order_relaxed)
+                   : mMasterNode->masterTpMaxDbR.load (std::memory_order_relaxed);
+}
+
+float BaySickGraph::getMasterCorrelation() const noexcept
+{
+    if (mMasterNode == nullptr || ! mMasterSpecActive.load (std::memory_order_relaxed)) return 0.0f;
+    return mMasterNode->masterCorr.load (std::memory_order_relaxed);
 }
 
 void BaySickGraph::updateMasterTapFlag() noexcept

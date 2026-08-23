@@ -9,37 +9,31 @@
 
 class BaySickDAWProcessor;
 
-// ── MasterAnalyzerView — CL-044 + CL-227 (QA-ModelShell TS7) ─────────────────
-// The master analyzer AND the loudness-report face are ONE window, not two
-// features (Jeff, 2026-07-29).  It carries two VIEWS over two SOURCES:
+// -- MasterAnalyzerView -- CL-044 (QA-ModelShell TS7), rebuilt QA-TrueLevel
+// SC-16 (Jeff, 2026-08-22) to the KBS Meter Suite blueprint -----------------
+// Three views, because the three questions are different shapes: how loud is
+// it RIGHT NOW is a number (Levels); whether it stayed there is a line over
+// time (Loudness); what it is made of is a spectrum (Spectrum).
 //
-//   View   : Loudness (a Youlean-style LUFS-over-time graph) or Spectrum.
-//   Source : Live (the running master output) or a captured/rendered version.
+// Additions over the plugin panel, which the app can make and a plugin cannot:
+// the history is the WHOLE take and zooms (wheel) / pans (drag), the loudness
+// range band is shaded on it, PLR / PSR are read out, the spectrum has a
+// slope tilt and a 1/3-octave mode, a second take overlays for A/B, moments
+// over the ceiling are counted, and the integrated verdict is graded against
+// the spec chosen in the export dialog.
 //
-// Readouts are always on: Momentary / Short-Term / Integrated LUFS, LRA, output
-// dBFS peak, and true peak.  The target line drawn across the loudness graph is the
-// user's own LUFS target -- moments above it are the flagged instances, and the
-// integrated full-song average is the headline number.  No published spec
-// defines a moment-level loudness limit, so the user's target IS the bar.
-//
-// Tap point: post fader / pan / width, the same place the master LUFS meter
-// reads, so the analyzer shows what actually leaves the app and the master fader
-// moves the trace.
-//
-// COST DISCIPLINE, two independent gates: the audio-side push sits behind an
-// atomic flag, driven from parentHierarchyChanged() keyed on
-// getPeer() != nullptr -- the peer-keyed suspend convention the shell uses for
-// MixerPage's vblank, the Effects poll and the Builder animation.  Since §3.1
-// the audio-side push does NOT stop with the window: version capture's
-// always-on analysis holds the master tap live, and this window is merely the
-// tap's second client -- closing it saves this window's own UI polling only.
-// ─────────────────────────────────────────────────────────────────────────────
+// Taps the processor's post-fader master feed (seqlock, wait-free on the audio
+// thread).  The tap and the timer follow the peer (parentHierarchyChanged), so
+// a closed window costs nothing.  60 Hz body-only repaint: the meters are the
+// one thing in the app that moves continuously, and 30 is where a falling peak
+// reads as steps.
+// -----------------------------------------------------------------------------
 class MasterAnalyzerView : public juce::Component,
                            public juce::SettableTooltipClient,
                            private juce::Timer
 {
 public:
-    enum class ViewMode { Loudness, Spectrum };
+    enum class ViewMode { Levels, Loudness, Spectrum };
 
     explicit MasterAnalyzerView (BaySickDAWProcessor& proc);
     ~MasterAnalyzerView() override;
@@ -47,51 +41,46 @@ public:
     void paint (juce::Graphics&) override;
     void resized() override;
     void parentHierarchyChanged() override;
+    void mouseWheelMove (const juce::MouseEvent&, const juce::MouseWheelDetails&) override;
+    void mouseDown (const juce::MouseEvent&) override;
+    void mouseDrag (const juce::MouseEvent&) override;
+    void mouseDoubleClick (const juce::MouseEvent&) override;
+    void mouseMove (const juce::MouseEvent&) override;
+    void mouseExit (const juce::MouseEvent&) override;
 
-    // ── TS7 §3.6: the version list ───────────────────────────────────────────
-    // The window does not OWN capture -- capture runs for the whole session
-    // whether this window exists or not -- so it is handed a pointer to read.
-    // Null is normal (no capture wired yet) and must stay harmless.
+    // ── TS7 §3.6: source picker (Live + every captured take) ─────────────────
     void setVersionSource (VersionCapture* vc);
     void refreshVersions();
-    // THE one way to change source, so the title-strip menu and the in-view combo
-    // cannot disagree.  0 = Live.  Previously the menu called showLive() directly,
-    // which left the combo displaying a take name over a live trace and let the
-    // next refreshVersions() re-apply the stale take.
     void selectSource (int takeId);
     int  getSelectedTakeId() const noexcept { return mSelectedTakeId; }
-    // Export the selected take's audio.  Wired by the editor because a file
-    // chooser is not this component's business.
     std::function<void(const VersionCapture::Version&)> onExportTake;
     std::function<void(int /*takeId*/)>                 onRemoveTake;   // QA-TrueLevel SC-14
 
-    // Driven from the window's title-strip menu.  Spectrum view implies the
-    // LIVE source: the spectrum is live data (no spectrum is captured for a
-    // take or render), so keeping a render's readouts over a live trace
-    // presented two different signals as one.
-    void setViewMode (ViewMode m)
-    {
-        mView = m;
-        if (m == ViewMode::Spectrum && mShowingRender)
-            selectSource (0);
-        repaint();
-    }
+    void setViewMode (ViewMode m);
     ViewMode getViewMode() const noexcept { return mView; }
-    void setTargetLufs (float lufs)    { mTargetLufs = lufs; repaint(); }
-    float getTargetLufs() const noexcept { return mTargetLufs; }
+
+    // The scale the panel draws against: target / ceiling from the spec the
+    // user works to (the export dialog's pick), never a compiled-in constant.
+    void  setTargetLufs (float lufs)      { mTargetLufs = lufs; repaint(); }
+    float getTargetLufs() const noexcept  { return mTargetLufs; }
+    void  setCeilingDb (float dbtp)       { mCeilingDb = dbtp; repaint(); }
+    float getCeilingDb() const noexcept   { return mCeilingDb; }
+
+    // Clears everything that accumulates: history, both true-peak maxima, the
+    // over-ceiling count and the spectrum's peak-hold trace.
     void resetHistory();
 
-    // A rendered result shown in place of the live trace (CL-227's face).  An
-    // empty curve returns the view to Live.
+    // A measured render / a take: the curves stand in for the live history and
+    // the summary numbers for the live meters.  momentary may be empty (older
+    // reports), in which case only the short-term line draws.
     void showRenderedCurve (const std::vector<float>& lufsCurve,
                             float integrated, float lra, float truePeakDb,
-                            const juce::String& label);
+                            const juce::String& label,
+                            const std::vector<float>& momentaryCurve = {},
+                            int overCeilingCount = -1);
     void showLive();
     bool isShowingRender() const noexcept { return mShowingRender; }
 
-    // ~5.4 Hz bins at 44.1k.  The feed pushes 1024 at a time and this
-    // accumulates 8 of them, because a 1024-point FFT cannot produce a bin below
-    // ~43 Hz -- which left the bottom octave of the display permanently empty.
     static constexpr int kFftOrder = 13;
     static constexpr int kFftSize  = 1 << kFftOrder;   // 8192
     static constexpr int kNumBins  = kFftSize / 2;
@@ -99,71 +88,92 @@ public:
 private:
     void timerCallback() override;
     void setTapActive (bool on);
+    void applySelection();
+    void rebuildCompareList();
+
     float xForFrequency (float hz, float w) const;
+    juce::Colour verdictColour (float lufs) const;
+
+    void paintLevels   (juce::Graphics&, juce::Rectangle<float>);
     void paintLoudness (juce::Graphics&, juce::Rectangle<float>);
     void paintSpectrum (juce::Graphics&, juce::Rectangle<float>);
-    void paintReadouts (juce::Graphics&, juce::Rectangle<float>);
+    void loudnessRow   (juce::Graphics&, juce::Rectangle<float>, const char* label, float lufs);
+    void paintPeaks    (juce::Graphics&, juce::Rectangle<float>);
+    void paintCorrelation (juce::Graphics&, juce::Rectangle<float>);
+    void paintLevelBars   (juce::Graphics&, juce::Rectangle<float>);
+
+    // The curves the Loudness view draws: live rings or the shown take.
+    const std::vector<float>& shortTermSeries() const noexcept;
+    const std::vector<float>& momentarySeries() const noexcept;
+    juce::Rectangle<float> plotBounds() const;
+    juce::Rectangle<float> bodyBounds() const;
 
     BaySickDAWProcessor& mProc;
 
-    // juce::dsp::FFT is not default-constructible -- must be in the ctor init
-    // list (CLAUDE.md gotcha).
+    // ── Spectrum machinery ───────────────────────────────────────────────────
     juce::dsp::FFT                      mFft;
     juce::dsp::WindowingFunction<float> mWindow;
-
     std::vector<float> mScratch;    // 2 * kFftSize, FFT works in place
     std::vector<float> mFeedBuf;    // SpectrumFeed::kSize
     std::vector<float> mAccum;      // kFftSize rolling input ring
     int                mAccumFill { 0 };
-
     std::array<float, kNumBins> mAvgDb  { };
     std::array<float, kNumBins> mPeakDb { };
     bool mHaveFrame { false };
+    int  mTilt       { 0 };       // 0 / 1 / 2 -> 0, 3, 4.5 dB per octave
+    bool mThirdOctave { false };
 
-    // Loudness history, sampled at kHistoryHz.  Deque rather than a ring because
-    // a render's curve replaces it wholesale and lengths differ.
-    std::deque<float> mLufsHistory;
-    std::vector<float> mRenderCurve;
+    // ── Loudness history (live) ──────────────────────────────────────────────
+    std::vector<float> mLiveShort, mLiveMom;   // kHistoryHz, whole session ring
+    int   mOverCeilingLive { 0 };
+    float mLastLiveTp { -144.0f };
+
+    // ── Shown take / render ──────────────────────────────────────────────────
+    std::vector<float> mRenderCurve, mRenderMom;
     bool         mShowingRender { false };
     juce::String mRenderLabel;
     float mRenderIntegrated { -120.0f };
     float mRenderLra        { 0.0f };
     float mRenderTruePeak   { -144.0f };
+    int   mRenderOverCeiling { 0 };
+
+    // ── A/B overlay ──────────────────────────────────────────────────────────
+    std::vector<float> mCompareCurve;
+    juce::String       mCompareLabel;
+
+    // ── Zoom / pan / hover on the history (seconds) ──────────────────────────
+    double mViewX0 { 0.0 }, mViewX1 { 0.0 };   // 0,0 = "show everything"
+    double mDragStartX0 { 0.0 }, mDragStartX1 { 0.0 };
+    int    mDragStartPx { 0 };
+    float  mHoverX { -1.0f };
 
     ViewMode mView       { ViewMode::Loudness };
     float    mTargetLufs { -14.0f };
+    float    mCeilingDb  { -1.0f };
     bool     mTapActive  { false };
 
-    // TS7 §3.6.  mSelectedTakeId is held separately from the combo's index
-    // because the list is rebuilt whenever a take is added, and an index would
-    // silently point at a different take afterwards.
     VersionCapture*                   mVersions { nullptr };
     std::unique_ptr<juce::ComboBox>   mSourceBox;
+    std::unique_ptr<juce::ComboBox>   mCompareBox;
     std::unique_ptr<juce::TextButton> mExportBtn;
     std::unique_ptr<juce::TextButton> mRemoveBtn;   // QA-TrueLevel SC-14
+    std::vector<std::unique_ptr<juce::TextButton>> mViewButtons;
+    std::unique_ptr<juce::TextButton> mResetBtn, mTiltBtn, mOctBtn;
     int  mSelectedTakeId { 0 };        // 0 = Live
     bool mRebuildingList { false };    // suppresses onChange during repopulate
-    void applySelection();
-    static constexpr float kControlsH = 26.0f;
 
-    // CALIBRATION (Rule 6 cat. 5).  Spectrum display range -96..+6 dB covers a
-    // mastered mix's floor through an overshoot.  The loudness graph runs -40..0
-    // LUFS, which spans every target in LoudnessSpec (-14 through ATSC's -24)
-    // with room to read a quiet passage.  History at 10 Hz over 120 s matches
-    // EBU Tech 3342's sampling rate and gives a readable two-minute window.
+    static constexpr float kControlsH = 26.0f;
+    static constexpr float kViewBarH  = 24.0f;
     static constexpr float kMinDb        = -96.0f;
     static constexpr float kMaxDb        =   6.0f;
-    static constexpr float kLufsMin      = -40.0f;
-    static constexpr float kLufsMax      =   0.0f;
-    static constexpr int   kTimerHz      =  30;
+    static constexpr int   kTimerHz      =  60;
     static constexpr int   kHistoryHz    =  10;
-    static constexpr int   kHistorySecs  = 120;
+    static constexpr int   kHistorySecs  = 1800;   // 30 min of whole-session history
     static constexpr int   kMaxHistory   = kHistoryHz * kHistorySecs;
     static constexpr float kAvgAlpha     = 0.35f;
     static constexpr float kPeakDecayDbPerSec = 12.0f;
     static constexpr float kMinHz        =    20.0f;
     static constexpr float kMaxHz        = 20000.0f;
-
     int mTickCounter { 0 };   // divides kTimerHz down to kHistoryHz
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MasterAnalyzerView)

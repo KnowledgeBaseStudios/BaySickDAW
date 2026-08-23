@@ -14446,7 +14446,8 @@ void StandaloneEditor::doExportAudio()
             if (auto* v = dynamic_cast<MasterAnalyzerView*> (win->getContent()))
                 v->showRenderedCurve (m.lufsCurve, m.integratedLufs, m.lraLu,
                                       m.truePeakDb,
-                                      juce::String (LoudnessSpec::get (m.specId).name));
+                                      juce::String (LoudnessSpec::get (m.specId).name),
+                                      m.momentaryCurve);
     };
     lo.content.setOwned (dlg);
     lo.dialogTitle                   = "Export Audio";
@@ -17025,6 +17026,9 @@ void StandaloneEditor::openMasterAnalyzerWindow()
     // TS7 §3.6: the window READS capture, it does not own it -- capture has been
     // running since app start whether this window was ever opened.
     viewRaw->setVersionSource (&mVersionCapture);
+    // SC-16: the scale follows the export dialog's spec -- target AND ceiling.
+    viewRaw->setTargetLufs (mVersionCapture.getSpec().integratedLufs);
+    viewRaw->setCeilingDb  (mVersionCapture.getSpec().maxTruePeakDb);
     viewRaw->onExportTake = [this] (const VersionCapture::Version& v)
     {
         exportCapturedTake (v);
@@ -17049,6 +17053,9 @@ void StandaloneEditor::openMasterAnalyzerWindow()
             juce::PopupMenu m;
 
             m.addSectionHeader ("View");
+            m.addItem ("Levels", true, safeView->getViewMode() == VM::Levels,
+                       [safeView]() mutable
+                       { if (safeView) safeView->setViewMode (VM::Levels); });
             m.addItem ("Loudness", true, safeView->getViewMode() == VM::Loudness,
                        [safeView]() mutable
                        { if (safeView) safeView->setViewMode (VM::Loudness); });
@@ -17095,14 +17102,15 @@ void StandaloneEditor::openMasterAnalyzerWindow()
                 if (! sp.checksIntegrated) continue;   // measure-only has no target
                 if (sp.id == LoudnessSpec::Id::Custom) continue;
                 const float t = sp.integratedLufs;
+                const float c = sp.maxTruePeakDb;
                 const bool ticked =
                     juce::approximatelyEqual (safeView->getTargetLufs(), t);
                 matchesPreset = matchesPreset || ticked;
                 m.addItem (juce::String (sp.name),
                            true,
                            ticked,
-                           [safeView, t]() mutable
-                           { if (safeView) safeView->setTargetLufs (t); });
+                           [safeView, t, c]() mutable
+                           { if (safeView) { safeView->setTargetLufs (t); safeView->setCeilingDb (c); } });
             }
 
             {

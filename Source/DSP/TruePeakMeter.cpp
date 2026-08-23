@@ -135,9 +135,15 @@ void TruePeakMeter::processChannel (int ch, const float* src, int numSamples) no
     if (ch < 0 || ch >= (int) mHist.size()) return;
 
     float localMax = mMaxLin;
+    float chMax    = ch < 2 ? mMaxLinCh[(size_t) ch] : 0.0f;
     for (int i = 0; i < numSamples; ++i)
-        localMax = juce::jmax (localMax, pushAndPeak (ch, src[i]));
+    {
+        const float p = pushAndPeak (ch, src[i]);
+        localMax = juce::jmax (localMax, p);
+        chMax    = juce::jmax (chMax, p);
+    }
     mMaxLin = localMax;
+    if (ch < 2) mMaxLinCh[(size_t) ch] = chMax;
 }
 
 void TruePeakMeter::process (const juce::AudioBuffer<float>& buf) noexcept
