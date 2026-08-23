@@ -1547,55 +1547,45 @@ void PageMenuBar::setFreezeSlot (std::function<int()> getState,
 // freeze driver calls it from its state-change broadcast.
 void PageMenuBar::refreshFreezeState() {}
 
-namespace
+TooltipMenuItem::TooltipMenuItem (juce::String text, juce::String tip, bool enabled,
+                                  juce::Colour textColour, bool ticked)
+    // TRUE: let the menu detect the click and invoke the item.  With false the
+    // component has to trigger itself, and the item's action would simply
+    // never fire.
+    : juce::PopupMenu::CustomComponent (true),
+      mText (std::move (text)), mTip (std::move (tip)),
+      mEnabled (enabled), mTicked (ticked), mColour (textColour)
 {
-    // JUCE PopupMenu items carry no tooltip.  Freeze needs one when it is
-    // LOCKED -- a greyed item with no explanation is a dead end (Jeff,
-    // 2026-08-04: "if it is locked make it so if the user hovers over that
-    // freeze option it says something about where to unlock that").  A custom
-    // item component is the only hook JUCE gives us; TooltipClient on it is
-    // what the tooltip window queries.
-    class TooltipMenuItem : public juce::PopupMenu::CustomComponent,
-                            public juce::TooltipClient
+}
+
+void TooltipMenuItem::getIdealSize (int& w, int& h)
+{
+    w = juce::Font (14.0f, juce::Font::plain).getStringWidth (mText) + 46;
+    h = 22;
+}
+
+void TooltipMenuItem::paint (juce::Graphics& g)
+{
+    if (mEnabled && isItemHighlighted())
     {
-    public:
-        TooltipMenuItem (juce::String text, juce::String tip, bool enabled,
-                         juce::Colour textColour)
-            // TRUE: let the menu detect the click and invoke the item.  With
-            // false the component has to trigger itself, and the item's action
-            // would simply never fire.
-            : juce::PopupMenu::CustomComponent (true),
-              mText (std::move (text)), mTip (std::move (tip)),
-              mEnabled (enabled), mColour (textColour)
-        {
-        }
-
-        juce::String getTooltip() override { return mTip; }
-
-        void getIdealSize (int& w, int& h) override
-        {
-            w = juce::Font (14.0f, juce::Font::plain).getStringWidth (mText) + 46;
-            h = 22;
-        }
-
-        void paint (juce::Graphics& g) override
-        {
-            if (mEnabled && isItemHighlighted())
-            {
-                g.setColour (VC::Accent.withAlpha (0.30f));
-                g.fillRect (getLocalBounds());
-            }
-            g.setColour (mEnabled ? mColour : mColour.withAlpha (0.38f));
-            g.setFont (juce::Font (14.0f, juce::Font::plain));
-            g.drawText (mText, getLocalBounds().withTrimmedLeft (12),
-                        juce::Justification::centredLeft, true);
-        }
-
-    private:
-        juce::String mText, mTip;
-        bool         mEnabled;
-        juce::Colour mColour;
-    };
+        g.setColour (VC::Accent.withAlpha (0.30f));
+        g.fillRect (getLocalBounds());
+    }
+    g.setColour (mEnabled ? mColour : mColour.withAlpha (0.38f));
+    if (mTicked)
+    {
+        // Same glyph geometry LookAndFeel_V4 draws for a ticked stock item, so
+        // a custom row and a stock row read as siblings in one menu.
+        const auto r = getLocalBounds().removeFromLeft (22).toFloat().reduced (6.0f, 5.0f);
+        juce::Path tick;
+        tick.startNewSubPath (r.getX(),            r.getCentreY());
+        tick.lineTo          (r.getCentreX() - 1,  r.getBottom());
+        tick.lineTo          (r.getRight(),        r.getY());
+        g.strokePath (tick, juce::PathStrokeType (2.0f));
+    }
+    g.setFont (juce::Font (14.0f, juce::Font::plain));
+    g.drawText (mText, getLocalBounds().withTrimmedLeft (mTicked ? 24 : 12),
+                juce::Justification::centredLeft, true);
 }
 
 void PageMenuBar::setVisualSlot (std::function<void()> openVisual,

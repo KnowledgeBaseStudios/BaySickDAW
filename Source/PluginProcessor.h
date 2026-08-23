@@ -1049,7 +1049,10 @@ public:
         juce::int64 projectEnd       = 0;
         int         numSamples       = 0;
         int         numOut           = 2;
-        float       masterGain       = 1.0f;
+        // No master gain here (QA-TrueLevel SC-1): the master fader belongs to
+        // the terminal chain only.  The MT strip tasks used to hand the fader x
+        // the hidden "masterGain" param down to the decode, so every clip took
+        // both TWICE (decode + master chain) while synth engines took them once.
         const MixerState* mxState    = nullptr;   // PatternManager.h top-level struct
         juce::AudioBuffer<float>* clipScratch = nullptr;   // shared decode buffer
         // QA-ClipPlayback Task 2: the row's ClipsPage BaySickPlayer (null when the

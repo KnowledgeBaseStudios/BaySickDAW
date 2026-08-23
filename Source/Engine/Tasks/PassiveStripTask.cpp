@@ -80,7 +80,7 @@ void PassiveStripTask::run()
         //
         // QA-Ef: processBus computes the bus-solo gate itself (anyBusSoloed(),
         // all 11 buses); no solo flag is passed from here.
-        mGraph->processBus (channelId, blockView, mCtx->bpm, mCtx->panLaw);
+        mGraph->processBus (channelId, blockView, mCtx->bpm);
         juce::ignoreUnused (mProcessor);
     }
 }

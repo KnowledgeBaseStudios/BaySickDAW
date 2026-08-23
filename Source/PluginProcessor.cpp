@@ -480,19 +480,17 @@ BaySickDAWProcessor::createParameterLayout()
             VID(id), name, lo, hi, def));
     };
 
-    // Master
-    addF("masterGain", "Master Gain", 0.f, 1.f, 0.8f);
     // Global "kill-all" - when true, every effects rack in the app is bypassed
     // regardless of its own _bypass state. Read by each bus/insert node per block.
     addB("master_fx_bypass", "Master FX Bypass", false);
 
-    // 2026-04-29: project-level pan law (FL Studio parity).
-    //   0 = Circular   (constant power, -3 dB at center, FL default)
-    //   1 = Triangular (linear,         -6 dB at center)
-    //   2 = Square     (0 dB at center, only attenuates the opposite side)
-    // Read every audio block by each Insert/InstrChannelNode when applying
-    // the per-strip _pan param.  Default 0 matches FL's fresh-project default.
-    addI("master_pan_law", "Pan Law", 0, 2, 0);
+    // Project-level pan law, the ONE law every pan knob follows (QA-TrueLevel
+    // SC-2, Jeff 2026-08-22): 0 = Ramped (FL "Circular"), 1 = Flat (FL
+    // "Triangular").  Both center-unity -- see DSP/PanLaw.h.  FL's manual lists
+    // exactly these two; the old third entry was FL's Triangular under a wrong
+    // name and the old Triangular was a -6 dB crossfade no DAW has.  Old
+    // projects storing 2 clamp to Flat (pre-v1, no shim).
+    addI("master_pan_law", "Pan Law", 0, 1, 0);
 
     // QA-Ea Task 0c (FL pre-roll record) + QA-Ee Stage 4 (unified snap scheme):
     // global record-quantize divisor, now on the shared 11-label scheme (Int
@@ -1236,7 +1234,6 @@ bool BaySickDAWProcessor::renderAudioClipsForRow (int row,
         player.unmuteResync = false;
 
         clipScratch.clear();
-        const float gain = ctx.masterGain;
         float       peak = 0.0f;
 
         // Vocoder path for actual time-stretch / pitch only.  Reverse no longer forces
@@ -1515,7 +1512,7 @@ bool BaySickDAWProcessor::renderAudioClipsForRow (int row,
                             const float p3    = player.pvOutBuf.getSample (srcCh, ip2);
                             const float v     = (p1 + 0.5f * frac * ((p2 - p0)
                                               + frac * (2.f * p0 - 5.f * p1 + 4.f * p2 - p3
-                                              + frac * (3.f * (p1 - p2) + p3 - p0)))) * gain;
+                                              + frac * (3.f * (p1 - p2) + p3 - p0))));
                             clipScratch.addSample (ch, bufOffset + i, v);
                             peak = juce::jmax (peak, std::abs (v));
                         }
@@ -1592,7 +1589,7 @@ bool BaySickDAWProcessor::renderAudioClipsForRow (int row,
                         const int   srcCh = ch % pvCh;
                         const float s0    = player.pvInBuf.getSample (srcCh, ip);
                         const float s1    = player.pvInBuf.getSample (srcCh, ip + 1);
-                        const float v     = (s0 + frac * (s1 - s0)) * gain;
+                        const float v     = s0 + frac * (s1 - s0);
                         clipScratch.addSample (ch, bufOffset + revDone, v);
                         peak = juce::jmax (peak, std::abs (v));
                     }
@@ -1669,7 +1666,7 @@ bool BaySickDAWProcessor::renderAudioClipsForRow (int row,
                             const float p3 = player.pvInBuf.getSample (srcCh, ip2);
                             const float v  = (p1 + 0.5f * frac * ((p2 - p0)
                                           + frac * (2.f * p0 - 5.f * p1 + 4.f * p2 - p3
-                                          + frac * (3.f * (p1 - p2) + p3 - p0)))) * gain;
+                                          + frac * (3.f * (p1 - p2) + p3 - p0))));
                             clipScratch.addSample (ch, bufOffset + fwdDone, v);
                             peak = juce::jmax (peak, std::abs (v));
                         }
@@ -1690,7 +1687,7 @@ bool BaySickDAWProcessor::renderAudioClipsForRow (int row,
             // raw readRatio) so the Stretch knob varispeeds the plain-playback path too.
             // posD keeps the fractional position (sub-sample block continuity).
             peak = player.source->readAndMix (
-                clipScratch, bufOffset, outSamples, posD, fileRate, ctx.numOut, gain);
+                clipScratch, bufOffset, outSamples, posD, fileRate, ctx.numOut, 1.0f);
             player.expectedFilePos = (juce::int64) std::llround (posD + (double) outSamples * fileRate);
         }
 
@@ -1942,7 +1939,6 @@ bool BaySickDAWProcessor::decodeFilePlayClip (AudioClipPlayer&             playe
     // ── Decode into ctx.clipScratch (Phase vocoder OR direct path) ───────────
     clipScratch.clear();
 
-    const float gain = ctx.masterGain;
     float       peak = 0.0f;
 
     const bool usePV = (player.vocoder != nullptr)
@@ -2301,7 +2297,7 @@ bool BaySickDAWProcessor::decodeFilePlayClip (AudioClipPlayer&             playe
                         const double dirRate = tc / (double) outSamples;
                         player.source->readAndMix (clipScratch, bufOffset,
                                                      outSamples, pStart, dirRate,
-                                                     numOut, gain);
+                                                     numOut, 1.0f);
                         for (int i = 0; i < outSamples; ++i)
                         {
                             const float t  = ((float) i + 0.5f) / (float) outSamples;
@@ -2350,7 +2346,7 @@ bool BaySickDAWProcessor::decodeFilePlayClip (AudioClipPlayer&             playe
                                     const float v  = (p1 + 0.5f * frac * ((p2 - p0)
                                                    + frac * (2.f * p0 - 5.f * p1 + 4.f * p2 - p3
                                                    + frac * (3.f * (p1 - p2) + p3 - p0))))
-                                                   * gain * fadeG;
+                                                   * fadeG;
                                     clipScratch.addSample (ch, bufOffset + i, v);
                                 }
                             }
@@ -2480,7 +2476,7 @@ bool BaySickDAWProcessor::decodeFilePlayClip (AudioClipPlayer&             playe
                         const float p3    = player.pvOutBuf.getSample (srcCh, ip2);
                         const float v     = (p1 + 0.5f * frac * ((p2 - p0)
                                           + frac * (2.f * p0 - 5.f * p1 + 4.f * p2 - p3
-                                          + frac * (3.f * (p1 - p2) + p3 - p0)))) * gain;
+                                          + frac * (3.f * (p1 - p2) + p3 - p0))));
                         clipScratch.addSample (ch, bufOffset + i, v);
                         peak = juce::jmax (peak, std::abs (v));
                     }
@@ -2501,7 +2497,7 @@ bool BaySickDAWProcessor::decodeFilePlayClip (AudioClipPlayer&             playe
         // ── Direct path: SR-only interpolation (no BPM stretch) ──────────────
         // posDB keeps the fractional position (sub-sample block continuity).
         peak = player.source->readAndMix (
-            clipScratch, bufOffset, outSamples, posDB, readRatio, numOut, gain);
+            clipScratch, bufOffset, outSamples, posDB, readRatio, numOut, 1.0f);
         player.expectedFilePos = (int64) std::llround (posDB + (double) outSamples * readRatio);
     }
     }   // !warpHandled (QA-Fa recovery: pristine paths untouched when the warp regime decoded)
@@ -3766,11 +3762,6 @@ void BaySickDAWProcessor::processBlock(juce::AudioBuffer<float>& buffer,
         mtCtx.bpm                = pos.getBpm().orFallback (120.0);
         mtCtx.anySolo            = anySolo;
         mtCtx.songMode           = mSongMode.load (std::memory_order_relaxed);
-        // 2026-05-06 (Batch 9b): cache project pan law for bus tasks.
-        mtCtx.panLaw             =
-            (apvts.getRawParameterValue("master_pan_law") != nullptr)
-                ? (int) apvts.getRawParameterValue("master_pan_law")->load()
-                : 0;
         mtCtx.posInfo            = &pos;
 
         // §6.8: pattern-mode freeze reads a per-pattern file at a LOOP-LOCAL

@@ -447,12 +447,10 @@ public:
     // contributions) before calling.  CL-301: every non-master bus runs the
     // ONE InstrChannelNode::processChainOnly (Master runs processMasterChain
     // via processMasterBus); processBus's remaining per-bus knowledge is
-    // node/meter-atomic selection only.  `panLaw` is retained for API
-    // stability but the chain reads the cached master_pan_law pointer (same
-    // param the caller snapshots).  Caller is responsible for routing the
+    // node/meter-atomic selection only.  The chain reads the cached
+    // master_pan_law pointer itself.  Caller is responsible for routing the
     // processed output downstream - processBus does DSP only.
-    void processBus(int busChId, juce::AudioBuffer<float>& buf,
-                    double bpm, int panLaw);
+    void processBus(int busChId, juce::AudioBuffer<float>& buf, double bpm);
 
     // ── Bus EffectRack access (Effects Page / Mixer UI) ───────────────────────
     EffectRack* getLayersBusRack();

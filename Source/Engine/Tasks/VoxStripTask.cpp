@@ -120,10 +120,6 @@ void VoxStripTask::run()
             (juce::int64) (beatStart * secPerBeat * mProcessor->mSampleRate));
 
         const auto& mx = mProcessor->mPatternManager->getMixer();
-        float masterGain = mx.masterLevel;
-        if (auto* p = mProcessor->apvts.getRawParameterValue ("masterGain"))
-            masterGain *= p->load();
-
         clipCtx.bpm          = bpm;
         clipCtx.anySolo      = mCtx->anySolo;
         clipCtx.secPerBeat   = secPerBeat;
@@ -131,7 +127,6 @@ void VoxStripTask::run()
         clipCtx.projectEnd   = projectStart + n;
         clipCtx.numSamples   = n;
         clipCtx.numOut       = blockView.getNumChannels();
-        clipCtx.masterGain   = masterGain;
         clipCtx.mxState      = &mx;
         // QA-E Task 3 follow-up (2026-05-12): per-task clip scratch (was
         // shared mProcessor->mAudioClipScratch -- the documented race went

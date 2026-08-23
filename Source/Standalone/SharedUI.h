@@ -279,6 +279,30 @@ namespace Filmstrips
     const juce::Image& volumeWhite();  // Volume White.png           -   70x70, 100 frames
 }
 
+// ── TooltipMenuItem ──────────────────────────────────────────────────────────
+// JUCE PopupMenu items carry no tooltip.  A custom item component is the only
+// hook JUCE gives us; TooltipClient on it is what the tooltip window queries
+// (the app's single parentless VibeTooltip finds components inside menu
+// windows).  Born for the locked-Freeze row (Jeff, 2026-08-04), shared since
+// the Pan Law rows needed the same thing (QA-TrueLevel SC-2).  `ticked` paints
+// the radio-style check the stock items show for the current choice.
+class TooltipMenuItem : public juce::PopupMenu::CustomComponent,
+                        public juce::TooltipClient
+{
+public:
+    TooltipMenuItem (juce::String text, juce::String tip, bool enabled,
+                     juce::Colour textColour, bool ticked = false);
+
+    juce::String getTooltip() override { return mTip; }
+    void getIdealSize (int& w, int& h) override;
+    void paint (juce::Graphics& g) override;
+
+private:
+    juce::String mText, mTip;
+    bool         mEnabled, mTicked;
+    juce::Colour mColour;
+};
+
 // ── PageMenuBar ───────────────────────────────────────────────────────────────
 // Tier 2: sits below the ribbon, above sub-tabs / content.
 // Shows ≡ hamburger (opens popup), optional page title, optional action items.

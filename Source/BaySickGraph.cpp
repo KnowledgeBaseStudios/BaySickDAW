@@ -1,6 +1,7 @@
 #include "BaySickGraph.h"
 #include "DSP/LufsMeterDSP.h"   // QA-RustyMeter Task 3: master-bus EBU R128 LUFS
 #include "DSP/TruePeakMeter.h"  // QA-ModelShell TS7 CL-044: master-out true peak
+#include "DSP/PanLaw.h"
 #include "Hosting/HostedPluginEffect.h"  // rack-slot offline sweep
 #include <unordered_map>
 #include <unordered_set>
@@ -256,49 +257,6 @@ namespace
     }
 }
 
-// ── Pan law helper (2026-04-29) ──────────────────────────────────────────────
-// FL Studio parity.  Maps pan ∈ [-1, +1] + project-level law selector
-// (master_pan_law: 0=Circular / 1=Triangular / 2=Square) → (gainL, gainR).
-//   Circular   - constant power, -3 dB at center (cos/sin curve, FL default)
-//   Triangular - linear, -6 dB at center
-//   Square     - 0 dB at center (only attenuates the opposite side)
-// Applied per-strip after the fader-gain stage in every Insert/Bus/Master node.
-static void applyPanLaw (float pan, int law, float& gainL, float& gainR) noexcept
-{
-    pan = juce::jlimit (-1.f, 1.f, pan);
-    const float normPan = (pan + 1.f) * 0.5f;   // 0 = full L, 0.5 = center, 1 = full R
-    switch (law)
-    {
-        case 1: // Triangular - linear, -6 dB at center
-            gainL = 1.f - normPan;
-            gainR = normPan;
-            break;
-        case 2: // Square - 0 dB at center, only attenuates the opposite side
-            gainL = (pan <= 0.f) ? 1.f : (1.f - pan);
-            gainR = (pan >= 0.f) ? 1.f : (1.f + pan);
-            break;
-        default: // 0 = Circular - constant power, -3 dB at center (FL default)
-        {
-            const float a = normPan * juce::MathConstants<float>::halfPi;
-            gainL = std::cos (a);
-            gainR = std::sin (a);
-            break;
-        }
-    }
-}
-
-// Apply pan in-place to a stereo buffer using the given pan + law.  No-op for
-// near-center pan (avoids the cost of two applyGain calls when the user hasn't
-// touched the pan knob).
-static void applyStereoPan (juce::AudioBuffer<float>& buf, float pan, int law) noexcept
-{
-    if (buf.getNumChannels() < 2 || std::abs (pan) < 1.0e-4f) return;
-    float gL = 1.f, gR = 1.f;
-    applyPanLaw (pan, law, gL, gR);
-    buf.applyGain (0, 0, buf.getNumSamples(), gL);
-    buf.applyGain (1, 0, buf.getNumSamples(), gR);
-}
-
 // CL-301 (2026-07-27): LayersBusNode / BassBusNode / DrumsBusNode /
 // MasterBusNode / EffectsBusNode deleted -- folded into the unified
 // InstrChannelNode below (see its header comment for the divergence history).
@@ -366,6 +324,7 @@ struct BaySickGraph::InsertNode
     // prepare; processBlock applies applyGainRamp(mLastFaderGain -> newGain)
     // so fader moves + mute toggles don't zipper.
     float                 mLastFaderGain { 1.0f };
+    baysick::pan::StereoMatrix mLastPan;     // pan ramps like the fader
 
     // ── Cached APVTS raw value pointers (rebindApvts sets these) ──────────────
     std::atomic<float>* pLevel    { nullptr };
@@ -572,11 +531,13 @@ struct BaySickGraph::InsertNode
         }
         mLastFaderGain = g;
 
-        // 2026-04-29: per-strip pan applied AFTER fader using project-level
-        // pan law (master_pan_law: 0=Circular / 1=Triangular / 2=Square).
-        // applyStereoPan no-ops when pan is at center, so this costs ~nothing
-        // for the common case.
-        applyStereoPan (buf, load(pPan, 0.f), (int) load(pPanLaw, 0.f));
+        // Per-strip pan AFTER the fader, mixer (fold) form of the project law.
+        {
+            const auto pan = baysick::pan::fold (load(pPan, 0.f),
+                                                 baysick::pan::lawFromParam (load(pPanLaw, 0.f)));
+            baysick::pan::apply (buf, mLastPan, pan);
+            mLastPan = pan;
+        }
 
         // QA-Fe2 SC delay-match: stash the pre-compensation output for SC
         // consumers before the alignment delay lands on this strip.
@@ -612,8 +573,8 @@ struct BaySickGraph::InsertNode
 // missing on the generic 7) plus a fourth found at fold time (the generic 7
 // never received setHostBPM, so tempo-synced rack effects on those buses ran
 // at default BPM).  Special-case content survives as members/methods, not
-// types: the master chain (terminal -- masterGain x fader, no polarity, no
-// comp delay, LUFS meter) is processMasterChain; every other bus runs
+// types: the master chain (terminal -- fader, no polarity, no comp delay,
+// LUFS meter) is processMasterChain; every other bus runs
 // processChainOnly.  The L/B/D synth-render fallback paths died with the fold
 // (dead since QA-Ea Part A; zero callers).
 struct BaySickGraph::InstrChannelNode
@@ -691,11 +652,11 @@ struct BaySickGraph::InstrChannelNode
     std::atomic<float>* pBypass         { nullptr };
     std::atomic<float>* pPan            { nullptr };
     std::atomic<float>* pPanLaw         { nullptr };
+    baysick::pan::StereoMatrix mLastPan;     // pan ramps like the fader
     std::atomic<float>* pLevel          { nullptr };
     std::atomic<float>* pMute           { nullptr };
     std::atomic<float>* pSolo           { nullptr };
     std::atomic<float>* pGlobalFxBypass { nullptr };
-    std::atomic<float>* pMasterGain     { nullptr };   // master chain only
 
     explicit InstrChannelNode(const juce::String& displayName) : name(displayName) {}
 
@@ -735,7 +696,6 @@ struct BaySickGraph::InstrChannelNode
         pMute           = apvts.getRawParameterValue(prefix + "_mute");
         pSolo           = apvts.getRawParameterValue(prefix + "_solo");
         pGlobalFxBypass = apvts.getRawParameterValue("master_fx_bypass");
-        pMasterGain     = apvts.getRawParameterValue("masterGain");
     }
 
     // Runs the standard bus DSP chain on `buf` in-place.  `buf` must already
@@ -803,7 +763,12 @@ struct BaySickGraph::InstrChannelNode
             }
         }
 
-        applyStereoPan (buf, loadParam(pPan, 0.f), (int) loadParam(pPanLaw, 0.f));
+        {
+            const auto pan = baysick::pan::fold (loadParam(pPan, 0.f),
+                                                 baysick::pan::lawFromParam (loadParam(pPanLaw, 0.f)));
+            baysick::pan::apply (buf, mLastPan, pan);
+            mLastPan = pan;
+        }
 
         if (scTapArmed.load(std::memory_order_relaxed))
             for (int c = 0, tc = juce::jmin(buf.getNumChannels(), scTap.getNumChannels()); c < tc; ++c)
@@ -816,7 +781,9 @@ struct BaySickGraph::InstrChannelNode
                             peakDbL, peakDbR, peakDb);
     }
 
-    // The terminal master chain: masterGain (APVTS knob) x master fader,
+    // The terminal master chain: master fader alone (QA-TrueLevel SC-1, Jeff
+    // 2026-08-22: the old hidden "masterGain" parameter - default 0.8, never
+    // bound to any control - took -1.9 dB off everything; deleted, not zeroed),
     // mute only (no solo -- nothing to solo against), pan BEFORE width
     // (kept verbatim from the former MasterBusNode), no polarity, no comp
     // delay / SC stash (terminal node), LUFS metering on the final sum.
@@ -836,14 +803,18 @@ struct BaySickGraph::InstrChannelNode
         rack.process(buf);
         if (buf.getNumChannels() >= 2) eq.process(buf);   // post-rack master EQ
 
-        const float masterGain  = loadParam(pMasterGain, 1.f);
         const bool  masterMuted = loadParam(pMute, 0.f) > 0.5f;
         const float masterFadDb = loadParam(pLevel, 0.f);
-        const float masterFadLn = juce::Decibels::decibelsToGain(masterFadDb, -60.f);
-        const float g = masterMuted ? 0.f : (masterGain * masterFadLn);
+        const float g = masterMuted ? 0.f
+                                    : juce::Decibels::decibelsToGain(masterFadDb, -60.f);
         if (g != 1.f) buf.applyGain(g);
 
-        applyStereoPan (buf, loadParam(pPan, 0.f), (int) loadParam(pPanLaw, 0.f));
+        {
+            const auto pan = baysick::pan::fold (loadParam(pPan, 0.f),
+                                                 baysick::pan::lawFromParam (loadParam(pPanLaw, 0.f)));
+            baysick::pan::apply (buf, mLastPan, pan);
+            mLastPan = pan;
+        }
 
         const float width = loadParam(pWidth, 1.f);
         if (buf.getNumChannels() >= 2 && std::abs(width - 1.f) > 1.0e-4f)
@@ -1083,8 +1054,7 @@ void BaySickGraph::buildFixedTopology(juce::AudioProcessorValueTreeState& apvts)
     mApvts = &apvts;   // 5F-4a: captured for ensureInsertNode / rebindApvts
 
     // §P4.3 B7: every bus has its own preEq member - no external EQ refs needed.
-    // CL-301: one node type for all five; masterGain reads via the cached
-    // pointer rebindBusApvts binds.
+    // CL-301: one node type for all five.
     mLayersNode     = std::make_unique<InstrChannelNode> ("Layers Bus");
     mBassNode       = std::make_unique<InstrChannelNode> ("Bass Bus");
     mDrumsNode      = std::make_unique<InstrChannelNode> ("Drums Bus");
@@ -1215,7 +1185,7 @@ float BaySickGraph::getMasterTruePeakDb() const noexcept
 }
 
 void BaySickGraph::processBus(int busChId, juce::AudioBuffer<float>& buf,
-                            double bpm, int panLaw)
+                            double bpm)
 {
     using namespace MixerChannelIds;
 

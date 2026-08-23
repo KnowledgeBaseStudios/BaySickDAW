@@ -143,10 +143,6 @@ void CompositeAudioInsertTask::run()
         const juce::int64 projectEnd   = projectStart + n;
 
         const auto& mx = mProcessor->mPatternManager->getMixer();
-        float masterGain = mx.masterLevel;
-        if (auto* p = mProcessor->apvts.getRawParameterValue ("masterGain"))
-            masterGain *= p->load();
-
         BaySickDAWProcessor::AudioClipBlockContext clipCtx;
         clipCtx.bpm           = bpm;
         clipCtx.anySolo       = mCtx->anySolo;
@@ -155,7 +151,6 @@ void CompositeAudioInsertTask::run()
         clipCtx.projectEnd    = projectEnd;
         clipCtx.numSamples    = n;
         clipCtx.numOut        = blockView.getNumChannels();
-        clipCtx.masterGain    = masterGain;
         clipCtx.mxState       = &mx;
         clipCtx.clipScratch   = &getClipScratch (blockView.getNumChannels(), n);
         clipCtx.clipPlayer    = mClipPlayer.load (std::memory_order_acquire);

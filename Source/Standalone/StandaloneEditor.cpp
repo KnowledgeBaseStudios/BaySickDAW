@@ -7664,7 +7664,8 @@ void StandaloneEditor::showPageForTab(int tabId)
 
             // 2026-04-29: Mixer hamburger menu - project-level Pan Law selector.
             // 2026-05-02: + meter latency-compensation toggle (off by default).
-            //   Pan Law: Circular (default), Triangular, Square -- matches FL.
+            //   Pan Law: Ramped (default) / Flat, the two laws FL has
+            //   (QA-TrueLevel SC-2); rows carry hover tooltips.
             //   Latency Compensate: when on, every meter shows the peak from
             //   N audio blocks ago (where N = output device latency / blockSize)
             //   so the visual lines up with the sound the user actually hears.
@@ -7677,9 +7678,22 @@ void StandaloneEditor::showPageForTab(int tabId)
                     juce::PopupMenu panLawSub;
                     auto* p = safeThis->mProcessor.apvts.getParameter ("master_pan_law");
                     const int current = p ? (int) ((juce::AudioParameterInt*) p)->get() : 0;
-                    panLawSub.addItem (101, "Circular (-3 dB at center)", true, current == 0);
-                    panLawSub.addItem (102, "Triangular (-6 dB at center)", true, current == 1);
-                    panLawSub.addItem (103, "Square (0 dB at center)", true, current == 2);
+                    auto addLaw = [&panLawSub, current] (int id, const char* name, const char* tip)
+                    {
+                        juce::PopupMenu::Item pmi (name);
+                        pmi.itemID = id;
+                        pmi.customComponent = new TooltipMenuItem (name, tip, true, VC::Text,
+                                                                   current == id - 101);
+                        panLawSub.addItem (std::move (pmi));
+                    };
+                    addLaw (101, "Ramped",
+                            "Constant-power panning. A sound keeps its level at center and "
+                            "rises by up to 3 dB as you pan it toward one side, so it feels "
+                            "equally loud anywhere in the stereo field.");
+                    addLaw (102, "Flat",
+                            "No level compensation. The side you pan toward holds its level "
+                            "while the other side fades out, so a sound is loudest at center "
+                            "and about 3 dB quieter at the sides.");
                     m.addSubMenu ("Pan Law", panLawSub);
 
                     // J-A2 (2026-05-04): Master Output channel selector.  Lists
@@ -7747,7 +7761,7 @@ void StandaloneEditor::showPageForTab(int tabId)
                         [safeThis] (int r)
                         {
                             if (! safeThis) return;
-                            if (r >= 101 && r <= 103)
+                            if (r >= 101 && r <= 102)
                             {
                                 beginParamUndoGesture (safeThis->mProcessor.apvts, "master_pan_law"); // Task 6 (12-iv)
                                 if (auto* param = safeThis->mProcessor.apvts.getParameter ("master_pan_law"))
