@@ -171,6 +171,11 @@ MasterAnalyzerView::MasterAnalyzerView (BaySickDAWProcessor& proc)
     mOctBtn->onClick = [this] { mThirdOctave = mOctBtn->getToggleState(); repaint(); };
     addAndMakeVisible (*mOctBtn);
 
+    mDbfsMeter = std::make_unique<DBFSMeter>();
+    mDbfsMeter->setMeterLayout (DBFSMeter::Layout::Full);
+    mDbfsMeter->setTooltip ("Master output level in dBFS - the master strip's meter");
+    addChildComponent (*mDbfsMeter);
+
     refreshVersions();
     setViewMode (ViewMode::Loudness);
 }
@@ -199,6 +204,14 @@ void MasterAnalyzerView::resized()
         b->setBounds (bar.removeFromLeft (w));
         bar.removeFromLeft (3);
     }
+
+    if (mDbfsMeter)
+    {
+        auto side = bodyBounds().reduced (6.0f, 6.0f);
+        side = side.removeFromRight (54.0f).reduced (4.0f, 0.0f);
+        side.removeFromTop (12.0f);
+        mDbfsMeter->setBounds (side.toNearestInt());
+    }
 }
 
 void MasterAnalyzerView::setViewMode (ViewMode m)
@@ -212,6 +225,7 @@ void MasterAnalyzerView::setViewMode (ViewMode m)
     const bool spec = (m == ViewMode::Spectrum);
     if (mTiltBtn) mTiltBtn->setVisible (spec);
     if (mOctBtn)  mOctBtn ->setVisible (spec);
+    if (mDbfsMeter) mDbfsMeter->setVisible (spec);
     repaint();
 }
 
@@ -395,6 +409,12 @@ void MasterAnalyzerView::timerCallback()
     else
     {
         for (auto& p : mPeakDb) p = juce::jmax (kMinDb, p - decay);
+    }
+
+    if (mDbfsMeter != nullptr && mView == ViewMode::Spectrum)
+    {
+        const auto [pl, pr] = mProc.drainMasterAnalyzerPeakDb();
+        mDbfsMeter->setStereoLevel (pl, pr);
     }
 
     // Over-ceiling moments, counted on the instantaneous true peak's rising edge.
@@ -968,37 +988,8 @@ void MasterAnalyzerView::paintSpectrum (juce::Graphics& g, juce::Rectangle<float
     g.setColour (tpR > mCeilingDb ? kRed : kText);
     g.drawText ("R " + fmt (tpR), (int) plot.getX() + 112, (int) plot.getY() + 4, 62, 11, juce::Justification::centredLeft);
 
-    paintLevelBars (g, side);
-}
-
-// Live dBFS beside the spectrum, so the analyzer answers "how loud" as well as
-// "made of what".
-void MasterAnalyzerView::paintLevelBars (juce::Graphics& g, juce::Rectangle<float> r)
-{
-    r = r.reduced (4.0f, 0.0f);
+    // The meter itself is the DBFSMeter child (resized() places it); only its label is ours.
     g.setColour (kDim);
     g.setFont (uiFont (8.0f));
-    g.drawText ("dBFS", r.removeFromTop (11.0f), juce::Justification::centred);
-    auto nums = r.removeFromBottom (12.0f);
-    const float v[2] = { mProc.mMasterPeakDbL.load (std::memory_order_relaxed),
-                         mProc.mMasterPeakDbR.load (std::memory_order_relaxed) };
-    const float gap = 4.0f;
-    const float w = juce::jmax (4.0f, (r.getWidth() - gap) * 0.5f);
-    for (int ch = 0; ch < 2; ++ch)
-    {
-        auto col = r.removeFromLeft (w);
-        if (ch == 0) r.removeFromLeft (gap);
-        g.setColour (kTrack);
-        g.fillRoundedRectangle (col, 2.0f);
-        const float t = juce::jlimit (0.0f, 1.0f, (v[ch] + 60.0f) / 60.0f);
-        if (t > 0.001f)
-        {
-            auto lit = col.withTrimmedTop (col.getHeight() * (1.0f - t));
-            g.setColour (v[ch] > -1.0f ? kRed : kCyan.withAlpha (0.85f));
-            g.fillRoundedRectangle (lit, 2.0f);
-        }
-    }
-    g.setColour (kText);
-    g.setFont (uiFont (8.5f));
-    g.drawText (fmt (juce::jmax (v[0], v[1]), 0), nums, juce::Justification::centred);
+    g.drawText ("dBFS", side.reduced (4.0f, 0.0f).removeFromTop (11.0f), juce::Justification::centred);
 }

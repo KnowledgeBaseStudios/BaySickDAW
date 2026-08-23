@@ -156,7 +156,7 @@ void BrowserItem::mouseDown(const MouseEvent& e)
 {
     if (e.mods.isRightButtonDown())
     {
-        if (onContextMenu) onContextMenu(e.getScreenPosition());
+        if (onContextMenu) onContextMenu (juce::Desktop::getInstance().getMainMouseSource().getScreenPosition().toInt());   // see AudioBrowserItem::itemClicked
         return;
     }
     if (onClicked) onClicked();
@@ -233,11 +233,15 @@ void AudioBrowserItem::paintItem (Graphics& g, int width, int height)
     }
 }
 
+// The event a TreeViewItem receives is re-based to the row's top-left but still
+// tagged with the tree's CONTENT component, so e.getScreenPosition() lands short
+// by the row's offset (the menu opened toward the top-left corner -- Jeff,
+// 2026-08-22).  The desktop's own mouse position is where the click was.
 void AudioBrowserItem::itemClicked (const MouseEvent& e)
 {
     if (e.mods.isPopupMenu())
     {
-        if (onContextMenu) onContextMenu (e.getScreenPosition());
+        if (onContextMenu) onContextMenu (juce::Desktop::getInstance().getMainMouseSource().getScreenPosition().toInt());
         return;
     }
     if (e.getNumberOfClicks() == 2)
@@ -291,7 +295,7 @@ void AudioCategoryItem::itemClicked (const MouseEvent& e)
     // ("Create Group...").
     if (e.mods.isPopupMenu())
     {
-        if (onContextMenu) onContextMenu (e.getScreenPosition());
+        if (onContextMenu) onContextMenu (juce::Desktop::getInstance().getMainMouseSource().getScreenPosition().toInt());
         return;
     }
     setOpen (! isOpen());
@@ -324,7 +328,7 @@ void AudioGroupItem::itemClicked (const MouseEvent& e)
 {
     if (e.mods.isPopupMenu())
     {
-        if (onContextMenu) onContextMenu (e.getScreenPosition());
+        if (onContextMenu) onContextMenu (juce::Desktop::getInstance().getMainMouseSource().getScreenPosition().toInt());
         return;
     }
     setOpen (! isOpen());

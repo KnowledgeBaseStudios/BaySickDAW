@@ -153,13 +153,19 @@ struct MeterRmsWindow
 // ring; UI thread never reads it directly (only the atomics).
 namespace
 {
+    // extraL / extraR (QA-TrueLevel): a SECOND consumer's max window.  The
+    // mixer's drain is exchange-and-reset, so any other reader of the same
+    // atomics sees the floor whenever the mixer got there first -- which is
+    // what made the analyzer's dBFS bars strobe.  Each consumer owns a pair.
     inline void publishPeakReading (const juce::AudioBuffer<float>& buf,
                                      std::array<float, MeterLatencyComp::kRingSize>& ringL,
                                      std::array<float, MeterLatencyComp::kRingSize>& ringR,
                                      int& writeIdx,
                                      std::atomic<float>& peakDbL,
                                      std::atomic<float>& peakDbR,
-                                     std::atomic<float>& peakDbMono) noexcept
+                                     std::atomic<float>& peakDbMono,
+                                     std::atomic<float>* extraL = nullptr,
+                                     std::atomic<float>* extraR = nullptr) noexcept
     {
         const auto [thisL, thisR] = bufferPeakDbStereo (buf);
         ringL[(size_t) (writeIdx & MeterLatencyComp::kRingMask)] = thisL;
@@ -194,6 +200,8 @@ namespace
         casMax (peakDbL,    dispL);
         casMax (peakDbR,    dispR);
         casMax (peakDbMono, juce::jmax (dispL, dispR));
+        if (extraL != nullptr) casMax (*extraL, dispL);
+        if (extraR != nullptr) casMax (*extraR, dispR);
     }
 
     // QA-RustyMeter (2026-05-30): RMS publish for the split meter's scrolling
@@ -620,6 +628,8 @@ struct BaySickGraph::InstrChannelNode
     std::atomic<float>  masterTpMaxDbL { -144.0f }, masterTpMaxDbR { -144.0f };
     std::atomic<float>  masterCorr { 0.0f };
     float corrLR { 0.0f }, corrLL { 0.0f }, corrRR { 0.0f };
+    // The analyzer's own dBFS peak window (see publishPeakReading's extra pair).
+    std::atomic<float>  anlzPeakDbL { -144.0f }, anlzPeakDbR { -144.0f };
     float corrK { 0.99993f };   // ~300 ms one-pole, set from the real rate at prepare
     // TS7 §3.1: the running MAX across a capture take, beside the per-block
     // value the readout shows.  A take's true peak cannot be sampled by the UI
@@ -908,7 +918,7 @@ struct BaySickGraph::InstrChannelNode
         }
 
         publishPeakReading (buf, peakRingL, peakRingR, peakRingIdx,
-                            peakDbL, peakDbR, peakDb);
+                            peakDbL, peakDbR, peakDb, &anlzPeakDbL, &anlzPeakDbR);
     }
 };
 
@@ -1205,6 +1215,13 @@ float BaySickGraph::getMasterTruePeakMaxDbChannel (int ch) const noexcept
     if (mMasterNode == nullptr) return -144.0f;
     return ch == 0 ? mMasterNode->masterTpMaxDbL.load (std::memory_order_relaxed)
                    : mMasterNode->masterTpMaxDbR.load (std::memory_order_relaxed);
+}
+
+std::pair<float, float> BaySickGraph::drainMasterAnalyzerPeakDb() noexcept
+{
+    if (mMasterNode == nullptr) return { -144.0f, -144.0f };
+    return { mMasterNode->anlzPeakDbL.exchange (-144.0f, std::memory_order_relaxed),
+             mMasterNode->anlzPeakDbR.exchange (-144.0f, std::memory_order_relaxed) };
 }
 
 float BaySickGraph::getMasterCorrelation() const noexcept

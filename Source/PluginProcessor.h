@@ -1346,6 +1346,7 @@ public:
     float getMasterTruePeakDbChannel (int ch) const noexcept    { return mVibeGraph.getMasterTruePeakDbChannel (ch); }
     float getMasterTruePeakMaxDbChannel (int ch) const noexcept { return mVibeGraph.getMasterTruePeakMaxDbChannel (ch); }
     float getMasterCorrelation() const noexcept                 { return mVibeGraph.getMasterCorrelation(); }
+    std::pair<float, float> drainMasterAnalyzerPeakDb() noexcept { return mVibeGraph.drainMasterAnalyzerPeakDb(); }
 
     // ── TS7 §3: version capture support ──────────────────────────────────────
     // Edge counters (§3.2) read by the editor's timer; the audio thread never

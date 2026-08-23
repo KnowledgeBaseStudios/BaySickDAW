@@ -697,6 +697,9 @@ public:
     float getMasterTruePeakDbChannel (int ch) const noexcept;
     float getMasterTruePeakMaxDbChannel (int ch) const noexcept;
     float getMasterCorrelation() const noexcept;
+    // The analyzer's exchange-and-reset dBFS peak window, separate from the
+    // mixer's so neither reader empties the other's.
+    std::pair<float, float> drainMasterAnalyzerPeakDb() noexcept;
 
     // Return the post-rack EQ owned by an InsertNode (or nullptr). Parallels
     // getInsertRack - same opaque-InsertNode reason.

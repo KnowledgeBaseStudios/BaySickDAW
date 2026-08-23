@@ -3,6 +3,7 @@
 #include "../DSP/SpectrumFeed.h"
 #include "../DSP/LoudnessSpec.h"
 #include "VersionCapture.h"
+#include "SharedUI.h"   // DBFSMeter: the master strip's meter, reused as-is
 #include <array>
 #include <deque>
 #include <vector>
@@ -100,7 +101,6 @@ private:
     void loudnessRow   (juce::Graphics&, juce::Rectangle<float>, const char* label, float lufs);
     void paintPeaks    (juce::Graphics&, juce::Rectangle<float>);
     void paintCorrelation (juce::Graphics&, juce::Rectangle<float>);
-    void paintLevelBars   (juce::Graphics&, juce::Rectangle<float>);
 
     // The curves the Loudness view draws: live rings or the shown take.
     const std::vector<float>& shortTermSeries() const noexcept;
@@ -159,6 +159,10 @@ private:
     std::unique_ptr<juce::TextButton> mRemoveBtn;   // QA-TrueLevel SC-14
     std::vector<std::unique_ptr<juce::TextButton>> mViewButtons;
     std::unique_ptr<juce::TextButton> mResetBtn, mTiltBtn, mOctBtn;
+    // SC-16: the dBFS meter beside the spectrum is the SAME component the
+    // master strip draws, with the same ballistics, fed from the analyzer's own
+    // peak window (the strip's window is emptied by the mixer's drain).
+    std::unique_ptr<DBFSMeter>        mDbfsMeter;
     int  mSelectedTakeId { 0 };        // 0 = Live
     bool mRebuildingList { false };    // suppresses onChange during repopulate
 
