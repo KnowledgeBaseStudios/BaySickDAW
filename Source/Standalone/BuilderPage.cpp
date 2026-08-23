@@ -406,12 +406,18 @@ BrowserPanel::BrowserPanel(PatternManager& pm,
                                                            juce::Colour (0xff00fff2));
     auto reportsCat = std::make_unique<AudioCategoryItem> ("Reports",
                                                            juce::Colour (0xffff9100));
+    // QA-TrueLevel SC-10: grey -- a Direct to Master strip belongs to no
+    // engine family.  Sits with the usable categories, above the renders.
+    auto directCat  = std::make_unique<AudioCategoryItem> ("Direct to Master",
+                                                           juce::Colour (0xff8a8f96));
     mExportsCat = exportsCat.get();
     mReportsCat = reportsCat.get();
+    mDirectCat  = directCat.get();
 
     mAudioRoot->addSubItem (clipsCat.release());
     mAudioRoot->addSubItem (voxCat  .release());
     mAudioRoot->addSubItem (instCat .release());
+    mAudioRoot->addSubItem (directCat.release());
     mAudioRoot->addSubItem (exportsCat.release());
     mAudioRoot->addSubItem (reportsCat.release());
     mAudioTree->setRootItem (mAudioRoot.get());
@@ -763,9 +769,13 @@ void BrowserPanel::rebuildRenderRows()
         for (const auto& e : onEnumerateAudio())
             claimed.add (e.fullPath);
 
-    // Same ordering as every other category, through the one helper.
+    // Same ordering as every other category, through the one helper.  The
+    // right-click wiring is what the library leaf factory does (makeLeaf): it
+    // was missing here from the day the Exports/Reports menu was written, so
+    // that menu sat unreachable until QA-TrueLevel (Jeff, 2026-08-22).
     auto fill = [this, &claimed] (AudioCategoryItem* cat, const juce::File& dir,
-                                  const juce::String& wildcard, juce::Colour accent)
+                                  const juce::String& wildcard, juce::Colour accent,
+                                  const juce::String& category)
     {
         if (cat == nullptr || ! dir.isDirectory()) return;
         juce::Array<juce::File> files;
@@ -779,6 +789,7 @@ void BrowserPanel::rebuildRenderRows()
 
             CategorizedAudioEntry e;
             e.audioLibIdx = -1;            // not a library entry -- no drag index
+            e.category    = category;
             e.displayName = f.getFileNameWithoutExtension();
             e.fullPath    = f.getFullPathName();
             e.accent      = accent;
@@ -786,11 +797,46 @@ void BrowserPanel::rebuildRenderRows()
         }
         sortEntries (entries);
         for (const auto& e : entries)
-            cat->addSubItem (new AudioBrowserItem (e));
+        {
+            auto* leaf = new AudioBrowserItem (e);
+            leaf->onContextMenu = [this, leaf] (Point<int> pt) { showAudioTreeContextMenu (*leaf, pt); };
+            cat->addSubItem (leaf);
+        }
     };
 
-    fill (mExportsCat, folders.first,  "*.wav;*.ogg;*.mp3", juce::Colour (0xff00fff2));
-    fill (mReportsCat, folders.second, "*.html;*.csv",      juce::Colour (0xffff9100));
+    fill (mExportsCat, folders.first,  "*.wav;*.ogg;*.mp3", juce::Colour (0xff00fff2), "Exports");
+    fill (mReportsCat, folders.second, "*.html;*.csv",      juce::Colour (0xffff9100), "Reports");
+
+    // Direct to Master strips: listed from the editor.  Not library entries;
+    // the category string is what the context menu branches on, and the strip
+    // id rides in groupName (unused for this category otherwise).
+    if (mDirectCat != nullptr)
+    {
+        mDirectCat->clearSubItems();
+        if (onEnumerateDirectToMaster)
+        {
+            std::vector<CategorizedAudioEntry> entries;
+            for (const auto& d : onEnumerateDirectToMaster())
+            {
+                CategorizedAudioEntry e;
+                e.audioLibIdx = -1;
+                e.category    = "Direct to Master";
+                e.displayName = d.name;
+                e.fullPath    = d.fullPath;
+                e.accent      = juce::Colour (0xff8a8f96);
+                e.groupName   = juce::String (d.stripId);
+                entries.push_back (e);
+            }
+            sortEntries (entries);
+            for (const auto& e : entries)
+            {
+                auto* leaf = new AudioBrowserItem (e);
+                leaf->onContextMenu     = [this, leaf] (Point<int> pt) { showAudioTreeContextMenu (*leaf, pt); };
+                leaf->onRenameRequested = [this, leaf] { beginRenameDirectToMaster (leaf->getGroupName().getIntValue(), leaf->getDisplayName()); };
+                mDirectCat->addSubItem (leaf);
+            }
+        }
+    }
 }
 
 // ── TS7 §11.5/§11.5a: add a render to the project ────────────────────────────
@@ -829,6 +875,9 @@ void BrowserPanel::beginAddRenderToProject (const juce::File& f,
     targets->push_back ({ -1, 0, "a new Clip Page" });
     targets->push_back ({ -1, 1, "a new Vox Page" });
     targets->push_back ({ -1, 2, "a new Inst Page" });
+    // QA-TrueLevel SC-9/SC-10: a strip straight into the master -- no page, no
+    // library entry, and the Exports row stays (it was never claimed).
+    targets->push_back ({ -1, 3, "Direct to Master" });
 
     juce::PopupMenu m;
     m.addSectionHeader ("Add \"" + f.getFileNameWithoutExtension() + "\" to:");
@@ -837,11 +886,18 @@ void BrowserPanel::beginAddRenderToProject (const juce::File& f,
 
     juce::Component::SafePointer<BrowserPanel> safeThis (this);
     m.showMenuAsync (juce::PopupMenu::Options(),
-        [safeThis, targets, stored, onRouted] (int r)
+        [safeThis, targets, stored, onRouted, f] (int r)
         {
             auto* self = safeThis.getComponent();
             if (self == nullptr || r <= 0 || r > (int) targets->size()) return;
             const auto& tg = (*targets)[(size_t) (r - 1)];
+
+            if (tg.createKind == 3)
+            {
+                if (self->onAddDirectToMaster) self->onAddDirectToMaster (f);
+                self->rebuildRenderRows();
+                return;
+            }
 
             // Adding the same render twice re-routes the one entry instead of
             // growing a second row for a single file.
@@ -876,6 +932,33 @@ void BrowserPanel::beginAddRenderToProject (const juce::File& f,
             self->rebuildRenderRows();    // and is no longer an Exports orphan
             if (onRouted) onRouted (libIdx);
         });
+}
+
+// QA-TrueLevel SC-10: rename a Direct to Master strip from its browser row --
+// same inline editor the library leaves use.
+void BrowserPanel::beginRenameDirectToMaster (int stripId, const String& currentName)
+{
+    auto editor = std::make_unique<TextEditor>();
+    editor->setText (currentName, false);
+    editor->setFont (Font (13.f));
+    editor->setSelectAllWhenFocused (true);
+    editor->setSize (180, 26);
+    editor->setEscapeAndReturnKeysConsumed (true);
+    auto* rawEdit = editor.get();
+    editor->onReturnKey = [this, stripId, rawEdit]
+    {
+        const String t = rawEdit->getText().trim();
+        if (t.isNotEmpty() && onRenameDirectToMaster) onRenameDirectToMaster (stripId, t);
+        if (auto* cb = rawEdit->findParentComponentOfClass<CallOutBox>()) cb->dismiss();
+        rebuildRenderRows();
+    };
+    editor->onEscapeKey = [rawEdit]
+    {
+        if (auto* cb = rawEdit->findParentComponentOfClass<CallOutBox>()) cb->dismiss();
+    };
+    Rectangle<int> anchor;
+    if (mAudioTree) anchor = mAudioTree->getScreenBounds().withHeight (28);
+    CallOutBox::launchAsynchronously (std::move (editor), anchor, nullptr);
 }
 
 // ── QA-Fe2 browser groups: menus + move/copy group assignment ────────────────
@@ -1038,15 +1121,23 @@ void BrowserPanel::showAudioTreeContextMenu (AudioBrowserItem& item, Point<int> 
 
     // TS7 §11.5/§11.6: Exports and Reports are not library entries (libIdx -1),
     // so they get their own short menu rather than falling through the
-    // library-index guard below and silently offering nothing.
+    // library-index guard below and silently offering nothing.  Direct to
+    // Master rows (QA-TrueLevel SC-10) share the branch: also libIdx -1, told
+    // apart by category.
     if (libIdx < 0)
     {
         const juce::File f (item.getFullPath());
-        if (! f.existsAsFile()) return;
+        const bool isDirect = item.getCategory() == "Direct to Master";
+        if (! isDirect && ! f.existsAsFile()) return;
         const bool isReport = f.hasFileExtension ("html;csv");
 
         PopupMenu m;
-        if (isReport)
+        if (isDirect)
+        {
+            m.addItem (4, "Rename...");
+            m.addItem (5, "Remove");
+        }
+        else if (isReport)
         {
             // §11.6: opens IN THE APP, in the analyzer -- the same view the user
             // watched live.  HTML is never rendered in-app (no WebBrowser).
@@ -1060,15 +1151,21 @@ void BrowserPanel::showAudioTreeContextMenu (AudioBrowserItem& item, Point<int> 
             m.addItem (2, "Add to Project...");
         }
         m.addSeparator();
-        m.addItem (3, "Reveal in Explorer");
+        m.addItem (3, "Show in Explorer", f.existsAsFile());
 
+        // Values, not the item: a tree rebuild can destroy the row before the
+        // async menu result lands.
+        const int    stripId = isDirect ? item.getGroupName().getIntValue() : -1;
+        const String curName = item.getDisplayName();
         m.showMenuAsync (PopupMenu::Options().withTargetScreenArea (
                              Rectangle<int> (globalPt.x, globalPt.y, 1, 1)),
-            [this, f] (int r)
+            [this, f, stripId, curName] (int r)
             {
                 if      (r == 1) { if (onOpenReport) onOpenReport (f); }
                 else if (r == 2) { beginAddRenderToProject (f, nullptr); }
                 else if (r == 3) { f.revealToUser(); }
+                else if (r == 4) { beginRenameDirectToMaster (stripId, curName); }
+                else if (r == 5) { if (onRemoveDirectToMaster) onRemoveDirectToMaster (stripId); rebuildRenderRows(); }
             });
         return;
     }
@@ -1087,7 +1184,7 @@ void BrowserPanel::showAudioTreeContextMenu (AudioBrowserItem& item, Point<int> 
     PopupMenu m;
     m.addItem (kIdRename,    "Rename...");
     m.addItem (kIdDuplicate, "Duplicate...");
-    m.addItem (kIdReveal,    "Reveal in Explorer");
+    m.addItem (kIdReveal,    "Show in Explorer");
     // QA-E Task 7 (FILE-02): the library entry is the source of truth for
     // routing.  Editing this moves every grid copy still following it.
     m.addItem (kIdProperties, "Properties...");
@@ -1124,7 +1221,7 @@ void BrowserPanel::showAudioTreeContextMenu (AudioBrowserItem& item, Point<int> 
     m.addItem (kIdDelete, "Delete");
 
     // Capture the resolved absolute path BEFORE the async menu fires so
-    // Reveal in Explorer doesn't try to walk the relative-path string the
+    // Show in Explorer doesn't try to walk the relative-path string the
     // library stores ("Samples/foo.wav") - that fails File::existsAsFile.
     const String absPath = item.getFullPath();
     auto onRename = item.onRenameRequested;

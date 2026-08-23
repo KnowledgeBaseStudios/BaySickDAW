@@ -73,7 +73,7 @@ struct CategorizedAudioEntry
     int          audioLibIdx { -1 };   // index into mPM.audioLibrary for drag descriptor
     juce::String category;             // "Clips" | "Vox" | "Inst"
     juce::String displayName;          // shown as leaf label
-    juce::String fullPath;             // for tooltip + Reveal in Explorer
+    juce::String fullPath;             // for tooltip + Show in Explorer
     juce::Colour accent;               // category accent color
     juce::String groupName;            // QA-Fe2: manual group ("" = auto/flat)
 };
@@ -120,6 +120,8 @@ public:
     int  getAudioLibIdx () const { return mEntry.audioLibIdx; }
     const juce::String& getDisplayName () const { return mEntry.displayName; }
     const juce::String& getFullPath    () const { return mEntry.fullPath;    }
+    const juce::String& getCategory    () const { return mEntry.category;    }
+    const juce::String& getGroupName   () const { return mEntry.groupName;   }
 
     // Wired by BrowserPanel so right-click can route into the existing
     // Choke Group / Delete / Rename context flow.
@@ -369,7 +371,12 @@ private:
     // bound page and are not clips.
     AudioCategoryItem*                        mExportsCat { nullptr };
     AudioCategoryItem*                        mReportsCat { nullptr };
+    // QA-TrueLevel SC-10: Direct to Master strips -- a file playing straight
+    // into the master from its own strip, no page, no library entry.  Listed
+    // from the editor's strip list, never from disk.
+    AudioCategoryItem*                        mDirectCat  { nullptr };
     void rebuildRenderRows();
+    void beginRenameDirectToMaster (int stripId, const juce::String& currentName);
 
 public:
     // TS7 §11: { <project>\Exports\, <project>\Reports\ }.  Supplied by the
@@ -377,6 +384,14 @@ public:
     std::function<std::pair<juce::File, juce::File>()> onGetRenderFolders;
     // §11.6: open a saved report in the analyzer window.
     std::function<void(const juce::File&)>             onOpenReport;
+
+    // QA-TrueLevel SC-10: Direct to Master.  The editor owns the strips; the
+    // panel lists them and forwards the gestures.
+    struct DirectToMasterInfo { int stripId { -1 }; juce::String name; juce::String fullPath; };
+    std::function<std::vector<DirectToMasterInfo>()>                       onEnumerateDirectToMaster;
+    std::function<void(const juce::File&)>                                 onAddDirectToMaster;
+    std::function<void(int /*stripId*/, const juce::String& /*newName*/)>  onRenameDirectToMaster;
+    std::function<void(int /*stripId*/)>                                   onRemoveDirectToMaster;
     // §11.5/§11.5a: add a rendered file to the project.  Not a callback -- the
     // whole flow is reachable from here (mPM plus the routing callbacks the
     // Properties dialog already uses), and routing it through the editor would
@@ -449,7 +464,7 @@ private:
 
     // G-5 (2026-04-29): right-click on an Audio tree leaf - same context-menu
     // shape as the legacy flat-list audio item (Rename / Choke Group / Delete
-    // + new Reveal in Explorer).  audioLibIdx is the global library index for
+    // + new Show in Explorer).  audioLibIdx is the global library index for
     // direct lookup into mPM.audioLibrary.
     void showAudioTreeContextMenu(AudioBrowserItem& item, juce::Point<int> globalPt);
 
