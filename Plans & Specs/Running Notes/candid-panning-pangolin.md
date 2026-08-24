@@ -167,3 +167,47 @@ event; menus now take the desktop's mouse position) and the analyzer's dBFS
 bars strobed (it read the mixer's exchange-and-reset peak window; it now has
 its own window at the tap and draws through the master strip's own DBFSMeter
 component). Installer 20260822-2308 carried those two.
+
+## 2026-08-24 - MIDI Learn goes project-only (Jeff's ruling), viewer window added
+
+Chasing the A -> B -> A class into MIDI Learn forced the admission: I had
+built an UNSPECCED global-defaults layer (a Documents-level MidiMappings.xml
+loaded at launch, plus a "Save MIDI mappings as global default" knob-menu row
+gated behind sHasAnyMidiMappings) that Jeff never asked for and never saw --
+the gate condition was never true on his rig, so the menu row never rendered
+and no global file ever existed on his disk. Worse, the load paths treated
+"project has no MidiCCMappings node" as KEEP the current table: the same
+no-node inheritance leak as the A -> B -> A parameter carry. The previous
+entry's line "MIDI hardware bindings are global-by-design and load from the
+global defaults file - untouched" described that unspecced design as if it
+were settled; this entry supersedes it.
+
+Jeff's ruling: MIDI Learn holds to the PROJECT and nothing else, templates
+included (a template made from a project with MIDI Learn carries it), plus a
+Help > "View Projects MidiMap" window showing everything mapped with enough
+info to tell what each row is.
+
+Shipped:
+- Global layer deleted outright: globalDefaultsFile / saveAsGlobalDefaults /
+  loadGlobalDefaults (registry), the MidiLearnUI wrapper, the launch-time
+  load in StandaloneApp, the SharedUI menu row + sOnMidiSaveAsDefault /
+  sHasAnyMidiMappings hooks, the editor's save handler. Grep sweep confirms
+  zero references remain.
+- Every load boundary now REPLACES the table: applyProcessorState (File >
+  Open + template apply) loads the file's node or clears when absent;
+  setStateInformation gets the same else-clear; resetToBlankState (File >
+  New) clears; deserializeProject's old overlay-load block deleted.
+- Template save carries the maps: saveTemplateAs adds the registry node to
+  the template root (drum triggers deliberately stay out - keyed on drum
+  page indices one machine's kit happened to use).
+- New Source/MidiLearn/MidiMapView.h: read-only table (Control / Hardware /
+  Channel / Device columns, friendly names via VKnobAutomation's resolver,
+  "CC N" / Pitch Bend / Aftertouch, Omni + Any-device fallbacks, sorted,
+  2 Hz signature-diff refresh, empty-state text). Opened via Help > "View
+  Projects MidiMap" (item 605) as aux window "midimap"; registry gained
+  getAllMappings() (copy under the lock) as its data source.
+
+Build green (six exit codes 0, four link lines, no error lines). TL-22
+added to section B.37 (learn -> New empties -> reload restores -> template
+carries -> no global-default menu row). Checkpoint commit under the batch's
+standing authorization.

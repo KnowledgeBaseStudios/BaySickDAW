@@ -3472,17 +3472,24 @@ at all, before this batch or after it:**
       keeps the page.  "Remove" on a D2M strip: it is gone.  Several files missing: one prompt
       per file, in sequence.  `D:__ R:__` notes:
 
-**Load boundary (Jeff's A -> B -> A find, 2026-08-24):**
-
-- [ ] **TL-21 - MUST-PASS: nothing carries between projects.** Load project A (an OLDER
-      file, e.g. Display Project), then a different project B, then A again WITHOUT
-      restarting: A plays identically to its first load - buses feed the master, no
-      inherited racks/EQs/routing from B (the leak was replaceState keeping any parameter
-      the incoming file predates at B's value; File > Open now runs File > New's full
-      clean slate - params to defaults, racks cleared, EQs re-seeded - before restoring).
-      Also B -> A -> B, and File > New after a loaded project still lands on pure
-      defaults.  `D:__ R:__` notes:
-
+**Load boundary (Jeff's A -> B -> A find, 2026-08-24):**
+
+- [ ] **TL-21 - MUST-PASS: nothing carries between projects.** Load project A (an OLDER
+      file, e.g. Display Project), then a different project B, then A again WITHOUT
+      restarting: A plays identically to its first load - buses feed the master, no
+      inherited racks/EQs/routing from B (the leak was replaceState keeping any parameter
+      the incoming file predates at B's value; File > Open now runs File > New's full
+      clean slate - params to defaults, racks cleared, EQs re-seeded - before restoring).
+      Also B -> A -> B, and File > New after a loaded project still lands on pure
+      defaults.  `D:__ R:__` notes:
+- [ ] **TL-22 - MIDI Learn is project-only.** MIDI-learn a knob in project A, save.  File >
+      New: Help > View Projects MidiMap shows "No MIDI mappings in this project" and the
+      hardware control no longer moves anything.  Load a project with no mappings: same.
+      Reload A: the mapping is back (the viewer lists it - control name, CC number,
+      channel, device) and the hardware control works.  Save A as a TEMPLATE, File > New
+      from that template: the mapping carries.  The knob right-click menu has no "Save as
+      global default" row (the global layer is deleted).  `D:__ R:__` notes:
+
 **Reports + capture:**
 
 - [ ] **TL-14 — defaults.** Fresh settings: File Settings shows "In the project Reports folder"

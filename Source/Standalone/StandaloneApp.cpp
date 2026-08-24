@@ -1207,12 +1207,6 @@ void BaySickDAWStandaloneApp::initialise(const juce::String&)
         }
     }
 
-    // I-3b (2026-05-02): Load the user's global MIDI Learn defaults if the
-    // file exists.  Per-project setStateInformation overlays its own mapping
-    // table on top later, so per-project mappings win.  No-op if the file
-    // doesn't exist (first launch).
-    mProcessor->getMidiLearnRegistry().loadGlobalDefaults();
-
     mPlayer = std::make_unique<juce::AudioProcessorPlayer>();
     mPlayer->setProcessor(mProcessor.get());
     mAdvancer = std::make_unique<PlayHeadAdvancer>(*mPlayHead, *mPlayer);

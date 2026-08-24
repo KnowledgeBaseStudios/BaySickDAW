@@ -29,14 +29,15 @@
 //     Keeps the data model simple; can switch to a hashed lookup if profiling
 //     shows it.
 //
-// Persistence:
-//   * Per-project: serialised inside the project's PluginProcessor::getState
-//     output as a `<MidiCCMappings>` ValueTree child.  Loaded by
-//     setStateInformation on project open.
-//   * Global default: Documents/BaySickDAW/MidiMappings.xml -- saved when
-//     the user picks "Save as global default" in the right-click menu (I-3c).
-//     Loaded at app launch BEFORE per-project state restores; per-project
-//     mappings overlay on top of globals.
+// Persistence (Jeff's ruling, 2026-08-24: PROJECT-ONLY, nothing else):
+//   * The table is project state, exactly like the mixer.  Every project and
+//     template save embeds the full table; every load boundary (Open, New,
+//     template apply) REPLACES it -- the file's table when it has one, empty
+//     when it does not.  Nothing ever carries from one project to the next.
+//   * The old global-defaults layer (a Documents-level MidiMappings.xml + a
+//     "Save as global default" menu row) was removed under the same ruling:
+//     it made bindings smear across projects through the session with no UI
+//     showing which file held what.
 //
 // Value mapping curve:
 //   * v1 ships LINEAR only (CC 0..127 -> param min..max via NormalisableRange).
@@ -129,9 +130,9 @@ public:
     void            loadFromValueTree (const juce::ValueTree& tree);
 
     // Documents/BaySickDAW/MidiMappings.xml
-    static juce::File globalDefaultsFile();
-    bool saveAsGlobalDefaults() const;
-    bool loadGlobalDefaults();   // returns true if file existed and parsed
+    // Every mapping, copied under the lock -- the Help > View Projects
+    // MidiMap window's data source.
+    std::vector<Mapping> getAllMappings() const;
 
     // ── Listener ────────────────────────────────────────────────────────────
     // Fired (on the message thread) whenever any mapping changes.  UI uses

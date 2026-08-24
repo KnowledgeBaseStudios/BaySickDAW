@@ -1,6 +1,4 @@
 #include "MidiLearnRegistry.h"
-#include "SafeXml.h"   // XXE + depth-guarded XML parse (QA-Cleanup)
-#include "../AppPaths.h"
 
 namespace
 {
@@ -361,29 +359,12 @@ void MidiLearnRegistry::loadFromValueTree (const juce::ValueTree& tree)
     if (onChanged) onChanged();
 }
 
-juce::File MidiLearnRegistry::globalDefaultsFile()
+std::vector<MidiLearnRegistry::Mapping> MidiLearnRegistry::getAllMappings() const
 {
-    return AppPaths::appRoot().getChildFile ("MidiMappings.xml");
-}
-
-bool MidiLearnRegistry::saveAsGlobalDefaults() const
-{
-    const auto file = globalDefaultsFile();
-    file.getParentDirectory().createDirectory();
-    auto vt = saveToValueTree();
-    auto xml = vt.createXml();
-    if (! xml) return false;
-    return xml->writeTo (file, juce::XmlElement::TextFormat());
-}
-
-bool MidiLearnRegistry::loadGlobalDefaults()
-{
-    const auto file = globalDefaultsFile();
-    if (! file.existsAsFile()) return false;
-    auto xml = SafeXml::parse (file);
-    if (! xml) return false;
-    auto vt = juce::ValueTree::fromXml (*xml);
-    if (! vt.isValid()) return false;
-    loadFromValueTree (vt);
-    return true;
+    std::vector<Mapping> out;
+    const juce::SpinLock::ScopedLockType lk (mLock);
+    out.reserve (mMappings.size());
+    for (const auto& kv : mMappings)
+        out.push_back (kv.second);
+    return out;
 }

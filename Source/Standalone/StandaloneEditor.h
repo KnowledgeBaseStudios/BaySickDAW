@@ -606,6 +606,7 @@ private:
     // Effects dropdown and the browser list with the processor's model.  Bound
     // to BaySickDAWProcessor::onDirectStripsChanged; the model is the truth.
     void syncDirectStripsFromModel();
+    void openMidiMapWindow();   // Help > View Projects MidiMap (Jeff, 2026-08-24)
 
     // QA-TrueLevel SC-14: one session report per project per app session.
     juce::File mSessionReportFile, mSessionReportProject;

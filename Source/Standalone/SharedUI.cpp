@@ -1923,8 +1923,6 @@ namespace VKnobAutomation
     std::function<juce::String(const juce::String& paramId)>                     sDescribeMidiMapping;
     std::function<void(const juce::String& paramId)>                             sOnMidiLearn;
     std::function<void(const juce::String& paramId)>                             sOnMidiForget;
-    std::function<void()>                                                        sOnMidiSaveAsDefault;
-    std::function<bool()>                                                        sHasAnyMidiMappings;
 
     int appendMidiLearnMenuItems (juce::PopupMenu& m, const juce::String& paramId, int firstId)
     {
@@ -1957,11 +1955,7 @@ namespace VKnobAutomation
             m.addItem (firstId + 1, label);
         }
 
-        // "Save MIDI mappings as global default" -- only if registry has any.
-        if (sHasAnyMidiMappings && sHasAnyMidiMappings())
-            m.addItem (firstId + 2, "Save MIDI mappings as global default");
-
-        return firstId + 2;
+        return firstId + 1;
     }
 
     bool handleMidiLearnMenuResult (int result, int firstId, const juce::String& paramId)
@@ -1974,11 +1968,6 @@ namespace VKnobAutomation
         if (result == firstId + 1)
         {
             if (sOnMidiForget) sOnMidiForget (paramId);
-            return true;
-        }
-        if (result == firstId + 2)
-        {
-            if (sOnMidiSaveAsDefault) sOnMidiSaveAsDefault();
             return true;
         }
         return false;

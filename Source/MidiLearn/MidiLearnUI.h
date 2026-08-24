@@ -114,10 +114,6 @@ public:
     }
 
     // Save current registry to Documents/BaySickDAW/MidiMappings.xml.
-    bool saveAsGlobalDefaults() const
-    {
-        return mRegistry.saveAsGlobalDefaults();
-    }
 
     // Query: is paramId currently being learned?  Used by VKnob to draw the
     // dashed yellow outline.

@@ -59,6 +59,7 @@
 #include "../Vox/VoxPage.h"                           // G-4: Vox page + empty state
 #include "../Inst/InstPage.h"                         // G-4: Inst page + empty state
 #include "../MidiLearn/MidiLearnUI.h"                  // I-3c: MIDI Learn UI controller
+#include "../MidiLearn/MidiMapView.h"                  // Help > View Projects MidiMap (2026-08-24)
 #include "WindowChrome.h"                              // QA-ModelShell TS7 §9
 #include "SafeAudioFormats.h"   // MP3 decode via vendored LAME (QA-Cleanup)
 
@@ -1008,25 +1009,6 @@ StandaloneEditor::StandaloneEditor(BaySickDAWProcessor& p, StandalonePlayHead& p
     {
         if (mMidiLearnUI) mMidiLearnUI->forget (pid);
     };
-    VKnobAutomation::sOnMidiSaveAsDefault = [this]
-    {
-        if (! mMidiLearnUI) return;
-        const bool ok = mMidiLearnUI->saveAsGlobalDefaults();
-        juce::AlertWindow::showMessageBoxAsync (
-            ok ? juce::MessageBoxIconType::InfoIcon
-               : juce::MessageBoxIconType::WarningIcon,
-            "MIDI Mappings",
-            ok ? juce::String ("Saved current MIDI mappings as the global default. "
-                                 "New projects will start with these mappings; existing "
-                                 "projects keep their per-project settings.")
-               : juce::String ("Could not write the global MIDI mappings file."));
-    };
-    VKnobAutomation::sHasAnyMidiMappings = [this]() -> bool
-    {
-        return mMidiLearnUI
-            && mProcessor.getMidiLearnRegistry().getAllParamIds().size() > 0;
-    };
-
     // Install the Escape-cancels listener on the editor itself (the JUCE
     // top-level Component wrapping the standalone window).  Focus rules:
     // KeyListener fires for any descendant whose key wasn't already handled.
@@ -9076,6 +9058,11 @@ void StandaloneEditor::saveTemplateAs ()
             auto* ui = root.createNewChildElement ("UIState");
             ui->setAttribute ("version", 1);
             se->serializeStructuralUIState (*ui, SaveShape::Template);
+            // Jeff's ruling 2026-08-24: a template made from a project WITH
+            // MIDI Learn carries it, like everything else in the setup.
+            if (auto midiXml = se->mProcessor.getMidiLearnRegistry()
+                                   .saveToValueTree().createXml())
+                root.addChildElement (midiXml.release());
 
             // Reject an unusable name BEFORE adoptTemplateSampleRefs: it copies
             // referenced samples into My Samples, and those copies would
@@ -12001,6 +11988,9 @@ juce::PopupMenu StandaloneEditor::getMenuForIndex(int menuIndex, const juce::Str
         // ManualsWindow.  That marker held this item unwired from 2026-07-29.
         m.addItem(601, "Help Index  (F1)");
         m.addItem(603, "Key Binds...");
+        // Jeff's ruling 2026-08-24: the project's whole MIDI map, visible in
+        // one place instead of one knob menu at a time.
+        m.addItem(605, "View Projects MidiMap");
         // "Rusty Drums Map..." moved to the Rusty page's own window Menu
         // (Jeff, 2026-08-13) -- a per-engine reference belongs on the engine,
         // not on the app-wide Help menu.  Id 604 retired with it.
@@ -12188,6 +12178,10 @@ void StandaloneEditor::menuItemSelected(int id, int)
 
     case 603:   // Help > Key Binds...
         showKeyBindsWindow();
+        break;
+
+    case 605:   // Help > View Projects MidiMap (Jeff's ruling 2026-08-24)
+        openMidiMapWindow();
         break;
 
     // case 604 (Help > Rusty Drums Map...) retired 2026-08-13: the map opens
@@ -16223,6 +16217,18 @@ WorkspaceWindow* StandaloneEditor::findAuxWindow (const juce::String& key) const
     for (const auto& a : mAuxWindows)
         if (a.key == key) return a.window.get();
     return nullptr;
+}
+
+void StandaloneEditor::openMidiMapWindow()
+{
+    auto content = std::make_unique<MidiMapView> (
+        mProcessor.getMidiLearnRegistry(),
+        [] (const juce::String& pid)
+        {
+            return VKnobAutomation::sResolveMenuLabel ? VKnobAutomation::sResolveMenuLabel (pid)
+                                                      : juce::String();
+        });
+    openAuxWindow ("midimap", "midimap", "MIDI Map", std::move (content), 560, 260);
 }
 
 WorkspaceWindow* StandaloneEditor::openAuxWindow (const juce::String& key,

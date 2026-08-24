@@ -6955,15 +6955,17 @@ void BaySickDAWProcessor::setStateInformation(const void* data, int sizeInBytes)
     }
 
     // I-3b: extract MIDI Learn mappings before passing to APVTS so the
-    // mapping tree doesn't end up living under apvts.state.  If the project
-    // has no <MidiCCMappings> child, the registry retains whatever was
-    // already in place (e.g., global defaults loaded at app startup).
+    // mapping tree doesn't end up living under apvts.state.  Project-only
+    // (Jeff's ruling 2026-08-24): a chunk without the child means NO mappings,
+    // not "keep the previous session's".
     auto midiMaps = state.getChildWithName(MidiLearnRegistry::kRootTag);
     if (midiMaps.isValid())
     {
         state.removeChild(midiMaps, nullptr);
         mMidiLearn.loadFromValueTree(midiMaps);
     }
+    else
+        mMidiLearn.clear();
 
     // QA-L-Fix (D-14): drum kit trigger bindings.  Unlike the MIDI Learn
     // registry there are no global defaults to fall back on, so a project
@@ -7048,8 +7050,10 @@ void BaySickDAWProcessor::serializeProject (juce::XmlElement& root)
     }
 
     // MIDI Learn CC mappings and per-drum trigger bindings.  Both live here and
-    // NOT in writeProcessorState: that block is shared with template save, and a
-    // template must not carry one machine's controller bindings.  Same
+    // NOT in writeProcessorState (that block is shared with template save).
+    // MIDI Learn DOES ride in templates since Jeff's 2026-08-24 ruling --
+    // saveTemplateAs adds the node itself; drum triggers stay out of them
+    // (keyed on drum page indices one machine's kit happened to use).  Same
     // standalone-only placement rule as DenoiseProfiles above.
     if (auto midiXml = mMidiLearn.saveToValueTree().createXml())
         root.addChildElement (midiXml.release());
@@ -7182,6 +7186,9 @@ void BaySickDAWProcessor::resetToBlankState()
     // into the wrong lane.  serializeProject writes the node unconditionally, so
     // one File > New makes the leak permanent project data.
     mDrumTriggers.clearAll();
+    // MIDI Learn is project state (Jeff's ruling 2026-08-24): a new project
+    // starts with none.
+    mMidiLearn.clear();
 
     // The shared load-boundary slate: params to defaults, racks cleared,
     // EQs re-seeded.  File > Open runs the same call before restoring
@@ -7350,13 +7357,6 @@ void BaySickDAWProcessor::deserializeProject (const juce::XmlElement& root)
                 DenoiseProfile::fromBase64 (e->getStringAttribute ("wet")) };
         }
 
-    // MIDI Learn mappings, mirroring setStateInformation's semantics: a project
-    // with no node keeps whatever loadGlobalDefaults seeded at launch, so the
-    // per-project table OVERLAYS the globals rather than replacing them.  Older
-    // projects have no node and therefore behave exactly as before.
-    if (auto* midiXml = root.getChildByName (MidiLearnRegistry::kRootTag))
-        mMidiLearn.loadFromValueTree (juce::ValueTree::fromXml (*midiXml));
-
     // Drum trigger bindings, also mirroring setStateInformation: there are no
     // global defaults to fall back on, so a project without the node CLEARS --
     // otherwise project B inherits project A's kit against project B's tabs.
@@ -7399,6 +7399,16 @@ void BaySickDAWProcessor::applyProcessorState (const juce::XmlElement& root)
     // one loaded in between (replaceState leaves any registered param the
     // incoming tree does not mention untouched).
     resetSessionStateToDefaults();
+
+    // MIDI Learn is project state and nothing else (Jeff's ruling 2026-08-24):
+    // the incoming file's table when it has one, EMPTY when it does not --
+    // never the previous project's.  Lives here so File > Open and template
+    // apply share one copy (both call applyProcessorState with the root that
+    // carries the node).
+    if (auto* midiXml = root.getChildByName (MidiLearnRegistry::kRootTag))
+        mMidiLearn.loadFromValueTree (juce::ValueTree::fromXml (*midiXml));
+    else
+        mMidiLearn.clear();
 
     // Processor state - first child under <Processor>.
     if (auto* processor = root.getChildByName ("Processor"))

@@ -937,15 +937,12 @@ namespace VKnobAutomation
     //   target (VKnob uses this to draw the dashed-yellow learn outline).
     // sDescribeMidiMapping: returns short human-readable mapping summary
     //   ("USB Keyboard CC#74 ch1") for the "MIDI Forget" item label.
-    // sOnMidiLearn / sOnMidiForget / sOnMidiSaveAsDefault: action triggers.
-    // sHasAnyMidiMappings: gates the "Save as global default" item visibility.
+    // sOnMidiLearn / sOnMidiForget: action triggers.
     extern std::function<bool(const juce::String& paramId)>          sIsMidiMapped;
     extern std::function<bool(const juce::String& paramId)>          sIsMidiLearningTarget;
     extern std::function<juce::String(const juce::String& paramId)>  sDescribeMidiMapping;
     extern std::function<void(const juce::String& paramId)>          sOnMidiLearn;
     extern std::function<void(const juce::String& paramId)>          sOnMidiForget;
-    extern std::function<void()>                                     sOnMidiSaveAsDefault;
-    extern std::function<bool()>                                     sHasAnyMidiMappings;
 
     // Builds the MIDI Learn submenu items into `m`.  Shared between VKnob
     // and GlobalAutoRightClick; keeps the menu structure in one place.
