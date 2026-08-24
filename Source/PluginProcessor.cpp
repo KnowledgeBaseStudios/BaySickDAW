@@ -7183,35 +7183,13 @@ void BaySickDAWProcessor::resetToBlankState()
     // one File > New makes the leak permanent project data.
     mDrumTriggers.clearAll();
 
-    // Reset every registered APVTS param to its default value.  Iterate via
-    // getParameters() so lazy-registered engine / mixer-strip / rack params
-    // all get swept regardless of when they were added.
-    {
-        // QA-UndoCoverage Task 6: File > New / Open default sweep is a load
-        // boundary -- never history.
-        juce::AudioProcessorValueTreeState::ScopedProgrammaticParamWrites spw;
-        for (auto* param : getParameters())
-        {
-            if (auto* ranged = dynamic_cast<juce::RangedAudioParameter*> (param))
-            {
-                // 2026-04-24 bugfix: getDefaultValue() already returns normalised
-                // 0..1 (JUCE contract).  Wrapping it in convertTo0to1 caused
-                // double-normalisation - Int params with large ranges (e.g.
-                // _sendTo 0..999) collapsed to 0, silently breaking every strip's
-                // routing after File > New.  Pass the normalised default straight
-                // through.
-                ranged->setValueNotifyingHost (ranged->getDefaultValue());
-            }
-        }
-    }
+    // The shared load-boundary slate: params to defaults, racks cleared,
+    // EQs re-seeded.  File > Open runs the same call before restoring
+    // (Jeff's ruling 2026-08-24: nothing carries between projects).
+    resetSessionStateToDefaults();
 
-    // Clear every rack slot across buses + inserts so File > New / File >
-    // Open never bleeds the previous session's effect chains through.
-    // loadRackStates only RESTORES from the tree - with no matching entries
-    // it wouldn't wipe pre-existing racks, which was the observed bug.
-    mVibeGraph.clearAllRackStates();
-
-    // The EQ re-seed and PatternManager back to one empty default pattern.
+    // PatternManager back to one empty default pattern (Open replaces it
+    // from the file instead, which is why it is not in the shared slate).
     //
     // THREAD SAFETY: reset() clears mPatterns AND mArrangement, and the audio
     // thread walks both bare -- the song-mode arrangement scheduler and the
@@ -7230,9 +7208,47 @@ void BaySickDAWProcessor::resetToBlankState()
         setProjectLoadInProgress (true);
         if (! shieldWasUp) settleAudioThread();
 
-        resetEqStatesToDefaults();
         if (mPatternManager) mPatternManager->reset();
 
+        setProjectLoadInProgress (shieldWasUp);
+    }
+}
+
+void BaySickDAWProcessor::resetSessionStateToDefaults()
+{
+    // Every registered APVTS param to its default.  Iterate via
+    // getParameters() so lazy-registered engine / mixer-strip / rack params
+    // all get swept regardless of when they were added.
+    {
+        // QA-UndoCoverage Task 6: a load boundary -- never history.
+        juce::AudioProcessorValueTreeState::ScopedProgrammaticParamWrites spw;
+        for (auto* param : getParameters())
+        {
+            if (auto* ranged = dynamic_cast<juce::RangedAudioParameter*> (param))
+            {
+                // 2026-04-24 bugfix: getDefaultValue() already returns normalised
+                // 0..1 (JUCE contract).  Wrapping it in convertTo0to1 caused
+                // double-normalisation - Int params with large ranges (e.g.
+                // _sendTo 0..999) collapsed to 0, silently breaking every strip's
+                // routing after File > New.  Pass the normalised default straight
+                // through.
+                ranged->setValueNotifyingHost (ranged->getDefaultValue());
+            }
+        }
+    }
+    // Clear every rack slot across buses + inserts.  loadRackStates only
+    // RESTORES from the tree - with no matching entries it wouldn't wipe
+    // pre-existing racks, which was the observed bug on File > New and the
+    // same leak on File > Open.
+    mVibeGraph.clearAllRackStates();
+    // EQ re-seed reallocates linear-phase processors the audio thread reads:
+    // shield -> settle -> mutate -> restore, nested-cheap when a load already
+    // holds the shield.
+    {
+        const bool shieldWasUp = isProjectLoadInProgress();
+        setProjectLoadInProgress (true);
+        if (! shieldWasUp) settleAudioThread();
+        resetEqStatesToDefaults();
         setProjectLoadInProgress (shieldWasUp);
     }
 }
@@ -7375,6 +7391,15 @@ void BaySickDAWProcessor::deserializeProject (const juce::XmlElement& root)
 // because the InsertNodes they target do not exist yet at this point.
 void BaySickDAWProcessor::applyProcessorState (const juce::XmlElement& root)
 {
+    // Jeff's ruling (2026-08-24): the FILE is the only source of project
+    // state.  Wipe the session to defaults BEFORE restoring, so a parameter,
+    // rack or EQ the incoming file has no entry for lands at its default
+    // instead of inheriting the previous project's value.  This is the fix
+    // for the A -> B -> A leak where reloading a project kept values from the
+    // one loaded in between (replaceState leaves any registered param the
+    // incoming tree does not mention untouched).
+    resetSessionStateToDefaults();
+
     // Processor state - first child under <Processor>.
     if (auto* processor = root.getChildByName ("Processor"))
     {

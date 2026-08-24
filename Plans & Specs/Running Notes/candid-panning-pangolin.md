@@ -132,3 +132,38 @@ per-pixel decimation (18k points x 3 at 60 Hz is fine today).
 
 Installer `20260822-2218` (52.7 MB) carries the whole batch + the
 regenerated manual + reprinted PDFs.
+
+## 2026-08-24 - Jeff's A -> B -> A find: File > Open never ran the clean slate
+
+Jeff loaded Display Project (fine), another project (fine), reloaded the
+first: buses played but nothing fed the master; Debug identical; no save had
+happened; app restart cleared it. File proven innocent by his own test.
+
+Root cause is a whole CLASS, already half-known in the code: `replaceState`
+leaves any registered parameter the incoming tree does not mention at its
+CURRENT session value (the load path's own comment describes the stale-node
+side of it, and clearAllRackStates exists because racks had the same leak on
+File > New). File > New ran a full clean slate (param default sweep +
+clearAllRackStates + EQ re-seed); File > Open restored the file OVER the
+live session, so anything project B created or touched that project A's
+older file predates kept B's value into A's reload. Jeff's ruling: nothing
+carries between projects - the file is the only source.
+
+Fix: the slate extracted to `resetSessionStateToDefaults()` (params to
+defaults under ScopedProgrammaticParamWrites, clearAllRackStates, EQ
+re-seed under the shield) - File > New calls it as before, and
+`applyProcessorState` (File > Open + template apply) now calls it BEFORE
+restoring. PatternManager stays out of the slate (Open replaces it from the
+file; New resets it separately). MIDI hardware bindings are global-by-design
+and load from the global defaults file - untouched. TL-21 added as a
+MUST-PASS (A->B->A both directions + New-after-load). Which exact parameter
+carried in Jeff's case is unproven (no capture); the class fix covers every
+instance, and the Save-As-broken-state trap stands if anything like it ever
+shows again.
+
+Also from Jeff's first pass, fixed + committed earlier (1d277851): tree
+right-click menus opened toward the top-left (TreeView re-bases the item
+event; menus now take the desktop's mouse position) and the analyzer's dBFS
+bars strobed (it read the mixer's exchange-and-reset peak window; it now has
+its own window at the tap and draws through the master strip's own DBFSMeter
+component). Installer 20260822-2308 carried those two.

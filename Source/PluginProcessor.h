@@ -221,6 +221,14 @@ public:
     // Caller is responsible for tearing down + rebuilding dynamic tabs - this
     // method deals only with processor-owned state.
     void resetToBlankState();
+    // The clean slate EVERY load boundary runs (Jeff's ruling, 2026-08-24:
+    // nothing carries from one project to the next -- the file is the only
+    // source of project state).  Every APVTS param to its default, every rack
+    // slot cleared, every EQ re-seeded.  File > New always did this; File >
+    // Open replaceState'd OVER the live session, so any parameter or rack the
+    // incoming file predates kept the previous project's value -- the
+    // A -> B -> A "buses stop feeding the master" leak.
+    void resetSessionStateToDefaults();
 
     // 2026-04-24: deferred rack state replay.  deserializeProject stashes
     // BaySickRackStates into mPendingProjectRackState and skips the immediate
@@ -1665,7 +1673,6 @@ private:
     std::atomic<float>* mSwingTruncPlugin[kMaxPluginPages] {};
     std::atomic<float>* mSwingMixRusty { nullptr };
     std::atomic<float>* mSwingTruncRusty { nullptr };
-
 
     // J-5 (2026-05-03): BaySickRustyDrums singleton engine.  Only one
     // instance per project.  Owned here so PluginProcessor can orchestrate
