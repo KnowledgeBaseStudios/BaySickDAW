@@ -895,3 +895,13 @@ add_custom_command(TARGET BaySickPluginHost POST_BUILD
             "$<TARGET_FILE:BaySickPluginHost>"
             "${CMAKE_BINARY_DIR}/BaySickDAWStandalone_artefacts/Debug/$<TARGET_FILE_NAME:BaySickPluginHost>"
     VERBATIM)
+
+# ── BaySickEqTests — the EQ engine proof target (QA-EqPro SC-13) ─────────────
+# Plain console exe over Source/DSP/Kbs, no JUCE.  Deliberately OUTSIDE
+# do_build.bat's gate (EXCLUDE_FROM_ALL): built + run on demand via
+# run_eq_tests.bat, exit code 0 = every measured claim held.
+add_executable(BaySickEqTests Tools/EqTests/main.cpp)
+set_target_properties(BaySickEqTests PROPERTIES
+    CXX_STANDARD 17
+    CXX_STANDARD_REQUIRED ON
+    EXCLUDE_FROM_ALL TRUE)
