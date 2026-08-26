@@ -3,7 +3,6 @@
 #include "../PluginProcessor.h"
 #include "../EngineRig.h"
 #include "../PatternManager.h"
-#include "../DSP/EQ8MsDSP.h"
 #include "SharedUI.h"
 #include "StandaloneApp.h"
 #include "UndoActions.h"

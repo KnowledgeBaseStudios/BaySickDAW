@@ -6802,34 +6802,6 @@ void StandaloneEditor::showPageForTab(int tabId)
     // Configure PageMenuBar tab slots for Layers/Bass/Drums pages
     if (mPageMenuBar)
     {
-        // 2026-04-19: PageMenuBar's hamburger ≡ becomes the universal page-
-        // actions menu. ParametricEQDisplay installs its options menu on the
-        // hamburger when its tab is active and clears it on switching away.
-        // Bank indicator (A/B compare current-bank pill) also injects into
-        // the bar's extra-right slot on EQ-tab activation, removed on switch.
-        auto syncEQHamburger = [this] (ParametricEQDisplay* eq, bool onEqTab)
-        {
-            if (! mPageMenuBar) return;
-            if (eq && onEqTab)
-            {
-                eq->installPageMenu (*mPageMenuBar);
-                eq->refreshBankIndicator();
-                // Dedicated slot adjacent to MID/SIDE (not the right-extras list).
-                // setBankIndicator is idempotent so repeat tab clicks don't stack.
-                mPageMenuBar->setBankIndicator (eq->getBankIndicator());
-            }
-            else if (eq)
-            {
-                eq->uninstallPageMenu (*mPageMenuBar);
-                mPageMenuBar->setBankIndicator (nullptr);
-            }
-            else
-            {
-                mPageMenuBar->setMenuBuilder (nullptr);
-                mPageMenuBar->setBankIndicator (nullptr);
-            }
-        };
-
         // Always start by clearing - each branch below restores its own state.
         // 2026-04-19: also clear extra-right components so per-page extras
         // (Effects meters/bypass/trackBox/trackLabel, Drums Kit/Nav, Mixer
@@ -20525,8 +20497,6 @@ void StandaloneEditor::pollDenoiseState()
         const double devSr = dev->getCurrentSampleRate();
         if (devSr > 0.0)
         {
-            ParametricEQDisplay::setLiveSampleRate (devSr);
-
             // Not during an offline render: it re-prepares the whole graph at
             // the render rate and reads this timeline as it goes.
             if (! mProcessor.isNonRealtime()

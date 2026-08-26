@@ -1,6 +1,6 @@
 #pragma once
 #include <JuceHeader.h>
-#include "../Standalone/SharedUI.h"   // ParametricEQDisplay
+#include "../Standalone/SharedUI.h"
 
 class BaySickDAWProcessor;
 

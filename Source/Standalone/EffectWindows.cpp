@@ -1,5 +1,4 @@
 #include "EffectWindows.h"
-#include "EqWindowUI/EqGraphView.h"   // QA-EqPro T5: compiled here ahead of the T6 window rebuild
 #include "EffectsPage.h"
 #include "EffectEditorPanels.h"
 #include "../PluginProcessor.h"
@@ -533,21 +532,53 @@ EffectEqWindow::EffectEqWindow (BaySickDAWProcessor& proc,
     : mProc (proc),
       mChannelId (channelId),
       mIsPre (isPre),
-      mResolveChannelName (std::move (resolveChannelName))
+      mResolveChannelName (std::move (resolveChannelName)),
+      mStripPrefix (EffectsPage::mixerPrefixForChannelId (channelId))
 {
-    mFallbackEq.prepare (44100.0, 512);
+    setWantsKeyboardFocus (true);
 
-    mDisplay = std::make_unique<ParametricEQDisplay>();
-    mDisplay->onLatencyChanged = [this]
-    {
-        mProc.setLatencySamples (mProc.mVibeGraph.updateBusLatencies());
+    mGraph = std::make_unique<eqview::EqGraphView> (proc, mStripPrefix, isPre);
+    mGraph->resolveEq = [this] { return resolveEq(); };
+    mGraph->ensureBand = [this] (int b)
+    { mProc.ensureEqBandParams (mStripPrefix, mIsPre ? 1 : 0, b); };
+    addAndMakeVisible (*mGraph);
+
+    mChips = std::make_unique<eqview::BandChipRow> (*mGraph);
+    mChips->onAbSwap = [this] { abSwap(); };
+    mChips->onAbCopy = [this] { if (auto* e = resolveEq()) e->saveToSpare(); };
+    mChips->onAbLock = [this] { if (auto* e = resolveEq()) e->lockSpare (! e->isSpareLocked()); };
+    mChips->isViewingB = [this] { auto* e = resolveEq(); return e != nullptr && e->isViewingSpare(); };
+    mChips->isAbLocked = [this] { auto* e = resolveEq(); return e != nullptr && e->isSpareLocked(); };
+    addAndMakeVisible (*mChips);
+
+    mRail = std::make_unique<eqview::EqRailView> (*mGraph);
+    mRail->onCollapse = [this] (bool) { resized(); };
+    mRail->onPickScSource = [this] { pickScSource(); };
+    addAndMakeVisible (*mRail);
+
+    // ST / MID / SIDE, left of the chips: the view IS the domain (SC-5).
+    mViewRow = std::make_unique<eqview::SegmentRow>();
+    mViewRow->segs = {
+        { {}, "ST", "Stereo view - bands that work the whole signal (plus any "
+                    "Left/Right band)" },
+        { {}, "MID", "Mid view - bands that work the centre of the image. The "
+                     "other views stay visible as a ghost." },
+        { {}, "SIDE", "Side view - bands that work the edges of the image. The "
+                      "other views stay visible as a ghost." },
     };
-    // MID/SIDE are the title strip's buttons, not an in-graph pill.
-    mDisplay->showMidSideToggle (false);
-    addAndMakeVisible (*mDisplay);
+    mViewRow->get = [this] { return (int) mGraph->domainView(); };
+    mViewRow->set = [this] (int v) { mGraph->setDomainView ((eqview::DomainView) v); };
+    addAndMakeVisible (*mViewRow);
 
-    bindToChannel();
     mTitle = windowTitle();
+}
+
+juce::String EffectEqWindow::windowTitle() const
+{
+    const juce::String strip = mResolveChannelName ? mResolveChannelName (mChannelId)
+                                                   : juce::String();
+    const juce::String what = mIsPre ? "Pre EQ" : "Post EQ";
+    return strip.isEmpty() ? what : strip + " - " + what;
 }
 
 EffectEqWindow::~EffectEqWindow()
@@ -557,46 +588,10 @@ EffectEqWindow::~EffectEqWindow()
     // strip's menu bar is normally already gone when the content dies, so this
     // reads through a SafePointer rather than a raw one.
     if (auto* bar = mBar.getComponent())
-        if (mDisplay != nullptr)
-        {
-            mDisplay->uninstallPageMenu (*bar);
-            bar->setBankIndicator (nullptr);
-        }
-}
-
-StripEq* EffectEqWindow::resolveEq() const
-{
-    auto& vg = mProc.mVibeGraph;
-    if (mIsPre) return EffectsPage::preEqForChannelId (vg, mChannelId);
-
-    EffectRack* rack = nullptr;
-    StripEq*    eq   = nullptr;
-    EffectsPage::resolveChannelDsp (vg, mChannelId, rack, eq);
-    return eq;
-}
-
-void EffectEqWindow::bindToChannel()
-{
-    // QA-EqPro T3: the nodes carry StripEq now; this window's display still
-    // speaks EQ8MsDSP and is rebuilt against the engine in Tasks 5-6.  Until
-    // then it binds the inert fallback so the window stays alive and harmless.
-    mBoundEq = resolveEq();
-
-    const juce::String chanPrefix = EffectsPage::mixerPrefixForChannelId (mChannelId);
-
-    mDisplay->bindMsDSP (&mFallbackEq);
-
-    mDisplay->setStripContext (chanPrefix,
-                               [] (int srcChId) { return MixerChannelIds::friendlyName (srcChId); });
-    mDisplay->setShowMid (mShowMid);
-}
-
-juce::String EffectEqWindow::windowTitle() const
-{
-    const juce::String strip = mResolveChannelName ? mResolveChannelName (mChannelId)
-                                                   : juce::String();
-    const juce::String what = mIsPre ? "Pre EQ8 M/S" : "Post EQ8 M/S";
-    return strip.isEmpty() ? what : strip + " - " + what;
+    {
+        bar->setMenuBuilder (nullptr);
+        bar->setBankIndicator (nullptr);
+    }
 }
 
 void EffectEqWindow::configureTitleStrip (PageMenuBar& bar)
@@ -622,21 +617,27 @@ void EffectEqWindow::configureTitleStrip (PageMenuBar& bar)
                      },
                      mIsPre ? 0 : 1);
 
-    bar.setMidSideSlots ([this] { mShowMid = true;  mDisplay->setShowMid (true);
-                                  if (mBar != nullptr) mBar->updateMidSideActive (true); },
-                         [this] { mShowMid = false; mDisplay->setShowMid (false);
-                                  if (mBar != nullptr) mBar->updateMidSideActive (false); },
-                         mShowMid);
-    bar.setMidSideVisible (true);
+    // MID/SIDE buttons retired: the domain views are the in-content ST/MID/
+    // SIDE row (three states cannot ride a two-button strip).
+    bar.setMidSideVisible (false);
 
-    mDisplay->installPageMenu (bar);
-    mDisplay->refreshBankIndicator();
-    bar.setBankIndicator (mDisplay->getBankIndicator());
+    bar.setMenuBuilder ([this] (juce::Component* anchor) { showOptionsMenu (anchor); });
 }
 
 void EffectEqWindow::resized()
 {
-    if (mDisplay) mDisplay->setBounds (getLocalBounds().reduced (4));
+    auto r = getLocalBounds().reduced (4);
+    auto top = r.removeFromTop (24);
+    if (mViewRow) mViewRow->setBounds (top.removeFromLeft (128).reduced (0, 2));
+    top.removeFromLeft (4);
+    if (mChips) mChips->setBounds (top);
+    if (mRail)
+    {
+        const int railW = mRail->collapsed ? eqview::EqRailView::kCollapsedWidth
+                                           : eqview::EqRailView::kWidth;
+        mRail->setBounds (r.removeFromRight (railW));
+    }
+    if (mGraph) mGraph->setBounds (r);
 }
 
 void EffectEqWindow::parentHierarchyChanged()
@@ -651,32 +652,61 @@ void EffectEqWindow::parentHierarchyChanged()
     }
 }
 
+bool EffectEqWindow::keyPressed (const juce::KeyPress& k)
+{
+    if (mGraph == nullptr) return false;
+    const bool shift = k.getModifiers().isShiftDown();
+    const float step = shift ? 1.0f : 0.2f;
+
+    if (k.getKeyCode() == juce::KeyPress::leftKey)  { mGraph->nudgeSelected (-step, 0); return true; }
+    if (k.getKeyCode() == juce::KeyPress::rightKey) { mGraph->nudgeSelected (+step, 0); return true; }
+    if (k.getKeyCode() == juce::KeyPress::upKey)    { mGraph->nudgeSelected (0, +step); return true; }
+    if (k.getKeyCode() == juce::KeyPress::downKey)  { mGraph->nudgeSelected (0, -step); return true; }
+    if (k.getKeyCode() == juce::KeyPress::tabKey)   { mGraph->cycleSelection (shift ? -1 : 1); return true; }
+    if (k.getKeyCode() == juce::KeyPress::deleteKey
+        || k.getKeyCode() == juce::KeyPress::backspaceKey)
+        { mGraph->deleteSelected(); return true; }
+    return false;
+}
+
+bool EffectEqWindow::keyStateChanged (bool)
+{
+    if (mGraph == nullptr) return false;
+    const bool l = juce::KeyPress::isKeyCurrentlyDown ('L')
+                || juce::KeyPress::isKeyCurrentlyDown ('l');
+    const bool gk = juce::KeyPress::isKeyCurrentlyDown ('G')
+                 || juce::KeyPress::isKeyCurrentlyDown ('g');
+
+    if (l != mLDown) { mLDown = l; mGraph->holdListen (l); }
+    if (gk != mGDown) { mGDown = gk; mGraph->setGrabArmed (gk); }
+    return l || gk;
+}
+
+StripEq* EffectEqWindow::resolveEq() const
+{
+    auto& vg = mProc.mVibeGraph;
+    if (mIsPre) return EffectsPage::preEqForChannelId (vg, mChannelId);
+
+    EffectRack* rack = nullptr;
+    StripEq*    eq   = nullptr;
+    EffectsPage::resolveChannelDsp (vg, mChannelId, rack, eq);
+    return eq;
+}
+
 void EffectEqWindow::timerCallback()
 {
     auto* eq = resolveEq();
 
-    // The channel DIED (its strip was deleted): left open, this window sat
-    // bound to the display-only fallback forever -- a zombie editing an EQ
-    // nothing plays through, against the registry's own close-on-target-loss
-    // design.  "Never resolved yet" is a different state: the fallback's
-    // stated role is drawing before the graph has built the node.
+    // The channel DIED (its strip was deleted): left open, this window would
+    // sit as a zombie editing an EQ nothing plays through.  "Never resolved
+    // yet" is a different state: the restore may still be in flight.
     if (eq == nullptr && mEverResolved)
     {
         if (onRequestClose) { onRequestClose(); return; }
     }
     if (eq != nullptr)
         mEverResolved = true;
-
-    // The node under this window can be rebuilt without the window hearing
-    // about it (a strip respawn, a graph rebuild).  Re-bind when the resolved
-    // DSP is a DIFFERENT object, or the display would keep drawing -- and
-    // writing -- into the old one.
-    if (eq != mBoundEq)
-        bindToChannel();
-
-    // Same poll the Effects page ran: pulls the pre/post spectrum feeds and the
-    // dynamic-band state back out of the bound DSP.
-    if (mDisplay) mDisplay->syncFromDSP();
+    mBoundEq = eq;
 
     const auto t = windowTitle();
     if (t != mTitle)
@@ -684,6 +714,310 @@ void EffectEqWindow::timerCallback()
         mTitle = t;
         if (onTitleChanged) onTitleChanged (t);
     }
+}
+
+void EffectEqWindow::abSwap()
+{
+    auto* e = resolveEq();
+    if (e == nullptr) return;
+    e->swapWithSpare();
+    pushBankToParams (*e);
+}
+
+// The swapped bank becomes the parameter state in one undo step - without
+// this the audio-thread sweep would push the un-swapped params right back
+// (the old EQ8 flow's lesson, kept).
+void EffectEqWindow::pushBankToParams (StripEq& e)
+{
+    beginParamUndoGesture (mProc.apvts, mGraph->paramId (0, "gain"));
+    for (int b = 0; b < StripEq::kBands; ++b)
+    {
+        const auto p = e.getBand (b);
+        // A high band neither bank uses stays unregistered - writing its
+        // defaults would materialize all 24 on the first swap.
+        if (b >= 8 && ! p.on && ! e.getSpareBand (b).on
+            && mProc.apvts.getParameter (mGraph->paramId (b, "on")) == nullptr)
+            continue;
+
+        mGraph->setBandValue (b, "on",      p.on ? 1.0f : 0.0f);
+        mGraph->setBandValue (b, "type",    (float) (int) p.type);
+        mGraph->setBandValue (b, "freq",    p.freqHz);
+        mGraph->setBandValue (b, "gain",    p.gainDb);
+        mGraph->setBandValue (b, "q",       p.q);
+        mGraph->setBandValue (b, "slope",   (float) p.slope);
+        mGraph->setBandValue (b, "chan",    (float) (int) p.channel);
+        mGraph->setBandValue (b, "place",   p.placement);
+        mGraph->setBandValue (b, "mute",    p.muted ? 1.0f : 0.0f);
+        mGraph->setBandValue (b, "iso",     p.isolated ? 1.0f : 0.0f);
+        mGraph->setBandValue (b, "dyn",     p.dynamic ? 1.0f : 0.0f);
+        mGraph->setBandValue (b, "thr",     p.thresholdDb);
+        mGraph->setBandValue (b, "ratio",   p.ratio);
+        mGraph->setBandValue (b, "atk",     p.attackMs);
+        mGraph->setBandValue (b, "rel",     p.releaseMs);
+        mGraph->setBandValue (b, "relauto", p.autoRelease ? 1.0f : 0.0f);
+        mGraph->setBandValue (b, "range",   p.rangeDb);
+        mGraph->setBandValue (b, "scsrc",   (float) p.scSource);
+    }
+}
+
+void EffectEqWindow::pickScSource()
+{
+    const int b = mGraph->selectedBand();
+    if (b < 0) return;
+
+    juce::PopupMenu m;
+    const int cur = mGraph->bandParams (b).scSource;
+    m.addItem (1, "This band's own input", true, cur < 0);
+    m.addSeparator();
+    for (int slot = 0; slot < 4; ++slot)
+    {
+        const auto id = mStripPrefix + "_sc_recv" + juce::String (slot) + "_from";
+        int src = -1;
+        if (auto* p = mProc.apvts.getRawParameterValue (id))
+            src = (int) p->load();
+        const bool routed = src >= 0;
+        juce::String name = "Receive " + juce::String (slot + 1);
+        name += routed ? " - " + MixerChannelIds::friendlyName (src)
+                       : juce::String (" - not routed");
+        m.addItem (2 + slot, name, routed, cur == slot);
+    }
+
+    const auto at = juce::Rectangle<int> (1, 1)
+                        .withPosition (juce::Desktop::getMousePosition());
+    m.showMenuAsync (juce::PopupMenu::Options()
+                         .withTargetComponent (this)
+                         .withTargetScreenArea (at),
+        [this, b] (int r)
+        {
+            if (r == 0) return;
+            const int slot = r == 1 ? -1 : r - 2;
+            beginParamUndoGesture (mProc.apvts, mGraph->paramId (b, "scsrc"));
+            mGraph->setBandValue (b, "scsrc", (float) slot);
+            if (auto* e = resolveEq())
+                e->scFeedSlot.store (slot, std::memory_order_relaxed);
+        });
+}
+
+void EffectEqWindow::showOptionsMenu (juce::Component* anchor)
+{
+    auto* e = resolveEq();
+    const int bank = mIsPre ? 1 : 0;
+    auto gid = [this, bank] (const char* which)
+    { return BaySickDAWProcessor::eqBankGlobalParamId (mStripPrefix, bank, which); };
+    auto boolParam = [this, &gid] (const char* which)
+    {
+        if (auto* p = mProc.apvts.getRawParameterValue (gid (which)))
+            return p->load() >= 0.5f;
+        return false;
+    };
+
+    // The EQ block registers on first touch; the menu IS a touch.
+    mProc.ensureStripEqParams (mStripPrefix);
+
+    int curMode = 0;
+    if (auto* p = mProc.apvts.getRawParameterValue (gid ("mode")))
+        curMode = juce::jlimit (0, 6, (int) p->load());
+
+    juce::PopupMenu m;
+
+    // Latency figures COMPUTED from the engine's own constants at the session
+    // rate - the old menu hand-mirrored the DSP's numbers and inherited its
+    // half-the-truth report.
+    const double sr = mProc.getSampleRate() > 0 ? mProc.getSampleRate() : 48000.0;
+    auto latencyLabel = [sr] (int modeIdx) -> juce::String
+    {
+        if (modeIdx < 2) return "0 ms";
+        const int n = 1 << (10 + (modeIdx - 2));
+        const int taps = n / 2 + 1;
+        const int hop = n - taps + 1;
+        const int lat = hop + (taps - 1) / 2;
+        return juce::String (juce::roundToInt (1000.0 * lat / sr)) + " ms ("
+             + juce::String (lat) + " sp)";
+    };
+
+    juce::PopupMenu mode;
+    const char* modeNames[] = { "Zero Latency", "Natural Phase", "Linear Low",
+                                "Linear Medium", "Linear High",
+                                "Linear Very High", "Linear Maximum" };
+    for (int i = 0; i < 7; ++i)
+        mode.addItem (100 + i,
+                      juce::String (modeNames[i]) + "   (" + latencyLabel (i) + ")",
+                      true, curMode == i);
+    m.addSubMenu ("Processing Mode", mode);
+    m.addItem (110, "Oversampling 2x", curMode < 2, boolParam ("os"));
+    m.addItem (111, "Proportional Q", true, boolParam ("propq"));
+    m.addSeparator();
+
+    juce::PopupMenu ag;
+    ag.addItem (120, "Auto-Gain", true, boolParam ("autogain"));
+    ag.addSeparator();
+    float agAmt = 1.0f;
+    if (auto* p = mProc.apvts.getRawParameterValue (gid ("agamt"))) agAmt = p->load();
+    const float amounts[] = { 0.25f, 0.5f, 0.75f, 1.0f };
+    for (int i = 0; i < 4; ++i)
+        ag.addItem (121 + i, juce::String ((int) (amounts[i] * 100)) + "%",
+                    true, std::abs (agAmt - amounts[i]) < 0.01f);
+    m.addSubMenu ("Auto-Gain", ag);
+
+    juce::PopupMenu outM;
+    outM.addItem (170, "Polarity Flip", true, boolParam ("polarity"));
+    outM.addSeparator();
+    float outDb = 0.0f;
+    if (auto* p = mProc.apvts.getRawParameterValue (gid ("outgain"))) outDb = p->load();
+    const float trims[] = { -12.0f, -6.0f, -3.0f, 0.0f, 3.0f, 6.0f, 12.0f };
+    for (int i = 0; i < 7; ++i)
+        outM.addItem (171 + i, (trims[i] > 0 ? "+" : "") + juce::String (trims[i], 0) + " dB",
+                      true, std::abs (outDb - trims[i]) < 0.1f);
+    m.addSubMenu ("Output Trim", outM);
+    m.addSeparator();
+
+    juce::PopupMenu scale;
+    const double scales[] = { 3.0, 6.0, 12.0, 18.0, 30.0 };
+    const double curScale = mGraph->gainScaleDb();
+    for (int i = 0; i < 5; ++i)
+        scale.addItem (130 + i, juce::String ("+/-") + juce::String ((int) scales[i]) + " dB",
+                       true, std::abs (curScale - scales[i]) < 0.1);
+    m.addSubMenu ("Gain Scale", scale);
+
+    juce::PopupMenu an;
+    an.addItem (140, "Pre", true, mGraph->analyserPre());
+    an.addItem (141, "Post", true, mGraph->analyserPost());
+    an.addItem (142, "Sidechain",
+                e != nullptr && e->scFeedAlive.load (std::memory_order_relaxed),
+                mGraph->analyserSc());
+    an.addSeparator();
+    an.addItem (143, "Fast", true, mGraph->postAnalyser().speed == eqview::EqAnalyser::Speed::fast);
+    an.addItem (144, "Medium", true, mGraph->postAnalyser().speed == eqview::EqAnalyser::Speed::medium);
+    an.addItem (145, "Slow", true, mGraph->postAnalyser().speed == eqview::EqAnalyser::Speed::slow);
+    an.addSeparator();
+    an.addItem (146, "Tilt 4.5 dB/oct", true, mGraph->postAnalyser().tiltDbPerOct > 4.0f);
+    an.addItem (147, "Tilt 3 dB/oct", true, std::abs (mGraph->postAnalyser().tiltDbPerOct - 3.0f) < 0.1f);
+    an.addItem (148, "Flat", true, mGraph->postAnalyser().tiltDbPerOct < 0.1f);
+    an.addSeparator();
+    an.addItem (149, "Freeze", true, mGraph->postAnalyser().frozen);
+    an.addItem (150, "Peak Hold", true, mGraph->postAnalyser().peakHold);
+    m.addSubMenu ("Analyser", an);
+
+    juce::PopupMenu viewM;
+    viewM.addItem (160, "Analyser", true, mGraph->showAnalyser());
+    viewM.addItem (161, "Spectrogram", true, mGraph->showSpectrogram());
+    viewM.addItem (162, "Phase Overlay", true, mGraph->showPhase());
+    viewM.addItem (163, "Piano Strip", true, mGraph->showPiano());
+    m.addSubMenu ("View", viewM);
+    m.addSeparator();
+
+    m.addItem (165, "Keyboard & Mouse...");
+    m.addItem (182, "Reset All Bands");
+
+    m.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (
+                         anchor != nullptr ? anchor : this),
+        [this, gid] (int r)
+        {
+            if (r == 0) return;
+            auto setG = [this, &gid] (const char* which, float natural)
+            {
+                if (auto* par = mProc.apvts.getParameter (gid (which)))
+                {
+                    beginParamUndoGesture (mProc.apvts, gid (which));
+                    par->setValueNotifyingHost (par->convertTo0to1 (natural));
+                }
+            };
+            auto toggleG = [this, &gid] (const char* which)
+            {
+                if (auto* par = mProc.apvts.getParameter (gid (which)))
+                {
+                    beginParamUndoGesture (mProc.apvts, gid (which));
+                    par->setValueNotifyingHost (par->getValue() >= 0.5f ? 0.0f : 1.0f);
+                }
+            };
+
+            if (r >= 100 && r < 107) setG ("mode", (float) (r - 100));
+            else if (r == 110) toggleG ("os");
+            else if (r == 111) toggleG ("propq");
+            else if (r == 120) toggleG ("autogain");
+            else if (r >= 121 && r <= 124)
+            {
+                const float amounts[] = { 0.25f, 0.5f, 0.75f, 1.0f };
+                setG ("agamt", amounts[r - 121]);
+            }
+            else if (r >= 130 && r < 135)
+            {
+                const double scales[] = { 3.0, 6.0, 12.0, 18.0, 30.0 };
+                mGraph->setViewProperty ("scale", scales[r - 130]);
+            }
+            else if (r == 140) mGraph->setViewProperty ("pre", ! mGraph->analyserPre());
+            else if (r == 141) mGraph->setViewProperty ("post", ! mGraph->analyserPost());
+            else if (r == 142) mGraph->setViewProperty ("sc", ! mGraph->analyserSc());
+            else if (r >= 143 && r <= 145)
+            {
+                const auto sp = r == 143 ? eqview::EqAnalyser::Speed::fast
+                              : r == 145 ? eqview::EqAnalyser::Speed::slow
+                                         : eqview::EqAnalyser::Speed::medium;
+                mGraph->preAnalyser().speed = sp;
+                mGraph->postAnalyser().speed = sp;
+                mGraph->scAnalyser().speed = sp;
+            }
+            else if (r >= 146 && r <= 148)
+            {
+                const float t = r == 146 ? 4.5f : r == 147 ? 3.0f : 0.0f;
+                mGraph->preAnalyser().tiltDbPerOct = t;
+                mGraph->postAnalyser().tiltDbPerOct = t;
+                mGraph->scAnalyser().tiltDbPerOct = t;
+            }
+            else if (r == 149)
+            {
+                const bool f = ! mGraph->postAnalyser().frozen;
+                mGraph->preAnalyser().frozen = f;
+                mGraph->postAnalyser().frozen = f;
+                mGraph->scAnalyser().frozen = f;
+            }
+            else if (r == 150)
+            {
+                auto& a = mGraph->postAnalyser();
+                a.peakHold = ! a.peakHold;
+                if (! a.peakHold) a.clearPeaks();
+            }
+            else if (r == 165)
+            {
+                juce::NativeMessageBox::showAsync (
+                    juce::MessageBoxOptions()
+                        .withIconType (juce::MessageBoxIconType::NoIcon)
+                        .withTitle ("Keyboard & Mouse")
+                        .withMessage (
+                            "Drag a dot: frequency + gain\n"
+                            "Shift+drag: fine\n"
+                            "Ctrl+drag: gain only\n"
+                            "Ctrl+Shift+drag: frequency only\n"
+                            "Wheel on a dot: Q (Shift = fine)\n"
+                            "Double-click empty: add a band\n"
+                            "Double-click a dot: mute\n"
+                            "Alt+click a dot: reset the band\n"
+                            "Right-click a dot: the band's menu\n"
+                            "Delete: remove the selected band\n"
+                            "Arrows: nudge  -  Tab: next band\n"
+                            "Hold L: listen  -  Hold G: arm spectrum grab\n"
+                            "(Keys work while the EQ window has focus - the "
+                            "headphone and crosshair buttons do the same "
+                            "jobs by mouse.)")
+                        .withButton ("OK"),
+                    nullptr);
+            }
+            else if (r >= 170 && r <= 177)
+            {
+                if (r == 170) toggleG ("polarity");
+                else
+                {
+                    const float trims[] = { -12.0f, -6.0f, -3.0f, 0.0f, 3.0f, 6.0f, 12.0f };
+                    setG ("outgain", trims[r - 171]);
+                }
+            }
+            else if (r == 182)
+            {
+                for (int b = 0; b < StripEq::kBands; ++b)
+                    if (mProc.apvts.getParameter (mGraph->paramId (b, "on")) != nullptr)
+                        mGraph->removeBand (b);
+            }
+        });
 }
 
 // ═══════════════════════════════════════════════════ T18 parametric visual draws

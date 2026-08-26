@@ -1,8 +1,8 @@
 #pragma once
 #include <JuceHeader.h>
 #include "../EffectRack.h"
-#include "../DSP/EQ8MsDSP.h"
 #include "../DSP/StripEq.h"
+#include "EqWindowUI/EqRailView.h"
 #include "SlotComponent.h"
 #include "SharedUI.h"
 #include "UndoActions.h"
@@ -163,32 +163,44 @@ public:
     void resized() override;
     void parentHierarchyChanged() override;
 
+    // The KBS keyboard map, best-effort (a click gives the content focus):
+    // arrows nudge, Tab cycles, Delete removes, hold L listens, hold G arms
+    // the grab.  The mouse-first alternates (latch button, crosshair) exist
+    // because focus in a DAW is never guaranteed.
+    bool keyPressed (const juce::KeyPress& k) override;
+    bool keyStateChanged (bool isKeyDown) override;
+
 private:
     void timerCallback() override;
-    void bindToChannel();
     // Resolved per call, never cached across ticks -- the node can be rebuilt
     // under the window (strip respawn, graph rebuild) and a stale pointer here
     // would mean editing an EQ nothing is listening to.
     StripEq* resolveEq() const;
 
+    void showOptionsMenu (juce::Component* anchor);
+    void abSwap();
+    void pushBankToParams (StripEq& e);
+    void pickScSource();
+
     BaySickDAWProcessor&              mProc;
     const int                        mChannelId;
     const bool                       mIsPre;
     std::function<juce::String(int)> mResolveChannelName;
+    const juce::String               mStripPrefix;
 
-    std::unique_ptr<ParametricEQDisplay> mDisplay;
-    // Display-only fallback so the curve still draws before the graph has built
-    // this channel's node (the same role EffectsPage's owned DSPs played).
-    EQ8MsDSP                         mFallbackEq;
-    // What the display is currently bound to, so the poll can notice a rebuild.
+    std::unique_ptr<eqview::EqGraphView> mGraph;
+    std::unique_ptr<eqview::BandChipRow> mChips;
+    std::unique_ptr<eqview::EqRailView>  mRail;
+    std::unique_ptr<eqview::SegmentRow>  mViewRow;   // ST / MID / SIDE (SC-5)
+
+    // What the poll last resolved, so a node death is tellable from a node
+    // that was never built.
     StripEq*                         mBoundEq { nullptr };
-    // Distinguishes "channel not built yet" (fallback draws) from "channel
-    // DIED" (close the window).
     bool                             mEverResolved { false };
     // SafePointer for the same destruction-order reason as EffectSlotWindow's.
     juce::Component::SafePointer<PageMenuBar> mBar;
-    bool                             mShowMid { true };
     juce::String                     mTitle;
+    bool                             mLDown { false }, mGDown { false };
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (EffectEqWindow)
 };

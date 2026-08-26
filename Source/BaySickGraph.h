@@ -449,7 +449,7 @@ public:
     // the lifetime of this BaySickGraph.
     // 12i: SpectrumFeed refs dropped - each StripEq owns its own pre/post feeds
     // (populated at its own process() I/O boundary). UI polls eq->preFeed /
-    // eq->postFeed directly via ParametricEQDisplay::bindMsDSP.
+    // eq->postFeed directly (the EQ window's analyser polls them).
     // §P4.3 B7 (2026-04-22): all external page-EQ refs dropped.  Every bus now
     // owns its own preEq (pre-rack) and busEq (post-rack) directly.
     // Drums-bus content comes exclusively from per-drum-tab InsertNode outputs.

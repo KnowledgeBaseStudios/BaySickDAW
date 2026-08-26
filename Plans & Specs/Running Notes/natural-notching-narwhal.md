@@ -186,3 +186,39 @@ New Source/Standalone/EqWindowUI/ (namespace eqview):
 
 Graph compiled via EffectWindows.cpp ahead of the T6 window rebuild.  Gate
 green (six exit codes 0, four link lines, no errors).
+
+## 2026-08-26 - Task 6 - rail + window rebuild; the old display and EQ8 DSP
+## deleted (gate green on third run; two span-cut casualties restored)
+
+EqRailView.h: DragNumber/SegmentRow/GrMeter/BandChipRow/BandRail ported with
+the KBS budget-fit layout; no tier gates; house colors; channel row is
+ST/L/R and only in the Stereo view (SC-5); EXT became the 4-slot sidechain
+picker (window-owned menu of the strip's routed receive lines, writes
+scsrc + points the SC spectrum feed); rail knobs componentID-stamped with
+their param ids so the app's global right-click (Automate / Type in value /
+MIDI Learn) reaches them like any stamped control; chip row carries 24
+chips + "+" + the A/B pill (SC-16: click swaps, right-click Copy A to B /
+Lock; off-view chips wear a tiny M/S domain tick).
+
+EffectEqWindow rebuilt: chips + ST/MID/SIDE view row + graph + collapsible
+rail; Pre/Post tabs kept (the pair stays two windows); the bar's MID/SIDE
+buttons retired (three view states cannot ride a two-button strip);
+hamburger = the new options menu with Processing Mode latencies COMPUTED
+from the engine's own constants at the session rate (the old hand-mirrored
+figures die with the mirror), oversampling/propQ/auto-gain+amount/output
+trim/polarity as the new bank-global params, gain scale, analyser + view
+submenus, Keyboard & Mouse card, Reset All Bands; A/B swap pushes the
+swapped bank into the params in one undo step (bands 9-24 neither bank
+uses stay unregistered); keyboard map best-effort on window focus (mouse
+alternates exist by design).  Window titles are now "Pre EQ"/"Post EQ"
+(the M/S pair naming died with the pair).
+
+DELETED: ParametricEQDisplay (SharedUI.h class + ~3,200 cpp lines - D1-D5
+and both dead bind modes with it, E1-E5 die as a class), the dead
+syncEQHamburger lambda, EQ8DSP/EQ8MsDSP/EqLinearPhaseProcessor (files +
+CMake entries), the pages' dead includes.  The DAW SpectrumFeed.h STAYS
+(master analyzer taps ride it).  Two things my span cuts took that the
+linker caught: EffectEqWindow::windowTitle and VUMeter's calibration
+static definitions - both restored (title simplified); plus one
+NativeMessageBox arity fix.  Grep sweep: only deliberate historical
+comments mention the old names.

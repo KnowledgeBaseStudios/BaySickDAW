@@ -1,6 +1,6 @@
 #pragma once
 #include <JuceHeader.h>
-#include "../Standalone/SharedUI.h"   // ParametricEQDisplay
+#include "../Standalone/SharedUI.h"
 #include "../Standalone/EngineChainProcessor.h"   // I-16 G-9: Pedals -> NAM/IR chain
 #include "../Standalone/UndoActions.h"            // QA-UndoCoverage Task 7: UndoContext + StructuralOpAction
 

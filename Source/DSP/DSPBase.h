@@ -106,7 +106,7 @@ public:
     //   * Rack effects (Compressor / Limiter / TransientShaper / future NS-2):
     //     setSidechainPick(idx) -- single pick stored in mScPick; use
     //     getActiveSidechain() inside process().
-    //   * EQ8DSP: per-band scSourceId picks; module overrides setSidechainBuffers
+    //   * StripEq: per-band scSource picks; module overrides setSidechainBuffers
     //     to store the array and reads buffers[scSourceId] per band.
     // bufs may be nullptr for unused slots; count is always kMaxScRecvSlots.
     virtual void setSidechainBuffers (juce::AudioBuffer<float>* const* bufs, int count) noexcept

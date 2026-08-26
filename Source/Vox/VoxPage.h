@@ -1,6 +1,6 @@
 #pragma once
 #include <JuceHeader.h>
-#include "../Standalone/SharedUI.h"   // ParametricEQDisplay
+#include "../Standalone/SharedUI.h"
 #include "../Standalone/UndoActions.h"   // QA-Fd: UndoContext plumb-through
 
 class BaySickDAWProcessor;
