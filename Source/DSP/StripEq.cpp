@@ -149,7 +149,10 @@ void StripEq::setSidechainBuffers (juce::AudioBuffer<float>* const* bufs, int co
 
     // Forward each receive line into the engine's slot copies (SC-4).  The
     // engine invalidates the slots after every process(), so this runs per
-    // block from the strip's pre-process push.
+    // block from the strip's pre-process push.  The analyser's SC overlay
+    // watches one line: the picked slot, or the first connected one.
+    const int wantSlot = scFeedSlot.load (std::memory_order_relaxed);
+    bool fedSc = false;
     for (int s = 0; s < 4; ++s)
     {
         const auto* buf = (bufs != nullptr && s < count) ? bufs[s] : nullptr;
@@ -161,7 +164,13 @@ void StripEq::setSidechainBuffers (juce::AudioBuffer<float>* const* bufs, int co
         const float* l = buf->getReadPointer (0);
         const float* r = buf->getNumChannels() > 1 ? buf->getReadPointer (1) : l;
         mEq.setSidechainSlot (s, l, r, buf->getNumSamples());
+        if (! fedSc && (wantSlot == s || wantSlot < 0))
+        {
+            scFeed.push (l, r, buf->getNumSamples());
+            fedSc = true;
+        }
     }
+    scFeedAlive.store (fedSc, std::memory_order_relaxed);
 }
 
 // ── serialization ────────────────────────────────────────────────────────────
@@ -227,6 +236,7 @@ void StripEq::getStateInformation (juce::MemoryBlock& dest)
     state.appendChild (spare, nullptr);
 
     state.setProperty ("viewingSpare", mViewingSpare,          nullptr);
+    state.appendChild (mViewTree.createCopy(), nullptr);
     state.setProperty ("mode",         (int) mEq.getMode(),    nullptr);
     state.setProperty ("os",           mEq.getOversampling(),  nullptr);
     state.setProperty ("propQ",        mEq.getProportionalQ(), nullptr);
@@ -256,6 +266,11 @@ void StripEq::setStateInformation (const void* data, int sz)
             bandFromTree (*child, p);
             mCached[(size_t) idx] = p;
             mEq.setBand (idx, p);
+        }
+        else if (child->getTagName() == "View")
+        {
+            mViewTree.copyPropertiesAndChildrenFrom (juce::ValueTree::fromXml (*child),
+                                                     nullptr);
         }
         else if (child->getTagName() == "Spare")
         {

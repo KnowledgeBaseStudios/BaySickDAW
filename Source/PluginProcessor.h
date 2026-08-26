@@ -2182,6 +2182,14 @@ public:
     // load-time hook that keeps saved automation lanes over never-opened EQs
     // playable.
     void ensureEqParamsForId (const juce::String& paramId);
+    // The ONE spelling, exposed for the EQ window's parameter plumbing (the
+    // registration-side EqBandIds table in the .cpp is the implementation).
+    // suffix is the CamelCase band suffix ("Freq".."ScSource"); which is the
+    // lowercase bank-global word ("mode".."polarity").
+    static juce::String eqBandParamId (const juce::String& stripPrefix, int bank,
+                                       int band, const char* suffix);
+    static juce::String eqBankGlobalParamId (const juce::String& stripPrefix, int bank,
+                                             const char* which);
 private:
     // Load-time scan of the saved tree (deep copy taken before replaceState)
     // for eq-scheme ids - the EQ sibling of restoreAuxStripsFromState.

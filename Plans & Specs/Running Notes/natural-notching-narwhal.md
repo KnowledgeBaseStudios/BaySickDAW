@@ -153,3 +153,36 @@ green (six exit codes 0, four link lines).
 FOUND while wiring, routed to Task 8's list: FxRackPresetIO::load applies
 the rack BLOB unshielded on the message thread (same class as the
 page-preset Path I) - added to the T8 shield set.
+
+## 2026-08-26 - Task 5 - display port I: fontaudio + analyser + graph with views
+
+fontaudio vendored (libs/fontaudio from the KBS tree, MIT module + OFL font +
+CC BY 4.0 SVGs - all attribution-required, flagged for the pre-release
+/audit-licenses sweep) as a juce_add_module linked into the app target.
+
+New Source/Standalone/EqWindowUI/ (namespace eqview):
+- EqAnalyser.h: the KBS analyser near-verbatim over the vendored kbs FFT +
+  SpectrumFeed (8192-pt, N/4 normalization, tilt 4.5 default, speeds,
+  freeze, peak hold, arm-hold, findPeakNear, match averaging, heat-mapped
+  spectrogram; the ring-sized poll buffer lesson kept in the comment).
+- EqGraphView.h: the graph adapted to the strip world.  Live StripEq
+  resolver (nodes rebuild under windows; null-safe empty plot), params via
+  the processor's one id spelling (eqBandParamId statics + the KBS field
+  vocabulary mapped in ONE table), ensureBand hook for bands 9-24 (SC-2),
+  beginParamUndoGesture on every gesture, the full six-pass interaction
+  map.  THE VIEWS (SC-5, 1b): Stereo/Mid/Side; view = domain (band created
+  in a view gets that channel; menus offer Left/Right only in the Stereo
+  view; Move-to-view per SC-18 keeps settings and re-domains in place;
+  reset keeps the band in ITS view - domain is structure, not a value);
+  per-view summed curve = product of that view's bands' own engine queries;
+  the other views ghost as dimmed live curves + faint dots, never
+  interactive.  House dark look (Jeff's addendum): VC::EQGridBg ground, no
+  brushed plate, white glow curve, band hues rotated from VC::Blue, post
+  analyser in the app's yellow.
+- StripEq gained the per-EQ-point viewTree (serialized in the blob) and an
+  SC spectrum feed (picked receive slot or first connected + alive flag)
+  for the analyser overlay + collision view; processor gained the
+  eqBandParamId/eqBankGlobalParamId statics.
+
+Graph compiled via EffectWindows.cpp ahead of the T6 window rebuild.  Gate
+green (six exit codes 0, four link lines, no errors).

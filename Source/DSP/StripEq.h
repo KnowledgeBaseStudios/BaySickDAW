@@ -82,13 +82,23 @@ public:
     void setSidechainBuffers (juce::AudioBuffer<float>* const* bufs, int count) noexcept override;
 
     // Spectrum taps at the wrapper's stereo boundary; the analyser polls them.
-    kbs::SpectrumFeed preFeed, postFeed;
+    // scFeed carries ONE of the strip's four receive lines (scFeedSlot; -1 =
+    // first connected) for the analyser overlay + collision view.
+    kbs::SpectrumFeed preFeed, postFeed, scFeed;
+    std::atomic<int>  scFeedSlot { -1 };
+    std::atomic<bool> scFeedAlive { false };
+
+    // Per-EQ-point display preferences (scale, analyser toggles, the domain
+    // view), serialized inside the state blob so they travel with the project
+    // - the plugin's viewTree pattern, per EQ point.
+    juce::ValueTree& viewTree() noexcept { return mViewTree; }
 
 private:
     static juce::ValueTree bandToTree (int index, const kbs::EqBandParams& p);
     static void bandFromTree (const juce::XmlElement& e, kbs::EqBandParams& p);
 
     kbs::ParametricEq mEq;
+    juce::ValueTree mViewTree { "View" };
     std::array<kbs::EqBandParams, kBands> mCached {};   // last pushed, audio thread
     std::array<kbs::EqBandParams, kBands> mSpare {};
     bool mViewingSpare { false };

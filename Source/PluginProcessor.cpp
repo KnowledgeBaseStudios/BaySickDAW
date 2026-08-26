@@ -7753,6 +7753,18 @@ void BaySickDAWProcessor::restoreEqParamsFromState (const juce::ValueTree& sourc
     }
 }
 
+juce::String BaySickDAWProcessor::eqBandParamId (const juce::String& stripPrefix,
+                                                 int bank, int band, const char* suffix)
+{
+    return EqBandIds::bandPrefix (stripPrefix, juce::jlimit (0, 1, bank), band) + suffix;
+}
+
+juce::String BaySickDAWProcessor::eqBankGlobalParamId (const juce::String& stripPrefix,
+                                                       int bank, const char* which)
+{
+    return EqBandIds::globalId (stripPrefix, juce::jlimit (0, 1, bank), which);
+}
+
 void BaySickDAWProcessor::ensureEqParamsForId (const juce::String& paramId)
 {
     for (int bank = 0; bank < kEqBanksPerStrip; ++bank)

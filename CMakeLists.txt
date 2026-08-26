@@ -51,6 +51,16 @@ else()
 endif()
 message(STATUS "Plugin sandbox helper will build as BaySickPluginHost${BAYSICK_HELPER_ARCH_SUFFIX}.exe")
 
+# ── fontaudio (QA-EqPro) ─────────────────────────────────────────────────
+# Vendored from the KBS Plugins tree (fefanto/fontaudio, JUCE module folder
+# only).  The icon font is compiled into FontAudioData.cpp so nothing installs
+# beside the exe.  Three licences, all attribution-required (tracked for the
+# pre-release /audit-licenses sweep):
+#   OFL 1.1    the font itself
+#   MIT        the module code
+#   CC BY 4.0  the source SVGs
+juce_add_module("${CMAKE_CURRENT_SOURCE_DIR}/libs/fontaudio")
+
 # ── Shared compile definitions ────────────────────────────────────────────────
 set(VIBESYNTH_DEFS
     JUCE_WEB_BROWSER=0
@@ -707,6 +717,7 @@ target_include_directories(BaySickDAWStandalone PRIVATE Source Source/Engine Sou
 target_link_libraries(BaySickDAWStandalone
     PRIVATE ${VIBESYNTH_LINK_LIBS}
             BaySickDAWAssets
+            fontaudio
     PUBLIC
         juce::juce_recommended_config_flags
         juce::juce_recommended_lto_flags

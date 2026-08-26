@@ -1,4 +1,5 @@
 #include "EffectWindows.h"
+#include "EqWindowUI/EqGraphView.h"   // QA-EqPro T5: compiled here ahead of the T6 window rebuild
 #include "EffectsPage.h"
 #include "EffectEditorPanels.h"
 #include "../PluginProcessor.h"
