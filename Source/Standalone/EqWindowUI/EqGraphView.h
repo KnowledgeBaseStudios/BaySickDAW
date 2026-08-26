@@ -735,6 +735,12 @@ public:
             par->endChangeGesture();
     }
 
+    double sessionSampleRate() const
+    {
+        const double sr = proc.getSampleRate();
+        return sr > 0 ? sr : 48000.0;
+    }
+
     // For the window's shot/test seams and the options menu.
     EqAnalyser& preAnalyser() { return pre; }
     EqAnalyser& postAnalyser() { return post; }

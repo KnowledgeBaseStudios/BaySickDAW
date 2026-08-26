@@ -16491,8 +16491,11 @@ void StandaloneEditor::openEffectEqWindow (int channelId, bool pre)
         openEffectEqWindow (channelId, wantPre);
     };
 
+    // QA-EqPro: the KBS editor's floor (720x420) - the rail's budget-fit
+    // arithmetic proves the dynamics section fits at exactly this minimum.
+    // Growth is the WorkspaceWindow's own resize, bounds persisted per window.
     auto* win = openAuxWindow (key, key, contentRaw->windowTitle(),
-                               std::move (content), 519, 372);
+                               std::move (content), 720, 420);
     if (win == nullptr) return;
 
     contentRaw->onTitleChanged = [win] (const juce::String& t) { win->setTitle (t); };

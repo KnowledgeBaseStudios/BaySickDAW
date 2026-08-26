@@ -222,3 +222,24 @@ linker caught: EffectEqWindow::windowTitle and VUMeter's calibration
 static definitions - both restored (title simplified); plus one
 NativeMessageBox arity fix.  Grep sweep: only deliberate historical
 comments mention the old names.
+
+## 2026-08-26 - Task 7 - Match, presets, and the window floor
+
+EqMatchPanel.h ported (capture Current = pre feed, capture Reference = the
+strip's PICKED sidechain receive line, or Load Reference File = offline
+whole-file spectrum; smoothness + band budget; replace-not-overlay apply -
+and the fit lands in the CURRENT view's domain, factory data never routes
+for you).  EqPresets.h: the 12 factory presets ported as pure data (dynamic
+presets carry their static cut per the KBS test-pass-six ruling).  Window
+menu gained EQ Match... + Presets (Default first - the out-of-the-box state
+incl. bank globals - then factory by category, user presets, Save
+Preset...).  User presets are bank-relative XML (suffixes, not full ids) in
+Documents/BaySickDAW/Presets/EQ (SC-17), saved via UserFileSave, parsed via
+SafeXml, loaded as clean-slate-then-values in the factory shape.
+
+Jeff mid-run: confirmed the window should use the KBS sizing - floor moved
+from the old 519x372 to the KBS 720x420 (the rail's budget-fit arithmetic
+proves the dynamics section fits at exactly that minimum); growth is the
+WorkspaceWindow's own resize with per-window persisted bounds.  OPEN FOR
+BATCH END (Jeff): 720x420 as the default is wanted, but whether it reads
+right at smaller sizes in our workspace is undecided - talk before close.

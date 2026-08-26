@@ -1,4 +1,7 @@
 #include "EffectWindows.h"
+#include "../AppPaths.h"
+#include "../UserFileSave.h"
+#include "../SafeXml.h"
 #include "EffectsPage.h"
 #include "EffectEditorPanels.h"
 #include "../PluginProcessor.h"
@@ -570,6 +573,9 @@ EffectEqWindow::EffectEqWindow (BaySickDAWProcessor& proc,
     mViewRow->set = [this] (int v) { mGraph->setDomainView ((eqview::DomainView) v); };
     addAndMakeVisible (*mViewRow);
 
+    mMatch = std::make_unique<eqview::EqMatchPanel> (*mGraph);
+    addChildComponent (*mMatch);
+
     mTitle = windowTitle();
 }
 
@@ -638,6 +644,10 @@ void EffectEqWindow::resized()
         mRail->setBounds (r.removeFromRight (railW));
     }
     if (mGraph) mGraph->setBounds (r);
+    if (mMatch && mGraph)
+        mMatch->setBounds (juce::Rectangle<int> (280, 190)
+                               .withPosition (mGraph->getRight() - 290,
+                                              mGraph->getY() + 10));
 }
 
 void EffectEqWindow::parentHierarchyChanged()
@@ -908,6 +918,43 @@ void EffectEqWindow::showOptionsMenu (juce::Component* anchor)
 
     m.addItem (165, "Keyboard & Mouse...");
     m.addItem (182, "Reset All Bands");
+    m.addSeparator();
+    m.addItem (190, "EQ Match...", true, mMatch != nullptr && mMatch->isVisible());
+
+    {
+        juce::PopupMenu presets;
+        presets.addItem (200, "Default");
+        presets.addSeparator();
+        juce::String lastCat;
+        juce::PopupMenu cat;
+        const auto& list = eqview::eqFactoryPresets();
+        for (size_t i = 0; i < list.size(); ++i)
+        {
+            const auto& pr = list[i];
+            if (lastCat.isNotEmpty() && lastCat != juce::String (pr.category))
+            {
+                presets.addSubMenu (lastCat, cat);
+                cat = juce::PopupMenu();
+            }
+            lastCat = pr.category;
+            cat.addItem (201 + (int) i, pr.name);
+        }
+        if (lastCat.isNotEmpty()) presets.addSubMenu (lastCat, cat);
+
+        auto userFiles = eqPresetsDir().findChildFiles (juce::File::findFiles,
+                                                        false, "*.xml");
+        userFiles.sort();
+        if (! userFiles.isEmpty())
+        {
+            presets.addSeparator();
+            for (int i = 0; i < userFiles.size() && i < 100; ++i)
+                presets.addItem (260 + i,
+                                 userFiles[i].getFileNameWithoutExtension());
+        }
+        presets.addSeparator();
+        presets.addItem (250, "Save Preset...");
+        m.addSubMenu ("Presets", presets);
+    }
 
     m.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (
                          anchor != nullptr ? anchor : this),
@@ -1017,7 +1064,211 @@ void EffectEqWindow::showOptionsMenu (juce::Component* anchor)
                     if (mProc.apvts.getParameter (mGraph->paramId (b, "on")) != nullptr)
                         mGraph->removeBand (b);
             }
+            else if (r == 190 && mMatch != nullptr)
+            {
+                mMatch->setVisible (! mMatch->isVisible());
+                mMatch->toFront (false);
+            }
+            else if (r == 200) applyDefaultPreset();
+            else if (r >= 201 && r < 250)
+            {
+                const auto& list = eqview::eqFactoryPresets();
+                const size_t idx = (size_t) (r - 201);
+                if (idx < list.size()) applyEqPresetBands (list[idx].bands);
+            }
+            else if (r == 250) saveUserPreset();
+            else if (r >= 260 && r < 360)
+            {
+                auto userFiles = eqPresetsDir().findChildFiles (juce::File::findFiles,
+                                                                false, "*.xml");
+                userFiles.sort();
+                const int idx = r - 260;
+                if (idx < userFiles.size()) loadUserPreset (userFiles[idx]);
+            }
         });
+}
+
+// ── presets ────────────────────────────────────────────────────────────────────────
+
+juce::File EffectEqWindow::eqPresetsDir()
+{
+    return AppPaths::appRoot().getChildFile ("Presets").getChildFile ("EQ");
+}
+
+// One undo step: every band back to its declared default (bands 1-8 wake on
+// and flat - the out-of-the-box state), then the preset's bands written over
+// the low slots.  Bands 9-24 neither side uses stay unregistered.
+void EffectEqWindow::applyEqPresetBands (const std::vector<kbs::EqBandParams>& bands)
+{
+    mProc.ensureStripEqParams (mStripPrefix);
+    beginParamUndoGesture (mProc.apvts, mGraph->paramId (0, "on"));
+
+    static const char* fields[] = { "on", "type", "freq", "gain", "q", "slope",
+                                    "chan", "place", "mute", "iso", "dyn", "thr",
+                                    "ratio", "atk", "rel", "relauto", "range",
+                                    "scsrc" };
+    for (int b = 0; b < StripEq::kBands; ++b)
+    {
+        const bool need = b < (int) bands.size();
+        const bool reg = mProc.apvts.getParameter (mGraph->paramId (b, "on")) != nullptr;
+        if (! need && ! reg) continue;
+        if (need && b >= 8)
+            mProc.ensureEqBandParams (mStripPrefix, mIsPre ? 1 : 0, b);
+
+        for (auto* f : fields)
+            if (auto* par = mProc.apvts.getParameter (mGraph->paramId (b, f)))
+                par->setValueNotifyingHost (par->getDefaultValue());
+
+        if (need)
+        {
+            const auto& p = bands[(size_t) b];
+            mGraph->setBandValue (b, "on",      p.on ? 1.0f : 0.0f);
+            mGraph->setBandValue (b, "type",    (float) (int) p.type);
+            mGraph->setBandValue (b, "freq",    p.freqHz);
+            mGraph->setBandValue (b, "gain",    p.gainDb);
+            mGraph->setBandValue (b, "q",       p.q);
+            mGraph->setBandValue (b, "slope",   (float) p.slope);
+            mGraph->setBandValue (b, "place",   p.placement);
+            mGraph->setBandValue (b, "dyn",     p.dynamic ? 1.0f : 0.0f);
+            mGraph->setBandValue (b, "thr",     p.thresholdDb);
+            mGraph->setBandValue (b, "ratio",   p.ratio);
+            mGraph->setBandValue (b, "atk",     p.attackMs);
+            mGraph->setBandValue (b, "rel",     p.releaseMs);
+            mGraph->setBandValue (b, "relauto", p.autoRelease ? 1.0f : 0.0f);
+            mGraph->setBandValue (b, "range",   p.rangeDb);
+            // The preset lands in the CURRENT view's domain (SC-5) - factory
+            // data never routes for you.
+            mGraph->setBandValue (b, "chan",
+                                  (float) (int) mGraph->domainOfCurrentView());
+        }
+    }
+    mGraph->selectBand (-1);
+}
+
+void EffectEqWindow::applyDefaultPreset()
+{
+    applyEqPresetBands ({});
+
+    // Default also lands the bank globals - the out-of-the-box state is a
+    // preset you can get back to, whole.
+    const int bank = mIsPre ? 1 : 0;
+    for (const char* g : { "mode", "os", "propq", "autogain", "agamt",
+                           "outgain", "polarity" })
+        if (auto* par = mProc.apvts.getParameter (
+                BaySickDAWProcessor::eqBankGlobalParamId (mStripPrefix, bank, g)))
+            par->setValueNotifyingHost (par->getDefaultValue());
+}
+
+// Bank-relative XML (suffixes, not full ids) so a preset saved on any strip's
+// pre bank loads onto any strip's post bank and back.
+void EffectEqWindow::saveUserPreset()
+{
+    auto* win = new juce::AlertWindow ("Save EQ Preset", "Name it:",
+                                       juce::MessageBoxIconType::NoIcon);
+    win->addTextEditor ("name", "", {});
+    win->addButton ("Save", 1, juce::KeyPress (juce::KeyPress::returnKey));
+    win->addButton ("Cancel", 0, juce::KeyPress (juce::KeyPress::escapeKey));
+
+    win->enterModalState (true, juce::ModalCallbackFunction::create (
+        [this, win] (int result)
+        {
+            const auto name = win->getTextEditorContents ("name");
+            std::unique_ptr<juce::AlertWindow> owned (win);
+            if (result != 1 || name.trim().isEmpty()) return;
+
+            juce::XmlElement rootEl ("BaySickEqPreset");
+            const juce::String bandBase = "b";
+            static const char* suffixes[] = { "Freq", "Gain", "Q", "Type", "On",
+                                              "Slope", "Channel", "Place", "Mute",
+                                              "Isolate", "Dynamic", "Threshold",
+                                              "Ratio", "Attack", "Release",
+                                              "AutoRelease", "Range", "ScSource" };
+            for (int b = 0; b < StripEq::kBands; ++b)
+            {
+                if (mProc.apvts.getParameter (mGraph->paramId (b, "on")) == nullptr)
+                    continue;
+                for (auto* sfx : suffixes)
+                {
+                    const auto id = BaySickDAWProcessor::eqBandParamId (
+                        mStripPrefix, mIsPre ? 1 : 0, b, sfx);
+                    if (auto* rp = dynamic_cast<juce::RangedAudioParameter*> (
+                            mProc.apvts.getParameter (id)))
+                    {
+                        auto* pe = rootEl.createNewChildElement ("Param");
+                        pe->setAttribute ("id", bandBase + juce::String (b) + sfx);
+                        pe->setAttribute ("v", rp->convertFrom0to1 (rp->getValue()));
+                    }
+                }
+            }
+            for (const char* g : { "mode", "os", "propq", "autogain", "agamt",
+                                   "outgain", "polarity" })
+                if (auto* rp = dynamic_cast<juce::RangedAudioParameter*> (
+                        mProc.apvts.getParameter (
+                            BaySickDAWProcessor::eqBankGlobalParamId (
+                                mStripPrefix, mIsPre ? 1 : 0, g))))
+                {
+                    auto* pe = rootEl.createNewChildElement ("Global");
+                    pe->setAttribute ("id", g);
+                    pe->setAttribute ("v", rp->convertFrom0to1 (rp->getValue()));
+                }
+
+            auto dir = eqPresetsDir();
+            if (! dir.exists() && ! dir.createDirectory())
+            {
+                juce::NativeMessageBox::showAsync (
+                    juce::MessageBoxOptions()
+                        .withIconType (juce::MessageBoxIconType::WarningIcon)
+                        .withTitle ("Could not save")
+                        .withMessage ("The EQ presets folder could not be created."),
+                    nullptr);
+                return;
+            }
+            UserFileSave::writeXmlAsync (dir, name, rootEl, {});
+        }), false);
+}
+
+void EffectEqWindow::loadUserPreset (const juce::File& f)
+{
+    auto xml = SafeXml::parse (f);
+    if (! xml || ! xml->hasTagName ("BaySickEqPreset")) return;
+
+    // Clean slate first, then the file's values - same one-undo-step shape as
+    // a factory preset.
+    applyDefaultPreset();
+
+    juce::AudioProcessorValueTreeState::ScopedProgrammaticParamWrites spw;
+    for (auto* pe = xml->getFirstChildElement(); pe != nullptr; pe = pe->getNextElement())
+    {
+        if (pe->hasTagName ("Param"))
+        {
+            const juce::String suffix = pe->getStringAttribute ("id");
+            // "b<N><Suffix>": ensure the band, then write through the strip id.
+            if (! suffix.startsWith ("b")) continue;
+            int j = 1;
+            while (j < suffix.length()
+                   && juce::CharacterFunctions::isDigit (suffix[j])) ++j;
+            const int band = suffix.substring (1, j).getIntValue();
+            mProc.ensureEqBandParams (mStripPrefix, mIsPre ? 1 : 0,
+                                      juce::jlimit (0, StripEq::kBands - 1, band));
+            const auto id = BaySickDAWProcessor::eqBandParamId (
+                mStripPrefix, mIsPre ? 1 : 0, band,
+                suffix.substring (j).toRawUTF8());
+            if (auto* rp = dynamic_cast<juce::RangedAudioParameter*> (
+                    mProc.apvts.getParameter (id)))
+                rp->setValueNotifyingHost (rp->convertTo0to1 (
+                    (float) pe->getDoubleAttribute ("v")));
+        }
+        else if (pe->hasTagName ("Global"))
+        {
+            const auto id = BaySickDAWProcessor::eqBankGlobalParamId (
+                mStripPrefix, mIsPre ? 1 : 0,
+                pe->getStringAttribute ("id").toRawUTF8());
+            if (auto* rp = dynamic_cast<juce::RangedAudioParameter*> (
+                    mProc.apvts.getParameter (id)))
+                rp->setValueNotifyingHost (rp->convertTo0to1 (
+                    (float) pe->getDoubleAttribute ("v")));
+        }
+    }
 }
 
 // ═══════════════════════════════════════════════════ T18 parametric visual draws

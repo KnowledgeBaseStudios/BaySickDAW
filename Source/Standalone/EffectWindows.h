@@ -3,6 +3,8 @@
 #include "../EffectRack.h"
 #include "../DSP/StripEq.h"
 #include "EqWindowUI/EqRailView.h"
+#include "EqWindowUI/EqMatchPanel.h"
+#include "EqWindowUI/EqPresets.h"
 #include "SlotComponent.h"
 #include "SharedUI.h"
 #include "UndoActions.h"
@@ -182,6 +184,15 @@ private:
     void pushBankToParams (StripEq& e);
     void pickScSource();
 
+    // Presets (SC-6 + SC-17): factory data applied through the parameters so
+    // loading is undoable; user presets are bank-relative XML in
+    // Documents/BaySickDAW/Presets/EQ.
+    void applyEqPresetBands (const std::vector<kbs::EqBandParams>& bands);
+    void applyDefaultPreset();
+    void saveUserPreset();
+    void loadUserPreset (const juce::File& f);
+    static juce::File eqPresetsDir();
+
     BaySickDAWProcessor&              mProc;
     const int                        mChannelId;
     const bool                       mIsPre;
@@ -192,6 +203,7 @@ private:
     std::unique_ptr<eqview::BandChipRow> mChips;
     std::unique_ptr<eqview::EqRailView>  mRail;
     std::unique_ptr<eqview::SegmentRow>  mViewRow;   // ST / MID / SIDE (SC-5)
+    std::unique_ptr<eqview::EqMatchPanel> mMatch;
 
     // What the poll last resolved, so a node death is tellable from a node
     // that was never built.
