@@ -731,7 +731,17 @@ namespace PagePresetIO
             const int overrideIdx = (cfg.insertRackIndices.size() == 1)
                                        ? cfg.insertRackIndices[0]
                                        : -1;
+
+            // QA-EqPro SC-8 (the B4 Path I fix): the rack blobs reach DSP
+            // setStateInformation - reallocation the audio thread can be
+            // inside.  Every project-load path already runs the nest-aware
+            // shield; preset import was the outlier, on every page type and
+            // the clipboard paste alike.
+            const bool shieldWasUp = processor.isProjectLoadInProgress();
+            processor.setProjectLoadInProgress (true);
+            if (! shieldWasUp) processor.settleAudioThread();
             applyRacks (processor, *racksEl, cfg, overrideIdx);
+            processor.setProjectLoadInProgress (shieldWasUp);
         }
 
         return true;

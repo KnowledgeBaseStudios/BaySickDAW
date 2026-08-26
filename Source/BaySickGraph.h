@@ -1044,6 +1044,10 @@ private:
     // mInstrChannelOrder for dropdown display.
     std::map<int, std::unique_ptr<InstrChannelNode>> mInstrChannelNodes;
     std::vector<int>                                 mInstrChannelOrder;
+    // QA-EqPro SC-11: audio rows keep only their dropdown name here - the
+    // legacy per-row InstrChannelNode (a never-processed rack + EQ pair per
+    // row) is gone.
+    std::map<int, juce::String>                      mAudioRowNames;
 
     // Per-page instrument EffectRacks - always live, prepared with the graph.
     // Applied after per-page EQ, before the bus sum, in PluginProcessor::processBlock.

@@ -125,7 +125,15 @@ bool load (BaySickDAWProcessor& proc, int channelId,
         || ! mb.fromBase64Encoding (rackEl->getStringAttribute ("data"))
         || mb.getSize() == 0)
     { outErr = "The preset's rack data is missing or corrupt."; return false; }
-    rack->setStateInformation (mb.getData(), (int) mb.getSize());
+    // QA-EqPro SC-8: same shield as the page-preset import - the rack blob
+    // apply reallocates DSP state the audio thread reads.
+    {
+        const bool shieldWasUp = proc.isProjectLoadInProgress();
+        proc.setProjectLoadInProgress (true);
+        if (! shieldWasUp) proc.settleAudioThread();
+        rack->setStateInformation (mb.getData(), (int) mb.getSize());
+        proc.setProjectLoadInProgress (shieldWasUp);
+    }
 
     const juce::String destPrefix = EffectsPage::mixerPrefixForChannelId (channelId);
     if (auto* eqEl = xml->getChildByName ("Eq"))

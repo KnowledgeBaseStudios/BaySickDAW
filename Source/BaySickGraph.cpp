@@ -2190,7 +2190,9 @@ void BaySickGraph::applyRackStates(const juce::ValueTree& parent)
 juce::String BaySickGraph::getInstrChannelName(int channelId) const
 {
     auto it = mInstrChannelNodes.find(channelId);
-    return it != mInstrChannelNodes.end() ? it->second->name : juce::String{};
+    if (it != mInstrChannelNodes.end()) return it->second->name;
+    auto an = mAudioRowNames.find(channelId);
+    return an != mAudioRowNames.end() ? an->second : juce::String{};
 }
 
 std::vector<int> BaySickGraph::getInstrChannelIds() const
@@ -2211,38 +2213,35 @@ StripEq* BaySickGraph::getInstrChannelEQ(int channelId)
 }
 
 // ── Per-clip audio row channels (IDs 400 + row) ──────────────────────────────
+// QA-EqPro SC-11 (Jeff's adjacent-2 ruling): audio rows no longer build a
+// legacy InstrChannelNode beside their InsertNode.  The old node was never
+// audio-processed - it existed only as a rack/EQ fallback and as the
+// dropdown's id + name source, so those two jobs keep a name map and the
+// order list while the duplicate DSP (2 StripEq + a rack per row) is gone.
 void BaySickGraph::addAudioRowChannel(int row, const juce::String& displayName)
 {
     const int id = 400 + row;
-    if (mInstrChannelNodes.count(id) > 0) return;
-    auto node = std::make_unique<InstrChannelNode>(displayName);
-    if (mSampleRate > 0.0) node->prepare(mSampleRate, mBlockSize);
-    mInstrChannelNodes[id] = std::move(node);
+    if (mAudioRowNames.count(id) > 0) return;
+    mAudioRowNames[id] = displayName;
     mInstrChannelOrder.push_back(id);   // included so Effects dropdown sees it
     if (onInstrChannelListChanged) onInstrChannelListChanged();
 }
 
 EffectRack* BaySickGraph::getAudioRowRack(int row)
 {
-    // 5F-4a Batch 6: prefer Audio InsertNode; fall back to legacy InstrChannelNode.
-    // QA-InsertMaps (2026-05-24): InsertNode lookup via flat array.
+    // QA-EqPro SC-11: the Audio InsertNode is the one home (the legacy
+    // fallback node is gone).
     if (auto* node = getInsertNode(InsertKind::Audio, row))
         return &node->rack;
-    auto it = mInstrChannelNodes.find(400 + row);
-    return it != mInstrChannelNodes.end() ? &it->second->rack : nullptr;
+    return nullptr;
 }
 
 StripEq* BaySickGraph::getAudioRowEQ(int row)
 {
-    // 5F-4a Batch 6 migration: prefer the Audio InsertNode's EQ; fall back to
-    // legacy InstrChannelNode. Mirrors the getAudioRowRack dual-path pattern.
-    // Previously legacy-only, which caused the audio-row EQ tab in EffectsPage
-    // to bind null when the node lived in the new InsertNode registry.
-    // QA-InsertMaps (2026-05-24): InsertNode lookup via flat array.
+    // QA-EqPro SC-11: InsertNode only.
     if (auto* node = getInsertNode(InsertKind::Audio, row))
         return &node->eq;
-    auto it = mInstrChannelNodes.find(400 + row);
-    return it != mInstrChannelNodes.end() ? &it->second->eq : nullptr;
+    return nullptr;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════

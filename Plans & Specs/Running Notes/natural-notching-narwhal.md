@@ -243,3 +243,25 @@ proves the dynamics section fits at exactly that minimum); growth is the
 WorkspaceWindow's own resize with per-window persisted bounds.  OPEN FOR
 BATCH END (Jeff): 720x420 as the default is wanted, but whether it reads
 right at smaller sizes in our workspace is undecided - talk before close.
+
+## 2026-08-26 - Task 8 - the B4 shields + the legacy audio-row node removed
+## (gate green first try)
+
+SC-8: the page-preset import path (PagePresetIO::importPagePreset ->
+applyRacks, which covers every page type AND the clipboard-paste and Rusty
+menu variants since they all funnel through it) now runs the nest-aware
+shield + settle around the rack-blob apply - the confirmed B4 Path I fix.
+FxRackPresetIO::load got the same shield around its rack blob (the sibling
+found during T4).  B4 Path C (the old EQ options menu mutating live EQs)
+died with the menu in T6 - the new menu writes mode/os PARAMS and the
+SC-15 listener applies them under the shield, so both confirmed
+use-after-free paths are closed.  The audio-thread detector allocation the
+threading verifier flagged (EQ8DSP updateDetector) died with EQ8DSP.
+
+SC-11: addAudioRowChannel no longer builds the legacy InstrChannelNode
+(verified never audio-processed - prepare/reset/save/lookup only).  Audio
+rows keep their dropdown id + name via a name map + the order list;
+getAudioRowRack/EQ are InsertNode-only; the legacy <InstrCh> save entries
+vanish naturally (the save loop finds no node) and old projects' legacy
+blobs are skipped on load - per row that retires 2 StripEq + 1 EffectRack
+of dead weight.
