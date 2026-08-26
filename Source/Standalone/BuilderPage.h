@@ -1352,6 +1352,16 @@ public:
 
         Scope      scope        { Scope::Song };
         Tail       tail         { Tail::Included };
+        // QA-EqPro SC-10: the delay-compensation solve holds the mix together
+        // by delaying every path to the slowest one, so the whole aligned mix
+        // leaves the graph totalLatencySamples late.  The live recorder paths
+        // have always skipped that many samples; the export never did, so
+        // every file started late against the grid (and Tail::Cut truncated
+        // the delayed final samples).  True for the master/tap-fed consumers
+        // (export, measure, stems - the taps carry mirrored delays and are
+        // equally late); FALSE for the freeze renders, whose pre-rack tap
+        // sits upstream of the compensation and is not delayed.
+        bool       trimLeadingLatency { true };
         int        patternIndex { -1 };        // Scope::Pattern only
         double     startBeats   { 0.0 };       // Scope::Section only
         double     endBeats     { 0.0 };       // Scope::Section only

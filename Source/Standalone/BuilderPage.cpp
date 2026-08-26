@@ -9449,6 +9449,20 @@ bool BuilderPage::runOfflineLoop (const RenderOptions& opts,
     juce::AudioBuffer<float> buf (kNumCh, kBlk);
     juce::MidiBuffer         midi;
     juce::int64              written  = 0;
+
+    // SC-10 leading-latency trim: output sample i carries musical time
+    // i - latency, so the first `latency` output samples are discarded while
+    // the head keeps advancing - the file then starts at musical zero and
+    // the content phase naturally runs `latency` samples longer, which is
+    // also what lets Tail::Cut keep the real final samples instead of
+    // truncating them.  Freeze renders pass trimLeadingLatency = false: their
+    // tap is upstream of the compensation.
+    juce::int64 toDiscard = opts.trimLeadingLatency
+                              ? (juce::int64) juce::jmax (0, mProcessor.getLatencySamples())
+                              : 0;
+    juce::AudioBuffer<float> trimScratch;
+    if (toDiscard > 0)
+        trimScratch.setSize (kNumCh, kBlk, false, true, true);
     double lastProgressMs = 0.0;   // progress throttle, see the onProgress call
     juce::int64              tailDone = 0;
     bool                     aborted  = false;
@@ -9491,7 +9505,26 @@ bool BuilderPage::runOfflineLoop (const RenderOptions& opts,
         mProcessor.processBlock (buf, midi);
         head.advance (chunk);
 
-        if (! consumeBlock (buf, chunk))
+        int consumed = chunk;
+        bool consumeOk = true;
+        if (toDiscard > 0)
+        {
+            const int drop = (int) juce::jmin (toDiscard, (juce::int64) chunk);
+            toDiscard -= drop;
+            consumed = chunk - drop;
+            if (consumed > 0)
+            {
+                for (int ch = 0; ch < kNumCh; ++ch)
+                    trimScratch.copyFrom (ch, 0, buf, ch, drop, consumed);
+                consumeOk = consumeBlock (trimScratch, consumed);
+            }
+        }
+        else
+        {
+            consumeOk = consumeBlock (buf, chunk);
+        }
+
+        if (! consumeOk)
         {
             if (outErr.isEmpty()) outErr = "Writing the export file(s) failed.";
             aborted = true;
@@ -9500,7 +9533,7 @@ bool BuilderPage::runOfflineLoop (const RenderOptions& opts,
 
         if (inContent)
         {
-            written += chunk;
+            written += consumed;
             // THROTTLED to ~10 Hz (2026-07-30).  Reporting every block was not a
             // cheap notification: the overlay's progress setter forces a
             // synchronous full-window SOFTWARE repaint of the whole editor (JUCE
@@ -9836,6 +9869,8 @@ bool BuilderPage::renderFreezeFile (BaySickGraph::InsertKind kind, int index,
                                     std::function<void(double)> onProgress)
 {
     RenderOptions opts;
+    opts.trimLeadingLatency = false;   // SC-10: the freeze tap is pre-rack,
+                                       // upstream of the compensation
     // §6.8: pattern scope renders the loop itself, so the file's length IS the
     // pattern's and reading it at a loop-local position lines up exactly.
     opts.scope        = patternIndex >= 0 ? RenderOptions::Scope::Pattern
@@ -10010,6 +10045,7 @@ bool BuilderPage::renderKitFreezeFiles (const std::vector<juce::File>& dests,
     if (n <= 0) { outErr = "The drum kit has no pieces to freeze."; return false; }
 
     RenderOptions opts;
+    opts.trimLeadingLatency = false;   // SC-10: same pre-rack tap as every freeze
     // §6.8: the kit is one instrument and gets per-pattern renders like the rest.
     opts.scope        = patternIndex >= 0 ? RenderOptions::Scope::Pattern
                                           : RenderOptions::Scope::Song;

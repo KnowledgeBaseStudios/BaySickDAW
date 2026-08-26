@@ -265,3 +265,17 @@ getAudioRowRack/EQ are InsertNode-only; the legacy <InstrCh> save entries
 vanish naturally (the save loop finds no node) and old projects' legacy
 blobs are skipped on load - per row that retires 2 StripEq + 1 EffectRack
 of dead weight.
+
+## 2026-08-26 - Task 9 - the export leading-latency trim (gate green first try)
+
+RenderOptions gained trimLeadingLatency (default true).  runOfflineLoop
+discards the first totalLatencySamples of OUTPUT while the musical head
+keeps advancing - output sample i carries musical time i - latency, so the
+file now starts at musical zero, and the content phase naturally runs
+latency samples longer, which is also what stops Tail::Cut truncating the
+delayed final samples.  Applies to export, measure, and stems alike (the
+strip taps carry mirrored compensation delays, so tap-fed renders are
+equally late); the two freeze renders opt OUT at their own RenderOptions
+construction - the freeze tap is pre-rack, upstream of the compensation,
+and trimming it would drop real samples.  The discard costs at most a few
+scratch-buffer copies at the head of a render.
