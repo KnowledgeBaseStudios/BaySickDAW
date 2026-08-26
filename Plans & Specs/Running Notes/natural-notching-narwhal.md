@@ -91,3 +91,26 @@ does not).  CMake target BaySickEqTests (EXCLUDE_FROM_ALL - do_build.bat's
 six-exit-code gate contract untouched) + run_eq_tests.bat (two-exit-code
 log contract).  FIRST RUN: 54 checks, all passed - including the two
 extensions.  The engine compiles clean under MSVC in our tree.
+
+## 2026-08-26 - Task 3 - StripEq wrapper + graph swap (gate green first try)
+
+New Source/DSP/StripEq.h/.cpp: one kbs::ParametricEq per bank behind the
+DSPBase interface.  Identity fast path keeps the feeds alive (EQ8MsDSP
+convention) and REFUSES to short-circuit whenever latency > 0 - the B2 fix
+by construction.  pushBand = full-struct compare then engine setBand;
+pushGlobals for the five sweep-driven globals; setMode/setOversampling are
+the shielded config actions (SC-15); DSP-side A/B spare kept (SC-16,
+params-only swap, engine re-pushed); resetToDefaults = the load-boundary
+slate; state blob tag "StripEq" (old EQ8MsDSP blobs simply do not parse -
+SC-14's reset falls out of the tag check); 4-slot SC forward into the
+engine's copied slots (SC-4 wrapper half); kbs::SpectrumFeed pre/post taps.
+
+Graph swap: InstrChannelNode + InsertNode carry StripEq (bulk type rename
+through BaySickGraph + EffectsPage incl. the 44 getters and resolveChannelDsp
+/ preEqForChannelId); chainLat and save/restore blobs ride the DSPBase
+virtuals unchanged.  updateEQFromCache is a DELIBERATE NO-OP until Task 4
+(old mid/side x 8 param layout has no mapping onto the new engine);
+resetEqStatesToDefaults now sweeps StripEq::resetToDefaults per EQ point.
+EffectEqWindow binds its inert fallback EQ8MsDSP (window alive but dead
+until Tasks 5-6, recorded as the planned mid-batch state).  Old EQ8 files
+still compile beside the new world; deletion lands with Task 6.

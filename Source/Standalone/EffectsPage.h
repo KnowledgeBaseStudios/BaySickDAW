@@ -1,7 +1,7 @@
 #pragma once
 #include <JuceHeader.h>
 #include "../EffectRack.h"
-#include "../DSP/EQ8MsDSP.h"
+#include "../DSP/StripEq.h"
 #include "TrackSelectionManager.h"
 #include "SlotComponent.h"
 #include "SharedUI.h"
@@ -104,13 +104,13 @@ public:
     // pointer that would dangle.  TS5's windows resolve through the same calls
     // for the same reason.
     static void        resolveChannelDsp (BaySickGraph& vg, int id,
-                                          EffectRack*& rack, EQ8MsDSP*& eq);
+                                          EffectRack*& rack, StripEq*& eq);
     static EffectRack* rackForChannelId  (BaySickGraph& vg, int id);
     // The PRE-rack EQ for a channel.  QA-ModelShell TS5: extracted from
     // onChannelChanged, where it was a second copy of the channel switch --
     // exactly the fork the batch plan says not to make.  The EQ windows and the
     // page now share this one.
-    static EQ8MsDSP*   preEqForChannelId (BaySickGraph& vg, int id);
+    static StripEq*   preEqForChannelId (BaySickGraph& vg, int id);
 
     // QA-ModelShell TS1: dropdown-channel-id -> rack-prefix vocabulary,
     // usable without the dropdown (the sweep below + any model trigger).

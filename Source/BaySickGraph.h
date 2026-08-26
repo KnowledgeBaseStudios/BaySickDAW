@@ -5,7 +5,7 @@
 #include <unordered_map>
 #include <functional>
 #include "DSP/SpectrumFeed.h"
-#include "DSP/EQ8MsDSP.h"
+#include "DSP/StripEq.h"
 #include "EffectRack.h"
 #include "BaySickConstants.h"
 
@@ -406,14 +406,14 @@ private:
 //                 processBus(kFxBus) each block)
 //
 // Each bus node owns an EffectRack (6 slots) and holds a reference to the
-// channel EQ8MsDSP managed by PluginProcessor.  Mixer gain/mute/solo comes
+// channel StripEq managed by PluginProcessor.  Mixer gain/mute/solo comes
 // from BusMix (written on the message thread, read on the audio thread).
 // ─────────────────────────────────────────────────────────────────────────────
 class BaySickGraph
 {
 public:
     // ── Spectrum feed (audio thread writes, UI timer reads) ───────────────────
-    // Definition moved to DSP/SpectrumFeed.h (shared with EQ8MsDSP per-instance
+    // Definition moved to DSP/SpectrumFeed.h (shared with StripEq per-instance
     // feeds; see 5F-9 §12i). Alias preserves the existing BaySickGraph::SpectrumFeed
     // name across every caller.
     using SpectrumFeed = ::SpectrumFeed;
@@ -447,7 +447,7 @@ public:
     // Build the fixed bus topology.  Guards itself - no-op after first call so
     // safe to call every prepareToPlay().  All references must remain valid for
     // the lifetime of this BaySickGraph.
-    // 12i: SpectrumFeed refs dropped - each EQ8MsDSP owns its own pre/post feeds
+    // 12i: SpectrumFeed refs dropped - each StripEq owns its own pre/post feeds
     // (populated at its own process() I/O boundary). UI polls eq->preFeed /
     // eq->postFeed directly via ParametricEQDisplay::bindMsDSP.
     // §P4.3 B7 (2026-04-22): all external page-EQ refs dropped.  Every bus now
@@ -514,54 +514,54 @@ public:
     EffectRack* getAuxRack      (int auxIdx);
 
     // ── Bus post-rack EQ access (Effects Page EQ tab per channel) ─────────────
-    // Each channel has its own independent EQ8MsDSP that runs after the EffectRack.
+    // Each channel has its own independent StripEq that runs after the EffectRack.
     // §P4.3 B7: pre-rack EQs now live on the same bus nodes as preEq members
     // (getXxxBusPreEQ accessors).  Pages bind their EQ display to those.
-    EQ8MsDSP* getLayersBusEQ();
-    EQ8MsDSP* getBassBusEQ();
-    EQ8MsDSP* getDrumsBusEQ();
-    EQ8MsDSP* getMasterEQ();
-    EQ8MsDSP* getEffectsBusEQ();
-    EQ8MsDSP* getAudioClipsBusEQ();       // ID 6 in Effects dropdown
-    EQ8MsDSP* getVoxBusEQ();              // R3.5
-    EQ8MsDSP* getInstBusEQ();             // R3.5
+    StripEq* getLayersBusEQ();
+    StripEq* getBassBusEQ();
+    StripEq* getDrumsBusEQ();
+    StripEq* getMasterEQ();
+    StripEq* getEffectsBusEQ();
+    StripEq* getAudioClipsBusEQ();       // ID 6 in Effects dropdown
+    StripEq* getVoxBusEQ();              // R3.5
+    StripEq* getInstBusEQ();             // R3.5
     // G-6 (2026-04-29): post-rack EQs for secondary Vox/Inst buses.
-    EQ8MsDSP* getVoxBus2EQ();
-    EQ8MsDSP* getInstBus2EQ();
-    EQ8MsDSP* getInstBus3EQ();
-    EQ8MsDSP* getRustyDrumsBusEQ();        // J-4
-    EQ8MsDSP* getPluginsBusEQ();           // QA-ModelShell TS6
+    StripEq* getVoxBus2EQ();
+    StripEq* getInstBus2EQ();
+    StripEq* getInstBus3EQ();
+    StripEq* getRustyDrumsBusEQ();        // J-4
+    StripEq* getPluginsBusEQ();           // QA-ModelShell TS6
     // QA-Layout T10: secondary group buses.
-    EQ8MsDSP* getLayersBus2EQ();
-    EQ8MsDSP* getBassBus2EQ();
-    EQ8MsDSP* getClipsBus2EQ();
-    EQ8MsDSP* getPluginsBus2EQ();
-    EQ8MsDSP* getDrumsBus2EQ();            // QA-SOUNDNESS
+    StripEq* getLayersBus2EQ();
+    StripEq* getBassBus2EQ();
+    StripEq* getClipsBus2EQ();
+    StripEq* getPluginsBus2EQ();
+    StripEq* getDrumsBus2EQ();            // QA-SOUNDNESS
 
-    // §P4.3: Pre-rack bus EQs - fresh EQ8MsDSP per bus, runs at the very start
+    // §P4.3: Pre-rack bus EQs - fresh StripEq per bus, runs at the very start
     // of each bus's processBlock chain (input -> preEq -> rack -> postEq -> fader).
     // Bound by the corresponding mixer-strip Effects-page Pre EQ8 M/S tab
     // (NOT by player pages - those use per-insert pre-EQ instead).
-    EQ8MsDSP* getLayersBusPreEQ();
-    EQ8MsDSP* getBassBusPreEQ();
-    EQ8MsDSP* getDrumsBusPreEQ();
-    EQ8MsDSP* getMasterPreEQ();
-    EQ8MsDSP* getEffectsBusPreEQ();
-    EQ8MsDSP* getAudioClipsBusPreEQ();
-    EQ8MsDSP* getVoxBusPreEQ();           // R3.5
-    EQ8MsDSP* getInstBusPreEQ();          // R3.5
+    StripEq* getLayersBusPreEQ();
+    StripEq* getBassBusPreEQ();
+    StripEq* getDrumsBusPreEQ();
+    StripEq* getMasterPreEQ();
+    StripEq* getEffectsBusPreEQ();
+    StripEq* getAudioClipsBusPreEQ();
+    StripEq* getVoxBusPreEQ();           // R3.5
+    StripEq* getInstBusPreEQ();          // R3.5
     // G-6 (2026-04-29): pre-rack EQs for secondary Vox/Inst buses.
-    EQ8MsDSP* getVoxBus2PreEQ();
-    EQ8MsDSP* getInstBus2PreEQ();
-    EQ8MsDSP* getInstBus3PreEQ();
-    EQ8MsDSP* getRustyDrumsBusPreEQ();     // J-4
-    EQ8MsDSP* getPluginsBusPreEQ();        // QA-ModelShell TS6
+    StripEq* getVoxBus2PreEQ();
+    StripEq* getInstBus2PreEQ();
+    StripEq* getInstBus3PreEQ();
+    StripEq* getRustyDrumsBusPreEQ();     // J-4
+    StripEq* getPluginsBusPreEQ();        // QA-ModelShell TS6
     // QA-Layout T10: secondary group buses.
-    EQ8MsDSP* getLayersBus2PreEQ();
-    EQ8MsDSP* getBassBus2PreEQ();
-    EQ8MsDSP* getClipsBus2PreEQ();
-    EQ8MsDSP* getPluginsBus2PreEQ();
-    EQ8MsDSP* getDrumsBus2PreEQ();         // QA-SOUNDNESS
+    StripEq* getLayersBus2PreEQ();
+    StripEq* getBassBus2PreEQ();
+    StripEq* getClipsBus2PreEQ();
+    StripEq* getPluginsBus2PreEQ();
+    StripEq* getDrumsBus2PreEQ();         // QA-SOUNDNESS
 
     // ── PDC - Plugin Delay Compensation ──────────────────────────────────────
     // Call from message thread after any effect is loaded/removed/bypassed.
@@ -615,14 +615,14 @@ public:
     juce::String            getInstrChannelName(int channelId) const;
     std::vector<int>        getInstrChannelIds() const;  // stable insertion order
     EffectRack*             getInstrChannelRack(int channelId);
-    EQ8MsDSP*               getInstrChannelEQ(int channelId);
+    StripEq*               getInstrChannelEQ(int channelId);
 
     // ── Per-clip audio row channels (IDs 400 + row) ──────────────────────────
     // One rack+EQ per arrangement row, created on clip import.
     // Included in getInstrChannelIds() so they appear in the Effects dropdown.
     void        addAudioRowChannel (int row, const juce::String& displayName);
     EffectRack* getAudioRowRack    (int row);
-    EQ8MsDSP*   getAudioRowEQ      (int row);
+    StripEq*   getAudioRowEQ      (int row);
 
     // ── 5F-4a: Per-insert audio nodes (new architecture) ─────────────────────
     // Each insert gets its own rack + post-rack EQ + polarity/width/fader path.
@@ -740,8 +740,8 @@ public:
     // distinguish a fresh capture from the previous block's leftovers.
     juce::uint32 getFreezeTapSeq() const noexcept;
 
-    EQ8MsDSP*   getInsertEQ     (InsertKind kind, int index);
-    EQ8MsDSP*   getInsertPreEQ  (InsertKind kind, int index);   // §P4.3
+    StripEq*   getInsertEQ     (InsertKind kind, int index);
+    StripEq*   getInsertPreEQ  (InsertKind kind, int index);   // §P4.3
 
     // 2026-05-05 dirty-flag wiring: fired from every BaySickGraph-owned rack's
     // onSlotsChanged (per-page racks, bus racks, insert racks).  PluginProcessor

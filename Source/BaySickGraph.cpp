@@ -297,13 +297,13 @@ struct BaySickGraph::InsertNode
 
     // ── Audio DSP ─────────────────────────────────────────────────────────────
     // §P4.3: pre-rack EQ runs at the very start of the chain, before polarity /
-    // width / rack / post-rack EQ.  Fresh EQ8MsDSP using the standard machinery
+    // width / rack / post-rack EQ.  Fresh StripEq using the standard machinery
     // - same registration + APVTS sync as the post-rack `eq` (just under the
     // `_preeq_` prefix so they don't collide).  Bypass-flat by default so
     // existing kits sound identical until the user touches it.
-    EQ8MsDSP              preEq;      // §P4.3 pre-rack
+    StripEq              preEq;      // §P4.3 pre-rack
     EffectRack            rack;
-    EQ8MsDSP              eq;         // post-rack
+    StripEq              eq;         // post-rack
     CompDelayLine         compDelay;  // per-insert PDC
     // QA-AudioMeters (2026-05-24): G1-pattern peak fields (parallel to L/B/D/
     // Master/FX/AudioClips/Vox/Inst/Rusty BusNodes).  InsertNode::processBlock
@@ -466,7 +466,7 @@ struct BaySickGraph::InsertNode
         }
 
         // §P4.3 pre-rack EQ - first DSP stage, before polarity / width / rack.
-        // (Identity short-circuit + spectrum feed live inside EQ8MsDSP::process.)
+        // (Identity short-circuit + spectrum feed live inside StripEq::process.)
         if (nc >= 2) preEq.process(buf);
 
         // Polarity flip
@@ -589,9 +589,9 @@ struct BaySickGraph::InsertNode
 struct BaySickGraph::InstrChannelNode
 {
     juce::String name;
-    EQ8MsDSP     preEq;   // §P4.3 pre-rack
+    StripEq     preEq;   // §P4.3 pre-rack
     EffectRack   rack;
-    EQ8MsDSP     eq;      // post-rack bus EQ - shown on Effects Page
+    StripEq     eq;      // post-rack bus EQ - shown on Effects Page
     // QA-Fe2 PDC: bus-stage alignment (post-pan, pre-meter).  The master
     // chain deliberately never processes it (terminal node -- nothing
     // downstream to align against).
@@ -1597,7 +1597,7 @@ int BaySickGraph::updateBusLatencies()
     using namespace MixerChannelIds;
     const int ch = 2;
 
-    auto chainLat = [](EQ8MsDSP& pre, EffectRack& rack, EQ8MsDSP& post)
+    auto chainLat = [](StripEq& pre, EffectRack& rack, StripEq& post)
     {
         return juce::jmax(0, pre .getLatencySamples())
              + juce::jmax(0, rack.getTotalLatencySamples())
@@ -1842,44 +1842,44 @@ int BaySickGraph::updateBusLatencies()
 }
 
 // ── EQ getters (post-rack bus EQs, one per channel) ──────────────────────────
-EQ8MsDSP* BaySickGraph::getLayersBusEQ()     { return mLayersNode       ? &mLayersNode      ->eq : nullptr; }
-EQ8MsDSP* BaySickGraph::getBassBusEQ()       { return mBassNode         ? &mBassNode        ->eq : nullptr; }
-EQ8MsDSP* BaySickGraph::getDrumsBusEQ()      { return mDrumsNode        ? &mDrumsNode       ->eq : nullptr; }
-EQ8MsDSP* BaySickGraph::getMasterEQ()        { return mMasterNode       ? &mMasterNode      ->eq : nullptr; }
-EQ8MsDSP* BaySickGraph::getEffectsBusEQ()    { return mEffectsBusNode   ? &mEffectsBusNode  ->eq : nullptr; }
-EQ8MsDSP* BaySickGraph::getAudioClipsBusEQ() { return mAudioClipsBusNode ? &mAudioClipsBusNode->eq  : nullptr; }
-EQ8MsDSP* BaySickGraph::getVoxBusEQ()        { return mVoxBusNode        ? &mVoxBusNode       ->eq  : nullptr; }
-EQ8MsDSP* BaySickGraph::getInstBusEQ()       { return mInstBusNode       ? &mInstBusNode      ->eq  : nullptr; }
-EQ8MsDSP* BaySickGraph::getVoxBus2EQ()       { return mVoxBus2Node       ? &mVoxBus2Node      ->eq  : nullptr; }
-EQ8MsDSP* BaySickGraph::getInstBus2EQ()      { return mInstBus2Node      ? &mInstBus2Node     ->eq  : nullptr; }
-EQ8MsDSP* BaySickGraph::getInstBus3EQ()      { return mInstBus3Node      ? &mInstBus3Node     ->eq  : nullptr; }
-EQ8MsDSP* BaySickGraph::getRustyDrumsBusEQ() { return mRustyDrumsBusNode ? &mRustyDrumsBusNode->eq  : nullptr; }
-EQ8MsDSP* BaySickGraph::getPluginsBusEQ()    { return mPluginsBusNode    ? &mPluginsBusNode   ->eq  : nullptr; }
-EQ8MsDSP* BaySickGraph::getLayersBus2EQ()    { return mLayersBus2Node    ? &mLayersBus2Node   ->eq  : nullptr; }
-EQ8MsDSP* BaySickGraph::getBassBus2EQ()      { return mBassBus2Node      ? &mBassBus2Node     ->eq  : nullptr; }
-EQ8MsDSP* BaySickGraph::getClipsBus2EQ()     { return mClipsBus2Node     ? &mClipsBus2Node    ->eq  : nullptr; }
-EQ8MsDSP* BaySickGraph::getPluginsBus2EQ()   { return mPluginsBus2Node   ? &mPluginsBus2Node  ->eq  : nullptr; }
-EQ8MsDSP* BaySickGraph::getDrumsBus2EQ()     { return mDrumsBus2Node     ? &mDrumsBus2Node    ->eq  : nullptr; }
+StripEq* BaySickGraph::getLayersBusEQ()     { return mLayersNode       ? &mLayersNode      ->eq : nullptr; }
+StripEq* BaySickGraph::getBassBusEQ()       { return mBassNode         ? &mBassNode        ->eq : nullptr; }
+StripEq* BaySickGraph::getDrumsBusEQ()      { return mDrumsNode        ? &mDrumsNode       ->eq : nullptr; }
+StripEq* BaySickGraph::getMasterEQ()        { return mMasterNode       ? &mMasterNode      ->eq : nullptr; }
+StripEq* BaySickGraph::getEffectsBusEQ()    { return mEffectsBusNode   ? &mEffectsBusNode  ->eq : nullptr; }
+StripEq* BaySickGraph::getAudioClipsBusEQ() { return mAudioClipsBusNode ? &mAudioClipsBusNode->eq  : nullptr; }
+StripEq* BaySickGraph::getVoxBusEQ()        { return mVoxBusNode        ? &mVoxBusNode       ->eq  : nullptr; }
+StripEq* BaySickGraph::getInstBusEQ()       { return mInstBusNode       ? &mInstBusNode      ->eq  : nullptr; }
+StripEq* BaySickGraph::getVoxBus2EQ()       { return mVoxBus2Node       ? &mVoxBus2Node      ->eq  : nullptr; }
+StripEq* BaySickGraph::getInstBus2EQ()      { return mInstBus2Node      ? &mInstBus2Node     ->eq  : nullptr; }
+StripEq* BaySickGraph::getInstBus3EQ()      { return mInstBus3Node      ? &mInstBus3Node     ->eq  : nullptr; }
+StripEq* BaySickGraph::getRustyDrumsBusEQ() { return mRustyDrumsBusNode ? &mRustyDrumsBusNode->eq  : nullptr; }
+StripEq* BaySickGraph::getPluginsBusEQ()    { return mPluginsBusNode    ? &mPluginsBusNode   ->eq  : nullptr; }
+StripEq* BaySickGraph::getLayersBus2EQ()    { return mLayersBus2Node    ? &mLayersBus2Node   ->eq  : nullptr; }
+StripEq* BaySickGraph::getBassBus2EQ()      { return mBassBus2Node      ? &mBassBus2Node     ->eq  : nullptr; }
+StripEq* BaySickGraph::getClipsBus2EQ()     { return mClipsBus2Node     ? &mClipsBus2Node    ->eq  : nullptr; }
+StripEq* BaySickGraph::getPluginsBus2EQ()   { return mPluginsBus2Node   ? &mPluginsBus2Node  ->eq  : nullptr; }
+StripEq* BaySickGraph::getDrumsBus2EQ()     { return mDrumsBus2Node     ? &mDrumsBus2Node    ->eq  : nullptr; }
 
 // §P4.3: Pre-rack bus EQs (NEW - every bus gets one).
-EQ8MsDSP* BaySickGraph::getLayersBusPreEQ()     { return mLayersNode       ? &mLayersNode       ->preEq : nullptr; }
-EQ8MsDSP* BaySickGraph::getBassBusPreEQ()       { return mBassNode         ? &mBassNode         ->preEq : nullptr; }
-EQ8MsDSP* BaySickGraph::getDrumsBusPreEQ()      { return mDrumsNode        ? &mDrumsNode        ->preEq : nullptr; }
-EQ8MsDSP* BaySickGraph::getMasterPreEQ()        { return mMasterNode       ? &mMasterNode       ->preEq : nullptr; }
-EQ8MsDSP* BaySickGraph::getEffectsBusPreEQ()    { return mEffectsBusNode   ? &mEffectsBusNode   ->preEq : nullptr; }
-EQ8MsDSP* BaySickGraph::getAudioClipsBusPreEQ() { return mAudioClipsBusNode ? &mAudioClipsBusNode->preEq : nullptr; }
-EQ8MsDSP* BaySickGraph::getVoxBusPreEQ()        { return mVoxBusNode        ? &mVoxBusNode       ->preEq : nullptr; }
-EQ8MsDSP* BaySickGraph::getInstBusPreEQ()       { return mInstBusNode       ? &mInstBusNode      ->preEq : nullptr; }
-EQ8MsDSP* BaySickGraph::getVoxBus2PreEQ()       { return mVoxBus2Node       ? &mVoxBus2Node      ->preEq : nullptr; }
-EQ8MsDSP* BaySickGraph::getInstBus2PreEQ()      { return mInstBus2Node      ? &mInstBus2Node     ->preEq : nullptr; }
-EQ8MsDSP* BaySickGraph::getInstBus3PreEQ()      { return mInstBus3Node      ? &mInstBus3Node     ->preEq : nullptr; }
-EQ8MsDSP* BaySickGraph::getRustyDrumsBusPreEQ() { return mRustyDrumsBusNode ? &mRustyDrumsBusNode->preEq : nullptr; }
-EQ8MsDSP* BaySickGraph::getPluginsBusPreEQ()    { return mPluginsBusNode    ? &mPluginsBusNode   ->preEq : nullptr; }
-EQ8MsDSP* BaySickGraph::getLayersBus2PreEQ()    { return mLayersBus2Node    ? &mLayersBus2Node   ->preEq : nullptr; }
-EQ8MsDSP* BaySickGraph::getBassBus2PreEQ()      { return mBassBus2Node      ? &mBassBus2Node     ->preEq : nullptr; }
-EQ8MsDSP* BaySickGraph::getClipsBus2PreEQ()     { return mClipsBus2Node     ? &mClipsBus2Node    ->preEq : nullptr; }
-EQ8MsDSP* BaySickGraph::getPluginsBus2PreEQ()   { return mPluginsBus2Node   ? &mPluginsBus2Node  ->preEq : nullptr; }
-EQ8MsDSP* BaySickGraph::getDrumsBus2PreEQ()     { return mDrumsBus2Node     ? &mDrumsBus2Node    ->preEq : nullptr; }
+StripEq* BaySickGraph::getLayersBusPreEQ()     { return mLayersNode       ? &mLayersNode       ->preEq : nullptr; }
+StripEq* BaySickGraph::getBassBusPreEQ()       { return mBassNode         ? &mBassNode         ->preEq : nullptr; }
+StripEq* BaySickGraph::getDrumsBusPreEQ()      { return mDrumsNode        ? &mDrumsNode        ->preEq : nullptr; }
+StripEq* BaySickGraph::getMasterPreEQ()        { return mMasterNode       ? &mMasterNode       ->preEq : nullptr; }
+StripEq* BaySickGraph::getEffectsBusPreEQ()    { return mEffectsBusNode   ? &mEffectsBusNode   ->preEq : nullptr; }
+StripEq* BaySickGraph::getAudioClipsBusPreEQ() { return mAudioClipsBusNode ? &mAudioClipsBusNode->preEq : nullptr; }
+StripEq* BaySickGraph::getVoxBusPreEQ()        { return mVoxBusNode        ? &mVoxBusNode       ->preEq : nullptr; }
+StripEq* BaySickGraph::getInstBusPreEQ()       { return mInstBusNode       ? &mInstBusNode      ->preEq : nullptr; }
+StripEq* BaySickGraph::getVoxBus2PreEQ()       { return mVoxBus2Node       ? &mVoxBus2Node      ->preEq : nullptr; }
+StripEq* BaySickGraph::getInstBus2PreEQ()      { return mInstBus2Node      ? &mInstBus2Node     ->preEq : nullptr; }
+StripEq* BaySickGraph::getInstBus3PreEQ()      { return mInstBus3Node      ? &mInstBus3Node     ->preEq : nullptr; }
+StripEq* BaySickGraph::getRustyDrumsBusPreEQ() { return mRustyDrumsBusNode ? &mRustyDrumsBusNode->preEq : nullptr; }
+StripEq* BaySickGraph::getPluginsBusPreEQ()    { return mPluginsBusNode    ? &mPluginsBusNode   ->preEq : nullptr; }
+StripEq* BaySickGraph::getLayersBus2PreEQ()    { return mLayersBus2Node    ? &mLayersBus2Node   ->preEq : nullptr; }
+StripEq* BaySickGraph::getBassBus2PreEQ()      { return mBassBus2Node      ? &mBassBus2Node     ->preEq : nullptr; }
+StripEq* BaySickGraph::getClipsBus2PreEQ()     { return mClipsBus2Node     ? &mClipsBus2Node    ->preEq : nullptr; }
+StripEq* BaySickGraph::getPluginsBus2PreEQ()   { return mPluginsBus2Node   ? &mPluginsBus2Node  ->preEq : nullptr; }
+StripEq* BaySickGraph::getDrumsBus2PreEQ()     { return mDrumsBus2Node     ? &mDrumsBus2Node    ->preEq : nullptr; }
 
 // ── Rack + bus EQ state serialization ────────────────────────────────────────
 
@@ -1907,7 +1907,7 @@ void BaySickGraph::saveRackStates(juce::ValueTree& parent)
     // without `preEq` round-trip cleanly - applyRackStates only restores
     // the property when it's present.
     auto addNode = [&](const juce::String& id, EffectRack& rack,
-                        EQ8MsDSP& preEq, EQ8MsDSP& eq)
+                        StripEq& preEq, StripEq& eq)
     {
         juce::ValueTree node("BusRack");
         node.setProperty("id", id, nullptr);
@@ -2062,7 +2062,7 @@ void BaySickGraph::applyRackStates(const juce::ValueTree& parent)
     // the matching saveRackStates change above), restore it onto the node's
     // §P4.3 pre-rack EQ.  Older saves without `preEq` skip this step - the
     // missing-property check below keeps backward compatibility.
-    auto restoreEqs = [&](const juce::ValueTree& rec, EQ8MsDSP& preEq, EQ8MsDSP& eq)
+    auto restoreEqs = [&](const juce::ValueTree& rec, StripEq& preEq, StripEq& eq)
     {
         if (rec.hasProperty ("preEq"))
         {
@@ -2076,7 +2076,7 @@ void BaySickGraph::applyRackStates(const juce::ValueTree& parent)
     };
 
     auto restoreNode = [&](const juce::String& id, EffectRack& rack,
-                            EQ8MsDSP& preEq, EQ8MsDSP& eq)
+                            StripEq& preEq, StripEq& eq)
     {
         for (int i = 0; i < parent.getNumChildren(); ++i)
         {
@@ -2204,7 +2204,7 @@ EffectRack* BaySickGraph::getInstrChannelRack(int channelId)
     return it != mInstrChannelNodes.end() ? &it->second->rack : nullptr;
 }
 
-EQ8MsDSP* BaySickGraph::getInstrChannelEQ(int channelId)
+StripEq* BaySickGraph::getInstrChannelEQ(int channelId)
 {
     auto it = mInstrChannelNodes.find(channelId);
     return it != mInstrChannelNodes.end() ? &it->second->eq : nullptr;
@@ -2232,7 +2232,7 @@ EffectRack* BaySickGraph::getAudioRowRack(int row)
     return it != mInstrChannelNodes.end() ? &it->second->rack : nullptr;
 }
 
-EQ8MsDSP* BaySickGraph::getAudioRowEQ(int row)
+StripEq* BaySickGraph::getAudioRowEQ(int row)
 {
     // 5F-4a Batch 6 migration: prefer the Audio InsertNode's EQ; fall back to
     // legacy InstrChannelNode. Mirrors the getAudioRowRack dual-path pattern.
@@ -2510,7 +2510,7 @@ std::pair<float, float> BaySickGraph::drainBusRms (int busChId) noexcept
              r->exchange (kNI, std::memory_order_relaxed) };
 }
 
-EQ8MsDSP* BaySickGraph::getInsertEQ(InsertKind kind, int index)
+StripEq* BaySickGraph::getInsertEQ(InsertKind kind, int index)
 {
     if (auto* node = getInsertNode(kind, index))
         return &node->eq;
@@ -2518,7 +2518,7 @@ EQ8MsDSP* BaySickGraph::getInsertEQ(InsertKind kind, int index)
 }
 
 // §P4.3: Pre-rack EQ on every InsertNode (Layer/Bass/Drum/Audio/Aux).
-EQ8MsDSP* BaySickGraph::getInsertPreEQ(InsertKind kind, int index)
+StripEq* BaySickGraph::getInsertPreEQ(InsertKind kind, int index)
 {
     if (auto* node = getInsertNode(kind, index))
         return &node->preEq;
@@ -3161,7 +3161,7 @@ void BaySickGraph::pushScArrayToStrip (int channelId)
     juce::AudioBuffer<float>* bufs[kMaxScRecvSlots];
     for (int i = 0; i < kMaxScRecvSlots; ++i) bufs[i] = arr[(size_t) i];
 
-    auto push3 = [bufs](EQ8MsDSP* preEq, EffectRack* rack, EQ8MsDSP* postEq)
+    auto push3 = [bufs](StripEq* preEq, EffectRack* rack, StripEq* postEq)
     {
         if (preEq)  preEq ->setSidechainBuffers(bufs, kMaxScRecvSlots);
         if (rack)   rack  ->setSidechainBuffers(bufs, kMaxScRecvSlots);

@@ -497,7 +497,7 @@ void EffectsPage::selectChannelByApvtsPrefix(const juce::String& apvtsPrefix)
 // Ardour's automation_control(param, create) -- the lane names a key and the
 // key resolves to a live control when one is needed.
 void EffectsPage::resolveChannelDsp (BaySickGraph& vg, int id,
-                                     EffectRack*& rack, EQ8MsDSP*& eq)
+                                     EffectRack*& rack, StripEq*& eq)
 {
     rack = nullptr;
     eq   = nullptr;
@@ -816,7 +816,7 @@ void EffectsPage::registerSlotAutomationFor (BaySickDAWProcessor& proc, int chId
 EffectRack* EffectsPage::rackForChannelId (BaySickGraph& vg, int id)
 {
     EffectRack* rack = nullptr;
-    EQ8MsDSP*   eq   = nullptr;
+    StripEq*   eq   = nullptr;
     resolveChannelDsp (vg, id, rack, eq);
     return rack;
 }
@@ -985,7 +985,7 @@ void EffectsPage::retryDeadPluginSlots (BaySickDAWProcessor& proc)
 // onChannelChanged.  It was the one piece of channel resolution that had NOT
 // been made static at TS1 -- a second copy of the channel switch living inside
 // a view method, which the EQ windows would have had to fork a third time.
-EQ8MsDSP* EffectsPage::preEqForChannelId (BaySickGraph& vg, int id)
+StripEq* EffectsPage::preEqForChannelId (BaySickGraph& vg, int id)
 {
     switch (id)
     {
@@ -1025,7 +1025,7 @@ EQ8MsDSP* EffectsPage::preEqForChannelId (BaySickGraph& vg, int id)
 void EffectsPage::onChannelChanged()
 {
     EffectRack* rack = nullptr;
-    EQ8MsDSP*  eq   = nullptr;
+    StripEq*  eq   = nullptr;
 
     auto& vg  = mProcessor.mVibeGraph;
     const int  id = mTrackBox->getSelectedId();

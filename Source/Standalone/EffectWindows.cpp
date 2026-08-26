@@ -563,31 +563,27 @@ EffectEqWindow::~EffectEqWindow()
         }
 }
 
-EQ8MsDSP* EffectEqWindow::resolveEq() const
+StripEq* EffectEqWindow::resolveEq() const
 {
     auto& vg = mProc.mVibeGraph;
     if (mIsPre) return EffectsPage::preEqForChannelId (vg, mChannelId);
 
     EffectRack* rack = nullptr;
-    EQ8MsDSP*   eq   = nullptr;
+    StripEq*    eq   = nullptr;
     EffectsPage::resolveChannelDsp (vg, mChannelId, rack, eq);
     return eq;
 }
 
 void EffectEqWindow::bindToChannel()
 {
-    EQ8MsDSP* eq = resolveEq();
-    mBoundEq = eq;
+    // QA-EqPro T3: the nodes carry StripEq now; this window's display still
+    // speaks EQ8MsDSP and is rebuilt against the engine in Tasks 5-6.  Until
+    // then it binds the inert fallback so the window stays alive and harmless.
+    mBoundEq = resolveEq();
 
     const juce::String chanPrefix = EffectsPage::mixerPrefixForChannelId (mChannelId);
-    const juce::String idPrefix   = mIsPre ? "_preeq_" : "_";
 
-    if (eq != nullptr && chanPrefix.isNotEmpty())
-        mDisplay->bindMsDSP (eq, &mProc.apvts,
-                             chanPrefix + idPrefix + "mid_eq",
-                             chanPrefix + idPrefix + "side_eq");
-    else
-        mDisplay->bindMsDSP (eq != nullptr ? eq : &mFallbackEq);
+    mDisplay->bindMsDSP (&mFallbackEq);
 
     mDisplay->setStripContext (chanPrefix,
                                [] (int srcChId) { return MixerChannelIds::friendlyName (srcChId); });

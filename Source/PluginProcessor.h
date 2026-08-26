@@ -10,7 +10,7 @@
 // + BaySickDrumsEditor + BaySickDrumsLAF all deleted.  Drums now use the
 // dynamic per-tab DrumPage model with BaySickPlayer / BaySickSynth engines.
 #include "PatternManager.h"
-#include "DSP/EQ8MsDSP.h"
+#include "DSP/StripEq.h"
 #include "BaySickGraph.h"
 #include "MidiRecorder.h"
 #include "AudioFileRecorder.h"
@@ -2002,12 +2002,12 @@ private:
     // updateBassPageEQsFromApvts removed along with their DSP instances.
     // Pre-rack EQs now sync via updateAllPreRackEQsFromApvts below (unified
     // mixer-strip iteration).
-    // Session B: generic update helper for any EQ8MsDSP bound to one strip slot's
+    // Session B: generic update helper for any StripEq bound to one strip slot's
     // param bank.  Reads all 17 band params x 8 bands x 2 sides and applies via
     // the standard setBand* setters (CPU-guarded internally).  Used for every EQ
     // (bus + insert, pre- and post-rack) whose params were lazily registered via
     // addParamsForTrackEQ / addParamsForTrackPreEQ.
-    void updateEQFromCache (EQ8MsDSP* eq, int stripSlot, int bank);
+    void updateEQFromCache (StripEq* eq, int stripSlot, int bank);
     // Iterates every registered mixer strip (18 buses + the insert families) and
     // calls updateEQFromCache for each InsertNode/BusNode's EQ. No-op when a
     // given slot has no node (index out of range or not yet registered).

@@ -5500,8 +5500,8 @@ namespace
     struct EqBusEntry
     {
         const char* prefix;
-        EQ8MsDSP* (*post) (BaySickGraph&);
-        EQ8MsDSP* (*pre)  (BaySickGraph&);
+        StripEq* (*post) (BaySickGraph&);
+        StripEq* (*pre)  (BaySickGraph&);
     };
 
     const EqBusEntry kEqBuses[] = {
@@ -5558,64 +5558,14 @@ namespace
 // allocation on this path.  A band whose Freq pointer is still null has not been
 // registered yet (new InsertNode whose ensureMixerStripParams has not run) and
 // is skipped, exactly as the old getParameter existence test did.
-void BaySickDAWProcessor::updateEQFromCache (EQ8MsDSP* eq, int stripSlot, int bank)
+void BaySickDAWProcessor::updateEQFromCache (StripEq* eq, int stripSlot, int bank)
 {
-    if (eq == nullptr || stripSlot < 0 || stripSlot >= kEqNumStripSlots) return;
-
-    auto syncSide = [this, stripSlot, bank] (EQ8DSP& side, int sideIdx)
-    {
-        for (int b = 0; b < kEqBands; ++b)
-        {
-            const auto& slots = mEqParamCache[(size_t) eqCacheIndex (stripSlot, bank, sideIdx, b)];
-
-            // Freq is the band's publication flag: the message thread stores it
-            // LAST with release, so a non-null read here makes all sixteen other
-            // pointers visible and the relaxed loads below are safe.
-            auto* freqP = slots.p[eqSlotFreq].load (std::memory_order_acquire);
-            if (freqP == nullptr) continue;
-
-            auto get = [&slots] (int which) -> float
-            {
-                if (auto* p = slots.p[which].load (std::memory_order_relaxed))
-                    return p->load (std::memory_order_relaxed);
-                return 0.f;
-            };
-
-            auto cur = side.getBand(b);
-            float f  = freqP->load (std::memory_order_relaxed);
-            if (f  != cur.freq)   side.setBandFreq (b, f);
-            float gn = get(eqSlotGain);
-            if (gn != cur.gainDb) side.setBandGain (b, gn);
-            float q  = get(eqSlotQ);
-            if (q  != cur.q)      side.setBandQ    (b, q);
-            int   t  = (int) get(eqSlotType);
-            if (t  != cur.type)   side.setBandType (b, t);
-            int   s  = (int) get(eqSlotSlope);
-            if (s  != cur.slope)  side.setBandSlope(b, s);
-            side.setBandOn    (b, get(eqSlotOn)   > 0.5f);
-            side.setBandMuted (b, get(eqSlotMute) > 0.5f);
-            side.setBandSoloed(b, get(eqSlotSolo) > 0.5f);
-            int ch = juce::jlimit(0, 4, (int) get(eqSlotChannel));
-            if (ch != cur.channel) side.setBandChannel(b, ch);
-            // 12j Dynamic EQ params (read only when registered - Dynamic's
-            // absence short-circuits all subsequent reads cheaply).
-            if (slots.p[eqSlotDynamic].load (std::memory_order_relaxed) != nullptr)
-            {
-                side.setBandDynamic  (b, get(eqSlotDynamic) > 0.5f);
-                float thr = get(eqSlotThreshold); if (thr != cur.threshold) side.setBandThreshold(b, thr);
-                float rt  = get(eqSlotRatio);     if (rt  != cur.ratio)     side.setBandRatio    (b, rt);
-                float at  = get(eqSlotAttack);    if (at  != cur.attack)    side.setBandAttack   (b, at);
-                float re  = get(eqSlotRelease);   if (re  != cur.release)   side.setBandRelease  (b, re);
-                float rg  = get(eqSlotRange);     if (rg  != cur.rangeDb)   side.setBandRange    (b, rg);
-                side.setBandUpward(b, get(eqSlotUpward) > 0.5f);
-                int sc = (int) get(eqSlotScSource);
-                if (sc != cur.scSourceId) side.setBandScSource(b, sc);
-            }
-        }
-    };
-
-    syncSide (eq->mid(),  0);
-    syncSide (eq->side(), 1);
+    // QA-EqPro T3: the graph nodes carry StripEq (one 24-band kbs engine per
+    // bank) but the parameter scheme is still the old mid/side x 8 layout,
+    // which has no meaningful mapping onto it.  Deliberate no-op until Task 4
+    // lands the new scheme + pointer cache; until then EQ state comes from the
+    // rack blob alone.
+    juce::ignoreUnused (eq, stripSlot, bank);
 }
 
 // Iterate every post-rack EQ instance (18 buses + the insert families) and sync
@@ -5663,64 +5613,38 @@ void BaySickDAWProcessor::updateAllPreRackEQsFromApvts()
     }
 }
 
-// Band values are APVTS-backed, so File > New's default sweep reaches them
-// through the two passes above.  Main level, phase mode, linear precision,
-// anti-cramping, proportional Q and the A/B spare have no parameter behind them
-// -- they live only in the DSP and in the saved rack blob, which File > Open
-// restores via BaySickGraph::applyRackStates and File > New does not write at all.
-// Without this, a blank project keeps the previous one's output trim (audible:
-// EQ8DSP::isIdentity refuses to short-circuit on a non-zero main level) and its
-// linear-phase FFT latency (BaySickGraph sums it into PDC), with the previous
+// The parts of an EQ point no parameter backs -- mode, oversampling, output
+// stage, the A/B spare -- live only in the DSP and in the saved rack blob,
+// which File > Open restores via BaySickGraph::applyRackStates and File > New
+// does not write at all.  Without this, a blank project keeps the previous
+// one's output trim (StripEq::isIdentity refuses to short-circuit on it) and
+// its linear-phase latency (BaySickGraph sums it into PDC), with the previous
 // project's B bank still sitting in the spare.
 //
-// THREAD SAFETY: setPhaseMode allocates and frees the linear-phase processor and
-// the band push writes coefficients processBlock reads, so the caller runs this
+// THREAD SAFETY: setMode allocates and frees the linear-phase engine and the
+// band pushes write coefficients processBlock reads, so the caller runs this
 // under the project-load shield with a settle already paid.
 void BaySickDAWProcessor::resetEqStatesToDefaults()
 {
-    auto forEachSide = [this] (auto&& fn)
+    auto each = [this] (auto&& fn)
     {
-        auto both = [&fn] (EQ8MsDSP* eq)
-        {
-            if (eq == nullptr) return;
-            fn (eq->mid());
-            fn (eq->side());
-        };
-
         for (int i = 0; i < kEqNumBusSlots; ++i)
         {
-            both (kEqBuses[i].post (mVibeGraph));
-            both (kEqBuses[i].pre  (mVibeGraph));
+            if (auto* e = kEqBuses[i].post (mVibeGraph)) fn (*e);
+            if (auto* e = kEqBuses[i].pre  (mVibeGraph)) fn (*e);
         }
         for (const auto& fam : kEqInsertFamilies)
             for (int i = 0; i < fam.count; ++i)
             {
-                both (mVibeGraph.getInsertEQ    (fam.kind, i));
-                both (mVibeGraph.getInsertPreEQ (fam.kind, i));
+                if (auto* e = mVibeGraph.getInsertEQ    (fam.kind, i)) fn (*e);
+                if (auto* e = mVibeGraph.getInsertPreEQ (fam.kind, i)) fn (*e);
             }
     };
-
-    // Back to the main bank BEFORE the band sync: swapWithSpare exchanges the
-    // two banks, so leaving it until afterwards would push the freshly
-    // defaulted bands back into the spare and pull the old ones into view.
-    forEachSide ([] (EQ8DSP& s) { if (s.isViewingSpare()) s.swapWithSpare(); });
-
-    // Land the defaulted band values now rather than on the next block, so the
-    // saveToSpare below seeds the spare from defaults and not from the bank the
-    // outgoing project left behind.
-    updateAllPostRackEQsFromApvts();
-    updateAllPreRackEQsFromApvts();
-
-    forEachSide ([] (EQ8DSP& s)
-    {
-        s.lockSpare (false);
-        s.saveToSpare();
-        s.setPhaseMode (EQ8DSP::PhaseMode::Standard);
-        s.setLinearPhasePrecision (EQ8DSP::kDefaultLinearPrec);
-        s.setAntiCramping (false);
-        s.setProportionalQ (true);
-        s.setMainLevel (0.0f);
-    });
+    // The whole non-param half of every EQ point in one call: bands + spare
+    // to defaults (main bank restored first inside), mode Zero Latency,
+    // oversampling off, proportional Q on, output stage cleared.  Param
+    // values re-assert through the audio-thread sweep once registered.
+    each ([] (StripEq& e) { e.resetToDefaults(); });
 }
 
 // ── CL-281 decode-once cache helpers ─────────────────────────────────────────

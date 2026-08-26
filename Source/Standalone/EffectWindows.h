@@ -2,6 +2,7 @@
 #include <JuceHeader.h>
 #include "../EffectRack.h"
 #include "../DSP/EQ8MsDSP.h"
+#include "../DSP/StripEq.h"
 #include "SlotComponent.h"
 #include "SharedUI.h"
 #include "UndoActions.h"
@@ -168,7 +169,7 @@ private:
     // Resolved per call, never cached across ticks -- the node can be rebuilt
     // under the window (strip respawn, graph rebuild) and a stale pointer here
     // would mean editing an EQ nothing is listening to.
-    EQ8MsDSP* resolveEq() const;
+    StripEq* resolveEq() const;
 
     BaySickDAWProcessor&              mProc;
     const int                        mChannelId;
@@ -180,7 +181,7 @@ private:
     // this channel's node (the same role EffectsPage's owned DSPs played).
     EQ8MsDSP                         mFallbackEq;
     // What the display is currently bound to, so the poll can notice a rebuild.
-    EQ8MsDSP*                        mBoundEq { nullptr };
+    StripEq*                         mBoundEq { nullptr };
     // Distinguishes "channel not built yet" (fallback draws) from "channel
     // DIED" (close the window).
     bool                             mEverResolved { false };
