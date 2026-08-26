@@ -279,3 +279,81 @@ equally late); the two freeze renders opt OUT at their own RenderOptions
 construction - the freeze tap is pre-rack, upstream of the compensation,
 and trimming it would drop real samples.  The discard costs at most a few
 scratch-buffer copies at the head of a render.
+
+## 2026-08-26 - Task 10 - docs, fix-backs, close prep
+
+Test plan section B.38 added (EQ-1..EQ-17, five MUST-PASS: the window, view
+= domain, linear alignment, mode change mid-play, touch-lazy params, export
+on the grid).  System Reference/EQ.md rewritten whole to the new
+architecture.  Manual: EQ.html + EQB.html rewritten to the new window
+(views + chips + rail + A/B pill + grab/match/presets), the three weeds
+pages IMP-14/15/16 rewritten against the NEW source (designBiquads + the
+over-threshold trigger; per-band routing + StripEq::pushBand; the FIR
+design + the 2x2 matrix), Callout Registry EQ/EQB/IMP rows updated,
+Screenshot List: the whole EQ sitting rewritten (SHOT-244..265) under a
+RE-SHOOT REQUIRED banner (EQ.png + EQ Band Menu.png masters are the
+retired panel; marker coords set to approximate new-layout positions until
+the re-shoot), SHOT-077 updated (MID/SIDE + bank pill left the title
+strip).  Manual regenerated (91 figures, 731 markers, 89/89 topics);
+all three PDFs reprinted.  Verbatim Strings carries no EQ entries -
+checked, nothing to update.
+
+EQ Build Notes gained the KBS fix-back entry (Jeff's instruction): the C3
+correction (twenty-five of twenty-six - the linear path ignored channel),
+the 2x2 matrix design portable back verbatim, the three-view mid/side
+model as the EQ Pro product fix, the four-slot sidechain extension - and
+the note that the DAW's look is one-way.
+
+Plan Routing notes carry the draft Main Plan section 5/6 text, the Future
+State test-pinning-sweep draft, and the open batch-end items (window
+sizing discussion, figure re-shoots, the B.38 walk).  Final tree re-ran
+the proof target: 54 checks green.  /draft-doc batch-close +
+/review-batch dispatched.
+
+## 2026-08-26 - Close review (/review-batch) + fixes
+
+Two BLOCKERs, both mine, both fixed pre-close: (1) the A/B swap (and copy)
+mutated the engine's band arrays from the message thread with no shield -
+the very class Task 8 closed; abSwap/onAbCopy now run the nest-aware
+shield + settle, and StripEq.h's A/B contract comment was corrected (it
+claimed the sweep materializes the swap - it cannot, the direct shielded
+push is the mechanism).  (2) The SC-10 trim's discard never reached the
+tap-fed sinks: on the boundary block, stems and mix-tap files took the
+FIRST samples of their tap block instead of the LAST and every later stem
+sample ran early - consumeBlock now carries a srcOffset every consumer
+honors (master + mix-tap + stems via FileSink::write's new from-offset;
+measure through an offset window view so the loudness math sees exactly
+what the file gets; freeze consumers receive 0 by their opt-out).
+
+NEEDS-FIX all taken: EQ Match no longer materializes unused high bands
+(registered-only removal, one undo transaction - Reset All Bands given the
+same one-transaction shape); user-preset load stays IN undo history (the
+programmatic-writes guard split the step in half, contradicting its own
+comment); wheel-Q, arrow nudges, both rail knuckle knobs, the four dyn
+knobs, the segment rows, the slope box and the drag-numbers all open their
+own undo transactions; the mode-menu latency labels now read
+kbs::eqLinearLatencySamples (ONE home beside eqLinearFftOrder - the review
+was right that my "computed" labels were a fresh hand mirror); Verbatim
+Strings gained the full EQ window section (the one Task 10 promise that
+had been missed); SC-11's own leftovers swept (the permanently-empty
+InstrChannelNode map + its save/restore/prepare/wipe loops deleted;
+getInstrChannelRack/EQ answer nullptr for their legacy callers);
+centre -> center in the new tooltip + test plan + EQ.md, colour/normalised
+comments in EqAnalyser.h fixed; the stale updateEQFromCache block comment
+and every remaining "EQ8 M/S" phrase corrected tree-wide.  Two compile
+hazards of my own fixing caught before the gate (helper declared above its
+dependency; a malformed init-list loop).
+
+NITs deferred by design, recorded here per the TrueLevel precedent:
+scFeedSlot (the analyser's picked SC line) not serialized; the graph's
+per-pixel viewProp/resolver chain (cache per paint pass when it shows up
+in profiling); analyser speed/tilt/freeze session-local; undoing an A/B
+swap restores params but not the DSP-side bank flag (EQ-13 may surface
+it); message-thread torn reads of the audio-written cached bands
+(display-only, hardware-atomic floats); FxRack preset load leaving
+destination bands absent from the file untouched (inherited semantics).
+
+ALSO SURFACED FOR JEFF (found by the close drafter, verified by grep):
+the Implemented Work Log has NO entries between QA-UICleanup (2026-07-08)
+and today - every batch from QA-TransportDisplay through QA-TrueLevel is
+missing from the log.  Routing (backfill vs a gap note) is his call.

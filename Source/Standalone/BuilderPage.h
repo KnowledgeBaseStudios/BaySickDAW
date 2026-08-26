@@ -1605,12 +1605,16 @@ public:
     // clock, per-block lane replay, tail-decay handling.  Consumers differ
     // only in what they do with each rendered block: renderToFile writes
     // sinks (+ stem arena taps), measureRender feeds meters, TS7's freeze
-    // taps one strip.  consumeBlock returns false to abort with an IO error.
+    // taps one strip.  consumeBlock (buf, srcOffset, chunk) returns false to
+    // abort with an IO error.  srcOffset is the SC-10 leading-latency discard
+    // offset into this block: non-zero only on the head blocks of a trimmed
+    // render, and a consumer that reads its OWN source (a strip tap) instead
+    // of buf must apply the same offset or its stream lands early.
     bool runOfflineLoop (const RenderOptions& opts,
                          juce::String& outErr,
                          std::function<bool()> shouldAbort,
                          std::function<void(double)> onProgress,
-                         const std::function<bool (const juce::AudioBuffer<float>&, int)>& consumeBlock);
+                         const std::function<bool (const juce::AudioBuffer<float>&, int, int)>& consumeBlock);
 
     // Message-thread entry: runs renderToFile on a background thread behind a
     // progress window with a working Cancel.

@@ -392,6 +392,39 @@ Tell Jeff (Debug exe first, then Release; one pass at batch end):
 
 ## Routing notes (Rule 3 application during execution)
 
+**Draft text for Jeff (he owns the plan docs):**
+
+*Main Plan section 5 entry (QA-EqPro):* "QA-EqPro (natural-notching-narwhal,
+2026-08-26) - the KBS EQ Pro engine take-back: kbs::ParametricEq vendored
+(24 bands, Natural Phase, true linear phase, over-threshold dynamics) with
+two DAW extensions fed back (per-domain linear 2x2 matrix - the C3 fix the
+plugin still needs - and the four-slot per-band sidechain); StripEq replaces
+the EQ8MsDSP mid+side pairs on every node; single-set touch-lazy param
+scheme (fresh build ~zero EQ params, was 9,792); the EQ window rebuilt as
+the ported graph/chips/rail with three domain views + ghost; EQ Match,
+spectrum grab, presets; B4's two unshielded paths closed; the legacy
+audio-row node removed; export leading-latency trim; Tools/EqTests proof
+target (54 checks); manual + System Reference + test plan B.38.  18 spec
+calls, 10 tasks, 10 checkpoint commits."
+
+*Main Plan section 6:* extend the sequencing arrow with QA-EqPro after
+QA-TrueLevel.
+
+*Future State entry (Jeff's adjacent-4 follow-up):* "Test-pinning sweep -
+QA-EqPro brought the KBS proof-target pattern into the DAW (Tools/EqTests:
+measured claims, exact latency, drawn-equals-heard).  Sweep the codebase for
+the next candidates - the pan law (PanLaw.h math vs measured fold), the
+loudness/true-peak chain (BS.1770 vectors), TempoMap arithmetic, the
+compressor/limiter envelopes - and stand up per-module runners on the same
+run_eq_tests.bat shape."
+
+*Open at close (Jeff, batch-end discussion):* the EQ window's default size -
+720x420 (the KBS floor) is wanted as the default, but whether it reads right
+at smaller sizes in our workspace is undecided; the floor currently PREVENTS
+smaller.  Also his: the EQ figure re-shoots (EQ.png + EQ Band Menu.png, list
+updated), and the B.38 walk.
+
+
 - Findings in EQ-adjacent code (racks, routing, windows): fix in-batch if
   they block a task, else surface to Jeff for routing (QA batches fix bugs
   found — deferral needs his call).

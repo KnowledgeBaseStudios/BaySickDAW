@@ -20,9 +20,10 @@
 // any-thread setter and is forwarded raw.
 //
 // A/B (SC-16): the spare bank lives here, DSP-side, and serializes with the
-// EQ point - swap on the message thread is a params-only exchange the next
-// audio-thread sweep materializes (the UI pushes the swapped bank to the
-// APVTS immediately after, exactly like the old EQ8DSP flow).
+// EQ point.  A swap exchanges arrays the audio thread reads and re-seats the
+// engine's runtime, so the CALLER runs it under the nest-aware shield with a
+// settle (the window's abSwap does), then pushes the swapped bank to the
+// APVTS so the sweep and the params agree.
 // ─────────────────────────────────────────────────────────────────────────────
 class StripEq : public DSPBase
 {

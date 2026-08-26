@@ -623,7 +623,7 @@ void ClipsPage::selectEngine (EngineType e)
     resized();
     repaint();
 
-    // G-7 polish (2026-04-29): bind Pre EQ8 M/S display to the Audio
+    // G-7 polish (2026-04-29): bind the Pre EQ window to the Audio
     // InsertNode's preEq + mixer_audio_<row>_preeq_(mid|side)_eq APVTS prefix.
     // Audio InsertNode was created by ensureAudioInsert when the clip was
     // first dropped onto Builder; getInsertPreEQ is non-null here.

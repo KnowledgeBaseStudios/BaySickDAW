@@ -7,7 +7,7 @@
 // all three fixes live here.
 //
 // Three surfaces from one transform: the line spectrum (pre dim, post bright,
-// sidechain in its own colour), the spectrogram heatmap, and the collision
+// sidechain in its own color), the spectrogram heatmap, and the collision
 // band (where the sidechain and the input both carry energy - the masking
 // view).
 #pragma once
@@ -65,7 +65,7 @@ public:
 
         fft.transform (td.data(), false);
 
-        // Single-sided magnitude, normalised so a full-scale sine reads
+        // Single-sided magnitude, normalized so a full-scale sine reads
         // 0 dBFS: bin magnitude N/4 under a Hann window (N/2 single-sided
         // times the window's 0.5 coherent gain).  The old display divided by
         // N and sat 12 dB low for ever.

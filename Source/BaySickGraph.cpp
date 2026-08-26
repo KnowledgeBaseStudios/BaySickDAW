@@ -1019,8 +1019,6 @@ void BaySickGraph::prepare(double sampleRate, int maxBlockSize)
     mDrumsNode     ->prepare(sampleRate, maxBlockSize);
     mMasterNode    ->prepare(sampleRate, maxBlockSize);
     mEffectsBusNode->prepare(sampleRate, maxBlockSize);
-    for (auto& [id, node] : mInstrChannelNodes)
-        node->prepare(sampleRate, maxBlockSize);
 
     // 5F-4a: per-insert nodes.  QA-InsertMaps (2026-05-24): single sweep over
     // mLiveInsertChannels covers all 8 InsertKinds (the original pointer-init-
@@ -1075,8 +1073,6 @@ void BaySickGraph::reset()
     mDrumsNode     ->reset();
     mMasterNode    ->reset();
     mEffectsBusNode->reset();
-    for (auto& [id, node] : mInstrChannelNodes)
-        node->reset();
     // 5F-4a: per-insert nodes.  QA-InsertMaps (2026-05-24): single sweep over
     // mLiveInsertChannels covers all 8 InsertKinds (the original pointer-init-
     // list at this site only covered 5 kinds -- Finding B in QA-InsertMaps
@@ -1902,7 +1898,7 @@ void BaySickGraph::saveRackStates(juce::ValueTree& parent)
 {
     if (!mTopologyBuilt) return;
 
-    // 2026-05-05: every node with a §P4.3 pre-rack EQ8 M/S now writes a
+    // 2026-05-05: every node with a §P4.3 pre-rack EQ now writes a
     // `preEq` property alongside the existing post-rack `eq`.  Older saves
     // without `preEq` round-trip cleanly - applyRackStates only restores
     // the property when it's present.
@@ -1931,7 +1927,7 @@ void BaySickGraph::saveRackStates(juce::ValueTree& parent)
 
     // 2026-04-24: the three special-bus InstrChannelNode racks (Audio Clips,
     // Vox, Inst) were silently dropped before - they're stored as separate
-    // member pointers, not in mInstrChannelNodes, so the loop below missed
+    // member pointers (never in a shared registry), so the loop below missed
     // them.  Save each alongside the fixed buses.
     if (mAudioClipsBusNode) addNode ("ClipsBus", mAudioClipsBusNode->rack, mAudioClipsBusNode->preEq, mAudioClipsBusNode->eq);
     if (mVoxBusNode)        addNode ("VoxBus",   mVoxBusNode       ->rack, mVoxBusNode       ->preEq, mVoxBusNode       ->eq);
@@ -1947,25 +1943,10 @@ void BaySickGraph::saveRackStates(juce::ValueTree& parent)
     if (mPluginsBus2Node)   addNode ("PluginsBus2", mPluginsBus2Node->rack, mPluginsBus2Node->preEq, mPluginsBus2Node->eq);
     if (mDrumsBus2Node)     addNode ("DrumsBus2",   mDrumsBus2Node->rack,   mDrumsBus2Node->preEq,   mDrumsBus2Node->eq);
 
-    for (int chId : mInstrChannelOrder)
-    {
-        auto it = mInstrChannelNodes.find(chId);
-        if (it == mInstrChannelNodes.end()) continue;
-        auto& ch = *it->second;
-
-        juce::ValueTree node("InstrCh");
-        node.setProperty("name", ch.name, nullptr);
-
-        juce::MemoryBlock rackData, preEqData, eqData;
-        ch.rack .getStateInformation(rackData);
-        ch.preEq.getStateInformation(preEqData);
-        ch.eq   .getStateInformation(eqData);
-        node.setProperty("rack",  encodeBlock(rackData),  nullptr);
-        node.setProperty("preEq", encodeBlock(preEqData), nullptr);
-        node.setProperty("eq",    encodeBlock(eqData),    nullptr);
-
-        parent.addChild(node, -1, nullptr);
-    }
+    // QA-EqPro SC-11: the legacy per-audio-row <InstrCh> save loop is gone
+    // with the nodes it serialized.  Old projects' <InstrCh> children are
+    // simply not consumed on load - the same deliberate reset as every other
+    // pre-QA-EqPro EQ carrier (SC-14).
 
     // 2026-04-24: per-insert rack + post-rack EQ state.  Every Layer / Bass /
     // Drum / Audio / Aux / Vox / Inst insert has its own rack - before this,
@@ -2038,7 +2019,6 @@ void BaySickGraph::clearAllRackStates()
     if (mPluginsBus2Node)   wipe (mPluginsBus2Node->rack);
     if (mDrumsBus2Node)     wipe (mDrumsBus2Node->rack);
 
-    for (auto& [id, node] : mInstrChannelNodes) if (node) wipe (node->rack);
     // QA-InsertMaps (2026-05-24): single sweep over mLiveInsertChannels.
     for (int chId : mLiveInsertChannels)
         if (auto* n = mInsertsByChannel[(size_t) chId].get())
@@ -2117,22 +2097,8 @@ void BaySickGraph::applyRackStates(const juce::ValueTree& parent)
     {
         auto child = parent.getChild(i);
         if (!child.hasType("InstrCh")) continue;
-
-        juce::String name = child.getProperty("name").toString();
-
-        for (int chId : mInstrChannelOrder)
-        {
-            auto it = mInstrChannelNodes.find(chId);
-            if (it == mInstrChannelNodes.end() || it->second->name != name) continue;
-
-            juce::MemoryBlock rackData;
-            if (decodeBlock(child.getProperty("rack").toString(), rackData))
-                it->second->rack.setStateInformation(rackData.getData(), (int)rackData.getSize());
-
-            restoreEqs (child, it->second->preEq, it->second->eq);
-
-            break;
-        }
+        // QA-EqPro SC-11: legacy per-audio-row entries - skipped (see the
+        // save side).
     }
 
     // 2026-04-24: per-insert rack / EQ restore.  Match by kind string + index.
@@ -2189,8 +2155,6 @@ void BaySickGraph::applyRackStates(const juce::ValueTree& parent)
 // ── Instrument channel registry (one rack+EQ per audio row) ──────────────────
 juce::String BaySickGraph::getInstrChannelName(int channelId) const
 {
-    auto it = mInstrChannelNodes.find(channelId);
-    if (it != mInstrChannelNodes.end()) return it->second->name;
     auto an = mAudioRowNames.find(channelId);
     return an != mAudioRowNames.end() ? an->second : juce::String{};
 }
@@ -2200,17 +2164,12 @@ std::vector<int> BaySickGraph::getInstrChannelIds() const
     return mInstrChannelOrder;
 }
 
-EffectRack* BaySickGraph::getInstrChannelRack(int channelId)
-{
-    auto it = mInstrChannelNodes.find(channelId);
-    return it != mInstrChannelNodes.end() ? &it->second->rack : nullptr;
-}
+// QA-EqPro SC-11: the per-audio-row InstrChannelNode registry is gone -
+// audio rows live on their InsertNodes.  These two remain for their legacy
+// callers and answer what is now always true.
+EffectRack* BaySickGraph::getInstrChannelRack(int) { return nullptr; }
 
-StripEq* BaySickGraph::getInstrChannelEQ(int channelId)
-{
-    auto it = mInstrChannelNodes.find(channelId);
-    return it != mInstrChannelNodes.end() ? &it->second->eq : nullptr;
-}
+StripEq* BaySickGraph::getInstrChannelEQ(int) { return nullptr; }
 
 // ── Per-clip audio row channels (IDs 400 + row) ──────────────────────────────
 // QA-EqPro SC-11 (Jeff's adjacent-2 ruling): audio rows no longer build a

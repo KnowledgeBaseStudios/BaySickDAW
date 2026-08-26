@@ -510,10 +510,10 @@ Lock one tab and freeze one tab before starting (needed for SHOT-048/049).
 - Why separate: The reusable view-swapper is how a window changes its entire layout.
 - Variant of: SHOT-075
 
-**SHOT-077 — Title strip with tab slots, MID/SIDE and bank pill (EQ)**
+**SHOT-077 — Title strip with tab slots (EQ)**
 - Reach: Effects ribbon slot chevron > "Pre EQ", then crop the resulting window's title strip.
-- Visible: Chrome tab-slot buttons after the Menu heading (default 74px each), the active one carrying an accent outer GLOW RING rather than a filled body; MID and SIDE buttons after them; a bank-indicator pill after those.
-- Why separate: Tab slots, MID/SIDE and the bank pill are a whole cluster that appears on only a few windows.
+- Visible: Chrome tab-slot buttons after the Menu heading (default 74px each), the active one carrying an accent outer GLOW RING rather than a filled body.  (QA-EqPro: the MID/SIDE buttons and the bank pill left the title strip - the views and the A/B pill live in the window's own top row now.)
+- Why separate: Tab slots are a cluster that appears on only a few windows.
 - Variant of: SHOT-070
 
 **SHOT-078 — Title strip Swing Mix knob and its right-click menu**
@@ -1390,115 +1390,116 @@ At least one sidechain cable routed to one strip.
 - Reach: Click the red X on a loaded slot row.
 - Visible: The confirmation prompt shown before the slot is cleared.
 
-**SHOT-244 — Pre EQ and Post EQ open together (index proof)**
+**RE-SHOOT REQUIRED (QA-EqPro, 2026-08-26):** every EQ shot below describes
+the NEW window (the KBS EQ Pro port: views + chips + rail).  The old masters
+`EQ.png` and `EQ Band Menu.png` show the retired 8-band panel and must be
+replaced; the manual's marker coordinates for `EQ` and `EQB` are approximate
+until the new masters exist.
+
+**SHOT-244 - Pre EQ and Post EQ open together (index proof)**
 - Reach: Effects > click "Pre EQ", then click "Post EQ" so both windows are open at once alongside the rack window.
 - Visible: Two EQ windows open simultaneously beside the rack index window.
 - Why separate: **The Effects page is an INDEX, not an editor.** A reader looking for EQ controls on the Effects page will otherwise be lost; this is the only way to show the one-window-per-thing model.
 
-**SHOT-245 — Pre EQ window, Mid view**
-- Reach: Ribbon > Effects, pick a channel, click "Pre EQ".
-- Visible: Title strip with a two-tab pair "Pre EQ" / "Post EQ" (Pre active), MID and SIDE buttons, hamburger Menu, and the A/B bank indicator. Below: a large log-frequency graph on the left ~75% with dB grid, the composite response curve and eight numbered coloured band handles; the right ~25% is NINE narrow columns — eight per-band (coloured dot header, filter-type combo, vertical gain fader with numeric readout, Freq knob with readout, Q knob with readout) and a ninth "Main" output-level fader column with its own readout.
+**SHOT-245 - Pre EQ window (the master for `EQ.png`)**
+- Reach: Ribbon > Effects, pick a channel, click "Pre EQ".  Add a few bands, one dynamic, one in the Side view, audio playing.
+- Visible: Title strip with the "Pre EQ" / "Post EQ" tab pair (Pre active) and the hamburger Menu.  Top row: ST / MID / SIDE view segments, the 24 band chips, "+", and the A/B pill.  The graph: dark ground, dotted grid, live spectrum, white glowing summed curve, coloured numbered handles with type glyphs (a dynamic band with its second ring + mini meter; the ghost of the other views' curves faint behind), the crosshair grab button top-right, the selected band's headphone button.  Right: the rail - BAND header, GAIN/PAN knobs, FREQ/Q numbers, the type glyph grid, ST/L/R, slope box, and the DYNAMICS section with DOWN/UP, THR/RATIO/ATK/REL and the GR meter.
 
-**SHOT-246 — Post EQ window**
+**SHOT-246 - Post EQ window**
 - Reach: Ribbon > Effects, pick a channel, click "Post EQ".
-- Visible: Identical display; the title reads "<Strip> - Post EQ8 M/S" and the Post EQ tab is the active one.
-- Why separate: Two windows that can be open at once and look identical except for the title and which tab is lit — exactly what a reader will confuse.
+- Visible: Identical layout; the title reads "<Strip> - Post EQ" and the Post EQ tab is the active one.
+- Why separate: Two windows that can be open at once and look identical except for the title and which tab is lit.
 - Variant of: SHOT-245
 
-**SHOT-247 — EQ window, Side view**
-- Reach: Pre EQ window > click the SIDE button in the title strip.
-- Visible: Same layout, SIDE active and MID inactive; band positions and curve are the side channel's, which usually differ from Mid.
-- Why separate: The only cue that you are editing a different set of bands is one button state.
+**SHOT-247 - EQ window, Side view with ghost**
+- Reach: Pre EQ window > click SIDE in the view row, with bands living in more than one view.
+- Visible: SIDE active; the Side bands full-strength; the Stereo/Mid views' curves and dots faint (the ghost); chips whose bands live elsewhere wear a tiny M or S tick.
+- Why separate: The ghost is the only cue the other half still exists; without it a reader thinks their bands vanished.
 - Variant of: SHOT-245
 
-**SHOT-248 — EQ, flat / all bands default**
-- Reach: Pre EQ window > Menu > "Reset All Bands to Default".
-- Visible: Flat response line across the graph, all eight handles on the 0 dB line at their default frequencies, all gain faders centred.
-- Why separate: The blank-slate state — what a reader sees on a brand-new strip.
+**SHOT-248 - EQ, out-of-the-box state**
+- Reach: Pre EQ window > Menu > Presets > "Default".
+- Visible: Flat response line, eight handles on the zero line at the home frequencies (40 to 12.5k), bands 9-24 off in the chip row.
+- Why separate: The blank-slate state - what a reader sees on a brand-new strip.
 - Variant of: SHOT-245
 
-**SHOT-249 — EQ band right-click menu**
-- Reach: Pre EQ window > right-click directly on one of the numbered band handles in the graph.
-- Visible: Submenus "Filter Type", "Slope / Order", "Channel", "Automate"; sep; "Make Dynamic" (ticked when on), "Dynamic Params..."; sep; "Reset Band".
+**SHOT-249 - EQ band right-click menu (the master for `EQ Band Menu.png`)**
+- Reach: Pre EQ window, STEREO view > right-click a band handle.
+- Visible: Submenus "Type", "Slope" (filter bands), "Channel" (Stereo view only), "Move to", "Dynamic"; then "Listen", "Isolate", "Mute"; sep; "Reset Band", "Delete Band".  The menu opens AT THE MOUSE.
 
-**SHOT-250 — EQ band menu, Filter Type submenu**
-- Reach: Right-click a band handle > hover "Filter Type".
-- Visible: Bell, Low Pass, High Pass, Low Shelf, Hi Shelf, Notch, Off, Band Pass, Tilt (current ticked).
+**SHOT-250 - EQ band menu, Type submenu**
+- Reach: Right-click a band handle > hover "Type".
+- Visible: Bell, Low Pass, High Pass, Low Shelf, High Shelf, Notch, Band Pass, Tilt (current ticked; no "Off" - delete is the off).
 
-**SHOT-251 — EQ band menu, Slope / Order submenu**
-- Reach: Right-click a band handle > hover "Slope / Order".
-- Visible: Center-2 (12 dB/oct), Steep-4 (24 dB/oct), Steep-6 (36 dB/oct), Steep-8 (48 dB/oct), Gentle-4 (LR 24), Gentle-6 (LR 36), Gentle-8 (LR 48).
+**SHOT-251 - EQ band menu, Slope submenu**
+- Reach: Right-click a FILTER band's handle > hover "Slope".
+- Visible: 6 dB/oct, 12 dB/oct, 18 dB/oct, 24 dB/oct, 36 dB/oct, 48 dB/oct, 72 dB/oct, 96 dB/oct, Brickwall (current ticked).
 
-**SHOT-252 — EQ band menu, Channel submenu**
-- Reach: Right-click a band handle > hover "Channel".
-- Visible: Stereo, Mid, Side, L Only, R Only (current ticked).
+**SHOT-252 - EQ band menu, Channel + Move to (Stereo view)**
+- Reach: Stereo view > right-click a band handle > hover "Channel", then "Move to".
+- Visible: Channel offers Stereo / Left / Right only; Move to offers "Mid view" / "Side view".  In the Mid or Side view the Channel submenu is ABSENT and Move to offers the other two views.
+- Why separate: The picker deliberately never offers Mid/Side - the views carry that - and readers of any other EQ will look for them here.
 
-**SHOT-253 — EQ band menu, Automate submenu**
-- Reach: Right-click a band handle > hover "Automate".
-- Visible: Freq, Gain, Q, Type, On, Slope, Mute, Solo, Channel.
+**SHOT-253 - EQ, dynamic band engaged**
+- Reach: DYN on a bell, direction DOWN, THR pulled down, audio playing.
+- Visible: The dashed EXTENT curve outside the live curve (it moves with THR), the handle's mini GR meter filling, the rail's GR meter agreeing, DOWN lit in the direction row.
+- Why separate: A second dotted curve with no legend anywhere - and the proof the two meters read the same movement.
+- Variant of: SHOT-245
 
-**SHOT-254 — EQ band menu, disabled in Linear modes**
-- Reach: EQ window > Menu > Processing Mode > "Linear Phase", then right-click a band handle.
-- Visible: The Channel row RELABELS itself to "Channel  (disabled in Linear modes)" with greyed submenu items, and "Make Dynamic  (disabled in Linear modes)" is greyed too.
-- Why separate: Rows change their own labels and grey out based on a setting made in a DIFFERENT menu — impossible to guess.
-- Variant of: SHOT-249
+**SHOT-254 - EQ, EXT sidechain pick**
+- Reach: A dynamic band selected, a source routed into one of the strip's receive slots > click EXT on the rail.
+- Visible: A menu listing "This band's own input" and the four receive lines by their routed source names (unrouted lines greyed "not routed").
 
-**SHOT-255 — EQ options menu (hamburger)**
+**SHOT-255 - EQ options menu (hamburger)**
 - Reach: Pre EQ window > click the hamburger Menu in the title strip.
-- Visible: "Reset All Bands to Default"; sep; "A/B Compare  (swap to B bank)", "Copy A -> B  (seed spare bank)", "Lock both banks (freeze A and B)"; sep; "Heatmap overlay (frequency heat over time)", "Phase curve overlay (phase shift vs freq)"; sep; "Anti-cramping (2x OS)"; sep; "Processing Mode" submenu; sep; "Linear Phase Precision (Linear Phase mode)" submenu, "IIR Mod Speed" submenu, "Proportional Q (analog console feel)".
+- Visible: "Processing Mode" submenu; "Oversampling 2x", "Proportional Q"; sep; "Auto-Gain" submenu, "Output Trim" submenu; sep; "Gain Scale", "Analyser", "View" submenus; sep; "Keyboard & Mouse...", "Reset All Bands"; sep; "EQ Match...", "Presets" submenu.
 
-**SHOT-256 — EQ options, Processing Mode submenu**
-- Reach: Pre EQ window > Menu > hover "Processing Mode".
-- Visible: Standard (minimum-phase), Linear Phase (zero phase shift, more CPU), HQ+ (oversampled), HQ Linear (oversampled + linear-phase), HQ Extended (low-latency linear) — **each with a LIVE latency readout appended like "[+2048 sp]".**
-- Why separate: The bracketed latency numbers are computed live and are a whole concept to explain.
+**SHOT-256 - EQ options, Processing Mode submenu**
+- Reach: Menu > hover "Processing Mode".
+- Visible: Zero Latency, Natural Phase, Linear Low, Linear Medium, Linear High, Linear Very High, Linear Maximum - **each with its real delay computed at the session rate, like "(35 ms (1535 sp))".**
+- Why separate: The figures are computed live from the engine's own constants - a whole concept to explain.
 
-**SHOT-257 — EQ options, Linear Phase Precision submenu**
-- Reach: Pre EQ window > Menu > hover "Linear Phase Precision (Linear Phase mode)".
-- Visible: 256 (low CPU), 512, 1024, 2048 (default), 4096 (high).
+**SHOT-257 - EQ, spectrum grab armed**
+- Reach: Click the crosshair top-right of the graph, music with a resonance playing, hover empty graph.
+- Visible: The crosshair lit, the found-peak marker (circle + drop line + "N Hz grab" readout) holding steady on the resonance.
+- Why separate: The marker only exists while armed - the arming model needs its picture.
 
-**SHOT-258 — EQ options, IIR Mod Speed submenu**
-- Reach: Pre EQ window > Menu > hover "IIR Mod Speed".
-- Visible: Instant (~1 ms), Fast, Medium, Slow, Slowest (~50 ms).
+**SHOT-258 - EQ Match panel**
+- Reach: Menu > "EQ Match...".
+- Visible: The floating panel over the graph's right edge - Capture Current, Capture Reference (SC), Load Reference File..., the SMOOTH slider and BANDS counter, the status line, Match and Close, with the two capture lights.
 
-**SHOT-259 — EQ Dynamic Params popout**
-- Reach: Right-click a Bell/Shelf/Tilt band handle > "Make Dynamic", then right-click it again > "Dynamic Params...".
-- Visible: A ~380x168 CallOutBox with an arrow pointing at the band handle; header "Dynamic - Band <n>"; five rotary knobs with text boxes below — Threshold, Ratio, Attack, Release, Range (bipolar, double-click snaps to 0); a sidechain source dropdown button under them; a tall live gain-reduction meter on the right with a 0 dB centre line.
+**SHOT-259 - EQ Presets submenu**
+- Reach: Menu > hover "Presets".
+- Visible: "Default" first, then the factory categories (Cleanup / Vocals / Drums / Bass / Master) as submenus, any user presets, and "Save Preset...".
 
-**SHOT-260 — EQ, dynamic band on the curve**
-- Reach: Make a band dynamic, set a non-zero Range, and play audio through the strip.
-- Visible: The band drawn with a DOTTED ghost outline showing the range endpoint alongside the solid live curve, and the handle moving with the gain reduction.
-- Why separate: A second dotted curve appears on the graph with **no legend anywhere.**
-- Variant of: SHOT-245
-
-**SHOT-261 — EQ, spectrum analyser running**
+**SHOT-260 - EQ, spectrum analyser running**
 - Reach: Pre EQ window with audio playing through the strip.
-- Visible: A translucent grey PRE-EQ spectrum drawn behind and a coloured POST-EQ spectrum in front, both under the response curve.
+- Visible: A translucent grey PRE spectrum behind and the app-yellow POST spectrum in front, both under the white curve.
 - Why separate: Two overlaid spectra that are easy to read as one.
 - Variant of: SHOT-245
 
-**SHOT-262 — EQ, heatmap overlay on**
-- Reach: Pre EQ window > Menu > "Heatmap overlay (frequency heat over time)", with audio playing.
-- Visible: A frequency-over-time heat wash drawn behind the curve in the graph area.
+**SHOT-261 - EQ, spectrogram on**
+- Reach: Menu > View > "Spectrogram", with audio playing.
+- Visible: The scrolling heat-mapped history (blue through cyan and yellow into red) behind the curve.
 - Variant of: SHOT-245
 
-**SHOT-263 — EQ, phase curve overlay on**
-- Reach: Pre EQ window > Menu > "Phase curve overlay (phase shift vs freq)".
-- Visible: A second curve showing phase shift versus frequency drawn over the graph.
+**SHOT-262 - EQ, phase overlay + piano strip on**
+- Reach: Menu > View > "Phase Overlay" and "Piano Strip".
+- Visible: The orange phase curve over the graph, and the piano strip along the bottom with every C named.
 - Variant of: SHOT-245
 
-**SHOT-264 — EQ bank indicator, A vs B**
-- Reach: Capture the indicator at the right of the title strip, then Menu > "A/B Compare" and capture again.
-- Visible: A small pill reading "A Bank" in GREEN, then "B Bank" in RED after the swap. Clicking the pill itself swaps banks.
-- Why separate: A two-state coloured indicator that changes what every control on the page is editing.
+**SHOT-263 - EQ A/B pill, A vs B**
+- Reach: Capture the pill at the right of the chip row, click it, capture again.
+- Visible: "A" (dim) then "B" (lit yellow) after the swap; right-click shows "Copy A to B" / "Lock banks".
+- Why separate: A two-state control that changes what every band on the page is.
 
-**SHOT-265 — EQ band hover panel**
-- Reach: Pre EQ window > hover the mouse over a band handle without clicking.
-- Visible: A three-column panel drawn INSIDE the graph — band info (type, freq, gain, Q, channel routing, on/mute/solo), dynamic parameters, and a graphical gain-reduction meter.
-- Why separate: A rich in-graph panel, not a normal tooltip; it carries reference content a manual page has to reproduce.
+**SHOT-264 - EQ drag readout + hover panel**
+- Reach: Drag a band (capture the floating readout), then release and hover it.
+- Visible: While dragging - "1.02 kHz   C6 +2c   +4.5 dB   Q 1.41" floating at the handle; on hover - the band summary line (band number, frequency, gain, live GR when dynamic).
 
-**SHOT-266 — EQ readout inline edit**
-- Reach: Double-click one of the small numeric readouts under a gain fader, freq knob or Q knob in the right panel.
-- Visible: A small text editor drawn over that readout, pre-filled with the current value and select-all'd, awaiting Enter or Escape.
+**SHOT-265 - EQ readout inline edit**
+- Reach: Double-click the FREQ or Q number on the rail.
+- Visible: A small text editor over the number, pre-filled and select-all'd, awaiting Enter or Escape.
 
 ---
 

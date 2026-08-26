@@ -9279,7 +9279,7 @@ bool BuilderPage::runOfflineLoop (const RenderOptions& opts,
                                   juce::String& outErr,
                                   std::function<bool()> shouldAbort,
                                   std::function<void(double)> onProgress,
-                                  const std::function<bool (const juce::AudioBuffer<float>&, int)>& consumeBlock)
+                                  const std::function<bool (const juce::AudioBuffer<float>&, int, int)>& consumeBlock)
 {
     using Scope = RenderOptions::Scope;
 
@@ -9455,14 +9455,13 @@ bool BuilderPage::runOfflineLoop (const RenderOptions& opts,
     // the head keeps advancing - the file then starts at musical zero and
     // the content phase naturally runs `latency` samples longer, which is
     // also what lets Tail::Cut keep the real final samples instead of
-    // truncating them.  Freeze renders pass trimLeadingLatency = false: their
-    // tap is upstream of the compensation.
+    // truncating them.  The discard travels as consumeBlock's srcOffset so
+    // tap-fed sinks (stems, mix taps) drop the same samples from their own
+    // sources.  Freeze renders pass trimLeadingLatency = false: their tap is
+    // upstream of the compensation.
     juce::int64 toDiscard = opts.trimLeadingLatency
                               ? (juce::int64) juce::jmax (0, mProcessor.getLatencySamples())
                               : 0;
-    juce::AudioBuffer<float> trimScratch;
-    if (toDiscard > 0)
-        trimScratch.setSize (kNumCh, kBlk, false, true, true);
     double lastProgressMs = 0.0;   // progress throttle, see the onProgress call
     juce::int64              tailDone = 0;
     bool                     aborted  = false;
@@ -9506,23 +9505,17 @@ bool BuilderPage::runOfflineLoop (const RenderOptions& opts,
         head.advance (chunk);
 
         int consumed = chunk;
+        int srcOffset = 0;
         bool consumeOk = true;
         if (toDiscard > 0)
         {
             const int drop = (int) juce::jmin (toDiscard, (juce::int64) chunk);
             toDiscard -= drop;
             consumed = chunk - drop;
-            if (consumed > 0)
-            {
-                for (int ch = 0; ch < kNumCh; ++ch)
-                    trimScratch.copyFrom (ch, 0, buf, ch, drop, consumed);
-                consumeOk = consumeBlock (trimScratch, consumed);
-            }
+            srcOffset = drop;
         }
-        else
-        {
-            consumeOk = consumeBlock (buf, chunk);
-        }
+        if (consumed > 0)
+            consumeOk = consumeBlock (buf, srcOffset, consumed);
 
         if (! consumeOk)
         {
@@ -9674,14 +9667,14 @@ bool BuilderPage::renderToFile (const RenderOptions& opts,
             }
             return true;
         }
-        bool write (const juce::AudioBuffer<float>& b, int n)
+        bool write (const juce::AudioBuffer<float>& b, int n, int from = 0)
         {
             const juce::AudioBuffer<float>* src = &b;
-            if (gainLin != 1.0f || dither != RenderOptions::Dither::Off)
+            if (from > 0 || gainLin != 1.0f || dither != RenderOptions::Dither::Off)
             {
                 scratch.setSize (2, n, false, false, true);
                 for (int c = 0; c < 2; ++c)
-                    scratch.copyFrom (c, 0, b, juce::jmin (c, b.getNumChannels() - 1), 0, n);
+                    scratch.copyFrom (c, 0, b, juce::jmin (c, b.getNumChannels() - 1), from, n);
                 if (gainLin != 1.0f)
                     scratch.applyGain (gainLin);
 
@@ -9796,20 +9789,22 @@ bool BuilderPage::renderToFile (const RenderOptions& opts,
     const bool ok = runOfflineLoop (opts, outErr, std::move (shouldAbort),
                                     std::move (onProgress),
         [this, &opts, &sinks, &stemSinks, &mixScratch]
-        (const juce::AudioBuffer<float>& buf, int chunk) -> bool
+        (const juce::AudioBuffer<float>& buf, int srcOffset, int chunk) -> bool
         {
             if (opts.writeMainFile)
             {
                 if (opts.mixTapChannels.empty())
                 {
                     // Master output -- the original behaviour.
-                    if (! sinks[0]->write (buf, chunk))
+                    if (! sinks[0]->write (buf, chunk, srcOffset))
                         return false;
                 }
                 else
                 {
                     // Sum the requested strips' post-chain taps.  One entry is a
-                    // single consolidated track; several is Full Mix.
+                    // single consolidated track; several is Full Mix.  The taps
+                    // carry mirrored compensation delays, so the SC-10 offset
+                    // applies to them exactly as to the master buffer.
                     mixScratch.clear (0, chunk);
                     for (int chId : opts.mixTapChannels)
                     {
@@ -9817,7 +9812,7 @@ bool BuilderPage::renderToFile (const RenderOptions& opts,
                         if (src == nullptr) continue;
                         const int nch = juce::jmin (2, src->getNumChannels());
                         for (int c = 0; c < nch; ++c)
-                            mixScratch.addFrom (c, 0, *src, c, 0, chunk);
+                            mixScratch.addFrom (c, 0, *src, c, srcOffset, chunk);
                     }
                     if (! sinks[0]->write (mixScratch, chunk))
                         return false;
@@ -9832,7 +9827,7 @@ bool BuilderPage::renderToFile (const RenderOptions& opts,
             {
                 auto* src = mProcessor.getStripOutputForTap (ss.channelId);
                 if (src == nullptr) continue;
-                if (! sinks[ss.sinkIdx]->write (*src, chunk))
+                if (! sinks[ss.sinkIdx]->write (*src, chunk, srcOffset))
                     return false;
             }
             return true;
@@ -9944,7 +9939,7 @@ bool BuilderPage::renderFreezeFile (BaySickGraph::InsertKind kind, int index,
     const bool ok = runOfflineLoop (opts, outErr, std::move (shouldAbort),
                                     std::move (onProgress),
         [&graph, &writer, &writtenSamples, &lastTapSeq, &blocksWithTap]
-        (const juce::AudioBuffer<float>&, int chunk) -> bool
+        (const juce::AudioBuffer<float>&, int, int chunk) -> bool
         {
             // The MASTER buffer the loop hands us is ignored on purpose: freeze
             // wants this insert's PRE-RACK signal, which the armed tap holds.
@@ -10098,7 +10093,7 @@ bool BuilderPage::renderKitFreezeFiles (const std::vector<juce::File>& dests,
     const bool ok = runOfflineLoop (opts, outErr, std::move (shouldAbort),
                                     std::move (onProgress),
         [kit, &writers, n, &writtenSamples, &lastRenderSeq, &blocksRendered, &silence]
-        (const juce::AudioBuffer<float>&, int chunk) -> bool
+        (const juce::AudioBuffer<float>&, int, int chunk) -> bool
         {
             // Same stale-buffer hazard the single-track tap has: the producer
             // task skips processStrips entirely on an idle block, and the strip
@@ -10208,15 +10203,19 @@ bool BuilderPage::measureRender (const RenderOptions& opts,
 
     const bool ok = runOfflineLoop (opts, outErr, std::move (shouldAbort),
                                     std::move (onProgress),
-        [&] (const juce::AudioBuffer<float>& buf, int chunk) -> bool
+        [&] (const juce::AudioBuffer<float>& buf, int srcOffset, int chunk) -> bool
         {
-            lufs.process (buf);
+            // SC-10: measure exactly the window the export writes - the trim's
+            // discard offset applies here like at every master-fed sink.
+            juce::AudioBuffer<float> win (const_cast<float**> (buf.getArrayOfReadPointers()),
+                                          buf.getNumChannels(), srcOffset, chunk);
+            lufs.process (win);
 
             const double blockStart = elapsedSecs;
             elapsedSecs += (double) chunk / sr;
 
             tp.resetPeak();
-            tp.process (buf);
+            tp.process (win);
             const float blockTpLin = tp.truePeakLinear();
             programmeTpLin = juce::jmax (programmeTpLin, blockTpLin);
 
@@ -10231,10 +10230,10 @@ bool BuilderPage::measureRender (const RenderOptions& opts,
             // transform, and fold the bins into log bands.  Blocks shorter than
             // the transform are skipped rather than zero-padded -- padding would
             // smear a partial tail block across every band.
-            if (chunk >= kFftSize && buf.getNumChannels() > 0)
+            if (chunk >= kFftSize && win.getNumChannels() > 0)
             {
-                const float* sL = buf.getReadPointer (0);
-                const float* sR = buf.getNumChannels() > 1 ? buf.getReadPointer (1) : sL;
+                const float* sL = win.getReadPointer (0);
+                const float* sR = win.getNumChannels() > 1 ? win.getReadPointer (1) : sL;
                 for (int i = 0; i < kFftSize; ++i)
                     specScratch[(size_t) i] = 0.5f * (sL[i] + sR[i]);
                 std::fill (specScratch.begin() + kFftSize, specScratch.end(), 0.0f);

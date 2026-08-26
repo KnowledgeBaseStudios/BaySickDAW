@@ -2,341 +2,227 @@
 
 **Purpose** - An equalizer changes how bright, warm, thick or thin something
 sounds by turning specific frequency ranges up or down. BaySickDAW gives every
-channel two of them: one before its effect rack and one after. Each is an
-8-band parametric EQ with a Mid bank and a Side bank, per-band stereo routing,
-optional dynamic (level-following) bands, phase modes from ordinary to fully
-linear-phase, and an A/B compare pair.
+channel two of them: one before its effect rack and one after. Each is a
+24-band parametric EQ built on the kbs engine (the KBS EQ Pro engine taken
+back, QA-EqPro 2026-08-26): three domain VIEWS (Stereo / Mid / Side), eight
+band types with slopes to 96 dB/oct plus Brickwall, Natural Phase (decramped
+bells at zero latency), five true linear-phase precisions, dynamic bands with
+the over-threshold model, a 4-line sidechain pick per band, spectrum grab,
+EQ Match, presets, and an A/B compare pair.
 
 ---
 
 ## How it operates
 
-Three classes:
-
-| Class | File | Role |
-|---|---|---|
-| `EQ8DSP` | `Source/DSP/EQ8DSP.*` | One 8-band bank. `kNumBands = 8`, up to `kMaxSections = 4` cascaded biquads per band |
-| `EQ8MsDSP` | `Source/DSP/EQ8MsDSP.*` | The thing a strip actually owns: two `EQ8DSP` instances (`mid()` and `side()`) run in series on the full stereo buffer |
-| `ParametricEQDisplay` | `Source/Standalone/SharedUI.*` | The widget: graph, band handles, right-hand column of controls, options menu |
-
-The M/S split is a **storage and view** split, not a processing one. Both inner
-banks see the full stereo buffer; each band inside them carries its own
-`channel` field (Stereo / Mid / Side / L only / R only) and does its own
-encode/decode when it needs to. The wrapper seeds the mid bank's bands to
-`Mid` and the side bank's to `Side` so the default behavior matches what the
-names say. `showMid` on the wrapper is a UI hint and does not affect audio -
-both banks always run.
-
-**Two per strip.** `BaySickGraph::InsertNode` holds `preEq` and `eq`, and the bus
-nodes hold the same pair. The strip's block order is: freeze tap, **preEq**,
-polarity, stereo width, the effect rack, **eq**, then fader / mute / solo. The
-Effects window's `Pre EQ` and `Post EQ` buttons open these two.
-
-**Per band** the DSP builds 1-4 biquad sections, or uses a zero-delay-feedback
-state-variable filter for Low Pass, High Pass and Band Pass (those keep their
-analog shape near Nyquist where a biquad cascade warps). Peaking, shelves,
-Notch, Off and Tilt stay on biquads. Frequency, gain and Q are smoothed and the
-coefficients are rebuilt at block rate only when something actually moved.
-
-**Dynamic bands** run a detector bandpass at the band's own frequency and Q
-over a saved copy of the block's *original* input, so band N's own gain
-reduction cannot feed its own detector. An envelope follower with separate
-attack and release feeds a gain computer that either compresses above the
-threshold or expands below it; the resulting gain is folded into the band's
-coefficients. Only gain-bearing types support it (Peaking, Low Shelf, High
-Shelf, Tilt). A band can be driven by one of the strip's sidechain receive
-lines instead of its own input.
-
-**Phase modes** (`EQ8DSP::PhaseMode`) change the engine:
-
-| Mode | Value | What runs | Linear FFT size |
-|---|---|---|---|
-| Standard | 0 | Ordinary minimum-phase filters | - |
-| Linear | 1 | Linear-phase FFT convolution | whatever Linear Phase Precision is set to (default 2048) |
-| HQ Plus | 2 | Anti-cramping forced on; no FFT path | - |
-| HQ Linear | 3 | Anti-cramping forced on plus linear-phase FFT | 4096, fixed |
-| HQ Extended | 4 | Linear-phase FFT, low latency | 512, fixed |
-
-Linear-phase latency is FFT size / 2 per inner bank, and the M/S wrapper runs
-Mid then Side, so a wrapped EQ reports twice that. `EQ8MsDSP::getLatencySamples`
-sums both banks and the graph feeds it into delay compensation. Every mode
-change arms an output fade scaled to the latency shift (up to 4096 samples) so
-the seam is not audible.
-
-Two things are restricted while a linear mode is active, and the menu grays
-them rather than hiding them: per-band channel routing is forced to Stereo (the
-linear-phase impulse is one combined response over L/R), and dynamic bands are
-disabled (the impulse is built from the static design).
-
-**Anti-cramping** is a 2x half-band oversampler around the whole band chain.
-Coefficients are designed at the oversampled rate so the drawn curve and the
-audible curve match. It roughly doubles this EQ's CPU, so it is off by default,
-and it reports its own small latency for compensation.
-
-**Spectrum feeds.** `EQ8MsDSP` taps a mono mixdown at the input (`preFeed`) and
-the output (`postFeed`) of its process. The display polls both at 30 Hz for the
-gray "before" and colored "after" analyzer overlays. These are seqlock feeds:
-wait-free on the audio thread, and a frame the UI catches mid-write is simply
-dropped.
-
----
+- **One engine per bank.** Every mixer node (18 buses + every insert strip)
+  carries `StripEq preEq` and `StripEq eq` (Source/DSP/StripEq.h) - each a
+  wrapper around ONE `kbs::ParametricEq` (Source/DSP/Kbs/ParametricEq.h,
+  24 bands). The old mid+side pair of 8-band engines is gone: a band's
+  domain is its own `EqChannel` (stereo / mid / side / left / right), so one
+  engine covers what the pair covered with half the instances and half the
+  linear-mode latency (the pair ran its halves in series).
+- **The engine is the vendored KBS core** (Source/DSP/Kbs/: ParametricEq,
+  EqLinearPhase, EqMatch + Devices/SVF/Oversampler/FFT/Feeds, JUCE-free,
+  namespace `kbs`), with two BaySickDAW extensions fed back as reference:
+  per-domain linear phase (a 2x2 matrix convolver, so mid/side/left/right
+  bands survive into the linear modes - the C3 defect's fix) and the
+  four-slot per-band sidechain (`EqBandParams::scSource`).
+- **Every question the display asks is answered by the engine's own
+  arithmetic** (`magnitudeAt`, `bandMagnitudeAt`, `bandExtentMagnitudeAt`,
+  `phaseAt`, `bandGrDb`). There is no drawing-side formula to drift - the
+  rule that buried the old display's defect class.
+- **Sync**: band and global values are APVTS parameters; the audio thread's
+  per-block sweep (`updateEQFromCache`, gated by the EQ dirty flag) builds
+  `kbs::EqBandParams` from a nullable pointer cache and pushes through
+  `StripEq::pushBand` / `pushGlobals` (full-struct compares - an untouched
+  band costs a compare). Processing Mode and Oversampling are parameters
+  too but NEVER ride the sweep or automation: they reallocate the linear
+  engine, so an APVTS listener applies them on the message thread under the
+  nest-aware project-load shield (SC-15).
+- **Identity fast path**: `StripEq::isIdentity` short-circuits a strip whose
+  bands are off or flat - but never when latency > 0 (a flat EQ in a linear
+  mode must impose its delay or the strip plays early against the PDC
+  solve). Latency reports exactly (`hop + (taps-1)/2`), pinned by an
+  impulse test to the sample, and enters `updateBusLatencies` as before.
+- **The proof target**: `run_eq_tests.bat` builds and runs `BaySickEqTests`
+  (Tools/EqTests, the KBS test sections + the extension regressions - 54
+  checks). Deliberately outside do_build.bat's six-exit-code gate.
 
 ## User-facing behavior
 
 ### Opening an EQ
 
-From the **Effects** window, press **Pre EQ** or **Post EQ**. Each opens in its
-own window and stays fixed to that one for its life. The window's title strip
-has a two-tab strip - clicking the other tab **opens the other window** rather
-than swapping this one's contents, so you can have both on screen at once.
-Every content tab's own window menu (Layers, Bass, Drums, Rusty Drums, Clips,
-Plugins, Vox, Inst) also carries **Pre EQ** and **Post EQ** rows pointing at
-that tab's own strip.
+Unchanged surfaces: the Effects page's Pre EQ / Post EQ buttons, the ribbon
+Effects sub-page rows, every instance page's window-row dropdown, and
+workspace restore. Each window is fixed Pre or Post for life; the title
+strip's other tab OPENS the sibling. Opening a window is the strip's EQ
+"first touch" - its parameters register then (see Parameters below).
+Window floor is 720x420 (the KBS budget - the rail provably fits at that
+minimum); growth is the WorkspaceWindow's own resize.
 
-Pre EQ shapes the sound going *into* your effects; Post EQ shapes what comes
-*out* of them. If you are just making something brighter or thinner, either
-works. If you are stopping a compressor from reacting to boomy bass, use Pre.
+### The window
+
+Top strip: the ST / MID / SIDE view row, then 24 numbered chips + "+" +
+the A/B pill. Below: the graph (analyser, optional spectrogram / phase /
+piano strip), and the collapsible right rail (click its left edge).
+
+**The views ARE the domains** (Jeff's ruling): a band made in the Side view
+works the sides; Mid view, the center; no routing gesture exists. The other
+views stay visible as a dimmed, live, non-clickable ghost. Left/Right exist
+only as a Channel pick on Stereo-view bands (amber badge); "Move to ...
+view" on the band menu re-domains a band keeping its settings. All 24 bands
+are one shared pool; a chip in another view wears a tiny M/S tick.
 
 ### The graph
 
-The big display shows frequency left (20 Hz) to right (20 kHz) and gain from
-+18 dB at the top to -18 dB at the bottom, with the curve your settings
-produce drawn across it.
+Interaction (one modifier, one meaning): drag = freq + gain; Shift = fine;
+Ctrl = gain only; Ctrl+Shift = freq only; wheel ON a dot = Q (Shift fine);
+double-click empty = add band; double-click a dot = MUTE; Alt+click =
+reset (bands 1-8 return to home frequencies 40/100/250/630/1600/4000/
+8000/12500); right-click = the band menu at the mouse; Delete removes.
+Arrows nudge, Tab cycles, hold L listens, hold G arms the grab (keys work
+while the window has focus; the headphone and crosshair buttons do the
+same jobs by mouse).
 
-| Gesture | What it does |
-|---|---|
-| Drag a handle | Left/right changes that band's frequency, up/down changes its gain. Bands with no gain (Low Pass, High Pass, Notch, Band Pass) only move sideways |
-| Hold Ctrl while dragging | Fine adjust - one tenth the sensitivity |
-| Scroll wheel over a handle | Q: up narrows, down widens |
-| Alt+click a handle | Resets that band's gain, Q, slope, mute and solo |
-| Right-click a handle | The band menu (below) |
-| Click the small `M` chip under a handle | Mutes that band |
-| Click the small `S` chip under a handle | Solos that band - only soloed bands are heard |
-| Hover a handle | A panel appears listing that band's type, frequency, gain, Q, routing and state, and, for a dynamic band, its dynamic settings and a live gain-reduction meter |
+Handles: filled dot + band number, fontaudio type glyph above (Tilt drawn),
+thin second ring + a fixed 3x22 px mini GR meter on dynamic bands, L/R
+badge, isolate glyph, the selected band's headphone latch button.
 
-Two spectrum overlays draw behind the curve: a translucent gray one showing the
-sound going into the EQ, and a brighter one showing what comes out. When they
-differ, you are seeing exactly what the EQ did.
+### The band menu
 
-### The band menu (right-click a handle)
+Type (8: Bell / Low Pass / High Pass / Low Shelf / High Shelf / Notch /
+Band Pass / Tilt), Slope (6..96 dB/oct + Brickwall; filters only;
+Brickwall is linear-phase-only and processes as 96 elsewhere), Channel
+(Stereo view only: Stereo / Left / Right), Move to view, Dynamic (Make
+Dynamic / Auto Release), Listen, Isolate, Mute, Reset Band, Delete Band.
 
-| Item | Choices |
-|---|---|
-| **Filter Type** | Bell, Low Pass, High Pass, Low Shelf, Hi Shelf, Notch, Off, Band Pass, Tilt |
-| **Slope / Order** | Center-2 (12 dB/oct), Steep-4 (24), Steep-6 (36), Steep-8 (48), Gentle-4 (LR 24), Gentle-6 (LR 36), Gentle-8 (LR 48) |
-| **Channel** | Stereo, Mid, Side, L Only, R Only. Grayed with `(disabled in Linear modes)` when a linear phase mode is on |
-| **Automate** | Freq, Gain, Q, Type, On, Slope, Mute, Solo, Channel - creates an automation lane for that band control |
-| **Make Dynamic** | Turns this band into a level-following band. Only available on Bell, Low Shelf, Hi Shelf and Tilt; grayed with `(disabled in Linear modes)` in a linear mode |
-| **Dynamic Params...** | Opens the dynamic panel (below). Only when the band is already dynamic and the EQ is a strip EQ with parameters behind it - which is what every Pre EQ and Post EQ window is |
-| **Reset Band** | Frequency back to this band's default, gain 0, Q 0.707, slope Center-2. Type, on/mute/solo and channel routing are left alone |
+### The rail
 
-Switching a band to a type that has no gain (Low Pass, High Pass, Notch, Band
-Pass, Off) zeroes its gain so the fader and the curve do not show a stale
-value.
+BAND header + colour dot; GAIN and PAN knobs (PAN splits the band's effect
+across the stereo image - gain types, Stereo view only; the drawn curve
+deliberately does not move with it); FREQ / Q drag-numbers (double-click
+types); the type glyph grid; ST/L/R; the slope box; DYNAMICS: DYN / AUTO /
+EXT, DOWN / UP direction, THR / RATIO / ATK / REL knobs and a real GR
+meter. EXT opens the strip's four sidechain receive lines by name - the
+band detects from the picked line (that line also feeds the analyser's
+Sidechain overlay and the collision tint). Rail knobs carry their
+parameter ids, so the app's global right-click (Automate / Type in value /
+MIDI Learn) works on them.
 
-### The right-hand column
+### Dynamics (the over-threshold model)
 
-One column per band, plus a ninth for the EQ's own output:
+Both directions engage when the detector EXCEEDS the threshold, by the
+excess times the ratio slope - DOWN compresses, UP expands. THR at 0 dB:
+nothing ever engages; at -60: everything, pinned. Travel is bounded by
+min(|threshold| x slope, |range|) - the dashed extent line is drawn from
+the same expression, moves with THR, and the live curve cannot cross it.
+Release can be programme-dependent (AUTO). A dynamic Notch is a
+de-resonator (a GR-driven cut bell), identity at rest.
 
-| Control | Range | Default | What it does |
-|---|---|---|---|
-| Colored dot at the top of the column | on/off | on | Click to switch that band on or off |
-| Type dropdown | Bell / LP / HP / LShelf / HShelf / Notch / Off / BPass / Tilt | Bell | Same list as the right-click menu |
-| Gain fader | -18..+18 dB | 0 | Vertical, bipolar. Double-click resets to 0. Disabled for types with no gain |
-| Freq knob | 20..20000 Hz | 40, 250, 500, 1000, 2000, 4000, 8000, 12000 Hz for bands 1-8 | Double-click resets to that band's default |
-| Q knob | 0.1..10 | 0.707 | How wide the band is. Double-click resets |
-| Main Level fader (ninth column) | -18..+18 dB | 0 | The EQ's own output trim. Double-click resets |
+### Modes
 
-Under each fader and knob is a numeric readout. Double-click a readout to type
-a value in directly; Enter commits, Escape cancels.
+Zero Latency (RBJ IIR), Natural Phase (Orfanidis decramped bells - analog
+shape at Nyquist, still zero latency), and five Linear precisions (FFT
+1024..16384; overlap-save with a Kaiser-designed FIR - no ripple, edits
+reach the audio, exact reported latency; dynamics ride minimum-phase
+deltas on the linear bed; per-band domains survive via the matrix path).
+Menu latency figures are computed from the engine's constants at the
+session rate. Oversampling 2x serves the IIR path only.
 
-### Mid and Side
+### Tools
 
-The title strip has **MID** and **SIDE** buttons. They choose which of the two
-banks the graph and the right-hand column are editing. Both banks always
-process - switching the view never changes the sound. Mid is the center of the
-stereo image (what is common to both speakers, usually vocals, bass and kick);
-Side is what differs between them (usually width and ambience). Cutting mud
-from Mid without touching Side is a common trick.
+**Listen** (band-pass audition of the band's region - also exactly what
+its detector hears) vs **Isolate** (mute the other bands). **Spectrum
+grab**: arm, the analyser max-holds, any empty click drops a pre-aimed cut
+bell on the found peak, one grab per arming. **EQ Match**: capture Current
+(pre feed) + Reference (picked SC line or a loaded audio file), fit bells
+to the difference (smoothness + band budget), replace into the current
+view's domain. **Presets**: Default (the out-of-the-box state, globals
+included), 12 factory presets (dynamic ones carry their static cut), user
+presets in `Documents/BaySickDAW/Presets/EQ` (bank-relative XML - a preset
+saved anywhere loads onto any strip's either bank). **A/B**: the chip-row
+pill; click swaps two complete setups (B starts blank), right-click Copy
+A to B / Lock; the swap lands in the parameters as one undo step.
 
-### Dynamic bands
+### The window menu
 
-Right-click a band and choose **Make Dynamic**, then **Dynamic Params...**. A
-small panel opens beside the band with:
-
-| Control | Range | Default | What it does |
-|---|---|---|---|
-| Threshold | -60..0 dB | -18 | The level at which the band starts moving |
-| Ratio | 1..20 | 2 | How much it moves |
-| Attack | 0.1..500 ms | 10 | How fast it reacts |
-| Release | 1..2000 ms | 100 | How fast it lets go |
-| Range | -18..+18 dB | 0 | Bipolar. Negative = cut when the band gets loud. Positive = boost when the band gets quiet. Zero = no movement. Double-click resets to 0 |
-| Sidechain source button | Off, or one of the strip's routed lines | Off | Drives this band from another channel instead of its own input |
-| GR readout | - | - | Live, showing the band moving |
-
-Turning Make Dynamic on always sets Range to 0, so the dotted "where it can go"
-curve starts flat and you dial in the direction yourself. Turning it off leaves
-Range alone so re-enabling brings your setting back.
-
-### The EQ window's Menu
-
-| Item | What it does |
-|---|---|
-| **Reset All Bands to Default** | Every band back to its default frequency, 0 dB, Q 0.707, Bell, Center-2, on, unmuted, unsoloed |
-| **A/B Compare (swap to A/B bank)** | Swaps to the other bank. The label tells you where the click will take you |
-| **Copy A -> B (seed spare bank)** | Copies the bank you are on into the other one, so you can start comparing from a known match |
-| **Lock both banks (freeze A and B)** | Freezes both banks so a drag cannot change either. Useful while you are listening back and forth |
-| **Heatmap overlay** | Frequency energy over time drawn behind the curve |
-| **Phase curve overlay** | Phase shift against frequency |
-| **Anti-cramping (2x OS)** | Doubles the internal sample rate so the top octave keeps its shape. Costs roughly twice the CPU and adds a little latency, which is compensated automatically. Only offered when the window is bound to a live EQ |
-| **Processing Mode** | Standard (minimum-phase) / Linear Phase / HQ+ (oversampled) / HQ Linear / HQ Extended (low-latency linear). Each entry shows the latency it adds at the current sample rate, e.g. `[+2048 sp]` |
-| **Linear Phase Precision (Linear Phase mode)** | 256 (low CPU) / 512 / 1024 / 2048 (default) / 4096 (high). Sets the FFT size used by the plain Linear Phase mode only - HQ Linear and HQ Extended keep their own fixed sizes, which is why the submenu names the mode it governs |
-| **IIR Mod Speed** | Instant (~1 ms) / Fast / Medium / Slow / Slowest (~50 ms). How quickly a knob move is applied. Slow avoids zipper noise; Instant is snappier |
-| **Proportional Q (analog console feel)** | On by default. Bell bands narrow as you boost them, the way console EQs behave. No effect on shelves, filters, notch or band pass |
-
-The title strip also carries a **bank indicator** reading `A Bank` (green) or
-`B Bank` (red). Click it to swap - it is a shortcut for A/B Compare.
-
-**Plain English on phase modes:** Standard is what every ordinary EQ does and
-is the right choice nearly always. Linear Phase keeps every frequency in
-perfect time with every other, which can help on a mix bus, but it delays the
-sound and can smear sharp transients. The `HQ` modes are the same ideas with
-oversampling on top. The latency numbers in the menu are what you are paying.
-
----
+Processing Mode (computed latencies), Oversampling 2x, Proportional Q,
+Auto-Gain (+ amount), Output Trim, Polarity Flip, Gain Scale (3/6/12/18/30),
+Analyser (pre / post / sidechain, speeds, tilt 0/3/4.5, freeze, peak hold),
+View (analyser / spectrogram / phase / piano), Keyboard & Mouse, Reset All
+Bands, EQ Match..., Presets.
 
 ## Parameters and persistence
 
-### APVTS parameters (bus and insert EQs)
+### APVTS parameters (touch-lazy, QA-EqPro SC-2 + SC-9)
 
-Per-band parameters exist for both banks and both positions. The id shape is:
+One 24-band set per bank: `{stripPrefix}_{eq_|preeq_}b{N}{Suffix}` with 18
+suffixes (Freq, Gain, Q, Type, On, Slope, Channel, Place, Mute, Isolate,
+Dynamic, Threshold, Ratio, Attack, Release, AutoRelease, Range, ScSource)
+plus 7 bank globals (`..._{eq_|preeq_}{mode|os|propq|autogain|agamt|
+outgain|polarity}`). NOTHING registers with the strip: the block (globals
++ bands 1-8) arrives on first touch - EQ window open, preset load, or the
+load-time tree scan (`restoreEqParamsFromState`) that keeps saved projects
+and their automation lanes working without a window ever opening; bands
+9-24 register one at a time on activation. Late registration adopts saved
+values via the `replaceState(copyState())` rebind. A fresh build holds
+approximately zero EQ params (previously 9,792 blank entries in every
+project file). Defaults: bands 1-8 on-and-flat (identity-skipped), the
+rest off; Threshold 0 dB; Gain/Range +-30; Q 0.1-30; the KBS home
+frequencies.
 
-```
-<mixerPrefix>_[preeq_]<mid|side>_eq<band><Suffix>
-```
-
-for example `mixer_layer_0_mid_eq3Gain` (post-rack) or
-`mixer_master_preeq_side_eq0Freq` (pre-rack). `band` is 0-7.
-
-| Suffix | Type | Range | Default |
-|---|---|---|---|
-| `Freq` | float | 20..20000 Hz | 40, 250, 500, 1000, 2000, 4000, 8000, 12000 by band |
-| `Gain` | float | -18..+18 dB | 0 |
-| `Q` | float | 0.1..10 | 0.707 |
-| `Type` | int | 0..8 | 0 (Bell) |
-| `On` | bool | - | true |
-| `Slope` | int | 0..6 | 0 |
-| `Mute` | bool | - | false |
-| `Solo` | bool | - | false |
-| `Channel` | int | 0..4 | 1 (Mid) in the mid bank, 2 (Side) in the side bank |
-| `Dynamic` | bool | - | false |
-| `Threshold` | float | -60..0 dB | -18 |
-| `Ratio` | float | 1..20 | 2 |
-| `Attack` | float | 0.1..500 ms | 10 |
-| `Release` | float | 1..2000 ms | 100 |
-| `Range` | float | -18..+18 dB | 0 |
-| `Upward` | bool | - | false |
-| `ScSource` | int | -1..999 | -1 (internal) |
-
-These parameters are the source of truth for a bus or insert EQ: they are
-re-pushed to the DSP every audio block from a pre-resolved pointer cache
-(`BaySickDAWProcessor::updateEQFromCache`). After an A/B swap the widget writes
-the newly-visible bank back into the parameters so the next block cannot undo
-the swap.
-
-`Upward` is retained scaffolding and is not user-editable - the direction is
-carried by the sign of `Range`.
-
-### Global EQ settings
-
-Main Level, Processing Mode, Linear Phase Precision, IIR Mod Speed,
-Proportional Q, Anti-cramping and the A/B bank state have **no** parameter
-mirror. The widget writes them straight onto the DSP, so the DSP's own state
-blob is where they are stored.
+Mode + os are automation-excluded (no lane can be created and a saved
+lane is refused registration) - they apply through the shielded listener.
 
 ### Saved with a project
 
-`EQ8DSP` writes an `<EQ8DSP>` tree: eight `<Band>` children carrying
-index/freq/gainDb/q/type/slope/on/muted/soloed/channel plus the dynamic fields,
-a nested `<Spare>` child holding the A/B spare bank's eight bands, and root
-properties `viewingSpare`, `mainLevel`, `iirModSpeed`, `proportionalQ`,
-`antiCramping`, `phaseMode` and `linearPrec`. A legacy `EQ6DSP` tag is still
-accepted on read. `EQ8MsDSP` nests the two inner blobs base64 under `mid` and
-`side`.
+The APVTS parameters (authoritative), plus the StripEq blob on the rack
+state (`<StripEq>`: 24 bands, the A/B spare bank under `<Spare>`,
+viewingSpare, mode/os/propq/autogain/agamt/outgain/polarity, and the
+`<View>` tree - gain scale, analyser toggles, the current domain view -
+so a window reopens the way it was left, per EQ point). Old `<EQ8MsDSP>`
+blobs fail the tag check and reset - deliberate (SC-14, pre-v1).
 
-`antiCramping` and `phaseMode` are re-applied through their setters rather than
-stored raw, because both re-prepare the filter chain and change reported
-latency. `viewingSpare` is saved so the app knows which bank the stored bands
-*are*.
+### Saved with presets
 
-`BaySickGraph::saveRackStates` writes each strip's `preEq` and `eq` blobs beside
-its rack blob into the project.
-
-### Saved with a preset
-
-An FX Rack preset (Effects window Menu > Save FX Rack Preset) carries the
-strip's four EQ parameter families - `<prefix>_mid_eq`, `<prefix>_side_eq`,
-`<prefix>_preeq_mid_eq`, `<prefix>_preeq_side_eq` - stored as suffixes with
-their values in natural units, so a preset saved on one strip loads onto
-another. Note this covers the *parameter* half only: the global settings listed
-above ride in the rack blob's EQ state rather than in these entries.
+FX Rack presets capture the strip's `_eq_*` / `_preeq_*` parameters
+(bank-relative suffixes, prefix-rewritten on load, blocks/bands ensured
+first). Page presets carry the rack blob including the StripEq state.
+User EQ presets: `Documents/BaySickDAW/Presets/EQ/*.xml`, bank-relative.
 
 ### Not saved
 
-Spectrum and heatmap history, live gain-reduction readouts, which of MID or
-SIDE the window is showing, and the lock state of a bus EQ's bands (the widget
-holds that in the UI, deliberately not in the DSP blob).
-
----
+The listen latch, grab arming, analyser freeze/peak-hold, match captures,
+and the spare-bank LOCK (deliberately session-local, as before).
 
 ## Lifetime and teardown
 
-An `EQ8MsDSP` is a plain member of the graph node that owns it - two per bus
-node and two per `InsertNode` - so it is created and destroyed with that node
-and is never separately allocated.
-
-`EffectEqWindow` holds a channel id and a Pre/Post flag and re-resolves the EQ
-on every 30 Hz tick through `EffectsPage::preEqForChannelId` /
-`EffectsPage::resolveChannelDsp`. Nothing is cached across ticks because a
-strip respawn or a project load can rebuild the node underneath the window; if
-the resolved pointer changes, the display re-binds. Until the window has
-resolved once it draws against a private display-only fallback EQ, so the curve
-is visible before the graph has built the node. Once it has resolved at least
-once, a resolve that then fails means the channel itself is gone and the window
-closes.
-
-The dynamic-parameters pop-up asks the display for the live DSP rather than
-trusting the pointer it was handed at construction, for the same reason.
-
-Ordering that matters: a phase-mode or anti-cramping change moves the reported
-latency, so the display fires `onLatencyChanged`, which the window wires to
-`BaySickGraph::updateBusLatencies` -> `setLatencySamples`. Both halves must run or
-compensation goes stale. The linear-phase processor is allocated and freed only
-from the message thread, never inside `process()`.
-
----
+StripEq lives on the graph nodes (18 bus nodes always; insert nodes with
+their strips). The window resolves its EQ per use through the live graph
+(never caches across ticks) and closes itself when the strip dies. Load
+boundaries: `resetSessionStateToDefaults` -> `resetEqStatesToDefaults`
+sweeps `StripEq::resetToDefaults` on every EQ point under the shield; the
+param default sweep covers the registered parameters. Mode changes and
+preset/rack-blob applies all run under the nest-aware shield + settle
+(the two historically unshielded paths - the EQ options menu and the
+page-preset import - were closed in this batch).
 
 ## Cross-references
 
-- **Effect Racks.md** - the six slots between Pre EQ and Post EQ, and the
-  windows that open both.
-- **Effect Modules.md** - the effects themselves.
-- **Pedalboard.md** - the pedal-style EQs in the board's last position, which
-  are separate three- and seven-band units, not this EQ.
-
----
+- `Source/DSP/Kbs/` - the vendored engine (see the header preambles; the
+  KBS-side ledger is `Files For Claude/EQ Build Notes.md`).
+- `Source/DSP/StripEq.h/.cpp` - the wrapper (sync, A/B, state, feeds).
+- `Source/Standalone/EqWindowUI/` - graph, rail, analyser, match, presets.
+- `Tools/EqTests` + `run_eq_tests.bat` - the proof target.
+- Mixer.md - strips, sends, the four sidechain receive lines.
+- Freeze and Export.md - the leading-latency trim (SC-10) and why freeze
+  renders opt out.
 
 ## Differs from Carry-Forward
 
-The Carry-Forward Reference snapshot records `NEVER-01` - per-band EQ
-parallelism - as "not actively planned; not blocked from future
-reconsideration if EQ topology changes". That still holds; nothing here
-implements it. Carry-Forward has no other EQ content, so there is no further
-delta.
-
-**Where the audit captures disagree with the code:** an earlier sweep noted
-that `EQ8DSP` omitted the A/B spare bank and `mLinearPrec` from its saved
-state, and that Linear Phase Precision was inert. Neither is true of the
-shipping code: `<Spare>`, `viewingSpare` and `linearPrec` are all serialized,
-and `EQ8DSP::linearFftSize` uses the precision to pick the plain Linear mode's
-FFT size.
+The Carry-Forward snapshot (2026-05-07) describes the 8-band EQ8DSP /
+EQ8MsDSP world: mid+side engine pairs, per-band channel pickers with
+Mid/Side entries, the block-rate dynamic EQ, the Hann-squared linear path
+with its recorded defects, eager per-strip EQ registration, and the
+ParametricEQDisplay with its own drawing formulas. All of it is replaced
+by this document's architecture (QA-EqPro, 2026-08-26).

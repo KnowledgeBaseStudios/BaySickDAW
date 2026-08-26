@@ -5544,10 +5544,10 @@ namespace
     }
 } // namespace
 
-// Generic EQ syncer.  Reads the full per-band set -- 9 static params plus the
-// 8-param Dynamic block when registered -- x 8 bands for both mid + side inner
-// EQs and applies via the standard setBand* setters (all internally CPU-guarded
-// so no-change calls are free).
+// Generic EQ syncer.  Reads the 18 band params for every REGISTERED band of
+// one StripEq bank (unregistered bands cache null and skip - the per-band
+// lazy contract) plus the five bank globals, and applies via pushBand /
+// pushGlobals (compared wrapper-side, so no-change calls are free).
 //
 // AUDIO THREAD.  Every value arrives through the pre-resolved pointer cache
 // (see mEqParamCache in the header) -- no APVTS map lookup, no juce::String, no

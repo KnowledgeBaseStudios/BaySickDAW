@@ -323,3 +323,59 @@ failure box `Export failed`; a take with no audio reports `No audio for this tak
 **The recon's Target names were given without their parentheses. The source
 literals carry them** (`Source/DSP/LoudnessSpec.h:54-57`). ITU-R BS.1770-4 is
 deliberately absent from the list.
+
+
+---
+
+## THE EQ WINDOW (QA-EqPro 2026-08-26, EffectWindows.cpp + EqWindowUI/)
+
+Tab pair: `Pre EQ` / `Post EQ`.  Window titles: `<Strip> - Pre EQ` /
+`<Strip> - Post EQ` (falls back to `Pre EQ` / `Post EQ` with no strip name).
+
+View row segments: `ST` / `MID` / `SIDE`.  Chip row: bands numbered `1`..`24`,
+the add control is `+`, the A/B pill reads `A` or `B`.
+
+Rail captions: `BAND <n>` / `NO BAND`; knob captions `GAIN` `PAN`; numbers
+`FREQ` `Q`; dynamics header `DYNAMICS`; toggles `DYN` `AUTO` `EXT`; direction
+segments `DOWN` / `UP`; dyn knob captions `THR` `RATIO` `ATK` `REL`; the pan
+readout is `C` or `L<n>` / `R<n>`, the release readout shows `auto` under
+AUTO.  Slope box rows: `6 dB/oct` `12 dB/oct` `18 dB/oct` `24 dB/oct`
+`36 dB/oct` `48 dB/oct` `72 dB/oct` `96 dB/oct` `Brickwall`.
+
+Band menu: submenus `Type` (`Bell` `Low Pass` `High Pass` `Low Shelf`
+`High Shelf` `Notch` `Band Pass` `Tilt`), `Slope` (rows above), `Channel`
+(`Stereo` `Left` `Right` - Stereo view only), `Move to` (`Stereo view`
+`Mid view` `Side view`), `Dynamic` (`Make Dynamic` / `Auto Release`); rows
+`Listen` `Isolate` `Mute`; sep; `Reset Band` `Delete Band`.
+
+Window menu: `Processing Mode` (rows `Zero Latency` `Natural Phase`
+`Linear Low` `Linear Medium` `Linear High` `Linear Very High`
+`Linear Maximum`, each suffixed `   (<n> ms (<n> sp))` computed at the
+session rate, or `   (0 ms)`); `Oversampling 2x`; `Proportional Q`;
+`Auto-Gain` (submenu: `Auto-Gain`, then `25%` `50%` `75%` `100%`);
+`Output Trim` (`Polarity Flip`, then `-12 dB` `-6 dB` `-3 dB` `0 dB`
+`+3 dB` `+6 dB` `+12 dB`); `Gain Scale` (`+/-3 dB` .. `+/-30 dB`);
+`Analyser` (`Pre` `Post` `Sidechain`; `Fast` `Medium` `Slow`;
+`Tilt 4.5 dB/oct` `Tilt 3 dB/oct` `Flat`; `Freeze` `Peak Hold`); `View`
+(`Analyser` `Spectrogram` `Phase Overlay` `Piano Strip`);
+`Keyboard & Mouse...`; `Reset All Bands`; `EQ Match...`; `Presets`
+(`Default` first, factory categories `Cleanup` `Vocals` `Drums` `Bass`
+`Master` as submenus, user presets, `Save Preset...`).
+
+EXT picker rows: `This band's own input`, then `Receive <n> - <source>` or
+`Receive <n> - not routed`.
+
+Match panel: title `EQ MATCH`; buttons `Capture Current`,
+`Capture Reference (SC)`, `Load Reference File...`, `Match`, `Close`;
+labels `SMOOTH` `BANDS`; opening status "Play the strip, capture Current.
+Feed the reference into a receive slot and capture it, or load a file.";
+capturing "Capturing... play the passage, press again to stop."; done
+`Captured.` / "Too short - nothing captured."; result recipe
+`<n> bands  -  residual <x> dB RMS (was <y>)`.
+
+Save preset prompt: title `Save EQ Preset`, message `Name it:`, buttons
+`Save` / `Cancel`.  Keyboard card title `Keyboard & Mouse` (body is the
+twelve-line map in EffectWindows.cpp; quote from source when needed).
+
+Empty-state and dot decorations: L/R badge letters `L` / `R`; the grab
+readout suffix is `  grab` after the Hz figure.

@@ -12090,7 +12090,7 @@ click to toggle - is the per-effect A/B, and
 <span id="FXI-10"></span><b>the red cross</b> clears the slot
 entirely.</p>
 </div></div>
-  <div class="l3"><p class="howworks"><b>How this works:</b> <a data-level="weeds" href="#IMP-14">EQ8</a>.</p>
+  <div class="l3"><p class="howworks"><b>How this works:</b> <a data-level="weeds" href="#IMP-14">The kbs EQ engine</a>.</p>
 <div class="tp" id="IMP-62"><h4 class="topichead">Effect racks</h4>
 <p>Six slots per channel, in series. A slot's window is keyed on the
 <em>effect</em>, not on the slot position &mdash; which is why reordering the
@@ -12441,468 +12441,316 @@ Plugin</b> appears only while a hosted plugin is down.</p>
   <div class="l1"><p class="lede">The eight-band EQ window. All eight bands are the same control set, so each band control is ONE callout per the within-image rule.</p>
   <figure><div class="views"><div class="vu"><div class="shot" data-screen="EQ" data-view="0" data-file="EQ.png" data-rect="0,0,100,100" data-dims="1307,564" style=""><img src="figures/EQ.png" alt="EQ Window" width="1307" height="564" style="" loading="lazy"></div></div></div></figure>
   <table class="callouts"><thead><tr><th style="width:3rem">#</th><th>On screen</th></tr></thead><tbody>
-<tr id="row-EQ-1"><td><button type="button" class="n" data-back="EQ-1" title="Show it on the picture">1</button></td><td><code>Pre EQ</code> / <code>Post EQ</code> - which of the strip two EQs this window is showing</td></tr>
-<tr id="row-EQ-2"><td><button type="button" class="n" data-back="EQ-2" title="Show it on the picture">2</button></td><td><code>MID</code> / <code>SIDE</code> - the mid/side view. Only meaningful once a band is switched to a M/S channel</td></tr>
-<tr id="row-EQ-3"><td><button type="button" class="n" data-back="EQ-3" title="Show it on the picture">3</button></td><td><code>A Bank</code> - the EQ own A/B snapshot pair, independent of any other A/B in the app</td></tr>
-<tr id="row-EQ-4"><td><button type="button" class="n" data-back="EQ-4" title="Show it on the picture">4</button></td><td>Grid - lines every 6 dB from -18 to +18; only 0 and +/-12 / +/-18 get text labels</td></tr>
-<tr id="row-EQ-5"><td><button type="button" class="n" data-back="EQ-5" title="Show it on the picture">5</button></td><td>Frequency scale - 20 Hz to 20 kHz, logarithmic</td></tr>
-<tr id="row-EQ-6"><td><button type="button" class="n" data-back="EQ-6" title="Show it on the picture">6</button></td><td>A band handle - numbered <code>1</code>..<code>8</code>, coloured per band, dragged on the curve. Every band has one</td></tr>
-<tr id="row-EQ-7"><td><button type="button" class="n" data-back="EQ-7" title="Show it on the picture">7</button></td><td>Band <code>M</code> - mute that band. Every band has one</td></tr>
-<tr id="row-EQ-8"><td><button type="button" class="n" data-back="EQ-8" title="Show it on the picture">8</button></td><td>Band <code>S</code> - solo that band. Every band has one</td></tr>
-<tr id="row-EQ-9"><td><button type="button" class="n" data-back="EQ-9" title="Show it on the picture">9</button></td><td>Band type box - <code>Bell</code> / <code>LP</code> / <code>HP</code> / <code>LShelf</code> / <code>HShelf</code> / <code>Notch</code> / <code>Off</code> / <code>BPass</code> / <code>Tilt</code>, sets the type directly. The band MENU opens on right-clicking a handle in the curve (<em>see <a href="#EQB">EQ Band Menu</a></em>)</td></tr>
-<tr id="row-EQ-10"><td><button type="button" class="n" data-back="EQ-10" title="Show it on the picture">10</button></td><td>Band gain fader - every band has one</td></tr>
-<tr id="row-EQ-11"><td><button type="button" class="n" data-back="EQ-11" title="Show it on the picture">11</button></td><td>Band gain readout - <code>0.0</code> dB</td></tr>
-<tr id="row-EQ-12"><td><button type="button" class="n" data-back="EQ-12" title="Show it on the picture">12</button></td><td>Band frequency knob and readout - <code>40</code> / <code>250</code> / <code>500</code> / <code>1.0k</code> / <code>2.0k</code> / <code>4.0k</code> / <code>8.0k</code> / <code>12k</code> are the eight defaults</td></tr>
-<tr id="row-EQ-13"><td><button type="button" class="n" data-back="EQ-13" title="Show it on the picture">13</button></td><td>Band Q knob and readout - <code>0.71</code> default</td></tr>
-<tr id="row-EQ-14"><td><button type="button" class="n" data-back="EQ-14" title="Show it on the picture">14</button></td><td><code>Main</code> column - the output trim, right of the eight bands</td></tr>
+<tr id="row-EQ-1"><td><button type="button" class="n" data-back="EQ-1" title="Show it on the picture">1</button></td><td><code>Pre EQ</code> / <code>Post EQ</code> - which of the strip&#x27;s two EQs this window is showing (QA-EqPro window)</td></tr>
+<tr id="row-EQ-2"><td><button type="button" class="n" data-back="EQ-2" title="Show it on the picture">2</button></td><td><code>ST</code> / <code>MID</code> / <code>SIDE</code> - the three domain views. The view a band lives in IS its domain; the other views ghost</td></tr>
+<tr id="row-EQ-3"><td><button type="button" class="n" data-back="EQ-3" title="Show it on the picture">3</button></td><td>The band chips - 24 numbered pills, one shared pool across the views, plus <code>+</code></td></tr>
+<tr id="row-EQ-4"><td><button type="button" class="n" data-back="EQ-4" title="Show it on the picture">4</button></td><td>The <code>A</code>/<code>B</code> pill - two complete setups; click swaps, right-click Copy A to B / Lock</td></tr>
+<tr id="row-EQ-5"><td><button type="button" class="n" data-back="EQ-5" title="Show it on the picture">5</button></td><td>Grid + frequency scale - gain scale selectable 3..30 dB; 20 Hz to 20 kHz, logarithmic</td></tr>
+<tr id="row-EQ-6"><td><button type="button" class="n" data-back="EQ-6" title="Show it on the picture">6</button></td><td>A band handle - numbered dot, type glyph above, dynamic ring + mini GR meter, L/R badge</td></tr>
+<tr id="row-EQ-7"><td><button type="button" class="n" data-back="EQ-7" title="Show it on the picture">7</button></td><td>The live spectrum - pre dim / post bright / sidechain, with spectrogram, phase and piano opt-ins</td></tr>
+<tr id="row-EQ-8"><td><button type="button" class="n" data-back="EQ-8" title="Show it on the picture">8</button></td><td>The headphone button - latches band LISTEN on the selected band</td></tr>
+<tr id="row-EQ-9"><td><button type="button" class="n" data-back="EQ-9" title="Show it on the picture">9</button></td><td>The crosshair - arms the spectrum grab (max-held peaks; one grab per arming)</td></tr>
+<tr id="row-EQ-10"><td><button type="button" class="n" data-back="EQ-10" title="Show it on the picture">10</button></td><td>Rail <code>GAIN</code> / <code>PAN</code> knobs - the band&#x27;s gain and its stereo placement</td></tr>
+<tr id="row-EQ-11"><td><button type="button" class="n" data-back="EQ-11" title="Show it on the picture">11</button></td><td>Rail <code>FREQ</code> / <code>Q</code> drag-numbers - drag or double-click to type</td></tr>
+<tr id="row-EQ-12"><td><button type="button" class="n" data-back="EQ-12" title="Show it on the picture">12</button></td><td>Rail type glyph grid + <code>ST</code>/<code>L</code>/<code>R</code> + slope box (6..96 dB/oct + <code>Brickwall</code>)</td></tr>
+<tr id="row-EQ-13"><td><button type="button" class="n" data-back="EQ-13" title="Show it on the picture">13</button></td><td>Rail <code>DYNAMICS</code> - <code>DYN</code>/<code>AUTO</code>/<code>EXT</code>, <code>DOWN</code>/<code>UP</code>, <code>THR</code>/<code>RATIO</code>/<code>ATK</code>/<code>REL</code>, GR meter</td></tr>
+<tr id="row-EQ-14"><td><button type="button" class="n" data-back="EQ-14" title="Show it on the picture">14</button></td><td>The window menu - modes with computed latencies, analyser/view options, EQ Match, presets</td></tr>
 </tbody></table></div>
   <div class="l2">﻿<p>An equalizer - EQ - turns parts of the frequency range up or down: more
-bass, less harshness, air on top. This one gives you eight independent
-<em>bands</em> - eight grabbable handles on a curve, each in charge of its
-own region - drawn over a live picture of your actual sound. Every channel
-has two of these: one before its effects rack, one after.</p>
+bass, less harshness, air on top. This one gives you up to twenty-four
+independent <em>bands</em> - grabbable handles on a curve, each in charge of
+its own region - drawn over a live picture of your actual sound. Every
+channel has two of these: one before its effects rack, one after.</p>
 
 
 <div class="cl"><div class="viewlabel">Which EQ, which view</div>
-<div class="shot cropview m2c" data-screen="EQ" data-m2key="EQ:0" data-file="EQ.png" data-rect="4.94,0,28.98,7.02" data-dims="1307,564" style="width:379px;aspect-ratio:9.5666"><img src="figures/EQ.png" alt="" style="position:absolute;width:345.066%;left:-17.046%;top:-0.000%" loading="lazy"><button type="button" class="marker" data-goto="EQ-1" style="left:24.60%;top:55.84%">1</button><button type="button" class="marker" data-goto="EQ-2" style="left:63.84%;top:53.56%">2</button><button type="button" class="marker" data-goto="EQ-3" style="left:80.40%;top:49.00%">3</button></div>
+<div class="shot cropview m2c" data-screen="EQ" data-m2key="EQ:0" data-file="EQ.png" data-rect="4.94,0,28.98,7.02" data-dims="1307,564" style="width:379px;aspect-ratio:9.5666"><img src="figures/EQ.png" alt="" style="position:absolute;width:345.066%;left:-17.046%;top:-0.000%" loading="lazy"><button type="button" class="marker" data-goto="EQ-1" style="left:24.36%;top:49.86%">1</button><button type="button" class="marker" data-goto="EQ-2" style="left:7.11%;top:128.21%">2</button><button type="button" class="marker" data-goto="EQ-3" style="left:148.59%;top:128.21%">3</button><button type="button" class="marker" data-goto="EQ-4" style="left:310.77%;top:128.21%">4</button></div>
 
 
 <p id="EQ-1"><b>Pre EQ / Post EQ</b> shows which of the channel's two EQs
 this window is editing - tone going INTO the effects, or tone coming out
 of them.</p>
 
-<p id="EQ-2"><b>MID / SIDE</b> switches the view between the center of
-the stereo picture (where voices and bass live) and its edges (where the
-width lives). It becomes meaningful once a band is routed to a
-mid-or-side channel - then you can brighten only the edges, or clean up
-only the middle, which ordinary EQ cannot do.</p>
+<p id="EQ-2"><b>ST / MID / SIDE</b> are the three <em>views</em>, and the
+view you are in decides what a band works on: make a band in the SIDE
+view and it shapes only the edges of the stereo picture (where the width
+lives); the MID view shapes only the center (where voices and bass live);
+ST is the everyday view where bands work the whole signal. No routing
+menus - the view is the decision. Whichever view you are in, the other
+views' curves stay faintly visible as a ghost, so you always see what the
+other half is doing.</p>
 
-<p id="EQ-3"><b>A Bank</b> is the EQ's own A/B pair - two complete curves
-to flip between while listening. Independent of every other A/B in the
-app.</p>
+<p id="EQ-3"><b>The band chips</b> - one numbered pill per band, all
+twenty-four in one shared pool across the views. Click selects,
+double-click mutes an active band or wakes an off one, right-click opens
+the band's menu, and <b>+</b> adds a band in the middle. A chip whose band
+lives in another view wears a tiny M or S tick.</p>
+
+<p id="EQ-4"><b>A/B</b> is the EQ's own compare pair - two complete
+setups to flip between while listening (B starts blank). Right-click it
+to copy A into B or to lock the pair. One Ctrl+Z undoes a flip.</p>
 
 </div>
 <div class="cl"><div class="viewlabel">The curve area</div>
-<div class="shot cropview m2c" data-screen="EQ" data-m2key="EQ:1" data-file="EQ.png" data-rect="0.36,6.84,71.57,92.43" data-dims="1307,564" style="width:935px;aspect-ratio:1.7944"><img src="figures/EQ.png" alt="" style="position:absolute;width:139.723%;left:-0.503%;top:-7.400%" loading="lazy"><button type="button" class="marker" data-goto="EQ-4" style="left:55.39%;top:30.47%">4</button><button type="button" class="marker" data-goto="EQ-5" style="left:48.40%;top:97.54%">5</button><button type="button" class="marker" data-goto="EQ-6" style="left:35.80%;top:47.63%">6</button><button type="button" class="marker" data-goto="EQ-7" style="left:35.60%;top:55.18%">7</button><button type="button" class="marker" data-goto="EQ-8" style="left:38.00%;top:55.51%">8</button></div>
+<div class="shot cropview m2c" data-screen="EQ" data-m2key="EQ:1" data-file="EQ.png" data-rect="0.36,6.84,71.57,92.43" data-dims="1307,564" style="width:935px;aspect-ratio:1.7944"><img src="figures/EQ.png" alt="" style="position:absolute;width:139.723%;left:-0.503%;top:-7.400%" loading="lazy"><button type="button" class="marker" data-goto="EQ-5" style="left:55.39%;top:52.10%">5</button><button type="button" class="marker" data-goto="EQ-6" style="left:41.41%;top:35.88%">6</button><button type="button" class="marker" data-goto="EQ-7" style="left:76.34%;top:70.50%">7</button><button type="button" class="marker" data-goto="EQ-8" style="left:35.83%;top:33.71%">8</button><button type="button" class="marker" data-goto="EQ-9" style="left:102.89%;top:9.91%">9</button></div>
 
 
-<p id="EQ-4"><b>The grid</b> rules every 6 dB from -18 to +18 (labels on
-0 and the 12s and 18s), over <span id="EQ-5"></span><b>a frequency scale</b>
-running 20 Hz to 20 kHz - the whole range of hearing, spaced the way ears
-hear it. <b>The live spectrum</b> draws behind
-the curve whenever sound flows, so your moves land on the actual music -
-you can SEE the harsh peak you are hunting. Heatmap and phase overlays
-are available as opt-ins.</p>
+<p id="EQ-5"><b>The grid</b> rules the gain scale (pick 3 to 30 dB in the
+menu - the small scales make mastering-size moves draggable) over
+<b>a frequency scale</b> running 20 Hz to 20 kHz, spaced the way ears
+hear it.</p>
 
-<p id="EQ-6"><b>The band handles</b> - numbered 1 to 8, colored - are the
+<p id="EQ-6"><b>The band handles</b> - numbered, colored - are the
 instrument: drag one to set its frequency (left-right) and its boost or
-cut (up-down) in a single gesture. Right-click a handle for its deeper
-menu, covered on the Band Menu page.
-A small amber badge (<code>St</code> /
-<code>M</code> / <code>S</code> / <code>L</code> / <code>R</code>)
-appears on a handle routed away from the view's default channel.</p>
+cut (up-down) in one gesture. Hold Shift for fine moves, Ctrl for gain
+only, Ctrl+Shift for frequency only; the wheel over a handle sets its
+width (Q); Alt-click resets it; double-click MUTES it (delete lives in
+the menu and on the Delete key); double-click empty space adds a band
+there. The small glyph above each dot is its shape, and a dynamic band
+wears a thin second ring plus a tiny meter showing how far it has moved
+right now.</p>
 
-<p id="EQ-7"><b>M</b> mutes a band; <span id="EQ-8"></span><b>S</b>
-solos it - and band solo is the great EQ teacher: solo a band, sweep it
-across the range, and you hear exactly what lives where. Find the ugly
-resonance by ear, then cut it.</p>
+<p id="EQ-7"><b>The live spectrum</b> draws behind the curve whenever
+sound flows, so your moves land on the actual music - you can SEE the
+harsh peak you are hunting. The menu offers a heat-mapped
+<em>spectrogram</em>, a phase overlay, a piano strip along the bottom
+(every C named, so frequency becomes pitch), analyser speeds, a display
+tilt that makes normal music read flat, freeze and peak hold.</p>
+
+<p id="EQ-8"><b>The headphone button</b> beside the selected band latches
+<em>listen</em>: you hear only that band's region while you drag it -
+sweep around and find the ugly resonance by ear. Isolate (in the band
+menu) is the other audition: mute every band but this one.</p>
+
+<p id="EQ-9"><b>The crosshair</b> arms the <em>spectrum grab</em>: the
+analyser holds its peaks steady, the nearest found resonance offers
+itself under your pointer, and one click drops a ready-aimed cut on it.
+One grab per arming, so playing music never steals a click.</p>
 
 </div>
-<div class="cl"><div class="viewlabel">The band columns</div>
-<div class="shot cropview m2c" data-screen="EQ" data-m2key="EQ:2" data-file="EQ.png" data-rect="71.54,6.41,28.46,93.59" data-dims="1307,564" style="width:372px;aspect-ratio:0.7047"><img src="figures/EQ.png" alt="" style="position:absolute;width:351.370%;left:-251.370%;top:-6.849%" loading="lazy"><button type="button" class="marker" data-goto="EQ-9" style="left:2.28%;top:6.49%">9</button><button type="button" class="marker" data-goto="EQ-10" style="left:1.55%;top:44.95%">10</button><button type="button" class="marker" data-goto="EQ-11" style="left:2.14%;top:78.66%">11</button><button type="button" class="marker" data-goto="EQ-12" style="left:1.72%;top:83.35%">12</button><button type="button" class="marker" data-goto="EQ-13" style="left:1.93%;top:90.93%">13</button><button type="button" class="marker" data-goto="EQ-14" style="left:91.64%;top:5.64%">14</button></div>
+<div class="cl"><div class="viewlabel">The rail</div>
+<div class="shot cropview m2c" data-screen="EQ" data-m2key="EQ:2" data-file="EQ.png" data-rect="71.54,6.41,28.46,93.59" data-dims="1307,564" style="width:372px;aspect-ratio:0.7047"><img src="figures/EQ.png" alt="" style="position:absolute;width:351.370%;left:-251.370%;top:-6.849%" loading="lazy"><button type="button" class="marker" data-goto="EQ-10" style="left:57.84%;top:16.66%">10</button><button type="button" class="marker" data-goto="EQ-11" style="left:57.84%;top:29.48%">11</button><button type="button" class="marker" data-goto="EQ-12" style="left:57.84%;top:44.44%">12</button><button type="button" class="marker" data-goto="EQ-13" style="left:57.84%;top:70.08%">13</button></div>
 
 
-<p id="EQ-9"><b>The type box</b> sets each band's shape.
-<code>Bell</code> boosts or cuts a hump around its frequency - the
-everyday shape. <code>LP</code> / <code>HP</code> (low-pass / high-pass)
-cut everything past their point - HP under a voice removes rumble
-wholesale. <code>LShelf</code> / <code>HShelf</code> tilt everything
-below or above - broad, gentle tone moves. <code>Notch</code> removes a
-narrow sliver; <code>BPass</code> keeps only a sliver; <code>Tilt</code>
-sees-saws the whole spectrum around its point; <code>Off</code> parks the
-band.</p>
+<p id="EQ-10"><b>GAIN and PAN</b> - the selected band's boost or cut, and
+where that boost or cut sits in the stereo picture: PAN hard left and the
+band's effect lands only on the left channel. It pans the band's WORK,
+not your audio, and the drawn curve deliberately stays put.</p>
 
-<p id="EQ-10"><b>The gain fader</b> with <span id="EQ-11"></span><b>its
-readout</b> is the band's boost or cut;
-<span id="EQ-12"></span><b>the frequency knob</b> places it (the eight
-bands wake up spread across the range, 40 Hz to 12 kHz); and
-<span id="EQ-13"></span><b>the Q knob</b> sets how NARROW the band works
-- low Q is a broad, musical brushstroke, high Q is surgical. The 0.71
-default is the do-no-harm middle.
-<span id="EQ-14"></span><b>Main</b>, right of the eight, is the output
-trim - pull it down when a boost-heavy curve has pushed the overall level
-up, so you are comparing tone, not loudness.</p>
+<p id="EQ-11"><b>FREQ and Q</b> - drag the numbers up and down, or
+double-click to type. Q is width: higher is narrower.</p>
+
+<p id="EQ-12"><b>The shape grid, channel and slope</b> - the band's type
+(Bell, the passes, the shelves, Notch, Band Pass, Tilt), a Stereo / L / R
+choice for Stereo-view bands, and for the filter shapes a slope from a
+gentle 6 dB per octave to a surgical 96 - plus Brickwall, which exists in
+the linear-phase modes.</p>
+
+<p id="EQ-13"><b>DYNAMICS</b> - DYN makes the band move with the music:
+DOWN cuts when its region crosses the threshold, UP boosts. THR decides
+where it engages - at 0 nothing ever moves, and the dotted line on the
+curve IS this knob: the furthest the band can travel. RATIO is how hard,
+ATK and REL how fast (AUTO lets the release follow the material), EXT
+picks one of the channel's sidechain receive lines so another track
+drives this band - the classic "duck the bass when the kick hits". The
+meter shows the movement live.</p>
+
+</div>
+<div class="cl"><div class="viewlabel">The menu</div>
+<div class="shot cropview m2c" data-screen="EQ" data-m2key="EQ:3" data-file="EQ.png" data-rect="89.55,0,10.45,9.75" data-dims="1307,564" style="width:260px;aspect-ratio:2.4838"><img src="figures/EQ.png" alt="" style="position:absolute;width:956.938%;left:-856.938%;top:-0.000%" loading="lazy"><button type="button" class="marker" data-goto="EQ-14" style="left:77.03%;top:35.90%">14</button></div>
+
+
+<p id="EQ-14"><b>The menu</b> holds the processing modes - Zero Latency,
+Natural Phase (analog-shaped highs at no cost), and five Linear Phase
+precisions with their real delays listed - plus oversampling,
+proportional Q, measured auto-gain, output trim and polarity, the gain
+scale, all the analyser and view options, the keyboard map, Reset All
+Bands, EQ Match (capture your track and a reference - or a reference
+FILE - and let the EQ fit itself to the difference), and the presets:
+Default, the factory shapes, and your own saved ones.</p>
 </div></div>
-  <div class="l3"><div class="tp" id="IMP-14"><h4 class="topichead">EQ8</h4>
-<p>Eight bands, each with a type, frequency, gain and Q. A dynamic band applies
-its gain only when the level in that band crosses a threshold, so it can sit idle
-until the problem happens.</p>
-<div class="codeblock"><div class="codehead">- Source/DSP/EQ8DSP.h</div><pre><code>// EQ8DSP::makeOneSection -- the 9 band types (one biquad section)
-EQ8DSP::Coeffs::Ptr EQ8DSP::makeOneSection(float sr, float freq,
-                                             float gainDb, float q, int type) const
-{
-    float f  = juce::jlimit(20.0f, sr * 0.499f, freq);
-    float qv = juce::jlimit(0.05f, 20.0f, q);
-    float g  = gainDb;
+  <div class="l3"><div class="tp" id="IMP-14"><h4 class="topichead">The kbs EQ engine</h4>
+﻿<p>Twenty-four bands, each with a type, frequency, gain and Q. One function
+designs a band's filter sections; the audio path installs them, the drawn
+curve evaluates them, and the linear-phase designer samples them - so the
+picture and the sound cannot disagree, because they are the same
+arithmetic.</p>
 
-    switch (type)
+<div class="codeblock"><div class="codehead">- Source/DSP/Kbs/ParametricEq.h (ParametricEq::designBiquads - one design path for every gain type)</div><pre><code>// gainDb is an argument rather than read from the params so the dynamic
+// rebuild and the static design go through the identical arithmetic.
+switch (p.type)
+{
+    case EqType::bell:
+        out[0] = (mode == EqMode::zeroLatency)
+                   ? Biquad::peaking (f, q, gainDb, designSr)
+                   : eqdesign::peakOrfanidis (f, designSr, q, gainDb);
+        return 1;
+
+    case EqType::lowShelf:
+        out[0] = eqdesign::shelf (f, designSr, q, gainDb, false);
+        return 1;
+
+    case EqType::highShelf:
+        out[0] = eqdesign::shelf (f, designSr, q, gainDb, true);
+        return 1;
+
+    case EqType::notch:
+        // A dynamic notch is a de-resonator: at rest it does nothing,
+        // and the detector cuts it in by up to range.
+        if (p.dynamic)
+        {
+            out[0] = (mode == EqMode::zeroLatency)
+                       ? Biquad::peaking (f, q, gainDb, designSr)
+                       : eqdesign::peakOrfanidis (f, designSr, q, gainDb);
+            return 1;
+        }
+        out[0] = eqdesign::notch (f, designSr, q);
+        return 1;
+
+    case EqType::tilt:
+        out[0] = eqdesign::shelf (f, designSr, q, +gainDb, false);
+        out[1] = eqdesign::shelf (f, designSr, q, -gainDb, true);
+        return 2;
+
+    default: return 0;   // LP/HP/BP live on the SVF path
+}</code></pre></div>
+<div class="codeblock"><div class="codehead">- Source/DSP/Kbs/ParametricEq.h (ParametricEq::advanceDynamics - the over-threshold trigger)</div><pre><code>// Both directions use the same unified over-threshold trigger: the band
+// moves - down for compression, up for expansion - when the detector
+// EXCEEDS the threshold, by the excess times the ratio slope.
+float grDb = 0.0f;
+if (env &gt;= kDetectorFloor &amp;&amp; std::abs (p.rangeDb) &gt; 0.0f)
+{
+    const float envDb = 20.0f * std::log10 (env);
+    const float ratio = std::max (1.0f, p.ratio);
+    const float slope = 1.0f - 1.0f / ratio;
+    const float over = envDb - p.thresholdDb;
+
+    if (over &gt; 0.0f)
     {
-        case 0:  return Coeffs::makePeakFilter  (sr, f, qv, juce::Decibels::decibelsToGain(g));
-        case 1:  return Coeffs::makeLowPass     (sr, f, qv);
-        case 2:  return Coeffs::makeHighPass    (sr, f, qv);
-        case 3:  return Coeffs::makeLowShelf    (sr, f, qv, juce::Decibels::decibelsToGain(g));
-        case 4:  return Coeffs::makeHighShelf   (sr, f, qv, juce::Decibels::decibelsToGain(g));
-        case 5:  return Coeffs::makeNotch       (sr, f, qv);
-        case 6:  return nullptr;   // OFF - no filter
-        case 7:  return Coeffs::makeBandPass    (sr, f, qv);
-        default: return Coeffs::makePeakFilter  (sr, f, qv, juce::Decibels::decibelsToGain(g));
+        const float extent = std::min (std::abs (p.thresholdDb) * slope,
+                                       std::abs (p.rangeDb));
+        const float mag = std::min (over * slope, extent);
+        grDb = p.rangeDb &gt; 0.0f ? mag : -mag;
     }
 }</code></pre></div>
-<details class="fullfn"><summary>Full function &mdash; - Source/DSP/EQ8DSP.h</summary><pre><code>// EQ8DSP::isDynamicSupportedType + EQ8DSP::processDynamic -- the dynamic EQ engine
-bool EQ8DSP::isDynamicSupportedType(int type) const noexcept
+<pre class="formulas">- The engine is the vendored KBS core (`kbs::ParametricEq`, Source/DSP/Kbs/), JUCE-free, 24 bands (`kMaxBands`), taken back from KBS EQ Pro at QA-EqPro with the DAW&#x27;s two extensions (per-domain linear phase, four-slot sidechain).
+- Bell in Natural mode uses the Orfanidis 1997 decramped design: the digital magnitude matches the analogue prototype at Nyquist instead of pinching to unity - analog-shaped highs at zero latency.
+- LP/HP/BP run on TPT state-variable cascades at Butterworth section Qs COMPUTED from the pole angles (`butterworthQ`), never tabulated - the engine this replaced kept the table in three places and they disagreed.
+- Dynamics: the detector is a band-pass at the band&#x27;s freq/Q over a PRE-EQ snapshot (parallel model - a band&#x27;s own cut never starves its own detector) or a picked sidechain line; envelopes run per sample; the commanded gain rebuilds the band&#x27;s section every 32 samples (0.7 ms at 48k) with a ~1.5 ms smoother between updates - the old engine applied it once per host block.
+- Travel is bounded by `min(|threshold| x slope, |range|)` - the SAME expression the dotted extent line is drawn from (`bandExtentMagnitudeAt`), so the live curve mathematically cannot cross it.  THR at 0 dB: nothing engages; the direction (DOWN/UP) rides the range parameter&#x27;s sign.
+- Parameter glides walk freq/gain/Q toward their targets once per 32-sample chunk (~15 ms to target), so automation sweeps instead of stepping at block rate.
+- Every claim is pinned by Tools/EqTests (`run_eq_tests.bat`, 54 checks): flat = bit-exact, measured equals drawn within 0.1 dB, attack lands at chunk rate, silence releases.</pre>
+<p class="behind"><b>Behind:</b> <a href="manual-2.html#EQ-6">The band handles</a>, <a href="manual-2.html#EQ-13">DYNAMICS</a>, <a href="manual-2.html#EQB-1">Type</a>, <a href="manual-2.html#EQB-5">Dynamic</a>.</p></div>
+<div class="tp" id="IMP-15"><h4 class="topichead">Domain views + per-band routing + the StripEq wrapper</h4>
+﻿<p>Any band can work on the whole signal, the middle of the stereo image,
+the sides, or one channel - per band, inside one engine. In the window this
+is the three VIEWS: the view a band lives in IS its domain.</p>
+
+<div class="codeblock"><div class="codehead">- Source/DSP/Kbs/ParametricEq.h (ParametricEq::processBands - per-band domain routing, in place)</div><pre><code>// Channel routing, per band, in place.
+float m = 0.0f, s = 0.0f;
+const auto ch = b.p.channel;
+const bool ms = (ch == EqChannel::mid || ch == EqChannel::side);
+if (ms)
 {
-    // Only gain-bearing types support dynamic mode. LP/HP/Notch/BP/OFF have no
-    // meaningful &quot;gain&quot; axis for a dynamic curve to modulate. Tilt is two
-    // shelves so it&#x27;s gain-bearing too.
-    return type == 0 /*Peaking*/ || type == 3 /*LowShelf*/
-        || type == 4 /*HighShelf*/ || type == 8 /*Tilt*/;
+    m = 0.5f * (xl + xr);
+    s = 0.5f * (xl - xr);
 }
 
-void EQ8DSP::processDynamic(int i, int numSamples)
+float aIn  = ms ? (ch == EqChannel::mid ? m : s)
+           : (ch == EqChannel::right ? xr : xl);
+float bIn  = (ch == EqChannel::stereo) ? xr : 0.0f;
+
+float aOut = bandSample (b, aIn, 0);
+float bOut = (ch == EqChannel::stereo) ? bandSample (b, bIn, 1) : 0.0f;
+
+switch (ch)
 {
-    auto&amp; bs = mBands[i];
-    const auto&amp; p = bs.params;
-
-    if (!p.dynamic || !isDynamicSupportedType(p.type) || p.type == 6 /*OFF*/)
-    {
-        bs.currentGrDb.store(0.0f, std::memory_order_relaxed);
-        return;
-    }
-    if (mSampleRate &lt;= 0.0) return;
-
-    // Make sure detector coefs match the current band freq/Q.
-    if (!bs.detFilterL.coefficients) updateDetector(i);
-
-    // Detector source: the saved original input (parallel-detector model).
-    // C.4 Phase 1 (2026-04-30): if this band has scSourceId in 0..3, swap
-    // the detector source for the strip&#x27;s SC array entry at that index.
-    const juce::AudioBuffer&lt;float&gt;* detSrc = &amp;mDetInput;
-    if (p.scSourceId &gt;= 0 &amp;&amp; mScBufs != nullptr
-        &amp;&amp; p.scSourceId &lt; mScCount &amp;&amp; mScBufs[p.scSourceId] != nullptr)
-    {
-        auto* cand = mScBufs[p.scSourceId];
-        if (cand-&gt;getNumSamples() &gt;= numSamples &amp;&amp; cand-&gt;getNumChannels() &gt; 0)
-            detSrc = cand;
-    }
-
-    // Pick the relevant channel domain from the chosen detector source based
-    // on the band&#x27;s channel routing. Stereo + LOnly use L; ROnly uses R; Mid
-    // uses (L+R)/2; Side uses (L-R)/2 computed on the fly.
-    const float* detSrcL = detSrc-&gt;getReadPointer(0);
-    const float* detSrcR = detSrc-&gt;getNumChannels() &gt; 1
-                         ? detSrc-&gt;getReadPointer(1) : detSrcL;
-
-    // Envelope follower constants (one-pole smoother with asymmetric times).
-    // coef = exp(-1 / (time_ms * sr / 1000)) is the standard formula.
-    const float sr      = (float) mSampleRate;
-    const float attMs   = juce::jmax(0.1f, p.attack);
-    const float relMs   = juce::jmax(1.0f, p.release);
-    const float attCoef = std::exp(-1.0f / (0.001f * attMs  * sr));
-    const float relCoef = std::exp(-1.0f / (0.001f * relMs  * sr));
-
-    float envLlocal = bs.envL;
-    float envRlocal = bs.envR;
-
-    for (int n = 0; n &lt; numSamples; ++n)
-    {
-        float inL = 0.0f, inR = 0.0f;
-        switch (p.channel)
-        {
-            case Channel::Stereo: inL = detSrcL[n]; inR = detSrcR[n]; break;
-            case Channel::Mid:    inL = 0.5f * (detSrcL[n] + detSrcR[n]); inR = inL; break;
-            case Channel::Side:   inL = 0.5f * (detSrcL[n] - detSrcR[n]); inR = inL; break;
-            case Channel::LOnly:  inL = detSrcL[n];  inR = 0.0f; break;
-            case Channel::ROnly:  inL = 0.0f;        inR = detSrcR[n]; break;
-            default:              inL = detSrcL[n]; inR = detSrcR[n]; break;
-        }
-        const float detL = std::abs(bs.detFilterL.processSample(inL));
-        const float detR = std::abs(bs.detFilterR.processSample(inR));
-
-        const float coefL = (detL &gt; envLlocal) ? attCoef : relCoef;
-        const float coefR = (detR &gt; envRlocal) ? attCoef : relCoef;
-        envLlocal = coefL * envLlocal + (1.0f - coefL) * detL;
-        envRlocal = coefR * envRlocal + (1.0f - coefR) * detR;
-    }
-    bs.envL = envLlocal;
-    bs.envR = envRlocal;
-
-    // Stereo-link: louder-of-L/R drives GR.
-    const float env = juce::jmax(envLlocal, envRlocal);
-    const float envDb = juce::Decibels::gainToDecibels(env + 1.0e-12f, -120.0f);
-
-    // 12j follow-up Q2: direction + amount derived from signed rangeDb.
-    //   rangeDb &lt; 0  -&gt; downward compression up to |range| dB (cut above threshold)
-    //   rangeDb &gt; 0  -&gt; upward expansion up to +range dB (boost below threshold)
-    //   rangeDb == 0 -&gt; no modulation (GR stays at 0)
-    const float thr     = p.threshold;
-    const float ratio   = juce::jmax(1.0f, p.ratio);
-    const bool  isUp    = (p.rangeDb &gt; 0.0f);
-    const float rangeMag= std::abs(p.rangeDb);
-    float grDb = 0.0f;
-
-    if (rangeMag &gt; 0.0f)
-    {
-        if (isUp)
-        {
-            const float under = thr - envDb;
-            if (under &gt; 0.0f)
-                grDb = under * (1.0f - 1.0f / ratio);   // positive = boost
-            grDb = juce::jmin(grDb, rangeMag);
-        }
-        else
-        {
-            const float over = envDb - thr;
-            if (over &gt; 0.0f)
-                grDb = -over * (1.0f - 1.0f / ratio);   // negative = cut
-            grDb = juce::jmax(grDb, -rangeMag);
-        }
-    }
-
-    bs.currentGrDb.store(grDb, std::memory_order_relaxed);
-}</code></pre></details>
-<pre class="formulas">- Band types (per-band `type` 0..8): 0 Bell/Peaking, 1 LP, 2 HP, 3 LowShelf, 4 HighShelf, 5 Notch, 6 OFF (null filter), 7 BandPass, 8 Tilt (= low shelf at +g plus high shelf at -g at the same pivot freq, 2 sections). All from JUCE RBJ `Coefficients` factories; freq clamped 20 Hz..0.499*sr, Q clamped 0.05..20.
-- Slopes (`slope` 0..6): 0 Center-2 = 1 section (user Q); 1/2/3 Steep-4/6/8 = 2/3/4 cascaded sections with Butterworth Q ladders `kSteepQ` = {0.5412, 1.3066}, {0.5176, 0.7071, 1.9318}, {0.5098, 0.6013, 0.9000, 2.5628}; 4/5/6 Gentle-4/6/8 = 2/3/4 sections all at `kGentleQ = 0.7071` (Linkwitz-Riley style). Bell/shelf cascades split gain: `sectionGain = gainDb / numSections`.
-- Filter engines (12e): LP/HP/BP run TPT (zero-delay-feedback SVF); Peaking/shelves/Notch/Tilt stay RBJ biquads. Up to `kMaxSections = 4` biquads per band, `kNumBands = 8`.
-- Proportional Q (12b, default on, Peaking only): `effQ = userQ * (1 + |gainDb|/18)` — Q narrows as gain rises.
-- Dynamic EQ (12j): only on gain-bearing types (0/3/4/8). Detector = bandpass biquad at the band&#x27;s freq/Q (HOST rate, parallel-detector model: detectors see the ORIGINAL block input, or an external sidechain via `scSourceId` 0..3). Envelope: one-pole per channel, `coef = exp(-1/(ms*0.001*sr))`, attack 0.1..500 ms (default 10), release 1..2000 ms (default 100); stereo-linked by max(L,R).
-- Gain computer: with `over = envDb - threshold` (threshold -60..0 dB, default -18; ratio 1..20, default 2): downward (rangeDb &lt; 0): `grDb = -over * (1 - 1/ratio)` clamped to `-|rangeDb|`; upward (rangeDb &gt; 0): `grDb = (thr - envDb) * (1 - 1/ratio)` clamped to `+rangeDb`. rangeDb signed -18..+18 dB, default 0 = no modulation. Effective filter gain = `designGain + grDb`, applied via block-rate coefficient rebuild.
-- Linear-mode interaction: dynamic EQ is disabled while a linear-phase mode is active (T2b option C); the UI menu labels the toggle &quot;Make Dynamic  (disabled in Linear modes)&quot;.
-- UI (SharedUI.cpp): the type dropdown offers Bell/LP/HP/LShelf/HShelf/Notch/Off/BPass/Tilt; the drawn curve uses `effGain = gainDb + (dynamic ? currentGrDb : 0)` so dynamic bands animate; a ghost outline draws the range endpoint; a dynamic params popout carries Thr / Ratio / Atk / Rel / Range / Up columns.</pre>
-<p class="behind"><b>Behind:</b> <a href="manual-2.html#EQ-1">Pre EQ / Post EQ</a>, <a href="manual-2.html#EQ-3">A Bank</a>, <a href="manual-2.html#EQ-4">Grid</a>, <a href="manual-2.html#EQ-5">Frequency scale</a>, <a href="manual-2.html#EQ-6">A band handle</a>, <a href="manual-2.html#EQ-7">Band M</a>, <a href="manual-2.html#EQ-8">Band S</a>, <a href="manual-2.html#EQ-9">Band type box</a>, <a href="manual-2.html#EQ-10">Band gain fader</a>, <a href="manual-2.html#EQ-11">Band gain readout</a>, <a href="manual-2.html#EQ-12">Band frequency knob and readout</a>, <a href="manual-2.html#EQ-13">Band Q knob and readout</a>, <a href="manual-2.html#EQ-14">Main column</a>, <a href="manual-2.html#EQB-1">Filter Type submenu</a>.</p></div>
-<div class="tp" id="IMP-15"><h4 class="topichead">EQ8 mid/side</h4>
-<p>The same eight bands able to work on the middle of the stereo image, the
-sides, or both. Per band, not per EQ.</p>
-
-<div class="codeblock"><div class="codehead">- Source/DSP/EQ8DSP.cpp (EQ8DSP::processBands M/S-domain pass — the live encode/decode)</div><pre><code>// EQ8DSP::processBands -- M/S encode, per-band M/S processing, decode
-if (needMS)
-{
-    float* M = mMsScratch.getWritePointer(0);
-    float* S = mMsScratch.getWritePointer(1);
-
-    for (int n = 0; n &lt; numSamples; ++n)
-    {
-        M[n] = 0.5f * (L[n] + R[n]);
-        S[n] = 0.5f * (L[n] - R[n]);
-    }
-
-    // ... per-band filtering on M or S (below) ...
-
-    for (int n = 0; n &lt; numSamples; ++n)
-    {
-        L[n] = M[n] + S[n];
-        R[n] = M[n] - S[n];
-    }
+    case EqChannel::stereo: xl = aOut; xr = bOut; break;
+    case EqChannel::mid:    xl = aOut + s; xr = aOut - s; break;
+    case EqChannel::side:   xl = m + aOut; xr = m - aOut; break;
+    case EqChannel::left:   xl = aOut; break;
+    case EqChannel::right:  xr = aOut; break;
 }</code></pre></div>
-<details class="fullfn"><summary>Full function &mdash; - Source/DSP/EQ8DSP.cpp (EQ8DSP::processBands M/S-domain pass — the live encode/decode)</summary><pre><code>// EQ8DSP::processBands -- full M/S-domain pass (verbatim)
-    // M/S-domain pass (Mid / Side). Only runs when any enabled band uses M/S
-    // routing AND the block is stereo.
-    if (L &amp;&amp; R &amp;&amp; mMsScratch.getNumSamples() &gt;= numSamples)
-    {
-        bool needMS = false;
-        for (int bi = 0; bi &lt; kNumBands; ++bi)
-        {
-            if (!bandShouldProcess(bi)) continue;
-            const int ch = mBands[bi].params.channel;
-            if (ch == Channel::Mid || ch == Channel::Side) { needMS = true; break; }
-        }
-
-        if (needMS)
-        {
-            float* M = mMsScratch.getWritePointer(0);
-            float* S = mMsScratch.getWritePointer(1);
-
-            for (int n = 0; n &lt; numSamples; ++n)
-            {
-                M[n] = 0.5f * (L[n] + R[n]);
-                S[n] = 0.5f * (L[n] - R[n]);
-            }
-
-            for (int bi = 0; bi &lt; kNumBands; ++bi)
-            {
-                if (!bandShouldProcess(bi)) continue;
-                auto&amp; bs = mBands[bi];
-                const int ch = bs.params.channel;
-                if (ch != Channel::Mid &amp;&amp; ch != Channel::Side) continue;
-
-                float* target = (ch == Channel::Mid) ? M : S;
-                const int ns = bs.activeSections;
-
-                if (bs.useTPT)
-                {
-                    for (int s = 0; s &lt; ns; ++s)
-                        for (int n = 0; n &lt; numSamples; ++n)
-                            target[n] = bs.tptL[s].processSample(0, target[n]);
-                }
-                else
-                {
-                    for (int s = 0; s &lt; ns; ++s)
-                    {
-                        if (!bs.filtersL[s].coefficients) continue;
-                        for (int n = 0; n &lt; numSamples; ++n)
-                            target[n] = bs.filtersL[s].processSample(target[n]);
-                    }
-                }
-            }
-
-            for (int n = 0; n &lt; numSamples; ++n)
-            {
-                L[n] = M[n] + S[n];
-                R[n] = M[n] - S[n];
-            }
-        }
-    }</code></pre></details>
-<pre class="formulas">- Encode: `M = 0.5*(L + R)`, `S = 0.5*(L - R)`. Decode: `L = M + S`, `R = M - S` (exact inverse; unity round trip when no band touches M or S).
-- Per-band routing (`Band::channel`, 12h): 0 Stereo (process L and R in place), 1 Mid, 2 Side, 3 LOnly, 4 ROnly. Mid/Side bands run their filter cascade on the encoded M or S channel only, using the band&#x27;s L-side filter state (`filtersL` / `tptL`) — one mono chain per M/S band.
-- The encode/decode pair runs at most ONCE per block, and only when at least one enabled, un-muted, solo-eligible band routes to Mid or Side (`needMS` scan) and the block is stereo; scratch buffer `mMsScratch` is pre-allocated in prepare (2 channels, `maxBlockSize * 2` for the anti-cramping 2x oversampled case).
-- Band grouping is legal because biquad chains are LTI: L/R-domain bands (Stereo/LOnly/ROnly) process first in place, then the M/S group encodes/processes/decodes — the composite transfer function is order-independent.
-- Bus-level wrapper `EQ8MsDSP`: two full EQ8DSP instances (16 bands total). `mid()`&#x27;s 8 bands default to channel = Mid, `side()`&#x27;s to channel = Side; both inner EQs receive the full stereo buffer in series (the wrapper no longer encodes). Latency = sum of both inner EQs&#x27; latencies; identity = both inner identity; the dynamic-EQ detector&#x27;s M/S domains use the same `0.5*(L+R)` / `0.5*(L-R)` folding (see `processDynamic`).
-- In linear-phase modes, per-band M/S routing is restricted to Stereo (T2a option B; the UI greys the per-band channel picker).</pre>
-<p class="behind"><b>Behind:</b> <a href="manual-2.html#EQ-2">MID / SIDE</a>, <a href="manual-2.html#EQB-3">Channel submenu</a>.</p></div>
-<div class="tp" id="IMP-16"><h4 class="topichead">EQ linear-phase path</h4>
-<p>An EQ that does not shift phase, at the cost of latency and pre-ringing. Worth
-it on a master, rarely worth it on a single track.</p>
-
-<div class="codeblock"><div class="codehead">- Source/DSP/EqLinearPhaseProcessor.h</div><pre><code>// EqLinearPhaseProcessor::fftSizeForMode + EQ8DSP::linearFftSize -- mode -&gt; FFT size
-int EqLinearPhaseProcessor::fftSizeForMode (int phaseMode) noexcept
+<div class="codeblock"><div class="codehead">- Source/DSP/StripEq.cpp (StripEq::pushBand - the audio-thread sync, one compare per untouched band)</div><pre><code>void StripEq::pushBand (int i, const kbs::EqBandParams&amp; p)
 {
-    // 0 Standard, 2 HQ+ -&gt; no linear processing
-    // 1 Linear         -&gt; 2048
-    // 3 HQ Linear      -&gt; 4096
-    // 4 HQ Extended    -&gt; 512  (&quot;economical&quot; - lower latency, less precision)
-    switch (phaseMode)
-    {
-        case 1: return 2048;
-        case 3: return 4096;
-        case 4: return 512;
-        default: return 0;
-    }
-}
+    if (i &lt; 0 || i &gt;= kBands) return;
+    auto&amp; c = mCached[(size_t) i];
 
-int EQ8DSP::linearFftSize (PhaseMode mode, int precision) noexcept
-{
-    if (mode == PhaseMode::Linear)
-        return kPrecFftSizes[juce::jlimit (0, kNumLinearPrecisions - 1, precision)];
+    const bool same =
+        c.on == p.on &amp;&amp; c.type == p.type &amp;&amp; c.freqHz == p.freqHz
+        &amp;&amp; c.gainDb == p.gainDb &amp;&amp; c.q == p.q &amp;&amp; c.slope == p.slope
+        &amp;&amp; c.channel == p.channel &amp;&amp; c.placement == p.placement
+        &amp;&amp; c.muted == p.muted &amp;&amp; c.isolated == p.isolated
+        &amp;&amp; c.dynamic == p.dynamic &amp;&amp; c.thresholdDb == p.thresholdDb
+        &amp;&amp; c.ratio == p.ratio &amp;&amp; c.attackMs == p.attackMs
+        &amp;&amp; c.releaseMs == p.releaseMs &amp;&amp; c.autoRelease == p.autoRelease
+        &amp;&amp; c.rangeDb == p.rangeDb &amp;&amp; c.scExternal == p.scExternal
+        &amp;&amp; c.scSource == p.scSource;
+    if (same) return;
 
-    return EqLinearPhaseProcessor::fftSizeForMode ((int) mode);
+    c = p;
+    mEq.setBand (i, p);
 }</code></pre></div>
-<details class="fullfn"><summary>Full function &mdash; - Source/DSP/EqLinearPhaseProcessor.h</summary><pre><code>// EqLinearPhaseProcessor::rebuildIR -- zero-phase (= linear-phase) IR design
-void EqLinearPhaseProcessor::rebuildIR (const std::function&lt;float(float)&gt;&amp; magnitudeFn)
+<pre class="formulas">- Encode: `M = 0.5*(L + R)`, `S = 0.5*(L - R)`; decode is the exact inverse - and it happens PER SAMPLE, PER BAND, only for bands that route mid or side.  There is no engine pair anymore: the old bus EQ was TWO 8-band engines run in series (a Mid set and a Side set); one 24-band engine now covers both with half the instances and half the linear-mode latency.
+- The window&#x27;s three views map onto `EqBandParams::channel`: a band created in the Mid view is `channel = mid`, Side view `= side`, Stereo view `= stereo` (or `left`/`right` via its picker).  &quot;Move to ... view&quot; rewrites the channel in place - settings kept.  The mono content of a stereo signal IS the mid, which is why there is no separate &quot;mono&quot; option anywhere.
+- Placement (the PAN knob) splits a gain band&#x27;s decibels across L and R (`placementWeights`: full weight own side, fading on the other) - gain types in the Stereo view only, separate L/R coefficient sets when the weights differ.  The drawn curve deliberately does not move with it.
+- StripEq (Source/DSP/StripEq.h) is the strip wrapper: the audio-thread sweep reads the band&#x27;s 18 APVTS parameters from a lock-free pointer cache, builds `EqBandParams`, and `pushBand` forwards only on change.  The wrapper also owns the A/B spare bank, the state blob, the spectrum feeds, and the identity fast path - which refuses to short-circuit whenever latency &gt; 0, so a flat EQ in a linear mode still imposes its delay (the old B2 defect&#x27;s negation).
+- Per-band sidechain: `scSource` picks one of the strip&#x27;s four receive lines (copied per block into the engine&#x27;s slot buffers); -1 = the band&#x27;s own input.</pre>
+<p class="behind"><b>Behind:</b> <a href="manual-2.html#EQ-2">ST / MID / SIDE</a>, <a href="manual-2.html#EQ-10">GAIN and PAN</a>, <a href="manual-2.html#EQB-3">Channel</a>, <a href="manual-2.html#EQB-4">Move to</a>.</p></div>
+<div class="tp" id="IMP-16"><h4 class="topichead">Linear phase</h4>
+﻿<p>Linear phase means the EQ changes WHAT the sound is made of without
+smearing WHEN it happens - every frequency is delayed identically, and the
+app's delay compensation absorbs that one delay exactly. The engine is
+overlap-save convolution with a properly designed FIR: exact linear
+convolution, so a flat curve passes bit-perfectly and the reported latency
+is the measured latency, to the sample.</p>
+
+<div class="codeblock"><div class="codehead">- Source/DSP/Kbs/EqLinearPhase.h (the FIR design - sample, rotate, window, transform)</div><pre><code>// Sample the magnitude, symmetric about Nyquist -&gt; a real, even
+// spectrum -&gt; a real, zero-phase impulse response.
+for (int k = 0; k &lt;= n / 2; ++k)
 {
-    if (mFftSize &lt;= 0 || ! magnitudeFn) return;
-    const float sr   = (float) mSampleRate;
-    const int   nyq  = mFftSize / 2;
-    const float binHz = sr / (float) mFftSize;
-    for (int k = 0; k &lt;= nyq; ++k)
-    {
-        const float f = (float) k * binHz;
-        // Clamp magnitude to a sane range to defend against pathological
-        // band setups (e.g. boosted Peaking with extreme Q at Nyquist).
-        const float mag = juce::jlimit (0.0f, 256.0f, magnitudeFn (f));
-        mIrMagBins[(size_t) k] = mag;
-    }
+    float m = at (k, n);
+    if (clampNonNegative) m = std::max (0.0f, m);
+    design[(size_t) k] = { m, 0.0f };
+    if (k &gt; 0 &amp;&amp; k &lt; n / 2)
+        design[(size_t) (n - k)] = { m, 0.0f };
 }
 
-// EqLinearPhaseProcessor::process -- per-sample ring I/O + frame trigger
-void EqLinearPhaseProcessor::process (juce::dsp::AudioBlock&lt;float&gt;&amp; block)
+fft-&gt;transform (design.data(), true);   // -&gt; impulse response at t=0
+
+// Rotate the centre of symmetry to (taps-1)/2 and window to `taps`.
+// Kaiser beta 8: about -80 dB sidelobes.
+const int half = (taps - 1) / 2;
+for (int i = 0; i &lt; taps; ++i)
 {
-    if (! isReady()) return;
-
-    const int numSamples = (int) block.getNumSamples();
-    const int numCh      = juce::jmin ((int) block.getNumChannels(), (int) mChannels.size());
-
-    for (int ch = 0; ch &lt; numCh; ++ch)
-    {
-        float* data = block.getChannelPointer ((size_t) ch);
-        auto&amp;  cs   = mChannels[(size_t) ch];
-
-        for (int n = 0; n &lt; numSamples; ++n)
-        {
-            // Append input sample
-            cs.inRing[(size_t) cs.inWritePos] = data[n];
-            cs.inWritePos = (cs.inWritePos + 1) % mFftSize;
-
-            // Replace input sample with delayed-and-EQd output from OLA ring
-            data[n] = cs.outRing[(size_t) cs.outReadPos];
-            // Clear after read so the next OLA accumulation lands on zero
-            cs.outRing[(size_t) cs.outReadPos] = 0.0f;
-            cs.outReadPos = (cs.outReadPos + 1) % mFftSize;
-
-            // Fire a frame every mHop samples
-            ++cs.samplesSinceFrame;
-            if (cs.samplesSinceFrame &gt;= mHop)
-            {
-                cs.samplesSinceFrame = 0;
-                processFrame (ch);
-            }
-        }
-    }
-}
-
-// EqLinearPhaseProcessor::processFrame -- windowed spectral convolution
-void EqLinearPhaseProcessor::processFrame (int channelIndex)
+    const int src = (i - half + n) % n;
+    const double r = (double) (i - half) / (double) std::max (1, half);
+    const double w = besselI0 (8.0 * std::sqrt (std::max (0.0, 1.0 - r * r)))
+                   / besselI0 (8.0);
+    scratch[(size_t) i] = { design[(size_t) src].real() * (float) w, 0.0f };
+}</code></pre></div>
+<div class="codeblock"><div class="codehead">- Source/DSP/Kbs/ParametricEq.h (ParametricEq::rebuildLinearCurve - the per-domain 2x2 matrix)</div><pre><code>// With only stereo bands one shared FIR is exact and cheap; the moment
+// any active band routes mid / side / left / right, the response is a
+// 2x2 matrix in the L/R domain and the engine designs all four entries.
+auto entry = [this] (float msSign, const std::vector&lt;float&gt;&amp; side)
 {
-    auto&amp; cs = mChannels[(size_t) channelIndex];
-
-    // The most recent N samples are precisely the entire ring, in order
-    // [inWritePos, inWritePos+1, ..., inWritePos+N-1] (mod N).
-    for (int i = 0; i &lt; mFftSize; ++i)
+    return [this, msSign, &amp;side] (int bin, int) -&gt; float
     {
-        const int srcIdx = (cs.inWritePos + i) % mFftSize;
-        const float winSample = cs.inRing[(size_t) srcIdx] * mWindow[(size_t) i];
-        mFftScratch[(size_t) i] = juce::dsp::Complex&lt;float&gt; (winSample, 0.0f);
-    }
-
-    // Forward FFT in place
-    mFft-&gt;perform (mFftScratch.data(), mFftScratch.data(), false);
-
-    // Multiply each bin by IR magnitude (real). Bin k mirrors to bin N-k for
-    // a real-valued signal, but juce::dsp::FFT gives the full N-bin output;
-    // we apply the magnitude symmetrically so the inverse stays real.
-    const int nyq = mFftSize / 2;
-    for (int k = 0; k &lt;= nyq; ++k)
-    {
-        const float mag = mIrMagBins[(size_t) k];
-        mFftScratch[(size_t) k] = mFftScratch[(size_t) k] * mag;
-        if (k &gt; 0 &amp;&amp; k &lt; nyq)
-        {
-            const int mirror = mFftSize - k;
-            mFftScratch[(size_t) mirror] = mFftScratch[(size_t) mirror] * mag;
-        }
-    }
-
-    // Inverse FFT in place
-    mFft-&gt;perform (mFftScratch.data(), mFftScratch.data(), true);
-
-    // Apply synthesis window + OLA-add into the output ring at the write head.
-    // Write head wraps modulo N. After the frame we advance it by mHop so the
-    // next frame&#x27;s window overlaps with this one&#x27;s second half.
-    int writeIdx = cs.outWritePos;
-    for (int i = 0; i &lt; mFftSize; ++i)
-    {
-        const float synth = mFftScratch[(size_t) i].real() * mWindow[(size_t) i] * mNormScale;
-        cs.outRing[(size_t) writeIdx] += synth;
-        writeIdx = (writeIdx + 1) % mFftSize;
-    }
-    cs.outWritePos = (cs.outWritePos + mHop) % mFftSize;
-}</code></pre></details>
-<pre class="formulas">- Topology: 50%-overlap-add Hann-windowed short-time Fourier convolution (windowed-spectrum processor). Hop = N/2; both analysis AND synthesis apply the Hann window `w[i] = 0.5 - 0.5*cos(2*pi*i/N)`.
-- Phase modes -&gt; FFT size N: Standard (0) and HQ Plus (2) = 0 (no linear path); Linear (1) = the Linear Phase Precision pick from `kPrecFftSizes = { 256, 512, 1024, 2048, 4096 }` (default index 3 = 2048); HQ Linear (3) = 4096 pinned; HQ Extended (4) = 512 pinned (&quot;economical&quot; low-latency variant). HQ Plus and HQ Linear also force anti-cramping (2x oversampling) on, and when AC is active the design rate is `2*sr`.
-- IR design: zero-phase = linear-phase. `mIrMagBins[k] = clamp(magnitudeFn(k * sr/N), 0, 256)` for k = 0..N/2 — real magnitudes, no phase term. The magnitude callback is `EQ8DSP::magnitudeForFrequencyStatic`, which uses the STATIC design gain per band (dynamic-EQ GR excluded per T2b option C); per-band M/S is restricted to Stereo in linear modes (T2a option B).
-- Spectral multiply is applied symmetrically (`bin k` and `bin N-k` for 0 &lt; k &lt; N/2) so the IFFT output stays real.
-- OLA reconstruction scale: with Hann^2 at 50% overlap, overlap-summed window-squared per output sample = `sumW2 / hop`; `mNormScale = 1 / (sumW2/hop)` restores unity pass-through when all IR mags are 1.
-- Latency = N/2 samples (Hann-window centroid): the output write head is initialized `hop` ahead of the read head. Reported via `getLatencySamples()`, summed through EQ8DSP (plus AC oversampler latency) -&gt; EQ8MsDSP (mid + side) -&gt; BaySickGraph::updateBusLatencies into host PDC.
-- Mode-change click masking (T2c): output fade length = `min(latencyDelta, 4096)` samples (minimum 256) armed on every AC or phase-mode change.
-- Frame rate = sr/hop per channel (e.g. N=2048 @ 48 kHz -&gt; 47 frames/s/ch; N=4096 -&gt; 23).</pre></div></div>
+        const auto k = (size_t) bin;
+        return 0.5f * (domM[k] + msSign * domS[k]) * domSt[k] * side[k];
+    };
+};
+linear.setMagnitudeMatrix (entry (+1.0f, domL),    // LL
+                           entry (-1.0f, domR),    // LR
+                           entry (-1.0f, domL),    // RL
+                           entry (+1.0f, domR));   // RR</code></pre></div>
+<pre class="formulas">- Streaming is overlap-save: frames of `hop` fresh samples, transform the last N, multiply by the FIR&#x27;s spectrum, keep only the wrap-free last `hop` - no analysis window, no synthesis window, nothing to &quot;sum flat&quot;.  The engine this replaced windowed twice at 50% overlap (a structural 6 dB tremolo), multiplied a raw sampled magnitude (circular wrap and pre-echo), and reported HALF its true delay into the delay compensation.
+- Latency = `hop + (taps - 1) / 2` with `taps = N/2 + 1`, `hop = N/2` - and a test injects an impulse and requires the measured peak position to equal the report with tolerance ZERO.
+- Five precisions: FFT 1024 (Low) to 16384 (Maximum).  At Low the 513-tap design window smooths a Q=1 bell by most of a decibel - the precision dial&#x27;s honest tradeoff; High is exact to 0.3 dB.  The menu&#x27;s latency figures are computed from these constants at the session rate.
+- Band edits reach the audio: the static curve rebuilds from the same `bandMagnitude` query the display draws, inside process(), whenever a band moved.  Dynamics stay minimum-phase ON PURPOSE: the FIR carries every band&#x27;s static curve; a dynamic band&#x27;s moving part rides as a minimum-phase section after it (a gain that moves cannot be linear-phase without lookahead artefacts) - the same split the big linear EQs make.
+- The 2x2 matrix (a BaySickDAW extension, fed back to KBS): per-bin, `LL = ((m+s)/2)*st*l`, `LR = ((m-s)/2)*st*r`, `RL = ((m-s)/2)*st*l`, `RR = ((m+s)/2)*st*r` - the M/S stage folded through the encode into the L/R domain.  Cross terms are SIGNED and the designer must not clamp them; the design pipeline is linear, so a mono signal through a side-only band cancels EXACTLY.  One latency stage regardless.
+- Brickwall lives here: the FIR is designed 1.0 inside the passband, 1e-6 outside - an IIR cannot be one, so outside the linear modes it plays as 96 dB/oct and the menu says so.</pre>
+<p class="behind"><b>Behind:</b> <a href="manual-2.html#EQ-14">The menu</a>, <a href="manual-2.html#EQB-2">Slope</a>.</p></div></div>
 </section>
 
 <section class="figd" id="EQB" data-code="EQB">
@@ -12911,52 +12759,56 @@ void EqLinearPhaseProcessor::processFrame (int channelIndex)
   <div class="l1"><p class="lede">The per-band menu. Reached from a band handle or its column chevron.</p>
   <figure><div class="views"><div class="vu"><div class="shot" data-screen="EQB" data-view="0" data-file="EQ Band Menu.png" data-rect="0,0,100,100" data-dims="226,220" style=""><img src="figures/EQ Band Menu.png" alt="EQ Band Menu" width="226" height="220" style="" loading="lazy"></div></div></div></figure>
   <table class="callouts"><thead><tr><th style="width:3rem">#</th><th>On screen</th></tr></thead><tbody>
-<tr id="row-EQB-1"><td><button type="button" class="n" data-back="EQB-1" title="Show it on the picture">1</button></td><td><code>Filter Type</code> submenu</td></tr>
-<tr id="row-EQB-2"><td><button type="button" class="n" data-back="EQB-2" title="Show it on the picture">2</button></td><td><code>Slope / Order</code> submenu</td></tr>
-<tr id="row-EQB-3"><td><button type="button" class="n" data-back="EQB-3" title="Show it on the picture">3</button></td><td>Channel submenu - <code>Stereo</code> / <code>Mid</code> / <code>Side</code> / <code>L Only</code> / <code>R Only</code>. In any Linear mode the submenu greys and reads <code>Channel  (disabled in Linear modes)</code></td></tr>
-<tr id="row-EQB-4"><td><button type="button" class="n" data-back="EQB-4" title="Show it on the picture">4</button></td><td>Band <code>Automate</code> submenu - <code>Freq</code> / <code>Gain</code> / <code>Q</code> / <code>Type</code> / <code>On</code> / <code>Slope</code> / <code>Mute</code> / <code>Solo</code> / <code>Channel</code>; the whole submenu greys when the EQ has no automation binding</td></tr>
-<tr id="row-EQB-5"><td><button type="button" class="n" data-back="EQB-5" title="Show it on the picture">5</button></td><td><code>Make Dynamic</code> - turns the band into a dynamic band. Reads <code>Make Dynamic  (disabled in Linear modes)</code> there, and greys for non-gain types (LP / HP / Notch / BP / Off)</td></tr>
-<tr id="row-EQB-6"><td><button type="button" class="n" data-back="EQB-6" title="Show it on the picture">6</button></td><td><code>Dynamic Params...</code> - greyed until the band IS dynamic. Also gated on the same automation binding as <code>Automate</code></td></tr>
-<tr id="row-EQB-7"><td><button type="button" class="n" data-back="EQB-7" title="Show it on the picture">7</button></td><td><code>Reset Band</code></td></tr>
+<tr id="row-EQB-1"><td><button type="button" class="n" data-back="EQB-1" title="Show it on the picture">1</button></td><td><code>Type</code> submenu - <code>Bell</code> / <code>Low Pass</code> / <code>High Pass</code> / <code>Low Shelf</code> / <code>High Shelf</code> / <code>Notch</code> / <code>Band Pass</code> / <code>Tilt</code></td></tr>
+<tr id="row-EQB-2"><td><button type="button" class="n" data-back="EQB-2" title="Show it on the picture">2</button></td><td><code>Slope</code> submenu - <code>6</code>..<code>96 dB/oct</code> + <code>Brickwall</code> (filter types only)</td></tr>
+<tr id="row-EQB-3"><td><button type="button" class="n" data-back="EQB-3" title="Show it on the picture">3</button></td><td><code>Channel</code> submenu - <code>Stereo</code> / <code>Left</code> / <code>Right</code>, Stereo view ONLY (Mid/Side are the views)</td></tr>
+<tr id="row-EQB-4"><td><button type="button" class="n" data-back="EQB-4" title="Show it on the picture">4</button></td><td><code>Move to</code> submenu - <code>Stereo view</code> / <code>Mid view</code> / <code>Side view</code>, settings kept</td></tr>
+<tr id="row-EQB-5"><td><button type="button" class="n" data-back="EQB-5" title="Show it on the picture">5</button></td><td><code>Dynamic</code> submenu - <code>Make Dynamic</code> / <code>Auto Release</code> (gain types + Notch)</td></tr>
+<tr id="row-EQB-6"><td><button type="button" class="n" data-back="EQB-6" title="Show it on the picture">6</button></td><td><code>Listen</code> / <code>Isolate</code> / <code>Mute</code> rows</td></tr>
+<tr id="row-EQB-7"><td><button type="button" class="n" data-back="EQB-7" title="Show it on the picture">7</button></td><td><code>Reset Band</code> / <code>Delete Band</code></td></tr>
 </tbody></table></div>
-  <div class="l2"><p>Right-click any band handle on the EQ curve and this menu opens - the
+  <div class="l2">﻿<p>Right-click any band handle (or its chip) and this menu opens - the
 band's deeper settings.</p>
 
 
 
-<p id="EQB-1"><b>Filter Type</b> - the same shapes as the type box on the
-panel, from the menu. <span id="EQB-2"></span><b>Slope / Order</b> sets
-how steeply a cut falls away past its point: gentle slopes sound natural
-and invisible; cliff-edge slopes remove a region almost surgically, at
-the price of sounding more processed.</p>
+<p id="EQB-1"><b>Type</b> - the same shapes as the rail's glyph grid, from
+the menu: Bell, Low Pass, High Pass, Low Shelf, High Shelf, Notch, Band
+Pass, Tilt.</p>
 
-<p id="EQB-3"><b>Channel</b> routes the band: <code>Stereo</code> (both
-sides, the default), <code>Mid</code> (only the center of the stereo
-picture), <code>Side</code> (only the edges), <code>L Only</code> /
-<code>R Only</code>. This is how one band can brighten just the width, or
-clean rumble out of just the middle. In the linear-phase modes the
-submenu greys and says so - per-channel routing belongs to the standard
-modes.</p>
+<p id="EQB-2"><b>Slope</b> - filter shapes only - sets how steeply a cut
+falls away past its point: 6 dB per octave sounds natural and invisible;
+96 removes a region almost surgically; <code>Brickwall</code> is the
+absolute version and belongs to the linear-phase modes (elsewhere it
+plays as 96).</p>
 
-<p id="EQB-4"><b>Automate</b> - opens an automation lane for any of the
-band's nine parameters (<code>Freq</code>, <code>Gain</code>,
-<code>Q</code>, <code>Type</code>, <code>On</code>, <code>Slope</code>,
-<code>Mute</code>, <code>Solo</code>, <code>Channel</code>), so the EQ
-itself can move over the song. The submenu greys when this EQ instance
-has nowhere to write automation.</p>
+<p id="EQB-3"><b>Channel</b> appears only in the Stereo view:
+<code>Stereo</code> (both sides, the default), <code>Left</code> or
+<code>Right</code> for a one-sided band (the dot wears an L or R badge).
+Mid and Side are not here - they are the VIEWS, and a band's view is
+already its answer.</p>
 
-<p id="EQB-5"><b>Make Dynamic</b> turns the band into a dynamic band: its
-gain moves with the music, cutting only when the problem appears - an EQ
-that works only when needed, which is the polite way to tame a harsh
-frequency. It greys for shapes with no gain to move (the cuts and
-notches) and in the linear modes, where the label says so.
-<span id="EQB-6"></span><b>Dynamic Params...</b> opens the dynamic
-band's own settings - how fast it reacts, how hard - once the band is
-dynamic.</p>
+<p id="EQB-4"><b>Move to</b> sends the band to another view - Stereo, Mid
+or Side - keeping every one of its settings. This is how a band changes
+what half of the picture it works on.</p>
 
-<p id="EQB-7"><b>Reset Band</b> returns the band to its defaults.</p>
+<p id="EQB-5"><b>Dynamic</b> - <code>Make Dynamic</code> turns the band
+into one that moves with the music, cutting (or boosting) only when its
+region crosses the threshold - an EQ that works only when needed, which
+is the polite way to tame a harsh frequency. <code>Auto Release</code>
+lets its recovery time follow the material: quick on transients,
+unobtrusive on sustained sound.</p>
+
+<p id="EQB-6"><b>Listen</b> latches the band's own audition (the
+headphone button does the same); <b>Isolate</b> mutes every band but this
+one; <b>Mute</b> silences this band's work while keeping its settings.</p>
+
+<p id="EQB-7"><b>Reset Band</b> returns the band to its defaults - the
+first eight also return to their home frequencies. <b>Delete Band</b>
+removes it entirely (also the Delete key); re-enabling later starts
+fresh, never a ghost of the old settings.</p>
 </div>
-  <div class="l3"><p class="howworks"><b>How this works:</b> <a data-level="weeds" href="#IMP-14">EQ8</a>, <a data-level="weeds" href="#IMP-15">EQ8 mid/side</a>, <a data-level="weeds" href="#IMP-63">Automation</a>.</p></div>
+  <div class="l3"><p class="howworks"><b>How this works:</b> <a data-level="weeds" href="#IMP-14">The kbs EQ engine</a>, <a data-level="weeds" href="#IMP-16">Linear phase</a>, <a data-level="weeds" href="#IMP-15">Domain views + per-band routing + the StripEq wrapper</a>.</p></div>
 </section>
 
 <section class="figd" id="VUMTR" data-code="VUMTR">
@@ -15461,9 +15313,9 @@ public:
 </div>
 
 <script>
-const COORDS  = {"FRAME":{"1":[44.41,1.75],"2":[55.7,1.34],"3":[1.44,2.42],"4":[4.67,2.56],"5":[9.13,2.56],"6":[13.51,2.96],"7":[17.89,2.69],"8":[22.49,2.83],"9":[45.2,8.5],"10":[66.91,8.37],"11":[96.3,4.86]},"FMENU":{"1":[4.65,5.19],"2":[5.19,12.16],"3":[5.19,21.73],"4":[4.92,28.9],"5":[5.19,35.67],"6":[5.47,45.03],"7":[4.65,52.2],"8":[4.92,59.37],"9":[5.19,69.53],"10":[4.37,79.1],"11":[4.37,88.66],"12":[4.65,95.83]},"EXP":{"1":[2.59,11.85],"2":[1.98,18.57],"3":[2.44,25.42],"4":[2.13,32.54],"5":[1.98,39.25],"6":[2.28,45.7],"7":[1.52,52.28],"8":[1.67,59.4],"9":[78.54,54.97],"10":[1.67,72.83],"11":[73.52,75.65]},"BUNDLE":{"1":[7.71,38.86],"2":[7.49,59.26],"3":[49.91,84.03]},"EMENU":{"1":[6.79,10.38],"2":[6.46,26.32],"3":[6.14,41.32],"4":[6.14,64.77],"5":[5.49,89.62]},"UNDO":{"1":[34.66,9.27],"2":[45.13,31.53]},"EVT":{"1":[2.73,5.41],"2":[8.05,5.41],"3":[13.94,5.53],"4":[20.7,5.66],"5":[30.33,5.28],"6":[49.73,7.52],"7":[12.72,13.36],"8":[23.37,13.1],"9":[64.97,12.99],"10":[84.66,9.01],"11":[95.01,8.63],"12":[37.51,45.69],"13":[1.51,26.42],"14":[21.42,94.06],"15":[11.14,98.28],"16":[84.67,28.73]},"PMENU":{"1":[3.74,7.4],"2":[4.2,19.92],"3":[4.2,38.89],"4":[3.74,50.69],"5":[4.2,63.57],"6":[4.67,80.75],"7":[4.44,93.27]},"VMENU":{"1":[3.69,6.86],"2":[3.69,20.04],"3":[3.3,32.5],"4":[3.5,43.9],"5":[3.3,57.08],"6":[3.69,69.19],"7":[3.69,80.59],"8":[3.69,93.41]},"OMENU":{"1":[3.3,7.54],"2":[3.3,20.77],"3":[3.3,32.22],"4":[3.68,45.1],"5":[3.3,57.98],"6":[3.49,74.44],"7":[3.49,91.97]},"FILE":{"1":[1.44,19.46],"2":[1.76,37.09],"3":[1.76,45.33],"4":[2.24,52.56],"5":[1.92,58.34],"6":[1.76,63.97]},"AUD":{"1":[11.4,16.2],"2":[9.94,27.56],"3":[10.07,38.18],"4":[11.4,48.42],"5":[10.47,56.05],"6":[7.82,76.35],"7":[1.59,85.66],"8":[77.14,86.41]},"PLUG":{"1":[0.93,7.13],"2":[0.79,11.77],"3":[0.65,29.58],"4":[0.57,34.69],"5":[0.86,59.69],"6":[1.01,64.9],"7":[3.64,96.37],"8":[16.79,96.53],"9":[2.52,72.86]},"HMENU":{"1":[4.93,16.37],"2":[4.64,44.48],"3":[4.93,84.64]},"KEYS":{"1":[0.55,4.61],"2":[0.55,7.65],"3":[45.15,7.65],"4":[88.78,7.57],"5":[96.65,7.47]},"TRAN":{"1":[0.82,22.86],"2":[5.4,20.48],"3":[9.75,22.86],"4":[13.98,18.09],"5":[20.08,18.09],"6":[25.37,25.24],"7":[31.71,20.48],"8":[38.4,25.24],"9":[47.45,16.62],"10":[50.97,13.33],"11":[55.91,15.1],"12":[59.42,80.04],"13":[63.12,15.1],"14":[67.76,46.69],"15":[87.61,51.45]},"TRANRM":{"1":[4.87,14.7],"2":[4.87,44.12],"3":[4.87,83.09]},"TRANMM":{"1":[4.85,35.8],"2":[5.36,56.82],"3":[4.85,76.38]},"TABBAR":{"1":[7.52,79.66],"2":[7.75,35.49],"3":[13.5,66.14],"4":[74.22,81.58],"5":[39.17,29.51],"6":[14.66,26.58],"7":[30.11,25.11],"8":[45.84,25.11],"9":[62.45,26.58],"10":[80.21,22.18],"11":[83.14,20.72],"12":[85.9,23.65]},"TABUTN":{"1":[6.65,6.01],"2":[6.98,14.45],"3":[7.32,23.15],"4":[5.99,32.11],"5":[6.65,41.58],"6":[6.65,49.51],"7":[5.99,58.47],"8":[6.32,67.68],"9":[6.98,76.64],"10":[6.32,84.83],"11":[6.32,94.04]},"BLD":{"1":[3.31,0.95],"2":[5.96,1.1],"3":[5.28,5.91],"4":[0.93,11.89],"5":[6.76,12.2],"6":[7.11,15.85],"7":[14.03,3.29],"8":[20.41,2.92],"9":[50.66,2.77],"10":[58.43,2.92],"11":[62.52,2.77],"12":[65.54,2.92],"13":[92.35,5.96],"14":[21.56,9.46],"15":[15.81,9.31],"16":[12.72,9.77],"17":[14.01,9.77],"18":[17.61,13.41],"19":[57.71,49.14],"20":[11.79,52.64],"21":[75.31,9.77],"22":[81.42,9.46]},"BLDM":{"1":[5.15,11.14],"2":[5.44,34.87],"3":[5.15,51.95],"4":[5.72,66.66],"5":[5.44,89.91]},"BLDE":{"1":[6.97,8.12],"2":[6.2,18.65],"3":[6.2,33.97],"4":[6.97,46.42],"5":[6.97,61.43],"6":[6.97,72.28],"7":[7.36,84.41],"8":[7.36,94.31]},"BLDV":{"1":[5.58,18.33],"2":[5.58,44.58],"3":[5.02,83.96]},"PR":{"1":[3.31,1.78],"2":[8.05,1.78],"3":[13.22,1.63],"4":[0.21,4.72],"5":[2.85,4.81],"6":[6.11,4.22],"7":[9.64,4.54],"8":[13.49,4.63],"9":[0.29,7.27],"10":[3.23,7.68],"11":[37.23,6.08],"12":[45.61,6.17],"13":[96,8.4],"14":[5.53,11.39],"15":[16.53,12.15],"16":[2,35],"17":[3.35,14.58],"18":[45,35],"19":[4.71,65.57],"20":[45,82],"21":[28.02,6.88]},"PRE":{"1":[7.32,8.95],"2":[7.32,22.97],"3":[7.32,44.88],"4":[7.32,62.4],"5":[6.17,78.18],"6":[7.71,91.32]},"PRT":{"1":[4.07,4.41],"2":[4.28,10.53],"3":[4.28,16.46],"4":[3.85,22.4],"5":[4.07,29.06],"6":[4.07,35],"7":[4.07,41.3],"8":[4.28,47.59],"9":[4.28,53.35],"10":[4.28,59.65],"11":[4.28,69.19],"12":[4.07,77.46],"13":[3.85,84.48],"14":[3.64,90.42],"15":[3.43,96.36]},"PRS":{"1":[8.28,16.45],"2":[7.84,55.42],"3":[6.97,84.05]},"PRC":{"1":[59.9,4.97]},"PRV":{"1":[7.19,7.8],"2":[7.19,19.97],"3":[7.19,32.85],"4":[7.19,44.3],"5":[7.91,62.54],"6":[8.27,80.79],"7":[8.27,93.67]},"DKIT":{"1":[3.59,2.02],"2":[2.8,11.6],"3":[0.5,35.17],"4":[5,14.2],"5":[9.63,16.92],"6":[11,16.77],"7":[90.33,8.71],"8":[98.02,5.82],"9":[25.8,6.27],"10":[12.36,14.18]},"DKITE":{"1":[7.36,10.85],"2":[6.97,25.59],"3":[7.36,46.39],"4":[8.91,62.43],"5":[8.13,76.29],"6":[7.36,92.33]},"DKITT":{"1":[7.35,9.22],"2":[7.72,20.83],"3":[7.35,33.94],"4":[8.09,47.42],"5":[9.19,59.78],"6":[7.35,72.51],"7":[7.72,92.36]},"DKITV":{"1":[7.25,12.09],"2":[7.98,30.6],"3":[8.34,58.65],"4":[8.7,86.7]},"PRMMNU":{"1":[4.99,15.18],"2":[4.99,43.27],"3":[4.05,82.98]},"BSV":{"1":[5.18,14.24],"2":[15.66,24.52],"3":[1.48,51.21],"4":[29.85,48.33],"5":[49.58,48.33],"6":[5.39,61.97],"7":[23.81,62.22],"8":[41.32,61.67],"9":[61.06,61.88],"10":[73.64,75.2],"11":[32,93.08]},"BSVCM":{"1":[5.89,3.95],"2":[5.01,10.96],"3":[4.71,17.57],"4":[4.71,24.57],"5":[4.71,34.58],"6":[3.83,42.19],"7":[3.83,51.2],"8":[5.3,61.61],"9":[5.01,69.02],"10":[5.01,79.23],"11":[4.71,86.24],"12":[4.71,95.65]},"BSVC":{"1":[46.47,7.36],"2":[3.59,6.39],"3":[9.91,5.95],"4":[19.62,52.85],"5":[35.76,52.58],"6":[52.52,52.85],"7":[71.77,52.76],"8":[10.28,57.03],"9":[94.14,57.12]},"BSA":{"1":[12.39,14.14],"2":[35.87,9.98],"3":[64.8,14.23],"4":[78.28,9.69],"5":[84.77,9.39],"6":[94.03,10.28],"7":[45,20.5],"8":[7.36,28.66],"9":[7.57,46.74],"10":[9.11,54.14],"11":[7.15,71.04],"12":[8.49,79.63],"13":[85.49,21.54],"14":[85.49,46.44],"15":[10.17,97.23],"16":[72.8,96.36],"17":[30.26,13.71],"18":[56,4]},"BSPIT":{"1":[10.64,4.07],"2":[15.45,3.61],"3":[18.54,3.76],"4":[23.93,3.76],"5":[16.96,10.29],"6":[65.4,4.22],"7":[68.8,4.49],"8":[72.65,4.41],"9":[79.51,4.49],"10":[45.13,7.57],"11":[58.93,8.48],"12":[63.74,8.48],"13":[68.34,8.48],"14":[71.72,8.64],"15":[79.27,8.48],"16":[83.44,7.87],"17":[88.18,5.13],"18":[2,45],"19":[30,14.5],"20":[50,55],"21":[50,97],"22":[3.59,11.38],"23":[99,55]},"BSPDL":{"1":[5.1,2.34],"2":[85.38,2.34],"3":[13.08,75.06],"4":[37.66,29.36],"5":[21.34,10.14],"6":[83.29,56.38],"7":[10.56,48.05],"8":[6.47,23.04],"9":[18.54,25.73],"10":[86.38,69.55],"11":[48.37,7.18],"12":[42.43,7.5]},"BSPDLM":{"1":[5.52,6.39],"2":[5.52,16.22],"3":[4.93,30.4],"4":[5.81,44.28],"5":[5.22,55.85],"6":[5.52,70.02],"7":[4.93,80.14],"8":[5.52,94.89]},"BSPDLP":{"1":[3.86,2.88],"2":[4.18,10.91],"3":[3.86,25.27],"4":[4.51,59.04],"5":[4.51,83.29],"6":[5.47,98.03]},"BSGTR":{"1":[73.55,3.47],"2":[86.24,3.34],"3":[3.85,11.29],"4":[10.47,10.96],"5":[8.57,55.42],"6":[16.8,54.63],"7":[45.93,49.28],"8":[78.08,49.12],"9":[4.46,2.6]},"BSBAS":{"1":[73.14,3.87],"2":[86.38,3.71],"3":[8.84,16.01],"4":[18.3,15.54],"5":[27.83,15.06],"6":[47.57,12.86],"7":[64.51,19],"8":[83.98,13.49],"9":[3.7,12.07],"10":[10.35,11.59],"11":[8.09,3.56]},"BSGBM":{"1":[5.52,4.47],"2":[5.52,11.79],"3":[5.52,19.11],"4":[5.52,30.09],"5":[4.64,37.62],"6":[4.93,48.39],"7":[5.81,58.72],"8":[5.81,66.68],"9":[5.81,77.66],"10":[6.39,85.2],"11":[5.22,95.75]},"BSNAM":{"1":[6.4,6.98],"2":[85.85,8.88],"3":[6.77,12.02],"4":[85.66,14.1],"5":[9,27.68],"6":[26.64,27.59],"7":[49.21,27.68],"8":[66.11,27.42],"9":[77.71,27.42],"10":[89.3,25.92],"11":[91,34.96],"12":[3.21,36.06],"13":[26.77,37.83],"14":[6.54,42.24],"15":[22.45,52.04],"16":[4.99,57.95],"17":[40.33,49.65],"18":[4.2,61.55],"19":[37.13,62.36],"20":[25.9,65.01],"21":[9.87,81.77],"22":[20.84,82.04],"23":[31.58,81.95],"24":[43.05,81.77],"25":[26,89],"26":[13.94,88.66],"27":[26,84],"28":[26,94],"29":[35.03,96.51]},"BSHARM":{"1":[5.9,9.98],"2":[6.44,23.4],"3":[22.42,23.56],"4":[9.8,37.14],"5":[37.22,12.67],"6":[53.95,9.82],"7":[54.22,23.4],"8":[52.51,42.19],"9":[61.7,41.88],"10":[68.76,47.4],"11":[83.84,47.56],"12":[4.66,52.93],"13":[23.72,52.77],"14":[4.94,64.93],"15":[22.83,65.25],"16":[8.91,77.09],"17":[7.75,89.72],"18":[24.95,77.72],"19":[50.39,52.93],"20":[67.32,53.56],"21":[86.03,53.88],"22":[62.01,58.42],"23":[80,75],"24":[88.84,58.3],"25":[61.95,92.36],"26":[41.61,17.88],"27":[4.59,1.95]},"BSHARMM":{"1":[6.04,3.73],"2":[5.21,9.38],"3":[5.49,17.23],"4":[3.84,22.72],"5":[4.94,30.42],"6":[5.21,35.28],"7":[4.94,43.6],"8":[5.49,49.1],"9":[4.39,54.75],"10":[4.94,62.44],"11":[4.94,70.29],"12":[4.94,75.47],"13":[4.66,83.01],"14":[6.04,88.81],"15":[5.49,95.57]},"BSSB":{},"BSSBT":{"1":[71.93,4.02],"2":[9.43,3.03]},"BSSBM":{"1":[6.04,4.42],"2":[6.31,9.45],"3":[6.04,17.45],"4":[5.21,22.63],"5":[5.21,30.48],"6":[5.49,35.98],"7":[5.21,43.98],"8":[5.49,49.32],"9":[6.04,54.34],"10":[5.76,62.66],"11":[6.58,69.89],"12":[5.76,75.69],"13":[6.58,83.07],"14":[6.58,88.57],"15":[6.31,95.79]},"BSSBOSC":{"1":[50,18],"2":[49.68,33.32],"3":[19.02,46.44],"4":[19.37,52.08],"5":[7.26,83.83],"6":[17.29,83.97],"7":[27.44,83.83],"8":[9.57,88.62],"9":[24.44,89.05],"10":[49.91,44.62],"11":[42.42,56.88],"12":[57.41,57.3],"13":[42.65,89.75],"14":[57.52,89.75],"15":[82.92,44.66],"16":[82.77,88.34]},"BSSBOENV":{"1":[24.94,45.25],"2":[44.1,87.59],"3":[74.57,44.83],"4":[93.16,87.87]},"BSSBFLT":{"1":[25,68],"2":[74.7,44.54],"3":[63.52,90.28],"4":[86.11,90.56]},"BSSBFENV":{"1":[43.22,93.5],"2":[92.07,88.99]},"BSSBLFO":{"1":[12.24,44.52],"2":[36.94,79.15],"3":[39.25,86.93],"4":[37.29,95.97],"5":[61.65,44.66],"6":[86.93,90.32]},"BSSBMOD":{"1":[6,45.23],"2":[25.05,89.39],"3":[49.18,44.94],"4":[49.64,91.08],"5":[67.88,89.95],"6":[85.43,90.09]},"BSP":{"1":[17.82,19.07],"2":[17.48,26.65],"3":[48.61,14.85],"4":[82.02,14.57],"5":[26.59,67.55],"6":[74.39,73.75],"7":[69.57,3.9],"8":[10.09,2.13]},"BSPM":{"1":[5.76,3.72],"2":[6.04,9.21],"3":[5.76,16.75],"4":[4.39,22.87],"5":[5.49,30.4],"6":[5.21,35.74],"7":[4.94,43.43],"8":[4.94,48.93],"9":[4.94,54.58],"10":[4.94,61.96],"11":[4.39,70.59],"12":[4.94,75.93],"13":[4.66,83.15],"14":[4.94,88.96],"15":[5.21,96.34]},"BSDRUMS":{},"BSDM":{"1":[5.51,5.77],"2":[5.78,13.97],"3":[5.23,26.04],"4":[5.23,35.2],"5":[4.68,42.68],"6":[5.51,54.75],"7":[5.23,62.95],"8":[4.68,71.15],"9":[5.78,82.97],"10":[5.23,94.31]},"BSRDTTL":{"1":[58.42,5.93],"2":[81,4.8],"3":[51.72,9.4]},"BSRDMENU":{"1":[5.88,8.04],"2":[6.81,20.25],"3":[6.19,32.11],"4":[6.81,43.97],"5":[4.95,63.74],"6":[4.64,81.35],"7":[5.26,93.93]},"BSRDMAIN":{"1":[58.15,5.29],"2":[80.79,5.29],"3":[48.99,9.11],"4":[16.83,31.14],"5":[31.92,30.23],"6":[70.89,30.05],"7":[13.24,61.17],"8":[43.55,60.81],"9":[89.33,61.17],"10":[9.28,3.33]},"BSRDKICK":{"1":[27.97,47.02],"2":[70.85,47.2],"3":[52.33,66.63]},"BSRDSNARE":{"1":[14.77,47.32],"2":[48.77,47.5],"3":[82.53,47.14],"4":[19.48,74.01],"5":[77.44,73.65],"6":[53.12,67.11]},"BSRDTOM":{"1":[27.01,62.45],"2":[63.44,47.35],"3":[86.12,47.9],"4":[71.38,66.82],"5":[89.1,70.1]},"BSRDHAT":{"1":[49.41,47.75],"2":[21.99,46.47],"3":[72.88,47.02],"4":[49.17,67.04]},"BSRDCYMB":{"1":[27.34,67.6],"2":[85.86,50.01],"3":[87.97,67.97]},"BSRDNOISE":{"1":[10.25,48.12],"2":[40.77,47.57],"3":[78.69,46.47]},"BSRDKIT":{"1":[48.9,56.78],"2":[18,84.14],"3":[81.54,4.8]},"BSRDMAP":{"1":[50,50]},"BSPLUG":{"1":[43.78,3.74],"2":[5.45,2.44]},"BSPLUGM":{"1":[5.68,6.07],"2":[5.68,17.38],"3":[4.87,26.04],"4":[5.41,37.34],"5":[5.41,46.48],"6":[5.41,55.14],"7":[4.6,66.45],"8":[5.95,74.14],"9":[5.68,82.8],"10":[5.68,95.31]},"MIX":{"1":[3.56,1.61],"2":[1.71,5.39],"3":[17.48,5.54],"4":[19.84,7.17],"5":[21.41,7.03],"6":[0.75,12.08],"7":[0.62,15.29],"8":[0.27,18.34],"9":[0.96,22.41],"10":[1.03,26.92],"11":[7.47,23],"12":[1.03,30.13],"13":[10.63,37.84],"14":[0.07,55],"15":[12,54.86],"16":[8.5,94.14],"17":[9.02,99],"18":[1.92,98.36]},"MIXMNU":{"1":[3.1,13.79],"2":[4.13,38.49],"3":[4.65,63.19],"4":[4.91,87.2]},"MIXADD":{"1":[9.78,8.85],"2":[8.31,56.49]},"MIXSTP":{"1":[19.62,17.22],"2":[21.63,17.22],"3":[23.52,37.12]},"MIXSM":{"1":[4.84,11.66],"2":[5.18,31.72],"3":[5.53,51.22],"4":[5.18,69.05],"5":[5.87,86.87]},"ANLZ":{"1":[18,9.2],"2":[58,9.2],"3":[80,9.2],"4":[93,9.2],"5":[12,15.5],"6":[45,40],"7":[45,62],"8":[45,84],"9":[72,15.5],"10":[82,15.5]},"ANLZM":{"1":[5.2,12.61],"2":[5.2,33.83],"3":[5.2,55.41],"4":[6.42,87.51],"5":[7.34,96.43]},"FXI":{"1":[1.43,13.39],"2":[85.11,16.7],"3":[18.03,28.39],"4":[67.73,29.66],"5":[48.39,37.49],"6":[9.86,36.53],"7":[87.28,38.25],"8":[92.49,37.23],"9":[4.15,36.53],"10":[96.52,37.74]},"FXRM":{"1":[5.87,11.57],"2":[6.41,27.98],"3":[5.34,49.55],"4":[5.61,73.94],"5":[6.14,90.35]},"FXPICK":{"1":[5.34,4.35],"2":[4.2,33.39],"3":[3.82,49.08],"4":[3.44,69.23],"5":[4.2,89.76],"6":[6.49,96.17]},"FX":{"1":[40.15,3.05],"2":[88.8,6.54],"3":[10.81,52.76],"4":[7.97,61.73],"5":[83.18,47.88],"6":[88.42,59.54],"7":[97.18,48.17]},"FXV":{},"FXM":{"1":[7.33,21.87],"2":[7.05,36.77],"3":[6.77,50.87],"4":[7.05,70.61],"5":[7.33,90.75]},"EQ":{"1":[12.07,3.92],"2":[23.44,3.76],"3":[28.24,3.44],"4":[40,35],"5":[35,97],"6":[25.98,50.86],"7":[25.84,57.84],"8":[27.56,58.15],"9":[72.19,12.48],"10":[71.98,48.48],"11":[72.15,80.03],"12":[72.03,84.42],"13":[72.09,91.51],"14":[97.62,11.69]},"EQB":{"1":[7.38,8.34],"2":[7.38,20.62],"3":[7.73,32.53],"4":[7.38,45.17],"5":[6.33,62.13],"6":[6.68,76.57],"7":[5.98,93.9]},"VUMTR":{"1":[50,45],"2":[49.29,90.68],"3":[4.26,8.32]}};
+const COORDS  = {"FRAME":{"1":[44.41,1.75],"2":[55.7,1.34],"3":[1.44,2.42],"4":[4.67,2.56],"5":[9.13,2.56],"6":[13.51,2.96],"7":[17.89,2.69],"8":[22.49,2.83],"9":[45.2,8.5],"10":[66.91,8.37],"11":[96.3,4.86]},"FMENU":{"1":[4.65,5.19],"2":[5.19,12.16],"3":[5.19,21.73],"4":[4.92,28.9],"5":[5.19,35.67],"6":[5.47,45.03],"7":[4.65,52.2],"8":[4.92,59.37],"9":[5.19,69.53],"10":[4.37,79.1],"11":[4.37,88.66],"12":[4.65,95.83]},"EXP":{"1":[2.59,11.85],"2":[1.98,18.57],"3":[2.44,25.42],"4":[2.13,32.54],"5":[1.98,39.25],"6":[2.28,45.7],"7":[1.52,52.28],"8":[1.67,59.4],"9":[78.54,54.97],"10":[1.67,72.83],"11":[73.52,75.65]},"BUNDLE":{"1":[7.71,38.86],"2":[7.49,59.26],"3":[49.91,84.03]},"EMENU":{"1":[6.79,10.38],"2":[6.46,26.32],"3":[6.14,41.32],"4":[6.14,64.77],"5":[5.49,89.62]},"UNDO":{"1":[34.66,9.27],"2":[45.13,31.53]},"EVT":{"1":[2.73,5.41],"2":[8.05,5.41],"3":[13.94,5.53],"4":[20.7,5.66],"5":[30.33,5.28],"6":[49.73,7.52],"7":[12.72,13.36],"8":[23.37,13.1],"9":[64.97,12.99],"10":[84.66,9.01],"11":[95.01,8.63],"12":[37.51,45.69],"13":[1.51,26.42],"14":[21.42,94.06],"15":[11.14,98.28],"16":[84.67,28.73]},"PMENU":{"1":[3.74,7.4],"2":[4.2,19.92],"3":[4.2,38.89],"4":[3.74,50.69],"5":[4.2,63.57],"6":[4.67,80.75],"7":[4.44,93.27]},"VMENU":{"1":[3.69,6.86],"2":[3.69,20.04],"3":[3.3,32.5],"4":[3.5,43.9],"5":[3.3,57.08],"6":[3.69,69.19],"7":[3.69,80.59],"8":[3.69,93.41]},"OMENU":{"1":[3.3,7.54],"2":[3.3,20.77],"3":[3.3,32.22],"4":[3.68,45.1],"5":[3.3,57.98],"6":[3.49,74.44],"7":[3.49,91.97]},"FILE":{"1":[1.44,19.46],"2":[1.76,37.09],"3":[1.76,45.33],"4":[2.24,52.56],"5":[1.92,58.34],"6":[1.76,63.97]},"AUD":{"1":[11.4,16.2],"2":[9.94,27.56],"3":[10.07,38.18],"4":[11.4,48.42],"5":[10.47,56.05],"6":[7.82,76.35],"7":[1.59,85.66],"8":[77.14,86.41]},"PLUG":{"1":[0.93,7.13],"2":[0.79,11.77],"3":[0.65,29.58],"4":[0.57,34.69],"5":[0.86,59.69],"6":[1.01,64.9],"7":[3.64,96.37],"8":[16.79,96.53],"9":[2.52,72.86]},"HMENU":{"1":[4.93,16.37],"2":[4.64,44.48],"3":[4.93,84.64]},"KEYS":{"1":[0.55,4.61],"2":[0.55,7.65],"3":[45.15,7.65],"4":[88.78,7.57],"5":[96.65,7.47]},"TRAN":{"1":[0.82,22.86],"2":[5.4,20.48],"3":[9.75,22.86],"4":[13.98,18.09],"5":[20.08,18.09],"6":[25.37,25.24],"7":[31.71,20.48],"8":[38.4,25.24],"9":[47.45,16.62],"10":[50.97,13.33],"11":[55.91,15.1],"12":[59.42,80.04],"13":[63.12,15.1],"14":[67.76,46.69],"15":[87.61,51.45]},"TRANRM":{"1":[4.87,14.7],"2":[4.87,44.12],"3":[4.87,83.09]},"TRANMM":{"1":[4.85,35.8],"2":[5.36,56.82],"3":[4.85,76.38]},"TABBAR":{"1":[7.52,79.66],"2":[7.75,35.49],"3":[13.5,66.14],"4":[74.22,81.58],"5":[39.17,29.51],"6":[14.66,26.58],"7":[30.11,25.11],"8":[45.84,25.11],"9":[62.45,26.58],"10":[80.21,22.18],"11":[83.14,20.72],"12":[85.9,23.65]},"TABUTN":{"1":[6.65,6.01],"2":[6.98,14.45],"3":[7.32,23.15],"4":[5.99,32.11],"5":[6.65,41.58],"6":[6.65,49.51],"7":[5.99,58.47],"8":[6.32,67.68],"9":[6.98,76.64],"10":[6.32,84.83],"11":[6.32,94.04]},"BLD":{"1":[3.31,0.95],"2":[5.96,1.1],"3":[5.28,5.91],"4":[0.93,11.89],"5":[6.76,12.2],"6":[7.11,15.85],"7":[14.03,3.29],"8":[20.41,2.92],"9":[50.66,2.77],"10":[58.43,2.92],"11":[62.52,2.77],"12":[65.54,2.92],"13":[92.35,5.96],"14":[21.56,9.46],"15":[15.81,9.31],"16":[12.72,9.77],"17":[14.01,9.77],"18":[17.61,13.41],"19":[57.71,49.14],"20":[11.79,52.64],"21":[75.31,9.77],"22":[81.42,9.46]},"BLDM":{"1":[5.15,11.14],"2":[5.44,34.87],"3":[5.15,51.95],"4":[5.72,66.66],"5":[5.44,89.91]},"BLDE":{"1":[6.97,8.12],"2":[6.2,18.65],"3":[6.2,33.97],"4":[6.97,46.42],"5":[6.97,61.43],"6":[6.97,72.28],"7":[7.36,84.41],"8":[7.36,94.31]},"BLDV":{"1":[5.58,18.33],"2":[5.58,44.58],"3":[5.02,83.96]},"PR":{"1":[3.31,1.78],"2":[8.05,1.78],"3":[13.22,1.63],"4":[0.21,4.72],"5":[2.85,4.81],"6":[6.11,4.22],"7":[9.64,4.54],"8":[13.49,4.63],"9":[0.29,7.27],"10":[3.23,7.68],"11":[37.23,6.08],"12":[45.61,6.17],"13":[96,8.4],"14":[5.53,11.39],"15":[16.53,12.15],"16":[2,35],"17":[3.35,14.58],"18":[45,35],"19":[4.71,65.57],"20":[45,82],"21":[28.02,6.88]},"PRE":{"1":[7.32,8.95],"2":[7.32,22.97],"3":[7.32,44.88],"4":[7.32,62.4],"5":[6.17,78.18],"6":[7.71,91.32]},"PRT":{"1":[4.07,4.41],"2":[4.28,10.53],"3":[4.28,16.46],"4":[3.85,22.4],"5":[4.07,29.06],"6":[4.07,35],"7":[4.07,41.3],"8":[4.28,47.59],"9":[4.28,53.35],"10":[4.28,59.65],"11":[4.28,69.19],"12":[4.07,77.46],"13":[3.85,84.48],"14":[3.64,90.42],"15":[3.43,96.36]},"PRS":{"1":[8.28,16.45],"2":[7.84,55.42],"3":[6.97,84.05]},"PRC":{"1":[59.9,4.97]},"PRV":{"1":[7.19,7.8],"2":[7.19,19.97],"3":[7.19,32.85],"4":[7.19,44.3],"5":[7.91,62.54],"6":[8.27,80.79],"7":[8.27,93.67]},"DKIT":{"1":[3.59,2.02],"2":[2.8,11.6],"3":[0.5,35.17],"4":[5,14.2],"5":[9.63,16.92],"6":[11,16.77],"7":[90.33,8.71],"8":[98.02,5.82],"9":[25.8,6.27],"10":[12.36,14.18]},"DKITE":{"1":[7.36,10.85],"2":[6.97,25.59],"3":[7.36,46.39],"4":[8.91,62.43],"5":[8.13,76.29],"6":[7.36,92.33]},"DKITT":{"1":[7.35,9.22],"2":[7.72,20.83],"3":[7.35,33.94],"4":[8.09,47.42],"5":[9.19,59.78],"6":[7.35,72.51],"7":[7.72,92.36]},"DKITV":{"1":[7.25,12.09],"2":[7.98,30.6],"3":[8.34,58.65],"4":[8.7,86.7]},"PRMMNU":{"1":[4.99,15.18],"2":[4.99,43.27],"3":[4.05,82.98]},"BSV":{"1":[5.18,14.24],"2":[15.66,24.52],"3":[1.48,51.21],"4":[29.85,48.33],"5":[49.58,48.33],"6":[5.39,61.97],"7":[23.81,62.22],"8":[41.32,61.67],"9":[61.06,61.88],"10":[73.64,75.2],"11":[32,93.08]},"BSVCM":{"1":[5.89,3.95],"2":[5.01,10.96],"3":[4.71,17.57],"4":[4.71,24.57],"5":[4.71,34.58],"6":[3.83,42.19],"7":[3.83,51.2],"8":[5.3,61.61],"9":[5.01,69.02],"10":[5.01,79.23],"11":[4.71,86.24],"12":[4.71,95.65]},"BSVC":{"1":[46.47,7.36],"2":[3.59,6.39],"3":[9.91,5.95],"4":[19.62,52.85],"5":[35.76,52.58],"6":[52.52,52.85],"7":[71.77,52.76],"8":[10.28,57.03],"9":[94.14,57.12]},"BSA":{"1":[12.39,14.14],"2":[35.87,9.98],"3":[64.8,14.23],"4":[78.28,9.69],"5":[84.77,9.39],"6":[94.03,10.28],"7":[45,20.5],"8":[7.36,28.66],"9":[7.57,46.74],"10":[9.11,54.14],"11":[7.15,71.04],"12":[8.49,79.63],"13":[85.49,21.54],"14":[85.49,46.44],"15":[10.17,97.23],"16":[72.8,96.36],"17":[30.26,13.71],"18":[56,4]},"BSPIT":{"1":[10.64,4.07],"2":[15.45,3.61],"3":[18.54,3.76],"4":[23.93,3.76],"5":[16.96,10.29],"6":[65.4,4.22],"7":[68.8,4.49],"8":[72.65,4.41],"9":[79.51,4.49],"10":[45.13,7.57],"11":[58.93,8.48],"12":[63.74,8.48],"13":[68.34,8.48],"14":[71.72,8.64],"15":[79.27,8.48],"16":[83.44,7.87],"17":[88.18,5.13],"18":[2,45],"19":[30,14.5],"20":[50,55],"21":[50,97],"22":[3.59,11.38],"23":[99,55]},"BSPDL":{"1":[5.1,2.34],"2":[85.38,2.34],"3":[13.08,75.06],"4":[37.66,29.36],"5":[21.34,10.14],"6":[83.29,56.38],"7":[10.56,48.05],"8":[6.47,23.04],"9":[18.54,25.73],"10":[86.38,69.55],"11":[48.37,7.18],"12":[42.43,7.5]},"BSPDLM":{"1":[5.52,6.39],"2":[5.52,16.22],"3":[4.93,30.4],"4":[5.81,44.28],"5":[5.22,55.85],"6":[5.52,70.02],"7":[4.93,80.14],"8":[5.52,94.89]},"BSPDLP":{"1":[3.86,2.88],"2":[4.18,10.91],"3":[3.86,25.27],"4":[4.51,59.04],"5":[4.51,83.29],"6":[5.47,98.03]},"BSGTR":{"1":[73.55,3.47],"2":[86.24,3.34],"3":[3.85,11.29],"4":[10.47,10.96],"5":[8.57,55.42],"6":[16.8,54.63],"7":[45.93,49.28],"8":[78.08,49.12],"9":[4.46,2.6]},"BSBAS":{"1":[73.14,3.87],"2":[86.38,3.71],"3":[8.84,16.01],"4":[18.3,15.54],"5":[27.83,15.06],"6":[47.57,12.86],"7":[64.51,19],"8":[83.98,13.49],"9":[3.7,12.07],"10":[10.35,11.59],"11":[8.09,3.56]},"BSGBM":{"1":[5.52,4.47],"2":[5.52,11.79],"3":[5.52,19.11],"4":[5.52,30.09],"5":[4.64,37.62],"6":[4.93,48.39],"7":[5.81,58.72],"8":[5.81,66.68],"9":[5.81,77.66],"10":[6.39,85.2],"11":[5.22,95.75]},"BSNAM":{"1":[6.4,6.98],"2":[85.85,8.88],"3":[6.77,12.02],"4":[85.66,14.1],"5":[9,27.68],"6":[26.64,27.59],"7":[49.21,27.68],"8":[66.11,27.42],"9":[77.71,27.42],"10":[89.3,25.92],"11":[91,34.96],"12":[3.21,36.06],"13":[26.77,37.83],"14":[6.54,42.24],"15":[22.45,52.04],"16":[4.99,57.95],"17":[40.33,49.65],"18":[4.2,61.55],"19":[37.13,62.36],"20":[25.9,65.01],"21":[9.87,81.77],"22":[20.84,82.04],"23":[31.58,81.95],"24":[43.05,81.77],"25":[26,89],"26":[13.94,88.66],"27":[26,84],"28":[26,94],"29":[35.03,96.51]},"BSHARM":{"1":[5.9,9.98],"2":[6.44,23.4],"3":[22.42,23.56],"4":[9.8,37.14],"5":[37.22,12.67],"6":[53.95,9.82],"7":[54.22,23.4],"8":[52.51,42.19],"9":[61.7,41.88],"10":[68.76,47.4],"11":[83.84,47.56],"12":[4.66,52.93],"13":[23.72,52.77],"14":[4.94,64.93],"15":[22.83,65.25],"16":[8.91,77.09],"17":[7.75,89.72],"18":[24.95,77.72],"19":[50.39,52.93],"20":[67.32,53.56],"21":[86.03,53.88],"22":[62.01,58.42],"23":[80,75],"24":[88.84,58.3],"25":[61.95,92.36],"26":[41.61,17.88],"27":[4.59,1.95]},"BSHARMM":{"1":[6.04,3.73],"2":[5.21,9.38],"3":[5.49,17.23],"4":[3.84,22.72],"5":[4.94,30.42],"6":[5.21,35.28],"7":[4.94,43.6],"8":[5.49,49.1],"9":[4.39,54.75],"10":[4.94,62.44],"11":[4.94,70.29],"12":[4.94,75.47],"13":[4.66,83.01],"14":[6.04,88.81],"15":[5.49,95.57]},"BSSB":{},"BSSBT":{"1":[71.93,4.02],"2":[9.43,3.03]},"BSSBM":{"1":[6.04,4.42],"2":[6.31,9.45],"3":[6.04,17.45],"4":[5.21,22.63],"5":[5.21,30.48],"6":[5.49,35.98],"7":[5.21,43.98],"8":[5.49,49.32],"9":[6.04,54.34],"10":[5.76,62.66],"11":[6.58,69.89],"12":[5.76,75.69],"13":[6.58,83.07],"14":[6.58,88.57],"15":[6.31,95.79]},"BSSBOSC":{"1":[50,18],"2":[49.68,33.32],"3":[19.02,46.44],"4":[19.37,52.08],"5":[7.26,83.83],"6":[17.29,83.97],"7":[27.44,83.83],"8":[9.57,88.62],"9":[24.44,89.05],"10":[49.91,44.62],"11":[42.42,56.88],"12":[57.41,57.3],"13":[42.65,89.75],"14":[57.52,89.75],"15":[82.92,44.66],"16":[82.77,88.34]},"BSSBOENV":{"1":[24.94,45.25],"2":[44.1,87.59],"3":[74.57,44.83],"4":[93.16,87.87]},"BSSBFLT":{"1":[25,68],"2":[74.7,44.54],"3":[63.52,90.28],"4":[86.11,90.56]},"BSSBFENV":{"1":[43.22,93.5],"2":[92.07,88.99]},"BSSBLFO":{"1":[12.24,44.52],"2":[36.94,79.15],"3":[39.25,86.93],"4":[37.29,95.97],"5":[61.65,44.66],"6":[86.93,90.32]},"BSSBMOD":{"1":[6,45.23],"2":[25.05,89.39],"3":[49.18,44.94],"4":[49.64,91.08],"5":[67.88,89.95],"6":[85.43,90.09]},"BSP":{"1":[17.82,19.07],"2":[17.48,26.65],"3":[48.61,14.85],"4":[82.02,14.57],"5":[26.59,67.55],"6":[74.39,73.75],"7":[69.57,3.9],"8":[10.09,2.13]},"BSPM":{"1":[5.76,3.72],"2":[6.04,9.21],"3":[5.76,16.75],"4":[4.39,22.87],"5":[5.49,30.4],"6":[5.21,35.74],"7":[4.94,43.43],"8":[4.94,48.93],"9":[4.94,54.58],"10":[4.94,61.96],"11":[4.39,70.59],"12":[4.94,75.93],"13":[4.66,83.15],"14":[4.94,88.96],"15":[5.21,96.34]},"BSDRUMS":{},"BSDM":{"1":[5.51,5.77],"2":[5.78,13.97],"3":[5.23,26.04],"4":[5.23,35.2],"5":[4.68,42.68],"6":[5.51,54.75],"7":[5.23,62.95],"8":[4.68,71.15],"9":[5.78,82.97],"10":[5.23,94.31]},"BSRDTTL":{"1":[58.42,5.93],"2":[81,4.8],"3":[51.72,9.4]},"BSRDMENU":{"1":[5.88,8.04],"2":[6.81,20.25],"3":[6.19,32.11],"4":[6.81,43.97],"5":[4.95,63.74],"6":[4.64,81.35],"7":[5.26,93.93]},"BSRDMAIN":{"1":[58.15,5.29],"2":[80.79,5.29],"3":[48.99,9.11],"4":[16.83,31.14],"5":[31.92,30.23],"6":[70.89,30.05],"7":[13.24,61.17],"8":[43.55,60.81],"9":[89.33,61.17],"10":[9.28,3.33]},"BSRDKICK":{"1":[27.97,47.02],"2":[70.85,47.2],"3":[52.33,66.63]},"BSRDSNARE":{"1":[14.77,47.32],"2":[48.77,47.5],"3":[82.53,47.14],"4":[19.48,74.01],"5":[77.44,73.65],"6":[53.12,67.11]},"BSRDTOM":{"1":[27.01,62.45],"2":[63.44,47.35],"3":[86.12,47.9],"4":[71.38,66.82],"5":[89.1,70.1]},"BSRDHAT":{"1":[49.41,47.75],"2":[21.99,46.47],"3":[72.88,47.02],"4":[49.17,67.04]},"BSRDCYMB":{"1":[27.34,67.6],"2":[85.86,50.01],"3":[87.97,67.97]},"BSRDNOISE":{"1":[10.25,48.12],"2":[40.77,47.57],"3":[78.69,46.47]},"BSRDKIT":{"1":[48.9,56.78],"2":[18,84.14],"3":[81.54,4.8]},"BSRDMAP":{"1":[50,50]},"BSPLUG":{"1":[43.78,3.74],"2":[5.45,2.44]},"BSPLUGM":{"1":[5.68,6.07],"2":[5.68,17.38],"3":[4.87,26.04],"4":[5.41,37.34],"5":[5.41,46.48],"6":[5.41,55.14],"7":[4.6,66.45],"8":[5.95,74.14],"9":[5.68,82.8],"10":[5.68,95.31]},"MIX":{"1":[3.56,1.61],"2":[1.71,5.39],"3":[17.48,5.54],"4":[19.84,7.17],"5":[21.41,7.03],"6":[0.75,12.08],"7":[0.62,15.29],"8":[0.27,18.34],"9":[0.96,22.41],"10":[1.03,26.92],"11":[7.47,23],"12":[1.03,30.13],"13":[10.63,37.84],"14":[0.07,55],"15":[12,54.86],"16":[8.5,94.14],"17":[9.02,99],"18":[1.92,98.36]},"MIXMNU":{"1":[3.1,13.79],"2":[4.13,38.49],"3":[4.65,63.19],"4":[4.91,87.2]},"MIXADD":{"1":[9.78,8.85],"2":[8.31,56.49]},"MIXSTP":{"1":[19.62,17.22],"2":[21.63,17.22],"3":[23.52,37.12]},"MIXSM":{"1":[4.84,11.66],"2":[5.18,31.72],"3":[5.53,51.22],"4":[5.18,69.05],"5":[5.87,86.87]},"ANLZ":{"1":[18,9.2],"2":[58,9.2],"3":[80,9.2],"4":[93,9.2],"5":[12,15.5],"6":[45,40],"7":[45,62],"8":[45,84],"9":[72,15.5],"10":[82,15.5]},"ANLZM":{"1":[5.2,12.61],"2":[5.2,33.83],"3":[5.2,55.41],"4":[6.42,87.51],"5":[7.34,96.43]},"FXI":{"1":[1.43,13.39],"2":[85.11,16.7],"3":[18.03,28.39],"4":[67.73,29.66],"5":[48.39,37.49],"6":[9.86,36.53],"7":[87.28,38.25],"8":[92.49,37.23],"9":[4.15,36.53],"10":[96.52,37.74]},"FXRM":{"1":[5.87,11.57],"2":[6.41,27.98],"3":[5.34,49.55],"4":[5.61,73.94],"5":[6.14,90.35]},"FXPICK":{"1":[5.34,4.35],"2":[4.2,33.39],"3":[3.82,49.08],"4":[3.44,69.23],"5":[4.2,89.76],"6":[6.49,96.17]},"FX":{"1":[40.15,3.05],"2":[88.8,6.54],"3":[10.81,52.76],"4":[7.97,61.73],"5":[83.18,47.88],"6":[88.42,59.54],"7":[97.18,48.17]},"FXV":{},"FXM":{"1":[7.33,21.87],"2":[7.05,36.77],"3":[6.77,50.87],"4":[7.05,70.61],"5":[7.33,90.75]},"EQ":{"1":[12,3.5],"2":[7,9],"3":[48,9],"4":[95,9],"5":[40,55],"6":[30,40],"7":[55,72],"8":[26,38],"9":[74,16],"10":[88,22],"11":[88,34],"12":[88,48],"13":[88,72],"14":[97.6,3.5]},"EQB":{"1":[7,7],"2":[7,19],"3":[7,31],"4":[7,43],"5":[7,55],"6":[7,71],"7":[7,89]},"VUMTR":{"1":[50,45],"2":[49.29,90.68],"3":[4.26,8.32]}};
 const CROPS   = {"FRAME":[["Main frame.png",null,null,1918,1019]],"FMENU":[["File Menu.png",null,null,291,400]],"EXP":[["Export Audio.png",null,null,524,594]],"BUNDLE":[["Export Project Bundle.png",null,null,351,218]],"EMENU":[["Edit Menu.png",null,null,246,169]],"UNDO":[["UndoHistory.png",null,null,220,401]],"EVT":[["Event Editor.png",null,null,1124,649]],"PMENU":[["Pattern Menu.png",null,null,341,222]],"VMENU":[["View Menu.png",null,null,410,223]],"OMENU":[["Options Menu.png",null,null,411,222]],"FILE":[["File Settings.png",null,null,499,552]],"AUD":[["Audio & Midi Settings.png",null,null,602,428]],"PLUG":[["Plugin Search.png",null,null,1151,873]],"HMENU":[["Help Menu.png",null,null,274,98]],"KEYS":[["Keybinds.png",null,null,879,1027]],"TRAN":[["Transport Bar.png",null,null,1020,48]],"TRANRM":[["Recording Menu.png",null,null,294,99]],"TRANMM":[["Metronome Menu.png",null,null,312,162]],"TABBAR":[["Ribbon Tab Bar.png",null,null,899,53]],"TABUTN":[["Ribbon + Menu.png",null,null,239,311]],"BLD":[["Builder.png",null,null,1909,901]],"BLDM":[["Builder Menu.png",null,null,278,167]],"BLDE":[["Builder Edit.png",null,null,205,249]],"BLDV":[["Builder View.png",null,null,285,102]],"PR":[["Piano Roll.png",null,null,1911,899]],"PRE":[["Piano Roll Edit.png",null,null,206,181]],"PRT":[["Piano Roll Tools.png",null,null,372,443]],"PRS":[["Piano Roll Scale.png",null,null,182,99]],"PRC":[["Piano Roll Chords.png",null,null,156,391]],"PRV":[["Piano Roll View.png",null,null,221,222]],"DKIT":[["Drum Kit.png",null,null,1914,903]],"DKITE":[["Drum Kit Edit.png",null,null,205,183]],"DKITT":[["Drum Kit Tools.png",null,null,216,212]],"DKITV":[["Drum Kit View.png",null,null,219,141]],"PRMMNU":[["RightClick Knob or Slider.png",null,null,255,81]],"BSV":[["BaySickVocals.png",null,null,647,442]],"BSVCM":[["BaySickVocals Menu.png",null,null,270,398]],"BSVC":[["Vocal Chain.png",null,null,644,905]],"BSA":[["BaySickAlign.png",null,null,1266,438]],"BSPIT":[["BaySickPitch.png",null,null,1912,901]],"BSPDL":[["BaySickPedals.png",null,"The board",1298,694],["BaySickPedals.png",[0,0,100,5.5],"Title bar",1298,694]],"BSPDLM":[["BaySickPedals Menu.png",null,null,274,275]],"BSPDLP":[["BaySickPedals List.png",null,null,247,856]],"BSGTR":[["BaySickGuitars.png",null,null,1306,568]],"BSBAS":[["BaySickBasses.png",null,null,1306,567]],"BSGBM":[["BaySickGuitars & Basses Menu.png",null,null,274,370]],"BSNAM":[["BaySickNAMIR.png",null,null,647,905]],"BSHARM":[["Harmless.png",null,null,1306,566]],"BSHARMM":[["BaySickSynth-BaySickPlayer-Harmless Menu.png",null,null,290,508]],"BSSB":[["BaySickSynth FLT.png",[34.4,1.44,18.04,4.36],"BaySickSynth",694,565],["BaySickBass Titlebar Crop.png",[33.5,2.41,19.23,5.58],"BaySickBass",651,441]],"BSSBT":[["BaySickSynth FLT.png",[0,0,100,6.09],"BaySickSynth",694,565],["BaySickBass Titlebar Crop.png",[0,0,100,8.93],"BaySickBass",651,441]],"BSSBM":[["BaySickSynth-BaySickPlayer-Harmless Menu.png",null,"BaySickSynth / BaySickPlayer / Harmless",290,508],["BaySickBass Menu Updated.png",null,"BaySickBass",282,506]],"BSSBOSC":[["BaySickSynth OSC.png",[0,5.8,100,94.2],"Oscillator panel with the waveform strip",694,567]],"BSSBOENV":[["BaySickSynth OSC ENV.png",[0,5.57,100,94.43],"Oscillator envelope panel",693,565]],"BSSBFLT":[["BaySickSynth FLT.png",[0,5.97,100,94.03],"Filter panel",694,565]],"BSSBFENV":[["BaySickSynth FLT ENV.png",[0,6.89,100,93.11],"Filter envelope panel",696,568]],"BSSBLFO":[["BaySickSynth LFO.png",[0,6.34,100,93.66],"LFO panel",693,566]],"BSSBMOD":[["BaySickSynth MOD.png",[0,6.24,100,93.76],"Mod panel",693,567]],"BSP":[["BaySickPlayer.png",null,null,609,568]],"BSPM":[["BaySickSynth-BaySickPlayer-Harmless Menu.png",null,null,290,508]],"BSDRUMS":[["Drum Kit.png",null,null,1914,903]],"BSDM":[["BaySickDrum Menu.png",null,null,289,330]],"BSRDTTL":[["BaySickRustyDrums Main.png",[0,0,100,17.5],"Title bar and section tabs",645,438]],"BSRDMENU":[["BaySickRustyDrums Menu.png",null,null,257,221]],"BSRDMAIN":[["BaySickRustyDrums Main.png",null,null,645,438]],"BSRDKICK":[["BaySickRustyDrums Kick.png",null,null,642,439]],"BSRDSNARE":[["BaySickRustyDrums Snare.png",null,null,643,439]],"BSRDTOM":[["BaySickRustyDrums Toms.png",null,null,644,438]],"BSRDHAT":[["BaySickRustyDrums Hi-Hat.png",null,null,646,438]],"BSRDCYMB":[["BaySickRustyDrums Cymbals.png",null,null,645,435]],"BSRDNOISE":[["BaySickRustyDrums Noises and Clicks.png",null,null,646,435]],"BSRDKIT":[["BaySickRustyDrums Drum Kit.png",null,null,643,437]],"BSRDMAP":[["Rusty Keys.png",null,null,704,1029]],"BSPLUG":[["Hosted Plugin.png",null,null,1157,628]],"BSPLUGM":[["BaySickPlugins Menu.png",null,null,294,331]],"MIX":[["Mixer.png",null,null,1913,900]],"MIXMNU":[["Mixer Menu.png",null,null,308,115]],"MIXADD":[["Mixer Add.png",null,null,162,210]],"MIXSTP":[["Mixer Strip Crop.png",[41.6,4.3,5.3,95.7],"An engine strip (Bass 1)",1915,905],["Mixer Strip Crop.png",[18.9,4.3,5.3,95.7],"A live-input strip (Vox 1)",1915,905]],"MIXSM":[["Send Menu.png",null,null,230,142]],"ANLZ":[["Analyzer.png",null,null,1307,569]],"ANLZM":[["Analyzer Menu.png",null,null,260,447]],"FXI":[["Effects Rack.png",null,null,615,313]],"FXRM":[["Effects Rack Menu.png",null,null,298,169]],"FXPICK":[["Effects Panel List.png",null,null,208,610]],"FX":[["Effects Panel.png",null,null,857,329]],"FXV":[["Effects Panel with Visual.png",null,null,858,605]],"FXM":[["Effects Panel Menu.png",null,null,282,197]],"EQ":[["EQ.png",null,null,1307,564]],"EQB":[["EQ Band Menu.png",null,null,226,220]],"VUMTR":[["VU Meter.png",null,null,224,249]]};
-const M2CROPS = {"TRAN:0":["Transport Bar.png",[0,0,19.91,100]],"TRAN:1":["Transport Bar.png",[21.4,6.02,16.44,87.96]],"TRAN:2":["Transport Bar.png",[37.68,0,13.4,100]],"TRAN:3":["Transport Bar.png",[51,0,10.74,100]],"TRAN:4":["Transport Bar.png",[61.5,0,37.97,100]],"TABBAR:0":["Ribbon Tab Bar.png",[0,0,16.14,100]],"TABBAR:1":["Ribbon Tab Bar.png",[0,0,85.19,100]],"TABBAR:2":["Ribbon Tab Bar.png",[84.48,0,15.52,100]],"BLD:0":["Builder.png",[0,3.56,11.96,15.78]],"BLD:1":["Builder.png",[12.02,2.17,55.88,7.57]],"BLD:2":["Builder.png",[19.5,7.49,80.5,4.44]],"BLD:3":["Builder.png",[11.97,10.01,8.43,13.24]],"BLD:4":["Builder.png",[20.05,9.52,79.42,88.71]],"PR:0":["Piano Roll.png",[2.67,0,16.09,3.89]],"PR:1":["Piano Roll.png",[0,3.35,16.34,7.25]],"PR:2":["Piano Roll.png",[2.81,5.3,45.28,6.41]],"PR:3":["Piano Roll.png",[4.2,10,95.48,55.71]],"PR:4":["Piano Roll.png",[0,9.78,4.53,56.04]],"PR:5":["Piano Roll.png",[3.94,64.08,96.06,35.92]],"DKIT:0":["Drum Kit.png",[0,9.76,13.18,55.87]],"DKIT:1":["Drum Kit.png",[89.56,4.54,10.44,7.25]],"BSV:0":["BaySickVocals.png",[0,7.67,30.49,48.93]],"BSV:1":["BaySickVocals.png",[27.65,46.41,40.37,12.55]],"BSV:2":["BaySickVocals.png",[3.66,57.58,50.69,23.22]],"BSV:3":["BaySickVocals.png",[60.13,59.21,37.67,22.29]],"BSV:4":["BaySickVocals.png",[28.29,90.53,43.3,9.47]],"BSVC:0":["Vocal Chain.png",[0.37,4.13,98.72,16.22]],"BSVC:1":["Vocal Chain.png",[2.36,50.54,82.88,6.62]],"BSVC:2":["Vocal Chain.png",[3.07,56.06,94.89,10.94]],"BSA:0":["BaySickAlign.png",[12.01,8.81,53.32,11.32]],"BSA:1":["BaySickAlign.png",[50,8.56,24.99,9.85]],"BSA:2":["BaySickAlign.png",[10.32,17.54,69.24,6.73]],"BSA:3":["BaySickAlign.png",[0,41.65,79.58,33.26]],"BSA:4":["BaySickAlign.png",[79.86,18.27,19.99,80.64]],"BSA:5":["BaySickAlign.png",[9.6,89.79,69.89,10.21]],"BSPIT:0":["BaySickPitch.png",[7.21,3.12,20.76,9.06]],"BSPIT:1":["BaySickPitch.png",[44.07,3.57,40.59,9.51]],"BSPIT:2":["BaySickPitch.png",[84.58,2.5,15.36,12.23]],"BSPIT:3":["BaySickPitch.png",[0,15.2,100,80.56]],"BSPDL:0":["BaySickPedals View.png",[0,0,100,100]],"BSPDL:1":["BaySickPedals Compact View.png",[0,0,100,100]],"BSPDL:2":["BaySickPedals.png",[25.33,5.88,24.95,47.24]],"BSPDL:3":["BaySickPedals.png",[1.38,7.45,23.55,5.5]],"BSPDL:4":["BaySickPedals.png",[1.27,7.16,23.9,44.37]],"BSPDL:5":["BaySickPedals.png",[74.74,52.96,24.3,44.97]],"BSGTR:0":["BaySickGuitars.png",[73.06,0,21.42,7.07]],"BSGTR:1":["BaySickGuitars.png",[0,5.47,15.46,6.67]],"BSGTR:2":["BaySickGuitars.png",[7.66,52.78,15.74,43.22]],"BSGTR:3":["BaySickGuitars.png",[29,47.52,40.8,50.42]],"BSGTR:4":["BaySickGuitars.png",[73.13,47.12,20.15,48.15]],"BSBAS:0":["BaySickBasses.png",[73.19,0,21.92,7.56]],"BSBAS:1":["BaySickBasses.png",[0.42,5.91,21.51,39.79]],"BSBAS:2":["BaySickBasses.png",[25.25,16.02,6.64,30.88]],"BSBAS:3":["BaySickBasses.png",[37.78,9.36,27.94,53.81]],"BSBAS:4":["BaySickBasses.png",[71.67,11.24,19.47,50.49]],"BSNAM:0":["BaySickNAMIR.png",[3.56,5.73,89.93,10.84]],"BSNAM:1":["BaySickNAMIR.png",[3.83,17.1,90.9,13.14]],"BSNAM:2":["BaySickNAMIR.png",[83.96,29.2,14.74,6.52]],"BSNAM:3":["BaySickNAMIR.png",[1.16,34.04,97.38,24.87]],"BSNAM:4":["BaySickNAMIR.png",[3.21,60.76,96.31,37.47]],"BSNAM:5":["BaySickNAMIR.png",[2.21,81.1,46.65,16.6]],"BSHARM:0":["Harmless.png",[1.28,7.03,32.6,14.18]],"BSHARM:1":["Harmless.png",[1.24,21.27,16.42,14.18]],"BSHARM:2":["Harmless.png",[17.66,21.27,16.21,13.94]],"BSHARM:3":["Harmless.png",[1.27,35.27,32.71,14.18]],"BSHARM:4":["Harmless.png",[35.03,7.21,10.43,41.74]],"BSHARM:5":["Harmless.png",[46.3,6.55,53.1,28.43]],"BSHARM:6":["Harmless.png",[46.5,35,52.35,13.49]],"BSHARM:7":["Harmless.png",[0.62,50.21,18.24,11.79]],"BSHARM:8":["Harmless.png",[18.41,50,24.11,12.84]],"BSHARM:9":["Harmless.png",[0.8,62,10.69,12]],"BSHARM:10":["Harmless.png",[11.1,63.21,31.93,11.76]],"BSHARM:11":["Harmless.png",[0.74,74.73,20.94,12.97]],"BSHARM:12":["Harmless.png",[0.84,87,21.04,13]],"BSHARM:13":["Harmless.png",[21.51,74.76,21.43,25.24]],"BSHARM:14":["Harmless.png",[61.46,49.5,38.54,50.5]],"BSSBOSC:0":["BaySickSynth OSC.png",[0.93,6.22,97.92,34.31]],"BSSBOSC:1":["BaySickSynth OSC.png",[0.84,40,32.73,57.65]],"BSSBOSC:2":["BaySickSynth OSC.png",[34.5,40.72,32.11,58.18]],"BSSBOSC:3":["BaySickSynth OSC.png",[67.35,40.58,32.02,58.46]],"BSSBOENV:0":["BaySickSynth OSC ENV.png",[1.11,40.67,48.74,58.09]],"BSSBOENV:1":["BaySickSynth OSC ENV.png",[50.68,40.25,48.2,58.23]],"BSSBFLT:0":["BaySickSynth FLT.png",[0.94,40.05,48.58,58.58]],"BSSBFLT:1":["BaySickSynth FLT.png",[50.55,40.22,48.37,59.08]],"BSSBFENV:0":["BaySickSynth FLT ENV.png",[6.58,39.86,92.83,59.38]],"BSSBLFO:0":["BaySickSynth LFO.png",[0.61,40.22,48.51,58.49]],"BSSBLFO:1":["BaySickSynth LFO.png",[50.69,39.93,47.78,59.06]],"BSSBMOD:0":["BaySickSynth MOD.png",[0,40.19,12.58,57.15]],"BSSBMOD:1":["BaySickSynth MOD.png",[13.3,39.51,47.93,59.33]],"BSSBMOD:2":["BaySickSynth MOD.png",[61.73,40.11,36.5,59.13]],"BSP:0":["BaySickPlayer.png",[3.08,15.49,27.6,9.98]],"BSP:1":["BaySickPlayer.png",[2.46,25.49,30.14,14.07]],"BSP:2":["BaySickPlayer.png",[37.71,8.87,24.05,44.54]],"BSP:3":["BaySickPlayer.png",[68.53,9.43,27.86,39.74]],"BSP:4":["BaySickPlayer.png",[4.77,53.24,43.63,28.62]],"BSP:5":["BaySickPlayer.png",[52.97,53.66,42.83,40.17]],"MIX:0":["Mixer.png",[0,0,19.23,6.83]],"MIX:1":["Mixer.png",[18.92,5.96,3.48,11.2]],"MIX:2":["Mixer.png",[0,16.06,11.27,17.26]],"MIX:3":["Mixer.png",[7.35,5.14,5.92,94.86]],"MIX:4":["Mixer.png",[0,95.34,24.92,4.66]],"ANLZ:0":["Analyzer.png",[13.5,3.2,84.0,12.0]],"ANLZ:1":["Analyzer.png",[5.0,9.5,14.0,12.0]],"ANLZ:2":["Analyzer.png",[38.0,34.0,14.0,12.0]],"ANLZ:3":["Analyzer.png",[38.0,56.0,14.0,12.0]],"ANLZ:4":["Analyzer.png",[40.5,9.5,46.0,80.5]],"FXI:0":["Effects Rack.png",[0,10.74,100,24.26]],"FXI:1":["Effects Rack.png",[0,34.45,100,11.54]],"FX:0":["Effects Panel.png",[39.4,0,53,12]],"FX:1":["Effects Panel.png",[6.2,45.45,80.36,20.18]],"FX:2":["Effects Panel.png",[86.99,46,7.12,18.28]],"EQ:0":["EQ.png",[4.94,0,28.98,7.02]],"EQ:1":["EQ.png",[0.36,6.84,71.57,92.43]],"EQ:2":["EQ.png",[71.54,6.41,28.46,93.59]]};
+const M2CROPS = {"TRAN:0":["Transport Bar.png",[0,0,19.91,100]],"TRAN:1":["Transport Bar.png",[21.4,6.02,16.44,87.96]],"TRAN:2":["Transport Bar.png",[37.68,0,13.4,100]],"TRAN:3":["Transport Bar.png",[51,0,10.74,100]],"TRAN:4":["Transport Bar.png",[61.5,0,37.97,100]],"TABBAR:0":["Ribbon Tab Bar.png",[0,0,16.14,100]],"TABBAR:1":["Ribbon Tab Bar.png",[0,0,85.19,100]],"TABBAR:2":["Ribbon Tab Bar.png",[84.48,0,15.52,100]],"BLD:0":["Builder.png",[0,3.56,11.96,15.78]],"BLD:1":["Builder.png",[12.02,2.17,55.88,7.57]],"BLD:2":["Builder.png",[19.5,7.49,80.5,4.44]],"BLD:3":["Builder.png",[11.97,10.01,8.43,13.24]],"BLD:4":["Builder.png",[20.05,9.52,79.42,88.71]],"PR:0":["Piano Roll.png",[2.67,0,16.09,3.89]],"PR:1":["Piano Roll.png",[0,3.35,16.34,7.25]],"PR:2":["Piano Roll.png",[2.81,5.3,45.28,6.41]],"PR:3":["Piano Roll.png",[4.2,10,95.48,55.71]],"PR:4":["Piano Roll.png",[0,9.78,4.53,56.04]],"PR:5":["Piano Roll.png",[3.94,64.08,96.06,35.92]],"DKIT:0":["Drum Kit.png",[0,9.76,13.18,55.87]],"DKIT:1":["Drum Kit.png",[89.56,4.54,10.44,7.25]],"BSV:0":["BaySickVocals.png",[0,7.67,30.49,48.93]],"BSV:1":["BaySickVocals.png",[27.65,46.41,40.37,12.55]],"BSV:2":["BaySickVocals.png",[3.66,57.58,50.69,23.22]],"BSV:3":["BaySickVocals.png",[60.13,59.21,37.67,22.29]],"BSV:4":["BaySickVocals.png",[28.29,90.53,43.3,9.47]],"BSVC:0":["Vocal Chain.png",[0.37,4.13,98.72,16.22]],"BSVC:1":["Vocal Chain.png",[2.36,50.54,82.88,6.62]],"BSVC:2":["Vocal Chain.png",[3.07,56.06,94.89,10.94]],"BSA:0":["BaySickAlign.png",[12.01,8.81,53.32,11.32]],"BSA:1":["BaySickAlign.png",[50,8.56,24.99,9.85]],"BSA:2":["BaySickAlign.png",[10.32,17.54,69.24,6.73]],"BSA:3":["BaySickAlign.png",[0,41.65,79.58,33.26]],"BSA:4":["BaySickAlign.png",[79.86,18.27,19.99,80.64]],"BSA:5":["BaySickAlign.png",[9.6,89.79,69.89,10.21]],"BSPIT:0":["BaySickPitch.png",[7.21,3.12,20.76,9.06]],"BSPIT:1":["BaySickPitch.png",[44.07,3.57,40.59,9.51]],"BSPIT:2":["BaySickPitch.png",[84.58,2.5,15.36,12.23]],"BSPIT:3":["BaySickPitch.png",[0,15.2,100,80.56]],"BSPDL:0":["BaySickPedals View.png",[0,0,100,100]],"BSPDL:1":["BaySickPedals Compact View.png",[0,0,100,100]],"BSPDL:2":["BaySickPedals.png",[25.33,5.88,24.95,47.24]],"BSPDL:3":["BaySickPedals.png",[1.38,7.45,23.55,5.5]],"BSPDL:4":["BaySickPedals.png",[1.27,7.16,23.9,44.37]],"BSPDL:5":["BaySickPedals.png",[74.74,52.96,24.3,44.97]],"BSGTR:0":["BaySickGuitars.png",[73.06,0,21.42,7.07]],"BSGTR:1":["BaySickGuitars.png",[0,5.47,15.46,6.67]],"BSGTR:2":["BaySickGuitars.png",[7.66,52.78,15.74,43.22]],"BSGTR:3":["BaySickGuitars.png",[29,47.52,40.8,50.42]],"BSGTR:4":["BaySickGuitars.png",[73.13,47.12,20.15,48.15]],"BSBAS:0":["BaySickBasses.png",[73.19,0,21.92,7.56]],"BSBAS:1":["BaySickBasses.png",[0.42,5.91,21.51,39.79]],"BSBAS:2":["BaySickBasses.png",[25.25,16.02,6.64,30.88]],"BSBAS:3":["BaySickBasses.png",[37.78,9.36,27.94,53.81]],"BSBAS:4":["BaySickBasses.png",[71.67,11.24,19.47,50.49]],"BSNAM:0":["BaySickNAMIR.png",[3.56,5.73,89.93,10.84]],"BSNAM:1":["BaySickNAMIR.png",[3.83,17.1,90.9,13.14]],"BSNAM:2":["BaySickNAMIR.png",[83.96,29.2,14.74,6.52]],"BSNAM:3":["BaySickNAMIR.png",[1.16,34.04,97.38,24.87]],"BSNAM:4":["BaySickNAMIR.png",[3.21,60.76,96.31,37.47]],"BSNAM:5":["BaySickNAMIR.png",[2.21,81.1,46.65,16.6]],"BSHARM:0":["Harmless.png",[1.28,7.03,32.6,14.18]],"BSHARM:1":["Harmless.png",[1.24,21.27,16.42,14.18]],"BSHARM:2":["Harmless.png",[17.66,21.27,16.21,13.94]],"BSHARM:3":["Harmless.png",[1.27,35.27,32.71,14.18]],"BSHARM:4":["Harmless.png",[35.03,7.21,10.43,41.74]],"BSHARM:5":["Harmless.png",[46.3,6.55,53.1,28.43]],"BSHARM:6":["Harmless.png",[46.5,35,52.35,13.49]],"BSHARM:7":["Harmless.png",[0.62,50.21,18.24,11.79]],"BSHARM:8":["Harmless.png",[18.41,50,24.11,12.84]],"BSHARM:9":["Harmless.png",[0.8,62,10.69,12]],"BSHARM:10":["Harmless.png",[11.1,63.21,31.93,11.76]],"BSHARM:11":["Harmless.png",[0.74,74.73,20.94,12.97]],"BSHARM:12":["Harmless.png",[0.84,87,21.04,13]],"BSHARM:13":["Harmless.png",[21.51,74.76,21.43,25.24]],"BSHARM:14":["Harmless.png",[61.46,49.5,38.54,50.5]],"BSSBOSC:0":["BaySickSynth OSC.png",[0.93,6.22,97.92,34.31]],"BSSBOSC:1":["BaySickSynth OSC.png",[0.84,40,32.73,57.65]],"BSSBOSC:2":["BaySickSynth OSC.png",[34.5,40.72,32.11,58.18]],"BSSBOSC:3":["BaySickSynth OSC.png",[67.35,40.58,32.02,58.46]],"BSSBOENV:0":["BaySickSynth OSC ENV.png",[1.11,40.67,48.74,58.09]],"BSSBOENV:1":["BaySickSynth OSC ENV.png",[50.68,40.25,48.2,58.23]],"BSSBFLT:0":["BaySickSynth FLT.png",[0.94,40.05,48.58,58.58]],"BSSBFLT:1":["BaySickSynth FLT.png",[50.55,40.22,48.37,59.08]],"BSSBFENV:0":["BaySickSynth FLT ENV.png",[6.58,39.86,92.83,59.38]],"BSSBLFO:0":["BaySickSynth LFO.png",[0.61,40.22,48.51,58.49]],"BSSBLFO:1":["BaySickSynth LFO.png",[50.69,39.93,47.78,59.06]],"BSSBMOD:0":["BaySickSynth MOD.png",[0,40.19,12.58,57.15]],"BSSBMOD:1":["BaySickSynth MOD.png",[13.3,39.51,47.93,59.33]],"BSSBMOD:2":["BaySickSynth MOD.png",[61.73,40.11,36.5,59.13]],"BSP:0":["BaySickPlayer.png",[3.08,15.49,27.6,9.98]],"BSP:1":["BaySickPlayer.png",[2.46,25.49,30.14,14.07]],"BSP:2":["BaySickPlayer.png",[37.71,8.87,24.05,44.54]],"BSP:3":["BaySickPlayer.png",[68.53,9.43,27.86,39.74]],"BSP:4":["BaySickPlayer.png",[4.77,53.24,43.63,28.62]],"BSP:5":["BaySickPlayer.png",[52.97,53.66,42.83,40.17]],"MIX:0":["Mixer.png",[0,0,19.23,6.83]],"MIX:1":["Mixer.png",[18.92,5.96,3.48,11.2]],"MIX:2":["Mixer.png",[0,16.06,11.27,17.26]],"MIX:3":["Mixer.png",[7.35,5.14,5.92,94.86]],"MIX:4":["Mixer.png",[0,95.34,24.92,4.66]],"ANLZ:0":["Analyzer.png",[13.5,3.2,84.0,12.0]],"ANLZ:1":["Analyzer.png",[5.0,9.5,14.0,12.0]],"ANLZ:2":["Analyzer.png",[38.0,34.0,14.0,12.0]],"ANLZ:3":["Analyzer.png",[38.0,56.0,14.0,12.0]],"ANLZ:4":["Analyzer.png",[40.5,9.5,46.0,80.5]],"FXI:0":["Effects Rack.png",[0,10.74,100,24.26]],"FXI:1":["Effects Rack.png",[0,34.45,100,11.54]],"FX:0":["Effects Panel.png",[39.4,0,53,12]],"FX:1":["Effects Panel.png",[6.2,45.45,80.36,20.18]],"FX:2":["Effects Panel.png",[86.99,46,7.12,18.28]],"EQ:0":["EQ.png",[4.94,0,28.98,7.02]],"EQ:1":["EQ.png",[0.36,6.84,71.57,92.43]],"EQ:2":["EQ.png",[71.54,6.41,28.46,93.59]],"EQ:3":["EQ.png",[89.55,0.0,10.45,9.75]]};
 
 (function () {
   // Pin the content column at the screen's own width (display scaling makes

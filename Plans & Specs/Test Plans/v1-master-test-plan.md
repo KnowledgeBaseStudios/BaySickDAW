@@ -3528,6 +3528,100 @@ at all, before this batch or after it:**
       ends takes with the transport; the Export Audio dialog's Measure still opens the analyzer
       on the measured curve (now with the momentary line).  `D:__ R:__` notes:
 
+### §B.38 — QA-EqPro (the kbs engine take-back: 24-band strip EQ, domain views, linear phase that tells the truth)
+
+Every strip's Pre/Post EQ is one 24-band kbs engine per bank (the mid+side
+pair is gone); the window is the ported KBS EQ Pro stack (graph + chips +
+rail) with three DOMAIN VIEWS.  Params are touch-lazy: a fresh build
+registers ~zero EQ params.  Old projects' EQ settings deliberately reset
+(SC-14).  The engine itself is proven by `run_eq_tests.bat` (54 checks) -
+these rows cover the app around it.
+
+**The window + views:**
+
+- [ ] **EQ-1 - MUST-PASS: the window stands up.** Open any strip's Post EQ: chip row (24 +
+      "+" + A/B pill), ST/MID/SIDE view row, graph with analyser, collapsible right rail.
+      Band drag = freq+gain, Shift fine, Ctrl gain-only, Ctrl+Shift freq-only; wheel on a
+      dot = Q; double-click empty adds, double-click a dot MUTES; Alt-click resets (bands
+      1-8 return to their home frequencies); Delete removes.  `D:__ R:__` notes:
+- [ ] **EQ-2 - MUST-PASS: the view IS the domain.** On a pan-wide source, add a band in the
+      SIDE view and boost: only the sides change (a mono source: nothing changes).  MID
+      view band: only the center.  No routing gesture anywhere; the band lands in the view
+      that made it.  `D:__ R:__` notes:
+- [ ] **EQ-3 - ghost views.** With bands in Mid and Side, switch views: the other view's
+      curve + dots stay visible dimmed, live (drag a band in one view while watching its
+      ghost from the other via a second window), and the ghost is never clickable.
+      `D:__ R:__` notes:
+- [ ] **EQ-4 - L/R only in Stereo view.** A Stereo-view band's right-click offers Channel >
+      Stereo/Left/Right (badge on the dot); Mid/Side appear in NO picker.  "Move to ...
+      view" re-domains a band keeping its settings (SC-18).  `D:__ R:__` notes:
+- [ ] **EQ-5 - the picture is the sound.** +12 bell at 1 kHz on a tone: the strip meter
+      moves ~+12; drag the band while playing - the sound follows the curve immediately,
+      in EVERY processing mode including the linear ones (the old engine's linear modes
+      ignored edits forever).  `D:__ R:__` notes:
+
+**Modes + latency truth:**
+
+- [ ] **EQ-6 - MUST-PASS: linear modes stay aligned.** Duplicate content on two strips into
+      the master; put one strip's EQ (flat bands) into Linear Maximum: no combing, no
+      timing smear against the untouched strip - flat-but-linear still imposes and is
+      compensated for its full delay (the old B2 defect's negation).  Nudge a band off
+      zero: no click, no jump.  `D:__ R:__` notes:
+- [ ] **EQ-7 - MUST-PASS: mode change during playback.** Cycle Processing Mode through all
+      seven entries while music plays, ten times fast: no crash, no jassert in Debug -
+      the change applies through the shielded parameter path.  Menu latency figures are
+      computed at the session rate (change the device rate: the ms figures move).
+      `D:__ R:__` notes:
+- [ ] **EQ-8 - Natural Phase.** A 15 kHz bell at 44.1k keeps its shape (audibly brighter
+      than Zero Latency's cramped version at the same settings).  `D:__ R:__` notes:
+
+**Dynamics + sidechain:**
+
+- [ ] **EQ-9 - the Nova model.** DYN on a bell: direction DOWN cuts past the threshold, UP
+      boosts past it; THR at 0 = nothing moves, pulling it down engages; the dotted
+      extent line moves with THR and the live curve never crosses it; rail + handle GR
+      meters agree.  `D:__ R:__` notes:
+- [ ] **EQ-10 - four receive lines.** Route a kick into receive 1 of a bass strip; EXT on
+      the bass EQ's dynamic band lists the routed lines by name; pick one - the band
+      ducks with the kick; the analyser's Sidechain overlay + collision tint follow the
+      picked line.  `D:__ R:__` notes:
+
+**Tools:**
+
+- [ ] **EQ-11 - listen + grab.** The headphone button latches band-listen (drag while
+      listening works); hold-L does the same with focus.  Arm the crosshair, play music
+      with a resonance: the marker holds steady (max-hold), any empty click drops a cut
+      bell on it, one grab per arming.  `D:__ R:__` notes:
+- [ ] **EQ-12 - EQ Match.** Capture Current on the playing strip, load a reference file,
+      Match: bands land approximating the reference's tone in the current view's domain;
+      the status reports bands + residual.  `D:__ R:__` notes:
+- [ ] **EQ-13 - presets + A/B.** Factory presets land audibly (dynamic ones carry their
+      static cut); Default restores the out-of-the-box state including the bank globals;
+      Save Preset writes to Documents/BaySickDAW/Presets/EQ and the file loads onto a
+      DIFFERENT strip's other bank; the A/B pill swaps two full setups (B starts blank),
+      right-click copies/locks, and the swap is one Ctrl+Z.  `D:__ R:__` notes:
+
+**Params + boundaries:**
+
+- [ ] **EQ-14 - MUST-PASS: touch-lazy params.** Fresh build: the automation right-click
+      lists NO EQ lanes for an untouched strip; open a strip's EQ window - its lanes
+      appear (Mx ... EQ B1 Freq etc.); turn on band 9+ - its lanes appear one band at a
+      time.  Automate an EQ gain lane, save, reload WITHOUT opening the EQ window: the
+      lane still plays.  `D:__ R:__` notes:
+- [ ] **EQ-15 - load boundaries.** A -> B -> A with EQ content: A's curve returns exactly;
+      File > New lands 8 flat bands on, everything else default; an OLD (pre-QA-EqPro)
+      project loads with its EQ reset and everything else intact (SC-14, deliberate).
+      Page presets + FX Rack presets carry the EQ; importing either mid-playback does
+      not crash (the new shields).  `D:__ R:__` notes:
+- [ ] **EQ-16 - MUST-PASS: export starts on the grid.** Export a project with a Linear
+      Maximum EQ on a bus: the file's first transient lands at the bar line (no leading
+      offset), and Tail: Cut keeps the final notes (nothing truncated).  A freeze made
+      with the same EQ still substitutes sample-aligned.  `D:__ R:__` notes:
+- [ ] **EQ-17 - the proof target.** `run_eq_tests.bat` from the repo root: eq_tests_log.txt
+      ends with both exit codes 0 and "all checks passed" (54 checks - the engine's
+      whole contract incl. the C3 per-domain regression and the 4-slot sidechain).
+      `D:__ R:__` notes:
+
 ## §C — Deferred re-verify ledger
 
 Parked items from closed batches. Lands INSIDE QA-J-Verify's §B section when that section is

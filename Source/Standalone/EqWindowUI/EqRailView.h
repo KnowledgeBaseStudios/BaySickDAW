@@ -447,9 +447,20 @@ public:
             addAndMakeVisible (k);
         };
 
+        auto gestureOnDragStart = [this] (juce::Slider& k, const char* field)
+        {
+            k.onDragStart = [this, field]
+            {
+                if (const int b = graph.selectedBand(); b >= 0)
+                    beginParamUndoGesture (graph.processor().apvts,
+                                           graph.paramId (b, field));
+            };
+        };
+
         initKnob (gain, "This band's gain");
         gain.setRange (-30.0, 30.0, 0.0);
         gain.setDoubleClickReturnValue (true, 0.0);
+        gestureOnDragStart (gain, "gain");
         gain.onValueChange = [this]
         {
             if (const int b = graph.selectedBand(); b >= 0)
@@ -462,6 +473,7 @@ public:
                        "gain types in the Stereo view.");
         pan.setRange (-1.0, 1.0, 0.0);
         pan.setDoubleClickReturnValue (true, 0.0);
+        gestureOnDragStart (pan, "place");
         pan.onValueChange = [this]
         {
             if (const int b = graph.selectedBand(); b >= 0)
@@ -526,6 +538,7 @@ public:
             if (syncing) return;
             const int b = graph.selectedBand();
             if (b < 0) return;
+            beginParamUndoGesture (graph.processor().apvts, graph.paramId (b, "slope"));
             graph.setBandValue (b, "slope", (float) (slope.getSelectedId() - 1));
         };
         addAndMakeVisible (slope);
@@ -571,6 +584,10 @@ public:
                     graph.setBandValue (b, field, (float) k.getValue());
             };
         };
+        const std::pair<juce::Slider*, const char*> dynGestures[] = {
+            { &thrK, "thr" }, { &ratK, "ratio" }, { &atkK, "atk" }, { &relK, "rel" } };
+        for (const auto& kf : dynGestures)
+            gestureOnDragStart (*kf.first, kf.second);
         initDynKnob (thrK, "thr", -60.0, 0.0, 0.0,
                      "Where the band engages, and how far it can go: at 0 dB "
                      "nothing ever crosses, so nothing moves; at -60 everything "
@@ -718,7 +735,11 @@ private:
         d.set = [this, field] (float v)
         {
             if (const int b = graph.selectedBand(); b >= 0)
+            {
+                beginParamUndoGesture (graph.processor().apvts,
+                                       graph.paramId (b, field));
                 graph.setBandValue (b, field, v);
+            }
         };
         addAndMakeVisible (d);
     }
@@ -735,7 +756,11 @@ private:
         row.set = [this, field] (int v)
         {
             if (const int b = graph.selectedBand(); b >= 0)
+            {
+                beginParamUndoGesture (graph.processor().apvts,
+                                       graph.paramId (b, field));
                 graph.setBandValue (b, field, (float) v);
+            }
         };
     }
 

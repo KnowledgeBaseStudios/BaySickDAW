@@ -97,6 +97,19 @@ inline int eqLinearFftOrder (EqMode m)
     }
 }
 
+// The linear path's latency for a mode, from the same constants EqLinearPhase
+// derives at prepare (taps = N/2 + 1, hop = N - taps + 1, latency =
+// hop + (taps - 1) / 2).  ONE home - menu readouts must not re-derive it.
+inline int eqLinearLatencySamples (EqMode m)
+{
+    const int order = eqLinearFftOrder (m);
+    if (order <= 0) return 0;
+    const int n = 1 << order;
+    const int taps = n / 2 + 1;
+    const int hop = n - taps + 1;
+    return hop + (taps - 1) / 2;
+}
+
 // ── one band, as the user has it ───────────────────────────────────────────
 struct EqBandParams
 {

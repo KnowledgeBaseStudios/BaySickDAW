@@ -10,7 +10,7 @@ class BaySickDAWProcessor;
 // A "page preset" captures every setting on an instrument-style page - every
 // engine state (including pages with multiple sub-tab engines like Inst's
 // Pedals + NAM/IR + sfizz Player), every mixer-strip APVTS param, every insert
-// effects rack + both pre + post EQ8 M/S, and (for pages that own a dedicated
+// effects rack + both pre + post EQs, and (for pages that own a dedicated
 // bus like Rusty's RustyDrums Bus) the bus rack + its EQs.  Piano-roll notes
 // are intentionally excluded - that's musical content, separate from the
 // chain's sound design.

@@ -548,7 +548,18 @@ EffectEqWindow::EffectEqWindow (BaySickDAWProcessor& proc,
 
     mChips = std::make_unique<eqview::BandChipRow> (*mGraph);
     mChips->onAbSwap = [this] { abSwap(); };
-    mChips->onAbCopy = [this] { if (auto* e = resolveEq()) e->saveToSpare(); };
+    mChips->onAbCopy = [this]
+    {
+        auto* e = resolveEq();
+        if (e == nullptr) return;
+        // Same shield as the swap: the copy reads the band array the audio
+        // thread writes.
+        const bool shieldWasUp = mProc.isProjectLoadInProgress();
+        mProc.setProjectLoadInProgress (true);
+        if (! shieldWasUp) mProc.settleAudioThread();
+        e->saveToSpare();
+        mProc.setProjectLoadInProgress (shieldWasUp);
+    };
     mChips->onAbLock = [this] { if (auto* e = resolveEq()) e->lockSpare (! e->isSpareLocked()); };
     mChips->isViewingB = [this] { auto* e = resolveEq(); return e != nullptr && e->isViewingSpare(); };
     mChips->isAbLocked = [this] { auto* e = resolveEq(); return e != nullptr && e->isSpareLocked(); };
@@ -564,7 +575,7 @@ EffectEqWindow::EffectEqWindow (BaySickDAWProcessor& proc,
     mViewRow->segs = {
         { {}, "ST", "Stereo view - bands that work the whole signal (plus any "
                     "Left/Right band)" },
-        { {}, "MID", "Mid view - bands that work the centre of the image. The "
+        { {}, "MID", "Mid view - bands that work the center of the image. The "
                      "other views stay visible as a ghost." },
         { {}, "SIDE", "Side view - bands that work the edges of the image. The "
                       "other views stay visible as a ghost." },
@@ -730,8 +741,17 @@ void EffectEqWindow::abSwap()
 {
     auto* e = resolveEq();
     if (e == nullptr) return;
+
+    // The swap exchanges band arrays the audio thread reads and re-seats the
+    // engine's runtime from the message thread - a configuration action, so
+    // it pays the nest-aware shield like every other one (the very class
+    // Task 8 closed; an A/B click is rare enough to afford the settle).
+    const bool shieldWasUp = mProc.isProjectLoadInProgress();
+    mProc.setProjectLoadInProgress (true);
+    if (! shieldWasUp) mProc.settleAudioThread();
     e->swapWithSpare();
     pushBankToParams (*e);
+    mProc.setProjectLoadInProgress (shieldWasUp);
 }
 
 // The swapped bank becomes the parameter state in one undo step - without
@@ -836,11 +856,8 @@ void EffectEqWindow::showOptionsMenu (juce::Component* anchor)
     const double sr = mProc.getSampleRate() > 0 ? mProc.getSampleRate() : 48000.0;
     auto latencyLabel = [sr] (int modeIdx) -> juce::String
     {
-        if (modeIdx < 2) return "0 ms";
-        const int n = 1 << (10 + (modeIdx - 2));
-        const int taps = n / 2 + 1;
-        const int hop = n - taps + 1;
-        const int lat = hop + (taps - 1) / 2;
+        const int lat = kbs::eqLinearLatencySamples ((kbs::EqMode) modeIdx);
+        if (lat <= 0) return "0 ms";
         return juce::String (juce::roundToInt (1000.0 * lat / sr)) + " ms ("
              + juce::String (lat) + " sp)";
     };
@@ -1060,9 +1077,10 @@ void EffectEqWindow::showOptionsMenu (juce::Component* anchor)
             }
             else if (r == 182)
             {
+                beginParamUndoGesture (mProc.apvts, mGraph->paramId (0, "on"));
                 for (int b = 0; b < StripEq::kBands; ++b)
-                    if (mProc.apvts.getParameter (mGraph->paramId (b, "on")) != nullptr)
-                        mGraph->removeBand (b);
+                    if (mGraph->isBandRegistered (b))
+                        mGraph->removeBand (b, false);
             }
             else if (r == 190 && mMatch != nullptr)
             {
@@ -1233,10 +1251,11 @@ void EffectEqWindow::loadUserPreset (const juce::File& f)
     if (! xml || ! xml->hasTagName ("BaySickEqPreset")) return;
 
     // Clean slate first, then the file's values - same one-undo-step shape as
-    // a factory preset.
+    // a factory preset (the writes join applyDefaultPreset's transaction, so
+    // they stay IN undo history - a programmatic-writes guard here would
+    // split the step in half).
     applyDefaultPreset();
 
-    juce::AudioProcessorValueTreeState::ScopedProgrammaticParamWrites spw;
     for (auto* pe = xml->getFirstChildElement(); pe != nullptr; pe = pe->getNextElement())
     {
         if (pe->hasTagName ("Param"))

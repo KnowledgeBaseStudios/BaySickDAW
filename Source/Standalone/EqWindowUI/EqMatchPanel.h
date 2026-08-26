@@ -255,9 +255,14 @@ private:
                                             graph.sessionSampleRate());
 
         // Replace, not overlay: matching over an existing curve would fit the
-        // difference twice.  The fit lands in the CURRENT view's domain.
+        // difference twice.  One undo step; only REGISTERED bands are touched
+        // (removing an unregistered band would materialize its params and
+        // defeat the lazy grain - SC-2/SC-9).  The fit lands in the CURRENT
+        // view's domain.
+        beginParamUndoGesture (graph.processor().apvts, graph.paramId (0, "on"));
         for (int b = 0; b < EqGraphView::kBands; ++b)
-            graph.removeBand (b);
+            if (graph.isBandRegistered (b))
+                graph.removeBand (b, false);
 
         const float chan = (float) (int) graph.domainOfCurrentView();
         for (size_t i = 0; i < fit.bands.size(); ++i)

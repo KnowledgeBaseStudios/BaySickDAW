@@ -7116,7 +7116,7 @@ void StandaloneEditor::showPageForTab(int tabId)
         else if (auto* cp = dynamic_cast<ClipsPage*>(mVisiblePage))
         {
             // 2026-04-28 (G-2): Clips page sub-tabs mirror Layer/Bass shape
-            // (Player / Piano Roll / Pre EQ8 M/S).  Piano Roll redirects to
+            // (Player / Piano Roll / Pre EQ).  Piano Roll redirects to
             // PianoRollPage with this Clip's engine selected; Pre EQ8 M/S is
             // a stub placeholder for now.
             // G-7: Page Preset hamburger always installed (Save greys out

@@ -228,7 +228,7 @@ naming the control sitting next to it, which already had its own number.
 | `FXV-8` | Source label | Nothing - "What is being drawn" says less than the drawing |
 | `EVT-1` | Event Editor title | `CHR-3`, which teaches window names once |
 | `BSVC-1` | Vocal Chain window title | `CHR-3`, same |
-| `EQ-10` | Band colour dot | `EQ-7`, the band handle it colour-matches |
+| `EQ-10` | Rail GAIN/PAN knobs | `EQ-6`, the selected band they edit |
 
 **The two Align strips were the opposite problem and were KEPT.** `SYNC POINTS`
 and `PROTECTED` genuinely look like dividers, and both are places you click and
@@ -536,9 +536,9 @@ reading; new topics append at the end of the namespace, never inside a block.
 | IMP-11 | Delay - Echo and Vocal Doubler modes, Spread / Pan tap offsets, sync divisions | `Source/DSP/DelayDSP` |
 | IMP-12 | Reverb - tail model, early reflections, bass multiplier | `Source/DSP/ReverbDSP` |
 | IMP-13 | De-reverb - reduction and tail estimation | `Source/DSP/DeReverbDSP` |
-| IMP-14 | EQ8 - eight bands, band types, dynamic EQ | `Source/DSP/EQ8DSP` |
-| IMP-15 | EQ8 mid/side | `Source/DSP/EQ8MsDSP` |
-| IMP-16 | EQ linear-phase path | `Source/DSP/EqLinearPhaseProcessor` |
+| IMP-14 | The kbs EQ engine - 24 bands, one design path, the over-threshold dynamics | `Source/DSP/Kbs/ParametricEq` |
+| IMP-15 | Domain views + per-band routing + the StripEq wrapper | `Source/DSP/Kbs/ParametricEq`, `Source/DSP/StripEq` |
+| IMP-16 | Linear phase - overlap-save FIR + the per-domain 2x2 matrix | `Source/DSP/Kbs/EqLinearPhase` |
 ### DSP modules - pedal and amp Style models (IMP-17..IMP-34)
 
 | IMP | Topic | Source |
@@ -845,20 +845,20 @@ band control is ONE callout per the within-image rule.
 
 | Callout | On-screen label | Manual 2 | IMP | System Reference |
 |---|---|---|---|---|
-| EQ-1 | `Pre EQ` / `Post EQ` - which of the strip two EQs this window is showing | Mixing | IMP-14 | `EQ.md` |
-| EQ-2 | `MID` / `SIDE` - the mid/side view. Only meaningful once a band is switched to a M/S channel | Mixing | IMP-15 | `EQ.md` |
-| EQ-3 | `A Bank` - the EQ own A/B snapshot pair, independent of any other A/B in the app | Mixing | IMP-14 | `EQ.md` |
-| EQ-4 | Grid - lines every 6 dB from -18 to +18; only 0 and +/-12 / +/-18 get text labels | Mixing | IMP-14 | `EQ.md` |
-| EQ-5 | Frequency scale - 20 Hz to 20 kHz, logarithmic | Mixing | IMP-14 | `EQ.md` |
-| EQ-6 | A band handle - numbered `1`..`8`, coloured per band, dragged on the curve. Every band has one | Mixing | IMP-14 | `EQ.md` |
-| EQ-7 | Band `M` - mute that band. Every band has one | Mixing | IMP-14 | `EQ.md` |
-| EQ-8 | Band `S` - solo that band. Every band has one | Mixing | IMP-14 | `EQ.md` |
-| EQ-9 | Band type box - `Bell` / `LP` / `HP` / `LShelf` / `HShelf` / `Notch` / `Off` / `BPass` / `Tilt`, sets the type directly. The band MENU opens on right-clicking a handle in the curve (*see EQB*) | Mixing | IMP-14 | `EQ.md` |
-| EQ-10 | Band gain fader - every band has one | Mixing | IMP-14 | `EQ.md` |
-| EQ-11 | Band gain readout - `0.0` dB | Mixing | IMP-14 | `EQ.md` |
-| EQ-12 | Band frequency knob and readout - `40` / `250` / `500` / `1.0k` / `2.0k` / `4.0k` / `8.0k` / `12k` are the eight defaults | Mixing | IMP-14 | `EQ.md` |
-| EQ-13 | Band Q knob and readout - `0.71` default | Mixing | IMP-14 | `EQ.md` |
-| EQ-14 | `Main` column - the output trim, right of the eight bands | Mixing | IMP-14 | `EQ.md` |
+| EQ-1 | `Pre EQ` / `Post EQ` - which of the strip's two EQs this window is showing (QA-EqPro window) | Mixing | IMP-14 | `EQ.md` |
+| EQ-2 | `ST` / `MID` / `SIDE` - the three domain views. The view a band lives in IS its domain; the other views ghost | Mixing | IMP-15 | `EQ.md` |
+| EQ-3 | The band chips - 24 numbered pills, one shared pool across the views, plus `+` | Mixing | IMP-14 | `EQ.md` |
+| EQ-4 | The `A`/`B` pill - two complete setups; click swaps, right-click Copy A to B / Lock | Mixing | IMP-14 | `EQ.md` |
+| EQ-5 | Grid + frequency scale - gain scale selectable 3..30 dB; 20 Hz to 20 kHz, logarithmic | Mixing | IMP-14 | `EQ.md` |
+| EQ-6 | A band handle - numbered dot, type glyph above, dynamic ring + mini GR meter, L/R badge | Mixing | IMP-14 | `EQ.md` |
+| EQ-7 | The live spectrum - pre dim / post bright / sidechain, with spectrogram, phase and piano opt-ins | Mixing | IMP-14 | `EQ.md` |
+| EQ-8 | The headphone button - latches band LISTEN on the selected band | Mixing | IMP-14 | `EQ.md` |
+| EQ-9 | The crosshair - arms the spectrum grab (max-held peaks; one grab per arming) | Mixing | IMP-14 | `EQ.md` |
+| EQ-10 | Rail `GAIN` / `PAN` knobs - the band's gain and its stereo placement | Mixing | IMP-15 | `EQ.md` |
+| EQ-11 | Rail `FREQ` / `Q` drag-numbers - drag or double-click to type | Mixing | IMP-14 | `EQ.md` |
+| EQ-12 | Rail type glyph grid + `ST`/`L`/`R` + slope box (6..96 dB/oct + `Brickwall`) | Mixing | IMP-14 | `EQ.md` |
+| EQ-13 | Rail `DYNAMICS` - `DYN`/`AUTO`/`EXT`, `DOWN`/`UP`, `THR`/`RATIO`/`ATK`/`REL`, GR meter | Mixing | IMP-14 | `EQ.md` |
+| EQ-14 | The window menu - modes with computed latencies, analyser/view options, EQ Match, presets | Mixing | IMP-16 | `EQ.md` |
 
 ### `EQB` - `EQ Band Menu.png`
 
@@ -866,13 +866,13 @@ The per-band menu. Reached from a band handle or its column chevron.
 
 | Callout | On-screen label | Manual 2 | IMP | System Reference |
 |---|---|---|---|---|
-| EQB-1 | `Filter Type` submenu | Mixing | IMP-14 | `EQ.md` |
-| EQB-2 | `Slope / Order` submenu | Mixing | IMP-14 | `EQ.md` |
-| EQB-3 | Channel submenu - `Stereo` / `Mid` / `Side` / `L Only` / `R Only`. In any Linear mode the submenu greys and reads `Channel  (disabled in Linear modes)` | Mixing | IMP-15 | `EQ.md` |
-| EQB-4 | Band `Automate` submenu - `Freq` / `Gain` / `Q` / `Type` / `On` / `Slope` / `Mute` / `Solo` / `Channel`; the whole submenu greys when the EQ has no automation binding | Writing | IMP-63 | `Automation.md` |
-| EQB-5 | `Make Dynamic` - turns the band into a dynamic band. Reads `Make Dynamic  (disabled in Linear modes)` there, and greys for non-gain types (LP / HP / Notch / BP / Off) | Mixing | IMP-14 | `EQ.md` |
-| EQB-6 | `Dynamic Params...` - greyed until the band IS dynamic. Also gated on the same automation binding as `Automate` | Mixing | IMP-14 | `EQ.md` |
-| EQB-7 | `Reset Band` | Mixing | IMP-14 | `EQ.md` |
+| EQB-1 | `Type` submenu - `Bell` / `Low Pass` / `High Pass` / `Low Shelf` / `High Shelf` / `Notch` / `Band Pass` / `Tilt` | Mixing | IMP-14 | `EQ.md` |
+| EQB-2 | `Slope` submenu - `6`..`96 dB/oct` + `Brickwall` (filter types only) | Mixing | IMP-16 | `EQ.md` |
+| EQB-3 | `Channel` submenu - `Stereo` / `Left` / `Right`, Stereo view ONLY (Mid/Side are the views) | Mixing | IMP-15 | `EQ.md` |
+| EQB-4 | `Move to` submenu - `Stereo view` / `Mid view` / `Side view`, settings kept | Mixing | IMP-15 | `EQ.md` |
+| EQB-5 | `Dynamic` submenu - `Make Dynamic` / `Auto Release` (gain types + Notch) | Mixing | IMP-14 | `EQ.md` |
+| EQB-6 | `Listen` / `Isolate` / `Mute` rows | Mixing | IMP-14 | `EQ.md` |
+| EQB-7 | `Reset Band` / `Delete Band` | Mixing | IMP-14 | `EQ.md` |
 
 ### `FX` - `Effects Panel.png`
 

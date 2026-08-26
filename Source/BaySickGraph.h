@@ -540,7 +540,7 @@ public:
 
     // §P4.3: Pre-rack bus EQs - fresh StripEq per bus, runs at the very start
     // of each bus's processBlock chain (input -> preEq -> rack -> postEq -> fader).
-    // Bound by the corresponding mixer-strip Effects-page Pre EQ8 M/S tab
+    // Bound by the corresponding mixer-strip Effects-page Pre EQ tab
     // (NOT by player pages - those use per-insert pre-EQ instead).
     StripEq* getLayersBusPreEQ();
     StripEq* getBassBusPreEQ();
@@ -1042,7 +1042,9 @@ private:
     // Instrument channel nodes: keyed by 400 + arrangement row, the id
     // addAudioRowChannel assigns.  Insertion order preserved via
     // mInstrChannelOrder for dropdown display.
-    std::map<int, std::unique_ptr<InstrChannelNode>> mInstrChannelNodes;
+    // QA-EqPro SC-11: the per-audio-row InstrChannelNode map is gone (the
+    // nodes were never audio-processed); mAudioRowNames + mInstrChannelOrder
+    // carry the dropdown.
     std::vector<int>                                 mInstrChannelOrder;
     // QA-EqPro SC-11: audio rows keep only their dropdown name here - the
     // legacy per-row InstrChannelNode (a never-processed rack + EQ pair per

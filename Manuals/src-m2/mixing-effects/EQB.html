@@ -1,36 +1,40 @@
-<p>Right-click any band handle on the EQ curve and this menu opens - the
+﻿<p>Right-click any band handle (or its chip) and this menu opens - the
 band's deeper settings.</p>
 
 <figure data-views="EQB">
 
-<p id="EQB-1"><b>Filter Type</b> - the same shapes as the type box on the
-panel, from the menu. <span id="EQB-2"></span><b>Slope / Order</b> sets
-how steeply a cut falls away past its point: gentle slopes sound natural
-and invisible; cliff-edge slopes remove a region almost surgically, at
-the price of sounding more processed.</p>
+<p id="EQB-1"><b>Type</b> - the same shapes as the rail's glyph grid, from
+the menu: Bell, Low Pass, High Pass, Low Shelf, High Shelf, Notch, Band
+Pass, Tilt.</p>
 
-<p id="EQB-3"><b>Channel</b> routes the band: <code>Stereo</code> (both
-sides, the default), <code>Mid</code> (only the center of the stereo
-picture), <code>Side</code> (only the edges), <code>L Only</code> /
-<code>R Only</code>. This is how one band can brighten just the width, or
-clean rumble out of just the middle. In the linear-phase modes the
-submenu greys and says so - per-channel routing belongs to the standard
-modes.</p>
+<p id="EQB-2"><b>Slope</b> - filter shapes only - sets how steeply a cut
+falls away past its point: 6 dB per octave sounds natural and invisible;
+96 removes a region almost surgically; <code>Brickwall</code> is the
+absolute version and belongs to the linear-phase modes (elsewhere it
+plays as 96).</p>
 
-<p id="EQB-4"><b>Automate</b> - opens an automation lane for any of the
-band's nine parameters (<code>Freq</code>, <code>Gain</code>,
-<code>Q</code>, <code>Type</code>, <code>On</code>, <code>Slope</code>,
-<code>Mute</code>, <code>Solo</code>, <code>Channel</code>), so the EQ
-itself can move over the song. The submenu greys when this EQ instance
-has nowhere to write automation.</p>
+<p id="EQB-3"><b>Channel</b> appears only in the Stereo view:
+<code>Stereo</code> (both sides, the default), <code>Left</code> or
+<code>Right</code> for a one-sided band (the dot wears an L or R badge).
+Mid and Side are not here - they are the VIEWS, and a band's view is
+already its answer.</p>
 
-<p id="EQB-5"><b>Make Dynamic</b> turns the band into a dynamic band: its
-gain moves with the music, cutting only when the problem appears - an EQ
-that works only when needed, which is the polite way to tame a harsh
-frequency. It greys for shapes with no gain to move (the cuts and
-notches) and in the linear modes, where the label says so.
-<span id="EQB-6"></span><b>Dynamic Params...</b> opens the dynamic
-band's own settings - how fast it reacts, how hard - once the band is
-dynamic.</p>
+<p id="EQB-4"><b>Move to</b> sends the band to another view - Stereo, Mid
+or Side - keeping every one of its settings. This is how a band changes
+what half of the picture it works on.</p>
 
-<p id="EQB-7"><b>Reset Band</b> returns the band to its defaults.</p>
+<p id="EQB-5"><b>Dynamic</b> - <code>Make Dynamic</code> turns the band
+into one that moves with the music, cutting (or boosting) only when its
+region crosses the threshold - an EQ that works only when needed, which
+is the polite way to tame a harsh frequency. <code>Auto Release</code>
+lets its recovery time follow the material: quick on transients,
+unobtrusive on sustained sound.</p>
+
+<p id="EQB-6"><b>Listen</b> latches the band's own audition (the
+headphone button does the same); <b>Isolate</b> mutes every band but this
+one; <b>Mute</b> silences this band's work while keeping its settings.</p>
+
+<p id="EQB-7"><b>Reset Band</b> returns the band to its defaults - the
+first eight also return to their home frequencies. <b>Delete Band</b>
+removes it entirely (also the Delete key); re-enabling later starts
+fresh, never a ghost of the old settings.</p>

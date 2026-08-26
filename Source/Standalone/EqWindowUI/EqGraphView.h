@@ -213,6 +213,8 @@ public:
     {
         if (selected < 0) return;
         const auto p = bandParams (selected);
+        beginParamUndoGesture (proc.apvts,
+                               paramId (selected, freqSemis != 0.0f ? "freq" : "gain"));
         if (freqSemis != 0.0f)
             setBandValue (selected, "freq",
                           p.freqHz * std::pow (2.0f, freqSemis / 12.0f));
@@ -477,6 +479,7 @@ public:
         if (hovered < 0) return;
         const auto p = bandParams (hovered);
         const float step = e.mods.isShiftDown() ? 0.08f : 0.25f;
+        beginParamUndoGesture (proc.apvts, paramId (hovered, "q"));
         setBandValue (hovered, "q", p.q * std::pow (2.0f, wheel.deltaY * step));
     }
 
@@ -509,11 +512,17 @@ public:
         selectBand (b);
     }
 
-    void removeBand (int b)
+    bool isBandRegistered (int b) const
+    {
+        return proc.apvts.getParameter (paramId (b, "on")) != nullptr;
+    }
+
+    void removeBand (int b, bool ownTransaction = true)
     {
         // Delete = off plus a reset to defaults, so re-enabling is a fresh
         // band rather than a ghost of this one.
-        beginParamUndoGesture (proc.apvts, paramId (b, "on"));
+        if (ownTransaction)
+            beginParamUndoGesture (proc.apvts, paramId (b, "on"));
         resetBand (b, false);
         setBandValue (b, "on", 0.0f);
         if (selected == b) selectBand (-1);
@@ -734,6 +743,8 @@ public:
         if (auto* par = proc.apvts.getParameter (paramId (b, field)))
             par->endChangeGesture();
     }
+
+    BaySickDAWProcessor& processor() noexcept { return proc; }
 
     double sessionSampleRate() const
     {
