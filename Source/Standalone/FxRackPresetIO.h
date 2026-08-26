@@ -8,7 +8,7 @@ class BaySickDAWProcessor;
 // ─────────────────────────────────────────────────────────────────────────────
 // Save / load a WHOLE strip's effects setup as one preset: all six rack slots
 // (types, order, uuids, bypass, output gains and every DSP's own state) plus
-// the strip's pre-rack and post-rack EQ8 M/S.
+// the strip's pre-rack and post-rack EQ.
 //
 // Distinct from its two neighbours, which is why it is its own module:
 //   * EffectPresetIO  - ONE effect's DSP state.
@@ -23,10 +23,10 @@ class BaySickDAWProcessor;
 // WHY THE RACK IS A BLOB BUT THE EQs ARE PARAMETERS.  EffectRack owns its DSP
 // state outright, so its getStateInformation blob IS the truth.  The EQs do not:
 // for any strip with a mixer prefix the APVTS parameters are the source of truth
-// and processBlock pushes them into the EQ8MsDSP every block -- so restoring the
+// and processBlock pushes them into the StripEq every block -- so restoring the
 // DSP's own state would be overwritten within one block.  The EQ half therefore
-// captures and restores the strip's `_mid_eq` / `_side_eq` / `_preeq_*`
-// parameters, exactly as PagePresetIO does for the same reason.
+// captures and restores the strip's `_eq_*` / `_preeq_*` parameters, exactly
+// as PagePresetIO does for the same reason.
 // ─────────────────────────────────────────────────────────────────────────────
 namespace FxRackPresetIO
 {

@@ -11,16 +11,14 @@ namespace
 {
     constexpr int kVersion = 1;
 
-    // The four EQ parameter families on a strip.  Spelled out rather than
-    // pattern-matched: "<prefix>_mid_eq" and "<prefix>_preeq_mid_eq" are
-    // disjoint by construction, and a loose "contains eq" test would sweep up
-    // unrelated parameters the day someone adds one.
+    // The two EQ parameter families on a strip (QA-EqPro single-set scheme):
+    // bands at {prefix}_{eq_|preeq_}b{N}{Suffix}, bank globals at
+    // {prefix}_{eq_|preeq_}{word}.  Both spellings are exclusive to the EQ by
+    // construction (strip controls are _level/_pan/_sendN_...).
     juce::StringArray eqSubPrefixes (const juce::String& mixerPrefix)
     {
-        return { mixerPrefix + "_mid_eq",
-                 mixerPrefix + "_side_eq",
-                 mixerPrefix + "_preeq_mid_eq",
-                 mixerPrefix + "_preeq_side_eq" };
+        return { mixerPrefix + "_eq_",
+                 mixerPrefix + "_preeq_" };
     }
 
     bool idIsEqParam (const juce::String& id, const juce::StringArray& subs)
@@ -134,6 +132,14 @@ bool load (BaySickDAWProcessor& proc, int channelId,
     {
         if (destPrefix.isNotEmpty())
         {
+            // QA-EqPro SC-2: the destination's EQ block - and any band 9-24
+            // the preset carries - may not be registered yet.  Ensure per
+            // entry (idempotent, and ensureEqParamsForId parses bands).
+            proc.ensureStripEqParams (destPrefix);
+            for (auto* pe = eqEl->getFirstChildElement(); pe != nullptr; pe = pe->getNextElement())
+                if (pe->hasTagName ("Param"))
+                    proc.ensureEqParamsForId (destPrefix + pe->getStringAttribute ("id"));
+
             // QA-UndoCoverage Task 6: rack-preset EQ restore is programmatic.
             juce::AudioProcessorValueTreeState::ScopedProgrammaticParamWrites spw;
             for (auto* pe = eqEl->getFirstChildElement(); pe != nullptr; pe = pe->getNextElement())

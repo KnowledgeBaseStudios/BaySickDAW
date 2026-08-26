@@ -4631,34 +4631,31 @@ juce::String StandaloneEditor::resolveAutomationDisplayName(const juce::String& 
         return stitch(prettifyParam(base), {}, prettyParam);
     }
 
-    // Format a mixer-strip parameter suffix. EQ band params get expanded to
-    // "{Pre }EQ Mid/Side B{n} {Param}"; everything else falls through to
-    // prettify.  §P4.3 B8: a leading "preeq_" token flags pre-rack EQ so the
-    // label reads "Pre EQ Mid B4 Freq" instead of the post-rack "EQ Mid ...".
+    // Format a mixer-strip parameter suffix.  QA-EqPro scheme: band params at
+    // {eq_|preeq_}b{N}{Suffix} label as "{Pre }EQ B{n} {Param}", bank globals
+    // at {eq_|preeq_}{word} label as "{Pre }EQ {Word}"; everything else falls
+    // through to prettify.
     auto formatMixerSuffix = [&](const juce::String& suffix) -> juce::String
     {
-        const bool isPre = suffix.startsWith("preeq_");
-        const juce::String eqPart = isPre ? suffix.substring(6) : suffix;
+        const bool isPre  = suffix.startsWith("preeq_");
+        const bool isPost = ! isPre && suffix.startsWith("eq_");
+        if (! isPre && ! isPost) return prettifyParam(suffix);
+
+        const juce::String eqPart  = suffix.substring(isPre ? 6 : 3);
         const juce::String eqLabel = isPre ? "Pre EQ " : "EQ ";
-        const bool isMid  = eqPart.startsWith("mid_eq");
-        const bool isSide = eqPart.startsWith("side_eq");
-        if (isMid || isSide)
+        if (eqPart.startsWith("b") && eqPart.length() > 1
+            && juce::CharacterFunctions::isDigit((char) eqPart[1]))
         {
-            const int prefixLen = isMid ? 6 : 7;
-            int j = prefixLen;
+            int j = 1;
             while (j < eqPart.length()
                    && juce::CharacterFunctions::isDigit((char) eqPart[j])) ++j;
-            if (j > prefixLen)
-            {
-                const int band = eqPart.substring(prefixLen, j).getIntValue();
-                const juce::String paramName = prettifyParam(eqPart.substring(j));
-                juce::String out = eqLabel + (isMid ? "Mid" : "Side")
-                                  + " B" + juce::String(band + 1);
-                if (paramName.isNotEmpty()) out += " " + paramName;
-                return out;
-            }
+            const int band = eqPart.substring(1, j).getIntValue();
+            const juce::String paramName = prettifyParam(eqPart.substring(j));
+            juce::String out = eqLabel + "B" + juce::String(band + 1);
+            if (paramName.isNotEmpty()) out += " " + paramName;
+            return out;
         }
-        return prettifyParam(suffix);
+        return eqLabel + prettifyParam(eqPart);
     };
 
     // 2026-04-21: Layer / Bass engine instance params (no effect-slot form).
@@ -4686,10 +4683,9 @@ juce::String StandaloneEditor::resolveAutomationDisplayName(const juce::String& 
         return "Pg " + pageName + " - " + engineLabel + " - " + prettifyParam(paramSuffix);
     };
 
-    // §P4.3 B7: legacy per-page EQ-tab params (tk_{pagePrefix}_{N}_mid_eq* /
-    // _side_eq*) no longer registered - pre-rack EQ on Layer/Bass/Drum pages
-    // now writes to the unified mixer_{kind}_<N>_preeq_* params and resolves
-    // via tryMixerNonSlot below (labelled "Mx ... - Pre EQ Mid B{n} {param}").
+    // Pre-rack EQ on Layer/Bass/Drum pages writes to the unified
+    // mixer_{kind}_<N>_preeq_* params and resolves via tryMixerNonSlot below
+    // (labelled "Mx ... - Pre EQ B{n} {param}").
 
     juce::String tryIt;
     tryIt = tryEngineOnPage("lay", "Layer"); if (tryIt.isNotEmpty()) return tryIt;
@@ -4697,7 +4693,7 @@ juce::String StandaloneEditor::resolveAutomationDisplayName(const juce::String& 
 
     // Mixer strip non-slot params: strip controls (_level / _pan / _mute /
     // _solo / _polarity / _width / _bypass / _arm / _sendTo / _sendN_*) and
-    // post-rack EQ bands (_mid_eq{b}* / _side_eq{b}*) on every strip family.
+    // post-rack EQ bands (_eq_b{N}* / _preeq_b{N}*) on every strip family.
     auto tryMixerNonSlot = [&]() -> juce::String
     {
         if (! paramId.startsWith("mixer_")) return {};
@@ -16506,6 +16502,11 @@ void StandaloneEditor::openEffectEqWindow (int channelId, bool pre)
     const juce::String key = "eq:" + juce::String (channelId) + (pre ? ":pre" : ":post");
     if (auto* existing = findAuxWindow (key)) { existing->toFront (true); return; }
 
+    // QA-EqPro SC-2/SC-9: opening the window IS the strip's EQ first-touch -
+    // the block (bank globals + bands 1-8, both banks) registers here, never
+    // with the strip.
+    mProcessor.ensureStripEqParams (EffectsPage::mixerPrefixForChannelId (channelId));
+
     auto content = std::make_unique<EffectEqWindow> (
         mProcessor, channelId, pre,
         [this] (int chId) { return mEffectsPage != nullptr ? mEffectsPage->getChannelDisplayName (chId)
@@ -17508,6 +17509,17 @@ void StandaloneEditor::registerStaticAutomationHandlers()
         if (auto* rap = dynamic_cast<juce::RangedAudioParameter*>(p))
         {
             juce::String pid = rap->paramID;
+
+            // QA-EqPro SC-15: EQ mode + oversampling reallocate the linear
+            // engine, so they apply only through the shielded message-thread
+            // path - no automation lane may drive them.  They are also never
+            // componentID-stamped, so no lane can be created; this guard is
+            // the belt for a lane arriving from a saved file.
+            if ((pid.endsWith ("_eq_mode") || pid.endsWith ("_eq_os")
+                 || pid.endsWith ("_preeq_mode") || pid.endsWith ("_preeq_os"))
+                && pid.startsWith ("mixer_"))
+                continue;
+
             mAutomationApplicators[pid] = [rap](float v01)
             {
                 rap->setValueNotifyingHost(v01);

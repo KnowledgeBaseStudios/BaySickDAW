@@ -526,13 +526,9 @@ BaySickDAWProcessor::createParameterLayout()
     // Default 0 = 1/4.  Per-project (SC11), same as the snap params above.
     addI("Unified_QuantizeDiv", "Quantize Division", 0, 3, 0);
 
-    // §P4.3 B7 (2026-04-22): legacy bus-EQ param blocks removed.
-    // Pre-rack Layers/Bass/Drums EQs are now per-strip on the InsertNode/BusNode
-    // (mixer_{kind}_<i>_preeq_mid_eq* / _preeq_side_eq*, registered lazily via
-    // addParamsForTrackPreEQ in ensureMixerStripParams).  Post-rack EQs live on
-    // mixer_{kind}_<i>_mid_eq* / _side_eq*.  The legacy `drums_*_eq*` block + the
-    // matching `tk_lay_*_mid_eq*` / `tk_bas_*_mid_eq*` lazy registrations + the
-    // mDrumsEQDSP / mLayerPageEQs / mBassPageEQs DSP instances are all gone.
+    // QA-EqPro: EQ params live per strip at {prefix}_{eq_|preeq_}b{N}* plus
+    // bank globals, registered on first TOUCH (ensureStripEqParams /
+    // ensureEqBandParams), never here and never with the strip - see SC-9.
 
     return { params.begin(), params.end() };
 }
@@ -5560,12 +5556,63 @@ namespace
 // is skipped, exactly as the old getParameter existence test did.
 void BaySickDAWProcessor::updateEQFromCache (StripEq* eq, int stripSlot, int bank)
 {
-    // QA-EqPro T3: the graph nodes carry StripEq (one 24-band kbs engine per
-    // bank) but the parameter scheme is still the old mid/side x 8 layout,
-    // which has no meaningful mapping onto it.  Deliberate no-op until Task 4
-    // lands the new scheme + pointer cache; until then EQ state comes from the
-    // rack blob alone.
-    juce::ignoreUnused (eq, stripSlot, bank);
+    if (eq == nullptr || stripSlot < 0 || stripSlot >= kEqNumStripSlots) return;
+
+    for (int b = 0; b < kEqBands; ++b)
+    {
+        const auto& slots = mEqParamCache[(size_t) eqCacheIndex (stripSlot, bank, b)];
+
+        // Freq is the band's publication flag: the message thread stores it
+        // LAST with release, so a non-null read here makes the seventeen
+        // other pointers visible and the relaxed loads below are safe.  A
+        // null read = the band is not registered (per-band lazy) - skip.
+        auto* freqP = slots.p[eqSlotFreq].load (std::memory_order_acquire);
+        if (freqP == nullptr) continue;
+
+        auto get = [&slots] (int which) -> float
+        {
+            if (auto* ptr = slots.p[which].load (std::memory_order_relaxed))
+                return ptr->load (std::memory_order_relaxed);
+            return 0.f;
+        };
+
+        kbs::EqBandParams bp;
+        bp.freqHz      = freqP->load (std::memory_order_relaxed);
+        bp.gainDb      = get (eqSlotGain);
+        bp.q           = get (eqSlotQ);
+        bp.type        = (kbs::EqType) juce::jlimit (0, 7, (int) get (eqSlotType));
+        bp.on          = get (eqSlotOn) > 0.5f;
+        bp.slope       = juce::jlimit (0, kbs::kEqNumSlopes - 1, (int) get (eqSlotSlope));
+        bp.channel     = (kbs::EqChannel) juce::jlimit (0, 4, (int) get (eqSlotChannel));
+        bp.placement   = juce::jlimit (-1.f, 1.f, get (eqSlotPlace));
+        bp.muted       = get (eqSlotMute) > 0.5f;
+        bp.isolated    = get (eqSlotIsolate) > 0.5f;
+        bp.dynamic     = get (eqSlotDynamic) > 0.5f;
+        bp.thresholdDb = get (eqSlotThreshold);
+        bp.ratio       = get (eqSlotRatio);
+        bp.attackMs    = get (eqSlotAttack);
+        bp.releaseMs   = get (eqSlotRelease);
+        bp.autoRelease = get (eqSlotAutoRelease) > 0.5f;
+        bp.rangeDb     = get (eqSlotRange);
+        bp.scSource    = juce::jlimit (-1, 3, (int) get (eqSlotScSource));
+        eq->pushBand (b, bp);
+    }
+
+    const auto& gl = mEqGlobalCache[(size_t) eqGlobalCacheIndex (stripSlot, bank)];
+    if (auto* flag = gl.p[eqGlobPropQ].load (std::memory_order_acquire))
+    {
+        auto gget = [&gl] (int which, float fallback) -> float
+        {
+            if (auto* ptr = gl.p[which].load (std::memory_order_relaxed))
+                return ptr->load (std::memory_order_relaxed);
+            return fallback;
+        };
+        eq->pushGlobals (flag->load (std::memory_order_relaxed) > 0.5f,
+                         gget (eqGlobAutoGain, 0.f) > 0.5f,
+                         gget (eqGlobAgAmt, 1.f),
+                         gget (eqGlobOutGain, 0.f),
+                         gget (eqGlobPolarity, 0.f) > 0.5f);
+    }
 }
 
 // Iterate every post-rack EQ instance (18 buses + the insert families) and sync
@@ -6913,6 +6960,7 @@ void BaySickDAWProcessor::setStateInformation(const void* data, int sizeInBytes)
     // Scans the pre-rebind file snapshot so only auxes ACTUALLY saved in the
     // file get restored.
     restoreAuxStripsFromState (savedFileSnapshot);
+    restoreEqParamsFromState (savedFileSnapshot);
 
     // QA-Ef close (2026-05-23): rebuild complete -- lower the shield so audio
     // resumes (mirror deserializeProject's tail).
@@ -7372,6 +7420,7 @@ void BaySickDAWProcessor::applyProcessorState (const juce::XmlElement& root)
             // which now has rebind-created stale nodes).  Same path as
             // setStateInformation.
             restoreAuxStripsFromState (savedFileSnapshot);
+            restoreEqParamsFromState (savedFileSnapshot);
             break;   // only one APVTS state child expected
         }
     }
@@ -7499,76 +7548,14 @@ namespace
 // (2026-04-25: addParamsForBaySickDrums had already gone with the legacy drum
 // processor.)
 
-void BaySickDAWProcessor::addParamsForTrackEQ(const juce::String& prefix)
-{
-    // Post-rack EQ (existing behavior - IDs at prefix + "_mid_eq{b}{Suffix}").
-    addParamsForEQBank(prefix, juce::String());
-}
-
-// §P4.3: Pre-rack EQ.  IDs at prefix + "_preeq_mid_eq{b}{Suffix}" so the
-// post-rack and pre-rack banks coexist on the same strip without collision.
-void BaySickDAWProcessor::addParamsForTrackPreEQ(const juce::String& prefix)
-{
-    addParamsForEQBank(prefix, "preeq_");
-}
-
-// Internal helper - registers an 8-band M/S EQ param bank under prefix +
-// "_" + subPrefix + "{mid|side}_eq{b}{Suffix}".
-//   subPrefix ""        → post-rack ("EQ" labels)
-//   subPrefix "preeq_"  → pre-rack  ("Pre EQ" labels - disambiguates automation menus)
-void BaySickDAWProcessor::addParamsForEQBank(const juce::String& prefix,
-                                             const juce::String& subPrefix)
-{
-    auto& ids = mRegisteredTrackParams[prefix];
-    static const float kFreqs[8] = { 40.f, 250.f, 500.f, 1000.f, 2000.f, 4000.f, 8000.f, 12000.f };
-    const juce::String labelTag = subPrefix.isEmpty() ? "EQ" : "Pre EQ";
-    for (const char* ch : { "mid", "side" })
-    {
-        // 12h: per-band channel default matches EQ8MsDSP's constructor-seeded behaviour
-        // (mid bands -> Channel::Mid = 1, side bands -> Channel::Side = 2). PRESET-SAFE.
-        const int chanDefault = (juce::String(ch) == "mid") ? 1 : 2;
-        for (int b = 0; b < 8; ++b)
-        {
-            juce::String bp = prefix + "_" + subPrefix + ch + "_eq" + juce::String(b);
-            const juce::String labelBase = prefix + " " + labelTag + " " + ch + " B" + juce::String(b);
-            dynF(apvts, ids, bp + "Freq",    labelBase + " Freq",    20.f, 20000.f, kFreqs[b]);
-            dynF(apvts, ids, bp + "Gain",    labelBase + " Gain",    -18.f, 18.f, 0.f);
-            dynF(apvts, ids, bp + "Q",       labelBase + " Q",       0.1f, 10.f, 0.707f);
-            dynI(apvts, ids, bp + "Type",    labelBase + " Type",    0, 8, 0);
-            dynB(apvts, ids, bp + "On",      labelBase + " On",      true);
-            dynI(apvts, ids, bp + "Slope",   labelBase + " Slope",   0, 6, 0);
-            // Session B: Mute + Solo + Channel rounded out so every EQ instance exposes
-            // the full automatable 9-param set. All additive PRESET-SAFE defaults.
-            dynB(apvts, ids, bp + "Mute",    labelBase + " Mute",    false);
-            dynB(apvts, ids, bp + "Solo",    labelBase + " Solo",    false);
-            dynI(apvts, ids, bp + "Channel", labelBase + " Channel", 0, 4, chanDefault);  // 12h
-            // 12j Dynamic EQ: 7 dynamic params + 1 sidechain-source scaffolding.
-            // PRESET-SAFE additive; defaults (Dynamic=off etc.) preserve v1 behaviour.
-            dynB(apvts, ids, bp + "Dynamic",   labelBase + " Dynamic",   false);
-            dynF(apvts, ids, bp + "Threshold", labelBase + " Threshold", -60.f,   0.f, -18.f);
-            dynF(apvts, ids, bp + "Ratio",     labelBase + " Ratio",       1.f,  20.f,   2.f);
-            dynF(apvts, ids, bp + "Attack",    labelBase + " Attack",    0.1f, 500.f,  10.f);
-            dynF(apvts, ids, bp + "Release",   labelBase + " Release",    1.f,2000.f, 100.f);
-            // 12j follow-up Q2: Range is bipolar. Negative = downward compression,
-            // positive = upward expansion, zero = no modulation. Direction + amount
-            // encoded in one value. PRESET-BREAK ⚠️ pre-v1 (old unsigned Range +
-            // Upward split is gone). Upward is kept as unused scaffolding for
-            // preset stability.
-            // 2026-04-19 follow-up: range magnitude matched to the Gain param
-            // magnitude (-18..+18) so Range can't exceed what the band's gain
-            // could theoretically reach on its own. Keeps the live-animated curve
-            // inside the -18..+18 dB grid for single-band modulation scenarios.
-            // C.4 follow-up (2026-04-30): default 0 (was -12) so the dotted
-            // ghost curve is flat on first Make-Dynamic toggle.  User adjusts
-            // the Range slider to dial in downward (-) or upward (+) intent.
-            dynF(apvts, ids, bp + "Range",     labelBase + " Range",    -18.f, 18.f, 0.f);
-            dynB(apvts, ids, bp + "Upward",    labelBase + " Upward",    false);
-            // Option B scaffolding for Tier 3 T11 external sidechain. Default -1
-            // = internal (band's own input); integer routing id when ready.
-            dynI(apvts, ids, bp + "ScSource",  labelBase + " ScSource", -1, 999, -1);
-        }
-    }
-}
+// ── QA-EqPro: the single-set EQ param scheme (SC-1 / SC-2 / SC-9) ───────────
+// One 24-band set per bank: ids at {prefix}_{eq_|preeq_}b{N}{Suffix}, bank
+// globals at {prefix}_{eq_|preeq_}{mode|os|propq|autogain|agamt|outgain|
+// polarity}.  No mid/side dimension - a band's domain is its Channel value,
+// written by the view (SC-5) and offered as Left/Right only in the Stereo
+// view's picker.  Nothing here registers with the strip: the block arrives on
+// first touch through ensureStripEqParams, bands 9-24 one at a time through
+// ensureEqBandParams.
 
 // Maps a mixer-strip prefix onto its EQ cache strip slot: buses first in
 // kEqBuses order, then the insert families in kEqInsertFamilies order.  Exact
@@ -7601,34 +7588,201 @@ int BaySickDAWProcessor::eqStripSlotForPrefix (const juce::String& prefix) noexc
     return -1;
 }
 
-// The ONE spelling every EQ-band CONSUMER composes from.  addParamsForEQBank is
-// the registration source of truth and builds the same strings inline; anything
-// that later looks a band's params up must go through here, because an APVTS
-// lookup is an exact string compare that returns null on a miss and reports
-// nothing -- a divergent copy is a silent no-op, not an error.
+// The ONE spelling every EQ-band CONSUMER composes from.  The registrars below
+// build the same strings inline; anything that later looks a band's params up
+// must go through here, because an APVTS lookup is an exact string compare
+// that returns null on a miss and reports nothing -- a divergent copy is a
+// silent no-op, not an error.
 namespace EqBandIds
 {
     // Index order must match BaySickDAWProcessor::EqBandParamSlot.
     static const char* const kSuffixes[] = {
-        "Freq", "Gain", "Q", "Type", "On", "Slope", "Mute", "Solo", "Channel",
-        "Dynamic", "Threshold", "Ratio", "Attack", "Release", "Range", "Upward", "ScSource"
+        "Freq", "Gain", "Q", "Type", "On", "Slope", "Channel", "Place",
+        "Mute", "Isolate", "Dynamic", "Threshold", "Ratio", "Attack",
+        "Release", "AutoRelease", "Range", "ScSource"
     };
-    static const char* const kSides[]    = { "mid", "side" };
-    static const char* const kBankSubs[] = { "", "preeq_" };
+    // Index order must match BaySickDAWProcessor::EqBankGlobalSlot.  Mode and
+    // os ride the same spelling family but never enter the sweep cache
+    // (SC-15: they reallocate, so they apply on the shielded path).
+    static const char* const kGlobalSuffixes[] = {
+        "propq", "autogain", "agamt", "outgain", "polarity"
+    };
+    static const char* const kBankSubs[] = { "eq_", "preeq_" };
 
-    // e.g. ("mixer_rusty_3", pre, side, 2) -> "mixer_rusty_3_preeq_side_eq2"
-    static juce::String bandPrefix (const juce::String& stripPrefix,
-                                    int bank, int side, int band)
+    // e.g. ("mixer_rusty_3", pre, 12) -> "mixer_rusty_3_preeq_b12"
+    static juce::String bandPrefix (const juce::String& stripPrefix, int bank, int band)
     {
-        return stripPrefix + "_" + kBankSubs[bank] + kSides[side]
-                 + "_eq" + juce::String (band);
+        return stripPrefix + "_" + kBankSubs[bank] + "b" + juce::String (band);
+    }
+    static juce::String globalId (const juce::String& stripPrefix, int bank, const char* which)
+    {
+        return stripPrefix + "_" + kBankSubs[bank] + which;
+    }
+
+    // The engine's home positions: 8 named defaults, then log-spaced - kept
+    // identical to the plugin's defaultFreqFor so a band index means the same
+    // frequency in both products.
+    static float defaultFreqFor (int b)
+    {
+        static const float k8[8] = { 40.f, 100.f, 250.f, 630.f, 1600.f, 4000.f, 8000.f, 12500.f };
+        if (b >= 0 && b < 8) return k8[b];
+        const float t = (float) (b - 8) / 16.0f;
+        return 20.0f * std::pow (1000.0f, 0.15f + 0.8f * t);
     }
 }
 
-// THREAD SAFETY: the message-thread half of the EQ param-pointer cache (see the
-// mEqParamCache declaration for the full contract).  Runs once per strip, right
-// after addParamsForEQBank has created the ids, so the pointers it resolves are
-// the ones that bank just registered.
+namespace
+{
+    void registerEqBand (juce::AudioProcessorValueTreeState& apvts, juce::StringArray& ids,
+                         const juce::String& stripPrefix, int bank, int b)
+    {
+        const juce::String bp = EqBandIds::bandPrefix (stripPrefix, bank, b);
+        const juce::String labelBase = stripPrefix + (bank == 1 ? " Pre EQ B" : " EQ B")
+                                         + juce::String (b + 1) + " ";
+        dynF (apvts, ids, bp + "Freq",        labelBase + "Freq",        20.f, 20000.f, EqBandIds::defaultFreqFor (b));
+        dynF (apvts, ids, bp + "Gain",        labelBase + "Gain",        -30.f, 30.f, 0.f);
+        dynF (apvts, ids, bp + "Q",           labelBase + "Q",           0.1f, 30.f, 0.707f);
+        dynI (apvts, ids, bp + "Type",        labelBase + "Type",        0, 7, 0);
+        // The plugin ships bands 1-8 on and flat (Jeff's test-pass-1 ruling);
+        // flat bells are identity in the engine and the wrapper's isIdentity
+        // still short-circuits the whole strip, so this costs nothing.
+        dynB (apvts, ids, bp + "On",          labelBase + "On",          b < 8);
+        dynI (apvts, ids, bp + "Slope",       labelBase + "Slope",       0, 8, 1);
+        dynI (apvts, ids, bp + "Channel",     labelBase + "Channel",     0, 4, 0);
+        dynF (apvts, ids, bp + "Place",       labelBase + "Place",       -1.f, 1.f, 0.f);
+        dynB (apvts, ids, bp + "Mute",        labelBase + "Mute",        false);
+        dynB (apvts, ids, bp + "Isolate",     labelBase + "Isolate",     false);
+        dynB (apvts, ids, bp + "Dynamic",     labelBase + "Dynamic",     false);
+        // Threshold defaults 0 dB: under the over-threshold semantics nothing
+        // engages until the user pulls it down (the plugin's test-pass-6
+        // ruling).
+        dynF (apvts, ids, bp + "Threshold",   labelBase + "Threshold",   -60.f, 0.f, 0.f);
+        dynF (apvts, ids, bp + "Ratio",       labelBase + "Ratio",       1.f, 20.f, 2.f);
+        dynF (apvts, ids, bp + "Attack",      labelBase + "Attack",      0.1f, 500.f, 10.f);
+        dynF (apvts, ids, bp + "Release",     labelBase + "Release",     1.f, 2000.f, 100.f);
+        dynB (apvts, ids, bp + "AutoRelease", labelBase + "AutoRelease", false);
+        dynF (apvts, ids, bp + "Range",       labelBase + "Range",       -30.f, 30.f, 0.f);
+        dynI (apvts, ids, bp + "ScSource",    labelBase + "ScSource",    -1, 3, -1);
+    }
+
+    void registerEqBankGlobals (juce::AudioProcessorValueTreeState& apvts, juce::StringArray& ids,
+                                const juce::String& stripPrefix, int bank)
+    {
+        const juce::String labelBase = stripPrefix + (bank == 1 ? " Pre EQ " : " EQ ");
+        auto gid = [&] (const char* which) { return EqBandIds::globalId (stripPrefix, bank, which); };
+        dynI (apvts, ids, gid ("mode"),     labelBase + "Mode",             0, 6, 0);
+        dynB (apvts, ids, gid ("os"),       labelBase + "Oversampling",     false);
+        dynB (apvts, ids, gid ("propq"),    labelBase + "Proportional Q",   true);
+        dynB (apvts, ids, gid ("autogain"), labelBase + "Auto Gain",        false);
+        dynF (apvts, ids, gid ("agamt"),    labelBase + "Auto Gain Amount", 0.f, 1.f, 1.f);
+        dynF (apvts, ids, gid ("outgain"),  labelBase + "Output Gain",      -24.f, 24.f, 0.f);
+        dynB (apvts, ids, gid ("polarity"), labelBase + "Polarity",         false);
+    }
+} // namespace
+
+bool BaySickDAWProcessor::ensureStripEqParams (const juce::String& prefix)
+{
+    if (eqStripSlotForPrefix (prefix) < 0) return false;
+    const juce::String probe = EqBandIds::bandPrefix (prefix, kEqBankPost, 0) + "Freq";
+    if (apvts.getParameter (probe) != nullptr) return false;
+
+    auto& ids = mRegisteredTrackParams[prefix];
+    for (int bank = 0; bank < kEqBanksPerStrip; ++bank)
+    {
+        registerEqBankGlobals (apvts, ids, prefix, bank);
+        for (int b = 0; b < 8; ++b)
+            registerEqBand (apvts, ids, prefix, bank, b);
+        apvts.addParameterListener (EqBandIds::globalId (prefix, bank, "mode"), &mEqConfigListener);
+        apvts.addParameterListener (EqBandIds::globalId (prefix, bank, "os"),   &mEqConfigListener);
+    }
+    cacheEqParamPointers (prefix);
+
+    // Late registration + saved values: replaceState binds adapters ONCE, so
+    // a param registered after project load would sit at its default while
+    // the tree carries the user's saved value.  The self-copy swap triggers
+    // the full rebind (the applyPendingRackStates recipe); the programmatic-
+    // writes guard keeps the adoption out of undo history.
+    {
+        juce::AudioProcessorValueTreeState::ScopedProgrammaticParamWrites spw;
+        apvts.replaceState (apvts.copyState());
+    }
+    if (onMixerStripParamsCreated) onMixerStripParamsCreated (prefix);
+    return true;
+}
+
+bool BaySickDAWProcessor::ensureEqBandParams (const juce::String& prefix, int bank, int band)
+{
+    if (bank < 0 || bank >= kEqBanksPerStrip || band < 0 || band >= kEqBands) return false;
+    if (band < 8) return ensureStripEqParams (prefix);   // the block covers 1-8
+
+    ensureStripEqParams (prefix);
+    const juce::String probe = EqBandIds::bandPrefix (prefix, bank, band) + "Freq";
+    if (apvts.getParameter (probe) != nullptr) return false;
+
+    auto& ids = mRegisteredTrackParams[prefix];
+    registerEqBand (apvts, ids, prefix, bank, band);
+    cacheEqParamPointers (prefix);
+
+    // Late registration + saved values: replaceState binds adapters ONCE, so
+    // a param registered after project load would sit at its default while
+    // the tree carries the user's saved value.  The self-copy swap triggers
+    // the full rebind (the applyPendingRackStates recipe); the programmatic-
+    // writes guard keeps the adoption out of undo history.
+    {
+        juce::AudioProcessorValueTreeState::ScopedProgrammaticParamWrites spw;
+        apvts.replaceState (apvts.copyState());
+    }
+    if (onMixerStripParamsCreated) onMixerStripParamsCreated (prefix);
+    return true;
+}
+
+// QA-EqPro: the EQ sibling of restoreAuxStripsFromState.  Scans the SAVED
+// file's tree (a deep copy taken before replaceState - same phantom-node trap)
+// for eq-scheme param ids and ensures their blocks/bands exist, so a loaded
+// project's EQ settings - and any automation lanes over them - land on
+// registered params without the user ever opening an EQ window.
+void BaySickDAWProcessor::restoreEqParamsFromState (const juce::ValueTree& sourceState)
+{
+    for (int c = 0; c < sourceState.getNumChildren(); ++c)
+    {
+        const auto child = sourceState.getChild (c);
+        const juce::String id = child.getProperty ("id").toString();
+        if (id.isEmpty()) continue;
+        if (id.contains ("_eq_") || id.contains ("_preeq_"))
+            ensureEqParamsForId (id);
+    }
+}
+
+void BaySickDAWProcessor::ensureEqParamsForId (const juce::String& paramId)
+{
+    for (int bank = 0; bank < kEqBanksPerStrip; ++bank)
+    {
+        const juce::String tag = juce::String ("_") + EqBandIds::kBankSubs[bank];
+        const int at = paramId.indexOf (tag);
+        if (at <= 0) continue;
+        const juce::String prefix = paramId.substring (0, at);
+        if (eqStripSlotForPrefix (prefix) < 0) continue;
+
+        const juce::String rest = paramId.substring (at + tag.length());
+        if (rest.startsWith ("b") && rest.length() > 1
+            && juce::CharacterFunctions::isDigit (rest[1]))
+        {
+            const int band = rest.substring (1).getIntValue();
+            ensureEqBandParams (prefix, bank, juce::jlimit (0, kEqBands - 1, band));
+        }
+        else
+        {
+            ensureStripEqParams (prefix);
+        }
+        return;
+    }
+}
+
+// THREAD SAFETY: the message-thread half of the EQ param-pointer cache (see
+// the mEqParamCache declaration for the full contract).  Idempotent, and
+// null-tolerant by design: getRawParameterValue returns null for anything not
+// registered yet, and a null Freq slot IS the not-yet-published state the
+// audio thread skips - so caching the whole 24-band grid is always safe.
 void BaySickDAWProcessor::cacheEqParamPointers (const juce::String& prefix)
 {
     const int stripSlot = eqStripSlotForPrefix (prefix);
@@ -7637,24 +7791,103 @@ void BaySickDAWProcessor::cacheEqParamPointers (const juce::String& prefix)
     static_assert ((int) (sizeof (EqBandIds::kSuffixes) / sizeof (EqBandIds::kSuffixes[0]))
                        == (int) eqNumBandParamSlots,
                    "EqBandIds::kSuffixes must carry one entry per EqBandParamSlot");
+    static_assert ((int) (sizeof (EqBandIds::kGlobalSuffixes) / sizeof (EqBandIds::kGlobalSuffixes[0]))
+                       == (int) eqNumBankGlobalSlots,
+                   "EqBandIds::kGlobalSuffixes must carry one entry per EqBankGlobalSlot");
 
     for (int bank = 0; bank < kEqBanksPerStrip; ++bank)
-        for (int side = 0; side < kEqSidesPerBank; ++side)
-            for (int b = 0; b < kEqBands; ++b)
-            {
-                const juce::String bp = EqBandIds::bandPrefix (prefix, bank, side, b);
-                auto& slots = mEqParamCache[(size_t) eqCacheIndex (stripSlot, bank, side, b)];
+    {
+        for (int b = 0; b < kEqBands; ++b)
+        {
+            const juce::String bp = EqBandIds::bandPrefix (prefix, bank, b);
+            auto& slots = mEqParamCache[(size_t) eqCacheIndex (stripSlot, bank, b)];
 
-                // Freq LAST and with release: it is the band's publication flag,
-                // so the audio thread's acquire-load of it makes these sixteen
-                // relaxed stores visible before it can act on any of them.
-                for (int s = eqSlotFreq + 1; s < eqNumBandParamSlots; ++s)
-                    slots.p[s].store (apvts.getRawParameterValue (bp + EqBandIds::kSuffixes[s]),
-                                      std::memory_order_relaxed);
-                slots.p[eqSlotFreq].store (
-                    apvts.getRawParameterValue (bp + EqBandIds::kSuffixes[eqSlotFreq]),
-                    std::memory_order_release);
+            // Freq LAST and with release: it is the band's publication flag,
+            // so the audio thread's acquire-load of it makes the seventeen
+            // relaxed stores visible before it can act on any of them.
+            for (int sIdx = eqSlotFreq + 1; sIdx < eqNumBandParamSlots; ++sIdx)
+                slots.p[sIdx].store (apvts.getRawParameterValue (bp + EqBandIds::kSuffixes[sIdx]),
+                                     std::memory_order_relaxed);
+            slots.p[eqSlotFreq].store (
+                apvts.getRawParameterValue (bp + EqBandIds::kSuffixes[eqSlotFreq]),
+                std::memory_order_release);
+        }
+
+        auto& gl = mEqGlobalCache[(size_t) eqGlobalCacheIndex (stripSlot, bank)];
+        for (int gIdx = eqGlobPropQ + 1; gIdx < eqNumBankGlobalSlots; ++gIdx)
+            gl.p[gIdx].store (apvts.getRawParameterValue (
+                                  EqBandIds::globalId (prefix, bank, EqBandIds::kGlobalSuffixes[gIdx])),
+                              std::memory_order_relaxed);
+        gl.p[eqGlobPropQ].store (apvts.getRawParameterValue (
+                                     EqBandIds::globalId (prefix, bank, EqBandIds::kGlobalSuffixes[eqGlobPropQ])),
+                                 std::memory_order_release);
+    }
+}
+
+// SC-15: mode/oversampling apply.  MESSAGE THREAD (the only writers are the
+// options menu, undo, and project load - automation never stamps these);
+// takes the nest-aware shield because setMode reallocates the linear engine.
+void BaySickDAWProcessor::applyEqConfigFromParams (const juce::String& prefix, int bank)
+{
+    JUCE_ASSERT_MESSAGE_THREAD
+    const int slot = eqStripSlotForPrefix (prefix);
+    if (slot < 0) return;
+
+    StripEq* eq = nullptr;
+    if (slot < kEqNumBusSlots)
+        eq = bank == kEqBankPre ? kEqBuses[slot].pre (mVibeGraph)
+                                : kEqBuses[slot].post (mVibeGraph);
+    else
+    {
+        int base = kEqNumBusSlots;
+        for (const auto& fam : kEqInsertFamilies)
+        {
+            if (slot < base + fam.count)
+            {
+                const int idx = slot - base;
+                eq = bank == kEqBankPre ? mVibeGraph.getInsertPreEQ (fam.kind, idx)
+                                        : mVibeGraph.getInsertEQ (fam.kind, idx);
+                break;
             }
+            base += fam.count;
+        }
+    }
+    if (eq == nullptr) return;
+
+    auto* modeP = apvts.getRawParameterValue (EqBandIds::globalId (prefix, bank, "mode"));
+    auto* osP   = apvts.getRawParameterValue (EqBandIds::globalId (prefix, bank, "os"));
+    if (modeP == nullptr || osP == nullptr) return;
+
+    const auto want   = (kbs::EqMode) juce::jlimit (0, 6, (int) modeP->load());
+    const bool wantOs = osP->load() > 0.5f;
+    if (want == eq->getMode() && wantOs == eq->getOversampling()) return;
+
+    const bool shieldWasUp = isProjectLoadInProgress();
+    setProjectLoadInProgress (true);
+    if (! shieldWasUp) settleAudioThread();
+    eq->setMode (want);
+    eq->setOversampling (wantOs);
+    setLatencySamples (mVibeGraph.updateBusLatencies());
+    setProjectLoadInProgress (shieldWasUp);
+}
+
+void BaySickDAWProcessor::EqConfigParamListener::parameterChanged (const juce::String& id, float)
+{
+    for (int bank = 0; bank < BaySickDAWProcessor::kEqBanksPerStrip; ++bank)
+    {
+        const juce::String tag = juce::String ("_") + EqBandIds::kBankSubs[bank];
+        const int at = id.indexOf (tag);
+        if (at <= 0) continue;
+        const juce::String prefix = id.substring (0, at);
+
+        auto apply = [&o = owner, prefix, bank] { o.applyEqConfigFromParams (prefix, bank); };
+        if (auto* mm = juce::MessageManager::getInstanceWithoutCreating();
+            mm != nullptr && mm->isThisTheMessageThread())
+            apply();
+        else
+            juce::MessageManager::callAsync (apply);
+        return;
+    }
 }
 
 // ── QA-ModelShell TS2: offline render drive ──────────────────────────────────
@@ -8767,22 +9000,11 @@ bool BaySickDAWProcessor::ensureMixerStripParams(const juce::String& prefix,
         return false;
 
     addParamsForMixerStrip(prefix, kind, defaultSendTo);
-    // Session B: every mixer strip also gets a full EQ band param set under the
-    // same prefix (prefix + "_mid_eq{b}<Suffix>" / "_side_eq{b}<Suffix>"), so the
-    // post-rack EQ on this strip is automatable.  Idempotent because dynF/dynB/dynI
-    // skip any id APVTS already holds -- there is no remove API, so a duplicate
-    // registration would be permanent.
-    addParamsForTrackEQ(prefix);
-    // §P4.3: every strip ALSO gets a pre-rack EQ block under
-    // prefix + "_preeq_mid_eq{b}*" / "_preeq_side_eq{b}*".  Same idempotent
-    // guard.  Bus/insert preEq DSPs (added in B2) bind to these params via
-    // updateAllPreRackEQsFromApvts (B4).
-    addParamsForTrackPreEQ(prefix);
-    // THREAD SAFETY: resolve this strip's EQ param pointers NOW, on the message
-    // thread, so the audio-thread sweep never has to look an id up in APVTS's
-    // adapterTable -- which this very function is concurrently emplacing into.
-    // Must follow both EQ-bank registrations above: it caches what they created.
-    cacheEqParamPointers(prefix);
+    // QA-EqPro SC-9: the strip's ROUTING params register here (a bus with no
+    // _sendTo has no edge out - BLU-447), but the EQ block deliberately does
+    // NOT.  EQ params arrive on first touch through ensureStripEqParams /
+    // ensureEqBandParams, so a fresh build holds ~zero EQ params instead of
+    // the 9,792 blank entries every project file used to carry.
     mRegisteredMixerStrips.insert(prefix);
     // QA-ModelShell TS3 (2026-07-27): automation registration for these ids is
     // triggered HERE, at param materialization, rather than by whatever view
@@ -9624,17 +9846,23 @@ void BaySickDAWProcessor::resetBaySickRustyDrumsMixerState()
             resetParam (prefix + "_send" + juce::String (s) + "_amount");
             resetParam (prefix + "_send" + juce::String (s) + "_prepost");
         }
-        // Both EQ banks (post-rack + pre-rack), both M/S sides, every band and
-        // every band param -- composed through EqBandIds so this cannot drift
-        // from the spelling addParamsForEQBank registers.
+        // Both EQ banks (post-rack + pre-rack), every band and every band
+        // param plus the bank globals -- composed through EqBandIds so this
+        // cannot drift from the spelling the registrars use.  resetParam
+        // null-skips anything not registered (per-band lazy).
         for (int bank = 0; bank < kEqBanksPerStrip; ++bank)
-            for (int side = 0; side < kEqSidesPerBank; ++side)
-                for (int b = 0; b < kEqBands; ++b)
-                {
-                    const juce::String bp = EqBandIds::bandPrefix (prefix, bank, side, b);
-                    for (const char* suffix : EqBandIds::kSuffixes)
-                        resetParam (bp + suffix);
-                }
+        {
+            for (int b = 0; b < kEqBands; ++b)
+            {
+                const juce::String bp = EqBandIds::bandPrefix (prefix, bank, b);
+                for (const char* suffix : EqBandIds::kSuffixes)
+                    resetParam (bp + suffix);
+            }
+            for (const char* g : EqBandIds::kGlobalSuffixes)
+                resetParam (EqBandIds::globalId (prefix, bank, g));
+            resetParam (EqBandIds::globalId (prefix, bank, "mode"));
+            resetParam (EqBandIds::globalId (prefix, bank, "os"));
+        }
     };
 
     // Bus + every potential Rusty insert slot.

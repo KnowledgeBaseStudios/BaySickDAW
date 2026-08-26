@@ -2002,11 +2002,11 @@ private:
     // updateBassPageEQsFromApvts removed along with their DSP instances.
     // Pre-rack EQs now sync via updateAllPreRackEQsFromApvts below (unified
     // mixer-strip iteration).
-    // Session B: generic update helper for any StripEq bound to one strip slot's
-    // param bank.  Reads all 17 band params x 8 bands x 2 sides and applies via
-    // the standard setBand* setters (CPU-guarded internally).  Used for every EQ
-    // (bus + insert, pre- and post-rack) whose params were lazily registered via
-    // addParamsForTrackEQ / addParamsForTrackPreEQ.
+    // QA-EqPro: generic update helper for one StripEq's param bank.  Reads
+    // the 18 band params for every REGISTERED band (unregistered bands cache
+    // null and are skipped - the per-band-lazy contract) plus the five bank
+    // globals, and applies through StripEq::pushBand / pushGlobals (compared
+    // wrapper-side so an untouched band costs a struct compare).
     void updateEQFromCache (StripEq* eq, int stripSlot, int bank);
     // Iterates every registered mixer strip (18 buses + the insert families) and
     // calls updateEQFromCache for each InsertNode/BusNode's EQ. No-op when a
@@ -2046,18 +2046,29 @@ private:
     enum EqBandParamSlot
     {
         eqSlotFreq = 0, eqSlotGain, eqSlotQ, eqSlotType, eqSlotOn, eqSlotSlope,
-        eqSlotMute, eqSlotSolo, eqSlotChannel,
+        eqSlotChannel, eqSlotPlace, eqSlotMute, eqSlotIsolate,
         eqSlotDynamic, eqSlotThreshold, eqSlotRatio, eqSlotAttack,
-        eqSlotRelease, eqSlotRange, eqSlotUpward, eqSlotScSource,
+        eqSlotRelease, eqSlotAutoRelease, eqSlotRange, eqSlotScSource,
         eqNumBandParamSlots
     };
     struct EqBandParamPtrs
     {
         std::atomic<std::atomic<float>*> p[eqNumBandParamSlots] {};
     };
+    // Per-bank globals the audio-thread sweep applies.  Mode + oversampling
+    // are deliberately NOT here: they reallocate, so they apply through the
+    // shielded message-thread path and never from the sweep (SC-15).
+    enum EqBankGlobalSlot
+    {
+        eqGlobPropQ = 0, eqGlobAutoGain, eqGlobAgAmt, eqGlobOutGain,
+        eqGlobPolarity, eqNumBankGlobalSlots
+    };
+    struct EqBankGlobalPtrs
+    {
+        std::atomic<std::atomic<float>*> p[eqNumBankGlobalSlots] {};
+    };
 
-    static constexpr int kEqBands         = 8;
-    static constexpr int kEqSidesPerBank  = 2;    // mid, side
+    static constexpr int kEqBands         = 24;   // QA-EqPro: the kbs band pool
     static constexpr int kEqBanksPerStrip = 2;    // post-rack, pre-rack
     static constexpr int kEqBankPost      = 0;
     static constexpr int kEqBankPre       = 1;
@@ -2072,19 +2083,26 @@ private:
         + MixerChannelIds::kMaxPluginStrips + MixerChannelIds::kMaxDirectStrips;
     static constexpr int kEqNumStripSlots = kEqNumBusSlots + kEqNumInsertSlots;
     static constexpr int kEqCacheSize =
-        kEqNumStripSlots * kEqBanksPerStrip * kEqSidesPerBank * kEqBands;
+        kEqNumStripSlots * kEqBanksPerStrip * kEqBands;
 
     static int eqStripSlotForPrefix (const juce::String& prefix) noexcept;
-    static constexpr int eqCacheIndex (int stripSlot, int bank, int side, int band) noexcept
+    static constexpr int eqCacheIndex (int stripSlot, int bank, int band) noexcept
     {
-        return ((stripSlot * kEqBanksPerStrip + bank) * kEqSidesPerBank + side)
-                   * kEqBands + band;
+        return (stripSlot * kEqBanksPerStrip + bank) * kEqBands + band;
     }
-    // Message thread only (calls into APVTS's map).  Idempotent.
+    static constexpr int eqGlobalCacheIndex (int stripSlot, int bank) noexcept
+    {
+        return stripSlot * kEqBanksPerStrip + bank;
+    }
+    // Message thread only (calls into APVTS's map).  Idempotent, and
+    // null-tolerant: an unregistered id caches as null, which to the sweep IS
+    // the not-yet-published state.
     void cacheEqParamPointers (const juce::String& prefix);
 
     std::unique_ptr<EqBandParamPtrs[]> mEqParamCache
         { std::make_unique<EqBandParamPtrs[]> ((size_t) kEqCacheSize) };
+    std::unique_ptr<EqBankGlobalPtrs[]> mEqGlobalCache
+        { std::make_unique<EqBankGlobalPtrs[]> ((size_t) (kEqNumStripSlots * kEqBanksPerStrip)) };
 
     // §P4.3 perf: ValueTree::Listener override.  Marks the EQ-sync dirty flag
     // when an EQ APVTS state property changes.  The next processBlock will run
@@ -2098,13 +2116,13 @@ private:
 
         // The sweep the flag arms walks every band of every registered strip,
         // pre and post.  Arming it for ANY param meant a fader drag re-ran that
-        // whole sweep at the APVTS flush rate.  Every EQ id carries "_mid_eq" /
-        // "_side_eq" (optionally behind "_preeq_"), so this filter misses no EQ
-        // edit.  (The per-band juce::String rebuild that made an unfiltered
-        // sweep genuinely dangerous on the audio thread is gone -- see the EQ
+        // whole sweep at the APVTS flush rate.  Every EQ id carries "_eq_" or
+        // "_preeq_" (the QA-EqPro scheme), so this filter misses no EQ edit.
+        // (The per-band juce::String rebuild that made an unfiltered sweep
+        // genuinely dangerous on the audio thread is gone -- see the EQ
         // param-pointer cache above -- but the sweep is still pure waste when
         // no EQ moved.)
-        if (pid.contains ("_eq"))
+        if (pid.contains ("_eq_") || pid.contains ("_preeq_"))
             mEQsDirty.store(true, std::memory_order_relaxed);
         if (onAnyStateChange) onAnyStateChange();   // P5: project dirty tracking
 
@@ -2149,11 +2167,39 @@ private:
     // Lazy registration helpers (called from ensureMixerStripParams)
     // QA-ApvtsAutomation (2026-07-25): the four engine mirror helpers removed
     // with registerParamsForTrack; 2026-04-25: addParamsForBaySickDrums before them.
-    void addParamsForTrackEQ     (const juce::String& prefix);
-    void addParamsForTrackPreEQ  (const juce::String& prefix);   // §P4.3 pre-rack EQ block
+    // ── QA-EqPro lazy EQ registration (SC-2 + SC-9) ─────────────────────────
+    // The EQ block (bank globals + bands 1-8, both banks) registers on first
+    // TOUCH - EQ window opened, preset or automation lane carrying eq params
+    // - never with the strip, so a fresh build holds ~zero EQ params (the
+    // 9,792-blank-entries-per-project-file cost SC-9 retired).  Bands 9-24
+    // register one at a time on activation.  Message thread; both fire the
+    // automation re-sweep through onMixerStripParamsCreated.  Public: the EQ
+    // window's open and the preset loaders are the touch points.
+public:
+    bool ensureStripEqParams (const juce::String& prefix);
+    bool ensureEqBandParams  (const juce::String& prefix, int bank, int band);
+    // Parses any eq-scheme param id and ensures its block/band exists - the
+    // load-time hook that keeps saved automation lanes over never-opened EQs
+    // playable.
+    void ensureEqParamsForId (const juce::String& paramId);
+private:
+    // Load-time scan of the saved tree (deep copy taken before replaceState)
+    // for eq-scheme ids - the EQ sibling of restoreAuxStripsFromState.
+    void restoreEqParamsFromState (const juce::ValueTree& sourceState);
+    // SC-15: apply this bank's mode/oversampling params to the engine.
+    // MESSAGE THREAD; takes the nest-aware shield internally.
+    void applyEqConfigFromParams (const juce::String& prefix, int bank);
     void addLiveInputParams      (const juce::String& prefix);   // R2: Vox/Inst _inputChannelIdx
     mutable juce::CriticalSection mInputChannelNamesLock;        // R2
-    void addParamsForEQBank      (const juce::String& prefix, const juce::String& subPrefix);
+    // SC-15 listener: a mode/os param changing (undo, project load, the menu
+    // itself) applies to the engine through the shielded message-thread path.
+    struct EqConfigParamListener : juce::AudioProcessorValueTreeState::Listener
+    {
+        explicit EqConfigParamListener (BaySickDAWProcessor& o) : owner (o) {}
+        void parameterChanged (const juce::String& id, float) override;
+        BaySickDAWProcessor& owner;
+    };
+    EqConfigParamListener mEqConfigListener { *this };
 
     // ── 5F-4a: Mixer-strip lazy APVTS registration ───────────────────────────
     // Classifies which mixer-strip param family to register; the per-kind

@@ -114,3 +114,42 @@ resetEqStatesToDefaults now sweeps StripEq::resetToDefaults per EQ point.
 EffectEqWindow binds its inert fallback EQ8MsDSP (window alive but dead
 until Tasks 5-6, recorded as the planned mid-batch state).  Old EQ8 files
 still compile beside the new world; deletion lands with Task 6.
+
+## 2026-08-26 - Task 4 - the parameter rework (gate green on retry; one
+## visibility fix)
+
+The single-set scheme is live: ids {prefix}_{eq_|preeq_}b{N}{Suffix} (18
+suffixes matching EqBandParamSlot: Channel/Place/Isolate/AutoRelease in,
+Solo/Upward and the mid/side dimension out) + 7 bank globals
+({prefix}_{eq_|preeq_}{mode|os|propq|autogain|agamt|outgain|polarity}).
+Defaults are the plugin's rulings verbatim: bands 1-8 ship on-and-flat
+(identity-skipped so it costs nothing), Threshold 0 dB, home frequencies
+40..12500 + log-spaced 9-24, Gain/Range +-30, Q to 30, Slope 9 entries.
+
+Registration is touch-lazy at BOTH grains (SC-2 + SC-9): NOTHING registers
+with the strip anymore - ensureStripEqParams (globals + bands 1-8, both
+banks) fires on EQ window open / preset load / load-time tree scan
+(restoreEqParamsFromState, the aux-restore sibling, wired into both load
+paths), ensureEqBandParams registers bands 9-24 one at a time.  Late
+registration adopts saved values via the house replaceState(copyState())
+rebind (the applyPendingRackStates recipe) under ScopedProgrammaticParamWrites.
+A fresh build now registers ZERO EQ params (was 9,792).
+
+The audio sweep (updateEQFromCache) builds kbs::EqBandParams from the
+nullable pointer cache (Freq stays the acquire-published flag; unregistered
+bands skip) and drives StripEq::pushBand + pushGlobals; cache reshaped to
+strips x banks x 24 with a parallel 5-slot bank-globals cache.  SC-15: mode
++ os are params but never enter the sweep or the automation registry (belt
+in registerStaticAutomationHandlers) - an APVTS listener applies them on
+the message thread under the nest-aware shield, updating PDC after.
+FxRackPresetIO moved to the new spelling + ensures blocks/bands before
+writing; formatMixerSuffix labels "{Pre }EQ B{n} {Param}"; the Rusty reset
+sweep and the mEQsDirty filter follow the new ids.
+
+Gate failed once - the lazy API landed private while the EQ window and
+preset IO call it - fixed by making the three touch points public.  Retry
+green (six exit codes 0, four link lines).
+
+FOUND while wiring, routed to Task 8's list: FxRackPresetIO::load applies
+the rack BLOB unshielded on the message thread (same class as the
+page-preset Path I) - added to the T8 shield set.
