@@ -1307,6 +1307,9 @@ PageMenuBar::PageMenuBar()
     mHamburgerBtn = std::make_unique<TitleStripMenuItem>("Menu");
     mHamburgerBtn->setTooltip("Page menu");
     mHamburgerBtn->onClick = [this] { showHamburgerMenu(); };
+    // QA-ManualPress M-4c: one shared strip serves every page window, so the
+    // heading anchors the "window menu" callout on each figure that names it.
+    mHamburgerBtn->getProperties().set (kDotAnchor, "EQ-15");
     addAndMakeVisible(*mHamburgerBtn);
 
     // QA-Layout T10 (L13): second flat native-style heading -- the strip
@@ -1314,6 +1317,7 @@ PageMenuBar::PageMenuBar()
     mAddBtn = std::make_unique<TitleStripMenuItem>("Add");
     mAddBtn->setTooltip("Add strips and buses");
     mAddBtn->onClick = [this] { if (mAddMenuBuilder) mAddMenuBuilder (mAddBtn.get()); };
+    mAddBtn->getProperties().set (kDotAnchor, "MIX-1");   // M-4c
     addChildComponent(*mAddBtn);
 }
 
@@ -1334,6 +1338,8 @@ void PageMenuBar::setExtraHeadings (const juce::StringArray& labels,
         auto btn = std::make_unique<TitleStripMenuItem> (labels[i]);
         auto* raw = btn.get();
         btn->onClick = [onOpen, i, raw] { if (onOpen) onOpen (i, raw); };
+        if (labels[i] == "View")
+            btn->getProperties().set (kDotAnchor, "BSPDL-1");   // M-4c
         addAndMakeVisible (*btn);
         mExtraHeadings.push_back (std::move (btn));
     }
@@ -1442,6 +1448,9 @@ void PageMenuBar::setTabSlots(const juce::StringArray& labels,
         const int idx = i;
         btn->onClick = [onTabClick, idx] { if (onTabClick) onTabClick(idx); };
         btn->setToggleState(i == activeIdx, juce::dontSendNotification);
+        // QA-ManualPress M-4c: the EQ figure's callout 1 names this pair.
+        if (i == 0 && labels[i].startsWith ("Pre EQ"))
+            btn->getProperties().set (kDotAnchor, "EQ-1");
         if (accent != juce::Colour())
         {
             // 2026-04-26: page sub-tabs (Player / Piano Roll / EQ) keep their
@@ -1752,6 +1761,10 @@ void PageMenuBar::setSwingKnobSlot (std::function<float()>     getMix,
     auto k = std::make_unique<PageSwingKnob> (std::move (getTruncate), std::move (setTruncate));
     k->setValue ((double) getMix(), juce::dontSendNotification);
     k->onValueChange = [s = k.get(), setMix] { if (setMix) setMix ((float) s->getValue()); };
+    // QA-ManualPress M-4c: ONE knob serves every player window, so it
+    // anchors the Swing Mix callout on all seven figures that show it.
+    k->getProperties().set (kDotAnchor,
+        "BSSBT-2;BSP-8;BSHARM-27;BSGTR-9;BSBAS-11;BSRDMAIN-10;BSPLUG-2");
     addAndMakeVisible (*k);
     mSwingKnob = std::move (k);
     resized();

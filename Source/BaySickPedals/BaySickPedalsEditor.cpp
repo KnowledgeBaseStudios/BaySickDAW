@@ -83,6 +83,11 @@ public:
         mPresetBtn = std::make_unique<juce::TextButton>("...");
         mPresetBtn->setTooltip ("Pedal preset menu (Save / Load / Restore Default)");
         mPresetBtn->onClick = [this] { showPresetMenu(); };
+        // QA-ManualPress M-4: every tile has a "..." and an ON, but the figure
+        // numbers each once, on the tuner tile.  An un-gated stamp would leave
+        // the dot on whichever tile the harness happened to walk last.
+        if (mSlot == BaySickPedalsProcessor::kSlotTuner)
+            mPresetBtn->getProperties().set (kDotAnchor, "BSPDL-5");
         addAndMakeVisible (*mPresetBtn);
 
         // I-15 polish: explicit "X" remove button on slots 1-6 when populated.
@@ -99,6 +104,9 @@ public:
                 mProc.clearSlot (mSlot);
                 mParent.onSlotTypeChanged (mSlot);
             };
+            // M-4: the X and the reorder arrows are hidden on an empty slot, so
+            // only a populated free tile can carry these dots.
+            mRemoveBtn->getProperties().set (kDotAnchor, "BSPDL-11");
             addAndMakeVisible (*mRemoveBtn);
 
             // I-15 polish (2026-05-03): up/down reorder buttons (mirror the FX
@@ -111,6 +119,7 @@ public:
             {
                 mParent.performMove (mSlot, mSlot - 1);
             };
+            mUpBtn->getProperties().set (kDotAnchor, "BSPDL-12");
             addAndMakeVisible (*mUpBtn);
 
             mDownBtn = std::make_unique<PedalArrowButton>(PedalArrowButton::Down);
@@ -130,6 +139,7 @@ public:
             mEqPicker->addItem ("Bass Graphic EQ",   2);
             mEqPicker->addItem ("Pro Parametric EQ", 3);
             mEqPicker->onChange = [this] { onEqPickerChanged(); };
+            mEqPicker->getProperties().set (kDotAnchor, "BSPDL-6");   // M-4
             addAndMakeVisible (*mEqPicker);
         }
 
@@ -144,6 +154,8 @@ public:
         mBypassBtn->setColour (juce::TextButton::textColourOffId,   juce::Colour (0xff44ff88));
         mBypassBtn->setColour (juce::TextButton::textColourOnId,    juce::Colour (0xff666666));
         mBypassBtn->setTooltip ("Bypass this pedal");
+        if (mSlot == BaySickPedalsProcessor::kSlotTuner)
+            mBypassBtn->getProperties().set (kDotAnchor, "BSPDL-7");   // M-4
         addAndMakeVisible (*mBypassBtn);
         mBypassAttach = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(
             mProc.apvts, slotBypassParamId (mSlot), *mBypassBtn);
@@ -211,6 +223,14 @@ public:
         // are also disabled when the pedal is already at the chain extremes
         // (slot 1 = first user-movable -> Up disabled; slot 6 = last -> Down).
         const bool populated = (type != EffectType::None);
+
+        // QA-ManualPress M-4: the board figure numbers an empty tile and a
+        // filled one.  Only the six FREE positions can be either, and the
+        // declaration is re-stated here because a tile changes which one it is.
+        if (mSlot != BaySickPedalsProcessor::kSlotTuner
+            && mSlot != BaySickPedalsProcessor::kSlotEQ)
+            getProperties().set (kDotAnchor, populated ? "BSPDL-4" : "BSPDL-3");
+
         if (mPresetBtn) mPresetBtn->setVisible (populated);
         if (mRemoveBtn) mRemoveBtn->setVisible (populated);
         if (mBypassBtn) mBypassBtn->setVisible (populated);
@@ -238,6 +258,10 @@ public:
                 mPanel = createEffectEditor (dsp, type, EditorPanelBase::PanelMode::Pedal);
                 if (mPanel)
                 {
+                    // QA-ManualPress M-4: "the EQ's own controls" is whichever
+                    // of the three EQ panels the last slot currently mounts.
+                    if (mSlot == BaySickPedalsProcessor::kSlotEQ)
+                        mPanel->getProperties().set (kDotAnchor, "BSPDL-10");
                     addAndMakeVisible (*mPanel);
                     applyAutomationContext();
                 }
@@ -700,6 +724,7 @@ BaySickPedalsEditor::BaySickPedalsEditor (BaySickPedalsProcessor& proc)
     // strip mount lands with the T4 pedals window).
     mPresetBtn.setTooltip ("Save / load the entire 8-slot pedalboard rack as a "
                            "preset (separate from per-pedal '...' presets).");
+    mPresetBtn.getProperties().set (kDotAnchor, "BSPDL-2");   // QA-ManualPress M-4
     mPresetBtn.onClick = [this]
     {
         if (onPedalboardPresetMenu) onPedalboardPresetMenu();

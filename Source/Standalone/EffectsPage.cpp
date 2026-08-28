@@ -91,6 +91,27 @@ public:
         mUpR    = b.removeFromRight (16);
         b.removeFromRight (4);
         mNameR  = b;
+
+        // QA-ManualPress M-4: every affordance on a row is PAINTED, so the
+        // manual's per-affordance callouts declare the rects just laid out.
+        // They ride ONE row -- the row above carries the whole-slot callout, and
+        // stamping all six rows would collide the dots on an arbitrary one.
+        if (mSlotIndex == 1)
+        {
+            auto rect = [] (const char* id, juce::Rectangle<int> r)
+            {
+                return juce::String (id) + "@" + juce::String (r.getX())
+                     + "," + juce::String (r.getY())
+                     + "," + juce::String (r.getWidth())
+                     + "," + juce::String (r.getHeight());
+            };
+            getProperties().set (kDotAnchor,
+                                 rect ("FXI-6",  mNameR)
+                       + ";"   + rect ("FXI-7",  mUpR.getUnion (mDownR))
+                       + ";"   + rect ("FXI-8",  mPickR)
+                       + ";"   + rect ("FXI-9",  mLedR)
+                       + ";"   + rect ("FXI-10", mCloseR));
+        }
     }
 
     void mouseDown (const juce::MouseEvent& e) override
@@ -227,6 +248,12 @@ EffectsPage::EffectsPage(TrackSelectionManager& tsm, BaySickDAWProcessor& proces
     makeEqBtn (mPreEqBtn,  "Pre EQ",  true);
     makeEqBtn (mPostEqBtn, "Post EQ", false);
 
+    // QA-ManualPress M-4: the rack window's own callouts anchor to its controls.
+    mTrackBox   ->getProperties().set (kDotAnchor, "FXI-1");
+    mFxBypassBtn->getProperties().set (kDotAnchor, "FXI-2");
+    mPreEqBtn   ->getProperties().set (kDotAnchor, "FXI-3");
+    mPostEqBtn  ->getProperties().set (kDotAnchor, "FXI-4");
+
     // ── Slot rows ─────────────────────────────────────────────────────────────
     for (int i = 0; i < EffectRack::kNumSlots; ++i)
     {
@@ -242,6 +269,9 @@ EffectsPage::EffectsPage(TrackSelectionManager& tsm, BaySickDAWProcessor& proces
                                                  [this, s] (const juce::PluginDescription& d)
                                                  { onPluginChosen (s, d); });
         };
+        // QA-ManualPress M-4: "a rack slot" is the whole row, numbered on the
+        // first one; the row below carries the per-affordance callouts.
+        if (i == 0) row->getProperties().set (kDotAnchor, "FXI-5");
         addAndMakeVisible (*row);
         mRows[(size_t) i] = std::move (row);
     }

@@ -328,6 +328,13 @@ BaySickPlayerEditor::BaySickPlayerEditor (BaySickPlayerProcessor& p)
         };
     }
 
+    // QA-ManualPress M-4c: manual callout anchors.  BSP-1 and BSP-2 name runs
+    // of controls rather than a box, so each anchors at the first control it
+    // lists; the box-level callouts declare their rects in resized().
+    mSampleStartKnob.getProperties().set (kDotAnchor, "BSP-1");
+    mCutSelfTog     .getProperties().set (kDotAnchor, "BSP-2");
+    mPresetBtn      .getProperties().set (kDotAnchor, "BSP-7");
+
     // Slider double-click returns each param's FACTORY default (the helper reads
     // getDefaultValue) -- standard knob behavior, independent of the loaded patch.
     setSliderDoubleClickDefaultsFromApvts (*this, mProc.apvts);
@@ -515,6 +522,26 @@ void BaySickPlayerEditor::resized()
     placeKnob (6, 0, 1, mDriveKnob,  mDriveLbl);
     placeKnob (6, 1, 1, mTrebleKnob, mTrebleLbl);
     placeKnob (6, 0, 2, mVolumeKnob, mVolumeLbl);
+
+    // QA-ManualPress M-4c: the box-level callouts have no container component
+    // (a box is a header label plus the knobs placed into boxRectFor's rect),
+    // so their dots anchor to that same rect.  BSP-5 and BSP-6 each name two
+    // neighbouring boxes and take the pair.
+    {
+        juce::String anchors;
+        auto add = [&anchors] (const char* code, juce::Rectangle<int> r)
+        {
+            if (r.isEmpty()) return;
+            if (anchors.isNotEmpty()) anchors << ";";
+            anchors << code << "@" << r.getX() << "," << r.getY() << ","
+                    << r.getWidth() << "," << r.getHeight();
+        };
+        add ("BSP-3", box (1));
+        add ("BSP-4", box (2));
+        add ("BSP-5", box (3).getUnion (box (4)));
+        add ("BSP-6", box (5).getUnion (box (6)));
+        getProperties().set (kDotAnchor, anchors);
+    }
 }
 
 // ── Preset management ─────────────────────────────────────────────────────────

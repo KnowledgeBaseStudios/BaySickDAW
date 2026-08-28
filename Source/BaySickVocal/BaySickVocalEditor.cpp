@@ -235,6 +235,21 @@ public:
         mThroatShift    .setComponentID (pid ("pitch_throatShift"));
         mFormantBtn     .setComponentID (pid ("pitch_formantPreserve"));
 
+        // QA-ManualPress M-4c: manual callout anchors - every BSV callout names
+        // one control on this panel, so each dot places itself from the live
+        // layout instead of a hand-measured percentage.
+        mMixSlider      .getProperties().set (kDotAnchor, "BSV-1");
+        mABSlot         .getProperties().set (kDotAnchor, "BSV-2");
+        mPitchBypassBtn .getProperties().set (kDotAnchor, "BSV-3");
+        mKeyCombo       .getProperties().set (kDotAnchor, "BSV-4");
+        mScaleCombo     .getProperties().set (kDotAnchor, "BSV-5");
+        mRetuneSpeed    .getProperties().set (kDotAnchor, "BSV-6");
+        mStrength       .getProperties().set (kDotAnchor, "BSV-7");
+        mHumanize       .getProperties().set (kDotAnchor, "BSV-8");
+        mThroatShift    .getProperties().set (kDotAnchor, "BSV-9");
+        mFormantBtn     .getProperties().set (kDotAnchor, "BSV-10");
+        mPitchRefLbl    .getProperties().set (kDotAnchor, "BSV-11");
+
         startTimerHz (10);
     }
 
@@ -460,6 +475,12 @@ public:
                     p->setValueNotifyingHost (
                         p->getNormalisableRange().convertTo0to1 ((float) newType));
             };
+
+            // QA-ManualPress M-4c: BSVC-1 is "a chain slot" - one dot for six
+            // identical slots, so only the first declares itself.  A stamp on
+            // every slot would resolve to the LAST one emitted.
+            if (i == 0)
+                sc->getProperties().set (kDotAnchor, "BSVC-1");
 
             addAndMakeVisible (*sc);
             mSlots[i] = std::move (sc);

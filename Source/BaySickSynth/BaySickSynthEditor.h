@@ -79,6 +79,9 @@ private:
     void layoutAmpEnvDeck (juce::Rectangle<int> deck);
     void layoutFilterDeck (juce::Rectangle<int> deck);
     void layoutFltEnvDeck (juce::Rectangle<int> deck);
+    // QA-ManualPress M-4c: accumulate painted-region manual callout
+    // anchors on this component (resized clears, layouts append).
+    void addDotAnchor (const juce::String& callout, juce::Rectangle<int> r);
     void layoutLFODeck    (juce::Rectangle<int> deck);
     void layoutModDeck    (juce::Rectangle<int> deck);
 

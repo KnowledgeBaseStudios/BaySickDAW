@@ -245,7 +245,14 @@ for _code in sorted(set(list(C.keys()) + list(call.keys()))):
         _b = _by.get(_n)
         if not _b:
             continue
-        _cur[_n] = (round(_b[0] + 0.9, 2), round(_b[1] + _b[3] / 2.0, 2))
+        # A declared anchor can still sit outside the shot: a scrolled rail,
+        # a control hidden in this figure's state.  Skip and report - never
+        # place a dot the reader cannot see.
+        _cx = _b[0] + _b[2] / 2.0
+        _cy = _b[1] + _b[3] / 2.0
+        if not (0.0 <= _cx <= 100.0 and 0.0 <= _cy <= 100.0):
+            continue
+        _cur[_n] = (round(_b[0] + _b[2] / 2.0, 2), round(_b[1] + _b[3] / 2.0, 2))
         _hit += 1
     if _hit:
         C[_code] = _cur

@@ -432,6 +432,61 @@ BaySickSynthEditor::BaySickSynthEditor (BaySickSynthProcessor& p)
     wireID (mLFORateKnob,     "lfo_rate");
     wireID (mLFOAmtKnob,      "lfo_amount");
 
+    // -- Manual callout anchors ------------------------------------------------
+    // QA-ManualPress M-4c: the manual's dots place themselves from these.  A
+    // control declares the callout it is the target of (kDotAnchor, SharedUI.h)
+    // and the --shot --docs harness dumps its live bounds, so a layout change
+    // moves the dot with it.  Nothing reads this at runtime.
+    mVisualizer      .getProperties().set (kDotAnchor, "BSSBOSC-1");
+    mWaveformCbo     .getProperties().set (kDotAnchor, "BSSBOSC-3");
+    mDualOscModeCbo  .getProperties().set (kDotAnchor, "BSSBOSC-4");
+    mTransposeKnob   .getProperties().set (kDotAnchor, "BSSBOSC-5");
+    mModifierKnob    .getProperties().set (kDotAnchor, "BSSBOSC-6");
+    mNoiseKnob       .getProperties().set (kDotAnchor, "BSSBOSC-7");
+    mOscSyncBtn      .getProperties().set (kDotAnchor, "BSSBOSC-8");
+    mRingModBtn      .getProperties().set (kDotAnchor, "BSSBOSC-9");
+    mVoiceModeLed   ->getProperties().set (kDotAnchor, "BSSBOSC-10");
+    mCutSelfBtn      .getProperties().set (kDotAnchor, "BSSBOSC-11");
+    mCutSelfModeBtn  .getProperties().set (kDotAnchor, "BSSBOSC-12");
+    mGlideKnob       .getProperties().set (kDotAnchor, "BSSBOSC-13");
+    mOutVolKnob      .getProperties().set (kDotAnchor, "BSSBOSC-14");
+    mModWheelDestLed->getProperties().set (kDotAnchor, "BSSBOSC-15");
+    mModWheelAmtKnob .getProperties().set (kDotAnchor, "BSSBOSC-16");
+
+    mAmpEnvGroup     .getProperties().set (kDotAnchor, "BSSBOENV-1");
+    mVelAmpKnob      .getProperties().set (kDotAnchor, "BSSBOENV-2");
+    mPitchEnvGroup   .getProperties().set (kDotAnchor, "BSSBOENV-3");
+    mPEnvAmtKnob     .getProperties().set (kDotAnchor, "BSSBOENV-4");
+
+    mFilterXYPad    ->getProperties().set (kDotAnchor, "BSSBFLT-1");
+    mFilterTypeLed  ->getProperties().set (kDotAnchor, "BSSBFLT-2");
+    mFltKbTrackKnob  .getProperties().set (kDotAnchor, "BSSBFLT-3");
+    mFltVelTrackKnob .getProperties().set (kDotAnchor, "BSSBFLT-4");
+
+    // The filter ADSR row is four sibling sliders with no container, so its
+    // dot anchors to ATTACK -- where the row starts.
+    // BSSBFENV-1 (the ADSR set) anchors to the sliders' union in resized().
+    mFltEnvAmtKnob   .getProperties().set (kDotAnchor, "BSSBFENV-2");
+
+    mLFOShapeLed    ->getProperties().set (kDotAnchor, "BSSBLFO-1");
+    mLFORateKnob     .getProperties().set (kDotAnchor, "BSSBLFO-2");
+    mLFODivCbo       .getProperties().set (kDotAnchor, "BSSBLFO-3");
+    mLFOSyncBtn      .getProperties().set (kDotAnchor, "BSSBLFO-4");
+    mLFODestLed     ->getProperties().set (kDotAnchor, "BSSBLFO-5");
+    mLFOAmtKnob      .getProperties().set (kDotAnchor, "BSSBLFO-6");
+
+    mNoiseGroup      .getProperties().set (kDotAnchor, "BSSBMOD-1");
+    mTransientGroup  .getProperties().set (kDotAnchor, "BSSBMOD-2");
+    mBurstModeBtn    .getProperties().set (kDotAnchor, "BSSBMOD-3");
+    // COUNT + SPACING are a pair inside BURST ENV, which the BURST switch
+    // already anchors -- so this dot takes COUNT, the pair's left edge.
+    mBurstCountKnob  .getProperties().set (kDotAnchor, "BSSBMOD-4");
+    mDriftKnob       .getProperties().set (kDotAnchor, "BSSBMOD-5");
+    mUnisonGroup     .getProperties().set (kDotAnchor, "BSSBMOD-6");
+
+    // Title-strip preset button (BSSBT figure is the FLT shot's title bar).
+    mPresetBtn       .getProperties().set (kDotAnchor, "BSSBT-1");
+
     // Grey rate knob when sync is on, grey div combo when sync is off
     avts.addParameterListener (pid ("lfo_sync"), this);
     refreshLFOSyncEnableState();
@@ -576,6 +631,11 @@ void BaySickSynthEditor::resized()
     const int kTabW   = w / 6;
     for (int i = 0; i < 6; ++i)
         mTabBtns[i].setBounds (i * kTabW, kTabTop, kTabW, 30);
+    // QA-ManualPress M-4c: painted-region callouts anchor to the rects this
+    // layout pass computes.  resized() clears first and every pass APPENDS,
+    // so one component can carry several callouts.
+    getProperties().set (kDotAnchor, juce::String());
+    addDotAnchor ("BSSBOSC-2", { 0, kTabTop, kTabW * 6, 30 });
 
     // ── Control deck ──────────────────────────────────────────────────────────
     const int kDeckTop = kTabTop + 30;
@@ -770,6 +830,17 @@ void BaySickSynthEditor::layoutFilterDeck (juce::Rectangle<int> deck)
     placeKnob (mFltVelTrackKnob, mFltVelTrackLbl, 1);
 }
 
+void BaySickSynthEditor::addDotAnchor (const juce::String& callout,
+                                      juce::Rectangle<int> r)
+{
+    auto cur = getProperties()[kDotAnchor].toString();
+    const juce::String decl = callout + "@" + juce::String (r.getX()) + ","
+                            + juce::String (r.getY()) + ","
+                            + juce::String (r.getWidth()) + ","
+                            + juce::String (r.getHeight());
+    getProperties().set (kDotAnchor, cur.isEmpty() ? decl : cur + ";" + decl);
+}
+
 void BaySickSynthEditor::layoutFltEnvDeck (juce::Rectangle<int> deck)
 {
     // Left 4 cols: ADSR vertical sliders, Right: Amount group
@@ -785,6 +856,10 @@ void BaySickSynthEditor::layoutFltEnvDeck (juce::Rectangle<int> deck)
         sliders[i]->setBounds (r.getX(), r.getY(), r.getWidth(), r.getHeight() - lH);
         labels [i]->setBounds (r.getX(), r.getBottom() - kLblH, r.getWidth(), kLblH);
     }
+
+    // M-4c: the callout names all four sliders as one set, so the dot
+    // anchors to the block they occupy, not to ATTACK alone.
+    addDotAnchor ("BSSBFENV-1", { deck.getX(), deck.getY(), sW * 4, deck.getHeight() });
 
     auto amtArea = deck.withX (deck.getRight() - amtW).withWidth (amtW).reduced (kPad / 2);
     mFltAmtGroup.setBounds (amtArea);

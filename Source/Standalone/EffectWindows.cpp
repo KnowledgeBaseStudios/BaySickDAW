@@ -400,6 +400,9 @@ void EffectSlotWindow::configureTitleStrip (PageMenuBar& bar)
                                                                      : (juce::Component*) mBar));
     });
 
+    // QA-ManualPress M-4: the panel figure numbers the title-strip bypass LED.
+    mLed.getProperties().set (kDotAnchor, "FX-2");
+
     bar.addExtraRightComponent (&mLed, 22);
     refreshChrome();
 }
@@ -594,6 +597,7 @@ EffectEqWindow::EffectEqWindow (BaySickDAWProcessor& proc,
                                      : v == 2 ? kbs::EqChannel::side
                                               : kbs::EqChannel::stereo);
     };
+    mViewRow->getProperties().set (kDotAnchor, "EQ-2");   // QA-ManualPress M-4
     addAndMakeVisible (*mViewRow);
 
     mMatch = std::make_unique<eqview::EqMatchPanel> (*mGraph);

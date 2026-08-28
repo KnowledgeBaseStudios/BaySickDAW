@@ -258,6 +258,47 @@ MixerTrackStrip::MixerTrackStrip(const juce::String& trackName,
             onAddSendRequested(mChannelId);
     };
     addAndMakeVisible(mAddSendBtn);
+
+    // QA-ManualPress M-4: the manual's Mixer callouts anchor to real controls.
+    // Split by STRIP TYPE rather than stamped on every strip: the figure holds
+    // several strips at once and the generator keeps the last match, so a
+    // callout declared everywhere would land on an arbitrary strip.  "Every
+    // strip has one" callouts therefore pick the type the figure numbers.
+    if (mType == StripType::Master)
+    {
+        mNameLabel        .getProperties().set (kDotAnchor, "MIX-2");
+        mFXBtn            .getProperties().set (kDotAnchor, "MIX-6");
+        mBypassBtn        .getProperties().set (kDotAnchor, "MIX-7");
+        mMasterFXBypassBtn.getProperties().set (kDotAnchor, "MIX-8");
+        mPanKnob          .getProperties().set (kDotAnchor, "MIX-9");
+        mWidthKnob        .getProperties().set (kDotAnchor, "MIX-10");
+        mLufsBox          .getProperties().set (kDotAnchor, "MIX-12");
+        mFader            .getProperties().set (kDotAnchor, "MIX-14");
+        mAddSendBtn       .getProperties().set (kDotAnchor, "MIX-18");
+    }
+    else if (mType == StripType::Bus)
+    {
+        mCollapseBtn .getProperties().set (kDotAnchor, "MIX-3");
+        mPolarityBtn .getProperties().set (kDotAnchor, "MIX-11");
+        mAddSendBtn  .getProperties().set (kDotAnchor, "MIX-17");
+    }
+    else
+    {
+        mMuteBtn .getProperties().set (kDotAnchor, "MIX-4");
+        mSoloBtn .getProperties().set (kDotAnchor, "MIX-5");
+        mFader   .getProperties().set (kDotAnchor, "MIX-13");
+        mDbLabel .getProperties().set (kDotAnchor, "MIX-16");
+        // The Mixer Strip Crop figure numbers the split meter again as its
+        // own callout, on the live-input strip it crops to.
+        mMeter   .getProperties().set (kDotAnchor, mType == StripType::Vox
+                                                       ? "MIX-15;MIXSTP-3" : "MIX-15");
+    }
+
+    if (mType == StripType::Vox)
+    {
+        mArmBtn   .getProperties().set (kDotAnchor, "MIXSTP-1");
+        mListenBtn.getProperties().set (kDotAnchor, "MIXSTP-2");
+    }
 }
 
 MixerTrackStrip::~MixerTrackStrip()

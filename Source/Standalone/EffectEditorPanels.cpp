@@ -222,6 +222,11 @@ void EditorPanelBase::setSlotContext(const juce::String& channelPrefix, const ju
         outputVolKnob->getProperties().set (kDotAnchor, "FX-6");   // M-4c
     }
 
+    // M-4: the panel's output dBFS bar.  Null on pedal-native panels, which
+    // strip it -- and those are not what the Effects Panel figure shoots.
+    if (dbfsOut)
+        dbfsOut->getProperties().set (kDotAnchor, "FX-7");
+
     // Task 9: automatable toggles (addAutomatableToggle).  ComponentID goes on
     // the wrapper AND every child -- GlobalAutoRightClick reads the clicked
     // component's id directly, and a click can land on the switch button or a
@@ -6297,6 +6302,9 @@ struct TunerStylePanel : public EditorPanelBase, private juce::Timer
         modeSel->setBodyTooltip ("Detection mode");
         modeSel->setSelectedIndex (dsp ? (int) dsp->getMode() : 0, juce::dontSendNotification);
         modeSel->onChange = [dsp] (int idx) { if (dsp) dsp->setMode (idx); };
+        // QA-ManualPress M-4: the pedalboard figure numbers the whole
+        // chicken-head cluster; its dot goes on the first of them.
+        modeSel->getProperties().set (kDotAnchor, "BSPDL-9");
         addAndMakeVisible (*modeSel);
 
         displaySel = std::make_unique<ChickenHeadSelector>();
@@ -6521,6 +6529,21 @@ struct TunerStylePanel : public EditorPanelBase, private juce::Timer
         // Right cluster: knob (top) + chickenheads + Mute / 432 buttons.
         const int rightW = juce::jmin (b.getWidth() / 3 + 30, 230);
         auto right = b.removeFromRight (rightW);
+
+        // QA-ManualPress M-4: the tuner readout is PAINTED, so it declares the
+        // rect paint() carves - what is left once the right cluster and the
+        // dBFS column paint() always reserves are taken, inset as drawn.  Pedal
+        // mode only: that is the panel the pedalboard figure numbers, and it is
+        // the only mode where paint()'s carve and this one agree.
+        if (mPanelMode == EditorPanelBase::PanelMode::Pedal)
+        {
+            const auto disp = b.withTrimmedRight (32 + 4).reduced (4, 4);
+            getProperties().set (kDotAnchor,
+                                 "BSPDL-8@" + juce::String (disp.getX())
+                                    + "," + juce::String (disp.getY())
+                                    + "," + juce::String (disp.getWidth())
+                                    + "," + juce::String (disp.getHeight()));
+        }
 
         // Trim knob top-right.
         if (trimKnob) trimKnob->setBounds (right.removeFromTop (kKnobSz + 14)

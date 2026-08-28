@@ -95,6 +95,8 @@ SlotComponent::SlotComponent(int slotIndex) : mSlotIndex(slotIndex)
     // setEditor() shows it only when the loaded effect declares
     // usesSidechain().  Click pops a menu of currently-routed SC lines.
     mScBtn = std::make_unique<juce::TextButton>("SC: Off");
+    if (mSlotIndex == 3)   // M-4c: one slot carries the callout
+        mScBtn->getProperties().set (kDotAnchor, "BSVC-7");
     mScBtn->setColour(juce::TextButton::buttonColourId, juce::Colour(0xff3b3b3b));
     mScBtn->setColour(juce::TextButton::textColourOffId, juce::Colour(0xffd6d6d6));
     mScBtn->setTooltip("Sidechain source");
@@ -106,6 +108,8 @@ SlotComponent::SlotComponent(int slotIndex) : mSlotIndex(slotIndex)
     // umbrellas (Compressor: Modern/FET/Opto; Saturation: Tube/Console).
     // Hidden by default; setEditor() shows it for the relevant effect types.
     mModeBtn = std::make_unique<juce::TextButton>("Mode");
+    if (mSlotIndex == 3)   // M-4c: one slot carries the callout
+        mModeBtn->getProperties().set (kDotAnchor, "BSVC-6");
     mModeBtn->setColour(juce::TextButton::buttonColourId, juce::Colour(0xff3b3b3b));
     mModeBtn->setColour(juce::TextButton::textColourOffId, juce::Colour(0xffd6d6d6));
     mModeBtn->setTooltip("Character mode");
@@ -118,6 +122,8 @@ SlotComponent::SlotComponent(int slotIndex) : mSlotIndex(slotIndex)
     // effect is loaded.  Click pops Save / Load (Factory + My Presets) /
     // Restore / Save as Default / Manage Presets.
     mPresetBtn = std::make_unique<juce::TextButton>("Preset");
+    if (mSlotIndex == 0)   // M-4c: one slot carries the callout
+        mPresetBtn->getProperties().set (kDotAnchor, "BSVC-5");
     mPresetBtn->setColour(juce::TextButton::buttonColourId, juce::Colour(0xff3b3b3b));
     mPresetBtn->setColour(juce::TextButton::textColourOffId, juce::Colour(0xffd6d6d6));
     mPresetBtn->setTooltip("Effect presets -- save / load / restore");
@@ -130,6 +136,8 @@ SlotComponent::SlotComponent(int slotIndex) : mSlotIndex(slotIndex)
     // reports hasAdvancedControls().  Click flips Basic<->Advanced + re-lays-out
     // the panel in place.
     mBasicBtn = std::make_unique<juce::TextButton>("Basic");
+    if (mSlotIndex == 2)   // M-4c: one slot carries the callout
+        mBasicBtn->getProperties().set (kDotAnchor, "BSVC-4");
     mBasicBtn->setColour(juce::TextButton::buttonColourId, juce::Colour(0xff3b3b3b));
     mBasicBtn->setColour(juce::TextButton::textColourOffId, juce::Colour(0xffd6d6d6));
     mBasicBtn->setTooltip("Basic / Advanced controls -- Advanced reveals power-user knobs");
@@ -633,6 +641,18 @@ void SlotComponent::resized()
 
     // Bypass dot on the left
     mBypassRect = header.removeFromLeft(24).withSizeKeepingCentre(20, 20);
+    // QA-ManualPress M-4c: the bypass dot and the slot name are PAINTED, so
+    // they anchor as sub-rects of the header the paint pass uses.  Gated to
+    // one slot: the Vocal Chain figure stacks six of these.
+    if (mSlotIndex == 0)
+        getProperties().set (kDotAnchor,
+            "BSVC-2@" + juce::String (mBypassRect.getX()) + ","
+                      + juce::String (mBypassRect.getY()) + ","
+                      + juce::String (mBypassRect.getWidth()) + ","
+                      + juce::String (mBypassRect.getHeight())
+          + ";BSVC-3@" + juce::String (header.getX()) + ","
+                       + juce::String (header.getY()) + ",90,"
+                       + juce::String (header.getHeight()));
     header.removeFromLeft(2);
 
     // Action glyphs on the right (close, then down, then up - right-to-left)

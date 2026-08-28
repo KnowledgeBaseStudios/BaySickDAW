@@ -654,6 +654,15 @@ HarmlessEditor::HarmlessEditor (HarmlessProcessor& p)
         mActivePart = (pp->load() > 0.5f) ? 1 : 0;
     rebindToPart (mActivePart);
 
+    // QA-ManualPress M-4c: manual callout anchors.  Section-level callouts are
+    // painted frames with no container, so they are declared in resized() from
+    // the same rects paint() draws; these five name one control each.
+    mPartABtn   .getProperties().set (kDotAnchor, "BSHARM-8");
+    mTimbreWavA .getProperties().set (kDotAnchor, "BSHARM-9");
+    mTimbreBlend.getProperties().set (kDotAnchor, "BSHARM-10");
+    mPartALevel .getProperties().set (kDotAnchor, "BSHARM-11");
+    mUnisonType .getProperties().set (kDotAnchor, "BSHARM-26");
+
     // Slider double-click returns each param's FACTORY default (the helper reads
     // getDefaultValue) -- standard knob behavior, independent of the loaded patch.
     setSliderDoubleClickDefaultsFromApvts (*this, mProc.apvts);
@@ -1283,6 +1292,36 @@ void HarmlessEditor::resized()
                 });
             }
         }
+    }
+
+    // QA-ManualPress M-4c: manual callout anchors for the SECTION callouts.  A
+    // section here is a painted frame, not a component, so the dot anchors to
+    // the same rect paint() draws and is re-declared whenever the layout moves.
+    {
+        juce::String anchors;
+        auto sec = [&anchors] (const char* code, juce::Rectangle<int> r)
+        {
+            if (r.isEmpty()) return;
+            if (anchors.isNotEmpty()) anchors << ";";
+            anchors << code << "@" << r.getX() << "," << r.getY() << ","
+                    << r.getWidth() << "," << r.getHeight();
+        };
+        sec ("BSHARM-1",  mGlobalSec);
+        sec ("BSHARM-2",  mTremSec);
+        sec ("BSHARM-3",  mRoutingSec);
+        sec ("BSHARM-4",  mVibLegatoSec);
+        sec ("BSHARM-5",  mUnisonSec);
+        sec ("BSHARM-6",  mFlt1Sec);
+        sec ("BSHARM-7",  mFlt2Sec);
+        sec ("BSHARM-12", mPitchSec);
+        sec ("BSHARM-13", mLFOSec);
+        sec ("BSHARM-14", mStrumSec);
+        sec ("BSHARM-15", mFXSec);
+        sec ("BSHARM-16", mAmpEnvSec);
+        sec ("BSHARM-17", mBlurPrismSec);
+        sec ("BSHARM-18", mXYZSec);
+        sec ("BSHARM-19", mSpectroSec);
+        getProperties().set (kDotAnchor, anchors);
     }
 }
 

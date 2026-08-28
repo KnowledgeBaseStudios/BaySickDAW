@@ -264,6 +264,7 @@ public:
         }
         selected = juce::jlimit (-1, kBands - 1, b);
         if (onSelect) onSelect (selected);
+        updateDotAnchors();
         repaint();
     }
 
@@ -504,6 +505,8 @@ public:
     const Colors& colors() const { return cols; }
 
     // ── painting ──────────────────────────────────────────────────────────
+    void resized() override { updateDotAnchors(); }
+
     void paint (juce::Graphics& g) override
     {
         const auto a = plotArea();
@@ -1994,6 +1997,37 @@ private:
         if (selected < 0) return {};
         const auto pos = handlePos (selected);
         return { pos.x - 30.0f, pos.y - 11.0f, 18.0f, 18.0f };
+    }
+
+    // QA-ManualPress M-4: everything the manual numbers inside the graph is
+    // PAINTED, so each callout declares the rect its own geometry helper above
+    // computes.  Re-stated on selection as well as on resize: the band handle
+    // and its LISTEN button sit on whichever band is selected.
+    void updateDotAnchors()
+    {
+        auto rect = [] (const char* id, juce::Rectangle<int> r)
+        {
+            return juce::String (id) + "@" + juce::String (r.getX())
+                 + "," + juce::String (r.getY())
+                 + "," + juce::String (r.getWidth())
+                 + "," + juce::String (r.getHeight());
+        };
+        const auto a = plotArea();
+        const auto axis = juce::Rectangle<float> (a.getX(), a.getBottom(),
+                                                  a.getWidth(), 14.0f);
+        juce::String decl = rect ("EQ-5", axis.toNearestInt())
+                    + ";" + rect ("EQ-7", a.toNearestInt())
+                    + ";" + rect ("EQ-9", grabButtonArea().toNearestInt());
+        if (selected >= 0 && bandParams (selected).on)
+        {
+            const auto pos = handlePos (selected);
+            decl << ";" << rect ("EQ-6", juce::Rectangle<float> (pos.x - 10.0f,
+                                                                 pos.y - 10.0f,
+                                                                 20.0f, 20.0f).toNearestInt());
+            const auto lb = listenButtonArea();
+            if (! lb.isEmpty()) decl << ";" << rect ("EQ-8", lb.toNearestInt());
+        }
+        getProperties().set (kDotAnchor, decl);
     }
 
     void drawGrabModeButton (juce::Graphics& g)

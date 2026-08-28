@@ -292,6 +292,16 @@ HarmlessModEditor::HarmlessModEditor()
     mTnsKnob .onValueChange = [this] { if (auto* c = currentCurve()) { c->tns  = (float) mTnsKnob .getValue(); publishEdit(); repaint(); } };
     mSkewKnob.onValueChange = [this] { if (auto* c = currentCurve()) { c->skew = (float) mSkewKnob.getValue(); publishEdit(); repaint(); } };
     mPwKnob  .onValueChange = [this] { if (auto* c = currentCurve()) { c->pw   = (float) mPwKnob  .getValue(); publishEdit(); repaint(); } };
+
+    // QA-ManualPress M-4c: manual callout anchors.  The toolbar and the bottom
+    // knob row are runs of loose controls, so each anchors at the leftmost
+    // member of its run - which is where the hand-placed dot sat.  The curve
+    // canvas is painted, so it declares its rect in resized().
+    mArticulationsDD.getProperties().set (kDotAnchor, "BSHARM-20");
+    mModulationsDD  .getProperties().set (kDotAnchor, "BSHARM-21");
+    mTabBtns[0]     .getProperties().set (kDotAnchor, "BSHARM-22");
+    mHScroll        .getProperties().set (kDotAnchor, "BSHARM-24");
+    mDepthKnob      .getProperties().set (kDotAnchor, "BSHARM-25");
 }
 
 HarmlessModEditor::~HarmlessModEditor() = default;
@@ -757,6 +767,15 @@ void HarmlessModEditor::resized()
 
     // Remaining area = graph.
     mGraphBounds = bounds.reduced (2, 0);
+
+    // QA-ManualPress M-4c: the curve canvas is a painted rect, not a child, so
+    // its callout dot anchors to the same rect drawCurve() draws into.
+    getProperties().set (kDotAnchor,
+                         juce::String ("BSHARM-23@")
+                           + juce::String (mGraphBounds.getX())      + ","
+                           + juce::String (mGraphBounds.getY())      + ","
+                           + juce::String (mGraphBounds.getWidth())  + ","
+                           + juce::String (mGraphBounds.getHeight()));
 }
 
 // ── Geometry helpers ──────────────────────────────────────────────────────────

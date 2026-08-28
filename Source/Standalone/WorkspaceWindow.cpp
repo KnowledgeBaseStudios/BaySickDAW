@@ -493,6 +493,13 @@ void WorkspaceWindow::resized()
     // (when a page mounts one) rides the PageMenuBar's right-extras cluster,
     // which ends left of these.
     auto title = titleBarArea();
+    // QA-ManualPress M-4c: the window title is PAINTED, so the callout anchors
+    // to the title bar's own rect (the same one paintTitleBar draws into).
+    getProperties().set (kDotAnchor,
+                         "FX-1@" + juce::String (title.getX()) + ","
+                                 + juce::String (title.getY()) + ","
+                                 + juce::String (title.getWidth()) + ","
+                                 + juce::String (title.getHeight()));
     if (mCloseBtn)
         mCloseBtn->setBounds (title.removeFromRight (kTitleH).reduced (4));
     if (mFullBtn)

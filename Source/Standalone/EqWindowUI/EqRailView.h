@@ -428,6 +428,25 @@ public:
         }
     }
 
+    // QA-ManualPress M-4: the chips, the morph strip and the A/B pill are all
+    // PAINTED into this one component, so the two callouts covering them
+    // declare the rects the geometry helpers below compute.
+    void resized() override
+    {
+        const auto chips = juce::Rectangle<int> (0, 0,
+                                                 getWidth() - kRightControls, getHeight());
+        const auto ab = morphArea().getUnion (abArea()).toNearestInt();
+        auto rect = [] (const char* id, juce::Rectangle<int> r)
+        {
+            return juce::String (id) + "@" + juce::String (r.getX())
+                 + "," + juce::String (r.getY())
+                 + "," + juce::String (r.getWidth())
+                 + "," + juce::String (r.getHeight());
+        };
+        getProperties().set (kDotAnchor,
+                             rect ("EQ-3", chips) + ";" + rect ("EQ-4", ab));
+    }
+
     void mouseMove (const juce::MouseEvent& e) override { hoverAt = e.position; }
 
     void mouseDown (const juce::MouseEvent& e) override
@@ -1012,6 +1031,14 @@ public:
             return 0.0f;
         };
         addAndMakeVisible (grMeter);
+
+        // QA-ManualPress M-4: the manual numbers the rail one BLOCK at a time,
+        // so each callout anchors to the first control of its block.
+        gain    .getProperties().set (kDotAnchor, "EQ-10");
+        freq    .getProperties().set (kDotAnchor, "EQ-11");
+        type    .getProperties().set (kDotAnchor, "EQ-12");
+        dynT    .getProperties().set (kDotAnchor, "EQ-13");
+        lfoRateK.getProperties().set (kDotAnchor, "EQ-14");
 
         startTimerHz (15);
     }

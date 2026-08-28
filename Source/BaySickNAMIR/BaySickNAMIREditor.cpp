@@ -648,6 +648,38 @@ BaySickNAMIREditor::BaySickNAMIREditor (BaySickNAMIRProcessor& p)
 
     updateLabels();
 
+    // QA-ManualPress M-4c: manual callout anchors.  Mic A and Mic B are the
+    // same control set and the registry numbers the pair ONCE, so only the A
+    // column declares itself - a stamp on both would resolve to Mic B.  The
+    // AMP / CAB rows anchor on their section label, which is the row's left
+    // edge and where the hand-placed dot sat.
+    mAmpSectionLbl           .getProperties().set (kDotAnchor, "BSNAM-1");
+    mNamBypassToggle         .getProperties().set (kDotAnchor, "BSNAM-2");
+    mCabSectionLbl           .getProperties().set (kDotAnchor, "BSNAM-3");
+    mCabBypassToggle         .getProperties().set (kDotAnchor, "BSNAM-4");
+    mInGainKnob              .getProperties().set (kDotAnchor, "BSNAM-5");
+    mGateThreshKnob          .getProperties().set (kDotAnchor, "BSNAM-6");
+    mLowCutKnob              .getProperties().set (kDotAnchor, "BSNAM-7");
+    mCabMixKnob              .getProperties().set (kDotAnchor, "BSNAM-8");
+    mOutputKnob              .getProperties().set (kDotAnchor, "BSNAM-9");
+    mOSSelector              .getProperties().set (kDotAnchor, "BSNAM-10");
+    mSlotABtn                .getProperties().set (kDotAnchor, "BSNAM-11");
+    mMicSimSectionLbl        .getProperties().set (kDotAnchor, "BSNAM-12");
+    mMicAActiveToggle        .getProperties().set (kDotAnchor, "BSNAM-13");
+    mMicSimMode              .getProperties().set (kDotAnchor, "BSNAM-14");
+    mMicSimModelCombo        .getProperties().set (kDotAnchor, "BSNAM-15");
+    mMicSimUserIrLabel       .getProperties().set (kDotAnchor, "BSNAM-16");
+    mMicSimMixKnob           .getProperties().set (kDotAnchor, "BSNAM-17");
+    mMicPlacementSectionLbl  .getProperties().set (kDotAnchor, "BSNAM-18");
+    mPlacementViewToggleA    .getProperties().set (kDotAnchor, "BSNAM-19");
+    mMicPlacementPolar       .getProperties().set (kDotAnchor, "BSNAM-20");
+    mMicPlacementDistanceKnob.getProperties().set (kDotAnchor, "BSNAM-21");
+    mMicPlacementAngleKnob   .getProperties().set (kDotAnchor, "BSNAM-22");
+    mMicPlacementHeightKnob  .getProperties().set (kDotAnchor, "BSNAM-23");
+    mMicPlacementMixKnob     .getProperties().set (kDotAnchor, "BSNAM-24");
+    if (mPlacementViewA != nullptr)
+        mPlacementViewA->getProperties().set (kDotAnchor, "BSNAM-25");
+
     // 2026-05-05 (Bug C fix): subscribe to bulk-restore notifications so the
     // file-name labels refresh after page-preset load / project load.
     juce::Component::SafePointer<BaySickNAMIREditor> safeThis (this);
