@@ -1,4 +1,5 @@
 #include "StandaloneApp.h"
+#include "ShotHarness.h"
 #include "SafeXml.h"   // XXE + depth-guarded XML parse (QA-Cleanup)
 #include "../AppPaths.h"
 #include "StandaloneEditor.h"
@@ -654,8 +655,20 @@ private:
     const double mStartMs;
 };
 
-void BaySickDAWStandaloneApp::initialise(const juce::String&)
+void BaySickDAWStandaloneApp::initialise(const juce::String& commandLine)
 {
+    // QA-ManualPress M-1: the manual screenshot mode.  Branches before the
+    // trace logger (which truncates the ASIO diagnostic), the splash, and
+    // every device/window step - the harness owns its own world and quits
+    // without the dispatch loop ever running (shutdown() still runs and is
+    // null-guarded throughout).
+    if (commandLine.contains ("--shot"))
+    {
+        setApplicationReturnValue (shots::run (commandLine));
+        quit();
+        return;
+    }
+
    #if JUCE_WINDOWS
     // Lift the whole process above NORMAL class so audio/render scheduling
     // wins against background apps under load.  ABOVE_NORMAL, not HIGH or

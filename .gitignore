@@ -52,6 +52,7 @@ UndoSnapshots/
 # would churn on every manual edit. The installer picks them up from the
 # staged Manuals/ folder; they are outputs, not source.
 /Manuals/*.pdf
+/Manuals/shots-staging/
 
 # Per-machine general settings (recent files, multi-core toggle, etc.) — modified every app launch.
 settings.xml

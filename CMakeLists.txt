@@ -520,6 +520,7 @@ target_sources(BaySickDAWStandalone PRIVATE
     # Main shell
     Source/Standalone/StandaloneApp.cpp
     Source/Standalone/StandaloneEditor.cpp
+    Source/Standalone/ShotHarness.cpp
     Source/Standalone/ProjectBrowserWindow.cpp
     Source/Standalone/UndoHistoryWindow.cpp
     # Phase 1 — new shell components

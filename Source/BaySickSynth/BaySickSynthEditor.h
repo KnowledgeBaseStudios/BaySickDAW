@@ -47,6 +47,9 @@ public:
     // the hosting window's title strip shows the engine name and mounts the
     // preset button.  The editor still OWNS the button.
     juce::Component* getTitleStripPresetButton() noexcept { return &mPresetBtn; }
+    // QA-ManualPress: the shot harness presses tabs the way a user does;
+    // headless there is no click to do it.  Inherited by BaySickBassEditor.
+    void selectTabForShot (int tab) { setActiveTab (tab); }
     static juce::String getEngineTitle()  { return "BaySickSynth"; }
     static juce::Colour getEngineAccent() { return juce::Colour (BaySickSynthLAF::kGreen); }
 

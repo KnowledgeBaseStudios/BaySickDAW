@@ -145,7 +145,11 @@ class BaySickDAWStandaloneApp : public juce::JUCEApplication,
 public:
     const juce::String getApplicationName()    override { return "BaySickDAW"; }
     const juce::String getApplicationVersion() override { return "1.2.0"; }
-    bool moreThanOneInstanceAllowed()          override { return false; }
+    // Single-instance, EXCEPT the shot harness: Windows would otherwise
+    // forward a --shot command line to the running app and exit before
+    // initialise ever saw it (QA-ManualPress M-1).
+    bool moreThanOneInstanceAllowed()          override
+        { return getCommandLineParameters().contains ("--shot"); }
 
     void initialise(const juce::String&) override;
     void shutdown()  override;

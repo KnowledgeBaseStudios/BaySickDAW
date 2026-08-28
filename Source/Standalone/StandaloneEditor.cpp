@@ -1,5 +1,6 @@
 #include "StandaloneEditor.h"
 #include "SafeXml.h"   // XXE + depth-guarded XML parse (QA-Cleanup)
+#include "ShotFactories.h"     // QA-ManualPress: the shot harness borrows dialog components
 #include "UndoBracket.h"
 #include "UndoSnapshotStore.h"   // QA-UndoCoverage Task 7: structural-undo snapshots
 #include "PagePresetIO.h"        // Task 7: peekEngineTypeFromXml
@@ -14373,6 +14374,19 @@ private:
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (ExportAudioDialog)
 };
 
+// QA-ManualPress: the harness photographs the dialog in its fresh state;
+// the empty ensure-saved hook only ever runs on an Export click.
+std::unique_ptr<juce::Component> shots::makeExportAudioDialog (BuilderPage& builder,
+                                                               BaySickDAWProcessor& proc)
+{
+    // One real-world strip so the stems toggle renders enabled, as it always
+    // is in the app (Master exists in every project).
+    std::vector<MixerPage::StemPickEntry> stems;
+    stems.push_back ({ 4, "Master", false });
+    return std::make_unique<ExportAudioDialog> (builder, proc, "Song",
+                                                std::move (stems), nullptr);
+}
+
 void StandaloneEditor::doExportAudio()
 {
     if (mBuilderPage == nullptr) return;
@@ -20326,27 +20340,9 @@ namespace
         return std::make_unique<juce::PropertiesFile> (
             AppPaths::appRoot().getChildFile ("ui_prefs.xml"), o);
     }
-}
 
-StandaloneEditor::FileTakeSettings StandaloneEditor::readFileTakeSettings() const
-{
-    auto p = openUiPrefs();
-    FileTakeSettings s;
-    // Defaults preserve today's behavior (DRY + WET written) until the user
-    // opts into cleaned takes; strength default = Strong (the ear-validated
-    // "cleantake" setting from the WORLD arc).
-    s.dry        = p->getBoolValue ("fsWriteDry",        true);
-    s.dryCleaned = p->getBoolValue ("fsWriteDryCleaned", false);
-    s.wet        = p->getBoolValue ("fsWriteWet",        true);
-    s.wetCleaned = p->getBoolValue ("fsWriteWetCleaned", false);
-    s.strength   = p->getIntValue  ("fsDenoiseStrength", (int) Denoise::Strong);
-    return s;
-}
-
-void StandaloneEditor::showFileSettingsDialog()
-{
-    // Standard app-styled dialog (503-pattern).  Live >=1 enforcement:
-    // unchecking the last checked take type re-checks it.
+    // QA-ManualPress: hoisted from showFileSettingsDialog so the shot
+    // harness can photograph the SAME component the dialog hosts.
     struct FileSettingsComp : juce::Component
     {
         juce::ToggleButton boxes[4];
@@ -20539,6 +20535,33 @@ void StandaloneEditor::showFileSettingsDialog()
             note.setBounds (b);
         }
     };
+}
+
+StandaloneEditor::FileTakeSettings StandaloneEditor::readFileTakeSettings() const
+{
+    auto p = openUiPrefs();
+    FileTakeSettings s;
+    // Defaults preserve today's behavior (DRY + WET written) until the user
+    // opts into cleaned takes; strength default = Strong (the ear-validated
+    // "cleantake" setting from the WORLD arc).
+    s.dry        = p->getBoolValue ("fsWriteDry",        true);
+    s.dryCleaned = p->getBoolValue ("fsWriteDryCleaned", false);
+    s.wet        = p->getBoolValue ("fsWriteWet",        true);
+    s.wetCleaned = p->getBoolValue ("fsWriteWetCleaned", false);
+    s.strength   = p->getIntValue  ("fsDenoiseStrength", (int) Denoise::Strong);
+    return s;
+}
+
+std::unique_ptr<juce::Component> shots::makeFileSettingsComponent()
+{
+    return std::make_unique<FileSettingsComp>();
+}
+
+void StandaloneEditor::showFileSettingsDialog()
+{
+    // Standard app-styled dialog (503-pattern).  Live >=1 enforcement:
+    // unchecking the last checked take type re-checks it.
+
 
     juce::DialogWindow::LaunchOptions opts;
     opts.dialogTitle            = "File Settings";
