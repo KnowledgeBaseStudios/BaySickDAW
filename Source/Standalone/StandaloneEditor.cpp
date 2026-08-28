@@ -16486,9 +16486,22 @@ void StandaloneEditor::openEffectEqWindow (int channelId, bool pre)
 
     auto* contentRaw = content.get();
     contentRaw->onRequestClose = [this, key] { closeAuxWindow (key); };
-    contentRaw->onOpenOtherEq  = [this, channelId] (bool wantPre)
+    contentRaw->onOpenOtherEq  = [this] (int chId, bool wantPre)
     {
-        openEffectEqWindow (channelId, wantPre);
+        openEffectEqWindow (chId, wantPre);
+    };
+
+    // W-21: the browser's world - the SAME enumerator the Effects page's
+    // channel dropdown uses, so the two lists can never disagree.
+    contentRaw->getEqChannels = [this]() -> std::vector<std::pair<int, juce::String>>
+    {
+        if (mEffectsPage != nullptr && mEffectsPage->onGetActiveChannels)
+            return mEffectsPage->onGetActiveChannels();
+        return {};
+    };
+    contentRaw->onOpenEqWindow = [this] (int chId, bool pre)
+    {
+        openEffectEqWindow (chId, pre);
     };
 
     // W-22: the Match panel's track scan - one offline pass over the timeline

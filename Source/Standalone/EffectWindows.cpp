@@ -604,6 +604,66 @@ EffectEqWindow::EffectEqWindow (BaySickDAWProcessor& proc,
     };
     addChildComponent (*mMatch);
 
+    // W-21: the instance browser - every EQ point in the project, one list.
+    mBrowser = std::make_unique<eqview::EqInstanceBrowser>();
+    mBrowser->getChannels = [this]
+    {
+        return getEqChannels ? getEqChannels()
+                             : std::vector<std::pair<int, juce::String>>();
+    };
+    mBrowser->resolvePoint = [this] (int id, bool pre) { return eqPointFor (id, pre); };
+    mBrowser->onRepoint = [this] (int id, bool pre) { retargetTo (id, pre); };
+    mBrowser->onOpenWindow = [this] (int id, bool pre)
+    { if (onOpenEqWindow) onOpenEqWindow (id, pre); };
+    mBrowser->isCurrent = [this] (int id, bool pre)
+    { return id == mChannelId && pre == mIsPre; };
+    mBrowser->isMatchRef = [this] (int id, bool pre)
+    { return id == mMatchRefChannel && pre == mMatchRefPre; };
+    mBrowser->isCollisionRef = [this] (int id, bool pre)
+    { return id == mCollisionChannel && pre == mCollisionPre; };
+    mBrowser->sampleRate = [this]
+    { const double sr = mProc.getSampleRate(); return sr > 0 ? sr : 48000.0; };
+    mBrowser->onMatchReference = [this] (int id, bool pre, const juce::String& name)
+    {
+        // Toggle: picking the current reference again clears it.
+        if (id == mMatchRefChannel && pre == mMatchRefPre)
+        {
+            mMatchRefChannel = -1;
+            if (mMatch) mMatch->setReferenceInstance (nullptr, {});
+            return;
+        }
+        mMatchRefChannel = id;
+        mMatchRefPre = pre;
+        if (mMatch)
+        {
+            mMatch->setReferenceInstance ([this]() -> kbs::SpectrumFeed*
+            {
+                auto* e2 = eqPointFor (mMatchRefChannel, mMatchRefPre);
+                return e2 != nullptr ? &e2->postFeed : nullptr;
+            }, name);
+            mMatch->setVisible (true);
+            mMatch->toFront (false);
+        }
+    };
+    mBrowser->onCollisionReference = [this] (int id, bool pre, const juce::String&)
+    {
+        if (id == mCollisionChannel && pre == mCollisionPre)
+        {
+            mCollisionChannel = -1;
+            if (mGraph) mGraph->altCollisionFeed = nullptr;
+            return;
+        }
+        mCollisionChannel = id;
+        mCollisionPre = pre;
+        if (mGraph)
+            mGraph->altCollisionFeed = [this]() -> kbs::SpectrumFeed*
+            {
+                auto* e2 = eqPointFor (mCollisionChannel, mCollisionPre);
+                return e2 != nullptr ? &e2->postFeed : nullptr;
+            };
+    };
+    addChildComponent (*mBrowser);
+
     mTitle = windowTitle();
 }
 
@@ -646,7 +706,7 @@ void EffectEqWindow::configureTitleStrip (PageMenuBar& bar)
                              if (mBar != nullptr) mBar->updateTabActive (mIsPre ? 0 : 1);
                              return;
                          }
-                         if (onOpenOtherEq) onOpenOtherEq (wantPre);
+                         if (onOpenOtherEq) onOpenOtherEq (mChannelId, wantPre);
                          // Selection stays on OUR tab: this window is still
                          // showing what it always was.
                          if (mBar != nullptr) mBar->updateTabActive (mIsPre ? 0 : 1);
@@ -694,6 +754,13 @@ void EffectEqWindow::resized()
                                .withPosition (mGraph->getRight()
                                                 - eqview::EqMatchPanel::kPanelW - 10,
                                               mGraph->getY() + 10));
+    if (mBrowser && mGraph)
+        mBrowser->setBounds (juce::Rectangle<int> (
+                                 eqview::EqInstanceBrowser::kPanelW,
+                                 juce::jmin (eqview::EqInstanceBrowser::kPanelH,
+                                             juce::jmax (120, mGraph->getHeight() - 20)))
+                                 .withPosition (mGraph->getX() + 10,
+                                                mGraph->getY() + 10));
 }
 
 void EffectEqWindow::parentHierarchyChanged()
@@ -740,13 +807,34 @@ bool EffectEqWindow::keyStateChanged (bool)
 
 StripEq* EffectEqWindow::resolveEq() const
 {
+    return eqPointFor (mChannelId, mIsPre);
+}
+
+StripEq* EffectEqWindow::eqPointFor (int channelId, bool pre) const
+{
     auto& vg = mProc.mVibeGraph;
-    if (mIsPre) return EffectsPage::preEqForChannelId (vg, mChannelId);
+    if (pre) return EffectsPage::preEqForChannelId (vg, channelId);
 
     EffectRack* rack = nullptr;
     StripEq*    eq   = nullptr;
-    EffectsPage::resolveChannelDsp (vg, mChannelId, rack, eq);
+    EffectsPage::resolveChannelDsp (vg, channelId, rack, eq);
     return eq;
+}
+
+void EffectEqWindow::retargetTo (int channelId, bool pre)
+{
+    if (channelId == mChannelId && pre == mIsPre) return;
+    mChannelId = channelId;
+    mIsPre = pre;
+    mStripPrefix = EffectsPage::mixerPrefixForChannelId (channelId);
+    mProc.ensureStripEqParams (mStripPrefix);
+    mBoundEq = nullptr;
+    mEverResolved = false;      // the new point may still be restoring
+    if (mGraph) mGraph->retarget (mStripPrefix, pre ? 1 : 0);
+    mTitle = windowTitle();
+    if (onTitleChanged) onTitleChanged (mTitle);
+    if (mBar != nullptr) mBar->updateTabActive (mIsPre ? 0 : 1);
+    repaint();
 }
 
 void EffectEqWindow::timerCallback()
@@ -1020,6 +1108,8 @@ void EffectEqWindow::showOptionsMenu (juce::Component* anchor)
     m.addItem (191, "Delta Listen", e != nullptr,
                e != nullptr && e->engine().getDeltaListen());
     m.addItem (167, "Sketch a Curve...", true, mGraph->isSketchMode());
+    m.addItem (168, "Instances...", true,
+               mBrowser != nullptr && mBrowser->isVisible());
     m.addSeparator();
 
     m.addItem (165, "Keyboard & Mouse...");
@@ -1184,6 +1274,11 @@ void EffectEqWindow::showOptionsMenu (juce::Component* anchor)
                         mGraph->removeBand (b, false);
             }
             else if (r == 167) mGraph->setSketchMode (! mGraph->isSketchMode());
+            else if (r == 168 && mBrowser != nullptr)
+            {
+                mBrowser->setVisible (! mBrowser->isVisible());
+                mBrowser->toFront (false);
+            }
             else if (r == 191)
             {
                 if (auto* e2 = resolveEq())

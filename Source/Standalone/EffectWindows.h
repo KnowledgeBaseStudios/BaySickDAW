@@ -4,6 +4,7 @@
 #include "../DSP/StripEq.h"
 #include "EqWindowUI/EqRailView.h"
 #include "EqWindowUI/EqMatchPanel.h"
+#include "EqWindowUI/EqInstanceBrowser.h"
 #include "EqWindowUI/EqPresets.h"
 #include "SlotComponent.h"
 #include "SharedUI.h"
@@ -158,7 +159,10 @@ public:
 
     // Asks the owner to open (or bring forward) the sibling EQ window for the
     // same strip.
-    std::function<void(bool wantPre)> onOpenOtherEq;
+    // W-8: carries the window's CURRENT channel - a re-pointed window's
+    // Pre/Post tabs must open the sibling of what it shows now, not of the
+    // strip it was born on.
+    std::function<void(int channelId, bool wantPre)> onOpenOtherEq;
     std::function<void()>             onRequestClose;
     std::function<void(const juce::String&)> onTitleChanged;
 
@@ -167,6 +171,16 @@ public:
     // editor owns the Builder, the overlay and the render session.
     std::function<bool (StripEq*, kbs::SpectrumScan&, juce::String& what,
                         juce::String& err)> runTrackScan;
+
+    // W-21: wired by the editor - the browser's world.
+    std::function<std::vector<std::pair<int, juce::String>>()> getEqChannels;
+    std::function<void (int channelId, bool pre)> onOpenEqWindow;
+
+    // W-8: re-point this window at another EQ point.  Every control follows
+    // (ids derive from the prefix + bank); title and tabs update; the aux
+    // window keeps its birth key - re-pointing is a view change, not a
+    // re-registration.
+    void retargetTo (int channelId, bool pre);
 
     void resized() override;
     void parentHierarchyChanged() override;
@@ -184,6 +198,8 @@ private:
     // under the window (strip respawn, graph rebuild) and a stale pointer here
     // would mean editing an EQ nothing is listening to.
     StripEq* resolveEq() const;
+    // W-21: any EQ point, same discipline - per call, never cached.
+    StripEq* eqPointFor (int channelId, bool pre) const;
 
     void showOptionsMenu (juce::Component* anchor);
     void abSwap();
@@ -200,16 +216,25 @@ private:
     static juce::File eqPresetsDir();
 
     BaySickDAWProcessor&              mProc;
-    const int                        mChannelId;
-    const bool                       mIsPre;
+    // Mutable since W-8: retargetTo re-points a live window.
+    int                              mChannelId;
+    bool                             mIsPre;
     std::function<juce::String(int)> mResolveChannelName;
-    const juce::String               mStripPrefix;
+    juce::String                     mStripPrefix;
 
     std::unique_ptr<eqview::EqGraphView> mGraph;
     std::unique_ptr<eqview::BandChipRow> mChips;
     std::unique_ptr<eqview::EqRailView>  mRail;
     std::unique_ptr<eqview::SegmentRow>  mViewRow;   // ST / MID / SIDE (SC-5)
     std::unique_ptr<eqview::EqMatchPanel> mMatch;
+    std::unique_ptr<eqview::EqInstanceBrowser> mBrowser;
+
+    // W-24 / W-21: which instance feeds the Match reference / the collision
+    // view.  (channelId, pre); -1 = none.  Resolved per use, never cached.
+    int  mMatchRefChannel { -1 };
+    bool mMatchRefPre { false };
+    int  mCollisionChannel { -1 };
+    bool mCollisionPre { false };
 
     // What the poll last resolved, so a node death is tellable from a node
     // that was never built.

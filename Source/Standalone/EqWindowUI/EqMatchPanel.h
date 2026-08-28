@@ -33,6 +33,23 @@ public:
     static constexpr int kPanelW = 280;
     static constexpr int kPanelH = 316;
 
+    // W-24: reference from another EQ instance - the resolver is called per
+    // tick (a strip can die under an open panel), the name is for the status
+    // line.  Null resolver = back to this strip's own sidechain line.
+    void setReferenceInstance (std::function<kbs::SpectrumFeed*()> f,
+                               const juce::String& name)
+    {
+        refInstanceFeed = std::move (f);
+        refInstanceName = name;
+        status.setText (refInstanceFeed
+                            ? "Reference source: " + name
+                                + ". Capture it while the song plays."
+                            : juce::String ("Reference source: this strip's "
+                                            "sidechain line."),
+                        juce::dontSendNotification);
+    }
+    bool hasReferenceInstance() const { return refInstanceFeed != nullptr; }
+
     // W-22: the window wires this to the editor's offline timeline scan.
     // Fills the accumulator, names what was scanned ("selection, 0:42" /
     // "whole song, 3:12"); false + err when it could not run.
@@ -323,7 +340,14 @@ private:
         auto* e = graph.eq();
         if (e == nullptr) return;
         if (capturingCur) { curMid.analyse (e->preFeed); curSide.analyse (e->preFeed, true); }
-        if (capturingRef) { refMid.analyse (e->scFeed);  refSide.analyse (e->scFeed,  true); }
+        if (capturingRef)
+        {
+            auto* feed = &e->scFeed;
+            if (refInstanceFeed)
+                if (auto* f = refInstanceFeed()) feed = f;
+            refMid.analyse (*feed);
+            refSide.analyse (*feed, true);
+        }
         if (capturingCur || capturingRef) repaint();
     }
 
@@ -738,6 +762,9 @@ private:
     juce::Slider detail, amount;
     juce::Label detailWhat, amountWhat, status;
     std::unique_ptr<juce::FileChooser> chooser;
+
+    std::function<kbs::SpectrumFeed*()> refInstanceFeed;
+    juce::String refInstanceName;
 
     EqAnalyser curMid, curSide, refMid, refSide;
     std::vector<float> curGrid, curSideGrid, refGrid, refSideGrid, curSpread;

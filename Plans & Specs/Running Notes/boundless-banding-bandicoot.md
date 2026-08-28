@@ -325,3 +325,49 @@ tally reported ("Cleanup: 3 cuts, 1 dynamic").
 
 EqTests section 22 (13 checks) green; suite green; gate six zeros + four
 links, clean first build.
+
+## 2026-08-27 - Task 10 - cross-instance + browser + re-point (W-8/21/24) [LONG POLE 2]
+
+Re-point plumbing (W-8): EffectEqWindow::retargetTo(channelId, pre) -
+mChannelId/mIsPre/mStripPrefix de-consted, param block ensured on the new
+target, EqGraphView::retarget swaps prefix+bank and drops everything
+stale (selection, multi-select, listen latch, link cache via a sentinel,
+every cached curve row, the spectrogram). Every control follows for free
+because ids derive from prefix+bank and the resolver runs per use; the
+title and the Pre/Post tabs update; the aux window keeps its BIRTH key -
+re-pointing is a view change, not a re-registration (a second window on
+the same point via the mixer is legal and harmless, params are shared).
+onOpenOtherEq now carries the CURRENT channel so a re-pointed window's
+tabs open the sibling of what it shows, not of the strip it was born on.
+
+NEW EqInstanceBrowser.h (W-21): every EQ point - the SAME enumerator the
+Effects page's channel dropdown uses (onGetActiveChannels, so the lists
+can never disagree), pre+post rows filtered by live resolve. Each row:
+name + PRE/POST tag, curve thumbnail off the engine's own magnitudeAt,
+live mini-spectrum (1024-pt FFT of the point's postFeed, visible rows
+only, eased-fall bars). Click re-points THIS window; double-click or the
+row menu opens the point in its own window; the row menu also sets Match
+Reference and Collision Reference (toggle semantics, row-tagged). Rows
+hold (channelId, pre) only - satellite discipline, resolve per use.
+
+Match-from-instance (W-24): EqMatchPanel::setReferenceInstance - the
+reference capture reads the picked instance's postFeed through a per-tick
+resolver instead of the strip's SC line; status names the source.
+Collision-from-instance: EqGraphView::altCollisionFeed - set, the
+collision view runs off the picked instance's postFeed with no sidechain
+routed.
+
+The IPC half: "Files For Claude/KBS Spec - EQ Spectra Share Protocol.md"
+(v1) - written against the working DAW implementation as the reference
+model: Local\KbsEqShare_v1 shared memory, 64 slots, SpectrumFeed-style
+seqlock frames on the EqMatch 240-pt grid (the .kbsref wire format),
+heartbeat reaping at 2 s, instance naming auto-number + renameable per
+sub-spec ruling 3c, edit-command SPSC ring with a CAS grant, and the
+non-negotiable host-correctness rule (remote edits apply through the
+target's OWN beginEdit/performEdit/endEdit - the plugin twin of our
+applicators-write-the-parameter rule). Plugin transport is KBS-session
+work; the doc is the handoff's IPC half.
+
+Browser/re-point are UI - smoke-verified per plan; EqTests suite rerun
+green (regression); gate six zeros + four links (one self-inflicted
+duplicate declaration from a half-applied patch script, removed).

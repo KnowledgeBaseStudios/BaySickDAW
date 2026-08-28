@@ -99,6 +99,10 @@ public:
     std::function<void (int band)> onSelect;
     std::function<void (int band)> ensureBand;              // SC-2: register 9-24
     std::function<void()> onViewSettingsChanged;
+    // W-21: an alternate collision source - another instance's post feed,
+    // resolved per tick (never a cached pointer).  Set = the collision view
+    // runs even with no sidechain routed.
+    std::function<kbs::SpectrumFeed*()> altCollisionFeed;
 
     EqGraphView (BaySickDAWProcessor& processor, juce::String stripPrefixIn, bool preBank)
         : proc (processor), stripPrefix (std::move (stripPrefixIn)),
@@ -111,6 +115,24 @@ public:
 
     // ── binding ───────────────────────────────────────────────────────────
     StripEq* eq() const { return resolveEq ? resolveEq() : nullptr; }
+
+    // W-8: the window re-points at another EQ point; this view follows.  All
+    // param ids derive from the prefix and bank, so every control the graph
+    // and rail own lands on the new target from the next read.
+    void retarget (const juce::String& newPrefix, int newBank)
+    {
+        stripPrefix = newPrefix;
+        bank = newBank;
+        listenLatched = false;
+        holdListen (false);
+        selectBand (-1);
+        clearMultiSelect();
+        linksCacheStr = juce::String::charToString (1);   // force reparse
+        loadLinks();
+        curveW = -1;                                      // every cached row is stale
+        spectrogram = {};
+        repaint();
+    }
 
     kbs::EqBandParams bandParams (int b) const
     {
@@ -492,7 +514,8 @@ public:
             refreshCurveCache (*e, a, (int) a.getWidth());
             if (showSpectrogram()) drawSpectrogram (g, a);
             if (showAnalyser()) drawAnalyser (g, a, *e);
-            if (analyserSc() && e->scFeedAlive.load (std::memory_order_relaxed))
+            if (altCollisionFeed
+                || (analyserSc() && e->scFeedAlive.load (std::memory_order_relaxed)))
                 drawCollision (g, a);
 
             drawGhostViews (g, a, *e);
@@ -2093,7 +2116,11 @@ private:
         {
             if (analyserPre()) any |= pre.analyse (e->preFeed);
             any |= post.analyse (e->postFeed);
-            if (analyserSc() && e->scFeedAlive.load (std::memory_order_relaxed))
+            if (altCollisionFeed)
+            {
+                if (auto* f = altCollisionFeed()) any |= sc.analyse (*f);
+            }
+            else if (analyserSc() && e->scFeedAlive.load (std::memory_order_relaxed))
                 any |= sc.analyse (e->scFeed);
         }
 
