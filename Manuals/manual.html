@@ -40,10 +40,19 @@ html, body { overflow-x: clip; }
 main { margin-left: 272px; width: calc(var(--fsw, 100vw) - 289px); }
 .views { display: flex; flex-wrap: wrap; gap: 14px; align-items: flex-start; }
 .views .vu { min-width: 0; }
+/* Text and tables wrap to the LIVE window with a right gutter mirroring the
+   left (Jeff); only the figure strip keeps the pinned fullscreen width -
+   screenshots never rescale, per the vertical-only-scroll ruling above. */
+main p, main table, main pre, main h3, main h4, main h5,
+main .lede, main .crumbs, main details.fullfn, main .tp
+{ max-width: calc(100vw - 344px); }
 @media print {
   .masthead, .figtoc, .nudge { display: none !important; }
   main { margin-left: 0 !important; width: auto !important; min-width: 0 !important; }
   html, body { overflow-x: visible; }
+  main p, main table, main pre, main h3, main h4, main h5,
+  main .lede, main .crumbs, main details.fullfn, main .tp
+  { max-width: none; }
   section.figd { break-before: page; }
 }
 .wrap.atlas { display: block; max-width: none; padding-right: 22px; }
@@ -316,7 +325,7 @@ bool ProjectManager::saveProject()
 already in place.</p>
 
 <p class="behind"><b>Behind:</b> <a href="manual-2.html#FMENU-2">New from Template submenu</a>, <a href="manual-2.html#FMENU-8">Save as Template</a>, <a href="manual-2.html#OMENU-1">General submenu</a>.</p>
-<div class="codeblock"><div class="codehead">Source\Standalone\StandaloneEditor.cpp (loadTemplate lines 8766-8781, applyTemplate lines 8783-8937, saveTemplateAs lines 8939+)</div><pre><code>// StandaloneEditor.h -- template dirs + the SaveShape split (verbatim)
+<div class="codeblock"><div class="codehead">Source\Standalone\StandaloneEditor.cpp (loadTemplate lines 8718+, applyTemplate lines 8735+, saveTemplateAs lines 8891+)</div><pre><code>// StandaloneEditor.h -- template dirs + the SaveShape split (verbatim)
     // Which of the two save shapes the tab walk is feeding.  Freeze is the one
     // thing the structural walk emits that is PROJECT data and not skeleton
     // data: the renders live in &lt;project&gt;\Freeze\ and the stamps are the
@@ -339,7 +348,7 @@ already in place.</p>
     // The actual teardown + rebuild, past the save prompt.  Never call directly:
     // loadTemplate owns the unsaved-changes gate for every entry point.
     void applyTemplate (const juce::File&amp; templateXml);</code></pre></div>
-<details class="fullfn"><summary>Full function &mdash; Source\Standalone\StandaloneEditor.cpp (loadTemplate lines 8766-8781, applyTemplate lines 8783-8937, saveTemplateAs lines 8939+)</summary><pre><code>// StandaloneEditor.cpp -- StandaloneEditor::loadTemplate (full function, lines 8766-8781)
+<details class="fullfn"><summary>Full function &mdash; Source\Standalone\StandaloneEditor.cpp (loadTemplate lines 8718+, applyTemplate lines 8735+, saveTemplateAs lines 8891+)</summary><pre><code>// StandaloneEditor.cpp -- StandaloneEditor::loadTemplate (full function, lines 8766-8781)
 void StandaloneEditor::loadTemplate (const juce::File&amp; templateXml)
 {
     if (! templateXml.existsAsFile())
@@ -444,7 +453,7 @@ song sounds like.</p>
 normal read-ahead by design, so waiting for the disk is correct there and would
 be a dropout anywhere else.</p>
 
-<div class="codeblock"><div class="codehead">- Source\PluginProcessor.cpp (BaySickDAWProcessor::beginOfflineRender lines 7644-7715, endOfflineRender lines 7717+)</div><pre><code>// BaySickDAWProcessor::beginOfflineRender (PluginProcessor.cpp) - entry gate + suspend
+<div class="codeblock"><div class="codehead">- Source\PluginProcessor.cpp (BaySickDAWProcessor::beginOfflineRender lines 7939+, endOfflineRender lines 8041+)</div><pre><code>// BaySickDAWProcessor::beginOfflineRender (PluginProcessor.cpp) - entry gate + suspend
 bool BaySickDAWProcessor::beginOfflineRender (double renderSampleRate, int renderBlockSize)
 {
     if (renderSampleRate &lt;= 0.0 || renderBlockSize &lt;= 0) return false;
@@ -467,7 +476,7 @@ bool BaySickDAWProcessor::beginOfflineRender (double renderSampleRate, int rende
     mOfflinePrevBlk  = getBlockSize();
     mOfflinePrevSong = isSongMode();
     mOfflinePrevHead = getPlayHead();</code></pre></div>
-<details class="fullfn"><summary>Full function &mdash; - Source\PluginProcessor.cpp (BaySickDAWProcessor::beginOfflineRender lines 7644-7715, endOfflineRender lines 7717+)</summary><pre><code>    // A freeze re-render during project load arrives with the load shield
+<details class="fullfn"><summary>Full function &mdash; - Source\PluginProcessor.cpp (BaySickDAWProcessor::beginOfflineRender lines 7939+, endOfflineRender lines 8041+)</summary><pre><code>    // A freeze re-render during project load arrives with the load shield
     // raised, and processBlock&#x27;s shield bail would clear every block of the
     // render (the offline loop calls processBlock directly, so the suspension
     // above does not gate it).  Dropping the shield here is safe because the
@@ -786,7 +795,7 @@ thirty-block drag undo in a single press.</p>
 
 <p>Depth is a user setting: 100, 250, 500 or 1000 transactions.</p>
 
-<div class="codeblock"><div class="codehead">Source\Standalone\UndoActions.h (UndoContext, typed actions, StructuralOpAction)</div><pre><code>// StandaloneEditor.cpp -- history depth setup (verbatim, lines 751-757)
+<div class="codeblock"><div class="codehead">Source\Standalone\StandaloneEditor.cpp (history depth setup) + Source\Standalone\UndoActions.h (UndoContext, typed actions)</div><pre><code>// StandaloneEditor.cpp -- history depth setup (verbatim, lines 766+)
     // History depth (Jeff ruling 2026-08-06, &quot;this one is required&quot;): the menu
     // numbers are TRANSACTION counts now.  JUCE&#x27;s cap is unit-based and every
     // action of ours exceeds the old (n, 30) unit budgets, so all four menu
@@ -923,7 +932,7 @@ play correctly while you listen and be missing from the exported file.</p>
 run across each <em>note</em> on a 0-1 phase; automation clips run on song
 position in ticks. The two are deliberately not shared.</p>
 
-<div class="codeblock"><div class="codehead">Source\Standalone\StandaloneEditor.cpp (registerModelEngineAutomation, lines 15425-15537)</div><pre><code>// StandaloneEditor.cpp -- registerModelEngineAutomation: the model-scoped applicator
+<div class="codeblock"><div class="codehead">Source\Standalone\StandaloneEditor.cpp (registerModelEngineAutomation, lines 15528+)</div><pre><code>// StandaloneEditor.cpp -- registerModelEngineAutomation: the model-scoped applicator
             if (VKnobAutomation::sOnRegisterApplicator)
                 VKnobAutomation::sOnRegisterApplicator (pid,
                     [resolveTarget, which, paramId, gated] (float v01)
@@ -938,7 +947,7 @@ position in ticks. The two are deliberately not shared.</p>
                             if (auto* param = ap-&gt;getParameter (paramId))
                                 param-&gt;setValueNotifyingHost (juce::jlimit (0.0f, 1.0f, v01));
                     });   // model-scoped: re-resolves through the rig at apply time</code></pre></div>
-<details class="fullfn"><summary>Full function &mdash; Source\Standalone\StandaloneEditor.cpp (registerModelEngineAutomation, lines 15425-15537)</summary><pre><code>// StandaloneEditor.cpp -- StandaloneEditor::registerModelEngineAutomation
+<details class="fullfn"><summary>Full function &mdash; Source\Standalone\StandaloneEditor.cpp (registerModelEngineAutomation, lines 15528+)</summary><pre><code>// StandaloneEditor.cpp -- StandaloneEditor::registerModelEngineAutomation
 // (full function, lines 15425-15537)
 void StandaloneEditor::registerModelEngineAutomation (EngineTab&amp; tab)
 {
@@ -1640,7 +1649,7 @@ performance, and none of those belong in a file.</p>
 <p>Audio device changes are written down and applied on the next launch rather
 than swapped under a running engine.</p>
 
-<div class="codeblock"><div class="codehead">Source\PluginProcessor.h (MetroDSP struct, lines 1844-1880)</div><pre><code>// PluginProcessor.cpp -- the swing push (scheduling-time transform, in scheduleRollWindows)
+<div class="codeblock"><div class="codehead">Source\PluginProcessor.h (MetroDSP struct, lines 1888+)</div><pre><code>// PluginProcessor.cpp -- the swing push (scheduling-time transform, in scheduleRollWindows)
                     // SW-2/SW-4 (QA-G3Smoke Swing): scheduling-time transform.
                     // An off-beat 16th (odd index in the PATTERN-LOCAL grid;
                     // floor keeps humanized starts coherent) is pushed by
@@ -1655,7 +1664,7 @@ than swapped under a running engine.</p>
                         localStart += swingAmt;
                         swung = true;
                     }</code></pre></div>
-<details class="fullfn"><summary>Full function &mdash; Source\PluginProcessor.h (MetroDSP struct, lines 1844-1880)</summary><pre><code>// PluginProcessor.h -- struct MetroDSP (full struct, lines 1845-1880)
+<details class="fullfn"><summary>Full function &mdash; Source\PluginProcessor.h (MetroDSP struct, lines 1888+)</summary><pre><code>// PluginProcessor.h -- struct MetroDSP (full struct, lines 1845-1880)
     struct MetroDSP {
         enum SoundType { Sine = 0, Click, Wood, Bell };
 
@@ -2279,7 +2288,7 @@ types, and the rest - is listed on the Key Binds window's
 ribbon is showing. The Drum Kit is the same window with a drum tab bound to it
 &mdash; the rows become drums instead of pitches.</p>
 
-<div class="codeblock"><div class="codehead">Source\PatternManager.h (PianoNote — the note model, lines 179-220)</div><pre><code>// BaySickBassProcessor.cpp -- the auditionNote atomic-exchange pattern, top of processBlock
+<div class="codeblock"><div class="codehead">Source\BaySickBass\BaySickBassProcessor.cpp (auditionNote drain, top of processBlock) + Source\PatternManager.h (PianoNote, line 179)</div><pre><code>// BaySickBassProcessor.cpp -- the auditionNote atomic-exchange pattern, top of processBlock
     const int auditNote = mAuditionNote.exchange (-1);
     if (auditNote &gt;= 0 &amp;&amp; auditNote &lt;= 127)
     {
@@ -3375,7 +3384,7 @@ drum named with a number in it can be read as a pitch. Drum pages therefore load
 their samples pinned to a fixed reference note, which is why a kick on a Drums
 tab plays as recorded instead of far too high.</p>
 
-<div class="codeblock"><div class="codehead">- Source\BaySickPlayer\BaySickPlayerDSP.cpp (BaySickSampleManager::detectRootNote, lines 511-574; loaders at lines 30-88) —</div><pre><code>// BaySickDAWProcessor::resolveProjectFile (PluginProcessor.cpp)
+<div class="codeblock"><div class="codehead">- Source\PluginProcessor.cpp (resolveProjectFile, line 7276) + Source\BaySickPlayer\BaySickPlayerDSP.cpp (detectRootNote, lines 511-574)</div><pre><code>// BaySickDAWProcessor::resolveProjectFile (PluginProcessor.cpp)
 juce::File BaySickDAWProcessor::resolveProjectFile (const juce::String&amp; storedPath) const
 {
     if (storedPath.isEmpty()) return {};
@@ -5615,7 +5624,8 @@ cap to edge. The side view looks like it should do that. It does not.</p>
     // Off-axis darkening high shelf: past ~15 deg, max ~-8 dB at +/-90.
     const float angleAbs = std::abs (mAngleDeg);
     const float angle01  = juce::jlimit (0.0f, 1.0f, (angleAbs - 15.0f) / 75.0f);
-    const float darkenDb = ((mPolar == Polar::Omni) ? 0.0f : -8.0f) * angle01;
+    const float darkenMax = (mPolar == Polar::Omni) ? 0.0f : -8.0f;
+    const float darkenDb  = darkenMax * angle01;
 
     // Distance ~1/sqrt(r) + polar gain.
     const float distGain = juce::jlimit (0.1f, 1.5f,
@@ -7948,7 +7958,7 @@ and the ADSR complete the voice; each is covered by its shared topic.</p>
     const double resampRatio = (region-&gt;fileSampleRate / mSampleRate) * pitchRatio
                                * (double) juce::jlimit (0.5f, 2.0f, mStretch);</code></pre></div>
 <details class="fullfn"><summary>Full function &mdash; Source\BaySickPlayer\BaySickPlayerDSP.cpp (BaySickPlayerVoice::startNote / renderNextBlock)</summary><pre><code>void BaySickPlayerVoice::startNote (int midiNote, float velocity,
-                            juce::SynthesiserSound* /*sound*/,
+                            juce::SynthesiserSound*,
                             int /*pitchWheelPos*/)
 {
     releaseResources();
@@ -10858,25 +10868,48 @@ inline float waveSample (double phase01, const WaveMix&amp; mix)
 <div class="tp" id="IMP-30"><h4 class="topichead">Acoustic Simulator</h4>
 <p>Reshapes an electric guitar toward an acoustic.</p>
 
-<div class="codeblock"><div class="codehead">Source\DSP\AcousticSimulatorStyleDSP.cpp</div><pre><code>// AcousticSimulatorStyleDSP::rebuildBodyEQ — the per-mode voicing curves
-    const float depth = juce::jlimit (0.0f, 1.0f, (mBodyDb + 15.0f) / 30.0f);
+<div class="codeblock"><div class="codehead">Source\DSP\AcousticSimulatorStyleDSP.cpp (rebuildBodyEQ - the per-mode voicing curves)</div><pre><code>    const float depth = juce::jlimit (0.0f, 1.0f, (mBodyDb + 15.0f) / 30.0f);
+
+    juce::dsp::IIR::Coefficients&lt;float&gt;::Ptr a, b;
+
     switch (mMode)
     {
-        case Mode::Standard:   // Balanced dreadnought: low-mid scoop + presence.
-            a = makePeakFilter (mSampleRate, 600.0f, 1.2f, dbToGain (-8.0f * depth));
-            b = makePeakFilter (mSampleRate, 4000.0f, 0.9f, dbToGain (4.0f * depth));
+        case Mode::Standard:
+            // Balanced dreadnought: low-mid scoop + presence.
+            a = juce::dsp::IIR::Coefficients&lt;float&gt;::makePeakFilter
+                    (mSampleRate, 600.0f, 1.2f, juce::Decibels::decibelsToGain (-8.0f * depth));
+            b = juce::dsp::IIR::Coefficients&lt;float&gt;::makePeakFilter
+                    (mSampleRate, 4000.0f, 0.9f, juce::Decibels::decibelsToGain (4.0f * depth));
             break;
-        case Mode::Jumbo:      // Massive low shelf + low-mid cut -- big-body bloom.
-            a = makeLowShelf   (mSampleRate, 110.0f, 0.7f, dbToGain (10.0f * depth));
-            b = makePeakFilter (mSampleRate, 550.0f, 1.0f, dbToGain (-5.0f * depth));
+        case Mode::Jumbo:
+            // Massive low shelf + low-mid cut -- big-body bloom.
+            a = juce::dsp::IIR::Coefficients&lt;float&gt;::makeLowShelf
+                    (mSampleRate, 110.0f, 0.7f, juce::Decibels::decibelsToGain (10.0f * depth));
+            b = juce::dsp::IIR::Coefficients&lt;float&gt;::makePeakFilter
+                    (mSampleRate, 550.0f, 1.0f, juce::Decibels::decibelsToGain (-5.0f * depth));
             break;
-        case Mode::Enhanced:   // Hi-fi sheen: strong high shelf + supporting low shelf.
-            a = makeHighShelf  (mSampleRate, 6000.0f, 0.7f, dbToGain (9.0f * depth));
-            b = makeLowShelf   (mSampleRate, 180.0f, 0.7f, dbToGain (4.0f * depth));
+        case Mode::Enhanced:
+            // Hi-fi sheen: strong high shelf + supporting low shelf.
+            a = juce::dsp::IIR::Coefficients&lt;float&gt;::makeHighShelf
+                    (mSampleRate, 6000.0f, 0.7f, juce::Decibels::decibelsToGain (9.0f * depth));
+            b = juce::dsp::IIR::Coefficients&lt;float&gt;::makeLowShelf
+                    (mSampleRate, 180.0f, 0.7f, juce::Decibels::decibelsToGain (4.0f * depth));
             break;
-        case Mode::Piezo:      // Undersaddle quack @ ~2.5 kHz + tight low cut.
-            a = makePeakFilter (mSampleRate, 2500.0f, 1.5f, dbToGain (10.0f * depth));
-            b = makeHighPass   (mSampleRate, 100.0f, 0.7f);
+        case Mode::Piezo:
+            // Undersaddle quack @ ~2.5 kHz + tight low cut.
+            a = juce::dsp::IIR::Coefficients&lt;float&gt;::makePeakFilter
+                    (mSampleRate, 2500.0f, 1.5f, juce::Decibels::decibelsToGain (10.0f * depth));
+            b = juce::dsp::IIR::Coefficients&lt;float&gt;::makeHighPass
+                    (mSampleRate, 100.0f, 0.7f);
+            break;
+        case Mode::User:
+        default:
+            // User mode bypasses the body EQ bank (Convolution handles it).
+            // Set both stages to neutral 1.0 gain peak filters.
+            a = juce::dsp::IIR::Coefficients&lt;float&gt;::makePeakFilter
+                    (mSampleRate, 1000.0f, 0.7f, 1.0f);
+            b = juce::dsp::IIR::Coefficients&lt;float&gt;::makePeakFilter
+                    (mSampleRate, 1000.0f, 0.7f, 1.0f);
             break;
     }</code></pre></div>
 <details class="fullfn"><summary>Full function &mdash; Source\DSP\AcousticSimulatorStyleDSP.cpp</summary><pre><code>void AcousticSimulatorStyleDSP::rebuildPickupEQ()
@@ -12125,7 +12158,7 @@ void LufsMeterDSP::accumulateIntegrated()
 peaks are real once the signal is converted back to sound, which is why a file
 that looks safe on a sample meter can still distort on playback.</p>
 
-<div class="codeblock"><div class="codehead">- Source\DSP\TruePeakMeter.cpp (148 lines)</div><pre><code>// TruePeakMeter::pushAndPeak() -- 4-phase interpolated peak per input sample
+<div class="codeblock"><div class="codehead">- Source\DSP\TruePeakMeter.cpp (154 lines)</div><pre><code>// TruePeakMeter::pushAndPeak() -- 4-phase interpolated peak per input sample
 float TruePeakMeter::pushAndPeak (int ch, float x) noexcept
 {
     auto&amp; hist = mHist[(size_t) ch];
@@ -12152,7 +12185,7 @@ float TruePeakMeter::pushAndPeak (int ch, float x) noexcept
     }
     return peak;
 }</code></pre></div>
-<details class="fullfn"><summary>Full function &mdash; - Source\DSP\TruePeakMeter.cpp (148 lines)</summary><pre><code>// besselI0() -- Kaiser window shaping term
+<details class="fullfn"><summary>Full function &mdash; - Source\DSP\TruePeakMeter.cpp (154 lines)</summary><pre><code>// besselI0() -- Kaiser window shaping term
     double besselI0 (double x)
     {
         double sum = 1.0, term = 1.0;
@@ -13031,7 +13064,7 @@ switch (ch)
     case EqChannel::left:   xl = aOut; break;
     case EqChannel::right:  xr = aOut; break;
 }</code></pre></div>
-<div class="codeblock"><div class="codehead">- Source/DSP/StripEq.cpp (StripEq::pushBand - the audio-thread sync, one compare per untouched band; abridged - the shipped compare spans all 31 band fields)</div><pre><code>void StripEq::pushBand (int i, const kbs::EqBandParams&amp; p)
+<div class="codeblock"><div class="codehead">- Source/DSP/StripEq.cpp (StripEq::pushBand - the audio-thread sync, one compare per untouched band; abridged - the shipped compare spans all 32 band fields)</div><pre><code>void StripEq::pushBand (int i, const kbs::EqBandParams&amp; p)
 {
     if (i &lt; 0 || i &gt;= kBands) return;
     auto&amp; c = mCached[(size_t) i];
@@ -13093,18 +13126,21 @@ for (int i = 0; i &lt; taps; ++i)
 <div class="codeblock"><div class="codehead">- Source/DSP/Kbs/ParametricEq.h (ParametricEq::rebuildLinearCurve - the per-domain 2x2 matrix)</div><pre><code>// With only stereo bands one shared FIR is exact and cheap; the moment
 // any active band routes mid / side / left / right, the response is a
 // 2x2 matrix in the L/R domain and the engine designs all four entries.
-auto entry = [this] (float msSign, const std::vector&lt;float&gt;&amp; side)
+// The domain buffers are COMPLEX (mixed phase / per-band excess phase ride
+// the same matrix) - mono cancellation of a side band stays EXACT with
+// phase in play (pinned by test, not assumed).
+auto entry = [this] (float msSign, const std::vector&lt;std::complex&lt;float&gt;&gt;&amp; side)
 {
-    return [this, msSign, &amp;side] (int bin, int) -&gt; float
+    return [this, msSign, &amp;side] (int bin, int) -&gt; std::complex&lt;float&gt;
     {
         const auto k = (size_t) bin;
         return 0.5f * (domM[k] + msSign * domS[k]) * domSt[k] * side[k];
     };
 };
-linear.setMagnitudeMatrix (entry (+1.0f, domL),    // LL
-                           entry (-1.0f, domR),    // LR
-                           entry (-1.0f, domL),    // RL
-                           entry (+1.0f, domR));   // RR</code></pre></div>
+linear.setResponseMatrix (entry (+1.0f, domL),    // LL
+                          entry (-1.0f, domR),    // LR
+                          entry (-1.0f, domL),    // RL
+                          entry (+1.0f, domR));   // RR</code></pre></div>
 <pre class="formulas">- Streaming is overlap-save: frames of `hop` fresh samples, transform the last N, multiply by the FIR&#x27;s spectrum, keep only the wrap-free last `hop` - no analysis window, no synthesis window, nothing to &quot;sum flat&quot;.  The engine this replaced windowed twice at 50% overlap (a structural 6 dB tremolo), multiplied a raw sampled magnitude (circular wrap and pre-echo), and reported HALF its true delay into the delay compensation.
 - Latency = `hop + (taps - 1) / 2` with `taps = N/2 + 1`, `hop = N/2` - and a test injects an impulse and requires the measured peak position to equal the report with tolerance ZERO.
 - Five precisions: FFT 1024 (Low) to 16384 (Maximum).  At Low the 513-tap design window smooths a Q=1 bell by most of a decibel - the precision dial&#x27;s honest tradeoff; High is exact to 0.3 dB.  The menu&#x27;s latency figures are computed from these constants at the session rate.
@@ -13226,7 +13262,7 @@ own scale - up to its maximum size.</p>
 about how loud something feels rather than what its peaks are. The calibration
 setting decides what level the needle calls zero, and it is app-wide.</p>
 
-<div class="codeblock"><div class="codehead">- Source\Standalone\SharedUI.cpp - VUMeter implementation, lines 5752-5897 (ballistics/calibration; paint code follows to ~6280)</div><pre><code>// VUMeter::onVBlank() -- vertical hardware-VU ballistics
+<div class="codeblock"><div class="codehead">- Source\Standalone\SharedUI.h - VUMeter (class at line 1319; ballistics and paint are header-inline, calibration statics in SharedUI.cpp)</div><pre><code>// VUMeter::onVBlank() -- vertical hardware-VU ballistics
         // 2026-05-02: ditched the ANSI C16.5-1942 spring-damper.  Rationale:
         // a 300 ms rise time literally cannot register a 10 ms snare hit at
         // 60+ Hz vblank cadence, so transient signals showed -16 VU when a
@@ -13255,7 +13291,7 @@ setting decides what level the needle calls zero, and it is app-wide.</p>
         // Snap-up + decay on the displayed value (in VU dB space).
         if (vuDb &gt; mDisplayLevel) mDisplayLevel = vuDb;
         else                       mDisplayLevel = juce::jmax (kVuMin, mDisplayLevel - decayDb);</code></pre></div>
-<details class="fullfn"><summary>Full function &mdash; - Source\Standalone\SharedUI.cpp - VUMeter implementation, lines 5752-5897 (ballistics/calibration; paint code follows to ~6280)</summary><pre><code>// VUMeter::onVBlank() -- horizontal path + MAX peak tracking (completing the excerpt)
+<details class="fullfn"><summary>Full function &mdash; - Source\Standalone\SharedUI.h - VUMeter (class at line 1319; ballistics and paint are header-inline, calibration statics in SharedUI.cpp)</summary><pre><code>// VUMeter::onVBlank() -- horizontal path + MAX peak tracking (completing the excerpt)
 void VUMeter::onVBlank()
 {
     if (mStyle == Horizontal)
@@ -13326,7 +13362,7 @@ void VUMeter::setLevel(float rms01)
     }
 }
 
-// Calibration statics (SharedUI.cpp 5753-5766 + SharedUI.h 1717-1724)
+// Calibration statics (SharedUI.cpp 2537-2538 + SharedUI.h 1384-1402)
 float VUMeter::sCalibrationDb = -18.f;
 std::function&lt;void()&gt; VUMeter::sOnCalibrationChanged;
 
@@ -14569,7 +14605,7 @@ Tape (the Tape Vibe control):
 rather than by pitch shifting is what makes it thicken without sounding out of
 tune.</p>
 
-<div class="codeblock"><div class="codehead">- Source/DSP/ChorusDSP.h</div><pre><code>// ChorusDSP::process (voice-sum core) + ChorusDSP::evalLFO
+<div class="codeblock"><div class="codehead">- Source/DSP/ChorusDSP.cpp</div><pre><code>// ChorusDSP::process (voice-sum core) + ChorusDSP::evalLFO
 // Voice model: 3 voices -&gt; 1 read per LFO; 6 voices -&gt; 2 reads per LFO (second read +pi)
 for (int v = 0; v &lt; numVoices; ++v)
 {
@@ -14595,7 +14631,7 @@ for (int v = 0; v &lt; numVoices; ++v)
     sumL += cubicInterp(mBufL, rposL, mBufSize);
     sumR += cubicInterp(mBufR, rposR, mBufSize);
 }</code></pre></div>
-<details class="fullfn"><summary>Full function &mdash; - Source/DSP/ChorusDSP.h</summary><pre><code>// ChorusDSP::evalLFO -- the four selectable LFO shapes
+<details class="fullfn"><summary>Full function &mdash; - Source/DSP/ChorusDSP.cpp</summary><pre><code>// ChorusDSP::evalLFO -- the four selectable LFO shapes
 float ChorusDSP::evalLFO (int wave, float phase)
 {
     switch (wave)
@@ -14761,7 +14797,7 @@ void ChorusDSP::process (juce::AudioBuffer&lt;float&gt;&amp; buffer)
 peaks and notches. Through-zero flanging sweeps the delay through zero for the
 jet-engine effect.</p>
 
-<div class="codeblock"><div class="codehead">- Source/DSP/FlangerDSP.h</div><pre><code>// FlangerDSP::process (feedback-path core)
+<div class="codeblock"><div class="codehead">- Source/DSP/FlangerDSP.cpp</div><pre><code>// FlangerDSP::process (feedback-path core)
 // Write to delay buffer (input + feedback from previous output)
 mBufL[mWritePos] = inL + fb * mFbL;
 mBufR[mWritePos] = inR + fb * mFbR;
@@ -14792,7 +14828,7 @@ if (invertWet) { delL = -delL; delR = -delR; }
 // Mix: dry + wet + cross
 if (L) L[n] = dryScale * inL + wetScale * delL + crossScale * delR;
 if (R) R[n] = dryScale * inR + wetScale * delR + crossScale * delL;</code></pre></div>
-<details class="fullfn"><summary>Full function &mdash; - Source/DSP/FlangerDSP.h</summary><pre><code>// FlangerDSP::process
+<details class="fullfn"><summary>Full function &mdash; - Source/DSP/FlangerDSP.cpp</summary><pre><code>// FlangerDSP::process
 void FlangerDSP::process (juce::AudioBuffer&lt;float&gt;&amp; buffer)
 {
     if (bypassed) return;
@@ -14916,7 +14952,7 @@ void FlangerDSP::process (juce::AudioBuffer&lt;float&gt;&amp; buffer)
 <p>A chain of allpass filters producing moving notches. Unlike a flanger the
 notches are not evenly spaced, which is why it swirls rather than whooshes.</p>
 
-<div class="codeblock"><div class="codehead">- Source/DSP/PhaserDSP.h</div><pre><code>// PhaserDSP::process (allpass cascade core)
+<div class="codeblock"><div class="codehead">- Source/DSP/PhaserDSP.cpp</div><pre><code>// PhaserDSP::process (allpass cascade core)
 // sec.7a: log-scaled LFO -&gt; frequency mapping
 const float logMinHz = std::log (minHz);
 const float logMaxHz = std::log (maxHz);
@@ -14942,7 +14978,7 @@ for (int s = 0; s &lt; activeStages; ++s)
     procL = yL;
     procR = yR;
 }</code></pre></div>
-<details class="fullfn"><summary>Full function &mdash; - Source/DSP/PhaserDSP.h</summary><pre><code>// PhaserDSP::process
+<details class="fullfn"><summary>Full function &mdash; - Source/DSP/PhaserDSP.cpp</summary><pre><code>// PhaserDSP::process
 void PhaserDSP::process (juce::AudioBuffer&lt;float&gt;&amp; buffer)
 {
     if (bypassed) return;
@@ -15083,7 +15119,7 @@ sides genuinely independent times inside a 5-50&nbsp;ms window &mdash; the range
 where a copy reads as a second performer rather than an echo.</p>
 <p>Tempo sync is single-valued for the whole effect; Vocal Doubler has no sync at
 all, because a doubler is about milliseconds rather than beats.</p>
-<div class="codeblock"><div class="codehead">- Source/DSP/DelayDSP.h</div><pre><code>// DelayDSP::recalcTargetDelay -- sync division + Spread/Pan tap offsets
+<div class="codeblock"><div class="codehead">- Source/DSP/DelayDSP.cpp</div><pre><code>// DelayDSP::recalcTargetDelay -- sync division + Spread/Pan tap offsets
 void DelayDSP::recalcTargetDelay()
 {
     float ms = delayMs;
@@ -15107,7 +15143,7 @@ void DelayDSP::recalcTargetDelay()
     mTargDelayL = juce::jlimit(1.0f, maxDelay, samples - spreadHalf - panOffset);
     mTargDelayR = juce::jlimit(1.0f, maxDelay, samples + spreadHalf + panOffset);
 }</code></pre></div>
-<details class="fullfn"><summary>Full function &mdash; - Source/DSP/DelayDSP.h</summary><pre><code>// DelayDSP::process -- VocalDoubler branch (verbatim)
+<details class="fullfn"><summary>Full function &mdash; - Source/DSP/DelayDSP.cpp</summary><pre><code>// DelayDSP::process -- VocalDoubler branch (verbatim)
     // H-8: VocalDoubler Type runs an entirely different algorithm (dual
     // detuned taps, no feedback, no diffusion / lo-fi / mod LFO chain).
     if (mType == Type::VocalDoubler)
@@ -15214,7 +15250,7 @@ what size the room is; the tail says what it is made of. A bass multiplier lets
 low frequencies ring longer or shorter than the rest, which is the difference
 between a hall and a boomy cupboard.</p>
 
-<div class="codeblock"><div class="codehead">- Source/DSP/ReverbDSP.h</div><pre><code>// ReverbDSP::updateFeedback -- RT60 tail model + bass-multiplier coefficients
+<div class="codeblock"><div class="codehead">- Source/DSP/ReverbDSP.cpp</div><pre><code>// ReverbDSP::updateFeedback -- RT60 tail model + bass-multiplier coefficients
 void ReverbDSP::updateFeedback()
 {
     if (mSampleRate &lt;= 0.0) return;
@@ -15236,7 +15272,7 @@ void ReverbDSP::updateFeedback()
     mBassLPCoef  = std::exp (-pi2 * std::max (1.0f, mBassCrossHz) / (float) mSampleRate);
     mBassGainAdd = mBassMult - 1.0f;
 }</code></pre></div>
-<details class="fullfn"><summary>Full function &mdash; - Source/DSP/ReverbDSP.h</summary><pre><code>// ReverbDSP::process -- FDN tail + ER + bass-shelf core (verbatim)
+<details class="fullfn"><summary>Full function &mdash; - Source/DSP/ReverbDSP.cpp</summary><pre><code>// ReverbDSP::process -- FDN tail + ER + bass-shelf core (verbatim)
         // §8d: multi-tap early reflections (3 taps per line at prime-ratio
         // positions, natural decay envelope; ER taps stay as integer reads -
         // per spec, early reflections should keep crisp pre-echo character).
@@ -15339,7 +15375,7 @@ void ReverbDSP::updateFeedback()
 problem it was built for &mdash; a voice recorded in a room that was too live
 &mdash; and poorly as a general effect.</p>
 
-<div class="codeblock"><div class="codehead">- Source/DSP/DeReverbDSP.h</div><pre><code>// DeReverbDSP::processFrame -- tail estimation + reduction gain core
+<div class="codeblock"><div class="codehead">- Source/DSP/DeReverbDSP.cpp</div><pre><code>// DeReverbDSP::processFrame -- tail estimation + reduction gain core
 const float reduction = 2.0f * (reductionPct / 100.0f);       // 0..2x over-subtract
 const float mix       = mixPct / 100.0f;
 constexpr float kGainFloor = 0.2f;                            // -14 dB max cut
@@ -15365,7 +15401,7 @@ for (int k = 0; k &lt; kBins; ++k)
 
     hist[(size_t) k] = mag;
 }</code></pre></div>
-<details class="fullfn"><summary>Full function &mdash; - Source/DSP/DeReverbDSP.h</summary><pre><code>// DeReverbDSP::updateDecay -- T60 semantics of the Tail knob
+<details class="fullfn"><summary>Full function &mdash; - Source/DSP/DeReverbDSP.cpp</summary><pre><code>// DeReverbDSP::updateDecay -- T60 semantics of the Tail knob
 void DeReverbDSP::updateDecay()
 {
     const double sr    = juce::jmax (8000.0, mSampleRate);

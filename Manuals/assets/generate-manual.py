@@ -512,10 +512,19 @@ html, body { overflow-x: clip; }
 main { margin-left: 272px; width: calc(var(--fsw, 100vw) - 289px); }
 .views { display: flex; flex-wrap: wrap; gap: 14px; align-items: flex-start; }
 .views .vu { min-width: 0; }
+/* Text and tables wrap to the LIVE window with a right gutter mirroring the
+   left (Jeff); only the figure strip keeps the pinned fullscreen width -
+   screenshots never rescale, per the vertical-only-scroll ruling above. */
+main p, main table, main pre, main h3, main h4, main h5,
+main .lede, main .crumbs, main details.fullfn, main .tp
+{ max-width: calc(100vw - 344px); }
 @media print {
   .masthead, .figtoc, .nudge { display: none !important; }
   main { margin-left: 0 !important; width: auto !important; min-width: 0 !important; }
   html, body { overflow-x: visible; }
+  main p, main table, main pre, main h3, main h4, main h5,
+  main .lede, main .crumbs, main details.fullfn, main .tp
+  { max-width: none; }
   section.figd { break-before: page; }
 }
 .wrap.atlas { display: block; max-width: none; padding-right: 22px; }
