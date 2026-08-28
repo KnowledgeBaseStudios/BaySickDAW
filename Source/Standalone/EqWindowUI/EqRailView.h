@@ -716,7 +716,9 @@ public:
             };
         };
         const std::pair<juce::Slider*, const char*> dynGestures[] = {
-            { &thrK, "thr" }, { &ratK, "ratio" }, { &atkK, "atk" }, { &relK, "rel" } };
+            { &thrK, "thr" }, { &ratK, "ratio" }, { &atkK, "atk" }, { &relK, "rel" },
+            { &thrBK, "thrb" }, { &ratBK, "ratb" }, { &rngBK, "rngb" },
+            { &onsK, "onset" } };
         for (const auto& kf : dynGestures)
             gestureOnDragStart (*kf.first, kf.second);
         initDynKnob (thrK, "thr", -60.0, 0.0, 0.0,
@@ -731,6 +733,24 @@ public:
         atkK.setDoubleClickReturnValue (true, 10.0);
         initDynKnob (relK, "rel", 1.0, 2000.0, 0.35, "Detector release");
         relK.setDoubleClickReturnValue (true, 100.0);
+
+        // W-12: the below-threshold stage + onset-selective detection.
+        initDynKnob (thrBK, "thrb", -60.0, 0.0, 0.0,
+                     "The BELOW stage: the band moves when its signal drops "
+                     "under this. All the way down = never.");
+        thrBK.setDoubleClickReturnValue (true, -60.0);
+        initDynKnob (ratBK, "ratb", 1.0, 20.0, 0.5, "How hard under the "
+                     "below-threshold");
+        ratBK.setDoubleClickReturnValue (true, 2.0);
+        initDynKnob (rngBK, "rngb", -30.0, 30.0, 0.0,
+                     "The below stage's travel and direction: up lifts quiet "
+                     "detail, down pushes it away. Zero = the stage is off.");
+        rngBK.setDoubleClickReturnValue (true, 0.0);
+        initDynKnob (onsK, "onset", 0.0, 1.0, 0.0,
+                     "Onset: how much the detector listens to attacks only. "
+                     "Full right, a sustained note reads as nothing and only "
+                     "hits register.");
+        onsK.setDoubleClickReturnValue (true, 0.0);
 
         // Direction: compress pulls the band down past the threshold, expand
         // pushes it up.  No Range knob - the range parameter carries the
@@ -839,6 +859,10 @@ public:
         caption (ratK, "RATIO");
         caption (atkK, "ATK");
         caption (relK, "REL");
+        caption (thrBK, "THR-B");
+        caption (ratBK, "RAT-B");
+        caption (rngBK, "RNG-B");
+        caption (onsK, "ONSET");
 
         auto readout = [&] (juce::Slider& k, const juce::String& text)
         {
@@ -860,6 +884,12 @@ public:
             readout (atkK, juce::String (p.attackMs, p.attackMs < 10 ? 1 : 0));
             readout (relK, p.autoRelease ? juce::String ("auto")
                                          : juce::String (p.releaseMs, 0));
+            readout (thrBK, juce::String (p.thresholdBDb, 0));
+            readout (ratBK, juce::String (p.ratioB, 1) + ":1");
+            readout (rngBK, std::abs (p.rangeBDb) < 0.05f ? juce::String ("off")
+                            : (p.rangeBDb > 0 ? "+" : "")
+                                + juce::String (p.rangeBDb, 0));
+            readout (onsK, juce::String ((int) std::round (p.onsetMix * 100)) + "%");
         }
     }
 
@@ -957,7 +987,7 @@ private:
         const bool showDynRow  = dynT.isVisible();
         const bool showDynBody = direction.isVisible();
         const int need = 207 + (showDynRow  ? 12 + 16 : 0)
-                             + (showDynBody ? 4 + 16 + 4 + 100 : 0);
+                             + (showDynBody ? 4 + 16 + 4 + 150 : 0);
 
         mMaxScroll = juce::jmax (0, need - full.getHeight());
         mScrollY   = juce::jlimit (0, mMaxScroll, mScrollY);
@@ -999,7 +1029,7 @@ private:
         direction.setBounds (r.removeFromTop (16));
         r.removeFromTop (4);
 
-        auto body = r.removeFromTop (100);
+        auto body = r.removeFromTop (150);
         auto meterCol = body.removeFromRight (22);
         grMeter.setBounds (meterCol.reduced (0, 1));
 
@@ -1011,6 +1041,14 @@ private:
         auto k2 = body.removeFromTop (30);
         atkK.setBounds (k2.removeFromLeft (kw).reduced (8, 0));
         relK.setBounds (k2.reduced (8, 0));
+        body.removeFromTop (20);
+        auto k3 = body.removeFromTop (30);
+        thrBK.setBounds (k3.removeFromLeft (kw).reduced (8, 0));
+        ratBK.setBounds (k3.reduced (8, 0));
+        body.removeFromTop (20);
+        auto k4 = body.removeFromTop (30);
+        rngBK.setBounds (k4.removeFromLeft (kw).reduced (8, 0));
+        onsK.setBounds (k4.reduced (8, 0));
     }
 
     void syncFromParams()
@@ -1039,6 +1077,10 @@ private:
             ratK.setComponentID (graph.paramId (b, "ratio"));
             atkK.setComponentID (graph.paramId (b, "atk"));
             relK.setComponentID (graph.paramId (b, "rel"));
+            thrBK.setComponentID (graph.paramId (b, "thrb"));
+            ratBK.setComponentID (graph.paramId (b, "ratb"));
+            rngBK.setComponentID (graph.paramId (b, "rngb"));
+            onsK.setComponentID (graph.paramId (b, "onset"));
         }
 
         gain.setVisible (show && kbs::eqTypeHasGain (p.type));
@@ -1061,7 +1103,7 @@ private:
         extT.setVisible (dynOk && p.dynamic);
 
         const bool dyn = dynOk && p.dynamic;
-        for (auto* k : { &thrK, &ratK, &atkK, &relK })
+        for (auto* k : { &thrK, &ratK, &atkK, &relK, &thrBK, &ratBK, &rngBK, &onsK })
             k->setVisible (dyn);
         relK.setVisible (dyn && ! p.autoRelease);
         direction.setVisible (dyn);
@@ -1113,7 +1155,7 @@ private:
 
     EqGraphView& graph;
 
-    juce::Slider gain, pan, thrK, ratK, atkK, relK;
+    juce::Slider gain, pan, thrK, ratK, atkK, relK, thrBK, ratBK, rngBK, onsK;
     SegmentRow direction;
     DragNumber freq, q;
     SegmentRow type, chan;

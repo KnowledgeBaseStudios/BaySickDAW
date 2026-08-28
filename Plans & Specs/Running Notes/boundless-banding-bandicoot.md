@@ -115,3 +115,30 @@ heap-allocate; the DAW's per-node cost 2x223 KB noted for the close docs).
 (5) stdout now unbuffered in the harness so a crash cannot eat its own
 evidence. EqTests section 16 (6 checks) green; full suite green; build gate
 six zeros + four links first try.
+
+## 2026-08-27 - Task 4 - two-way dynamics + onset (W-12)
+
+Every band gained an independent BELOW-threshold stage (thresholdBDb /
+ratioB / rangeBDb - signed like the above stage's Range; -60 threshold +
+0 range = inert by default) and an onset-selective detection mix (0 = the
+whole signal, 1 = attacks only). Below-stage semantics mirror the house
+over-threshold model: engages by the SHORTFALL under thresholdB times the
+ratioB slope, silence-gated, extent-walled by the distance from thresholdB
+to the detector floor - so the same never-past-the-line guarantee holds in
+both directions. Both stages sum into one gain target through the existing
+chunk smoother; the dashed extent ghost now draws BOTH reachable
+directions (bandExtentMagnitudeAt grew a direction argument, legacy shape
+preserved for existing callers). Four new band params (23 suffixes now),
+full APVTS/blob/compare/sweep plumbing, rail grew a second dynamics block
+(THR-B / RAT-B / RNG-B / ONSET) with gestures, ids, captions, readouts.
+
+Findings: (1) my first onset detector ran its fast/slow pair on the
+rectified sample stream - a sustained 1 kHz tone rippled at carrier rate
+and read as endless onsets (caught by the sustained-tone check); the pair
+now runs symmetric one-poles (3 ms / 60 ms) on smoothed magnitude, and the
+fast pole is deliberately slower than a carrier half-cycle - reasoning in
+the code. (2) Exact-value GR pins were naive - the detector envelope of a
+rectified sine sits a shade under peak by design; the deterministic pin is
+the range CAP driven well past, and the tests now say so. EqTests section
+17 (6 checks) green; suite green; build gate six zeros + four links first
+try.

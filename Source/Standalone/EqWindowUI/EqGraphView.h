@@ -849,6 +849,8 @@ public:
             { "ratio", "Ratio" }, { "atk", "Attack" }, { "rel", "Release" },
             { "relauto", "AutoRelease" }, { "range", "Range" },
             { "scsrc", "ScSource" }, { "phase", "Phase" },
+            { "thrb", "ThresholdB" }, { "ratb", "RatioB" },
+            { "rngb", "RangeB" }, { "onset", "Onset" },
         };
         for (const auto& e : map)
             if (std::strcmp (e.f, field) == 0) return e.s;
@@ -1173,20 +1175,34 @@ private:
             // computer - the live curve cannot pass it.
             if (sel && p.dynamic)
             {
-                juce::Path ghost;
-                for (int px = 0; px <= w; px += 3)
+                // W-12: two stages can travel in two directions - draw an
+                // extent line for each direction that is actually reachable.
+                for (const int dir : { +1, -1 })
                 {
-                    const double hz = xToFreq (a.getX() + (float) px);
-                    const float db = 20.0f * std::log10 (juce::jmax (1.0e-6f,
-                        e.engine().bandExtentMagnitudeAt (b, (float) hz)));
-                    const float y = gainToY (db);
-                    if (px == 0) ghost.startNewSubPath (a.getX(), y);
-                    else ghost.lineTo (a.getX() + (float) px, y);
+                    const float probe = e.engine().bandExtentMagnitudeAt (
+                        b, p.freqHz, dir);
+                    const float base = e.engine().bandMagnitudeAt (
+                        b, p.freqHz, 0, false);
+                    if (std::abs (20.0f * std::log10 (juce::jmax (1.0e-6f, probe))
+                                - 20.0f * std::log10 (juce::jmax (1.0e-6f, base)))
+                        < 0.05f)
+                        continue;                       // nothing travels this way
+
+                    juce::Path ghost;
+                    for (int px = 0; px <= w; px += 3)
+                    {
+                        const double hz = xToFreq (a.getX() + (float) px);
+                        const float db = 20.0f * std::log10 (juce::jmax (1.0e-6f,
+                            e.engine().bandExtentMagnitudeAt (b, (float) hz, dir)));
+                        const float y = gainToY (db);
+                        if (px == 0) ghost.startNewSubPath (a.getX(), y);
+                        else ghost.lineTo (a.getX() + (float) px, y);
+                    }
+                    const float dashes[] = { 4.0f, 4.0f };
+                    juce::PathStrokeType (1.2f).createDashedStroke (ghost, ghost, dashes, 2);
+                    g.setColour (col.withAlpha (0.55f));
+                    g.fillPath (ghost);
                 }
-                const float dashes[] = { 4.0f, 4.0f };
-                juce::PathStrokeType (1.2f).createDashedStroke (ghost, ghost, dashes, 2);
-                g.setColour (col.withAlpha (0.55f));
-                g.fillPath (ghost);
             }
         }
     }

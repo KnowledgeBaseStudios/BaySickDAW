@@ -1230,6 +1230,120 @@ int main()
                   "mixed mode: heard equals drawn on a low bell");
         }
     }
+    // ---- 17. QA-EqFlagship Task 4: two-way dynamics + onset (W-12)
+    std::printf ("%s", "\n  17. two-way dynamics + onset\n");
+    {
+        const double srr = 48000.0;
+
+        auto steadyGr = [] (kbs::ParametricEq& eq, double amp, double freq,
+                            double srr2)
+        {
+            const int block = 256;
+            std::vector<float> L (block), R (block);
+            double phase = 0.0;
+            for (int bl = 0; bl < 120; ++bl)
+            {
+                for (int i = 0; i < block; ++i)
+                {
+                    phase += 2.0 * kbs::kPi * freq / srr2;
+                    L[(size_t) i] = R[(size_t) i] = (float) (amp * std::sin (phase));
+                }
+                eq.process (L.data(), R.data(), block);
+            }
+            return (double) eq.bandGrDb (0);
+        };
+
+        // The below stage lifts quiet material by exactly its bounded travel.
+        {
+            kbs::ParametricEq eq;
+            eq.prepare (srr, 256);
+            kbs::EqBandParams b;
+            b.on = true; b.type = kbs::EqType::bell;
+            b.freqHz = 1000.0f; b.gainDb = 0.0f; b.q = 1.0f;
+            b.dynamic = true;
+            b.thresholdDb = 0.0f;            // above stage never engages
+            b.thresholdBDb = -40.0f;
+            b.ratioB = 20.0f;
+            b.rangeBDb = 6.0f;
+            eq.setBand (0, b);
+            // -50 dB tone sits 10 dB under thresholdB; slope 0.95 asks 9.5,
+            // range caps at 6.
+            near (steadyGr (eq, 0.00316, 1000.0, srr), 6.0, 0.4,
+                  "the below stage lifts quiet material to its range cap");
+        }
+
+        // The below stage can also push quiet away (negative range), and the
+        // above stage still compresses independently in the same band.
+        {
+            kbs::ParametricEq eq;
+            eq.prepare (srr, 256);
+            kbs::EqBandParams b;
+            b.on = true; b.type = kbs::EqType::bell;
+            b.freqHz = 1000.0f; b.gainDb = 0.0f; b.q = 1.0f;
+            b.dynamic = true;
+            // Cap-pinned on both stages: the detector envelope of a
+            // rectified sine sits a shade under peak by design, so the
+            // deterministic number is the range cap, driven well past.
+            b.thresholdDb = -30.0f; b.ratio = 20.0f; b.rangeDb = -6.0f;
+            b.thresholdBDb = -35.0f; b.ratioB = 20.0f; b.rangeBDb = -6.0f;
+            eq.setBand (0, b);
+            // Loud (-20 dB): far over -> pinned at the -6 cap; the below
+            // stage sees nothing.
+            near (steadyGr (eq, 0.1, 1000.0, srr), -6.0, 0.2,
+                  "loud material: the above stage compresses alone");
+            // Quiet (-55 dB): far under -> pinned at the below cap; the
+            // above stage sees nothing.
+            near (steadyGr (eq, 0.00178, 1000.0, srr), -6.0, 0.2,
+                  "quiet material: the below stage expands alone");
+        }
+
+        // A band whose below stage is inert behaves exactly as before.
+        {
+            kbs::ParametricEq eq;
+            eq.prepare (srr, 256);
+            kbs::EqBandParams b;
+            b.on = true; b.type = kbs::EqType::bell;
+            b.freqHz = 1000.0f; b.q = 1.0f;
+            b.dynamic = true;
+            b.thresholdDb = -40.0f; b.ratio = 4.0f; b.rangeDb = -12.0f;
+            eq.setBand (0, b);
+            // -20 dB tone: 20 over -> min(15, min(30, 12)) = -12 (the cap).
+            near (steadyGr (eq, 0.1, 1000.0, srr), -12.0, 0.4,
+                  "single-stage behavior is unchanged when B is inert");
+        }
+
+        // Onset at full mix: a sustained tone reads as nothing...
+        {
+            kbs::ParametricEq eq;
+            eq.prepare (srr, 256);
+            kbs::EqBandParams b;
+            b.on = true; b.type = kbs::EqType::bell;
+            b.freqHz = 1000.0f; b.q = 1.0f;
+            b.dynamic = true;
+            b.thresholdDb = -40.0f; b.ratio = 4.0f; b.rangeDb = -12.0f;
+            b.onsetMix = 1.0f;
+            eq.setBand (0, b);
+            near (steadyGr (eq, 0.1, 1000.0, srr), 0.0, 0.5,
+                  "full onset mix ignores a sustained tone");
+
+            // ...but a fresh attack from silence registers immediately.
+            std::vector<float> L (256), R (256);
+            double phase = 0.0;
+            double deepest = 0.0;
+            for (int bl = 0; bl < 20; ++bl)
+            {
+                for (int i = 0; i < 256; ++i)
+                {
+                    phase += 2.0 * kbs::kPi * 1000.0 / srr;
+                    L[(size_t) i] = R[(size_t) i] = (float) (0.25 * std::sin (phase));
+                }
+                eq.process (L.data(), R.data(), 256);
+                deepest = std::min (deepest, (double) eq.bandGrDb (0));
+            }
+            check (deepest < -3.0, "and a fresh attack registers",
+                   deepest, -3.0);
+        }
+    }
     std::printf (failures == 0 ? "\n  all checks passed\n\n" : "\n  %d FAILURE(S)\n\n", failures);
     return failures == 0 ? 0 : 1;
 }

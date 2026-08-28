@@ -153,6 +153,19 @@ struct EqBandParams
     float     phaseMix = 0.0f;            // W-9, linear modes only: 0 = the
                                           // mode's phase, 1 = this band
                                           // minimum-phase (no pre-ring)
+
+    // W-12: the second, independent BELOW-threshold stage.  Engages when the
+    // detector drops UNDER thresholdB, by the shortfall times the ratioB
+    // slope; rangeBDb signed - positive lifts the quiet (upward compression),
+    // negative pushes it further down (expansion).  0 dB of range = inert;
+    // -60 threshold = effectively never (nothing real sits under it).
+    float thresholdBDb = -60.0f;
+    float ratioB = 2.0f;
+    float rangeBDb = 0.0f;
+    // W-12: onset-selective detection - 0 hears the whole signal, 1 hears
+    // only transients (fast-minus-slow envelope), so dynamics can hit the
+    // attack of a hit and ignore its ring.
+    float onsetMix = 0.0f;
     EqChannel channel = EqChannel::stereo;
     float     placement = 0.0f;           // -1 left .. +1 right; gain types, stereo only
     bool      muted = false;
@@ -577,7 +590,7 @@ public:
     // dotted line the display draws, it moves with the THRESHOLD knob, and
     // the live curve cannot pass it because the same expression bounds the
     // gain computer.
-    float bandExtentMagnitudeAt (int i, float hz) const
+    float bandExtentMagnitudeAt (int i, float hz, int direction = 0) const
     {
         if (i < 0 || i >= kMaxBands) return 1.0f;
         const auto& b = bands[(size_t) i];
@@ -586,7 +599,25 @@ public:
         const float slope = 1.0f - 1.0f / std::max (1.0f, b.p.ratio);
         const float extent = std::min (std::abs (b.p.thresholdDb) * slope,
                                        std::abs (b.p.rangeDb));
-        const float extentGain = b.p.gainDb + (b.p.rangeDb > 0.0f ? extent : -extent);
+        // W-12: with two stages the possible travel spans both directions.
+        // direction +1 = the furthest up the curve can go, -1 = furthest
+        // down, 0 = the legacy single-stage reading (the above stage's own
+        // direction) so existing callers keep their meaning.
+        const float slopeB = 1.0f - 1.0f / std::max (1.0f, b.p.ratioB);
+        const float extentB = std::abs (b.p.rangeBDb) > 0.0f
+            ? std::min ((b.p.thresholdBDb - kDetectorFloorDb) * slopeB,
+                        std::abs (b.p.rangeBDb))
+            : 0.0f;
+        float travel;
+        if (direction > 0)
+            travel =  (b.p.rangeDb  > 0.0f ? extent  : 0.0f)
+                    + (b.p.rangeBDb > 0.0f ? extentB : 0.0f);
+        else if (direction < 0)
+            travel = -((b.p.rangeDb  < 0.0f ? extent  : 0.0f)
+                     + (b.p.rangeBDb < 0.0f ? extentB : 0.0f));
+        else
+            travel = b.p.rangeDb > 0.0f ? extent : -extent;
+        const float extentGain = b.p.gainDb + travel;
 
         BiquadCoeffs cs[2];
         const float designSr = (float) ((oversampling && ! eqModeIsLinear (mode)) ? sr * 2.0 : sr);
@@ -769,6 +800,8 @@ private:
         // Dynamics.
         Biquad detFL, detFR;
         float envL = 0.0f, envR = 0.0f;
+        float envFastL = 0.0f, envFastR = 0.0f;   // onset detection pair
+        float envSlowL = 0.0f, envSlowR = 0.0f;
         float grDb = 0.0f;          // target from the gain computer
         float grSmooth = 0.0f;      // what the filter actually carries
         float overSec = 0.0f;       // how long the signal has been over - auto release
@@ -800,6 +833,7 @@ private:
             poleStateL = poleStateR = 0.0f;
             detFL.reset(); detFR.reset();
             envL = envR = 0.0f;
+            envFastL = envFastR = envSlowL = envSlowR = 0.0f;
             grDb = grSmooth = 0.0f;
             overSec = 0.0f;
             grDbShown.store (0.0f, std::memory_order_relaxed);
@@ -1058,7 +1092,20 @@ private:
             dr = scR.data();
         }
 
+        // Onset shaping (W-12): a fast/slow SMOOTHED-magnitude pair turns
+        // the detector feed into "what just changed" - at full mix a
+        // sustained tone reads as silence and only attacks register.  Both
+        // poles are symmetric and the fast one is slower than a carrier
+        // half-cycle, or the pair rings at the carrier rate and a steady
+        // tone reads as endless onsets (the first cut of this did).  The
+        // factor of 2 keeps a typical attack's onset component near its raw
+        // level.
+        const float mix = std::clamp (p.onsetMix, 0.0f, 1.0f);
+        const float aOF = std::exp (-1.0f / (0.003f * hostSr));
+        const float aOS = std::exp (-1.0f / (0.060f * hostSr));
+
         float el = b.envL, er = b.envR;
+        float fL = b.envFastL, fR = b.envFastR, sL = b.envSlowL, sR = b.envSlowR;
         for (int n = from; n < to; ++n)
         {
             float inL, inR;
@@ -1070,12 +1117,22 @@ private:
                 case EqChannel::right: inL = 0.0f;  inR = dr[n]; break;
                 default:               inL = dl[n]; inR = dr[n]; break;
             }
-            const float vL = std::abs (b.detFL.process (inL));
-            const float vR = std::abs (b.detFR.process (inR));
+            float vL = std::abs (b.detFL.process (inL));
+            float vR = std::abs (b.detFR.process (inR));
+            if (mix > 0.001f)
+            {
+                fL = aOF * fL + (1.0f - aOF) * vL;
+                fR = aOF * fR + (1.0f - aOF) * vR;
+                sL = aOS * sL + (1.0f - aOS) * vL;
+                sR = aOS * sR + (1.0f - aOS) * vR;
+                vL = (1.0f - mix) * vL + mix * 2.0f * std::max (0.0f, fL - sL);
+                vR = (1.0f - mix) * vR + mix * 2.0f * std::max (0.0f, fR - sR);
+            }
             el = (vL > el ? aAtt : aRel) * el + (1.0f - (vL > el ? aAtt : aRel)) * vL;
             er = (vR > er ? aAtt : aRel) * er + (1.0f - (vR > er ? aAtt : aRel)) * vR;
         }
         b.envL = el; b.envR = er;
+        b.envFastL = fL; b.envFastR = fR; b.envSlowL = sL; b.envSlowR = sR;
 
         const float env = std::max (el, er);
 
@@ -1116,6 +1173,24 @@ private:
         else
         {
             b.overSec = std::max (0.0f, b.overSec - (float) (to - from) / (float) sr);
+        }
+
+        // W-12: the independent below-threshold stage.  The silence gate
+        // still applies - lifting actual silence forever is not a feature -
+        // and the extent wall is the distance from thresholdB down to the
+        // detector floor, mirroring the above stage's |threshold| wall.
+        if (env >= kDetectorFloor && std::abs (p.rangeBDb) > 0.0f)
+        {
+            const float envDb = 20.0f * std::log10 (env);
+            const float slopeB = 1.0f - 1.0f / std::max (1.0f, p.ratioB);
+            const float under = p.thresholdBDb - envDb;
+            if (under > 0.0f)
+            {
+                const float extentB = std::min ((p.thresholdBDb - kDetectorFloorDb) * slopeB,
+                                                std::abs (p.rangeBDb));
+                const float mag = std::min (under * slopeB, extentB);
+                grDb += p.rangeBDb > 0.0f ? mag : -mag;
+            }
         }
 
         b.grDb = grDb;

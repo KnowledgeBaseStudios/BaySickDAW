@@ -5596,6 +5596,10 @@ void BaySickDAWProcessor::updateEQFromCache (StripEq* eq, int stripSlot, int ban
         bp.rangeDb     = get (eqSlotRange);
         bp.scSource    = juce::jlimit (-1, 3, (int) get (eqSlotScSource));
         bp.phaseMix    = juce::jlimit (0.0f, 1.0f, get (eqSlotPhase));
+        bp.thresholdBDb = juce::jlimit (-60.0f, 0.0f, get (eqSlotThresholdB));
+        bp.ratioB      = juce::jlimit (1.0f, 20.0f, get (eqSlotRatioB));
+        bp.rangeBDb    = juce::jlimit (-30.0f, 30.0f, get (eqSlotRangeB));
+        bp.onsetMix    = juce::jlimit (0.0f, 1.0f, get (eqSlotOnset));
         eq->pushBand (b, bp);
     }
 
@@ -7600,7 +7604,8 @@ namespace EqBandIds
     static const char* const kSuffixes[] = {
         "Freq", "Gain", "Q", "Type", "On", "Slope", "Channel", "Place",
         "Mute", "Isolate", "Dynamic", "Threshold", "Ratio", "Attack",
-        "Release", "AutoRelease", "Range", "ScSource", "Phase"
+        "Release", "AutoRelease", "Range", "ScSource", "Phase",
+        "ThresholdB", "RatioB", "RangeB", "Onset"
     };
     // Index order must match BaySickDAWProcessor::EqBankGlobalSlot.  Mode and
     // os ride the same spelling family but never enter the sweep cache
@@ -7656,6 +7661,10 @@ namespace
         dynF (apvts, ids, bp + "Range",       labelBase + "Range",       -30.f, 30.f, 0.f);
         dynI (apvts, ids, bp + "ScSource",    labelBase + "ScSource",    -1, 3, -1);
         dynF (apvts, ids, bp + "Phase",       labelBase + "Phase",       0.f, 1.f, 0.f);
+        dynF (apvts, ids, bp + "ThresholdB",  labelBase + "ThresholdB",  -60.f, 0.f, -60.f);
+        dynF (apvts, ids, bp + "RatioB",      labelBase + "RatioB",      1.f, 20.f, 2.f);
+        dynF (apvts, ids, bp + "RangeB",      labelBase + "RangeB",      -30.f, 30.f, 0.f);
+        dynF (apvts, ids, bp + "Onset",       labelBase + "Onset",       0.f, 1.f, 0.f);
     }
 
     void registerEqBankGlobals (juce::AudioProcessorValueTreeState& apvts, juce::StringArray& ids,
