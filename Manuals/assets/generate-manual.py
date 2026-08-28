@@ -252,7 +252,18 @@ for _code in sorted(set(list(C.keys()) + list(call.keys()))):
         _cy = _b[1] + _b[3] / 2.0
         if not (0.0 <= _cx <= 100.0 and 0.0 <= _cy <= 100.0):
             continue
-        _cur[_n] = (round(_b[0] + _b[2] / 2.0, 2), round(_b[1] + _b[3] / 2.0, 2))
+        # Placement follows the hand convention (Jeff, verified against his
+        # coords by rendering them): a CONTROL takes its dot just below,
+        # in the caption whitespace, so the knob face stays readable; a
+        # large REGION takes its top edge, centred, so it labels the block
+        # without covering what is inside it.
+        if _b[3] <= 20.0:
+            _dx, _dy = _b[0] + _b[2] / 2.0, _b[1] + _b[3] + 1.6
+        else:
+            _dx, _dy = _b[0] + _b[2] / 2.0, _b[1] + 2.6
+        # keep the whole marker inside the crop, not just its centre
+        _cur[_n] = (round(min(max(_dx, 1.4), 98.6), 2),
+                    round(min(max(_dy, 2.0), 97.6), 2))
         _hit += 1
     if _hit:
         C[_code] = _cur

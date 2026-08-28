@@ -1232,6 +1232,13 @@ void EffectEqWindow::showOptionsMenu (juce::Component* anchor)
                 a.peakHold = ! a.peakHold;
                 if (! a.peakHold) a.clearPeaks();
             }
+            // The View submenu's four toggles (Jeff, 2026-08-28): built at
+            // ids 160-163 but never dispatched, so the rows drew their tick
+            // state and did nothing when clicked.
+            else if (r == 160) mGraph->setViewProperty ("analyser",    ! mGraph->showAnalyser());
+            else if (r == 161) mGraph->setViewProperty ("spectrogram", ! mGraph->showSpectrogram());
+            else if (r == 162) mGraph->setViewProperty ("phase",       ! mGraph->showPhase());
+            else if (r == 163) mGraph->setViewProperty ("piano",       ! mGraph->showPiano());
             else if (r == 165)
             {
                 juce::NativeMessageBox::showAsync (
