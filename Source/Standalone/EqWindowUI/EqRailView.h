@@ -718,7 +718,7 @@ public:
         const std::pair<juce::Slider*, const char*> dynGestures[] = {
             { &thrK, "thr" }, { &ratK, "ratio" }, { &atkK, "atk" }, { &relK, "rel" },
             { &thrBK, "thrb" }, { &ratBK, "ratb" }, { &rngBK, "rngb" },
-            { &onsK, "onset" } };
+            { &onsK, "onset" }, { &denK, "dens" } };
         for (const auto& kf : dynGestures)
             gestureOnDragStart (*kf.first, kf.second);
         initDynKnob (thrK, "thr", -60.0, 0.0, 0.0,
@@ -751,6 +751,13 @@ public:
                      "Full right, a sustained note reads as nothing and only "
                      "hits register.");
         onsK.setDoubleClickReturnValue (true, 0.0);
+
+        // W-1: how surgical a SPECTRAL band is about which bins it moves.
+        initDynKnob (denK, "dens", 0.0, 1.0, 0.0,
+                     "Spectral density: left, only real spikes over their "
+                     "neighborhood register; right, individual resonances "
+                     "are picked apart.");
+        denK.setDoubleClickReturnValue (true, 0.5);
 
         // Direction: compress pulls the band down past the threshold, expand
         // pushes it up.  No Range knob - the range parameter carries the
@@ -863,6 +870,7 @@ public:
         caption (ratBK, "RAT-B");
         caption (rngBK, "RNG-B");
         caption (onsK, "ONSET");
+        caption (denK, "DENSE");
 
         auto readout = [&] (juce::Slider& k, const juce::String& text)
         {
@@ -890,6 +898,7 @@ public:
                             : (p.rangeBDb > 0 ? "+" : "")
                                 + juce::String (p.rangeBDb, 0));
             readout (onsK, juce::String ((int) std::round (p.onsetMix * 100)) + "%");
+            readout (denK, juce::String ((int) std::round (p.density * 100)) + "%");
         }
     }
 
@@ -987,7 +996,7 @@ private:
         const bool showDynRow  = dynT.isVisible();
         const bool showDynBody = direction.isVisible();
         const int need = 207 + (showDynRow  ? 12 + 16 : 0)
-                             + (showDynBody ? 4 + 16 + 4 + 150 : 0);
+                             + (showDynBody ? 4 + 16 + 4 + 200 : 0);
 
         mMaxScroll = juce::jmax (0, need - full.getHeight());
         mScrollY   = juce::jlimit (0, mMaxScroll, mScrollY);
@@ -1029,7 +1038,7 @@ private:
         direction.setBounds (r.removeFromTop (16));
         r.removeFromTop (4);
 
-        auto body = r.removeFromTop (150);
+        auto body = r.removeFromTop (200);
         auto meterCol = body.removeFromRight (22);
         grMeter.setBounds (meterCol.reduced (0, 1));
 
@@ -1049,6 +1058,9 @@ private:
         auto k4 = body.removeFromTop (30);
         rngBK.setBounds (k4.removeFromLeft (kw).reduced (8, 0));
         onsK.setBounds (k4.reduced (8, 0));
+        body.removeFromTop (20);
+        auto k5 = body.removeFromTop (30);
+        denK.setBounds (k5.removeFromLeft (kw).reduced (8, 0));
     }
 
     void syncFromParams()
@@ -1081,6 +1093,7 @@ private:
             ratBK.setComponentID (graph.paramId (b, "ratb"));
             rngBK.setComponentID (graph.paramId (b, "rngb"));
             onsK.setComponentID (graph.paramId (b, "onset"));
+            denK.setComponentID (graph.paramId (b, "dens"));
         }
 
         gain.setVisible (show && kbs::eqTypeHasGain (p.type));
@@ -1105,6 +1118,7 @@ private:
         const bool dyn = dynOk && p.dynamic;
         for (auto* k : { &thrK, &ratK, &atkK, &relK, &thrBK, &ratBK, &rngBK, &onsK })
             k->setVisible (dyn);
+        denK.setVisible (dyn && p.spectral);
         relK.setVisible (dyn && ! p.autoRelease);
         direction.setVisible (dyn);
 
@@ -1155,7 +1169,7 @@ private:
 
     EqGraphView& graph;
 
-    juce::Slider gain, pan, thrK, ratK, atkK, relK, thrBK, ratBK, rngBK, onsK;
+    juce::Slider gain, pan, thrK, ratK, atkK, relK, thrBK, ratBK, rngBK, onsK, denK;
     SegmentRow direction;
     DragNumber freq, q;
     SegmentRow type, chan;

@@ -53,6 +53,7 @@ void StripEq::pushBand (int i, const kbs::EqBandParams& p)
         && c.phaseMix == p.phaseMix
         && c.thresholdBDb == p.thresholdBDb && c.ratioB == p.ratioB
         && c.rangeBDb == p.rangeBDb && c.onsetMix == p.onsetMix
+        && c.spectral == p.spectral && c.density == p.density
         && c.rangeDb == p.rangeDb && c.scExternal == p.scExternal
         && c.scSource == p.scSource;
     if (same) return;
@@ -207,6 +208,8 @@ juce::ValueTree StripEq::bandToTree (int index, const kbs::EqBandParams& p)
     t.setProperty ("ratioB",   p.ratioB,            nullptr);
     t.setProperty ("rangeB",   p.rangeBDb,          nullptr);
     t.setProperty ("onset",    p.onsetMix,          nullptr);
+    t.setProperty ("spectral", p.spectral,          nullptr);
+    t.setProperty ("density",  p.density,           nullptr);
     return t;
 }
 
@@ -232,6 +235,8 @@ void StripEq::bandFromTree (const juce::XmlElement& e, kbs::EqBandParams& p)
     p.ratioB      = juce::jlimit (1.0f, 20.0f, (float) e.getDoubleAttribute ("ratioB", p.ratioB));
     p.rangeBDb    = juce::jlimit (-30.0f, 30.0f, (float) e.getDoubleAttribute ("rangeB", p.rangeBDb));
     p.onsetMix    = juce::jlimit (0.0f, 1.0f, (float) e.getDoubleAttribute ("onset", p.onsetMix));
+    p.spectral    = e.getBoolAttribute   ("spectral", p.spectral);
+    p.density     = juce::jlimit (0.0f, 1.0f, (float) e.getDoubleAttribute ("density", p.density));
     p.releaseMs   = (float) e.getDoubleAttribute ("rel",   p.releaseMs);
     p.autoRelease = e.getBoolAttribute   ("relAuto",  p.autoRelease);
     p.rangeDb     = (float) e.getDoubleAttribute ("range", p.rangeDb);

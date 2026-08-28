@@ -142,3 +142,39 @@ rectified sine sits a shade under peak by design; the deterministic pin is
 the range CAP driven well past, and the tests now say so. EqTests section
 17 (6 checks) green; suite green; build gate six zeros + four links first
 try.
+
+## 2026-08-27 - Task 5 - spectral dynamics (W-1) [long pole 1]
+
+Per-band spectral mode shipped: in a linear mode a spectral band watches
+the individual bins inside its footprint and moves only the ones standing
+over their own spectral neighborhood. Architecture: EqLinearPhase grew
+analyze/apply hooks into the frame (both input spectra pre-touch, gains
+into each output spectrum pre-inverse); setting them routes processStereo
+through the lockstep frame (which also learned the diagonal non-matrix
+case). ParametricEq owns four pre-allocated spectral slots (footprint /
+neighborhood / gain vectors sized at configureLinear - no audio-thread
+allocation), a composite per-bin gain curve, and a Hann-CORRECTED detector
+view computed in the frequency domain (the 3-tap kernel IS the Hann
+convolution - the frames must stay rectangular for overlap-save, and
+rectangular leakage smears the neighborhood; found by the two-tone check).
+Neighborhood width is frequency-PROPORTIONAL (a flat bin count means two
+octaves at 100 Hz and a sliver at 5 kHz); a footprint-energy level gate
+stops a lone quiet harmonic being cut for having no neighbors; the house
+threshold semantics hold (0 = never, -60 = any poke); per-bin travel is
+capped by the band's range; mask timing floored at the frame rate (a mask
+re-aiming every frame sprays modulation on footprint-mates - measured).
+Spectral bands skip the whole-band dynamics in linear modes (no double
+move) and the drawn static curve drops the stale whole-band GR. Two new
+band params (Spectral / Density - 25 suffixes), Dynamic-submenu toggle
+(arms dynamics with it), rail DENSE knob, the graph draws the live per-bin
+move as a bright breathing line via spectralGrDbAt. Outside linear modes
+the flag is inert and the band is its plain (dynamic) self.
+
+The honest engineering record: realized tone-level cut lands near half the
+per-bin cap (mainlobe dilution + mask smoothing + gain spreading), ~1 dB
+collateral on a footprint-mate 27 dB down - the polish past this point is
+the ear-tuning axis every spectral product lives on, and Density/attack/
+release are exposed for exactly that; Jeff's smoke is the tuning pass.
+EqTests section 18 (5 checks incl. untriggered-band exact latency and
+inert-outside-linear) green; suite green; gate six zeros + four links
+(one menu-scope compile fix on the way).

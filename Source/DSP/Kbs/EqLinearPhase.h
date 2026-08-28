@@ -132,6 +132,17 @@ public:
 
     bool isMatrixOn() const { return matrixOn; }
 
+    // ── spectral dynamics hooks (QA-EqFlagship W-1) ───────────────────────
+    //
+    // The per-frame windows into the transform: `spectralAnalyze` sees both
+    // input spectra before anything touches them (the detector's view);
+    // `spectralApply` multiplies its gains into each OUTPUT spectrum before
+    // the inverse transform.  Null = feature off, zero cost.  Setting these
+    // routes processStereo through the lockstep frame even without the
+    // matrix, so both channels share one analysis.
+    std::function<void (const std::complex<float>*, const std::complex<float>*, int)> spectralAnalyze;
+    std::function<void (std::complex<float>*, int)> spectralApply;
+
     // ── complex (mixed / per-band phase) designs (QA-EqFlagship W-9) ──────
     //
     // The FIR need not be zero-phase: sampling a COMPLEX response (magnitude
@@ -211,7 +222,7 @@ public:
     void processStereo (float* l, float* r, int numSamples)
     {
         if (! isReady() || chans.size() < 2) return;
-        if (! matrixOn)
+        if (! matrixOn && ! spectralAnalyze)
         {
             process (0, l, numSamples);
             process (1, r, numSamples);
@@ -373,12 +384,34 @@ private:
         fft->transform (scratch.data(),  false);   // X_L
         fft->transform (scratchB.data(), false);   // X_R
 
-        for (int i = 0; i < n; ++i)
+        if (spectralAnalyze)
+            spectralAnalyze (scratch.data(), scratchB.data(), n);
+
+        if (matrixOn)
         {
-            const auto xl = scratch[(size_t) i];
-            const auto xr = scratchB[(size_t) i];
-            outA[(size_t) i] = specLL[(size_t) i] * xl + specLR[(size_t) i] * xr;
-            outB[(size_t) i] = specRL[(size_t) i] * xl + specRR[(size_t) i] * xr;
+            for (int i = 0; i < n; ++i)
+            {
+                const auto xl = scratch[(size_t) i];
+                const auto xr = scratchB[(size_t) i];
+                outA[(size_t) i] = specLL[(size_t) i] * xl + specLR[(size_t) i] * xr;
+                outB[(size_t) i] = specRL[(size_t) i] * xl + specRR[(size_t) i] * xr;
+            }
+        }
+        else
+        {
+            // Diagonal: the plain shared spectrum, in the lockstep frame only
+            // because the spectral hooks need both channels together.
+            for (int i = 0; i < n; ++i)
+            {
+                outA[(size_t) i] = spectrum[(size_t) i] * scratch[(size_t) i];
+                outB[(size_t) i] = spectrum[(size_t) i] * scratchB[(size_t) i];
+            }
+        }
+
+        if (spectralApply)
+        {
+            spectralApply (outA.data(), n);
+            spectralApply (outB.data(), n);
         }
 
         fft->transform (outA.data(), true);

@@ -780,6 +780,11 @@ public:
             juce::PopupMenu dyn;
             dyn.addItem (400, "Make Dynamic", true, p.dynamic);
             dyn.addItem (401, "Auto Release", p.dynamic, p.autoRelease);
+            auto* se = eq();
+            dyn.addItem (403, "Spectral (linear modes)",
+                         se != nullptr && kbs::eqModeIsLinear (se->getMode())
+                             && kbs::eqTypeHasGain (p.type),
+                         p.spectral);
             m.addSubMenu ("Dynamic", dyn);
         }
 
@@ -820,6 +825,14 @@ public:
                 else if (r >= 310 && r <= 312)
                     moveBandToView (b, (DomainView) (r - 310));
                 else if (r == 400) toggleDynamic (b);
+                else if (r == 403)
+                {
+                    beginParamUndoGesture (proc.apvts, paramId (b, "spec"));
+                    const bool now = ! bandParams (b).spectral;
+                    setBandValue (b, "spec", now ? 1.0f : 0.0f);
+                    if (now && ! bandParams (b).dynamic)
+                        setBandValue (b, "dyn", 1.0f);
+                }
                 else if (r == 401) toggleBand (b, "relauto");
                 else if (r == 500) { selectBand (b); toggleListenLatch(); }
                 else if (r == 501) toggleBand (b, "iso");
@@ -851,6 +864,7 @@ public:
             { "scsrc", "ScSource" }, { "phase", "Phase" },
             { "thrb", "ThresholdB" }, { "ratb", "RatioB" },
             { "rngb", "RangeB" }, { "onset", "Onset" },
+            { "spec", "Spectral" }, { "dens", "Density" },
         };
         for (const auto& e : map)
             if (std::strcmp (e.f, field) == 0) return e.s;
@@ -1175,6 +1189,31 @@ private:
             // computer - the live curve cannot pass it.
             if (sel && p.dynamic)
             {
+                // W-1: the live spectral move, drawn as a bright inner line
+                // riding the band's own curve - the per-bin cuts breathing.
+                if (p.spectral)
+                {
+                    juce::Path live;
+                    bool anyGr = false;
+                    for (int px = 0; px <= w; px += 2)
+                    {
+                        const double hz = xToFreq (a.getX() + (float) px);
+                        const float gr = e.engine().spectralGrDbAt (b, (float) hz);
+                        const float db = 20.0f * std::log10 (juce::jmax (1.0e-6f,
+                            e.engine().bandMagnitudeAt (b, (float) hz, 0, false)))
+                            + gr;
+                        if (std::abs (gr) > 0.05f) anyGr = true;
+                        const float y = gainToY (db);
+                        if (px == 0) live.startNewSubPath (a.getX(), y);
+                        else live.lineTo (a.getX() + (float) px, y);
+                    }
+                    if (anyGr)
+                    {
+                        g.setColour (col.brighter (0.4f).withAlpha (0.9f));
+                        g.strokePath (live, juce::PathStrokeType (1.3f));
+                    }
+                }
+
                 // W-12: two stages can travel in two directions - draw an
                 // extent line for each direction that is actually reachable.
                 for (const int dir : { +1, -1 })

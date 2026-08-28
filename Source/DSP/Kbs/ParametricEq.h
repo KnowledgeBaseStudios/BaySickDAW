@@ -166,6 +166,15 @@ struct EqBandParams
     // only transients (fast-minus-slow envelope), so dynamics can hit the
     // attack of a hit and ignore its ring.
     float onsetMix = 0.0f;
+
+    // W-1: spectral dynamics.  In a linear mode a spectral band watches the
+    // individual bins inside its footprint and moves only the ones that
+    // stand out from their own spectral neighborhood; outside the linear
+    // modes the flag is inert and the band is its plain static self.
+    // Density sets how surgical: low = broad neighborhoods (only real
+    // spikes register), high = narrow (individual resonances).
+    bool  spectral = false;
+    float density = 0.5f;
     EqChannel channel = EqChannel::stereo;
     float     placement = 0.0f;           // -1 left .. +1 right; gain types, stereo only
     bool      muted = false;
@@ -450,7 +459,8 @@ public:
         // must not, or every drag would crackle. Structural = type, slope,
         // channel, or coming on.
         const bool structural = p.type != b.p.type || p.slope != b.p.slope
-                             || p.channel != b.p.channel || (p.on && ! b.p.on);
+                             || p.channel != b.p.channel || (p.on && ! b.p.on)
+                             || p.spectral != b.p.spectral;
         b.p = p;
         b.dirty = true;
         if (structural) b.resetRuntime();   // also snaps the glides to target
@@ -636,6 +646,24 @@ public:
     // Radians at hz. Zero across the board in linear modes - after the host
     // compensates the reported delay, that is the truth, and drawing the IIR
     // phase there was one of the recorded defects.
+    // W-1: the live spectral move at a frequency (dB, weighted by the
+    // band's footprint) - what the graph's breathing spectral curve draws.
+    // Audio-written, display-read; a torn read paints one frame odd.
+    float spectralGrDbAt (int band, float hz) const
+    {
+        if (! eqModeIsLinear (mode) || ! anySpectral) return 0.0f;
+        for (const auto& sl : spectralSlots)
+        {
+            if (sl.band != band) continue;
+            const int n = linear.fftSize();
+            if (n <= 0 || sl.gr.empty()) return 0.0f;
+            const int k = std::clamp ((int) (hz * (float) n / (float) sr),
+                                      0, n / 2);
+            return sl.gr[(size_t) k] * sl.wt[(size_t) k];
+        }
+        return 0.0f;
+    }
+
     float phaseAt (float hz) const
     {
         double ph = 0.0;
@@ -1268,8 +1296,12 @@ private:
                     moved = true;
                 }
 
-                if (b.p.dynamic && eqTypeSupportsDynamic (b.p.type))
+                if (b.p.dynamic && eqTypeSupportsDynamic (b.p.type)
+                    && ! (dynamicDeltaOnly && b.p.spectral))
                 {
+                    // A spectral band's movement is per-bin in the frames;
+                    // running the whole-band dynamics on top would move the
+                    // same energy twice.
                     advanceDynamics (b, hostFrom, std::min (hostTo, (int) detL.size()));
                     if (std::abs (b.grSmooth - b.lastBuiltGr) > 0.005f) moved = true;
                 }
@@ -1437,7 +1469,8 @@ private:
         // indistinguishable from dynamics doing it (test pass six).
         (void) channel;
         float g = p.gainDb;
-        if (withDynamic && p.dynamic && eqTypeSupportsDynamic (p.type))
+        if (withDynamic && p.dynamic && eqTypeSupportsDynamic (p.type)
+            && ! (p.spectral && eqModeIsLinear (mode)))
             g += b.grSmooth;
 
         BiquadCoeffs cs[2];
@@ -1530,6 +1563,15 @@ private:
         const size_t bins = (size_t) (linear.fftSize() / 2 + 1);
         for (auto* t : { &domSt, &domL, &domR, &domM, &domS })
             t->assign (bins, std::complex<float> (1.0f, 0.0f));
+        for (auto& sl : spectralSlots)
+        {
+            sl.band = -1;
+            sl.wt.assign (bins, 0.0f);
+            sl.base.assign (bins, -120.0f);
+            sl.gr.assign (bins, 0.0f);
+        }
+        specGainLin.assign (bins, 1.0f);
+        specMagDb.assign (bins, -120.0f);
         staticCurveDirty = true;
     }
 
@@ -1547,6 +1589,8 @@ private:
         // M/S stage - band index order cannot be honoured across the two
         // groups by a single frequency-domain design, and either order is a
         // valid reading of "these bands each process their domain".
+        updateSpectralSlots();
+
         bool anyDomain = false, anyPhase = mode == EqMode::mixed;
         for (const auto& b : bands)
         {
@@ -1646,6 +1690,205 @@ private:
                                   entry (+1.0f, domR));   // RR
     }
 
+    // W-1: which bands hold the spectral slots, their footprints, and
+    // whether the hooks are live.  Runs with every static rebuild - slot
+    // storage never allocates here.
+    void updateSpectralSlots()
+    {
+        const int n = linear.fftSize();
+        if (n <= 0) return;
+        const double binHz = sr / (double) n;
+        int used = 0;
+        anySpectral = false;
+
+        for (auto& sl : spectralSlots) sl.band = -1;
+
+        for (int bi = 0; bi < kMaxBands && used < kSpectralSlots; ++bi)
+        {
+            const auto& b = bands[(size_t) bi];
+            if (! bandActive (b) || ! b.p.spectral
+                || ! eqTypeHasGain (b.p.type)) continue;
+
+            auto& sl = spectralSlots[(size_t) used];
+            sl.band = bi;
+            // Footprint: the band's own bell/shelf shape at a reference
+            // +6 dB, normalized 0..1 - so a spectral band with 0 dB static
+            // gain still owns a region.
+            EqBandParams ref = b.p;
+            ref.gainDb = 6.0f;
+            ref.dynamic = false;
+            BiquadCoeffs cs[2];
+            const int nc = designBiquads (ref, (float) sr, 6.0f, cs);
+            for (int k = 0; k <= n / 2; ++k)
+            {
+                const double w = 2.0 * kPi * (double) (k * binHz)
+                               / std::max (1.0, sr);
+                double m = 1.0, ph = 0.0, tot = 1.0;
+                for (int i = 0; i < nc; ++i)
+                {
+                    eqdesign::biquadResponse (cs[i], w, m, ph);
+                    tot *= m;
+                }
+                const float db = (float) (20.0 * std::log10 (std::max (1.0e-6, tot)));
+                sl.wt[(size_t) k] = std::clamp (db / 6.0f, 0.0f, 1.0f);
+            }
+            ++used;
+            anySpectral = true;
+        }
+
+        // Hook install/removal - small lambdas, no allocation.
+        if (anySpectral)
+        {
+            linear.spectralAnalyze = [this] (const std::complex<float>* xl,
+                                             const std::complex<float>* xr, int nn)
+            { spectralAnalyzeFrame (xl, xr, nn); };
+            linear.spectralApply = [this] (std::complex<float>* y, int nn)
+            { spectralApplyFrame (y, nn); };
+        }
+        else
+        {
+            linear.spectralAnalyze = nullptr;
+            linear.spectralApply = nullptr;
+        }
+    }
+
+    // Per frame: rate each slot's bins against their own smoothed
+    // neighborhood, move the over-standers by the band's ratio slope within
+    // its range, attack/release at the hop rate, spread the gain to avoid
+    // musical noise, and fold every slot into one composite gain curve.
+    void spectralAnalyzeFrame (const std::complex<float>* xl,
+                               const std::complex<float>* xr, int n)
+    {
+        const int half = n / 2;
+        const float hopSec = (float) (linear.fftSize() - linear.firTaps() + 1)
+                           / (float) sr;
+
+        for (size_t k = 0; k < (size_t) half + 1; ++k) specGainLin[k] = 1.0f;
+
+        // The detector's view: Hann windowing applied IN the frequency
+        // domain (the 3-tap kernel 0.5X[k] - 0.25X[k-1] - 0.25X[k+1] IS the
+        // Hann window's spectrum convolution).  The frames must stay
+        // rectangular for overlap-save, and rectangular leakage smears every
+        // tone across the neighborhood the detector compares against.
+        for (int k = 0; k <= half; ++k)
+        {
+            auto tap = [&] (const std::complex<float>* x) -> float
+            {
+                std::complex<float> h = 0.5f * x[(size_t) k];
+                if (k > 0)    h -= 0.25f * x[(size_t) (k - 1)];
+                if (k < half) h -= 0.25f * x[(size_t) (k + 1)];
+                return std::abs (h);
+            };
+            const float m = std::max (tap (xl), tap (xr));
+            specMagDb[(size_t) k] = std::max (-90.0f,
+                20.0f * std::log10 (std::max (1.0e-7f, m)));
+        }
+
+        for (auto& sl : spectralSlots)
+        {
+            if (sl.band < 0) continue;
+            auto& b = bands[(size_t) sl.band];
+            const auto& p = b.p;
+
+            // Neighborhood width from Density, PROPORTIONAL to frequency: a
+            // flat bin count reads "a third of an octave" at 5 kHz and "two
+            // octaves" at 100 Hz.  relW is the fractional bandwidth.
+            const float relW = 0.03f + 0.30f * (1.0f - std::clamp (p.density, 0.0f, 1.0f));
+            const float aSpread = std::exp (-1.0f / 3.0f);
+
+            auto aBaseAt = [relW] (int k)
+            {
+                const float wBins = 3.0f + relW * (float) k;
+                return std::exp (-1.0f / wBins);
+            };
+
+            for (int k = 0; k <= half; ++k)
+                sl.base[(size_t) k] = specMagDb[(size_t) k];
+            float run = sl.base[0];
+            for (int k = 0; k <= half; ++k)
+            {
+                const float aB = aBaseAt (k);
+                run = aB * run + (1.0f - aB) * sl.base[(size_t) k];
+                sl.base[(size_t) k] = run;
+            }
+            for (int k = half; k >= 0; --k)
+            {
+                const float aB = aBaseAt (k);
+                run = aB * run + (1.0f - aB) * sl.base[(size_t) k];
+                sl.base[(size_t) k] = run;
+            }
+
+            // Required poke mirrors the band model: threshold 0 = never,
+            // -60 = any amount over the neighborhood.
+            const float required = std::max (0.0f, 60.0f + p.thresholdDb);
+
+            double fpEnergy = 0.0, fpWeight = 0.0;
+            for (int k = 0; k <= half; ++k)
+            {
+                if (sl.wt[(size_t) k] < 0.01f) continue;
+                fpEnergy += (double) sl.wt[(size_t) k]
+                          * std::pow (10.0, specMagDb[(size_t) k] * 0.1f);
+                fpWeight += (double) sl.wt[(size_t) k];
+            }
+            const float gateDb = fpWeight > 0.0
+                ? 10.0f * (float) std::log10 (std::max (1.0e-12, fpEnergy / fpWeight)) - 6.0f
+                : 0.0f;
+            const float slope = 1.0f - 1.0f / std::max (1.0f, p.ratio);
+            const float cap = std::abs (p.rangeDb);
+            // Effective timing floored at ~1.5 frames: the mask is computed
+            // once per hop, and letting it fully re-aim every frame turns a
+            // rotating leakage pattern into audible modulation spray on
+            // whatever shares the footprint.
+            const float attS = std::max (hopSec, 0.001f * std::max (0.1f, p.attackMs));
+            const float relS = std::max (hopSec, 0.001f * std::max (1.0f, p.releaseMs));
+            const float aA = std::exp (-hopSec / attS);
+            const float aR = std::exp (-hopSec / relS);
+            float deepest = 0.0f;
+
+            for (int k = 0; k <= half; ++k)
+            {
+                if (sl.wt[(size_t) k] < 0.01f) { sl.gr[(size_t) k] *= aR; continue; }
+                const float binDb = specMagDb[(size_t) k];
+                const float over = (binDb - sl.base[(size_t) k]) - required;
+                float target = 0.0f;
+                if (over > 0.0f && binDb > kDetectorFloorDb && binDb > gateDb)
+                    target = (p.rangeDb > 0.0f ? 1.0f : -1.0f)
+                           * std::min (over * slope, cap);
+                auto& g = sl.gr[(size_t) k];
+                const float a = std::abs (target) > std::abs (g) ? aA : aR;
+                g = target + a * (g - target);
+            }
+
+            // Spread the gain along k (both directions) - per-bin gating
+            // without it is audible as musical noise.
+            run = sl.gr[0];
+            for (int k = 0; k <= half; ++k)
+            { run = aSpread * run + (1.0f - aSpread) * sl.gr[(size_t) k]; sl.gr[(size_t) k] = run; }
+            for (int k = half; k >= 0; --k)
+            { run = aSpread * run + (1.0f - aSpread) * sl.gr[(size_t) k]; sl.gr[(size_t) k] = run; }
+
+            for (int k = 0; k <= half; ++k)
+            {
+                const float db = sl.gr[(size_t) k] * sl.wt[(size_t) k];
+                deepest = std::min (deepest, db);
+                if (std::abs (db) > 0.01f)
+                    specGainLin[(size_t) k] *= std::pow (10.0f, db * (1.0f / 20.0f));
+            }
+            b.grDbShown.store (deepest, std::memory_order_relaxed);
+        }
+    }
+
+    void spectralApplyFrame (std::complex<float>* y, int n)
+    {
+        const int half = n / 2;
+        for (int k = 0; k <= half; ++k)
+        {
+            y[(size_t) k] *= specGainLin[(size_t) k];
+            if (k > 0 && k < half)
+                y[(size_t) (n - k)] *= specGainLin[(size_t) k];
+        }
+    }
+
     void markAllDirty()
     {
         for (auto& b : bands) b.dirty = true;
@@ -1684,6 +1927,22 @@ private:
     EqLinearPhase linear;
     bool staticCurveDirty = true;
     std::vector<std::complex<float>> domSt, domL, domR, domM, domS;   // matrix rebuild tables
+
+    // W-1: spectral dynamics state.  A fixed budget of simultaneous
+    // spectral bands, all storage sized at configureLinear - per-bin work
+    // runs on the audio thread and must not allocate.  wt is the band's
+    // normalized footprint, base the rolling spectral neighborhood, gr the
+    // smoothed per-bin gain move (dB), env unused spare kept for symmetry.
+    static constexpr int kSpectralSlots = 4;
+    struct SpectralSlot
+    {
+        int band = -1;
+        std::vector<float> wt, base, gr;
+    };
+    std::array<SpectralSlot, (size_t) kSpectralSlots> spectralSlots;
+    std::vector<float> specGainLin;    // composite per-bin linear gain
+    std::vector<float> specMagDb;      // Hann-corrected magnitudes, shared per frame
+    bool anySpectral = false;
 
     std::vector<float> scL, scR, detL, detR;
     bool scValid = false;
