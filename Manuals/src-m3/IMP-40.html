@@ -2,7 +2,7 @@
 the leader's. Works in real time rather than bars, because a singer's timing is
 not a grid.</p>
 
-<div class="codeblock"><div class="codehead">- Source\DSP\BaySickAlignDSP.cpp (975 lines)</div><pre><code>// BaySickAlignDSP.cpp anonymous-ns pairOnsets() -- the alignment cost/path DP
+<div class="codeblock"><div class="codehead">- Source\DSP\BaySickAlignDSP.cpp - key excerpts (full file 975 lines)</div><pre><code>// BaySickAlignDSP.cpp anonymous-ns pairOnsets() -- the alignment cost/path DP
         struct Cell { int count; double cost; unsigned char from; };
         // from: 0 = pair (diag), 1 = skip dub, 2 = skip guide.
         std::vector&lt;Cell&gt; dp ((m + 1) * (n + 1));
@@ -41,7 +41,7 @@ not a grid.</p>
                 }
                 at (i, j) = best;
             }</code></pre></div>
-<details class="fullfn"><summary>Full function &mdash; - Source\DSP\BaySickAlignDSP.cpp (975 lines)</summary><pre><code>// pairOnsets() -- full
+<details class="fullfn"><summary>Full function &mdash; - Source\DSP\BaySickAlignDSP.cpp - key excerpts (full file 975 lines)</summary><pre><code>// pairOnsets() -- full
     std::vector&lt;Pair&gt; pairOnsets (const std::vector&lt;double&gt;&amp; dubOnsets,
                                    const std::vector&lt;double&gt;&amp; guideOnsets,
                                    double tolerance)

@@ -1,6 +1,6 @@
 <p>The built-in shifting methods.</p>
 
-<div class="codeblock"><div class="codehead">- Source\DSP\PitchShifters.h (214 lines, header-only)</div><pre><code>// CepstralFormantEngine::processFrame() -- envelope replacement core
+<div class="codeblock"><div class="codehead">- Source\DSP\PitchShifters.h - key excerpts (full file 214 lines, header-only)</div><pre><code>// CepstralFormantEngine::processFrame() -- envelope replacement core
         // Target envelope: dry&#x27;s (preserve) or wet&#x27;s own (throat-only),
         // frequency-scaled by the throat ratio.
         const float scale = std::pow (2.0f, -throatSemis / 12.0f);   // sample source bin = k*scale
@@ -26,7 +26,7 @@
             if (k &gt; 0 &amp;&amp; k &lt; kSize / 2)
                 mSpecWet[(size_t) (kSize - k)] = std::conj (mSpecWet[(size_t) k]);
         }</code></pre></div>
-<details class="fullfn"><summary>Full function &mdash; - Source\DSP\PitchShifters.h (214 lines, header-only)</summary><pre><code>// CepstralFormantEngine::processFrame()
+<details class="fullfn"><summary>Full function &mdash; - Source\DSP\PitchShifters.h - key excerpts (full file 214 lines, header-only)</summary><pre><code>// CepstralFormantEngine::processFrame()
     void processFrame (bool preserve, float throatSemis) noexcept
     {
         // Windowed frames end at the current input head.

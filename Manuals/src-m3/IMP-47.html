@@ -1,6 +1,6 @@
 <p>Estimates tempo from audio. Behind the Tap button and the tempo field.</p>
 
-<div class="codeblock"><div class="codehead">- Source\DSP\BpmDetect.h (119 lines, header-only, namespace BpmDetect)</div><pre><code>// BpmDetect::detect() -- comb-scored autocorrelation core
+<div class="codeblock"><div class="codehead">- Source\DSP\BpmDetect.h - key excerpts (full file 119 lines, header-only, namespace BpmDetect)</div><pre><code>// BpmDetect::detect() -- comb-scored autocorrelation core
         // 3) autocorrelation over the 60-200 BPM lag range (+ double-lag
         //    headroom for the comb), comb-scored: score(L) = r(L) + r(2L)/2
         //    + r(L/2)/3.
@@ -29,7 +29,7 @@
             ++scored;
             if (s &gt; bestScore) { bestScore = s; bestLag = lag; }
         }</code></pre></div>
-<details class="fullfn"><summary>Full function &mdash; - Source\DSP\BpmDetect.h (119 lines, header-only, namespace BpmDetect)</summary><pre><code>    inline Estimate detect (juce::AudioFormatReader&amp; reader)
+<details class="fullfn"><summary>Full function &mdash; - Source\DSP\BpmDetect.h - key excerpts (full file 119 lines, header-only, namespace BpmDetect)</summary><pre><code>    inline Estimate detect (juce::AudioFormatReader&amp; reader)
     {
         Estimate out;
         const double sr = reader.sampleRate;

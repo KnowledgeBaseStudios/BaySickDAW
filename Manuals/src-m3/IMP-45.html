@@ -2,7 +2,7 @@
 analysis &mdash; running it at full rate costs far more and finds the same
 answer.</p>
 
-<div class="codeblock"><div class="codehead">- Source\DSP\PitchTrackerYIN.cpp (355 lines)</div><pre><code>// PitchTrackerYIN::pushAudio() -- audio-thread box-average decimation
+<div class="codeblock"><div class="codehead">- Source\DSP\PitchTrackerYIN.cpp - key excerpts (full file 355 lines)</div><pre><code>// PitchTrackerYIN::pushAudio() -- audio-thread box-average decimation
     if (mDecim &lt;= 1) { writeToFifo (mono, numSamples); return; }
 
     // Box-average mDecim input samples into one analysis sample.  The partial
@@ -27,7 +27,7 @@ answer.</p>
     }
 
     if (outN &gt; 0) writeToFifo (out, outN);</code></pre></div>
-<details class="fullfn"><summary>Full function &mdash; - Source\DSP\PitchTrackerYIN.cpp (355 lines)</summary><pre><code>// PitchTrackerYIN::prepare()
+<details class="fullfn"><summary>Full function &mdash; - Source\DSP\PitchTrackerYIN.cpp - key excerpts (full file 355 lines)</summary><pre><code>// PitchTrackerYIN::prepare()
 void PitchTrackerYIN::prepare (double sampleRate)
 {
     if (mWorker != nullptr) releaseResources();

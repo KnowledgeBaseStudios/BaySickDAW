@@ -1,6 +1,6 @@
 <p>Estimates a noise profile and subtracts it. Behind the "Cleaned" take types.</p>
 
-<div class="codeblock"><div class="codehead">- Source\DSP\DenoiseDSP.cpp (341 lines)</div><pre><code>// Denoise::cleanFile() -- spectral subtraction gain + birdies suppression
+<div class="codeblock"><div class="codehead">- Source\DSP\DenoiseDSP.cpp - key excerpts (full file 341 lines)</div><pre><code>// Denoise::cleanFile() -- spectral subtraction gain + birdies suppression
         for (int k = 0; k &lt; bins; ++k)
         {
             const float re = fftData[(size_t) (k * 2)];
@@ -23,7 +23,7 @@
             fftData[(size_t) (k * 2)]     *= g;
             if (k &gt; 0 &amp;&amp; k &lt; bins - 1) fftData[(size_t) (k * 2 + 1)] *= g;
         }</code></pre></div>
-<details class="fullfn"><summary>Full function &mdash; - Source\DSP\DenoiseDSP.cpp (341 lines)</summary><pre><code>void DenoiseLearner::processPending()
+<details class="fullfn"><summary>Full function &mdash; - Source\DSP\DenoiseDSP.cpp - key excerpts (full file 341 lines)</summary><pre><code>void DenoiseLearner::processPending()
 {
     if (mFFT == nullptr) return;
     const int size = (int) mRing.size();

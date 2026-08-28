@@ -1,7 +1,7 @@
 <p>Third-party engines, each with its own trade between quality, CPU and
 character. Offered as a choice because no single one is best on every voice.</p>
 
-<div class="codeblock"><div class="codehead">- Source\DSP\LibraryPitchShifters.cpp (569 lines - the three wrapper classes + factory; OUR code, wrapping vendored libs)</div><pre><code>// RubberBandShifter::bake() -- realtime-mode engine driven block-by-block (our wrapper)
+<div class="codeblock"><div class="codehead">- Source\DSP\LibraryPitchShifters.cpp - key excerpts (full file 569 lines - the three wrapper classes + factory; OUR code, wrapping vendored libs)</div><pre><code>// RubberBandShifter::bake() -- realtime-mode engine driven block-by-block (our wrapper)
         using RB = RubberBand::RubberBandStretcher;
         // Offline mode fixes pitch for the whole pass; time-varying edits need
         // the REAL-TIME engine driven block-by-block.  OptionPitchHighConsistency
@@ -23,7 +23,7 @@ character. Offered as a choice because no single one is best on every voice.</p>
             const float* const* ip = &amp;src;
             rb.process (ip, (size_t) chunk, isFinal);
             drain();</code></pre></div>
-<details class="fullfn"><summary>Full function &mdash; - Source\DSP\LibraryPitchShifters.cpp (569 lines - the three wrapper classes + factory; OUR code, wrapping vendored libs)</summary><pre><code>        long long srcCursor = 0;   // integer source samples fed (excludes pad)
+<details class="fullfn"><summary>Full function &mdash; - Source\DSP\LibraryPitchShifters.cpp - key excerpts (full file 569 lines - the three wrapper classes + factory; OUR code, wrapping vendored libs)</summary><pre><code>        long long srcCursor = 0;   // integer source samples fed (excludes pad)
         int edited = 0;
         while (edited &lt; nOut)
         {

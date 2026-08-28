@@ -2,7 +2,7 @@
 400&nbsp;ms window, short-term 3&nbsp;s, integrated the whole programme, and
 range the spread between the quiet and loud parts.</p>
 
-<div class="codeblock"><div class="codehead">- Source\DSP\LufsMeterDSP.cpp (170 lines) + LufsMeterDSP.h (84 lines) - K-weighting, momentary/short-term windows, gated integrated</div><pre><code>// LufsMeterDSP::designKWeighting() -- bilinear-from-constants (exact at any fs)
+<div class="codeblock"><div class="codehead">- Source\DSP\LufsMeterDSP.cpp - key excerpts (full file 170 lines) + LufsMeterDSP.h - key excerpts (full file 84 lines) - K-weighting, momentary/short-term windows, gated integrated</div><pre><code>// LufsMeterDSP::designKWeighting() -- bilinear-from-constants (exact at any fs)
     // Stage 1 — high shelf.
     {
         const double f0 = 1681.9744509555319, G = 3.99984385397, Q = 0.7071752369554193;
@@ -30,7 +30,7 @@ range the spread between the quiet and loud parts.</p>
         mHpL.coefficients = c;
         mHpR.coefficients = c;
     }</code></pre></div>
-<details class="fullfn"><summary>Full function &mdash; - Source\DSP\LufsMeterDSP.cpp (170 lines) + LufsMeterDSP.h (84 lines) - K-weighting, momentary/short-term windows, gated integrated</summary><pre><code>// LufsMeterDSP::process() + closeBin() + windowLufs()
+<details class="fullfn"><summary>Full function &mdash; - Source\DSP\LufsMeterDSP.cpp - key excerpts (full file 170 lines) + LufsMeterDSP.h - key excerpts (full file 84 lines) - K-weighting, momentary/short-term windows, gated integrated</summary><pre><code>// LufsMeterDSP::process() + closeBin() + windowLufs()
 void LufsMeterDSP::process (const juce::AudioBuffer&lt;float&gt;&amp; buf)
 {
     const int n  = buf.getNumSamples();

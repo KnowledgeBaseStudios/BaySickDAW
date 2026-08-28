@@ -2,7 +2,7 @@
 above the audible range instead of folding back into it as harshness. Costs CPU
 in direct proportion.</p>
 
-<div class="codeblock"><div class="codehead">- Source\DSP\PolyphaseOversampler.h (98 lines, header-only)</div><pre><code>// PolyphaseOversampler4x::prepare() -- the locked construction args
+<div class="codeblock"><div class="codehead">- Source\DSP\PolyphaseOversampler.h - key excerpts (full file 98 lines, header-only)</div><pre><code>// PolyphaseOversampler4x::prepare() -- the locked construction args
     void prepare (int numChannels, int maxBlockSize)
     {
         using OS = juce::dsp::Oversampling&lt;float&gt;;
@@ -17,7 +17,7 @@ in direct proportion.</p>
         mOS-&gt;initProcessing ((size_t) maxBlockSize);
         mNumChannels = numChannels;
     }</code></pre></div>
-<details class="fullfn"><summary>Full function &mdash; - Source\DSP\PolyphaseOversampler.h (98 lines, header-only)</summary><pre><code>    void prepare (int numChannels, int maxBlockSize)
+<details class="fullfn"><summary>Full function &mdash; - Source\DSP\PolyphaseOversampler.h - key excerpts (full file 98 lines, header-only)</summary><pre><code>    void prepare (int numChannels, int maxBlockSize)
     {
         using OS = juce::dsp::Oversampling&lt;float&gt;;
         // numStages=2 = two halving filter stages = 4x oversampling factor.

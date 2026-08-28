@@ -2,7 +2,7 @@
 note boundaries in a way a realtime corrector cannot &mdash; a realtime one has
 to decide before it has heard the end of the word.</p>
 
-<div class="codeblock"><div class="codehead">- Source\DSP\BaySickPitchDSP.cpp (1193 lines)</div><pre><code>// BaySickPitchDSP::computeEnvelopes() - per-sample edit -&gt; envelope resolver (bake input)
+<div class="codeblock"><div class="codehead">- Source\DSP\BaySickPitchDSP.cpp - key excerpts (full file 1193 lines)</div><pre><code>// BaySickPitchDSP::computeEnvelopes() - per-sample edit -&gt; envelope resolver (bake input)
         const float smoothCoef = 1.0f - std::exp (-1.0f / (float) (speedMs * 0.001 * sr));
         const float gainCoef   = 1.0f - std::exp (-1.0f / (float) (0.005 * sr));
 ...
@@ -35,7 +35,7 @@ to decide before it has heard the end of the word.</p>
         outRatio  [i] = std::pow (2.0f, (st.smoothedSemis + fastSemis) / 12.0f);
         outFormant[i] = st.smoothedFormant;
         outGain   [i] = st.smoothedGain;</code></pre></div>
-<details class="fullfn"><summary>Full function &mdash; - Source\DSP\BaySickPitchDSP.cpp (1193 lines)</summary><pre><code>// BaySickPitchDSP::analyzeComposite() -- Stage 1 voiced runs + Stage 2 glide-merge
+<details class="fullfn"><summary>Full function &mdash; - Source\DSP\BaySickPitchDSP.cpp - key excerpts (full file 1193 lines)</summary><pre><code>// BaySickPitchDSP::analyzeComposite() -- Stage 1 voiced runs + Stage 2 glide-merge
     BaySickAlignDSP::estimateF0Track (mono, numSamples, sampleRate, kF0Hop, mF0Track);
     const double hopSec = kF0Hop / sampleRate;
     const int    numFrames = (int) mF0Track.size();

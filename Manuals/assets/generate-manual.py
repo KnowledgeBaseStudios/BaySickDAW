@@ -9,7 +9,7 @@
 #     auto-expand whatever they land in
 #   - shared mechanism topics live on their LEAD figure (synth panels carry
 #     the synth engine's code); only true collections stay in group-end blocks
-import re, os, sys, html, json, struct, importlib.util
+import re, os, sys, html, json, struct, importlib.util, datetime
 
 ROOT = r"C:\Users\jeffm\Documents\BaySickDAW"
 REG  = os.path.join(ROOT, "Plans & Specs", "System Reference", "Callout Registry.md")
@@ -139,6 +139,22 @@ for m in re.finditer(r'^\| (Shell|Instrument|Mixing & Effects) \| (\d+) \| `([A-
     ORDER.append(code)
 assert len(ORDER) == 91
 
+
+GROUPS = ["Shell", "Instrument", "Mixing & Effects"]
+GSLUG = {"Shell": "shell", "Instrument": "instrument", "Mixing & Effects": "mixing-effects"}
+CHILDREN = {}
+for code, f in FIGS.items():
+    for p in f['parents']:
+        CHILDREN.setdefault(p, []).append(code)
+for p in CHILDREN:
+    CHILDREN[p].sort(key=lambda c: (GROUPS.index(FIGS[c]['group']), FIGS[c]['order']))
+
+call = {}
+for code, n, label, imp in re.findall(
+        r'^\| ([A-Z][A-Z\-]*)-(\d+) \| (.*?) \| \w+ \| ([A-Z\-0-9]+|-) \| .*? \|\s*$', reg, re.M):
+    call.setdefault(code, []).append((int(n), label, imp))
+for k in call: call[k].sort()
+
 # QA-ManualPress M-4: menu-figure dots self-anchor.  Menu callouts number
 # down the rows by convention, and the harness emits every captured menu's
 # row rects into bsd-docs.json - so a conforming figure's dot map is
@@ -155,18 +171,18 @@ for _code in list(C.keys()):
     _rows = (DOCS.get(_fig) or {}).get('menurows')
     if not _rows:
         continue
-    _old = C[_code]
+    _want = len(call.get(_code, [])) or len(C.get(_code, {}))
     _withH = [r for r in _rows if not r.get('sep')]
     _noH = [r for r in _withH if not r.get('header')]
     _anchors = None
     for _cand in (_withH, _noH):
-        if len(_cand) == len(_old):
+        if len(_cand) == _want:
             _anchors = _cand
             break
     if _anchors is None:
         MENU_DOT_REPORT.append(
             "%s (%s): %d callouts vs %d rows (%d excl headers) - hand coords kept"
-            % (_code, _fig, len(_old), len(_withH), len(_noH)))
+            % (_code, _fig, _want, len(_withH), len(_noH)))
         continue
     _gen = {}
     for _i, _r in enumerate(_anchors):
@@ -175,20 +191,6 @@ for _code in list(C.keys()):
     C[_code] = _gen
     MENU_DOT_GENERATED += 1
 
-GROUPS = ["Shell", "Instrument", "Mixing & Effects"]
-GSLUG = {"Shell": "shell", "Instrument": "instrument", "Mixing & Effects": "mixing-effects"}
-CHILDREN = {}
-for code, f in FIGS.items():
-    for p in f['parents']:
-        CHILDREN.setdefault(p, []).append(code)
-for p in CHILDREN:
-    CHILDREN[p].sort(key=lambda c: (GROUPS.index(FIGS[c]['group']), FIGS[c]['order']))
-
-call = {}
-for code, n, label, imp in re.findall(
-        r'^\| ([A-Z][A-Z\-]*)-(\d+) \| (.*?) \| \w+ \| ([A-Z\-0-9]+|-) \| .*? \|\s*$', reg, re.M):
-    call.setdefault(code, []).append((int(n), label, imp))
-for k in call: call[k].sort()
 
 blurb = {}
 for m in re.finditer(r'^### `([A-Z\-]+)` - `[^`]+`\s*\n\s*\n(.*?)(?=\n\| Callout|\n### |\Z)',
@@ -550,6 +552,13 @@ html, body { overflow-x: clip; }
 main { margin-left: 272px; width: calc(var(--fsw, 100vw) - 289px); }
 .views { display: flex; flex-wrap: wrap; gap: 14px; align-items: flex-start; }
 .views .vu { min-width: 0; }
+/* One 1.3 MB page: offscreen sections opt out of layout/paint so a
+   details toggle reflows its own section, not the whole document (Jeff
+   reported whole-manual lag opening code dropdowns). Chromium renders
+   contained sections on demand for scroll, anchor jumps and find-in-page. */
+section.figd { content-visibility: auto; contain-intrinsic-size: auto 900px; }
+details.fullfn > pre { content-visibility: auto; contain-intrinsic-size: auto 600px; }
+.tp { content-visibility: auto; contain-intrinsic-size: auto 500px; }
 /* Text and tables wrap to the LIVE window with a right gutter mirroring the
    left (Jeff); only the figure strip keeps the pinned fullscreen width -
    screenshots never rescale, per the vertical-only-scroll ruling above. */
@@ -563,6 +572,7 @@ main .lede, main .crumbs, main details.fullfn, main .tp
   main p, main table, main pre, main h3, main h4, main h5,
   main .lede, main .crumbs, main details.fullfn, main .tp
   { max-width: none; }
+  section.figd, details.fullfn > pre, .tp { content-visibility: visible; }
   section.figd { break-before: page; }
 }
 .wrap.atlas { display: block; max-width: none; padding-right: 22px; }
@@ -640,6 +650,7 @@ a.dbtn.weeds:hover { background: var(--accent-2); color: #00201f; }
       <button id="lv-depth">In Depth</button>
       <button id="lv-weeds">In The Weeds</button>
       <span class="lhint" id="lhint">Pictures and pointers only.</span>
+      <span class="lhint" style="margin-left:auto">built {stamp}</span>
     </div>
   </div>
 </header>
@@ -1009,6 +1020,7 @@ const M2CROPS = {m2crops};
 """
 
 doc = doc_head.replace("{nav}", "\n".join(nav)).replace("{parts}", "\n".join(parts)) + doc_js
+doc = doc.replace("{stamp}", datetime.datetime.now().strftime("%Y-%m-%d %H:%M"))
 doc = doc.replace("{coords}", json.dumps(coord_data, separators=(',', ':')))
 doc = doc.replace("{crops}",  json.dumps(crop_data,  separators=(',', ':')))
 doc = doc.replace("{m2crops}", json.dumps(m2crop_data, separators=(',', ':')))

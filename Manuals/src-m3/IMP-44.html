@@ -1,7 +1,7 @@
 <p>The low-latency path used while you are singing, where being fast matters more
 than being perfect.</p>
 
-<div class="codeblock"><div class="codehead">- Source\DSP\MonitorPitchShifter.h (86 lines, header-only)</div><pre><code>// MonitorPitchShifter::process() -- dual-tap crossfade core
+<div class="codeblock"><div class="codehead">- Source\DSP\MonitorPitchShifter.h - key excerpts (full file 86 lines, header-only)</div><pre><code>// MonitorPitchShifter::process() -- dual-tap crossfade core
     // In-place mono shift.  ratio = output pitch / input pitch.
     void process (float* buf, int n, float ratio) noexcept
     {
@@ -23,7 +23,7 @@ than being perfect.</p>
             mWrite = (mWrite + 1) &amp; mMask;   // wrap the accumulator itself, not just reads
         }
     }</code></pre></div>
-<details class="fullfn"><summary>Full function &mdash; - Source\DSP\MonitorPitchShifter.h (86 lines, header-only)</summary><pre><code>// MonitorPitchShifter -- prepare/reset/process/readTap (full)
+<details class="fullfn"><summary>Full function &mdash; - Source\DSP\MonitorPitchShifter.h - key excerpts (full file 86 lines, header-only)</summary><pre><code>// MonitorPitchShifter -- prepare/reset/process/readTap (full)
     void prepare (double sampleRate, int maxBlockSize)
     {
         // 24 ms window: below ~20 ms the splice rate beats against low male

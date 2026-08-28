@@ -2,7 +2,7 @@
 in time, resynthesises. Stretch far enough and it smears &mdash; that is the
 method showing, not a fault.</p>
 
-<div class="codeblock"><div class="codehead">- Source\DSP\PhaseVocoder.cpp (407 lines)</div><pre><code>// PhaseVocoder::prepare() -- the OLA output-ring capacity law
+<div class="codeblock"><div class="codehead">- Source\DSP\PhaseVocoder.cpp - key excerpts (full file 407 lines)</div><pre><code>// PhaseVocoder::prepare() -- the OLA output-ring capacity law
     // Capacity law for the OLA queue.  processFrame&#x27;s add spans
     // [outWriteAbs, outWriteAbs + mFFTSize) and the consumer only drains
     // between pushes, so the deepest the unread region ever gets is
@@ -24,7 +24,7 @@ method showing, not a fault.</p>
         c.phaseAccum.assign ((size_t) (mFFTSize / 2 + 1),     0.0f);
         c.outBuf    .assign (sz,                              0.0f);
     }</code></pre></div>
-<details class="fullfn"><summary>Full function &mdash; - Source\DSP\PhaseVocoder.cpp (407 lines)</summary><pre><code>// PhaseVocoder::prepare()
+<details class="fullfn"><summary>Full function &mdash; - Source\DSP\PhaseVocoder.cpp - key excerpts (full file 407 lines)</summary><pre><code>// PhaseVocoder::prepare()
 void PhaseVocoder::prepare (int maxOutputSamplesPerBlock, double fileSampleRate)
 {
     const int order = fftOrderForFileRate (fileSampleRate);

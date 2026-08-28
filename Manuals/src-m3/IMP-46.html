@@ -1,7 +1,7 @@
 <p>Finds several simultaneous pitches. Harder, less certain, and what the
 send-notes-to feature uses.</p>
 
-<div class="codeblock"><div class="codehead">- Source\DSP\PolyPitchTracker.cpp (205 lines)</div><pre><code>// PolyPitchTracker::WorkerThread::analyze() -- greedy harmonic-sum detection
+<div class="codeblock"><div class="codehead">- Source\DSP\PolyPitchTracker.cpp - key excerpts (full file 205 lines)</div><pre><code>// PolyPitchTracker::WorkerThread::analyze() -- greedy harmonic-sum detection
         constexpr int H = 8;                                  // harmonics summed
         const float scoreThresh = meanMag * (float) H * 3.0f;
 
@@ -29,7 +29,7 @@ send-notes-to feature uses.</p>
                 if (s &gt; bestS) { bestS = s; bestF = f; }
             }
             if (bestF &lt;= 0.0f || bestS &lt; scoreThresh) break;</code></pre></div>
-<details class="fullfn"><summary>Full function &mdash; - Source\DSP\PolyPitchTracker.cpp (205 lines)</summary><pre><code>    void analyze (const float* window, const float* hann,
+<details class="fullfn"><summary>Full function &mdash; - Source\DSP\PolyPitchTracker.cpp - key excerpts (full file 205 lines)</summary><pre><code>    void analyze (const float* window, const float* hann,
                   juce::dsp::FFT&amp; fft, std::vector&lt;float&gt;&amp; fftBuf)
     {
         const int W = kWindowSize;

@@ -2,7 +2,7 @@
 peaks are real once the signal is converted back to sound, which is why a file
 that looks safe on a sample meter can still distort on playback.</p>
 
-<div class="codeblock"><div class="codehead">- Source\DSP\TruePeakMeter.cpp (154 lines)</div><pre><code>// TruePeakMeter::pushAndPeak() -- 4-phase interpolated peak per input sample
+<div class="codeblock"><div class="codehead">- Source\DSP\TruePeakMeter.cpp - key excerpts (full file 154 lines)</div><pre><code>// TruePeakMeter::pushAndPeak() -- 4-phase interpolated peak per input sample
 float TruePeakMeter::pushAndPeak (int ch, float x) noexcept
 {
     auto&amp; hist = mHist[(size_t) ch];
@@ -29,7 +29,7 @@ float TruePeakMeter::pushAndPeak (int ch, float x) noexcept
     }
     return peak;
 }</code></pre></div>
-<details class="fullfn"><summary>Full function &mdash; - Source\DSP\TruePeakMeter.cpp (154 lines)</summary><pre><code>// besselI0() -- Kaiser window shaping term
+<details class="fullfn"><summary>Full function &mdash; - Source\DSP\TruePeakMeter.cpp - key excerpts (full file 154 lines)</summary><pre><code>// besselI0() -- Kaiser window shaping term
     double besselI0 (double x)
     {
         double sum = 1.0, term = 1.0;
