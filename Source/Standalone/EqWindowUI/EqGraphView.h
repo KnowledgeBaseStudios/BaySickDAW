@@ -36,6 +36,8 @@
 #include "../../PluginProcessor.h"
 #include "../UndoBracket.h"
 #include "../SharedUI.h"
+#include <array>
+#include <vector>
 
 namespace eqview {
 
@@ -132,18 +134,31 @@ public:
         repaint();
     }
 
-    float gainScaleDb() const { return (float) (double) viewProp ("scale", 18.0); }
-    bool showAnalyser() const { return (bool) viewProp ("analyser", true); }
-    bool showSpectrogram() const { return (bool) viewProp ("spectrogram", false); }
-    bool showPhase() const { return (bool) viewProp ("phase", false); }
-    bool showPiano() const { return (bool) viewProp ("piano", false); }
-    bool analyserPre() const { return (bool) viewProp ("pre", true); }
-    bool analyserPost() const { return (bool) viewProp ("post", true); }
-    bool analyserSc() const { return (bool) viewProp ("sc", false); }
+    // STATIC identifiers, deliberately.  juce::Identifier pools every string
+    // globally, so building one from a literal takes a lock on the process-wide
+    // pool - and these are reached from the per-pixel geometry helpers, which
+    // turned a display preference into thousands of locked lookups per frame.
+    float gainScaleDb() const
+        { static const juce::Identifier k ("scale"); return (float) (double) viewProp (k, 18.0); }
+    bool showAnalyser() const
+        { static const juce::Identifier k ("analyser"); return (bool) viewProp (k, true); }
+    bool showSpectrogram() const
+        { static const juce::Identifier k ("spectrogram"); return (bool) viewProp (k, false); }
+    bool showPhase() const
+        { static const juce::Identifier k ("phase"); return (bool) viewProp (k, false); }
+    bool showPiano() const
+        { static const juce::Identifier k ("piano"); return (bool) viewProp (k, false); }
+    bool analyserPre() const
+        { static const juce::Identifier k ("pre"); return (bool) viewProp (k, true); }
+    bool analyserPost() const
+        { static const juce::Identifier k ("post"); return (bool) viewProp (k, true); }
+    bool analyserSc() const
+        { static const juce::Identifier k ("sc"); return (bool) viewProp (k, false); }
 
     DomainView domainView() const
     {
-        return (DomainView) juce::jlimit (0, 2, (int) viewProp ("view", 0));
+        static const juce::Identifier k ("view");
+        return (DomainView) juce::jlimit (0, 2, (int) viewProp (k, 0));
     }
 
     void setDomainView (DomainView v)
@@ -277,9 +292,144 @@ public:
 
     float gainToY (float db) const
     {
-        const auto a = plotArea();
-        const float s = gainScaleDb();
+        return gainToYIn (plotArea(), gainScaleDb(), db);
+    }
+
+    // The same maths against a rect and scale the caller already has.  The
+    // member versions re-derive both per call - fine once, ruinous inside a
+    // per-pixel loop, where it was four property reads a pixel.
+    static double xToFreqIn (juce::Rectangle<float> a, float x)
+    {
+        const double t = juce::jlimit (0.0f, 1.0f, (x - a.getX()) / a.getWidth());
+        return 20.0 * std::pow (1000.0, t);
+    }
+
+    static float gainToYIn (juce::Rectangle<float> a, float s, float db)
+    {
         return juce::jmap (juce::jlimit (-s, s, db), -s, s, a.getBottom(), a.getY());
+    }
+
+    // ── per-band curve cache ──────────────────────────────────────────────
+    // bandMagnitudeAt re-derives the whole filter on every call - a pow, six
+    // sqrt and two tan per band per pixel - and the curve only actually moves
+    // when a parameter does.  So each band's response is sampled once across
+    // the plot and kept until that band changes; dragging one band recomputes
+    // one row instead of all of them, and an idle window recomputes nothing.
+    //
+    // DYNAMIC bands are deliberately NOT cached: bandMagnitudeAt defaults to
+    // withDynamic = true, so their drawn curve moves with the live gain
+    // reduction, and caching it would freeze the very animation it exists to
+    // show.  They stay live per pixel, and there are rarely more than one.
+    struct CurveKey
+    {
+        bool on = false, muted = false, dyn = false;
+        int type = -1, slope = -1;
+        float f = 0.0f, g = 0.0f, q = 0.0f;
+
+        bool operator== (const CurveKey& o) const noexcept
+        {
+            return on == o.on && muted == o.muted && dyn == o.dyn
+                && type == o.type && slope == o.slope
+                && f == o.f && g == o.g && q == o.q;
+        }
+    };
+
+    static CurveKey keyOf (const kbs::EqBandParams& p)
+    {
+        return { p.on, p.muted, p.dynamic, (int) p.type, p.slope,
+                 p.freqHz, p.gainDb, p.q };
+    }
+
+    bool bandIsLive (int b) const
+    {
+        if (b < 0 || b >= kBands) return false;
+        const auto& k = curveKey[(size_t) b];
+        return k.dyn && kbs::eqTypeSupportsDynamic ((kbs::EqType) k.type);
+    }
+
+    // Rebuilds only what changed.  Everything the engine's magnitude depends
+    // on beyond the band itself - mode, oversampling, sample rate - and the
+    // sampling width invalidate the whole set.
+    void refreshCurveCache (StripEq& e, juce::Rectangle<float> a, int w)
+    {
+        if (w < 0) return;      // degenerate plot: assign would underflow size_t
+
+        // Every global comes off the ENGINE, the object the magnitude query
+        // reads - the processor's rate updates before the engines re-prepare
+        // on a device change, and a key built from the wrong object can stamp
+        // a stale build as current forever.
+        const auto mode = e.getMode();
+        const bool os = e.getOversampling();
+        const bool pq = e.engine().getProportionalQ();
+        const double sr = e.engine().getSampleRate();
+        const bool all = w != curveW || mode != curveMode || os != curveOs
+                      || pq != curvePq || std::abs (sr - curveSr) > 0.5;
+        if (all)
+        {
+            curveW = w; curveMode = mode; curveOs = os; curvePq = pq; curveSr = sr;
+            for (auto& k : curveKey) k = CurveKey{};
+        }
+
+        for (int b = 0; b < kBands; ++b)
+        {
+            // The ENGINE's band, not the wrapper's cache: pushBand writes the
+            // two in sequence, and a key taken from one object against a row
+            // sampled from the other can latch a stale row permanently.  From
+            // one object, the worst a mid-refresh update can do is store an
+            // already-outdated key - which mismatches next frame and reheals.
+            const auto p = e.engine().getBand (b);
+            const auto k = keyOf (p);
+            auto& row = curveRow[(size_t) b];
+            if (! all && k == curveKey[(size_t) b] && (int) row.size() == w + 1)
+                continue;
+
+            curveKey[(size_t) b] = k;
+            row.assign ((size_t) w + 1, 0.0f);
+            // Live (uncached) or contributing nothing: the row stays zeroed.
+            // Live means dynamics that can actually MOVE - a dyn flag on a
+            // type with no dynamics draws its static curve and caches fine.
+            if ((k.dyn && kbs::eqTypeSupportsDynamic ((kbs::EqType) k.type))
+                || ! p.on || p.muted)
+                continue;
+
+            for (int px = 0; px <= w; ++px)
+                row[(size_t) px] = 20.0f * std::log10 (juce::jmax (1.0e-6f,
+                    e.engine().bandMagnitudeAt (b, (float) xToFreqIn (a, a.getX() + (float) px))));
+        }
+    }
+
+    // One band's dB at a pixel: cached unless the band is dynamic.
+    float bandDbAt (StripEq& e, int b, juce::Rectangle<float> a, int px) const
+    {
+        if (! bandIsLive (b))
+        {
+            const auto& row = curveRow[(size_t) b];
+            if ((size_t) px < row.size()) return row[(size_t) px];
+        }
+        return 20.0f * std::log10 (juce::jmax (1.0e-6f,
+            e.engine().bandMagnitudeAt (b, (float) xToFreqIn (a, a.getX() + (float) px))));
+    }
+
+    // A view's summed dB at a pixel: cached rows add, live bands evaluate.
+    float curveDbAt (StripEq& e, const int* idx, int n,
+                     juce::Rectangle<float> a, int px) const
+    {
+        float db = 0.0f;
+        for (int i = 0; i < n; ++i) db += bandDbAt (e, idx[i], a, px);
+        return db;
+    }
+
+    // The bands one view actually draws, collected ONCE instead of re-testing
+    // all 24 (and copying each band's struct) at every pixel.
+    int collectViewBands (StripEq& e, DomainView v, int* out) const
+    {
+        int n = 0;
+        for (int b = 0; b < kBands; ++b)
+        {
+            const auto p = e.getBand (b);
+            if (p.on && ! p.muted && viewOfChannel (p.channel) == v) out[n++] = b;
+        }
+        return n;
     }
 
     float yToGain (float y) const
@@ -312,6 +462,7 @@ public:
         auto* e = eq();
         if (e != nullptr)
         {
+            refreshCurveCache (*e, a, (int) a.getWidth());
             if (showSpectrogram()) drawSpectrogram (g, a);
             if (showAnalyser()) drawAnalyser (g, a, *e);
             if (analyserSc() && e->scFeedAlive.load (std::memory_order_relaxed))
@@ -784,23 +935,52 @@ private:
             g.fillRect (x, y, 1.0f, 1.5f);
     }
 
+    // The grid is ~2,700 individual fills - static geometry that only moves
+    // when the plot resizes or the gain scale changes, and it was being redrawn
+    // from scratch thirty times a second.  Rendered once into an image and
+    // blitted instead.
     void drawGrid (juce::Graphics& g, juce::Rectangle<float> a)
+    {
+        const int iw = juce::jmax (1, (int) std::ceil (a.getWidth()));
+        const int ih = juce::jmax (1, (int) std::ceil (a.getHeight()));
+        const float sc = gainScaleDb();
+
+        if (! gridCache.isValid() || gridW != iw || gridH != ih
+            || std::abs (gridScale - sc) > 0.001f)
+        {
+            gridCache = juce::Image (juce::Image::ARGB, iw, ih, true);
+            juce::Graphics gg (gridCache);
+            renderGrid (gg, juce::Rectangle<float> (0.0f, 0.0f, (float) iw, (float) ih), sc);
+            gridW = iw;
+            gridH = ih;
+            gridScale = sc;
+        }
+        g.drawImageAt (gridCache, (int) a.getX(), (int) a.getY());
+    }
+
+    static float freqToXIn (juce::Rectangle<float> a, double hz)
+    {
+        const double t = std::log (juce::jlimit (20.0, 20000.0, hz) / 20.0)
+                       / std::log (1000.0);
+        return a.getX() + (float) t * a.getWidth();
+    }
+
+    void renderGrid (juce::Graphics& g, juce::Rectangle<float> a, float sc2)
     {
         const double minors[] = { 30, 40, 60, 70, 80, 90, 200, 300, 400, 600,
                                   700, 800, 900, 2000, 3000, 4000, 6000, 7000,
                                   8000, 9000, 15000 };
         for (double hz : minors)
-            drawDottedVertical (g, freqToX (hz), a, 0.10f);
+            drawDottedVertical (g, freqToXIn (a, hz), a, 0.10f);
 
         for (double hz : { 50.0, 100.0, 500.0, 1000.0, 5000.0, 10000.0 })
-            drawDottedVertical (g, freqToX (hz), a, 0.25f);
+            drawDottedVertical (g, freqToXIn (a, hz), a, 0.25f);
 
-        const float sc2 = gainScaleDb();
         g.setFont (juce::Font (juce::FontOptions (9.0f)));
         for (float db = -sc2; db <= sc2 + 0.01f; db += sc2 / 3.0f)
         {
             const bool zero = std::abs (db) < 0.01f;
-            const float y = gainToY (db);
+            const float y = gainToYIn (a, sc2, db);
             if (zero)
             {
                 g.setColour (cols.zeroLine.withAlpha (0.30f));
@@ -902,23 +1082,6 @@ private:
         }
     }
 
-    // A view's summed curve: the product of ITS bands' own responses - each
-    // pixel still the engine's arithmetic, multiplied display-side.  The
-    // views are separate pictures by design (Jeff): the Mid view shows the
-    // mid processing, not the whole EQ.
-    float viewCurveDb (StripEq& e, DomainView v, double hz) const
-    {
-        double m = 1.0;
-        for (int b = 0; b < kBands; ++b)
-        {
-            const auto p = e.getBand (b);
-            if (! p.on || p.muted) continue;
-            if (viewOfChannel (p.channel) != v) continue;
-            m *= e.engine().bandMagnitudeAt (b, (float) hz);
-        }
-        return 20.0f * (float) std::log10 (juce::jmax (1.0e-6, m));
-    }
-
     // The other two views, ghosted: live, dimmed, never interactive - so the
     // half you are not editing stays visible while you work (Jeff).
     void drawGhostViews (juce::Graphics& g, juce::Rectangle<float> a, StripEq& e)
@@ -929,19 +1092,15 @@ private:
             const auto v = (DomainView) vi;
             if (v == domainView()) continue;
 
-            bool any = false;
-            for (int b = 0; b < kBands && ! any; ++b)
-            {
-                const auto p = e.getBand (b);
-                any = p.on && ! p.muted && viewOfChannel (p.channel) == v;
-            }
-            if (! any) continue;
+            int idx[kBands];
+            const int n = collectViewBands (e, v, idx);
+            if (n == 0) continue;
 
+            const float s = gainScaleDb();
             juce::Path path;
             for (int px = 0; px <= w; px += 3)
             {
-                const double hz = xToFreq (a.getX() + (float) px);
-                const float y = gainToY (viewCurveDb (e, v, hz));
+                const float y = gainToYIn (a, s, curveDbAt (e, idx, n, a, px));
                 if (px == 0) path.startNewSubPath (a.getX(), y);
                 else path.lineTo (a.getX() + (float) px, y);
             }
@@ -973,12 +1132,10 @@ private:
             juce::Path path;
             path.startNewSubPath (a.getX(), zeroY);
             const int w = (int) a.getWidth();
+            const float s = gainScaleDb();          // hoisted: see xToFreqIn
             for (int px = 0; px <= w; px += 2)
             {
-                const double hz = xToFreq (a.getX() + (float) px);
-                const float db = 20.0f * std::log10 (juce::jmax (1.0e-6f,
-                    e.engine().bandMagnitudeAt (b, (float) hz)));
-                const float y = gainToY (db);
+                const float y = gainToYIn (a, s, bandDbAt (e, b, a, px));
                 path.lineTo (a.getX() + (float) px, y);
                 if (px == 0) curve.startNewSubPath (a.getX(), y);
                 else curve.lineTo (a.getX() + (float) px, y);
@@ -1031,20 +1188,24 @@ private:
     {
         const int w = (int) a.getWidth();
 
+        int idx[kBands];
+        const int n = collectViewBands (e, domainView(), idx);
+        const float s = gainScaleDb();
+
         juce::Path path;
         path.preallocateSpace (w * 2 + 8);
         for (int px = 0; px <= w; px += 1)
         {
-            const double hz = xToFreq (a.getX() + (float) px);
-            const float y = gainToY (viewCurveDb (e, domainView(), hz));
+            const float y = gainToYIn (a, s, curveDbAt (e, idx, n, a, px));
             if (px == 0) path.startNewSubPath (a.getX(), y);
             else path.lineTo (a.getX() + (float) px, y);
         }
 
         {
+            const float zeroY = gainToYIn (a, s, 0.0f);
             juce::Path fill (path);
-            fill.lineTo (a.getRight(), gainToY (0.0f));
-            fill.lineTo (a.getX(), gainToY (0.0f));
+            fill.lineTo (a.getRight(), zeroY);
+            fill.lineTo (a.getX(), zeroY);
             fill.closeSubPath();
             g.setColour (cols.curve.withAlpha (0.10f));
             g.fillPath (fill);
@@ -1394,6 +1555,20 @@ private:
     int selected = -1, hovered = -1;
     EqAnalyser::Peak grabPeak;
     bool grabValid = false, grabArmed = false, listening = false;
+
+    // Grid render cache - see drawGrid.  Keyed on the plot size and the gain
+    // scale, which are the only things its geometry depends on.
+    juce::Image gridCache;
+    int gridW = 0, gridH = 0;
+    float gridScale = 0.0f;
+
+    // Per-band curve cache - see refreshCurveCache.
+    std::array<std::vector<float>, (size_t) kBands> curveRow;
+    std::array<CurveKey, (size_t) kBands> curveKey;
+    int curveW = -1;
+    kbs::EqMode curveMode = kbs::EqMode::zeroLatency;
+    bool curveOs = false, curvePq = true;
+    double curveSr = 0.0;
     bool dragging = false, listenLatched = false;
     juce::Point<float> dragStart, lastMouse;
     float dragStartFreq = 1000.0f, dragStartGain = 0.0f;

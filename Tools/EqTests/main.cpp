@@ -835,6 +835,140 @@ int main()
         near (drive (1), 0.0, 0.2, "a loud signal on another slot does not");
     }
 
+    // ---- 12b/12c. EQ Match: mid/side from one budget, and constant vs
+    // occasional.  Ported from the KBS suite alongside the engine itself
+    // (their 2026-08-26 handoff).  These pin the two claims the new EqMatch
+    // makes: a match can tell the center from the edges, and it can tell a
+    // constant problem from one that only shows up on peaks.
+    std::printf ("%s", "\n  12b. EQ Match - stereo, mid and side from one budget\n");
+    {
+        auto flatGrid = [] { return std::vector<float> (kbs::EqMatch::kPoints, -20.0f); };
+        auto count = [] (const kbs::EqMatch::Result& r, kbs::EqChannel ch)
+        {
+            int n = 0;
+            for (const auto& b : r.bands) if (b.channel == ch) ++n;
+            return n;
+        };
+        auto dent = [] (std::vector<float>& v, double loHz, double hiHz, float db)
+        {
+            for (int i = 0; i < kbs::EqMatch::kPoints; ++i)
+            {
+                const double hz = kbs::EqMatch::hzAt (i);
+                if (hz > loHz && hz < hiHz) v[(size_t) i] += db;
+            }
+        };
+
+        // The domains agree exactly: one stereo band says it once.
+        {
+            auto rM = flatGrid(), rS = flatGrid(), cM = flatGrid(), cS = flatGrid();
+            dent (cM, 2200.0, 4200.0, 6.0f);
+            dent (cS, 2200.0, 4200.0, 6.0f);
+            const auto r = kbs::EqMatch::fitMidSide (rM.data(), rS.data(),
+                                                     cM.data(), cS.data(), 0.4f, 12);
+            check (count (r, kbs::EqChannel::stereo) > 0,
+                   "domains that agree get stereo bands",
+                   (double) count (r, kbs::EqChannel::stereo), 1.0);
+            check (count (r, kbs::EqChannel::mid) == 0 && count (r, kbs::EqChannel::side) == 0,
+                   "and nothing is spent saying it twice", 0.0, 0.0);
+        }
+
+        // Only the sides have a problem: fixed on the sides, no stereo band.
+        {
+            auto rM = flatGrid(), rS = flatGrid(), cM = flatGrid(), cS = flatGrid();
+            dent (cS, 2200.0, 4200.0, 6.0f);
+            const auto r = kbs::EqMatch::fitMidSide (rM.data(), rS.data(),
+                                                     cM.data(), cS.data(), 0.4f, 12);
+            check (count (r, kbs::EqChannel::side) > 0,
+                   "a side-only problem is fixed on the sides",
+                   (double) count (r, kbs::EqChannel::side), 1.0);
+            check (count (r, kbs::EqChannel::stereo) == 0,
+                   "and never with a stereo band", 0.0, 0.0);
+        }
+
+        // Same place, different amounts: a band each, in their own domain.
+        {
+            auto rM = flatGrid(), rS = flatGrid(), cM = flatGrid(), cS = flatGrid();
+            dent (cM, 2200.0, 4200.0, 6.0f);
+            dent (cS, 2200.0, 4200.0, 2.0f);
+            const auto r = kbs::EqMatch::fitMidSide (rM.data(), rS.data(),
+                                                     cM.data(), cS.data(), 0.4f, 12);
+            check (count (r, kbs::EqChannel::mid) > 0 && count (r, kbs::EqChannel::side) > 0,
+                   "differing amounts get a band each, in their own domain", 1.0, 1.0);
+        }
+
+        // Broad shared error plus narrow detail in each domain.
+        {
+            auto rM = flatGrid(), rS = flatGrid(), cM = flatGrid(), cS = flatGrid();
+            dent (cM, 200.0, 8000.0, 5.0f);
+            dent (cS, 200.0, 8000.0, 5.0f);
+            dent (cM, 900.0, 1150.0, 5.0f);
+            dent (cS, 3000.0, 3800.0, 5.0f);
+            const auto r = kbs::EqMatch::fitMidSide (rM.data(), rS.data(),
+                                                     cM.data(), cS.data(), 0.2f, 16);
+            check (count (r, kbs::EqChannel::stereo) > 0,
+                   "a broad shared error is carried by stereo bands",
+                   (double) count (r, kbs::EqChannel::stereo), 1.0);
+            check (r.residualRmsDb < r.targetRmsDb * 0.6f,
+                   "and the whole fit removes most of what it was given",
+                   r.residualRmsDb, r.targetRmsDb * 0.5);
+        }
+
+        // One budget, counted across every domain together.
+        {
+            auto rM = flatGrid(), rS = flatGrid(), cM = flatGrid(), cS = flatGrid();
+            for (int i = 0; i < kbs::EqMatch::kPoints; ++i)
+            {
+                cM[(size_t) i] += (float) (6.0 * std::sin (i * 0.31));
+                cS[(size_t) i] += (float) (6.0 * std::sin (i * 0.17 + 1.0));
+            }
+            const auto r = kbs::EqMatch::fitMidSide (rM.data(), rS.data(),
+                                                     cM.data(), cS.data(), 0.1f, 7);
+            check ((int) r.bands.size() <= 7, "the budget is shared across domains",
+                   (double) r.bands.size(), 7.0);
+        }
+    }
+
+    std::printf ("%s", "\n  12c. EQ Match - constant against occasional\n");
+    {
+        // One 3 kHz excess described two ways: sitting there all the time, or
+        // the same average arrived at by swinging.  Only the second should come
+        // out dynamic - a static cut for it dulls the passages that were fine.
+        std::vector<float> ref (kbs::EqMatch::kPoints, -20.0f);
+        std::vector<float> cur (kbs::EqMatch::kPoints, -20.0f);
+        std::vector<float> steady (kbs::EqMatch::kPoints, 1.5f);
+        std::vector<float> peaky (kbs::EqMatch::kPoints, 1.5f);
+
+        for (int i = 0; i < kbs::EqMatch::kPoints; ++i)
+        {
+            const double hz = kbs::EqMatch::hzAt (i);
+            if (hz > 2200.0 && hz < 4200.0)
+            {
+                cur[(size_t) i] = -14.0f;
+                peaky[(size_t) i] = 9.0f;
+            }
+        }
+
+        const auto steadyFit = kbs::EqMatch::fit (ref.data(), cur.data(), 0.4f, 6,
+                                                  48000.0, steady.data());
+        const auto wildFit = kbs::EqMatch::fit (ref.data(), cur.data(), 0.4f, 6,
+                                                48000.0, peaky.data());
+        const auto noneFit = kbs::EqMatch::fit (ref.data(), cur.data(), 0.4f, 6);
+
+        check (steadyFit.dynamicBands == 0, "a constant excess gets a static cut",
+               (double) steadyFit.dynamicBands, 0.0);
+        check (wildFit.dynamicBands > 0, "an occasional excess gets a dynamic one",
+               (double) wildFit.dynamicBands, 1.0);
+        check (noneFit.dynamicBands == 0, "no spread data means the old behavior exactly",
+               (double) noneFit.dynamicBands, 0.0);
+
+        if (! wildFit.bands.empty() && ! steadyFit.bands.empty())
+        {
+            const auto& b = wildFit.bands[0];
+            const double total = std::abs ((double) b.gainDb) + std::abs ((double) b.rangeDb);
+            const double steadyTotal = std::abs ((double) steadyFit.bands[0].gainDb);
+            near (total, steadyTotal, 0.75, "and covers the same range in total");
+        }
+    }
     std::printf (failures == 0 ? "\n  all checks passed\n\n" : "\n  %d FAILURE(S)\n\n", failures);
     return failures == 0 ? 0 : 1;
 }

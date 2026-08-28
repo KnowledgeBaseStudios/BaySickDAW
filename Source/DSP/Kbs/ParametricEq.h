@@ -140,6 +140,28 @@ struct EqBandParams
                                           // plugin's single bus via scExternal)
 };
 
+// The home positions: 8 named defaults, then log-spaced.  ONE home - the
+// parameter defaults and the A/B spare's seed both read it, so a band index
+// means the same frequency wherever the band is built.
+inline float eqDefaultFreq (int b)
+{
+    static const float k8[8] = { 40.0f, 100.0f, 250.0f, 630.0f,
+                                 1600.0f, 4000.0f, 8000.0f, 12500.0f };
+    if (b >= 0 && b < 8) return k8[b];
+    const float t = (float) (b - 8) / 16.0f;
+    return 20.0f * std::pow (1000.0f, 0.15f + 0.8f * t);
+}
+
+// A band as it ships: 1-8 on and flat at their home frequencies, 9-24 off.
+// Every other field's struct default already IS the parameter default.
+inline EqBandParams eqDefaultBand (int b)
+{
+    EqBandParams p;
+    p.on     = (b >= 0 && b < 8);
+    p.freqHz = eqDefaultFreq (b);
+    return p;
+}
+
 inline bool eqTypeHasGain (EqType t)
 {
     return t == EqType::bell || t == EqType::lowShelf
@@ -383,6 +405,7 @@ public:
         markAllDirty();
     }
     bool getOversampling() const { return oversampling; }
+    double getSampleRate() const { return sr; }
 
     void setProportionalQ (bool on)
     {

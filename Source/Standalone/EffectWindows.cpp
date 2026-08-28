@@ -645,19 +645,35 @@ void EffectEqWindow::resized()
 {
     auto r = getLocalBounds().reduced (4);
     auto top = r.removeFromTop (24);
-    if (mViewRow) mViewRow->setBounds (top.removeFromLeft (128).reduced (0, 2));
+    if (mViewRow)
+    {
+        // Sized to the widest label instead of a round number: SIDE plus a
+        // hair of padding, and all three segments take that width.
+        const juce::Font segFont (juce::FontOptions (9.5f, juce::Font::bold));
+        const int textW = (int) std::ceil (
+            juce::GlyphArrangement::getStringWidth (segFont, "SIDE"));
+        const int cellW = textW + 8;          // the 1px cell inset plus 3 a side
+        mViewRow->setBounds (top.removeFromLeft (cellW * 3).reduced (0, 2));
+    }
     top.removeFromLeft (4);
     if (mChips) mChips->setBounds (top);
     if (mRail)
     {
-        const int railW = mRail->collapsed ? eqview::EqRailView::kCollapsedWidth
-                                           : eqview::EqRailView::kWidth;
+        // Below the width where a graph is still worth looking at, the rail
+        // folds itself away rather than eating what is left.  The user's own
+        // collapse is remembered separately and wins on the way back out.
+        static constexpr int kMinGraphW = 300;
+        mRail->forcedCollapsed = (r.getWidth() - eqview::EqRailView::kWidth) < kMinGraphW;
+        const int railW = mRail->isCollapsed() ? eqview::EqRailView::kCollapsedWidth
+                                               : eqview::EqRailView::kWidth;
         mRail->setBounds (r.removeFromRight (railW));
     }
     if (mGraph) mGraph->setBounds (r);
     if (mMatch && mGraph)
-        mMatch->setBounds (juce::Rectangle<int> (280, 190)
-                               .withPosition (mGraph->getRight() - 290,
+        mMatch->setBounds (juce::Rectangle<int> (eqview::EqMatchPanel::kPanelW,
+                                                 eqview::EqMatchPanel::kPanelH)
+                               .withPosition (mGraph->getRight()
+                                                - eqview::EqMatchPanel::kPanelW - 10,
                                               mGraph->getY() + 10));
 }
 

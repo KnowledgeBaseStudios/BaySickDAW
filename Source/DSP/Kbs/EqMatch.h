@@ -27,6 +27,11 @@ public:
     static constexpr int kPoints = 240;
     static constexpr double kLoHz = 20.0, kHiHz = 20000.0;
 
+    // How much a point has to swing before its error counts as occasional
+    // rather than constant. Measured on programme material, a steady band
+    // sits near 3 dB of spread and a band driven by peaks runs well past it.
+    static constexpr double kOccasionalDb = 4.5;
+
     static double hzAt (int i)
     {
         return kLoHz * std::pow (kHiHz / kLoHz, (double) i / (kPoints - 1));
@@ -37,13 +42,22 @@ public:
         std::vector<EqBandParams> bands;
         float residualRmsDb = 0.0f;      // what is left after the fit
         float targetRmsDb = 0.0f;        // what the fit was asked to remove
+        int dynamicBands = 0;            // how many of them came out dynamic
     };
 
     // referenceDb / currentDb: kPoints of dB, both on hzAt's grid.
     // smoothness 0..1: 0 = follow every wrinkle (1/12 oct), 1 = broad
     // strokes (1.5 oct). maxBands caps how many bells may be spent.
+    // spreadDb is optional: kPoints of how far the CURRENT capture swings
+    // around its own average at each point, from
+    // EqAnalyser::averagedSpreadGrid. Given it, the fit distinguishes a
+    // constant problem from an occasional one - a 3 kHz excess that only
+    // appears on the loud moments is not something a static cut should
+    // solve, because the static cut dulls the other ninety percent. Absent,
+    // every band is static and the result is bit-identical to before.
     static Result fit (const float* referenceDb, const float* currentDb,
-                       float smoothness, int maxBands, double sampleRate = 48000.0)
+                       float smoothness, int maxBands, double sampleRate = 48000.0,
+                       const float* spreadDb = nullptr)
     {
         Result out;
         maxBands = std::clamp (maxBands, 1, ParametricEq::kMaxBands);
@@ -99,6 +113,31 @@ public:
             b.freqHz = (float) std::clamp (f0, 25.0, 19000.0);
             b.gainDb = (float) std::clamp (err, -18.0, 18.0);
             b.q = (float) q;
+
+            // A cut whose frequency swings a lot in the source is a problem
+            // that comes and goes. Hand the constant part to static gain and
+            // the rest to a dynamic range, so quiet passages keep their tone.
+            // Boosts stay static: an occasional hole is not a thing dynamics
+            // can fill without pumping.
+            if (spreadDb != nullptr && err < -0.5)
+            {
+                const double swing = spreadDb[at];
+                if (swing > kOccasionalDb)
+                {
+                    const double share = std::clamp ((swing - kOccasionalDb) / kOccasionalDb,
+                                                     0.0, 0.75);
+                    const double dynPart = std::abs (b.gainDb) * share;
+                    b.gainDb = (float) (b.gainDb + dynPart);     // toward zero
+                    b.dynamic = true;
+                    b.rangeDb = (float) -dynPart;
+                    b.thresholdDb = -12.0f;      // programme-relative, like every dynamic here
+                    b.ratio = 4.0f;
+                    b.attackMs = 5.0f;
+                    b.releaseMs = 120.0f;
+                    out.dynamicBands++;
+                }
+            }
+
             out.bands.push_back (b);
 
             // Subtract the bell that will actually be run - the RBJ response,
@@ -156,6 +195,220 @@ private:
         }
         v = std::move (outV);
     }
+
+public:
+    // ── mid and side, from one operation ──────────────────────────────
+    //
+    // Four spectra in: what the track is and what it should be, each split
+    // into mid and side. Two differences out, and bands placed across all
+    // three domains from ONE budget - because 24 bands is what there is,
+    // and the music decides how they are spent, not a quota.
+    //
+    // Stereo against mid+side is decided per band by the owner's rule: take
+    // the common part with a candidate stereo band, then count how many
+    // domains still need a band there.
+    //
+    //   neither      -> stereo. The domains agreed; one band instead of two.
+    //   both         -> stereo. It is doing what two bands would, and the
+    //                   mid and side bands beside it are the augmentation.
+    //   exactly one  -> NOT stereo. Mid and side each get their own band.
+    //                   "Stereo plus mid" spends the same two bands while
+    //                   hiding why either exists, and a single Q cannot be
+    //                   right for two errors of different widths.
+    static Result fitMidSide (const float* refMidDb, const float* refSideDb,
+                              const float* curMidDb, const float* curSideDb,
+                              float smoothness, int maxBands,
+                              double sampleRate = 48000.0,
+                              const float* spreadMidDb = nullptr,
+                              const float* spreadSideDb = nullptr)
+    {
+        Result out;
+        maxBands = std::clamp (maxBands, 1, ParametricEq::kMaxBands);
+
+        const double octaves = 1.0 / 12.0 + (1.5 - 1.0 / 12.0) * std::clamp (smoothness, 0.0f, 1.0f);
+        const double pointsPerOct = (kPoints - 1) / std::log2 (kHiHz / kLoHz);
+
+        auto prepare = [&] (const float* ref, const float* cur)
+        {
+            std::vector<double> d (kPoints);
+            double mean = 0.0;
+            for (int i = 0; i < kPoints; ++i)
+            {
+                d[(size_t) i] = (double) ref[i] - cur[i];
+                mean += d[(size_t) i];
+            }
+            mean /= kPoints;
+            for (auto& v : d) v -= mean;
+            smoothGaussian (d, octaves * pointsPerOct * 0.5);
+            return d;
+        };
+
+        std::vector<double> resMid  = prepare (refMidDb,  curMidDb);
+        std::vector<double> resSide = prepare (refSideDb, curSideDb);
+
+        {
+            std::vector<double> both (kPoints);
+            for (int i = 0; i < kPoints; ++i)
+                both[(size_t) i] = 0.5 * (resMid[(size_t) i] + resSide[(size_t) i]);
+            out.targetRmsDb = rms (both);
+        }
+
+        // Q from the error's own width, the same way the single-domain fit
+        // reads it: walk out to the half-gain points and measure the octaves
+        // between them.
+        auto widthAt = [&] (const std::vector<double>& res, int at)
+        {
+            const double err = res[(size_t) at];
+            const double half = err / 2.0;
+            int lo = at, hi = at;
+            while (lo > 0 && sameSideBeyond (res[(size_t) (lo - 1)], half)) --lo;
+            while (hi < kPoints - 1 && sameSideBeyond (res[(size_t) (hi + 1)], half)) ++hi;
+            return std::max (0.15, (hi - lo) / pointsPerOct);
+        };
+
+        auto qOf = [] (double widthOct) { return std::clamp (1.6 / widthOct, 0.3, 12.0); };
+
+        // Subtract a band's TRUE response, so the next pass sees what is
+        // really left rather than an idealised shape.
+        auto subtract = [&] (std::vector<double>& res, const EqBandParams& b)
+        {
+            BiquadCoeffs c = Biquad::peaking (b.freqHz, b.q, b.gainDb, sampleRate);
+            for (int i = 0; i < kPoints; ++i)
+            {
+                double mag, ph;
+                eqdesign::biquadResponse (c, 2.0 * kPi * hzAt (i) / sampleRate, mag, ph);
+                res[(size_t) i] -= 20.0 * std::log10 (std::max (1.0e-9, mag));
+            }
+        };
+
+        auto makeBand = [&] (double f0, double gain, double q, EqChannel ch,
+                             const float* spread, int at)
+        {
+            EqBandParams b;
+            b.on = true;
+            b.type = EqType::bell;
+            b.freqHz = (float) std::clamp (f0, 25.0, 19000.0);
+            b.gainDb = (float) std::clamp (gain, -18.0, 18.0);
+            b.q = (float) q;
+            b.channel = ch;
+
+            // The same constant-against-occasional decision the single-domain
+            // fit makes, per domain.
+            if (spread != nullptr && gain < -0.5)
+            {
+                const double swing = spread[at];
+                if (swing > kOccasionalDb)
+                {
+                    const double share = std::clamp ((swing - kOccasionalDb) / kOccasionalDb,
+                                                     0.0, 0.75);
+                    const double dynPart = std::abs (b.gainDb) * share;
+                    b.gainDb = (float) (b.gainDb + dynPart);
+                    b.dynamic = true;
+                    b.rangeDb = (float) -dynPart;
+                    b.thresholdDb = -12.0f;
+                    b.ratio = 4.0f;
+                    b.attackMs = 5.0f;
+                    b.releaseMs = 120.0f;
+                    out.dynamicBands++;
+                }
+            }
+            return b;
+        };
+
+        // Does this domain still want a band anywhere near here?
+        auto stillNeeds = [&] (const std::vector<double>& res, int at)
+        {
+            const int span = (int) std::ceil (pointsPerOct);
+            for (int i = std::max (0, at - span); i <= std::min (kPoints - 1, at + span); ++i)
+                if (std::abs (res[(size_t) i]) >= 0.5) return true;
+            return false;
+        };
+
+        while ((int) out.bands.size() < maxBands)
+        {
+            // The biggest remaining error across BOTH domains: one budget,
+            // spent where the music hurts most.
+            int at = 0;
+            double err = 0.0;
+            for (int i = 0; i < kPoints; ++i)
+            {
+                if (std::abs (resMid[(size_t) i]) > std::abs (err))
+                { err = resMid[(size_t) i]; at = i; }
+                if (std::abs (resSide[(size_t) i]) > std::abs (err))
+                { err = resSide[(size_t) i]; at = i; }
+            }
+            if (std::abs (err) < 0.5) break;
+
+            const double f0 = hzAt (at);
+            const double mErr = resMid[(size_t) at];
+            const double sErr = resSide[(size_t) at];
+
+            // The common part exists only where the two agree in direction.
+            const bool agree = mErr * sErr > 0.0;
+            const double common = agree ? (std::abs (mErr) < std::abs (sErr) ? mErr : sErr)
+                                        : 0.0;
+
+            bool useStereo = false;
+            EqBandParams stereoBand;
+
+            if (agree && std::abs (common) >= 0.5)
+            {
+                const double wM = widthAt (resMid, at);
+                const double wS = widthAt (resSide, at);
+                const double widthRatio = std::max (wM, wS) / std::max (0.15, std::min (wM, wS));
+
+                // A stereo band carries one Q. If the two errors are shaped
+                // differently that Q is wrong for at least one of them, so
+                // the domains keep their own bands whatever the amounts say.
+                if (widthRatio < 1.5)
+                {
+                    stereoBand = makeBand (f0, common, qOf (std::min (wM, wS)),
+                                           EqChannel::stereo, spreadMidDb, at);
+
+                    std::vector<double> tryMid = resMid, trySide = resSide;
+                    subtract (tryMid, stereoBand);
+                    subtract (trySide, stereoBand);
+
+                    const bool needM = stillNeeds (tryMid, at);
+                    const bool needS = stillNeeds (trySide, at);
+
+                    // Both or neither: the stereo band is worth its slot.
+                    // Exactly one: it would be the second half of a story
+                    // nobody can read, so mid and side go their own way.
+                    useStereo = (needM == needS);
+                }
+            }
+
+            if (useStereo)
+            {
+                subtract (resMid, stereoBand);
+                subtract (resSide, stereoBand);
+                out.bands.push_back (stereoBand);
+                continue;
+            }
+
+            // Separate domains. The one that hurts most goes first so the
+            // budget is always spent on the loudest problem; its partner
+            // comes back around on the next pass if it still needs one.
+            const bool midFirst = std::abs (mErr) >= std::abs (sErr);
+            const double gain = midFirst ? mErr : sErr;
+            if (std::abs (gain) < 0.5) break;
+
+            auto& res = midFirst ? resMid : resSide;
+            const auto band = makeBand (f0, gain, qOf (widthAt (res, at)),
+                                        midFirst ? EqChannel::mid : EqChannel::side,
+                                        midFirst ? spreadMidDb : spreadSideDb, at);
+            subtract (res, band);
+            out.bands.push_back (band);
+        }
+
+        std::vector<double> left (kPoints);
+        for (int i = 0; i < kPoints; ++i)
+            left[(size_t) i] = 0.5 * (resMid[(size_t) i] + resSide[(size_t) i]);
+        out.residualRmsDb = rms (left);
+        return out;
+    }
+
 };
 
 } // namespace kbs

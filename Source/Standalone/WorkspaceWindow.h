@@ -101,6 +101,9 @@ public:
     //
     // Call AFTER setDefaultWindowSize: that resets the minimum to the default.
     void setResizeFloor (int minW, int minH);
+    // Zero on either axis = no override, and the default is the minimum.
+    int effectiveMinW() const noexcept;
+    int effectiveMinH() const noexcept;
 
     // Turns OUR border-drag resize off for this window (Jeff, 2026-08-11).
     //
@@ -447,6 +450,7 @@ private:
     bool                                             mDefaultKnown { false };
     bool                                             mOpenedAtPlaceholder { false };
     juce::Point<int>                                 mDefaultSize { 0, 0 };
+    juce::Point<int>                                 mFloorOverride { 0, 0 };
 public:
     // Anti-degenerate clamp only -- small enough to be no content rule, big
     // enough that a window can always be grabbed and dragged back.

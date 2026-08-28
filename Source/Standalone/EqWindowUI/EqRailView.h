@@ -251,8 +251,10 @@ public:
         for (int b = 0; b < EqGraphView::kBands; ++b)
         {
             const auto p = graph.bandParams (b);
+            // The side inset shrinks with the chip: at a narrow window those
+            // 2px each side are the difference between "24" fitting and not.
             auto cell = juce::Rectangle<float> (b * w, 0.0f, w, (float) getHeight())
-                            .reduced (2.0f, 4.0f);
+                            .reduced (juce::jmin (2.0f, w * 0.12f), 4.0f);
 
             auto col = graph.bandColour (b);
             if (! p.on) col = col.withAlpha (0.25f);
@@ -271,7 +273,11 @@ public:
 
             g.setColour (p.on ? VC::Bg : VC::TextDim);
             g.setFont (juce::Font (juce::FontOptions (10.0f, juce::Font::bold)));
-            g.drawText (juce::String (b + 1), cell, juce::Justification::centred);
+            // FITTED, not drawn: drawText drops a string wider than its box
+            // whole, which is why every chip past 9 went blank once the window
+            // was narrow enough to squeeze two digits.
+            g.drawFittedText (juce::String (b + 1), cell.toNearestInt(),
+                              juce::Justification::centred, 1, 0.5f);
 
             // A chip living in another view shows a tiny domain tick so the
             // row still maps the whole pool.
@@ -434,7 +440,15 @@ public:
     // EXT is the strip's four receive lines here, not one bool: the window
     // owns the menu (it knows the strip's routing names).
     std::function<void()> onPickScSource;
+
+    // Two separate wishes.  `collapsed` is the user's, set by clicking the
+    // rail's left edge and never overwritten; `forcedCollapsed` is the
+    // window's, set when there is not enough width left to show a graph
+    // worth looking at.  Growing the window back restores the user's choice
+    // instead of whatever the squeeze left behind.
     bool collapsed = false;
+    bool forcedCollapsed = false;
+    bool isCollapsed() const noexcept { return collapsed || forcedCollapsed; }
 
     explicit EqRailView (EqGraphView& graphRef)
         : graph (graphRef), freq ("FREQ"), q ("Q")
@@ -641,20 +655,36 @@ public:
         g.setColour (VC::Panel);
         g.fillRoundedRectangle (getLocalBounds().toFloat().reduced (2.0f, 1.0f), 4.0f);
 
-        g.setColour (VC::Accent.withAlpha (0.6f));
-        g.fillRoundedRectangle (3.0f, getHeight() * 0.5f - 14.0f, 3.0f, 28.0f, 1.5f);
+        // The collapse grip: two bars, the back one dim, so it reads as
+        // something that slides rather than a decorative line.  White, because
+        // the old single accent-tinted bar was near invisible against the
+        // panel it sits on.
+        const float gripY = getHeight() * 0.5f - 14.0f;
+        g.setColour (VC::Text.withAlpha (0.28f));
+        g.fillRoundedRectangle (7.5f, gripY, 2.0f, 28.0f, 1.0f);
+        g.setColour (VC::Text.withAlpha (0.9f));
+        g.fillRoundedRectangle (3.0f, gripY, 3.0f, 28.0f, 1.5f);
 
         const int b = graph.selectedBand();
-        g.setColour (VC::TextDim);
-        g.setFont (juce::Font (juce::FontOptions (10.0f, juce::Font::bold)));
-        g.drawText (b >= 0 ? "BAND " + juce::String (b + 1) : "NO BAND",
-                    14, 6, getWidth() - 28, 12, juce::Justification::centredLeft);
 
+        // The band's colour dot lives INSIDE the collapsed strip, flush to its
+        // right edge: parked out at the full width it was clipped to a one
+        // pixel sliver on collapse, which is worse than not drawing it.  Here
+        // the collapsed rail still says which band is selected.
         if (b >= 0)
         {
             g.setColour (graph.bandColour (b));
-            g.fillEllipse ((float) getWidth() - 22.0f, 7.0f, 9.0f, 9.0f);
+            g.fillEllipse ((float) kCollapsedWidth - 10.0f, 7.0f, 9.0f, 9.0f);
         }
+
+        // Nothing below this fits in 14px, and drawing it into a negative-width
+        // box is how the label passes end up as rows of empty squares.
+        if (isCollapsed()) return;
+
+        g.setColour (VC::TextDim);
+        g.setFont (juce::Font (juce::FontOptions (10.0f, juce::Font::bold)));
+        g.drawText (b >= 0 ? "BAND " + juce::String (b + 1) : "NO BAND",
+                    18, 6, getWidth() - 32, 12, juce::Justification::centredLeft);
 
         auto caption = [&] (juce::Component& c, const char* text)
         {
@@ -675,6 +705,17 @@ public:
             g.setFont (juce::Font (juce::FontOptions (8.5f, juce::Font::bold)));
             g.drawText ("DYNAMICS", 14, dynTop - 16, 80, 10,
                         juce::Justification::left);
+        }
+
+        if (mMaxScroll > 0)
+        {
+            const float track = (float) getHeight() - 26.0f;
+            const float frac = (float) getHeight() / (float) (getHeight() + mMaxScroll);
+            const float h = juce::jmax (18.0f, track * frac);
+            const float t = (float) mScrollY / (float) mMaxScroll;
+            g.setColour (VC::Accent.withAlpha (0.8f));
+            g.fillRoundedRectangle ((float) getWidth() - 5.5f,
+                                    20.0f + t * (track - h), 2.5f, h, 1.25f);
         }
 
         caption (thrK, "THR");
@@ -709,11 +750,25 @@ public:
 
     void mouseDown (const juce::MouseEvent& e) override
     {
-        if (e.position.x < 9.0f)
+        if (e.position.x < 11.0f)
         {
+            // A deliberate click outvotes the width-driven collapse: without
+            // this the edge silently did nothing at any size narrow enough to
+            // have folded the rail on its own.
+            forcedCollapsed = false;
             collapsed = ! collapsed;
             if (onCollapse) onCollapse (collapsed);
         }
+    }
+
+    void mouseWheelMove (const juce::MouseEvent&,
+                         const juce::MouseWheelDetails& w) override
+    {
+        if (mMaxScroll <= 0) return;
+        mScrollY = juce::jlimit (0, mMaxScroll,
+                                 mScrollY - juce::roundToInt (w.deltaY * 60.0f));
+        layout();
+        repaint();
     }
 
     void pollNow() { timerCallback(); }
@@ -767,9 +822,28 @@ private:
     void layout()
     {
         // Budgeted to fit the smallest window WITH the dynamics section and
-        // its meter (the KBS third-pass arithmetic, kept).
-        auto r = getLocalBounds().reduced (12, 5);
-        r.removeFromTop (15);
+        // its meter (the KBS third-pass arithmetic, kept), but only RESERVED
+        // when that section is actually on screen: the block is 140 of the
+        // rail's 335 px and stays hidden for every band that is not dynamic,
+        // which is most bands most of the time.  Whatever still does not fit
+        // scrolls instead of clipping, so the rail stays usable at any height
+        // rather than at a threshold.
+        if (isCollapsed()) return;
+
+        auto full = getLocalBounds().reduced (12, 5);
+        full.removeFromTop (15);                    // the header stays pinned
+
+        // Read the same visibility the timer set - two predicates that could
+        // disagree is how a layout starts reserving space for nothing.
+        const bool showDynRow  = dynT.isVisible();
+        const bool showDynBody = direction.isVisible();
+        const int need = 158 + (showDynRow  ? 12 + 16 : 0)
+                             + (showDynBody ? 4 + 16 + 4 + 100 : 0);
+
+        mMaxScroll = juce::jmax (0, need - full.getHeight());
+        mScrollY   = juce::jlimit (0, mMaxScroll, mScrollY);
+
+        auto r = full.withY (full.getY() - mScrollY).withHeight (need);
 
         auto knobs = r.removeFromTop (34);
         gain.setBounds (knobs.removeFromLeft (knobs.getWidth() / 2).reduced (14, 0));
@@ -787,16 +861,21 @@ private:
         chan.setBounds (r.removeFromTop (16));
         r.removeFromTop (3);
         slope.setBounds (r.removeFromTop (17));
-        r.removeFromTop (12);
 
-        dynTop = r.getY();
-        auto tr = r.removeFromTop (16);
-        const int tw = tr.getWidth() / 3;
-        dynT.setBounds (tr.removeFromLeft (tw).reduced (1, 0));
-        autoT.setBounds (tr.removeFromLeft (tw).reduced (1, 0));
-        extT.setBounds (tr.reduced (1, 0));
+        if (showDynRow)
+        {
+            r.removeFromTop (12);
+            dynTop = r.getY();
+            auto tr = r.removeFromTop (16);
+            const int tw = tr.getWidth() / 3;
+            dynT.setBounds (tr.removeFromLeft (tw).reduced (1, 0));
+            autoT.setBounds (tr.removeFromLeft (tw).reduced (1, 0));
+            extT.setBounds (tr.reduced (1, 0));
+        }
+
+        if (! showDynBody) return;
+
         r.removeFromTop (4);
-
         direction.setBounds (r.removeFromTop (16));
         r.removeFromTop (4);
 
@@ -865,6 +944,16 @@ private:
             k->setVisible (dyn);
         relK.setVisible (dyn && ! p.autoRelease);
         direction.setVisible (dyn);
+
+        const bool bandChanged = b != lastLaidOutBand;
+        if (bandChanged) { mScrollY = 0; lastLaidOutBand = b; }
+        if (bandChanged || dynOk != lastDynRow || dyn != lastDynBody)
+        {
+            lastDynRow  = dynOk;
+            lastDynBody = dyn;
+            layout();
+            repaint();
+        }
         grMeter.setVisible (dyn);
 
         if (dyn)
@@ -911,6 +1000,9 @@ private:
     juce::TextButton dynT, autoT, extT;
     GrMeter grMeter;
     int dynTop = 300;
+    int mScrollY = 0, mMaxScroll = 0;
+    bool lastDynRow = false, lastDynBody = false;
+    int lastLaidOutBand = -2;
     int stampedBand = -1;
     bool syncing = false;
 

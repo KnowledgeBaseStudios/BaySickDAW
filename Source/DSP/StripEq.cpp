@@ -93,7 +93,9 @@ void StripEq::resetToDefaults()
     {
         mCached[(size_t) i] = {};
         mEq.setBand (i, {});
-        mSpare[(size_t) i] = {};
+        // B ships like A: an untouched spare is the default bank, not an empty
+        // one, so swapping to B lands on the same 8 flat bands A opened with.
+        mSpare[(size_t) i] = kbs::eqDefaultBand (i);
     }
     mViewingSpare = false;
     mSpareLocked  = false;

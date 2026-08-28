@@ -345,7 +345,7 @@ void WorkspaceWindow::setDefaultWindowSize (int w, int h)
     // suspension was only ever pending T8, and compact layouts moved to Future
     // State (CL-306).  A view that genuinely needs to be smaller declares its
     // own smaller default via setDefaultWindowSize (the pedals Compact view).
-    mConstrainer.setMinimumSize (mDefaultSize.x, mDefaultSize.y);
+    mConstrainer.setMinimumSize (effectiveMinW(), effectiveMinH());
 
     // ONLY a window that opened without a remembered size takes the default.
     // A size that came from the session map, a project or the user's own drag
@@ -360,10 +360,12 @@ void WorkspaceWindow::setDefaultWindowSize (int w, int h)
 
     // A remembered size from before this window's default was known -- or from
     // the run where the minimum was suspended for measuring -- must come up to
-    // the new floor.
-    if (getWidth() < mDefaultSize.x || getHeight() < mDefaultSize.y)
-        setSize (juce::jmax (getWidth(),  mDefaultSize.x),
-                 juce::jmax (getHeight(), mDefaultSize.y));
+    // the new floor.  The FLOOR, not the default: a window the user has
+    // deliberately shrunk below its opening size must not be grown back by
+    // the next restore sweep that happens to re-announce the default.
+    if (getWidth() < effectiveMinW() || getHeight() < effectiveMinH())
+        setSize (juce::jmax (getWidth(),  effectiveMinW()),
+                 juce::jmax (getHeight(), effectiveMinH()));
 }
 
 void WorkspaceWindow::setFixedAspect (double widthOverHeight)
@@ -389,10 +391,23 @@ void WorkspaceWindow::setUserResizable (bool canResize)
 
 void WorkspaceWindow::setResizeFloor (int minW, int minH)
 {
-    // Never below the degenerate floor -- a window still has to be grabbable
-    // whatever its content claims it can shrink to.
-    mConstrainer.setMinimumSize (juce::jmax (kMinDegenerateW, minW),
-                                 juce::jmax (kMinDegenerateH, minH));
+    // Remembered, not just applied: setDefaultWindowSize runs again on every
+    // restore/healing sweep and would otherwise put the minimum back to the
+    // default, re-locking a window its content had deliberately freed.
+    mFloorOverride = { juce::jmax (kMinDegenerateW, minW),
+                       juce::jmax (kMinDegenerateH, minH) };
+    mConstrainer.setMinimumSize (mFloorOverride.x, mFloorOverride.y);
+}
+
+// The default IS the minimum unless the content has claimed a lower floor.
+int WorkspaceWindow::effectiveMinW() const noexcept
+{
+    return mFloorOverride.x > 0 ? mFloorOverride.x : mDefaultSize.x;
+}
+
+int WorkspaceWindow::effectiveMinH() const noexcept
+{
+    return mFloorOverride.y > 0 ? mFloorOverride.y : mDefaultSize.y;
 }
 
 void WorkspaceWindow::setTitle (juce::String t)

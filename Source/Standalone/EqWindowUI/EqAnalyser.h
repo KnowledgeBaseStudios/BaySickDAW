@@ -53,10 +53,11 @@ public:
 
     // Pull the latest window from a feed and fold it into the smoothed
     // display state.  Returns false when the feed had nothing new.
-    bool analyse (const kbs::SpectrumFeed& feed)
+    bool analyse (const kbs::SpectrumFeed& feed, bool sideStream = false)
     {
         if (frozen) return false;
-        if (! feed.poll (raw.data())) return false;
+        if (! (sideStream ? feed.pollSide (raw.data()) : feed.poll (raw.data())))
+            return false;
 
         // The feed ring is longer than the FFT: take the most recent kSize.
         const int off = (int) raw.size() - kSize;
@@ -87,8 +88,13 @@ public:
 
             binsDb[(size_t) k] = db;
 
+            // Braced deliberately: unbraced, the second line runs every frame
+            // and writes into a vector that is empty until a capture starts.
             if (averaging)
+            {
                 avgSum[(size_t) k] += db;
+                avgSq[(size_t) k]  += (double) db * db;
+            }
 
             // Rise instantly, fall at the display speed - an analyser that
             // smooths its attack hides the transient it exists to show.
@@ -120,6 +126,7 @@ public:
     void startAverage()
     {
         avgSum.assign (kBins, 0.0);
+        avgSq.assign (kBins, 0.0);
         avgCount = 0;
         averaging = true;
     }
@@ -141,6 +148,26 @@ public:
             const double t = juce::jlimit (0.0, 1.0, bin - k);
             out[i] = (float) ((avgSum[(size_t) k] * (1.0 - t)
                              + avgSum[(size_t) (k + 1)] * t) / avgCount);
+        }
+        return true;
+    }
+
+    // How far each point swings around its own average, in dB.  A steady band
+    // and a band that only misbehaves on peaks have the same mean and very
+    // different spreads, and that difference is what decides whether EQ Match
+    // spends a static bell or a dynamic one.  Nearest-bin, no interpolation -
+    // a spread number does not need sub-bin precision.
+    bool averagedSpreadGrid (float* out, int points, double loHz, double hiHz) const
+    {
+        if (avgCount < 4) return false;
+        for (int i = 0; i < points; ++i)
+        {
+            const double hz = loHz * std::pow (hiHz / loHz, (double) i / (points - 1));
+            const double bin = hz * kSize / sampleRate;
+            const int k = juce::jlimit (1, kBins - 2, (int) bin);
+            const double mean = avgSum[(size_t) k] / avgCount;
+            const double var = std::max (0.0, avgSq[(size_t) k] / avgCount - mean * mean);
+            out[i] = (float) std::sqrt (var);
         }
         return true;
     }
@@ -283,7 +310,7 @@ private:
     double sampleRate = 48000.0;
     std::vector<float> window, raw, binsDb, smoothDb, peakDb;
     std::vector<std::complex<float>> td;
-    std::vector<double> avgSum;
+    std::vector<double> avgSum, avgSq;
     std::vector<float> armHoldDb;
     int avgCount = 0;
     bool averaging = false;

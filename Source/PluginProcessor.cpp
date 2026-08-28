@@ -7619,16 +7619,7 @@ namespace EqBandIds
         return stripPrefix + "_" + kBankSubs[bank] + which;
     }
 
-    // The engine's home positions: 8 named defaults, then log-spaced - kept
-    // identical to the plugin's defaultFreqFor so a band index means the same
-    // frequency in both products.
-    static float defaultFreqFor (int b)
-    {
-        static const float k8[8] = { 40.f, 100.f, 250.f, 630.f, 1600.f, 4000.f, 8000.f, 12500.f };
-        if (b >= 0 && b < 8) return k8[b];
-        const float t = (float) (b - 8) / 16.0f;
-        return 20.0f * std::pow (1000.0f, 0.15f + 0.8f * t);
-    }
+    static float defaultFreqFor (int b) { return kbs::eqDefaultFreq (b); }
 }
 
 namespace
@@ -7706,6 +7697,10 @@ bool BaySickDAWProcessor::ensureStripEqParams (const juce::String& prefix)
         juce::AudioProcessorValueTreeState::ScopedProgrammaticParamWrites spw;
         apvts.replaceState (apvts.copyState());
     }
+    // The ValueTree listener arms the EQ sweep only on property CHANGES; a
+    // first-touch registration at defaults never fires it, so without this the
+    // 8 default-on bands never reach the engine and the graph opens empty.
+    mEQsDirty.store (true, std::memory_order_relaxed);
     if (onMixerStripParamsCreated) onMixerStripParamsCreated (prefix);
     return true;
 }
@@ -7732,6 +7727,7 @@ bool BaySickDAWProcessor::ensureEqBandParams (const juce::String& prefix, int ba
         juce::AudioProcessorValueTreeState::ScopedProgrammaticParamWrites spw;
         apvts.replaceState (apvts.copyState());
     }
+    mEQsDirty.store (true, std::memory_order_relaxed);   // see ensureStripEqParams
     if (onMixerStripParamsCreated) onMixerStripParamsCreated (prefix);
     return true;
 }

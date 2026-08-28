@@ -39,9 +39,12 @@ public:
 
         for (int i = 0; i < n; ++i)
         {
-            // Mono sum is what a spectrum analyser shows, and it halves the
-            // work on the UI thread for no loss of information.
+            // Mid is what a spectrum analyser shows. Side rides along
+            // because EQ Match needs to know how the two domains differ -
+            // one mono sum cannot tell it whether a problem lives in the
+            // centre or at the edges.
             data[(size_t) write] = 0.5f * (left[i] + right[i]);
+            side[(size_t) write] = 0.5f * (left[i] - right[i]);
             write = (write + 1) & (kSize - 1);
         }
         filled = std::min (kSize, filled + n);
@@ -50,7 +53,11 @@ public:
     }
 
     // UI thread. Returns false if the audio thread was mid-write.
-    bool poll (float* dest) const noexcept
+    bool pollSide (float* dest) const noexcept { return pollFrom (side, dest); }
+
+    bool poll (float* dest) const noexcept { return pollFrom (data, dest); }
+
+    bool pollFrom (const std::array<float, kSize>& src, float* dest) const noexcept
     {
         const uint32_t a = seq.load (std::memory_order_acquire);
         if (a & 1u) return false;
@@ -58,14 +65,14 @@ public:
         // Oldest first, so the caller gets a contiguous window in time order.
         const int start = write;
         for (int i = 0; i < kSize; ++i)
-            dest[i] = data[(size_t) ((start + i) & (kSize - 1))];
+            dest[i] = src[(size_t) ((start + i) & (kSize - 1))];
 
         return a == seq.load (std::memory_order_acquire) && filled >= kSize;
     }
 
 private:
     mutable std::atomic<uint32_t> seq { 0 };
-    std::array<float, kSize> data {};
+    std::array<float, kSize> data {}, side {};
     int write = 0, filled = 0;
 };
 

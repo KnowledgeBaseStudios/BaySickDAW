@@ -16491,12 +16491,14 @@ void StandaloneEditor::openEffectEqWindow (int channelId, bool pre)
         openEffectEqWindow (channelId, wantPre);
     };
 
-    // QA-EqPro: the KBS editor's floor (720x420) - the rail's budget-fit
-    // arithmetic proves the dynamics section fits at exactly this minimum.
-    // Growth is the WorkspaceWindow's own resize, bounds persisted per window.
+    // QA-EqPro: opens at the KBS editor's 720x420 (the rail's budget-fit
+    // arithmetic proves the dynamics section fits at exactly that size), and
+    // shrinks to 495x253 - measured by Jeff 2026-08-26 as the smallest where
+    // the graph, the chip row and the rail are all still workable.
     auto* win = openAuxWindow (key, key, contentRaw->windowTitle(),
                                std::move (content), 720, 420);
     if (win == nullptr) return;
+    win->setResizeFloor (495, 253);
 
     contentRaw->onTitleChanged = [win] (const juce::String& t) { win->setTitle (t); };
     contentRaw->configureTitleStrip (*win->getPageMenu());

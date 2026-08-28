@@ -30,7 +30,13 @@ class StripEq : public DSPBase
 public:
     static constexpr int kBands = kbs::ParametricEq::kMaxBands;
 
-    StripEq() = default;
+    StripEq()
+    {
+        // B ships like A: an untouched spare is the default bank, so the very
+        // first swap to B lands on the same 8 flat bands - see resetToDefaults.
+        for (int i = 0; i < kBands; ++i)
+            mSpare[(size_t) i] = kbs::eqDefaultBand (i);
+    }
     ~StripEq() override = default;
 
     // DSPBase interface
