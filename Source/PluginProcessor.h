@@ -2049,6 +2049,7 @@ private:
         eqSlotChannel, eqSlotPlace, eqSlotMute, eqSlotIsolate,
         eqSlotDynamic, eqSlotThreshold, eqSlotRatio, eqSlotAttack,
         eqSlotRelease, eqSlotAutoRelease, eqSlotRange, eqSlotScSource,
+        eqSlotPhase,
         eqNumBandParamSlots
     };
     struct EqBandParamPtrs

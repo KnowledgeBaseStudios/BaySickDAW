@@ -881,8 +881,9 @@ void EffectEqWindow::showOptionsMenu (juce::Component* anchor)
     juce::PopupMenu mode;
     const char* modeNames[] = { "Zero Latency", "Natural Phase", "Linear Low",
                                 "Linear Medium", "Linear High",
-                                "Linear Very High", "Linear Maximum" };
-    for (int i = 0; i < 7; ++i)
+                                "Linear Very High", "Linear Maximum",
+                                "Mixed Phase" };
+    for (int i = 0; i < 8; ++i)
         mode.addItem (100 + i,
                       juce::String (modeNames[i]) + "   (" + latencyLabel (i) + ")",
                       true, curMode == i);
@@ -1011,7 +1012,7 @@ void EffectEqWindow::showOptionsMenu (juce::Component* anchor)
                 }
             };
 
-            if (r >= 100 && r < 107) setG ("mode", (float) (r - 100));
+            if (r >= 100 && r < 108) setG ("mode", (float) (r - 100));
             else if (r == 110) toggleG ("os");
             else if (r == 111) toggleG ("propq");
             else if (r == 120) toggleG ("autogain");

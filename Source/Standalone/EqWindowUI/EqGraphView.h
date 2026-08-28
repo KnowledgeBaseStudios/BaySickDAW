@@ -848,7 +848,7 @@ public:
             { "iso", "Isolate" }, { "dyn", "Dynamic" }, { "thr", "Threshold" },
             { "ratio", "Ratio" }, { "atk", "Attack" }, { "rel", "Release" },
             { "relauto", "AutoRelease" }, { "range", "Range" },
-            { "scsrc", "ScSource" },
+            { "scsrc", "ScSource" }, { "phase", "Phase" },
         };
         for (const auto& e : map)
             if (std::strcmp (e.f, field) == 0) return e.s;

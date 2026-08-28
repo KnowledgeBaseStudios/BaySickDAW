@@ -90,7 +90,11 @@ enum class EqMode
 {
     zeroLatency = 0,   // minimum-phase IIR, classic RBJ bells
     natural,           // same, bells decramped (Orfanidis) - still zero latency
-    linearLow, linearMedium, linearHigh, linearVeryHigh, linearMaximum
+    linearLow, linearMedium, linearHigh, linearVeryHigh, linearMaximum,
+    // QA-EqFlagship W-9: the linear machinery with a frequency-weighted
+    // phase floor - minimum-phase character in the lows (no bass pre-ring),
+    // linear in the highs.  Appended so stored mode values keep meaning.
+    mixed
 };
 
 inline bool eqModeIsLinear (EqMode m) { return (int) m >= (int) EqMode::linearLow; }
@@ -106,8 +110,21 @@ inline int eqLinearFftOrder (EqMode m)
         case EqMode::linearHigh:     return 12;
         case EqMode::linearVeryHigh: return 13;
         case EqMode::linearMaximum:  return 14;   // 16384
+        case EqMode::mixed:          return 12;   // room for LF min-phase tails
         default:                     return 0;
     }
+}
+
+// Mixed mode's minimum-phase weight per frequency: fully natural below
+// 150 Hz (where linear-phase pre-ring is audible on bass), fully linear
+// above 1.5 kHz (where minimum-phase cramping/rotation is the artifact),
+// a raised-cosine ramp in log-frequency between.
+inline float eqMixedMinPhaseWeight (float hz)
+{
+    if (hz <= 150.0f)  return 1.0f;
+    if (hz >= 1500.0f) return 0.0f;
+    const float t = std::log (hz / 150.0f) / std::log (10.0f);
+    return 0.5f * (1.0f + std::cos ((float) kPi * t));
 }
 
 // The linear path's latency for a mode, from the same constants EqLinearPhase
@@ -133,6 +150,9 @@ struct EqBandParams
     float     q = 0.707f;
     float     slope = 12.0f;              // filters only; dB/oct, continuous
                                           // 1..96; >= 96.5 = Brickwall
+    float     phaseMix = 0.0f;            // W-9, linear modes only: 0 = the
+                                          // mode's phase, 1 = this band
+                                          // minimum-phase (no pre-ring)
     EqChannel channel = EqChannel::stereo;
     float     placement = 0.0f;           // -1 left .. +1 right; gain types, stereo only
     bool      muted = false;
@@ -587,10 +607,28 @@ public:
     // phase there was one of the recorded defects.
     float phaseAt (float hz) const
     {
-        if (eqModeIsLinear (mode)) return 0.0f;
         double ph = 0.0;
-        for (const auto& b : bands)
-            if (bandActive (b)) ph += bandPhase (b, hz);
+        if (eqModeIsLinear (mode))
+        {
+            // Post-PDC truth: pure linear content reports zero; what remains
+            // is exactly the excess each band was given (W-9).
+            for (const auto& b : bands)
+            {
+                if (! bandActive (b)) continue;
+                float wgt = std::clamp (b.p.phaseMix, 0.0f, 1.0f);
+                if (mode == EqMode::mixed)
+                {
+                    const float mw = eqMixedMinPhaseWeight (hz);
+                    wgt = 1.0f - (1.0f - wgt) * (1.0f - mw);
+                }
+                if (wgt > 0.001f) ph += wgt * bandPhase (b, hz);
+            }
+        }
+        else
+        {
+            for (const auto& b : bands)
+                if (bandActive (b)) ph += bandPhase (b, hz);
+        }
         if (polarityFlip) ph += kPi;
         return (float) ph;
     }
@@ -1416,7 +1454,7 @@ private:
         // rebuilds run on the audio thread and must not allocate.
         const size_t bins = (size_t) (linear.fftSize() / 2 + 1);
         for (auto* t : { &domSt, &domL, &domR, &domM, &domS })
-            t->assign (bins, 1.0f);
+            t->assign (bins, std::complex<float> (1.0f, 0.0f));
         staticCurveDirty = true;
     }
 
@@ -1434,11 +1472,30 @@ private:
         // M/S stage - band index order cannot be honoured across the two
         // groups by a single frequency-domain design, and either order is a
         // valid reading of "these bands each process their domain".
-        bool anyDomain = false;
+        bool anyDomain = false, anyPhase = mode == EqMode::mixed;
         for (const auto& b : bands)
-            if (bandActive (b) && b.p.channel != EqChannel::stereo) { anyDomain = true; break; }
+        {
+            if (! bandActive (b)) continue;
+            if (b.p.channel != EqChannel::stereo) anyDomain = true;
+            if (b.p.phaseMix > 0.005f) anyPhase = true;
+        }
 
-        if (! anyDomain)
+        // W-9: a band's excess phase is its own minimum-phase response,
+        // weighted by the band's phaseMix OR'd with the mode's per-frequency
+        // floor (mixed mode).  Magnitude is untouched - phase only decides
+        // where each band's energy sits around the one reported delay.
+        auto bandExcess = [this] (const BandRt& b, float hz) -> double
+        {
+            float wgt = std::clamp (b.p.phaseMix, 0.0f, 1.0f);
+            if (mode == EqMode::mixed)
+            {
+                const float mw = eqMixedMinPhaseWeight (hz);
+                wgt = 1.0f - (1.0f - wgt) * (1.0f - mw);
+            }
+            return wgt <= 0.001f ? 0.0 : wgt * bandPhase (b, hz);
+        };
+
+        if (! anyDomain && ! anyPhase)
         {
             linear.setMagnitude ([this] (float hz)
             {
@@ -1453,42 +1510,65 @@ private:
 
         const int n = linear.fftSize();
         const double binHz = sr / (double) n;
+
+        if (! anyDomain)
+        {
+            linear.setResponse ([&] (int bin, int) -> std::complex<float>
+            {
+                const float hz = (float) (bin * binHz);
+                double m = 1.0, ph = 0.0;
+                for (const auto& b : bands)
+                {
+                    if (! bandActive (b)) continue;
+                    m *= bandMagnitude (b, hz, 0, false);
+                    ph += bandExcess (b, hz);
+                }
+                return std::polar ((float) m, (float) ph);
+            });
+            return;
+        }
+
         for (int k = 0; k <= n / 2; ++k)
         {
             const float hz = (float) (k * binHz);
-            double st = 1.0, dl = 1.0, dr = 1.0, dm = 1.0, ds = 1.0;
+            std::complex<double> st (1.0, 0.0), dl (1.0, 0.0), dr (1.0, 0.0),
+                                 dm (1.0, 0.0), ds (1.0, 0.0);
             for (const auto& b : bands)
             {
                 if (! bandActive (b)) continue;
-                const double m = bandMagnitude (b, hz, 0, false);
+                const auto h = std::polar (bandMagnitude (b, hz, 0, false),
+                                           anyPhase ? bandExcess (b, hz) : 0.0);
                 switch (b.p.channel)
                 {
-                    case EqChannel::stereo: st *= m; break;
-                    case EqChannel::left:   dl *= m; break;
-                    case EqChannel::right:  dr *= m; break;
-                    case EqChannel::mid:    dm *= m; break;
-                    case EqChannel::side:   ds *= m; break;
+                    case EqChannel::stereo: st *= h; break;
+                    case EqChannel::left:   dl *= h; break;
+                    case EqChannel::right:  dr *= h; break;
+                    case EqChannel::mid:    dm *= h; break;
+                    case EqChannel::side:   ds *= h; break;
                 }
             }
-            domSt[(size_t) k] = (float) st;
-            domL [(size_t) k] = (float) dl;
-            domR [(size_t) k] = (float) dr;
-            domM [(size_t) k] = (float) dm;
-            domS [(size_t) k] = (float) ds;
+            domSt[(size_t) k] = std::complex<float> (st);
+            domL [(size_t) k] = std::complex<float> (dl);
+            domR [(size_t) k] = std::complex<float> (dr);
+            domM [(size_t) k] = std::complex<float> (dm);
+            domS [(size_t) k] = std::complex<float> (ds);
         }
 
-        auto entry = [this] (float msSign, const std::vector<float>& side)
+        // The domain algebra is linear, so it holds verbatim with complex
+        // entries - mono cancellation of a side band stays EXACT with phase
+        // in play (pinned by test, not assumed).
+        auto entry = [this] (float msSign, const std::vector<std::complex<float>>& side)
         {
-            return [this, msSign, &side] (int bin, int) -> float
+            return [this, msSign, &side] (int bin, int) -> std::complex<float>
             {
                 const auto k = (size_t) bin;
                 return 0.5f * (domM[k] + msSign * domS[k]) * domSt[k] * side[k];
             };
         };
-        linear.setMagnitudeMatrix (entry (+1.0f, domL),    // LL
-                                   entry (-1.0f, domR),    // LR
-                                   entry (-1.0f, domL),    // RL
-                                   entry (+1.0f, domR));   // RR
+        linear.setResponseMatrix (entry (+1.0f, domL),    // LL
+                                  entry (-1.0f, domR),    // LR
+                                  entry (-1.0f, domL),    // RL
+                                  entry (+1.0f, domR));   // RR
     }
 
     void markAllDirty()
@@ -1528,7 +1608,7 @@ private:
 
     EqLinearPhase linear;
     bool staticCurveDirty = true;
-    std::vector<float> domSt, domL, domR, domM, domS;   // matrix rebuild tables
+    std::vector<std::complex<float>> domSt, domL, domR, domM, domS;   // matrix rebuild tables
 
     std::vector<float> scL, scR, detL, detR;
     bool scValid = false;

@@ -80,3 +80,38 @@ difference between IIR and linear modes for fractional slopes is real,
 each mode draws its own truth, noted for the docs. (3) One deduction
 error (wireSegment fallback) - trivial. EqTests section 15: 10 checks, all
 green; suite green; build gate six zeros + four links (second run).
+
+## 2026-08-27 - Task 3 - per-band phase + Mixed mode (W-9)
+
+The complex-phase pipeline: EqLinearPhase gained designSpectrumComplex
+(conjugate-symmetric complex sampling -> real IR, same rotate pipeline) with
+setResponse / setResponseMatrix; ParametricEq gained EqBandParams.phaseMix
+(0..1, 19th band param "Phase", full APVTS/blob/sweep/compare plumbing) and
+EqMode::mixed (appended - stored mode values keep meaning; order-12 grid;
+raised-cosine min-phase weight, fully natural below 150 Hz, fully linear
+above 1.5 kHz). A band's excess phase = its own analytic minimum-phase
+response (bandPhase, already computed and previously discarded), weighted by
+phaseMix OR'd with the mode's per-frequency floor. The domain tables went
+complex; the 2x2 matrix algebra holds verbatim (linear in the entries) and
+the side-band mono cancellation is RE-PINNED EXACT with phase in play.
+phaseAt now reports the blended excess phase in linear modes (post-PDC
+truth) instead of a flat zero. Rail gained a PHASE drag-number (percent,
+linear modes only); the mode menu gained Mixed Phase with its computed
+latency. Latency unchanged by phase - recorded everywhere: blend moves
+pre-ring, never delay.
+
+Findings: (1) REAL DESIGN BUG caught by the new heard-equals-drawn checks -
+the center-peaked Kaiser window is wrong for phase-blended IRs (min-phase
+energy starts AT center and tails right; the Kaiser bump ate the tail - a
+low bell lost 3 dB). Complex designs now use a flat window with
+raised-cosine edge tapers; the pure-linear path keeps its proven Kaiser
+(QA-EqPro pins untouched). (2) Mixed moved to the order-12 grid for LF
+min-phase tails. (3) The 80 Hz check is pinned at 0.5 dB with the reason in
+the test: ~11.7 Hz design bins under an 80 Hz bell is FIR resolution - the
+class-wide linear-phase physics, not a phase-blend cost. (4) Engine size
+measured: 223 KB at 96 bands (printed by section 14) - ~30 stack engines in
+the test main() overflowed even 8 MB, test-exe stack now 32 MB (products
+heap-allocate; the DAW's per-node cost 2x223 KB noted for the close docs).
+(5) stdout now unbuffered in the harness so a crash cannot eat its own
+evidence. EqTests section 16 (6 checks) green; full suite green; build gate
+six zeros + four links first try.

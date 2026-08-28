@@ -914,7 +914,7 @@ add_executable(BaySickEqTests Tools/EqTests/main.cpp)
 # ~100KB, so the default 1MB stack dies at the prologue probe.  The PRODUCTS
 # heap-allocate every engine; only the test needs the headroom.
 if(MSVC)
-  target_link_options(BaySickEqTests PRIVATE "/STACK:8388608")
+  target_link_options(BaySickEqTests PRIVATE "/STACK:33554432")
 endif()
 set_target_properties(BaySickEqTests PROPERTIES
     CXX_STANDARD 17

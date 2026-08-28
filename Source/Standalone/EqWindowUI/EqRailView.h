@@ -664,6 +664,16 @@ public:
                           "Brickwall, which exists in the linear-phase modes.");
         addAndMakeVisible (slope);
 
+        // W-9: per-band phase, linear modes only.  0% = the mode's own
+        // phase; 100% = this band minimum-phase (its pre-ring gone).
+        wireNumber (phaseN, "phase", false, 0.004f,
+                    [] (float v)
+                    { return juce::String ((int) std::round (v * 100.0f)) + "%"; });
+        phaseN.setTooltip ("This band's phase in the linear modes: 0% rides "
+                           "the mode's linear phase, 100% makes just this "
+                           "band minimum-phase - its pre-ring disappears.");
+        addAndMakeVisible (phaseN);
+
         dynT.setButtonText ("DYN");
         dynT.setTooltip ("Make this band dynamic: it moves with the material. "
                          "Enabling seeds the direction to compress so it does "
@@ -893,7 +903,8 @@ private:
             if (b < 0) return 0.0f;
             const auto p = graph.bandParams (b);
             return std::strcmp (field, "freq") == 0 ? p.freqHz
-                 : std::strcmp (field, "slope") == 0 ? p.slope : p.q;
+                 : std::strcmp (field, "slope") == 0 ? p.slope
+                 : std::strcmp (field, "phase") == 0 ? p.phaseMix : p.q;
         };
         d.set = [this, field] (float v)
         {
@@ -945,7 +956,7 @@ private:
         // disagree is how a layout starts reserving space for nothing.
         const bool showDynRow  = dynT.isVisible();
         const bool showDynBody = direction.isVisible();
-        const int need = 181 + (showDynRow  ? 12 + 16 : 0)
+        const int need = 207 + (showDynRow  ? 12 + 16 : 0)
                              + (showDynBody ? 4 + 16 + 4 + 100 : 0);
 
         mMaxScroll = juce::jmax (0, need - full.getHeight());
@@ -969,6 +980,7 @@ private:
         chan.setBounds (r.removeFromTop (16));
         r.removeFromTop (3);
         slope.setBounds (r.removeFromTop (26));
+        phaseN.setBounds (r.removeFromTop (26));
 
         if (showDynRow)
         {
@@ -1006,6 +1018,7 @@ private:
         const int b = graph.selectedBand();
         if (b < 0) return;
         slope.refresh();
+        phaseN.refresh();
     }
 
     void timerCallback() override
@@ -1038,6 +1051,8 @@ private:
             pan.setValue (p.placement, juce::dontSendNotification);
 
         slope.setVisible (show && kbs::eqTypeHasSlope (p.type));
+        phaseN.setVisible (show && graph.eq() != nullptr
+                           && kbs::eqModeIsLinear (graph.eq()->getMode()));
         chan.setVisible (show && graph.domainView() == DomainView::stereo);
 
         const bool dynOk = show && kbs::eqTypeSupportsDynamic (p.type);
@@ -1103,6 +1118,7 @@ private:
     DragNumber freq, q;
     SegmentRow type, chan;
     DragNumber slope { "SLOPE" };
+    DragNumber phaseN { "PHASE" };
     juce::TextButton dynT, autoT, extT;
     GrMeter grMeter;
     int dynTop = 300;

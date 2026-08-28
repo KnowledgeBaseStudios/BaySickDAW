@@ -44,6 +44,7 @@ static double levelAt (const std::vector<float>& buf, double freq, double sr, in
 
 int main()
 {
+    std::setvbuf (stdout, nullptr, _IONBF, 0);
     // ── 10. the parametric EQ engine ───────────────────────────────────────
     std::printf ("\n  parametric EQ - identity and magnitude\n");
     {
@@ -972,6 +973,8 @@ int main()
     // ---- 14. QA-EqFlagship Task 1: the 96-band pool (W-15)
     std::printf ("%s", "\n  14. the 96-band pool\n");
     {
+        std::printf ("      sizeof(ParametricEq) = %zu KB\n",
+                     sizeof (kbs::ParametricEq) / 1024);
         check (kbs::ParametricEq::kMaxBands == 96, "the pool holds 96 bands",
                (double) kbs::ParametricEq::kMaxBands, 96.0);
 
@@ -1119,6 +1122,112 @@ int main()
             check (std::abs (eq.phaseAt (1000.0f)) > 1.0,
                    "and rotates real phase at its corner",
                    std::abs (eq.phaseAt (1000.0f)), 1.0);
+        }
+    }
+    // ---- 16. QA-EqFlagship Task 3: per-band phase + Mixed mode (W-9)
+    std::printf ("%s", "\n  16. per-band phase + Mixed mode\n");
+    {
+        const double srr = 48000.0;
+
+        auto settleGain = [] (kbs::ParametricEq& eq, double freq, double srr2)
+        {
+            const int block = 256;
+            std::vector<float> L (block), R (block), tail;
+            double phase = 0.0;
+            const int settle = 2 * eq.latencySamples() / block + 40;
+            for (int bl = 0; bl < settle + 40; ++bl)
+            {
+                for (int i = 0; i < block; ++i)
+                {
+                    phase += 2.0 * kbs::kPi * freq / srr2;
+                    L[(size_t) i] = R[(size_t) i] = (float) (0.1 * std::sin (phase));
+                }
+                eq.process (L.data(), R.data(), block);
+                if (bl >= settle) tail.insert (tail.end(), L.begin(), L.end());
+            }
+            const double period = srr2 / freq;
+            const size_t whole = (size_t) (std::floor ((double) tail.size() / period) * period);
+            tail.resize (std::max<size_t> (whole, (size_t) period));
+            return 20.0 * std::log10 (levelAt (tail, freq, srr2, 0) / 0.1);
+        };
+
+        // A minimum-phased band keeps its magnitude: heard equals drawn at
+        // full phaseMix, and the drawn curve equals the phaseMix=0 curve.
+        {
+            kbs::ParametricEq eq;
+            eq.prepare (srr, 256);
+            eq.setMode (kbs::EqMode::linearMedium);
+            kbs::EqBandParams b;
+            b.on = true; b.type = kbs::EqType::bell;
+            b.freqHz = 700.0f; b.gainDb = 8.0f; b.q = 1.2f;
+            b.phaseMix = 1.0f;
+            eq.setBand (0, b);
+            const double drawn = 20.0 * std::log10 (eq.magnitudeAt (700.0f));
+            near (settleGain (eq, 700.0, srr), drawn, 0.3,
+                  "full min-phase band: heard equals drawn");
+            near (drawn, 8.0, 0.3, "and the magnitude is the bell's own");
+        }
+
+        // The algebra survives phase: a side band at full phaseMix STILL
+        // leaves a mono signal untouched, exactly.
+        {
+            kbs::ParametricEq eq;
+            eq.prepare (srr, 256);
+            eq.setMode (kbs::EqMode::linearMedium);
+            kbs::EqBandParams b;
+            b.on = true; b.type = kbs::EqType::bell;
+            b.freqHz = 1000.0f; b.gainDb = 6.0f; b.q = 1.0f;
+            b.channel = kbs::EqChannel::side;
+            b.phaseMix = 1.0f;
+            eq.setBand (0, b);
+            near (settleGain (eq, 1000.0, srr), 0.0, 0.05,
+                  "side band at full phaseMix leaves mono exactly alone");
+        }
+
+        // Mixed mode: a flat EQ is still a pure delay - the impulse peak
+        // lands at exactly the reported latency.
+        {
+            kbs::ParametricEq eq;
+            eq.prepare (srr, 512);
+            eq.setMode (kbs::EqMode::mixed);
+            const int lat = eq.latencySamples();
+            check (lat > 0, "mixed mode reports linear-class latency",
+                   (double) lat, 1.0);
+
+            std::vector<float> L (512, 0.0f), R (512, 0.0f);
+            L[0] = R[0] = 1.0f;
+            int peakAt = -1; float peakV = 0.0f; int base = 0;
+            for (int bl = 0; bl < 8; ++bl)
+            {
+                eq.process (L.data(), R.data(), 512);
+                for (int i = 0; i < 512; ++i)
+                    if (std::abs (L[(size_t) i]) > peakV)
+                    { peakV = std::abs (L[(size_t) i]); peakAt = base + i; }
+                std::fill (L.begin(), L.end(), 0.0f);
+                std::fill (R.begin(), R.end(), 0.0f);
+                base += 512;
+            }
+            near ((double) peakAt, (double) lat, 0.0,
+                  "flat mixed-mode impulse peaks at the reported latency");
+        }
+
+        // Mixed mode with a low bell: magnitude still equals the query (the
+        // phase floor moves energy, never level).
+        {
+            kbs::ParametricEq eq;
+            eq.prepare (srr, 256);
+            eq.setMode (kbs::EqMode::mixed);
+            kbs::EqBandParams b;
+            b.on = true; b.type = kbs::EqType::bell;
+            b.freqHz = 80.0f; b.gainDb = 6.0f; b.q = 1.0f;
+            eq.setBand (0, b);
+            const double drawn = 20.0 * std::log10 (eq.magnitudeAt (80.0f));
+            // 0.5 dB, deliberately: at order 12 the design grid is ~11.7 Hz
+            // per bin, coarse under an 80 Hz bell - the FIR-resolution truth
+            // every linear-phase EQ lives with at LF, not a phase-blend cost
+            // (the same bell passes 0.3 at 700 Hz).
+            near (settleGain (eq, 80.0, srr), drawn, 0.5,
+                  "mixed mode: heard equals drawn on a low bell");
         }
     }
     std::printf (failures == 0 ? "\n  all checks passed\n\n" : "\n  %d FAILURE(S)\n\n", failures);

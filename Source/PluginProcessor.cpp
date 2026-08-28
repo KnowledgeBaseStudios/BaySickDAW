@@ -5595,6 +5595,7 @@ void BaySickDAWProcessor::updateEQFromCache (StripEq* eq, int stripSlot, int ban
         bp.autoRelease = get (eqSlotAutoRelease) > 0.5f;
         bp.rangeDb     = get (eqSlotRange);
         bp.scSource    = juce::jlimit (-1, 3, (int) get (eqSlotScSource));
+        bp.phaseMix    = juce::jlimit (0.0f, 1.0f, get (eqSlotPhase));
         eq->pushBand (b, bp);
     }
 
@@ -7599,7 +7600,7 @@ namespace EqBandIds
     static const char* const kSuffixes[] = {
         "Freq", "Gain", "Q", "Type", "On", "Slope", "Channel", "Place",
         "Mute", "Isolate", "Dynamic", "Threshold", "Ratio", "Attack",
-        "Release", "AutoRelease", "Range", "ScSource"
+        "Release", "AutoRelease", "Range", "ScSource", "Phase"
     };
     // Index order must match BaySickDAWProcessor::EqBankGlobalSlot.  Mode and
     // os ride the same spelling family but never enter the sweep cache
@@ -7654,6 +7655,7 @@ namespace
         dynB (apvts, ids, bp + "AutoRelease", labelBase + "AutoRelease", false);
         dynF (apvts, ids, bp + "Range",       labelBase + "Range",       -30.f, 30.f, 0.f);
         dynI (apvts, ids, bp + "ScSource",    labelBase + "ScSource",    -1, 3, -1);
+        dynF (apvts, ids, bp + "Phase",       labelBase + "Phase",       0.f, 1.f, 0.f);
     }
 
     void registerEqBankGlobals (juce::AudioProcessorValueTreeState& apvts, juce::StringArray& ids,
@@ -7661,7 +7663,7 @@ namespace
     {
         const juce::String labelBase = stripPrefix + (bank == 1 ? " Pre EQ " : " EQ ");
         auto gid = [&] (const char* which) { return EqBandIds::globalId (stripPrefix, bank, which); };
-        dynI (apvts, ids, gid ("mode"),     labelBase + "Mode",             0, 6, 0);
+        dynI (apvts, ids, gid ("mode"),     labelBase + "Mode",             0, 7, 0);
         dynB (apvts, ids, gid ("os"),       labelBase + "Oversampling",     false);
         dynB (apvts, ids, gid ("propq"),    labelBase + "Proportional Q",   true);
         dynB (apvts, ids, gid ("autogain"), labelBase + "Auto Gain",        false);
@@ -7866,7 +7868,7 @@ void BaySickDAWProcessor::applyEqConfigFromParams (const juce::String& prefix, i
     auto* osP   = apvts.getRawParameterValue (EqBandIds::globalId (prefix, bank, "os"));
     if (modeP == nullptr || osP == nullptr) return;
 
-    const auto want   = (kbs::EqMode) juce::jlimit (0, 6, (int) modeP->load());
+    const auto want   = (kbs::EqMode) juce::jlimit (0, 7, (int) modeP->load());
     const bool wantOs = osP->load() > 0.5f;
     if (want == eq->getMode() && wantOs == eq->getOversampling()) return;
 

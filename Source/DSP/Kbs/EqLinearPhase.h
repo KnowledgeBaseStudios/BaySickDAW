@@ -132,6 +132,34 @@ public:
 
     bool isMatrixOn() const { return matrixOn; }
 
+    // ── complex (mixed / per-band phase) designs (QA-EqFlagship W-9) ──────
+    //
+    // The FIR need not be zero-phase: sampling a COMPLEX response (magnitude
+    // plus an excess phase) with conjugate symmetry still yields a real
+    // impulse response, and the same rotate-to-centre + Kaiser pipeline
+    // holds.  The centre delay - the one latency the engine reports - is
+    // unchanged; what moves is where each band's energy sits around it
+    // (minimum-phase content leans forward, killing its pre-ring).
+    void setResponse (const std::function<std::complex<float> (int bin, int fftSizeN)>& at)
+    {
+        if (! isReady()) return;
+        designSpectrumComplex (spectrum, at);
+        matrixOn = false;
+    }
+
+    void setResponseMatrix (const std::function<std::complex<float> (int bin, int fftSizeN)>& ll,
+                            const std::function<std::complex<float> (int bin, int fftSizeN)>& lr,
+                            const std::function<std::complex<float> (int bin, int fftSizeN)>& rl,
+                            const std::function<std::complex<float> (int bin, int fftSizeN)>& rr)
+    {
+        if (! isReady()) return;
+        designSpectrumComplex (specLL, ll);
+        designSpectrumComplex (specLR, lr);
+        designSpectrumComplex (specRL, rl);
+        designSpectrumComplex (specRR, rr);
+        matrixOn = true;
+    }
+
     // Convenience for a flat curve without building a lambda at the call site.
     void setIdentity() { setMagnitude ([] (int, int) { return 1.0f; }); }
 
@@ -281,6 +309,46 @@ private:
             const double r = (double) (i - half) / (double) std::max (1, half);
             const double w = besselI0 (8.0 * std::sqrt (std::max (0.0, 1.0 - r * r)))
                            / besselI0 (8.0);
+            scratch[(size_t) i] = { design[(size_t) src].real() * (float) w, 0.0f };
+        }
+
+        fft->transform (scratch.data(), false);
+        std::copy (scratch.begin(), scratch.end(), dest.begin());
+    }
+
+    // The complex twin of designSpectrum: H(n-k) = conj(H(k)) keeps the
+    // impulse response real; everything after the sampling is the shared
+    // pipeline.  No clamp - a complex response's sign lives in its phase.
+    void designSpectrumComplex (std::vector<std::complex<float>>& dest,
+                                const std::function<std::complex<float> (int bin, int fftSizeN)>& at)
+    {
+        for (int k = 0; k <= n / 2; ++k)
+        {
+            const auto h = at (k, n);
+            design[(size_t) k] = h;
+            if (k > 0 && k < n / 2)
+                design[(size_t) (n - k)] = std::conj (h);
+        }
+
+        fft->transform (design.data(), true);
+
+        // NOT the Kaiser: a phase-blended response is no longer symmetric
+        // about the centre - minimum-phase content starts AT the centre and
+        // tails rightward - so a centre-peaked window eats the tail and the
+        // magnitude with it (a low bell lost 3 dB to it).  A flat window
+        // with raised-cosine edge tapers keeps whatever the blend put where
+        // it put it; the pure-linear path keeps its proven Kaiser.
+        const int half = (taps - 1) / 2;
+        const int taper = std::max (8, taps / 8);
+        std::fill (scratch.begin(), scratch.end(), std::complex<float> { 0.0f, 0.0f });
+        for (int i = 0; i < taps; ++i)
+        {
+            const int src = (i - half + n) % n;
+            double w = 1.0;
+            if (i < taper)
+                w = 0.5 * (1.0 - std::cos (kPi * (double) i / (double) taper));
+            else if (i >= taps - taper)
+                w = 0.5 * (1.0 - std::cos (kPi * (double) (taps - 1 - i) / (double) taper));
             scratch[(size_t) i] = { design[(size_t) src].real() * (float) w, 0.0f };
         }
 
