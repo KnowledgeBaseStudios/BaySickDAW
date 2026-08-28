@@ -964,6 +964,51 @@ void shootEffectPanels (World& w)
     rack->loadEffect (3, EffectType::None);
 }
 
+// ── every pedal, its own figure (Jeff, 2026-08-28) ────────────────────────
+// The picker list documents what can go in a slot; In Depth documents each
+// pedal's actual panel with its own generated control table.  Shot as the
+// TILE, not the whole board, so the crop and the control dump both cover
+// exactly one pedal.
+void shootPedalPanels (World&)
+{
+    struct Pedal { const char* name; EffectType type; int slot; };
+    static const Pedal kPedals[] = {
+        { "Tuner",              EffectType::TunerStyle,             0 },
+        { "Bass Compressor",    EffectType::BassCompressorStyle,    1 },
+        { "Noise Gate",         EffectType::NoiseGateStyle,         1 },
+        { "Bass Driver",        EffectType::BassDriverStyle,        1 },
+        { "Bass Overdrive",     EffectType::BassOverdriveStyle,     1 },
+        { "Blues Drive",        EffectType::BluesDriveStyle,        1 },
+        { "Distortion",         EffectType::DistortionStyle,        1 },
+        { "Fuzz",               EffectType::FuzzStyle,              1 },
+        { "High-Gain",          EffectType::HighGainStyle,          1 },
+        { "Octave",             EffectType::OctaveStyle,            1 },
+        { "Acoustic Simulator", EffectType::AcousticSimulatorStyle, 1 },
+        { "Polyphonic Synth",   EffectType::SynthStyle,             1 },
+        { "Wah",                EffectType::WahStyle,               1 },
+        { "Acoustic Preamp",    EffectType::AcousticPreampStyle,    1 },
+        { "NAM Pedal",          EffectType::NAMPedalStyle,          1 },
+        { "Graphic EQ",         EffectType::GraphicEQStyle,         7 },
+    };
+
+    for (const auto& pd : kPedals)
+    {
+        const juce::String fig = juce::String ("Pedal ") + pd.name;
+        if (! want (fig)) continue;
+
+        BaySickPedalsProcessor pedals (nullptr);
+        if (pd.slot != 0 && pd.slot != 7)
+            pedals.loadEffect (pd.slot, pd.type);
+
+        BaySickPedalsEditor ed (pedals);
+        ed.setSize (1038, 554);           // Standard view, as the board ships
+        if (auto* tile = ed.getTileForShot (pd.slot))
+            save (*tile, fig, 1.25f);
+        else
+        { ++gFailed; std::cout << "  FAILED " << fig << " (no tile)" << std::endl; }
+    }
+}
+
 void shootMixerCluster (World& w)
 {
     const bool wantMix = want ("Mixer");
@@ -1945,6 +1990,7 @@ const Figure kFigures[] = {
     // Piano Roll and the Event Editor read.
     { "effects",       &shootEffectsCluster },
     { "fx panels",     &shootEffectPanels },
+    { "pedal panels",  &shootPedalPanels },
     { "mixer",         &shootMixerCluster },
     { "vu meter",      &shootVuMeter },
     { "builder",       &shootBuilder },

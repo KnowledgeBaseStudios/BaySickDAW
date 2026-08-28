@@ -47,6 +47,9 @@ public:
     // --shot only: runs the given slot's real Change-Pedal menu path so the
     // harness's capture hook (ShotMenuHook.h) can take the menu headless.
     void showSwapMenuForShot (int slot);
+    // --shot only: the tile itself, so each pedal can be shot on its own
+    // and its control table dumped without the rest of the board.
+    juce::Component* getTileForShot (int slot);
 
     // Called by per-tile components when the user picks a new effect type
     // (Change Pedal menu, EQ picker dropdown).

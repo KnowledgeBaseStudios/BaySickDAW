@@ -79,6 +79,8 @@ def _effect_of(fig):
         return FIG_EFFECT[fig]
     if fig.startswith("FX Panel "):
         return fig[len("FX Panel "):].rsplit(" ", 1)[0]
+    if fig.startswith("Pedal "):
+        return fig[len("Pedal "):]
     return None
 
 def _fx_key(fig, rid, label):
@@ -122,6 +124,30 @@ def effect_gallery():
                        % (view, html.escape(fig), html.escape(fig)))
         tbl = controls_table_for_figure("FX Panel %s Basic" % nm,
                                         "FX Panel %s Advanced" % nm)
+        if tbl:
+            out.append(tbl)
+        out.append('</section>')
+    return "\n".join(out)
+
+
+# Jeff, 2026-08-28: the picker list says what can go in a slot; In Depth
+# shows each pedal's real panel with its own generated control table.
+def pedal_gallery():
+    names = sorted(k[len("Pedal "):] for k in DOCS if k.startswith("Pedal "))
+    if not names:
+        return ""
+    out = ['<h4 class="ctrlhead">Every pedal, panel by panel</h4>',
+           '<p>Each pedal below is its own tile on the board, shot from the '
+           'running app. Tuner and Graphic EQ are the two locked slots.</p>']
+    for nm in names:
+        fig = "Pedal " + nm
+        png = os.path.join(FIGD, fig + ".png")
+        if not os.path.exists(png):
+            continue
+        out.append('<section class="fxpanel"><h5>%s</h5>' % html.escape(nm))
+        out.append('<figure><img src="figures/%s.png" alt="%s" loading="lazy"></figure>'
+                   % (html.escape(fig), html.escape(fig)))
+        tbl = controls_table_for_figure(fig)
         if tbl:
             out.append(tbl)
         out.append('</section>')
@@ -613,7 +639,8 @@ for g in GROUPS:
 </section>""".format(code=code, name=html.escape(f['name']), crumbs=ch, blurb=bl,
                      views=l1_views(code), table=l1_table(code),
                      controls=controls_table(code)
-                              + (effect_gallery() if code == 'FX' else ''),
+                              + (effect_gallery() if code == 'FX' else '')
+                              + (pedal_gallery() if code == 'BSPDLP' else ''),
                      chapter=l2_chapter(code),
                      l3=('<div class="l3">%s</div>' % l3) if l3 else ''))
     bi = 0
@@ -857,6 +884,17 @@ const M2CROPS = {m2crops};
     expandTo(el);
   }
   window.__revealLevel = ensureVisible;
+  // A jump can change the level and open collapsed blocks, and offscreen
+  // sections are content-visibility:auto - so at click time the target's
+  // height is still an ESTIMATE and a single scroll lands short (the old
+  // "click it twice" bug).  Scroll, let layout settle, scroll again.
+  function scrollToStable(el, block) {
+    const go = function () { el.scrollIntoView({ block: block || 'start' }); };
+    go();
+    requestAnimationFrame(function () {
+      requestAnimationFrame(function () { go(); setTimeout(go, 60); });
+    });
+  }
 
   document.addEventListener('click', function (e) {
     const a = e.target.closest('a[href^="#"]');
@@ -866,14 +904,14 @@ const M2CROPS = {m2crops};
     e.preventDefault();
     if (a.dataset.level && RANK[a.dataset.level] > RANK[levelOf()]) setLevel(a.dataset.level);
     ensureVisible(t);
-    t.scrollIntoView({ block: a.dataset.level ? 'center' : 'start' });
+    scrollToStable(t, a.dataset.level ? 'center' : 'start');
     t.classList.add('flash');
     setTimeout(function () { t.classList.remove('flash'); }, 1400);
     history.replaceState(null, '', a.getAttribute('href'));
   });
   if (location.hash) {
     const t = document.getElementById(location.hash.slice(1));
-    if (t) { ensureVisible(t); setTimeout(function () { t.scrollIntoView(); }, 0); }
+    if (t) { ensureVisible(t); scrollToStable(t, 'start'); }
   }
 
   // sidebar fold toggles
@@ -902,7 +940,7 @@ const M2CROPS = {m2crops};
           const row = document.getElementById('row-' + code + '-' + n);
           if (row) {
             expandTo(row);
-            row.scrollIntoView({ block: 'center' });
+            scrollToStable(row, 'center');
             row.classList.add('flash');
             setTimeout(function () { row.classList.remove('flash'); }, 1200);
           }
@@ -932,7 +970,7 @@ const M2CROPS = {m2crops};
       shot = m.parentElement;
     }
     expandTo(shot);
-    shot.scrollIntoView({ block: 'center' });
+    scrollToStable(shot, 'center');
     if (m) { m.classList.add('pulse'); setTimeout(function () { m.classList.remove('pulse'); }, 1800); }
   });
 

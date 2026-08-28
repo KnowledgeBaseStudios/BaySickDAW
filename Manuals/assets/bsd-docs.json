@@ -5735,7 +5735,7 @@
   "Effects Panel": {
     "controls": [
       {
-        "id": "master_652f5d9e14e04838b6a689d3dc69ac1c_output_vol",
+        "id": "master_435e26df32cd4a2ba67fb392d1546984_output_vol",
         "kind": "knob",
         "label": "Vol",
         "tip": "Slot output gain (dB) - double-click resets to 0",
@@ -5754,7 +5754,7 @@
         "defText": "0.0"
       },
       {
-        "id": "master_652f5d9e14e04838b6a689d3dc69ac1c_detect",
+        "id": "master_435e26df32cd4a2ba67fb392d1546984_detect",
         "kind": "knob",
         "label": "Detect",
         "tip": "Detection width. Narrow = S sounds only; Wide = also catches Sh sounds",
@@ -5773,7 +5773,7 @@
         "defText": "50"
       },
       {
-        "id": "master_652f5d9e14e04838b6a689d3dc69ac1c_thresh",
+        "id": "master_435e26df32cd4a2ba67fb392d1546984_thresh",
         "kind": "knob",
         "label": "Thresh",
         "tip": "Threshold (dB). Detector triggers above this level",
@@ -5792,7 +5792,7 @@
         "defText": "-12.5"
       },
       {
-        "id": "master_652f5d9e14e04838b6a689d3dc69ac1c_range",
+        "id": "master_435e26df32cd4a2ba67fb392d1546984_range",
         "kind": "knob",
         "label": "Range",
         "tip": "Max reduction (dB). Caps how much the de-esser can pull down",
@@ -5811,7 +5811,7 @@
         "defText": "-14.0"
       },
       {
-        "id": "master_652f5d9e14e04838b6a689d3dc69ac1c_mode",
+        "id": "master_435e26df32cd4a2ba67fb392d1546984_mode",
         "kind": "knob",
         "label": "Mode",
         "tip": "0 = Wide (duck the whole detected sound), 100 = Split (duck only above 4 kHz), between = blend",
@@ -5899,7 +5899,7 @@
   "Effects Panel with Visual": {
     "controls": [
       {
-        "id": "master_504031afe1f4406cb25a99e9492281ef_output_vol",
+        "id": "master_1363e7c62a5447bb9238b27b874e4105_output_vol",
         "kind": "knob",
         "label": "Vol",
         "tip": "Slot output gain (dB) - double-click resets to 0",
@@ -5918,7 +5918,7 @@
         "defText": "0.0"
       },
       {
-        "id": "master_504031afe1f4406cb25a99e9492281ef_room",
+        "id": "master_1363e7c62a5447bb9238b27b874e4105_room",
         "kind": "knob",
         "label": "Room",
         "tip": "Room size scale",
@@ -5937,7 +5937,7 @@
         "defText": "0.60"
       },
       {
-        "id": "master_504031afe1f4406cb25a99e9492281ef_decay",
+        "id": "master_1363e7c62a5447bb9238b27b874e4105_decay",
         "kind": "knob",
         "label": "Decay",
         "tip": "RT60 decay time (s)",
@@ -5956,7 +5956,7 @@
         "defText": "2.0"
       },
       {
-        "id": "master_504031afe1f4406cb25a99e9492281ef_diffuse",
+        "id": "master_1363e7c62a5447bb9238b27b874e4105_diffuse",
         "kind": "knob",
         "label": "Diffuse",
         "tip": "Pre-diffusion (0=clear, 1=dense)",
@@ -5975,7 +5975,7 @@
         "defText": "0.50"
       },
       {
-        "id": "master_504031afe1f4406cb25a99e9492281ef_predly",
+        "id": "master_1363e7c62a5447bb9238b27b874e4105_predly",
         "kind": "knob",
         "label": "PreDly",
         "tip": "Pre-delay (ms)",
@@ -5994,7 +5994,7 @@
         "defText": "10.0"
       },
       {
-        "id": "master_504031afe1f4406cb25a99e9492281ef_wet",
+        "id": "master_1363e7c62a5447bb9238b27b874e4105_wet",
         "kind": "knob",
         "label": "Wet",
         "tip": "Wet level",
@@ -6013,7 +6013,7 @@
         "defText": "0.30"
       },
       {
-        "id": "master_504031afe1f4406cb25a99e9492281ef_dry",
+        "id": "master_1363e7c62a5447bb9238b27b874e4105_dry",
         "kind": "knob",
         "label": "Dry",
         "tip": "Dry level",
@@ -6032,7 +6032,7 @@
         "defText": "0.70"
       },
       {
-        "id": "master_504031afe1f4406cb25a99e9492281ef_locut",
+        "id": "master_1363e7c62a5447bb9238b27b874e4105_locut",
         "kind": "knob",
         "label": "LoCut",
         "tip": "Input HPF (Hz)",
@@ -6051,7 +6051,7 @@
         "defText": "80"
       },
       {
-        "id": "master_504031afe1f4406cb25a99e9492281ef_hicut",
+        "id": "master_1363e7c62a5447bb9238b27b874e4105_hicut",
         "kind": "knob",
         "label": "HiCut",
         "tip": "Input LPF (Hz)",
@@ -6070,7 +6070,7 @@
         "defText": "18000"
       },
       {
-        "id": "master_504031afe1f4406cb25a99e9492281ef_bassmlt",
+        "id": "master_1363e7c62a5447bb9238b27b874e4105_bassmlt",
         "kind": "knob",
         "label": "BassMlt",
         "tip": "Bass tail multiplier",
@@ -6089,7 +6089,7 @@
         "defText": "1.20"
       },
       {
-        "id": "master_504031afe1f4406cb25a99e9492281ef_bassx",
+        "id": "master_1363e7c62a5447bb9238b27b874e4105_bassx",
         "kind": "knob",
         "label": "BassX",
         "tip": "Bass shelf crossover (Hz)",
@@ -6108,7 +6108,7 @@
         "defText": "250"
       },
       {
-        "id": "master_504031afe1f4406cb25a99e9492281ef_taildep",
+        "id": "master_1363e7c62a5447bb9238b27b874e4105_taildep",
         "kind": "knob",
         "label": "TailDep",
         "tip": "Tail modulation depth (ms)",
@@ -6127,7 +6127,7 @@
         "defText": "0.30"
       },
       {
-        "id": "master_504031afe1f4406cb25a99e9492281ef_tailrt",
+        "id": "master_1363e7c62a5447bb9238b27b874e4105_tailrt",
         "kind": "knob",
         "label": "TailRt",
         "tip": "Tail modulation rate (Hz)",
@@ -6146,7 +6146,7 @@
         "defText": "0.35"
       },
       {
-        "id": "master_504031afe1f4406cb25a99e9492281ef_stereo",
+        "id": "master_1363e7c62a5447bb9238b27b874e4105_stereo",
         "kind": "knob",
         "label": "Stereo",
         "tip": "Stereo separation (%)",
@@ -6165,7 +6165,7 @@
         "defText": "100"
       },
       {
-        "id": "master_504031afe1f4406cb25a99e9492281ef_hidamp",
+        "id": "master_1363e7c62a5447bb9238b27b874e4105_hidamp",
         "kind": "knob",
         "label": "HiDamp",
         "tip": "High-freq damping (Hz)",
@@ -6184,7 +6184,7 @@
         "defText": "8000"
       },
       {
-        "id": "master_504031afe1f4406cb25a99e9492281ef_er",
+        "id": "master_1363e7c62a5447bb9238b27b874e4105_er",
         "kind": "knob",
         "label": "ER",
         "tip": "Early reflections level (dB)",
@@ -6272,7 +6272,7 @@
   "FX Panel Compressor Basic": {
     "controls": [
       {
-        "id": "master_6ed14706f0d444678badab31077890c9_output_vol",
+        "id": "master_c29a3c6ea2df46c99e7686dfbde12aad_output_vol",
         "kind": "knob",
         "label": "Vol",
         "tip": "Slot output gain (dB) - double-click resets to 0",
@@ -6291,7 +6291,7 @@
         "defText": "0.0"
       },
       {
-        "id": "master_6ed14706f0d444678badab31077890c9_thresh",
+        "id": "master_c29a3c6ea2df46c99e7686dfbde12aad_thresh",
         "kind": "knob",
         "label": "Thresh",
         "tip": "Threshold (dB)",
@@ -6310,7 +6310,7 @@
         "defText": "-12.0"
       },
       {
-        "id": "master_6ed14706f0d444678badab31077890c9_ratio",
+        "id": "master_c29a3c6ea2df46c99e7686dfbde12aad_ratio",
         "kind": "knob",
         "label": "Ratio",
         "tip": "Compression ratio (0.4=expand, >1=compress)",
@@ -6329,7 +6329,7 @@
         "defText": "4.0"
       },
       {
-        "id": "master_6ed14706f0d444678badab31077890c9_gain",
+        "id": "master_c29a3c6ea2df46c99e7686dfbde12aad_gain",
         "kind": "knob",
         "label": "Gain",
         "tip": "Output gain (dB) - ignored if Auto MU is on",
@@ -6348,7 +6348,7 @@
         "defText": "0.0"
       },
       {
-        "id": "master_6ed14706f0d444678badab31077890c9_attack",
+        "id": "master_c29a3c6ea2df46c99e7686dfbde12aad_attack",
         "kind": "knob",
         "label": "Attack",
         "tip": "Attack (ms)",
@@ -6367,7 +6367,7 @@
         "defText": "10.0"
       },
       {
-        "id": "master_6ed14706f0d444678badab31077890c9_release",
+        "id": "master_c29a3c6ea2df46c99e7686dfbde12aad_release",
         "kind": "knob",
         "label": "Release",
         "tip": "Release (ms)",
@@ -6455,7 +6455,7 @@
   "FX Panel Compressor Advanced": {
     "controls": [
       {
-        "id": "master_d4feb8c2a54d481f936d1e0b8a47fe66_output_vol",
+        "id": "master_d81146f1f4704982b9147281af898f50_output_vol",
         "kind": "knob",
         "label": "Vol",
         "tip": "Slot output gain (dB) - double-click resets to 0",
@@ -6474,7 +6474,7 @@
         "defText": "0.0"
       },
       {
-        "id": "master_d4feb8c2a54d481f936d1e0b8a47fe66_thresh",
+        "id": "master_d81146f1f4704982b9147281af898f50_thresh",
         "kind": "knob",
         "label": "Thresh",
         "tip": "Threshold (dB)",
@@ -6493,7 +6493,7 @@
         "defText": "-12.0"
       },
       {
-        "id": "master_d4feb8c2a54d481f936d1e0b8a47fe66_ratio",
+        "id": "master_d81146f1f4704982b9147281af898f50_ratio",
         "kind": "knob",
         "label": "Ratio",
         "tip": "Compression ratio (0.4=expand, >1=compress)",
@@ -6512,7 +6512,7 @@
         "defText": "4.0"
       },
       {
-        "id": "master_d4feb8c2a54d481f936d1e0b8a47fe66_kneew",
+        "id": "master_d81146f1f4704982b9147281af898f50_kneew",
         "kind": "knob",
         "label": "KneeW",
         "tip": "Manual knee width (dB) - overrides knee-type's default smoothing",
@@ -6531,7 +6531,7 @@
         "defText": "6.0"
       },
       {
-        "id": "master_d4feb8c2a54d481f936d1e0b8a47fe66_gain",
+        "id": "master_d81146f1f4704982b9147281af898f50_gain",
         "kind": "knob",
         "label": "Gain",
         "tip": "Output gain (dB) - ignored if Auto MU is on",
@@ -6550,7 +6550,7 @@
         "defText": "0.0"
       },
       {
-        "id": "master_d4feb8c2a54d481f936d1e0b8a47fe66_attack",
+        "id": "master_d81146f1f4704982b9147281af898f50_attack",
         "kind": "knob",
         "label": "Attack",
         "tip": "Attack (ms)",
@@ -6569,7 +6569,7 @@
         "defText": "10.0"
       },
       {
-        "id": "master_d4feb8c2a54d481f936d1e0b8a47fe66_release",
+        "id": "master_d81146f1f4704982b9147281af898f50_release",
         "kind": "knob",
         "label": "Release",
         "tip": "Release (ms)",
@@ -6588,7 +6588,7 @@
         "defText": "100"
       },
       {
-        "id": "master_d4feb8c2a54d481f936d1e0b8a47fe66_mix",
+        "id": "master_d81146f1f4704982b9147281af898f50_mix",
         "kind": "knob",
         "label": "Mix",
         "tip": "Dry/Wet mix (parallel compression)",
@@ -6607,7 +6607,7 @@
         "defText": "1.00"
       },
       {
-        "id": "master_d4feb8c2a54d481f936d1e0b8a47fe66_looka",
+        "id": "master_d81146f1f4704982b9147281af898f50_looka",
         "kind": "knob",
         "label": "LookA",
         "tip": "Look-ahead (ms) - adds latency; EffectRack PDC compensates",
@@ -6626,7 +6626,7 @@
         "defText": "0.0"
       },
       {
-        "id": "master_d4feb8c2a54d481f936d1e0b8a47fe66_det",
+        "id": "master_d81146f1f4704982b9147281af898f50_det",
         "kind": "knob",
         "label": "Det",
         "tip": "Detection window (ms) - RMS smoother time constant; smaller=faster tracking",
@@ -6645,7 +6645,7 @@
         "defText": "10.0"
       },
       {
-        "id": "master_d4feb8c2a54d481f936d1e0b8a47fe66_schpf",
+        "id": "master_d81146f1f4704982b9147281af898f50_schpf",
         "kind": "knob",
         "label": "SCHPF",
         "tip": "Sidechain HPF cutoff (Hz) - 20 = effectively off; raise to prevent bass triggering GR",
@@ -6733,7 +6733,7 @@
   "FX Panel De-esser Basic": {
     "controls": [
       {
-        "id": "master_6bc5273c5abb42519cd180676d659027_output_vol",
+        "id": "master_8d597c0346e5449b941314bbbb7e23bb_output_vol",
         "kind": "knob",
         "label": "Vol",
         "tip": "Slot output gain (dB) - double-click resets to 0",
@@ -6752,7 +6752,7 @@
         "defText": "0.0"
       },
       {
-        "id": "master_6bc5273c5abb42519cd180676d659027_detect",
+        "id": "master_8d597c0346e5449b941314bbbb7e23bb_detect",
         "kind": "knob",
         "label": "Detect",
         "tip": "Detection width. Narrow = S sounds only; Wide = also catches Sh sounds",
@@ -6771,7 +6771,7 @@
         "defText": "50"
       },
       {
-        "id": "master_6bc5273c5abb42519cd180676d659027_thresh",
+        "id": "master_8d597c0346e5449b941314bbbb7e23bb_thresh",
         "kind": "knob",
         "label": "Thresh",
         "tip": "Threshold (dB). Detector triggers above this level",
@@ -6790,7 +6790,7 @@
         "defText": "-12.5"
       },
       {
-        "id": "master_6bc5273c5abb42519cd180676d659027_range",
+        "id": "master_8d597c0346e5449b941314bbbb7e23bb_range",
         "kind": "knob",
         "label": "Range",
         "tip": "Max reduction (dB). Caps how much the de-esser can pull down",
@@ -6809,7 +6809,7 @@
         "defText": "-14.0"
       },
       {
-        "id": "master_6bc5273c5abb42519cd180676d659027_mode",
+        "id": "master_8d597c0346e5449b941314bbbb7e23bb_mode",
         "kind": "knob",
         "label": "Mode",
         "tip": "0 = Wide (duck the whole detected sound), 100 = Split (duck only above 4 kHz), between = blend",
@@ -6897,7 +6897,7 @@
   "FX Panel De-esser Advanced": {
     "controls": [
       {
-        "id": "master_2e25bba29161437ea6522ed008b0b6c4_output_vol",
+        "id": "master_da324b7837a84e06ad0abb0f4e0a8c4a_output_vol",
         "kind": "knob",
         "label": "Vol",
         "tip": "Slot output gain (dB) - double-click resets to 0",
@@ -6916,7 +6916,7 @@
         "defText": "0.0"
       },
       {
-        "id": "master_2e25bba29161437ea6522ed008b0b6c4_detect",
+        "id": "master_da324b7837a84e06ad0abb0f4e0a8c4a_detect",
         "kind": "knob",
         "label": "Detect",
         "tip": "Detection width. Narrow = S sounds only; Wide = also catches Sh sounds",
@@ -6935,7 +6935,7 @@
         "defText": "50"
       },
       {
-        "id": "master_2e25bba29161437ea6522ed008b0b6c4_thresh",
+        "id": "master_da324b7837a84e06ad0abb0f4e0a8c4a_thresh",
         "kind": "knob",
         "label": "Thresh",
         "tip": "Threshold (dB). Detector triggers above this level",
@@ -6954,7 +6954,7 @@
         "defText": "-12.5"
       },
       {
-        "id": "master_2e25bba29161437ea6522ed008b0b6c4_range",
+        "id": "master_da324b7837a84e06ad0abb0f4e0a8c4a_range",
         "kind": "knob",
         "label": "Range",
         "tip": "Max reduction (dB). Caps how much the de-esser can pull down",
@@ -6973,7 +6973,7 @@
         "defText": "-14.0"
       },
       {
-        "id": "master_2e25bba29161437ea6522ed008b0b6c4_mode",
+        "id": "master_da324b7837a84e06ad0abb0f4e0a8c4a_mode",
         "kind": "knob",
         "label": "Mode",
         "tip": "0 = Wide (duck the whole detected sound), 100 = Split (duck only above 4 kHz), between = blend",
@@ -6992,7 +6992,7 @@
         "defText": "50"
       },
       {
-        "id": "master_2e25bba29161437ea6522ed008b0b6c4_freq",
+        "id": "master_da324b7837a84e06ad0abb0f4e0a8c4a_freq",
         "kind": "knob",
         "label": "Freq",
         "tip": "Detector HPF cutoff (Hz). Direct control of what Detect sets",
@@ -7011,7 +7011,7 @@
         "defText": "6500"
       },
       {
-        "id": "master_2e25bba29161437ea6522ed008b0b6c4_q",
+        "id": "master_da324b7837a84e06ad0abb0f4e0a8c4a_q",
         "kind": "knob",
         "label": "Q",
         "tip": "Detector HPF Q. Higher = narrower detection band",
@@ -7030,7 +7030,7 @@
         "defText": "1.40"
       },
       {
-        "id": "master_2e25bba29161437ea6522ed008b0b6c4_atk",
+        "id": "master_da324b7837a84e06ad0abb0f4e0a8c4a_atk",
         "kind": "knob",
         "label": "Atk",
         "tip": "Attack (ms)",
@@ -7049,7 +7049,7 @@
         "defText": "1.0"
       },
       {
-        "id": "master_2e25bba29161437ea6522ed008b0b6c4_rel",
+        "id": "master_da324b7837a84e06ad0abb0f4e0a8c4a_rel",
         "kind": "knob",
         "label": "Rel",
         "tip": "Release (ms)",
@@ -7068,7 +7068,7 @@
         "defText": "80"
       },
       {
-        "id": "master_2e25bba29161437ea6522ed008b0b6c4_look",
+        "id": "master_da324b7837a84e06ad0abb0f4e0a8c4a_look",
         "kind": "knob",
         "label": "Look",
         "tip": "Lookahead (ms). Detector sees the audio early so the duck lands on the consonant. Not used by the Spectral engine",
@@ -7087,7 +7087,7 @@
         "defText": "0.00"
       },
       {
-        "id": "master_2e25bba29161437ea6522ed008b0b6c4_mix",
+        "id": "master_da324b7837a84e06ad0abb0f4e0a8c4a_mix",
         "kind": "knob",
         "label": "Mix",
         "tip": "Wet / dry blend",
@@ -7175,7 +7175,7 @@
   "FX Panel Gate Basic": {
     "controls": [
       {
-        "id": "master_0ed4e07ad9c047f8aa2c12ca7232027d_output_vol",
+        "id": "master_7454cdc0b1cd4cba834154f5a6da460b_output_vol",
         "kind": "knob",
         "label": "Vol",
         "tip": "Slot output gain (dB) - double-click resets to 0",
@@ -7194,7 +7194,7 @@
         "defText": "0.0"
       },
       {
-        "id": "master_0ed4e07ad9c047f8aa2c12ca7232027d_thresh",
+        "id": "master_7454cdc0b1cd4cba834154f5a6da460b_thresh",
         "kind": "knob",
         "label": "Thresh",
         "tip": "Gate threshold (dB). Signal below closes the gate; default -80 = fully open",
@@ -7213,7 +7213,7 @@
         "defText": "-80.0"
       },
       {
-        "id": "master_0ed4e07ad9c047f8aa2c12ca7232027d_range",
+        "id": "master_7454cdc0b1cd4cba834154f5a6da460b_range",
         "kind": "knob",
         "label": "Range",
         "tip": "Attenuation when closed (dB)",
@@ -7232,7 +7232,7 @@
         "defText": "-60.0"
       },
       {
-        "id": "master_0ed4e07ad9c047f8aa2c12ca7232027d_attack",
+        "id": "master_7454cdc0b1cd4cba834154f5a6da460b_attack",
         "kind": "knob",
         "label": "Attack",
         "tip": "Opening speed (ms)",
@@ -7251,7 +7251,7 @@
         "defText": "1.0"
       },
       {
-        "id": "master_0ed4e07ad9c047f8aa2c12ca7232027d_hold",
+        "id": "master_7454cdc0b1cd4cba834154f5a6da460b_hold",
         "kind": "knob",
         "label": "Hold",
         "tip": "Time held open after the signal drops (ms)",
@@ -7270,7 +7270,7 @@
         "defText": "50"
       },
       {
-        "id": "master_0ed4e07ad9c047f8aa2c12ca7232027d_release",
+        "id": "master_7454cdc0b1cd4cba834154f5a6da460b_release",
         "kind": "knob",
         "label": "Release",
         "tip": "Closing speed (ms)",
@@ -7358,7 +7358,7 @@
   "FX Panel Gate Advanced": {
     "controls": [
       {
-        "id": "master_e1bd3c75b4e8415bbe7de1a1d737786a_output_vol",
+        "id": "master_c791195075c54283a50bbd0e3620c21f_output_vol",
         "kind": "knob",
         "label": "Vol",
         "tip": "Slot output gain (dB) - double-click resets to 0",
@@ -7377,7 +7377,7 @@
         "defText": "0.0"
       },
       {
-        "id": "master_e1bd3c75b4e8415bbe7de1a1d737786a_thresh",
+        "id": "master_c791195075c54283a50bbd0e3620c21f_thresh",
         "kind": "knob",
         "label": "Thresh",
         "tip": "Gate threshold (dB). Signal below closes the gate; default -80 = fully open",
@@ -7396,7 +7396,7 @@
         "defText": "-80.0"
       },
       {
-        "id": "master_e1bd3c75b4e8415bbe7de1a1d737786a_range",
+        "id": "master_c791195075c54283a50bbd0e3620c21f_range",
         "kind": "knob",
         "label": "Range",
         "tip": "Attenuation when closed (dB)",
@@ -7415,7 +7415,7 @@
         "defText": "-60.0"
       },
       {
-        "id": "master_e1bd3c75b4e8415bbe7de1a1d737786a_attack",
+        "id": "master_c791195075c54283a50bbd0e3620c21f_attack",
         "kind": "knob",
         "label": "Attack",
         "tip": "Opening speed (ms)",
@@ -7434,7 +7434,7 @@
         "defText": "1.0"
       },
       {
-        "id": "master_e1bd3c75b4e8415bbe7de1a1d737786a_hold",
+        "id": "master_c791195075c54283a50bbd0e3620c21f_hold",
         "kind": "knob",
         "label": "Hold",
         "tip": "Time held open after the signal drops (ms)",
@@ -7453,7 +7453,7 @@
         "defText": "50"
       },
       {
-        "id": "master_e1bd3c75b4e8415bbe7de1a1d737786a_release",
+        "id": "master_c791195075c54283a50bbd0e3620c21f_release",
         "kind": "knob",
         "label": "Release",
         "tip": "Closing speed (ms)",
@@ -7541,7 +7541,7 @@
   "FX Panel Limiter Basic": {
     "controls": [
       {
-        "id": "master_76adfcafc7044166839f459611d1ad9f_output_vol",
+        "id": "master_72d70b1249da4c2992a772aeb42c740c_output_vol",
         "kind": "knob",
         "label": "Vol",
         "tip": "Slot output gain (dB) - double-click resets to 0",
@@ -7560,7 +7560,7 @@
         "defText": "0.0"
       },
       {
-        "id": "master_76adfcafc7044166839f459611d1ad9f_ingain",
+        "id": "master_72d70b1249da4c2992a772aeb42c740c_ingain",
         "kind": "knob",
         "label": "InGain",
         "tip": "Input gain (dB)",
@@ -7579,7 +7579,7 @@
         "defText": "0.0"
       },
       {
-        "id": "master_76adfcafc7044166839f459611d1ad9f_ceil",
+        "id": "master_72d70b1249da4c2992a772aeb42c740c_ceil",
         "kind": "knob",
         "label": "Ceil",
         "tip": "Output ceiling (dB; +12 = headroom / no limiting)",
@@ -7598,7 +7598,7 @@
         "defText": "-0.3"
       },
       {
-        "id": "master_76adfcafc7044166839f459611d1ad9f_satth",
+        "id": "master_72d70b1249da4c2992a772aeb42c740c_satth",
         "kind": "knob",
         "label": "SatTh",
         "tip": "Soft-sat threshold (1 = off)",
@@ -7617,7 +7617,7 @@
         "defText": "1.00"
       },
       {
-        "id": "master_76adfcafc7044166839f459611d1ad9f_atk",
+        "id": "master_72d70b1249da4c2992a772aeb42c740c_atk",
         "kind": "knob",
         "label": "Atk",
         "tip": "Attack (ms)",
@@ -7636,7 +7636,7 @@
         "defText": "1.0"
       },
       {
-        "id": "master_76adfcafc7044166839f459611d1ad9f_rel",
+        "id": "master_72d70b1249da4c2992a772aeb42c740c_rel",
         "kind": "knob",
         "label": "Rel",
         "tip": "Release (ms)",
@@ -7655,7 +7655,7 @@
         "defText": "100"
       },
       {
-        "id": "master_76adfcafc7044166839f459611d1ad9f_sustain",
+        "id": "master_72d70b1249da4c2992a772aeb42c740c_sustain",
         "kind": "knob",
         "label": "Sustain",
         "tip": "Sustain (ms) - RMS window that holds the limiter's gain reduction so it releases over the window instead of early. 0 = off",
@@ -7725,7 +7725,7 @@
   "FX Panel Limiter Advanced": {
     "controls": [
       {
-        "id": "master_e804dbe8e99040f78cf0259ffea0f83b_output_vol",
+        "id": "master_b28f9045580f41c1a87246bb161d6fc4_output_vol",
         "kind": "knob",
         "label": "Vol",
         "tip": "Slot output gain (dB) - double-click resets to 0",
@@ -7744,7 +7744,7 @@
         "defText": "0.0"
       },
       {
-        "id": "master_e804dbe8e99040f78cf0259ffea0f83b_ingain",
+        "id": "master_b28f9045580f41c1a87246bb161d6fc4_ingain",
         "kind": "knob",
         "label": "InGain",
         "tip": "Input gain (dB)",
@@ -7763,7 +7763,7 @@
         "defText": "0.0"
       },
       {
-        "id": "master_e804dbe8e99040f78cf0259ffea0f83b_ceil",
+        "id": "master_b28f9045580f41c1a87246bb161d6fc4_ceil",
         "kind": "knob",
         "label": "Ceil",
         "tip": "Output ceiling (dB; +12 = headroom / no limiting)",
@@ -7782,7 +7782,7 @@
         "defText": "-0.3"
       },
       {
-        "id": "master_e804dbe8e99040f78cf0259ffea0f83b_satth",
+        "id": "master_b28f9045580f41c1a87246bb161d6fc4_satth",
         "kind": "knob",
         "label": "SatTh",
         "tip": "Soft-sat threshold (1 = off)",
@@ -7801,7 +7801,7 @@
         "defText": "1.00"
       },
       {
-        "id": "master_e804dbe8e99040f78cf0259ffea0f83b_satcv",
+        "id": "master_b28f9045580f41c1a87246bb161d6fc4_satcv",
         "kind": "knob",
         "label": "SatCv",
         "tip": "Soft-sat knee curve",
@@ -7820,7 +7820,7 @@
         "defText": "0.50"
       },
       {
-        "id": "master_e804dbe8e99040f78cf0259ffea0f83b_schpf",
+        "id": "master_b28f9045580f41c1a87246bb161d6fc4_schpf",
         "kind": "knob",
         "label": "SCHPF",
         "tip": "Sidechain HPF cutoff (Hz) - 20 = off. Raise to stop bass from pumping the limiter",
@@ -7839,7 +7839,7 @@
         "defText": "20"
       },
       {
-        "id": "master_e804dbe8e99040f78cf0259ffea0f83b_atk",
+        "id": "master_b28f9045580f41c1a87246bb161d6fc4_atk",
         "kind": "knob",
         "label": "Atk",
         "tip": "Attack (ms)",
@@ -7858,7 +7858,7 @@
         "defText": "1.0"
       },
       {
-        "id": "master_e804dbe8e99040f78cf0259ffea0f83b_rel",
+        "id": "master_b28f9045580f41c1a87246bb161d6fc4_rel",
         "kind": "knob",
         "label": "Rel",
         "tip": "Release (ms)",
@@ -7877,7 +7877,7 @@
         "defText": "100"
       },
       {
-        "id": "master_e804dbe8e99040f78cf0259ffea0f83b_ahead",
+        "id": "master_b28f9045580f41c1a87246bb161d6fc4_ahead",
         "kind": "knob",
         "label": "Ahead",
         "tip": "Look-ahead (ms)",
@@ -7896,7 +7896,7 @@
         "defText": "2.0"
       },
       {
-        "id": "master_e804dbe8e99040f78cf0259ffea0f83b_relcv",
+        "id": "master_b28f9045580f41c1a87246bb161d6fc4_relcv",
         "kind": "knob",
         "label": "RelCv",
         "tip": "Release curve (0=linear, 1=exp)",
@@ -7915,7 +7915,7 @@
         "defText": "0.50"
       },
       {
-        "id": "master_e804dbe8e99040f78cf0259ffea0f83b_sustain",
+        "id": "master_b28f9045580f41c1a87246bb161d6fc4_sustain",
         "kind": "knob",
         "label": "Sustain",
         "tip": "Sustain (ms) - RMS window that holds the limiter's gain reduction so it releases over the window instead of early. 0 = off",
@@ -7985,7 +7985,7 @@
   "FX Panel Transient Shaper Basic": {
     "controls": [
       {
-        "id": "master_7902e544f4244edd880226f4ea0548a0_output_vol",
+        "id": "master_4b95094fbe384443b6fca1a756970be4_output_vol",
         "kind": "knob",
         "label": "Vol",
         "tip": "Slot output gain (dB) - double-click resets to 0",
@@ -8004,7 +8004,7 @@
         "defText": "0.0"
       },
       {
-        "id": "master_7902e544f4244edd880226f4ea0548a0_attack",
+        "id": "master_4b95094fbe384443b6fca1a756970be4_attack",
         "kind": "knob",
         "label": "Attack",
         "tip": "Attack shaping (-100=reduce, 0=neutral, +100=enhance)",
@@ -8023,7 +8023,7 @@
         "defText": "0"
       },
       {
-        "id": "master_7902e544f4244edd880226f4ea0548a0_release",
+        "id": "master_4b95094fbe384443b6fca1a756970be4_release",
         "kind": "knob",
         "label": "Release",
         "tip": "Release shaping (-100=shorten, +100=extend)",
@@ -8042,7 +8042,7 @@
         "defText": "0"
       },
       {
-        "id": "master_7902e544f4244edd880226f4ea0548a0_split",
+        "id": "master_4b95094fbe384443b6fca1a756970be4_split",
         "kind": "knob",
         "label": "Split",
         "tip": "Band-split frequency (Hz)",
@@ -8061,7 +8061,7 @@
         "defText": "260"
       },
       {
-        "id": "master_7902e544f4244edd880226f4ea0548a0_drive",
+        "id": "master_4b95094fbe384443b6fca1a756970be4_drive",
         "kind": "knob",
         "label": "Drive",
         "tip": "Output drive (soft saturation; 4x oversampled)",
@@ -8080,7 +8080,7 @@
         "defText": "0.0"
       },
       {
-        "id": "master_7902e544f4244edd880226f4ea0548a0_gain",
+        "id": "master_4b95094fbe384443b6fca1a756970be4_gain",
         "kind": "knob",
         "label": "Gain",
         "tip": "Output gain (dB)",
@@ -8099,7 +8099,7 @@
         "defText": "0.0"
       },
       {
-        "id": "master_7902e544f4244edd880226f4ea0548a0_wet",
+        "id": "master_4b95094fbe384443b6fca1a756970be4_wet",
         "kind": "knob",
         "label": "Wet",
         "tip": "Dry/Wet mix (C3). Default 1.0 = 100%-wet (v1 behavior); lower for parallel transient shaping",
@@ -8169,7 +8169,7 @@
   "FX Panel Transient Shaper Advanced": {
     "controls": [
       {
-        "id": "master_0442de237e614827922dba4fbcc1bad3_output_vol",
+        "id": "master_97ead211ba904c24b1df84218fe275f9_output_vol",
         "kind": "knob",
         "label": "Vol",
         "tip": "Slot output gain (dB) - double-click resets to 0",
@@ -8188,7 +8188,7 @@
         "defText": "0.0"
       },
       {
-        "id": "master_0442de237e614827922dba4fbcc1bad3_attack",
+        "id": "master_97ead211ba904c24b1df84218fe275f9_attack",
         "kind": "knob",
         "label": "Attack",
         "tip": "Attack shaping (-100=reduce, 0=neutral, +100=enhance)",
@@ -8207,7 +8207,7 @@
         "defText": "0"
       },
       {
-        "id": "master_0442de237e614827922dba4fbcc1bad3_release",
+        "id": "master_97ead211ba904c24b1df84218fe275f9_release",
         "kind": "knob",
         "label": "Release",
         "tip": "Release shaping (-100=shorten, +100=extend)",
@@ -8226,7 +8226,7 @@
         "defText": "0"
       },
       {
-        "id": "master_0442de237e614827922dba4fbcc1bad3_sens",
+        "id": "master_97ead211ba904c24b1df84218fe275f9_sens",
         "kind": "knob",
         "label": "Sens",
         "tip": "Detection sensitivity",
@@ -8245,7 +8245,7 @@
         "defText": "0.50"
       },
       {
-        "id": "master_0442de237e614827922dba4fbcc1bad3_split",
+        "id": "master_97ead211ba904c24b1df84218fe275f9_split",
         "kind": "knob",
         "label": "Split",
         "tip": "Band-split frequency (Hz)",
@@ -8264,7 +8264,7 @@
         "defText": "260"
       },
       {
-        "id": "master_0442de237e614827922dba4fbcc1bad3_balance",
+        "id": "master_97ead211ba904c24b1df84218fe275f9_balance",
         "kind": "knob",
         "label": "Balance",
         "tip": "Band balance (-100=low, +100=high)",
@@ -8283,7 +8283,7 @@
         "defText": "0"
       },
       {
-        "id": "master_0442de237e614827922dba4fbcc1bad3_drive",
+        "id": "master_97ead211ba904c24b1df84218fe275f9_drive",
         "kind": "knob",
         "label": "Drive",
         "tip": "Output drive (soft saturation; 4x oversampled)",
@@ -8302,7 +8302,7 @@
         "defText": "0.0"
       },
       {
-        "id": "master_0442de237e614827922dba4fbcc1bad3_gain",
+        "id": "master_97ead211ba904c24b1df84218fe275f9_gain",
         "kind": "knob",
         "label": "Gain",
         "tip": "Output gain (dB)",
@@ -8321,7 +8321,7 @@
         "defText": "0.0"
       },
       {
-        "id": "master_0442de237e614827922dba4fbcc1bad3_wet",
+        "id": "master_97ead211ba904c24b1df84218fe275f9_wet",
         "kind": "knob",
         "label": "Wet",
         "tip": "Dry/Wet mix (C3). Default 1.0 = 100%-wet (v1 behavior); lower for parallel transient shaping",
@@ -8340,7 +8340,7 @@
         "defText": "1.00"
       },
       {
-        "id": "master_0442de237e614827922dba4fbcc1bad3_fastrel",
+        "id": "master_97ead211ba904c24b1df84218fe275f9_fastrel",
         "kind": "knob",
         "label": "FastRel",
         "tip": "Fast envelope release time (ms). Used as the release time-constant of the peak follower. Previously hardcoded 10 ms; exposed for power-user tuning",
@@ -8359,7 +8359,7 @@
         "defText": "10.0"
       },
       {
-        "id": "master_0442de237e614827922dba4fbcc1bad3_slowatt",
+        "id": "master_97ead211ba904c24b1df84218fe275f9_slowatt",
         "kind": "knob",
         "label": "SlowAtt",
         "tip": "Slow envelope attack time (ms). Used as the attack time-constant of the RMS follower. Previously hardcoded 10 ms; exposed for power-user tuning",
@@ -8429,7 +8429,7 @@
   "FX Panel Overdrive Basic": {
     "controls": [
       {
-        "id": "master_eaa161e16a5542aa8f2e5183ef0fbd99_output_vol",
+        "id": "master_36166a01cc634401bac3d98d1589183e_output_vol",
         "kind": "knob",
         "label": "Vol",
         "tip": "Slot output gain (dB) - double-click resets to 0",
@@ -8448,7 +8448,7 @@
         "defText": "0.0"
       },
       {
-        "id": "master_eaa161e16a5542aa8f2e5183ef0fbd99_drive",
+        "id": "master_36166a01cc634401bac3d98d1589183e_drive",
         "kind": "knob",
         "label": "Drive",
         "tip": "Pre-amp drive",
@@ -8467,7 +8467,7 @@
         "defText": "5.0"
       },
       {
-        "id": "master_eaa161e16a5542aa8f2e5183ef0fbd99_color",
+        "id": "master_36166a01cc634401bac3d98d1589183e_color",
         "kind": "knob",
         "label": "Color",
         "tip": "Pre-filter low-pass cutoff (Hz)",
@@ -8486,7 +8486,7 @@
         "defText": "1000"
       },
       {
-        "id": "master_eaa161e16a5542aa8f2e5183ef0fbd99_band",
+        "id": "master_36166a01cc634401bac3d98d1589183e_band",
         "kind": "knob",
         "label": "Band",
         "tip": "Amount of pre low-pass into the drive (0 = full bandwidth, 1 = full LP at Color)",
@@ -8505,7 +8505,7 @@
         "defText": "0.50"
       },
       {
-        "id": "master_eaa161e16a5542aa8f2e5183ef0fbd99_filter",
+        "id": "master_36166a01cc634401bac3d98d1589183e_filter",
         "kind": "knob",
         "label": "Filter",
         "tip": "Post LPF cutoff (Hz)",
@@ -8524,7 +8524,7 @@
         "defText": "8000"
       },
       {
-        "id": "master_eaa161e16a5542aa8f2e5183ef0fbd99_out",
+        "id": "master_36166a01cc634401bac3d98d1589183e_out",
         "kind": "knob",
         "label": "Out",
         "tip": "Output level -- attenuate-only (-18..0 dB; max = unity gain)",
@@ -8612,7 +8612,7 @@
   "FX Panel Overdrive Advanced": {
     "controls": [
       {
-        "id": "master_efe8ff715f6c4fb0a6ac2f735116f5aa_output_vol",
+        "id": "master_1c1c2589dcf9448080d3c1a4092bbe5c_output_vol",
         "kind": "knob",
         "label": "Vol",
         "tip": "Slot output gain (dB) - double-click resets to 0",
@@ -8631,7 +8631,7 @@
         "defText": "0.0"
       },
       {
-        "id": "master_efe8ff715f6c4fb0a6ac2f735116f5aa_drive",
+        "id": "master_1c1c2589dcf9448080d3c1a4092bbe5c_drive",
         "kind": "knob",
         "label": "Drive",
         "tip": "Pre-amp drive",
@@ -8650,7 +8650,7 @@
         "defText": "5.0"
       },
       {
-        "id": "master_efe8ff715f6c4fb0a6ac2f735116f5aa_color",
+        "id": "master_1c1c2589dcf9448080d3c1a4092bbe5c_color",
         "kind": "knob",
         "label": "Color",
         "tip": "Pre-filter low-pass cutoff (Hz)",
@@ -8669,7 +8669,7 @@
         "defText": "1000"
       },
       {
-        "id": "master_efe8ff715f6c4fb0a6ac2f735116f5aa_band",
+        "id": "master_1c1c2589dcf9448080d3c1a4092bbe5c_band",
         "kind": "knob",
         "label": "Band",
         "tip": "Amount of pre low-pass into the drive (0 = full bandwidth, 1 = full LP at Color)",
@@ -8688,7 +8688,7 @@
         "defText": "0.50"
       },
       {
-        "id": "master_efe8ff715f6c4fb0a6ac2f735116f5aa_bias",
+        "id": "master_1c1c2589dcf9448080d3c1a4092bbe5c_bias",
         "kind": "knob",
         "label": "Bias",
         "tip": "Pre-shaper DC bias (adds even harmonics / tube-like warmth). 0 = symmetric (odd harmonics only)",
@@ -8707,7 +8707,7 @@
         "defText": "0.00"
       },
       {
-        "id": "master_efe8ff715f6c4fb0a6ac2f735116f5aa_filter",
+        "id": "master_1c1c2589dcf9448080d3c1a4092bbe5c_filter",
         "kind": "knob",
         "label": "Filter",
         "tip": "Post LPF cutoff (Hz)",
@@ -8726,7 +8726,7 @@
         "defText": "8000"
       },
       {
-        "id": "master_efe8ff715f6c4fb0a6ac2f735116f5aa_out",
+        "id": "master_1c1c2589dcf9448080d3c1a4092bbe5c_out",
         "kind": "knob",
         "label": "Out",
         "tip": "Output level -- attenuate-only (-18..0 dB; max = unity gain)",
@@ -8745,7 +8745,7 @@
         "defText": "0.0"
       },
       {
-        "id": "master_efe8ff715f6c4fb0a6ac2f735116f5aa_wet",
+        "id": "master_1c1c2589dcf9448080d3c1a4092bbe5c_wet",
         "kind": "knob",
         "label": "Wet",
         "tip": "Wet/dry mix (1 = full wet)",
@@ -8833,7 +8833,7 @@
   "FX Panel Saturation Basic": {
     "controls": [
       {
-        "id": "master_1a15b9b431c14ee1a12930ac173d1611_output_vol",
+        "id": "master_82a11a02d98f43e08495523c65812814_output_vol",
         "kind": "knob",
         "label": "Vol",
         "tip": "Slot output gain (dB) - double-click resets to 0",
@@ -8852,7 +8852,7 @@
         "defText": "0.0"
       },
       {
-        "id": "master_1a15b9b431c14ee1a12930ac173d1611_drive",
+        "id": "master_82a11a02d98f43e08495523c65812814_drive",
         "kind": "knob",
         "label": "Drive",
         "tip": "Preamp drive (gentler than Tube tanh)",
@@ -8871,7 +8871,7 @@
         "defText": "3.00"
       },
       {
-        "id": "master_1a15b9b431c14ee1a12930ac173d1611_color",
+        "id": "master_82a11a02d98f43e08495523c65812814_color",
         "kind": "knob",
         "label": "Color",
         "tip": "Transformer 2nd-harmonic colour",
@@ -8890,7 +8890,7 @@
         "defText": "3.00"
       },
       {
-        "id": "master_1a15b9b431c14ee1a12930ac173d1611_output",
+        "id": "master_82a11a02d98f43e08495523c65812814_output",
         "kind": "knob",
         "label": "Output",
         "tip": "Output gain (dB)",
@@ -8978,7 +8978,7 @@
   "FX Panel Saturation Advanced": {
     "controls": [
       {
-        "id": "master_ae4b536024f8418db5e6bd3da6276c8f_output_vol",
+        "id": "master_fd405f49229143ba89bac0dc9459cbb3_output_vol",
         "kind": "knob",
         "label": "Vol",
         "tip": "Slot output gain (dB) - double-click resets to 0",
@@ -8997,7 +8997,7 @@
         "defText": "0.0"
       },
       {
-        "id": "master_ae4b536024f8418db5e6bd3da6276c8f_drive",
+        "id": "master_fd405f49229143ba89bac0dc9459cbb3_drive",
         "kind": "knob",
         "label": "Drive",
         "tip": "Preamp drive (gentler than Tube tanh)",
@@ -9016,7 +9016,7 @@
         "defText": "3.00"
       },
       {
-        "id": "master_ae4b536024f8418db5e6bd3da6276c8f_color",
+        "id": "master_fd405f49229143ba89bac0dc9459cbb3_color",
         "kind": "knob",
         "label": "Color",
         "tip": "Transformer 2nd-harmonic colour",
@@ -9035,7 +9035,7 @@
         "defText": "3.00"
       },
       {
-        "id": "master_ae4b536024f8418db5e6bd3da6276c8f_mix",
+        "id": "master_fd405f49229143ba89bac0dc9459cbb3_mix",
         "kind": "knob",
         "label": "Mix",
         "tip": "Wet / dry blend (%)",
@@ -9054,7 +9054,7 @@
         "defText": "70.0"
       },
       {
-        "id": "master_ae4b536024f8418db5e6bd3da6276c8f_output",
+        "id": "master_fd405f49229143ba89bac0dc9459cbb3_output",
         "kind": "knob",
         "label": "Output",
         "tip": "Output gain (dB)",
@@ -9142,7 +9142,7 @@
   "FX Panel Chorus Basic": {
     "controls": [
       {
-        "id": "master_95b84ebafa9446829930219f745da0dd_output_vol",
+        "id": "master_883e29b95dc446ada2286d5057668741_output_vol",
         "kind": "knob",
         "label": "Vol",
         "tip": "Slot output gain (dB) - double-click resets to 0",
@@ -9161,7 +9161,7 @@
         "defText": "0.0"
       },
       {
-        "id": "master_95b84ebafa9446829930219f745da0dd_lfo1",
+        "id": "master_883e29b95dc446ada2286d5057668741_lfo1",
         "kind": "knob",
         "label": "LFO1",
         "tip": "LFO 1 rate (Hz)",
@@ -9180,7 +9180,7 @@
         "defText": "0.50"
       },
       {
-        "id": "master_95b84ebafa9446829930219f745da0dd_lfo2",
+        "id": "master_883e29b95dc446ada2286d5057668741_lfo2",
         "kind": "knob",
         "label": "LFO2",
         "tip": "LFO 2 rate (Hz)",
@@ -9199,7 +9199,7 @@
         "defText": "0.80"
       },
       {
-        "id": "master_95b84ebafa9446829930219f745da0dd_lfo3",
+        "id": "master_883e29b95dc446ada2286d5057668741_lfo3",
         "kind": "knob",
         "label": "LFO3",
         "tip": "LFO 3 rate (Hz)",
@@ -9218,7 +9218,7 @@
         "defText": "1.20"
       },
       {
-        "id": "master_95b84ebafa9446829930219f745da0dd_delay",
+        "id": "master_883e29b95dc446ada2286d5057668741_delay",
         "kind": "knob",
         "label": "Delay",
         "tip": "Base delay (ms)",
@@ -9237,7 +9237,7 @@
         "defText": "8.0"
       },
       {
-        "id": "master_95b84ebafa9446829930219f745da0dd_depth",
+        "id": "master_883e29b95dc446ada2286d5057668741_depth",
         "kind": "knob",
         "label": "Depth",
         "tip": "Modulation depth (ms)",
@@ -9256,7 +9256,7 @@
         "defText": "8.0"
       },
       {
-        "id": "master_95b84ebafa9446829930219f745da0dd_stereo",
+        "id": "master_883e29b95dc446ada2286d5057668741_stereo",
         "kind": "knob",
         "label": "Stereo",
         "tip": "L/R LFO phase offset (deg)",
@@ -9275,7 +9275,7 @@
         "defText": "120"
       },
       {
-        "id": "master_95b84ebafa9446829930219f745da0dd_crosshz",
+        "id": "master_883e29b95dc446ada2286d5057668741_crosshz",
         "kind": "knob",
         "label": "CrossHz",
         "tip": "Crossover cutoff (Hz)",
@@ -9345,7 +9345,7 @@
   "FX Panel Chorus Advanced": {
     "controls": [
       {
-        "id": "master_b9b16d93dd0d4de194d6360369ad397d_output_vol",
+        "id": "master_53c8f4dcb1a34bcbb34ac848426835bb_output_vol",
         "kind": "knob",
         "label": "Vol",
         "tip": "Slot output gain (dB) - double-click resets to 0",
@@ -9364,7 +9364,7 @@
         "defText": "0.0"
       },
       {
-        "id": "master_b9b16d93dd0d4de194d6360369ad397d_lfo1",
+        "id": "master_53c8f4dcb1a34bcbb34ac848426835bb_lfo1",
         "kind": "knob",
         "label": "LFO1",
         "tip": "LFO 1 rate (Hz)",
@@ -9383,7 +9383,7 @@
         "defText": "0.50"
       },
       {
-        "id": "master_b9b16d93dd0d4de194d6360369ad397d_lfo2",
+        "id": "master_53c8f4dcb1a34bcbb34ac848426835bb_lfo2",
         "kind": "knob",
         "label": "LFO2",
         "tip": "LFO 2 rate (Hz)",
@@ -9402,7 +9402,7 @@
         "defText": "0.80"
       },
       {
-        "id": "master_b9b16d93dd0d4de194d6360369ad397d_lfo3",
+        "id": "master_53c8f4dcb1a34bcbb34ac848426835bb_lfo3",
         "kind": "knob",
         "label": "LFO3",
         "tip": "LFO 3 rate (Hz)",
@@ -9421,7 +9421,7 @@
         "defText": "1.20"
       },
       {
-        "id": "master_b9b16d93dd0d4de194d6360369ad397d_delay",
+        "id": "master_53c8f4dcb1a34bcbb34ac848426835bb_delay",
         "kind": "knob",
         "label": "Delay",
         "tip": "Base delay (ms)",
@@ -9440,7 +9440,7 @@
         "defText": "8.0"
       },
       {
-        "id": "master_b9b16d93dd0d4de194d6360369ad397d_depth",
+        "id": "master_53c8f4dcb1a34bcbb34ac848426835bb_depth",
         "kind": "knob",
         "label": "Depth",
         "tip": "Modulation depth (ms)",
@@ -9459,7 +9459,7 @@
         "defText": "8.0"
       },
       {
-        "id": "master_b9b16d93dd0d4de194d6360369ad397d_stereo",
+        "id": "master_53c8f4dcb1a34bcbb34ac848426835bb_stereo",
         "kind": "knob",
         "label": "Stereo",
         "tip": "L/R LFO phase offset (deg)",
@@ -9478,7 +9478,7 @@
         "defText": "120"
       },
       {
-        "id": "master_b9b16d93dd0d4de194d6360369ad397d_crosshz",
+        "id": "master_53c8f4dcb1a34bcbb34ac848426835bb_crosshz",
         "kind": "knob",
         "label": "CrossHz",
         "tip": "Crossover cutoff (Hz)",
@@ -9497,7 +9497,7 @@
         "defText": "800"
       },
       {
-        "id": "master_b9b16d93dd0d4de194d6360369ad397d_wet",
+        "id": "master_53c8f4dcb1a34bcbb34ac848426835bb_wet",
         "kind": "knob",
         "label": "Wet",
         "tip": "Wet level",
@@ -9567,7 +9567,7 @@
   "FX Panel Flanger Basic": {
     "controls": [
       {
-        "id": "master_80d2863e6f4d49098c11f7e884ce7271_output_vol",
+        "id": "master_896e845852184b5fbd0b117315b7a44d_output_vol",
         "kind": "knob",
         "label": "Vol",
         "tip": "Slot output gain (dB) - double-click resets to 0",
@@ -9586,7 +9586,7 @@
         "defText": "0.0"
       },
       {
-        "id": "master_80d2863e6f4d49098c11f7e884ce7271_rate",
+        "id": "master_896e845852184b5fbd0b117315b7a44d_rate",
         "kind": "knob",
         "label": "Rate",
         "tip": "LFO rate (Hz)",
@@ -9605,7 +9605,7 @@
         "defText": "0.50"
       },
       {
-        "id": "master_80d2863e6f4d49098c11f7e884ce7271_depth",
+        "id": "master_896e845852184b5fbd0b117315b7a44d_depth",
         "kind": "knob",
         "label": "Depth",
         "tip": "Sweep depth (ms)",
@@ -9624,7 +9624,7 @@
         "defText": "5.0"
       },
       {
-        "id": "master_80d2863e6f4d49098c11f7e884ce7271_delay",
+        "id": "master_896e845852184b5fbd0b117315b7a44d_delay",
         "kind": "knob",
         "label": "Delay",
         "tip": "Base (min) delay (ms)",
@@ -9643,7 +9643,7 @@
         "defText": "0.0"
       },
       {
-        "id": "master_80d2863e6f4d49098c11f7e884ce7271_feed",
+        "id": "master_896e845852184b5fbd0b117315b7a44d_feed",
         "kind": "knob",
         "label": "Feed",
         "tip": "Feedback (%) - negative via InvFB toggle",
@@ -9662,7 +9662,7 @@
         "defText": "50"
       },
       {
-        "id": "master_80d2863e6f4d49098c11f7e884ce7271_phase",
+        "id": "master_896e845852184b5fbd0b117315b7a44d_phase",
         "kind": "knob",
         "label": "Phase",
         "tip": "Stereo R-channel LFO offset (deg)",
@@ -9681,7 +9681,7 @@
         "defText": "0"
       },
       {
-        "id": "master_80d2863e6f4d49098c11f7e884ce7271_shape",
+        "id": "master_896e845852184b5fbd0b117315b7a44d_shape",
         "kind": "knob",
         "label": "Shape",
         "tip": "LFO shape morph (0 = pure sine, 1 = pure triangle)",
@@ -9700,7 +9700,7 @@
         "defText": "0.00"
       },
       {
-        "id": "master_80d2863e6f4d49098c11f7e884ce7271_damp",
+        "id": "master_896e845852184b5fbd0b117315b7a44d_damp",
         "kind": "knob",
         "label": "Damp",
         "tip": "Feedback damping: 0 = off/bright, 1 = max (warm, tames harshness)",
@@ -9719,7 +9719,7 @@
         "defText": "0.00"
       },
       {
-        "id": "master_80d2863e6f4d49098c11f7e884ce7271_wet",
+        "id": "master_896e845852184b5fbd0b117315b7a44d_wet",
         "kind": "knob",
         "label": "Wet",
         "tip": "Wet / dry blend",
@@ -9738,7 +9738,7 @@
         "defText": "0.50"
       },
       {
-        "id": "master_80d2863e6f4d49098c11f7e884ce7271_cross",
+        "id": "master_896e845852184b5fbd0b117315b7a44d_cross",
         "kind": "knob",
         "label": "Cross",
         "tip": "Cross-channel wet mix in dB (L->R, R->L). -96 = off; raise for stereo 'spinning' width",
@@ -9826,7 +9826,7 @@
   "FX Panel Flanger Advanced": {
     "controls": [
       {
-        "id": "master_b0dfef008d7e44feb73031204ec27508_output_vol",
+        "id": "master_69abd2c0dcdc443faa1d1ef73460511e_output_vol",
         "kind": "knob",
         "label": "Vol",
         "tip": "Slot output gain (dB) - double-click resets to 0",
@@ -9845,7 +9845,7 @@
         "defText": "0.0"
       },
       {
-        "id": "master_b0dfef008d7e44feb73031204ec27508_rate",
+        "id": "master_69abd2c0dcdc443faa1d1ef73460511e_rate",
         "kind": "knob",
         "label": "Rate",
         "tip": "LFO rate (Hz)",
@@ -9864,7 +9864,7 @@
         "defText": "0.50"
       },
       {
-        "id": "master_b0dfef008d7e44feb73031204ec27508_depth",
+        "id": "master_69abd2c0dcdc443faa1d1ef73460511e_depth",
         "kind": "knob",
         "label": "Depth",
         "tip": "Sweep depth (ms)",
@@ -9883,7 +9883,7 @@
         "defText": "5.0"
       },
       {
-        "id": "master_b0dfef008d7e44feb73031204ec27508_delay",
+        "id": "master_69abd2c0dcdc443faa1d1ef73460511e_delay",
         "kind": "knob",
         "label": "Delay",
         "tip": "Base (min) delay (ms)",
@@ -9902,7 +9902,7 @@
         "defText": "0.0"
       },
       {
-        "id": "master_b0dfef008d7e44feb73031204ec27508_feed",
+        "id": "master_69abd2c0dcdc443faa1d1ef73460511e_feed",
         "kind": "knob",
         "label": "Feed",
         "tip": "Feedback (%) - negative via InvFB toggle",
@@ -9921,7 +9921,7 @@
         "defText": "50"
       },
       {
-        "id": "master_b0dfef008d7e44feb73031204ec27508_phase",
+        "id": "master_69abd2c0dcdc443faa1d1ef73460511e_phase",
         "kind": "knob",
         "label": "Phase",
         "tip": "Stereo R-channel LFO offset (deg)",
@@ -9940,7 +9940,7 @@
         "defText": "0"
       },
       {
-        "id": "master_b0dfef008d7e44feb73031204ec27508_shape",
+        "id": "master_69abd2c0dcdc443faa1d1ef73460511e_shape",
         "kind": "knob",
         "label": "Shape",
         "tip": "LFO shape morph (0 = pure sine, 1 = pure triangle)",
@@ -9959,7 +9959,7 @@
         "defText": "0.00"
       },
       {
-        "id": "master_b0dfef008d7e44feb73031204ec27508_damp",
+        "id": "master_69abd2c0dcdc443faa1d1ef73460511e_damp",
         "kind": "knob",
         "label": "Damp",
         "tip": "Feedback damping: 0 = off/bright, 1 = max (warm, tames harshness)",
@@ -9978,7 +9978,7 @@
         "defText": "0.00"
       },
       {
-        "id": "master_b0dfef008d7e44feb73031204ec27508_wet",
+        "id": "master_69abd2c0dcdc443faa1d1ef73460511e_wet",
         "kind": "knob",
         "label": "Wet",
         "tip": "Wet / dry blend",
@@ -9997,7 +9997,7 @@
         "defText": "0.50"
       },
       {
-        "id": "master_b0dfef008d7e44feb73031204ec27508_cross",
+        "id": "master_69abd2c0dcdc443faa1d1ef73460511e_cross",
         "kind": "knob",
         "label": "Cross",
         "tip": "Cross-channel wet mix in dB (L->R, R->L). -96 = off; raise for stereo 'spinning' width",
@@ -10085,7 +10085,7 @@
   "FX Panel Phaser Basic": {
     "controls": [
       {
-        "id": "master_e07c79aa3f5b4ce1be7e82aca3cb14d9_output_vol",
+        "id": "master_7397237ae1c44f8399194533755e884f_output_vol",
         "kind": "knob",
         "label": "Vol",
         "tip": "Slot output gain (dB) - double-click resets to 0",
@@ -10104,7 +10104,7 @@
         "defText": "0.0"
       },
       {
-        "id": "master_e07c79aa3f5b4ce1be7e82aca3cb14d9_rate",
+        "id": "master_7397237ae1c44f8399194533755e884f_rate",
         "kind": "knob",
         "label": "Rate",
         "tip": "LFO rate (Hz) - upper bound follows Slow/Fast Range",
@@ -10123,7 +10123,7 @@
         "defText": "0.50"
       },
       {
-        "id": "master_e07c79aa3f5b4ce1be7e82aca3cb14d9_minhz",
+        "id": "master_7397237ae1c44f8399194533755e884f_minhz",
         "kind": "knob",
         "label": "MinHz",
         "tip": "Allpass freq lower bound (Hz)",
@@ -10142,7 +10142,7 @@
         "defText": "200"
       },
       {
-        "id": "master_e07c79aa3f5b4ce1be7e82aca3cb14d9_maxhz",
+        "id": "master_7397237ae1c44f8399194533755e884f_maxhz",
         "kind": "knob",
         "label": "MaxHz",
         "tip": "Allpass freq upper bound (Hz)",
@@ -10161,7 +10161,7 @@
         "defText": "2000"
       },
       {
-        "id": "master_e07c79aa3f5b4ce1be7e82aca3cb14d9_feed",
+        "id": "master_7397237ae1c44f8399194533755e884f_feed",
         "kind": "knob",
         "label": "Feed",
         "tip": "Feedback amount (up to 1.2)",
@@ -10180,7 +10180,7 @@
         "defText": "0.50"
       },
       {
-        "id": "master_e07c79aa3f5b4ce1be7e82aca3cb14d9_stereo",
+        "id": "master_7397237ae1c44f8399194533755e884f_stereo",
         "kind": "knob",
         "label": "Stereo",
         "tip": "L/R LFO phase offset (deg)",
@@ -10199,7 +10199,7 @@
         "defText": "0"
       },
       {
-        "id": "master_e07c79aa3f5b4ce1be7e82aca3cb14d9_wet",
+        "id": "master_7397237ae1c44f8399194533755e884f_wet",
         "kind": "knob",
         "label": "Wet",
         "tip": "Wet level",
@@ -10218,7 +10218,7 @@
         "defText": "0.50"
       },
       {
-        "id": "master_e07c79aa3f5b4ce1be7e82aca3cb14d9_gain",
+        "id": "master_7397237ae1c44f8399194533755e884f_gain",
         "kind": "knob",
         "label": "Gain",
         "tip": "Output gain (dB)",
@@ -10306,7 +10306,7 @@
   "FX Panel Phaser Advanced": {
     "controls": [
       {
-        "id": "master_e7b0e6b2bef7450aa448e1d27daad862_output_vol",
+        "id": "master_09b0b8ec3f5640f997dc766efe6a1615_output_vol",
         "kind": "knob",
         "label": "Vol",
         "tip": "Slot output gain (dB) - double-click resets to 0",
@@ -10325,7 +10325,7 @@
         "defText": "0.0"
       },
       {
-        "id": "master_e7b0e6b2bef7450aa448e1d27daad862_rate",
+        "id": "master_09b0b8ec3f5640f997dc766efe6a1615_rate",
         "kind": "knob",
         "label": "Rate",
         "tip": "LFO rate (Hz) - upper bound follows Slow/Fast Range",
@@ -10344,7 +10344,7 @@
         "defText": "0.50"
       },
       {
-        "id": "master_e7b0e6b2bef7450aa448e1d27daad862_minhz",
+        "id": "master_09b0b8ec3f5640f997dc766efe6a1615_minhz",
         "kind": "knob",
         "label": "MinHz",
         "tip": "Allpass freq lower bound (Hz)",
@@ -10363,7 +10363,7 @@
         "defText": "200"
       },
       {
-        "id": "master_e7b0e6b2bef7450aa448e1d27daad862_maxhz",
+        "id": "master_09b0b8ec3f5640f997dc766efe6a1615_maxhz",
         "kind": "knob",
         "label": "MaxHz",
         "tip": "Allpass freq upper bound (Hz)",
@@ -10382,7 +10382,7 @@
         "defText": "2000"
       },
       {
-        "id": "master_e7b0e6b2bef7450aa448e1d27daad862_feed",
+        "id": "master_09b0b8ec3f5640f997dc766efe6a1615_feed",
         "kind": "knob",
         "label": "Feed",
         "tip": "Feedback amount (up to 1.2)",
@@ -10401,7 +10401,7 @@
         "defText": "0.50"
       },
       {
-        "id": "master_e7b0e6b2bef7450aa448e1d27daad862_stereo",
+        "id": "master_09b0b8ec3f5640f997dc766efe6a1615_stereo",
         "kind": "knob",
         "label": "Stereo",
         "tip": "L/R LFO phase offset (deg)",
@@ -10420,7 +10420,7 @@
         "defText": "0"
       },
       {
-        "id": "master_e7b0e6b2bef7450aa448e1d27daad862_wet",
+        "id": "master_09b0b8ec3f5640f997dc766efe6a1615_wet",
         "kind": "knob",
         "label": "Wet",
         "tip": "Wet level",
@@ -10439,7 +10439,7 @@
         "defText": "0.50"
       },
       {
-        "id": "master_e7b0e6b2bef7450aa448e1d27daad862_cross",
+        "id": "master_09b0b8ec3f5640f997dc766efe6a1615_cross",
         "kind": "knob",
         "label": "Cross",
         "tip": "Cross-channel feedback (0=no cross, 1=full swap)",
@@ -10458,7 +10458,7 @@
         "defText": "0.00"
       },
       {
-        "id": "master_e7b0e6b2bef7450aa448e1d27daad862_gain",
+        "id": "master_09b0b8ec3f5640f997dc766efe6a1615_gain",
         "kind": "knob",
         "label": "Gain",
         "tip": "Output gain (dB)",
@@ -10546,7 +10546,7 @@
   "FX Panel De-reverb Basic": {
     "controls": [
       {
-        "id": "master_fb94356d2c6a468f82e994d52ff67f08_output_vol",
+        "id": "master_b3c2696630a4491cb6757a6df9b3092e_output_vol",
         "kind": "knob",
         "label": "Vol",
         "tip": "Slot output gain (dB) - double-click resets to 0",
@@ -10565,7 +10565,7 @@
         "defText": "0.0"
       },
       {
-        "id": "master_fb94356d2c6a468f82e994d52ff67f08_reduce",
+        "id": "master_b3c2696630a4491cb6757a6df9b3092e_reduce",
         "kind": "knob",
         "label": "Reduce",
         "tip": "How hard the room tail is suppressed (%)",
@@ -10584,7 +10584,7 @@
         "defText": "50"
       },
       {
-        "id": "master_fb94356d2c6a468f82e994d52ff67f08_tail",
+        "id": "master_b3c2696630a4491cb6757a6df9b3092e_tail",
         "kind": "knob",
         "label": "Tail",
         "tip": "Modeled reverb tail length (ms). Match the room: bigger room = longer",
@@ -10603,7 +10603,7 @@
         "defText": "400"
       },
       {
-        "id": "master_fb94356d2c6a468f82e994d52ff67f08_mix",
+        "id": "master_b3c2696630a4491cb6757a6df9b3092e_mix",
         "kind": "knob",
         "label": "Mix",
         "tip": "Dry/wet blend (%)",
@@ -10691,7 +10691,7 @@
   "FX Panel De-reverb Advanced": {
     "controls": [
       {
-        "id": "master_6b638fd81640436699ba671c9023b040_output_vol",
+        "id": "master_307d3765376a4ae0a13693df441550b6_output_vol",
         "kind": "knob",
         "label": "Vol",
         "tip": "Slot output gain (dB) - double-click resets to 0",
@@ -10710,7 +10710,7 @@
         "defText": "0.0"
       },
       {
-        "id": "master_6b638fd81640436699ba671c9023b040_reduce",
+        "id": "master_307d3765376a4ae0a13693df441550b6_reduce",
         "kind": "knob",
         "label": "Reduce",
         "tip": "How hard the room tail is suppressed (%)",
@@ -10729,7 +10729,7 @@
         "defText": "50"
       },
       {
-        "id": "master_6b638fd81640436699ba671c9023b040_tail",
+        "id": "master_307d3765376a4ae0a13693df441550b6_tail",
         "kind": "knob",
         "label": "Tail",
         "tip": "Modeled reverb tail length (ms). Match the room: bigger room = longer",
@@ -10748,7 +10748,7 @@
         "defText": "400"
       },
       {
-        "id": "master_6b638fd81640436699ba671c9023b040_mix",
+        "id": "master_307d3765376a4ae0a13693df441550b6_mix",
         "kind": "knob",
         "label": "Mix",
         "tip": "Dry/wet blend (%)",
@@ -10836,7 +10836,7 @@
   "FX Panel Delay Basic": {
     "controls": [
       {
-        "id": "master_8d0c374415714d8db340bdbbe4290d27_output_vol",
+        "id": "master_60c3a8acd6084c999085a8b92217d6dc_output_vol",
         "kind": "knob",
         "label": "Vol",
         "tip": "Slot output gain (dB) - double-click resets to 0",
@@ -10855,7 +10855,7 @@
         "defText": "0.0"
       },
       {
-        "id": "master_8d0c374415714d8db340bdbbe4290d27_time",
+        "id": "master_60c3a8acd6084c999085a8b92217d6dc_time",
         "kind": "knob",
         "label": "Time",
         "tip": "Delay time (ms)",
@@ -10874,7 +10874,7 @@
         "defText": "250"
       },
       {
-        "id": "master_8d0c374415714d8db340bdbbe4290d27_feed",
+        "id": "master_60c3a8acd6084c999085a8b92217d6dc_feed",
         "kind": "knob",
         "label": "Feed",
         "tip": "Feedback level (>1 builds up)",
@@ -10893,7 +10893,7 @@
         "defText": "0.40"
       },
       {
-        "id": "master_8d0c374415714d8db340bdbbe4290d27_wet",
+        "id": "master_60c3a8acd6084c999085a8b92217d6dc_wet",
         "kind": "knob",
         "label": "Wet",
         "tip": "Wet output level",
@@ -10912,7 +10912,7 @@
         "defText": "0.30"
       },
       {
-        "id": "master_8d0c374415714d8db340bdbbe4290d27_dry",
+        "id": "master_60c3a8acd6084c999085a8b92217d6dc_dry",
         "kind": "knob",
         "label": "Dry",
         "tip": "Dry output level",
@@ -10931,7 +10931,7 @@
         "defText": "1.00"
       },
       {
-        "id": "master_8d0c374415714d8db340bdbbe4290d27_tone",
+        "id": "master_60c3a8acd6084c999085a8b92217d6dc_tone",
         "kind": "knob",
         "label": "Tone",
         "tip": "Tone on the wet output (left = low-pass, right = high-pass, center = off)",
@@ -10950,7 +10950,7 @@
         "defText": "0.00"
       },
       {
-        "id": "master_8d0c374415714d8db340bdbbe4290d27_fbdst",
+        "id": "master_60c3a8acd6084c999085a8b92217d6dc_fbdst",
         "kind": "knob",
         "label": "FBDst",
         "tip": "Feedback distortion drive",
@@ -10969,7 +10969,7 @@
         "defText": "1.0"
       },
       {
-        "id": "master_8d0c374415714d8db340bdbbe4290d27_fbknee",
+        "id": "master_60c3a8acd6084c999085a8b92217d6dc_fbknee",
         "kind": "knob",
         "label": "FBKnee",
         "tip": "Curve knee - Limit: 0=hard clip, 1=smooth; Sat: 0=sharp (solid-state), 1=soft (valve)",
@@ -10988,7 +10988,7 @@
         "defText": "0.50"
       },
       {
-        "id": "master_8d0c374415714d8db340bdbbe4290d27_fbsym",
+        "id": "master_60c3a8acd6084c999085a8b92217d6dc_fbsym",
         "kind": "knob",
         "label": "FBSym",
         "tip": "Sat-mode symmetry (0=symmetric, 1=asymmetric DC offset)",
@@ -11007,7 +11007,7 @@
         "defText": "0.00"
       },
       {
-        "id": "master_8d0c374415714d8db340bdbbe4290d27_smooth",
+        "id": "master_60c3a8acd6084c999085a8b92217d6dc_smooth",
         "kind": "knob",
         "label": "Smooth",
         "tip": "Time smoothing - higher = slower transition when delay time changes. Only audible when the Pitch toggle (right of this row) is ON",
@@ -11077,7 +11077,7 @@
   "FX Panel Delay Advanced": {
     "controls": [
       {
-        "id": "master_690f0fe7a3e247eb85399bfe4ee87001_output_vol",
+        "id": "master_ab8a50a53d9b4933a755db5194944c09_output_vol",
         "kind": "knob",
         "label": "Vol",
         "tip": "Slot output gain (dB) - double-click resets to 0",
@@ -11096,7 +11096,7 @@
         "defText": "0.0"
       },
       {
-        "id": "master_690f0fe7a3e247eb85399bfe4ee87001_time",
+        "id": "master_ab8a50a53d9b4933a755db5194944c09_time",
         "kind": "knob",
         "label": "Time",
         "tip": "Delay time (ms)",
@@ -11115,7 +11115,7 @@
         "defText": "250"
       },
       {
-        "id": "master_690f0fe7a3e247eb85399bfe4ee87001_feed",
+        "id": "master_ab8a50a53d9b4933a755db5194944c09_feed",
         "kind": "knob",
         "label": "Feed",
         "tip": "Feedback level (>1 builds up)",
@@ -11134,7 +11134,7 @@
         "defText": "0.40"
       },
       {
-        "id": "master_690f0fe7a3e247eb85399bfe4ee87001_lofisr",
+        "id": "master_ab8a50a53d9b4933a755db5194944c09_lofisr",
         "kind": "knob",
         "label": "LoFiSR",
         "tip": "Lo-Fi sample rate (Hz) - 48000 = full quality; lower = bit-crusher / vintage character on every echo (drop below ~6000 for obvious grit)",
@@ -11153,7 +11153,7 @@
         "defText": "48000"
       },
       {
-        "id": "master_690f0fe7a3e247eb85399bfe4ee87001_wetin",
+        "id": "master_ab8a50a53d9b4933a755db5194944c09_wetin",
         "kind": "knob",
         "label": "WetIn",
         "tip": "Input gain INTO delay line - drop to freeze current feedback while muting new input",
@@ -11172,7 +11172,7 @@
         "defText": "1.00"
       },
       {
-        "id": "master_690f0fe7a3e247eb85399bfe4ee87001_wet",
+        "id": "master_ab8a50a53d9b4933a755db5194944c09_wet",
         "kind": "knob",
         "label": "Wet",
         "tip": "Wet output level",
@@ -11191,7 +11191,7 @@
         "defText": "0.30"
       },
       {
-        "id": "master_690f0fe7a3e247eb85399bfe4ee87001_dry",
+        "id": "master_ab8a50a53d9b4933a755db5194944c09_dry",
         "kind": "knob",
         "label": "Dry",
         "tip": "Dry output level",
@@ -11210,7 +11210,7 @@
         "defText": "1.00"
       },
       {
-        "id": "master_690f0fe7a3e247eb85399bfe4ee87001_fbcut",
+        "id": "master_ab8a50a53d9b4933a755db5194944c09_fbcut",
         "kind": "knob",
         "label": "FBCut",
         "tip": "Feedback filter cutoff (Hz)",
@@ -11229,7 +11229,7 @@
         "defText": "80"
       },
       {
-        "id": "master_690f0fe7a3e247eb85399bfe4ee87001_fbreso",
+        "id": "master_ab8a50a53d9b4933a755db5194944c09_fbreso",
         "kind": "knob",
         "label": "FBReso",
         "tip": "Feedback filter resonance (Q) - essential for BP character, subtle for LP/HP",
@@ -11248,7 +11248,7 @@
         "defText": "0.71"
       },
       {
-        "id": "master_690f0fe7a3e247eb85399bfe4ee87001_tone",
+        "id": "master_ab8a50a53d9b4933a755db5194944c09_tone",
         "kind": "knob",
         "label": "Tone",
         "tip": "Tone on the wet output (left = low-pass, right = high-pass, center = off)",
@@ -11267,7 +11267,7 @@
         "defText": "0.00"
       },
       {
-        "id": "master_690f0fe7a3e247eb85399bfe4ee87001_modhz",
+        "id": "master_ab8a50a53d9b4933a755db5194944c09_modhz",
         "kind": "knob",
         "label": "ModHz",
         "tip": "LFO modulation rate (Hz)",
@@ -11286,7 +11286,7 @@
         "defText": "0.0"
       },
       {
-        "id": "master_690f0fe7a3e247eb85399bfe4ee87001_modtime",
+        "id": "master_ab8a50a53d9b4933a755db5194944c09_modtime",
         "kind": "knob",
         "label": "ModTime",
         "tip": "LFO depth on delay TIME (chorus / flange-into-delay character). Requires ModHz > 0 (left of this knob) to hear any change",
@@ -11305,7 +11305,7 @@
         "defText": "0.00"
       },
       {
-        "id": "master_690f0fe7a3e247eb85399bfe4ee87001_modfb",
+        "id": "master_ab8a50a53d9b4933a755db5194944c09_modfb",
         "kind": "knob",
         "label": "ModFB",
         "tip": "LFO depth on feedback filter cutoff (+/- octaves)",
@@ -11324,7 +11324,7 @@
         "defText": "0.00"
       },
       {
-        "id": "master_690f0fe7a3e247eb85399bfe4ee87001_diff",
+        "id": "master_ab8a50a53d9b4933a755db5194944c09_diff",
         "kind": "knob",
         "label": "Diff",
         "tip": "Diffusion level (allpass smearing)",
@@ -11343,7 +11343,7 @@
         "defText": "0.00"
       },
       {
-        "id": "master_690f0fe7a3e247eb85399bfe4ee87001_diffsprd",
+        "id": "master_ab8a50a53d9b4933a755db5194944c09_diffsprd",
         "kind": "knob",
         "label": "DiffSprd",
         "tip": "Diffusion spread - scales the 4 allpass base delays (tight 0 to wide 1)",
@@ -11362,7 +11362,7 @@
         "defText": "0.50"
       },
       {
-        "id": "master_690f0fe7a3e247eb85399bfe4ee87001_lobit",
+        "id": "master_ab8a50a53d9b4933a755db5194944c09_lobit",
         "kind": "knob",
         "label": "LoBit",
         "tip": "Lo-Fi bit depth (24=off)",
@@ -11381,7 +11381,7 @@
         "defText": "24.0"
       },
       {
-        "id": "master_690f0fe7a3e247eb85399bfe4ee87001_fbdst",
+        "id": "master_ab8a50a53d9b4933a755db5194944c09_fbdst",
         "kind": "knob",
         "label": "FBDst",
         "tip": "Feedback distortion drive",
@@ -11400,7 +11400,7 @@
         "defText": "1.0"
       },
       {
-        "id": "master_690f0fe7a3e247eb85399bfe4ee87001_fbknee",
+        "id": "master_ab8a50a53d9b4933a755db5194944c09_fbknee",
         "kind": "knob",
         "label": "FBKnee",
         "tip": "Curve knee - Limit: 0=hard clip, 1=smooth; Sat: 0=sharp (solid-state), 1=soft (valve)",
@@ -11419,7 +11419,7 @@
         "defText": "0.50"
       },
       {
-        "id": "master_690f0fe7a3e247eb85399bfe4ee87001_fbsym",
+        "id": "master_ab8a50a53d9b4933a755db5194944c09_fbsym",
         "kind": "knob",
         "label": "FBSym",
         "tip": "Sat-mode symmetry (0=symmetric, 1=asymmetric DC offset)",
@@ -11438,7 +11438,7 @@
         "defText": "0.00"
       },
       {
-        "id": "master_690f0fe7a3e247eb85399bfe4ee87001_spread",
+        "id": "master_ab8a50a53d9b4933a755db5194944c09_spread",
         "kind": "knob",
         "label": "Spread",
         "tip": "Stereo spread (L/R base delay difference)",
@@ -11457,7 +11457,7 @@
         "defText": "0.00"
       },
       {
-        "id": "master_690f0fe7a3e247eb85399bfe4ee87001_pan",
+        "id": "master_ab8a50a53d9b4933a755db5194944c09_pan",
         "kind": "knob",
         "label": "Pan",
         "tip": "L/R offset pan",
@@ -11476,7 +11476,7 @@
         "defText": "0.00"
       },
       {
-        "id": "master_690f0fe7a3e247eb85399bfe4ee87001_smooth",
+        "id": "master_ab8a50a53d9b4933a755db5194944c09_smooth",
         "kind": "knob",
         "label": "Smooth",
         "tip": "Time smoothing - higher = slower transition when delay time changes. Only audible when the Pitch toggle (right of this row) is ON",
@@ -11495,7 +11495,7 @@
         "defText": "0.50"
       },
       {
-        "id": "master_690f0fe7a3e247eb85399bfe4ee87001_duck",
+        "id": "master_ab8a50a53d9b4933a755db5194944c09_duck",
         "kind": "knob",
         "label": "Duck",
         "tip": "0..100 %.  Sidechain ducking amount.  When the trigger (SC source, or the dry input if none picked) crosses the DkThr threshold, the wet output is attenuated by this amount.  0 = disabled (vocal-friendly setting around 60 %).",
@@ -11514,7 +11514,7 @@
         "defText": "0"
       },
       {
-        "id": "master_690f0fe7a3e247eb85399bfe4ee87001_dkthr",
+        "id": "master_ab8a50a53d9b4933a755db5194944c09_dkthr",
         "kind": "knob",
         "label": "DkThr",
         "tip": "Duck threshold (dB) - trigger level where ducking starts",
@@ -11533,7 +11533,7 @@
         "defText": "-24"
       },
       {
-        "id": "master_690f0fe7a3e247eb85399bfe4ee87001_dkatt",
+        "id": "master_ab8a50a53d9b4933a755db5194944c09_dkatt",
         "kind": "knob",
         "label": "DkAtt",
         "tip": "Duck attack (ms) - how fast the wet ducks once the trigger crosses threshold",
@@ -11552,7 +11552,7 @@
         "defText": "10"
       },
       {
-        "id": "master_690f0fe7a3e247eb85399bfe4ee87001_dkrel",
+        "id": "master_ab8a50a53d9b4933a755db5194944c09_dkrel",
         "kind": "knob",
         "label": "DkRel",
         "tip": "Duck release (ms) - how fast the wet recovers after the trigger falls back",
@@ -11622,7 +11622,7 @@
   "FX Panel Reverb Basic": {
     "controls": [
       {
-        "id": "master_076ae52b3bfc48b3a6897c8dbe80c649_output_vol",
+        "id": "master_ac2e7901fdda4782b323dfe9743049c7_output_vol",
         "kind": "knob",
         "label": "Vol",
         "tip": "Slot output gain (dB) - double-click resets to 0",
@@ -11641,7 +11641,7 @@
         "defText": "0.0"
       },
       {
-        "id": "master_076ae52b3bfc48b3a6897c8dbe80c649_room",
+        "id": "master_ac2e7901fdda4782b323dfe9743049c7_room",
         "kind": "knob",
         "label": "Room",
         "tip": "Room size scale",
@@ -11660,7 +11660,7 @@
         "defText": "0.60"
       },
       {
-        "id": "master_076ae52b3bfc48b3a6897c8dbe80c649_decay",
+        "id": "master_ac2e7901fdda4782b323dfe9743049c7_decay",
         "kind": "knob",
         "label": "Decay",
         "tip": "RT60 decay time (s)",
@@ -11679,7 +11679,7 @@
         "defText": "2.0"
       },
       {
-        "id": "master_076ae52b3bfc48b3a6897c8dbe80c649_diffuse",
+        "id": "master_ac2e7901fdda4782b323dfe9743049c7_diffuse",
         "kind": "knob",
         "label": "Diffuse",
         "tip": "Pre-diffusion (0=clear, 1=dense)",
@@ -11698,7 +11698,7 @@
         "defText": "0.50"
       },
       {
-        "id": "master_076ae52b3bfc48b3a6897c8dbe80c649_predly",
+        "id": "master_ac2e7901fdda4782b323dfe9743049c7_predly",
         "kind": "knob",
         "label": "PreDly",
         "tip": "Pre-delay (ms)",
@@ -11717,7 +11717,7 @@
         "defText": "10.0"
       },
       {
-        "id": "master_076ae52b3bfc48b3a6897c8dbe80c649_wet",
+        "id": "master_ac2e7901fdda4782b323dfe9743049c7_wet",
         "kind": "knob",
         "label": "Wet",
         "tip": "Wet level",
@@ -11736,7 +11736,7 @@
         "defText": "0.30"
       },
       {
-        "id": "master_076ae52b3bfc48b3a6897c8dbe80c649_dry",
+        "id": "master_ac2e7901fdda4782b323dfe9743049c7_dry",
         "kind": "knob",
         "label": "Dry",
         "tip": "Dry level",
@@ -11755,7 +11755,7 @@
         "defText": "0.70"
       },
       {
-        "id": "master_076ae52b3bfc48b3a6897c8dbe80c649_locut",
+        "id": "master_ac2e7901fdda4782b323dfe9743049c7_locut",
         "kind": "knob",
         "label": "LoCut",
         "tip": "Input HPF (Hz)",
@@ -11774,7 +11774,7 @@
         "defText": "80"
       },
       {
-        "id": "master_076ae52b3bfc48b3a6897c8dbe80c649_hicut",
+        "id": "master_ac2e7901fdda4782b323dfe9743049c7_hicut",
         "kind": "knob",
         "label": "HiCut",
         "tip": "Input LPF (Hz)",
@@ -11793,7 +11793,7 @@
         "defText": "18000"
       },
       {
-        "id": "master_076ae52b3bfc48b3a6897c8dbe80c649_bassmlt",
+        "id": "master_ac2e7901fdda4782b323dfe9743049c7_bassmlt",
         "kind": "knob",
         "label": "BassMlt",
         "tip": "Bass tail multiplier",
@@ -11812,7 +11812,7 @@
         "defText": "1.20"
       },
       {
-        "id": "master_076ae52b3bfc48b3a6897c8dbe80c649_bassx",
+        "id": "master_ac2e7901fdda4782b323dfe9743049c7_bassx",
         "kind": "knob",
         "label": "BassX",
         "tip": "Bass shelf crossover (Hz)",
@@ -11831,7 +11831,7 @@
         "defText": "250"
       },
       {
-        "id": "master_076ae52b3bfc48b3a6897c8dbe80c649_taildep",
+        "id": "master_ac2e7901fdda4782b323dfe9743049c7_taildep",
         "kind": "knob",
         "label": "TailDep",
         "tip": "Tail modulation depth (ms)",
@@ -11850,7 +11850,7 @@
         "defText": "0.30"
       },
       {
-        "id": "master_076ae52b3bfc48b3a6897c8dbe80c649_tailrt",
+        "id": "master_ac2e7901fdda4782b323dfe9743049c7_tailrt",
         "kind": "knob",
         "label": "TailRt",
         "tip": "Tail modulation rate (Hz)",
@@ -11869,7 +11869,7 @@
         "defText": "0.35"
       },
       {
-        "id": "master_076ae52b3bfc48b3a6897c8dbe80c649_stereo",
+        "id": "master_ac2e7901fdda4782b323dfe9743049c7_stereo",
         "kind": "knob",
         "label": "Stereo",
         "tip": "Stereo separation (%)",
@@ -11888,7 +11888,7 @@
         "defText": "100"
       },
       {
-        "id": "master_076ae52b3bfc48b3a6897c8dbe80c649_hidamp",
+        "id": "master_ac2e7901fdda4782b323dfe9743049c7_hidamp",
         "kind": "knob",
         "label": "HiDamp",
         "tip": "High-freq damping (Hz)",
@@ -11907,7 +11907,7 @@
         "defText": "8000"
       },
       {
-        "id": "master_076ae52b3bfc48b3a6897c8dbe80c649_er",
+        "id": "master_ac2e7901fdda4782b323dfe9743049c7_er",
         "kind": "knob",
         "label": "ER",
         "tip": "Early reflections level (dB)",
@@ -11977,7 +11977,7 @@
   "FX Panel Reverb Advanced": {
     "controls": [
       {
-        "id": "master_46481d0e0c784307bb1138b3ba2c8de5_output_vol",
+        "id": "master_7b6bd296154c4d1ea2b76733d8cf0617_output_vol",
         "kind": "knob",
         "label": "Vol",
         "tip": "Slot output gain (dB) - double-click resets to 0",
@@ -11996,7 +11996,7 @@
         "defText": "0.0"
       },
       {
-        "id": "master_46481d0e0c784307bb1138b3ba2c8de5_room",
+        "id": "master_7b6bd296154c4d1ea2b76733d8cf0617_room",
         "kind": "knob",
         "label": "Room",
         "tip": "Room size scale",
@@ -12015,7 +12015,7 @@
         "defText": "0.60"
       },
       {
-        "id": "master_46481d0e0c784307bb1138b3ba2c8de5_decay",
+        "id": "master_7b6bd296154c4d1ea2b76733d8cf0617_decay",
         "kind": "knob",
         "label": "Decay",
         "tip": "RT60 decay time (s)",
@@ -12034,7 +12034,7 @@
         "defText": "2.0"
       },
       {
-        "id": "master_46481d0e0c784307bb1138b3ba2c8de5_hfratio",
+        "id": "master_7b6bd296154c4d1ea2b76733d8cf0617_hfratio",
         "kind": "knob",
         "label": "HFRatio",
         "tip": "HF decay ratio (<1 = darker/shorter highs)",
@@ -12053,7 +12053,7 @@
         "defText": "0.70"
       },
       {
-        "id": "master_46481d0e0c784307bb1138b3ba2c8de5_diffuse",
+        "id": "master_7b6bd296154c4d1ea2b76733d8cf0617_diffuse",
         "kind": "knob",
         "label": "Diffuse",
         "tip": "Pre-diffusion (0=clear, 1=dense)",
@@ -12072,7 +12072,7 @@
         "defText": "0.50"
       },
       {
-        "id": "master_46481d0e0c784307bb1138b3ba2c8de5_predly",
+        "id": "master_7b6bd296154c4d1ea2b76733d8cf0617_predly",
         "kind": "knob",
         "label": "PreDly",
         "tip": "Pre-delay (ms)",
@@ -12091,7 +12091,7 @@
         "defText": "10.0"
       },
       {
-        "id": "master_46481d0e0c784307bb1138b3ba2c8de5_wettone",
+        "id": "master_7b6bd296154c4d1ea2b76733d8cf0617_wettone",
         "kind": "knob",
         "label": "WetTone",
         "tip": "Wet tone tilt ±12 dB @ 1 kHz (-=warm, +=bright)",
@@ -12110,7 +12110,7 @@
         "defText": "0.0"
       },
       {
-        "id": "master_46481d0e0c784307bb1138b3ba2c8de5_wet",
+        "id": "master_7b6bd296154c4d1ea2b76733d8cf0617_wet",
         "kind": "knob",
         "label": "Wet",
         "tip": "Wet level",
@@ -12129,7 +12129,7 @@
         "defText": "0.30"
       },
       {
-        "id": "master_46481d0e0c784307bb1138b3ba2c8de5_dry",
+        "id": "master_7b6bd296154c4d1ea2b76733d8cf0617_dry",
         "kind": "knob",
         "label": "Dry",
         "tip": "Dry level",
@@ -12148,7 +12148,7 @@
         "defText": "0.70"
       },
       {
-        "id": "master_46481d0e0c784307bb1138b3ba2c8de5_locut",
+        "id": "master_7b6bd296154c4d1ea2b76733d8cf0617_locut",
         "kind": "knob",
         "label": "LoCut",
         "tip": "Input HPF (Hz)",
@@ -12167,7 +12167,7 @@
         "defText": "80"
       },
       {
-        "id": "master_46481d0e0c784307bb1138b3ba2c8de5_hicut",
+        "id": "master_7b6bd296154c4d1ea2b76733d8cf0617_hicut",
         "kind": "knob",
         "label": "HiCut",
         "tip": "Input LPF (Hz)",
@@ -12186,7 +12186,7 @@
         "defText": "18000"
       },
       {
-        "id": "master_46481d0e0c784307bb1138b3ba2c8de5_bassmlt",
+        "id": "master_7b6bd296154c4d1ea2b76733d8cf0617_bassmlt",
         "kind": "knob",
         "label": "BassMlt",
         "tip": "Bass tail multiplier",
@@ -12205,7 +12205,7 @@
         "defText": "1.20"
       },
       {
-        "id": "master_46481d0e0c784307bb1138b3ba2c8de5_bassx",
+        "id": "master_7b6bd296154c4d1ea2b76733d8cf0617_bassx",
         "kind": "knob",
         "label": "BassX",
         "tip": "Bass shelf crossover (Hz)",
@@ -12224,7 +12224,7 @@
         "defText": "250"
       },
       {
-        "id": "master_46481d0e0c784307bb1138b3ba2c8de5_taildep",
+        "id": "master_7b6bd296154c4d1ea2b76733d8cf0617_taildep",
         "kind": "knob",
         "label": "TailDep",
         "tip": "Tail modulation depth (ms)",
@@ -12243,7 +12243,7 @@
         "defText": "0.30"
       },
       {
-        "id": "master_46481d0e0c784307bb1138b3ba2c8de5_tailrt",
+        "id": "master_7b6bd296154c4d1ea2b76733d8cf0617_tailrt",
         "kind": "knob",
         "label": "TailRt",
         "tip": "Tail modulation rate (Hz)",
@@ -12262,7 +12262,7 @@
         "defText": "0.35"
       },
       {
-        "id": "master_46481d0e0c784307bb1138b3ba2c8de5_stereo",
+        "id": "master_7b6bd296154c4d1ea2b76733d8cf0617_stereo",
         "kind": "knob",
         "label": "Stereo",
         "tip": "Stereo separation (%)",
@@ -12281,7 +12281,7 @@
         "defText": "100"
       },
       {
-        "id": "master_46481d0e0c784307bb1138b3ba2c8de5_hidamp",
+        "id": "master_7b6bd296154c4d1ea2b76733d8cf0617_hidamp",
         "kind": "knob",
         "label": "HiDamp",
         "tip": "High-freq damping (Hz)",
@@ -12300,7 +12300,7 @@
         "defText": "8000"
       },
       {
-        "id": "master_46481d0e0c784307bb1138b3ba2c8de5_er",
+        "id": "master_7b6bd296154c4d1ea2b76733d8cf0617_er",
         "kind": "knob",
         "label": "ER",
         "tip": "Early reflections level (dB)",
@@ -12319,7 +12319,7 @@
         "defText": "-6.0"
       },
       {
-        "id": "master_46481d0e0c784307bb1138b3ba2c8de5_freeze",
+        "id": "master_7b6bd296154c4d1ea2b76733d8cf0617_freeze",
         "kind": "toggle",
         "bounds": [
           78.862973760932945,
@@ -12329,7 +12329,7 @@
         ]
       },
       {
-        "id": "master_46481d0e0c784307bb1138b3ba2c8de5_duck",
+        "id": "master_7b6bd296154c4d1ea2b76733d8cf0617_duck",
         "kind": "knob",
         "label": "Duck",
         "tip": "0..100 %.  Sidechain ducking amount.  When the trigger (SC source, or the dry input if none picked) crosses the DkThr threshold, the wet reverb is attenuated by this amount.  0 = disabled.",
@@ -12348,7 +12348,7 @@
         "defText": "0"
       },
       {
-        "id": "master_46481d0e0c784307bb1138b3ba2c8de5_dkthr",
+        "id": "master_7b6bd296154c4d1ea2b76733d8cf0617_dkthr",
         "kind": "knob",
         "label": "DkThr",
         "tip": "Duck threshold (dB) - trigger level where ducking starts",
@@ -12367,7 +12367,7 @@
         "defText": "-24"
       },
       {
-        "id": "master_46481d0e0c784307bb1138b3ba2c8de5_dkatt",
+        "id": "master_7b6bd296154c4d1ea2b76733d8cf0617_dkatt",
         "kind": "knob",
         "label": "DkAtt",
         "tip": "Duck attack (ms) - how fast the wet ducks once the trigger crosses threshold",
@@ -12386,7 +12386,7 @@
         "defText": "10"
       },
       {
-        "id": "master_46481d0e0c784307bb1138b3ba2c8de5_dkrel",
+        "id": "master_7b6bd296154c4d1ea2b76733d8cf0617_dkrel",
         "kind": "knob",
         "label": "DkRel",
         "tip": "Duck release (ms) - how fast the wet recovers after the trigger falls back",
@@ -12458,6 +12458,1634 @@
           2.661596958174905,
           2.623906705539359,
           7.604562737642586
+        ]
+      }
+    ]
+  },
+  "Pedal Tuner": {
+    "controls": [
+      {
+        "id": "",
+        "kind": "knob",
+        "label": "Trim",
+        "tip": "Reference Hz fine-trim.  Range is 436-445 Hz in 440 mode, 428-437 Hz in 432 mode.",
+        "bounds": [
+          66.260162601626021,
+          12.307692307692308,
+          17.886178861788618,
+          22.307692307692307
+        ],
+        "min": 436.0,
+        "max": 445.0,
+        "interval": 0.1,
+        "minText": "436.0",
+        "maxText": "445.0",
+        "valueText": "440.0",
+        "defText": "440.0"
+      }
+    ],
+    "anchors": [
+      {
+        "anchor": "BSPDL-5",
+        "bounds": [
+          89.430894308943095,
+          2.307692307692307,
+          8.130081300813009,
+          7.692307692307693
+        ]
+      },
+      {
+        "anchor": "BSPDL-7",
+        "bounds": [
+          37.804878048780488,
+          88.84615384615384,
+          24.390243902439025,
+          8.461538461538462
+        ]
+      },
+      {
+        "anchor": "BSPDL-8",
+        "bounds": [
+          4.878048780487805,
+          13.846153846153847,
+          32.520325203252035,
+          70.769230769230774
+        ]
+      },
+      {
+        "anchor": "BSPDL-9",
+        "bounds": [
+          54.471544715447152,
+          35.384615384615387,
+          12.601626016260163,
+          17.692307692307693
+        ]
+      }
+    ]
+  },
+  "Pedal Bass Compressor": {
+    "controls": [
+      {
+        "id": "",
+        "kind": "knob",
+        "label": "Thresh",
+        "tip": "Threshold (dB) -- compression begins above this level",
+        "bounds": [
+          15.040650406504065,
+          17.307692307692307,
+          22.764227642276424,
+          26.923076923076923
+        ],
+        "min": -48.0,
+        "max": 0.0,
+        "interval": 0.5,
+        "minText": "-48.0",
+        "maxText": "0.0",
+        "valueText": "-24.0",
+        "defText": "-24.0"
+      },
+      {
+        "id": "",
+        "kind": "knob",
+        "label": "Ratio",
+        "tip": "Per-band ratio (applied directly to all 3 bands)",
+        "bounds": [
+          61.788617886178862,
+          17.307692307692307,
+          22.764227642276424,
+          26.923076923076923
+        ],
+        "min": 1.0,
+        "max": 10.0,
+        "interval": 0.100000001490116,
+        "minText": "1.0",
+        "maxText": "10.0",
+        "valueText": "4.0",
+        "defText": "4.0"
+      },
+      {
+        "id": "",
+        "kind": "knob",
+        "label": "Release",
+        "tip": "Per-band release time (ms)",
+        "bounds": [
+          15.040650406504065,
+          54.230769230769234,
+          22.764227642276424,
+          26.923076923076923
+        ],
+        "min": 50.0,
+        "max": 500.0,
+        "interval": 1.0,
+        "minText": "50",
+        "maxText": "500",
+        "valueText": "200",
+        "defText": "200"
+      },
+      {
+        "id": "",
+        "kind": "knob",
+        "label": "Level",
+        "tip": "Output level (dB)",
+        "bounds": [
+          61.788617886178862,
+          54.230769230769234,
+          22.764227642276424,
+          26.923076923076923
+        ],
+        "min": -24.0,
+        "max": 12.0,
+        "interval": 0.100000001490116,
+        "minText": "-24.0",
+        "maxText": "12.0",
+        "valueText": "0.0",
+        "defText": "0.0"
+      }
+    ],
+    "anchors": [
+      {
+        "anchor": "BSPDL-4",
+        "bounds": [
+          0.0,
+          0.0,
+          100.0,
+          100.0
+        ]
+      },
+      {
+        "anchor": "BSPDL-11",
+        "bounds": [
+          90.243902439024396,
+          2.307692307692307,
+          7.317073170731708,
+          7.692307692307693
+        ]
+      },
+      {
+        "anchor": "BSPDL-12",
+        "bounds": [
+          60.975609756097562,
+          2.307692307692307,
+          8.130081300813009,
+          7.692307692307693
+        ]
+      }
+    ]
+  },
+  "Pedal Noise Gate": {
+    "controls": [
+      {
+        "id": "",
+        "kind": "knob",
+        "label": "Threshold",
+        "tip": "Gate opens above this RMS level (dB); closes below",
+        "bounds": [
+          15.040650406504065,
+          17.307692307692307,
+          22.764227642276424,
+          26.923076923076923
+        ],
+        "min": -60.0,
+        "max": 0.0,
+        "interval": 0.100000001490116,
+        "minText": "-60.0",
+        "maxText": "0.0",
+        "valueText": "-40.0",
+        "defText": "-40.0"
+      },
+      {
+        "id": "",
+        "kind": "knob",
+        "label": "Decay",
+        "tip": "Gate close release time (ms)",
+        "bounds": [
+          61.788617886178862,
+          17.307692307692307,
+          22.764227642276424,
+          26.923076923076923
+        ],
+        "min": 1.0,
+        "max": 1000.0,
+        "interval": 1.0,
+        "minText": "1",
+        "maxText": "1000",
+        "valueText": "100",
+        "defText": "100"
+      }
+    ],
+    "anchors": [
+      {
+        "anchor": "BSPDL-4",
+        "bounds": [
+          0.0,
+          0.0,
+          100.0,
+          100.0
+        ]
+      },
+      {
+        "anchor": "BSPDL-11",
+        "bounds": [
+          90.243902439024396,
+          2.307692307692307,
+          7.317073170731708,
+          7.692307692307693
+        ]
+      },
+      {
+        "anchor": "BSPDL-12",
+        "bounds": [
+          60.975609756097562,
+          2.307692307692307,
+          8.130081300813009,
+          7.692307692307693
+        ]
+      }
+    ]
+  },
+  "Pedal Bass Driver": {
+    "controls": [
+      {
+        "id": "",
+        "kind": "knob",
+        "label": "Drive",
+        "tip": "Drive amount on the Mid + High bands (Low band stays clean)",
+        "bounds": [
+          7.317073170731708,
+          17.307692307692307,
+          22.764227642276424,
+          26.923076923076923
+        ],
+        "min": 0.0,
+        "max": 1.0,
+        "interval": 0.001000000047497,
+        "minText": "0.000",
+        "maxText": "1.000",
+        "valueText": "0.500",
+        "defText": "0.500"
+      },
+      {
+        "id": "",
+        "kind": "knob",
+        "label": "Blend",
+        "tip": "Clean / clipped mix on the Mid+High bands",
+        "bounds": [
+          38.211382113821138,
+          17.307692307692307,
+          22.764227642276424,
+          26.923076923076923
+        ],
+        "min": 0.0,
+        "max": 1.0,
+        "interval": 0.001000000047497,
+        "minText": "0.000",
+        "maxText": "1.000",
+        "valueText": "0.700",
+        "defText": "0.700"
+      },
+      {
+        "id": "",
+        "kind": "knob",
+        "label": "Low",
+        "tip": "Low-band gain (clean VCA punch on the fundamental)",
+        "bounds": [
+          69.105691056910572,
+          17.307692307692307,
+          22.764227642276424,
+          26.923076923076923
+        ],
+        "min": 0.0,
+        "max": 1.0,
+        "interval": 0.001000000047497,
+        "minText": "0.000",
+        "maxText": "1.000",
+        "valueText": "0.700",
+        "defText": "0.700"
+      },
+      {
+        "id": "",
+        "kind": "knob",
+        "label": "High",
+        "tip": "High-band gain (post-clip)",
+        "bounds": [
+          7.317073170731708,
+          54.230769230769234,
+          22.764227642276424,
+          26.923076923076923
+        ],
+        "min": 0.0,
+        "max": 1.0,
+        "interval": 0.001000000047497,
+        "minText": "0.000",
+        "maxText": "1.000",
+        "valueText": "0.700",
+        "defText": "0.700"
+      },
+      {
+        "id": "",
+        "kind": "knob",
+        "label": "Level",
+        "tip": "Output level (dB)",
+        "bounds": [
+          38.211382113821138,
+          54.230769230769234,
+          22.764227642276424,
+          26.923076923076923
+        ],
+        "min": -24.0,
+        "max": 12.0,
+        "interval": 0.100000001490116,
+        "minText": "-24.0",
+        "maxText": "12.0",
+        "valueText": "0.0",
+        "defText": "0.0"
+      }
+    ],
+    "anchors": [
+      {
+        "anchor": "BSPDL-4",
+        "bounds": [
+          0.0,
+          0.0,
+          100.0,
+          100.0
+        ]
+      },
+      {
+        "anchor": "BSPDL-11",
+        "bounds": [
+          90.243902439024396,
+          2.307692307692307,
+          7.317073170731708,
+          7.692307692307693
+        ]
+      },
+      {
+        "anchor": "BSPDL-12",
+        "bounds": [
+          60.975609756097562,
+          2.307692307692307,
+          8.130081300813009,
+          7.692307692307693
+        ]
+      }
+    ]
+  },
+  "Pedal Bass Overdrive": {
+    "controls": [
+      {
+        "id": "",
+        "kind": "knob",
+        "label": "Gain",
+        "tip": "Drive amount (full-range hard clip)",
+        "bounds": [
+          7.317073170731708,
+          17.307692307692307,
+          22.764227642276424,
+          26.923076923076923
+        ],
+        "min": 0.0,
+        "max": 1.0,
+        "interval": 0.001000000047497,
+        "minText": "0.000",
+        "maxText": "1.000",
+        "valueText": "0.500",
+        "defText": "0.500"
+      },
+      {
+        "id": "",
+        "kind": "knob",
+        "label": "Balance",
+        "tip": "Dry / wet blend (0 = clean, 1 = fully clipped)",
+        "bounds": [
+          38.211382113821138,
+          17.307692307692307,
+          22.764227642276424,
+          26.923076923076923
+        ],
+        "min": 0.0,
+        "max": 1.0,
+        "interval": 0.001000000047497,
+        "minText": "0.000",
+        "maxText": "1.000",
+        "valueText": "0.500",
+        "defText": "0.500"
+      },
+      {
+        "id": "",
+        "kind": "knob",
+        "label": "Low",
+        "tip": "EQ Low shelf at 100 Hz (post-blend; dB)",
+        "bounds": [
+          69.105691056910572,
+          17.307692307692307,
+          22.764227642276424,
+          26.923076923076923
+        ],
+        "min": -15.0,
+        "max": 15.0,
+        "interval": 0.100000001490116,
+        "minText": "-15.0",
+        "maxText": "15.0",
+        "valueText": "0.0",
+        "defText": "0.0"
+      },
+      {
+        "id": "",
+        "kind": "knob",
+        "label": "High",
+        "tip": "EQ High shelf at 3 kHz (post-blend; dB)",
+        "bounds": [
+          7.317073170731708,
+          54.230769230769234,
+          22.764227642276424,
+          26.923076923076923
+        ],
+        "min": -15.0,
+        "max": 15.0,
+        "interval": 0.100000001490116,
+        "minText": "-15.0",
+        "maxText": "15.0",
+        "valueText": "0.0",
+        "defText": "0.0"
+      },
+      {
+        "id": "",
+        "kind": "knob",
+        "label": "Level",
+        "tip": "Output level (dB)",
+        "bounds": [
+          38.211382113821138,
+          54.230769230769234,
+          22.764227642276424,
+          26.923076923076923
+        ],
+        "min": -24.0,
+        "max": 12.0,
+        "interval": 0.100000001490116,
+        "minText": "-24.0",
+        "maxText": "12.0",
+        "valueText": "0.0",
+        "defText": "0.0"
+      }
+    ],
+    "anchors": [
+      {
+        "anchor": "BSPDL-4",
+        "bounds": [
+          0.0,
+          0.0,
+          100.0,
+          100.0
+        ]
+      },
+      {
+        "anchor": "BSPDL-11",
+        "bounds": [
+          90.243902439024396,
+          2.307692307692307,
+          7.317073170731708,
+          7.692307692307693
+        ]
+      },
+      {
+        "anchor": "BSPDL-12",
+        "bounds": [
+          60.975609756097562,
+          2.307692307692307,
+          8.130081300813009,
+          7.692307692307693
+        ]
+      }
+    ]
+  },
+  "Pedal Blues Drive": {
+    "controls": [
+      {
+        "id": "",
+        "kind": "knob",
+        "label": "Drive",
+        "tip": "Drive amount (0 = clean, 1 = heavy overdrive)",
+        "bounds": [
+          7.317073170731708,
+          35.769230769230766,
+          22.764227642276424,
+          26.923076923076923
+        ],
+        "min": 0.0,
+        "max": 1.0,
+        "interval": 0.001000000047497,
+        "minText": "0.000",
+        "maxText": "1.000",
+        "valueText": "0.500",
+        "defText": "0.500"
+      },
+      {
+        "id": "",
+        "kind": "knob",
+        "label": "Tone",
+        "tip": "Tone (LPF cutoff sweep 500 Hz - 5 kHz)",
+        "bounds": [
+          38.211382113821138,
+          35.769230769230766,
+          22.764227642276424,
+          26.923076923076923
+        ],
+        "min": 0.0,
+        "max": 1.0,
+        "interval": 0.001000000047497,
+        "minText": "0.000",
+        "maxText": "1.000",
+        "valueText": "0.500",
+        "defText": "0.500"
+      },
+      {
+        "id": "",
+        "kind": "knob",
+        "label": "Level",
+        "tip": "Output level (dB)",
+        "bounds": [
+          69.105691056910572,
+          35.769230769230766,
+          22.764227642276424,
+          26.923076923076923
+        ],
+        "min": -24.0,
+        "max": 12.0,
+        "interval": 0.100000001490116,
+        "minText": "-24.0",
+        "maxText": "12.0",
+        "valueText": "0.0",
+        "defText": "0.0"
+      }
+    ],
+    "anchors": [
+      {
+        "anchor": "BSPDL-4",
+        "bounds": [
+          0.0,
+          0.0,
+          100.0,
+          100.0
+        ]
+      },
+      {
+        "anchor": "BSPDL-11",
+        "bounds": [
+          90.243902439024396,
+          2.307692307692307,
+          7.317073170731708,
+          7.692307692307693
+        ]
+      },
+      {
+        "anchor": "BSPDL-12",
+        "bounds": [
+          60.975609756097562,
+          2.307692307692307,
+          8.130081300813009,
+          7.692307692307693
+        ]
+      }
+    ]
+  },
+  "Pedal Distortion": {
+    "controls": [
+      {
+        "id": "",
+        "kind": "knob",
+        "label": "Dist",
+        "tip": "Distortion amount (drives the hard-clipper into a square wave at max)",
+        "bounds": [
+          7.317073170731708,
+          35.769230769230766,
+          22.764227642276424,
+          26.923076923076923
+        ],
+        "min": 0.0,
+        "max": 1.0,
+        "interval": 0.001000000047497,
+        "minText": "0.000",
+        "maxText": "1.000",
+        "valueText": "0.500",
+        "defText": "0.500"
+      },
+      {
+        "id": "",
+        "kind": "knob",
+        "label": "Tone",
+        "tip": "Tone (mid-scoop tilt EQ -- left = darker, right = brighter, center = scooped mids)",
+        "bounds": [
+          38.211382113821138,
+          35.769230769230766,
+          22.764227642276424,
+          26.923076923076923
+        ],
+        "min": 0.0,
+        "max": 1.0,
+        "interval": 0.001000000047497,
+        "minText": "0.000",
+        "maxText": "1.000",
+        "valueText": "0.500",
+        "defText": "0.500"
+      },
+      {
+        "id": "",
+        "kind": "knob",
+        "label": "Level",
+        "tip": "Output level (dB)",
+        "bounds": [
+          69.105691056910572,
+          35.769230769230766,
+          22.764227642276424,
+          26.923076923076923
+        ],
+        "min": -24.0,
+        "max": 12.0,
+        "interval": 0.100000001490116,
+        "minText": "-24.0",
+        "maxText": "12.0",
+        "valueText": "0.0",
+        "defText": "0.0"
+      }
+    ],
+    "anchors": [
+      {
+        "anchor": "BSPDL-4",
+        "bounds": [
+          0.0,
+          0.0,
+          100.0,
+          100.0
+        ]
+      },
+      {
+        "anchor": "BSPDL-11",
+        "bounds": [
+          90.243902439024396,
+          2.307692307692307,
+          7.317073170731708,
+          7.692307692307693
+        ]
+      },
+      {
+        "anchor": "BSPDL-12",
+        "bounds": [
+          60.975609756097562,
+          2.307692307692307,
+          8.130081300813009,
+          7.692307692307693
+        ]
+      }
+    ]
+  },
+  "Pedal Fuzz": {
+    "controls": [
+      {
+        "id": "",
+        "kind": "knob",
+        "label": "Fuzz",
+        "tip": "Fuzz amount",
+        "bounds": [
+          15.040650406504065,
+          17.307692307692307,
+          22.764227642276424,
+          26.923076923076923
+        ],
+        "min": 0.0,
+        "max": 1.0,
+        "interval": 0.001000000047497,
+        "minText": "0.000",
+        "maxText": "1.000",
+        "valueText": "0.500",
+        "defText": "0.500"
+      },
+      {
+        "id": "",
+        "kind": "knob",
+        "label": "Boost",
+        "tip": "Input boost into the fuzz (dB) -- pushes the clipping harder without changing Fuzz",
+        "bounds": [
+          61.788617886178862,
+          17.307692307692307,
+          22.764227642276424,
+          26.923076923076923
+        ],
+        "min": 0.0,
+        "max": 20.0,
+        "interval": 0.100000001490116,
+        "minText": "0.0",
+        "maxText": "20.0",
+        "valueText": "0.0",
+        "defText": "0.0"
+      },
+      {
+        "id": "",
+        "kind": "knob",
+        "label": "Level",
+        "tip": "Output level (dB)",
+        "bounds": [
+          15.040650406504065,
+          54.230769230769234,
+          22.764227642276424,
+          26.923076923076923
+        ],
+        "min": -24.0,
+        "max": 12.0,
+        "interval": 0.100000001490116,
+        "minText": "-24.0",
+        "maxText": "12.0",
+        "valueText": "0.0",
+        "defText": "0.0"
+      }
+    ],
+    "anchors": [
+      {
+        "anchor": "BSPDL-4",
+        "bounds": [
+          0.0,
+          0.0,
+          100.0,
+          100.0
+        ]
+      },
+      {
+        "anchor": "BSPDL-11",
+        "bounds": [
+          90.243902439024396,
+          2.307692307692307,
+          7.317073170731708,
+          7.692307692307693
+        ]
+      },
+      {
+        "anchor": "BSPDL-12",
+        "bounds": [
+          60.975609756097562,
+          2.307692307692307,
+          8.130081300813009,
+          7.692307692307693
+        ]
+      }
+    ]
+  },
+  "Pedal High-Gain": {
+    "controls": [
+      {
+        "id": "",
+        "kind": "knob",
+        "label": "Dist",
+        "tip": "Distortion amount (cascading hard-clip drive)",
+        "bounds": [
+          7.317073170731708,
+          17.307692307692307,
+          22.764227642276424,
+          26.923076923076923
+        ],
+        "min": 0.0,
+        "max": 1.0,
+        "interval": 0.001000000047497,
+        "minText": "0.000",
+        "maxText": "1.000",
+        "valueText": "0.500",
+        "defText": "0.500"
+      },
+      {
+        "id": "",
+        "kind": "knob",
+        "label": "Low",
+        "tip": "Low shelf at 80 Hz (dB)",
+        "bounds": [
+          38.211382113821138,
+          17.307692307692307,
+          22.764227642276424,
+          26.923076923076923
+        ],
+        "min": -15.0,
+        "max": 15.0,
+        "interval": 0.100000001490116,
+        "minText": "-15.0",
+        "maxText": "15.0",
+        "valueText": "0.0",
+        "defText": "0.0"
+      },
+      {
+        "id": "",
+        "kind": "knob",
+        "label": "Mid Hz",
+        "tip": "Mid peak frequency (Hz)",
+        "bounds": [
+          69.105691056910572,
+          17.307692307692307,
+          22.764227642276424,
+          26.923076923076923
+        ],
+        "min": 200.0,
+        "max": 5000.0,
+        "interval": 1.0,
+        "minText": "200",
+        "maxText": "5000",
+        "valueText": "800",
+        "defText": "800"
+      },
+      {
+        "id": "",
+        "kind": "knob",
+        "label": "Mid dB",
+        "tip": "Mid peak gain (dB)",
+        "bounds": [
+          7.317073170731708,
+          54.230769230769234,
+          22.764227642276424,
+          26.923076923076923
+        ],
+        "min": -15.0,
+        "max": 15.0,
+        "interval": 0.100000001490116,
+        "minText": "-15.0",
+        "maxText": "15.0",
+        "valueText": "0.0",
+        "defText": "0.0"
+      },
+      {
+        "id": "",
+        "kind": "knob",
+        "label": "High",
+        "tip": "High shelf at 5 kHz (dB)",
+        "bounds": [
+          38.211382113821138,
+          54.230769230769234,
+          22.764227642276424,
+          26.923076923076923
+        ],
+        "min": -15.0,
+        "max": 15.0,
+        "interval": 0.100000001490116,
+        "minText": "-15.0",
+        "maxText": "15.0",
+        "valueText": "0.0",
+        "defText": "0.0"
+      },
+      {
+        "id": "",
+        "kind": "knob",
+        "label": "Level",
+        "tip": "Output level (dB)",
+        "bounds": [
+          69.105691056910572,
+          54.230769230769234,
+          22.764227642276424,
+          26.923076923076923
+        ],
+        "min": -24.0,
+        "max": 12.0,
+        "interval": 0.100000001490116,
+        "minText": "-24.0",
+        "maxText": "12.0",
+        "valueText": "0.0",
+        "defText": "0.0"
+      }
+    ],
+    "anchors": [
+      {
+        "anchor": "BSPDL-4",
+        "bounds": [
+          0.0,
+          0.0,
+          100.0,
+          100.0
+        ]
+      },
+      {
+        "anchor": "BSPDL-11",
+        "bounds": [
+          90.243902439024396,
+          2.307692307692307,
+          7.317073170731708,
+          7.692307692307693
+        ]
+      },
+      {
+        "anchor": "BSPDL-12",
+        "bounds": [
+          60.975609756097562,
+          2.307692307692307,
+          8.130081300813009,
+          7.692307692307693
+        ]
+      }
+    ]
+  },
+  "Pedal Octave": {
+    "controls": [
+      {
+        "id": "",
+        "kind": "knob",
+        "label": "Direct",
+        "tip": "Dry signal level (0 = effect only)",
+        "bounds": [
+          7.317073170731708,
+          17.307692307692307,
+          22.764227642276424,
+          26.923076923076923
+        ],
+        "min": 0.0,
+        "max": 1.0,
+        "interval": 0.001000000047497,
+        "minText": "0.000",
+        "maxText": "1.000",
+        "valueText": "1.000",
+        "defText": "1.000"
+      },
+      {
+        "id": "",
+        "kind": "knob",
+        "label": "+1",
+        "tip": "+1 octave shift level",
+        "bounds": [
+          38.211382113821138,
+          17.307692307692307,
+          22.764227642276424,
+          26.923076923076923
+        ],
+        "min": 0.0,
+        "max": 1.0,
+        "interval": 0.001000000047497,
+        "minText": "0.000",
+        "maxText": "1.000",
+        "valueText": "0.000",
+        "defText": "0.000"
+      },
+      {
+        "id": "",
+        "kind": "knob",
+        "label": "-1",
+        "tip": "-1 octave shift level",
+        "bounds": [
+          69.105691056910572,
+          17.307692307692307,
+          22.764227642276424,
+          26.923076923076923
+        ],
+        "min": 0.0,
+        "max": 1.0,
+        "interval": 0.001000000047497,
+        "minText": "0.000",
+        "maxText": "1.000",
+        "valueText": "0.500",
+        "defText": "0.500"
+      },
+      {
+        "id": "",
+        "kind": "knob",
+        "label": "-2",
+        "tip": "-2 octave shift level",
+        "bounds": [
+          7.317073170731708,
+          54.230769230769234,
+          22.764227642276424,
+          26.923076923076923
+        ],
+        "min": 0.0,
+        "max": 1.0,
+        "interval": 0.001000000047497,
+        "minText": "0.000",
+        "maxText": "1.000",
+        "valueText": "0.000",
+        "defText": "0.000"
+      },
+      {
+        "id": "",
+        "kind": "knob",
+        "label": "Range",
+        "tip": "Input LP cutoff (300 Hz - 3 kHz). Lower = better tracking on bass; higher = more harmonic content.",
+        "bounds": [
+          38.211382113821138,
+          54.230769230769234,
+          22.764227642276424,
+          26.923076923076923
+        ],
+        "min": 0.0,
+        "max": 1.0,
+        "interval": 0.001000000047497,
+        "minText": "0.000",
+        "maxText": "1.000",
+        "valueText": "0.600",
+        "defText": "0.600"
+      }
+    ],
+    "anchors": [
+      {
+        "anchor": "BSPDL-4",
+        "bounds": [
+          0.0,
+          0.0,
+          100.0,
+          100.0
+        ]
+      },
+      {
+        "anchor": "BSPDL-11",
+        "bounds": [
+          90.243902439024396,
+          2.307692307692307,
+          7.317073170731708,
+          7.692307692307693
+        ]
+      },
+      {
+        "anchor": "BSPDL-12",
+        "bounds": [
+          60.975609756097562,
+          2.307692307692307,
+          8.130081300813009,
+          7.692307692307693
+        ]
+      }
+    ]
+  },
+  "Pedal Acoustic Simulator": {
+    "controls": [
+      {
+        "id": "",
+        "kind": "knob",
+        "label": "Top",
+        "tip": "Transient pick attack (HF shelf >4 kHz, modulated by envelope follower). +15 emphasizes pick clack; -15 ducks attack.",
+        "bounds": [
+          7.317073170731708,
+          17.307692307692307,
+          22.764227642276424,
+          26.923076923076923
+        ],
+        "min": -15.0,
+        "max": 15.0,
+        "interval": 0.100000001490116,
+        "minText": "-15.0",
+        "maxText": "15.0",
+        "valueText": "0.0",
+        "defText": "0.0"
+      },
+      {
+        "id": "",
+        "kind": "knob",
+        "label": "Body",
+        "tip": "Acoustic body depth - bottom = off, center = moderate, top = full voice (bundled body capture + the selected mode's voicing). In User mode: your IR's wet/dry mix.",
+        "bounds": [
+          38.211382113821138,
+          17.307692307692307,
+          22.764227642276424,
+          26.923076923076923
+        ],
+        "min": -15.0,
+        "max": 15.0,
+        "interval": 0.100000001490116,
+        "minText": "-15.0",
+        "maxText": "15.0",
+        "valueText": "0.0",
+        "defText": "0.0"
+      },
+      {
+        "id": "",
+        "kind": "knob",
+        "label": "Reverb",
+        "tip": "Schroeder reverb wet/dry mix",
+        "bounds": [
+          69.105691056910572,
+          17.307692307692307,
+          22.764227642276424,
+          26.923076923076923
+        ],
+        "min": 0.0,
+        "max": 1.0,
+        "interval": 0.001000000047497,
+        "minText": "0.000",
+        "maxText": "1.000",
+        "valueText": "0.200",
+        "defText": "0.200"
+      },
+      {
+        "id": "",
+        "kind": "knob",
+        "label": "Level",
+        "tip": "Output level (dB)",
+        "bounds": [
+          7.317073170731708,
+          54.230769230769234,
+          22.764227642276424,
+          26.923076923076923
+        ],
+        "min": -24.0,
+        "max": 12.0,
+        "interval": 0.100000001490116,
+        "minText": "-24.0",
+        "maxText": "12.0",
+        "valueText": "0.0",
+        "defText": "0.0"
+      }
+    ],
+    "anchors": [
+      {
+        "anchor": "BSPDL-4",
+        "bounds": [
+          0.0,
+          0.0,
+          100.0,
+          100.0
+        ]
+      },
+      {
+        "anchor": "BSPDL-11",
+        "bounds": [
+          90.243902439024396,
+          2.307692307692307,
+          7.317073170731708,
+          7.692307692307693
+        ]
+      },
+      {
+        "anchor": "BSPDL-12",
+        "bounds": [
+          60.975609756097562,
+          2.307692307692307,
+          8.130081300813009,
+          7.692307692307693
+        ]
+      }
+    ]
+  },
+  "Pedal Polyphonic Synth": {
+    "controls": [
+      {
+        "id": "",
+        "kind": "knob",
+        "label": "Var",
+        "tip": "Variation (sub-character within the Type)",
+        "bounds": [
+          8.943089430894309,
+          12.692307692307692,
+          19.512195121951219,
+          23.846153846153847
+        ],
+        "min": 1.0,
+        "max": 11.0,
+        "interval": 1.0,
+        "minText": "1",
+        "maxText": "11",
+        "valueText": "1",
+        "defText": "1"
+      },
+      {
+        "id": "",
+        "kind": "knob",
+        "label": "Tone",
+        "tip": "Synth voice tone (filter cutoff)",
+        "bounds": [
+          39.837398373983739,
+          12.692307692307692,
+          19.512195121951219,
+          23.846153846153847
+        ],
+        "min": 0.0,
+        "max": 1.0,
+        "interval": 0.001000000047497,
+        "minText": "0.000",
+        "maxText": "1.000",
+        "valueText": "0.600",
+        "defText": "0.600"
+      },
+      {
+        "id": "",
+        "kind": "knob",
+        "label": "Rate",
+        "tip": "LFO rate (modulates filter on Lead/Pad, amplitude on Seq)",
+        "bounds": [
+          70.731707317073173,
+          12.692307692307692,
+          19.512195121951219,
+          23.846153846153847
+        ],
+        "min": 0.0,
+        "max": 1.0,
+        "interval": 0.001000000047497,
+        "minText": "0.000",
+        "maxText": "1.000",
+        "valueText": "0.300",
+        "defText": "0.300"
+      },
+      {
+        "id": "",
+        "kind": "knob",
+        "label": "Depth",
+        "tip": "LFO depth",
+        "bounds": [
+          8.943089430894309,
+          37.307692307692307,
+          19.512195121951219,
+          23.846153846153847
+        ],
+        "min": 0.0,
+        "max": 1.0,
+        "interval": 0.001000000047497,
+        "minText": "0.000",
+        "maxText": "1.000",
+        "valueText": "0.400",
+        "defText": "0.400"
+      },
+      {
+        "id": "",
+        "kind": "knob",
+        "label": "Effect",
+        "tip": "Synth voice level",
+        "bounds": [
+          39.837398373983739,
+          37.307692307692307,
+          19.512195121951219,
+          23.846153846153847
+        ],
+        "min": 0.0,
+        "max": 1.0,
+        "interval": 0.001000000047497,
+        "minText": "0.000",
+        "maxText": "1.000",
+        "valueText": "0.500",
+        "defText": "0.500"
+      },
+      {
+        "id": "",
+        "kind": "knob",
+        "label": "Direct",
+        "tip": "Dry signal level",
+        "bounds": [
+          70.731707317073173,
+          37.307692307692307,
+          19.512195121951219,
+          23.846153846153847
+        ],
+        "min": 0.0,
+        "max": 1.0,
+        "interval": 0.001000000047497,
+        "minText": "0.000",
+        "maxText": "1.000",
+        "valueText": "1.000",
+        "defText": "1.000"
+      }
+    ],
+    "anchors": [
+      {
+        "anchor": "BSPDL-4",
+        "bounds": [
+          0.0,
+          0.0,
+          100.0,
+          100.0
+        ]
+      },
+      {
+        "anchor": "BSPDL-11",
+        "bounds": [
+          90.243902439024396,
+          2.307692307692307,
+          7.317073170731708,
+          7.692307692307693
+        ]
+      },
+      {
+        "anchor": "BSPDL-12",
+        "bounds": [
+          60.975609756097562,
+          2.307692307692307,
+          8.130081300813009,
+          7.692307692307693
+        ]
+      }
+    ]
+  },
+  "Pedal Wah": {
+    "controls": [
+      {
+        "id": "",
+        "kind": "knob",
+        "label": "Pedal",
+        "tip": "Pedal Position (0 = heel-down / dark, 1 = toe-down / bright). MIDI Learn binds an expression pedal CC; right-click the knob to assign.",
+        "bounds": [
+          15.040650406504065,
+          35.769230769230766,
+          22.764227642276424,
+          26.923076923076923
+        ],
+        "min": 0.0,
+        "max": 1.0,
+        "interval": 0.001000000047497,
+        "minText": "0.000",
+        "maxText": "1.000",
+        "valueText": "0.500",
+        "defText": "0.500"
+      }
+    ],
+    "anchors": [
+      {
+        "anchor": "BSPDL-4",
+        "bounds": [
+          0.0,
+          0.0,
+          100.0,
+          100.0
+        ]
+      },
+      {
+        "anchor": "BSPDL-11",
+        "bounds": [
+          90.243902439024396,
+          2.307692307692307,
+          7.317073170731708,
+          7.692307692307693
+        ]
+      },
+      {
+        "anchor": "BSPDL-12",
+        "bounds": [
+          60.975609756097562,
+          2.307692307692307,
+          8.130081300813009,
+          7.692307692307693
+        ]
+      }
+    ]
+  },
+  "Pedal Acoustic Preamp": {
+    "controls": [
+      {
+        "id": "",
+        "kind": "knob",
+        "label": "Resonance",
+        "tip": "Acoustic resonance amount - adaptive: analyzes your playing and breathes the body resonance with level and pick attacks; this knob is the ceiling of that depth.  In User body mode: IR wet/dry mix.",
+        "bounds": [
+          7.317073170731708,
+          17.307692307692307,
+          22.764227642276424,
+          26.923076923076923
+        ],
+        "min": 0.0,
+        "max": 1.0,
+        "interval": 0.001000000047497,
+        "minText": "0.000",
+        "maxText": "1.000",
+        "valueText": "0.500",
+        "defText": "0.500"
+      },
+      {
+        "id": "",
+        "kind": "knob",
+        "label": "Ambience",
+        "tip": "Schroeder reverberator wet/dry mix",
+        "bounds": [
+          38.211382113821138,
+          17.307692307692307,
+          22.764227642276424,
+          26.923076923076923
+        ],
+        "min": 0.0,
+        "max": 1.0,
+        "interval": 0.001000000047497,
+        "minText": "0.000",
+        "maxText": "1.000",
+        "valueText": "0.200",
+        "defText": "0.200"
+      },
+      {
+        "id": "",
+        "kind": "knob",
+        "label": "Notch",
+        "tip": "Feedback-rejection notch.  Bottom = OFF (the normal position); raise to sweep 50 Hz - 1 kHz, Q ~10.  Turn until the feedback rumble disappears.",
+        "bounds": [
+          69.105691056910572,
+          17.307692307692307,
+          22.764227642276424,
+          26.923076923076923
+        ],
+        "min": 45.0,
+        "max": 1000.0,
+        "interval": 1.0,
+        "minText": "OFF",
+        "maxText": "1000 Hz",
+        "valueText": "OFF",
+        "defText": "OFF"
+      },
+      {
+        "id": "",
+        "kind": "knob",
+        "label": "Level",
+        "tip": "Output level (dB)",
+        "bounds": [
+          7.317073170731708,
+          54.230769230769234,
+          22.764227642276424,
+          26.923076923076923
+        ],
+        "min": -24.0,
+        "max": 12.0,
+        "interval": 0.100000001490116,
+        "minText": "-24.0",
+        "maxText": "12.0",
+        "valueText": "0.0",
+        "defText": "0.0"
+      }
+    ],
+    "anchors": [
+      {
+        "anchor": "BSPDL-4",
+        "bounds": [
+          0.0,
+          0.0,
+          100.0,
+          100.0
+        ]
+      },
+      {
+        "anchor": "BSPDL-11",
+        "bounds": [
+          90.243902439024396,
+          2.307692307692307,
+          7.317073170731708,
+          7.692307692307693
+        ]
+      },
+      {
+        "anchor": "BSPDL-12",
+        "bounds": [
+          60.975609756097562,
+          2.307692307692307,
+          8.130081300813009,
+          7.692307692307693
+        ]
+      }
+    ]
+  },
+  "Pedal NAM Pedal": {
+    "controls": [
+      {
+        "id": "",
+        "kind": "knob",
+        "label": "Input/Drive",
+        "tip": "Pre-model gain (-24 to +24 dB).  Pushes a hotter signal into the NAM model to fake more drive.",
+        "bounds": [
+          -5.691056910569106,
+          45.0,
+          17.886178861788618,
+          16.923076923076923
+        ],
+        "min": -24.0,
+        "max": 24.0,
+        "interval": 0.100000001490116,
+        "minText": "-24.0",
+        "maxText": "24.0",
+        "valueText": "0.0",
+        "defText": "0.0"
+      },
+      {
+        "id": "",
+        "kind": "knob",
+        "label": "Low",
+        "tip": "Post-model low shelf @ 100 Hz (+/-15 dB)",
+        "bounds": [
+          -5.691056910569106,
+          45.0,
+          17.886178861788618,
+          16.923076923076923
+        ],
+        "min": -15.0,
+        "max": 15.0,
+        "interval": 0.100000001490116,
+        "minText": "-15.0",
+        "maxText": "15.0",
+        "valueText": "0.0",
+        "defText": "0.0"
+      },
+      {
+        "id": "",
+        "kind": "knob",
+        "label": "Mid",
+        "tip": "Post-model mid peak @ 1 kHz, Q=0.7 (+/-15 dB)",
+        "bounds": [
+          -2.845528455284553,
+          45.0,
+          17.886178861788618,
+          16.923076923076923
+        ],
+        "min": -15.0,
+        "max": 15.0,
+        "interval": 0.100000001490116,
+        "minText": "-15.0",
+        "maxText": "15.0",
+        "valueText": "0.0",
+        "defText": "0.0"
+      },
+      {
+        "id": "",
+        "kind": "knob",
+        "label": "High",
+        "tip": "Post-model high shelf @ 5 kHz (+/-15 dB)",
+        "bounds": [
+          12.195121951219512,
+          45.0,
+          17.886178861788618,
+          16.923076923076923
+        ],
+        "min": -15.0,
+        "max": 15.0,
+        "interval": 0.100000001490116,
+        "minText": "-15.0",
+        "maxText": "15.0",
+        "valueText": "0.0",
+        "defText": "0.0"
+      },
+      {
+        "id": "",
+        "kind": "knob",
+        "label": "Blend",
+        "tip": "Dry/wet mix.  100% = full NAM model.  Lower mixes the dry input back in.",
+        "bounds": [
+          36.585365853658537,
+          45.0,
+          17.886178861788618,
+          16.923076923076923
+        ],
+        "min": 0.0,
+        "max": 1.0,
+        "interval": 0.001000000047497,
+        "minText": "0.000",
+        "maxText": "1.000",
+        "valueText": "1.000",
+        "defText": "1.000"
+      },
+      {
+        "id": "",
+        "kind": "knob",
+        "label": "Output",
+        "tip": "Output trim (-24 to +12 dB).  Lets you tame loud captures.",
+        "bounds": [
+          60.975609756097562,
+          45.0,
+          17.886178861788618,
+          16.923076923076923
+        ],
+        "min": -24.0,
+        "max": 12.0,
+        "interval": 0.100000001490116,
+        "minText": "-24.0",
+        "maxText": "12.0",
+        "valueText": "0.0",
+        "defText": "0.0"
+      }
+    ],
+    "anchors": [
+      {
+        "anchor": "BSPDL-4",
+        "bounds": [
+          0.0,
+          0.0,
+          100.0,
+          100.0
+        ]
+      },
+      {
+        "anchor": "BSPDL-11",
+        "bounds": [
+          90.243902439024396,
+          2.307692307692307,
+          7.317073170731708,
+          7.692307692307693
+        ]
+      },
+      {
+        "anchor": "BSPDL-12",
+        "bounds": [
+          60.975609756097562,
+          2.307692307692307,
+          8.130081300813009,
+          7.692307692307693
+        ]
+      }
+    ]
+  },
+  "Pedal Graphic EQ": {
+    "anchors": [
+      {
+        "anchor": "BSPDL-6",
+        "bounds": [
+          2.439024390243902,
+          1.923076923076923,
+          85.365853658536579,
+          8.461538461538462
+        ]
+      },
+      {
+        "anchor": "BSPDL-10",
+        "bounds": [
+          1.626016260162602,
+          10.76923076923077,
+          96.747967479674799,
+          76.92307692307692
         ]
       }
     ]

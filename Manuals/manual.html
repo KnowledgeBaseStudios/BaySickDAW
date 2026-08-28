@@ -138,7 +138,7 @@ a.dbtn.weeds:hover { background: var(--accent-2); color: #00201f; }
       <button id="lv-depth">In Depth</button>
       <button id="lv-weeds">In The Weeds</button>
       <span class="lhint" id="lhint">Pictures and pointers only.</span>
-      <span class="lhint" style="margin-left:auto">built 2026-08-28 15:40</span>
+      <span class="lhint" style="margin-left:auto">built 2026-08-28 15:48</span>
     </div>
   </div>
 </header>
@@ -8354,7 +8354,174 @@ the pedal itself.</p>
 <tr id="row-BSPDLP-5"><td><button type="button" class="n" data-back="BSPDLP-5" title="Show it on the picture">5</button></td><td><code>Time</code> group - <code>Acoustic Preamp</code>, <code>Delay</code>, <code>Reverb</code></td></tr>
 <tr id="row-BSPDLP-6"><td><button type="button" class="n" data-back="BSPDLP-6" title="Show it on the picture">6</button></td><td><code>Clear</code> - empties the slot. Greyed while the slot is already empty</td></tr>
 </tbody></table></div>
-  <div class="l2"><p>The pedal picker - what you get when you click an empty slot or right-click
+  <div class="l2"><h4 class="ctrlhead">Every pedal, panel by panel</h4>
+<p>Each pedal below is its own tile on the board, shot from the running app. Tuner and Graphic EQ are the two locked slots.</p>
+<section class="fxpanel"><h5>Acoustic Preamp</h5>
+<figure><img src="figures/Pedal Acoustic Preamp.png" alt="Pedal Acoustic Preamp" loading="lazy"></figure>
+<h4 class="ctrlhead">Controls</h4>
+<table class="controls"><thead><tr><th>Control</th><th>What it does</th><th>Default</th><th>Range</th></tr></thead><tbody>
+<tr><td>Resonance</td><td>Adds body resonance, adapting to your playing.</td><td>0.5</td><td>0 to 1</td></tr>
+<tr><td>Ambience</td><td>Adds modeled room around the sound.</td><td>0.2</td><td>0 to 1</td></tr>
+<tr><td>Notch</td><td>Notches out the frequency that feeds back.</td><td>OFF</td><td>OFF to 1000 Hz</td></tr>
+<tr><td>Level</td><td>Sets the pedal&#x27;s output level.</td><td>0</td><td>-24 to 12</td></tr>
+</tbody></table>
+
+</section>
+<section class="fxpanel"><h5>Acoustic Simulator</h5>
+<figure><img src="figures/Pedal Acoustic Simulator.png" alt="Pedal Acoustic Simulator" loading="lazy"></figure>
+<h4 class="ctrlhead">Controls</h4>
+<table class="controls"><thead><tr><th>Control</th><th>What it does</th><th>Default</th><th>Range</th></tr></thead><tbody>
+<tr><td>Top</td><td>Sharpens the pick attack.</td><td>0</td><td>-15 to 15</td></tr>
+<tr><td>Body</td><td>Sets how deep the modeled body sounds.</td><td>0</td><td>-15 to 15</td></tr>
+<tr><td>Reverb</td><td>Adds modeled room around the sound.</td><td>0.2</td><td>0 to 1</td></tr>
+<tr><td>Level</td><td>Sets the pedal&#x27;s output level.</td><td>0</td><td>-24 to 12</td></tr>
+</tbody></table>
+
+</section>
+<section class="fxpanel"><h5>Bass Compressor</h5>
+<figure><img src="figures/Pedal Bass Compressor.png" alt="Pedal Bass Compressor" loading="lazy"></figure>
+<h4 class="ctrlhead">Controls</h4>
+<table class="controls"><thead><tr><th>Control</th><th>What it does</th><th>Default</th><th>Range</th></tr></thead><tbody>
+<tr><td>Thresh</td><td>Compresses signal above this level.</td><td>-24</td><td>-48 to 0</td></tr>
+<tr><td>Ratio</td><td>Sets how hard compression squeezes.</td><td>4</td><td>1 to 10</td></tr>
+<tr><td>Release</td><td>Sets how fast compression lets go.</td><td>200</td><td>50 to 500</td></tr>
+<tr><td>Level</td><td>Sets the pedal&#x27;s output level.</td><td>0</td><td>-24 to 12</td></tr>
+</tbody></table>
+
+</section>
+<section class="fxpanel"><h5>Bass Driver</h5>
+<figure><img src="figures/Pedal Bass Driver.png" alt="Pedal Bass Driver" loading="lazy"></figure>
+<h4 class="ctrlhead">Controls</h4>
+<table class="controls"><thead><tr><th>Control</th><th>What it does</th><th>Default</th><th>Range</th></tr></thead><tbody>
+<tr><td>Drive</td><td>Drives the mid and high bands into clipping.</td><td>0.5</td><td>0 to 1</td></tr>
+<tr><td>Blend</td><td>Blends the clipped signal against clean.</td><td>0.7</td><td>0 to 1</td></tr>
+<tr><td>Low</td><td>Sets the clean low band&#x27;s level.</td><td>0.7</td><td>0 to 1</td></tr>
+<tr><td>High</td><td>Sets the high band&#x27;s level.</td><td>0.7</td><td>0 to 1</td></tr>
+<tr><td>Level</td><td>Sets the pedal&#x27;s output level.</td><td>0</td><td>-24 to 12</td></tr>
+</tbody></table>
+
+</section>
+<section class="fxpanel"><h5>Bass Overdrive</h5>
+<figure><img src="figures/Pedal Bass Overdrive.png" alt="Pedal Bass Overdrive" loading="lazy"></figure>
+<h4 class="ctrlhead">Controls</h4>
+<table class="controls"><thead><tr><th>Control</th><th>What it does</th><th>Default</th><th>Range</th></tr></thead><tbody>
+<tr><td>Gain</td><td>Drives the whole signal into clipping.</td><td>0.5</td><td>0 to 1</td></tr>
+<tr><td>Balance</td><td>Blends the clipped signal against clean.</td><td>0.5</td><td>0 to 1</td></tr>
+<tr><td>Low</td><td>Cuts or boosts the low shelf.</td><td>0</td><td>-15 to 15</td></tr>
+<tr><td>High</td><td>Cuts or boosts the high shelf.</td><td>0</td><td>-15 to 15</td></tr>
+<tr><td>Level</td><td>Sets the pedal&#x27;s output level.</td><td>0</td><td>-24 to 12</td></tr>
+</tbody></table>
+
+</section>
+<section class="fxpanel"><h5>Blues Drive</h5>
+<figure><img src="figures/Pedal Blues Drive.png" alt="Pedal Blues Drive" loading="lazy"></figure>
+<h4 class="ctrlhead">Controls</h4>
+<table class="controls"><thead><tr><th>Control</th><th>What it does</th><th>Default</th><th>Range</th></tr></thead><tbody>
+<tr><td>Drive</td><td>Drives the signal from clean to overdriven.</td><td>0.5</td><td>0 to 1</td></tr>
+<tr><td>Tone</td><td>Sweeps the tone dark to bright.</td><td>0.5</td><td>0 to 1</td></tr>
+<tr><td>Level</td><td>Sets the pedal&#x27;s output level.</td><td>0</td><td>-24 to 12</td></tr>
+</tbody></table>
+
+</section>
+<section class="fxpanel"><h5>Distortion</h5>
+<figure><img src="figures/Pedal Distortion.png" alt="Pedal Distortion" loading="lazy"></figure>
+<h4 class="ctrlhead">Controls</h4>
+<table class="controls"><thead><tr><th>Control</th><th>What it does</th><th>Default</th><th>Range</th></tr></thead><tbody>
+<tr><td>Dist</td><td>Drives the clipper toward a square wave.</td><td>0.5</td><td>0 to 1</td></tr>
+<tr><td>Tone</td><td>Tilts the tone dark to bright.</td><td>0.5</td><td>0 to 1</td></tr>
+<tr><td>Level</td><td>Sets the pedal&#x27;s output level.</td><td>0</td><td>-24 to 12</td></tr>
+</tbody></table>
+
+</section>
+<section class="fxpanel"><h5>Fuzz</h5>
+<figure><img src="figures/Pedal Fuzz.png" alt="Pedal Fuzz" loading="lazy"></figure>
+<h4 class="ctrlhead">Controls</h4>
+<table class="controls"><thead><tr><th>Control</th><th>What it does</th><th>Default</th><th>Range</th></tr></thead><tbody>
+<tr><td>Fuzz</td><td>Sets how hard the fuzz clips.</td><td>0.5</td><td>0 to 1</td></tr>
+<tr><td>Boost</td><td>Pushes a hotter signal into the fuzz.</td><td>0</td><td>0 to 20</td></tr>
+<tr><td>Level</td><td>Sets the pedal&#x27;s output level.</td><td>0</td><td>-24 to 12</td></tr>
+</tbody></table>
+
+</section>
+<section class="fxpanel"><h5>Graphic EQ</h5>
+<figure><img src="figures/Pedal Graphic EQ.png" alt="Pedal Graphic EQ" loading="lazy"></figure>
+</section>
+<section class="fxpanel"><h5>High-Gain</h5>
+<figure><img src="figures/Pedal High-Gain.png" alt="Pedal High-Gain" loading="lazy"></figure>
+<h4 class="ctrlhead">Controls</h4>
+<table class="controls"><thead><tr><th>Control</th><th>What it does</th><th>Default</th><th>Range</th></tr></thead><tbody>
+<tr><td>Dist</td><td>Cascades the clipping stages for gain.</td><td>0.5</td><td>0 to 1</td></tr>
+<tr><td>Low</td><td>Cuts or boosts the low shelf.</td><td>0</td><td>-15 to 15</td></tr>
+<tr><td>Mid Hz</td><td>Moves the mid peak&#x27;s frequency.</td><td>800</td><td>200 to 5000</td></tr>
+<tr><td>Mid dB</td><td>Cuts or boosts the mid peak.</td><td>0</td><td>-15 to 15</td></tr>
+<tr><td>High</td><td>Cuts or boosts the high shelf.</td><td>0</td><td>-15 to 15</td></tr>
+<tr><td>Level</td><td>Sets the pedal&#x27;s output level.</td><td>0</td><td>-24 to 12</td></tr>
+</tbody></table>
+
+</section>
+<section class="fxpanel"><h5>NAM Pedal</h5>
+<figure><img src="figures/Pedal NAM Pedal.png" alt="Pedal NAM Pedal" loading="lazy"></figure>
+<h4 class="ctrlhead">Controls</h4>
+<table class="controls"><thead><tr><th>Control</th><th>What it does</th><th>Default</th><th>Range</th></tr></thead><tbody>
+<tr><td>Input/Drive</td><td>Sets how hard the capture is driven.</td><td>0</td><td>-24 to 24</td></tr>
+<tr><td>Low</td><td>Cuts or boosts the low shelf after the model.</td><td>0</td><td>-15 to 15</td></tr>
+<tr><td>Mid</td><td>Cuts or boosts the mids after the model.</td><td>0</td><td>-15 to 15</td></tr>
+<tr><td>High</td><td>Cuts or boosts the high shelf after the model.</td><td>0</td><td>-15 to 15</td></tr>
+<tr><td>Blend</td><td>Blends the captured amp against dry.</td><td>1</td><td>0 to 1</td></tr>
+<tr><td>Output</td><td>Trims the output of a loud capture.</td><td>0</td><td>-24 to 12</td></tr>
+</tbody></table>
+
+</section>
+<section class="fxpanel"><h5>Noise Gate</h5>
+<figure><img src="figures/Pedal Noise Gate.png" alt="Pedal Noise Gate" loading="lazy"></figure>
+<h4 class="ctrlhead">Controls</h4>
+<table class="controls"><thead><tr><th>Control</th><th>What it does</th><th>Default</th><th>Range</th></tr></thead><tbody>
+<tr><td>Threshold</td><td>Opens the gate above this level.</td><td>-40</td><td>-60 to 0</td></tr>
+<tr><td>Decay</td><td>Sets how fast the gate closes.</td><td>100</td><td>1 to 1000</td></tr>
+</tbody></table>
+
+</section>
+<section class="fxpanel"><h5>Octave</h5>
+<figure><img src="figures/Pedal Octave.png" alt="Pedal Octave" loading="lazy"></figure>
+<h4 class="ctrlhead">Controls</h4>
+<table class="controls"><thead><tr><th>Control</th><th>What it does</th><th>Default</th><th>Range</th></tr></thead><tbody>
+<tr><td>Direct</td><td>Sets the untouched signal&#x27;s level.</td><td>1</td><td>0 to 1</td></tr>
+<tr><td>+1</td><td>Sets the octave-up voice&#x27;s level.</td><td>0</td><td>0 to 1</td></tr>
+<tr><td>-1</td><td>Sets the octave-down voice&#x27;s level.</td><td>0.5</td><td>0 to 1</td></tr>
+<tr><td>-2</td><td>Sets the two-octaves-down voice&#x27;s level.</td><td>0</td><td>0 to 1</td></tr>
+<tr><td>Range</td><td>Tunes tracking for bass or guitar range.</td><td>0.6</td><td>0 to 1</td></tr>
+</tbody></table>
+
+</section>
+<section class="fxpanel"><h5>Polyphonic Synth</h5>
+<figure><img src="figures/Pedal Polyphonic Synth.png" alt="Pedal Polyphonic Synth" loading="lazy"></figure>
+<h4 class="ctrlhead">Controls</h4>
+<table class="controls"><thead><tr><th>Control</th><th>What it does</th><th>Default</th><th>Range</th></tr></thead><tbody>
+<tr><td>Var</td><td>Picks a variation within the synth type.</td><td>1</td><td>1 to 11</td></tr>
+<tr><td>Tone</td><td>Opens or closes the synth voice&#x27;s filter.</td><td>0.6</td><td>0 to 1</td></tr>
+<tr><td>Rate</td><td>Sets the modulation&#x27;s speed.</td><td>0.3</td><td>0 to 1</td></tr>
+<tr><td>Depth</td><td>Sets how deep the modulation swings.</td><td>0.4</td><td>0 to 1</td></tr>
+<tr><td>Effect</td><td>Sets the synth voice&#x27;s level.</td><td>0.5</td><td>0 to 1</td></tr>
+<tr><td>Direct</td><td>Sets the untouched signal&#x27;s level.</td><td>1</td><td>0 to 1</td></tr>
+</tbody></table>
+
+</section>
+<section class="fxpanel"><h5>Tuner</h5>
+<figure><img src="figures/Pedal Tuner.png" alt="Pedal Tuner" loading="lazy"></figure>
+<h4 class="ctrlhead">Controls</h4>
+<table class="controls"><thead><tr><th>Control</th><th>What it does</th><th>Default</th><th>Range</th></tr></thead><tbody>
+<tr><td>Trim</td><td>Fine-trims the tuner&#x27;s reference pitch.</td><td>440</td><td>436 to 445</td></tr>
+</tbody></table>
+
+</section>
+<section class="fxpanel"><h5>Wah</h5>
+<figure><img src="figures/Pedal Wah.png" alt="Pedal Wah" loading="lazy"></figure>
+<h4 class="ctrlhead">Controls</h4>
+<table class="controls"><thead><tr><th>Control</th><th>What it does</th><th>Default</th><th>Range</th></tr></thead><tbody>
+<tr><td>Pedal</td><td>Sweeps the wah from heel to toe.</td><td>0.5</td><td>0 to 1</td></tr>
+</tbody></table>
+
+</section><p>The pedal picker - what you get when you click an empty slot or right-click
 a pedal to swap it. Grouped by what the pedal does to the signal.</p>
 
 
@@ -20009,7 +20176,7 @@ are added it shows the header with a greyed
 <tr><td>Stereo</td><td>Separates the reverb&#x27;s left and right.</td><td>100</td><td>0 to 200</td></tr>
 <tr><td>HiDamp</td><td>Darkens the tail above this frequency.</td><td>8000</td><td>500 to 20000</td></tr>
 <tr><td>ER</td><td>Sets the early reflections&#x27; level.</td><td>-6</td><td>-60 to 12</td></tr>
-<tr><td>Master 46481D0E0C784307Bb1138B3Ba2C8De5 Freeze</td><td>Holds the current tail forever.</td><td></td><td>on / off</td></tr>
+<tr><td>Master 7B6Bd296154C4D1Ea2B76733D8Cf0617 Freeze</td><td>Holds the current tail forever.</td><td></td><td>on / off</td></tr>
 <tr><td>Duck</td><td>Ducks the wet under the trigger signal.</td><td>0</td><td>0 to 100</td></tr>
 <tr><td>DkThr</td><td>Starts ducking above this trigger level.</td><td>-24</td><td>-60 to 0</td></tr>
 <tr><td>DkAtt</td><td>Sets how fast the wet ducks.</td><td>10</td><td>1 to 200</td></tr>
@@ -26592,6 +26759,17 @@ const M2CROPS = {"TRAN:0":["Transport Bar.png",[0,0,19.91,100]],"TRAN:1":["Trans
     expandTo(el);
   }
   window.__revealLevel = ensureVisible;
+  // A jump can change the level and open collapsed blocks, and offscreen
+  // sections are content-visibility:auto - so at click time the target's
+  // height is still an ESTIMATE and a single scroll lands short (the old
+  // "click it twice" bug).  Scroll, let layout settle, scroll again.
+  function scrollToStable(el, block) {
+    const go = function () { el.scrollIntoView({ block: block || 'start' }); };
+    go();
+    requestAnimationFrame(function () {
+      requestAnimationFrame(function () { go(); setTimeout(go, 60); });
+    });
+  }
 
   document.addEventListener('click', function (e) {
     const a = e.target.closest('a[href^="#"]');
@@ -26601,14 +26779,14 @@ const M2CROPS = {"TRAN:0":["Transport Bar.png",[0,0,19.91,100]],"TRAN:1":["Trans
     e.preventDefault();
     if (a.dataset.level && RANK[a.dataset.level] > RANK[levelOf()]) setLevel(a.dataset.level);
     ensureVisible(t);
-    t.scrollIntoView({ block: a.dataset.level ? 'center' : 'start' });
+    scrollToStable(t, a.dataset.level ? 'center' : 'start');
     t.classList.add('flash');
     setTimeout(function () { t.classList.remove('flash'); }, 1400);
     history.replaceState(null, '', a.getAttribute('href'));
   });
   if (location.hash) {
     const t = document.getElementById(location.hash.slice(1));
-    if (t) { ensureVisible(t); setTimeout(function () { t.scrollIntoView(); }, 0); }
+    if (t) { ensureVisible(t); scrollToStable(t, 'start'); }
   }
 
   // sidebar fold toggles
@@ -26637,7 +26815,7 @@ const M2CROPS = {"TRAN:0":["Transport Bar.png",[0,0,19.91,100]],"TRAN:1":["Trans
           const row = document.getElementById('row-' + code + '-' + n);
           if (row) {
             expandTo(row);
-            row.scrollIntoView({ block: 'center' });
+            scrollToStable(row, 'center');
             row.classList.add('flash');
             setTimeout(function () { row.classList.remove('flash'); }, 1200);
           }
@@ -26667,7 +26845,7 @@ const M2CROPS = {"TRAN:0":["Transport Bar.png",[0,0,19.91,100]],"TRAN:1":["Trans
       shot = m.parentElement;
     }
     expandTo(shot);
-    shot.scrollIntoView({ block: 'center' });
+    scrollToStable(shot, 'center');
     if (m) { m.classList.add('pulse'); setTimeout(function () { m.classList.remove('pulse'); }, 1800); }
   });
 

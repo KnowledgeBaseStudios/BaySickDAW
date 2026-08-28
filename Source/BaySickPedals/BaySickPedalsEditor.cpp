@@ -783,6 +783,12 @@ void BaySickPedalsEditor::setAutomationPrefix (const juce::String& prefix)
             t->applyAutomationContext();
 }
 
+juce::Component* BaySickPedalsEditor::getTileForShot (int slot)
+{
+    return (slot >= 0 && slot < BaySickPedalsProcessor::kNumSlots)
+               ? mTiles[(size_t) slot].get() : nullptr;
+}
+
 void BaySickPedalsEditor::showSwapMenuForShot (int slot)
 {
     if (slot >= 0 && slot < BaySickPedalsProcessor::kNumSlots
