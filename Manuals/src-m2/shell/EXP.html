@@ -1,4 +1,4 @@
-<p>The Export Audio dialog - your song out of the app and into a file.</p>
+<p>The Export Audio dialog - renders the song to a file.</p>
 
 <figure data-views="EXP">
 
@@ -12,7 +12,7 @@ at the last bar.</p>
 <span id="EXP-4"></span><b>Quality</b> (24-bit is the safe modern default)
 and <span id="EXP-5"></span><b>Sample rate</b> - renders run at the
 session's rate unless you change it; rates above 48 kHz grey for MP3 and
-drop to 48000. <span id="EXP-6"></span><b>Dither</b> applies proper noise
+drop to 48000. <span id="EXP-6"></span><b>Dither</b> applies noise
 shaping when reducing bit depth - <code>Off</code> unless you are exporting
 below the session depth.</p>
 
@@ -37,7 +37,7 @@ stems you want.</p>
 <b>the progress bar</b> tracks a running render or
 measure along the bottom.</p>
 
-<p>Worth knowing: an export is a true offline render - the
+<p>An export is a true offline render - the
 engine suspends, switches everything to offline mode, and renders faster
 than real time. It is a calculation, not a recording, which is why it is
 sample-accurate every time.</p>
