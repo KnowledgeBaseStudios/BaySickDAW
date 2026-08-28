@@ -1448,6 +1448,103 @@ int main()
                   "spectral reads zero outside the linear modes");
         }
     }
+    // ---- 19. QA-EqFlagship Task 6: the character stage (W-3, W-14)
+    std::printf ("%s", "\n  19. the character stage\n");
+    {
+        const double srr = 48000.0;
+
+        auto harmonicDb = [] (kbs::ParametricEq& eq, double freq, int harmonic,
+                              double srr2)
+        {
+            const int block = 256;
+            std::vector<float> L (block), R (block), tail;
+            double phase = 0.0;
+            for (int bl = 0; bl < 80; ++bl)
+            {
+                for (int i = 0; i < block; ++i)
+                {
+                    phase += 2.0 * kbs::kPi * freq / srr2;
+                    L[(size_t) i] = R[(size_t) i] = (float) (0.3 * std::sin (phase));
+                }
+                eq.process (L.data(), R.data(), block);
+                if (bl >= 40) tail.insert (tail.end(), L.begin(), L.end());
+            }
+            const double period = srr2 / freq;
+            const size_t whole = (size_t) (std::floor ((double) tail.size() / period) * period);
+            tail.resize (std::max<size_t> (whole, (size_t) period));
+            return 20.0 * std::log10 (
+                std::max (1.0e-9, levelAt (tail, freq * harmonic, srr2, 0)) / 0.3);
+        };
+
+        // Off = bit-exact pass-through, whatever the amount says.
+        {
+            kbs::ParametricEq eq;
+            eq.prepare (srr, 256);
+            eq.setCharacter (kbs::EqCharMode::off, 1.0f);
+            std::vector<float> L (256), R (256), refL (256);
+            for (int i = 0; i < 256; ++i)
+                refL[(size_t) i] = L[(size_t) i] = R[(size_t) i]
+                    = (float) std::sin (0.1 * i) * 0.5f;
+            eq.process (L.data(), R.data(), 256);
+            double diff = 0.0;
+            for (int i = 0; i < 256; ++i)
+                diff += std::abs ((double) L[(size_t) i] - refL[(size_t) i]);
+            check (diff == 0.0, "color off is bit-exact", diff, 0.0);
+        }
+
+        // Color A: real harmonics arrive, the level barely moves.
+        {
+            kbs::ParametricEq eq;
+            eq.prepare (srr, 256);
+            // Half amount, the working setting: full drive on a hot sine
+            // compresses the fundamental - that IS saturation - so the
+            // level pin lives where people actually use it.
+            eq.setCharacter (kbs::EqCharMode::colorA, 0.5f);
+            const double fund = harmonicDb (eq, 1000.0, 1, srr);
+            const double h3 = harmonicDb (eq, 1000.0, 3, srr);
+            near (fund, 0.0, 1.5, "color A holds the level");
+            check (h3 > -60.0, "and adds a real third harmonic", h3, -60.0);
+        }
+
+        // Difference mode with a FLAT EQ nulls exactly: nothing changed,
+        // nothing to color.
+        {
+            kbs::ParametricEq eq;
+            eq.prepare (srr, 256);
+            eq.setCharacter (kbs::EqCharMode::difference, 1.0f);
+            std::vector<float> L (256), R (256), refL (256);
+            for (int i = 0; i < 256; ++i)
+                refL[(size_t) i] = L[(size_t) i] = R[(size_t) i]
+                    = (float) std::sin (0.17 * i) * 0.4f;
+            eq.process (L.data(), R.data(), 256);
+            double diff = 0.0;
+            for (int i = 0; i < 256; ++i)
+                diff += std::abs ((double) L[(size_t) i] - refL[(size_t) i]);
+            check (diff < 1.0e-6, "difference mode nulls on a flat EQ", diff, 0.0);
+        }
+
+        // Per-band sat: zero amount is untouched; a driven slice adds
+        // harmonics near the band and leaves far-away content alone.
+        {
+            kbs::ParametricEq eq;
+            eq.prepare (srr, 256);
+            kbs::EqBandParams b;
+            b.on = true; b.type = kbs::EqType::bell;
+            b.freqHz = 1000.0f; b.gainDb = 0.0f; b.q = 1.0f;
+            b.satAmt = 1.0f;
+            eq.setBand (0, b);
+            const double h3 = harmonicDb (eq, 1000.0, 3, srr);
+            check (h3 > -60.0, "a saturated band's slice adds harmonics",
+                   h3, -60.0);
+
+            kbs::ParametricEq clean;
+            clean.prepare (srr, 256);
+            b.satAmt = 0.0f;
+            clean.setBand (0, b);
+            const double h3c = harmonicDb (clean, 1000.0, 3, srr);
+            check (h3c < -80.0, "zero sat is clean", h3c, -80.0);
+        }
+    }
     std::printf (failures == 0 ? "\n  all checks passed\n\n" : "\n  %d FAILURE(S)\n\n", failures);
     return failures == 0 ? 0 : 1;
 }

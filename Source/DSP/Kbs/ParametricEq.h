@@ -37,7 +37,8 @@
 // which the wrapper treats as a configuration action.
 #pragma once
 
-#include "Devices.h"        // Biquad + RBJ designs, kDetectorFloor
+#include "Devices.h"
+#include "EqCharacter.h"        // Biquad + RBJ designs, kDetectorFloor
 #include "SVF.h"            // the TPT state-variable filter
 #include "Oversampler.h"
 #include "EqLinearPhase.h"
@@ -166,6 +167,11 @@ struct EqBandParams
     // only transients (fast-minus-slow envelope), so dynamics can hit the
     // attack of a hit and ignore its ring.
     float onsetMix = 0.0f;
+
+    // W-14: per-band saturation - the character stage scoped to this
+    // band's region: the band-passed slice at freq/Q is softened and folded
+    // back in.  0 = untouched.
+    float satAmt = 0.0f;
 
     // W-1: spectral dynamics.  In a linear mode a spectral band watches the
     // individual bins inside its footprint and moves only the ones that
@@ -419,6 +425,8 @@ public:
         scL.assign ((size_t) maxBlock, 0.0f);
         scR.assign ((size_t) maxBlock, 0.0f);
         detL.assign ((size_t) maxBlock, 0.0f);
+        dryL.assign ((size_t) maxBlock, 0.0f);
+        dryR.assign ((size_t) maxBlock, 0.0f);
         detR.assign ((size_t) maxBlock, 0.0f);
         for (int s = 0; s < 4; ++s)
         {
@@ -522,6 +530,15 @@ public:
 
     void setOutputGainDb (float db) { outGainDb = std::clamp (db, -24.0f, 24.0f); }
     void setPolarityFlip (bool flip) { polarityFlip = flip; }
+
+    // W-3: the character stage.  Safe live setters - nothing reallocates.
+    void setCharacter (EqCharMode m, float amount01)
+    {
+        charMode = m;
+        charAmt = std::clamp (amount01, 0.0f, 1.0f);
+    }
+    EqCharMode getCharMode() const { return charMode; }
+    float getCharAmount() const { return charAmt; }
 
     // A band auditioned on its own: the output becomes a band-pass at the
     // band's frequency and Q, which is also exactly what its dynamic detector
@@ -697,6 +714,12 @@ public:
     {
         if (numSamples <= 0) return;
 
+        if (charMode == EqCharMode::difference)
+        {
+            std::copy (l, l + numSamples, dryL.begin());
+            std::copy (r, r + numSamples, dryR.begin());
+        }
+
         // The detectors hear the block as it arrived, whatever the bands do
         // to it afterwards - the parallel model, so a band's own reduction
         // never starves its own detector.
@@ -770,6 +793,51 @@ public:
             }
         }
 
+        // W-14: per-band saturation - each armed band's slice, softened and
+        // folded back, scaled by its amount.
+        for (auto& b : bands)
+        {
+            if (! bandActive (b) || b.p.satAmt <= 0.001f
+                || ! eqTypeHasGain (b.p.type)) continue;
+            const float amt = b.p.satAmt;
+            for (int i = 0; i < numSamples; ++i)
+            {
+                const float sl2 = (float) b.satFL.process (l[i]);
+                const float sr2 = (float) b.satFR.process (r[i]);
+                l[i] += amt * (eqchar::stage (EqCharMode::colorB, sl2, 2.5f) - sl2);
+                r[i] += amt * (eqchar::stage (EqCharMode::colorB, sr2, 2.5f) - sr2);
+            }
+        }
+
+        // W-3: the character stage - program-dependent drive (the follower
+        // backs the color off as the material gets loud), unity small-signal
+        // gain by construction, difference mode colors only what the EQ
+        // changed and nulls exactly when the EQ is flat.
+        if (charMode != EqCharMode::off && charAmt > 0.001f)
+        {
+            const float aCh = std::exp (-1.0f / (0.010f * (float) sr));
+            for (int i = 0; i < numSamples; ++i)
+            {
+                const float pk = std::max (std::abs (l[i]), std::abs (r[i]));
+                chEnv = aCh * chEnv + (1.0f - aCh) * pk;
+                const float prog = std::clamp (1.0f / (0.4f + 2.0f * chEnv), 0.4f, 2.0f);
+                const float d = 1.0f + charAmt * 2.5f * prog;
+
+                if (charMode == EqCharMode::difference)
+                {
+                    const float dlS = l[i] - dryL[(size_t) i];
+                    const float drS = r[i] - dryR[(size_t) i];
+                    l[i] = dryL[(size_t) i] + eqchar::stage (EqCharMode::colorB, dlS, d);
+                    r[i] = dryR[(size_t) i] + eqchar::stage (EqCharMode::colorB, drS, d);
+                }
+                else
+                {
+                    l[i] = eqchar::stage (charMode, l[i], d);
+                    r[i] = eqchar::stage (charMode, r[i], d);
+                }
+            }
+        }
+
         // Output stage: measured auto-gain, trim, polarity.
         float outLin = std::pow (10.0f, outGainDb / 20.0f);
         if (polarityFlip) outLin = -outLin;
@@ -830,6 +898,7 @@ private:
         float envL = 0.0f, envR = 0.0f;
         float envFastL = 0.0f, envFastR = 0.0f;   // onset detection pair
         float envSlowL = 0.0f, envSlowR = 0.0f;
+        Biquad satFL, satFR;                      // W-14 band-scoped slice
         float grDb = 0.0f;          // target from the gain computer
         float grSmooth = 0.0f;      // what the filter actually carries
         float overSec = 0.0f;       // how long the signal has been over - auto release
@@ -1068,6 +1137,15 @@ private:
         b.hasPole = false;
         b.ladCount = 0;
         b.lastBuiltGr = p.dynamic ? b.grSmooth : 0.0f;
+
+        if (p.satAmt > 0.001f)
+        {
+            const auto c = eqdesign::bandPass (std::clamp (b.cFreq, 30.0f, designSr * 0.4f),
+                                               designSr,
+                                               std::clamp (b.cQ, 0.5f, 8.0f));
+            b.satFL.setCoeffs (c);
+            b.satFR.setCoeffs (c);
+        }
     }
 
     // In linear modes a dynamic band's IIR carries only the moving part; its
@@ -1940,6 +2018,10 @@ private:
         std::vector<float> wt, base, gr;
     };
     std::array<SpectralSlot, (size_t) kSpectralSlots> spectralSlots;
+    std::vector<float> dryL, dryR;     // W-3 difference mode's dry copy
+    EqCharMode charMode = EqCharMode::off;
+    float charAmt = 0.5f;
+    float chEnv = 0.0f;
     std::vector<float> specGainLin;    // composite per-bin linear gain
     std::vector<float> specMagDb;      // Hann-corrected magnitudes, shared per frame
     bool anySpectral = false;

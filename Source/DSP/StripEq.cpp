@@ -54,6 +54,7 @@ void StripEq::pushBand (int i, const kbs::EqBandParams& p)
         && c.thresholdBDb == p.thresholdBDb && c.ratioB == p.ratioB
         && c.rangeBDb == p.rangeBDb && c.onsetMix == p.onsetMix
         && c.spectral == p.spectral && c.density == p.density
+        && c.satAmt == p.satAmt
         && c.rangeDb == p.rangeDb && c.scExternal == p.scExternal
         && c.scSource == p.scSource;
     if (same) return;
@@ -69,17 +70,20 @@ kbs::EqBandParams StripEq::getBand (int i) const
 }
 
 void StripEq::pushGlobals (bool propQ, bool autoGain, float agAmount01,
-                           float outGainDb, bool polarity)
+                           float outGainDb, bool polarity,
+                           int charMode, float charAmt)
 {
     mEq.setProportionalQ (propQ);
     mEq.setAutoGain (autoGain, agAmount01);
     mEq.setOutputGainDb (outGainDb);
     mEq.setPolarityFlip (polarity);
+    mEq.setCharacter ((kbs::EqCharMode) juce::jlimit (0, 3, charMode), charAmt);
     mAutoGain  = autoGain;
     mAgAmount  = agAmount01;
     mOutGainDb = outGainDb;
     mPolarity  = polarity;
 }
+
 
 void StripEq::setMode (kbs::EqMode m)
 {
@@ -105,7 +109,7 @@ void StripEq::resetToDefaults()
     mSpareLocked  = false;
     mEq.setMode (kbs::EqMode::zeroLatency);
     mEq.setOversampling (false);
-    pushGlobals (true, false, 1.0f, 0.0f, false);
+    pushGlobals (true, false, 1.0f, 0.0f, false, 0, 0.5f);
     mEq.setListenBand (-1);
     mEq.reset();
 }
@@ -210,6 +214,7 @@ juce::ValueTree StripEq::bandToTree (int index, const kbs::EqBandParams& p)
     t.setProperty ("onset",    p.onsetMix,          nullptr);
     t.setProperty ("spectral", p.spectral,          nullptr);
     t.setProperty ("density",  p.density,           nullptr);
+    t.setProperty ("sat",      p.satAmt,            nullptr);
     return t;
 }
 
@@ -237,6 +242,7 @@ void StripEq::bandFromTree (const juce::XmlElement& e, kbs::EqBandParams& p)
     p.onsetMix    = juce::jlimit (0.0f, 1.0f, (float) e.getDoubleAttribute ("onset", p.onsetMix));
     p.spectral    = e.getBoolAttribute   ("spectral", p.spectral);
     p.density     = juce::jlimit (0.0f, 1.0f, (float) e.getDoubleAttribute ("density", p.density));
+    p.satAmt      = juce::jlimit (0.0f, 1.0f, (float) e.getDoubleAttribute ("sat", p.satAmt));
     p.releaseMs   = (float) e.getDoubleAttribute ("rel",   p.releaseMs);
     p.autoRelease = e.getBoolAttribute   ("relAuto",  p.autoRelease);
     p.rangeDb     = (float) e.getDoubleAttribute ("range", p.rangeDb);
@@ -259,6 +265,8 @@ void StripEq::getStateInformation (juce::MemoryBlock& dest)
     state.setProperty ("viewingSpare", mViewingSpare,          nullptr);
     state.appendChild (mViewTree.createCopy(), nullptr);
     state.setProperty ("mode",         (int) mEq.getMode(),    nullptr);
+    state.setProperty ("charMode",     (int) mEq.getCharMode(), nullptr);
+    state.setProperty ("charAmt",      mEq.getCharAmount(),     nullptr);
     state.setProperty ("os",           mEq.getOversampling(),  nullptr);
     state.setProperty ("propQ",        mEq.getProportionalQ(), nullptr);
     state.setProperty ("autoGain",     mAutoGain,              nullptr);
@@ -307,11 +315,15 @@ void StripEq::setStateInformation (const void* data, int sz)
     }
 
     mViewingSpare = xml->getBoolAttribute ("viewingSpare", false);
-    mEq.setMode ((kbs::EqMode) juce::jlimit (0, 6, xml->getIntAttribute ("mode", 0)));
+    mEq.setMode ((kbs::EqMode) juce::jlimit (0, 7, xml->getIntAttribute ("mode", 0)));
+    mEq.setCharacter ((kbs::EqCharMode) juce::jlimit (0, 3, xml->getIntAttribute ("charMode", 0)),
+                      (float) xml->getDoubleAttribute ("charAmt", 0.5));
     mEq.setOversampling (xml->getBoolAttribute ("os", false));
     pushGlobals (xml->getBoolAttribute ("propQ", true),
                  xml->getBoolAttribute ("autoGain", false),
                  (float) xml->getDoubleAttribute ("agAmt", 1.0),
                  (float) xml->getDoubleAttribute ("outGain", 0.0),
-                 xml->getBoolAttribute ("polarity", false));
+                 xml->getBoolAttribute ("polarity", false),
+                 juce::jlimit (0, 3, xml->getIntAttribute ("charMode", 0)),
+                 (float) xml->getDoubleAttribute ("charAmt", 0.5));
 }

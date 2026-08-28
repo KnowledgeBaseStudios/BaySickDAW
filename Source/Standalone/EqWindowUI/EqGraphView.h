@@ -864,7 +864,7 @@ public:
             { "scsrc", "ScSource" }, { "phase", "Phase" },
             { "thrb", "ThresholdB" }, { "ratb", "RatioB" },
             { "rngb", "RangeB" }, { "onset", "Onset" },
-            { "spec", "Spectral" }, { "dens", "Density" },
+            { "spec", "Spectral" }, { "dens", "Density" }, { "sat", "Sat" },
         };
         for (const auto& e : map)
             if (std::strcmp (e.f, field) == 0) return e.s;

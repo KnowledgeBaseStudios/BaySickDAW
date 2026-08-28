@@ -60,7 +60,8 @@ public:
 
     // Audio-thread global sync (cheap, engine setters self-guard).
     void pushGlobals (bool propQ, bool autoGain, float agAmount01,
-                      float outGainDb, bool polarity);
+                      float outGainDb, bool polarity,
+                      int charMode, float charAmt);
 
     // Configuration actions - message thread, under the shield (SC-15).
     void setMode (kbs::EqMode m);

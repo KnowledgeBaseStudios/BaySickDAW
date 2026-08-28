@@ -892,6 +892,26 @@ void EffectEqWindow::showOptionsMenu (juce::Component* anchor)
     m.addItem (111, "Proportional Q", true, boolParam ("propq"));
     m.addSeparator();
 
+    // W-3: the color stage.  Names are working drafts pending Jeff's pick.
+    {
+        juce::PopupMenu ch;
+        int chMode = 0;
+        float chAmt = 0.5f;
+        if (auto* p2 = mProc.apvts.getRawParameterValue (gid ("charmode"))) chMode = (int) p2->load();
+        if (auto* p2 = mProc.apvts.getRawParameterValue (gid ("charamt")))  chAmt = p2->load();
+        ch.addItem (180, "None", true, chMode == 0);
+        ch.addItem (181, "Color A", true, chMode == 1);
+        ch.addItem (182, "Color B", true, chMode == 2);
+        ch.addItem (183, "Difference", true, chMode == 3);
+        ch.addSeparator();
+        const float amounts2[] = { 0.25f, 0.5f, 0.75f, 1.0f };
+        for (int i = 0; i < 4; ++i)
+            ch.addItem (184 + i, juce::String ((int) (amounts2[i] * 100)) + "%",
+                        chMode != 0,
+                        std::abs (chAmt - amounts2[i]) < 0.01f);
+        m.addSubMenu ("Color", ch);
+    }
+
     juce::PopupMenu ag;
     ag.addItem (120, "Auto-Gain", true, boolParam ("autogain"));
     ag.addSeparator();
@@ -1013,6 +1033,12 @@ void EffectEqWindow::showOptionsMenu (juce::Component* anchor)
             };
 
             if (r >= 100 && r < 108) setG ("mode", (float) (r - 100));
+            else if (r >= 180 && r < 184) setG ("charmode", (float) (r - 180));
+            else if (r >= 184 && r < 188)
+            {
+                const float amounts2[] = { 0.25f, 0.5f, 0.75f, 1.0f };
+                setG ("charamt", amounts2[r - 184]);
+            }
             else if (r == 110) toggleG ("os");
             else if (r == 111) toggleG ("propq");
             else if (r == 120) toggleG ("autogain");

@@ -5602,6 +5602,7 @@ void BaySickDAWProcessor::updateEQFromCache (StripEq* eq, int stripSlot, int ban
         bp.onsetMix    = juce::jlimit (0.0f, 1.0f, get (eqSlotOnset));
         bp.spectral    = get (eqSlotSpectral) > 0.5f;
         bp.density     = juce::jlimit (0.0f, 1.0f, get (eqSlotDensity));
+        bp.satAmt      = juce::jlimit (0.0f, 1.0f, get (eqSlotSat));
         eq->pushBand (b, bp);
     }
 
@@ -5618,7 +5619,9 @@ void BaySickDAWProcessor::updateEQFromCache (StripEq* eq, int stripSlot, int ban
                          gget (eqGlobAutoGain, 0.f) > 0.5f,
                          gget (eqGlobAgAmt, 1.f),
                          gget (eqGlobOutGain, 0.f),
-                         gget (eqGlobPolarity, 0.f) > 0.5f);
+                         gget (eqGlobPolarity, 0.f) > 0.5f,
+                         (int) gget (eqGlobCharMode, 0.f),
+                         gget (eqGlobCharAmt, 0.5f));
     }
 }
 
@@ -7607,13 +7610,15 @@ namespace EqBandIds
         "Freq", "Gain", "Q", "Type", "On", "Slope", "Channel", "Place",
         "Mute", "Isolate", "Dynamic", "Threshold", "Ratio", "Attack",
         "Release", "AutoRelease", "Range", "ScSource", "Phase",
-        "ThresholdB", "RatioB", "RangeB", "Onset", "Spectral", "Density"
+        "ThresholdB", "RatioB", "RangeB", "Onset", "Spectral", "Density",
+        "Sat"
     };
     // Index order must match BaySickDAWProcessor::EqBankGlobalSlot.  Mode and
     // os ride the same spelling family but never enter the sweep cache
     // (SC-15: they reallocate, so they apply on the shielded path).
     static const char* const kGlobalSuffixes[] = {
-        "propq", "autogain", "agamt", "outgain", "polarity"
+        "propq", "autogain", "agamt", "outgain", "polarity",
+        "charmode", "charamt"
     };
     static const char* const kBankSubs[] = { "eq_", "preeq_" };
 
@@ -7669,6 +7674,7 @@ namespace
         dynF (apvts, ids, bp + "Onset",       labelBase + "Onset",       0.f, 1.f, 0.f);
         dynB (apvts, ids, bp + "Spectral",    labelBase + "Spectral",    false);
         dynF (apvts, ids, bp + "Density",     labelBase + "Density",     0.f, 1.f, 0.5f);
+        dynF (apvts, ids, bp + "Sat",         labelBase + "Sat",         0.f, 1.f, 0.f);
     }
 
     void registerEqBankGlobals (juce::AudioProcessorValueTreeState& apvts, juce::StringArray& ids,
@@ -7683,6 +7689,8 @@ namespace
         dynF (apvts, ids, gid ("agamt"),    labelBase + "Auto Gain Amount", 0.f, 1.f, 1.f);
         dynF (apvts, ids, gid ("outgain"),  labelBase + "Output Gain",      -24.f, 24.f, 0.f);
         dynB (apvts, ids, gid ("polarity"), labelBase + "Polarity",         false);
+        dynI (apvts, ids, gid ("charmode"), labelBase + "Color",            0, 3, 0);
+        dynF (apvts, ids, gid ("charamt"),  labelBase + "Color Amount",     0.f, 1.f, 0.5f);
     }
 } // namespace
 

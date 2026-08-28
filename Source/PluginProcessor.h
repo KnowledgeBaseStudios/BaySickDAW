@@ -2050,7 +2050,7 @@ private:
         eqSlotDynamic, eqSlotThreshold, eqSlotRatio, eqSlotAttack,
         eqSlotRelease, eqSlotAutoRelease, eqSlotRange, eqSlotScSource,
         eqSlotPhase, eqSlotThresholdB, eqSlotRatioB, eqSlotRangeB, eqSlotOnset,
-        eqSlotSpectral, eqSlotDensity,
+        eqSlotSpectral, eqSlotDensity, eqSlotSat,
         eqNumBandParamSlots
     };
     struct EqBandParamPtrs
@@ -2063,7 +2063,7 @@ private:
     enum EqBankGlobalSlot
     {
         eqGlobPropQ = 0, eqGlobAutoGain, eqGlobAgAmt, eqGlobOutGain,
-        eqGlobPolarity, eqNumBankGlobalSlots
+        eqGlobPolarity, eqGlobCharMode, eqGlobCharAmt, eqNumBankGlobalSlots
     };
     struct EqBankGlobalPtrs
     {

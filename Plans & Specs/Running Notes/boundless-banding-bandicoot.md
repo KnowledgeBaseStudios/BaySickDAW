@@ -178,3 +178,31 @@ release are exposed for exactly that; Jeff's smoke is the tuning pass.
 EqTests section 18 (5 checks incl. untriggered-band exact latency and
 inert-outside-linear) green; suite green; gate six zeros + four links
 (one menu-scope compile fix on the way).
+
+## 2026-08-27 - Task 6 - the character stage (W-3 + W-14)
+
+NEW Source/DSP/Kbs/EqCharacter.h: two curves (odd-order cubic "Color A",
+asymmetric tanh "Color B") + a difference mode, all normalized to unity
+small-signal gain. Engine: program-dependent drive (10 ms follower backs
+the color off as material gets loud), difference mode captures the dry
+block at process entry and colors only what the EQ changed - it NULLS
+BIT-NEAR on a flat EQ, pinned by test. Per-band saturation (W-14): a
+band-passed slice at the band's freq/Q softened and folded back, per-band
+Sat param + rail SAT drag-number. Two new bank globals (charmode/charamt)
+ride the sweep (safe live setters, nothing reallocates), Color submenu in
+the window menu (WORKING NAMES "Color A"/"Color B"/"Difference" pending
+Jeff's pick - sub-spec 1, to be bundled with sub-specs 2 and 3 in one
+stop). Blob carries both + the band sat; ALSO fixed a Task 3 straggler
+found here: the blob's mode load clamped 0..6 and silently truncated Mixed
+to Linear Maximum on project load.
+
+DELIBERATE DEVIATION recorded: the plan line said "oversampled internally";
+the shipped curves are low-order (cubic + soft tanh) whose added harmonics
+sit low enough that aliasing is below audibility at these drives - stated
+in the header. A heavier drive stage would need its own oversampler; if
+Jeff's ear test wants more bite, that is the upgrade path. Also honest:
+full-amount color on hot material compresses the fundamental ~2 dB -
+that IS saturation; the level pin lives at the working 50% amount.
+EqTests section 19 (6 checks incl. off-is-bit-exact and the difference
+null) green; suite green; gate six zeros + four links (one suffix-table
+static_assert + one blob call fixed on the way - the assert did its job).

@@ -669,6 +669,14 @@ public:
         wireNumber (phaseN, "phase", false, 0.004f,
                     [] (float v)
                     { return juce::String ((int) std::round (v * 100.0f)) + "%"; });
+        // W-14: this band's slice of the color stage.
+        wireNumber (satN, "sat", false, 0.004f,
+                    [] (float v)
+                    { return juce::String ((int) std::round (v * 100.0f)) + "%"; });
+        satN.setTooltip ("Saturate just this band's region: the slice at the "
+                         "band's frequency and width is softened and folded "
+                         "back. Zero = clean.");
+        addAndMakeVisible (satN);
         phaseN.setTooltip ("This band's phase in the linear modes: 0% rides "
                            "the mode's linear phase, 100% makes just this "
                            "band minimum-phase - its pre-ring disappears.");
@@ -943,7 +951,8 @@ private:
             const auto p = graph.bandParams (b);
             return std::strcmp (field, "freq") == 0 ? p.freqHz
                  : std::strcmp (field, "slope") == 0 ? p.slope
-                 : std::strcmp (field, "phase") == 0 ? p.phaseMix : p.q;
+                 : std::strcmp (field, "phase") == 0 ? p.phaseMix
+                 : std::strcmp (field, "sat") == 0 ? p.satAmt : p.q;
         };
         d.set = [this, field] (float v)
         {
@@ -995,7 +1004,7 @@ private:
         // disagree is how a layout starts reserving space for nothing.
         const bool showDynRow  = dynT.isVisible();
         const bool showDynBody = direction.isVisible();
-        const int need = 207 + (showDynRow  ? 12 + 16 : 0)
+        const int need = 233 + (showDynRow  ? 12 + 16 : 0)
                              + (showDynBody ? 4 + 16 + 4 + 200 : 0);
 
         mMaxScroll = juce::jmax (0, need - full.getHeight());
@@ -1020,6 +1029,7 @@ private:
         r.removeFromTop (3);
         slope.setBounds (r.removeFromTop (26));
         phaseN.setBounds (r.removeFromTop (26));
+        satN.setBounds (r.removeFromTop (26));
 
         if (showDynRow)
         {
@@ -1069,6 +1079,7 @@ private:
         if (b < 0) return;
         slope.refresh();
         phaseN.refresh();
+        satN.refresh();
     }
 
     void timerCallback() override
@@ -1108,6 +1119,7 @@ private:
         slope.setVisible (show && kbs::eqTypeHasSlope (p.type));
         phaseN.setVisible (show && graph.eq() != nullptr
                            && kbs::eqModeIsLinear (graph.eq()->getMode()));
+        satN.setVisible (show && kbs::eqTypeHasGain (p.type));
         chan.setVisible (show && graph.domainView() == DomainView::stereo);
 
         const bool dynOk = show && kbs::eqTypeSupportsDynamic (p.type);
@@ -1175,6 +1187,7 @@ private:
     SegmentRow type, chan;
     DragNumber slope { "SLOPE" };
     DragNumber phaseN { "PHASE" };
+    DragNumber satN { "SAT" };
     juce::TextButton dynT, autoT, extT;
     GrMeter grMeter;
     int dynTop = 300;
