@@ -155,6 +155,92 @@ public:
         return out;
     }
 
+    // W-2: Auto Cleanup - resonance and problem detection with NO reference.
+    // The capture is matched against its own broad-stroke self (a ~1-octave
+    // smoothing of itself): whatever stands narrowly over its own
+    // neighborhood is a resonance, whatever the neighborhood already is is
+    // the tone - so only pokes get bands, and only CUTS are emitted.  The
+    // same spread rule fit() uses sends intermittent pokes to dynamic bands
+    // so the quiet ninety percent keeps its tone.
+    static Result cleanup (const float* currentDb, int maxBands,
+                           double sampleRate = 48000.0,
+                           const float* spreadDb = nullptr)
+    {
+        Result out;
+        maxBands = std::clamp (maxBands, 1, ParametricEq::kMaxBands);
+        const double pointsPerOct = (kPoints - 1) / std::log2 (kHiHz / kLoHz);
+
+        std::vector<double> cur (kPoints), broad (kPoints);
+        for (int i = 0; i < kPoints; ++i)
+            cur[(size_t) i] = broad[(size_t) i] = (double) currentDb[i];
+        smoothGaussian (broad, 1.0 * pointsPerOct * 0.5);
+
+        // Negative where the capture pokes above its neighborhood; the light
+        // 1/12-oct pass keeps single-bin noise from earning a band.
+        std::vector<double> residual (kPoints);
+        for (int i = 0; i < kPoints; ++i)
+            residual[(size_t) i] = broad[(size_t) i] - cur[(size_t) i];
+        smoothGaussian (residual, (1.0 / 12.0) * pointsPerOct * 0.5);
+        out.targetRmsDb = rms (residual);
+
+        for (int used = 0; used < maxBands; ++used)
+        {
+            int at = 0;
+            double err = 0.0;
+            for (int i = 0; i < kPoints; ++i)
+                if (residual[(size_t) i] < err) { err = residual[(size_t) i]; at = i; }
+
+            // Under 2 dB of poke is tone, not trouble.
+            if (err > -2.0) break;
+
+            const double half = err / 2.0;
+            int lo = at, hi = at;
+            while (lo > 0 && sameSideBeyond (residual[(size_t) (lo - 1)], half)) --lo;
+            while (hi < kPoints - 1 && sameSideBeyond (residual[(size_t) (hi + 1)], half)) ++hi;
+            const double widthOct = std::max (0.15, (hi - lo) / pointsPerOct);
+            const double q = std::clamp (1.6 / widthOct, 1.0, 12.0);
+
+            EqBandParams b;
+            b.on = true;
+            b.type = EqType::bell;
+            b.freqHz = (float) std::clamp (hzAt (at), 40.0, 16000.0);
+            b.gainDb = (float) std::clamp (err, -18.0, 0.0);
+            b.q = (float) q;
+
+            if (spreadDb != nullptr)
+            {
+                const double swing = spreadDb[at];
+                if (swing > kOccasionalDb)
+                {
+                    const double share = std::clamp ((swing - kOccasionalDb) / kOccasionalDb,
+                                                     0.0, 0.75);
+                    const double dynPart = std::abs (b.gainDb) * share;
+                    b.gainDb = (float) (b.gainDb + dynPart);     // toward zero
+                    b.dynamic = true;
+                    b.rangeDb = (float) -dynPart;
+                    b.thresholdDb = -12.0f;
+                    b.ratio = 4.0f;
+                    b.attackMs = 5.0f;
+                    b.releaseMs = 120.0f;
+                    out.dynamicBands++;
+                }
+            }
+
+            out.bands.push_back (b);
+
+            BiquadCoeffs c = Biquad::peaking (b.freqHz, b.q, b.gainDb, sampleRate);
+            for (int i = 0; i < kPoints; ++i)
+            {
+                double mag, ph;
+                eqdesign::biquadResponse (c, 2.0 * kPi * hzAt (i) / sampleRate, mag, ph);
+                residual[(size_t) i] -= 20.0 * std::log10 (std::max (1.0e-9, mag));
+            }
+        }
+
+        out.residualRmsDb = rms (residual);
+        return out;
+    }
+
 private:
     static bool sameSideBeyond (double v, double half)
     {

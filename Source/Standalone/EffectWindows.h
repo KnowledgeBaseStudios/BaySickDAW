@@ -162,6 +162,12 @@ public:
     std::function<void()>             onRequestClose;
     std::function<void(const juce::String&)> onTitleChanged;
 
+    // W-22: wired by the editor - the offline timeline scan against a strip.
+    // The window resolves its own strip per call and hands it over; the
+    // editor owns the Builder, the overlay and the render session.
+    std::function<bool (StripEq*, kbs::SpectrumScan&, juce::String& what,
+                        juce::String& err)> runTrackScan;
+
     void resized() override;
     void parentHierarchyChanged() override;
 

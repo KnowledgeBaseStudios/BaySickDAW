@@ -16491,6 +16491,70 @@ void StandaloneEditor::openEffectEqWindow (int channelId, bool pre)
         openEffectEqWindow (channelId, wantPre);
     };
 
+    // W-22: the Match panel's track scan - one offline pass over the timeline
+    // (selection wins when one exists), the strip's pre-EQ tap feeding the
+    // accumulator.  Message thread throughout, behind the heavy-op overlay -
+    // the same discipline as a freeze render.
+    contentRaw->runTrackScan = [this] (StripEq* strip, kbs::SpectrumScan& scan,
+                                       juce::String& what, juce::String& err) -> bool
+    {
+        if (mBuilderPage == nullptr || strip == nullptr)
+        { err = "The Builder is not available."; return false; }
+
+        BuilderPage::RenderOptions o;
+        const bool sel = mBuilderPage->hasTimeSelection();
+        if (sel)
+        {
+            o.scope = BuilderPage::RenderOptions::Scope::Section;
+            // Ruler selection is in BARS; the render works in beats.
+            o.startBeats = (double) mBuilderPage->getTimeSelStartBars() * 4.0;
+            o.endBeats   = (double) mBuilderPage->getTimeSelEndBars()   * 4.0;
+        }
+        o.tail = BuilderPage::RenderOptions::Tail::Cut;
+        o.sampleRate = mProcessor.getSampleRate() > 0 ? mProcessor.getSampleRate()
+                                                      : 48000.0;
+
+        juce::String openErr;
+        if (! mBuilderPage->enterOfflineRender (o.sampleRate, openErr))
+        {
+            err = openErr.isNotEmpty() ? openErr
+                                       : juce::String ("Could not enter offline render mode.");
+            return false;
+        }
+
+        scan.prepare (o.sampleRate);
+        strip->scanTap.store (&scan, std::memory_order_release);
+        mHeavyOpOverlay.beginOp ("Scanning for EQ Match...", false);
+        mHeavyOpOverlay.setCancellable (true);
+
+        double secs = 0.0;
+        juce::String loopErr;
+        const bool ok = mBuilderPage->runOfflineLoop (o, loopErr,
+            [this] { return mHeavyOpOverlay.wasCancelled(); },
+            [this] (double p) { mHeavyOpOverlay.setProgress (p); },
+            [&secs, &o] (const juce::AudioBuffer<float>&, int, int chunk) -> bool
+            {
+                secs += (double) chunk / o.sampleRate;
+                return true;
+            });
+
+        strip->scanTap.store (nullptr, std::memory_order_release);
+        mBuilderPage->leaveOfflineRender();
+        mHeavyOpOverlay.endOp();
+
+        if (! ok)
+        {
+            err = loopErr.isNotEmpty() ? loopErr : juce::String ("Scan cancelled.");
+            return false;
+        }
+
+        const int totalS = (int) std::round (secs);
+        what = juce::String (sel ? "selection" : "whole song") + ", "
+             + juce::String (totalS / 60) + ":"
+             + juce::String (totalS % 60).paddedLeft ('0', 2);
+        return true;
+    };
+
     // QA-EqPro: opens at the KBS editor's 720x420 (the rail's budget-fit
     // arithmetic proves the dynamics section fits at exactly that size), and
     // shrinks to 495x253 - measured by Jeff 2026-08-26 as the smallest where

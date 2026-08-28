@@ -22,6 +22,9 @@ void StripEq::process (juce::AudioBuffer<float>& buffer)
     float* l = buffer.getWritePointer (0);
     float* r = buffer.getWritePointer (1);
 
+    if (auto* tap = scanTap.load (std::memory_order_acquire))
+        tap->push (l, r, numSamples);
+
     // Identity behaves like bypass but the spectrum feeds stay alive - a
     // skipped EQ with an empty analyser reads as broken (the EQ8MsDSP
     // convention, kept).

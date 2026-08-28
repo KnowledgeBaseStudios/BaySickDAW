@@ -595,6 +595,13 @@ EffectEqWindow::EffectEqWindow (BaySickDAWProcessor& proc,
     addAndMakeVisible (*mViewRow);
 
     mMatch = std::make_unique<eqview::EqMatchPanel> (*mGraph);
+    mMatch->onScanTrack = [this] (kbs::SpectrumScan& scan, juce::String& what,
+                                  juce::String& err)
+    {
+        if (! runTrackScan)
+        { err = "Track scanning is not available here."; return false; }
+        return runTrackScan (resolveEq(), scan, what, err);
+    };
     addChildComponent (*mMatch);
 
     mTitle = windowTitle();

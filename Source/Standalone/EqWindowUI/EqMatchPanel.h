@@ -18,7 +18,10 @@
 
 #include "EqGraphView.h"
 #include "../../DSP/Kbs/EqMatch.h"
+#include "../../DSP/Kbs/SpectrumScan.h"
 #include "../../AppPaths.h"
+#include "../../SafeXml.h"
+#include "../../UserFileSave.h"
 
 namespace eqview {
 
@@ -28,7 +31,13 @@ public:
     // ONE home: the window positions the panel from these, so growing the
     // panel cannot leave its bottom row clipped off by a stale number.
     static constexpr int kPanelW = 280;
-    static constexpr int kPanelH = 246;
+    static constexpr int kPanelH = 316;
+
+    // W-22: the window wires this to the editor's offline timeline scan.
+    // Fills the accumulator, names what was scanned ("selection, 0:42" /
+    // "whole song, 3:12"); false + err when it could not run.
+    std::function<bool (kbs::SpectrumScan&, juce::String& what,
+                        juce::String& err)> onScanTrack;
 
     explicit EqMatchPanel (EqGraphView& graphRef) : graph (graphRef)
     {
@@ -40,9 +49,12 @@ public:
 
         initButton (captureCur, "Capture Current");
         initButton (loadCur,    "Load Current Export...");
+        initButton (scanBtn,    "Scan Track / Selection");
         initButton (captureRef, "Capture Reference (SC)");
         initButton (loadRef,    "Load Reference File...");
+        initButton (spectraBtn, "Stored Spectra...");
         initButton (apply,      "Match");
+        initButton (cleanupBtn, "Auto Cleanup");
         initButton (close,      "Close");
 
         captureCur.setTooltip ("Averages this strip's own sound while you play "
@@ -52,12 +64,26 @@ public:
         captureRef.setTooltip ("Averages the picked sidechain receive line - "
                                "route the track you want to sound like into "
                                "one of this strip's receive slots first.");
+        scanBtn.setTooltip ("Reads this strip's timeline audio offline - no "
+                            "playing needed. A time selection wins when one "
+                            "exists; otherwise the whole song.");
+        spectraBtn.setTooltip ("Save the captured spectra under a name, or "
+                               "load a stored one as the reference. The files "
+                               "are .kbsref - share them like presets.");
+        cleanupBtn.setTooltip ("Listens to the Current capture and cuts what "
+                               "stands out over its own neighborhood - "
+                               "resonances get static cuts, problems that "
+                               "come and go get dynamic bands. Ordinary "
+                               "editable bands, one undo step.");
 
         captureCur.onClick = [this] { toggleCapture (true); };
         captureRef.onClick = [this] { toggleCapture (false); };
         loadCur.onClick    = [this] { loadIntoSide (true); };
         loadRef.onClick    = [this] { loadIntoSide (false); };
+        scanBtn.onClick    = [this] { doScan(); };
+        spectraBtn.onClick = [this] { spectraMenu(); };
         apply.onClick      = [this] { doMatch(); };
+        cleanupBtn.onClick = [this] { doCleanup(); };
         close.onClick      = [this] { setVisible (false); };
 
         // ONE control, answering one question: how closely should the match
@@ -78,6 +104,25 @@ public:
                            "when the rest is inaudible.");
         detail.onValueChange = [this] { updateDetailLabel(); };
         addAndMakeVisible (detail);
+
+        // W-11's Match Amount: how much of the computed fit to actually
+        // apply.  100% is the fit; half strength eases a track toward the
+        // reference; past 100% overshoots on purpose.
+        amount.setRange (0.0, 2.0, 0.0);
+        amount.setValue (1.0);
+        amount.setSliderStyle (juce::Slider::LinearHorizontal);
+        amount.setTextBoxStyle (juce::Slider::NoTextBox, false, 0, 0);
+        amount.setTooltip ("How much of the fit to apply. 100% is the full "
+                           "match; 50% meets the reference halfway; past 100% "
+                           "overshoots. Applies to Match and Auto Cleanup.");
+        amount.onValueChange = [this] { updateAmountLabel(); };
+        addAndMakeVisible (amount);
+
+        amountWhat.setFont (juce::Font (juce::FontOptions (10.0f)));
+        amountWhat.setColour (juce::Label::textColourId, VC::TextDim);
+        amountWhat.setJustificationType (juce::Justification::centredRight);
+        addAndMakeVisible (amountWhat);
+        updateAmountLabel();
 
         detailWhat.setFont (juce::Font (juce::FontOptions (10.0f)));
         detailWhat.setColour (juce::Label::textColourId, VC::TextDim);
@@ -121,6 +166,7 @@ public:
         g.setColour (VC::TextDim);
         g.setFont (juce::Font (juce::FontOptions (9.0f)));
         g.drawText ("DETAIL", 10, detailLabelY, 60, 10, juce::Justification::left);
+        g.drawText ("AMOUNT", 10, amountLabelY, 60, 10, juce::Justification::left);
 
         // Capture states, as lights beside their own buttons.  The y comes
         // from resized() rather than a constant, so a layout change cannot
@@ -141,35 +187,56 @@ public:
         r.removeFromTop (22);
 
         // Grouped by what they are FOR, not by what kind of control they are:
-        // current and its file loader, then everything about the reference.
+        // everything that makes a Current, then everything about the
+        // reference, then the two dials, then the actions.
         auto row = r.removeFromTop (20);
         lightYCur = row.getY() + 6;
         captureCur.setBounds (row.withTrimmedRight (24));
         r.removeFromTop (2);
         loadCur.setBounds (r.removeFromTop (20));
-        r.removeFromTop (10);
+        r.removeFromTop (2);
+        scanBtn.setBounds (r.removeFromTop (20));
+        r.removeFromTop (8);
 
         row = r.removeFromTop (20);
         lightYRef = row.getY() + 6;
         captureRef.setBounds (row.withTrimmedRight (24));
         r.removeFromTop (2);
         loadRef.setBounds (r.removeFromTop (20));
-        r.removeFromTop (10);
+        r.removeFromTop (2);
+        spectraBtn.setBounds (r.removeFromTop (20));
+        r.removeFromTop (8);
 
         auto head = r.removeFromTop (12);
         detailLabelY = head.getY();
         detailWhat.setBounds (head);
-        detail.setBounds (r.removeFromTop (20));
-        r.removeFromTop (4);
+        detail.setBounds (r.removeFromTop (18));
+        r.removeFromTop (2);
 
-        status.setBounds (r.removeFromTop (36));
-        auto bottom = r.removeFromTop (22);
-        apply.setBounds (bottom.removeFromLeft (getWidth() / 2 - 14));
+        head = r.removeFromTop (12);
+        amountLabelY = head.getY();
+        amountWhat.setBounds (head);
+        amount.setBounds (r.removeFromTop (18));
+        r.removeFromTop (2);
+
+        status.setBounds (r.removeFromTop (34));
+        r.removeFromTop (2);
+        auto bottom = r.removeFromTop (20);
+        apply.setBounds (bottom.removeFromLeft (getWidth() / 2 - 13));
         bottom.removeFromLeft (6);
-        close.setBounds (bottom);
+        cleanupBtn.setBounds (bottom);
+        r.removeFromTop (2);
+        close.setBounds (r.removeFromTop (20));
     }
 
 private:
+    void updateAmountLabel()
+    {
+        amountWhat.setText (juce::String ((int) std::round (amount.getValue() * 100.0))
+                              + "% of the fit",
+                            juce::dontSendNotification);
+    }
+
     // What the knob means, in words: "0.7" tells nobody anything.
     void updateDetailLabel()
     {
@@ -434,7 +501,10 @@ private:
 
         // A stereo-wide fit lands in the view the user is looking at; a
         // mid/side fit carries its own domain per band and ignores the view.
+        // Match Amount (W-11's arithmetic): every gain and dynamic range is
+        // scaled - the fit is the destination, the amount is how far to go.
         const float viewChan = (float) (int) graph.domainOfCurrentView();
+        const float amt = (float) amount.getValue();
         int stereoN = 0, midN = 0, sideN = 0;
 
         for (size_t i = 0; i < fit.bands.size() && (int) i < EqGraphView::kBands; ++i)
@@ -447,13 +517,13 @@ private:
             graph.setBandValue (b, "type", 0.0f);
             graph.setBandValue (b, "chan", chan);
             graph.setBandValue (b, "freq", fb.freqHz);
-            graph.setBandValue (b, "gain", fb.gainDb);
+            graph.setBandValue (b, "gain", fb.gainDb * amt);
             graph.setBandValue (b, "q",    fb.q);
 
             if (fb.dynamic)
             {
                 graph.setBandValue (b, "dyn",   1.0f);
-                graph.setBandValue (b, "range", fb.rangeDb);
+                graph.setBandValue (b, "range", fb.rangeDb * amt);
                 graph.setBandValue (b, "thr",   fb.thresholdDb);
                 graph.setBandValue (b, "ratio", fb.ratio);
                 graph.setBandValue (b, "atk",   fb.attackMs);
@@ -478,11 +548,195 @@ private:
                         juce::dontSendNotification);
     }
 
+    // W-22: the offline timeline scan feeds the CURRENT side exactly like a
+    // live capture - mid, side, and the swing that drives dynamic bands.
+    void doScan()
+    {
+        if (! onScanTrack)
+        {
+            status.setText ("Track scanning is not available here.",
+                            juce::dontSendNotification);
+            return;
+        }
+        auto scan = std::make_unique<kbs::SpectrumScan>();
+        juce::String what, err;
+        if (! onScanTrack (*scan, what, err))
+        {
+            status.setText (err.isNotEmpty() ? err
+                                             : juce::String ("Scan did not finish."),
+                            juce::dontSendNotification);
+            return;
+        }
+        const int n = kbs::EqMatch::kPoints;
+        curGrid.assign (n, -80.0f);
+        curSideGrid.assign (n, -80.0f);
+        curSpread.assign (n, 0.0f);
+        haveCur = scan->midGrid (curGrid.data(), n,
+                                 kbs::EqMatch::kLoHz, kbs::EqMatch::kHiHz);
+        haveCurSide = scan->sideGrid (curSideGrid.data(), n,
+                                      kbs::EqMatch::kLoHz, kbs::EqMatch::kHiHz)
+                   && scan->sideMeaningful();
+        haveSpread = scan->spreadGrid (curSpread.data(), n,
+                                       kbs::EqMatch::kLoHz, kbs::EqMatch::kHiHz);
+        status.setText (haveCur ? "Scanned: " + what
+                                : juce::String ("The scan heard nothing on this strip."),
+                        juce::dontSendNotification);
+        repaint();
+    }
+
+    // W-2: Auto Cleanup - ADDS cuts over the existing curve (a cleanup is a
+    // correction, not a replacement), scaled by Amount, one undo step.
+    void doCleanup()
+    {
+        if (! haveCur)
+        {
+            status.setText ("Capture, load or scan Current first - Cleanup "
+                            "listens to it.",
+                            juce::dontSendNotification);
+            return;
+        }
+        const auto fit = kbs::EqMatch::cleanup (
+            curGrid.data(), 12, graph.sessionSampleRate(),
+            haveSpread ? curSpread.data() : nullptr);
+        if (fit.bands.empty())
+        {
+            status.setText ("Nothing stands out over its own neighborhood - "
+                            "no cleanup needed.",
+                            juce::dontSendNotification);
+            return;
+        }
+
+        const float amt = (float) amount.getValue();
+        const float viewChan = (float) (int) graph.domainOfCurrentView();
+        beginParamUndoGesture (graph.processor().apvts, graph.paramId (0, "on"));
+        int made = 0;
+        for (const auto& fb : fit.bands)
+        {
+            const int b = graph.firstFreeBand();
+            if (b < 0) break;
+            graph.setBandValue (b, "on",   1.0f);
+            graph.setBandValue (b, "type", 0.0f);
+            graph.setBandValue (b, "chan", viewChan);
+            graph.setBandValue (b, "freq", fb.freqHz);
+            graph.setBandValue (b, "gain", fb.gainDb * amt);
+            graph.setBandValue (b, "q",    fb.q);
+            if (fb.dynamic)
+            {
+                graph.setBandValue (b, "dyn",   1.0f);
+                graph.setBandValue (b, "range", fb.rangeDb * amt);
+                graph.setBandValue (b, "thr",   fb.thresholdDb);
+                graph.setBandValue (b, "ratio", fb.ratio);
+                graph.setBandValue (b, "atk",   fb.attackMs);
+                graph.setBandValue (b, "rel",   fb.releaseMs);
+            }
+            ++made;
+        }
+        juce::String tally = "Cleanup: " + juce::String (made) + " cut"
+                           + (made == 1 ? "" : "s");
+        if (fit.dynamicBands > 0)
+            tally << ", " << fit.dynamicBands << " dynamic";
+        tally << " - ordinary bands, one undo step.";
+        status.setText (tally, juce::dontSendNotification);
+    }
+
+    // ── W-19 / W-24: stored named spectra (.kbsref) ────────────────────────
+    void spectraMenu()
+    {
+        juce::PopupMenu m;
+        m.addItem (1, "Save Current As...", haveCur);
+        m.addItem (2, "Save Reference As...", haveRef);
+        auto files = referencesDir().findChildFiles (juce::File::findFiles,
+                                                     false, "*.kbsref");
+        files.sort();
+        if (! files.isEmpty()) m.addSeparator();
+        for (int i = 0; i < files.size() && i < 60; ++i)
+            m.addItem (10 + i, files[i].getFileNameWithoutExtension());
+
+        m.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&spectraBtn),
+            [this, files] (int r)
+            {
+                if (r == 1 || r == 2) saveSpectrumAs (r == 1);
+                else if (r >= 10 && r - 10 < files.size())
+                    loadStoredSpectrum (files[r - 10]);
+            });
+    }
+
+    void saveSpectrumAs (bool current)
+    {
+        auto* win = new juce::AlertWindow ("Save Spectrum", "Name it:",
+                                           juce::MessageBoxIconType::NoIcon);
+        win->addTextEditor ("name", "", {});
+        win->addButton ("Save", 1, juce::KeyPress (juce::KeyPress::returnKey));
+        win->addButton ("Cancel", 0, juce::KeyPress (juce::KeyPress::escapeKey));
+        win->enterModalState (true, juce::ModalCallbackFunction::create (
+            [this, win, current] (int result)
+            {
+                const auto name = win->getTextEditorContents ("name");
+                std::unique_ptr<juce::AlertWindow> owned (win);
+                if (result != 1 || name.trim().isEmpty()) return;
+
+                auto csvOf = [] (const std::vector<float>& v)
+                {
+                    juce::String s;
+                    s.preallocateBytes (v.size() * 8);
+                    for (float x : v) s << juce::String (x, 2) << " ";
+                    return s.trim();
+                };
+
+                juce::XmlElement rootEl ("KbsEqReference");
+                rootEl.setAttribute ("points", kbs::EqMatch::kPoints);
+                rootEl.setAttribute ("loHz", kbs::EqMatch::kLoHz);
+                rootEl.setAttribute ("hiHz", kbs::EqMatch::kHiHz);
+                rootEl.setAttribute ("hasSide",
+                                     current ? haveCurSide : haveRefSide);
+                rootEl.createNewChildElement ("Mid")->addTextElement (
+                    csvOf (current ? curGrid : refGrid));
+                rootEl.createNewChildElement ("Side")->addTextElement (
+                    csvOf (current ? curSideGrid : refSideGrid));
+                UserFileSave::writeXmlAsync (referencesDir(), name, rootEl,
+                                             {}, {}, ".kbsref");
+                status.setText ("Saved: " + name.trim(), juce::dontSendNotification);
+            }), false);
+    }
+
+    void loadStoredSpectrum (const juce::File& f)
+    {
+        auto xml = SafeXml::parse (f);
+        if (! xml || ! xml->hasTagName ("KbsEqReference"))
+        {
+            status.setText ("Could not read that spectrum.",
+                            juce::dontSendNotification);
+            return;
+        }
+        const int n = kbs::EqMatch::kPoints;
+        refGrid.assign (n, -80.0f);
+        refSideGrid.assign (n, -80.0f);
+        auto readCsv = [n] (const juce::XmlElement* el, std::vector<float>& out)
+        {
+            if (el == nullptr) return false;
+            const auto toks = juce::StringArray::fromTokens (el->getAllSubText(),
+                                                             " ", {});
+            if (toks.size() < n) return false;
+            for (int i = 0; i < n; ++i)
+                out[(size_t) i] = toks[i].getFloatValue();
+            return true;
+        };
+        haveRef = readCsv (xml->getChildByName ("Mid"), refGrid);
+        haveRefSide = xml->getBoolAttribute ("hasSide", false)
+                   && readCsv (xml->getChildByName ("Side"), refSideGrid);
+        status.setText (haveRef ? "Reference: " + f.getFileNameWithoutExtension()
+                                    + " (stored spectrum)"
+                                : juce::String ("Could not read that spectrum."),
+                        juce::dontSendNotification);
+        repaint();
+    }
+
     EqGraphView& graph;
 
     juce::TextButton captureCur, loadCur, captureRef, loadRef, apply, close;
-    juce::Slider detail;
-    juce::Label detailWhat, status;
+    juce::TextButton scanBtn, spectraBtn, cleanupBtn;
+    juce::Slider detail, amount;
+    juce::Label detailWhat, amountWhat, status;
     std::unique_ptr<juce::FileChooser> chooser;
 
     EqAnalyser curMid, curSide, refMid, refSide;
@@ -490,7 +744,7 @@ private:
     bool capturingCur = false, capturingRef = false;
     bool haveCur = false, haveRef = false;
     bool haveCurSide = false, haveRefSide = false, haveSpread = false;
-    int lightYCur = 30, lightYRef = 52, detailLabelY = 96;
+    int lightYCur = 30, lightYRef = 52, detailLabelY = 96, amountLabelY = 130;
 };
 
 } // namespace eqview

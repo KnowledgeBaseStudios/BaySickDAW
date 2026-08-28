@@ -286,3 +286,42 @@ inversion, log-exact +12 st shift, flat-EQ delta null, delta of a +6
 bell = the added part, mono side-audition silence, mid = the tone,
 matched solo within 2 dB) green; suite green; gate six zeros + four
 links, clean first build.
+
+## 2026-08-27 - Task 9 - the match cluster (W-2/19/22/24 + Match Amount)
+
+NEW Source/DSP/Kbs/SpectrumScan.h (JUCE-free, tested): the offline
+capture accumulator - 4096-point Hann frames at half-overlap, mid + side
+dB averages on the match grid plus the mid capture's per-point swing (the
+same std-dev statistic EqAnalyser::averagedSpreadGrid feeds the fitter),
+pushed at render speed with no feed ring and no dropped frames.
+
+EqMatch::cleanup (W-2): resonance detection with NO reference - the
+capture is matched against its own ~1-octave broad-stroke self, CUTS
+only, 2 dB poke floor, Q floored at 1; the existing spread rule (12c)
+sends swinging problems to dynamic bands. Tested: cut lands on a
+synthetic 2 kHz resonance, steady = static, swinging = dynamic with
+downward range, and the flat remainder sprouts nothing.
+
+Track/selection scan (W-22): StripEq grew an atomic pre-EQ scanTap
+(armed only around an offline session - the live audio thread is
+suspended, so no race; fires on the identity path too). The editor wires
+runTrackScan into every EQ window: one offline pass over the timeline
+(hasTimeSelection wins as Section, else Song, Tail::Cut) behind the
+heavy-op overlay with cancel + progress, enterOfflineRender /
+runOfflineLoop / leaveOfflineRender exactly per the freeze discipline,
+message thread throughout. Reports "Scanned: selection, 0:42" per the
+ruling.
+
+Panel (EqMatchPanel, 280x316 now): Scan Track / Selection under the
+Current group; Stored Spectra... under the Reference group - save
+Current or Reference under a name, load any stored one as the reference
+(.kbsref XML: match-grid mid+side CSV + hasSide, in Presets/EQ/
+References via UserFileSave + SafeXml - W-19 save/reuse and W-24
+file-level import/export are the same files); AMOUNT slider (0-200%,
+"N% of the fit") scaling every gain and dynamic range at apply - Match
+and Auto Cleanup both honor it; Auto Cleanup button ADDS its cuts over
+the existing curve (a correction, not a replacement), one undo step,
+tally reported ("Cleanup: 3 cuts, 1 dynamic").
+
+EqTests section 22 (13 checks) green; suite green; gate six zeros + four
+links, clean first build.

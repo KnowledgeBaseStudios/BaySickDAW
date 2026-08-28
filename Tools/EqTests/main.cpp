@@ -16,6 +16,7 @@
 
 #include "../../Source/DSP/Kbs/ParametricEq.h"
 #include "../../Source/DSP/Kbs/EqMatch.h"
+#include "../../Source/DSP/Kbs/SpectrumScan.h"
 
 namespace { int failures = 0; }
 
@@ -1788,6 +1789,122 @@ int main()
             tail.resize (std::max<size_t> (whole, (size_t) period));
             const double db = 20.0 * std::log10 (levelAt (tail, 1000.0, srr, 0) / 0.1);
             near (db, 0.0, 2.0, "matched solo holds the program's loudness");
+        }
+    }
+    // ---- 22. QA-EqFlagship Task 9: Auto Cleanup + the scan accumulator
+    std::printf ("%s", "\n  22. auto cleanup + spectrum scan\n");
+    {
+        const int n = kbs::EqMatch::kPoints;
+
+        // A synthetic capture: flat -20 dB with one narrow +9 dB poke near
+        // 2 kHz (a resonance) - cleanup must cut AT it, and nothing else big.
+        auto pokeGrid = [n] (double pokeHz, double pokeDb, double widthOct)
+        {
+            std::vector<float> g ((size_t) n, -20.0f);
+            for (int i = 0; i < n; ++i)
+            {
+                const double d = std::log2 (kbs::EqMatch::hzAt (i) / pokeHz);
+                g[(size_t) i] += (float) (pokeDb
+                    * std::exp (-0.5 * (d / (widthOct * 0.5)) * (d / (widthOct * 0.5))));
+            }
+            return g;
+        };
+
+        {
+            const auto g = pokeGrid (2000.0, 9.0, 0.3);
+            const auto r = kbs::EqMatch::cleanup (g.data(), 12, 48000.0);
+            check (! r.bands.empty(), "cleanup finds the resonance",
+                   (double) r.bands.size(), 1.0);
+            if (! r.bands.empty())
+            {
+                const auto& b = r.bands[0];
+                const double oct = std::abs (std::log2 (b.freqHz / 2000.0));
+                check (oct < 0.25, "the cut lands on the resonance",
+                       (double) b.freqHz, 2000.0);
+                check (b.gainDb < -4.0, "and cuts it hard", b.gainDb, -4.0);
+                check (! b.dynamic, "steady problem, static cut",
+                       b.dynamic ? 1.0 : 0.0, 0.0);
+            }
+            // The flat remainder must not sprout cuts: every band near the poke.
+            for (const auto& b : r.bands)
+                check (std::abs (std::log2 (b.freqHz / 2000.0)) < 1.0,
+                       "no cut far from the problem", (double) b.freqHz, 2000.0);
+        }
+
+        // The same poke with a big SWING at it comes out dynamic - the
+        // intermittent problem goes to a dynamic band (the 12c rule reused).
+        {
+            const auto g = pokeGrid (2000.0, 9.0, 0.3);
+            std::vector<float> spread ((size_t) n, 1.0f);
+            for (int i = 0; i < n; ++i)
+                if (std::abs (std::log2 (kbs::EqMatch::hzAt (i) / 2000.0)) < 0.4)
+                    spread[(size_t) i] = 9.0f;
+            const auto r = kbs::EqMatch::cleanup (g.data(), 12, 48000.0, spread.data());
+            check (r.dynamicBands >= 1, "a swinging problem becomes dynamic",
+                   (double) r.dynamicBands, 1.0);
+            if (! r.bands.empty())
+                check (r.bands[0].rangeDb < 0.0, "with a downward range",
+                       r.bands[0].rangeDb, -1.0);
+        }
+
+        // The scan accumulator: a stereo pass with a mono 1 kHz tone reads a
+        // mid peak at 1 kHz and calls the side meaningless; a hard
+        // left-minus-right tone puts the energy in SIDE and flags it real.
+        {
+            const double srr = 48000.0;
+            for (int mode = 0; mode < 2; ++mode)
+            {
+                kbs::SpectrumScan scan;
+                scan.prepare (srr);
+                std::vector<float> L (512), R (512);
+                double phase = 0.0;
+                for (int bl = 0; bl < 400; ++bl)
+                {
+                    for (int i = 0; i < 512; ++i)
+                    {
+                        phase += 2.0 * kbs::kPi * 1000.0 / srr;
+                        const float v = (float) (0.25 * std::sin (phase));
+                        L[(size_t) i] = v;
+                        R[(size_t) i] = mode == 0 ? v : -v;
+                    }
+                    scan.push (L.data(), R.data(), 512);
+                }
+                check (scan.frames() > 40, "the scan accumulated frames",
+                       (double) scan.frames(), 40.0);
+
+                std::vector<float> mid ((size_t) n), side ((size_t) n);
+                scan.midGrid (mid.data(), n, kbs::EqMatch::kLoHz, kbs::EqMatch::kHiHz);
+                scan.sideGrid (side.data(), n, kbs::EqMatch::kLoHz, kbs::EqMatch::kHiHz);
+
+                auto atHz = [n] (const std::vector<float>& g, double hz)
+                {
+                    int best = 0;
+                    double bd = 1.0e9;
+                    for (int i = 0; i < n; ++i)
+                    {
+                        const double d = std::abs (std::log2 (kbs::EqMatch::hzAt (i) / hz));
+                        if (d < bd) { bd = d; best = i; }
+                    }
+                    return (double) g[(size_t) best];
+                };
+
+                if (mode == 0)
+                {
+                    check (atHz (mid, 1000.0) - atHz (mid, 4000.0) > 30.0,
+                           "mono tone: the mid grid peaks at the tone",
+                           atHz (mid, 1000.0) - atHz (mid, 4000.0), 30.0);
+                    check (! scan.sideMeaningful(),
+                           "mono tone: the side is not meaningful", 0.0, 0.0);
+                }
+                else
+                {
+                    check (atHz (side, 1000.0) - atHz (mid, 1000.0) > 30.0,
+                           "anti-phase tone: the energy lives in side",
+                           atHz (side, 1000.0) - atHz (mid, 1000.0), 30.0);
+                    check (scan.sideMeaningful(),
+                           "anti-phase tone: the side is meaningful", 1.0, 1.0);
+                }
+            }
         }
     }
     std::printf (failures == 0 ? "\n  all checks passed\n\n" : "\n  %d FAILURE(S)\n\n", failures);

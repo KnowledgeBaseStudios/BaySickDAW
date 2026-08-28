@@ -3,6 +3,7 @@
 #include "DSPBase.h"
 #include "Kbs/ParametricEq.h"
 #include "Kbs/Feeds.h"
+#include "Kbs/SpectrumScan.h"
 
 // ── StripEq ───────────────────────────────────────────────────────────────────
 // QA-EqPro: the strip EQ wrapper around ONE kbs::ParametricEq.  Replaces
@@ -89,6 +90,13 @@ public:
     bool isIdentity() const noexcept;
 
     void setSidechainBuffers (juce::AudioBuffer<float>* const* bufs, int count) noexcept override;
+
+    // W-22 scan tap: armed by the message thread around an OFFLINE render
+    // (the live audio thread is suspended for the whole session, so the
+    // pointed-at accumulator is never raced).  Pre-EQ, like preFeed - and it
+    // fires on the identity path too, because an untouched EQ still wants
+    // its input scanned.
+    std::atomic<kbs::SpectrumScan*> scanTap { nullptr };
 
     // Spectrum taps at the wrapper's stereo boundary; the analyser polls them.
     // scFeed carries ONE of the strip's four receive lines (scFeedSlot; -1 =
