@@ -582,6 +582,16 @@ EffectEqWindow::EffectEqWindow (BaySickDAWProcessor& proc,
     };
     mViewRow->get = [this] { return (int) mGraph->domainView(); };
     mViewRow->set = [this] (int v) { mGraph->setDomainView ((eqview::DomainView) v); };
+    // W-23: hold MID or SIDE to hear that domain alone; release restores.
+    mViewRow->onHold = [this] (int v, bool down)
+    {
+        auto* e = resolveEq();
+        if (e == nullptr) return;
+        e->engine().setAuditionDomain (! down ? kbs::EqChannel::stereo
+                                     : v == 1 ? kbs::EqChannel::mid
+                                     : v == 2 ? kbs::EqChannel::side
+                                              : kbs::EqChannel::stereo);
+    };
     addAndMakeVisible (*mViewRow);
 
     mMatch = std::make_unique<eqview::EqMatchPanel> (*mGraph);
@@ -601,6 +611,8 @@ juce::String EffectEqWindow::windowTitle() const
 EffectEqWindow::~EffectEqWindow()
 {
     stopTimer();
+    if (auto* e = resolveEq())
+        e->engine().setAuditionDomain (kbs::EqChannel::stereo);
     // Same destruction-order hazard as EffectSlotWindow's dtor -- the title
     // strip's menu bar is normally already gone when the content dies, so this
     // reads through a SafePointer rather than a raw one.
@@ -971,8 +983,40 @@ void EffectEqWindow::showOptionsMenu (juce::Component* anchor)
     m.addSubMenu ("View", viewM);
     m.addSeparator();
 
+    // W-11: whole-curve transforms - non-destructive, the handles hold
+    // their set points while the curve follows.
+    {
+        float cScale = 100.0f, cShift = 0.0f;
+        if (auto* p2 = mProc.apvts.getRawParameterValue (gid ("curvescale"))) cScale = p2->load();
+        if (auto* p2 = mProc.apvts.getRawParameterValue (gid ("curveshift"))) cShift = p2->load();
+        juce::PopupMenu wc;
+        const float scales2[] = { -100.0f, -50.0f, 50.0f, 75.0f, 100.0f,
+                                  125.0f, 150.0f, 200.0f };
+        for (int i = 0; i < 8; ++i)
+            wc.addItem (370 + i,
+                        juce::String ("Scale ") + juce::String ((int) scales2[i]) + "%"
+                            + (i == 0 ? " (invert)" : ""),
+                        true, std::abs (cScale - scales2[i]) < 0.5f);
+        wc.addSeparator();
+        const float shifts[] = { -12.0f, -7.0f, -5.0f, -2.0f, -1.0f, 0.0f,
+                                 1.0f, 2.0f, 5.0f, 7.0f, 12.0f };
+        for (int i = 0; i < 11; ++i)
+            wc.addItem (380 + i,
+                        juce::String ("Shift ") + (shifts[i] > 0 ? "+" : "")
+                            + juce::String ((int) shifts[i]) + " st",
+                        true, std::abs (cShift - shifts[i]) < 0.5f);
+        wc.addSeparator();
+        wc.addItem (391, "Reset Transforms",
+                    std::abs (cScale - 100.0f) > 0.5f || std::abs (cShift) > 0.5f);
+        m.addSubMenu ("Whole Curve", wc);
+    }
+    m.addItem (191, "Delta Listen", e != nullptr,
+               e != nullptr && e->engine().getDeltaListen());
+    m.addItem (167, "Sketch a Curve...", true, mGraph->isSketchMode());
+    m.addSeparator();
+
     m.addItem (165, "Keyboard & Mouse...");
-    m.addItem (182, "Reset All Bands");
+    m.addItem (166, "Reset All Bands");
     m.addSeparator();
     m.addItem (190, "EQ Match...", true, mMatch != nullptr && mMatch->isVisible());
 
@@ -1104,6 +1148,12 @@ void EffectEqWindow::showOptionsMenu (juce::Component* anchor)
                             "Delete: remove the selected band\n"
                             "Arrows: nudge  -  Tab: next band\n"
                             "Hold L: listen  -  Hold G: arm spectrum grab\n"
+                            "Drag empty space: select several bands\n"
+                            "Ctrl+click dots: add or remove from the set\n"
+                            "Drag any set dot: they move together "
+                            "(Alt scales the gains instead)\n"
+                            "Click the piano strip: snap the band to a note\n"
+                            "Hold MID or SIDE: hear that domain alone\n"
                             "(Keys work while the EQ window has focus - the "
                             "headphone and crosshair buttons do the same "
                             "jobs by mouse.)")
@@ -1119,12 +1169,35 @@ void EffectEqWindow::showOptionsMenu (juce::Component* anchor)
                     setG ("outgain", trims[r - 171]);
                 }
             }
-            else if (r == 182)
+            else if (r == 166)
             {
                 beginParamUndoGesture (mProc.apvts, mGraph->paramId (0, "on"));
                 for (int b = 0; b < StripEq::kBands; ++b)
                     if (mGraph->isBandRegistered (b))
                         mGraph->removeBand (b, false);
+            }
+            else if (r == 167) mGraph->setSketchMode (! mGraph->isSketchMode());
+            else if (r == 191)
+            {
+                if (auto* e2 = resolveEq())
+                    e2->engine().setDeltaListen (! e2->engine().getDeltaListen());
+            }
+            else if (r >= 370 && r < 378)
+            {
+                const float scales2[] = { -100.0f, -50.0f, 50.0f, 75.0f, 100.0f,
+                                          125.0f, 150.0f, 200.0f };
+                setG ("curvescale", scales2[r - 370]);
+            }
+            else if (r >= 380 && r < 391)
+            {
+                const float shifts[] = { -12.0f, -7.0f, -5.0f, -2.0f, -1.0f, 0.0f,
+                                         1.0f, 2.0f, 5.0f, 7.0f, 12.0f };
+                setG ("curveshift", shifts[r - 380]);
+            }
+            else if (r == 391)
+            {
+                setG ("curvescale", 100.0f);
+                setG ("curveshift", 0.0f);
             }
             else if (r == 190 && mMatch != nullptr)
             {

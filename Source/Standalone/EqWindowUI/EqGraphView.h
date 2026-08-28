@@ -187,6 +187,31 @@ public:
 
     int selectedBand() const { return selected; }
 
+    // W-16: the multi-selection (rubber-band / Ctrl+click).  The primary
+    // `selected` band stays the rail's band; the set rides its drags.
+    bool isMultiSelected (int b) const
+        { return b >= 0 && b < kBands && multiSel[(size_t) b]; }
+
+    void clearMultiSelect()
+    {
+        if (multiSelCount == 0) return;
+        multiSel.fill (false);
+        multiSelCount = 0;
+        repaint();
+    }
+
+    // W-4: sketch mode - the next stroke across the graph becomes bands.
+    void setSketchMode (bool on)
+    {
+        sketchMode = on;
+        sketchDrawing = false;
+        sketchPts.clear();
+        setMouseCursor (on ? juce::MouseCursor::CrosshairCursor
+                           : juce::MouseCursor::NormalCursor);
+        repaint();
+    }
+    bool isSketchMode() const { return sketchMode; }
+
     void holdListen (bool down)
     {
         if (auto* e = eq())
@@ -482,6 +507,35 @@ public:
         if (grabValid && ! dragging) drawGrabMarker (g);
         drawGrabModeButton (g);
 
+        if (rubberActive)
+        {
+            g.setColour (cols.text.withAlpha (0.12f));
+            g.fillRect (rubberRect);
+            g.setColour (cols.text.withAlpha (0.6f));
+            g.drawRect (rubberRect, 1.0f);
+        }
+
+        if (sketchMode)
+        {
+            if (sketchPts.empty())
+            {
+                g.setColour (cols.text.withAlpha (0.75f));
+                g.setFont (juce::Font (juce::FontOptions (12.0f, juce::Font::bold)));
+                g.drawText ("Sketch: draw the curve you want. Right-click cancels.",
+                            a.toNearestInt().withTrimmedTop (8),
+                            juce::Justification::centredTop);
+            }
+            if (sketchPts.size() > 1)
+            {
+                juce::Path pth;
+                pth.startNewSubPath (sketchPts.front());
+                for (size_t i = 1; i < sketchPts.size(); ++i)
+                    pth.lineTo (sketchPts[i]);
+                g.setColour (cols.analyserPost);
+                g.strokePath (pth, juce::PathStrokeType (2.0f));
+            }
+        }
+
         if (dragging && selected >= 0) drawDragReadout (g);
         else if (hovered >= 0 && ! dragging) drawHoverPanel (g, hovered);
     }
@@ -509,7 +563,24 @@ public:
 
         if (e.mods.isPopupMenu())
         {
+            if (sketchMode) { setSketchMode (false); return; }   // escape hatch
             if (hit >= 0) { selectBand (hit); showBandMenu (hit); }
+            return;
+        }
+
+        if (sketchMode)
+        {
+            sketchDrawing = true;
+            sketchPts.clear();
+            sketchPts.push_back (e.position);
+            return;
+        }
+
+        // W-5: the piano strip is an instrument - a click snaps the selected
+        // band (or a new one) to that note.
+        if (showPiano() && pianoStripArea().contains (e.position))
+        {
+            pianoClick (e.position);
             return;
         }
 
@@ -535,11 +606,43 @@ public:
             }
         }
 
+        if (hit < 0 && ! grabArmed)
+        {
+            // W-16: empty-space drag rubber-bands a selection; a plain click
+            // just clears one.
+            rubberActive = true;
+            rubberStart = e.position;
+            rubberRect = {};
+            return;
+        }
+
         if (hit >= 0)
         {
+            const bool inSet = multiSel[(size_t) hit];
+
+            // W-16: Ctrl+click curates the set.  Ctrl+drag on the already-
+            // primary dot keeps its gain-only meaning when no set exists.
+            if (e.mods.isCtrlDown() && ! e.mods.isShiftDown()
+                && ! (hit == selected && multiSelCount == 0))
+            {
+                if (multiSelCount == 0 && selected >= 0 && selected != hit)
+                { multiSel[(size_t) selected] = true; ++multiSelCount; }
+                auto& f = multiSel[(size_t) hit];
+                f = ! f;
+                multiSelCount += f ? 1 : -1;
+                if (f) selectBand (hit);
+                repaint();
+                return;
+            }
+
+            if (! inSet) clearMultiSelect();
             selectBand (hit);
 
-            if (e.mods.isAltDown()) { resetBand (hit); return; }
+            // Alt on a lone dot resets it; Alt starting a GROUP drag means
+            // proportional gain scaling instead (documented in the help box).
+            const bool groupContext = inSet && multiSelCount > 1;
+            if (e.mods.isAltDown() && ! groupContext) { resetBand (hit); return; }
+            dragProportional = e.mods.isAltDown();
 
             dragging = true;
             dragStart = e.position;
@@ -549,11 +652,43 @@ public:
             beginParamUndoGesture (proc.apvts, paramId (hit, "freq"));
             beginGesture (hit, "freq");
             beginGesture (hit, "gain");
+
+            // W-16: companions - the multi-selection plus the band's linked
+            // group ride this drag.
+            dragSet.clear(); dragSetFreq.clear(); dragSetGain.clear();
+            loadLinks();
+            const int lg = linkGroup[(size_t) hit];
+            for (int b = 0; b < kBands; ++b)
+            {
+                if (b == hit) continue;
+                const auto bp = bandParams (b);
+                if (! bp.on) continue;
+                const bool join = (inSet && multiSel[(size_t) b])
+                               || (lg >= 0 && linkGroup[(size_t) b] == lg);
+                if (! join) continue;
+                dragSet.push_back (b);
+                dragSetFreq.push_back (bp.freqHz);
+                dragSetGain.push_back (bp.gainDb);
+                beginGesture (b, "freq");
+                beginGesture (b, "gain");
+            }
         }
     }
 
     void mouseDrag (const juce::MouseEvent& e) override
     {
+        if (sketchDrawing)
+        {
+            sketchPts.push_back (e.position);
+            repaint();
+            return;
+        }
+        if (rubberActive)
+        {
+            rubberRect = juce::Rectangle<float> (rubberStart, e.position);
+            repaint();
+            return;
+        }
         if (! dragging || selected < 0) return;
 
         const auto p = bandParams (selected);
@@ -563,13 +698,15 @@ public:
         const bool gainOnly = e.mods.isCtrlDown() && ! e.mods.isShiftDown();
         const bool freqOnly = e.mods.isCtrlDown() && e.mods.isShiftDown();
 
+        float newFreq = dragStartFreq, newGain = dragStartGain;
         if (! gainOnly)
         {
             const float dx = (e.position.x - dragStart.x) * k;
             const auto a = plotArea();
             const double t0 = std::log (dragStartFreq / 20.0) / std::log (1000.0);
             const double t = t0 + dx / a.getWidth();
-            setBandValue (selected, "freq", (float) (20.0 * std::pow (1000.0, t)));
+            newFreq = (float) (20.0 * std::pow (1000.0, t));
+            setBandValue (selected, "freq", newFreq);
         }
 
         if (! freqOnly && kbs::eqTypeHasGain (p.type))
@@ -578,16 +715,72 @@ public:
             const float s = gainScaleDb();
             const auto a = plotArea();
             const float dDb = -dy * (2.0f * s) / a.getHeight();
-            setBandValue (selected, "gain", dragStartGain + dDb);
+            newGain = dragStartGain + dDb;
+            setBandValue (selected, "gain", newGain);
+        }
+
+        // W-16: companions move as a shape - frequency as a ratio (a log
+        // shift), gain as an offset, or scaled proportionally when the drag
+        // started with Alt.
+        if (! dragSet.empty())
+        {
+            const float ratio = newFreq / std::max (1.0f, dragStartFreq);
+            const float dDb = newGain - dragStartGain;
+            const float propK = std::abs (dragStartGain) > 0.25f
+                                  ? newGain / dragStartGain : 1.0f;
+            for (size_t i = 0; i < dragSet.size(); ++i)
+            {
+                const int b = dragSet[i];
+                if (! gainOnly)
+                    setBandValue (b, "freq", dragSetFreq[i] * ratio);
+                if (! freqOnly && kbs::eqTypeHasGain (bandParams (b).type))
+                    setBandValue (b, "gain",
+                                  dragProportional ? dragSetGain[i] * propK
+                                                   : dragSetGain[i] + dDb);
+            }
         }
     }
 
     void mouseUp (const juce::MouseEvent&) override
     {
+        if (sketchDrawing)
+        {
+            sketchDrawing = false;
+            sketchApply();
+            setSketchMode (false);
+            return;
+        }
+        if (rubberActive)
+        {
+            rubberActive = false;
+            if (rubberRect.getWidth() > 4.0f || rubberRect.getHeight() > 4.0f)
+            {
+                multiSel.fill (false);
+                multiSelCount = 0;
+                int last = -1;
+                for (int b = 0; b < kBands; ++b)
+                {
+                    const auto bp = bandParams (b);
+                    if (! bp.on || viewOfChannel (bp.channel) != domainView())
+                        continue;
+                    if (rubberRect.contains (handlePos (b)))
+                    { multiSel[(size_t) b] = true; ++multiSelCount; last = b; }
+                }
+                // One band is just a selection, not a set.
+                if (multiSelCount == 1) { multiSel.fill (false); multiSelCount = 0; }
+                if (last >= 0) selectBand (last);
+            }
+            else clearMultiSelect();
+            repaint();
+            return;
+        }
         if (dragging && selected >= 0)
         {
             endGesture (selected, "freq");
             endGesture (selected, "gain");
+            for (int b : dragSet)
+            { endGesture (b, "freq"); endGesture (b, "gain"); }
+            dragSet.clear();
         }
         dragging = false;
         repaint();
@@ -678,6 +871,8 @@ public:
             beginParamUndoGesture (proc.apvts, paramId (b, "on"));
         resetBand (b, false);
         setBandValue (b, "on", 0.0f);
+        if (multiSel[(size_t) b]) { multiSel[(size_t) b] = false; --multiSelCount; }
+        if (linkGroup[(size_t) b] >= 0) { linkGroup[(size_t) b] = -1; saveLinks(); }
         if (selected == b) selectBand (-1);
     }
 
@@ -724,6 +919,34 @@ public:
         for (int b = 0; b < kBands; ++b)
             if (! bandParams (b).on) return b;
         return -1;
+    }
+
+    void loadLinks()
+    {
+        static const juce::Identifier kLinks ("links");
+        const juce::String s = viewProp (kLinks, juce::String()).toString();
+        if (s == linksCacheStr) return;
+        linksCacheStr = s;
+        linkGroup.fill (-1);
+        for (const auto& tok : juce::StringArray::fromTokens (s, ";", {}))
+        {
+            const int c = tok.indexOfChar (':');
+            if (c <= 0) continue;
+            const int b = tok.substring (0, c).getIntValue();
+            if (b >= 0 && b < kBands)
+                linkGroup[(size_t) b] = tok.substring (c + 1).getIntValue();
+        }
+    }
+
+    void saveLinks()
+    {
+        static const juce::Identifier kLinks ("links");
+        juce::String s;
+        for (int b = 0; b < kBands; ++b)
+            if (linkGroup[(size_t) b] >= 0)
+                s << b << ":" << linkGroup[(size_t) b] << ";";
+        linksCacheStr = s;
+        if (auto* e = eq()) e->viewTree().setProperty (kLinks, s, nullptr);
     }
 
     // ── the band menu ─────────────────────────────────────────────────────
@@ -792,7 +1015,23 @@ public:
 
         m.addItem (500, "Listen", true, listenLatched && selected == b);
         m.addItem (501, "Isolate", true, p.isolated);
+        {
+            // W-18 per-band delta = global delta scoped by Isolate.
+            auto* seD = eq();
+            m.addItem (505, "Delta Listen", seD != nullptr,
+                       seD != nullptr && seD->engine().getDeltaListen()
+                           && p.isolated);
+        }
         m.addItem (504, "Mute", true, p.muted);
+        m.addSeparator();
+        if (domainView() == DomainView::stereo
+            && p.channel == kbs::EqChannel::stereo)
+            m.addItem (320, "Split to Left + Right");
+        loadLinks();
+        if (multiSelCount > 1 && isMultiSelected (b))
+            m.addItem (510, "Link Selected Bands");
+        if (linkGroup[(size_t) b] >= 0)
+            m.addItem (511, "Unlink");
         m.addSeparator();
         m.addItem (502, "Reset Band");
         m.addItem (503, "Delete Band");
@@ -838,10 +1077,89 @@ public:
                 else if (r == 401) toggleBand (b, "relauto");
                 else if (r == 500) { selectBand (b); toggleListenLatch(); }
                 else if (r == 501) toggleBand (b, "iso");
+                else if (r == 505)
+                {
+                    if (auto* se2 = eq())
+                    {
+                        const bool on = ! (se2->engine().getDeltaListen()
+                                           && bandParams (b).isolated);
+                        se2->engine().setDeltaListen (on);
+                        if (bandParams (b).isolated != on) toggleBand (b, "iso");
+                    }
+                }
+                else if (r == 320) splitBandLR (b);
+                else if (r == 510) linkSelected();
+                else if (r == 511)
+                { linkGroup[(size_t) b] = -1; saveLinks(); repaint(); }
                 else if (r == 504) toggleBand (b, "mute");
                 else if (r == 502) resetBand (b);
                 else if (r == 503) removeBand (b);
             });
+    }
+
+    // W-17: the band becomes its own Left and Right copies - the twin takes
+    // every setting, only the channel differs.  One undo step.
+    void splitBandLR (int b)
+    {
+        const int nb = firstFreeBand();
+        if (nb < 0) return;
+        const auto p = bandParams (b);
+        if (ensureBand) ensureBand (nb);
+        beginParamUndoGesture (proc.apvts, paramId (b, "chan"));
+        writeBandParams (nb, p);
+        setBandValue (b, "chan", (float) (int) kbs::EqChannel::left);
+        setBandValue (nb, "chan", (float) (int) kbs::EqChannel::right);
+        selectBand (b);
+        repaint();
+    }
+
+    // W-16: persistent linked groups, serialized in the EQ point's view tree
+    // so they travel with the project.
+    void linkSelected()
+    {
+        loadLinks();
+        int gId = 0;
+        for (int b = 0; b < kBands; ++b) gId = std::max (gId, linkGroup[(size_t) b] + 1);
+        for (int b = 0; b < kBands; ++b)
+            if (multiSel[(size_t) b]) linkGroup[(size_t) b] = gId;
+        saveLinks();
+        repaint();
+    }
+
+    void writeBandParams (int b, const kbs::EqBandParams& p)
+    {
+        if (ensureBand) ensureBand (b);
+        setBandValue (b, "on", p.on ? 1.0f : 0.0f);
+        setBandValue (b, "type", (float) (int) p.type);
+        setBandValue (b, "freq", p.freqHz);
+        setBandValue (b, "gain", p.gainDb);
+        setBandValue (b, "q", p.q);
+        setBandValue (b, "slope", p.slope);
+        setBandValue (b, "phase", p.phaseMix);
+        setBandValue (b, "chan", (float) (int) p.channel);
+        setBandValue (b, "place", p.placement);
+        setBandValue (b, "mute", p.muted ? 1.0f : 0.0f);
+        setBandValue (b, "iso", p.isolated ? 1.0f : 0.0f);
+        setBandValue (b, "dyn", p.dynamic ? 1.0f : 0.0f);
+        setBandValue (b, "thr", p.thresholdDb);
+        setBandValue (b, "ratio", p.ratio);
+        setBandValue (b, "atk", p.attackMs);
+        setBandValue (b, "rel", p.releaseMs);
+        setBandValue (b, "relauto", p.autoRelease ? 1.0f : 0.0f);
+        setBandValue (b, "range", p.rangeDb);
+        setBandValue (b, "scsrc", (float) p.scSource);
+        setBandValue (b, "thrb", p.thresholdBDb);
+        setBandValue (b, "ratb", p.ratioB);
+        setBandValue (b, "rngb", p.rangeBDb);
+        setBandValue (b, "onset", p.onsetMix);
+        setBandValue (b, "spec", p.spectral ? 1.0f : 0.0f);
+        setBandValue (b, "dens", p.density);
+        setBandValue (b, "sat", p.satAmt);
+        setBandValue (b, "lforate", p.lfoRateHz);
+        setBandValue (b, "lfodepth", p.lfoDepth);
+        setBandValue (b, "lfotgt", (float) p.lfoTarget);
+        setBandValue (b, "envdepth", p.envDepth);
+        setBandValue (b, "envtgt", (float) p.envTarget);
     }
 
     // ── parameter plumbing ────────────────────────────────────────────────
@@ -1368,6 +1686,20 @@ private:
                                (r + 5.0f) * 2.0f, (r + 5.0f) * 2.0f);
             }
 
+            // W-16: set members wear a light outer ring; linked bands a
+            // small corner dot in their own colour.
+            if (multiSel[(size_t) b] && ! sel)
+            {
+                g.setColour (cols.text.withAlpha (0.75f));
+                g.drawEllipse (pos.x - r - 5.0f, pos.y - r - 5.0f,
+                               (r + 5.0f) * 2.0f, (r + 5.0f) * 2.0f, 1.2f);
+            }
+            if (linkGroup[(size_t) b] >= 0)
+            {
+                g.setColour (col);
+                g.fillEllipse (pos.x + r * 0.6f, pos.y - r - 4.0f, 4.5f, 4.5f);
+            }
+
             g.setColour (sel ? col : cols.ground.withAlpha (0.85f));
             g.fillEllipse (pos.x - r, pos.y - r, r * 2, r * 2);
             g.setColour (col);
@@ -1432,6 +1764,163 @@ private:
                             juce::Justification::centred, false);
             }
         }
+    }
+
+    juce::Rectangle<float> pianoStripArea() const
+    {
+        auto r = getLocalBounds().toFloat().reduced (2.0f);
+        r.removeFromBottom (16.0f);
+        return r.removeFromBottom (26.0f);
+    }
+
+    // W-5: a click on the strip snaps the selected band to that note - or
+    // births a band right on it.
+    void pianoClick (juce::Point<float> pos)
+    {
+        const double hz = xToFreq (pos.x);
+        const int midi = juce::jlimit (16, 135,
+            (int) std::lround (69.0 + 12.0 * std::log2 (hz / 440.0)));
+        const float note = 440.0f * std::pow (2.0f, (float) (midi - 69) / 12.0f);
+        if (selected >= 0)
+        {
+            beginParamUndoGesture (proc.apvts, paramId (selected, "freq"));
+            setBandValue (selected, "freq", note);
+        }
+        else
+        {
+            const int b = firstFreeBand();
+            if (b < 0) return;
+            if (ensureBand) ensureBand (b);
+            beginParamUndoGesture (proc.apvts, paramId (b, "on"));
+            setBandValue (b, "on", 1.0f);
+            setBandValue (b, "type", 0.0f);
+            setBandValue (b, "chan", (float) (int) domainOfCurrentView());
+            setBandValue (b, "freq", note);
+            setBandValue (b, "q", 0.707f);
+            selectBand (b);
+        }
+        repaint();
+    }
+
+    // W-4: the stroke becomes bands.  The fit works in (octave, dB) space:
+    // greedy peeling - place the biggest residual as a bell (its width read
+    // off the stroke), subtract, repeat; a peak hugging either edge whose
+    // level HOLDS to that edge is a shelf, not a bell.  One undo step, so
+    // plain Undo is the escape.
+    void sketchApply()
+    {
+        if (sketchPts.size() < 4) return;
+        float x0 = 1.0e9f, x1 = -1.0e9f;
+        for (const auto& sp : sketchPts)
+        { x0 = std::min (x0, sp.x); x1 = std::max (x1, sp.x); }
+        if (x1 - x0 < 24.0f) return;
+
+        constexpr int N = 64;
+        std::array<float, (size_t) N> tgt {}, cnt {};
+        for (const auto& sp : sketchPts)
+        {
+            const int k = juce::jlimit (0, N - 1,
+                (int) ((sp.x - x0) / (x1 - x0) * (float) (N - 1) + 0.5f));
+            tgt[(size_t) k] += yToGain (sp.y);
+            cnt[(size_t) k] += 1.0f;
+        }
+        float lastV = 0.0f;
+        bool seeded = false;
+        for (int k = 0; k < N; ++k)
+        {
+            if (cnt[(size_t) k] > 0.0f)
+            { lastV = tgt[(size_t) k] / cnt[(size_t) k]; seeded = true; }
+            tgt[(size_t) k] = seeded ? lastV : 0.0f;
+        }
+        for (int k = N - 2; k >= 0; --k)          // leading gap fill, backwards
+            if (cnt[(size_t) k] <= 0.0f && cnt[(size_t) (k + 1)] > 0.0f
+                && tgt[(size_t) k] == 0.0f)
+                tgt[(size_t) k] = tgt[(size_t) (k + 1)];
+        auto sm = tgt;
+        for (int k = 1; k < N - 1; ++k)
+            sm[(size_t) k] = 0.25f * tgt[(size_t) (k - 1)] + 0.5f * tgt[(size_t) k]
+                           + 0.25f * tgt[(size_t) (k + 1)];
+
+        const float octSpan = (float) std::log2 (xToFreq (x1) / xToFreq (x0));
+        const float octPerBin = octSpan / (float) (N - 1);
+
+        struct Fit { float hz, g, q; int type; };
+        std::vector<Fit> fits;
+        auto resid = sm;
+        for (int pass = 0; pass < 8; ++pass)
+        {
+            int kPk = 0;
+            for (int k = 1; k < N; ++k)
+                if (std::abs (resid[(size_t) k]) > std::abs (resid[(size_t) kPk]))
+                    kPk = k;
+            const float gPk = resid[(size_t) kPk];
+            if (std::abs (gPk) < 1.5f) break;
+
+            int kl = kPk, kr = kPk;
+            while (kl > 0 && std::abs (resid[(size_t) (kl - 1)]) > std::abs (gPk) * 0.5f
+                   && resid[(size_t) (kl - 1)] * gPk > 0.0f) --kl;
+            while (kr < N - 1 && std::abs (resid[(size_t) (kr + 1)]) > std::abs (gPk) * 0.5f
+                   && resid[(size_t) (kr + 1)] * gPk > 0.0f) ++kr;
+            float wOct = std::max (0.15f, (float) (kr - kl) * octPerBin);
+
+            const bool shelfLo = kl == 0
+                && std::abs (resid[0]) > std::abs (gPk) * 0.6f && kPk < N / 3;
+            const bool shelfHi = kr == N - 1
+                && std::abs (resid[(size_t) (N - 1)]) > std::abs (gPk) * 0.6f
+                && kPk > 2 * N / 3;
+
+            Fit f;
+            f.g = juce::jlimit (-30.0f, 30.0f, gPk);
+            f.hz = (float) xToFreq (x0 + (float) kPk / (float) (N - 1) * (x1 - x0));
+            if (shelfLo || shelfHi)
+            {
+                f.type = shelfLo ? 3 : 4;          // low shelf / high shelf
+                f.q = 0.707f;
+                const int kEdgeIn = shelfLo ? kr : kl;   // the corner
+                f.hz = (float) xToFreq (x0 + (float) kEdgeIn / (float) (N - 1)
+                                                 * (x1 - x0));
+                for (int k = 0; k < N; ++k)
+                {
+                    const float d = (float) (k - kEdgeIn) * octPerBin
+                                    * (shelfLo ? -1.0f : 1.0f);
+                    resid[(size_t) k] -= f.g / (1.0f + std::exp (-4.0f * d));
+                }
+            }
+            else
+            {
+                // Q from octave bandwidth: q = sqrt(2^N) / (2^N - 1).
+                const float twoN = std::pow (2.0f, wOct);
+                f.type = 0;
+                f.q = juce::jlimit (0.4f, 12.0f,
+                                    std::sqrt (twoN) / std::max (0.05f, twoN - 1.0f));
+                const float half = wOct * 0.5f;
+                for (int k = 0; k < N; ++k)
+                {
+                    const float d = (float) (k - kPk) * octPerBin;
+                    resid[(size_t) k] -= f.g / (1.0f + (d / half) * (d / half));
+                }
+            }
+            fits.push_back (f);
+        }
+
+        if (fits.empty()) return;
+        beginParamUndoGesture (proc.apvts, paramId (0, "on"));
+        int lastB = -1;
+        for (const auto& f : fits)
+        {
+            const int b = firstFreeBand();
+            if (b < 0) break;
+            if (ensureBand) ensureBand (b);
+            setBandValue (b, "on", 1.0f);
+            setBandValue (b, "type", (float) f.type);
+            setBandValue (b, "chan", (float) (int) domainOfCurrentView());
+            setBandValue (b, "freq", f.hz);
+            setBandValue (b, "gain", f.g);
+            setBandValue (b, "q", f.q);
+            lastB = b;
+        }
+        if (lastB >= 0) selectBand (lastB);
+        repaint();
     }
 
     void drawPiano (juce::Graphics& g)
@@ -1554,6 +2043,7 @@ private:
         g.drawText (text, box, juce::Justification::centred, false);
     }
 
+public:
     static juce::String formatHz (float hz)
     {
         return hz >= 1000.0f ? juce::String (hz / 1000.0f, 2) + " kHz"
@@ -1571,6 +2061,8 @@ private:
              + (cents == 0 ? juce::String()
                            : (cents > 0 ? " +" : " ") + juce::String (cents) + "c");
     }
+
+private:
 
     int bandAt (juce::Point<float> pos) const
     {
@@ -1591,6 +2083,7 @@ private:
     {
         auto* e = eq();
         if (e == nullptr) { repaint(); return; }
+        loadLinks();
 
         const double sr = proc.getSampleRate();
         if (sr > 0) { pre.setSampleRate (sr); post.setSampleRate (sr); sc.setSampleRate (sr); }
@@ -1639,6 +2132,25 @@ private:
     bool dragging = false, listenLatched = false;
     juce::Point<float> dragStart, lastMouse;
     float dragStartFreq = 1000.0f, dragStartGain = 0.0f;
+
+    // W-16 selection machinery.
+    std::array<bool, (size_t) kBands> multiSel {};
+    int multiSelCount = 0;
+    bool rubberActive = false;
+    juce::Rectangle<float> rubberRect;
+    juce::Point<float> rubberStart;
+    bool dragProportional = false;
+    std::vector<int> dragSet;
+    std::vector<float> dragSetFreq, dragSetGain;
+
+    // W-16 persistent linked groups, cached from the view tree ("links",
+    // "band:group;..." - reparsed only when the string changes).
+    std::array<int, (size_t) kBands> linkGroup { [] { std::array<int, (size_t) kBands> a {}; a.fill (-1); return a; }() };
+    juce::String linksCacheStr;
+
+    // W-4 sketch state.
+    bool sketchMode = false, sketchDrawing = false;
+    std::vector<juce::Point<float>> sketchPts;
 
     juce::SharedResourcePointer<fontaudio::IconHelper> icons;
 };

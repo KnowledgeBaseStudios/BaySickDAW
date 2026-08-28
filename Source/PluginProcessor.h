@@ -2065,7 +2065,8 @@ private:
     enum EqBankGlobalSlot
     {
         eqGlobPropQ = 0, eqGlobAutoGain, eqGlobAgAmt, eqGlobOutGain,
-        eqGlobPolarity, eqGlobCharMode, eqGlobCharAmt, eqNumBankGlobalSlots
+        eqGlobPolarity, eqGlobCharMode, eqGlobCharAmt,
+        eqGlobCurveScale, eqGlobCurveShift, eqNumBankGlobalSlots
     };
     struct EqBankGlobalPtrs
     {

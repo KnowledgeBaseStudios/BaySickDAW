@@ -74,13 +74,15 @@ kbs::EqBandParams StripEq::getBand (int i) const
 
 void StripEq::pushGlobals (bool propQ, bool autoGain, float agAmount01,
                            float outGainDb, bool polarity,
-                           int charMode, float charAmt)
+                           int charMode, float charAmt,
+                           float curveScalePct, float curveShiftSemis)
 {
     mEq.setProportionalQ (propQ);
     mEq.setAutoGain (autoGain, agAmount01);
     mEq.setOutputGainDb (outGainDb);
     mEq.setPolarityFlip (polarity);
     mEq.setCharacter ((kbs::EqCharMode) juce::jlimit (0, 3, charMode), charAmt);
+    mEq.setCurveTransform (curveScalePct / 100.0f, curveShiftSemis);
     mAutoGain  = autoGain;
     mAgAmount  = agAmount01;
     mOutGainDb = outGainDb;
@@ -112,7 +114,7 @@ void StripEq::resetToDefaults()
     mSpareLocked  = false;
     mEq.setMode (kbs::EqMode::zeroLatency);
     mEq.setOversampling (false);
-    pushGlobals (true, false, 1.0f, 0.0f, false, 0, 0.5f);
+    pushGlobals (true, false, 1.0f, 0.0f, false, 0, 0.5f, 100.0f, 0.0f);
     mEq.setListenBand (-1);
     mEq.reset();
 }
@@ -280,6 +282,8 @@ void StripEq::getStateInformation (juce::MemoryBlock& dest)
     state.setProperty ("mode",         (int) mEq.getMode(),    nullptr);
     state.setProperty ("charMode",     (int) mEq.getCharMode(), nullptr);
     state.setProperty ("charAmt",      mEq.getCharAmount(),     nullptr);
+    state.setProperty ("curveScale",   mEq.getCurveScale() * 100.0f, nullptr);
+    state.setProperty ("curveShift",   mEq.getCurveShiftSemis(),     nullptr);
     state.setProperty ("os",           mEq.getOversampling(),  nullptr);
     state.setProperty ("propQ",        mEq.getProportionalQ(), nullptr);
     state.setProperty ("autoGain",     mAutoGain,              nullptr);
@@ -338,5 +342,7 @@ void StripEq::setStateInformation (const void* data, int sz)
                  (float) xml->getDoubleAttribute ("outGain", 0.0),
                  xml->getBoolAttribute ("polarity", false),
                  juce::jlimit (0, 3, xml->getIntAttribute ("charMode", 0)),
-                 (float) xml->getDoubleAttribute ("charAmt", 0.5));
+                 (float) xml->getDoubleAttribute ("charAmt", 0.5),
+                 (float) xml->getDoubleAttribute ("curveScale", 100.0),
+                 (float) xml->getDoubleAttribute ("curveShift", 0.0));
 }

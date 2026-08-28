@@ -450,6 +450,15 @@ public:
 
         configureLinear();
 
+        // W-18 alignment ring, sized once for the deepest mode so a mode
+        // change never reallocates under the audio thread.
+        int maxLat = Oversampler<2>::latencySamples();
+        for (int mi = 0; mi < 8; ++mi)
+            maxLat = std::max (maxLat, eqLinearLatencySamples ((EqMode) mi));
+        deltaRingL.assign ((size_t) (maxLat + maxBlock + 1), 0.0f);
+        deltaRingR.assign ((size_t) (maxLat + maxBlock + 1), 0.0f);
+        deltaRingPos = 0;
+
         listenSvfL.prepare (sr);
         listenSvfR.prepare (sr);
 
@@ -467,6 +476,8 @@ public:
         autoGainLin = 1.0f;
         listenSvfL.reset();
         listenSvfR.reset();
+        lisInPow = lisOutPow = 0.0f; lisGain = 1.0f; lastListenBand = -1;
+        deltaWasOn = false;
         markAllDirty();
     }
 
@@ -552,6 +563,35 @@ public:
     }
     EqCharMode getCharMode() const { return charMode; }
     float getCharAmount() const { return charAmt; }
+
+    // W-11: whole-curve transforms.  scale multiplies every gain band's dB
+    // (negative inverts the curve), shiftSemis moves every design frequency.
+    // Live-safe: the IIR path follows through the glide targets, the linear
+    // modes rebuild their FIR the way any parameter change there does.  The
+    // band HANDLES stay at the user's set points - the curve moves.
+    void setCurveTransform (float scale, float shiftSemis)
+    {
+        scale = std::clamp (scale, -2.0f, 2.0f);
+        shiftSemis = std::clamp (shiftSemis, -24.0f, 24.0f);
+        if (scale == curveScale && shiftSemis == curveShiftSemis) return;
+        curveScale = scale;
+        curveShiftSemis = shiftSemis;
+        curveFreqMul = std::pow (2.0f, shiftSemis / 12.0f);
+        staticCurveDirty = true;
+    }
+    float getCurveScale() const { return curveScale; }
+    float getCurveShiftSemis() const { return curveShiftSemis; }
+
+    // W-18: delta listen - the output becomes out-minus-in, latency-aligned,
+    // so the ear hears exactly what the EQ is doing.  Any-thread, like the
+    // listen band; per-band delta is this composed with Isolate.
+    void setDeltaListen (bool on) { deltaListen.store (on, std::memory_order_relaxed); }
+    bool getDeltaListen() const { return deltaListen.load (std::memory_order_relaxed); }
+
+    // W-23: hold-to-audition one domain of the output (EqChannel values;
+    // stereo = off), both ears.  Any-thread, momentary by convention.
+    void setAuditionDomain (EqChannel c)
+        { auditionDomain.store ((int) c, std::memory_order_relaxed); }
 
     // A band auditioned on its own: the output becomes a band-pass at the
     // band's frequency and Q, which is also exactly what its dynamic detector
@@ -657,13 +697,13 @@ public:
                      + (b.p.rangeBDb < 0.0f ? extentB : 0.0f));
         else
             travel = b.p.rangeDb > 0.0f ? extent : -extent;
-        const float extentGain = b.p.gainDb + travel;
+        const float extentGain = xfGain (b.p) + travel;
 
         BiquadCoeffs cs[2];
         const float designSr = (float) ((oversampling && ! eqModeIsLinear (mode)) ? sr * 2.0 : sr);
         const double w = 2.0 * kPi * std::clamp ((double) hz, 1.0, sr * 0.499) / designSr;
         const int n = designBiquads (b.p, designSr, extentGain, cs,
-                                     b.p.freqHz, b.p.q);
+                                     xfFreq (b.p), b.p.q);
         double mag = 1.0, ph = 0.0, tot = 1.0;
         for (int k = 0; k < n; ++k)
         {
@@ -727,7 +767,8 @@ public:
     {
         if (numSamples <= 0) return;
 
-        if (charMode == EqCharMode::difference)
+        const bool deltaOn = deltaListen.load (std::memory_order_relaxed);
+        if (charMode == EqCharMode::difference || deltaOn)
         {
             std::copy (l, l + numSamples, dryL.begin());
             std::copy (r, r + numSamples, dryR.begin());
@@ -795,16 +836,37 @@ public:
         if (lb >= 0 && bands[(size_t) lb].p.on)
         {
             auto& b = bands[(size_t) lb];
-            listenSvfL.set (std::clamp (b.p.freqHz, 20.0f, (float) (sr * 0.45)),
-                            std::clamp (b.p.q, 0.5f, 20.0f));
-            listenSvfR.set (std::clamp (b.p.freqHz, 20.0f, (float) (sr * 0.45)),
-                            std::clamp (b.p.q, 0.5f, 20.0f));
+            if (lb != lastListenBand)
+            { lastListenBand = lb; lisInPow = lisOutPow = 0.0f; lisGain = 1.0f; }
+            const float lf = std::clamp (xfFreq (b.p), 20.0f, (float) (sr * 0.45));
+            listenSvfL.set (lf, std::clamp (b.p.q, 0.5f, 20.0f));
+            listenSvfR.set (lf, std::clamp (b.p.q, 0.5f, 20.0f));
+            // W-10: loudness-matched solo - the slice rides toward the
+            // program's own level so auditioning is not a level jump in
+            // either direction (the raw bp slice peaks at Q, so a narrow
+            // band arrives HOT).  Capped at +-24 dB: an empty band matched
+            // "exactly" would be a noise amplifier.
+            const float aLis = std::exp (-1.0f / (0.200f * (float) sr));
+            const float aG   = std::exp (-1.0f / (0.050f * (float) sr));
             for (int i = 0; i < nDet; ++i)
             {
-                l[i] = listenSvfL.process (detL[(size_t) i]).bp;
-                r[i] = listenSvfR.process (detR[(size_t) i]).bp;
+                const float sl0 = listenSvfL.process (detL[(size_t) i]).bp;
+                const float sr0 = listenSvfR.process (detR[(size_t) i]).bp;
+                const float pIn = std::max (std::abs (detL[(size_t) i]),
+                                            std::abs (detR[(size_t) i]));
+                const float pSl = std::max (std::abs (sl0), std::abs (sr0));
+                lisInPow  = aLis * lisInPow  + (1.0f - aLis) * pIn * pIn;
+                lisOutPow = aLis * lisOutPow + (1.0f - aLis) * pSl * pSl;
+                float want = 1.0f;
+                if (lisOutPow > 1.0e-10f && lisInPow > 1.0e-10f)
+                    want = std::clamp (std::sqrt (lisInPow / lisOutPow),
+                                       0.0625f, 16.0f);
+                lisGain = aG * lisGain + (1.0f - aG) * want;
+                l[i] = sl0 * lisGain;
+                r[i] = sr0 * lisGain;
             }
         }
+        else lastListenBand = -1;
 
         // W-14: per-band saturation - each armed band's slice, softened and
         // folded back, scaled by its amount.
@@ -871,6 +933,50 @@ public:
         }
 
         for (int i = 0; i < numSamples; ++i) { l[i] *= outLin; r[i] *= outLin; }
+
+        // W-18: output minus the latency-aligned input.  The ring only runs
+        // while delta is engaged; the enable edge clears it, so the first
+        // aligned window subtracts silence instead of stale history.
+        if (deltaOn)
+        {
+            if (! deltaWasOn)
+            {
+                std::fill (deltaRingL.begin(), deltaRingL.end(), 0.0f);
+                std::fill (deltaRingR.begin(), deltaRingR.end(), 0.0f);
+            }
+            const int lat = latencySamples();
+            const int ring = (int) deltaRingL.size();
+            if (lat + 1 <= ring)
+                for (int i = 0; i < numSamples; ++i)
+                {
+                    deltaRingL[(size_t) deltaRingPos] = dryL[(size_t) i];
+                    deltaRingR[(size_t) deltaRingPos] = dryR[(size_t) i];
+                    const int rd = (deltaRingPos - lat + ring) % ring;
+                    l[i] -= deltaRingL[(size_t) rd];
+                    r[i] -= deltaRingR[(size_t) rd];
+                    deltaRingPos = (deltaRingPos + 1) % ring;
+                }
+        }
+        deltaWasOn = deltaOn;
+
+        // W-23: hold-to-audition one domain - the output collapses to that
+        // component alone, in both ears.
+        switch ((EqChannel) auditionDomain.load (std::memory_order_relaxed))
+        {
+            case EqChannel::mid:
+                for (int i = 0; i < numSamples; ++i) l[i] = r[i] = 0.5f * (l[i] + r[i]);
+                break;
+            case EqChannel::side:
+                for (int i = 0; i < numSamples; ++i) l[i] = r[i] = 0.5f * (l[i] - r[i]);
+                break;
+            case EqChannel::left:
+                for (int i = 0; i < numSamples; ++i) r[i] = l[i];
+                break;
+            case EqChannel::right:
+                for (int i = 0; i < numSamples; ++i) l[i] = r[i];
+                break;
+            default: break;
+        }
 
         scValid = false;   // a sidechain is one block's worth of truth
         scSlotValid.fill (false);
@@ -963,6 +1069,13 @@ private:
         return true;
     }
 
+    // W-11: the transform every design and query reads through - one pair of
+    // functions so the audio, the FIR designer and the drawn curve can never
+    // disagree about where a band actually sits.
+    float xfFreq (const EqBandParams& p) const { return p.freqHz * curveFreqMul; }
+    float xfGain (const EqBandParams& p) const
+        { return eqTypeHasGain (p.type) ? p.gainDb * curveScale : p.gainDb; }
+
     // Placement splits a gain band's dB across the channels: full weight on
     // its own side, fading on the other. Gain types only - a filter has no
     // gain to split, which is why the editor hides placement there.
@@ -985,7 +1098,7 @@ private:
                        BiquadCoeffs* out,
                        float freqOverride = -1.0f, float qOverride = -1.0f) const
     {
-        const float fRaw = freqOverride > 0.0f ? freqOverride : p.freqHz;
+        const float fRaw = freqOverride > 0.0f ? freqOverride : xfFreq (p);
         const float qRaw = qOverride > 0.0f ? qOverride : p.q;
         const float f = std::clamp (fRaw, 20.0f, designSr * 0.497f);
         float qEff = qRaw;
@@ -1326,7 +1439,7 @@ private:
 
     void updateDetector (BandRt& b)
     {
-        const float f = std::clamp (b.p.freqHz, 20.0f, (float) (sr * 0.45));
+        const float f = std::clamp (xfFreq (b.p), 20.0f, (float) (sr * 0.45));
         const float q = std::clamp (b.p.q, 0.3f, 20.0f);
         const auto c = eqdesign::bandPass (f, sr, q);
         b.detFL.setCoeffs (c);
@@ -1420,8 +1533,8 @@ private:
                     b.modFreqMul = 1.0f; b.modGainAdd = 0.0f; b.modQMul = 1.0f;
                 }
 
-                const float tgtF = b.p.freqHz * b.modFreqMul;
-                const float tgtG = b.p.gainDb + b.modGainAdd;
+                const float tgtF = xfFreq (b.p) * b.modFreqMul;
+                const float tgtG = xfGain (b.p) + b.modGainAdd;
                 const float tgtQ = std::clamp (b.p.q * b.modQMul, 0.1f, 30.0f);
 
                 bool moved = false;
@@ -1544,7 +1657,7 @@ private:
                 return hzInsideBrickwall (p, hz) ? 1.0 : 1.0e-6;
 
             const float slopeDb = brick ? 96.0f : std::clamp (p.slope, 1.0f, 96.0f);
-            const double fc = std::clamp ((double) p.freqHz, 20.0, designSr * 0.45);
+            const double fc = std::clamp ((double) xfFreq (p), 20.0, designSr * 0.45);
             const double Om = std::tan (w / 2.0) / std::tan (kPi * fc / designSr);
             double mag = 1.0;
 
@@ -1610,7 +1723,7 @@ private:
         (void) channel;
         const bool modLive = withDynamic && ! eqModeIsLinear (mode)
             && (p.lfoDepth > 0.001f || std::abs (p.envDepth) > 0.001f);
-        float g = modLive ? b.cGain : p.gainDb;
+        float g = modLive ? b.cGain : xfGain (p);
         if (withDynamic && p.dynamic && eqTypeSupportsDynamic (p.type)
             && ! (p.spectral && eqModeIsLinear (mode)))
             g += b.grSmooth;
@@ -1640,7 +1753,7 @@ private:
                                     ? 96.0f : std::clamp (p.slope, 1.0f, 96.0f);
             const int poles = (int) (slopeDb / 6.0f + 1.0e-4f);
             const float rem = slopeDb - 6.0f * (float) poles;
-            const double fc = std::clamp ((double) p.freqHz, 20.0, designSr * 0.45);
+            const double fc = std::clamp ((double) xfFreq (p), 20.0, designSr * 0.45);
             const double Om = std::tan (w / 2.0) / std::tan (kPi * fc / designSr);
             double ph = 0.0;
 
@@ -1679,7 +1792,7 @@ private:
         float wl, wr;
         placementWeights (p, wl, wr);
         BiquadCoeffs cs[2];
-        const int n = designBiquads (p, designSr, p.gainDb * std::max (wl, wr), cs);
+        const int n = designBiquads (p, designSr, xfGain (p) * std::max (wl, wr), cs);
         double mag = 1.0, phs = 0.0, tot = 0.0;
         for (int i = 0; i < n; ++i)
         {
@@ -1691,10 +1804,11 @@ private:
 
     bool hzInsideBrickwall (const EqBandParams& p, float hz) const
     {
-        if (p.type == EqType::lowPass)  return hz <= p.freqHz;
-        if (p.type == EqType::highPass) return hz >= p.freqHz;
-        const float half = p.freqHz / std::max (0.35f, p.q) * 0.5f;
-        return std::abs (hz - p.freqHz) <= half;
+        const float f0 = xfFreq (p);
+        if (p.type == EqType::lowPass)  return hz <= f0;
+        if (p.type == EqType::highPass) return hz >= f0;
+        const float half = f0 / std::max (0.35f, p.q) * 0.5f;
+        return std::abs (hz - f0) <= half;
     }
 
     // ── linear plumbing ───────────────────────────────────────────────────
@@ -2063,6 +2177,22 @@ private:
     float outGainDb = 0.0f;
     bool polarityFlip = false;
     std::atomic<int> listenBand { -1 };
+
+    // W-11 whole-curve transforms.
+    float curveScale = 1.0f, curveShiftSemis = 0.0f, curveFreqMul = 1.0f;
+
+    // W-18 delta listen + its alignment ring (sized at prepare).
+    std::atomic<bool> deltaListen { false };
+    bool deltaWasOn = false;
+    std::vector<float> deltaRingL, deltaRingR;
+    int deltaRingPos = 0;
+
+    // W-10 loudness-matched solo followers.
+    int lastListenBand = -1;
+    float lisInPow = 0.0f, lisOutPow = 0.0f, lisGain = 1.0f;
+
+    // W-23 domain audition (EqChannel as int; stereo = off).
+    std::atomic<int> auditionDomain { 0 };
     bool anyIsolated = false;
 
     Oversampler<2> osL, osR;

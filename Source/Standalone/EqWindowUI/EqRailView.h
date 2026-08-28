@@ -16,6 +16,38 @@
 
 namespace eqview {
 
+// W-5: "A4", "C#2", "Bb3", "C#2+13" (cents) as frequency entry.  Returns the
+// Hz, or -1 when the text is not a note name.
+inline float parseNoteNameHz (const juce::String& in)
+{
+    auto s = in.trim().toUpperCase().removeCharacters (" ");
+    if (s.isEmpty()) return -1.0f;
+    static const int pcOf[7] = { 9, 11, 0, 2, 4, 5, 7 };   // A..G
+    const auto c0 = s[0];
+    if (c0 < 'A' || c0 > 'G') return -1.0f;
+    int pc = pcOf[(int) (c0 - 'A')];
+    int i = 1;
+    const int len = s.length();
+    if (i < len && s[i] == '#') { ++pc; ++i; }
+    else if (i + 1 < len && s[i] == 'B'
+             && (juce::CharacterFunctions::isDigit (s[i + 1]) || s[i + 1] == '-'))
+    { --pc; ++i; }                                          // flat, not the note B
+    int j = i;
+    if (j < len && s[j] == '-') ++j;
+    int k = j;
+    while (k < len && juce::CharacterFunctions::isDigit (s[k])) ++k;
+    if (k == j) return -1.0f;
+    const int oct = s.substring (i, k).getIntValue();
+    float cents = 0.0f;
+    if (k < len)
+    {
+        if (s[k] != '+' && s[k] != '-') return -1.0f;
+        cents = (float) s.substring (k).getIntValue();
+    }
+    const float midi = (float) ((oct + 1) * 12 + pc) + cents / 100.0f;
+    return 440.0f * std::pow (2.0f, (midi - 69.0f) / 12.0f);
+}
+
 // ── a draggable number field ───────────────────────────────────────────────
 class DragNumber : public juce::Component,
                    public juce::SettableTooltipClient
@@ -24,6 +56,7 @@ public:
     std::function<float()> get;
     std::function<void (float)> set;
     std::function<juce::String (float)> format;
+    std::function<float (const juce::String&)> parse;   // typed-text override
     float dragScale = 1.0f;
     bool logDrag = false;
 
@@ -43,7 +76,12 @@ public:
         value.onTextChange = [this]
         {
             if (set && get)
-                set (value.getText().retainCharacters ("0123456789.-").getFloatValue());
+            {
+                float v = parse ? parse (value.getText()) : -1.0f;
+                if (v <= 0.0f)
+                    v = value.getText().retainCharacters ("0123456789.-").getFloatValue();
+                set (v);
+            }
             refresh();
         };
         value.setInterceptsMouseClicks (false, false);
@@ -56,6 +94,12 @@ public:
     {
         if (get && format)
             value.setText (format (get()), juce::dontSendNotification);
+    }
+
+    void setLabelText (const juce::String& t)
+    {
+        if (t != label.getText())
+            label.setText (t, juce::dontSendNotification);
     }
 
     void resized() override
@@ -98,7 +142,8 @@ private:
 
 // ── a row of exclusive segments, each with its own tooltip ─────────────────
 class SegmentRow : public juce::Component,
-                   public juce::TooltipClient
+                   public juce::TooltipClient,
+                   private juce::Timer
 {
 public:
     struct Seg { juce::String glyph, text, tip; };
@@ -107,6 +152,10 @@ public:
 
     std::function<int()> get;
     std::function<void (int)> set;
+    // W-23: fires (index, true) after the press has been held ~a third of a
+    // second, (index, false) on release.  A quick click never triggers it,
+    // so the plain switch gesture is untouched.
+    std::function<void (int, bool)> onHold;
 
     juce::Rectangle<float> cellRect (int i) const
     {
@@ -159,8 +208,18 @@ public:
     void mouseDown (const juce::MouseEvent& e) override
     {
         if (segs.empty() || ! set) return;
-        set (indexAt (e.position));
+        const int idx = indexAt (e.position);
+        set (idx);
+        if (onHold) { heldIdx = idx; startTimer (300); }
         repaint();
+    }
+
+    void mouseUp (const juce::MouseEvent&) override
+    {
+        stopTimer();
+        if (holdActive && onHold) onHold (heldIdx, false);
+        holdActive = false;
+        heldIdx = -1;
     }
 
     juce::String getTooltip() override
@@ -177,7 +236,15 @@ private:
         return 0;
     }
 
+    void timerCallback() override
+    {
+        stopTimer();
+        if (onHold && heldIdx >= 0) { holdActive = true; onHold (heldIdx, true); }
+    }
+
     juce::Point<float> hoverAt;
+    int heldIdx = -1;
+    bool holdActive = false;
     juce::SharedResourcePointer<fontaudio::IconHelper> icons;
 };
 
@@ -325,6 +392,22 @@ public:
         g.setFont (juce::Font (juce::FontOptions (14.0f, juce::Font::bold)));
         g.drawText ("+", add, juce::Justification::centred);
 
+        // W-20: the morph strip - a track with a spring-back thumb.
+        {
+            auto mr = morphArea();
+            auto track = mr.withSizeKeepingCentre (mr.getWidth() - 8.0f, 3.0f);
+            g.setColour (VC::Surface.darker (0.3f));
+            g.fillRoundedRectangle (track, 1.5f);
+            const float tx = track.getX() + track.getWidth()
+                                * juce::jlimit (0.0f, 1.0f, morphT);
+            g.setColour (morphActive ? VC::Yellow : VC::Accent.withAlpha (0.8f));
+            g.fillEllipse (tx - 4.0f, mr.getCentreY() - 4.0f, 8.0f, 8.0f);
+            g.setColour (VC::TextDim.withAlpha (0.8f));
+            g.setFont (juce::Font (juce::FontOptions (6.5f, juce::Font::bold)));
+            g.drawText ("A", mr.removeFromLeft (7.0f), juce::Justification::centredLeft);
+            g.drawText ("B", mr.removeFromRight (7.0f), juce::Justification::centredRight);
+        }
+
         // The A/B pill (SC-16): lit while the B bank is in view.
         const bool onB = isViewingB && isViewingB();
         auto ab = abArea();
@@ -349,6 +432,14 @@ public:
 
     void mouseDown (const juce::MouseEvent& e) override
     {
+        if (morphArea().contains (e.position) && ! e.mods.isPopupMenu())
+        {
+            morphBegin();
+            morphActive = true;
+            morphDragTo (e.position.x);
+            return;
+        }
+
         if (abArea().contains (e.position))
         {
             if (e.mods.isPopupMenu())
@@ -424,6 +515,19 @@ public:
         graph.selectBand (b);
     }
 
+    void mouseDrag (const juce::MouseEvent& e) override
+    {
+        if (morphActive) morphDragTo (e.position.x);
+    }
+
+    void mouseUp (const juce::MouseEvent&) override
+    {
+        if (! morphActive) return;
+        morphActive = false;
+        morphT = 0.0f;             // spring back: what you hear stays
+        repaint();
+    }
+
     void mouseDoubleClick (const juce::MouseEvent& e) override
     {
         const int b = chipAt (e.position);
@@ -443,6 +547,10 @@ public:
         if (abArea().contains (hoverAt))
             return "A/B compare: click swaps the two setups, right-click "
                    "copies or locks them.";
+        if (morphArea().contains (hoverAt))
+            return "Morph: drag the thumb to blend this setup toward the "
+                   "other bank. Release keeps what you hear; Undo takes the "
+                   "whole morph back.";
         if (addArea().contains (hoverAt)) return "Add a band";
         if (lastVisiblePage() > 0
             && (arrowUpArea().contains (hoverAt) || arrowDownArea().contains (hoverAt)))
@@ -458,7 +566,7 @@ public:
     }
 
 private:
-    static constexpr int kRightControls = 54;   // "+" plus the A/B pill
+    static constexpr int kRightControls = 104;  // morph strip, "+", A/B pill
     static constexpr int kPageSize = 24;
     static constexpr int kArrowW = 14;
 
@@ -515,6 +623,64 @@ private:
         return { (float) getWidth() - 52.0f, 2.0f, 24.0f, (float) getHeight() - 4.0f };
     }
 
+    juce::Rectangle<float> morphArea() const
+    {
+        return { (float) getWidth() - 102.0f, 4.0f, 46.0f, (float) getHeight() - 8.0f };
+    }
+
+    // W-20: one gesture morphs the live bank toward the spare.  The drag
+    // starts from a SNAPSHOT of both banks, writes interpolated parameters
+    // through the graph's one id spelling (one undo step), and the thumb
+    // springs back on release - the morphed state IS the new A.
+    void morphBegin()
+    {
+        auto* e = graph.eq();
+        if (e == nullptr) return;
+        morphBands.clear(); morphSrc.clear(); morphDst.clear();
+        for (int b = 0; b < EqGraphView::kBands; ++b)
+        {
+            const auto a = e->getBand (b);
+            const auto s = e->getSpareBand (b);
+            if (! a.on && ! s.on) continue;
+            const bool differ = a.on != s.on || a.type != s.type
+                || a.channel != s.channel
+                || std::abs (a.freqHz - s.freqHz) > 0.01f
+                || std::abs (a.gainDb - s.gainDb) > 0.001f
+                || std::abs (a.q - s.q) > 0.0001f
+                || std::abs (a.slope - s.slope) > 0.01f
+                || std::abs (a.placement - s.placement) > 0.001f;
+            if (! differ) continue;
+            morphBands.push_back (b);
+            morphSrc.push_back (a);
+            morphDst.push_back (s);
+        }
+        if (! morphBands.empty())
+            beginParamUndoGesture (graph.processor().apvts,
+                                   graph.paramId (morphBands[0], "gain"));
+    }
+
+    void morphApply (float t)
+    {
+        for (size_t i = 0; i < morphBands.size(); ++i)
+        {
+            const int b = morphBands[i];
+            const auto& a = morphSrc[i];
+            const auto& s = morphDst[i];
+            const auto& d = t < 0.5f ? a : s;   // discrete fields snap halfway
+            graph.setBandValue (b, "on",   d.on ? 1.0f : 0.0f);
+            graph.setBandValue (b, "type", (float) (int) d.type);
+            graph.setBandValue (b, "chan", (float) (int) d.channel);
+            graph.setBandValue (b, "freq",
+                a.freqHz * std::pow (s.freqHz / std::max (1.0f, a.freqHz), t));
+            graph.setBandValue (b, "gain", a.gainDb + (s.gainDb - a.gainDb) * t);
+            graph.setBandValue (b, "q",
+                a.q * std::pow (s.q / std::max (0.05f, a.q), t));
+            graph.setBandValue (b, "slope", a.slope + (s.slope - a.slope) * t);
+            graph.setBandValue (b, "place",
+                a.placement + (s.placement - a.placement) * t);
+        }
+    }
+
     juce::Rectangle<float> abArea() const
     {
         return { (float) getWidth() - 26.0f, 4.0f, 24.0f, (float) getHeight() - 8.0f };
@@ -529,9 +695,22 @@ private:
         repaint();
     }
 
+    void morphDragTo (float x)
+    {
+        const auto mr = morphArea();
+        morphT = juce::jlimit (0.0f, 1.0f,
+                               (x - (mr.getX() + 4.0f)) / (mr.getWidth() - 8.0f));
+        morphApply (morphT);
+        repaint();
+    }
+
     EqGraphView& graph;
     int page = 0, lastSelected = -1;
     juce::Point<float> hoverAt;
+    bool morphActive = false;
+    float morphT = 0.0f;
+    std::vector<int> morphBands;
+    std::vector<kbs::EqBandParams> morphSrc, morphDst;
     juce::SharedResourcePointer<fontaudio::IconHelper> icons;
 };
 
@@ -603,7 +782,9 @@ public:
         wireNumber (freq, "freq", true, 0.006f,
                     [] (float v) { return v >= 1000.0f ? juce::String (v / 1000.0f, 2) + "k"
                                                        : juce::String (v, 1); });
-        freq.setTooltip ("The band's frequency. Drag, or double-click to type.");
+        freq.parse = [] (const juce::String& t) { return parseNoteNameHz (t); };
+        freq.setTooltip ("The band's frequency. Drag, or double-click to type "
+                         "- a number, or a note name like A4 or C#2+13.");
         wireNumber (q, "q", true, 0.008f,
                     [] (float v) { return juce::String (v, 2); });
         q.setTooltip ("Width. Higher is narrower. The wheel over the band's "
@@ -1138,6 +1319,10 @@ private:
         const int b = graph.selectedBand();
         const bool show = b >= 0;
         const auto p = show ? graph.bandParams (b) : kbs::EqBandParams();
+
+        // W-5: the FREQ caption doubles as the live note name.
+        freq.setLabelText (show ? EqGraphView::noteName (p.freqHz)
+                                : juce::String ("FREQ"));
 
         // Component ids carry the param spelling so the app's global
         // right-click (Automate / Type in value / MIDI Learn) reaches these

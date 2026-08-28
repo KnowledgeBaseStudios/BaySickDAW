@@ -5626,7 +5626,9 @@ void BaySickDAWProcessor::updateEQFromCache (StripEq* eq, int stripSlot, int ban
                          gget (eqGlobOutGain, 0.f),
                          gget (eqGlobPolarity, 0.f) > 0.5f,
                          (int) gget (eqGlobCharMode, 0.f),
-                         gget (eqGlobCharAmt, 0.5f));
+                         gget (eqGlobCharAmt, 0.5f),
+                         gget (eqGlobCurveScale, 100.f),
+                         gget (eqGlobCurveShift, 0.f));
     }
 }
 
@@ -7623,7 +7625,7 @@ namespace EqBandIds
     // (SC-15: they reallocate, so they apply on the shielded path).
     static const char* const kGlobalSuffixes[] = {
         "propq", "autogain", "agamt", "outgain", "polarity",
-        "charmode", "charamt"
+        "charmode", "charamt", "curvescale", "curveshift"
     };
     static const char* const kBankSubs[] = { "eq_", "preeq_" };
 
@@ -7701,6 +7703,8 @@ namespace
         dynB (apvts, ids, gid ("polarity"), labelBase + "Polarity",         false);
         dynI (apvts, ids, gid ("charmode"), labelBase + "Color",            0, 3, 0);
         dynF (apvts, ids, gid ("charamt"),  labelBase + "Color Amount",     0.f, 1.f, 0.5f);
+        dynF (apvts, ids, gid ("curvescale"), labelBase + "Curve Scale",    -200.f, 200.f, 100.f);
+        dynF (apvts, ids, gid ("curveshift"), labelBase + "Curve Shift",    -24.f, 24.f, 0.f);
     }
 } // namespace
 

@@ -242,3 +242,47 @@ EqTests section 20 (LFO measurably swings the band between half-cycle
 windows, negative env depth ducks the boost on hot vs quiet material,
 zero-depth bit-near static) green; suite green; gate six zeros + four
 links, clean first run.
+
+## 2026-08-27 - Task 8 - the workflow cluster (W-4/5/10/11/16/17/18/20/23)
+
+Nine features in one pass, engine first. ENGINE: whole-curve transforms
+(W-11) as two new bank globals (curvescale -200..+200% / curveshift -24..
++24 st) riding the sweep - ONE pair of xfFreq/xfGain helpers is the choke
+point every design AND query reads through (designBiquads' freq fallback,
+glide targets, extent, detector, listen, brickwall edges, bandMagnitude/
+bandPhase), so the audio, the FIR designer and the drawn curve cannot
+disagree; handles stay at the user's set points, the curve moves. Delta
+listen (W-18): out-minus-in with a latency-alignment ring sized once at
+prepare for the deepest mode (no audio-thread allocation; the enable edge
+clears it); per-band delta = delta composed with Isolate, no second
+machinery. Loudness-matched solo (W-10): the listen slice rides paired
+200 ms power followers toward the program's level, +-24 dB cap - found by
+test: the raw bp slice peaks at Q, so the match must CUT as well as boost
+(the first clamp was boost-only and a Q=2 solo sat +6 dB hot). Domain
+audition (W-23): atomic EqChannel collapse at the output tail.
+
+UI: multi-select (W-16) - rubber-band on empty space + Ctrl+click
+curation, companions ride drags as a shape (freq as ratio, gain as offset,
+Alt = proportional scale; Alt-reset preserved for lone dots), persistent
+linked groups serialized in the view tree ("links" string, cached parse);
+Split to Left + Right (W-17) via writeBandParams (all 31 fields); EQ
+Sketch (W-4) - menu-armed stroke -> greedy peel in octave/dB space (bells
+with Q read off the stroke width, edge-holding peaks become shelves), one
+undo step; piano strip clickable (W-5) - click snaps the selected band to
+the note (or births one), FREQ caption doubles as the live note name,
+freq field accepts note-name entry (A4, Bb2, C#2+13); A/B morph strip
+(W-20) in the chip row - drag blends the live bank toward the spare from
+a gesture-start snapshot (freq/Q log, gain/slope/place linear, discrete
+snap at halfway), thumb springs back, one undo step; hold MID/SIDE
+(W-23) auditions the domain via a 300 ms SegmentRow hold hook (a quick
+click switches views exactly as before); Whole Curve + Delta Listen +
+Sketch entries in the window menu.
+
+FOUND + FIXED in passing (Task 6 straggler): menu id 182 was BOTH the
+Color submenu's "Warm" and "Reset All Bands" - the color branch ate the
+click, so Reset All silently set the color to Warm and never reset.
+Reset All now lives at 166. EqTests section 21 (8 checks: exact -100%
+inversion, log-exact +12 st shift, flat-EQ delta null, delta of a +6
+bell = the added part, mono side-audition silence, mid = the tone,
+matched solo within 2 dB) green; suite green; gate six zeros + four
+links, clean first build.

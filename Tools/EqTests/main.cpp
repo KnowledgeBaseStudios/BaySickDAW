@@ -1642,6 +1642,154 @@ int main()
                   "zero depths leave the band its plain static self");
         }
     }
+    // ---- 21. QA-EqFlagship Task 8: transforms, delta, domains, matched solo
+    std::printf ("%s", "\n  21. curve transforms + delta + domain audition\n");
+    {
+        const double srr = 48000.0;
+
+        // Scale -100% inverts the curve exactly: the +6 bell reads -6.
+        {
+            kbs::ParametricEq eq;
+            eq.prepare (srr, 256);
+            kbs::EqBandParams b;
+            b.on = true; b.type = kbs::EqType::bell;
+            b.freqHz = 1000.0f; b.gainDb = 6.0f; b.q = 1.0f;
+            eq.setBand (0, b);
+            const double before = 20.0 * std::log10 (eq.bandMagnitudeAt (0, 1000.0f));
+            eq.setCurveTransform (-1.0f, 0.0f);
+            const double after = 20.0 * std::log10 (eq.bandMagnitudeAt (0, 1000.0f));
+            near (before, 6.0, 0.05, "the bell reads +6 before");
+            near (after, -before, 0.02, "scale -100% inverts it exactly");
+        }
+
+        // Shift +12 semitones moves the response one octave, log-exactly.
+        {
+            kbs::ParametricEq eq;
+            eq.prepare (srr, 256);
+            kbs::EqBandParams b;
+            b.on = true; b.type = kbs::EqType::bell;
+            b.freqHz = 1000.0f; b.gainDb = 6.0f; b.q = 2.0f;
+            eq.setBand (0, b);
+            const double at1k = 20.0 * std::log10 (eq.bandMagnitudeAt (0, 1000.0f));
+            eq.setCurveTransform (1.0f, 12.0f);
+            const double at2k = 20.0 * std::log10 (eq.bandMagnitudeAt (0, 2000.0f));
+            near (at2k, at1k, 0.05, "shift +12 st puts 1 kHz's response at 2 kHz");
+        }
+
+        // Delta on a FLAT EQ is silence: nothing changed, nothing to hear.
+        {
+            kbs::ParametricEq eq;
+            eq.prepare (srr, 256);
+            eq.setDeltaListen (true);
+            std::vector<float> L (256), R (256);
+            double acc = 0.0;
+            for (int bl = 0; bl < 20; ++bl)
+            {
+                for (int i = 0; i < 256; ++i)
+                    L[(size_t) i] = R[(size_t) i]
+                        = (float) (0.3 * std::sin (0.13 * (bl * 256 + i)));
+                eq.process (L.data(), R.data(), 256);
+                if (bl >= 4)
+                    for (int i = 0; i < 256; ++i)
+                        acc = std::max (acc, (double) std::abs (L[(size_t) i]));
+            }
+            check (acc < 1.0e-5, "delta on a flat EQ nulls", acc, 0.0);
+        }
+
+        // Delta with a +6 bell at the tone: what remains is the ADDED part,
+        // (10^(6/20) - 1) times the input.
+        {
+            kbs::ParametricEq eq;
+            eq.prepare (srr, 256);
+            kbs::EqBandParams b;
+            b.on = true; b.type = kbs::EqType::bell;
+            b.freqHz = 1000.0f; b.gainDb = 6.0f; b.q = 1.0f;
+            eq.setBand (0, b);
+            eq.setDeltaListen (true);
+            std::vector<float> L (256), R (256), tail;
+            double phase = 0.0;
+            for (int bl = 0; bl < 60; ++bl)
+            {
+                for (int i = 0; i < 256; ++i)
+                {
+                    phase += 2.0 * kbs::kPi * 1000.0 / srr;
+                    L[(size_t) i] = R[(size_t) i] = (float) (0.1 * std::sin (phase));
+                }
+                eq.process (L.data(), R.data(), 256);
+                if (bl >= 30) tail.insert (tail.end(), L.begin(), L.end());
+            }
+            const double period = srr / 1000.0;
+            const size_t whole = (size_t) (std::floor ((double) tail.size() / period) * period);
+            tail.resize (std::max<size_t> (whole, (size_t) period));
+            const double got = levelAt (tail, 1000.0, srr, 0) / 0.1;
+            const double expect = std::pow (10.0, 6.0 / 20.0) - 1.0;
+            near (20.0 * std::log10 (got), 20.0 * std::log10 (expect), 0.5,
+                  "delta of a +6 bell is the added part alone");
+        }
+
+        // Domain audition: a mono tone has no side - side audition is
+        // silence, mid audition is the tone itself.
+        {
+            for (int domain = 0; domain < 2; ++domain)
+            {
+                kbs::ParametricEq eq;
+                eq.prepare (srr, 256);
+                eq.setAuditionDomain (domain == 0 ? kbs::EqChannel::side
+                                                  : kbs::EqChannel::mid);
+                std::vector<float> L (256), R (256), tail;
+                double phase = 0.0;
+                for (int bl = 0; bl < 20; ++bl)
+                {
+                    for (int i = 0; i < 256; ++i)
+                    {
+                        phase += 2.0 * kbs::kPi * 1000.0 / srr;
+                        L[(size_t) i] = R[(size_t) i] = (float) (0.1 * std::sin (phase));
+                    }
+                    eq.process (L.data(), R.data(), 256);
+                    if (bl >= 8) tail.insert (tail.end(), L.begin(), L.end());
+                }
+                const double period = srr / 1000.0;
+                const size_t whole = (size_t) (std::floor ((double) tail.size() / period) * period);
+                tail.resize (std::max<size_t> (whole, (size_t) period));
+                const double db = 20.0 * std::log10 (
+                    std::max (1.0e-9, levelAt (tail, 1000.0, srr, 0) / 0.1));
+                if (domain == 0)
+                    check (db < -80.0, "side audition of a mono tone is silence",
+                           db, -80.0);
+                else
+                    near (db, 0.0, 0.1, "mid audition of a mono tone is the tone");
+            }
+        }
+
+        // Loudness-matched solo: listening to the band AT the tone keeps the
+        // audition within a couple of dB of the program it replaced.
+        {
+            kbs::ParametricEq eq;
+            eq.prepare (srr, 256);
+            kbs::EqBandParams b;
+            b.on = true; b.type = kbs::EqType::bell;
+            b.freqHz = 1000.0f; b.gainDb = 0.0f; b.q = 2.0f;
+            eq.setBand (0, b);
+            eq.setListenBand (0);
+            std::vector<float> L (256), R (256), tail;
+            double phase = 0.0;
+            for (int bl = 0; bl < 120; ++bl)
+            {
+                for (int i = 0; i < 256; ++i)
+                {
+                    phase += 2.0 * kbs::kPi * 1000.0 / srr;
+                    L[(size_t) i] = R[(size_t) i] = (float) (0.1 * std::sin (phase));
+                }
+                eq.process (L.data(), R.data(), 256);
+                if (bl >= 80) tail.insert (tail.end(), L.begin(), L.end());
+            }
+            const double period = srr / 1000.0;
+            const size_t whole = (size_t) (std::floor ((double) tail.size() / period) * period);
+            tail.resize (std::max<size_t> (whole, (size_t) period));
+            const double db = 20.0 * std::log10 (levelAt (tail, 1000.0, srr, 0) / 0.1);
+            near (db, 0.0, 2.0, "matched solo holds the program's loudness");
+        }
+    }
     std::printf (failures == 0 ? "\n  all checks passed\n\n" : "\n  %d FAILURE(S)\n\n", failures);
     return failures == 0 ? 0 : 1;
 }
