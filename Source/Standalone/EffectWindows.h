@@ -182,6 +182,11 @@ public:
     // re-registration.
     void retargetTo (int channelId, bool pre);
 
+    // QA-ManualPress: the shot harness selects bands, pumps the analyser and
+    // overlays panels on the graph - headless there is no timer to do it.
+    eqview::EqGraphView* graphForShot() { return mGraph.get(); }
+    eqview::EqRailView*  railForShot()  { return mRail.get(); }
+
     void resized() override;
     void parentHierarchyChanged() override;
 

@@ -15,4 +15,7 @@ namespace shots
     std::unique_ptr<juce::Component> makeFileSettingsComponent();
     std::unique_ptr<juce::Component> makeExportAudioDialog (BuilderPage& builder,
                                                             BaySickDAWProcessor& proc);
+    // The dialog enumerates device types/names without opening anything; a
+    // never-initialised manager is its designed input.
+    std::unique_ptr<juce::Component> makeAudioSettingsComponent (juce::AudioDeviceManager& dm);
 }

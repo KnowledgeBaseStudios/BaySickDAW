@@ -111,11 +111,12 @@ UndoHistoryWindow::UndoHistoryWindow(juce::UndoManager&               manager,
                                      const std::deque<juce::String>&  labels,
                                      const int&                        cursor,
                                      std::function<void()>             globalUndo,
-                                     std::function<void()>             globalRedo)
+                                     std::function<void()>             globalRedo,
+                                     bool                              showOnConstruct)
     : juce::DocumentWindow("Undo History",
                             VC::Panel,
                             juce::DocumentWindow::closeButton,
-                            true)
+                            showOnConstruct)
     , mManager(manager)
     , mLabels(labels)
     , mCursor(cursor)
@@ -129,6 +130,8 @@ UndoHistoryWindow::UndoHistoryWindow(juce::UndoManager&               manager,
     mContent = content;
     setContentOwned(content, false);
     setSize(220, 400);
+    if (showOnConstruct)
+    {
     centreWithSize(220, 400);
     setVisible(true);
     // TS7 §9.4: the always-on-top flag that used to be here is gone.  It was
@@ -137,6 +140,7 @@ UndoHistoryWindow::UndoHistoryWindow(juce::UndoManager&               manager,
     // relationship (WindowChrome::ownToMainWindow, applied by the editor once
     // this window exists) is what actually solves it.
     toFront(true);
+    }
 
     mManager.addChangeListener(this);
 }

@@ -55,3 +55,62 @@ master was captured after a click; ours documents the true fresh state
 (diff-sheet note). Export Audio's "Check against" reads Jeff's live
 ui_prefs.xml (machine state, same as any hand shot). Gate six zeros +
 four links twice (initial + fix pass for ribbon width and the stem entry).
+
+## 2026-08-28 - Task 2 - state-rich figures
+
+32 more figures; the suite now runs all 49 in ~25 seconds, 0 failed.
+Fifteen shoot functions covering the whole Bucket A recon: effects
+cluster (empty rack first, then DeEsser + Reverb loaded, Basic off, and
+the panel + visual windows composed into one host at the app's stacking),
+mixer (bass channel added then mVibeGraph.rebuildRoutingFromApvts - the
+cables only exist after a routing rebuild; strip crop adds Vox + Inst
+channels for the live-input strip types), VU meter, Builder (pattern
+manager content BEFORE the page constructor: named rows, placed blocks,
+marker/timesig/tempo changes, a NoopAction so Undo enables, playhead
+parked mid-ruler), Piano Roll (notes straight into bassRoll[0] + a
+hand-built PianoRollConnection), Event Editor (an Automation block with a
+mixer_master_fader lane + the browser pane's resolve hook), Undo History,
+BaySickPlayer, the vox family (five windows off one editor; channel-id +
+composite-render hooks BEFORE hosting), the rusty family (Core Library
+full kit + the seven section tabs via the panel hook), Drum Kit grid,
+Guitars/Basses (kits loaded BEFORE InstPage so setSource sees them), the
+EQ cluster (real pre-EQ StripEq on master, six bands incl. a dynamic
+bell, 48 noise blocks interleaved with graph polls so the analyzer +
+GR are live; channels 1/2 get post bands for the instance browser),
+analyzer, plugin search, audio settings.
+
+Hooks: AriaControlPanel::selectTabForShot (its tab buttons ride
+callAsync - dead headless), BaySickRustyDrumsPage::getAriaPanelForShot,
+UndoHistoryWindow grew a showOnConstruct ctor flag, EffectEqWindow
+graphForShot/railForShot, EqInstanceBrowser::pollForShot (rows only build
+in its visibility-gated timer), shots::makeAudioSettingsComponent over
+the file-scope dialog class. Compile lessons: BaySickRustyDrumsPage.h
+only forward-declares AriaControlPanel; BaySickVocalEditor must come from
+createEditor() - its panel types are complete only in its own TU, so a
+by-value editor cannot destruct anywhere else.
+
+Timer findings: sfizz kit loads are SYNCHRONOUS headless (no waits); the
+vox family needs the batch's ONE timer pump (sleep 550ms then
+callPendingTimersSynchronously - pitch's analyze callAfterDelay, vocals'
+10Hz readout, align's preset mirror); the EQ rail syncs everything in its
+own timer, so headless it kept construction-state visibility - FREQ/Q
+blank and SLOPE/PHASE rows painting on a bell band. railForShot +
+pollNow x2 fixed it: live note caption (W-5), filled value boxes,
+conditional rows matching the live app.
+
+Fix pass: the tab-slot pill's dropdown glyph mojibake'd - the literal
+UTF-8 arrow got double-encoded somewhere in the patch pipeline; the
+"\xe2\x96\xbe" escape spelling (Task 1's transport button already used
+it) is immune. Both pill sites re-spelled.
+
+Verified sample: 16 of the 32 eyeballed against masters. Mixer is
+pixel-parity including the cable highlights; BaySickPitch matches its
+master INCLUDING the ANALYSIS FAILED badge + raw-float readouts (the
+master shows the same); Rusty Main, Vocal Chain (all six stage skins),
+Event Editor, Effects Panel with Visual all land. Diff-sheet notes:
+Builder is now state-rich where the old master was an empty grid (named
+tracks + placed blocks per the plan's brief); EQ Instances.png is NEW
+(QA-EqFlagship browser, no prior master); Audio & Midi Settings
+enumerates the live machine's devices, same as any hand shot. Gate six
+zeros + four links x3 to green (two compile fixes, then the fix pass +
+glyph respins).

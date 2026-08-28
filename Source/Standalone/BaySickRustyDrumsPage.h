@@ -135,6 +135,11 @@ private:
     std::unique_ptr<juce::Component>                mPlayerTab;
     std::unique_ptr<AriaControlPanel>               mAriaPanel;
 
+    // QA-ManualPress: the shot harness drives the panel's section tabs.
+public:
+    AriaControlPanel* getAriaPanelForShot() { return mAriaPanel.get(); }
+private:
+
     // ── Tab 2: Piano Roll (redirect - no local content, handled by editor) ─
     std::unique_ptr<juce::Component>                mPianoRollTab;
     std::unique_ptr<juce::Label>                    mPianoRollPlaceholder;

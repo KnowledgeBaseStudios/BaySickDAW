@@ -78,6 +78,10 @@ public:
     // content is the section tab row (laid by resized()), not hosted widgets.
     BaySickTitleBar* getTitleBar() const noexcept { return mTitleBar.get(); }
 
+    // QA-ManualPress: the shot harness presses section tabs the way a user
+    // does; the buttons' own path goes through callAsync, dead headless.
+    void selectTabForShot (int tabIdx) { selectTab (tabIdx); }
+
 private:
     void parseGuiXml (const juce::File& xml);
     void rebuildTabBar();

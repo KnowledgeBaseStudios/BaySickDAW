@@ -715,6 +715,13 @@ private:
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(AudioSettingsDialog)
 };
 
+// QA-ManualPress: the shot harness photographs the same dialog component
+// the app hosts; the class is file-scope here, so the factory lives here.
+std::unique_ptr<juce::Component> shots::makeAudioSettingsComponent (juce::AudioDeviceManager& dm)
+{
+    return std::make_unique<AudioSettingsDialog> (dm, nullptr);
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Placeholder component used by Mixer and Effects tabs until Phase 2/5
 // ─────────────────────────────────────────────────────────────────────────────

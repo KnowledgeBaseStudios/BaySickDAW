@@ -16,11 +16,14 @@ class UndoHistoryWindow : public juce::DocumentWindow,
                           public juce::ChangeListener
 {
 public:
+    // showOnConstruct=false (QA-ManualPress) builds the window fully laid
+    // out but never adds it to the desktop - the shot harness snapshots it.
     UndoHistoryWindow(juce::UndoManager&               manager,
                       const std::deque<juce::String>&  labels,
                       const int&                        cursor,
                       std::function<void()>             globalUndo,
-                      std::function<void()>             globalRedo);
+                      std::function<void()>             globalRedo,
+                      bool                              showOnConstruct = true);
     ~UndoHistoryWindow() override;
 
     void refresh();

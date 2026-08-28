@@ -34,6 +34,10 @@ public:
     std::function<bool (int channelId, bool pre)> isCurrent, isMatchRef, isCollisionRef;
     std::function<double()> sampleRate;
 
+    // QA-ManualPress: headless the 10 Hz timer never fires and the row list
+    // stays empty; the shot harness pumps it by hand.
+    void pollForShot() { timerCallback(); }
+
     EqInstanceBrowser() : fft (kFftOrder)
     {
         rowsView = std::make_unique<RowList> (*this);
