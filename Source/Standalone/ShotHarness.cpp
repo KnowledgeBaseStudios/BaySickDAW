@@ -294,6 +294,63 @@ const ExtraDoc kExtraDocs[] = {
     { "EQ",    "mixer_master_preeq_b1Slope" },
 };
 
+// QA-ManualPress M-4 option C (Jeff, 2026-08-28): a component declares which
+// manual callout it anchors -
+//     comp.getProperties().set (kDotAnchor, "BSSBOSC-4");
+// and the dot places itself from the live layout forever after.  A PROPERTY,
+// not a componentID: the target is often a knob that already carries its
+// param id, and region containers (an OSC group, a caption row) carry no id
+// at all.  Unstamped callouts keep their hand coordinate and are reported.
+void collectDotAnchors (juce::Component& root, juce::Component& c,
+                        juce::Rectangle<int> area, juce::Array<juce::var>& out)
+{
+    if (&c != &root && ! c.isVisible()) return;
+
+    const auto v = c.getProperties()[kDotAnchor];
+    if (! v.isVoid() && area.getWidth() > 0 && area.getHeight() > 0)
+    {
+        // "CODE-n" anchors the whole component; "CODE-n@x,y,w,h" anchors a
+        // sub-rect in the component's own coordinates, for callouts whose
+        // target is PAINTED rather than a child component (a bypass LED, a
+        // meter bar).  Semicolons separate several on one component.
+        juce::StringArray decls;
+        decls.addTokens (v.toString(), ";", "");
+        for (auto decl : decls)
+        {
+            decl = decl.trim();
+            if (decl.isEmpty()) continue;
+
+            juce::Rectangle<int> local = c.getLocalBounds();
+            juce::String id = decl;
+            if (decl.contains ("@"))
+            {
+                id = decl.upToFirstOccurrenceOf ("@", false, false).trim();
+                juce::StringArray n;
+                n.addTokens (decl.fromFirstOccurrenceOf ("@", false, false), ",", "");
+                if (n.size() == 4)
+                    local = juce::Rectangle<int> (n[0].getIntValue(), n[1].getIntValue(),
+                                                  n[2].getIntValue(), n[3].getIntValue());
+            }
+            if (local.isEmpty()) continue;
+
+            const auto b = root.getLocalArea (&c, local);
+            juce::DynamicObject::Ptr o = new juce::DynamicObject();
+            o->setProperty ("anchor", id);
+            juce::Array<juce::var> r;
+            r.add (100.0 * (b.getX()     - area.getX()) / area.getWidth());
+            r.add (100.0 * (b.getY()     - area.getY()) / area.getHeight());
+            r.add (100.0 * b.getWidth()  / area.getWidth());
+            r.add (100.0 * b.getHeight() / area.getHeight());
+            o->setProperty ("bounds", r);
+            out.add (juce::var (o.get()));
+        }
+    }
+
+    for (auto* child : c.getChildren())
+        if (child != nullptr)
+            collectDotAnchors (root, *child, area, out);
+}
+
 bool gInMenuSave = false;   // saveMenu arms this: a menu figure has no table
 
 void docsAdd (juce::Component& c, const juce::String& name,
@@ -313,10 +370,13 @@ void docsAdd (juce::Component& c, const juce::String& name,
                 o->setProperty ("param", pv);
                 rows.add (juce::var (o.get()));
             }
-    if (rows.isEmpty()) return;
+    juce::Array<juce::var> anchors;
+    collectDotAnchors (c, c, area, anchors);
+    if (rows.isEmpty() && anchors.isEmpty()) return;
 
     juce::DynamicObject::Ptr fig = new juce::DynamicObject();
-    fig->setProperty ("controls", rows);
+    if (! rows.isEmpty())    fig->setProperty ("controls", rows);
+    if (! anchors.isEmpty()) fig->setProperty ("anchors", anchors);
     gDocs->setProperty (name, juce::var (fig.get()));
 }
 

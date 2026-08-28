@@ -1082,6 +1082,14 @@ public:
     }
 };
 
+// QA-ManualPress M-4 option C: the manual's callout dots anchor themselves.
+// A component declares the callout it is the target of -
+//     comp.getProperties().set (kDotAnchor, "BSSBOSC-4");
+// - and `BaySickDAW.exe --shot --docs` emits its live bounds, so the dot
+// tracks the real layout instead of a hand-measured percentage.  Costs one
+// property on a component that is built once; nothing reads it at runtime.
+static const juce::Identifier kDotAnchor ("dotAnchor");
+
 // ── Compact knob with label ───────────────────────────────────────────────────
 class VKnob : public juce::Component,
               private juce::Slider::Listener

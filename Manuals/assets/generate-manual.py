@@ -215,6 +215,47 @@ for code, n, label, imp in re.findall(
     call.setdefault(code, []).append((int(n), label, imp))
 for k in call: call[k].sort()
 
+# QA-ManualPress M-4 option C (Jeff's ruling, 2026-08-28): control-figure
+# dots anchor themselves too.  App components declare the callout they are
+# the target of (kDotAnchor in SharedUI.h) and the harness dumps their live
+# bounds; a declared callout's dot is placed from the real layout, and an
+# undeclared one keeps its hand coordinate and is reported.  The dot sits at
+# the anchor's left edge, vertically centred - the hand convention.
+DOT_ANCHOR_GEN = 0
+DOT_ANCHOR_TODO = []
+for _code in sorted(set(list(C.keys()) + list(call.keys()))):
+    _files = (FIGS.get(_code) or {}).get('files') or []
+    if not _files:
+        continue
+    _fig = os.path.splitext(os.path.basename(_files[0]))[0]
+    _anch = (DOCS.get(_fig) or {}).get('anchors') or []
+    if not _anch:
+        continue
+    _by = {}
+    for _a in _anch:
+        _m = re.match(r'^([A-Z]+)-(\d+)$', str(_a.get('anchor') or '').strip())
+        if _m and _m.group(1) == _code:
+            _by[int(_m.group(2))] = _a['bounds']
+    if not _by:
+        continue
+    _want = [t[0] for t in call.get(_code, [])] or sorted(C.get(_code, {}))
+    _cur = dict(C.get(_code, {}))
+    _hit = 0
+    for _n in _want:
+        _b = _by.get(_n)
+        if not _b:
+            continue
+        _cur[_n] = (round(_b[0] + 0.9, 2), round(_b[1] + _b[3] / 2.0, 2))
+        _hit += 1
+    if _hit:
+        C[_code] = _cur
+        DOT_ANCHOR_GEN += _hit
+        _missing = [n for n in _want if n not in _by]
+        if _missing:
+            DOT_ANCHOR_TODO.append("%s: %d/%d anchored, hand coords kept for %s"
+                                   % (_code, _hit, len(_want),
+                                      ",".join(str(x) for x in _missing[:12])))
+
 # QA-ManualPress M-4: menu-figure dots self-anchor.  Menu callouts number
 # down the rows by convention, and the harness emits every captured menu's
 # row rects into bsd-docs.json - so a conforming figure's dot map is
@@ -1090,6 +1131,9 @@ open(OUT, "w", encoding="utf-8", newline="").write(doc)
 print("figures        :", len(ORDER))
 print("markers        :", markers_total)
 print("clusters       :", len(m2crop_data))
+print("ctrl dots gen  : %d dots" % DOT_ANCHOR_GEN)
+for _t in DOT_ANCHOR_TODO:
+    print("  DOT TODO " + _t)
 print("menu dots gen  : %d figures" % MENU_DOT_GENERATED)
 for _m in MENU_DOT_REPORT:
     print("  DOT MISMATCH " + _m)

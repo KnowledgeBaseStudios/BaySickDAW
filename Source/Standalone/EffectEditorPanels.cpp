@@ -201,6 +201,15 @@ void EditorPanelBase::setSlotContext(const juce::String& channelPrefix, const ju
     for (int i = 0; i < (int)knobs.size(); ++i)
         stampId(knobs[i].get());
 
+    // QA-ManualPress M-4c: the manual's "a panel knob" / "knob caption"
+    // callouts (FX-3 / FX-4) anchor to the first knob every panel builds, so
+    // the dots follow whatever panel the figure is shot from.
+    if (! knobs.empty() && knobs[0] != nullptr)
+    {
+        knobs[0]->getProperties().set (kDotAnchor, "FX-3");
+        knobs[0]->label.getProperties().set (kDotAnchor, "FX-4");
+    }
+
     // Panels that keep knobs in their own row vectors (r1knobs/r2knobs) expose
     // them via getExtraKnobs(). Stamp those too so paramIds are complete.
     for (auto* k : getExtraKnobs())
@@ -208,7 +217,10 @@ void EditorPanelBase::setSlotContext(const juce::String& channelPrefix, const ju
 
     // Output vol knob
     if (outputVolKnob)
+    {
         outputVolKnob->paramId = base + "output_vol";
+        outputVolKnob->getProperties().set (kDotAnchor, "FX-6");   // M-4c
+    }
 
     // Task 9: automatable toggles (addAutomatableToggle).  ComponentID goes on
     // the wrapper AND every child -- GlobalAutoRightClick reads the clicked
@@ -219,6 +231,8 @@ void EditorPanelBase::setSlotContext(const juce::String& channelPrefix, const ju
         if (t.tog == nullptr) continue;
         const juce::String pid = base + t.suffix;
         t.tog->setComponentID(pid);
+        if (&t == &mAutoToggles.front())
+            t.tog->getProperties().set (kDotAnchor, "FX-5");   // M-4c: "a switch toggle"
         for (auto* child : t.tog->getChildren())
             if (child) child->setComponentID(pid);
     }
